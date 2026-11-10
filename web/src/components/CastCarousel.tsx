@@ -2,7 +2,8 @@ import { Fragment, memo, useMemo } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import type { CastMember } from "@/api/types";
-import type { CrewGroup } from "@/components/castCrewGroups";
+import { CREW_ROLE_CAPTION, type CrewGroup } from "@/components/castCrewGroups";
+import { useT } from "@/i18n";
 import { usePrefetchPeople } from "@/hooks/queries/people";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
 import { buildPersonCatalogHref } from "@/pages/catalogSearchParams";
@@ -48,6 +49,7 @@ function CastCarousel({
   prefetchPeople = false,
   crewGroups,
 }: CastCarouselProps) {
+  const t = useT();
   const { emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } = useCarouselEmbla();
   const visible = useMemo(
     () =>
@@ -68,20 +70,20 @@ function CastCarousel({
         seen.add(key);
         cards.push({
           name: member.name,
-          subtitle: group.role,
+          subtitle: t(CREW_ROLE_CAPTION[group.role]),
           personId: member.person_id,
           photoUrl: member.photo_url,
         });
         if (cards.length === group.max) break;
       }
       if (cards.length > 0) {
-        out.push({ key: group.label, label: group.label, cards });
+        out.push({ key: group.label, label: t(group.label), cards });
       }
     }
     if (visible.length > 0) {
       out.push({
         key: "cast",
-        label: "Cast",
+        label: t("web.detail.castCrew.cast"),
         cards: visible.map((member) => ({
           name: member.name,
           subtitle: member.character,
@@ -91,7 +93,7 @@ function CastCarousel({
       });
     }
     return out;
-  }, [crewGroups, visible]);
+  }, [crewGroups, visible, t]);
   const prefetchIds = useMemo(
     () =>
       sections.flatMap((section) => section.cards.flatMap((c) => (c.personId ? [c.personId] : []))),
@@ -111,7 +113,7 @@ function CastCarousel({
             "from-background/90 absolute top-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-r to-transparent opacity-0 transition-opacity duration-200 group-hover/carousel:opacity-100 focus-visible:opacity-100",
             fullBleed ? "left-4 sm:left-6 lg:left-10 xl:left-12" : "left-0",
           )}
-          aria-label="Scroll left"
+          aria-label={t("web.detail.castCrew.scrollLeft")}
         >
           <ChevronLeft className="text-foreground h-6 w-6" />
         </button>
@@ -167,7 +169,7 @@ function CastCarousel({
             "from-background/90 absolute top-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-l to-transparent opacity-0 transition-opacity duration-200 group-hover/carousel:opacity-100 focus-visible:opacity-100",
             fullBleed ? "right-4 sm:right-6 lg:right-10 xl:right-12" : "right-0",
           )}
-          aria-label="Scroll right"
+          aria-label={t("web.detail.castCrew.scrollRight")}
         >
           <ChevronRight className="text-foreground h-6 w-6" />
         </button>

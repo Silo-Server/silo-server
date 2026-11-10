@@ -29,7 +29,7 @@ import { Switch } from "@/components/ui/switch";
 import { useLibraryRealtimeMonitoring } from "@/hooks/queries/admin/libraries";
 import { cn } from "@/lib/utils";
 import { extraKindGroupLabel, PROVIDER_TRAILER_KINDS } from "@/lib/extraKinds";
-import { LANGUAGES } from "@/player/utils/languageNames";
+import { languageOptions } from "@/player/utils/languageNames";
 
 import { BOX_SET_MIN_MOVIE_OPTIONS, LIBRARY_TYPES } from "./libraryTypes";
 import {
@@ -43,7 +43,9 @@ import { LibraryTranslatePanel } from "./LibraryTranslatePanel";
 
 // A library's metadata_language is a bare ISO 639-1 code; the server rejects
 // regional tags such as pt-BR, so the picker leaves them out.
-const LIBRARY_METADATA_LANGUAGES = LANGUAGES.filter((lang) => /^[a-z]{2}$/.test(lang.code));
+function libraryMetadataLanguages() {
+  return languageOptions().filter((lang) => /^[a-z]{2}$/.test(lang.code));
+}
 
 function SettingCard({
   htmlFor,
@@ -429,7 +431,7 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {LIBRARY_METADATA_LANGUAGES.map((lang) => (
+            {libraryMetadataLanguages().map((lang) => (
               <SelectItem key={lang.code} value={lang.code}>
                 {lang.label}
               </SelectItem>

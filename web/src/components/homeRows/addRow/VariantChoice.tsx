@@ -1,5 +1,6 @@
 import { useId } from "react";
 import { RadioCardItem, RadioGroup } from "@/components/ui/radio-group";
+import { useT } from "@/i18n";
 import { variantFamily, variantOf } from "@/lib/homeRows/variants";
 import type { GalleryPreset } from "@/lib/recipes";
 import { cn } from "@/lib/utils";
@@ -27,13 +28,14 @@ export function VariantChoice({
   presets?: readonly GalleryPreset[];
   onChange: (presetKey: string) => void;
 }) {
+  const t = useT();
   const labelId = useId();
   const family = variantFamily(sectionType);
   if (!family) return null;
   return (
     <div className="grid gap-2">
       <span id={labelId} className="text-sm font-medium">
-        {family.control}
+        {t(family.control)}
       </span>
       <RadioGroup
         aria-labelledby={labelId}
@@ -45,12 +47,13 @@ export function VariantChoice({
           <RadioCardItem
             key={option.presetKey}
             value={option.presetKey}
-            label={option.label}
+            label={t(option.label)}
             hint={
-              option.hint ??
-              presets
-                ?.find((preset) => preset.key === option.presetKey)
-                ?.description_short.replace(/\.$/, "")
+              option.hint
+                ? t(option.hint)
+                : presets
+                    ?.find((preset) => preset.key === option.presetKey)
+                    ?.description_short.replace(/\.$/, "")
             }
           />
         ))}

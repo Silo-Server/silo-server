@@ -159,6 +159,106 @@ describe("EditMetadataDialog field locks", () => {
   });
 });
 
+describe("EditMetadataDialog season and episode locks", () => {
+  beforeEach(() => {
+    mocks.update.mockReset();
+    mocks.updateAsync.mockReset();
+    mocks.refresh.mockReset();
+  });
+
+  function child(type: "season" | "episode", lockedFields: number[] = []): ItemDetail {
+    return {
+      content_id: `${type}-test`,
+      type,
+      title: "Provider title",
+      overview: "Provider overview",
+      air_date: "2020-05-06",
+      locked_fields: lockedFields,
+    } as ItemDetail;
+  }
+
+  it.each(["season", "episode"] as const)("locks an edited %s's fields", (type) => {
+    render(<EditMetadataDialog item={child(type)} open onOpenChange={vi.fn()} />);
+    fireEvent.change(screen.getByDisplayValue("Provider title"), {
+      target: { value: "Edited title" },
+    });
+    fireEvent.change(screen.getByDisplayValue("Provider overview"), {
+      target: { value: "Edited overview" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Dates & Ratings" }));
+    fireEvent.change(screen.getByDisplayValue("2020-05-06"), {
+      target: { value: "2001-02-03" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+
+    expect(mocks.update).toHaveBeenCalledWith(
+      {
+        title: "Edited title",
+        overview: "Edited overview",
+        air_date: "2001-02-03",
+        locked_fields: [0, 1, 13],
+      },
+      expect.any(Object),
+    );
+  });
+
+  it("locks an edited episode's runtime", () => {
+    render(
+      <EditMetadataDialog
+        item={{ ...child("episode"), runtime: 53 }}
+        open
+        onOpenChange={vi.fn()}
+      />,
+    );
+    fireEvent.change(screen.getByDisplayValue("53"), { target: { value: "77" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+
+    expect(mocks.update).toHaveBeenCalledWith(
+      { runtime: 77, locked_fields: [7] },
+      expect.any(Object),
+    );
+  });
+
+  // These rows don't store a tagline or a sort title, so the edit is dropped and
+  // must not freeze the provider's overview or title.
+  it("doesn't lock a field for an edit the row can't store", () => {
+    render(<EditMetadataDialog item={child("episode")} open onOpenChange={vi.fn()} />);
+    fireEvent.change(screen.getByPlaceholderText("No tagline"), {
+      target: { value: "Edited tagline" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+
+    expect(mocks.update).toHaveBeenCalledWith({ tagline: "Edited tagline" }, expect.any(Object));
+  });
+
+  it("leaves a season image's lock on the series", () => {
+    const onOpenChange = vi.fn();
+    render(<EditMetadataDialog item={child("season")} open onOpenChange={onOpenChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "Images" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply image" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("shows the locked count and unlocks before a reset refreshes", async () => {
+    mocks.updateAsync.mockResolvedValue({});
+    const item = child("episode", [0, 13]);
+    render(<EditMetadataDialog item={item} open onOpenChange={vi.fn()} />);
+    expect(screen.getByText("2 locked")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset to Provider" }));
+    fireEvent.click(screen.getByText("Reset & Refresh"));
+
+    await waitFor(() => expect(mocks.refresh).toHaveBeenCalledWith({ item, mode: "quick" }));
+    expect(mocks.updateAsync).toHaveBeenCalledWith({ locked_fields: [] });
+    expect(mocks.updateAsync.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.refresh.mock.invocationCallOrder[0]!,
+    );
+  });
+});
+
 describe("EditMetadataDialog cleared fields", () => {
   beforeEach(() => {
     mocks.update.mockReset();

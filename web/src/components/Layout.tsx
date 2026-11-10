@@ -44,6 +44,7 @@ import { catalogKeys } from "@/hooks/queries/keys";
 import { fetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { markCriticalContentLoaded, useCriticalContentLoaded } from "@/lib/startupPriority";
 import { useSettingsReturnPath } from "@/hooks/useSettingsReturnPath";
+import { useT } from "@/i18n";
 import { useSidebarSwap } from "@/hooks/useSidebarSwap";
 
 // Only admins see the activity indicator, so everyone else skips downloading it.
@@ -70,6 +71,7 @@ interface LayoutProps {
 }
 
 export default function Layout({ children }: LayoutProps) {
+  const t = useT();
   const shellRef = useRef<HTMLDivElement>(null);
   const mobileHeaderRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -394,7 +396,7 @@ export default function Layout({ children }: LayoutProps) {
           href="#main-content"
           className="focus:bg-background focus:text-foreground focus:ring-ring sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-50 focus:rounded-lg focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:ring-2 focus:outline-none"
         >
-          Skip to content
+          {t("web.shell.layout.skipToContent")}
         </a>
         <GlobalSearch />
         <div className="from-primary/8 pointer-events-none fixed inset-x-0 top-0 z-0 h-40 bg-gradient-to-b to-transparent blur-3xl" />
@@ -430,7 +432,7 @@ export default function Layout({ children }: LayoutProps) {
             <button
               onClick={() => setMobileOpen(true)}
               className="text-muted-foreground hover:text-foreground hover:bg-accent/60 flex h-10 w-10 items-center justify-center rounded-xl transition-all active:scale-[0.98]"
-              aria-label="Open menu"
+              aria-label={t("web.shell.layout.openMenu")}
             >
               <Menu className="h-5 w-5" />
             </button>
@@ -450,7 +452,9 @@ export default function Layout({ children }: LayoutProps) {
             {showAdminActivity && <AdminActivityIndicator />}
             <Link
               to="/settings"
-              aria-label={`${profile?.name ?? user?.username ?? "User"} settings`}
+              aria-label={t("web.shell.layout.profileSettings", {
+                name: profile?.name ?? user?.username ?? t("web.shell.profile.fallbackName"),
+              })}
               className="flex h-9 w-9 items-center justify-center rounded-full transition-transform active:scale-[0.98]"
             >
               <Avatar className="h-9 w-9 shadow-[0_16px_32px_-22px_rgba(0,0,0,0.7)]">
@@ -460,6 +464,7 @@ export default function Layout({ children }: LayoutProps) {
                 <AvatarFallback className="bg-primary text-primary-foreground text-xs font-bold">
                   {profile?.name?.charAt(0).toUpperCase() ??
                     user?.username?.charAt(0).toUpperCase() ??
+                    // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- placeholder initial, not a word
                     "?"}
                 </AvatarFallback>
               </Avatar>
@@ -471,7 +476,7 @@ export default function Layout({ children }: LayoutProps) {
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
           <SheetContent side="left" className="w-[280px] p-0 sm:max-w-[280px]">
             <SheetHeader className="sr-only">
-              <SheetTitle>Navigation</SheetTitle>
+              <SheetTitle>{t("web.shell.layout.navigationTitle")}</SheetTitle>
             </SheetHeader>
             <AppSidebar onNavigate={() => setMobileOpen(false)} />
           </SheetContent>

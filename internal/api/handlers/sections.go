@@ -189,6 +189,10 @@ type sectionResponse struct {
 	// WebOnly is answered by /api/v2 only; the frozen /api/v1 body has no
 	// such member.
 	WebOnly bool `json:"-"`
+	// TitleKey and TitleArgs are the stored row's; see
+	// sections.PageSection. Answered by /api/v2 only.
+	TitleKey  string            `json:"-"`
+	TitleArgs map[string]string `json:"-"`
 }
 
 type sectionListResponse struct {
@@ -210,6 +214,8 @@ func toSectionResponse(s *sections.PageSection) sectionResponse {
 		CreatedAt:   s.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:   s.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 		WebOnly:     s.WebOnly,
+		TitleKey:    s.TitleKey,
+		TitleArgs:   s.TitleArgs,
 	}
 }
 
@@ -491,6 +497,10 @@ type resolvedSectionResponse struct {
 	IsCustom    bool                  `json:"is_custom"`
 	Customized  bool                  `json:"customized"`
 	Items       []sectionItemResponse `json:"items"`
+	// TitleKey and TitleArgs are the section's; see
+	// sections.ResolvedSection. Only the v2 API carries them.
+	TitleKey  string            `json:"-"`
+	TitleArgs map[string]string `json:"-"`
 	// HasMore reports that a capped Home row read (SectionViewer.ItemLimitCap)
 	// answered fewer cards than the row holds. Only the v2 API carries it.
 	HasMore bool `json:"-"`
@@ -508,6 +518,10 @@ type resolvedSectionLayoutResponse struct {
 	ItemLimit   int    `json:"item_limit"`
 	IsCustom    bool   `json:"is_custom"`
 	Customized  bool   `json:"customized"`
+	// TitleKey and TitleArgs are the section's; see
+	// sections.ResolvedSection. Only the v2 API carries them.
+	TitleKey  string            `json:"-"`
+	TitleArgs map[string]string `json:"-"`
 }
 
 type homeLayoutResponse struct {
@@ -550,7 +564,10 @@ func (h *SectionHandler) HandleHomeSections(w http.ResponseWriter, r *http.Reque
 	if !rejectInvalidImageSize(w, r) {
 		return
 	}
-	resp, err := h.HomeSections(r.Context(), sectionViewerFromRequest(r))
+	// The frozen v1 endpoint keeps answering empty rows other than an
+	// off-season seasonal row and one that hiding watched titles emptied;
+	// v2 leaves every empty row out.
+	resp, err := h.homeSections(r.Context(), sectionViewerFromRequest(r), true)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -591,7 +608,8 @@ func (h *SectionHandler) HandleLibrarySections(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	resp, err := h.LibrarySections(r.Context(), libraryID, sectionViewerFromRequest(r))
+	// As on Home, v1 keeps answering empty rows.
+	resp, err := h.librarySections(r.Context(), libraryID, sectionViewerFromRequest(r), true)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -1356,13 +1374,28 @@ func applyDiversityFilter(withItems []sections.SectionWithItems) []sections.Sect
 }
 
 // dropEmptySeasonalSections removes seasonal_themed sections that produced
-// no items so the home page doesn't render an empty row off-season. Called
-// from the aggregate handlers; per-section endpoints still return empty
-// seasonal sections when explicitly requested by ID.
+// no items so the home page doesn't render an empty row off-season. The frozen
+// v1 aggregate handlers use it; v2 drops every empty section instead.
 func dropEmptySeasonalSections(withItems []sections.SectionWithItems) []sections.SectionWithItems {
 	out := withItems[:0]
 	for _, w := range withItems {
 		if w.SectionType == sections.SectionSeasonalThemed && len(w.Items) == 0 {
+			continue
+		}
+		out = append(out, w)
+	}
+	return out
+}
+
+// dropEmptySections removes every section that produced no items, so the v2
+// aggregate Home and library reads never answer a row the viewer cannot fill:
+// one whose titles all sit outside their access, an off-season seasonal row,
+// or a row whose fetch failed. The per-section endpoints still answer an empty
+// section when it is asked for by ID.
+func dropEmptySections(withItems []sections.SectionWithItems) []sections.SectionWithItems {
+	out := withItems[:0]
+	for _, w := range withItems {
+		if len(w.Items) == 0 {
 			continue
 		}
 		out = append(out, w)
@@ -1506,6 +1539,8 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 			IsCustom:    s.IsCustom,
 			Customized:  s.Customized,
 			Items:       items,
+			TitleKey:    s.TitleKey,
+			TitleArgs:   s.TitleArgs,
 		})
 	}
 	return resp
@@ -2078,6 +2113,7 @@ func injectNextUpSection(resolved []sections.ResolvedSection) []sections.Resolve
 		ID:          "system-next-up",
 		SectionType: sections.SectionNextUp,
 		Title:       "Next Up",
+		TitleKey:    sections.TitleKeyNextUp,
 		ItemLimit:   20,
 	}
 

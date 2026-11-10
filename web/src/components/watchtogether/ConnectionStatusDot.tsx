@@ -1,9 +1,11 @@
+import { useT, type MessageKey } from "@/i18n";
+
 export type WatchTogetherConnectionState = "disconnected" | "connecting" | "connected";
 
-const connectionLabels: Record<WatchTogetherConnectionState, string> = {
-  connected: "Connected",
-  connecting: "Connecting…",
-  disconnected: "Disconnected",
+const connectionLabels: Record<WatchTogetherConnectionState, MessageKey> = {
+  connected: "web.watchTogether.connection.connected",
+  connecting: "web.watchTogether.connection.connecting",
+  disconnected: "watchParty.connection.disconnected",
 };
 
 /**
@@ -11,7 +13,8 @@ const connectionLabels: Record<WatchTogetherConnectionState, string> = {
  * `ConnectionStatusDot` so every surface uses the same palette + vocabulary.
  */
 export function ConnectionStateLabel({ state }: { state: WatchTogetherConnectionState }) {
-  return <>{connectionLabels[state] ?? connectionLabels.disconnected}</>;
+  const t = useT();
+  return <>{t(connectionLabels[state] ?? connectionLabels.disconnected)}</>;
 }
 
 /** Shared watch-together connection indicator dot. */

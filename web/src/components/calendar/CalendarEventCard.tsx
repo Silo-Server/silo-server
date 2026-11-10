@@ -9,8 +9,12 @@ import {
   upcomingBadgeLabel,
 } from "@/lib/upcomingEventPresentation";
 import type { CalendarEvent } from "@/hooks/queries/calendar";
+import { useAppLanguage, useT } from "@/i18n";
 
 export default function CalendarEventCard({ event }: { event: CalendarEvent }) {
+  const t = useT();
+  // The subtitle, air time and badges come from plain helpers; follow language changes.
+  useAppLanguage();
   const [loaded, setLoaded] = useState(false);
   // Keyed by URL so a re-signed poster is tried again.
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
@@ -76,9 +80,10 @@ export default function CalendarEventCard({ event }: { event: CalendarEvent }) {
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
               <span
                 className="bg-background/70 text-foreground flex h-8 w-8 items-center justify-center rounded-full text-base backdrop-blur-sm"
-                aria-label="Watched"
+                aria-label={t("web.calendar.watched")}
               >
-                ✓
+                {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a check mark glyph, labelled above */}
+                {"✓"}
               </span>
             </div>
           )}

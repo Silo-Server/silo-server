@@ -16,6 +16,7 @@ import {
 } from "./chartMath";
 import { ChartLegend, ChartTooltip, ChartTooltipRow } from "./chartChrome";
 import { useMeasuredSize } from "./useMeasuredSize";
+import { formatLocale } from "@/lib/appLocale";
 
 export interface LineChartPoint {
   /** Sample timestamp in epoch milliseconds. */
@@ -106,7 +107,7 @@ const VIEW_WIDTH = 1000;
 const VIEW_HEIGHT = 100;
 
 function defaultFormatValue(value: number): string {
-  return value.toLocaleString();
+  return value.toLocaleString(formatLocale());
 }
 
 /**

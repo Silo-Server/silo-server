@@ -143,6 +143,11 @@ func readProfileLimits(ctx context.Context, tx pgx.Tx, userID int) (map[string]p
 			&p.quality, &p.allowedTitles, &p.directTitles, &p.allowedCollections, &p.collectionTitles); err != nil {
 			return nil, err
 		}
+		if p.primary {
+			// The primary profile inherits its account's libraries; a limit
+			// stored on it grants and removes nothing (access.ProfileLibraryLimit).
+			p.restricted, p.libraries = false, nil
+		}
 		out[id] = p
 	}
 	return out, rows.Err()

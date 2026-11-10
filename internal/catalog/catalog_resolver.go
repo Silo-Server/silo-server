@@ -2264,7 +2264,7 @@ func bytesTrimSpace(raw []byte) []byte {
 // catalogLibraryCollectionMembership resolves how the catalog lists a library
 // collection's members for the viewer, within the libraries access allows.
 func catalogLibraryCollectionMembership(collection *models.LibraryCollection, access AccessFilter) (LibraryCollectionMembership, error) {
-	membership, err := ResolveLibraryCollectionMembership(collection, access.AllowedLibraryIDs)
+	membership, err := ResolveLibraryCollectionMembership(collection, access)
 	if err != nil {
 		return LibraryCollectionMembership{}, fmt.Errorf("%w: library collection query_definition: %w", ErrInvalidCatalogRequest, err)
 	}
@@ -2670,6 +2670,7 @@ func catalogSearchAccess(req CatalogRequest, access AccessFilter) (AccessFilter,
 		AllowedLibraryIDs:  allowedLibraryIDs,
 		DisabledLibraryIDs: slices.Clone(access.DisabledLibraryIDs),
 		MaturityLimits:     access.MaturityLimits,
+		UserID:             access.UserID,
 	}
 
 	scope := req.Query.MediaScope

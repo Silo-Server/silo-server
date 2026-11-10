@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Loader2, Send } from "lucide-react";
 import { toast } from "sonner";
-import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
+import { invalidEmailMessage, isValidEmail } from "@/lib/email";
 import { captureProfileRequestContext, isCapturedProfileAuthorityActive } from "@/api/client";
 import { v2, type V2Result } from "@/api/v2/request";
 import { Button } from "@/components/ui/button";
@@ -23,7 +23,7 @@ export function TestEmailRow() {
     }
     const to = recipient.trim();
     if (!isValidEmail(to)) {
-      toast.error(INVALID_EMAIL_MESSAGE);
+      toast.error(invalidEmailMessage());
       return;
     }
     inFlight.current = true;

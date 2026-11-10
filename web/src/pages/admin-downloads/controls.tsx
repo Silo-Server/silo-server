@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 export const CHECKBOX = "accent-primary size-3.5 cursor-pointer disabled:cursor-default";
@@ -47,6 +48,7 @@ export function LoadMoreButton({
 }: {
   query: { hasNextPage: boolean; isFetchingNextPage: boolean; fetchNextPage: () => unknown };
 }) {
+  const t = useT();
   if (!query.hasNextPage) return null;
   return (
     <div className="flex justify-center">
@@ -56,7 +58,9 @@ export function LoadMoreButton({
         disabled={query.isFetchingNextPage}
         onClick={() => void query.fetchNextPage()}
       >
-        {query.isFetchingNextPage ? "Loading…" : "Load more"}
+        {query.isFetchingNextPage
+          ? t("web.admin.downloads.controls.loadingMore")
+          : t("web.admin.downloads.controls.loadMore")}
       </Button>
     </div>
   );
@@ -64,13 +68,14 @@ export function LoadMoreButton({
 
 /** A tab label's count badge, highlighted while there is something to count. */
 export function TabCount({ count }: { count: number }) {
+  const t = useT();
   return (
     <span
       className={`rounded-md px-1.5 py-0.5 text-[10px] leading-none font-bold tabular-nums ${
         count > 0 ? "bg-primary/10 text-primary" : "bg-surface text-muted-foreground"
       }`}
     >
-      {count > 99 ? "99+" : count}
+      {count > 99 ? t("web.admin.downloads.controls.countOverflow") : count}
     </span>
   );
 }

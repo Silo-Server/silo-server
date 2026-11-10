@@ -1,6 +1,8 @@
 import { useState } from "react";
 
 import { Slider } from "@/components/ui/slider";
+import { useAppLanguage } from "@/i18n";
+import { formatWithUnit } from "@/lib/settingsDisplay";
 import { SETTINGS_CONTROL_WIDTH } from "@/pages/admin-settings/SettingField";
 import { cn } from "@/lib/utils";
 
@@ -40,8 +42,10 @@ export function SettingSlider({
   onCommit,
   className,
 }: SettingSliderProps) {
+  useAppLanguage();
   const [draft, setDraft] = useState<number | null>(null);
   const shown = draft ?? value;
+  const readout = unit ? formatWithUnit(String(shown), unit) : String(shown);
 
   return (
     // Defaults to the shared settings control width so a slider row ends on the
@@ -63,8 +67,7 @@ export function SettingSlider({
         }}
       />
       <span className="text-muted-foreground min-w-16 text-right text-xs font-medium tabular-nums">
-        {shown}
-        {unit ? ` ${unit}` : ""}
+        {readout}
       </span>
     </div>
   );

@@ -1,18 +1,31 @@
 import { ApiClientError } from "@/api/client";
 import type { PolicyCompileIssue } from "@/api/adminPolicy";
+import { t, type MessageKey } from "@/i18n";
+import { formatLocale } from "@/lib/appLocale";
 
 export function formatPolicyDate(value?: string | null) {
-  if (!value) return "—";
-  return new Date(value).toLocaleString();
+  if (!value) return t("web.admin.access.policy.noValue");
+  return new Date(value).toLocaleString(formatLocale());
 }
 
 export function formatPolicyEvalMicros(evalTimeNS?: number | null) {
-  if (evalTimeNS === undefined || evalTimeNS === null) return "—";
-  return `${Math.round(evalTimeNS / 100) / 10} µs`;
+  if (evalTimeNS === undefined || evalTimeNS === null) return t("web.admin.access.policy.noValue");
+  return t("web.admin.access.policy.evalMicros", {
+    value: String(Math.round(evalTimeNS / 100) / 10),
+  });
 }
 
+const DOMAIN_NAMES: Record<string, MessageKey> = {
+  scope: "web.admin.access.policy.domainName.scope",
+  permission: "web.admin.access.policy.domainName.permission",
+  action: "web.admin.access.policy.domainName.action",
+};
+
+/** A domain's short name: the known domains by key, any other title-cased from its id. */
 export function formatPolicyDomain(domain: string) {
-  if (!domain) return "Policy";
+  if (!domain) return t("web.admin.access.policy.domainName.fallback");
+  const known = Object.hasOwn(DOMAIN_NAMES, domain) ? DOMAIN_NAMES[domain] : undefined;
+  if (known) return t(known);
   return domain
     .split(/[-_]/)
     .filter(Boolean)

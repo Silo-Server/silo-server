@@ -4,14 +4,16 @@ import { useQueries } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
 
 import { fetchAdminCollections } from "@/api/adminCollections";
+import LibraryMultiSelect from "@/components/LibraryMultiSelect";
 import { Button } from "@/components/ui/button";
 import { adminKeys } from "@/hooks/queries/keys";
 import {
-  LIBRARIES_NOT_PICKED,
-  NO_HEADING,
-  PERSONAL_TAB_HELP,
-  SHELF_AFTER_CREATE,
-  SHOW_ON_TAB_LABEL,
+  librariesNotPicked,
+  noHeading,
+  SMART_LIBRARIES_HELP,
+  personalTabHelp,
+  shelfAfterCreate,
+  showOnTabLabel,
   serverTabHelp,
   unshareWarning,
 } from "@/lib/collections/copy";
@@ -22,10 +24,20 @@ import { focusLibrariesLine } from "../fields/librariesLineFocus";
 import { SettingRow } from "../fields/SettingRow";
 import { ShowToOtherProfilesField } from "../ShowToOtherProfilesField";
 import { ToggleRow } from "../fields/ToggleRow";
+import { useT } from "@/i18n";
+/** A separator, the same in every language. */
+const DOT = "·";
 
 interface NamedLibrary {
   id: number;
   name: string;
+}
+
+/** A server Smart collection picks its libraries here: its rules name where titles come from. */
+export interface LibraryPicker {
+  options: Array<{ id: number; name: string; type?: string }>;
+  value: number[];
+  onChange: (libraryIds: number[]) => void;
 }
 
 /**
@@ -34,6 +46,7 @@ interface NamedLibrary {
  * order, No heading included.
  */
 function useShelves(collectionId: string | undefined, libraries: readonly NamedLibrary[]) {
+  const t = useT();
   const lists = useQueries({
     queries: libraries.map((library) => ({
       queryKey: adminKeys.collections(library.id),
@@ -49,7 +62,10 @@ function useShelves(collectionId: string | undefined, libraries: readonly NamedL
       ? data?.groups.find((candidate) => candidate.id === entry.group_id)
       : undefined;
     const leads = entry?.featured === true && (group?.default_sort_mode ?? "manual") === "manual";
-    return `${library.name} › ${group?.name ?? NO_HEADING}${leads ? ", pinned first" : ""}`;
+    const shelf = group?.name ?? noHeading();
+    return leads
+      ? t("web.collections.whereItShows.shelfInLibraryPinned", { library: library.name, shelf })
+      : t("web.collections.whereItShows.shelfInLibrary", { library: library.name, shelf });
   });
 }
 
@@ -59,50 +75,72 @@ function Value({ children }: { children: ReactNode }) {
 }
 
 /**
- * A server collection's Libraries and Shelf rows. Change moves focus to the
- * libraries control in the contents card; Arrange opens the first library's
- * shelves once the collection exists.
+ * A server collection's Libraries and Shelf rows. With `picker` (Smart) the
+ * libraries are picked here; otherwise Change moves focus to the libraries
+ * control in the contents card. Arrange opens the first library's shelves
+ * once the collection exists.
  */
 function ServerFacts({
   collectionId,
   libraries,
+  picker,
 }: {
   collectionId?: string;
   libraries: readonly NamedLibrary[];
+  picker?: LibraryPicker;
 }) {
+  const t = useT();
   const shelves = useShelves(collectionId, libraries);
   const first = libraries[0];
   return (
     <>
+      {picker ? (
+        <SettingRow
+          label={t("web.collections.copy.fieldLibraries")}
+          value={SMART_LIBRARIES_HELP}
+          action={
+            <LibraryMultiSelect
+              libraries={picker.options}
+              value={picker.value}
+              onChange={picker.onChange}
+              hideAllOption
+              emptyLabel={t("web.collections.fields.chooseLibraries")}
+              triggerLabel="Show in libraries"
+              triggerClassName="h-8 max-w-[14rem] justify-between gap-1 rounded-[10px] px-3"
+            />
+          }
+        />
+      ) : (
+        <SettingRow
+          label={t("web.collections.copy.fieldLibraries")}
+          value={
+            libraries.length > 0 ? (
+              <Value>{libraries.map((library) => library.name).join(", ")}</Value>
+            ) : (
+              librariesNotPicked()
+            )
+          }
+          action={
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              aria-label={t("web.collections.whereItShows.changeLibraries")}
+              onClick={focusLibrariesLine}
+            >
+              {t("web.collections.whereItShows.change")}
+            </Button>
+          }
+        />
+      )}
       <SettingRow
-        label="Libraries"
-        value={
-          libraries.length > 0 ? (
-            <Value>{libraries.map((library) => library.name).join(", ")}</Value>
-          ) : (
-            LIBRARIES_NOT_PICKED
-          )
-        }
-        action={
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            aria-label="Change libraries"
-            onClick={focusLibrariesLine}
-          >
-            Change
-          </Button>
-        }
-      />
-      <SettingRow
-        label="Shelf"
+        label={t("web.collections.whereItShows.shelf")}
         value={
           collectionId ? (
             <Value>{shelves.join(", ")}</Value>
           ) : (
             <>
-              <Value>{NO_HEADING}</Value> · {SHELF_AFTER_CREATE}
+              <Value>{noHeading()}</Value> {DOT} {shelfAfterCreate()}
             </>
           )
         }
@@ -110,7 +148,7 @@ function ServerFacts({
           collectionId && first ? (
             <Button asChild variant="outline" size="sm">
               <Link to={SERVER_SCOPE.paths.list({ view: "arrange", libraryId: first.id })}>
-                Arrange
+                {t("web.collections.whereItShows.arrange")}
               </Link>
             </Button>
           ) : null
@@ -140,6 +178,7 @@ export function WhereItShowsPanel({
   draft,
   onChange,
   libraries,
+  libraryPicker,
   otherProfileNames,
   savedShared,
   rows,
@@ -151,6 +190,8 @@ export function WhereItShowsPanel({
   onChange: (update: (draft: CollectionDraft) => CollectionDraft) => void;
   /** Server: the collection's libraries, named. */
   libraries: readonly NamedLibrary[];
+  /** Server Smart: picks the libraries it shows in. */
+  libraryPicker?: LibraryPicker;
   /** Personal: the account's other profiles; empty on a single-profile account. */
   otherProfileNames: readonly string[];
   /** Personal: whether the saved collection is shared. */
@@ -160,6 +201,7 @@ export function WhereItShowsPanel({
   /** Server: set when rows show it, so hiding it asks first. */
   hideConfirm?: HideConfirm | null;
 }) {
+  const t = useT();
   const id = useId();
   const [confirmingHide, setConfirmingHide] = useState(false);
 
@@ -176,14 +218,14 @@ export function WhereItShowsPanel({
       className="surface-panel grid content-start gap-5 rounded-[22px] p-5 sm:p-6"
     >
       <h2 id={`${id}-heading`} className="text-[17px] font-semibold">
-        Where it shows
+        {t("web.collections.whereItShows.heading")}
       </h2>
       <div className="divide-border/70 -my-4 grid divide-y [&>*]:py-4">
         {scopeKind === "server" && draft.server ? (
           <>
-            <ServerFacts collectionId={collectionId} libraries={libraries} />
+            <ServerFacts collectionId={collectionId} libraries={libraries} picker={libraryPicker} />
             <ToggleRow
-              label={SHOW_ON_TAB_LABEL}
+              label={showOnTabLabel()}
               help={serverTabHelp(libraries.map((library) => library.name))}
               checked={draft.server.visibility === "visible"}
               onCheckedChange={(on) => {
@@ -218,8 +260,8 @@ export function WhereItShowsPanel({
               </ShowToOtherProfilesField>
             ) : null}
             <ToggleRow
-              label={SHOW_ON_TAB_LABEL}
-              help={PERSONAL_TAB_HELP}
+              label={showOnTabLabel()}
+              help={personalTabHelp()}
               checked={draft.personal.inLibraryTabs}
               onCheckedChange={(inLibraryTabs) =>
                 onChange((current) => ({

@@ -9,6 +9,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 interface PageMoreMenuEntry {
@@ -172,6 +173,7 @@ export function PageMoreMenu({
   triggerRef?: Ref<HTMLButtonElement>;
   onOpenChange?: (open: boolean) => void;
 }) {
+  const t = useT();
   const afterClose = useRef<AfterClose | null>(null);
   const onChosen = (after: AfterClose | null) => {
     afterClose.current = after;
@@ -184,14 +186,14 @@ export function PageMoreMenu({
           type="button"
           variant="outline"
           size={compact ? "icon" : "sm"}
-          aria-label={compact ? "More" : undefined}
+          aria-label={compact ? t("web.ui.pageMoreMenu.more") : undefined}
           className={cn(
             "data-[state=open]:bg-accent",
             compact && "bg-surface/90 size-12 rounded-[14px]",
           )}
         >
           <Ellipsis className={compact ? "size-5" : undefined} />
-          {compact ? null : "More"}
+          {compact ? null : t("web.ui.pageMoreMenu.more")}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent

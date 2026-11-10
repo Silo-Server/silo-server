@@ -19,6 +19,7 @@ type localPipelineItemRepo struct {
 	people    map[string][]models.ItemPerson
 	chosen    map[string]bool
 	upsertErr error
+	peopleErr error
 }
 
 func (r *localPipelineItemRepo) Upsert(ctx context.Context, item *models.MediaItem) error {
@@ -38,6 +39,9 @@ func newLocalPipelineHarness() (*testHarness, *localPipelineItemRepo) {
 func (r *localPipelineItemRepo) GetPeople(_ context.Context, contentID string) ([]models.ItemPerson, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.peopleErr != nil {
+		return nil, r.peopleErr
+	}
 	return append([]models.ItemPerson(nil), r.people[contentID]...), nil
 }
 

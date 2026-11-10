@@ -12,12 +12,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
+import { useT, type Translate } from "@/i18n";
 import { COLLECTION_SOURCE_ORDER } from "@/lib/collectionSortConfig";
 import {
-  MANUAL_ORDER_LINE,
-  NO_LIMIT,
-  ORDER_HELP,
-  SYNCED_ORDER_HELP,
+  manualOrderLine,
+  noLimit,
+  orderHelp,
+  syncedOrderHelp,
   storedSortLine,
 } from "@/lib/collections/copy";
 import { clearDefaultSort } from "@/lib/collections/draft";
@@ -39,18 +40,31 @@ const BY_DATE = new Set([
   "date_viewed",
 ]);
 
+type Direction = "az" | "za" | "newest" | "oldest" | "highest" | "lowest";
+
+/** Which way each direction reads for a sort: A–Z, newest first, highest first. */
+function directionsOf(field: string): Record<QuerySortOrder, Direction> {
+  if (ALPHABETICAL.has(field)) return { asc: "az", desc: "za" };
+  if (BY_DATE.has(field)) return { desc: "newest", asc: "oldest" };
+  return { desc: "highest", asc: "lowest" };
+}
+
 /** How each direction reads for a sort: "A–Z", "Newest first", "Highest first". */
-function directionLabels(field: string): Record<QuerySortOrder, string> {
-  if (ALPHABETICAL.has(field)) return { asc: "A–Z", desc: "Z–A" };
-  if (BY_DATE.has(field)) return { desc: "Newest first", asc: "Oldest first" };
-  return { desc: "Highest first", asc: "Lowest first" };
+function directionLabels(t: Translate, field: string): Record<QuerySortOrder, string> {
+  const directions = directionsOf(field);
+  return {
+    asc: t("web.collections.fields.direction", { direction: directions.asc }),
+    desc: t("web.collections.fields.direction", { direction: directions.desc }),
+  };
 }
 
 /** "Title A–Z", "Date Added, newest first": a stored default sort, as the stored-sort line names it. */
-function sortLabel(field: string, order: QuerySortOrder): string {
+function sortLabel(t: Translate, field: string, order: QuerySortOrder): string {
   const name = QUERY_SORT_OPTIONS.find((option) => option.value === field)?.label ?? field;
-  const direction = directionLabels(field)[order];
-  return ALPHABETICAL.has(field) ? `${name} ${direction}` : `${name}, ${direction.toLowerCase()}`;
+  const direction = directionsOf(field)[order];
+  return ALPHABETICAL.has(field)
+    ? t("web.collections.fields.sortAlphabetical", { name, direction })
+    : t("web.collections.fields.sortWithDirection", { name, direction });
 }
 
 /** A sort_config's field ("" keeps the source order) and direction, the field's default when unset. */
@@ -63,9 +77,9 @@ function storedSort(sortConfig: Record<string, unknown> | undefined) {
   return { field, order };
 }
 
-function storedDefaultSort(sortConfig: Record<string, unknown> | undefined) {
+function storedDefaultSort(t: Translate, sortConfig: Record<string, unknown> | undefined) {
   const { field, order } = storedSort(sortConfig);
-  return field ? sortLabel(field, order) : null;
+  return field ? sortLabel(t, field, order) : null;
 }
 
 /** Commits the typed limit: blank is no limit; anything not a positive whole number keeps the old one. */
@@ -107,12 +121,13 @@ export type OrderBlockProps =
  * it keeps.
  */
 export function OrderBlock(props: OrderBlockProps) {
+  const t = useT();
   if (props.mode === "synced") return <SyncedOrder {...props} />;
   if (props.mode !== "smart") {
     return (
       <div className="border-border/70 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-t pt-4">
-        <h3 className="text-[14.5px] font-semibold">Order</h3>
-        <p className="text-muted-foreground text-[13.5px]">{MANUAL_ORDER_LINE}</p>
+        <h3 className="text-[14.5px] font-semibold">{t("web.collections.fields.order")}</h3>
+        <p className="text-muted-foreground text-[13.5px]">{manualOrderLine()}</p>
       </div>
     );
   }
@@ -125,6 +140,7 @@ function SmartOrder({
   onChange,
   allowPersonalized,
 }: Extract<OrderBlockProps, { mode: "smart" }>) {
+  const t = useT();
   const id = useId();
   const shownRatingSources = useShownRatingSources();
   const options = getQuerySortOptions({
@@ -133,8 +149,8 @@ function SmartOrder({
     shownRatingSources,
     keepSortField: rules.sort.field,
   });
-  const directions = directionLabels(rules.sort.field);
-  const stored = storedDefaultSort(sortConfig);
+  const directions = directionLabels(t, rules.sort.field);
+  const stored = storedDefaultSort(t, sortConfig);
 
   function setSort(sort: QueryDefinition["sort"]) {
     onChange({
@@ -155,7 +171,7 @@ function SmartOrder({
       className="border-border/70 grid gap-3 border-t pt-4"
     >
       <h3 id={`${id}-heading`} className="text-[14.5px] font-semibold">
-        Order
+        {t("web.collections.fields.order")}
       </h3>
       <div className="grid gap-2.5 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)]">
         <Select
@@ -167,7 +183,7 @@ function SmartOrder({
             })
           }
         >
-          <SelectTrigger aria-label="Sort by" className="h-11 w-full">
+          <SelectTrigger aria-label={t("web.collections.fields.sortBy")} className="h-11 w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -184,7 +200,10 @@ function SmartOrder({
             setSort({ ...rules.sort, order: order as QueryDefinition["sort"]["order"] })
           }
         >
-          <SelectTrigger aria-label="Direction" className="h-11 w-full">
+          <SelectTrigger
+            aria-label={t("web.collections.fields.directionLabel")}
+            className="h-11 w-full"
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -192,7 +211,7 @@ function SmartOrder({
             <SelectItem value="asc">{directions.asc}</SelectItem>
           </SelectContent>
         </Select>
-        <MaxTitlesInput limit={rules.limit} placeholder={NO_LIMIT} onCommit={commitLimit} />
+        <MaxTitlesInput limit={rules.limit} placeholder={noLimit()} onCommit={commitLimit} />
       </div>
       {stored ? (
         <div className="bg-muted/50 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl px-3 py-2.5 text-[13px]">
@@ -202,14 +221,14 @@ function SmartOrder({
             type="button"
             size="sm"
             variant="outline"
-            aria-label={`Clear the saved default sort, ${stored}`}
+            aria-label={t("web.collections.fields.clearStoredSort", { sort: stored })}
             onClick={() => onChange({ rules, sortConfig: clearDefaultSort(sortConfig) })}
           >
-            Clear
+            {t("web.collections.fields.clear")}
           </Button>
         </div>
       ) : null}
-      <p className="text-muted-foreground text-[13px]">{ORDER_HELP}</p>
+      <p className="text-muted-foreground text-[13px]">{orderHelp()}</p>
     </section>
   );
 }
@@ -227,6 +246,7 @@ function MaxTitlesInput({
   placeholder: string;
   onCommit: (input: HTMLInputElement) => void;
 }) {
+  const t = useT();
   return (
     <label className="border-border bg-background focus-within:border-ring focus-within:ring-ring/50 flex h-11 items-center gap-3 rounded-md border px-3 text-sm shadow-xs transition-[color,box-shadow] focus-within:ring-[3px]">
       <Input
@@ -234,7 +254,7 @@ function MaxTitlesInput({
         type="number"
         min={1}
         step={1}
-        aria-label="Max titles"
+        aria-label={t("web.collections.copy.fieldLimit")}
         placeholder={placeholder}
         defaultValue={limit ?? ""}
         className="h-full min-w-0 flex-1 rounded-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
@@ -247,7 +267,7 @@ function MaxTitlesInput({
         aria-hidden
         className="border-border text-muted-foreground flex shrink-0 items-center self-stretch border-l pl-3"
       >
-        max titles
+        {t("web.collections.fields.maxTitlesSuffix")}
       </span>
     </label>
   );
@@ -260,6 +280,7 @@ function SyncedOrder({
   onLimitChange,
   allowPersonalized,
 }: Extract<OrderBlockProps, { mode: "synced" }>) {
+  const t = useT();
   const id = useId();
   const shownRatingSources = useShownRatingSources();
   const { field, order } = storedSort(sortConfig);
@@ -268,7 +289,7 @@ function SyncedOrder({
     shownRatingSources,
     keepSortField: field,
   });
-  const directions = directionLabels(field);
+  const directions = directionLabels(t, field);
 
   function commitLimit(input: HTMLInputElement) {
     const next = parsedLimit(input.value, limit);
@@ -282,7 +303,7 @@ function SyncedOrder({
       className="border-border/70 grid gap-3 border-t pt-4"
     >
       <h3 id={`${id}-heading`} className="text-[14.5px] font-semibold">
-        Order
+        {t("web.collections.fields.order")}
       </h3>
       <div className="grid gap-2.5 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)]">
         <Select
@@ -295,11 +316,16 @@ function SyncedOrder({
             )
           }
         >
-          <SelectTrigger aria-label="Default sort" className="h-11 w-full">
+          <SelectTrigger
+            aria-label={t("web.collections.fields.defaultSort")}
+            className="h-11 w-full"
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={COLLECTION_SOURCE_ORDER}>List order</SelectItem>
+            <SelectItem value={COLLECTION_SOURCE_ORDER}>
+              {t("web.collections.fields.listOrder")}
+            </SelectItem>
             {options.map((option) => (
               <SelectItem key={option.value} value={option.value}>
                 {option.label}
@@ -313,7 +339,10 @@ function SyncedOrder({
           disabled={!field}
           onValueChange={(next) => onSortChange({ field, order: next })}
         >
-          <SelectTrigger aria-label="Direction" className="h-11 w-full">
+          <SelectTrigger
+            aria-label={t("web.collections.fields.directionLabel")}
+            className="h-11 w-full"
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -323,14 +352,20 @@ function SyncedOrder({
                 <SelectItem value="asc">{directions.asc}</SelectItem>
               </>
             ) : (
-              <SelectItem value={COLLECTION_SOURCE_ORDER}>As listed</SelectItem>
+              <SelectItem value={COLLECTION_SOURCE_ORDER}>
+                {t("web.collections.fields.asListed")}
+              </SelectItem>
             )}
           </SelectContent>
         </Select>
-        <MaxTitlesInput limit={limit} placeholder="Whole list" onCommit={commitLimit} />
+        <MaxTitlesInput
+          limit={limit}
+          placeholder={t("web.collections.fields.wholeList")}
+          onCommit={commitLimit}
+        />
       </div>
       <p className="text-muted-foreground text-[13px]">
-        {SYNCED_ORDER_HELP} {ORDER_HELP}
+        {syncedOrderHelp()} {orderHelp()}
       </p>
     </section>
   );

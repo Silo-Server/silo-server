@@ -80,11 +80,11 @@ import {
 } from "@/lib/collections/adminList";
 import { MAX_SELECTED_COLLECTIONS, runBatch } from "@/lib/collections/batch";
 import {
-  CHECK_BEFORE_DELETE_FAILED,
-  COLLECTION_IN_USE,
-  COLLECTIONS_IN_USE,
-  SHOW_IT_FIRST,
-  STARTER_PACK_BLOCKS_DELETE,
+  checkBeforeDeleteFailed,
+  collectionInUse,
+  collectionsInUse,
+  showItFirst,
+  starterPackBlocksDelete,
   alreadyShown,
   batchResult,
   rowsLeftMessage,
@@ -108,7 +108,7 @@ import {
 } from "@/lib/collections/rows";
 import { collectionsInAdminScope, SERVER_SCOPE } from "@/lib/collections/scope";
 import {
-  COLLECTION_KIND_LABEL,
+  collectionKindLabel,
   collectionKindOf,
   isListBackedCollectionType,
 } from "@/lib/collections/types";
@@ -124,18 +124,21 @@ import {
 } from "@/lib/collections/starterPacks";
 import { updateCheckboxSelection } from "@/lib/checkboxSelection";
 import { cn } from "@/lib/utils";
+import { useT, type Translate } from "@/i18n";
 import { buildLibraryCollectionCatalogHref } from "./catalogSearchParams";
 
 /** Under this width More and New collection move to a bar docked at the bottom. */
 const NARROW_QUERY = "(max-width: 1023px)";
 const ALL_LIBRARIES = "all";
 
-const KIND_OPTIONS: ReadonlyArray<{ value: KindFilter; label: string }> = [
-  { value: "all", label: "All" },
-  { value: "manual", label: COLLECTION_KIND_LABEL.manual },
-  { value: "smart", label: COLLECTION_KIND_LABEL.smart },
-  { value: "synced", label: COLLECTION_KIND_LABEL.synced },
-];
+function kindOptions(t: Translate): ReadonlyArray<{ value: KindFilter; label: string }> {
+  return [
+    { value: "all", label: t("web.admin.collections.list.kindAll") },
+    { value: "manual", label: collectionKindLabel("manual") },
+    { value: "smart", label: collectionKindLabel("smart") },
+    { value: "synced", label: collectionKindLabel("synced") },
+  ];
+}
 
 /** Several collections about to be deleted together, each read fresh for its ETag. */
 interface BulkDelete {
@@ -147,8 +150,11 @@ interface BulkDelete {
 }
 
 /** One line per collection a select-mode action couldn't change. */
-function batchFailure(collection: LibraryCollection, error: unknown): string {
-  return `${collection.title}: ${SERVER_SCOPE.errorMessage(error, "Something went wrong")}`;
+function batchFailure(t: Translate, collection: LibraryCollection, error: unknown): string {
+  return t("web.admin.collections.select.failure", {
+    title: collection.title,
+    message: SERVER_SCOPE.errorMessage(error, t("web.admin.collections.select.failureFallback")),
+  });
 }
 
 function showBatchResult(
@@ -174,17 +180,15 @@ interface PendingDelete {
   rows: CollectionRow[] | null;
 }
 
-const DELETE_CHANGED = "It changed since you opened this. Check it, then delete again.";
-
 // A server collection's DELETE answers 409 (problem type "conflict") only
 // while a row still shows it.
 function isCollectionInUse(error: unknown) {
   return error instanceof V2ProblemError && error.status === 409;
 }
 
-function deleteErrorMessage(error: unknown): string {
-  if (isCollectionInUse(error)) return COLLECTION_IN_USE;
-  return SERVER_SCOPE.errorMessage(error, "Couldn't delete it");
+function deleteErrorMessage(t: Translate, error: unknown): string {
+  if (isCollectionInUse(error)) return collectionInUse();
+  return SERVER_SCOPE.errorMessage(error, t("web.admin.collections.delete.failed"));
 }
 
 /**
@@ -194,7 +198,8 @@ function deleteErrorMessage(error: unknown): string {
  * opened from here come back to it.
  */
 export default function AdminCollections() {
-  useDocumentTitle("Collections");
+  const t = useT();
+  useDocumentTitle(t("web.admin.collections.page.title"));
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const location = useLocation();
@@ -421,7 +426,7 @@ export default function AdminCollections() {
         rows: null,
       });
     } catch (error) {
-      toast.error(adminMutationMessage(error, "Could not load collection"));
+      toast.error(adminMutationMessage(error, t("web.admin.collections.delete.loadFailed")));
     }
   }
 
@@ -442,7 +447,9 @@ export default function AdminCollections() {
                 ...current,
                 ...fresh,
                 rows: null,
-                error: fresh ? DELETE_CHANGED : CHECK_BEFORE_DELETE_FAILED,
+                error: fresh
+                  ? t("web.admin.collections.delete.changed")
+                  : checkBeforeDeleteFailed(),
               }
             : current,
         );
@@ -470,7 +477,7 @@ export default function AdminCollections() {
       { id: pendingDelete.collection.id, etag: pendingDelete.etag },
       {
         onSuccess: () => {
-          toast.success("Collection deleted");
+          toast.success(t("web.admin.collections.delete.done"));
           setPendingDelete(null);
         },
         onError: (error) => void showDeleteError(error),
@@ -507,7 +514,7 @@ export default function AdminCollections() {
             ...current,
             ...fresh,
             rows: null,
-            error: fresh ? DELETE_CHANGED : deleteErrorMessage(error),
+            error: fresh ? t("web.admin.collections.delete.changed") : deleteErrorMessage(t, error),
           }
         : current,
     );
@@ -555,7 +562,9 @@ export default function AdminCollections() {
   ) {
     setBatchRunning(true);
     try {
-      const { done, failures } = await runBatch(targets, run, batchFailure);
+      const { done, failures } = await runBatch(targets, run, (collection, error) =>
+        batchFailure(t, collection, error),
+      );
       showBatchResult(action, done, targets.length, failures, warnedCount());
     } finally {
       setBatchRunning(false);
@@ -572,7 +581,8 @@ export default function AdminCollections() {
       async (list) => {
         try {
           const result = await SERVER_SCOPE.sync(list.id);
-          if (result.status === "failed") throw new Error(result.message || "Sync failed");
+          if (result.status === "failed")
+            throw new Error(result.message || t("web.admin.collections.select.syncFailed"));
           if (result.status === "warning") warned++;
         } finally {
           setSyncingIds((current) => {
@@ -618,7 +628,7 @@ export default function AdminCollections() {
     try {
       hiding = await withFreshRowCounts(changing);
     } catch (error) {
-      toast.error(adminMutationMessage(error, "Could not check which rows use them"));
+      toast.error(adminMutationMessage(error, t("web.admin.collections.select.checkRowsFailed")));
       return;
     } finally {
       setBatchRunning(false);
@@ -660,7 +670,7 @@ export default function AdminCollections() {
       const used = (collection: LibraryCollection) => (collection.row_count ?? 0) > 0;
       const deletable = counted.filter((collection) => !used(collection));
       if (deletable.length === 0) {
-        toast.error(COLLECTIONS_IN_USE);
+        toast.error(collectionsInUse());
         return;
       }
       const snapshots = await prepareAdminCollectionDeletes(deletable.map((entry) => entry.id));
@@ -670,14 +680,13 @@ export default function AdminCollections() {
         wholeView,
       });
     } catch (error) {
-      toast.error(adminMutationMessage(error, "Could not prepare deletion"));
+      toast.error(adminMutationMessage(error, t("web.admin.collections.bulkDelete.prepareFailed")));
     } finally {
       setPreparingDelete(false);
     }
   }
 
   const activeLibrary = libraryList.find((library) => library.id === activeLibraryId) ?? null;
-  const deleteProgressLabel = `Deleting ${deleteCollections.progress?.completed ?? 0} of ${deleteCollections.progress?.total ?? viewCollections.length} collections`;
   const deleting = preparingDelete || deleteCollections.isPending;
   // A starter set being added would race a delete of the collections it makes,
   // and a select-mode change would move the ETags a delete has read.
@@ -708,8 +717,8 @@ export default function AdminCollections() {
   const moreItems: PageMoreMenuItem[] = [
     {
       key: "starter-packs",
-      label: "Starter packs…",
-      help: "Add a ready-made set of collections to a library.",
+      label: t("web.admin.collections.more.starterPacks"),
+      help: t("web.admin.collections.more.starterPacksHelp"),
       icon: Layers3,
       disabled: !canImport,
       opensDialog: true,
@@ -717,8 +726,8 @@ export default function AdminCollections() {
     },
     {
       key: "select",
-      label: "Select collections",
-      help: "Sync, show, hide or delete several at once.",
+      label: t("web.admin.collections.more.select"),
+      help: t("web.admin.collections.more.selectHelp"),
       icon: SquareCheckBig,
       // Focus moves to Select all once select mode opens.
       returnFocus: false,
@@ -727,8 +736,14 @@ export default function AdminCollections() {
     },
     {
       key: "delete-all",
-      label: deleteCollections.isPending ? `${deleteProgressLabel}…` : "Delete all in this view…",
-      help: "Every collection the current filters show.",
+      label: deleteCollections.isPending
+        ? deleteProgressLabel(
+            t,
+            deleteCollections.progress?.completed ?? 0,
+            deleteCollections.progress?.total ?? viewCollections.length,
+          )
+        : t("web.admin.collections.more.deleteAll"),
+      help: t("web.admin.collections.more.deleteAllHelp"),
       icon: Trash2,
       group: true,
       disabled: viewCollections.length === 0 || bulkBusy,
@@ -743,7 +758,7 @@ export default function AdminCollections() {
       className={cn(narrow && "h-12 rounded-[14px] text-[15px]")}
       onClick={() => setPickerOpen(true)}
     >
-      <Plus aria-hidden /> New collection
+      <Plus aria-hidden /> {t("web.admin.collections.page.newCollection")}
     </Button>
   );
 
@@ -753,8 +768,8 @@ export default function AdminCollections() {
   return (
     <div aria-busy={deleting} inert={deleting ? true : undefined}>
       <CalmPage
-        title="Collections"
-        subtitle="Server collections everyone can browse on each library's Collections tab and use in Sections."
+        title={t("web.admin.collections.page.title")}
+        subtitle={t("web.admin.collections.page.subtitle")}
         actions={
           narrow ? null : (
             <>
@@ -770,11 +785,11 @@ export default function AdminCollections() {
         <div className="flex flex-wrap items-center gap-3">
           <div className="min-w-0 flex-1">
             <PillSwitcher
-              label="Library"
+              label={t("web.admin.collections.page.libraryFilter")}
               options={[
                 {
                   value: ALL_LIBRARIES,
-                  label: "All libraries",
+                  label: t("web.admin.collections.page.allLibraries"),
                   icon: LibraryIcon,
                   // Arrange works on one library's shelves.
                   disabled: state.view === "arrange",
@@ -793,11 +808,15 @@ export default function AdminCollections() {
             />
           </div>
           <Segmented
-            label="View"
+            label={t("web.admin.collections.page.viewLabel")}
             value={state.view}
             options={[
-              { value: "list", label: "List", icon: List },
-              { value: "arrange", label: "Arrange", icon: LayoutGrid },
+              { value: "list", label: t("web.admin.collections.page.viewList"), icon: List },
+              {
+                value: "arrange",
+                label: t("web.admin.collections.page.viewArrange"),
+                icon: LayoutGrid,
+              },
             ]}
             onChange={setView}
           />
@@ -805,12 +824,15 @@ export default function AdminCollections() {
 
         {state.view === "list" ? (
           <div className="contents" onKeyDown={handleSelectKeyDown}>
-            <section aria-label="Collections" className="surface-panel rounded-[26px] p-1.5">
+            <section
+              aria-label={t("web.admin.collections.list.regionLabel")}
+              className="surface-panel rounded-[26px] p-1.5"
+            >
               {allCollections.isError ? (
                 <div role="alert" className="grid justify-items-center gap-3 px-4 py-10 text-sm">
-                  <p>Couldn&apos;t load collections</p>
+                  <p>{t("web.admin.collections.list.loadFailed")}</p>
                   <Button variant="outline" size="sm" onClick={() => void allCollections.refetch()}>
-                    Retry
+                    {t("common.retry")}
                   </Button>
                 </div>
               ) : allCollections.isLoading ? (
@@ -847,7 +869,9 @@ export default function AdminCollections() {
                   )}
                   {listed.length === 0 ? (
                     <div className="grid justify-items-center gap-2 px-4 py-10 text-sm">
-                      <p className="text-muted-foreground">No collections match.</p>
+                      <p className="text-muted-foreground">
+                        {t("web.admin.collections.list.noMatches")}
+                      </p>
                       <Button
                         variant="outline"
                         size="sm"
@@ -855,7 +879,7 @@ export default function AdminCollections() {
                           update({ kind: "all", q: "", failed: false }, { replace: true })
                         }
                       >
-                        Clear filters
+                        {t("web.admin.collections.list.clearFilters")}
                       </Button>
                     </div>
                   ) : (
@@ -889,7 +913,9 @@ export default function AdminCollections() {
                                 selecting
                                   ? {
                                       selected: selectedIds.has(collection.id),
-                                      label: `Select ${collection.title}`,
+                                      label: t("web.admin.collections.list.selectItem", {
+                                        title: collection.title,
+                                      }),
                                       onChange: (checked, extend) =>
                                         changeSelection(collection.id, checked, extend),
                                     }
@@ -914,7 +940,7 @@ export default function AdminCollections() {
                                         ),
                                       disabledReason: visible
                                         ? undefined
-                                        : "Hidden from Collections tabs",
+                                        : t("web.admin.collections.list.hiddenFromTabs"),
                                     }}
                                     sync={
                                       canImport &&
@@ -932,7 +958,7 @@ export default function AdminCollections() {
                                         ...rowPageChoices.others,
                                       ],
                                       onAdd: (page) => navigate(addRowPath(collection.id, page)),
-                                      disabledReason: visible ? undefined : SHOW_IT_FIRST,
+                                      disabledReason: visible ? undefined : showItFirst(),
                                     }}
                                     onDelete={() => void prepareDelete(collection)}
                                   />
@@ -948,15 +974,17 @@ export default function AdminCollections() {
                     <p className="text-muted-foreground flex items-center gap-2 px-4 pt-2 pb-3 text-[13px]">
                       <Info aria-hidden className="size-4 shrink-0" />
                       <span>
-                        Click a collection to edit it. Order and shelves live in{" "}
-                        <button
-                          type="button"
-                          className="text-foreground font-semibold underline-offset-4 hover:underline"
-                          onClick={() => setView("arrange")}
-                        >
-                          Arrange
-                        </button>
-                        .
+                        {t("web.admin.collections.list.arrangeHint", {
+                          arrange: (chunks) => (
+                            <button
+                              type="button"
+                              className="text-foreground font-semibold underline-offset-4 hover:underline"
+                              onClick={() => setView("arrange")}
+                            >
+                              {chunks}
+                            </button>
+                          ),
+                        })}
                       </span>
                     </p>
                   )}
@@ -998,19 +1026,19 @@ export default function AdminCollections() {
                     : []),
                   {
                     key: "show",
-                    label: "Show on tabs",
+                    label: t("web.admin.collections.select.showOnTabs"),
                     icon: Eye,
                     onClick: () => void setSelectedVisible(true),
                   },
                   {
                     key: "hide",
-                    label: "Hide from tabs",
+                    label: t("web.admin.collections.select.hideFromTabs"),
                     icon: EyeOff,
                     onClick: () => void setSelectedVisible(false),
                   },
                   {
                     key: "delete",
-                    label: "Delete…",
+                    label: t("web.admin.collections.select.delete"),
                     icon: Trash2,
                     destructive: true,
                     separated: true,
@@ -1060,7 +1088,11 @@ export default function AdminCollections() {
         onOpenChange={(open) => {
           if (!open && !holdDeleteOpen.current) setPendingDelete(null);
         }}
-        title={`Delete ${pendingDelete?.collection.title ?? "collection"}?`}
+        title={
+          pendingDelete
+            ? t("web.admin.collections.delete.title", { title: pendingDelete.collection.title })
+            : t("web.admin.collections.delete.titleFallback")
+        }
         libraryNames={pendingNames}
         rows={deleteRowsState}
         rowLibraryNames={libraryNames}
@@ -1094,10 +1126,14 @@ export default function AdminCollections() {
         count={bulkDelete?.snapshots.length ?? 0}
         kind={bulkDeleteKinds.size === 1 ? [...bulkDeleteKinds][0]! : null}
         // A collection goes from every library, so only Delete all names where.
-        where={bulkDelete?.wholeView ? (activeLibrary?.name ?? "this view") : null}
+        where={
+          bulkDelete?.wholeView
+            ? (activeLibrary?.name ?? t("web.admin.collections.bulkDelete.thisView"))
+            : null
+        }
         elsewhere={bulkDeleteElsewhere}
         kept={bulkDelete?.kept ?? []}
-        blocked={activeApplyJob ? STARTER_PACK_BLOCKS_DELETE : null}
+        blocked={activeApplyJob ? starterPackBlocksDelete() : null}
         onConfirm={confirmBulkDelete}
       />
     </div>
@@ -1158,6 +1194,7 @@ function ListFilters({
   failedCount: number;
   onChange: (patch: Partial<AdminListState>) => void;
 }) {
+  const t = useT();
   return (
     <div className="border-border/75 flex flex-wrap items-center gap-2.5 border-b px-3 pt-2.5 pb-3">
       <div className="relative min-w-[200px] flex-1 sm:max-w-[280px]">
@@ -1167,17 +1204,20 @@ function ListFilters({
         />
         <Input
           type="search"
-          aria-label="Search collections"
-          placeholder={`Search ${total} collection${total === 1 ? "" : "s"}`}
+          aria-label={t("web.admin.collections.list.searchLabel")}
+          placeholder={t("web.admin.collections.list.searchPlaceholder", {
+            count: total,
+            count_text: String(total),
+          })}
           value={state.q}
           onChange={(event) => onChange({ q: event.target.value })}
           className="h-9 rounded-xl pl-9"
         />
       </div>
       <Segmented
-        label="Type"
+        label={t("web.admin.collections.list.typeLabel")}
         value={state.kind}
-        options={KIND_OPTIONS}
+        options={kindOptions(t)}
         onChange={(kind) => onChange({ kind })}
       />
       {failedCount > 0 || state.failed ? (
@@ -1193,7 +1233,10 @@ function ListFilters({
           )}
         >
           <span aria-hidden className="bg-destructive size-2 rounded-full" />
-          {failedCount} sync{failedCount === 1 ? "" : "s"} failed
+          {t("web.admin.collections.list.syncsFailed", {
+            count: failedCount,
+            count_text: String(failedCount),
+          })}
         </button>
       ) : null}
     </div>
@@ -1201,9 +1244,10 @@ function ListFilters({
 }
 
 function ListSkeleton() {
+  const t = useT();
   return (
     <div role="status" aria-busy="true" className="grid gap-1 p-2">
-      <span className="sr-only">Loading collections…</span>
+      <span className="sr-only">{t("web.admin.collections.list.loading")}</span>
       {Array.from({ length: 5 }, (_, index) => (
         <div key={index} className="flex items-center gap-3.5 px-2 py-2.5">
           <Skeleton className="h-[50px] w-[74px] rounded-xl" />
@@ -1230,16 +1274,19 @@ function EmptyLibrary({
   onAddStarterPack: () => void;
   newCollection: ReactNode;
 }) {
+  const t = useT();
   return (
     <div className="grid justify-items-center gap-3 px-4 py-14 text-center">
       <span className="bg-accent/80 ring-border grid size-12 place-items-center rounded-xl ring-1 ring-inset">
         <Layers aria-hidden className="text-muted-foreground size-5" />
       </span>
       <p className="font-semibold">
-        {libraryName ? `No collections in ${libraryName} yet` : "No collections yet"}
+        {libraryName
+          ? t("web.admin.collections.empty.titleInLibrary", { library: libraryName })
+          : t("web.admin.collections.empty.title")}
       </p>
       <p className="text-muted-foreground max-w-sm text-sm">
-        Make one yourself, or start from ready-made lists.
+        {t("web.admin.collections.empty.body")}
       </p>
       <div className="flex flex-wrap justify-center gap-2">
         <Button
@@ -1248,7 +1295,7 @@ function EmptyLibrary({
           disabled={!canAddStarterPack}
           onClick={onAddStarterPack}
         >
-          <Layers3 aria-hidden /> Add a starter pack
+          <Layers3 aria-hidden /> {t("web.admin.collections.empty.addStarterPack")}
         </Button>
         {newCollection}
       </div>
@@ -1278,6 +1325,7 @@ function ArrangeView({
   onEditCollection: (collection: LibraryCollection) => void;
   onVisibleChange: (collection: LibraryCollection, visible: boolean) => void;
 }) {
+  const t = useT();
   if (libraryId === null) return null;
   if (board.isError)
     return (
@@ -1285,16 +1333,16 @@ function ArrangeView({
         role="alert"
         className="surface-panel grid justify-items-center gap-3 rounded-[26px] px-4 py-10 text-sm"
       >
-        <p>Couldn&apos;t load shelves</p>
+        <p>{t("web.admin.collections.arrange.loadFailed")}</p>
         <Button variant="outline" size="sm" onClick={() => void board.refetch()}>
-          Retry
+          {t("common.retry")}
         </Button>
       </div>
     );
   if (board.isLoading || !board.data)
     return (
       <div role="status" aria-busy="true" className="grid gap-3">
-        <span className="sr-only">Loading shelves…</span>
+        <span className="sr-only">{t("web.admin.collections.arrange.loading")}</span>
         {Array.from({ length: 3 }, (_, index) => (
           <Skeleton key={index} className="h-32 w-full rounded-[22px]" />
         ))}
@@ -1330,6 +1378,7 @@ function ArrangeView({
 }
 
 function CollectionApplyJobBanner({ job }: { job: AdminJob | null }) {
+  const t = useT();
   const result = job?.status === "completed" ? templateResultOf(job) : null;
   // Read the packs only for a finished job, to name it and count what it shows.
   const bundles = useCollectionTemplateBundles(result !== null);
@@ -1353,8 +1402,14 @@ function CollectionApplyJobBanner({ job }: { job: AdminJob | null }) {
         <div className="flex items-start gap-3">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
           <div className="min-w-0 space-y-1">
-            <p className="text-sm font-medium">Couldn't add the starter pack</p>
-            <p className="text-xs">{job.error_message || job.message || "The job failed."}</p>
+            <p className="text-sm font-medium">
+              {t("web.admin.collections.starterPack.failedTitle")}
+            </p>
+            <p className="text-xs">
+              {job.error_message ||
+                job.message ||
+                t("web.admin.collections.starterPack.failedFallback")}
+            </p>
           </div>
         </div>
       </div>
@@ -1381,7 +1436,11 @@ function CollectionApplyJobBanner({ job }: { job: AdminJob | null }) {
           />
           <div className="min-w-0 space-y-1">
             <p className="text-sm font-medium">
-              {packResultHeading(pack?.title ?? "Starter pack", true, added)}
+              {packResultHeading(
+                pack?.title ?? t("web.admin.collections.starterPack.nameFallback"),
+                true,
+                added,
+              )}
             </p>
             {result && pack ? (
               <p className="text-muted-foreground text-xs">{packResultSummary(result, pack)}</p>
@@ -1398,8 +1457,10 @@ function CollectionApplyJobBanner({ job }: { job: AdminJob | null }) {
         <Loader2 className="text-muted-foreground mt-0.5 h-4 w-4 shrink-0 animate-spin" />
         <div className="min-w-0 flex-1 space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm font-medium">Adding a starter pack</p>
-            <p className="text-muted-foreground text-xs">{job.message || "Working..."}</p>
+            <p className="text-sm font-medium">{t("web.admin.collections.starterPack.adding")}</p>
+            <p className="text-muted-foreground text-xs">
+              {job.message || t("web.admin.collections.starterPack.working")}
+            </p>
           </div>
           <div className="progress-bar">
             <div className="progress-fill animate-pulse" style={{ width: "40%" }} />
@@ -1408,6 +1469,15 @@ function CollectionApplyJobBanner({ job }: { job: AdminJob | null }) {
       </div>
     </div>
   );
+}
+
+/** The More menu's Delete all item while a delete runs. */
+function deleteProgressLabel(t: Translate, completed: number, total: number) {
+  return t("web.admin.collections.more.deleting", {
+    count: total,
+    done_text: String(completed),
+    count_text: String(total),
+  });
 }
 
 function isActiveTemplateBundleApplyJob(job: AdminJob) {

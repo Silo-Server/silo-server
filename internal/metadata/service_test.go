@@ -34,7 +34,8 @@ type fakeItemRepo struct {
 	items map[string]*models.MediaItem
 
 	// replacedPeople records each ReplacePeople call by content ID.
-	replacedPeople map[string][]models.ItemPerson
+	replacedPeople   map[string][]models.ItemPerson
+	replacePeopleErr error
 
 	// Trailer refresh cooldown state (metadataTrailerRefreshRepo).
 	trailersRequestedAt    map[string]time.Time
@@ -184,6 +185,9 @@ func (r *fakeItemRepo) IncrementRefreshFailure(_ context.Context, contentID stri
 func (r *fakeItemRepo) ReplacePeople(_ context.Context, contentID string, people []models.ItemPerson) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.replacePeopleErr != nil {
+		return r.replacePeopleErr
+	}
 	if r.replacedPeople == nil {
 		r.replacedPeople = make(map[string][]models.ItemPerson)
 	}

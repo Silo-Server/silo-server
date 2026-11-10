@@ -8,19 +8,20 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useMangaSeriesFiles } from "@/hooks/queries/catalogRead";
+import { useT, type Translate } from "@/i18n";
 import { prettifyVolumeLabel } from "@/lib/mangaChapters";
 import { formatFileSize } from "@/lib/mediaFormat";
 
 // fileRowLabel describes the chapter a file backs: its volume token when
 // present, otherwise a chapter form mirroring the series list labels.
-function fileRowLabel(file: MangaChapterFile): string {
+function fileRowLabel(file: MangaChapterFile, t: Translate): string {
   if (file.volume?.trim()) {
     return prettifyVolumeLabel(file.volume);
   }
   if (typeof file.chapter_index === "number") {
-    return `Chapter ${file.chapter_index}`;
+    return t("web.item.mangaFiles.chapterNumber", { number: String(file.chapter_index) });
   }
-  return file.title?.trim() || "Chapter";
+  return file.title?.trim() || t("web.item.mangaFiles.chapter");
 }
 
 // MangaFilesDialog shows the local files backing a manga series: the folder(s)
@@ -37,6 +38,7 @@ export default function MangaFilesDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const t = useT();
   const { data, isLoading, error } = useMangaSeriesFiles(contentId, open);
   const files = data?.files ?? [];
   const totalBytes = files.reduce((sum, file) => sum + (file.file_size || 0), 0);
@@ -46,12 +48,18 @@ export default function MangaFilesDialog({
       <DialogContent className="max-h-[85vh] gap-4 sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="truncate pr-6">
-            {title ? `${title} — Files` : "Files"}
+            {title
+              ? t("web.item.mangaFiles.titleWithName", { title })
+              : t("web.item.mangaFiles.title")}
           </DialogTitle>
           <DialogDescription>
             {files.length > 0
-              ? `${files.length} ${files.length === 1 ? "file" : "files"} · ${formatFileSize(totalBytes)}`
-              : "Local files backing this series."}
+              ? t("web.item.mangaFiles.summary", {
+                  count: files.length,
+                  file_count: String(files.length),
+                  size: formatFileSize(totalBytes),
+                })
+              : t("web.item.mangaFiles.description")}
           </DialogDescription>
         </DialogHeader>
 
@@ -60,9 +68,7 @@ export default function MangaFilesDialog({
             <Loader2 className="text-muted-foreground size-6 animate-spin" />
           </div>
         ) : error ? (
-          <p className="text-destructive py-6 text-sm">
-            Couldn't load file details. Try again later.
-          </p>
+          <p className="text-destructive py-6 text-sm">{t("web.item.mangaFiles.loadFailed")}</p>
         ) : (
           <div className="min-h-0 space-y-4 overflow-y-auto">
             {(data?.folder_paths?.length ?? 0) > 0 && (
@@ -79,7 +85,7 @@ export default function MangaFilesDialog({
               </div>
             )}
             {files.length === 0 ? (
-              <p className="text-muted-foreground py-4 text-sm">No files found.</p>
+              <p className="text-muted-foreground py-4 text-sm">{t("web.item.mangaFiles.empty")}</p>
             ) : (
               <ul className="divide-border/40 border-border/40 divide-y rounded-md border">
                 {files.map((file) => (
@@ -88,7 +94,7 @@ export default function MangaFilesDialog({
                     className="flex items-baseline gap-3 px-3 py-2"
                   >
                     <span className="text-foreground/90 w-28 flex-shrink-0 truncate text-xs font-medium">
-                      {fileRowLabel(file)}
+                      {fileRowLabel(file, t)}
                     </span>
                     <span
                       className="text-muted-foreground min-w-0 flex-1 truncate font-mono text-xs"

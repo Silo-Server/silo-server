@@ -88,15 +88,55 @@ A Jellyfin or Emby record without a last-played time carries an unknown timestam
 sorts before any local activity: it can create missing progress but never replaces newer
 Silo progress. Favorite-only records add the favorite without creating progress.
 
+## Streaming and resume
+
+Providers stream: each page is matched and written before the next is requested, so a
+slow database slows the source instead of growing memory, and memory does not grow with
+history size. Only short lists are held across pages: the in-progress (resume) lists, merged
+into the watched pages as they pass, and the Plex watchlist. Series lookups use a
+fixed-size cache, and every per-run aggregate (Continue Watching shows and the source
+series that name them, the Plex admin seen-set) has a fixed entry cap. A failed run is
+partial: pages applied before the failure stay applied.
+
+Each applied page saves a checkpoint on the run: the position of that page and the totals
+from before it. A resumed run reads that page again, because offsets shift when the source
+changes during the import. Re-applying is safe: progress writes require a newer time, and
+history adds nothing for the same item at the same time. A stage that restarts from its
+first page on resume (a Jellyfin or Emby lookback, an in-progress remainder) reports one
+position for all its pages, so only its first page writes a checkpoint. After a resume the
+totals can be slightly off, because already merged items count again; no rows are
+duplicated. A resumed run skips the Continue Watching pass with its warning, because it
+did not see every show in this process; the next import reconciles them.
+
+A run goes back to the queue, keeping its checkpoint, when its process shuts down, when
+the database fails to answer a match query, or when its heartbeat expires (see below).
+`resume_attempts` counts restarts without getting past the checkpointed page; at five the
+run fails as before. A match error the database answers (a data exception or program
+limit) would repeat on every resume, so that page is matched one record at a time instead,
+and each record's failure becomes a warning. A re-claim keeps the run's first `started_at`.
+
+One run past 50,000 items holds the cluster-wide large-import slot, a partial unique
+index on `large_import` among running rows. Others that grow past it wait for the slot,
+keeping their heartbeat and their worker slot, so smaller imports can queue behind them.
+A run that lost its claim or was canceled while waiting stops instead of taking the slot.
+
 Source servers are user-supplied, so what an import reads from one is bounded
 (`internal/historyimport/upstream_limits.go`): each successful response is decoded only up
-to 16 MiB and 250,000 JSON values, and each paged listing stops at 5,000 pages, 500,000
-items, or 512 MiB in total. One budget also covers the whole run, across every listing,
-Plex section, ID lookup, and metadata sweep: 2 GiB read and an estimated 256 MiB of kept
-items. Lookups by ID keep only the items they asked for, one per ID.
-Going over a limit fails the run with its own message. That includes lists whose other
-failures only add a warning (resume positions, favorites, the watchlist, Plex sections, and
-metadata lookups), so an import never completes without a list the source sent.
+to 16 MiB and 250,000 JSON values. Those per-response limits are the memory protection.
+Each paged listing stops at 200,000 pages, 5,000,000 items, or 32 GiB in total, and one
+budget covers the whole run, across every listing, Plex section, ID lookup, and metadata
+sweep: 64 GiB read. These stop a runaway source that keeps reporting more rows than it
+delivers; they do not protect memory. What a run holds across pages is capped at an
+estimated 64 MiB. Lookups by ID keep only the items they asked for, one per ID.
+Going over a limit fails the run with its own message, and the failure log names the
+limit. That includes lists whose other failures only add a warning (resume positions,
+favorites, the watchlist, Plex sections, and metadata lookups), so an import never
+completes without a list the source sent. Plex metadata lookups stop for the rest of the
+run after three consecutive failed batches, so a broken metadata endpoint does not cost a
+timeout on every page.
+
+## Durable queue
+
 
 A node reserves local capacity before atomically claiming a queued row. Claims use
 `FOR UPDATE SKIP LOCKED` and an incremented generation. Heartbeat, progress, and
@@ -120,7 +160,8 @@ All terminal transitions erase that credential atomically, including legacy main
 and administrative cancellation. Missing or unsupported queued envelopes are quarantined
 as safe terminal failures so they cannot block later work. Invalid ciphertext, missing
 credentials, or changed execution authority fails closed after claim. A queued job survives
-a process exit; a running job with uncertain effects is never automatically replayed.
+a process exit. A running job continues from its checkpoint (see Streaming and resume); one
+without a checkpoint is never automatically replayed.
 
 A failed COMMIT response can be ambiguous. The API advises checking existing imports
 before another submission and does not report an uncertain admission as proven rollback.
@@ -128,8 +169,8 @@ Submissions have no durable request identity and remain non-retryable automatica
 
 Source, token, and mapping edits remain available during an import. Workers retain
 the original target, validate current configuration revisions before provider
-execution and each target operation, and repeat validation on their 15-second
-heartbeat. A changed or missing configuration stops the run with a review message;
+execution and before each page they apply, and repeat validation on their 15-second
+heartbeat, which stops the run between records. A changed or missing configuration stops the run with a review message;
 it never redirects work to the new target. Updating a mapping's import timestamp
 does not change its configuration revision. A completed claim updates that timestamp
 only if the mapping still matches the captured revision and target.
@@ -151,9 +192,10 @@ undo completed effects or guarantee that an operation already in flight stops be
 committing: PostgreSQL queue state and the per-user store are not one transaction.
 Configuration changes have the same in-flight limit.
 
-Running jobs with expired heartbeats become terminal failures, never automatic retries.
-Some target writes may already have committed before a crash; an administrator can
-review the outcome and explicitly create a new run. Legacy queued admin jobs without
+A running job with an expired heartbeat goes back to the queue when it has a checkpoint
+and fewer than five restarts without progress; otherwise it becomes a terminal failure.
+Target writes from before the crash stay committed; an administrator can review the
+outcome and explicitly create a new run. Legacy queued admin jobs without
 reconstructible dispatch metadata fail with an operator-visible explanation. The
 continuous legacy orphan sweep applies only to admin-token runs. The unchanged stale-running
 heartbeat policy applies to both kinds; its conditional update rechecks freshness after

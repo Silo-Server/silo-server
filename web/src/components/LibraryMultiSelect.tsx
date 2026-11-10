@@ -9,6 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ChevronDown } from "lucide-react";
+import { useT, type Translate } from "@/i18n";
 
 interface LibraryOption {
   id: number;
@@ -24,6 +25,7 @@ function isLibraryEligible(library: LibraryOption, eligibleKinds?: string[]): bo
 }
 
 function formatLibraryFilterSummary(
+  t: Translate,
   libraryIds: number[],
   libraries: LibraryOption[],
   emptyLabel: string,
@@ -37,16 +39,28 @@ function formatLibraryFilterSummary(
     .filter((name): name is string => Boolean(name));
 
   if (libraryIds.length === 1) {
-    return names[0] ?? "1 library";
+    return names[0] ?? t("web.profiles.libraries.count", { count: 1, count_text: "1" });
   }
   if (names.length === 0) {
-    return `${libraryIds.length} libraries`;
+    return t("web.profiles.libraries.count", {
+      count: libraryIds.length,
+      count_text: String(libraryIds.length),
+    });
   }
+  const fallback = t("web.profiles.librarySelect.libraryFallback");
   // Unnamed IDs (deleted or not yet loaded) still count toward "+N more".
   if (libraryIds.length === 2 && names.length === 2) {
-    return `${names[0] ?? "Library"}, ${names[1] ?? "Library"}`;
+    return t("web.profiles.librarySelect.pair", {
+      first: names[0] ?? fallback,
+      second: names[1] ?? fallback,
+    });
   }
-  return `${names[0] ?? "Library"} +${libraryIds.length - 1} more`;
+  const more = libraryIds.length - 1;
+  return t("web.profiles.librarySelect.more", {
+    count: more,
+    count_text: String(more),
+    name: names[0] ?? fallback,
+  });
 }
 
 function toggleLibrarySelection(
@@ -65,8 +79,8 @@ export default function LibraryMultiSelect({
   value,
   onChange,
   eligibleKinds,
-  emptyLabel = "All Libraries",
-  allOptionLabel = emptyLabel,
+  emptyLabel: emptyLabelProp,
+  allOptionLabel: allOptionLabelProp,
   hideAllOption = false,
   ineligibleReason,
   triggerClassName,
@@ -87,6 +101,9 @@ export default function LibraryMultiSelect({
   /** Read before the summary by screen readers, when no visible label names the button. */
   triggerLabel?: string;
 }) {
+  const t = useT();
+  const emptyLabel = emptyLabelProp ?? t("web.profiles.librarySelect.allLibraries");
+  const allOptionLabel = allOptionLabelProp ?? emptyLabel;
   const hasIneligible =
     Array.isArray(eligibleKinds) &&
     eligibleKinds.length > 0 &&
@@ -102,8 +119,12 @@ export default function LibraryMultiSelect({
           disabled={disabled}
         >
           <span className="truncate">
-            {triggerLabel ? <span className="sr-only">{`${triggerLabel}: `}</span> : null}
-            {formatLibraryFilterSummary(value, libraries, emptyLabel)}
+            {triggerLabel ? (
+              <span className="sr-only">
+                {t("web.profiles.librarySelect.triggerLabel", { label: triggerLabel })}
+              </span>
+            ) : null}
+            {formatLibraryFilterSummary(t, value, libraries, emptyLabel)}
           </span>
           <ChevronDown className="ml-2 h-4 w-4 shrink-0" />
         </Button>

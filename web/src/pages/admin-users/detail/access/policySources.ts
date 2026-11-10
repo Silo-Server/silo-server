@@ -3,6 +3,7 @@ import type { PolicyInheritHints } from "@/components/UserPolicyFields";
 import { playbackQualityPresetFromValue } from "@/lib/playback-quality";
 import type { ResolvedRequestTerms } from "@/lib/requestAccess";
 import { formatStreamBitrateLimit } from "@/lib/streamBitrateLimit";
+import { t } from "@/i18n";
 
 /**
  * Where each Access & limits value comes from, and how the page words it.
@@ -28,8 +29,10 @@ export type PolicyRowKey =
 
 /** "Owner", "Admin" or "User". */
 export function roleLabel(user: Pick<AdminUser, "is_owner" | "role">): string {
-  if (user.is_owner) return "Owner";
-  return user.role === "admin" ? "Admin" : "User";
+  if (user.is_owner) return t("web.admin.users.detail.access.role.owner");
+  return user.role === "admin"
+    ? t("web.admin.users.detail.access.role.admin")
+    : t("web.admin.users.detail.access.role.user");
 }
 
 /** Where inherited values come from: "server" for admins and ungrouped accounts. */
@@ -78,39 +81,59 @@ export function rowSource(user: AdminUser, row: PolicyRowKey, ctx: InheritContex
   return ctx.kind === "group" ? "group" : "default";
 }
 
-/** "Default" or "Group", the prefix of an inherited value. */
-function inheritPrefix(ctx: InheritContext): string {
-  return ctx.kind === "group" ? "Group" : "Default";
+/** "Default: {value}" or "Group: {value}", an inherited value with where it comes from. */
+export function inheritedFrom(kind: "default" | "group", value: string): string {
+  return kind === "group"
+    ? t("web.admin.users.detail.access.inherited.group", { value })
+    : t("web.admin.users.detail.access.inherited.default", { value });
 }
 
-export function libraryListText(ids: number[] | null, libraries: Library[]): string {
-  if (ids === null) return "All libraries";
-  if (ids.length === 0) return "No libraries";
+function libraryNames(ids: number[], libraries: Library[]): string {
   return ids
     .map((id) => libraries.find((library) => library.id === id)?.name ?? `#${id}`)
     .join(", ");
 }
 
-/** The cap as a resolution ("1080p", "4K"), or "Any". */
-export function formatQuality(value: string | null | undefined): string {
+export function libraryListText(ids: number[] | null, libraries: Library[]): string {
+  if (ids === null) return t("web.admin.users.detail.access.value.allLibraries");
+  if (ids.length === 0) return t("web.admin.users.detail.access.value.noLibraries");
+  return libraryNames(ids, libraries);
+}
+
+/** The cap as a resolution ("1080p", "4K"), or `any` when uncapped. */
+function qualityText(value: string | null | undefined, any: () => string): string {
   switch (playbackQualityPresetFromValue(value)) {
     case "standard":
       return "1080p";
     case "4k":
       return "4K";
     default:
-      return "Any";
+      return any();
   }
 }
 
-/** Lower-cases the generic words of a value for use after "Default: " (names keep their case). */
-function lowerFirst(text: string): string {
-  return /^[A-Z][a-z]/.test(text) ? text.charAt(0).toLowerCase() + text.slice(1) : text;
+/** The cap as a resolution ("1080p", "4K"), or "Any". */
+export function formatQuality(value: string | null | undefined): string {
+  return qualityText(value, () => t("web.admin.users.detail.access.value.anyQuality"));
 }
 
 function inheritedVideoText(allowed: boolean, max: number): string {
-  if (!allowed) return "not allowed";
-  return max === 0 ? "allowed, unlimited" : `allowed, up to ${max} at a time`;
+  if (!allowed) return t("web.admin.users.detail.access.inline.notAllowed");
+  return max === 0
+    ? t("web.admin.users.detail.access.inline.videoUnlimited")
+    : t("web.admin.users.detail.access.inline.videoUpTo", { max: String(max) });
+}
+
+function inlineAllowed(allowed: boolean): string {
+  return allowed
+    ? t("web.admin.users.detail.access.inline.allowed")
+    : t("web.admin.users.detail.access.inline.notAllowed");
+}
+
+function inlineBitrateCap(kbps: number): string {
+  return kbps === 0
+    ? t("web.admin.users.detail.access.inline.noCap")
+    : formatStreamBitrateLimit(kbps);
 }
 
 /** "Default: unlimited" / "Group: 2"; undefined when the inherited value is unknown. */
@@ -121,15 +144,17 @@ export function inheritedValueText(
   libraries: Library[],
 ): string | undefined {
   const value = inheritedValue(row, hints, libraries);
-  return value === undefined ? undefined : `${inheritPrefix(ctx)}: ${value}`;
+  return value === undefined
+    ? undefined
+    : inheritedFrom(ctx.kind === "group" ? "group" : "default", value);
 }
 
-/** The formatted value lower-cased for use after a prefix; undefined while unknown. */
-function lowered<T>(value: T | undefined, format: (value: T) => string): string | undefined {
-  return value === undefined ? undefined : lowerFirst(format(value));
+/** The formatted value as it reads after a prefix; undefined while unknown. */
+function inline<T>(value: T | undefined, format: (value: T) => string): string | undefined {
+  return value === undefined ? undefined : format(value);
 }
 
-/** The inherited value alone, lower-cased as it reads after a prefix. */
+/** The inherited value alone, worded as it reads after a prefix ("Default: unlimited"). */
 function inheritedValue(
   row: PolicyRowKey,
   hints: PolicyInheritHints | undefined,
@@ -139,32 +164,41 @@ function inheritedValue(
   switch (row) {
     case "libraries":
       if (hints.library_ids === undefined) return undefined;
-      // Library names keep their case; only "All libraries" and "No libraries" lower.
-      return hints.library_ids === null || hints.library_ids.length === 0
-        ? lowerFirst(libraryListText(hints.library_ids, libraries))
-        : libraryListText(hints.library_ids, libraries);
+      if (hints.library_ids === null) return t("web.admin.users.detail.access.inline.allLibraries");
+      if (hints.library_ids.length === 0) {
+        return t("web.admin.users.detail.access.inline.noLibraries");
+      }
+      return libraryNames(hints.library_ids, libraries);
     case "maxQuality":
-      return lowered(hints.max_playback_quality, formatQuality);
+      return inline(hints.max_playback_quality, (value) =>
+        qualityText(value, () => t("web.admin.users.detail.access.inline.anyQuality")),
+      );
     case "maxStreams":
-      return lowered(hints.max_streams, formatStreams);
+      return inline(hints.max_streams, (n) =>
+        n === 0 ? t("web.admin.users.detail.access.inline.unlimited") : String(n),
+      );
     case "videoTranscoding":
       return hints.transcode_allowed === undefined || hints.max_transcodes === undefined
         ? undefined
         : inheritedVideoText(hints.transcode_allowed, hints.max_transcodes);
     case "audioTranscoding":
-      return lowered(hints.audio_transcode_allowed, formatAllowed);
+      return inline(hints.audio_transcode_allowed, inlineAllowed);
     case "remoteBitrate":
-      return lowered(hints.max_remote_stream_bitrate_kbps, formatBitrateCap);
+      return inline(hints.max_remote_stream_bitrate_kbps, inlineBitrateCap);
     case "localBitrate":
-      return lowered(hints.max_local_stream_bitrate_kbps, formatBitrateCap);
+      return inline(hints.max_local_stream_bitrate_kbps, inlineBitrateCap);
     case "downloads":
-      return lowered(hints.download_allowed, formatAllowed);
+      return inline(hints.download_allowed, inlineAllowed);
     case "serverPrepared":
-      return lowered(hints.download_transcode_allowed, formatAllowed);
+      return inline(hints.download_transcode_allowed, inlineAllowed);
     case "requests":
-      return lowered(hints.requests_allowed, (allowed) => (allowed ? "yes" : "no"));
+      return inline(hints.requests_allowed, (allowed) =>
+        allowed
+          ? t("web.admin.users.detail.access.inline.yes")
+          : t("web.admin.users.detail.access.inline.no"),
+      );
     case "maxProfiles":
-      return lowered(hints.max_profiles, String);
+      return inline(hints.max_profiles, String);
   }
 }
 
@@ -240,24 +274,28 @@ export function sameVideoTranscoding(
 export function formatVideoTranscoding(v: VideoTranscoding): string {
   switch (v.mode) {
     case "off":
-      return "Off";
+      return t("web.admin.users.detail.access.value.off");
     case "unlimited":
-      return "Unlimited";
+      return t("web.admin.users.detail.access.value.unlimited");
     case "limit":
-      return `Up to ${v.max} at a time`;
+      return t("web.admin.users.detail.access.value.upToAtATime", { max: String(v.max) });
   }
 }
 
 export function formatStreams(n: number): string {
-  return n === 0 ? "Unlimited" : String(n);
+  return n === 0 ? t("web.admin.users.detail.access.value.unlimited") : String(n);
 }
 
 export function formatBitrateCap(kbps: number): string {
-  return kbps === 0 ? "No cap" : formatStreamBitrateLimit(kbps);
+  return kbps === 0
+    ? t("web.admin.users.detail.access.value.noCap")
+    : formatStreamBitrateLimit(kbps);
 }
 
 export function formatAllowed(b: boolean): string {
-  return b ? "Allowed" : "Not allowed";
+  return b
+    ? t("web.admin.users.detail.access.value.allowed")
+    : t("web.admin.users.detail.access.value.notAllowed");
 }
 
 /**
@@ -322,7 +360,10 @@ export function parseWholeNumber(text: string, min: number): number | null {
   return Number.isSafeInteger(n) && n >= min ? n : null;
 }
 
-export const ALLOWED_OPTIONS: { value: boolean; label: string }[] = [
-  { value: true, label: "Allowed" },
-  { value: false, label: "Not allowed" },
-];
+/** Allowed / Not allowed, for a Custom choice; call it when rendering. */
+export function allowedOptions(): { value: boolean; label: string }[] {
+  return [
+    { value: true, label: formatAllowed(true) },
+    { value: false, label: formatAllowed(false) },
+  ];
+}

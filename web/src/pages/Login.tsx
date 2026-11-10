@@ -24,6 +24,7 @@ import {
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useServerBranding } from "@/hooks/useServerBranding";
 import { AuthBackground } from "@/components/auth/AuthBackground";
+import { AuthLanguagePicker } from "@/components/auth/AuthLanguagePicker";
 import { sanitizeAuthRedirect } from "@/lib/authRedirect";
 import { formatDeviceCode, spokenDeviceCode } from "@/lib/deviceCode";
 import {
@@ -37,8 +38,11 @@ import {
   sessionEndReason,
 } from "@/lib/externalSignIn";
 import { toast } from "sonner";
+import { useT, type MessageKey } from "@/i18n";
 
 type DeviceLoginSession = V2Result<"POST /api/v2/auth/device/start">;
+// The phone sign-in status line: a catalog message, or an error's own text.
+type DeviceStatus = { key: MessageKey } | { text: string };
 
 function detectPlatform() {
   const ua = navigator.userAgent;
@@ -101,7 +105,7 @@ export default function Login() {
   const [submitting, setSubmitting] = useState(false);
   const [startingDeviceLogin, setStartingDeviceLogin] = useState(false);
   const [deviceSession, setDeviceSession] = useState<DeviceLoginSession | null>(null);
-  const [deviceStatusMessage, setDeviceStatusMessage] = useState("");
+  const [deviceStatus, setDeviceStatus] = useState<DeviceStatus | null>(null);
   const [devicePolling, setDevicePolling] = useState(false);
   // The device code of a request still waiting for approval, which leaving
   // the page or starting over withdraws.
@@ -144,8 +148,9 @@ export default function Login() {
     signupStatusQuery.isFetchedAfterMount &&
     signupStatusQuery.data.enabled;
   const { available: passwordResetAvailable } = usePasswordResetAvailable();
+  const t = useT();
 
-  useDocumentTitle("Sign In");
+  useDocumentTitle(t("web.auth.login.documentTitle"));
 
   const redirectTarget = sanitizeAuthRedirect(searchParams.get("redirect"));
 
@@ -275,7 +280,7 @@ export default function Login() {
           pendingDeviceCode.current = null;
           const session = sessionFromTokenPair(result.tokens);
           completeLogin(session);
-          setDeviceStatusMessage("Signed in. Loading profiles...");
+          setDeviceStatus({ key: "web.auth.login.device.signedIn" });
           void navigateAfterLogin(session.user);
           return;
         }
@@ -283,7 +288,7 @@ export default function Login() {
         if (result.status === "denied") {
           shouldPollAgain = false;
           pendingDeviceCode.current = null;
-          setDeviceStatusMessage("Approval was denied. Start a new code to try again.");
+          setDeviceStatus({ key: "web.auth.login.device.denied" });
           setDeviceSession(null);
           return;
         }
@@ -295,18 +300,24 @@ export default function Login() {
         ) {
           shouldPollAgain = false;
           pendingDeviceCode.current = null;
-          setDeviceStatusMessage("This code is no longer valid. Start a new one.");
+          setDeviceStatus({ key: "web.auth.login.device.invalid" });
           setDeviceSession(null);
           return;
         }
 
         // Someone opened the link on a phone: the person carries on there.
-        setDeviceStatusMessage(
-          result.opened ? "Continue on your phone." : "Waiting for approval on your phone...",
-        );
+        setDeviceStatus({
+          key: result.opened
+            ? "web.auth.login.device.continueOnPhone"
+            : "web.auth.login.device.waiting",
+        });
       } catch (error) {
         if (!cancelled) {
-          setDeviceStatusMessage(error instanceof Error ? error.message : "Device sign-in failed");
+          setDeviceStatus(
+            error instanceof Error
+              ? { text: error.message }
+              : { key: "web.auth.login.device.failed" },
+          );
         }
       } finally {
         if (!cancelled) {
@@ -342,7 +353,7 @@ export default function Login() {
         <div
           className="border-primary h-8 w-8 animate-spin rounded-full border-b-2"
           role="status"
-          aria-label="Loading"
+          aria-label={t("common.loading")}
         />
       </main>
     );
@@ -376,7 +387,7 @@ export default function Login() {
       if (refusal) {
         setLoginRefusal(refusal);
       } else {
-        toast.error(err instanceof Error ? err.message : "Login failed");
+        toast.error(err instanceof Error ? err.message : t("web.auth.login.loginFailed"));
       }
     } finally {
       setSubmitting(false);
@@ -404,7 +415,7 @@ export default function Login() {
       if (refusal) {
         setLoginRefusal(refusal);
       } else {
-        toast.error(err instanceof Error ? err.message : "Sign-in failed");
+        toast.error(err instanceof Error ? err.message : t("web.auth.login.signInFailed"));
       }
     } finally {
       setNetworkSigningIn(null);
@@ -417,9 +428,9 @@ export default function Login() {
       const data = await v2("POST /api/v2/auth/device/start", { body: buildDevicePayload() });
       pendingDeviceCode.current = data.device_code;
       setDeviceSession(data);
-      setDeviceStatusMessage("Waiting for approval on your phone...");
+      setDeviceStatus({ key: "web.auth.login.device.waiting" });
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to start device login");
+      toast.error(error instanceof Error ? error.message : t("web.auth.login.device.startFailed"));
     } finally {
       setStartingDeviceLogin(false);
     }
@@ -437,15 +448,21 @@ export default function Login() {
     passwordResetAvailable &&
     passwordFormShown &&
     (!selectedProvider || selectedProvider === "local");
-  const oauthProviderNames = oauthProviders.map((entry) => entry.display_name).join(" or ");
+  const providerNames = oauthProviders.map((entry) => entry.display_name);
+  // "A or B or C": each name joins the list through the catalog's "or".
+  const oauthProviderNames = providerNames.length
+    ? providerNames.reduce((first, next) =>
+        t("web.auth.login.providerAlternatives", { first, next }),
+      )
+    : "";
   function passwordLoginRefusal(problemType: string): string | null {
     switch (problemType) {
       case "local_login_disabled":
         return oauthProviderNames
-          ? `Password sign-in is turned off on this server. Sign in with ${oauthProviderNames} instead.`
-          : "Password sign-in is turned off on this server.";
+          ? t("web.auth.login.passwordDisabledUseProvider", { providers: oauthProviderNames })
+          : t("web.auth.login.passwordDisabled");
       case "password_expired":
-        return "Your directory password has expired. Change it with your organization, then sign in again.";
+        return t("web.auth.login.passwordExpired");
       case "permission_denied":
         // Sign-in has no caller yet, so the only denial is a disabled account.
         return oauthFailureText("account_disabled");
@@ -466,7 +483,8 @@ export default function Login() {
   return (
     <main className="auth-shell">
       <AuthBackground />
-      <h1 className="sr-only">Sign in to {serverName}</h1>
+      <AuthLanguagePicker />
+      <h1 className="sr-only">{t("web.auth.login.heading", { server: serverName })}</h1>
       <Card className="auth-card glass panel-border w-full max-w-md border-0">
         <CardHeader>
           <CardTitle className="text-3xl font-extrabold tracking-[-0.04em]">{serverName}</CardTitle>
@@ -479,12 +497,18 @@ export default function Login() {
               className="border-border bg-muted/40 space-y-1 rounded-md border p-3 text-sm"
             >
               <p className="font-medium">
-                {endedSession === "signed-out" ? "You’re signed out" : "Your session ended"}
+                {t(
+                  endedSession === "signed-out"
+                    ? "web.auth.login.signedOutTitle"
+                    : "web.auth.login.sessionEndedTitle",
+                )}
               </p>
               <p className="text-muted-foreground">
-                {endedSession === "signed-out"
-                  ? "Sign in again whenever you’re ready."
-                  : "This sign-in expired or was signed out. Sign in again to continue."}
+                {t(
+                  endedSession === "signed-out"
+                    ? "web.auth.login.signedOutBody"
+                    : "web.auth.login.sessionEndedBody",
+                )}
               </p>
             </div>
           )}
@@ -496,13 +520,14 @@ export default function Login() {
               <p>
                 {/* Only a 503 provider_unavailable is the provider's; any
                     other outage is the server's or the network's. */}
-                {sessionRestoreProviderUnavailable
-                  ? "Can't reach the sign-in provider right now."
-                  : "Can't restore your session right now."}{" "}
-                You&apos;re still signed in; try again in a moment.
+                {t(
+                  sessionRestoreProviderUnavailable
+                    ? "web.auth.login.restoreProviderUnavailable"
+                    : "web.auth.login.restoreUnavailable",
+                )}
               </p>
               <Button type="button" variant="outline" size="sm" onClick={retrySessionRestore}>
-                Try again
+                {t("common.tryAgain")}
               </Button>
             </div>
           )}
@@ -524,22 +549,21 @@ export default function Login() {
           )}
           {autoRedirectProvider && readyToRedirect && (
             <p className="text-muted-foreground text-sm" role="status">
-              Taking you to {autoRedirectProvider.display_name}…
+              {t("web.auth.login.takingYouTo", { provider: autoRedirectProvider.display_name })}
             </p>
           )}
           {switchingAccount && oauthProviders.length > 0 && (
-            <p className="text-muted-foreground text-sm">
-              Choose the account to sign in with. You may be asked which account to use at the
-              sign-in provider.
-            </p>
+            <p className="text-muted-foreground text-sm">{t("web.auth.login.switchAccountHint")}</p>
           )}
           {networkProviders.length > 0 && (
             <div className="space-y-2">
               {networkProviders.map((entry) => {
                 const owner = networkIdentityName(entry);
-                let label = `Continue with ${entry.display_name}`;
-                if (networkSigningIn === entry.id) label = "Signing in…";
-                else if (owner) label = `Continue as ${owner}`;
+                let label = t("web.auth.login.network.continueWith", {
+                  provider: entry.display_name,
+                });
+                if (networkSigningIn === entry.id) label = t("web.auth.login.network.signingIn");
+                else if (owner) label = t("web.auth.login.network.continueAs", { name: owner });
                 return (
                   <Button
                     key={entry.id}
@@ -553,7 +577,7 @@ export default function Login() {
                       <span>{label}</span>
                       {owner && (
                         <span className="text-xs font-normal opacity-80">
-                          via {entry.display_name}
+                          {t("web.auth.login.network.via", { provider: entry.display_name })}
                         </span>
                       )}
                     </span>
@@ -563,7 +587,7 @@ export default function Login() {
               {(passwordFormShown || oauthProviders.length > 0) && (
                 <div className="text-muted-foreground flex items-center gap-2 pt-2 text-xs">
                   <div className="bg-border h-px flex-1" />
-                  <span>or</span>
+                  <span>{t("web.auth.login.or")}</span>
                   <div className="bg-border h-px flex-1" />
                 </div>
               )}
@@ -582,7 +606,7 @@ export default function Login() {
               {passwordFormShown && (
                 <div className="text-muted-foreground flex items-center gap-2 pt-2 text-xs">
                   <div className="bg-border h-px flex-1" />
-                  <span>or</span>
+                  <span>{t("web.auth.login.or")}</span>
                   <div className="bg-border h-px flex-1" />
                 </div>
               )}
@@ -591,7 +615,7 @@ export default function Login() {
           {passwordFormShown && (
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="username">Username</Label>
+                <Label htmlFor="username">{t("web.auth.username")}</Label>
                 <Input
                   id="username"
                   value={username}
@@ -602,7 +626,7 @@ export default function Login() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="password">{t("web.auth.password")}</Label>
                 <PasswordInput
                   id="password"
                   value={password}
@@ -616,14 +640,14 @@ export default function Login() {
                       to={forgotPasswordHref}
                       className="text-muted-foreground hover:text-foreground text-xs underline-offset-4 hover:underline"
                     >
-                      Forgot password?
+                      {t("web.auth.login.forgotPassword")}
                     </Link>
                   </div>
                 )}
               </div>
               {(credentialProviders.length > 1 || hasDirectoryProvider) && (
                 <div className="space-y-2">
-                  <Label htmlFor={providerPickerId}>Sign in with</Label>
+                  <Label htmlFor={providerPickerId}>{t("web.auth.login.providerLabel")}</Label>
                   <Select value={selectedProvider} onValueChange={setProvider}>
                     <SelectTrigger
                       id={providerPickerId}
@@ -634,7 +658,9 @@ export default function Login() {
                     </SelectTrigger>
                     <SelectContent>
                       {hasDirectoryProvider && (
-                        <SelectItem value={AUTO_PROVIDER}>Automatic</SelectItem>
+                        <SelectItem value={AUTO_PROVIDER}>
+                          {t("web.auth.login.providerAutomatic")}
+                        </SelectItem>
                       )}
                       {credentialProviders.map((entry) => (
                         <SelectItem key={entry.id} value={entry.id}>
@@ -645,14 +671,13 @@ export default function Login() {
                   </Select>
                   {hasDirectoryProvider ? (
                     <p id={providerPickerHintId} className="text-muted-foreground text-xs">
-                      Automatic: accounts with a Silo password sign in with it, everyone else with
-                      the directory.
+                      {t("web.auth.login.providerAutomaticHint")}
                     </p>
                   ) : null}
                 </div>
               )}
               <Button type="submit" className="w-full" disabled={submitting}>
-                {submitting ? "Signing in..." : "Sign in"}
+                {submitting ? t("web.auth.login.signingIn") : t("web.auth.signIn")}
               </Button>
             </form>
           )}
@@ -661,9 +686,9 @@ export default function Login() {
             <Separator />
             <div className="space-y-3">
               <div>
-                <h2 className="text-sm font-semibold">Use your phone instead</h2>
+                <h2 className="text-sm font-semibold">{t("web.auth.login.device.title")}</h2>
                 <p className="text-muted-foreground mt-1 text-sm">
-                  Scan a code, sign in there, and approve this device.
+                  {t("web.auth.login.device.description")}
                 </p>
               </div>
               {!deviceSession ? (
@@ -674,7 +699,9 @@ export default function Login() {
                   disabled={startingDeviceLogin}
                   onClick={() => void handleStartDeviceLogin()}
                 >
-                  {startingDeviceLogin ? "Generating code..." : "Show QR code"}
+                  {startingDeviceLogin
+                    ? t("web.auth.login.device.generatingCode")
+                    : t("web.auth.login.device.showQrCode")}
                 </Button>
               ) : (
                 <div className="border-border/60 bg-background/50 space-y-4 rounded-md border p-4">
@@ -683,11 +710,12 @@ export default function Login() {
                   </div>
                   <div className="space-y-1 text-center">
                     <p className="text-muted-foreground text-sm">
-                      Or go to{" "}
-                      <span className="text-foreground break-all">
-                        {deviceSession.verification_uri}
-                      </span>{" "}
-                      and enter
+                      {t("web.auth.login.device.goToAndEnter", {
+                        url: deviceSession.verification_uri,
+                        address: (chunks) => (
+                          <span className="text-foreground break-all">{chunks}</span>
+                        ),
+                      })}
                     </p>
                     <div
                       className="font-mono text-2xl font-semibold tracking-[0.12em]"
@@ -708,13 +736,16 @@ export default function Login() {
                           pendingDeviceCode.current = null;
                         }
                         setDeviceSession(null);
-                        setDeviceStatusMessage("");
+                        setDeviceStatus(null);
                       }}
                     >
-                      Start over
+                      {t("web.auth.login.device.startOver")}
                     </Button>
                     <p className="text-muted-foreground text-center text-sm">
-                      {devicePolling ? "Checking for approval..." : deviceStatusMessage}
+                      {devicePolling
+                        ? t("web.auth.login.device.checking")
+                        : deviceStatus &&
+                          ("key" in deviceStatus ? t(deviceStatus.key) : deviceStatus.text)}
                     </p>
                   </div>
                 </div>
@@ -724,10 +755,13 @@ export default function Login() {
 
           {signupOpen && (
             <p className="text-muted-foreground text-center text-sm">
-              Don&apos;t have an account?{" "}
-              <Link to={signupHref} className="text-foreground underline hover:no-underline">
-                Sign up
-              </Link>
+              {t("web.auth.login.noAccount", {
+                link: (chunks) => (
+                  <Link to={signupHref} className="text-foreground underline hover:no-underline">
+                    {chunks}
+                  </Link>
+                ),
+              })}
             </p>
           )}
         </CardContent>

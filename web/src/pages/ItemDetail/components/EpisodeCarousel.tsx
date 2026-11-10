@@ -17,6 +17,7 @@ import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
 import type { ScrollPreservingState } from "@/hooks/useScrollRestoration";
 import { buildItemHref } from "@/lib/mediaNavigation";
+import { useT } from "@/i18n";
 import EpisodeCardCaption from "./EpisodeCardCaption";
 
 interface EpisodeCarouselProps {
@@ -33,6 +34,7 @@ export default function EpisodeCarousel({
   episodeLinkState,
   libraryId,
 }: EpisodeCarouselProps) {
+  const t = useT();
   const currentEpisodeIndex = episodes.findIndex(
     (episode) => episode.episode_number === currentEpisodeNumber,
   );
@@ -67,7 +69,7 @@ export default function EpisodeCarousel({
             type="button"
             onClick={scrollPrev}
             className="from-background/90 absolute top-0 bottom-0 left-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-r to-transparent opacity-0 transition-opacity duration-200 group-hover/carousel:opacity-100 focus-visible:opacity-100"
-            aria-label="Scroll left"
+            aria-label={t("web.detail.carousel.scrollLeft")}
           >
             <ChevronLeft className="text-foreground h-6 w-6" />
           </button>
@@ -100,7 +102,7 @@ export default function EpisodeCarousel({
             type="button"
             onClick={scrollNext}
             className="from-background/90 absolute top-0 right-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-l to-transparent opacity-0 transition-opacity duration-200 group-hover/carousel:opacity-100 focus-visible:opacity-100"
-            aria-label="Scroll right"
+            aria-label={t("web.detail.carousel.scrollRight")}
           >
             <ChevronRight className="text-foreground h-6 w-6" />
           </button>
@@ -129,10 +131,12 @@ function EpisodeCarouselCard({
   hideOverviewIfUnwatched: boolean;
   onPrefetch: () => void;
 }) {
+  const t = useT();
   const cardRef = useRef<HTMLDivElement>(null);
   const prefetchHandlers = useDwellPrefetch(onPrefetch);
   const thumbhashUrl = ep.still_thumbhash ? decodeThumbhash(ep.still_thumbhash) : "";
-  const episodeTitle = ep.title || `Episode ${ep.episode_number}`;
+  const episodeTitle =
+    ep.title || t("web.detail.episodes.numbered", { episode: String(ep.episode_number) });
   const episodeHref = buildItemHref({
     contentId: ep.content_id,
     libraryId: episodeLinkLibraryId(ep, libraryId),
@@ -200,7 +204,7 @@ function EpisodeCarouselCard({
                     <span className="bg-primary-foreground absolute inline-flex h-full w-full animate-ping rounded-full opacity-60" />
                     <span className="bg-primary-foreground relative inline-flex size-1.5 rounded-full" />
                   </span>
-                  Now Viewing
+                  {t("web.detail.episodes.nowViewing")}
                 </div>
               )}
               {progress != null && (

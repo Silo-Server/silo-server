@@ -20,6 +20,7 @@ import {
   getSessionClientLabel,
 } from "@/pages/adminActivityPresentation";
 import { formatDateTime } from "@/lib/datetime";
+import { formatLocale } from "@/lib/appLocale";
 
 export default function AdminStats() {
   const statsQuery = useAdminStats();
@@ -151,7 +152,9 @@ function StatCard({ title, value, icon }: { title: string; value: number; icon: 
         <div className="text-muted-foreground">{icon}</div>
       </CardHeader>
       <CardContent>
-        <div className="text-3xl font-semibold tracking-tight">{value.toLocaleString()}</div>
+        <div className="text-3xl font-semibold tracking-tight">
+          {value.toLocaleString(formatLocale())}
+        </div>
       </CardContent>
     </Card>
   );

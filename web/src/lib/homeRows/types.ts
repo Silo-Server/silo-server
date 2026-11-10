@@ -4,6 +4,7 @@
  * adapter hook, so nothing under components/homeRows reads an account role or
  * an API type.
  */
+import { t } from "@/i18n";
 import type { CollectionOption } from "@/hooks/queries/useAllUserCollections";
 import type { PeekRequest } from "@/components/calm/usePeekLimiter";
 import type { RowDraft } from "./rowDraft";
@@ -45,6 +46,12 @@ export interface HomeRow {
   own: boolean;
   /** Profile: the server's own name for a row this profile renamed. */
   renamedFrom?: string;
+  /**
+   * The catalog key of a title the server wrote itself, with the `title` it
+   * came with. It translates `title` only while the row still has that title,
+   * so an unsaved rename shows as typed.
+   */
+  titleKey?: { title: string; key: string; args?: Record<string, string> };
 }
 
 /** An open Edit row: the row as it was read, plus whatever the surface needs to save over it. */
@@ -59,7 +66,7 @@ export interface EditSession {
 /** Thrown by `save` when the row changed since the edit session was read. */
 export class RowChangedError extends Error {
   constructor() {
-    super("This row changed since you opened it.");
+    super(t("web.home.rows.draft.rowChanged"));
     this.name = "RowChangedError";
   }
 }

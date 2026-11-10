@@ -2,6 +2,7 @@ import { Link } from "react-router";
 
 import { cn } from "@/lib/utils";
 import { chartSeriesColor } from "./chartMath";
+import { formatLocale } from "@/lib/appLocale";
 
 export interface BarListItem {
   id: string;
@@ -23,7 +24,7 @@ export interface BarListProps {
 }
 
 function defaultFormatValue(value: number): string {
-  return value.toLocaleString();
+  return value.toLocaleString(formatLocale());
 }
 
 /**

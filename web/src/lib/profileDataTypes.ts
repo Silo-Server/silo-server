@@ -1,4 +1,5 @@
 import type { components } from "@/api/v2/schema";
+import { t } from "@/i18n";
 
 /**
  * The kinds of a profile's own data, shared by a profile's export and import
@@ -18,13 +19,27 @@ export const DATA_TYPE_IDS: readonly ProfileDataTypeId[] = [
 ];
 
 export const DATA_TYPE_LABELS: Record<ProfileDataTypeId, string> = {
-  watch_history: "Watch history and progress",
-  ratings: "Ratings",
-  favorites: "Favorites and watchlist",
-  collections: "Personal collections",
-  dismissals: 'Dismissed and "not interested"',
-  preferences: "Playback and display preferences",
-  notifications: "Notification preferences",
+  get watch_history() {
+    return t("web.profiles.dataTypes.watchHistory");
+  },
+  get ratings() {
+    return t("web.profiles.dataTypes.ratings");
+  },
+  get favorites() {
+    return t("web.profiles.dataTypes.favorites");
+  },
+  get collections() {
+    return t("web.profiles.dataTypes.collections");
+  },
+  get dismissals() {
+    return t("web.profiles.dataTypes.dismissals");
+  },
+  get preferences() {
+    return t("web.profiles.dataTypes.preferences");
+  },
+  get notifications() {
+    return t("web.profiles.dataTypes.notifications");
+  },
 };
 
 /** The same, inside a sentence. */
@@ -46,12 +61,18 @@ export function dataCountsPhrase(data: {
   left_out: number;
 }): string {
   const parts = [
-    data.added > 0 ? `${data.added} added` : null,
-    data.updated > 0 ? `${data.updated} updated` : null,
-    data.unchanged > 0 ? `${data.unchanged} already here` : null,
-    data.left_out > 0 ? `${data.left_out} left out` : null,
+    data.added > 0 ? t("web.profiles.dataTypes.counts.added", { count: String(data.added) }) : null,
+    data.updated > 0
+      ? t("web.profiles.dataTypes.counts.updated", { count: String(data.updated) })
+      : null,
+    data.unchanged > 0
+      ? t("web.profiles.dataTypes.counts.unchanged", { count: String(data.unchanged) })
+      : null,
+    data.left_out > 0
+      ? t("web.profiles.dataTypes.counts.leftOut", { count: String(data.left_out) })
+      : null,
   ].filter((part): part is string => part !== null);
-  return parts.length > 0 ? parts.join(", ") : "nothing to merge";
+  return parts.length > 0 ? parts.join(", ") : t("web.profiles.dataTypes.counts.nothing");
 }
 
 /** The most titles listed by name before "and N more". */
@@ -61,7 +82,9 @@ const TITLES_SHOWN = 10;
 export function titleList(titles: readonly string[]): string {
   const shown = titles.slice(0, TITLES_SHOWN).join(", ");
   const rest = titles.length - TITLES_SHOWN;
-  return rest > 0 ? `${shown}, and ${rest} more` : shown;
+  return rest > 0
+    ? t("web.profiles.dataTypes.titleListMore", { titles: shown, count: String(rest) })
+    : shown;
 }
 
 /** Short nouns for counting pending entries: one and many. */

@@ -18,19 +18,26 @@ import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiob
 import { coldResumePosition } from "@/pages/audiobooks/player/smartRewind";
 import { getAudiobookSmartRewind } from "@/pages/audiobooks/player/useAudiobookPrefs";
 import { hasMachineTranslation } from "./components/machineTranslation";
+import { useAppLanguage, useT, type Translate } from "@/i18n";
 
-function formatSeconds(totalSeconds: number): string {
+function formatSeconds(t: Translate, totalSeconds: number): string {
   if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return "";
   const h = Math.floor(totalSeconds / 3600);
   const m = Math.floor((totalSeconds % 3600) / 60);
   const s = Math.floor(totalSeconds % 60);
   if (h > 0) {
-    return `${h}h ${String(m).padStart(2, "0")}m`;
+    return t("web.detail.duration.hoursMinutes", {
+      hours: String(h),
+      minutes: String(m).padStart(2, "0"),
+    });
   }
   if (m > 0) {
-    return `${m}m ${String(s).padStart(2, "0")}s`;
+    return t("web.detail.mediaInfo.durationMs", {
+      minutes: String(m),
+      seconds: String(s).padStart(2, "0"),
+    });
   }
-  return `${s}s`;
+  return t("web.detail.mediaInfo.durationS", { seconds: String(s) });
 }
 
 function leafUserData(userData: ItemDetail["user_data"]): LeafItemUserData | undefined {
@@ -72,6 +79,7 @@ export default function AudiobookContent({
   item: ItemDetail & { type: "audiobook" };
   libraryId?: number;
 }) {
+  const t = useT();
   const [searchParams] = useSearchParams();
   const handledPlayParamRef = useRef(false);
   const [addToCollectionOpen, setAddToCollectionOpen] = useState(false);
@@ -98,7 +106,12 @@ export default function AudiobookContent({
     durationTotal > 0 &&
     (progress.is_in_progress ?? !progress.played),
   );
-  const chapters = useMemo(() => buildChapterList(files), [files]);
+  const language = useAppLanguage();
+  const chapters = useMemo(
+    () => buildChapterList(files),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- untitled chapters get a translated fallback title
+    [files, language],
+  );
   const isPlayerOpen = audiobookPlayback?.activeRequest?.contentId === item.content_id;
   const activePlayback = isPlayerOpen ? audiobookPlayback?.active : null;
   const currentPlayerSeconds =
@@ -129,16 +142,18 @@ export default function AudiobookContent({
 
   function primaryPlaybackLabel() {
     if (activePlayback?.playing) {
-      return "Pause";
+      return t("web.detail.audiobook.pause");
     }
     if (activePlayback) {
-      return "Resume";
+      return t("web.detail.actions.resume");
     }
     if (hasProgress) {
       const chapter = findChapterAt(chapters, resumeSeconds);
-      return chapter ? `Resume · ${chapter.label}` : "Resume";
+      return chapter
+        ? t("web.detail.audiobook.resumeChapter", { chapter: chapter.label })
+        : t("web.detail.actions.resume");
     }
-    return "Listen";
+    return t("web.detail.audiobook.listen");
   }
 
   useEffect(() => {
@@ -168,7 +183,7 @@ export default function AudiobookContent({
         overviewMachineTranslated={hasMachineTranslation(item.machine_translated_fields)}
         title={item.title}
         topNav={<PageBack />}
-        context="Audiobook"
+        context={t("web.detail.hero.typeAudiobook")}
         studioLabel={item.audiobook?.publisher || item.studios?.[0] || undefined}
         posterUrl={item.poster_url}
         posterThumbhash={item.poster_thumbhash}
@@ -178,21 +193,29 @@ export default function AudiobookContent({
             <div className="text-muted-foreground flex flex-col gap-0.5 text-sm">
               {author && (
                 <span>
-                  <span className="font-medium">By</span> {author}
+                  {t("web.detail.books.byAuthor", {
+                    label: (chunks) => <span className="font-medium">{chunks}</span>,
+                    name: (chunks) => chunks,
+                    author,
+                  })}
                 </span>
               )}
               {narrator && (
                 <span>
-                  <span className="font-medium">Narrated by</span>{" "}
-                  {(item.audiobook?.other_narrations ?? []).length > 0 ? (
-                    <NarratorPicker
-                      currentNarrator={narrator}
-                      currentContentId={item.content_id}
-                      others={item.audiobook?.other_narrations ?? []}
-                    />
-                  ) : (
-                    narrator
-                  )}
+                  {t("web.detail.books.narratedBy", {
+                    label: (chunks) => <span className="font-medium">{chunks}</span>,
+                    name: (chunks) =>
+                      (item.audiobook?.other_narrations ?? []).length > 0 ? (
+                        <NarratorPicker
+                          currentNarrator={narrator}
+                          currentContentId={item.content_id}
+                          others={item.audiobook?.other_narrations ?? []}
+                        />
+                      ) : (
+                        chunks
+                      ),
+                    narrator,
+                  })}
                 </span>
               )}
             </div>
@@ -201,7 +224,7 @@ export default function AudiobookContent({
         metadata={
           <MetadataBadges
             year={item.year > 0 ? String(item.year) : undefined}
-            duration={durationTotal > 0 ? formatSeconds(durationTotal) : undefined}
+            duration={durationTotal > 0 ? formatSeconds(t, durationTotal) : undefined}
           />
         }
         overview={item.overview}
@@ -219,8 +242,10 @@ export default function AudiobookContent({
                     />
                   </div>
                   <p className="text-muted-foreground mt-1 text-xs">
-                    {formatSeconds(resumeSeconds)} listened ·{" "}
-                    {Math.round((resumeSeconds / durationTotal) * 100)}%
+                    {t("web.detail.audiobook.listenedProgress", {
+                      time: formatSeconds(t, resumeSeconds),
+                      percent: String(Math.round((resumeSeconds / durationTotal) * 100)),
+                    })}
                   </p>
                 </div>
               )}
@@ -238,14 +263,14 @@ export default function AudiobookContent({
                   size="lg"
                   onClick={() => setAddToCollectionOpen(true)}
                   className="gap-2"
-                  title="Add to a manual collection"
+                  title={t("web.detail.audiobook.addToCollectionHint")}
                 >
                   <FolderPlus className="h-4 w-4" />
-                  Add to Collection
+                  {t("web.detail.actions.addToCollection")}
                 </Button>
                 {hasProgress && (
                   <Button variant="outline" size="lg" onClick={() => openPlayer(0)}>
-                    Listen from Start
+                    {t("web.detail.audiobook.listenFromStart")}
                   </Button>
                 )}
               </div>
@@ -263,14 +288,18 @@ export default function AudiobookContent({
         {item.audiobook?.series && item.audiobook.series.entries.length > 0 && (
           <RelatedRail
             heading={
-              item.audiobook.series.name ? `In ${item.audiobook.series.name}` : "In this series"
+              item.audiobook.series.name
+                ? t("web.detail.books.inSeries", { series: item.audiobook.series.name })
+                : t("web.detail.books.inThisSeries")
             }
             items={item.audiobook.series.entries.map((entry) => ({
               content_id: entry.content_id,
               title: entry.title,
               poster_url: entry.poster_url,
               subtitle:
-                typeof entry.series_index === "number" ? `Book ${entry.series_index}` : undefined,
+                typeof entry.series_index === "number"
+                  ? t("web.detail.books.bookNumber", { number: String(entry.series_index) })
+                  : undefined,
               highlight: entry.content_id === item.content_id,
             }))}
           />
@@ -278,7 +307,11 @@ export default function AudiobookContent({
 
         {(item.audiobook?.related.also_by_author ?? []).length > 0 && (
           <RelatedRail
-            heading={`Also by ${author ?? "this author"}`}
+            heading={
+              author
+                ? t("web.detail.books.alsoByAuthor", { author })
+                : t("web.detail.books.alsoByThisAuthor")
+            }
             items={(item.audiobook?.related.also_by_author ?? []).map((entry) => ({
               content_id: entry.content_id,
               title: entry.title,
@@ -290,7 +323,7 @@ export default function AudiobookContent({
 
         {(item.audiobook?.related.similar ?? []).length > 0 && (
           <RelatedRail
-            heading="You might also like"
+            heading={t("web.detail.books.youMightAlsoLike")}
             items={(item.audiobook?.related.similar ?? []).map((entry) => ({
               content_id: entry.content_id,
               title: entry.title,

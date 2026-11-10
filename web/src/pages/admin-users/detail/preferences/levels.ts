@@ -5,13 +5,15 @@ import type {
   AdminSettingScope,
   AdminUserSettingEntry,
 } from "@/hooks/queries/admin/users";
+import { t, type Translate } from "@/i18n";
 import {
   resolutionOrderFor,
   resolveInheritedValue,
   type InheritedValue,
-  variesScopePhrase,
 } from "@/lib/inheritedSettingValue";
 import { SETTING_DEFINITIONS, type SettingKey } from "@/lib/settingsContract";
+
+import { possessiveText } from "../format";
 
 /**
  * The Preferences tab's "levels": the places a setting can be stored for an
@@ -47,13 +49,6 @@ export interface PreferenceLevelGroup {
 }
 
 const FAMILY_ORDER: AdminSettingClientFamily[] = ["tv", "mobile", "tablet", "desktop", "web"];
-const FAMILY_LABELS: Record<AdminSettingClientFamily, string> = {
-  tv: "TV",
-  mobile: "Mobile",
-  tablet: "Tablet",
-  desktop: "Desktop",
-  web: "Web",
-};
 
 /** The level id for one profile on one device; also used to link here. */
 export function deviceLevelId(profileId: string, deviceId: string): string {
@@ -167,14 +162,14 @@ export function buildPreferenceLevels({
   if (account.length > 0) {
     groups.push({
       key: "account",
-      title: "Account",
+      title: t("web.admin.users.detail.preferences.levels.accountGroup"),
       levels: [
         {
           id: "account",
           kind: "account",
           identity: { scope: "account" },
           profileName: "",
-          name: "Account-wide",
+          name: t("web.admin.users.detail.preferences.levels.accountWide"),
           entries: account.sort(byManifestOrder),
         },
       ],
@@ -183,7 +178,13 @@ export function buildPreferenceLevels({
 
   const listed = new Set(profiles.map((profile) => profile.id));
   const orphaned = [...byProfile.keys()].filter((id) => !listed.has(id)).sort();
-  const ordered = [...profiles, ...orphaned.map((id) => ({ id, name: id || "Unknown profile" }))];
+  const ordered = [
+    ...profiles,
+    ...orphaned.map((id) => ({
+      id,
+      name: id || t("web.admin.users.detail.preferences.levels.unknownProfile"),
+    })),
+  ];
 
   for (const profile of ordered) {
     const rows = byProfile.get(profile.id) ?? emptyProfileRows();
@@ -194,7 +195,7 @@ export function buildPreferenceLevels({
         id: profileLevelId(profile.id),
         kind: "profile",
         identity: { scope: "profile", profileId: profile.id },
-        name: "All devices",
+        name: t("web.admin.users.detail.preferences.levels.allDevices"),
         entries: rows.profile.sort(byManifestOrder),
       },
     ];
@@ -218,7 +219,7 @@ export function buildPreferenceLevels({
       registered.add(device.device_id);
       levels.push(
         deviceLevel(device.device_id, {
-          name: device.device_name || "Unnamed device",
+          name: device.device_name || t("web.admin.users.detail.preferences.levels.unnamedDevice"),
           platform: device.device_platform,
           lastSeenAt: seen?.last_seen_at ?? device.last_seen_at ?? device.last_updated,
         }),
@@ -228,7 +229,11 @@ export function buildPreferenceLevels({
       if (registered.has(deviceId)) continue;
       levels.push(
         deviceLevel(deviceId, {
-          name: deviceId ? `Device ${deviceId.slice(0, 8)}` : "Unknown device",
+          name: deviceId
+            ? t("web.admin.users.detail.preferences.levels.deviceById", {
+                id: deviceId.slice(0, 8),
+              })
+            : t("web.admin.users.detail.preferences.levels.unknownDevice"),
           platform: "",
           lastSeenAt: null,
         }),
@@ -243,12 +248,14 @@ export function buildPreferenceLevels({
         id: `client.${profile.id}.${family}`,
         kind: "client",
         identity: { scope: "profile_client", profileId: profile.id, clientFamily: family },
-        name: `${FAMILY_LABELS[family]} apps`,
+        name: t("web.admin.users.detail.preferences.levels.clientApps", { family }),
         entries: familyRows.sort(byManifestOrder),
       });
     }
 
-    const libraryName = (id: number) => libraryNames.get(id) || `Library #${id}`;
+    const libraryName = (id: number) =>
+      libraryNames.get(id) ||
+      t("web.admin.users.detail.preferences.levels.libraryById", { id: String(id) });
     for (const [libraryId, libraryRows] of [...rows.libraries].sort(([a], [b]) =>
       libraryName(a).localeCompare(libraryName(b)),
     )) {
@@ -257,7 +264,9 @@ export function buildPreferenceLevels({
         id: `library.${profile.id}.${libraryId}`,
         kind: "library",
         identity: { scope: "profile_library", profileId: profile.id, libraryId },
-        name: `${libraryName(libraryId)} library`,
+        name: t("web.admin.users.detail.preferences.levels.library", {
+          library: libraryName(libraryId),
+        }),
         entries: libraryRows.sort(byManifestOrder),
       });
     }
@@ -268,12 +277,16 @@ export function buildPreferenceLevels({
         id: `series.${profile.id}.${seriesId}`,
         kind: "series",
         identity: { scope: "profile_series", profileId: profile.id, seriesId },
-        name: `Series ${seriesId}`,
+        name: t("web.admin.users.detail.preferences.levels.series", { id: seriesId }),
         entries: seriesRows.sort(byManifestOrder),
       });
     }
 
-    groups.push({ key: `profile.${profile.id}`, title: `Profile · ${profile.name}`, levels });
+    groups.push({
+      key: `profile.${profile.id}`,
+      title: t("web.admin.users.detail.preferences.levels.profileGroup", { profile: profile.name }),
+      levels,
+    });
   }
   return groups;
 }
@@ -330,31 +343,49 @@ export function replacedValue(
   });
 }
 
-function variesSuffix(replaced: ReplacedValue): string {
-  return replaced.orVaries
-    ? `, or ${variesScopePhrase(replaced.orVaries)} setting where one applies`
-    : "";
+/** The `scope` select value of a varying layer ("appFamily" for an app family). */
+function variesScope(orVaries: NonNullable<ReplacedValue["orVaries"]>): string {
+  return orVaries === "app family" ? "appFamily" : orVaries;
 }
 
 /** "Replaces Main: English", "Replaces app default: Off". */
 export function replacesText(replaced: ReplacedValue): string {
-  const base =
-    replaced.profileName !== null
-      ? `Replaces ${replaced.profileName}: ${replaced.display ?? replaced.raw}`
-      : replaced.display === null
-        ? "Replaces the app default"
-        : `Replaces app default: ${replaced.display}`;
-  return base + variesSuffix(replaced);
+  const scope = replaced.orVaries ? variesScope(replaced.orVaries) : undefined;
+  if (replaced.profileName !== null) {
+    const values = { profile: replaced.profileName, value: replaced.display ?? replaced.raw };
+    return scope
+      ? t("web.admin.users.detail.preferences.replaces.profileOrVaries", { ...values, scope })
+      : t("web.admin.users.detail.preferences.replaces.profile", values);
+  }
+  if (replaced.display === null) {
+    return scope
+      ? t("web.admin.users.detail.preferences.replaces.appDefaultOrVaries", { scope })
+      : t("web.admin.users.detail.preferences.replaces.appDefault");
+  }
+  const value = replaced.display;
+  return scope
+    ? t("web.admin.users.detail.preferences.replaces.appDefaultValueOrVaries", { value, scope })
+    : t("web.admin.users.detail.preferences.replaces.appDefaultValue", { value });
 }
 
 /** The short form the add picker shows: "Main: English", "App default: Off". */
 export function replacedShort(replaced: ReplacedValue): string {
+  const scope = replaced.orVaries ? variesScope(replaced.orVaries) : undefined;
   if (replaced.profileName !== null) {
-    const named = `${replaced.profileName}: ${replaced.display ?? replaced.raw}`;
-    return replaced.orVaries ? `${named} or per ${replaced.orVaries}` : named;
+    const values = { profile: replaced.profileName, value: replaced.display ?? replaced.raw };
+    return scope
+      ? t("web.admin.users.detail.preferences.short.profileOrVaries", { ...values, scope })
+      : t("web.admin.users.detail.preferences.short.profile", values);
   }
-  const base = replaced.display === null ? "App default" : `App default: ${replaced.display}`;
-  return replaced.orVaries ? `${base} or per ${replaced.orVaries}` : base;
+  if (replaced.display === null) {
+    return scope
+      ? t("web.admin.users.detail.preferences.short.appDefaultOrVaries", { scope })
+      : t("web.admin.users.detail.preferences.short.appDefault");
+  }
+  const value = replaced.display;
+  return scope
+    ? t("web.admin.users.detail.preferences.short.appDefaultValueOrVaries", { value, scope })
+    : t("web.admin.users.detail.preferences.short.appDefaultValue", { value });
 }
 
 export interface AddableSetting {
@@ -409,31 +440,24 @@ export function addableSettings(
 }
 
 /** Where a level's settings apply, for sentences: "on Shield TV", "in TV Shows library". */
-export function levelPlace(level: PreferenceLevel): string {
+export function levelPlace(level: PreferenceLevel, translate: Translate): string {
   switch (level.kind) {
     case "account":
-      return "for the whole account";
+      return translate("web.admin.users.detail.preferences.place.account");
     case "profile":
-      return `for ${level.profileName}`;
+      return translate("web.admin.users.detail.preferences.place.profile", {
+        profile: level.profileName,
+      });
     case "device":
-      return `on ${level.name}`;
+      return translate("web.admin.users.detail.preferences.place.device", { device: level.name });
     case "client":
-      return `on ${level.profileName}'s ${level.name}`;
+      return possessiveText(translate, "web.admin.users.detail.preferences.place.client", {
+        profile: level.profileName,
+        apps: level.name,
+      });
     case "library":
-      return `in ${level.name}`;
+      return translate("web.admin.users.detail.preferences.place.library", { library: level.name });
     case "series":
-      return "in this series";
-  }
-}
-
-/** The noun the tab uses for a level: "device", "profile", "library". */
-export function levelNoun(level: PreferenceLevel): string {
-  switch (level.kind) {
-    case "account":
-      return "account";
-    case "client":
-      return "app family";
-    default:
-      return level.kind;
+      return translate("web.admin.users.detail.preferences.place.series");
   }
 }

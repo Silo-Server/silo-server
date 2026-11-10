@@ -25,6 +25,7 @@ import { settingValueFromString } from "@/hooks/queries/admin/users";
 import { useSetSettingValue, type SettingIdentity } from "@/hooks/queries/settingValues";
 import type { SettingKey } from "@/lib/settingsContract";
 import { cn } from "@/lib/utils";
+import { useT } from "@/i18n";
 
 /**
  * Renders the server-driven first-run tour as a modal overlay. The step
@@ -62,6 +63,7 @@ export function TourHost({ flow, onDone }: TourHostProps) {
   const progress = useOnboardingProgress();
   const navigate = useNavigate();
   const [saveFailed, setSaveFailed] = useState(false);
+  const t = useT();
 
   const step = steps[index];
 
@@ -111,8 +113,11 @@ export function TourHost({ flow, onDone }: TourHostProps) {
   if (saveFailed)
     return (
       <div role="alert">
-        Progress could not be saved.{" "}
-        <Button onClick={() => window.location.reload()}>Reload tour</Button>
+        {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- the space between the message and the button */}
+        {t("web.onboarding.tour.saveFailed")}{" "}
+        <Button onClick={() => window.location.reload()}>
+          {t("web.onboarding.tour.reloadTour")}
+        </Button>
       </div>
     );
   if (!step) return null;
@@ -127,7 +132,7 @@ export function TourHost({ flow, onDone }: TourHostProps) {
       className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-xl"
       role="dialog"
       aria-modal="true"
-      aria-label="Feature tour"
+      aria-label={t("web.onboarding.tour.label")}
     >
       <div className="bg-card border-border max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-2xl border p-6 shadow-2xl sm:p-7">
         <StepBody step={step} />
@@ -140,7 +145,7 @@ export function TourHost({ flow, onDone }: TourHostProps) {
             onClick={() => finish({ skipped: true })}
             className="text-muted-foreground shrink-0"
           >
-            Skip tour
+            {t("web.onboarding.tour.skip")}
           </Button>
           <div className="flex min-w-0 items-center gap-4">
             {/* Pips are decorative; on phones they'd crowd the buttons out. */}
@@ -163,7 +168,7 @@ export function TourHost({ flow, onDone }: TourHostProps) {
                   disabled={progress.isPending}
                   onClick={() => setIndex(index - 1)}
                 >
-                  Back
+                  {t("common.back")}
                 </Button>
               )}
               {step.kind === "handoff" ? (
@@ -172,11 +177,15 @@ export function TourHost({ flow, onDone }: TourHostProps) {
                   disabled={progress.isPending}
                   onClick={() => finish({ skipped: false, route: step.route })}
                 >
-                  {step.title ?? "Finish"}
+                  {step.title ?? t("web.onboarding.tour.finish")}
                 </Button>
               ) : (
                 <Button size="sm" disabled={progress.isPending} onClick={advance}>
-                  {isLast ? "Done" : index === 0 ? "Show me" : "Next"}
+                  {isLast
+                    ? t("common.done")
+                    : index === 0
+                      ? t("web.onboarding.tour.showMe")
+                      : t("web.onboarding.tour.next")}
                 </Button>
               )}
             </div>
@@ -222,10 +231,13 @@ function StepBody({ step }: { step: OnboardingStep }) {
  * links fall back to a plain external-link button.
  */
 function StoreLink({ link }: { link: OnboardingStepLink }) {
+  const t = useT();
   const brand = link.url.includes("apple.com")
     ? {
         Icon: AppleLogo,
-        eyebrow: link.url.includes("testflight") ? "TestFlight beta" : "App Store",
+        eyebrow: link.url.includes("testflight")
+          ? t("web.onboarding.tour.testFlightBeta")
+          : "App Store",
       }
     : link.url.includes("play.google.com")
       ? { Icon: GooglePlayLogo, eyebrow: "Google Play" }

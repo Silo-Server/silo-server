@@ -56,6 +56,7 @@ import { formatDate } from "@/lib/datetime";
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 import { useQualityPreference } from "@/hooks/queries/qualityPreference";
 import { hasMachineTranslation } from "./components/machineTranslation";
+import { useT } from "@/i18n";
 
 export default function EpisodeContent({
   item,
@@ -69,6 +70,7 @@ export default function EpisodeContent({
    */
   libraryId?: number;
 }) {
+  const t = useT();
   const navigate = useNavigate();
   const location = useLocation();
   useAmbientColor(item.backdrop_thumbhash);
@@ -242,7 +244,7 @@ export default function EpisodeContent({
         }
       : null;
   const navigationState = location.state as EpisodeNavigationState | null;
-  const primaryAction = resolveLeafPrimaryAction(item, "Play Episode");
+  const primaryAction = resolveLeafPrimaryAction(item, t("web.detail.actions.playEpisode"));
   const watchTogether = useDetailWatchTogether({
     item,
     target:
@@ -262,12 +264,12 @@ export default function EpisodeContent({
     initialSeasonNumber: item.season_number ?? undefined,
   });
   const restartHref =
-    primaryAction.label === "Resume" && (item.versions?.length ?? 0) > 0
+    primaryAction.label === t("web.detail.actions.resume") && (item.versions?.length ?? 0) > 0
       ? `/watch/${item.content_id}?restart=1`
       : undefined;
 
   const title = item.title ?? "";
-  const seriesTitle = item.series_title ?? "Series";
+  const seriesTitle = item.series_title ?? t("web.detail.hero.typeSeries");
   const seriesId = item.series_id;
   const seasonNum = item.season_number;
   const episodeNum = item.episode_number;
@@ -290,10 +292,10 @@ export default function EpisodeContent({
     (currentSeason
       ? getSeasonDisplayTitle(currentSeason)
       : seasonNum === 0
-        ? "Specials"
+        ? t("web.detail.seasons.specials")
         : seasonNum != null
-          ? `Season ${seasonNum}`
-          : "Season");
+          ? t("web.detail.seasons.numbered", { season: String(seasonNum) })
+          : t("web.detail.seasons.seasonFallback"));
   const seasonHref =
     navigationState?.parentSeasonHref ??
     (currentSeason ? buildItemHref({ contentId: currentSeason.content_id, libraryId }) : undefined);
@@ -316,7 +318,9 @@ export default function EpisodeContent({
     breadcrumbSegments.push({ label: seasonLabel, href: seasonHref });
   }
   if (episodeNum != null) {
-    breadcrumbSegments.push({ label: `Episode ${episodeNum}` });
+    breadcrumbSegments.push({
+      label: t("web.detail.episodes.numbered", { episode: String(episodeNum) }),
+    });
   }
 
   return (
@@ -454,13 +458,18 @@ export default function EpisodeContent({
         />
 
         {(siblingsLoading || siblingEpisodes.length > 1) && (
-          <section className="page-shell episode-detail-navigation" aria-label="More episodes">
+          <section
+            className="page-shell episode-detail-navigation"
+            aria-label={t("web.detail.episodes.moreEpisodesRegion")}
+          >
             {/* More Episodes carousel — most useful, so show first */}
             {siblingsLoading ? (
               <EpisodeCarouselSkeleton />
             ) : (
               <div>
-                <h2 className="mb-5 text-xl font-semibold tracking-tight">More Episodes</h2>
+                <h2 className="mb-5 text-xl font-semibold tracking-tight">
+                  {t("web.detail.episodes.moreEpisodes")}
+                </h2>
                 <EpisodeCarousel
                   episodes={siblingEpisodes}
                   currentEpisodeNumber={episodeNum ?? -1}
@@ -476,7 +485,7 @@ export default function EpisodeContent({
       <div className="page-shell detail-supporting-content space-y-12 py-10 sm:space-y-14">
         {canCurateMetadata && (
           <MediaLocations
-            title="Media locations"
+            title={t("web.detail.sections.mediaLocations")}
             versions={item.versions}
             onShowMediaInfo={openMediaInfo}
           />
@@ -484,7 +493,9 @@ export default function EpisodeContent({
 
         {item.cast && item.cast.length > 0 && (
           <div>
-            <h2 className="mb-5 text-xl font-semibold tracking-tight">Cast</h2>
+            <h2 className="mb-5 text-xl font-semibold tracking-tight">
+              {t("web.detail.sections.cast")}
+            </h2>
             <CastCarousel cast={item.cast} prefetchPeople />
           </div>
         )}

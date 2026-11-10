@@ -1,5 +1,6 @@
 import { useId } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
+import { useT } from "@/i18n";
 import { BULK_LIBRARY_LIMIT } from "@/lib/homeRows/bulkCopy";
 import type { LibraryPage } from "@/lib/homeRows/types";
 import { cn } from "@/lib/utils";
@@ -31,6 +32,7 @@ export function LibraryPageChips({
   maxSelected: number;
   help: string;
 }) {
+  const t = useT();
   const id = useId();
   const full = selectedIds.length >= maxSelected;
   const showLimit = full && !disabled;
@@ -41,7 +43,7 @@ export function LibraryPageChips({
       aria-describedby={showLimit ? `${id}-help ${id}-limit` : `${id}-help`}
     >
       <span id={`${id}-label`} className="mb-2 block text-sm leading-none font-medium">
-        Add to these library pages
+        {t("web.home.addRow.pages.label")}
       </span>
       <div className="flex flex-wrap gap-2">
         {pages.map((page) => {
@@ -81,9 +83,10 @@ export function LibraryPageChips({
                 <>
                   {" "}
                   <span className="text-muted-foreground text-xs font-normal">
-                    <span className="sr-only">(</span>
-                    {currentNote}
-                    <span className="sr-only">)</span>
+                    {t("web.home.addRow.pages.currentNote", {
+                      note: currentNote,
+                      hidden: (chunks) => <span className="sr-only">{chunks}</span>,
+                    })}
                   </span>
                 </>
               ) : null}
@@ -96,7 +99,7 @@ export function LibraryPageChips({
       </p>
       {showLimit ? (
         <p id={`${id}-limit`} className="text-muted-foreground mt-1 text-[13px]">
-          You can add a row to up to {BULK_LIBRARY_LIMIT} pages at once.
+          {t("web.home.addRow.pages.limit", { count: BULK_LIBRARY_LIMIT })}
         </p>
       ) : null}
     </div>

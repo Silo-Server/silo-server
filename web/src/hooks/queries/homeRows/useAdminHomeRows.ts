@@ -29,6 +29,7 @@ import {
 } from "@/lib/homeRows/payloads";
 import type { RowDraft } from "@/lib/homeRows/rowDraft";
 import { stableJson } from "@/lib/homeRows/stableJson";
+import { useT } from "@/i18n";
 import {
   RowChangedError,
   type EditSession,
@@ -157,16 +158,17 @@ export function useAdminHomeRows(): AdminHomeRows {
   );
   const scope = page.kind;
   const libraryId = page.kind === "library" ? page.libraryId : undefined;
+  const t = useT();
   const pages = useMemo<HomeRowsPageOption[]>(
     () => [
-      { ref: { kind: "home" }, label: "Home" },
+      { ref: { kind: "home" }, label: t("web.home.rows.pages.home") },
       ...libraries.map((library) => ({
         ref: { kind: "library" as const, libraryId: library.id },
         label: library.name,
         libraryType: library.type,
       })),
     ],
-    [libraries],
+    [libraries, t],
   );
 
   const list = useAdminSections(scope, libraryId, pageKnown);

@@ -1,5 +1,6 @@
 import { Check, Play, Vote } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useT } from "@/i18n";
 import type {
   GuestControlPolicy,
   WatchTogetherRoomSnapshot,
@@ -21,22 +22,25 @@ export function LobbyEmptyStage({
   isHost: boolean;
   onOpenVoting: () => void;
 }) {
-  const host = hostMember(room)?.display_name ?? "The host";
+  const t = useT();
+  const host = hostMember(room)?.display_name ?? t("watchParty.theHost");
   return (
     <div className="surface-panel-subtle flex flex-col items-center gap-3 rounded-xl border border-dashed border-white/10 px-6 py-10 text-center">
       <p className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
-        Room is open
+        {t("web.watchTogether.lobby.roomOpen")}
       </p>
-      <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Nothing on yet</h2>
+      <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+        {t("web.watchTogether.lobby.nothingOn")}
+      </h2>
       <p className="text-muted-foreground max-w-md text-sm">
         {isHost
-          ? "Pick something below and it lands here for everyone to see. Or let the room decide."
-          : `${host} is deciding. Anything you pick below goes in as a suggestion.`}
+          ? t("web.watchTogether.lobby.hostBody")
+          : t("web.watchTogether.lobby.guestBody", { host })}
       </p>
       {isHost ? (
         <Button type="button" variant="outline" onClick={onOpenVoting} className="mt-1 gap-2">
           <Vote className="size-4" />
-          Open the floor to votes
+          {t("web.watchTogether.lobby.openVoting")}
         </Button>
       ) : null}
     </div>
@@ -63,32 +67,52 @@ export function LobbyStagedStage({
   onCopyInvite: () => void;
   onSetPolicy: (policy: GuestControlPolicy) => void;
 }) {
+  const t = useT();
   const contentId = room.selected_content_id!;
   const { ready, total } = guestReadyCount(room);
-  const host = hostMember(room)?.display_name ?? "The host";
+  const host = hostMember(room)?.display_name ?? t("watchParty.theHost");
   const self = selfMember(room);
   return (
     <div className="flex flex-col gap-4">
       <StagedHero
         contentId={contentId}
         libraryId={room.selected_library_id}
-        eyebrow={isHost ? "Up next" : `Up next · ${host} queued this`}
+        eyebrow={
+          isHost
+            ? t("web.watchTogether.lobby.upNext")
+            : t("web.watchTogether.lobby.upNextGuest", { host })
+        }
         caption={
           isHost
             ? total > 0
-              ? `${ready} of ${total} ready`
-              : "Waiting for a guest to join"
-            : `Starts when ${host} presses play · ${ready} of ${total} ready`
+              ? t("web.watchTogether.presence.ready", {
+                  ready: String(ready),
+                  total,
+                  total_text: String(total),
+                })
+              : t("web.watchTogether.lobby.waitingGuest")
+            : t("web.watchTogether.lobby.guestCaption", {
+                host,
+                ready: String(ready),
+                total,
+                total_text: String(total),
+              })
         }
       >
         {isHost ? (
           <>
             <Button type="button" onClick={onStart} disabled={busy} className="gap-2">
               <Play className="size-3.5" />
-              {total > 0 ? `Start for everyone · ${ready}/${total} ready` : "Start alone anyway"}
+              {total > 0
+                ? t("web.watchTogether.lobby.startEveryone", {
+                    ready: String(ready),
+                    total,
+                    total_text: String(total),
+                  })
+                : t("web.watchTogether.lobby.startAlone")}
             </Button>
             <Button type="button" variant="outline" onClick={onChange} disabled={busy}>
-              Change
+              {t("web.watchTogether.common.change")}
             </Button>
           </>
         ) : (
@@ -101,7 +125,9 @@ export function LobbyStagedStage({
               aria-pressed={self?.lobby_ready === true}
             >
               <Check className="size-3.5" />
-              {self?.lobby_ready ? "Ready ✓" : "I'm ready"}
+              {self?.lobby_ready
+                ? t("web.watchTogether.lobby.readyDone")
+                : t("watchParty.button.imReady")}
             </Button>
           </>
         )}
@@ -141,16 +167,20 @@ export function LobbySuggestions({
   onQueue: (suggestion: WatchTogetherSuggestion) => void;
   onDelete: (id: string) => void;
 }) {
+  const t = useT();
   if (suggestions.length === 0) return null;
   const byId = new Map(suggestions.map((s) => [s.id, s]));
   return (
-    <section className="surface-panel-subtle rounded-xl px-3 py-3" aria-label="Suggestions">
+    <section
+      className="surface-panel-subtle rounded-xl px-3 py-3"
+      aria-label={t("web.watchTogether.lobby.suggestions")}
+    >
       <div className="flex items-baseline justify-between gap-3 px-2 pb-2">
         <h3 className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
-          Suggestions · {suggestions.length}
+          {t("web.watchTogether.lobby.suggestionsCount", { count: String(suggestions.length) })}
         </h3>
         <span className="text-muted-foreground text-xs">
-          {isHost ? "Queue one to put it up next." : "The host decides what plays."}
+          {isHost ? t("watchParty.strip.manager") : t("watchParty.strip.guest")}
         </span>
       </div>
       <SuggestionList
@@ -170,7 +200,7 @@ export function LobbySuggestions({
               }
             : undefined
         }
-        promoteLabel="Queue this"
+        promoteLabel={t("web.watchTogether.lobby.queueThis")}
         onDelete={onDelete}
         emptyText=""
       />

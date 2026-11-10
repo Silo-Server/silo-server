@@ -26,6 +26,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { useRequestGroupLimit } from "@/hooks/queries/admin/requests";
 import { useAdminPolicyDefaults } from "@/hooks/queries/admin/users";
+import { useT, type MessageKey } from "@/i18n";
 import {
   PERMISSION_MARKER_EDIT,
   PERMISSION_METADATA_CURATION,
@@ -41,7 +42,6 @@ import {
   accessGroupName,
   formatAllowed,
   formatQuality,
-  formatStreams,
   inheritedValueText,
   libraryListText,
   permissionLock,
@@ -52,15 +52,18 @@ import { useAccountCardDraft } from "./useAccountCardDraft";
 const PERMISSIONS = [
   {
     permission: PERMISSION_MARKER_EDIT,
-    label: "Marker editing",
-    description: "Intro, recap, credits, and preview markers",
+    label: "web.admin.users.detail.access.library.markerEdit",
+    description: "web.admin.users.detail.access.library.markerEditDescription",
   },
   {
     permission: PERMISSION_METADATA_CURATION,
-    label: "Metadata curation",
-    description: "Edit, refresh, and rematch metadata",
+    label: "web.admin.users.detail.access.library.metadataCuration",
+    description: "web.admin.users.detail.access.library.metadataCurationDescription",
   },
-] as const;
+] as const satisfies readonly { permission: string; label: MessageKey; description: MessageKey }[];
+
+const ACCESS_GROUP_ROW = "web.admin.users.detail.access.library.accessGroup";
+const LIBRARIES_ROW = "web.admin.users.detail.access.library.libraries";
 
 interface LibraryDraft {
   groupId: number | null;
@@ -87,10 +90,10 @@ function samePermissions(a: string[], b: string[]): boolean {
   return a.length === b.length && [...a].sort().join("\n") === [...b].sort().join("\n");
 }
 
-function changedRows(d: LibraryDraft, base: LibraryDraft): string[] {
-  const rows: string[] = [];
-  if (d.groupId !== base.groupId) rows.push("Access group");
-  if (!sameIds(d.libraryIds, base.libraryIds)) rows.push("Libraries");
+function changedRows(d: LibraryDraft, base: LibraryDraft): MessageKey[] {
+  const rows: MessageKey[] = [];
+  if (d.groupId !== base.groupId) rows.push(ACCESS_GROUP_ROW);
+  if (!sameIds(d.libraryIds, base.libraryIds)) rows.push(LIBRARIES_ROW);
   for (const { permission, label } of PERMISSIONS) {
     if (
       hasAssignedPermission(d.permissions, permission) !==
@@ -130,25 +133,32 @@ function rebase(d: LibraryDraft, oldBase: LibraryDraft, fresh: LibraryDraft): Li
   };
 }
 
-const APPROVAL_SUMMARY: Partial<Record<RequestApprovalMode, string>> = {
-  auto: "requests approved automatically",
-  manual: "requests need approval",
+const APPROVAL_SUMMARY: Partial<Record<RequestApprovalMode, MessageKey>> = {
+  auto: "web.admin.users.detail.access.library.summaryAutoApprove",
+  manual: "web.admin.users.detail.access.library.summaryManualApprove",
 };
 
 /** "Family: Movies, TV · 1080p · 2 streams · requests need approval". */
 function GroupSummary({ group, libraries }: { group: AccessGroup; libraries: Library[] }) {
+  const t = useT();
   const limit = useRequestGroupLimit(group.id);
   const mode = limit.data?.approval_mode;
   const approval = mode === undefined ? undefined : APPROVAL_SUMMARY[mode];
   const parts = [
     libraryListText(group.library_ids, libraries),
     formatQuality(group.max_playback_quality),
-    `${formatStreams(group.max_streams).toLowerCase()} streams`,
-    approval,
+    t("web.admin.users.detail.access.library.summaryStreams", {
+      count: group.max_streams,
+      count_text: String(group.max_streams),
+    }),
+    approval === undefined ? undefined : t(approval),
   ].filter(Boolean);
   return (
     <p className="text-muted-foreground text-xs">
-      {group.name}: {parts.join(" · ")}
+      {t("web.admin.users.detail.access.library.groupSummary", {
+        group: group.name,
+        summary: parts.join(" · "),
+      })}
     </p>
   );
 }
@@ -163,6 +173,7 @@ export function LibraryAccessCard({
   ctx,
   hints,
 }: AccessCardProps) {
+  const t = useT();
   const draft = useAccountCardDraft({
     id: "library",
     editor,
@@ -184,7 +195,7 @@ export function LibraryAccessCard({
     id: "library",
     description:
       user.role === "admin"
-        ? "Admins don't use access groups. Unset values follow the server default."
+        ? t("web.admin.users.detail.access.library.adminDescription")
         : undefined,
     manageable,
     available,
@@ -212,10 +223,10 @@ export function LibraryAccessCard({
       <EditableCard {...cardProps}>
         {!admin ? (
           <div
-            data-changed={changed.has("Access group") ? "true" : undefined}
+            data-changed={changed.has(ACCESS_GROUP_ROW) ? "true" : undefined}
             className="space-y-2 px-4 py-3.5 sm:px-5"
           >
-            <Label htmlFor={groupSelectId}>Access group</Label>
+            <Label htmlFor={groupSelectId}>{t(ACCESS_GROUP_ROW)}</Label>
             <div className="flex flex-wrap items-center gap-2">
               <Select
                 value={d.groupId === null ? "none" : String(d.groupId)}
@@ -230,9 +241,13 @@ export function LibraryAccessCard({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">No group</SelectItem>
-                  {groupMissing ? (
-                    <SelectItem value={String(d.groupId)}>#{d.groupId}</SelectItem>
+                  <SelectItem value="none">
+                    {t("web.admin.users.detail.access.library.noGroup")}
+                  </SelectItem>
+                  {groupMissing && d.groupId !== null ? (
+                    <SelectItem value={String(d.groupId)}>
+                      {accessGroupName(d.groupId, groups)}
+                    </SelectItem>
                   ) : null}
                   {groups.map((group) => (
                     <SelectItem key={group.id} value={String(group.id)}>
@@ -244,7 +259,7 @@ export function LibraryAccessCard({
               {d.groupId !== null ? (
                 <Button asChild variant="ghost" size="xs">
                   <Link to={`/admin/access-groups/${d.groupId}`}>
-                    Open group
+                    {t("web.admin.users.detail.access.library.openGroup")}
                     <ArrowUpRight aria-hidden="true" />
                   </Link>
                 </Button>
@@ -255,16 +270,16 @@ export function LibraryAccessCard({
         ) : null}
 
         <fieldset
-          data-changed={changed.has("Libraries") ? "true" : undefined}
+          data-changed={changed.has(LIBRARIES_ROW) ? "true" : undefined}
           className={cn(
             "border-border/50 space-y-2 px-4 py-3.5 sm:px-5",
             !admin && "border-t",
-            changed.has("Libraries") && "shadow-[inset_3px_0_0_var(--color-amber-500)]",
+            changed.has(LIBRARIES_ROW) && "shadow-[inset_3px_0_0_var(--color-amber-500)]",
           )}
         >
-          <legend className="sr-only">Libraries</legend>
+          <legend className="sr-only">{t(LIBRARIES_ROW)}</legend>
           <div aria-hidden="true" className="text-sm font-medium">
-            Libraries
+            {t(LIBRARIES_ROW)}
           </div>
           <label
             className={cn(
@@ -281,7 +296,9 @@ export function LibraryAccessCard({
             />
             <span className="min-w-0">
               <span className="block text-sm font-medium">
-                {hintGroupId === null ? "Use the server default" : "Use the group's libraries"}
+                {hintGroupId === null
+                  ? t("web.admin.users.detail.access.library.useServerDefault")
+                  : t("web.admin.users.detail.access.library.useGroupLibraries")}
               </span>
               {inheritedLibraries !== undefined ? (
                 <span className="text-muted-foreground block text-xs">
@@ -310,7 +327,9 @@ export function LibraryAccessCard({
                   }))
                 }
               />
-              <span className="text-sm font-medium">Choose for this account</span>
+              <span className="text-sm font-medium">
+                {t("web.admin.users.detail.access.library.chooseForAccount")}
+              </span>
             </label>
             {choose ? (
               <div className="mt-2.5 space-y-2 pl-7">
@@ -347,7 +366,7 @@ export function LibraryAccessCard({
                 </div>
                 {d.libraryIds?.length === 0 ? (
                   <p className="text-muted-foreground text-xs">
-                    This account won't see any library.
+                    {t("web.admin.users.detail.access.library.noLibraryWarning")}
                   </p>
                 ) : null}
               </div>
@@ -361,16 +380,20 @@ export function LibraryAccessCard({
           const switchId = `${groupSelectId}-${permission}`;
           // A locked switch shows what applies (off); an assignment the group
           // blocks is noted instead of reading as on.
-          let description: string = help;
+          let description = t(help);
           if (lock.locked && assigned) {
-            description = `Set on this account; has no effect under ${lock.groupName}`;
+            description = t("web.admin.users.detail.access.library.assignedButBlocked", {
+              group: lock.groupName ?? "",
+            });
           } else if (!lock.locked && lock.groupName) {
-            description = `The ${lock.groupName} group allows this`;
+            description = t("web.admin.users.detail.access.library.groupAllows", {
+              group: lock.groupName,
+            });
           }
           return (
             <KeyValueRow
               key={permission}
-              label={<Label htmlFor={switchId}>{label}</Label>}
+              label={<Label htmlFor={switchId}>{t(label)}</Label>}
               description={description}
               changed={changed.has(label)}
               value={
@@ -378,7 +401,9 @@ export function LibraryAccessCard({
                   {lock.locked ? (
                     <span className="text-muted-foreground inline-flex items-center gap-1 text-xs">
                       <Lock aria-hidden="true" className="size-3" />
-                      {lock.groupName} group doesn't allow this
+                      {t("web.admin.users.detail.access.library.groupDisallows", {
+                        group: lock.groupName ?? "",
+                      })}
                     </span>
                   ) : null}
                   {lock.locked && assigned ? (
@@ -393,7 +418,7 @@ export function LibraryAccessCard({
                         }))
                       }
                     >
-                      Remove from account
+                      {t("web.admin.users.detail.access.library.removeFromAccount")}
                     </Button>
                   ) : null}
                   <Switch
@@ -420,16 +445,16 @@ export function LibraryAccessCard({
     <EditableCard {...cardProps}>
       {user.role !== "admin" ? (
         <KeyValueRow
-          label="Access group"
+          label={t(ACCESS_GROUP_ROW)}
           value={
             user.access_group_id === null
-              ? "No group"
+              ? t("web.admin.users.detail.access.library.noGroup")
               : accessGroupName(user.access_group_id, groups)
           }
         />
       ) : null}
       <PolicyValueRow
-        label="Libraries"
+        label={t(LIBRARIES_ROW)}
         value={libraryListText(effective.library_ids, libraries)}
         source={rowSource(user, "libraries", ctx)}
         base={inheritedValueText("libraries", hints, ctx, libraries)}
@@ -440,8 +465,14 @@ export function LibraryAccessCard({
         return (
           <KeyValueRow
             key={permission}
-            label={label}
-            description={blocked ? `Blocked by the ${lock.groupName} group` : help}
+            label={t(label)}
+            description={
+              blocked
+                ? t("web.admin.users.detail.access.library.blockedByGroup", {
+                    group: lock.groupName ?? "",
+                  })
+                : t(help)
+            }
             value={formatAllowed(hasAssignedPermission(effective.permissions, permission))}
           />
         );

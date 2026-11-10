@@ -4,6 +4,7 @@ import { formatTime } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
 import { chartSeriesColor, stackSegments } from "./chartMath";
 import { ChartLegend, ChartTooltip, ChartTooltipRow } from "./chartChrome";
+import { formatLocale } from "@/lib/appLocale";
 
 export interface StackedColumnBucket {
   /** Bucket start in epoch milliseconds. */
@@ -41,7 +42,7 @@ const MIN_SEGMENT_PX = 2;
 const TARGET_TICK_LABELS = 4;
 
 function defaultFormatValue(value: number): string {
-  return value.toLocaleString();
+  return value.toLocaleString(formatLocale());
 }
 
 /**

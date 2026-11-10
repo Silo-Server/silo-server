@@ -1,5 +1,9 @@
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useT } from "@/i18n";
+
+/** The title while the dialog closes (no key): a format name, not translated. */
+const CLOSING_TITLE = "JSON";
 
 /**
  * Raw value editor for settings with no inline control (object-valued ones
@@ -24,6 +28,7 @@ export function SettingJsonDialog({
   onCancel: () => void;
   onSave: () => void;
 }) {
+  const t = useT();
   return (
     <Dialog
       open={settingKey !== null}
@@ -33,20 +38,20 @@ export function SettingJsonDialog({
     >
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle className="font-mono text-sm">{settingKey ?? "JSON"}</DialogTitle>
+          <DialogTitle className="font-mono text-sm">{settingKey ?? CLOSING_TITLE}</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
           <p className="text-muted-foreground text-[12.5px]">{description}</p>
           <textarea
             spellCheck={false}
-            aria-label="Raw value"
+            aria-label={t("web.admin.users.detail.preferences.json.rawValueAria")}
             className="border-border bg-background focus:border-foreground/40 min-h-[260px] w-full rounded-md border px-3 py-2 font-mono text-[13px] leading-relaxed transition-colors outline-none"
             value={value}
             onChange={(event) => onValueChange(event.target.value)}
           />
           <div className="flex justify-end gap-2">
             <Button variant="outline" size="sm" onClick={onCancel}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button size="sm" onClick={onSave}>
               {saveLabel}

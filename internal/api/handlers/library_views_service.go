@@ -211,14 +211,22 @@ func sectionLayoutOf(resolved []sections.ResolvedSection) SectionLayoutView {
 			ItemLimit:   s.ItemLimit,
 			IsCustom:    s.IsCustom,
 			Customized:  s.Customized,
+			TitleKey:    s.TitleKey,
+			TitleArgs:   s.TitleArgs,
 		})
 	}
 	return resp
 }
 
-// LibrarySections answers every section of the library with its items, each
+// LibrarySections answers every section of the library that has items, each
 // row capped at viewer.ItemLimitCap items when it is set.
 func (h *SectionHandler) LibrarySections(ctx context.Context, libraryID int, viewer SectionViewer) (SectionsView, error) {
+	return h.librarySections(ctx, libraryID, viewer, false)
+}
+
+// librarySections is LibrarySections. With keepEmptyRows, it answers sections
+// with no items, other than an off-season seasonal row, as v1 always has.
+func (h *SectionHandler) librarySections(ctx context.Context, libraryID int, viewer SectionViewer, keepEmptyRows bool) (SectionsView, error) {
 	if err := h.requireViewableLibrary(ctx, libraryID); err != nil {
 		return SectionsView{}, err
 	}
@@ -232,7 +240,11 @@ func (h *SectionHandler) LibrarySections(ctx context.Context, libraryID int, vie
 	withItems := h.fetcher.FetchAll(ctx, resolved, &libraryID, nil, userID, profileID, accessFilter)
 	withItems = cutCappedSectionItems(withItems, viewer.ItemLimitCap)
 	withItems = applyDiversityFilter(withItems)
-	withItems = dropEmptySeasonalSections(withItems)
+	if keepEmptyRows {
+		withItems = dropEmptySeasonalSections(withItems)
+	} else {
+		withItems = dropEmptySections(withItems)
+	}
 	return h.buildSections(ctx, withItems, &libraryID, viewer.Access, viewer.Artwork()), nil
 }
 
@@ -282,6 +294,8 @@ func (h *SectionHandler) librarySectionItems(ctx context.Context, libraryID int,
 				IsCustom:    withItems.IsCustom,
 				Customized:  withItems.Customized,
 				Items:       []sectionItemResponse{},
+				TitleKey:    withItems.TitleKey,
+				TitleArgs:   withItems.TitleArgs,
 			}, nil
 		}
 		return resp.Sections[0], nil

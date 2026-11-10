@@ -13,13 +13,8 @@ import {
 import { BULK_LIBRARY_LIMIT } from "@/lib/homeRows/bulkCopy";
 import { RowChangedError, type HomeRow, type LibraryPage } from "@/lib/homeRows/types";
 import { LibraryPageChips } from "./addRow/LibraryPageChips";
-
-const listFormat = new Intl.ListFormat("en", { style: "long", type: "conjunction" });
-
-function confirmLabel(count: number) {
-  if (count === 0) return "Add to pages";
-  return count === 1 ? "Add to 1 page" : `Add to ${count} pages`;
-}
+import { useT } from "@/i18n";
+import { appLanguage } from "@/lib/appLocale";
 
 /**
  * ⋯ Add to other libraries…: copies an existing row to other library pages.
@@ -46,6 +41,7 @@ export function AddToOtherLibrariesDialog({
   const [changed, setChanged] = useState(false);
   const [open, setOpen] = useState(true);
   const busyRef = useRef(false);
+  const t = useT();
 
   async function confirm() {
     if (busyRef.current || selectedIds.length === 0) return;
@@ -54,13 +50,16 @@ export function AddToOtherLibrariesDialog({
     try {
       await onCopy(selectedIds);
       const names = pages.filter((page) => selectedIds.includes(page.id)).map((page) => page.label);
-      toast.success(`Added to ${listFormat.format(names)}.`);
+      const list = new Intl.ListFormat(appLanguage(), { style: "long", type: "conjunction" });
+      toast.success(t("web.home.rows.addToOtherLibraries.added", { pages: list.format(names) }));
       setOpen(false);
     } catch (error) {
       if (error instanceof RowChangedError) setChanged(true);
       else
         toast.error(
-          error instanceof Error && error.message ? error.message : "Could not add this row",
+          error instanceof Error && error.message
+            ? error.message
+            : t("web.home.rows.addToOtherLibraries.failed"),
         );
     } finally {
       busyRef.current = false;
@@ -77,37 +76,40 @@ export function AddToOtherLibrariesDialog({
         }}
       >
         <DialogHeader>
-          <DialogTitle>Add {row.title} to other libraries</DialogTitle>
+          <DialogTitle>
+            {t("web.home.rows.addToOtherLibraries.title", { row: row.title })}
+          </DialogTitle>
           <DialogDescription>
-            Each page gets its own copy at the bottom, so you can change or remove it there later.
+            {t("web.home.rows.addToOtherLibraries.description")}
           </DialogDescription>
         </DialogHeader>
         <LibraryPageChips
           pages={pages}
           currentId={currentId}
-          currentNote="already here"
+          currentNote={t("web.home.rows.addToOtherLibraries.alreadyHere")}
           selectedIds={selectedIds}
           onChange={setSelectedIds}
           maxSelected={BULK_LIBRARY_LIMIT}
-          help={
+          help={t(
             row.hero
-              ? "The copies aren't hero banners; this page keeps its own."
-              : "Nothing changes on this page."
-          }
+              ? "web.home.rows.addToOtherLibraries.helpHero"
+              : "web.home.rows.addToOtherLibraries.helpRow",
+          )}
         />
         {changed ? (
           <p role="alert" className="text-sm">
-            {row.title} changed since you opened this page. Close this, reload the rows, and try
-            again.
+            {t("web.home.rows.addToOtherLibraries.changed", { row: row.title })}
           </p>
         ) : null}
         <DialogFooter>
           <Button variant="outline" disabled={busy} onClick={() => setOpen(false)}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button disabled={busy || changed || selectedIds.length === 0} onClick={confirm}>
             <Copy aria-hidden className="size-4" />
-            {confirmLabel(selectedIds.length)}
+            {selectedIds.length === 0
+              ? t("web.home.rows.addToOtherLibraries.confirmNone")
+              : t("web.home.rows.addToOtherLibraries.confirm", { count: selectedIds.length })}
           </Button>
         </DialogFooter>
       </DialogContent>

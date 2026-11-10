@@ -16,7 +16,8 @@ import { useAccessGroups } from "@/hooks/queries/admin/accessGroups";
 import { useAdminUserProfiles } from "@/hooks/queries/admin/history";
 import { useAdminPolicyDefaults, useViewerIsOwner } from "@/hooks/queries/admin/users";
 import { useAuth } from "@/hooks/useAuth";
-import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
+import { useT, type MessageKey, type Translate } from "@/i18n";
+import { invalidEmailMessage, isValidEmail } from "@/lib/email";
 
 import { KeyValueRow } from "../ui";
 import { EditableCard, type AccessCardProps } from "./EditableCard";
@@ -34,7 +35,14 @@ import {
 } from "./policySources";
 import { useAccountCardDraft } from "./useAccountCardDraft";
 
-const PROFILES_LABEL = "Profiles allowed";
+/** The space before a trailing note; kept out of the JSX so it is not read as text. */
+const SPACE = " ";
+
+const USERNAME_ROW = "web.admin.users.detail.access.signIn.username";
+const EMAIL_ROW = "web.admin.users.detail.access.signIn.email";
+const ROLE_ROW = "web.admin.users.detail.access.signIn.role";
+const ENABLED_ROW = "web.admin.users.detail.access.signIn.canSignIn";
+const PROFILES_ROW = "web.admin.users.detail.access.signIn.profilesAllowed";
 
 interface SignInDraft {
   username: string;
@@ -58,13 +66,13 @@ function toDraft(user: AdminUser): SignInDraft {
   };
 }
 
-function changedRows(draft: SignInDraft, base: SignInDraft): string[] {
-  const rows: string[] = [];
-  if (draft.username !== base.username) rows.push("Username");
-  if (draft.email !== base.email) rows.push("Email");
-  if (draft.role !== base.role) rows.push("Role");
-  if (draft.enabled !== base.enabled) rows.push("Can sign in");
-  if (rowChanged(draft.profiles, rowOverride(base.profiles) ?? null)) rows.push(PROFILES_LABEL);
+function changedRows(draft: SignInDraft, base: SignInDraft): MessageKey[] {
+  const rows: MessageKey[] = [];
+  if (draft.username !== base.username) rows.push(USERNAME_ROW);
+  if (draft.email !== base.email) rows.push(EMAIL_ROW);
+  if (draft.role !== base.role) rows.push(ROLE_ROW);
+  if (draft.enabled !== base.enabled) rows.push(ENABLED_ROW);
+  if (rowChanged(draft.profiles, rowOverride(base.profiles) ?? null)) rows.push(PROFILES_ROW);
   return rows;
 }
 
@@ -111,11 +119,12 @@ function profilesIncomplete(draft: SignInDraft, saved: SignInDraft): boolean {
   return rowOverride(draft.profiles) === undefined && rowOverride(saved.profiles) !== null;
 }
 
-function validate(draft: SignInDraft, base: AdminUser): string | null {
-  if (draft.username.trim() === "") return "Enter a username.";
-  if (!isValidEmail(draft.email)) return INVALID_EMAIL_MESSAGE;
-  if (profilesIncomplete(draft, toDraft(base)))
-    return "Allow at least 1 profile, or choose Default.";
+function validate(t: Translate, draft: SignInDraft, base: AdminUser): string | null {
+  if (draft.username.trim() === "") return t("web.admin.users.detail.access.signIn.enterUsername");
+  if (!isValidEmail(draft.email)) return invalidEmailMessage();
+  if (profilesIncomplete(draft, toDraft(base))) {
+    return t("web.admin.users.detail.access.signIn.profilesInvalid");
+  }
   return null;
 }
 
@@ -133,6 +142,7 @@ export function SignInCard({
   /** The profile limit is access policy, which only the server owner changes on an admin. */
   policyLocked?: boolean;
 }) {
+  const t = useT();
   const viewerId = useAuth().user?.id;
   const viewerIsOwner = useViewerIsOwner(viewerId);
   const profiles = useAdminUserProfiles(user.id);
@@ -144,7 +154,7 @@ export function SignInCard({
     toDraft,
     toBody,
     changedRows,
-    validate,
+    validate: (d, account) => validate(t, d, account),
   });
   const usernameId = useId();
   const emailId = useId();
@@ -167,19 +177,33 @@ export function SignInCard({
   const profilesInvalid = d !== undefined && profilesIncomplete(d, saved);
 
   function roleDescription(): string {
-    if (ownAccount) return "You can't change your own role.";
-    if (adminRoleLocked) return "Only the server owner can grant the admin role.";
+    if (ownAccount) return t("web.admin.users.detail.access.signIn.ownRole");
+    if (adminRoleLocked) return t("web.admin.users.detail.access.signIn.ownerGrantsAdminRole");
     if (d?.role === "admin" && base.role !== "admin" && base.access_group_id !== null) {
-      return `Admins don't use access groups. Saving removes this account from ${accessGroupName(base.access_group_id, groups)}.`;
+      return t("web.admin.users.detail.access.signIn.adminLeavesGroup", {
+        group: accessGroupName(base.access_group_id, groups),
+      });
     }
-    return "Only the server owner can grant admin";
+    return t("web.admin.users.detail.access.signIn.ownerGrantsAdmin");
   }
 
   function enabledDescription(): string | undefined {
-    if (base.is_owner) return "The server owner stays an enabled admin.";
-    if (ownAccount) return "You can't disable your own account.";
+    if (base.is_owner) return t("web.admin.users.detail.access.signIn.ownerStaysEnabled");
+    if (ownAccount) return t("web.admin.users.detail.access.signIn.cannotDisableSelf");
     return undefined;
   }
+
+  const yesNo = (value: boolean) =>
+    value
+      ? t("web.admin.users.detail.access.value.yes")
+      : t("web.admin.users.detail.access.value.no");
+  const usedSuffix =
+    used !== undefined ? (
+      <span className="text-muted-foreground text-xs font-normal">
+        {SPACE}
+        {t("web.admin.users.detail.access.signIn.profilesUsedSuffix", { used: String(used) })}
+      </span>
+    ) : null;
 
   return (
     <EditableCard
@@ -193,8 +217,8 @@ export function SignInCard({
       {draft.editing && d ? (
         <>
           <KeyValueRow
-            label={<Label htmlFor={usernameId}>Username</Label>}
-            changed={changed.has("Username")}
+            label={<Label htmlFor={usernameId}>{t(USERNAME_ROW)}</Label>}
+            changed={changed.has(USERNAME_ROW)}
             value={
               <Input
                 id={usernameId}
@@ -208,8 +232,8 @@ export function SignInCard({
             }
           />
           <KeyValueRow
-            label={<Label htmlFor={emailId}>Email</Label>}
-            changed={changed.has("Email")}
+            label={<Label htmlFor={emailId}>{t(EMAIL_ROW)}</Label>}
+            changed={changed.has(EMAIL_ROW)}
             value={
               <Input
                 id={emailId}
@@ -224,9 +248,9 @@ export function SignInCard({
             }
           />
           <KeyValueRow
-            label={<Label htmlFor={roleId}>Role</Label>}
+            label={<Label htmlFor={roleId}>{t(ROLE_ROW)}</Label>}
             description={roleDescription()}
-            changed={changed.has("Role")}
+            changed={changed.has(ROLE_ROW)}
             value={
               <Select
                 value={base.is_owner ? "owner" : d.role}
@@ -238,12 +262,16 @@ export function SignInCard({
                 </SelectTrigger>
                 <SelectContent>
                   {base.is_owner ? (
-                    <SelectItem value="owner">Owner</SelectItem>
+                    <SelectItem value="owner">
+                      {t("web.admin.users.detail.access.role.owner")}
+                    </SelectItem>
                   ) : (
                     <>
-                      <SelectItem value="user">User</SelectItem>
+                      <SelectItem value="user">
+                        {t("web.admin.users.detail.access.role.user")}
+                      </SelectItem>
                       <SelectItem value="admin" disabled={adminRoleLocked}>
-                        Admin
+                        {t("web.admin.users.detail.access.role.admin")}
                       </SelectItem>
                     </>
                   )}
@@ -252,12 +280,15 @@ export function SignInCard({
             }
           />
           {!base.password_login ? (
-            <KeyValueRow label="Password" value="Managed by an external sign-in provider" />
+            <KeyValueRow
+              label={t("web.admin.users.detail.access.signIn.password")}
+              value={t("web.admin.users.detail.access.signIn.externalPassword")}
+            />
           ) : null}
           <KeyValueRow
-            label={<Label htmlFor={enabledId}>Can sign in</Label>}
+            label={<Label htmlFor={enabledId}>{t(ENABLED_ROW)}</Label>}
             description={enabledDescription()}
-            changed={changed.has("Can sign in")}
+            changed={changed.has(ENABLED_ROW)}
             value={
               <Switch
                 id={enabledId}
@@ -270,16 +301,20 @@ export function SignInCard({
           <KeyValueRow
             label={
               d.profiles.custom ? (
-                <Label htmlFor={profilesId}>{PROFILES_LABEL}</Label>
+                <Label htmlFor={profilesId}>{t(PROFILES_ROW)}</Label>
               ) : (
-                PROFILES_LABEL
+                t(PROFILES_ROW)
               )
             }
-            description={used !== undefined ? `${used} used` : undefined}
-            changed={changed.has(PROFILES_LABEL)}
+            description={
+              used !== undefined
+                ? t("web.admin.users.detail.access.signIn.profilesUsed", { used: String(used) })
+                : undefined
+            }
+            changed={changed.has(PROFILES_ROW)}
             value={
               <DefaultCustomSegment
-                label={PROFILES_LABEL}
+                label={t(PROFILES_ROW)}
                 defaultText={
                   inheritedProfiles === undefined ? undefined : String(inheritedProfiles)
                 }
@@ -321,7 +356,7 @@ export function SignInCard({
                   />
                   {d.profiles.value === null ? (
                     <span className="text-muted-foreground text-xs">
-                      Enter a whole number of at least 1, or switch back to Default.
+                      {t("web.admin.users.detail.access.signIn.profilesMinHint")}
                     </span>
                   ) : null}
                 </div>
@@ -331,38 +366,39 @@ export function SignInCard({
         </>
       ) : (
         <>
-          <KeyValueRow label="Username" value={user.username} />
-          <KeyValueRow label="Email" value={user.email || "—"} />
+          <KeyValueRow label={t(USERNAME_ROW)} value={user.username} />
+          <KeyValueRow label={t(EMAIL_ROW)} value={user.email || "—"} />
           {!user.password_login ? (
-            <KeyValueRow label="Password" value="Managed by an external sign-in provider" />
+            <KeyValueRow
+              label={t("web.admin.users.detail.access.signIn.password")}
+              value={t("web.admin.users.detail.access.signIn.externalPassword")}
+            />
           ) : null}
           <KeyValueRow
-            label="Role"
-            description="Only the server owner can grant admin"
+            label={t(ROLE_ROW)}
+            description={t("web.admin.users.detail.access.signIn.ownerGrantsAdmin")}
             value={roleLabel(user)}
           />
           <KeyValueRow
-            label="Can sign in"
+            label={t(ENABLED_ROW)}
             value={
               <>
-                {user.enabled ? "Yes" : "No"}
+                {yesNo(user.enabled)}
                 {user.password_change_required ? (
                   <span className="text-muted-foreground text-xs font-normal">
-                    {" "}
-                    · must change password
+                    {SPACE}
+                    {t("web.admin.users.detail.access.signIn.mustChangePassword")}
                   </span>
                 ) : null}
               </>
             }
           />
           <PolicyValueRow
-            label={PROFILES_LABEL}
+            label={t(PROFILES_ROW)}
             value={
               <>
                 {user.effective_policy.max_profiles}
-                {used !== undefined ? (
-                  <span className="text-muted-foreground text-xs font-normal"> · {used} used</span>
-                ) : null}
+                {usedSuffix}
               </>
             }
             source={rowSource(user, "maxProfiles", ctx)}

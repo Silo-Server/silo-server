@@ -7650,15 +7650,22 @@
         "properties": {
           "layout": {
             "additionalProperties": true,
-            "type": "object",
+            "description": "Stored layout; null when this account has none saved, and the client keeps its local or default arrangement",
+            "type": [
+              "object",
+              "null"
+            ],
             "x-silo-extension-bag": "admin-dashboard-layout"
           },
           "updated_at": {
-            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "description": "When the stored layout was last saved; null when none is saved",
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -17127,6 +17134,10 @@
             },
             "type": "array"
           },
+          "update_failure": {
+            "$ref": "#/components/schemas/AdminPluginUpdateFailure",
+            "description": "The last automatic update that failed, such as a download that did not match its catalog checksum. Absent when the last check did not fail for this plugin."
+          },
           "update_policy": {
             "type": "string"
           },
@@ -17482,6 +17493,32 @@
         },
         "required": [
           "enabled"
+        ],
+        "type": "object"
+      },
+      "AdminPluginUpdateFailure": {
+        "additionalProperties": false,
+        "properties": {
+          "failed_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why the update was refused, written for the administrator; it names no URL or checksum",
+            "type": "string"
+          },
+          "version": {
+            "description": "The version Silo tried and failed to install",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "reason",
+          "failed_at"
         ],
         "type": "object"
       },
@@ -20456,6 +20493,25 @@
             "type": "string"
           },
           "title": {
+            "type": "string"
+          },
+          "title_args": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Values of the title_key message's placeholders by name, such as library for a generated library row; present only with title_key, and absent when the message has none",
+            "examples": [
+              {
+                "library": "Movies"
+              }
+            ],
+            "type": "object"
+          },
+          "title_key": {
+            "description": "Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section or recommendation row name. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. A client acts on title_key whenever it is present",
+            "examples": [
+              "home.section.recentlyAddedIn"
+            ],
             "type": "string"
           },
           "updated_at": {
@@ -32098,6 +32154,7 @@
             "examples": [
               "https://silo.example.test/activate"
             ],
+            "format": "uri",
             "type": "string"
           },
           "verification_uri_complete": {
@@ -36639,6 +36696,13 @@
             ],
             "format": "int64",
             "type": "integer"
+          },
+          "section_title_keys": {
+            "description": "Sections, profile section settings, admin section definitions and recommendation rows carry title_key, with title_args when its message has placeholders, for titles the server writes, so a client can translate them (a few, such as a seasonal row's in-season title, have none; a client shows title whenever the key is absent or unknown), and profile section settings carry default_title_key and default_title_args the same way for default_title. Informational: clients act on title_key whenever it is present. Absent when the home sections service is not configured, and on a server that predates the fields",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           },
           "state": {
             "description": "Support and configuration state, not health",
@@ -46702,6 +46766,7 @@
             "type": "string"
           },
           "library_restrictions_enabled": {
+            "description": "Whether the profile is limited to allowed_library_ids within its account's libraries. The primary profile is never limited: it sees every library its account can access and hides libraries through its settings instead",
             "examples": [
               false
             ],
@@ -46863,6 +46928,15 @@
             ],
             "type": "boolean"
           },
+          "max_profiles": {
+            "description": "How many profiles this account may have, from its effective access policy; createProfile answers 409 once the household holds this many. Omitted on a remote-playback handoff, which lists only its own profile and cannot create one, and when the server could not read the limit; in that second case a client keeps offering new profiles and createProfile stays the check",
+            "examples": [
+              5
+            ],
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
           "page": {
             "$ref": "#/components/schemas/PageInfo",
             "description": "Cursor state; absent for bounded unpaginated collections"
@@ -46887,7 +46961,7 @@
         "additionalProperties": false,
         "properties": {
           "allowed_library_ids": {
-            "description": "Unique library identifiers the profile may see when restrictions are enabled",
+            "description": "Unique library identifiers the profile may see when restrictions are enabled. Must be empty on an account's first profile, which becomes its primary profile, even with restrictions off",
             "examples": [
               [
                 "1",
@@ -46950,6 +47024,7 @@
             "type": "string"
           },
           "library_restrictions_enabled": {
+            "description": "Limits the profile to allowed_library_ids. Must be false or omitted on an account's first profile, which becomes its primary profile",
             "examples": [
               false
             ],
@@ -47256,6 +47331,25 @@
             ],
             "type": "string"
           },
+          "default_title_args": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Values of the default_title_key message's placeholders by name; present only with default_title_key, and absent when the message has none",
+            "examples": [
+              {
+                "library": "Movies"
+              }
+            ],
+            "type": "object"
+          },
+          "default_title_key": {
+            "description": "Key of the shared translation catalog message whose English is default_title, under the same rules as title_key: present only while default_title is the server's own text, and absent when an administrator typed it",
+            "examples": [
+              "home.section.continueWatching"
+            ],
+            "type": "string"
+          },
           "featured": {
             "examples": [
               false
@@ -47307,6 +47401,25 @@
             "description": "The title this profile sees: its own title override, or the administrator's title",
             "examples": [
               "Continue Watching"
+            ],
+            "type": "string"
+          },
+          "title_args": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Values of the title_key message's placeholders by name, such as library for a generated library row; present only with title_key, and absent when the message has none",
+            "examples": [
+              {
+                "library": "Movies"
+              }
+            ],
+            "type": "object"
+          },
+          "title_key": {
+            "description": "Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section or recommendation row name. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. A client acts on title_key whenever it is present",
+            "examples": [
+              "home.section.recentlyAddedIn"
             ],
             "type": "string"
           }
@@ -47418,6 +47531,7 @@
             ]
           },
           "library_restrictions_enabled": {
+            "description": "Limits the profile to allowed_library_ids. The primary profile can't be limited: true, or a non-empty allowed_library_ids, fails validation on it",
             "examples": [
               false
             ],
@@ -48660,6 +48774,25 @@
             "description": "Display label",
             "examples": [
               "Because you enjoy Crime"
+            ],
+            "type": "string"
+          },
+          "title_args": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Values of the title_key message's placeholders by name, such as library for a generated library row; present only with title_key, and absent when the message has none",
+            "examples": [
+              {
+                "library": "Movies"
+              }
+            ],
+            "type": "object"
+          },
+          "title_key": {
+            "description": "Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section or recommendation row name. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. A client acts on title_key whenever it is present",
+            "examples": [
+              "home.section.recentlyAddedIn"
             ],
             "type": "string"
           },
@@ -50047,6 +50180,25 @@
             ],
             "type": "string"
           },
+          "title_args": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Values of the title_key message's placeholders by name, such as library for a generated library row; present only with title_key, and absent when the message has none",
+            "examples": [
+              {
+                "library": "Movies"
+              }
+            ],
+            "type": "object"
+          },
+          "title_key": {
+            "description": "Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section or recommendation row name. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. A client acts on title_key whenever it is present",
+            "examples": [
+              "home.section.recentlyAddedIn"
+            ],
+            "type": "string"
+          },
           "total_count": {
             "description": "Items the section has in total, at least the number returned",
             "examples": [
@@ -50146,6 +50298,25 @@
           "title": {
             "examples": [
               "Recently Added"
+            ],
+            "type": "string"
+          },
+          "title_args": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Values of the title_key message's placeholders by name, such as library for a generated library row; present only with title_key, and absent when the message has none",
+            "examples": [
+              {
+                "library": "Movies"
+              }
+            ],
+            "type": "object"
+          },
+          "title_key": {
+            "description": "Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section or recommendation row name. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. A client acts on title_key whenever it is present",
+            "examples": [
+              "home.section.recentlyAddedIn"
             ],
             "type": "string"
           }
@@ -52567,6 +52738,11 @@
           },
           "source": {
             "type": "string"
+          },
+          "stored_subtitle_id": {
+            "description": "Stored subtitle row ID, matching subtitle_ready.subtitle_id. Present for downloaded, uploaded and generated tracks, including tracks without a URL or sync_key. Stable across inventory reordering; selection still uses combined_index.",
+            "format": "int64",
+            "type": "integer"
           },
           "stream_index": {
             "description": "Embedded tracks only: the absolute probed stream index, the namespace of subtitle.embedded.stream_index and the sidecar URL's embedded_stream_index",
@@ -180130,7 +180306,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "The home page's sections with their cards, as the acting profile sees them.",
+        "summary": "The home page's sections that have cards for the acting profile, with those cards.",
         "tags": [
           "home"
         ],
@@ -187681,7 +187857,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "The library's sections with their cards, as the acting profile sees them.",
+        "summary": "The library's sections that have cards for the acting profile, with those cards.",
         "tags": [
           "libraries"
         ],
@@ -220461,6 +220637,17 @@
             }
           },
           {
+            "description": "Set to refuse by the server on a server_remux_progressive URL whose attempt listed progressive_range_refusal_v1 in deliveries.progressive.features. A progressive remux streams from its seek origin and cannot resume: with it, a GET whose Range starts past byte 0 (or is a suffix range) answers 409 before the remux starts, and the client reopens the stream at its current position. Without it such a range streams from the origin with 200.",
+            "in": "query",
+            "name": "remux_range",
+            "schema": {
+              "enum": [
+                "refuse"
+              ],
+              "type": "string"
+            }
+          },
+          {
             "in": "header",
             "name": "If-Match",
             "schema": {
@@ -221034,6 +221221,17 @@
             "in": "query",
             "name": "st",
             "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Set to refuse by the server on a server_remux_progressive URL whose attempt listed progressive_range_refusal_v1 in deliveries.progressive.features. A progressive remux streams from its seek origin and cannot resume: with it, a GET whose Range starts past byte 0 (or is a suffix range) answers 409 before the remux starts, and the client reopens the stream at its current position. Without it such a range streams from the origin with 200.",
+            "in": "query",
+            "name": "remux_range",
+            "schema": {
+              "enum": [
+                "refuse"
+              ],
               "type": "string"
             }
           },
@@ -242172,9 +242370,20 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Set by the server when the attempt negotiated progressive_range_refusal_v1: a GET whose Range starts past byte 0, or is a suffix range, answers 409 instead of streaming from the origin.",
+            "in": "query",
+            "name": "remux_range",
+            "schema": {
+              "enum": [
+                "refuse"
+              ],
+              "type": "string"
+            }
           }
         ],
-        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Audio-downmix-v2 recipes are refused404 here and require the versioned audio route. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised.",
+        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. A URL carrying remux_range=refuse (progressive_range_refusal_v1) answers a GET whose Range starts past byte 0, or is a suffix range, with 409 before any work starts or is relayed; without it that range streams from the origin. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Audio-downmix-v2 recipes are refused404 here and require the versioned audio route. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised.",
         "listener": "proxy",
         "method": "GET",
         "path": "/stream/remux/{token}",
@@ -242308,9 +242517,20 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Set by the server when the attempt negotiated progressive_range_refusal_v1: a GET whose Range starts past byte 0, or is a suffix range, answers 409 instead of streaming from the origin.",
+            "in": "query",
+            "name": "remux_range",
+            "schema": {
+              "enum": [
+                "refuse"
+              ],
+              "type": "string"
+            }
           }
         ],
-        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Audio-downmix-v2 recipes are refused404 here and require the versioned audio route. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised. The HTTP server suppresses all HEAD response bytes.",
+        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. A URL carrying remux_range=refuse (progressive_range_refusal_v1) answers a GET whose Range starts past byte 0, or is a suffix range, with 409 before any work starts or is relayed; without it that range streams from the origin. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Audio-downmix-v2 recipes are refused404 here and require the versioned audio route. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised. The HTTP server suppresses all HEAD response bytes.",
         "listener": "proxy",
         "method": "HEAD",
         "path": "/stream/remux/{token}",
@@ -242363,9 +242583,20 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Set by the server when the attempt negotiated progressive_range_refusal_v1: a GET whose Range starts past byte 0, or is a suffix range, answers 409 instead of streaming from the origin.",
+            "in": "query",
+            "name": "remux_range",
+            "schema": {
+              "enum": [
+                "refuse"
+              ],
+              "type": "string"
+            }
           }
         ],
-        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Only the exact versioned stereo AAC downmix shape is accepted; ordinary/partial recipes return404. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised.",
+        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. A URL carrying remux_range=refuse (progressive_range_refusal_v1) answers a GET whose Range starts past byte 0, or is a suffix range, with 409 before any work starts or is relayed; without it that range streams from the origin. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Only the exact versioned stereo AAC downmix shape is accepted; ordinary/partial recipes return404. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised.",
         "listener": "proxy",
         "method": "GET",
         "path": "/stream/remux/audio-v2/{token}",
@@ -242499,9 +242730,20 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Set by the server when the attempt negotiated progressive_range_refusal_v1: a GET whose Range starts past byte 0, or is a suffix range, answers 409 instead of streaming from the origin.",
+            "in": "query",
+            "name": "remux_range",
+            "schema": {
+              "enum": [
+                "refuse"
+              ],
+              "type": "string"
+            }
           }
         ],
-        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Only the exact versioned stereo AAC downmix shape is accepted; ordinary/partial recipes return404. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised. The HTTP server suppresses all HEAD response bytes.",
+        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. A URL carrying remux_range=refuse (progressive_range_refusal_v1) answers a GET whose Range starts past byte 0, or is a suffix range, with 409 before any work starts or is relayed; without it that range streams from the origin. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Only the exact versioned stereo AAC downmix shape is accepted; ordinary/partial recipes return404. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised. The HTTP server suppresses all HEAD response bytes.",
         "listener": "proxy",
         "method": "HEAD",
         "path": "/stream/remux/audio-v2/{token}",
@@ -242916,9 +243158,20 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Set by the server when the attempt negotiated progressive_range_refusal_v1: a GET whose Range starts past byte 0, or is a suffix range, answers 409 instead of streaming from the origin.",
+            "in": "query",
+            "name": "remux_range",
+            "schema": {
+              "enum": [
+                "refuse"
+              ],
+              "type": "string"
+            }
           }
         ],
-        "description": "Header-only bearer access JWT, current login-session validity and a stored grant owned by the same account are required on every request. No API key, cookie or query-token fallback. Missing grant404; wrong account403; unavailable dependencies503. Committed proxy egress and recipe family remain enforced. Local authorization errors are application/json objects with error and message; downstream/local media failures retain their existing media. This does not add a profile/PIN check or native v2 alias. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Identity dispatch selects remux only for the literal remux play method; after the endpoint family gate other accepted non-transcode methods fall through to direct-file serving. Boosted-remux grant compatibility is not established by this description. Direct files retain strongETag/ranges. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised.",
+        "description": "Header-only bearer access JWT, current login-session validity and a stored grant owned by the same account are required on every request. No API key, cookie or query-token fallback. Missing grant404; wrong account403; unavailable dependencies503. Committed proxy egress and recipe family remain enforced. Local authorization errors are application/json objects with error and message; downstream/local media failures retain their existing media. This does not add a profile/PIN check or native v2 alias. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. A URL carrying remux_range=refuse (progressive_range_refusal_v1) answers a GET whose Range starts past byte 0, or is a suffix range, with 409 before any work starts or is relayed; without it that range streams from the origin. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Identity dispatch selects remux only for the literal remux play method; after the endpoint family gate other accepted non-transcode methods fall through to direct-file serving. Boosted-remux grant compatibility is not established by this description. Direct files retain strongETag/ranges. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised.",
         "listener": "proxy",
         "method": "GET",
         "path": "/stream/v3/{session_id}",
@@ -243073,9 +243326,20 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Set by the server when the attempt negotiated progressive_range_refusal_v1: a GET whose Range starts past byte 0, or is a suffix range, answers 409 instead of streaming from the origin.",
+            "in": "query",
+            "name": "remux_range",
+            "schema": {
+              "enum": [
+                "refuse"
+              ],
+              "type": "string"
+            }
           }
         ],
-        "description": "Header-only bearer access JWT, current login-session validity and a stored grant owned by the same account are required on every request. No API key, cookie or query-token fallback. Missing grant404; wrong account403; unavailable dependencies503. Committed proxy egress and recipe family remain enforced. Local authorization errors are application/json objects with error and message; downstream/local media failures retain their existing media. This does not add a profile/PIN check or native v2 alias. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Identity dispatch selects remux only for the literal remux play method; after the endpoint family gate other accepted non-transcode methods fall through to direct-file serving. Boosted-remux grant compatibility is not established by this description. Direct files retain strongETag/ranges. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised. The HTTP server suppresses all HEAD response bytes.",
+        "description": "Header-only bearer access JWT, current login-session validity and a stored grant owned by the same account are required on every request. No API key, cookie or query-token fallback. Missing grant404; wrong account403; unavailable dependencies503. Committed proxy egress and recipe family remain enforced. Local authorization errors are application/json objects with error and message; downstream/local media failures retain their existing media. This does not add a profile/PIN check or native v2 alias. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. A URL carrying remux_range=refuse (progressive_range_refusal_v1) answers a GET whose Range starts past byte 0, or is a suffix range, with 409 before any work starts or is relayed; without it that range streams from the origin. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Identity dispatch selects remux only for the literal remux play method; after the endpoint family gate other accepted non-transcode methods fall through to direct-file serving. Boosted-remux grant compatibility is not established by this description. Direct files retain strongETag/ranges. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised. The HTTP server suppresses all HEAD response bytes.",
         "listener": "proxy",
         "method": "HEAD",
         "path": "/stream/v3/{session_id}",

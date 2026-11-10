@@ -10,15 +10,17 @@ import {
 } from "react";
 
 import { useReportUnsavedChanges } from "@/hooks/useUnsavedChanges";
+import type { MessageKey } from "@/i18n";
 
 export type AccessCardId = "signin" | "library" | "downloads" | "playback" | "requests";
 
-export const ACCESS_CARD_TITLES: Record<AccessCardId, string> = {
-  signin: "Sign-in & role",
-  library: "Library access",
-  downloads: "Downloads",
-  playback: "Playback & streaming",
-  requests: "Requests",
+/** Each Access & limits card's title; resolve with `t()`. */
+export const ACCESS_CARD_TITLE_KEYS: Record<AccessCardId, MessageKey> = {
+  signin: "web.admin.users.detail.common.cardTitle.signin",
+  library: "web.admin.users.detail.common.cardTitle.library",
+  downloads: "web.admin.users.detail.common.cardTitle.downloads",
+  playback: "web.admin.users.detail.common.cardTitle.playback",
+  requests: "web.admin.users.detail.common.cardTitle.requests",
 };
 
 /** The one card being edited, with what the unsaved-changes prompt needs from it. */

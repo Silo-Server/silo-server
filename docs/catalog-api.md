@@ -49,6 +49,49 @@ row is drawn again. A client that shows a capped row reporting `has_more` and
 wants the rest of it in place reads the row again at its own limit
 (`getHomeSectionItems` without `item_limit`) and keeps the cards it already shows.
 
+## Section titles
+
+A `Section` and a `SectionLayoutEntry` (Home and library pages), each row of
+`getProfileSectionSettings`, each `AdminSection` (`listAdminSections`,
+`getAdminSection`, and the responses that answer one), and each `RecommendationRow`
+(`getDiscover`, `getForYouMain`, `listForYouRows`, `getRecommendationSection`) carry
+`title_key` and `title_args` while their `title` is the server's own text: a built-in row name such as
+`home.section.continueWatching`, a generated library row (`home.section.recentlyAddedIn` with `{"library": "Movies"}`),
+the synthetic Next Up row, a Because You Watched heading that names its title
+(`home.section.becauseYouWatchedTitle` with `title`), the shared row a For You or
+taste-match section shows a new profile (`home.section.popularOnServer`,
+`home.section.topGenre` with `genre`), and every recommendation row title the server words
+(`home.section.forYou`, `home.section.becauseYouEnjoy` with `genres`, the cluster's
+comma-separated genre names, `home.section.pickedFromYourHistory`,
+`home.section.profilesLikeYouEnjoyed`). A home row that still
+holds the older default "Trending on Server" carries `home.section.trendingOnServer`. The key names a message in the shared translation
+catalog, and `title_args` fills its placeholders by name. A client that has the key shows
+its translation; otherwise, and whenever the fields are absent, it shows `title`.
+`title_args` and `default_title_args` are left out when the message has no placeholders,
+so a client must not require them to use a key.
+
+The fields are absent when an administrator or the profile typed the title, and when the
+server replaced the stored title with one of an item or season (a seasonal row's in-season
+title, an editorial subject). That replacement happens when the row's items are read: the
+`Section` from that read carries the title to show, while the layout entry and the profile's
+section settings keep the stored title and its key, so a client heads a loaded row with the
+fetched `Section`'s title fields. For a stored section, the server records the key with the
+row it writes, and an update that changes the row's title without changing its key clears it, so whether a row keeps
+its key never depends on comparing text. A library rename re-keys the generated rows that
+still carry their own key, with the new name in `title_args`; a generated row without a key
+is renamed only while its title still reads as the old library name. Upgrading keyed the existing rows whose title is
+exactly a built-in name, because stored rows don't record who wrote them, so a typed title
+identical to a built-in name shows that name's translation. For a recommendation row, the server derives the key from the row's type and wording when
+it builds the response, so a title in other wording, such as one an older build cached, has none. A profile
+title override equal to the administrator's title keeps the key. A profile settings row
+also carries `default_title_key` and `default_title_args` for its `default_title`, the
+administrator's title a renamed row can go back to, under the same rules. An
+`AdminSection` describes the stored row, so an editor still edits `title` itself.
+`getHomeCapabilities`
+reports `section_title_keys: true` on a server that sends them; it is informational, and a
+client acts on `title_key` whenever it is present. The frozen `/api/v1` reads
+and the Jellyfin surface do not carry them.
+
 ## People search
 
 `GET /api/v2/catalog/people` (`listPeople`) accepts a name query in `q` and
@@ -827,7 +870,9 @@ server whose PostgreSQL ranking differed. PostgreSQL search retains its
 three-second deadline inside the overall browse deadline.
 
 Meilisearch captures the configured ranked result window in one provider response,
-then stores its filtered, ordered candidate IDs in shared Redis for 15 minutes.
+then stores its filtered, ordered candidate IDs for 15 minutes. Redis shares
+sessions across replicas. Without Redis, sessions stay in process, so a cursor
+returns `invalid_cursor` after a restart or when another replica handles it.
 The configured window must be between 1 and 1,000 candidates; a larger runtime
 index setting returns `capability_unsupported` before serving a partial ranking.
 This is the provider's reachable window, not an exact global match count.
@@ -839,8 +884,9 @@ and access scope. Pages reauthorize each candidate and advance past deleted or
 inaccessible IDs. Explicit window seeks count visible rows within this bounded
 ranking. Metadata and access remain live; the retained IDs and their order are
 immutable. Fallback may select PostgreSQL before the first page, but a continuation
-never switches providers. Expiry or Redis eviction returns `invalid_cursor`;
-Redis failure returns `dependency_unavailable`. Restarting performs a new search.
+never switches providers. Expiry or eviction returns `invalid_cursor`; a
+configured Redis failure returns `dependency_unavailable`. Restarting performs a
+new search.
 
 ### Letter index
 
@@ -1027,6 +1073,27 @@ fall back to the ID when the title is absent. Personal membership pages hydrate
 titles through the existing viewer access filter; admin pages require acting
 administrator access. Membership identity, ordering and cursor revision checks
 are unchanged. Frozen v1 membership responses do not expose this field.
+
+## Server smart collection libraries
+
+A server smart collection keeps two library lists. Its `library_ids` are where it shows: the
+library Collections tabs that list it, and the libraries through which a viewer can open it. Its
+`query_definition.library_ids` are where its titles come from, and an empty list means every
+library. The two are independent, so a collection can draw from every library and show only on the
+Movies tab. Every read of its titles (`/api/v2` and `/api/v1` collection items, home and library
+rows, the catalog `library_collection` source, Jellyfin BoxSet children and `item_count`) runs the
+rules over their own libraries and then applies the viewer's access: allowed libraries, hidden
+libraries and rating limits. A viewer who can reach none of the collection's own `library_ids` gets
+none of its titles from any of these reads, as its page refuses them. A row on one library's page
+still lists only that library's titles.
+`previewAdminCollection` previews the same rules with no viewer limits.
+
+Before this, reads narrowed the rules to the collection's `library_ids`, and rules naming no library
+took them. A migration wrote that effective list into each existing collection's rules, so none of
+them changed titles, and restoring a backup made before this change (restore set version 4 or older)
+does the same for the collections it creates. Rules naming only libraries outside the collection's
+own libraries matched nothing before; they now draw from the libraries they name, which is what the
+admin preview already showed.
 
 ## Admin template list
 

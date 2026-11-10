@@ -2,6 +2,7 @@ import * as React from "react";
 import { Popover as PopoverPrimitive } from "radix-ui";
 import { Check, ChevronsUpDown } from "lucide-react";
 
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { PortalContainerContext } from "./portal-container-context";
 
@@ -25,11 +26,12 @@ export function SearchableSelect({
   options,
   value,
   onChange,
-  placeholder = "Select...",
+  placeholder,
   disabled = false,
   isLoading = false,
   getLabel,
 }: SearchableSelectProps) {
+  const t = useT();
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState("");
   const [focusedIndex, setFocusedIndex] = React.useState(-1);
@@ -82,7 +84,9 @@ export function SearchableSelect({
             !value && "text-muted-foreground",
           )}
         >
-          <span className="truncate">{value ? labelOf(value) : placeholder}</span>
+          <span className="truncate">
+            {value ? labelOf(value) : (placeholder ?? t("web.ui.select.placeholder"))}
+          </span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </button>
       </PopoverPrimitive.Trigger>
@@ -103,8 +107,8 @@ export function SearchableSelect({
                 setFocusedIndex(-1);
               }}
               onKeyDown={handleSearchKeyDown}
-              placeholder="Search..."
-              aria-label="Search options"
+              placeholder={t("web.ui.select.searchPlaceholder")}
+              aria-label={t("web.ui.select.searchOptions")}
               aria-controls={listboxId}
               aria-activedescendant={
                 focusedIndex >= 0 ? `${listboxId}-opt-${focusedIndex}` : undefined
@@ -120,9 +124,13 @@ export function SearchableSelect({
             className="max-h-60 overflow-y-auto overscroll-contain p-1"
           >
             {isLoading ? (
-              <p className="text-muted-foreground py-4 text-center text-sm">Loading...</p>
+              <p className="text-muted-foreground py-4 text-center text-sm">
+                {t("web.ui.loading")}
+              </p>
             ) : filtered.length === 0 ? (
-              <p className="text-muted-foreground py-4 text-center text-sm">No results found</p>
+              <p className="text-muted-foreground py-4 text-center text-sm">
+                {t("web.ui.select.noResults")}
+              </p>
             ) : (
               <>
                 <button
@@ -144,7 +152,7 @@ export function SearchableSelect({
                   <Check
                     className={cn("mr-2 h-4 w-4 shrink-0", value ? "opacity-0" : "opacity-100")}
                   />
-                  <span className="text-muted-foreground italic">Any</span>
+                  <span className="text-muted-foreground italic">{t("web.ui.select.any")}</span>
                 </button>
 
                 {filtered.map((opt, i) => (
@@ -203,11 +211,12 @@ export function SearchableMultiSelect({
   options,
   value,
   onChange,
-  placeholder = "Select...",
+  placeholder,
   disabled = false,
   isLoading = false,
   getLabel,
 }: SearchableMultiSelectProps) {
+  const t = useT();
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState("");
   const [focusedIndex, setFocusedIndex] = React.useState(-1);
@@ -265,10 +274,10 @@ export function SearchableMultiSelect({
 
   const displayText =
     value.length === 0
-      ? placeholder
+      ? (placeholder ?? t("web.ui.select.placeholder"))
       : value.length <= 3
         ? value.map(labelOf).join(", ")
-        : `${value.length} selected`;
+        : t("web.ui.selectedCount", { count: value.length, shown: String(value.length) });
 
   return (
     <PopoverPrimitive.Root open={open} onOpenChange={setOpen} modal={false}>
@@ -304,8 +313,8 @@ export function SearchableMultiSelect({
                 setFocusedIndex(-1);
               }}
               onKeyDown={handleSearchKeyDown}
-              placeholder="Search..."
-              aria-label="Search options"
+              placeholder={t("web.ui.select.searchPlaceholder")}
+              aria-label={t("web.ui.select.searchOptions")}
               aria-controls={listboxId}
               aria-activedescendant={
                 focusedIndex >= 0 ? `${listboxId}-opt-${focusedIndex}` : undefined
@@ -322,9 +331,13 @@ export function SearchableMultiSelect({
             className="max-h-60 overflow-y-auto overscroll-contain p-1"
           >
             {isLoading ? (
-              <p className="text-muted-foreground py-4 text-center text-sm">Loading...</p>
+              <p className="text-muted-foreground py-4 text-center text-sm">
+                {t("web.ui.loading")}
+              </p>
             ) : filtered.length === 0 ? (
-              <p className="text-muted-foreground py-4 text-center text-sm">No results found</p>
+              <p className="text-muted-foreground py-4 text-center text-sm">
+                {t("web.ui.select.noResults")}
+              </p>
             ) : (
               <>
                 {value.length > 0 ? (
@@ -340,7 +353,9 @@ export function SearchableMultiSelect({
                     onClick={() => onChange([])}
                   >
                     <Check className="mr-2 h-4 w-4 shrink-0 opacity-0" />
-                    <span className="text-muted-foreground italic">Clear all</span>
+                    <span className="text-muted-foreground italic">
+                      {t("web.ui.select.clearAll")}
+                    </span>
                   </button>
                 ) : null}
 

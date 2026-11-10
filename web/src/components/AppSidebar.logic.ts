@@ -54,12 +54,18 @@ export interface AppNavLink {
 }
 
 export interface AppNavGroup {
-  /** Display label for the group ("Other" for uncategorized plugins). */
+  /**
+   * The manifest's first category segment, or {@link UNCATEGORIZED_APP_GROUP}
+   * for uncategorized plugins (the sidebar shows that one translated).
+   */
   category: string;
   links: AppNavLink[];
 }
 
-/** Group label for plugins whose manifest declares no category. */
+/**
+ * Group key for plugins whose manifest declares no category. The sidebar
+ * renders it as the catalog's "Other" (`web.shell.sidebar.otherApps`).
+ */
 export const UNCATEGORIZED_APP_GROUP = "Other";
 
 /**

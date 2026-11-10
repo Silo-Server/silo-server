@@ -1,4 +1,5 @@
 import { AlertTriangle, CheckCircle2, Info, X } from "lucide-react";
+import { useT } from "@/i18n";
 import type { SubtitleSyncNotice } from "../hooks/useSubtitleSyncFeedback";
 
 interface SubtitleSyncIndicatorProps {
@@ -19,6 +20,7 @@ const TONE_CLASS: Record<SubtitleSyncNotice["tone"], string> = {
  * fullscreen, where the app's toasts do not reach.
  */
 export function SubtitleSyncIndicator({ notice, onDismiss }: SubtitleSyncIndicatorProps) {
+  const t = useT();
   const running = notice.tone === "progress";
   return (
     <div className="pointer-events-none absolute top-[max(1rem,env(safe-area-inset-top))] right-[max(1rem,env(safe-area-inset-right))] z-40 flex justify-end">
@@ -47,7 +49,7 @@ export function SubtitleSyncIndicator({ notice, onDismiss }: SubtitleSyncIndicat
             <span className="mt-1 flex items-center gap-2">
               <span
                 role="progressbar"
-                aria-label="Subtitle sync progress"
+                aria-label={t("web.subtitles.sync.progressLabel")}
                 aria-valuemin={0}
                 aria-valuemax={100}
                 aria-valuenow={notice.percent}
@@ -59,7 +61,7 @@ export function SubtitleSyncIndicator({ notice, onDismiss }: SubtitleSyncIndicat
                 />
               </span>
               <span className="w-9 text-right text-[11px] text-white/60 tabular-nums">
-                {notice.percent}%
+                {t("web.subtitles.sync.percent", { percent: String(notice.percent) })}
               </span>
             </span>
           )}
@@ -68,7 +70,7 @@ export function SubtitleSyncIndicator({ notice, onDismiss }: SubtitleSyncIndicat
           <button
             type="button"
             onClick={onDismiss}
-            aria-label="Dismiss"
+            aria-label={t("web.subtitles.syncNotice.dismiss")}
             className="-mt-1 -mr-2 shrink-0 rounded p-1 text-white/50 hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
           >
             <X className="h-3.5 w-3.5" />

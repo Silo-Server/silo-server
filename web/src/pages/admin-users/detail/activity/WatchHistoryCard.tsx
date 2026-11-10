@@ -27,6 +27,7 @@ import {
   useAdminUserWatchHistory,
   useAdminUserWatchSummary,
 } from "@/hooks/queries/admin/userActivity";
+import { useT, type MessageKey, type Translate } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 import {
@@ -37,14 +38,15 @@ import {
   watchedFraction,
 } from "../format";
 import { DetailCard, ProgressBar } from "../ui";
+import { formatLocale } from "@/lib/appLocale";
 
 const ALL_PROFILES = "all";
-const PERIODS = [
-  { days: 7, label: "Last 7 days" },
-  { days: 30, label: "Last 30 days" },
-  { days: 90, label: "Last 90 days" },
-  { days: 365, label: "Last year" },
-] as const;
+const PERIODS: readonly { days: number; label: MessageKey }[] = [
+  { days: 7, label: "web.admin.users.detail.activity.history.period.week" },
+  { days: 30, label: "web.admin.users.detail.activity.history.period.month" },
+  { days: 90, label: "web.admin.users.detail.activity.history.period.quarter" },
+  { days: 365, label: "web.admin.users.detail.activity.history.period.year" },
+];
 const PAGE_SIZE = 25;
 
 interface HistoryRow {
@@ -59,13 +61,17 @@ interface HistoryRow {
   endedAt: string;
 }
 
-function playRow(play: AdminUserPlay): HistoryRow {
+function playRow(t: Translate, play: AdminUserPlay): HistoryRow {
   const episode = episodeCode(play.season_number, play.episode_number);
   return {
     key: play.session_id,
     live: false,
     itemId: play.media_item_id,
-    title: play.series_title || play.media_title || play.media_item_id || "Unknown title",
+    title:
+      play.series_title ||
+      play.media_title ||
+      play.media_item_id ||
+      t("web.admin.users.detail.common.unknownTitle"),
     code: play.series_title ? episode : "",
     profile: play.profile_name || play.profile_id,
     method: play.play_method,
@@ -74,12 +80,13 @@ function playRow(play: AdminUserPlay): HistoryRow {
   };
 }
 
-function liveRow(session: AdminSession): HistoryRow {
+function liveRow(t: Translate, session: AdminSession): HistoryRow {
   return {
     key: `live:${session.session_id}`,
     live: true,
     itemId: session.content_id ?? "",
-    title: session.series_name || session.media_title || "Unknown title",
+    title:
+      session.series_name || session.media_title || t("web.admin.users.detail.common.unknownTitle"),
     code: session.series_name ? episodeCode(session.season_number, session.episode_number) : "",
     profile: session.profile_name || session.profile_id,
     method: session.effective_play_method || session.play_method,
@@ -95,6 +102,7 @@ export function WatchHistoryCard({
   userId: number;
   summaryAvailable: boolean;
 }) {
+  const t = useT();
   const [profileId, setProfileId] = useState<string>(ALL_PROFILES);
   const [days, setDays] = useState(30);
   const profileFilter = profileId === ALL_PROFILES ? undefined : profileId;
@@ -116,11 +124,11 @@ export function WatchHistoryCard({
   const rows = useMemo(() => {
     const liveRows = (live.data ?? [])
       .filter((session) => !profileFilter || session.profile_id === profileFilter)
-      .map(liveRow);
-    return [...liveRows, ...(history.data ?? []).map(playRow)];
-  }, [live.data, history.data, profileFilter]);
+      .map((session) => liveRow(t, session));
+    return [...liveRows, ...(history.data ?? []).map((play) => playRow(t, play))];
+  }, [t, live.data, history.data, profileFilter]);
 
-  const period = PERIODS.find((p) => p.days === days) ?? PERIODS[1];
+  const period = PERIODS.find((p) => p.days === days) ?? PERIODS[1]!;
   const plays = summaryAvailable ? summary.data?.plays : undefined;
   const shown = history.data?.length ?? 0;
   const historyLink =
@@ -128,27 +136,37 @@ export function WatchHistoryCard({
     (profileFilter ? `&profile_id=${encodeURIComponent(profileFilter)}` : "");
   // With no rows yet: loading text, the empty state, or nothing beside the error.
   const emptyMessage = history.isLoading
-    ? "Loading watch history..."
+    ? t("web.admin.users.detail.activity.history.loading")
     : history.isError
       ? null
-      : "No plays in this period.";
+      : t("web.admin.users.detail.activity.history.empty");
 
   return (
     <DetailCard
-      title="Watch history"
+      title={t("web.admin.users.detail.activity.history.title")}
       description={
         plays !== undefined
-          ? `${plays.toLocaleString()} ${plays === 1 ? "play" : "plays"} in the last ${days} days`
+          ? t("web.admin.users.detail.activity.history.summary", {
+              count: plays,
+              count_text: plays.toLocaleString(formatLocale()),
+              days: String(days),
+            })
           : undefined
       }
       actions={
         <div className="flex flex-wrap items-center gap-2">
           <Select value={profileId} onValueChange={setProfileId}>
-            <SelectTrigger size="sm" className="w-36" aria-label="Profile">
+            <SelectTrigger
+              size="sm"
+              className="w-36"
+              aria-label={t("web.admin.users.detail.common.profileFilter")}
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={ALL_PROFILES}>All profiles</SelectItem>
+              <SelectItem value={ALL_PROFILES}>
+                {t("web.admin.users.detail.common.allProfiles")}
+              </SelectItem>
               {(profiles.data ?? []).map((profile) => (
                 <SelectItem key={profile.id} value={profile.id}>
                   {profile.name || profile.id}
@@ -157,13 +175,17 @@ export function WatchHistoryCard({
             </SelectContent>
           </Select>
           <Select value={String(days)} onValueChange={(value) => setDays(Number(value))}>
-            <SelectTrigger size="sm" className="w-36" aria-label="Period">
-              <SelectValue>{period.label}</SelectValue>
+            <SelectTrigger
+              size="sm"
+              className="w-36"
+              aria-label={t("web.admin.users.detail.activity.history.periodLabel")}
+            >
+              <SelectValue>{t(period.label)}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               {PERIODS.map((option) => (
                 <SelectItem key={option.days} value={String(option.days)}>
-                  {option.label}
+                  {t(option.label)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -173,11 +195,16 @@ export function WatchHistoryCard({
       footer={
         <>
           <span className="text-muted-foreground mr-auto text-xs">
-            {plays !== undefined ? `Showing ${shown} of ${plays}` : `Showing ${shown}`}
+            {plays !== undefined
+              ? t("web.admin.users.detail.activity.history.showingOf", {
+                  shown: String(shown),
+                  total: String(plays),
+                })
+              : t("web.admin.users.detail.activity.history.showing", { shown: String(shown) })}
           </span>
           <Button variant="ghost" size="sm" asChild>
             <Link to={historyLink}>
-              Open in Playback History
+              {t("web.admin.users.detail.activity.history.openHistory")}
               <ArrowUpRight className="h-3 w-3" />
             </Link>
           </Button>
@@ -188,7 +215,7 @@ export function WatchHistoryCard({
               disabled={history.isFetchingNextPage}
               onClick={() => history.fetchNextPage()}
             >
-              Load more
+              {t("web.admin.users.detail.common.loadMore")}
             </Button>
           )}
         </>
@@ -196,9 +223,11 @@ export function WatchHistoryCard({
     >
       {history.isError && (
         <div role="alert" className="flex items-center gap-3 px-5 py-4 text-sm">
-          <span className="text-destructive">Couldn&apos;t load watch history.</span>
+          <span className="text-destructive">
+            {t("web.admin.users.detail.activity.history.failed")}
+          </span>
           <Button variant="outline" size="sm" onClick={() => history.refetch()}>
-            Retry
+            {t("common.retry")}
           </Button>
         </div>
       )}
@@ -207,11 +236,19 @@ export function WatchHistoryCard({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="pl-4 sm:pl-5">Title</TableHead>
-                <TableHead className="hidden sm:table-cell">Profile</TableHead>
-                <TableHead>Method</TableHead>
-                <TableHead className="hidden sm:table-cell">Watched</TableHead>
-                <TableHead className="pr-4 sm:pr-5">When</TableHead>
+                <TableHead className="pl-4 sm:pl-5">
+                  {t("web.admin.users.detail.activity.history.column.title")}
+                </TableHead>
+                <TableHead className="hidden sm:table-cell">
+                  {t("web.admin.users.detail.activity.history.column.profile")}
+                </TableHead>
+                <TableHead>{t("web.admin.users.detail.activity.history.column.method")}</TableHead>
+                <TableHead className="hidden sm:table-cell">
+                  {t("web.admin.users.detail.activity.history.column.watched")}
+                </TableHead>
+                <TableHead className="pr-4 sm:pr-5">
+                  {t("web.admin.users.detail.activity.history.column.when")}
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -248,7 +285,7 @@ export function WatchHistoryCard({
                     {row.live ? (
                       <span className="text-foreground inline-flex items-center gap-1.5">
                         <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                        Now
+                        {t("web.admin.users.detail.activity.history.now")}
                       </span>
                     ) : (
                       formatShortDate(row.endedAt)

@@ -27,6 +27,7 @@ import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { isEpisodeStill, isEpisodeUnwatched } from "@/lib/episodeSpoilers";
 import { RatingEntry } from "@/components/ratings/RatingEntry";
 import { formatHeroMetadata } from "./heroMetadata";
+import { useAppLanguage, useT, type Translate } from "@/i18n";
 
 // On-view translation for the visible slide loads after the hero itself, so
 // it stays out of the launch bundle; the plain overview shows meanwhile.
@@ -159,28 +160,32 @@ const HeroBackdropSlide = memo(function HeroBackdropSlide({
   );
 });
 
-function heroPlayLabel(item: SectionItem, activeAudiobookPlaying?: boolean | null): string {
+function heroPlayLabel(
+  t: Translate,
+  item: SectionItem,
+  activeAudiobookPlaying?: boolean | null,
+): string {
   if (item.type === "ebook") {
-    return "Read";
+    return t("web.home.hero.read");
   }
   if (item.type !== "audiobook") {
-    return "Play";
+    return t("web.home.hero.play");
   }
   if (activeAudiobookPlaying === true) {
-    return "Pause";
+    return t("web.home.hero.pause");
   }
   if (activeAudiobookPlaying === false) {
-    return "Resume";
+    return t("web.home.hero.resume");
   }
   const position = item.position_seconds ?? 0;
   const duration = item.duration_seconds ?? 0;
   if (position > 0 && (duration <= 0 || position < duration)) {
-    return "Resume";
+    return t("web.home.hero.resume");
   }
   if (item.user_state?.played) {
-    return "Listen Again";
+    return t("web.home.hero.listenAgain");
   }
-  return "Listen";
+  return t("web.home.hero.listen");
 }
 
 export default function HeroBanner({
@@ -192,6 +197,9 @@ export default function HeroBanner({
   libraryId,
   onRefreshItems,
 }: HeroBannerProps) {
+  const t = useT();
+  // The details line comes from a plain helper; follow language changes.
+  useAppLanguage();
   const spoilerPrefs = useEpisodeSpoilerPrefs();
   const slides = useMemo(() => items.slice(0, maxSlides), [items, maxSlides]);
   const pendingSlideIds = useMemo(
@@ -331,7 +339,7 @@ export default function HeroBanner({
     current.type === "audiobook" && audiobookPlayback?.active?.contentId === current.content_id
       ? audiobookPlayback.active.playing
       : null;
-  const playLabel = heroPlayLabel(current, activeAudiobookPlaying);
+  const playLabel = heroPlayLabel(t, current, activeAudiobookPlaying);
   const playHref = buildMediaPlayHref({
     contentId: current.content_id,
     type: current.type,
@@ -362,7 +370,7 @@ export default function HeroBanner({
         bleed ? "-mt-[96px] mb-0 sm:-mt-[104px]" : "border-border/60 mb-10 border-b",
       )}
       aria-roledescription="carousel"
-      aria-label="Featured content"
+      aria-label={t("web.home.hero.carouselLabel")}
       onMouseEnter={pause}
       onMouseLeave={resume}
       onFocus={pause}
@@ -414,9 +422,10 @@ export default function HeroBanner({
         <div className="w-full max-w-[1380px]">
           <div className="max-w-3xl">
             <p className="hero-eyebrow mb-4 hidden sm:block">
-              <span className="hero-eyebrow-strong">Featured</span>
+              <span className="hero-eyebrow-strong">{t("web.home.hero.eyebrow")}</span>
+              {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a divider glyph, not text */}
               <span className="hero-eyebrow-divider">—</span>
-              <span>No. {padded(activeIndex + 1)}</span>
+              <span>{t("web.home.hero.slideNumber", { number: padded(activeIndex + 1) })}</span>
             </p>
             <h1
               key={current.content_id}
@@ -471,7 +480,7 @@ export default function HeroBanner({
                 className="pill pill-glass transition-colors duration-(--duration-fast)"
               >
                 <Info className="h-4 w-4" />
-                More Info
+                {t("web.home.hero.moreInfo")}
               </ViewTransitionLink>
             </div>
           </div>
@@ -494,7 +503,7 @@ export default function HeroBanner({
             type="button"
             onClick={prev}
             className="glass-subtle absolute top-1/2 left-3 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-(--duration-fast) hover:opacity-100 sm:left-5 sm:p-2 sm:opacity-80 lg:opacity-0 lg:group-hover:opacity-90"
-            aria-label="Previous slide"
+            aria-label={t("web.home.hero.previousSlide")}
           >
             <ChevronLeft className="size-4 sm:size-5" />
           </button>
@@ -502,7 +511,7 @@ export default function HeroBanner({
             type="button"
             onClick={next}
             className="glass-subtle absolute top-1/2 right-3 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-(--duration-fast) hover:opacity-100 sm:right-5 sm:p-2 sm:opacity-80 lg:opacity-0 lg:group-hover:opacity-90"
-            aria-label="Next slide"
+            aria-label={t("web.home.hero.nextSlide")}
           >
             <ChevronRight className="size-4 sm:size-5" />
           </button>
@@ -522,13 +531,16 @@ export default function HeroBanner({
           >
             <div className="hero-slide-counter" aria-hidden="true">
               <span className="num">{padded(activeIndex + 1)}</span>
+              {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a separator glyph, not text */}
               <span>/</span>
               <span>{padded(slideCount)}</span>
             </div>
             <button
               type="button"
               onClick={togglePause}
-              aria-label={paused ? "Play slideshow" : "Pause slideshow"}
+              aria-label={
+                paused ? t("web.home.hero.playSlideshow") : t("web.home.hero.pauseSlideshow")
+              }
               className="glass-subtle flex h-7 w-7 items-center justify-center rounded-full text-white/80 transition-colors hover:text-white"
             >
               {paused ? <Play className="size-3" /> : <Pause className="size-3" />}
@@ -554,7 +566,9 @@ export default function HeroBanner({
             <button
               type="button"
               onClick={togglePause}
-              aria-label={paused ? "Play slideshow" : "Pause slideshow"}
+              aria-label={
+                paused ? t("web.home.hero.playSlideshow") : t("web.home.hero.pauseSlideshow")
+              }
               className="flex h-7 w-7 items-center justify-center rounded-full text-white/70 transition-colors hover:text-white"
             >
               {paused ? <Play className="size-3.5" /> : <Pause className="size-3.5" />}

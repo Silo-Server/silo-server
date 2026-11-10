@@ -13,6 +13,7 @@ import RefreshFailedNotice from "@/components/RefreshFailedNotice";
 import ScrollToTopButton from "@/components/ScrollToTopButton";
 import { useCatalogLetters, useCatalogWindow, useLibraryHasItems } from "@/hooks/queries/catalog";
 import type { AudiobookGroupBy } from "@/hooks/queries/audiobookGroups";
+import { useT, type MessageKey } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { normalizeQuerySortForScope } from "@/lib/querySortOptions";
 import type { CatalogSearchState } from "@/pages/catalogSearchParams";
@@ -46,11 +47,11 @@ interface LibraryBrowseProps {
   onQueryDefinitionChange: (queryDefinition: QueryDefinition) => void;
 }
 
-const AXIS_LABELS: Record<AudiobookBrowseAxis, string> = {
-  books: "Books",
-  series: "Series",
-  authors: "Authors",
-  narrators: "Narrators",
+const AXIS_LABELS: Record<AudiobookBrowseAxis, MessageKey> = {
+  books: "web.library.browse.axisBooks",
+  series: "web.library.browse.axisSeries",
+  authors: "web.library.browse.axisAuthors",
+  narrators: "web.library.browse.axisNarrators",
 };
 
 const AXIS_GROUP_BY: Record<Exclude<AudiobookBrowseAxis, "books">, AudiobookGroupBy> = {
@@ -72,10 +73,11 @@ function AudiobookAxisTabs({
   value: AudiobookBrowseAxis;
   onChange: (axis: AudiobookBrowseAxis) => void;
 }) {
+  const t = useT();
   return (
     <div
       role="radiogroup"
-      aria-label="Browse audiobooks by"
+      aria-label={t("web.library.browse.axisLabel")}
       className="surface-panel inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-full p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       {AUDIOBOOK_BROWSE_AXES.map((axis) => {
@@ -98,7 +100,7 @@ function AudiobookAxisTabs({
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
-            {AXIS_LABELS[axis]}
+            {t(AXIS_LABELS[axis])}
           </button>
         );
       })}
@@ -107,16 +109,17 @@ function AudiobookAxisTabs({
 }
 
 function NoMatchingItems({ onClearFilters }: { onClearFilters?: () => void }) {
+  const t = useT();
   return (
     <div className="text-muted-foreground flex flex-col items-center gap-3 py-12 text-center">
-      <p>No items match your current filters.</p>
+      <p>{t("web.library.browse.noMatches")}</p>
       {onClearFilters ? (
         <button
           type="button"
           onClick={onClearFilters}
           className="text-primary text-sm font-medium hover:underline"
         >
-          Clear filters
+          {t("web.library.browse.clearFilters")}
         </button>
       ) : null}
     </div>
@@ -131,6 +134,7 @@ export default function LibraryBrowse({
   onBrowseTypeChange,
   onQueryDefinitionChange,
 }: LibraryBrowseProps) {
+  const t = useT();
   const limit = 60;
   const sortRelevanceScope =
     browseType === "episode"
@@ -302,10 +306,10 @@ export default function LibraryBrowse({
   let refreshFailedMessage: string | undefined;
   if (browsePartlyFailed) {
     refreshFailedMessage = catalogQuery.sourceError
-      ? "Couldn't refresh this library."
-      : "Some items couldn't be loaded.";
+      ? t("web.library.browse.refreshFailed")
+      : t("web.library.browse.someItemsFailed");
   } else if (lettersRefreshFailed) {
-    refreshFailedMessage = "Couldn't refresh the letter bar, so a jump may land a little off.";
+    refreshFailedMessage = t("web.library.browse.lettersRefreshFailed");
   }
 
   if (isGroupedAxis) {
@@ -342,7 +346,9 @@ export default function LibraryBrowse({
     <div className="space-y-5 py-2 sm:space-y-6">
       {libraryType === "series" ? (
         <div className="flex flex-wrap items-center gap-3">
-          <span className="text-muted-foreground text-sm font-medium">Type</span>
+          <span className="text-muted-foreground text-sm font-medium">
+            {t("web.library.browse.typeLabel")}
+          </span>
           <Select
             value={browseType}
             onValueChange={(value) => onBrowseTypeChange(value as LibraryBrowseType)}
@@ -351,8 +357,8 @@ export default function LibraryBrowse({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="series">Series</SelectItem>
-              <SelectItem value="episode">Episodes</SelectItem>
+              <SelectItem value="series">{t("web.catalog.mediaType.series")}</SelectItem>
+              <SelectItem value="episode">{t("web.catalog.mediaType.episodes")}</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -387,7 +393,7 @@ export default function LibraryBrowse({
           empty state. */}
       {browseFailed ? (
         <PageUnavailable
-          title="Couldn't load this library"
+          title={t("web.library.browse.loadFailed")}
           description={loadErrorDescription(catalogQuery.error)}
           onRetry={retryBrowse}
           retrying={retrying}

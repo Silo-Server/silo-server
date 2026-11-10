@@ -13,6 +13,7 @@ import type { PageRef } from "@/lib/homeRows/types";
 
 import { RowsOnceCreated, RowsThatShowIt } from "./RowsThatShowIt";
 import { useAddedRowHighlight } from "./useAddedRowHighlight";
+import { useAppLanguage } from "@/i18n";
 
 interface PersonalRowsProps {
   /** The saved collection; undefined until it is created. */
@@ -57,6 +58,7 @@ function PersonalRows({
   onAdd,
   onLineChange,
 }: PersonalRowsProps) {
+  useAppLanguage();
   const libraries = useUserLibraries();
   // Until the display preferences load, the list still holds hidden libraries.
   const visible = libraries.isLoading ? undefined : libraries.data;

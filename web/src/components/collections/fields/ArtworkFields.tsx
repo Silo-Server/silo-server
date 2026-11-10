@@ -11,12 +11,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { isArtworkStaged } from "@/hooks/queries/collectionScope";
+import { useT } from "@/i18n";
 import {
-  ARTWORK_SLOT_LABEL,
-  BACKDROP_CAPTION,
-  NO_POSTER,
-  POSTER_AWAITS_COLLAGE,
-  POSTER_IS_COLLAGE,
+  artworkSlotLabel,
+  backdropCaption,
+  noPoster,
+  posterAwaitsCollage,
+  posterIsCollage,
   type ArtworkState,
 } from "@/lib/collections/copy";
 import type { ArtworkDraft, ArtworkSlot, ArtworkSlotDraft } from "@/lib/collections/scope";
@@ -30,12 +31,14 @@ import {
 } from "./artworkPreview";
 
 const ACCEPT = "image/jpeg,image/png,image/webp";
+/** The link field's placeholder: a URL's start, not text to translate. */
+const LINK_PLACEHOLDER = "https://";
 
 /** Under the poster tile, by what it shows; nothing under a chosen or saved image. */
-const POSTER_CAPTION: Readonly<Partial<Record<ArtworkState, string>>> = {
-  collage: POSTER_IS_COLLAGE,
-  "awaiting-collage": POSTER_AWAITS_COLLAGE,
-  none: NO_POSTER,
+const POSTER_CAPTION: Readonly<Partial<Record<ArtworkState, () => string>>> = {
+  collage: posterIsCollage,
+  "awaiting-collage": posterAwaitsCollage,
+  none: noPoster,
 };
 
 /**
@@ -52,11 +55,12 @@ export function EmptyArtwork({
   /** A poster without a collage to fall back to shows as no poster. */
   collages?: boolean;
 }) {
+  const t = useT();
   const collage = slot === "poster" && collages;
   const Icon = collage ? LayoutGrid : ImageIcon;
-  let label = "No backdrop";
-  if (collage) label = "Collage";
-  else if (slot === "poster") label = NO_POSTER;
+  let label = t("web.collections.fields.noBackdrop");
+  if (collage) label = t("web.collections.fields.collage");
+  else if (slot === "poster") label = noPoster();
   return (
     <span
       className={cn(
@@ -105,20 +109,21 @@ function ArtworkTile({
   onRetry?: () => void;
   disabled?: boolean;
 }) {
+  const t = useT();
   const id = useId();
   const input = useRef<HTMLInputElement>(null);
   // After Paste a link…, focus goes to the link field rather than back to the pencil.
   const pasting = useRef(false);
   const preview = useArtworkPreview(value, savedUrl, fallback);
   const state = artworkState(value, savedUrl, fallback);
-  const label = ARTWORK_SLOT_LABEL[slot];
-  const noun = label.toLowerCase();
+  const label = artworkSlotLabel(slot);
   const poster = slot === "poster";
   const usesCollage = poster && fallback.collages;
   const staged = isArtworkStaged(value);
   // Back to the collage or no image: removes a saved image on Save, or drops a new one.
   const clear = () => onChange(savedUrl ? { remove: true } : undefined);
-  const caption = poster ? POSTER_CAPTION[state] : preview ? undefined : BACKDROP_CAPTION;
+  const caption = poster ? POSTER_CAPTION[state]?.() : preview ? undefined : backdropCaption();
+  const slotValues = { slot: poster ? "poster" : "backdrop" };
 
   return (
     <div
@@ -128,7 +133,11 @@ function ArtworkTile({
     >
       <div className={cn(TILE_FRAME, poster ? "aspect-[2/3]" : "aspect-video")}>
         {preview ? (
-          <img src={preview} alt={`${label} preview`} className="size-full object-cover" />
+          <img
+            src={preview}
+            alt={t("web.collections.fields.artworkPreview", slotValues)}
+            className="size-full object-cover"
+          />
         ) : (
           <EmptyArtwork slot={slot} collages={fallback.collages} />
         )}
@@ -138,7 +147,7 @@ function ArtworkTile({
               ref={triggerRef}
               type="button"
               size="icon-sm"
-              aria-label={`Change ${noun}`}
+              aria-label={t("web.collections.fields.changeArtwork", slotValues)}
               className="absolute right-1.5 bottom-1.5 size-7 rounded-lg bg-black/70 text-white ring-1 ring-white/10 backdrop-blur hover:bg-black/85 [&_svg]:size-3.5"
             >
               <Pencil aria-hidden />
@@ -156,7 +165,7 @@ function ArtworkTile({
           >
             <DropdownMenuItem onSelect={() => input.current?.click()}>
               <Upload aria-hidden />
-              Upload image…
+              {t("web.collections.fields.uploadImage")}
             </DropdownMenuItem>
             <DropdownMenuItem
               onSelect={() => {
@@ -165,12 +174,14 @@ function ArtworkTile({
               }}
             >
               <Link2 aria-hidden />
-              Paste a link…
+              {t("web.collections.fields.pasteALink")}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem disabled={state !== "new" && state !== "saved"} onSelect={clear}>
               {usesCollage ? <LayoutGrid aria-hidden /> : <Trash2 aria-hidden />}
-              {usesCollage ? "Use the collage" : `Remove ${noun}`}
+              {usesCollage
+                ? t("web.collections.fields.useTheCollage")
+                : t("web.collections.fields.removeArtwork", slotValues)}
               {usesCollage && (state === "collage" || state === "awaiting-collage") ? (
                 <Check aria-hidden className="ml-auto" />
               ) : null}
@@ -191,32 +202,39 @@ function ArtworkTile({
           role="alert"
           className="text-destructive flex flex-wrap items-center gap-2 text-[12.5px]"
         >
-          {`Couldn't save the ${noun}. ${error}`}
+          {t("web.collections.fields.artworkSaveFailed", { ...slotValues, error })}
           {onRetry ? (
             <Button type="button" size="sm" variant="outline" className="h-7" onClick={onRetry}>
-              Retry
+              {t("common.retry")}
             </Button>
           ) : null}
         </p>
       ) : staged ? (
         <p className="text-muted-foreground text-[12.5px] leading-snug">
-          {value?.remove && !value.file && !value.sourceUrl?.trim()
-            ? `The ${noun} is removed when you save.`
-            : `The new ${noun} saves when you press Save.`}{" "}
-          <button
-            type="button"
-            className="text-foreground font-medium underline underline-offset-4"
-            onClick={() => onChange(undefined)}
-          >
-            Undo
-          </button>
+          {t(
+            value?.remove && !value.file && !value.sourceUrl?.trim()
+              ? "web.collections.fields.artworkRemovedOnSave"
+              : "web.collections.fields.artworkSavesOnSave",
+            {
+              ...slotValues,
+              undo: (chunks) => (
+                <button
+                  type="button"
+                  className="text-foreground font-medium underline underline-offset-4"
+                  onClick={() => onChange(undefined)}
+                >
+                  {chunks}
+                </button>
+              ),
+            },
+          )}
         </p>
       ) : null}
       <input
         ref={input}
         type="file"
         accept={ACCEPT}
-        aria-label={`Upload ${noun}`}
+        aria-label={t("web.collections.fields.uploadArtwork", slotValues)}
         className="hidden"
         onChange={(event) => {
           const file = event.target.files?.[0];
@@ -242,6 +260,7 @@ function PasteLinkBox({
   onUse: (link: string) => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const id = useId();
   const [link, setLink] = useState(initial);
   const use = () => {
@@ -250,13 +269,13 @@ function PasteLinkBox({
   return (
     <div className="border-border bg-popover grid max-w-[360px] gap-2.5 rounded-xl border p-3.5">
       <label htmlFor={`${id}-link`} className="text-[13.5px] font-semibold">
-        {`${ARTWORK_SLOT_LABEL[slot]} image link`}
+        {t("web.collections.fields.imageLink", { slot })}
       </label>
       <Input
         ref={fieldRef}
         id={`${id}-link`}
         type="url"
-        placeholder="https://"
+        placeholder={LINK_PLACEHOLDER}
         value={link}
         onChange={(event) => setLink(event.target.value)}
         onKeyDown={(event) => {
@@ -271,10 +290,10 @@ function PasteLinkBox({
       />
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" size="sm" onClick={onClose}>
-          Cancel
+          {t("common.cancel")}
         </Button>
         <Button type="button" size="sm" disabled={!link.trim()} onClick={use}>
-          Use link
+          {t("web.collections.fields.useLink")}
         </Button>
       </div>
     </div>

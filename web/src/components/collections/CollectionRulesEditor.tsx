@@ -2,6 +2,7 @@ import type { PersonalizedSorts } from "@/lib/querySortOptions";
 import type { QueryDefinition } from "@/api/types";
 import type { FilterConfig } from "@/api/types";
 import FilterRuleEditor from "@/components/FilterRuleEditor";
+import { useT } from "@/i18n";
 import LibraryMultiSelect from "@/components/LibraryMultiSelect";
 import {
   normalizeQuerySortForScope,
@@ -40,6 +41,7 @@ export default function CollectionRulesEditor({
   sortRelevanceScope,
   readOnly = false,
 }: CollectionRulesEditorProps) {
+  const t = useT();
   const filterConfig: FilterConfig = {
     match: value.match,
     groups: value.groups,
@@ -59,7 +61,7 @@ export default function CollectionRulesEditor({
         >
           {showMediaScopeSelector ? (
             <div className="space-y-2">
-              <Label>Media Scope</Label>
+              <Label>{t("web.collections.rules.mediaScope")}</Label>
               <Select
                 value={value.media_scope ?? "all"}
                 onValueChange={(next) => {
@@ -81,14 +83,18 @@ export default function CollectionRulesEditor({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Media</SelectItem>
-                  <SelectItem value="video">Movies & Series</SelectItem>
-                  <SelectItem value="movie">Movies</SelectItem>
-                  <SelectItem value="series">Series</SelectItem>
-                  <SelectItem value="episode">Episodes</SelectItem>
-                  <SelectItem value="audiobook">Audiobooks</SelectItem>
-                  <SelectItem value="ebook">Ebooks</SelectItem>
-                  <SelectItem value="manga">Manga</SelectItem>
+                  <SelectItem value="all">{t("web.collections.rules.mediaAll")}</SelectItem>
+                  <SelectItem value="video">{t("web.collections.rules.mediaVideo")}</SelectItem>
+                  <SelectItem value="movie">{t("web.collections.rules.mediaMovies")}</SelectItem>
+                  <SelectItem value="series">{t("web.collections.rules.mediaSeries")}</SelectItem>
+                  <SelectItem value="episode">
+                    {t("web.collections.rules.mediaEpisodes")}
+                  </SelectItem>
+                  <SelectItem value="audiobook">
+                    {t("web.collections.rules.mediaAudiobooks")}
+                  </SelectItem>
+                  <SelectItem value="ebook">{t("web.collections.rules.mediaEbooks")}</SelectItem>
+                  <SelectItem value="manga">{t("web.collections.rules.mediaManga")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -96,7 +102,7 @@ export default function CollectionRulesEditor({
 
           {allowLibrarySelection ? (
             <div className="space-y-2">
-              <Label>Libraries</Label>
+              <Label>{t("web.collections.rules.libraries")}</Label>
               <LibraryMultiSelect
                 libraries={libraries}
                 value={value.library_ids}
@@ -108,7 +114,7 @@ export default function CollectionRulesEditor({
       ) : null}
 
       <div className="space-y-2">
-        <Label>Rule Groups</Label>
+        <Label>{t("web.collections.rules.ruleGroups")}</Label>
         <FilterRuleEditor
           value={filterConfig}
           allowPersonalizedFilters={allowPersonalizedFilters}

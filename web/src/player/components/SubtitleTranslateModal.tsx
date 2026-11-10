@@ -5,14 +5,19 @@ import type { PlayerConfig } from "../context/PlayerConfigContext";
 import type { PlayerAudioTrack, PlayerSubtitleInfo } from "../types";
 import { playerV2 } from "../player-v2";
 import { PlayerFetchError } from "../player-fetch";
-import { LANGUAGES, getLanguageName, normalizeLanguageCode } from "../utils/languageNames";
-import { isSubtitleFormatLabel } from "../utils/subtitleCodecs";
+import { languageOptions, normalizeLanguageCode } from "../utils/languageNames";
 import {
+  audioLabel,
   buildSubtitleTranslateRequest,
   isTranslatableSource,
+  sourceLabels,
   type SubtitleTranslateMode,
 } from "./subtitleTranslateRequest";
-import { QUOTA_PERIOD_WINDOW_LABELS } from "@/lib/quotaPeriods";
+import { quotaPeriodWindowLabel } from "@/lib/quotaPeriods";
+import { useT, type MessageKey } from "@/i18n";
+
+/** Glyph on the close button, which carries a translated label. */
+const CLOSE_GLYPH = "✕";
 
 interface SubtitleTranslateModalProps {
   preferredSubtitleLanguage?: string | null;
@@ -27,66 +32,6 @@ interface SubtitleTranslateModalProps {
   sessionId?: string;
   getStartPosition?: () => number;
   onClose: () => void;
-}
-
-// titleNames reports whether a track title already states a flag, so the flag
-// is not repeated. A negated mention ("Non-forced", "Not SDH") does not count.
-function titleNames(title: string, words: string): boolean {
-  return (
-    new RegExp(`\\b(?:${words})\\b`, "i").test(title) &&
-    !new RegExp(`\\b(?:non|not)[\\s-]*(?:${words})\\b`, "i").test(title)
-  );
-}
-
-// sourceLabel names a translation source so full, SDH and forced tracks in one
-// language can be told apart: the track title when it says more than the
-// language or format (as the subtitle menu shows it), then Forced and SDH when
-// the title does not already say so, then where the track comes from.
-export function sourceLabel(track: PlayerSubtitleInfo): string {
-  const lang = getLanguageName(track.language) || track.language || "Unknown";
-  const title = track.label?.trim() ?? "";
-  const hasDetail =
-    title !== "" &&
-    title !== track.language &&
-    title !== lang &&
-    !isSubtitleFormatLabel(title, track.codec);
-  const parts = [lang];
-  if (hasDetail) parts.push(title);
-  if (track.forced && !titleNames(title, "forced")) parts.push("Forced");
-  if (track.hearing_impaired && !titleNames(title, "sdh|cc|hearing")) parts.push("SDH");
-  if (track.source) parts.push(track.source);
-  return parts.join(" · ");
-}
-
-// sourceLabels labels every source track so each option in the picker is
-// distinct. Tracks whose labels would read the same get their track number,
-// and a numbered label that still matches another option gets a counter.
-export function sourceLabels(tracks: PlayerSubtitleInfo[]): Map<number, string> {
-  const base = tracks.map((track) => ({ index: track.index, label: sourceLabel(track) }));
-  const counts = new Map<string, number>();
-  for (const { label } of base) counts.set(label, (counts.get(label) ?? 0) + 1);
-  const used = new Set(
-    base.filter(({ label }) => counts.get(label) === 1).map(({ label }) => label),
-  );
-  const labels = new Map<number, string>();
-  for (const { index, label } of base) {
-    if (counts.get(label) === 1) {
-      labels.set(index, label);
-      continue;
-    }
-    const numbered = `${label} · track ${index + 1}`;
-    let candidate = numbered;
-    for (let n = 2; used.has(candidate); n++) candidate = `${numbered} (${n})`;
-    used.add(candidate);
-    labels.set(index, candidate);
-  }
-  return labels;
-}
-
-function audioLabel(track: PlayerAudioTrack, i: number): string {
-  const lang = getLanguageName(track.language ?? "") || track.language || `Track ${i + 1}`;
-  const layout = track.layout ? ` · ${track.layout}` : "";
-  return `${lang}${layout}${track.default ? " · default" : ""}`;
 }
 
 // Per-user transcription quota as reported by GET /subtitles/ai/quota.
@@ -113,10 +58,12 @@ export function SubtitleTranslateModal({
   getStartPosition,
   onClose,
 }: SubtitleTranslateModalProps) {
+  const t = useT();
   // Only offer sources the server can actually translate (excludes live tracks,
   // bitmap embedded tracks, and ASS/non-text external/downloaded tracks).
   const sourceTracks = useMemo(() => tracks.filter(isTranslatableSource), [tracks]);
-  const sourceOptionLabels = useMemo(() => sourceLabels(sourceTracks), [sourceTracks]);
+  // Built from messages on each render, so they follow the interface language.
+  const sourceOptionLabels = sourceLabels(sourceTracks);
   const canTranslate = translateEnabled && sourceTracks.length > 0;
   const canTranscribe = transcribeEnabled && (audioTracks?.length ?? 0) > 0;
   // Subtitle translation is the default; generating from audio takes over when
@@ -126,7 +73,7 @@ export function SubtitleTranslateModal({
   const [audioIndex, setAudioIndex] = useState(0);
   const [targetLang, setTargetLang] = useState(() => {
     const preferred = normalizeLanguageCode(preferredSubtitleLanguage);
-    return LANGUAGES.some((language) => language.code === preferred) ? preferred : "en";
+    return languageOptions().some((language) => language.code === preferred) ? preferred : "en";
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -134,7 +81,7 @@ export function SubtitleTranslateModal({
 
   const effectiveSourceIndex = sourceIndex ?? sourceTracks[0]?.index ?? null;
   const quotaExhausted = quota !== null && quota.remaining <= 0;
-  const quotaPeriodLabel = quota ? (QUOTA_PERIOD_WINDOW_LABELS[quota.period] ?? quota.period) : "";
+  const quotaPeriodLabel = quota ? (quotaPeriodWindowLabel(quota.period) ?? quota.period) : "";
 
   const generation = useRef(0);
   const inFlight = useRef(false);
@@ -231,7 +178,7 @@ export function SubtitleTranslateModal({
         res.job.kind !== (body.kind ?? "translate") ||
         res.job.source_index !== body.source_index
       ) {
-        throw new Error("Subtitle processing returned an invalid job.");
+        throw new Error(t("web.subtitles.translate.invalidJob"));
       }
       // A request the server had already finished returns the completed job;
       // its stored track is selected directly, with no job left to report.
@@ -239,9 +186,9 @@ export function SubtitleTranslateModal({
         res.job.status === "completed" ? (res.job.result_subtitle_id ?? undefined) : undefined;
       onSubtitleJobAccepted?.(res.job.id, reusedSubtitleId);
       if (reusedSubtitleId) {
-        toast.info("These subtitles were already created, so the saved track is selected.");
+        toast.info(t("web.subtitles.translate.alreadyCreated"));
       } else if (!res.live_delivery_attached) {
-        toast.info("Your subtitle job is underway. The track will appear when it's ready.");
+        toast.info(t("web.subtitles.translate.underway"));
       }
       handleClose();
     } catch (err) {
@@ -256,8 +203,8 @@ export function SubtitleTranslateModal({
         err instanceof Error
           ? err.message
           : mode === "audio"
-            ? "Couldn't start subtitle generation."
-            : "Couldn't start translation.",
+            ? t("web.subtitles.translate.generationFailed")
+            : t("web.subtitles.translate.translationFailed"),
       );
     } finally {
       if (current()) {
@@ -282,6 +229,7 @@ export function SubtitleTranslateModal({
     isOpen,
     refreshQuota,
     onSubtitleJobAccepted,
+    t,
   ]);
 
   if (!isOpen) return null;
@@ -292,7 +240,7 @@ export function SubtitleTranslateModal({
       onClick={handleClose}
       role="dialog"
       aria-modal="true"
-      aria-label="Translate subtitles with AI"
+      aria-label={t("web.subtitles.translate.titleTranslate")}
     >
       <div
         className="w-full max-w-[440px] rounded-lg bg-neutral-900 text-white shadow-xl"
@@ -300,15 +248,17 @@ export function SubtitleTranslateModal({
       >
         <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
           <h2 className="text-sm font-semibold">
-            {mode === "audio" ? "Generate subtitles with AI" : "Translate subtitles with AI"}
+            {mode === "audio"
+              ? t("web.subtitles.translate.titleGenerate")
+              : t("web.subtitles.translate.titleTranslate")}
           </h2>
           <button
             type="button"
             className="rounded text-white/60 hover:text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
             onClick={handleClose}
-            aria-label="Close"
+            aria-label={t("web.subtitles.closeDialog")}
           >
-            ✕
+            {CLOSE_GLYPH}
           </button>
         </div>
 
@@ -317,9 +267,9 @@ export function SubtitleTranslateModal({
             <div className="flex gap-1 rounded bg-neutral-800 p-1" role="tablist">
               {(
                 [
-                  ["subtitles", "From subtitles"],
-                  ["audio", "From audio"],
-                ] as const
+                  ["subtitles", "web.subtitles.translate.fromSubtitles"],
+                  ["audio", "web.subtitles.translate.fromAudio"],
+                ] as const satisfies readonly (readonly [SubtitleTranslateMode, MessageKey])[]
               ).map(([value, label]) => (
                 <button
                   key={value}
@@ -332,7 +282,7 @@ export function SubtitleTranslateModal({
                   onClick={() => setMode(value)}
                   disabled={submitting}
                 >
-                  {label}
+                  {t(label)}
                 </button>
               ))}
             </div>
@@ -340,14 +290,14 @@ export function SubtitleTranslateModal({
 
           {!canTranslate && !canTranscribe ? (
             <p className="py-4 text-center text-xs text-white/50">
-              No text subtitle track is available to translate. Add or download one first.
+              {t("web.subtitles.translate.noSource")}
             </p>
           ) : (
             <>
               {mode === "subtitles" ? (
                 <label className="block">
                   <span className="mb-1 block text-xs font-medium text-white/60">
-                    Translate from
+                    {t("web.subtitles.translate.translateFrom")}
                   </span>
                   <select
                     className="w-full rounded bg-neutral-800 px-2 py-1.5 text-sm text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
@@ -364,7 +314,9 @@ export function SubtitleTranslateModal({
                 </label>
               ) : (
                 <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-white/60">Audio track</span>
+                  <span className="mb-1 block text-xs font-medium text-white/60">
+                    {t("web.subtitles.translate.audioTrack")}
+                  </span>
                   <select
                     className="w-full rounded bg-neutral-800 px-2 py-1.5 text-sm text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
                     value={audioIndex}
@@ -382,13 +334,14 @@ export function SubtitleTranslateModal({
 
               {mode === "audio" && !translateEnabled ? (
                 <p className="text-xs leading-relaxed text-white/60">
-                  Subtitles are written in the spoken language. AI translation is turned off on this
-                  server.
+                  {t("web.subtitles.translate.spokenLanguageOnly")}
                 </p>
               ) : (
                 <label className="block">
                   <span className="mb-1 block text-xs font-medium text-white/60">
-                    {mode === "audio" ? "Subtitle language" : "Translate to"}
+                    {mode === "audio"
+                      ? t("web.subtitles.translate.subtitleLanguage")
+                      : t("web.subtitles.translate.translateTo")}
                   </span>
                   <select
                     className="w-full rounded bg-neutral-800 px-2 py-1.5 text-sm text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
@@ -396,7 +349,7 @@ export function SubtitleTranslateModal({
                     onChange={(e) => setTargetLang(e.target.value)}
                     disabled={submitting}
                   >
-                    {LANGUAGES.map((lang) => (
+                    {languageOptions().map((lang) => (
                       <option key={lang.code} value={lang.code}>
                         {lang.label}
                       </option>
@@ -412,8 +365,17 @@ export function SubtitleTranslateModal({
                   }`}
                 >
                   {quotaExhausted
-                    ? `You've used all ${quota.limit} transcriptions for the last ${quotaPeriodLabel}. Try again later.`
-                    : `${quota.remaining} of ${quota.limit} transcriptions left for the last ${quotaPeriodLabel}.`}
+                    ? t("web.subtitles.translate.quotaExhausted", {
+                        limit: quota.limit,
+                        limit_text: String(quota.limit),
+                        period: quotaPeriodLabel,
+                      })
+                    : t("web.subtitles.translate.quotaRemaining", {
+                        limit: quota.limit,
+                        limit_text: String(quota.limit),
+                        remaining: String(quota.remaining),
+                        period: quotaPeriodLabel,
+                      })}
                 </p>
               )}
 
@@ -429,7 +391,7 @@ export function SubtitleTranslateModal({
                   className="rounded px-3 py-1.5 text-sm text-white/60 hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
                   onClick={handleClose}
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </button>
                 <button
                   type="button"
@@ -441,16 +403,20 @@ export function SubtitleTranslateModal({
                     (mode === "audio" && quotaExhausted)
                   }
                 >
-                  {submitting ? "Starting…" : mode === "audio" ? "Generate" : "Translate"}
+                  {submitting
+                    ? t("web.subtitles.translate.starting")
+                    : mode === "audio"
+                      ? t("web.subtitles.translate.generate")
+                      : t("web.subtitles.translate.translate")}
                 </button>
               </div>
 
               <p className="text-[11px] leading-relaxed text-white/35">
                 {mode === "audio"
                   ? translateEnabled
-                    ? "The audio is transcribed on the server (and translated if the language differs) — longer files take a while. The finished track is saved for everyone."
-                    : "The audio is transcribed on the server — longer files take a while. The finished track is saved for everyone."
-                  : "Playback pauses while the first lines are translated, then resumes with subtitles streaming in. The finished track is saved for everyone."}
+                    ? t("web.subtitles.translate.noteAudioTranslate")
+                    : t("web.subtitles.translate.noteAudio")
+                  : t("web.subtitles.translate.noteSubtitles")}
               </p>
             </>
           )}

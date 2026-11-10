@@ -12,73 +12,105 @@ import {
   useUpdateAdminUserSetting,
   type AdminUserSettingEntry,
 } from "@/hooks/queries/admin/users";
+import { useT, type MessageKey, type Translate } from "@/i18n";
 import {
   formatSettingValue,
   getSettingDefinition,
   isStructuredSetting,
 } from "@/lib/settingsDisplay";
 
-import { formatLastSeen } from "../format";
+import { formatLastSeen, possessiveText } from "../format";
 import { DetailCard } from "../ui";
 import { AddSettingPicker } from "./AddSettingPicker";
 import {
   addableSettings,
   categoryTitle,
   identityOf,
-  levelNoun,
   levelPlace,
   replacedValue,
   replacesText,
+  type LevelKind,
   type PreferenceLevel,
 } from "./levels";
 import { SettingJsonDialog } from "./SettingJsonDialog";
 
-const SYNC_NOTE = "The change reaches the app the next time it syncs.";
-
-function levelTitle(level: PreferenceLevel): string {
-  return level.kind === "account" ? level.name : `${level.name} · ${level.profileName}`;
+function levelTitle(t: Translate, level: PreferenceLevel): string {
+  return level.kind === "account"
+    ? level.name
+    : t("web.admin.users.detail.preferences.level.title", {
+        level: level.name,
+        profile: level.profileName,
+      });
 }
 
-function levelDescription(level: PreferenceLevel): string {
+function levelDescription(t: Translate, level: PreferenceLevel): string {
   const profile = level.profileName;
   switch (level.kind) {
     case "account":
-      return "These apply to every profile on the account.";
+      return t("web.admin.users.detail.preferences.level.descAccount");
     case "profile":
-      return `These apply on every device ${profile} uses.`;
+      return t("web.admin.users.detail.preferences.level.descProfile", { profile });
     case "device": {
       const meta = [
         level.device?.platform ? platformLabel(level.device.platform) : null,
-        level.device?.lastSeenAt ? `last seen ${formatLastSeen(level.device.lastSeenAt)}` : null,
+        level.device?.lastSeenAt
+          ? t("web.admin.users.detail.preferences.level.lastSeen", {
+              when: formatLastSeen(level.device.lastSeenAt),
+            })
+          : null,
       ].filter(Boolean);
-      const lead = meta.length > 0 ? `${meta.join(" · ")}. ` : "";
-      return `${lead}These replace ${profile}'s settings on this device only; everything else follows ${profile}.`;
+      return meta.length > 0
+        ? possessiveText(t, "web.admin.users.detail.preferences.level.descDeviceWithMeta", {
+            meta: meta.join(" · "),
+            profile,
+          })
+        : possessiveText(t, "web.admin.users.detail.preferences.level.descDevice", { profile });
     }
     case "client":
-      return `These replace ${profile}'s settings in these apps only; everything else follows ${profile}.`;
+      return possessiveText(t, "web.admin.users.detail.preferences.level.descClient", { profile });
     case "library":
-      return `These replace ${profile}'s settings in this library only; everything else follows ${profile}.`;
+      return possessiveText(t, "web.admin.users.detail.preferences.level.descLibrary", { profile });
     case "series":
-      return `These replace ${profile}'s settings for this series only; everything else follows ${profile}.`;
+      return possessiveText(t, "web.admin.users.detail.preferences.level.descSeries", { profile });
   }
 }
 
-function emptyText(level: PreferenceLevel): { title: string; detail: string } {
+const EMPTY_TITLE: Record<Exclude<LevelKind, "account" | "profile">, MessageKey> = {
+  device: "web.admin.users.detail.preferences.empty.deviceTitle",
+  client: "web.admin.users.detail.preferences.empty.clientTitle",
+  library: "web.admin.users.detail.preferences.empty.libraryTitle",
+  series: "web.admin.users.detail.preferences.empty.seriesTitle",
+};
+
+const ADD_LABEL: Record<LevelKind, MessageKey> = {
+  account: "web.admin.users.detail.preferences.add.account",
+  profile: "web.admin.users.detail.preferences.add.profile",
+  device: "web.admin.users.detail.preferences.add.device",
+  client: "web.admin.users.detail.preferences.add.client",
+  library: "web.admin.users.detail.preferences.add.library",
+  series: "web.admin.users.detail.preferences.add.series",
+};
+
+function emptyText(t: Translate, level: PreferenceLevel): { title: string; detail: string } {
   if (level.kind === "profile") {
     return {
-      title: `Nothing changed for ${level.profileName}`,
-      detail: "It uses the app defaults everywhere.",
+      title: t("web.admin.users.detail.preferences.empty.profileTitle", {
+        profile: level.profileName,
+      }),
+      detail: t("web.admin.users.detail.preferences.empty.profileDetail"),
     };
   }
   if (level.kind === "account") {
     return {
-      title: "Nothing changed for the account",
-      detail: "Every profile uses its own settings.",
+      title: t("web.admin.users.detail.preferences.empty.accountTitle"),
+      detail: t("web.admin.users.detail.preferences.empty.accountDetail"),
     };
   }
   return {
-    title: `Nothing changed on this ${levelNoun(level)}`,
-    detail: `It uses ${level.profileName}'s settings everywhere.`,
+    title: t(EMPTY_TITLE[level.kind]),
+    detail: possessiveText(t, "web.admin.users.detail.preferences.empty.detail", {
+      profile: level.profileName,
+    }),
   };
 }
 
@@ -98,6 +130,7 @@ function SettingRow({
   onEditJson: () => void;
   onRemove: () => void;
 }) {
+  const t = useT();
   const definition = getSettingDefinition(entry.key);
   const label = definition?.label ?? entry.key;
   // A key this build does not know, an object-valued one, or one the manifest
@@ -113,7 +146,7 @@ function SettingRow({
         variant="ghost"
         size="icon"
         className="text-muted-foreground hover:text-destructive size-7"
-        aria-label={`Remove ${label}`}
+        aria-label={t("web.admin.users.detail.preferences.row.removeAria", { setting: label })}
         disabled={busy}
         onClick={onRemove}
       >
@@ -121,7 +154,9 @@ function SettingRow({
       </Button>
       <div className="min-w-0">
         <div className="text-muted-foreground text-[11px] font-medium">
-          {definition ? categoryTitle(definition.category) : "Not in this version"}
+          {definition
+            ? categoryTitle(definition.category)
+            : t("web.admin.users.detail.preferences.row.notInVersion")}
         </div>
         <div className="text-sm font-medium break-words" title={definition?.description}>
           {label}
@@ -138,10 +173,12 @@ function SettingRow({
                 so a key from a newer server is shown but not edited here. */}
             {definition ? (
               <Button variant="outline" size="sm" disabled={busy} onClick={onEditJson}>
-                Edit JSON
+                {t("web.admin.users.detail.preferences.row.editJson")}
               </Button>
             ) : (
-              <span className="text-muted-foreground text-xs">View only</span>
+              <span className="text-muted-foreground text-xs">
+                {t("web.admin.users.detail.preferences.row.viewOnly")}
+              </span>
             )}
           </>
         ) : (
@@ -175,6 +212,7 @@ export function LevelSettings({
   /** Every scope the profile stores; see replacedValue. */
   profileAllEntries: readonly AdminUserSettingEntry[];
 }) {
+  const t = useT();
   const updateSetting = useUpdateAdminUserSetting();
   const deleteSetting = useDeleteAdminUserSetting();
   const clearDevice = useDeleteAllAdminUserDeviceSettingsForDevice();
@@ -193,7 +231,7 @@ export function LevelSettings({
     [level, profileEntries, profileAllEntries],
   );
   const canAdd = addable.length > 0;
-  const addLabel = `Add a setting for this ${levelNoun(level)}`;
+  const addLabel = t(ADD_LABEL[level.kind]);
   const replacedFor = (key: string) => replacedValue(level, key, profileEntries, profileAllEntries);
 
   const add = async (keys: string[]) => {
@@ -217,16 +255,35 @@ export function LevelSettings({
   const removal = removing ? replacedFor(removing.key) : null;
   const removingLabel = removing ? (getSettingDefinition(removing.key)?.label ?? removing.key) : "";
   const fromProfile = removal?.profileName != null;
+  const place = levelPlace(level, t);
   const removalTitle = fromProfile
-    ? `Use ${level.profileName}'s value ${levelPlace(level)}?`
-    : "Go back to the app default?";
-  const removalValue = removal?.display ? `, ${removal.display},` : "";
-  const removalDescription = fromProfile
-    ? `${removingLabel} goes back to ${level.profileName}'s setting${removalValue} ${levelPlace(level)}. ${SYNC_NOTE}`
-    : `${removingLabel} goes back to the app default${removalValue} ${levelPlace(level)}. ${SYNC_NOTE}`;
+    ? possessiveText(t, "web.admin.users.detail.preferences.removal.titleProfile", {
+        profile: level.profileName,
+        place,
+      })
+    : t("web.admin.users.detail.preferences.removal.titleDefault");
+  const removalValue = removal?.display || undefined;
+  let removalDescription: string;
+  if (fromProfile) {
+    const values = { setting: removingLabel, profile: level.profileName, place };
+    removalDescription = removalValue
+      ? possessiveText(t, "web.admin.users.detail.preferences.removal.toProfileWithValue", {
+          ...values,
+          value: removalValue,
+        })
+      : possessiveText(t, "web.admin.users.detail.preferences.removal.toProfile", values);
+  } else {
+    const values = { setting: removingLabel, place };
+    removalDescription = removalValue
+      ? t("web.admin.users.detail.preferences.removal.toDefaultWithValue", {
+          ...values,
+          value: removalValue,
+        })
+      : t("web.admin.users.detail.preferences.removal.toDefault", values);
+  }
 
   const device = level.kind === "device" ? level.device : undefined;
-  const empty = emptyText(level);
+  const empty = emptyText(t, level);
 
   return (
     <>
@@ -235,19 +292,19 @@ export function LevelSettings({
           device ? (
             <span className="flex items-center gap-3">
               <PlatformTile kind={classifyPlatform(device.platform)} size="sm" />
-              {levelTitle(level)}
+              {levelTitle(t, level)}
             </span>
           ) : (
-            levelTitle(level)
+            levelTitle(t, level)
           )
         }
-        description={levelDescription(level)}
+        description={levelDescription(t, level)}
         actions={
           device ? (
             <>
               <Button variant="ghost" size="sm" asChild>
                 <Link to={`/admin/devices/${userId}/${encodeURIComponent(device.id)}`}>
-                  Open device
+                  {t("web.admin.users.detail.preferences.level.openDevice")}
                   <ArrowUpRight className="h-3 w-3" />
                 </Link>
               </Button>
@@ -257,7 +314,7 @@ export function LevelSettings({
                 disabled={busy || level.entries.length === 0}
                 onClick={() => setClearing(true)}
               >
-                Clear device settings
+                {t("web.admin.users.detail.preferences.level.clearDeviceSettings")}
               </Button>
             </>
           ) : undefined
@@ -297,7 +354,13 @@ export function LevelSettings({
         }}
         title={removalTitle}
         description={removalDescription}
-        confirmLabel={fromProfile ? `Use ${level.profileName}'s` : "Use app default"}
+        confirmLabel={
+          fromProfile
+            ? possessiveText(t, "web.admin.users.detail.preferences.removal.confirmProfile", {
+                profile: level.profileName,
+              })
+            : t("web.admin.users.detail.preferences.removal.confirmDefault")
+        }
         onConfirm={() => {
           if (removing) {
             deleteSetting.mutate({ userId, key: removing.key, identity: identityOf(removing) });
@@ -309,9 +372,14 @@ export function LevelSettings({
         <ConfirmDialog
           open={clearing}
           onOpenChange={setClearing}
-          title={`Clear ${level.profileName}'s settings on ${level.name}?`}
-          description={`Every setting ${level.profileName} changed on this device is removed, so it uses ${level.profileName}'s settings everywhere. ${SYNC_NOTE}`}
-          confirmLabel="Clear settings"
+          title={possessiveText(t, "web.admin.users.detail.preferences.clear.title", {
+            profile: level.profileName,
+            device: level.name,
+          })}
+          description={possessiveText(t, "web.admin.users.detail.preferences.clear.description", {
+            profile: level.profileName,
+          })}
+          confirmLabel={t("web.admin.users.detail.preferences.clear.confirm")}
           variant="destructive"
           onConfirm={() => {
             clearDevice.mutate({
@@ -327,8 +395,8 @@ export function LevelSettings({
       <SettingJsonDialog
         settingKey={jsonEditor?.key ?? null}
         value={jsonValue}
-        description="Edit the raw value. This setting has no inline control, so saving replaces the stored value wholesale. The trash button removes it."
-        saveLabel="Save value"
+        description={t("web.admin.users.detail.preferences.json.description")}
+        saveLabel={t("web.admin.users.detail.preferences.json.save")}
         onValueChange={setJsonValue}
         onCancel={closeJsonEditor}
         onSave={() => {

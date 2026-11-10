@@ -1,4 +1,5 @@
 import type { LibraryRealtimeMonitoringEntry, LibraryRealtimeMonitoringState } from "@/api/types";
+import { formatLocale } from "@/lib/appLocale";
 
 /** Where the server-wide real-time monitoring switch lives. */
 export const REALTIME_MONITORING_SETTINGS_PATH = "/admin/settings/library";
@@ -36,7 +37,7 @@ export function realtimeMonitoringStatusText(entry: LibraryRealtimeMonitoringEnt
 function statusSummary(entry: LibraryRealtimeMonitoringEntry): string {
   if (entry.state !== "monitoring") return realtimeMonitoringStateLabel(entry.state);
   const folderNoun = entry.directories === 1 ? "folder" : "folders";
-  const summary = `Monitoring ${entry.directories.toLocaleString()} ${folderNoun}`;
+  const summary = `Monitoring ${entry.directories.toLocaleString(formatLocale())} ${folderNoun}`;
   return entry.backend ? `${summary} (${entry.backend})` : summary;
 }
 

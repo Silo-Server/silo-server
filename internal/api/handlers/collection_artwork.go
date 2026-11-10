@@ -199,7 +199,7 @@ func uploadCollectionImageVariants(
 	case "poster":
 		widths = collectionPosterWidths
 	case "backdrop":
-		widths = []int{1280, 300}
+		widths = collectionBackdropWidths
 	default:
 		return "", "", fmt.Errorf("invalid image type: %s", imageType)
 	}
@@ -216,6 +216,10 @@ func uploadCollectionImageVariants(
 // collectionPosterWidths are the resized variants stored beside an original
 // collection poster.
 var collectionPosterWidths = catalog.CollectionPosterWidths
+
+// collectionBackdropWidths are the resized variants stored beside an original
+// collection backdrop, widest first. A collection page shows the widest.
+var collectionBackdropWidths = []int{1280, 300}
 
 // putCollectionImageVariants generates the given resized variants of fileData
 // and uploads them, with the original, as basePath/{variant}.{revision}.{ext}.

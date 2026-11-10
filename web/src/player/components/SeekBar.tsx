@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MarkerKind, MarkerRegionView, PlayerChapter } from "../types";
 import { trickplayTile, type PlayerTrickplay } from "../trickplay";
 import { formatTime } from "../utils/formatTime";
+import { MARKER_LABEL_KEYS } from "../hooks/useMarkerEditor";
+import { useT, type Translate } from "@/i18n";
 
 interface SeekBarProps {
   currentTime: number;
@@ -64,12 +66,9 @@ const REGION_DOT_COLORS: Record<MarkerKind, string> = {
   preview: "bg-emerald-300",
 };
 
-const MARKER_LABELS: Record<MarkerKind, string> = {
-  intro: "Intro",
-  recap: "Recap",
-  credits: "Credits / Outro",
-  preview: "Preview",
-};
+function markerLabel(t: Translate, kind: MarkerKind): string {
+  return t(MARKER_LABEL_KEYS[kind]);
+}
 
 function findChapterAtTime(chapters: PlayerChapter[], time: number): PlayerChapter | null {
   for (const chapter of chapters) {
@@ -108,6 +107,7 @@ export function SeekBar({
   trickplayUpdatedAt,
   onTrickplayError,
 }: SeekBarProps) {
+  const t = useT();
   const barRef = useRef<HTMLDivElement>(null);
   const [hoverTime, setHoverTime] = useState<number | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -286,14 +286,24 @@ export function SeekBar({
   const displayTime = dragTime ?? currentTime;
   const playedPercent = duration > 0 ? (displayTime / duration) * 100 : 0;
 
-  const formatAriaValueText = useCallback((seconds: number): string => {
-    const s = Math.floor(seconds);
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    if (m > 0 && sec > 0) return `${m} minutes ${sec} seconds`;
-    if (m > 0) return `${m} minutes`;
-    return `${sec} seconds`;
-  }, []);
+  const formatAriaValueText = useCallback(
+    (seconds: number): string => {
+      const s = Math.floor(seconds);
+      const m = Math.floor(s / 60);
+      const sec = s % 60;
+      if (m > 0 && sec > 0) {
+        return t("web.player.seekBar.positionMinutesSeconds", {
+          minutes: t("web.player.seekBar.positionMinutes", { minutes: m, minutes_text: String(m) }),
+          seconds: t("web.player.seekBar.positionSeconds", { seconds: sec }),
+        });
+      }
+      if (m > 0) {
+        return t("web.player.seekBar.positionMinutes", { minutes: m, minutes_text: String(m) });
+      }
+      return t("web.player.seekBar.positionSeconds", { seconds: sec });
+    },
+    [t],
+  );
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -367,7 +377,7 @@ export function SeekBar({
             {tile && trickplay ? (
               <div
                 role="img"
-                aria-label={`Preview at ${formatTime(previewTime)}`}
+                aria-label={t("web.player.seekBar.previewAt", { time: formatTime(previewTime) })}
                 data-testid="seek-preview-image"
                 className="w-full bg-black bg-no-repeat"
                 style={{
@@ -381,7 +391,7 @@ export function SeekBar({
               (hoverRegion || hoverChapter) && (
                 <PreviewImage
                   src={hoverRegion ? hoverRegion.thumbnail_url : hoverChapter?.thumbnail_url}
-                  alt={hoverRegion ? MARKER_LABELS[hoverRegion.kind] : (hoverChapter?.title ?? "")}
+                  alt={hoverRegion ? markerLabel(t, hoverRegion.kind) : (hoverChapter?.title ?? "")}
                   className="aspect-video w-full object-cover"
                   placeholderClassName="flex items-center justify-center bg-gradient-to-b from-white/[0.06] to-white/[0.02]"
                 />
@@ -397,9 +407,12 @@ export function SeekBar({
                       REGION_DOT_COLORS[hoverRegion.kind],
                     ].join(" ")}
                   />
-                  <span className="truncate">{MARKER_LABELS[hoverRegion.kind]}</span>
+                  <span className="truncate">{markerLabel(t, hoverRegion.kind)}</span>
                   <span className="text-white/45 tabular-nums">
-                    {formatTime(hoverRegion.start)}-{formatTime(hoverRegion.end)}
+                    {t("web.player.seekBar.markerRange", {
+                      start: formatTime(hoverRegion.start),
+                      end: formatTime(hoverRegion.end),
+                    })}
                   </span>
                 </div>
               )}
@@ -432,7 +445,7 @@ export function SeekBar({
         >
           <div className="rounded-lg border border-white/[0.08] bg-neutral-900/95 px-2.5 py-1.5 text-center shadow-2xl backdrop-blur-md">
             <div className="text-[10px] font-medium tracking-wide text-white/45 capitalize">
-              {activeRegion.kind} {edgeDrag}
+              {t("web.player.seekBar.markerEdge", { kind: activeRegion.kind, edge: edgeDrag })}
             </div>
             <div className="text-xs font-semibold text-white tabular-nums">
               {formatTime(edgeDrag === "start" ? activeRegion.start : activeRegion.end)}
@@ -449,8 +462,10 @@ export function SeekBar({
       <div
         ref={barRef}
         role="slider"
+        // Found by this attribute, not by its label, which is translated.
+        data-player-seek-slider=""
         tabIndex={0}
-        aria-label="Seek"
+        aria-label={t("web.player.seekBar.label")}
         aria-valuemin={0}
         aria-valuemax={duration}
         aria-valuenow={displayTime}
@@ -527,12 +542,12 @@ export function SeekBar({
             <>
               <MarkerHandle
                 percent={(activeRegion.start / duration) * 100}
-                label="Drag marker start"
+                label={t("web.player.seekBar.dragMarkerStart")}
                 onPointerDown={handleEdgePointerDown(activeRegion.kind, "start")}
               />
               <MarkerHandle
                 percent={(activeRegion.end / duration) * 100}
-                label="Drag marker end"
+                label={t("web.player.seekBar.dragMarkerEnd")}
                 onPointerDown={handleEdgePointerDown(activeRegion.kind, "end")}
               />
             </>

@@ -1,4 +1,5 @@
 import type { components } from "@/api/v2/schema";
+import { t } from "@/i18n";
 import type { PlayerSubtitleInfo } from "../types";
 
 export type StoredSubtitle = components["schemas"]["StoredSubtitle"];
@@ -65,7 +66,7 @@ export function isSyncInProgress(status: SubtitleSyncStatus | undefined): boolea
 export function formatSyncOffset(offsetMs: number): string {
   const seconds = Math.abs(offsetMs) / 1000;
   const sign = offsetMs < 0 ? "−" : "+";
-  return `${sign}${seconds.toFixed(1)} s`;
+  return t("web.subtitles.sync.offsetSeconds", { offset: `${sign}${seconds.toFixed(1)}` });
 }
 
 const FRAME_RATES = [23.976, 24, 25, 29.97, 30, 50, 59.94, 60];
@@ -86,11 +87,11 @@ export function describeSyncScale(scale: number): string | null {
   for (const from of FRAME_RATES) {
     for (const to of FRAME_RATES) {
       if (from !== to && Math.abs(from / to - scale) <= FRAME_RATE_TOLERANCE) {
-        return `${from}→${to} fps`;
+        return t("web.subtitles.sync.frameRate", { from: String(from), to: String(to) });
       }
     }
   }
-  return `×${Number(scale.toFixed(4))} speed`;
+  return t("web.subtitles.sync.speed", { factor: String(Number(scale.toFixed(4))) });
 }
 
 /** "+2.3 s · 25→23.976 fps": a correction in a few characters. */
@@ -111,11 +112,11 @@ export function syncPhaseLabel(job: SubtitleSyncJob | undefined): string | null 
   if (!job || !isSyncInProgress(job.status)) return null;
   switch (job.phase) {
     case "matching":
-      return "Matching lines to speech…";
+      return t("web.subtitles.sync.phase.matching");
     case "analyzing":
-      return "Listening to the audio…";
+      return t("web.subtitles.sync.phase.analyzing");
     default:
-      return "Waiting to start…";
+      return t("web.subtitles.sync.phase.waiting");
   }
 }
 
@@ -123,13 +124,13 @@ export function syncPhaseLabel(job: SubtitleSyncJob | undefined): string | null 
 export function syncFailureMessage(failure: SubtitleSyncFailure | undefined): string {
   switch (failure) {
     case "subtitle_changed":
-      return "The subtitle changed while it was syncing. Try again.";
+      return t("web.subtitles.sync.failure.subtitleChanged");
     case "no_audio":
-      return "This video has no audio Silo can read.";
+      return t("web.subtitles.sync.failure.noAudio");
     case "unavailable":
-      return "The server is busy. Try again in a few minutes.";
+      return t("web.subtitles.sync.failure.unavailable");
     default:
-      return "Sync failed. Try again.";
+      return t("web.subtitles.sync.failure.generic");
   }
 }
 
@@ -145,19 +146,24 @@ export function syncStatusLabel(
     case "pending":
     case "running": {
       const percent = syncProgressPercent(sync);
-      return percent ? `Syncing… ${percent}%` : "Syncing…";
+      return percent
+        ? t("web.subtitles.sync.status.syncingPercent", { percent: String(percent) })
+        : t("web.subtitles.sync.status.syncing");
     }
     case "no_match":
-      return "Doesn't match this video";
+      return t("web.subtitles.sync.status.noMatch");
     case "failed":
-      return "Sync failed";
+      return t("web.subtitles.sync.status.failed");
     case "already_synced":
-      if (isIdentityTiming(timing)) return "Already in sync";
+      if (isIdentityTiming(timing)) return t("web.subtitles.sync.status.alreadyInSync");
       break;
     case "synced":
-      if (isIdentityTiming(timing)) return "Original timing";
-      if (sameTiming(sync.result, timing)) return `Synced ${describeTiming(timing)}`;
+      if (isIdentityTiming(timing)) return t("web.subtitles.sync.status.originalTiming");
+      if (sameTiming(sync.result, timing))
+        return t("web.subtitles.sync.status.synced", { timing: describeTiming(timing) });
       break;
   }
-  return isIdentityTiming(timing) ? null : `Timing adjusted ${describeTiming(timing)}`;
+  return isIdentityTiming(timing)
+    ? null
+    : t("web.subtitles.sync.status.adjusted", { timing: describeTiming(timing) });
 }

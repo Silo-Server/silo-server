@@ -4064,6 +4064,13 @@ export interface PluginRuntime {
   next_restart_at?: string;
 }
 
+/** The last automatic update Silo refused to install, and why. */
+export interface PluginUpdateFailure {
+  version: string;
+  reason: string;
+  failed_at: string;
+}
+
 export interface PluginInstallation {
   id: number;
   repository_id?: number | null;
@@ -4088,6 +4095,8 @@ export interface PluginInstallation {
   repo_url?: string;
   presentation?: PluginPresentation;
   updates_paused: boolean;
+  /** The last automatic update that failed; absent when the last check did not fail. */
+  update_failure?: PluginUpdateFailure | null;
   legacy_metadata_import_types?: string[];
   created_at?: string;
   updated_at?: string;
@@ -4563,7 +4572,18 @@ export interface SectionItem {
   machine_translated_fields?: string[];
 }
 
-export interface ResolvedSection {
+/**
+ * A section title the server wrote itself carries its key in the shared
+ * catalog, so a client can translate it (docs/catalog-api.md, "Section
+ * titles"). Absent on titles an administrator or profile typed; see
+ * `useSectionTitle`.
+ */
+export interface SectionTitleKey {
+  title_key?: string;
+  title_args?: Record<string, string>;
+}
+
+export interface ResolvedSection extends SectionTitleKey {
   id: string;
   section_type: string;
   title: string;
@@ -4579,7 +4599,7 @@ export interface SectionsResponse {
   sections: ResolvedSection[];
 }
 
-export interface ResolvedSectionLayout {
+export interface ResolvedSectionLayout extends SectionTitleKey {
   id: string;
   section_type: string;
   title: string;
@@ -4799,7 +4819,7 @@ export interface SectionOverride {
   removed?: boolean;
 }
 
-export interface SettingsSectionEntry {
+export interface SettingsSectionEntry extends SectionTitleKey {
   id: string;
   section_type: string;
   title: string;

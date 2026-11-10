@@ -9,6 +9,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { useT } from "@/i18n";
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -38,8 +39,8 @@ export function ConfirmDialog({
   onOpenChange,
   title,
   description,
-  confirmLabel = "Confirm",
-  cancelLabel = "Cancel",
+  confirmLabel,
+  cancelLabel,
   variant = "default",
   onConfirm,
   isPending,
@@ -49,6 +50,8 @@ export function ConfirmDialog({
   onCloseAutoFocus,
   error,
 }: ConfirmDialogProps) {
+  const t = useT();
+  const confirmText = confirmLabel ?? t("web.shell.confirmDialog.confirm");
   const id = useId();
   const items = bullets?.items ?? [];
   const itemId = (index: number) => `${id}-item-${index}`;
@@ -63,7 +66,7 @@ export function ConfirmDialog({
   ].join(" ");
   const buttons = (
     <>
-      <AlertDialogCancel>{cancelLabel}</AlertDialogCancel>
+      <AlertDialogCancel>{cancelLabel ?? t("common.cancel")}</AlertDialogCancel>
       <AlertDialogAction
         onClick={onConfirm}
         variant={variant === "destructive" ? "destructive" : "default"}
@@ -72,10 +75,10 @@ export function ConfirmDialog({
         {isPending ? (
           <>
             <span className="mr-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
-            {confirmLabel}
+            {confirmText}
           </>
         ) : (
-          confirmLabel
+          confirmText
         )}
       </AlertDialogAction>
     </>
@@ -106,7 +109,7 @@ export function ConfirmDialog({
         {irreversible ? (
           <AlertDialogFooter className="items-center sm:justify-between">
             <p id={noteId} className="text-muted-foreground text-sm">
-              This can&apos;t be undone.
+              {t("web.shell.confirmDialog.irreversible")}
             </p>
             <div className="flex gap-2">{buttons}</div>
           </AlertDialogFooter>

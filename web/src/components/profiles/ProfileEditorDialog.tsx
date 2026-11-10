@@ -25,8 +25,6 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import {
-  type ProfileCreate,
-  type ProfileUpdate,
   useCreateProfile,
   useDeleteProfileAvatar,
   useUpdateProfile,
@@ -52,67 +50,28 @@ import {
 } from "@/lib/profile-management";
 import { cn } from "@/lib/utils";
 import { AllowedTitlesSection } from "@/components/profiles/AllowedTitlesSection";
+import { ProfileLibraryAccess } from "@/components/profiles/ProfileLibraryAccess";
 import {
   profileHasMaturityLimit,
   useCanManageTitleAllowances,
 } from "@/hooks/queries/titleAllowances";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
+import { useT } from "@/i18n";
+import {
+  ANY_CONTENT_RATING_VALUE,
+  NO_ADVISORY_AGE_VALUE,
+  sortLibraryIDs,
+  type ProfileEditorDialogProps,
+  type ProfileEditorSave,
+  type ValidationErrors,
+} from "./ProfileEditorDialog.model";
 
-/**
- * Where the editor saves instead of the signed-in household's own profile
- * operations: the admin account page passes its account's.
- */
-export interface ProfileEditorSave {
-  create: (body: ProfileCreate) => Promise<Profile>;
-  update: (id: string, body: ProfileUpdate) => Promise<Profile>;
-  pending: boolean;
-}
-
-interface ProfileEditorDialogProps {
-  open: boolean;
-  profile?: Profile | null;
-  libraries: UserLibrary[];
-  avatarUploadEnabled?: boolean;
-  /** The server accepts `max_advisory_age`; hides the control when false. */
-  advisoryAgeSupported?: boolean;
-  /** The server accepts `require_advisory_age`; hides the switch when false. */
-  requireAdvisoryAgeSupported?: boolean;
-  /**
-   * Creates the profile and uploads its avatar as this profile instead of the
-   * active one, as Who's watching does for the verified primary profile.
-   */
-  profileContext?: ProfileRequestContextSnapshot;
-  /**
-   * Saves through these instead. They cannot upload an avatar, so the upload
-   * field is hidden; removing an existing upload is saved with the update.
-   */
-  save?: ProfileEditorSave;
-  onOpenChange: (open: boolean) => void;
-  onSaveSuccess?: (
-    profile: Profile,
-    context: {
-      mode: "create" | "edit";
-      pin: string;
-    },
-  ) => void;
-}
-
-interface ValidationErrors {
-  name?: string;
-  pin?: string;
-  libraries?: string;
-}
-
-const ANY_CONTENT_RATING_VALUE = "__any_content__";
-const NO_ADVISORY_AGE_VALUE = "__no_advisory_limit__";
-
-function sortLibraryIDs(ids: number[]) {
-  return [...new Set(ids)].sort((left, right) => left - right);
-}
+export type { ProfileEditorSave } from "./ProfileEditorDialog.model";
 
 export function ProfileEditorDialog({
   open,
   profile = null,
+  createsPrimary = false,
   libraries,
   avatarUploadEnabled = false,
   advisoryAgeSupported = false,
@@ -122,6 +81,7 @@ export function ProfileEditorDialog({
   onOpenChange,
   onSaveSuccess,
 }: ProfileEditorDialogProps) {
+  const t = useT();
   const mode = profile ? "edit" : "create";
   const sortedLibraries = useMemo(
     () => [...libraries].sort((left, right) => left.sort_order - right.sort_order),
@@ -132,16 +92,19 @@ export function ProfileEditorDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>{mode === "edit" ? "Edit profile" : "New profile"}</DialogTitle>
-          <DialogDescription>
-            Set the avatar, name, PIN, and access rules for this profile.
-          </DialogDescription>
+          <DialogTitle>
+            {mode === "edit"
+              ? t("web.profiles.editor.titleEdit")
+              : t("web.profiles.editor.titleNew")}
+          </DialogTitle>
+          <DialogDescription>{t("web.profiles.editor.description")}</DialogDescription>
         </DialogHeader>
         {open ? (
           <ProfileEditorForm
             key={profile?.id ?? "new-profile"}
             mode={mode}
             profile={profile}
+            isPrimary={profile ? profile.is_primary : createsPrimary}
             libraries={sortedLibraries}
             avatarUploadEnabled={avatarUploadEnabled}
             advisoryAgeSupported={advisoryAgeSupported}
@@ -160,6 +123,7 @@ export function ProfileEditorDialog({
 function ProfileEditorForm({
   mode,
   profile,
+  isPrimary,
   libraries,
   avatarUploadEnabled,
   advisoryAgeSupported,
@@ -171,6 +135,7 @@ function ProfileEditorForm({
 }: {
   mode: "create" | "edit";
   profile: Profile | null;
+  isPrimary: boolean;
   libraries: UserLibrary[];
   avatarUploadEnabled: boolean;
   advisoryAgeSupported: boolean;
@@ -186,6 +151,7 @@ function ProfileEditorForm({
     },
   ) => void;
 }) {
+  const t = useT();
   const createMutation = useCreateProfile(profileContext);
   const updateMutation = useUpdateProfile();
   const uploadAvatarMutation = useUploadProfileAvatar(profileContext);
@@ -197,7 +163,15 @@ function ProfileEditorForm({
     uploadAvatarMutation.isPending ||
     deleteAvatarMutation.isPending;
 
-  const [draft, setDraft] = useState<ProfileDraft>(() => createProfileDraft(profile));
+  // The primary profile inherits the account's libraries and hides the ones it
+  // doesn't want in Settings → Libraries, so it has no library limit. A limit
+  // an older server stored on it is cleared by the next save.
+  const [draft, setDraft] = useState<ProfileDraft>(() => {
+    const initial = createProfileDraft(profile);
+    return isPrimary
+      ? { ...initial, libraryRestrictionsEnabled: false, allowedLibraryIDs: [] }
+      : initial;
+  });
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [removeUploadedAvatar, setRemoveUploadedAvatar] = useState(false);
   const [activePresetStyle, setActivePresetStyle] = useState(
@@ -230,7 +204,6 @@ function ProfileEditorForm({
   const requireAdvisoryAgeId = useId();
   const requireAdvisoryAgeHelpId = useId();
   const playbackQualityId = useId();
-  const restrictLibrariesId = useId();
   const selectedContentRatingValue =
     draft.maxContentRating === "" ? ANY_CONTENT_RATING_VALUE : draft.maxContentRating;
 
@@ -292,7 +265,7 @@ function ProfileEditorForm({
     setDraft((current) =>
       applyKidsPreset(current, {
         contentRatingTouched,
-        libraryAccessTouched,
+        libraryAccessTouched: libraryAccessTouched || isPrimary,
       }),
     );
   }
@@ -301,15 +274,15 @@ function ProfileEditorForm({
     const nextErrors: ValidationErrors = {};
 
     if (current.name.trim() === "") {
-      nextErrors.name = "Enter a profile name.";
+      nextErrors.name = t("web.profiles.editor.nameRequired");
     }
 
     if (current.pin.trim() !== "" && !/^\d{4}$/.test(current.pin.trim())) {
-      nextErrors.pin = "PIN must be exactly 4 digits.";
+      nextErrors.pin = t("web.profiles.editor.pinInvalid");
     }
 
     if (current.libraryRestrictionsEnabled && current.allowedLibraryIDs.length === 0) {
-      nextErrors.libraries = "Choose at least one library.";
+      nextErrors.libraries = t("web.profiles.editor.librariesRequired");
     }
 
     return nextErrors;
@@ -391,37 +364,44 @@ function ProfileEditorForm({
     <form onSubmit={(event) => void handleSubmit(event)} className="space-y-5">
       <section className="border-border space-y-4 rounded-md border p-4">
         <div className="space-y-1">
-          <h3 className="text-sm font-semibold">Profile</h3>
-          <p className="text-muted-foreground text-sm">Choose an avatar and basic details.</p>
+          <h3 className="text-sm font-semibold">{t("web.profiles.editor.profileSection")}</h3>
+          <p className="text-muted-foreground text-sm">
+            {t("web.profiles.editor.profileSectionHint")}
+          </p>
         </div>
 
         <div className="flex flex-col gap-4 lg:flex-row">
           <div className="flex flex-col items-center gap-3 rounded-xl border px-5 py-4 lg:w-52">
             <Avatar className="ring-border h-24 w-24 ring-2">
               {previewImage ? (
-                <AvatarImage src={previewImage} alt={draft.name || "Profile avatar"} />
+                <AvatarImage
+                  src={previewImage}
+                  alt={draft.name || t("web.profiles.editor.avatarAlt")}
+                />
               ) : null}
               <AvatarFallback className="bg-surface text-primary text-3xl font-bold">
                 {(draft.name || profile?.name || "?").charAt(0).toUpperCase()}
               </AvatarFallback>
             </Avatar>
             <div className="text-center">
-              <div className="text-sm font-medium">{draft.name.trim() || "Preview"}</div>
+              <div className="text-sm font-medium">
+                {draft.name.trim() || t("web.profiles.editor.preview")}
+              </div>
               <div className="text-muted-foreground text-xs">
                 {avatarFile
-                  ? "Custom upload selected"
+                  ? t("web.profiles.editor.customUploadSelected")
                   : selectedPreset
                     ? selectedPreset.label
                     : existingUploadedAvatarURL
-                      ? "Custom upload"
-                      : "Initials fallback"}
+                      ? t("web.profiles.editor.customUpload")
+                      : t("web.profiles.editor.initialsFallback")}
               </div>
             </div>
           </div>
 
           <div className="flex-1 space-y-4">
             <div className="space-y-2">
-              <Label htmlFor={nameId}>Name</Label>
+              <Label htmlFor={nameId}>{t("web.profiles.editor.name")}</Label>
               <Input
                 id={nameId}
                 value={draft.name}
@@ -437,17 +417,21 @@ function ProfileEditorForm({
             <div className="space-y-2">
               <Label htmlFor={pinId}>
                 {draft.clearPin
-                  ? "PIN will be removed"
+                  ? t("web.profiles.editor.pinRemoved")
                   : profile?.has_pin
-                    ? "New PIN"
-                    : "PIN (optional)"}
+                    ? t("web.profiles.editor.newPin")
+                    : t("web.profiles.editor.pinOptional")}
               </Label>
               <Input
                 id={pinId}
                 type="password"
                 inputMode="numeric"
                 maxLength={4}
-                placeholder={draft.clearPin ? "PIN will be removed on save" : "4 digits"}
+                placeholder={
+                  draft.clearPin
+                    ? t("web.profiles.editor.pinRemovedOnSave")
+                    : t("web.profiles.editor.pinPlaceholder")
+                }
                 value={draft.clearPin ? "" : draft.pin}
                 disabled={draft.clearPin}
                 onChange={(event) => {
@@ -471,7 +455,9 @@ function ProfileEditorForm({
                     setErrors((current) => ({ ...current, pin: undefined }));
                   }}
                 >
-                  {draft.clearPin ? "Keep existing PIN" : "Remove PIN"}
+                  {draft.clearPin
+                    ? t("web.profiles.editor.keepPin")
+                    : t("web.profiles.editor.removePin")}
                 </Button>
               ) : null}
               {errors.pin ? <p className="text-destructive text-sm">{errors.pin}</p> : null}
@@ -481,11 +467,8 @@ function ProfileEditorForm({
 
         <div className="space-y-3">
           <div className="space-y-1">
-            <Label>Preset avatars</Label>
-            <p className="text-muted-foreground text-xs">
-              Pick a DiceBear style, shuffle fun options, or leave it blank to keep initials. A
-              custom upload overrides presets.
-            </p>
+            <Label>{t("web.profiles.editor.presets")}</Label>
+            <p className="text-muted-foreground text-xs">{t("web.profiles.editor.presetsHint")}</p>
           </div>
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
             {PROFILE_AVATAR_STYLES.map((style) => {
@@ -514,8 +497,13 @@ function ProfileEditorForm({
           </div>
           <div className="flex items-center justify-between gap-3">
             <p className="text-muted-foreground text-xs">
-              {PROFILE_AVATAR_STYLES.find((style) => style.id === activePresetStyle)?.summary}.
-              Showing {visiblePresets.length} options right now.
+              {t("web.profiles.editor.presetsShowing", {
+                count: visiblePresets.length,
+                count_text: String(visiblePresets.length),
+                summary:
+                  PROFILE_AVATAR_STYLES.find((style) => style.id === activePresetStyle)?.summary ??
+                  "",
+              })}
             </p>
             <Button
               type="button"
@@ -524,7 +512,7 @@ function ProfileEditorForm({
               onClick={() => setPresetBatch((current) => current + 1)}
             >
               <RefreshCw className="h-4 w-4" />
-              More options
+              {t("web.profiles.editor.moreOptions")}
             </Button>
           </div>
           <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
@@ -560,7 +548,7 @@ function ProfileEditorForm({
 
         {save ? null : avatarUploadEnabled ? (
           <ImageUploadField
-            label="Custom upload"
+            label={t("web.profiles.editor.customUpload")}
             currentUrl={existingUploadedAvatarURL}
             file={avatarFile}
             onFileChange={(file) => {
@@ -582,9 +570,9 @@ function ProfileEditorForm({
           />
         ) : (
           <div className="rounded-md border border-dashed px-4 py-3 text-sm">
-            <p className="font-medium">Custom uploads are unavailable</p>
+            <p className="font-medium">{t("web.profiles.editor.uploadsUnavailable")}</p>
             <p className="text-muted-foreground mt-1 text-xs">
-              Configure private S3 avatar storage to enable uploaded profile avatars.
+              {t("web.profiles.editor.uploadsUnavailableHint")}
             </p>
           </div>
         )}
@@ -592,18 +580,16 @@ function ProfileEditorForm({
 
       <section className="border-border space-y-4 rounded-md border p-4">
         <div className="space-y-1">
-          <h3 className="text-sm font-semibold">Access</h3>
+          <h3 className="text-sm font-semibold">{t("web.profiles.editor.accessSection")}</h3>
           <p className="text-muted-foreground text-sm">
-            Content limits and library visibility for this profile.
+            {t("web.profiles.editor.accessSectionHint")}
           </p>
         </div>
 
         <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
           <div className="space-y-0.5">
-            <Label htmlFor="profile-is-child">Kids profile</Label>
-            <p className="text-muted-foreground text-xs">
-              Seeds a safer default rating and library setup.
-            </p>
+            <Label htmlFor="profile-is-child">{t("web.profiles.editor.kids")}</Label>
+            <p className="text-muted-foreground text-xs">{t("web.profiles.editor.kidsHint")}</p>
           </div>
           <Switch
             id="profile-is-child"
@@ -614,7 +600,7 @@ function ProfileEditorForm({
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
-            <Label htmlFor={contentRatingId}>Maximum content rating</Label>
+            <Label htmlFor={contentRatingId}>{t("web.profiles.editor.maxContentRating")}</Label>
             <Select
               value={selectedContentRatingValue}
               onValueChange={(value) => {
@@ -640,7 +626,7 @@ function ProfileEditorForm({
 
           {advisoryAgeSupported ? (
             <div className="space-y-2">
-              <Label htmlFor={advisoryAgeId}>Maximum advisory age</Label>
+              <Label htmlFor={advisoryAgeId}>{t("web.profiles.editor.maxAdvisoryAge")}</Label>
               <Select
                 value={
                   draft.maxAdvisoryAge === null
@@ -673,23 +659,20 @@ function ProfileEditorForm({
                 </SelectContent>
               </Select>
               <p id={advisoryAgeHelpId} className="text-muted-foreground text-xs">
-                Hides titles an advisory service such as Common Sense Media recommends for older
-                viewers.
                 {requireAdvisoryAgeSupported &&
                 draft.maxAdvisoryAge !== null &&
                 draft.requireAdvisoryAge
-                  ? null
-                  : " Titles without an advisory age are limited by the content rating alone."}
+                  ? t("web.profiles.editor.advisoryAgeHelp")
+                  : t("web.profiles.editor.advisoryAgeHelpFallback")}
               </p>
               {requireAdvisoryAgeSupported && draft.maxAdvisoryAge !== null ? (
                 <div className="flex items-start justify-between gap-3 pt-1">
                   <div className="space-y-0.5">
                     <Label htmlFor={requireAdvisoryAgeId}>
-                      Hide titles without an advisory age
+                      {t("web.profiles.editor.hideWithoutAge")}
                     </Label>
                     <p id={requireAdvisoryAgeHelpId} className="text-muted-foreground text-xs">
-                      Shows only titles rated at or under this age. Ages are looked up over time, so
-                      this profile may see few titles at first.
+                      {t("web.profiles.editor.hideWithoutAgeHint")}
                     </p>
                   </div>
                   <Switch
@@ -704,7 +687,7 @@ function ProfileEditorForm({
           ) : null}
 
           <div className="space-y-2">
-            <Label htmlFor={playbackQualityId}>Maximum playback quality</Label>
+            <Label htmlFor={playbackQualityId}>{t("web.profiles.editor.maxPlaybackQuality")}</Label>
             <Select
               value={draft.maxPlaybackQuality}
               onValueChange={(value) =>
@@ -725,71 +708,29 @@ function ProfileEditorForm({
           </div>
         </div>
 
-        <div className="border-border space-y-3 rounded-md border p-3">
-          <div className="flex items-center justify-between gap-4">
-            <div className="space-y-0.5">
-              <Label htmlFor={restrictLibrariesId}>Restrict libraries</Label>
-              <p className="text-muted-foreground text-xs">
-                Limit this profile to a specific set of libraries.
-              </p>
-            </div>
-            <Switch
-              id={restrictLibrariesId}
-              checked={draft.libraryRestrictionsEnabled}
-              onCheckedChange={(checked) => {
-                setLibraryAccessTouched(true);
-                updateDraft("libraryRestrictionsEnabled", checked);
-                setErrors((current) => ({ ...current, libraries: undefined }));
-              }}
-            />
-          </div>
-
-          {draft.libraryRestrictionsEnabled ? (
-            <div className="space-y-2">
-              <div className="grid gap-2">
-                {libraries.length === 0 ? (
-                  <p className="text-muted-foreground text-sm">No libraries available.</p>
-                ) : (
-                  libraries.map((library) => {
-                    const checked = draft.allowedLibraryIDs.includes(library.id);
-
-                    return (
-                      <div
-                        key={library.id}
-                        className="border-border flex items-center justify-between rounded-md border px-3 py-2"
-                      >
-                        <div className="space-y-0.5">
-                          <div className="text-sm font-medium">{library.name}</div>
-                          <div className="text-muted-foreground text-xs capitalize">
-                            {library.type}
-                          </div>
-                        </div>
-                        <Switch
-                          checked={checked}
-                          onCheckedChange={(nextChecked) => toggleLibrary(library.id, nextChecked)}
-                        />
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-
-              {errors.libraries ? (
-                <p className="text-destructive text-sm">{errors.libraries}</p>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
+        <ProfileLibraryAccess
+          isPrimary={isPrimary}
+          libraries={libraries}
+          restricted={draft.libraryRestrictionsEnabled}
+          allowedLibraryIDs={draft.allowedLibraryIDs}
+          error={errors.libraries}
+          onRestrictedChange={(checked) => {
+            setLibraryAccessTouched(true);
+            updateDraft("libraryRestrictionsEnabled", checked);
+            setErrors((current) => ({ ...current, libraries: undefined }));
+          }}
+          onLibraryChange={toggleLibrary}
+        />
       </section>
 
       {showAllowedTitles && profile ? <AllowedTitlesSection profileId={profile.id} /> : null}
 
       <DialogFooter>
         <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-          Cancel
+          {t("common.cancel")}
         </Button>
         <Button type="submit" disabled={isPending}>
-          {isPending ? "Saving..." : "Save profile"}
+          {isPending ? t("web.profiles.editor.saving") : t("web.profiles.editor.save")}
         </Button>
       </DialogFooter>
     </form>

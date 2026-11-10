@@ -19,6 +19,7 @@ import {
 import { classifyActivityMethod } from "@/pages/adminActivityPresentation";
 import { formatFileCount, formatMbps } from "../format";
 import { latestFreshPoint } from "./timeseriesSeries";
+import { formatLocale } from "@/lib/appLocale";
 
 function StatTile({
   label,
@@ -114,7 +115,7 @@ export function TranscodeShareStatWidget() {
       value={share === null ? "—" : `${share}%`}
       sub={
         sessions.length > 0
-          ? `${transcoding.toLocaleString()} of ${sessions.length.toLocaleString()} streams`
+          ? `${transcoding.toLocaleString(formatLocale())} of ${sessions.length.toLocaleString(formatLocale())} streams`
           : "no active streams"
       }
       icon={<Zap className="h-4 w-4" />}
@@ -132,7 +133,7 @@ export function ProfilesActiveStatWidget() {
       // A rolling 24h window, not "today": the server has no user timezone, so
       // the label says 24h rather than implying a calendar day.
       label="Profiles · 24h"
-      value={profiles === undefined ? "—" : profiles.toLocaleString()}
+      value={profiles === undefined ? "—" : profiles.toLocaleString(formatLocale())}
       sub="watched on this server"
       icon={<UserCheck className="h-4 w-4" />}
       isLoading={activityQuery.isLoading}
@@ -147,7 +148,7 @@ export function MoviesStatWidget() {
   return (
     <StatTile
       label="Total Movies"
-      value={stats ? stats.total_movies.toLocaleString() : "—"}
+      value={stats ? stats.total_movies.toLocaleString(formatLocale()) : "—"}
       sub={formatFileCount(stats?.total_movie_files)}
       icon={<Film className="h-4 w-4" />}
       isLoading={statsQuery.isLoading || (!stats && !statsQuery.error)}
@@ -162,7 +163,7 @@ export function ShowsStatWidget() {
   return (
     <StatTile
       label="Total Shows"
-      value={stats ? stats.total_shows.toLocaleString() : "—"}
+      value={stats ? stats.total_shows.toLocaleString(formatLocale()) : "—"}
       sub={formatFileCount(stats?.total_show_files)}
       icon={<Tv className="h-4 w-4" />}
       isLoading={statsQuery.isLoading || (!stats && !statsQuery.error)}
@@ -185,7 +186,7 @@ export function AdvisoryCoverageStatWidget() {
     <StatTile
       label="Advisory ages"
       value={stats ? (titles > 0 ? `${Math.round((covered / titles) * 100)}%` : "—") : "—"}
-      sub={`${covered.toLocaleString()} of ${titles.toLocaleString()} titles`}
+      sub={`${covered.toLocaleString(formatLocale())} of ${titles.toLocaleString(formatLocale())} titles`}
       icon={<ShieldCheck className="h-4 w-4" />}
       isLoading={statsQuery.isLoading || (!stats && !statsQuery.error)}
       error={statsQuery.error}

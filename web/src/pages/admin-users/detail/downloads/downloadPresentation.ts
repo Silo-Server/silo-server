@@ -1,4 +1,5 @@
 import type { AdminUserDownload, AdminUserDownloadSubscription } from "@/api/v2/adminUserActivity";
+import { t, type MessageKey } from "@/i18n";
 import { episodeCode } from "../format";
 
 export type DownloadBadgeTone = "ok" | "accent" | "neutral" | "warn" | "danger";
@@ -25,17 +26,25 @@ function observedStatus(status: string, android: boolean): string {
 export function downloadStatusBadge(status: string, android: boolean): DownloadBadge {
   switch (observedStatus(status, android)) {
     case "completed":
-      return { label: "On device", tone: "ok" };
+      return { label: t("web.admin.users.detail.downloads.status.onDevice"), tone: "ok" };
     case "downloading":
-      return { label: "Downloading", tone: "accent" };
+      return { label: t("web.admin.users.detail.downloads.status.downloading"), tone: "accent" };
     case "ready":
-      return { label: android ? "Requested" : "Waiting for device", tone: "neutral" };
+      return {
+        label: android
+          ? t("web.admin.users.detail.downloads.status.requested")
+          : t("web.admin.users.detail.downloads.status.waitingForDevice"),
+        tone: "neutral",
+      };
     case "preparing":
-      return { label: "Server preparing", tone: "neutral" };
+      return {
+        label: t("web.admin.users.detail.downloads.status.serverPreparing"),
+        tone: "neutral",
+      };
     case "failed":
-      return { label: "Failed", tone: "danger" };
+      return { label: t("web.admin.users.detail.downloads.status.failed"), tone: "danger" };
     case "revoked":
-      return { label: "Revoked", tone: "warn" };
+      return { label: t("web.admin.users.detail.downloads.status.revoked"), tone: "warn" };
     default:
       return { label: status, tone: "neutral" };
   }
@@ -54,14 +63,19 @@ function formatMbps(kbps: number): string {
 
 /** "Original" for the source file; "10 Mbps · server-prepared" for a server-made copy. */
 export function downloadQualityLabel(d: AdminUserDownload): string {
-  if (d.delivery_format !== "transcode") return "Original";
+  if (d.delivery_format !== "transcode")
+    return t("web.admin.users.detail.downloads.quality.original");
   let kbps = d.target_bitrate_kbps;
   if (!(kbps > 0)) {
     const pattern = /^(\d+(?:\.\d+)?)mbps$/i;
     const preset = pattern.exec(d.effective_quality) ?? pattern.exec(d.quality);
     kbps = preset ? Number(preset[1]) * 1000 : 0;
   }
-  return kbps > 0 ? `${formatMbps(kbps)} Mbps · server-prepared` : "Server-prepared";
+  return kbps > 0
+    ? t("web.admin.users.detail.downloads.quality.serverPreparedBitrate", {
+        mbps: formatMbps(kbps),
+      })
+    : t("web.admin.users.detail.downloads.quality.serverPrepared");
 }
 
 export interface DownloadGroup {
@@ -101,7 +115,7 @@ export function groupDeviceDownloads(
       groups.set(`item:${row.id}`, {
         key: `item:${row.id}`,
         contentId: row.content_id,
-        title: row.title || "Unknown title",
+        title: row.title || t("web.admin.users.detail.common.unknownTitle"),
         episodes: [],
         movie: row,
         monitored: false,
@@ -114,7 +128,7 @@ export function groupDeviceDownloads(
       group = {
         key,
         contentId: row.content_id,
-        title: row.title || "Unknown series",
+        title: row.title || t("web.admin.users.detail.downloads.unknownSeries"),
         episodes: [],
         monitored: monitors.some(
           (monitor) =>
@@ -132,19 +146,28 @@ export function groupDeviceDownloads(
   return [...groups.values()];
 }
 
-function plural(n: number, one: string, many = `${one}s`): string {
-  return `${n} ${n === 1 ? one : many}`;
+/** A count message whose number prints as typed, without grouping. */
+function counted(key: MessageKey, n: number): string {
+  return t(key, { count: n, count_text: String(n) });
+}
+
+/** "Season 3", "Seasons 1, 2". */
+function seasonList(seasons: number[]): string {
+  return t("web.admin.users.detail.downloads.seasonList", {
+    count: seasons.length,
+    seasons: seasons.join(", "),
+  });
 }
 
 /** "6 episodes · S02E01–E06", "3 episodes · Season 3", "4 episodes · Seasons 1, 2". */
 export function seriesGroupSubtitle(group: DownloadGroup): string {
-  const count = plural(group.episodes.length, "episode");
+  const count = counted("web.admin.users.detail.downloads.episodeCount", group.episodes.length);
   const known = group.episodes
     .map((row) => row.episode)
     .filter((episode): episode is NonNullable<AdminUserDownload["episode"]> => episode !== null);
   if (known.length === 0) return count;
   const seasons = [...new Set(known.map((episode) => episode.season_number))].sort((a, b) => a - b);
-  if (seasons.length > 1) return `${count} · Seasons ${seasons.join(", ")}`;
+  if (seasons.length > 1) return `${count} · ${seasonList(seasons)}`;
   const numbers = [...new Set(known.map((episode) => episode.episode_number))].sort(
     (a, b) => a - b,
   );
@@ -152,9 +175,15 @@ export function seriesGroupSubtitle(group: DownloadGroup): string {
   const last = numbers[numbers.length - 1]!;
   if (numbers.length === 1) return `${count} · ${episodeCode(seasons[0], first)}`;
   const consecutive = last - first + 1 === numbers.length && known.length === group.episodes.length;
-  if (consecutive)
-    return `${count} · ${episodeCode(seasons[0], first)}–E${String(last).padStart(2, "0")}`;
-  return `${count} · Season ${seasons[0]}`;
+  if (consecutive) {
+    const range = t("web.admin.users.detail.downloads.episodeRange", {
+      season: String(seasons[0]).padStart(2, "0"),
+      first: String(first).padStart(2, "0"),
+      last: String(last).padStart(2, "0"),
+    });
+    return `${count} · ${range}`;
+  }
+  return `${count} · ${seasonList(seasons)}`;
 }
 
 /**
@@ -178,36 +207,63 @@ export function seriesGroupStatus(group: DownloadGroup, android: boolean): Downl
   );
   if (working.length > 1) {
     const total = working.reduce((sum, status) => sum + n(status), 0);
-    return { label: `${total} in progress`, tone: "accent" };
-  }
-  if (n("downloading") > 0) return { label: `${n("downloading")} downloading`, tone: "accent" };
-  if (n("failed") > 0) return { label: `${n("failed")} failed`, tone: "danger" };
-  if (n("preparing") > 0) return { label: `${n("preparing")} preparing`, tone: "neutral" };
-  if (n("ready") > 0)
     return {
-      label: android ? `${n("ready")} requested` : `${n("ready")} waiting`,
+      label: counted("web.admin.users.detail.downloads.count.inProgress", total),
+      tone: "accent",
+    };
+  }
+  if (n("downloading") > 0) {
+    return {
+      label: counted("web.admin.users.detail.downloads.count.downloading", n("downloading")),
+      tone: "accent",
+    };
+  }
+  if (n("failed") > 0) {
+    return {
+      label: counted("web.admin.users.detail.downloads.count.failed", n("failed")),
+      tone: "danger",
+    };
+  }
+  if (n("preparing") > 0) {
+    return {
+      label: counted("web.admin.users.detail.downloads.count.preparing", n("preparing")),
       tone: "neutral",
     };
-  if (n("revoked") > 0) return { label: `${n("revoked")} revoked`, tone: "warn" };
+  }
+  if (n("ready") > 0)
+    return {
+      label: android
+        ? counted("web.admin.users.detail.downloads.count.requested", n("ready"))
+        : counted("web.admin.users.detail.downloads.count.waiting", n("ready")),
+      tone: "neutral",
+    };
+  if (n("revoked") > 0) {
+    return {
+      label: counted("web.admin.users.detail.downloads.count.revoked", n("revoked")),
+      tone: "warn",
+    };
+  }
   if (n("completed") === rows.length) return downloadStatusBadge("completed", android);
-  return { label: "Mixed", tone: "neutral" };
+  return { label: t("web.admin.users.detail.downloads.status.mixed"), tone: "neutral" };
 }
 
 /** What a series monitor keeps on the device. */
 export function monitorKeepsLabel(s: AdminUserDownloadSubscription): string {
   switch (s.mode) {
     case "all":
-      return "All episodes";
+      return t("web.admin.users.detail.downloads.monitor.allEpisodes");
     case "future":
-      return "New episodes only";
+      return t("web.admin.users.detail.downloads.monitor.newOnly");
     case "latest_season":
       return s.target_season !== null
-        ? `Latest season (S${String(s.target_season).padStart(2, "0")})`
-        : "Latest season";
+        ? t("web.admin.users.detail.downloads.monitor.latestSeasonNumber", {
+            season: String(s.target_season).padStart(2, "0"),
+          })
+        : t("web.admin.users.detail.downloads.monitor.latestSeason");
     case "specific_seasons": {
       const seasons = [...s.season_numbers].sort((a, b) => a - b);
-      if (seasons.length === 0) return "Chosen seasons";
-      return `${seasons.length === 1 ? "Season" : "Seasons"} ${seasons.join(", ")}`;
+      if (seasons.length === 0) return t("web.admin.users.detail.downloads.monitor.chosenSeasons");
+      return seasonList(seasons);
     }
     default:
       return s.mode;
@@ -216,11 +272,18 @@ export function monitorKeepsLabel(s: AdminUserDownloadSubscription): string {
 
 /** Where a monitor stands now: what's on the device and what's on its way. */
 export function monitorNowLabel(s: AdminUserDownloadSubscription): string {
-  if (!s.active) return "Paused";
+  if (!s.active) return t("web.admin.users.detail.downloads.monitor.paused");
   const parts: string[] = [];
-  if (s.on_device > 0) parts.push(`${s.on_device} on device`);
-  if (s.removed_episodes > 0) parts.push(`${s.removed_episodes} removed by the user`);
-  if (s.in_progress > 0) parts.push(`${s.in_progress} in progress`);
+  if (s.on_device > 0)
+    parts.push(counted("web.admin.users.detail.downloads.count.onDevice", s.on_device));
+  if (s.removed_episodes > 0) {
+    parts.push(counted("web.admin.users.detail.downloads.count.removedByUser", s.removed_episodes));
+  }
+  if (s.in_progress > 0) {
+    parts.push(counted("web.admin.users.detail.downloads.count.inProgress", s.in_progress));
+  }
   if (parts.length > 0) return parts.join(" · ");
-  return s.mode === "future" ? "Waiting for the next episode" : "Nothing downloaded yet";
+  return s.mode === "future"
+    ? t("web.admin.users.detail.downloads.monitor.waitingNext")
+    : t("web.admin.users.detail.downloads.monitor.nothingYet");
 }

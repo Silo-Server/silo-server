@@ -6,6 +6,7 @@ import { SideNavItem, SideNavSection } from "@/components/SideNav";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { SettingsSearchInput } from "@/components/settings/SettingsSearchInput";
 import type { SidebarSwap } from "@/hooks/useSidebarSwap";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 const DESKTOP_MEDIA_QUERY = "(min-width: 64rem)";
@@ -65,6 +66,7 @@ export function SettingsSidebar({
   entrance,
   className,
 }: SettingsSidebarProps) {
+  const t = useT();
   return (
     <aside
       data-settings-sidebar=""
@@ -111,7 +113,7 @@ export function SettingsSidebar({
           </SideNavSection>
         ))}
         {groups.length === 0 ? (
-          <p className="text-muted-foreground px-2 text-sm">No matching settings</p>
+          <p className="text-muted-foreground px-2 text-sm">{t("web.settings.search.noMatches")}</p>
         ) : null}
       </nav>
     </aside>

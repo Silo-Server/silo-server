@@ -21,6 +21,7 @@ import {
 } from "@/lib/collections/scope";
 import { useListReturnPath } from "@/lib/collections/listReturn";
 import type { SyncedTab } from "@/lib/collections/synced";
+import { useT } from "@/i18n";
 
 const CREATE_KINDS: readonly CreateKind[] = ["manual", "smart", "synced"];
 const SYNCED_TABS: readonly SyncedTab[] = ["mdblist", "tmdb_chart", "tmdb_list"];
@@ -32,6 +33,7 @@ function readOnlyHref(href: string) {
 
 /** Header and cards in their final places while the collection loads; no save bar. */
 function EditorSkeleton() {
+  const t = useT();
   const panel = (rows: number) => (
     <div className="surface-panel grid gap-4 rounded-[22px] p-5 sm:p-6">
       <Skeleton className="h-5 w-28" />
@@ -42,7 +44,7 @@ function EditorSkeleton() {
   );
   return (
     <div role="status" aria-busy="true">
-      <span className="sr-only">Loading collection editor…</span>
+      <span className="sr-only">{t("web.collections.editorPage.loading")}</span>
       <CollectionEditorShell
         header={
           <div aria-hidden className="grid gap-4">
@@ -76,6 +78,7 @@ function EditorSkeleton() {
  * Someone who can't change the collection is sent to its page instead of a form.
  */
 export default function CollectionEditorPage({ scope: scopeKind }: { scope: ScopeKind }) {
+  const t = useT();
   const scope = (scopeKind === "server" ? SERVER_SCOPE : PERSONAL_SCOPE) as CollectionScope;
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
@@ -124,8 +127,8 @@ export default function CollectionEditorPage({ scope: scopeKind }: { scope: Scop
     if (editor.error && !isNotFoundProblem(editor.error)) {
       return (
         <PageUnavailable
-          title="Couldn't load this collection"
-          description="Something went wrong while loading it. Try again in a moment."
+          title={t("web.collections.editorPage.loadFailedTitle")}
+          description={t("web.collections.editorPage.loadFailedDescription")}
           onRetry={() => void editor.refetch()}
           retrying={editor.isFetching}
         />
@@ -144,19 +147,24 @@ export default function CollectionEditorPage({ scope: scopeKind }: { scope: Scop
 }
 
 function CollectionNotFound({ scope, listPath }: { scope: ScopeKind; listPath: string }) {
-  useDocumentTitle("Not found");
+  const t = useT();
+  useDocumentTitle(t("web.collections.editorPage.notFoundDocumentTitle"));
   return (
     <PageUnavailable
-      title={scope === "server" ? "Collection not found" : "This collection isn't available"}
+      title={
+        scope === "server"
+          ? t("web.collections.editorPage.notFoundServer")
+          : t("web.collections.editorPage.notFoundPersonal")
+      }
       description={
         scope === "server"
-          ? "It may have been deleted, or the link may be wrong."
-          : "It may have been deleted, or you may not have access to it."
+          ? t("web.collections.editorPage.notFoundServerHelp")
+          : t("web.collections.editorPage.notFoundPersonalHelp")
       }
     >
       <Button asChild variant="outline">
         <ViewTransitionLink to={listPath} up>
-          All collections
+          {t("web.collections.editorPage.allCollections")}
         </ViewTransitionLink>
       </Button>
     </PageUnavailable>

@@ -22,6 +22,7 @@ import type {
   PageRef,
 } from "@/lib/homeRows/types";
 import { fetchRecipeCatalog, type RecipeCatalogResponse } from "@/lib/recipes";
+import { useT } from "@/i18n";
 import { useProfileHomeRows } from "./useProfileHomeRows";
 import { useProfileRowCollections } from "./useRowCollectionOptions";
 
@@ -57,6 +58,9 @@ function toHomeRow(section: SettingsSectionEntry): HomeRow {
     shown: !section.hidden,
     own: section.is_custom,
     renamedFrom: renamed ? section.default_title : undefined,
+    titleKey: section.title_key
+      ? { title: section.title, key: section.title_key, args: section.title_args }
+      : undefined,
   };
 }
 
@@ -113,15 +117,16 @@ export function useProfileHomeRowsAdapter(): ProfileHomeRowsAdapter {
     [setHookPage, setSearchParams],
   );
 
+  const t = useT();
   const pages = useMemo<HomeRowsPageOption[]>(
     () => [
-      { ref: { kind: "home" }, label: "Home" },
+      { ref: { kind: "home" }, label: t("web.home.rows.pages.home") },
       ...(libraries ?? []).map((library) => ({
         ref: { kind: "library" as const, libraryId: library.id },
         label: library.name,
       })),
     ],
-    [libraries],
+    [libraries, t],
   );
 
   const catalogQuery = useQuery({

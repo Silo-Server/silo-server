@@ -21,6 +21,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import type { CatalogFiltersResponse } from "@/api/types";
+import { useT } from "@/i18n";
 
 /** Default secondary filter values for "Clear All". */
 const EMPTY_SECONDARY_FILTERS: Partial<GuidedFormState> = {
@@ -96,6 +97,7 @@ export default function CatalogFilterSheet({
   libraryType,
   catalogState,
 }: CatalogFilterSheetProps) {
+  const t = useT();
   // Portal container inside the Sheet's DOM so that react-remove-scroll
   // (activated by the Dialog/Sheet) does not block scroll events inside
   // dropdown listboxes opened by filter controls.
@@ -117,8 +119,8 @@ export default function CatalogFilterSheet({
           <SheetHeader className="border-b pb-3">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <SheetTitle>Filters</SheetTitle>
-                <SheetDescription>Refine your catalog results</SheetDescription>
+                <SheetTitle>{t("web.catalog.filters.heading")}</SheetTitle>
+                <SheetDescription>{t("web.catalog.filters.subtitle")}</SheetDescription>
               </div>
               <div className="flex items-center gap-1">
                 <Button
@@ -128,7 +130,7 @@ export default function CatalogFilterSheet({
                   onClick={() => onEditorModeChange("guided")}
                   disabled={!guidedAvailable}
                 >
-                  Guided
+                  {t("web.catalog.filters.guided")}
                 </Button>
                 <Button
                   type="button"
@@ -136,7 +138,7 @@ export default function CatalogFilterSheet({
                   size="xs"
                   onClick={() => onEditorModeChange("advanced")}
                 >
-                  Advanced
+                  {t("web.catalog.filters.advanced")}
                 </Button>
               </div>
             </div>
@@ -185,11 +187,11 @@ export default function CatalogFilterSheet({
               size="sm"
               onClick={() => onUpdate(EMPTY_SECONDARY_FILTERS)}
             >
-              Clear All
+              {t("web.catalog.filters.clearAll")}
             </Button>
             <SheetClose asChild>
               <Button type="button" size="sm">
-                Done
+                {t("common.done")}
               </Button>
             </SheetClose>
           </SheetFooter>

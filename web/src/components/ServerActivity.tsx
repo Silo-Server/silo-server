@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from "react";
+import { useAppLanguage } from "@/i18n";
 import { Link, useLocation } from "react-router";
 import { Popover as PopoverPrimitive } from "radix-ui";
 import {
@@ -38,6 +39,7 @@ import {
   preparationRunningLabel,
   preparationWorker,
 } from "@/pages/adminDownloadPreparationPresentation";
+import { formatLocale } from "@/lib/appLocale";
 
 const CONNECTION_PROBLEM_INDICATOR_DELAY_MS = 4_000;
 const MAX_ACTIVITY_SCAN_ROWS = 25;
@@ -450,8 +452,8 @@ function PreparationsSummary({
   const hiddenRunning = running.length - visible.length;
   const waiting = [
     hiddenRunning > 0 ? `${hiddenRunning} more running` : "",
-    queued > 0 ? `${queued.toLocaleString()} queued` : "",
-    retrying > 0 ? `${retrying.toLocaleString()} waiting to retry` : "",
+    queued > 0 ? `${queued.toLocaleString(formatLocale())} queued` : "",
+    retrying > 0 ? `${retrying.toLocaleString(formatLocale())} waiting to retry` : "",
   ].filter(Boolean);
 
   if (visible.length === 0 && waiting.length === 0 && paused === 0 && failed === 0) {
@@ -477,13 +479,13 @@ function PreparationsSummary({
       {paused > 0 && (
         <div className="text-muted-foreground flex items-center gap-1.5 text-[11px]">
           <Pause className="h-3 w-3 shrink-0" aria-hidden="true" />
-          {paused.toLocaleString()} paused
+          {paused.toLocaleString(formatLocale())} paused
         </div>
       )}
       {failed > 0 && (
         <div className="text-destructive flex items-center gap-1.5 text-[11px] font-medium">
           <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden="true" />
-          {failed.toLocaleString()} failed in the last 24 hours
+          {failed.toLocaleString(formatLocale())} failed in the last 24 hours
         </div>
       )}
     </div>
@@ -497,6 +499,8 @@ function PreparationRow({
   prep: AdminDownloadPreparation;
   onNavigate: () => void;
 }) {
+  // The preparation helpers return catalog text; re-render it on a language change.
+  useAppLanguage();
   const percent = preparationPercent(prep);
   const worker = preparationWorker(prep);
   const detail = [
@@ -598,7 +602,7 @@ function formatScanProgress(scan: ScanRun) {
       0,
       Math.min(100, Math.round((result.files_processed / result.total_files) * 100)),
     );
-    return `${result.message ?? "Processing files"} · ${result.files_processed.toLocaleString()} / ${result.total_files.toLocaleString()} (${percent}%)`;
+    return `${result.message ?? "Processing files"} · ${result.files_processed.toLocaleString(formatLocale())} / ${result.total_files.toLocaleString(formatLocale())} (${percent}%)`;
   }
   if (result.message) {
     return result.message;
@@ -622,7 +626,7 @@ function MoreRows({
   return (
     <div className="text-muted-foreground border-t border-[color-mix(in_srgb,var(--border)_35%,transparent)] pt-1.5 text-[11px]">
       {countIsLowerBound ? "At least " : ""}
-      {count.toLocaleString()} {label}
+      {count.toLocaleString(formatLocale())} {label}
     </div>
   );
 }

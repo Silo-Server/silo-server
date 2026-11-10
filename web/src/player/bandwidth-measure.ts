@@ -6,6 +6,7 @@ import {
   type ProbeMode,
   type ProbeResult,
 } from "./probe-meter";
+import { t } from "@/i18n";
 
 /**
  * One connection speed test's transfer and timing. The schedule and Test speed
@@ -19,7 +20,7 @@ const DEFAULT_RETRY_AFTER_SECONDS = 30;
 
 export class ProbeRateLimited extends Error {
   constructor(readonly retryAfter: number) {
-    super(`Try again in ${retryAfter} ${retryAfter === 1 ? "second" : "seconds"}`);
+    super(t("web.player.speedTest.retryAfter", { seconds: retryAfter }));
   }
 }
 

@@ -62,6 +62,7 @@ import { FieldGroup } from "./FieldGroup";
 import { SaveBar } from "@/components/SaveBar";
 import { SettingField, SettingFieldStatus } from "./SettingField";
 import ServerNotificationChannels from "./ServerNotificationChannels";
+import { formatLocale } from "@/lib/appLocale";
 
 /**
  * Operator kill switches for the whole pipeline. Both default on and only
@@ -341,7 +342,7 @@ function RegisterRelayRow({
   const renewalStatus = expirationValid
     ? expiration.getTime() <= Date.now()
       ? "Expired; Silo renews it before the next delivery."
-      : `Expires ${expiration.toLocaleString()}; Silo renews automatically.`
+      : `Expires ${expiration.toLocaleString(formatLocale())}; Silo renews automatically.`
     : configured
       ? "Expiration unknown; Silo refreshes the credential on its next renewal."
       : reregistrationRequired

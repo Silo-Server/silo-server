@@ -8,20 +8,21 @@ import MachineTranslatedLabel from "@/pages/ItemDetail/components/MachineTransla
 import { hasMachineTranslation } from "@/pages/ItemDetail/components/machineTranslation";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
+import { useT, type Translate } from "@/i18n";
 import type { ItemMemberState, MemberWatchState } from "@/api/v2/watchTogetherMemberState";
 import type { WatchTogetherRoomMember } from "@/lib/watchTogether";
 import { MemberAvatar } from "../MemberAvatar";
 import { memberKey, memberTints } from "../members";
 import type { PickerCard } from "./PickerRow";
 
-function stateLabel(state: MemberWatchState | undefined) {
-  if (!state || state.state === "unseen") return "Hasn't seen it";
-  if (state.state === "watched") return "Watched";
+function stateLabel(state: MemberWatchState | undefined, t: Translate) {
+  if (!state || state.state === "unseen") return t("web.watchTogether.movie.notSeen");
+  if (state.state === "watched") return t("watchParty.whoSeen.watched");
   if (state.position_seconds !== undefined && state.duration_seconds) {
     const pct = Math.round((state.position_seconds / state.duration_seconds) * 100);
-    return `${pct}% in`;
+    return t("web.watchTogether.movie.percentIn", { percent: String(pct) });
   }
-  return "In progress";
+  return t("watchParty.whoSeen.inProgress");
 }
 
 /**
@@ -38,6 +39,7 @@ export function MemberWatchList({
   state: ItemMemberState | undefined;
   loading: boolean;
 }) {
+  const t = useT();
   const tints = memberTints(members);
   const byMember = new Map(state?.members.map((s) => [`${s.user_id}:${s.profile_id}`, s]) ?? []);
   const seen = members.filter((m) => byMember.get(memberKey(m))?.state === "watched").length;
@@ -49,17 +51,23 @@ export function MemberWatchList({
     <section className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between">
         <h4 className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
-          Who's seen it
+          {t("watchParty.whoSeen.title")}
         </h4>
         {!loading && members.length > 0 ? (
           <span className="text-muted-foreground text-[11px]">
             {started === 0
-              ? "new for everyone"
+              ? t("web.watchTogether.movie.newForEveryone")
               : seen === members.length
-                ? "a rewatch for everyone"
+                ? t("web.watchTogether.movie.rewatchForEveryone")
                 : seen === 0
-                  ? `${started} of ${members.length} started`
-                  : `${seen} of ${members.length}`}
+                  ? t("web.watchTogether.movie.startedOf", {
+                      started: String(started),
+                      total: String(members.length),
+                    })
+                  : t("web.watchTogether.movie.seenOf", {
+                      seen: String(seen),
+                      total: String(members.length),
+                    })}
           </span>
         ) : null}
       </div>
@@ -76,9 +84,12 @@ export function MemberWatchList({
               ) : (
                 <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
                   {s?.on_watchlist ? (
-                    <Bookmark className="size-3" aria-label="On their watchlist" />
+                    <Bookmark
+                      className="size-3"
+                      aria-label={t("web.watchTogether.movie.onWatchlist")}
+                    />
                   ) : null}
-                  {stateLabel(s)}
+                  {stateLabel(s, t)}
                 </span>
               )}
             </li>
@@ -115,6 +126,7 @@ export function MovieDetailPanel({
   onConfirm: () => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const detail = useCatalogItemDetail(card.content_id, card.library_id);
   const item = detail.data;
   const [backdropLoaded, setBackdropLoaded] = useState(false);
@@ -166,7 +178,7 @@ export function MovieDetailPanel({
           </div>
           <div className="min-w-0 flex-1 pb-0.5">
             <p className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
-              Candidate
+              {t("web.watchTogether.movie.eyebrow")}
             </p>
             <h3 className="line-clamp-2 text-base leading-tight font-semibold">{card.title}</h3>
             {meta.length > 0 ? (
@@ -186,7 +198,7 @@ export function MovieDetailPanel({
           variant="ghost"
           size="icon-sm"
           onClick={onClose}
-          aria-label="Close details"
+          aria-label={t("web.watchTogether.movie.close")}
           className="absolute top-2 right-2 bg-black/30 hover:bg-black/50"
         >
           <X className="size-4" />
@@ -235,13 +247,15 @@ export function MovieDetailPanel({
 
       <div className="border-border/60 flex shrink-0 flex-wrap items-center justify-end gap-2 border-t px-4 py-3">
         {replaces ? (
-          <span className="text-muted-foreground mr-auto text-xs">Replaces {replaces}</span>
+          <span className="text-muted-foreground mr-auto text-xs">
+            {t("web.watchTogether.common.replaces", { title: replaces })}
+          </span>
         ) : null}
         <Button type="button" variant="ghost" onClick={onClose} disabled={busy}>
-          Cancel
+          {t("common.cancel")}
         </Button>
         <Button type="button" onClick={onConfirm} disabled={busy}>
-          {busy ? "Working…" : actionLabel}
+          {busy ? t("web.watchTogether.common.working") : actionLabel}
         </Button>
       </div>
     </div>

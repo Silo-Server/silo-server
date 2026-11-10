@@ -39,6 +39,7 @@ import { buildItemHref } from "@/lib/mediaNavigation";
 import { cn } from "@/lib/utils";
 import { hasMachineTranslation } from "./components/machineTranslation";
 import EpisodesTranslationAction from "./components/EpisodesTranslationAction";
+import { useT } from "@/i18n";
 
 /** Series lead with their creators; one without Creator credits keeps showing its directors. */
 const SERIES_LEAD_JOBS = ["Creator", "Director"] as const;
@@ -56,6 +57,7 @@ export default function SeriesContent({
   libraryId?: number;
   showAdvisoryAge?: boolean;
 }) {
+  const t = useT();
   const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
     useOnViewTranslation(item);
   const navigate = useNavigate();
@@ -168,7 +170,7 @@ export default function SeriesContent({
             variant="series"
             title={title}
             topNav={<PageBack />}
-            context="Series"
+            context={t("web.detail.hero.typeSeries")}
             studioLabel={firstNetwork}
             backdropUrl={item.backdrop_url}
             backdropThumbhash={item.backdrop_thumbhash}
@@ -199,7 +201,7 @@ export default function SeriesContent({
               <HeroCrewLine
                 crew={item.crew ?? []}
                 genres={item.genres}
-                jobLabel="Created by"
+                jobLabel={t("web.detail.overview.createdBy")}
                 leadJobs={SERIES_LEAD_JOBS}
               />
             }
@@ -253,21 +255,25 @@ export default function SeriesContent({
                 !singleSeason && "series-detail-rail",
               )}
               role="region"
-              aria-label="Seasons and episodes"
+              aria-label={t("web.detail.seasons.navigationRegion")}
             >
               {seasonsLoading ? (
                 <SeasonCarouselSkeleton />
               ) : singleSeason ? (
                 <section>
                   <div className="mb-5 flex items-center justify-between gap-3">
-                    <h2 className="text-xl font-semibold tracking-tight">Episodes</h2>
+                    <h2 className="text-xl font-semibold tracking-tight">
+                      {t("web.detail.episodes.heading")}
+                    </h2>
                     <div className="flex items-center gap-3">
                       <EpisodesTranslationAction
                         translating={episodesTranslating}
                         onTranslate={onTranslateEpisodes}
                       />
                       <span className="text-muted-foreground text-sm">
-                        {singleSeason.episode_count} total
+                        {t("web.detail.seasons.totalCount", {
+                          count: String(singleSeason.episode_count),
+                        })}
                       </span>
                     </div>
                   </div>
@@ -318,7 +324,7 @@ export default function SeriesContent({
       {item.videos && item.videos.length > 0 && <TrailersSection videos={item.videos} />}
 
       {((item.cast?.length ?? 0) > 0 || crewGroups.some((g) => g.members.length > 0)) && (
-        <DetailSection title="Cast & Crew">
+        <DetailSection title={t("web.detail.sections.castAndCrew")}>
           <CastCarousel cast={item.cast ?? []} crewGroups={crewGroups} limit={12} prefetchPeople />
         </DetailSection>
       )}

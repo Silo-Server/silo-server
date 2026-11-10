@@ -34,6 +34,7 @@ import {
   usePolicyVersions,
   useValidatePolicy,
 } from "@/hooks/queries/admin/policy";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 import { PolicySimulatePanel } from "./PolicySimulatePanel";
@@ -88,7 +89,12 @@ interface ActivationTarget {
 
 type LifecycleStep = "validate" | "save" | "activate" | "live";
 
-const LIFECYCLE_LABELS = ["Draft", "Validated", "Saved", "Active"] as const;
+const LIFECYCLE_STAGES = [
+  { id: "draft", label: "web.admin.access.policy.status.draft" },
+  { id: "validated", label: "web.admin.access.policy.editor.stage.validated" },
+  { id: "saved", label: "web.admin.access.policy.editor.stage.saved" },
+  { id: "active", label: "web.admin.access.policy.status.active" },
+] as const;
 
 function lifecycleProgress(step: LifecycleStep) {
   // Index of the first label that is NOT yet reached.
@@ -105,14 +111,18 @@ function lifecycleProgress(step: LifecycleStep) {
 }
 
 function LifecycleRail({ step, liveVersion }: { step: LifecycleStep; liveVersion?: number }) {
+  const t = useT();
   const reached = lifecycleProgress(step);
   return (
-    <ol aria-label="Policy lifecycle" className="flex flex-wrap items-center gap-1.5">
-      {LIFECYCLE_LABELS.map((label, index) => {
+    <ol
+      aria-label={t("web.admin.access.policy.editor.lifecycleLabel")}
+      className="flex flex-wrap items-center gap-1.5"
+    >
+      {LIFECYCLE_STAGES.map((stage, index) => {
         const done = index < reached;
         const current = index === reached;
         return (
-          <li key={label} className="flex items-center gap-1.5">
+          <li key={stage.id} className="flex items-center gap-1.5">
             {index > 0 && (
               <span
                 aria-hidden
@@ -128,9 +138,11 @@ function LifecycleRail({ step, liveVersion }: { step: LifecycleStep; liveVersion
               )}
             >
               {done && <Check aria-hidden className="size-3" />}
-              {label === "Active" && liveVersion !== undefined && step === "live"
-                ? `Active · v${liveVersion}`
-                : label}
+              {stage.id === "active" && liveVersion !== undefined && step === "live"
+                ? t("web.admin.access.policy.editor.stage.activeVersion", {
+                    version: String(liveVersion),
+                  })
+                : t(stage.label)}
             </span>
           </li>
         );
@@ -155,6 +167,7 @@ function seedKey(document: PolicySnapshot, seedVersion: PolicyVersion | undefine
 }
 
 export function PolicyEditorPanel({ documentId, domains }: PolicyEditorPanelProps) {
+  const t = useT();
   const documentQuery = usePolicyDocument(documentId);
   const versionsQuery = usePolicyVersions(documentId);
   const document = documentQuery.data;
@@ -183,19 +196,21 @@ export function PolicyEditorPanel({ documentId, domains }: PolicyEditorPanelProp
   if (!documentId) {
     return (
       <div className="surface-panel-subtle text-muted-foreground rounded-2xl p-6 text-sm">
-        Select an override to edit its Rego source.
+        {t("web.admin.access.policy.editor.selectOverride")}
       </div>
     );
   }
 
   if (documentQuery.isLoading || waitingForSeedSource) {
-    return <p className="text-muted-foreground text-sm">Loading policy document...</p>;
+    return (
+      <p className="text-muted-foreground text-sm">{t("web.admin.access.policy.editor.loading")}</p>
+    );
   }
 
   if (!document) {
     return (
       <div className="border-destructive/40 bg-destructive/10 text-destructive rounded-lg border px-3 py-2 text-sm">
-        Policy document could not be loaded.
+        {t("web.admin.access.policy.editor.loadFailed")}
       </div>
     );
   }
@@ -265,6 +280,7 @@ const PolicyEditorState = memo(function PolicyEditorState({
   onStateChange,
   newerSeed,
 }: PolicyEditorStateProps) {
+  const t = useT();
   const [draft, setDraft] = useState(initialSource);
   const [captured, setCaptured] = useState(document);
   const [reviewRequired, setReviewRequired] = useState(false);
@@ -296,7 +312,7 @@ const PolicyEditorState = memo(function PolicyEditorState({
     onStateChange({ draft, pending });
   }, [draft, pending, onStateChange]);
 
-  const meta = policyDomainMeta(document.domain);
+  const meta = policyDomainMeta(document.domain, t);
   const validated = validation?.source === draft && validation.result.compiled_ok;
 
   // An unedited seed from a compiled-but-inactive version is already "saved":
@@ -340,7 +356,7 @@ const PolicyEditorState = memo(function PolicyEditorState({
       });
       setValidation({ source, result });
       setIssues(result.errors);
-      setMessage(result.compiled_ok ? "Validation passed for the submitted source." : "");
+      setMessage(result.compiled_ok ? t("web.admin.access.policy.editor.validationPassed") : "");
     } catch (error) {
       const nextIssues = compileIssuesFromError(error);
       setIssues(nextIssues);
@@ -348,7 +364,11 @@ const PolicyEditorState = memo(function PolicyEditorState({
         source,
         result: { compiled_ok: false, errors: nextIssues },
       });
-      setMessage(nextIssues.length > 0 ? "" : messageFromError(error, "Validation failed."));
+      setMessage(
+        nextIssues.length > 0
+          ? ""
+          : messageFromError(error, t("web.admin.access.policy.editor.validationFailed")),
+      );
     }
   }
 
@@ -375,7 +395,12 @@ const PolicyEditorState = memo(function PolicyEditorState({
           result: {
             compiled_ok: false,
             errors: [
-              { row: 0, col: 0, message: result.compile_error ?? "Saved draft did not compile." },
+              {
+                row: 0,
+                col: 0,
+                message:
+                  result.compile_error ?? t("web.admin.access.policy.editor.savedDidNotCompile"),
+              },
             ],
           },
         });
@@ -388,18 +413,24 @@ const PolicyEditorState = memo(function PolicyEditorState({
               {
                 row: 0,
                 col: 0,
-                message: result.compile_error ?? "This saved draft did not compile.",
+                message:
+                  result.compile_error ??
+                  t("web.admin.access.policy.editor.thisSavedDidNotCompile"),
               },
             ],
       );
       setMessage(
         result.compiled_ok
-          ? `Saved v${result.version_number}. Review the current policy before activation.`
-          : `Saved v${result.version_number}, but it did not compile. Its source is preserved in history; fix the diagnostics before saving another version.`,
+          ? t("web.admin.access.policy.editor.savedVersion", {
+              version: String(result.version_number),
+            })
+          : t("web.admin.access.policy.editor.savedVersionNotCompiled", {
+              version: String(result.version_number),
+            }),
       );
     } catch (error) {
       setIssues(compileIssuesFromError(error));
-      setMessage(policyMutationMessage(error, "Unable to save policy version."));
+      setMessage(policyMutationMessage(error, t("web.admin.access.policy.editor.saveFailed")));
     }
   }
 
@@ -417,7 +448,7 @@ const PolicyEditorState = memo(function PolicyEditorState({
     } catch (error) {
       setReviewRequired(true);
       setConfirmActivate(false);
-      setMessage(policyMutationMessage(error, "Unable to activate policy version."));
+      setMessage(policyMutationMessage(error, t("web.admin.access.policy.activateFailed")));
     }
   }
 
@@ -427,14 +458,18 @@ const PolicyEditorState = memo(function PolicyEditorState({
         return (
           <Button type="button" onClick={validateDraft} disabled={busy}>
             <CheckCircle2 className="size-4" />
-            {validatePolicy.isPending ? "Validating..." : "Validate draft"}
+            {validatePolicy.isPending
+              ? t("web.admin.access.policy.editor.validating")
+              : t("web.admin.access.policy.editor.validate")}
           </Button>
         );
       case "save":
         return (
           <Button type="button" onClick={saveVersion} disabled={busy}>
             <Save className="size-4" />
-            {createVersion.isPending ? "Saving..." : "Save as version"}
+            {createVersion.isPending
+              ? t("web.admin.access.policy.editor.saving")
+              : t("web.admin.access.policy.editor.save")}
           </Button>
         );
       case "activate":
@@ -445,7 +480,9 @@ const PolicyEditorState = memo(function PolicyEditorState({
             disabled={busy || reviewRequired}
           >
             <ShieldCheck className="size-4" />
-            Activate v{savedTarget?.version_number}
+            {t("web.admin.access.policy.editor.activate", {
+              version: String(savedTarget?.version_number ?? ""),
+            })}
           </Button>
         );
       case "live":
@@ -472,7 +509,7 @@ const PolicyEditorState = memo(function PolicyEditorState({
           <div className="flex shrink-0 flex-col items-stretch gap-2 sm:flex-row sm:items-center">
             {step !== "validate" && step !== "live" && (
               <Button type="button" variant="ghost" onClick={validateDraft} disabled={busy}>
-                Re-validate
+                {t("web.admin.access.policy.editor.revalidate")}
               </Button>
             )}
             {primaryAction}
@@ -481,14 +518,12 @@ const PolicyEditorState = memo(function PolicyEditorState({
 
         {step === "live" && (
           <p className="text-muted-foreground mt-3 text-sm">
-            This source is selected as the active version in the saved document. Each server applies
-            saved policy changes independently. Edit it to start a new draft.
+            {t("web.admin.access.policy.editor.live")}
           </p>
         )}
         {!document.enabled && (
           <p className="text-warning mt-3 text-sm">
-            This override is disabled: the Silo baseline applies unchanged until it is re-enabled
-            from the overrides list.
+            {t("web.admin.access.policy.editor.disabledNote")}
           </p>
         )}
 
@@ -496,9 +531,10 @@ const PolicyEditorState = memo(function PolicyEditorState({
           <div className="border-warning/40 bg-warning/10 mt-4 flex flex-col gap-2 rounded-lg border px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
             <span className="text-warning">
               {newerSeed.versionNumber !== undefined
-                ? `The saved policy changed (active version ${newerSeed.versionNumber}).`
-                : "The saved policy revision changed."}{" "}
-              Loading saved source replaces the text in this editor.
+                ? t("web.admin.access.policy.editor.newerVersion", {
+                    version: String(newerSeed.versionNumber),
+                  })
+                : t("web.admin.access.policy.editor.newerRevision")}
             </span>
             <Button
               type="button"
@@ -507,7 +543,7 @@ const PolicyEditorState = memo(function PolicyEditorState({
               className="shrink-0"
               onClick={newerSeed.onAdopt}
             >
-              Load saved source
+              {t("web.admin.access.policy.editor.loadSaved")}
             </Button>
           </div>
         )}
@@ -518,7 +554,7 @@ const PolicyEditorState = memo(function PolicyEditorState({
           onAdopt={(snapshot) => {
             setCaptured(snapshot);
             setReviewRequired(false);
-            setMessage("Current revision adopted. Your draft and saved version are unchanged.");
+            setMessage(t("web.admin.access.policy.editor.revisionAdopted"));
           }}
         />
 
@@ -527,8 +563,8 @@ const PolicyEditorState = memo(function PolicyEditorState({
             <Input
               value={comment}
               onChange={(event) => setComment(event.target.value)}
-              placeholder="What changed? (optional, shown in history)"
-              aria-label="Policy version comment"
+              placeholder={t("web.admin.access.policy.editor.commentPlaceholder")}
+              aria-label={t("web.admin.access.policy.editor.commentLabel")}
             />
           </div>
         )}
@@ -550,23 +586,31 @@ const PolicyEditorState = memo(function PolicyEditorState({
 
         {saved && saved.source !== draft && (
           <p className="text-muted-foreground text-sm">
-            Current edits are not saved in v{saved.target.version_number}.
+            {t("web.admin.access.policy.editor.editsNotSaved", {
+              version: String(saved.target.version_number),
+            })}
           </p>
         )}
         {validation && validation.source !== draft && (
           <p className="text-muted-foreground text-sm">
-            The validation result applies to earlier source. Validate the current draft before
-            saving.
+            {t("web.admin.access.policy.editor.validationStale")}
           </p>
         )}
         {visibleIssues.length > 0 && (
           <div className="border-destructive/40 bg-destructive/10 text-destructive mt-4 rounded-lg border px-3 py-2">
-            <h3 className="text-sm font-semibold">Compile issues</h3>
+            <h3 className="text-sm font-semibold">
+              {t("web.admin.access.policy.editor.compileIssues")}
+            </h3>
             <ul className="mt-2 space-y-1 text-xs">
               {visibleIssues.map((issue, index) => (
                 <li key={issueKey(issue, index)}>
-                  {issue.row > 0 ? `${issue.row}:${issue.col} ` : ""}
-                  {issue.message}
+                  {issue.row > 0
+                    ? t("web.admin.access.policy.compileIssue", {
+                        row: String(issue.row),
+                        col: String(issue.col),
+                        message: issue.message,
+                      })
+                    : issue.message}
                 </li>
               ))}
             </ul>
@@ -587,19 +631,25 @@ const PolicyEditorState = memo(function PolicyEditorState({
       <AlertDialog open={confirmActivate} onOpenChange={setConfirmActivate}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Activate saved v{savedTarget?.version_number}?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {t("web.admin.access.policy.activateTitle", {
+                version: String(savedTarget?.version_number ?? ""),
+              })}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              The reviewed policy is {captured.enabled ? "enabled" : "disabled"}, with active
-              version {captured.active_version?.version_number ?? "none"}. This saves a new
-              active-version selection. Servers reload independently; the result will report local
-              application.
+              {t("web.admin.access.policy.editor.activateBody", {
+                state: captured.enabled ? "enabled" : "disabled",
+                has_version:
+                  (captured.active_version?.version_number ?? null) !== null ? "yes" : "no",
+                version: String(captured.active_version?.version_number ?? ""),
+              })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <Button onClick={() => void activateSavedVersion()} disabled={busy || reviewRequired}>
               <Play className="size-4" />
-              Confirm activation
+              {t("web.admin.access.policy.editor.confirmActivation")}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
