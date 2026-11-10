@@ -194,7 +194,7 @@ func NewService(
 // Login authenticates the user with the given credentials and creates a new
 // session. Returns a TokenPair containing the access and refresh tokens.
 func (s *Service) Login(ctx context.Context, username, password, deviceName, ip string) (*TokenPair, *models.User, error) {
-	return s.loginWithProvider(ctx, LocalProviderID, username, password, deviceName, ip, false)
+	return s.loginWithProvider(ctx, new(string), LocalProviderID, username, password, deviceName, ip, false)
 }
 
 // CompatLogin is Login for sign-in surfaces that cannot run the forced
@@ -246,15 +246,19 @@ func (s *Service) CompatLoginWithLocalFallback(ctx context.Context, username, pa
 	if err != nil {
 		return nil, nil, false, err
 	}
+	// Both passwords belong to one sign-in, so the fallback keeps the first
+	// attempt's snapshot: a sign-out everywhere that commits between the two
+	// checks refuses the fallback too.
+	var snapshot string
 	if providerID == LocalProviderID && fallback != "" && len(password) > MaximumPasswordBytes {
-		pair, user, err := s.loginWithProvider(ctx, LocalProviderID, username, fallback, deviceName, ip, true)
+		pair, user, err := s.loginWithProvider(ctx, &snapshot, LocalProviderID, username, fallback, deviceName, ip, true)
 		return pair, user, err == nil, err
 	}
-	pair, user, err = s.loginWithProvider(ctx, providerID, username, password, deviceName, ip, true)
+	pair, user, err = s.loginWithProvider(ctx, &snapshot, providerID, username, password, deviceName, ip, true)
 	if providerID != LocalProviderID || fallback == "" || !errors.Is(err, ErrInvalidCredentials) {
 		return pair, user, false, err
 	}
-	pair, user, err = s.loginWithProvider(ctx, LocalProviderID, username, fallback, deviceName, ip, true)
+	pair, user, err = s.loginWithProvider(ctx, &snapshot, LocalProviderID, username, fallback, deviceName, ip, true)
 	return pair, user, err == nil, err
 }
 
@@ -294,7 +298,7 @@ func (s *Service) LoginWithProvider(
 		}
 		providerID = routed
 	}
-	return s.loginWithProvider(ctx, providerID, username, password, deviceName, ip, false)
+	return s.loginWithProvider(ctx, new(string), providerID, username, password, deviceName, ip, false)
 }
 
 // routePasswordLogin picks the provider for a password sign-in that named
@@ -747,8 +751,12 @@ func (s *Service) DiscoverProviders(ctx context.Context) (ProviderDiscovery, err
 	return discovery, nil
 }
 
+// loginWithProvider signs username in through providerID. *snapshot is the
+// sign-in's database snapshot (signInSnapshot): taken here when empty, and
+// shared by the attempts of one sign-in.
 func (s *Service) loginWithProvider(
 	ctx context.Context,
+	snapshot *string,
 	providerID string,
 	username string,
 	password string,
@@ -762,11 +770,16 @@ func (s *Service) loginWithProvider(
 	}
 
 	// Taken before the credential check: a sign-out everywhere that commits
-	// after this point refuses the sign-in below (signedOutSince).
-	snapshot, err := signInSnapshot(ctx, s.users.pool)
-	if err != nil {
-		return nil, nil, err
+	// after this point refuses the sign-in below (signedOutSince). A retry
+	// within the same sign-in passes the snapshot back in.
+	if *snapshot == "" {
+		taken, err := signInSnapshot(ctx, s.users.pool)
+		if err != nil {
+			return nil, nil, err
+		}
+		*snapshot = taken
 	}
+	var err error
 	creds := Credentials{Username: username, Password: password}
 	var (
 		user       *models.User
@@ -824,7 +837,7 @@ func (s *Service) loginWithProvider(
 			if refusePasswordChange && current.PasswordChangeRequired {
 				return ErrPasswordChangeRequired
 			}
-			since, err := signedOutSince(ctx, tx, current.ID, snapshot)
+			since, err := signedOutSince(ctx, tx, current.ID, *snapshot)
 			if err != nil {
 				return err
 			}
@@ -869,7 +882,7 @@ func (s *Service) loginWithProvider(
 			DeviceName:           deviceName,
 			IP:                   ip,
 			RefusePasswordChange: refusePasswordChange,
-			SignInSnapshot:       snapshot,
+			SignInSnapshot:       *snapshot,
 		})
 		if err != nil {
 			return nil, nil, err
