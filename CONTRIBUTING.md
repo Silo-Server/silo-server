@@ -282,8 +282,9 @@ selection may skip. Selection tools come from the trusted reusable workflow's
 main branch.
 
 `Go test` runs the full Go suite, which owns the ledger, scenario,
-offline-route, spec, and fixture assertions. `Go lint` runs the contract checks
-after lint: the generator freshness checks and the semantic API comparison. The
+offline-route, spec, and fixture assertions. `Go vet and contracts` runs
+whole-tree `go vet` and then the contract checks: the generator freshness checks
+and the semantic API comparison. `Go lint` runs golangci-lint beside it. The
 contract checks pass `CONTRACT_GO_TESTS=0` to avoid repeating the suite's
 assertions; local verify targets remain complete by default. `Go integration`
 runs its race tests against two databases of its own: a PostgreSQL 17 database
