@@ -415,12 +415,13 @@ libraries, in just the added ones. Collections that already share a title, such 
 still save their other fields. Imports, templates and restores don't apply the rule.
 
 The `slug` is a URL name the server derives from the title when a create leaves it out. It is
-unique only within the collection's first library, and a create takes the first free
-`<slug>-<n>` instead of failing, so titles that differ only in punctuation ("Sci-Fi" and
-"Sci Fi"), or that have no Latin letters or digits (which derive `collection`), save as
-separate collections. A collection whose `library_ids` no longer include its first library
-moves to the new first one the same way. An update that names a `slug` another collection of
-that library uses is refused at `body.slug`.
+unique only within the collection's `library_id`: `library_id` when the create gives one, else
+the first of `library_ids`. A create takes the first free `<slug>-<n>` there instead of failing,
+so titles that differ only in punctuation ("Sci-Fi" and "Sci Fi"), or that have no Latin letters
+or digits (which derive `collection`), save as separate collections. `library_id` stays while
+that library is anywhere in `library_ids`. When an update drops it, the collection moves to the
+first remaining library and takes a free slug there the same way. An update that names a `slug`
+another collection of its `library_id` uses is refused at `body.slug`.
 
 ## Collections that hold a title
 

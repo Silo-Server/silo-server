@@ -8,10 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
-	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func TestAdminCollectionServiceRejectsArtworkInDefinition(t *testing.T) {
