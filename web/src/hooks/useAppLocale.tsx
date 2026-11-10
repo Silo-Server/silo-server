@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
-import { IntlProvider } from "react-intl";
 
 import {
   settingsCapabilitiesSupportKey,
@@ -9,13 +8,15 @@ import {
 } from "@/hooks/queries/settingValues";
 import { useAppearanceCacheOwner } from "@/hooks/themePreferences";
 import {
-  browserLocaleInputs,
-  getAppLocale,
-  resolveAppLocale,
-  setAppLocale,
-  type AppLanguage,
-} from "@/lib/appLocale";
-import { hasCatalog, loadMessages, type Messages } from "@/lib/i18nMessages";
+  AppIntlProvider,
+  appIntl,
+  createAppIntl,
+  loadTranslations,
+  PSEUDO_LOCALES_ENABLED,
+  setAppIntl,
+  type Messages,
+} from "@/i18n";
+import { browserLocaleInputs, hasCatalog, resolveAppLocale, setAppLocale } from "@/lib/appLocale";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { appearanceCache, storage } from "@/utils/storage";
 
@@ -38,7 +39,12 @@ function languageBeforeSettings(owner: string | null): string | null {
 }
 
 function resolve(stored: string | null) {
-  return resolveAppLocale({ stored, ...browserLocaleInputs(), hasCatalog });
+  return resolveAppLocale({
+    stored,
+    ...browserLocaleInputs(),
+    hasCatalog,
+    pseudoLocales: PSEUDO_LOCALES_ENABLED,
+  });
 }
 
 // Seed the app locale before the first render, so a page doesn't paint in one
@@ -96,7 +102,7 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
   const apiLanguage = typeof apiValue === "string" ? apiValue : null;
   // Once loaded the server's answer is authoritative, null included.
   const stored = apiLoaded ? apiLanguage : languageBeforeSettings(cacheOwner);
-  const { language, formatLocale, localizedFormats, dir } = useMemo(
+  const { language, catalog, formatLocale, localizedFormats, dir } = useMemo(
     () => resolve(stored),
     [stored],
   );
@@ -109,10 +115,7 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
     storage.remove(SIGNED_OUT_KEY);
   }, [apiLoaded, apiLanguage, cacheOwner]);
 
-  const [intl, setIntl] = useState<{ language: AppLanguage; messages: Messages }>(() => ({
-    language: getAppLocale().language,
-    messages: {},
-  }));
+  const [intl, setIntl] = useState(appIntl);
 
   useEffect(() => {
     let cancelled = false;
@@ -121,23 +124,22 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
         ? undefined
         : import("@/lib/languageNames").then((module) => module.loadLanguageNames(language));
     void Promise.all([
-      // Without its catalog a language still renders, in the English defaults.
-      loadMessages(language).catch((): Messages => ({})),
+      // Without its catalog a language still renders, in English.
+      loadTranslations(catalog).catch((): Messages => ({})),
       // Without name data, language names stay English.
       names?.catch(() => undefined),
     ]).then(([messages]) => {
       if (cancelled) return;
-      setAppLocale({ language, formatLocale, localizedFormats, dir });
-      setIntl({ language, messages });
+      // The formatter first: helpers that subscribe to the app locale read it.
+      const next = createAppIntl(catalog, messages);
+      setAppIntl(next);
+      setAppLocale({ language, catalog, formatLocale, localizedFormats, dir });
+      setIntl(next);
     });
     return () => {
       cancelled = true;
     };
-  }, [language, formatLocale, localizedFormats, dir]);
+  }, [language, catalog, formatLocale, localizedFormats, dir]);
 
-  return (
-    <IntlProvider locale={intl.language} defaultLocale="en" messages={intl.messages}>
-      {children}
-    </IntlProvider>
-  );
+  return <AppIntlProvider intl={intl}>{children}</AppIntlProvider>;
 }

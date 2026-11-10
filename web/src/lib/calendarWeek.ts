@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import { formatLocale } from "@/lib/appLocale";
 
 /** Returns the ISO date string (YYYY-MM-DD) of the Monday for the week containing `date`. */
@@ -40,8 +41,7 @@ export function formatDayHeading(dateStr: string): string {
   const d = parseDate(dateStr);
   const weekday = d.toLocaleDateString(formatLocale(), { weekday: "long" });
   const month = d.toLocaleDateString(formatLocale(), { month: "long" });
-  const day = d.getDate();
-  return `${weekday}, ${month} ${ordinal(day)}`;
+  return t("web.calendar.dayHeading", { weekday, month, day: String(d.getDate()) });
 }
 
 /** Returns a short day label like "Mon" and day number like "7". */
@@ -68,9 +68,21 @@ export function formatWeekRangeLabel(weekStart: string): string {
     start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear();
   if (sameMonth) {
     const month = start.toLocaleDateString(formatLocale(), { month: "short" });
-    return `${month} ${start.getDate()} – ${end.getDate()}, ${start.getFullYear()}`;
+    return t("web.calendar.weekRangeSameMonth", {
+      month,
+      start_day: String(start.getDate()),
+      end_day: String(end.getDate()),
+      year: String(start.getFullYear()),
+    });
   }
-  return `${start.toLocaleDateString(formatLocale(), { month: "short", day: "numeric" })} – ${end.toLocaleDateString(formatLocale(), { month: "short", day: "numeric", year: "numeric" })}`;
+  return t("web.calendar.weekRange", {
+    start: start.toLocaleDateString(formatLocale(), { month: "short", day: "numeric" }),
+    end: end.toLocaleDateString(formatLocale(), {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }),
+  });
 }
 
 /** Checks if a date string is today. */
@@ -90,10 +102,4 @@ function formatDate(d: Date): string {
 function parseDate(dateStr: string): Date {
   const parts = dateStr.split("-").map(Number);
   return new Date(parts[0]!, parts[1]! - 1, parts[2]!);
-}
-
-function ordinal(n: number): string {
-  const s = ["th", "st", "nd", "rd"] as const;
-  const v = n % 100;
-  return n + (s[(v - 20) % 10] ?? s[v] ?? s[0]);
 }

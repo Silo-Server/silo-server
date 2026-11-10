@@ -18,7 +18,8 @@ import {
 } from "@/hooks/queries/settingValues";
 import { useDateTimeFormat, useDateTimeFormatSettings } from "@/hooks/useDateTimeFormat";
 import { useTheme } from "@/hooks/useTheme";
-import { matchShippedLanguage, SHIPPED_LANGUAGES } from "@/lib/appLocale";
+import { PSEUDO_LOCALES_ENABLED } from "@/i18n";
+import { matchAppLanguage, pickerLanguages } from "@/lib/appLocale";
 import { formatDate, formatTime } from "@/lib/datetime";
 import type { DateFormatPreference, TimeFormatPreference } from "@/lib/datetime";
 import { getLanguageName } from "@/lib/languageNames";
@@ -57,7 +58,8 @@ function AppLanguageSetting() {
   const savedValue = stored?.[SETTING_KEYS.UI_APP_LANGUAGE];
   const shownValue = mutation.isPending ? mutation.variables.value : savedValue;
   const tag = typeof shownValue === "string" ? shownValue : null;
-  const offered = tag !== null && SHIPPED_LANGUAGES.some((language) => language.tag === tag);
+  const languages = pickerLanguages(PSEUDO_LOCALES_ENABLED);
+  const offered = tag !== null && languages.some((language) => language.tag === tag);
 
   return (
     <div className="space-y-2">
@@ -87,14 +89,14 @@ function AppLanguageSetting() {
         <SelectContent>
           <SelectItem value={MATCH_DEVICE}>Match device</SelectItem>
           {tag !== null && !offered && <SelectItem value={tag}>{getLanguageName(tag)}</SelectItem>}
-          {SHIPPED_LANGUAGES.map((language) => (
+          {languages.map((language) => (
             <SelectItem key={language.tag} value={language.tag} lang={language.tag}>
               {language.endonym}
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
-      {tag !== null && matchShippedLanguage(tag) === null && (
+      {tag !== null && matchAppLanguage(tag, PSEUDO_LOCALES_ENABLED) === null && (
         <p className="text-muted-foreground text-[13px]">
           This language isn’t available on the web yet, so the web app follows your device here.
         </p>

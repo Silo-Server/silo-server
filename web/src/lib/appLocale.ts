@@ -29,9 +29,66 @@ export const SHIPPED_LANGUAGES = [
 
 export type AppLanguage = (typeof SHIPPED_LANGUAGES)[number]["tag"];
 
+/**
+ * Languages whose translation catalog has shipped. Only these can come from
+ * the browser's language list, and only these (plus English) are offered in
+ * the pickers; a stored choice still selects any shipped language. The
+ * PR that ships a language's translations adds it here.
+ */
+export const CATALOG_LANGUAGES: readonly AppLanguage[] = [];
+
+/** Whether a language's translations have shipped; English always has. */
+export function hasCatalog(language: AppLanguage): boolean {
+  return language === "en" || CATALOG_LANGUAGES.includes(language);
+}
+
+/**
+ * Pseudo-locales for QA builds (`VITE_PSEUDO_LOCALES=1`, and `vite dev`): a
+ * stored tag selects one, and the pickers list them. They format as English.
+ */
+export const PSEUDO_LANGUAGES = [
+  { tag: "en-XA", endonym: "Pseudo (accented)", dir: "ltr" },
+  { tag: "ar-XB", endonym: "Pseudo (right-to-left)", dir: "rtl" },
+] as const;
+
+function pseudoLanguage(tag: string | null | undefined) {
+  const lower = tag?.toLowerCase();
+  return PSEUDO_LANGUAGES.find((locale) => locale.tag.toLowerCase() === lower);
+}
+
+/**
+ * The text direction of an app language or pseudo-locale tag. It doesn't
+ * depend on whether the language's catalog has shipped: a stored `ar` lays
+ * out right to left, and isolates its placeholders, before then.
+ */
+export function languageDirection(tag: string): "ltr" | "rtl" {
+  return pseudoLanguage(tag)?.dir ?? (tag === "ar" ? "rtl" : "ltr");
+}
+
+/**
+ * The picker entry a stored tag selects: a pseudo-locale when the build carries
+ * them, else the shipped language it matches; null for neither.
+ */
+export function matchAppLanguage(
+  tag: string | null | undefined,
+  pseudoLocales: boolean,
+): string | null {
+  return (pseudoLocales ? pseudoLanguage(tag)?.tag : undefined) ?? matchShippedLanguage(tag);
+}
+
+/** The languages a picker offers: English, those with a catalog, and pseudo-locales when built in. */
+export function pickerLanguages(
+  pseudoLocales: boolean,
+): ReadonlyArray<{ tag: string; endonym: string }> {
+  const languages = SHIPPED_LANGUAGES.filter((language) => hasCatalog(language.tag));
+  return pseudoLocales ? [...languages, ...PSEUDO_LANGUAGES] : languages;
+}
+
 export interface AppLocale {
-  /** The shipped language the interface uses. */
+  /** The shipped language the interface uses; English under a pseudo-locale. */
   language: AppLanguage;
+  /** The catalog its messages come from: the language, or a pseudo-locale tag. */
+  catalog: string;
   /**
    * Locale for dates and numbers. `undefined` means the browser's own default,
    * which is what every format call used before the app had a language.
@@ -96,8 +153,20 @@ export function resolveAppLocale(input: {
   navigatorLanguages: readonly string[];
   runtimeLocale: string;
   hasCatalog: (language: AppLanguage) => boolean;
+  /** Whether this build carries the pseudo-locales, so a stored pseudo tag selects one. */
+  pseudoLocales: boolean;
 }): AppLocale {
   const stored = typeof input.stored === "string" ? canonicalLanguageTag(input.stored) : null;
+  const pseudo = input.pseudoLocales ? pseudoLanguage(stored) : undefined;
+  if (pseudo) {
+    return {
+      language: "en",
+      catalog: pseudo.tag,
+      formatLocale: undefined,
+      localizedFormats: false,
+      dir: pseudo.dir,
+    };
+  }
   const chosen = matchShippedLanguage(stored);
   const fromBrowser = input.navigatorLanguages
     .map(matchShippedLanguage)
@@ -107,9 +176,10 @@ export function resolveAppLocale(input: {
   const formatLocale = chosen && runtimeLanguage !== chosen ? (stored ?? undefined) : undefined;
   return {
     language,
+    catalog: language,
     formatLocale,
     localizedFormats: language !== "en" && (formatLocale ? true : runtimeLanguage === language),
-    dir: language === "ar" ? "rtl" : "ltr",
+    dir: languageDirection(language),
   };
 }
 
@@ -132,6 +202,7 @@ export function browserLocaleInputs(): {
 
 let current: AppLocale = {
   language: "en",
+  catalog: "en",
   formatLocale: undefined,
   localizedFormats: false,
   dir: "ltr",
@@ -140,7 +211,7 @@ const listeners = new Set<() => void>();
 
 function applyToDocument(locale: AppLocale): void {
   if (typeof document === "undefined") return;
-  document.documentElement.lang = locale.language;
+  document.documentElement.lang = locale.catalog;
   document.documentElement.dir = locale.dir;
 }
 
@@ -171,6 +242,8 @@ export function setAppLocale(next: AppLocale): void {
   applyToDocument(next);
   if (
     next.language === current.language &&
+    next.catalog === current.catalog &&
+    next.dir === current.dir &&
     next.formatLocale === current.formatLocale &&
     next.localizedFormats === current.localizedFormats
   ) {

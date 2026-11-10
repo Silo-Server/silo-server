@@ -37,7 +37,9 @@ describe("resolveAppLocale", () => {
     navigatorLanguages: string[],
     runtimeLocale = "en-US",
     hasCatalog = withCatalogs("es", "de", "fr", "pt-BR", "ja", "zh-Hans", "ar"),
-  ) => ({ navigatorLanguages, runtimeLocale, hasCatalog });
+    pseudoLocales = false,
+  ) => ({ navigatorLanguages, runtimeLocale, hasCatalog, pseudoLocales });
+  const pseudo = { language: "en", formatLocale: undefined, localizedFormats: false };
 
   it.each([
     {
@@ -118,9 +120,28 @@ describe("resolveAppLocale", () => {
       ...browser(["en-US"]),
       expected: { language: "ar", formatLocale: "ar", localizedFormats: true, dir: "rtl" },
     },
-  ])("$name", ({ stored, navigatorLanguages, runtimeLocale, hasCatalog, expected }) => {
-    expect(resolveAppLocale({ stored, navigatorLanguages, runtimeLocale, hasCatalog })).toEqual(
-      expected,
-    );
+    {
+      name: "a stored pseudo-locale applies in a build that carries them",
+      stored: "en-XA",
+      ...browser(["de-DE"], "de-DE", withCatalogs(), true),
+      expected: { ...pseudo, catalog: "en-XA", dir: "ltr" },
+    },
+    {
+      name: "the right-to-left pseudo-locale mirrors",
+      stored: "ar-xb",
+      ...browser(["en-US"], "en-US", withCatalogs(), true),
+      expected: { ...pseudo, catalog: "ar-XB", dir: "rtl" },
+    },
+    {
+      name: "without pseudo-locales built in, en-XA is plain English",
+      stored: "en-XA",
+      ...browser(["en-US"], "en-US", withCatalogs(), false),
+      expected: { ...pseudo, catalog: "en", dir: "ltr" },
+    },
+  ])("$name", ({ stored, expected, ...inputs }) => {
+    expect(resolveAppLocale({ stored, ...inputs })).toEqual({
+      catalog: expected.language,
+      ...expected,
+    });
   });
 });

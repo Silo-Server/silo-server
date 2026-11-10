@@ -1,5 +1,6 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useAppLanguage } from "@/i18n";
 import { getWeekDays, formatShortDay, formatWeekRangeLabel, isToday } from "@/lib/calendarWeek";
 import type { CalendarDay } from "@/hooks/queries/calendar";
 
@@ -22,6 +23,8 @@ export default function WeekNavigator({
   onNext,
   onToday,
 }: WeekNavigatorProps) {
+  // The labels come from plain helpers; this re-renders them on a language change.
+  useAppLanguage();
   const weekDays = getWeekDays(weekStart);
   const datesWithEvents = new Set(days.map((d) => d.date));
   const rangeLabel = formatWeekRangeLabel(weekStart);

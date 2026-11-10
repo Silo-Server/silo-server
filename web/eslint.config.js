@@ -4,9 +4,48 @@ import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
 import eslintConfigPrettier from "eslint-config-prettier";
 import eslintComments from "@eslint-community/eslint-plugin-eslint-comments";
+import formatjs from "eslint-plugin-formatjs";
+
+// Requests infer their shape through the generated v2 contract.
+const CONTRACT_SYNTAX = [
+  {
+    selector: "CallExpression[callee.name='api'][typeArguments]",
+    message:
+      "api<T>(...) asserts a response shape. Migrated files call v2(...) and let the contract infer it.",
+  },
+  {
+    selector: "CallExpression[callee.name='apiWithProfileRequestContext'][typeArguments]",
+    message:
+      "apiWithProfileRequestContext<T>(...) asserts a response shape. Migrated files call v2(...) and let the contract infer it.",
+  },
+  {
+    selector: "TSAsExpression > TSTypeReference > Identifier[name=/(Response|Request)$/]",
+    message:
+      "Casting to a *Response/*Request type bypasses the contract. Use the inferred v2 types instead.",
+  },
+];
+
+// Translated text goes through src/i18n (see its README).
+const REACT_INTL_IMPORT = {
+  name: "react-intl",
+  message: "Use useT()/t() from @/i18n; only src/i18n talks to react-intl.",
+};
+const PLAIN_TEXT_IMPORT = {
+  name: "@/i18n",
+  importNames: ["t", "serverText"],
+  message:
+    "Components use useT()/useServerText(), which re-render on a language change; t() and serverText() are for plain code.",
+};
+
+// Files and directories whose text is extracted to the message catalog. An
+// extraction PR adds its area here, one glob per line, sorted.
+const I18N_CONVERTED = [
+  "src/components/calendar/DayGroup.tsx",
+  "src/components/homeRows/AddToOtherLibrariesDialog.tsx",
+];
 
 export default tseslint.config(
-  { ignores: ["dist"] },
+  { ignores: ["dist", "src/locales"] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/*.{ts,tsx}"],
@@ -74,25 +113,43 @@ export default tseslint.config(
     },
   },
   {
-    // Requests infer their shape through the generated v2 contract.
     files: ["**/*.{ts,tsx}"],
     rules: {
-      "no-restricted-syntax": [
+      "no-restricted-syntax": ["error", ...CONTRACT_SYNTAX],
+      "no-restricted-imports": ["error", { paths: [REACT_INTL_IMPORT] }],
+    },
+  },
+  {
+    files: ["**/*.tsx"],
+    rules: {
+      "no-restricted-imports": ["error", { paths: [REACT_INTL_IMPORT, PLAIN_TEXT_IMPORT] }],
+    },
+  },
+  {
+    files: ["src/i18n/**"],
+    rules: { "no-restricted-imports": "off" },
+  },
+  {
+    files: I18N_CONVERTED,
+    plugins: { formatjs },
+    rules: {
+      "formatjs/no-literal-string-in-jsx": [
         "error",
         {
-          selector: "CallExpression[callee.name='api'][typeArguments]",
-          message:
-            "api<T>(...) asserts a response shape. Migrated files call v2(...) and let the contract infer it.",
+          props: {
+            include: [
+              ["*", "{label,title,subtitle,description,help,placeholder,currentNote,alt,tooltip}"],
+            ],
+          },
         },
+      ],
+      "no-restricted-syntax": [
+        "error",
+        ...CONTRACT_SYNTAX,
         {
-          selector: "CallExpression[callee.name='apiWithProfileRequestContext'][typeArguments]",
-          message:
-            "apiWithProfileRequestContext<T>(...) asserts a response shape. Migrated files call v2(...) and let the contract infer it.",
-        },
-        {
-          selector: "TSAsExpression > TSTypeReference > Identifier[name=/(Response|Request)$/]",
-          message:
-            "Casting to a *Response/*Request type bypasses the contract. Use the inferred v2 types instead.",
+          selector:
+            "CallExpression:matches([callee.name='toast'], [callee.object.name='toast'])[arguments.0.type=/^(Literal|TemplateLiteral)$/]",
+          message: "Toast text comes from the message catalog: toast.success(t(...)).",
         },
       ],
     },

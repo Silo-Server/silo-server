@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 
+import { appIntl, subscribeAppIntl } from "@/i18n";
 import { subscribeAppLocale } from "@/lib/appLocale";
 
 type LanguageNames = typeof import("@/lib/languageNames");
@@ -46,9 +47,12 @@ function subscribe(listener: () => void): () => void {
   listeners.add(listener);
   // Names follow the interface language, so a language change re-renders too.
   const unsubscribeLocale = subscribeAppLocale(listener);
+  // Composed names ("Language (Region)") follow the messages.
+  const unsubscribeMessages = subscribeAppIntl(listener);
   return () => {
     listeners.delete(listener);
     unsubscribeLocale();
+    unsubscribeMessages();
   };
 }
 
@@ -56,9 +60,9 @@ function ignoreChanges(): () => void {
   return () => {};
 }
 
-/** The language the loaded names are in, or null while they load. */
+/** The languages the loaded names and their wording are in, or null while they load. */
 function loadedLanguage(): string | null {
-  return languageNames?.namesLanguage() ?? null;
+  return languageNames ? `${languageNames.namesLanguage()}|${appIntl().locale}` : null;
 }
 
 /**
