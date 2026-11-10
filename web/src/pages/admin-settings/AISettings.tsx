@@ -21,7 +21,7 @@ import {
 import { useDebounce } from "@/hooks/useDebounce";
 import { useRestartKeys, type RestartKeyMatcher } from "@/hooks/useRestartKeys";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
-import { QUOTA_PERIODS, QUOTA_PERIOD_WINDOW_LABELS } from "@/lib/quotaPeriods";
+import { QUOTA_PERIODS, quotaPeriodWindowLabel } from "@/lib/quotaPeriods";
 import { cn } from "@/lib/utils";
 import { SaveBar } from "@/components/SaveBar";
 
@@ -1026,7 +1026,7 @@ export default function AISettings() {
               onChange={(next) => setValue("subtitle_ai.transcribe_quota_period", next)}
               options={QUOTA_PERIODS.map((period) => ({
                 value: period,
-                label: `Per ${period} (rolling ${QUOTA_PERIOD_WINDOW_LABELS[period]})`,
+                label: `Per ${period} (rolling ${quotaPeriodWindowLabel(period)})`,
               }))}
               description="Rolling window for the transcription allowance above."
               restartRequired={restartKeys.has("subtitle_ai.transcribe_quota_period")}

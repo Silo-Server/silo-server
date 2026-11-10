@@ -91,7 +91,11 @@ export const BUFFERING_QUALITY_CONSTANTS = {
   MIN_ESTIMATE_KBPS,
 } as const;
 
-/** What the pills and notices say, the same on every client. */
+/**
+ * What the pills and notices say in English, the same on every client; the
+ * shared vectors pin it. The player shows the catalog's `bufferingQuality.*`
+ * messages, which carry this English.
+ */
 export const BUFFERING_QUALITY_COPY = {
   prompt_title: "Playback keeps buffering",
   prompt_lower: "Lower quality",

@@ -8,8 +8,6 @@ import {
   Pause,
   PictureInPicture2,
   Play,
-  RotateCcw,
-  RotateCw,
   Scaling,
   SkipBack,
   SkipForward,
@@ -39,6 +37,13 @@ import type { PlayerConfig } from "../context/PlayerConfigContext";
 import type { SubtitleSync } from "../hooks/useSubtitleSync";
 import { useCoarsePointer } from "../hooks/useCoarsePointer";
 import { PlayerMenuSurface } from "./PlayerMenuSurface";
+import { ClusterSlotSpacer, SkipIcon } from "./PlayerControlsParts";
+import { useT } from "@/i18n";
+
+/** Decorative separator between values; not text, so not translated. */
+const SEPARATOR = "·";
+/** Separator between elapsed and total time; not text, so not translated. */
+const TIME_SEPARATOR = "/";
 
 interface PlayerControlsProps {
   /** The profile's rewind/fast-forward intervals, shown on the transport buttons. */
@@ -195,6 +200,7 @@ export function PlayerControls({
   onFullscreenToggle,
   onSurfaceTap,
 }: PlayerControlsProps) {
+  const t = useT();
   const isCoarsePointer = useCoarsePointer();
   const controlsRef = useRef<HTMLDivElement>(null);
   const [narrowPlayer, setNarrowPlayer] = useState(false);
@@ -254,7 +260,7 @@ export function PlayerControls({
                 <CircleButton
                   size="md"
                   variant="secondary"
-                  ariaLabel="Previous episode"
+                  ariaLabel={t("web.player.controls.previousEpisode")}
                   onClick={onPrevEpisode}
                 >
                   <SkipBack className="h-5 w-5" fill="currentColor" />
@@ -266,7 +272,7 @@ export function PlayerControls({
             <CircleButton
               size="md"
               variant="secondary"
-              ariaLabel={`Back ${skipSeconds.back} seconds`}
+              ariaLabel={t("web.player.controls.skipBack", { count: skipSeconds.back })}
               onClick={handleSkipBack}
             >
               <SkipIcon direction="back" seconds={skipSeconds.back} />
@@ -274,7 +280,7 @@ export function PlayerControls({
             <button
               type="button"
               className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-white text-black shadow-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-              aria-label={playing ? "Pause" : "Play"}
+              aria-label={playing ? t("web.player.controls.pause") : t("web.player.controls.play")}
               onClick={onPlayPause}
             >
               {playing ? (
@@ -286,7 +292,7 @@ export function PlayerControls({
             <CircleButton
               size="md"
               variant="secondary"
-              ariaLabel={`Forward ${skipSeconds.forward} seconds`}
+              ariaLabel={t("web.player.controls.skipForward", { count: skipSeconds.forward })}
               onClick={handleSkipForward}
             >
               <SkipIcon direction="forward" seconds={skipSeconds.forward} />
@@ -296,7 +302,7 @@ export function PlayerControls({
                 <CircleButton
                   size="md"
                   variant="secondary"
-                  ariaLabel="Next episode"
+                  ariaLabel={t("web.player.controls.nextEpisode")}
                   onClick={onNextEpisode}
                 >
                   <SkipForward className="h-5 w-5" fill="currentColor" />
@@ -343,7 +349,7 @@ export function PlayerControls({
               ) : null}
               <div className="font-mono text-[11px] tracking-[0.12em] text-white/75 tabular-nums">
                 {formatTime(currentTime)}
-                <span className="mx-1 text-white/30">/</span>
+                <span className="mx-1 text-white/30">{TIME_SEPARATOR}</span>
                 {formatTime(duration)}
               </div>
             </div>
@@ -379,7 +385,7 @@ export function PlayerControls({
             <button
               type="button"
               className="player-utility-btn"
-              aria-label="More player options"
+              aria-label={t("web.player.controls.moreOptions")}
               aria-expanded={overflowOpen}
               aria-haspopup="menu"
               onClick={() => setOverflowOpen(true)}
@@ -391,7 +397,11 @@ export function PlayerControls({
                 type="button"
                 className="player-utility-btn"
                 onClick={onFullscreenToggle}
-                aria-label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+                aria-label={
+                  isFullscreen
+                    ? t("web.player.controls.exitFullscreen")
+                    : t("web.player.controls.fullscreen")
+                }
               >
                 {isFullscreen ? (
                   <Minimize className="h-[18px] w-[18px]" />
@@ -423,12 +433,12 @@ export function PlayerControls({
                     >
                       {subtitleLabel}
                     </span>
-                    <span className="text-white/25">·</span>
+                    <span className="text-white/25">{SEPARATOR}</span>
                   </>
                 ) : null}
                 <span className="shrink-0 font-mono text-[11px] tracking-[0.12em] whitespace-nowrap text-white/75 normal-case tabular-nums">
                   {formatTime(currentTime)}
-                  <span className="mx-1 text-white/30">/</span>
+                  <span className="mx-1 text-white/30">{TIME_SEPARATOR}</span>
                   {formatTime(duration)}
                 </span>
               </div>
@@ -446,7 +456,7 @@ export function PlayerControls({
                   <CircleButton
                     size="sm"
                     variant="secondary"
-                    ariaLabel="Previous episode"
+                    ariaLabel={t("web.player.controls.previousEpisode")}
                     onClick={onPrevEpisode}
                   >
                     <SkipBack className="h-[18px] w-[18px]" fill="currentColor" />
@@ -459,7 +469,7 @@ export function PlayerControls({
               <CircleButton
                 size="sm"
                 variant="secondary"
-                ariaLabel={`Back ${skipSeconds.back} seconds`}
+                ariaLabel={t("web.player.controls.skipBack", { count: skipSeconds.back })}
                 onClick={handleSkipBack}
               >
                 <SkipIcon direction="back" seconds={skipSeconds.back} />
@@ -468,7 +478,7 @@ export function PlayerControls({
               <CircleButton
                 size="md"
                 variant="primary"
-                ariaLabel={playing ? "Pause" : "Play"}
+                ariaLabel={playing ? t("web.player.controls.pause") : t("web.player.controls.play")}
                 onClick={onPlayPause}
                 data-paused={!playing}
               >
@@ -482,7 +492,7 @@ export function PlayerControls({
               <CircleButton
                 size="sm"
                 variant="secondary"
-                ariaLabel={`Forward ${skipSeconds.forward} seconds`}
+                ariaLabel={t("web.player.controls.skipForward", { count: skipSeconds.forward })}
                 onClick={handleSkipForward}
               >
                 <SkipIcon direction="forward" seconds={skipSeconds.forward} />
@@ -493,7 +503,7 @@ export function PlayerControls({
                   <CircleButton
                     size="sm"
                     variant="secondary"
-                    ariaLabel="Next episode"
+                    ariaLabel={t("web.player.controls.nextEpisode")}
                     onClick={onNextEpisode}
                   >
                     <SkipForward className="h-[18px] w-[18px]" fill="currentColor" />
@@ -564,9 +574,9 @@ export function PlayerControls({
                   type="button"
                   className="player-utility-btn"
                   onClick={onToggleMarkerEdit}
-                  aria-label="Edit markers"
+                  aria-label={t("web.player.controls.editMarkers")}
                   aria-pressed={markerEditActive}
-                  title="Edit markers"
+                  title={t("web.player.controls.editMarkers")}
                   data-active={markerEditActive ? "true" : "false"}
                 >
                   <Tags className="h-[18px] w-[18px]" />
@@ -577,7 +587,7 @@ export function PlayerControls({
                 type="button"
                 className="player-utility-btn"
                 onClick={onTogglePlaybackInfo}
-                aria-label="Playback info"
+                aria-label={t("web.player.controls.playbackInfo")}
                 data-active={showPlaybackInfo ? "true" : "false"}
               >
                 <Info className="h-[18px] w-[18px]" />
@@ -588,8 +598,8 @@ export function PlayerControls({
                   type="button"
                   className="player-utility-btn"
                   onClick={onTogglePiP}
-                  aria-label="Picture in Picture (P)"
-                  title="Picture in Picture (P)"
+                  aria-label={t("web.player.controls.pictureInPictureShortcut")}
+                  title={t("web.player.controls.pictureInPictureShortcut")}
                 >
                   <PictureInPicture2 className="h-[18px] w-[18px]" />
                 </button>
@@ -599,9 +609,9 @@ export function PlayerControls({
                 type="button"
                 className="player-utility-btn"
                 onClick={onVideoFitToggle}
-                aria-label="Fill screen"
+                aria-label={t("web.player.controls.fillScreen")}
                 aria-pressed={videoFit === "cover"}
-                title="Fill screen"
+                title={t("web.player.controls.fillScreen")}
                 data-active={videoFit === "cover" ? "true" : "false"}
               >
                 <Scaling className="h-[18px] w-[18px]" />
@@ -612,7 +622,11 @@ export function PlayerControls({
                   type="button"
                   className="player-utility-btn"
                   onClick={onFullscreenToggle}
-                  aria-label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+                  aria-label={
+                    isFullscreen
+                      ? t("web.player.controls.exitFullscreen")
+                      : t("web.player.controls.fullscreen")
+                  }
                 >
                   {isFullscreen ? (
                     <Minimize className="h-[18px] w-[18px]" />
@@ -630,7 +644,7 @@ export function PlayerControls({
         <button
           type="button"
           className="absolute inset-0 z-40"
-          aria-label="Close menu"
+          aria-label={t("web.player.menu.close")}
           onClick={(event) => {
             event.stopPropagation();
             setOverflowOpen(false);
@@ -642,7 +656,7 @@ export function PlayerControls({
           <div className="py-1">
             {!isCoarsePointer && (
               <div className="flex items-center justify-between border-b border-white/10 px-5 py-3 text-sm text-white/80">
-                <span>Volume</span>
+                <span>{t("web.player.controls.volume")}</span>
                 <VolumeControl
                   volume={volume}
                   muted={muted}
@@ -654,7 +668,7 @@ export function PlayerControls({
             {onAudioSelect && audioTracks.length > 0 && (
               <OverflowAction
                 icon={<AudioLines className="h-5 w-5" />}
-                label="Audio tracks"
+                label={t("web.player.audioMenu.trigger")}
                 onClick={() => {
                   setOverflowOpen(false);
                   setAudioOpen(true);
@@ -664,7 +678,7 @@ export function PlayerControls({
             {(chapters?.length ?? 0) > 0 && (
               <OverflowAction
                 icon={<ListVideo className="h-5 w-5" />}
-                label="Chapters"
+                label={t("web.player.chaptersMenu.trigger")}
                 onClick={() => {
                   setOverflowOpen(false);
                   setChaptersOpen(true);
@@ -673,7 +687,7 @@ export function PlayerControls({
             )}
             <OverflowAction
               icon={<Info className="h-5 w-5" />}
-              label="Playback info"
+              label={t("web.player.controls.playbackInfo")}
               active={showPlaybackInfo}
               onClick={() => {
                 onTogglePlaybackInfo();
@@ -683,7 +697,7 @@ export function PlayerControls({
             {onTogglePiP && document.pictureInPictureEnabled && (
               <OverflowAction
                 icon={<PictureInPicture2 className="h-5 w-5" />}
-                label="Picture in Picture"
+                label={t("web.player.controls.pictureInPicture")}
                 onClick={() => {
                   onTogglePiP();
                   setOverflowOpen(false);
@@ -692,7 +706,7 @@ export function PlayerControls({
             )}
             <OverflowAction
               icon={<Scaling className="h-5 w-5" />}
-              label="Fill screen"
+              label={t("web.player.controls.fillScreen")}
               active={videoFit === "cover"}
               onClick={() => {
                 onVideoFitToggle();
@@ -702,7 +716,7 @@ export function PlayerControls({
             {markerEditAvailable && onToggleMarkerEdit && (
               <OverflowAction
                 icon={<Tags className="h-5 w-5" />}
-                label="Edit markers"
+                label={t("web.player.controls.editMarkers")}
                 active={markerEditActive}
                 onClick={() => {
                   onToggleMarkerEdit();
@@ -759,30 +773,5 @@ function OverflowAction({
       {icon}
       <span>{label}</span>
     </button>
-  );
-}
-
-/* ─────────────────────────────────────────────────────────────────────
-   Internal building blocks
-   ───────────────────────────────────────────────────────────────────── */
-
-/** Invisible placeholder that reserves the exact footprint of a CircleButton
- *  so the playback cluster stays symmetric when a neighboring episode isn't
- *  available (first/last episode in a series). */
-function ClusterSlotSpacer({ size }: { size: "sm" | "md" }) {
-  const sizing = size === "md" ? "h-12 w-12 sm:h-14 sm:w-14" : "h-10 w-10 sm:h-11 sm:w-11";
-  return <div aria-hidden="true" className={sizing} />;
-}
-
-/** Curved arrow with the skip-seconds number centered in the loop. */
-function SkipIcon({ direction, seconds }: { direction: "back" | "forward"; seconds: number }) {
-  const Arrow = direction === "back" ? RotateCcw : RotateCw;
-  return (
-    <span className="relative flex h-7 w-7 items-center justify-center">
-      <Arrow className="h-7 w-7" strokeWidth={1.6} />
-      <span className="absolute inset-0 flex items-center justify-center pb-[1px] text-[8.5px] font-semibold tracking-tight tabular-nums">
-        {seconds}
-      </span>
-    </span>
   );
 }

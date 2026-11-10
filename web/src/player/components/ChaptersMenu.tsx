@@ -4,6 +4,7 @@ import type { PlayerChapter } from "../types";
 import { formatTime } from "../utils/formatTime";
 import { PreviewImage } from "./PreviewImage";
 import { PlayerMenuSurface } from "./PlayerMenuSurface";
+import { useT } from "@/i18n";
 
 interface ChaptersMenuProps {
   chapters: PlayerChapter[];
@@ -28,6 +29,7 @@ export function ChaptersMenu({
   onOpenChange,
   hideTrigger = false,
 }: ChaptersMenuProps) {
+  const t = useT();
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const open = controlledOpen ?? uncontrolledOpen;
   const setOpen = useCallback(
@@ -101,7 +103,7 @@ export function ChaptersMenu({
           type="button"
           className="player-utility-btn"
           onClick={() => setOpen((value) => !value)}
-          aria-label="Chapters"
+          aria-label={t("web.player.chaptersMenu.trigger")}
           aria-expanded={open}
           aria-haspopup="menu"
         >
@@ -117,7 +119,7 @@ export function ChaptersMenu({
           onKeyDown={handleMenuKeyDown}
         >
           <div className="px-3 py-1.5 text-xs font-medium tracking-wide text-white/50 uppercase">
-            Chapters
+            {t("web.player.chaptersMenu.heading")}
           </div>
           {chapters.map((chapter, index) => (
             <button

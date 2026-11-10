@@ -1,6 +1,7 @@
 import { useCallback, useRef } from "react";
 import { Volume2, VolumeX } from "lucide-react";
 import { storage } from "@/utils/storage";
+import { useT } from "@/i18n";
 
 /** Read persisted volume from localStorage. */
 export function getPersistedVolume(): { volume: number; muted: boolean } {
@@ -38,6 +39,7 @@ export function VolumeControl({
   onMutedChange,
   tone = "overlay",
 }: VolumeControlProps) {
+  const t = useT();
   const sliderRef = useRef<HTMLDivElement>(null);
 
   const getVolumeFromEvent = useCallback(
@@ -160,8 +162,8 @@ export function VolumeControl({
         type="button"
         className={buttonClass}
         onClick={() => onMutedChange(!muted)}
-        aria-label={muted ? "Unmute" : "Mute"}
-        title={muted ? "Unmute (M)" : "Mute (M)"}
+        aria-label={muted ? t("web.player.volume.unmute") : t("web.player.volume.mute")}
+        title={muted ? t("web.player.volume.unmuteShortcut") : t("web.player.volume.muteShortcut")}
         data-active={muted || volume === 0 ? "false" : undefined}
       >
         {muted || volume === 0 ? (
@@ -178,11 +180,13 @@ export function VolumeControl({
         ref={sliderRef}
         role="slider"
         tabIndex={0}
-        aria-label="Volume"
+        aria-label={t("web.player.volume.label")}
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={Math.round(displayVolume * 100)}
-        aria-valuetext={`Volume ${Math.round(displayVolume * 100)}%`}
+        aria-valuetext={t("web.player.volume.valueText", {
+          percent: String(Math.round(displayVolume * 100)),
+        })}
         className={`group/vol-slider relative flex h-6 w-24 cursor-pointer touch-none items-center rounded-full focus-visible:ring-2 focus-visible:outline-none ${sliderFocusClass}`}
         onMouseDown={handleMouseDown}
         onTouchStart={handleTouchStart}

@@ -6,6 +6,7 @@ import ContinueWatchingCard from "@/components/ContinueWatchingCard";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import MediaCarousel from "@/components/MediaCarousel";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
+import { useT } from "@/i18n";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import { buildChapterList, findChapterAt, totalAudiobookDuration } from "@/lib/audiobooks/chapters";
@@ -38,6 +39,7 @@ function namesFromPeople(people: Array<{ name?: string }> | undefined): string |
  * row with the rest of the in-progress books.
  */
 export default function NowListeningHero({ section, libraryId }: NowListeningHeroProps) {
+  const t = useT();
   const deck = section.items[0];
   const rest = section.items.slice(1);
   const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
@@ -60,7 +62,9 @@ export default function NowListeningHero({ section, libraryId }: NowListeningHer
     () => (detail ? audiobookFilesFromVersions(detail.versions) : []),
     [detail],
   );
-  const chapters = useMemo(() => buildChapterList(files), [files]);
+  // Built on each render so the fallback "Chapter N" labels it shows follow
+  // the interface language.
+  const chapters = buildChapterList(files);
 
   if (!deck) return null;
 
@@ -83,12 +87,19 @@ export default function NowListeningHero({ section, libraryId }: NowListeningHer
   const progressPercent =
     durationSeconds > 0 ? Math.min((positionSeconds / durationSeconds) * 100, 100) : 0;
   const timeLeft = formatListeningTimeLeft(positionSeconds, durationSeconds);
-  const chapterLine = chapter
-    ? `Chapter ${chapter.index} of ${chapters.length}` +
-      (chapter.label && chapter.label !== `Chapter ${chapter.index}` ? ` · ${chapter.label}` : "")
-    : durationSeconds > 0
-      ? formatHoursMinutes(durationSeconds)
-      : "";
+  let chapterLine = durationSeconds > 0 ? formatHoursMinutes(durationSeconds) : "";
+  if (chapter) {
+    const index = String(chapter.index);
+    const total = String(chapters.length);
+    // Whether the chapter has a title of its own is decided on the English
+    // data, as before, not by comparing translated text (D44).
+    const entry = chapters[chapter.index - 1];
+    const englishLabel = entry && (entry.chapter.title || `Chapter ${entry.chapter.index + 1}`);
+    const titled = englishLabel && englishLabel !== `Chapter ${chapter.index}`;
+    chapterLine = titled
+      ? t("web.audiobooks.hero.chapterPositionTitled", { index, total, chapter: chapter.label })
+      : t("web.audiobooks.hero.chapterPosition", { index, total });
+  }
 
   const playHref = buildMediaPlayHref({
     contentId: deck.content_id,
@@ -120,13 +131,17 @@ export default function NowListeningHero({ section, libraryId }: NowListeningHer
     // page link, which auto-starts playback via ?play=1.
   };
 
-  const resumeLabel = isActivePlaying ? "Pause" : positionSeconds > 0 ? "Resume" : "Listen";
+  const resumeLabel = isActivePlaying
+    ? t("web.audiobooks.hero.pause")
+    : positionSeconds > 0
+      ? t("web.audiobooks.hero.resume")
+      : t("web.audiobooks.hero.listen");
 
   return (
     <>
       <section
         className="relative -mt-[96px] w-full overflow-hidden sm:-mt-[104px]"
-        aria-label="Now listening"
+        aria-label={t("web.audiobooks.hero.ariaLabel")}
       >
         {/* The book's own cover, blurred, stands in for a backdrop and warms
             the section with the cover's palette alongside the ambient glow. */}
@@ -177,7 +192,7 @@ export default function NowListeningHero({ section, libraryId }: NowListeningHer
 
             <div className="min-w-0 flex-1">
               <p className="hero-eyebrow mb-3">
-                <span className="hero-eyebrow-strong">Now Listening</span>
+                <span className="hero-eyebrow-strong">{t("web.audiobooks.hero.eyebrow")}</span>
               </p>
               <h1
                 className="font-display max-w-3xl text-3xl font-extrabold tracking-[-0.03em] text-balance sm:text-4xl lg:text-5xl"
@@ -187,9 +202,11 @@ export default function NowListeningHero({ section, libraryId }: NowListeningHer
               </h1>
               {(author || narrator) && (
                 <p className="text-foreground/70 mt-2 max-w-2xl truncate text-sm sm:text-base">
-                  {author}
-                  {author && narrator ? " · " : ""}
-                  {narrator && `Narrated by ${narrator}`}
+                  {author && narrator
+                    ? t("web.audiobooks.hero.authorAndNarrator", { author, narrator })
+                    : narrator
+                      ? t("web.audiobooks.hero.narratedBy", { narrator })
+                      : author}
                 </p>
               )}
 
@@ -224,7 +241,7 @@ export default function NowListeningHero({ section, libraryId }: NowListeningHer
                   className="pill pill-glass transition-colors duration-(--duration-fast)"
                 >
                   <Info className="h-4 w-4" />
-                  More Info
+                  {t("web.audiobooks.hero.moreInfo")}
                 </ViewTransitionLink>
               </div>
             </div>

@@ -1,4 +1,5 @@
 import type { MarkerKind } from "@/api/types";
+import type { MessageKey } from "@/i18n";
 
 /**
  * Canonical marker-kind metadata and timecode helpers shared by app-side
@@ -16,6 +17,14 @@ export const MARKER_LABELS: Record<MarkerKind, string> = {
   recap: "Recap",
   credits: "Credits / Outro",
   preview: "Preview",
+};
+
+/** Message ids of the labels above, for screens that translate them. */
+export const MARKER_LABEL_KEYS: Record<MarkerKind, MessageKey> = {
+  intro: "web.markers.kind.intro",
+  recap: "web.markers.kind.recap",
+  credits: "web.markers.kind.credits",
+  preview: "web.markers.kind.preview",
 };
 
 /** Formats seconds as h:mm:ss / m:ss for display. Empty string for null. */

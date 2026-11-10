@@ -302,13 +302,23 @@ export class V2ProblemError extends Error {
 
 /** A problem's display text in the current language; see `V2ProblemError`. */
 function problemText(problem: Problem): string {
-  const text = serverText(
-    `error.${problemId(problem)}`,
-    undefined,
-    problem.detail || problem.title,
-  );
-  const field = problem.errors?.[0];
-  return field ? serverText(`error.field.${field.code}`, undefined, text) : text;
+  return problemDisplayText(problem, problem.detail || problem.title);
+}
+
+/**
+ * The display text for a problem body parsed outside `v2()` (the player's own
+ * fetches). `english` is what the caller shows today, always kept in English;
+ * a translated interface shows `error.field.<code>` of the first field error,
+ * then `error.<type>`, then `english`.
+ */
+export function problemDisplayText(
+  problem: { type?: unknown; errors?: { code?: unknown }[] },
+  english: string,
+): string {
+  const type = typeof problem.type === "string" ? problemId({ type: problem.type }) : "";
+  const text = type ? serverText(`error.${type}`, undefined, english) : english;
+  const code = problem.errors?.[0]?.code;
+  return typeof code === "string" ? serverText(`error.field.${code}`, undefined, text) : text;
 }
 
 /**
