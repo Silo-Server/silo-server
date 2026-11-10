@@ -8,6 +8,7 @@ import { useAccessGroups } from "@/hooks/queries/admin/accessGroups";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import { useAdminUserCapabilities } from "@/hooks/queries/admin/users";
 import { useAdminUserDownloadSummary } from "@/hooks/queries/admin/userActivity";
+import { useT, type Translate } from "@/i18n";
 import {
   PERMISSION_MARKER_EDIT,
   PERMISSION_METADATA_CURATION,
@@ -28,10 +29,6 @@ import {
 } from "../access/policySources";
 import { userDetailTabSearch } from "../userDetailTabs";
 import { DetailCard, SourceTag } from "../ui";
-
-function plural(n: number, one: string, many: string) {
-  return `${n} ${n === 1 ? one : many}`;
-}
 
 function SummaryLine({
   icon,
@@ -60,43 +57,59 @@ function SummaryLine({
   );
 }
 
-function videoTranscodingText(video: VideoTranscoding): string {
+function videoTranscodingText(t: Translate, video: VideoTranscoding): string {
   switch (video.mode) {
     case "off":
-      return "No video transcoding";
+      return t("web.admin.users.detail.overview.access.noVideoTranscoding");
     case "unlimited":
-      return "Unlimited video transcodes";
+      return t("web.admin.users.detail.overview.access.unlimitedVideoTranscodes");
     case "limit":
-      return `Up to ${plural(video.max, "video transcode", "video transcodes")}`;
+      return t("web.admin.users.detail.overview.access.videoTranscodeLimit", {
+        count: video.max,
+        count_text: String(video.max),
+      });
   }
 }
 
 /** The requests line: whether the account can request, and its quota and approval once known. */
 function requestsSummary(
+  t: Translate,
   canRequest: boolean,
   terms: ResolvedRequestTerms | undefined,
 ): { title: ReactNode; detail?: ReactNode } {
-  if (!canRequest) return { title: "Can't request media" };
-  if (!terms) return { title: "Requests" };
+  if (!canRequest) return { title: t("web.admin.users.detail.overview.access.cantRequest") };
+  if (!terms) return { title: t("web.admin.users.detail.overview.access.requests") };
   const detail = (
     <>
-      {terms.autoApprove ? "Approved automatically" : "Needs approval"}
+      {terms.autoApprove
+        ? t("web.admin.users.detail.overview.access.autoApprove")
+        : t("web.admin.users.detail.overview.access.needsApproval")}
       {terms.approvalSource.kind === "account" ? CUSTOM : null}
     </>
   );
   const title = (
     <>
-      {formatQuota(terms.quota)}
+      {formatQuota(t, terms.quota)}
       {terms.quotaSource.kind === "account" ? CUSTOM : null}
     </>
   );
   return { title, detail };
 }
 
-function formatQuota(quota: ResolvedRequestTerms["quota"]): string {
-  if (quota.unlimited) return "Unlimited requests";
-  const window = quota.days === 1 ? "day" : `${quota.days} days`;
-  return `${plural(quota.max, "request", "requests")} per ${window}`;
+function formatQuota(t: Translate, quota: ResolvedRequestTerms["quota"]): string {
+  if (quota.unlimited) return t("web.admin.users.detail.overview.access.unlimitedRequests");
+  const period =
+    quota.days === 1
+      ? t("web.admin.users.detail.overview.access.quotaDay")
+      : t("web.admin.users.detail.overview.access.quotaDays", {
+          days: quota.days,
+          days_text: String(quota.days),
+        });
+  return t("web.admin.users.detail.overview.access.quota", {
+    count: quota.max,
+    count_text: String(quota.max),
+    period,
+  });
 }
 
 const CUSTOM = (
@@ -107,6 +120,7 @@ const CUSTOM = (
 
 /** A few lines on what the account can do, with the account's own limits marked. */
 export function AccessSummaryCard({ user }: { user: AdminUser }) {
+  const t = useT();
   const groups = useAccessGroups().data ?? [];
   const libraries = useAdminLibraries().data ?? [];
   const capabilities = useAdminUserCapabilities().data;
@@ -117,11 +131,15 @@ export function AccessSummaryCard({ user }: { user: AdminUser }) {
   const effective = user.effective_policy;
   const ctx = inheritContextFor(user, groups);
   const custom = countCustomPolicyRows(user) + countCustomRequestTerms(terms);
-  const source = ctx.kind === "group" ? `${ctx.name} group` : "Server default";
+  const source =
+    ctx.kind === "group"
+      ? t("web.admin.users.detail.overview.access.groupSource", { name: ctx.name })
+      : t("web.admin.users.detail.overview.access.serverDefault");
 
   const marker = hasAssignedPermission(effective.permissions, PERMISSION_MARKER_EDIT);
   const curate = hasAssignedPermission(effective.permissions, PERMISSION_METADATA_CURATION);
   const videoText = videoTranscodingText(
+    t,
     videoTranscodingFromEffective(effective.transcode_allowed, effective.max_transcodes),
   );
   const videoCustom = user.transcode_allowed !== null || user.max_transcodes !== null;
@@ -129,60 +147,88 @@ export function AccessSummaryCard({ user }: { user: AdminUser }) {
 
   const summary = downloads.data;
   const downloadsDetail = [
-    effective.download_transcode_allowed ? "Server-prepared copies allowed" : "Original files only",
+    effective.download_transcode_allowed
+      ? t("web.admin.users.detail.overview.access.serverCopiesAllowed")
+      : t("web.admin.users.detail.overview.access.originalFilesOnly"),
     ...(accountDownloads && summary
       ? [
-          `${plural(summary.completed, "download", "downloads")} confirmed on devices`,
-          `${plural(summary.monitored_series, "series", "series")} monitored`,
+          t("web.admin.users.detail.overview.access.downloadsConfirmed", {
+            count: summary.completed,
+            count_text: String(summary.completed),
+          }),
+          t("web.admin.users.detail.overview.access.seriesMonitored", {
+            count: summary.monitored_series,
+            count_text: String(summary.monitored_series),
+          }),
         ]
       : []),
   ].join(" · ");
 
   const canRequest = effective.requests_allowed && server?.requests_enabled !== false;
-  const requestsLine = requestsSummary(canRequest, terms);
+  const requestsLine = requestsSummary(t, canRequest, terms);
 
   return (
     <DetailCard
-      title="Access"
+      title={t("web.admin.users.detail.overview.access.title")}
       description={
         custom > 0
-          ? `${source}, with ${plural(custom, "limit", "limits")} set for this account`
+          ? t("web.admin.users.detail.overview.access.withLimits", { count: custom, source })
           : source
       }
       actions={
         <Button asChild variant="outline" size="xs">
-          <Link to={userDetailTabSearch("access")}>Access &amp; limits →</Link>
+          <Link to={userDetailTabSearch("access")}>
+            {t("web.admin.users.detail.overview.access.openAccess")}
+          </Link>
         </Button>
       }
     >
       <SummaryLine
         icon={<LayoutGrid />}
         title={libraryListText(effective.library_ids, libraries)}
-        detail={`${marker ? "Can" : "Can't"} edit markers · ${curate ? "can" : "can't"} curate metadata`}
+        detail={t("web.admin.users.detail.overview.access.markersCurate", {
+          marker: marker ? "yes" : "no",
+          curate: curate ? "yes" : "no",
+        })}
       />
       <SummaryLine
         icon={<Play />}
         title={
           <>
-            {formatQuality(effective.max_playback_quality)} quality
-            {user.max_playback_quality !== null ? CUSTOM : null} ·{" "}
+            {t("web.admin.users.detail.overview.access.quality", {
+              quality: formatQuality(effective.max_playback_quality),
+            })}
+            {user.max_playback_quality !== null ? CUSTOM : null}
+            {" · "}
             {effective.max_streams === 0
-              ? "unlimited streams"
-              : plural(effective.max_streams, "stream", "streams")}
+              ? t("web.admin.users.detail.overview.access.unlimitedStreams")
+              : t("web.admin.users.detail.overview.access.streams", {
+                  count: effective.max_streams,
+                  count_text: String(effective.max_streams),
+                })}
             {user.max_streams !== null ? CUSTOM : null}
           </>
         }
         detail={
           <>
             {videoText}
-            {videoCustom ? CUSTOM : null} ·{" "}
-            {remote === 0 ? "no bitrate cap" : `${formatStreamBitrateLimit(remote)} remote cap`}
+            {videoCustom ? CUSTOM : null}
+            {" · "}
+            {remote === 0
+              ? t("web.admin.users.detail.overview.access.noBitrateCap")
+              : t("web.admin.users.detail.overview.access.remoteCap", {
+                  bitrate: formatStreamBitrateLimit(remote),
+                })}
           </>
         }
       />
       <SummaryLine
         icon={<Download />}
-        title={effective.download_allowed ? "Downloads allowed" : "Downloads not allowed"}
+        title={
+          effective.download_allowed
+            ? t("web.admin.users.detail.overview.access.downloadsAllowed")
+            : t("web.admin.users.detail.overview.access.downloadsNotAllowed")
+        }
         detail={downloadsDetail}
       />
       <SummaryLine icon={<Mail />} title={requestsLine.title} detail={requestsLine.detail} />

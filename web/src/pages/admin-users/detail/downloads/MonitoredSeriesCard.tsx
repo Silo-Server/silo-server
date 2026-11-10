@@ -7,6 +7,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useT } from "@/i18n";
 
 import { formatStorageLimit } from "../format";
 import { DetailCard } from "../ui";
@@ -26,28 +27,39 @@ export function MonitoredSeriesCard({
   /** A device or profile filter is narrowing the list. */
   filtered?: boolean;
 }) {
+  const t = useT();
   return (
     <DetailCard
-      title="Monitored series"
-      description="New episodes download to the device automatically. Devices check when the app opens or refreshes in the background."
+      title={t("web.admin.users.detail.downloads.monitoredSeries")}
+      description={t("web.admin.users.detail.downloads.monitor.description")}
     >
       {monitors.length === 0 ? (
         <p className="text-muted-foreground px-5 py-6 text-center text-sm">
           {filtered
-            ? "No monitored series match these filters."
-            : "No series are monitored on this account’s devices."}
+            ? t("web.admin.users.detail.downloads.monitor.noMatch")
+            : t("web.admin.users.detail.downloads.monitor.empty")}
         </p>
       ) : (
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="pl-4 sm:pl-5">Series</TableHead>
-                <TableHead className={wideOnly}>Device · profile</TableHead>
-                <TableHead>Keeps</TableHead>
-                <TableHead className={wideOnly}>After watching</TableHead>
-                <TableHead className={wideOnly}>Storage limit</TableHead>
-                <TableHead className="pr-4 sm:pr-5">Now</TableHead>
+                <TableHead className="pl-4 sm:pl-5">
+                  {t("web.admin.users.detail.downloads.monitor.column.series")}
+                </TableHead>
+                <TableHead className={wideOnly}>
+                  {t("web.admin.users.detail.downloads.monitor.column.deviceProfile")}
+                </TableHead>
+                <TableHead>{t("web.admin.users.detail.downloads.monitor.column.keeps")}</TableHead>
+                <TableHead className={wideOnly}>
+                  {t("web.admin.users.detail.downloads.monitor.column.afterWatching")}
+                </TableHead>
+                <TableHead className={wideOnly}>
+                  {t("web.admin.users.detail.downloads.monitor.column.storageLimit")}
+                </TableHead>
+                <TableHead className="pr-4 sm:pr-5">
+                  {t("web.admin.users.detail.downloads.monitor.column.now")}
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -57,17 +69,21 @@ export function MonitoredSeriesCard({
                     {monitor.series_title || monitor.series_id}
                   </TableCell>
                   <TableCell className={`${wideOnly} text-muted-foreground`}>
-                    {deviceName(monitor.device_id)} ·{" "}
-                    {profileNames.get(monitor.profile_id) || monitor.profile_id}
+                    {[
+                      deviceName(monitor.device_id),
+                      profileNames.get(monitor.profile_id) || monitor.profile_id,
+                    ].join(" · ")}
                   </TableCell>
                   <TableCell className="whitespace-normal">{monitorKeepsLabel(monitor)}</TableCell>
                   <TableCell className={`${wideOnly} text-muted-foreground`}>
-                    {monitor.delete_watched ? "Delete after watching" : "Keep"}
+                    {monitor.delete_watched
+                      ? t("web.admin.users.detail.downloads.monitor.deleteAfterWatching")
+                      : t("web.admin.users.detail.downloads.monitor.keep")}
                   </TableCell>
                   <TableCell className={`${wideOnly} text-muted-foreground`}>
                     {monitor.max_storage_bytes > 0
                       ? formatStorageLimit(monitor.max_storage_bytes)
-                      : "No limit"}
+                      : t("web.admin.users.detail.downloads.monitor.noLimit")}
                   </TableCell>
                   <TableCell className="text-muted-foreground pr-4 whitespace-normal sm:pr-5">
                     {monitorNowLabel(monitor)}

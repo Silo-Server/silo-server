@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useUserIPs } from "@/hooks/queries/admin/ips";
+import { useT } from "@/i18n";
 
 import { formatLastSeen, formatShortDate } from "../format";
 import { DetailCard } from "../ui";
@@ -30,6 +31,7 @@ function isNewRemoteAddress(
 }
 
 export function IPAddressesCard({ userId }: { userId: number }) {
+  const t = useT();
   const history = useUserIPs(userId, WINDOW_DAYS);
   const [expanded, setExpanded] = useState(false);
   const ips = history.data ?? [];
@@ -38,12 +40,14 @@ export function IPAddressesCard({ userId }: { userId: number }) {
 
   return (
     <DetailCard
-      title="IP addresses"
-      description={`From request logs, last ${WINDOW_DAYS} days`}
+      title={t("web.admin.users.detail.activity.ips.title")}
+      description={t("web.admin.users.detail.activity.ips.description", { days: WINDOW_DAYS })}
       actions={
         canExpand ? (
           <Button variant="ghost" size="sm" onClick={() => setExpanded(true)}>
-            {history.hasNextPage ? "Show all" : `Show all ${ips.length}`}
+            {history.hasNextPage
+              ? t("web.admin.users.detail.activity.ips.showAll")
+              : t("web.admin.users.detail.activity.showAllCount", { count: String(ips.length) })}
           </Button>
         ) : undefined
       }
@@ -56,24 +60,28 @@ export function IPAddressesCard({ userId }: { userId: number }) {
             disabled={history.isFetchingNextPage}
             onClick={() => void history.fetchNextPage()}
           >
-            Load more
+            {t("web.admin.users.detail.common.loadMore")}
           </Button>
         ) : undefined
       }
     >
       {history.isError && (
         <div role="alert" className="flex items-center gap-3 px-5 py-4 text-sm">
-          <span className="text-destructive">Could not load IP history.</span>
+          <span className="text-destructive">
+            {t("web.admin.users.detail.activity.ips.failed")}
+          </span>
           <Button variant="outline" size="sm" onClick={() => void history.restart()}>
-            Reload history
+            {t("web.admin.users.detail.activity.ips.reload")}
           </Button>
         </div>
       )}
       {history.isLoading ? (
-        <p className="text-muted-foreground px-5 py-6 text-center text-sm">Loading IP history...</p>
+        <p className="text-muted-foreground px-5 py-6 text-center text-sm">
+          {t("web.admin.users.detail.activity.ips.loading")}
+        </p>
       ) : ips.length === 0 && !history.isError ? (
         <p className="text-muted-foreground px-5 py-6 text-center text-sm">
-          No IP history found for this user.
+          {t("web.admin.users.detail.activity.ips.empty")}
         </p>
       ) : (
         <ul>
@@ -89,18 +97,26 @@ export function IPAddressesCard({ userId }: { userId: number }) {
                     variant="outline"
                     className="rounded-full border-amber-500/40 bg-amber-500/10 text-amber-200"
                   >
-                    First seen {formatShortDate(entry.first_seen)}
+                    {t("web.admin.users.detail.activity.ips.firstSeen", {
+                      date: formatShortDate(entry.first_seen),
+                    })}
                   </Badge>
                 ) : entry.location === "local" ? (
-                  <span className="text-muted-foreground">Local</span>
+                  <span className="text-muted-foreground">
+                    {t("web.admin.users.detail.activity.ips.local")}
+                  </span>
                 ) : entry.location === "remote" ? (
-                  <span className="text-muted-foreground">Remote</span>
+                  <span className="text-muted-foreground">
+                    {t("web.admin.users.detail.activity.ips.remote")}
+                  </span>
                 ) : null}
               </span>
               <span className="text-muted-foreground col-span-2 text-xs tabular-nums sm:col-span-1 sm:text-right">
-                {entry.request_count.toLocaleString(formatLocale())}{" "}
-                {entry.request_count === 1 ? "request" : "requests"} ·{" "}
-                {formatLastSeen(entry.last_seen)}
+                {t("web.admin.users.detail.activity.ips.requests", {
+                  count: entry.request_count,
+                  count_text: entry.request_count.toLocaleString(formatLocale()),
+                  last_seen: formatLastSeen(entry.last_seen),
+                })}
               </span>
             </li>
           ))}

@@ -4,6 +4,7 @@ import type { AdminSession, AdminUser } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAdminUserProfileActivity } from "@/hooks/queries/admin/userActivity";
+import { useT } from "@/i18n";
 
 import { formatLastSeen } from "../format";
 import { userDetailTabSearch } from "../userDetailTabs";
@@ -17,29 +18,35 @@ export function ProfilesCard({
   user: AdminUser;
   live: AdminSession[] | undefined | null;
 }) {
+  const t = useT();
   const profiles = useAdminUserProfileActivity(user.id);
   const watching = new Set((live ?? []).map((session) => session.profile_id));
   const count = profiles.data?.length;
 
   return (
     <DetailCard
-      title="Profiles"
+      title={t("web.admin.users.detail.overview.profiles.title")}
       description={
         count === undefined
           ? undefined
-          : `${count} of ${user.effective_policy.max_profiles} allowed`
+          : t("web.admin.users.detail.common.profilesAllowed", {
+              count: String(count),
+              max: String(user.effective_policy.max_profiles),
+            })
       }
       actions={
         <Button asChild variant="ghost" size="sm">
-          <Link to={userDetailTabSearch("profiles")}>Manage</Link>
+          <Link to={userDetailTabSearch("profiles")}>
+            {t("web.admin.users.detail.overview.profiles.manage")}
+          </Link>
         </Button>
       }
     >
       {profiles.isError ? (
         <div role="alert" className="flex flex-wrap items-center gap-2 px-4 py-4 text-sm sm:px-5">
-          Couldn't load profiles.
+          {t("web.admin.users.detail.common.loadProfilesFailed")}
           <Button type="button" variant="outline" size="sm" onClick={() => void profiles.refetch()}>
-            Retry
+            {t("common.retry")}
           </Button>
         </div>
       ) : !profiles.data ? (
@@ -48,7 +55,7 @@ export function ProfilesCard({
         </div>
       ) : profiles.data.length === 0 ? (
         <p className="text-muted-foreground px-4 py-6 text-center text-sm sm:px-5">
-          This account has no profiles.
+          {t("web.admin.users.detail.common.noProfiles")}
         </p>
       ) : (
         profiles.data.map((profile, index) => (
@@ -58,12 +65,12 @@ export function ProfilesCard({
             title={profile.name}
             trailing={
               watching.has(profile.id)
-                ? "Watching now"
+                ? t("web.admin.users.detail.common.watchingNow")
                 : profile.last_seen_at
                   ? formatLastSeen(profile.last_seen_at)
                   : // Only device registrations are read here, and a failed read
                     // also comes back empty, so this can't claim "never used".
-                    "No device activity"
+                    t("web.admin.users.detail.common.noDeviceActivity")
             }
           />
         ))

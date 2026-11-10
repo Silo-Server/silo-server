@@ -63,11 +63,17 @@ import {
 } from "lucide-react";
 import { formatDateTime, formatTime } from "@/lib/datetime";
 import { formatLocale } from "@/lib/appLocale";
+import { englishText, useT, type TextValues, type Translate } from "@/i18n";
+import type { MessageKey } from "@/locales/keys";
 
 type SortField = "username" | "media" | "method" | "node" | "started";
 type SortDir = "asc" | "desc";
 
 const REFRESH_SPINNER_MIN_VISIBLE_MS = 1_000;
+// Punctuation and symbols, the same in every language.
+const MIDDLE_DOT = "·";
+const SORT_ASC_MARK = "▲";
+const SORT_DESC_MARK = "▼";
 
 // The stream table's header and rows share one column template, whose minimums
 // add up to 977px plus 4rem of gaps and padding (1041px at a 16px root font,
@@ -76,21 +82,24 @@ const REFRESH_SPINNER_MIN_VISIBLE_MS = 1_000;
 const STREAM_TABLE_COLUMNS =
   "grid-cols-[minmax(120px,1.1fr)_minmax(190px,1.7fr)_minmax(220px,1.9fr)_minmax(90px,0.8fr)_minmax(125px,0.9fr)_minmax(232px,1.4fr)]";
 
-const STACKED_SORT_FIELDS: [SortField, string][] = [
-  ["username", "User"],
-  ["media", "Stream"],
-  ["method", "Playback"],
-  ["node", "Route"],
-  ["started", "Time"],
+const STACKED_SORT_FIELDS: [SortField, MessageKey][] = [
+  ["username", "web.admin.activity.column.user"],
+  ["media", "web.admin.activity.column.stream"],
+  ["method", "web.admin.activity.column.playback"],
+  ["node", "web.admin.activity.column.route"],
+  ["started", "web.admin.activity.column.time"],
 ];
 
+// Sort keys and search compare English text (and the shown text, for search),
+// so a language change neither reorders rows nor loses a typed English query.
 function routeSortValue(session: AdminSession): string {
-  return getSessionRouteNodes(session)
+  return getSessionRouteNodes(session, englishText)
     .map((node) => `${node.label} ${node.name}`)
     .join(" ");
 }
 
 export default function AdminActivity() {
+  const t = useT();
   const { data: sessions = [], isLoading, refetch: refresh } = useAdminSessions();
   const [searchParams] = useSearchParams();
   const { connectionState } = useRealtimeEvents();
@@ -173,7 +182,9 @@ export default function AdminActivity() {
       }
     }
     return [...counts.values()];
-  }, [sessions]);
+    // Node labels come from t() inside getSessionRouteNodes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- rebuild on a language change
+  }, [sessions, t]);
 
   // Filter + sort
   const filtered = useMemo(() => {
@@ -192,7 +203,7 @@ export default function AdminActivity() {
           getSessionClientLabelFull(s).toLowerCase().includes(q) ||
           s.client_user_agent?.toLowerCase().includes(q) ||
           s.client_ip?.toLowerCase().includes(q) ||
-          getSessionRouteNodes(s).some((node) =>
+          [...getSessionRouteNodes(s), ...getSessionRouteNodes(s, englishText)].some((node) =>
             `${node.label} ${node.name}`.toLowerCase().includes(q),
           ),
       );
@@ -212,7 +223,7 @@ export default function AdminActivity() {
           cmp = (a.username || "").localeCompare(b.username || "");
           break;
         case "media":
-          cmp = getDisplayTitle(a).localeCompare(getDisplayTitle(b));
+          cmp = getDisplayTitle(a, englishText).localeCompare(getDisplayTitle(b, englishText));
           break;
         case "method":
           cmp = compareActivityMethods(classifyActivityMethod(a), classifyActivityMethod(b));
@@ -226,7 +237,10 @@ export default function AdminActivity() {
       }
       return sortDir === "asc" ? cmp : -cmp;
     });
-  }, [sessions, search, methodFilter, nodeFilter, typeFilter, sortField, sortDir]);
+    // Search also matches the shown route text, which comes from t() inside
+    // getSessionRouteNodes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-filter on a language change
+  }, [sessions, search, methodFilter, nodeFilter, typeFilter, sortField, sortDir, t]);
 
   const toggleSort = (field: SortField) => {
     if (sortField === field) {
@@ -253,27 +267,42 @@ export default function AdminActivity() {
     });
   }, []);
 
+  const reloadHistoryButton = (
+    <Button onClick={() => void ipHistory.restart()}>
+      {t("web.admin.activity.ipLookup.reload")}
+    </Button>
+  );
+
   // Download preparation moved to the Downloads page; keep old links working.
   if (searchParams.get("view") === "preparations") {
     return <Navigate to="/admin/downloads?tab=preparation" replace />;
   }
-  if (isLoading) return <div className="text-muted-foreground pb-8">Loading activity...</div>;
+  if (isLoading)
+    return <div className="text-muted-foreground pb-8">{t("web.admin.activity.page.loading")}</div>;
 
   return (
     <div className="space-y-5 lg:space-y-6">
       <PageHeader
-        title="Activity"
+        title={t("web.admin.activity.page.title")}
         subtitle={
           sessions.length === 0
-            ? "No active streams"
-            : `${sessions.length} active stream${sessions.length !== 1 ? "s" : ""} across ${routeNodes.length} node${routeNodes.length !== 1 ? "s" : ""}`
+            ? t("web.admin.activity.page.noStreams")
+            : t("web.admin.activity.page.subtitle", {
+                count: sessions.length,
+                count_text: String(sessions.length),
+                nodes: routeNodes.length,
+                nodes_text: String(routeNodes.length),
+              })
         }
         actions={
           <>
             {sessions.length > 0 && (
               <span className="live-badge flex items-center gap-1.5">
                 <Radio className="h-3 w-3" />
-                {sessions.length} live
+                {t("web.admin.activity.page.liveCount", {
+                  count: sessions.length,
+                  count_text: String(sessions.length),
+                })}
               </span>
             )}
             <Button
@@ -287,13 +316,15 @@ export default function AdminActivity() {
               <RefreshCw
                 className={`h-3.5 w-3.5 ${isManualRefreshPending ? "animate-spin" : ""}`}
               />
-              {isManualRefreshPending ? "Refreshing..." : "Refresh"}
+              {isManualRefreshPending
+                ? t("web.admin.activity.page.refreshing")
+                : t("web.admin.activity.page.refresh")}
             </Button>
             <div className="min-w-[8.75rem] px-1 text-right">
               <div className="text-muted-foreground text-[10px] font-semibold tracking-wider uppercase">
-                Realtime Updates
+                {t("web.admin.activity.realtime.heading")}
               </div>
-              <div className="text-[12px]">{formatConnectionState(connectionState)}</div>
+              <div className="text-[12px]">{formatConnectionState(connectionState, t)}</div>
               {error && <div className="text-muted-foreground text-[11px]">{error}</div>}
             </div>
           </>
@@ -308,7 +339,7 @@ export default function AdminActivity() {
         className="surface-panel rounded-2xl border-0"
       >
         <summary className="cursor-pointer px-4 py-3 text-sm font-medium select-none">
-          IP Lookup
+          {t("web.admin.activity.ipLookup.heading")}
         </summary>
         <div className="px-4 pb-4">
           <form
@@ -320,37 +351,40 @@ export default function AdminActivity() {
           >
             <Input
               type="text"
-              placeholder="IP lookup (e.g. 203.0.113.50)"
+              placeholder={t("web.admin.activity.ipLookup.placeholder")}
               value={ipSearch}
               onChange={(e) => setIPSearch(e.target.value)}
               className="max-w-xs font-mono text-sm"
             />
             <Button type="submit" variant="outline" size="sm" disabled={!ipSearch.trim()}>
               <Search className="mr-1 h-3.5 w-3.5" />
-              Lookup
+              {t("web.admin.activity.ipLookup.submit")}
             </Button>
           </form>
           {activeIP && (
             <div className="mt-3">
               {ipLoading ? (
-                <p className="text-muted-foreground text-sm">Searching...</p>
+                <p className="text-muted-foreground text-sm">
+                  {t("web.admin.activity.ipLookup.searching")}
+                </p>
               ) : ipHistory.isError && ipUsers.length === 0 ? (
                 <p role="alert">
-                  Could not load IP history.{" "}
-                  <Button onClick={() => void ipHistory.restart()}>Reload history</Button>
+                  {t("web.admin.activity.ipLookup.loadError")} {reloadHistoryButton}
                 </p>
               ) : ipUsers.length === 0 ? (
                 <p className="text-muted-foreground text-sm">
-                  No users found for {activeIP} in the last 30 days.
+                  {t("web.admin.activity.ipLookup.empty", { ip: activeIP })}
                 </p>
               ) : (
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>User</TableHead>
-                      <TableHead>First Seen</TableHead>
-                      <TableHead>Last Seen</TableHead>
-                      <TableHead className="text-right">Requests</TableHead>
+                      <TableHead>{t("web.admin.activity.ipLookup.column.user")}</TableHead>
+                      <TableHead>{t("web.admin.activity.ipLookup.column.firstSeen")}</TableHead>
+                      <TableHead>{t("web.admin.activity.ipLookup.column.lastSeen")}</TableHead>
+                      <TableHead className="text-right">
+                        {t("web.admin.activity.ipLookup.column.requests")}
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -361,7 +395,8 @@ export default function AdminActivity() {
                             to={`/admin/users/${entry.user_id}`}
                             className="text-primary font-medium hover:underline"
                           >
-                            {entry.username || `User #${entry.user_id}`}
+                            {entry.username ||
+                              t("web.admin.activity.userFallback", { id: String(entry.user_id) })}
                           </Link>
                         </TableCell>
                         <TableCell className="text-sm">
@@ -378,8 +413,7 @@ export default function AdminActivity() {
               )}
               {ipHistory.isError && ipUsers.length > 0 && (
                 <p role="alert">
-                  Could not load more history.{" "}
-                  <Button onClick={() => void ipHistory.restart()}>Reload history</Button>
+                  {t("web.admin.activity.ipLookup.loadMoreError")} {reloadHistoryButton}
                 </p>
               )}
               {ipHistory.hasNextPage && (
@@ -387,7 +421,7 @@ export default function AdminActivity() {
                   disabled={ipHistory.isFetchingNextPage}
                   onClick={() => void ipHistory.fetchNextPage()}
                 >
-                  Load more
+                  {t("web.admin.activity.ipLookup.loadMore")}
                 </Button>
               )}
             </div>
@@ -401,11 +435,11 @@ export default function AdminActivity() {
           {/* Method distribution bar */}
           <div className="mb-3">
             <div className="text-muted-foreground mb-2 text-[10px] font-semibold tracking-wider uppercase">
-              Playback Method
+              {t("web.admin.activity.summary.methodHeading")}
             </div>
             <div
               role="img"
-              aria-label="Playback method distribution"
+              aria-label={t("web.admin.activity.summary.methodDistribution")}
               className="flex h-1.5 overflow-hidden rounded-full"
             >
               {Object.entries(methods)
@@ -413,7 +447,10 @@ export default function AdminActivity() {
                 .map(([method, count]) => (
                   <div
                     key={method}
-                    title={`${activityMethodMeta(method).label}: ${count}`}
+                    title={t("web.admin.activity.summary.methodSegment", {
+                      method: activityMethodMeta(method).label,
+                      count: String(count),
+                    })}
                     className={`transition-all duration-500 ${activityMethodMeta(method).swatchClass}`}
                     style={{ width: `${(count / sessions.length) * 100}%` }}
                   />
@@ -427,7 +464,10 @@ export default function AdminActivity() {
                     key={method}
                     type="button"
                     title={activityMethodMeta(method).description}
-                    aria-label={`${activityMethodMeta(method).label} ${count}`}
+                    aria-label={t("web.admin.activity.summary.methodFilter", {
+                      method: activityMethodMeta(method).label,
+                      count: String(count),
+                    })}
                     aria-pressed={methodFilter === method}
                     onClick={() => setMethodFilter(methodFilter === method ? null : method)}
                     className={`flex items-center gap-1.5 text-[11px] transition-opacity ${
@@ -448,7 +488,7 @@ export default function AdminActivity() {
           {routeNodes.length > 1 && (
             <div className="border-border border-t pt-3">
               <div className="text-muted-foreground mb-2 text-[10px] font-semibold tracking-wider uppercase">
-                By Routing Node
+                {t("web.admin.activity.summary.byNode")}
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {[...routeNodes]
@@ -483,7 +523,7 @@ export default function AdminActivity() {
         <div className="relative min-w-[200px] flex-1">
           <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2" />
           <Input
-            placeholder="Filter by user, media, client, or node..."
+            placeholder={t("web.admin.activity.filter.placeholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="h-8 pl-9 text-[13px]"
@@ -498,17 +538,19 @@ export default function AdminActivity() {
           )}
         </div>
         <div className="flex gap-1">
-          {(["movie", "series"] as const).map((t) => (
+          {(["movie", "series"] as const).map((type) => (
             <button
-              key={t}
-              onClick={() => setTypeFilter(typeFilter === t ? null : t)}
+              key={type}
+              onClick={() => setTypeFilter(typeFilter === type ? null : type)}
               className={`rounded-md border px-2.5 py-1.5 text-[11px] font-medium capitalize transition-all ${
-                typeFilter === t
+                typeFilter === type
                   ? "border-primary/40 bg-primary/10 text-primary"
                   : "border-border bg-surface text-muted-foreground hover:text-foreground"
               }`}
             >
-              {t === "movie" ? "Movies" : "Series"}
+              {type === "movie"
+                ? t("web.admin.activity.filter.movies")
+                : t("web.admin.activity.filter.series")}
             </button>
           ))}
         </div>
@@ -522,7 +564,7 @@ export default function AdminActivity() {
             className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-[11px]"
           >
             <X className="h-3 w-3" />
-            Clear filters
+            {t("web.admin.activity.filter.clear")}
           </button>
         )}
       </div>
@@ -530,7 +572,11 @@ export default function AdminActivity() {
       {/* Filter status */}
       {(search || activeFilters > 0) && (
         <div className="text-muted-foreground text-[11px]">
-          Showing {filtered.length} of {sessions.length} streams
+          {t("web.admin.activity.filter.showing", {
+            total: sessions.length,
+            shown: String(filtered.length),
+            total_text: String(sessions.length),
+          })}
         </div>
       )}
 
@@ -542,11 +588,11 @@ export default function AdminActivity() {
           {/* Sort controls for the stacked rows, which have no column headers */}
           <div
             role="group"
-            aria-label="Sort streams"
+            aria-label={t("web.admin.activity.sort.group")}
             className="border-border bg-surface/50 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-b px-4 py-2.5 @min-[calc(977px+4rem)]:hidden"
           >
             <span className="text-muted-foreground/70 text-[10px] font-semibold tracking-wider uppercase">
-              Sort
+              {t("web.admin.activity.sort.heading")}
             </span>
             {STACKED_SORT_FIELDS.map(([field, label]) => (
               <SortHeader
@@ -556,7 +602,7 @@ export default function AdminActivity() {
                 dir={sortDir}
                 onClick={toggleSort}
               >
-                {label}
+                {t(label)}
               </SortHeader>
             ))}
           </div>
@@ -566,16 +612,16 @@ export default function AdminActivity() {
             className={`border-border bg-surface/50 hidden ${STREAM_TABLE_COLUMNS} items-center gap-2 border-b px-3 py-2.5 @min-[calc(977px+4rem)]:grid`}
           >
             <SortHeader field="username" current={sortField} dir={sortDir} onClick={toggleSort}>
-              User
+              {t("web.admin.activity.column.user")}
             </SortHeader>
             <SortHeader field="media" current={sortField} dir={sortDir} onClick={toggleSort}>
-              Stream
+              {t("web.admin.activity.column.stream")}
             </SortHeader>
             <SortHeader field="method" current={sortField} dir={sortDir} onClick={toggleSort}>
-              Playback
+              {t("web.admin.activity.column.playback")}
             </SortHeader>
             <SortHeader field="node" current={sortField} dir={sortDir} onClick={toggleSort}>
-              Route
+              {t("web.admin.activity.column.route")}
             </SortHeader>
             <SortHeader
               field="started"
@@ -584,10 +630,10 @@ export default function AdminActivity() {
               onClick={toggleSort}
               className="justify-end"
             >
-              Time
+              {t("web.admin.activity.column.time")}
             </SortHeader>
             <div className="text-muted-foreground text-right text-[10px] font-semibold tracking-wider uppercase">
-              Actions
+              {t("web.admin.activity.column.actions")}
             </div>
           </div>
 
@@ -619,11 +665,13 @@ function StreamRow({
   even: boolean;
   onIPLookup: (ip: string) => void;
 }) {
+  const t = useT();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [ffmpegOpen, setFFmpegOpen] = useState(false);
-  const title = getDisplayTitle(session);
-  const subtitle = getDisplaySubtitle(session);
-  const username = session.username || `User #${session.user_id}`;
+  const title = getDisplayTitle(session, t);
+  const subtitle = getDisplaySubtitle(session, t);
+  const username =
+    session.username || t("web.admin.activity.userFallback", { id: String(session.user_id) });
   const elapsed = getElapsed(session.started_at);
   const profileDisplay = session.profile_name || session.profile_id || "";
   const userHref = `/admin/users/${session.user_id}`;
@@ -721,7 +769,7 @@ function StreamRow({
                     {clientLabel}
                   </span>
                 ) : null}
-                {clientLabel && clientIP ? <span className="shrink-0">·</span> : null}
+                {clientLabel && clientIP ? <span className="shrink-0">{MIDDLE_DOT}</span> : null}
                 {clientIP ? (
                   <button
                     type="button"
@@ -775,7 +823,7 @@ function StreamRow({
               aria-expanded={expandedOpen}
               className="text-muted-foreground hover:text-primary inline-flex items-center gap-0.5 text-[10px] font-medium transition-colors"
             >
-              Details
+              {t("web.admin.activity.row.details")}
               {expandedOpen ? (
                 <ChevronUp className="h-3 w-3" />
               ) : (
@@ -785,17 +833,17 @@ function StreamRow({
           </div>
           <div className="mt-1.5 space-y-1">
             <PlaybackSummaryLine
-              label="Container"
+              label={t("web.admin.activity.row.container")}
               decision={containerDecision}
               value={formatDeliveredContainerSummary(session)}
             />
             <PlaybackSummaryLine
-              label="Video"
+              label={t("web.admin.activity.row.video")}
               decision={videoDecision}
               value={formatDeliveredVideoSummary(session)}
             />
             <PlaybackSummaryLine
-              label="Audio"
+              label={t("web.admin.activity.row.audio")}
               decision={audioDecision}
               value={formatDeliveredAudioSummary(session)}
             />
@@ -824,14 +872,16 @@ function StreamRow({
               ) : (
                 <Play className="h-2.5 w-2.5" />
               )}
-              {session.is_paused ? "Paused" : "Playing"}
+              {session.is_paused
+                ? t("web.admin.activity.row.paused")
+                : t("web.admin.activity.row.playing")}
             </span>
           </div>
           <div className="text-foreground mt-1 font-mono text-[12px] leading-tight tabular-nums">
             {playbackPosition}
           </div>
           <div className="text-muted-foreground mt-0.5 text-[10px] leading-tight tabular-nums">
-            Session active {elapsed}
+            {t("web.admin.activity.row.sessionActive", { elapsed })}
           </div>
         </div>
 
@@ -850,7 +900,9 @@ function StreamRow({
                 onClick={toggleFFmpeg}
               >
                 <Terminal className="h-3.5 w-3.5" />
-                {ffmpegOpen ? "Hide FFmpeg" : "FFmpeg"}
+                {ffmpegOpen
+                  ? t("web.admin.activity.row.hideFfmpeg")
+                  : t("web.admin.activity.row.ffmpeg")}
               </Button>
             }
             extraMenuItems={
@@ -858,13 +910,13 @@ function StreamRow({
                 <DropdownMenuItem asChild>
                   <Link to={logsHref}>
                     <FileText className="h-4 w-4" />
-                    View Logs
+                    {t("web.admin.activity.row.viewLogs")}
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
                   <Link to={ffmpegLogsHref}>
                     <Terminal className="h-4 w-4" />
-                    FFmpeg Logs
+                    {t("web.admin.activity.row.ffmpegLogs")}
                   </Link>
                 </DropdownMenuItem>
               </>
@@ -902,7 +954,7 @@ function StreamRow({
             ) : (
               <span className="truncate">{title}</span>
             )}
-            <span className="flex-shrink-0">·</span>
+            <span className="flex-shrink-0">{MIDDLE_DOT}</span>
             <span className="flex-shrink-0 font-mono tabular-nums">{elapsed}</span>
           </div>
           {(clientLabel || clientIP || streamMeta) && (
@@ -912,7 +964,9 @@ function StreamRow({
                   {clientLabel}
                 </span>
               ) : null}
-              {clientLabel && (clientIP || streamMeta) ? <span className="shrink-0">·</span> : null}
+              {clientLabel && (clientIP || streamMeta) ? (
+                <span className="shrink-0">{MIDDLE_DOT}</span>
+              ) : null}
               {clientIP ? (
                 <button
                   type="button"
@@ -922,7 +976,7 @@ function StreamRow({
                   {clientIP}
                 </button>
               ) : null}
-              {clientIP && streamMeta ? <span className="shrink-0">·</span> : null}
+              {clientIP && streamMeta ? <span className="shrink-0">{MIDDLE_DOT}</span> : null}
               {streamMeta ? (
                 itemHref ? (
                   <Link to={itemHref} className="hover:text-primary min-w-0 truncate">
@@ -947,7 +1001,9 @@ function StreamRow({
               ) : (
                 <Play className="h-2.5 w-2.5" />
               )}
-              {session.is_paused ? "Paused" : "Playing"}
+              {session.is_paused
+                ? t("web.admin.activity.row.paused")
+                : t("web.admin.activity.row.playing")}
             </span>
             <span className="font-mono tabular-nums">{playbackPosition}</span>
           </div>
@@ -963,7 +1019,7 @@ function StreamRow({
                 aria-expanded={expandedOpen}
                 className="text-muted-foreground hover:text-primary inline-flex items-center gap-0.5 text-[10px] font-medium transition-colors"
               >
-                Details
+                {t("web.admin.activity.row.details")}
                 {expandedOpen ? (
                   <ChevronUp className="h-3 w-3" />
                 ) : (
@@ -973,17 +1029,17 @@ function StreamRow({
             </div>
             <div className="mt-1.5 space-y-1">
               <PlaybackSummaryLine
-                label="Container"
+                label={t("web.admin.activity.row.container")}
                 decision={containerDecision}
                 value={formatDeliveredContainerSummary(session)}
               />
               <PlaybackSummaryLine
-                label="Video"
+                label={t("web.admin.activity.row.video")}
                 decision={videoDecision}
                 value={formatDeliveredVideoSummary(session)}
               />
               <PlaybackSummaryLine
-                label="Audio"
+                label={t("web.admin.activity.row.audio")}
                 decision={audioDecision}
                 value={formatDeliveredAudioSummary(session)}
               />
@@ -1003,7 +1059,9 @@ function StreamRow({
                   onClick={toggleFFmpeg}
                 >
                   <Terminal className="h-3.5 w-3.5" />
-                  {ffmpegOpen ? "Hide FFmpeg" : "FFmpeg"}
+                  {ffmpegOpen
+                    ? t("web.admin.activity.row.hideFfmpeg")
+                    : t("web.admin.activity.row.ffmpeg")}
                 </Button>
               }
               extraMenuItems={
@@ -1011,13 +1069,13 @@ function StreamRow({
                   <DropdownMenuItem asChild>
                     <Link to={logsHref}>
                       <FileText className="h-4 w-4" />
-                      View Logs
+                      {t("web.admin.activity.row.viewLogs")}
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
                     <Link to={ffmpegLogsHref}>
                       <Terminal className="h-4 w-4" />
-                      FFmpeg Logs
+                      {t("web.admin.activity.row.ffmpegLogs")}
                     </Link>
                   </DropdownMenuItem>
                 </>
@@ -1072,10 +1130,11 @@ function PlaybackSummaryLine({
 }
 
 function ActivityMethodBadge({ method }: { method: string }) {
+  const t = useT();
   const meta = activityMethodMeta(method);
   return (
     <span
-      aria-label={`Playback method: ${meta.label}`}
+      aria-label={t("web.admin.activity.row.methodBadge", { method: meta.label })}
       title={meta.description}
       className={`inline-flex shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-semibold ${meta.badgeClass}`}
     >
@@ -1111,35 +1170,40 @@ function PlaybackExpandedPanel({
   isFetching: boolean;
   logsHref: string;
 }) {
+  const t = useT();
   return (
     <div className="terminal-surface border-border/50 bg-card border-t px-4 py-3">
       <div className="mb-2 flex items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
             <div className="rounded-full border border-[var(--terminal-border)] bg-[var(--terminal-bg)] px-2 py-0.5 text-[10px] font-semibold tracking-[0.2em] text-[var(--terminal-fg)] uppercase">
-              Playback
+              {t("web.admin.activity.panel.heading")}
             </div>
             <div className="text-foreground/85 text-[11px] font-medium">
-              Stream details{showFFmpeg ? " and live transcode console" : ""}
+              {showFFmpeg
+                ? t("web.admin.activity.panel.streamDetailsWithConsole")
+                : t("web.admin.activity.panel.streamDetails")}
             </div>
           </div>
           <div className="text-muted-foreground mt-1 font-mono text-[10px]">{sessionID}</div>
         </div>
         {showFFmpeg && isFetching ? (
-          <div className="text-muted-foreground text-[10px]">Refreshing…</div>
+          <div className="text-muted-foreground text-[10px]">
+            {t("web.admin.activity.panel.refreshing")}
+          </div>
         ) : null}
       </div>
 
       <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         <PlaybackDetailCard
-          label="Container"
+          label={t("web.admin.activity.row.container")}
           decision={containerDecision}
           source={formatSourceContainerSummary(session)}
           delivered={formatDeliveredContainerSummary(session)}
           detail={formatContainerDetail(session)}
         />
         <PlaybackDetailCard
-          label="Video"
+          label={t("web.admin.activity.row.video")}
           decision={videoDecision}
           source={formatVideoSummary(session)}
           delivered={formatDeliveredVideoSummary(session)}
@@ -1148,7 +1212,7 @@ function PlaybackExpandedPanel({
           toneMapping={videoDecision === "transcode" ? toneMapping : null}
         />
         <PlaybackDetailCard
-          label="Audio"
+          label={t("web.admin.activity.row.audio")}
           decision={audioDecision}
           source={formatAudioSummary(session)}
           delivered={formatDeliveredAudioSummary(session)}
@@ -1167,18 +1231,17 @@ function PlaybackExpandedPanel({
               to={logsHref}
               className="text-[11px] font-medium text-[var(--terminal-fg)] hover:text-[var(--terminal-fg)]/80"
             >
-              Open full FFmpeg logs
+              {t("web.admin.activity.panel.openFfmpegLogs")}
             </Link>
           </div>
           <div className="overflow-hidden rounded-xl border border-[var(--terminal-border)] bg-[var(--terminal-bg)] shadow-[0_18px_60px_rgba(0,0,0,0.35)]">
             {isLoading ? (
               <div className="px-4 py-6 font-mono text-[11px] text-[var(--terminal-muted)]">
-                Loading ffmpeg output…
+                {t("web.admin.activity.panel.loadingFfmpeg")}
               </div>
             ) : rows.length === 0 ? (
               <div className="px-4 py-6 font-mono text-[11px] text-[var(--terminal-muted)]">
-                No ffmpeg rows yet for this session. If the session is direct play or remux without
-                a transcode worker, nothing will appear here.
+                {t("web.admin.activity.panel.noFfmpegRows")}
               </div>
             ) : (
               <div className="max-h-64 overflow-y-auto">
@@ -1192,7 +1255,9 @@ function PlaybackExpandedPanel({
                         {formatTimeOnly(row.timestamp)}
                       </div>
                       <div className="text-[10px] tracking-[0.18em] text-[var(--terminal-muted)]/60 uppercase">
-                        {row.message.includes("stderr") ? "stderr" : "event"}
+                        {row.message.includes("stderr")
+                          ? t("web.admin.activity.panel.stderr")
+                          : t("web.admin.activity.panel.event")}
                       </div>
                     </div>
                     <div className="min-w-0">
@@ -1208,7 +1273,11 @@ function PlaybackExpandedPanel({
                           <span>{stringAttr(row, "hw_accel")}</span>
                         )}
                         {stringAttr(row, "restart_count") !== "-" && (
-                          <span>restart {stringAttr(row, "restart_count")}</span>
+                          <span>
+                            {t("web.admin.activity.panel.restart", {
+                              count: stringAttr(row, "restart_count"),
+                            })}
+                          </span>
                         )}
                       </div>
                     </div>
@@ -1240,6 +1309,7 @@ function PlaybackDetailCard({
   mode?: string | null;
   toneMapping?: string | null;
 }) {
+  const t = useT();
   return (
     <PlaybackDetailCardShell
       label={label}
@@ -1251,11 +1321,18 @@ function PlaybackDetailCard({
         </span>
       }
     >
-      <PlaybackDetailLine label="Source" value={source} />
-      <PlaybackDetailLine label="Delivered" value={delivered} />
-      {mode ? <PlaybackDetailLine label="Mode" value={mode} /> : null}
-      {toneMapping ? <PlaybackDetailLine label="Tone mapping" value={toneMapping} /> : null}
-      <PlaybackDetailLine label="Detail" value={detail} muted />
+      <PlaybackDetailLine label={t("web.admin.activity.detail.source")} value={source} />
+      <PlaybackDetailLine label={t("web.admin.activity.detail.delivered")} value={delivered} />
+      {mode ? (
+        <PlaybackDetailLine label={t("web.admin.activity.detail.mode")} value={mode} />
+      ) : null}
+      {toneMapping ? (
+        <PlaybackDetailLine
+          label={t("web.admin.activity.detail.toneMapping")}
+          value={toneMapping}
+        />
+      ) : null}
+      <PlaybackDetailLine label={t("web.admin.activity.detail.detail")} value={detail} muted />
     </PlaybackDetailCardShell>
   );
 }
@@ -1266,12 +1343,15 @@ function PlaybackDetailCard({
  * this?" — the session rows only have room for the compact label.
  */
 function PlaybackClientCard({ session }: { session: AdminSession }) {
-  const label = getSessionClientLabelFull(session) || "Unknown client";
+  const t = useT();
+  const label = getSessionClientLabelFull(session) || t("web.admin.activity.client.unknown");
   const userAgent = session.client_user_agent?.trim() || "";
   return (
-    <PlaybackDetailCardShell label="Client">
-      <PlaybackDetailLine label="App" value={label} />
-      {userAgent ? <PlaybackDetailLine label="Agent" value={userAgent} muted /> : null}
+    <PlaybackDetailCardShell label={t("web.admin.activity.client.heading")}>
+      <PlaybackDetailLine label={t("web.admin.activity.client.app")} value={label} />
+      {userAgent ? (
+        <PlaybackDetailLine label={t("web.admin.activity.client.agent")} value={userAgent} muted />
+      ) : null}
     </PlaybackDetailCardShell>
   );
 }
@@ -1345,19 +1425,21 @@ function SortHeader({
       } ${className}`}
     >
       {children}
-      {active && <span className="text-[8px]">{dir === "asc" ? "▲" : "▼"}</span>}
+      {active && (
+        <span className="text-[8px]">{dir === "asc" ? SORT_ASC_MARK : SORT_DESC_MARK}</span>
+      )}
     </button>
   );
 }
 
-function formatConnectionState(state: "connecting" | "live" | "disconnected") {
+function formatConnectionState(state: "connecting" | "live" | "disconnected", t: Translate) {
   switch (state) {
     case "connecting":
-      return "Connecting";
+      return t("web.admin.activity.realtime.connecting");
     case "live":
-      return "Live";
+      return t("web.admin.activity.realtime.live");
     default:
-      return "Disconnected";
+      return t("web.admin.activity.realtime.disconnected");
   }
 }
 
@@ -1382,17 +1464,18 @@ function formatTimeOnly(value: string) {
 }
 
 function EmptyState({ hasData }: { hasData: boolean }) {
+  const t = useT();
   return (
     <div className="text-muted-foreground flex flex-col items-center justify-center py-20 text-sm">
       {hasData ? (
         <>
           <Filter className="mb-3 h-8 w-8 opacity-20" />
-          <span>No streams match your filters</span>
+          <span>{t("web.admin.activity.empty.noMatches")}</span>
         </>
       ) : (
         <>
           <Play className="mb-3 h-8 w-8 opacity-20" />
-          <span>No active streams</span>
+          <span>{t("web.admin.activity.page.noStreams")}</span>
         </>
       )}
     </div>
@@ -1401,20 +1484,25 @@ function EmptyState({ hasData }: { hasData: boolean }) {
 
 // --- Helpers ---
 
-function getDisplayTitle(session: AdminSession): string {
+function getDisplayTitle(
+  session: AdminSession,
+  t: (id: MessageKey, values?: TextValues) => string,
+): string {
   if (session.series_name && session.season_number != null && session.episode_number != null) {
     return session.episode_name || `S${session.season_number}E${session.episode_number}`;
   }
-  return session.media_title || `File #${session.media_file_id}`;
+  return (
+    session.media_title || t("web.admin.activity.title.file", { id: String(session.media_file_id) })
+  );
 }
 
-function getDisplaySubtitle(session: AdminSession): string | null {
+function getDisplaySubtitle(session: AdminSession, t: Translate): string | null {
   if (session.series_name && session.season_number != null && session.episode_number != null) {
     const ep = `S${session.season_number}E${session.episode_number}`;
     return session.series_name ? `${ep} · ${session.series_name}` : ep;
   }
-  if (session.media_type === "movie") return "Movie";
-  if (session.media_type === "series") return "Series";
+  if (session.media_type === "movie") return t("web.admin.activity.subtitle.movie");
+  if (session.media_type === "series") return t("web.admin.activity.subtitle.series");
   return null;
 }
 
