@@ -92,6 +92,9 @@ reports `section_title_keys: true` on a server that sends them; it is informatio
 client acts on `title_key` whenever it is present. The frozen `/api/v1` reads
 and the Jellyfin surface do not carry them.
 
+How clients look up a `title_key` in the shared translation catalog is in
+[the client translation architecture](architecture/i18n.md).
+
 ## People search
 
 `GET /api/v2/catalog/people` (`listPeople`) accepts a name query in `q` and
