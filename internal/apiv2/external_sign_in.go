@@ -190,7 +190,7 @@ type AdminPluginAuthBindingTestInput struct {
 	RawBody []byte
 	Body    struct {
 		CapabilityID string                   `json:"capability_id,omitempty" maxLength:"256" doc:"auth_provider.v1 capability to test; empty tests the plugin's first one"`
-		Config       []AdminPluginConfigWrite `json:"config,omitempty" maxItems:"64" doc:"Staged global configuration entries, unsaved, merged as updateAdminPluginInstallationConfig would merge them. Entries and fields not named here use the stored values; a declared non-secret field sent as null or a blank string is cleared so the plugin default applies; blank secret fields use the stored secret only while the rest of that entry is unchanged and no secret in it is entered, otherwise only the secrets entered are used; clear_secrets drops it from the test"`
+		Config       []AdminPluginConfigWrite `json:"config,omitempty" maxItems:"64" doc:"Staged global configuration entries, unsaved, merged as updateAdminPluginInstallationConfig would merge them. Entries and fields not named here use the stored values; a declared non-secret field sent as null or a blank string is cleared so the plugin default applies; blank secret fields use the stored secret only while the rest of that entry is unchanged and no secret in it is entered, otherwise only the secrets entered are used and stored fields the schema does not declare are left out of that entry; clear_secrets drops it from the test"`
 	}
 }
 

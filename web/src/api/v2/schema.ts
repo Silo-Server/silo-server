@@ -19761,7 +19761,7 @@ export interface components {
     AdminPluginAuthBindingTestInputBody: {
       /** @description auth_provider.v1 capability to test; empty tests the plugin's first one */
       capability_id?: string;
-      /** @description Staged global configuration entries, unsaved, merged as updateAdminPluginInstallationConfig would merge them. Entries and fields not named here use the stored values; a declared non-secret field sent as null or a blank string is cleared so the plugin default applies; blank secret fields use the stored secret only while the rest of that entry is unchanged and no secret in it is entered, otherwise only the secrets entered are used; clear_secrets drops it from the test */
+      /** @description Staged global configuration entries, unsaved, merged as updateAdminPluginInstallationConfig would merge them. Entries and fields not named here use the stored values; a declared non-secret field sent as null or a blank string is cleared so the plugin default applies; blank secret fields use the stored secret only while the rest of that entry is unchanged and no secret in it is entered, otherwise only the secrets entered are used and stored fields the schema does not declare are left out of that entry; clear_secrets drops it from the test */
       config?: components["schemas"]["AdminPluginConfigWrite"][];
     };
     AdminPluginAuthBindingWrite: {
@@ -19873,7 +19873,7 @@ export interface components {
       clear_secrets?: string[];
       /** @description The manifest global_config_schema key */
       key: string;
-      /** @description The entry's fields, merged over the stored entry. A declared non-secret top-level field sent as null or a blank string is removed so the plugin default applies; blank secret fields preserve the stored secret. A connection test reuses a stored secret only while the rest of the entry is unchanged and no secret in it is entered */
+      /** @description The entry's fields, merged over the stored entry. A declared non-secret top-level field sent as null or a blank string is removed so the plugin default applies; blank secret fields preserve the stored secret. A connection test reuses a stored secret only while the rest of the entry is unchanged and no secret in it is entered; otherwise it also leaves out stored fields the schema does not declare */
       value: {
         [key: string]: unknown;
       };
