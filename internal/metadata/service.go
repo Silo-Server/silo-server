@@ -3334,7 +3334,7 @@ func (s *MetadataService) clearPreviousMatchRows(ctx context.Context, contentID 
 // creditsUnlisted reports whether the merged item lists no credits and a lock
 // holds neither group, so the stored credits have to go.
 func creditsUnlisted(item *models.MediaItem, creditLocks []MetadataField) bool {
-	return len(item.People) == 0 && !(isFieldLocked(creditLocks, FieldCast) && isFieldLocked(creditLocks, FieldCrew))
+	return len(item.People) == 0 && (!isFieldLocked(creditLocks, FieldCast) || !isFieldLocked(creditLocks, FieldCrew))
 }
 
 // clearUnlistedCredits removes the stored credits when the merged item lists
