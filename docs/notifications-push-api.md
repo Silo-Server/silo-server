@@ -196,7 +196,9 @@ again; the app recovers by resetting on that later attempt.
 The retained-owner guarantee requires every API writer sharing the database to
 enforce it. Upgrade all API replicas before allowing reset requests. An older
 writer can treat a cleared generation as an unowned installation and overwrite
-the reserved account. `installation_reset_available` describes the responding
+the reserved account. A retirement after a reset depends on the same upgrade: an
+older writer stores no fence, and lets any account holding the fence's key cross
+it. `installation_reset_available` describes the responding
 server; it does not certify that other replicas have been upgraded. Recovery to
 an older release must follow the [backup and rollback policy](release-versioning.md#backups-and-rollback),
 restoring the pre-upgrade database instead of running older writers against
