@@ -413,7 +413,7 @@ func (a *applier) writeHomeSection(ctx context.Context, tx pgx.Tx, id string) (a
 		item.Notes = append(item.Notes, note)
 	}
 	section := &sections.PageSection{Scope: e.Scope, LibraryID: plan.library, Position: e.Position, SectionType: sections.SectionType(e.SectionType),
-		Title: e.Title, Featured: e.Featured, ItemLimit: e.ItemLimit, Enabled: enabled, WebOnly: e.restoredWebOnly()}
+		Title: e.Title, TitleKey: e.TitleKey, TitleArgs: e.titleArgs(), Featured: e.Featured, ItemLimit: e.ItemLimit, Enabled: enabled, WebOnly: e.restoredWebOnly()}
 	create := plan.local == nil
 	if create {
 		if section.ID, err = freeSectionID(ctx, tx, e.ID); err != nil {

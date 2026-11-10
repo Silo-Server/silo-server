@@ -703,7 +703,7 @@ collections in `collections.json`, and an omitted item's `cause` and
 `error`; version 4 a home section's `web_only`; version 5 no new field, but a
 server smart collection's rules now draw from their own `library_ids`, so a
 restore pins an older set's smart collection rules to the collection's
-libraries), the source
+libraries; version 6 a home section's `title_key` and `title_args`), the source
 server id and name, Silo version, creation time, `SECRET_KEY` check value, and
 a section index: for each section its item count, each of its files with
 size and SHA-256, and the blob keys its documents reference. Plugin archive
@@ -725,9 +725,11 @@ format version: an older reader refuses a newer set as "from a newer Silo"
 instead of failing on what it does not know, and a set that claims an older
 version while holding something added later (`users` in version 1,
 `home_sections` or template collections in version 2, a `web_only` section
-in version 3) is refused. A set without `web_only` reads it as false, the
-column's default. Readers accept versions 1 to 4; version 4 is always
-written.
+in version 3, a `title_key` section in version 5) is refused. A set without
+`web_only` reads it as false, the column's default. A set without `title_key`
+reads every title as typed text, so a restored title never gains a key; a
+keyed title keeps its key and arguments when a restore creates or replaces the
+section. Readers accept versions 1 to 6; version 6 is always written.
 
 | Section | Holds | Blob prefixes |
 |---|---|---|

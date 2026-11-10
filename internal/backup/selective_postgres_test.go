@@ -952,6 +952,10 @@ func seedPages(t *testing.T, f *selectiveFixture) pagesSeed {
 	s.managed = page("home", nil, "collection", "Managed "+s.suffix, `{"library_collection_id":"`+managed.ID+`"}`)
 	s.layout = page("home", nil, "recently_added", "Layout "+s.suffix, `{}`)
 	dbExec(t, pool, `UPDATE page_sections SET featured = true, web_only = true WHERE id = ANY($1)`, []string{s.layout, s.recent})
+	// Server-written titles: one row restored by replacing it, one by
+	// creating it. s.featured keeps an admin-typed title with no key.
+	dbExec(t, pool, `UPDATE page_sections SET title_key = 'home.section.recentlyAddedIn', title_args = '{"library":"Pages"}' WHERE id = $1`, s.recent)
+	dbExec(t, pool, `UPDATE page_sections SET title_key = 'home.section.recentlyAdded' WHERE id = $1`, s.layout)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM page_sections WHERE title LIKE $1`, "%"+s.suffix)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM library_collections WHERE library_id = $1`, s.library)
@@ -1614,6 +1618,18 @@ func (f *selectiveFixture) checkRestoredPages(t *testing.T, s pagesSeed, report 
 	}
 	if n := countRows(t, pool, `SELECT count(*) FROM page_sections WHERE id = $1 AND featured AND web_only`, s.layout); n != 1 {
 		t.Fatal("the deleted web-only hero row was not created web-only")
+	}
+	for id, want := range map[string]struct{ key, library string }{
+		s.recent:   {"home.section.recentlyAddedIn", "Pages"},
+		s.layout:   {"home.section.recentlyAdded", ""},
+		s.featured: {"", ""},
+	} {
+		var key string
+		var library *string
+		if err := pool.QueryRow(ctx, `SELECT title_key, title_args->>'library' FROM page_sections WHERE id = $1`, id).Scan(&key, &library); err != nil ||
+			key != want.key || (library != nil) != (want.library != "") || (library != nil && *library != want.library) {
+			t.Fatalf("restored section %s: title_key %q, library arg %v (%v), want %+v", id, key, library, err, want)
+		}
 	}
 	var managed string
 	if err := pool.QueryRow(ctx, `SELECT config->>'library_collection_id' FROM page_sections WHERE id = $1`, s.managed).Scan(&managed); err != nil ||
