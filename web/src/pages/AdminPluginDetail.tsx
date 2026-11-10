@@ -511,6 +511,7 @@ function InstalledPluginPage({
             <AlertTriangle aria-hidden="true" className="text-warning mt-0.5 size-4 shrink-0" />
           }
         >
+          {/* eslint-disable formatjs/no-literal-string-in-jsx -- new on main; its catalog key is a follow-up */}
           <p>
             <strong className="font-semibold">
               Silo couldn't update {name} to {installation.update_failure.version}.
@@ -521,6 +522,7 @@ function InstalledPluginPage({
             It stays on version {installation.version}. Last tried{" "}
             {formatDateTime(installation.update_failure.failed_at)}.
           </p>
+          {/* eslint-enable formatjs/no-literal-string-in-jsx -- end of the refused-update banner */}
         </Banner>
       ) : null}
 

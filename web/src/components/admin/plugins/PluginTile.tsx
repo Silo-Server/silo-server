@@ -152,6 +152,7 @@ export function InstalledPluginTile({
             title={installation.update_failure.reason}
           >
             <AlertTriangle aria-hidden="true" className="size-3.5 shrink-0" />
+            {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- new on main; its catalog key is a follow-up */}
             <span className="truncate">Update to {installation.update_failure.version} failed</span>
           </span>
         ) : updateVersion ? (
