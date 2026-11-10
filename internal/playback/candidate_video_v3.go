@@ -1,5 +1,15 @@
 package playback
 
+// Wire tokens a plan carries that tests also name.
+const (
+	decisionReasonValidatedOriginalV3 = "validated_original_playback"
+	degradationDVRemovedV3            = "dolby_vision_removed"
+	dvBaseLayerReasonV3               = "base_layer_compatible_hevc"
+	degradationDVBaseLayerOnlyV3      = "dolby_vision_base_layer_only"
+	transcodeReasonCopyExhaustedV3    = "copy_routes_exhausted"
+	audioReasonNoTrackV3              = "no_audio_track"
+)
+
 // videoFactsV3 is what the planner knows about a video file before it builds
 // any candidate: what each delivery can carry, and the plan every route
 // starts from.
@@ -27,10 +37,9 @@ type remuxAudioFactsV3 struct {
 	progressiveCodecConverts, progressiveChannelLimited, progressiveConverts bool
 	hlsCodecConverts, hlsChannelLimited, hlsTranscode, hlsQuirkConverts      bool
 	// hlsConverts includes the device quirk that converts audio HLS could copy.
-	hlsConverts    bool
-	hlsAACChannels int
-	firefoxAAC     *AppliedQuirkV3
-	hlsQuirk       *AppliedQuirkV3
+	hlsConverts          bool
+	hlsAACChannels       int
+	firefoxAAC, hlsQuirk *AppliedQuirkV3
 }
 
 func (f *videoFactsV3) originalRangeOK() bool {
@@ -47,7 +56,7 @@ func (p *candidatePlannerV3) planVideo() PlannerResultV3 {
 	}
 	exhausted := terminalPlannerResultV3("adaptation_unavailable", "No validated playback route is available for this source and output route.", false)
 	if p.video.transcodeStage {
-		exhausted = terminalPlannerResultV3("adaptation_exhausted", "All compatible playback recipes have already failed for this output route.", false)
+		exhausted = exhaustedV3()
 	}
 	return p.selectCandidateV3(p.videoCandidates(), p.enterVideoRoute, p.evaluateVideo, exhausted)
 }
@@ -69,6 +78,8 @@ func (p *candidatePlannerV3) videoFacts() *PlannerResultV3 {
 	f.hlsSubtitleOK = f.hlsSubtitle.Terminal == nil && !f.hlsSubtitle.RequiresBurn
 	f.quality = ResolveQualityPolicyV3(request, source)
 	if p.capRequiresEncode {
+		// The quality resolver sizes from the video track rate, which can
+		// undercount the total a source-preserving route sends.
 		f.quality.RequiresTranscode, f.quality.PreservesSource = true, false
 		capKbps := optionalValueV3(request.BandwidthCapKbps)
 		if f.quality.BitrateKbps <= 0 {
@@ -88,14 +99,17 @@ func (p *candidatePlannerV3) videoFacts() *PlannerResultV3 {
 	f.dv8BaseOK, f.dv8BaseRange = clientDV8BaseLayerFallbackV3(source, request)
 	audioOK, passthrough, audioClaims := audioEligibilityV3(source, request)
 	f.originalAudioOK = audioSelectionUsesContainerDefaultV3(file, in.AudioTrackIndex) || clientSelectsOriginalAudioTrackV3(request)
+	// Video-only media has no audio to adapt.
 	f.noAudioTrack = source.AudioCodec == "" && len(file.AudioTracks) == 0
 	if !audioOK && f.noAudioTrack {
 		audioOK, audioClaims.Reason = true, audioReasonNoTrackV3
 	}
 	f.audioOK, f.audioClaims = audioOK, audioClaims
 	stripUnsupported := p.dolbyVisionFacts()
+	// Name the real cause, a source whose Dolby Vision metadata cannot be
+	// removed, when nothing else can play it and no tone-map encode can run.
 	if stripUnsupported && !f.originalRangeOK() && !f.serverDV81 && !f.clientDV81 && !f.clientHDR10 &&
-		(!resolveToneMapRecipeV3(in, source, nil).ok || !videoTranscodeExecutableV3(in, source)) {
+		(!resolveToneMapRecipeV3(in, source, nil).ok || !encodeCanRunV3(in, source)) {
 		return refusalV3(terminalPlannerResultV3(TerminalDVConversionUnsupportedV3,
 			"This source's Dolby Vision metadata cannot be removed cleanly, and this device cannot play the source as it is.", false))
 	}
@@ -104,10 +118,7 @@ func (p *candidatePlannerV3) videoFacts() *PlannerResultV3 {
 		return refusalV3(terminalPlannerResultV3("source_metadata_incomplete", "The source is missing video metadata required for a validated playback route.", true))
 	}
 	if !videoOK && evidenceInsufficient {
-		f.base.DegradationWarnings = append(f.base.DegradationWarnings, DegradationWarningV3{
-			Code:    EvidenceInsufficientForDirectV3,
-			Message: "The client's capability evidence tier cannot validate this stream for a direct route; an adapted route is used instead.",
-		})
+		f.base.DegradationWarnings = append(f.base.DegradationWarnings, DegradationWarningV3{Code: EvidenceInsufficientForDirectV3, Message: "The client's capability evidence tier cannot validate this stream for a direct route; an adapted route is used instead."})
 	}
 	p.routeFacts(evidenceInsufficient)
 	return nil
@@ -141,11 +152,11 @@ func (p *candidatePlannerV3) dolbyVisionFacts() bool {
 
 func (p *candidatePlannerV3) videoBase(videoClaims VideoClaimsV3, passthrough, stripUnsupported bool) {
 	f := &p.video
+	// Every delivery's policy addresses the same selected track.
 	selected := f.subtitle
-	if selected.Terminal != nil {
-		selected = f.remuxSubtitle
+	for _, next := range []SubtitlePolicyResultV3{f.remuxSubtitle, f.hlsSubtitle} {
 		if selected.Terminal != nil {
-			selected = f.hlsSubtitle
+			selected = next
 		}
 	}
 	base := p.newPlanV3(selected)
@@ -158,37 +169,29 @@ func (p *candidatePlannerV3) videoBase(videoClaims VideoClaimsV3, passthrough, s
 		base.DegradationWarnings = append(base.DegradationWarnings, SubtitleTrackUnavailableWarningV3())
 	}
 	if p.source.DynamicRange == DynamicRangeHDRUnknownV3 && (f.rangeOK || f.clientManagedRange) {
-		base.DegradationWarnings = append(base.DegradationWarnings, DegradationWarningV3{
-			Code:    "hdr_range_assumed_hdr10",
-			Message: "The source is flagged HDR without precise range metadata; playback treats it as HDR10 unless the client resolves a more precise presentation.",
-		})
+		base.DegradationWarnings = append(base.DegradationWarnings, DegradationWarningV3{Code: "hdr_range_assumed_hdr10", Message: "The source is flagged HDR without precise range metadata; playback treats it as HDR10 unless the client resolves a more precise presentation."})
 	}
 	if stripUnsupported {
-		base.DegradationWarnings = append(base.DegradationWarnings, DegradationWarningV3{
-			Code:    "dolby_vision_strip_unsupported_by_source",
-			Message: "This source's Dolby Vision metadata cannot be removed cleanly, so the validated HDR10 route is unavailable for it.",
-		})
+		base.DegradationWarnings = append(base.DegradationWarnings, DegradationWarningV3{Code: "dolby_vision_strip_unsupported_by_source", Message: "This source's Dolby Vision metadata cannot be removed cleanly, so the validated HDR10 route is unavailable for it."})
 	}
 	f.base = base
 }
 
 // routeFacts decides which routes get candidates. An automatic quality
-// reduction that only an encode could deliver, and no encode can run, is
-// dropped with a warning so the source still plays.
+// reduction that only an encode could deliver, when no encode can run and no
+// lower version serves it, is dropped with a warning so the source plays.
 func (p *candidatePlannerV3) routeFacts(evidenceInsufficient bool) {
 	in, source, f := p.input, p.source, &p.video
 	anySubtitle := f.originalSubtitleOK || f.remuxSubtitleOK || f.hlsSubtitleOK
 	if in.ServerBitrateCapKbps == 0 && f.quality.RequiresTranscode && !f.quality.ExplicitRung && anySubtitle && f.videoOK &&
-		f.anyCopyRange() && !videoTranscodeExecutableV3(in, source) && !lowerVersionServesQualitiesV3(in) {
-		warnings := append(f.quality.Warnings, DegradationWarningV3{
-			Code:    "quality_reduction_unavailable",
-			Message: "Reduced-quality transcoding is unavailable for this source; it is delivered at original quality.",
-		})
+		f.anyCopyRange() && !encodeCanRunV3(in, source) && !lowerVersionServesQualitiesV3(in) {
+		warnings := append(f.quality.Warnings, DegradationWarningV3{Code: "quality_reduction_unavailable", Message: "Reduced-quality transcoding is unavailable for this source; it is delivered at original quality."})
 		f.quality = originalQualityResultV3(source)
 		f.quality.Warnings = warnings
 	}
 	f.base.DegradationWarnings = append(f.base.DegradationWarnings, f.quality.Warnings...)
 	f.mustAdapt = f.quality.RequiresTranscode || !f.videoOK || !f.anyCopyRange() || !anySubtitle
+	// A remux maps only the base layer, so Profile 7 is never copied as is.
 	remuxRangeOK := f.rangeOK && source.DVProfile != 7 || f.serverDV81
 	f.remuxActive = !f.mustAdapt && !source.VideoCopyUnsafe && (remuxRangeOK || f.stripProgressive || f.stripHLS) &&
 		(f.remuxSubtitleOK || f.hlsSubtitleOK)
@@ -201,21 +204,21 @@ func (p *candidatePlannerV3) routeFacts(evidenceInsufficient bool) {
 // transcodeStageFacts decides whether encode candidates exist and the reason
 // their plans name.
 func (p *candidatePlannerV3) transcodeStageFacts(evidenceInsufficient, anySubtitle bool) {
-	f := &p.video
+	in, f := p.input, &p.video
 	switch {
 	case f.mustAdapt:
 		f.transcodeStage = true
 		if !f.quality.RequiresTranscode && !f.videoOK && evidenceInsufficient {
 			f.transcodeReason = EvidenceInsufficientForDirectV3
 		}
+		// Only the burn-in forces the encode: a refusal names the subtitle.
 		f.subtitleForced = !f.quality.RequiresTranscode && f.videoOK && f.anyCopyRange() && !anySubtitle
-	case f.remuxActive && p.input.ServerBitrateCapKbps > 0 && (f.remuxAudio.progressiveConverts || f.remuxAudio.hlsConverts):
-		// Special case: an audio-converting remux under a server cap may not
-		// fit it, so the encode follows with its own reason and even without
-		// HLS, where its refusal is client_hls_unsupported.
+	case f.remuxActive && in.ServerBitrateCapKbps > 0 && (f.remuxAudio.progressiveConverts || f.remuxAudio.hlsConverts):
+		// Special case: an audio-converting remux may not fit a server cap, so
+		// the encode follows with its own reason, even without HLS.
 		f.transcodeStage = true
 	default:
-		f.transcodeStage = deliveryAvailableV3(p.input.Request, DeliveryClassHLSV3)
+		f.transcodeStage = deliveryAvailableV3(in.Request, DeliveryClassHLSV3)
 		f.transcodeReason = transcodeReasonCopyExhaustedV3
 	}
 }
@@ -242,6 +245,8 @@ func (p *candidatePlannerV3) remuxAudioFacts() {
 	case a.hlsQuirkConverts:
 		a.hlsAACChannels = aacOutputChannelsV3(request, DeliveryClassHLSV3, source.AudioChannels, false)
 	case a.hlsTranscode:
+		// Non-native codecs keep their surround, as many channels as a
+		// ceiling allows.
 		a.hlsAACChannels = aacOutputChannelsV3(request, DeliveryClassHLSV3, source.AudioChannels, a.hlsChannelLimited || !hlsNativeAudioCodecV3(source.AudioCodec))
 	}
 }
@@ -250,68 +255,55 @@ func (p *candidatePlannerV3) remuxAudioFacts() {
 func (p *candidatePlannerV3) videoCandidates() []candidateV3 {
 	f, source, request := &p.video, p.source, p.input.Request
 	var candidates []candidateV3
-	add := func(route candidateRouteV3, delivery string, converts bool, video candidateVideoV3, subtitles ...candidateSubtitleV3) {
+	add := func(c candidateV3, ok bool, subtitles ...candidateSubtitleV3) {
 		for _, subtitle := range subtitles {
-			candidates = append(candidates, candidateV3{route: route, delivery: delivery, video: video, convertsAudio: converts, subtitle: subtitle})
+			if c.subtitle = subtitle; ok {
+				candidates = append(candidates, c)
+			}
 		}
 	}
-	hlsSubtitles := []candidateSubtitleV3{candidateOnDemandRenditionsV3, candidatePipelineRenditionV3, candidateSidecarV3}
-	originalOK := !f.mustAdapt && f.quality.PreservesSource && f.videoOK && f.audioOK && f.originalAudioOK && f.originalSubtitleOK &&
-		containsFoldV3(request.Capabilities.Containers, source.Container) && deliveryAvailableV3(request, DeliveryClassOriginalHTTPV3)
-	var originals []candidateVideoV3
-	switch {
-	case !originalOK:
-	case source.DVProfile == 7:
+	sidecar := []candidateSubtitleV3{candidateSidecarV3}
+	hls := []candidateSubtitleV3{candidateOnDemandRenditionsV3, candidatePipelineRenditionV3, candidateSidecarV3}
+	if !f.mustAdapt && f.quality.PreservesSource && f.videoOK && f.audioOK && f.originalAudioOK && f.originalSubtitleOK &&
+		containsFoldV3(request.Capabilities.Containers, source.Container) && deliveryAvailableV3(request, DeliveryClassOriginalHTTPV3) {
+		original := func(video candidateVideoV3, ok bool) {
+			add(candidateV3{route: candidateOriginalV3, video: video}, ok, sidecar...)
+		}
+		dv7 := source.DVProfile == 7
 		// A dual-layer Profile 7 file plays original only when the client
 		// converts or presents it itself.
-		originals = appendIfV3(originals, f.clientDV81, candidateClientDV81V3)
-		originals = appendIfV3(originals, f.clientHDR10, candidateClientHDR10V3)
-		originals = appendIfV3(originals, f.clientManagedRange, candidateClientManagedV3)
-	default:
-		originals = appendIfV3(originals, f.rangeOK, candidateCopyV3)
-		originals = appendIfV3(originals, f.dv8BaseOK, candidateDV8BaseLayerV3)
-		originals = appendIfV3(originals, !f.rangeOK && !f.dv8BaseOK && f.clientManagedRange, candidateClientManagedV3)
-	}
-	for _, video := range originals {
-		add(candidateOriginalV3, DeliveryClassOriginalHTTPV3, false, video, candidateSidecarV3)
+		original(candidateClientDV81V3, dv7 && f.clientDV81)
+		original(candidateClientHDR10V3, dv7 && f.clientHDR10)
+		original(candidateCopyV3, !dv7 && f.rangeOK)
+		original(candidateDV8BaseLayerV3, !dv7 && f.dv8BaseOK)
+		original(candidateClientManagedV3, f.clientManagedRange && (dv7 || !f.rangeOK && !f.dv8BaseOK))
 	}
 	if f.remuxActive {
 		strip := f.stripProgressive || f.stripHLS
-		var remuxes []candidateVideoV3
-		remuxes = appendIfV3(remuxes, f.serverDV81, candidateServerDV81V3)
-		// A remux copies only the base layer, so Profile 7 is never preserved.
-		remuxes = appendIfV3(remuxes, source.DVProfile != 7 && (f.rangeOK || !strip), candidateCopyV3)
-		remuxes = appendIfV3(remuxes, strip, candidateServerStripV3)
-		for _, video := range remuxes {
-			if video != candidateServerDV81V3 {
-				add(candidateRemuxV3, DeliveryClassProgressiveV3, f.remuxAudio.progressiveConverts, video, candidateSidecarV3)
-			}
-			add(candidateRemuxV3, DeliveryClassHLSV3, f.remuxAudio.hlsConverts, video, hlsSubtitles...)
+		a := &f.remuxAudio
+		for video, ok := range map[candidateVideoV3]bool{
+			candidateServerDV81V3:  f.serverDV81,
+			candidateCopyV3:        source.DVProfile != 7 && (f.rangeOK || !strip),
+			candidateServerStripV3: strip,
+		} {
+			// The server's Profile 8.1 conversion rewrites fMP4 HLS only.
+			add(candidateV3{route: candidateRemuxV3, video: video, audio: audioOpV3(a.progressiveConverts), delivery: candidateProgressiveV3}, ok && video != candidateServerDV81V3, sidecar...)
+			add(candidateV3{route: candidateRemuxV3, video: video, audio: audioOpV3(a.hlsConverts), delivery: candidateHLSV3}, ok, hls...)
 		}
 	}
-	if f.transcodeStage {
-		add(candidateTranscodeV3, DeliveryClassHLSV3, true, candidateEncodeHEVCV3, hlsSubtitles...)
-		add(candidateTranscodeV3, DeliveryClassHLSV3, true, candidateEncodeH264V3, hlsSubtitles...)
+	for _, video := range []candidateVideoV3{candidateEncodeHEVCV3, candidateEncodeH264V3} {
+		add(candidateV3{route: candidateTranscodeV3, video: video, audio: candidateAudioConvertV3, delivery: candidateHLSV3}, f.transcodeStage, hls...)
 	}
 	sortCandidatesV3(candidates)
 	return candidates
 }
 
-func appendIfV3(videos []candidateVideoV3, ok bool, video candidateVideoV3) []candidateVideoV3 {
-	if ok {
-		return append(videos, video)
-	}
-	return videos
-}
-
 // enterVideoRoute holds the refusals that end planning between routes.
 func (p *candidatePlannerV3) enterVideoRoute(route candidateRouteV3) *PlannerResultV3 {
-	f, a := &p.video, &p.video.remuxAudio
-	if !f.remuxActive {
-		return nil
-	}
-	switch route {
-	case candidateRemuxV3:
+	a := &p.video.remuxAudio
+	switch {
+	case !p.video.remuxActive:
+	case route == candidateRemuxV3:
 		// Special case: when both remux deliveries must convert the codec and
 		// neither pool offers AAC, the missing toolchain is the refusal, even
 		// though an encode might run.
@@ -319,11 +311,9 @@ func (p *candidatePlannerV3) enterVideoRoute(route candidateRouteV3) *PlannerRes
 			(!deliveryAvailableV3(p.input.Request, DeliveryClassHLSV3) || !p.input.hlsRemuxRegistry().Available(TransformationAudioToAACV3)) {
 			return refusalV3(terminalPlannerResultV3(TerminalAudioConversionUnsupportedV3, "The required validated AAC conversion toolchain is unavailable.", true))
 		}
-	case candidateTranscodeV3:
+	case route == candidateTranscodeV3 && p.hlsAACMissing != "":
 		// Special case: likewise when an HLS copy remux lacked only AAC.
-		if p.hlsAACMissing != "" {
-			return refusalV3(terminalPlannerResultV3(TerminalAudioConversionUnsupportedV3, p.hlsAACMissing, true))
-		}
+		return refusalV3(terminalPlannerResultV3(TerminalAudioConversionUnsupportedV3, p.hlsAACMissing, true))
 	}
 	return nil
 }
@@ -333,18 +323,14 @@ func (p *candidatePlannerV3) progressiveAACOK() bool {
 		p.input.progressiveRemuxRegistry().Available(TransformationAudioToAACV3)
 }
 
-func (p *candidatePlannerV3) evaluateVideo(c candidateV3) (PlannerResultV3, bool, *PlannerResultV3) {
-	var result PlannerResultV3
-	var ok bool
+func (p *candidatePlannerV3) evaluateVideo(c candidateV3) (*PlannerResultV3, *PlannerResultV3) {
 	switch {
 	case c.route == candidateTranscodeV3:
 		return p.transcodeCandidate(c)
 	case c.route == candidateOriginalV3:
-		result, ok = p.originalCandidate(c)
-	case c.delivery == DeliveryClassHLSV3:
-		result, ok = p.hlsRemuxCandidate(c)
-	default:
-		result, ok = p.progressiveCandidate(c)
+		return p.originalCandidate(c), nil
+	case c.delivery == candidateHLSV3:
+		return p.hlsRemuxCandidate(c), nil
 	}
-	return result, ok, nil
+	return p.progressiveCandidate(c), nil
 }

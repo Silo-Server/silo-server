@@ -14,26 +14,14 @@ import (
 // candidatePreferenceV3, and takes the first viable one that has not been
 // attempted. Viability is checked lazily from the top, so a lookup that can
 // reach pooled nodes or run FFmpeg runs only for a candidate that needs it.
+// Each dimension's values are declared in preference order.
 type candidateV3 struct {
-	route         candidateRouteV3
-	delivery      string
-	video         candidateVideoV3
-	convertsAudio bool
-	subtitle      candidateSubtitleV3
+	route    candidateRouteV3
+	video    candidateVideoV3
+	audio    candidateAudioV3
+	delivery candidateDeliveryV3
+	subtitle candidateSubtitleV3
 }
-
-// Wire tokens the candidate planner shares with the walk in plan_v3.go.
-const (
-	decisionReasonValidatedOriginalV3 = "validated_original_playback"
-	degradationDVELDiscardedV3        = "dolby_vision_enhancement_layer_discarded"
-	degradationDVRemovedV3            = "dolby_vision_removed"
-	mimeHLSV3                         = "application/vnd.apple.mpegurl"
-	seekRestorationPlayerPositionV3   = "player_position"
-	dvBaseLayerReasonV3               = "base_layer_compatible_hevc"
-	degradationDVBaseLayerOnlyV3      = "dolby_vision_base_layer_only"
-	transcodeReasonCopyExhaustedV3    = "copy_routes_exhausted"
-	audioReasonNoTrackV3              = "no_audio_track"
-)
 
 type candidateRouteV3 int
 
@@ -43,7 +31,6 @@ const (
 	candidateTranscodeV3
 )
 
-// candidateVideoV3 values are listed in preference order.
 type candidateVideoV3 int
 
 const (
@@ -58,8 +45,23 @@ const (
 	candidateEncodeH264V3
 )
 
+type candidateAudioV3 int
+
+const (
+	candidateAudioCopyV3 candidateAudioV3 = iota
+	candidateAudioConvertV3
+)
+
+type candidateDeliveryV3 int
+
+const (
+	candidateOriginalHTTPV3 candidateDeliveryV3 = iota
+	candidateProgressiveV3
+	candidateHLSV3
+)
+
 // candidateSubtitleV3 is how an HLS stream carries the selected subtitle;
-// every other route uses the delivery's own subtitle decision.
+// other deliveries use their own subtitle decision.
 type candidateSubtitleV3 int
 
 const (
@@ -68,33 +70,20 @@ const (
 	candidateSidecarV3
 )
 
-// candidatePreferenceV3 orders candidates. Each rule breaks the ties the
-// rules before it leave.
+// candidatePreferenceV3 orders candidates; each rule breaks the ties the rules
+// before it leave.
 var candidatePreferenceV3 = []func(a, b candidateV3) int{
 	// The original file, then a copy remux, then an encode.
 	func(a, b candidateV3) int { return cmp.Compare(a.route, b.route) },
-	// The video recipe, in candidateVideoV3 order: Dolby Vision conversions
-	// before the copy, the copy before stripping, HEVC before H.264.
+	// Dolby Vision conversions before the copy, the copy before the strip,
+	// HEVC before H.264.
 	func(a, b candidateV3) int { return cmp.Compare(a.video, b.video) },
 	// Audio copied before converted.
-	func(a, b candidateV3) int { return compareFalseFirstV3(a.convertsAudio, b.convertsAudio) },
+	func(a, b candidateV3) int { return cmp.Compare(a.audio, b.audio) },
 	// Progressive before HLS.
-	func(a, b candidateV3) int {
-		return compareFalseFirstV3(a.delivery == DeliveryClassHLSV3, b.delivery == DeliveryClassHLSV3)
-	},
+	func(a, b candidateV3) int { return cmp.Compare(a.delivery, b.delivery) },
 	// On-demand renditions, then the pipeline rendition, then a sidecar.
 	func(a, b candidateV3) int { return cmp.Compare(a.subtitle, b.subtitle) },
-}
-
-func compareFalseFirstV3(a, b bool) int {
-	switch {
-	case a == b:
-		return 0
-	case a:
-		return 1
-	default:
-		return -1
-	}
 }
 
 func sortCandidatesV3(candidates []candidateV3) {
@@ -106,6 +95,13 @@ func sortCandidatesV3(candidates []candidateV3) {
 		}
 		return 0
 	})
+}
+
+func audioOpV3(convert bool) candidateAudioV3 {
+	if convert {
+		return candidateAudioConvertV3
+	}
+	return candidateAudioCopyV3
 }
 
 type candidatePlannerV3 struct {
@@ -121,9 +117,9 @@ type candidatePlannerV3 struct {
 	transcodeStop *PlannerResultV3
 }
 
-// planPlaybackCandidatesV3 returns what PlanPlaybackV3 returns, chosen from a
-// sorted candidate list instead of a walk.
-func planPlaybackCandidatesV3(input PlannerInputV3) PlannerResultV3 {
+// PlanPlaybackV3 chooses a playable protocol-v3 route for one file from
+// source and client facts.
+func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 	if input.RequestedFile == nil {
 		return terminalPlannerResultV3("source_unavailable", "The requested media source is unavailable.", false)
 	}
@@ -134,6 +130,7 @@ func planPlaybackCandidatesV3(input PlannerInputV3) PlannerResultV3 {
 	if file.ProbeRejected() {
 		return terminalPlannerResultV3(TerminalSourceUnreadableV3, TerminalSourceUnreadableMessageV3, false)
 	}
+	// No route plays an audio track FFmpeg cannot decode; another track can.
 	if input.AudioTrackIndex >= 0 && input.AudioTrackIndex < len(file.AudioTracks) && !AudioTrackDecodable(file.AudioTracks, input.AudioTrackIndex, file.CodecAudio) {
 		message := TerminalAudioTrackUndecodableMessageV3
 		if !AnyAudioTrackDecodable(file.AudioTracks, file.CodecAudio) {
@@ -153,8 +150,8 @@ func planPlaybackCandidatesV3(input PlannerInputV3) PlannerResultV3 {
 	} else {
 		result = p.planVideo()
 	}
-	// Under a cap the source must be encoded to fit, every candidate that
-	// survives encodes, so only a refusal changes: the cap names it.
+	// Under a cap the source must be encoded to fit, only encoding candidates
+	// exist, so only a refusal changes: the cap names it.
 	if p.capRequiresEncode && result.Terminal != nil {
 		result = terminalPlannerResultV3(TerminalBitratePolicyUnavailableV3, "This stream exceeds the server bitrate limit, and no compliant transcoding route is available.", result.Terminal.Retryable)
 	}
@@ -189,38 +186,41 @@ func memoV3[T any](lookup func() T) func() T {
 	return sync.OnceValue(lookup)
 }
 
-// selectCandidateV3 checks candidates in order and returns the first viable
-// one not yet attempted. enter runs once before the first candidate of each
-// route, and once more for every route the list never reached; it can end
-// planning with a refusal. evaluate builds a candidate's plan, reports whether
-// it is viable, or ends planning with a refusal.
+// selectCandidateV3 returns the first viable candidate not yet attempted.
+// enter runs once per route, in order, before that route's first candidate or
+// at the end for routes without one, and may end planning with a refusal.
+// evaluate returns a candidate's result, nil when it is not viable, or a
+// refusal that ends planning.
 func (p *candidatePlannerV3) selectCandidateV3(candidates []candidateV3, enter func(candidateRouteV3) *PlannerResultV3,
-	evaluate func(candidateV3) (PlannerResultV3, bool, *PlannerResultV3), exhausted PlannerResultV3) PlannerResultV3 {
+	evaluate func(candidateV3) (*PlannerResultV3, *PlannerResultV3), exhausted PlannerResultV3) PlannerResultV3 {
 	output := p.input.Request.ClientPlaybackContext.Output.OutputContextID
+	end := candidateTranscodeV3 + 1
 	next := candidateOriginalV3
-	for _, candidate := range candidates {
-		for ; next <= candidate.route; next++ {
+	for _, candidate := range append(candidates, candidateV3{route: end}) {
+		for ; next <= candidate.route && next < end; next++ {
 			if stop := enter(next); stop != nil {
 				return *stop
 			}
 		}
-		result, ok, stop := evaluate(candidate)
+		if candidate.route == end {
+			break
+		}
+		result, stop := evaluate(candidate)
 		if stop != nil {
 			return *stop
 		}
-		if ok && !planAttemptedV3(*result.Plan, output, p.input.AttemptedKeys) {
-			return result
-		}
-	}
-	for ; next <= candidateTranscodeV3; next++ {
-		if stop := enter(next); stop != nil {
-			return *stop
+		if result != nil && !planAttemptedV3(*result.Plan, output, p.input.AttemptedKeys) {
+			return *result
 		}
 	}
 	return exhausted
 }
 
 func refusalV3(result PlannerResultV3) *PlannerResultV3 { return &result }
+
+func exhaustedV3() PlannerResultV3 {
+	return terminalPlannerResultV3("adaptation_exhausted", "All compatible playback recipes have already failed for this output route.", false)
+}
 
 // newPlanV3 is the plan every route of this file starts from.
 func (p *candidatePlannerV3) newPlanV3(subtitle SubtitlePolicyResultV3) PlanV3 {
@@ -238,7 +238,7 @@ func (p *candidatePlannerV3) newPlanV3(subtitle SubtitlePolicyResultV3) PlanV3 {
 		EffectiveMediaFileID:   p.file.ID,
 		Source:                 p.source,
 		SubtitleFidelityPolicy: subtitlePolicyNameV3(request.SubtitleFidelityPreference),
-		Timeline:               TimelineV3{SourceStartSeconds: floatOrZeroV3(request.StartPosition), PlayerStartSeconds: floatOrZeroV3(request.StartPosition), CanSeekAnywhere: true, SeekRestoration: seekRestorationPlayerPositionV3},
+		Timeline:               TimelineV3{SourceStartSeconds: floatOrZeroV3(request.StartPosition), PlayerStartSeconds: floatOrZeroV3(request.StartPosition), CanSeekAnywhere: true, SeekRestoration: "player_position"},
 	}
 }
 
@@ -246,8 +246,12 @@ func (p *candidatePlannerV3) finalizeV3(plan *PlanV3) {
 	finalizePlanIdentityV3(plan, p.input.Request.PlaybackAttemptID, p.input.Request.ClientPlaybackContext.Output.OutputContextID)
 }
 
+func streamV3(protocol StreamProtocolV3, container, mime string) StreamV3 {
+	return StreamV3{Protocol: protocol, Container: container, MIMEType: mime, Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}
+}
+
 // planAudioOnly plans a file without a video track: the original file, or a
-// progressive remux whose one audio recipe is fixed by the facts.
+// progressive remux whose one audio recipe the facts fix.
 func (p *candidatePlannerV3) planAudioOnly() PlannerResultV3 {
 	request, source := p.input.Request, p.source
 	audioOK, _, audioClaims := audioEligibilityV3(source, request)
@@ -262,16 +266,15 @@ func (p *candidatePlannerV3) planAudioOnly() PlannerResultV3 {
 	base.AvailableQualities = audioAvailableQualitiesV3(source)
 	remux := base
 	remux.Delivery = DeliveryRemuxProgressiveV3
-	remux.Stream = StreamV3{Protocol: StreamHTTPProgressiveV3, Container: containerMP4V3, MIMEType: AudioOnlyRemuxMIMEV3, Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}
+	remux.Stream = streamV3(StreamHTTPProgressiveV3, containerMP4V3, AudioOnlyRemuxMIMEV3)
 	remux.DecisionReason = decisionReasonContainerNormalizationV3
-	// The remux copies unless the copy cannot play there; then it converts.
+	// The remux copies unless the copy cannot play there.
 	forced := !audioOK || capExceeded
 	convert := forced || !deliverySupportsPlanV3(request, DeliveryClassProgressiveV3, remux)
-
-	candidates := []candidateV3{{route: candidateRemuxV3, delivery: DeliveryClassProgressiveV3, convertsAudio: convert}}
+	candidates := []candidateV3{{route: candidateRemuxV3, delivery: candidateProgressiveV3, audio: audioOpV3(convert)}}
 	if audioOK && !capExceeded && containsFoldV3(request.Capabilities.Containers, source.Container) &&
 		(audioSelectionUsesContainerDefaultV3(p.file, p.input.AudioTrackIndex) || clientSelectsOriginalAudioTrackV3(request)) {
-		candidates = append(candidates, candidateV3{route: candidateOriginalV3, delivery: DeliveryClassOriginalHTTPV3})
+		candidates = append(candidates, candidateV3{route: candidateOriginalV3})
 	}
 	sortCandidatesV3(candidates)
 	enter := func(route candidateRouteV3) *PlannerResultV3 {
@@ -280,23 +283,24 @@ func (p *candidatePlannerV3) planAudioOnly() PlannerResultV3 {
 		}
 		return nil
 	}
-	evaluate := func(c candidateV3) (PlannerResultV3, bool, *PlannerResultV3) {
-		if c.route == candidateOriginalV3 {
-			plan := base
-			plan.Delivery = DeliveryOriginalHTTPV3
-			plan.Stream = StreamV3{Protocol: StreamHTTPProgressiveV3, Container: source.Container, MIMEType: MimeFromExtension(p.file.FilePath), Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}
-			plan.DecisionReason = decisionReasonValidatedOriginalV3
-			p.finalizeV3(&plan)
-			return PlannerResultV3{Plan: &plan, PlayMethod: PlayDirect, SubtitleTrackIndex: -1, SubtitleTransportTrackIndex: -1},
-				deliverySupportsPlanV3(request, DeliveryClassOriginalHTTPV3, plan), nil
+	evaluate := func(c candidateV3) (*PlannerResultV3, *PlannerResultV3) {
+		if c.route == candidateRemuxV3 {
+			return p.audioOnlyRemux(remux, convert, forced, capExceeded)
 		}
-		return p.audioOnlyRemux(remux, c.convertsAudio, forced, capExceeded)
+		plan := base
+		plan.Delivery = DeliveryOriginalHTTPV3
+		plan.Stream = streamV3(StreamHTTPProgressiveV3, source.Container, MimeFromExtension(p.file.FilePath))
+		plan.DecisionReason = decisionReasonValidatedOriginalV3
+		p.finalizeV3(&plan)
+		if !deliverySupportsPlanV3(request, DeliveryClassOriginalHTTPV3, plan) {
+			return nil, nil
+		}
+		return &PlannerResultV3{Plan: &plan, PlayMethod: PlayDirect, SubtitleTrackIndex: -1, SubtitleTransportTrackIndex: -1}, nil
 	}
-	exhausted := terminalPlannerResultV3("adaptation_exhausted", "All compatible playback recipes have already failed for this output route.", false)
-	return p.selectCandidateV3(candidates, enter, evaluate, exhausted)
+	return p.selectCandidateV3(candidates, enter, evaluate, exhaustedV3())
 }
 
-func (p *candidatePlannerV3) audioOnlyRemux(plan PlanV3, convert, forced, capExceeded bool) (PlannerResultV3, bool, *PlannerResultV3) {
+func (p *candidatePlannerV3) audioOnlyRemux(plan PlanV3, convert, forced, capExceeded bool) (*PlannerResultV3, *PlannerResultV3) {
 	request, source := p.input.Request, p.source
 	undecodable := refusalV3(terminalPlannerResultV3("adaptation_unavailable", "The progressive delivery cannot decode the planned audio recipe.", false))
 	channels, bitrate := 0, 0
@@ -305,22 +309,23 @@ func (p *candidatePlannerV3) audioOnlyRemux(plan PlanV3, convert, forced, capExc
 		aacOK := registry != nil && registry.Available(TransformationAudioToAACV3)
 		channels = audioOnlyAACOutputChannelsV3(request, source)
 		bitrate = audioOnlyAACBitrateKbpsV3(optionalValueV3(request.BandwidthCapKbps))
-		if forced && p.input.ServerBitrateCapKbps > 0 {
+		capped := forced && p.input.ServerBitrateCapKbps > 0
+		if capped {
 			bitrate = min(bitrate, p.input.ServerBitrateCapKbps*95/100)
 		}
 		switch {
 		case !aacOK && forced:
-			return PlannerResultV3{}, false, refusalV3(terminalPlannerResultV3(TerminalAudioConversionUnsupportedV3, "The required validated AAC conversion toolchain is unavailable.", true))
+			return nil, refusalV3(terminalPlannerResultV3(TerminalAudioConversionUnsupportedV3, "The required validated AAC conversion toolchain is unavailable.", true))
 		case !aacOK:
-			return PlannerResultV3{}, false, undecodable
-		case bitrate < 32 && forced && p.input.ServerBitrateCapKbps > 0:
-			return PlannerResultV3{}, false, refusalV3(terminalPlannerResultV3(TerminalBitratePolicyUnavailableV3, "The server bitrate limit is too low for a playable audio stream.", false))
+			return nil, undecodable
+		case capped && bitrate < 32:
+			return nil, refusalV3(terminalPlannerResultV3(TerminalBitratePolicyUnavailableV3, "The server bitrate limit is too low for a playable audio stream.", false))
 		}
 		applyAudioOnlyAACConversionV3(&plan, channels, bitrate, forced && capExceeded)
 	}
 	if !deliverySupportsPlanV3(request, DeliveryClassProgressiveV3, plan) {
-		return PlannerResultV3{}, false, undecodable
+		return nil, undecodable
 	}
 	p.finalizeV3(&plan)
-	return PlannerResultV3{Plan: &plan, PlayMethod: PlayRemux, TranscodeAudio: convert, TargetAudioCodec: plan.EffectiveRecipe.AudioCodec, SourceAudioChannels: stereoDownmixSourceChannelsV3(source.AudioChannels, channels, convert), TargetAudioChannels: channels, TargetAudioBitrateKbps: bitrate, SubtitleTrackIndex: -1, SubtitleTransportTrackIndex: -1}, true, nil
+	return &PlannerResultV3{Plan: &plan, PlayMethod: PlayRemux, TranscodeAudio: convert, TargetAudioCodec: plan.EffectiveRecipe.AudioCodec, SourceAudioChannels: stereoDownmixSourceChannelsV3(source.AudioChannels, channels, convert), TargetAudioChannels: channels, TargetAudioBitrateKbps: bitrate, SubtitleTrackIndex: -1, SubtitleTransportTrackIndex: -1}, nil
 }
