@@ -287,10 +287,22 @@
       "value": "\u200F\u202EThis value isn’t valid.\u202C"
     }
   ],
+  "error.field.invalid_entity_tag": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EExpected \"*\" or a comma-separated list of quoted entity-tags.\u202C"
+    }
+  ],
   "error.field.invalid_enum": [
     {
       "type": 0,
       "value": "\u200F\u202EChoose one of the allowed values.\u202C"
+    }
+  ],
+  "error.field.invalid_sort_field": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESort names a field this operation does not sort by, or names one twice.\u202C"
     }
   ],
   "error.field.invalid_type": [
@@ -593,6 +605,570 @@
       "value": "\u200F\u202ESome values aren’t valid. Check them and try again.\u202C"
     }
   ],
+  "home.recipe.aclBlank.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAdmin-curated, item-by-item ordered list.\u202C"
+    }
+  ],
+  "home.recipe.aclBlank.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEditor's Picks\u202C"
+    }
+  ],
+  "home.recipe.anniversariesDefault.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETitles celebrating a milestone release anniversary this month.\u202C"
+    }
+  ],
+  "home.recipe.anniversariesDefault.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAnniversaries\u202C"
+    }
+  ],
+  "home.recipe.awCannes.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECannes Festival selections.\u202C"
+    }
+  ],
+  "home.recipe.awCannes.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECannes Selections\u202C"
+    }
+  ],
+  "home.recipe.awEmmy.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEmmy-winning shows.\u202C"
+    }
+  ],
+  "home.recipe.awEmmy.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEmmy Winners\u202C"
+    }
+  ],
+  "home.recipe.awOscar.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAcademy Award winners in your library.\u202C"
+    }
+  ],
+  "home.recipe.awOscar.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOscar Winners\u202C"
+    }
+  ],
+  "home.recipe.bcwAuto.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPicks based on your most recent watch.\u202C"
+    }
+  ],
+  "home.recipe.caImdb.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERated 8.0+ on TMDB with 500+ votes.\u202C"
+    }
+  ],
+  "home.recipe.caImdb.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECritically Acclaimed\u202C"
+    }
+  ],
+  "home.recipe.collectionPick.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EShow items from a library or curated collection.\u202C"
+    }
+  ],
+  "home.recipe.collectionPick.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECollection\u202C"
+    }
+  ],
+  "home.recipe.continueListeningDefault.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPick up audiobooks where you left off.\u202C"
+    }
+  ],
+  "home.recipe.continueWatchingDefault.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPick up movies and episodes where you left off.\u202C"
+    }
+  ],
+  "home.recipe.esActor.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWeekly spotlight on an actor in your library.\u202C"
+    }
+  ],
+  "home.recipe.esActor.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EActor Spotlight\u202C"
+    }
+  ],
+  "home.recipe.esDirectorAuto.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWeekly spotlight on a director in your library.\u202C"
+    }
+  ],
+  "home.recipe.esDirectorAuto.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDirector Spotlight\u202C"
+    }
+  ],
+  "home.recipe.esEra80s.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFilms from the 1980s.\u202C"
+    }
+  ],
+  "home.recipe.esEra80s.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe 80s\u202C"
+    }
+  ],
+  "home.recipe.esStudio.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWeekly spotlight on a studio in your library.\u202C"
+    }
+  ],
+  "home.recipe.esStudio.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EStudio Spotlight\u202C"
+    }
+  ],
+  "home.recipe.favoritesDefault.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EYour favorites.\u202C"
+    }
+  ],
+  "home.recipe.favoritesDefault.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFavorites\u202C"
+    }
+  ],
+  "home.recipe.ffDefault.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERated 7.0+ on TMDB with 100+ votes, and not watched in the past year.\u202C"
+    }
+  ],
+  "home.recipe.ffDefault.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EForgotten Favorites\u202C"
+    }
+  ],
+  "home.recipe.forYou.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPer-profile picks from the recommendation engine.\u202C"
+    }
+  ],
+  "home.recipe.forYou.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERecommended For You\u202C"
+    }
+  ],
+  "home.recipe.fs4k.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETitles available in 4K UHD.\u202C"
+    }
+  ],
+  "home.recipe.fs4k.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202E4K Showcase\u202C"
+    }
+  ],
+  "home.recipe.fs4kRecent.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERecently added 4K UHD titles.\u202C"
+    }
+  ],
+  "home.recipe.fs4kRecent.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENew in 4K\u202C"
+    }
+  ],
+  "home.recipe.fsDv.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDolby Vision titles.\u202C"
+    }
+  ],
+  "home.recipe.fsDv.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDolby Vision Picks\u202C"
+    }
+  ],
+  "home.recipe.fsHdr.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHDR-mastered titles.\u202C"
+    }
+  ],
+  "home.recipe.fsHdr.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHDR Highlights\u202C"
+    }
+  ],
+  "home.recipe.genreRouletteWeekly.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA different genre every week, rated 6.0+ on TMDB with 100+ votes.\u202C"
+    }
+  ],
+  "home.recipe.genreRouletteWeekly.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EGenre Roulette\u202C"
+    }
+  ],
+  "home.recipe.hiddenGemsDefault.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERated 7.5+ on TMDB with 100+ votes, and watched twice or less.\u202C"
+    }
+  ],
+  "home.recipe.moodAfterMidnight.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHorror or Thriller, rated 6.0+ on TMDB with 100+ votes.\u202C"
+    }
+  ],
+  "home.recipe.moodAfterMidnight.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAfter Midnight\u202C"
+    }
+  ],
+  "home.recipe.moodComfort.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EComedy, Romance or Family, rated 6.0+ on TMDB with 100+ votes.\u202C"
+    }
+  ],
+  "home.recipe.moodComfort.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EComfort Rewatches\u202C"
+    }
+  ],
+  "home.recipe.moodDateNight.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERomance or Comedy, rated 6.0+ on TMDB with 100+ votes.\u202C"
+    }
+  ],
+  "home.recipe.moodDateNight.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDate Night\u202C"
+    }
+  ],
+  "home.recipe.moodEdgeOfSeat.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThriller or Action, rated 6.5+ on TMDB with 100+ votes.\u202C"
+    }
+  ],
+  "home.recipe.moodEdgeOfSeat.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEdge of Your Seat\u202C"
+    }
+  ],
+  "home.recipe.moodFeelGood.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EComedy or Family, rated 6.5+ on TMDB with 100+ votes.\u202C"
+    }
+  ],
+  "home.recipe.moodFeelGood.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFeel-Good Comedies\u202C"
+    }
+  ],
+  "home.recipe.moodMindBending.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EScience Fiction or Mystery, rated 7.0+ on TMDB with 100+ votes.\u202C"
+    }
+  ],
+  "home.recipe.moodMindBending.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMind-Bending Sci-Fi\u202C"
+    }
+  ],
+  "home.recipe.moodQuietSunday.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDrama or Documentary, rated 7.0+ on TMDB with 100+ votes.\u202C"
+    }
+  ],
+  "home.recipe.moodQuietSunday.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EQuiet Sunday Cinema\u202C"
+    }
+  ],
+  "home.recipe.moodTearjerker.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDrama or Romance, rated 7.0+ on TMDB with 100+ votes.\u202C"
+    }
+  ],
+  "home.recipe.moodTearjerker.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETearjerkers\u202C"
+    }
+  ],
+  "home.recipe.mwMonth.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETop plays in the last 30 days.\u202C"
+    }
+  ],
+  "home.recipe.mwMonth.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMost Watched This Month\u202C"
+    }
+  ],
+  "home.recipe.mwWeek.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETop plays in the last 7 days.\u202C"
+    }
+  ],
+  "home.recipe.mwWeek.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMost Watched This Week\u202C"
+    }
+  ],
+  "home.recipe.nextInSeriesDefault.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe next audiobook in series you've finished.\u202C"
+    }
+  ],
+  "home.recipe.nextInSeriesDefault.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENext in Series\u202C"
+    }
+  ],
+  "home.recipe.nextUpDefault.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENext episodes ready to watch.\u202C"
+    }
+  ],
+  "home.recipe.ntl30.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAdded in the last 30 days.\u202C"
+    }
+  ],
+  "home.recipe.ntl30.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENew to Library This Month\u202C"
+    }
+  ],
+  "home.recipe.paHousehold.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERecent watches across all other profiles.\u202C"
+    }
+  ],
+  "home.recipe.paHousehold.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWhat Others Just Watched\u202C"
+    }
+  ],
+  "home.recipe.randomDefault.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA random selection from your library.\u202C"
+    }
+  ],
+  "home.recipe.randomDefault.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESurprise Me\u202C"
+    }
+  ],
+  "home.recipe.recentlyAddedDefault.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELatest additions to your library.\u202C"
+    }
+  ],
+  "home.recipe.recentlyReleasedDefault.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERecently released titles.\u202C"
+    }
+  ],
+  "home.recipe.recentlyReleasedDefault.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENew Releases\u202C"
+    }
+  ],
+  "home.recipe.returningShowsDefault.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EShows you've watched with a brand-new season in your library.\u202C"
+    }
+  ],
+  "home.recipe.seAuto.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECycles automatically — Halloween in October, Christmas in December, etc.\u202C"
+    }
+  ],
+  "home.recipe.seAuto.details": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOne section that swaps in curated holiday picks based on the calendar. Choose the holidays, a vibe for each, and add your own holidays.\u202C"
+    }
+  ],
+  "home.recipe.seFamilyMovieNight.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFamily picks on Friday and Saturday evenings.\u202C"
+    }
+  ],
+  "home.recipe.seFamilyMovieNight.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFamily Movie Night\u202C"
+    }
+  ],
+  "home.recipe.shortWatchesDefault.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMovies of 95 minutes or less, rated 6.0+ on TMDB with 100+ votes.\u202C"
+    }
+  ],
+  "home.recipe.shortWatchesDefault.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EShort & Sweet\u202C"
+    }
+  ],
+  "home.recipe.similar.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWhat similar profiles are loving.\u202C"
+    }
+  ],
+  "home.recipe.tasteTop.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBest matches for your strongest taste — set a genre to narrow it.\u202C"
+    }
+  ],
+  "home.recipe.tdiscTmdbDay.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EToday's trending movies & shows from TMDB, matched to your library.\u202C"
+    }
+  ],
+  "home.recipe.tdiscTmdbDay.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETMDB Trending Today\u202C"
+    }
+  ],
+  "home.recipe.tdiscTmdbWeek.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis week's trending movies & shows from TMDB, matched to your library.\u202C"
+    }
+  ],
+  "home.recipe.tdiscTmdbWeek.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETMDB Trending This Week\u202C"
+    }
+  ],
+  "home.recipe.tr24h.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMost-played in the last day.\u202C"
+    }
+  ],
+  "home.recipe.tr24h.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETrending Now (24h)\u202C"
+    }
+  ],
+  "home.recipe.tr30d.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMost-played in the last month.\u202C"
+    }
+  ],
+  "home.recipe.tr30d.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETrending This Month\u202C"
+    }
+  ],
+  "home.recipe.tr7d.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMost-played in the last week.\u202C"
+    }
+  ],
+  "home.recipe.watchlistDefault.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EItems you've saved to watch.\u202C"
+    }
+  ],
+  "home.recipe.watchlistDefault.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWatchlist\u202C"
+    }
+  ],
   "home.section.becauseYouEnjoy": [
     {
       "type": 0,
@@ -635,6 +1211,60 @@
     {
       "type": 0,
       "value": "\u200F\u202EContinue Watching\u202C"
+    }
+  ],
+  "home.section.discoverGenres": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EGenres\u202C"
+    }
+  ],
+  "home.section.discoverNetworks": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENetworks\u202C"
+    }
+  ],
+  "home.section.discoverOnAirSeries": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOn Air Series\u202C"
+    }
+  ],
+  "home.section.discoverPopularMovies": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPopular Movies\u202C"
+    }
+  ],
+  "home.section.discoverPopularSeries": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPopular Series\u202C"
+    }
+  ],
+  "home.section.discoverStudios": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EStudios\u202C"
+    }
+  ],
+  "home.section.discoverTrendingMovies": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETrending Movies\u202C"
+    }
+  ],
+  "home.section.discoverTrendingSeries": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETrending Series\u202C"
+    }
+  ],
+  "home.section.discoverUpcomingMovies": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EUpcoming Movies\u202C"
     }
   ],
   "home.section.forYou": [
@@ -805,6 +1435,210 @@
       "value": "\u200F\u202EReturning Shows\u202C"
     }
   ],
+  "home.section.seasonal.christmas.classics": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EChristmas Classics\u202C"
+    }
+  ],
+  "home.section.seasonal.christmas.comedies": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EChristmas Comedies\u202C"
+    }
+  ],
+  "home.section.seasonal.christmas.family": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFamily Christmas\u202C"
+    }
+  ],
+  "home.section.seasonal.christmas.favorites": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EChristmas Favorites\u202C"
+    }
+  ],
+  "home.section.seasonal.christmas.hallmark": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHallmark Christmas\u202C"
+    }
+  ],
+  "home.section.seasonal.christmas.romcoms": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EChristmas Rom-Coms\u202C"
+    }
+  ],
+  "home.section.seasonal.easter.faith": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEaster Stories\u202C"
+    }
+  ],
+  "home.section.seasonal.easter.family": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEaster Movies\u202C"
+    }
+  ],
+  "home.section.seasonal.familyMovieNight.favorites": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFamily Favorites\u202C"
+    }
+  ],
+  "home.section.seasonal.familyMovieNight.liveAction": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFamily Movie Night\u202C"
+    }
+  ],
+  "home.section.seasonal.familyMovieNight.new": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFamily Movie Night\u202C"
+    }
+  ],
+  "home.section.seasonal.halloween.animated": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAnimated Halloween\u202C"
+    }
+  ],
+  "home.section.seasonal.halloween.family": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFamily Halloween\u202C"
+    }
+  ],
+  "home.section.seasonal.halloween.favorites": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHalloween Favorites\u202C"
+    }
+  ],
+  "home.section.seasonal.halloween.horror": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHalloween Horror\u202C"
+    }
+  ],
+  "home.section.seasonal.halloween.tv": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHalloween TV\u202C"
+    }
+  ],
+  "home.section.seasonal.newYear.favorites": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENew Year's Movies\u202C"
+    }
+  ],
+  "home.section.seasonal.saturdayMorning.cartoons": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESaturday Morning Cartoons\u202C"
+    }
+  ],
+  "home.section.seasonal.saturdayMorning.modern": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESaturday Morning Favorites\u202C"
+    }
+  ],
+  "home.section.seasonal.saturdayMorning.nineties": [
+    {
+      "type": 0,
+      "value": "\u200F\u202E90s Saturday Mornings\u202C"
+    }
+  ],
+  "home.section.seasonal.stPatricks.irishFilm": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EIrish Film\u202C"
+    }
+  ],
+  "home.section.seasonal.stPatricks.irishTv": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EIrish TV\u202C"
+    }
+  ],
+  "home.section.seasonal.summer.blockbusters": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESummer Blockbusters\u202C"
+    }
+  ],
+  "home.section.seasonal.summer.classicSummer": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EClassic Summer Movies\u202C"
+    }
+  ],
+  "home.section.seasonal.summer.nostalgia": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESummer Nostalgia\u202C"
+    }
+  ],
+  "home.section.seasonal.summerBlockbuster.blockbusters": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESummer Blockbusters\u202C"
+    }
+  ],
+  "home.section.seasonal.summerBlockbuster.classicSummer": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EClassic Summer Movies\u202C"
+    }
+  ],
+  "home.section.seasonal.summerBlockbuster.nostalgia": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESummer Nostalgia\u202C"
+    }
+  ],
+  "home.section.seasonal.thanksgiving.favorites": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThanksgiving Movies\u202C"
+    }
+  ],
+  "home.section.seasonal.thanksgiving.feelGood": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFeel-Good Favorites\u202C"
+    }
+  ],
+  "home.section.seasonal.valentines.favorites": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EValentine's Favorites\u202C"
+    }
+  ],
+  "home.section.seasonal.valentines.loveStories": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EClassic Love Stories\u202C"
+    }
+  ],
+  "home.section.seasonal.valentines.romanticDramas": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERomantic Dramas\u202C"
+    }
+  ],
+  "home.section.seasonal.valentines.romcoms": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EValentine's Rom-Coms\u202C"
+    }
+  ],
   "home.section.seasonalPicks": [
     {
       "type": 0,
@@ -819,6 +1653,12 @@
     {
       "type": 1,
       "value": "genre"
+    }
+  ],
+  "home.section.topPicksToday": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETop Picks Today\u202C"
     }
   ],
   "home.section.topRated": [

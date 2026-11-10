@@ -287,10 +287,22 @@
       "value": "⟦Ţĥîš ṽåļûé îšñ’ţ ṽåļîđ.~~~~~~~~~~⟧"
     }
   ],
+  "error.field.invalid_entity_tag": [
+    {
+      "type": 0,
+      "value": "⟦Éẋþéçţéđ \"*\" öŕ å çöɱɱå-šéþåŕåţéđ ļîšţ öƒ ǫûöţéđ éñţîţý-ţåĝš.~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "error.field.invalid_enum": [
     {
       "type": 0,
       "value": "⟦Çĥööšé öñé öƒ ţĥé åļļöŵéđ ṽåļûéš.~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "error.field.invalid_sort_field": [
+    {
+      "type": 0,
+      "value": "⟦Šöŕţ ñåɱéš å ƒîéļđ ţĥîš öþéŕåţîöñ đöéš ñöţ šöŕţ ƀý, öŕ ñåɱéš öñé ţŵîçé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "error.field.invalid_type": [
@@ -593,6 +605,570 @@
       "value": "⟦Šöɱé ṽåļûéš åŕéñ’ţ ṽåļîđ. Çĥéçķ ţĥéɱ åñđ ţŕý åĝåîñ.~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "home.recipe.aclBlank.description": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ-çûŕåţéđ, îţéɱ-ƀý-îţéɱ öŕđéŕéđ ļîšţ.~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.aclBlank.name": [
+    {
+      "type": 0,
+      "value": "⟦Éđîţöŕ'š Þîçķš~~~~~~⟧"
+    }
+  ],
+  "home.recipe.anniversariesDefault.description": [
+    {
+      "type": 0,
+      "value": "⟦Ţîţļéš çéļéƀŕåţîñĝ å ɱîļéšţöñé ŕéļéåšé åññîṽéŕšåŕý ţĥîš ɱöñţĥ.~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.anniversariesDefault.name": [
+    {
+      "type": 0,
+      "value": "⟦Åññîṽéŕšåŕîéš~~~~~~⟧"
+    }
+  ],
+  "home.recipe.awCannes.description": [
+    {
+      "type": 0,
+      "value": "⟦Çåññéš Ƒéšţîṽåļ šéļéçţîöñš.~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.awCannes.name": [
+    {
+      "type": 0,
+      "value": "⟦Çåññéš Šéļéçţîöñš~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.awEmmy.description": [
+    {
+      "type": 0,
+      "value": "⟦Éɱɱý-ŵîññîñĝ šĥöŵš.~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.awEmmy.name": [
+    {
+      "type": 0,
+      "value": "⟦Éɱɱý Ŵîññéŕš~~~~~⟧"
+    }
+  ],
+  "home.recipe.awOscar.description": [
+    {
+      "type": 0,
+      "value": "⟦Åçåđéɱý Åŵåŕđ ŵîññéŕš îñ ýöûŕ ļîƀŕåŕý.~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.awOscar.name": [
+    {
+      "type": 0,
+      "value": "⟦Öšçåŕ Ŵîññéŕš~~~~~~⟧"
+    }
+  ],
+  "home.recipe.bcwAuto.description": [
+    {
+      "type": 0,
+      "value": "⟦Þîçķš ƀåšéđ öñ ýöûŕ ɱöšţ ŕéçéñţ ŵåţçĥ.~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.caImdb.description": [
+    {
+      "type": 0,
+      "value": "⟦Ŕåţéđ 8.0+ öñ ŢṀĐƁ ŵîţĥ 500+ ṽöţéš.~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.caImdb.name": [
+    {
+      "type": 0,
+      "value": "⟦Çŕîţîçåļļý Åççļåîɱéđ~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.collectionPick.description": [
+    {
+      "type": 0,
+      "value": "⟦Šĥöŵ îţéɱš ƒŕöɱ å ļîƀŕåŕý öŕ çûŕåţéđ çöļļéçţîöñ.~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.collectionPick.name": [
+    {
+      "type": 0,
+      "value": "⟦Çöļļéçţîöñ~~~~⟧"
+    }
+  ],
+  "home.recipe.continueListeningDefault.description": [
+    {
+      "type": 0,
+      "value": "⟦Þîçķ ûþ åûđîöƀööķš ŵĥéŕé ýöû ļéƒţ öƒƒ.~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.continueWatchingDefault.description": [
+    {
+      "type": 0,
+      "value": "⟦Þîçķ ûþ ɱöṽîéš åñđ éþîšöđéš ŵĥéŕé ýöû ļéƒţ öƒƒ.~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.esActor.description": [
+    {
+      "type": 0,
+      "value": "⟦Ŵééķļý šþöţļîĝĥţ öñ åñ åçţöŕ îñ ýöûŕ ļîƀŕåŕý.~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.esActor.name": [
+    {
+      "type": 0,
+      "value": "⟦Åçţöŕ Šþöţļîĝĥţ~~~~~~⟧"
+    }
+  ],
+  "home.recipe.esDirectorAuto.description": [
+    {
+      "type": 0,
+      "value": "⟦Ŵééķļý šþöţļîĝĥţ öñ å đîŕéçţöŕ îñ ýöûŕ ļîƀŕåŕý.~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.esDirectorAuto.name": [
+    {
+      "type": 0,
+      "value": "⟦Đîŕéçţöŕ Šþöţļîĝĥţ~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.esEra80s.description": [
+    {
+      "type": 0,
+      "value": "⟦Ƒîļɱš ƒŕöɱ ţĥé 1980š.~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.esEra80s.name": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé 80š~~~⟧"
+    }
+  ],
+  "home.recipe.esStudio.description": [
+    {
+      "type": 0,
+      "value": "⟦Ŵééķļý šþöţļîĝĥţ öñ å šţûđîö îñ ýöûŕ ļîƀŕåŕý.~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.esStudio.name": [
+    {
+      "type": 0,
+      "value": "⟦Šţûđîö Šþöţļîĝĥţ~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.favoritesDefault.description": [
+    {
+      "type": 0,
+      "value": "⟦Ýöûŕ ƒåṽöŕîţéš.~~~~~~⟧"
+    }
+  ],
+  "home.recipe.favoritesDefault.name": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåṽöŕîţéš~~~~⟧"
+    }
+  ],
+  "home.recipe.ffDefault.description": [
+    {
+      "type": 0,
+      "value": "⟦Ŕåţéđ 7.0+ öñ ŢṀĐƁ ŵîţĥ 100+ ṽöţéš, åñđ ñöţ ŵåţçĥéđ îñ ţĥé þåšţ ýéåŕ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.ffDefault.name": [
+    {
+      "type": 0,
+      "value": "⟦Ƒöŕĝöţţéñ Ƒåṽöŕîţéš~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.forYou.description": [
+    {
+      "type": 0,
+      "value": "⟦Þéŕ-þŕöƒîļé þîçķš ƒŕöɱ ţĥé ŕéçöɱɱéñđåţîöñ éñĝîñé.~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.forYou.name": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéçöɱɱéñđéđ Ƒöŕ Ýöû~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.fs4k.description": [
+    {
+      "type": 0,
+      "value": "⟦Ţîţļéš åṽåîļåƀļé îñ 4Ķ ÛĤĐ.~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.fs4k.name": [
+    {
+      "type": 0,
+      "value": "⟦4Ķ Šĥöŵçåšé~~~~~⟧"
+    }
+  ],
+  "home.recipe.fs4kRecent.description": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéçéñţļý åđđéđ 4Ķ ÛĤĐ ţîţļéš.~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.fs4kRecent.name": [
+    {
+      "type": 0,
+      "value": "⟦Ñéŵ îñ 4Ķ~~~~⟧"
+    }
+  ],
+  "home.recipe.fsDv.description": [
+    {
+      "type": 0,
+      "value": "⟦Đöļƀý Ṽîšîöñ ţîţļéš.~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.fsDv.name": [
+    {
+      "type": 0,
+      "value": "⟦Đöļƀý Ṽîšîöñ Þîçķš~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.fsHdr.description": [
+    {
+      "type": 0,
+      "value": "⟦ĤĐŔ-ɱåšţéŕéđ ţîţļéš.~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.fsHdr.name": [
+    {
+      "type": 0,
+      "value": "⟦ĤĐŔ Ĥîĝĥļîĝĥţš~~~~~~⟧"
+    }
+  ],
+  "home.recipe.genreRouletteWeekly.description": [
+    {
+      "type": 0,
+      "value": "⟦Å đîƒƒéŕéñţ ĝéñŕé éṽéŕý ŵééķ, ŕåţéđ 6.0+ öñ ŢṀĐƁ ŵîţĥ 100+ ṽöţéš.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.genreRouletteWeekly.name": [
+    {
+      "type": 0,
+      "value": "⟦Ĝéñŕé Ŕöûļéţţé~~~~~~⟧"
+    }
+  ],
+  "home.recipe.hiddenGemsDefault.description": [
+    {
+      "type": 0,
+      "value": "⟦Ŕåţéđ 7.5+ öñ ŢṀĐƁ ŵîţĥ 100+ ṽöţéš, åñđ ŵåţçĥéđ ţŵîçé öŕ ļéšš.~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.moodAfterMidnight.description": [
+    {
+      "type": 0,
+      "value": "⟦Ĥöŕŕöŕ öŕ Ţĥŕîļļéŕ, ŕåţéđ 6.0+ öñ ŢṀĐƁ ŵîţĥ 100+ ṽöţéš.~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.moodAfterMidnight.name": [
+    {
+      "type": 0,
+      "value": "⟦Åƒţéŕ Ṁîđñîĝĥţ~~~~~~⟧"
+    }
+  ],
+  "home.recipe.moodComfort.description": [
+    {
+      "type": 0,
+      "value": "⟦Çöɱéđý, Ŕöɱåñçé öŕ Ƒåɱîļý, ŕåţéđ 6.0+ öñ ŢṀĐƁ ŵîţĥ 100+ ṽöţéš.~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.moodComfort.name": [
+    {
+      "type": 0,
+      "value": "⟦Çöɱƒöŕţ Ŕéŵåţçĥéš~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.moodDateNight.description": [
+    {
+      "type": 0,
+      "value": "⟦Ŕöɱåñçé öŕ Çöɱéđý, ŕåţéđ 6.0+ öñ ŢṀĐƁ ŵîţĥ 100+ ṽöţéš.~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.moodDateNight.name": [
+    {
+      "type": 0,
+      "value": "⟦Đåţé Ñîĝĥţ~~~~⟧"
+    }
+  ],
+  "home.recipe.moodEdgeOfSeat.description": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥŕîļļéŕ öŕ Åçţîöñ, ŕåţéđ 6.5+ öñ ŢṀĐƁ ŵîţĥ 100+ ṽöţéš.~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.moodEdgeOfSeat.name": [
+    {
+      "type": 0,
+      "value": "⟦Éđĝé öƒ Ýöûŕ Šéåţ~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.moodFeelGood.description": [
+    {
+      "type": 0,
+      "value": "⟦Çöɱéđý öŕ Ƒåɱîļý, ŕåţéđ 6.5+ öñ ŢṀĐƁ ŵîţĥ 100+ ṽöţéš.~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.moodFeelGood.name": [
+    {
+      "type": 0,
+      "value": "⟦Ƒééļ-Ĝööđ Çöɱéđîéš~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.moodMindBending.description": [
+    {
+      "type": 0,
+      "value": "⟦Šçîéñçé Ƒîçţîöñ öŕ Ṁýšţéŕý, ŕåţéđ 7.0+ öñ ŢṀĐƁ ŵîţĥ 100+ ṽöţéš.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.moodMindBending.name": [
+    {
+      "type": 0,
+      "value": "⟦Ṁîñđ-Ɓéñđîñĝ Šçî-Ƒî~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.moodQuietSunday.description": [
+    {
+      "type": 0,
+      "value": "⟦Đŕåɱå öŕ Đöçûɱéñţåŕý, ŕåţéđ 7.0+ öñ ŢṀĐƁ ŵîţĥ 100+ ṽöţéš.~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.moodQuietSunday.name": [
+    {
+      "type": 0,
+      "value": "⟦Ǫûîéţ Šûñđåý Çîñéɱå~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.moodTearjerker.description": [
+    {
+      "type": 0,
+      "value": "⟦Đŕåɱå öŕ Ŕöɱåñçé, ŕåţéđ 7.0+ öñ ŢṀĐƁ ŵîţĥ 100+ ṽöţéš.~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.moodTearjerker.name": [
+    {
+      "type": 0,
+      "value": "⟦Ţéåŕĵéŕķéŕš~~~~~⟧"
+    }
+  ],
+  "home.recipe.mwMonth.description": [
+    {
+      "type": 0,
+      "value": "⟦Ţöþ þļåýš îñ ţĥé ļåšţ 30 đåýš.~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.mwMonth.name": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöšţ Ŵåţçĥéđ Ţĥîš Ṁöñţĥ~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.mwWeek.description": [
+    {
+      "type": 0,
+      "value": "⟦Ţöþ þļåýš îñ ţĥé ļåšţ 7 đåýš.~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.mwWeek.name": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöšţ Ŵåţçĥéđ Ţĥîš Ŵééķ~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.nextInSeriesDefault.description": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé ñéẋţ åûđîöƀööķ îñ šéŕîéš ýöû'ṽé ƒîñîšĥéđ.~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.nextInSeriesDefault.name": [
+    {
+      "type": 0,
+      "value": "⟦Ñéẋţ îñ Šéŕîéš~~~~~~⟧"
+    }
+  ],
+  "home.recipe.nextUpDefault.description": [
+    {
+      "type": 0,
+      "value": "⟦Ñéẋţ éþîšöđéš ŕéåđý ţö ŵåţçĥ.~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.ntl30.description": [
+    {
+      "type": 0,
+      "value": "⟦Åđđéđ îñ ţĥé ļåšţ 30 đåýš.~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.ntl30.name": [
+    {
+      "type": 0,
+      "value": "⟦Ñéŵ ţö Ļîƀŕåŕý Ţĥîš Ṁöñţĥ~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.paHousehold.description": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéçéñţ ŵåţçĥéš åçŕöšš åļļ öţĥéŕ þŕöƒîļéš.~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.paHousehold.name": [
+    {
+      "type": 0,
+      "value": "⟦Ŵĥåţ Öţĥéŕš Ĵûšţ Ŵåţçĥéđ~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.randomDefault.description": [
+    {
+      "type": 0,
+      "value": "⟦Å ŕåñđöɱ šéļéçţîöñ ƒŕöɱ ýöûŕ ļîƀŕåŕý.~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.randomDefault.name": [
+    {
+      "type": 0,
+      "value": "⟦Šûŕþŕîšé Ṁé~~~~~⟧"
+    }
+  ],
+  "home.recipe.recentlyAddedDefault.description": [
+    {
+      "type": 0,
+      "value": "⟦Ļåţéšţ åđđîţîöñš ţö ýöûŕ ļîƀŕåŕý.~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.recentlyReleasedDefault.description": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéçéñţļý ŕéļéåšéđ ţîţļéš.~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.recentlyReleasedDefault.name": [
+    {
+      "type": 0,
+      "value": "⟦Ñéŵ Ŕéļéåšéš~~~~~⟧"
+    }
+  ],
+  "home.recipe.returningShowsDefault.description": [
+    {
+      "type": 0,
+      "value": "⟦Šĥöŵš ýöû'ṽé ŵåţçĥéđ ŵîţĥ å ƀŕåñđ-ñéŵ šéåšöñ îñ ýöûŕ ļîƀŕåŕý.~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.seAuto.description": [
+    {
+      "type": 0,
+      "value": "⟦Çýçļéš åûţöɱåţîçåļļý — Ĥåļļöŵééñ îñ Öçţöƀéŕ, Çĥŕîšţɱåš îñ Đéçéɱƀéŕ, éţç.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.seAuto.details": [
+    {
+      "type": 0,
+      "value": "⟦Öñé šéçţîöñ ţĥåţ šŵåþš îñ çûŕåţéđ ĥöļîđåý þîçķš ƀåšéđ öñ ţĥé çåļéñđåŕ. Çĥööšé ţĥé ĥöļîđåýš, å ṽîƀé ƒöŕ éåçĥ, åñđ åđđ ýöûŕ öŵñ ĥöļîđåýš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.seFamilyMovieNight.description": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåɱîļý þîçķš öñ Ƒŕîđåý åñđ Šåţûŕđåý éṽéñîñĝš.~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.seFamilyMovieNight.name": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåɱîļý Ṁöṽîé Ñîĝĥţ~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.shortWatchesDefault.description": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöṽîéš öƒ 95 ɱîñûţéš öŕ ļéšš, ŕåţéđ 6.0+ öñ ŢṀĐƁ ŵîţĥ 100+ ṽöţéš.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.shortWatchesDefault.name": [
+    {
+      "type": 0,
+      "value": "⟦Šĥöŕţ & Šŵééţ~~~~~~⟧"
+    }
+  ],
+  "home.recipe.similar.description": [
+    {
+      "type": 0,
+      "value": "⟦Ŵĥåţ šîɱîļåŕ þŕöƒîļéš åŕé ļöṽîñĝ.~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.tasteTop.description": [
+    {
+      "type": 0,
+      "value": "⟦Ɓéšţ ɱåţçĥéš ƒöŕ ýöûŕ šţŕöñĝéšţ ţåšţé — šéţ å ĝéñŕé ţö ñåŕŕöŵ îţ.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.tdiscTmdbDay.description": [
+    {
+      "type": 0,
+      "value": "⟦Ţöđåý'š ţŕéñđîñĝ ɱöṽîéš & šĥöŵš ƒŕöɱ ŢṀĐƁ, ɱåţçĥéđ ţö ýöûŕ ļîƀŕåŕý.~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.tdiscTmdbDay.name": [
+    {
+      "type": 0,
+      "value": "⟦ŢṀĐƁ Ţŕéñđîñĝ Ţöđåý~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.tdiscTmdbWeek.description": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš ŵééķ'š ţŕéñđîñĝ ɱöṽîéš & šĥöŵš ƒŕöɱ ŢṀĐƁ, ɱåţçĥéđ ţö ýöûŕ ļîƀŕåŕý.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.tdiscTmdbWeek.name": [
+    {
+      "type": 0,
+      "value": "⟦ŢṀĐƁ Ţŕéñđîñĝ Ţĥîš Ŵééķ~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.tr24h.description": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöšţ-þļåýéđ îñ ţĥé ļåšţ đåý.~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.tr24h.name": [
+    {
+      "type": 0,
+      "value": "⟦Ţŕéñđîñĝ Ñöŵ (24ĥ)~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.tr30d.description": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöšţ-þļåýéđ îñ ţĥé ļåšţ ɱöñţĥ.~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.tr30d.name": [
+    {
+      "type": 0,
+      "value": "⟦Ţŕéñđîñĝ Ţĥîš Ṁöñţĥ~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.tr7d.description": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöšţ-þļåýéđ îñ ţĥé ļåšţ ŵééķ.~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.watchlistDefault.description": [
+    {
+      "type": 0,
+      "value": "⟦Îţéɱš ýöû'ṽé šåṽéđ ţö ŵåţçĥ.~~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.recipe.watchlistDefault.name": [
+    {
+      "type": 0,
+      "value": "⟦Ŵåţçĥļîšţ~~~~⟧"
+    }
+  ],
   "home.section.becauseYouEnjoy": [
     {
       "type": 0,
@@ -643,6 +1219,60 @@
     {
       "type": 0,
       "value": "⟦Çöñţîñûé Ŵåţçĥîñĝ~~~~~~~⟧"
+    }
+  ],
+  "home.section.discoverGenres": [
+    {
+      "type": 0,
+      "value": "⟦Ĝéñŕéš~~~⟧"
+    }
+  ],
+  "home.section.discoverNetworks": [
+    {
+      "type": 0,
+      "value": "⟦Ñéţŵöŕķš~~~~⟧"
+    }
+  ],
+  "home.section.discoverOnAirSeries": [
+    {
+      "type": 0,
+      "value": "⟦Öñ Åîŕ Šéŕîéš~~~~~~⟧"
+    }
+  ],
+  "home.section.discoverPopularMovies": [
+    {
+      "type": 0,
+      "value": "⟦Þöþûļåŕ Ṁöṽîéš~~~~~~⟧"
+    }
+  ],
+  "home.section.discoverPopularSeries": [
+    {
+      "type": 0,
+      "value": "⟦Þöþûļåŕ Šéŕîéš~~~~~~⟧"
+    }
+  ],
+  "home.section.discoverStudios": [
+    {
+      "type": 0,
+      "value": "⟦Šţûđîöš~~~⟧"
+    }
+  ],
+  "home.section.discoverTrendingMovies": [
+    {
+      "type": 0,
+      "value": "⟦Ţŕéñđîñĝ Ṁöṽîéš~~~~~~⟧"
+    }
+  ],
+  "home.section.discoverTrendingSeries": [
+    {
+      "type": 0,
+      "value": "⟦Ţŕéñđîñĝ Šéŕîéš~~~~~~⟧"
+    }
+  ],
+  "home.section.discoverUpcomingMovies": [
+    {
+      "type": 0,
+      "value": "⟦Ûþçöɱîñĝ Ṁöṽîéš~~~~~~⟧"
     }
   ],
   "home.section.forYou": [
@@ -825,6 +1455,210 @@
       "value": "⟦Ŕéţûŕñîñĝ Šĥöŵš~~~~~~⟧"
     }
   ],
+  "home.section.seasonal.christmas.classics": [
+    {
+      "type": 0,
+      "value": "⟦Çĥŕîšţɱåš Çļåššîçš~~~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.christmas.comedies": [
+    {
+      "type": 0,
+      "value": "⟦Çĥŕîšţɱåš Çöɱéđîéš~~~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.christmas.family": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåɱîļý Çĥŕîšţɱåš~~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.christmas.favorites": [
+    {
+      "type": 0,
+      "value": "⟦Çĥŕîšţɱåš Ƒåṽöŕîţéš~~~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.christmas.hallmark": [
+    {
+      "type": 0,
+      "value": "⟦Ĥåļļɱåŕķ Çĥŕîšţɱåš~~~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.christmas.romcoms": [
+    {
+      "type": 0,
+      "value": "⟦Çĥŕîšţɱåš Ŕöɱ-Çöɱš~~~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.easter.faith": [
+    {
+      "type": 0,
+      "value": "⟦Éåšţéŕ Šţöŕîéš~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.easter.family": [
+    {
+      "type": 0,
+      "value": "⟦Éåšţéŕ Ṁöṽîéš~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.familyMovieNight.favorites": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåɱîļý Ƒåṽöŕîţéš~~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.familyMovieNight.liveAction": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåɱîļý Ṁöṽîé Ñîĝĥţ~~~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.familyMovieNight.new": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåɱîļý Ṁöṽîé Ñîĝĥţ~~~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.halloween.animated": [
+    {
+      "type": 0,
+      "value": "⟦Åñîɱåţéđ Ĥåļļöŵééñ~~~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.halloween.family": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåɱîļý Ĥåļļöŵééñ~~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.halloween.favorites": [
+    {
+      "type": 0,
+      "value": "⟦Ĥåļļöŵééñ Ƒåṽöŕîţéš~~~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.halloween.horror": [
+    {
+      "type": 0,
+      "value": "⟦Ĥåļļöŵééñ Ĥöŕŕöŕ~~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.halloween.tv": [
+    {
+      "type": 0,
+      "value": "⟦Ĥåļļöŵééñ ŢṼ~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.newYear.favorites": [
+    {
+      "type": 0,
+      "value": "⟦Ñéŵ Ýéåŕ'š Ṁöṽîéš~~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.saturdayMorning.cartoons": [
+    {
+      "type": 0,
+      "value": "⟦Šåţûŕđåý Ṁöŕñîñĝ Çåŕţööñš~~~~~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.saturdayMorning.modern": [
+    {
+      "type": 0,
+      "value": "⟦Šåţûŕđåý Ṁöŕñîñĝ Ƒåṽöŕîţéš~~~~~~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.saturdayMorning.nineties": [
+    {
+      "type": 0,
+      "value": "⟦90š Šåţûŕđåý Ṁöŕñîñĝš~~~~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.stPatricks.irishFilm": [
+    {
+      "type": 0,
+      "value": "⟦Îŕîšĥ Ƒîļɱ~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.stPatricks.irishTv": [
+    {
+      "type": 0,
+      "value": "⟦Îŕîšĥ ŢṼ~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.summer.blockbusters": [
+    {
+      "type": 0,
+      "value": "⟦Šûɱɱéŕ Ɓļöçķƀûšţéŕš~~~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.summer.classicSummer": [
+    {
+      "type": 0,
+      "value": "⟦Çļåššîç Šûɱɱéŕ Ṁöṽîéš~~~~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.summer.nostalgia": [
+    {
+      "type": 0,
+      "value": "⟦Šûɱɱéŕ Ñöšţåļĝîå~~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.summerBlockbuster.blockbusters": [
+    {
+      "type": 0,
+      "value": "⟦Šûɱɱéŕ Ɓļöçķƀûšţéŕš~~~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.summerBlockbuster.classicSummer": [
+    {
+      "type": 0,
+      "value": "⟦Çļåššîç Šûɱɱéŕ Ṁöṽîéš~~~~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.summerBlockbuster.nostalgia": [
+    {
+      "type": 0,
+      "value": "⟦Šûɱɱéŕ Ñöšţåļĝîå~~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.thanksgiving.favorites": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥåñķšĝîṽîñĝ Ṁöṽîéš~~~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.thanksgiving.feelGood": [
+    {
+      "type": 0,
+      "value": "⟦Ƒééļ-Ĝööđ Ƒåṽöŕîţéš~~~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.valentines.favorites": [
+    {
+      "type": 0,
+      "value": "⟦Ṽåļéñţîñé'š Ƒåṽöŕîţéš~~~~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.valentines.loveStories": [
+    {
+      "type": 0,
+      "value": "⟦Çļåššîç Ļöṽé Šţöŕîéš~~~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.valentines.romanticDramas": [
+    {
+      "type": 0,
+      "value": "⟦Ŕöɱåñţîç Đŕåɱåš~~~~~~⟧"
+    }
+  ],
+  "home.section.seasonal.valentines.romcoms": [
+    {
+      "type": 0,
+      "value": "⟦Ṽåļéñţîñé'š Ŕöɱ-Çöɱš~~~~~~~~⟧"
+    }
+  ],
   "home.section.seasonalPicks": [
     {
       "type": 0,
@@ -843,6 +1677,12 @@
     {
       "type": 0,
       "value": "~~⟧"
+    }
+  ],
+  "home.section.topPicksToday": [
+    {
+      "type": 0,
+      "value": "⟦Ţöþ Þîçķš Ţöđåý~~~~~~⟧"
     }
   ],
   "home.section.topRated": [
