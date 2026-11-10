@@ -189,6 +189,10 @@ type sectionResponse struct {
 	// WebOnly is answered by /api/v2 only; the frozen /api/v1 body has no
 	// such member.
 	WebOnly bool `json:"-"`
+	// TitleKey and TitleArgs are the stored row's; see
+	// sections.PageSection. Answered by /api/v2 only.
+	TitleKey  string            `json:"-"`
+	TitleArgs map[string]string `json:"-"`
 }
 
 type sectionListResponse struct {
@@ -210,6 +214,8 @@ func toSectionResponse(s *sections.PageSection) sectionResponse {
 		CreatedAt:   s.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:   s.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 		WebOnly:     s.WebOnly,
+		TitleKey:    s.TitleKey,
+		TitleArgs:   s.TitleArgs,
 	}
 }
 

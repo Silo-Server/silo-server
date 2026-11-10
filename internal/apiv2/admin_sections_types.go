@@ -24,6 +24,7 @@ type AdminSection struct {
 	WebOnly     bool          `json:"web_only" doc:"Keeps the section off every client but the web app while it is its page's first featured section, the one the web shows as the banner: a viewer section read then answers it only to a caller whose X-Silo-Client-Family is web. Once another featured section comes first, every client gets it as a regular row. Always false on a section that is not featured."`
 	CreatedAt   Instant       `json:"created_at"`
 	UpdatedAt   Instant       `json:"updated_at"`
+	SectionTitleKey
 }
 type AdminSectionCreate struct {
 	Scope       string        `json:"scope,omitempty" enum:"home,library" default:"home"`
@@ -154,7 +155,7 @@ type AdminSectionPreviewResult struct {
 type AdminSectionPreviewOutput struct{ Body AdminSectionPreviewResult }
 
 func adminSectionOf(v handlers.AdminSection) (AdminSection, *Problem) {
-	out := AdminSection{ID: ID(v.ID), Scope: v.Scope, Position: v.Position, SectionType: v.SectionType, Title: v.Title, Featured: v.Featured, ItemLimit: v.ItemLimit, Enabled: v.Enabled, WebOnly: v.WebOnly, Config: SectionConfig{}}
+	out := AdminSection{ID: ID(v.ID), Scope: v.Scope, Position: v.Position, SectionType: v.SectionType, Title: v.Title, Featured: v.Featured, ItemLimit: v.ItemLimit, Enabled: v.Enabled, WebOnly: v.WebOnly, Config: SectionConfig{}, SectionTitleKey: sectionTitleKeyOf(v.TitleKey, v.TitleArgs)}
 	if v.LibraryID != nil {
 		out.LibraryID = new(ID(strconv.Itoa(*v.LibraryID)))
 	}

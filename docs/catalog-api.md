@@ -51,18 +51,19 @@ wants the rest of it in place reads the row again at its own limit
 
 ## Section titles
 
-A `Section` and a `SectionLayoutEntry` (Home and library pages) and each row of
-`getProfileSectionSettings` carry `title_key` and `title_args` while their `title`
-is the server's own text: a built-in row name such as `home.section.continueWatching`,
-a generated library row (`home.section.recentlyAddedIn` with `{"library": "Movies"}`),
+A `Section` and a `SectionLayoutEntry` (Home and library pages), each row of
+`getProfileSectionSettings`, and each `AdminSection` (`listAdminSections`,
+`getAdminSection`, and the responses that answer one) carry `title_key` and
+`title_args` while their `title` is the server's own text: a built-in row name such as
+`home.section.continueWatching`, a generated library row (`home.section.recentlyAddedIn` with `{"library": "Movies"}`),
 the synthetic Next Up row, a Because You Watched heading that names its title
 (`home.section.becauseYouWatchedTitle` with `title`), and the shared row a For You or
 taste-match section shows a new profile (`home.section.popularOnServer`,
 `home.section.topGenre` with `genre`). The key names a message in the shared translation
 catalog, and `title_args` fills its placeholders by name. A client that has the key shows
 its translation; otherwise, and whenever the fields are absent, it shows `title`.
-`title_args` is left out when the message has no placeholders, so a client must not
-require it to use a key.
+`title_args` and `default_title_args` are left out when the message has no placeholders,
+so a client must not require them to use a key.
 
 The fields are absent when an administrator or the profile typed the title, and when the
 server replaced the stored title with one of an item or season (a seasonal row's in-season
@@ -76,7 +77,11 @@ still carry their own key, with the new name in `title_args`; a generated row wi
 is renamed only while its title still reads as the old library name. Upgrading keyed the existing rows whose title is
 exactly a built-in name, because stored rows don't record who wrote them, so a typed title
 identical to a built-in name shows that name's translation. A profile
-title override equal to the administrator's title keeps the key. `getHomeCapabilities`
+title override equal to the administrator's title keeps the key. A profile settings row
+also carries `default_title_key` and `default_title_args` for its `default_title`, the
+administrator's title a renamed row can go back to, under the same rules. An
+`AdminSection` describes the stored row, so an editor still edits `title` itself.
+`getHomeCapabilities`
 reports `section_title_keys: true` on a server that sends them. The frozen `/api/v1` reads
 and the Jellyfin surface do not carry them.
 

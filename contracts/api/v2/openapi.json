@@ -20495,6 +20495,25 @@
           "title": {
             "type": "string"
           },
+          "title_args": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Values of the title_key message's placeholders by name, such as library for a generated library row; present only with title_key, and absent when the message has none",
+            "examples": [
+              {
+                "library": "Movies"
+              }
+            ],
+            "type": "object"
+          },
+          "title_key": {
+            "description": "Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section name. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. Sent when getHomeCapabilities reports section_title_keys",
+            "examples": [
+              "home.section.recentlyAddedIn"
+            ],
+            "type": "string"
+          },
           "updated_at": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
             "format": "date-time",
@@ -36679,7 +36698,7 @@
             "type": "integer"
           },
           "section_title_keys": {
-            "description": "Sections and profile section settings carry title_key, with title_args when its message has placeholders, for titles the server writes, so a client can translate them (a few, such as a seasonal row's in-season title, have none; a client shows title whenever the key is absent or unknown). Absent when the home sections service is not configured, and on a server that predates the fields",
+            "description": "Sections, profile section settings and admin section definitions carry title_key, with title_args when its message has placeholders, for titles the server writes, so a client can translate them (a few, such as a seasonal row's in-season title, have none; a client shows title whenever the key is absent or unknown), and profile section settings carry default_title_key and default_title_args the same way for default_title. Absent when the home sections service is not configured, and on a server that predates the fields",
             "examples": [
               true
             ],
@@ -47309,6 +47328,25 @@
             "description": "The administrator's title for this row; title shows it unless the profile saved a title override. Empty for a section the profile built",
             "examples": [
               "Continue Watching"
+            ],
+            "type": "string"
+          },
+          "default_title_args": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Values of the default_title_key message's placeholders by name; present only with default_title_key, and absent when the message has none",
+            "examples": [
+              {
+                "library": "Movies"
+              }
+            ],
+            "type": "object"
+          },
+          "default_title_key": {
+            "description": "Key of the shared translation catalog message whose English is default_title, under the same rules as title_key: present only while default_title is the server's own text, and absent when an administrator typed it",
+            "examples": [
+              "home.section.continueWatching"
             ],
             "type": "string"
           },

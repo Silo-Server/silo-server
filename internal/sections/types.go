@@ -169,6 +169,11 @@ type ResolvedSection struct {
 	// title override. Only ResolveForSettings fills it, and it is empty for a
 	// profile-built section. Not serialized: v1 bodies embed this struct.
 	DefaultTitle string `json:"-"`
+	// DefaultTitleKey and DefaultTitleArgs are the admin section's own title
+	// key and arguments, as TitleKey and TitleArgs are Title's. Only
+	// ResolveForSettings fills them, with DefaultTitle.
+	DefaultTitleKey  string            `json:"-"`
+	DefaultTitleArgs map[string]string `json:"-"`
 
 	// SuppressNextUp, when true on a continue-watching section, skips the
 	// next-up injection, the combined sort, and the one-card-per-series
