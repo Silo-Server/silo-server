@@ -348,6 +348,7 @@ func TestLocalSignInOverlappingSignOutDB(t *testing.T) {
 		_, _, err := svc.Login(ctx, local.Username, "correct horse battery", "test", "")
 		signIn <- err
 	}()
+	giveUp := time.After(10 * time.Second)
 	for blocked := false; !blocked; {
 		if err := env.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
 			WHERE $1 = ANY(pg_blocking_pids(pid)))`, signOutPID).Scan(&blocked); err != nil {
@@ -356,7 +357,9 @@ func TestLocalSignInOverlappingSignOutDB(t *testing.T) {
 		select {
 		case err := <-signIn:
 			t.Fatalf("local sign-in finished before the sign-out committed: %v", err)
-		default:
+		case <-giveUp:
+			t.Fatal("local sign-in never waited for the sign-out's account lock")
+		case <-time.After(10 * time.Millisecond):
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
