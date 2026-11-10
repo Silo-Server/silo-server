@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { storage } from "@/utils/storage";
 import {
+  expectAutomaticStart,
   getStillWatchingThreshold,
   isStillWatchingGated,
+  noteRouteStart,
   recordAutoAdvance,
   resetStillWatchingStreak,
   setStillWatchingThreshold,
@@ -27,6 +29,16 @@ describe("still watching streak", () => {
     recordAutoAdvance();
     expect(isStillWatchingGated()).toBe(true);
     resetStillWatchingStreak();
+    expect(isStillWatchingGated()).toBe(false);
+  });
+
+  it("clears the streak when the route opens something the viewer picked", () => {
+    setStillWatchingThreshold(1);
+    expectAutomaticStart("ep-2");
+    recordAutoAdvance();
+    noteRouteStart("ep-2");
+    expect(isStillWatchingGated()).toBe(true);
+    noteRouteStart("ep-7");
     expect(isStillWatchingGated()).toBe(false);
   });
 

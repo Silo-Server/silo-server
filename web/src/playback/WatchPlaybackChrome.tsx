@@ -1,5 +1,10 @@
 import { usePlaybackBarHeight } from "@/hooks/usePlaybackBarHeight";
-import { recordAutoAdvance, resetStillWatchingStreak } from "@/player/stillWatching";
+import {
+  expectAutomaticStart,
+  noteRouteStart,
+  recordAutoAdvance,
+  resetStillWatchingStreak,
+} from "@/player/stillWatching";
 import { useSeekPreferences } from "@/hooks/queries/seekPreferences";
 import {
   lazy,
@@ -320,6 +325,9 @@ export function WatchPlaybackProvider({ children }: { children: ReactNode }) {
   }, [profileId, state.request]);
 
   const syncRouteRequest = useCallback((request: WatchRouteRequest) => {
+    if (stateRef.current.request?.requestKey !== request.requestKey) {
+      noteRouteStart(request.contentId);
+    }
     dispatch({ type: "SYNC_ROUTE_REQUEST", request });
   }, []);
 
@@ -340,6 +348,7 @@ export function WatchPlaybackProvider({ children }: { children: ReactNode }) {
     (input: WatchPlaybackStartInput | WatchRouteRequest, trigger: PlaybackStartTrigger) => {
       const request = normalizeWatchPlaybackRequest(input);
       if (trigger === "viewer") resetStillWatchingStreak();
+      else expectAutomaticStart(request.contentId);
       // Press-play-to-first-frame starts here, before any navigation or
       // Picture-in-Picture exit the viewer also waits for. The route rebuilds
       // the same request key, so the player's session can claim the mark.

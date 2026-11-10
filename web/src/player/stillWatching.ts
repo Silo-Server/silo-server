@@ -25,6 +25,24 @@ export function resetStillWatchingStreak(): void {
   automaticStarts = 0;
 }
 
+/**
+ * Content an automatic start is about to open. Playback also starts from the
+ * route (a Play link, another device's stream), so a route that opens anything
+ * else was the viewer's choice.
+ */
+let expectedAutomaticContentId: string | null = null;
+
+export function expectAutomaticStart(contentId: string): void {
+  expectedAutomaticContentId = contentId;
+}
+
+/** The route adopted a new playback request for this content. */
+export function noteRouteStart(contentId: string): void {
+  const automatic = expectedAutomaticContentId === contentId;
+  expectedAutomaticContentId = null;
+  if (!automatic) resetStillWatchingStreak();
+}
+
 /** The limit is per browser: the contract classes it as client-local. */
 export function getStillWatchingThreshold(): number {
   const stored = storage.get(storage.KEYS.STILL_WATCHING_THRESHOLD);
