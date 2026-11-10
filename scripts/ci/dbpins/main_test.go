@@ -154,13 +154,14 @@ func TestCheck(t *testing.T) {
 }
 
 // The wrapper repoints a database variable only when it names the template,
-// however its options are spelled, and never passes its own variables on.
+// however its host, port and options are spelled, and never passes its own
+// variables on.
 func TestCloneEnv(t *testing.T) {
 	const template = "postgres://u:p@localhost:5432/silo_test?sslmode=disable"
 	const clone = "postgres://u:p@localhost:5432/dbpins_x?sslmode=disable"
 	got := cloneEnv([]string{
 		"SILO_TEST_DATABASE_URL=" + template,
-		"SILO_SUBTITLE_STORAGE_TEST_DATABASE_URL=postgresql://u:p@localhost/silo_test",
+		"SILO_SUBTITLE_STORAGE_TEST_DATABASE_URL=postgresql://u:p@127.0.0.1/other?dbname=silo_test",
 		"OTHER=" + template,
 		cloneTemplateEnv + "=" + template,
 		cloneRunEnv + "=abcd",
@@ -176,6 +177,22 @@ func TestCloneEnv(t *testing.T) {
 	other := cloneEnv([]string{"SILO_SUBTITLE_STORAGE_TEST_DATABASE_URL=postgres://u:p@localhost:5432/subtitles"}, template, clone)
 	if other[0] != "SILO_SUBTITLE_STORAGE_TEST_DATABASE_URL=postgres://u:p@localhost:5432/subtitles" {
 		t.Fatalf("a different database was repointed: %q", other)
+	}
+}
+
+// A dbname query parameter overrides the URL path, so pointing a URL at the
+// copy, or at the maintenance database, must drop it.
+func TestWithDatabaseDropsTheDbnameOverride(t *testing.T) {
+	const template = "postgres://u:p@localhost/ignored?dbname=silo_test&sslmode=disable"
+	if name, err := databaseName(template); err != nil || name != "silo_test" {
+		t.Fatalf("databaseName = %q, %v; want silo_test", name, err)
+	}
+	got, err := withDatabase(template, "postgres")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "postgres://u:p@localhost/postgres?sslmode=disable" {
+		t.Fatalf("withDatabase = %q", got)
 	}
 }
 

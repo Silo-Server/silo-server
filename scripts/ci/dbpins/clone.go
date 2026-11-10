@@ -137,7 +137,7 @@ func cloneEnv(environ []string, template, cloneURL string) []string {
 }
 
 // sameDatabase reports whether two URLs name one database on one server,
-// however their options are spelled.
+// however their options are spelled. The loopback names count as one host.
 func sameDatabase(a, b string) bool {
 	if a == b {
 		return true
@@ -147,13 +147,21 @@ func sameDatabase(a, b string) bool {
 	if errA != nil || errB != nil {
 		return false
 	}
+	host := func(u *url.URL) string {
+		switch h := u.Hostname(); h {
+		case "", "localhost", "127.0.0.1", "::1":
+			return "localhost"
+		default:
+			return h
+		}
+	}
 	port := func(u *url.URL) string {
 		if p := u.Port(); p != "" {
 			return p
 		}
 		return "5432"
 	}
-	return ua.Hostname() == ub.Hostname() && port(ua) == port(ub) && strings.TrimPrefix(ua.Path, "/") == strings.TrimPrefix(ub.Path, "/")
+	return host(ua) == host(ub) && port(ua) == port(ub) && effectiveDatabase(ua) == effectiveDatabase(ub)
 }
 
 var unsafeName = regexp.MustCompile(`[^a-z0-9]+`)
@@ -270,18 +278,32 @@ func databaseName(dsn string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	name := strings.TrimPrefix(u.Path, "/")
+	name := effectiveDatabase(u)
 	if name == "" || name == "postgres" {
 		return "", fmt.Errorf("SILO_TEST_DATABASE_URL must name a disposable database, not %q", name)
 	}
 	return name, nil
 }
 
+// effectiveDatabase is the database a URL connects to: a dbname query
+// parameter overrides the path, in pgx as in libpq.
+func effectiveDatabase(u *url.URL) string {
+	if name := u.Query().Get("dbname"); name != "" {
+		return name
+	}
+	return strings.TrimPrefix(u.Path, "/")
+}
+
+// withDatabase points the URL at another database on the same server,
+// dropping a dbname query parameter that would override the path.
 func withDatabase(dsn, name string) (string, error) {
 	u, err := parseDatabaseURL(dsn)
 	if err != nil {
 		return "", err
 	}
+	query := u.Query()
+	query.Del("dbname")
+	u.RawQuery = query.Encode()
 	u.Path, u.RawPath = "/"+name, ""
 	return u.String(), nil
 }
