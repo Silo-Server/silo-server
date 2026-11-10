@@ -847,16 +847,14 @@ jobs:
           job-status: ${{ job.status }}
           cache-key: ${{ steps.setup-go.outputs.cache-key }}
 
+  # One job, not a build/checks pair: each half took one to two minutes, far
+  # under the Go jobs, and every extra job waits for a slot under the
+  # organization's hosted-runner concurrency cap, which peak hours reach.
   web:
-    name: Web (${{ matrix.part }})
-    # Consolidation and two web shards: deferred: no recorded occurrence.
+    name: Web
     needs: select
     if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.web != 'false') }}
     runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-web"]', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        part: [build, checks]
     defaults:
       run:
         working-directory: web
@@ -886,15 +884,16 @@ jobs:
         run: pnpm config set store-dir "${XDG_DATA_HOME:-$RUNNER_TEMP}/pnpm/store"
 
       - name: Install
+        id: install
         run: pnpm install --frozen-lockfile
 
       - name: Read the web check cache directory
-        if: matrix.part == 'checks' && runner.environment == 'github-hosted'
+        if: runner.environment == 'github-hosted'
         id: web-cache
         run: echo "path=${XDG_CACHE_HOME:-$RUNNER_TEMP}/silo-web" >> "$GITHUB_OUTPUT"
 
       - name: Restore the web check cache
-        if: matrix.part == 'checks' && runner.environment == 'github-hosted' && github.event_name == 'pull_request'
+        if: runner.environment == 'github-hosted' && github.event_name == 'pull_request'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.web-cache.outputs.path }}
@@ -902,7 +901,7 @@ jobs:
           restore-keys: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/eslint-suppressions.json', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-
 
       - name: Restore and save the web check cache
-        if: matrix.part == 'checks' && runner.environment == 'github-hosted' && github.event_name != 'pull_request'
+        if: runner.environment == 'github-hosted' && github.event_name != 'pull_request'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.web-cache.outputs.path }}
@@ -910,7 +909,6 @@ jobs:
           restore-keys: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/eslint-suppressions.json', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-
 
       - name: Lint and format check
-        if: matrix.part == 'checks'
         env:
           ESLINT_CACHE_ID: ${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/eslint-suppressions.json') }}
           PRETTIER_CACHE_ID: ${{ hashFiles('web/pnpm-lock.yaml', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}
@@ -924,7 +922,7 @@ jobs:
           exit "$failed"
 
       - name: Audit the pinned dependency lockfile
-        if: matrix.part == 'checks' && (github.event_name == 'schedule' || (github.event_name == 'push' && github.ref_name == 'main'))
+        if: github.event_name == 'schedule' || (github.event_name == 'push' && github.ref_name == 'main')
         run: pnpm audit --audit-level=high
       # - name: Check JSX accessibility
       #   run: pnpm exec eslint . --config eslint-a11y.config.js
@@ -936,8 +934,9 @@ jobs:
       #   run: pnpm exec knip
       # Not measured; needs a prototype defining entrypoints and public consumers.
 
+      # A lint or format failure must not hide type, build or binding errors.
       - name: Typecheck and build
-        if: matrix.part == 'build'
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: |
           failed=0
           pnpm exec tsrs -b || { echo "::error::Typecheck failed"; failed=1; }
@@ -948,11 +947,10 @@ jobs:
       # imports another chunk or index.html gains a cross-origin
       # render-blocking resource.
       - name: Check the launch bundle
-        if: matrix.part == 'build'
         run: pnpm run budget:check
 
       - name: Upload frontend bundle for image builds
-        if: matrix.part == 'build' && github.event_name == 'push' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)
+        if: github.event_name == 'push' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: frontend-dist-${{ github.sha }}
@@ -964,14 +962,14 @@ jobs:
       # the bindings check lives here rather than in a Go job, which has no
       # pnpm. It needs Go to run the generator.
       - name: Set up Go
-        if: matrix.part == 'checks'
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '>=1.26 <1.27'
           cache: ${{ runner.environment == 'github-hosted' }}
 
       - name: Verify the generated web settings binding is current
-        if: matrix.part == 'checks'
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         working-directory: .
         run: make verify-settings-bindings-web
 
@@ -980,20 +978,20 @@ jobs:
       # fresh generation so the typed request boundary never drifts from the
       # spec the server serves.
       - name: Verify the generated web v2 contract types are current
-        if: matrix.part == 'checks'
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         working-directory: .
         run: make verify-apiv2-web-types
 
 
   web-test:
-    name: Web test (${{ matrix.shard }}/4)
+    name: Web test (${{ matrix.shard }}/2)
     needs: select
     if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.web != 'false') }}
     runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-web-test-{2}"]', github.run_id, github.run_attempt, matrix.shard)) || 'ubuntu-24.04' }}
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1023,10 +1021,11 @@ jobs:
 
       # Includes the appearance-cache ownership tests, which are the regression
       # guard for cross-account leaks in the localStorage warm start. The
-      # suite is split across four runners; vitest assigns files to a shard
-      # deterministically, so every file runs exactly once.
+      # suite is split across two runners, about two minutes each; vitest
+      # assigns files to a shard deterministically, so every file runs exactly
+      # once.
       - name: Test
-        run: make test-web WEBTEST_ARGS="--shard=${{ matrix.shard }}/4 --maxWorkers=4"
+        run: make test-web WEBTEST_ARGS="--shard=${{ matrix.shard }}/2 --maxWorkers=4"
 
   result:
     name: CI result
