@@ -164,24 +164,21 @@ func metadataCurationIdentityOwners(ctx context.Context, tx pgx.Tx, itemType, an
 	if exclude == nil {
 		exclude = []string{}
 	}
+	// One branch per lookup so each uses its index: the primary key, the
+	// partial provider-column indexes (WHERE <column> <> ''), and the
+	// media_item_provider_ids (provider, provider_id, item_type) key. Stored
+	// IDs are already trimmed, and IMDb IDs lower-cased, by the writers.
 	rows, err := tx.Query(ctx, `
-		SELECT mi.content_id FROM media_items mi
-		WHERE mi.type = $1
-		  AND NOT (mi.content_id = ANY($6::text[]))
-		  AND (
-			($2 <> '' AND mi.content_id = $2)
-			OR ($3 <> '' AND btrim(mi.tmdb_id) = $3)
-			OR ($4 <> '' AND lower(btrim(mi.imdb_id)) = $4)
-			OR ($5 <> '' AND btrim(mi.tvdb_id) = $5)
-			OR EXISTS (
-				SELECT 1 FROM media_item_provider_ids mip
-				WHERE mip.content_id = mi.content_id
-				  AND ((mip.provider = 'tmdb' AND $3 <> '' AND mip.provider_id = $3)
-					OR (mip.provider = 'imdb' AND $4 <> '' AND lower(mip.provider_id) = $4)
-					OR (mip.provider = 'tvdb' AND $5 <> '' AND mip.provider_id = $5))
-			)
-		  )
-		ORDER BY mi.content_id`, itemType, anchor, tmdb, imdb, tvdb, exclude)
+		SELECT content_id FROM (
+			SELECT content_id, type FROM media_items WHERE $2 <> '' AND content_id = $2
+			UNION SELECT content_id, type FROM media_items WHERE tmdb_id <> '' AND tmdb_id = $3
+			UNION SELECT content_id, type FROM media_items WHERE imdb_id <> '' AND imdb_id = $4
+			UNION SELECT content_id, type FROM media_items WHERE tvdb_id <> '' AND tvdb_id = $5
+			UNION SELECT content_id, item_type FROM media_item_provider_ids
+				WHERE item_type = $1 AND provider_id <> '' AND (provider, provider_id) IN (('tmdb', $3), ('imdb', $4), ('tvdb', $5))
+		) owner(content_id, type)
+		WHERE type = $1 AND NOT (content_id = ANY($6::text[]))
+		ORDER BY content_id`, itemType, anchor, tmdb, imdb, tvdb, exclude)
 	if err != nil {
 		return nil, fmt.Errorf("find curation identity owners: %w", err)
 	}
