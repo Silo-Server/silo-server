@@ -232,7 +232,10 @@ func (m *PolicyPermissionMiddleware) RequireMetadataCurationForItem(next http.Ha
 			}
 			return nil
 		}
-		next.ServeHTTP(w, r.WithContext(access.WithMetadataCurationAuthorizer(r.Context(), authorize)))
+		// Queued work can't reach the PDP inputs of this request (device,
+		// client IP, request time), so it is held to the curator's libraries.
+		ctx := access.WithMetadataCurationScope(r.Context(), access.MetadataCurationScope{LibraryIDs: slices.Clone(effective.LibraryIDs)})
+		next.ServeHTTP(w, r.WithContext(access.WithMetadataCurationAuthorizer(ctx, authorize)))
 	})
 }
 

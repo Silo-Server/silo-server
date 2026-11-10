@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/catalog/reattribute"
 	"github.com/Silo-Server/silo-server/internal/contentid"
@@ -4197,11 +4198,21 @@ func refreshTargetKey(targetType, contentID string) string {
 	return targetType + ":" + contentID
 }
 
+// refreshFailureLeavesNoDebt reports a refresh error that must not become
+// refresh debt. A cancelled refresh is not a failure. A curation-scope refusal
+// means a delegated curator's refresh would have merged onto an item outside
+// their libraries: debt is retried as automatic work with no curator scope, so
+// recording it would let the retry perform that merge.
+func refreshFailureLeavesNoDebt(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, access.ErrMetadataCurationScope)
+}
+
 func (s *MetadataService) recordRefreshFailure(ctx context.Context, contentID string, refreshErr error, incrementDebtAttempt bool) {
 	if s == nil || s.itemRepo == nil || strings.TrimSpace(contentID) == "" || refreshErr == nil {
 		return
 	}
-	if errors.Is(refreshErr, context.Canceled) || errors.Is(refreshErr, context.DeadlineExceeded) {
+	if refreshFailureLeavesNoDebt(refreshErr) {
 		return
 	}
 	if err := s.itemRepo.IncrementRefreshFailure(ctx, contentID); err != nil && !errors.Is(err, catalog.ErrItemNotFound) {
@@ -4227,7 +4238,7 @@ func (s *MetadataService) recordRefreshTargetFailure(ctx context.Context, target
 	if s == nil || s.refreshDebtRepo == nil || strings.TrimSpace(contentID) == "" || refreshErr == nil {
 		return
 	}
-	if errors.Is(refreshErr, context.Canceled) || errors.Is(refreshErr, context.DeadlineExceeded) {
+	if refreshFailureLeavesNoDebt(refreshErr) {
 		return
 	}
 	if err := s.syncRefreshDebtTargetFailure(ctx, targetType, contentID, refreshErr, incrementDebtAttempt); err != nil {

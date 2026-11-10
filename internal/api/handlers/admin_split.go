@@ -281,6 +281,14 @@ func (h *AdminSplitHandler) SplitAdminItem(ctx context.Context, sourceID string,
 	if itemTypes[sourceID] != sourceItem.Type {
 		return AdminSplitResult{}, apiError(http.StatusBadRequest, "bad_request", "Source item changed; retry the split")
 	}
+	// A new target keeps the chosen provider IDs, and later refreshes merge it
+	// onto any item already holding them, so those items must be in scope too.
+	if target.created {
+		ids := contentid.ProviderIDs{Tmdb: target.providerIDs["tmdb"], Imdb: target.providerIDs["imdb"], Tvdb: target.providerIDs["tvdb"]}
+		if err := catalog.LockMetadataCurationIdentity(ctx, tx, sourceItem.Type, "", ids, sourceID, target.contentID); err != nil {
+			return AdminSplitResult{}, splitTransactionError(ctx, err)
+		}
+	}
 	if len(moved) != len(seen) {
 		return AdminSplitResult{}, apiError(http.StatusBadRequest, "bad_request", "Selected files changed; retry the split")
 	}

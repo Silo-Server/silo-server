@@ -2780,12 +2780,15 @@ func (r *ItemRepository) GetPeople(ctx context.Context, contentID string) ([]mod
 // cleared rating also loses its per-source row. Always bumps updated_at.
 // Returns ErrItemNotFound if no row matches contentID.
 func (r *ItemRepository) UpdateMetadata(ctx context.Context, contentID string, upd *MetadataUpdate) error {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := r.pool.BeginTx(ctx, MetadataCurationTxOptions(ctx))
 	if err != nil {
 		return fmt.Errorf("begin metadata update tx: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
+	if err := lockCuratedProviderIDs(ctx, tx, contentID, upd); err != nil {
+		return err
+	}
 	if err := r.UpdateMetadataTx(ctx, tx, contentID, upd); err != nil {
 		return err
 	}

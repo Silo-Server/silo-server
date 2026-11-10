@@ -35,3 +35,49 @@ func AuthorizeMetadataCurationLibraries(ctx context.Context, libraries []int) er
 	}
 	return nil
 }
+
+type metadataCurationScopeKey struct{}
+
+// MetadataCurationScope is the library scope a delegated curator was granted
+// for one request. It is plain data so work the request queues for later, such
+// as an item refresh job that may run on another node, can carry it and hold
+// that work to the same libraries.
+type MetadataCurationScope struct {
+	// LibraryIDs are the curator's assigned libraries. Nil means every library.
+	LibraryIDs []int `json:"library_ids"`
+}
+
+// Authorizer allows a non-empty library set inside the scope, the same rule the
+// legacy curation gate applies to a request.
+func (s MetadataCurationScope) Authorizer() MetadataCurationAuthorizer {
+	allowed := make(map[int]struct{}, len(s.LibraryIDs))
+	for _, id := range s.LibraryIDs {
+		allowed[id] = struct{}{}
+	}
+	restricted := s.LibraryIDs != nil
+	return func(ctx context.Context, libraries []int) error {
+		if len(libraries) == 0 {
+			return ErrMetadataCurationScope
+		}
+		if restricted {
+			for _, id := range libraries {
+				if _, ok := allowed[id]; !ok {
+					return ErrMetadataCurationScope
+				}
+			}
+		}
+		return ctx.Err()
+	}
+}
+
+// WithMetadataCurationScope records the scope of a delegated curator's request.
+// Acting admins carry no scope: their deferred work stays automatic.
+func WithMetadataCurationScope(ctx context.Context, scope MetadataCurationScope) context.Context {
+	return context.WithValue(ctx, metadataCurationScopeKey{}, scope)
+}
+
+// MetadataCurationScopeFrom returns the delegated curator scope recorded on ctx.
+func MetadataCurationScopeFrom(ctx context.Context) (MetadataCurationScope, bool) {
+	scope, ok := ctx.Value(metadataCurationScopeKey{}).(MetadataCurationScope)
+	return scope, ok
+}
