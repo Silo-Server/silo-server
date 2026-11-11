@@ -332,23 +332,23 @@ func lifecycleContext(ctx context.Context) (context.Context, context.CancelFunc)
 
 // recordEnd writes an end's admin history row through the lifecycle, and
 // announces the end when it is the one that stopped an announced session.
-// It reports false when this server keeps no lifecycle, so the caller
-// writes the history row the old way.
-func (h *PlaybackHandler) recordEnd(ctx context.Context, session *playback.Session, entry AdminPlaybackHistoryEntry) bool {
+// It reports handled false when this server keeps no lifecycle, so the
+// caller writes the history row the old way, and the write's error.
+func (h *PlaybackHandler) recordEnd(ctx context.Context, session *playback.Session, entry AdminPlaybackHistoryEntry) (handled bool, _ error) {
 	store, ok := h.AdminStore.(playbackLifecycleStore)
 	if !ok || lifecycleIDParam(session.ID) == nil {
-		return false
+		return false, nil
 	}
 	t, won, err := store.RecordEnd(ctx, entry, sessionFrontend(session))
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to record admin history", "component", "api", "session", session.ID, "error", err)
-		return true
+		return true, err
 	}
 	if !won {
-		return true
+		return true, nil
 	}
 	if _, ready := h.lifecycleEventsReady(); !ready {
-		return true
+		return true, nil
 	}
 	view := PlaybackLifecycleEventView{Transition: t}
 	if history, err := h.LifecycleViews.ReadAdminPlaybackHistoryEntry(ctx, session.ID); err != nil {
@@ -357,7 +357,7 @@ func (h *PlaybackHandler) recordEnd(ctx context.Context, session *playback.Sessi
 		view.History = history
 	}
 	h.publishLifecycleView(ctx, view)
-	return true
+	return true, nil
 }
 
 // sessionFrontend names the surface a session started from, for the

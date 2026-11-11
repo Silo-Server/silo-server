@@ -1352,20 +1352,30 @@ func (h *PlaybackHandler) recordStopHistory(ctx context.Context, session *playba
 	return result
 }
 
-func (h *PlaybackHandler) recordAdminStopHistory(ctx context.Context, session *playback.Session, reason PlaybackEndReason) {
-	if entry, err := h.buildAdminHistoryEntry(ctx, session); err != nil {
+// recordAdminStopHistory logs a failed write itself and also returns it, so
+// the lifecycle sweep can hold back its next attempt.
+func (h *PlaybackHandler) recordAdminStopHistory(ctx context.Context, session *playback.Session, reason PlaybackEndReason) error {
+	entry, err := h.buildAdminHistoryEntry(ctx, session)
+	if err != nil {
 		slog.ErrorContext(ctx, "failed to build admin history", "component", "api", "session", session.ID, "error", err)
-	} else if entry != nil && h.AdminStore != nil {
-		entry.EndReason = reason
-		// An end goes through the session's lifecycle, which announces it;
-		// a teardown the client can recover from records its stretch only.
-		if reason != "" && h.recordEnd(ctx, session, *entry) {
-			return
-		}
-		if err := h.AdminStore.RecordHistory(ctx, *entry); err != nil {
-			slog.ErrorContext(ctx, "failed to record admin history", "component", "api", "session", session.ID, "error", err)
+		return err
+	}
+	if entry == nil || h.AdminStore == nil {
+		return nil
+	}
+	entry.EndReason = reason
+	// An end goes through the session's lifecycle, which announces it;
+	// a teardown the client can recover from records its stretch only.
+	if reason != "" {
+		if handled, err := h.recordEnd(ctx, session, *entry); handled {
+			return err
 		}
 	}
+	if err := h.AdminStore.RecordHistory(ctx, *entry); err != nil {
+		slog.ErrorContext(ctx, "failed to record admin history", "component", "api", "session", session.ID, "error", err)
+		return err
+	}
+	return nil
 }
 
 // compatPlayHistoryNamespace derives a Jellyfin play's watch-history row ID
