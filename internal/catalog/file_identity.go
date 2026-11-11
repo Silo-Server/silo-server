@@ -69,7 +69,7 @@ func (v *FileVersion) hideFileIdentity(keepNames bool) {
 		// and the scanner stores the file name as its title. Without it the
 		// track is known by its embedded title or, numbered as the playback
 		// inventory numbers it, its language.
-		if t.External && (t.TitleIsFallback || strings.TrimSpace(t.Title) == t.FileName) {
+		if t.External && (t.TitleIsFallback || models.IsFileNameTitle(t.Title, t.FileName)) {
 			t.Title, t.TitleIsFallback = "", false
 			if strings.TrimSpace(t.EmbeddedTitle) == "" {
 				if label := labels.Next(t.Language, t.Codec, t.Forced, t.HearingImpaired); label != t.Language {
