@@ -108,3 +108,10 @@ it("creates the account when every field is valid", async () => {
   await screen.findByText("Profile picker");
   expect(auth.signup).toHaveBeenCalledWith("alice", "alice@example.test", "long-enough", "WELCOME");
 });
+
+it("locks the fields while the request is out, so a late refusal can't land on an edit", async () => {
+  auth.signup.mockReturnValue(new Promise(() => {}));
+  await fill({});
+  fireEvent.click(createAccount());
+  expect(await screen.findByLabelText("Invite code")).toBeDisabled();
+});

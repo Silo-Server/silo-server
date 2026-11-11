@@ -192,75 +192,78 @@ export default function Signup() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="signup-username">{t("web.auth.username")}</Label>
-              <Input
-                {...fieldProps("username", "signup-username")}
-                value={username}
-                onChange={edit("username", setUsername)}
-                autoComplete="username"
-                autoFocus
-                required
-              />
-              <FieldError id="signup-username-error" message={errorFor("username")} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="signup-email">{t("web.auth.email")}</Label>
-              <Input
-                {...fieldProps("email", "signup-email")}
-                type="email"
-                value={email}
-                onChange={edit("email", setEmail)}
-                autoComplete="email"
-                required
-              />
-              <FieldError id="signup-email-error" message={errorFor("email")} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="signup-password">{t("web.auth.password")}</Label>
-              <p className="text-muted-foreground text-xs">
-                {t("web.auth.passwordRules.minLength")}
-              </p>
-              <PasswordInput
-                {...fieldProps("password", "signup-password")}
-                value={password}
-                onChange={edit("password", setPassword)}
-                autoComplete="new-password"
-                required
-              />
-              <FieldError id="signup-password-error" message={errorFor("password")} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="signup-confirm-password">{t("web.auth.confirmPassword")}</Label>
-              <PasswordInput
-                {...fieldProps("confirmPassword", "signup-confirm-password")}
-                value={confirmPassword}
-                onChange={edit("confirmPassword", setConfirmPassword)}
-                autoComplete="new-password"
-                required
-              />
-              <FieldError
-                id="signup-confirm-password-error"
-                message={errorFor("confirmPassword")}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="signup-invite-code">{t("web.auth.signup.inviteCodeLabel")}</Label>
-              <Input
-                {...fieldProps("inviteCode", "signup-invite-code")}
-                value={inviteCode}
-                onChange={edit("inviteCode", setInviteCode)}
-                placeholder={t("web.auth.signup.inviteCodePlaceholder")}
-                required
-              />
-              <FieldError id="signup-invite-code-error" message={errorFor("inviteCode")} />
-            </div>
-            <Button type="submit" className="w-full" disabled={submitting || invalid}>
-              {submitting
-                ? t("web.auth.passwordRules.creatingAccount")
-                : t("web.auth.createAccount")}
-            </Button>
+          <form onSubmit={handleSubmit}>
+            {/* Locked while a request is out, so a refusal can't land on a value typed since. */}
+            <fieldset disabled={submitting} className="min-w-0 space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="signup-username">{t("web.auth.username")}</Label>
+                <Input
+                  {...fieldProps("username", "signup-username")}
+                  value={username}
+                  onChange={edit("username", setUsername)}
+                  autoComplete="username"
+                  autoFocus
+                  required
+                />
+                <FieldError id="signup-username-error" message={errorFor("username")} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="signup-email">{t("web.auth.email")}</Label>
+                <Input
+                  {...fieldProps("email", "signup-email")}
+                  type="email"
+                  value={email}
+                  onChange={edit("email", setEmail)}
+                  autoComplete="email"
+                  required
+                />
+                <FieldError id="signup-email-error" message={errorFor("email")} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="signup-password">{t("web.auth.password")}</Label>
+                <p className="text-muted-foreground text-xs">
+                  {t("web.auth.passwordRules.minLength")}
+                </p>
+                <PasswordInput
+                  {...fieldProps("password", "signup-password")}
+                  value={password}
+                  onChange={edit("password", setPassword)}
+                  autoComplete="new-password"
+                  required
+                />
+                <FieldError id="signup-password-error" message={errorFor("password")} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="signup-confirm-password">{t("web.auth.confirmPassword")}</Label>
+                <PasswordInput
+                  {...fieldProps("confirmPassword", "signup-confirm-password")}
+                  value={confirmPassword}
+                  onChange={edit("confirmPassword", setConfirmPassword)}
+                  autoComplete="new-password"
+                  required
+                />
+                <FieldError
+                  id="signup-confirm-password-error"
+                  message={errorFor("confirmPassword")}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="signup-invite-code">{t("web.auth.signup.inviteCodeLabel")}</Label>
+                <Input
+                  {...fieldProps("inviteCode", "signup-invite-code")}
+                  value={inviteCode}
+                  onChange={edit("inviteCode", setInviteCode)}
+                  placeholder={t("web.auth.signup.inviteCodePlaceholder")}
+                  required
+                />
+                <FieldError id="signup-invite-code-error" message={errorFor("inviteCode")} />
+              </div>
+              <Button type="submit" className="w-full" disabled={submitting || invalid}>
+                {submitting
+                  ? t("web.auth.passwordRules.creatingAccount")
+                  : t("web.auth.createAccount")}
+              </Button>
+            </fieldset>
           </form>
           <p className="text-muted-foreground mt-4 text-center text-sm">
             {t("web.auth.passwordRules.alreadyHaveAccount", {
