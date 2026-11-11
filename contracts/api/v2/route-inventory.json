@@ -73,6 +73,32 @@
     {
       "id": 1,
       "middleware": [
+        "clientip.Middleware(s.clientIP) [when s.clientIP != nil]",
+        "netaccess.Middleware(s.ingressTokens) [when s.ingressTokens != nil]",
+        "cors.Handler(cors.Options{ AllowedOrigins: []string{\"*\"}, AllowedMethods: []string{\"GET\", \"HEAD\", \"OPTIONS\"}, AllowedHeaders: []string{ \"Accept\", \"Authorization\", \"Content-Type\", proxyRangeHeader, \"X-Silo-Device-Name\", \"X-Silo-Device-Platform\", \"X-Silo-Client-Family\", \"X-Profile-Token\", \"X-Silo-Device-Id\", \"X-Silo-Client\", \"X-Silo-Client-Version\", \"X-Profile-Id\", \"X-Silo-Client-Build\", \"X-Silo-Client-Channel\", \"If-Match\", \"If-Modified-Since\", \"If-None-Match\", \"If-Range\", \"If-Unmodified-Since\", }, ExposedHeaders: []string{ \"Accept-Ranges\", \"Content-Encoding\", \"Content-Length\", \"Content-Range\", \"ETag\", \"Last-Modified\", \"Retry-After\", }, MaxAge: 86400, })"
+      ]
+    },
+    {
+      "id": 2,
+      "middleware": [
+        "clientip.Middleware(s.clientIP) [when s.clientIP != nil]",
+        "netaccess.Middleware(s.ingressTokens) [when s.ingressTokens != nil]",
+        "cors.Handler(cors.Options{ AllowedOrigins: []string{\"*\"}, AllowedMethods: []string{\"GET\", \"HEAD\", \"OPTIONS\"}, AllowedHeaders: []string{ \"Accept\", \"Authorization\", \"Content-Type\", proxyRangeHeader, \"X-Silo-Device-Name\", \"X-Silo-Device-Platform\", \"X-Silo-Client-Family\", \"X-Profile-Token\", \"X-Silo-Device-Id\", \"X-Silo-Client\", \"X-Silo-Client-Version\", \"X-Profile-Id\", \"X-Silo-Client-Build\", \"X-Silo-Client-Channel\", \"If-Match\", \"If-Modified-Since\", \"If-None-Match\", \"If-Range\", \"If-Unmodified-Since\", }, ExposedHeaders: []string{ \"Accept-Ranges\", \"Content-Encoding\", \"Content-Length\", \"Content-Range\", \"ETag\", \"Last-Modified\", \"Retry-After\", }, MaxAge: 86400, })",
+        "s.meterEgress"
+      ]
+    },
+    {
+      "id": 3,
+      "middleware": [
+        "clientip.Middleware(s.clientIP) [when s.clientIP != nil]",
+        "netaccess.Middleware(s.ingressTokens) [when s.ingressTokens != nil]",
+        "cors.Handler(cors.Options{ AllowedOrigins: []string{\"*\"}, AllowedMethods: []string{\"GET\", \"HEAD\", \"OPTIONS\"}, AllowedHeaders: []string{ \"Accept\", \"Authorization\", \"Content-Type\", proxyRangeHeader, \"X-Silo-Device-Name\", \"X-Silo-Device-Platform\", \"X-Silo-Client-Family\", \"X-Profile-Token\", \"X-Silo-Device-Id\", \"X-Silo-Client\", \"X-Silo-Client-Version\", \"X-Profile-Id\", \"X-Silo-Client-Build\", \"X-Silo-Client-Channel\", \"If-Match\", \"If-Modified-Since\", \"If-None-Match\", \"If-Range\", \"If-Unmodified-Since\", }, ExposedHeaders: []string{ \"Accept-Ranges\", \"Content-Encoding\", \"Content-Length\", \"Content-Range\", \"ETag\", \"Last-Modified\", \"Retry-After\", }, MaxAge: 86400, })",
+        "s.requireBearer"
+      ]
+    },
+    {
+      "id": 4,
+      "middleware": [
         "httpstream.NoSniff",
         "apimw.RequestID",
         "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
@@ -83,32 +109,6 @@
         "httpstream.CompressWithExclusions(skipNativeMediaCompression, apiv2.IdentityEncoded)",
         "activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub) [when deps.ActivityLogWriter != nil]",
         "apimw.ProvideActingAdmin(actingAdmin)"
-      ]
-    },
-    {
-      "id": 2,
-      "middleware": [
-        "clientip.Middleware(s.clientIP) [when s.clientIP != nil]",
-        "netaccess.Middleware(s.ingressTokens) [when s.ingressTokens != nil]",
-        "cors.Handler(cors.Options{ AllowedOrigins: []string{\"*\"}, AllowedMethods: []string{\"GET\", \"HEAD\", \"OPTIONS\"}, AllowedHeaders: []string{ \"Accept\", \"Authorization\", \"Content-Type\", proxyRangeHeader, \"X-Silo-Device-Name\", \"X-Silo-Device-Platform\", \"X-Silo-Client-Family\", \"X-Profile-Token\", \"X-Silo-Device-Id\", \"X-Silo-Client\", \"X-Silo-Client-Version\", \"X-Profile-Id\", \"X-Silo-Client-Build\", \"X-Silo-Client-Channel\", \"If-Match\", \"If-Modified-Since\", \"If-None-Match\", \"If-Range\", \"If-Unmodified-Since\", }, ExposedHeaders: []string{ \"Accept-Ranges\", \"Content-Encoding\", \"Content-Length\", \"Content-Range\", \"ETag\", \"Last-Modified\", \"Retry-After\", }, MaxAge: 86400, })"
-      ]
-    },
-    {
-      "id": 3,
-      "middleware": [
-        "clientip.Middleware(s.clientIP) [when s.clientIP != nil]",
-        "netaccess.Middleware(s.ingressTokens) [when s.ingressTokens != nil]",
-        "cors.Handler(cors.Options{ AllowedOrigins: []string{\"*\"}, AllowedMethods: []string{\"GET\", \"HEAD\", \"OPTIONS\"}, AllowedHeaders: []string{ \"Accept\", \"Authorization\", \"Content-Type\", proxyRangeHeader, \"X-Silo-Device-Name\", \"X-Silo-Device-Platform\", \"X-Silo-Client-Family\", \"X-Profile-Token\", \"X-Silo-Device-Id\", \"X-Silo-Client\", \"X-Silo-Client-Version\", \"X-Profile-Id\", \"X-Silo-Client-Build\", \"X-Silo-Client-Channel\", \"If-Match\", \"If-Modified-Since\", \"If-None-Match\", \"If-Range\", \"If-Unmodified-Since\", }, ExposedHeaders: []string{ \"Accept-Ranges\", \"Content-Encoding\", \"Content-Length\", \"Content-Range\", \"ETag\", \"Last-Modified\", \"Retry-After\", }, MaxAge: 86400, })",
-        "s.meterEgress"
-      ]
-    },
-    {
-      "id": 4,
-      "middleware": [
-        "clientip.Middleware(s.clientIP) [when s.clientIP != nil]",
-        "netaccess.Middleware(s.ingressTokens) [when s.ingressTokens != nil]",
-        "cors.Handler(cors.Options{ AllowedOrigins: []string{\"*\"}, AllowedMethods: []string{\"GET\", \"HEAD\", \"OPTIONS\"}, AllowedHeaders: []string{ \"Accept\", \"Authorization\", \"Content-Type\", proxyRangeHeader, \"X-Silo-Device-Name\", \"X-Silo-Device-Platform\", \"X-Silo-Client-Family\", \"X-Profile-Token\", \"X-Silo-Device-Id\", \"X-Silo-Client\", \"X-Silo-Client-Version\", \"X-Profile-Id\", \"X-Silo-Client-Build\", \"X-Silo-Client-Channel\", \"If-Match\", \"If-Modified-Since\", \"If-None-Match\", \"If-Range\", \"If-Unmodified-Since\", }, ExposedHeaders: []string{ \"Accept-Ranges\", \"Content-Encoding\", \"Content-Length\", \"Content-Range\", \"ETag\", \"Last-Modified\", \"Retry-After\", }, MaxAge: 86400, })",
-        "s.requireBearer"
       ]
     },
     {
@@ -3399,9 +3399,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -3424,9 +3426,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -3449,9 +3453,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -3474,9 +3480,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -3499,9 +3507,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -3524,9 +3534,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -3549,9 +3561,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -3574,9 +3588,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -3599,9 +3615,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -3624,9 +3642,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -3649,9 +3669,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -3674,9 +3696,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -3699,9 +3723,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -3724,9 +3750,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -3749,9 +3777,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -3774,9 +3804,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -3799,9 +3831,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -3824,9 +3858,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -3849,9 +3885,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -3874,9 +3912,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -3899,9 +3939,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -3924,9 +3966,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -3949,9 +3993,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -3974,9 +4020,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -3999,9 +4047,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4024,9 +4074,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4049,9 +4101,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4074,9 +4128,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4099,9 +4155,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4124,9 +4182,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4149,9 +4209,11 @@
       "handler_expr": "healthHandler.ServeHTTP",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "none",
@@ -4174,9 +4236,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4199,9 +4263,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4224,9 +4290,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4249,9 +4317,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4274,9 +4344,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4299,9 +4371,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4324,9 +4398,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4349,9 +4425,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4374,9 +4452,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4399,9 +4479,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4424,9 +4506,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4449,9 +4533,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4474,9 +4560,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4499,9 +4587,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4524,9 +4614,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4549,9 +4641,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4574,9 +4668,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4599,9 +4695,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4624,9 +4722,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4649,9 +4749,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4674,9 +4776,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4699,9 +4803,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4724,9 +4830,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4749,9 +4857,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4774,9 +4884,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4799,9 +4911,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4824,9 +4938,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4849,9 +4965,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4874,9 +4992,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4899,9 +5019,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4924,9 +5046,11 @@
       "handler_expr": "readyHandler.ServeHTTP",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "none",
@@ -4949,9 +5073,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4974,9 +5100,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -4999,9 +5127,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -5024,9 +5154,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -5049,9 +5181,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -5074,9 +5208,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -5099,9 +5235,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -5124,9 +5262,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -5149,9 +5289,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -5174,9 +5316,11 @@
       "handler_expr": "v1Tombstone",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "public",
-      "auth_traits": [],
+      "auth_traits": [
+        "unclassified_middleware"
+      ],
       "conditions": [],
       "conditional": false,
       "request_kind": "unknown",
@@ -5199,7 +5343,7 @@
       "handler_expr": "apiv2.NewHandler(v2deps)",
       "handler_kind": "delegation",
       "handler_resolved": true,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "delegated",
       "auth_traits": [
         "delegated"
@@ -5226,7 +5370,7 @@
       "handler_expr": "apiv2.NewHandler(v2deps)",
       "handler_kind": "delegation",
       "handler_resolved": true,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "delegated",
       "auth_traits": [
         "delegated"
@@ -5253,7 +5397,7 @@
       "handler_expr": "apiv2.NewHandler(v2deps)",
       "handler_kind": "delegation",
       "handler_resolved": true,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "delegated",
       "auth_traits": [
         "delegated"
@@ -5280,7 +5424,7 @@
       "handler_expr": "apiv2.NewHandler(v2deps)",
       "handler_kind": "delegation",
       "handler_resolved": true,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "delegated",
       "auth_traits": [
         "delegated"
@@ -5307,7 +5451,7 @@
       "handler_expr": "apiv2.NewHandler(v2deps)",
       "handler_kind": "delegation",
       "handler_resolved": true,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "delegated",
       "auth_traits": [
         "delegated"
@@ -5334,7 +5478,7 @@
       "handler_expr": "apiv2.NewHandler(v2deps)",
       "handler_kind": "delegation",
       "handler_resolved": true,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "delegated",
       "auth_traits": [
         "delegated"
@@ -5361,7 +5505,7 @@
       "handler_expr": "apiv2.NewHandler(v2deps)",
       "handler_kind": "delegation",
       "handler_resolved": true,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "delegated",
       "auth_traits": [
         "delegated"
@@ -5388,7 +5532,7 @@
       "handler_expr": "apiv2.NewHandler(v2deps)",
       "handler_kind": "delegation",
       "handler_resolved": true,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "delegated",
       "auth_traits": [
         "delegated"
@@ -5415,7 +5559,7 @@
       "handler_expr": "apiv2.NewHandler(v2deps)",
       "handler_kind": "delegation",
       "handler_resolved": true,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "delegated",
       "auth_traits": [
         "delegated"
@@ -5442,7 +5586,7 @@
       "handler_expr": "apiv2.NewHandler(v2deps)",
       "handler_kind": "delegation",
       "handler_resolved": true,
-      "middleware_chain": 1,
+      "middleware_chain": 4,
       "auth_class": "delegated",
       "auth_traits": [
         "delegated"
@@ -5469,7 +5613,7 @@
       "handler_expr": "s.handleForceReload",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 4,
+      "middleware_chain": 3,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -5497,7 +5641,7 @@
       "handler_expr": "s.handleReloadConfig",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 4,
+      "middleware_chain": 3,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -5525,7 +5669,7 @@
       "handler_expr": "s.handleReprobeCapabilities",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 4,
+      "middleware_chain": 3,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -5553,7 +5697,7 @@
       "handler_expr": "s.handleHealth",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 2,
+      "middleware_chain": 1,
       "auth_class": "public",
       "auth_traits": [
         "cors"
@@ -5580,7 +5724,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/downloads/file/{token}\", s.handleDownloadFile)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 3,
+      "middleware_chain": 2,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -5608,7 +5752,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodHead, \"/downloads/file/{token}\", s.handleDownloadFile)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 3,
+      "middleware_chain": 2,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -5636,7 +5780,7 @@
       "handler_expr": "s.handleHWCapabilities",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 4,
+      "middleware_chain": 3,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -5664,7 +5808,7 @@
       "handler_expr": "promhttp.Handler()",
       "handler_kind": "expression",
       "handler_resolved": false,
-      "middleware_chain": 2,
+      "middleware_chain": 1,
       "auth_class": "public",
       "auth_traits": [
         "cors"
@@ -5691,7 +5835,7 @@
       "handler_expr": "s.handleNetworkAccessStatus",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 4,
+      "middleware_chain": 3,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -5719,7 +5863,7 @@
       "handler_expr": "s.handleNetworkAccessConnect",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 4,
+      "middleware_chain": 3,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -5747,7 +5891,7 @@
       "handler_expr": "s.handleNetworkAccessDisconnect",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 4,
+      "middleware_chain": 3,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -5775,7 +5919,7 @@
       "handler_expr": "s.handleNetworkAccessProviderStatus",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 4,
+      "middleware_chain": 3,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -5803,7 +5947,7 @@
       "handler_expr": "s.handleStatus",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 4,
+      "middleware_chain": 3,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -5831,7 +5975,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/bandwidth-probe/{token}\", s.handleBandwidthProbe)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 3,
+      "middleware_chain": 2,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -5859,7 +6003,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/direct/{token}\", s.handleDirectPlay)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 3,
+      "middleware_chain": 2,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -5887,7 +6031,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodHead, \"/stream/direct/{token}\", s.handleDirectPlay)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 3,
+      "middleware_chain": 2,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -5915,7 +6059,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/remux/audio-v2/{token}\", s.handleAudioV2Remux)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 3,
+      "middleware_chain": 2,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -5943,7 +6087,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodHead, \"/stream/remux/audio-v2/{token}\", s.handleAudioV2Remux)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 3,
+      "middleware_chain": 2,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -5971,7 +6115,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/remux/{token}\", s.handleRemux)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 3,
+      "middleware_chain": 2,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -5999,7 +6143,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodHead, \"/stream/remux/{token}\", s.handleRemux)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 3,
+      "middleware_chain": 2,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -6027,7 +6171,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/subtitles/{token}/{track}\", s.handleSubtitle)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 3,
+      "middleware_chain": 2,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -6055,7 +6199,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/subtitles/{token}/{track}/fonts\", s.handleSubtitleFonts)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 3,
+      "middleware_chain": 2,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -6083,7 +6227,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/theme/{token}\", s.handleThemeAudio)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 3,
+      "middleware_chain": 2,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -6111,7 +6255,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodHead, \"/stream/theme/{token}\", s.handleThemeAudio)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 3,
+      "middleware_chain": 2,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -6139,7 +6283,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/transcode/{token}/master.m3u8\", s.handleTranscodeManifest)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 3,
+      "middleware_chain": 2,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -6167,7 +6311,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodHead, \"/stream/transcode/{token}/master.m3u8\", s.handleTranscodeManifest)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 3,
+      "middleware_chain": 2,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -6195,7 +6339,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/transcode/{token}/segment/{name}\", s.handleTranscodeSegment)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 3,
+      "middleware_chain": 2,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -6223,7 +6367,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/v3/{session_id}\", s.handleGrantIdentity)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 3,
+      "middleware_chain": 2,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -6251,7 +6395,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodHead, \"/stream/v3/{session_id}\", s.handleGrantIdentity)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 3,
+      "middleware_chain": 2,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -6279,7 +6423,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/v3/{session_id}/master.m3u8\", s.handleGrantTranscodeManifest)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 3,
+      "middleware_chain": 2,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -6307,7 +6451,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodHead, \"/stream/v3/{session_id}/master.m3u8\", s.handleGrantTranscodeManifest)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 3,
+      "middleware_chain": 2,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -6335,7 +6479,7 @@
       "handler_expr": "observeProxy(s.telemetry, http.MethodGet, \"/stream/v3/{session_id}/segment/{name}\", s.handleGrantTranscodeSegment)",
       "handler_kind": "method",
       "handler_resolved": true,
-      "middleware_chain": 3,
+      "middleware_chain": 2,
       "auth_class": "public",
       "auth_traits": [
         "cors",
