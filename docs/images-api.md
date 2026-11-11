@@ -1,9 +1,7 @@
 # Images API
 
 > **API lifecycle:** this documents the stable `/api/v2` native contract, which locks with Silo
-> 1.0. The frozen alpha `/api/v1` surface carries the same artwork ladder through the pre-1.0
-> bridge window and is then retired. See
-> [the native API contract](architecture/api-contract.md).
+> 1.0. See [the native API contract](architecture/api-contract.md).
 
 Silo caches artwork at a fixed ladder of widths and returns a URL for one of them.
 The URL is either a direct object-storage URL or a signed server route. By default the server picks the width from context — card rows get
@@ -46,8 +44,7 @@ The parameter is accepted on:
 
 The item versions list and the beta manga-file and audiobook-group lists accept
 it as well. Other JSON `/api/v2` operations reject it as an unknown query
-parameter with `422 validation_failed`. The frozen `/api/v1` recommendation
-routes ignore it.
+parameter with `422 validation_failed`.
 
 Within item detail this covers cast and crew headshots too: they follow the
 `profile` ladder, which has no wide rung, so `large` and `medium` land on the
@@ -252,8 +249,7 @@ size they resolve at `medium`.
 
 Today the images come from local sidecar files next to the media (see
 [local NFO metadata](architecture/local-nfo-metadata.md#sidecar-artwork-copy-into-the-s3-image-cache)). No
-metadata plugin supplies them, so a library without such files has none. The
-frozen `/api/v1` detail and capability documents do not carry them.
+metadata plugin supplies them, so a library without such files has none.
 
 ## Episode still provenance
 
@@ -317,18 +313,6 @@ The shared cached-artwork resolver applies the same persisted availability
 selection to Jellyfin image URL resolution. Its protocol parameters and image
 response shapes are unchanged; image fetching remains independent of catalog
 metadata responses.
-
-## Bridge note
-
-The frozen alpha surface exposes the same ladder at `/api/v1/catalog`,
-`/api/v1/home/sections`, and the other v1 reads, and its capability document at
-`GET /api/v1/images/capability` (singular, with a numeric `schema_version` instead of
-`revision`/`state`). It rejects a bad size with `400 invalid_image_size` and a bad
-`include_artwork` with `400 invalid_include_artwork`. Those paths are frozen. After the
-bridge window, and once a maintainer decides to retire it (#886), the main API listener
-answers the `/api/v1` business routes with `410 Gone` and the `client_upgrade_required`
-problem code; `/api/v1/health` and `/api/v1/ready` keep answering. Build against
-`/api/v2`.
 
 ### Marker thumbnail lifecycle
 

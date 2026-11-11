@@ -55,24 +55,3 @@ func TestSocketOriginAcceptsConnectedOverlayOrigin(t *testing.T) {
 		t.Fatal("events socket accepted the overlay origin after the provider dropped")
 	}
 }
-
-func TestCheckWebSocketOriginAcceptsConnectedOverlayOrigin(t *testing.T) {
-	cache := netaccess.NewStatusCache()
-	SetWebSocketOverlayOrigins(cache.ConnectedOrigins)
-	t.Cleanup(func() { SetWebSocketOverlayOrigins(nil) })
-
-	req := httptest.NewRequest(http.MethodGet, "/playback/sessions/abc/control/ws", nil)
-	req.Host = "origin.internal:8097"
-	req.Header.Set("Origin", "https://silo.tail1234.ts.net")
-	if checkWebSocketOrigin(req) {
-		t.Fatal("overlay origin accepted before the provider connected")
-	}
-	cache.Report(netaccess.Status{InstallationID: 3, Provider: "tailscale", State: netaccess.StateConnected, Origin: "https://silo.tail1234.ts.net"})
-	if !checkWebSocketOrigin(req) {
-		t.Fatal("overlay origin refused while the provider is connected")
-	}
-	req.Header.Set("Origin", "https://evil.test")
-	if checkWebSocketOrigin(req) {
-		t.Fatal("foreign origin accepted")
-	}
-}

@@ -70,8 +70,8 @@
 ./internal/catalog TestGetItemVersionsMatchesDetail
 ./internal/catalog TestGetItemVersionsAccessAndMissing
 
-# Episode batches: the viewer's preference lookups run once per series, not
-# once per episode, on the Jellyfin season page path.
+# Episode batches: the viewer's preference lookups and the episode reads run
+# once per series, not once per episode, on the Jellyfin season page path.
 ./internal/catalog TestGetEpisodeDetailsForSeriesResolvesPreferencesOncePerSeries
 
 # Seek previews: one availability lookup per item or episode page, and none
@@ -316,10 +316,9 @@
 ./internal/metadata TestIdentifyMoveMarksTheMovedItemPostgres
 ./internal/metadata TestIdentifyRenameLeavesTheMarkToTheIdentityWritePostgres
 
-# Webhook deliveries are capped at 10 MiB on every receiver, the v2 route and
-# the frozen legacy bridge alike.
+# Webhook deliveries are capped at 10 MiB on every receiver.
 ./internal/webhooksync TestProcessWebhookBoundedAppliesDefaultLimitDB
-./internal/api/handlers TestLegacyWebhookReceiverRejectsOversizedBodyDB
+./internal/apiv2 TestWebhookReceiverRealDeliveryDB
 
 # A person write reindexes the person's titles only when it changes the name,
 # the only person field search documents carry.

@@ -372,8 +372,10 @@ func (p *countingUserStores) ForUser(context.Context, int) (userstore.UserStore,
 
 func (*countingUserStores) Close() error { return nil }
 
-// Jellyfin season pages build every episode's detail in one batch; the
-// viewer's preference lookups must not grow with the number of episodes.
+// Jellyfin season pages build every episode's detail in one batch; neither
+// the viewer's preference lookups nor the episode row reads may grow with the
+// number of episodes. With no presentation library and no translated
+// episodes, that leaves the statement count flat.
 func TestGetEpisodeDetailsForSeriesResolvesPreferencesOncePerSeries(t *testing.T) {
 	f := newVersionsFixture(t)
 	store := newDetailTestStore(t)
@@ -402,9 +404,10 @@ func TestGetEpisodeDetailsForSeriesResolvesPreferencesOncePerSeries(t *testing.T
 		episodes = append(episodes, id)
 	}
 
-	lookups := func(ids []string) int {
+	lookups := func(ids []string) (userStores int, statements int64) {
 		t.Helper()
 		users.calls = 0
+		f.queries.calls.Store(0)
 		details, err := f.svc.GetEpisodeDetailsForSeries(t.Context(), f.ids["series"], ids, AccessFilter{UserID: 1, ProfileID: "profile-1"})
 		if err != nil {
 			t.Fatal(err)
@@ -415,9 +418,16 @@ func TestGetEpisodeDetailsForSeriesResolvesPreferencesOncePerSeries(t *testing.T
 				t.Fatalf("episode %s lost the viewer's preferences: %+v", id, detail)
 			}
 		}
-		return users.calls
+		return users.calls, f.queries.calls.Load()
 	}
-	if one, all := lookups(episodes[:1]), lookups(episodes); all != one {
-		t.Fatalf("user store lookups = %d for %d episodes, %d for one", all, len(episodes), one)
+	// Warm anything a first call caches, so the two counts compare like for like.
+	lookups(episodes[:1])
+	oneUsers, oneStatements := lookups(episodes[:1])
+	allUsers, allStatements := lookups(episodes)
+	if allUsers != oneUsers {
+		t.Fatalf("user store lookups = %d for %d episodes, %d for one", allUsers, len(episodes), oneUsers)
+	}
+	if allStatements != oneStatements {
+		t.Fatalf("statements = %d for %d episodes, %d for one", allStatements, len(episodes), oneStatements)
 	}
 }

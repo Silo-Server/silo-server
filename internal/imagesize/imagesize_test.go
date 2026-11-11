@@ -1,8 +1,6 @@
 package imagesize
 
 import (
-	"net/http"
-	"net/http/httptest"
 	"slices"
 	"testing"
 
@@ -34,35 +32,6 @@ func TestParse(t *testing.T) {
 			t.Fatalf("Parse(%q) = nil error, want rejection", raw)
 		}
 	}
-}
-
-func TestFromRequest(t *testing.T) {
-	t.Run("absent", func(t *testing.T) {
-		got, err := FromRequest(httptest.NewRequest(http.MethodGet, "/api/v1/items", nil))
-		if err != nil || got != Unset {
-			t.Fatalf("FromRequest = (%q, %v), want (Unset, nil)", got, err)
-		}
-	})
-
-	t.Run("valid", func(t *testing.T) {
-		got, err := FromRequest(httptest.NewRequest(http.MethodGet, "/api/v1/items?image_size=large", nil))
-		if err != nil || got != Large {
-			t.Fatalf("FromRequest = (%q, %v), want (large, nil)", got, err)
-		}
-	})
-
-	t.Run("invalid", func(t *testing.T) {
-		if _, err := FromRequest(httptest.NewRequest(http.MethodGet, "/api/v1/items?image_size=enormous", nil)); err == nil {
-			t.Fatal("FromRequest = nil error, want rejection")
-		}
-	})
-
-	t.Run("nil request", func(t *testing.T) {
-		got, err := FromRequest(nil)
-		if err != nil || got != Unset {
-			t.Fatalf("FromRequest(nil) = (%q, %v), want (Unset, nil)", got, err)
-		}
-	})
 }
 
 func TestVariantMatrix(t *testing.T) {

@@ -66,7 +66,7 @@ func (h *PlaybackHandler) currentReadings(probe *connectionstore.Probe, sample *
 // purpose: the sender's reading is not the receiver's link. Nothing is
 // recorded.
 func (h *PlaybackHandler) applyConnectionReading(r *http.Request, req *playback.StartRequestV3) error {
-	if !isNativeAPIV2(r.Context()) || !playback.HasFeatureV3(req.ClientFeatures, playback.FeatureBufferingQualityV1) ||
+	if !playback.HasFeatureV3(req.ClientFeatures, playback.FeatureBufferingQualityV1) ||
 		req.QualityPreference != playback.QualityAutoV3 || req.BandwidthEstimateKbps != nil || req.LearnedLimit == playback.LearnedLimitIgnoreV3 {
 		return nil
 	}
@@ -89,7 +89,7 @@ func (h *PlaybackHandler) applyConnectionReading(r *http.Request, req *playback.
 // the stored start request instead, and this function may have rewritten that
 // request's estimate to the limit, so recording it would renew the limit.
 func (h *PlaybackHandler) applyLearnedLimit(r *http.Request, req *playback.StartRequestV3, clientSent bool) (*playback.BandwidthLimitV3, error) {
-	if !isNativeAPIV2(r.Context()) || !playback.HasFeatureV3(req.ClientFeatures, playback.FeatureBufferingQualityV1) {
+	if !playback.HasFeatureV3(req.ClientFeatures, playback.FeatureBufferingQualityV1) {
 		return nil, nil
 	}
 	if observed := req.ObservedThroughputKbps; observed != nil && req.BandwidthEstimateKbps != nil && *observed < *req.BandwidthEstimateKbps {

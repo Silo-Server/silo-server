@@ -57,7 +57,7 @@ func (f *fakeWebhookManagement) ListWebhookEvents(context.Context, int, string, 
 
 // webhookManagement is the real household-manager rule over fixed profiles.
 func webhookManagement(profiles []userstore.Profile) *handlers.WebhookSyncHandler {
-	return handlers.NewWebhookSyncHandler(nil, householdStores{profiles: profiles}, nil)
+	return handlers.NewWebhookSyncHandler(nil, householdStores{profiles: profiles})
 }
 
 // webhookManager is the member account acting as its primary profile.
