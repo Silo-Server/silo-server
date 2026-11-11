@@ -13,9 +13,8 @@ const (
 	// IdleStopAfter is how long a lazily started plugin process may go unused
 	// before the host stops it. It is long enough that a plugin called in
 	// bursts (a scan, a metadata refresh, someone browsing) stays up across the
-	// burst, and no shorter than the response cache a plugin keeps, typically
-	// half an hour, so a quiet spell does not throw a live cache away with
-	// the process. It is also far above the longest gap between a caller
+	// burst, and a plugin that caches responses for up to half an hour keeps
+	// that cache through a quiet spell. It is also far above the longest gap between a caller
 	// resolving a plugin client and making its call.
 	IdleStopAfter = 30 * time.Minute
 	// DefaultIdleCheckInterval is how often a running plugin is checked.

@@ -2,14 +2,13 @@
 
 A plugin that is not resident starts on its first RPC. The host stops it again
 once nothing has used it for 30 minutes, and the next RPC starts it as the first
-one did. A server whose libraries never call a plugin
-(an audiobook metadata provider on a Movies and Series server) does not keep
-that process in memory.
+one did. A server whose libraries never call a plugin (an audiobook metadata
+provider on a Movies and Series server) does not keep that process in memory.
 
 The period is fixed (`pluginhost.IdleStopAfter`). Thirty minutes covers a burst
-of calls and is no shorter than the response caches plugins keep, typically half
-an hour, so a quiet spell does not throw a live cache away. Proxy nodes run only resident
-plugins, so nothing there is stopped for being idle.
+of calls, and a plugin that caches responses for up to half an hour keeps that
+cache through a quiet spell. Proxy nodes build their plugin host without an idle
+period, so nothing there is stopped for being idle.
 
 ## What counts as use
 
@@ -53,10 +52,10 @@ reads (`Host.Running`, which backs the admin `runtime.state`) are not use.
   manifest and configures it. A start that fails is recorded as any failed
   lazy start is.
 - An idle stop is a deliberate stop. The client is not marked unhealthy, the
-  exit handler is not called, no lazy start failure is recorded, and the
-  installation reports `stopped`, which the admin UI shows as a healthy plugin
-  that is not running. The process is asked to shut down and is only killed if
-  it has not exited after two seconds.
+  exit handler is not called, and no lazy start failure is recorded. The
+  installation reports `stopped`, and the admin UI shows it as **Active**, like
+  any other healthy plugin that is not running. The process is asked to shut
+  down and is only killed if it has not exited after two seconds.
 - State a plugin keeps in memory does not survive an idle stop. Host-held
   state (configuration, instance state, OAuth and device-code flow state, scan
   markers, sync cursors) is sent again with each call. A plugin must not rely

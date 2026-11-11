@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"google.golang.org/grpc"
@@ -290,30 +291,30 @@ func TestStopAndShutdownWaitForAnIdleStopInProgress(t *testing.T) {
 			host, inst, _ := idleTestHost(t, clock, 7)
 			clock.Advance(testIdlePeriod)
 
-			// Stands in for a process that takes a while to exit.
-			exiting := make(chan struct{})
-			exit := make(chan struct{})
-			inst.cancelMonitors = func() {
-				close(exiting)
-				<-exit
-			}
-			go host.stopIfIdle(context.Background(), 7, inst)
-			<-exiting
-
-			var exitedFirst atomic.Bool
-			returned := make(chan error, 1)
-			go func() {
-				err := wait(host)
-				if err == nil && !exitedFirst.Load() {
-					err = errors.New("returned while the idle process was still exiting")
+			synctest.Test(t, func(t *testing.T) {
+				// Stands in for a process that takes a while to exit.
+				exiting := make(chan struct{})
+				exit := make(chan struct{})
+				inst.cancelMonitors = func() {
+					close(exiting)
+					<-exit
 				}
-				returned <- err
-			}()
-			exitedFirst.Store(true)
-			close(exit)
-			if err := <-returned; err != nil {
-				t.Fatal(err)
-			}
+				go host.stopIfIdle(context.Background(), 7, inst)
+				<-exiting
+
+				returned := make(chan error, 1)
+				go func() { returned <- wait(host) }()
+				synctest.Wait()
+				select {
+				case err := <-returned:
+					t.Fatalf("returned (%v) while the idle process was still exiting", err)
+				default:
+				}
+				close(exit)
+				if err := <-returned; err != nil {
+					t.Fatal(err)
+				}
+			})
 		})
 	}
 }

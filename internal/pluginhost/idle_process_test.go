@@ -10,6 +10,8 @@ import (
 
 	"github.com/hashicorp/go-hclog"
 
+	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
 
@@ -43,8 +45,41 @@ func waitUntilStopped(ctx context.Context, t *testing.T, host *pluginhost.Host, 
 	}
 }
 
+// keepCalling sends a capability RPC on client every 10 ms until the
+// returned stop is called. The fixture answers Unimplemented, which still
+// counts as use.
+func keepCalling(t *testing.T, client *pluginhost.Client) (stop func()) {
+	t.Helper()
+	metadata, err := client.MetadataProvider("exiting")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				_, _ = metadata.Search(context.Background(), &pluginv1.SearchMetadataRequest{})
+			}
+		}
+	}()
+	return func() {
+		close(done)
+		<-finished
+	}
+}
+
 // Only a process started with StopWhenIdle on a host with an idle period is
 // stopped; the stop is not a crash, and the next Start brings it back.
+// Calls made on the client keep its process up, so the activity interceptors
+// are wired into the real connection. It runs on the real clock, with
+// several plugin starts and two idle periods, so it takes about a second.
 func TestHostStopsIdleProcessAndStartsItAgain(t *testing.T) {
 	bin, manifest := buildExitingPlugin(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -65,8 +100,13 @@ func TestHostStopsIdleProcessAndStartsItAgain(t *testing.T) {
 		_ = host.Shutdown(context.Background())
 	})
 
-	// Started first, so each has been idle for longer than installation 3 by
+	// Started first, so each has been up for longer than installation 3 by
 	// the time that one is stopped.
+	busy, err := host.Start(ctx, pluginhost.StartRequest{InstallationID: 5, BinaryPath: bin, Manifest: manifest, StopWhenIdle: true})
+	if err != nil {
+		t.Fatalf("Start of a plugin in use: %v", err)
+	}
+	stopCalling := keepCalling(t, busy)
 	if _, err := disabled.Start(ctx, pluginhost.StartRequest{InstallationID: 1, BinaryPath: bin, Manifest: manifest, StopWhenIdle: true}); err != nil {
 		t.Fatalf("Start on a host with no idle period: %v", err)
 	}
@@ -106,6 +146,10 @@ func TestHostStopsIdleProcessAndStartsItAgain(t *testing.T) {
 		t.Fatal("Start after idle stop returned the stopped client")
 	}
 	waitUntilStopped(ctx, t, host, 3)
+	stopCalling()
+	if !host.Running(5) {
+		t.Fatal("a plugin was stopped while it was being called")
+	}
 	// Stop returns once the idle stop has finished, so nothing is logged later.
 	if err := host.Stop(3); !errors.Is(err, pluginhost.ErrClientNotFound) {
 		t.Fatalf("Stop after idle stop = %v, want ErrClientNotFound", err)
