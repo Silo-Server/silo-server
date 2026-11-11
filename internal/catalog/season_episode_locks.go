@@ -23,11 +23,17 @@ const (
 	seasonsTable  = "seasons"
 	episodesTable = "episodes"
 
-	childColumnTitle    = "title"
-	childColumnOverview = "overview"
-	childColumnRuntime  = "runtime"
-	sqlEmptyText        = "''"
-	sqlNull             = "NULL"
+	childColumnTitle         = "title"
+	childColumnOverview      = "overview"
+	childColumnRuntime       = "runtime"
+	childColumnSortTitle     = "sort_title"
+	childColumnOriginalTitle = "original_title"
+	childColumnTagline       = "tagline"
+	childColumnImdbID        = "imdb_id"
+	childColumnTmdbID        = "tmdb_id"
+	childColumnTvdbID        = "tvdb_id"
+	sqlEmptyText             = "''"
+	sqlNull                  = "NULL"
 
 	// The titles metadata's fallbackSeasonTitle and fallbackEpisodeTitle give a
 	// row the provider has no title for. A cleared row the new show doesn't
@@ -58,6 +64,17 @@ var (
 		{columnAirDate, fieldReleaseDatesLocked, sqlNull},
 		{childColumnRuntime, fieldRuntimeLocked, sqlNull},
 	}
+)
+
+// The title details only an admin writes on a season or episode. No refresh
+// writes them, so they need no lock, but they describe one show like a locked
+// field does. An episode's provider IDs are not among them: refreshes write those.
+var (
+	seasonEditedColumns = []string{
+		childColumnSortTitle, childColumnOriginalTitle, childColumnTagline,
+		childColumnImdbID, childColumnTmdbID, childColumnTvdbID,
+	}
+	episodeEditedColumns = []string{childColumnSortTitle, childColumnOriginalTitle, childColumnTagline}
 )
 
 func lockedAssignments(table string, columns []childLockedColumn) string {
@@ -94,20 +111,28 @@ func childOverviewApplies(locks []int, source string) bool {
 	return !slices.Contains(locks, fieldOverviewLocked) || source != models.LocalizationSourceProvider
 }
 
-// ClearSeriesChildEditsTx removes every season and episode lock on seriesID and
-// resets the locked values, for a series that now names a different show. The
-// edits describe the old show, so they must not stay even when the new show's
-// provider has nothing to replace them with.
+// ClearSeriesChildEditsTx removes every season and episode lock on seriesID,
+// resets the locked values and empties the title details, for a series that now
+// names a different show. The edits describe the old show, so they must not stay
+// even when the new show's provider has nothing to replace them with.
 func ClearSeriesChildEditsTx(ctx context.Context, tx pgx.Tx, seriesID string) error {
 	for _, target := range []struct {
 		table   string
 		columns []childLockedColumn
-	}{{seasonsTable, seasonLockedColumns}, {episodesTable, episodeLockedColumns}} {
+		edited  []string
+	}{{seasonsTable, seasonLockedColumns, seasonEditedColumns}, {episodesTable, episodeLockedColumns, episodeEditedColumns}} {
 		assignments := joinColumns(target.columns, ", ", func(c childLockedColumn) string {
 			return fmt.Sprintf("%[1]s = CASE WHEN %[2]d = ANY(locked_fields) THEN %[3]s ELSE %[1]s END", c.column, c.field, c.empty)
 		})
-		query := fmt.Sprintf(`UPDATE %s SET %s, locked_fields = '{}', updated_at = NOW()
-			WHERE series_id = $1 AND locked_fields <> '{}'`, target.table, assignments)
+		editedPredicates := make([]string, 0, len(target.edited))
+		clearAssignments := make([]string, 0, len(target.edited))
+		for _, column := range target.edited {
+			editedPredicates = append(editedPredicates, column+" <> ''")
+			clearAssignments = append(clearAssignments, column+" = ''")
+		}
+		query := fmt.Sprintf(`UPDATE %s SET %s, %s, locked_fields = '{}', updated_at = NOW()
+			WHERE series_id = $1 AND (locked_fields <> '{}' OR %s)`,
+			target.table, assignments, strings.Join(clearAssignments, ", "), strings.Join(editedPredicates, " OR "))
 		if _, err := tx.Exec(ctx, query, seriesID); err != nil {
 			return fmt.Errorf("clearing %s edits of series %s: %w", target.table, seriesID, err)
 		}

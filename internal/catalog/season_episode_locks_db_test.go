@@ -138,3 +138,39 @@ func TestLockableFieldsKeepOnlyWhatARowCanHonor(t *testing.T) {
 		t.Errorf("episode keeps %v, want the name and runtime locks", got)
 	}
 }
+
+// A season or episode stores the title details an admin edits, and the item
+// detail returns them. No provider writes them, so a refresh keeps them without
+// a lock. The content rating stays the series': it decides age limits.
+func TestSeasonEpisodeEditsKeepTitleDetailsDB(t *testing.T) {
+	ctx := context.Background()
+	f := newArtworkLockFixture(t, "title-details")
+	sortTitle, originalTitle, tagline := "Edited sort title", "Edited original title", "Edited tagline"
+	imdbID, tmdbID, tvdbID := "tt7654321", "7654321", "1234567"
+	edit := &MetadataUpdate{SortTitle: &sortTitle, OriginalTitle: &originalTitle, Tagline: &tagline,
+		ImdbID: &imdbID, TmdbID: &tmdbID, TvdbID: &tvdbID}
+	if err := f.details.UpdateSeasonMetadata(ctx, f.season.ContentID, edit); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.details.UpdateEpisodeMetadata(ctx, f.episode.ContentID, edit); err != nil {
+		t.Fatal(err)
+	}
+	if err := errors.Join(
+		f.seasons.BulkUpsert(ctx, []*models.Season{f.providerSeason()}),
+		f.episodes.BulkUpsert(ctx, f.seriesID, []*models.Episode{f.providerEpisode()}),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, id := range []string{f.season.ContentID, f.episode.ContentID} {
+		detail, err := f.details.GetItemDetail(ctx, id, AccessFilter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := []string{detail.SortTitle, detail.OriginalTitle, detail.Tagline, detail.ImdbID, detail.TmdbID, detail.TvdbID}
+		want := []string{sortTitle, originalTitle, tagline, imdbID, tmdbID, tvdbID}
+		if !slices.Equal(got, want) {
+			t.Errorf("%s detail = %q, want %q", id, got, want)
+		}
+	}
+}

@@ -39,7 +39,8 @@ const episodeColumns = `content_id, series_id, season_id, season_number, episode
 	imdb_id, tmdb_id, tvdb_id,
 	still_path, still_source_path, still_thumbhash,
 	metadata_s3_path, metadata_etag, metadata_source,
-	created_at, updated_at, locked_fields`
+	created_at, updated_at, locked_fields,
+	sort_title, original_title, tagline`
 
 // refreshSeriesAirDatesSQL maintains the denormalized media_items columns
 // last_air_date_at (newest episode aired on or before today) and
@@ -231,6 +232,9 @@ func scanEpisode(row pgx.Row) (*models.Episode, error) {
 		&ep.CreatedAt,
 		&ep.UpdatedAt,
 		&ep.LockedFields,
+		&ep.SortTitle,
+		&ep.OriginalTitle,
+		&ep.Tagline,
 	)
 	if seasonID != nil {
 		ep.SeasonID = *seasonID
@@ -315,6 +319,9 @@ func scanEpisodes(rows pgx.Rows) ([]*models.Episode, error) {
 			&ep.CreatedAt,
 			&ep.UpdatedAt,
 			&ep.LockedFields,
+			&ep.SortTitle,
+			&ep.OriginalTitle,
+			&ep.Tagline,
 		)
 		if seasonID != nil {
 			ep.SeasonID = *seasonID
@@ -1282,7 +1289,10 @@ func (r *EpisodeRepository) UpdateMetadata(ctx context.Context, contentID string
 	}
 
 	addString("title", upd.Title)
+	addString(childColumnSortTitle, upd.SortTitle)
+	addString(childColumnOriginalTitle, upd.OriginalTitle)
 	addString("overview", upd.Overview)
+	addString(childColumnTagline, upd.Tagline)
 	if upd.LockedFields != nil {
 		setClauses = append(setClauses, fmt.Sprintf("locked_fields = $%d", argIdx))
 		args = append(args, lockableFields(*upd.LockedFields, episodeLockedColumns))

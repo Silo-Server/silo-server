@@ -219,16 +219,26 @@ describe("EditMetadataDialog season and episode locks", () => {
     );
   });
 
-  // These rows don't store a tagline or a sort title, so the edit is dropped and
-  // must not freeze the provider's overview or title.
-  it("doesn't lock a field for an edit the row can't store", () => {
-    render(<EditMetadataDialog item={child("episode")} open onOpenChange={vi.fn()} />);
+  // No provider writes a season's or episode's title details or a season's IDs,
+  // so saving them locks nothing. The content rating stays the series'.
+  it.each(["season", "episode"] as const)("saves a %s's title details and IDs", (type) => {
+    const item = { ...child(type), sort_title: "Provider sort title", tvdb_id: "7654321" };
+    render(<EditMetadataDialog item={item} open onOpenChange={vi.fn()} />);
+    expect(screen.queryByText("Content Rating")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByDisplayValue("Provider sort title"), {
+      target: { value: "Edited sort title" },
+    });
     fireEvent.change(screen.getByPlaceholderText("No tagline"), {
       target: { value: "Edited tagline" },
     });
+    fireEvent.click(screen.getByRole("button", { name: "External IDs" }));
+    fireEvent.change(screen.getByDisplayValue("7654321"), { target: { value: "1234567" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
 
-    expect(mocks.update).toHaveBeenCalledWith({ tagline: "Edited tagline" }, expect.any(Object));
+    expect(mocks.update).toHaveBeenCalledWith(
+      { sort_title: "Edited sort title", tagline: "Edited tagline", tvdb_id: "1234567" },
+      expect.any(Object),
+    );
   });
 
   it("leaves a season image's lock on the series", () => {
