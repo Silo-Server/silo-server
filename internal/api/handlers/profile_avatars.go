@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -287,6 +288,9 @@ func (h *ProfileHandler) UploadAvatar(ctx context.Context, up ProfileAvatarUploa
 	}
 
 	result, err := imageutil.GenerateSquareVariants(data, []int{256})
+	if errors.Is(err, imageutil.ErrBusy) {
+		return none, apiError(http.StatusServiceUnavailable, "unavailable", "Image processing is busy; try again shortly")
+	}
 	if err != nil {
 		return none, apiError(http.StatusBadRequest, "bad_request", "Invalid image file")
 	}

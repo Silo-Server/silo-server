@@ -238,7 +238,7 @@ func putCollectionImageVariants(
 	// decode, are the caller's artwork problem; any other failure stays a
 	// server error.
 	result, err := imageutil.GenerateVariants(fileData, widths)
-	if err != nil && (errors.Is(err, imageutil.ErrInvalidImage) || imageutil.PixelDataUndecodable(fileData)) {
+	if err != nil && imageutil.SourceUnusable(err, fileData) {
 		return "", "", invalidCollectionImage("The file is not a supported image.", err)
 	}
 	if err != nil {
