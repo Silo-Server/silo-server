@@ -208,7 +208,7 @@ func writeSessionCheckUnavailable(w http.ResponseWriter) {
 func writeSessionLookupFailed(w http.ResponseWriter, r *http.Request, token string, err error) {
 	if r.Context().Err() == nil {
 		slog.WarnContext(r.Context(), "jellycompat auth: session lookup failed; answering 503", "component", "jellycompat",
-			"path", r.URL.Path,
+			"path", redactHLSPlaySessionID(r.URL.Path),
 			"token_prefix", safeTokenPrefix(token),
 			"error", logredact.SanitizeText(err.Error()),
 		)
@@ -388,7 +388,7 @@ func PlaybackSessionAuth(sessions *SessionStore, playbackStore CompatPlaybackSto
 					}
 					if ok {
 						slog.InfoContext(r.Context(), "jellycompat static stream granted without credentials",
-							"play_session", grant.ID, "user_id", grant.UserID, "item_id", itemID, "media_source_id", sourceID, "client_ip", clientIP, "peer", requestPeerHost(r), "negotiated_peer", grant.ClientPeer)
+							"play_session", playSessionFingerprint(grant.ID), "user_id", grant.UserID, "item_id", itemID, "media_source_id", sourceID, "client_ip", clientIP, "peer", requestPeerHost(r), "negotiated_peer", grant.ClientPeer)
 						// This grant infers an owner from a shared address; the
 						// caller supplied no credential. Keep source/global
 						// protection without spending that owner's account budget.

@@ -35,7 +35,6 @@ const (
 // the others take database arrival order.
 const (
 	LifecycleFrontendNative   = "native"
-	LifecycleFrontendBridge   = "bridge"
 	LifecycleFrontendJellyfin = "jellyfin"
 	LifecycleFrontendABS      = "abs"
 )

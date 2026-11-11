@@ -147,6 +147,7 @@
 ./internal/api/handlers TestClearResumePositionTargetsDB
 ./internal/api/handlers TestEbookProgressEventsPostgres
 ./internal/api/handlers TestRemoveHistoryHidesEpisodesWithoutLibraryFilePostgres
+./internal/api/handlers TestHistoryImportProfileAuthorizationDB
 ./internal/api/handlers TestParentUnwatchClearsEpisodesWithoutLibraryFilePostgres
 ./internal/api/handlers TestAudiobookMarkListenedPostgres
 ./internal/api/handlers TestAudiobookMarkListenedBoundariesPostgres
@@ -186,8 +187,7 @@
 ./internal/auth TestAPIKeyVerifierLegacyDigestCollision
 ./internal/auth TestAPIKeyVerifierMigrationRollback
 ./internal/auth TestAPIKeyVerifierDownSeesConcurrentInsert
-./internal/api/handlers TestAPIKeyLegacyListsAndEditorNeverReturnStoredSecret
-./internal/api/handlers TestAPIKeyCreationStillReturnsTheOnlyFullSecretResponse
+./internal/api/handlers TestAPIKeyEditorNeverReturnsStoredSecret
 
 # Minting a key for another account holds the Owner rules against a concurrent promotion.
 ./internal/api/handlers TestAdminAPIKeyCreationHoldsOwnerRulesAgainstPromotionDB
@@ -612,7 +612,7 @@
 # Recommendations: job locks, refresh marks, signal triggers, embedding lock and
 # reset, build-time access, exclusion set, profile purge, and section fill.
 ./internal/api/handlers TestLibrarySectionItemsAnswersAnErrorWhenTheFetchFailsDB
-./internal/api/handlers TestV1RecentlyAddedDropsInaccessibleItemsPostgres
+./internal/api/handlers TestRecentlyAddedItemsKeepsTheViewersLibrariesDB
 ./internal/api/handlers TestWatchedFilterDoesNotFallBackToPostgres
 ./internal/historyimport TestImportRunReportsSignalChangesOncePostgres
 ./internal/metadata TestMergeKeepsTheSourceEmbeddingPostgres

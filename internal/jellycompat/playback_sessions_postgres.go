@@ -253,7 +253,7 @@ func (d *DurableCompatPlaybackStore) PutNegotiated(session PlaybackSession) {
 		slog.WarnContext(ctx, "persist negotiated compat playback session failed",
 			"component", "jellycompat",
 			"error", err,
-			"play_session_id", stored.ID,
+			"play_session_id", playSessionFingerprint(stored.ID),
 		)
 	} else {
 		d.clearUnpersisted(stored.ID)
@@ -430,7 +430,7 @@ func (d *DurableCompatPlaybackStore) Delete(id string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if _, err := d.pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE id = $1`, id); err != nil {
-		slog.Warn("delete compat playback session failed", "error", err, "play_session_id", id)
+		slog.Warn("delete compat playback session failed", "error", err, "play_session_id", playSessionFingerprint(id))
 	}
 }
 
@@ -520,7 +520,7 @@ func (d *DurableCompatPlaybackStore) StageTerminal(
 
 	committed, err := d.stageTerminalDB(id, compatToken, event, authoritative)
 	if err != nil {
-		slog.Warn("stage durable compat terminal event failed", "error", err, "play_session_id", id)
+		slog.Warn("stage durable compat terminal event failed", "error", err, "play_session_id", playSessionFingerprint(id))
 		return nil, err
 	}
 	if committed == nil {
@@ -650,13 +650,13 @@ func (d *DurableCompatPlaybackStore) ClaimTerminal(id, compatToken string, claim
 		return nil, ErrSessionNotFound
 	}
 	if err != nil {
-		slog.Warn("claim compat terminal event failed", "error", err, "play_session_id", id)
+		slog.Warn("claim compat terminal event failed", "error", err, "play_session_id", playSessionFingerprint(id))
 		return nil, err
 	}
 
 	var session PlaybackSession
 	if err := json.Unmarshal(raw, &session); err != nil {
-		slog.Warn("unmarshal claimed compat terminal event failed", "error", err, "play_session_id", id)
+		slog.Warn("unmarshal claimed compat terminal event failed", "error", err, "play_session_id", playSessionFingerprint(id))
 		return nil, err
 	}
 	d.mem.Delete(id)
@@ -700,7 +700,7 @@ func (d *DurableCompatPlaybackStore) ReleaseTerminalClaim(
 	`, id, compatToken, claimUntil, claimVersion, fallbackSent).Scan(&raw)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
-			slog.Warn("release compat terminal event claim failed", "error", err, "play_session_id", id)
+			slog.Warn("release compat terminal event claim failed", "error", err, "play_session_id", playSessionFingerprint(id))
 		}
 		d.mem.ReleaseTerminalClaim(id, compatToken, claimUntil, claimVersion, fallbackSent)
 		return
@@ -742,7 +742,7 @@ func (d *DurableCompatPlaybackStore) CompleteTerminal(
 			AND COALESCE((data->>'TerminalEventVersion')::bigint, 0) = $4
 	`, id, compatToken, claimUntil, claimVersion)
 	if err != nil {
-		slog.Warn("complete compat terminal event failed", "error", err, "play_session_id", id)
+		slog.Warn("complete compat terminal event failed", "error", err, "play_session_id", playSessionFingerprint(id))
 		return
 	}
 	if tag.RowsAffected() > 0 {
@@ -869,7 +869,7 @@ func (d *DurableCompatPlaybackStore) Update(id string, fn func(*PlaybackSession)
 		// restart would reload a stale row or 404. A genuinely absent/expired row
 		// and a nil pool are not durability failures and return nil (best-effort,
 		// unchanged) — only real DB round-trip errors propagate.
-		return fmt.Errorf("durably persist compat playback session %s: %w", id, err)
+		return fmt.Errorf("durably persist compat playback session %s: %w", playSessionFingerprint(id), err)
 	}
 	return nil
 }
@@ -897,7 +897,7 @@ func (d *DurableCompatPlaybackStore) updateDB(
 
 	tx, err := d.pool.Begin(ctx)
 	if err != nil {
-		slog.Warn("begin compat playback session update tx failed", "error", err, "play_session_id", id)
+		slog.Warn("begin compat playback session update tx failed", "error", err, "play_session_id", playSessionFingerprint(id))
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
@@ -913,13 +913,13 @@ func (d *DurableCompatPlaybackStore) updateDB(
 			// durability failure — best-effort, the in-memory mutation stands.
 			return nil, nil
 		}
-		slog.Warn("load compat playback session for update failed", "error", err, "play_session_id", id)
+		slog.Warn("load compat playback session for update failed", "error", err, "play_session_id", playSessionFingerprint(id))
 		return nil, err
 	}
 
 	var session PlaybackSession
 	if err := json.Unmarshal(raw, &session); err != nil {
-		slog.Warn("unmarshal compat playback session for update failed", "error", err, "play_session_id", id)
+		slog.Warn("unmarshal compat playback session for update failed", "error", err, "play_session_id", playSessionFingerprint(id))
 		return nil, err
 	}
 	for _, update := range pending {
@@ -928,7 +928,7 @@ func (d *DurableCompatPlaybackStore) updateDB(
 			// A write queued after an earlier DB failure no longer applies to the
 			// row, e.g. its compare-and-swap lost to another replica meanwhile.
 			// Drop it; committing consumes it with the rest of the queue.
-			slog.Warn("drop pending compat playback session update", "error", err, "play_session_id", id)
+			slog.Warn("drop pending compat playback session update", "error", err, "play_session_id", playSessionFingerprint(id))
 			continue
 		}
 		session = candidate
@@ -944,7 +944,7 @@ func (d *DurableCompatPlaybackStore) updateDB(
 
 	data, err := marshalPlaybackSession(session)
 	if err != nil {
-		slog.Warn("marshal compat playback session for update failed", "error", err, "play_session_id", id)
+		slog.Warn("marshal compat playback session for update failed", "error", err, "play_session_id", playSessionFingerprint(id))
 		return nil, err
 	}
 	expiresAt := session.ExpiresAt
@@ -952,11 +952,11 @@ func (d *DurableCompatPlaybackStore) updateDB(
 		expiresAt = d.now().Add(d.ttl)
 	}
 	if _, err := tx.Exec(ctx, upsertSessionQuery, session.ID, session.CompatToken, session.UserID, data, expiresAt); err != nil {
-		slog.Warn("persist compat playback session update failed", "error", err, "play_session_id", id)
+		slog.Warn("persist compat playback session update failed", "error", err, "play_session_id", playSessionFingerprint(id))
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		slog.Warn("commit compat playback session update failed", "error", err, "play_session_id", id)
+		slog.Warn("commit compat playback session update failed", "error", err, "play_session_id", playSessionFingerprint(id))
 		return nil, err
 	}
 	return &session, nil
@@ -1206,7 +1206,7 @@ func (d *DurableCompatPlaybackStore) upsert(ctx context.Context, session Playbac
 	}
 	data, err := marshalPlaybackSession(session)
 	if err != nil {
-		slog.WarnContext(ctx, "marshal compat playback session failed", "component", "jellycompat", "error", err, "play_session_id", session.ID)
+		slog.WarnContext(ctx, "marshal compat playback session failed", "component", "jellycompat", "error", err, "play_session_id", playSessionFingerprint(session.ID))
 		return err
 	}
 	expiresAt := session.ExpiresAt
@@ -1214,7 +1214,7 @@ func (d *DurableCompatPlaybackStore) upsert(ctx context.Context, session Playbac
 		expiresAt = d.now().Add(d.ttl)
 	}
 	if _, err := d.pool.Exec(ctx, upsertSessionQuery, session.ID, session.CompatToken, session.UserID, data, expiresAt); err != nil {
-		slog.WarnContext(ctx, "persist compat playback session failed", "component", "jellycompat", "error", err, "play_session_id", session.ID)
+		slog.WarnContext(ctx, "persist compat playback session failed", "component", "jellycompat", "error", err, "play_session_id", playSessionFingerprint(session.ID))
 		return err
 	}
 	return nil
@@ -1239,7 +1239,7 @@ func (d *DurableCompatPlaybackStore) insertIfAbsent(session *PlaybackSession) (b
 		ON CONFLICT (id) DO NOTHING
 	`, session.ID, session.CompatToken, session.UserID, data, expiresAt)
 	if err != nil {
-		slog.Warn("repair unpersisted compat playback session failed", "error", err, "play_session_id", session.ID)
+		slog.Warn("repair unpersisted compat playback session failed", "error", err, "play_session_id", playSessionFingerprint(session.ID))
 		return false, err
 	}
 	return tag.RowsAffected() > 0, nil
@@ -1294,12 +1294,12 @@ func (d *DurableCompatPlaybackStore) load(id string) (*PlaybackSession, bool, er
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, false, nil
 		}
-		slog.Warn("load compat playback session failed", "error", err, "play_session_id", id)
+		slog.Warn("load compat playback session failed", "error", err, "play_session_id", playSessionFingerprint(id))
 		return nil, false, err
 	}
 	var session PlaybackSession
 	if err := json.Unmarshal(raw, &session); err != nil {
-		slog.Warn("unmarshal compat playback session failed", "error", err, "play_session_id", id)
+		slog.Warn("unmarshal compat playback session failed", "error", err, "play_session_id", playSessionFingerprint(id))
 		return nil, false, err
 	}
 	return &session, true, nil

@@ -1,8 +1,7 @@
 # Personal collections API
 
 > **API lifecycle:** this documents the stable `/api/v2` native contract, which locks with Silo
-> 1.0. The frozen alpha `/api/v1` surface answers the same features through the pre-1.0 bridge
-> window and is then retired. See [the native API contract](architecture/api-contract.md).
+> 1.0. See [the native API contract](architecture/api-contract.md).
 
 A personal collection belongs to the profile that created it (`creator_profile_id`). Collections
 for the whole server are admin collections and are not covered here. Paths below omit the
@@ -82,6 +81,10 @@ stored one: an image libvips cannot read, whether uploaded or linked; a JPEG or 
 megapixels whose pixel data does not decode; and a `source_url` with no http(s) host, an answer
 other than `200`, or more than 10 MiB. Other processing failures stay `500`.
 
+An import's `poster_url` is a bundled template poster path (`/images/collection-templates/...`)
+or an http(s) image URL. Any other value answers `422 validation_failed` at `body.poster_url`
+and creates no collection. The server does not fetch the URL: clients load it themselves.
+
 - `listCollections`, `getLibraryCollections` and `listLibraryUserCollections` return the
   collage in `poster_url` and mark it with `poster_is_collage: true`.
 - `getCollection` and `updateCollection` carry no `poster_url` for any poster, uploaded,
@@ -97,9 +100,6 @@ other than `200`, or more than 10 MiB. Other processing failures stay `500`.
   It is false when the server has no artwork storage (and then `artwork` is false too), and for
   an account on the SQLite user store.
 - `deleteCollectionImage` removes an uploaded poster; the collection then shows its collage.
-
-The `/api/v1` bridge does not show collages: its personal collection and library tab reads keep
-returning only uploaded and imported posters.
 
 ## Listing and order
 
@@ -140,11 +140,3 @@ contract keeps their members with fixed values:
   body); a value is a `422 validation_failed`.
 
 A later change removes these operations and members from `/api/v2` before the 1.0 lock.
-
-## `/api/v1` bridge
-
-The frozen v1 routes share the same rules. `GET /api/v1/collections` returns own and shared
-collections; `groups` is always `[]` and `group_id` always `null`. `allowed_profile_ids` reports
-the effective audience (the creator alone, or every profile on the login) and is ignored on
-input. `PUT /api/v1/collections/order` accepts only a null or absent `group_id`, and its
-`ordered_ids` names only the acting profile's own collections. The v1 group routes answer `501`. See the [v1 removals table](architecture/v1-scope.md#breaking-removals-taken-before-lock).

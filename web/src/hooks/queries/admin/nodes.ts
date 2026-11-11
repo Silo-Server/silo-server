@@ -149,8 +149,7 @@ function useNodeWrite() {
           onResponse,
         });
       } else {
-        if (!intent.node?.config_etag)
-          throw new Error("Reload nodes and reopen this action to obtain its original version.");
+        if (!intent.node?.config_etag) throw new Error(t("web.admin.errors.nodesReloadReopen"));
         const options = {
           ...common,
           path: { id: String(intent.node.id) },
@@ -171,9 +170,7 @@ function useNodeWrite() {
       if (!mounted.current || !isNodeWriteAuthorityActive(intent.authority))
         throw new StaleApiRequestContextError();
       if (result && (!etag || result.config_etag !== etag))
-        throw new Error(
-          "Node write acknowledgement is unavailable. Inspect current state before saving again.",
-        );
+        throw new Error(t("web.admin.errors.nodeWriteAckMissing"));
       return result;
     },
     onSuccess: (result, intent) => {

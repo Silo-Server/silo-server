@@ -27,8 +27,6 @@ type PersonalCollectionCreateCommand struct {
 	// carried no multipart body. It answers http.ErrMissingFile when the
 	// part is absent.
 	PosterFile func() ([]byte, error)
-	// V1Rules: see PersonalCollectionPreviewRequest.
-	V1Rules bool
 }
 
 const (
@@ -136,17 +134,15 @@ func (h *CollectionHandler) CreatePersonalCollection(ctx context.Context, cmd Pe
 	queryDefinitionJSON := defaultJSON(req.QueryDefinition)
 	collectionType := firstNonEmptyCollection(req.CollectionType, "manual")
 	if collectionType == collectionTypeSmart {
-		queryDefinitionJSON, err = normalizeSmartCollectionQueryDefinitionJSON(queryDefinitionJSON, true, true, cmd.V1Rules)
+		queryDefinitionJSON, err = normalizeSmartCollectionQueryDefinitionJSON(queryDefinitionJSON, true, true)
 		if err != nil {
 			return none, fieldError("query_definition", "Invalid query_definition")
 		}
-		if !cmd.V1Rules {
-			if err := requireSmartCollectionRule(queryDefinitionJSON); err != nil {
-				return none, err
-			}
+		if err := requireSmartCollectionRule(queryDefinitionJSON); err != nil {
+			return none, err
 		}
 	} else if len(req.QueryDefinition) > 0 {
-		queryDefinitionJSON, err = normalizeQueryDefinitionJSON(queryDefinitionJSON, true, true, cmd.V1Rules)
+		queryDefinitionJSON, err = normalizeQueryDefinitionJSON(queryDefinitionJSON, true, true)
 		if err != nil {
 			return none, fieldError("query_definition", "Invalid query_definition")
 		}
@@ -354,15 +350,15 @@ func (h *CollectionHandler) collectionViewsCounted(ctx context.Context, store us
 		if collage, ok := reads.posters[c.ID]; ok {
 			posterPath, resp.PosterThumbhash, resp.PosterIsCollage = collage.Path, collage.Thumbhash, true
 		}
-		resp.PosterURL = h.presignUserCollectionPoster(ctx, posterPath)
+		resp.PosterURL = personalCollectionPosterURL(ctx, h.ArtworkResolver, c.ID, posterPath)
 		views = append(views, resp)
 	}
 	return views
 }
 
 // collagesForRead is the collage service a read of personal collections uses:
-// /api/v2 reads show collages, while the frozen /api/v1 bridge keeps showing
-// only uploaded and imported posters.
+// the list operations marked by WithNativeAPIV2 show collages; other reads
+// show only uploaded and imported posters.
 func collagesForRead(ctx context.Context, collages *catalog.PersonalCollectionCollages) *catalog.PersonalCollectionCollages {
 	if !isNativeAPIV2(ctx) {
 		return nil
@@ -370,8 +366,8 @@ func collagesForRead(ctx context.Context, collages *catalog.PersonalCollectionCo
 	return collages
 }
 
-// memberCountsForRead returns memberCounts on /api/v2 and nil elsewhere: the
-// frozen /api/v1 list routes keep counting members on every read.
+// memberCountsForRead returns memberCounts for the list operations marked by
+// WithNativeAPIV2 and nil for other reads, which count members afresh.
 func memberCountsForRead(ctx context.Context, memberCounts *catalog.PersonalCollectionMemberCounts) *catalog.PersonalCollectionMemberCounts {
 	if !isNativeAPIV2(ctx) {
 		return nil
@@ -398,15 +394,6 @@ func collectionGroupView(g userstore.CollectionGroup) CollectionGroupView {
 		DefaultSortMode: string(g.DefaultSortMode),
 		SortOrder:       g.SortOrder,
 	}
-}
-
-// posterFileReader is the multipart poster part of a v1 request; nil when
-// the request is not multipart.
-func posterFileReader(r *http.Request) func() ([]byte, error) {
-	if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
-		return nil
-	}
-	return func() ([]byte, error) { return readCollectionImageMultipart(r, collectionImagePoster) }
 }
 
 // PersonalCollectionFeatures describes the acting account's storage support.

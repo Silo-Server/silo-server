@@ -7,7 +7,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"slices"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -23,8 +22,6 @@ type PersonalCollectionUpdateCommand struct {
 	CollectionID string
 	Request      PersonalCollectionUpdateRequest
 	PosterFile   func() ([]byte, error)
-	// V1Rules: see PersonalCollectionPreviewRequest.
-	V1Rules bool
 }
 
 func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd PersonalCollectionUpdateCommand) (PersonalCollectionView, error) {
@@ -76,11 +73,11 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 		input.DisplayQueryDefinition = &displayQueryDefinition
 	}
 	if len(req.QueryDefinition) > 0 {
-		normalized, err := normalizeSmartCollectionQueryDefinitionJSON(req.QueryDefinition, true, true, cmd.V1Rules)
+		normalized, err := normalizeSmartCollectionQueryDefinitionJSON(req.QueryDefinition, true, true)
 		if err != nil {
 			return none, fieldError("query_definition", "Invalid query_definition")
 		}
-		if !cmd.V1Rules && existing.CollectionType == collectionTypeSmart {
+		if existing.CollectionType == collectionTypeSmart {
 			if err := requireSmartCollectionRule(normalized); err != nil {
 				return none, err
 			}
@@ -231,7 +228,7 @@ func (h *CollectionHandler) PreviewPersonalCollection(ctx context.Context, req P
 
 	var def catalog.QueryDefinition
 	if len(req.QueryDefinition) > 0 {
-		normalized, err := normalizeQueryDefinitionJSON(req.QueryDefinition, true, true, req.V1Rules)
+		normalized, err := normalizeQueryDefinitionJSON(req.QueryDefinition, true, true)
 		if err != nil {
 			return none, fieldError("query_definition", "Invalid query_definition")
 		}
@@ -299,78 +296,6 @@ func (h *CollectionHandler) DeletePersonalCollection(ctx context.Context, userID
 	removeDeletedCollectionArtwork(ctx, h.ArtworkStore, userCollectionImagePrefix, collectionID)
 
 	return nil
-}
-
-// ListPersonalCollectionItems preserves the unpaged bridge response. V2 callers
-// must use the bounded continuation service instead. It lists the stored
-// members the reader can access: for another profile's collection, only those
-// its owner can access too, as on every other read.
-func (h *CollectionHandler) ListPersonalCollectionItems(ctx context.Context, userID int, profileID, collectionID string) (PersonalCollectionItemsView, error) {
-	var none PersonalCollectionItemsView
-
-	if collectionID == "" {
-		return none, apiError(http.StatusBadRequest, "bad_request", "Collection ID is required")
-	}
-
-	store, collection, err := h.personalCollectionStore(ctx, userID, profileID, collectionID, false)
-	if err != nil {
-		return none, err
-	}
-
-	items, err := store.ListCollectionItems(ctx, collectionID)
-	if err != nil {
-		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to list collection items")
-	}
-	items, err = h.accessibleCollectionItems(ctx, userID, profileID, collection.CreatorProfileID, items)
-	if err != nil {
-		return none, err
-	}
-
-	resp := PersonalCollectionItemsView{
-		Items: make([]PersonalCollectionItemView, 0, len(items)),
-	}
-	for _, ci := range items {
-		resp.Items = append(resp.Items, PersonalCollectionItemView{
-			CollectionID: ci.CollectionID,
-			MediaItemID:  ci.MediaItemID,
-			Position:     ci.Position,
-			AddedAt:      ci.AddedAt,
-		})
-	}
-
-	return resp, nil
-}
-
-// accessibleCollectionItems keeps the stored members of ownerProfileID's
-// collection that profileID may see (catalog.PersonalCollectionFilter), in
-// their stored order. Hidden members stay stored.
-func (h *CollectionHandler) accessibleCollectionItems(ctx context.Context, userID int, profileID, ownerProfileID string, items []userstore.CollectionItem) ([]userstore.CollectionItem, error) {
-	if len(items) == 0 {
-		return items, nil
-	}
-	filter, err := catalog.PersonalCollectionFilter(ctx, h.CollectionOwners, AccessFilterFromContext(ctx, ""), userID, profileID, ownerProfileID)
-	if err != nil {
-		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list collection items")
-	}
-	reader, err := h.itemReader()
-	if err != nil {
-		return nil, err
-	}
-	ids := make([]string, 0, len(items))
-	for _, item := range items {
-		ids = append(ids, item.MediaItemID)
-	}
-	visible, err := reader.GetByIDsWithAccess(ctx, ids, filter)
-	if err != nil {
-		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list collection items")
-	}
-	allowed := make(map[string]bool, len(visible))
-	for _, item := range visible {
-		if item != nil {
-			allowed[item.ContentID] = true
-		}
-	}
-	return slices.DeleteFunc(items, func(item userstore.CollectionItem) bool { return !allowed[item.MediaItemID] }), nil
 }
 
 func (h *CollectionHandler) AddPersonalCollectionItem(ctx context.Context, userID int, profileID, collectionID, itemID string, position int) error {

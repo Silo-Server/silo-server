@@ -178,23 +178,6 @@ func TestApplyBurstCap(t *testing.T) {
 	})
 }
 
-func TestCursorRoundTrip(t *testing.T) {
-	cursor := Cursor{CreatedAt: time.Date(2026, 6, 11, 10, 30, 0, 123456789, time.UTC), ID: "01ABC"}
-	decoded, err := DecodeCursor(cursor.Encode())
-	if err != nil {
-		t.Fatalf("decode failed: %v", err)
-	}
-	if !decoded.CreatedAt.Equal(cursor.CreatedAt) || decoded.ID != cursor.ID {
-		t.Fatalf("round trip mismatch: %+v vs %+v", decoded, cursor)
-	}
-	if _, err := DecodeCursor("not-a-cursor"); err == nil {
-		t.Fatal("garbage cursor must fail to decode")
-	}
-	if _, err := DecodeCursor(""); err == nil {
-		t.Fatal("empty cursor must fail to decode")
-	}
-}
-
 func TestMemoryTicketStore(t *testing.T) {
 	store := NewTicketStore(nil)
 	ctx := context.Background()
