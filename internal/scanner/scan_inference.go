@@ -9,11 +9,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/naming"
 )
 
-const (
-	inferenceStateResolved  = "resolved"
-	inferenceStateAmbiguous = "ambiguous"
-)
-
 // scanRootInference infers content roots for the files of one scan scope a
 // batch at a time. add returns the assignments of the files it is given, which
 // the caller keeps only while it processes that batch; the root snapshots and
@@ -66,8 +61,9 @@ func (a *scanRootInference) result() rootInferenceResult {
 // scanGroupInference is scanRootInference's counterpart for content groups. A
 // group or an observed location can hold files from any directory of the
 // scope, so their snapshots are tallied across every batch; only the per-file
-// identities are handed back batch by batch. result equals what a single
-// inferGroupAssignments call over all the files returns.
+// identities are handed back batch by batch. result covers every file added,
+// and is the same however the files were split into batches.
+// inferGroupAssignments is this inference over a single list.
 //
 // A tally keeps the whole identity of its first file, which supplies the
 // snapshot's sample and identity fields, and for the rest of its files only
@@ -126,7 +122,7 @@ func newScanGroupInference(libraryType string, folderID int, identityOverrides *
 // add infers the group identity of each file and returns the identities by
 // clean path. rootAssignments are the same files' root assignments.
 func (a *scanGroupInference) add(filePaths []string, rootAssignments map[string]fileRootAssignment) map[string]fileGroupAssignment {
-	assignments := inferGroupAssignments(filePaths, a.libraryType, a.folderID, rootAssignments, a.identityOverrides).Assignments
+	assignments := inferGroupIdentities(filePaths, a.libraryType, rootAssignments, a.identityOverrides)
 	for _, rawPath := range filePaths {
 		a.observe(assignments[filepath.Clean(rawPath)])
 	}
@@ -135,7 +131,7 @@ func (a *scanGroupInference) add(filePaths []string, rootAssignments map[string]
 
 func (a *scanGroupInference) observe(identity fileGroupAssignment) {
 	groupKey := groupBucketKey(identity)
-	ambiguous := identity.State == inferenceStateAmbiguous
+	ambiguous := identity.State == groupStateAmbiguous
 
 	location := a.locations[identity.ObservedRootPath]
 	if location == nil {
@@ -203,9 +199,9 @@ func (a *scanGroupInference) result() groupInferenceResult {
 }
 
 func (g *groupTally) snapshot(folderID int) models.ScannedMediaGroup {
-	state := inferenceStateResolved
+	state := groupStateResolved
 	if g.ambiguous {
-		state = inferenceStateAmbiguous
+		state = groupStateAmbiguous
 	}
 	overrideSource := overrideSourceNone
 	if g.overridden {
@@ -247,9 +243,9 @@ func (l *locationTally) snapshot(folderID int, observedRoot string) models.Obser
 	// A location split across groups is ambiguous only when the split was not
 	// operator-directed: identity overrides deliberately place files from one
 	// folder into different groups.
-	state := inferenceStateResolved
+	state := groupStateResolved
 	if l.ambiguous || (groupCount > 1 && nonOverriddenGroups > 1) {
-		state = inferenceStateAmbiguous
+		state = groupStateAmbiguous
 	}
 	primary := l.first
 	primaryGroupVersion := 0

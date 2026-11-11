@@ -42,10 +42,9 @@ func batchedInference(
 // produces: file counts, the first file's sample and identity, ambiguity, the
 // primary location and the evidence.
 //
-// Groups are compared with inferGroupAssignments, which still tallies a whole
-// list itself. Roots have one implementation, so for them this checks only
-// that the batch size does not matter; internal/naming pins what a root
-// snapshot holds.
+// The single pass and the batches share one implementation, so this checks
+// that splitting the files does not change the result; the other inference
+// tests pin what the snapshots hold.
 func TestBatchedInferenceMatchesSinglePass(t *testing.T) {
 	t.Parallel()
 
