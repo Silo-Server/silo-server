@@ -14,11 +14,12 @@ import (
 // recommendPostgresOLTPCases are the hosts TestRecommendPostgresOLTPSettings
 // sizes.
 var recommendPostgresOLTPCases = []struct {
-	name         string
-	memoryBudget int64
-	cpus         int
-	detectedCPUs int
-	want         map[string]string
+	name           string
+	memoryBudget   int64
+	memoryExplicit bool
+	cpus           int
+	detectedCPUs   int
+	want           map[string]string
 }{
 	{
 		name:         "mid-sized host reaches the shared_buffers ceiling",
@@ -76,6 +77,21 @@ var recommendPostgresOLTPCases = []struct {
 		},
 	},
 	{
+		// POSTGRES_TUNE_MEMORY is the way above the ceiling. work_mem is the
+		// same as under a detected budget of this size.
+		name:           "explicit memory budget is not bounded",
+		memoryBudget:   32 * sizeGB,
+		memoryExplicit: true,
+		cpus:           8,
+		want: map[string]string{
+			"shared_buffers":       "8GB",
+			"effective_cache_size": "24GB",
+			"autovacuum_work_mem":  "256MB",
+			"work_mem":             "77672kB",
+			"huge_pages":           "try",
+		},
+	},
+	{
 		// Workers follow the bounded count; work_mem keeps the detected
 		// one, so bounding does not raise it.
 		name:         "detected CPU count was bounded",
@@ -99,6 +115,7 @@ func TestRecommendPostgresOLTPSettings(t *testing.T) {
 				Enabled:           true,
 				Profile:           postgresTuneProfileOLTP,
 				MemoryBudgetBytes: tt.memoryBudget,
+				MemoryExplicit:    tt.memoryExplicit,
 				CPUs:              tt.cpus,
 				DetectedCPUs:      tt.detectedCPUs,
 				Connections:       100,
@@ -182,6 +199,9 @@ func TestLoadPostgresTuneOptionsFromEnv(t *testing.T) {
 	}
 	if opts.MemorySource != "env" {
 		t.Fatalf("MemorySource = %q, want env", opts.MemorySource)
+	}
+	if !opts.MemoryExplicit {
+		t.Fatal("MemoryExplicit = false, want true for a set POSTGRES_TUNE_MEMORY")
 	}
 	if opts.MemoryBudgetPercent != 100 {
 		t.Fatalf("MemoryBudgetPercent = %d, want 100", opts.MemoryBudgetPercent)

@@ -29,14 +29,16 @@ const (
 
 	defaultPostgresTuneMemoryBudgetPercent = 75
 
-	// postgresTuneSharedBuffersMaxBytes is the ceiling on the tuned
-	// shared_buffers. A quarter of the memory budget suits a database that is
-	// the only tenant of its host, but a media catalog's hot set (indexes
-	// and recently read rows) is far smaller than a large host's quarter, and
-	// the operating system's page cache still holds whatever falls outside it.
-	// The ceiling is fixed, not sized from the database: shared_buffers
-	// changes only at a restart, and the omnibus image writes it before the
-	// database has any content.
+	// postgresTuneSharedBuffersMaxBytes is the ceiling on shared_buffers
+	// when the memory budget was detected. A quarter of the memory budget
+	// suits a database that is the only tenant of its host, but a media
+	// catalog's hot set (indexes and recently read rows) is usually far
+	// smaller than a large host's quarter, and the operating system's page
+	// cache still holds whatever falls outside it. The ceiling is fixed, not
+	// sized from the database: shared_buffers changes only at a restart, and
+	// the omnibus image writes it before the database has any content. A
+	// database that outgrows it (intro detection fingerprints alone can pass
+	// 2GB) is given more with POSTGRES_TUNE_MEMORY, which is not bounded.
 	postgresTuneSharedBuffersMaxBytes = 2 * sizeGB
 
 	// maxPostgresTuneDetectedCPUs bounds a detected CPU count. A container
@@ -89,7 +91,11 @@ type PostgresTuneOptions struct {
 	DetectedMemoryBytes int64
 	MemorySource        string
 	MemoryBudgetPercent int
-	CPUs                int
+	// MemoryExplicit reports that POSTGRES_TUNE_MEMORY named the budget. An
+	// explicit budget is the operator's, so shared_buffers takes its full
+	// quarter.
+	MemoryExplicit bool
+	CPUs           int
 	// DetectedCPUs is the machine's CPU count before it was bounded, or zero
 	// when CPUs was set explicitly. work_mem is sized from it, so bounding
 	// the workers does not raise work_mem.
@@ -133,6 +139,7 @@ type postgresTuneMemoryBudget struct {
 	DetectedBytes int64
 	Source        string
 	Percent       int
+	Explicit      bool
 }
 
 // LoadPostgresTuneOptionsFromEnv reads the opt-in PostgreSQL tuning environment.
@@ -201,6 +208,7 @@ func LoadPostgresTuneOptionsFromEnv(appMaxConnections int) (PostgresTuneOptions,
 		DetectedMemoryBytes: memory.DetectedBytes,
 		MemorySource:        memory.Source,
 		MemoryBudgetPercent: memory.Percent,
+		MemoryExplicit:      memory.Explicit,
 		CPUs:                cpus,
 		DetectedCPUs:        detectedCPUs,
 		Connections:         connections,
@@ -212,7 +220,8 @@ func LoadPostgresTuneOptionsFromEnv(appMaxConnections int) (PostgresTuneOptions,
 }
 
 // RecommendPostgresOLTPSettings returns pgtune-style OLTP recommendations,
-// with shared_buffers and autovacuum_work_mem bounded for a catalog database.
+// with autovacuum_work_mem, and shared_buffers under a detected memory budget,
+// bounded for a catalog database.
 func RecommendPostgresOLTPSettings(opts PostgresTuneOptions, postgresMajorVersion int) []PostgresTuneSetting {
 	memoryBudgetKB := opts.MemoryBudgetBytes / sizeKB
 	if memoryBudgetKB <= 0 {
@@ -228,7 +237,10 @@ func RecommendPostgresOLTPSettings(opts PostgresTuneOptions, postgresMajorVersio
 	// work_mem keeps the uncapped quarter and the unbounded CPU count as its
 	// basis, so neither bound raises it.
 	budgetQuarter := memoryBudgetKB / 4
-	sharedBuffers := min(budgetQuarter, postgresTuneSharedBuffersMaxBytes/sizeKB)
+	sharedBuffers := budgetQuarter
+	if !opts.MemoryExplicit {
+		sharedBuffers = min(sharedBuffers, postgresTuneSharedBuffersMaxBytes/sizeKB)
+	}
 	// A planner hint, not an allocation: the page cache holds what
 	// shared_buffers does not, so it stays sized from the whole budget.
 	effectiveCacheSize := (memoryBudgetKB * 3) / 4
@@ -455,6 +467,7 @@ func loadPostgresTuneMemory() (postgresTuneMemoryBudget, error) {
 		DetectedBytes: mem,
 		Source:        "env",
 		Percent:       100,
+		Explicit:      true,
 	}, nil
 }
 

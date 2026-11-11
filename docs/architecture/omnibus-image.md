@@ -203,12 +203,15 @@ environment and `/config/silo/.env`. A new cluster then starts with them, and
 Silo's later `ALTER SYSTEM` writes the same values, so no restart is pending.
 An existing cluster whose `postgresql.auto.conf` holds an older value runs
 with that value until the restart after Silo rewrites it. Of the settings in
-this file, `shared_buffers` is a quarter of the memory budget up to a fixed
-2GB, and `max_worker_processes` follows a detected CPU count of at most 16
-(`POSTGRES_TUNE_CPUS` is used as given). The `shared_buffers` ceiling is
-fixed, not sized from the database, because this file is written before the
-database has content and a value that grew with it would need a restart each
-time.
+this file, `shared_buffers` is a quarter of the memory budget, up to a fixed
+2GB when the budget is detected, and `max_worker_processes` follows a
+detected CPU count of at most 16. `POSTGRES_TUNE_MEMORY` and
+`POSTGRES_TUNE_CPUS` are used as given, so an explicit
+`POSTGRES_TUNE_MEMORY` is the way to a larger `shared_buffers`: the tuner's
+`postgresql.auto.conf` loads after `conf.d`, so a local file cannot raise it.
+The ceiling is fixed, not sized from the database, because this file is
+written before the database has content and a value that grew with it would
+need a restart each time.
 `max_connections` and `io_method` stay out: the first is sized from
 `database.max_connections`, which lives in the database, and an `io_method`
 PostgreSQL rejects would drop the whole file (below). Both apply at the next
