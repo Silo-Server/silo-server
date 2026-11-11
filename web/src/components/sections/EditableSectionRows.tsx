@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { rowKindLabel } from "@/lib/homeRows/catalog";
 import { queryDefinitionFromSectionConfig } from "@/api/types";
 import type { Library } from "@/api/types";
-import { matchRecipePreset, type RecipeCatalogResponse } from "@/lib/recipes";
+import { matchRecipePreset, presetLabel, type RecipeCatalogResponse } from "@/lib/recipes";
 import { Eye, EyeOff, GripVertical, Pencil, Star, Trash2 } from "lucide-react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -32,7 +32,8 @@ export function recipeLabel(
   if (catalog) {
     for (const defs of Object.values(catalog.categories)) {
       const found = defs?.find((def) => def.type === type);
-      const label = found ? matchRecipePreset(found, config)?.display_name : undefined;
+      const preset = found ? matchRecipePreset(found, config) : undefined;
+      const label = preset ? presetLabel(preset) : undefined;
       if (label) return label;
     }
   }

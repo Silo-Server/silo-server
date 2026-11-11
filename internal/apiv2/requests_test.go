@@ -601,7 +601,8 @@ func TestDiscover(t *testing.T) {
 	if rec.Code != 200 || len(sections.Items) != 1 || sections.Items[0].Key != "trending_movies" || len(sections.Items[0].Results) != 1 || sections.Page != nil {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
-	if len(sections.RowOrder) != 2 || sections.RowOrder[1] != (DiscoverRowRef{Key: "studios", Type: "studios", Title: "Studios"}) {
+	if len(sections.RowOrder) != 2 || sections.RowOrder[1].Key != "studios" || sections.RowOrder[1].Type != "studios" || sections.RowOrder[1].Title != "Studios" ||
+		sections.RowOrder[1].TitleKey != "home.section.discoverStudios" {
 		t.Fatalf("row_order = %+v, want the title row then the brand row", sections.RowOrder)
 	}
 	rec = do(t, h, http.MethodGet, "/api/v2/requests/discover/rows/r_abc?page=2", "", requestOwner)
