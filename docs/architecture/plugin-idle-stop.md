@@ -49,7 +49,10 @@ reads (`Host.Running`, which backs the admin `runtime.state`) are not use.
 - The watcher holds the installation's start slot until the old process has
   exited, so a restart never overlaps the process it replaces. A `Start`
   already in flight wins: it cancels the watcher. `Stop` and `Shutdown` also
-  wait for that exit.
+  wait for that exit. The one exception is a process that still has not
+  exited `DefaultIdleStopTimeout` after being killed (stuck in uninterruptible
+  I/O): the watcher logs a warning and releases the slot, so a restart can
+  overlap it and `Stop` or `Shutdown` can return before it exits.
 - The first call after an idle stop waits for a cold start before it is sent:
   the binary is verified again, the process launches, and the host reads its
   manifest and configures it. A start that fails is recorded as any failed

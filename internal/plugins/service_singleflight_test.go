@@ -305,6 +305,10 @@ func TestOnlyLazyPluginsAreStartedWithStopWhenIdle(t *testing.T) {
 	host := &fakeServiceHost{clientErr: pluginhost.ErrClientNotFound}
 	service := &Service{installations: store, host: host}
 
+	// No process, as after an idle stop: reported stopped, not failed.
+	if state := service.RuntimeStateOf(store.byID[7]); state.State != ResidentStopped || state.LastError != "" {
+		t.Fatalf("runtime state of a stopped idle plugin = %+v, want stopped with no error", state)
+	}
 	if _, err := service.ensureClient(context.Background(), 7); err != nil {
 		t.Fatalf("ensureClient after an idle stop: %v", err)
 	}
@@ -313,9 +317,6 @@ func TestOnlyLazyPluginsAreStartedWithStopWhenIdle(t *testing.T) {
 	}
 	if !host.started[0].StopWhenIdle {
 		t.Fatal("a lazily started plugin was not started with StopWhenIdle")
-	}
-	if state := service.RuntimeStateOf(store.byID[7]); state.State != ResidentStopped || state.LastError != "" {
-		t.Fatalf("runtime state of a stopped idle plugin = %+v, want stopped with no error", state)
 	}
 
 	resident := testPluginManifest(t, "silo.overlay", "1.0.0")
