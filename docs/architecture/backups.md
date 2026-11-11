@@ -729,7 +729,11 @@ in version 3, a `title_key` section in version 5) is refused. A set without
 `web_only` reads it as false, the column's default. A set without `title_key`
 reads every title as typed text, so a restored title never gains a key; a
 keyed title keeps its key and arguments when a restore creates or replaces the
-section. Readers accept versions 1 to 6; version 6 is always written.
+section. A restore never takes a key away: replacing a section with a title
+that has no key leaves the key the section already has when the title is the
+same text, because the two then show the same English, and a set written
+before version 6 cannot say whether its title was typed. The restore preview
+reports a section that differs only by its key as changed. Readers accept versions 1 to 6; version 6 is always written.
 
 | Section | Holds | Blob prefixes |
 |---|---|---|
