@@ -86,8 +86,9 @@ The server reads and decodes a poster before it writes anything. `uploadCollecti
   `200`, or more than 10 MiB.
 - `503 dependency_unavailable` with `Retry-After` when the server is too busy to decode another
   image. The poster may be fine; send the request again.
-- `500 internal_error` for any other failure, such as a source that could not be reached or a
-  storage error. The answer carries no detail; the server logs the cause. For a source it
+- `500 internal_error` for any other failure, such as a source that could not be reached, a
+  source address the server refuses (above), or a storage error. The answer carries no detail;
+  the server logs the cause, except for a refused address, which is not logged. For a source it
   could not download, the log line holds the source's host and the kind of failure (a
   timeout, a DNS, connection or TLS certificate failure, or any other) and no other part of
   the URL the request or a redirect named.

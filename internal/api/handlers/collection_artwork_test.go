@@ -507,10 +507,15 @@ func captureDefaultLog(t *testing.T) *bytes.Buffer {
 func TestCollectionArtworkError_HidesServerFailures(t *testing.T) {
 	logs := captureDefaultLog(t)
 
-	err := personalCollectionPosterError(t.Context(), "c1", errors.New("uploading original: connection reset"))
-	apiErr, ok := errors.AsType[*APIError](err)
-	if !ok || apiErr.Status != http.StatusInternalServerError || apiErr.Message != "Failed to store collection artwork" {
-		t.Fatalf("err = %#v, want the 500 fallback", err)
+	cause := errors.New("uploading original: connection reset")
+	for _, err := range []error{
+		personalCollectionPosterError(t.Context(), "c1", cause),
+		collectionArtworkError(cause, "Failed to store collection artwork"),
+	} {
+		apiErr, ok := errors.AsType[*APIError](err)
+		if !ok || apiErr.Status != http.StatusInternalServerError || apiErr.Message != "Failed to store collection artwork" {
+			t.Fatalf("err = %#v, want the 500 fallback", err)
+		}
 	}
 
 	// A busy answer is the caller's to act on, so it is not hidden, on the

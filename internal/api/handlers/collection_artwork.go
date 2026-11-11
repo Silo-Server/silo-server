@@ -412,7 +412,7 @@ func storeCollectionImageVariants(
 		if err := store.Put(ctx, key, v.Data); err != nil {
 			return "", fmt.Errorf("uploading %s: %w", v.Key, err)
 		}
-		if v.Key == "original" {
+		if v.Key == artworkkey.OriginalVariant {
 			s3Path = key
 		}
 	}
