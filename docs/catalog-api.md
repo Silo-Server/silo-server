@@ -464,7 +464,9 @@ but not its `file_path` or `file_name`, an external subtitle track's
 `folder_paths`. The rule covers the versions nested in
 `playback_variants` too. When two such subtitles share a language, format and
 flags, the second gets the title `en 2` (then `en 3`, and so on), as the
-playback inventory labels it, so a saved choice still tells them apart.
+playback inventory labels it, so a saved choice still tells them apart. A
+choice the viewer saved earlier under a sidecar's file name comes back in
+`effective_subtitle_track_signature` with that sidecar's new label.
 
 Audiobook and ebook versions keep `file_name` for every viewer, and lose only
 `file_path`. Those beta features name and open files by it.
