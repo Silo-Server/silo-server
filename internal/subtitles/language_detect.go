@@ -194,7 +194,13 @@ func containsDigit(value string) bool {
 	return false
 }
 
+// languageFromMetadata reads only the start of the file, where ASS script info
+// and WebVTT headers live, so its cost does not grow with file size.
 func languageFromMetadata(format SubtitleFormat, data []byte) (string, bool) {
+	if len(data) > contentSampleBytes {
+		head := data[:contentSampleBytes]
+		data = head[:bytes.LastIndexByte(head, '\n')+1]
+	}
 	switch format {
 	case FormatASS, FormatSSA:
 		return languageFromASSMetadata(data)
@@ -245,9 +251,8 @@ func languageFromVTTMetadata(data []byte) (string, bool) {
 
 // Content detection reads at most contentSampleBytes of a subtitle file.
 // Language identification needs far less text than a full subtitle holds, and
-// the detector's cost grows with its input, so a larger file is sampled as
-// contentSampleWindows evenly spaced runs of whole lines. Each window stays
-// under bufio.Scanner's 64 KiB line limit.
+// the detector's cost grows with its input, so a larger file is sampled: its
+// text-bearing lines are read as contentSampleWindows evenly spaced runs.
 const (
 	contentSampleBytes   = 128 << 10
 	contentSampleWindows = 8
@@ -275,40 +280,79 @@ func languageFromContent(data []byte, format SubtitleFormat) (string, bool) {
 }
 
 // contentDetectionText returns the subtitle text handed to the language
-// detector. It never exceeds contentSampleBytes: text extraction only drops
-// bytes from its input, and that input is at most contentSampleBytes.
+// detector. It holds at most contentSampleBytes runes: extraction turns each
+// byte of its input into at most one rune, and that input is at most
+// contentSampleBytes long.
 func contentDetectionText(data []byte, format SubtitleFormat) string {
-	return extractSubtitleDialogue(sampleSubtitleContent(data), format)
+	return extractSubtitleDialogue(sampleSubtitleContent(data, format), format)
 }
 
 // sampleSubtitleContent returns data unchanged when it fits the content
-// sample, and otherwise joins evenly spaced windows trimmed to whole lines.
-// A blank line separates windows so SRT and VTT cue parsing restarts cleanly.
-func sampleSubtitleContent(data []byte) []byte {
+// sample. For a larger file it keeps the lines that can carry subtitle text,
+// so embedded fonts, graphics, or styles are not sampled in place of speech,
+// and returns whole lines from evenly spaced windows over them. A blank line
+// ends each window so cue parsing restarts cleanly.
+func sampleSubtitleContent(data []byte, format SubtitleFormat) []byte {
 	if len(data) <= contentSampleBytes {
 		return data
 	}
+	total := 0
+	forEachTextLine(data, format, func(line []byte) { total += len(line) })
+	sample := make([]byte, 0, min(total, contentSampleBytes))
+	if total <= contentSampleBytes {
+		forEachTextLine(data, format, func(line []byte) { sample = append(sample, line...) })
+		return sample
+	}
 	window := contentSampleBytes/contentSampleWindows - 1
-	step := (len(data) - window) / (contentSampleWindows - 1)
-	sample := make([]byte, 0, contentSampleBytes)
-	for i := range contentSampleWindows {
-		chunk := data[i*step : i*step+window]
-		if i > 0 {
-			// Drop the partial line the window starts inside.
-			start := bytes.IndexByte(chunk, '\n')
-			if start < 0 {
+	step := (total - window) / (contentSampleWindows - 1)
+	w, offset := 0, 0
+	forEachTextLine(data, format, func(line []byte) {
+		start := offset
+		offset += len(line)
+		for w < contentSampleWindows && start >= w*step+window {
+			sample = append(sample, '\n')
+			w++
+		}
+		if w < contentSampleWindows && start >= w*step && offset <= w*step+window {
+			sample = append(sample, line...)
+		}
+	})
+	return sample
+}
+
+// forEachTextLine calls fn with each line of data, including its newline,
+// that the format's text extractor may read: ASS and SSA dialog events,
+// WebVTT cue timings and payloads, and every line of other formats.
+func forEachTextLine(data []byte, format SubtitleFormat, fn func(line []byte)) {
+	inCue := false
+	for len(data) > 0 {
+		end := bytes.IndexByte(data, '\n') + 1
+		if end == 0 {
+			end = len(data)
+		}
+		line := data[:end]
+		data = data[end:]
+		switch format {
+		case FormatASS, FormatSSA:
+			const prefix = "dialogue:" //nolint:misspell // ASS event keyword
+			trimmed := bytes.TrimSpace(line)
+			if len(trimmed) < len(prefix) || !bytes.EqualFold(trimmed[:len(prefix)], []byte(prefix)) {
 				continue
 			}
-			chunk = chunk[start+1:]
+		case FormatVTT:
+			trimmed := bytes.TrimSpace(line)
+			switch {
+			case len(trimmed) == 0:
+				inCue = false
+				continue
+			case bytes.Contains(trimmed, []byte("-->")):
+				inCue = true
+			case !inCue:
+				continue
+			}
 		}
-		end := bytes.LastIndexByte(chunk, '\n')
-		if end < 0 {
-			continue
-		}
-		sample = append(sample, chunk[:end+1]...)
-		sample = append(sample, '\n')
+		fn(line)
 	}
-	return sample
 }
 
 func extractSubtitleDialogue(data []byte, format SubtitleFormat) string {

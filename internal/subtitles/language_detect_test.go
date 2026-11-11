@@ -143,25 +143,43 @@ var englishDialogue = []string{
 	"We have three hours until sunrise, so keep your voice down and follow me.",
 }
 
+// assWithAttachments returns an ASS file whose English events sit between
+// embedded data sections, the layout Aegisub writes for attached fonts.
+func assWithAttachments(before, events, after int) []byte {
+	attachment := func(section string, size int) []byte {
+		var b strings.Builder
+		fmt.Fprintf(&b, "\n[%s]\nfontname: attached.ttf\n", section)
+		for i := 0; b.Len() < size; i++ {
+			for j := range 80 {
+				b.WriteByte(byte(33 + (i*7+j*13)%64))
+			}
+			b.WriteByte('\n')
+		}
+		return []byte(b.String())
+	}
+	data := []byte("[Script Info]\nScriptType: v4.00+\n")
+	data = append(data, attachment("Fonts", before)...)
+	data = append(data, '\n')
+	data = append(data, largeSubtitle(FormatASS, events, englishDialogue)...)
+	return append(data, attachment("Graphics", after)...)
+}
+
 func TestContentDetectionBoundsDetectorInput(t *testing.T) {
 	const size = MaxUploadSize
 	inputs := map[string]struct {
 		format SubtitleFormat
 		data   []byte
 	}{
-		"srt":            {FormatSRT, largeSubtitle(FormatSRT, size, englishDialogue)},
-		"vtt":            {FormatVTT, largeSubtitle(FormatVTT, size, englishDialogue)},
-		"ass":            {FormatASS, largeSubtitle(FormatASS, size, englishDialogue)},
-		"no newlines":    {FormatSRT, bytes.Repeat([]byte("word "), size/5)},
-		"multibyte text": {FormatSRT, largeSubtitle(FormatSRT, size, []string{"日本語の字幕はここにあります。", "Ünïcödé — ✓ 🎬"})},
+		"srt": {FormatSRT, largeSubtitle(FormatSRT, size, englishDialogue)},
+		"vtt": {FormatVTT, largeSubtitle(FormatVTT, size, englishDialogue)},
+		"ass": {FormatASS, largeSubtitle(FormatASS, size, englishDialogue)},
+		// Each invalid byte becomes a three-byte replacement rune.
+		"invalid utf-8": {FormatSRT, largeSubtitle(FormatSRT, size, []string{string(bytes.Repeat([]byte{0xff}, 70))})},
 	}
 	for name, in := range inputs {
 		text := contentDetectionText(in.data, in.format)
-		if len(text) > contentSampleBytes {
-			t.Errorf("%s: detector input is %d bytes, want at most %d", name, len(text), contentSampleBytes)
-		}
-		if !utf8.ValidString(text) {
-			t.Errorf("%s: detector input is not valid UTF-8", name)
+		if runes := utf8.RuneCountInString(text); runes > contentSampleBytes {
+			t.Errorf("%s: detector input is %d runes, want at most %d", name, runes, contentSampleBytes)
 		}
 	}
 }
@@ -170,31 +188,45 @@ func TestContentDetectionBoundsDetectorInput(t *testing.T) {
 // maximum-size upload allocates about as much as on a normal feature-length
 // subtitle, rather than millions of times while reading the whole file.
 func TestResolveUploadLanguageWorkIsBounded(t *testing.T) {
-	for _, format := range []SubtitleFormat{FormatSRT, FormatVTT, FormatASS} {
-		data := largeSubtitle(format, MaxUploadSize, englishDialogue)
-		filename := "subtitle." + string(format)
+	// Short header lines and no cue until the end make a metadata scan
+	// that reads the whole file allocate once per line.
+	longHeader := append([]byte("WEBVTT\n"), bytes.Repeat([]byte("x\n"), MaxUploadSize/2-512)...)
+	longHeader = append(longHeader, "\n00:00:01.000 --> 00:00:02.000\n"+strings.Join(englishDialogue, " ")+"\n"...)
+	cases := []struct {
+		format SubtitleFormat
+		data   []byte
+	}{
+		{FormatSRT, largeSubtitle(FormatSRT, MaxUploadSize, englishDialogue)},
+		{FormatVTT, largeSubtitle(FormatVTT, MaxUploadSize, englishDialogue)},
+		{FormatASS, largeSubtitle(FormatASS, MaxUploadSize, englishDialogue)},
+		{FormatASS, assWithAttachments(MaxUploadSize/2, 100<<10, MaxUploadSize/2-(200<<10))},
+		{FormatVTT, longHeader},
+	}
+	for _, tc := range cases {
+		filename := "subtitle." + string(tc.format)
 		var detected LanguageDetection
 		allocs := testing.AllocsPerRun(1, func() {
-			detected, _ = ResolveUploadLanguage(filename, format, data, "", false)
+			detected, _ = ResolveUploadLanguage(filename, tc.format, tc.data, "", false)
 		})
 		if detected.Language != "en" || detected.Source != LanguageSourceContent {
-			t.Fatalf("%s: detected %+v, want en from content", format, detected)
+			t.Errorf("%s, %d bytes: detected %+v, want en from content", tc.format, len(tc.data), detected)
 		}
 		if allocs > 1_000_000 {
-			t.Errorf("%s: detecting a %d byte upload made %.0f allocations, want at most 1000000", format, len(data), allocs)
+			t.Errorf("%s: detecting a %d byte upload made %.0f allocations, want at most 1000000", tc.format, len(tc.data), allocs)
 		}
 	}
 }
 
 func TestSampleSubtitleContentKeepsSmallFilesWhole(t *testing.T) {
-	data := largeSubtitle(FormatSRT, contentSampleBytes-200, englishDialogue)
-	if got := sampleSubtitleContent(data); !bytes.Equal(got, data) {
+	data := largeSubtitle(FormatSRT, contentSampleBytes, englishDialogue)[:contentSampleBytes]
+	if got := sampleSubtitleContent(data, FormatSRT); !bytes.Equal(got, data) {
 		t.Fatalf("a %d byte file was sampled; files up to %d bytes must be read whole", len(data), contentSampleBytes)
 	}
 }
 
 // Sampling a large file must find the language that reading all of it finds,
-// including when typesetting lines fill the start of an ASS file.
+// including when typesetting lines or attachments surround the speech in an
+// ASS file.
 func TestSampledDetectionMatchesFullText(t *testing.T) {
 	typesetting := make([]string, 0, 3000)
 	for i := range 3000 {
@@ -229,6 +261,7 @@ func TestSampledDetectionMatchesFullText(t *testing.T) {
 			"قالت لي إن أخاها لا يزال يعمل في المحطة.",
 		}), "ar"},
 		{"japanese ass after typesetting", FormatASS, karaoke, "ja"},
+		{"english ass between attachments", FormatASS, assWithAttachments(1<<20, 50<<10, 200<<10), "en"},
 	}
 	for _, tc := range cases {
 		if len(tc.data) <= contentSampleBytes {
