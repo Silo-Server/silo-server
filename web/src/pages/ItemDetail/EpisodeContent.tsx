@@ -264,7 +264,7 @@ export default function EpisodeContent({
     initialSeasonNumber: item.season_number ?? undefined,
   });
   const restartHref =
-    primaryAction.label === t("web.detail.actions.resume") && (item.versions?.length ?? 0) > 0
+    primaryAction.resuming && (item.versions?.length ?? 0) > 0
       ? `/watch/${item.content_id}?restart=1`
       : undefined;
 

@@ -311,12 +311,12 @@ function describeKind(row: HomeRow, context: DescribeContext): DescriptionPart[]
         }),
       ];
     case "trending_discover": {
-      // The movies-only and TV-only wording is new; its catalog keys are a follow-up,
-      // so those two stay English until the catalog has them.
       if (config.filter_type === "movie" || config.filter_type === "series") {
-        const what = config.filter_type === "movie" ? "Movies trending" : "TV shows trending";
         return [
-          `${what} on TMDB ${config.window === "day" ? "today" : "this week"}, from what you have`,
+          t("web.home.rows.describe.trendingDiscoverFiltered", {
+            media: config.filter_type,
+            window: config.window === "day" ? "day" : "week",
+          }),
         ];
       }
       return [

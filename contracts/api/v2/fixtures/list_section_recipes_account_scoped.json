@@ -31,7 +31,9 @@
                   "comedy"
                 ],
                 "mood": "cozy"
-              }
+              },
+              "display_name_key": "home.recipe.cozy.name",
+              "description_short_key": "home.recipe.cozy.description"
             },
             {
               "key": "bare",
@@ -39,7 +41,9 @@
               "icon": "dot",
               "description_short": "No params",
               "description_long": "",
-              "default_params": {}
+              "default_params": {},
+              "display_name_key": "home.recipe.bare.name",
+              "description_short_key": "home.recipe.bare.description"
             }
           ],
           "avoid_duplicates": false,

@@ -100,8 +100,7 @@ export function useSaveAdminDashboardLayout() {
       });
       if (!isCapturedProfileAuthorityActive(intent.profileContext))
         throw new StaleApiRequestContextError();
-      if (!etag)
-        throw new Error("Server layout write revision missing; reload before saving again.");
+      if (!etag) throw new Error(t("web.admin.errors.layoutRevisionMissing"));
       return etag;
     },
     onSuccess: (_result, intent) => {

@@ -92,8 +92,18 @@ Unrestricted viewers and the admin collection routes keep the stored count.
 ## Personal collections
 
 A personal collection's assigned poster is the one its creator uploaded, linked or imported,
-stored in `user_personal_collections.poster_url`. Without one it shows a collage, by the rules
-above with these differences:
+stored in `user_personal_collections.poster_url`. That column holds an http(s) image URL, a
+root-relative path to a bundled template poster, or a storage key the server built under the
+collection's own `user-collection-images/{collection}/` directory. No request may set a key:
+an import accepts only a template path or an http(s) URL, and an upload or linked image is
+stored under a key the server names. Every read resolves the poster through
+`personalCollectionPosterURL` (`internal/api/handlers`), which signs a key only when
+`usercollections.OwnsPosterKey` places it in that directory and otherwise returns no poster. A
+backup restore applies the same rule. Signing any other stored key would give its reader a link,
+valid without a session, to an object the collection does not own.
+
+Without an assigned poster the collection shows a collage, by the rules above with these
+differences:
 
 - The viewer's filter is `catalog.PersonalCollectionFilter`: for another profile's shared
   collection, the viewer's access intersected with the owner's, resolved on every read. Sources

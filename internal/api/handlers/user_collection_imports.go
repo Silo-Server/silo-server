@@ -8,6 +8,9 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"path"
+	"regexp"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -239,6 +242,10 @@ func (h *UserCollectionImportHandler) createImportedCollection(
 	if err := validateOptionalLibraryIDs(cfg.LibraryIDs); err != nil {
 		return none, err
 	}
+	posterURL, err := importedPosterURL(shared.PosterURL)
+	if err != nil {
+		return none, err
+	}
 
 	sourceConfigJSON, err := usercollections.MarshalSourceConfig(cfg)
 	if err != nil {
@@ -266,13 +273,13 @@ func (h *UserCollectionImportHandler) createImportedCollection(
 		SyncSchedule:           schedule,
 		NextSyncAt:             usercollections.InitialNextSyncAt(schedule),
 		DisplayQueryDefinition: displayQueryDefinition,
-		PosterURL:              strings.TrimSpace(shared.PosterURL),
+		PosterURL:              posterURL,
 	})
 	if err != nil {
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to create collection")
 	}
 
-	if err := h.storeBundledTemplatePoster(ctx, store, collection, strings.TrimSpace(shared.PosterURL)); err != nil {
+	if err := h.storeBundledTemplatePoster(ctx, store, collection, posterURL); err != nil {
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to process template poster")
 	}
 
@@ -348,22 +355,8 @@ func (h *UserCollectionImportHandler) artworkBackend() blobstore.Store {
 // collectionView renders a stored collection with its poster presigned.
 func (h *UserCollectionImportHandler) collectionView(ctx context.Context, c userstore.Collection) PersonalCollectionView {
 	resp := toCollectionResponse(c)
-	resp.PosterURL = h.presignCollectionPoster(ctx, c.PosterURL)
+	resp.PosterURL = personalCollectionPosterURL(ctx, h.ArtworkResolver, c.ID, c.PosterURL)
 	return resp
-}
-
-func (h *UserCollectionImportHandler) presignCollectionPoster(ctx context.Context, path string) string {
-	if path == "" {
-		return ""
-	}
-	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") || strings.HasPrefix(path, "/") {
-		return catalog.ImageURLOrEmpty(path)
-	}
-	if h.ArtworkResolver == nil {
-		return ""
-	}
-	key := cardThumbnailPath(path)
-	return h.ArtworkResolver.ResolveURLs(ctx, []string{key})[key].URL
 }
 
 func (h *UserCollectionImportHandler) HandleSync(w http.ResponseWriter, r *http.Request) {
@@ -445,6 +438,31 @@ func validateOptionalLimit(limit *int) error {
 		return fieldError("limit", "limit must be at least 1")
 	}
 	return nil
+}
+
+// templatePosterPath matches a path below the bundled template poster
+// directory written in plain file name characters. It leaves out percent
+// escapes, backslashes, queries and fragments, which a browser could resolve
+// to a path outside that directory.
+var templatePosterPath = regexp.MustCompile(`^` + regexp.QuoteMeta(collectionTemplateImageDir) + `[A-Za-z0-9._/-]+$`)
+
+// importedPosterURL returns the poster an import stores for its collection:
+// none, a bundled template poster, or an http(s) image URL. The stored value
+// is shown as the collection's poster, so a storage key is refused: only the
+// server names the objects a collection's poster is read from.
+func importedPosterURL(raw string) (string, error) {
+	poster := strings.TrimSpace(raw)
+	switch {
+	case poster == "":
+		return "", nil
+	case templatePosterPath.MatchString(poster) && poster == path.Clean(poster):
+		return poster, nil
+	case strings.HasPrefix(poster, "http://"), strings.HasPrefix(poster, "https://"):
+		if parsed, err := url.Parse(poster); err == nil && parsed.Host != "" && catalog.ImageURLOrEmpty(poster) != "" {
+			return poster, nil
+		}
+	}
+	return "", fieldError("poster_url", "poster_url must be a collection template poster or an http(s) image URL")
 }
 
 func validateOptionalLibraryIDs(libraryIDs []int) error {
