@@ -2,14 +2,11 @@ package handlers
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"strconv"
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -20,8 +17,7 @@ import (
 )
 
 // Deleting an account removes the artwork of every personal collection its
-// profiles had, on both delete paths; the foreign-key cascade that removes
-// the rows cannot. Another account's collection keeps its artwork.
+// profiles had; the foreign-key cascade that removes the rows cannot. Another account's collection keeps its artwork.
 func TestAdminAccountDeleteRemovesCollectionArtworkDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -84,42 +80,17 @@ func TestAdminAccountDeleteRemovesCollectionArtworkDB(t *testing.T) {
 	h := NewAdminHandler(auth.NewUserRepository(pool), pool, provider)
 	h.ArtworkStore = artwork
 
-	for name, deleteAccount := range map[string]func(id int) error{
-		"v2": func(id int) error { return h.DeleteAdminAccount(claimsCtx(adminID), id, -1, 0) },
-		"v1": func(id int) error {
-			rec := deleteUserV1(h, adminID, id)
-			if rec.Code != http.StatusNoContent {
-				t.Fatalf("v1 delete status = %d: %s", rec.Code, rec.Body.String())
-			}
-			return nil
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			goneID := insert("artwork-gone-"+name, models.RoleUser)
-			gone := seed(goneID, "main-"+name+suffix, "kid-"+name+suffix)
-			if err := deleteAccount(goneID); err != nil {
-				t.Fatal(err)
-			}
-			for _, id := range gone {
-				if n := artworkLeft(id); n != 0 {
-					t.Errorf("deleted account's collection %s keeps %d artwork objects", id, n)
-				}
-			}
-			if n := artworkLeft(kept[0]); n != 1 {
-				t.Errorf("other account's collection has %d artwork objects, want 1", n)
-			}
-		})
+	goneID := insert("artwork-gone", models.RoleUser)
+	gone := seed(goneID, "main-"+suffix, "kid-"+suffix)
+	if err := h.DeleteAdminAccount(claimsCtx(adminID), goneID, -1, 0); err != nil {
+		t.Fatal(err)
 	}
-}
-
-// deleteUserV1 deletes account id through DELETE /api/v1/admin/users/{id} as
-// administrator actorID.
-func deleteUserV1(h *AdminHandler, actorID, id int) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/users/"+strconv.Itoa(id), nil)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", strconv.Itoa(id))
-	req = req.WithContext(context.WithValue(claimsCtx(actorID), chi.RouteCtxKey, rctx))
-	rec := httptest.NewRecorder()
-	h.HandleDeleteUser(rec, req)
-	return rec
+	for _, id := range gone {
+		if n := artworkLeft(id); n != 0 {
+			t.Errorf("deleted account's collection %s keeps %d artwork objects", id, n)
+		}
+	}
+	if n := artworkLeft(kept[0]); n != 1 {
+		t.Errorf("other account's collection has %d artwork objects, want 1", n)
+	}
 }

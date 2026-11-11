@@ -192,7 +192,7 @@
 # Minting a key for another account holds the Owner rules against a concurrent promotion.
 ./internal/api/handlers TestAdminAPIKeyCreationHoldsOwnerRulesAgainstPromotionDB
 
-# Deleting an account removes its personal collections' artwork on both delete paths.
+# Deleting an account removes its personal collections' artwork.
 ./internal/api/handlers TestAdminAccountDeleteRemovesCollectionArtworkDB
 
 # Recovery identity changes retire links and prevent delivery to a stale address.

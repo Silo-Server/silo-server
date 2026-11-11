@@ -1240,7 +1240,7 @@ func (h *AdminHandler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) 
 	if h.OnUserSessionsRevoked != nil {
 		h.OnUserSessionsRevoked(r.Context(), id)
 	}
-	h.removeDeletedAccountArtwork(r.Context(), collections)
+	removeDeletedCollectionArtwork(r.Context(), h.ArtworkStore, userCollectionImagePrefix, collections...)
 	h.sweepWatchlistTitles(r.Context(), id)
 	h.invalidateStats(r.Context(), cache.ChannelAdmin, cache.EventAdminStatsInvalidated, strconv.Itoa(id))
 
@@ -1256,14 +1256,6 @@ func (h *AdminHandler) deletedAccountCollections(ctx context.Context, tx pgx.Tx,
 		return nil, nil
 	}
 	return pgstore.AccountCollectionIDs(ctx, tx, userID)
-}
-
-// removeDeletedAccountArtwork removes the artwork of a deleted account's
-// personal collections. The delete has committed, so a failure only logs.
-func (h *AdminHandler) removeDeletedAccountArtwork(ctx context.Context, collectionIDs []string) {
-	for _, collectionID := range collectionIDs {
-		removeDeletedCollectionArtwork(ctx, h.ArtworkStore, userCollectionImagePrefix, collectionID)
-	}
 }
 
 // sweepWatchlistTitles removes the watchlist titles a deleted account's

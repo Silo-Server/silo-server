@@ -325,7 +325,7 @@ func (h *AdminHandler) DeleteAdminAccount(ctx context.Context, id int, revision,
 	if h.OnUserSessionsRevoked != nil {
 		h.OnUserSessionsRevoked(ctx, id)
 	}
-	h.removeDeletedAccountArtwork(ctx, collections)
+	removeDeletedCollectionArtwork(ctx, h.ArtworkStore, userCollectionImagePrefix, collections...)
 	h.sweepWatchlistTitles(ctx, id)
 	h.invalidateStats(ctx, cache.ChannelAdmin, cache.EventAdminStatsInvalidated, strconv.Itoa(id))
 	return nil

@@ -126,7 +126,7 @@ func ListProfiles(db *sql.DB) ([]Profile, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listing profiles: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck // rows.Err reports the failure
+	defer rows.Close()
 
 	var profiles []Profile
 	for rows.Next() {

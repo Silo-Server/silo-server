@@ -1022,9 +1022,7 @@ func (h *ProfileHandler) DeleteProfile(ctx context.Context, cmd ProfileDeleteCom
 			slog.WarnContext(ctx, "profile avatar cleanup failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", cleanupErr)
 		}
 	}
-	for _, collectionID := range deletedCollections {
-		removeDeletedCollectionArtwork(ctx, h.ArtworkStore, userCollectionImagePrefix, collectionID)
-	}
+	removeDeletedCollectionArtwork(ctx, h.ArtworkStore, userCollectionImagePrefix, deletedCollections...)
 	if h.DeviceLibraryPurger != nil {
 		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()

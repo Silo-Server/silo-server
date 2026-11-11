@@ -126,7 +126,7 @@ func TestPostgresDeleteProfileRemovesProfileState(t *testing.T) {
 }
 
 // profileTablesClearedElsewhere are the user tables with a profile_id that
-// DeleteProfile leaves to another step, with the step.
+// profileCascadeTables leaves out, with the step that clears them.
 var profileTablesClearedElsewhere = map[string]string{
 	"user_personal_collections": "DeleteProfile's own delete, which returns the collection IDs for artwork cleanup",
 	"user_devices":              "the profile handler's device-library purge (downloads.Repository.PurgeProfileDevices)",

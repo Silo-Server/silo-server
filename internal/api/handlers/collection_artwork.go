@@ -411,18 +411,20 @@ func cleanUpReplacedCollectionImage(
 	}
 }
 
-// removeDeletedCollectionArtwork deletes a deleted collection's whole artwork
-// directory: every image revision and collage. The row delete has committed,
-// so the cleanup outlives a canceled request, bounded by
+// removeDeletedCollectionArtwork deletes deleted collections' whole artwork
+// directories: every image revision and collage. The row deletes have
+// committed, so the cleanup outlives a canceled request, bounded as a whole by
 // collectionImageCleanupTimeout, and a failure only logs.
-func removeDeletedCollectionArtwork(ctx context.Context, store blobstore.Store, prefix, collectionID string) {
-	if store == nil {
+func removeDeletedCollectionArtwork(ctx context.Context, store blobstore.Store, prefix string, collectionIDs ...string) {
+	if store == nil || len(collectionIDs) == 0 {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), collectionImageCleanupTimeout)
 	defer cancel()
-	if _, err := store.DeletePrefix(ctx, fmt.Sprintf("%s/%s/", prefix, collectionID)); err != nil {
-		slog.WarnContext(ctx, "collection delete: removing artwork failed", "component", "api", "collection_id", collectionID, "prefix", prefix, "error", err)
+	for _, collectionID := range collectionIDs {
+		if _, err := store.DeletePrefix(ctx, fmt.Sprintf("%s/%s/", prefix, collectionID)); err != nil {
+			slog.WarnContext(ctx, "collection delete: removing artwork failed", "component", "api", "collection_id", collectionID, "prefix", prefix, "error", err)
+		}
 	}
 }
 
