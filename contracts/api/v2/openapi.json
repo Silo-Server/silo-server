@@ -35555,6 +35555,7 @@
             "type": "string"
           },
           "file_name": {
+            "description": "Absent for viewers without file-path visibility, except on audiobooks and ebooks",
             "type": "string"
           },
           "file_path": {
@@ -54983,6 +54984,7 @@
             "type": "boolean"
           },
           "file_name": {
+            "description": "An external track's file name; absent for viewers without file-path visibility, except on audiobooks and ebooks",
             "type": "string"
           },
           "forced": {
@@ -55517,10 +55519,11 @@
             "type": "string"
           },
           "file_name": {
+            "description": "Absent for viewers without file-path visibility, except on audiobooks and ebooks",
             "type": "string"
           },
           "file_path": {
-            "description": "Only for accounts allowed to see paths",
+            "description": "Absent for viewers without file-path visibility",
             "type": "string"
           },
           "file_size": {
@@ -56502,6 +56505,7 @@
             "type": "boolean"
           },
           "file_name": {
+            "description": "An external track's file name; absent for viewers without file-path visibility, except on audiobooks and ebooks",
             "type": "string"
           },
           "forced": {

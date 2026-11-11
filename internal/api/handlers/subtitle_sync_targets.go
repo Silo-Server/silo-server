@@ -24,6 +24,9 @@ type SubtitleSyncState struct {
 	Stored *subtitles.DownloadedSubtitle
 	// External is the sidecar's catalog entry; nil for a stored subtitle.
 	External *models.ExternalSubtitle
+	// ExternalLabel names the sidecar to the caller: its file name when the
+	// caller may see file names, else its own title or its language.
+	ExternalLabel string
 	// ContentSHA256 identifies a sidecar's bytes on disk.
 	ContentSHA256 string
 	Timing        subtitles.Timing
@@ -266,6 +269,17 @@ func (h *SubtitleSearchHandler) externalSyncStates(ctx context.Context, file *mo
 	return out, nil
 }
 
+// sidecarLabel is a sidecar's ExternalLabel for the caller.
+func (h *SubtitleSearchHandler) sidecarLabel(ctx context.Context, sidecar *models.ExternalSubtitle) string {
+	switch {
+	case h.FileNamesVisible != nil && h.FileNamesVisible(ctx):
+		return sidecar.FileName()
+	case !sidecar.TitleIsFileName():
+		return sidecar.Title
+	}
+	return sidecar.Language
+}
+
 // externalSyncState reads a sidecar and finds its correction, in timings when
 // given. It is nil for a sidecar that cannot be retimed or is gone from disk.
 func (h *SubtitleSearchHandler) externalSyncState(ctx context.Context, fileID int, sidecar *models.ExternalSubtitle, timings map[string]*subtitles.ExternalTiming) (*SubtitleSyncState, error) {
@@ -281,7 +295,7 @@ func (h *SubtitleSearchHandler) externalSyncState(ctx context.Context, fileID in
 		return nil, errSidecarUnreadable
 	}
 	state := &SubtitleSyncState{Key: subtitles.ExternalSyncKey(sidecar.Path), MediaFileID: fileID, External: sidecar,
-		ContentSHA256: subtitles.ContentSHA256(data), Timing: subtitles.Timing{Scale: 1}}
+		ExternalLabel: h.sidecarLabel(ctx, sidecar), ContentSHA256: subtitles.ContentSHA256(data), Timing: subtitles.Timing{Scale: 1}}
 	var row *subtitles.ExternalTiming
 	if timings != nil {
 		row = timings[state.ContentSHA256]

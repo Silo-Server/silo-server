@@ -405,6 +405,12 @@ builder. The web player applies the same mapping to realtime subtitle URLs.
 Absolute delivery URLs from distributed nodes retain their origin and path;
 signed query strings are preserved without decoding or re-encoding.
 
+An external subtitle whose only title is its file name is labeled by that
+name only for a viewer who may see file names (see
+[File paths and names](catalog-api.md#file-paths-and-names)). Everyone else
+gets its embedded title or language as the `label`, as an untitled embedded
+track does.
+
 ## Revocation
 
 Stop, session expiry or abort, and admin stop or terminate write the

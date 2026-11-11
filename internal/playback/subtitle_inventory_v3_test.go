@@ -386,3 +386,31 @@ func TestSubtitleInventoryV3_EmbeddedRowsCarryStreamIdentity(t *testing.T) {
 		}
 	}
 }
+
+// A viewer who may not see file names must not read one from an untitled
+// sidecar's label. A sidecar with its own title, and every embedded track,
+// keeps its label.
+func TestHideSidecarFileNamesV3(t *testing.T) {
+	file := &models.MediaFile{
+		ID: 42,
+		ExternalSubtitles: []models.ExternalSubtitle{
+			{Path: "/media/Movie.2023.1080p.WEB-DL-GROUP.en.srt", Language: "en", Format: "srt"},
+			// The scanner stores a sidecar's file name as its title.
+			{Path: "/media/Movie.2023.1080p.WEB-DL-GROUP.es.srt", Language: "es", Format: "srt", Title: "Movie.2023.1080p.WEB-DL-GROUP.es.srt"},
+			{Path: "/media/movie.fr.srt", Language: "fr", Format: "srt", Title: "Commentary"},
+		},
+		SubtitleTracks: []models.SubtitleTrack{{Index: 0, Language: "ja", Codec: "subrip", Title: "Signs"}},
+	}
+	items := BuildSubtitleInventoryV3(file, nil)
+	if items[0].Label != "Movie.2023.1080p.WEB-DL-GROUP.en.srt" {
+		t.Fatalf("untitled sidecar label = %q, want its file name before hiding", items[0].Label)
+	}
+
+	HideSidecarFileNamesV3(items, file)
+
+	for i, want := range []string{"en", "es", "Commentary", "Signs"} {
+		if items[i].Label != want {
+			t.Errorf("item %d label = %q, want %q", i, items[i].Label, want)
+		}
+	}
+}

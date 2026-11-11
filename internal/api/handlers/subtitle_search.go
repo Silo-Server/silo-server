@@ -40,6 +40,9 @@ type SubtitleSearchHandler struct {
 	sync           SubtitleSyncService
 	external       ExternalTimingStore
 	ready          SubtitleReadyAnnouncer
+	// FileNamesVisible reports whether the caller may see file names
+	// (ItemsHandler.CanViewFilePaths). Optional: without it no caller does.
+	FileNamesVisible func(context.Context) bool
 }
 
 // NewSubtitleSearchHandler creates a new SubtitleSearchHandler.

@@ -2279,10 +2279,11 @@ func isNotFound(err error) bool {
 		errors.Is(err, catalog.ErrSeasonNotFound)
 }
 
-// canViewFilePaths reports whether the caller may see on-disk paths: the
-// acting admin always, any other caller when the account's effective
-// permissions, after the access group's mask, include metadata curation.
-func (h *ItemsHandler) canViewFilePaths(ctx context.Context) bool {
+// CanViewFilePaths reports whether the caller may see on-disk paths and file
+// names: the acting admin always, any other caller when the account's
+// effective permissions, after the access group's mask, include metadata
+// curation.
+func (h *ItemsHandler) CanViewFilePaths(ctx context.Context) bool {
 	claims := apimw.GetClaims(ctx)
 	if claims == nil {
 		return false

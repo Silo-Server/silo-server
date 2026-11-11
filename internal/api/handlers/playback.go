@@ -241,8 +241,12 @@ type PlaybackHandler struct {
 	// 404 after a restart and the client starts a new attempt, as before.
 	SessionRecipeStore sessionRecipeStoreV3
 	ItemAccess         PlaybackItemAccessChecker // optional; enables file authorization checks
-	EpisodeLookup      PlaybackEpisodeLookup     // optional; resolves episode files to their series
-	ExtraLookup        PlaybackExtraLookup       // optional; resolves extras files to their parent item
+	// FileNamesVisible reports whether the caller may see file names
+	// (ItemsHandler.CanViewFilePaths). Optional: without it no caller does, and
+	// an untitled external subtitle is labeled by its language.
+	FileNamesVisible   func(context.Context) bool
+	EpisodeLookup      PlaybackEpisodeLookup // optional; resolves episode files to their series
+	ExtraLookup        PlaybackExtraLookup   // optional; resolves extras files to their parent item
 	OriginalLangLookup PlaybackOriginalLanguageLookup
 	SettingsRepo       PlaybackSettingsReader     // optional; reads server settings (e.g., allow_4k_transcode)
 	FileVersionFetcher PlaybackFileVersionFetcher // optional; queries sibling file versions for 4K guard

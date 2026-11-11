@@ -110,7 +110,8 @@ func parseSyntheticSeasonID(contentID string) (string, int, bool) {
 }
 
 // enrichItemDetail adds the viewer's state to detail. curates is
-// canViewFilePaths for the request; paths are stripped without it.
+// CanViewFilePaths for the request; file paths and names are stripped
+// without it.
 func (h *CatalogResourceHandler) enrichItemDetail(ctx context.Context, v ItemViewer, detail *catalog.ItemDetail, curates bool) {
 	if detail == nil {
 		return
@@ -156,10 +157,7 @@ func (h *CatalogResourceHandler) enrichItemDetail(ctx context.Context, v ItemVie
 
 	detail.ViewerCurates = curates
 	if !detail.ViewerCurates {
-		for i := range detail.Versions {
-			detail.Versions[i].FilePath = ""
-		}
-		detail.FolderPaths = nil
+		detail.HideFileIdentity()
 	}
 
 	if batched {

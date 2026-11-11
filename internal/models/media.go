@@ -2,8 +2,11 @@ package models
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 const (
@@ -533,6 +536,18 @@ type ExternalSubtitle struct {
 	Forced          bool   `json:"forced"`
 	Default         bool   `json:"default"`
 	HearingImpaired bool   `json:"hearing_impaired"`
+}
+
+// FileName is the sidecar's file name.
+func (s ExternalSubtitle) FileName() string {
+	return fspath.Display(filepath.Base(s.Path))
+}
+
+// TitleIsFileName reports whether the sidecar has no title of its own: none
+// is stored, or the stored one is its file name, as the scanner records.
+func (s ExternalSubtitle) TitleIsFileName() bool {
+	title := strings.TrimSpace(s.Title)
+	return title == "" || title == s.FileName()
 }
 
 // PersonKind identifies the role type a person has on a media item.

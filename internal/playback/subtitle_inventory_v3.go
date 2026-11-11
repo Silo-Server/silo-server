@@ -175,6 +175,25 @@ func BuildSubtitleInventoryV3(file *models.MediaFile, additional []SubtitleInven
 	return items
 }
 
+// HideSidecarFileNamesV3 relabels the external sidecars whose only title is
+// their file name, for a viewer who may not see file names: such a track falls
+// back to its embedded title, then its language, as an untitled embedded track
+// does. file is the file inventory was built from.
+func HideSidecarFileNamesV3(inventory []SubtitleInventoryItemV3, file *models.MediaFile) {
+	if file == nil {
+		return
+	}
+	for i, item := range inventory {
+		index := item.CombinedIndex
+		if item.Source != SubtitleSourceExternalV3 || index < 0 || index >= len(file.ExternalSubtitles) {
+			continue
+		}
+		if sub := file.ExternalSubtitles[index]; sub.TitleIsFileName() {
+			inventory[i].Label = firstNonEmptySubtitleLabelV3(sub.EmbeddedTitle, sub.Language)
+		}
+	}
+}
+
 // SubtitleInventoryV3 returns the combined-ordinal inventory with
 // session-scoped stream URLs attached to every sidecar-deliverable track. It
 // knows no client features, so every URL takes its default representation.

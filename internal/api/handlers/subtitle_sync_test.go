@@ -147,6 +147,15 @@ func TestSubtitleSyncBySyncKey(t *testing.T) {
 	if err != nil || len(states) != 2 || states[0].Key != "stored-9" || states[1].Key != sidecarKey || states[1].Revision != 0 {
 		t.Fatalf("list %+v %v", states, err)
 	}
+	// Only a caller who may see file names gets the sidecar's file name.
+	if states[1].ExternalLabel != "en" {
+		t.Fatalf("sidecar label for a viewer = %q, want its language", states[1].ExternalLabel)
+	}
+	h.FileNamesVisible = func(context.Context) bool { return true }
+	if curated, err := h.ListSubtitleSync(ctx, access, 42); err != nil || curated[1].ExternalLabel != "movie.en.srt" {
+		t.Fatalf("sidecar label for a curator = %+v %v", curated, err)
+	}
+	h.FileNamesVisible = nil
 	for _, key := range []string{subtitles.ExternalSyncKey(micro), subtitles.ExternalSyncKey(filepath.Join(dir, "movie.de.srt")), "stored-77", "bogus"} {
 		if _, err := h.SubtitleSync(ctx, access, 42, key); !errors.Is(err, subtitles.ErrSubtitleNotFound) {
 			t.Errorf("%s: %v", key, err)
