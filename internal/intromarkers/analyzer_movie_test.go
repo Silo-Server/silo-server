@@ -448,6 +448,57 @@ func TestRunPagesMovies(t *testing.T) {
 	}
 }
 
+// stallingEpisodes is a repository whose episode listing waits for its
+// context to end, like an episode pass on a library too large to finish.
+type stallingEpisodes struct{ *fakeIntroRepository }
+
+func (stallingEpisodes) ListEligibleCandidates(ctx context.Context) ([]Candidate, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// Issue #3421: a run with a deadline stops its episodes early enough for the
+// movies to get their budget. A cancel during the episodes still stops the
+// whole run.
+func TestRunLeavesMoviesTheirShareOfTheDeadline(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		timeout  time.Duration
+		cancelAt time.Duration
+		wantErr  error
+	}{
+		{name: "episode share spent", timeout: 600 * time.Millisecond},
+		{name: "canceled during episodes", timeout: time.Minute, cancelAt: 50 * time.Millisecond, wantErr: context.Canceled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &fakeIntroRepository{enabledLibraries: 1, movieCandidates: []Candidate{movieCandidate(10, 7200)}}
+			sampler := &fakeMovieSampler{}
+			analyzer := movieAnalyzer(repo, sampler)
+			analyzer.repo = stallingEpisodes{repo}
+			analyzer.movieBudget = 200 * time.Millisecond
+			ctx, cancel := context.WithTimeout(context.Background(), tc.timeout)
+			defer cancel()
+			if tc.cancelAt > 0 {
+				time.AfterFunc(tc.cancelAt, cancel)
+			}
+
+			summary, err := analyzer.Run(ctx, allMarkerKinds, nil)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("Run error = %v, want %v", err, tc.wantErr)
+			}
+			if tc.wantErr != nil {
+				if summary.EpisodeBudgetExhausted || sampler.tailCount() != 0 {
+					t.Fatalf("summary %+v, %d tail passes; want the run stopped before the movies", summary, sampler.tailCount())
+				}
+				return
+			}
+			if !summary.EpisodeBudgetExhausted || sampler.tailCount() != 1 || summary.MovieCreditsMarkersWritten != 1 || ctx.Err() != nil {
+				t.Fatalf("summary %+v, %d tail passes, ctx %v; want the movie analyzed before the deadline", summary, sampler.tailCount(), ctx.Err())
+			}
+		})
+	}
+}
+
 // The scheduled run stops starting movies once the movie budget is spent;
 // the movie in progress finishes and the rest wait for the next run.
 func TestRunStopsMoviesAtTheBudget(t *testing.T) {

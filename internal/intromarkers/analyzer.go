@@ -2,6 +2,7 @@ package intromarkers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -347,11 +348,18 @@ func (a *Analyzer) run(ctx context.Context, kinds EpisodeMarkerKinds, progress P
 	moviesFrom := 0.0
 	if passes.episodes {
 		moviesFrom = 85
-		episodeSummary, err := a.runEpisodes(ctx, kinds, func(percent float64, message string) {
+		episodeCtx, stopEpisodes := a.episodeContext(ctx)
+		episodeSummary, err := a.runEpisodes(episodeCtx, kinds, func(percent float64, message string) {
 			report(percent*moviesFrom/100, message)
 		})
+		budgetSpent := errors.Is(context.Cause(episodeCtx), errEpisodeBudgetSpent)
+		stopEpisodes()
 		mergeRunSummary(&summary, episodeSummary)
-		if err != nil {
+		if budgetSpent {
+			// The episodes stopped where a cancel stops them; the season
+			// groups they finished are saved and the next run resumes there.
+			summary.EpisodeBudgetExhausted = true
+		} else if err != nil {
 			return summary, err
 		}
 	}
@@ -364,12 +372,35 @@ func (a *Analyzer) run(ctx context.Context, kinds EpisodeMarkerKinds, progress P
 	if err != nil {
 		return summary, err
 	}
-	if summary.MovieBudgetExhausted {
+	switch {
+	case summary.EpisodeBudgetExhausted && summary.MovieBudgetExhausted:
+		report(100, "Marker detection completed; remaining episodes and movies wait for the next run")
+	case summary.EpisodeBudgetExhausted:
+		report(100, "Marker detection completed; remaining episodes wait for the next run")
+	case summary.MovieBudgetExhausted:
 		report(100, "Marker detection completed; remaining movies wait for the next run")
-		return summary, nil
+	default:
+		report(100, "Marker detection completed")
 	}
-	report(100, "Marker detection completed")
 	return summary, nil
+}
+
+// errEpisodeBudgetSpent is the cause of an episode pass stopped to leave the
+// movies their share of the run's time.
+var errEpisodeBudgetSpent = errors.New("episode share of the run's time limit spent")
+
+// episodeContext bounds the episode pass of a run that has a deadline, such
+// as a scheduled run with a max runtime, so the episodes cannot use the whole
+// run and leave none for the movies after them. It reserves the movie budget
+// before the deadline, or half the time left when that is shorter. A run
+// without a deadline gets ctx unchanged.
+func (a *Analyzer) episodeContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return ctx, func() {}
+	}
+	reserve := min(a.movieRunBudget(), time.Until(deadline)/2)
+	return context.WithDeadlineCause(ctx, deadline.Add(-reserve), errEpisodeBudgetSpent)
 }
 
 // runEpisodes analyzes the episodes of every enabled library for kinds,
@@ -1472,5 +1503,8 @@ func mergeRunSummary(dst *RunSummary, src RunSummary) {
 	dst.MovieCreditsMarkersWritten += src.MovieCreditsMarkersWritten
 	if src.MovieBudgetExhausted {
 		dst.MovieBudgetExhausted = true
+	}
+	if src.EpisodeBudgetExhausted {
+		dst.EpisodeBudgetExhausted = true
 	}
 }

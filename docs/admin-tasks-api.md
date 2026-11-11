@@ -23,6 +23,9 @@ but does not create a durable job or promise execution after a process failure.
 Concurrent local starts conflict. Another server has its own worker state.
 `POST /api/v2/admin/tasks/{key}/cancel` requests cancellation of the current local
 execution; completed effects remain. Neither operation automatically retries.
+While a task is `running` or `cancelling` on the responding process, its
+`started_at` reports when that run started; `last_execution` still describes
+the previous finished run. The frozen v1 task routes do not report it.
 
 The `refresh_all_library_metadata` task runs a `full` library metadata refresh
 (see [libraries-api.md](libraries-api.md)) for each enabled library in turn,
