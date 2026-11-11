@@ -204,7 +204,9 @@ type CompatPlaybackStore interface {
 	// An error means the negotiation was not stored, so its PlaySessionId
 	// must not be handed to the client.
 	PutNegotiated(session PlaybackSession) error
-	// Get returns a session when it exists and is not expired.
+	// Get returns a session when it exists and is not expired. A failed
+	// durable read with no cached copy reads as not found; code that grants
+	// access uses Lookup instead.
 	Get(id string) (*PlaybackSession, bool)
 	// Lookup is Get for callers that grant access by PlaySessionId: it
 	// returns an error, instead of not-found, when the store could not be
