@@ -636,6 +636,20 @@ URL gets `410 Gone` until it is given the current URL.
 The web management screen consumes the emitted URL. No native receiver or
 management caller was found; no Jellyfin-protocol endpoint needs migration.
 
+Connection management is account-wide and requires the existing
+[household-manager authority](architecture/api-contract.md#credential-continuity):
+the primary profile, with PIN verification when it has a PIN. This covers every
+`/api/v2/webhook-sync/connections` operation, reads included, because the list
+returns each receiver URL with its secret, the event log shows what mapped
+profiles watched, and mappings choose which profile an external user writes to.
+The account's admin role never widens a selected secondary profile's authority.
+A request without a profile is accepted only in the admin cases that rule
+allows, and a key declaring a locked primary profile cannot use its skipped PIN
+check as verification. Refusals are `403 permission_denied` or
+`profile_verification_required`. The receiver is unaffected, since the secret
+authenticates it. The web offers the page to the primary profile, and to an acting
+admin with no profile selected, whom the API refuses once any profile is limited.
+
 ### Revision-guarded onboarding
 
 `GET /api/v2/onboarding/flow?surface=web|phone|tv` returns the current tour

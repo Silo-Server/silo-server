@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -8,15 +9,29 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/webhooksync"
 )
 
 type WebhookSyncHandler struct {
 	service *webhooksync.Service
+	stores  userstore.UserStoreProvider
 }
 
-func NewWebhookSyncHandler(service *webhooksync.Service) *WebhookSyncHandler {
-	return &WebhookSyncHandler{service: service}
+// NewWebhookSyncHandler takes the household stores that decide who may manage
+// connections. Without stores every management request is refused; the public
+// receiver does not need them.
+func NewWebhookSyncHandler(service *webhooksync.Service, stores userstore.UserStoreProvider) *WebhookSyncHandler {
+	return &WebhookSyncHandler{service: service, stores: stores}
+}
+
+// MayManageWebhookSync applies the household-manager rule to connection
+// management, reads included. A connection belongs to the account, its
+// receiver URL carries the secret that authenticates deliveries, and its
+// mappings choose which profile an external user's watch state is written to,
+// so a household member who is not the manager may neither see nor change it.
+func (h *WebhookSyncHandler) MayManageWebhookSync(ctx context.Context, userID int, profileID string, verify func(*userstore.Profile) error) (bool, error) {
+	return mayManageHouseholdOf(ctx, h.stores, userID, profileID, verify)
 }
 
 // ReceiveWebhook applies a v2 delivery through the shared processor and delivery log.
