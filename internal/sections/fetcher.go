@@ -443,7 +443,7 @@ func (f *Fetcher) fetchOne(ctx context.Context, resolved ResolvedSection, librar
 	// callers that bypass SectionWithItems construction.
 	if resolved.SectionType == SectionSeasonalThemed && len(items) > 0 {
 		if pick, ok := f.activeSeasonalPick(resolved.Config); ok && pick.Title != "" {
-			resolved.Title = pick.Title
+			resolved.Title, resolved.TitleKey, resolved.TitleArgs = pick.Title, pick.TitleKey, nil
 		}
 	}
 

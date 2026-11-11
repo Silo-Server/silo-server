@@ -872,6 +872,23 @@ func TestReadRestoreSetReadsEveryFormatVersion(t *testing.T) {
 			}
 		}
 	}
+	titleKey := func(key string) func(*RestoreSetIndex, *[]testEntry) {
+		return func(index *RestoreSetIndex, entries *[]testEntry) {
+			for _, e := range *entries {
+				if e.name == homeSectionsDocumentName {
+					var doc HomeSectionsDocument
+					_ = json.Unmarshal(e.data, &doc)
+					for i := range doc.Sections {
+						doc.Sections[i].TitleKey = key
+						if key != "" {
+							doc.Sections[i].TitleArgs = map[string]string{"library": "Movies"}
+						}
+					}
+					setDocument(index, *entries, homeSectionsDocumentName, mustJSON(doc), len(doc.Sections))
+				}
+			}
+		}
+	}
 	read := func(index RestoreSetIndex, entries []testEntry) error {
 		_, err := ReadRestoreSet(context.Background(), bytes.NewReader(buildTar(t, index, entries)), ReadOptions{})
 		return err
@@ -893,6 +910,9 @@ func TestReadRestoreSetReadsEveryFormatVersion(t *testing.T) {
 		}, true},
 		{"version 3 without web-only sections", 3, webOnly(false), true},
 		{"version 3 with a web-only section", 3, webOnly(true), false},
+		{"version 5 without title keys", 5, titleKey(""), true},
+		{"version 5 with a title key", 5, titleKey("home.section.recentlyAddedIn"), false},
+		{"version 6 with a title key", 6, titleKey("home.section.recentlyAddedIn"), true},
 		{"version 2 with home sections", 2, func(i *RestoreSetIndex, e *[]testEntry) { dropTemplates(i, e) }, false},
 		{"version 2 with template collections", 2, func(i *RestoreSetIndex, e *[]testEntry) { dropSection(i, e, SectionHomeSections) }, false},
 	} {

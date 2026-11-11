@@ -2071,19 +2071,33 @@ func (s *DetailService) GetEpisodeDetailsForSeries(
 		// A failed optional batch leaves the per-episode reads in place. Their
 		// existing error handling skips only the detail that could not be built.
 	}
-	for _, contentID := range episodeContentIDs {
-		episode, err := s.episodeRepo.GetByID(ctx, contentID)
+	// One read for the whole page, rather than one per episode.
+	episodes, err := s.episodeRepo.GetByIDs(ctx, episodeContentIDs)
+	if err != nil {
+		return nil, err
+	}
+	episodesByID := make(map[string]*models.Episode, len(episodes))
+	for _, episode := range episodes {
+		if episode != nil {
+			episodesByID[episode.ContentID] = episode
+		}
+	}
+	// One membership read for the page. Each episode must itself be in the
+	// presentation library, as validatePresentationItemAccess requires of one ID.
+	var inLibrary map[string]bool
+	if filter.PresentationLibraryID != nil {
+		inLibrary, err = s.itemRepo.GetItemsInLibrary(ctx, episodeContentIDs, *filter.PresentationLibraryID)
 		if err != nil {
-			if errors.Is(err, ErrEpisodeNotFound) {
-				continue
-			}
 			return nil, err
 		}
-		if err := s.validatePresentationItemAccess(ctx, filter, contentID); err != nil {
-			if errors.Is(err, ErrItemNotFound) {
-				continue
-			}
-			return nil, err
+	}
+	for _, contentID := range episodeContentIDs {
+		episode := episodesByID[contentID]
+		if episode == nil {
+			continue
+		}
+		if filter.PresentationLibraryID != nil && !inLibrary[contentID] {
+			continue
 		}
 		detail, err := s.buildEpisodeDetail(ctx, episode, seriesCtx, filter)
 		if err != nil {

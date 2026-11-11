@@ -1,5 +1,6 @@
 import { v2 } from "../api/v2/request";
 import type { components } from "../api/v2/schema";
+import { serverText } from "../i18n";
 
 export type Category =
   | "library_staples"
@@ -18,7 +19,24 @@ export interface GalleryPreset {
   icon: string;
   description_short: string;
   description_long?: string;
+  /** Catalog keys for the three texts above, present when the server sent them. */
+  display_name_key?: string;
+  description_short_key?: string;
+  description_long_key?: string;
   default_params: Record<string, unknown>;
+}
+
+/**
+ * A preset's name for display, in the interface language. `display_name`
+ * itself stays English: a row created from a preset is saved under it.
+ */
+export function presetLabel(preset: GalleryPreset): string {
+  return serverText(preset.display_name_key, undefined, preset.display_name);
+}
+
+/** A preset's one-line description for display, in the interface language. */
+export function presetShortText(preset: GalleryPreset): string {
+  return serverText(preset.description_short_key, undefined, preset.description_short);
 }
 
 export interface RecipeDefinition {
@@ -104,6 +122,13 @@ export function recipeCatalogFromV2(
         icon: preset.icon,
         description_short: preset.description_short,
         ...(preset.description_long ? { description_long: preset.description_long } : {}),
+        ...(preset.display_name_key ? { display_name_key: preset.display_name_key } : {}),
+        ...(preset.description_short_key
+          ? { description_short_key: preset.description_short_key }
+          : {}),
+        ...(preset.description_long_key
+          ? { description_long_key: preset.description_long_key }
+          : {}),
         default_params: preset.default_params,
       })),
       avoid_duplicates: def.avoid_duplicates,

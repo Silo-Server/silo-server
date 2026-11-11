@@ -2,9 +2,7 @@ package handlers
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net/http"
 	"strconv"
 	"time"
 
@@ -153,32 +151,6 @@ func (p *AdminDownloadsStatsProvider) Close() {
 		return
 	}
 	p.cache.Close()
-}
-
-// HandleGetDownloadsStats handles GET /admin/stats/downloads.
-func (h *AdminHandler) HandleGetDownloadsStats(w http.ResponseWriter, r *http.Request) {
-	limit, err := parseClampedIntQuery(
-		r, "limit",
-		adminDownloadsStatsDefaultLimit,
-		adminDownloadsStatsMinLimit,
-		adminDownloadsStatsMaxLimit,
-	)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-
-	stats, err := h.ReadAdminDownloadsStats(r.Context(), limit, isTruthyQuery(r.URL.Query().Get("refresh")))
-	if errors.Is(err, ErrAdminDashboardUnavailable) {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Database not configured")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get downloads stats")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, stats)
 }
 
 // queryAdminDownloadsStats reads the aggregate straight from the downloads

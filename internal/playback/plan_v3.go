@@ -232,6 +232,10 @@ type PlannerResultV3 struct {
 	ToneMapRecipeVersion     string
 	ToneMapPreflightRequired bool
 	ToneMapSourceRevision    tonemap.SourceRevision
+	// SettingsDependentRefusal marks a Terminal that a playback setting decided
+	// (4K transcoding, tone mapping). A caller that could not load the settings
+	// planned without them, so it reports such a refusal as temporary.
+	SettingsDependentRefusal bool
 }
 
 // hlsToneMapCapabilities resolves the lazy pooled inventory when present and
@@ -1286,7 +1290,7 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	}
 	if !input.Settings.TranscodeEnabled {
 		if subtitleForcedAdaptation {
-			return terminalPlannerResultV3("subtitle_conversion_unsupported", "The selected subtitle must be burned into the video, but transcoding is unavailable.", false)
+			return terminalPlannerResultV3(TerminalSubtitleConversionUnsupportedV3, "The selected subtitle must be burned into the video, but transcoding is unavailable.", false)
 		}
 		return terminalPlannerResultV3("transcoding_disabled", "The source requires video adaptation, but transcoding is unavailable.", false)
 	}
@@ -1298,15 +1302,15 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	}
 	if source.DynamicRange != "" && source.DynamicRange != DynamicRangeSDRV3 && !toneMapRecipe.ok {
 		if subtitleForcedAdaptation {
-			return terminalPlannerResultV3("subtitle_conversion_unsupported", "The selected subtitle must be burned into the video, but this HDR source cannot be re-encoded.", false)
+			return settingsRefusalV3(TerminalSubtitleConversionUnsupportedV3, "The selected subtitle must be burned into the video, but this HDR source cannot be re-encoded.")
 		}
-		return terminalPlannerResultV3(TerminalHDRTranscodeUnsupportedV3, "This HDR source requires video encoding, but no validated HDR-preserving or tone-map recipe is installed.", false)
+		return settingsRefusalV3(TerminalHDRTranscodeUnsupportedV3, "This HDR source requires video encoding, but no validated HDR-preserving or tone-map recipe is installed.")
 	}
 	if is4KSourceV3(input.EffectiveFile, source) && !input.Settings.Allow4KTranscode {
 		if subtitleForcedAdaptation {
-			return terminalPlannerResultV3("subtitle_conversion_unsupported", "The selected subtitle must be burned into the video, but 4K transcoding is disabled.", false)
+			return settingsRefusalV3(TerminalSubtitleConversionUnsupportedV3, "The selected subtitle must be burned into the video, but 4K transcoding is disabled.")
 		}
-		return terminalPlannerResultV3("no_alternate_version", TerminalMessage4KTranscodeDisabledV3, false)
+		return settingsRefusalV3(TerminalNoAlternateVersionV3, TerminalMessage4KTranscodeDisabledV3)
 	}
 	if hlsRegistry == nil {
 		hlsRegistry = input.hlsVideoRegistry()
@@ -1315,7 +1319,7 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		// The lower version can still play a quality it serves at its own
 		// size, so a refusal it acts on beats one it does not.
 		if lowerVersionTakesTranscodeV3(input, source, quality) {
-			return terminalPlannerResultV3("no_alternate_version", terminalMessageLowerVersionServesV3, false)
+			return terminalPlannerResultV3(TerminalNoAlternateVersionV3, terminalMessageLowerVersionServesV3, false)
 		}
 		return terminalPlannerResultV3("conversion_tool_unavailable", "The required validated H.264/AAC conversion toolchain is unavailable.", true)
 	}
@@ -1397,7 +1401,7 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	// transcodes the lower version instead, and replans this source without
 	// it if that fails.
 	if lowerVersionTakesTranscodeV3(input, source, quality) {
-		return terminalPlannerResultV3("no_alternate_version", terminalMessageLowerVersionServesV3, false)
+		return terminalPlannerResultV3(TerminalNoAlternateVersionV3, terminalMessageLowerVersionServesV3, false)
 	}
 	if source.DynamicRange != "" && source.DynamicRange != DynamicRangeSDRV3 {
 		base.AvailableQualities = availableQualitiesV3(input, source)

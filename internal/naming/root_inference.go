@@ -403,11 +403,6 @@ func normalizeInferLibraryType(value string) string {
 	}
 }
 
-func detectInferSeasonStructure(parts []string, allowNumeric bool) bool {
-	found, _ := detectSeasonStructure(parts, "", "", allowNumeric, false)
-	return found
-}
-
 // IsMisplacedSeriesFile reports whether filePath is a TV episode that lives
 // inside an explicit "Season NN/" (or "Specials"/"Extras") directory. Such a
 // file is a series structure dropped into a movie-type library (e.g. a fan

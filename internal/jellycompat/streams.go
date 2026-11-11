@@ -731,12 +731,22 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 		} else {
 			copyAudioCodec = compatSourceAudioCodec(*source)
 		}
+		// A progressive remux is one long response whose ffmpeg belongs to
+		// this request. No later request exists for a stop to refuse, so the
+		// stop has to reach the stream itself, as in the native handler.
+		var abort <-chan struct{}
+		if watcher, ok := h.sessionMgr.(transportStopWatcher); ok {
+			var release func()
+			abort, release = watcher.WatchTransportStop(playSession.UpstreamSessionID)
+			defer release()
+		}
 		_ = playback.ServeRemuxWithOptions(w, r, file.FilePath, "mp4", seekSeconds, source.TranscodeAudio, audioTrackIndex, file.PrimaryDVProfile(), playback.RemuxServeOptions{
 			ContentType:         playback.RemuxContentType(file.IsAudioOnly()),
 			AudioOnly:           file.IsAudioOnly(),
 			FFmpegPath:          h.FFmpegPath,
 			SourceAudioChannels: sourceAudioChannels,
 			CopyAudioCodec:      copyAudioCodec,
+			Abort:               abort,
 		})
 	default:
 		_ = playback.ServeDirectPlay(w, r, file.FilePath)
@@ -1218,7 +1228,7 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 				"last_produced_age_ms", lastProducedAgeMS,
 				"wait_timeout_ms", decision.WaitTimeout.Milliseconds(),
 				"reason", decision.Reason,
-				"play_session", playSessionID,
+				"play_session", playSessionFingerprint(playSessionID),
 				"session", playSession.UpstreamSessionID,
 				"playback_session_id", playSession.UpstreamSessionID,
 			)
@@ -1232,7 +1242,7 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 					"last_produced_age_ms", lastProducedAgeMS,
 					"wait_timeout_ms", decision.WaitTimeout.Milliseconds(),
 					"reason", decision.Reason,
-					"play_session", playSessionID,
+					"play_session", playSessionFingerprint(playSessionID),
 					"session", playSession.UpstreamSessionID,
 					"playback_session_id", playSession.UpstreamSessionID,
 				)
@@ -1247,7 +1257,7 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 						"last_produced_age_ms", lastProducedAgeMS,
 						"wait_timeout_ms", decision.WaitTimeout.Milliseconds(),
 						"reason", decision.Reason,
-						"play_session", playSessionID,
+						"play_session", playSessionFingerprint(playSessionID),
 						"session", playSession.UpstreamSessionID,
 						"playback_session_id", playSession.UpstreamSessionID,
 					)
@@ -1266,7 +1276,7 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 					slog.ErrorContext(r.Context(), "restart transcode at missing segment", "component", "jellycompat",
 						"error", restartErr,
 						"segment", segmentName,
-						"play_session", playSessionID,
+						"play_session", playSessionFingerprint(playSessionID),
 						"session", playSession.UpstreamSessionID,
 						"playback_session_id", playSession.UpstreamSessionID,
 					)
@@ -1297,7 +1307,7 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 						"seek_seconds", target.SeekSeconds,
 						"stream_origin_seconds", target.StreamOriginSeconds,
 						"resolved_start_segment", target.StartSegmentNumber,
-						"play_session", playSessionID,
+						"play_session", playSessionFingerprint(playSessionID),
 						"session", playSession.UpstreamSessionID,
 						"playback_session_id", playSession.UpstreamSessionID,
 					)
@@ -2576,7 +2586,7 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 				h.syncSessionsNow(context.WithoutCancel(r.Context()), "compat_unidentified_stop")
 			} else if !errors.Is(err, playback.ErrSessionNotFound) {
 				slog.WarnContext(r.Context(), "jellycompat could not mark an unidentified stop", "component", "jellycompat",
-					"play_session_id", playSession.ID, "error", err)
+					"play_session_id", playSessionFingerprint(playSession.ID), "error", err)
 			}
 		}
 	}
@@ -2687,7 +2697,7 @@ func (h *PlaybackHandler) reviveUpstreamForReport(ctx context.Context, session *
 	revived, err := h.ensureUpstreamPlayback(ctx, session, playSession.ID, *source, playSession.UpstreamPlayMethod)
 	if err != nil {
 		slog.WarnContext(ctx, "jellycompat upstream session revive failed", "component", "jellycompat",
-			"play_session_id", playSession.ID,
+			"play_session_id", playSessionFingerprint(playSession.ID),
 			"upstream_session_id", playSession.UpstreamSessionID,
 			"error", err,
 		)
@@ -3544,7 +3554,7 @@ func (h *PlaybackHandler) applyReportedAudioSelection(ctx context.Context, playS
 	}
 	if selectionErr != nil {
 		slog.WarnContext(ctx, "jellycompat audio selection update failed", "component", "jellycompat",
-			"play_session_id", playSession.ID,
+			"play_session_id", playSessionFingerprint(playSession.ID),
 			"audio_stream_index", selectedAudioStreamIndex,
 			"error", selectionErr,
 		)
@@ -3553,7 +3563,7 @@ func (h *PlaybackHandler) applyReportedAudioSelection(ctx context.Context, playS
 			audioTrackIndex = resolvedAudioTrackIndex
 		}
 		slog.InfoContext(ctx, "jellycompat audio selection updated", "component", "jellycompat",
-			"play_session_id", playSession.ID,
+			"play_session_id", playSessionFingerprint(playSession.ID),
 			"media_source_id", updatedSource.ID,
 			"audio_stream_index", selectedAudioStreamIndex,
 			"audio_track_index", audioTrackIndex,
@@ -3764,7 +3774,7 @@ func (h *PlaybackHandler) restartCompatTranscodeForAudioSelection(
 		opts := transcodeSession.Opts()
 		if err := h.persistTranscodeRecipe(context.WithoutCancel(ctx), playSession.ID, playSession.UpstreamSessionID, opts); err != nil {
 			slog.WarnContext(ctx, "persist audio-restarted transcode recipe", "component", "jellycompat", "error", err,
-				"playback_session_id", playSession.ID)
+				"play_session_id", playSessionFingerprint(playSession.ID), "playback_session_id", playSession.UpstreamSessionID)
 		}
 		return true, nil
 	}

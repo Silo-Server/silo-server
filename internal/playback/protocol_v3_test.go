@@ -1717,21 +1717,23 @@ func TestPlanPlaybackV3SubtitleTerminalPrecedence(t *testing.T) {
 		transcode, allow4K bool
 		wantReason         string
 		wantSubtitleNamed  bool
+		// A refusal a setting decided is retried when settings failed to load.
+		wantSettingsDependent bool
 	}{
 		// A user who just picked a bitmap subtitle can undo that choice; an HDR
 		// or 4K reason points them at a problem that is not blocking them.
-		{name: "subtitle alone forced the transcode", transcode: true, allow4K: true, wantReason: "subtitle_conversion_unsupported", wantSubtitleNamed: true},
+		{name: "subtitle alone forced the transcode", transcode: true, allow4K: true, wantReason: "subtitle_conversion_unsupported", wantSubtitleNamed: true, wantSettingsDependent: true},
 		// The subtitle only owns the terminal when it is the sole blocker: a
 		// client that cannot take the source range at all still gets the range
 		// cause.
-		{name: "HDR terminal kept when the range is also unsupported", noHDR: true, transcode: true, allow4K: true, wantReason: "hdr_transcode_unsupported"},
+		{name: "HDR terminal kept when the range is also unsupported", noHDR: true, transcode: true, allow4K: true, wantReason: "hdr_transcode_unsupported", wantSettingsDependent: true},
 		// With transcoding disabled, the subtitle policy itself terminals a
 		// bitmap selection (burn-in is never offered), so the reason names the
 		// subtitle before the planner ever weighs range or quality causes. The
 		// selection is genuinely undeliverable, so that attribution is accurate
 		// for every cause mix.
 		{name: "disabled transcode still names an undeliverable subtitle", noHDR: true, allow4K: true, wantReason: "subtitle_conversion_unsupported"},
-		{name: "subtitle named over the 4K policy", sdr: true, transcode: true, wantReason: "subtitle_conversion_unsupported", wantSubtitleNamed: true},
+		{name: "subtitle named over the 4K policy", sdr: true, transcode: true, wantReason: "subtitle_conversion_unsupported", wantSubtitleNamed: true, wantSettingsDependent: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			file := detailedFixtureFileV3()
@@ -1755,6 +1757,9 @@ func TestPlanPlaybackV3SubtitleTerminalPrecedence(t *testing.T) {
 			}
 			if test.wantSubtitleNamed && !strings.Contains(strings.ToLower(result.Terminal.Message), "subtitle") {
 				t.Errorf("terminal message = %q, want the subtitle named", result.Terminal.Message)
+			}
+			if result.SettingsDependentRefusal != test.wantSettingsDependent {
+				t.Errorf("SettingsDependentRefusal = %t, want %t", result.SettingsDependentRefusal, test.wantSettingsDependent)
 			}
 		})
 	}
