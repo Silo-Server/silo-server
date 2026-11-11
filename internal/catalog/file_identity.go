@@ -76,20 +76,34 @@ func sidecarPositions(versions []FileVersion) map[string]sidecarPosition {
 // relabelSavedSidecarChoice translates a saved choice of an external subtitle
 // whose label is the sidecar's file name, as such choices were saved before
 // this viewer stopped seeing file names, to the label the viewer now gets for
-// that sidecar, so the choice still selects it. versions are already hidden;
-// positions were taken before.
+// that sidecar, so the choice still selects it. A label the viewer cannot see
+// on any current sidecar, such as the file name of one since removed, is
+// dropped; the choice then matches by language, format and flags. versions
+// are already hidden; positions were taken before.
 func relabelSavedSidecarChoice(sig *userstore.SubtitleTrackSignature, versions []FileVersion, positions map[string]sidecarPosition) *userstore.SubtitleTrackSignature {
-	if sig == nil || sig.Source != subtitleSourceExternal {
+	if sig == nil || sig.Source != subtitleSourceExternal || strings.TrimSpace(sig.Label) == "" {
 		return sig
 	}
-	pos, ok := positions[strings.TrimSpace(sig.Label)]
-	if !ok {
-		return sig
-	}
-	track := versions[pos.version].SubtitleTracks[pos.track]
 	relabeled := *sig
-	relabeled.Label = firstNonEmpty(track.Title, track.EmbeddedTitle, track.Language)
+	if pos, ok := positions[strings.TrimSpace(sig.Label)]; ok {
+		relabeled.Label = sidecarTrackLabel(versions[pos.version].SubtitleTracks[pos.track])
+		return &relabeled
+	}
+	for _, version := range versions {
+		for _, track := range version.SubtitleTracks {
+			if track.External && sidecarTrackLabel(track) == sig.Label {
+				return sig
+			}
+		}
+	}
+	relabeled.Label = ""
 	return &relabeled
+}
+
+// sidecarTrackLabel is the label a client shows for an external track once its
+// file name is hidden.
+func sidecarTrackLabel(track VersionSubtitleTrack) string {
+	return firstNonEmpty(track.Title, track.EmbeddedTitle, track.Language)
 }
 
 func hideVariantFileIdentity(variants []PlaybackVariant, itemType string) {
