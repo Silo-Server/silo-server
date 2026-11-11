@@ -48,6 +48,12 @@ The `/downloads` family serves two lifecycles. The presence of
 
 Mobile clients should always send `X-Silo-Device-Id` and operate on managed entries.
 
+Every profile on the account shares its ephemeral rows, but a profile reaches only
+the rows whose title it may open. When a library restriction or a rating or
+advisory-age limit hides a row's title from the requesting profile, the list
+leaves the row out and the file and delete routes answer `404`. An episode row
+follows its series.
+
 Ephemeral rows are one-shot convenience records: the server prunes them
 automatically about 7 days after their last update. Managed device entries are
 not auto-pruned, except a `revoked` entry whose device has not confirmed the
@@ -524,7 +530,11 @@ GET /api/v2/downloads
 ```
 
 With `X-Silo-Device-Id`, returns that profile and device's managed entries. Without
-it, returns the account's ephemeral web rows.
+it, returns the account's ephemeral web rows whose title the requesting profile may
+open. Rows the profile may not open take no part in paging: a page holds `limit`
+entries whenever `page.has_more` is true, and a cursor never points at such a row.
+The server reads only a bounded number of rows past them for one page, about 2,000;
+a profile behind a longer run sees the list end there.
 
 Response:
 
@@ -584,7 +594,9 @@ DELETE /api/v2/downloads/{id}
 
 Deletes the managed entry owned by `(account, profile, header device)` or cancels an
 ephemeral transfer, and returns a bodyless `204`. Missing or incorrectly scoped
-entries return `404`. The client is responsible for deleting local files.
+entries return `404`, as does an ephemeral row whose title the requesting profile
+may not open; that row is left unchanged. The client is responsible for deleting
+local files.
 
 Deleting a `revoked` entry is how the app confirms it removed its copy; the server
 records that in the administrator's history.

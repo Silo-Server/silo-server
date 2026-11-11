@@ -208,12 +208,12 @@ func (f *fakeDownloadService) ServeFile(_ context.Context, w http.ResponseWriter
 	return nil
 }
 
-func (f *fakeDownloadService) List(_ context.Context, userID int, profileID, deviceID string) ([]*downloads.Download, error) {
+func (f *fakeDownloadService) List(_ context.Context, userID int, profileID, deviceID string, _ catalog.AccessFilter) ([]*downloads.Download, error) {
 	f.gotList = identityCall{userID: userID, profileID: profileID, deviceID: deviceID}
 	return f.list, f.listErr
 }
 
-func (f *fakeDownloadService) Delete(_ context.Context, userID int, profileID, deviceID, downloadID string) error {
+func (f *fakeDownloadService) Delete(_ context.Context, userID int, profileID, deviceID, downloadID string, _ catalog.AccessFilter) error {
 	f.gotDelete = identityCall{userID, profileID, deviceID, downloadID}
 	return f.deleteErr
 }
@@ -709,6 +709,14 @@ type openItemAccess struct{}
 
 func (openItemAccess) EnsureAccessible(context.Context, string, catalog.AccessFilter) error {
 	return nil
+}
+
+func (openItemAccess) EnsureAccessibleIDs(_ context.Context, ids []string, _ catalog.AccessFilter) (map[string]bool, error) {
+	allowed := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		allowed[id] = true
+	}
+	return allowed, nil
 }
 
 type countingLinkIssuer struct{ calls int }

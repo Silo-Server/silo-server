@@ -142,10 +142,29 @@ func invalidCollectionImage(message string, cause error) *APIError {
 	return &APIError{Status: http.StatusBadRequest, Code: policyErrorBadRequest, Message: message, cause: cause}
 }
 
-// collectionArtworkError keeps a client-facing artwork error and hides any
-// other failure behind a 500 with the given message.
+// collectionImageBusyRetryAfter is the Retry-After, in seconds, on a busy
+// answer: the wait imageutil gives a source before it reports ErrBusy.
+const collectionImageBusyRetryAfter = 30
+
+// busyCollectionImage reports that image processing had no room for the
+// artwork. The image may be fine, so the caller is told to try again and is
+// not told the file is unsupported.
+func busyCollectionImage(cause error) *APIError {
+	return &APIError{
+		Status:     http.StatusServiceUnavailable,
+		Code:       policyErrorUnavailable,
+		Message:    "Image processing is busy; try again shortly.",
+		RetryAfter: collectionImageBusyRetryAfter,
+		cause:      cause,
+	}
+}
+
+// collectionArtworkError keeps a client-facing artwork error, including a
+// busy answer, and hides any other failure behind a 500 with the given
+// message.
 func collectionArtworkError(err error, message string) error {
-	if apiErr, ok := errors.AsType[*APIError](err); ok && apiErr.Status < http.StatusInternalServerError {
+	if apiErr, ok := errors.AsType[*APIError](err); ok &&
+		(apiErr.Status < http.StatusInternalServerError || apiErr.Status == http.StatusServiceUnavailable) {
 		return apiErr
 	}
 	return apiError(http.StatusInternalServerError, "internal_error", message)
@@ -263,6 +282,9 @@ func putCollectionImageVariants(
 	if err != nil && imageutil.SourceUnusable(err, fileData) {
 		return "", "", invalidCollectionImage("The file is not a supported image.", err)
 	}
+	if errors.Is(err, imageutil.ErrBusy) {
+		return "", "", busyCollectionImage(err)
+	}
 	if err != nil {
 		return "", "", fmt.Errorf("generating image variants: %w", err)
 	}
@@ -283,6 +305,9 @@ func putCollectionImageVariants(
 
 	if len(w300Data) > 0 {
 		thumbhashStr, err = imageutil.Thumbhash(w300Data)
+		if errors.Is(err, imageutil.ErrBusy) {
+			return "", "", busyCollectionImage(err)
+		}
 		if err != nil {
 			return "", "", fmt.Errorf("computing thumbhash: %w", err)
 		}
