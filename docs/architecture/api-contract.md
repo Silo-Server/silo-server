@@ -1683,6 +1683,11 @@ carry optional `title_key` and `title_args` (an object of strings) while the row
 server text, so a client can show the title in its own language, and `ProfileSectionSetting` carries
 `default_title_key` and `default_title_args` for its `default_title`; `getHomeCapabilities` reports `section_title_keys: true` when the
 server sends them. A client acts on `title_key` whenever it is present.
+The Requests Discover rows (`DiscoverRowRef`, `DiscoverSection`, and `AdminDiscoverRow` on a
+read) carry `title_key` the same way while a built-in row holds its default title, and each
+`RecipePreset` carries `display_name_key`, `description_short_key`, and `description_long_key`
+for its text. These came after `section_title_keys`, so the flag does not say whether a server
+sends them; a client reads each key when it is present. A layout write takes no `title_key`.
 `page_sections.title_key` stores the key beside the title, and a trigger
 clears it on any update that changes the title without changing the key, so an older binary's
 rename cannot leave a stale key. See [the catalog API](../catalog-api.md#section-titles).

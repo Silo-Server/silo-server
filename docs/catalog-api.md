@@ -64,15 +64,21 @@ taste-match section shows a new profile (`home.section.popularOnServer`,
 (`home.section.forYou`, `home.section.becauseYouEnjoy` with `genres`, the cluster's
 comma-separated genre names, `home.section.pickedFromYourHistory`,
 `home.section.profilesLikeYouEnjoyed`). A home row that still
-holds the older default "Trending on Server" carries `home.section.trendingOnServer`. The key names a message in the shared translation
+holds the older default "Trending on Server" carries `home.section.trendingOnServer`. A seasonal
+row's in-season title carries `home.section.seasonal.<theme>.<vibe>` while it is a built-in
+vibe's own title; a title an admin set for the theme or a custom holiday has none. The built-in
+rows of the Requests Discover page (`row_order` and the rows of `listDiscoverSections`,
+`getDiscoverSection` and `getDiscoverRow`, and each row of `getRequestDiscoverLayout`) carry
+`title_key` (`home.section.discoverTrendingMovies` and the like) while the row still holds its
+default title. The key names a message in the shared translation
 catalog, and `title_args` fills its placeholders by name. A client that has the key shows
 its translation; otherwise, and whenever the fields are absent, it shows `title`.
 `title_args` and `default_title_args` are left out when the message has no placeholders,
 so a client must not require them to use a key.
 
 The fields are absent when an administrator or the profile typed the title, and when the
-server replaced the stored title with one of an item or season (a seasonal row's in-season
-title, an editorial subject). That replacement happens when the row's items are read: the
+server replaced the stored title with one of an item or season (a seasonal row's custom title,
+an editorial subject). That replacement happens when the row's items are read: the
 `Section` from that read carries the title to show, while the layout entry and the profile's
 section settings keep the stored title and its key, so a client heads a loaded row with the
 fetched `Section`'s title fields. For a stored section, the server records the key with the
@@ -91,6 +97,13 @@ administrator's title a renamed row can go back to, under the same rules. An
 reports `section_title_keys: true` on a server that sends them; it is informational, and a
 client acts on `title_key` whenever it is present. The frozen `/api/v1` reads
 and the Jellyfin surface do not carry them.
+
+Each preset `listSectionRecipes` answers also carries `display_name_key`,
+`description_short_key` and, for a preset with a `description_long`, `description_long_key`:
+the shared catalog messages (`home.recipe.<preset>.name`, `.description`, `.details`, or a
+`home.section.*` key when the name is also a row title) whose English is `display_name`,
+`description_short` and `description_long`. The text fields stay English in every answer, a
+client with the key shows its translation, and the frozen `/api/v1` gallery carries neither.
 
 How clients look up a `title_key` in the shared translation catalog is in
 [the client translation architecture](architecture/i18n.md).
