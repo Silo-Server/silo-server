@@ -3134,7 +3134,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		wireBackupRestore(deps, adminHandler, libraryHandler, adminImageHandler, externalSignInPlugins, libraryCollectionHandler, sectionHandler, rateLimitHandler)
 	}
 	if deps.DB != nil && authService != nil && userRepo != nil {
-		v2deps.ExternalSignIn = handlers.NewExternalSignInHandler(auth.NewIdentityService(deps.DB), authService, userRepo, externalSignInPlugins)
+		externalSignIn := handlers.NewExternalSignInHandler(auth.NewIdentityService(deps.DB), authService, userRepo, externalSignInPlugins)
+		externalSignIn.Stores = deps.UserStoreProvider
+		v2deps.ExternalSignIn = externalSignIn
 	}
 	if deps.PluginService != nil {
 		v2deps.NetworkAccess = deps.PluginService

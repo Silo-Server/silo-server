@@ -10,6 +10,8 @@ import { AccountSignInSection } from "./AccountSignInSection";
 const auth = vi.hoisted(() => ({
   providers: [] as Array<Record<string, unknown>>,
   isImpersonating: false,
+  // The account's primary profile, the one that may disconnect a sign-in.
+  profile: { id: "p-primary", is_primary: true },
 }));
 const leave = vi.hoisted(() => vi.fn());
 const toastSuccess = vi.hoisted(() => vi.fn());

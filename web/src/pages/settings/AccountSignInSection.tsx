@@ -129,7 +129,7 @@ function linkResultBanner(params: URLSearchParams): Banner | null {
  */
 export function AccountSignInSection() {
   const t = useT();
-  const { providers = [], isImpersonating, refreshSignInProviders } = useAuth();
+  const { providers = [], isImpersonating, profile, refreshSignInProviders } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [banner, setBanner] = useState<Banner | null>(() => linkResultBanner(searchParams));
   const [connecting, setConnecting] = useState<string | null>(null);
@@ -157,11 +157,14 @@ export function AccountSignInSection() {
   );
   const linked = identities.data?.items ?? [];
   const linkedInstallations = new Set(linked.map((identity) => identity.installation_id));
-  // Disconnecting is offered only while the account can still sign in
-  // another way: another identity, or a local password the server still
-  // accepts (the server switch, or break-glass). The server answers its own
-  // rule (last_sign_in_method) as can_unlink.
+  // Disconnecting is offered only to the account's primary profile, and only
+  // while the account can still sign in another way: another identity, or a
+  // local password the server still accepts (the server switch, or
+  // break-glass). The server answers both of its rules as can_unlink.
   const canDisconnect = identities.data?.can_unlink === true;
+  // Another profile is refused whatever the account's other sign-ins are, so
+  // only the primary profile is told the identity is the only way in.
+  const onlyWayIn = !canDisconnect && profile?.is_primary === true;
   const connectable = externalProviders.filter(
     (entry) => !linkedInstallations.has(entry.installation_id ?? ""),
   );
@@ -202,7 +205,7 @@ export function AccountSignInSection() {
                 key={identity.id}
                 identity={identity}
                 canDisconnect={!isImpersonating && canDisconnect}
-                onlyWayIn={!canDisconnect}
+                onlyWayIn={onlyWayIn}
                 onDisconnect={() => setDisconnecting(identity)}
               />
             ))}
