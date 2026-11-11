@@ -82,6 +82,10 @@ stored one: an image libvips cannot read, whether uploaded or linked; a JPEG or 
 megapixels whose pixel data does not decode; and a `source_url` with no http(s) host, an answer
 other than `200`, or more than 10 MiB. Other processing failures stay `500`.
 
+An import's `poster_url` is a bundled template poster path (`/images/collection-templates/...`)
+or an http(s) image URL. Any other value answers `422 validation_failed` at `body.poster_url`
+and creates no collection. The server does not fetch the URL: clients load it themselves.
+
 - `listCollections`, `getLibraryCollections` and `listLibraryUserCollections` return the
   collage in `poster_url` and mark it with `poster_is_collage: true`.
 - `getCollection` and `updateCollection` carry no `poster_url` for any poster, uploaded,

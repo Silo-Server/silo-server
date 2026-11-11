@@ -21,6 +21,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/collage"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
 	"github.com/Silo-Server/silo-server/internal/netguard"
+	"github.com/Silo-Server/silo-server/internal/usercollections"
 )
 
 // Shared artwork helpers used by both the admin library_collections handler
@@ -87,6 +88,27 @@ func storeBundledCollectionPosterIfS3Configured(
 		return "", "", false, err
 	}
 	return storedPath, thumbhashStr, true, nil
+}
+
+// personalCollectionPosterURL resolves a personal collection's stored poster,
+// or its collage, to a URL at card size. An image URL or a root-relative path
+// such as a bundled template poster is returned as stored. A storage key is
+// signed only when it is in the collection's own image directory
+// (usercollections.OwnsPosterKey), where its uploaded poster and collages are
+// written. Any other key reads as no poster, so a row that names one cannot
+// make the server sign an object the collection does not own.
+func personalCollectionPosterURL(ctx context.Context, resolver artworkurl.Resolver, collectionID, path string) string {
+	if path == "" {
+		return ""
+	}
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") || strings.HasPrefix(path, "/") {
+		return catalog.ImageURLOrEmpty(path)
+	}
+	if resolver == nil || !usercollections.OwnsPosterKey(collectionID, path) {
+		return ""
+	}
+	key := cardThumbnailPath(path)
+	return resolver.ResolveURLs(ctx, []string{key})[key].URL
 }
 
 // readCollectionImageMultipart reads a single image file from a multipart

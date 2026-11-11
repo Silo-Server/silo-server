@@ -354,7 +354,7 @@ func (h *CollectionHandler) collectionViewsCounted(ctx context.Context, store us
 		if collage, ok := reads.posters[c.ID]; ok {
 			posterPath, resp.PosterThumbhash, resp.PosterIsCollage = collage.Path, collage.Thumbhash, true
 		}
-		resp.PosterURL = h.presignUserCollectionPoster(ctx, posterPath)
+		resp.PosterURL = personalCollectionPosterURL(ctx, h.ArtworkResolver, c.ID, posterPath)
 		views = append(views, resp)
 	}
 	return views
