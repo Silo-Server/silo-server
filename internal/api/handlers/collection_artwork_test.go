@@ -476,6 +476,13 @@ func TestCollectionArtworkError_HidesServerFailures(t *testing.T) {
 	if !ok || apiErr.Status != http.StatusInternalServerError || apiErr.Message != "Failed to store collection artwork" {
 		t.Fatalf("err = %#v, want the 500 fallback", err)
 	}
+
+	// A busy answer is the caller's to act on, so it is not hidden.
+	busy := &APIError{Status: http.StatusServiceUnavailable, Code: "unavailable", Message: "busy", RetryAfter: 30}
+	err = collectionArtworkError(busy, "Failed to store collection artwork")
+	if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.Status != http.StatusServiceUnavailable || apiErr.RetryAfter != 30 {
+		t.Fatalf("err = %#v, want the 503 kept with its Retry-After", err)
+	}
 }
 
 // Linux libvips reads a truncated PNG's header and fails inside Process; other
