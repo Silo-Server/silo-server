@@ -647,7 +647,8 @@ A request without a profile is accepted only in the admin cases that rule
 allows, and a key declaring a locked primary profile cannot use its skipped PIN
 check as verification. Refusals are `403 permission_denied` or
 `profile_verification_required`. The receiver is unaffected, since the secret
-authenticates it. The web offers the page only to the primary profile.
+authenticates it. The web offers the page to the primary profile, and to an acting
+admin with no profile selected, whom the API refuses once any profile is limited.
 
 ### Revision-guarded onboarding
 
