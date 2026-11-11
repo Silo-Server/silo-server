@@ -283,6 +283,9 @@ func putCollectionImageVariants(
 
 	if len(w300Data) > 0 {
 		thumbhashStr, err = imageutil.Thumbhash(w300Data)
+		if errors.Is(err, imageutil.ErrBusy) {
+			return "", "", busyCollectionImage(err)
+		}
 		if err != nil {
 			return "", "", fmt.Errorf("computing thumbhash: %w", err)
 		}

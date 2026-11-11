@@ -167,7 +167,7 @@ func (h *LibraryCollectionHandler) createAdminCollection(ctx context.Context, re
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to process template poster")
 	}
 	if err := artwork(collection.ID, req.PosterSourceURL, req.BackdropSourceURL); err != nil {
-		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to process uploaded images")
+		return none, collectionArtworkError(err, "Failed to process uploaded images")
 	}
 	if posterStored || artwork != nil || strings.TrimSpace(req.PosterSourceURL) != "" || strings.TrimSpace(req.BackdropSourceURL) != "" {
 		collection, err = h.repo.GetByID(ctx, collection.ID)
@@ -284,7 +284,7 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 	}
 
 	if err := artwork(collectionID, pointerStringValue(req.PosterSourceURL), pointerStringValue(req.BackdropSourceURL)); err != nil {
-		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to process uploaded images")
+		return none, collectionArtworkError(err, "Failed to process uploaded images")
 	}
 
 	updated, err := h.repo.GetByID(ctx, collectionID)
@@ -466,7 +466,7 @@ func (h *LibraryCollectionHandler) importAdminMDBList(ctx context.Context, req A
 	// Process admin artwork before sync so MaybeGenerateCollage sees the
 	// uploaded poster and skips collage generation.
 	if err := artwork(collection.ID, req.PosterSourceURL, req.BackdropSourceURL); err != nil {
-		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to process uploaded images")
+		return none, collectionArtworkError(err, "Failed to process uploaded images")
 	}
 
 	run, err := h.service.SyncCollection(ctx, collection.ID)
@@ -511,7 +511,7 @@ func (h *LibraryCollectionHandler) importAdminTMDB(ctx context.Context, req Admi
 	// Process admin artwork before sync so MaybeGenerateCollage sees the
 	// uploaded poster and skips collage generation.
 	if err := artwork(collection.ID, req.PosterSourceURL, req.BackdropSourceURL); err != nil {
-		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to process uploaded images")
+		return none, collectionArtworkError(err, "Failed to process uploaded images")
 	}
 
 	run, err := h.service.SyncCollection(ctx, collection.ID)
@@ -553,7 +553,7 @@ func (h *LibraryCollectionHandler) importAdminTMDBList(ctx context.Context, req 
 	// Process admin artwork before sync so MaybeGenerateCollage sees the
 	// uploaded poster and skips collage generation.
 	if err := artwork(collection.ID, req.PosterSourceURL, req.BackdropSourceURL); err != nil {
-		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to process uploaded images")
+		return none, collectionArtworkError(err, "Failed to process uploaded images")
 	}
 
 	run, err := h.service.SyncCollection(ctx, collection.ID)
