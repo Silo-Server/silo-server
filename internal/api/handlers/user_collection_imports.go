@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"regexp"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -439,6 +440,12 @@ func validateOptionalLimit(limit *int) error {
 	return nil
 }
 
+// templatePosterPath matches a path below the bundled template poster
+// directory written in plain file name characters. It leaves out percent
+// escapes, backslashes, queries and fragments, which a browser could resolve
+// to a path outside that directory.
+var templatePosterPath = regexp.MustCompile(`^` + regexp.QuoteMeta(collectionTemplateImageDir) + `[A-Za-z0-9._/-]+$`)
+
 // importedPosterURL returns the poster an import stores for its collection:
 // none, a bundled template poster, or an http(s) image URL. The stored value
 // is shown as the collection's poster, so a storage key is refused: only the
@@ -448,10 +455,8 @@ func importedPosterURL(raw string) (string, error) {
 	switch {
 	case poster == "":
 		return "", nil
-	case strings.HasPrefix(poster, collectionTemplateImageDir):
-		if poster == path.Clean(poster) {
-			return poster, nil
-		}
+	case templatePosterPath.MatchString(poster) && poster == path.Clean(poster):
+		return poster, nil
 	case strings.HasPrefix(poster, "http://"), strings.HasPrefix(poster, "https://"):
 		if parsed, err := url.Parse(poster); err == nil && parsed.Host != "" && catalog.ImageURLOrEmpty(poster) != "" {
 			return poster, nil

@@ -554,6 +554,7 @@ func TestImportTMDB_RefusesStorageKeyAsPoster(t *testing.T) {
 		refused      bool
 	}{
 		{"storage key", "library-posters/1.jpg", true},
+		{"escaped path out of the template directory", collectionTemplateImageDir + "%2e%2e/%2e%2e/api/v2/artwork/library-posters/1.jpg", true},
 		{"template poster", collectionTemplateImageDir + "tmdb_popular_movies.jpg", false},
 		{"image URL", "https://image.example/poster.jpg", false},
 	}
