@@ -16,8 +16,15 @@ func (s ExternalSubtitle) FileName() string {
 // TitleIsFileName reports whether the sidecar has no title of its own: none
 // is stored, or the stored one is its file name, as the scanner records.
 func (s ExternalSubtitle) TitleIsFileName() bool {
-	title := strings.TrimSpace(s.Title)
-	return title == "" || title == s.FileName()
+	return IsFileNameTitle(s.Title, s.FileName())
+}
+
+// IsFileNameTitle reports whether title says nothing beyond fileName: it is
+// empty, or the file name itself. Both are compared without surrounding
+// space, so a file name that starts or ends with a space still matches.
+func IsFileNameTitle(title, fileName string) bool {
+	title = strings.TrimSpace(title)
+	return title == "" || title == strings.TrimSpace(fileName)
 }
 
 // SidecarLabels labels the external subtitles that a viewer who may not see

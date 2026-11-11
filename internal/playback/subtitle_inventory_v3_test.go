@@ -400,6 +400,8 @@ func TestHideSidecarFileNamesV3(t *testing.T) {
 			{Path: "/media/movie.fr.srt", Language: "fr", Format: "srt", Title: "Commentary"},
 			// A second untitled English sidecar stays distinguishable.
 			{Path: "/media/Movie.2023.1080p.WEB-DL-OTHER.en.srt", Language: "en", Format: "srt"},
+			// A file name that starts with a space is still only a file name.
+			{Path: "/media/ Movie.2023.1080p.WEB-DL-GROUP.de.srt", Language: "de", Format: "srt", Title: " Movie.2023.1080p.WEB-DL-GROUP.de.srt"},
 		},
 		SubtitleTracks: []models.SubtitleTrack{{Index: 0, Language: "ja", Codec: "subrip", Title: "Signs"}},
 	}
@@ -413,14 +415,14 @@ func TestHideSidecarFileNamesV3(t *testing.T) {
 
 	HideSidecarFileNamesV3(items, file)
 
-	for i, want := range []string{"en", "es", "Commentary", "en 2", "Signs"} {
+	for i, want := range []string{"en", "es", "Commentary", "en 2", "de", "Signs"} {
 		if items[i].Label != want {
 			t.Errorf("item %d label = %q, want %q", i, items[i].Label, want)
 		}
 	}
 
 	HideSidecarFileNamesV3(restored, &models.MediaFile{ID: 42})
-	for i, item := range restored[:4] {
+	for i, item := range restored[:5] {
 		if strings.Contains(item.Label, ".srt") {
 			t.Errorf("restored item %d label = %q after its sidecars changed, want no file name", i, item.Label)
 		}

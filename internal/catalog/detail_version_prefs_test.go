@@ -323,6 +323,8 @@ func TestDetailHideFileIdentity(t *testing.T) {
 			// A second untitled English sidecar is numbered, as the playback
 			// inventory numbers it, so a saved choice tells the two apart.
 			{Path: "/media/Movie (2023)/Movie.2023.2160p.WEB-DL-OTHER.en.srt", Language: "en", Format: "srt"},
+			// A file name that starts with a space is still only a file name.
+			{Path: "/media/Movie (2023)/ Movie.2023.2160p.WEB-DL-GROUP.de.srt", Language: "de", Format: "srt", Title: " Movie.2023.2160p.WEB-DL-GROUP.de.srt"},
 		},
 	}
 	for _, tc := range []struct {
@@ -359,6 +361,9 @@ func TestDetailHideFileIdentity(t *testing.T) {
 				}
 				if second := v.SubtitleTracks[3]; !tc.keepNames && (second.Title != "en 2" || second.FileName != "") {
 					t.Errorf("second untitled English sidecar = %+v, want title \"en 2\" and no file name", second)
+				}
+				if spaced := v.SubtitleTracks[4]; !tc.keepNames && (spaced.Title != "" || spaced.FileName != "") {
+					t.Errorf("sidecar whose file name starts with a space = %+v, want no title or file name", spaced)
 				}
 			}
 		})
