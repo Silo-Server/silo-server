@@ -4167,29 +4167,18 @@ func compatMasterCodecs(videoCodec string, source PlaybackMediaSource, audio mod
 }
 
 // compatMasterVideoCodec returns the RFC 6381 CODECS entry for the copied
-// video, or "" when the probe lacks the level or another fact the entry
-// needs.
+// video, or "" when the probe lacks the level, names a profile the entry
+// cannot describe, or lacks another fact the entry needs.
 func compatMasterVideoCodec(video models.VideoTrack) string {
 	switch strings.ToLower(strings.TrimSpace(video.Codec)) {
 	case compatVideoCodecHEVC, "h265":
-		if video.Level > 0 {
-			profile := "1.4"
-			if strings.EqualFold(strings.ReplaceAll(video.Profile, " ", ""), "main10") {
-				profile = "2.4"
-			}
+		profile := compatHEVCCodecProfiles[strings.ToLower(strings.ReplaceAll(video.Profile, " ", ""))]
+		if video.Level > 0 && profile != "" {
 			return fmt.Sprintf("hvc1.%s.L%d.B0", profile, video.Level)
 		}
 	case compatTargetVideoCodec, "avc":
-		if video.Level > 0 {
-			profile := "4240"
-			switch strings.ToLower(strings.TrimSpace(video.Profile)) {
-			case "high":
-				profile = "6400"
-			case "main":
-				profile = "4D40"
-			case "baseline":
-				profile = "42E0"
-			}
+		profile := compatH264CodecProfiles[strings.ToLower(strings.TrimSpace(video.Profile))]
+		if video.Level > 0 && profile != "" {
 			return fmt.Sprintf("avc1.%s%02X", profile, video.Level)
 		}
 	case compatVideoCodecAV1:
@@ -4198,6 +4187,34 @@ func compatMasterVideoCodec(video models.VideoTrack) string {
 		return compatVP9CodecString(video)
 	}
 	return ""
+}
+
+// compatH264CodecProfiles maps FFprobe's H.264 profile name to the
+// profile_idc and constraint flag bytes of the avc1 entry. The intra profiles
+// require constraint_set3_flag. Other profiles (Extended, CAVLC 4:4:4) are
+// left out rather than declared as a profile the stream does not have.
+//
+//nolint:goconst // FFprobe profile names, listed verbatim.
+var compatH264CodecProfiles = map[string]string{
+	"constrained baseline":  "4240",
+	"baseline":              "42E0",
+	"main":                  "4D40",
+	"high":                  "6400",
+	"high 10":               "6E00",
+	"high 10 intra":         "6E10",
+	"high 4:2:2":            "7A00",
+	"high 4:2:2 intra":      "7A10",
+	"high 4:4:4 predictive": "F400",
+	"high 4:4:4 intra":      "F410",
+}
+
+// compatHEVCCodecProfiles maps FFprobe's HEVC profile name, spaces removed,
+// to the profile and compatibility fields of the hvc1 entry. Range Extensions
+// and the other extension profiles are told apart only by constraint flags
+// the probe does not report, so they get no entry.
+var compatHEVCCodecProfiles = map[string]string{
+	"main":   "1.4",
+	"main10": "2.4",
 }
 
 // compatAV1CodecString builds the short form av01.0.LLM.DD (AV1 ISOBMFF,
