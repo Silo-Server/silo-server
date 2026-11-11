@@ -60,6 +60,29 @@ export const BRAND_ROWS: readonly DiscoverRowBody[] = [
   { id: "genres", type: "genres", title: "Genres", enabled: true },
 ];
 
+/**
+ * The catalog key of each stock row's default title, as the server keys a stored
+ * row (internal/requests/discoverrows). A row offered to bring back is not
+ * stored, so the server has sent no key for it.
+ */
+const STOCK_TITLE_KEYS: Readonly<Record<string, MessageKey>> = {
+  trending_movies: "home.section.discoverTrendingMovies",
+  trending_series: "home.section.discoverTrendingSeries",
+  popular_movies: "home.section.discoverPopularMovies",
+  popular_series: "home.section.discoverPopularSeries",
+  upcoming_movies: "home.section.discoverUpcomingMovies",
+  on_air_series: "home.section.discoverOnAirSeries",
+  studios: "home.section.discoverStudios",
+  networks: "home.section.discoverNetworks",
+  genres: "home.section.discoverGenres",
+};
+
+/** The key of a stock row that still holds its default title; none for any other row. */
+function stockTitleKey(row: Pick<DiscoverRowBody, "id" | "title">): MessageKey | undefined {
+  const stock = [...BUILT_IN_ROWS, ...BRAND_ROWS].find((entry) => entry.id === row.id);
+  return stock && stock.title === row.title ? STOCK_TITLE_KEYS[stock.id ?? ""] : undefined;
+}
+
 function builtIn(id: string, title: string, chart: DiscoverChart): DiscoverRowBody {
   return { id, type: "tmdb_chart", title, enabled: true, limit: 20, chart };
 }
@@ -173,10 +196,10 @@ export function layoutBodies(layout: DiscoverLayout): DiscoverRowBody[] {
   return layout.rows.map(rowBody);
 }
 
-/** A stored row as the shared row list shows it. Brand rows hold no titles. */
+/** A row as the shared row list shows it. Brand rows hold no titles. */
 export function toHomeRow(row: DiscoverRow): HomeRow {
   // The server's own row names carry a catalog key (see `useHomeRowTitle`); a name an admin typed has none.
-  const { title_key, title_args } = sectionTitleKey(row);
+  const { title_key = stockTitleKey(row), title_args } = sectionTitleKey(row);
   return {
     id: row.id ?? "",
     title: row.title,
