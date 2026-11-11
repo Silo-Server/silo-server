@@ -332,7 +332,7 @@ func (h *LibraryCollectionHandler) LibraryUserCollections(ctx context.Context, l
 	}
 	collections = h.withVisibleItemCounts(ctx, userID, profileID, collections)
 	for i := range collections {
-		collections[i].PosterURL = h.presignGPURLCtx(ctx, collections[i].PosterPath)
+		collections[i].PosterURL = personalCollectionPosterURL(ctx, h.ArtworkResolver, collections[i].ID, collections[i].PosterPath)
 	}
 	return collections, nil
 }
@@ -416,7 +416,7 @@ func (h *LibraryCollectionHandler) LibraryCollectionsTab(ctx context.Context, li
 			}
 			sorted := applyUserCollectionSort(userCollections, g.DefaultSortMode)
 			for i := range sorted {
-				posterURL := h.presignGPURLCtx(ctx, sorted[i].PosterPath)
+				posterURL := personalCollectionPosterURL(ctx, h.ArtworkResolver, sorted[i].ID, sorted[i].PosterPath)
 				creatorProfileID := sorted[i].CreatorProfileID
 				colls = append(colls, libraryTabCollection{
 					ID:               sorted[i].ID,
