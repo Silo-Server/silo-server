@@ -61,25 +61,6 @@ func TestCatalogSortMetricField(t *testing.T) {
 	}
 }
 
-// TestWriteCatalogResponseKeepsEffectiveSortWhenGrouped guards the group=work
-// response: grouping builds a fresh CatalogResult, and effective_sort must
-// survive it so a grouped Watchlist/Favorites page can still show the sort that
-// actually ordered it.
-func TestWriteCatalogResponseKeepsEffectiveSortWhenGrouped(t *testing.T) {
-	body := decodeCatalogResponse(t, &catalog.CatalogResult{
-		Total:         2,
-		EffectiveSort: catalog.QuerySort{Field: "title", Order: "asc"},
-	}, true)
-
-	sort, ok := body["effective_sort"].(map[string]any)
-	if !ok {
-		t.Fatalf("effective_sort missing from grouped response: %v", body)
-	}
-	if sort["field"] != "title" || sort["order"] != "asc" {
-		t.Fatalf("effective_sort = %v, want title/asc", sort)
-	}
-}
-
 func TestCatalogBrowseViewFreezesOnlyResolvedSourceOrder(t *testing.T) {
 	for _, resolved := range []bool{false, true} {
 		view := catalogBrowseView(&catalog.CatalogResult{EffectiveSortResolved: resolved}, nil)

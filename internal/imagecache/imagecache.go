@@ -239,6 +239,10 @@ func (c *Cacher) CacheBytes(ctx context.Context, data []byte, req CacheRequest) 
 	if len(data) == 0 {
 		return nil, fmt.Errorf("imagecache: image data is empty")
 	}
+	data, err := rasterizeOperatorSource(data)
+	if err != nil {
+		return nil, fmt.Errorf("imagecache: rasterize: %w", err)
+	}
 	thumbhash, err := imageutil.Thumbhash(data)
 	if err != nil {
 		return nil, fmt.Errorf("imagecache: thumbhash: %w", err)
@@ -275,6 +279,20 @@ func (c *Cacher) CacheBytes(ctx context.Context, data []byte, req CacheRequest) 
 	}, nil
 }
 
+// rasterizeOperatorSource renders an SVG, HEIF or AVIF source to a PNG and
+// returns any other source unchanged. Providers such as TMDB serve logos as
+// SVG, and artwork in a library folder may be an AVIF or a HEIC under a .jpg
+// name. Everything this package caches is a source the operator chose: a
+// provider download, a file in a library, or an admin's upload, which is
+// already limited to JPEG, PNG and WebP. Request paths that take a user's
+// image call imageutil directly, which refuses those formats.
+func rasterizeOperatorSource(data []byte) ([]byte, error) {
+	if !imageutil.NeedsRasterizing(data) {
+		return data, nil
+	}
+	return imageutil.Rasterize(data)
+}
+
 // Cache downloads the image at req.SourceURL and stores it through the same
 // variant, revision-tracking, and upload pipeline as CacheBytes.
 func (c *Cacher) Cache(ctx context.Context, req CacheRequest) (*CacheResult, error) {
@@ -299,7 +317,6 @@ func (c *Cacher) Cache(ctx context.Context, req CacheRequest) (*CacheResult, err
 	if err != nil {
 		return nil, fmt.Errorf("imagecache: download %s: %w", url, err)
 	}
-
 	return c.CacheBytes(ctx, data, req)
 }
 

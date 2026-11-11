@@ -112,7 +112,7 @@ export async function saveAdminArtwork(
       );
     } catch (error) {
       artworkErrors.push(
-        `${type}: ${error instanceof Error ? error.message : "Artwork update failed"}`,
+        `${type}: ${error instanceof Error ? error.message : t("web.admin.errors.artworkUpdateFailed")}`,
       );
     }
   }
@@ -263,6 +263,6 @@ export async function fetchAdminBoardOrderSnapshot(libraryId: number, groupIds: 
     for (const [id, snapshot] of batch) collectionOrders.set(id, snapshot);
   }
   if ((await fetchAdminGroupOrderSnapshot(libraryId)).etag !== groupOrder.etag)
-    throw new Error("Collection order changed while loading. Reload before reordering.");
+    throw new Error(t("web.admin.errors.collectionOrderChanged"));
   return { groupOrder, collectionOrders };
 }
