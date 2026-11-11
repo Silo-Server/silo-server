@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
@@ -179,5 +180,22 @@ func TestSubtitleSyncBySyncKey(t *testing.T) {
 	}
 	if _, err := h.SetSubtitleSyncTiming(ctx, access, 42, sidecarKey, 1, "other-bytes", subtitles.Timing{Scale: 1}); !errors.Is(err, subtitles.ErrExternalTimingChanged) {
 		t.Fatalf("write for other bytes: %v", err)
+	}
+}
+
+// The sync list labels a sidecar as the catalog and the playback inventory do,
+// so a second untitled sidecar of a language is "en 2" there too.
+func TestSidecarLabels(t *testing.T) {
+	sidecars := []models.ExternalSubtitle{
+		{Path: "/media/Movie.GROUP.en.srt", Language: "en", Format: "srt", Title: "Movie.GROUP.en.srt"},
+		{Path: "/media/movie.fr.srt", Language: "fr", Format: "srt", Title: "Commentary"},
+		{Path: "/media/Movie.OTHER.en.srt", Language: "en", Format: "srt"},
+		{Path: "/media/Movie.ja.ass", Language: "ja", Format: "ass", EmbeddedTitle: "Signs"},
+	}
+	if got, want := sidecarLabels(sidecars, false), []string{"en", "Commentary", "en 2", "Signs"}; !slices.Equal(got, want) {
+		t.Errorf("viewer labels = %q, want %q", got, want)
+	}
+	if got, want := sidecarLabels(sidecars, true), []string{"Movie.GROUP.en.srt", "movie.fr.srt", "Movie.OTHER.en.srt", "Movie.ja.ass"}; !slices.Equal(got, want) {
+		t.Errorf("curator labels = %q, want %q", got, want)
 	}
 }
