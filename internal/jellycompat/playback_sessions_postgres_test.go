@@ -638,7 +638,7 @@ func TestDurableCompatPlaybackStoreRetiresUpstreamSessionAcrossReplicas(t *testi
 	holder := NewDurableCompatPlaybackStore(pool, time.Hour, clock)
 	other := NewDurableCompatPlaybackStore(pool, time.Hour, clock)
 	id := t.Name()
-	for upstream, method := range map[string]string{"up-remote": "transcode", "up-local": "remux", "up-direct": "direct"} {
+	for upstream, method := range map[string]string{"up-remote": "transcode", "up-repeat": "transcode", "up-local": "remux", "up-direct": "direct"} {
 		holder.Put(PlaybackSession{ID: id + upstream, CompatToken: id, UpstreamSessionID: id + upstream, UpstreamPlayMethod: method})
 		t.Cleanup(func() { holder.Delete(id + upstream) })
 		if _, ok := holder.Get(id + upstream); !ok {
@@ -661,15 +661,23 @@ func TestDurableCompatPlaybackStoreRetiresUpstreamSessionAcrossReplicas(t *testi
 	if _, ok := holder.Get(id + "up-local"); ok {
 		t.Fatal("the replica that retired its own play still routes it")
 	}
+	// A repeat on the holder finds nothing left to retire, and stops the
+	// holder routing its cached copy without waiting for a revalidation.
+	if retired, err := other.RetireUpstreamSession(id + "up-repeat"); err != nil || !retired {
+		t.Fatalf("retire before the repeat = %v, %v", retired, err)
+	}
+	if retired, err := holder.RetireUpstreamSession(id + "up-repeat"); err != nil || retired {
+		t.Fatalf("repeat retire = %v, %v, want nothing left to retire", retired, err)
+	}
+	if _, ok := holder.Get(id + "up-repeat"); ok {
+		t.Fatal("the holder still routes its cached copy after a repeat end")
+	}
 	now = now.Add(compatCacheRevalidationInterval)
 	if _, ok := holder.Get(id + "up-remote"); ok {
 		t.Fatal("the holder still routes a play another replica retired")
 	}
 	if _, ok := holder.Get(id + "up-direct"); !ok {
 		t.Fatal("the holder no longer routes the direct play")
-	}
-	if retired, err := holder.RetireUpstreamSession(id + "up-remote"); err != nil || retired {
-		t.Fatalf("repeat retire = %v, %v, want nothing left to retire", retired, err)
 	}
 }
 

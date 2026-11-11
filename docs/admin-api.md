@@ -2448,8 +2448,9 @@ terminate, or the stop fallback above, does to it depends on the play's stream
 
 With several API replicas, a terminate that reaches a replica without the
 session succeeds when it retired a transcode or remux play. The replica holding
-the session then stops serving the play's HLS within five seconds. It keeps
-its session copy and transcode until its idle sweep, lets a progressive remux
+the session then stops serving the play's HLS when it next reads the play's
+row, which it tries every five seconds. It keeps its session copy and
+transcode until its idle sweep reaps them, lets a progressive remux
 already in flight run to its end, and records the play as expired, not as
 ended by an administrator. A stop command for a Jellyfin play still answers
 `404` on a replica without the session. Ending a session does not revoke the

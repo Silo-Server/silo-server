@@ -774,16 +774,22 @@ a replica that does not hold the session and does not depend on Redis. A write
 that fails is retried with backoff (`scheduleCompatAdminEndRetry`); until it
 lands, the play is hidden only on the replica that received the end, and only
 if that replica had a copy of the row; without one, that terminate answers
-`404`. When the end lands on a replica that does not hold the session:
+`404`. One case is not retried to the end: when the row never received the
+upstream session because its attach failed in the same outage, the retry finds
+no row to retire, and another replica can still route the row afterwards. When
+the end lands on a replica that does not hold the session:
 
 - The terminate succeeds. An administrator's stop command does not reach this
   path there: it looks the session up first and answers `404`.
-- The holder serves the play's HLS from its cached row for at most
-  `compatCacheRevalidationInterval` (5 seconds).
+- The holder serves the play's HLS from its cached row until it next reads the
+  row. It tries every `compatCacheRevalidationInterval` (5 seconds), and a
+  read that fails keeps the cached row until the next try.
 - The holder's idle session copy and transcode stay until the stale-session
-  sweep (by default 45 seconds after the last activity, 30 minutes for a
-  paused play), which closes both. The play is then recorded as expired, not
-  as ended by an administrator.
+  sweep reaps the copy, which closes both. The sweep waits out the session's
+  idle window: `DefaultActiveSessionGrace`, or the longer window of a paused
+  play, of a play still inside `StartupSessionGrace`, or of a session whose
+  media another node serves (`remoteTransportIdleGrace`). The play is then
+  recorded as expired, not as ended by an administrator.
 - A progressive remux response already in flight on the holder counts as an
   active transport, which the sweep skips. It runs until the response ends.
 

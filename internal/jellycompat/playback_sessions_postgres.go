@@ -485,11 +485,16 @@ func (d *DurableCompatPlaybackStore) HideFromRouting(id, compatToken string) err
 // while it still names this upstream session and a stream the server
 // produces, so a play another server has moved to direct play or to a new
 // upstream session is left alone. A server that still routes the play reads
-// the terminal row at its next revalidation, within
-// compatCacheRevalidationInterval.
+// the terminal row at its next revalidation that succeeds; it tries one
+// every compatCacheRevalidationInterval.
 //
 // This process's cached copy decides only where the row cannot: the write
 // failed, or the copy holds changes the row never received.
+//
+// One case is not retried to the end. When the write fails and the row never
+// received this upstream session (its attach failed in the same outage), the
+// copy here is hidden, but a retry by upstream session finds no row to
+// retire, so another server can still route the row once Postgres answers.
 func (d *DurableCompatPlaybackStore) RetireUpstreamSession(upstreamSessionID string) (bool, error) {
 	// An empty id would match every play that has not started yet.
 	if upstreamSessionID == "" {
@@ -512,7 +517,9 @@ func (d *DurableCompatPlaybackStore) RetireUpstreamSession(upstreamSessionID str
 		return false, err
 	}
 	if err == nil && !d.isUnpersisted(play.ID) && !d.hasPendingUpdates(play.ID) {
-		// The row answered, and this copy is behind it.
+		// The row answered, and this copy is behind it: read it again
+		// before routing the play from the copy.
+		d.invalidateValidation(play.ID, play.CompatToken)
 		return false, nil
 	}
 	// A failed write still leaves this process's copy hidden.

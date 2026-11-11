@@ -735,9 +735,7 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 		// this request. No later request exists for a stop to refuse, so the
 		// stop has to reach the stream itself, as in the native handler.
 		var abort <-chan struct{}
-		if watcher, ok := h.sessionMgr.(interface {
-			WatchTransportStop(string) (<-chan struct{}, func())
-		}); ok {
+		if watcher, ok := h.sessionMgr.(transportStopWatcher); ok {
 			var release func()
 			abort, release = watcher.WatchTransportStop(playSession.UpstreamSessionID)
 			defer release()

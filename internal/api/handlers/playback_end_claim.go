@@ -168,6 +168,16 @@ func (c nativeEndClaim) finish(ctx context.Context, sessionID, historyID string)
 	}
 }
 
+// compatAdminEnder is probed for on the session manager at run time, so a
+// manager without it would leave Jellyfin plays running after an
+// administrator's end without a sign. The assertion fails the build if the
+// production manager stops providing it.
+type compatAdminEnder interface {
+	EndCompatPlayAsAdmin(ctx context.Context, sessionID string) bool
+}
+
+var _ compatAdminEnder = (*playback.SessionManager)(nil)
+
 // endSessionAsAdmin ends a session an administrator stopped or terminated,
 // or whose command the player never confirmed. The attempt row is stopped
 // under the administrator's stop id first, so progress and replan answer 410
@@ -186,9 +196,7 @@ func (c nativeEndClaim) finish(ctx context.Context, sessionID, historyID string)
 func (h *PlaybackHandler) endSessionAsAdmin(ctx context.Context, sessionID string) error {
 	claim := claimNativeEnd(ctx, h.PlanStoreV3, h.StreamDeny, sessionID, adminStopID(sessionID))
 	defer h.forgetProgressSideEffectLock(sessionID)
-	compat, _ := h.sessionMgr.(interface {
-		EndCompatPlayAsAdmin(context.Context, string) bool
-	})
+	compat, _ := h.sessionMgr.(compatAdminEnder)
 	compatEnded := compat != nil && compat.EndCompatPlayAsAdmin(ctx, sessionID)
 	switch {
 	case claim.store != nil:

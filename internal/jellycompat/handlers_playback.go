@@ -1336,13 +1336,29 @@ func NewPlaybackHandler(
 	if adder, ok := sessionMgr.(sessionExpirationHookAdder); ok {
 		adder.AddExpirationHook(h.handleExpiredSession)
 	}
-	if ender, ok := sessionMgr.(interface {
-		SetCompatAdminEnd(playback.CompatAdminEnd)
-	}); ok {
-		ender.SetCompatAdminEnd(h.endUpstreamSessionAsAdmin)
+	if registrar, ok := sessionMgr.(compatAdminEndRegistrar); ok {
+		registrar.SetCompatAdminEnd(h.endUpstreamSessionAsAdmin)
 	}
 	return h
 }
+
+// compatAdminEndRegistrar and transportStopWatcher are probed for on the
+// session manager at run time, so a manager without them would switch an
+// administrator's end, or the abort of a progressive remux, off without a
+// sign. The assertions below fail the build if the production manager stops
+// providing either.
+type compatAdminEndRegistrar interface {
+	SetCompatAdminEnd(playback.CompatAdminEnd)
+}
+
+type transportStopWatcher interface {
+	WatchTransportStop(sessionID string) (<-chan struct{}, func())
+}
+
+var (
+	_ compatAdminEndRegistrar = (*playback.SessionManager)(nil)
+	_ transportStopWatcher    = (*playback.SessionManager)(nil)
+)
 
 func (h *PlaybackHandler) handleExpiredSession(session *playback.Session) {
 	if h == nil || h.tm == nil || session == nil {
@@ -1366,8 +1382,13 @@ func (h *PlaybackHandler) handleExpiredSession(session *playback.Session) {
 //
 // The native session is left to the administrator path that called this,
 // which stops it and records the play. A request already past its row lookup
-// can still register the session and a transcode again; no later request
-// reaches them, and the idle reaper closes both.
+// can still rebuild what this ends, and no later request reaches what it
+// rebuilt. After the session stop, it registers the session and a transcode
+// again, and the idle sweep reaps the session and closes the transcode.
+// Between the close below and the session stop, it restarts the transcode
+// under a session that is then stopped: no expiry hook reaches that
+// transcode, which stays until the process shuts down, as it does on the
+// client's own stop path.
 func (h *PlaybackHandler) endUpstreamSessionAsAdmin(ctx context.Context, upstreamSessionID string) bool {
 	if h == nil || h.playbackStore == nil || upstreamSessionID == "" {
 		return false
