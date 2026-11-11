@@ -19,6 +19,10 @@ const (
 	IdleStopAfter = 30 * time.Minute
 	// DefaultIdleCheckInterval is how often a running plugin is checked.
 	DefaultIdleCheckInterval = 30 * time.Second
+	// DefaultIdleStopTimeout bounds an idle stop. go-plugin asks the plugin to
+	// shut down with no deadline, so a frozen process would otherwise hold the
+	// installation's start slot, and every caller waiting on it, forever.
+	DefaultIdleStopTimeout = 10 * time.Second
 
 	// pluginServicePrefix selects the Silo plugin protocol. The health probe
 	// and go-plugin's own broker, stdio and controller calls share the
@@ -149,12 +153,41 @@ func (h *Host) stopIfIdle(ctx context.Context, installationID int, instance *ins
 	h.idleStopping[installationID] = exited
 	h.mu.Unlock()
 
-	h.logger.Debug("stopping idle plugin", "installation_id", installationID, "idle_for", h.idleStopAfter)
-	h.teardown(instance, true)
+	h.logger.Info("stopping idle plugin", "installation_id", installationID, "idle_for", h.idleStopAfter)
+	h.teardownIdle(installationID, instance)
 
 	h.mu.Lock()
 	delete(h.idleStopping, installationID)
 	h.mu.Unlock()
 	close(exited)
 	return true
+}
+
+// teardownIdle stops an idle instance gracefully, and kills its process when
+// it has not shut down within the idle stop timeout (see
+// DefaultIdleStopTimeout).
+func (h *Host) teardownIdle(installationID int, instance *instance) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.teardown(instance, true)
+	}()
+	select {
+	case <-done:
+		return
+	case <-time.After(h.idleStopTimeout):
+	}
+
+	h.logger.Warn("idle plugin did not shut down in time, killing it", "installation_id", installationID, "timeout", h.idleStopTimeout)
+	if instance.command != nil && instance.command.Process != nil {
+		_ = instance.command.Process.Kill()
+	}
+	select {
+	case <-done:
+	case <-time.After(h.idleStopTimeout):
+		// The process is stuck in the kernel (uninterruptible I/O) and cannot
+		// die yet. Release the start slot anyway: a new process is better than
+		// a plugin no caller can reach until the server restarts.
+		h.logger.Warn("idle plugin process has not exited after being killed", "installation_id", installationID)
+	}
 }

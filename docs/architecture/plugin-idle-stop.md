@@ -54,8 +54,11 @@ reads (`Host.Running`, which backs the admin `runtime.state`) are not use.
 - An idle stop is a deliberate stop. The client is not marked unhealthy, the
   exit handler is not called, and no lazy start failure is recorded. The
   installation reports `stopped`, and the admin UI shows it as **Active**, like
-  any other healthy plugin that is not running. The process is asked to shut
-  down and is only killed if it has not exited after two seconds.
+  any other healthy plugin that is not running. The stop is logged at info.
+- The process is asked to shut down and is killed if it has not exited after
+  two seconds. go-plugin's shutdown request has no deadline, so a process that
+  is frozen when its idle period ends is killed after `DefaultIdleStopTimeout`
+  instead of holding the start slot, and every caller waiting on it, for good.
 - State a plugin keeps in memory does not survive an idle stop. Host-held
   state (configuration, instance state, OAuth and device-code flow state, scan
   markers, sync cursors) is sent again with each call. A plugin must not rely

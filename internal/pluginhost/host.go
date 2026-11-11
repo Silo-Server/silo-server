@@ -36,6 +36,9 @@ type Config struct {
 	// IdleCheckInterval is how often such a process is checked. Zero takes
 	// DefaultIdleCheckInterval.
 	IdleCheckInterval time.Duration
+	// IdleStopTimeout is how long an idle stop waits for the plugin to shut
+	// down before killing its process. Zero takes DefaultIdleStopTimeout.
+	IdleStopTimeout time.Duration
 
 	// EventPublisher receives events that plugins publish via RuntimeHost.
 	// Typically silo's *events.Hub. When nil, plugins that try to
@@ -85,6 +88,7 @@ type Host struct {
 	exitCheckInterval   time.Duration
 	idleStopAfter       time.Duration
 	idleCheckInterval   time.Duration
+	idleStopTimeout     time.Duration
 	// now is a test seam for the idle clock.
 	now func() time.Time
 
@@ -157,10 +161,15 @@ func NewHost(cfg Config) *Host {
 	if idleInterval <= 0 {
 		idleInterval = DefaultIdleCheckInterval
 	}
+	idleStopTimeout := cfg.IdleStopTimeout
+	if idleStopTimeout <= 0 {
+		idleStopTimeout = DefaultIdleStopTimeout
+	}
 
 	return &Host{
 		idleStopAfter:       max(cfg.IdleStopAfter, 0),
 		idleCheckInterval:   idleInterval,
+		idleStopTimeout:     idleStopTimeout,
 		now:                 time.Now,
 		logger:              logger,
 		healthCheckInterval: interval,
