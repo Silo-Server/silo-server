@@ -238,7 +238,7 @@ func (h *PlaybackHandler) lowerBufferedVersionForIntent(r *http.Request, req pla
 		if err := preflightPlaybackFile(r.Context(), candidate, h.MissingMarker, h.EventsHub); err != nil {
 			continue
 		}
-		result, _ := h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: next, RequestedFile: base, EffectiveFile: candidate, AudioTrackIndex: nextAudio, Settings: settings, ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), candidate), Now: time.Now(), AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), candidate)})
+		result, _ := h.planPlaybackWithCapabilitiesV3(r.Context(), h.plannerInputV3(r.Context(), planningV3{plannerRequestedFile: base, settings: settings}, next, candidate, nextAudio))
 		if result.Plan != nil && result.Plan.Delivery != playback.DeliveryTranscodeHLSV3 {
 			return candidate, next, nextAudio
 		}
