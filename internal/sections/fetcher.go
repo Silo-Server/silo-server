@@ -1543,16 +1543,22 @@ func (f *Fetcher) fetchUserCollection(ctx context.Context, s ResolvedSection, li
 		if qd.Limit != nil && *qd.Limit > 0 {
 			limit = *qd.Limit
 		}
+		// Both queries read the viewer's own state, as fetchFiltered does for
+		// the collection without a display filter.
+		viewerAccess := filter
+		viewerAccess.UserID = userID
+		viewerAccess.ProfileID = profileID
+		baseAccess := filter
+		if qd.IsPersonalized() {
+			baseAccess = viewerAccess
+		}
 		executor := &catalog.QueryExecutor{Pool: f.pool}
-		items, _, err := executor.Preview(ctx, qd, filter, limit)
+		items, _, err := executor.Preview(ctx, qd, baseAccess, limit)
 		if err != nil {
 			return nil, 0, err
 		}
 
-		displayAccess := filter
-		displayAccess.UserID = userID
-		displayAccess.ProfileID = profileID
-		items, err = catalog.FilterCollectionItemsByDisplayQuery(ctx, f.pool, items, collection.DisplayQueryDefinition, displayAccess)
+		items, err = catalog.FilterCollectionItemsByDisplayQuery(ctx, f.pool, items, collection.DisplayQueryDefinition, viewerAccess)
 		if err != nil {
 			return nil, 0, err
 		}

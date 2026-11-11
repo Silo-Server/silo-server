@@ -28,6 +28,7 @@
 ./internal/audiobooks TestABSListsLeaveOutBooksInNoLibraryDB
 ./internal/api/handlers TestAdminStatsLeaveOutFilesAndItemsHeldByRemovalGraceDB
 ./internal/sections TestRuleRowsReadTheViewersWatchStatePostgres
+./internal/sections TestSmartCollectionRowWithDisplayFilterReadsTheViewersWatchStatePostgres
 ./internal/scanner TestFileRepositoryPreservesFirstSeenScanProvenance
 ./internal/scanner TestMultiEpisodeFileServesSpannedEpisodesDB
 ./internal/scanner TestScannedGroupForItemDB
