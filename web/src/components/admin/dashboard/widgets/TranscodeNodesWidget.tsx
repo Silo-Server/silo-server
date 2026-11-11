@@ -333,6 +333,8 @@ function FleetSummary({ nodes }: { nodes: StreamNode[] }) {
 
 /** Where a CPU, RAM or GPU reading turns amber. */
 const HIGH_LOAD_PERCENT = 90;
+// Between a count and its "/ cap", so the cell's text reads "3 / 8".
+const SPACE = " ";
 
 const COLUMN_HEADING =
   "bg-card text-muted-foreground border-border sticky top-0 z-10 border-b pb-1 ps-2.5 text-end text-[11px] font-medium whitespace-nowrap";
@@ -645,7 +647,7 @@ function ActiveCount({ node }: { node: StreamNode }) {
         {active}
         {cap !== null ? (
           <span className="text-muted-foreground font-normal">
-            {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a space, not text */}{" "}
+            {SPACE}
             {t("web.admin.dashboard.widgets.transcodeNodes.capSeparator", {
               max: cap.toLocaleString(formatLocale()),
             })}
@@ -686,7 +688,7 @@ function EgressValue({ node }: { node: StreamNode }) {
       </span>
       {cap !== null ? (
         <span className="text-muted-foreground hidden @min-[620px]/nodes:inline">
-          {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a space, not text */}{" "}
+          {SPACE}
           {t("web.admin.dashboard.widgets.transcodeNodes.capSeparator", {
             max: formatMbpsValue(cap / 1_000),
           })}
