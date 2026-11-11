@@ -107983,6 +107983,48 @@
       "value": "Trabajo fallido"
     }
   ],
+  "web.common.libraryType.audiobooks": [
+    {
+      "type": 0,
+      "value": "Audiolibros"
+    }
+  ],
+  "web.common.libraryType.ebooks": [
+    {
+      "type": 0,
+      "value": "Libros electrónicos"
+    }
+  ],
+  "web.common.libraryType.manga": [
+    {
+      "type": 0,
+      "value": "Manga"
+    }
+  ],
+  "web.common.libraryType.mixed": [
+    {
+      "type": 0,
+      "value": "Mixta"
+    }
+  ],
+  "web.common.libraryType.movies": [
+    {
+      "type": 0,
+      "value": "Películas"
+    }
+  ],
+  "web.common.libraryType.podcasts": [
+    {
+      "type": 0,
+      "value": "Podcasts"
+    }
+  ],
+  "web.common.libraryType.series": [
+    {
+      "type": 0,
+      "value": "Series"
+    }
+  ],
   "web.common.markers.sharingDisclosure": [
     {
       "type": 0,
