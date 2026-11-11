@@ -493,7 +493,9 @@ func (d *DurableCompatPlaybackStore) HideFromRouting(id, compatToken string) err
 //   - The statement matched nothing and the copy owes the row earlier writes,
 //     which may include this upstream session. They go through Update, which
 //     replays the ones that still apply and leaves the copy holding the row's
-//     state, and the statement runs once more.
+//     state, and the statement runs once more. Between the two the row can
+//     be routable under this upstream session. A replay that fails counts
+//     as a failed statement.
 //   - The play never reached Postgres, so there is no row to ask or to write.
 //     The copy is hidden here; a hidden copy is never persisted as routable.
 //   - The statement failed. The copy is hidden here without a row write and
@@ -516,8 +518,8 @@ func (d *DurableCompatPlaybackStore) RetireUpstreamSession(upstreamSessionID str
 		if retired, hiddenErr := d.retireHiddenCopy(upstreamSessionID); retired || hiddenErr != nil {
 			return retired, hiddenErr
 		}
-		if play, ok := d.cachedRetirablePlay(upstreamSessionID); ok && !d.isUnpersisted(play.ID) && d.hasPendingUpdates(play.ID) {
-			_ = d.Update(play.ID, func(*PlaybackSession) error { return nil })
+		var replayed bool
+		if replayed, err = d.replayOwedWrites(upstreamSessionID); replayed && err == nil {
 			rows, err = d.retireUpstreamRows(upstreamSessionID)
 		}
 	}
@@ -544,6 +546,24 @@ func (d *DurableCompatPlaybackStore) RetireUpstreamSession(upstreamSessionID str
 	return d.hideCopyStillOnUpstream(play.ID, play.CompatToken, upstreamSessionID, err != nil), err
 }
 
+// replayOwedWrites sends the writes that this process's routable copy on an
+// upstream session owes its row through Update, and reports whether there
+// were any. A replay that fails is a failed retirement, not an answer from
+// the row: the copy still routes the upstream session and the row has not
+// heard of it, so the error goes back to the caller.
+func (d *DurableCompatPlaybackStore) replayOwedWrites(upstreamSessionID string) (bool, error) {
+	play, ok := d.cachedRetirablePlay(upstreamSessionID)
+	if !ok || d.isUnpersisted(play.ID) || !d.hasPendingUpdates(play.ID) {
+		return false, nil
+	}
+	err := d.Update(play.ID, func(*PlaybackSession) error { return nil })
+	if errors.Is(err, ErrSessionNotFound) {
+		// The copy went away meanwhile; the row answers on its own.
+		err = nil
+	}
+	return true, err
+}
+
 // hideCopyStillOnUpstream hides this process's copy of a play, and writes no
 // row, only while the copy still names the upstream session with a retired
 // play method: a switch that landed after the caller looked the copy up
@@ -566,9 +586,15 @@ func (d *DurableCompatPlaybackStore) hideCopyStillOnUpstream(id, compatToken, up
 // done: this process hid its copy and kept the writes it owed the row, which
 // may include the upstream session itself. One transaction replays those
 // writes onto the row and retires it if it then names the upstream session
-// with a retired play method, so the row is never routable under that
-// session and the copy stays hidden. A row that names anything else is left
-// as it is, and the owed writes are dropped with the hidden copy.
+// with a retired play method, so this step does not leave the row routable
+// under that session, and the copy stays hidden. A row that names anything
+// else is left as it is, and the owed writes are dropped with the hidden
+// copy.
+//
+// Until this runs, an Update by play id on the hidden copy would load the
+// row over it and commit the owed writes, leaving the row routable under the
+// ended session until the next retry retires it. Only a request that was
+// already past its lookup when the copy was hidden makes such an Update.
 func (d *DurableCompatPlaybackStore) retireHiddenCopy(upstreamSessionID string) (bool, error) {
 	play, ok := d.mem.findOnUpstream(upstreamSessionID, true)
 	if !ok || !adminEndRetiresPlay(play.UpstreamPlayMethod) || !d.hasPendingUpdates(play.ID) {

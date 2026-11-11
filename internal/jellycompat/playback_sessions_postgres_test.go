@@ -787,13 +787,18 @@ func TestDurableCompatPlaybackStoreRetireLeavesMovedPlay(t *testing.T) {
 }
 
 // TestDurableCompatPlaybackStoreRetryAfterFailedStatement: a retirement whose
-// statement failed while the play's attach was still owed hid the copy and
-// kept its owed writes. The retry replays them and retires the row in one
-// step, so the row is never routable under the ended upstream session and no
-// other replica keeps routing the play. A row that another replica attached
-// to its own upstream session in the meantime is left alone.
+// statement fails while the play's attach is still owed hides the copy,
+// keeps its owed writes, and reports the error. The retry replays them and
+// retires the row in one transaction, so no other replica keeps routing the
+// play. A row that another replica attached to its own upstream session in
+// the meantime is left alone. The outage is a closed pool for that one call.
 func TestDurableCompatPlaybackStoreRetryAfterFailedStatement(t *testing.T) {
 	pool := newCompatTestPool(t)
+	closed, err := pgxpool.New(t.Context(), os.Getenv("SILO_TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed.Close()
 	stale := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
 	mover := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
 	for _, moved := range []bool{false, true} {
@@ -813,8 +818,14 @@ func TestDurableCompatPlaybackStoreRetryAfterFailedStatement(t *testing.T) {
 				t.Fatal(err)
 			}
 			stale.appendPendingUpdate(id, id, attach)
-			if !stale.hideCopyStillOnUpstream(id, id, upstream, true) {
-				t.Fatal("the copy was not hidden")
+			stale.pool = closed
+			hidden, outageErr := stale.RetireUpstreamSession(upstream)
+			stale.pool = pool
+			if outageErr == nil || !hidden {
+				t.Fatalf("retire during the outage = %v, %v, want the copy hidden and an error to retry on", hidden, outageErr)
+			}
+			if _, ok := stale.Get(id); ok {
+				t.Fatal("the copy is still routable after the failed statement")
 			}
 			if moved {
 				wantUpstream = id + "-other"
@@ -839,6 +850,72 @@ func TestDurableCompatPlaybackStoreRetryAfterFailedStatement(t *testing.T) {
 				t.Fatal("the stale replica still owes writes")
 			}
 		})
+	}
+}
+
+// TestDurableCompatPlaybackStoreRetireHidesCopyWhenReplayFails: the statement
+// matches nothing because the row never received the attach, and replaying
+// the owed attach then fails. That is a failed retirement, not an answer
+// from the row: the copy is hidden with its owed writes and the error is
+// reported, so the retry finishes it. The replay fails on a row another
+// transaction holds locked; the store's connections give up on the lock
+// after 200ms.
+func TestDurableCompatPlaybackStoreRetireHidesCopyWhenReplayFails(t *testing.T) {
+	pool := newCompatTestPool(t)
+	config, err := pgxpool.ParseConfig(os.Getenv("SILO_TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.ConnConfig.RuntimeParams["lock_timeout"] = "200ms"
+	impatient, err := pgxpool.NewWithConfig(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(impatient.Close)
+	stale := NewDurableCompatPlaybackStore(impatient, time.Hour, nil)
+	other := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	id := t.Name()
+	upstream := id + "-up"
+	stale.Put(PlaybackSession{ID: id, CompatToken: id})
+	t.Cleanup(func() { stale.Delete(id) })
+	attach := func(session *PlaybackSession) error {
+		if session.UpstreamSessionID != "" {
+			return errUpstreamReplaced
+		}
+		session.UpstreamSessionID, session.UpstreamPlayMethod = upstream, "transcode"
+		return nil
+	}
+	if err := stale.mem.Update(id, attach); err != nil {
+		t.Fatal(err)
+	}
+	stale.appendPendingUpdate(id, id, attach)
+
+	tx, err := pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(t.Context(), `SELECT 1 FROM jellycompat_playback_sessions WHERE id = $1 FOR UPDATE`, id); err != nil {
+		t.Fatal(err)
+	}
+	hidden, replayErr := stale.RetireUpstreamSession(upstream)
+	if err := tx.Rollback(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if replayErr == nil || !hidden {
+		t.Fatalf("retire with a failed replay = %v, %v, want the copy hidden and an error to retry on", hidden, replayErr)
+	}
+	if _, ok := stale.Get(id); ok {
+		t.Fatal("the copy still routes the ended upstream session")
+	}
+
+	if retired, err := stale.RetireUpstreamSession(upstream); err != nil || !retired {
+		t.Fatalf("retry = %v, %v, want the row retired", retired, err)
+	}
+	if row, ok, err := other.load(id); err != nil || !ok || !row.Terminal || row.UpstreamSessionID != upstream {
+		t.Fatalf("row = %+v, %v, %v; want it retired under its upstream session", row, ok, err)
+	}
+	if _, ok := other.Get(id); ok {
+		t.Fatal("another replica still routes the play")
 	}
 }
 

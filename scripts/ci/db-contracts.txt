@@ -168,6 +168,7 @@
 ./internal/jellycompat TestDurableCompatPlaybackStoreRetiresUpstreamSessionAcrossReplicas
 ./internal/jellycompat TestDurableCompatPlaybackStoreRetireLeavesMovedPlay
 ./internal/jellycompat TestDurableCompatPlaybackStoreRetryAfterFailedStatement
+./internal/jellycompat TestDurableCompatPlaybackStoreRetireHidesCopyWhenReplayFails
 ./internal/jellycompat TestPseudoUserOwnerAcrossReplicasPostgres
 ./internal/invitations TestLinkInvitationLifecycleDB
 ./internal/invitations TestEmailedInvitationLinkReplacementDB

@@ -771,21 +771,26 @@ Which plays this ends is decided by the row's `UpstreamPlayMethod`
 
 The retirement is one statement keyed on the upstream session and the play
 method, so it works from a replica that does not hold the session and does not
-depend on Redis. It is the only write that retires a row: a play that another
-replica has moved to a new upstream session, or to direct play, matches
-nothing and stays routable, whatever a stale cached copy says. When the
-statement matches nothing and the replica's cached copy owes the row earlier
-writes, those are sent through the store's update path and the statement runs
-once more. A cached copy is hidden without a row write in two cases only: the
-play never reached Postgres, or the statement failed. A write
+depend on Redis. A row is retired only by a write that checks it still names
+this upstream session with a retired method: a play that another replica has
+moved to a new upstream session, or to direct play, matches nothing and stays
+routable, whatever a stale cached copy says. When the statement matches
+nothing and the replica's cached copy owes the row earlier writes, those are
+sent through the store's update path and the statement runs once more; in
+between, the row can be routable under the ended session. A cached copy is
+hidden without a row write in two cases only: the play never reached
+Postgres, or the statement or that replay failed. A write
 that fails is retried with backoff (`scheduleCompatAdminEndRetry`); until it
 lands, the play is hidden only on the replica that received the end, and only
 if that replica had a copy of the row; without one, that terminate answers
-`404`. A copy hidden by a failed statement keeps the writes it owes the row. If
-the row never received the upstream session because its attach failed in the
-same outage, the retry replays those writes and retires the row in one
-transaction, so the row is never routable under the ended session. When the end
-lands on a replica that does not hold the session:
+`404`. A copy hidden by a failure keeps the writes it owes the row. If the row
+never received the upstream session because its attach failed in the same
+outage, the retry replays those writes and retires the row in one transaction
+(`retireHiddenCopy`). Before that retry, a request that was already past its
+lookup can still update the hidden copy by play ID; that loads the row over
+the copy and commits the owed attach, so the row is routable under the ended
+session until the retry retires it. When the end lands on a replica that does
+not hold the session:
 
 - The terminate succeeds. An administrator's stop command does not reach this
   path there: it looks the session up first and answers `404`.
