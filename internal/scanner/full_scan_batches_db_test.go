@@ -353,6 +353,33 @@ func checkBatchedDroppedMount(t *testing.T, pair batchedScanPair) {
 	}
 }
 
+// TestFullScanInBatchesFailedReadReconcilesNothingDB covers a batch whose
+// cataloged rows cannot be read after earlier batches were processed. The scan
+// must fail without reconciling: a file gone from disk is not marked missing,
+// and no root, group or location snapshot is rewritten from the partial walk.
+func TestFullScanInBatchesFailedReadReconcilesNothingDB(t *testing.T) {
+	pool := newScannerTestPool(t)
+	library := newBatchedScanLibrary(t, pool, "series", batchedScanFiles, 1)
+	library.scan("first scan")
+	before := library.snapshot("first scan")
+
+	// The first file walked is gone, and the row of the last one makes its
+	// batch's read fail.
+	if err := os.Remove(filepath.Join(library.root, batchedScanFiles[0])); err != nil {
+		t.Fatalf("remove a file: %v", err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE media_files SET external_subtitles = '{}'::jsonb WHERE file_path = $1`,
+		filepath.Join(library.root, batchedScanFiles[len(batchedScanFiles)-1])); err != nil {
+		t.Fatalf("break a row: %v", err)
+	}
+	if _, err := library.scanner.ScanFolder(t.Context(), library.folder); err == nil {
+		t.Fatal("scan succeeded, want the failed batch read reported")
+	}
+	if after := library.snapshot("failed scan"); !slices.Equal(before, after) {
+		t.Fatalf("failed scan changed the catalog:\nbefore %q\nafter  %q", before, after)
+	}
+}
+
 // TestFullScanInBatchesFindsCatalogedExtrasDB covers the extras of a batched
 // scan, whose cataloged rows are read by path after the primary files. Once
 // the movie has an item its extras are cataloged; the scan after that must
