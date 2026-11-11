@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type idleClock struct {
@@ -316,5 +318,23 @@ func TestStopAndShutdownWaitForAnIdleStopInProgress(t *testing.T) {
 				}
 			})
 		})
+	}
+}
+
+// Once the idle stop has decided, a callback the plugin starts on its own is
+// refused instead of being cut off mid-flight by the teardown.
+func TestIdleStopRefusesACallbackAfterTheDecision(t *testing.T) {
+	clock := &idleClock{now: time.Unix(1000, 0)}
+	host, inst, _ := idleTestHost(t, clock, 7)
+
+	clock.Advance(testIdlePeriod)
+	if !host.stopIfIdle(context.Background(), 7, inst) {
+		t.Fatal("did not stop an instance idle for the whole period")
+	}
+	ran := false
+	handler := func(context.Context, any) (any, error) { ran = true; return nil, nil }
+	_, err := inst.activity.unaryServer(context.Background(), nil, &grpc.UnaryServerInfo{}, handler)
+	if status.Code(err) != codes.Unavailable || ran {
+		t.Fatalf("callback after the idle stop decision: err = %v, handler ran = %v; want Unavailable without running it", err, ran)
 	}
 }

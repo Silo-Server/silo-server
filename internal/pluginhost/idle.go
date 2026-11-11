@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -43,6 +45,10 @@ type activity struct {
 	// capability RPC is unary today; a stream has no end this type can see,
 	// so a process that opens one is never stopped for being idle.
 	pinned bool
+	// stopping is set when the idle stop commits to stopping the process.
+	// Callbacks the plugin starts after that are refused rather than cut
+	// off by the teardown.
+	stopping bool
 }
 
 func newActivity(now func() time.Time) *activity {
@@ -74,7 +80,24 @@ func (a *activity) end() {
 func (a *activity) idleFor(period time.Duration) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	return a.idleForLocked(period)
+}
+
+func (a *activity) idleForLocked(period time.Duration) bool {
 	return !a.pinned && a.inFlight == 0 && a.now().Sub(a.last) >= period
+}
+
+// commitStop marks the process as stopping if it is still idle for period.
+// The check and the mark share a.mu with callback admission, so no callback
+// can start between them.
+func (a *activity) commitStop(period time.Duration) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.idleForLocked(period) {
+		return false
+	}
+	a.stopping = true
+	return true
 }
 
 // unaryClient counts host calls to the plugin for as long as they run.
@@ -99,7 +122,14 @@ func (a *activity) streamClient(ctx context.Context, desc *grpc.StreamDesc, cc *
 // unaryServer counts the plugin's calls back to the host. A callback with no
 // host call in flight is the only sign of work the plugin does on its own.
 func (a *activity) unaryServer(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-	a.begin()
+	a.mu.Lock()
+	if a.stopping {
+		a.mu.Unlock()
+		return nil, status.Error(codes.Unavailable, "plugin process is stopping after being idle")
+	}
+	a.inFlight++
+	a.last = a.now()
+	a.mu.Unlock()
 	defer a.end()
 	return handler(ctx, req)
 }
@@ -144,7 +174,7 @@ func (h *Host) stopIfIdle(ctx context.Context, installationID int, instance *ins
 
 	h.mu.Lock()
 	current, ok := h.instances[installationID]
-	if !ok || current != instance || !instance.activity.idleFor(h.idleStopAfter) {
+	if !ok || current != instance || !instance.activity.commitStop(h.idleStopAfter) {
 		h.mu.Unlock()
 		return false
 	}

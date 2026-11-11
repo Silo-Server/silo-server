@@ -43,6 +43,9 @@ reads (`Host.Running`, which backs the admin `runtime.state`) are not use.
 - The idle check and the removal from the host's instance map happen under the
   lock `Host.Client` takes to record a use. A caller either finds the process
   and keeps it alive for another idle period, or finds none and starts one.
+  The same decision marks the process as stopping under the lock that admits
+  plugin callbacks, so a callback the plugin starts afterwards is refused with
+  `Unavailable` instead of being cut off mid-flight.
 - The watcher holds the installation's start slot until the old process has
   exited, so a restart never overlaps the process it replaces. A `Start`
   already in flight wins: it cancels the watcher. `Stop` and `Shutdown` also
