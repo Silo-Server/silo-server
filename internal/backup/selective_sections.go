@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -212,7 +213,7 @@ func (p *planner) planHomeSection(ctx context.Context, e HomeSectionEntry, libMa
 }
 
 func readSection(ctx context.Context, q queryer, where string, args ...any) ([]*sections.PageSection, error) {
-	rows, err := q.Query(ctx, `SELECT id, scope, library_id, position, section_type, title, featured, item_limit, config::text, enabled, web_only
+	rows, err := q.Query(ctx, `SELECT id, scope, library_id, position, section_type, title, featured, item_limit, config::text, enabled, web_only, title_key, title_args
 		FROM page_sections WHERE `+where+` ORDER BY id`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("reading page sections: %w", err)
@@ -223,7 +224,7 @@ func readSection(ctx context.Context, q queryer, where string, args ...any) ([]*
 		var s sections.PageSection
 		var library *int64
 		var config string
-		if err := rows.Scan(&s.ID, &s.Scope, &library, &s.Position, &s.SectionType, &s.Title, &s.Featured, &s.ItemLimit, &config, &s.Enabled, &s.WebOnly); err != nil {
+		if err := rows.Scan(&s.ID, &s.Scope, &library, &s.Position, &s.SectionType, &s.Title, &s.Featured, &s.ItemLimit, &config, &s.Enabled, &s.WebOnly, &s.TitleKey, &s.TitleArgs); err != nil {
 			return nil, err
 		}
 		if library != nil {
@@ -243,8 +244,14 @@ func (p *planner) sectionChanges(ctx context.Context, plan sectionPlan, libMap m
 	if e.SectionType != string(local.SectionType) {
 		changes = append(changes, "type")
 	}
-	if e.Title != local.Title {
+	switch {
+	case e.Title != local.Title:
 		changes = append(changes, "title")
+	// The same title can still have lost its key here, by a rename and a
+	// rename back. A set's title without a key never takes one away: the
+	// write leaves the local key alone.
+	case e.TitleKey != "" && (e.TitleKey != local.TitleKey || !maps.Equal(e.TitleArgs, local.TitleArgs)):
+		changes = append(changes, "title translation")
 	}
 	if e.Position != local.Position {
 		changes = append(changes, "position")
