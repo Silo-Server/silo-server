@@ -14,6 +14,9 @@ interface NextEpisodeState {
  * starts a 10-second countdown, and provides the next episode reference. The
  * countdown running out is an automatic start; skipping it is the viewer's.
  */
+/** Seconds the next-episode countdown runs. */
+export const NEXT_EPISODE_COUNTDOWN_SECONDS = 10;
+
 export function useNextEpisode(
   triggerRegion: PlayerTimeRange | null,
   seriesContext: SeriesContext | undefined,
@@ -21,7 +24,7 @@ export function useNextEpisode(
   onNavigate: (contentId: string, trigger: PlaybackStartTrigger) => void,
 ): NextEpisodeState {
   const [showCountdown, setShowCountdown] = useState(false);
-  const [secondsRemaining, setSecondsRemaining] = useState(10);
+  const [secondsRemaining, setSecondsRemaining] = useState(NEXT_EPISODE_COUNTDOWN_SECONDS);
   const cancelledRef = useRef(false);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -35,7 +38,7 @@ export function useNextEpisode(
   useEffect(() => {
     cancelledRef.current = false;
     setShowCountdown(false);
-    setSecondsRemaining(10);
+    setSecondsRemaining(NEXT_EPISODE_COUNTDOWN_SECONDS);
     if (countdownRef.current) {
       clearInterval(countdownRef.current);
       countdownRef.current = null;
@@ -62,7 +65,7 @@ export function useNextEpisode(
 
     if (!showCountdown) {
       setShowCountdown(true);
-      setSecondsRemaining(10);
+      setSecondsRemaining(NEXT_EPISODE_COUNTDOWN_SECONDS);
 
       countdownRef.current = setInterval(() => {
         setSecondsRemaining((prev) => {

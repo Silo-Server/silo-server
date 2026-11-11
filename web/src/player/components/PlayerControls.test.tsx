@@ -55,8 +55,8 @@ describe("PlayerControls", () => {
     vi.restoreAllMocks();
   });
 
-  it("moves desktop secondary controls into overflow as the player narrows", () => {
-    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1024);
+  it("keeps rarely used toggles under More and moves secondary controls there as the player narrows", () => {
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(900);
     let resize = () => {};
     vi.stubGlobal(
       "ResizeObserver",
@@ -70,24 +70,25 @@ describe("PlayerControls", () => {
     );
 
     renderControls(true);
-    expect(screen.queryByRole("button", { name: "Edit markers" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Audio tracks" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "More player options" }));
-    expect(screen.getByRole("menuitem", { name: "Edit markers" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitemcheckbox", { name: "Edit markers" })).toBeInTheDocument();
     expect(screen.getByRole("slider", { name: "Volume" })).toBeInTheDocument();
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("menu")).toBeNull();
 
     width.mockReturnValue(1920);
     act(resize);
-    expect(screen.queryByRole("button", { name: "More player options" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Edit markers" })).toBeInTheDocument();
     expect(screen.getByRole("slider", { name: "Volume" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit markers" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "More player options" }));
+    expect(screen.getByRole("menuitemcheckbox", { name: "Edit markers" })).toBeInTheDocument();
   });
 
   it.each(["overflow", "Audio tracks", "Chapters"])(
     "does not reopen %s after widening and narrowing the player",
     (menu) => {
-      const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1024);
+      const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(900);
       let resize = () => {};
       vi.stubGlobal(
         "ResizeObserver",
@@ -119,7 +120,7 @@ describe("PlayerControls", () => {
       width.mockReturnValue(1920);
       act(resize);
       expect(screen.queryByRole("menu")).toBeNull();
-      width.mockReturnValue(1024);
+      width.mockReturnValue(900);
       act(resize);
       expect(screen.queryByRole("menu")).toBeNull();
       expect(screen.getByRole("button", { name: "More player options" })).toHaveAttribute(
@@ -136,19 +137,21 @@ describe("PlayerControls", () => {
     expect(screen.queryByRole("button", { name: "Edit markers" })).toBeNull();
   });
 
-  it("toggles between Fit and Fill from the desktop utility rail", () => {
+  it("toggles between Fit and Fill from More", () => {
     const onVideoFitToggle = vi.fn();
     const { unmount } = renderControls(false, { onVideoFitToggle });
 
-    const fill = screen.getByRole("button", { name: "Fill screen" });
-    expect(fill).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(screen.getByRole("button", { name: "More player options" }));
+    const fill = screen.getByRole("menuitemcheckbox", { name: "Fill screen" });
+    expect(fill).toHaveAttribute("aria-checked", "false");
     fireEvent.click(fill);
     expect(onVideoFitToggle).toHaveBeenCalledOnce();
 
     unmount();
     renderControls(false, { videoFit: "cover" });
-    expect(screen.getByRole("button", { name: "Fill screen" })).toHaveAttribute(
-      "aria-pressed",
+    fireEvent.click(screen.getByRole("button", { name: "More player options" }));
+    expect(screen.getByRole("menuitemcheckbox", { name: "Fill screen" })).toHaveAttribute(
+      "aria-checked",
       "true",
     );
   });
@@ -171,7 +174,7 @@ describe("PlayerControls", () => {
     renderControls(false);
 
     expect(screen.getByRole("button", { name: "More player options" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Play" })).toHaveClass("h-16", "w-16");
+    expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /mute/i })).toBeNull();
   });
 

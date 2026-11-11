@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import {
+  AudioLines,
   Info,
   ListVideo,
   Maximize,
@@ -8,13 +9,15 @@ import {
   Pause,
   PictureInPicture2,
   Play,
+  RotateCcw,
+  RotateCw,
   Scaling,
   SkipBack,
   SkipForward,
   Tags,
-  AudioLines,
 } from "lucide-react";
-import { CircleButton } from "./CircleButton";
+import "@/styles/player-hud.css";
+import { findActiveChapterIndex } from "../utils/chapters";
 import { SeekBar } from "./SeekBar";
 import { formatTime } from "../utils/formatTime";
 import { VolumeControl } from "./VolumeControl";
@@ -37,13 +40,12 @@ import type { PlayerConfig } from "../context/PlayerConfigContext";
 import type { SubtitleSync } from "../hooks/useSubtitleSync";
 import { useCoarsePointer } from "../hooks/useCoarsePointer";
 import { PlayerMenuSurface } from "./PlayerMenuSurface";
-import { ClusterSlotSpacer, SkipIcon } from "./PlayerControlsParts";
-import { useT } from "@/i18n";
+import { portraitDock } from "../utils/portraitDock";
+import { AmbientLetterbox, type AmbientSource } from "./AmbientLetterbox";
+import { numberText, useT } from "@/i18n";
 
 /** Decorative separator between values; not text, so not translated. */
 const SEPARATOR = "·";
-/** Separator between elapsed and total time; not text, so not translated. */
-const TIME_SEPARATOR = "/";
 
 interface PlayerControlsProps {
   /** The profile's rewind/fast-forward intervals, shown on the transport buttons. */
@@ -52,6 +54,7 @@ interface PlayerControlsProps {
   onSkip: { back: () => void; forward: () => void };
   // Visibility
   visible: boolean;
+
   // Video state
   playing: boolean;
   currentTime: number;
@@ -75,6 +78,11 @@ interface PlayerControlsProps {
   muted: boolean;
   isFullscreen: boolean;
   videoFit: VideoFitMode;
+  /** The video's width / height; places the touch dock under a letterboxed picture. */
+  videoAspect?: number;
+  /** The element showing the picture, for the upright-phone letterbox glow. */
+  getAmbientSource?: () => AmbientSource | null;
+
   onVideoFitToggle: () => void;
   // Subtitles
   subtitleTracks: PlayerSubtitleInfo[];
@@ -132,7 +140,13 @@ interface PlayerControlsProps {
   onSurfaceTap?: (event: MouseEvent<HTMLElement>) => void;
 }
 
-/** Skip amount for the ±seconds buttons, matching keyboard shortcuts. */
+/**
+ * Below this width (in rem, so large text counts) the utility rail no longer
+ * fits beside the transport: secondary controls move into More and the
+ * transport moves over the picture.
+ */
+const FULL_LAYOUT_MIN_REM = 64;
+
 export function PlayerControls({
   skipSeconds,
   onSkip,
@@ -156,6 +170,8 @@ export function PlayerControls({
   muted,
   isFullscreen,
   videoFit,
+  videoAspect = 0,
+  getAmbientSource,
   onVideoFitToggle,
   subtitleTracks,
   activeSubtitleIndex,
@@ -203,341 +219,365 @@ export function PlayerControls({
   const t = useT();
   const isCoarsePointer = useCoarsePointer();
   const controlsRef = useRef<HTMLDivElement>(null);
-  const [narrowPlayer, setNarrowPlayer] = useState(false);
+  const remProbeRef = useRef<HTMLSpanElement>(null);
+  const dockRef = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ width: 0, height: 0, rem: 16, dock: 0 });
+  const narrowPlayer = size.width > 0 && size.width < FULL_LAYOUT_MIN_REM * size.rem;
   const compactControls = isCoarsePointer || narrowPlayer;
 
   useLayoutEffect(() => {
     const element = controlsRef.current;
     if (!element || typeof ResizeObserver === "undefined") return;
-    const measure = () => setNarrowPlayer(element.clientWidth < 1536);
+    const measure = () => {
+      const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+      setSize({
+        width: element.clientWidth,
+        height: element.clientHeight,
+        rem,
+        dock: dockRef.current?.offsetHeight ?? 0,
+      });
+    };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(element);
+    // A 1rem probe resizes when the reader changes their text size, which
+    // moves the layout threshold without resizing the player.
+    if (remProbeRef.current) observer.observe(remProbeRef.current);
+    if (dockRef.current) observer.observe(dockRef.current);
     return () => observer.disconnect();
   }, []);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [audioOpen, setAudioOpen] = useState(false);
   const [chaptersOpen, setChaptersOpen] = useState(false);
-  // Discard compact menus when switching layouts so they cannot reappear
-  // after a resize or fullscreen round trip.
-  if (!compactControls && (overflowOpen || audioOpen || chaptersOpen)) {
+  // Discard compact-only menus when switching layouts so they cannot
+  // reappear after a resize or fullscreen round trip.
+  const [menusLayout, setMenusLayout] = useState(compactControls);
+  if (menusLayout !== compactControls) {
+    setMenusLayout(compactControls);
     setOverflowOpen(false);
     setAudioOpen(false);
     setChaptersOpen(false);
   }
-  const handleSkipBack = onSkip.back;
-  const handleSkipForward = onSkip.forward;
   // When playing any episode in a series (even the first or last), reserve
   // both prev/next slots so the cluster remains symmetric around the play
   // button. Movies (no episode nav at all) skip the slots entirely.
   const showEpisodeSlots = hasPrevEpisode || hasNextEpisode;
+  const pipAvailable = Boolean(onTogglePiP) && document.pictureInPictureEnabled;
+
+  const activeChapterIndex = findActiveChapterIndex(chapters ?? [], currentTime);
+  const chapterTitle =
+    chapters && chapters.length > 1 && activeChapterIndex >= 0
+      ? chapters[activeChapterIndex]?.title
+      : undefined;
+  const remaining = Math.max(0, duration - currentTime);
+
+  // A phone held upright letterboxes the picture into a band mid-screen. The
+  // HUD then gathers around that band: the title just above it and the
+  // controls, transport included, just below it.
+  const dock =
+    isCoarsePointer && videoFit === "contain"
+      ? portraitDock(size.width, size.height, videoAspect, size.rem)
+      : null;
+  const dockTop = dock ? dock.pictureBottom + 0.75 * size.rem : null;
+  const portraitTitleBottom = dock ? size.height - dock.pictureTop + 0.75 * size.rem : null;
+
+  // A phone on its side: the title shares the control row, so the dock stays
+  // short enough for the transport to sit at the screen's vertical centre.
+  const landscapeTouch = isCoarsePointer && dockTop === null && size.width > size.height;
+
+  // A short touch player (landscape phone, large text) has no room above the
+  // dock for the floating transport; it joins the dock's control row instead.
+  const inlineTransport =
+    isCoarsePointer &&
+    dockTop === null &&
+    size.dock > 0 &&
+    size.height - 4 * size.rem - size.dock < 5.5 * size.rem;
+
+  // The floating touch transport centres on the screen when it clears both
+  // the top bar (4rem) and the dock; otherwise it centres in the gap between.
+  const halfTransport = 1.875 * size.rem;
+  const transportCentred =
+    size.height / 2 - halfTransport >= 4 * size.rem &&
+    size.height / 2 + halfTransport + 0.5 * size.rem <= size.height - size.dock;
+
+  // A centred cluster reserves both episode slots so play stays on the
+  // centreline; a left-aligned row shows only the buttons that apply.
+  const transport = (large: boolean, reserveSlots = true) => (
+    <>
+      {showEpisodeSlots ? (
+        hasPrevEpisode ? (
+          <TransportButton label={t("web.player.controls.previousEpisode")} onClick={onPrevEpisode}>
+            <SkipBack fill="currentColor" strokeWidth={0} />
+          </TransportButton>
+        ) : reserveSlots ? (
+          <span aria-hidden="true" className="hud-transport-btn" />
+        ) : null
+      ) : null}
+      <TransportButton
+        label={t("web.player.controls.skipBack", { count: skipSeconds.back })}
+        onClick={onSkip.back}
+      >
+        <SkipGlyph direction="back" seconds={skipSeconds.back} />
+      </TransportButton>
+      <button
+        type="button"
+        className={`hud-play-btn ${large ? "hud-play-btn--large" : ""}`}
+        aria-label={playing ? t("web.player.controls.pause") : t("web.player.controls.play")}
+        onClick={onPlayPause}
+      >
+        {playing ? (
+          <Pause fill="currentColor" strokeWidth={0} />
+        ) : (
+          <Play className="translate-x-[0.0625rem]" fill="currentColor" strokeWidth={0} />
+        )}
+      </button>
+      <TransportButton
+        label={t("web.player.controls.skipForward", { count: skipSeconds.forward })}
+        onClick={onSkip.forward}
+      >
+        <SkipGlyph direction="forward" seconds={skipSeconds.forward} />
+      </TransportButton>
+      {showEpisodeSlots ? (
+        hasNextEpisode ? (
+          <TransportButton label={t("web.player.controls.nextEpisode")} onClick={onNextEpisode}>
+            <SkipForward fill="currentColor" strokeWidth={0} />
+          </TransportButton>
+        ) : reserveSlots ? (
+          <span aria-hidden="true" className="hud-transport-btn" />
+        ) : null
+      ) : null}
+    </>
+  );
+
+  const subtitleMenu = (
+    <SubtitleMenu
+      tracks={subtitleTracks}
+      preferredSubtitleLanguage={preferredSubtitleLanguage}
+      activeIndex={activeSubtitleIndex}
+      onSelect={onSubtitleSelect}
+      delayMs={subtitleDelayMs}
+      onDelayChange={onSubtitleDelayChange}
+      mediaFileId={mediaFileId}
+      playerConfig={playerConfig}
+      onRefreshSubtitles={onRefreshSubtitles}
+      onSubtitleJobAccepted={onSubtitleJobAccepted}
+      sessionId={sessionId}
+      getSubtitleStartPosition={getSubtitleStartPosition}
+      subtitleSync={subtitleSync}
+      audioTracks={audioTracks}
+    />
+  );
+  const qualityMenu = (
+    <QualityMenu
+      options={qualityOptions}
+      activeId={activeQualityId}
+      activeQuality={activeQuality}
+      isTranscoding={isTranscoding}
+      error={qualityError}
+      onSelect={onQualitySelect}
+      versions={versions}
+      versionLocked={versionLocked}
+      onSwitchVersion={onSwitchVersion}
+      playbackSpeed={playbackSpeed}
+      onPlaybackSpeedChange={onPlaybackSpeedChange}
+    />
+  );
+  const fullscreenButton = onFullscreenToggle ? (
+    <button
+      type="button"
+      className="hud-icon-btn"
+      onClick={onFullscreenToggle}
+      aria-label={
+        isFullscreen ? t("web.player.controls.exitFullscreen") : t("web.player.controls.fullscreen")
+      }
+      title={
+        isFullscreen
+          ? t("web.player.controls.exitFullscreenShortcut")
+          : t("web.player.controls.fullscreenShortcut")
+      }
+    >
+      {isFullscreen ? <Minimize /> : <Maximize />}
+    </button>
+  ) : null;
 
   return (
     <div
       ref={controlsRef}
       data-compact={compactControls}
       data-touch={isCoarsePointer}
-      className={`player-controls absolute inset-0 z-10 transition-opacity duration-300 ${
+      className={`player-controls hud absolute inset-0 z-10 transition-opacity duration-300 ${
         visible ? "opacity-100" : "pointer-events-none opacity-0"
       }`}
       onClick={onSurfaceTap ?? onPlayPause}
     >
-      {/* Gradient scrim — darkens the bottom of the frame just enough that
-          white controls stay legible without washing out the picture. */}
-      <div className="player-scrim pointer-events-none absolute inset-0" />
+      <span
+        ref={remProbeRef}
+        aria-hidden="true"
+        className="pointer-events-none invisible absolute h-px w-[1rem]"
+      />
+      {dock && getAmbientSource ? (
+        <AmbientLetterbox
+          getSource={getAmbientSource}
+          pictureTop={dock.pictureTop}
+          pictureBottom={dock.pictureBottom}
+          height={size.height}
+          active={visible}
+        />
+      ) : null}
+      {/* Scrims darken only where controls sit, so text stays legible on a
+          white frame without dimming the middle of the picture. */}
+      <div
+        aria-hidden="true"
+        className="hud-scrim-top pointer-events-none absolute inset-x-0 top-0"
+      />
+      <div
+        aria-hidden="true"
+        className="hud-scrim-bottom pointer-events-none absolute inset-x-0 bottom-0"
+      />
 
-      {/* Touch transport cluster. pointer-events pass through the empty area
-          so surface taps still toggle controls / double-tap-seek; only the
-          cluster itself is interactive. */}
-      {compactControls && (
-        <div className="player-compact-transport pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-[max(0.75rem,env(safe-area-inset-left))]">
+      {/* Touch and narrow players: transport over the picture. pointer-events
+          pass through the empty area so surface taps still toggle controls /
+          double-tap-seek; only the cluster itself is interactive. */}
+      {compactControls && !inlineTransport && dockTop === null && (
+        <div
+          className="player-compact-transport pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-[max(0.75rem,env(safe-area-inset-left))]"
+          // On touch the transport centres on the screen; when that would
+          // reach the dock, it centres between the top bar and the dock.
+          style={
+            isCoarsePointer && dockTop === null && size.dock > 0 && !transportCentred
+              ? { top: `${4 * size.rem}px`, bottom: `${size.dock}px` }
+              : undefined
+          }
+        >
           {/* Transport reads left to right in every language, like the timeline. */}
           <div
             dir="ltr"
-            className={`flex items-center gap-2 ${visible ? "pointer-events-auto" : ""}`}
+            className={`flex items-center gap-3 sm:gap-5 ${visible ? "pointer-events-auto" : ""}`}
             onClick={(event) => event.stopPropagation()}
           >
-            {showEpisodeSlots ? (
-              hasPrevEpisode ? (
-                <CircleButton
-                  size="md"
-                  variant="secondary"
-                  ariaLabel={t("web.player.controls.previousEpisode")}
-                  onClick={onPrevEpisode}
-                >
-                  <SkipBack className="h-5 w-5" fill="currentColor" />
-                </CircleButton>
-              ) : (
-                <ClusterSlotSpacer size="md" />
-              )
-            ) : null}
-            <CircleButton
-              size="md"
-              variant="secondary"
-              ariaLabel={t("web.player.controls.skipBack", { count: skipSeconds.back })}
-              onClick={handleSkipBack}
-            >
-              <SkipIcon direction="back" seconds={skipSeconds.back} />
-            </CircleButton>
-            <button
-              type="button"
-              className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-white text-black shadow-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-              aria-label={playing ? t("web.player.controls.pause") : t("web.player.controls.play")}
-              onClick={onPlayPause}
-            >
-              {playing ? (
-                <Pause className="h-7 w-7" fill="currentColor" strokeWidth={0} />
-              ) : (
-                // eslint-disable-next-line silo/no-physical-direction -- centres the play triangle, which doesn't mirror
-                <Play className="ml-1 h-7 w-7" fill="currentColor" strokeWidth={0} />
-              )}
-            </button>
-            <CircleButton
-              size="md"
-              variant="secondary"
-              ariaLabel={t("web.player.controls.skipForward", { count: skipSeconds.forward })}
-              onClick={handleSkipForward}
-            >
-              <SkipIcon direction="forward" seconds={skipSeconds.forward} />
-            </CircleButton>
-            {showEpisodeSlots ? (
-              hasNextEpisode ? (
-                <CircleButton
-                  size="md"
-                  variant="secondary"
-                  ariaLabel={t("web.player.controls.nextEpisode")}
-                  onClick={onNextEpisode}
-                >
-                  <SkipForward className="h-5 w-5" fill="currentColor" />
-                </CircleButton>
-              ) : (
-                <ClusterSlotSpacer size="md" />
-              )
-            ) : null}
+            {transport(false)}
           </div>
         </div>
       )}
 
-      {/* Narrow players use centered transport and a compact bottom utility row. */}
+      {portraitTitleBottom !== null ? (
+        <div
+          className="pointer-events-none absolute inset-x-0 z-10 flex px-[max(1.25rem,env(safe-area-inset-left))]"
+          style={{ bottom: portraitTitleBottom }}
+        >
+          <TitleBlock title={title} subtitleLabel={subtitleLabel} chapterTitle={chapterTitle} />
+        </div>
+      ) : null}
+
       <div
-        className="player-hud player-rise absolute inset-x-0 bottom-0 z-10 px-[max(0.75rem,env(safe-area-inset-left))] pt-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-[max(1.5rem,env(safe-area-inset-left))] sm:pr-[max(1.5rem,env(safe-area-inset-right))] sm:pb-[max(1.25rem,env(safe-area-inset-bottom))]"
+        ref={dockRef}
+        data-docked={dockTop !== null ? "true" : undefined}
+        style={dockTop !== null ? { top: dockTop, bottom: "auto" } : undefined}
+        className="player-hud absolute inset-x-0 bottom-0 z-10 pt-4 pr-[max(1rem,env(safe-area-inset-right))] pb-[max(0.75rem,env(safe-area-inset-bottom))] pl-[max(1rem,env(safe-area-inset-left))] sm:pr-[max(2rem,env(safe-area-inset-right))] sm:pb-[max(2rem,env(safe-area-inset-bottom))] sm:pl-[max(2rem,env(safe-area-inset-left))]"
         onClick={(e) => e.stopPropagation()}
       >
-        <SeekBar
-          currentTime={currentTime}
-          duration={duration}
-          buffered={buffered}
-          chapters={chapters}
-          regions={regions}
-          trickplay={trickplay}
-          trickplayUpdatedAt={trickplayUpdatedAt}
-          onTrickplayError={onTrickplayError}
-          editing={editing}
-          activeEditKind={activeEditKind}
-          onRegionEdgeChange={onRegionEdgeChange}
-          onSeek={onSeek}
-          onSkip={onSkip}
-        />
+        {/* On touch the title gets its own line; the row below is all controls. */}
+        {isCoarsePointer && dockTop === null && !landscapeTouch ? (
+          <div className="hud-touch-title mb-1 flex px-1">
+            <TitleBlock title={title} subtitleLabel={subtitleLabel} chapterTitle={chapterTitle} />
+          </div>
+        ) : null}
+        {!compactControls ? (
+          <div className="mb-2 flex">
+            <TitleBlock title={title} subtitleLabel={subtitleLabel} chapterTitle={chapterTitle} />
+          </div>
+        ) : null}
+        {/* Timeline: elapsed, the bar, and time remaining, left to right in
+            every language. */}
+        <div dir="ltr" className="flex items-center gap-2 sm:gap-3">
+          <span className="hud-time text-end">{formatTime(currentTime)}</span>
+          <div className="min-w-0 flex-1">
+            <SeekBar
+              currentTime={currentTime}
+              duration={duration}
+              buffered={buffered}
+              chapters={chapters}
+              regions={regions}
+              trickplay={trickplay}
+              trickplayUpdatedAt={trickplayUpdatedAt}
+              onTrickplayError={onTrickplayError}
+              editing={editing}
+              activeEditKind={activeEditKind}
+              onRegionEdgeChange={onRegionEdgeChange}
+              onSeek={onSeek}
+              onSkip={onSkip}
+            />
+          </div>
+          <span className="hud-time">
+            <span className="sr-only">
+              {t("web.player.controls.remainingTimeLabel", { time: formatTime(remaining) })}
+            </span>
+            <span aria-hidden="true">
+              {t("web.player.controls.remainingTime", { time: formatTime(remaining) })}
+            </span>
+          </span>
+        </div>
+
+        {dockTop !== null ? (
+          <div dir="ltr" className="mt-2 flex items-center justify-center gap-5">
+            {transport(true)}
+          </div>
+        ) : null}
 
         {compactControls ? (
-          <div className="player-compact-row mt-2 flex min-w-0 items-center gap-2">
-            <div className="player-compact-metadata flex min-w-0 flex-1 flex-col gap-0.5">
-              {title ? (
-                <div
-                  className="truncate text-[15px] leading-tight font-semibold tracking-tight text-white"
-                  title={title}
-                >
-                  {title}
+          <div
+            className={`player-compact-row mt-1 flex min-w-0 flex-wrap items-center gap-1 ${
+              dockTop !== null ? "justify-center gap-3" : "justify-end"
+            }`}
+          >
+            {inlineTransport ? (
+              // The margin follows the row's direction; the transport inside
+              // reads left to right.
+              <div className="me-auto">
+                <div dir="ltr" className="hud-inline-transport flex items-center gap-2">
+                  {transport(false)}
                 </div>
-              ) : null}
-              {/* Left to right inside, but placed at the column's start like the title. */}
-              <div
-                dir="ltr"
-                className="self-start font-mono text-[11px] tracking-[0.12em] text-white/75 tabular-nums"
-              >
-                {formatTime(currentTime)}
-                <span className="mx-1 text-white/30">{TIME_SEPARATOR}</span>
-                {formatTime(duration)}
               </div>
-            </div>
-            <SubtitleMenu
-              tracks={subtitleTracks}
-              preferredSubtitleLanguage={preferredSubtitleLanguage}
-              activeIndex={activeSubtitleIndex}
-              onSelect={onSubtitleSelect}
-              delayMs={subtitleDelayMs}
-              onDelayChange={onSubtitleDelayChange}
-              mediaFileId={mediaFileId}
-              playerConfig={playerConfig}
-              onRefreshSubtitles={onRefreshSubtitles}
-              onSubtitleJobAccepted={onSubtitleJobAccepted}
-              sessionId={sessionId}
-              getSubtitleStartPosition={getSubtitleStartPosition}
-              subtitleSync={subtitleSync}
-              audioTracks={audioTracks}
-            />
-            <QualityMenu
-              options={qualityOptions}
-              activeId={activeQualityId}
-              activeQuality={activeQuality}
-              isTranscoding={isTranscoding}
-              error={qualityError}
-              onSelect={onQualitySelect}
-              versions={versions}
-              versionLocked={versionLocked}
-              onSwitchVersion={onSwitchVersion}
-              playbackSpeed={playbackSpeed}
-              onPlaybackSpeedChange={onPlaybackSpeedChange}
-            />
+            ) : isCoarsePointer && !landscapeTouch ? (
+              dockTop === null ? (
+                <span className="flex-1" />
+              ) : null
+            ) : (
+              <TitleBlock title={title} subtitleLabel={subtitleLabel} chapterTitle={chapterTitle} />
+            )}
+            {subtitleMenu}
+            {qualityMenu}
             <button
               type="button"
-              className="player-utility-btn"
+              className="hud-icon-btn"
               aria-label={t("web.player.controls.moreOptions")}
               aria-expanded={overflowOpen}
               aria-haspopup="menu"
               onClick={() => setOverflowOpen(true)}
             >
-              <MoreHorizontal className="h-5 w-5" />
+              <MoreHorizontal />
             </button>
-            {onFullscreenToggle && (
-              <button
-                type="button"
-                className="player-utility-btn"
-                onClick={onFullscreenToggle}
-                aria-label={
-                  isFullscreen
-                    ? t("web.player.controls.exitFullscreen")
-                    : t("web.player.controls.fullscreen")
-                }
-              >
-                {isFullscreen ? (
-                  <Minimize className="h-[18px] w-[18px]" />
-                ) : (
-                  <Maximize className="h-[18px] w-[18px]" />
-                )}
-              </button>
-            )}
+            {fullscreenButton}
           </div>
         ) : (
-          <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-5">
-            {/* ─── Left: Title / episode / time ─── */}
-            <div className="flex min-w-0 flex-col gap-0.5">
-              {title ? (
-                <div
-                  className="truncate text-[15px] leading-tight font-semibold tracking-tight text-white sm:text-base"
-                  title={title}
-                >
-                  {title}
-                </div>
-              ) : null}
-              <div className="flex items-center gap-2 text-[10px] leading-tight text-white/55 uppercase">
-                {subtitleLabel ? (
-                  <>
-                    <span
-                      className="truncate tracking-[0.22em]"
-                      style={{ maxWidth: "38ch" }}
-                      title={subtitleLabel}
-                    >
-                      {subtitleLabel}
-                    </span>
-                    <span className="text-white/25">{SEPARATOR}</span>
-                  </>
-                ) : null}
-                <span
-                  dir="ltr"
-                  className="shrink-0 font-mono text-[11px] tracking-[0.12em] whitespace-nowrap text-white/75 normal-case tabular-nums"
-                >
-                  {formatTime(currentTime)}
-                  <span className="mx-1 text-white/30">{TIME_SEPARATOR}</span>
-                  {formatTime(duration)}
-                </span>
+          <div className="mt-2 flex items-center justify-between gap-6">
+            {/* Playback at the start, where the eye starts; settings at the end.
+                The transport itself reads left to right in every language. */}
+            <div className="flex items-center gap-3">
+              <div dir="ltr" className="flex items-center gap-3">
+                {transport(false, false)}
               </div>
+              <span aria-hidden="true" className="mx-1.5 h-6 w-px bg-white/15" />
+              <VolumeControl
+                tone="hud"
+                volume={volume}
+                muted={muted}
+                onVolumeChange={onVolumeChange}
+                onMutedChange={onMutedChange}
+              />
             </div>
 
-            {/* ─── Center: Main playback cluster ─── */}
-            {/* When ANY episode navigation exists (series context), both the
-              prev and next slots are reserved so the play button stays
-              exactly on the cluster's centerline even at the first or last
-              episode. For movies the slots are omitted entirely, leaving a
-              symmetric 3-button cluster that's also perfectly centered. */}
-            <div dir="ltr" className="flex items-center justify-center gap-2 sm:gap-3">
-              {showEpisodeSlots ? (
-                hasPrevEpisode ? (
-                  <CircleButton
-                    size="sm"
-                    variant="secondary"
-                    ariaLabel={t("web.player.controls.previousEpisode")}
-                    onClick={onPrevEpisode}
-                  >
-                    <SkipBack className="h-[18px] w-[18px]" fill="currentColor" />
-                  </CircleButton>
-                ) : (
-                  <ClusterSlotSpacer size="sm" />
-                )
-              ) : null}
-
-              <CircleButton
-                size="sm"
-                variant="secondary"
-                ariaLabel={t("web.player.controls.skipBack", { count: skipSeconds.back })}
-                onClick={handleSkipBack}
-              >
-                <SkipIcon direction="back" seconds={skipSeconds.back} />
-              </CircleButton>
-
-              <CircleButton
-                size="md"
-                variant="primary"
-                ariaLabel={playing ? t("web.player.controls.pause") : t("web.player.controls.play")}
-                onClick={onPlayPause}
-                data-paused={!playing}
-              >
-                {playing ? (
-                  <Pause className="h-6 w-6" strokeWidth={0} fill="currentColor" />
-                ) : (
-                  // eslint-disable-next-line silo/no-physical-direction -- centres the play triangle, which doesn't mirror
-                  <Play className="ml-[2px] h-6 w-6" strokeWidth={0} fill="currentColor" />
-                )}
-              </CircleButton>
-
-              <CircleButton
-                size="sm"
-                variant="secondary"
-                ariaLabel={t("web.player.controls.skipForward", { count: skipSeconds.forward })}
-                onClick={handleSkipForward}
-              >
-                <SkipIcon direction="forward" seconds={skipSeconds.forward} />
-              </CircleButton>
-
-              {showEpisodeSlots ? (
-                hasNextEpisode ? (
-                  <CircleButton
-                    size="sm"
-                    variant="secondary"
-                    ariaLabel={t("web.player.controls.nextEpisode")}
-                    onClick={onNextEpisode}
-                  >
-                    <SkipForward className="h-[18px] w-[18px]" fill="currentColor" />
-                  </CircleButton>
-                ) : (
-                  <ClusterSlotSpacer size="sm" />
-                )
-              ) : null}
-            </div>
-
-            {/* ─── Right: Utility rail ─── */}
-            <div className="flex items-center justify-end gap-0.5">
-              <div className="shrink-0">
-                <VolumeControl
-                  volume={volume}
-                  muted={muted}
-                  onVolumeChange={onVolumeChange}
-                  onMutedChange={onMutedChange}
-                />
-              </div>
-
-              <div className="player-hud-divider mx-1" />
-
+            <div className="flex items-center justify-end gap-1.5">
               {onAudioSelect && (
                 <AudioTrackMenu
                   tracks={audioTracks}
@@ -546,106 +586,24 @@ export function PlayerControls({
                   currentPosition={currentTime}
                 />
               )}
-
+              {subtitleMenu}
               <ChaptersMenu chapters={chapters ?? []} currentTime={currentTime} onSeek={onSeek} />
-
-              <SubtitleMenu
-                tracks={subtitleTracks}
-                preferredSubtitleLanguage={preferredSubtitleLanguage}
-                activeIndex={activeSubtitleIndex}
-                onSelect={onSubtitleSelect}
-                delayMs={subtitleDelayMs}
-                onDelayChange={onSubtitleDelayChange}
-                mediaFileId={mediaFileId}
-                playerConfig={playerConfig}
-                onRefreshSubtitles={onRefreshSubtitles}
-                onSubtitleJobAccepted={onSubtitleJobAccepted}
-                sessionId={sessionId}
-                getSubtitleStartPosition={getSubtitleStartPosition}
-                subtitleSync={subtitleSync}
-                audioTracks={audioTracks}
+              <span aria-hidden="true" className="mx-1.5 h-6 w-px bg-white/15" />
+              {qualityMenu}
+              <MoreMenu
+                open={overflowOpen}
+                onOpenChange={setOverflowOpen}
+                pipAvailable={pipAvailable}
+                onTogglePiP={onTogglePiP}
+                videoFit={videoFit}
+                onVideoFitToggle={onVideoFitToggle}
+                showPlaybackInfo={showPlaybackInfo}
+                onTogglePlaybackInfo={onTogglePlaybackInfo}
+                markerEditAvailable={markerEditAvailable}
+                markerEditActive={markerEditActive}
+                onToggleMarkerEdit={onToggleMarkerEdit}
               />
-
-              <QualityMenu
-                options={qualityOptions}
-                activeId={activeQualityId}
-                activeQuality={activeQuality}
-                isTranscoding={isTranscoding}
-                error={qualityError}
-                onSelect={onQualitySelect}
-                versions={versions}
-                versionLocked={versionLocked}
-                onSwitchVersion={onSwitchVersion}
-                playbackSpeed={playbackSpeed}
-                onPlaybackSpeedChange={onPlaybackSpeedChange}
-              />
-
-              {markerEditAvailable && onToggleMarkerEdit && (
-                <button
-                  type="button"
-                  className="player-utility-btn"
-                  onClick={onToggleMarkerEdit}
-                  aria-label={t("web.player.controls.editMarkers")}
-                  aria-pressed={markerEditActive}
-                  title={t("web.player.controls.editMarkers")}
-                  data-active={markerEditActive ? "true" : "false"}
-                >
-                  <Tags className="h-[18px] w-[18px]" />
-                </button>
-              )}
-
-              <button
-                type="button"
-                className="player-utility-btn"
-                onClick={onTogglePlaybackInfo}
-                aria-label={t("web.player.controls.playbackInfo")}
-                data-active={showPlaybackInfo ? "true" : "false"}
-              >
-                <Info className="h-[18px] w-[18px]" />
-              </button>
-
-              {onTogglePiP && document.pictureInPictureEnabled && (
-                <button
-                  type="button"
-                  className="player-utility-btn"
-                  onClick={onTogglePiP}
-                  aria-label={t("web.player.controls.pictureInPictureShortcut")}
-                  title={t("web.player.controls.pictureInPictureShortcut")}
-                >
-                  <PictureInPicture2 className="h-[18px] w-[18px]" />
-                </button>
-              )}
-
-              <button
-                type="button"
-                className="player-utility-btn"
-                onClick={onVideoFitToggle}
-                aria-label={t("web.player.controls.fillScreen")}
-                aria-pressed={videoFit === "cover"}
-                title={t("web.player.controls.fillScreen")}
-                data-active={videoFit === "cover" ? "true" : "false"}
-              >
-                <Scaling className="h-[18px] w-[18px]" />
-              </button>
-
-              {onFullscreenToggle && (
-                <button
-                  type="button"
-                  className="player-utility-btn"
-                  onClick={onFullscreenToggle}
-                  aria-label={
-                    isFullscreen
-                      ? t("web.player.controls.exitFullscreen")
-                      : t("web.player.controls.fullscreen")
-                  }
-                >
-                  {isFullscreen ? (
-                    <Minimize className="h-[18px] w-[18px]" />
-                  ) : (
-                    <Maximize className="h-[18px] w-[18px]" />
-                  )}
-                </button>
-              )}
+              {fullscreenButton}
             </div>
           </div>
         )}
@@ -663,79 +621,54 @@ export function PlayerControls({
         />
       )}
       {compactControls && overflowOpen && (
-        <PlayerMenuSurface className="player-overflow-menu" onClose={() => setOverflowOpen(false)}>
-          <div className="py-1">
-            {!isCoarsePointer && (
-              <div className="flex items-center justify-between border-b border-white/10 px-5 py-3 text-sm text-white/80">
-                <span>{t("web.player.controls.volume")}</span>
-                <VolumeControl
-                  volume={volume}
-                  muted={muted}
-                  onVolumeChange={onVolumeChange}
-                  onMutedChange={onMutedChange}
-                />
-              </div>
-            )}
-            {onAudioSelect && audioTracks.length > 0 && (
-              <OverflowAction
-                icon={<AudioLines className="h-5 w-5" />}
-                label={t("web.player.audioMenu.trigger")}
-                onClick={() => {
-                  setOverflowOpen(false);
-                  setAudioOpen(true);
-                }}
+        <PlayerMenuSurface
+          title={t("web.player.controls.more")}
+          onClose={() => setOverflowOpen(false)}
+        >
+          {!isCoarsePointer && (
+            <div className="flex items-center justify-between gap-4 px-4 py-1.5 text-sm">
+              <span>{t("web.player.controls.volume")}</span>
+              <VolumeControl
+                tone="hud"
+                volume={volume}
+                muted={muted}
+                onVolumeChange={onVolumeChange}
+                onMutedChange={onMutedChange}
               />
-            )}
-            {(chapters?.length ?? 0) > 0 && (
-              <OverflowAction
-                icon={<ListVideo className="h-5 w-5" />}
-                label={t("web.player.chaptersMenu.trigger")}
-                onClick={() => {
-                  setOverflowOpen(false);
-                  setChaptersOpen(true);
-                }}
-              />
-            )}
+            </div>
+          )}
+          {onAudioSelect && audioTracks.length > 0 && (
             <OverflowAction
-              icon={<Info className="h-5 w-5" />}
-              label={t("web.player.controls.playbackInfo")}
-              active={showPlaybackInfo}
+              icon={<AudioLines />}
+              label={t("web.player.audioMenu.trigger")}
               onClick={() => {
-                onTogglePlaybackInfo();
                 setOverflowOpen(false);
+                setAudioOpen(true);
               }}
             />
-            {onTogglePiP && document.pictureInPictureEnabled && (
-              <OverflowAction
-                icon={<PictureInPicture2 className="h-5 w-5" />}
-                label={t("web.player.controls.pictureInPicture")}
-                onClick={() => {
-                  onTogglePiP();
-                  setOverflowOpen(false);
-                }}
-              />
-            )}
+          )}
+          {(chapters?.length ?? 0) > 0 && (
             <OverflowAction
-              icon={<Scaling className="h-5 w-5" />}
-              label={t("web.player.controls.fillScreen")}
-              active={videoFit === "cover"}
+              icon={<ListVideo />}
+              label={t("web.player.chaptersMenu.trigger")}
               onClick={() => {
-                onVideoFitToggle();
                 setOverflowOpen(false);
+                setChaptersOpen(true);
               }}
             />
-            {markerEditAvailable && onToggleMarkerEdit && (
-              <OverflowAction
-                icon={<Tags className="h-5 w-5" />}
-                label={t("web.player.controls.editMarkers")}
-                active={markerEditActive}
-                onClick={() => {
-                  onToggleMarkerEdit();
-                  setOverflowOpen(false);
-                }}
-              />
-            )}
-          </div>
+          )}
+          <MoreMenuItems
+            close={() => setOverflowOpen(false)}
+            pipAvailable={pipAvailable}
+            onTogglePiP={onTogglePiP}
+            videoFit={videoFit}
+            onVideoFitToggle={onVideoFitToggle}
+            showPlaybackInfo={showPlaybackInfo}
+            onTogglePlaybackInfo={onTogglePlaybackInfo}
+            markerEditAvailable={markerEditAvailable}
+            markerEditActive={markerEditActive}
+            onToggleMarkerEdit={onToggleMarkerEdit}
+          />
         </PlayerMenuSurface>
       )}
       {compactControls && onAudioSelect && (
@@ -763,26 +696,220 @@ export function PlayerControls({
   );
 }
 
+/* ─────────────────────────────────────────────────────────────────────
+   Internal building blocks
+   ───────────────────────────────────────────────────────────────────── */
+
+function TitleBlock({
+  title,
+  subtitleLabel,
+  chapterTitle,
+}: {
+  title?: string;
+  subtitleLabel?: string;
+  chapterTitle?: string;
+}) {
+  const meta = [subtitleLabel, chapterTitle].filter((part): part is string => Boolean(part));
+  return (
+    <div className="player-compact-metadata flex min-w-0 flex-1 flex-col gap-1">
+      {title ? (
+        <div className="hud-title truncate" title={title}>
+          {title}
+        </div>
+      ) : null}
+      {meta.length > 0 ? (
+        <div className="hud-meta" title={meta.join(` ${SEPARATOR} `)}>
+          {meta.map((part, index) => (
+            <span key={index} className="flex min-w-0 items-center gap-2">
+              {index > 0 ? <span aria-hidden="true" className="hud-dot" /> : null}
+              <span className={index === 0 ? "shrink-0" : "truncate"}>{part}</span>
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function TransportButton({
+  label,
+  onClick,
+  children,
+}: {
+  label: string;
+  onClick?: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      className="hud-glass-btn hud-transport-btn"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** Curved arrow with the skip-seconds number centered in the loop. */
+function SkipGlyph({ direction, seconds }: { direction: "back" | "forward"; seconds: number }) {
+  const Arrow = direction === "back" ? RotateCcw : RotateCw;
+  return (
+    <span className="hud-skip-glyph" aria-hidden="true">
+      <Arrow />
+      <span>{numberText(seconds)}</span>
+    </span>
+  );
+}
+
+interface MoreMenuItemsProps {
+  close: () => void;
+  pipAvailable: boolean;
+  onTogglePiP?: () => void;
+  videoFit: VideoFitMode;
+  onVideoFitToggle: () => void;
+  showPlaybackInfo: boolean;
+  onTogglePlaybackInfo: () => void;
+  markerEditAvailable: boolean;
+  markerEditActive: boolean;
+  onToggleMarkerEdit?: () => void;
+}
+
+/** The less frequent controls, shared by the desktop More menu and the compact overflow. */
+function MoreMenuItems({
+  close,
+  pipAvailable,
+  onTogglePiP,
+  videoFit,
+  onVideoFitToggle,
+  showPlaybackInfo,
+  onTogglePlaybackInfo,
+  markerEditAvailable,
+  markerEditActive,
+  onToggleMarkerEdit,
+}: MoreMenuItemsProps) {
+  const t = useT();
+  return (
+    <>
+      <OverflowToggle
+        icon={<Scaling />}
+        label={t("web.player.controls.fillScreen")}
+        checked={videoFit === "cover"}
+        onClick={onVideoFitToggle}
+      />
+      <OverflowToggle
+        icon={<Info />}
+        label={t("web.player.controls.playbackInfo")}
+        checked={showPlaybackInfo}
+        onClick={() => {
+          onTogglePlaybackInfo();
+          close();
+        }}
+      />
+      {markerEditAvailable && onToggleMarkerEdit && (
+        <OverflowToggle
+          icon={<Tags />}
+          label={t("web.player.controls.editMarkers")}
+          checked={markerEditActive}
+          onClick={() => {
+            onToggleMarkerEdit();
+            close();
+          }}
+        />
+      )}
+      {pipAvailable && onTogglePiP && (
+        <OverflowAction
+          icon={<PictureInPicture2 />}
+          label={t("web.player.controls.pictureInPictureItem")}
+          onClick={() => {
+            onTogglePiP();
+            close();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function MoreMenu({
+  open,
+  onOpenChange,
+  ...items
+}: Omit<MoreMenuItemsProps, "close"> & { open: boolean; onOpenChange: (open: boolean) => void }) {
+  const t = useT();
+  const menuRef = useRef<HTMLDivElement>(null);
+  return (
+    <div ref={menuRef} className="relative">
+      <button
+        type="button"
+        className="hud-icon-btn"
+        aria-label={t("web.player.controls.moreOptions")}
+        title={t("web.player.controls.more")}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={() => onOpenChange(!open)}
+      >
+        <MoreHorizontal />
+      </button>
+      {open && (
+        <PlayerMenuSurface
+          title={t("web.player.controls.more")}
+          anchorRef={menuRef}
+          className="hud-popover"
+          onClose={() => onOpenChange(false)}
+        >
+          <MoreMenuItems close={() => onOpenChange(false)} {...items} />
+        </PlayerMenuSurface>
+      )}
+    </div>
+  );
+}
+
 function OverflowAction({
   icon,
   label,
-  active = false,
   onClick,
 }: {
   icon: ReactNode;
   label: string;
-  active?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button role="menuitem" type="button" className="hud-item" onClick={onClick}>
+      <span aria-hidden="true" className="hud-item-icon">
+        {icon}
+      </span>
+      <span>{label}</span>
+    </button>
+  );
+}
+
+function OverflowToggle({
+  icon,
+  label,
+  checked,
+  onClick,
+}: {
+  icon: ReactNode;
+  label: string;
+  checked: boolean;
   onClick: () => void;
 }) {
   return (
     <button
-      role="menuitem"
+      role="menuitemcheckbox"
       type="button"
-      className={`flex min-h-12 w-full items-center gap-3 px-5 py-3 text-start text-sm ${active ? "bg-white/10 text-white" : "text-white/80"}`}
+      aria-checked={checked}
+      className="hud-item"
       onClick={onClick}
     >
-      {icon}
+      <span aria-hidden="true" className="hud-item-icon">
+        {icon}
+      </span>
       <span>{label}</span>
+      <span aria-hidden="true" className="hud-switch" />
     </button>
   );
 }

@@ -102,7 +102,9 @@ describe("PlayingNextScreen auto-play toggle", () => {
     // Settings switch inert: it would save a profile value this row shadows.
     renderScreen();
 
-    fireEvent.click(screen.getByRole("button", { name: "Auto-play is on" }));
+    const toggle = screen.getByRole("switch", { name: "Auto-play" });
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(toggle);
 
     await waitFor(() =>
       expect(mutateAsync).toHaveBeenCalledWith({
@@ -125,9 +127,10 @@ describe("PlayingNextScreen auto-play toggle", () => {
     });
 
     renderScreen();
-    expect(screen.getByRole("button", { name: "Auto-play is off" })).toBeTruthy();
+    const toggle = screen.getByRole("switch", { name: "Auto-play" });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
 
-    fireEvent.click(screen.getByRole("button", { name: "Auto-play is off" }));
+    fireEvent.click(toggle);
 
     await waitFor(() =>
       expect(mutateAsync).toHaveBeenCalledWith({

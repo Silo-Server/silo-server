@@ -394,7 +394,6 @@ const PHYSICAL_DIRECTION = [
   "src/components/admin/dashboard/charts/LineChart.tsx",
   "src/components/admin/dashboard/charts/StackedColumnChart.tsx",
   "src/components/overlays/CardOverlays.tsx",
-  "src/player/components/PlaybackSpeedTrack.tsx",
   "src/player/components/SeekBar.tsx",
   "src/player/components/VolumeControl.tsx",
 ];

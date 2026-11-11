@@ -1,3 +1,6 @@
+import { ChevronDown, X } from "lucide-react";
+import "@/styles/player-hud.css";
+import { formatTime } from "../utils/formatTime";
 import { useMediaSkipHandlers } from "../hooks/useMediaSkipHandlers";
 import {
   MEDIA_ENDED_EVENT,
@@ -592,6 +595,13 @@ export function VideoPlayer({
   // Box under the <video> that holds the browser decode engine's canvas.
   const engineSurfaceRef = useRef<HTMLDivElement>(null);
   const [browserEngineActive, setBrowserEngineActive] = useState(false);
+  // The element showing the picture: the engine's visible canvas layer while
+  // it decodes, otherwise the <video> itself.
+  const getAmbientSource = useCallback((): HTMLVideoElement | HTMLCanvasElement | null => {
+    if (!browserEngineActive) return videoRef.current;
+    const layers = engineSurfaceRef.current?.querySelectorAll("canvas") ?? [];
+    return Array.from(layers).find((layer) => layer.style.display !== "none") ?? null;
+  }, [browserEngineActive]);
   // Bumped whenever an engine transport starts or stops. Frame callbacks
   // registered on one engine end with it, so renderers that drive themselves
   // from requestVideoFrameCallback (JASSUB) rebuild on it.
@@ -3648,6 +3658,7 @@ export function VideoPlayer({
     positionStyle: subtitlePositionStyle,
     fontScale: subtitleFontScale,
     coverCrop,
+    videoAspect,
   } = useSubtitleLayout(containerRef, videoRef, subtitleSettings.position, videoFit);
   // Scale cue text with the rendered video so subtitles stay proportionally
   // the same size as the window grows or shrinks.
@@ -3666,15 +3677,31 @@ export function VideoPlayer({
   // laid out even while the controls are faded out, so its height is readable
   // regardless of visibility.
   const [controlBarHeight, setControlBarHeight] = useState(0);
+  // How far the dock's top sits above the player's bottom edge. The same as
+  // the bar's height when it is docked at the bottom; on a phone held upright
+  // the dock sits under the picture instead, and the skip pill and next-episode
+  // card must clear all of it, not just its height.
+  const [dockClearance, setDockClearance] = useState(0);
   useEffect(() => {
     const container = containerRef.current;
     if (!container || isDetached) return;
     const hud = container.querySelector<HTMLElement>(".player-hud");
     if (!hud) return;
-    const update = () => setControlBarHeight(hud.offsetHeight);
+    const update = () => {
+      setControlBarHeight(hud.offsetHeight);
+      // Layout offsets, not client rects: the hidden HUD is translated. Its
+      // offset parent is the controls surface, which fills the player.
+      const surface = hud.offsetParent as HTMLElement | null;
+      setDockClearance(
+        surface
+          ? Math.max(hud.offsetHeight, surface.clientHeight - hud.offsetTop)
+          : hud.offsetHeight,
+      );
+    };
     update();
     const ro = new ResizeObserver(update);
     ro.observe(hud);
+    ro.observe(container);
     return () => ro.disconnect();
   }, [isDetached, isPlayerReady, displayMode]);
 
@@ -5126,7 +5153,13 @@ export function VideoPlayer({
   }, [onRealtimeConnectionStateChange, realtime.connectionState]);
 
   // -- Postroll mini-player resize --
-  const [miniPlayerWidth, setMiniPlayerWidth] = useState(320);
+  // Null until the viewer resizes it: the post-roll layout's own width
+  // (--postroll-video-width) applies, so the end screen can sit beside it.
+  const [miniPlayerWidth, setMiniPlayerWidth] = useState<number | null>(null);
+  // The width the end screen reserves beside the player, read from the player
+  // before its first resize: dragging may shrink it, never grow it over the
+  // end screen's column.
+  const reservedMiniWidthRef = useRef<number | null>(null);
   const isDraggingRef = useRef(false);
 
   const handleResizePointerDown = useCallback(
@@ -5135,7 +5168,9 @@ export function VideoPlayer({
       e.stopPropagation();
       isDraggingRef.current = true;
       const startX = e.clientX;
-      const startWidth = miniPlayerWidth;
+      const startWidth = miniPlayerWidth ?? containerRef.current?.offsetWidth ?? 320;
+      reservedMiniWidthRef.current ??= startWidth;
+      const maxWidth = reservedMiniWidthRef.current;
       const target = e.currentTarget as HTMLElement;
       target.setPointerCapture(e.pointerId);
       // The handle is at the bottom end corner: right, or left right to left.
@@ -5144,7 +5179,7 @@ export function VideoPlayer({
       const onMove = (ev: PointerEvent) => {
         // Dragging the handle outward grows the player.
         const delta = (ev.clientX - startX) * outward;
-        setMiniPlayerWidth(Math.max(200, Math.min(640, startWidth + delta)));
+        setMiniPlayerWidth(Math.max(200, Math.min(maxWidth, startWidth + delta)));
       };
       const onUp = () => {
         isDraggingRef.current = false;
@@ -5190,25 +5225,41 @@ export function VideoPlayer({
   // -- Render --
 
   const isPostrollVisible = displayMode === "postroll" && !hasEnded;
+  const bufferingShown =
+    !isDetached &&
+    ((stalled && !awaitingFirstFrame) || transportReloading) &&
+    !roomSyncWaiting &&
+    isPlayerReady;
 
   return (
     <div
       ref={containerRef}
       className={
         displayMode === "postroll"
-          ? `player-container fixed start-6 top-6 z-[60] aspect-video overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10 transition-opacity duration-700 ${hasEnded ? "pointer-events-none opacity-0" : "cursor-pointer"}`
+          ? `player-container fixed start-6 top-6 z-[60] aspect-video overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10 transition-opacity duration-700 lg:start-12 lg:top-1/2 lg:-translate-y-1/2 ${hasEnded ? "pointer-events-none opacity-0" : "cursor-pointer"}`
           : isDetached
             ? "pointer-events-none fixed start-0 top-0 z-[-1] h-px w-px overflow-hidden opacity-0"
             : controlsVisible
-              ? "player-container fixed inset-0 z-50 bg-black"
-              : "player-container fixed inset-0 z-50 cursor-none bg-black"
+              ? "player-container hud fixed inset-0 z-50 bg-black"
+              : "player-container hud fixed inset-0 z-50 cursor-none bg-black"
       }
-      style={displayMode === "postroll" ? { width: miniPlayerWidth } : undefined}
+      style={
+        displayMode === "postroll"
+          ? { width: miniPlayerWidth ?? "var(--postroll-video-width)" }
+          : undefined
+      }
       onClick={isPostrollVisible ? handleMiniPlayerClick : undefined}
       onMouseEnter={isDetached ? undefined : resetControlsTimer}
       onMouseLeave={isDetached ? undefined : hideControlsOnMouseLeave}
       onMouseMove={isDetached ? undefined : resetControlsTimer}
     >
+      {/* Post-roll caption: the corner picture is this episode, still playing
+          its credits; a click returns to it. */}
+      {isPostrollVisible && (
+        <div className="hud pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent px-3 pt-6 pb-2.5 text-xs font-semibold">
+          {t("web.player.postRoll.stillPlaying")}
+        </div>
+      )}
       {/* Postroll resize handle (bottom end corner) */}
       {isPostrollVisible && (
         <div
@@ -5234,7 +5285,7 @@ export function VideoPlayer({
       {/* Back button + media info */}
       {!isDetached && (
         <div
-          className={`absolute top-[max(1rem,env(safe-area-inset-top))] left-[max(1rem,env(safe-area-inset-left))] z-50 flex items-center gap-3 transition-opacity duration-300 rtl:right-[max(1rem,env(safe-area-inset-right))] rtl:left-auto ${
+          className={`hud-top-chrome absolute top-[max(1rem,env(safe-area-inset-top))] left-[max(1rem,env(safe-area-inset-left))] z-50 flex items-center gap-2 transition-opacity duration-300 sm:top-[max(1.5rem,env(safe-area-inset-top))] sm:left-[max(2rem,env(safe-area-inset-left))] rtl:right-[max(1rem,env(safe-area-inset-right))] rtl:left-auto sm:rtl:right-[max(2rem,env(safe-area-inset-right))] ${
             controlsVisible ? "opacity-100" : "pointer-events-none opacity-0"
           }`}
         >
@@ -5245,47 +5296,20 @@ export function VideoPlayer({
             disabled={isLeaving}
             aria-label={t("web.player.minimize")}
             title={t("web.player.minimize")}
-            className="flex h-11 w-11 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
+            className="hud-glass-btn"
             type="button"
           >
-            <svg
-              aria-hidden="true"
-              xmlns="http://www.w3.org/2000/svg"
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="m6 9 6 6 6-6" />
-            </svg>
+            <ChevronDown />
           </button>
           <button
             onClick={() => {
               void handleExit();
             }}
             disabled={isLeaving}
-            className="flex items-center gap-2 rounded-full bg-black/60 px-4 py-2 text-sm text-white hover:bg-black/80"
+            className="hud-glass-btn hud-glass-btn--text"
             type="button"
           >
-            <svg
-              aria-hidden="true"
-              xmlns="http://www.w3.org/2000/svg"
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M18 6 6 18" />
-              <path d="m6 6 12 12" />
-            </svg>
+            <X />
             {t("web.player.exit")}
           </button>
           {/* Title + episode info have moved to the bottom HUD in the
@@ -5341,23 +5365,17 @@ export function VideoPlayer({
 
       {!isDetached && watchTogetherRoomId && watchTogether.replacementReason ? (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 px-6">
-          <div role="alert" className="max-w-sm text-center text-white">
+          <div role="alert" className="hud-card w-full max-w-md p-6 text-center">
             <h2 className="text-lg font-semibold">{t("web.player.room.replacedTitle")}</h2>
-            <p className="mt-2 text-sm text-white/70">{watchTogether.replacementReason}</p>
-            <button
-              type="button"
-              onClick={watchTogether.rejoinRoom}
-              className="mt-4 rounded-md bg-white px-4 py-2 text-sm font-medium text-black"
-            >
-              {t("web.player.room.rejoin")}
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleExit()}
-              className="ms-3 mt-4 rounded-md border border-white/30 px-4 py-2 text-sm font-medium"
-            >
-              {t("web.player.room.leave")}
-            </button>
+            <p className="mt-2 text-sm text-[var(--hud-ash)]">{watchTogether.replacementReason}</p>
+            <div className="mt-5 flex flex-wrap justify-center gap-3">
+              <button type="button" onClick={watchTogether.rejoinRoom} className="hud-primary-btn">
+                {t("web.player.room.rejoin")}
+              </button>
+              <button type="button" onClick={() => void handleExit()} className="hud-secondary-btn">
+                {t("web.player.room.leave")}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
@@ -5369,7 +5387,7 @@ export function VideoPlayer({
           aria-label={t("web.player.loadingVideo")}
           className="absolute inset-0 z-40 flex items-center justify-center bg-black"
         >
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+          <div className="hud-spinner" />
           <span className="sr-only">{t("web.player.loadingVideo")}</span>
         </div>
       )}
@@ -5381,10 +5399,10 @@ export function VideoPlayer({
           aria-label={t("web.player.room.syncing")}
           className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center px-6"
         >
-          <div className="rounded-[8px] border border-white/15 bg-black/70 px-5 py-4 text-center text-white shadow-2xl backdrop-blur">
-            <div className="mx-auto h-10 w-10 animate-spin rounded-full border-2 border-white/20 border-t-white" />
-            <div className="mt-3 text-sm font-medium">{t("web.player.room.syncing")}</div>
-            <div className="mt-1 text-xs text-white/70">
+          <div className="hud-card px-6 py-5 text-center">
+            <div className="hud-spinner mx-auto" />
+            <div className="mt-3 text-sm font-semibold">{t("web.player.room.syncing")}</div>
+            <div className="mt-1 text-xs text-[var(--hud-ash)]">
               {watchTogether.room?.members?.some((member) => member.is_syncing)
                 ? t("web.player.room.waitingFor", {
                     names: watchTogether.room.members
@@ -5401,25 +5419,29 @@ export function VideoPlayer({
       )}
 
       {/* Buffering spinner (mid-playback stalls, outages and replanned transports) */}
-      {!isDetached &&
-        ((stalled && !awaitingFirstFrame) || transportReloading) &&
-        !roomSyncWaiting &&
-        isPlayerReady && (
-          <div
-            role="status"
-            aria-label={stallLabel ?? t("web.player.bufferingStatus")}
-            className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-center gap-3"
-          >
-            <div className="h-10 w-10 animate-spin rounded-full border-2 border-white/20 border-t-white" />
-            {stallLabel ? (
-              <span className="rounded-full bg-black/60 px-3 py-1 text-xs font-medium text-white/85">
-                {stallLabel}
+      {bufferingShown && (
+        <div
+          role="status"
+          aria-label={stallLabel ?? t("web.player.bufferingStatus")}
+          className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center"
+        >
+          {/* Centred and solid, so a stall is never mistaken for a pause or
+              lost on a white frame; it says where playback picks up. */}
+          <div className="hud-card flex items-center gap-4 rounded-2xl py-4 ps-4 pe-6">
+            <div className="hud-spinner hud-spinner--lamp size-10 border-[0.25rem]" />
+            <div className="flex flex-col gap-0.5">
+              <span className="text-base font-semibold">
+                {stallLabel ?? t("web.player.bufferingStatus")}
               </span>
-            ) : (
-              <span className="sr-only">{t("web.player.bufferingStatus")}</span>
-            )}
+              <span className="text-[0.8125rem] text-[var(--hud-ash)] tabular-nums">
+                {t("web.player.buffering.loadingFrom", {
+                  time: formatTime(roomHeldSeek ?? currentTime),
+                })}
+              </span>
+            </div>
           </div>
-        )}
+        </div>
+      )}
 
       {!isDetached && (notice || bufferingPill) ? (
         <PlaybackNoticeStack>
@@ -5451,29 +5473,27 @@ export function VideoPlayer({
           role={connectionStatus === "reconnecting" ? "status" : "alert"}
           className="absolute inset-0 z-40 flex items-center justify-center bg-black/80 px-6"
         >
-          <div className="flex max-w-md flex-col items-center gap-4 text-center">
-            {connectionStatus === "reconnecting" && (
-              <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
-            )}
-            <div className="space-y-1">
-              <p className="text-base font-semibold text-white">
+          <div className="hud-card flex w-full max-w-md flex-col items-center gap-4 p-6 text-center">
+            {connectionStatus === "reconnecting" && <div className="hud-spinner" />}
+            <div className="space-y-1.5">
+              <p className="text-lg font-semibold">
                 {connectionStatus === "reconnecting"
                   ? t("web.player.connection.reconnecting")
                   : (connectionErrorTitle ?? t("web.player.connection.lostTitle"))}
               </p>
-              <p className="text-sm text-white/60">
+              <p className="text-sm leading-relaxed text-[var(--hud-ash)]">
                 {connectionStatus === "reconnecting"
                   ? t("web.player.connection.reconnectingDetail")
                   : (connectionError ?? t("web.player.connection.lostDetail"))}
               </p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap justify-center gap-3">
               {connectionStatus === "lost" && onRetryConnection && (
                 <button
                   onClick={onRetryConnection}
                   disabled={isLeaving}
                   type="button"
-                  className="rounded bg-white px-4 py-2 text-sm font-medium text-black hover:bg-white/90"
+                  className="hud-primary-btn"
                 >
                   {t("common.tryAgain")}
                 </button>
@@ -5484,7 +5504,7 @@ export function VideoPlayer({
                 }}
                 disabled={isLeaving}
                 type="button"
-                className="rounded bg-white/10 px-4 py-2 text-sm text-white hover:bg-white/20"
+                className="hud-secondary-btn"
               >
                 {t("player.goBack")}
               </button>
@@ -5495,16 +5515,19 @@ export function VideoPlayer({
 
       {/* Error state */}
       {!isDetached && error && connectionStatus === "connected" && (
-        <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/80">
-          <div className="text-center">
-            <div className="mb-4 text-sm text-white/60">{error}</div>
+        <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/80 px-6">
+          <div
+            role="alert"
+            className="hud-card flex w-full max-w-md flex-col items-center gap-4 p-6 text-center"
+          >
+            <p className="text-sm leading-relaxed">{error}</p>
             <button
               onClick={() => {
                 void handleExit();
               }}
               disabled={isLeaving}
               type="button"
-              className="rounded bg-white/10 px-4 py-2 text-sm text-white hover:bg-white/20"
+              className="hud-secondary-btn"
             >
               {t("player.goBack")}
             </button>
@@ -5563,7 +5586,7 @@ export function VideoPlayer({
             role="status"
             className="pointer-events-none absolute inset-x-0 top-20 z-40 flex justify-center"
           >
-            <span className="rounded bg-black/75 px-3 py-2 text-sm text-white">
+            <span className="hud-card rounded-full px-4 py-2 text-sm font-medium">
               {subtitleLoadState === "loading"
                 ? t("web.player.subtitles.loading")
                 : t("web.player.subtitles.loadFailedRetrying")}
@@ -5609,6 +5632,7 @@ export function VideoPlayer({
           timer={activeIntroPrompt.timer ?? undefined}
           introPrompt
           controlsVisible={controlsVisible}
+          dockHeight={dockClearance}
           focusOnMount={focusIntroPromptOnMount}
           provenance={activeIntro}
           showConfidence={showMarkerConfidence}
@@ -5620,6 +5644,7 @@ export function VideoPlayer({
           onSkip={skipMarker}
           label={skipMarkerLabel(t, activeSkipMarker.kind)}
           controlsVisible={controlsVisible}
+          dockHeight={dockClearance}
           provenance={activeSkipMarker}
           showConfidence={showMarkerConfidence}
           showSource={showMarkerSource}
@@ -5634,6 +5659,7 @@ export function VideoPlayer({
       {/* Next episode overlay */}
       {!isDetached && nextEpisode.showCountdown && nextEpisode.nextEpisode && (
         <NextEpisodeOverlay
+          dockHeight={controlsVisible ? dockClearance : 0}
           episode={nextEpisode.nextEpisode}
           secondsRemaining={nextEpisode.secondsRemaining}
           onSkip={nextEpisode.skipToNext}
@@ -5644,8 +5670,8 @@ export function VideoPlayer({
       {/* Live translation buffering indicator */}
       {translationBuffering && (
         <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
-          <div className="flex items-center gap-3 rounded-lg bg-black/80 px-4 py-3 text-sm text-white shadow-lg">
-            <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+          <div className="hud-card flex items-center gap-3 rounded-full py-3 ps-3 pe-5 text-sm font-semibold">
+            <span className="hud-spinner size-6 border-2" />
             {liveTranslation?.label
               ? t("web.player.subtitles.preparingTranslation", { label: liveTranslation.label })
               : t("web.player.subtitles.preparingTranslated")}
@@ -5740,6 +5766,8 @@ export function VideoPlayer({
           onVolumeChange={handleVolumeChange}
           onMutedChange={handleMutedChange}
           videoFit={videoFit}
+          videoAspect={videoAspect}
+          getAmbientSource={getAmbientSource}
           onVideoFitToggle={() =>
             setVideoFit((current) => (current === "cover" ? "contain" : "cover"))
           }
