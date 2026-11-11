@@ -34,6 +34,7 @@ import { requestAdminMessages, useT } from "@/i18n";
 import { BrandingProvider } from "@/contexts/BrandingProvider";
 import { UICustomizationProvider } from "@/contexts/UICustomizationProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { RouteLoading } from "@/components/RouteLoading";
 import ImpersonationBanner from "@/components/ImpersonationBanner";
 import { loadStoredImpersonationAdminSession } from "@/lib/impersonationSession";
 import { Toaster } from "@/components/ui/sonner";
@@ -223,16 +224,6 @@ function ScrollRestorationManager() {
 function NavigationDirectionManager() {
   useNavigationDirection();
   return null;
-}
-
-function RouteLoading() {
-  const t = useT();
-  return (
-    <div className="p-8" role="status" aria-live="polite">
-      <span className="sr-only">{t("web.common.shell.loadingPage")}</span>
-      {t("web.ui.loading")}
-    </div>
-  );
 }
 
 function RequireAuth({ children }: { children: ReactNode }) {
