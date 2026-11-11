@@ -137,6 +137,12 @@
       "value": "Year"
     }
   ],
+  "collections.collection": [
+    {
+      "type": 0,
+      "value": "Collection"
+    }
+  ],
   "common.back": [
     {
       "type": 0,
@@ -287,10 +293,22 @@
       "value": "This value isn’t valid."
     }
   ],
+  "error.field.invalid_entity_tag": [
+    {
+      "type": 0,
+      "value": "Expected \"*\" or a comma-separated list of quoted entity-tags."
+    }
+  ],
   "error.field.invalid_enum": [
     {
       "type": 0,
       "value": "Choose one of the allowed values."
+    }
+  ],
+  "error.field.invalid_sort_field": [
+    {
+      "type": 0,
+      "value": "Sort names a field this operation does not sort by, or names one twice."
     }
   ],
   "error.field.invalid_type": [
@@ -593,6 +611,570 @@
       "value": "Some values aren’t valid. Check them and try again."
     }
   ],
+  "home.recipe.aclBlank.description": [
+    {
+      "type": 0,
+      "value": "Admin-curated, item-by-item ordered list."
+    }
+  ],
+  "home.recipe.aclBlank.name": [
+    {
+      "type": 0,
+      "value": "Editor's Picks"
+    }
+  ],
+  "home.recipe.anniversariesDefault.description": [
+    {
+      "type": 0,
+      "value": "Titles celebrating a milestone release anniversary this month."
+    }
+  ],
+  "home.recipe.anniversariesDefault.name": [
+    {
+      "type": 0,
+      "value": "Anniversaries"
+    }
+  ],
+  "home.recipe.awCannes.description": [
+    {
+      "type": 0,
+      "value": "Cannes Festival selections."
+    }
+  ],
+  "home.recipe.awCannes.name": [
+    {
+      "type": 0,
+      "value": "Cannes Selections"
+    }
+  ],
+  "home.recipe.awEmmy.description": [
+    {
+      "type": 0,
+      "value": "Emmy-winning shows."
+    }
+  ],
+  "home.recipe.awEmmy.name": [
+    {
+      "type": 0,
+      "value": "Emmy Winners"
+    }
+  ],
+  "home.recipe.awOscar.description": [
+    {
+      "type": 0,
+      "value": "Academy Award winners in your library."
+    }
+  ],
+  "home.recipe.awOscar.name": [
+    {
+      "type": 0,
+      "value": "Oscar Winners"
+    }
+  ],
+  "home.recipe.bcwAuto.description": [
+    {
+      "type": 0,
+      "value": "Picks based on your most recent watch."
+    }
+  ],
+  "home.recipe.caImdb.description": [
+    {
+      "type": 0,
+      "value": "Rated 8.0+ on TMDB with 500+ votes."
+    }
+  ],
+  "home.recipe.caImdb.name": [
+    {
+      "type": 0,
+      "value": "Critically Acclaimed"
+    }
+  ],
+  "home.recipe.collectionPick.description": [
+    {
+      "type": 0,
+      "value": "Show items from a library or curated collection."
+    }
+  ],
+  "home.recipe.collectionPick.name": [
+    {
+      "type": 0,
+      "value": "Collection"
+    }
+  ],
+  "home.recipe.continueListeningDefault.description": [
+    {
+      "type": 0,
+      "value": "Pick up audiobooks where you left off."
+    }
+  ],
+  "home.recipe.continueWatchingDefault.description": [
+    {
+      "type": 0,
+      "value": "Pick up movies and episodes where you left off."
+    }
+  ],
+  "home.recipe.esActor.description": [
+    {
+      "type": 0,
+      "value": "Weekly spotlight on an actor in your library."
+    }
+  ],
+  "home.recipe.esActor.name": [
+    {
+      "type": 0,
+      "value": "Actor Spotlight"
+    }
+  ],
+  "home.recipe.esDirectorAuto.description": [
+    {
+      "type": 0,
+      "value": "Weekly spotlight on a director in your library."
+    }
+  ],
+  "home.recipe.esDirectorAuto.name": [
+    {
+      "type": 0,
+      "value": "Director Spotlight"
+    }
+  ],
+  "home.recipe.esEra80s.description": [
+    {
+      "type": 0,
+      "value": "Films from the 1980s."
+    }
+  ],
+  "home.recipe.esEra80s.name": [
+    {
+      "type": 0,
+      "value": "The 80s"
+    }
+  ],
+  "home.recipe.esStudio.description": [
+    {
+      "type": 0,
+      "value": "Weekly spotlight on a studio in your library."
+    }
+  ],
+  "home.recipe.esStudio.name": [
+    {
+      "type": 0,
+      "value": "Studio Spotlight"
+    }
+  ],
+  "home.recipe.favoritesDefault.description": [
+    {
+      "type": 0,
+      "value": "Your favorites."
+    }
+  ],
+  "home.recipe.favoritesDefault.name": [
+    {
+      "type": 0,
+      "value": "Favorites"
+    }
+  ],
+  "home.recipe.ffDefault.description": [
+    {
+      "type": 0,
+      "value": "Rated 7.0+ on TMDB with 100+ votes, and not watched in the past year."
+    }
+  ],
+  "home.recipe.ffDefault.name": [
+    {
+      "type": 0,
+      "value": "Forgotten Favorites"
+    }
+  ],
+  "home.recipe.forYou.description": [
+    {
+      "type": 0,
+      "value": "Per-profile picks from the recommendation engine."
+    }
+  ],
+  "home.recipe.forYou.name": [
+    {
+      "type": 0,
+      "value": "Recommended For You"
+    }
+  ],
+  "home.recipe.fs4k.description": [
+    {
+      "type": 0,
+      "value": "Titles available in 4K UHD."
+    }
+  ],
+  "home.recipe.fs4k.name": [
+    {
+      "type": 0,
+      "value": "4K Showcase"
+    }
+  ],
+  "home.recipe.fs4kRecent.description": [
+    {
+      "type": 0,
+      "value": "Recently added 4K UHD titles."
+    }
+  ],
+  "home.recipe.fs4kRecent.name": [
+    {
+      "type": 0,
+      "value": "New in 4K"
+    }
+  ],
+  "home.recipe.fsDv.description": [
+    {
+      "type": 0,
+      "value": "Dolby Vision titles."
+    }
+  ],
+  "home.recipe.fsDv.name": [
+    {
+      "type": 0,
+      "value": "Dolby Vision Picks"
+    }
+  ],
+  "home.recipe.fsHdr.description": [
+    {
+      "type": 0,
+      "value": "HDR-mastered titles."
+    }
+  ],
+  "home.recipe.fsHdr.name": [
+    {
+      "type": 0,
+      "value": "HDR Highlights"
+    }
+  ],
+  "home.recipe.genreRouletteWeekly.description": [
+    {
+      "type": 0,
+      "value": "A different genre every week, rated 6.0+ on TMDB with 100+ votes."
+    }
+  ],
+  "home.recipe.genreRouletteWeekly.name": [
+    {
+      "type": 0,
+      "value": "Genre Roulette"
+    }
+  ],
+  "home.recipe.hiddenGemsDefault.description": [
+    {
+      "type": 0,
+      "value": "Rated 7.5+ on TMDB with 100+ votes, and watched twice or less."
+    }
+  ],
+  "home.recipe.moodAfterMidnight.description": [
+    {
+      "type": 0,
+      "value": "Horror or Thriller, rated 6.0+ on TMDB with 100+ votes."
+    }
+  ],
+  "home.recipe.moodAfterMidnight.name": [
+    {
+      "type": 0,
+      "value": "After Midnight"
+    }
+  ],
+  "home.recipe.moodComfort.description": [
+    {
+      "type": 0,
+      "value": "Comedy, Romance or Family, rated 6.0+ on TMDB with 100+ votes."
+    }
+  ],
+  "home.recipe.moodComfort.name": [
+    {
+      "type": 0,
+      "value": "Comfort Rewatches"
+    }
+  ],
+  "home.recipe.moodDateNight.description": [
+    {
+      "type": 0,
+      "value": "Romance or Comedy, rated 6.0+ on TMDB with 100+ votes."
+    }
+  ],
+  "home.recipe.moodDateNight.name": [
+    {
+      "type": 0,
+      "value": "Date Night"
+    }
+  ],
+  "home.recipe.moodEdgeOfSeat.description": [
+    {
+      "type": 0,
+      "value": "Thriller or Action, rated 6.5+ on TMDB with 100+ votes."
+    }
+  ],
+  "home.recipe.moodEdgeOfSeat.name": [
+    {
+      "type": 0,
+      "value": "Edge of Your Seat"
+    }
+  ],
+  "home.recipe.moodFeelGood.description": [
+    {
+      "type": 0,
+      "value": "Comedy or Family, rated 6.5+ on TMDB with 100+ votes."
+    }
+  ],
+  "home.recipe.moodFeelGood.name": [
+    {
+      "type": 0,
+      "value": "Feel-Good Comedies"
+    }
+  ],
+  "home.recipe.moodMindBending.description": [
+    {
+      "type": 0,
+      "value": "Science Fiction or Mystery, rated 7.0+ on TMDB with 100+ votes."
+    }
+  ],
+  "home.recipe.moodMindBending.name": [
+    {
+      "type": 0,
+      "value": "Mind-Bending Sci-Fi"
+    }
+  ],
+  "home.recipe.moodQuietSunday.description": [
+    {
+      "type": 0,
+      "value": "Drama or Documentary, rated 7.0+ on TMDB with 100+ votes."
+    }
+  ],
+  "home.recipe.moodQuietSunday.name": [
+    {
+      "type": 0,
+      "value": "Quiet Sunday Cinema"
+    }
+  ],
+  "home.recipe.moodTearjerker.description": [
+    {
+      "type": 0,
+      "value": "Drama or Romance, rated 7.0+ on TMDB with 100+ votes."
+    }
+  ],
+  "home.recipe.moodTearjerker.name": [
+    {
+      "type": 0,
+      "value": "Tearjerkers"
+    }
+  ],
+  "home.recipe.mwMonth.description": [
+    {
+      "type": 0,
+      "value": "Top plays in the last 30 days."
+    }
+  ],
+  "home.recipe.mwMonth.name": [
+    {
+      "type": 0,
+      "value": "Most Watched This Month"
+    }
+  ],
+  "home.recipe.mwWeek.description": [
+    {
+      "type": 0,
+      "value": "Top plays in the last 7 days."
+    }
+  ],
+  "home.recipe.mwWeek.name": [
+    {
+      "type": 0,
+      "value": "Most Watched This Week"
+    }
+  ],
+  "home.recipe.nextInSeriesDefault.description": [
+    {
+      "type": 0,
+      "value": "The next audiobook in series you've finished."
+    }
+  ],
+  "home.recipe.nextInSeriesDefault.name": [
+    {
+      "type": 0,
+      "value": "Next in Series"
+    }
+  ],
+  "home.recipe.nextUpDefault.description": [
+    {
+      "type": 0,
+      "value": "Next episodes ready to watch."
+    }
+  ],
+  "home.recipe.ntl30.description": [
+    {
+      "type": 0,
+      "value": "Added in the last 30 days."
+    }
+  ],
+  "home.recipe.ntl30.name": [
+    {
+      "type": 0,
+      "value": "New to Library This Month"
+    }
+  ],
+  "home.recipe.paHousehold.description": [
+    {
+      "type": 0,
+      "value": "Recent watches across all other profiles."
+    }
+  ],
+  "home.recipe.paHousehold.name": [
+    {
+      "type": 0,
+      "value": "What Others Just Watched"
+    }
+  ],
+  "home.recipe.randomDefault.description": [
+    {
+      "type": 0,
+      "value": "A random selection from your library."
+    }
+  ],
+  "home.recipe.randomDefault.name": [
+    {
+      "type": 0,
+      "value": "Surprise Me"
+    }
+  ],
+  "home.recipe.recentlyAddedDefault.description": [
+    {
+      "type": 0,
+      "value": "Latest additions to your library."
+    }
+  ],
+  "home.recipe.recentlyReleasedDefault.description": [
+    {
+      "type": 0,
+      "value": "Recently released titles."
+    }
+  ],
+  "home.recipe.recentlyReleasedDefault.name": [
+    {
+      "type": 0,
+      "value": "New Releases"
+    }
+  ],
+  "home.recipe.returningShowsDefault.description": [
+    {
+      "type": 0,
+      "value": "Shows you've watched with a brand-new season in your library."
+    }
+  ],
+  "home.recipe.seAuto.description": [
+    {
+      "type": 0,
+      "value": "Cycles automatically — Halloween in October, Christmas in December, etc."
+    }
+  ],
+  "home.recipe.seAuto.details": [
+    {
+      "type": 0,
+      "value": "One section that swaps in curated holiday picks based on the calendar. Choose the holidays, a vibe for each, and add your own holidays."
+    }
+  ],
+  "home.recipe.seFamilyMovieNight.description": [
+    {
+      "type": 0,
+      "value": "Family picks on Friday and Saturday evenings."
+    }
+  ],
+  "home.recipe.seFamilyMovieNight.name": [
+    {
+      "type": 0,
+      "value": "Family Movie Night"
+    }
+  ],
+  "home.recipe.shortWatchesDefault.description": [
+    {
+      "type": 0,
+      "value": "Movies of 95 minutes or less, rated 6.0+ on TMDB with 100+ votes."
+    }
+  ],
+  "home.recipe.shortWatchesDefault.name": [
+    {
+      "type": 0,
+      "value": "Short & Sweet"
+    }
+  ],
+  "home.recipe.similar.description": [
+    {
+      "type": 0,
+      "value": "What similar profiles are loving."
+    }
+  ],
+  "home.recipe.tasteTop.description": [
+    {
+      "type": 0,
+      "value": "Best matches for your strongest taste — set a genre to narrow it."
+    }
+  ],
+  "home.recipe.tdiscTmdbDay.description": [
+    {
+      "type": 0,
+      "value": "Today's trending movies & shows from TMDB, matched to your library."
+    }
+  ],
+  "home.recipe.tdiscTmdbDay.name": [
+    {
+      "type": 0,
+      "value": "TMDB Trending Today"
+    }
+  ],
+  "home.recipe.tdiscTmdbWeek.description": [
+    {
+      "type": 0,
+      "value": "This week's trending movies & shows from TMDB, matched to your library."
+    }
+  ],
+  "home.recipe.tdiscTmdbWeek.name": [
+    {
+      "type": 0,
+      "value": "TMDB Trending This Week"
+    }
+  ],
+  "home.recipe.tr24h.description": [
+    {
+      "type": 0,
+      "value": "Most-played in the last day."
+    }
+  ],
+  "home.recipe.tr24h.name": [
+    {
+      "type": 0,
+      "value": "Trending Now (24h)"
+    }
+  ],
+  "home.recipe.tr30d.description": [
+    {
+      "type": 0,
+      "value": "Most-played in the last month."
+    }
+  ],
+  "home.recipe.tr30d.name": [
+    {
+      "type": 0,
+      "value": "Trending This Month"
+    }
+  ],
+  "home.recipe.tr7d.description": [
+    {
+      "type": 0,
+      "value": "Most-played in the last week."
+    }
+  ],
+  "home.recipe.watchlistDefault.description": [
+    {
+      "type": 0,
+      "value": "Items you've saved to watch."
+    }
+  ],
+  "home.recipe.watchlistDefault.name": [
+    {
+      "type": 0,
+      "value": "Watchlist"
+    }
+  ],
   "home.section.becauseYouEnjoy": [
     {
       "type": 0,
@@ -635,6 +1217,60 @@
     {
       "type": 0,
       "value": "Continue Watching"
+    }
+  ],
+  "home.section.discoverGenres": [
+    {
+      "type": 0,
+      "value": "Genres"
+    }
+  ],
+  "home.section.discoverNetworks": [
+    {
+      "type": 0,
+      "value": "Networks"
+    }
+  ],
+  "home.section.discoverOnAirSeries": [
+    {
+      "type": 0,
+      "value": "On Air Series"
+    }
+  ],
+  "home.section.discoverPopularMovies": [
+    {
+      "type": 0,
+      "value": "Popular Movies"
+    }
+  ],
+  "home.section.discoverPopularSeries": [
+    {
+      "type": 0,
+      "value": "Popular Series"
+    }
+  ],
+  "home.section.discoverStudios": [
+    {
+      "type": 0,
+      "value": "Studios"
+    }
+  ],
+  "home.section.discoverTrendingMovies": [
+    {
+      "type": 0,
+      "value": "Trending Movies"
+    }
+  ],
+  "home.section.discoverTrendingSeries": [
+    {
+      "type": 0,
+      "value": "Trending Series"
+    }
+  ],
+  "home.section.discoverUpcomingMovies": [
+    {
+      "type": 0,
+      "value": "Upcoming Movies"
     }
   ],
   "home.section.forYou": [
@@ -805,6 +1441,210 @@
       "value": "Returning Shows"
     }
   ],
+  "home.section.seasonal.christmas.classics": [
+    {
+      "type": 0,
+      "value": "Christmas Classics"
+    }
+  ],
+  "home.section.seasonal.christmas.comedies": [
+    {
+      "type": 0,
+      "value": "Christmas Comedies"
+    }
+  ],
+  "home.section.seasonal.christmas.family": [
+    {
+      "type": 0,
+      "value": "Family Christmas"
+    }
+  ],
+  "home.section.seasonal.christmas.favorites": [
+    {
+      "type": 0,
+      "value": "Christmas Favorites"
+    }
+  ],
+  "home.section.seasonal.christmas.hallmark": [
+    {
+      "type": 0,
+      "value": "Hallmark Christmas"
+    }
+  ],
+  "home.section.seasonal.christmas.romcoms": [
+    {
+      "type": 0,
+      "value": "Christmas Rom-Coms"
+    }
+  ],
+  "home.section.seasonal.easter.faith": [
+    {
+      "type": 0,
+      "value": "Easter Stories"
+    }
+  ],
+  "home.section.seasonal.easter.family": [
+    {
+      "type": 0,
+      "value": "Easter Movies"
+    }
+  ],
+  "home.section.seasonal.familyMovieNight.favorites": [
+    {
+      "type": 0,
+      "value": "Family Favorites"
+    }
+  ],
+  "home.section.seasonal.familyMovieNight.liveAction": [
+    {
+      "type": 0,
+      "value": "Family Movie Night"
+    }
+  ],
+  "home.section.seasonal.familyMovieNight.new": [
+    {
+      "type": 0,
+      "value": "Family Movie Night"
+    }
+  ],
+  "home.section.seasonal.halloween.animated": [
+    {
+      "type": 0,
+      "value": "Animated Halloween"
+    }
+  ],
+  "home.section.seasonal.halloween.family": [
+    {
+      "type": 0,
+      "value": "Family Halloween"
+    }
+  ],
+  "home.section.seasonal.halloween.favorites": [
+    {
+      "type": 0,
+      "value": "Halloween Favorites"
+    }
+  ],
+  "home.section.seasonal.halloween.horror": [
+    {
+      "type": 0,
+      "value": "Halloween Horror"
+    }
+  ],
+  "home.section.seasonal.halloween.tv": [
+    {
+      "type": 0,
+      "value": "Halloween TV"
+    }
+  ],
+  "home.section.seasonal.newYear.favorites": [
+    {
+      "type": 0,
+      "value": "New Year's Movies"
+    }
+  ],
+  "home.section.seasonal.saturdayMorning.cartoons": [
+    {
+      "type": 0,
+      "value": "Saturday Morning Cartoons"
+    }
+  ],
+  "home.section.seasonal.saturdayMorning.modern": [
+    {
+      "type": 0,
+      "value": "Saturday Morning Favorites"
+    }
+  ],
+  "home.section.seasonal.saturdayMorning.nineties": [
+    {
+      "type": 0,
+      "value": "90s Saturday Mornings"
+    }
+  ],
+  "home.section.seasonal.stPatricks.irishFilm": [
+    {
+      "type": 0,
+      "value": "Irish Film"
+    }
+  ],
+  "home.section.seasonal.stPatricks.irishTv": [
+    {
+      "type": 0,
+      "value": "Irish TV"
+    }
+  ],
+  "home.section.seasonal.summer.blockbusters": [
+    {
+      "type": 0,
+      "value": "Summer Blockbusters"
+    }
+  ],
+  "home.section.seasonal.summer.classicSummer": [
+    {
+      "type": 0,
+      "value": "Classic Summer Movies"
+    }
+  ],
+  "home.section.seasonal.summer.nostalgia": [
+    {
+      "type": 0,
+      "value": "Summer Nostalgia"
+    }
+  ],
+  "home.section.seasonal.summerBlockbuster.blockbusters": [
+    {
+      "type": 0,
+      "value": "Summer Blockbusters"
+    }
+  ],
+  "home.section.seasonal.summerBlockbuster.classicSummer": [
+    {
+      "type": 0,
+      "value": "Classic Summer Movies"
+    }
+  ],
+  "home.section.seasonal.summerBlockbuster.nostalgia": [
+    {
+      "type": 0,
+      "value": "Summer Nostalgia"
+    }
+  ],
+  "home.section.seasonal.thanksgiving.favorites": [
+    {
+      "type": 0,
+      "value": "Thanksgiving Movies"
+    }
+  ],
+  "home.section.seasonal.thanksgiving.feelGood": [
+    {
+      "type": 0,
+      "value": "Feel-Good Favorites"
+    }
+  ],
+  "home.section.seasonal.valentines.favorites": [
+    {
+      "type": 0,
+      "value": "Valentine's Favorites"
+    }
+  ],
+  "home.section.seasonal.valentines.loveStories": [
+    {
+      "type": 0,
+      "value": "Classic Love Stories"
+    }
+  ],
+  "home.section.seasonal.valentines.romanticDramas": [
+    {
+      "type": 0,
+      "value": "Romantic Dramas"
+    }
+  ],
+  "home.section.seasonal.valentines.romcoms": [
+    {
+      "type": 0,
+      "value": "Valentine's Rom-Coms"
+    }
+  ],
   "home.section.seasonalPicks": [
     {
       "type": 0,
@@ -819,6 +1659,12 @@
     {
       "type": 1,
       "value": "genre"
+    }
+  ],
+  "home.section.topPicksToday": [
+    {
+      "type": 0,
+      "value": "Top Picks Today"
     }
   ],
   "home.section.topRated": [
@@ -2579,6 +3425,12 @@
     {
       "type": 0,
       "value": "Host only"
+    }
+  ],
+  "shuffle.nothingToPlay": [
+    {
+      "type": 0,
+      "value": "Nothing here can be played."
     }
   ],
   "subtitleSearch.hearingImpaired": [
@@ -21963,6 +22815,12 @@
       "value": "date"
     }
   ],
+  "web.admin.common.jobHistory.jobType.backupRestore": [
+    {
+      "type": 0,
+      "value": "Backup Restore"
+    }
+  ],
   "web.admin.common.jobHistory.jobType.catalogExport": [
     {
       "type": 0,
@@ -21997,6 +22855,18 @@
     {
       "type": 0,
       "value": "Library Refresh"
+    }
+  ],
+  "web.admin.common.jobHistory.jobType.storageTransition": [
+    {
+      "type": 0,
+      "value": "Storage Transition"
+    }
+  ],
+  "web.admin.common.jobHistory.jobType.templateBundleApply": [
+    {
+      "type": 0,
+      "value": "Template Bundle Apply"
     }
   ],
   "web.admin.common.jobHistory.progress": [
@@ -26189,6 +27059,18 @@
       "value": "failed"
     }
   ],
+  "web.admin.common.taskStatus.queued": [
+    {
+      "type": 0,
+      "value": "queued"
+    }
+  ],
+  "web.admin.common.taskStatus.running": [
+    {
+      "type": 0,
+      "value": "running"
+    }
+  ],
   "web.admin.common.title.header.accessGroups": [
     {
       "type": 0,
@@ -30253,6 +31135,22 @@
       "value": "label"
     }
   ],
+  "web.admin.dashboard.widgets.transcodeNodes.buildDiffersFlag": [
+    {
+      "type": 0,
+      "value": "Build differs"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.buildDiffersTitle": [
+    {
+      "type": 0,
+      "value": "Build differs from the server. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.admin.dashboard.widgets.transcodeNodes.buildOutdated": [
     {
       "type": 0,
@@ -30283,6 +31181,16 @@
       "value": "date"
     }
   ],
+  "web.admin.dashboard.widgets.transcodeNodes.capSeparator": [
+    {
+      "type": 0,
+      "value": "/ "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.dashboard.widgets.transcodeNodes.checked": [
     {
       "type": 0,
@@ -30291,6 +31199,30 @@
     {
       "type": 1,
       "value": "time"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.column.active": [
+    {
+      "type": 0,
+      "value": "Active"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.column.build": [
+    {
+      "type": 0,
+      "value": "Build"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.column.mbps": [
+    {
+      "type": 0,
+      "value": "Mbps"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.column.node": [
+    {
+      "type": 0,
+      "value": "Node"
     }
   ],
   "web.admin.dashboard.widgets.transcodeNodes.disabled": [
@@ -30305,10 +31237,60 @@
       "value": "No stream nodes — transcodes run on this server"
     }
   ],
+  "web.admin.dashboard.widgets.transcodeNodes.groupCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " group"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " groups"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.dashboard.widgets.transcodeNodes.healthy": [
     {
       "type": 0,
       "value": "Healthy"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.healthyCount": [
+    {
+      "type": 1,
+      "value": "healthy"
+    },
+    {
+      "type": 0,
+      "value": "/"
+    },
+    {
+      "type": 1,
+      "value": "enabled"
+    },
+    {
+      "type": 0,
+      "value": " healthy"
     }
   ],
   "web.admin.dashboard.widgets.transcodeNodes.jobs": [
@@ -30417,10 +31399,34 @@
       "value": "Failed to load stream nodes."
     }
   ],
+  "web.admin.dashboard.widgets.transcodeNodes.loadPercent": [
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
   "web.admin.dashboard.widgets.transcodeNodes.manage": [
     {
       "type": 0,
       "value": "Manage ›"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.meterLabel": [
+    {
+      "type": 1,
+      "value": "node"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "metric"
     }
   ],
   "web.admin.dashboard.widgets.transcodeNodes.neverChecked": [
@@ -30443,6 +31449,96 @@
     {
       "type": 0,
       "value": "Revision unavailable"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.staleDisabledTitle": [
+    {
+      "type": 0,
+      "value": "This node is switched off, so health checks no longer update it."
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.staleUnreachableTitle": [
+    {
+      "type": 0,
+      "value": "The last health check did not reach this node."
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.storageFlag": [
+    {
+      "type": 0,
+      "value": "Storage "
+    },
+    {
+      "type": 1,
+      "value": "fill"
+    },
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.storageTitle": [
+    {
+      "type": 0,
+      "value": "Transcode directory "
+    },
+    {
+      "type": 1,
+      "value": "fill"
+    },
+    {
+      "type": 0,
+      "value": "% full. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.streamCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " stream"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " streams"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.streamsAbbr": [
+    {
+      "type": 0,
+      "value": "strm"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.streamsTitle": [
+    {
+      "type": 0,
+      "value": "streams"
     }
   ],
   "web.admin.dashboard.widgets.transcodeNodes.summary": [
@@ -30565,6 +31661,52 @@
     {
       "type": 0,
       "value": "Nodes"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.transcodeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " transcode"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " transcodes"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.transcodesAbbr": [
+    {
+      "type": 0,
+      "value": "trns"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.transcodesTitle": [
+    {
+      "type": 0,
+      "value": "transcodes"
     }
   ],
   "web.admin.dashboard.widgets.transcodeNodes.unhealthy": [
@@ -39442,6 +40584,314 @@
       "value": "Storage"
     }
   ],
+  "web.admin.errors.activityCursorRepeated": [
+    {
+      "type": 0,
+      "value": "Activity cursor repeated. Reload history."
+    }
+  ],
+  "web.admin.errors.activityItemsInvalid": [
+    {
+      "type": 0,
+      "value": "Invalid activity items. Reload history."
+    }
+  ],
+  "web.admin.errors.activityPageInvalid": [
+    {
+      "type": 0,
+      "value": "Invalid activity page. Reload history."
+    }
+  ],
+  "web.admin.errors.apiKeyCursorRepeated": [
+    {
+      "type": 0,
+      "value": "Repeated API key cursor. Reload the list."
+    }
+  ],
+  "web.admin.errors.apiKeyPaginationInvalid": [
+    {
+      "type": 0,
+      "value": "Invalid API key pagination. Reload the list."
+    }
+  ],
+  "web.admin.errors.apiKeyReloadBeforeSaving": [
+    {
+      "type": 0,
+      "value": "Reload this API key before saving: a strong ETag is required."
+    }
+  ],
+  "web.admin.errors.apiKeysProfileChanged": [
+    {
+      "type": 0,
+      "value": "Reload API keys after changing profiles."
+    }
+  ],
+  "web.admin.errors.artworkCacheIncomplete": [
+    {
+      "type": 0,
+      "value": "Artwork caching did not finish. Inspect administrator diagnostics for details."
+    }
+  ],
+  "web.admin.errors.artworkUpdateFailed": [
+    {
+      "type": 0,
+      "value": "Artwork update failed"
+    }
+  ],
+  "web.admin.errors.catalogRevisionMissing": [
+    {
+      "type": 0,
+      "value": "Catalog revision unavailable. Reload before editing."
+    }
+  ],
+  "web.admin.errors.collectionOrderChanged": [
+    {
+      "type": 0,
+      "value": "Collection order changed while loading. Reload before reordering."
+    }
+  ],
+  "web.admin.errors.devicesTooMany": [
+    {
+      "type": 0,
+      "value": "Too many devices to display. Reload the list."
+    }
+  ],
+  "web.admin.errors.diagnosticDownloadFailed": [
+    {
+      "type": 0,
+      "value": "Diagnostic report download failed ("
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": ")."
+    }
+  ],
+  "web.admin.errors.diagnosticFormatUnexpected": [
+    {
+      "type": 0,
+      "value": "The server returned an unexpected diagnostic report format."
+    }
+  ],
+  "web.admin.errors.diagnosticsAvailabilityUnknown": [
+    {
+      "type": 0,
+      "value": "Unrecognized diagnostics availability. Reload before changing upload settings."
+    }
+  ],
+  "web.admin.errors.historyImportConfigReload": [
+    {
+      "type": 0,
+      "value": "Reload this configuration before saving."
+    }
+  ],
+  "web.admin.errors.historyImportPageIncomplete": [
+    {
+      "type": 0,
+      "value": "Incomplete history import page. Reload to try again."
+    }
+  ],
+  "web.admin.errors.historyImportStatusMissing": [
+    {
+      "type": 0,
+      "value": "The accepted import did not include its expected status location. Refresh runs before trying again."
+    }
+  ],
+  "web.admin.errors.imageChoicesChanged": [
+    {
+      "type": 0,
+      "value": "Image choices changed. Reload to try again."
+    }
+  ],
+  "web.admin.errors.integrationPageIncomplete": [
+    {
+      "type": 0,
+      "value": "Incomplete integration page. Reload to try again."
+    }
+  ],
+  "web.admin.errors.itemFilesIncomplete": [
+    {
+      "type": 0,
+      "value": "Incomplete item file list. Reload to try again."
+    }
+  ],
+  "web.admin.errors.layoutRevisionMissing": [
+    {
+      "type": 0,
+      "value": "Server layout write revision missing; reload before saving again."
+    }
+  ],
+  "web.admin.errors.nodeWriteAckMissing": [
+    {
+      "type": 0,
+      "value": "Node write acknowledgement is unavailable. Inspect current state before saving again."
+    }
+  ],
+  "web.admin.errors.nodesReloadReopen": [
+    {
+      "type": 0,
+      "value": "Reload nodes and reopen this action to obtain its original version."
+    }
+  ],
+  "web.admin.errors.playbackHistoryInvalid": [
+    {
+      "type": 0,
+      "value": "Invalid playback history page. Reload the page."
+    }
+  ],
+  "web.admin.errors.requestPageIncomplete": [
+    {
+      "type": 0,
+      "value": "Incomplete request page. Reload to try again."
+    }
+  ],
+  "web.admin.errors.requestsEditorReload": [
+    {
+      "type": 0,
+      "value": "Reload this editor before saving."
+    }
+  ],
+  "web.admin.errors.scheduleRevisionMissing": [
+    {
+      "type": 0,
+      "value": "Schedule revision unavailable. Reload before editing."
+    }
+  ],
+  "web.admin.errors.seekPreviewsNoneQueued": [
+    {
+      "type": 0,
+      "value": "No seek previews were queued"
+    }
+  ],
+  "web.admin.errors.seekPreviewsQueueFailed": [
+    {
+      "type": 0,
+      "value": "Could not queue seek previews"
+    }
+  ],
+  "web.admin.errors.seekPreviewsQueued": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Seek previews queued for "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " file"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Seek previews queued for "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " files"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.errors.sessionsTooMany": [
+    {
+      "type": 0,
+      "value": "Too many sessions to display. Reload the list."
+    }
+  ],
+  "web.admin.errors.settingsPageInvalid": [
+    {
+      "type": 0,
+      "value": "Invalid settings page. Reload the settings."
+    }
+  ],
+  "web.admin.errors.subtitleDeleteAttempted": [
+    {
+      "type": 0,
+      "value": "This deletion was already attempted. Close and review the subtitle again."
+    }
+  ],
+  "web.admin.errors.subtitleDownloadFailed": [
+    {
+      "type": 0,
+      "value": "Subtitle download failed ("
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": ")."
+    }
+  ],
+  "web.admin.errors.subtitleDownloadUnexpected": [
+    {
+      "type": 0,
+      "value": "Unexpected subtitle download response."
+    }
+  ],
+  "web.admin.errors.subtitleIdentityChanged": [
+    {
+      "type": 0,
+      "value": "Subtitle identity changed. Reload the list."
+    }
+  ],
+  "web.admin.errors.subtitleListInvalid": [
+    {
+      "type": 0,
+      "value": "Invalid subtitle list. Reload the page."
+    }
+  ],
+  "web.admin.errors.subtitleValidatorRequired": [
+    {
+      "type": 0,
+      "value": "A strong subtitle edit validator is required. Reopen the editor."
+    }
+  ],
+  "web.admin.errors.translationCancelFailed": [
+    {
+      "type": 0,
+      "value": "Failed to cancel translation"
+    }
+  ],
+  "web.admin.errors.userPaginationInvalid": [
+    {
+      "type": 0,
+      "value": "Invalid user pagination. Reload the list."
+    }
+  ],
+  "web.admin.errors.userReloadBeforeSaving": [
+    {
+      "type": 0,
+      "value": "Reload this user before saving: a strong ETag is required."
+    }
+  ],
+  "web.admin.errors.watchHistoryInvalid": [
+    {
+      "type": 0,
+      "value": "Invalid watch history page. Reload the page."
+    }
+  ],
   "web.admin.history.column.ended": [
     {
       "type": 0,
@@ -41706,6 +43156,24 @@
     {
       "type": 0,
       "value": ": it may have been restored, but Silo couldn't confirm it. Reload it to check."
+    }
+  ],
+  "web.admin.homeRows.row.cantCopyToLibraries": [
+    {
+      "type": 0,
+      "value": "This row can't be added to other libraries."
+    }
+  ],
+  "web.admin.homeRows.row.moveFailed": [
+    {
+      "type": 0,
+      "value": "Could not move this row"
+    }
+  ],
+  "web.admin.homeRows.row.saveFailed": [
+    {
+      "type": 0,
+      "value": "Could not save this row"
     }
   ],
   "web.admin.homeRows.rowMenu.addToOtherLibraries": [
@@ -48229,6 +49697,64 @@
       "value": "Uninstalling..."
     }
   ],
+  "web.admin.plugins.detail.updateFailed": [
+    {
+      "type": 8,
+      "value": "b",
+      "children": [
+        {
+          "type": 0,
+          "value": "Silo couldn't update "
+        },
+        {
+          "type": 1,
+          "value": "name"
+        },
+        {
+          "type": 0,
+          "value": " to "
+        },
+        {
+          "type": 1,
+          "value": "version"
+        },
+        {
+          "type": 0,
+          "value": "."
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "web.admin.plugins.detail.updateFailedStays": [
+    {
+      "type": 0,
+      "value": "It stays on version "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": ". Last tried "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.plugins.detail.updateTo": [
     {
       "type": 0,
@@ -49253,6 +50779,20 @@
     {
       "type": 0,
       "value": " available"
+    }
+  ],
+  "web.admin.plugins.tile.updateFailed": [
+    {
+      "type": 0,
+      "value": "Update to "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": " failed"
     }
   ],
   "web.admin.plugins.tile.updatesPaused": [
@@ -72701,6 +74241,12 @@
       "value": "Max runtime (not enforced):"
     }
   ],
+  "web.admin.tasks.detail.maxRuntimeLabel": [
+    {
+      "type": 0,
+      "value": "Max runtime:"
+    }
+  ],
   "web.admin.tasks.detail.maxRuntimeNone": [
     {
       "type": 0,
@@ -73125,6 +74671,12 @@
       "value": "Provider artwork"
     }
   ],
+  "web.admin.tasks.refreshReason.providerIdIncomplete": [
+    {
+      "type": 0,
+      "value": "Provider ID incomplete"
+    }
+  ],
   "web.admin.tasks.refreshReason.refreshFailure": [
     {
       "type": 0,
@@ -73227,6 +74779,798 @@
     {
       "type": 0,
       "value": "Stopping..."
+    }
+  ],
+  "web.admin.tasks.task.autoscan_poll.description": [
+    {
+      "type": 0,
+      "value": "Poll installed scan-source providers for changes and enqueue rescans"
+    }
+  ],
+  "web.admin.tasks.task.autoscan_poll.name": [
+    {
+      "type": 0,
+      "value": "Autoscan poll"
+    }
+  ],
+  "web.admin.tasks.task.autoscan_webhook_retry.description": [
+    {
+      "type": 0,
+      "value": "Retry durably accepted Autoscan webhook deliveries"
+    }
+  ],
+  "web.admin.tasks.task.autoscan_webhook_retry.name": [
+    {
+      "type": 0,
+      "value": "Autoscan webhook retry"
+    }
+  ],
+  "web.admin.tasks.task.backfill_ebook_metadata.description": [
+    {
+      "type": 0,
+      "value": "Enriches the legacy ebook backlog without competing with scheduled metadata sync"
+    }
+  ],
+  "web.admin.tasks.task.backfill_ebook_metadata.name": [
+    {
+      "type": 0,
+      "value": "Backfill Ebook Metadata"
+    }
+  ],
+  "web.admin.tasks.task.backfill_hdr10_plus.description": [
+    {
+      "type": 0,
+      "value": "Reads the first frame of HDR video scanned before Silo detected HDR10+, once per file, so HDR10+ files are labeled HDR10+ instead of HDR10."
+    }
+  ],
+  "web.admin.tasks.task.backfill_hdr10_plus.name": [
+    {
+      "type": 0,
+      "value": "Detect HDR10+ Video"
+    }
+  ],
+  "web.admin.tasks.task.backfill_matroska_track_numbers.description": [
+    {
+      "type": 0,
+      "value": "Reads the track list of MKV files with text subtitles scanned before Silo recorded subtitle track numbers, once per file, so apps can show embedded subtitles without server extraction."
+    }
+  ],
+  "web.admin.tasks.task.backfill_matroska_track_numbers.name": [
+    {
+      "type": 0,
+      "value": "Record Matroska Subtitle Track Numbers"
+    }
+  ],
+  "web.admin.tasks.task.backfill_media_item_aliases.description": [
+    {
+      "type": 0,
+      "value": "Seeds searchable aliases from existing original and localized media titles in resumable batches."
+    }
+  ],
+  "web.admin.tasks.task.backfill_media_item_aliases.name": [
+    {
+      "type": 0,
+      "value": "Backfill Media Item Aliases"
+    }
+  ],
+  "web.admin.tasks.task.backfill_metadata_images.description": [
+    {
+      "type": 0,
+      "value": "Manually discovers and caches missing provider artwork across the full catalog"
+    }
+  ],
+  "web.admin.tasks.task.backfill_metadata_images.name": [
+    {
+      "type": 0,
+      "value": "Backfill Metadata Images"
+    }
+  ],
+  "web.admin.tasks.task.backup.description": [
+    {
+      "type": 0,
+      "value": "Backs up the database and uploaded files to the backup destination, then deletes backups beyond the configured count"
+    }
+  ],
+  "web.admin.tasks.task.backup.name": [
+    {
+      "type": 0,
+      "value": "Back Up Server"
+    }
+  ],
+  "web.admin.tasks.task.bulk_metadata_enrichment.description": [
+    {
+      "type": 0,
+      "value": "Looks up movies and series with enrichment providers that batch requests, such as MDBList, many titles at a time"
+    }
+  ],
+  "web.admin.tasks.task.bulk_metadata_enrichment.name": [
+    {
+      "type": 0,
+      "value": "Bulk Metadata Enrichment"
+    }
+  ],
+  "web.admin.tasks.task.cache_metadata_images.description": [
+    {
+      "type": 0,
+      "value": "Processes only artwork already queued by scans, refreshes, and metadata changes"
+    }
+  ],
+  "web.admin.tasks.task.cache_metadata_images.name": [
+    {
+      "type": 0,
+      "value": "Cache Metadata Images"
+    }
+  ],
+  "web.admin.tasks.task.chapter_thumbnail_backfill.description": [
+    {
+      "type": 0,
+      "value": "Generates missing chapter thumbnails for opted-in libraries"
+    }
+  ],
+  "web.admin.tasks.task.chapter_thumbnail_backfill.name": [
+    {
+      "type": 0,
+      "value": "Chapter Thumbnail Backfill"
+    }
+  ],
+  "web.admin.tasks.task.check_plugin_updates.description": [
+    {
+      "type": 0,
+      "value": "Fetches plugin repositories and applies or records available plugin updates"
+    }
+  ],
+  "web.admin.tasks.task.check_plugin_updates.name": [
+    {
+      "type": 0,
+      "value": "Check Plugin Updates"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_activity_log.description": [
+    {
+      "type": 0,
+      "value": "Prunes expired activity log rows and partitions"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_activity_log.name": [
+    {
+      "type": 0,
+      "value": "Cleanup Activity Log"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_artwork_revisions.description": [
+    {
+      "type": 0,
+      "value": "Deletes unpublished or displaced immutable artwork revisions after a grace period when no catalog record references them."
+    }
+  ],
+  "web.admin.tasks.task.cleanup_artwork_revisions.name": [
+    {
+      "type": 0,
+      "value": "Clean Artwork Revisions"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_auth_sessions.description": [
+    {
+      "type": 0,
+      "value": "Deletes login sessions whose expiry has passed, revoked or not"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_auth_sessions.name": [
+    {
+      "type": 0,
+      "value": "Cleanup Expired Login Sessions"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_autoscan_events.description": [
+    {
+      "type": 0,
+      "value": "Prunes old autoscan poll and webhook events from the Activity history"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_autoscan_events.name": [
+    {
+      "type": 0,
+      "value": "Cleanup Autoscan Events"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_catalog_search_index_events.description": [
+    {
+      "type": 0,
+      "value": "Prunes acknowledged catalog search outbox events after the recovery window."
+    }
+  ],
+  "web.admin.tasks.task.cleanup_catalog_search_index_events.name": [
+    {
+      "type": 0,
+      "value": "Cleanup Catalog Search Index Events"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_chapter_thumbnail_originals.description": [
+    {
+      "type": 0,
+      "value": "Deletes full-size chapter thumbnail images stored by earlier versions. Clients only load the 300px thumbnail; the task stops once storage holds none."
+    }
+  ],
+  "web.admin.tasks.task.cleanup_chapter_thumbnail_originals.name": [
+    {
+      "type": 0,
+      "value": "Clean Up Full-Size Chapter Thumbnails"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_client_diagnostics.description": [
+    {
+      "type": 0,
+      "value": "Prunes expired client diagnostic reports and orphaned bundles"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_client_diagnostics.name": [
+    {
+      "type": 0,
+      "value": "Cleanup Client Diagnostics"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_device_logins.description": [
+    {
+      "type": 0,
+      "value": "Deletes device sign-in requests long past their expiry"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_device_logins.name": [
+    {
+      "type": 0,
+      "value": "Cleanup Expired Device Sign-in Requests"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_oauth_flows.description": [
+    {
+      "type": 0,
+      "value": "Deletes OAuth sign-in flows long past their expiry"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_oauth_flows.name": [
+    {
+      "type": 0,
+      "value": "Cleanup Expired OAuth Sign-in Flows"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_operational_log.description": [
+    {
+      "type": 0,
+      "value": "Prunes expired operational log rows and partitions"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_operational_log.name": [
+    {
+      "type": 0,
+      "value": "Cleanup Operational Log"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_orphaned_media_items.description": [
+    {
+      "type": 0,
+      "value": "Deletes detached provisional media items that have no files, library memberships, or durable user/sync references."
+    }
+  ],
+  "web.admin.tasks.task.cleanup_orphaned_media_items.name": [
+    {
+      "type": 0,
+      "value": "Clean Orphaned Media Items"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_policy_decision_log.description": [
+    {
+      "type": 0,
+      "value": "Prunes expired policy decision log rows and partitions"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_policy_decision_log.name": [
+    {
+      "type": 0,
+      "value": "Cleanup Policy Decision Log"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_removed_media_images.description": [
+    {
+      "type": 0,
+      "value": "Deletes the chapter thumbnails and seek previews of media files removed from the catalog, and seek previews that were replaced, after a grace period."
+    }
+  ],
+  "web.admin.tasks.task.cleanup_removed_media_images.name": [
+    {
+      "type": 0,
+      "value": "Clean Removed Media Images"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_task_history.description": [
+    {
+      "type": 0,
+      "value": "Prunes old background task execution history"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_task_history.name": [
+    {
+      "type": 0,
+      "value": "Cleanup Task History"
+    }
+  ],
+  "web.admin.tasks.task.contribute_markers.description": [
+    {
+      "type": 0,
+      "value": "Sends eligible intros and credits detected on this server to providers with automatic sharing enabled, and manual corrections a save could not deliver to providers that accept corrections."
+    }
+  ],
+  "web.admin.tasks.task.contribute_markers.name": [
+    {
+      "type": 0,
+      "value": "Share detected markers"
+    }
+  ],
+  "web.admin.tasks.task.database_maintenance.description": [
+    {
+      "type": 0,
+      "value": "Prunes expired activity and policy logs, task history, autoscan events, login sessions, device sign-in requests, OAuth sign-in flows, search index events, and notifications, and prepares upcoming log partitions"
+    }
+  ],
+  "web.admin.tasks.task.database_maintenance.name": [
+    {
+      "type": 0,
+      "value": "Database Maintenance"
+    }
+  ],
+  "web.admin.tasks.task.detect_intro_markers.description": [
+    {
+      "type": 0,
+      "value": "Analyzes files for intros and credits in libraries with marker detection enabled."
+    }
+  ],
+  "web.admin.tasks.task.detect_intro_markers.name": [
+    {
+      "type": 0,
+      "value": "Detect markers on this server"
+    }
+  ],
+  "web.admin.tasks.task.encode_download_artifacts.description": [
+    {
+      "type": 0,
+      "value": "Encodes queued remux/transcode download artifacts, recovers stranded jobs, and evicts old artifacts"
+    }
+  ],
+  "web.admin.tasks.task.encode_download_artifacts.name": [
+    {
+      "type": 0,
+      "value": "Prepare Download Artifacts"
+    }
+  ],
+  "web.admin.tasks.task.generate_extra_stills.description": [
+    {
+      "type": 0,
+      "value": "Takes a frame from each local extra that has no image file beside it"
+    }
+  ],
+  "web.admin.tasks.task.generate_extra_stills.name": [
+    {
+      "type": 0,
+      "value": "Generate Extra Thumbnails"
+    }
+  ],
+  "web.admin.tasks.task.match_media.description": [
+    {
+      "type": 0,
+      "value": "Matches unmatched media files to metadata from providers"
+    }
+  ],
+  "web.admin.tasks.task.match_media.name": [
+    {
+      "type": 0,
+      "value": "Match Media Files"
+    }
+  ],
+  "web.admin.tasks.task.notifications_retention.description": [
+    {
+      "type": 0,
+      "value": "Prunes old notifications and processed release events according to the retention settings."
+    }
+  ],
+  "web.admin.tasks.task.notifications_retention.name": [
+    {
+      "type": 0,
+      "value": "Clean Up Notifications"
+    }
+  ],
+  "web.admin.tasks.task.queue_seek_previews.description": [
+    {
+      "type": 0,
+      "value": "Queues seek-bar previews for the video files of libraries that have them turned on, and requeues previews that no longer match their file or settings."
+    }
+  ],
+  "web.admin.tasks.task.queue_seek_previews.name": [
+    {
+      "type": 0,
+      "value": "Queue Seek Previews"
+    }
+  ],
+  "web.admin.tasks.task.rebuild_catalog_search_index.description": [
+    {
+      "type": 0,
+      "value": "Rebuilds the configured Meilisearch catalog index from PostgreSQL."
+    }
+  ],
+  "web.admin.tasks.task.rebuild_catalog_search_index.name": [
+    {
+      "type": 0,
+      "value": "Rebuild Catalog Search Index"
+    }
+  ],
+  "web.admin.tasks.task.rebuild_release_interest.description": [
+    {
+      "type": 0,
+      "value": "Recomputes which profiles care about which series (favorites, watchlist, watch progress) for new-episode notifications."
+    }
+  ],
+  "web.admin.tasks.task.rebuild_release_interest.name": [
+    {
+      "type": 0,
+      "value": "Rebuild Notification Interest"
+    }
+  ],
+  "web.admin.tasks.task.recheck_external_identities.description": [
+    {
+      "type": 0,
+      "value": "Asks the external sign-in provider about accounts that hold API keys or idle sessions, and revokes the access of accounts the provider no longer admits"
+    }
+  ],
+  "web.admin.tasks.task.recheck_external_identities.name": [
+    {
+      "type": 0,
+      "value": "Re-check External Sign-in Accounts"
+    }
+  ],
+  "web.admin.tasks.task.reconcile_artwork_cache.description": [
+    {
+      "type": 0,
+      "value": "Manually verifies cached artwork against object storage; missing records may be reset across the full library and require an explicit metadata image backfill"
+    }
+  ],
+  "web.admin.tasks.task.reconcile_artwork_cache.name": [
+    {
+      "type": 0,
+      "value": "Reconcile Artwork Cache"
+    }
+  ],
+  "web.admin.tasks.task.reconcile_requests.description": [
+    {
+      "type": 0,
+      "value": "Checks approved and active media requests against Radarr, Sonarr, and the Silo catalog"
+    }
+  ],
+  "web.admin.tasks.task.reconcile_requests.name": [
+    {
+      "type": 0,
+      "value": "Reconcile Requests"
+    }
+  ],
+  "web.admin.tasks.task.reconcile_watch_history.description": [
+    {
+      "type": 0,
+      "value": "Re-resolves orphaned watch history rows against the current media catalog using stored stable identities."
+    }
+  ],
+  "web.admin.tasks.task.reconcile_watch_history.name": [
+    {
+      "type": 0,
+      "value": "Reconcile Watch History"
+    }
+  ],
+  "web.admin.tasks.task.refresh_all_library_metadata.description": [
+    {
+      "type": 0,
+      "value": "Re-fetches provider metadata for every item in all enabled libraries. Runs only when started manually; large libraries can take hours and make many provider requests"
+    }
+  ],
+  "web.admin.tasks.task.refresh_all_library_metadata.name": [
+    {
+      "type": 0,
+      "value": "Refresh All Library Metadata"
+    }
+  ],
+  "web.admin.tasks.task.refresh_anime_ids.description": [
+    {
+      "type": 0,
+      "value": "Downloads the AniDB-based anime list that request routing uses to recognize anime TMDB does not tag"
+    }
+  ],
+  "web.admin.tasks.task.refresh_anime_ids.name": [
+    {
+      "type": 0,
+      "value": "Refresh Anime List"
+    }
+  ],
+  "web.admin.tasks.task.refresh_metadata.description": [
+    {
+      "type": 0,
+      "value": "Refreshes stale metadata from providers for existing media items"
+    }
+  ],
+  "web.admin.tasks.task.refresh_metadata.name": [
+    {
+      "type": 0,
+      "value": "Refresh Metadata"
+    }
+  ],
+  "web.admin.tasks.task.refresh_request_discover_lists.description": [
+    {
+      "type": 0,
+      "value": "Downloads the TMDB and MDBList lists behind the Requests Discover page's list rows"
+    }
+  ],
+  "web.admin.tasks.task.refresh_request_discover_lists.name": [
+    {
+      "type": 0,
+      "value": "Refresh Request Discover Lists"
+    }
+  ],
+  "web.admin.tasks.task.refresh_request_downloads.description": [
+    {
+      "type": 0,
+      "value": "Refreshes the download progress of media requests that Radarr, Sonarr, or another request plugin is downloading"
+    }
+  ],
+  "web.admin.tasks.task.refresh_request_downloads.name": [
+    {
+      "type": 0,
+      "value": "Refresh Request Downloads"
+    }
+  ],
+  "web.admin.tasks.task.refresh_seasonal_lists.description": [
+    {
+      "type": 0,
+      "value": "Downloads the curated MDBList lists behind Seasonal Picks home rows ahead of each holiday"
+    }
+  ],
+  "web.admin.tasks.task.refresh_seasonal_lists.name": [
+    {
+      "type": 0,
+      "value": "Refresh Seasonal Lists"
+    }
+  ],
+  "web.admin.tasks.task.refresh_series_air_dates.description": [
+    {
+      "type": 0,
+      "value": "Updates the latest-aired episode date of series whose next known episode has aired."
+    }
+  ],
+  "web.admin.tasks.task.refresh_series_air_dates.name": [
+    {
+      "type": 0,
+      "value": "Refresh Series Air Dates"
+    }
+  ],
+  "web.admin.tasks.task.refresh_trending_discover.description": [
+    {
+      "type": 0,
+      "value": "Refreshes the persisted external trending lists (TMDB) for Trending Discover home sections and the calendar's Trending view"
+    }
+  ],
+  "web.admin.tasks.task.refresh_trending_discover.name": [
+    {
+      "type": 0,
+      "value": "Refresh Trending Discover"
+    }
+  ],
+  "web.admin.tasks.task.release_stored_artwork.description": [
+    {
+      "type": 0,
+      "value": "While provider artwork is not saved to storage, points stored artwork back at its providers and queues refreshes for artwork only a provider can replace"
+    }
+  ],
+  "web.admin.tasks.task.release_stored_artwork.name": [
+    {
+      "type": 0,
+      "value": "Release Stored Artwork"
+    }
+  ],
+  "web.admin.tasks.task.repair_provider_id_integrity.description": [
+    {
+      "type": 0,
+      "value": "Repairs drift between media_items provider ID columns and normalized provider ID rows."
+    }
+  ],
+  "web.admin.tasks.task.repair_provider_id_integrity.name": [
+    {
+      "type": 0,
+      "value": "Repair Provider ID Integrity"
+    }
+  ],
+  "web.admin.tasks.task.scan_libraries.description": [
+    {
+      "type": 0,
+      "value": "Queues durable full-library scans for all enabled libraries; actual scan progress continues in Admin Libraries and Server Activity"
+    }
+  ],
+  "web.admin.tasks.task.scan_libraries.name": [
+    {
+      "type": 0,
+      "value": "Queue Media Library Scans"
+    }
+  ],
+  "web.admin.tasks.task.seed_content_availability.description": [
+    {
+      "type": 0,
+      "value": "Records the existing episode and movie back-catalog as already-released so new-content notifications only fire for items that arrive afterwards."
+    }
+  ],
+  "web.admin.tasks.task.seed_content_availability.name": [
+    {
+      "type": 0,
+      "value": "Seed Content Availability"
+    }
+  ],
+  "web.admin.tasks.task.setting_mutations_retention.description": [
+    {
+      "type": 0,
+      "value": "Deletes expired settings-mutation idempotency receipts from every user's store."
+    }
+  ],
+  "web.admin.tasks.task.setting_mutations_retention.name": [
+    {
+      "type": 0,
+      "value": "Clean Up Setting Mutation Receipts"
+    }
+  ],
+  "web.admin.tasks.task.summarize_api_usage.description": [
+    {
+      "type": 0,
+      "value": "Counts API requests per sign-in session for the dashboard's API clients card"
+    }
+  ],
+  "web.admin.tasks.task.summarize_api_usage.name": [
+    {
+      "type": 0,
+      "value": "Summarize API Usage"
+    }
+  ],
+  "web.admin.tasks.task.sweep_artwork_storage.description": [
+    {
+      "type": 0,
+      "value": "Deletes cached artwork objects that no catalog record references, reclaiming revisions the artwork garbage collector never saw"
+    }
+  ],
+  "web.admin.tasks.task.sweep_artwork_storage.name": [
+    {
+      "type": 0,
+      "value": "Sweep Artwork Storage"
+    }
+  ],
+  "web.admin.tasks.task.sweep_orphaned_media_images.description": [
+    {
+      "type": 0,
+      "value": "Finds stored chapter thumbnails and seek previews that nothing references any more and schedules them for deletion."
+    }
+  ],
+  "web.admin.tasks.task.sweep_orphaned_media_images.name": [
+    {
+      "type": 0,
+      "value": "Sweep Orphaned Media Images"
+    }
+  ],
+  "web.admin.tasks.task.sync_audiobook_metadata.description": [
+    {
+      "type": 0,
+      "value": "Fetches metadata (cover art, overview, narrator) for audiobooks that have not yet been enriched"
+    }
+  ],
+  "web.admin.tasks.task.sync_audiobook_metadata.name": [
+    {
+      "type": 0,
+      "value": "Sync Audiobook Metadata"
+    }
+  ],
+  "web.admin.tasks.task.sync_catalog_search_index.description": [
+    {
+      "type": 0,
+      "value": "Builds or upgrades the Meilisearch catalog index when needed, then syncs pending catalog changes."
+    }
+  ],
+  "web.admin.tasks.task.sync_catalog_search_index.name": [
+    {
+      "type": 0,
+      "value": "Sync Catalog Search Index"
+    }
+  ],
+  "web.admin.tasks.task.sync_collections.description": [
+    {
+      "type": 0,
+      "value": "Syncs collections that have a scheduled automatic sync"
+    }
+  ],
+  "web.admin.tasks.task.sync_collections.name": [
+    {
+      "type": 0,
+      "value": "Sync Collections"
+    }
+  ],
+  "web.admin.tasks.task.sync_ebook_metadata.description": [
+    {
+      "type": 0,
+      "value": "Fetches metadata for new ebooks and ebooks due for a recurring refresh"
+    }
+  ],
+  "web.admin.tasks.task.sync_ebook_metadata.name": [
+    {
+      "type": 0,
+      "value": "Sync Ebook Metadata"
+    }
+  ],
+  "web.admin.tasks.task.sync_manga_metadata.description": [
+    {
+      "type": 0,
+      "value": "Fetches metadata (cover art, overview, authors) for manga that have not yet been enriched"
+    }
+  ],
+  "web.admin.tasks.task.sync_manga_metadata.name": [
+    {
+      "type": 0,
+      "value": "Sync Manga Metadata"
+    }
+  ],
+  "web.admin.tasks.task.sync_markers.description": [
+    {
+      "type": 0,
+      "value": "Fetches missing markers from enabled online providers and refreshes saved markers. Requires Save to library."
+    }
+  ],
+  "web.admin.tasks.task.sync_markers.name": [
+    {
+      "type": 0,
+      "value": "Sync online markers"
+    }
+  ],
+  "web.admin.tasks.task.sync_movie_box_sets.description": [
+    {
+      "type": 0,
+      "value": "Looks up which TMDB collection each movie belongs to in libraries with box sets on, and refreshes the collections' names, artwork, and order."
+    }
+  ],
+  "web.admin.tasks.task.sync_movie_box_sets.name": [
+    {
+      "type": 0,
+      "value": "Sync Movie Box Sets"
+    }
+  ],
+  "web.admin.tasks.task.sync_podcast_feeds.description": [
+    {
+      "type": 0,
+      "value": "Refreshes RSS podcast feeds that are due for polling and upserts new episodes"
+    }
+  ],
+  "web.admin.tasks.task.sync_podcast_feeds.name": [
+    {
+      "type": 0,
+      "value": "Sync Podcast Feeds"
+    }
+  ],
+  "web.admin.tasks.task.sync_user_collections.description": [
+    {
+      "type": 0,
+      "value": "Refreshes profile-owned imported collections (TMDB, MDBList) on their schedule"
+    }
+  ],
+  "web.admin.tasks.task.sync_user_collections.name": [
+    {
+      "type": 0,
+      "value": "Sync User Collections"
+    }
+  ],
+  "web.admin.tasks.task.sync_watch_providers.description": [
+    {
+      "type": 0,
+      "value": "Checks linked watch providers for due automatic sync work"
+    }
+  ],
+  "web.admin.tasks.task.sync_watch_providers.name": [
+    {
+      "type": 0,
+      "value": "Sync Watch Providers"
     }
   ],
   "web.admin.tasks.triggerText.daily": [
@@ -77689,6 +80033,66 @@
     {
       "type": 0,
       "value": "Add a setting for this series"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.appearance": [
+    {
+      "type": 0,
+      "value": "Appearance"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.catalog": [
+    {
+      "type": 0,
+      "value": "Catalog"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.downloads": [
+    {
+      "type": 0,
+      "value": "Downloads"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.nav": [
+    {
+      "type": 0,
+      "value": "Nav"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.navigation": [
+    {
+      "type": 0,
+      "value": "Navigation"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.playback": [
+    {
+      "type": 0,
+      "value": "Playback"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.player": [
+    {
+      "type": 0,
+      "value": "Player"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.requests": [
+    {
+      "type": 0,
+      "value": "Requests"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.search": [
+    {
+      "type": 0,
+      "value": "Search"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.watch_party": [
+    {
+      "type": 0,
+      "value": "Watch Party"
     }
   ],
   "web.admin.users.detail.preferences.clear.confirm": [
@@ -82969,6 +85373,12 @@
       "value": "…"
     }
   ],
+  "web.auth.loginSubtitle.default": [
+    {
+      "type": 0,
+      "value": "Sign in with an existing account."
+    }
+  ],
   "web.auth.networkSignIn.addressRequired": [
     {
       "type": 0,
@@ -84439,6 +86849,45 @@
       "value": "Remove show watch data?"
     }
   ],
+  "web.catalog.history.removeFailed": [
+    {
+      "type": 0,
+      "value": "Failed to remove history"
+    }
+  ],
+  "web.catalog.history.removed": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Removed watch data"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Removed watch data for "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " items"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.catalog.letters.letterNoTitles": [
     {
       "type": 1,
@@ -84857,6 +87306,40 @@
     {
       "type": 0,
       "value": "Shuffle"
+    }
+  ],
+  "web.catalog.page.titleCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "shown"
+            },
+            {
+              "type": 0,
+              "value": " title"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "shown"
+            },
+            {
+              "type": 0,
+              "value": " titles"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.catalog.page.watchlist": [
@@ -86091,6 +88574,18 @@
     {
       "type": 0,
       "value": "Add as a row"
+    }
+  ],
+  "web.collections.copy.addAtLeastOneRule": [
+    {
+      "type": 0,
+      "value": "Add at least one rule."
+    }
+  ],
+  "web.collections.copy.addRuleThenCreate": [
+    {
+      "type": 0,
+      "value": "Add a rule, then create it."
     }
   ],
   "web.collections.copy.addToCollectionFootnote": [
@@ -89405,6 +91900,12 @@
       "value": "Pick its libraries, then create it."
     }
   ],
+  "web.collections.copy.pickWhereItShowsFirst": [
+    {
+      "type": 0,
+      "value": "Pick the libraries it shows in, then create it."
+    }
+  ],
   "web.collections.copy.pinEveryLibrary": [
     {
       "type": 0,
@@ -89517,12 +92018,6 @@
       "value": "You can still save. Titles that match later join on their own."
     }
   ],
-  "web.collections.copy.previewEveryLibrary": [
-    {
-      "type": 0,
-      "value": "From every library until you pick some"
-    }
-  ],
   "web.collections.copy.previewFailed": [
     {
       "type": 0,
@@ -89567,6 +92062,18 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.collections.copy.previewNeedsRule": [
+    {
+      "type": 0,
+      "value": "Add a rule to see what it matches"
+    }
+  ],
+  "web.collections.copy.previewNeedsRuleHelp": [
+    {
+      "type": 0,
+      "value": "A smart collection needs at least one rule. Without one it would hold every title."
     }
   ],
   "web.collections.copy.previewShowsUnsaved": [
@@ -89733,6 +92240,16 @@
     {
       "type": 0,
       "value": "Couldn't save"
+    }
+  ],
+  "web.collections.copy.saveFailedWithError": [
+    {
+      "type": 0,
+      "value": "Couldn't save · "
+    },
+    {
+      "type": 1,
+      "value": "error"
     }
   ],
   "web.collections.copy.saveFirstDescription": [
@@ -89991,6 +92508,12 @@
     {
       "type": 0,
       "value": "Nothing matches yet. Titles that match later join on their own."
+    }
+  ],
+  "web.collections.copy.smartLibrariesHelp": [
+    {
+      "type": 0,
+      "value": "Their Collections tabs list it. Its rules pick where titles come from."
     }
   ],
   "web.collections.copy.smartUpdatesItself": [
@@ -92847,6 +95370,18 @@
       "value": "name"
     }
   ],
+  "web.collections.page.emptyAll": [
+    {
+      "type": 0,
+      "value": "There are no collections yet."
+    }
+  ],
+  "web.collections.page.emptyMine": [
+    {
+      "type": 0,
+      "value": "You haven't made any collections yet."
+    }
+  ],
   "web.collections.page.filterAll": [
     {
       "type": 0,
@@ -95417,6 +97952,48 @@
       "value": "This week"
     }
   ],
+  "web.collections.toast.addFailed": [
+    {
+      "type": 0,
+      "value": "Failed to add to collection"
+    }
+  ],
+  "web.collections.toast.notShared": [
+    {
+      "type": 0,
+      "value": "Only you see it now"
+    }
+  ],
+  "web.collections.toast.removeItemFailed": [
+    {
+      "type": 0,
+      "value": "Failed to remove item"
+    }
+  ],
+  "web.collections.toast.reorderFailed": [
+    {
+      "type": 0,
+      "value": "Failed to reorder"
+    }
+  ],
+  "web.collections.toast.reorderItemsFailed": [
+    {
+      "type": 0,
+      "value": "Failed to reorder items"
+    }
+  ],
+  "web.collections.toast.sharedWithProfiles": [
+    {
+      "type": 0,
+      "value": "Shown to other profiles"
+    }
+  ],
+  "web.collections.toast.sharingFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't change sharing"
+    }
+  ],
   "web.collections.types.kindManual": [
     {
       "type": 0,
@@ -95487,6 +98064,12 @@
     {
       "type": 0,
       "value": "Where it shows"
+    }
+  ],
+  "web.collections.whereItShows.librariesTrigger": [
+    {
+      "type": 0,
+      "value": "Show in libraries"
     }
   ],
   "web.collections.whereItShows.shelf": [
@@ -96283,6 +98866,18 @@
       "value": "Western"
     }
   ],
+  "web.common.job.cancelled": [
+    {
+      "type": 0,
+      "value": "Job cancelled"
+    }
+  ],
+  "web.common.job.failed": [
+    {
+      "type": 0,
+      "value": "Job failed"
+    }
+  ],
   "web.common.markers.sharingDisclosure": [
     {
       "type": 0,
@@ -96323,6 +98918,24 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.common.overlays.previewPlaceholder.movie": [
+    {
+      "type": 0,
+      "value": "Movie preview"
+    }
+  ],
+  "web.common.overlays.previewPlaceholder.requested": [
+    {
+      "type": 0,
+      "value": "Requested preview"
+    }
+  ],
+  "web.common.overlays.previewPlaceholder.show": [
+    {
+      "type": 0,
+      "value": "Show preview"
+    }
+  ],
   "web.common.overlays.previewSample": [
     {
       "type": 0,
@@ -96345,6 +98958,20 @@
     {
       "type": 0,
       "value": "Show"
+    }
+  ],
+  "web.common.overlays.sampleDownloading": [
+    {
+      "type": 0,
+      "value": "Downloading "
+    },
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "%"
     }
   ],
   "web.common.overlays.watched": [
@@ -96795,6 +99422,124 @@
     {
       "type": 0,
       "value": "TMDB Rating"
+    }
+  ],
+  "web.common.sortable.canceled": [
+    {
+      "type": 0,
+      "value": "Moving "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " was canceled."
+    }
+  ],
+  "web.common.sortable.dropped": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " dropped."
+    }
+  ],
+  "web.common.sortable.droppedAt": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " dropped at position "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.common.sortable.fallbackName": [
+    {
+      "type": 0,
+      "value": "Item"
+    }
+  ],
+  "web.common.sortable.instructions": [
+    {
+      "type": 0,
+      "value": "To move an item, focus its handle and press Space or Enter. Use the arrow keys to move it, Space or Enter to drop it, or Escape to cancel."
+    }
+  ],
+  "web.common.sortable.over": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " is now at position "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.common.sortable.pickedUp": [
+    {
+      "type": 0,
+      "value": "Picked up "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", position "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.common.speedTest.retryAfter": [
@@ -102033,6 +104778,12 @@
       "value": "e.g. Christopher Nolan"
     }
   ],
+  "web.home.addRow.params.trendingShow": [
+    {
+      "type": 0,
+      "value": "Show"
+    }
+  ],
   "web.home.addRow.personalSentence": [
     {
       "type": 1,
@@ -102372,12 +105123,6 @@
       "value": "all libraries"
     }
   ],
-  "web.home.addRow.rules.chooseLibraries": [
-    {
-      "type": 0,
-      "value": "choose libraries"
-    }
-  ],
   "web.home.addRow.rules.group": [
     {
       "type": 0,
@@ -102488,10 +105233,10 @@
       "value": "any"
     }
   ],
-  "web.home.addRow.rules.noRulesCollection": [
+  "web.home.addRow.rules.noRulesCollectionYet": [
     {
       "type": 0,
-      "value": "No rules yet, so the collection holds every title from these libraries."
+      "value": "No rules yet. Add one to choose which titles it holds."
     }
   ],
   "web.home.addRow.rules.noRulesRow": [
@@ -105852,6 +108597,60 @@
       }
     }
   ],
+  "web.home.rows.describe.trendingDiscoverFiltered": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "movie": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Movies trending"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "TV shows trending"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " on TMDB "
+    },
+    {
+      "type": 5,
+      "value": "window",
+      "options": {
+        "day": {
+          "value": [
+            {
+              "type": 0,
+              "value": "today"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "this week"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": ", from what you have"
+    }
+  ],
   "web.home.rows.describe.trendingHere": [
     {
       "type": 0,
@@ -106732,6 +109531,12 @@
     {
       "type": 0,
       "value": "That row no longer exists."
+    }
+  ],
+  "web.home.rows.links.rowMissing": [
+    {
+      "type": 0,
+      "value": "This row is no longer on this page."
     }
   ],
   "web.home.rows.notes.conflict": [
@@ -109314,6 +112119,24 @@
       "value": "This will unlock all fields and refresh metadata from your providers. Any manual edits will be overwritten on the next refresh."
     }
   ],
+  "web.item.editMetadata.resetDescriptionEpisode": [
+    {
+      "type": 0,
+      "value": "This will unlock this episode's title, overview, runtime and air date and refresh metadata from your providers. Any manual edits to them will be overwritten."
+    }
+  ],
+  "web.item.editMetadata.resetDescriptionSeason": [
+    {
+      "type": 0,
+      "value": "This will unlock this season's title, overview and air date and refresh metadata from your providers. Any manual edits to them will be overwritten. Artwork you picked stays locked on the series; reset the series to replace it."
+    }
+  ],
+  "web.item.editMetadata.resetDescriptionSeries": [
+    {
+      "type": 0,
+      "value": "This will unlock all fields on this series and refresh metadata from your providers. Any manual edits to the series will be overwritten. Locked seasons and episodes keep their edits."
+    }
+  ],
   "web.item.editMetadata.resetToProvider": [
     {
       "type": 0,
@@ -110200,6 +113023,12 @@
     {
       "type": 0,
       "value": "Rating"
+    }
+  ],
+  "web.item.rating.remove": [
+    {
+      "type": 0,
+      "value": "Remove rating"
     }
   ],
   "web.item.rating.stars": [
@@ -111352,6 +114181,132 @@
       "value": "Removed from watchlist"
     }
   ],
+  "web.library.watchlist.statusApprovedWaiting": [
+    {
+      "type": 0,
+      "value": "Approved · waiting for a download"
+    }
+  ],
+  "web.library.watchlist.statusAwaitingApproval": [
+    {
+      "type": 0,
+      "value": "Awaiting approval"
+    }
+  ],
+  "web.library.watchlist.statusDownloading": [
+    {
+      "type": 0,
+      "value": "Downloading "
+    },
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
+  "web.library.watchlist.statusListedTwice": [
+    {
+      "type": 0,
+      "value": "TMDB lists it twice"
+    }
+  ],
+  "web.library.watchlist.statusNeedsAttention": [
+    {
+      "type": 0,
+      "value": "Needs attention"
+    }
+  ],
+  "web.library.watchlist.statusNoLongerListed": [
+    {
+      "type": 0,
+      "value": "No longer listed on TMDB"
+    }
+  ],
+  "web.library.watchlist.statusNotOnTmdb": [
+    {
+      "type": 0,
+      "value": "Not on TMDB"
+    }
+  ],
+  "web.library.watchlist.statusNotRequested": [
+    {
+      "type": 0,
+      "value": "Not requested"
+    }
+  ],
+  "web.library.watchlist.statusNotRequestedOut": [
+    {
+      "type": 0,
+      "value": "Not requested · out "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.library.watchlist.statusNotRequestedReason": [
+    {
+      "type": 0,
+      "value": "Not requested · "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "web.library.watchlist.statusOut": [
+    {
+      "type": 0,
+      "value": "Out "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.library.watchlist.statusOutApproved": [
+    {
+      "type": 0,
+      "value": "Out "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " · approved"
+    }
+  ],
+  "web.library.watchlist.statusOutAwaitingApproval": [
+    {
+      "type": 0,
+      "value": "Out "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " · awaiting approval"
+    }
+  ],
+  "web.library.watchlist.titlesHint": [
+    {
+      "type": 0,
+      "value": "These titles aren't in the library yet, so they can't be played. When one arrives, it moves to In your library."
+    }
+  ],
+  "web.library.watchlist.titlesHintRequested": [
+    {
+      "type": 0,
+      "value": "These titles aren't in the library yet, so they can't be played. They've been requested for you. When one arrives, it moves to In your library and you get a notification."
+    }
+  ],
   "web.library.watchlist.updateFailed": [
     {
       "type": 0,
@@ -112492,6 +115447,58 @@
     {
       "type": 0,
       "value": "Won’t notify right now"
+    }
+  ],
+  "web.notifications.toast.followedArrived": [
+    {
+      "type": 0,
+      "value": "A title you asked to hear about has arrived in the library."
+    }
+  ],
+  "web.notifications.toast.newEpisode": [
+    {
+      "type": 0,
+      "value": "New episode of "
+    },
+    {
+      "type": 1,
+      "value": "series"
+    }
+  ],
+  "web.notifications.toast.requestApprovedTitle": [
+    {
+      "type": 0,
+      "value": "Request approved: "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.notifications.toast.requestArrived": [
+    {
+      "type": 0,
+      "value": "Your media request has arrived in the library."
+    }
+  ],
+  "web.notifications.toast.requestDeclinedTitle": [
+    {
+      "type": 0,
+      "value": "Request declined: "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.notifications.toast.seriesAvailable": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " is now available"
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -113698,6 +116705,50 @@
       "value": "Exit"
     }
   ],
+  "web.player.hud.episode": [
+    {
+      "type": 0,
+      "value": "S"
+    },
+    {
+      "type": 1,
+      "value": "season"
+    },
+    {
+      "type": 0,
+      "value": " · E"
+    },
+    {
+      "type": 1,
+      "value": "episode"
+    }
+  ],
+  "web.player.hud.episodeWithTitle": [
+    {
+      "type": 0,
+      "value": "S"
+    },
+    {
+      "type": 1,
+      "value": "season"
+    },
+    {
+      "type": 0,
+      "value": " · E"
+    },
+    {
+      "type": 1,
+      "value": "episode"
+    },
+    {
+      "type": 0,
+      "value": " — "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
   "web.player.info.audioBitrate": [
     {
       "type": 0,
@@ -114864,6 +117915,12 @@
     {
       "type": 0,
       "value": ")"
+    }
+  ],
+  "web.player.tracks.resetAudioFailed": [
+    {
+      "type": 0,
+      "value": "Failed to reset audio preference"
     }
   ],
   "web.player.tracks.saveAudioFailed": [
@@ -116400,6 +119457,12 @@
     {
       "type": 0,
       "value": "Library Access"
+    }
+  ],
+  "web.profiles.libraryAccess.primaryNote": [
+    {
+      "type": 0,
+      "value": "The primary profile sees every library the account can access. It can hide libraries in Settings → Libraries."
     }
   ],
   "web.profiles.librarySelect.allLibraries": [
@@ -122404,22 +125467,14 @@
       "value": "Your Plex authentication token"
     }
   ],
-  "web.settings.historyImport.processed": [
+  "web.settings.historyImport.processedSoFar": [
     {
       "type": 1,
       "value": "processed"
     },
     {
       "type": 0,
-      "value": " / "
-    },
-    {
-      "type": 1,
-      "value": "fetched"
-    },
-    {
-      "type": 0,
-      "value": " processed"
+      "value": " processed so far"
     }
   ],
   "web.settings.historyImport.reconnectPlex": [
@@ -124332,6 +127387,30 @@
       "value": "Browser notifications enabled"
     }
   ],
+  "web.settings.notifications.push.error.incompleteSubscription": [
+    {
+      "type": 0,
+      "value": "The browser returned an incomplete push subscription"
+    }
+  ],
+  "web.settings.notifications.push.error.permissionDenied": [
+    {
+      "type": 0,
+      "value": "Notification permission was not granted"
+    }
+  ],
+  "web.settings.notifications.push.error.unsubscribeFailed": [
+    {
+      "type": 0,
+      "value": "Server registration removed, but the browser subscription could not be removed."
+    }
+  ],
+  "web.settings.notifications.push.error.unsupported": [
+    {
+      "type": 0,
+      "value": "This browser does not support push notifications"
+    }
+  ],
   "web.settings.notifications.push.lastDeliveredAt": [
     {
       "type": 0,
@@ -125052,6 +128131,12 @@
       "value": "Multi-Audio"
     }
   ],
+  "web.settings.overlays.badge.multiAudio.value": [
+    {
+      "type": 0,
+      "value": "Multi-Audio"
+    }
+  ],
   "web.settings.overlays.badge.multiSub.description": [
     {
       "type": 0,
@@ -125236,6 +128321,30 @@
     {
       "type": 0,
       "value": "Show Status"
+    }
+  ],
+  "web.settings.overlays.badge.showStatus.value.cancelled": [
+    {
+      "type": 0,
+      "value": "Cancelled"
+    }
+  ],
+  "web.settings.overlays.badge.showStatus.value.ended": [
+    {
+      "type": 0,
+      "value": "Ended"
+    }
+  ],
+  "web.settings.overlays.badge.showStatus.value.returning": [
+    {
+      "type": 0,
+      "value": "Returning"
+    }
+  ],
+  "web.settings.overlays.badge.showStatus.value.upcoming": [
+    {
+      "type": 0,
+      "value": "Upcoming"
     }
   ],
   "web.settings.overlays.badge.studio.description": [
@@ -126804,6 +129913,56 @@
       "value": "Wi-Fi"
     }
   ],
+  "web.settings.plexAuth.homeUserNoServerAccess": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " does not have access to this Plex server. Share the server with them in Plex, or choose another server."
+    }
+  ],
+  "web.settings.plexAuth.homeUserNoSignIn": [
+    {
+      "type": 0,
+      "value": "Plex did not return a sign-in for this Plex Home user."
+    }
+  ],
+  "web.settings.plexAuth.homeUserPinRejected": [
+    {
+      "type": 0,
+      "value": "Plex did not accept that PIN. Check the PIN for this Plex Home user and try again."
+    }
+  ],
+  "web.settings.plexAuth.homeUserPinRequired": [
+    {
+      "type": 0,
+      "value": "This Plex Home user is protected by a PIN. Enter their PIN and try again."
+    }
+  ],
+  "web.settings.plexAuth.invalidPinResponse": [
+    {
+      "type": 0,
+      "value": "Plex sign-in returned an invalid PIN response."
+    }
+  ],
+  "web.settings.plexAuth.requestFailed": [
+    {
+      "type": 0,
+      "value": "Plex request failed with status "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    }
+  ],
+  "web.settings.plexAuth.signInIncomplete": [
+    {
+      "type": 0,
+      "value": "Plex sign-in was not completed. Please try again."
+    }
+  ],
   "web.settings.profileLaunch.ask": [
     {
       "type": 0,
@@ -126930,6 +130089,46 @@
     {
       "type": 0,
       "value": "No profiles yet"
+    }
+  ],
+  "web.settings.profiles.limitReached": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "This account can have "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " profile. An administrator can raise the limit."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "This account can have "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " profiles. An administrator can raise the limit."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.settings.profiles.newProfile": [
@@ -132616,6 +135815,12 @@
     {
       "type": 0,
       "value": "Discard unsaved changes?"
+    }
+  ],
+  "web.shuffle.startFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't start shuffle."
     }
   ],
   "web.subtitles.closeDialog": [
