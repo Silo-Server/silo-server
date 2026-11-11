@@ -104,7 +104,8 @@ The `/api/v1` bridge takes a poster on `POST /api/v1/collections` and
 follows the same order: a poster that fails before it is stored creates or changes nothing. It
 answers `400 bad_request` for a poster the server cannot use, including a part that is not
 JPEG, PNG or WebP or is over 10 MB; `503 unavailable` when the server is too busy to decode it;
-and `500 internal_error` with a fixed message otherwise. Other fields are checked first, so a
+and `500 internal_error` with a fixed message otherwise. A source address the server refuses
+has its own fixed `500` message. Other fields are checked first, so a
 request with a poster and an invalid field answers for the field, and the poster is neither
 decoded nor fetched. As on `/api/v2`, a poster that decoded but could not be stored answers the
 same fixed `500` after the collection was created or updated, so that `500` alone does not tell
