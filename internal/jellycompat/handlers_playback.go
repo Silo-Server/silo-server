@@ -2625,7 +2625,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		Name:    firstMediaBrowserAuthorizationValue(r, "Client"),
 		Version: firstMediaBrowserAuthorizationValue(r, "Version"),
 	}.Normalized()
-	h.playbackStore.PutNegotiated(PlaybackSession{
+	if err := h.playbackStore.PutNegotiated(PlaybackSession{
 		ID:                 playSessionID,
 		CompatToken:        session.Token,
 		ClientDeviceID:     clientDeviceID,
@@ -2639,7 +2639,12 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		UserID:             session.PseudoUserID.String(),
 		InitialSeekSeconds: clampSeekSeconds(float64(req.StartTimeTicks)/10_000_000, sources),
 		MediaSources:       sources,
-	})
+	}); err != nil {
+		// Other replicas could not resolve this PlaySessionId; let the client
+		// retry the negotiation instead.
+		writeSessionCheckUnavailable(w)
+		return
+	}
 
 	writeJSON(w, http.StatusOK, playbackInfoResponseDTO{
 		PlaySessionID: playSessionID,

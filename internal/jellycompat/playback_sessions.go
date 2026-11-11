@@ -201,9 +201,15 @@ type CompatPlaybackStore interface {
 	Put(session PlaybackSession)
 	// PutNegotiated stores a PlaybackInfo negotiation and atomically replaces
 	// older, still-unstarted negotiations for the same client device and item.
-	PutNegotiated(session PlaybackSession)
+	// An error means the negotiation was not stored, so its PlaySessionId
+	// must not be handed to the client.
+	PutNegotiated(session PlaybackSession) error
 	// Get returns a session when it exists and is not expired.
 	Get(id string) (*PlaybackSession, bool)
+	// Lookup is Get for callers that grant access by PlaySessionId: it
+	// returns an error, instead of not-found, when the store could not be
+	// read and holds no usable copy of the session.
+	Lookup(id string) (*PlaybackSession, bool, error)
 	// Delete removes a session.
 	Delete(id string)
 	// HideFromRouting immediately makes a caller-owned session unavailable to
@@ -300,8 +306,9 @@ func (s *PlaybackSessionStore) Put(session PlaybackSession) {
 // and Stopped reports. Replacing only unstarted sessions keeps real concurrent
 // playback intact while preventing the abandoned negotiation from later
 // publishing a stale pause.
-func (s *PlaybackSessionStore) PutNegotiated(session PlaybackSession) {
+func (s *PlaybackSessionStore) PutNegotiated(session PlaybackSession) error {
 	s.putNegotiatedNormalized(session)
+	return nil
 }
 
 // putNormalized stores or replaces a compat playback session and returns the
@@ -371,6 +378,12 @@ func (s *PlaybackSessionStore) Get(id string) (*PlaybackSession, bool) {
 	}
 	cp := session
 	return &cp, true
+}
+
+// Lookup implements CompatPlaybackStore. The in-memory store cannot fail.
+func (s *PlaybackSessionStore) Lookup(id string) (*PlaybackSession, bool, error) {
+	session, ok := s.Get(id)
+	return session, ok, nil
 }
 
 // Delete removes a playback session.

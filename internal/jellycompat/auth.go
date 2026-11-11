@@ -216,6 +216,19 @@ func writeSessionLookupFailed(w http.ResponseWriter, r *http.Request, token stri
 	writeSessionCheckUnavailable(w)
 }
 
+// writePlaySessionLookupFailed answers a PlaySessionId-only request whose play
+// session could not be read from the playback store.
+func writePlaySessionLookupFailed(w http.ResponseWriter, r *http.Request, playSessionID string, err error) {
+	if r.Context().Err() == nil {
+		slog.WarnContext(r.Context(), "jellycompat auth: play session lookup failed; answering 503", "component", "jellycompat",
+			"path", redactHLSPlaySessionID(r.URL.Path),
+			"play_session", playSessionFingerprint(playSessionID),
+			"error", logredact.SanitizeText(err.Error()),
+		)
+	}
+	writeSessionCheckUnavailable(w)
+}
+
 // attributeActivity records the session's account on the activity log entry
 // for this request, when the activity log middleware is mounted.
 func attributeActivity(r *http.Request, session *Session) {
@@ -354,7 +367,14 @@ func PlaybackSessionAuth(sessions *SessionStore, playbackStore CompatPlaybackSto
 			// (and no api_key / auth header), so a case-sensitive match would
 			// miss it and 401 the stream — forcing a needless transcode fallback.
 			if playSessionID := newCaseInsensitiveQuery(r.URL.Query()).Get("PlaySessionId"); playSessionID != "" && playbackStore != nil {
-				if playSession, found := playbackStore.Get(playSessionID); found && playbackGrantMatchesRequest(r, playSession) {
+				playSession, found, err := playbackStore.Lookup(playSessionID)
+				if err != nil {
+					// The grant was not judged: answer a retryable 503, not a
+					// 401 that reads as a revoked play session.
+					writePlaySessionLookupFailed(w, r, playSessionID, err)
+					return
+				}
+				if found && playbackGrantMatchesRequest(r, playSession) {
 					session, ok, err := resolveCompatToken(r.Context(), sessions, keyAuth, playSession.CompatToken)
 					if err != nil {
 						writeSessionLookupFailed(w, r, playSession.CompatToken, err)

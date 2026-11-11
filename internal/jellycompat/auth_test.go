@@ -89,6 +89,41 @@ func TestPlaybackSessionAuth_DefaultLifetime(t *testing.T) {
 	}
 }
 
+// A PlaySessionId-only media request whose play session cannot be read from
+// the store answers a retryable 503, not a 401 that reads as a revoked grant
+// (#2923). The replica that cached the session keeps serving it.
+func TestPlaybackSessionAuth_PlaySessionStoreUnavailable(t *testing.T) {
+	sessions := NewSessionStore(30*24*time.Hour, nil)
+	_ = sessions.Put(Session{Token: "compat-tok", StreamAppUserID: 1})
+	pool := newUnreachableCompatPool(t)
+	warm := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	warm.Put(PlaybackSession{ID: "ps-abc", CompatToken: "compat-tok", RouteItemID: "itm"})
+	cold := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+
+	for _, tc := range []struct {
+		name     string
+		store    CompatPlaybackStore
+		wantCode int
+	}{
+		{"replica holding the session", warm, http.StatusOK},
+		{"replica without the session", cold, http.StatusServiceUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := requestWithCompatRouteItem(httptest.NewRequest("GET", "/Videos/itm/master.m3u8?PlaySessionId=ps-abc", nil), "itm")
+			rec := httptest.NewRecorder()
+			PlaybackSessionAuth(sessions, tc.store, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			})).ServeHTTP(rec, req)
+			if rec.Code != tc.wantCode {
+				t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tc.wantCode, rec.Body.String())
+			}
+			if tc.wantCode == http.StatusServiceUnavailable && rec.Header().Get("Retry-After") == "" {
+				t.Fatal("503 carries no Retry-After")
+			}
+		})
+	}
+}
+
 func TestExtractToken_CaseInsensitiveAPIKey(t *testing.T) {
 	// "ApiKey" is Jellyfin's current query spelling (PascalCase); "api_key" is
 	// the legacy spelling. Native clients (incl. Jellyfin Android TV) build

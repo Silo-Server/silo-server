@@ -186,6 +186,18 @@ func newCompatTestPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
+// newUnreachableCompatPool returns a pool whose every query fails, standing in
+// for a Postgres outage without needing a database.
+func newUnreachableCompatPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	pool, err := pgxpool.New(context.Background(), "postgres://silo:silo@127.0.0.1:1/silo?sslmode=disable&connect_timeout=1")
+	if err != nil {
+		t.Fatalf("create pool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	return pool
+}
+
 func TestPlaybackSessionStoreTerminalClaimIsAtomicAndOwnerScoped(t *testing.T) {
 	store := NewPlaybackSessionStore(time.Hour, nil)
 	store.Put(PlaybackSession{ID: "play-1", CompatToken: "owner", UpstreamSessionID: "upstream-1"})
