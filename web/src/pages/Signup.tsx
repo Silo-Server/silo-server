@@ -15,6 +15,7 @@ import { AuthBackground } from "@/components/auth/AuthBackground";
 import { AuthLanguagePicker } from "@/components/auth/AuthLanguagePicker";
 import { sanitizeAuthRedirect } from "@/lib/authRedirect";
 import { invalidEmailMessage, isValidEmail } from "@/lib/email";
+import { newPasswordProblem } from "@/lib/newPassword";
 import { toast } from "sonner";
 import { useT } from "@/i18n";
 
@@ -72,8 +73,9 @@ export default function Signup() {
       toast.error(invalidEmailMessage());
       return;
     }
-    if (password !== confirmPassword) {
-      toast.error(t("web.auth.passwordRules.mismatch"));
+    const passwordProblem = newPasswordProblem(password, confirmPassword);
+    if (passwordProblem) {
+      toast.error(passwordProblem);
       return;
     }
     setSubmitting(true);

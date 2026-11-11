@@ -1735,7 +1735,7 @@ Errors are RFC 9457 problem documents with `Content-Type: application/problem+js
   "type": "https://siloserver.org/docs/api/v2/problems/validation_failed",
   "title": "Validation failed",
   "status": 422,
-  "detail": "The request did not pass validation; see errors.",
+  "detail": "expected value to be one of \"original, 20mbps, 10mbps, 5mbps, 2mbps, 1mbps\"",
   "instance": "urn:silo:request:000000000000000000000026",
   "errors": [
     {
