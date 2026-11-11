@@ -4105,6 +4105,18 @@
       "value": "Loading members..."
     }
   ],
+  "web.admin.access.groups.members.noMatches": [
+    {
+      "type": 0,
+      "value": "No members match your search."
+    }
+  ],
+  "web.admin.access.groups.members.search": [
+    {
+      "type": 0,
+      "value": "Search members"
+    }
+  ],
   "web.admin.access.groups.newGroup": [
     {
       "type": 0,

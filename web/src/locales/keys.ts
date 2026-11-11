@@ -638,6 +638,8 @@ export type MessageKey =
   | "web.admin.access.groups.members.help"
   | "web.admin.access.groups.members.loadFailed"
   | "web.admin.access.groups.members.loading"
+  | "web.admin.access.groups.members.noMatches"
+  | "web.admin.access.groups.members.search"
   | "web.admin.access.groups.newGroup"
   | "web.admin.access.groups.permissions.allowAll"
   | "web.admin.access.groups.permissions.allowAllLabel"
