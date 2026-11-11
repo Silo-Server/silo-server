@@ -449,51 +449,70 @@ func TestRunPagesMovies(t *testing.T) {
 }
 
 // stallingEpisodes is a repository whose episode listing waits for its
-// context to end, like an episode pass on a library too large to finish.
-type stallingEpisodes struct{ *fakeIntroRepository }
+// context to end, like an episode pass on a library too large to finish. It
+// then returns err, or the context's error when err is nil.
+type stallingEpisodes struct {
+	*fakeIntroRepository
+	err error
+}
 
-func (stallingEpisodes) ListEligibleCandidates(ctx context.Context) ([]Candidate, error) {
+func (s stallingEpisodes) ListEligibleCandidates(ctx context.Context) ([]Candidate, error) {
 	<-ctx.Done()
+	if s.err != nil {
+		return nil, s.err
+	}
 	return nil, ctx.Err()
 }
 
 // Issue #3421: a run with a deadline stops its episodes early enough for the
-// movies to get their budget. A cancel during the episodes still stops the
-// whole run.
+// movies to get their budget, and so does the episode pass a server without
+// Chromaprint runs before its separate movie pass. A cancel, or an error
+// other than the deadline, during the episodes still stops the run.
 func TestRunLeavesMoviesTheirShareOfTheDeadline(t *testing.T) {
+	errDatabase := errors.New("database unavailable")
+	run := func(a *Analyzer, ctx context.Context) (RunSummary, error) { return a.Run(ctx, allMarkerKinds, nil) }
+	runEpisodes := func(a *Analyzer, ctx context.Context) (RunSummary, error) {
+		return a.RunEpisodes(ctx, allMarkerKinds, nil)
+	}
 	for _, tc := range []struct {
-		name     string
-		timeout  time.Duration
-		cancelAt time.Duration
-		wantErr  error
+		name        string
+		run         func(*Analyzer, context.Context) (RunSummary, error)
+		cancelAt    time.Duration
+		episodesErr error
+		wantErr     error
+		wantMovies  int
+		wantSpent   bool
 	}{
-		{name: "episode share spent", timeout: 600 * time.Millisecond},
-		{name: "canceled during episodes", timeout: time.Minute, cancelAt: 50 * time.Millisecond, wantErr: context.Canceled},
+		{name: "episode share spent", run: run, wantMovies: 1, wantSpent: true},
+		{name: "episode pass alone leaves the movie share", run: runEpisodes, wantSpent: true},
+		{name: "repository error at the end of the share", run: run, episodesErr: errDatabase, wantErr: errDatabase},
+		{name: "canceled during episodes", run: run, cancelAt: 50 * time.Millisecond, wantErr: context.Canceled},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			repo := &fakeIntroRepository{enabledLibraries: 1, movieCandidates: []Candidate{movieCandidate(10, 7200)}}
 			sampler := &fakeMovieSampler{}
 			analyzer := movieAnalyzer(repo, sampler)
-			analyzer.repo = stallingEpisodes{repo}
-			analyzer.movieBudget = 200 * time.Millisecond
-			ctx, cancel := context.WithTimeout(context.Background(), tc.timeout)
+			analyzer.repo = stallingEpisodes{fakeIntroRepository: repo, err: tc.episodesErr}
+			// The episodes' share ends a second before the deadline, which
+			// leaves the movie pass a wide margin on a loaded runner.
+			analyzer.movieBudget = time.Second
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 			if tc.cancelAt > 0 {
-				time.AfterFunc(tc.cancelAt, cancel)
+				stop := time.AfterFunc(tc.cancelAt, cancel)
+				defer stop.Stop()
 			}
 
-			summary, err := analyzer.Run(ctx, allMarkerKinds, nil)
+			summary, err := tc.run(analyzer, ctx)
 			if !errors.Is(err, tc.wantErr) {
-				t.Fatalf("Run error = %v, want %v", err, tc.wantErr)
+				t.Fatalf("error = %v, want %v", err, tc.wantErr)
 			}
-			if tc.wantErr != nil {
-				if summary.EpisodeBudgetExhausted || sampler.tailCount() != 0 {
-					t.Fatalf("summary %+v, %d tail passes; want the run stopped before the movies", summary, sampler.tailCount())
-				}
-				return
+			if summary.EpisodeBudgetExhausted != tc.wantSpent || sampler.tailCount() != tc.wantMovies || summary.MovieCreditsMarkersWritten != tc.wantMovies {
+				t.Fatalf("summary %+v, %d tail passes; want episode_budget_exhausted %v and %d movies", summary, sampler.tailCount(), tc.wantSpent, tc.wantMovies)
 			}
-			if !summary.EpisodeBudgetExhausted || sampler.tailCount() != 1 || summary.MovieCreditsMarkersWritten != 1 || ctx.Err() != nil {
-				t.Fatalf("summary %+v, %d tail passes, ctx %v; want the movie analyzed before the deadline", summary, sampler.tailCount(), ctx.Err())
+			if tc.wantErr == nil && ctx.Err() != nil {
+				t.Fatalf("ctx %v; want the run finished before its deadline", ctx.Err())
 			}
 		})
 	}

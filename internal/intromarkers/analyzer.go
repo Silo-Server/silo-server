@@ -317,6 +317,15 @@ func (a *Analyzer) run(ctx context.Context, kinds EpisodeMarkerKinds, progress P
 		report(100, "Credits detection is turned off")
 		return summary, nil
 	}
+	// With credits on, movies follow the episodes: in this run, or in the
+	// RunMovies pass a server without Chromaprint runs after RunEpisodes.
+	// Their share of the time limit is reserved now, so the library lookup
+	// comes out of the episodes' share.
+	episodeCtx, stopEpisodes := ctx, context.CancelFunc(func() {})
+	if passes.episodes && kinds.Credits {
+		episodeCtx, stopEpisodes = a.episodeContext(ctx)
+	}
+	defer stopEpisodes()
 	libraries, err := a.repo.CountEnabledLibraries(ctx)
 	if err != nil {
 		return summary, err
@@ -332,9 +341,7 @@ func (a *Analyzer) run(ctx context.Context, kinds EpisodeMarkerKinds, progress P
 	}
 
 	if !movies {
-		episodeSummary, err := a.runEpisodes(ctx, kinds, report)
-		mergeRunSummary(&summary, episodeSummary)
-		if err != nil {
+		if err := a.runEpisodeShare(episodeCtx, kinds, report, &summary); err != nil {
 			return summary, err
 		}
 		if passes.movies {
@@ -348,18 +355,10 @@ func (a *Analyzer) run(ctx context.Context, kinds EpisodeMarkerKinds, progress P
 	moviesFrom := 0.0
 	if passes.episodes {
 		moviesFrom = 85
-		episodeCtx, stopEpisodes := a.episodeContext(ctx)
-		episodeSummary, err := a.runEpisodes(episodeCtx, kinds, func(percent float64, message string) {
+		err := a.runEpisodeShare(episodeCtx, kinds, func(percent float64, message string) {
 			report(percent*moviesFrom/100, message)
-		})
-		budgetSpent := errors.Is(context.Cause(episodeCtx), errEpisodeBudgetSpent)
-		stopEpisodes()
-		mergeRunSummary(&summary, episodeSummary)
-		if budgetSpent {
-			// The episodes stopped where a cancel stops them; the season
-			// groups they finished are saved and the next run resumes there.
-			summary.EpisodeBudgetExhausted = true
-		} else if err != nil {
+		}, &summary)
+		if err != nil {
 			return summary, err
 		}
 	}
@@ -401,6 +400,21 @@ func (a *Analyzer) episodeContext(ctx context.Context) (context.Context, context
 	}
 	reserve := min(a.movieRunBudget(), time.Until(deadline)/2)
 	return context.WithDeadlineCause(ctx, deadline.Add(-reserve), errEpisodeBudgetSpent)
+}
+
+// runEpisodeShare runs the episodes under episodeCtx, from episodeContext,
+// and merges them into summary. Episodes stopped at the end of their share
+// are not an error: they stopped where a cancel stops them, the season groups
+// they finished are saved, and the next run resumes there. Any other error,
+// such as a repository failure, is returned.
+func (a *Analyzer) runEpisodeShare(episodeCtx context.Context, kinds EpisodeMarkerKinds, report ProgressFunc, summary *RunSummary) error {
+	episodeSummary, err := a.runEpisodes(episodeCtx, kinds, report)
+	mergeRunSummary(summary, episodeSummary)
+	if errors.Is(context.Cause(episodeCtx), errEpisodeBudgetSpent) && (err == nil || errors.Is(err, context.DeadlineExceeded)) {
+		summary.EpisodeBudgetExhausted = true
+		return nil
+	}
+	return err
 }
 
 // runEpisodes analyzes the episodes of every enabled library for kinds,
