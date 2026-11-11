@@ -70,8 +70,8 @@
 ./internal/catalog TestGetItemVersionsMatchesDetail
 ./internal/catalog TestGetItemVersionsAccessAndMissing
 
-# Episode batches: the viewer's preference lookups run once per series, not
-# once per episode, on the Jellyfin season page path.
+# Episode batches: the viewer's preference lookups and the episode reads run
+# once per series, not once per episode, on the Jellyfin season page path.
 ./internal/catalog TestGetEpisodeDetailsForSeriesResolvesPreferencesOncePerSeries
 
 # Seek previews: one availability lookup per item or episode page, and none
