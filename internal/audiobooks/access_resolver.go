@@ -10,6 +10,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/audiobooks/abs"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -72,47 +73,62 @@ func (r *ABSAccessResolver) ResolveABSAccess(ctx context.Context, userID, profil
 	}, nil
 }
 
-// ResolveABSOwnerAccess resolves the current access of a stored ABS principal
-// that is not the caller, such as the owner of a public RSS feed. Unlike
-// ResolveABSAccess it fails closed: it returns abs.ErrOwnerUnavailable when the
-// account is missing or disabled, when the profile no longer exists or policy
-// refuses it, or when a principal without a profile belongs to an account
-// that now has profiles (the rule SiloCredValidator.VerifyTokenProfile applies
-// to tokens).
-func (r *ABSAccessResolver) ResolveABSOwnerAccess(ctx context.Context, userID, profileID string) (catalog.AccessFilter, error) {
+// ResolveABSOwnerAccess resolves the current access of the stored owner of an
+// ABS capability, such as a public RSS feed. Unlike ResolveABSAccess it fails
+// closed: it returns abs.ErrOwnerUnavailable when the account is missing or
+// disabled, when the profile no longer exists or policy refuses it, or when a
+// principal without a profile belongs to an account that now has profiles
+// (the rule SiloCredValidator.VerifyTokenProfile applies to tokens).
+//
+// actingAdmin follows the native API's acting-admin gate (RequireActingAdmin
+// in internal/api/middleware): the account holds the server admin role and
+// the owner is its primary profile. An owner without a profile exists only on
+// an account with no profiles, which that gate lets act as the administrator.
+func (r *ABSAccessResolver) ResolveABSOwnerAccess(ctx context.Context, userID, profileID string) (catalog.AccessFilter, bool, error) {
 	if r == nil || r.resolver == nil || r.users == nil || r.stores == nil {
-		return catalog.AccessFilter{}, errors.New("ABS owner access resolver not configured")
+		return catalog.AccessFilter{}, false, errors.New("ABS owner access resolver not configured")
 	}
 	uid, err := strconv.Atoi(userID)
 	if err != nil {
-		return catalog.AccessFilter{}, abs.ErrOwnerUnavailable
+		return catalog.AccessFilter{}, false, abs.ErrOwnerUnavailable
 	}
 	user, err := r.users.GetByID(ctx, uid)
 	if errors.Is(err, auth.ErrNotFound) {
-		return catalog.AccessFilter{}, abs.ErrOwnerUnavailable
+		return catalog.AccessFilter{}, false, abs.ErrOwnerUnavailable
 	}
 	if err != nil {
-		return catalog.AccessFilter{}, fmt.Errorf("load ABS owner %d: %w", uid, err)
+		return catalog.AccessFilter{}, false, fmt.Errorf("load ABS owner %d: %w", uid, err)
 	}
 	if user == nil || !user.Enabled {
-		return catalog.AccessFilter{}, abs.ErrOwnerUnavailable
+		return catalog.AccessFilter{}, false, abs.ErrOwnerUnavailable
 	}
-	if profileID == "" {
-		store, err := r.stores.ForUser(ctx, uid)
-		if err != nil {
-			return catalog.AccessFilter{}, fmt.Errorf("open user store: %w", err)
-		}
+	store, err := r.stores.ForUser(ctx, uid)
+	if err != nil {
+		return catalog.AccessFilter{}, false, fmt.Errorf("open user store: %w", err)
+	}
+	actingAdmin := user.Role == models.RoleAdmin
+	switch {
+	case profileID == "":
 		profiles, err := store.ListProfiles(ctx)
 		if err != nil {
-			return catalog.AccessFilter{}, fmt.Errorf("list profiles: %w", err)
+			return catalog.AccessFilter{}, false, fmt.Errorf("list profiles: %w", err)
 		}
 		if len(profiles) > 0 {
-			return catalog.AccessFilter{}, abs.ErrOwnerUnavailable
+			return catalog.AccessFilter{}, false, abs.ErrOwnerUnavailable
 		}
+	case actingAdmin:
+		profile, err := store.GetProfile(ctx, profileID)
+		if err != nil {
+			return catalog.AccessFilter{}, false, fmt.Errorf("load profile: %w", err)
+		}
+		actingAdmin = profile != nil && profile.IsPrimary
 	}
 	filter, err := r.ResolveABSAccess(ctx, userID, profileID)
 	if errors.Is(err, access.ErrProfileNotFound) || errors.Is(err, access.ErrProfileUnverified) {
-		return catalog.AccessFilter{}, abs.ErrOwnerUnavailable
+		return catalog.AccessFilter{}, false, abs.ErrOwnerUnavailable
 	}
-	return filter, err
+	if err != nil {
+		return catalog.AccessFilter{}, false, err
+	}
+	return filter, actingAdmin, nil
 }

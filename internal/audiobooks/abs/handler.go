@@ -234,10 +234,15 @@ type ProfileVerifier interface {
 // effective catalog access filter used by silo's native API.
 type AccessResolver interface {
 	ResolveABSAccess(ctx context.Context, userID, profileID string) (catalog.AccessFilter, error)
-	// ResolveABSOwnerAccess resolves a stored owner that is not the caller,
-	// such as a public feed's owner. It returns ErrOwnerUnavailable when the
-	// owner's account is missing or disabled or its profile is gone.
-	ResolveABSOwnerAccess(ctx context.Context, userID, profileID string) (catalog.AccessFilter, error)
+	// ResolveABSOwnerAccess resolves the owner of a stored capability, such
+	// as a public feed, from its account and profile as they are now. It
+	// returns ErrOwnerUnavailable when the owner's account is missing or
+	// disabled or its profile is gone. actingAdmin reports whether the owner
+	// may use server admin powers, by the native API's acting-admin rule: the
+	// account holds the admin role and the owner is its primary profile, or
+	// the account has no profiles. Any other profile on an admin account is a
+	// household member.
+	ResolveABSOwnerAccess(ctx context.Context, userID, profileID string) (filter catalog.AccessFilter, actingAdmin bool, err error)
 }
 
 // EventPublisher delivers a realtime event to Socket.io clients. May be nil;
