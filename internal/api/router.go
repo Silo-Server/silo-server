@@ -2514,7 +2514,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			if deps.RecWorker != nil {
 				webhookSyncSvc.SetSignalsChangedNotifier(deps.RecWorker)
 			}
-			webhookSyncHandler = handlers.NewWebhookSyncHandler(webhookSyncSvc)
+			webhookSyncHandler = handlers.NewWebhookSyncHandler(webhookSyncSvc, deps.UserStoreProvider, profileTokenService)
 		}
 	}
 
@@ -3225,6 +3225,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if webhookSyncHandler != nil {
 		v2deps.WebhookSync = webhookSyncHandler
+		v2deps.WebhookSyncManagement = webhookSyncHandler
 		v2deps.WebhookReceiver = webhookSyncHandler
 	}
 	if onboardingHandler != nil {

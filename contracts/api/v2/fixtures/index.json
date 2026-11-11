@@ -11975,7 +11975,8 @@
         "method": "GET",
         "path": "/api/v2/webhook-sync/connections",
         "headers": {
-          "Authorization": "Bearer tok-member"
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-primary"
         }
       },
       "expected_status": 200,

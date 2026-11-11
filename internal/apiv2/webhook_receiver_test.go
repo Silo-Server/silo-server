@@ -50,7 +50,7 @@ func TestWebhookReceiverRealDeliveryDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	app := handlers.NewWebhookSyncHandler(webhooksync.NewService(webhooksync.NewRepository(pool, cipher), nil, nil))
+	app := handlers.NewWebhookSyncHandler(webhooksync.NewService(webhooksync.NewRepository(pool, cipher), nil, nil), nil, nil)
 	deps := pilotDeps(nil, nil)
 	deps.WebhookReceiver = app
 	h := newTestHandler(t, deps)
@@ -195,5 +195,6 @@ func TestWebhookReceiverRealDeliveryDB(t *testing.T) {
 }
 
 func (f *fakeWebhookManagement) RotateWebhookConnection(context.Context, int, string) (*webhooksync.RotateWebhookResult, error) {
+	f.calls++
 	return &webhooksync.RotateWebhookResult{WebhookURL: "/api/v2/webhook-sync/webhooks/new-secret"}, nil
 }

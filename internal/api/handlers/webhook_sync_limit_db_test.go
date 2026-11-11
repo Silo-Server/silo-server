@@ -47,7 +47,7 @@ func TestLegacyWebhookReceiverRejectsOversizedBodyDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := NewWebhookSyncHandler(webhooksync.NewService(webhooksync.NewRepository(pool, cipher), historyimport.NewRepository(pool, cipher), nil))
+	handler := NewWebhookSyncHandler(webhooksync.NewService(webhooksync.NewRepository(pool, cipher), historyimport.NewRepository(pool, cipher), nil), nil, nil)
 	router := chi.NewRouter()
 	router.Post("/api/v1/webhook-sync/webhooks/{secret}", handler.HandleWebhook)
 

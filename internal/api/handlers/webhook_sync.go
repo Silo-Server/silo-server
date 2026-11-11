@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -11,14 +12,18 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/webhooksync"
 )
 
 type WebhookSyncHandler struct {
-	service *webhooksync.Service
+	service       *webhooksync.Service
+	stores        userstore.UserStoreProvider
+	profileTokens *access.ProfileTokenService
 }
 
 type legacyPlexSyncConnection struct {
@@ -89,11 +94,45 @@ type legacyUpdatePlexSyncActorsRequest struct {
 	} `json:"mappings"`
 }
 
-func NewWebhookSyncHandler(service *webhooksync.Service) *WebhookSyncHandler {
-	return &WebhookSyncHandler{service: service}
+// NewWebhookSyncHandler takes the household stores and profile tokens that
+// decide who may manage connections. Without stores every management request
+// is refused; the public receiver needs neither.
+func NewWebhookSyncHandler(service *webhooksync.Service, stores userstore.UserStoreProvider, profileTokens *access.ProfileTokenService) *WebhookSyncHandler {
+	return &WebhookSyncHandler{service: service, stores: stores, profileTokens: profileTokens}
+}
+
+// MayManageWebhookSync applies the household-manager rule to connection
+// management, reads included. A connection belongs to the account, its
+// receiver URL carries the secret that authenticates deliveries, and its
+// mappings choose which profile an external user's watch state is written to,
+// so a household member who is not the manager may neither see nor change it.
+func (h *WebhookSyncHandler) MayManageWebhookSync(ctx context.Context, userID int, profileID string, verify func(*userstore.Profile) error) (bool, error) {
+	return mayManageHouseholdOf(ctx, h.stores, userID, profileID, verify)
+}
+
+// requireManagement reports whether the v1 caller may manage connections,
+// and writes the refusal when not.
+func (h *WebhookSyncHandler) requireManagement(w http.ResponseWriter, r *http.Request) bool {
+	allowed, err := h.MayManageWebhookSync(r.Context(), apimw.GetUserID(r.Context()), activeProfileIDOf(r), func(profile *userstore.Profile) error {
+		return verifyProfileTokenFor(r, h.profileTokens, profile)
+	})
+	switch {
+	case errors.Is(err, access.ErrProfileUnverified):
+		writeError(w, http.StatusForbidden, "forbidden", "Webhook sync management requires verifying the primary profile PIN")
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to check webhook sync permissions")
+	case !allowed:
+		writeError(w, http.StatusForbidden, "forbidden", "Webhook sync management requires the account's primary profile")
+	default:
+		return true
+	}
+	return false
 }
 
 func (h *WebhookSyncHandler) HandleListConnections(w http.ResponseWriter, r *http.Request) {
+	if !h.requireManagement(w, r) {
+		return
+	}
 	userID := apimw.GetUserID(r.Context())
 	connections, err := h.service.ListConnections(r.Context(), userID)
 	if err != nil {
@@ -108,6 +147,9 @@ func (h *WebhookSyncHandler) HandleListConnections(w http.ResponseWriter, r *htt
 }
 
 func (h *WebhookSyncHandler) HandleLegacyListConnections(w http.ResponseWriter, r *http.Request) {
+	if !h.requireManagement(w, r) {
+		return
+	}
 	userID := apimw.GetUserID(r.Context())
 	connections, err := h.service.ListConnections(r.Context(), userID)
 	if err != nil {
@@ -126,6 +168,9 @@ func (h *WebhookSyncHandler) HandleLegacyListConnections(w http.ResponseWriter, 
 }
 
 func (h *WebhookSyncHandler) HandleCreateConnection(w http.ResponseWriter, r *http.Request) {
+	if !h.requireManagement(w, r) {
+		return
+	}
 	userID := apimw.GetUserID(r.Context())
 	if userID == 0 {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
@@ -146,6 +191,9 @@ func (h *WebhookSyncHandler) HandleCreateConnection(w http.ResponseWriter, r *ht
 }
 
 func (h *WebhookSyncHandler) HandleLegacyCreateConnection(w http.ResponseWriter, r *http.Request) {
+	if !h.requireManagement(w, r) {
+		return
+	}
 	userID := apimw.GetUserID(r.Context())
 	if userID == 0 {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
@@ -182,6 +230,9 @@ func (h *WebhookSyncHandler) HandleLegacyCreateConnection(w http.ResponseWriter,
 }
 
 func (h *WebhookSyncHandler) HandleUpdateConnection(w http.ResponseWriter, r *http.Request) {
+	if !h.requireManagement(w, r) {
+		return
+	}
 	userID := apimw.GetUserID(r.Context())
 	id := chi.URLParam(r, "id")
 	if id == "" {
@@ -203,6 +254,9 @@ func (h *WebhookSyncHandler) HandleUpdateConnection(w http.ResponseWriter, r *ht
 }
 
 func (h *WebhookSyncHandler) HandleDeleteConnection(w http.ResponseWriter, r *http.Request) {
+	if !h.requireManagement(w, r) {
+		return
+	}
 	userID := apimw.GetUserID(r.Context())
 	id := chi.URLParam(r, "id")
 	if id == "" {
@@ -221,6 +275,9 @@ func (h *WebhookSyncHandler) HandleLegacyDeleteConnection(w http.ResponseWriter,
 }
 
 func (h *WebhookSyncHandler) HandleRotateWebhook(w http.ResponseWriter, r *http.Request) {
+	if !h.requireManagement(w, r) {
+		return
+	}
 	userID := apimw.GetUserID(r.Context())
 	id := chi.URLParam(r, "id")
 	if id == "" {
@@ -236,6 +293,9 @@ func (h *WebhookSyncHandler) HandleRotateWebhook(w http.ResponseWriter, r *http.
 }
 
 func (h *WebhookSyncHandler) HandleLegacyRotateWebhook(w http.ResponseWriter, r *http.Request) {
+	if !h.requireManagement(w, r) {
+		return
+	}
 	userID := apimw.GetUserID(r.Context())
 	id := chi.URLParam(r, "id")
 	if id == "" {
@@ -253,6 +313,9 @@ func (h *WebhookSyncHandler) HandleLegacyRotateWebhook(w http.ResponseWriter, r 
 }
 
 func (h *WebhookSyncHandler) HandleGetProfileMappings(w http.ResponseWriter, r *http.Request) {
+	if !h.requireManagement(w, r) {
+		return
+	}
 	userID := apimw.GetUserID(r.Context())
 	id := chi.URLParam(r, "id")
 	if id == "" {
@@ -268,6 +331,9 @@ func (h *WebhookSyncHandler) HandleGetProfileMappings(w http.ResponseWriter, r *
 }
 
 func (h *WebhookSyncHandler) HandleListEvents(w http.ResponseWriter, r *http.Request) {
+	if !h.requireManagement(w, r) {
+		return
+	}
 	userID := apimw.GetUserID(r.Context())
 	id := chi.URLParam(r, "id")
 	if id == "" {
@@ -287,6 +353,9 @@ func (h *WebhookSyncHandler) HandleListEvents(w http.ResponseWriter, r *http.Req
 }
 
 func (h *WebhookSyncHandler) HandleLegacyGetActors(w http.ResponseWriter, r *http.Request) {
+	if !h.requireManagement(w, r) {
+		return
+	}
 	userID := apimw.GetUserID(r.Context())
 	id := chi.URLParam(r, "id")
 	if id == "" {
@@ -302,6 +371,9 @@ func (h *WebhookSyncHandler) HandleLegacyGetActors(w http.ResponseWriter, r *htt
 }
 
 func (h *WebhookSyncHandler) HandleUpdateProfileMappings(w http.ResponseWriter, r *http.Request) {
+	if !h.requireManagement(w, r) {
+		return
+	}
 	userID := apimw.GetUserID(r.Context())
 	id := chi.URLParam(r, "id")
 	if id == "" {
@@ -322,6 +394,9 @@ func (h *WebhookSyncHandler) HandleUpdateProfileMappings(w http.ResponseWriter, 
 }
 
 func (h *WebhookSyncHandler) HandleLegacyUpdateActors(w http.ResponseWriter, r *http.Request) {
+	if !h.requireManagement(w, r) {
+		return
+	}
 	userID := apimw.GetUserID(r.Context())
 	id := chi.URLParam(r, "id")
 	if id == "" {
