@@ -23,10 +23,6 @@ type PersonalCollectionCreateCommand struct {
 	UserID    int
 	ProfileID string
 	Request   PersonalCollectionCreateRequest
-	// PosterFile reads the uploaded poster part; nil when the request
-	// carried no multipart body. It answers http.ErrMissingFile when the
-	// part is absent.
-	PosterFile func() ([]byte, error)
 }
 
 const (
@@ -121,7 +117,7 @@ func (h *CollectionHandler) CreatePersonalCollection(ctx context.Context, cmd Pe
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
 
-	if cmd.PosterFile != nil || req.PosterSourceURL != "" {
+	if req.PosterSourceURL != "" {
 		if err := collectionFeatureError(store, "artwork"); err != nil {
 			return none, err
 		}
@@ -156,6 +152,13 @@ func (h *CollectionHandler) CreatePersonalCollection(ctx context.Context, cmd Pe
 	if err != nil {
 		return none, fieldError("display_query_definition", err.Error())
 	}
+	// The poster is read and decoded before the insert: one the server cannot
+	// use, or is too busy to decode, creates nothing, so repeating the request
+	// cannot leave two collections.
+	poster, err := h.prepareCollectionPoster(ctx, nil, req.PosterSourceURL)
+	if err != nil {
+		return none, personalCollectionPosterError(ctx, "", err)
+	}
 	collection, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{
 		CreatorProfileID:           cmd.ProfileID,
 		Name:                       req.Name,
@@ -171,11 +174,10 @@ func (h *CollectionHandler) CreatePersonalCollection(ctx context.Context, cmd Pe
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to create collection")
 	}
 
-	posterProvided, err := h.processCollectionPoster(ctx, store, collection.ID, cmd.ProfileID, cmd.PosterFile, req.PosterSourceURL)
-	if err != nil {
-		return none, apiError(http.StatusInternalServerError, "internal_error", err.Error())
-	}
-	if posterProvided {
+	if poster != nil {
+		if err := h.storeCollectionPoster(ctx, store, collection.ID, cmd.ProfileID, poster); err != nil {
+			return none, personalCollectionPosterError(ctx, collection.ID, err)
+		}
 		if refreshed, err := store.GetCollection(ctx, collection.ID); err == nil {
 			collection = refreshed
 		}

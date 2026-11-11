@@ -21,7 +21,6 @@ type PersonalCollectionUpdateCommand struct {
 	ProfileID    string
 	CollectionID string
 	Request      PersonalCollectionUpdateRequest
-	PosterFile   func() ([]byte, error)
 }
 
 func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd PersonalCollectionUpdateCommand) (PersonalCollectionView, error) {
@@ -37,7 +36,7 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 		return none, err
 	}
 
-	if cmd.PosterFile != nil || req.PosterSourceURL != nil {
+	if req.PosterSourceURL != nil {
 		if err := collectionFeatureError(store, "artwork"); err != nil {
 			return none, err
 		}
@@ -164,6 +163,12 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 		}
 	}
 
+	// The poster is read and decoded before the update, as create does before
+	// its insert: one the server cannot use changes nothing.
+	poster, err := h.prepareCollectionPoster(ctx, nil, pointerStringValue(req.PosterSourceURL))
+	if err != nil {
+		return none, personalCollectionPosterError(ctx, collectionID, err)
+	}
 	if err := store.UpdateCollection(ctx, input); err != nil {
 		if errors.Is(err, userstore.ErrCollectionRevisionMismatch) {
 			return none, err
@@ -199,12 +204,10 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 		}
 	}
 
-	posterSource := pointerStringValue(req.PosterSourceURL)
-	if _, err := h.processCollectionPoster(ctx, store, collectionID, profileID, cmd.PosterFile, posterSource); err != nil {
-		if errors.Is(err, errCollectionForbidden) {
-			return none, apiError(http.StatusForbidden, "forbidden", "Only the creator can edit this collection")
+	if poster != nil {
+		if err := h.storeCollectionPoster(ctx, store, collectionID, profileID, poster); err != nil {
+			return none, personalCollectionPosterError(ctx, collectionID, err)
 		}
-		return none, apiError(http.StatusInternalServerError, "internal_error", err.Error())
 	}
 
 	// Re-read the collection to return updated state.
@@ -468,8 +471,8 @@ func (h *CollectionHandler) UploadPersonalCollectionPoster(ctx context.Context, 
 	if len(data) == 0 {
 		return PersonalCollectionView{}, fieldError("body", "Poster image is required")
 	}
-	if _, err := h.processCollectionPoster(ctx, store, collectionID, profileID, func() ([]byte, error) { return data, nil }, ""); err != nil {
-		return PersonalCollectionView{}, collectionArtworkError(err, "Failed to store collection artwork")
+	if err := h.processCollectionPoster(ctx, store, collectionID, profileID, data, ""); err != nil {
+		return PersonalCollectionView{}, personalCollectionPosterError(ctx, collectionID, err)
 	}
 	return h.GetPersonalCollection(ctx, userID, profileID, collectionID)
 }
@@ -486,8 +489,8 @@ func (h *CollectionHandler) SetPersonalCollectionPosterSource(ctx context.Contex
 	if strings.TrimSpace(source) == "" {
 		return PersonalCollectionView{}, fieldError("source_url", "An image URL is required")
 	}
-	if _, err := h.processCollectionPoster(ctx, store, id, profileID, nil, source); err != nil {
-		return PersonalCollectionView{}, collectionArtworkError(err, "Failed to store collection artwork")
+	if err := h.processCollectionPoster(ctx, store, id, profileID, nil, source); err != nil {
+		return PersonalCollectionView{}, personalCollectionPosterError(ctx, id, err)
 	}
 	return h.GetPersonalCollection(ctx, userID, profileID, id)
 }
