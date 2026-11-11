@@ -671,7 +671,13 @@ func (d *DurableCompatPlaybackStore) retireUpstreamRows(upstreamSessionID string
 		}
 		retired = append(retired, [2]string{id, compatToken})
 	}
-	return retired, rows.Err()
+	// A result that fails partway does not say whether the statement
+	// committed. Report it as a failed statement, with no rows, so the
+	// caller hides its own copy and retries.
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return retired, nil
 }
 
 // StageTerminal hides a session and persists the provider event under a row
