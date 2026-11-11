@@ -320,6 +320,9 @@ func TestDetailHideFileIdentity(t *testing.T) {
 			// The scanner stores a sidecar's file name as its title.
 			{Path: "/media/Movie (2023)/Movie.2023.2160p.WEB-DL-GROUP.es.srt", Language: "es", Format: "srt", Title: "Movie.2023.2160p.WEB-DL-GROUP.es.srt"},
 			{Path: "/media/Movie (2023)/Movie.fr.srt", Language: "fr", Format: "srt", Title: "Commentary"},
+			// A second untitled English sidecar is numbered, as the playback
+			// inventory numbers it, so a saved choice tells the two apart.
+			{Path: "/media/Movie (2023)/Movie.2023.2160p.WEB-DL-OTHER.en.srt", Language: "en", Format: "srt"},
 		},
 	}
 	for _, tc := range []struct {
@@ -353,6 +356,9 @@ func TestDetailHideFileIdentity(t *testing.T) {
 				}
 				if titled.Title != "Commentary" {
 					t.Errorf("titled sidecar title = %q, want Commentary", titled.Title)
+				}
+				if second := v.SubtitleTracks[3]; !tc.keepNames && (second.Title != "en 2" || second.FileName != "") {
+					t.Errorf("second untitled English sidecar = %+v, want title \"en 2\" and no file name", second)
 				}
 			}
 		})

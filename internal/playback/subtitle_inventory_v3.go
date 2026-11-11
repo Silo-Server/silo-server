@@ -175,21 +175,30 @@ func BuildSubtitleInventoryV3(file *models.MediaFile, additional []SubtitleInven
 	return items
 }
 
-// HideSidecarFileNamesV3 relabels the external sidecars whose only title is
-// their file name, for a viewer who may not see file names: such a track falls
-// back to its embedded title, then its language, as an untitled embedded track
-// does. file is the file inventory was built from.
+// HideSidecarFileNamesV3 relabels the external sidecars of inventory for a
+// viewer who may not see file names. A sidecar keeps its label only when that
+// label is the title of the sidecar file currently holds at its ordinal; any
+// other label, its file name or one left in a restored plan after the
+// sidecars changed, is replaced. The replacement is the sidecar's embedded
+// title, or its language numbered by models.SidecarLabels, as the catalog
+// labels the same track.
 func HideSidecarFileNamesV3(inventory []SubtitleInventoryItemV3, file *models.MediaFile) {
-	if file == nil {
-		return
-	}
+	labels := models.SidecarLabels{}
 	for i, item := range inventory {
-		index := item.CombinedIndex
-		if item.Source != SubtitleSourceExternalV3 || index < 0 || index >= len(file.ExternalSubtitles) {
+		if item.Source != SubtitleSourceExternalV3 {
 			continue
 		}
-		if sub := file.ExternalSubtitles[index]; sub.TitleIsFileName() {
-			inventory[i].Label = firstNonEmptySubtitleLabelV3(sub.EmbeddedTitle, sub.Language)
+		var sub *models.ExternalSubtitle
+		if file != nil && item.CombinedIndex >= 0 && item.CombinedIndex < len(file.ExternalSubtitles) {
+			sub = &file.ExternalSubtitles[item.CombinedIndex]
+		}
+		switch {
+		case sub != nil && !sub.TitleIsFileName() && item.Label == sub.Title:
+			// Its own title: keep it.
+		case sub != nil && sub.TitleIsFileName() && strings.TrimSpace(sub.EmbeddedTitle) != "":
+			inventory[i].Label = sub.EmbeddedTitle
+		default:
+			inventory[i].Label = labels.Next(item.Language, item.Codec, item.Forced, item.HearingImpaired)
 		}
 	}
 }

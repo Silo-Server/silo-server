@@ -398,6 +398,8 @@ func TestHideSidecarFileNamesV3(t *testing.T) {
 			// The scanner stores a sidecar's file name as its title.
 			{Path: "/media/Movie.2023.1080p.WEB-DL-GROUP.es.srt", Language: "es", Format: "srt", Title: "Movie.2023.1080p.WEB-DL-GROUP.es.srt"},
 			{Path: "/media/movie.fr.srt", Language: "fr", Format: "srt", Title: "Commentary"},
+			// A second untitled English sidecar stays distinguishable.
+			{Path: "/media/Movie.2023.1080p.WEB-DL-OTHER.en.srt", Language: "en", Format: "srt"},
 		},
 		SubtitleTracks: []models.SubtitleTrack{{Index: 0, Language: "ja", Codec: "subrip", Title: "Signs"}},
 	}
@@ -405,12 +407,22 @@ func TestHideSidecarFileNamesV3(t *testing.T) {
 	if items[0].Label != "Movie.2023.1080p.WEB-DL-GROUP.en.srt" {
 		t.Fatalf("untitled sidecar label = %q, want its file name before hiding", items[0].Label)
 	}
+	// A restored plan keeps the labels it was built with; the sidecars may
+	// have changed since.
+	restored := slices.Clone(items)
 
 	HideSidecarFileNamesV3(items, file)
 
-	for i, want := range []string{"en", "es", "Commentary", "Signs"} {
+	for i, want := range []string{"en", "es", "Commentary", "en 2", "Signs"} {
 		if items[i].Label != want {
 			t.Errorf("item %d label = %q, want %q", i, items[i].Label, want)
+		}
+	}
+
+	HideSidecarFileNamesV3(restored, &models.MediaFile{ID: 42})
+	for i, item := range restored[:4] {
+		if strings.Contains(item.Label, ".srt") {
+			t.Errorf("restored item %d label = %q after its sidecars changed, want no file name", i, item.Label)
 		}
 	}
 }

@@ -408,8 +408,9 @@ signed query strings are preserved without decoding or re-encoding.
 An external subtitle whose only title is its file name is labeled by that
 name only for a viewer who may see file names (see
 [File paths and names](catalog-api.md#file-paths-and-names)). Everyone else
-gets its embedded title or language as the `label`, as an untitled embedded
-track does.
+gets its embedded title or language as the `label`, numbered like the catalog
+title when several share a language, format and flags. Realtime subtitle
+events never label a sidecar by its file name, for any viewer.
 
 ## Revocation
 
