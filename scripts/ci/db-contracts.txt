@@ -114,6 +114,15 @@
 # marks its files missing and removes the title from the library.
 ./internal/scanner TestScanSubtreeReconcilesDeletedTitleFolderDB
 
+# A full scan that holds a few files at a time catalogs a library like one that
+# holds them all: groups and roots spanning batches, a deleted top-level
+# folder, an unreadable folder and a dropped mount.
+./internal/scanner TestFullScanInBatchesCatalogsLikeOneBatchDB
+
+# A batched full scan finds the cataloged rows of extras, which it reads by
+# path after the primary files, instead of taking them for new files.
+./internal/scanner TestFullScanInBatchesFindsCatalogedExtrasDB
+
 # A subtree scan of a deleted book folder reconciles its files, except under a
 # configured root that is now an empty directory (a lost mount).
 ./internal/scanner TestScanSubtreeAudiobookVanishedBookUnderEmptyRootDB
