@@ -20,6 +20,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/collage"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/netguard"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 )
@@ -112,7 +113,8 @@ func personalCollectionPosterURL(ctx context.Context, resolver artworkurl.Resolv
 }
 
 // readCollectionImageMultipart reads a single image file from a multipart
-// request, validating MIME type and size.
+// request, validating MIME type and size. A part of another type or over the
+// size limit is the caller's 400.
 func readCollectionImageMultipart(r *http.Request, fieldName string) ([]byte, error) {
 	file, header, err := r.FormFile(fieldName)
 	if err != nil {
@@ -123,10 +125,10 @@ func readCollectionImageMultipart(r *http.Request, fieldName string) ([]byte, er
 	switch header.Header.Get("Content-Type") {
 	case "image/jpeg", "image/png", "image/webp":
 	default:
-		return nil, fmt.Errorf("unsupported image type: %s", header.Header.Get("Content-Type"))
+		return nil, invalidCollectionImage("Unsupported image type; use JPEG, PNG, or WebP.", nil)
 	}
 	if header.Size > collectionImageMaxBytes {
-		return nil, fmt.Errorf("file exceeds 10 MB limit")
+		return nil, invalidCollectionImage("The image exceeds the 10 MB limit.", nil)
 	}
 
 	data := make([]byte, header.Size)
@@ -142,13 +144,32 @@ func invalidCollectionImage(message string, cause error) *APIError {
 	return &APIError{Status: http.StatusBadRequest, Code: policyErrorBadRequest, Message: message, cause: cause}
 }
 
-// collectionArtworkError keeps a client-facing artwork error and hides any
-// other failure behind a 500 with the given message.
-func collectionArtworkError(err error, message string) error {
+// collectionArtworkError answers a failed personal collection poster by its
+// cause. A client-facing error passes through unchanged. A server too busy to
+// decode the image answers as a busy avatar upload does, and a source address
+// the server will not fetch keeps its one fixed answer. Any other failure is
+// the server's: its cause goes to the log, and the client gets a 500 that
+// says nothing about the store or the source behind it. It takes no message,
+// so no caller can put error text in the answer. collectionID is empty when
+// the collection does not exist yet.
+func collectionArtworkError(ctx context.Context, collectionID string, err error) error {
 	if apiErr, ok := errors.AsType[*APIError](err); ok && apiErr.Status < http.StatusInternalServerError {
 		return apiErr
 	}
-	return apiError(http.StatusInternalServerError, "internal_error", message)
+	if errors.Is(err, imageutil.ErrBusy) {
+		return apiError(http.StatusServiceUnavailable, "unavailable", "Image processing is busy; try again shortly").WithCause(imageutil.ErrBusy)
+	}
+	if errors.Is(err, errCollectionImageSourceNotAllowed) {
+		return apiError(http.StatusInternalServerError, "internal_error", "poster source: "+errCollectionImageSourceNotAllowed.Error())
+	}
+	// A request the client ended is not a failure to report. A failed
+	// download names the source URL, which can carry a credential in its
+	// query or path, so the URL is reduced before the text is logged.
+	if !errors.Is(err, context.Canceled) {
+		slog.ErrorContext(ctx, "collection artwork: saving a poster failed", "component", "api",
+			"collection_id", collectionID, "error", logredact.SanitizeText(logredact.SanitizeURLError(err).Error()))
+	}
+	return apiError(http.StatusInternalServerError, "internal_error", "Failed to store collection artwork")
 }
 
 // downloadCollectionImageURL fetches an image from an http(s) URL with size
@@ -256,38 +277,69 @@ func putCollectionImageVariants(
 	if store == nil {
 		return "", "", fmt.Errorf("image upload requires configured S3 storage")
 	}
+	variants, err := generateCollectionImageVariants(fileData, widths)
+	if err != nil {
+		return "", "", err
+	}
+	s3Path, err = storeCollectionImageVariants(ctx, store, basePath, revision, variants)
+	if err != nil {
+		return "", "", err
+	}
+	return s3Path, variants.thumbhash, nil
+}
+
+// collectionImageVariants is collection artwork decoded into the variants to
+// store, with a thumbhash of the w300 variant.
+type collectionImageVariants struct {
+	result    *imageutil.VariantResult
+	thumbhash string
+}
+
+// generateCollectionImageVariants decodes fileData into the original and the
+// given resized variants and computes the thumbhash. Every decode happens
+// here and nothing is stored, so a caller can refuse an image before it
+// writes anything.
+func generateCollectionImageVariants(fileData []byte, widths []int) (*collectionImageVariants, error) {
 	// Bytes libvips cannot read, and JPEG or PNG pixel data that does not
 	// decode, are the caller's artwork problem; any other failure stays a
 	// server error.
 	result, err := imageutil.GenerateVariants(fileData, widths)
 	if err != nil && imageutil.SourceUnusable(err, fileData) {
-		return "", "", invalidCollectionImage("The file is not a supported image.", err)
+		return nil, invalidCollectionImage("The file is not a supported image.", err)
 	}
 	if err != nil {
-		return "", "", fmt.Errorf("generating image variants: %w", err)
+		return nil, fmt.Errorf("generating image variants: %w", err)
 	}
-
-	var w300Data []byte
+	variants := &collectionImageVariants{result: result}
 	for _, v := range result.Variants {
-		key := artworkkey.Build(basePath, v.Key, revision, result.Ext)
-		if err := store.Put(ctx, key, v.Data); err != nil {
-			return "", "", fmt.Errorf("uploading %s: %w", v.Key, err)
+		if v.Key == "w300" && len(v.Data) > 0 {
+			variants.thumbhash, err = imageutil.Thumbhash(v.Data)
+			if err != nil {
+				return nil, fmt.Errorf("computing thumbhash: %w", err)
+			}
 		}
-		if v.Key == "w300" {
-			w300Data = v.Data
+	}
+	return variants, nil
+}
+
+// storeCollectionImageVariants uploads generated variants as
+// basePath/{variant}.{revision}.{ext} and returns the original's key.
+func storeCollectionImageVariants(
+	ctx context.Context,
+	store blobstore.Store,
+	basePath, revision string,
+	variants *collectionImageVariants,
+) (s3Path string, err error) {
+	for _, v := range variants.result.Variants {
+		key := artworkkey.Build(basePath, v.Key, revision, variants.result.Ext)
+		if err := store.Put(ctx, key, v.Data); err != nil {
+			return "", fmt.Errorf("uploading %s: %w", v.Key, err)
 		}
 		if v.Key == "original" {
 			s3Path = key
 		}
 	}
-
-	if len(w300Data) > 0 {
-		thumbhashStr, err = imageutil.Thumbhash(w300Data)
-		if err != nil {
-			return "", "", fmt.Errorf("computing thumbhash: %w", err)
-		}
-	}
-	return s3Path, thumbhashStr, nil
+	return s3Path, nil
 }
 
 // collectionImageRevision derives a short content revision for artwork keys.

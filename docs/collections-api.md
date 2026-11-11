@@ -77,10 +77,33 @@ own network (loopback, a private or link-local range, or a name that resolves to
 one reached through a redirect, fails the poster with one fixed error. See
 [Outbound address guard](architecture/outbound-address-guard.md#collection-artwork).
 
-`uploadCollectionPoster` answers `422 validation_failed` for a poster it cannot use and keeps the
-stored one: an image libvips cannot read, whether uploaded or linked; a JPEG or PNG of up to 4
-megapixels whose pixel data does not decode; and a `source_url` with no http(s) host, an answer
-other than `200`, or more than 10 MiB. Other processing failures stay `500`.
+The server reads and decodes a poster before it writes anything. `uploadCollectionPoster`, and
+`createCollection` with a `poster_source_url`, answer a poster that fails by its cause:
+
+- `422 validation_failed` for a poster the server cannot use: an image libvips cannot read,
+  whether uploaded or linked; a JPEG or PNG of up to 4 megapixels whose pixel data does not
+  decode; and a `source_url` or `poster_source_url` with no http(s) host, an answer other than
+  `200`, or more than 10 MiB.
+- `503 dependency_unavailable` with `Retry-After` when the server is too busy to decode another
+  image. The poster may be fine; send the request again.
+- `500 internal_error` for any other failure, such as a source that could not be reached or a
+  storage error. The answer carries no detail; the server logs the cause, with any credential
+  in the source URL removed.
+
+A poster that fails before it is stored creates and changes nothing: `createCollection` creates
+no collection, so repeating the request cannot leave two, and `uploadCollectionPoster` keeps the
+stored poster. A poster that decoded but could not be written is the one failure left after
+`createCollection` has stored the collection: the answer is `500` and the collection exists
+without the poster.
+
+The `/api/v1` bridge takes a poster on `POST /api/v1/collections` and
+`PUT /api/v1/collections/{id}`, as a multipart `poster` part or a `poster_source_url`, and
+follows the same order: a poster that fails before it is stored creates or changes nothing. It
+answers `400 bad_request` for a poster the server cannot use, including a part that is not
+JPEG, PNG or WebP or is over 10 MB; `503 unavailable` when the server is too busy to decode it;
+and `500 internal_error` with a fixed message otherwise. Other fields are checked first, so a
+request with a poster and an invalid field answers for the field, and the poster is neither
+decoded nor fetched.
 
 An import's `poster_url` is a bundled template poster path (`/images/collection-templates/...`)
 or an http(s) image URL. Any other value answers `422 validation_failed` at `body.poster_url`
