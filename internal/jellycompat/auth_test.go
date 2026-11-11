@@ -7,8 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -91,29 +94,44 @@ func TestPlaybackSessionAuth_DefaultLifetime(t *testing.T) {
 
 // A PlaySessionId-only media request whose play session cannot be read from
 // the store answers a retryable 503, not a 401 that reads as a revoked grant
-// (#2923). The replica that cached the session keeps serving it.
+// (#2923). The replica that cached the session keeps serving it, and a static
+// stream that a cached same-address negotiation grants is still served.
 func TestPlaybackSessionAuth_PlaySessionStoreUnavailable(t *testing.T) {
+	const (
+		master = "/Videos/itm/master.m3u8?PlaySessionId=ps-abc"
+		static = "/Videos/itm/stream?static=true&mediaSourceId=src9&PlaySessionId=ps-abc"
+	)
 	sessions := NewSessionStore(30*24*time.Hour, nil)
 	_ = sessions.Put(Session{Token: "compat-tok", StreamAppUserID: 1})
 	pool := newUnreachableCompatPool(t)
 	warm := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
 	warm.Put(PlaybackSession{ID: "ps-abc", CompatToken: "compat-tok", RouteItemID: "itm"})
 	cold := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	coldWithGrant := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	coldWithGrant.Put(PlaybackSession{
+		ID: "ps-live", CompatToken: "compat-tok", RouteItemID: "itm",
+		ClientIP: "192.0.2.1", ClientPeer: "192.0.2.1", MediaSources: []PlaybackMediaSource{{ID: "src9"}},
+	})
 
 	for _, tc := range []struct {
 		name     string
 		store    CompatPlaybackStore
+		path     string
 		wantCode int
 	}{
-		{"replica holding the session", warm, http.StatusOK},
-		{"replica without the session", cold, http.StatusServiceUnavailable},
+		{"replica holding the session", warm, master, http.StatusOK},
+		{"replica without the session", cold, master, http.StatusServiceUnavailable},
+		{"static stream without a grant", cold, static, http.StatusServiceUnavailable},
+		{"static stream granted by a cached negotiation", coldWithGrant, static, http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			req := requestWithCompatRouteItem(httptest.NewRequest("GET", "/Videos/itm/master.m3u8?PlaySessionId=ps-abc", nil), "itm")
+			ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+			router := chi.NewRouter()
+			guarded := router.With(PlaybackSessionAuth(sessions, tc.store, nil))
+			guarded.Handle("/Videos/{id}/master.m3u8", ok)
+			guarded.Handle("/Videos/{id}/stream", ok)
 			rec := httptest.NewRecorder()
-			PlaybackSessionAuth(sessions, tc.store, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(http.StatusOK)
-			})).ServeHTTP(rec, req)
+			clientip.Middleware(clientip.NewResolver(nil))(router).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
 			if rec.Code != tc.wantCode {
 				t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tc.wantCode, rec.Body.String())
 			}
