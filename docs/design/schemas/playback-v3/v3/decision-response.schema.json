@@ -403,6 +403,11 @@
         },
         "header_refresh_url": {
           "type": "string"
+        },
+        "parallel_range_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "The same API stream on the admin's media origin, with the same query as url. Present only for an attempt that a login session started and that sent client feature parallel_range_origin_v1, on an API-served original_http plan, while server.web_media_url is set. Its st alone authorizes each range request."
         }
       },
       "additionalProperties": true

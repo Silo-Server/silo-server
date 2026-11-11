@@ -245,7 +245,9 @@ func TestPlaybackHLSDeliveryAnswersCrossOrigin(t *testing.T) {
 	requireCORS("gone segment", gone)
 
 	// Scope: other delivery and JSON operations keep the same-origin default.
-	for _, path := range []string{Prefix + "/stream/" + deliveryTestSession + "?st=opaque", Prefix + "/libraries"} {
+	// The original-file stream route has its own cross-origin rule
+	// (TestPlaybackMediaCORSV2).
+	for _, path := range []string{Prefix + "/stream/" + deliveryTestSession + "/subtitles/0/fonts?st=opaque", Prefix + "/libraries"} {
 		if rec := do(t, h, http.MethodGet, path, "", viewer); rec.Header().Get("Access-Control-Allow-Origin") != "" {
 			t.Fatalf("%s gained CORS: %d %v", path, rec.Code, rec.Header())
 		}
@@ -401,5 +403,51 @@ func TestPlaybackDecisionV2PublishesTheActiveQuality(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), `"active_quality":"1080p-low"`) {
 		t.Fatalf("v2 plan must carry active_quality: %s", raw)
+	}
+}
+
+// The web player stripes direct play on a separate media origin, so its range
+// reads are cross-origin: they need the CORS headers on every answer, an
+// unauthenticated preflight included, and sibling routes must not gain them.
+func TestPlaybackMediaCORSV2(t *testing.T) {
+	deps, _ := catalogDeps(t)
+	deps.PlaybackMedia = &PlaybackMediaHandlers{Original: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "video/mp4")
+		http.ServeContent(w, r, "fixture.mp4", time.Time{}, strings.NewReader("0123456789"))
+	})}
+	h := newTestHandler(t, deps)
+	stream := Prefix + "/stream/" + deliveryTestSession
+	origin := map[string]string{"Origin": "https://app.example.test"}
+
+	preflight := do(t, h, http.MethodOptions, stream, "", with(with(origin, "Access-Control-Request-Method", "GET"), "Access-Control-Request-Headers", "range"))
+	if preflight.Code != http.StatusNoContent ||
+		preflight.Header().Get("Access-Control-Allow-Origin") != "*" ||
+		preflight.Header().Get("Access-Control-Allow-Methods") != "GET, HEAD, OPTIONS" ||
+		preflight.Header().Get("Access-Control-Allow-Headers") != "Range" ||
+		preflight.Header().Get("Access-Control-Allow-Credentials") != "" {
+		t.Fatalf("preflight: %d %v", preflight.Code, preflight.Header())
+	}
+
+	ranged := do(t, h, http.MethodGet, stream+"?st=opaque&token="+memberToken, "", with(origin, "Range", "bytes=2-4"))
+	if ranged.Code != http.StatusPartialContent || ranged.Body.String() != "234" ||
+		ranged.Header().Get("Access-Control-Allow-Origin") != "*" ||
+		!strings.Contains(ranged.Header().Get("Access-Control-Expose-Headers"), "Content-Range") ||
+		ranged.Header().Get("Access-Control-Allow-Credentials") != "" {
+		t.Fatalf("range read: %d %q %v", ranged.Code, ranged.Body.String(), ranged.Header())
+	}
+
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		denied := do(t, h, method, stream+"?st=opaque", "", origin)
+		if denied.Code != http.StatusUnauthorized ||
+			denied.Header().Get("Access-Control-Allow-Origin") != "*" ||
+			!strings.Contains(denied.Header().Get("Access-Control-Expose-Headers"), "Content-Range") ||
+			denied.Header().Get("Access-Control-Allow-Credentials") != "" {
+			t.Fatalf("%s refused with no credential: a gate error must stay readable to the page: %d %v", method, denied.Code, denied.Header())
+		}
+	}
+
+	sibling := do(t, h, http.MethodOptions, stream+"/subtitles/0.vtt", "", origin)
+	if sibling.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("CORS reached a sibling route: %d %v", sibling.Code, sibling.Header())
 	}
 }

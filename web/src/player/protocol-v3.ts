@@ -431,6 +431,8 @@ export interface StreamV3 {
   headers: Record<string, string>;
   header_refresh: HeaderRefreshModeV3;
   header_refresh_url?: string;
+  /** The same stream on the admin's media origin; with `st` it needs no login token, without it the client adds one. */
+  parallel_range_url?: string;
 }
 
 export interface TimelineV3 {

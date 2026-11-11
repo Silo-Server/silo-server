@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -53,6 +54,45 @@ func TestHoldKeepsSessionUntilLastOverlappingRequestEnds(t *testing.T) {
 	}
 	if redisStub.exists(tracker.redisKey(info.SessionID)) {
 		t.Fatal("session record kept in Redis after its last request ended")
+	}
+}
+
+// A direct-play stream arrives as a series of range requests with gaps
+// between them. The last release of a lingering hold must keep the session
+// counted and its record in Redis until sessionTTL passes with no new request.
+func TestHoldLingeringKeepsSessionThroughGapBetweenRequests(t *testing.T) {
+	redisStub := startRedisStub(t)
+	tracker := NewTracker(redisStub.client(t), "http://proxy-a", "proxy-a", "proxy")
+	ctx := context.Background()
+	info := SessionInfo{SessionID: "play-1", Type: "direct_play"}
+	key := tracker.redisKey(info.SessionID)
+
+	for range 2 {
+		release := tracker.HoldLingering(ctx, info)
+		release(ctx)
+		if got := tracker.ActiveCount(); got != 1 {
+			t.Fatalf("ActiveCount in the gap after a request = %d, want 1", got)
+		}
+		tracker.refreshAll(ctx)
+		if !redisStub.exists(key) {
+			t.Fatal("session record deleted from Redis in the gap after a request")
+		}
+	}
+
+	// A replan to HLS on the same proxy keeps the session ID. Its first Touch
+	// must write its own record over the lingering one, as it does after a
+	// plain Hold release.
+	tracker.Touch(ctx, SessionInfo{SessionID: info.SessionID, Type: "transcode"})
+	if got := redisStub.recordType(t, key); got != "transcode" {
+		t.Fatalf("record type after Touch following a lingering release = %q, want %q", got, "transcode")
+	}
+
+	tracker.mu.Lock()
+	tracker.touched[info.SessionID] = time.Now().Add(-sessionTTL - time.Second)
+	tracker.mu.Unlock()
+	tracker.refreshAll(ctx)
+	if got := tracker.ActiveCount(); got != 0 {
+		t.Fatalf("ActiveCount after sessionTTL with no request = %d, want 0", got)
 	}
 }
 
@@ -106,10 +146,14 @@ func TestRefreshRestoresHeldSessionRecord(t *testing.T) {
 // The last release can end a session after refresh has read its record but
 // before refresh's write reaches Redis. That write must not leave the ended
 // session in Redis for another TTL, or replace the record of a request that
-// registered the session again.
+// registered the session again. A lingering last release is the exception: it
+// keeps the session counted and its record.
 func TestRefreshDoesNotRestoreSessionReleasedMidRefresh(t *testing.T) {
 	for _, tc := range []struct {
 		name string
+		// lingerRelease takes the hold with HoldLingering, as a direct-play
+		// request does.
+		lingerRelease bool
 		// touchAfterRelease re-registers the session through Touch, as an
 		// HLS replan on the same proxy does, before the refresh write lands.
 		touchAfterRelease bool
@@ -118,10 +162,13 @@ func TestRefreshDoesNotRestoreSessionReleasedMidRefresh(t *testing.T) {
 		holdAfterRelease bool
 		// wantType is the type of the record left in Redis, or "" for none.
 		wantType string
+		// wantCount is ActiveCount once the refresh finishes.
+		wantCount int
 	}{
 		{name: "released"},
-		{name: "released then touched", touchAfterRelease: true, wantType: "hls"},
-		{name: "released then held again", holdAfterRelease: true, wantType: "remux"},
+		{name: "released then touched", touchAfterRelease: true, wantType: "hls", wantCount: 1},
+		{name: "released then held again", holdAfterRelease: true, wantType: "remux", wantCount: 1},
+		{name: "released lingering", lingerRelease: true, wantType: "direct_play", wantCount: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			redisStub := startRedisStub(t)
@@ -130,7 +177,11 @@ func TestRefreshDoesNotRestoreSessionReleasedMidRefresh(t *testing.T) {
 			info := SessionInfo{SessionID: "play-1", Type: "direct_play"}
 			key := tracker.redisKey(info.SessionID)
 
-			release := tracker.Hold(ctx, info)
+			hold := tracker.Hold
+			if tc.lingerRelease {
+				hold = tracker.HoldLingering
+			}
+			release := hold(ctx, info)
 			redisStub.beforeNextSet(func() {
 				release(ctx)
 				if tc.touchAfterRelease {
@@ -148,6 +199,9 @@ func TestRefreshDoesNotRestoreSessionReleasedMidRefresh(t *testing.T) {
 
 			if got := redisStub.recordType(t, key); got != tc.wantType {
 				t.Fatalf("record type after refresh = %q, want %q", got, tc.wantType)
+			}
+			if got := tracker.ActiveCount(); got != tc.wantCount {
+				t.Fatalf("ActiveCount after refresh = %d, want %d", got, tc.wantCount)
 			}
 		})
 	}

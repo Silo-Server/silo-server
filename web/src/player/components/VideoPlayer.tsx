@@ -2648,8 +2648,21 @@ export function VideoPlayer({
 
   // Read by the transport effect, which reruns on planRevision rather than on
   // every input the original-file route depends on.
-  const originalRouteInputRef = useRef({ plan, browserEngine, nativeOriginalSupport, audioTracks });
-  originalRouteInputRef.current = { plan, browserEngine, nativeOriginalSupport, audioTracks };
+  const getAccessToken = playerConfig.getAccessToken;
+  const originalRouteInputRef = useRef({
+    plan,
+    browserEngine,
+    nativeOriginalSupport,
+    audioTracks,
+    getAccessToken,
+  });
+  originalRouteInputRef.current = {
+    plan,
+    browserEngine,
+    nativeOriginalSupport,
+    audioTracks,
+    getAccessToken,
+  };
 
   // -- hls.js lifecycle --
   useEffect(() => {
@@ -3104,6 +3117,13 @@ export function VideoPlayer({
                 },
                 engine: routeInput.browserEngine,
                 audioTracks: routeInput.audioTracks,
+                accessToken: routeInput.getAccessToken(),
+                navigationProtocol:
+                  (
+                    performance.getEntriesByType?.("navigation")[0] as
+                      | PerformanceNavigationTiming
+                      | undefined
+                  )?.nextHopProtocol ?? "",
               })
             : ({ kind: "native" } as const);
         if (route.kind === "unsupported") {

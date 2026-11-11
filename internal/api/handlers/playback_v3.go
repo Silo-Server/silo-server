@@ -257,6 +257,31 @@ func withNativeDeliveryFeaturesV3(mode mediaAuthModeV3, req playback.StartReques
 	return mode
 }
 
+// setPlanStreamURLsV3 publishes the prepared transport's URL as the plan's
+// stream URL, and, when every condition holds, the same stream on the admin's
+// media origin as stream.parallel_range_url. The URL's st alone authorizes each
+// range request, so the client sends no account token. The stream reference
+// authorizes only an attempt that a login session started (loginBound), so the
+// field appears only for such an attempt that negotiated
+// parallel_range_origin_v1, on an API-served original_http plan, while
+// server.web_media_url is set. Any other attempt reads stream.url.
+func (h *PlaybackHandler) setPlanStreamURLsV3(ctx context.Context, plan *playback.PlanV3, transport preparedTransportV3, clientFeatures []string, loginBound bool) {
+	plan.Stream.URL = transport.url
+	plan.Stream.ParallelRangeURL = ""
+	if !loginBound || h.SettingsRepo == nil ||
+		!playback.HasFeatureV3(clientFeatures, playback.FeatureParallelRangeOriginV1) ||
+		plan.Delivery != playback.DeliveryOriginalHTTPV3 ||
+		transport.routingEgress != noderouting.EgressAPI ||
+		!strings.HasPrefix(transport.url, "/stream/") {
+		return
+	}
+	origin, _ := h.SettingsRepo.Get(ctx, config.WebMediaURLSettingKey)
+	if origin == "" {
+		return
+	}
+	plan.Stream.ParallelRangeURL = origin + "/api/v2" + transport.url
+}
+
 // headerAuthenticatedMediaV3 resolves the negotiated media transport mode from
 // a client's advertised feature set.
 //
@@ -2418,7 +2443,7 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 		abort()
 		return playback.DecisionResponseV3{}, subtitleArtifactErrorV3("Failed to freeze the selected subtitle identity.", frozenErr)
 	}
-	result.Plan.Stream.URL = transport.url
+	h.setPlanStreamURLsV3(r.Context(), result.Plan, transport, req.ClientFeatures, apimw.LoginSessionID(r.Context()) != "")
 	if err := h.attachSubtitleArtifactV3(r.Context(), session.ID, effectiveFile, result.Plan, result.SubtitleTrackIndex, &frozenRecipe, req.ClientFeatures); err != nil {
 		transport.rollback()
 		abort()
@@ -6183,7 +6208,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		// fallible subtitle-identity freeze after authority publication.
 		artifactRecipe.ToneMapMode = result.ToneMapMode
 	}
-	result.Plan.Stream.URL = transport.url
+	h.setPlanStreamURLsV3(r.Context(), result.Plan, transport, start.ClientFeatures, record.LoginSessionID != "")
 	response := playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, ServerFeatures: playback.NativeServerFeaturesV3(), Outcome: playback.OutcomePlayableV3, SessionID: session.ID, PlaybackPlan: result.Plan}
 	updated := *record
 	updated.CurrentPlanID = result.Plan.PlanID

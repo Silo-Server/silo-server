@@ -285,6 +285,12 @@ func ParseBackupTime(value string) (hour, minute int, ok bool) {
 // Read per request, so a change applies without restart.
 const ServerLocalURLSettingKey = "server.local_url"
 
+// WebMediaURLSettingKey is an optional https origin that serves the same API
+// over HTTP/1.1 only. The web player stripes direct-play range reads across it
+// (parallel_range_url in the playback plan); the URL's st authorizes each range.
+// Empty is off. Read per request, so a change applies without restart.
+const WebMediaURLSettingKey = "server.web_media_url"
+
 // External sign-in settings (docs/architecture/external-sign-in.md).
 const (
 	// AuthLocalPasswordLoginSettingKey turns local password sign-in on or off
@@ -388,6 +394,7 @@ var adminSettingDefaults = map[string]string{
 
 	ServerLANDiscoverySettingKey:              "true",
 	ServerLocalURLSettingKey:                  "",
+	WebMediaURLSettingKey:                     "",
 	AuthLocalPasswordLoginSettingKey:          "true",
 	AuthEmailAutoMatchSettingKey:              "false",
 	AuthUserAPIKeysSettingKey:                 "false",
@@ -1005,6 +1012,8 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminURL(key, value)
 	case ServerLocalURLSettingKey:
 		return normalizeLocalURL(value)
+	case WebMediaURLSettingKey:
+		return normalizeWebMediaURL(value)
 	case "redis.url":
 		return NormalizeRedisURL(value)
 	case RedisDBSettingKey:
@@ -1510,18 +1519,38 @@ func normalizeAdminEnum(key, value string, allowed ...string) (string, error) {
 // normalizeLocalURL accepts an http(s) origin: clients reach the API at its
 // root, and the connections document publishes origins only.
 func normalizeLocalURL(value string) (string, error) {
-	normalized, err := normalizeAdminURL(ServerLocalURLSettingKey, value)
+	return normalizeOriginURL(ServerLocalURLSettingKey, value)
+}
+
+// normalizeWebMediaURL accepts an https origin: an HTTPS page cannot fetch
+// plain HTTP, and the login token travels to this origin.
+func normalizeWebMediaURL(value string) (string, error) {
+	normalized, err := normalizeOriginURL(WebMediaURLSettingKey, value)
+	if err != nil || normalized == "" {
+		return normalized, err
+	}
+	if !strings.HasPrefix(normalized, "https://") {
+		return "", fmt.Errorf("%s must use https", WebMediaURLSettingKey)
+	}
+	return normalized, nil
+}
+
+// normalizeOriginURL accepts an http(s) origin and returns it as scheme://host,
+// so a stray "?" or "#" with nothing after it never reaches a URL built from it.
+// Empty is accepted as off.
+func normalizeOriginURL(key, value string) (string, error) {
+	normalized, err := normalizeAdminURL(key, value)
 	if err != nil || normalized == "" {
 		return normalized, err
 	}
 	parsed, err := url.Parse(normalized)
 	if err != nil {
-		return "", fmt.Errorf("%s must include a URL scheme and host", ServerLocalURLSettingKey)
+		return "", fmt.Errorf("%s must include a URL scheme and host", key)
 	}
 	if parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.User != nil {
-		return "", fmt.Errorf("%s must be a scheme, host and optional port, such as http://192.168.1.20:8080", ServerLocalURLSettingKey)
+		return "", fmt.Errorf("%s must be a scheme, host and optional port, such as https://media.example.com or http://192.168.1.20:8080", key)
 	}
-	return normalized, nil
+	return parsed.Scheme + "://" + parsed.Host, nil
 }
 
 func normalizeAdminURL(key, value string) (string, error) {

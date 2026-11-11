@@ -52806,6 +52806,10 @@
           "mime_type": {
             "type": "string"
           },
+          "parallel_range_url": {
+            "format": "uri",
+            "type": "string"
+          },
           "protocol": {
             "type": "string"
           },

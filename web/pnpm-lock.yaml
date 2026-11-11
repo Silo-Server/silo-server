@@ -96,7 +96,7 @@ importers:
         specifier: ^0.576.0
         version: 0.576.0(react@19.2.4)
       mediabunny:
-        specifier: ^1.62.1
+        specifier: 1.62.1
         version: 1.62.1
       node-unrar-js:
         specifier: ^2.0.2

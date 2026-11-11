@@ -63,14 +63,32 @@ export function buildPlayerStreamUrl(
   const apiRoot = /^\/api\/v[12]\//.test(streamPath)
     ? apiBaseUrl.replace(/\/api\/v[12]\/?$/, "")
     : apiBaseUrl;
-  const base = `${apiRoot}${streamPath}`;
+  return appendAccessToken(`${apiRoot}${streamPath}`, token);
+}
+
+/**
+ * Prepares the plan's `stream.parallel_range_url`, and nothing else. Use it
+ * only for that field. The server sends it for an attempt that a login session
+ * started, under the negotiated `parallel_range_origin_v1` feature. When the
+ * URL carries `st`, that reference alone authorizes each range request, so no
+ * account token is added; without `st`, the access token is appended. Every
+ * other absolute URL, a proxy node's included, never receives the login token.
+ */
+export function buildParallelRangeUrl(url: string, token: string | null): string {
+  if (new URL(url, "https://placeholder.invalid").searchParams.has("st")) {
+    return url;
+  }
+  return appendAccessToken(url, token);
+}
+
+function appendAccessToken(url: string, token: string | null): string {
   if (!token) {
-    return base;
+    return url;
   }
   const query = new URLSearchParams({ token }).toString();
   // The backend stream URL may already carry its own query string (e.g. the
   // `?st=<streamtoken>` reconstruct token for integrated-mode direct/remux).
   // Join with `&` in that case so we don't clobber it into `st=X?token=Y`.
-  const separator = base.includes("?") ? "&" : "?";
-  return `${base}${separator}${query}`;
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}${query}`;
 }

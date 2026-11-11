@@ -782,7 +782,8 @@ func (s *Server) serveDirectPlayClaims(w http.ResponseWriter, r *http.Request, c
 	attachStream(r.Context(), claims)
 	noteDelivery(r, claims)
 	info := sessionInfo(s.tracker, claims, "direct_play")
-	release := s.tracker.Hold(r.Context(), info)
+	// A striping player plays one file through many short range requests.
+	release := s.tracker.HoldLingering(r.Context(), info)
 	defer release(context.WithoutCancel(r.Context()))
 
 	// Serve through the same path the integrated server uses rather than a bare

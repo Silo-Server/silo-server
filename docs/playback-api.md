@@ -407,13 +407,32 @@ byte is a v2 problem; a failure after it ends the stream. A stopped, expired or
 terminated session answers `410 playback_session_ended`. A subtitle sidecar the
 node has no room to read yet answers `503` with `Retry-After`; retry it then.
 
-The HLS manifest and segment answers, refusals included, carry
-`Access-Control-Allow-Origin: *` with `Range` allowed and the range and
-validator headers exposed, so a player on another origin, such as a Google Cast
-receiver, can read them. Subtitle sidecars send the same wildcard from their
-handler. The wildcard never comes with `Access-Control-Allow-Credentials`, and
-the API answers no `OPTIONS` preflight. Cast receivers fetch playlists and
-segments with plain GETs and have not been seen to send one.
+A plan may carry `stream.parallel_range_url`, the same stream on the media origin
+the administrator set in `server.web_media_url`. It appears only for an attempt
+that a login session started and that sent client feature
+`parallel_range_origin_v1`, on an API-served `original_http` plan, and is
+omitted otherwise. A client that negotiated `parallel_range_origin_v1` reads the
+file from `parallel_range_url` when the plan has one, as parallel closed ranges.
+When that URL carries `st`, the reference alone authorizes each range request
+and the client sends no account token; when it carries no `st`, the client sends
+its account access token. A plan without `parallel_range_url` is read from
+`stream.url`. `stream.url` stays valid; a client may also read the warm head,
+overflow ranges, or a natively played file from it.
+
+Three kinds of response are readable from another origin. Each carries
+`Access-Control-Allow-Origin: *` and no `Access-Control-Allow-Credentials`:
+
+- The original-file stream, `GET` and `HEAD` on `/api/v2/stream/{session_id}`,
+  refusals included, with `Range` allowed and `Content-Range` exposed. The web player reads it from
+  the media origin. The `OPTIONS` preflight answers `204` before any
+  credential is read, with `GET, HEAD, OPTIONS` and the `Range` header allowed.
+- The HLS manifest and segment answers, refusals included, with `Range` allowed
+  and the range and validator headers exposed, so a player such as a Google Cast receiver can
+  read them. The API answers no `OPTIONS` preflight there; Cast receivers
+  fetch playlists and segments with plain GETs and have not been seen to send
+  one.
+- Subtitle sidecars, from their handler. A refusal before the handler runs
+  carries no CORS header.
 
 Subtitle inventory URLs in v2 playback responses use the `/api/v2/stream/`
 mount, including relative `/stream/` values produced by the shared inventory

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPlayerStreamUrl } from "./stream-url";
+import { buildParallelRangeUrl, buildPlayerStreamUrl } from "./stream-url";
 
 describe("buildPlayerStreamUrl", () => {
   it("preserves a server-anchored seek param instead of synthesizing one", () => {
@@ -63,3 +63,38 @@ it.each(["/api/v1", "/api/v2", "https://silo.example.test/base/api/v1"])(
     ).toBe("https://proxy.example.test/stream/opaque?st=a%2Bb");
   },
 );
+
+it("appends the token to a path that already carries st", () => {
+  expect(buildPlayerStreamUrl("/api/v1", "/api/v2/stream/session?st=opaque", "access")).toBe(
+    "/api/v2/stream/session?st=opaque&token=access",
+  );
+});
+
+describe("buildParallelRangeUrl", () => {
+  it.each([
+    [
+      "https://media.example.test/api/v2/stream/s?st=x",
+      "https://media.example.test/api/v2/stream/s?st=x",
+    ],
+    [
+      "https://media.example.test/api/v2/stream/s?seek=1&st=x",
+      "https://media.example.test/api/v2/stream/s?seek=1&st=x",
+    ],
+    [
+      "https://media.example.test/api/v2/stream/s",
+      "https://media.example.test/api/v2/stream/s?token=access",
+    ],
+    [
+      "https://media.example.test/api/v2/stream/s?seek=1",
+      "https://media.example.test/api/v2/stream/s?seek=1&token=access",
+    ],
+  ])("adds the token only when %s has no st", (url, expected) => {
+    expect(buildParallelRangeUrl(url, "access")).toBe(expected);
+  });
+
+  it("adds no token when there is none", () => {
+    expect(buildParallelRangeUrl("https://media.example.test/api/v2/stream/s", null)).toBe(
+      "https://media.example.test/api/v2/stream/s",
+    );
+  });
+});

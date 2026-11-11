@@ -65,6 +65,16 @@ const (
 	// origin, so every byte egresses from the API server; with it the plan may
 	// hand out credential-free proxy origins and distributed egress is restored.
 	FeatureAuthorizedMediaOriginsV3 = "authorized_media_origins_v1"
+	// FeatureParallelRangeOriginV1 is the client's promise to read the file from
+	// the plan's stream.parallel_range_url when the plan has one. The server
+	// sends it only for an attempt started by a login session. When that URL
+	// carries st, the reference alone authorizes each range request and the
+	// client sends no account token; when it carries no st, the client sends its
+	// account access token. A plan without parallel_range_url is read from
+	// stream.url. stream.url stays valid; a client may also read the warm head,
+	// overflow ranges, or a natively played file from it. Without the feature
+	// the plan carries no such field.
+	FeatureParallelRangeOriginV1 = "parallel_range_origin_v1"
 	// FeaturePlanInvalidatedV3 is the client's promise to handle the realtime
 	// plan_invalidated command: ack it, replan off the named plan with operation
 	// failure_recovery and the invalidated plan's attempt key in
@@ -327,7 +337,7 @@ func ServerFeaturesV3() []string {
 // advertises and honors only on /api/v2. They postdate the /api/v1 freeze, so
 // the frozen surface neither advertises nor negotiates them.
 func NativeServerFeaturesV3() []string {
-	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3, FeatureHLSRemuxSubtitleRenditionsV3, FeatureHLSCopyMPEGTSV3, FeatureHLSVariableSubstitutionV3, FeatureCodecChannelCeilingsV3, FeatureNativeEmbeddedLimitationsV3, FeatureHLSSubtitleRenditionsAllV3, FeatureProgressiveRangeRefusalV3)
+	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3, FeatureHLSRemuxSubtitleRenditionsV3, FeatureHLSCopyMPEGTSV3, FeatureHLSVariableSubstitutionV3, FeatureCodecChannelCeilingsV3, FeatureNativeEmbeddedLimitationsV3, FeatureHLSSubtitleRenditionsAllV3, FeatureProgressiveRangeRefusalV3, FeatureParallelRangeOriginV1)
 }
 
 // HLSVariableSubstitutionV3 reports whether the request's hls delivery
@@ -991,6 +1001,11 @@ type StreamV3 struct {
 	Headers          map[string]string   `json:"headers"`
 	HeaderRefresh    HeaderRefreshModeV3 `json:"header_refresh"`
 	HeaderRefreshURL string              `json:"header_refresh_url,omitempty" format:"uri-reference"`
+	// ParallelRangeURL is the same API stream on the admin's media origin, for a
+	// client that negotiated parallel_range_origin_v1, on an attempt started by a
+	// login session. It carries the same query as URL, st included, which alone
+	// authorizes each range request.
+	ParallelRangeURL string `json:"parallel_range_url,omitempty" format:"uri"`
 }
 
 type TimelineV3 struct {

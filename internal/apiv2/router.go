@@ -540,6 +540,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	r.Use(joinPreconditionFields)
 	r.Use(rejectMalformedDeviceHeader)
 	r.Use(withRequest)
+	r.Use(playbackMediaCORS)
 	if deps.ActingAdmin != nil {
 		r.Use(apimw.ProvideActingAdmin(deps.ActingAdmin))
 	}

@@ -34997,6 +34997,8 @@ export interface components {
         [key: string]: string;
       };
       mime_type?: string;
+      /** Format: uri */
+      parallel_range_url?: string;
       protocol: string;
       /** Format: uri-reference */
       url: string;

@@ -1,5 +1,6 @@
 import type { FailureV3, PlanV3 } from "../protocol-v3";
 import type { PlayerAudioTrack } from "../types";
+import { buildParallelRangeUrl } from "../stream-url";
 import type { EngineCapabilities } from "./capabilities";
 import type { EngineSourceSpec, EngineTransfer } from "./source";
 
@@ -63,6 +64,38 @@ export function engineTransferForPlan(plan: PlanV3): EngineTransfer | null {
   }
 }
 
+function isAbsoluteUrl(url: string): boolean {
+  return url.startsWith("http://") || url.startsWith("https://");
+}
+
+/**
+ * The URL the engine stripes range reads on, or undefined for the stock
+ * source. First match wins:
+ *
+ * 1. The server named a media origin: stripe on it. The URL's `st` authorizes
+ *    each range, so the login token is added only when the URL has no `st`.
+ * 2. `streamUrl` is on the page's own origin (relative) and the page itself
+ *    came over HTTP/1.1, where parallel connections are real.
+ * 3. `streamUrl` is absolute, so it is a proxy node's URL. It is used as the
+ *    server issued it, and the login token never goes to a node.
+ *
+ * Anything else, including a page served over HTTP/2 or HTTP/3, does not
+ * stripe: there is one connection to share.
+ */
+function parallelRangeUrlFor(
+  plan: PlanV3,
+  streamUrl: string,
+  accessToken: string | null,
+  navigationProtocol: string,
+): string | undefined {
+  if (plan.stream.parallel_range_url) {
+    return buildParallelRangeUrl(plan.stream.parallel_range_url, accessToken);
+  }
+  if (isAbsoluteUrl(streamUrl)) return streamUrl;
+  if (navigationProtocol === "http/1.1") return streamUrl;
+  return undefined;
+}
+
 function unsupported(message: string): OriginalPlaybackRoute {
   return { kind: "unsupported", failure: { classification: ENGINE_UNSUPPORTED_SOURCE, message } };
 }
@@ -83,8 +116,18 @@ export function resolveOriginalPlaybackRoute(input: {
   native: NativeOriginalSupport;
   engine: EngineCapabilities | null;
   audioTracks: readonly PlayerAudioTrack[];
+  /** The login token, for a server-named media origin whose URL has no `st`. */
+  accessToken?: string | null;
+  /** The page navigation's `nextHopProtocol`; empty when the browser gives none. */
+  navigationProtocol?: string;
 }): OriginalPlaybackRoute {
   const { plan, streamUrl, native, engine, audioTracks } = input;
+  const parallelRangeUrl = parallelRangeUrlFor(
+    plan,
+    streamUrl,
+    input.accessToken ?? null,
+    input.navigationProtocol ?? "",
+  );
   const container = lower(plan.source.container || plan.stream.container);
   const videoCodec = lower(plan.effective_recipe.video_codec || plan.source.video_codec);
   const audioCodec = lower(plan.effective_recipe.audio_codec || plan.source.audio_codec);
@@ -128,6 +171,7 @@ export function resolveOriginalPlaybackRoute(input: {
     kind: "engine",
     source: {
       url: streamUrl,
+      ...(parallelRangeUrl ? { parallelRangeUrl } : {}),
       headers: plan.stream.headers ?? {},
       container,
       durationSeconds: plan.source.duration_seconds ?? null,
