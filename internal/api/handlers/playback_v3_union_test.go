@@ -320,7 +320,7 @@ func TestProgressivePlanningCapabilitiesV3RequireRelayAndAuthorityForTranscodeEx
 func TestIncompleteToneMapPlanningBecomesRetryableStartFailure(t *testing.T) {
 	for _, reason := range []string{
 		playback.TerminalHDRTranscodeUnsupportedV3,
-		terminalSubtitleConversionUnsupportedV3,
+		playback.TerminalSubtitleConversionUnsupportedV3,
 	} {
 		result := playback.PlannerResultV3{Terminal: &playback.TerminalV3{Reason: reason}}
 
@@ -332,18 +332,26 @@ func TestIncompleteToneMapPlanningBecomesRetryableStartFailure(t *testing.T) {
 	}
 }
 
+// Which refusals a setting decided is the planner's answer
+// (SettingsDependentRefusal); this covers what the handler does with it.
 func TestIncompletePlaybackSettingsMakePolicyTerminalsRetryable(t *testing.T) {
-	tests := []playback.TerminalV3{
-		{Reason: playback.TerminalHDRTranscodeUnsupportedV3, Message: "HDR unavailable"},
-		{Reason: terminalSubtitleConversionUnsupportedV3, Message: "The selected subtitle must be burned into the video, but this HDR source cannot be re-encoded."},
-		{Reason: terminalSubtitleConversionUnsupportedV3, Message: "The selected subtitle must be burned into the video, but 4K transcoding is disabled."},
-		{Reason: terminalNoAlternateVersionV3, Message: playback.TerminalMessage4KTranscodeDisabledV3},
-	}
-	for _, terminal := range tests {
-		result := retryIncompletePlaybackSettingsV3(playback.PlannerResultV3{Terminal: &terminal}, context.DeadlineExceeded)
-		if result.Terminal == nil || result.Terminal.Reason != transcodeStartFailedReasonV3 || !result.Terminal.Retryable {
-			t.Fatalf("settings terminal %q = %#v, want retryable %q", terminal.Reason, result.Terminal, transcodeStartFailedReasonV3)
+	refusal := func(settingsDependent bool) playback.PlannerResultV3 {
+		return playback.PlannerResultV3{
+			Terminal:                 &playback.TerminalV3{Reason: playback.TerminalNoAlternateVersionV3},
+			SettingsDependentRefusal: settingsDependent,
 		}
+	}
+	result := retryIncompletePlaybackSettingsV3(refusal(true), context.DeadlineExceeded)
+	if result.Terminal == nil || result.Terminal.Reason != transcodeStartFailedReasonV3 || !result.Terminal.Retryable || result.SettingsDependentRefusal {
+		t.Fatalf("settings refusal = %#v, want retryable %q with the marker cleared", result, transcodeStartFailedReasonV3)
+	}
+	// A lower version that serves the quality is refused under the same reason
+	// whatever the settings say.
+	if got := retryIncompletePlaybackSettingsV3(refusal(false), context.DeadlineExceeded); got.Terminal.Reason != playback.TerminalNoAlternateVersionV3 {
+		t.Fatalf("refusal no setting decided became %#v", got.Terminal)
+	}
+	if got := retryIncompletePlaybackSettingsV3(refusal(true), nil); got.Terminal.Reason != playback.TerminalNoAlternateVersionV3 {
+		t.Fatalf("refusal under loaded settings became %#v", got.Terminal)
 	}
 
 	direct := playback.PlannerResultV3{Plan: &playback.PlanV3{Delivery: playback.DeliveryOriginalHTTPV3}}

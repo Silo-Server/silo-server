@@ -1432,39 +1432,25 @@ func (snapshot *hlsPlanningSnapshotV3) capabilityError() error {
 }
 
 func retryIncompleteToneMapPlanningV3(result playback.PlannerResultV3, capabilityErr error) playback.PlannerResultV3 {
-	if capabilityErr == nil || result.Terminal == nil {
+	if capabilityErr == nil || !result.ToneMapDependentRefusal() {
 		return result
 	}
-	switch result.Terminal.Reason {
-	case playback.TerminalHDRTranscodeUnsupportedV3, terminalSubtitleConversionUnsupportedV3:
-	default:
-		return result
-	}
-	result.Terminal = &playback.TerminalV3{
-		Reason:    transcodeStartFailedReasonV3,
-		Message:   "Tone-map capability discovery is temporarily unavailable.",
-		Retryable: true,
-	}
-	return result
+	return retryablePlanningFailureV3(result, "Tone-map capability discovery is temporarily unavailable.")
 }
 
 func retryIncompletePlaybackSettingsV3(result playback.PlannerResultV3, settingsErr error) playback.PlannerResultV3 {
-	if settingsErr == nil || result.Terminal == nil {
+	if settingsErr == nil || result.Terminal == nil || !result.SettingsDependentRefusal {
 		return result
 	}
-	terminal := result.Terminal
-	settingsDependent := terminal.Reason == playback.TerminalHDRTranscodeUnsupportedV3 ||
-		(terminal.Reason == terminalNoAlternateVersionV3 && terminal.Message == playback.TerminalMessage4KTranscodeDisabledV3) ||
-		(terminal.Reason == terminalSubtitleConversionUnsupportedV3 &&
-			(strings.Contains(terminal.Message, "this HDR source") || strings.Contains(terminal.Message, "4K transcoding is disabled")))
-	if !settingsDependent {
-		return result
-	}
-	result.Terminal = &playback.TerminalV3{
-		Reason:    transcodeStartFailedReasonV3,
-		Message:   "Playback settings are temporarily unavailable.",
-		Retryable: true,
-	}
+	return retryablePlanningFailureV3(result, "Playback settings are temporarily unavailable.")
+}
+
+// retryablePlanningFailureV3 replaces a refusal that rests on facts the server
+// could not load with one the client retries. The new refusal names no
+// setting, so the marker goes with the old one.
+func retryablePlanningFailureV3(result playback.PlannerResultV3, message string) playback.PlannerResultV3 {
+	result.Terminal = &playback.TerminalV3{Reason: transcodeStartFailedReasonV3, Message: message, Retryable: true}
+	result.SettingsDependentRefusal = false
 	return result
 }
 
@@ -1503,11 +1489,8 @@ func (h *PlaybackHandler) planPlaybackWithCapabilitiesV3(ctx context.Context, in
 			playback.PlanAttemptKeyV3(*result.Plan, input.Request.ClientPlaybackContext.Output.OutputContextID, nil))
 		result = playback.PlanPlaybackV3(input)
 	}
-	if result.Terminal != nil {
-		switch result.Terminal.Reason {
-		case playback.TerminalHDRTranscodeUnsupportedV3, terminalSubtitleConversionUnsupportedV3:
-			return result, snapshot.capabilityError()
-		}
+	if result.ToneMapDependentRefusal() {
+		return result, snapshot.capabilityError()
 	}
 	return result, nil
 }
@@ -1809,7 +1792,7 @@ func (h *PlaybackHandler) planStartV3(r *http.Request, req playback.StartRequest
 	}
 	result, toneMapCapabilityErr := h.planPlaybackWithCapabilitiesV3(r.Context(), input)
 	var warnings []playback.DegradationWarningV3
-	if req.AllowsAlternateVersions() && terminalAllowsAlternateFileV3(result.Terminal) { //nolint:nestif // existing alternate-version fallback; only its quality condition changed
+	if req.AllowsAlternateVersions() && result.AnotherVersionMayPlay() { //nolint:nestif // existing alternate-version fallback; only its quality condition changed
 		accessFilter := requestAccessFilter(r)
 		if alternates, alternateErr := h.findAlternateFiles(r.Context(), alternateBase, accessFilter); alternateErr == nil {
 			if alternateBase != requestedFile {
@@ -1870,7 +1853,7 @@ func (h *PlaybackHandler) planStartV3(r *http.Request, req playback.StartRequest
 				}
 			}
 			subtitleNotShown := false
-			if result.Terminal != nil && droppedSubtitle != nil && subtitleRefusalV3(result.Terminal) {
+			if droppedSubtitle != nil && result.SubtitleRefusal() {
 				// The planner pinned the requested file's refusal on the
 				// subtitle, and every sibling that plays drops the subtitle
 				// too. Playing the requested file without it keeps its
@@ -5452,7 +5435,7 @@ func (h *PlaybackHandler) planReplanV3(r *http.Request, p replanPlanningV3, star
 		result, toneMapCapabilityErr = h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: start, RequestedFile: p.plannerRequestedFile, EffectiveFile: effectiveFile, LowerVersion: lowerVersionForFileV3(p.lowerVersion, effectiveFile), ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: audioIndex, Settings: p.settings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AttemptedKeys: p.attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile), CueIndexedSubtitleTracks: p.renditionTracks.cueIndexedSubtitleTracks(effectiveFile, start)})
 	}
 	planned := replanPassV3{alternateCandidateV3: alternateCandidateV3{file: effectiveFile, request: start, audioIndex: audioIndex, result: result, toneMapErr: toneMapCapabilityErr}, audioDegraded: audioDegraded}
-	if start.AllowsAlternateVersions() && terminalAllowsAlternateFileV3(result.Terminal) && replanAllowsAlternateFileV3(p.operation) {
+	if start.AllowsAlternateVersions() && result.AnotherVersionMayPlay() && replanAllowsAlternateFileV3(p.operation) {
 		planned.alternateCandidateV3, planned.subtitleDegraded, planned.subtitleNotShown = h.planReplanAlternateV3(r, p, planned.alternateCandidateV3)
 	}
 	return planned, nil
@@ -5555,7 +5538,7 @@ func (h *PlaybackHandler) planReplanAlternateV3(r *http.Request, p replanPlannin
 	}
 	// A held-back requested edition is already the picture the
 	// viewer asked for, so it keeps its place.
-	if result.Terminal != nil && droppedSubtitle != nil && droppedSubtitle.file.ID != p.requestedFile.ID && subtitleRefusalV3(result.Terminal) {
+	if droppedSubtitle != nil && droppedSubtitle.file.ID != p.requestedFile.ID && result.SubtitleRefusal() {
 		// The planner pinned the effective file's refusal on the
 		// subtitle, and every sibling that plays drops the subtitle
 		// too. Playing the effective file without it keeps its
@@ -6837,52 +6820,9 @@ func lowerVersionForFileV3(lower *playback.LowerVersionV3, file *models.MediaFil
 	return &playback.LowerVersionV3{Requested: lower.Requested, Lower: playback.SourceDescriptorFromFileV3(file, 0)}
 }
 
-const (
-	terminalNoAlternateVersionV3            = "no_alternate_version"
-	terminalHDRTranscodeUnsupportedV3       = playback.TerminalHDRTranscodeUnsupportedV3
-	terminalSubtitleConversionUnsupportedV3 = "subtitle_conversion_unsupported"
-	terminalSubtitleUnavailableInVersionV3  = "subtitle_unavailable_in_version"
-	terminalBitratePolicyUnavailableV3      = playback.TerminalBitratePolicyUnavailableV3
-)
-
-// terminalAllowsAlternateFileV3 reports whether a refusal is the kind another
-// version of the same item could satisfy.
-//
-// subtitle_conversion_unsupported belongs here because it is not only a
-// subtitle-format refusal: when a burn-in requirement is the sole trigger of an
-// adaptation the source cannot take, the planner reports the blocker in terms
-// of the subtitle rather than the HDR pipeline or the 4K policy. Those cases
-// used to surface as hdr_transcode_unsupported / no_alternate_version and were
-// the exact reason this gate exists — a bitmap subtitle needing burn-in that an
-// HDR source cannot support while an SDR alternate can. Leaving the new reason
-// out silently retired that fallback and refused playback outright.
-//
-// bitrate_policy_unavailable belongs here for the same reason: it replaces the
-// 4K and HDR refusals of a version that exceeds the stream's bitrate limit, and
-// a lower-bitrate version may fit that limit.
-//
-// source_unreadable belongs here because the refusal is about one damaged
-// file, not the item: a readable version of the same item still plays.
-func terminalAllowsAlternateFileV3(terminal *playback.TerminalV3) bool {
-	if terminal == nil {
-		return false
-	}
-	switch terminal.Reason {
-	case terminalNoAlternateVersionV3, terminalHDRTranscodeUnsupportedV3, terminalSubtitleConversionUnsupportedV3, terminalBitratePolicyUnavailableV3,
-		playback.TerminalSourceUnreadableV3:
-		return true
-	default:
-		return false
-	}
-}
-
-// subtitleRefusalV3 reports a refusal the planner pinned on the selected
-// subtitle: a burn-in that was the only reason for an adaptation the file
-// cannot take, or a subtitle the fidelity policy cannot serve. The file may
-// then play with the subtitle cleared; callers re-plan it to find out.
-func subtitleRefusalV3(terminal *playback.TerminalV3) bool {
-	return terminal != nil && terminal.Reason == terminalSubtitleConversionUnsupportedV3
-}
+// terminalSubtitleUnavailableInVersionV3 is the handler's own refusal of an
+// alternate version that lacks the selected subtitle track.
+const terminalSubtitleUnavailableInVersionV3 = "subtitle_unavailable_in_version"
 
 // planWithoutSubtitleV3 plans input's file again with the selected subtitle
 // cleared. It returns nil unless that plan can run: a progressive remux this

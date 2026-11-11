@@ -3148,29 +3148,6 @@ func TestPrepareTransportV3ClearsRemoteTransportMarkWhenServingLocally(t *testin
 	}
 }
 
-// A burn-in requirement that only an SDR alternate can satisfy must still reach
-// the alternate-version fallback. The planner reports that refusal in terms of
-// the subtitle rather than the HDR pipeline, so a gate listing only the HDR and
-// version reasons silently retires the fallback and refuses playback outright.
-func TestTerminalAllowsAlternateFileV3CoversSubtitleForcedRefusals(t *testing.T) {
-	for _, reason := range []string{
-		terminalNoAlternateVersionV3,
-		terminalHDRTranscodeUnsupportedV3,
-		terminalSubtitleConversionUnsupportedV3,
-		// A damaged file says nothing about the item's other versions.
-		playback.TerminalSourceUnreadableV3,
-	} {
-		if !terminalAllowsAlternateFileV3(&playback.TerminalV3{Reason: reason}) {
-			t.Fatalf("terminal %q must allow an alternate-version retry", reason)
-		}
-	}
-	if terminalAllowsAlternateFileV3(&playback.TerminalV3{Reason: "client_hls_unsupported"}) {
-		t.Fatal("a client-route refusal must not trigger an alternate-version retry")
-	}
-	if terminalAllowsAlternateFileV3(nil) {
-		t.Fatal("a nil terminal must not trigger an alternate-version retry")
-	}
-}
 func TestPlaybackV3ToneMapBudgetsCoverColdNodeWork(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.PlaybackConfig = func() config.PlaybackConfig {
