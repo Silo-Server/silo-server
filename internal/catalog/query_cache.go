@@ -109,9 +109,11 @@ func (c *queryCache[V]) get(ctx context.Context, key string, load func(context.C
 // expired entries.
 func (c *queryCache[V]) lookup(key string) (V, bool) {
 	var zero V
-	now := c.now()
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	// Read the clock once the lock is held, so a lookup that waited for it
+	// does not judge freshness by the time it started waiting.
+	now := c.now()
 	c.pruneExpiredLocked(now)
 	item, ok := c.entries[key]
 	if !ok {
