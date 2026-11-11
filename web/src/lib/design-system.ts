@@ -590,12 +590,18 @@ export const PAGE_CONTAINER = "px-4 py-4 sm:px-6 lg:px-12 lg:py-6";
 
 /**
  * Hero banner container sizing — shared between HeroBanner and Home skeletons.
+ * It is a minimum height, not a fixed one: a title that wraps to several
+ * lines on a short viewport makes the hero taller instead of pushing the
+ * eyebrow and title out of its top edge. Everything inside the hero other
+ * than its bottom-anchored text block is absolutely positioned.
  */
-export const HERO_BANNER_SIZE = "h-[54vh] min-h-[380px] max-h-[760px] lg:h-[66vh]";
+export const HERO_BANNER_SIZE =
+  "min-h-[clamp(380px,54vh,760px)] lg:min-h-[clamp(380px,66vh,760px)]";
 
 /**
  * Taller cinematic hero sizing used by the Library page Recommended tab.
  * The marquee header sits on top, so the hero needs extra height to
  * keep the title block comfortably clear of the nav bar.
  */
-export const HERO_BANNER_SIZE_TALL = "h-[60vh] min-h-[420px] max-h-[760px] lg:h-[72vh]";
+export const HERO_BANNER_SIZE_TALL =
+  "min-h-[clamp(420px,60vh,760px)] lg:min-h-[clamp(420px,72vh,760px)]";

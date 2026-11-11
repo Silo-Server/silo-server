@@ -365,7 +365,7 @@ export default function HeroBanner({
     <section
       ref={sectionRef}
       className={cn(
-        "home-hero group relative w-full overflow-hidden",
+        "home-hero group relative flex w-full flex-col overflow-hidden",
         heightClassName,
         bleed ? "-mt-[96px] mb-0 sm:-mt-[104px]" : "border-border/60 mb-10 border-b",
       )}
@@ -415,8 +415,11 @@ export default function HeroBanner({
       {/* Content */}
       <div
         className={cn(
-          "relative z-10 flex h-full min-h-0 items-end px-4 pb-10 sm:px-6 sm:pb-12 lg:px-10 lg:pb-16 xl:px-12",
-          reserveHeaderSpace && "pt-24 sm:pt-28 lg:pt-32",
+          "relative z-10 flex flex-1 items-end px-4 pb-10 sm:px-6 sm:pb-12 lg:px-10 lg:pb-16 xl:px-12",
+          // A tall title block grows the hero rather than overflowing it;
+          // the top padding keeps the eyebrow off the top edge (and, below
+          // sm, clear of the slide counter) when that happens.
+          reserveHeaderSpace ? "pt-24 sm:pt-28 lg:pt-32" : "pt-16",
         )}
       >
         <div className="w-full max-w-[1380px]">
