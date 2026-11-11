@@ -33,6 +33,32 @@ func TestRequestLoggerRedactsQueryCredentials(t *testing.T) {
 			t.Errorf("missing diagnostic %q: %s", want, logs.String())
 		}
 	}
+
+	// An HLS request carries the play session ID as a path segment and as a
+	// query parameter. HEAD has no route, so it is logged without route
+	// parameters.
+	logs.Reset()
+	var debugLogs bytes.Buffer
+	const hlsRoute = "/Videos/{id}/hls/{playlistId}/{segmentId}.{segmentContainer}"
+	mux := chi.NewRouter()
+	mux.Use(normalizeCompatPathMiddleware, newDebugLogMiddleware(&debugLogs, ""), requestLoggerMiddleware)
+	mux.Get(hlsRoute, func(http.ResponseWriter, *http.Request) {})
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		mux.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(method,
+			"/emby/videos/item-1/hls/play-session-secret/12.ts?playSessionId=play-session-secret&MediaSourceId=source-1", nil))
+	}
+	assertLogSecretsAbsent(t, logs.String()+debugLogs.String(), "play-session-secret")
+	for _, want := range []string{
+		`"route":"` + hlsRoute + `"`, `"path":"/Videos/item-1/hls/`, `"original_path":"/emby/videos/item-1/hls/`,
+		"/12.ts", "MediaSourceId=source-1", `"status":405`,
+	} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("missing diagnostic %q: %s", want, logs.String())
+		}
+	}
+	if !strings.Contains(debugLogs.String(), "/Videos/item-1/hls/") {
+		t.Errorf("debug log lost the route and item: %s", debugLogs.String())
+	}
 }
 
 func TestSeasonsPanicLoggerRedactsQueryCredentials(t *testing.T) {

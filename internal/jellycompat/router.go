@@ -442,7 +442,10 @@ func skipCompatActivityLog(pattern string) bool {
 		compatTrickplaySheetRoute, compatTrickplayPlaylistRoute:
 		return true
 	}
-	return strings.HasPrefix(pattern, "/Videos/") && strings.Contains(pattern, "/hls/{playlistId}/")
+	// A request the router refused on an HLS path, such as a HEAD, arrives here
+	// as the path the client sent, which carries the play session ID. Matching
+	// the path shape skips it along with the HLS route patterns.
+	return redactHLSPlaySessionID(pattern) != pattern
 }
 
 func skipCompatMediaCompression(r *http.Request) bool {
