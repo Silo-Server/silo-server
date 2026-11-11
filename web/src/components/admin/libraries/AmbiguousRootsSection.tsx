@@ -468,7 +468,9 @@ function RootOverrideDialog({
           <div className="flex items-start gap-3">
             <div className="flex min-w-0 flex-1 flex-col gap-2 max-sm:text-start">
               <DialogTitle>{t("web.admin.libraries.rootOverride.title")}</DialogTitle>
-              <DialogDescription className="break-words">
+              {/* The fixed phone header holds the full root path; a long one
+                  scrolls here instead of squeezing the form below. */}
+              <DialogDescription className="break-words max-sm:max-h-[25dvh] max-sm:overflow-y-auto">
                 {t("web.admin.libraries.rootOverride.description", {
                   path: root.root_path,
                   code: (chunks) => <code className="break-all">{chunks}</code>,
