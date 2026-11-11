@@ -30,4 +30,17 @@ import "C"
 // libvips older than 8.13 has no untrusted flag and keeps every loader.
 func init() {
 	C.silo_vips_block_untrusted()
+
+	// libvips keeps finished operations so that a repeated one can be answered
+	// from its cache, and bimg leaves that cache on. Silo decodes every source
+	// from its own buffer, which never matches an earlier one, so the cache
+	// only holds memory after the call that used it has returned. Keep
+	// nothing.
+	C.vips_cache_set_max(0)
+}
+
+// operationCacheSize is the number of finished operations libvips is holding.
+// It is here for the tests, which cannot use cgo themselves.
+func operationCacheSize() int {
+	return int(C.vips_cache_get_size())
 }

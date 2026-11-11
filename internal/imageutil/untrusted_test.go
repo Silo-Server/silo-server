@@ -44,3 +44,13 @@ func TestLoadersKeptAfterUntrustedBlock(t *testing.T) {
 		})
 	}
 }
+
+// libvips must keep nothing of a source once the call that decoded it returns.
+func TestOperationCacheIsEmptyAfterDecode(t *testing.T) {
+	if _, err := GenerateVariants(largeTestJPEG(t, 8, 8), []int{4}); err != nil {
+		t.Fatalf("GenerateVariants: %v", err)
+	}
+	if held := operationCacheSize(); held != 0 {
+		t.Fatalf("libvips holds %d finished operations, want 0", held)
+	}
+}
