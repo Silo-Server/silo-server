@@ -242,23 +242,38 @@ func (s *Scanner) processScopeExtras(
 	sidecars SidecarListing,
 	result *ScanResult,
 ) error {
-	if ctx.Err() == nil {
-		existingByPath, err := s.loadExtraScanState(ctx, folder.ID, extras)
-		switch {
-		case ctx.Err() != nil:
-			// A read the cancellation cut short is that cancellation, which
-			// the caller reports; it is not a failed scan.
-		case err != nil:
-			return err
-		default:
-			stats := s.processExtraFiles(ctx, folder, extras, existingByPath, sidecars)
-			result.New += stats.New
-			result.Updated += stats.Updated
-			result.Unchanged += stats.Unchanged
-			result.Errors += stats.Errors
-		}
+	if scanCanceled(ctx) {
+		return nil
 	}
+	existingByPath, err := s.loadExtraScanState(ctx, folder.ID, extras)
+	if err != nil {
+		// A read the cancellation cut short is that cancellation, which the
+		// caller reports; it is not a failed scan.
+		return errUnlessCanceled(ctx, err)
+	}
+	if scanCanceled(ctx) {
+		return nil
+	}
+	stats :=s.processExtraFiles(ctx, folder, extras, existingByPath, sidecars)
+	result.New += stats.New
+	result.Updated += stats.Updated
+	result.Unchanged += stats.Unchanged
+	result.Errors += stats.Errors
 	return nil
+}
+
+// scanCanceled reports whether the scan's context has been canceled.
+func scanCanceled(ctx context.Context) bool {
+	return ctx.Err() != nil
+}
+
+// errUnlessCanceled returns err, or nil when the scan was canceled: an error
+// the cancellation caused is reported by the caller as that cancellation.
+func errUnlessCanceled(ctx context.Context, err error) error {
+	if scanCanceled(ctx) {
+		return nil
+	}
+	return err
 }
 
 // loadExtraScanState reads the cataloged scan state of a scope's extras.
