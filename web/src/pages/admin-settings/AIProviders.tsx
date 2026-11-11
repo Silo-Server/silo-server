@@ -538,6 +538,7 @@ function ProviderPanel({
         label={t("web.admin.settings.ai.providers.baseUrl")}
         value={draft.base_url}
         onChange={(base_url) => change({ base_url })}
+        // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
         hint={type.default_base_url || "https://llm.example.net/v1"}
         description={
           custom

@@ -1,6 +1,7 @@
 import { JobPageControls } from "@/components/admin/JobPageControls";
 import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useDebounce } from "@/hooks/useDebounce";
+import { useSortableAccessibility } from "@/hooks/useSortableAccessibility";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import type {
   AdminJob,
@@ -197,6 +198,9 @@ function LibrariesPage() {
   const reorderMutation = useReorderLibraries();
   const [orderedLibraries, setOrderedLibraries] = useState<Library[]>(libraries);
   const [activeId, setActiveId] = useState<number | null>(null);
+  const sortableAccessibility = useSortableAccessibility(
+    orderedLibraries.map((library) => ({ id: library.id, name: library.name })),
+  );
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -447,6 +451,7 @@ function LibrariesPage() {
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
+          accessibility={sortableAccessibility}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
           onDragCancel={handleDragCancel}

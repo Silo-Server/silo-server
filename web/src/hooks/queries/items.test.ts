@@ -165,7 +165,18 @@ describe("item query helpers", () => {
     expect(mocks.toastError).toHaveBeenCalledWith("The file is not a JPEG, PNG or WebP image");
   });
 
-  it("warns when the refresh succeeded but artwork caching did not finish", async () => {
+  it.each([
+    // A job read through the API: the flag, with admin text that has not loaded formatting as "".
+    {
+      payload: { artwork_cache_incomplete: true, artwork_cache_warning: "" },
+      description: undefined,
+    },
+    // A job that arrived as a live event: only the server's own warning text.
+    {
+      payload: { artwork_cache_warning: "2 refreshed artwork image(s) failed to cache" },
+      description: "2 refreshed artwork image(s) failed to cache",
+    },
+  ])("warns when the refresh succeeded but artwork caching did not finish", async (shape) => {
     const invalidateQueries = vi.fn().mockResolvedValue(undefined);
     mocks.useQueryClient.mockReturnValue({ invalidateQueries });
 
@@ -184,7 +195,7 @@ describe("item query helpers", () => {
         job: {
           result_payload: {
             refresh_content_id: "series-1",
-            artwork_cache_warning: "2 refreshed artwork image(s) failed to cache",
+            ...shape.payload,
           },
         },
       },
@@ -195,10 +206,7 @@ describe("item query helpers", () => {
     expect(mocks.toastSuccess).not.toHaveBeenCalled();
     expect(mocks.toastWarning).toHaveBeenCalledWith(
       "Metadata refreshed, but artwork caching did not finish",
-      {
-        id: "refresh-toast",
-        description: "2 refreshed artwork image(s) failed to cache",
-      },
+      { id: "refresh-toast", description: shape.description },
     );
     // The refresh still committed, so the caches must be invalidated anyway.
     expect(invalidateQueries).toHaveBeenCalled();

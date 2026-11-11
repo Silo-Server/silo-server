@@ -15,11 +15,27 @@ const JOB_TYPE_LABELS: Record<string, MessageKey> = {
   catalog_import: "web.admin.common.jobHistory.jobType.catalogImport",
   item_refresh: "web.admin.common.jobHistory.jobType.itemRefresh",
   library_refresh: "web.admin.common.jobHistory.jobType.libraryRefresh",
+  backup_restore: "web.admin.common.jobHistory.jobType.backupRestore",
+  storage_transition: "web.admin.common.jobHistory.jobType.storageTransition",
+  template_bundle_apply: "web.admin.common.jobHistory.jobType.templateBundleApply",
 };
 
 function jobTypeLabel(jobType: string, t: Translate) {
   const key = JOB_TYPE_LABELS[jobType];
   return key ? t(key) : jobType;
+}
+
+const JOB_STATUS_LABELS: Record<string, MessageKey> = {
+  queued: "web.admin.common.taskStatus.queued",
+  running: "web.admin.common.taskStatus.running",
+  completed: "web.admin.common.taskStatus.completed",
+  failed: "web.admin.common.taskStatus.failed",
+  cancelled: "web.admin.common.taskStatus.cancelled",
+};
+
+function jobStatusLabel(status: string, t: Translate) {
+  const key = JOB_STATUS_LABELS[status];
+  return key ? t(key) : status;
 }
 
 function statusVariant(status: string) {
@@ -214,7 +230,7 @@ export default function AdminJobHistory() {
             return (
               <div key={job.id} className="flex flex-col gap-1 px-4 py-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant={statusVariant(job.status)}>{job.status}</Badge>
+                  <Badge variant={statusVariant(job.status)}>{jobStatusLabel(job.status, t)}</Badge>
                   <Badge variant="outline">{jobTypeLabel(job.job_type, t)}</Badge>
                   {desc && <span className="text-sm font-medium">{desc}</span>}
                   <span className="text-muted-foreground text-xs">

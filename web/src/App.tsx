@@ -790,6 +790,13 @@ function AppRoutes() {
 
 function RealtimeEventChannels() {
   const actingAdmin = useIsActingAdmin();
+  const { user } = useAuth();
+  // An account with a delegated permission (metadata curation, marker editing)
+  // uses item tools that show admin text, so it needs that catalog chunk too.
+  const delegated = (user?.permissions?.length ?? 0) > 0;
+  useEffect(() => {
+    if (delegated) requestAdminMessages();
+  }, [delegated]);
 
   useEventChannel("catalog");
   useEventChannel("user_state");

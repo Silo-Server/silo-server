@@ -30,8 +30,8 @@ import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useHasUnsavedChanges, useReportUnsavedChanges } from "@/hooks/useUnsavedChanges";
 import {
-  ADD_A_RULE,
-  ADD_A_RULE_THEN_CREATE,
+  addARuleThenCreate,
+  addAtLeastOneRule,
   changedBeforeDelete,
   checkBeforeDeleteFailed,
   draftFieldLabel,
@@ -42,10 +42,10 @@ import {
   pickALibrary,
   pickAListFirst,
   pickLibrariesFirst,
-  PICK_WHERE_IT_SHOWS_FIRST,
+  pickWhereItShowsFirst,
   previewShowsUnsaved,
   saveAfterConflicts,
-  saveFailed,
+  saveFailedWithError,
   saveNotReady,
   showItFirst,
   discardKeepsItHidden,
@@ -589,14 +589,14 @@ export function CollectionEditor<Raw extends WireCollection>({
     afterPending = editor.changed.some(previewed) ? previewShowsUnsaved() : null;
   }
   if (needsLibraries && !needsList) afterPending = pickALibrary();
-  else if (needsRules) afterPending = ADD_A_RULE;
+  else if (needsRules) afterPending = addAtLeastOneRule();
   // Before Create: what's still missing, in the order the page asks for it.
   let createHint: string | null = null;
   if (needsList) createHint = pickAListFirst();
   else if (draft.name.trim() === "") createHint = nameItThenCreate();
   else if (needsLibraries)
-    createHint = smart && isServer ? PICK_WHERE_IT_SHOWS_FIRST : pickLibrariesFirst();
-  else if (needsRules) createHint = ADD_A_RULE_THEN_CREATE;
+    createHint = smart && isServer ? pickWhereItShowsFirst() : pickLibrariesFirst();
+  else if (needsRules) createHint = addARuleThenCreate();
   else if (newList) createHint = syncsOnCreate();
   else if (smart && preview.status === "ready") createHint = smartCreateHint(preview.total);
   else if (staged.length > 0) createHint = titlesReadyToAdd(staged.length);
@@ -621,7 +621,7 @@ export function CollectionEditor<Raw extends WireCollection>({
       }}
       message={
         editor.saveError ? (
-          `${saveFailed()} · ${editor.saveError}`
+          saveFailedWithError(editor.saveError)
         ) : (
           <>
             {notSavedMessage(pending)}{" "}
@@ -647,7 +647,7 @@ export function CollectionEditor<Raw extends WireCollection>({
       onDiscard={() => navigate(listPath)}
       message={
         editor.saveError ? (
-          `${saveFailed()} · ${editor.saveError}`
+          saveFailedWithError(editor.saveError)
         ) : (
           <>
             {notCreatedYet()} {/* A phone's bar has room for the state and the buttons only. */}

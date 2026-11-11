@@ -12,12 +12,13 @@ import {
   useUpdateAdminUserSetting,
   type AdminUserSettingEntry,
 } from "@/hooks/queries/admin/users";
-import { useT, type MessageKey, type Translate } from "@/i18n";
+import { useAppLanguage, useT, type MessageKey, type Translate } from "@/i18n";
 import {
   formatSettingValue,
   getSettingDefinition,
   isStructuredSetting,
 } from "@/lib/settingsDisplay";
+import { settingDescription, settingLabel } from "@/lib/settingsText";
 
 import { formatLastSeen } from "../format";
 import { DetailCard } from "../ui";
@@ -132,7 +133,7 @@ function SettingRow({
 }) {
   const t = useT();
   const definition = getSettingDefinition(entry.key);
-  const label = definition?.label ?? entry.key;
+  const label = definition ? settingLabel(definition) : entry.key;
   // A key this build does not know, an object-valued one, or one the manifest
   // edits through a panel has no inline control that renders its value
   // truthfully; those go through the raw JSON editor.
@@ -158,7 +159,10 @@ function SettingRow({
             ? categoryTitle(definition.category)
             : t("web.admin.users.detail.preferences.row.notInVersion")}
         </div>
-        <div className="text-sm font-medium break-words" title={definition?.description}>
+        <div
+          className="text-sm font-medium break-words"
+          title={definition ? settingDescription(definition) : undefined}
+        >
           {label}
         </div>
         <div className="text-muted-foreground text-xs">{replaces}</div>
@@ -226,9 +230,12 @@ export function LevelSettings({
   };
 
   const busy = updateSetting.isPending || deleteSetting.isPending || clearDevice.isPending;
+  // Labels are read in the current language when the list is built.
+  const language = useAppLanguage();
   const addable = useMemo(
     () => addableSettings(level, profileEntries, profileAllEntries),
-    [level, profileEntries, profileAllEntries],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `language` rebuilds the translated labels
+    [level, profileEntries, profileAllEntries, language],
   );
   const canAdd = addable.length > 0;
   const addLabel = t(ADD_LABEL[level.kind]);
@@ -253,7 +260,12 @@ export function LevelSettings({
   ) : null;
 
   const removal = removing ? replacedFor(removing.key) : null;
-  const removingLabel = removing ? (getSettingDefinition(removing.key)?.label ?? removing.key) : "";
+  const removingDefinition = removing ? getSettingDefinition(removing.key) : undefined;
+  const removingLabel = removing
+    ? removingDefinition
+      ? settingLabel(removingDefinition)
+      : removing.key
+    : "";
   const fromProfile = removal?.profileName != null;
   const place = levelPlace(level, t);
   const removalTitle = fromProfile

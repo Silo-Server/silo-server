@@ -2,6 +2,7 @@ import { isCapturedProfileAuthorityActive, StaleApiRequestContextError } from "@
 import { adminSubtitleListScope, type AdminStoredSubtitle } from "./adminSubtitles";
 import { captureAdminSubtitleEditIntent, getAdminSubtitleEditor } from "./adminSubtitleMetadata";
 import { v2 } from "./request";
+import { t } from "@/i18n";
 
 // Each explicit confirmation owns one original validator and at most one DELETE.
 export async function prepareAdminSubtitleDeletion(
@@ -17,10 +18,7 @@ export async function prepareAdminSubtitleDeletion(
   return {
     subtitle: editor.body,
     async confirm() {
-      if (consumed)
-        throw new Error(
-          "This deletion was already attempted. Close and review the subtitle again.",
-        );
+      if (consumed) throw new Error(t("web.admin.errors.subtitleDeleteAttempted"));
       if (
         !isCapturedProfileAuthorityActive(editor.intent.profileContext) ||
         adminSubtitleListScope() !== scope
