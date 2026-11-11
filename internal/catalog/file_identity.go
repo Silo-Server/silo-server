@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // A file's identity is where it lives on the server and what it is called:
@@ -30,9 +31,11 @@ func (d *ItemDetail) HideFileIdentity() {
 	if d == nil {
 		return
 	}
+	sidecars := sidecarPositions(d.Versions)
 	HideFileIdentity(d.Versions, d.Type)
 	hideVariantFileIdentity(d.PlaybackVariants, d.Type)
 	d.FolderPaths = nil
+	d.EffectiveSubtitleTrackSignature = relabelSavedSidecarChoice(d.EffectiveSubtitleTrackSignature, d.Versions, sidecars)
 }
 
 // HideFileIdentity strips file identity from the watch detail's versions,
@@ -41,8 +44,52 @@ func (d *WatchDetail) HideFileIdentity() {
 	if d == nil {
 		return
 	}
+	sidecars := sidecarPositions(d.Versions)
 	HideFileIdentity(d.Versions, d.Type)
 	hideVariantFileIdentity(d.PlaybackVariants, d.Type)
+	d.EffectiveSubtitleTrackSignature = relabelSavedSidecarChoice(d.EffectiveSubtitleTrackSignature, d.Versions, sidecars)
+}
+
+// subtitleSourceExternal is the source of a subtitle file next to the media.
+const subtitleSourceExternal = "external"
+
+// sidecarPosition is where an external subtitle track sits in a version list.
+type sidecarPosition struct{ version, track int }
+
+// sidecarPositions maps each external track's file name to its position.
+func sidecarPositions(versions []FileVersion) map[string]sidecarPosition {
+	positions := map[string]sidecarPosition{}
+	for v := range versions {
+		for t, track := range versions[v].SubtitleTracks {
+			name := strings.TrimSpace(track.FileName)
+			if !track.External || name == "" {
+				continue
+			}
+			if _, seen := positions[name]; !seen {
+				positions[name] = sidecarPosition{version: v, track: t}
+			}
+		}
+	}
+	return positions
+}
+
+// relabelSavedSidecarChoice translates a saved choice of an external subtitle
+// whose label is the sidecar's file name, as such choices were saved before
+// this viewer stopped seeing file names, to the label the viewer now gets for
+// that sidecar, so the choice still selects it. versions are already hidden;
+// positions were taken before.
+func relabelSavedSidecarChoice(sig *userstore.SubtitleTrackSignature, versions []FileVersion, positions map[string]sidecarPosition) *userstore.SubtitleTrackSignature {
+	if sig == nil || sig.Source != subtitleSourceExternal {
+		return sig
+	}
+	pos, ok := positions[strings.TrimSpace(sig.Label)]
+	if !ok {
+		return sig
+	}
+	track := versions[pos.version].SubtitleTracks[pos.track]
+	relabeled := *sig
+	relabeled.Label = firstNonEmpty(track.Title, track.EmbeddedTitle, track.Language)
+	return &relabeled
 }
 
 func hideVariantFileIdentity(variants []PlaybackVariant, itemType string) {

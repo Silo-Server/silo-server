@@ -4607,7 +4607,7 @@ func (s *DetailService) buildPlaybackInfoWith(
 			key := fmt.Sprintf("external:%s:%s:%v:%v", sub.Language, sub.Format, sub.Forced, sub.HearingImpaired)
 			if _, exists := subtitleSet[key]; !exists {
 				subtitleSet[key] = SubtitleInfo{
-					Source:          "external",
+					Source:          subtitleSourceExternal,
 					Language:        sub.Language,
 					Codec:           sub.Format,
 					Forced:          sub.Forced,

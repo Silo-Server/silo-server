@@ -333,9 +333,20 @@ func TestDetailHideFileIdentity(t *testing.T) {
 	}{{itemType: "movie"}, {itemType: "audiobook", keepNames: true}} {
 		t.Run(tc.itemType, func(t *testing.T) {
 			versions, variants, _, _, _, _, _ := (&DetailService{}).buildPlaybackInfo(context.Background(), []*models.MediaFile{file}, AccessFilter{}, "movie-1")
-			detail := &ItemDetail{Type: tc.itemType, Versions: versions, PlaybackVariants: variants, FolderPaths: []string{"/media/Movie (2023)"}}
+			// Saved before this viewer stopped seeing file names: the second
+			// English sidecar, labeled by its file name.
+			saved := &userstore.SubtitleTrackSignature{Source: "external", Language: "en", Codec: "srt", Label: "Movie.2023.2160p.WEB-DL-OTHER.en.srt"}
+			detail := &ItemDetail{Type: tc.itemType, Versions: versions, PlaybackVariants: variants, FolderPaths: []string{"/media/Movie (2023)"},
+				EffectiveSubtitleTrackSignature: saved}
 
 			detail.HideFileIdentity()
+
+			if want := map[bool]string{false: "en 2", true: saved.Label}[tc.keepNames]; detail.EffectiveSubtitleTrackSignature.Label != want {
+				t.Errorf("saved choice label = %q, want %q", detail.EffectiveSubtitleTrackSignature.Label, want)
+			}
+			if saved.Label != "Movie.2023.2160p.WEB-DL-OTHER.en.srt" {
+				t.Errorf("the stored signature was changed in place: %q", saved.Label)
+			}
 
 			if detail.FolderPaths != nil {
 				t.Errorf("FolderPaths = %v, want none", detail.FolderPaths)
