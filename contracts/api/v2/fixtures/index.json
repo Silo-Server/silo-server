@@ -5213,7 +5213,8 @@
         "method": "DELETE",
         "path": "/api/v2/account/identities/4",
         "headers": {
-          "Authorization": "Bearer tok-member"
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-primary"
         }
       },
       "expected_status": 409,
@@ -5233,7 +5234,8 @@
         "method": "DELETE",
         "path": "/api/v2/account/identities/6",
         "headers": {
-          "Authorization": "Bearer tok-member"
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-primary"
         }
       },
       "expected_status": 204,
