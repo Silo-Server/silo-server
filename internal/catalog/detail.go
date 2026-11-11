@@ -2082,16 +2082,22 @@ func (s *DetailService) GetEpisodeDetailsForSeries(
 			episodesByID[episode.ContentID] = episode
 		}
 	}
+	// One membership read for the page. Each episode must itself be in the
+	// presentation library, as validatePresentationItemAccess requires of one ID.
+	var inLibrary map[string]bool
+	if filter.PresentationLibraryID != nil {
+		inLibrary, err = s.itemRepo.GetItemsInLibrary(ctx, episodeContentIDs, *filter.PresentationLibraryID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	for _, contentID := range episodeContentIDs {
 		episode := episodesByID[contentID]
 		if episode == nil {
 			continue
 		}
-		if err := s.validatePresentationItemAccess(ctx, filter, contentID); err != nil {
-			if errors.Is(err, ErrItemNotFound) {
-				continue
-			}
-			return nil, err
+		if filter.PresentationLibraryID != nil && !inLibrary[contentID] {
+			continue
 		}
 		detail, err := s.buildEpisodeDetail(ctx, episode, seriesCtx, filter)
 		if err != nil {
