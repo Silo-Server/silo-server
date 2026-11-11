@@ -1,8 +1,7 @@
 # Backups API
 
 > **API lifecycle:** this documents the stable `/api/v2` native contract, which locks with Silo
-> 1.0. Backups have no `/api/v1` routes. See
-> [the native API contract](architecture/api-contract.md).
+> 1.0. See [the native API contract](architecture/api-contract.md).
 
 The Backups page's operations under `/api/v2/admin/backups`. Each requires an
 acting administrator: an account with the server-wide `admin` role. A

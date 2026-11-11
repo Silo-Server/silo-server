@@ -31,7 +31,7 @@ serves as External. The key matches case-insensitively; any other key returns
 built from configuration alone, so routes that need further dependencies, such
 as `GET /Persons/{name}` and `POST /Library/Media/Updated`, are not in it.
 `internal/jellycompat/router.go`
-owns registration; the native `/api/v1` contract is separate.
+owns registration; the native `/api/v2` contract is separate.
 
 ## Users and avatars
 
@@ -752,9 +752,9 @@ connection's shared budget, as described in
 [Sign-in rate limits](auth-api.md#sign-in-rate-limits).
 
 - `POST /Users/AuthenticateByName` spends the per-IP and `login` budgets before
-  the global budget, like native sign-in (`POST /api/v2/auth/login`, and
-  `POST /api/v1/auth/login` during the bridge). It shares the per-IP `login`
-  counter with every native operation that spends that budget. The account name also spends its
+  the global budget, like native sign-in (`POST /api/v2/auth/login`). It shares
+  the per-IP `login` counter with every native operation that spends that
+  budget. The account name also spends its
   sign-in attempt budget, shared with native sign-in on every node
   ([Sign-in attempts per name](auth-api.md#sign-in-attempts-per-name)); a
   locked name answers 429 `TooManyRequests` with `Retry-After`. It reads at

@@ -114,33 +114,6 @@ func personalCollectionPosterURL(ctx context.Context, resolver artworkurl.Resolv
 	return resolver.ResolveURLs(ctx, []string{key})[key].URL
 }
 
-// readCollectionImageMultipart reads a single image file from a multipart
-// request, validating MIME type and size. A part of another type or over the
-// size limit fails with an invalidCollectionImage error, which the routes
-// that keep client-facing artwork errors answer as a 400.
-func readCollectionImageMultipart(r *http.Request, fieldName string) ([]byte, error) {
-	file, header, err := r.FormFile(fieldName)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	switch header.Header.Get("Content-Type") {
-	case "image/jpeg", "image/png", "image/webp":
-	default:
-		return nil, invalidCollectionImage("Unsupported image type; use JPEG, PNG, or WebP.", nil)
-	}
-	if header.Size > collectionImageMaxBytes {
-		return nil, invalidCollectionImage("The image exceeds the 10 MB limit.", nil)
-	}
-
-	data := make([]byte, header.Size)
-	if _, err := io.ReadFull(file, data); err != nil {
-		return nil, fmt.Errorf("reading file: %w", err)
-	}
-	return data, nil
-}
-
 // invalidCollectionImage reports artwork the caller supplied that Silo cannot
 // use. The v2 routes render the 400 as a validation problem instead of a 500.
 func invalidCollectionImage(message string, cause error) *APIError {

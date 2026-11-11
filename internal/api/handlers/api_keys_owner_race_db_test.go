@@ -2,14 +2,9 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -62,7 +57,7 @@ func TestAdminAPIKeyCreationHoldsOwnerRulesAgainstPromotionDB(t *testing.T) {
 	users := auth.NewUserRepository(pool)
 	h := NewAPIKeyHandler(auth.NewAPIKeyRepository(pool))
 	h.Owners = users
-	// Each transport returns "" when it created the key, else the error code.
+	// The transport returns "" when it created the key, else the error code.
 	transports := map[string]func(actorID, targetID int) string{
 		"v2": func(actorID, targetID int) string {
 			_, err := h.CreateAdminAPIKey(claimsCtx(actorID), targetID, "owner-rules", nil)
@@ -74,20 +69,8 @@ func TestAdminAPIKeyCreationHoldsOwnerRulesAgainstPromotionDB(t *testing.T) {
 			}
 			return ""
 		},
-		"v1": func(actorID, targetID int) string {
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/api-keys", strings.NewReader(fmt.Sprintf(`{"label":"owner-rules","user_id":%d}`, targetID)))
-			req = req.WithContext(claimsCtx(actorID))
-			rec := httptest.NewRecorder()
-			h.HandleAdminCreateAPIKey(rec, req)
-			if rec.Code == http.StatusCreated {
-				return ""
-			}
-			var body errorResponse
-			_ = json.Unmarshal(rec.Body.Bytes(), &body)
-			return fmt.Sprintf("%d %s", rec.Code, body.Error)
-		},
 	}
-	refused := map[string]string{"v2": codeOwnerProtected, "v1": "403 " + codeOwnerProtected}
+	refused := map[string]string{"v2": codeOwnerProtected}
 
 	for name, create := range transports {
 		t.Run(name, func(t *testing.T) {

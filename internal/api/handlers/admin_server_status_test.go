@@ -2,141 +2,16 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/config"
 )
-
-func TestAdminServerStatusDoesNotPromoteLiveJellyfinIdentitySettings(t *testing.T) {
-	t.Parallel()
-
-	cfg, err := config.LoadFromDB(map[string]string{
-		"jellyfin_compat.enabled":                 "true",
-		"jellyfin_compat.listen":                  ":8096",
-		"jellyfin_compat.public_url":              "http://127.0.0.1:8096",
-		"jellyfin_compat.server_name":             "Silo",
-		"jellyfin_compat.emulated_server_version": "10.11.0",
-	})
-	if err != nil {
-		t.Fatalf("LoadFromDB: %v", err)
-	}
-
-	handler := &AdminHandler{
-		Config:        cfg,
-		RestartStatus: NewServerRestartStatusTracker(),
-		SettingsRepo: &fakeServerSettingsStore{values: map[string]string{
-			"jellyfin_compat.public_url":              "https://compat.example.test",
-			"jellyfin_compat.server_name":             "Silo Compat",
-			"jellyfin_compat.emulated_server_version": "10.11.6",
-		}},
-	}
-	req := httptest.NewRequest(http.MethodGet, "/admin/server/status", nil)
-	rec := httptest.NewRecorder()
-
-	handler.HandleGetServerStatus(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	var resp adminServerStatusResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.RestartRequired {
-		t.Fatal("RestartRequired = true, want false for live Jellyfin identity settings")
-	}
-}
-
-// A server with neither a pool nor a Redis client must still answer 200 with a
-// well-formed health object: the dashboard health strip is the one place an
-// admin can see that a dependency is missing.
-func TestAdminServerStatusHealthWithoutDependencies(t *testing.T) {
-	t.Parallel()
-
-	handler := &AdminHandler{RestartStatus: NewServerRestartStatusTracker()}
-	rec := httptest.NewRecorder()
-	handler.HandleGetServerStatus(rec, httptest.NewRequest(http.MethodGet, "/admin/server/status", nil))
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-
-	var body struct {
-		Health struct {
-			Postgres map[string]any `json:"postgres"`
-			Redis    map[string]any `json:"redis"`
-			Errors   int64          `json:"errors_24h"`
-			Warnings int64          `json:"warnings_24h"`
-		} `json:"health"`
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-
-	for name, component := range map[string]map[string]any{
-		"postgres": body.Health.Postgres,
-		"redis":    body.Health.Redis,
-	} {
-		if component == nil {
-			t.Fatalf("%s health missing from the response", name)
-		}
-		if configured, _ := component["configured"].(bool); configured {
-			t.Fatalf("%s configured = true, want false", name)
-		}
-		if _, present := component["ok"]; present {
-			t.Fatalf("%s reports ok while unconfigured; absent and broken must differ", name)
-		}
-		if _, present := component["latency_ms"]; present {
-			t.Fatalf("%s reports a latency it never measured", name)
-		}
-	}
-	if body.Health.Errors != 0 || body.Health.Warnings != 0 {
-		t.Fatalf("log counts = %d/%d, want 0/0", body.Health.Errors, body.Health.Warnings)
-	}
-}
-
-// An unreachable Postgres is reported as ok:false rather than failing the
-// route, and the log tallies degrade to zero instead of 500ing.
-func TestAdminServerStatusHealthWithUnreachablePostgres(t *testing.T) {
-	t.Parallel()
-
-	pool, err := pgxpool.New(context.Background(), "postgres://silo:silo@127.0.0.1:1/silo?connect_timeout=1")
-	if err != nil {
-		t.Fatalf("create unreachable pool: %v", err)
-	}
-	t.Cleanup(pool.Close)
-
-	handler := &AdminHandler{pool: pool, RestartStatus: NewServerRestartStatusTracker()}
-	rec := httptest.NewRecorder()
-	handler.HandleGetServerStatus(rec, httptest.NewRequest(http.MethodGet, "/admin/server/status", nil))
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	var body struct {
-		Health adminServerHealth `json:"health"`
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if !body.Health.Postgres.Configured {
-		t.Fatal("postgres configured = false, want true when a pool exists")
-	}
-	if body.Health.Postgres.OK == nil || *body.Health.Postgres.OK {
-		t.Fatalf("postgres ok = %v, want false", body.Health.Postgres.OK)
-	}
-	if body.Health.Errors24h != 0 || body.Health.Warnings24h != 0 {
-		t.Fatalf("log counts = %d/%d, want 0/0 when the query fails", body.Health.Errors24h, body.Health.Warnings24h)
-	}
-}
 
 // failingSettingsStore models the settings table during a Postgres outage.
 type failingSettingsStore struct {
@@ -144,41 +19,7 @@ type failingSettingsStore struct {
 }
 
 func (f *failingSettingsStore) GetAll(context.Context) (map[string]string, error) {
-	return nil, fmt.Errorf("settings storage is down")
-}
-
-// A settings lookup that fails — Postgres being down — must not 500 the status
-// endpoint: the health object in this response is where that outage is
-// supposed to become visible.
-func TestAdminServerStatusAnswersWhenSettingsStorageIsDown(t *testing.T) {
-	t.Parallel()
-
-	handler := &AdminHandler{
-		RestartStatus: NewServerRestartStatusTracker(),
-		SettingsRepo:  &failingSettingsStore{},
-	}
-	rec := httptest.NewRecorder()
-	handler.HandleGetServerStatus(rec, httptest.NewRequest(http.MethodGet, "/admin/server/status", nil))
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	var body struct {
-		Health         adminServerHealth         `json:"health"`
-		ArtworkStorage adminArtworkStorageStatus `json:"artwork_storage"`
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if body.Health.Postgres.Configured {
-		t.Fatal("postgres configured = true, want false with no pool")
-	}
-	if body.ArtworkStorage.StatusKnown {
-		t.Fatal("storage lock status known despite failed settings read")
-	}
-	if h := handler.ReadAdminServerStatus(t.Context()); h.ArtworkStorage.StatusKnown {
-		t.Fatal("internal storage lock status known despite failed settings read")
-	}
+	return nil, errors.New("settings storage is down")
 }
 
 func TestLogLevelCountsAreServedFromCache(t *testing.T) {
@@ -199,5 +40,98 @@ func TestLogLevelCountsAreServedFromCache(t *testing.T) {
 	// The pool cannot connect, so a cache miss would return zeros.
 	if got := handler.logLevelCounts24h(context.Background()); got != (adminLogLevelCounts{4, 12}) {
 		t.Fatalf("counts = %v, want [4 12] from cache", got)
+	}
+}
+
+// Live Jellyfin identity settings take effect without a restart, so a stored
+// value that differs from the running config does not ask for one.
+func TestAdminServerStatusDoesNotPromoteLiveJellyfinIdentitySettings(t *testing.T) {
+	t.Parallel()
+	cfg, err := config.LoadFromDB(map[string]string{
+		"jellyfin_compat.enabled":                 "true",
+		"jellyfin_compat.listen":                  ":8096",
+		"jellyfin_compat.public_url":              "http://127.0.0.1:8096",
+		"jellyfin_compat.server_name":             "Silo",
+		"jellyfin_compat.emulated_server_version": "10.11.0",
+	})
+	if err != nil {
+		t.Fatalf("LoadFromDB: %v", err)
+	}
+	handler := &AdminHandler{
+		Config:        cfg,
+		RestartStatus: NewServerRestartStatusTracker(),
+		SettingsRepo: &fakeServerSettingsStore{values: map[string]string{
+			"jellyfin_compat.public_url":              "https://compat.example.test",
+			"jellyfin_compat.server_name":             "Silo Compat",
+			"jellyfin_compat.emulated_server_version": "10.11.6",
+		}},
+	}
+	if handler.ReadAdminServerStatus(t.Context()).RestartRequired {
+		t.Fatal("RestartRequired = true, want false for live Jellyfin identity settings")
+	}
+}
+
+// The status read answers whatever its dependencies do: the health object is
+// where a missing or broken one becomes visible.
+func TestAdminServerStatusHealthDegradesWithoutFailing(t *testing.T) {
+	t.Parallel()
+	unreachable, err := pgxpool.New(context.Background(), "postgres://silo:silo@127.0.0.1:1/silo?connect_timeout=1")
+	if err != nil {
+		t.Fatalf("create unreachable pool: %v", err)
+	}
+	t.Cleanup(unreachable.Close)
+
+	t.Run("no dependencies", func(t *testing.T) {
+		health := (&AdminHandler{RestartStatus: NewServerRestartStatusTracker()}).ReadAdminServerStatus(t.Context()).Health
+		for name, component := range map[string]adminHealthComponent{"postgres": health.Postgres, "redis": health.Redis} {
+			// Absent and broken must differ: an unconfigured component
+			// reports neither ok nor a latency it never measured.
+			if component.Configured || component.OK != nil || component.LatencyMS != nil {
+				t.Fatalf("%s = %+v, want unconfigured", name, component)
+			}
+		}
+		if health.Errors24h != 0 || health.Warnings24h != 0 {
+			t.Fatalf("log counts = %d/%d, want 0/0", health.Errors24h, health.Warnings24h)
+		}
+	})
+
+	t.Run("unreachable Postgres", func(t *testing.T) {
+		health := (&AdminHandler{pool: unreachable, RestartStatus: NewServerRestartStatusTracker()}).ReadAdminServerStatus(t.Context()).Health
+		if !health.Postgres.Configured || health.Postgres.OK == nil || *health.Postgres.OK {
+			t.Fatalf("postgres = %+v, want configured and not ok", health.Postgres)
+		}
+		if health.Errors24h != 0 || health.Warnings24h != 0 {
+			t.Fatalf("log counts = %d/%d, want 0/0 when the query fails", health.Errors24h, health.Warnings24h)
+		}
+	})
+
+	t.Run("settings storage down", func(t *testing.T) {
+		status := (&AdminHandler{RestartStatus: NewServerRestartStatusTracker(), SettingsRepo: &failingSettingsStore{}}).ReadAdminServerStatus(t.Context())
+		if status.Health.Postgres.Configured {
+			t.Fatal("postgres configured = true, want false with no pool")
+		}
+		// A false lock flag is not a confirmed editable location.
+		if status.ArtworkStorage.StatusKnown {
+			t.Fatal("storage lock status known despite failed settings read")
+		}
+	})
+}
+
+func TestAdminServerStatusReportsArtworkStorageLock(t *testing.T) {
+	t.Parallel()
+	read := func(backend string, stored map[string]string) adminArtworkStorageStatus {
+		h := &AdminHandler{RestartStatus: NewServerRestartStatusTracker(), ArtworkBackend: backend, SettingsRepo: &fakeServerSettingsStore{values: stored}}
+		return h.ReadAdminServerStatus(t.Context()).ArtworkStorage
+	}
+	if got := read("local", map[string]string{}); got.Locked || got.PrivateLocked || !got.StatusKnown || got.Backend != "local" {
+		t.Fatalf("fresh install: %+v", got)
+	}
+	if got := read("s3", map[string]string{blobstore.IdentitySettingKey: "s3|https://s3.example|artwork|"}); !got.Locked || !got.PrivateLocked || !got.StatusKnown || got.Backend != "s3" {
+		t.Fatalf("recorded artwork did not lock both locations: %+v", got)
+	}
+	// A private bucket that holds data locks only the private location; the
+	// artwork location is still free until the first artwork write.
+	if got := read("local", map[string]string{blobstore.OperationalIdentitySettingKey: "s3|https://private.example|private|"}); got.Locked || !got.PrivateLocked {
+		t.Fatalf("private-only recording: %+v", got)
 	}
 }

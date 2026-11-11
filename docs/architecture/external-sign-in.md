@@ -85,9 +85,8 @@ node create one account:
 5. **Otherwise** `account_required`: the provider admitted the person (its
    group rules passed), but no account is linked or matched and account
    creation is off, so an administrator has to add one. It is a kind of
-   `not_permitted`: the frozen v1 login and the Jellyfin login still answer
-   `not_permitted`, while the v2 login (problem type `account_required`, 403),
-   the web login page and the app redirect (`reason=` / `error=`
+   `not_permitted`: the Jellyfin login still answers `not_permitted`, while
+   the native login (problem type `account_required`, 403), the web login page and the app redirect (`reason=` / `error=`
    `account_required`) tell it apart. `not_permitted` stays the answer for the
    provider's own refusals (its group rules, `NOT_PERMITTED`,
    `access_denied`).
@@ -111,7 +110,7 @@ and the last enabled admin are never demoted; the skip is logged.
 - `auth.local_password_login` (default on) is the server-wide switch. Off,
   the local provider refuses every account except break-glass admins with
   `local_login_disabled`, after checking the password. The check is in
-  `LocalProvider.Authenticate`, so it covers v1, v2, Jellyfin and
+  `LocalProvider.Authenticate`, so it covers the native API, Jellyfin and
   Audiobookshelf compatibility.
 - The server Owner is break-glass by default: first-run setup and every
   ownership move (transfer or `silo owner set`) set the flag on the new Owner,
@@ -124,8 +123,7 @@ and the last enabled admin are never demoted; the skip is logged.
   make its own role immune to provider demotion. A role change away from admin
   clears it. For the same reason only the Owner may set the password of its
   own account through account administration while that account's local
-  password sign-in is off (403 `permission_denied`; the v1 route answers
-  `owner_protected`): the write would turn local sign-in back on, and local
+  password sign-in is off (403 `permission_denied`): the write would turn local sign-in back on, and local
   sign-ins skip the provider's role sync and re-check.
 - At least one usable break-glass account (enabled admin with local password
   sign-in) must exist while the switch is off. Turning the switch off, and
@@ -140,8 +138,7 @@ and the last enabled admin are never demoted; the skip is logged.
   out), and `-temporary-password` also gives it a random temporary password,
   printed once, that must be changed at the next sign-in, revoking its
   sign-ins.
-- An administrator setting an account's password (v1 and v2 admin user
-  update) also turns its local password sign-in back on.
+- An administrator setting an account's password (admin user update) also turns its local password sign-in back on.
 - While the switch is off, invited signup and invitation acceptance, which
   create local-password accounts, are refused with `local_login_disabled`
   before the invite is spent, and signup is reported off.
@@ -261,16 +258,15 @@ runs it, and the handoff to the client. Flow rows live in Postgres
 step.
 
 - **Public origin.** The provider always returns the browser to the callback
-  on the configured public URL (`server.public_url`). Without one, a v2 web
-  start sends the browser to `/login` with `reason=provider_unavailable`, a
-  v2 native start with a valid `code_challenge` and `app_state` goes to the
-  app redirect with `error=provider_unavailable`, and only the frozen v1
-  init answers 409. A start that arrives on another origin (scheme, host and
+  on the configured public URL (`server.public_url`). Without one, a web
+  start sends the browser to `/login` with `reason=provider_unavailable`, and
+  a native start with a valid `code_challenge` and `app_state` goes to the
+  app redirect with `error=provider_unavailable`. A start that arrives on another origin (scheme, host and
   port as `clientip.RequestScheme` and `clientip.RequestHost` show it: a
   trusted proxy's `X-Forwarded-Host`, else `Host`) is first redirected to
   the same start on the public origin. A web start is marked `bounce=1` so a
-  proxy that hides the origin cannot loop; the v2 form post goes to the GET
-  start (303) and the frozen v1 init repeats itself there (307). A native
+  proxy that hides the origin cannot loop; the form post goes to the GET
+  start (303). A native
   start is parked on the server and moves with only a flow ID (see Native
   apps). Refusals that need no browser state (bad installation id, plugin not
   loaded) answer before any redirect.
@@ -548,7 +544,7 @@ the SDK's `NetworkIdentityAuth`.
   and linking always ask again. A network provider is never the default
   provider, never counts toward `password_login`, and never receives a
   password: login and Jellyfin routing skip it, a login that names it fails
-  as wrong credentials, and the frozen v1 provider list leaves it out.
+  as wrong credentials.
 - **Linking** (`linkAccountIdentityWithNetwork`,
   `POST /account/identities/link-network`) works like directory linking: the
   account re-enters its local password, then the peer's identity is linked as
@@ -658,8 +654,7 @@ refreshing. The host therefore asks the provider again.
   approver's chain the same way. Only a login session may approve a device: an API key
   would turn a credential no refresh re-checks into a refreshing session,
   and an impersonation session would hand the device a session with no trace
-  of the impersonator, so both are refused (v2 403 `permission_denied`, v1
-  403 `forbidden`). See [device-login.md](device-login.md#who-decides).
+  of the impersonator, so both are refused (403 `permission_denied`). See [device-login.md](device-login.md#who-decides).
 - **When.** At refresh, when the identity's last answer is older than
   `auth.provider_recheck_interval` (default 12 h), or the last attempt could
   not reach the provider at least 2 minutes ago. Refreshes in between use the
@@ -802,9 +797,9 @@ refreshing. The host therefore asks the provider again.
     timeout, or a lock wait that runs out: with
     `auth.provider_recheck_outage_policy` `fail_open` (default) the session
     slides as usual and the next refresh asks again; with `fail_closed` the
-    refresh is refused without revoking the session (v2 503
-    `provider_unavailable`, v1 401 `invalid_token`; a Jellyfin compatibility
-    session whose refresh fails is dropped).
+    refresh is refused without revoking the session (503
+    `provider_unavailable`; a Jellyfin compatibility session whose refresh
+    fails is dropped).
   - The response's `external_subject` and `denial` are ignored.
 - **refresh_state at rest.** Stored per identity in
   `plugin_auth_identities.refresh_state`, AES-GCM encrypted with the server
