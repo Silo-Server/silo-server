@@ -171,7 +171,7 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 	// its insert: one the server cannot use changes nothing.
 	poster, err := h.prepareCollectionPoster(ctx, cmd.PosterFile, pointerStringValue(req.PosterSourceURL))
 	if err != nil {
-		return none, collectionArtworkError(ctx, collectionID, err)
+		return none, personalCollectionPosterError(ctx, collectionID, err)
 	}
 	if err := store.UpdateCollection(ctx, input); err != nil {
 		if errors.Is(err, userstore.ErrCollectionRevisionMismatch) {
@@ -210,7 +210,7 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 
 	if poster != nil {
 		if err := h.storeCollectionPoster(ctx, store, collectionID, profileID, poster); err != nil {
-			return none, collectionArtworkError(ctx, collectionID, err)
+			return none, personalCollectionPosterError(ctx, collectionID, err)
 		}
 	}
 
@@ -548,7 +548,7 @@ func (h *CollectionHandler) UploadPersonalCollectionPoster(ctx context.Context, 
 		return PersonalCollectionView{}, fieldError("body", "Poster image is required")
 	}
 	if err := h.processCollectionPoster(ctx, store, collectionID, profileID, func() ([]byte, error) { return data, nil }, ""); err != nil {
-		return PersonalCollectionView{}, collectionArtworkError(ctx, collectionID, err)
+		return PersonalCollectionView{}, personalCollectionPosterError(ctx, collectionID, err)
 	}
 	return h.GetPersonalCollection(ctx, userID, profileID, collectionID)
 }
@@ -566,7 +566,7 @@ func (h *CollectionHandler) SetPersonalCollectionPosterSource(ctx context.Contex
 		return PersonalCollectionView{}, fieldError("source_url", "An image URL is required")
 	}
 	if err := h.processCollectionPoster(ctx, store, id, profileID, nil, source); err != nil {
-		return PersonalCollectionView{}, collectionArtworkError(ctx, id, err)
+		return PersonalCollectionView{}, personalCollectionPosterError(ctx, id, err)
 	}
 	return h.GetPersonalCollection(ctx, userID, profileID, id)
 }

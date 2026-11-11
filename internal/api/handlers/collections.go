@@ -607,7 +607,7 @@ func (h *CollectionHandler) HandleDeleteCollectionImage(w http.ResponseWriter, r
 // processCollectionPoster prepares the poster a request carries and stores it
 // on the given collection. It is a no-op when the request carries none. The
 // caller is responsible for ensuring the request profile owns the collection,
-// and answers a failure through collectionArtworkError.
+// and answers a failure through personalCollectionPosterError.
 func (h *CollectionHandler) processCollectionPoster(
 	ctx context.Context,
 	store userstore.UserStore,

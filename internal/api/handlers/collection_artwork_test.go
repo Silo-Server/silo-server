@@ -24,7 +24,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/imageutil"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -508,23 +507,27 @@ func captureDefaultLog(t *testing.T) *bytes.Buffer {
 func TestCollectionArtworkError_HidesServerFailures(t *testing.T) {
 	logs := captureDefaultLog(t)
 
-	err := collectionArtworkError(t.Context(), "c1", errors.New("uploading original: connection reset"))
+	err := personalCollectionPosterError(t.Context(), "c1", errors.New("uploading original: connection reset"))
 	apiErr, ok := errors.AsType[*APIError](err)
 	if !ok || apiErr.Status != http.StatusInternalServerError || apiErr.Message != "Failed to store collection artwork" {
 		t.Fatalf("err = %#v, want the 500 fallback", err)
 	}
 
-	// A server too busy to decode the poster is the client's cue to retry,
-	// answered as a busy avatar upload is.
-	err = collectionArtworkError(t.Context(), "c1", fmt.Errorf("poster: generating image variants: %w", imageutil.ErrBusy))
-	apiErr, ok = errors.AsType[*APIError](err)
-	if !ok || apiErr.Status != http.StatusServiceUnavailable || apiErr.Code != "unavailable" || !errors.Is(err, imageutil.ErrBusy) {
-		t.Fatalf("err = %#v, want the busy 503", err)
+	// A busy answer is the caller's to act on, so it is not hidden, on the
+	// personal routes or the admin ones.
+	busy := &APIError{Status: http.StatusServiceUnavailable, Code: "unavailable", Message: "busy", RetryAfter: 30}
+	for _, err := range []error{
+		personalCollectionPosterError(t.Context(), "c1", fmt.Errorf("poster: %w", busy)),
+		collectionArtworkError(busy, "Failed to store collection artwork"),
+	} {
+		if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.Status != http.StatusServiceUnavailable || apiErr.RetryAfter != 30 {
+			t.Fatalf("err = %#v, want the 503 kept with its Retry-After", err)
+		}
 	}
 
 	// A request the client ended is not logged as a failure.
 	logs.Reset()
-	_ = collectionArtworkError(t.Context(), "c1", fmt.Errorf("poster: uploading original: %w", context.Canceled))
+	_ = personalCollectionPosterError(t.Context(), "c1", fmt.Errorf("poster: uploading original: %w", context.Canceled))
 	if logs.Len() != 0 {
 		t.Fatalf("a canceled request was logged: %q", logs.String())
 	}
@@ -570,7 +573,7 @@ func TestProcessCollectionPoster_InvalidImageKeepsStoredPoster(t *testing.T) {
 	h := &CollectionHandler{ArtworkStore: artwork}
 
 	err = h.processCollectionPoster(t.Context(), store, "c1", "p1", func() ([]byte, error) { return []byte("not an image"), nil }, "")
-	mapped := collectionArtworkError(t.Context(), "c1", err)
+	mapped := personalCollectionPosterError(t.Context(), "c1", err)
 	if apiErr, ok := errors.AsType[*APIError](mapped); !ok || apiErr.Status != http.StatusBadRequest {
 		t.Fatalf("mapped err = %v, want a 400 APIError", mapped)
 	}

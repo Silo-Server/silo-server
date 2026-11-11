@@ -3440,8 +3440,10 @@ exponential backoff from 1 s to 60 s, and is parked as `failed` after ten consec
 failures until restarted or reconfigured), `state` (`stopped`, `starting`, `running`,
 `backoff`, `failed`), `restart_count`, `last_error`, `last_started_at` and `next_restart_at`.
 Plugins declaring `network_access_provider.v1` are resident; every other plugin starts on
-first use and reports `running`, `stopped`, or `failed` when its last launch on the answering
-server failed, with `last_error` saying why. A later successful launch, an administrator
+first use, is stopped again after 30 minutes
+without use, and reports `running`, `stopped`, or `failed` when its last launch on the answering
+server failed, with `last_error` saying why. A plugin stopped for being idle reports `stopped`
+and starts on its next use. A later successful launch, an administrator
 restart, an update or a configuration change clears that failure. A plugin that isn't running
 also reports `failed` when the answering server has to restore its files from the stored
 archive and the archive can't be read (it won't open or extract, or doesn't match the

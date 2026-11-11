@@ -13,7 +13,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/collections/templates"
-	"github.com/Silo-Server/silo-server/internal/imageutil"
 	"github.com/Silo-Server/silo-server/internal/mdblist"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -348,23 +347,6 @@ func TestCollectionProblemPreservesUnsupportedSource(t *testing.T) {
 	})
 	if p.Status != http.StatusGone || p.Type != TypeUnsupportedSource.URI() || p.Title != TypeUnsupportedSource.Title {
 		t.Fatalf("problem = %#v", p)
-	}
-}
-
-// A poster the server was too busy to decode is a 503 the client may repeat
-// after the delay it names, as a busy avatar upload is.
-func TestCreateCollectionBusyPosterNamesARetryDelay(t *testing.T) {
-	deps, pc, _ := collectionDeps(t)
-	pc.err = (&handlers.APIError{
-		Status:  http.StatusServiceUnavailable,
-		Code:    "unavailable",
-		Message: "Image processing is busy; try again shortly",
-	}).WithCause(imageutil.ErrBusy)
-	rec := do(t, newTestHandler(t, deps), http.MethodPost, "/api/v2/collections",
-		`{"name":"Rainy days","poster_source_url":"https://images.example/poster.jpg"}`, viewerHeaders())
-	requireProblem(t, rec, TypeDependencyUnavailable)
-	if got := rec.Header().Get("Retry-After"); got != "30" {
-		t.Fatalf("Retry-After = %q, want 30", got)
 	}
 }
 

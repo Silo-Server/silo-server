@@ -10,7 +10,6 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
-	"github.com/Silo-Server/silo-server/internal/imageutil"
 	"github.com/Silo-Server/silo-server/internal/mdblist"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -497,13 +496,11 @@ func collectionProblem(err error) *Problem {
 	case apiErr.Status == http.StatusNotImplemented:
 		return NewProblem(TypeCapabilityUnsupported, apiErr.Message)
 	case apiErr.Status == http.StatusServiceUnavailable:
-		p := NewProblem(TypeDependencyUnavailable, apiErr.Message)
-		// A poster the server was too busy to decode can be sent again, after
-		// the delay a busy avatar upload is given.
-		if errors.Is(err, imageutil.ErrBusy) {
-			p = p.WithRetryAfter(30)
+		problem := NewProblem(TypeDependencyUnavailable, apiErr.Message)
+		if apiErr.RetryAfter > 0 {
+			problem = problem.WithRetryAfter(apiErr.RetryAfter)
 		}
-		return p
+		return problem
 	case apiErr.Status == http.StatusBadGateway:
 		return NewProblem(TypeDependencyUnavailable, apiErr.Message).WithRetryAfter(30)
 	}

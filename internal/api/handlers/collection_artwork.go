@@ -116,9 +116,8 @@ func personalCollectionPosterURL(ctx context.Context, resolver artworkurl.Resolv
 
 // readCollectionImageMultipart reads a single image file from a multipart
 // request, validating MIME type and size. A part of another type or over the
-// size limit fails with an invalidCollectionImage error. The personal
-// collection routes answer it as a 400; the admin routes answer every artwork
-// failure with their own fixed 500.
+// size limit fails with an invalidCollectionImage error, which the routes
+// that keep client-facing artwork errors answer as a 400.
 func readCollectionImageMultipart(r *http.Request, fieldName string) ([]byte, error) {
 	file, header, err := r.FormFile(fieldName)
 	if err != nil {
@@ -148,20 +147,45 @@ func invalidCollectionImage(message string, cause error) *APIError {
 	return &APIError{Status: http.StatusBadRequest, Code: policyErrorBadRequest, Message: message, cause: cause}
 }
 
-// collectionArtworkError answers a failed personal collection poster by its
-// cause. A client-facing error passes through unchanged. A server too busy to
-// decode the image answers as a busy avatar upload does, and a source address
-// the server will not fetch keeps its one fixed answer. Any other failure
-// goes to the log, and the client gets a 500 that says nothing about the
-// store or the source behind it. It takes no message, so no caller can put
-// error text in the answer. collectionID is empty when the collection does
-// not exist yet.
-func collectionArtworkError(ctx context.Context, collectionID string, err error) error {
-	if apiErr, ok := errors.AsType[*APIError](err); ok && apiErr.Status < http.StatusInternalServerError {
+// collectionImageBusyRetryAfter is the Retry-After, in seconds, on a busy
+// answer: the wait imageutil gives a source before it reports ErrBusy.
+const collectionImageBusyRetryAfter = 30
+
+// busyCollectionImage reports that image processing had no room for the
+// artwork. The image may be fine, so the caller is told to try again and is
+// not told the file is unsupported.
+func busyCollectionImage(cause error) *APIError {
+	return &APIError{
+		Status:     http.StatusServiceUnavailable,
+		Code:       policyErrorUnavailable,
+		Message:    "Image processing is busy; try again shortly.",
+		RetryAfter: collectionImageBusyRetryAfter,
+		cause:      cause,
+	}
+}
+
+// collectionArtworkError keeps a client-facing artwork error, including a
+// busy answer, and hides any other failure behind a 500 with the given
+// message.
+func collectionArtworkError(err error, message string) error {
+	if apiErr, ok := errors.AsType[*APIError](err); ok &&
+		(apiErr.Status < http.StatusInternalServerError || apiErr.Status == http.StatusServiceUnavailable) {
 		return apiErr
 	}
-	if errors.Is(err, imageutil.ErrBusy) {
-		return apiError(http.StatusServiceUnavailable, "unavailable", "Image processing is busy; try again shortly").WithCause(imageutil.ErrBusy)
+	return apiError(http.StatusInternalServerError, "internal_error", message)
+}
+
+// personalCollectionPosterError answers a failed personal collection poster
+// by its cause. A client-facing error, including a busy answer, passes
+// through unchanged, and a source address the server will not fetch keeps its
+// one fixed answer. Any other failure goes to the log, and the client gets a
+// 500 that says nothing about the store or the source behind it. It takes no
+// message, so no caller can put error text in the answer. collectionID is
+// empty when the collection does not exist yet.
+func personalCollectionPosterError(ctx context.Context, collectionID string, err error) error {
+	if apiErr, ok := errors.AsType[*APIError](err); ok &&
+		(apiErr.Status < http.StatusInternalServerError || apiErr.Status == http.StatusServiceUnavailable) {
+		return apiErr
 	}
 	if errors.Is(err, errCollectionImageSourceNotAllowed) {
 		return apiError(http.StatusInternalServerError, "internal_error", "poster source: "+errCollectionImageSourceNotAllowed.Error())
@@ -354,6 +378,9 @@ func generateCollectionImageVariants(fileData []byte, widths []int) (*collection
 	if err != nil && imageutil.SourceUnusable(err, fileData) {
 		return nil, invalidCollectionImage("The file is not a supported image.", err)
 	}
+	if errors.Is(err, imageutil.ErrBusy) {
+		return nil, busyCollectionImage(err)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("generating image variants: %w", err)
 	}
@@ -361,6 +388,9 @@ func generateCollectionImageVariants(fileData []byte, widths []int) (*collection
 	for _, v := range result.Variants {
 		if v.Key == "w300" && len(v.Data) > 0 {
 			variants.thumbhash, err = imageutil.Thumbhash(v.Data)
+			if errors.Is(err, imageutil.ErrBusy) {
+				return nil, busyCollectionImage(err)
+			}
 			if err != nil {
 				return nil, fmt.Errorf("computing thumbhash: %w", err)
 			}
