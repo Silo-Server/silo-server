@@ -22,7 +22,6 @@ const mocks = vi.hoisted(() => ({
     isSuccess: false,
   },
   save: vi.fn(),
-  saveKeepalive: vi.fn(),
   reset: vi.fn(),
   userId: 1,
 }));
@@ -31,8 +30,7 @@ vi.mock("@/hooks/queries/admin/dashboardLayout", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/queries/admin/dashboardLayout")>();
   const mutateCaptured = (
     intent: import("@/hooks/queries/admin/dashboardLayout").DashboardLayoutSaveIntent,
-    options?: { keepalive?: boolean },
-  ) => (options?.keepalive ? mocks.saveKeepalive(intent.layout) : mocks.save(intent.layout));
+  ) => mocks.save(intent.layout);
   return {
     ...actual,
     useAdminDashboardLayout: () => mocks.query,
@@ -92,7 +90,6 @@ beforeEach(() => {
   mocks.userId = ADMIN_USER_ID;
   mocks.query = { data: undefined, isSuccess: false };
   mocks.save.mockReset();
-  mocks.saveKeepalive.mockReset();
   mocks.reset.mockReset();
 });
 
@@ -581,7 +578,7 @@ describe("useDashboardLayout server persistence", () => {
   });
 
   // A reload inside the debounce window must not drop the queued save.
-  it("sends a queued save with keepalive when the page is hidden", () => {
+  it("sends a queued save immediately when the page is hidden", () => {
     vi.useFakeTimers();
     writeStored([{ id: "egress-24h", span: 6, rows: 3, range: "day" }]);
     serverLayout(readStored().entries);
@@ -594,8 +591,8 @@ describe("useDashboardLayout server persistence", () => {
       window.dispatchEvent(new Event("pagehide"));
     });
 
-    expect(mocks.saveKeepalive).toHaveBeenCalledTimes(1);
-    expect(mocks.saveKeepalive).toHaveBeenCalledWith({
+    expect(mocks.save).toHaveBeenCalledTimes(1);
+    expect(mocks.save).toHaveBeenCalledWith({
       version: 1,
       entries: [{ id: "egress-24h", span: 6, rows: 3, range: "week" }],
     });
@@ -603,7 +600,7 @@ describe("useDashboardLayout server persistence", () => {
     act(() => {
       vi.advanceTimersByTime(DASHBOARD_LAYOUT_SAVE_DEBOUNCE_MS);
     });
-    expect(mocks.save).not.toHaveBeenCalled();
+    expect(mocks.save).toHaveBeenCalledTimes(1);
   });
 
   it("resetLayout refuses an obsolete authority callback before local reset", () => {

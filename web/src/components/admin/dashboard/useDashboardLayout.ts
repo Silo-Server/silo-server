@@ -263,7 +263,7 @@ export function useDashboardLayout(): DashboardLayout {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const flushSave = useCallback(
-    function flush(options?: { keepalive?: boolean }) {
+    function flush() {
       if (timerRef.current !== null) {
         clearTimeout(timerRef.current);
         timerRef.current = null;
@@ -274,7 +274,6 @@ export function useDashboardLayout(): DashboardLayout {
       pendingRef.current = null;
       inFlightRef.current = intent;
       saveMutate(intent, {
-        keepalive: options?.keepalive,
         onSuccess: (etag) => {
           if (inFlightRef.current !== intent) return;
           inFlightRef.current = null;
@@ -335,9 +334,9 @@ export function useDashboardLayout(): DashboardLayout {
   // Send a queued write before this page goes away rather than dropping it.
   // A reload or tab close inside the debounce window would otherwise lose it,
   // and the next load would adopt the older server copy over the admin's last
-  // change; keepalive lets that request outlive the page.
+  // change. Layout saves use keepalive, so the request outlives the page.
   useEffect(() => {
-    const flushOnPageHide = () => flushSave({ keepalive: true });
+    const flushOnPageHide = () => flushSave();
     window.addEventListener("pagehide", flushOnPageHide);
     return () => {
       window.removeEventListener("pagehide", flushOnPageHide);

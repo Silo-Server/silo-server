@@ -85,13 +85,16 @@ export function useSaveAdminDashboardLayout() {
   const mutation = useMutation({
     scope: LAYOUT_MUTATION_SCOPE,
     retry: false,
-    mutationFn: async (intent: DashboardLayoutSaveIntent & { keepalive?: boolean }) => {
+    mutationFn: async (intent: DashboardLayoutSaveIntent) => {
       if (!isCapturedProfileAuthorityActive(intent.profileContext))
         throw new StaleApiRequestContextError();
       let etag: string | null = null;
       await v2("PUT /api/v2/admin/dashboard/layout", {
         headers: { "If-Match": intent.etag },
-        keepalive: intent.keepalive,
+        // A reload or tab close must not cancel a save the admin is waiting
+        // on: without keepalive the next load adopts the older server layout.
+        // Saves run one at a time and stay far below the 64 KiB keepalive budget.
+        keepalive: true,
         onResponse: (response) => {
           etag = response.headers.get("ETag");
         },
@@ -120,16 +123,11 @@ export function useSaveAdminDashboardLayout() {
   const mutateCaptured = useCallback(
     (
       intent: DashboardLayoutSaveIntent,
-      options?: {
-        onSuccess?: (etag: string) => void;
-        onError?: () => void;
-        /** Let the write outlive the page: set when flushing on `pagehide`. */
-        keepalive?: boolean;
-      },
+      options?: { onSuccess?: (etag: string) => void; onError?: () => void },
     ) => {
       // Promise completion survives observer unmount; per-call mutate callbacks
       // do not. Cleanup may still hold a newer copied edit behind this write.
-      void rawMutateAsync({ ...intent, keepalive: options?.keepalive }).then(
+      void rawMutateAsync(intent).then(
         (etag) => {
           if (isCapturedProfileAuthorityActive(intent.profileContext)) options?.onSuccess?.(etag);
           else options?.onError?.();
