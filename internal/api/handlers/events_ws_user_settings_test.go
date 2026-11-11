@@ -28,7 +28,7 @@ import (
 // client could ever receive, while every Hub-level test stayed green.
 func TestEventsWebSocketDeliversUserSettingsToNonAdmins(t *testing.T) {
 	hub := evt.NewHub("test", &cache.NoopEventBus{})
-	handler := &EventsHandler{hub: hub}
+	handler := &EventsHandler{hub: hub, socketAdmission: testSocketAdmission(t)}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// The router authenticates before the handler runs; a plain (non-admin)
@@ -146,7 +146,7 @@ func TestAdminDefaultChangeReachesEveryViewer(t *testing.T) {
 		t.Fatalf("starting hub: %v", err)
 	}
 	adminNode := evt.NewHub("admin-node", bus)
-	handler := &EventsHandler{hub: hub}
+	handler := &EventsHandler{hub: hub, socketAdmission: testSocketAdmission(t)}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := apimw.SetClaims(r.Context(), &auth.Claims{UserID: 7, Role: "user"})

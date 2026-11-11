@@ -93,7 +93,12 @@ type EventsHandler struct {
 	sessionCheckInterval time.Duration
 	// profiles re-verifies the PIN proof of the profile a connection holding
 	// the admin channels acts as; see SetProfileVerifier.
-	profiles apimw.ViewerResolver
+	profiles        apimw.ViewerResolver
+	socketAdmission *evt.ClientSocketAdmission
+	appContext      context.Context //nolint:containedctx // Process lifecycle dependency shared with compatibility sockets.
+	shuttingDown    func() bool
+	upgradeSocket   func(http.ResponseWriter, *http.Request, websocket.Upgrader) (eventSocket, error)
+	subscribeSocket func() (<-chan evt.Envelope, func())
 }
 
 // sessionRoleChecker reports whether a login session is still active and its
@@ -162,6 +167,15 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	if !checkWebSocketOrigin(r) {
+		http.Error(w, "origin refused", http.StatusForbidden)
+		return
+	}
+	r, release, admitted := h.admitClientSocket(w, r, claims.UserID)
+	if !admitted {
+		return
+	}
+	defer release()
 
 	// Browsers cannot set custom headers on websocket handshakes, so profile
 	// identity arrives as a short-lived single-use ticket minted via
@@ -217,13 +231,12 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	if h.sessionRoles != nil && claims.SessionID != "" {
-		ctx, cancel := context.WithCancel(r.Context())
-		defer cancel()
-		go h.closeOnSessionChange(ctx, cancel, claims, stillActingAdmin)
-		r = r.WithContext(ctx)
+	startAuthority := func(ctx context.Context, cancel context.CancelFunc) {
+		if h.sessionRoles != nil && claims.SessionID != "" {
+			go h.closeOnSessionChange(ctx, cancel, claims, stillActingAdmin)
+		}
 	}
-	h.serveWebSocket(w, r, effective, boundProfileID, wsUpgrader, nil)
+	h.serveWebSocket(w, r, effective, boundProfileID, wsUpgrader, nil, startAuthority)
 }
 
 // withProfileProof narrows decide to while profileID's PIN proof still
@@ -308,8 +321,14 @@ func (h *EventsHandler) sessionChanged(ctx context.Context, claims *auth.Claims,
 // EventsCloseAccessChanged; a nil channel never fires. Only the v2 handshake
 // passes one: the bridge socket never sends access_changed, and never
 // receives V2Only events either.
-func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, claims *auth.Claims, boundProfileID string, upgrader websocket.Upgrader, accessChanged <-chan struct{}) {
-	conn, err := upgrader.Upgrade(w, r, nil)
+//
+//nolint:funlen // Keep the existing single-writer protocol loop together.
+func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, claims *auth.Claims, boundProfileID string, upgrader websocket.Upgrader, accessChanged <-chan struct{}, startAuthority func(context.Context, context.CancelFunc)) {
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	// Watchers, snapshot work and transport closure must share cancellation.
+	r = r.WithContext(ctx)
+	conn, err := h.upgradeEventSocket(w, r, upgrader)
 	if err != nil {
 		// The Android/KMP client has a long history of silent handshake
 		// failures here (gorilla writes the 4xx itself); log the exact
@@ -334,11 +353,15 @@ func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, c
 	configureWebSocket(conn)
 	conn.SetReadLimit(maxEventsFrameBytes)
 
-	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
+	if !startEventSocketAuthority(ctx, cancel, startAuthority) {
+		return
+	}
 
-	eventsCh, unsubscribe := h.hub.Subscribe()
-	defer unsubscribe()
+	eventsCh, unsubscribe := h.subscribeEventSocket()
+	defer func() {
+		_ = conn.Close()
+		unsubscribe()
+	}()
 	startWebSocketPingLoop(ctx, func() error {
 		return writeWebSocketControl(conn, websocket.PingMessage, nil)
 	})
@@ -405,6 +428,11 @@ func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, c
 				return
 			}
 		}
+	}()
+	defer func() {
+		cancel()
+		_ = conn.Close()
+		<-readDone
 	}()
 
 	subscriptions := declaredSubs
@@ -492,7 +520,7 @@ func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, c
 // closeEventsAccessChanged sends the access_changed frame and close code, then
 // waits briefly for the client's close reply so both frames arrive before the
 // connection is torn down.
-func closeEventsAccessChanged(conn *websocket.Conn, readDone <-chan struct{}) {
+func closeEventsAccessChanged(conn eventSocket, readDone <-chan struct{}) {
 	if err := writeWebSocketJSON(conn, evt.EventsAccessChangedMessage{Type: eventsAccessChanged}); err != nil {
 		return
 	}
@@ -512,7 +540,7 @@ func closeEventsAccessChanged(conn *websocket.Conn, readDone <-chan struct{}) {
 }
 
 func (h *EventsHandler) handleEventsClientMessage(
-	conn *websocket.Conn,
+	conn eventSocket,
 	r *http.Request,
 	claims *auth.Claims,
 	boundProfileID string,
@@ -887,13 +915,16 @@ func (h *EventsHandler) snapshotForChannel(
 }
 
 func (h *EventsHandler) writeSnapshotFrame(
-	conn *websocket.Conn,
+	conn eventSocket,
 	r *http.Request,
 	claims *auth.Claims,
 	boundProfileID string,
 	channel evt.EventChannel,
 ) error {
 	data, err := h.snapshotForChannel(r, claims, boundProfileID, channel)
+	if ctxErr := r.Context().Err(); ctxErr != nil {
+		return ctxErr
+	}
 	if err != nil {
 		slog.ErrorContext(r.Context(),
 			"events: failed to build initial snapshot", "component", "api",
@@ -916,7 +947,7 @@ func (h *EventsHandler) writeSnapshotFrame(
 }
 
 func (h *EventsHandler) writeEventFrame(
-	conn *websocket.Conn,
+	conn eventSocket,
 	r *http.Request,
 	claims *auth.Claims,
 	boundProfileID string,
