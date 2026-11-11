@@ -288,7 +288,7 @@ An empty `contexts` list is refused at the schema (`resolve_effective_settings_c
   "type": "https://siloserver.org/docs/api/v2/problems/validation_failed",
   "title": "Validation failed",
   "status": 422,
-  "detail": "The request did not pass validation; see errors.",
+  "detail": "expected array length >= 1",
   "instance": "urn:silo:request:000000000000000000000038",
   "errors": [
     {
@@ -319,7 +319,7 @@ plugin installation id that names nothing (numeric or not; identifiers are opaqu
   "type": "https://siloserver.org/docs/api/v2/problems/validation_failed",
   "title": "Validation failed",
   "status": 422,
-  "detail": "The request did not pass validation; see errors.",
+  "detail": "No setting named no.such exists in this server's contract",
   "instance": "urn:silo:request:000000000000000000000035",
   "errors": [
     {
@@ -427,7 +427,7 @@ A missing `values` member (`update_plugin_settings_values_required.json`):
   "type": "https://siloserver.org/docs/api/v2/problems/validation_failed",
   "title": "Validation failed",
   "status": 422,
-  "detail": "The request did not pass validation; see errors.",
+  "detail": "expected required property values to be present",
   "instance": "urn:silo:request:000000000000000000000029",
   "errors": [
     {

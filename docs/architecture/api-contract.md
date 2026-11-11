@@ -481,7 +481,10 @@ members even where RFC 9457 makes them optional:
 
 Validation failures add an `errors` array. Each entry contains `location` using the documented
 `body.*`, `query.*`, `path.*`, or `header.*` grammar, a stable `code`, and a safe `detail`.
-Rejected values are never echoed. Stack traces, database/upstream errors, filesystem paths,
+When a validation failure has no explanation beyond its field errors, its `detail` is the
+summary "The request did not pass validation; see errors.", except that with exactly one field
+error the server sends that error's `detail` instead, so a client that shows only the problem
+`detail` still names the reason. Rejected values are never echoed. Stack traces, database/upstream errors, filesystem paths,
 internal node URLs, credentials, tokens, private media data, and other implementation detail are
 never returned to the client. Problem responses default to `Cache-Control: no-store` unless a
 specific public problem is reviewed as cacheable. Clients translate a problem by its type and
