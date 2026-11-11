@@ -644,7 +644,8 @@ function ActiveCount({ node }: { node: StreamNode }) {
       <span className={describeNodeJobs(node).warning ? "text-warning font-semibold" : undefined}>
         {active}
         {cap !== null ? (
-          <span className="text-muted-foreground ms-1 font-normal">
+          <span className="text-muted-foreground font-normal">
+            {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a space, not text */}{" "}
             {t("web.admin.dashboard.widgets.transcodeNodes.capSeparator", {
               max: cap.toLocaleString(formatLocale()),
             })}
@@ -684,7 +685,8 @@ function EgressValue({ node }: { node: StreamNode }) {
         {formatMbpsValue(node.egress_kbps / 1_000)}
       </span>
       {cap !== null ? (
-        <span className="text-muted-foreground ms-1 hidden @min-[620px]/nodes:inline">
+        <span className="text-muted-foreground hidden @min-[620px]/nodes:inline">
+          {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a space, not text */}{" "}
           {t("web.admin.dashboard.widgets.transcodeNodes.capSeparator", {
             max: formatMbpsValue(cap / 1_000),
           })}

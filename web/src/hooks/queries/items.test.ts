@@ -184,7 +184,9 @@ describe("item query helpers", () => {
         job: {
           result_payload: {
             refresh_content_id: "series-1",
-            artwork_cache_warning: "2 refreshed artwork image(s) failed to cache",
+            artwork_cache_incomplete: true,
+            // Admin text that has not loaded formats as "".
+            artwork_cache_warning: "",
           },
         },
       },
@@ -195,10 +197,7 @@ describe("item query helpers", () => {
     expect(mocks.toastSuccess).not.toHaveBeenCalled();
     expect(mocks.toastWarning).toHaveBeenCalledWith(
       "Metadata refreshed, but artwork caching did not finish",
-      {
-        id: "refresh-toast",
-        description: "2 refreshed artwork image(s) failed to cache",
-      },
+      { id: "refresh-toast", description: undefined },
     );
     // The refresh still committed, so the caches must be invalidated anyway.
     expect(invalidateQueries).toHaveBeenCalled();

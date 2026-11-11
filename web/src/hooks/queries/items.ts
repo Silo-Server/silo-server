@@ -83,6 +83,8 @@ interface ItemRefreshJobResult {
   matched_files?: number;
   // Set when the metadata refresh committed but its artwork did not finish
   // caching. The refresh itself succeeded, so this is a warning, not an error.
+  artwork_cache_incomplete?: boolean;
+  // What an admin can do about it, in admin text.
   artwork_cache_warning?: string;
   scan_result?: {
     new?: number;
@@ -121,12 +123,12 @@ export function useRefreshItemMetadata() {
       const refreshContentID = result.refresh_content_id;
       const detailContentID = result.detail_content_id;
       const newFiles = result.scan_result?.new ?? 0;
-      const artworkWarning = result.artwork_cache_warning;
 
-      if (artworkWarning) {
+      if (result.artwork_cache_incomplete) {
         toast.warning(t("web.item.toast.refreshArtworkWarning"), {
           id: context?.toastID,
-          description: artworkWarning,
+          // Admin text: empty for a curator whose session has not loaded it.
+          description: result.artwork_cache_warning || undefined,
         });
       } else if (mode === "complete") {
         toast.success(t("web.item.toast.completeRefreshFinished"), { id: context?.toastID });

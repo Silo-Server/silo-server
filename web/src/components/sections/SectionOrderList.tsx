@@ -71,7 +71,7 @@ export function SectionOrderList({
   const sectionTitle = useSectionTitle();
   const [activeId, setActiveId] = useState<string | null>(null);
   const sortableAccessibility = useSortableAccessibility(
-    sections.map((section) => ({ id: section.id, name: section.title })),
+    sections.map((section) => ({ id: section.id, name: sectionTitle(section) })),
   );
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
