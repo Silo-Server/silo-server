@@ -3,12 +3,14 @@ package handlers
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -114,7 +116,9 @@ func personalCollectionPosterURL(ctx context.Context, resolver artworkurl.Resolv
 
 // readCollectionImageMultipart reads a single image file from a multipart
 // request, validating MIME type and size. A part of another type or over the
-// size limit is the caller's 400.
+// size limit fails with an invalidCollectionImage error. The personal
+// collection routes answer it as a 400; the admin routes answer every artwork
+// failure with their own fixed 500.
 func readCollectionImageMultipart(r *http.Request, fieldName string) ([]byte, error) {
 	file, header, err := r.FormFile(fieldName)
 	if err != nil {
@@ -147,11 +151,11 @@ func invalidCollectionImage(message string, cause error) *APIError {
 // collectionArtworkError answers a failed personal collection poster by its
 // cause. A client-facing error passes through unchanged. A server too busy to
 // decode the image answers as a busy avatar upload does, and a source address
-// the server will not fetch keeps its one fixed answer. Any other failure is
-// the server's: its cause goes to the log, and the client gets a 500 that
-// says nothing about the store or the source behind it. It takes no message,
-// so no caller can put error text in the answer. collectionID is empty when
-// the collection does not exist yet.
+// the server will not fetch keeps its one fixed answer. Any other failure
+// goes to the log, and the client gets a 500 that says nothing about the
+// store or the source behind it. It takes no message, so no caller can put
+// error text in the answer. collectionID is empty when the collection does
+// not exist yet.
 func collectionArtworkError(ctx context.Context, collectionID string, err error) error {
 	if apiErr, ok := errors.AsType[*APIError](err); ok && apiErr.Status < http.StatusInternalServerError {
 		return apiErr
@@ -162,21 +166,64 @@ func collectionArtworkError(ctx context.Context, collectionID string, err error)
 	if errors.Is(err, errCollectionImageSourceNotAllowed) {
 		return apiError(http.StatusInternalServerError, "internal_error", "poster source: "+errCollectionImageSourceNotAllowed.Error())
 	}
-	// A request the client ended is not a failure to report. A failed
-	// download names the source URL, which can carry a credential in its
-	// query or path, so the URL is reduced before the text is logged.
-	if !errors.Is(err, context.Canceled) {
+	if download, ok := errors.AsType[*collectionImageDownloadError](err); ok {
+		// The caller named the source, and any profile can name one that
+		// fails, so this is a warning. The line carries the source's host and
+		// the kind of failure, and nothing else of the URL.
+		slog.WarnContext(ctx, "collection artwork: downloading a poster source failed", "component", "api",
+			"collection_id", collectionID, "host", download.host, "error", download.failure)
+	} else if !errors.Is(err, context.Canceled) {
+		// The server's own failure; a request the client ended is not one. An
+		// artwork store reached over HTTP reports a failed request with the
+		// object's URL, which is logged without its userinfo, query and
+		// fragment.
 		slog.ErrorContext(ctx, "collection artwork: saving a poster failed", "component", "api",
 			"collection_id", collectionID, "error", logredact.SanitizeText(logredact.SanitizeURLError(err).Error()))
 	}
 	return apiError(http.StatusInternalServerError, "internal_error", "Failed to store collection artwork")
 }
 
+// collectionImageDownloadError is an image source the server could not
+// download. It keeps the host the request named and the kind of failure, and
+// none of the transport error's text: that text quotes the requested URL and,
+// after a redirect the client could not follow, the response's Location
+// header, and a credential can sit anywhere in either.
+type collectionImageDownloadError struct {
+	host    string
+	failure string
+}
+
+func (e *collectionImageDownloadError) Error() string {
+	return "downloading image from " + e.host + ": " + e.failure
+}
+
+// collectionImageDownloadFailure reduces err, a failed download from host, to
+// an error that is safe to log. A request the client ended stays
+// context.Canceled.
+func collectionImageDownloadFailure(host string, err error) error {
+	if errors.Is(err, context.Canceled) {
+		return fmt.Errorf("downloading image: %w", context.Canceled)
+	}
+	failure := "request failed"
+	if timeout, ok := errors.AsType[net.Error](err); ok && timeout.Timeout() {
+		failure = "timed out"
+	} else if _, ok := errors.AsType[*net.DNSError](err); ok {
+		failure = "DNS lookup failed"
+	} else if _, ok := errors.AsType[*tls.CertificateVerificationError](err); ok {
+		failure = "TLS certificate not accepted"
+	} else if _, ok := errors.AsType[*net.OpError](err); ok {
+		failure = "connection failed"
+	}
+	return &collectionImageDownloadError{host: host, failure: failure}
+}
+
 // downloadCollectionImageURL fetches an image from an http(s) URL with size
 // limits. The address policy lives in client's netguard transport
 // (newCollectionImageClient), and ctx decides whether the local network is
 // allowed. An address the policy refuses fails with
-// errCollectionImageSourceNotAllowed.
+// errCollectionImageSourceNotAllowed. A request or a body read that fails any
+// other way fails with a collectionImageDownloadError, which keeps the host
+// and drops the transport's own text.
 func downloadCollectionImageURL(ctx context.Context, client *http.Client, rawURL string) ([]byte, error) {
 	if client == nil {
 		return nil, errors.New("collection image downloads have no HTTP client")
@@ -193,14 +240,14 @@ func downloadCollectionImageURL(ctx context.Context, client *http.Client, rawURL
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
 	if err != nil {
-		return nil, fmt.Errorf("building request: %w", err)
+		return nil, invalidCollectionImage("The image source URL is not valid.", nil)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
 		if errors.Is(err, netguard.ErrPrivateDestination) || errors.Is(err, netguard.ErrBlockedDestination) {
 			return nil, errCollectionImageSourceNotAllowed
 		}
-		return nil, fmt.Errorf("downloading image: %w", err)
+		return nil, collectionImageDownloadFailure(parsed.Host, err)
 	}
 	defer resp.Body.Close()
 
@@ -217,7 +264,7 @@ func downloadCollectionImageURL(ctx context.Context, client *http.Client, rawURL
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, collectionImageMaxBytes+1))
 	if err != nil {
-		return nil, fmt.Errorf("reading image response: %w", err)
+		return nil, collectionImageDownloadFailure(parsed.Host, err)
 	}
 	if len(data) > collectionImageMaxBytes {
 		return nil, invalidCollectionImage("The image exceeds the 10 MB limit.", nil)

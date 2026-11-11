@@ -87,8 +87,10 @@ The server reads and decodes a poster before it writes anything. `uploadCollecti
 - `503 dependency_unavailable` with `Retry-After` when the server is too busy to decode another
   image. The poster may be fine; send the request again.
 - `500 internal_error` for any other failure, such as a source that could not be reached or a
-  storage error. The answer carries no detail; the server logs the cause, with any credential
-  in the source URL removed.
+  storage error. The answer carries no detail; the server logs the cause. For a source it
+  could not download, the log line holds the source's host and the kind of failure (a
+  timeout, a DNS, connection or TLS certificate failure, or any other) and no other part of
+  the URL the request or a redirect named.
 
 A poster that fails before it is stored creates and changes nothing: `createCollection` creates
 no collection, so repeating the request cannot leave two, and `uploadCollectionPoster` keeps the
@@ -103,7 +105,9 @@ answers `400 bad_request` for a poster the server cannot use, including a part t
 JPEG, PNG or WebP or is over 10 MB; `503 unavailable` when the server is too busy to decode it;
 and `500 internal_error` with a fixed message otherwise. Other fields are checked first, so a
 request with a poster and an invalid field answers for the field, and the poster is neither
-decoded nor fetched.
+decoded nor fetched. As on `/api/v2`, a poster that decoded but could not be stored answers the
+same fixed `500` after the collection was created or updated, so that `500` alone does not tell
+a client whether a collection exists.
 
 An import's `poster_url` is a bundled template poster path (`/images/collection-templates/...`)
 or an http(s) image URL. Any other value answers `422 validation_failed` at `body.poster_url`
