@@ -3406,6 +3406,9 @@ func (d Dependencies) overlayOrigins() handlers.OverlayOriginSource {
 // two drift, and a drifted copy is exactly how a broken writer chain passes its
 // own tests (see the §4.4 conformance requirement in the stream-telemetry design).
 func useBaseMiddleware(r chi.Router, deps Dependencies) {
+	// No response is used as a type it does not declare (see httpstream.NoSniff).
+	r.Use(httpstream.NoSniff)
+
 	// Server-generated request ID; never adopts a client-supplied one.
 	r.Use(apimw.RequestID)
 
