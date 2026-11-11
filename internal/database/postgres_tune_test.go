@@ -11,87 +11,89 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func TestRecommendPostgresOLTPSettings(t *testing.T) {
-	tests := []struct {
-		name         string
-		memoryBudget int64
-		cpus         int
-		detectedCPUs int
-		want         map[string]string
-	}{
-		{
-			name:         "mid-sized host reaches the shared_buffers ceiling",
-			memoryBudget: 16 * sizeGB,
-			cpus:         8,
-			want: map[string]string{
-				"max_connections":                  "100",
-				"shared_buffers":                   "2GB",
-				"effective_cache_size":             "12GB",
-				"maintenance_work_mem":             "1GB",
-				"autovacuum_work_mem":              "256MB",
-				"wal_buffers":                      "16MB",
-				"min_wal_size":                     "2GB",
-				"max_wal_size":                     "8GB",
-				"random_page_cost":                 "1.1",
-				"effective_io_concurrency":         "1000",
-				"work_mem":                         "38836kB",
-				"huge_pages":                       "try",
-				"jit":                              "off",
-				"wal_compression":                  "lz4",
-				"max_worker_processes":             "8",
-				"max_parallel_workers_per_gather":  "4",
-				"max_parallel_workers":             "8",
-				"max_parallel_maintenance_workers": "4",
-			},
+// recommendPostgresOLTPCases are the hosts TestRecommendPostgresOLTPSettings
+// sizes.
+var recommendPostgresOLTPCases = []struct {
+	name         string
+	memoryBudget int64
+	cpus         int
+	detectedCPUs int
+	want         map[string]string
+}{
+	{
+		name:         "mid-sized host reaches the shared_buffers ceiling",
+		memoryBudget: 16 * sizeGB,
+		cpus:         8,
+		want: map[string]string{
+			"max_connections":                  "100",
+			"shared_buffers":                   "2GB",
+			"effective_cache_size":             "12GB",
+			"maintenance_work_mem":             "1GB",
+			"autovacuum_work_mem":              "256MB",
+			"wal_buffers":                      "16MB",
+			"min_wal_size":                     "2GB",
+			"max_wal_size":                     "8GB",
+			"random_page_cost":                 "1.1",
+			"effective_io_concurrency":         "1000",
+			"work_mem":                         "38836kB",
+			"huge_pages":                       "try",
+			"jit":                              "off",
+			"wal_compression":                  "lz4",
+			"max_worker_processes":             "8",
+			"max_parallel_workers_per_gather":  "4",
+			"max_parallel_workers":             "8",
+			"max_parallel_maintenance_workers": "4",
 		},
-		{
-			name:         "small host stays under the ceilings",
-			memoryBudget: 2 * sizeGB,
-			cpus:         4,
-			want: map[string]string{
-				"shared_buffers":       "512MB",
-				"effective_cache_size": "1536MB",
-				"maintenance_work_mem": "128MB",
-				"autovacuum_work_mem":  "128MB",
-				"wal_buffers":          "16MB",
-				"huge_pages":           "off",
-			},
+	},
+	{
+		name:         "small host stays under the ceilings",
+		memoryBudget: 2 * sizeGB,
+		cpus:         4,
+		want: map[string]string{
+			"shared_buffers":       "512MB",
+			"effective_cache_size": "1536MB",
+			"maintenance_work_mem": "128MB",
+			"autovacuum_work_mem":  "128MB",
+			"wal_buffers":          "16MB",
+			"huge_pages":           "off",
 		},
-		{
-			name:         "large host with an explicit CPU count",
-			memoryBudget: 48 * sizeGB,
-			cpus:         64,
-			want: map[string]string{
-				"shared_buffers":         "2GB",
-				"effective_cache_size":   "36GB",
-				"maintenance_work_mem":   "3GB",
-				"autovacuum_work_mem":    "256MB",
-				"work_mem":               "76725kB",
-				"huge_pages":             "try",
-				"max_worker_processes":   "64",
-				"max_parallel_workers":   "64",
-				"autovacuum_max_workers": "5",
-				"io_workers":             "16",
-			},
+	},
+	{
+		name:         "large host with an explicit CPU count",
+		memoryBudget: 48 * sizeGB,
+		cpus:         64,
+		want: map[string]string{
+			"shared_buffers":         "2GB",
+			"effective_cache_size":   "36GB",
+			"maintenance_work_mem":   "3GB",
+			"autovacuum_work_mem":    "256MB",
+			"work_mem":               "76725kB",
+			"huge_pages":             "try",
+			"max_worker_processes":   "64",
+			"max_parallel_workers":   "64",
+			"autovacuum_max_workers": "5",
+			"io_workers":             "16",
 		},
-		{
-			// Workers follow the bounded count; work_mem keeps the detected
-			// one, so bounding does not raise it.
-			name:         "detected CPU count was bounded",
-			memoryBudget: 16 * sizeGB,
-			cpus:         16,
-			detectedCPUs: 224,
-			want: map[string]string{
-				"max_worker_processes":   "16",
-				"max_parallel_workers":   "16",
-				"autovacuum_max_workers": "4",
-				"io_workers":             "4",
-				"work_mem":               "12945kB",
-			},
+	},
+	{
+		// Workers follow the bounded count; work_mem keeps the detected
+		// one, so bounding does not raise it.
+		name:         "detected CPU count was bounded",
+		memoryBudget: 16 * sizeGB,
+		cpus:         16,
+		detectedCPUs: 224,
+		want: map[string]string{
+			"max_worker_processes":   "16",
+			"max_parallel_workers":   "16",
+			"autovacuum_max_workers": "4",
+			"io_workers":             "4",
+			"work_mem":               "12945kB",
 		},
-	}
+	},
+}
 
-	for _, tt := range tests {
+func TestRecommendPostgresOLTPSettings(t *testing.T) {
+	for _, tt := range recommendPostgresOLTPCases {
 		t.Run(tt.name, func(t *testing.T) {
 			opts := PostgresTuneOptions{
 				Enabled:           true,
@@ -122,7 +124,7 @@ func TestRecommendPostgresOLTPSettings(t *testing.T) {
 
 // A container without a CPU limit reports every core of its host.
 func TestDetectedPostgresTuneCPUsAreBounded(t *testing.T) {
-	for detected, want := range map[int]int{0: 1, 8: 8, 224: 16} {
+	for detected, want := range map[int]int{0: 1, 8: 8, 16: 16, 17: 16, 224: 16} {
 		if got := detectedPostgresTuneCPUs(detected); got != want {
 			t.Errorf("detectedPostgresTuneCPUs(%d) = %d, want %d", detected, got, want)
 		}

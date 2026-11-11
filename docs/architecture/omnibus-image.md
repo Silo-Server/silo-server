@@ -201,13 +201,14 @@ those settings, such as `shared_buffers`, only at start. So while
 restart-only settings Silo sizes from memory and CPUs, read from the same
 environment and `/config/silo/.env`. A new cluster then starts with them, and
 Silo's later `ALTER SYSTEM` writes the same values, so no restart is pending.
-The tuner bounds what it sizes from the machine: `shared_buffers` is a quarter
-of the memory budget up to a fixed 2GB,
-a detected CPU count sizes at most 16 workers (`POSTGRES_TUNE_CPUS` is used as
-given), and `autovacuum_work_mem` is at most 256MB. The `shared_buffers`
-ceiling is fixed, not sized from the database, because this file is written
-before the database has content and a value that grew with it would need a
-restart each time.
+An existing cluster whose `postgresql.auto.conf` holds an older value runs
+with that value until the restart after Silo rewrites it. Of the settings in
+this file, `shared_buffers` is a quarter of the memory budget up to a fixed
+2GB, and `max_worker_processes` follows a detected CPU count of at most 16
+(`POSTGRES_TUNE_CPUS` is used as given). The `shared_buffers` ceiling is
+fixed, not sized from the database, because this file is written before the
+database has content and a value that grew with it would need a restart each
+time.
 `max_connections` and `io_method` stay out: the first is sized from
 `database.max_connections`, which lives in the database, and an `io_method`
 PostgreSQL rejects would drop the whole file (below). Both apply at the next
