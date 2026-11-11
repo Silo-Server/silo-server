@@ -85,7 +85,7 @@
     display: block;
     width: 100%;
     height: 100%;
-    filter: blur(28px) saturate(1.2) brightness(0.6);
+    filter: blur(28px) saturate(1.2) brightness(0.5);
     transform: scale(1.3, -1.3);
   }
   .hud-ambient--top {
@@ -93,6 +93,11 @@
   }
   .hud-ambient--bottom {
     mask-image: linear-gradient(to bottom, #000, rgb(0 0 0 / 0.4) 50%, transparent);
+  }
+  /* The title above the picture sits on the brightest part of the glow, so
+     its second line takes the title's colour instead of the dimmer grey. */
+  .hud-portrait-title .hud-meta {
+    color: var(--hud-paper);
   }
 
   /* ── Buttons ────────────────────────────────────────────────── */

@@ -462,7 +462,7 @@ export function PlayerControls({
 
       {portraitTitleBottom !== null ? (
         <div
-          className="pointer-events-none absolute inset-x-0 z-10 flex px-[max(1.25rem,env(safe-area-inset-left))]"
+          className="hud-portrait-title pointer-events-none absolute inset-x-0 z-10 flex px-[max(1.25rem,env(safe-area-inset-left))]"
           style={{ bottom: portraitTitleBottom }}
         >
           <TitleBlock title={title} subtitleLabel={subtitleLabel} chapterTitle={chapterTitle} />
