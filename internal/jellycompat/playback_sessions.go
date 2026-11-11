@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -209,6 +210,13 @@ type CompatPlaybackStore interface {
 	// HideFromRouting immediately makes a caller-owned session unavailable to
 	// stream/progress routing before slower durable terminal staging begins.
 	HideFromRouting(id, compatToken string) error
+	// RetireUpstreamSession hides the play attached to an upstream session
+	// from routing, as HideFromRouting does, for every server process that
+	// shares the store. It retires only a play whose stream the server
+	// produces (adminEndRetiresPlay) and reports whether it retired one. An
+	// error means the retirement may not have reached the other processes,
+	// so the caller retries it.
+	RetireUpstreamSession(upstreamSessionID string) (bool, error)
 	// StageTerminal hides a session from playback routing and durably records
 	// the provider event. An authoritative Stopped event replaces a fallback;
 	// a later fallback can never replace an authoritative event.
@@ -399,6 +407,45 @@ func (s *PlaybackSessionStore) HideFromRouting(id, compatToken string) error {
 	session.UpdatedAt = s.now()
 	s.sessions[id] = session
 	return nil
+}
+
+// adminEndRetiredMethods are the upstream play methods whose play an
+// administrator's end retires: the streams the server produces. A direct play
+// stays routable. Its next request rebuilds the session under the same id,
+// which a proxy's deny marker refuses; with its row retired, a Static=true
+// client would start a new play under an id no marker covers. The method is
+// the row's current one, so a play that switched method is judged by the
+// stream it serves now.
+var adminEndRetiredMethods = []string{string(playback.PlayTranscode), string(playback.PlayRemux)}
+
+func adminEndRetiresPlay(upstreamPlayMethod string) bool {
+	return slices.Contains(adminEndRetiredMethods, upstreamPlayMethod)
+}
+
+// RetireUpstreamSession implements CompatPlaybackStore.
+func (s *PlaybackSessionStore) RetireUpstreamSession(upstreamSessionID string) (bool, error) {
+	play, ok := s.FindByUpstreamSessionID(upstreamSessionID)
+	return ok && s.retireIfOnUpstream(play.ID, upstreamSessionID), nil
+}
+
+// retireIfOnUpstream hides a play from routing only while it still names
+// upstreamSessionID with a play method an administrator's end retires. The
+// check and the mark share one lock, so a method or upstream switch that
+// lands after the caller looked the play up leaves the play it attached
+// alone.
+func (s *PlaybackSessionStore) retireIfOnUpstream(id, upstreamSessionID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session, ok := s.sessions[id]
+	now := s.now()
+	if !ok || session.Terminal || !session.ExpiresAt.After(now) ||
+		session.UpstreamSessionID != upstreamSessionID || !adminEndRetiresPlay(session.UpstreamPlayMethod) {
+		return false
+	}
+	session.Terminal = true
+	session.UpdatedAt = now
+	s.sessions[id] = session
+	return true
 }
 
 func (s *PlaybackSessionStore) terminalIDsByCompatToken(compatToken string) map[string]struct{} {
@@ -704,6 +751,12 @@ func (s *PlaybackSessionStore) findByClientPlaySessionID(
 // FindByUpstreamSessionID resolves the unique compat play attached to a local
 // upstream session.
 func (s *PlaybackSessionStore) FindByUpstreamSessionID(upstreamSessionID string) (*PlaybackSession, bool) {
+	return s.findOnUpstream(upstreamSessionID, false)
+}
+
+// findOnUpstream resolves the play attached to an upstream session: the
+// routable one, or with hidden the one already hidden from routing.
+func (s *PlaybackSessionStore) findOnUpstream(upstreamSessionID string, hidden bool) (*PlaybackSession, bool) {
 	if upstreamSessionID == "" {
 		return nil, false
 	}
@@ -712,7 +765,7 @@ func (s *PlaybackSessionStore) FindByUpstreamSessionID(upstreamSessionID string)
 
 	now := s.now()
 	for _, session := range s.sessions {
-		if session.ExpiresAt.After(now) && !session.Terminal && session.UpstreamSessionID == upstreamSessionID {
+		if session.ExpiresAt.After(now) && session.Terminal == hidden && session.UpstreamSessionID == upstreamSessionID {
 			copy := session
 			return &copy, true
 		}

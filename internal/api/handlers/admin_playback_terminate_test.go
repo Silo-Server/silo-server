@@ -170,3 +170,25 @@ func TestAdminTerminateRevokesAnAttemptHeldElsewhere(t *testing.T) {
 		t.Fatalf("remote attempt not stopped by an administrator: %+v %v", record, err)
 	}
 }
+
+// TestAdminTerminateEndsAJellyfinPlayHeldElsewhere: a Jellyfin play has no
+// attempt row to stop, so a terminate that lands on a replica without the
+// session reaches the play only through the Jellyfin surface. When that
+// surface ends the play, the terminate reports the revocation instead of an
+// unknown session.
+func TestAdminTerminateEndsAJellyfinPlayHeldElsewhere(t *testing.T) {
+	control, sessionMgr, _, _ := newAdminPlaybackControlTestHandler(t)
+	remote := uuid.NewString()
+	sessionMgr.SetCompatAdminEnd(func(_ context.Context, sessionID string) bool {
+		return sessionID == remote
+	})
+
+	view, err := control.Terminate(t.Context(), AdminTerminateInput{SessionID: remote, ActorID: 2})
+	if err != nil || !view.AuthorityRevoked || view.DurableState != AdminTerminateDurableStopped {
+		t.Fatalf("view = %+v, %v", view, err)
+	}
+	// A session neither surface knows stays unknown.
+	if _, err := control.Terminate(t.Context(), AdminTerminateInput{SessionID: uuid.NewString(), ActorID: 2}); !errors.Is(err, playback.ErrSessionNotFound) {
+		t.Fatalf("unknown session err = %v", err)
+	}
+}

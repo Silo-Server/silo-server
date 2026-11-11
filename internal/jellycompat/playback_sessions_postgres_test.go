@@ -210,6 +210,25 @@ func TestPlaybackSessionStoreTerminalClaimIsAtomicAndOwnerScoped(t *testing.T) {
 	}
 }
 
+// TestPlaybackSessionStoreRetireChecksUpstreamUnderLock: an end looks a play
+// up by its upstream session and then retires it. A method or upstream
+// switch that lands between the two must leave the play it attached alone,
+// so the retiring step checks the play again under the lock it marks it in.
+func TestPlaybackSessionStoreRetireChecksUpstreamUnderLock(t *testing.T) {
+	store := NewPlaybackSessionStore(time.Hour, nil)
+	store.Put(PlaybackSession{ID: "moved", CompatToken: "token", UpstreamSessionID: "new", UpstreamPlayMethod: "transcode"})
+	store.Put(PlaybackSession{ID: "direct", CompatToken: "token", UpstreamSessionID: "old", UpstreamPlayMethod: "direct"})
+	store.Put(PlaybackSession{ID: "current", CompatToken: "token", UpstreamSessionID: "old", UpstreamPlayMethod: "remux"})
+	for id, want := range map[string]bool{"moved": false, "direct": false, "current": true} {
+		if got := store.retireIfOnUpstream(id, "old"); got != want {
+			t.Errorf("retire %s for the old upstream session = %v, want %v", id, got, want)
+		}
+		if _, routable := store.Get(id); routable == want {
+			t.Errorf("%s routable = %v after the end", id, routable)
+		}
+	}
+}
+
 func TestPlaybackSessionStoreDeactivateRetainsOnlyFinalReportLookup(t *testing.T) {
 	store := NewPlaybackSessionStore(time.Hour, nil)
 	store.Put(PlaybackSession{
@@ -623,6 +642,280 @@ func TestDurableCompatPlaybackStoreUpdateRejectionAcrossReplicas(t *testing.T) {
 	}
 	if winners != 1 {
 		t.Fatalf("winners = %d (errs %v), want exactly one", winners, errs)
+	}
+}
+
+// TestDurableCompatPlaybackStoreRetiresUpstreamSessionAcrossReplicas: an
+// administrator's end can land on a replica that never served the play. The
+// retirement must stop the replica that does serve it from routing the play:
+// at once on the replica that retired it, and on the other once its cached
+// copy is revalidated. A direct play is retired from neither.
+func TestDurableCompatPlaybackStoreRetiresUpstreamSessionAcrossReplicas(t *testing.T) {
+	pool := newCompatTestPool(t)
+	now := time.Now()
+	clock := func() time.Time { return now }
+	holder := NewDurableCompatPlaybackStore(pool, time.Hour, clock)
+	other := NewDurableCompatPlaybackStore(pool, time.Hour, clock)
+	id := t.Name()
+	for upstream, method := range map[string]string{"up-remote": "transcode", "up-repeat": "transcode", "up-local": "remux", "up-direct": "direct"} {
+		holder.Put(PlaybackSession{ID: id + upstream, CompatToken: id, UpstreamSessionID: id + upstream, UpstreamPlayMethod: method})
+		t.Cleanup(func() { holder.Delete(id + upstream) })
+		if _, ok := holder.Get(id + upstream); !ok {
+			t.Fatalf("holder does not route %s", upstream)
+		}
+	}
+
+	for name, replica := range map[string]*DurableCompatPlaybackStore{"holder": holder, "other": other} {
+		if retired, err := replica.RetireUpstreamSession(id + "up-direct"); err != nil || retired {
+			t.Fatalf("retire a direct play from the %s = %v, %v, want it left alone", name, retired, err)
+		}
+	}
+
+	if retired, err := other.RetireUpstreamSession(id + "up-remote"); err != nil || !retired {
+		t.Fatalf("retire from the replica without the play = %v, %v", retired, err)
+	}
+	if retired, err := holder.RetireUpstreamSession(id + "up-local"); err != nil || !retired {
+		t.Fatalf("retire from the replica holding the play = %v, %v", retired, err)
+	}
+	if _, ok := holder.Get(id + "up-local"); ok {
+		t.Fatal("the replica that retired its own play still routes it")
+	}
+	// A repeat on the holder finds nothing left to retire, and stops the
+	// holder routing its cached copy without waiting for a revalidation.
+	if retired, err := other.RetireUpstreamSession(id + "up-repeat"); err != nil || !retired {
+		t.Fatalf("retire before the repeat = %v, %v", retired, err)
+	}
+	if retired, err := holder.RetireUpstreamSession(id + "up-repeat"); err != nil || retired {
+		t.Fatalf("repeat retire = %v, %v, want nothing left to retire", retired, err)
+	}
+	if _, ok := holder.Get(id + "up-repeat"); ok {
+		t.Fatal("the holder still routes its cached copy after a repeat end")
+	}
+	now = now.Add(compatCacheRevalidationInterval)
+	if _, ok := holder.Get(id + "up-remote"); ok {
+		t.Fatal("the holder still routes a play another replica retired")
+	}
+	if _, ok := holder.Get(id + "up-direct"); !ok {
+		t.Fatal("the holder no longer routes the direct play")
+	}
+}
+
+// TestDurableCompatPlaybackStoreRetireLeavesMovedPlay: a replica whose cached
+// copy still names an upstream session, and still owes the row an unrelated
+// write, must not retire the play from that copy once another replica has
+// moved it to a new upstream session. The row decides: it stays routable, the
+// owed write still lands, and the replica adopts the row's state. The owed
+// write is queued the way a failed Update queues it, which a live pool cannot
+// be made to do.
+func TestDurableCompatPlaybackStoreRetireLeavesMovedPlay(t *testing.T) {
+	pool := newCompatTestPool(t)
+	stale := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	mover := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	for _, method := range []string{"direct", "transcode"} {
+		t.Run("moved to "+method, func(t *testing.T) {
+			id := t.Name()
+			oldUpstream, newUpstream := id+"-old", id+"-new"
+			stale.Put(PlaybackSession{ID: id, CompatToken: id, UpstreamSessionID: oldUpstream, UpstreamPlayMethod: "transcode"})
+			t.Cleanup(func() { stale.Delete(id) })
+			owed := func(session *PlaybackSession) error {
+				session.ProgressPersistenceKnown = true
+				return nil
+			}
+			if err := stale.mem.Update(id, owed); err != nil {
+				t.Fatal(err)
+			}
+			stale.appendPendingUpdate(id, id, owed)
+			if err := mover.Update(id, func(session *PlaybackSession) error {
+				session.UpstreamSessionID, session.UpstreamPlayMethod = newUpstream, method
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			if retired, err := stale.RetireUpstreamSession(oldUpstream); err != nil || retired {
+				t.Fatalf("retire the replaced upstream session = %v, %v, want nothing retired", retired, err)
+			}
+			row, ok, err := mover.load(id)
+			if err != nil || !ok || row.Terminal || row.UpstreamSessionID != newUpstream || !row.ProgressPersistenceKnown {
+				t.Fatalf("row = %+v, %v, %v; want the moved play routable with the owed write applied", row, ok, err)
+			}
+			if got, ok := stale.Get(id); !ok || got.UpstreamSessionID != newUpstream || got.UpstreamPlayMethod != method {
+				t.Fatalf("stale replica reads %+v, %v; want the row's new upstream session", got, ok)
+			}
+		})
+	}
+
+	// The owed write is the attach itself: the row learns the upstream
+	// session first, and is then retired by it.
+	t.Run("owed attach", func(t *testing.T) {
+		id := t.Name()
+		stale.Put(PlaybackSession{ID: id, CompatToken: id})
+		t.Cleanup(func() { stale.Delete(id) })
+		attach := func(session *PlaybackSession) error {
+			session.UpstreamSessionID, session.UpstreamPlayMethod = id+"-up", "transcode"
+			return nil
+		}
+		if err := stale.mem.Update(id, attach); err != nil {
+			t.Fatal(err)
+		}
+		stale.appendPendingUpdate(id, id, attach)
+		if retired, err := stale.RetireUpstreamSession(id + "-up"); err != nil || !retired {
+			t.Fatalf("retire = %v, %v", retired, err)
+		}
+		if row, ok, err := mover.load(id); err != nil || !ok || !row.Terminal || row.UpstreamSessionID != id+"-up" {
+			t.Fatalf("row = %+v, %v, %v; want it retired under its upstream session", row, ok, err)
+		}
+	})
+
+	// A play that never reached Postgres is hidden where it lives, and no
+	// row is written for it.
+	t.Run("never persisted", func(t *testing.T) {
+		id := t.Name()
+		stale.mem.Put(PlaybackSession{ID: id, CompatToken: id, UpstreamSessionID: id + "-up", UpstreamPlayMethod: "remux"})
+		stale.markUnpersisted(id)
+		t.Cleanup(func() { stale.Delete(id) })
+		if retired, err := stale.RetireUpstreamSession(id + "-up"); err != nil || !retired {
+			t.Fatalf("retire = %v, %v", retired, err)
+		}
+		if _, ok := stale.Get(id); ok {
+			t.Fatal("the hidden copy is still routable")
+		}
+		if _, ok, err := mover.load(id); err != nil || ok {
+			t.Fatalf("a row was written for the hidden copy: %v, %v", ok, err)
+		}
+	})
+}
+
+// TestDurableCompatPlaybackStoreRetryAfterFailedStatement: a retirement whose
+// statement fails while the play's attach is still owed hides the copy,
+// keeps its owed writes, and reports the error. The retry replays them and
+// retires the row in one transaction, so no other replica keeps routing the
+// play. A row that another replica attached to its own upstream session in
+// the meantime is left alone. The outage is a closed pool for that one call.
+func TestDurableCompatPlaybackStoreRetryAfterFailedStatement(t *testing.T) {
+	pool := newCompatTestPool(t)
+	closed, err := pgxpool.New(t.Context(), os.Getenv("SILO_TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed.Close()
+	stale := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	mover := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	for _, moved := range []bool{false, true} {
+		t.Run(fmt.Sprintf("row moved=%v", moved), func(t *testing.T) {
+			id := t.Name()
+			upstream, wantUpstream := id+"-up", id+"-up"
+			stale.Put(PlaybackSession{ID: id, CompatToken: id})
+			t.Cleanup(func() { stale.Delete(id) })
+			attach := func(session *PlaybackSession) error {
+				if session.UpstreamSessionID != "" {
+					return errUpstreamReplaced
+				}
+				session.UpstreamSessionID, session.UpstreamPlayMethod = upstream, "transcode"
+				return nil
+			}
+			if err := stale.mem.Update(id, attach); err != nil {
+				t.Fatal(err)
+			}
+			stale.appendPendingUpdate(id, id, attach)
+			stale.pool = closed
+			hidden, outageErr := stale.RetireUpstreamSession(upstream)
+			stale.pool = pool
+			if outageErr == nil || !hidden {
+				t.Fatalf("retire during the outage = %v, %v, want the copy hidden and an error to retry on", hidden, outageErr)
+			}
+			if _, ok := stale.Get(id); ok {
+				t.Fatal("the copy is still routable after the failed statement")
+			}
+			if moved {
+				wantUpstream = id + "-other"
+				if err := mover.Update(id, func(session *PlaybackSession) error {
+					session.UpstreamSessionID, session.UpstreamPlayMethod = wantUpstream, "direct"
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			if retired, err := stale.RetireUpstreamSession(upstream); err != nil || retired == moved {
+				t.Fatalf("retry = %v, %v, want retired = %v", retired, err, !moved)
+			}
+			if row, ok, err := mover.load(id); err != nil || !ok || row.Terminal == moved || row.UpstreamSessionID != wantUpstream {
+				t.Fatalf("row = %+v, %v, %v; want terminal = %v on %s", row, ok, err, !moved, wantUpstream)
+			}
+			if _, ok := mover.Get(id); ok != moved {
+				t.Fatalf("the other replica routes the play = %v, want %v", ok, moved)
+			}
+			if stale.hasPendingUpdates(id) {
+				t.Fatal("the stale replica still owes writes")
+			}
+		})
+	}
+}
+
+// TestDurableCompatPlaybackStoreRetireHidesCopyWhenReplayFails: the statement
+// matches nothing because the row never received the attach, and replaying
+// the owed attach then fails. That is a failed retirement, not an answer
+// from the row: the copy is hidden with its owed writes and the error is
+// reported, so the retry finishes it. The replay fails on a row another
+// transaction holds locked; the store's connections give up on the lock
+// after 200ms.
+func TestDurableCompatPlaybackStoreRetireHidesCopyWhenReplayFails(t *testing.T) {
+	pool := newCompatTestPool(t)
+	config, err := pgxpool.ParseConfig(os.Getenv("SILO_TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.ConnConfig.RuntimeParams["lock_timeout"] = "200ms"
+	impatient, err := pgxpool.NewWithConfig(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(impatient.Close)
+	stale := NewDurableCompatPlaybackStore(impatient, time.Hour, nil)
+	other := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	id := t.Name()
+	upstream := id + "-up"
+	stale.Put(PlaybackSession{ID: id, CompatToken: id})
+	t.Cleanup(func() { stale.Delete(id) })
+	attach := func(session *PlaybackSession) error {
+		if session.UpstreamSessionID != "" {
+			return errUpstreamReplaced
+		}
+		session.UpstreamSessionID, session.UpstreamPlayMethod = upstream, "transcode"
+		return nil
+	}
+	if err := stale.mem.Update(id, attach); err != nil {
+		t.Fatal(err)
+	}
+	stale.appendPendingUpdate(id, id, attach)
+
+	tx, err := pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(t.Context(), `SELECT 1 FROM jellycompat_playback_sessions WHERE id = $1 FOR UPDATE`, id); err != nil {
+		t.Fatal(err)
+	}
+	hidden, replayErr := stale.RetireUpstreamSession(upstream)
+	if err := tx.Rollback(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if replayErr == nil || !hidden {
+		t.Fatalf("retire with a failed replay = %v, %v, want the copy hidden and an error to retry on", hidden, replayErr)
+	}
+	if _, ok := stale.Get(id); ok {
+		t.Fatal("the copy still routes the ended upstream session")
+	}
+
+	if retired, err := stale.RetireUpstreamSession(upstream); err != nil || !retired {
+		t.Fatalf("retry = %v, %v, want the row retired", retired, err)
+	}
+	if row, ok, err := other.load(id); err != nil || !ok || !row.Terminal || row.UpstreamSessionID != upstream {
+		t.Fatalf("row = %+v, %v, %v; want it retired under its upstream session", row, ok, err)
+	}
+	if _, ok := other.Get(id); ok {
+		t.Fatal("another replica still routes the play")
 	}
 }
 
