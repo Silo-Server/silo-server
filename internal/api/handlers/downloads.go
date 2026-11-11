@@ -43,8 +43,8 @@ type DownloadService interface {
 	SyncSubscriptions(ctx context.Context, userID int, profileID, deviceID string, filter catalog.AccessFilter) (int, error)
 	ServeDirect(ctx context.Context, w http.ResponseWriter, r *http.Request, userID, fileID int, format string, filter catalog.AccessFilter) error
 	ServeFile(ctx context.Context, w http.ResponseWriter, r *http.Request, userID int, profileID, deviceID, downloadID string, filter catalog.AccessFilter) error
-	List(ctx context.Context, userID int, profileID, deviceID string) ([]*downloads.Download, error)
-	Delete(ctx context.Context, userID int, profileID, deviceID, downloadID string) error
+	List(ctx context.Context, userID int, profileID, deviceID string, filter catalog.AccessFilter) ([]*downloads.Download, error)
+	Delete(ctx context.Context, userID int, profileID, deviceID, downloadID string, filter catalog.AccessFilter) error
 	PatchStatus(ctx context.Context, userID int, profileID, deviceID, downloadID, status string) error
 	BuildManifest(ctx context.Context, userID int, profileID, deviceID, downloadID string, filter catalog.AccessFilter) (*downloads.OfflineManifest, error)
 	BuildBatchManifests(ctx context.Context, userID int, profileID, deviceID, batchID string, filter catalog.AccessFilter) ([]*downloads.OfflineManifest, []downloads.SkippedManifest, error)
@@ -376,7 +376,7 @@ func (h *DownloadHandler) HandleListDownloads(w http.ResponseWriter, r *http.Req
 	}
 
 	profileID, deviceID, _, _ := managedIdentity(r)
-	list, err := h.svc.List(r.Context(), userID, profileID, deviceID)
+	list, err := h.svc.List(r.Context(), userID, profileID, deviceID, requestAccessFilter(r))
 	if err != nil {
 		if errors.Is(err, downloads.ErrProfileRequired) {
 			writeError(w, http.StatusBadRequest, "profile_required", "A profile is required for managed downloads")
@@ -412,7 +412,7 @@ func (h *DownloadHandler) HandleDeleteDownload(w http.ResponseWriter, r *http.Re
 	}
 
 	profileID, deviceID, _, _ := managedIdentity(r)
-	if err := h.svc.Delete(r.Context(), userID, profileID, deviceID, id); err != nil {
+	if err := h.svc.Delete(r.Context(), userID, profileID, deviceID, id, requestAccessFilter(r)); err != nil {
 		if errors.Is(err, downloads.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "not_found", "Download not found")
 			return
