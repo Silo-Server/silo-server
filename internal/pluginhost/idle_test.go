@@ -327,14 +327,27 @@ func TestIdleStopRefusesACallbackAfterTheDecision(t *testing.T) {
 	clock := &idleClock{now: time.Unix(1000, 0)}
 	host, inst, _ := idleTestHost(t, clock, 7)
 
-	clock.Advance(testIdlePeriod)
-	if !host.stopIfIdle(context.Background(), 7, inst) {
-		t.Fatal("did not stop an instance idle for the whole period")
+	// Hold the teardown open: the callback lands while the process is being
+	// stopped, the window the decision has to cover.
+	inTeardown := make(chan struct{})
+	release := make(chan struct{})
+	inst.cancelMonitors = func() {
+		close(inTeardown)
+		<-release
 	}
+	clock.Advance(testIdlePeriod)
+	stopped := make(chan bool, 1)
+	go func() { stopped <- host.stopIfIdle(context.Background(), 7, inst) }()
+	<-inTeardown
+
 	ran := false
 	handler := func(context.Context, any) (any, error) { ran = true; return nil, nil }
 	_, err := inst.activity.unaryServer(context.Background(), nil, &grpc.UnaryServerInfo{}, handler)
+	close(release)
+	if !<-stopped {
+		t.Fatal("did not stop an instance idle for the whole period")
+	}
 	if status.Code(err) != codes.Unavailable || ran {
-		t.Fatalf("callback after the idle stop decision: err = %v, handler ran = %v; want Unavailable without running it", err, ran)
+		t.Fatalf("callback during the idle stop: err = %v, handler ran = %v; want Unavailable without running it", err, ran)
 	}
 }
