@@ -73,6 +73,7 @@
     {
       "id": 1,
       "middleware": [
+        "httpstream.NoSniff",
         "apimw.RequestID",
         "clientip.Middleware(deps.ClientIPResolver) [when deps.ClientIPResolver != nil]",
         "netaccess.Middleware(deps.NetworkAccess.Registry) [when deps.NetworkAccess != nil]",
