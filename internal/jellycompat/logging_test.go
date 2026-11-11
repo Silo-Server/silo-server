@@ -51,6 +51,7 @@ func TestRequestLoggerRedactsQueryCredentials(t *testing.T) {
 	for _, want := range []string{
 		`"route":"` + hlsRoute + `"`, `"path":"/Videos/item-1/hls/`, `"original_path":"/emby/videos/item-1/hls/`,
 		"/12.ts", "MediaSourceId=source-1", `"status":405`,
+		`"play_session_id":"` + playSessionFingerprint("play-session-secret") + `"`,
 	} {
 		if !strings.Contains(logs.String(), want) {
 			t.Errorf("missing diagnostic %q: %s", want, logs.String())
@@ -58,6 +59,20 @@ func TestRequestLoggerRedactsQueryCredentials(t *testing.T) {
 	}
 	if !strings.Contains(debugLogs.String(), "/Videos/item-1/hls/") {
 		t.Errorf("debug log lost the route and item: %s", debugLogs.String())
+	}
+}
+
+func TestRedactHLSPlaySessionID(t *testing.T) {
+	for path, want := range map[string]string{
+		"/Videos/item-1/hls/play-1/12.ts":                "/Videos/item-1/hls/[REDACTED]/12.ts",
+		"/Videos/item-1/audio-v2/hls/play-1/stream.m3u8": "/Videos/item-1/audio-v2/hls/[REDACTED]/stream.m3u8",
+		"/emby/videos/item-1/hls/play-1/12.ts":           "/emby/videos/item-1/hls/[REDACTED]/12.ts",
+		"/Videos/hls/stream":                             "/Videos/hls/stream",
+		"/Items/item-1/hls/play-1/12.ts":                 "/Items/item-1/hls/play-1/12.ts",
+	} {
+		if got := redactHLSPlaySessionID(path); got != want {
+			t.Errorf("redactHLSPlaySessionID(%q) = %q, want %q", path, got, want)
+		}
 	}
 }
 

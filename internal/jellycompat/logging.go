@@ -108,6 +108,11 @@ func requestLoggerMiddleware(next http.Handler) http.Handler {
 			"auth_kind", authKind(r),
 		}
 		attrs = append(attrs, db.LogAttrs()...)
+		// The path and query no longer name the play, so this is what ties a
+		// request to the other log lines about it.
+		if id := firstNonEmpty(newCaseInsensitiveQuery(r.URL.Query()).Get("PlaySessionId"), chi.URLParam(r, "playlistId")); id != "" {
+			attrs = append(attrs, "play_session_id", playSessionFingerprint(id))
+		}
 		slog.InfoContext(r.Context(), "jellycompat request", attrs...)
 	})
 }
