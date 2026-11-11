@@ -285,14 +285,9 @@ func TestPlaybackClientInfoForStartV3(t *testing.T) {
 			want:    playback.ClientInfo{Name: "Silo iOS", Build: "42"},
 		},
 		{
-			name:    "v1 bridge records the registry device headers",
-			headers: map[string]string{"X-Silo-Device-Id": " tv-1 ", "X-Silo-Device-Platform": "tvOS"},
-			want:    playback.ClientInfo{DeviceID: "tv-1", DevicePlatform: "tvOS"},
-		},
-		{
-			// On /api/v2 the request header carries the playback X-Device-ID,
-			// which is not the registry identity.
-			name:     "v2 records the declared device, not X-Device-ID",
+			// The request header carries the playback X-Device-ID, which is
+			// not the registry identity.
+			name:     "records the declared device, not X-Device-ID",
 			headers:  map[string]string{"X-Silo-Client": "Silo iOS", "X-Silo-Device-Id": "playback-device"},
 			declared: &DeviceMetadata{DeviceID: "iphone-1", DevicePlatform: "iOS"},
 			want:     playback.ClientInfo{Name: "Silo iOS", DeviceID: "iphone-1", DevicePlatform: "iOS"},
@@ -300,12 +295,12 @@ func TestPlaybackClientInfoForStartV3(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", nil)
+			req := httptest.NewRequest(http.MethodPost, "/api/v2/playback/start", nil)
 			for name, value := range tc.headers {
 				req.Header.Set(name, value)
 			}
 			if tc.declared != nil {
-				ctx := context.WithValue(WithNativeAPIV2(req.Context()), playbackDeclaredDeviceContextKey{}, *tc.declared)
+				ctx := context.WithValue(req.Context(), playbackDeclaredDeviceContextKey{}, *tc.declared)
 				req = req.WithContext(ctx)
 			}
 			got := playbackClientInfoForStartV3(req, tc.context)

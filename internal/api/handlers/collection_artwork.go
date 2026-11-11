@@ -21,6 +21,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/collage"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
 	"github.com/Silo-Server/silo-server/internal/netguard"
+	"github.com/Silo-Server/silo-server/internal/usercollections"
 )
 
 // Shared artwork helpers used by both the admin library_collections handler
@@ -89,29 +90,25 @@ func storeBundledCollectionPosterIfS3Configured(
 	return storedPath, thumbhashStr, true, nil
 }
 
-// readCollectionImageMultipart reads a single image file from a multipart
-// request, validating MIME type and size.
-func readCollectionImageMultipart(r *http.Request, fieldName string) ([]byte, error) {
-	file, header, err := r.FormFile(fieldName)
-	if err != nil {
-		return nil, err
+// personalCollectionPosterURL resolves a personal collection's stored poster,
+// or its collage, to a URL at card size. An image URL or a root-relative path
+// such as a bundled template poster is returned as stored. A storage key is
+// signed only when it is in the collection's own image directory
+// (usercollections.OwnsPosterKey), where its uploaded poster and collages are
+// written. Any other key reads as no poster, so a row that names one cannot
+// make the server sign an object the collection does not own.
+func personalCollectionPosterURL(ctx context.Context, resolver artworkurl.Resolver, collectionID, path string) string {
+	if path == "" {
+		return ""
 	}
-	defer file.Close()
-
-	switch header.Header.Get("Content-Type") {
-	case "image/jpeg", "image/png", "image/webp":
-	default:
-		return nil, fmt.Errorf("unsupported image type: %s", header.Header.Get("Content-Type"))
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") || strings.HasPrefix(path, "/") {
+		return catalog.ImageURLOrEmpty(path)
 	}
-	if header.Size > collectionImageMaxBytes {
-		return nil, fmt.Errorf("file exceeds 10 MB limit")
+	if resolver == nil || !usercollections.OwnsPosterKey(collectionID, path) {
+		return ""
 	}
-
-	data := make([]byte, header.Size)
-	if _, err := io.ReadFull(file, data); err != nil {
-		return nil, fmt.Errorf("reading file: %w", err)
-	}
-	return data, nil
+	key := cardThumbnailPath(path)
+	return resolver.ResolveURLs(ctx, []string{key})[key].URL
 }
 
 // invalidCollectionImage reports artwork the caller supplied that Silo cannot
@@ -120,10 +117,29 @@ func invalidCollectionImage(message string, cause error) *APIError {
 	return &APIError{Status: http.StatusBadRequest, Code: policyErrorBadRequest, Message: message, cause: cause}
 }
 
-// collectionArtworkError keeps a client-facing artwork error and hides any
-// other failure behind a 500 with the given message.
+// collectionImageBusyRetryAfter is the Retry-After, in seconds, on a busy
+// answer: the wait imageutil gives a source before it reports ErrBusy.
+const collectionImageBusyRetryAfter = 30
+
+// busyCollectionImage reports that image processing had no room for the
+// artwork. The image may be fine, so the caller is told to try again and is
+// not told the file is unsupported.
+func busyCollectionImage(cause error) *APIError {
+	return &APIError{
+		Status:     http.StatusServiceUnavailable,
+		Code:       policyErrorUnavailable,
+		Message:    "Image processing is busy; try again shortly.",
+		RetryAfter: collectionImageBusyRetryAfter,
+		cause:      cause,
+	}
+}
+
+// collectionArtworkError keeps a client-facing artwork error, including a
+// busy answer, and hides any other failure behind a 500 with the given
+// message.
 func collectionArtworkError(err error, message string) error {
-	if apiErr, ok := errors.AsType[*APIError](err); ok && apiErr.Status < http.StatusInternalServerError {
+	if apiErr, ok := errors.AsType[*APIError](err); ok &&
+		(apiErr.Status < http.StatusInternalServerError || apiErr.Status == http.StatusServiceUnavailable) {
 		return apiErr
 	}
 	return apiError(http.StatusInternalServerError, "internal_error", message)
@@ -238,8 +254,11 @@ func putCollectionImageVariants(
 	// decode, are the caller's artwork problem; any other failure stays a
 	// server error.
 	result, err := imageutil.GenerateVariants(fileData, widths)
-	if err != nil && (errors.Is(err, imageutil.ErrInvalidImage) || imageutil.PixelDataUndecodable(fileData)) {
+	if err != nil && imageutil.SourceUnusable(err, fileData) {
 		return "", "", invalidCollectionImage("The file is not a supported image.", err)
+	}
+	if errors.Is(err, imageutil.ErrBusy) {
+		return "", "", busyCollectionImage(err)
 	}
 	if err != nil {
 		return "", "", fmt.Errorf("generating image variants: %w", err)
@@ -261,6 +280,9 @@ func putCollectionImageVariants(
 
 	if len(w300Data) > 0 {
 		thumbhashStr, err = imageutil.Thumbhash(w300Data)
+		if errors.Is(err, imageutil.ErrBusy) {
+			return "", "", busyCollectionImage(err)
+		}
 		if err != nil {
 			return "", "", fmt.Errorf("computing thumbhash: %w", err)
 		}

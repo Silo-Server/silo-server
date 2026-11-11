@@ -76,10 +76,10 @@ func TestHTTPProxyUsesLaunchProfileWithoutRequestHeader(t *testing.T) {
 		profileTestProxyService{client: client}, profileTestInstallationStore{},
 	).WithUserThemeLookup(themes).WithUserIdentityLookup(identities)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/plugins/1/page", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/plugin-content/plugins/1/page", nil)
 	req = req.WithContext(WithPluginAccessUser(req.Context(), true, false, 7, "profile-1"))
 	rec := httptest.NewRecorder()
-	proxy.ServeRoute(rec, req, 1, true, false)
+	proxy.serveRoute(rec, req, 1, true, false)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
@@ -105,11 +105,11 @@ func TestHTTPProxyIgnoresUnverifiedProfileHeader(t *testing.T) {
 		profileTestProxyService{client: client}, profileTestInstallationStore{},
 	).WithUserThemeLookup(themes).WithUserIdentityLookup(identities)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/plugins/1/page", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/plugin-content/plugins/1/page", nil)
 	req.Header.Set("X-Profile-Id", "locked-profile")
 	req = req.WithContext(WithPluginAccessUser(req.Context(), true, false, 7, ""))
 	rec := httptest.NewRecorder()
-	proxy.ServeRoute(rec, req, 1, true, false)
+	proxy.serveRoute(rec, req, 1, true, false)
 
 	if rec.Code != http.StatusOK || client.request == nil {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
@@ -128,14 +128,14 @@ func TestHTTPProxyKeepsRenewedCookiesOutOfSharedCaches(t *testing.T) {
 	for _, renewed := range []bool{true, false} {
 		client := &profileTestRouteClient{responseHeaders: map[string]string{"Cache-Control": "public, max-age=600"}}
 		proxy := NewHTTPProxy(profileTestProxyService{client: client}, profileTestInstallationStore{})
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/plugins/1/page", nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/plugin-content/plugins/1/page", nil)
 		req = req.WithContext(WithPluginAccessUser(req.Context(), true, false, 7, "profile-1"))
 		rec := httptest.NewRecorder()
 		var cookie *http.Cookie
 		if renewed {
 			cookie = &http.Cookie{Name: "silo_plugin_access", Value: "renewed"}
 		}
-		proxy.ServeRoute(WithRenewedCookie(rec, cookie), req, 1, true, false)
+		proxy.serveRoute(WithRenewedCookie(rec, cookie), req, 1, true, false)
 		want := "public, max-age=600"
 		if renewed {
 			want = "private, no-store"

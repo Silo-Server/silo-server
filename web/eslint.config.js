@@ -5,6 +5,7 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import eslintConfigPrettier from "eslint-config-prettier";
 import eslintComments from "@eslint-community/eslint-plugin-eslint-comments";
 import formatjs from "eslint-plugin-formatjs";
+import noAdminMessage from "./eslint-rules/no-admin-message-outside-admin.js";
 import noPhysicalDirection from "./eslint-rules/no-physical-direction.js";
 
 // Requests infer their shape through the generated v2 contract.
@@ -38,16 +39,62 @@ const PLAIN_TEXT_IMPORT = {
     "Components use useT()/useServerText(), which re-render on a language change; t() and serverText() are for plain code.",
 };
 
+const I18N_TEXT_PROPS =
+  "{label,title,subtitle,description,help,placeholder,currentNote,alt,tooltip," +
+  "hint,detail,message,caption,eyebrow,heading,summary,note,empty," +
+  "*Label,*Text,*Hint,*Note,*Message,*Title,*Heading,*Description,*Summary,*Caption}";
+
 // Files and directories whose text is extracted to the message catalog. An
 // extraction PR adds its area here, one glob per line, sorted.
 const I18N_CONVERTED = [
+  "src/api/adminCollectionRows.ts",
+  "src/api/adminCollections.ts",
   "src/api/adminPolicy.ts",
   "src/api/adminSections.ts",
+  "src/api/v2/adminAccountSettings.ts",
+  "src/api/v2/adminApiKeys.ts",
+  "src/api/v2/adminAuthority.ts",
+  "src/api/v2/adminAutoscanAvailableSources.ts",
+  "src/api/v2/adminAutoscanConnections.ts",
+  "src/api/v2/adminAutoscanEvents.ts",
+  "src/api/v2/adminAutoscanInspection.ts",
+  "src/api/v2/adminAutoscanPagination.ts",
+  "src/api/v2/adminAutoscanRewrites.ts",
+  "src/api/v2/adminAutoscanScans.ts",
+  "src/api/v2/adminAutoscanSources.ts",
+  "src/api/v2/adminBackupRestore.ts",
+  "src/api/v2/adminBackups.ts",
+  "src/api/v2/adminBackupUpload.ts",
+  "src/api/v2/adminDevices.ts",
+  "src/api/v2/adminDiagnosticDownload.ts",
+  "src/api/v2/adminDownloadPreparations.ts",
+  "src/api/v2/adminDownloadStorage.ts",
+  "src/api/v2/adminDownloadStorageCache.ts",
+  "src/api/v2/adminHistoryImports.ts",
+  "src/api/v2/adminImages.ts",
+  "src/api/v2/adminLogsSocket.ts",
+  "src/api/v2/adminPlaybackCommands.ts",
+  "src/api/v2/adminPlaybackHistory.ts",
+  "src/api/v2/adminPluginUpload.ts",
+  "src/api/v2/adminRequests.ts",
+  "src/api/v2/adminSessions.ts",
+  "src/api/v2/adminSessionsCache.ts",
+  "src/api/v2/adminSettingsSnapshot.ts",
+  "src/api/v2/adminSplit.ts",
+  "src/api/v2/adminSubtitleBytes.ts",
+  "src/api/v2/adminSubtitleDelete.ts",
+  "src/api/v2/adminSubtitleMetadata.ts",
   "src/api/v2/adminSubtitleProviderConfiguration.ts",
+  "src/api/v2/adminSubtitles.ts",
+  "src/api/v2/adminTasks.ts",
+  "src/api/v2/adminUserActivity.ts",
+  "src/api/v2/adminUsers.ts",
   "src/App.tsx",
   "src/components/AddToCollectionDialog.tsx",
   "src/components/admin/**",
   "src/components/AdminCatalogMaintenance.tsx",
+  "src/components/adminCatalogMaintenanceFormatters.ts",
+  "src/components/adminCatalogMaintenancePathRewrites.ts",
   "src/components/AdminDownloadPreparationsRefresh.tsx",
   "src/components/AdminJobHistory.tsx",
   "src/components/AdminLayout.tsx",
@@ -122,6 +169,7 @@ const I18N_CONVERTED = [
   "src/components/NowListeningHero.tsx",
   "src/components/onboarding/**",
   "src/components/overlays/CardWatchStatus.tsx",
+  "src/components/overlays/OverlayPreviewCard.tsx",
   "src/components/overlays/OverlayPreviewVariantToggle.tsx",
   "src/components/overlays/settings/**",
   "src/components/page/**",
@@ -133,6 +181,7 @@ const I18N_CONVERTED = [
   "src/components/policy/**",
   "src/components/profiles/**",
   "src/components/ratings/**",
+  "src/components/RealtimeEventsProvider.tsx",
   "src/components/RecommendationGrid.tsx",
   "src/components/RefreshFailedNotice.tsx",
   "src/components/RefreshMetadataDialog.tsx",
@@ -163,29 +212,20 @@ const I18N_CONVERTED = [
   "src/components/UserPolicyFields.tsx",
   "src/components/watchlist/**",
   "src/components/watchtogether/**",
+  "src/contexts/BrandingProvider.tsx",
   "src/hooks/admin/**",
-  "src/hooks/queries/admin/branding.ts",
-  "src/hooks/queries/admin/dashboardLayout.ts",
-  "src/hooks/queries/admin/diagnostics.ts",
-  "src/hooks/queries/admin/invitations.ts",
-  "src/hooks/queries/admin/inviteCodes.ts",
-  "src/hooks/queries/admin/networkAccess.ts",
-  "src/hooks/queries/admin/nodes.ts",
-  "src/hooks/queries/admin/overlayImages.ts",
-  "src/hooks/queries/admin/plugins.ts",
-  "src/hooks/queries/admin/rateLimits.ts",
-  "src/hooks/queries/admin/scanControls.ts",
-  "src/hooks/queries/admin/serverNotificationChannels.ts",
-  "src/hooks/queries/admin/settings.ts",
-  "src/hooks/queries/admin/tasks.ts",
-  "src/hooks/queries/admin/userProfiles.ts",
-  "src/hooks/queries/admin/users.ts",
+  "src/hooks/queries/collections.ts",
+  "src/hooks/queries/admin/**",
   "src/hooks/queries/collectionScope.ts",
+  "src/hooks/queries/devices.ts",
   "src/hooks/queries/favorites.ts",
   "src/hooks/queries/history-import.ts",
+  "src/hooks/queries/history.ts",
   "src/hooks/queries/homeDismissals.ts",
+  "src/hooks/queries/homeRows/useAdminHomeRows.ts",
   "src/hooks/queries/homeRows/useHomeLayoutExport.ts",
   "src/hooks/queries/homeRows/useProfileHomeRows.ts",
+  "src/hooks/queries/homeRows/useProfileHomeRowsAdapter.ts",
   "src/hooks/queries/items.ts",
   "src/hooks/queries/markers.ts",
   "src/hooks/queries/notificationWebhooks.ts",
@@ -194,14 +234,22 @@ const I18N_CONVERTED = [
   "src/hooks/queries/profiles.ts",
   "src/hooks/queries/ratings.ts",
   "src/hooks/queries/sections.ts",
+  "src/hooks/queries/shuffles.ts",
   "src/hooks/queries/subtitles.ts",
+  "src/hooks/queries/trackPreferences.ts",
   "src/hooks/queries/useAutoscan.ts",
   "src/hooks/queries/useRequests.ts",
   "src/hooks/queries/watchlist.ts",
   "src/hooks/queries/watchlistTitles.ts",
   "src/hooks/queries/watchProviders.ts",
   "src/hooks/queries/webhook-sync.ts",
+  "src/hooks/useServerBranding.ts",
+  "src/hooks/useSortableAccessibility.ts",
+  "src/hooks/useTTS.ts",
+  "src/hooks/useAdminNavTopics.ts",
+  "src/hooks/useIsActingAdmin.ts",
   "src/lib/accountOwner.ts",
+  "src/lib/adminJobs.ts",
   "src/lib/adminNavigation.ts",
   "src/lib/adminSettingsSearch.ts",
   "src/lib/aiProviders.ts",
@@ -222,6 +270,7 @@ const I18N_CONVERTED = [
   "src/lib/markers.ts",
   "src/lib/mediaFormat.ts",
   "src/lib/overlays/icons.tsx",
+  "src/lib/plexAuth.ts",
   "src/lib/pluginCapabilities.ts",
   "src/lib/pluginPresentation.ts",
   "src/lib/pluginStatus.ts",
@@ -230,10 +279,13 @@ const I18N_CONVERTED = [
   "src/lib/requestAccess.ts",
   "src/lib/requestRoutingOptions.ts",
   "src/lib/scanRuns.ts",
+  "src/lib/settingsAdminDefaults.ts",
   "src/lib/taskProgress.ts",
   "src/lib/taskTrigger.ts",
   "src/lib/tmdbGenres.ts",
   "src/lib/upcomingEventPresentation.ts",
+  "src/lib/watchlistTitles.ts",
+  "src/lib/webPush.ts",
   "src/pages/ActivateDevice.tsx",
   "src/pages/admin-backups/**",
   "src/pages/admin-downloads/**",
@@ -256,10 +308,12 @@ const I18N_CONVERTED = [
   "src/pages/AdminDiagnostics.tsx",
   "src/pages/AdminDiagnostics.filters.ts",
   "src/pages/AdminDiagnostics.parts.tsx",
+  "src/pages/adminDownloadPreparationPresentation.ts",
   "src/pages/AdminDownloads.tsx",
   "src/pages/AdminHistoryImport.tsx",
   "src/pages/AdminHomeRows.tsx",
   "src/pages/AdminLibraries.tsx",
+  "src/pages/adminLibraryOrder.ts",
   "src/pages/AdminLogs.tsx",
   "src/pages/AdminLogs.format.ts",
   "src/pages/AdminLogsPlaybackSummary.tsx",
@@ -343,6 +397,51 @@ const PHYSICAL_DIRECTION = [
   "src/player/components/PlaybackSpeedTrack.tsx",
   "src/player/components/SeekBar.tsx",
   "src/player/components/VolumeControl.tsx",
+];
+
+// Files that may use `web.admin.*` messages: the admin area, the setup wizard
+// and modules only they import. Admin text is its own catalog chunk that a
+// non-admin never loads (see src/i18n/README.md), so any other file must use a
+// different namespace. A file that mixes admin and shared text is listed only
+// when what non-admin screens call from it uses no admin key.
+const ADMIN_TEXT_PATHS = [
+  // Admin pages, components, hooks and API clients.
+  "src/api/admin*",
+  "src/api/v2/admin*",
+  "src/components/[Aa]dmin*",
+  "src/components/admin/**",
+  "src/hooks/admin/**",
+  "src/hooks/queries/admin/**",
+  "src/hooks/queries/homeRows/useAdminHomeRows.ts",
+  "src/lib/admin*",
+  "src/pages/Admin*",
+  "src/pages/admin*",
+  "src/pages/admin*/**",
+  // The setup wizard waits for the admin part (useAdminMessages).
+  "src/components/FolderBrowser.tsx",
+  "src/pages/setup-wizard/**",
+  "src/pages/SetupWizard.tsx",
+  // Surfaces an admin sees outside the admin layout; each waits for the part
+  // with useAdminMessages({ optional: true }).
+  "src/components/ServerActivity.tsx",
+  // Helpers only admin pages import.
+  "src/hooks/queries/useAutoscan.ts",
+  "src/lib/accountOwner.ts",
+  "src/lib/aiProviders.ts",
+  "src/lib/externalSignInAdmin.ts",
+  "src/lib/plugin*.ts",
+  "src/lib/requestAccess.ts",
+  "src/lib/requestRoutingOptions.ts",
+  "src/lib/scanRuns.ts",
+  "src/lib/taskProgress.ts",
+  "src/lib/taskText.ts",
+  "src/lib/taskTrigger.ts",
+  // Shared with non-admin screens, which call only the parts without admin keys:
+  // documentTitle's resolveDocumentTitle, profileDataTypes' DATA_TYPE_LABELS,
+  // dataCountsPhrase and titleList, sections' profile hooks.
+  "src/hooks/queries/sections.ts",
+  "src/lib/documentTitle.ts",
+  "src/lib/profileDataTypes.ts",
 ];
 
 export default tseslint.config(
@@ -434,6 +533,13 @@ export default tseslint.config(
     rules: { "silo/no-physical-direction": "error" },
   },
   {
+    files: ["src/**/*.{ts,tsx}"],
+    // test-setup.ts preloads the admin part, so a test can't tell.
+    ignores: [...ADMIN_TEXT_PATHS, "src/i18n/**", "**/*.test.*", "**/*.test-support.*"],
+    plugins: { "silo-admin-text": { rules: { "no-admin-message": noAdminMessage } } },
+    rules: { "silo-admin-text/no-admin-message": "error" },
+  },
+  {
     files: ["src/i18n/**"],
     rules: { "no-restricted-imports": "off" },
   },
@@ -447,9 +553,12 @@ export default tseslint.config(
         "error",
         {
           props: {
-            include: [
-              ["*", "{label,title,subtitle,description,help,placeholder,currentNote,alt,tooltip}"],
-            ],
+            // Props that carry text a person reads. The suffix globs catch the
+            // many component props named for what they show (confirmLabel,
+            // emptyText, ...); className, variant, id and similar stay out.
+            include: [["*", I18N_TEXT_PROPS]],
+            // An HTML attribute whose value is a keyboard keyword, not text.
+            exclude: [["*", "enterKeyHint"]],
           },
         },
       ],

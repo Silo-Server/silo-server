@@ -7,8 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/gorilla/websocket"
+
+	"github.com/Silo-Server/silo-server/internal/clientip"
 )
 
 func TestSocketOriginTrustedProxy(t *testing.T) {

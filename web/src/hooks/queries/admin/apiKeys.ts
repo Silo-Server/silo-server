@@ -20,6 +20,7 @@ import {
   type CreateBody,
 } from "@/api/v2/adminApiKeys";
 import { adminKeys } from "../keys";
+import { t } from "@/i18n";
 
 const listKey = (scope: string) => [...adminKeys.apiKeys(), scope] as const;
 const staleTime = 30_000;
@@ -31,7 +32,7 @@ export function useAdminApiKeyCapabilities() {
     queryFn: () => {
       const context = captureAdminApiKeyAuthority();
       if (adminApiKeyScope(context) !== scope)
-        throw new Error("Reload API keys after changing profiles.");
+        throw new Error(t("web.admin.errors.apiKeysProfileChanged"));
       return getAdminApiKeyCapabilities(context);
     },
     retry: false,
@@ -49,7 +50,7 @@ export function useAdminApiKeys(enabled = true) {
     queryFn: async ({ pageParam }) => {
       const context = captureAdminApiKeyAuthority();
       if (adminApiKeyScope(context) !== scope)
-        throw new Error("Reload API keys after changing profiles.");
+        throw new Error(t("web.admin.errors.apiKeysProfileChanged"));
       const page = await listAdminApiKeysPage(pageParam, context);
       const previous =
         queryClient.getQueryData<InfiniteData<AdminAPIKeyPage, string | undefined>>(queryKey);
@@ -57,7 +58,7 @@ export function useAdminApiKeys(enabled = true) {
       const visited =
         currentIndex >= 0 ? previous?.pageParams.slice(0, currentIndex) : previous?.pageParams;
       if (page.page.has_more && visited?.includes(page.page.next_cursor)) {
-        throw new Error("Repeated API key cursor. Reload the list.");
+        throw new Error(t("web.admin.errors.apiKeyCursorRepeated"));
       }
       return page;
     },

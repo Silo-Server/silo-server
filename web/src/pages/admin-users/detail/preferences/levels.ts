@@ -5,13 +5,14 @@ import type {
   AdminSettingScope,
   AdminUserSettingEntry,
 } from "@/hooks/queries/admin/users";
-import { t, type Translate } from "@/i18n";
+import { t, type MessageKey, type Translate } from "@/i18n";
 import {
   resolutionOrderFor,
   resolveInheritedValue,
   type InheritedValue,
 } from "@/lib/inheritedSettingValue";
 import { SETTING_DEFINITIONS, type SettingKey } from "@/lib/settingsContract";
+import { settingDescription, settingLabel } from "@/lib/settingsText";
 
 /**
  * The Preferences tab's "levels": the places a setting can be stored for an
@@ -69,8 +70,26 @@ function byManifestOrder(a: AdminUserSettingEntry, b: AdminUserSettingEntry): nu
   return manifestRank(a.key) - manifestRank(b.key) || a.key.localeCompare(b.key);
 }
 
-/** "playback" → "Playback", "client_local" → "Client Local". */
+const CATEGORY_TITLES: Record<string, MessageKey> = {
+  playback: "web.admin.users.detail.preferences.category.playback",
+  player: "web.admin.users.detail.preferences.category.player",
+  catalog: "web.admin.users.detail.preferences.category.catalog",
+  appearance: "web.admin.users.detail.preferences.category.appearance",
+  navigation: "web.admin.users.detail.preferences.category.navigation",
+  search: "web.admin.users.detail.preferences.category.search",
+  downloads: "web.admin.users.detail.preferences.category.downloads",
+  nav: "web.admin.users.detail.preferences.category.nav",
+  requests: "web.admin.users.detail.preferences.category.requests",
+  watch_party: "web.admin.users.detail.preferences.category.watch_party",
+};
+
+/**
+ * A setting category's heading: "playback" → "Playback", "watch_party" → "Watch Party".
+ * A category this build has no message for gets its title-cased id.
+ */
 export function categoryTitle(category: string): string {
+  const key = CATEGORY_TITLES[category];
+  if (key) return t(key);
   return category
     .split(/[_\s]+/)
     .filter(Boolean)
@@ -426,8 +445,8 @@ export function addableSettings(
     const list = categories.get(category) ?? [];
     list.push({
       key,
-      label: definition.label,
-      description: definition.description,
+      label: settingLabel(definition),
+      description: settingDescription(definition),
       category,
       setHere: stored.has(key),
       replaced: replacedValue(level, key, profileEntries, profileAllEntries),

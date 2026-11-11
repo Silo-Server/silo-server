@@ -58,6 +58,8 @@ type UserResolver interface {
 // ItemAccessChecker checks library/content-rating access.
 type ItemAccessChecker interface {
 	EnsureAccessible(ctx context.Context, contentID string, filter catalog.AccessFilter) error
+	// EnsureAccessibleIDs is the batch form: the IDs the filter admits map to true.
+	EnsureAccessibleIDs(ctx context.Context, contentIDs []string, filter catalog.AccessFilter) (map[string]bool, error)
 }
 
 // SettingsReader loads all server settings as a flat map.
@@ -1197,15 +1199,20 @@ func sameManagedTarget(a, b *Download) bool {
 }
 
 // List returns the calling device's managed entries, or the user's
-// ephemeral/account-level rows when no device header is present.
-func (s *Service) List(ctx context.Context, userID int, profileID, deviceID string) ([]*Download, error) {
+// ephemeral/account-level rows when no device header is present, leaving out
+// the account-level rows whose item the requesting profile may not open.
+func (s *Service) List(ctx context.Context, userID int, profileID, deviceID string, filter catalog.AccessFilter) ([]*Download, error) {
 	if deviceID != "" {
 		if profileID == "" {
 			return nil, ErrProfileRequired
 		}
 		return s.repo.ListManaged(ctx, userID, profileID, deviceID)
 	}
-	return s.repo.ListEphemeral(ctx, userID)
+	rows, err := s.repo.ListEphemeral(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return s.accessibleRows(ctx, rows, filter)
 }
 
 // ServeDirect validates permissions and serves a file directly for browser
@@ -1372,9 +1379,9 @@ func (s *Service) PatchStatus(ctx context.Context, userID int, profileID, device
 }
 
 // Delete removes a managed entry (authorized on user, profile, device) or
-// cancels/deletes an ephemeral row. Each path is scoped to its own row mode so
-// neither can touch the other's rows.
-func (s *Service) Delete(ctx context.Context, userID int, profileID, deviceID, downloadID string) error {
+// cancels/deletes an ephemeral row the requesting profile may open. Each path
+// is scoped to its own row mode so neither can touch the other's rows.
+func (s *Service) Delete(ctx context.Context, userID int, profileID, deviceID, downloadID string, filter catalog.AccessFilter) error {
 	if deviceID != "" {
 		if profileID == "" {
 			return ErrProfileRequired
@@ -1395,6 +1402,15 @@ func (s *Service) Delete(ctx context.Context, userID int, profileID, deviceID, d
 	}
 	if dl.UserID != userID || dl.IsManaged() {
 		return ErrNotFound
+	}
+	// Account-level rows are shared by every profile on the account, so only
+	// a profile whose content scope admits the item may cancel or remove one.
+	// A refusal answers as a missing row does.
+	if err := s.itemAccess.EnsureAccessible(ctx, dl.ContentID, filter); err != nil {
+		if errors.Is(err, catalog.ErrItemNotFound) {
+			return ErrNotFound
+		}
+		return err
 	}
 	switch dl.Status {
 	case StatusQueued, StatusDownloading:

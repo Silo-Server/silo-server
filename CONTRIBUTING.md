@@ -162,8 +162,8 @@ Outside these areas, don't add a test. That includes:
 - Small changes, UI layout, styling, or copy.
 - Code with no logic of its own: constants, defaults, field copies, getters,
   constructors, handlers and adapters that pass values through.
-- `/api/v1` beyond its own authorization checks. It is frozen; test shared
-  behavior through the service or `/api/v2`.
+- The retired `/api/v1` namespace beyond its tombstone. Test shared behavior
+  through the service or `/api/v2`.
 - Migrations that only add a table, column, or index.
 - Behavior an existing test already covers, at this layer or another.
 - The language, the standard library, or a dependency.
@@ -246,9 +246,6 @@ make test-web
 make verify-settings-bindings-all
 make verify-playback-fixtures
 make verify-route-inventory
-make verify-migration-ledger
-make verify-scenario-catalogs
-make verify-offline-routes
 make verify-apiv2-openapi
 make verify-apiv2-web-types
 make verify-apiv2-contract          # BASE_REF=origin/<pr-base> when not main
@@ -261,7 +258,6 @@ make verify-shellcheck              # ShellCheck 0.11.0
 make verify-size-ratchet            # BASE_REF=origin/<pr-base> when not main
 make verify-bidi
 make verify-migrations              # BASE_REF=origin/<pr-base> when not main
-make verify-v1-route-freeze         # BASE_REF=origin/<pr-base> when not main
 docker pull prom/prometheus:v3.5.0   # Required first: the target uses --pull=never
 make verify-prometheus-rules
 ```
@@ -281,18 +277,17 @@ canceled, missing, or unexpectedly skipped work; only jobs excluded by the
 selection may skip. Selection tools come from the trusted reusable workflow's
 main branch.
 
-`Go test` runs the full Go suite, which owns the ledger, scenario,
-offline-route, spec, and fixture assertions. `Go vet and contracts` runs
-whole-tree `go vet` and then the contract checks: the generator freshness checks
-and the semantic API comparison. `Go lint` runs golangci-lint beside it. The
+`Go test` runs the full Go suite, which owns the spec and fixture assertions.
+`Go vet and contracts` runs whole-tree `go vet` and then the contract checks:
+the generator freshness checks and the semantic API comparison. `Go lint` runs
+golangci-lint beside it. The
 contract checks pass `CONTRACT_GO_TESTS=0` to avoid repeating the suite's
 assertions; local verify targets remain complete by default. `Go integration`
 runs its race tests against two databases of its own: a PostgreSQL 17 database
 for the Watch Party, history import, and marker claim migration tests, and a
 migrated pgvector database for the tests that need the full schema. `Go DB pins`
 and `Go DB external auth` each start a separate pgvector database, and the unit
-suite has no database. No CI job sets `SILO_SCENARIO_DATABASE_URL`, so the
-scenario executor, which truncates its database, gets none of these databases.
+suite has no database.
 
 Touching `internal/apiv2` registrations? Run
 `make apiv2-openapi apiv2-fixtures apiv2-web-types` and commit what they write;
@@ -409,13 +404,25 @@ in the pull request template. For each issue the change fully resolves, add a
 GitHub closes the issue when the pull request merges into `main`; the
 `Related issue:` line alone does not close anything. Name an epic, scope item,
 or partly addressed issue on `Related issue:`, and write `Related issue: N/A`
-when none applies. Either way, the Problem section has to stand on its own. Keep the commit history intentional and the diff
-limited to the stated problem. Keep the description proportional to the change;
-omit session history, full logs, and private report links other than an
-`Evidence:` line. Follow the
+when none applies. Keep both lines accurate when the pull request's scope
+changes. Either way, the Problem section has to stand on its own. Keep the
+commit history intentional and the diff limited to the stated problem. Keep the
+description proportional to the change; omit session history, full logs, and
+private report links other than an `Evidence:` line. Follow the
 [public-content and media rules](AGENTS.md#pull-requests), and include evidence
 for every change users can see, as [Show visible changes](#show-visible-changes)
 describes.
+
+Until 1.0 ships, maintainers check each 1.0 feature by hand on the
+[Silo v1.0.0 board](https://github.com/orgs/Silo-Server/projects/5). A
+`[v1] <Feature>` issue holds the acceptance criteria, and each validation task
+under it records a result for its cases `C1…`. Work out which passed cases your
+change could reach, and list the affected tasks and cases on the
+`Validation tasks:` line, for example
+`Validation tasks: unblocks #1144 C3; changes #1200 C1`, or write `none`.
+Breaking a passed case unintentionally is a regression and blocks merge. A
+deliberate change to validated behavior must say why and still meet the
+published criterion; changing the criterion itself needs a maintainer decision.
 
 ### Write the description
 

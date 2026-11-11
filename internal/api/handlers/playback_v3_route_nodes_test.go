@@ -203,96 +203,10 @@ type remoteReplanFixtureV3 struct {
 	starts    func() int
 }
 
-func newRemoteReplanFixtureV3(t *testing.T) remoteReplanFixtureV3 {
-	t.Helper()
-	var mu sync.Mutex
-	starts := 0
-	newNode := func() *httptest.Server {
-		node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch {
-			case r.Method == http.MethodGet && r.URL.Path == "/hw-capabilities":
-				writeJSON(w, http.StatusOK, playback.HWAccelInfo{Transformations: remoteHLSPlanV3().Transformations})
-			case r.Method == http.MethodPost && r.URL.Path == "/transcode/start":
-				var request transcodenode.TranscodeStartRequest
-				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-					t.Errorf("decode remote start: %v", err)
-				}
-				mu.Lock()
-				starts++
-				mu.Unlock()
-				writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{SessionID: request.SessionID, Status: "started", AudioRecipeVersion: request.AudioRecipeVersion, ThrottleSeconds: request.ThrottleSeconds})
-			default:
-				w.WriteHeader(http.StatusNoContent)
-			}
-		}))
-		t.Cleanup(node.Close)
-		return node
-	}
-	first, second := newNode(), newNode()
-	transcodes := nodepool.NewTranscodePool()
-	transcodes.SetNodes([]*nodepool.Node{
-		{ID: 1, URL: first.URL, Enabled: true, Healthy: true},
-		{ID: 2, URL: second.URL, Enabled: true, Healthy: true},
-	})
-
-	file := v3HandlerFixtureFile(t)
-	file.CodecVideo, file.VideoTracks[0].Codec = "mpeg4", "mpeg4"
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
-	handler.JWTSecret = "test-secret"
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"transcode_enabled": "true", "allow_4k_transcode": "true"}}
-	handler.ItemAccess = allowAllPlaybackItemAccess{}
-	handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
-	handler.NodePlanner = nodepool.NewPlanner(nodepool.NewProxyPool(), transcodes)
-	requireWorkerRoutingV3(handler)
-	handler.v3Registry = playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
-		{Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, Available: true},
-		{Name: playback.TransformationVideoToH264V3, RecipeVersion: playback.TransformationVideoToH264RecipeVersionV3, Available: true},
-	})
-	recorder := &probeRecorderV3{dead: map[string]bool{}}
-	handler.v3RouteNodeProbe = recorder.probe
-
-	startRequest := v3HandlerStartRequest()
-	startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
-	started := startPlayablePlaybackV3(t, handler, marshalV3StartRequest(t, startRequest))
-	session, err := handler.sessionMgr.GetSession(started.SessionID)
-	if err != nil || session.TranscodeNodeURL == "" {
-		t.Fatalf("start did not place the transcode on a node: %#v", session)
-	}
-	other := second.URL
-	if session.TranscodeNodeURL == second.URL {
-		other = first.URL
-	}
-	return remoteReplanFixtureV3{
-		handler: handler, probe: recorder, start: startRequest, started: started,
-		startedOn: session.TranscodeNodeURL, other: other,
-		starts: func() int { mu.Lock(); defer mu.Unlock(); return starts },
-	}
-}
-
 func (f remoteReplanFixtureV3) killStartedNode() {
 	f.probe.mu.Lock()
 	f.probe.dead[f.startedOn] = true
 	f.probe.mu.Unlock()
-}
-
-func (f remoteReplanFixtureV3) replan(t *testing.T, operation playback.ReplanOperationV3, failure playback.FailureV3, attempted []string) playback.DecisionResponseV3 {
-	t.Helper()
-	return postPlaybackReplanV3(t, f.handler, f.started.SessionID, playback.ReplanRequestV3{
-		ProtocolVersion:       playback.ProtocolV3,
-		Operation:             operation,
-		PlaybackAttemptID:     f.start.PlaybackAttemptID,
-		ReplanRequestID:       "dead-node-replan-0001",
-		FailedPlanID:          f.started.PlaybackPlan.PlanID,
-		PlanAttemptID:         "dead-node-plan-attempt-0001",
-		PlanAttemptKey:        f.started.PlaybackPlan.PlanAttemptKey,
-		AttemptedPlanKeys:     attempted,
-		AttemptCount:          1,
-		PositionSeconds:       120,
-		Failure:               failure,
-		SelectedTracks:        f.started.PlaybackPlan.SelectedTracks,
-		Capabilities:          f.start.Capabilities,
-		ClientPlaybackContext: f.start.ClientPlaybackContext,
-	})
 }
 
 func (f remoteReplanFixtureV3) currentNode(t *testing.T) string {
@@ -302,68 +216,6 @@ func (f remoteReplanFixtureV3) currentNode(t *testing.T) string {
 		t.Fatalf("replan dropped the session: %v", err)
 	}
 	return session.TranscodeNodeURL
-}
-
-// A replan that changes nothing keeps a working remote transport, and moves
-// one whose node no longer answers.
-func TestHandleReplanPlaybackV3MovesTrackChangeOffAnUnreachableNode(t *testing.T) {
-	t.Run("node answers", func(t *testing.T) {
-		f := newRemoteReplanFixtureV3(t)
-		replanned := f.replan(t, playback.ReplanOperationTrackChangeV3, playback.FailureV3{}, nil)
-		if replanned.PlaybackPlan == nil {
-			t.Fatalf("replan returned no plan: %#v", replanned)
-		}
-		if !slices.Contains(f.probe.probedURLs(), f.startedOn) {
-			t.Fatalf("replan probed %v, want the current node %s", f.probe.probedURLs(), f.startedOn)
-		}
-		if node := f.currentNode(t); node != f.startedOn || replanned.PlaybackPlan.Stream.URL != f.started.PlaybackPlan.Stream.URL {
-			t.Fatalf("working transport was replaced: node %s -> %s, url %s -> %s", f.startedOn, node, f.started.PlaybackPlan.Stream.URL, replanned.PlaybackPlan.Stream.URL)
-		}
-	})
-	t.Run("node unreachable", func(t *testing.T) {
-		f := newRemoteReplanFixtureV3(t)
-		f.killStartedNode()
-		replanned := f.replan(t, playback.ReplanOperationTrackChangeV3, playback.FailureV3{}, nil)
-		if replanned.PlaybackPlan == nil {
-			t.Fatalf("replan returned no plan: %#v", replanned)
-		}
-		if node := f.currentNode(t); node != f.other {
-			t.Fatalf("replanned node = %s, want %s (started on %s)", node, f.other, f.startedOn)
-		}
-		if replanned.PlaybackPlan.Stream.URL == f.started.PlaybackPlan.Stream.URL {
-			t.Fatalf("replan kept the stream URL of the unreachable node: %s", replanned.PlaybackPlan.Stream.URL)
-		}
-		if n := f.starts(); n != 2 {
-			t.Fatalf("remote starts = %d, want the original start and one replacement", n)
-		}
-	})
-}
-
-// A failure recovery from a node that stopped answering keeps the failed
-// recipe: the node failed, not the plan, so the same recipe runs on another
-// node instead of being excluded.
-func TestHandleReplanPlaybackV3FailureRecoveryFromAnUnreachableNodeKeepsTheRecipe(t *testing.T) {
-	f := newRemoteReplanFixtureV3(t)
-	key := f.started.PlaybackPlan.PlanAttemptKey
-	f.killStartedNode()
-	replanned := f.replan(t, playback.ReplanOperationFailureRecoveryV3, playback.FailureV3{Classification: "http_failure"}, []string{key})
-	if replanned.PlaybackPlan == nil {
-		t.Fatalf("recovery returned no plan: %#v", replanned)
-	}
-	if replanned.PlaybackPlan.PlanAttemptKey != key {
-		t.Fatalf("recovery recipe = %s, want the unfailed recipe %s", replanned.PlaybackPlan.PlanAttemptKey, key)
-	}
-	if node := f.currentNode(t); node != f.other {
-		t.Fatalf("recovered on %s, want %s", node, f.other)
-	}
-
-	// With the node answering, the same request still excludes the recipe.
-	g := newRemoteReplanFixtureV3(t)
-	gKey := g.started.PlaybackPlan.PlanAttemptKey
-	recovered := g.replan(t, playback.ReplanOperationFailureRecoveryV3, playback.FailureV3{Classification: "http_failure"}, []string{gKey})
-	if recovered.PlaybackPlan != nil && recovered.PlaybackPlan.PlanAttemptKey == gKey {
-		t.Fatalf("recovery from a reachable node reused the failed recipe %s", gKey)
-	}
 }
 
 // Planning reads capabilities from every pooled node; a node the replan found
@@ -390,21 +242,6 @@ func TestPlanningCapabilityReadsSkipUnreachableNodes(t *testing.T) {
 	}
 	if n := deadRequests.Load(); n != 0 {
 		t.Fatalf("the unreachable node received %d capability requests", n)
-	}
-}
-
-// Clients echo plan keys opaquely, and planning compares them trimmed, so a
-// padded copy of the failed key must not exclude the recipe either.
-func TestHandleReplanPlaybackV3NodeRecoveryIgnoresPaddedFailedKeys(t *testing.T) {
-	f := newRemoteReplanFixtureV3(t)
-	key := f.started.PlaybackPlan.PlanAttemptKey
-	f.killStartedNode()
-	replanned := f.replan(t, playback.ReplanOperationFailureRecoveryV3, playback.FailureV3{Classification: "http_failure"}, []string{key + " "})
-	if replanned.PlaybackPlan == nil || replanned.PlaybackPlan.PlanAttemptKey != key {
-		t.Fatalf("recovery = %#v, want the unfailed recipe %s", replanned.PlaybackPlan, key)
-	}
-	if node := f.currentNode(t); node != f.other {
-		t.Fatalf("recovered on %s, want %s", node, f.other)
 	}
 }
 
@@ -467,5 +304,168 @@ func TestUnreachableSessionNodesV3FindsHungNode(t *testing.T) {
 	}
 	if took := time.Since(started); took > routeNodeProbeTimeoutV3+time.Second {
 		t.Fatalf("probe took %v, want within %v", took, routeNodeProbeTimeoutV3)
+	}
+}
+
+func newRemoteReplanFixtureV3(t *testing.T) remoteReplanFixtureV3 {
+	t.Helper()
+	var mu sync.Mutex
+	starts := 0
+	newNode := func() *httptest.Server {
+		node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodGet && r.URL.Path == "/hw-capabilities":
+				writeJSON(w, http.StatusOK, playback.HWAccelInfo{Transformations: remoteHLSPlanV3().Transformations})
+			case r.Method == http.MethodPost && r.URL.Path == "/transcode/start":
+				var request transcodenode.TranscodeStartRequest
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Errorf("decode remote start: %v", err)
+				}
+				mu.Lock()
+				starts++
+				mu.Unlock()
+				writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{SessionID: request.SessionID, Status: "started", AudioRecipeVersion: request.AudioRecipeVersion, ThrottleSeconds: request.ThrottleSeconds})
+			default:
+				w.WriteHeader(http.StatusNoContent)
+			}
+		}))
+		t.Cleanup(node.Close)
+		return node
+	}
+	first, second := newNode(), newNode()
+	transcodes := nodepool.NewTranscodePool()
+	transcodes.SetNodes([]*nodepool.Node{
+		{ID: 1, URL: first.URL, Enabled: true, Healthy: true},
+		{ID: 2, URL: second.URL, Enabled: true, Healthy: true},
+	})
+
+	file := v3HandlerFixtureFile(t)
+	file.CodecVideo, file.VideoTracks[0].Codec = "mpeg4", "mpeg4"
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	handler.JWTSecret = "test-secret"
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"transcode_enabled": "true", "allow_4k_transcode": "true"}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
+	handler.NodePlanner = nodepool.NewPlanner(nodepool.NewProxyPool(), transcodes)
+	requireWorkerRoutingV3(handler)
+	handler.v3Registry = playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
+		{Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, Available: true},
+		{Name: playback.TransformationVideoToH264V3, RecipeVersion: playback.TransformationVideoToH264RecipeVersionV3, Available: true},
+	})
+	recorder := &probeRecorderV3{dead: map[string]bool{}}
+	handler.v3RouteNodeProbe = recorder.probe
+
+	startRequest := v3HandlerStartRequest()
+	startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
+	started := startPlayableDecisionV2(t, handler, marshalV3StartRequest(t, startRequest))
+	session, err := handler.sessionMgr.GetSession(started.SessionID)
+	if err != nil || session.TranscodeNodeURL == "" {
+		t.Fatalf("start did not place the transcode on a node: %#v", session)
+	}
+	other := second.URL
+	if session.TranscodeNodeURL == second.URL {
+		other = first.URL
+	}
+	return remoteReplanFixtureV3{
+		handler: handler, probe: recorder, start: startRequest, started: started,
+		startedOn: session.TranscodeNodeURL, other: other,
+		starts: func() int { mu.Lock(); defer mu.Unlock(); return starts },
+	}
+}
+
+func (f remoteReplanFixtureV3) replan(t *testing.T, operation playback.ReplanOperationV3, failure playback.FailureV3, attempted []string) playback.DecisionResponseV3 {
+	t.Helper()
+	return replanPlaybackDecisionV2(t, f.handler, f.started.SessionID, playback.ReplanRequestV3{
+		ProtocolVersion:       playback.ProtocolV3,
+		Operation:             operation,
+		PlaybackAttemptID:     f.start.PlaybackAttemptID,
+		ReplanRequestID:       "dead-node-replan-0001",
+		FailedPlanID:          f.started.PlaybackPlan.PlanID,
+		PlanAttemptID:         "dead-node-plan-attempt-0001",
+		PlanAttemptKey:        f.started.PlaybackPlan.PlanAttemptKey,
+		AttemptedPlanKeys:     attempted,
+		AttemptCount:          1,
+		PositionSeconds:       120,
+		Failure:               failure,
+		SelectedTracks:        f.started.PlaybackPlan.SelectedTracks,
+		Capabilities:          f.start.Capabilities,
+		ClientPlaybackContext: f.start.ClientPlaybackContext,
+	})
+}
+
+// A replan that changes nothing keeps a working remote transport, and moves
+// one whose node no longer answers.
+func TestReplanPlaybackV2MovesTrackChangeOffAnUnreachableNode(t *testing.T) {
+	t.Run("node answers", func(t *testing.T) {
+		f := newRemoteReplanFixtureV3(t)
+		replanned := f.replan(t, playback.ReplanOperationTrackChangeV3, playback.FailureV3{}, nil)
+		if replanned.PlaybackPlan == nil {
+			t.Fatalf("replan returned no plan: %#v", replanned)
+		}
+		if !slices.Contains(f.probe.probedURLs(), f.startedOn) {
+			t.Fatalf("replan probed %v, want the current node %s", f.probe.probedURLs(), f.startedOn)
+		}
+		if node := f.currentNode(t); node != f.startedOn || replanned.PlaybackPlan.Stream.URL != f.started.PlaybackPlan.Stream.URL {
+			t.Fatalf("working transport was replaced: node %s -> %s, url %s -> %s", f.startedOn, node, f.started.PlaybackPlan.Stream.URL, replanned.PlaybackPlan.Stream.URL)
+		}
+	})
+	t.Run("node unreachable", func(t *testing.T) {
+		f := newRemoteReplanFixtureV3(t)
+		f.killStartedNode()
+		replanned := f.replan(t, playback.ReplanOperationTrackChangeV3, playback.FailureV3{}, nil)
+		if replanned.PlaybackPlan == nil {
+			t.Fatalf("replan returned no plan: %#v", replanned)
+		}
+		if node := f.currentNode(t); node != f.other {
+			t.Fatalf("replanned node = %s, want %s (started on %s)", node, f.other, f.startedOn)
+		}
+		if replanned.PlaybackPlan.Stream.URL == f.started.PlaybackPlan.Stream.URL {
+			t.Fatalf("replan kept the stream URL of the unreachable node: %s", replanned.PlaybackPlan.Stream.URL)
+		}
+		if n := f.starts(); n != 2 {
+			t.Fatalf("remote starts = %d, want the original start and one replacement", n)
+		}
+	})
+}
+
+// A failure recovery from a node that stopped answering keeps the failed
+// recipe: the node failed, not the plan, so the same recipe runs on another
+// node instead of being excluded.
+func TestReplanPlaybackV2FailureRecoveryFromAnUnreachableNodeKeepsTheRecipe(t *testing.T) {
+	f := newRemoteReplanFixtureV3(t)
+	key := f.started.PlaybackPlan.PlanAttemptKey
+	f.killStartedNode()
+	replanned := f.replan(t, playback.ReplanOperationFailureRecoveryV3, playback.FailureV3{Classification: "http_failure"}, []string{key})
+	if replanned.PlaybackPlan == nil {
+		t.Fatalf("recovery returned no plan: %#v", replanned)
+	}
+	if replanned.PlaybackPlan.PlanAttemptKey != key {
+		t.Fatalf("recovery recipe = %s, want the unfailed recipe %s", replanned.PlaybackPlan.PlanAttemptKey, key)
+	}
+	if node := f.currentNode(t); node != f.other {
+		t.Fatalf("recovered on %s, want %s", node, f.other)
+	}
+
+	// With the node answering, the same request still excludes the recipe.
+	g := newRemoteReplanFixtureV3(t)
+	gKey := g.started.PlaybackPlan.PlanAttemptKey
+	recovered := g.replan(t, playback.ReplanOperationFailureRecoveryV3, playback.FailureV3{Classification: "http_failure"}, []string{gKey})
+	if recovered.PlaybackPlan != nil && recovered.PlaybackPlan.PlanAttemptKey == gKey {
+		t.Fatalf("recovery from a reachable node reused the failed recipe %s", gKey)
+	}
+}
+
+// Clients echo plan keys opaquely, and planning compares them trimmed, so a
+// padded copy of the failed key must not exclude the recipe either.
+func TestReplanPlaybackV2NodeRecoveryIgnoresPaddedFailedKeys(t *testing.T) {
+	f := newRemoteReplanFixtureV3(t)
+	key := f.started.PlaybackPlan.PlanAttemptKey
+	f.killStartedNode()
+	replanned := f.replan(t, playback.ReplanOperationFailureRecoveryV3, playback.FailureV3{Classification: "http_failure"}, []string{key + " "})
+	if replanned.PlaybackPlan == nil || replanned.PlaybackPlan.PlanAttemptKey != key {
+		t.Fatalf("recovery = %#v, want the unfailed recipe %s", replanned.PlaybackPlan, key)
+	}
+	if node := f.currentNode(t); node != f.other {
+		t.Fatalf("recovered on %s, want %s", node, f.other)
 	}
 }

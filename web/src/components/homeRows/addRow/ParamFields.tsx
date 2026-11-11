@@ -281,24 +281,22 @@ function SpotlightFields({ config, onChange }: FieldProps) {
   );
 }
 
-const TRENDING_SHOWS = [
-  { value: "all", label: "Both" },
-  { value: "movie", label: "Movies" },
-  { value: "series", label: "TV shows" },
-] as const;
-
-type TrendingShow = (typeof TRENDING_SHOWS)[number]["value"];
+type TrendingShow = "all" | "movie" | "series";
 
 /** Which titles a worldwide trending row keeps; Both leaves filter_type unset. */
 function TrendingShowField({ config, onChange }: FieldProps) {
+  const t = useT();
   const value: TrendingShow =
     config.filter_type === "movie" || config.filter_type === "series" ? config.filter_type : "all";
   return (
     <Segmented<TrendingShow>
-      // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- new on main; its catalog key is a follow-up
-      label="Show"
+      label={t("web.home.addRow.params.trendingShow")}
       value={value}
-      options={TRENDING_SHOWS}
+      options={[
+        { value: "all", label: t("web.collections.tmdbSources.mediaBoth") },
+        { value: "movie", label: t("web.collections.tmdbSources.mediaMovies") },
+        { value: "series", label: t("web.collections.tmdbSources.mediaTv") },
+      ]}
       onChange={(next) => onChange({ ...config, filter_type: next === "all" ? undefined : next })}
     />
   );

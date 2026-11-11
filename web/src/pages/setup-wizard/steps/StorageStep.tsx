@@ -184,6 +184,7 @@ function S3Fields({
     <>
       <SettingField
         label={t("web.setup.storage.endpointLabel")}
+        // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
         hint="https://s3.amazonaws.com"
         value={form.getValue(key("endpoint"))}
         onChange={(v) => form.setValue(key("endpoint"), v)}
@@ -219,6 +220,7 @@ function S3Fields({
       <SettingField
         label={t("web.setup.storage.prefixLabel")}
         description={t("web.setup.storage.prefixDescription")}
+        // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
         hint="silo"
         value={form.getValue(key("key_prefix"))}
         onChange={(v) => form.setValue(key("key_prefix"), v)}
@@ -236,6 +238,7 @@ function S3Fields({
           {urlAuth !== "presigned" ? (
             <SettingField
               label={t("web.setup.storage.readEndpointLabel")}
+              // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
               hint="https://cdn.example.com"
               value={form.getValue("s3.public_read_endpoint")}
               onChange={(v) => form.setValue("s3.public_read_endpoint", v)}
@@ -392,6 +395,7 @@ export function StorageStep() {
         />
         <SettingField
           label={t("web.setup.storage.localPathLabel")}
+          // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
           hint="/var/lib/silo/artwork"
           value={form.getValue("artwork.local_path")}
           onChange={(value) => form.setValue("artwork.local_path", value)}
@@ -433,6 +437,7 @@ export function StorageStep() {
           <SettingField
             label={t("web.setup.storage.redisUrlLabel")}
             type="password"
+            // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
             hint="redis://localhost:6379"
             value={form.getValue("redis.url")}
             onChange={(v) => stageRedisUrl(form, v)}

@@ -6,6 +6,7 @@ import {
 } from "@/api/client";
 import { randomUUID } from "@/lib/uuid";
 import { v2, V2ProblemError, type V2Result } from "./request";
+import { t } from "@/i18n";
 
 /**
  * Sequenced administrator playback commands (pause, resume, stop, message).
@@ -162,7 +163,8 @@ export async function sendAdminPlaybackCommand(
     throw new Error(`Unsupported session command: ${request.action}`);
   }
   const message = request.message?.trim() ?? "";
-  if (request.action === "message" && !message) throw new Error("Message is required");
+  if (request.action === "message" && !message)
+    throw new Error(t("web.admin.sessions.playback.toast.messageRequired"));
   requireAuthority(profileContext);
   const intent = JSON.stringify([
     profileContext.serverOrigin,
