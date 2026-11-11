@@ -15,7 +15,7 @@ import {
   type UpdateItemMetadataRequest,
 } from "@/hooks/queries/items";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
-import { useT } from "@/i18n";
+import { useT, type MessageKey } from "@/i18n";
 import { cn } from "@/lib/utils";
 import {
   AIR_TIMEZONES,
@@ -44,13 +44,10 @@ const EPISODE_FIELD_LOCK_MAP: Record<string, number> = {
   runtime: FIELD_RUNTIME,
 };
 
-const RESET_DESCRIPTIONS: Partial<Record<ItemDetail["type"], string>> = {
-  series:
-    "This will unlock all fields on this series and refresh metadata from your providers. Any manual edits to the series will be overwritten. Locked seasons and episodes keep their edits.",
-  season:
-    "This will unlock this season's title, overview and air date and refresh metadata from your providers. Any manual edits to them will be overwritten. Artwork you picked stays locked on the series; reset the series to replace it.",
-  episode:
-    "This will unlock this episode's title, overview, runtime and air date and refresh metadata from your providers. Any manual edits to them will be overwritten.",
+const RESET_DESCRIPTION_KEYS: Partial<Record<ItemDetail["type"], MessageKey>> = {
+  series: "web.item.editMetadata.resetDescriptionSeries",
+  season: "web.item.editMetadata.resetDescriptionSeason",
+  episode: "web.item.editMetadata.resetDescriptionEpisode",
 };
 
 const FIELD_LOCK_MAPS: Partial<Record<ItemDetail["type"], Record<string, number>>> = {
@@ -738,7 +735,9 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
         open={showResetConfirm}
         onOpenChange={setShowResetConfirm}
         title={t("web.item.editMetadata.resetToProvider")}
-        description={RESET_DESCRIPTIONS[item.type] ?? t("web.item.editMetadata.resetDescription")}
+        description={t(
+          RESET_DESCRIPTION_KEYS[item.type] ?? "web.item.editMetadata.resetDescription",
+        )}
         confirmLabel={t("web.item.editMetadata.resetConfirm")}
         variant="destructive"
         onConfirm={handleReset}

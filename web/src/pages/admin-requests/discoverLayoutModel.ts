@@ -31,6 +31,7 @@ import { formatRelativeTime } from "@/lib/date";
 import type { RowGroup } from "@/lib/homeRows/catalog";
 import type { DescriptionPart } from "@/lib/homeRows/describe";
 import type { HomeRow } from "@/lib/homeRows/types";
+import { sectionTitleKey } from "@/lib/sectionTitle";
 
 /**
  * The six rows the page had before it could be changed. Shipped apps merge
@@ -166,6 +167,8 @@ export function layoutBodies(layout: DiscoverLayout): DiscoverRowBody[] {
 
 /** A stored row as the shared row list shows it. Brand rows hold no titles. */
 export function toHomeRow(row: DiscoverRow): HomeRow {
+  // The server's own row names carry a catalog key (see `useHomeRowTitle`); a name an admin typed has none.
+  const { title_key, title_args } = sectionTitleKey(row);
   return {
     id: row.id ?? "",
     title: row.title,
@@ -175,6 +178,7 @@ export function toHomeRow(row: DiscoverRow): HomeRow {
     hero: false,
     shown: row.enabled,
     own: false,
+    titleKey: title_key ? { title: row.title, key: title_key, args: title_args } : undefined,
   };
 }
 

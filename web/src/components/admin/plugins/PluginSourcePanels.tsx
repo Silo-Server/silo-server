@@ -13,6 +13,7 @@ import {
   useUpdatePluginRepository,
 } from "@/hooks/queries/admin/plugins";
 import { useT } from "@/i18n";
+import { sourceLabel } from "@/lib/pluginPresentation";
 import { cn } from "@/lib/utils";
 
 const PANEL = "rounded-xl border bg-card px-4 py-4";
@@ -166,7 +167,12 @@ export function PluginRepositoriesPanel({
                   repo.enabled ? "bg-success" : "bg-muted-foreground",
                 )}
               />
-              <span className="shrink-0 font-medium">{repo.display_name}</span>
+              <span className="shrink-0 font-medium">
+                {/* The two managed repositories are a fixed set: show their label in the interface language. */}
+                {repo.managed && repo.source_kind !== "external"
+                  ? sourceLabel(repo.source_kind)
+                  : repo.display_name}
+              </span>
               <span className="text-muted-foreground min-w-0 flex-1 truncate text-[12.5px]">
                 {repo.managed ? t("web.admin.plugins.repositories.managed") : repo.url}
               </span>

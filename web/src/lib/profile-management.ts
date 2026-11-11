@@ -336,6 +336,5 @@ export function canSwitchProfile(profileCount: number, maxProfiles: number | nul
 
 /** The sentence shown in place of New profile once the household is full. */
 export function profileLimitMessage(maxProfiles: number): string {
-  const noun = maxProfiles === 1 ? "profile" : "profiles";
-  return `This account can have ${maxProfiles} ${noun}. An administrator can raise the limit.`;
+  return t("web.settings.profiles.limitReached", { count: maxProfiles });
 }

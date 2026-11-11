@@ -299,6 +299,7 @@ function S3Group({
     <FieldGroup label={label} description={description} restartAll={allRestart(restartKeys, keys)}>
       <SettingField
         label={t("web.admin.settings.storage.s3.endpoint")}
+        // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
         hint="https://s3.us-east-1.amazonaws.com"
         value={form.getValue(key("endpoint"))}
         onChange={(v) => form.setValue(key("endpoint"), v)}
@@ -424,6 +425,7 @@ function S3Group({
             >
               <SettingField
                 label={t("web.admin.settings.storage.s3.readEndpoint")}
+                // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
                 hint="https://cdn.example.com"
                 value={form.getValue("s3.public_read_endpoint")}
                 onChange={(v) => form.setValue("s3.public_read_endpoint", v)}
