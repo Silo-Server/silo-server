@@ -63,6 +63,12 @@
 ./internal/catalog TestMovieBoxSetDB
 ./internal/catalog TestBoxSetCollectionArtworkDB
 
+# A delegated curator's provider-ID edit can't name a title in another library,
+# which a later refresh would merge the item onto, and the curator's refresh job
+# re-anchors only inside their libraries.
+./internal/catalog TestCuratedProviderIDEditsStayInCurationScopeDB
+./internal/metadata TestCuratorRefreshReanchorStaysInScopePostgres
+
 # A corrected match empties an item's localized text, keeping locks and manual translations.
 ./internal/catalog TestClearMatchTextDB
 

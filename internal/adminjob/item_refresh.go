@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/libraryingest"
@@ -60,6 +61,10 @@ type ItemRefreshRequest struct {
 	ScanScope              string          `json:"scan_scope"`
 	Mode                   ItemRefreshMode `json:"mode,omitempty"`
 	CanonicalRootPath      string          `json:"canonical_root_path,omitempty"`
+	// CurationScope is set when a delegated metadata curator queued the job.
+	// The metadata refresh runs under it, so a merge it would perform is held
+	// to the curator's libraries as match, split and merge are.
+	CurationScope *access.MetadataCurationScope `json:"curation_scope,omitempty"`
 }
 
 type ItemRefreshResult struct {
@@ -584,7 +589,11 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 			refreshTargetType = "item"
 		}
 	}
-	if err := e.refresher.RefreshTargetForLibrary(ctx, refreshTargetType, refreshContentID, req.ScanFolderID); err != nil {
+	refreshCtx := ctx
+	if req.CurationScope != nil {
+		refreshCtx = access.WithMetadataCurationAuthorizer(ctx, req.CurationScope.Authorizer())
+	}
+	if err := e.refresher.RefreshTargetForLibrary(refreshCtx, refreshTargetType, refreshContentID, req.ScanFolderID); err != nil {
 		return nil, fmt.Errorf("refresh metadata: %w", err)
 	}
 	artworkWarning := ""

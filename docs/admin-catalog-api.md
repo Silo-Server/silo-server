@@ -622,6 +622,22 @@ envelope, and v2 match/apply a `permission_denied` problem. Each refused
 transaction rolls back; the multi-step match pipeline has no whole-request atomicity
 guarantee. Detached split identification retains the originating curation authority.
 
+Provider IDs a delegated curator stores are held to the same policy, because work
+that runs later with no curator present acts on them: a refresh, a refresh-debt
+retry or a scheduled refresh merges the item onto the item already at the anchor
+the IDs derive or holding one of them. A metadata edit that changes `tmdb_id`,
+`imdb_id` or `tvdb_id`, and a split that creates a target from chosen provider IDs,
+lock and authorise every such existing item (other than the edited item, or the
+split source and target) and are refused with 403 when one is out of scope. Unchanged
+IDs a form resends are not re-checked. An item refresh job a delegated curator
+queues records the curator's assigned libraries in its payload (`curation_scope`)
+and runs its metadata refresh under that scope on whichever node claims it; the job
+checks that snapshot rather than a fresh policy decision. A refresh refused for
+curation scope records no refresh failure or refresh debt, since debt retries run as
+automatic work. IDs a provider adds during a later automatic refresh, and identity
+overrides a split persists for scans, are not curator choices and converge as
+automatic work does.
+
 ### Match repair
 
 `POST /api/v2/admin/items/{id}/match/search`, `/match/apply` and
