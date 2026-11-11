@@ -926,16 +926,6 @@ export default function ActionBar({
       ),
     ],
     [
-      canCurateMetadata && onShowMediaInfo && (
-        <DetailOverflowMenuItem
-          key="media-info"
-          closeMenu={closeOverflowMenu}
-          onAction={onShowMediaInfo}
-        >
-          <Info className="size-4" />
-          {t("web.detail.mediaInfo.title")}
-        </DetailOverflowMenuItem>
-      ),
       isAdmin && contentId && (
         <DetailOverflowMenuItem
           key="play-history"
@@ -948,6 +938,18 @@ export default function ActionBar({
       ),
     ],
   ];
+  const infoItems = [
+    onShowMediaInfo && (
+      <DetailOverflowMenuItem
+        key="media-info"
+        closeMenu={closeOverflowMenu}
+        onAction={onShowMediaInfo}
+      >
+        <Info className="size-4" />
+        {t("web.detail.mediaInfo.title")}
+      </DetailOverflowMenuItem>
+    ),
+  ];
   const manageItems = manageGroups.flat().filter(Boolean);
   // A single management action sits at the end of the menu instead of behind Manage.
   const hasManagePanel = manageItems.length > 1;
@@ -955,6 +957,7 @@ export default function ActionBar({
     playbackItems,
     libraryItems,
     partyItems,
+    infoItems,
     hasManagePanel
       ? [
           <DetailOverflowMenuItem

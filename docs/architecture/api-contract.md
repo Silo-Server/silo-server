@@ -769,7 +769,7 @@ permissions; no gate reads it.
 
 Routes outside the admin groups that widen what an admin sees or may do (another account's
 media requests and their download-server fields, another account's downloaded subtitles,
-on-disk file paths, job polls, administrator events, admin-only home-section recipes) take
+on-disk file paths and file names, job polls, administrator events, admin-only home-section recipes) take
 that reach from the same decision, the acting admin, never from the account role: handlers call `apimw.ActingAdmin`, which answers with
 the decider the router hands the acting-admin gate. It counts a declared profile only after the
 viewer gate verified it in the same request, so an operation that relies on it runs the viewer

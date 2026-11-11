@@ -4957,6 +4957,9 @@ func (h *PlaybackHandler) attachSubtitleArtifactV3(ctx context.Context, sessionI
 		}
 		inventory = playback.ScopeSubtitleInventoryV3(sessionID, file, rebuilt, clientFeatures)
 	}
+	if h == nil || h.FileNamesVisible == nil || !h.FileNamesVisible(ctx) {
+		playback.HideSidecarFileNamesV3(inventory, file)
+	}
 	plan.Subtitle.Inventory = inventory
 	// Only render and convert publish a client-fetchable artifact; off and
 	// burn_in have none by definition. Clear rather than leave whatever the plan

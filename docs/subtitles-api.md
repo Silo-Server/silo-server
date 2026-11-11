@@ -566,7 +566,10 @@ requester. A subtitle someone already synced or retimed is left as it is.
 
 Each returns `SubtitleSyncState`: `key`, `media_file_id`, `source`
 (`downloaded` or `external`), `stored_subtitle_id` for a stored subtitle,
-`language`, `format`, `label` (the release name, or the sidecar's file name),
+`language`, `format`, `label` (the release name, or for a sidecar its file
+name; a viewer who may not see file names gets the label the catalog and the
+playback inventory give it instead, see
+[File paths and names](catalog-api.md#file-paths-and-names)),
 `timing` (`{offset_ms, scale}`: original time `t` plays at `t * scale +
 offset_ms`), and `sync`, the latest job, when it has one. A key the file does
 not have returns `404`.
