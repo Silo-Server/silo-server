@@ -91,39 +91,6 @@ const scanStateColumns = `id, content_id, episode_id, extra_id,
 		) subtitle_paths
 	), '[]'::jsonb) AS external_subtitle_paths`
 
-// sharedStrings hands out one copy of each distinct string it is given. A scan
-// holds the scan state of every file under a root at once, and the files of
-// one show or folder repeat the same roots, group key, title and codec names,
-// so the rows of one load keep one copy of those between them instead of one
-// each.
-type sharedStrings map[string]string
-
-func (shared sharedStrings) get(s string) string {
-	if existing, ok := shared[s]; ok {
-		return existing
-	}
-	shared[s] = s
-	return s
-}
-
-// share points the repeated string fields of state at the shared copies.
-func (shared sharedStrings) share(state *scanStateFile) {
-	state.ContentID = shared.get(state.ContentID)
-	state.CanonicalRootPath = shared.get(state.CanonicalRootPath)
-	state.ObservedRootPath = shared.get(state.ObservedRootPath)
-	state.ContentGroupKey = shared.get(state.ContentGroupKey)
-	state.BaseTitle = shared.get(state.BaseTitle)
-	state.BaseType = shared.get(state.BaseType)
-	state.IdentityConfidence = shared.get(state.IdentityConfidence)
-	state.CodecVideo = shared.get(state.CodecVideo)
-	state.CodecAudio = shared.get(state.CodecAudio)
-	state.Resolution = shared.get(state.Resolution)
-	state.Container = shared.get(state.Container)
-	state.EditionSource = shared.get(state.EditionSource)
-	state.PresentationKind = shared.get(state.PresentationKind)
-	state.ProbeSource = shared.get(state.ProbeSource)
-}
-
 func scanScanStateRow(row pgx.Row) (*scanStateFile, error) {
 	var state scanStateFile
 	var contentID, episodeID *string
@@ -285,13 +252,11 @@ func scanScanStateRows(rows pgx.Rows) ([]*scanStateFile, error) {
 	defer rows.Close()
 
 	files := make([]*scanStateFile, 0)
-	shared := sharedStrings{}
 	for rows.Next() {
 		file, err := scanScanStateRow(rows)
 		if err != nil {
 			return nil, err
 		}
-		shared.share(file)
 		files = append(files, file)
 	}
 	if err := rows.Err(); err != nil {
