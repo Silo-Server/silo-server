@@ -13,7 +13,8 @@ import (
 
 // queryCachePruneInterval is the least time between sweeps that drop expired
 // entries. Without them a value nobody asks for again would stay until newer
-// values pushed it out of the budget, which a quiet cache never does.
+// values pushed it out of the budget. Sweeps run on lookups, so a cache that
+// gets none keeps its entries, still within its budget.
 const queryCachePruneInterval = time.Minute
 
 // queryCache holds values derived from catalog queries in memory, keyed by a

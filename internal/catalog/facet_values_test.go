@@ -170,15 +170,25 @@ func TestFacetValueCacheTTL(t *testing.T) {
 	if _, err := c.get(t.Context(), "idle", staticLoad(listOf(1), &idleCalls)); err != nil {
 		t.Fatal(err)
 	}
-	now = now.Add(time.Minute)
+	// "fresh" is stored half a TTL later and must outlive the sweep.
+	now = now.Add(30 * time.Second)
+	var freshCalls atomic.Int32
+	fresh := staticLoad(listOf(1), &freshCalls)
+	if _, err := c.get(t.Context(), "fresh", fresh); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(queryCachePruneInterval - 30*time.Second)
 	if _, err := c.get(t.Context(), "k", load); err != nil {
 		t.Fatal(err)
 	}
 	if calls.Load() != 2 {
 		t.Fatalf("loads after TTL = %d, want 2", calls.Load())
 	}
-	if c.used != 1 || len(c.entries) != 1 {
+	if c.used != 2 || len(c.entries) != 2 {
 		t.Fatalf("expired entry left behind: used=%d entries=%d", c.used, len(c.entries))
+	}
+	if _, err := c.get(t.Context(), "fresh", fresh); err != nil || freshCalls.Load() != 1 {
+		t.Fatalf("sweep dropped a fresh entry: loads=%d err=%v", freshCalls.Load(), err)
 	}
 }
 
