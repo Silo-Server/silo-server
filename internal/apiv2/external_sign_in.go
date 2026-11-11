@@ -386,8 +386,10 @@ func registerExternalSignIn(reg *Registry) {
 				}
 			}
 			if canUnlink {
-				// A primary profile whose PIN is not verified cannot disconnect
-				// now; the list itself is still its to read.
+				// The viewer gate already turned away a PIN-locked profile that
+				// sent no proof. What can still arrive unverified is an API key,
+				// which skips the PIN, or a request the primary profile's PIN
+				// changed under: either reads false rather than failing the list.
 				canUnlink, err = svc.MayUnlinkAccountIdentity(ctx, claims.UserID, profileFrom(ctx), verifyHouseholdProfile(ctx))
 				if err != nil && !errors.Is(err, access.ErrProfileUnverified) {
 					return nil, serviceProblem(err)

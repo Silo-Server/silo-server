@@ -516,9 +516,10 @@ from its own login session only. Two rules hold:
 - Only the household manager may disconnect: the account's primary profile,
   with its PIN verified when it has one (`canManageHouseholdAs`, the rule
   personal API key creation uses). Every profile on an account shares its
-  login session, and linking again needs the account's local password, so
-  without this rule a child profile could remove a sign-in the account's owner
-  cannot put back. `listAccountIdentities` answers `can_unlink` by both rules
+  login session, and the account cannot always link the identity again by
+  itself, because self-service linking needs its local password. Without this
+  rule a child profile could remove a sign-in the account's owner may be
+  unable to put back. `listAccountIdentities` answers `can_unlink` by both rules
   for the profile asking, so a client offers the control only to a profile
   the call would accept.
 

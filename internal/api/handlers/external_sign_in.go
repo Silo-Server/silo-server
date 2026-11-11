@@ -169,10 +169,11 @@ func (h *ExternalSignInHandler) CanUnlinkAccountIdentity(ctx context.Context, us
 
 // MayUnlinkAccountIdentity reports whether the caller acting as
 // activeProfileID may disconnect one of the account's identities. How the
-// account signs in belongs to the whole household, and a disconnected
-// identity can only be linked again with the account's local password, so
-// only the household manager may. verify confirms a PIN-locked primary
-// profile and returns access.ErrProfileUnverified when it is not.
+// account signs in belongs to the whole household, and the account cannot
+// always link a disconnected identity again by itself (self-service linking
+// needs its local password), so only the household manager may. verify
+// confirms a PIN-locked primary profile and returns
+// access.ErrProfileUnverified when it is not.
 func (h *ExternalSignInHandler) MayUnlinkAccountIdentity(ctx context.Context, userID int, activeProfileID string, verify func(profile *userstore.Profile) error) (bool, error) {
 	return mayManageHouseholdOf(ctx, h.Stores, userID, activeProfileID, verify)
 }
