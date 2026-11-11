@@ -731,12 +731,24 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 		} else {
 			copyAudioCodec = compatSourceAudioCodec(*source)
 		}
+		// A progressive remux is one long response whose ffmpeg belongs to
+		// this request. No later request exists for a stop to refuse, so the
+		// stop has to reach the stream itself, as in the native handler.
+		var abort <-chan struct{}
+		if watcher, ok := h.sessionMgr.(interface {
+			WatchTransportStop(string) (<-chan struct{}, func())
+		}); ok {
+			var release func()
+			abort, release = watcher.WatchTransportStop(playSession.UpstreamSessionID)
+			defer release()
+		}
 		_ = playback.ServeRemuxWithOptions(w, r, file.FilePath, "mp4", seekSeconds, source.TranscodeAudio, audioTrackIndex, file.PrimaryDVProfile(), playback.RemuxServeOptions{
 			ContentType:         playback.RemuxContentType(file.IsAudioOnly()),
 			AudioOnly:           file.IsAudioOnly(),
 			FFmpegPath:          h.FFmpegPath,
 			SourceAudioChannels: sourceAudioChannels,
 			CopyAudioCodec:      copyAudioCodec,
+			Abort:               abort,
 		})
 	default:
 		_ = playback.ServeDirectPlay(w, r, file.FilePath)

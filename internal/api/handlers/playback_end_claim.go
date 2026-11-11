@@ -176,9 +176,19 @@ func (c nativeEndClaim) finish(ctx context.Context, sessionID, historyID string)
 // another replica holds the copy. A session another stop already ended only
 // loses this replica's copy. ErrSessionNotFound means there was nothing here
 // to end.
+//
+// A Jellyfin play has no attempt row: its own routing row is what lets any
+// replica rebuild the session, so the Jellyfin surface retires that row
+// before the session is stopped, whether or not this replica holds the
+// session. When it ended a play whose session another replica holds, the end
+// took effect and is not reported as an unknown session.
 func (h *PlaybackHandler) endSessionAsAdmin(ctx context.Context, sessionID string) error {
 	claim := claimNativeEnd(ctx, h.PlanStoreV3, h.StreamDeny, sessionID, adminStopID(sessionID))
 	defer h.forgetProgressSideEffectLock(sessionID)
+	compat, _ := h.sessionMgr.(interface {
+		EndCompatPlayAsAdmin(context.Context, string) bool
+	})
+	compatEnded := compat != nil && compat.EndCompatPlayAsAdmin(ctx, sessionID)
 	switch {
 	case claim.store != nil:
 		historyID, err := h.finishStop(ctx, claim.record, sessionID, claim.receipt.Accepted, claim.reason(sessionID, PlaybackEndTerminated))
@@ -190,7 +200,11 @@ func (h *PlaybackHandler) endSessionAsAdmin(ctx context.Context, sessionID strin
 		claim.finish(ctx, sessionID, historyID)
 		return nil
 	case claim.owned:
-		return h.stopPlaybackSessionByID(ctx, sessionID, PlaybackEndTerminated)
+		err := h.stopPlaybackSessionByID(ctx, sessionID, PlaybackEndTerminated)
+		if compatEnded && errors.Is(err, playback.ErrSessionNotFound) {
+			return nil
+		}
+		return err
 	default:
 		return h.dropLiveSessionByID(ctx, sessionID)
 	}

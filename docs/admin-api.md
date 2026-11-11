@@ -2432,6 +2432,17 @@ unless the receiving replica told the player itself: the holder may still be
 telling the player, or may already have ended the session, so whether the
 player was notified is unknown. Retrying the terminate is safe.
 
+A Jellyfin-protocol play has no playback attempt and no realtime lane, and its
+session is rebuilt from the play's own row instead of a stream token. A
+terminate, or the stop fallback above, therefore also retires that row and
+closes the play's transcode: the play's stream requests answer `404`, and its
+progress reports no longer start the session again. A terminate that reaches a
+replica without the session succeeds when it retired the play. The replica serving the
+play may keep serving it from its cached row for up to five seconds
+([restart-resilient playback](architecture/restart-resilient-playback.md#administrator-end)).
+Ending a session does not revoke the sign-in, so the viewer can start a new
+play.
+
 The JSON body is required (`{}` when there is no reason) and carries an optional
 `reason`. The `200` receipt carries
 `session_id`, `authority_revoked`, `already_revoked`, `durable_state`,

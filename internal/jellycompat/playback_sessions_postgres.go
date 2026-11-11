@@ -481,6 +481,51 @@ func (d *DurableCompatPlaybackStore) HideFromRouting(id, compatToken string) err
 	return nil
 }
 
+// RetireUpstreamSession hides this process's copy of the play first, without
+// waiting on Postgres, as HideFromRouting does. It then retires the row
+// whichever process cached it: a server that still routes the play reads the
+// terminal row at its next revalidation, within compatCacheRevalidationInterval.
+func (d *DurableCompatPlaybackStore) RetireUpstreamSession(upstreamSessionID string) (bool, error) {
+	// An empty id would match every play that has not started yet.
+	if upstreamSessionID == "" {
+		return false, nil
+	}
+	retired := false
+	if play, ok := d.FindByUpstreamSessionID(upstreamSessionID); ok {
+		err := d.HideFromRouting(play.ID, play.CompatToken)
+		// A failed write still leaves this process's copy hidden.
+		retired = !errors.Is(err, ErrSessionNotFound)
+	}
+	if d.pool == nil {
+		return retired, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	rows, err := d.pool.Query(ctx, `
+		UPDATE jellycompat_playback_sessions
+		SET data = jsonb_set(data, '{Terminal}', 'true'::jsonb, true)
+		WHERE data->>'UpstreamSessionID' = $1 AND expires_at > $2
+			AND COALESCE((data->>'Terminal')::boolean, false) = false
+		RETURNING id, compat_token
+	`, upstreamSessionID, d.now())
+	if err != nil {
+		return retired, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, compatToken string
+		if err := rows.Scan(&id, &compatToken); err != nil {
+			return retired, err
+		}
+		// This process may hold a copy it had not attached to the upstream
+		// session yet; its next read must come from the row.
+		d.invalidateValidation(id, compatToken)
+		d.bumpCacheGenerations(id, compatToken)
+		retired = true
+	}
+	return retired, rows.Err()
+}
+
 // StageTerminal hides a session and persists the provider event under a row
 // lock. This merge keeps an authoritative Stopped event from being overwritten
 // by a later ActiveEncodings fallback on another server process.

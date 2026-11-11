@@ -209,6 +209,10 @@ type CompatPlaybackStore interface {
 	// HideFromRouting immediately makes a caller-owned session unavailable to
 	// stream/progress routing before slower durable terminal staging begins.
 	HideFromRouting(id, compatToken string) error
+	// RetireUpstreamSession hides the play attached to an upstream session
+	// from routing, as HideFromRouting does, for every server process that
+	// shares the store. It reports whether it retired a play.
+	RetireUpstreamSession(upstreamSessionID string) (bool, error)
 	// StageTerminal hides a session from playback routing and durably records
 	// the provider event. An authoritative Stopped event replaces a fallback;
 	// a later fallback can never replace an authoritative event.
@@ -399,6 +403,15 @@ func (s *PlaybackSessionStore) HideFromRouting(id, compatToken string) error {
 	session.UpdatedAt = s.now()
 	s.sessions[id] = session
 	return nil
+}
+
+// RetireUpstreamSession implements CompatPlaybackStore.
+func (s *PlaybackSessionStore) RetireUpstreamSession(upstreamSessionID string) (bool, error) {
+	play, ok := s.FindByUpstreamSessionID(upstreamSessionID)
+	if !ok {
+		return false, nil
+	}
+	return s.HideFromRouting(play.ID, play.CompatToken) == nil, nil
 }
 
 func (s *PlaybackSessionStore) terminalIDsByCompatToken(compatToken string) map[string]struct{} {

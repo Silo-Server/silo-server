@@ -557,7 +557,7 @@ Descriptor location by route (the core change):
 | route family | descriptor (how it reconstructs) | revocation |
 |--------------|----------------------------------|------------|
 | native (1–3) | the signed token the client re-presents | producer-kill (integrated) + deny marker (API and node); ≤24h token for a passive ban |
-| jellycompat (4–6) | `jellycompat_playback_sessions.data.Recipe` (token can't round-trip) | producer-kill + deny marker (API and node); ≤24h token for a passive ban |
+| jellycompat (4–6) | `jellycompat_playback_sessions.data.Recipe` (token can't round-trip) | producer-kill + retired compat row (API, §12.7), deny marker (node); ≤24h token for a passive ban |
 | ~~all~~ | ~~`transcode_recipes` Postgres row~~ — removed | — |
 
 ### 12.2 Where the token rides
@@ -733,6 +733,31 @@ the durable compat row (`PlaybackSession.Recipe`, persisted in the `data` JSONB)
 and written in the same `Update` that flips `TranscodeStarted`. The node hop
 (multi-node jellycompat) still uses a path token exactly like native, and the
 node checks the deny marker on that path too.
+
+#### Administrator end
+
+The compat serve paths on the API reconstruct from the row, not from a token, so
+the deny marker does not gate them, and a Jellyfin play has no attempt row to
+stop. An administrator's stop or terminate therefore ends the play through the
+row: before it stops the native session, the admin end path
+(`endSessionAsAdmin`) has jellycompat set the play's row `Terminal`, the state
+the client's own stop and the expiry claim already set, and close the transcode
+in jellycompat's own manager. Stream, manifest and progress requests for the
+play then find no row, so none of them rebuilds the session.
+
+The row is found by its upstream session, so the end also works from a replica
+that does not hold the session, and it does not depend on Redis. What remains on
+the replica that does hold it:
+
+- It serves the play from its cached row for at most
+  `compatCacheRevalidationInterval` (5 seconds).
+- Its idle session copy and transcode stay until the stale-session sweep
+  (by default 45 seconds after the last activity, 30 minutes for a paused
+  play), which closes both.
+- A progressive remux or direct-play response already in flight counts as an
+  active transport, which the sweep skips. It runs until the response ends.
+  On the replica that received the end, stopping the session aborts an in-flight
+  progressive remux. Direct play has no abort on either surface.
 
 #### Transcode node lost mid-stream
 

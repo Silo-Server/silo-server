@@ -1336,6 +1336,11 @@ func NewPlaybackHandler(
 	if adder, ok := sessionMgr.(sessionExpirationHookAdder); ok {
 		adder.AddExpirationHook(h.handleExpiredSession)
 	}
+	if ender, ok := sessionMgr.(interface {
+		SetCompatAdminEnd(playback.CompatAdminEnd)
+	}); ok {
+		ender.SetCompatAdminEnd(h.endUpstreamSessionAsAdmin)
+	}
 	return h
 }
 
@@ -1345,6 +1350,33 @@ func (h *PlaybackHandler) handleExpiredSession(session *playback.Session) {
 	}
 	sessionCopy := *session
 	go h.tm.CloseTranscodeSession(sessionCopy.ID, sessionCopy.TranscodeNodeURL)
+}
+
+// endUpstreamSessionAsAdmin ends the play attached to an upstream session an
+// administrator stopped or terminated, and reports whether it found one.
+// Stopping the native session does not end a Jellyfin play: the client's next
+// segment, manifest or progress request would rebuild the session from the
+// play's row and adopt the transcode, which runs in this handler's manager.
+// The row is retired first, so those requests answer not found on every
+// server sharing the store, and then the local transcode is closed.
+//
+// The native session is left to the administrator path that called this,
+// which stops it and records the play. A request already past its row lookup
+// can still register the session and a transcode again; no later request
+// reaches them, and the idle reaper closes both.
+func (h *PlaybackHandler) endUpstreamSessionAsAdmin(ctx context.Context, upstreamSessionID string) bool {
+	if h == nil || h.playbackStore == nil || upstreamSessionID == "" {
+		return false
+	}
+	retired, err := h.playbackStore.RetireUpstreamSession(upstreamSessionID)
+	if err != nil {
+		slog.WarnContext(ctx, "jellycompat could not retire a play an administrator ended", "component", "jellycompat",
+			"upstream_session_id", upstreamSessionID, "error", err)
+	}
+	if h.tm != nil {
+		h.tm.CloseTranscodeSession(upstreamSessionID, "")
+	}
+	return retired
 }
 
 func (h *PlaybackHandler) segmentRetentionSeconds() int {

@@ -626,6 +626,44 @@ func TestDurableCompatPlaybackStoreUpdateRejectionAcrossReplicas(t *testing.T) {
 	}
 }
 
+// TestDurableCompatPlaybackStoreRetiresUpstreamSessionAcrossReplicas: an
+// administrator's end can land on a replica that never served the play. The
+// retirement must stop the replica that does serve it from routing the play:
+// at once on the replica that retired it, and on the other once its cached
+// copy is revalidated.
+func TestDurableCompatPlaybackStoreRetiresUpstreamSessionAcrossReplicas(t *testing.T) {
+	pool := newCompatTestPool(t)
+	now := time.Now()
+	clock := func() time.Time { return now }
+	holder := NewDurableCompatPlaybackStore(pool, time.Hour, clock)
+	other := NewDurableCompatPlaybackStore(pool, time.Hour, clock)
+	id := t.Name()
+	for _, upstream := range []string{"up-remote", "up-local"} {
+		holder.Put(PlaybackSession{ID: id + upstream, CompatToken: id, UpstreamSessionID: id + upstream})
+		t.Cleanup(func() { holder.Delete(id + upstream) })
+		if _, ok := holder.Get(id + upstream); !ok {
+			t.Fatalf("holder does not route %s", upstream)
+		}
+	}
+
+	if retired, err := other.RetireUpstreamSession(id + "up-remote"); err != nil || !retired {
+		t.Fatalf("retire from the replica without the play = %v, %v", retired, err)
+	}
+	if retired, err := holder.RetireUpstreamSession(id + "up-local"); err != nil || !retired {
+		t.Fatalf("retire from the replica holding the play = %v, %v", retired, err)
+	}
+	if _, ok := holder.Get(id + "up-local"); ok {
+		t.Fatal("the replica that retired its own play still routes it")
+	}
+	now = now.Add(compatCacheRevalidationInterval)
+	if _, ok := holder.Get(id + "up-remote"); ok {
+		t.Fatal("the holder still routes a play another replica retired")
+	}
+	if retired, err := holder.RetireUpstreamSession(id + "up-remote"); err != nil || retired {
+		t.Fatalf("repeat retire = %v, %v, want nothing left to retire", retired, err)
+	}
+}
+
 // TestDurableCompatPlaybackStoreDropsRejectedPendingUpdate: a write queued
 // after a DB failure that no longer applies to the row (its compare-and-swap
 // lost to another replica meanwhile) is dropped instead of blocking every
