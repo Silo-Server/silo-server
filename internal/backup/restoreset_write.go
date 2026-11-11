@@ -521,7 +521,7 @@ func (b *restoreSetBuild) addHomeSections(ctx context.Context, tx pgx.Tx, spec s
 		}
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT id, scope, library_id, position, section_type, title, featured, item_limit, config::text, enabled, web_only
+		SELECT id, scope, library_id, position, section_type, title, featured, item_limit, config::text, enabled, web_only, title_key, title_args
 		FROM page_sections ORDER BY scope, library_id NULLS FIRST, position, id`)
 	if err != nil {
 		return err
@@ -531,7 +531,7 @@ func (b *restoreSetBuild) addHomeSections(ctx context.Context, tx pgx.Tx, spec s
 		var e HomeSectionEntry
 		var library *int64
 		var config string
-		if err := rows.Scan(&e.ID, &e.Scope, &library, &e.Position, &e.SectionType, &e.Title, &e.Featured, &e.ItemLimit, &config, &e.Enabled, &e.WebOnly); err != nil {
+		if err := rows.Scan(&e.ID, &e.Scope, &library, &e.Position, &e.SectionType, &e.Title, &e.Featured, &e.ItemLimit, &config, &e.Enabled, &e.WebOnly, &e.TitleKey, &e.TitleArgs); err != nil {
 			rows.Close()
 			return err
 		}
