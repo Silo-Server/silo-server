@@ -85,12 +85,13 @@ export function useSaveAdminDashboardLayout() {
   const mutation = useMutation({
     scope: LAYOUT_MUTATION_SCOPE,
     retry: false,
-    mutationFn: async (intent: DashboardLayoutSaveIntent) => {
+    mutationFn: async (intent: DashboardLayoutSaveIntent & { keepalive?: boolean }) => {
       if (!isCapturedProfileAuthorityActive(intent.profileContext))
         throw new StaleApiRequestContextError();
       let etag: string | null = null;
       await v2("PUT /api/v2/admin/dashboard/layout", {
         headers: { "If-Match": intent.etag },
+        keepalive: intent.keepalive,
         onResponse: (response) => {
           etag = response.headers.get("ETag");
         },
@@ -119,11 +120,16 @@ export function useSaveAdminDashboardLayout() {
   const mutateCaptured = useCallback(
     (
       intent: DashboardLayoutSaveIntent,
-      options?: { onSuccess?: (etag: string) => void; onError?: () => void },
+      options?: {
+        onSuccess?: (etag: string) => void;
+        onError?: () => void;
+        /** Let the write outlive the page: set when flushing on `pagehide`. */
+        keepalive?: boolean;
+      },
     ) => {
       // Promise completion survives observer unmount; per-call mutate callbacks
       // do not. Cleanup may still hold a newer copied edit behind this write.
-      void rawMutateAsync(intent).then(
+      void rawMutateAsync({ ...intent, keepalive: options?.keepalive }).then(
         (etag) => {
           if (isCapturedProfileAuthorityActive(intent.profileContext)) options?.onSuccess?.(etag);
           else options?.onError?.();
