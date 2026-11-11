@@ -409,13 +409,25 @@ in the pull request template. For each issue the change fully resolves, add a
 GitHub closes the issue when the pull request merges into `main`; the
 `Related issue:` line alone does not close anything. Name an epic, scope item,
 or partly addressed issue on `Related issue:`, and write `Related issue: N/A`
-when none applies. Either way, the Problem section has to stand on its own. Keep the commit history intentional and the diff
-limited to the stated problem. Keep the description proportional to the change;
-omit session history, full logs, and private report links other than an
-`Evidence:` line. Follow the
+when none applies. Keep both lines accurate when the pull request's scope
+changes. Either way, the Problem section has to stand on its own. Keep the
+commit history intentional and the diff limited to the stated problem. Keep the
+description proportional to the change; omit session history, full logs, and
+private report links other than an `Evidence:` line. Follow the
 [public-content and media rules](AGENTS.md#pull-requests), and include evidence
 for every change users can see, as [Show visible changes](#show-visible-changes)
 describes.
+
+Until 1.0 ships, maintainers check each 1.0 feature by hand on the
+[Silo v1.0.0 board](https://github.com/orgs/Silo-Server/projects/5). A
+`[v1] <Feature>` issue holds the acceptance criteria, and each validation task
+under it records a result for its cases `C1…`. Work out which passed cases your
+change could reach, and list the affected tasks and cases on the
+`Validation tasks:` line, for example
+`Validation tasks: unblocks #1144 C3; changes #1200 C1`, or write `none`.
+Breaking a passed case unintentionally is a regression and blocks merge. A
+deliberate change to validated behavior must say why and still meet the
+published criterion; changing the criterion itself needs a maintainer decision.
 
 ### Write the description
 
