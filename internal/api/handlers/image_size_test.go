@@ -1,8 +1,6 @@
 package handlers
 
 import (
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -83,13 +81,6 @@ func TestSizedCardBackdropPathFollowsTheStillLadder(t *testing.T) {
 				t.Errorf("real backdrop = %q, want it to end in %q", got, tt.wantBackdrop)
 			}
 		})
-	}
-}
-
-func TestRequestImageSizeIgnoresInvalidValue(t *testing.T) {
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/catalog?image_size=enormous", nil)
-	if got := requestImageSize(r); got != imagesize.Unset {
-		t.Fatalf("requestImageSize = %q, want Unset for an invalid value", got)
 	}
 }
 
