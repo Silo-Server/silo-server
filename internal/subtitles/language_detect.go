@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/abadojack/whatlanggo"
 
@@ -242,9 +243,19 @@ func languageFromVTTMetadata(data []byte) (string, bool) {
 	return "", false
 }
 
+// Content detection reads at most contentSampleBytes of a subtitle file.
+// Language identification needs far less text than a full subtitle holds, and
+// the detector's cost grows with its input, so a larger file is sampled as
+// contentSampleWindows evenly spaced runs of whole lines. Each window stays
+// under bufio.Scanner's 64 KiB line limit.
+const (
+	contentSampleBytes   = 128 << 10
+	contentSampleWindows = 8
+)
+
 func languageFromContent(data []byte, format SubtitleFormat) (string, bool) {
-	text := extractSubtitleDialogue(data, format)
-	if len([]rune(text)) < 40 {
+	text := contentDetectionText(data, format)
+	if utf8.RuneCountInString(text) < 40 {
 		return "", false
 	}
 
@@ -261,6 +272,43 @@ func languageFromContent(data []byte, format SubtitleFormat) (string, bool) {
 		return language, true
 	}
 	return "", false
+}
+
+// contentDetectionText returns the subtitle text handed to the language
+// detector. It never exceeds contentSampleBytes: text extraction only drops
+// bytes from its input, and that input is at most contentSampleBytes.
+func contentDetectionText(data []byte, format SubtitleFormat) string {
+	return extractSubtitleDialogue(sampleSubtitleContent(data), format)
+}
+
+// sampleSubtitleContent returns data unchanged when it fits the content
+// sample, and otherwise joins evenly spaced windows trimmed to whole lines.
+// A blank line separates windows so SRT and VTT cue parsing restarts cleanly.
+func sampleSubtitleContent(data []byte) []byte {
+	if len(data) <= contentSampleBytes {
+		return data
+	}
+	window := contentSampleBytes/contentSampleWindows - 1
+	step := (len(data) - window) / (contentSampleWindows - 1)
+	sample := make([]byte, 0, contentSampleBytes)
+	for i := range contentSampleWindows {
+		chunk := data[i*step : i*step+window]
+		if i > 0 {
+			// Drop the partial line the window starts inside.
+			start := bytes.IndexByte(chunk, '\n')
+			if start < 0 {
+				continue
+			}
+			chunk = chunk[start+1:]
+		}
+		end := bytes.LastIndexByte(chunk, '\n')
+		if end < 0 {
+			continue
+		}
+		sample = append(sample, chunk[:end+1]...)
+		sample = append(sample, '\n')
+	}
+	return sample
 }
 
 func extractSubtitleDialogue(data []byte, format SubtitleFormat) string {
