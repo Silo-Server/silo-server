@@ -107949,6 +107949,48 @@
       "value": "O trabalho falhou"
     }
   ],
+  "web.common.libraryType.audiobooks": [
+    {
+      "type": 0,
+      "value": "Audiolivros"
+    }
+  ],
+  "web.common.libraryType.ebooks": [
+    {
+      "type": 0,
+      "value": "E-books"
+    }
+  ],
+  "web.common.libraryType.manga": [
+    {
+      "type": 0,
+      "value": "Mangás"
+    }
+  ],
+  "web.common.libraryType.mixed": [
+    {
+      "type": 0,
+      "value": "Mista"
+    }
+  ],
+  "web.common.libraryType.movies": [
+    {
+      "type": 0,
+      "value": "Filmes"
+    }
+  ],
+  "web.common.libraryType.podcasts": [
+    {
+      "type": 0,
+      "value": "Podcasts"
+    }
+  ],
+  "web.common.libraryType.series": [
+    {
+      "type": 0,
+      "value": "Séries"
+    }
+  ],
   "web.common.markers.sharingDisclosure": [
     {
       "type": 0,

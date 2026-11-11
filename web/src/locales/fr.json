@@ -107719,6 +107719,48 @@
       "value": "Échec du travail"
     }
   ],
+  "web.common.libraryType.audiobooks": [
+    {
+      "type": 0,
+      "value": "Livres audio"
+    }
+  ],
+  "web.common.libraryType.ebooks": [
+    {
+      "type": 0,
+      "value": "Livres numériques"
+    }
+  ],
+  "web.common.libraryType.manga": [
+    {
+      "type": 0,
+      "value": "Mangas"
+    }
+  ],
+  "web.common.libraryType.mixed": [
+    {
+      "type": 0,
+      "value": "Mixte"
+    }
+  ],
+  "web.common.libraryType.movies": [
+    {
+      "type": 0,
+      "value": "Films"
+    }
+  ],
+  "web.common.libraryType.podcasts": [
+    {
+      "type": 0,
+      "value": "Podcasts"
+    }
+  ],
+  "web.common.libraryType.series": [
+    {
+      "type": 0,
+      "value": "Séries"
+    }
+  ],
   "web.common.markers.sharingDisclosure": [
     {
       "type": 0,

@@ -1240,13 +1240,13 @@
   "home.section.discoverPopularMovies": [
     {
       "type": 0,
-      "value": "热门电影"
+      "value": "人气电影"
     }
   ],
   "home.section.discoverPopularSeries": [
     {
       "type": 0,
-      "value": "热门剧集"
+      "value": "人气剧集"
     }
   ],
   "home.section.discoverStudios": [
@@ -90333,6 +90333,48 @@
     {
       "type": 0,
       "value": "作业失败"
+    }
+  ],
+  "web.common.libraryType.audiobooks": [
+    {
+      "type": 0,
+      "value": "有声书"
+    }
+  ],
+  "web.common.libraryType.ebooks": [
+    {
+      "type": 0,
+      "value": "电子书"
+    }
+  ],
+  "web.common.libraryType.manga": [
+    {
+      "type": 0,
+      "value": "漫画"
+    }
+  ],
+  "web.common.libraryType.mixed": [
+    {
+      "type": 0,
+      "value": "混合"
+    }
+  ],
+  "web.common.libraryType.movies": [
+    {
+      "type": 0,
+      "value": "电影"
+    }
+  ],
+  "web.common.libraryType.podcasts": [
+    {
+      "type": 0,
+      "value": "播客"
+    }
+  ],
+  "web.common.libraryType.series": [
+    {
+      "type": 0,
+      "value": "剧集"
     }
   ],
   "web.common.markers.sharingDisclosure": [
