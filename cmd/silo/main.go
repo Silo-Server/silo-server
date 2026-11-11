@@ -599,7 +599,6 @@ func maybeApplyPostgresTuning(ctx context.Context, pool *pgxpool.Pool, appMaxCon
 		"detected_memory_bytes", opts.DetectedMemoryBytes,
 		"memory_source", opts.MemorySource,
 		"memory_budget_percent", opts.MemoryBudgetPercent,
-		"shared_buffers_max_bytes", opts.SharedBuffersMaxBytes,
 		"cpus", opts.CPUs,
 		"detected_cpus", opts.DetectedCPUs,
 		"connections", opts.Connections,

@@ -13,12 +13,11 @@ import (
 
 func TestRecommendPostgresOLTPSettings(t *testing.T) {
 	tests := []struct {
-		name             string
-		memoryBudget     int64
-		sharedBuffersMax int64
-		cpus             int
-		detectedCPUs     int
-		want             map[string]string
+		name         string
+		memoryBudget int64
+		cpus         int
+		detectedCPUs int
+		want         map[string]string
 	}{
 		{
 			name:         "mid-sized host reaches the default shared_buffers ceiling",
@@ -76,16 +75,6 @@ func TestRecommendPostgresOLTPSettings(t *testing.T) {
 			},
 		},
 		{
-			name:             "raised ceiling",
-			memoryBudget:     48 * sizeGB,
-			sharedBuffersMax: 8 * sizeGB,
-			cpus:             8,
-			want: map[string]string{
-				"shared_buffers":       "8GB",
-				"effective_cache_size": "36GB",
-			},
-		},
-		{
 			// Workers follow the bounded count; work_mem keeps the detected
 			// one, so bounding does not raise it.
 			name:         "detected CPU count was bounded",
@@ -105,16 +94,15 @@ func TestRecommendPostgresOLTPSettings(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			opts := PostgresTuneOptions{
-				Enabled:               true,
-				Profile:               postgresTuneProfileOLTP,
-				MemoryBudgetBytes:     tt.memoryBudget,
-				SharedBuffersMaxBytes: tt.sharedBuffersMax,
-				CPUs:                  tt.cpus,
-				DetectedCPUs:          tt.detectedCPUs,
-				Connections:           100,
-				Storage:               postgresTuneStorageNVMe,
-				DBSize:                postgresTuneDBSizeMidRAM,
-				OSType:                "linux",
+				Enabled:           true,
+				Profile:           postgresTuneProfileOLTP,
+				MemoryBudgetBytes: tt.memoryBudget,
+				CPUs:              tt.cpus,
+				DetectedCPUs:      tt.detectedCPUs,
+				Connections:       100,
+				Storage:           postgresTuneStorageNVMe,
+				DBSize:            postgresTuneDBSizeMidRAM,
+				OSType:            "linux",
 			}
 			byName := map[string]string{}
 			for _, setting := range RecommendPostgresOLTPSettings(opts, 18) {
@@ -172,7 +160,6 @@ func TestRecommendPostgresStartupSettings(t *testing.T) {
 func TestLoadPostgresTuneOptionsFromEnv(t *testing.T) {
 	t.Setenv("POSTGRES_TUNE", "auto")
 	t.Setenv("POSTGRES_TUNE_MEMORY", "8GB")
-	t.Setenv("POSTGRES_TUNE_SHARED_BUFFERS_MAX", "512MB")
 	t.Setenv("POSTGRES_TUNE_CPUS", "64")
 	t.Setenv("POSTGRES_TUNE_STORAGE", "hdd")
 	t.Setenv("POSTGRES_TUNE_DB_SIZE", "greater_ram")
@@ -197,9 +184,6 @@ func TestLoadPostgresTuneOptionsFromEnv(t *testing.T) {
 	if opts.MemoryBudgetPercent != 100 {
 		t.Fatalf("MemoryBudgetPercent = %d, want 100", opts.MemoryBudgetPercent)
 	}
-	if opts.SharedBuffersMaxBytes != 512*sizeMB {
-		t.Fatalf("SharedBuffersMaxBytes = %d, want %d", opts.SharedBuffersMaxBytes, 512*sizeMB)
-	}
 	// An explicit count is the operator's and is not bounded.
 	if opts.CPUs != 64 || opts.DetectedCPUs != 0 {
 		t.Fatalf("CPUs = %d, DetectedCPUs = %d, want 64 and 0", opts.CPUs, opts.DetectedCPUs)
@@ -212,18 +196,6 @@ func TestLoadPostgresTuneOptionsFromEnv(t *testing.T) {
 	}
 	if opts.DBSize != postgresTuneDBSizeGreaterRAM {
 		t.Fatalf("DBSize = %q, want %q", opts.DBSize, postgresTuneDBSizeGreaterRAM)
-	}
-}
-
-// A ceiling PostgreSQL would refuse must not reach the omnibus startup file,
-// where it would stop the server from starting.
-func TestLoadPostgresTuneOptionsRejectsSharedBuffersMaxBelowPostgresMinimum(t *testing.T) {
-	t.Setenv("POSTGRES_TUNE", "auto")
-	t.Setenv("POSTGRES_TUNE_MEMORY", "8GB")
-	t.Setenv("POSTGRES_TUNE_SHARED_BUFFERS_MAX", "64kB")
-
-	if _, err := LoadPostgresTuneOptionsFromEnv(20); err == nil {
-		t.Fatal("expected a ceiling below 128kB to be rejected")
 	}
 }
 

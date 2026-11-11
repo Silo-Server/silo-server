@@ -202,7 +202,7 @@ restart-only settings Silo sizes from memory and CPUs, read from the same
 environment and `/config/silo/.env`. A new cluster then starts with them, and
 Silo's later `ALTER SYSTEM` writes the same values, so no restart is pending.
 The tuner bounds what it sizes from the machine: `shared_buffers` is a quarter
-of the memory budget up to `POSTGRES_TUNE_SHARED_BUFFERS_MAX` (2GB by default),
+of the memory budget up to a fixed 2GB,
 a detected CPU count sizes at most 16 workers (`POSTGRES_TUNE_CPUS` is used as
 given), and `autovacuum_work_mem` is at most 256MB. The `shared_buffers`
 ceiling is fixed, not sized from the database, because this file is written

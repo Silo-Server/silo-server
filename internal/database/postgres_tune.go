@@ -29,7 +29,7 @@ const (
 
 	defaultPostgresTuneMemoryBudgetPercent = 75
 
-	// defaultPostgresTuneSharedBuffersMaxBytes is the ceiling on the tuned
+	// postgresTuneSharedBuffersMaxBytes is the ceiling on the tuned
 	// shared_buffers. A quarter of the memory budget suits a database that is
 	// the only tenant of its host, but a media catalog's hot set (indexes
 	// and recently read rows) is far smaller than a large host's quarter, and
@@ -37,11 +37,7 @@ const (
 	// The ceiling is fixed, not sized from the database: shared_buffers
 	// changes only at a restart, and the omnibus image writes it before the
 	// database has any content.
-	defaultPostgresTuneSharedBuffersMaxBytes = 2 * sizeGB
-
-	// minPostgresTuneSharedBuffersMaxBytes is the smallest shared_buffers
-	// PostgreSQL accepts.
-	minPostgresTuneSharedBuffersMaxBytes = 128 * sizeKB
+	postgresTuneSharedBuffersMaxBytes = 2 * sizeGB
 
 	// maxPostgresTuneDetectedCPUs bounds a detected CPU count. A container
 	// without a CPU limit sees every core of its host, and one worker slot per
@@ -93,9 +89,7 @@ type PostgresTuneOptions struct {
 	DetectedMemoryBytes int64
 	MemorySource        string
 	MemoryBudgetPercent int
-	// SharedBuffersMaxBytes caps shared_buffers; zero means the default.
-	SharedBuffersMaxBytes int64
-	CPUs                  int
+	CPUs                int
 	// DetectedCPUs is the machine's CPU count before it was bounded, or zero
 	// when CPUs was set explicitly. work_mem is sized from it, so bounding
 	// the workers does not raise work_mem.
@@ -173,11 +167,6 @@ func LoadPostgresTuneOptionsFromEnv(appMaxConnections int) (PostgresTuneOptions,
 		return PostgresTuneOptions{}, err
 	}
 
-	sharedBuffersMax, err := loadPostgresTuneSharedBuffersMax()
-	if err != nil {
-		return PostgresTuneOptions{}, err
-	}
-
 	cpus, detectedCPUs, err := loadPostgresTuneCPUs()
 	if err != nil {
 		return PostgresTuneOptions{}, err
@@ -206,20 +195,19 @@ func LoadPostgresTuneOptionsFromEnv(appMaxConnections int) (PostgresTuneOptions,
 	ioMethod := strings.ToLower(firstNonEmptyEnv("POSTGRES_TUNE_IO_METHOD", "SILO_POSTGRES_TUNE_IO_METHOD"))
 
 	return PostgresTuneOptions{
-		Enabled:               true,
-		Profile:               profile,
-		MemoryBudgetBytes:     memory.BudgetBytes,
-		DetectedMemoryBytes:   memory.DetectedBytes,
-		MemorySource:          memory.Source,
-		MemoryBudgetPercent:   memory.Percent,
-		SharedBuffersMaxBytes: sharedBuffersMax,
-		CPUs:                  cpus,
-		DetectedCPUs:          detectedCPUs,
-		Connections:           connections,
-		Storage:               storage,
-		DBSize:                dbSize,
-		OSType:                osType,
-		IOMethod:              ioMethod,
+		Enabled:             true,
+		Profile:             profile,
+		MemoryBudgetBytes:   memory.BudgetBytes,
+		DetectedMemoryBytes: memory.DetectedBytes,
+		MemorySource:        memory.Source,
+		MemoryBudgetPercent: memory.Percent,
+		CPUs:                cpus,
+		DetectedCPUs:        detectedCPUs,
+		Connections:         connections,
+		Storage:             storage,
+		DBSize:              dbSize,
+		OSType:              osType,
+		IOMethod:            ioMethod,
 	}, nil
 }
 
@@ -240,14 +228,7 @@ func RecommendPostgresOLTPSettings(opts PostgresTuneOptions, postgresMajorVersio
 	// work_mem keeps the uncapped quarter and the unbounded CPU count as its
 	// basis, so neither bound raises it.
 	budgetQuarter := memoryBudgetKB / 4
-	sharedBuffers := budgetQuarter
-	sharedBuffersMax := opts.SharedBuffersMaxBytes
-	if sharedBuffersMax <= 0 {
-		sharedBuffersMax = defaultPostgresTuneSharedBuffersMaxBytes
-	}
-	if sharedBuffers > sharedBuffersMax/sizeKB {
-		sharedBuffers = sharedBuffersMax / sizeKB
-	}
+	sharedBuffers := min(budgetQuarter, postgresTuneSharedBuffersMaxBytes/sizeKB)
 	// A planner hint, not an allocation: the page cache holds what
 	// shared_buffers does not, so it stays sized from the whole budget.
 	effectiveCacheSize := (memoryBudgetKB * 3) / 4
@@ -487,21 +468,6 @@ func loadPostgresTuneMemoryBudgetPercent() (int, error) {
 		return 0, fmt.Errorf("invalid POSTGRES_TUNE_MEMORY_BUDGET_PERCENT %q", raw)
 	}
 	return percent, nil
-}
-
-func loadPostgresTuneSharedBuffersMax() (int64, error) {
-	raw := firstNonEmptyEnv("POSTGRES_TUNE_SHARED_BUFFERS_MAX", "SILO_POSTGRES_TUNE_SHARED_BUFFERS_MAX")
-	if raw == "" {
-		return defaultPostgresTuneSharedBuffersMaxBytes, nil
-	}
-	limit, err := parsePostgresTuneByteSize(raw)
-	if err != nil {
-		return 0, fmt.Errorf("invalid POSTGRES_TUNE_SHARED_BUFFERS_MAX: %w", err)
-	}
-	if limit < minPostgresTuneSharedBuffersMaxBytes {
-		return 0, fmt.Errorf("invalid POSTGRES_TUNE_SHARED_BUFFERS_MAX %q: PostgreSQL needs at least 128kB", raw)
-	}
-	return limit, nil
 }
 
 // loadPostgresTuneCPUs returns the CPU count to tune for and, when it was
