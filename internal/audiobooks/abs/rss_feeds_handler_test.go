@@ -270,6 +270,12 @@ func TestFeed_Open_RequiresActingAdmin(t *testing.T) {
 	if code := open("1", ""); code != http.StatusOK || len(store.rows) != 1 {
 		t.Errorf("acting admin: status = %d, feeds stored = %d; want 200 and one", code, len(store.rows))
 	}
+	// A failed lookup must stop the open: the item lookup that follows would
+	// read the empty filter as unrestricted.
+	h.deps.AccessResolver = failingOwnerResolver{}
+	if code := open("1", ""); code != http.StatusInternalServerError || len(store.rows) != 1 {
+		t.Errorf("failed owner lookup: status = %d, feeds stored = %d; want 500 and no new feed", code, len(store.rows))
+	}
 }
 
 func TestFeed_Open_Collision_409(t *testing.T) {

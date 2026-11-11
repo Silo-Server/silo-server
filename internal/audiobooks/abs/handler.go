@@ -238,10 +238,11 @@ type AccessResolver interface {
 	// as a public feed, from its account and profile as they are now. It
 	// returns ErrOwnerUnavailable when the owner's account is missing or
 	// disabled or its profile is gone. actingAdmin reports whether the owner
-	// may use server admin powers, by the native API's acting-admin rule: the
+	// may use server admin powers, by the built-in acting-admin rule: the
 	// account holds the admin role and the owner is its primary profile, or
 	// the account has no profiles. Any other profile on an admin account is a
-	// household member.
+	// household member. An operator's custom policy override of the native
+	// admin gate is not consulted.
 	ResolveABSOwnerAccess(ctx context.Context, userID, profileID string) (filter catalog.AccessFilter, actingAdmin bool, err error)
 }
 

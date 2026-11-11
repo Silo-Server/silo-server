@@ -80,10 +80,12 @@ func (r *ABSAccessResolver) ResolveABSAccess(ctx context.Context, userID, profil
 // principal without a profile belongs to an account that now has profiles
 // (the rule SiloCredValidator.VerifyTokenProfile applies to tokens).
 //
-// actingAdmin follows the native API's acting-admin gate (RequireActingAdmin
-// in internal/api/middleware): the account holds the server admin role and
-// the owner is its primary profile. An owner without a profile exists only on
-// an account with no profiles, which that gate lets act as the administrator.
+// actingAdmin is the built-in acting-admin rule (actingAdminAllowedFor in
+// internal/api/middleware): the account holds the server admin role and the
+// owner is its primary profile. An owner without a profile exists only on an
+// account with no profiles, which that rule lets act as the administrator. An
+// operator's custom policy override of the native admin gate is not consulted
+// here.
 func (r *ABSAccessResolver) ResolveABSOwnerAccess(ctx context.Context, userID, profileID string) (catalog.AccessFilter, bool, error) {
 	if r == nil || r.resolver == nil || r.users == nil || r.stores == nil {
 		return catalog.AccessFilter{}, false, errors.New("ABS owner access resolver not configured")

@@ -120,12 +120,18 @@ func TestResolveABSOwnerAccess(t *testing.T) {
 				ownerScopeResolver{err: fmt.Errorf("%w: revoked by policy", access.ErrProfileUnverified)}),
 			"kid",
 		},
+		// The primary-profile lookup an admin account takes finds nothing;
+		// that is an unavailable owner, not a failed lookup.
+		"deleted profile on an admin account": {
+			newOwnerResolver(ownerUserRepo{user: &models.User{ID: 7, Role: models.RoleAdmin, Enabled: true}}),
+			"kid",
+		},
 	}
 	for name, tc := range unavailable {
 		t.Run(name, func(t *testing.T) {
-			_, _, err := tc.resolver.ResolveABSOwnerAccess(context.Background(), "7", tc.profileID)
-			if !errors.Is(err, abs.ErrOwnerUnavailable) {
-				t.Fatalf("err = %v, want ErrOwnerUnavailable", err)
+			_, actingAdmin, err := tc.resolver.ResolveABSOwnerAccess(context.Background(), "7", tc.profileID)
+			if !errors.Is(err, abs.ErrOwnerUnavailable) || actingAdmin {
+				t.Fatalf("actingAdmin = %t, err = %v; want false, ErrOwnerUnavailable", actingAdmin, err)
 			}
 		})
 	}
