@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { getAccessGroup, type AccessGroupEditor as GroupEditor } from "@/api/v2/accessGroups";
 import { isRequestEditorConflict } from "@/api/v2/adminRequests";
 import { V2ProblemError } from "@/api/v2/request";
-import type { AccessGroup, AccessGroupInput } from "@/api/types";
+import type { AccessGroupInput } from "@/api/types";
 import { EditorConflict } from "@/components/admin/EditorConflict";
 import { RequestLimitFields } from "@/components/admin/RequestLimitFields";
 import { LibraryAccessSelector } from "@/components/LibraryAccessSelector";
@@ -36,7 +36,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   useAccessGroups,
@@ -50,8 +49,7 @@ import {
   useUpdateRequestGroupLimit,
 } from "@/hooks/queries/admin/requests";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
-import { useT, type MessageKey } from "@/i18n";
-import { PERMISSION_MARKER_EDIT, PERMISSION_METADATA_CURATION } from "@/lib/permissions";
+import { useT } from "@/i18n";
 import {
   describeInheritedValue,
   formatRequestApproval,
@@ -74,74 +72,18 @@ import {
   type PlaybackQualityPreset,
 } from "@/lib/playback-quality";
 
+import { sameGroupBody, singleLine, storedGroupBody } from "./accessGroupDraft";
 import { LimitField, StreamBitrateLimitField, ToggleRow } from "./AccessGroupFields";
 import { AccessGroupMembers } from "./AccessGroupMembers";
+import { AccessGroupPermissionsSection } from "./AccessGroupPermissionsSection";
 import { AccessGroupSaveBar } from "./AccessGroupSaveBar";
 
 // Tailwind's lg breakpoint: the editor's bottom button row from here up, the
 // pinned save bar below. Tests have no matchMedia and get the button row.
-const DESKTOP_QUERY = "(min-width: 1024px)";
+const DESKTOP_QUERY = "(min-width: 64rem)";
 
 // Menu rows tall enough to tap on a phone.
 const MENU_ITEM_CLASS = "min-h-11";
-
-// The two assignable permissions (mirrors auth.assignablePermissions). A group
-// mask of `null` means "all assignable"; a list narrows to those named.
-const ASSIGNABLE_PERMISSIONS: Array<{
-  value: string;
-  label: MessageKey;
-  description: MessageKey;
-}> = [
-  {
-    value: PERMISSION_METADATA_CURATION,
-    label: "web.admin.access.groups.permissions.metadataCuration",
-    description: "web.admin.access.groups.permissions.metadataCurationDescription",
-  },
-  {
-    value: PERMISSION_MARKER_EDIT,
-    label: "web.admin.access.groups.permissions.markerEdit",
-    description: "web.admin.access.groups.permissions.markerEditDescription",
-  },
-];
-
-/**
- * The body a save would send for the group as stored, built with the same
- * normalization as the editor's (quality preset, clamped transcoded
- * downloads), so an untouched draft compares equal to it.
- */
-function storedGroupBody(group: AccessGroup): AccessGroupInput {
-  return {
-    name: group.name.trim(),
-    description: group.description.trim(),
-    library_ids: group.library_ids,
-    max_playback_quality: playbackQualityValueFromPreset(
-      playbackQualityPresetFromValue(group.max_playback_quality),
-    ),
-    download_allowed: group.download_allowed,
-    download_transcode_allowed: group.download_allowed && group.download_transcode_allowed,
-    transcode_allowed: group.transcode_allowed,
-    audio_transcode_allowed: group.audio_transcode_allowed,
-    max_streams: group.max_streams,
-    max_transcodes: group.max_transcodes,
-    max_remote_stream_bitrate_kbps: group.max_remote_stream_bitrate_kbps,
-    max_local_stream_bitrate_kbps: group.max_local_stream_bitrate_kbps,
-    max_profiles: group.max_profiles,
-    allowed_permissions: group.allowed_permissions,
-    requests_allowed: group.requests_allowed,
-    is_default: group.is_default,
-  };
-}
-
-function sameGroupBody(a: AccessGroupInput, b: AccessGroupInput): boolean {
-  return (Object.keys(b) as Array<keyof AccessGroupInput>).every(
-    (key) => JSON.stringify(a[key]) === JSON.stringify(b[key]),
-  );
-}
-
-/** The description is one line: line breaks typed or pasted on a phone become spaces. */
-function singleLine(value: string): string {
-  return value.replace(/\r\n|[\r\n]/g, " ");
-}
 
 interface AccessGroupEditorProps {
   initialEditor: GroupEditor;
@@ -269,16 +211,6 @@ export function AccessGroupEditor({
     }
   }
 
-  const allPermissions = permissions === null;
-
-  function setPermissionAllowed(permission: string, allowed: boolean) {
-    const current = permissions ?? ASSIGNABLE_PERMISSIONS.map((entry) => entry.value);
-    const next = allowed
-      ? Array.from(new Set([...current, permission]))
-      : current.filter((value) => value !== permission);
-    setPermissions(next);
-  }
-
   // What Save would send, or null while a limit box holds no valid value.
   const draftBody: AccessGroupInput | null =
     maxRemoteStreamBitrateKbps === null ||
@@ -377,6 +309,11 @@ export function AccessGroupEditor({
     setIsDefault(group.is_default);
     requestLimit.reset();
     setDraftGeneration((generation) => generation + 1);
+    // Messages about the thrown-away edit go with it. A stale group stays
+    // flagged: its Reload notice is still the way forward.
+    setLimitError("");
+    setLimitConflict(false);
+    if (!conflict) setError("");
   }
 
   async function remove() {
@@ -751,45 +688,7 @@ export function AccessGroupEditor({
           </p>
         </section>
 
-        <section className="surface-panel space-y-3 rounded-2xl border-0 p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-semibold">
-                {t("web.admin.access.groups.permissions.heading")}
-              </h2>
-              <p className="text-muted-foreground mt-0.5 text-xs">
-                {t("web.admin.access.groups.permissions.help")}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground text-xs">
-                {t("web.admin.access.groups.permissions.allowAll")}
-              </span>
-              <Switch
-                checked={allPermissions}
-                onCheckedChange={(checked) =>
-                  setPermissions(
-                    checked ? null : ASSIGNABLE_PERMISSIONS.map((entry) => entry.value),
-                  )
-                }
-                aria-label={t("web.admin.access.groups.permissions.allowAllLabel")}
-              />
-            </div>
-          </div>
-          {!allPermissions && (
-            <div className="space-y-2">
-              {ASSIGNABLE_PERMISSIONS.map((permission) => (
-                <ToggleRow
-                  key={permission.value}
-                  label={t(permission.label)}
-                  description={t(permission.description)}
-                  checked={permissions?.includes(permission.value) ?? false}
-                  onCheckedChange={(checked) => setPermissionAllowed(permission.value, checked)}
-                />
-              ))}
-            </div>
-          )}
-        </section>
+        <AccessGroupPermissionsSection permissions={permissions} onChange={setPermissions} />
 
         <AccessGroupMembers groupId={group.id} />
 

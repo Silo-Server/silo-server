@@ -47,11 +47,14 @@ export function LibraryCardList({
   realtimeMonitoringByLibraryId,
   trickplayByLibraryId,
   onMove,
+  moving,
 }: {
   rows: LibraryRow[];
   realtimeMonitoringByLibraryId: Map<number, LibraryRealtimeMonitoringEntry>;
   trickplayByLibraryId: Map<number, AdminTrickplayLibrary>;
   onMove: (libraryId: number, direction: -1 | 1) => void;
+  /** A reorder is saving or the list is reloading: Move up and Move down wait. */
+  moving: boolean;
 }) {
   return (
     <ul className="space-y-3">
@@ -61,8 +64,8 @@ export function LibraryCardList({
             row={row}
             realtimeMonitoring={realtimeMonitoringByLibraryId.get(row.library.id)}
             trickplay={trickplayByLibraryId.get(row.library.id)}
-            canMoveUp={index > 0}
-            canMoveDown={index < rows.length - 1}
+            canMoveUp={!moving && index > 0}
+            canMoveDown={!moving && index < rows.length - 1}
             onMove={(direction) => onMove(row.library.id, direction)}
           />
         </li>

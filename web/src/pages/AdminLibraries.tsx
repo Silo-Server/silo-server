@@ -111,7 +111,11 @@ export default function AdminLibraries() {
 function LibrariesPage() {
   const t = useT();
   useEventChannel("scans");
-  const { data: libraries = NO_LIBRARIES, isLoading } = useAdminLibraries();
+  const {
+    data: libraries = NO_LIBRARIES,
+    isLoading,
+    isFetching: librariesFetching,
+  } = useAdminLibraries();
   const { data: libraryCapabilities } = useLibraryCapabilities();
   const { data: activeScans = NO_ACTIVE_SCANS } = useActiveScans();
   const { data: realtimeMonitoring } = useLibraryRealtimeMonitoring();
@@ -368,6 +372,9 @@ function LibrariesPage() {
             realtimeMonitoringByLibraryId={realtimeMonitoringByLibraryId}
             trickplayByLibraryId={trickplayByLibraryId}
             onMove={handleMove}
+            // One move at a time: each sends the whole order, and the list it
+            // starts from must already include the previous move.
+            moving={reorderMutation.isPending || librariesFetching}
           />
         )}
 

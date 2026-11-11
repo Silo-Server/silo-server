@@ -6,7 +6,7 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 export const PAGE_SIZE = 10;
 
 // Tailwind's lg breakpoint: tables from here up, cards below.
-const DESKTOP_QUERY = "(min-width: 1024px)";
+const DESKTOP_QUERY = "(min-width: 64rem)";
 
 /**
  * Whether the admin libraries page shows its tables, for the library list and
