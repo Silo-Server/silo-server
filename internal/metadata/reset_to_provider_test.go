@@ -4,6 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -156,5 +159,42 @@ func TestProcess_ResetToProviderClearsCreditsTheProvidersLack(t *testing.T) {
 	people, replaced := h.itemRepo.replacedPeople[contentID]
 	if !replaced || len(people) != 0 {
 		t.Errorf("ReplacePeople called = %v with %v, want the stored credits cleared", replaced, personNames(people))
+	}
+}
+
+// notFoundRemote answers every lookup the way a plugin says it has no such
+// title: a gRPC NotFound status, which PluginProvider passes through as is.
+type notFoundRemote struct{ slug string }
+
+func (p notFoundRemote) Slug() string       { return p.slug }
+func (p notFoundRemote) Name() string       { return p.slug }
+func (p notFoundRemote) ForTypes() []string { return []string{"movie"} }
+func (p notFoundRemote) GetMetadata(context.Context, MetadataRequest) (*MetadataResult, error) {
+	return nil, status.Error(codes.NotFound, p.slug+": no such title")
+}
+
+// A provider that says it doesn't know the title has answered, so the reset
+// goes ahead with the other providers' values, whether the answer is a
+// built-in provider's HTTP 404 or a plugin's NotFound status.
+func TestProcess_ResetToProviderAcceptsANotFoundAnswer(t *testing.T) {
+	const contentID = "146000000000000100"
+	h := newTestHarness()
+	seedEditedMovie(t, h, contentID)
+	answering := &capturingMetadataProvider{response: &MetadataResult{
+		HasMetadata: true, Title: "Provider Title", Year: 2006,
+		ProviderIDs: map[string]string{"tmdb": "100"},
+	}}
+
+	if _, err := h.service.ProcessWithProviders(context.Background(), ProcessRequest{
+		ContentID: contentID, Language: "en", Mode: ModeManualRefresh, resetToProvider: true,
+	}, []Provider{answering, notFoundRemote{slug: "plugin-metadata"}}); err != nil {
+		t.Fatalf("ProcessWithProviders: %v", err)
+	}
+	item, err := h.itemRepo.GetByID(context.Background(), contentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Tagline != "" {
+		t.Errorf("tagline = %q, want the reset applied", item.Tagline)
 	}
 }

@@ -359,7 +359,11 @@ reset fails, and the target keeps its values and locks, when a provider in the
 chain fails to answer. A not-found answer, or an enrichment provider that isn't
 configured, doesn't fail it. A reset through a library whose metadata language
 isn't the item's own writes that language's text to the localization rows, as
-any refresh does, and keeps the base row's title, overview and tagline. A
+any refresh does, and keeps the base row's title, overview and tagline. When
+the refresh adopts that language as the item's own, because every library
+holding the item uses it, the base row is rewritten in it instead. Clients
+that can't read the capability document, such as delegated curators, can send
+`reset` and treat a `422` as a server without it. A
 series reset leaves its seasons' and episodes' locks alone, and artwork follows
 the ordinary refresh rules.
 

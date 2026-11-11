@@ -60,7 +60,7 @@ type AdminItemMetadataUpdateInput struct {
 type AdminItemMetadataRefreshInput struct {
 	ID   string `path:"id" minLength:"1" maxLength:"512"`
 	Body struct {
-		Mode string `json:"mode,omitempty" enum:"quick,complete,reset" default:"quick" doc:"quick rescans the item's folder and refreshes its metadata; complete rebuilds the item from its files first; reset is a quick refresh that also clears the item's field locks and every field its providers have no value for, and fails without changing the item when a provider does not answer. Send reset only when getAdminCatalogCapabilities reports item_metadata_reset"`
+		Mode string `json:"mode,omitempty" enum:"quick,complete,reset" default:"quick" doc:"quick rescans the item's folder and refreshes its metadata; complete rebuilds the item from its files first; reset is a quick refresh that also clears the item's field locks and every field its providers have no value for, and fails without changing the item when a provider does not answer; through a library whose metadata language is not the item's own, it keeps the item's own-language title, overview and tagline. getAdminCatalogCapabilities reports item_metadata_reset when reset is accepted; a server without it rejects reset with 422"`
 	}
 }
 
