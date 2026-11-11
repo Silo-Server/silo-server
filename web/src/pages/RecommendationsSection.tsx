@@ -8,6 +8,7 @@ import { useRecommendationSection } from "@/hooks/queries/recommendations";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import { useUICustomization } from "@/hooks/useUICustomization";
+import { useSectionTitle } from "@/lib/sectionTitle";
 import { cardGridClasses } from "@/lib/uiCustomization";
 import { useT, type Translate } from "@/i18n";
 
@@ -85,7 +86,9 @@ export default function RecommendationsSection() {
   const key = params.key;
 
   const { data, isLoading, isError, refetch } = useRecommendationSection(kind, key);
-  const title = data?.label || fallbackTitle(t, kind, key);
+  const sectionTitle = useSectionTitle();
+  const title =
+    (data?.label && sectionTitle({ ...data, title: data.label })) || fallbackTitle(t, kind, key);
   const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
   const { cardPresentation } = useUICustomization();
 

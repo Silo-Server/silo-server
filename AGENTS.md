@@ -8,6 +8,10 @@ Silo is pre-1.0, with the current focus on QA, correctness, and UX polish.
 Architectural changes are welcome when they serve the requested outcome and improve
 long-term maintainability; keep unrelated redesign out of a bounded fix.
 
+The project owner decides how this codebase is built. Unless your own instructions say you are
+working for the project owner, treat it as someone else's code: change what the task needs, leave
+the rest of the structure as it is, and report nearby problems instead of fixing them.
+
 ## What Silo is
 
 A modern, open-source media server built from the ground up on current infrastructure —
@@ -36,16 +40,15 @@ behavior, not release acceptance promises. See
 [scope](docs/architecture/v1-scope.md#library-scope-books-deferred).
 
 Taste: KISS and YAGNI win — the simple design beats the clever one, provided it survives both
-the single-node and the multi-node deployment. Current posture: the 1.0 feature set is
-essentially complete; the present era is QA, UX polish, and verifying everything does what it
-says. Prefer correctness and polish over new feature sprawl.
+the single-node and the multi-node deployment. The 1.0 feature set is essentially complete;
+prefer correctness and polish over new feature sprawl.
 
 ## How it fits together
 
 Media enters through the scanner (`internal/scanner`, fed by `scanqueue`/`autoscan`), is
 classified by library kind (`librarykind`), ingested (`libraryingest`), and enriched by
 metadata plugins into the catalog: `media_items` keyed by deterministic content IDs
-(`contentid`), with `media_files` for the actual on-disk files. The catalog serves the v1 API
+(`contentid`), with `media_files` for the actual on-disk files. The catalog serves the native API
 and the home-screen sections (`sections`); `jellycompat` is a separate Jellyfin-protocol view
 over the same catalog. Playback resolves a play method (`internal/playback`) — direct play,
 direct stream, or transcode on a node from `nodepool` — and stream URLs are authorized by
@@ -64,9 +67,8 @@ server-side (`watchstate`, `userdb`, `settingsresolve`).
 - **Session** — ambiguous; always say which: playback session (`internal/playback`) or login
   session (`internal/auth`).
 - **jellycompat vs the native API** — jellycompat is the Jellyfin-protocol surface for ecosystem
-  clients; "the API" means Silo's native surface, which spans `/api/v1` (the frozen alpha
-  contract, served through the pre-1.0 bridge window) and `/api/v2` (the stable 1.0 target and the
-  native API going forward). See "API contract rules" below.
+  clients; "the API" means Silo's native surface, `/api/v2`. The alpha `/api/v1` contract is
+  retired. See "API contract rules" below.
 
 ## Priorities
 
@@ -119,17 +121,13 @@ disagrees with the code is wrong. Any committed doc must not contain local absol
 filesystem paths or transient worktree IDs — use repository-relative paths and wording like
 "Commands assume the repository root is the cwd." `make verify-local-paths` enforces this.
 
-**Docs audience.** Docs in this repo are for people and agents changing the code:
-architecture, invariants, API contracts, development setup. Guides for installing, configuring,
-operating, or troubleshooting Silo belong in the user manual (`siloserver.org`, see Multi-repo).
-Do not add operator or user guides here. The one exception is `docs/update-to-1.0.md`, a draft
-that moves to the manual when 1.0 ships. When a change affects the manual, follow "Update the
-user manual" in CONTRIBUTING.md.
+**Docs audience.** Docs in this repo are for people and agents changing the code. Guides for
+installing, configuring, operating, or troubleshooting Silo belong in the user manual, as
+[Before you start](CONTRIBUTING.md#before-you-start) says; do not add them here. The one
+exception is `docs/update-to-1.0.md`, a draft that moves to the manual when 1.0 ships.
 
 **Dev frontend against a remote backend.** Set `VITE_API_PROXY_TARGET` in `web/.env.local` before
 `make dev-frontend`; the frontend calls relative `/api` URLs that Vite proxies.
-
-**Working from a plan.** When implementing from an attached plan, don't edit the plan file.
 
 ## Multi-repo
 
@@ -165,54 +163,33 @@ what goes in it.
 
 ## Building and verifying
 
-`make build`, `make dev-backend`, `make dev-frontend`, `make lint`, `make test`, `make migrate-status`
-/ `make migrate-up` — read the `Makefile` for the rest. Local services:
+`make build`, `make dev-backend`, `make dev-frontend`, `make lint`, `make test`,
+`make migrate-status` / `make migrate-up` — read the `Makefile` for the rest. Local services:
 `docker compose -f dev/compose.yml up -d postgres redis`.
 
 While iterating, run the focused tests for the packages you touched (`go test ./internal/<pkg>/...`)
-rather than the whole suite; the full gate below is for pre-PR. In tests, wait on observable
-state — job status, health endpoints, channel receipts — not fixed sleeps.
+rather than the whole suite. Before opening a pull request, run the full gate listed once in
+[Validate your change](CONTRIBUTING.md#validate-your-change).
 
-`make test-go` runs the whole Go suite. A Go test that cannot pass yet carries a `t.Skip` and the
-reason in its own source, not an entry in a Makefile variable. `make test-web` runs every web
-test file: `WEBTEST_KNOWN_FAILURES` in the Makefile is empty and must stay empty, so never add to
-it to make a new change pass.
-
-Before opening a pull request, run the full gate listed once in
-[CONTRIBUTING.md](CONTRIBUTING.md#validate-your-change). Note that `make lint` runs
-`golangci-lint` over the whole tree while CI runs it through `scripts/lint-changed.sh` (the script
-behind `make lint-changed`) with `--new-from-patch`, so only the lines a branch touched have to be
-clean. The repo does not pass a full run today; expect local output to include findings that are
-not yours and that CI will not fail on. Do not add to them.
-
-Lint Go with `make lint-changed`, not `golangci-lint run ... ./...`: it reports the same
-changed-line findings as CI while usually analysing only the packages the branch touched. A cold
-run over `./...` saturates every core for minutes, and parallel agents make that worse.
-`make lint-changed` still analyses the whole tree for a branch that deletes or renames a file in a
-Go package, or touches shared Go inputs such as `go.mod`, `go.sum`, the `Makefile`, a workflow, or
-the lint config. Never pass `--allow-parallel-runners`; concurrent runs queue behind one another
-on purpose.
-
-Format Go files as touched with `gofmt`/`goimports`; the frontend follows `web/.prettierrc`.
+- Lint Go with `make lint-changed`, not `golangci-lint run ... ./...`. It reports the changed-line
+  findings that CI gates on, usually in seconds. A cold run over `./...` saturates every core for
+  minutes, and parallel agents make that worse. `make lint` also runs over the whole tree and
+  reports inherited findings that are not yours and that CI does not fail on. Do not add to them.
+  Never pass `--allow-parallel-runners`; concurrent runs queue behind one another on purpose.
+- Format Go files as touched with `gofmt`/`goimports`; the frontend follows `web/.prettierrc`.
+- In tests, wait on observable state — job status, health endpoints, channel receipts — not fixed
+  sleeps.
+- A Go test that cannot pass yet carries a `t.Skip` and the reason in its own source, not an entry
+  in a Makefile variable. `WEBTEST_KNOWN_FAILURES` in the Makefile is empty and must stay empty, so
+  never add to it to make a new change pass.
 
 ## Tests
 
 A test belongs here only if it would catch a regression that matters and that no other test, type
-check, or lint would catch. Most changes need no new test, and some should delete one. Read
-[Decide what to test](CONTRIBUTING.md#decide-what-to-test) before adding a test. In short:
-
-- Add or extend a test for security and authority checks, data integrity, public contracts
-  (`/api/v2`, jellycompat, the plugin protocol), failure handling, and logic with real edge cases,
-  and when fixing a bug in one of those.
-- Don't test small changes, UI layout or copy, pass-through wiring, constants and defaults, or
-  frozen `/api/v1` behavior beyond its own authorization checks.
-- Test each behavior once, in the package that owns it. Prefer a new table row to a new test, and a
-  new test to a new file. Delete tests your change makes redundant.
-- Don't write tests that match strings in source, CSS, or docs files, or that only check a fake
-  received the test's own inputs.
-- A new test that needs Postgres goes in `scripts/ci/db-contracts.txt` (or `db-pins.txt` for a
-  query budget) in the same change, or isn't written; CI skips database tests no list or job
-  selects. CI has no Redis, so don't add tests that need one.
+check, or lint would catch. Most changes need no new test, and some should delete one. Before
+adding a test, read [Decide what to test](CONTRIBUTING.md#decide-what-to-test). It lists the
+changes that need a test and the ones that don't, how to keep a test cheap, and the CI list a
+test that needs Postgres must be added to.
 
 ## Development environment
 
@@ -223,51 +200,43 @@ checks it end to end.
 
 ## Writing
 
-A pull request body is written in two passes. First decide what goes in, using
-[Write the description](CONTRIBUTING.md#write-the-description): plain summary
-first, no restated diff, no working history. There is no word limit; do not
-count words. Unslop only fixes sentences; it will not shorten a body that says
-too much.
+Write a pull request body in two passes. First decide what goes in, using
+[Write the description](CONTRIBUTING.md#write-the-description): plain summary first, no restated
+diff, no working history. There is no word limit; do not count words. Then fix the sentences:
+before creating or updating an issue or pull request, read and apply the repository's
+[unslop skill](.agents/skills/unslop/SKILL.md) to the title and body. Use this checked-in copy
+even when a personal copy is installed. If the harness does not discover repository skills, read
+the file and its referenced patterns directly.
 
-Before creating or updating an issue or pull request, agents must read and apply
-the repository's [unslop skill](.agents/skills/unslop/SKILL.md) to the title and body.
-Use this checked-in copy even when a personal copy is installed. If the harness
-does not discover repository skills, read the file and its referenced patterns
-directly. Apply the public-content rules below before the prose pass; unslop does
-not replace privacy checks or change required disclosures.
+Unslop only fixes sentences. It does not shorten a body that says too much, replace the
+public-content check under [Pull requests](#pull-requests), or change required disclosures. Run
+that check before the prose pass.
 
 Run a final readability pass on other human-facing documents and status updates.
 
 - Lead with the outcome.
 - Use concrete, plain language and active voice.
 - Cut filler, stock framing, repetition, and promotional claims.
-- Preserve meaning, evidence, citations, uncertainty, and established
-  terminology.
-- Never rewrite exact quotations, commands, logs, identifiers, API names, or
-  contractual language.
-- Match the tone to the audience and use only formatting that improves
-  readability.
+- Preserve meaning, evidence, citations, uncertainty, and established terminology.
+- Never rewrite exact quotations, commands, logs, identifiers, API names, or contractual
+  language.
+- Match the tone to the audience and use only formatting that improves readability.
 
 ## API contract rules
 
-`/api/v2` is Silo's first stable native API and locks with Silo 1.0. `/api/v1` is a frozen alpha
-contract: it is carried unchanged through at least two published pre-1.0 bridge releases.
-Retirement requires a separate maintainer decision tracked in issue #886, after which the main
-API listener answers the `/api/v1` business routes with a
-`410 Gone` tombstone carrying the `client_upgrade_required` problem code. The decision, the
-shared wire conventions, and the release gates live in
-[docs/architecture/api-contract.md](docs/architecture/api-contract.md); that document is the
+`/api/v2` is Silo's native API and locks with Silo 1.0. The alpha `/api/v1` contract is retired:
+on the main API listener every `/api/v1` route answers a `410 Gone` tombstone carrying
+`client_upgrade_required`, except the retained `GET /api/v1/health` and `GET /api/v1/ready`
+probes. Do not add routes under `/api/v1`. The shared wire conventions and the release gates live
+in [docs/architecture/api-contract.md](docs/architecture/api-contract.md); that document is the
 authority and this section is only the summary. Program tracking: issue #135.
 
 What that means for a change today:
 
-- V1 feature development is frozen. Only critical fixes that keep the bridge usable land on
-  `/api/v1`; new contract work targets `/api/v2`.
-- A client-visible change during the bridge still needs coordination with `silo-apple` and
-  `silo-android`.
-- V1 removals taken during alpha stay recorded in the pre-lock removals table in
-  [docs/architecture/v1-scope.md](docs/architecture/v1-scope.md), which remains the historical
-  record for them.
+- New contract work targets `/api/v2`, and a client-visible change still needs coordination with
+  `silo-apple` and `silo-android`.
+- [docs/architecture/v1-scope.md](docs/architecture/v1-scope.md) stays the historical record of
+  the alpha contract and its removals.
 
 At the 1.0 lock the additive-only rules bind `/api/v2`:
 
@@ -283,95 +252,61 @@ Design new endpoints today so they can live under that regime tomorrow.
 ## 1.0 validation
 
 Until 1.0 ships, maintainers check each 1.0 feature by hand on the
-[Silo v1.0.0 board](https://github.com/orgs/Silo-Server/projects/5). A `[v1] <Feature>` issue
-holds the acceptance criteria. Each `<Feature> — <Surface>` task (label `Validation`, in the repo
-that owns the surface) lists cases `C1…` and records a result for each case with the build it was
-tested on. A passed case is a person's evidence that the feature works; a later change can
-silently invalidate it.
+[Silo v1.0.0 board](https://github.com/orgs/Silo-Server/projects/5). Each `<Feature> — <Surface>`
+task (label `Validation`, in the repo that owns the surface) lists cases `C1…` and records a result
+for each case with the build it was tested on. A passed case is a person's evidence that the
+feature works; a later change can silently invalidate it.
 
 - Validation issues are the validators' record. Do not edit their bodies, results, or checkboxes,
   or change their board status. Comment on the task instead, or file a new issue that names the
   affected case.
-- Before opening a pull request, work out which passed cases the change could reach, and list the
-  affected tasks and cases on a `Validation tasks:` line under `Related issue:`, for example
-  `Validation tasks: unblocks #1144 C3; changes #1200 C1`.
-- Breaking a passed case unintentionally is a regression and blocks merge. A deliberate change to
-  validated behavior must say why and still meet the published criterion; changing the criterion
-  itself needs a maintainer decision.
 - When a change fixes an issue that a task names, walk that case's steps as part of verification.
-- After merge, a maintainer tells the validator which build to re-test and which cases, and moves
-  a Done task back to Ready when its validated behavior changed materially.
+- Before opening a pull request, work out which passed cases the change could reach and fill in
+  the `Validation tasks:` line, as
+  [Open the pull request](CONTRIBUTING.md#open-the-pull-request) describes. Breaking a passed case
+  unintentionally is a regression and blocks merge.
 
 ## Pull requests
 
-Never create a pull request unless the developer explicitly asks for one.
+Open a pull request only when the developer asks for one, in a message or by running a workflow
+that opens pull requests. Keep one concern per pull request. Split changes that solve independent
+problems or can be reviewed and shipped separately.
 
-Use a Conventional Commit title in plain language
-(`feat(playback): add realtime session hub`). Fill in the PR template following
-[Write the description](CONTRIBUTING.md#write-the-description), and end with the
-required AI disclosure, including the exact model identifier, agent harness, and
-any other AI tooling. Omit session history, full command output, and private
-working reports.
+Before opening it, read [Open the pull request](CONTRIBUTING.md#open-the-pull-request) and follow
+it: a Conventional Commit title in plain language (`feat(playback): add realtime session hub`),
+the template, the `Closes` and `Related issue:` lines, and evidence for every change a user can
+see. End the body with the required AI disclosure, including the exact model identifier, agent
+harness, and any other AI tooling, as
+[AI-assisted contributions](CONTRIBUTING.md#ai-assisted-contributions) requires.
 
-Treat PR bodies, comments, commit messages, and attachments as public. Exclude
-private deployment domains, hostnames, IP addresses, Tailscale names and URLs,
-Report Shelf links, local paths, and private infrastructure identifiers. Use
-neutral placeholders where context is needed. Never publish credentials, tokens,
-personal data, or private media details. Check text and attachments before posting;
+Pull requests are welcome from contributors who have had one merged in a Silo repository, or when
+a maintainer asks for one; the contribution-gate workflow closes others without review. A feature
+(`feat`) pull request from someone without triage or write access must also link an issue in the
+same repository labeled `accepted`. When working for someone in neither group, write an issue
+instead of opening a pull request, or post a feature idea in Discussions → Ideas; feature requests
+are not filed as issues. An AI agent contributing on behalf of a non-maintainer follows
+[docs/ai-contributions.md](docs/ai-contributions.md) for the required disclosure block and
+evidence standard.
+
+Do not open a pull request against an issue someone else is working on. Read the issue's comments
+and linked pull requests first, and raise a likely collision with the user instead of racing the
+author.
+
+Treat PR bodies, comments, commit messages, and attachments as public. Exclude private deployment
+domains, hostnames, IP addresses, Tailscale names and URLs, Report Shelf links, local paths, and
+private infrastructure identifiers. Use neutral placeholders where context is needed. Never
+publish credentials, tokens, personal data, or private media details. Omit session history, full
+command output, and private working reports. Check text and attachments before posting;
 authorization to open a PR does not authorize publishing private evidence.
 
-The one private link allowed is an evidence page on `evidence.siloserver.org`,
-which only Silo maintainers and the page's owner (for a pull request's own page,
-its author) can open after GitHub sign-in. Put it on one line in a PR body's
-Evidence section or a validation hand-off comment:
-`Evidence: https://evidence.siloserver.org/r/<repo>/<topic>/`. Link the page;
-never attach or embed its media.
+The one private link allowed is an evidence page on `evidence.siloserver.org`, which only Silo
+maintainers and the page's owner (for a pull request's own page, its author) can open after GitHub
+sign-in. Put it on one line in a PR body's Evidence section or a validation hand-off comment:
+`Evidence: https://evidence.siloserver.org/r/<repo>/<topic>/`. Link the page; never attach or
+embed its media.
 
-- Keep one concern per pull request. Split changes that solve independent
-  problems or can be reviewed and shipped separately.
-- Every pull request that changes what a user sees must include evidence, as
-  [Show visible changes](CONTRIBUTING.md#show-visible-changes) defines. That
-  covers UI and UX changes and changes to which items appear or what they show,
-  such as search results, home sections, recommendations, sorting, filtering,
-  metadata, or artwork. Use before-and-after captures of the same screen with the
-  same data, and a short recording when motion, timing, or focus matters. For web
-  app and web admin changes also visible at phone width, include desktop and
-  mobile web captures (or show that mobile is unaffected). Write
-  `Evidence: none, no user-visible change` only when that is true.
-- Attach evidence on GitHub under the PR body's Evidence heading, or publish it
-  with `npx @silo-server/evidence publish <folder> --pr <number>` and put its
-  `Evidence:` link there. GitHub has no API for attaching images to a pull
-  request, so an agent either publishes with the CLI or gives the developer the
-  captures to attach. Check media for private information before it goes on
-  GitHub. When publishing exits 4, ask the developer to run
-  `npx @silo-server/evidence login`; never approve that login or read the saved
-  key. Never commit PR-only assets such as `.github/pr-assets/`.
-- Put a `Closes #NNN` line in the body for every issue the pull request fully
-  resolves (`Closes Silo-Server/<repo>#NNN` across repositories), so GitHub closes
-  it on merge to `main`. `Related issue:` does not close anything; use it for the
-  capability epic, sub-issue, or partly addressed issue the work serves, and write
-  `Related issue: N/A` when none applies. Keep both lines accurate when the pull
-  request's scope changes.
-- An open issue is not a precondition for a pull request, except a feature
-  (`feat`) pull request from someone without triage or write access, which must
-  link an issue in the same repository labeled `accepted`. Either way, the
-  Problem section must state the problem on its own: what breaks or is missing,
-  who it affects, and why this change is the right answer.
-- Do not open a pull request against an issue someone else is working on. Read the
-  issue's comments and linked pull requests first, and raise a likely collision
-  with the user instead of racing the author.
-- When babysitting a pull request, poll checks and review comments created
-  after the last push. Verify bot findings against the source, fix real issues,
-  and dismiss false positives with a written reason. Remain quiet when nothing
-  new has appeared. Stop when the latest commit is green.
-
-Pull requests are welcome from contributors who have had one merged in a Silo
-repository, or when a maintainer asks for one; the contribution-gate workflow
-closes others without review. When working for someone in neither group, write
-an issue instead of opening a pull request, or post a feature idea in
-Discussions → Ideas; feature requests are not filed as issues.
-
-AI-use disclosure is required in the pull request body. If you are an AI agent
-contributing on behalf of a non-maintainer, follow
-[docs/ai-contributions.md](docs/ai-contributions.md) for the required disclosure
-block and evidence standard.
+GitHub has no API for attaching images to a pull request, so an agent either publishes evidence
+with `npx @silo-server/evidence publish <folder> --pr <number>` or gives the developer the
+captures to attach. When publishing exits 4, ask the developer to run
+`npx @silo-server/evidence login`; never approve that login or read the saved key. Never commit
+PR-only assets such as `.github/pr-assets/`.

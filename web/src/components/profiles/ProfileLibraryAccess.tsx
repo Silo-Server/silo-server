@@ -34,10 +34,8 @@ export function ProfileLibraryAccess({
     return (
       <div className="border-border space-y-0.5 rounded-md border p-3">
         <p className="text-sm font-medium">{t("web.settings.library.title")}</p>
-        {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- new on main; its catalog key is a follow-up */}
         <p className="text-muted-foreground text-xs">
-          The primary profile sees every library the account can access. It can hide libraries in
-          Settings → Libraries.
+          {t("web.profiles.libraryAccess.primaryNote")}
         </p>
       </div>
     );

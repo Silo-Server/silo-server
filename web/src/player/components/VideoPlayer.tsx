@@ -2465,7 +2465,11 @@ export function VideoPlayer({
   // Title strip copy passed into the floating HUD.
   const hudTitle = seriesContext?.seriesTitle ?? title;
   const hudSubtitle = seriesContext
-    ? `S${codeNumber(seriesContext.currentSeason)} · E${codeNumber(seriesContext.currentEpisode)}${title ? ` — ${title}` : ""}`
+    ? t(title ? "web.player.hud.episodeWithTitle" : "web.player.hud.episode", {
+        season: codeNumber(seriesContext.currentSeason),
+        episode: codeNumber(seriesContext.currentEpisode),
+        title,
+      })
     : year
       ? numberText(year)
       : undefined;

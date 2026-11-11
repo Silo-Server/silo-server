@@ -5,6 +5,7 @@ import { AdminSectionCommandDialog } from "@/components/AdminSectionCommandDialo
 import ServerActivity from "@/components/ServerActivity";
 import { RestartBanner } from "@/components/admin/RestartBanner";
 import { PageFrame } from "@/components/page/PageHeader";
+import { RouteLoading } from "@/components/RouteLoading";
 import {
   Sheet,
   SheetClose,
@@ -30,8 +31,8 @@ const ADMIN_DESKTOP_MEDIA_QUERY = "(min-width: 64rem)";
 const LOGO_GLYPH = "▶";
 
 export default function AdminLayout() {
-  // Admin text is its own catalog chunk; render once it has loaded.
-  return useAdminMessages() ? <AdminLayoutContent /> : null;
+  // Admin text is its own catalog chunk; show the route loading state until it has loaded.
+  return useAdminMessages() ? <AdminLayoutContent /> : <RouteLoading />;
 }
 
 function AdminLayoutContent() {

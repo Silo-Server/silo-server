@@ -161,7 +161,8 @@ export function useTestServerNotificationChannel() {
     retry: false,
     mutationFn: async (id: string) => {
       if (!context) throw new StaleApiRequestContextError();
-      if (inFlight.current) throw new Error("A test delivery is already in progress.");
+      if (inFlight.current)
+        throw new Error(t("web.common.toast.notificationWebhooks.testInProgress"));
       inFlight.current = true;
       try {
         return await testNotificationDestination("server-channel", id, context);

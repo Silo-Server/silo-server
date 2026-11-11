@@ -19,7 +19,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 
@@ -231,20 +230,18 @@ type mediaAuthModeV3 struct {
 	// text only, so it is not part of plan identity.
 	hlsVariableSubstitution bool
 	// progressiveRangeRefusal is the progressive delivery's
-	// progressive_range_refusal_v1 feature on /api/v2: a progressive remux URL
+	// progressive_range_refusal_v1 feature: a progressive remux URL
 	// carries playback.RemuxRangeQueryParam, so the stream refuses a
 	// mid-stream range instead of restarting at its origin. It changes the
 	// stream URL only, so it is not part of plan identity.
 	progressiveRangeRefusal bool
 }
 
-// withNativeDeliveryFeaturesV3 adds the request's /api/v2 delivery opt-ins to
-// mode: the hls playlist-substitution form and the progressive range refusal.
-// The frozen /api/v1 surface never negotiates them.
-func withNativeDeliveryFeaturesV3(r *http.Request, mode mediaAuthModeV3, req playback.StartRequestV3) mediaAuthModeV3 {
-	native := isNativeAPIV2(r.Context())
-	mode.hlsVariableSubstitution = native && playback.HLSVariableSubstitutionV3(req)
-	mode.progressiveRangeRefusal = native && playback.ProgressiveRangeRefusalV3(req)
+// withNativeDeliveryFeaturesV3 adds the request's delivery opt-ins to mode:
+// the hls playlist-substitution form and the progressive range refusal.
+func withNativeDeliveryFeaturesV3(mode mediaAuthModeV3, req playback.StartRequestV3) mediaAuthModeV3 {
+	mode.hlsVariableSubstitution = playback.HLSVariableSubstitutionV3(req)
+	mode.progressiveRangeRefusal = playback.ProgressiveRangeRefusalV3(req)
 	return mode
 }
 
@@ -922,29 +919,6 @@ func (h *PlaybackHandler) localHLSExecutionRegistryWithInputsV3(
 	return local
 }
 
-// hlsPlanningRegistryV3 returns the video-transcode registry. Playback planning
-// uses workload-specific registries so remux and video policy cannot leak
-// executor capabilities into one another.
-func (h *PlaybackHandler) hlsPlanningRegistryV3(ctx context.Context) *playback.TransformationRegistryV3 {
-	settings := h.plannerSettingsV3(ctx)
-	inventory := hlsToneMapCapabilityInventoryV3{}
-	policy := tonemap.NewPolicy(settings.HardwareToneMapEnabled, settings.SoftwareToneMapEnabled)
-	if policy != tonemap.PolicyNone {
-		inventory, _ = h.hlsToneMapCapabilityInventoryV3(ctx)
-	}
-	return h.hlsPlanningRegistryWithInputsV3(ctx, settings, inventory)
-}
-
-// hlsPlanningRegistryWithInputsV3 combines locally executable
-// transformations with transformations advertised by pooled transcode nodes.
-func (h *PlaybackHandler) hlsPlanningRegistryWithInputsV3(
-	ctx context.Context,
-	settings playback.PlannerSettingsV3,
-	inventory hlsToneMapCapabilityInventoryV3,
-) *playback.TransformationRegistryV3 {
-	return h.hlsPlanningRegistryWithInputsForWorkloadV3(ctx, settings, inventory, noderouting.WorkloadVideoTranscode)
-}
-
 // progressiveRemuxPlanningRegistryWithInputsV3 reports only the remux
 // transformations executable by policy-eligible progressive routes. The API
 // proxy, and transcode pools are admitted only when policy leaves a legal
@@ -1022,38 +996,6 @@ func progressiveRemuxExecutorAvailabilityV3(policy config.PlaybackRoutingPolicy,
 		transcodeExecutionAllowed = transcodeExecutionAllowed || candidate.Execution == noderouting.ExecutionTranscode
 	}
 	return localAllowed, proxyExecutionAllowed, transcodeExecutionAllowed
-}
-
-// hlsCapabilityRegistryWithInputsV3 reports the union of transformations that
-// can execute on any admitted playback workload. The capability contract is
-// not workload-scoped, while planning must keep these registries separate.
-func (h *PlaybackHandler) hlsCapabilityRegistryWithInputsV3(
-	ctx context.Context,
-	settings playback.PlannerSettingsV3,
-	inventory hlsToneMapCapabilityInventoryV3,
-) *playback.TransformationRegistryV3 {
-	local := h.localHLSExecutionRegistryWithInputsV3(ctx, settings, inventory)
-	progressive := h.progressiveRemuxPlanningRegistryWithInputsV3(
-		ctx, local, h.JWTSecret != "" || h.proxyEgressOriginsAvailableV3(),
-	)
-	remux := h.hlsPlanningRegistryWithInputsForWorkloadV3(
-		ctx, settings, hlsToneMapCapabilityInventoryV3{}, noderouting.WorkloadRemux,
-	)
-	video := h.hlsPlanningRegistryWithInputsForWorkloadV3(
-		ctx, settings, inventory, noderouting.WorkloadVideoTranscode,
-	)
-	return progressive.WithAdvertised(remux.Advertised()).WithAdvertised(video.Advertised())
-}
-
-// hlsPlanningRegistryWithInputsForWorkloadV3 keeps transformation
-// availability inside the hard execution boundary for one HLS workload.
-func (h *PlaybackHandler) hlsPlanningRegistryWithInputsForWorkloadV3(
-	ctx context.Context,
-	settings playback.PlannerSettingsV3,
-	inventory hlsToneMapCapabilityInventoryV3,
-	workload noderouting.Workload,
-) *playback.TransformationRegistryV3 {
-	return h.hlsPlanningRegistryWithInputsForClientV3(ctx, settings, inventory, workload, true)
 }
 
 // hlsPlanningRegistryWithInputsForClientV3 keeps transformation availability
@@ -1149,12 +1091,6 @@ func hlsRouteExecutorAvailabilityForClientV3(
 	return localAllowed, workerAllowed
 }
 
-// hlsToneMapCapabilityInventoryV3 snapshots local and pooled-node tone-map
-// capabilities for a single planning operation.
-func (h *PlaybackHandler) hlsToneMapCapabilityInventoryV3(ctx context.Context) (hlsToneMapCapabilityInventoryV3, error) {
-	return h.hlsToneMapCapabilityInventoryForClientV3(ctx, true)
-}
-
 func (h *PlaybackHandler) hlsToneMapCapabilityInventoryForClientV3(
 	ctx context.Context,
 	proxyAllowed bool,
@@ -1220,13 +1156,6 @@ func (h *PlaybackHandler) hlsToneMapCapabilityInventoryForClientV3(
 		inventory.union = append(inventory.union, remote.capabilities...)
 	}
 	return inventory, probeErr
-}
-
-// hlsToneMapCapabilitiesV3 builds the executor union available to HLS planning
-// from eligible local fallback and all reachable transcode nodes.
-func (h *PlaybackHandler) hlsToneMapCapabilitiesV3(ctx context.Context) tonemap.Capabilities {
-	inventory, _ := h.hlsToneMapCapabilityInventoryV3(ctx)
-	return inventory.union
 }
 
 type hlsPlanningSnapshotV3 struct {
@@ -1839,56 +1768,6 @@ func validateAdvertisedTransformationsV3(plan *playback.PlanV3, advertised []pla
 	return nil
 }
 
-// HandlePlaybackCapabilityV3 reports only transformations that the installed
-// runtime has actually probed. Protocol v3 is the server's only playback
-// protocol, so `enabled` is constant; it stays in the response because clients
-// feature-detect against it and the field is part of the frozen contract.
-func (h *PlaybackHandler) HandlePlaybackCapabilityV3(w http.ResponseWriter, r *http.Request) {
-	if apimw.GetUserID(r.Context()) == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-	response := playback.CapabilityResponseV3{Enabled: true, ProtocolVersions: []int{playback.ProtocolV3}}
-	response.Features = playback.ServerFeaturesV3()
-	response.Deliveries = []playback.DeliveryV3{playback.DeliveryOriginalHTTPV3, playback.DeliveryRemuxProgressiveV3, playback.DeliveryRemuxHLSV3, playback.DeliveryTranscodeHLSV3}
-	settings := h.plannerSettingsV3(r.Context())
-	policy := tonemap.NewPolicy(settings.HardwareToneMapEnabled, settings.SoftwareToneMapEnabled)
-	inventory := hlsToneMapCapabilityInventoryV3{}
-	if policy != tonemap.PolicyNone {
-		inventory, _ = h.hlsToneMapCapabilityInventoryV3(r.Context())
-	}
-	registry := h.hlsCapabilityRegistryWithInputsV3(r.Context(), settings, inventory)
-	toneMapAvailable := false
-	if policy != tonemap.PolicyNone {
-		for _, capability := range inventory.union {
-			if policy.Allows(capability.Mode) && len(capability.SourceKinds) > 0 {
-				toneMapAvailable = true
-				break
-			}
-		}
-	}
-	for _, transformation := range registry.Advertised() {
-		if transformation.Name == playback.TransformationHDRToSDRToneMapV3 && !toneMapAvailable {
-			continue
-		}
-		response.Transformations = append(response.Transformations, transformation)
-	}
-	writeJSON(w, http.StatusOK, response)
-}
-
-// handleStartPlaybackV3 validates, plans, and starts a protocol-v3 request.
-func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.Request, body []byte) {
-	response, err := h.startPlaybackApplicationV3(r, body)
-	if err != nil {
-		writePlaybackOperationError(w, err)
-		return
-	}
-	if response.Outcome == playback.OutcomePlayableV3 {
-		h.recordStartingDevice(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), deviceMetadataFromRequest(r))
-	}
-	writeJSON(w, http.StatusCreated, frozenV1DecisionV3(response))
-}
-
 // recordStartingDevice registers the device that started playback, so a
 // device that plays without ever writing a device setting still appears in
 // the profile's device registry with a current last_seen_at. Callers record
@@ -2037,28 +1916,9 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	if err := json.Unmarshal(body, &req); err != nil {
 		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusBadRequest, "bad_request", "Invalid protocol v3 request body")
 	}
-	if !isNativeAPIV2(r.Context()) {
-		// The frozen /api/v1 surface ignored these fields as unknown. Drop them
-		// before validation so v1 neither rejects nor acts on them.
-		req.BandwidthEstimateSource, req.ObservedThroughputKbps, req.LearnedLimit = "", nil, ""
-		withoutNativeDeliveryFieldsV3(&req.ClientPlaybackContext)
-	}
 	warnings, err := req.NormalizeAndValidate()
 	if err != nil {
 		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusBadRequest, "bad_request", err.Error())
-	}
-	if !isNativeAPIV2(r.Context()) {
-		// The frozen /api/v1 surface negotiates only its original features.
-		// subrip_sidecar_v1 is attempt-sticky, so dropping it here keeps it out
-		// of every later replan of this attempt too.
-		req.ClientFeatures = playback.WithoutFeatureV3(req.ClientFeatures, playback.FeatureBufferingQualityV1)
-		req.ClientFeatures = playback.WithoutFeatureV3(req.ClientFeatures, playback.FeaturePlaybackPlanSummaryV1)
-		req.ClientFeatures = playback.WithoutFeatureV3(req.ClientFeatures, playback.FeatureSubripSidecarV3)
-		req.ClientFeatures = playback.WithoutFeatureV3(req.ClientFeatures, playback.FeatureMarkerThumbnailsV3)
-		req.ClientFeatures = playback.WithoutFeatureV3(req.ClientFeatures, playback.FeatureHLSSubtitleRenditionsV3)
-		req.ClientFeatures = playback.WithoutFeatureV3(req.ClientFeatures, playback.FeatureHLSRemuxSubtitleRenditionsV3)
-		req.ClientFeatures = playback.WithoutFeatureV3(req.ClientFeatures, playback.FeatureHLSSubtitleRenditionsAllV3)
-		withoutNativeDeliveryFeaturesV3(&req.ClientPlaybackContext)
 	}
 	timings.mark("decode_validate")
 	profileID := apimw.GetProfileID(r.Context())
@@ -2082,7 +1942,7 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		if response.Terminal != nil {
 			return response, nil
 		}
-		if err := requireAttemptAPISurfaceV3(r.Context(), existing, req.ClientFeatures); err != nil {
+		if err := requireAttemptAPISurfaceV3(existing, req.ClientFeatures); err != nil {
 			return playback.DecisionResponseV3{}, err
 		}
 		// The replayed plan is only usable while its session is alive; a dead
@@ -2319,9 +2179,8 @@ type playbackStartRequestDigestsV3 struct {
 // clients that report their app identity only there. All values stay opaque —
 // they are trimmed and length-clamped when the session stamps them.
 //
-// The device is the one the client declared for the profile device registry:
-// the X-Silo-Device-* headers on the v1 bridge, PlaybackCaller.DeclaredDevice
-// on /api/v2.
+// The device is the one the client declared for the profile device registry,
+// PlaybackCaller.DeclaredDevice.
 //
 // The fallback applies only to a client that named itself. client_playback_context
 // carries no app name, so nothing in the body can identify a nameless client
@@ -2332,10 +2191,7 @@ type playbackStartRequestDigestsV3 struct {
 // semver, on every browser session.
 func playbackClientInfoForStartV3(r *http.Request, clientContext playback.ClientPlaybackContextV3) playback.ClientInfo {
 	info := playback.ClientInfoFromRequest(r)
-	device := DeviceMetadataFromHeaders(r.Header)
-	if isNativeAPIV2(r.Context()) {
-		device, _ = r.Context().Value(playbackDeclaredDeviceContextKey{}).(DeviceMetadata)
-	}
+	device, _ := r.Context().Value(playbackDeclaredDeviceContextKey{}).(DeviceMetadata)
 	info.DeviceID, info.DevicePlatform = device.DeviceID, device.DevicePlatform
 	if info.Name == "" {
 		return info.Normalized()
@@ -2352,38 +2208,6 @@ func playbackClientInfoForStartV3(r *http.Request, clientContext playback.Client
 	// The header half is already normalized; body-sourced values have to be
 	// clamped too before they reach the decision log and the route event.
 	return info.Normalized()
-}
-
-// playbackClientInfoWithSessionFallbackV3 completes a header-derived identity
-// from the session the event belongs to. Route events posted out of band carry
-// no client_playback_context, so without this a client that reports its build
-// only in the start body would attribute its plan_selected event to a build and
-// every later event of the same attempt to none.
-func (h *PlaybackHandler) playbackClientInfoWithSessionFallbackV3(sessionID string, info playback.ClientInfo) playback.ClientInfo {
-	if sessionID == "" || h.sessionMgr == nil {
-		return info
-	}
-	if info.Name != "" && info.Version != "" && info.Build != "" && info.Channel != "" {
-		return info
-	}
-	session, err := h.sessionMgr.GetSession(sessionID)
-	if err != nil || session == nil {
-		return info
-	}
-	stamped := session.ClientInfo()
-	if info.Name == "" {
-		info.Name = stamped.Name
-	}
-	if info.Version == "" {
-		info.Version = stamped.Version
-	}
-	if info.Build == "" {
-		info.Build = stamped.Build
-	}
-	if info.Channel == "" {
-		info.Channel = stamped.Channel
-	}
-	return info
 }
 
 // newPlaybackStartRequestDigestsV3 fingerprints both the body and normalized
@@ -2420,7 +2244,7 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 	if result.Plan == nil {
 		return playback.DecisionResponseV3{}, &transportErrorV3{reason: "internal_error", message: "The server produced no playback plan."}
 	}
-	mode := withNativeDeliveryFeaturesV3(r, headerAuthenticatedMediaV3(req.ClientFeatures), req)
+	mode := withNativeDeliveryFeaturesV3(headerAuthenticatedMediaV3(req.ClientFeatures), req)
 	ctx := playback.WithClientInfo(r.Context(), clientInfo)
 	session, err := h.sessionMgr.StartSessionWithFilesContext(ctx, userID, profileID, effectiveFile.ID, requestedFile.ID, result.PlayMethod, result.TranscodeAudio)
 	if err != nil {
@@ -2491,7 +2315,7 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 		abort()
 		return playback.DecisionResponseV3{}, subtitleArtifactErrorV3("Failed to prepare the selected subtitle artifact.", err)
 	}
-	response := playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, ServerFeatures: serverFeaturesForRequestV3(r.Context()), Outcome: playback.OutcomePlayableV3, SessionID: session.ID, PlaybackPlan: result.Plan}
+	response := playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, ServerFeatures: playback.NativeServerFeaturesV3(), Outcome: playback.OutcomePlayableV3, SessionID: session.ID, PlaybackPlan: result.Plan}
 	record := playback.AttemptRecordV3{PlaybackAttemptID: req.PlaybackAttemptID, SessionID: session.ID, UserID: userID, ProfileID: profileID, RequestedMediaFileID: requestedFile.ID, EffectiveMediaFileID: effectiveFile.ID, CurrentPlanID: result.Plan.PlanID, CurrentPlan: *result.Plan, FrozenRecipe: frozenRecipe, NormalizedRequest: req, ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), StartResponse: response, RequestDigest: requestDigests.current, ExpiresAt: time.Now().Add(playback.MaxTokenTTL), DesiredTracks: h.startDesiredTracksV3(r.Context(), requestedFile, intent, effectiveFile, result.Plan, frozenRecipe)}
 	if err := h.updateV3SessionState(r.Context(), session, effectiveFile, result, transport, mode); err != nil {
 		transport.rollback()
@@ -2516,24 +2340,14 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 	}
 	h.recordSessionRecipeV3(r.Context(), result.Plan.PlanID, &transport)
 	if started, err := h.sessionMgr.GetSession(session.ID); err == nil {
-		frontend := LifecycleFrontendBridge
-		if isNativeAPIV2(r.Context()) {
-			frontend = LifecycleFrontendNative
-		}
-		h.SessionStarted(r.Context(), started, frontend)
+		h.SessionStarted(r.Context(), started, LifecycleFrontendNative)
 	}
 	// Start-side effects belong after both the attempt and transport commits:
 	// retries that lose the idempotency race must not emit duplicate provider
 	// scrobbles or analysis work for the short-lived session they roll back.
 	h.raceCopySafetyV3(effectiveFile.ID, result.Plan)
-	// The frozen /api/v1 bridge keeps saving the audio a start played; the
-	// native API saves only explicit picks.
-	var legacyAudioTrackIndex *int
-	if !isNativeAPIV2(r.Context()) {
-		index := plannedAudioTrackIndexV3(result, audioIndex)
-		legacyAudioTrackIndex = &index
-	}
-	h.enqueuePlaybackStartSideEffectsV3(r.Context(), session, effectiveFile, userID, profileID, legacyAudioTrackIndex)
+	// Only explicit picks are saved, never the audio a start happened to play.
+	h.enqueuePlaybackStartSideEffectsV3(r.Context(), session, effectiveFile, userID, profileID, nil)
 	h.prefetchSubtitlesV3(session.ID, effectiveFile, req, result)
 	h.enqueueRouteEventV3(playback.RouteEventRecordV3{RouteEventV3: playback.RouteEventV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: req.PlaybackAttemptID, SessionID: session.ID, PlanID: result.Plan.PlanID, Event: playback.RouteEventPlanSelectedV3, AppliedQuirkIDs: appliedQuirkIDsV3(result.Plan), QuirkRegistryRevision: appliedQuirkRevisionV3(result.Plan), OutputContextID: req.ClientPlaybackContext.Output.OutputContextID}, UserID: userID, ProfileID: profileID, ClientName: clientInfo.Name, ClientVersion: clientInfo.Version, ClientBuild: clientInfo.Build, ClientChannel: clientInfo.Channel, ClientModel: req.ClientPlaybackContext.Device.Model})
 	return response, nil
@@ -2555,7 +2369,7 @@ func (h *PlaybackHandler) replayDuplicateStartV3(ctx context.Context, userID int
 		}
 		return playback.DecisionResponseV3{}, persistFailed
 	}
-	if err := requireAttemptAPISurfaceV3(ctx, existing, req.ClientFeatures); err != nil {
+	if err := requireAttemptAPISurfaceV3(existing, req.ClientFeatures); err != nil {
 		return playback.DecisionResponseV3{}, &transportErrorV3{reason: "playback_attempt_reused", message: "The playback attempt belongs to a different API surface."}
 	}
 	// Replaying a concurrent duplicate is only valid while its session is
@@ -2955,12 +2769,6 @@ func (h *PlaybackHandler) checkReplacementAdmissionV3(
 func canRetrySoftwareToneMapV3(result playback.PlannerResultV3) bool {
 	return result.FrozenSourceMetadata == nil && result.ToneMapMode == tonemap.ModeHardware &&
 		result.ToneMapPolicy.Allows(tonemap.ModeSoftware)
-}
-
-// prepareSoftwareToneMapFallbackV3 retries an eligible failed hardware recipe
-// on a software-capable remote node or, when allowed, on the API host.
-func (h *PlaybackHandler) prepareSoftwareToneMapFallbackV3(r *http.Request, session *playback.Session, file *models.MediaFile, result playback.PlannerResultV3, mode mediaAuthModeV3) (preparedTransportV3, bool, *transportErrorV3) {
-	return h.prepareSoftwareToneMapFallbackWithPolicyV3(r, session, file, result, mode, h.playbackRoutingPolicyForContextV3(r.Context()))
 }
 
 // prepareSoftwareToneMapFallbackWithPolicyV3 re-enters route preparation with a
@@ -5034,42 +4842,6 @@ func plannedAudioTrackIndexV3(result playback.PlannerResultV3, fallback int) int
 	return fallback
 }
 
-// withoutNativeDeliveryFeaturesV3 drops the /api/v2-only delivery features
-// from a request that arrived through the frozen /api/v1 surface, which never
-// advertised them.
-// withoutNativeDeliveryFieldsV3 drops the delivery fields /api/v1 never had,
-// which its decoder ignored as unknown, before validation sees them.
-func withoutNativeDeliveryFieldsV3(ctx *playback.ClientPlaybackContextV3) {
-	for name, delivery := range ctx.Deliveries {
-		if delivery.MaxChannelsByCodec != nil {
-			delivery.MaxChannelsByCodec = nil
-			ctx.Deliveries[name] = delivery
-		}
-		// Native embedded limitations came after the freeze: /api/v1 plans
-		// an entry as it did before them, and never advertises
-		// native_embedded_limitations_v1, without which a client must not
-		// send an entry that needs them.
-		if slices.ContainsFunc(delivery.Subtitles.NativeEmbedded, func(entry playback.NativeEmbeddedSubtitleCapabilityV3) bool {
-			return entry.Limitations != nil
-		}) {
-			delivery.Subtitles.NativeEmbedded = slices.Clone(delivery.Subtitles.NativeEmbedded)
-			for i := range delivery.Subtitles.NativeEmbedded {
-				delivery.Subtitles.NativeEmbedded[i].Limitations = nil
-			}
-			ctx.Deliveries[name] = delivery
-		}
-	}
-}
-
-func withoutNativeDeliveryFeaturesV3(ctx *playback.ClientPlaybackContextV3) {
-	hls, ok := ctx.Deliveries[playback.DeliveryClassHLSV3]
-	if !ok || !playback.HasFeatureV3(hls.Features, playback.FeatureHLSCopyMPEGTSV3) {
-		return
-	}
-	hls.Features = playback.WithoutFeatureV3(hls.Features, playback.FeatureHLSCopyMPEGTSV3)
-	ctx.Deliveries[playback.DeliveryClassHLSV3] = hls
-}
-
 func transportGenerationV3(sessionID, planID string) string {
 	planSuffix := strings.TrimPrefix(planID, "plan:")
 	if len(planSuffix) > 12 {
@@ -5286,29 +5058,6 @@ func downloadedSubtitleLabelV3(value subtitles.DownloadedSubtitle) string {
 	return value.ReleaseName + " (" + value.Provider + ")"
 }
 
-// HandleReplanPlaybackV3 provides persistent idempotency and preserves the old
-// transport until a successor has entered its startup state and the new plan is
-// durably committed.
-func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	if userID == 0 || profileID == "" {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication and profile are required")
-		return
-	}
-	body, err := readBoundedV3Body(w, r, maxPlaybackV3BodyBytes)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	response, err := h.replanPlaybackApplicationV3(r, chiURLParamV3(r, "session_id"), body)
-	if err != nil {
-		writePlaybackOperationError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, frozenV1DecisionV3(response))
-}
-
 // replanPlaybackApplicationV3 is the replan application shared by the v1
 // handler and the v2 service seam: idempotent on replan_request_id + body
 // digest, serialized per session, and atomic between the durable plan and the
@@ -5322,13 +5071,6 @@ func (h *PlaybackHandler) replanPlaybackApplicationV3(r *http.Request, sessionID
 	var req playback.ReplanRequestV3
 	if err := json.Unmarshal(body, &req); err != nil {
 		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusBadRequest, "bad_request", "Invalid replan request")
-	}
-	if !isNativeAPIV2(r.Context()) {
-		// As on start: /api/v1 ignores the buffering-quality fields and the
-		// /api/v2-only delivery fields and features.
-		req.BandwidthEstimateSource, req.ObservedThroughputKbps, req.LearnedLimit = "", nil, ""
-		withoutNativeDeliveryFieldsV3(&req.ClientPlaybackContext)
-		withoutNativeDeliveryFeaturesV3(&req.ClientPlaybackContext)
 	}
 	// Reject malformed identity/bounds before doing any session lookup. When
 	// client_features is omitted, temporarily allow the only validation rule
@@ -5365,7 +5107,7 @@ func (h *PlaybackHandler) replanPlaybackApplicationV3(r *http.Request, sessionID
 	if record.UserID != userID || record.ProfileID != profileID {
 		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusForbidden, "forbidden", "Session belongs to another profile")
 	}
-	if err := requireAttemptAPISurfaceV3(r.Context(), record, nil); err != nil {
+	if err := requireAttemptAPISurfaceV3(record, nil); err != nil {
 		return playback.DecisionResponseV3{}, err
 	}
 	if record.PlaybackAttemptID != req.PlaybackAttemptID {
@@ -6231,7 +5973,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	// security contract or the playlist form it serves. The progressive range
 	// refusal follows this replan's own request: it only changes the
 	// progressive URL this replan publishes.
-	mode := withNativeDeliveryFeaturesV3(r, headerAuthenticatedMediaV3(start.ClientFeatures), start)
+	mode := withNativeDeliveryFeaturesV3(headerAuthenticatedMediaV3(start.ClientFeatures), start)
 	if !seekReanchor {
 		// A freshly planned replan can land on the same refused progressive
 		// remux a start would have; escalate it identically. A seek reanchor
@@ -6391,7 +6133,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		artifactRecipe.ToneMapMode = result.ToneMapMode
 	}
 	result.Plan.Stream.URL = transport.url
-	response := playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, ServerFeatures: serverFeaturesForRequestV3(r.Context()), Outcome: playback.OutcomePlayableV3, SessionID: session.ID, PlaybackPlan: result.Plan}
+	response := playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, ServerFeatures: playback.NativeServerFeaturesV3(), Outcome: playback.OutcomePlayableV3, SessionID: session.ID, PlaybackPlan: result.Plan}
 	updated := *record
 	updated.CurrentPlanID = result.Plan.PlanID
 	updated.CurrentPlan = *result.Plan
@@ -6439,10 +6181,6 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	}
 	transport.afterDurableCommit = func() {
 		cancelReservation()
-		if trackChange && !isNativeAPIV2(r.Context()) {
-			// The frozen /api/v1 bridge still saves a track change's audio.
-			h.persistLegacyAudioPreferenceV3(r.Context(), session.ID, session.UserID, session.ProfileID, effectiveFile, plannedAudioTrackIndexV3(result, session.AudioTrackIndex))
-		}
 		h.syncSessionsNow(r.Context(), "v3_replan")
 		event := playback.RouteEventPlanSelectedV3
 		clientModel := req.ClientPlaybackContext.Device.Model
@@ -7197,60 +6935,6 @@ func (h *PlaybackHandler) acquireReplanSlotV3(ctx context.Context) (func(), erro
 	}
 }
 
-func (h *PlaybackHandler) HandlePlaybackRouteEventV3(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	if userID == 0 || profileID == "" {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication and profile are required")
-		return
-	}
-	body, err := readBoundedV3Body(w, r, maxPlaybackV3EventBodyBytes)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid event body")
-		return
-	}
-	var event playback.RouteEventV3
-	// Plan summaries are a native /api/v2 feature; the frozen v1 route keeps
-	// rejecting them as it did before they existed.
-	if err := json.Unmarshal(body, &event); err != nil || !validRouteEventV3(event) || event.Event == playback.RouteEventPlanSummaryV3 {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid route event")
-		return
-	}
-	// The rate limiter runs before the ownership lookup so the per-minute
-	// budget bounds the store reads as well as the writes.
-	if !h.allowRouteEventV3(userID, event.PlaybackAttemptID) {
-		writeError(w, http.StatusTooManyRequests, "event_rate_limited", "Playback route event rate exceeded")
-		return
-	}
-	var identity *playback.AttemptIdentityV3
-	var identityErr error
-	if event.SessionID != "" {
-		identity, identityErr = h.PlanStoreV3.GetAttemptIdentity(r.Context(), event.SessionID)
-	} else {
-		identity, identityErr = h.PlanStoreV3.GetAttemptIdentityByPlaybackAttemptID(r.Context(), event.PlaybackAttemptID)
-	}
-	if identityErr != nil {
-		// A store outage is not an ownership violation; keep 403 for genuine
-		// mismatches so clients stop sending events for foreign sessions.
-		if !errors.Is(identityErr, playback.ErrSessionNotFound) {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to authorize the route event")
-			return
-		}
-		writeError(w, http.StatusForbidden, "forbidden", "Route event does not belong to this profile")
-		return
-	}
-	if identity.UserID != userID || identity.ProfileID != profileID ||
-		(event.SessionID != "" && identity.PlaybackAttemptID != event.PlaybackAttemptID) ||
-		(identity.SessionID == "" && !terminalStartRouteEventV3(event)) {
-		writeError(w, http.StatusForbidden, "forbidden", "Route event does not belong to this profile")
-		return
-	}
-	event.Diagnostics = sanitizeDiagnosticsV3(event.Diagnostics)
-	client := h.playbackClientInfoWithSessionFallbackV3(firstNonEmptyValue(event.SessionID, identity.SessionID), playback.ClientInfoFromRequest(r))
-	h.enqueueRouteEventV3(playback.RouteEventRecordV3{RouteEventV3: event, UserID: userID, ProfileID: profileID, ClientName: client.Name, ClientVersion: client.Version, ClientBuild: client.Build, ClientChannel: client.Channel, ClientModel: event.Diagnostics["device_model"]})
-	w.WriteHeader(http.StatusAccepted)
-}
-
 func terminalStartRouteEventV3(event playback.RouteEventV3) bool {
 	return event.Event == playback.RouteEventTerminalV3 &&
 		event.SessionID == "" && event.PlanID == "" &&
@@ -7712,14 +7396,6 @@ func (h *PlaybackHandler) startFailureDecisionV3(ctx context.Context, userID int
 	return h.persistTerminalStartDecisionV3(ctx, userID, profileID, req, requestDigests, requestedFileID, effectiveFileID, response)
 }
 
-func writeStartAttemptPersistenceErrorV3(w http.ResponseWriter, err error) {
-	if errors.Is(err, playback.ErrIdempotencyKeyReusedV3) {
-		writeError(w, http.StatusConflict, "playback_attempt_reused", "The playback attempt ID belongs to a different request")
-		return
-	}
-	writeError(w, http.StatusInternalServerError, "internal_error", "Failed to persist the playback decision")
-}
-
 func decisionResponseFromAttemptV3(record *playback.AttemptRecordV3) playback.DecisionResponseV3 {
 	if record == nil {
 		return playback.DecisionResponseV3{}
@@ -7735,35 +7411,6 @@ func decisionResponseFromAttemptV3(record *playback.AttemptRecordV3) playback.De
 		plan.RuntimeCorrections = []string{}
 	}
 	return normalizeDecisionResponseV3(playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, ServerFeatures: playback.ServerFeaturesV3(), Outcome: playback.OutcomePlayableV3, SessionID: record.SessionID, PlaybackPlan: &plan})
-}
-
-// frozenV1DecisionV3 removes what only /api/v2 publishes from a decision
-// written on the frozen /api/v1 surface: active_quality, the menu rungs
-// below 1.5 Mbps that Auto lowering added after the freeze, and the
-// embedded inventory rows' stream_index, container_track_id and
-// native_selectable, plus the stored subtitle row identity.
-func frozenV1DecisionV3(response playback.DecisionResponseV3) playback.DecisionResponseV3 {
-	if response.PlaybackPlan == nil {
-		return response
-	}
-	plan := *response.PlaybackPlan
-	plan.ActiveQuality = ""
-	plan.AvailableQualities = slices.DeleteFunc(slices.Clone(plan.AvailableQualities), func(quality playback.AvailableQualityV3) bool {
-		return quality.Label == playback.QualityRung480pLowV3 || quality.Label == playback.QualityRung360pV3
-	})
-	plan.Subtitle.Inventory = slices.Clone(plan.Subtitle.Inventory)
-	for i := range plan.Subtitle.Inventory {
-		item := &plan.Subtitle.Inventory[i]
-		item.StreamIndex, item.ContainerTrackID, item.NativeSelectable, item.HLSRendition = nil, "", false, nil
-		item.StoredSubtitleID = 0
-	}
-	if rendition := plan.Subtitle.HLSRendition; rendition != nil && rendition.Index != 0 {
-		frozen := *rendition
-		frozen.Index = 0
-		plan.Subtitle.HLSRendition = &frozen
-	}
-	response.PlaybackPlan = &plan
-	return response
 }
 
 func normalizeDecisionResponseV3(response playback.DecisionResponseV3) playback.DecisionResponseV3 {
@@ -7837,22 +7484,6 @@ func appliedQuirkRevisionV3(plan *playback.PlanV3) string {
 	return plan.AppliedQuirks[0].RegistryRevision
 }
 
-func writeV3FileError(w http.ResponseWriter, err error) {
-	if errors.Is(err, catalog.ErrItemNotFound) || errors.Is(err, catalog.ErrEpisodeNotFound) {
-		writeError(w, http.StatusNotFound, "not_found", "Media file not found")
-		return
-	}
-	writeError(w, http.StatusInternalServerError, "internal_error", "Failed to authorize media file")
-}
-func readBoundedV3Body(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, error) {
-	return ioReadAllV3(http.MaxBytesReader(w, r.Body, limit))
-}
-func ioReadAllV3(reader interface{ Read([]byte) (int, error) }) ([]byte, error) {
-	var buffer bytes.Buffer
-	_, err := buffer.ReadFrom(reader)
-	return buffer.Bytes(), err
-}
-func chiURLParamV3(r *http.Request, key string) string { return chi.URLParam(r, key) }
 func floatOrZeroHandlerV3(v *float64) float64 {
 	if v == nil {
 		return 0

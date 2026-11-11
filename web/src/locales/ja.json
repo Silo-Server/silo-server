@@ -137,6 +137,12 @@
       "value": "年"
     }
   ],
+  "collections.collection": [
+    {
+      "type": 0,
+      "value": "コレクション"
+    }
+  ],
   "common.back": [
     {
       "type": 0,
@@ -287,10 +293,22 @@
       "value": "この値は無効です。"
     }
   ],
+  "error.field.invalid_entity_tag": [
+    {
+      "type": 0,
+      "value": "「*」、または引用符で囲んだエンティティタグのカンマ区切りリストを指定してください。"
+    }
+  ],
   "error.field.invalid_enum": [
     {
       "type": 0,
       "value": "使用できる値のいずれかを選択してください。"
+    }
+  ],
+  "error.field.invalid_sort_field": [
+    {
+      "type": 0,
+      "value": "並べ替えに、この操作では使用できないフィールドが指定されているか、同じフィールドが2回指定されています。"
     }
   ],
   "error.field.invalid_type": [
@@ -593,6 +611,570 @@
       "value": "無効な値があります。確認してもう一度お試しください。"
     }
   ],
+  "home.recipe.aclBlank.description": [
+    {
+      "type": 0,
+      "value": "管理者が厳選し、1件ずつ並べたリスト。"
+    }
+  ],
+  "home.recipe.aclBlank.name": [
+    {
+      "type": 0,
+      "value": "編集部のおすすめ"
+    }
+  ],
+  "home.recipe.anniversariesDefault.description": [
+    {
+      "type": 0,
+      "value": "今月、公開から節目の周年を迎える作品。"
+    }
+  ],
+  "home.recipe.anniversariesDefault.name": [
+    {
+      "type": 0,
+      "value": "周年記念"
+    }
+  ],
+  "home.recipe.awCannes.description": [
+    {
+      "type": 0,
+      "value": "カンヌ国際映画祭の出品作品。"
+    }
+  ],
+  "home.recipe.awCannes.name": [
+    {
+      "type": 0,
+      "value": "カンヌ出品作品"
+    }
+  ],
+  "home.recipe.awEmmy.description": [
+    {
+      "type": 0,
+      "value": "エミー賞受賞シリーズ。"
+    }
+  ],
+  "home.recipe.awEmmy.name": [
+    {
+      "type": 0,
+      "value": "エミー賞受賞作品"
+    }
+  ],
+  "home.recipe.awOscar.description": [
+    {
+      "type": 0,
+      "value": "ライブラリにあるアカデミー賞受賞作品。"
+    }
+  ],
+  "home.recipe.awOscar.name": [
+    {
+      "type": 0,
+      "value": "アカデミー賞受賞作品"
+    }
+  ],
+  "home.recipe.bcwAuto.description": [
+    {
+      "type": 0,
+      "value": "最近視聴した作品に基づくおすすめ。"
+    }
+  ],
+  "home.recipe.caImdb.description": [
+    {
+      "type": 0,
+      "value": "TMDBで評価8.0以上、投票数500以上。"
+    }
+  ],
+  "home.recipe.caImdb.name": [
+    {
+      "type": 0,
+      "value": "批評家から高評価の作品"
+    }
+  ],
+  "home.recipe.collectionPick.description": [
+    {
+      "type": 0,
+      "value": "ライブラリまたは厳選コレクションの作品を表示します。"
+    }
+  ],
+  "home.recipe.collectionPick.name": [
+    {
+      "type": 0,
+      "value": "コレクション"
+    }
+  ],
+  "home.recipe.continueListeningDefault.description": [
+    {
+      "type": 0,
+      "value": "途中まで聴いたオーディオブックを続きから再開。"
+    }
+  ],
+  "home.recipe.continueWatchingDefault.description": [
+    {
+      "type": 0,
+      "value": "途中まで視聴した映画やエピソードを続きから再開。"
+    }
+  ],
+  "home.recipe.esActor.description": [
+    {
+      "type": 0,
+      "value": "ライブラリの俳優を毎週ピックアップ。"
+    }
+  ],
+  "home.recipe.esActor.name": [
+    {
+      "type": 0,
+      "value": "注目の俳優"
+    }
+  ],
+  "home.recipe.esDirectorAuto.description": [
+    {
+      "type": 0,
+      "value": "ライブラリの監督を毎週ピックアップ。"
+    }
+  ],
+  "home.recipe.esDirectorAuto.name": [
+    {
+      "type": 0,
+      "value": "注目の監督"
+    }
+  ],
+  "home.recipe.esEra80s.description": [
+    {
+      "type": 0,
+      "value": "1980年代の映画。"
+    }
+  ],
+  "home.recipe.esEra80s.name": [
+    {
+      "type": 0,
+      "value": "80年代"
+    }
+  ],
+  "home.recipe.esStudio.description": [
+    {
+      "type": 0,
+      "value": "ライブラリのスタジオを毎週ピックアップ。"
+    }
+  ],
+  "home.recipe.esStudio.name": [
+    {
+      "type": 0,
+      "value": "注目のスタジオ"
+    }
+  ],
+  "home.recipe.favoritesDefault.description": [
+    {
+      "type": 0,
+      "value": "お気に入りの作品。"
+    }
+  ],
+  "home.recipe.favoritesDefault.name": [
+    {
+      "type": 0,
+      "value": "お気に入り"
+    }
+  ],
+  "home.recipe.ffDefault.description": [
+    {
+      "type": 0,
+      "value": "TMDBで評価7.0以上、投票数100以上で、過去1年間視聴していない作品。"
+    }
+  ],
+  "home.recipe.ffDefault.name": [
+    {
+      "type": 0,
+      "value": "忘れていたお気に入り"
+    }
+  ],
+  "home.recipe.forYou.description": [
+    {
+      "type": 0,
+      "value": "おすすめエンジンによるプロフィールごとのおすすめ。"
+    }
+  ],
+  "home.recipe.forYou.name": [
+    {
+      "type": 0,
+      "value": "あなたへのおすすめ"
+    }
+  ],
+  "home.recipe.fs4k.description": [
+    {
+      "type": 0,
+      "value": "4K UHDで視聴できる作品。"
+    }
+  ],
+  "home.recipe.fs4k.name": [
+    {
+      "type": 0,
+      "value": "4Kショーケース"
+    }
+  ],
+  "home.recipe.fs4kRecent.description": [
+    {
+      "type": 0,
+      "value": "最近追加された4K UHD作品。"
+    }
+  ],
+  "home.recipe.fs4kRecent.name": [
+    {
+      "type": 0,
+      "value": "新着4K"
+    }
+  ],
+  "home.recipe.fsDv.description": [
+    {
+      "type": 0,
+      "value": "Dolby Vision作品。"
+    }
+  ],
+  "home.recipe.fsDv.name": [
+    {
+      "type": 0,
+      "value": "Dolby Visionセレクション"
+    }
+  ],
+  "home.recipe.fsHdr.description": [
+    {
+      "type": 0,
+      "value": "HDRマスタリング作品。"
+    }
+  ],
+  "home.recipe.fsHdr.name": [
+    {
+      "type": 0,
+      "value": "HDRハイライト"
+    }
+  ],
+  "home.recipe.genreRouletteWeekly.description": [
+    {
+      "type": 0,
+      "value": "毎週異なるジャンル、TMDBで評価6.0以上、投票数100以上。"
+    }
+  ],
+  "home.recipe.genreRouletteWeekly.name": [
+    {
+      "type": 0,
+      "value": "ジャンルルーレット"
+    }
+  ],
+  "home.recipe.hiddenGemsDefault.description": [
+    {
+      "type": 0,
+      "value": "TMDBで評価7.5以上、投票数100以上で、視聴回数が2回以下の作品。"
+    }
+  ],
+  "home.recipe.moodAfterMidnight.description": [
+    {
+      "type": 0,
+      "value": "ホラーまたはスリラー、TMDBで評価6.0以上、投票数100以上。"
+    }
+  ],
+  "home.recipe.moodAfterMidnight.name": [
+    {
+      "type": 0,
+      "value": "真夜中の映画"
+    }
+  ],
+  "home.recipe.moodComfort.description": [
+    {
+      "type": 0,
+      "value": "コメディ、ロマンスまたはファミリー、TMDBで評価6.0以上、投票数100以上。"
+    }
+  ],
+  "home.recipe.moodComfort.name": [
+    {
+      "type": 0,
+      "value": "何度でも観たい作品"
+    }
+  ],
+  "home.recipe.moodDateNight.description": [
+    {
+      "type": 0,
+      "value": "ロマンスまたはコメディ、TMDBで評価6.0以上、投票数100以上。"
+    }
+  ],
+  "home.recipe.moodDateNight.name": [
+    {
+      "type": 0,
+      "value": "デートナイト"
+    }
+  ],
+  "home.recipe.moodEdgeOfSeat.description": [
+    {
+      "type": 0,
+      "value": "スリラーまたはアクション、TMDBで評価6.5以上、投票数100以上。"
+    }
+  ],
+  "home.recipe.moodEdgeOfSeat.name": [
+    {
+      "type": 0,
+      "value": "ハラハラドキドキ"
+    }
+  ],
+  "home.recipe.moodFeelGood.description": [
+    {
+      "type": 0,
+      "value": "コメディまたはファミリー、TMDBで評価6.5以上、投票数100以上。"
+    }
+  ],
+  "home.recipe.moodFeelGood.name": [
+    {
+      "type": 0,
+      "value": "心温まるコメディ"
+    }
+  ],
+  "home.recipe.moodMindBending.description": [
+    {
+      "type": 0,
+      "value": "SFまたはミステリー、TMDBで評価7.0以上、投票数100以上。"
+    }
+  ],
+  "home.recipe.moodMindBending.name": [
+    {
+      "type": 0,
+      "value": "頭をひねるSF"
+    }
+  ],
+  "home.recipe.moodQuietSunday.description": [
+    {
+      "type": 0,
+      "value": "ドラマまたはドキュメンタリー、TMDBで評価7.0以上、投票数100以上。"
+    }
+  ],
+  "home.recipe.moodQuietSunday.name": [
+    {
+      "type": 0,
+      "value": "静かな日曜日の映画"
+    }
+  ],
+  "home.recipe.moodTearjerker.description": [
+    {
+      "type": 0,
+      "value": "ドラマまたはロマンス、TMDBで評価7.0以上、投票数100以上。"
+    }
+  ],
+  "home.recipe.moodTearjerker.name": [
+    {
+      "type": 0,
+      "value": "泣ける作品"
+    }
+  ],
+  "home.recipe.mwMonth.description": [
+    {
+      "type": 0,
+      "value": "過去30日間の再生回数上位。"
+    }
+  ],
+  "home.recipe.mwMonth.name": [
+    {
+      "type": 0,
+      "value": "今月最も視聴された作品"
+    }
+  ],
+  "home.recipe.mwWeek.description": [
+    {
+      "type": 0,
+      "value": "過去7日間の再生回数上位。"
+    }
+  ],
+  "home.recipe.mwWeek.name": [
+    {
+      "type": 0,
+      "value": "今週最も視聴された作品"
+    }
+  ],
+  "home.recipe.nextInSeriesDefault.description": [
+    {
+      "type": 0,
+      "value": "聴き終えたシリーズの次のオーディオブック。"
+    }
+  ],
+  "home.recipe.nextInSeriesDefault.name": [
+    {
+      "type": 0,
+      "value": "シリーズの続き"
+    }
+  ],
+  "home.recipe.nextUpDefault.description": [
+    {
+      "type": 0,
+      "value": "すぐに視聴できる次のエピソード。"
+    }
+  ],
+  "home.recipe.ntl30.description": [
+    {
+      "type": 0,
+      "value": "過去30日間に追加された作品。"
+    }
+  ],
+  "home.recipe.ntl30.name": [
+    {
+      "type": 0,
+      "value": "今月ライブラリに追加された作品"
+    }
+  ],
+  "home.recipe.paHousehold.description": [
+    {
+      "type": 0,
+      "value": "他のすべてのプロフィールが最近視聴した作品。"
+    }
+  ],
+  "home.recipe.paHousehold.name": [
+    {
+      "type": 0,
+      "value": "みんなが最近観た作品"
+    }
+  ],
+  "home.recipe.randomDefault.description": [
+    {
+      "type": 0,
+      "value": "ライブラリからランダムに選んだ作品。"
+    }
+  ],
+  "home.recipe.randomDefault.name": [
+    {
+      "type": 0,
+      "value": "おまかせ"
+    }
+  ],
+  "home.recipe.recentlyAddedDefault.description": [
+    {
+      "type": 0,
+      "value": "ライブラリに最近追加された作品。"
+    }
+  ],
+  "home.recipe.recentlyReleasedDefault.description": [
+    {
+      "type": 0,
+      "value": "最近リリースされた作品。"
+    }
+  ],
+  "home.recipe.recentlyReleasedDefault.name": [
+    {
+      "type": 0,
+      "value": "新作"
+    }
+  ],
+  "home.recipe.returningShowsDefault.description": [
+    {
+      "type": 0,
+      "value": "視聴したシリーズのうち、新しいシーズンがライブラリに追加されたもの。"
+    }
+  ],
+  "home.recipe.seAuto.description": [
+    {
+      "type": 0,
+      "value": "自動で切り替わります。10月はハロウィン、12月はクリスマスなど。"
+    }
+  ],
+  "home.recipe.seAuto.details": [
+    {
+      "type": 0,
+      "value": "カレンダーに合わせて、厳選された祝日のおすすめに切り替わるセクションです。祝日とそれぞれの雰囲気を選び、独自の祝日を追加できます。"
+    }
+  ],
+  "home.recipe.seFamilyMovieNight.description": [
+    {
+      "type": 0,
+      "value": "金曜日と土曜日の夜にファミリー向けのおすすめ。"
+    }
+  ],
+  "home.recipe.seFamilyMovieNight.name": [
+    {
+      "type": 0,
+      "value": "ファミリー映画ナイト"
+    }
+  ],
+  "home.recipe.shortWatchesDefault.description": [
+    {
+      "type": 0,
+      "value": "95分以下の映画、TMDBで評価6.0以上、投票数100以上。"
+    }
+  ],
+  "home.recipe.shortWatchesDefault.name": [
+    {
+      "type": 0,
+      "value": "さくっと観られる作品"
+    }
+  ],
+  "home.recipe.similar.description": [
+    {
+      "type": 0,
+      "value": "好みの近いプロフィールが気に入っている作品。"
+    }
+  ],
+  "home.recipe.tasteTop.description": [
+    {
+      "type": 0,
+      "value": "一番の好みに最も合う作品。ジャンルを設定して絞り込めます。"
+    }
+  ],
+  "home.recipe.tdiscTmdbDay.description": [
+    {
+      "type": 0,
+      "value": "TMDBの今日のトレンド映画・シリーズのうち、ライブラリにあるもの。"
+    }
+  ],
+  "home.recipe.tdiscTmdbDay.name": [
+    {
+      "type": 0,
+      "value": "TMDBの今日のトレンド"
+    }
+  ],
+  "home.recipe.tdiscTmdbWeek.description": [
+    {
+      "type": 0,
+      "value": "TMDBの今週のトレンド映画・シリーズのうち、ライブラリにあるもの。"
+    }
+  ],
+  "home.recipe.tdiscTmdbWeek.name": [
+    {
+      "type": 0,
+      "value": "TMDBの今週のトレンド"
+    }
+  ],
+  "home.recipe.tr24h.description": [
+    {
+      "type": 0,
+      "value": "過去1日で最も再生された作品。"
+    }
+  ],
+  "home.recipe.tr24h.name": [
+    {
+      "type": 0,
+      "value": "現在のトレンド（24時間）"
+    }
+  ],
+  "home.recipe.tr30d.description": [
+    {
+      "type": 0,
+      "value": "過去1か月で最も再生された作品。"
+    }
+  ],
+  "home.recipe.tr30d.name": [
+    {
+      "type": 0,
+      "value": "今月のトレンド"
+    }
+  ],
+  "home.recipe.tr7d.description": [
+    {
+      "type": 0,
+      "value": "過去1週間で最も再生された作品。"
+    }
+  ],
+  "home.recipe.watchlistDefault.description": [
+    {
+      "type": 0,
+      "value": "後で視聴するために保存した作品。"
+    }
+  ],
+  "home.recipe.watchlistDefault.name": [
+    {
+      "type": 0,
+      "value": "ウォッチリスト"
+    }
+  ],
   "home.section.becauseYouEnjoy": [
     {
       "type": 1,
@@ -635,6 +1217,60 @@
     {
       "type": 0,
       "value": "視聴を続ける"
+    }
+  ],
+  "home.section.discoverGenres": [
+    {
+      "type": 0,
+      "value": "ジャンル"
+    }
+  ],
+  "home.section.discoverNetworks": [
+    {
+      "type": 0,
+      "value": "ネットワーク"
+    }
+  ],
+  "home.section.discoverOnAirSeries": [
+    {
+      "type": 0,
+      "value": "放送中のシリーズ"
+    }
+  ],
+  "home.section.discoverPopularMovies": [
+    {
+      "type": 0,
+      "value": "人気の映画"
+    }
+  ],
+  "home.section.discoverPopularSeries": [
+    {
+      "type": 0,
+      "value": "人気のシリーズ"
+    }
+  ],
+  "home.section.discoverStudios": [
+    {
+      "type": 0,
+      "value": "スタジオ"
+    }
+  ],
+  "home.section.discoverTrendingMovies": [
+    {
+      "type": 0,
+      "value": "トレンドの映画"
+    }
+  ],
+  "home.section.discoverTrendingSeries": [
+    {
+      "type": 0,
+      "value": "トレンドのシリーズ"
+    }
+  ],
+  "home.section.discoverUpcomingMovies": [
+    {
+      "type": 0,
+      "value": "近日公開の映画"
     }
   ],
   "home.section.forYou": [
@@ -805,6 +1441,210 @@
       "value": "新シーズンが始まるシリーズ"
     }
   ],
+  "home.section.seasonal.christmas.classics": [
+    {
+      "type": 0,
+      "value": "クリスマスの名作"
+    }
+  ],
+  "home.section.seasonal.christmas.comedies": [
+    {
+      "type": 0,
+      "value": "クリスマスコメディ"
+    }
+  ],
+  "home.section.seasonal.christmas.family": [
+    {
+      "type": 0,
+      "value": "家族で楽しむクリスマス"
+    }
+  ],
+  "home.section.seasonal.christmas.favorites": [
+    {
+      "type": 0,
+      "value": "クリスマスの定番"
+    }
+  ],
+  "home.section.seasonal.christmas.hallmark": [
+    {
+      "type": 0,
+      "value": "Hallmarkのクリスマス映画"
+    }
+  ],
+  "home.section.seasonal.christmas.romcoms": [
+    {
+      "type": 0,
+      "value": "クリスマスのラブコメ"
+    }
+  ],
+  "home.section.seasonal.easter.faith": [
+    {
+      "type": 0,
+      "value": "イースターの物語"
+    }
+  ],
+  "home.section.seasonal.easter.family": [
+    {
+      "type": 0,
+      "value": "イースターの映画"
+    }
+  ],
+  "home.section.seasonal.familyMovieNight.favorites": [
+    {
+      "type": 0,
+      "value": "ファミリー向けの定番"
+    }
+  ],
+  "home.section.seasonal.familyMovieNight.liveAction": [
+    {
+      "type": 0,
+      "value": "ファミリー映画ナイト"
+    }
+  ],
+  "home.section.seasonal.familyMovieNight.new": [
+    {
+      "type": 0,
+      "value": "ファミリー映画ナイト"
+    }
+  ],
+  "home.section.seasonal.halloween.animated": [
+    {
+      "type": 0,
+      "value": "ハロウィンアニメ"
+    }
+  ],
+  "home.section.seasonal.halloween.family": [
+    {
+      "type": 0,
+      "value": "家族で楽しむハロウィン"
+    }
+  ],
+  "home.section.seasonal.halloween.favorites": [
+    {
+      "type": 0,
+      "value": "ハロウィンの定番"
+    }
+  ],
+  "home.section.seasonal.halloween.horror": [
+    {
+      "type": 0,
+      "value": "ハロウィンホラー"
+    }
+  ],
+  "home.section.seasonal.halloween.tv": [
+    {
+      "type": 0,
+      "value": "ハロウィンのシリーズ"
+    }
+  ],
+  "home.section.seasonal.newYear.favorites": [
+    {
+      "type": 0,
+      "value": "新年の映画"
+    }
+  ],
+  "home.section.seasonal.saturdayMorning.cartoons": [
+    {
+      "type": 0,
+      "value": "土曜朝のアニメ"
+    }
+  ],
+  "home.section.seasonal.saturdayMorning.modern": [
+    {
+      "type": 0,
+      "value": "土曜朝の定番アニメ"
+    }
+  ],
+  "home.section.seasonal.saturdayMorning.nineties": [
+    {
+      "type": 0,
+      "value": "90年代の土曜朝アニメ"
+    }
+  ],
+  "home.section.seasonal.stPatricks.irishFilm": [
+    {
+      "type": 0,
+      "value": "アイルランド映画"
+    }
+  ],
+  "home.section.seasonal.stPatricks.irishTv": [
+    {
+      "type": 0,
+      "value": "アイルランドのシリーズ"
+    }
+  ],
+  "home.section.seasonal.summer.blockbusters": [
+    {
+      "type": 0,
+      "value": "夏の大ヒット作"
+    }
+  ],
+  "home.section.seasonal.summer.classicSummer": [
+    {
+      "type": 0,
+      "value": "夏の名作映画"
+    }
+  ],
+  "home.section.seasonal.summer.nostalgia": [
+    {
+      "type": 0,
+      "value": "懐かしの夏"
+    }
+  ],
+  "home.section.seasonal.summerBlockbuster.blockbusters": [
+    {
+      "type": 0,
+      "value": "夏の大ヒット作"
+    }
+  ],
+  "home.section.seasonal.summerBlockbuster.classicSummer": [
+    {
+      "type": 0,
+      "value": "夏の名作映画"
+    }
+  ],
+  "home.section.seasonal.summerBlockbuster.nostalgia": [
+    {
+      "type": 0,
+      "value": "懐かしの夏"
+    }
+  ],
+  "home.section.seasonal.thanksgiving.favorites": [
+    {
+      "type": 0,
+      "value": "感謝祭の映画"
+    }
+  ],
+  "home.section.seasonal.thanksgiving.feelGood": [
+    {
+      "type": 0,
+      "value": "心温まる定番作品"
+    }
+  ],
+  "home.section.seasonal.valentines.favorites": [
+    {
+      "type": 0,
+      "value": "バレンタインの定番"
+    }
+  ],
+  "home.section.seasonal.valentines.loveStories": [
+    {
+      "type": 0,
+      "value": "名作ラブストーリー"
+    }
+  ],
+  "home.section.seasonal.valentines.romanticDramas": [
+    {
+      "type": 0,
+      "value": "恋愛ドラマ"
+    }
+  ],
+  "home.section.seasonal.valentines.romcoms": [
+    {
+      "type": 0,
+      "value": "バレンタインのラブコメ"
+    }
+  ],
   "home.section.seasonalPicks": [
     {
       "type": 0,
@@ -819,6 +1659,12 @@
     {
       "type": 0,
       "value": "の人気作品"
+    }
+  ],
+  "home.section.topPicksToday": [
+    {
+      "type": 0,
+      "value": "今日のイチオシ"
     }
   ],
   "home.section.topRated": [
@@ -2568,6 +3414,12 @@
     {
       "type": 0,
       "value": "ホストのみ"
+    }
+  ],
+  "shuffle.nothingToPlay": [
+    {
+      "type": 0,
+      "value": "再生できる項目がありません。"
     }
   ],
   "subtitleSearch.hearingImpaired": [
@@ -19842,6 +20694,12 @@
       "value": "date"
     }
   ],
+  "web.admin.common.jobHistory.jobType.backupRestore": [
+    {
+      "type": 0,
+      "value": "バックアップの復元"
+    }
+  ],
   "web.admin.common.jobHistory.jobType.catalogExport": [
     {
       "type": 0,
@@ -19876,6 +20734,18 @@
     {
       "type": 0,
       "value": "ライブラリの更新"
+    }
+  ],
+  "web.admin.common.jobHistory.jobType.storageTransition": [
+    {
+      "type": 0,
+      "value": "ストレージの移行"
+    }
+  ],
+  "web.admin.common.jobHistory.jobType.templateBundleApply": [
+    {
+      "type": 0,
+      "value": "テンプレートバンドルの適用"
     }
   ],
   "web.admin.common.jobHistory.progress": [
@@ -23518,6 +24388,18 @@
       "value": "失敗"
     }
   ],
+  "web.admin.common.taskStatus.queued": [
+    {
+      "type": 0,
+      "value": "キュー待ち"
+    }
+  ],
+  "web.admin.common.taskStatus.running": [
+    {
+      "type": 0,
+      "value": "実行中"
+    }
+  ],
   "web.admin.common.title.header.accessGroups": [
     {
       "type": 0,
@@ -27130,6 +28012,22 @@
       "value": "label"
     }
   ],
+  "web.admin.dashboard.widgets.transcodeNodes.buildDiffersFlag": [
+    {
+      "type": 0,
+      "value": "ビルドが異なる"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.buildDiffersTitle": [
+    {
+      "type": 0,
+      "value": "ビルドがサーバーと異なります。"
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.admin.dashboard.widgets.transcodeNodes.buildOutdated": [
     {
       "type": 0,
@@ -27160,6 +28058,16 @@
       "value": "date"
     }
   ],
+  "web.admin.dashboard.widgets.transcodeNodes.capSeparator": [
+    {
+      "type": 0,
+      "value": "/ "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.dashboard.widgets.transcodeNodes.checked": [
     {
       "type": 0,
@@ -27168,6 +28076,30 @@
     {
       "type": 1,
       "value": "time"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.column.active": [
+    {
+      "type": 0,
+      "value": "実行中"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.column.build": [
+    {
+      "type": 0,
+      "value": "ビルド"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.column.mbps": [
+    {
+      "type": 0,
+      "value": "Mbps"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.column.node": [
+    {
+      "type": 0,
+      "value": "ノード"
     }
   ],
   "web.admin.dashboard.widgets.transcodeNodes.disabled": [
@@ -27182,10 +28114,49 @@
       "value": "ストリームノードがありません — トランスコードはこのサーバーで実行されます"
     }
   ],
+  "web.admin.dashboard.widgets.transcodeNodes.groupCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "グループ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.dashboard.widgets.transcodeNodes.healthy": [
     {
       "type": 0,
       "value": "正常"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.healthyCount": [
+    {
+      "type": 0,
+      "value": "正常"
+    },
+    {
+      "type": 1,
+      "value": "healthy"
+    },
+    {
+      "type": 0,
+      "value": "/"
+    },
+    {
+      "type": 1,
+      "value": "enabled"
     }
   ],
   "web.admin.dashboard.widgets.transcodeNodes.jobs": [
@@ -27262,10 +28233,34 @@
       "value": "ストリームノードを読み込めませんでした。"
     }
   ],
+  "web.admin.dashboard.widgets.transcodeNodes.loadPercent": [
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
   "web.admin.dashboard.widgets.transcodeNodes.manage": [
     {
       "type": 0,
       "value": "管理 ›"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.meterLabel": [
+    {
+      "type": 1,
+      "value": "node"
+    },
+    {
+      "type": 0,
+      "value": "の"
+    },
+    {
+      "type": 1,
+      "value": "metric"
     }
   ],
   "web.admin.dashboard.widgets.transcodeNodes.neverChecked": [
@@ -27288,6 +28283,84 @@
     {
       "type": 0,
       "value": "リビジョン不明"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.staleDisabledTitle": [
+    {
+      "type": 0,
+      "value": "このノードはオフになっているため、ヘルスチェックで更新されなくなりました。"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.staleUnreachableTitle": [
+    {
+      "type": 0,
+      "value": "前回のヘルスチェックでこのノードに接続できませんでした。"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.storageFlag": [
+    {
+      "type": 0,
+      "value": "ストレージ"
+    },
+    {
+      "type": 1,
+      "value": "fill"
+    },
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.storageTitle": [
+    {
+      "type": 0,
+      "value": "トランスコードディレクトリの使用率は"
+    },
+    {
+      "type": 1,
+      "value": "fill"
+    },
+    {
+      "type": 0,
+      "value": "%です。"
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.streamCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "ストリーム"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.streamsAbbr": [
+    {
+      "type": 0,
+      "value": "配信"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.streamsTitle": [
+    {
+      "type": 0,
+      "value": "ストリーム"
     }
   ],
   "web.admin.dashboard.widgets.transcodeNodes.summary": [
@@ -27362,6 +28435,44 @@
     {
       "type": 0,
       "value": "ノード"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.transcodeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "トランスコード"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.transcodesAbbr": [
+    {
+      "type": 0,
+      "value": "変換"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.transcodesTitle": [
+    {
+      "type": 0,
+      "value": "トランスコード"
     }
   ],
   "web.admin.dashboard.widgets.transcodeNodes.unhealthy": [
@@ -34587,6 +35698,295 @@
       "value": "ストレージ"
     }
   ],
+  "web.admin.errors.activityCursorRepeated": [
+    {
+      "type": 0,
+      "value": "アクティビティのカーソルが重複しました。履歴を再読み込みしてください。"
+    }
+  ],
+  "web.admin.errors.activityItemsInvalid": [
+    {
+      "type": 0,
+      "value": "アクティビティの項目が無効です。履歴を再読み込みしてください。"
+    }
+  ],
+  "web.admin.errors.activityPageInvalid": [
+    {
+      "type": 0,
+      "value": "アクティビティのページが無効です。履歴を再読み込みしてください。"
+    }
+  ],
+  "web.admin.errors.apiKeyCursorRepeated": [
+    {
+      "type": 0,
+      "value": "APIキーのカーソルが重複しました。一覧を再読み込みしてください。"
+    }
+  ],
+  "web.admin.errors.apiKeyPaginationInvalid": [
+    {
+      "type": 0,
+      "value": "APIキーのページ分割が無効です。一覧を再読み込みしてください。"
+    }
+  ],
+  "web.admin.errors.apiKeyReloadBeforeSaving": [
+    {
+      "type": 0,
+      "value": "保存する前にこのAPIキーを再読み込みしてください。強いETagが必要です。"
+    }
+  ],
+  "web.admin.errors.apiKeysProfileChanged": [
+    {
+      "type": 0,
+      "value": "プロフィールを変更した後は、APIキーを再読み込みしてください。"
+    }
+  ],
+  "web.admin.errors.artworkCacheIncomplete": [
+    {
+      "type": 0,
+      "value": "アートワークのキャッシュが完了しませんでした。詳細は管理者向けの診断情報を確認してください。"
+    }
+  ],
+  "web.admin.errors.artworkUpdateFailed": [
+    {
+      "type": 0,
+      "value": "アートワークを更新できませんでした"
+    }
+  ],
+  "web.admin.errors.catalogRevisionMissing": [
+    {
+      "type": 0,
+      "value": "カタログのリビジョンを取得できません。編集する前に再読み込みしてください。"
+    }
+  ],
+  "web.admin.errors.collectionOrderChanged": [
+    {
+      "type": 0,
+      "value": "読み込み中にコレクションの順序が変更されました。並べ替える前に再読み込みしてください。"
+    }
+  ],
+  "web.admin.errors.devicesTooMany": [
+    {
+      "type": 0,
+      "value": "表示できるデバイスの数を超えています。一覧を再読み込みしてください。"
+    }
+  ],
+  "web.admin.errors.diagnosticDownloadFailed": [
+    {
+      "type": 0,
+      "value": "診断レポートをダウンロードできませんでした（"
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "）。"
+    }
+  ],
+  "web.admin.errors.diagnosticFormatUnexpected": [
+    {
+      "type": 0,
+      "value": "サーバーから予期しない形式の診断レポートが返されました。"
+    }
+  ],
+  "web.admin.errors.diagnosticsAvailabilityUnknown": [
+    {
+      "type": 0,
+      "value": "診断情報の利用状況を認識できません。アップロードの設定を変更する前に再読み込みしてください。"
+    }
+  ],
+  "web.admin.errors.historyImportConfigReload": [
+    {
+      "type": 0,
+      "value": "保存する前にこの構成を再読み込みしてください。"
+    }
+  ],
+  "web.admin.errors.historyImportPageIncomplete": [
+    {
+      "type": 0,
+      "value": "履歴のインポートのページが不完全です。再読み込みしてもう一度お試しください。"
+    }
+  ],
+  "web.admin.errors.historyImportStatusMissing": [
+    {
+      "type": 0,
+      "value": "受け付けられたインポートに、想定されたステータスの場所が含まれていませんでした。もう一度試す前に実行一覧を更新してください。"
+    }
+  ],
+  "web.admin.errors.imageChoicesChanged": [
+    {
+      "type": 0,
+      "value": "画像の候補が変更されました。再読み込みしてもう一度お試しください。"
+    }
+  ],
+  "web.admin.errors.integrationPageIncomplete": [
+    {
+      "type": 0,
+      "value": "連携のページが不完全です。再読み込みしてもう一度お試しください。"
+    }
+  ],
+  "web.admin.errors.itemFilesIncomplete": [
+    {
+      "type": 0,
+      "value": "項目のファイル一覧が不完全です。再読み込みしてもう一度お試しください。"
+    }
+  ],
+  "web.admin.errors.layoutRevisionMissing": [
+    {
+      "type": 0,
+      "value": "サーバーのレイアウトの書き込みリビジョンがありません。再度保存する前に再読み込みしてください。"
+    }
+  ],
+  "web.admin.errors.nodeWriteAckMissing": [
+    {
+      "type": 0,
+      "value": "ノードへの書き込みの確認応答を取得できません。再度保存する前に現在の状態を確認してください。"
+    }
+  ],
+  "web.admin.errors.nodesReloadReopen": [
+    {
+      "type": 0,
+      "value": "元のバージョンを取得するには、ノードを再読み込みしてこの操作をもう一度開いてください。"
+    }
+  ],
+  "web.admin.errors.playbackHistoryInvalid": [
+    {
+      "type": 0,
+      "value": "再生履歴のページが無効です。ページを再読み込みしてください。"
+    }
+  ],
+  "web.admin.errors.requestPageIncomplete": [
+    {
+      "type": 0,
+      "value": "リクエストのページが不完全です。再読み込みしてもう一度お試しください。"
+    }
+  ],
+  "web.admin.errors.requestsEditorReload": [
+    {
+      "type": 0,
+      "value": "保存する前にこのエディターを再読み込みしてください。"
+    }
+  ],
+  "web.admin.errors.scheduleRevisionMissing": [
+    {
+      "type": 0,
+      "value": "スケジュールのリビジョンを取得できません。編集する前に再読み込みしてください。"
+    }
+  ],
+  "web.admin.errors.seekPreviewsNoneQueued": [
+    {
+      "type": 0,
+      "value": "キューに追加されたシークプレビューはありません"
+    }
+  ],
+  "web.admin.errors.seekPreviewsQueueFailed": [
+    {
+      "type": 0,
+      "value": "シークプレビューをキューに追加できませんでした"
+    }
+  ],
+  "web.admin.errors.seekPreviewsQueued": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "件のファイルのシークプレビューをキューに追加しました"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.errors.sessionsTooMany": [
+    {
+      "type": 0,
+      "value": "表示できるセッションの数を超えています。一覧を再読み込みしてください。"
+    }
+  ],
+  "web.admin.errors.settingsPageInvalid": [
+    {
+      "type": 0,
+      "value": "設定のページが無効です。設定を再読み込みしてください。"
+    }
+  ],
+  "web.admin.errors.subtitleDeleteAttempted": [
+    {
+      "type": 0,
+      "value": "この削除はすでに試行されています。閉じてから字幕をもう一度確認してください。"
+    }
+  ],
+  "web.admin.errors.subtitleDownloadFailed": [
+    {
+      "type": 0,
+      "value": "字幕をダウンロードできませんでした（"
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "）。"
+    }
+  ],
+  "web.admin.errors.subtitleDownloadUnexpected": [
+    {
+      "type": 0,
+      "value": "字幕のダウンロードで予期しない応答がありました。"
+    }
+  ],
+  "web.admin.errors.subtitleIdentityChanged": [
+    {
+      "type": 0,
+      "value": "字幕の識別情報が変更されました。一覧を再読み込みしてください。"
+    }
+  ],
+  "web.admin.errors.subtitleListInvalid": [
+    {
+      "type": 0,
+      "value": "字幕の一覧が無効です。ページを再読み込みしてください。"
+    }
+  ],
+  "web.admin.errors.subtitleValidatorRequired": [
+    {
+      "type": 0,
+      "value": "字幕の編集には強いバリデーターが必要です。エディターを開き直してください。"
+    }
+  ],
+  "web.admin.errors.translationCancelFailed": [
+    {
+      "type": 0,
+      "value": "翻訳をキャンセルできませんでした"
+    }
+  ],
+  "web.admin.errors.userPaginationInvalid": [
+    {
+      "type": 0,
+      "value": "ユーザーのページ分割が無効です。一覧を再読み込みしてください。"
+    }
+  ],
+  "web.admin.errors.userReloadBeforeSaving": [
+    {
+      "type": 0,
+      "value": "保存する前にこのユーザーを再読み込みしてください。強いETagが必要です。"
+    }
+  ],
+  "web.admin.errors.watchHistoryInvalid": [
+    {
+      "type": 0,
+      "value": "視聴履歴のページが無効です。ページを再読み込みしてください。"
+    }
+  ],
   "web.admin.history.column.ended": [
     {
       "type": 0,
@@ -36648,6 +38048,24 @@
     {
       "type": 0,
       "value": "：復元された可能性がありますが、Siloで確認できませんでした。再読み込みして確認してください。"
+    }
+  ],
+  "web.admin.homeRows.row.cantCopyToLibraries": [
+    {
+      "type": 0,
+      "value": "この行はほかのライブラリに追加できません。"
+    }
+  ],
+  "web.admin.homeRows.row.moveFailed": [
+    {
+      "type": 0,
+      "value": "この行を移動できませんでした"
+    }
+  ],
+  "web.admin.homeRows.row.saveFailed": [
+    {
+      "type": 0,
+      "value": "この行を保存できませんでした"
     }
   ],
   "web.admin.homeRows.rowMenu.addToOtherLibraries": [
@@ -42572,6 +43990,60 @@
       "value": "アンインストール中…"
     }
   ],
+  "web.admin.plugins.detail.updateFailed": [
+    {
+      "type": 8,
+      "value": "b",
+      "children": [
+        {
+          "type": 0,
+          "value": "Siloは"
+        },
+        {
+          "type": 1,
+          "value": "name"
+        },
+        {
+          "type": 0,
+          "value": "を"
+        },
+        {
+          "type": 1,
+          "value": "version"
+        },
+        {
+          "type": 0,
+          "value": "に更新できませんでした。"
+        }
+      ]
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "web.admin.plugins.detail.updateFailedStays": [
+    {
+      "type": 0,
+      "value": "バージョン"
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "のままです。最終試行："
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
   "web.admin.plugins.detail.updateTo": [
     {
       "type": 1,
@@ -43560,6 +45032,16 @@
     {
       "type": 0,
       "value": "を利用可能"
+    }
+  ],
+  "web.admin.plugins.tile.updateFailed": [
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "への更新に失敗"
     }
   ],
   "web.admin.plugins.tile.updatesPaused": [
@@ -66208,6 +67690,12 @@
       "value": "最大実行時間（適用されません）："
     }
   ],
+  "web.admin.tasks.detail.maxRuntimeLabel": [
+    {
+      "type": 0,
+      "value": "最大実行時間："
+    }
+  ],
   "web.admin.tasks.detail.maxRuntimeNone": [
     {
       "type": 0,
@@ -66608,6 +68096,12 @@
       "value": "プロバイダーのアートワーク"
     }
   ],
+  "web.admin.tasks.refreshReason.providerIdIncomplete": [
+    {
+      "type": 0,
+      "value": "プロバイダーIDが不完全"
+    }
+  ],
   "web.admin.tasks.refreshReason.refreshFailure": [
     {
       "type": 0,
@@ -66710,6 +68204,798 @@
     {
       "type": 0,
       "value": "停止中…"
+    }
+  ],
+  "web.admin.tasks.task.autoscan_poll.description": [
+    {
+      "type": 0,
+      "value": "インストール済みのスキャンソースプロバイダーに変更を問い合わせ、再スキャンをキューに追加します"
+    }
+  ],
+  "web.admin.tasks.task.autoscan_poll.name": [
+    {
+      "type": 0,
+      "value": "Autoscanのポーリング"
+    }
+  ],
+  "web.admin.tasks.task.autoscan_webhook_retry.description": [
+    {
+      "type": 0,
+      "value": "永続的に受け付けたAutoscanのWebhook配信を再試行します"
+    }
+  ],
+  "web.admin.tasks.task.autoscan_webhook_retry.name": [
+    {
+      "type": 0,
+      "value": "AutoscanのWebhook再試行"
+    }
+  ],
+  "web.admin.tasks.task.backfill_ebook_metadata.description": [
+    {
+      "type": 0,
+      "value": "スケジュールされたメタデータ同期と競合せずに、従来の電子書籍の未処理分を補完します"
+    }
+  ],
+  "web.admin.tasks.task.backfill_ebook_metadata.name": [
+    {
+      "type": 0,
+      "value": "電子書籍メタデータの補完"
+    }
+  ],
+  "web.admin.tasks.task.backfill_hdr10_plus.description": [
+    {
+      "type": 0,
+      "value": "SiloがHDR10+を検出する前にスキャンされたHDR動画の最初のフレームをファイルごとに1回読み取り、HDR10+ファイルがHDR10ではなくHDR10+と表示されるようにします。"
+    }
+  ],
+  "web.admin.tasks.task.backfill_hdr10_plus.name": [
+    {
+      "type": 0,
+      "value": "HDR10+動画の検出"
+    }
+  ],
+  "web.admin.tasks.task.backfill_matroska_track_numbers.description": [
+    {
+      "type": 0,
+      "value": "Siloが字幕トラック番号を記録する前にスキャンされた、テキスト字幕を含むMKVファイルのトラック一覧をファイルごとに1回読み取り、サーバーで抽出しなくてもアプリで埋め込み字幕を表示できるようにします。"
+    }
+  ],
+  "web.admin.tasks.task.backfill_matroska_track_numbers.name": [
+    {
+      "type": 0,
+      "value": "Matroska字幕のトラック番号を記録"
+    }
+  ],
+  "web.admin.tasks.task.backfill_media_item_aliases.description": [
+    {
+      "type": 0,
+      "value": "既存のメディアの原題とローカライズされたタイトルから、検索可能な別名を再開可能なバッチで作成します。"
+    }
+  ],
+  "web.admin.tasks.task.backfill_media_item_aliases.name": [
+    {
+      "type": 0,
+      "value": "メディアアイテムの別名の補完"
+    }
+  ],
+  "web.admin.tasks.task.backfill_metadata_images.description": [
+    {
+      "type": 0,
+      "value": "カタログ全体で不足しているプロバイダーのアートワークを手動で検出してキャッシュします"
+    }
+  ],
+  "web.admin.tasks.task.backfill_metadata_images.name": [
+    {
+      "type": 0,
+      "value": "メタデータ画像の補完"
+    }
+  ],
+  "web.admin.tasks.task.backup.description": [
+    {
+      "type": 0,
+      "value": "データベースとアップロードされたファイルをバックアップ先にバックアップし、設定された数を超えるバックアップを削除します"
+    }
+  ],
+  "web.admin.tasks.task.backup.name": [
+    {
+      "type": 0,
+      "value": "サーバーのバックアップ"
+    }
+  ],
+  "web.admin.tasks.task.bulk_metadata_enrichment.description": [
+    {
+      "type": 0,
+      "value": "MDBListなど、リクエストをまとめて処理する補完プロバイダーで、映画とシリーズを一度に多数検索します"
+    }
+  ],
+  "web.admin.tasks.task.bulk_metadata_enrichment.name": [
+    {
+      "type": 0,
+      "value": "メタデータの一括補完"
+    }
+  ],
+  "web.admin.tasks.task.cache_metadata_images.description": [
+    {
+      "type": 0,
+      "value": "スキャン、更新、メタデータの変更によってすでにキューに追加されたアートワークのみを処理します"
+    }
+  ],
+  "web.admin.tasks.task.cache_metadata_images.name": [
+    {
+      "type": 0,
+      "value": "メタデータ画像のキャッシュ"
+    }
+  ],
+  "web.admin.tasks.task.chapter_thumbnail_backfill.description": [
+    {
+      "type": 0,
+      "value": "有効にしたライブラリで、不足しているチャプターのサムネイルを生成します"
+    }
+  ],
+  "web.admin.tasks.task.chapter_thumbnail_backfill.name": [
+    {
+      "type": 0,
+      "value": "チャプターサムネイルの補完"
+    }
+  ],
+  "web.admin.tasks.task.check_plugin_updates.description": [
+    {
+      "type": 0,
+      "value": "プラグインリポジトリを取得し、利用可能なプラグインの更新を適用または記録します"
+    }
+  ],
+  "web.admin.tasks.task.check_plugin_updates.name": [
+    {
+      "type": 0,
+      "value": "プラグインの更新を確認"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_activity_log.description": [
+    {
+      "type": 0,
+      "value": "期限切れのアクティビティログの行とパーティションを削除します"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_activity_log.name": [
+    {
+      "type": 0,
+      "value": "アクティビティログのクリーンアップ"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_artwork_revisions.description": [
+    {
+      "type": 0,
+      "value": "どのカタログレコードからも参照されていない、未公開または置き換えられた不変のアートワークリビジョンを、猶予期間の後に削除します。"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_artwork_revisions.name": [
+    {
+      "type": 0,
+      "value": "アートワークリビジョンのクリーンアップ"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_auth_sessions.description": [
+    {
+      "type": 0,
+      "value": "取り消しの有無にかかわらず、有効期限を過ぎたログインセッションを削除します"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_auth_sessions.name": [
+    {
+      "type": 0,
+      "value": "期限切れのログインセッションのクリーンアップ"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_autoscan_events.description": [
+    {
+      "type": 0,
+      "value": "古いAutoscanのポーリングとWebhookのイベントをアクティビティ履歴から削除します"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_autoscan_events.name": [
+    {
+      "type": 0,
+      "value": "Autoscanイベントのクリーンアップ"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_catalog_search_index_events.description": [
+    {
+      "type": 0,
+      "value": "確認済みのカタログ検索のアウトボックスイベントを、復旧期間の経過後に削除します。"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_catalog_search_index_events.name": [
+    {
+      "type": 0,
+      "value": "カタログ検索インデックスイベントのクリーンアップ"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_chapter_thumbnail_originals.description": [
+    {
+      "type": 0,
+      "value": "以前のバージョンで保存されたフルサイズのチャプターサムネイル画像を削除します。クライアントは300pxのサムネイルのみを読み込みます。ストレージに該当する画像がなくなるとタスクは停止します。"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_chapter_thumbnail_originals.name": [
+    {
+      "type": 0,
+      "value": "フルサイズのチャプターサムネイルのクリーンアップ"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_client_diagnostics.description": [
+    {
+      "type": 0,
+      "value": "期限切れのクライアント診断レポートと孤立したバンドルを削除します"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_client_diagnostics.name": [
+    {
+      "type": 0,
+      "value": "クライアント診断のクリーンアップ"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_device_logins.description": [
+    {
+      "type": 0,
+      "value": "有効期限を大きく過ぎたデバイスのサインインリクエストを削除します"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_device_logins.name": [
+    {
+      "type": 0,
+      "value": "期限切れのデバイスサインインリクエストのクリーンアップ"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_oauth_flows.description": [
+    {
+      "type": 0,
+      "value": "有効期限を大きく過ぎたOAuthサインインフローを削除します"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_oauth_flows.name": [
+    {
+      "type": 0,
+      "value": "期限切れのOAuthサインインフローのクリーンアップ"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_operational_log.description": [
+    {
+      "type": 0,
+      "value": "期限切れの運用ログの行とパーティションを削除します"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_operational_log.name": [
+    {
+      "type": 0,
+      "value": "運用ログのクリーンアップ"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_orphaned_media_items.description": [
+    {
+      "type": 0,
+      "value": "ファイル、ライブラリへの所属、ユーザーや同期の永続的な参照がない、切り離された仮のメディアアイテムを削除します。"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_orphaned_media_items.name": [
+    {
+      "type": 0,
+      "value": "孤立したメディアアイテムのクリーンアップ"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_policy_decision_log.description": [
+    {
+      "type": 0,
+      "value": "期限切れのポリシー判定ログの行とパーティションを削除します"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_policy_decision_log.name": [
+    {
+      "type": 0,
+      "value": "ポリシー判定ログのクリーンアップ"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_removed_media_images.description": [
+    {
+      "type": 0,
+      "value": "カタログから削除されたメディアファイルのチャプターサムネイルとシークプレビュー、および置き換えられたシークプレビューを、猶予期間の後に削除します。"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_removed_media_images.name": [
+    {
+      "type": 0,
+      "value": "削除済みメディアの画像のクリーンアップ"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_task_history.description": [
+    {
+      "type": 0,
+      "value": "古いバックグラウンドタスクの実行履歴を削除します"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_task_history.name": [
+    {
+      "type": 0,
+      "value": "タスク履歴のクリーンアップ"
+    }
+  ],
+  "web.admin.tasks.task.contribute_markers.description": [
+    {
+      "type": 0,
+      "value": "このサーバーで検出された対象のイントロとクレジットを自動共有が有効なプロバイダーに送信し、保存時に送信できなかった手動の修正を、修正を受け付けるプロバイダーに送信します。"
+    }
+  ],
+  "web.admin.tasks.task.contribute_markers.name": [
+    {
+      "type": 0,
+      "value": "検出したマーカーの共有"
+    }
+  ],
+  "web.admin.tasks.task.database_maintenance.description": [
+    {
+      "type": 0,
+      "value": "期限切れのアクティビティログとポリシーログ、タスク履歴、Autoscanイベント、ログインセッション、デバイスのサインインリクエスト、OAuthサインインフロー、検索インデックスイベント、通知を削除し、今後のログパーティションを準備します"
+    }
+  ],
+  "web.admin.tasks.task.database_maintenance.name": [
+    {
+      "type": 0,
+      "value": "データベースのメンテナンス"
+    }
+  ],
+  "web.admin.tasks.task.detect_intro_markers.description": [
+    {
+      "type": 0,
+      "value": "マーカー検出が有効なライブラリのファイルを解析し、イントロとクレジットを検出します。"
+    }
+  ],
+  "web.admin.tasks.task.detect_intro_markers.name": [
+    {
+      "type": 0,
+      "value": "このサーバーでマーカーを検出"
+    }
+  ],
+  "web.admin.tasks.task.encode_download_artifacts.description": [
+    {
+      "type": 0,
+      "value": "キュー内のRemux／トランスコードのダウンロード用ファイルをエンコードし、停止したジョブを復旧して、古いファイルを削除します"
+    }
+  ],
+  "web.admin.tasks.task.encode_download_artifacts.name": [
+    {
+      "type": 0,
+      "value": "ダウンロード用ファイルの準備"
+    }
+  ],
+  "web.admin.tasks.task.generate_extra_stills.description": [
+    {
+      "type": 0,
+      "value": "横に画像ファイルがないローカルの特典映像から、それぞれ1フレームを取得します"
+    }
+  ],
+  "web.admin.tasks.task.generate_extra_stills.name": [
+    {
+      "type": 0,
+      "value": "特典映像のサムネイルを生成"
+    }
+  ],
+  "web.admin.tasks.task.match_media.description": [
+    {
+      "type": 0,
+      "value": "一致していないメディアファイルをプロバイダーのメタデータと照合します"
+    }
+  ],
+  "web.admin.tasks.task.match_media.name": [
+    {
+      "type": 0,
+      "value": "メディアファイルの照合"
+    }
+  ],
+  "web.admin.tasks.task.notifications_retention.description": [
+    {
+      "type": 0,
+      "value": "保持設定に従って、古い通知と処理済みのリリースイベントを削除します。"
+    }
+  ],
+  "web.admin.tasks.task.notifications_retention.name": [
+    {
+      "type": 0,
+      "value": "通知のクリーンアップ"
+    }
+  ],
+  "web.admin.tasks.task.queue_seek_previews.description": [
+    {
+      "type": 0,
+      "value": "シークバーのプレビューが有効なライブラリの動画ファイルについてプレビューをキューに追加し、ファイルや設定と一致しなくなったプレビューを再びキューに追加します。"
+    }
+  ],
+  "web.admin.tasks.task.queue_seek_previews.name": [
+    {
+      "type": 0,
+      "value": "シークプレビューをキューに追加"
+    }
+  ],
+  "web.admin.tasks.task.rebuild_catalog_search_index.description": [
+    {
+      "type": 0,
+      "value": "設定されたMeilisearchのカタログインデックスをPostgreSQLから再構築します。"
+    }
+  ],
+  "web.admin.tasks.task.rebuild_catalog_search_index.name": [
+    {
+      "type": 0,
+      "value": "カタログ検索インデックスの再構築"
+    }
+  ],
+  "web.admin.tasks.task.rebuild_release_interest.description": [
+    {
+      "type": 0,
+      "value": "新しいエピソードの通知のために、各プロフィールが関心を持つシリーズ（お気に入り、ウォッチリスト、視聴状況）を再計算します。"
+    }
+  ],
+  "web.admin.tasks.task.rebuild_release_interest.name": [
+    {
+      "type": 0,
+      "value": "通知対象の関心の再構築"
+    }
+  ],
+  "web.admin.tasks.task.recheck_external_identities.description": [
+    {
+      "type": 0,
+      "value": "APIキーまたはアイドル状態のセッションを持つアカウントについて外部サインインプロバイダーに問い合わせ、プロバイダーが許可しなくなったアカウントのアクセスを取り消します"
+    }
+  ],
+  "web.admin.tasks.task.recheck_external_identities.name": [
+    {
+      "type": 0,
+      "value": "外部サインインアカウントの再確認"
+    }
+  ],
+  "web.admin.tasks.task.reconcile_artwork_cache.description": [
+    {
+      "type": 0,
+      "value": "キャッシュされたアートワークをオブジェクトストレージと手動で照合します。見つからないレコードはライブラリ全体でリセットされる場合があり、メタデータ画像の補完を明示的に実行する必要があります"
+    }
+  ],
+  "web.admin.tasks.task.reconcile_artwork_cache.name": [
+    {
+      "type": 0,
+      "value": "アートワークキャッシュの照合"
+    }
+  ],
+  "web.admin.tasks.task.reconcile_requests.description": [
+    {
+      "type": 0,
+      "value": "承認済みおよび処理中のメディアリクエストをRadarr、Sonarr、Siloのカタログと照合します"
+    }
+  ],
+  "web.admin.tasks.task.reconcile_requests.name": [
+    {
+      "type": 0,
+      "value": "リクエストの照合"
+    }
+  ],
+  "web.admin.tasks.task.reconcile_watch_history.description": [
+    {
+      "type": 0,
+      "value": "保存されている固定IDを使用して、孤立した視聴履歴の行を現在のメディアカタログと再照合します。"
+    }
+  ],
+  "web.admin.tasks.task.reconcile_watch_history.name": [
+    {
+      "type": 0,
+      "value": "視聴履歴の照合"
+    }
+  ],
+  "web.admin.tasks.task.refresh_all_library_metadata.description": [
+    {
+      "type": 0,
+      "value": "有効なすべてのライブラリの全アイテムについて、プロバイダーのメタデータを再取得します。手動で開始した場合のみ実行されます。大規模なライブラリでは数時間かかり、プロバイダーへのリクエストが多数発生する場合があります"
+    }
+  ],
+  "web.admin.tasks.task.refresh_all_library_metadata.name": [
+    {
+      "type": 0,
+      "value": "全ライブラリのメタデータを更新"
+    }
+  ],
+  "web.admin.tasks.task.refresh_anime_ids.description": [
+    {
+      "type": 0,
+      "value": "TMDBでタグ付けされていないアニメをリクエストの振り分けで識別するための、AniDBベースのアニメ一覧をダウンロードします"
+    }
+  ],
+  "web.admin.tasks.task.refresh_anime_ids.name": [
+    {
+      "type": 0,
+      "value": "アニメ一覧の更新"
+    }
+  ],
+  "web.admin.tasks.task.refresh_metadata.description": [
+    {
+      "type": 0,
+      "value": "既存のメディアアイテムについて、古くなったメタデータをプロバイダーから更新します"
+    }
+  ],
+  "web.admin.tasks.task.refresh_metadata.name": [
+    {
+      "type": 0,
+      "value": "メタデータの更新"
+    }
+  ],
+  "web.admin.tasks.task.refresh_request_discover_lists.description": [
+    {
+      "type": 0,
+      "value": "リクエストのディスカバーページのリスト行に使われるTMDBとMDBListのリストをダウンロードします"
+    }
+  ],
+  "web.admin.tasks.task.refresh_request_discover_lists.name": [
+    {
+      "type": 0,
+      "value": "リクエストのディスカバーリストを更新"
+    }
+  ],
+  "web.admin.tasks.task.refresh_request_downloads.description": [
+    {
+      "type": 0,
+      "value": "Radarr、Sonarr、またはほかのリクエストプラグインがダウンロード中のメディアリクエストについて、ダウンロードの進捗を更新します"
+    }
+  ],
+  "web.admin.tasks.task.refresh_request_downloads.name": [
+    {
+      "type": 0,
+      "value": "リクエストのダウンロード状況を更新"
+    }
+  ],
+  "web.admin.tasks.task.refresh_seasonal_lists.description": [
+    {
+      "type": 0,
+      "value": "各祝日に先立ち、ホームの季節のおすすめ行に使われる厳選されたMDBListのリストをダウンロードします"
+    }
+  ],
+  "web.admin.tasks.task.refresh_seasonal_lists.name": [
+    {
+      "type": 0,
+      "value": "季節のリストを更新"
+    }
+  ],
+  "web.admin.tasks.task.refresh_series_air_dates.description": [
+    {
+      "type": 0,
+      "value": "次の既知のエピソードが放送されたシリーズについて、最新の放送エピソードの日付を更新します。"
+    }
+  ],
+  "web.admin.tasks.task.refresh_series_air_dates.name": [
+    {
+      "type": 0,
+      "value": "シリーズの放送日を更新"
+    }
+  ],
+  "web.admin.tasks.task.refresh_trending_discover.description": [
+    {
+      "type": 0,
+      "value": "ホームのトレンド（ディスカバー）セクションとカレンダーのトレンド表示に使われる、保存済みの外部トレンドリスト（TMDB）を更新します"
+    }
+  ],
+  "web.admin.tasks.task.refresh_trending_discover.name": [
+    {
+      "type": 0,
+      "value": "トレンド（ディスカバー）を更新"
+    }
+  ],
+  "web.admin.tasks.task.release_stored_artwork.description": [
+    {
+      "type": 0,
+      "value": "プロバイダーのアートワークをストレージに保存しない設定の間、保存済みのアートワークの参照先をプロバイダーに戻し、プロバイダーでしか置き換えられないアートワークの更新をキューに追加します"
+    }
+  ],
+  "web.admin.tasks.task.release_stored_artwork.name": [
+    {
+      "type": 0,
+      "value": "保存済みアートワークの解放"
+    }
+  ],
+  "web.admin.tasks.task.repair_provider_id_integrity.description": [
+    {
+      "type": 0,
+      "value": "media_itemsのプロバイダーID列と正規化されたプロバイダーID行の間のずれを修復します。"
+    }
+  ],
+  "web.admin.tasks.task.repair_provider_id_integrity.name": [
+    {
+      "type": 0,
+      "value": "プロバイダーIDの整合性を修復"
+    }
+  ],
+  "web.admin.tasks.task.scan_libraries.description": [
+    {
+      "type": 0,
+      "value": "有効なすべてのライブラリについて、永続的なライブラリ全体のスキャンをキューに追加します。実際のスキャンの進行状況はライブラリ管理とサーバーアクティビティで確認できます"
+    }
+  ],
+  "web.admin.tasks.task.scan_libraries.name": [
+    {
+      "type": 0,
+      "value": "メディアライブラリのスキャンをキューに追加"
+    }
+  ],
+  "web.admin.tasks.task.seed_content_availability.description": [
+    {
+      "type": 0,
+      "value": "既存のエピソードと映画のバックカタログを公開済みとして記録し、新着コンテンツの通知がその後に追加されたアイテムに対してのみ送信されるようにします。"
+    }
+  ],
+  "web.admin.tasks.task.seed_content_availability.name": [
+    {
+      "type": 0,
+      "value": "コンテンツの公開状況を初期化"
+    }
+  ],
+  "web.admin.tasks.task.setting_mutations_retention.description": [
+    {
+      "type": 0,
+      "value": "すべてのユーザーのストアから、期限切れの設定変更の冪等性レシートを削除します。"
+    }
+  ],
+  "web.admin.tasks.task.setting_mutations_retention.name": [
+    {
+      "type": 0,
+      "value": "設定変更のレシートをクリーンアップ"
+    }
+  ],
+  "web.admin.tasks.task.summarize_api_usage.description": [
+    {
+      "type": 0,
+      "value": "ダッシュボードのAPIクライアントカード用に、サインインセッションごとのAPIリクエスト数を集計します"
+    }
+  ],
+  "web.admin.tasks.task.summarize_api_usage.name": [
+    {
+      "type": 0,
+      "value": "API使用状況を集計"
+    }
+  ],
+  "web.admin.tasks.task.sweep_artwork_storage.description": [
+    {
+      "type": 0,
+      "value": "どのカタログレコードからも参照されていないキャッシュ済みのアートワークオブジェクトを削除し、アートワークのガベージコレクターが検出しなかったリビジョンを回収します"
+    }
+  ],
+  "web.admin.tasks.task.sweep_artwork_storage.name": [
+    {
+      "type": 0,
+      "value": "アートワークストレージを整理"
+    }
+  ],
+  "web.admin.tasks.task.sweep_orphaned_media_images.description": [
+    {
+      "type": 0,
+      "value": "どこからも参照されなくなった保存済みのチャプターサムネイルとシークプレビューを検出し、削除をスケジュールします。"
+    }
+  ],
+  "web.admin.tasks.task.sweep_orphaned_media_images.name": [
+    {
+      "type": 0,
+      "value": "孤立したメディア画像を整理"
+    }
+  ],
+  "web.admin.tasks.task.sync_audiobook_metadata.description": [
+    {
+      "type": 0,
+      "value": "まだ情報が補完されていないオーディオブックのメタデータ（カバーアート、概要、ナレーター）を取得します"
+    }
+  ],
+  "web.admin.tasks.task.sync_audiobook_metadata.name": [
+    {
+      "type": 0,
+      "value": "オーディオブックのメタデータを同期"
+    }
+  ],
+  "web.admin.tasks.task.sync_catalog_search_index.description": [
+    {
+      "type": 0,
+      "value": "必要に応じてMeilisearchのカタログインデックスを構築またはアップグレードし、保留中のカタログの変更を同期します。"
+    }
+  ],
+  "web.admin.tasks.task.sync_catalog_search_index.name": [
+    {
+      "type": 0,
+      "value": "カタログの検索インデックスを同期"
+    }
+  ],
+  "web.admin.tasks.task.sync_collections.description": [
+    {
+      "type": 0,
+      "value": "自動同期がスケジュールされているコレクションを同期します"
+    }
+  ],
+  "web.admin.tasks.task.sync_collections.name": [
+    {
+      "type": 0,
+      "value": "コレクションを同期"
+    }
+  ],
+  "web.admin.tasks.task.sync_ebook_metadata.description": [
+    {
+      "type": 0,
+      "value": "新しい電子書籍と定期更新の対象となる電子書籍のメタデータを取得します"
+    }
+  ],
+  "web.admin.tasks.task.sync_ebook_metadata.name": [
+    {
+      "type": 0,
+      "value": "電子書籍のメタデータを同期"
+    }
+  ],
+  "web.admin.tasks.task.sync_manga_metadata.description": [
+    {
+      "type": 0,
+      "value": "まだ情報が補完されていないマンガのメタデータ（カバーアート、概要、著者）を取得します"
+    }
+  ],
+  "web.admin.tasks.task.sync_manga_metadata.name": [
+    {
+      "type": 0,
+      "value": "マンガのメタデータを同期"
+    }
+  ],
+  "web.admin.tasks.task.sync_markers.description": [
+    {
+      "type": 0,
+      "value": "有効なオンラインプロバイダーから不足しているマーカーを取得し、保存済みのマーカーを更新します。「ライブラリに保存」が必要です。"
+    }
+  ],
+  "web.admin.tasks.task.sync_markers.name": [
+    {
+      "type": 0,
+      "value": "オンラインマーカーを同期"
+    }
+  ],
+  "web.admin.tasks.task.sync_movie_box_sets.description": [
+    {
+      "type": 0,
+      "value": "ボックスセットが有効なライブラリで、各映画が属するTMDBコレクションを調べ、コレクションの名前、アートワーク、順序を更新します。"
+    }
+  ],
+  "web.admin.tasks.task.sync_movie_box_sets.name": [
+    {
+      "type": 0,
+      "value": "映画のボックスセットを同期"
+    }
+  ],
+  "web.admin.tasks.task.sync_podcast_feeds.description": [
+    {
+      "type": 0,
+      "value": "ポーリング時期を迎えたRSSポッドキャストフィードを更新し、新しいエピソードを追加または更新します"
+    }
+  ],
+  "web.admin.tasks.task.sync_podcast_feeds.name": [
+    {
+      "type": 0,
+      "value": "ポッドキャストフィードを同期"
+    }
+  ],
+  "web.admin.tasks.task.sync_user_collections.description": [
+    {
+      "type": 0,
+      "value": "プロフィールが所有するインポート済みコレクション（TMDB、MDBList）をスケジュールに従って更新します"
+    }
+  ],
+  "web.admin.tasks.task.sync_user_collections.name": [
+    {
+      "type": 0,
+      "value": "ユーザーコレクションを同期"
+    }
+  ],
+  "web.admin.tasks.task.sync_watch_providers.description": [
+    {
+      "type": 0,
+      "value": "連携済みの視聴プロバイダーに実行予定の自動同期処理があるか確認します"
+    }
+  ],
+  "web.admin.tasks.task.sync_watch_providers.name": [
+    {
+      "type": 0,
+      "value": "視聴プロバイダーを同期"
     }
   ],
   "web.admin.tasks.triggerText.daily": [
@@ -70549,6 +72835,66 @@
     {
       "type": 0,
       "value": "このシリーズに設定を追加"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.appearance": [
+    {
+      "type": 0,
+      "value": "外観"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.catalog": [
+    {
+      "type": 0,
+      "value": "カタログ"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.downloads": [
+    {
+      "type": 0,
+      "value": "ダウンロード"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.nav": [
+    {
+      "type": 0,
+      "value": "ナビ"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.navigation": [
+    {
+      "type": 0,
+      "value": "ナビゲーション"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.playback": [
+    {
+      "type": 0,
+      "value": "再生"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.player": [
+    {
+      "type": 0,
+      "value": "プレーヤー"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.requests": [
+    {
+      "type": 0,
+      "value": "リクエスト"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.search": [
+    {
+      "type": 0,
+      "value": "検索"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.watch_party": [
+    {
+      "type": 0,
+      "value": "Watch Party"
     }
   ],
   "web.admin.users.detail.preferences.clear.confirm": [
@@ -75494,6 +77840,12 @@
       "value": "に移動しています…"
     }
   ],
+  "web.auth.loginSubtitle.default": [
+    {
+      "type": 0,
+      "value": "既存のアカウントでサインインしてください。"
+    }
+  ],
   "web.auth.networkSignIn.addressRequired": [
     {
       "type": 0,
@@ -76856,6 +79208,33 @@
       "value": "シリーズの視聴データを削除しますか？"
     }
   ],
+  "web.catalog.history.removeFailed": [
+    {
+      "type": 0,
+      "value": "履歴を削除できませんでした"
+    }
+  ],
+  "web.catalog.history.removed": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "件の視聴データを削除しました"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.catalog.letters.letterNoTitles": [
     {
       "type": 1,
@@ -77246,6 +79625,28 @@
     {
       "type": 0,
       "value": "シャッフル"
+    }
+  ],
+  "web.catalog.page.titleCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "shown"
+            },
+            {
+              "type": 0,
+              "value": "作品"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.catalog.page.watchlist": [
@@ -78456,6 +80857,18 @@
     {
       "type": 0,
       "value": "行として追加"
+    }
+  ],
+  "web.collections.copy.addAtLeastOneRule": [
+    {
+      "type": 0,
+      "value": "ルールを1つ以上追加してください。"
+    }
+  ],
+  "web.collections.copy.addRuleThenCreate": [
+    {
+      "type": 0,
+      "value": "ルールを追加してから作成してください。"
     }
   ],
   "web.collections.copy.addToCollectionFootnote": [
@@ -80760,6 +83173,12 @@
       "value": "ライブラリを選択してから作成してください。"
     }
   ],
+  "web.collections.copy.pickWhereItShowsFirst": [
+    {
+      "type": 0,
+      "value": "表示するライブラリを選択してから作成してください。"
+    }
+  ],
   "web.collections.copy.pinEveryLibrary": [
     {
       "type": 0,
@@ -80868,12 +83287,6 @@
       "value": "このまま保存できます。後で一致したタイトルは自動的に追加されます。"
     }
   ],
-  "web.collections.copy.previewEveryLibrary": [
-    {
-      "type": 0,
-      "value": "ライブラリを選択するまで、すべてのライブラリが対象"
-    }
-  ],
   "web.collections.copy.previewFailed": [
     {
       "type": 0,
@@ -80906,6 +83319,18 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.collections.copy.previewNeedsRule": [
+    {
+      "type": 0,
+      "value": "ルールを追加すると一致する作品が表示されます"
+    }
+  ],
+  "web.collections.copy.previewNeedsRuleHelp": [
+    {
+      "type": 0,
+      "value": "スマートコレクションにはルールが1つ以上必要です。ルールがないと、すべての作品が含まれてしまいます。"
     }
   ],
   "web.collections.copy.previewShowsUnsaved": [
@@ -81048,6 +83473,16 @@
     {
       "type": 0,
       "value": "保存できませんでした"
+    }
+  ],
+  "web.collections.copy.saveFailedWithError": [
+    {
+      "type": 0,
+      "value": "保存できませんでした · "
+    },
+    {
+      "type": 1,
+      "value": "error"
     }
   ],
   "web.collections.copy.saveFirstDescription": [
@@ -81290,6 +83725,12 @@
     {
       "type": 0,
       "value": "まだ一致するタイトルはありません。今後一致したタイトルは自動的に加わります。"
+    }
+  ],
+  "web.collections.copy.smartLibrariesHelp": [
+    {
+      "type": 0,
+      "value": "選択したライブラリのコレクションタブに表示されます。作品の取得元はルールで決まります。"
     }
   ],
   "web.collections.copy.smartUpdatesItself": [
@@ -83932,6 +86373,18 @@
       "value": "をドラッグ"
     }
   ],
+  "web.collections.page.emptyAll": [
+    {
+      "type": 0,
+      "value": "コレクションはまだありません。"
+    }
+  ],
+  "web.collections.page.emptyMine": [
+    {
+      "type": 0,
+      "value": "まだコレクションを作成していません。"
+    }
+  ],
   "web.collections.page.filterAll": [
     {
       "type": 0,
@@ -86184,6 +88637,48 @@
       "value": "今週"
     }
   ],
+  "web.collections.toast.addFailed": [
+    {
+      "type": 0,
+      "value": "コレクションに追加できませんでした"
+    }
+  ],
+  "web.collections.toast.notShared": [
+    {
+      "type": 0,
+      "value": "自分だけに表示されるようになりました"
+    }
+  ],
+  "web.collections.toast.removeItemFailed": [
+    {
+      "type": 0,
+      "value": "アイテムを外せませんでした"
+    }
+  ],
+  "web.collections.toast.reorderFailed": [
+    {
+      "type": 0,
+      "value": "並べ替えできませんでした"
+    }
+  ],
+  "web.collections.toast.reorderItemsFailed": [
+    {
+      "type": 0,
+      "value": "アイテムを並べ替えできませんでした"
+    }
+  ],
+  "web.collections.toast.sharedWithProfiles": [
+    {
+      "type": 0,
+      "value": "他のプロフィールに表示されます"
+    }
+  ],
+  "web.collections.toast.sharingFailed": [
+    {
+      "type": 0,
+      "value": "共有設定を変更できませんでした"
+    }
+  ],
   "web.collections.types.kindManual": [
     {
       "type": 0,
@@ -86254,6 +88749,12 @@
     {
       "type": 0,
       "value": "表示場所"
+    }
+  ],
+  "web.collections.whereItShows.librariesTrigger": [
+    {
+      "type": 0,
+      "value": "表示するライブラリ"
     }
   ],
   "web.collections.whereItShows.shelf": [
@@ -86998,6 +89499,60 @@
       "value": "西部劇"
     }
   ],
+  "web.common.job.cancelled": [
+    {
+      "type": 0,
+      "value": "ジョブがキャンセルされました"
+    }
+  ],
+  "web.common.job.failed": [
+    {
+      "type": 0,
+      "value": "ジョブが失敗しました"
+    }
+  ],
+  "web.common.libraryType.audiobooks": [
+    {
+      "type": 0,
+      "value": "オーディオブック"
+    }
+  ],
+  "web.common.libraryType.ebooks": [
+    {
+      "type": 0,
+      "value": "電子書籍"
+    }
+  ],
+  "web.common.libraryType.manga": [
+    {
+      "type": 0,
+      "value": "マンガ"
+    }
+  ],
+  "web.common.libraryType.mixed": [
+    {
+      "type": 0,
+      "value": "混合"
+    }
+  ],
+  "web.common.libraryType.movies": [
+    {
+      "type": 0,
+      "value": "映画"
+    }
+  ],
+  "web.common.libraryType.podcasts": [
+    {
+      "type": 0,
+      "value": "ポッドキャスト"
+    }
+  ],
+  "web.common.libraryType.series": [
+    {
+      "type": 0,
+      "value": "シリーズ"
+    }
+  ],
   "web.common.markers.sharingDisclosure": [
     {
       "type": 0,
@@ -87030,6 +89585,24 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.common.overlays.previewPlaceholder.movie": [
+    {
+      "type": 0,
+      "value": "映画のプレビュー"
+    }
+  ],
+  "web.common.overlays.previewPlaceholder.requested": [
+    {
+      "type": 0,
+      "value": "リクエスト済みのプレビュー"
+    }
+  ],
+  "web.common.overlays.previewPlaceholder.show": [
+    {
+      "type": 0,
+      "value": "シリーズのプレビュー"
+    }
+  ],
   "web.common.overlays.previewSample": [
     {
       "type": 0,
@@ -87052,6 +89625,20 @@
     {
       "type": 0,
       "value": "シリーズ"
+    }
+  ],
+  "web.common.overlays.sampleDownloading": [
+    {
+      "type": 0,
+      "value": "ダウンロード中"
+    },
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "%"
     }
   ],
   "web.common.overlays.watched": [
@@ -87470,6 +90057,116 @@
     {
       "type": 0,
       "value": "TMDB評価"
+    }
+  ],
+  "web.common.sortable.canceled": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "の移動をキャンセルしました。"
+    }
+  ],
+  "web.common.sortable.dropped": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "をドロップしました。"
+    }
+  ],
+  "web.common.sortable.droppedAt": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "を"
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "件中"
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": "番目にドロップしました。"
+    }
+  ],
+  "web.common.sortable.fallbackName": [
+    {
+      "type": 0,
+      "value": "アイテム"
+    }
+  ],
+  "web.common.sortable.instructions": [
+    {
+      "type": 0,
+      "value": "アイテムを移動するには、ハンドルにフォーカスしてSpaceキーまたはEnterキーを押します。矢印キーで移動し、SpaceキーまたはEnterキーでドロップ、Escapeキーでキャンセルします。"
+    }
+  ],
+  "web.common.sortable.over": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "は現在"
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "件中"
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": "番目です。"
+    }
+  ],
+  "web.common.sortable.pickedUp": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "を持ち上げました。"
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "件中"
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": "番目です。"
     }
   ],
   "web.common.speedTest.retryAfter": [
@@ -92243,6 +94940,12 @@
       "value": "例：クリストファー・ノーラン"
     }
   ],
+  "web.home.addRow.params.trendingShow": [
+    {
+      "type": 0,
+      "value": "表示"
+    }
+  ],
   "web.home.addRow.personalSentence": [
     {
       "type": 1,
@@ -92539,12 +95242,6 @@
       "value": "すべてのライブラリ"
     }
   ],
-  "web.home.addRow.rules.chooseLibraries": [
-    {
-      "type": 0,
-      "value": "ライブラリを選択"
-    }
-  ],
   "web.home.addRow.rules.group": [
     {
       "type": 0,
@@ -92643,10 +95340,10 @@
       "value": "いずれか"
     }
   ],
-  "web.home.addRow.rules.noRulesCollection": [
+  "web.home.addRow.rules.noRulesCollectionYet": [
     {
       "type": 0,
-      "value": "ルールがまだないため、このコレクションにはこれらのライブラリのすべてのタイトルが含まれます。"
+      "value": "ルールはまだありません。ルールを追加して、含める作品を選択してください。"
     }
   ],
   "web.home.addRow.rules.noRulesRow": [
@@ -95715,6 +98412,60 @@
       }
     }
   ],
+  "web.home.rows.describe.trendingDiscoverFiltered": [
+    {
+      "type": 5,
+      "value": "window",
+      "options": {
+        "day": {
+          "value": [
+            {
+              "type": 0,
+              "value": "今日"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "今週"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": "TMDBでトレンドの"
+    },
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "movie": {
+          "value": [
+            {
+              "type": 0,
+              "value": "映画"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "シリーズ"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": "（ライブラリ内の作品から）"
+    }
+  ],
   "web.home.rows.describe.trendingHere": [
     {
       "type": 0,
@@ -96599,6 +99350,12 @@
     {
       "type": 0,
       "value": "その行はもう存在しません。"
+    }
+  ],
+  "web.home.rows.links.rowMissing": [
+    {
+      "type": 0,
+      "value": "この行はもうこのページにありません。"
     }
   ],
   "web.home.rows.notes.conflict": [
@@ -98971,6 +101728,24 @@
       "value": "すべての項目のロックを解除し、プロバイダーからメタデータを更新します。手動で編集した内容は次回の更新で上書きされます。"
     }
   ],
+  "web.item.editMetadata.resetDescriptionEpisode": [
+    {
+      "type": 0,
+      "value": "このエピソードのタイトル、あらすじ、再生時間、放送日のロックを解除し、プロバイダーからメタデータを更新します。手動で編集した内容は上書きされます。"
+    }
+  ],
+  "web.item.editMetadata.resetDescriptionSeason": [
+    {
+      "type": 0,
+      "value": "このシーズンのタイトル、あらすじ、放送日のロックを解除し、プロバイダーからメタデータを更新します。手動で編集した内容は上書きされます。選択したアートワークはシリーズでロックされたままです。置き換えるにはシリーズをリセットしてください。"
+    }
+  ],
+  "web.item.editMetadata.resetDescriptionSeries": [
+    {
+      "type": 0,
+      "value": "このシリーズのすべての項目のロックを解除し、プロバイダーからメタデータを更新します。シリーズを手動で編集した内容は上書きされます。ロックされたシーズンとエピソードの編集内容は保持されます。"
+    }
+  ],
   "web.item.editMetadata.resetToProvider": [
     {
       "type": 0,
@@ -99838,6 +102613,12 @@
     {
       "type": 0,
       "value": "評価"
+    }
+  ],
+  "web.item.rating.remove": [
+    {
+      "type": 0,
+      "value": "評価を削除"
     }
   ],
   "web.item.rating.stars": [
@@ -100903,6 +103684,128 @@
     {
       "type": 0,
       "value": "ウォッチリストから削除しました"
+    }
+  ],
+  "web.library.watchlist.statusApprovedWaiting": [
+    {
+      "type": 0,
+      "value": "承認済み · ダウンロード待ち"
+    }
+  ],
+  "web.library.watchlist.statusAwaitingApproval": [
+    {
+      "type": 0,
+      "value": "承認待ち"
+    }
+  ],
+  "web.library.watchlist.statusDownloading": [
+    {
+      "type": 0,
+      "value": "ダウンロード中"
+    },
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
+  "web.library.watchlist.statusListedTwice": [
+    {
+      "type": 0,
+      "value": "TMDBに重複して登録されています"
+    }
+  ],
+  "web.library.watchlist.statusNeedsAttention": [
+    {
+      "type": 0,
+      "value": "要確認"
+    }
+  ],
+  "web.library.watchlist.statusNoLongerListed": [
+    {
+      "type": 0,
+      "value": "TMDBに掲載されなくなりました"
+    }
+  ],
+  "web.library.watchlist.statusNotOnTmdb": [
+    {
+      "type": 0,
+      "value": "TMDBになし"
+    }
+  ],
+  "web.library.watchlist.statusNotRequested": [
+    {
+      "type": 0,
+      "value": "未リクエスト"
+    }
+  ],
+  "web.library.watchlist.statusNotRequestedOut": [
+    {
+      "type": 0,
+      "value": "未リクエスト · "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "公開"
+    }
+  ],
+  "web.library.watchlist.statusNotRequestedReason": [
+    {
+      "type": 0,
+      "value": "未リクエスト · "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "web.library.watchlist.statusOut": [
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "公開"
+    }
+  ],
+  "web.library.watchlist.statusOutApproved": [
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "公開 · 承認済み"
+    }
+  ],
+  "web.library.watchlist.statusOutAwaitingApproval": [
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "公開 · 承認待ち"
+    }
+  ],
+  "web.library.watchlist.titlesHint": [
+    {
+      "type": 0,
+      "value": "これらの作品はまだライブラリにないため、再生できません。追加されると「ライブラリ内」に移動します。"
+    }
+  ],
+  "web.library.watchlist.titlesHintRequested": [
+    {
+      "type": 0,
+      "value": "これらの作品はまだライブラリにないため、再生できません。自動的にリクエストされています。追加されると「ライブラリ内」に移動し、通知が届きます。"
     }
   ],
   "web.library.watchlist.updateFailed": [
@@ -102039,6 +104942,58 @@
       "value": "現在は通知されません"
     }
   ],
+  "web.notifications.toast.followedArrived": [
+    {
+      "type": 0,
+      "value": "通知を希望した作品がライブラリに追加されました。"
+    }
+  ],
+  "web.notifications.toast.newEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": "の新しいエピソード"
+    }
+  ],
+  "web.notifications.toast.requestApprovedTitle": [
+    {
+      "type": 0,
+      "value": "リクエスト承認済み："
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.notifications.toast.requestArrived": [
+    {
+      "type": 0,
+      "value": "リクエストしたメディアがライブラリに追加されました。"
+    }
+  ],
+  "web.notifications.toast.requestDeclinedTitle": [
+    {
+      "type": 0,
+      "value": "リクエスト却下："
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.notifications.toast.seriesAvailable": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": "が視聴可能になりました"
+    }
+  ],
   "web.onboarding.gate.progressFailed": [
     {
       "type": 0,
@@ -103119,6 +106074,50 @@
     {
       "type": 0,
       "value": "終了"
+    }
+  ],
+  "web.player.hud.episode": [
+    {
+      "type": 0,
+      "value": "S"
+    },
+    {
+      "type": 1,
+      "value": "season"
+    },
+    {
+      "type": 0,
+      "value": " · E"
+    },
+    {
+      "type": 1,
+      "value": "episode"
+    }
+  ],
+  "web.player.hud.episodeWithTitle": [
+    {
+      "type": 0,
+      "value": "S"
+    },
+    {
+      "type": 1,
+      "value": "season"
+    },
+    {
+      "type": 0,
+      "value": " · E"
+    },
+    {
+      "type": 1,
+      "value": "episode"
+    },
+    {
+      "type": 0,
+      "value": " — "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.player.info.audioBitrate": [
@@ -104233,6 +107232,12 @@
     {
       "type": 0,
       "value": "）"
+    }
+  ],
+  "web.player.tracks.resetAudioFailed": [
+    {
+      "type": 0,
+      "value": "音声の設定をリセットできませんでした"
     }
   ],
   "web.player.tracks.saveAudioFailed": [
@@ -105635,6 +108640,12 @@
     {
       "type": 0,
       "value": "ライブラリへのアクセス"
+    }
+  ],
+  "web.profiles.libraryAccess.primaryNote": [
+    {
+      "type": 0,
+      "value": "メインプロフィールには、アカウントがアクセスできるすべてのライブラリが表示されます。ライブラリは設定 → ライブラリで非表示にできます。"
     }
   ],
   "web.profiles.librarySelect.allLibraries": [
@@ -111180,18 +114191,14 @@
       "value": "Plexの認証トークン"
     }
   ],
-  "web.settings.historyImport.processed": [
+  "web.settings.historyImport.processedSoFar": [
+    {
+      "type": 0,
+      "value": "これまでに"
+    },
     {
       "type": 1,
       "value": "processed"
-    },
-    {
-      "type": 0,
-      "value": " / "
-    },
-    {
-      "type": 1,
-      "value": "fetched"
     },
     {
       "type": 0,
@@ -113058,6 +116065,30 @@
       "value": "ブラウザー通知を有効にしました"
     }
   ],
+  "web.settings.notifications.push.error.incompleteSubscription": [
+    {
+      "type": 0,
+      "value": "ブラウザーから不完全なプッシュサブスクリプションが返されました"
+    }
+  ],
+  "web.settings.notifications.push.error.permissionDenied": [
+    {
+      "type": 0,
+      "value": "通知の許可が得られませんでした"
+    }
+  ],
+  "web.settings.notifications.push.error.unsubscribeFailed": [
+    {
+      "type": 0,
+      "value": "サーバーの登録は削除されましたが、ブラウザーのサブスクリプションを削除できませんでした。"
+    }
+  ],
+  "web.settings.notifications.push.error.unsupported": [
+    {
+      "type": 0,
+      "value": "このブラウザーはプッシュ通知に対応していません"
+    }
+  ],
   "web.settings.notifications.push.lastDeliveredAt": [
     {
       "type": 0,
@@ -113762,6 +116793,12 @@
       "value": "多言語音声"
     }
   ],
+  "web.settings.overlays.badge.multiAudio.value": [
+    {
+      "type": 0,
+      "value": "複数音声"
+    }
+  ],
   "web.settings.overlays.badge.multiSub.description": [
     {
       "type": 0,
@@ -113946,6 +116983,30 @@
     {
       "type": 0,
       "value": "シリーズの状況"
+    }
+  ],
+  "web.settings.overlays.badge.showStatus.value.cancelled": [
+    {
+      "type": 0,
+      "value": "打ち切り"
+    }
+  ],
+  "web.settings.overlays.badge.showStatus.value.ended": [
+    {
+      "type": 0,
+      "value": "完結"
+    }
+  ],
+  "web.settings.overlays.badge.showStatus.value.returning": [
+    {
+      "type": 0,
+      "value": "継続中"
+    }
+  ],
+  "web.settings.overlays.badge.showStatus.value.upcoming": [
+    {
+      "type": 0,
+      "value": "近日公開"
     }
   ],
   "web.settings.overlays.badge.studio.description": [
@@ -115426,6 +118487,60 @@
       "value": "Wi-Fi"
     }
   ],
+  "web.settings.plexAuth.homeUserNoServerAccess": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "はこのPlexサーバーにアクセスできません。Plexでサーバーを共有するか、別のサーバーを選択してください。"
+    }
+  ],
+  "web.settings.plexAuth.homeUserNoSignIn": [
+    {
+      "type": 0,
+      "value": "PlexからこのPlex Homeユーザーのサインイン情報が返されませんでした。"
+    }
+  ],
+  "web.settings.plexAuth.homeUserPinRejected": [
+    {
+      "type": 0,
+      "value": "PlexがそのPINを受け付けませんでした。このPlex HomeユーザーのPINを確認して、もう一度お試しください。"
+    }
+  ],
+  "web.settings.plexAuth.homeUserPinRequired": [
+    {
+      "type": 0,
+      "value": "このPlex HomeユーザーはPINで保護されています。PINを入力して、もう一度お試しください。"
+    }
+  ],
+  "web.settings.plexAuth.invalidPinResponse": [
+    {
+      "type": 0,
+      "value": "Plexのサインインから無効なPIN応答が返されました。"
+    }
+  ],
+  "web.settings.plexAuth.requestFailed": [
+    {
+      "type": 0,
+      "value": "Plexのリクエストが失敗しました（ステータス"
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "）"
+    }
+  ],
+  "web.settings.plexAuth.signInIncomplete": [
+    {
+      "type": 0,
+      "value": "Plexのサインインが完了しませんでした。もう一度お試しください。"
+    }
+  ],
   "web.settings.profileLaunch.ask": [
     {
       "type": 0,
@@ -115552,6 +118667,31 @@
     {
       "type": 0,
       "value": "プロフィールがまだありません"
+    }
+  ],
+  "web.settings.profiles.limitReached": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "このアカウントで作成できるプロフィールは"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "件までです。管理者は上限を引き上げることができます。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.settings.profiles.newProfile": [
@@ -120982,6 +124122,12 @@
     {
       "type": 0,
       "value": "未保存の変更を破棄しますか？"
+    }
+  ],
+  "web.shuffle.startFailed": [
+    {
+      "type": 0,
+      "value": "シャッフルを開始できませんでした。"
     }
   ],
   "web.subtitles.closeDialog": [

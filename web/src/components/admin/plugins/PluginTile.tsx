@@ -152,8 +152,11 @@ export function InstalledPluginTile({
             title={installation.update_failure.reason}
           >
             <AlertTriangle aria-hidden="true" className="size-3.5 shrink-0" />
-            {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- new on main; its catalog key is a follow-up */}
-            <span className="truncate">Update to {installation.update_failure.version} failed</span>
+            <span className="truncate">
+              {t("web.admin.plugins.tile.updateFailed", {
+                version: installation.update_failure.version,
+              })}
+            </span>
           </span>
         ) : updateVersion ? (
           <span className="bg-surface-raised text-foreground/85 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[12.5px]">
