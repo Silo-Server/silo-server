@@ -496,14 +496,13 @@ func (d *DurableCompatPlaybackStore) HideFromRouting(id, compatToken string) err
 //     state, and the statement runs once more.
 //   - The play never reached Postgres, so there is no row to ask or to write.
 //     The copy is hidden here; a hidden copy is never persisted as routable.
-//   - The statement failed. The copy is hidden here without a row write, and
-//     the error has the caller retry, which runs the statement again. The
-//     copy stays hidden even if the row turns out to have moved.
-//
-// One case is not retried to the end. When the write fails and the row never
-// received this upstream session (its attach failed in the same outage), the
-// copy here is hidden, but a retry by upstream session finds no row to
-// retire, so another server can still route the row once Postgres answers.
+//   - The statement failed. The copy is hidden here without a row write and
+//     keeps the writes it owes the row, and the error has the caller retry.
+//     The retry runs the statement again. If that matches nothing and the
+//     hidden copy still owes writes, retireHiddenCopy replays them and
+//     retires the row in one transaction, when the row then names this
+//     upstream session. The copy stays hidden even if the row turns out to
+//     have moved.
 func (d *DurableCompatPlaybackStore) RetireUpstreamSession(upstreamSessionID string) (bool, error) {
 	// An empty id would match every play that has not started yet.
 	if upstreamSessionID == "" {
@@ -514,6 +513,9 @@ func (d *DurableCompatPlaybackStore) RetireUpstreamSession(upstreamSessionID str
 	}
 	rows, err := d.retireUpstreamRows(upstreamSessionID)
 	if err == nil && len(rows) == 0 {
+		if retired, hiddenErr := d.retireHiddenCopy(upstreamSessionID); retired || hiddenErr != nil {
+			return retired, hiddenErr
+		}
 		if play, ok := d.cachedRetirablePlay(upstreamSessionID); ok && !d.isUnpersisted(play.ID) && d.hasPendingUpdates(play.ID) {
 			_ = d.Update(play.ID, func(*PlaybackSession) error { return nil })
 			rows, err = d.retireUpstreamRows(upstreamSessionID)
@@ -537,7 +539,58 @@ func (d *DurableCompatPlaybackStore) RetireUpstreamSession(upstreamSessionID str
 		d.invalidateValidation(play.ID, play.CompatToken)
 		return false, nil
 	}
-	return d.hideCachedCopy(play.ID, play.CompatToken) == nil, err
+	// A failed statement keeps the writes the copy owes the row: the retry
+	// needs them to find and retire the row (retireHiddenCopy).
+	return d.hideCopyStillOnUpstream(play.ID, play.CompatToken, upstreamSessionID, err != nil), err
+}
+
+// hideCopyStillOnUpstream hides this process's copy of a play, and writes no
+// row, only while the copy still names the upstream session with a retired
+// play method: a switch that landed after the caller looked the copy up
+// leaves the play it attached alone.
+func (d *DurableCompatPlaybackStore) hideCopyStillOnUpstream(id, compatToken, upstreamSessionID string, keepOwedWrites bool) bool {
+	unlockSession := d.lockSessionMutation(id)
+	defer unlockSession()
+	d.cacheMutationMu.RLock()
+	defer d.finishCacheMutation(id, compatToken)
+	if !d.mem.retireIfOnUpstream(id, upstreamSessionID) {
+		return false
+	}
+	if !keepOwedWrites {
+		d.clearPendingUpdates(id)
+	}
+	return true
+}
+
+// retireHiddenCopy finishes a retirement that a failed statement left half
+// done: this process hid its copy and kept the writes it owed the row, which
+// may include the upstream session itself. One transaction replays those
+// writes onto the row and retires it if it then names the upstream session
+// with a retired play method, so the row is never routable under that
+// session and the copy stays hidden. A row that names anything else is left
+// as it is, and the owed writes are dropped with the hidden copy.
+func (d *DurableCompatPlaybackStore) retireHiddenCopy(upstreamSessionID string) (bool, error) {
+	play, ok := d.mem.findOnUpstream(upstreamSessionID, true)
+	if !ok || !adminEndRetiresPlay(play.UpstreamPlayMethod) || !d.hasPendingUpdates(play.ID) {
+		return false, nil
+	}
+	unlockSession := d.lockSessionMutation(play.ID)
+	defer unlockSession()
+	committed, err := d.updateDB(play.ID, d.pendingUpdatesSnapshot(play.ID), func(row *PlaybackSession) error {
+		if row.UpstreamSessionID != upstreamSessionID || !adminEndRetiresPlay(row.UpstreamPlayMethod) {
+			return errUpstreamReplaced
+		}
+		row.Terminal = true
+		return nil
+	})
+	var rejected *compatUpdateRejectedError
+	if err != nil && !errors.As(err, &rejected) {
+		// The owed writes stay for the next retry.
+		return false, err
+	}
+	d.clearPendingUpdates(play.ID)
+	d.invalidateValidation(play.ID, play.CompatToken)
+	return committed != nil, nil
 }
 
 // cachedRetirablePlay returns this process's routable copy of the play on an

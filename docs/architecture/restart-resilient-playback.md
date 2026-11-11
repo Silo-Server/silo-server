@@ -781,10 +781,11 @@ play never reached Postgres, or the statement failed. A write
 that fails is retried with backoff (`scheduleCompatAdminEndRetry`); until it
 lands, the play is hidden only on the replica that received the end, and only
 if that replica had a copy of the row; without one, that terminate answers
-`404`. One case is not retried to the end: when the row never received the
-upstream session because its attach failed in the same outage, the retry finds
-no row to retire, and another replica can still route the row afterwards. When
-the end lands on a replica that does not hold the session:
+`404`. A copy hidden by a failed statement keeps the writes it owes the row. If
+the row never received the upstream session because its attach failed in the
+same outage, the retry replays those writes and retires the row in one
+transaction, so the row is never routable under the ended session. When the end
+lands on a replica that does not hold the session:
 
 - The terminate succeeds. An administrator's stop command does not reach this
   path there: it looks the session up first and answers `404`.

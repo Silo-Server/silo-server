@@ -210,6 +210,25 @@ func TestPlaybackSessionStoreTerminalClaimIsAtomicAndOwnerScoped(t *testing.T) {
 	}
 }
 
+// TestPlaybackSessionStoreRetireChecksUpstreamUnderLock: an end looks a play
+// up by its upstream session and then retires it. A method or upstream
+// switch that lands between the two must leave the play it attached alone,
+// so the retiring step checks the play again under the lock it marks it in.
+func TestPlaybackSessionStoreRetireChecksUpstreamUnderLock(t *testing.T) {
+	store := NewPlaybackSessionStore(time.Hour, nil)
+	store.Put(PlaybackSession{ID: "moved", CompatToken: "token", UpstreamSessionID: "new", UpstreamPlayMethod: "transcode"})
+	store.Put(PlaybackSession{ID: "direct", CompatToken: "token", UpstreamSessionID: "old", UpstreamPlayMethod: "direct"})
+	store.Put(PlaybackSession{ID: "current", CompatToken: "token", UpstreamSessionID: "old", UpstreamPlayMethod: "remux"})
+	for id, want := range map[string]bool{"moved": false, "direct": false, "current": true} {
+		if got := store.retireIfOnUpstream(id, "old"); got != want {
+			t.Errorf("retire %s for the old upstream session = %v, want %v", id, got, want)
+		}
+		if _, routable := store.Get(id); routable == want {
+			t.Errorf("%s routable = %v after the end", id, routable)
+		}
+	}
+}
+
 func TestPlaybackSessionStoreDeactivateRetainsOnlyFinalReportLookup(t *testing.T) {
 	store := NewPlaybackSessionStore(time.Hour, nil)
 	store.Put(PlaybackSession{
@@ -765,6 +784,62 @@ func TestDurableCompatPlaybackStoreRetireLeavesMovedPlay(t *testing.T) {
 			t.Fatalf("a row was written for the hidden copy: %v, %v", ok, err)
 		}
 	})
+}
+
+// TestDurableCompatPlaybackStoreRetryAfterFailedStatement: a retirement whose
+// statement failed while the play's attach was still owed hid the copy and
+// kept its owed writes. The retry replays them and retires the row in one
+// step, so the row is never routable under the ended upstream session and no
+// other replica keeps routing the play. A row that another replica attached
+// to its own upstream session in the meantime is left alone.
+func TestDurableCompatPlaybackStoreRetryAfterFailedStatement(t *testing.T) {
+	pool := newCompatTestPool(t)
+	stale := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	mover := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	for _, moved := range []bool{false, true} {
+		t.Run(fmt.Sprintf("row moved=%v", moved), func(t *testing.T) {
+			id := t.Name()
+			upstream, wantUpstream := id+"-up", id+"-up"
+			stale.Put(PlaybackSession{ID: id, CompatToken: id})
+			t.Cleanup(func() { stale.Delete(id) })
+			attach := func(session *PlaybackSession) error {
+				if session.UpstreamSessionID != "" {
+					return errUpstreamReplaced
+				}
+				session.UpstreamSessionID, session.UpstreamPlayMethod = upstream, "transcode"
+				return nil
+			}
+			if err := stale.mem.Update(id, attach); err != nil {
+				t.Fatal(err)
+			}
+			stale.appendPendingUpdate(id, id, attach)
+			if !stale.hideCopyStillOnUpstream(id, id, upstream, true) {
+				t.Fatal("the copy was not hidden")
+			}
+			if moved {
+				wantUpstream = id + "-other"
+				if err := mover.Update(id, func(session *PlaybackSession) error {
+					session.UpstreamSessionID, session.UpstreamPlayMethod = wantUpstream, "direct"
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			if retired, err := stale.RetireUpstreamSession(upstream); err != nil || retired == moved {
+				t.Fatalf("retry = %v, %v, want retired = %v", retired, err, !moved)
+			}
+			if row, ok, err := mover.load(id); err != nil || !ok || row.Terminal == moved || row.UpstreamSessionID != wantUpstream {
+				t.Fatalf("row = %+v, %v, %v; want terminal = %v on %s", row, ok, err, !moved, wantUpstream)
+			}
+			if _, ok := mover.Get(id); ok != moved {
+				t.Fatalf("the other replica routes the play = %v, want %v", ok, moved)
+			}
+			if stale.hasPendingUpdates(id) {
+				t.Fatal("the stale replica still owes writes")
+			}
+		})
+	}
 }
 
 // TestDurableCompatPlaybackStoreDropsRejectedPendingUpdate: a write queued

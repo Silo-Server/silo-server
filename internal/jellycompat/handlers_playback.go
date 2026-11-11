@@ -1386,9 +1386,8 @@ func (h *PlaybackHandler) handleExpiredSession(session *playback.Session) {
 // rebuilt. After the session stop, it registers the session and a transcode
 // again, and the idle sweep reaps the session and closes the transcode.
 // Between the close below and the session stop, it restarts the transcode
-// under a session that is then stopped: no expiry hook reaches that
-// transcode, which stays until the process shuts down, as it does on the
-// client's own stop path.
+// under a session that is then stopped, which no expiry hook reaches; the
+// second close, once the session has stopped, is for that transcode.
 func (h *PlaybackHandler) endUpstreamSessionAsAdmin(ctx context.Context, upstreamSessionID string) bool {
 	if h == nil || h.playbackStore == nil || upstreamSessionID == "" {
 		return false
@@ -1401,8 +1400,36 @@ func (h *PlaybackHandler) endUpstreamSessionAsAdmin(ctx context.Context, upstrea
 	}
 	if h.tm != nil {
 		h.tm.CloseTranscodeSession(upstreamSessionID, "")
+		if retired {
+			h.closeTranscodeOnceSessionStops(upstreamSessionID)
+		}
 	}
 	return retired
+}
+
+// compatAdminEndStopWait bounds the wait for the administrator path to stop
+// the native session of a play this handler retired. The stop follows the
+// retirement at once; the bound only ends the wait if it never comes.
+const compatAdminEndStopWait = 30 * time.Second
+
+// closeTranscodeOnceSessionStops closes the play's transcode again once its
+// native session has stopped, so a transcode a request started in between is
+// not left without a session to expire it. A session this server does not
+// hold counts as stopped, and closing an absent transcode does nothing.
+func (h *PlaybackHandler) closeTranscodeOnceSessionStops(upstreamSessionID string) {
+	watcher, ok := h.sessionMgr.(transportStopWatcher)
+	if !ok {
+		return
+	}
+	stopped, release := watcher.WatchTransportStop(upstreamSessionID)
+	go func() {
+		defer release()
+		select {
+		case <-stopped:
+		case <-time.After(compatAdminEndStopWait):
+		}
+		h.tm.CloseTranscodeSession(upstreamSessionID, "")
+	}()
 }
 
 // scheduleCompatAdminEndRetry repeats a retirement whose write failed until

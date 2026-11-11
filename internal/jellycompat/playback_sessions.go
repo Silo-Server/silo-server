@@ -425,10 +425,27 @@ func adminEndRetiresPlay(upstreamPlayMethod string) bool {
 // RetireUpstreamSession implements CompatPlaybackStore.
 func (s *PlaybackSessionStore) RetireUpstreamSession(upstreamSessionID string) (bool, error) {
 	play, ok := s.FindByUpstreamSessionID(upstreamSessionID)
-	if !ok || !adminEndRetiresPlay(play.UpstreamPlayMethod) {
-		return false, nil
+	return ok && s.retireIfOnUpstream(play.ID, upstreamSessionID), nil
+}
+
+// retireIfOnUpstream hides a play from routing only while it still names
+// upstreamSessionID with a play method an administrator's end retires. The
+// check and the mark share one lock, so a method or upstream switch that
+// lands after the caller looked the play up leaves the play it attached
+// alone.
+func (s *PlaybackSessionStore) retireIfOnUpstream(id, upstreamSessionID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session, ok := s.sessions[id]
+	now := s.now()
+	if !ok || session.Terminal || !session.ExpiresAt.After(now) ||
+		session.UpstreamSessionID != upstreamSessionID || !adminEndRetiresPlay(session.UpstreamPlayMethod) {
+		return false
 	}
-	return s.HideFromRouting(play.ID, play.CompatToken) == nil, nil
+	session.Terminal = true
+	session.UpdatedAt = now
+	s.sessions[id] = session
+	return true
 }
 
 func (s *PlaybackSessionStore) terminalIDsByCompatToken(compatToken string) map[string]struct{} {
@@ -734,6 +751,12 @@ func (s *PlaybackSessionStore) findByClientPlaySessionID(
 // FindByUpstreamSessionID resolves the unique compat play attached to a local
 // upstream session.
 func (s *PlaybackSessionStore) FindByUpstreamSessionID(upstreamSessionID string) (*PlaybackSession, bool) {
+	return s.findOnUpstream(upstreamSessionID, false)
+}
+
+// findOnUpstream resolves the play attached to an upstream session: the
+// routable one, or with hidden the one already hidden from routing.
+func (s *PlaybackSessionStore) findOnUpstream(upstreamSessionID string, hidden bool) (*PlaybackSession, bool) {
 	if upstreamSessionID == "" {
 		return nil, false
 	}
@@ -742,7 +765,7 @@ func (s *PlaybackSessionStore) FindByUpstreamSessionID(upstreamSessionID string)
 
 	now := s.now()
 	for _, session := range s.sessions {
-		if session.ExpiresAt.After(now) && !session.Terminal && session.UpstreamSessionID == upstreamSessionID {
+		if session.ExpiresAt.After(now) && session.Terminal == hidden && session.UpstreamSessionID == upstreamSessionID {
 			copy := session
 			return &copy, true
 		}

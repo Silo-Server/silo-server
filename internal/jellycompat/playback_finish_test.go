@@ -239,6 +239,35 @@ func TestAdminEndRetriesFailedRetirement(t *testing.T) {
 	})
 }
 
+// TestAdminEndClosesTranscodeStartedBeforeSessionStop: a segment request that
+// was already past its row lookup can start a transcode after the end closed
+// the play's transcode and before the administrator path stops the session.
+// Once the session is stopped nothing else would close it, so the end closes
+// the play's transcode again at that point.
+func TestAdminEndClosesTranscodeStartedBeforeSessionStop(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		sessions := playback.NewSessionManager(0, 0)
+		sessions.RegisterReconstructed(&playback.Session{
+			ID: "upstream-1", UserID: 1, PlayMethod: playback.PlayTranscode, IsJellyfinCompat: true,
+		})
+		store := NewPlaybackSessionStore(time.Hour, nil)
+		store.Put(PlaybackSession{ID: "play-1", CompatToken: "token-1", UpstreamSessionID: "upstream-1", UpstreamPlayMethod: "transcode"})
+		handler := &PlaybackHandler{playbackStore: store, sessionMgr: sessions, tm: playback.NewTranscodeManager()}
+
+		if !handler.endUpstreamSessionAsAdmin(t.Context(), "upstream-1") {
+			t.Fatal("the administrator's end found no play to retire")
+		}
+		handler.tm.RegisterTranscodeSession("upstream-1", &playback.TranscodeSession{})
+		if err := sessions.StopSession("upstream-1"); err != nil {
+			t.Fatal(err)
+		}
+		synctest.Wait()
+		if handler.tm.GetTranscodeSession("upstream-1") != nil {
+			t.Fatal("a transcode started before the session stop is still registered")
+		}
+	})
+}
+
 // headerSignalingRecorder reports when the handler has written its status.
 type headerSignalingRecorder struct {
 	*httptest.ResponseRecorder
