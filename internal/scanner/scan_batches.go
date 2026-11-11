@@ -242,23 +242,22 @@ func (s *Scanner) processScopeExtras(
 	sidecars SidecarListing,
 	result *ScanResult,
 ) error {
-	if ctx.Err() != nil {
-		return nil
+	if ctx.Err() == nil {
+		existingByPath, err := s.loadExtraScanState(ctx, folder.ID, extras)
+		switch {
+		case ctx.Err() != nil:
+			// A read the cancellation cut short is that cancellation, which
+			// the caller reports; it is not a failed scan.
+		case err != nil:
+			return err
+		default:
+			stats := s.processExtraFiles(ctx, folder, extras, existingByPath, sidecars)
+			result.New += stats.New
+			result.Updated += stats.Updated
+			result.Unchanged += stats.Unchanged
+			result.Errors += stats.Errors
+		}
 	}
-	existingByPath, err := s.loadExtraScanState(ctx, folder.ID, extras)
-	if ctx.Err() != nil {
-		// A read the cancellation cut short is that cancellation, which the
-		// caller reports; it is not a failed scan.
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	stats := s.processExtraFiles(ctx, folder, extras, existingByPath, sidecars)
-	result.New += stats.New
-	result.Updated += stats.Updated
-	result.Unchanged += stats.Unchanged
-	result.Errors += stats.Errors
 	return nil
 }
 
