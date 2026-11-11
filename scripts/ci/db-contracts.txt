@@ -114,6 +114,14 @@
 # marks its files missing and removes the title from the library.
 ./internal/scanner TestScanSubtreeReconcilesDeletedTitleFolderDB
 
+# A subtree scan of a deleted book folder reconciles its files, except under a
+# configured root that is now an empty directory (a lost mount).
+./internal/scanner TestScanSubtreeAudiobookVanishedBookUnderEmptyRootDB
+
+# A monitored rename of a book folder keeps the book: the old path is
+# reconciled first, and the removal grace holds the book for the new path.
+./internal/scanner TestScanSubtreeAudiobookRenameKeepsBookDB
+
 # A full scan that holds a few files at a time catalogs a library like one that
 # holds them all: groups and roots spanning batches, a deleted top-level
 # folder, an unreadable folder and a dropped mount.
@@ -126,14 +134,6 @@
 # A batched full scan whose later batch read fails reconciles nothing: no file
 # is marked missing and no snapshot is rewritten from the partial walk.
 ./internal/scanner TestFullScanInBatchesFailedReadReconcilesNothingDB
-
-# A subtree scan of a deleted book folder reconciles its files, except under a
-# configured root that is now an empty directory (a lost mount).
-./internal/scanner TestScanSubtreeAudiobookVanishedBookUnderEmptyRootDB
-
-# A monitored rename of a book folder keeps the book: the old path is
-# reconciled first, and the removal grace holds the book for the new path.
-./internal/scanner TestScanSubtreeAudiobookRenameKeepsBookDB
 
 # Stale membership removal locks the series before it deletes, in the order
 # curated rebind and split take them.
