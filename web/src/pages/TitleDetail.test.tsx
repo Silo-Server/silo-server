@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
-import type { MediaRequest, RequestMediaDetail } from "@/api/types";
+import type { MediaRequest, RequestMediaDetail, RequestOption } from "@/api/types";
 import { V2ProblemError } from "@/api/v2/request";
 
 const mocks = vi.hoisted(() => ({
@@ -18,6 +18,8 @@ const mocks = vi.hoisted(() => ({
   cancel: vi.fn(),
   toggleFollow: vi.fn(),
   refetch: vi.fn(),
+  // The request options the title's download server offers; none by default.
+  requestOptions: [] as RequestOption[],
 }));
 
 vi.mock("@/hooks/queries/useRequests", () => ({
@@ -37,6 +39,11 @@ vi.mock("@/hooks/queries/useRequests", () => ({
   useCancelMediaRequest: () => ({ mutate: mocks.cancel, isPending: false }),
   useToggleRequestFollow: () => ({ mutate: mocks.toggleFollow, isPending: false }),
   useRequestFeatureStatus: () => ({ data: undefined }),
+  useRequestOptions: () => ({ data: mocks.requestOptions, isLoading: false }),
+  useLoadRequestOptions: () => ({
+    supported: mocks.requestOptions.length > 0,
+    load: () => Promise.resolve(mocks.requestOptions),
+  }),
 }));
 vi.mock("@/hooks/queries/watchlistTitles", () => ({
   useToggleWatchlistTitle: () => ({ mutate: vi.fn(), isPending: false }),
@@ -213,6 +220,7 @@ describe("TitleDetail", () => {
     mocks.useCatalogItemDetail.mockReset();
     mocks.useMyMediaRequests.mockReset();
     mocks.create.mockReset();
+    mocks.requestOptions = [];
     mocks.cancel.mockReset();
     mocks.toggleFollow.mockReset();
     mocks.refetch.mockReset();
@@ -237,6 +245,32 @@ describe("TitleDetail", () => {
       expect(mocks.create).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({ media_type: mediaType, tmdb_id: 603, title: "The Matrix" }),
       );
+    });
+
+    it("asks for the download server settings on offer before requesting a movie", async () => {
+      mocks.requestOptions = [
+        {
+          key: "radarr_profile_id",
+          label: "Quality",
+          default: "default",
+          choices: [
+            { value: "default", label: "Server default" },
+            { value: "4", label: "Ultra-HD" },
+          ],
+        },
+      ];
+      renderDetail({ ...baseDetail, media_type: "movie", request: { requestable: true } });
+
+      fireEvent.click(primaryButton("Request movie"));
+      const dialog = await screen.findByRole("dialog");
+      expect(within(dialog).getByRole("combobox", { name: "Quality" })).toBeInTheDocument();
+      // Nothing is sent until the viewer confirms.
+      expect(mocks.create).not.toHaveBeenCalled();
+
+      fireEvent.click(within(dialog).getByRole("button", { name: "Request" }));
+      expect(mocks.create).toHaveBeenCalledOnce();
+      // The default was kept, so the server's own setting applies.
+      expect(mocks.create.mock.calls[0]![0]).not.toHaveProperty("options");
     });
 
     it("requests a series season by season", () => {

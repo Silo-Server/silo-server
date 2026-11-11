@@ -225,6 +225,7 @@ type MediaRequest struct {
 	State                string                  `json:"state" doc:"The one state to show a user: pending, approved, processing, partially_available (some requested seasons are in the library), available (in the library), declined, cancelled or failed" example:"pending"` //nolint:misspell // the store's spelling
 	Seasons              []int                   `json:"seasons" doc:"Series: the requested season numbers; empty means the whole series (requests made through v1 or before season requests)"`
 	SeasonProgress       []RequestSeasonProgress `json:"season_progress" doc:"Series season requests: each requested season's episodes, once the series is in the library; empty otherwise"`
+	Options              []RequestOptionChoice   `json:"options" doc:"What the requester chose from listRequestOptions when making the request, or the approving admin from listAdminRequestOptions, in the words it was offered in; empty when nothing was chosen"`
 	OutcomeReason        string                  `json:"outcome_reason,omitempty" doc:"Why the request was declined or withdrawn, when a reason was given"`
 	Source               string                  `json:"source" doc:"What created the request: direct (the Request button or an API create) or watchlist (adding a title that is not in the library to a watchlist); more values may be added" example:"direct"`
 	RequestedByUserID    ID                      `json:"requested_by_user_id,omitempty" example:"1"`
@@ -241,6 +242,74 @@ type MediaRequest struct {
 	ApprovedAt           *Instant                `json:"approved_at,omitempty"`
 	CompletedAt          *Instant                `json:"completed_at,omitempty"`
 	Download             *RequestDownload        `json:"download,omitempty" doc:"How far the request's downloads are over all its servers (1080p and 4K together), while any reports them: bytes summed, the phase that needs the most attention, the latest estimate, and the oldest report's time"`
+}
+
+// RequestOptionChoice is one setting the requester chose for a request.
+type RequestOptionChoice struct {
+	Key        string `json:"key" doc:"The option's key" example:"radarr_profile_id"`
+	Label      string `json:"label" doc:"The option's name" example:"Quality"`
+	Value      string `json:"value" doc:"The chosen value" example:"4"`
+	ValueLabel string `json:"value_label" doc:"The chosen value's name when it was chosen" example:"Ultra-HD"`
+}
+
+func requestOptionChoicesOf(choices mediarequests.RequesterChoices) []RequestOptionChoice {
+	out := make([]RequestOptionChoice, 0, len(choices.Choices))
+	for _, c := range choices.Choices {
+		out = append(out, RequestOptionChoice{Key: c.Key, Label: c.Label, Value: c.Value, ValueLabel: c.ValueLabel})
+	}
+	return out
+}
+
+// RequestOption is one download server setting the viewer may choose when
+// requesting a title.
+type RequestOption struct {
+	Key     string               `json:"key" doc:"The key to send in createRequest's options" example:"radarr_profile_id"`
+	Label   string               `json:"label" doc:"The option's name" example:"Quality"`
+	Default string               `json:"default" doc:"The value in effect when the requester chooses nothing, for preselecting; always one of choices" example:"default"`
+	Choices []RequestOptionValue `json:"choices" doc:"The values on offer; never empty"`
+}
+
+// RequestOptionValue is one value of a RequestOption.
+type RequestOptionValue struct {
+	Value string `json:"value" example:"4"`
+	Label string `json:"label" example:"Ultra-HD"`
+}
+
+// RequestOptionList is the listRequestOptions response body.
+type RequestOptionList struct {
+	Options []RequestOption `json:"options" doc:"Empty, never null, when the title's download server offers no choice, or its choices cannot be read right now"`
+}
+
+// RequestOptionListOutput is the listRequestOptions response.
+type RequestOptionListOutput struct {
+	Body RequestOptionList
+}
+
+// listRequestOptions answers which download server settings the viewer may
+// choose for a title. It asks the server's request plugin, so clients call it
+// when the requester opens the request control, not for every title shown.
+func (reg *Registry) listRequestOptions(ctx context.Context, in *RequestMediaDetailInput) (*RequestOptionListOutput, error) {
+	svc, viewer, p := reg.requestViewer(ctx)
+	if p != nil {
+		return nil, p
+	}
+	options, err := svc.RequesterOptions(ctx, viewer, mediarequests.MediaType(in.MediaType), in.TMDBID)
+	if err != nil {
+		return nil, requestProblem(err)
+	}
+	return &RequestOptionListOutput{Body: requestOptionListOf(options)}, nil
+}
+
+func requestOptionListOf(options []mediarequests.RequesterOption) RequestOptionList {
+	out := RequestOptionList{Options: make([]RequestOption, 0, len(options))}
+	for _, option := range options {
+		values := make([]RequestOptionValue, 0, len(option.Choices))
+		for _, choice := range option.Choices {
+			values = append(values, RequestOptionValue{Value: choice.Value, Label: choice.Label})
+		}
+		out.Options = append(out.Options, RequestOption{Key: option.Key, Label: option.Label, Default: option.Default, Choices: values})
+	}
+	return out
 }
 
 // MediaRequestOutput is a single-request response.
@@ -266,6 +335,8 @@ type MediaRequestCreate struct {
 	PosterPath   string `json:"poster_path,omitempty" doc:"TMDB image path"`
 	BackdropPath string `json:"backdrop_path,omitempty" doc:"TMDB image path"`
 	Seasons      []int  `json:"seasons,omitempty" maxItems:"200" doc:"Series only: the season numbers to request, starting at 1 (a season below 1 is refused). Omitted: every aired season not yet complete in the library" example:"[2,3]"`
+	// Options are the requester's picks from listRequestOptions.
+	Options map[string]string `json:"options,omitempty" maxProperties:"16" doc:"The requester's picks from listRequestOptions for this title, as option key to chosen value. A key or value that is not offered is refused with validation_failed. Omitted: the download server's own settings apply"`
 }
 
 // MediaRequestCreateInput is the createRequest request.
@@ -365,6 +436,7 @@ const (
 	opGetRequest            = "getRequest"
 	opSearchRequestMedia    = "searchRequestMedia"
 	opGetRequestMediaDetail = "getRequestMediaDetail"
+	opListRequestOptions    = "listRequestOptions"
 	opListDiscoverSections  = "listDiscoverSections"
 	opGetDiscoverSection    = "getDiscoverSection"
 	opGetDiscoverRow        = "getDiscoverRow"
@@ -408,6 +480,11 @@ func registerRequests(reg *Registry) {
 		"Get a movie's or series' detail document with its availability and request state.")
 	detail.Errors = []int{http.StatusConflict}
 	Register(reg, Operation{Operation: detail, Class: ClassProfileScoped, ServiceBacked: true}, reg.getRequestMediaDetail)
+
+	options := humaOp(http.MethodGet, Prefix+"/requests/options/{media_type}/{tmdb_id}", opListRequestOptions, requestsTag,
+		"List the download server settings the viewer may choose when requesting a title.")
+	options.Errors = []int{http.StatusConflict}
+	Register(reg, Operation{Operation: options, Class: ClassProfileScoped, ServiceBacked: true}, reg.listRequestOptions)
 
 	sections := humaOp(http.MethodGet, Prefix+"/requests/discover", opListDiscoverSections, requestsTag,
 		"List the Discover page's rows in the admin's order, with each title row's first page.")
@@ -523,6 +600,7 @@ func (reg *Registry) createRequest(ctx context.Context, in *MediaRequestCreateIn
 		PosterPath:   in.Body.PosterPath,
 		BackdropPath: in.Body.BackdropPath,
 		Seasons:      in.Body.Seasons,
+		Options:      in.Body.Options,
 	})
 	if err != nil {
 		return nil, requestProblem(err)
@@ -842,6 +920,7 @@ func mediaRequestOf(r *mediarequests.Request, viewer mediarequests.Viewer) Media
 		State:            string(r.State()),
 		Seasons:          NonNil(r.Seasons),
 		SeasonProgress:   requestSeasonProgressOf(r.SeasonProgress),
+		Options:          requestOptionChoicesOf(r.RequesterChoices),
 		OutcomeReason:    r.OutcomeReason,
 		Source:           string(requestSourceOf(r.Source)),
 		IsAnime:          r.IsAnime,

@@ -371,25 +371,29 @@ func (r *Repository) insertRequest(
 	if err != nil {
 		return nil, err
 	}
+	choices, err := encodeRequesterChoices(input.Choices)
+	if err != nil {
+		return nil, err
+	}
 	row := exec.QueryRow(ctx, `
 		INSERT INTO media_requests (
 			id, provider, media_type, tmdb_id, tvdb_id, imdb_id, title, year,
 			overview, poster_path, backdrop_path, status, outcome,
 			requested_by_user_id, requested_by_profile_id, is_anime, created_at, updated_at, approved_at,
-			routing_facts, seasons, source
+			routing_facts, seasons, source, requester_choices
 		)
 		VALUES (
 			$1, 'tmdb', $2, $3, $4, $5, $6, $7,
 			$8, $9, $10, $11, $12,
 			$13, $14, $15, $16, $16, $17,
-			$18, $19, $20
+			$18, $19, $20, $21
 		)
 		RETURNING `+requestColumns(), input.ID, input.Input.MediaType, input.Input.TMDBID, tvdbID,
 		strings.TrimSpace(input.Input.IMDbID), strings.TrimSpace(input.Input.Title), year,
 		strings.TrimSpace(input.Input.Overview), strings.TrimSpace(input.Input.PosterPath),
 		strings.TrimSpace(input.Input.BackdropPath), status, outcome,
 		input.Requester.UserID, input.Requester.ProfileID, input.IsAnime, now, approvedAt,
-		facts, nonNilSeasons(input.Input.Seasons), requestSource(input.Input.Source))
+		facts, nonNilSeasons(input.Input.Seasons), requestSource(input.Input.Source), choices)
 	req, err := scanRequest(row)
 	if err != nil {
 		return nil, fmt.Errorf("insert request: %w", err)
@@ -680,6 +684,24 @@ func (r *Repository) SetStatus(ctx context.Context, id string, from StateGuard, 
 		return nil, fmt.Errorf("commit request status transaction: %w", err)
 	}
 	return req, nil
+}
+
+func (r *Repository) SetPendingRequesterChoices(ctx context.Context, id string, choices RequesterChoices) error {
+	raw, err := encodeRequesterChoices(choices)
+	if err != nil {
+		return err
+	}
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE media_requests
+		SET requester_choices = $2, updated_at = now()
+		WHERE id = $1 AND status = 'pending' AND outcome = 'active'`, id, raw)
+	if err != nil {
+		return fmt.Errorf("set request choices: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrInvalidState
+	}
+	return nil
 }
 
 func (r *Repository) SetOutcome(ctx context.Context, id string, from StateGuard, outcome Outcome, actor Viewer, message string) (*Request, error) {
@@ -1482,7 +1504,8 @@ func requestColumns() string {
 	        overview, poster_path, backdrop_path, status, outcome,
 	        requested_by_user_id, requested_by_profile_id, is_anime,
 	        last_error, created_at, updated_at, approved_at, completed_at,
-	        submit_attempts, submit_lease_until, next_submit_at, outcome_reason, routing_facts, seasons, source`
+	        submit_attempts, submit_lease_until, next_submit_at, outcome_reason, routing_facts, seasons, source,
+	        requester_choices`
 }
 
 type requestScanner interface {
@@ -1493,7 +1516,7 @@ func scanRequest(row requestScanner) (*Request, error) {
 	var req Request
 	var tvdbID, year sql.NullInt64
 	var approvedAt, completedAt, submitLeaseUntil, nextSubmitAt sql.NullTime
-	var rawFacts []byte
+	var rawFacts, rawChoices []byte
 	if err := row.Scan(
 		&req.ID,
 		&req.Provider,
@@ -1523,9 +1546,15 @@ func scanRequest(row requestScanner) (*Request, error) {
 		&rawFacts,
 		&req.Seasons,
 		&req.Source,
+		&rawChoices,
 	); err != nil {
 		return nil, err
 	}
+	choices, err := decodeRequesterChoices(rawChoices)
+	if err != nil {
+		return nil, err
+	}
+	req.RequesterChoices = choices
 	facts, err := decodeRoutingFacts(rawFacts)
 	if err != nil {
 		return nil, err

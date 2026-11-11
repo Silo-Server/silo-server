@@ -447,6 +447,39 @@ describe("request administration", () => {
     expect(screen.queryByRole("link", { name: "Waiting Title" })).not.toBeInTheDocument();
   });
 
+  it("asks the approving admin for the download server settings a request offers", async () => {
+    serve({
+      ...queue({ needs_approval: [request("r1", "Waiting Title")] }),
+      "GET /api/v2/admin/requests/{id}/options": () => ({
+        options: [
+          {
+            key: "radarr_profile_id",
+            label: "Quality",
+            default: "default",
+            choices: [
+              { value: "default", label: "Seerr default" },
+              { value: "4", label: "Ultra-HD" },
+            ],
+          },
+        ],
+      }),
+      "POST /api/v2/admin/requests/{id}/approve": () =>
+        request("r1", "Waiting Title", { status: "approved", state: "approved" }),
+    });
+    mount("/admin/requests?view=needs_approval");
+    fireEvent.click(
+      within(await rowOf("Waiting Title")).getByRole("button", { name: "Approve: Waiting Title" }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("combobox", { name: "Quality" })).toBeInTheDocument();
+    // Nothing is approved until the admin confirms.
+    expect(calls("POST /api/v2/admin/requests/{id}/approve")).toHaveLength(0);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(calls("POST /api/v2/admin/requests/{id}/approve")).toHaveLength(1));
+    // The default was kept, so no pick is sent.
+    expect(calls("POST /api/v2/admin/requests/{id}/approve")[0].body).toEqual({});
+  });
+
   it("loads the next page from the cursor the last one returned", async () => {
     serve({
       ...queue({}),

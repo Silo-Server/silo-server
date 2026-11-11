@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import {
   useInfiniteQuery,
   useMutation,
@@ -24,6 +25,7 @@ import {
   listDiscoverStudiosV2,
   getMediaRequestV2,
   listMyMediaRequestsV2,
+  listRequestOptionsV2,
   searchRequestMediaV2,
 } from "@/api/v2/requests";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
@@ -35,6 +37,7 @@ import type {
   RequestDiscoverySection,
   RequestListParams,
   RequestMediaPage,
+  RequestOption,
   RequestSearchMediaType,
   RequestMediaType,
 } from "@/api/types";
@@ -293,6 +296,58 @@ export function useCreateMediaRequest() {
       toast.error(err instanceof Error ? err.message : t("requests.error.create"));
     },
   });
+}
+
+/** How long a title's request options are reused before asking its download server again. */
+const REQUEST_OPTIONS_STALE_TIME = 60_000;
+
+function requestOptionsQuery(mediaType: RequestMediaType, tmdbID: number) {
+  return {
+    queryKey: requestKeys.options(mediaType, tmdbID),
+    queryFn: () => listRequestOptionsV2(mediaType, tmdbID),
+    staleTime: REQUEST_OPTIONS_STALE_TIME,
+    retry: false,
+  };
+}
+
+/**
+ * The download server settings the viewer may choose for a title, read while
+ * `enabled`. A server without request options (see request_options_supported)
+ * is never asked. A failed read offers nothing: the title can still be
+ * requested with the server's own settings.
+ */
+export function useRequestOptions(
+  mediaType: RequestMediaType,
+  tmdbID: number,
+  options: { enabled: boolean },
+) {
+  const supported = useRequestFeatureStatus().data?.request_options_supported === true;
+  return useQuery({
+    ...requestOptionsQuery(mediaType, tmdbID),
+    enabled: options.enabled && supported && tmdbID > 0,
+  });
+}
+
+/**
+ * Reads a title's request options once, for a control that requests on a
+ * single click when there is nothing to choose. `supported` is false on a
+ * server without request options, which has nothing to read. `load` resolves
+ * to none when the read fails.
+ */
+export function useLoadRequestOptions() {
+  const queryClient = useQueryClient();
+  const supported = useRequestFeatureStatus().data?.request_options_supported === true;
+  const load = useCallback(
+    async (mediaType: RequestMediaType, tmdbID: number): Promise<RequestOption[]> => {
+      try {
+        return await queryClient.fetchQuery(requestOptionsQuery(mediaType, tmdbID));
+      } catch {
+        return [];
+      }
+    },
+    [queryClient],
+  );
+  return { supported, load };
 }
 
 /** Follows or unfollows a title someone else has already requested. */

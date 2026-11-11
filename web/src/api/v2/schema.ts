@@ -4850,6 +4850,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/requests/{id}/options": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Manage media requests and their configuration. */
+    get: operations["listAdminRequestOptions"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/requests/{id}/retry": {
     parameters: {
       query?: never;
@@ -11575,6 +11592,23 @@ export interface paths {
     };
     /** List the account's media requests, newest first. */
     get: operations["listMyRequests"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/requests/options/{media_type}/{tmdb_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the download server settings the viewer may choose when requesting a title. */
+    get: operations["listRequestOptions"];
     put?: never;
     post?: never;
     delete?: never;
@@ -20599,6 +20633,10 @@ export interface components {
       status: "started";
     };
     AdminRequestActionInputBody: {
+      /** @description Approve only: the admin's picks from listAdminRequestOptions, as option key to chosen value. A pick replaces the requester's for that option. A key or value that is not offered is refused with validation_failed. Omitted: the requester's picks and the download server's own settings apply */
+      options?: {
+        [key: string]: string;
+      };
       reason?: string;
     };
     AdminRequestCapabilitiesOutputBody: {
@@ -27099,6 +27137,8 @@ export interface components {
       rating_restrictions_enforced: boolean;
       /** @description Whether removeFailedRequest is available: a requester can delete their own failed request that delivered nothing. */
       remove_failed_supported: boolean;
+      /** @description Whether the server has listRequestOptions and takes options on createRequest. Whether a given title offers any depends on its download server and that server's request plugin. */
+      request_options_supported: boolean;
       requests_enabled: boolean;
       /** @description Opaque revision of this document */
       revision: string;
@@ -29166,6 +29206,8 @@ export interface components {
        * @example movie
        */
       media_type: string;
+      /** @description What the requester chose from listRequestOptions when making the request, or the approving admin from listAdminRequestOptions, in the words it was offered in; empty when nothing was chosen */
+      options: components["schemas"]["RequestOptionChoice"][];
       /**
        * @description active, declined, cancelled, failed
        * @example active
@@ -29250,6 +29292,10 @@ export interface components {
        * @enum {string}
        */
       media_type: "movie" | "series";
+      /** @description The requester's picks from listRequestOptions for this title, as option key to chosen value. A key or value that is not offered is refused with validation_failed. Omitted: the download server's own settings apply */
+      options?: {
+        [key: string]: string;
+      };
       overview?: string;
       /** @description TMDB image path */
       poster_path?: string;
@@ -33250,6 +33296,57 @@ export interface components {
        * @example pending
        */
       status?: string;
+    };
+    RequestOption: {
+      /** @description The values on offer; never empty */
+      choices: components["schemas"]["RequestOptionValue"][];
+      /**
+       * @description The value in effect when the requester chooses nothing, for preselecting; always one of choices
+       * @example default
+       */
+      default: string;
+      /**
+       * @description The key to send in createRequest's options
+       * @example radarr_profile_id
+       */
+      key: string;
+      /**
+       * @description The option's name
+       * @example Quality
+       */
+      label: string;
+    };
+    RequestOptionChoice: {
+      /**
+       * @description The option's key
+       * @example radarr_profile_id
+       */
+      key: string;
+      /**
+       * @description The option's name
+       * @example Quality
+       */
+      label: string;
+      /**
+       * @description The chosen value
+       * @example 4
+       */
+      value: string;
+      /**
+       * @description The chosen value's name when it was chosen
+       * @example Ultra-HD
+       */
+      value_label: string;
+    };
+    RequestOptionList: {
+      /** @description Empty, never null, when the title's download server offers no choice, or its choices cannot be read right now */
+      options: components["schemas"]["RequestOption"][];
+    };
+    RequestOptionValue: {
+      /** @example Ultra-HD */
+      label: string;
+      /** @example 4 */
+      value: string;
     };
     RequestSeasonProgress: {
       /**
@@ -81216,6 +81313,115 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AdminRequestEventCollection"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listAdminRequestOptions: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description The request */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RequestOptionList"];
         };
       };
       /** @description Bad Request */
@@ -139081,6 +139287,126 @@ export interface operations {
       };
       /** @description Not Acceptable */
       406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listRequestOptions: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description The media type */
+        media_type: "movie" | "series";
+        /** @description TMDB identifier (external, not a Silo ID) */
+        tmdb_id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RequestOptionList"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };

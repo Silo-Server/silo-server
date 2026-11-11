@@ -13,13 +13,15 @@ import {
   Plus,
   X,
 } from "lucide-react";
-import type { MediaRequest, RequestMediaDetail } from "@/api/types";
+import type { MediaRequest, RequestMediaDetail, RequestOption } from "@/api/types";
 import { CancelRequestDialog } from "@/components/CancelRequestDialog";
 import { RequestDownloadProgress } from "@/components/RequestDownloadProgress";
+import { RequestOptionsDialog } from "@/components/RequestOptionsDialog";
 import { RequestSeasonsDialog } from "@/components/RequestSeasonsDialog";
 import {
   useCancelMediaRequest,
   useCreateMediaRequest,
+  useLoadRequestOptions,
   useMediaRequest,
   useMyMediaRequests,
   useRequestFeatureStatus,
@@ -84,6 +86,19 @@ export default function RequestActionBar({ item, libraryHref }: RequestActionBar
   const ownRequest = useOwnCancellableRequest(item);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [pickSeasons, setPickSeasons] = useState(false);
+  const requestOptions = useLoadRequestOptions();
+  const [loadingOptions, setLoadingOptions] = useState(false);
+  // Set while the viewer chooses the download server settings on offer.
+  const [chooseOptions, setChooseOptions] = useState<RequestOption[] | null>(null);
+  // A title with nothing to choose is requested on the click, as before.
+  const requestNow = () => createRequest.mutate(requestInputFromMediaResult(item));
+  const requestOrChoose = async () => {
+    setLoadingOptions(true);
+    const options = await requestOptions.load(item.media_type, item.tmdb_id);
+    setLoadingOptions(false);
+    if (options.length > 0) setChooseOptions(options);
+    else requestNow();
+  };
   // A series TMDB lists seasons for is requested season by season.
   const seasonPicker = item.media_type === "series" && (item.seasons?.length ?? 0) > 0;
 
@@ -107,10 +122,12 @@ export default function RequestActionBar({ item, libraryHref }: RequestActionBar
           ? t("web.detail.request.requestSeries")
           : t("web.detail.request.requestMovie"),
       icon: Plus,
-      pending: createRequest.isPending,
+      pending: createRequest.isPending || loadingOptions,
       onClick: seasonPicker
         ? () => setPickSeasons(true)
-        : () => createRequest.mutate(requestInputFromMediaResult(item)),
+        : requestOptions.supported
+          ? () => void requestOrChoose()
+          : requestNow,
     };
   } else if (inLibrary) {
     primaryAction = libraryHref
@@ -228,6 +245,14 @@ export default function RequestActionBar({ item, libraryHref }: RequestActionBar
           isPending={cancelRequest.isPending}
         />
       ) : null}
+      <RequestOptionsDialog
+        open={chooseOptions !== null}
+        onOpenChange={(open) => {
+          if (!open) setChooseOptions(null);
+        }}
+        item={item}
+        options={chooseOptions ?? []}
+      />
       {seasonPicker ? (
         <RequestSeasonsDialog
           open={pickSeasons}

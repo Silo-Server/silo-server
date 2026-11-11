@@ -132,6 +132,56 @@ export function targetServerName(
   );
 }
 
+/**
+ * A request's targets with those that are one copy on one server shown once.
+ * A server that decides the resolution itself (by a quality profile) answers
+ * Silo's HD and 4K versions with the same download, which comes back as two
+ * targets carrying one external id.
+ */
+export function distinctTargets(
+  targets: readonly RequestTarget[] | undefined,
+): { target: RequestTarget; shared: boolean }[] {
+  const out: { target: RequestTarget; shared: boolean }[] = [];
+  const seen = new Map<string, number>();
+  for (const target of targets ?? []) {
+    const key =
+      target.integration_id && target.external_id
+        ? `${target.integration_id}\n${target.external_id}`
+        : undefined;
+    const earlier = key === undefined ? undefined : seen.get(key);
+    if (earlier !== undefined) {
+      out[earlier].shared = true;
+      continue;
+    }
+    if (key !== undefined) seen.set(key, out.length);
+    out.push({ target, shared: false });
+  }
+  return out;
+}
+
+/**
+ * The settings chosen for the given requests (a quality profile, a folder),
+ * as the column names to show them under: each label once, in the order
+ * first seen. Movies and series name the same setting with the same label.
+ */
+export function requestOptionColumns(requests: readonly Pick<MediaRequest, "options">[]): string[] {
+  const labels: string[] = [];
+  for (const request of requests) {
+    for (const choice of request.options ?? []) {
+      if (!labels.includes(choice.label)) labels.push(choice.label);
+    }
+  }
+  return labels;
+}
+
+/** What a request chose for the setting a column names; undefined when nothing. */
+export function requestOptionValue(
+  request: Pick<MediaRequest, "options">,
+  column: string,
+): string | undefined {
+  return request.options?.find((choice) => choice.label === column)?.value_label;
+}
+
 /** The request's own closing reason, or the error that stopped it. */
 export function requestProblemText(
   request: Pick<MediaRequest, "outcome_reason" | "last_error">,

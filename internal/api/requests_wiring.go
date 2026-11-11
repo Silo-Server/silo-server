@@ -33,12 +33,32 @@ func (a PluginRequestRouterAdapter) RouterFeatures(ctx context.Context, installa
 	if err != nil {
 		return mediarequests.RouterFeatures{}, err
 	}
-	return mediarequests.RouterFeatures{
+	features := mediarequests.RouterFeatures{
 		SupportsSeasons:         descriptor.GetSupportsSeasons(),
 		ReportsDownloadProgress: descriptor.GetReportsDownloadProgress(),
 		APIKeyOptional:          descriptor.GetApiKeyOptional(),
 		BaseURLOptional:         descriptor.GetBaseUrlOptional(),
-	}, nil
+	}
+	if declared := descriptor.GetRequesterOptions(); len(declared) > 0 {
+		// An option without its own label takes the admin form field's.
+		labels, err := a.Svc.RequestRouterFieldLabels(ctx, installationID, capabilityID)
+		if err != nil {
+			return mediarequests.RouterFeatures{}, err
+		}
+		for _, option := range declared {
+			label := option.GetLabel()
+			if label == "" {
+				label = labels[option.GetField()]
+			}
+			features.RequesterOptions = append(features.RequesterOptions, mediarequests.RouterRequesterOption{
+				Field:        option.GetField(),
+				MediaType:    mediarequests.MediaType(option.GetMediaType()),
+				Label:        label,
+				ChooserField: option.GetChooserField(),
+			})
+		}
+	}
+	return features, nil
 }
 
 // AttachRequestRouter wires the plugin-backed router provider onto a requests

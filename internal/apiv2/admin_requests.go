@@ -20,6 +20,7 @@ const adminActionRetry = "retry"
 const adminRequestSort = "-created_at"
 const opGetAdminRequestCapabilities = "getAdminRequestCapabilities"
 const opAdminApproveRequest = "adminApproveRequest"
+const opListAdminRequestOptions = "listAdminRequestOptions"
 const opAdminDeclineRequest = "adminDeclineRequest"
 const opAdminCancelRequest = "adminCancelRequest"
 const opAdminRetryRequest = "adminRetryRequest"
@@ -164,7 +165,16 @@ type AdminRequestActionInput struct {
 	MediaRequestGetInput
 	Body struct {
 		Reason string `json:"reason,omitempty"`
+		// Options are the approving admin's picks from listAdminRequestOptions.
+		Options map[string]string `json:"options,omitempty" maxProperties:"16" doc:"Approve only: the admin's picks from listAdminRequestOptions, as option key to chosen value. A pick replaces the requester's for that option. A key or value that is not offered is refused with validation_failed. Omitted: the requester's picks and the download server's own settings apply"`
 	}
+}
+
+// adminRequestApprover is a request service that lets the approving admin
+// choose download server settings.
+type adminRequestApprover interface {
+	ApproverOptions(ctx context.Context, viewer mediarequests.Viewer, id string) ([]mediarequests.RequesterOption, error)
+	ApproveWithOptions(ctx context.Context, viewer mediarequests.Viewer, id string, picks map[string]string) (*mediarequests.Request, error)
 }
 type AdminRequestCapabilitiesOutput struct {
 	Status       int
@@ -244,7 +254,11 @@ func registerAdminRequests(reg *Registry) {
 			var err error
 			switch action {
 			case adminActionApprove:
-				r, err = s.Approve(ctx, v, string(in.ID))
+				if approver, ok := s.(adminRequestApprover); ok && len(in.Body.Options) > 0 {
+					r, err = approver.ApproveWithOptions(ctx, v, string(in.ID), in.Body.Options)
+				} else {
+					r, err = s.Approve(ctx, v, string(in.ID))
+				}
 			case adminActionDecline:
 				r, err = s.Decline(ctx, v, string(in.ID), in.Body.Reason)
 			case adminActionCancel:
@@ -262,6 +276,20 @@ func registerAdminRequests(reg *Registry) {
 			return &MediaRequestOutput{Body: mediaRequestOf(r, v)}, nil
 		})
 	}
+	Register(reg, op(http.MethodGet, "/admin/requests/{id}/options", opListAdminRequestOptions, false), func(ctx context.Context, in *MediaRequestGetInput) (*RequestOptionListOutput, error) {
+		s, p := reg.adminRequestService()
+		if p != nil {
+			return nil, p
+		}
+		var options []mediarequests.RequesterOption
+		if approver, ok := s.(adminRequestApprover); ok {
+			var err error
+			if options, err = approver.ApproverOptions(ctx, adminRequestViewer(ctx), string(in.ID)); err != nil {
+				return nil, requestProblem(err)
+			}
+		}
+		return &RequestOptionListOutput{Body: requestOptionListOf(options)}, nil
+	})
 	Register(reg, op(http.MethodGet, "/admin/request-settings", opGetAdminRequestSettings, false), reg.getAdminRequestSettings)
 	Register(reg, op(http.MethodPut, "/admin/request-settings", opUpdateAdminRequestSettings, true), reg.updateAdminRequestSettings)
 	Register(reg, op(http.MethodGet, "/admin/request-users/{user_id}/limit", opGetAdminRequestUserLimit, false), reg.getAdminRequestUserLimit)

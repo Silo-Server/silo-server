@@ -43,6 +43,9 @@ type Store interface {
 	// Declining or withdrawing also clears the title's follows in the same
 	// transaction.
 	SetStatus(ctx context.Context, id string, from StateGuard, status Status, actor Viewer) (*Request, error)
+	// SetPendingRequesterChoices replaces a request's picks while it still
+	// waits for approval; any other request returns ErrInvalidState.
+	SetPendingRequesterChoices(ctx context.Context, id string, choices RequesterChoices) error
 	SetOutcome(ctx context.Context, id string, from StateGuard, outcome Outcome, actor Viewer, message string) (*Request, error)
 	// ReopenFailed moves a failed request back to active + approved with a
 	// fresh submission budget, in one guarded write.
@@ -155,6 +158,9 @@ type CreateRequestRecord struct {
 	Facts     RoutingFacts
 	Requester Viewer
 	Now       time.Time
+	// Choices are the requester's picks, already checked against what the
+	// server offers.
+	Choices RequesterChoices
 	// Quota, when non-nil, instructs the store to atomically verify the
 	// requester is below their per-user limit before inserting. The check
 	// runs inside the same transaction as the insert with a per-user

@@ -1,15 +1,17 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { RequestMediaDetail, RequestMediaSeason } from "@/api/types";
+import type { RequestMediaDetail, RequestMediaSeason, RequestOption } from "@/api/types";
 
 const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   loaded: { data: undefined as RequestMediaDetail | undefined, isFetching: false, isError: false },
+  options: { data: [] as RequestOption[], isLoading: false },
 }));
 
 vi.mock("@/hooks/queries/useRequests", () => ({
   useCreateMediaRequest: () => ({ mutate: mocks.create, isPending: false }),
   useRequestMediaDetail: () => mocks.loaded,
+  useRequestOptions: () => mocks.options,
 }));
 
 import { RequestSeasonsDialog } from "./RequestSeasonsDialog";
@@ -50,6 +52,26 @@ describe("RequestSeasonsDialog", () => {
   beforeEach(() => {
     mocks.create.mockReset();
     mocks.loaded = { data: undefined, isFetching: false, isError: false };
+    mocks.options = { data: [], isLoading: false };
+  });
+
+  it("sends only the download server settings the viewer changed", () => {
+    mocks.options.data = [
+      {
+        key: "sonarr_profile_id",
+        label: "Quality",
+        default: "default",
+        choices: [
+          { value: "default", label: "Server default" },
+          { value: "9", label: "Ultra-HD" },
+        ],
+      },
+    ];
+    const dialog = open(series({ seasons: [season(1)] }));
+    expect(within(dialog).getByRole("combobox", { name: "Quality" })).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Request Season 1" }));
+    // Untouched, the server's own setting applies and nothing is sent.
+    expect(mocks.create.mock.calls[0]![0]).not.toHaveProperty("options");
   });
 
   it("leaves an untouched pick to the server", () => {
