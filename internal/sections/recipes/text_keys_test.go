@@ -48,6 +48,11 @@ func TestSeasonalPickKeysOnlyBuiltInTitles(t *testing.T) {
 	if !ok || renamed.Title != "Our Christmas" || renamed.TitleKey != "" {
 		t.Fatalf("renamed pick = %+v", renamed)
 	}
+	holiday := SeasonalCustomHoliday{Name: "Solstice", Start: "12-15", End: "12-25", ListURL: "https://mdblist.com/lists/u/solstice"}
+	custom, ok := ActiveSeasonalPick(SeasonalThemedParams{EnabledThemes: []string{ThemeChristmas}, CustomHolidays: []SeasonalCustomHoliday{holiday}}, now)
+	if !ok || custom.Title != "Solstice" || custom.TitleKey != "" {
+		t.Fatalf("custom holiday pick = %+v", custom)
+	}
 	for _, theme := range SeasonalThemes {
 		for _, vibe := range theme.Vibes {
 			if vibe.Title != "" && strings.Count(seasonalVibeTitleKey(theme.Key, vibe.Key), ".") != 4 {

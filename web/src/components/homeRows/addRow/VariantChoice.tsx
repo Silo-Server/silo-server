@@ -12,7 +12,8 @@ const COLUMNS: Record<number, string> = {
 };
 
 function hintFromPreset(preset: GalleryPreset | undefined): string | undefined {
-  return preset ? presetShortText(preset).replace(/\.$/, "") : undefined;
+  // The text is translated, so drop the full stop of whichever script it ends in.
+  return preset ? presetShortText(preset).replace(/[.。]$/, "") : undefined;
 }
 
 /**

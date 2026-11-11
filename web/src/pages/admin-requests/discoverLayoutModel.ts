@@ -154,8 +154,16 @@ export function isBuiltInRow(row: Pick<DiscoverRowBody, "id">): boolean {
   return BUILT_IN_ROWS.some((builtInRow) => builtInRow.id === row.id);
 }
 
-/** A stored row as the server takes it back. */
-export function rowBody({ source: _source, ...body }: DiscoverRow): DiscoverRowBody {
+/**
+ * A stored row as the server takes it back: without what the server adds on a
+ * read (the list's source and the title's catalog key), which a write refuses.
+ */
+export function rowBody({
+  source: _source,
+  title_key: _titleKey,
+  title_args: _titleArgs,
+  ...body
+}: DiscoverRow): DiscoverRowBody {
   return body;
 }
 

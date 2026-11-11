@@ -39,13 +39,6 @@ export function presetShortText(preset: GalleryPreset): string {
   return serverText(preset.description_short_key, undefined, preset.description_short);
 }
 
-/** A preset's long description for display, in the interface language; undefined when it has none. */
-export function presetLongText(preset: GalleryPreset): string | undefined {
-  return preset.description_long === undefined
-    ? undefined
-    : serverText(preset.description_long_key, undefined, preset.description_long);
-}
-
 export interface RecipeDefinition {
   type: string;
   category: Category;
