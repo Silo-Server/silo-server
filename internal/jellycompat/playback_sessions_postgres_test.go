@@ -681,6 +681,92 @@ func TestDurableCompatPlaybackStoreRetiresUpstreamSessionAcrossReplicas(t *testi
 	}
 }
 
+// TestDurableCompatPlaybackStoreRetireLeavesMovedPlay: a replica whose cached
+// copy still names an upstream session, and still owes the row an unrelated
+// write, must not retire the play from that copy once another replica has
+// moved it to a new upstream session. The row decides: it stays routable, the
+// owed write still lands, and the replica adopts the row's state. The owed
+// write is queued the way a failed Update queues it, which a live pool cannot
+// be made to do.
+func TestDurableCompatPlaybackStoreRetireLeavesMovedPlay(t *testing.T) {
+	pool := newCompatTestPool(t)
+	stale := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	mover := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	for _, method := range []string{"direct", "transcode"} {
+		t.Run("moved to "+method, func(t *testing.T) {
+			id := t.Name()
+			oldUpstream, newUpstream := id+"-old", id+"-new"
+			stale.Put(PlaybackSession{ID: id, CompatToken: id, UpstreamSessionID: oldUpstream, UpstreamPlayMethod: "transcode"})
+			t.Cleanup(func() { stale.Delete(id) })
+			owed := func(session *PlaybackSession) error {
+				session.ProgressPersistenceKnown = true
+				return nil
+			}
+			if err := stale.mem.Update(id, owed); err != nil {
+				t.Fatal(err)
+			}
+			stale.appendPendingUpdate(id, id, owed)
+			if err := mover.Update(id, func(session *PlaybackSession) error {
+				session.UpstreamSessionID, session.UpstreamPlayMethod = newUpstream, method
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			if retired, err := stale.RetireUpstreamSession(oldUpstream); err != nil || retired {
+				t.Fatalf("retire the replaced upstream session = %v, %v, want nothing retired", retired, err)
+			}
+			row, ok, err := mover.load(id)
+			if err != nil || !ok || row.Terminal || row.UpstreamSessionID != newUpstream || !row.ProgressPersistenceKnown {
+				t.Fatalf("row = %+v, %v, %v; want the moved play routable with the owed write applied", row, ok, err)
+			}
+			if got, ok := stale.Get(id); !ok || got.UpstreamSessionID != newUpstream || got.UpstreamPlayMethod != method {
+				t.Fatalf("stale replica reads %+v, %v; want the row's new upstream session", got, ok)
+			}
+		})
+	}
+
+	// The owed write is the attach itself: the row learns the upstream
+	// session first, and is then retired by it.
+	t.Run("owed attach", func(t *testing.T) {
+		id := t.Name()
+		stale.Put(PlaybackSession{ID: id, CompatToken: id})
+		t.Cleanup(func() { stale.Delete(id) })
+		attach := func(session *PlaybackSession) error {
+			session.UpstreamSessionID, session.UpstreamPlayMethod = id+"-up", "transcode"
+			return nil
+		}
+		if err := stale.mem.Update(id, attach); err != nil {
+			t.Fatal(err)
+		}
+		stale.appendPendingUpdate(id, id, attach)
+		if retired, err := stale.RetireUpstreamSession(id + "-up"); err != nil || !retired {
+			t.Fatalf("retire = %v, %v", retired, err)
+		}
+		if row, ok, err := mover.load(id); err != nil || !ok || !row.Terminal || row.UpstreamSessionID != id+"-up" {
+			t.Fatalf("row = %+v, %v, %v; want it retired under its upstream session", row, ok, err)
+		}
+	})
+
+	// A play that never reached Postgres is hidden where it lives, and no
+	// row is written for it.
+	t.Run("never persisted", func(t *testing.T) {
+		id := t.Name()
+		stale.mem.Put(PlaybackSession{ID: id, CompatToken: id, UpstreamSessionID: id + "-up", UpstreamPlayMethod: "remux"})
+		stale.markUnpersisted(id)
+		t.Cleanup(func() { stale.Delete(id) })
+		if retired, err := stale.RetireUpstreamSession(id + "-up"); err != nil || !retired {
+			t.Fatalf("retire = %v, %v", retired, err)
+		}
+		if _, ok := stale.Get(id); ok {
+			t.Fatal("the hidden copy is still routable")
+		}
+		if _, ok, err := mover.load(id); err != nil || ok {
+			t.Fatalf("a row was written for the hidden copy: %v, %v", ok, err)
+		}
+	})
+}
+
 // TestDurableCompatPlaybackStoreDropsRejectedPendingUpdate: a write queued
 // after a DB failure that no longer applies to the row (its compare-and-swap
 // lost to another replica meanwhile) is dropped instead of blocking every

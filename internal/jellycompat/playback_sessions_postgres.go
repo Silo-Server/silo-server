@@ -481,15 +481,24 @@ func (d *DurableCompatPlaybackStore) HideFromRouting(id, compatToken string) err
 	return nil
 }
 
-// RetireUpstreamSession lets the row decide. One statement retires it only
-// while it still names this upstream session and a stream the server
-// produces, so a play another server has moved to direct play or to a new
-// upstream session is left alone. A server that still routes the play reads
-// the terminal row at its next revalidation that succeeds; it tries one
-// every compatCacheRevalidationInterval.
+// RetireUpstreamSession lets the row decide. One statement (retireUpstreamRows)
+// retires it only while it still names this upstream session and a stream
+// the server produces, and nothing else here writes a row as retired. A play
+// another server has moved to direct play or to a new upstream session is
+// therefore left alone, whatever this process's cached copy says. A server
+// that still routes the play reads the terminal row at its next revalidation
+// that succeeds; it tries one every compatCacheRevalidationInterval.
 //
-// This process's cached copy decides only where the row cannot: the write
-// failed, or the copy holds changes the row never received.
+// This process's cached copy is used in three cases:
+//   - The statement matched nothing and the copy owes the row earlier writes,
+//     which may include this upstream session. They go through Update, which
+//     replays the ones that still apply and leaves the copy holding the row's
+//     state, and the statement runs once more.
+//   - The play never reached Postgres, so there is no row to ask or to write.
+//     The copy is hidden here; a hidden copy is never persisted as routable.
+//   - The statement failed. The copy is hidden here without a row write, and
+//     the error has the caller retry, which runs the statement again. The
+//     copy stays hidden even if the row turns out to have moved.
 //
 // One case is not retried to the end. When the write fails and the row never
 // received this upstream session (its attach failed in the same outage), the
@@ -504,27 +513,56 @@ func (d *DurableCompatPlaybackStore) RetireUpstreamSession(upstreamSessionID str
 		return d.mem.RetireUpstreamSession(upstreamSessionID)
 	}
 	rows, err := d.retireUpstreamRows(upstreamSessionID)
+	if err == nil && len(rows) == 0 {
+		if play, ok := d.cachedRetirablePlay(upstreamSessionID); ok && !d.isUnpersisted(play.ID) && d.hasPendingUpdates(play.ID) {
+			_ = d.Update(play.ID, func(*PlaybackSession) error { return nil })
+			rows, err = d.retireUpstreamRows(upstreamSessionID)
+		}
+	}
 	for _, row := range rows {
 		// Hide a copy this process caches now; read any other from the row.
 		d.invalidateValidation(row[0], row[1])
-		_ = d.HideFromRouting(row[0], row[1])
+		_ = d.hideCachedCopy(row[0], row[1])
 	}
 	if len(rows) > 0 {
 		return true, nil
 	}
-	play, ok := d.mem.FindByUpstreamSessionID(upstreamSessionID)
-	if !ok || !adminEndRetiresPlay(play.UpstreamPlayMethod) {
+	play, ok := d.cachedRetirablePlay(upstreamSessionID)
+	if !ok {
 		return false, err
 	}
-	if err == nil && !d.isUnpersisted(play.ID) && !d.hasPendingUpdates(play.ID) {
+	if err == nil && !d.isUnpersisted(play.ID) {
 		// The row answered, and this copy is behind it: read it again
 		// before routing the play from the copy.
 		d.invalidateValidation(play.ID, play.CompatToken)
 		return false, nil
 	}
-	// A failed write still leaves this process's copy hidden.
-	hidden := !errors.Is(d.HideFromRouting(play.ID, play.CompatToken), ErrSessionNotFound)
-	return hidden, err
+	return d.hideCachedCopy(play.ID, play.CompatToken) == nil, err
+}
+
+// cachedRetirablePlay returns this process's routable copy of the play on an
+// upstream session, when an administrator's end retires its play method.
+func (d *DurableCompatPlaybackStore) cachedRetirablePlay(upstreamSessionID string) (*PlaybackSession, bool) {
+	play, ok := d.mem.FindByUpstreamSessionID(upstreamSessionID)
+	if !ok || !adminEndRetiresPlay(play.UpstreamPlayMethod) {
+		return nil, false
+	}
+	return play, true
+}
+
+// hideCachedCopy is the cache half of HideFromRouting: it hides this
+// process's copy of a play and writes no row. A write by play id could
+// retire a play that another server has since moved.
+func (d *DurableCompatPlaybackStore) hideCachedCopy(id, compatToken string) error {
+	unlockSession := d.lockSessionMutation(id)
+	defer unlockSession()
+	d.cacheMutationMu.RLock()
+	defer d.finishCacheMutation(id, compatToken)
+	if err := d.mem.HideFromRouting(id, compatToken); err != nil {
+		return err
+	}
+	d.clearPendingUpdates(id)
+	return nil
 }
 
 // retireUpstreamRows marks the rows of a server-produced play on an upstream

@@ -769,8 +769,15 @@ Which plays this ends is decided by the row's `UpstreamPlayMethod`
   file with `Static=true`. That starts a new direct play under a new session
   ID, as the method switch did before for a play that was not retired.
 
-The retirement is one statement keyed on the upstream session, so it works from
-a replica that does not hold the session and does not depend on Redis. A write
+The retirement is one statement keyed on the upstream session and the play
+method, so it works from a replica that does not hold the session and does not
+depend on Redis. It is the only write that retires a row: a play that another
+replica has moved to a new upstream session, or to direct play, matches
+nothing and stays routable, whatever a stale cached copy says. When the
+statement matches nothing and the replica's cached copy owes the row earlier
+writes, those are sent through the store's update path and the statement runs
+once more. A cached copy is hidden without a row write in two cases only: the
+play never reached Postgres, or the statement failed. A write
 that fails is retried with backoff (`scheduleCompatAdminEndRetry`); until it
 lands, the play is hidden only on the replica that received the end, and only
 if that replica had a copy of the row; without one, that terminate answers
