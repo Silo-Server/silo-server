@@ -50,22 +50,41 @@ func TestExternalSubtitleDirCacheMatchesSidecars(t *testing.T) {
 	}
 }
 
+// Workers share one cache. With room for fewer directories than they read,
+// listings are evicted and read again while other workers use them.
 func TestExternalSubtitleDirCacheConcurrent(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "Movie.en.srt"), nil, 0600); err != nil {
-		t.Fatal(err)
+	root := t.TempDir()
+	var media []string
+	for _, title := range []string{"One", "Two", "Three", "Four"} {
+		for _, name := range []string{title + ".mkv", title + ".en.srt", "Subs/French.srt"} {
+			path := filepath.Join(root, title, name)
+			if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, nil, 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		media = append(media, filepath.Join(root, title, title+".mkv"))
 	}
 	cache := newExternalSubtitleDirCache("movies")
+	cache.size = 2
 	var wg sync.WaitGroup
-	for range 16 {
+	for worker := range 16 {
 		wg.Go(func() {
-			got, err := cache.Detect(filepath.Join(dir, "Movie.mkv"))
-			if err != nil || len(got) != 1 {
-				t.Errorf("Detect = %#v, %v", got, err)
+			for i := range media {
+				path := media[(worker+i)%len(media)]
+				got, err := cache.Detect(path)
+				if err != nil || len(got) != 2 {
+					t.Errorf("%s: Detect = %#v, %v", path, got, err)
+				}
 			}
 		})
 	}
 	wg.Wait()
+	if len(cache.dirs) > cache.size || cache.recent.Len() != len(cache.dirs) {
+		t.Fatalf("cache holds %d directories (%d in order), want at most %d", len(cache.dirs), cache.recent.Len(), cache.size)
+	}
 }
 
 // A directory that has dropped out of the cache is read again, so its videos
