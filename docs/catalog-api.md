@@ -462,7 +462,9 @@ curation permission. Everyone else gets every technical field of each version,
 but not its `file_path` or `file_name`, an external subtitle track's
 `file_name` or a `title` that is only that file name, or an item's
 `folder_paths`. The rule covers the versions nested in
-`playback_variants` too.
+`playback_variants` too. When two such subtitles share a language, format and
+flags, the second gets the title `en 2` (then `en 3`, and so on), as the
+playback inventory labels it, so a saved choice still tells them apart.
 
 Audiobook and ebook versions keep `file_name` for every viewer, and lose only
 `file_path`. Those beta features name and open files by it.

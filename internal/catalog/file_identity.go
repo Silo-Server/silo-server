@@ -3,6 +3,8 @@ package catalog
 import (
 	"slices"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // A file's identity is where it lives on the server and what it is called:
@@ -60,12 +62,20 @@ func (v *FileVersion) hideFileIdentity(keepNames bool) {
 	// A playback variant part holds a copy of the version that shares this
 	// slice, so edit a copy of it.
 	tracks := slices.Clone(v.SubtitleTracks)
+	labels := models.SidecarLabels{}
 	for i := range tracks {
 		t := &tracks[i]
 		// The catalog fills an untitled sidecar's title from its file name,
-		// and the scanner stores the file name as its title.
+		// and the scanner stores the file name as its title. Without it the
+		// track is known by its embedded title or, numbered as the playback
+		// inventory numbers it, its language.
 		if t.External && (t.TitleIsFallback || strings.TrimSpace(t.Title) == t.FileName) {
 			t.Title, t.TitleIsFallback = "", false
+			if strings.TrimSpace(t.EmbeddedTitle) == "" {
+				if label := labels.Next(t.Language, t.Codec, t.Forced, t.HearingImpaired); label != t.Language {
+					t.Title = label
+				}
+			}
 		}
 		t.FileName = ""
 	}
