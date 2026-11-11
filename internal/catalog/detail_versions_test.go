@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"slices"
 	"sync/atomic"
@@ -429,5 +430,65 @@ func TestGetEpisodeDetailsForSeriesResolvesPreferencesOncePerSeries(t *testing.T
 	}
 	if allStatements != oneStatements {
 		t.Fatalf("statements = %d for %d episodes, %d for one", allStatements, len(episodes), oneStatements)
+	}
+}
+
+// Under a presentation library the batch checks every episode's membership in
+// one query, and still leaves out episodes the library does not hold.
+func TestGetEpisodeDetailsForSeriesChecksLibraryMembershipOnce(t *testing.T) {
+	f := newVersionsFixture(t)
+	addEpisode := func(n int, inLibrary bool) string {
+		t.Helper()
+		id := fmt.Sprintf("%s-%d", f.ids["episode"], n)
+		if _, err := f.pool.Exec(t.Context(), `INSERT INTO episodes (content_id,series_id,season_id,season_number,episode_number,title) VALUES ($1,$2,$3,1,$4,'Episode')`, id, f.ids["series"], f.ids["season"], n); err != nil {
+			t.Fatal(err)
+		}
+		if inLibrary {
+			if _, err := f.pool.Exec(t.Context(), `INSERT INTO episode_libraries (episode_id,media_folder_id) VALUES ($1,$2)`, id, f.library); err != nil {
+				t.Fatal(err)
+			}
+		}
+		f.files.files[id] = f.files.files[f.ids["episode"]]
+		return id
+	}
+	episodes := []string{f.ids["episode"]}
+	for n := 2; n <= 6; n++ {
+		episodes = append(episodes, addEpisode(n, true))
+	}
+	base := AccessFilter{UserID: 1, ProfileID: "profile-1"}
+	scoped := base
+	scoped.PresentationLibraryID = new(f.library)
+
+	statements := func(ids []string) int64 {
+		t.Helper()
+		f.queries.calls.Store(0)
+		details, err := f.svc.GetEpisodeDetailsForSeries(t.Context(), f.ids["series"], ids, scoped)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(details) != len(ids) {
+			t.Fatalf("got %d details for %d episodes", len(details), len(ids))
+		}
+		return f.queries.calls.Load()
+	}
+	statements(episodes[:2]) // warm anything a first call caches
+	if two, all := statements(episodes[:2]), statements(episodes); all != two {
+		t.Errorf("statements = %d for %d episodes, %d for 2", all, len(episodes), two)
+	}
+
+	// An episode outside the library and an unknown ID are left out, not errors.
+	outside := addEpisode(99, false)
+	ids := []string{episodes[0], outside, f.ids["episode"] + "-unknown"}
+	for _, c := range []struct {
+		filter AccessFilter
+		want   []string
+	}{{base, []string{episodes[0], outside}}, {scoped, []string{episodes[0]}}} {
+		details, err := f.svc.GetEpisodeDetailsForSeries(t.Context(), f.ids["series"], ids, c.filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := slices.Sorted(maps.Keys(details)); !slices.Equal(got, c.want) {
+			t.Errorf("presentation library %t: details for %v, want %v", c.filter.PresentationLibraryID != nil, got, c.want)
+		}
 	}
 }
