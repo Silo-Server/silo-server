@@ -1257,7 +1257,8 @@ into an avc1/fMP4 segment (§4). Detecting it means reading the opening seconds
 of the source, which on remote storage costs seconds — so the server no longer
 waits for it. An unresolved verdict plans **optimistically** (a remux is
 allowed), the scan runs behind the issued plan, and if it comes back unsafe the
-plan that was handed out has to be taken back.
+plan that was handed out is taken back, except from a v3 attempt whose copy has
+not failed on the client (see the copy-first rule below).
 
 The push is a realtime **command** on the session control socket
 (`GET /playback/sessions/{session_id}/control/ws`) — acked and answered like
@@ -1297,14 +1298,15 @@ feature, no connection, no `completed` result within `deadline_ms` (an ack
 alone does not stop the clock), or a `rejected` result, and the session is
 terminated instead. That is deliberate, and it is the whole
 backwards-compatibility story: a client shipped before this token sees its
-session end, runs the recovery it already has, and its fresh attempt is planned
-against the persisted verdict — which lands it on a transcode. No client has to
+session end, runs the recovery it already has, and its fresh attempt re-plans
+the route (a multi-PPS source is still offered the copy first; see below). No client has to
 implement anything to stay correct; the feature only buys a seamless switch
 instead of a stopped session.
 
 An inconclusive scan changes nothing: nothing is persisted, no command is
 pushed, and live sessions keep the route they were given. Only a positive
-"this source cannot be copied" verdict withdraws a plan.
+"this source cannot be copied" verdict withdraws a plan, and from a v3 attempt
+only once a copy has failed on the client (see the copy-first rule below).
 
 Three scoping rules keep the stop from firing where it cannot help:
 
@@ -1323,6 +1325,18 @@ Three scoping rules keep the stop from firing where it cannot help:
   copy-safety verdict, so a stopped compat client reconnects onto the identical
   remux. The stop is only correct for clients whose recovery re-decides the
   route, which for a Silo client means planning against the persisted verdict.
+- **A multi-PPS source is copied first, for every client.** Decoders that
+  apply in-band parameter sets (Media3) play the copy; ones that trust only the
+  sample entry's (VideoToolbox, browser MSE) fail it. A `failure_recovery` or
+  `seek_failure_recovery` replan of a copy plan, unless blamed on a node, a
+  proxy origin, the network, the audio renderer or a subtitle route, marks the
+  attempt `VideoCopyFailed` in its frozen recipe, and
+  the planner then offers the attempt's copy-unsafe source no remux copy. The
+  mark does not gate direct play: once a quality or track change clears the
+  attempted keys, `original_http` may be tried again, and a transcode follows
+  only if it is not playable. Until then the
+  notifier leaves a v3 attempt's copy alone. A strict decoder costs up to two
+  failed routes (direct play, then the copy); a silent mis-decode is not caught.
 
 That persisted verdict is read from the `media_files` row on every path that
 plans a route — start, replan, and the v2 resolver — not only from the probe
@@ -1342,8 +1356,8 @@ remux the verdict condemned. The serve routes therefore re-read the persisted
 verdict for a video stream-copy recipe (a progressive remux, or an HLS transport
 whose video target is `copy`) and refuse with the ordinary playback-session
 not-found when the row says the source is unsafe. The client's existing recovery
-mints a fresh attempt, which plans against the same row and lands on a
-transcode. Transcode reconstruction is untouched: re-encoding the bitstream is
+mints a fresh attempt, which re-plans the route: the copy is offered first
+again, and a transcode follows only if that copy fails. Transcode reconstruction is untouched: re-encoding the bitstream is
 unaffected by conflicting parameter sets.
 
 On the HLS routes the check runs *before* the session is rebuilt, not before the

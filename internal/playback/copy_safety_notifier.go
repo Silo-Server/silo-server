@@ -199,6 +199,12 @@ func (n *CopySafetyNotifier) consider(ctx context.Context, session *Session, fil
 	if !sessionOnVideoCopyRouteV3(session, record) {
 		return copySafetyUnresolved
 	}
+	if record != nil && record.CurrentPlan.Delivery != "" && !record.FrozenRecipe.VideoCopyFailed {
+		// A v3 attempt is offered the copy of a multi-PPS source on purpose and
+		// leaves it only when the copy fails on the client (see
+		// StartRequestV3.VideoCopyFailed); the verdict alone does not condemn it.
+		return copySafetyDisposed
+	}
 	if session.IsJellyfinCompat {
 		// Stopping only helps a client whose recovery re-decides the route
 		// against the verdict. The Jellyfin-protocol surface picks direct

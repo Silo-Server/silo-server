@@ -1396,6 +1396,108 @@ func TestStartPlaybackV3FreezesDownloadedSubtitleFromPlanningSnapshot(t *testing
 	}
 }
 
+// A multi-PPS source is copied first. Once that copy fails on the client, the
+// recovery lands on a transcode instead of the next remux variant, and a later
+// replan of the attempt does not offer the copy again.
+func TestHandleReplanPlaybackV3FailedCopyOfMultiPPSSourceTranscodes(t *testing.T) {
+	file := v3HandlerFixtureFile(t)
+	multiPPS := true
+	file.VideoTracks[0].MultiplePPS = &multiPPS
+	manager := playback.NewSessionManager(0, 0)
+	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+	stubCopySeekAnchorV3(handler)
+	handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
+	handler.v3Registry = playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
+		{Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, Available: true},
+		{Name: playback.TransformationVideoToH264V3, RecipeVersion: "2", Available: true},
+	})
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"transcode_enabled": "true", "allow_4k_transcode": "true"}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	startRequest := v3HandlerStartRequest()
+	startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassProgressiveV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
+	startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
+
+	rr := httptest.NewRecorder()
+	handler.HandleStartPlayback(rr, httptest.NewRequest(http.MethodPost, "/api/v2/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(WithNativeAPIV2(newAuthorizedPlaybackContext())))
+	var active playback.DecisionResponseV3
+	if rr.Code != http.StatusCreated || json.Unmarshal(rr.Body.Bytes(), &active) != nil {
+		t.Fatalf("start status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if active.PlaybackPlan == nil || active.PlaybackPlan.Delivery != playback.DeliveryOriginalHTTPV3 {
+		t.Fatalf("initial plan = %#v", active.PlaybackPlan)
+	}
+	t.Cleanup(func() { handler.tm.CloseTranscodeSession(active.SessionID, "") })
+
+	var attempted []string
+	replan := func(index int, operation playback.ReplanOperationV3, classification string) playback.DecisionResponseV3 {
+		currentKey := playback.PlanAttemptKeyV3(*active.PlaybackPlan, startRequest.ClientPlaybackContext.Output.OutputContextID, nil)
+		request := playback.ReplanRequestV3{
+			ProtocolVersion: playback.ProtocolV3, Operation: operation,
+			PlaybackAttemptID: startRequest.PlaybackAttemptID,
+			ReplanRequestID:   fmt.Sprintf("multi-pps-replan-%04d", index),
+			PlanAttemptID:     fmt.Sprintf("multi-pps-plan-attempt-%04d", index),
+			AttemptCount:      index, QualityPreference: "auto",
+			FailedPlanID:          active.PlaybackPlan.PlanID,
+			PlanAttemptKey:        currentKey,
+			SelectedTracks:        active.PlaybackPlan.SelectedTracks,
+			Capabilities:          startRequest.Capabilities,
+			ClientPlaybackContext: startRequest.ClientPlaybackContext,
+		}
+		if operation == playback.ReplanOperationFailureRecoveryV3 {
+			attempted = append(attempted, currentKey)
+			request.AttemptedPlanKeys = append([]string(nil), attempted...)
+			request.Failure = playback.FailureV3{Classification: classification}
+		}
+		body, err := json.Marshal(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rr := servePlaybackReplanNativeV3(handler, active.SessionID, body)
+		var response playback.DecisionResponseV3
+		if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &response) != nil || response.PlaybackPlan == nil {
+			t.Fatalf("replan %d status = %d, body = %s", index, rr.Code, rr.Body.String())
+		}
+		return response
+	}
+
+	// The attempted keys alone also walk the plan off a copy, so each step
+	// checks the persisted mark as well as the route.
+	copyFailedMark := func(step string, want bool) {
+		t.Helper()
+		record, err := handler.PlanStoreV3.GetAttempt(t.Context(), active.SessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if record.FrozenRecipe.VideoCopyFailed != want {
+			t.Fatalf("%s: persisted VideoCopyFailed = %v, want %v", step, record.FrozenRecipe.VideoCopyFailed, want)
+		}
+	}
+	// Direct play failing is not a copy failure: the copy is still offered.
+	active = replan(1, playback.ReplanOperationFailureRecoveryV3, "decoder_error")
+	if active.PlaybackPlan.Delivery != playback.DeliveryRemuxProgressiveV3 {
+		t.Fatalf("after direct-play failure delivery = %q, want the progressive copy", active.PlaybackPlan.Delivery)
+	}
+	copyFailedMark("direct-play failure", false)
+	// A network (or subtitle) failure is not the video decoder's: the next copy is still offered.
+	active = replan(2, playback.ReplanOperationFailureRecoveryV3, "transport_stall")
+	if !playback.PlanCopiesVideoV3(*active.PlaybackPlan) {
+		t.Fatalf("after a network failure delivery = %q, want another copy", active.PlaybackPlan.Delivery)
+	}
+	copyFailedMark("network failure", false)
+	// The copy fails: recovery transcodes, and the mark is persisted.
+	active = replan(3, playback.ReplanOperationFailureRecoveryV3, "decoder_error")
+	if active.PlaybackPlan.Delivery != playback.DeliveryTranscodeHLSV3 {
+		t.Fatalf("after copy failure delivery = %q, want a transcode", active.PlaybackPlan.Delivery)
+	}
+	copyFailedMark("copy failure", true)
+	// A later replan of the attempt keeps refusing the copy and keeps the mark.
+	active = replan(4, playback.ReplanOperationQualityChangeV3, "")
+	if playback.PlanCopiesVideoV3(*active.PlaybackPlan) {
+		t.Fatalf("quality change after a failed copy delivery = %q, want no copy", active.PlaybackPlan.Delivery)
+	}
+	copyFailedMark("quality change", true)
+}
+
 func TestHandleReplanPlaybackV3SeekReanchorPreservesFallbackRecipe(t *testing.T) {
 	file := v3HandlerFixtureFile(t)
 	manager := playback.NewSessionManager(0, 0)

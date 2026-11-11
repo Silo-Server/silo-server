@@ -821,6 +821,13 @@ type StartRequestV3 struct {
 	BandwidthCapKbps           *int                      `json:"bandwidth_cap_kbps,omitempty"`
 	Capabilities               ClientCodecCapabilitiesV3 `json:"client_capabilities"`
 	ClientPlaybackContext      ClientPlaybackContextV3   `json:"client_playback_context"`
+
+	// VideoCopyFailed is set by the server, never the client: a video
+	// stream-copy already failed on the client during this attempt. A multi-PPS
+	// source then stops offering copy routes, so recovery lands on a transcode
+	// instead of the next remux variant. It is sticky for the attempt (see
+	// ExecutableRecipeV3.VideoCopyFailed).
+	VideoCopyFailed bool `json:"-"`
 }
 
 func (r StartRequestV3) AllowsAlternateVersions() bool {

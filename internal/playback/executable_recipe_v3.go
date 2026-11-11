@@ -75,6 +75,9 @@ type ExecutableRecipeV3 struct {
 	// version 5 so a binary that predates it rejects the recipe instead of
 	// reopening the transport as fMP4.
 	CopyVideoMPEGTS bool `json:"copy_video_mpegts,omitempty"`
+	// VideoCopyFailed mirrors PlannerResultV3.VideoCopyFailed: a video
+	// stream-copy already failed on the client in this attempt.
+	VideoCopyFailed bool `json:"video_copy_failed,omitempty"`
 }
 
 const (
@@ -104,6 +107,7 @@ func FreezeExecutableRecipeV3(result PlannerResultV3) ExecutableRecipeV3 {
 		PlayMethod:                    result.PlayMethod,
 		TranscodeAudio:                result.TranscodeAudio,
 		RemuxResumeLeadingPictureDrop: result.RemuxResumeLeadingPictureDrop,
+		VideoCopyFailed:               result.VideoCopyFailed,
 		TargetVideoCodec:              result.TargetVideoCodec,
 		TargetAudioCodec:              result.TargetAudioCodec,
 		TargetAudioChannels:           result.TargetAudioChannels,
@@ -227,6 +231,12 @@ func PlanCopiesVideoAsMPEGTSV3(plan PlanV3) bool {
 	return plan.Delivery == DeliveryRemuxHLSV3 && plan.EffectiveRecipe.SegmentContainer == SegmentContainerMPEGTSV3
 }
 
+// PlanCopiesVideoV3 reports whether the plan stream-copies the source's video
+// (an HLS or progressive server remux).
+func PlanCopiesVideoV3(plan PlanV3) bool {
+	return plan.Delivery == DeliveryRemuxHLSV3 || plan.Delivery == DeliveryRemuxProgressiveV3
+}
+
 // PlannerResult restores a planner result from the frozen executable recipe.
 func (r ExecutableRecipeV3) PlannerResult(plan *PlanV3) PlannerResultV3 {
 	return PlannerResultV3{
@@ -234,6 +244,7 @@ func (r ExecutableRecipeV3) PlannerResult(plan *PlanV3) PlannerResultV3 {
 		PlayMethod:                    r.PlayMethod,
 		TranscodeAudio:                r.TranscodeAudio,
 		RemuxResumeLeadingPictureDrop: r.RemuxResumeLeadingPictureDrop,
+		VideoCopyFailed:               r.VideoCopyFailed,
 		TargetVideoCodec:              r.TargetVideoCodec,
 		TargetAudioCodec:              r.TargetAudioCodec,
 		SourceAudioChannels:           r.SourceAudioChannels,

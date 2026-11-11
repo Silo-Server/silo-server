@@ -5680,10 +5680,11 @@ type replanPassV3 struct {
 // audioDegraded is the audio selection's state before planning.
 func (h *PlaybackHandler) planReplanV3(r *http.Request, p replanPlanningV3, start playback.StartRequestV3, effectiveFile *models.MediaFile, audioIndex int, audioDegraded bool) (replanPassV3, *transportErrorV3) {
 	// An output change that falls back to the playing edition plans under the
-	// same estimate, and so the same limit.
+	// same estimate, and so the same limit, and still refuses a failed copy.
 	currentEffectiveStart := p.currentEffectiveStart
 	currentEffectiveStart.BandwidthEstimateKbps = start.BandwidthEstimateKbps
 	currentEffectiveStart.BandwidthEstimateSource = start.BandwidthEstimateSource
+	currentEffectiveStart.VideoCopyFailed = start.VideoCopyFailed
 	additional, inventoryErr := h.listDownloadedSubtitlesV3(r.Context(), effectiveFile)
 	if inventoryErr != nil && (p.operation == playback.ReplanOperationTrackChangeV3 || p.operation == playback.ReplanOperationQualityChangeV3) && selectsDownloadedSubtitleV3(effectiveFile, start) {
 		// A failed lookup says nothing about whether the selected track
@@ -6160,6 +6161,15 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 	}
 	if !seekReanchor && !userIntentOperation && (!intentChange || seekFailureRecovery) {
+		// A video stream-copy that failed on the client stays refused for the
+		// rest of the attempt, so a multi-PPS source lands on a transcode instead
+		// of the next remux variant. A failure on an unreachable node or proxy
+		// origin, of the network, or of a subtitle route is not the video
+		// decoder's. It goes on the durable recipe now because a terminal or
+		// transport error persists this record unchanged.
+		if !proxyOriginRecovery && !nodeRecovery && !notVideoDecodeFailuresV3[req.Failure.Classification] && playback.PlanCopiesVideoV3(record.CurrentPlan) {
+			record.FrozenRecipe.VideoCopyFailed = true
+		}
 		// Always exclude the durable server recipe so stale or malformed client
 		// history cannot immediately re-select the route that just failed and
 		// ping-pong the session. A client-reported local mutation (for example a
@@ -6177,6 +6187,8 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			}
 		}
 	}
+	// The failed-copy mark rides on start so every plan this replan builds sees it.
+	start.VideoCopyFailed = record.FrozenRecipe.VideoCopyFailed
 	var result playback.PlannerResultV3
 	var toneMapCapabilityErr error
 	var plannerSettings playback.PlannerSettingsV3
@@ -6713,6 +6725,35 @@ func sameEmbeddedSubtitleRouteV3(left, right *playback.EmbeddedSubtitleV3) bool 
 		return left == nil && right == nil
 	}
 	return *left == *right
+}
+
+const (
+	failureHTTPV3          = "http_failure"
+	failureNetworkErrorV3  = "network_error"
+	failureAudioRendererV3 = "audio_renderer_error"
+)
+
+// notVideoDecodeFailuresV3 lists the failure classifications that say a copy
+// route failed for a reason other than the video decoder: the network, the
+// source, the audio renderer, or a subtitle route. They do not mark the copy as
+// failed; an audio failure recovers on a copy with the audio converted to AAC,
+// not on a video transcode. Any other classification does, because a wrong
+// mark costs a transcode, which plays, while a missed one leaves a strict
+// decoder retrying copies. The network names are the ones the Silo apps send.
+// The web engine's browser_engine_read_failed is left out on purpose: it also
+// reports video that stopped while audio kept playing, which is how a strict
+// decoder fails a copy.
+var notVideoDecodeFailuresV3 = map[string]bool{
+	playback.FailureSubtitleHLSRenditionFailedV3: true,
+	playback.FailureSubtitleEmbeddedFailedV3:     true,
+	"transport_stall":                            true,
+	"transport_failure":                          true,
+	failureHTTPV3:                                true,
+	failureNetworkErrorV3:                        true,
+	"network_degraded":                           true,
+	"source_unavailable":                         true,
+	"seek_reanchor_network_failure":              true,
+	failureAudioRendererV3:                       true,
 }
 
 // withoutFailedSubtitleRoutesV3 removes the subtitle routes this attempt may
