@@ -107,7 +107,6 @@
   --animate-slide-up: slide-up 0.3s ease-out;
   --animate-scale-in: scale-in 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
   --animate-ken-burns-a: ken-burns-a 14s linear infinite;
-  --animate-ken-burns-b: ken-burns-b 18s linear infinite;
 
   /* ── Motion: Duration ──────────────────────────────────────── */
   --duration-instant: 0ms;
@@ -212,11 +211,11 @@
     opacity: 0;
   }
 }
-/* Hero backdrop drift: a slow pan over a fixed overscan. The scale stays
-   constant on purpose. Firefox redraws an element whose scale is animating at
-   each new size and lands it on whole pixels, so a slow zoom stutters there.
-   Each pan stays inside its overscan (3% a side at 1.06, 2% at 1.04), so the
-   frame never shows an edge. */
+/* Collection hero backdrop drift: a slow pan over a fixed overscan. The scale
+   stays constant on purpose. Firefox redraws an element whose scale is
+   animating at each new size and lands it on whole pixels, so a slow zoom
+   stutters there. The pan stays inside its 3%-a-side overscan, so the frame
+   never shows an edge. */
 @keyframes ken-burns-a {
   0%,
   100% {
@@ -226,17 +225,6 @@
   50% {
     scale: 1.06;
     translate: -1.5% -1%;
-  }
-}
-@keyframes ken-burns-b {
-  0%,
-  100% {
-    scale: 1.04;
-    translate: 1% 0;
-  }
-  50% {
-    scale: 1.04;
-    translate: -1% 0.6%;
   }
 }
 
@@ -440,7 +428,6 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --duration-sidebar-entry: 0ms;
     --duration-sidebar-return: 0ms;
     --animate-ken-burns-a: none;
-    --animate-ken-burns-b: none;
   }
   .ambient-glow {
     transition: none;
