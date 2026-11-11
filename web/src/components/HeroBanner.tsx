@@ -421,12 +421,6 @@ export default function HeroBanner({
       >
         <div className="w-full max-w-[1380px]">
           <div className="max-w-3xl">
-            <p className="hero-eyebrow mb-4 hidden sm:block">
-              <span className="hero-eyebrow-strong">{t("web.home.hero.eyebrow")}</span>
-              {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a divider glyph, not text */}
-              <span className="hero-eyebrow-divider">—</span>
-              <span>{t("web.home.hero.slideNumber", { number: padded(activeIndex + 1) })}</span>
-            </p>
             <h1
               key={current.content_id}
               className="bidi-text font-display mb-4 max-w-4xl text-4xl font-extrabold tracking-[-0.04em] text-balance sm:text-5xl lg:text-6xl xl:text-7xl"
