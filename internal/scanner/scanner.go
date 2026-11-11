@@ -3126,6 +3126,11 @@ func (s *Scanner) processFile(
 			return found, nil
 		}
 		stored, err := s.fileRepo.GetByID(ctx, existing.ID)
+		if errors.Is(err, ErrFileNotFound) {
+			// Deleted since the snapshot: there is nothing stored to keep,
+			// and the upsert re-ingests the file.
+			return found, nil
+		}
 		if err != nil {
 			return nil, fmt.Errorf("reading stored sidecars of file %s: %w", filePath, err)
 		}
@@ -3555,11 +3560,18 @@ func hasMissingExternalSubtitlePath(paths []string) bool {
 		if strings.TrimSpace(path) == "" {
 			continue
 		}
-		if _, err := fspath.Stat(path); errors.Is(err, os.ErrNotExist) {
+		if sidecarConfirmedGone(path) {
 			return true
 		}
 	}
 	return false
+}
+
+// sidecarConfirmedGone reports that a stored sidecar no longer exists. Any
+// other stat failure leaves it unconfirmed.
+func sidecarConfirmedGone(path string) bool {
+	_, err := fspath.Stat(path)
+	return errors.Is(err, os.ErrNotExist)
 }
 
 func shouldSkipStableConfirmedScanState(
@@ -3781,7 +3793,7 @@ func keepUnlistedSidecars(stored, found []models.ExternalSubtitle) []models.Exte
 			delete(foundByPath, path)
 			continue
 		}
-		if _, err := fspath.Stat(sub.Path); errors.Is(err, os.ErrNotExist) {
+		if sidecarConfirmedGone(sub.Path) {
 			continue
 		}
 		result = append(result, sub)
