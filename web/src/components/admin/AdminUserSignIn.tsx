@@ -46,6 +46,7 @@ import {
   isNetworkSignIn,
 } from "@/lib/externalSignInAdmin";
 import { useT } from "@/i18n";
+import { TOUCH_HIT_AREA, TOUCH_TARGETS } from "@/lib/touchTargets";
 import { cn } from "@/lib/utils";
 import { FeedbackLine, type Feedback } from "@/components/admin/FeedbackLine";
 
@@ -108,7 +109,7 @@ function IdentityRow({
   return (
     <li className="flex flex-wrap items-start justify-between gap-3 py-3 first:pt-0 last:pb-0">
       <div className="min-w-0 flex-1 space-y-1">
-        <p className="text-sm font-medium">
+        <p className="text-sm font-medium break-words">
           {provider}
           {who ? (
             <span className="text-muted-foreground font-normal">
@@ -118,7 +119,7 @@ function IdentityRow({
           ) : null}
         </p>
         {identity.display_name ? (
-          <p className="text-muted-foreground text-xs">{identity.display_name}</p>
+          <p className="text-muted-foreground text-xs break-words">{identity.display_name}</p>
         ) : null}
         <p className="text-muted-foreground text-xs break-all">
           {t("web.admin.common.adminUserSignIn.identity.subject", {
@@ -285,7 +286,7 @@ function LinkIdentityDialog({
         if (!open && !link.isPending) onClose();
       }}
     >
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className={cn("sm:max-w-lg", TOUCH_TARGETS)}>
         <form onSubmit={submit} className="space-y-4" noValidate>
           <DialogHeader>
             <DialogTitle>{t("web.admin.common.adminUserSignIn.link.title")}</DialogTitle>
@@ -307,7 +308,10 @@ function LinkIdentityDialog({
             <p className="text-muted-foreground text-sm">
               {t("web.admin.common.adminUserSignIn.link.noProviders", {
                 link: (chunks) => (
-                  <Link to="/admin/settings/sign-in" className="text-foreground underline">
+                  <Link
+                    to="/admin/settings/sign-in"
+                    className={cn("text-foreground underline", TOUCH_HIT_AREA)}
+                  >
                     {chunks}
                   </Link>
                 ),
@@ -322,7 +326,7 @@ function LinkIdentityDialog({
                 <SelectTrigger id={providerId} className="w-full">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className={TOUCH_TARGETS}>
                   {candidates.map((installation) => (
                     <SelectItem key={installation.id} value={String(installation.id)}>
                       {installation.auth_bindings?.some((b) => b.enabled)
@@ -534,7 +538,10 @@ export function AdminUserSignIn({
             <p className="text-muted-foreground text-xs">
               {t("web.admin.common.adminUserSignIn.password.turnBackOn", {
                 link: (chunks) => (
-                  <Link to="/admin/settings/sign-in" className="text-foreground underline">
+                  <Link
+                    to="/admin/settings/sign-in"
+                    className={cn("text-foreground underline", TOUCH_HIT_AREA)}
+                  >
                     {chunks}
                   </Link>
                 ),
@@ -671,6 +678,7 @@ export function AdminUserSignIn({
           last_way: lastWay ? "yes" : "no",
         })}
         confirmLabel={t("web.admin.common.adminUserSignIn.unlink")}
+        className={TOUCH_TARGETS}
         variant="destructive"
         onConfirm={confirmUnlink}
         isPending={unlink.isPending}

@@ -82179,6 +82179,16 @@
       "value": "Could not load users."
     }
   ],
+  "web.admin.users.list.moreActions": [
+    {
+      "type": 0,
+      "value": "More actions for "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    }
+  ],
   "web.admin.users.list.nextPage": [
     {
       "type": 0,
@@ -82189,6 +82199,12 @@
     {
       "type": 0,
       "value": "No group"
+    }
+  ],
+  "web.admin.users.list.noMatches": [
+    {
+      "type": 0,
+      "value": "No users match your search or filter."
     }
   ],
   "web.admin.users.list.pageRange": [
