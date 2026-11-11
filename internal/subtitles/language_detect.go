@@ -288,14 +288,51 @@ func contentDetectionText(data []byte, format SubtitleFormat) string {
 }
 
 // sampleSubtitleContent returns data unchanged when it fits the content
-// sample. For a larger file it keeps the lines that can carry subtitle text,
-// so embedded fonts, graphics, or styles are not sampled in place of speech,
-// and returns whole lines from evenly spaced windows over them. A blank line
-// ends each window so cue parsing restarts cleanly.
+// sample. A larger file is read as evenly spaced windows of whole lines, with
+// a blank line after each window so cue parsing restarts cleanly. ASS, SSA
+// and WebVTT windows span only the lines that can carry subtitle text, so
+// embedded fonts, graphics, or styles are not sampled in place of speech.
 func sampleSubtitleContent(data []byte, format SubtitleFormat) []byte {
 	if len(data) <= contentSampleBytes {
 		return data
 	}
+	switch format {
+	case FormatASS, FormatSSA, FormatVTT:
+		return sampleTextLines(data, format)
+	default:
+		return sampleLineWindows(data)
+	}
+}
+
+const contentSampleWindow = contentSampleBytes/contentSampleWindows - 1
+
+// sampleLineWindows samples a format in which every line can carry text.
+func sampleLineWindows(data []byte) []byte {
+	step := (len(data) - contentSampleWindow) / (contentSampleWindows - 1)
+	sample := make([]byte, 0, contentSampleBytes)
+	for i := range contentSampleWindows {
+		chunk := data[i*step : i*step+contentSampleWindow]
+		if i > 0 {
+			// Drop the partial line the window starts inside.
+			start := bytes.IndexByte(chunk, '\n')
+			if start < 0 {
+				continue
+			}
+			chunk = chunk[start+1:]
+		}
+		end := bytes.LastIndexByte(chunk, '\n')
+		if end < 0 {
+			continue
+		}
+		sample = append(sample, chunk[:end+1]...)
+		sample = append(sample, '\n')
+	}
+	return sample
+}
+
+// sampleTextLines keeps every text line when they fit the sample, and
+// otherwise windows over the text lines alone.
+func sampleTextLines(data []byte, format SubtitleFormat) []byte {
 	total := 0
 	forEachTextLine(data, format, func(line []byte) { total += len(line) })
 	sample := make([]byte, 0, min(total, contentSampleBytes))
@@ -303,17 +340,16 @@ func sampleSubtitleContent(data []byte, format SubtitleFormat) []byte {
 		forEachTextLine(data, format, func(line []byte) { sample = append(sample, line...) })
 		return sample
 	}
-	window := contentSampleBytes/contentSampleWindows - 1
-	step := (total - window) / (contentSampleWindows - 1)
+	step := (total - contentSampleWindow) / (contentSampleWindows - 1)
 	w, offset := 0, 0
 	forEachTextLine(data, format, func(line []byte) {
 		start := offset
 		offset += len(line)
-		for w < contentSampleWindows && start >= w*step+window {
+		for w < contentSampleWindows && start >= w*step+contentSampleWindow {
 			sample = append(sample, '\n')
 			w++
 		}
-		if w < contentSampleWindows && start >= w*step && offset <= w*step+window {
+		if w < contentSampleWindows && start >= w*step && offset <= w*step+contentSampleWindow {
 			sample = append(sample, line...)
 		}
 	})
@@ -321,8 +357,8 @@ func sampleSubtitleContent(data []byte, format SubtitleFormat) []byte {
 }
 
 // forEachTextLine calls fn with each line of data, including its newline,
-// that the format's text extractor may read: ASS and SSA dialog events,
-// WebVTT cue timings and payloads, and every line of other formats.
+// that the format's text extractor may read: ASS and SSA dialog events and
+// WebVTT cue timings and payloads.
 func forEachTextLine(data []byte, format SubtitleFormat, fn func(line []byte)) {
 	inCue := false
 	for len(data) > 0 {
