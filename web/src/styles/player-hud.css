@@ -2,10 +2,10 @@
    Video player HUD
    ================================================================
    The HUD always sits on a picture, never on an app surface, so its
-   tokens are fixed rather than themed. One warm accent, the projector
-   lamp, marks where the viewer is and what they have chosen: the played
-   part of the timeline, the selected row in a panel, keyboard focus.
-   Nothing else is amber.
+   tokens are fixed rather than themed. The exception is the lamp, the
+   server's accent color (--primary). It marks where the viewer is and
+   what they have chosen: the played part of the timeline, the selected
+   row in a panel, keyboard focus. Nothing else uses it.
 
    Sizes are in rem so the HUD grows with the reader's text size.
    Imported by the player components that use it; Vite dedupes it.
@@ -14,7 +14,8 @@
 :root {
   --hud-paper: #f5f3ef;
   --hud-ash: #bdbab3;
-  --hud-lamp: #f2b544;
+  --hud-lamp: var(--primary);
+  --hud-lamp-ink: var(--primary-foreground);
   --hud-ink: #0e0e11;
   --hud-panel: rgb(16 16 19 / 0.93);
   --hud-glass: rgb(20 20 24 / 0.62);
@@ -152,7 +153,7 @@
     font-size: 0.6875rem;
     font-weight: 700;
     line-height: 1.125rem;
-    color: var(--hud-ink);
+    color: var(--hud-lamp-ink);
     background: var(--hud-lamp);
   }
 
@@ -497,14 +498,14 @@
     stroke-width: 1.75;
   }
 
-  /* Desktop panels rise from the utility rail and clear the timeline above
-     it, so scrubbing stays possible with a panel open. */
+  /* Desktop panels rise just above their rail button. A tall panel may
+     cover the timeline while it is open. */
   .hud-popover {
     position: absolute;
     inset-inline-end: 0;
-    bottom: calc(100% + 3.75rem);
+    bottom: calc(100% + 0.75rem);
     z-index: 30;
-    max-height: min(32rem, calc(100cqh - 13rem));
+    max-height: min(32rem, calc(100cqh - 10rem));
   }
 
   /* A long list inside a panel scrolls on its own under the header, with a
@@ -665,7 +666,7 @@
   }
   [aria-checked="true"] > .hud-switch::after {
     transform: translateX(calc(0.875rem * var(--dir-sign)));
-    background: var(--hud-ink);
+    background: var(--hud-lamp-ink);
   }
 
   /* Small inline action inside a panel (delay −/+, Reset). */
@@ -770,7 +771,7 @@
   }
 
   /* ── Keyboard focus ─────────────────────────────────────────
-     Amber ring plus a dark halo: it reads on white buttons, on the
+     Accent ring plus a dark halo: it reads on white buttons, on the
      panel, and on any frame of video.                              */
   .hud :focus-visible {
     outline: 2px solid var(--hud-lamp);

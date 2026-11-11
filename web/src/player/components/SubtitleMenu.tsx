@@ -256,7 +256,7 @@ export function SubtitleMenu({
           <div
             role="menu"
             aria-label={t("web.subtitles.menu.tracksLabel")}
-            className="hud-scroll-list max-h-[min(22.5rem,calc(100cqh-26rem))] min-h-[7.5rem] shrink"
+            className="hud-scroll-list max-h-[min(22.5rem,calc(100cqh-23rem))] min-h-[7.5rem] shrink"
           >
             <button
               role="menuitemradio"
@@ -274,10 +274,6 @@ export function SubtitleMenu({
               const isActive = track.index === activeIndex;
               const languageName = getLanguageName(track.language);
               const source = track.source ?? "embedded";
-              // Text formats render alike; only image-based ones (no restyling,
-              // no search) are worth naming in the list.
-              const format = getSubtitleFormatLabel(track.codec);
-              const formatLabel = format && ["PGS", "DVD", "DVB"].includes(format) ? format : null;
               const detail =
                 track.label &&
                 track.label !== track.language &&
@@ -285,12 +281,12 @@ export function SubtitleMenu({
                 !isSubtitleFormatLabel(track.label, track.codec)
                   ? track.label
                   : null;
-              // Embedded is the norm, so only other sources are called out.
-              const secondary = [
-                detail,
-                formatLabel,
-                source !== "embedded" && SOURCE_LABELS[source] ? t(SOURCE_LABELS[source]) : null,
-              ].filter(Boolean);
+              const badges = [
+                getSubtitleFormatLabel(track.codec),
+                t(SOURCE_LABELS[source] ?? "web.subtitles.menu.source.embedded"),
+              ]
+                .filter(Boolean)
+                .join(" · ");
               const syncEntry = syncEntryOf(track);
               const syncLabel = syncEntry ? syncStatusLabel(syncEntry.state) : null;
 
@@ -307,18 +303,17 @@ export function SubtitleMenu({
                     {isActive ? <Check /> : null}
                   </span>
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                    {/* One line: the language, then what tells this track apart. */}
+                    {/* The title gets its own line: it can be a long file name,
+                        and truncating it must not hide the format and source. */}
                     <span className="flex min-w-0 items-baseline justify-between gap-3">
-                      <span className="shrink-0">{languageName}</span>
-                      {secondary.length > 0 && (
-                        <span
-                          className="hud-item-secondary min-w-0 truncate text-end"
-                          title={secondary.join(" · ")}
-                        >
-                          {secondary.join(" · ")}
-                        </span>
-                      )}
+                      <span className="min-w-0 truncate">{languageName}</span>
+                      <span className="hud-item-secondary shrink-0">{badges}</span>
                     </span>
+                    {detail && (
+                      <span className="hud-item-secondary truncate" title={detail}>
+                        {detail}
+                      </span>
+                    )}
                     {syncLabel && (
                       <span
                         className="hud-item-secondary truncate"
