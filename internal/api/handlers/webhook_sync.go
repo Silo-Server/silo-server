@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/webhooksync"
 )
@@ -562,19 +563,12 @@ func logWebhookDelivery(result *webhooksync.ProcessWebhookResult, meta webhooksy
 	}
 }
 
+// requestBaseURL is the origin r arrived on. X-Forwarded-Proto and
+// X-Forwarded-Host count only from a trusted proxy (see clientip.RequestOrigin),
+// so a client cannot use them to change the scheme or host of the links built
+// from it.
 func requestBaseURL(r *http.Request) string {
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	if forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); forwarded != "" {
-		scheme = forwarded
-	}
-	host := r.Host
-	if forwarded := forwardedHost(r); forwarded != "" {
-		host = forwarded
-	}
-	return scheme + "://" + host
+	return clientip.RequestOrigin(r)
 }
 
 func requestWebhookURL(baseURL, secret string) string {

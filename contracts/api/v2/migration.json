@@ -27887,7 +27887,7 @@
         "path": "/api/v2/home/sections",
         "operation_id": "listHomeSections"
       },
-      "notes": "Section catalog-home (profile_scoped). Same body as v1 with each card as the shared CatalogItem; image_size is a strict enum answered 422."
+      "notes": "Section catalog-home (profile_scoped). Same body as v1 with each card as the shared CatalogItem, except that rows with no items for the viewer are left out where v1 answers them empty; image_size is a strict enum answered 422."
     },
     {
       "listener": "api",
@@ -30329,7 +30329,7 @@
         "path": "/api/v2/library/{id}/sections",
         "operation_id": "listLibrarySections"
       },
-      "notes": "Section catalog-libraries (profile_scoped). Cards are the shared CatalogItem: progress_updated_at is a UTC ms instant; image_size is a declared enum answered 422; the device header is not read."
+      "notes": "Section catalog-libraries (profile_scoped). Cards are the shared CatalogItem: progress_updated_at is a UTC ms instant; image_size is a declared enum answered 422; the device header is not read. Rows with no items for the viewer are left out where v1 answers them empty."
     },
     {
       "listener": "api",
@@ -42649,7 +42649,7 @@
       },
       "notes": "Native v2 profile-scoped lifecycle; watch-provider sync runs use a bounded recent window (default 10, maximum 50), without continuation. External exchanges and mutations have no durable replay guarantee.",
       "retry_safety": "non_retryable",
-      "retry_safety_note": "Active-run lookup, cooldown check and run creation are separate database calls, and dispatch is process-local. Concurrent API nodes can create multiple runs. Add an atomic durable reservation and recoverable dispatch before advertising coalescing or automatic retry."
+      "retry_safety_note": "Manual coalescing, cooldown and reservation commit under the connection row lock. Scheduled admission skips a live manual run; scheduled overlap and manual timeout are unchanged. All nodes must use this boundary. Process-local dispatch has no durable replay guarantee; automatic retry remains unsafe."
     },
     {
       "listener": "api",

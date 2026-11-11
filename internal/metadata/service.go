@@ -213,6 +213,7 @@ type metadataSeasonRepo interface {
 type metadataItemLocalizationRepo interface {
 	Get(ctx context.Context, contentID, language string) (*models.MediaItemLocalization, error)
 	Upsert(ctx context.Context, loc *models.MediaItemLocalization) error
+	ClearMatchText(ctx context.Context, contentID string, keepTitle, keepText bool) error
 }
 
 type metadataSeasonLocalizationRepo interface {
@@ -2185,8 +2186,15 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			) {
 				continue
 			}
-			slog.WarnContext(ctx, "metadata: image provider error", "component", "metadata",
-				"provider", p.Slug(), "error", err)
+			// Only a lookup-key call is enrichment; an outage behind the
+			// provider's own ID still warns.
+			if accumulatedIDs[p.Slug()] == "" && isRoutineEnrichmentError(p, err) {
+				slog.DebugContext(ctx, "metadata: enrichment provider cannot answer now", "component", "metadata",
+					"provider", p.Slug(), "error", err)
+			} else {
+				slog.WarnContext(ctx, "metadata: image provider error", "component", "metadata",
+					"provider", p.Slug(), "error", err)
+			}
 			continue
 		}
 		if isIdentityHinter {
@@ -2450,6 +2458,14 @@ func buildMatchDecision(hints *MatchHints, candidates []MatchCandidate, winner *
 		decision.Outcome = MatchOutcomeTrustedIDConflict
 	default:
 		decision.Outcome = MatchOutcomeCandidateRejected
+		// The caller passes the hints and candidates of the attempt it kept,
+		// and the fallbacks after selection (episode or title-alias validation)
+		// only accept, so selecting again names the rule that rejected them.
+		// Outcomes a caller reclassifies afterwards drop the rule when bounded.
+		if _, ok, rejection := selectInitialMatch(hints, candidates, nil); !ok {
+			decision.Rejection = rejection.rule
+			decision.RequiredScore = rejection.requiredScore
+		}
 	}
 
 	scored := make([]MatchCandidate, len(candidates))
@@ -2766,6 +2782,12 @@ func (s *MetadataService) mergeAndPersist(
 	if req.Mode == ModeIdentify && !isNew && contentID != "" && existingItem == nil {
 		return nil, fmt.Errorf("identify target %q: %w", contentID, catalog.ErrItemNotFound)
 	}
+	// A correction to a different show clears the edits on its seasons and
+	// episodes, which describe the old show, in the transaction that stores the
+	// new identity. The id may move first: a rename keeps the children, but a
+	// merge onto another row takes on that row's, whose edits are its own.
+	replacesShow := req.identityCorrection && normalizeItemTypeForContentID(contentType) == matchContentTypeSeries &&
+		correctionNamesDifferentShow(contentType, storedItemIdentity(existingItem, req.durableProviderIDs), accumulator.ProviderIDs)
 	// Identity repairs (rebinding, local-ID promotion) belong to matching and
 	// refreshes, never to an enrichment write.
 	if !req.writesFieldsOnly() && !isNew && contentID != "" && existingItem != nil && (isProvisionalOwnershipStatus(existingItem.Status) || len(durableIDs) == 0) {
@@ -2775,6 +2797,7 @@ func (s *MetadataService) mergeAndPersist(
 		}
 		if reboundTo != "" {
 			contentID = reboundTo
+			replacesShow = false
 			existingItem, err = s.itemRepo.GetByID(ctx, contentID)
 			if err != nil {
 				return nil, fmt.Errorf("loading rebound item: %w", err)
@@ -2794,13 +2817,14 @@ func (s *MetadataService) mergeAndPersist(
 	// rows. Placed before the durableIDs merge below so the canonical row's
 	// provider IDs are folded into the accumulator. See canonicalizeLocalContentID.
 	if !req.writesFieldsOnly() && !isNew && contentid.IsLocal(contentID) {
-		canonical, err := s.canonicalizeLocalContentID(
+		canonical, renamed, err := s.canonicalizeLocalContentID(
 			ctx, contentID, providerIDsStruct(accumulator.ProviderIDs), contentType, req.Mode == ModeIdentify)
 		if err != nil {
 			return nil, fmt.Errorf("canonicalize local content id: %w", err)
 		}
 		if canonical != contentID {
 			contentID = canonical
+			replacesShow = replacesShow && renamed
 			existingItem, err = s.itemRepo.GetByID(ctx, contentID)
 			if err != nil {
 				return nil, fmt.Errorf("loading canonicalized item: %w", err)
@@ -2822,13 +2846,14 @@ func (s *MetadataService) mergeAndPersist(
 	anchorRejected := identityCorrectionRejectsLiveAnchor(contentID, accumulator.ProviderIDs,
 		accumulator.rejectedIdentityProviderIDs, req.recordedStaleProviderIDs, accumulator.sameRunStaleProviderIDs)
 	if shouldReanchorProviderContentID(contentID, isNew, req.Mode, anchorRejected) {
-		reanchored, err := s.reanchorContentID(
+		reanchored, renamed, err := s.reanchorContentID(
 			ctx, contentID, providerIDsStruct(accumulator.ProviderIDs), contentType, req.Mode == ModeIdentify)
 		if err != nil {
 			return nil, fmt.Errorf("reanchor provider content id: %w", err)
 		}
 		if reanchored != contentID {
 			contentID = reanchored
+			replacesShow = replacesShow && renamed
 			existingItem, err = s.itemRepo.GetByID(ctx, contentID)
 			if err != nil {
 				return nil, fmt.Errorf("loading reanchored item: %w", err)
@@ -2861,6 +2886,11 @@ func (s *MetadataService) mergeAndPersist(
 		}
 	}
 
+	// A correction that merged onto an item already holding the new identity
+	// keeps that item's own values.
+	corrected := existingItem != nil && req.identityCorrection && identityChoiceCorrects(
+		canonicalIdentityProviderIDs(accumulator.ProviderIDs), writtenIdentity)
+
 	// Adoption restamps default_metadata_language to req.Language while the
 	// merge below rewrites the language-bearing text (title, overview). Field
 	// locks win over adoption: if BOTH are locked, nothing would actually be
@@ -2877,6 +2907,9 @@ func (s *MetadataService) mergeAndPersist(
 		// Fallback text belongs to the provider IDs it was fetched with, so it
 		// applies after persistence moved the item to another content ID too.
 		keepStoredTitle := req.Mode != ModeInitialMatch || existingItem == nil || !isSkeletonLikeStatus(existingItem.Status)
+		if corrected {
+			req.fallback.ignoreStoredText()
+		}
 		req.fallback.applyToItem(accumulator, req.Language, existingItem, keepStoredTitle)
 		req.fallback.applyToChildren(seasons, episodes, req.Language, contentID)
 	case fallbackLanguage != "":
@@ -2908,6 +2941,7 @@ func (s *MetadataService) mergeAndPersist(
 		}
 	}
 
+	mergeLocked := locked
 	if existingItem != nil {
 		existingResult := itemToMetadataResult(existingItem)
 		suppressProviderIDValues(existingResult.ProviderIDs, accumulator.recordedStaleProviderIDs)
@@ -2931,9 +2965,22 @@ func (s *MetadataService) mergeAndPersist(
 			accumulator.localLists.keepStoredLists(accumulator, existingResult)
 			s.keepStoredLocalCredits(ctx, contentID, accumulator)
 		}
-		mergeLocked := locked
 		if !req.enrichmentOnly {
-			mergeLocked = s.peopleLocksForMerge(ctx, contentID, locked, existingResult, accumulator)
+			var creditsErr error
+			mergeLocked, creditsErr = s.peopleLocksForMerge(ctx, contentID, locked, existingResult, accumulator)
+			if creditsErr != nil {
+				// A correction must drop the previous match's unlocked group
+				// before the new identity is stored; afterwards a retry is no
+				// correction and keeps it.
+				if corrected {
+					return nil, creditsErr
+				}
+				slog.WarnContext(ctx, "metadata: leaving credits unchanged", "component", "metadata",
+					"content_id", contentID, "error", creditsErr)
+			}
+		}
+		if corrected {
+			clearPreviousMatch(existingResult, mergeLocked)
 		}
 		if isCanonicalWrite {
 			MergeMetadata(accumulator, existingResult, mergeLocked, mergeMode)
@@ -2942,12 +2989,8 @@ func (s *MetadataService) mergeAndPersist(
 		}
 		if !req.enrichmentOnly {
 			// One enrichment provider's dates only fill empty ones (above);
-			// the provider chain's current dates are a refresh's to apply. A
-			// correction that merged onto an item already holding the new
-			// identity keeps that item's own dates.
-			corrected := req.identityCorrection && identityChoiceCorrects(
-				canonicalIdentityProviderIDs(accumulator.ProviderIDs), writtenIdentity)
-			refreshHomeReleaseDates(existingResult, accumulator, mergeLocked, corrected)
+			// the provider chain's current dates are a refresh's to apply.
+			refreshHomeReleaseDates(existingResult, accumulator, mergeLocked)
 		}
 		for key := range accumulator.quarantinedProviderIDKeys {
 			delete(existingResult.ProviderIDs, key)
@@ -3061,6 +3104,11 @@ func (s *MetadataService) mergeAndPersist(
 		}
 	}
 	item.ContentID = contentID
+	if corrected {
+		if err := s.clearPreviousMatchRows(ctx, contentID, item, locked, mergeLocked); err != nil {
+			return nil, err
+		}
+	}
 	persistedContentID, err := s.persistItemAndProviderIDs(
 		ctx,
 		item,
@@ -3070,6 +3118,7 @@ func (s *MetadataService) mergeAndPersist(
 		len(durableIDs) == 0,
 		contentType,
 		req.Mode == ModeIdentify,
+		replacesShow,
 	)
 	if err != nil {
 		return nil, err
@@ -3185,17 +3234,17 @@ func (s *MetadataService) mergeAndPersist(
 	// refresh reported: scores and vote counts keep moving after release, and
 	// discovery rows rank by the TMDB count. The enrichment-only bulk pass
 	// carries one provider's answer, so it only fills sources the item lacks
-	// and never overwrites the chain's choice. Identify replaces the whole set,
-	// even with an empty one, because it keeps the content_id while changing
-	// the title: a source only the previous match reported would otherwise
-	// stay on the item for good. Like the rating columns, they are
+	// and never overwrites the chain's choice. Identify and a corrected NFO replace
+	// the whole set, even with an empty one, because they keep the content_id
+	// while changing the title: a source only the previous match reported would
+	// otherwise stay on the item for good. Like the rating columns, they are
 	// provider-invariant and written for every language.
 	if s.ratingSourceRepo != nil && !isFieldLocked(locked, FieldRating) {
 		sources := itemRatingSourcesFromResult(contentID, accumulator.RatingSources)
 		replace := mergeMode == MergeReplaceUnlocked || (req.Mode == ModeScheduledRefresh && !req.enrichmentOnly)
 		var err error
 		switch {
-		case req.Mode == ModeIdentify:
+		case req.Mode == ModeIdentify || corrected:
 			err = s.ratingSourceRepo.Replace(ctx, contentID, sources)
 		case len(sources) > 0:
 			err = s.ratingSourceRepo.Upsert(ctx, contentID, sources, replace)
@@ -3242,6 +3291,25 @@ func (s *MetadataService) mergeAndPersist(
 	}, nil
 }
 
+// clearPreviousMatchRows empties what a correction keeps outside the item row:
+// localized text and, when the new match lists none, credits. It runs before the
+// new identity is stored: afterwards a retry is no correction, and nothing would
+// clear them. Credits the new match does list replace the stored ones later on.
+func (s *MetadataService) clearPreviousMatchRows(ctx context.Context, contentID string, item *models.MediaItem, locked, creditLocks []MetadataField) error {
+	if s.itemLocalizationRepo != nil {
+		if err := s.itemLocalizationRepo.ClearMatchText(ctx, contentID, isFieldLocked(locked, FieldName), isFieldLocked(locked, FieldOverview)); err != nil {
+			return err
+		}
+	}
+	if len(item.People) > 0 || (isFieldLocked(creditLocks, FieldCast) && isFieldLocked(creditLocks, FieldCrew)) {
+		return nil
+	}
+	if err := s.itemRepo.ReplacePeople(ctx, contentID, nil); err != nil {
+		return fmt.Errorf("clearing the previous match's people: %w", err)
+	}
+	return nil
+}
+
 func (s *MetadataService) persistItemAndProviderIDs(
 	ctx context.Context,
 	item *models.MediaItem,
@@ -3251,13 +3319,14 @@ func (s *MetadataService) persistItemAndProviderIDs(
 	missingDurableIDs bool,
 	contentType string,
 	identityChosen bool,
+	clearChildEdits bool,
 ) (string, error) {
 	if item == nil || strings.TrimSpace(item.ContentID) == "" {
 		return "", fmt.Errorf("content_id is required")
 	}
 	if itemRepo, ok := s.itemRepo.(*catalog.ItemRepository); ok && s.dbPool != nil {
 		if providerRepo, ok := s.providerIDRepo.(*catalog.ProviderIDRepository); ok && providerRepo != nil {
-			return s.persistItemAndProviderIDsTx(ctx, itemRepo, providerRepo, item, providerIDs, isNew, existingItem, missingDurableIDs, contentType, identityChosen)
+			return s.persistItemAndProviderIDsTx(ctx, itemRepo, providerRepo, item, providerIDs, isNew, existingItem, missingDurableIDs, contentType, identityChosen, clearChildEdits)
 		}
 	}
 	contentID, err := s.persistItemAndProviderIDsLegacy(ctx, item, providerIDs, isNew, existingItem, missingDurableIDs, contentType)
@@ -3278,9 +3347,10 @@ func (s *MetadataService) persistItemAndProviderIDsTx(
 	missingDurableIDs bool,
 	contentType string,
 	identityChosen bool,
+	clearChildEdits bool,
 ) (string, error) {
 	contentID := item.ContentID
-	err := s.persistItemAndProviderIDsOnceTx(ctx, itemRepo, providerRepo, item, providerIDs, identityChosen)
+	err := s.persistItemAndProviderIDsOnceTx(ctx, itemRepo, providerRepo, item, providerIDs, identityChosen, clearChildEdits)
 	if err == nil {
 		return contentID, nil
 	}
@@ -3297,7 +3367,10 @@ func (s *MetadataService) persistItemAndProviderIDsTx(
 	}
 	item.ContentID = reboundTo
 	clearDroppedIdentityColumns(item, dropped)
-	if retryErr := s.persistItemAndProviderIDsOnceTx(ctx, itemRepo, providerRepo, item, providerIDs, identityChosen); retryErr != nil {
+	// A row conflict recovery merged into holds its own edits; a retry on the
+	// same row still owes the clear its first attempt rolled back.
+	clearOnRetry := clearChildEdits && reboundTo == contentID
+	if retryErr := s.persistItemAndProviderIDsOnceTx(ctx, itemRepo, providerRepo, item, providerIDs, identityChosen, clearOnRetry); retryErr != nil {
 		return "", fmt.Errorf("persisting provider IDs after conflict recovery for %s: %w", reboundTo, retryErr)
 	}
 	return reboundTo, nil
@@ -3331,6 +3404,7 @@ func (s *MetadataService) persistItemAndProviderIDsOnceTx(
 	item *models.MediaItem,
 	providerIDs map[string]string,
 	identityChosen bool,
+	clearChildEdits bool,
 ) error {
 	tx, err := s.dbPool.BeginTx(ctx, catalog.MetadataCurationTxOptions(ctx))
 	if err != nil {
@@ -3354,6 +3428,11 @@ func (s *MetadataService) persistItemAndProviderIDsOnceTx(
 	// (identify_sticky.go).
 	if identityChosen {
 		if err := catalog.MarkIdentityChosenTx(ctx, tx, item.ContentID); err != nil {
+			return err
+		}
+	}
+	if clearChildEdits {
+		if err := catalog.ClearSeriesChildEditsTx(ctx, tx, item.ContentID); err != nil {
 			return err
 		}
 	}
@@ -10455,6 +10534,22 @@ func rejectIdentityProviderIDs(rejected providerIDValueSet, chosen map[string]st
 			}
 		}
 	}
+}
+
+// correctionNamesDifferentShow reports whether a correction's resolved IDs name
+// a different title than the stored ones: they contradict on the first ID both
+// carry, or share no ID that would show they are the same title.
+func correctionNamesDifferentShow(itemType string, stored, resolved map[string]string) bool {
+	if identityProviderIDsContradict(itemType, stored, resolved) {
+		return true
+	}
+	for _, key := range trustedSearchIDKeys {
+		value := normalizeProviderIDComparisonValue(key, stored[key])
+		if value != "" && value == normalizeProviderIDComparisonValue(key, resolved[key]) {
+			return false
+		}
+	}
+	return true
 }
 
 func mediaItemWithProviderIDs(item *models.MediaItem, providerIDs map[string]string) *models.MediaItem {

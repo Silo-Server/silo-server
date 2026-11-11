@@ -7,6 +7,7 @@ import LibraryHeader from "@/components/LibraryHeader";
 import { useUserLibraries } from "@/hooks/queries/libraries";
 import { useStartShuffle } from "@/hooks/queries/shuffles";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { useT } from "@/i18n";
 import LibraryRecommended from "./LibraryRecommended";
 import LibraryBrowse from "./LibraryBrowse";
 import LibraryCollections from "./LibraryCollections";
@@ -40,6 +41,7 @@ interface HydratedLibrarySearch {
 }
 
 export default function LibraryPage() {
+  const t = useT();
   const { libraryId } = useParams<{ libraryId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: libraries, isLoading } = useUserLibraries();
@@ -117,7 +119,7 @@ export default function LibraryPage() {
     setHasRenderedHero(rendered);
   }, []);
 
-  useDocumentTitle(library?.name ?? "Library");
+  useDocumentTitle(library?.name ?? t("web.library.page.titleFallback"));
 
   /* eslint-disable react-hooks/set-state-in-effect -- hydration provenance is synchronized with router state */
   useEffect(() => {
@@ -422,9 +424,9 @@ export default function LibraryPage() {
   if (!library) {
     return (
       <div className="text-muted-foreground flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-        <p>This library is hidden or unavailable for your account.</p>
+        <p>{t("web.library.page.unavailable")}</p>
         <Link to="/settings/libraries" className="text-primary text-sm font-medium hover:underline">
-          Manage library visibility in Settings
+          {t("web.library.page.manageVisibility")}
         </Link>
       </div>
     );
@@ -462,7 +464,6 @@ export default function LibraryPage() {
             <LibraryBrowse
               libraryId={id}
               libraryType={libraryType || "mixed"}
-              boxSetsEnabled={library?.box_sets_enabled === true}
               browseType={browseType}
               queryDefinition={queryDefinition}
               onBrowseTypeChange={handleBrowseTypeChange}

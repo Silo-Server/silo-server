@@ -5433,6 +5433,58 @@ func TestPrepareTransportV3RoutesDirectPlayThroughProxyNode(t *testing.T) {
 	}
 }
 
+// A progressive remux URL carries remux_range=refuse only where its egress
+// refuses the range: an older proxy would stream it from the origin instead.
+func TestPrepareTransportV3PublishesRemuxRangeRefusalOnlyToAProxyThatHonorsIt(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		features []string
+		want     bool
+	}{
+		{name: "upgraded proxy", features: []string{playback.TransportFeatureProgressiveRemuxRelayV1, playback.TransportFeatureRemuxRangeRefusalV1}, want: true},
+		{name: "older proxy", features: []string{playback.TransportFeatureProgressiveRemuxRelayV1}, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+			handler.JWTSecret = "test-secret"
+			stubCopySeekAnchorV3(handler)
+			proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/hw-capabilities" {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				writeJSON(w, http.StatusOK, playback.HWAccelInfo{
+					TransportFeatures: tc.features,
+					Transformations: []playback.TransformationV3{
+						{Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3},
+					},
+				})
+			}))
+			t.Cleanup(proxy.Close)
+			handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{ProxyNode: &nodepool.Node{ID: 42, URL: proxy.URL + "/"}}}
+
+			plan := identityProxyPlanV3(playback.DeliveryRemuxProgressiveV3, playback.TransformationV3{Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3})
+			transport, transportErr := handler.prepareTransportV3(
+				httptest.NewRequest(http.MethodPost, "/", nil),
+				&playback.Session{ID: "session-remux-range", UserID: 7, ProfileID: "profile-1"},
+				v3HandlerFixtureFile(t),
+				playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayRemux, TranscodeAudio: true, TargetAudioCodec: "aac"},
+				mediaAuthModeV3{progressiveRangeRefusal: true})
+			if transportErr != nil {
+				t.Fatalf("prepare identity transport: %v", transportErr)
+			}
+			defer transport.rollback()
+
+			if !strings.HasPrefix(transport.url, proxy.URL+"/stream/remux/") {
+				t.Fatalf("remux stream url = %q, want a proxy /stream/remux URL", transport.url)
+			}
+			if got := strings.Contains(transport.url, playback.RemuxRangeQueryParam+"="+playback.RemuxRangeRefuse); got != tc.want {
+				t.Fatalf("remux stream url = %q, carries the refusal = %v, want %v", transport.url, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestPrepareTransportV3RoutesProgressiveRemuxThroughProxyNodeWithSeekAndDV(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
@@ -6764,4 +6816,36 @@ func TestAttachSubtitleArtifactV3UsesFrozenDownloadedIdentityWithoutOrdinalLooku
 	if plan.Subtitle.Artifact == nil || !strings.Contains(plan.Subtitle.Artifact.URL, "downloaded_subtitle_id=71") {
 		t.Fatalf("artifact = %#v, want frozen downloaded subtitle 71", plan.Subtitle.Artifact)
 	}
+	t.Run("restored inventory includes a newly added stored track", func(t *testing.T) {
+		repo.listErr = nil
+		repo.list = []subtitles.DownloadedSubtitle{
+			*repo.subtitles[71],
+			{ID: 72, MediaFileID: file.ID, Format: subtitles.FormatSRT},
+		}
+		before := playback.PlanV3{
+			Subtitle: playback.SubtitleDecisionV3{
+				Mode:      playback.SubtitleRenderV3,
+				Inventory: playback.BuildSubtitleInventoryV3(file, downloadedSubtitleEntriesV3(file, repo.list[:1])),
+			},
+			Timeline: playback.TimelineV3{StreamOriginSeconds: 321},
+		}
+		raw, err := json.Marshal(before)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var restored playback.PlanV3
+		if err := json.Unmarshal(raw, &restored); err != nil {
+			t.Fatal(err)
+		}
+		if err := handler.attachSubtitleArtifactV3(t.Context(), "session-frozen-subtitle", file, &restored, selectedIndex, &recipe, nil); err != nil {
+			t.Fatal(err)
+		}
+		if len(restored.Subtitle.Inventory) != 2 || !strings.Contains(restored.Subtitle.Inventory[1].URL, "downloaded_subtitle_id=72") {
+			t.Fatalf("restored menu lost newly added subtitle 72: %+v", restored.Subtitle.Inventory)
+		}
+		if restored.Subtitle.Artifact == nil || !strings.Contains(restored.Subtitle.Artifact.URL, "downloaded_subtitle_id=71") || restored.Subtitle.Mode != before.Subtitle.Mode || restored.Timeline != before.Timeline {
+			t.Fatalf("restoring the menu changed the selected recipe: %+v", restored)
+		}
+	})
+
 }

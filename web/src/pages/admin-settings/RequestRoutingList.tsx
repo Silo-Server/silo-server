@@ -30,6 +30,7 @@ import {
   useUpdateRequestRoute,
 } from "@/hooks/queries/admin/requests";
 import { useSortableList } from "@/hooks/useSortableList";
+import { useAppLanguage, useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 import { RequestFallbackEditor } from "./RequestFallbackEditor";
@@ -69,6 +70,7 @@ type DialogState =
  * server's options once they load (IDs until then).
  */
 function DestinationText({ dest, scope }: { dest: RequestRouteDestination; scope: RoutingScope }) {
+  useAppLanguage();
   const server = scope.allServers.find((candidate) => candidate.id === dest.integration_id);
   const needsNames = Object.keys(dest.overrides ?? {}).some((key) =>
     SERVER_NAMED_OVERRIDES.has(key),
@@ -88,6 +90,7 @@ function RowWarnings({
   onFix: (fix: RoutingWarningFix) => void;
   busy: boolean;
 }) {
+  useAppLanguage();
   if (warnings.length === 0) return null;
   return (
     <ul className="mt-1.5 flex list-none flex-col gap-1">
@@ -104,7 +107,7 @@ function RowWarnings({
                 type="button"
                 size="xs"
                 variant="outline"
-                className="ml-auto h-6 border-amber-500/40 text-amber-600 dark:text-amber-300"
+                className="ms-auto h-6 border-amber-500/40 text-amber-600 dark:text-amber-300"
                 disabled={busy}
                 onClick={() => onFix(warning.fix!)}
               >
@@ -145,21 +148,22 @@ function RuleRow({
   onDelete: () => void;
   onFix: (fix: RoutingWarningFix) => void;
 }) {
+  const t = useT();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: rule.id,
     disabled: busy,
   });
   const fallback = scope.fallback;
   const below = scope.rules.slice(index + 1);
-  const fourK: ReactNode = rule.skip_uhd ? (
-    fallback?.uhd.integration_id ? (
-      "4K → none"
-    ) : null
-  ) : rule.uhd.integration_id && !sameDestination(rule.uhd, fallback?.uhd ?? {}) ? (
-    <>
-      4K → <DestinationText dest={rule.uhd} scope={scope} />
-    </>
-  ) : null;
+  const fourK: ReactNode = rule.skip_uhd
+    ? fallback?.uhd.integration_id
+      ? t("web.admin.settings.requests.list.uhdNone")
+      : null
+    : rule.uhd.integration_id && !sameDestination(rule.uhd, fallback?.uhd ?? {})
+      ? t("web.admin.settings.requests.list.uhdTo", {
+          destination: <DestinationText dest={rule.uhd} scope={scope} />,
+        })
+      : null;
 
   return (
     <li
@@ -178,7 +182,7 @@ function RuleRow({
       <div className="flex items-start gap-2">
         <button
           type="button"
-          aria-label={`Drag ${rule.name}`}
+          aria-label={t("web.admin.settings.requests.list.drag", { rule: rule.name })}
           className="text-muted-foreground hover:bg-accent mt-0.5 shrink-0 cursor-grab touch-none rounded-md p-1 disabled:cursor-not-allowed disabled:opacity-50"
           disabled={busy}
           {...attributes}
@@ -187,7 +191,7 @@ function RuleRow({
           <GripVertical className="size-4" aria-hidden="true" />
         </button>
         <span
-          className="text-muted-foreground mt-1 w-5 shrink-0 text-right text-xs tabular-nums"
+          className="text-muted-foreground mt-1 w-5 shrink-0 text-end text-xs tabular-nums"
           aria-hidden="true"
         >
           {index + 1}
@@ -196,7 +200,7 @@ function RuleRow({
           <button
             type="button"
             onClick={onEdit}
-            className="focus-visible:ring-ring group block w-full rounded-sm text-left focus-visible:ring-2 focus-visible:outline-none"
+            className="focus-visible:ring-ring group block w-full rounded-sm text-start focus-visible:ring-2 focus-visible:outline-none"
           >
             <span
               className={cn(
@@ -205,7 +209,9 @@ function RuleRow({
               )}
             >
               {rule.name}
-              {!rule.enabled ? <Badge variant="secondary">Off</Badge> : null}
+              {!rule.enabled ? (
+                <Badge variant="secondary">{t("web.admin.settings.requests.list.off")}</Badge>
+              ) : null}
             </span>
             <span
               className={cn(
@@ -217,13 +223,13 @@ function RuleRow({
                 {ruleSentence(rule.conditions, scope.mediaType, scope.names)}
               </span>
               <span className="block">
-                {rule.hd.integration_id ? (
-                  <>
-                    → <DestinationText dest={rule.hd} scope={scope} />
-                  </>
-                ) : (
-                  `HD → ${passThroughLabel("hd", below, fallback, scope.allServers)}`
-                )}
+                {rule.hd.integration_id
+                  ? t("web.admin.settings.requests.list.sendsTo", {
+                      destination: <DestinationText dest={rule.hd} scope={scope} />,
+                    })
+                  : t("web.admin.settings.requests.list.hdTo", {
+                      destination: passThroughLabel("hd", below, fallback, scope.allServers),
+                    })}
               </span>
               {fourK ? <span className="block">{fourK}</span> : null}
             </span>
@@ -234,7 +240,7 @@ function RuleRow({
           checked={rule.enabled}
           onCheckedChange={onToggle}
           disabled={busy}
-          aria-label={`${rule.name} enabled`}
+          aria-label={t("web.admin.settings.requests.list.enabled", { rule: rule.name })}
         />
         {/* Not modal: Edit and Delete open a dialog, and a modal menu closing
           under it can leave the page unclickable. */}
@@ -245,29 +251,31 @@ function RuleRow({
               size="icon-sm"
               variant="ghost"
               className="-mt-1 shrink-0"
-              aria-label={`More for ${rule.name}`}
+              aria-label={t("web.admin.settings.requests.list.more", { rule: rule.name })}
             >
               <MoreHorizontal />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={onEdit}>Edit</DropdownMenuItem>
+            <DropdownMenuItem onSelect={onEdit}>
+              {t("web.admin.settings.requests.shared.edit")}
+            </DropdownMenuItem>
             <DropdownMenuItem disabled={busy || index === 0} onSelect={() => onMove(-1)}>
-              Move up
+              {t("web.admin.settings.requests.list.moveUp")}
             </DropdownMenuItem>
             <DropdownMenuItem disabled={busy || index === count - 1} onSelect={() => onMove(1)}>
-              Move down
+              {t("web.admin.settings.requests.list.moveDown")}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" disabled={busy} onSelect={onDelete}>
-              Delete
+              {t("web.admin.settings.requests.shared.delete")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      {/* Under the rule's text, but across to the row's right edge, so a fix
+      {/* Under the rule's text, but across to the row's end edge, so a fix
           button lines up with the switches above it. */}
-      <div className="pl-15">
+      <div className="ps-15">
         <RowWarnings warnings={warnings} onFix={onFix} busy={busy} />
       </div>
     </li>
@@ -288,16 +296,17 @@ function FallbackRow({
   onEdit: () => void;
   onFix: (fix: RoutingWarningFix) => void;
 }) {
+  const t = useT();
   const fallback = scope.fallback;
   const save = useUpdateRequestRoute();
-  const noun = scope.mediaType === "series" ? "series" : "movie";
+  const mediaType = { media_type: scope.mediaType };
   if (!fallback) return null;
   const saved = Boolean(fallback.hd.integration_id);
 
   return (
     <div
       role="group"
-      aria-label="Everything else"
+      aria-label={t("web.admin.settings.requests.shared.everythingElse")}
       className="border-border/60 flex items-start gap-2 border-t px-1 py-3"
     >
       <span className="mt-0.5 w-[3.25rem] shrink-0" aria-hidden="true" />
@@ -306,29 +315,34 @@ function FallbackRow({
           <button
             type="button"
             onClick={onEdit}
-            className="focus-visible:ring-ring group block w-full rounded-sm text-left focus-visible:ring-2 focus-visible:outline-none"
+            className="focus-visible:ring-ring group block w-full rounded-sm text-start focus-visible:ring-2 focus-visible:outline-none"
           >
-            <span className="block text-sm font-medium group-hover:underline">Everything else</span>
+            <span className="block text-sm font-medium group-hover:underline">
+              {t("web.admin.settings.requests.shared.everythingElse")}
+            </span>
             <span className="text-muted-foreground block text-xs leading-relaxed">
               <span className="text-foreground/80 block">
-                Every other {noun} → <DestinationText dest={fallback.hd} scope={scope} />
+                {t("web.admin.settings.requests.list.fallbackHd", {
+                  ...mediaType,
+                  destination: <DestinationText dest={fallback.hd} scope={scope} />,
+                })}
               </span>
               <span className="block">
-                4K →{" "}
-                {fallback.uhd.integration_id ? (
-                  <DestinationText dest={fallback.uhd} scope={scope} />
-                ) : (
-                  "none"
-                )}
+                {fallback.uhd.integration_id
+                  ? t("web.admin.settings.requests.list.uhdTo", {
+                      destination: <DestinationText dest={fallback.uhd} scope={scope} />,
+                    })
+                  : t("web.admin.settings.requests.list.uhdNone")}
               </span>
             </span>
           </button>
         ) : (
           <div className="space-y-2">
-            <p className="text-sm font-medium">Everything else</p>
+            <p className="text-sm font-medium">
+              {t("web.admin.settings.requests.shared.everythingElse")}
+            </p>
             <p className="text-muted-foreground text-xs">
-              Choose where {scope.mediaType === "series" ? "series" : "movies"} go when no rule
-              takes them.
+              {t("web.admin.settings.requests.list.fallbackChoose", mediaType)}
             </p>
             <Select
               value=""
@@ -343,8 +357,11 @@ function FallbackRow({
                 })
               }
             >
-              <SelectTrigger aria-label="Everything else server" className="w-full sm:w-64">
-                <SelectValue placeholder="Choose a server" />
+              <SelectTrigger
+                aria-label={t("web.admin.settings.requests.list.fallbackServer")}
+                className="w-full sm:w-64"
+              >
+                <SelectValue placeholder={t("web.admin.settings.requests.shared.chooseServer")} />
               </SelectTrigger>
               <SelectContent>
                 {scope.servers
@@ -377,6 +394,7 @@ export function RequestRoutingList({
   /** The list is being read again; its order and validators may be stale. */
   routesFetching: boolean;
 }) {
+  const t = useT();
   const { mediaType, rules, fallback } = scope;
   const [dialog, setDialog] = useState<DialogState>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -395,20 +413,26 @@ export function RequestRoutingList({
   );
 
   // Screen readers hear rule names and positions, not IDs.
-  const nameOf = (id: UniqueIdentifier) => rules.find((rule) => rule.id === id)?.name ?? "The rule";
-  const positionOf = (id: UniqueIdentifier) => ids.indexOf(String(id)) + 1;
+  const nameOf = (id: UniqueIdentifier) =>
+    rules.find((rule) => rule.id === id)?.name ??
+    t("web.admin.settings.requests.list.dragUnknownRule");
+  const at = (id: UniqueIdentifier, position: UniqueIdentifier = id) => ({
+    rule: nameOf(id),
+    position: ids.indexOf(String(position)) + 1,
+    total: ids.length,
+  });
   const announcements: Announcements = {
-    onDragStart: ({ active }) =>
-      `Picked up ${nameOf(active.id)}, rule ${positionOf(active.id)} of ${ids.length}.`,
+    onDragStart: ({ active }) => t("web.admin.settings.requests.list.dragStart", at(active.id)),
     onDragOver: ({ active, over }) =>
       over
-        ? `${nameOf(active.id)} is at position ${positionOf(over.id)} of ${ids.length}.`
-        : `${nameOf(active.id)} is no longer over the list.`,
+        ? t("web.admin.settings.requests.list.dragOver", at(active.id, over.id))
+        : t("web.admin.settings.requests.list.dragOutside", { rule: nameOf(active.id) }),
     onDragEnd: ({ active, over }) =>
       over
-        ? `${nameOf(active.id)} dropped at position ${positionOf(over.id)} of ${ids.length}.`
-        : `${nameOf(active.id)} dropped.`,
-    onDragCancel: ({ active }) => `Moving ${nameOf(active.id)} was cancelled.`,
+        ? t("web.admin.settings.requests.list.dragEnd", at(active.id, over.id))
+        : t("web.admin.settings.requests.list.dragDropped", { rule: nameOf(active.id) }),
+    onDragCancel: ({ active }) =>
+      t("web.admin.settings.requests.list.dragCancel", { rule: nameOf(active.id) }),
   };
 
   useEffect(() => {
@@ -467,8 +491,6 @@ export function RequestRoutingList({
   const editing = dialog?.kind === "edit" ? rules.find((rule) => rule.id === dialog.id) : undefined;
   const fallbackReady = Boolean(fallback?.hd.integration_id);
   const kindName = KIND_NAMES[mediaType];
-  const noun = mediaType === "series" ? "series" : "movie";
-  const plural = mediaType === "series" ? "series" : "movies";
   const fallbackServer = scope.allServers.find(
     (server) => server.id === fallback?.hd.integration_id,
   );
@@ -476,7 +498,7 @@ export function RequestRoutingList({
   if (scope.servers.length === 0 && rules.length === 0) {
     return (
       <p className="text-muted-foreground py-3.5 text-sm">
-        Add a {kindName} server above to send {noun} requests anywhere.
+        {t("web.admin.settings.requests.list.noServers", { kind: kindName, media_type: mediaType })}
       </p>
     );
   }
@@ -485,8 +507,10 @@ export function RequestRoutingList({
     <div className="py-2">
       {rules.length === 0 && fallbackReady ? (
         <p className="text-muted-foreground py-2 text-sm">
-          Every {noun} request goes to {fallbackServer?.name ?? kindName}. Add a rule only if some{" "}
-          {plural} should go somewhere else, like anime or kids&apos; titles.
+          {t("web.admin.settings.requests.list.noRules", {
+            media_type: mediaType,
+            server: fallbackServer?.name ?? kindName,
+          })}
         </p>
       ) : null}
 
@@ -499,7 +523,7 @@ export function RequestRoutingList({
         >
           <SortableContext items={ids} strategy={verticalListSortingStrategy}>
             <ol
-              aria-label={`${mediaType === "series" ? "Series" : "Movie"} rules`}
+              aria-label={t("web.admin.settings.requests.list.rules", { media_type: mediaType })}
               className="divide-border/60 list-none divide-y"
             >
               {rules.map((rule, index) => (
@@ -543,10 +567,12 @@ export function RequestRoutingList({
           onClick={() => setDialog({ kind: "add" })}
         >
           <Plus aria-hidden="true" />
-          Add a rule
+          {t("web.admin.settings.requests.list.addRule")}
         </Button>
         {!fallbackReady ? (
-          <p className="text-muted-foreground text-xs">Choose where everything else goes first.</p>
+          <p className="text-muted-foreground text-xs">
+            {t("web.admin.settings.requests.list.fallbackFirst")}
+          </p>
         ) : null}
       </div>
 

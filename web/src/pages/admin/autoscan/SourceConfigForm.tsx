@@ -5,6 +5,7 @@ import type { AutoscanScanSourceDescriptor } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { SchemaForm } from "@/components/admin/plugins/SchemaForm";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
+import { useT } from "@/i18n";
 
 import { configFields, fillValueFromLibraries } from "./sourceDescriptor";
 
@@ -38,6 +39,7 @@ export function SourceConfigForm({
   /** Reports whether every required/validated field is satisfied. */
   onValidityChange?: (valid: boolean) => void;
 }) {
+  const t = useT();
   const libraries = useAdminLibraries();
   const form = descriptor.config_form;
   const fields = useMemo(() => configFields(descriptor), [descriptor]);
@@ -83,10 +85,10 @@ export function SourceConfigForm({
               variant="outline"
               size="sm"
               onClick={() => applyFill(field.key, value)}
-              title={`Replace ${field.label} with the paths of your enabled libraries`}
+              title={t("web.admin.autoscan.sourceForm.fillTitle", { field: field.label })}
             >
               <LibraryIcon className="size-3.5" />
-              Use library paths for {field.label}
+              {t("web.admin.autoscan.sourceForm.fillButton", { field: field.label })}
             </Button>
           ))}
         </div>

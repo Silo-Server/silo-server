@@ -22,7 +22,7 @@ export function WidgetHeader({ title, children }: { title: string; children: Rea
   return (
     <CardHeader className="flex shrink-0 flex-row flex-wrap items-center justify-between gap-2 space-y-0 pb-3">
       <CardTitle className="flex-1 text-sm font-bold">{title}</CardTitle>
-      <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
+      <div className="ms-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
         {children}
       </div>
     </CardHeader>

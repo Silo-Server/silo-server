@@ -19,6 +19,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/auditmutation"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -197,6 +198,9 @@ type ProfileView struct {
 type ProfileListView struct {
 	Profiles            []ProfileView `json:"profiles"`
 	AvatarUploadEnabled bool          `json:"avatar_upload_enabled"`
+	// MaxProfiles is the household profile limit, 0 when it could not be
+	// read. Only v2 listProfiles reports it: the frozen v1 body leaves it out.
+	MaxProfiles int `json:"-"`
 }
 
 type verifyPINResponse struct {
@@ -256,6 +260,34 @@ func profileLimitReached(limit int) *APIError {
 		fmt.Sprintf("This account has reached its profile limit (%d)", limit))
 }
 
+// householdProfileLimit is the account's household profile limit from its
+// effective access policy, or 0 when no limit can be read (no user
+// repository, or no such account). CreateProfile enforces it and
+// ListProfiles reports it, so the limit a client shows is the one a create
+// meets.
+func (h *ProfileHandler) householdProfileLimit(ctx context.Context, userID int) (int, *APIError) {
+	if h.UserRepo == nil {
+		return 0, nil
+	}
+	user, err := h.UserRepo.GetByID(ctx, userID)
+	if err != nil {
+		slog.WarnContext(ctx, "loading the account for its profile limit failed", "component", "api", "user_id", userID, "error", err)
+		return 0, apiError(http.StatusInternalServerError, "internal_error", "Failed to load user")
+	}
+	if user == nil {
+		return 0, nil
+	}
+	effective, err := access.EffectivePolicyForUser(ctx, user, h.AccessGroups)
+	if err != nil {
+		slog.WarnContext(ctx, "resolving the account's profile limit failed", "component", "api", "user_id", userID, "error", err)
+		return 0, apiError(http.StatusInternalServerError, "internal_error", "Failed to load the account's profile limit")
+	}
+	if effective.MaxProfiles < 1 {
+		return 0, nil
+	}
+	return effective.MaxProfiles, nil
+}
+
 // invalidAdvisoryAgeLimit is the field error for an advisory-age limit outside
 // the storable range.
 func invalidAdvisoryAgeLimit() *APIError {
@@ -277,6 +309,21 @@ func isAllowedSelfServiceProfileUpdate(req ProfileUpdateRequest) bool {
 		req.LibraryRestrictionsEnabled == nil &&
 		req.AllowedLibraryIDs == nil &&
 		req.MaxPlaybackQuality == nil
+}
+
+// primaryLibraryLimitError rejects a library limit on the primary profile. The
+// primary inherits its account's libraries (access.ProfileLibraryLimit) and
+// hides the ones it doesn't want instead; turning the limit off, or an empty
+// allowlist, stays accepted so a client that always sends both still saves.
+func primaryLibraryLimitError(enabled bool, allowed []int) *APIError {
+	const message = "The primary profile can't be limited to some libraries; it can hide libraries instead"
+	switch {
+	case enabled:
+		return fieldError("library_restrictions_enabled", message)
+	case len(allowed) > 0:
+		return fieldError("allowed_library_ids", message)
+	}
+	return nil
 }
 
 // --- Handler methods ---
@@ -309,10 +356,78 @@ func (h *ProfileHandler) ListProfiles(ctx context.Context, userID int) (ProfileL
 	if err != nil {
 		return ProfileListView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to list profiles")
 	}
+	// A limit that cannot be read leaves MaxProfiles at 0 rather than failing
+	// the list: the picker needs the profiles more than the limit.
+	maxProfiles, limitErr := h.householdProfileLimit(ctx, userID)
+	if limitErr != nil {
+		maxProfiles = 0
+	}
 	return ProfileListView{
 		Profiles:            h.toProfileResponses(ctx, store, profiles),
 		AvatarUploadEnabled: h.AvatarStore != nil,
+		MaxProfiles:         maxProfiles,
 	}, nil
+}
+
+// GetProfile reads one profile of the account: 404 not_found when the
+// account has no profile with that ID, so another account's profile is
+// never found, and 500 when the store fails. v2 getAdminUserProfile calls
+// it.
+func (h *ProfileHandler) GetProfile(ctx context.Context, userID int, profileID string) (ProfileView, error) {
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil || store == nil {
+		return ProfileView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+	}
+	profile, err := store.GetProfile(ctx, profileID)
+	if err != nil {
+		return ProfileView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load profile")
+	}
+	if profile == nil {
+		return ProfileView{}, apiError(http.StatusNotFound, "not_found", "Profile not found")
+	}
+	return h.toProfileResponse(ctx, store, *profile), nil
+}
+
+// checkAccountAdmin applies the Owner rules to an administrator's profile
+// write on an account (accountAdmin): only the Owner may change the Owner's
+// or another admin's profiles. A primary profile's PIN guards that account's
+// admin access, so another admin setting it could lock the account out of
+// administration. Household writes (accountAdmin false) pass.
+func (h *ProfileHandler) checkAccountAdmin(ctx context.Context, accountAdmin bool, userID int) error {
+	if !accountAdmin {
+		return nil
+	}
+	if h.UserRepo == nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to load user")
+	}
+	target, err := h.UserRepo.GetByID(ctx, userID)
+	if err != nil {
+		if auth.IsNotFound(err) {
+			return apiError(http.StatusNotFound, "not_found", "User not found")
+		}
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to load user")
+	}
+	actor, err := requestOwnerActor(ctx, h.UserRepo)
+	if err != nil {
+		return apiError(http.StatusInternalServerError, "internal_error", "Failed to load user")
+	}
+	return ownerError(auth.CheckOwnerTarget(actor, target))
+}
+
+// manageHouseholdAs is householdManagerAs for a profile write: a server
+// administrator acting through the admin API (accountAdmin) manages the
+// household with no acting profile, so no PIN revision is bound to the write.
+func manageHouseholdAs(
+	ctx context.Context,
+	store userstore.UserStore,
+	accountAdmin bool,
+	activeProfileID string,
+	verify func(*userstore.Profile) error,
+) (bool, *userstore.Profile, error) {
+	if accountAdmin {
+		return true, nil, nil
+	}
+	return householdManagerAs(ctx, store, activeProfileID, verify)
 }
 
 // HandleCreateProfile handles POST /profiles.
@@ -358,6 +473,12 @@ type ProfileCreateCommand struct {
 	// VerifyProfile confirms a PIN-locked primary profile is verified for
 	// this request; it returns access.ErrProfileUnverified when it is not.
 	VerifyProfile func(profile *userstore.Profile) error
+	// AccountAdmin marks a server administrator managing this account's
+	// household through the admin API (the caller already passed the acting
+	// admin check). It replaces the household-manager check: the
+	// administrator's own profile is not a member of this household, so there
+	// is no primary profile or PIN proof to require.
+	AccountAdmin bool
 }
 
 // CreateProfile creates a household profile: validation, the bootstrap or
@@ -367,6 +488,9 @@ type ProfileCreateCommand struct {
 // *APIError carrying the v1 status, code and message.
 func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCommand) (ProfileView, error) {
 	var none ProfileView
+	if err := h.checkAccountAdmin(ctx, cmd.AccountAdmin, cmd.UserID); err != nil {
+		return none, err
+	}
 	req := cmd.Request
 	userID := cmd.UserID
 	if strings.TrimSpace(req.Name) == "" {
@@ -410,7 +534,7 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 	var acting *userstore.Profile
 	isBootstrap := len(existingProfiles) == 0
 	if !isBootstrap {
-		allowed, active, err := householdManagerAs(ctx, store, cmd.ActiveProfileID, cmd.VerifyProfile)
+		allowed, active, err := manageHouseholdAs(ctx, store, cmd.AccountAdmin, cmd.ActiveProfileID, cmd.VerifyProfile)
 		if err != nil {
 			return none, profileManagementError(err)
 		}
@@ -428,28 +552,22 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 			req.MaxPlaybackQuality != "") {
 		return none, apiError(http.StatusForbidden, "forbidden", "Profile access settings require the primary profile or admin access")
 	}
+	// The first profile becomes the primary.
+	if isBootstrap {
+		if apiErr := primaryLibraryLimitError(req.LibraryRestrictionsEnabled, req.AllowedLibraryIDs); apiErr != nil {
+			return none, apiErr
+		}
+	}
 	// profileLimit is the account's household limit (0 = unlimited). This
 	// early check answers a full household before the name check, as it always
 	// has; the guarantee under concurrency is the re-count inside the creating
 	// transaction (createProfileWithSettingsSync).
-	profileLimit := 0
-	if h.UserRepo != nil {
-		user, err := h.UserRepo.GetByID(ctx, userID)
-		if err != nil {
-			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load user")
-		}
-		if user != nil {
-			effective, err := access.EffectivePolicyForUser(ctx, user, h.AccessGroups)
-			if err != nil {
-				return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load the account's profile limit")
-			}
-			if effective.MaxProfiles >= 1 {
-				profileLimit = effective.MaxProfiles
-			}
-			if profileLimit >= 1 && len(existingProfiles) >= profileLimit {
-				return none, profileLimitReached(profileLimit)
-			}
-		}
+	profileLimit, limitErr := h.householdProfileLimit(ctx, userID)
+	if limitErr != nil {
+		return none, limitErr
+	}
+	if profileLimit >= 1 && len(existingProfiles) >= profileLimit {
+		return none, profileLimitReached(profileLimit)
 	}
 
 	if profileNameConflicts(existingProfiles, req.Name, "") {
@@ -589,6 +707,12 @@ type ProfileUpdateCommand struct {
 	// VerifyProfile confirms a PIN-locked primary profile is verified for
 	// this request; it returns access.ErrProfileUnverified when it is not.
 	VerifyProfile func(profile *userstore.Profile) error
+	// AccountAdmin marks a server administrator managing this account's
+	// household through the admin API (the caller already passed the acting
+	// admin check). It replaces the household-manager check: the
+	// administrator's own profile is not a member of this household, so there
+	// is no primary profile or PIN proof to require.
+	AccountAdmin bool
 }
 
 // UpdateProfile applies a profile update: authorization (household manager
@@ -598,6 +722,9 @@ type ProfileUpdateCommand struct {
 // status, code and message.
 func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCommand) (ProfileView, error) {
 	var none ProfileView
+	if err := h.checkAccountAdmin(ctx, cmd.AccountAdmin, cmd.UserID); err != nil {
+		return none, err
+	}
 	req := cmd.Request
 	userID, profileID := cmd.UserID, cmd.ProfileID
 	var avatarRef *string
@@ -630,7 +757,7 @@ func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCom
 		return none, apiError(http.StatusNotFound, "not_found", "Profile not found")
 	}
 
-	canManage, acting, err := householdManagerAs(ctx, store, cmd.ActiveProfileID, cmd.VerifyProfile)
+	canManage, acting, err := manageHouseholdAs(ctx, store, cmd.AccountAdmin, cmd.ActiveProfileID, cmd.VerifyProfile)
 	if err != nil {
 		return none, profileManagementError(err)
 	}
@@ -642,6 +769,16 @@ func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCom
 		}
 		if !isAllowedSelfServiceProfileUpdate(req) {
 			return none, apiError(http.StatusForbidden, "forbidden", "Profile access settings require the primary profile or admin access")
+		}
+	}
+
+	if currentProfile.IsPrimary {
+		var allowed []int
+		if req.AllowedLibraryIDs != nil {
+			allowed = *req.AllowedLibraryIDs
+		}
+		if apiErr := primaryLibraryLimitError(req.LibraryRestrictionsEnabled != nil && *req.LibraryRestrictionsEnabled, allowed); apiErr != nil {
+			return none, apiErr
 		}
 	}
 
@@ -799,6 +936,12 @@ type ProfileDeleteCommand struct {
 	// VerifyProfile confirms a PIN-locked primary profile is verified for
 	// this request; it returns access.ErrProfileUnverified when it is not.
 	VerifyProfile func(profile *userstore.Profile) error
+	// AccountAdmin marks a server administrator managing this account's
+	// household through the admin API (the caller already passed the acting
+	// admin check). It replaces the household-manager check: the
+	// administrator's own profile is not a member of this household, so there
+	// is no primary profile or PIN proof to require.
+	AccountAdmin bool
 }
 
 // DeleteProfile deletes a household profile: the household-manager
@@ -807,12 +950,15 @@ type ProfileDeleteCommand struct {
 // deleteProfile both call it; a failure is an *APIError carrying the v1
 // status, code and message.
 func (h *ProfileHandler) DeleteProfile(ctx context.Context, cmd ProfileDeleteCommand) error {
+	if err := h.checkAccountAdmin(ctx, cmd.AccountAdmin, cmd.UserID); err != nil {
+		return err
+	}
 	userID, profileID := cmd.UserID, cmd.ProfileID
 	store, err := h.storeProvider.ForUser(ctx, userID)
 	if err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
-	allowed, err := canManageHouseholdAs(ctx, store, cmd.ActiveProfileID, cmd.VerifyProfile)
+	allowed, _, err := manageHouseholdAs(ctx, store, cmd.AccountAdmin, cmd.ActiveProfileID, cmd.VerifyProfile)
 	if err != nil {
 		return profileManagementError(err)
 	}
@@ -1123,6 +1269,12 @@ func (h *ProfileHandler) profileResponseWith(
 	ctx context.Context, p userstore.Profile, prefs profilePreferences,
 ) ProfileView {
 	avatarSource, avatarURL := h.ResolveAvatar(ctx, p.Avatar)
+	// A primary profile has no library limit (access.ProfileLibraryLimit); a
+	// stored one, from an older server or a restored backup, is not reported.
+	libraryRestricted, allowedLibraryIDs := p.LibraryRestrictionsEnabled, p.AllowedLibraryIDs
+	if p.IsPrimary {
+		libraryRestricted, allowedLibraryIDs = false, nil
+	}
 	return ProfileView{
 		ID:                         p.ID,
 		Name:                       p.Name,
@@ -1145,8 +1297,8 @@ func (h *ProfileHandler) profileResponseWith(
 		AutoSkipRecap:              p.AutoSkipRecap,
 		AutoPlayNextPreview:        p.AutoPlayNextPreview,
 		ShowForcedSubtitles:        prefs.ShowForcedSubtitles,
-		LibraryRestrictionsEnabled: p.LibraryRestrictionsEnabled,
-		AllowedLibraryIDs:          append([]int(nil), p.AllowedLibraryIDs...),
+		LibraryRestrictionsEnabled: libraryRestricted,
+		AllowedLibraryIDs:          append([]int(nil), allowedLibraryIDs...),
 		MaxPlaybackQuality:         access.NormalizePlaybackQuality(p.MaxPlaybackQuality),
 		CreatedAt:                  p.CreatedAt,
 		UpdatedAt:                  p.UpdatedAt,

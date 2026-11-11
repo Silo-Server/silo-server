@@ -29,6 +29,7 @@ import {
 } from "@/lib/homeRows/payloads";
 import type { RowDraft } from "@/lib/homeRows/rowDraft";
 import { stableJson } from "@/lib/homeRows/stableJson";
+import { useT } from "@/i18n";
 import {
   RowChangedError,
   type EditSession,
@@ -51,7 +52,9 @@ const BATCH_PARALLEL = 4;
 /** Why a row in a select-mode batch was left as it was. */
 export interface BatchFailure {
   id: string;
+  /** The row's stored title, with its catalog key; show it through `useHomeRowTitle`. */
   title: string;
+  titleKey?: HomeRow["titleKey"];
   /** changed: it no longer matches the page. */
   reason: "changed" | "failed";
   message?: string;
@@ -70,8 +73,12 @@ function toHomeRow(section: PageSectionConfig): HomeRow {
     config: section.config ?? {},
     itemLimit: section.item_limit,
     hero: section.featured,
+    ...(section.web_only === undefined ? {} : { webOnly: section.web_only }),
     shown: section.enabled,
     own: false,
+    titleKey: section.title_key
+      ? { title: section.title, key: section.title_key, args: section.title_args }
+      : undefined,
   };
 }
 
@@ -82,6 +89,7 @@ function sameRow(a: PageSectionConfig, b: PageSectionConfig): boolean {
     a.section_type === b.section_type &&
     a.enabled === b.enabled &&
     a.featured === b.featured &&
+    a.web_only === b.web_only &&
     a.item_limit === b.item_limit &&
     stableJson(a.config) === stableJson(b.config)
   );
@@ -155,16 +163,17 @@ export function useAdminHomeRows(): AdminHomeRows {
   );
   const scope = page.kind;
   const libraryId = page.kind === "library" ? page.libraryId : undefined;
+  const t = useT();
   const pages = useMemo<HomeRowsPageOption[]>(
     () => [
-      { ref: { kind: "home" }, label: "Home" },
+      { ref: { kind: "home" }, label: t("web.home.rows.pages.home") },
       ...libraries.map((library) => ({
         ref: { kind: "library" as const, libraryId: library.id },
         label: library.name,
         libraryType: library.type,
       })),
     ],
-    [libraries],
+    [libraries, t],
   );
 
   const list = useAdminSections(scope, libraryId, pageKnown);
@@ -304,17 +313,19 @@ export function useAdminHomeRows(): AdminHomeRows {
           return null;
         };
         const settle = async (id: string) => {
-          const title = onScreen.get(id)?.title ?? id;
+          const row = onScreen.get(id);
+          const { title, titleKey } = row ? toHomeRow(row) : { title: id, titleKey: undefined };
           try {
             const reason = await writeOne(id);
-            if (reason) failures.push({ id, title, reason });
+            if (reason) failures.push({ id, title, titleKey, reason });
           } catch (error) {
             failures.push(
               isStale(error)
-                ? { id, title, reason: "changed" }
+                ? { id, title, titleKey, reason: "changed" }
                 : {
                     id,
                     title,
+                    titleKey,
                     reason: "failed",
                     message: adminSectionMutationMessage(error, "Could not save this row"),
                   },
@@ -508,6 +519,7 @@ export function useAdminHomeRows(): AdminHomeRows {
     capabilities: {
       draftPreview: previewAvailable,
       libraryCopies: page.kind === "library",
+      webOnlyHero: Boolean(capabilities?.web_only),
     },
     create,
     copyToLibraries,

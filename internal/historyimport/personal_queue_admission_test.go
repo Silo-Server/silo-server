@@ -1,6 +1,7 @@
 package historyimport
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -18,4 +19,33 @@ func personalQueueRepository(t *testing.T) *Repository {
 	}
 	applyPersonalQueueMigration(t, repo.pool)
 	return repo
+}
+
+// A personal import can name any server and the import slots are shared, so
+// an account gets one queued or running personal import at a time.
+func TestEnqueuePersonalRunAllowsOneActiveRunPerAccount(t *testing.T) {
+	repo := personalQueueRepository(t)
+	enqueue := func(userID int, profileID string) (*Run, error) {
+		return repo.enqueuePersonalRun(t.Context(), personalRunAdmission{
+			UserID: userID, ProfileID: profileID, SourceType: SourceTypeJellyfin, ConnectionMode: ConnectionModeCustom,
+			Credentials: personalRunCredentials{BaseURL: "http://jellyfin.example", ExternalUserID: "external", ServerToken: "token"},
+		})
+	}
+
+	first, err := enqueue(1, "p")
+	if err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	if _, err := enqueue(1, "p"); !errors.Is(err, ErrPersonalRunActive) {
+		t.Fatalf("second run while the first is queued: err = %v, want ErrPersonalRunActive", err)
+	}
+	if _, err := enqueue(2, "other"); err != nil {
+		t.Fatalf("another account's run: %v", err)
+	}
+	if _, err := repo.pool.Exec(t.Context(), `UPDATE history_import_runs SET status='completed' WHERE id=$1`, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := enqueue(1, "p"); err != nil {
+		t.Fatalf("run after the first finished: %v", err)
+	}
 }

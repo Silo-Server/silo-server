@@ -20,8 +20,12 @@ import (
 const (
 	maxSubtitleFontAttachments = 32
 	maxSubtitleFontBytes       = 32 << 20 // 32 MiB
-	subtitleFontTTFMIME        = "font/ttf"
-	subtitleFontFallbackMIME   = "application/octet-stream"
+
+	ffmpegMapArg             = "-map"
+	ffmpegVideoFramesArg     = "-frames:v"
+	ffmpegNullMuxer          = "null"
+	subtitleFontTTFMIME      = "font/ttf"
+	subtitleFontFallbackMIME = "application/octet-stream"
 )
 
 // SubtitleFontAttachment is a font attached to a media container for ASS/SSA
@@ -72,7 +76,7 @@ func ListAttachedSubtitleFonts(ctx context.Context, inputPath, ffmpegPath string
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	streams, err := probeFontAttachmentStreams(ctx, inputPath, ffprobePathFromFFmpeg(ffmpegPath))
+	streams, _, err := probeFontAttachmentStreams(ctx, inputPath, ffprobePathFromFFmpeg(ffmpegPath))
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +116,7 @@ func extractAttachedSubtitleFonts(ctx context.Context, inputPath, ffmpegPath str
 		return nil, fmt.Errorf("subtitle fonts: input path is required")
 	}
 
-	streams, err := probeFontAttachmentStreams(ctx, inputPath, ffprobePathFromFFmpeg(ffmpegPath))
+	streams, videoStream, err := probeFontAttachmentStreams(ctx, inputPath, ffprobePathFromFFmpeg(ffmpegPath))
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +141,7 @@ func extractAttachedSubtitleFonts(ctx context.Context, inputPath, ffmpegPath str
 		bin = "ffmpeg"
 	}
 
-	fonts, err := dumpFontAttachments(ctx, inputPath, bin, streams, maxSubtitleFontBytes)
+	fonts, err := dumpFontAttachments(ctx, inputPath, bin, streams, videoStream, maxSubtitleFontBytes)
 	if selectedName != "" && len(fonts) > 0 {
 		fonts[0].Name = selectedName
 	}
@@ -159,7 +163,9 @@ func EncodeSubtitleFontBundle(fonts []SubtitleFontAttachment) []SubtitleFontBund
 // dumpFontAttachments concatenates the selected attachments on stdout in one
 // FFmpeg process. Probed extradata sizes frame each font; a bounded pipe reader
 // rejects oversized or changed output without ever spilling font data to disk.
-func dumpFontAttachments(ctx context.Context, inputPath string, ffmpegPath string, streams []attachmentProbeStream, maxBytes int64) ([]SubtitleFontAttachment, error) {
+// videoStream is the source's first video stream, or -1 (see
+// attachmentDumpOutputArgs).
+func dumpFontAttachments(ctx context.Context, inputPath string, ffmpegPath string, streams []attachmentProbeStream, videoStream int, maxBytes int64) ([]SubtitleFontAttachment, error) {
 	var expected int64
 	for _, stream := range streams {
 		if stream.ExtraDataSize <= 0 {
@@ -177,7 +183,7 @@ func dumpFontAttachments(ctx context.Context, inputPath string, ffmpegPath strin
 	for _, stream := range streams {
 		args = append(args, fmt.Sprintf("-dump_attachment:%d", stream.Index), "pipe:1")
 	}
-	args = append(args, "-i", inputPath, "-map", "0:t?", "-c", "copy", "-f", "null", "-")
+	args = append(append(args, "-i", inputPath), attachmentDumpOutputArgs(videoStream)...)
 	cmd := fspath.CommandContext(ctx, ffmpegPath, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -215,51 +221,71 @@ func dumpFontAttachments(ctx context.Context, inputPath string, ffmpegPath strin
 	return fonts, nil
 }
 
-func probeFontAttachmentStreams(ctx context.Context, inputPath string, ffprobePath string) ([]attachmentProbeStream, error) {
+// attachmentDumpOutputArgs is the output of an FFmpeg run that dumps
+// attachments, which FFmpeg does from the container's header when it opens
+// the input. The output only has to let it stop there: mapping attachments
+// alone, or every stream, still demuxes the whole file (38 s for a 15 GB
+// Matroska file on network storage), while one video stream limited to no
+// frames ends the run at once. A source without video (videoStream -1) keeps
+// the attachment-only output, which reads it whole.
+func attachmentDumpOutputArgs(videoStream int) []string {
+	args := []string{ffmpegMapArg, "0:t?"}
+	if videoStream >= 0 {
+		args = []string{ffmpegMapArg, fmt.Sprintf("0:%d", videoStream), ffmpegVideoFramesArg, "0"}
+	}
+	return append(args, "-c", codecCopyV3, "-f", ffmpegNullMuxer, "-")
+}
+
+// probeFontAttachmentStreams returns the source's font attachments and the
+// index of its first video stream, or -1.
+func probeFontAttachmentStreams(ctx context.Context, inputPath string, ffprobePath string) ([]attachmentProbeStream, int, error) {
 	bin := ffprobePath
 	if strings.TrimSpace(bin) == "" {
 		bin = "ffprobe"
 	}
 	cmd := fspath.CommandContext(ctx, bin,
 		"-v", "error",
-		"-select_streams", "t",
 		"-show_entries", "stream=index,codec_name,codec_type,extradata_size:stream_tags=filename,mimetype",
 		"-of", "json",
 		inputPath,
 	)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, err
+		return nil, -1, err
 	}
 	if err := cmd.Start(); err != nil {
-		return nil, err
+		return nil, -1, err
 	}
 	const maxProbeBytes = 1 << 20
 	out, readErr := io.ReadAll(io.LimitReader(stdout, maxProbeBytes+1))
 	if readErr != nil || len(out) > maxProbeBytes {
 		_ = procgroup.Kill(cmd)
 		_ = cmd.Wait()
-		return nil, errors.New("subtitle fonts: attachment metadata exceeds probe limit or could not be read")
+		return nil, -1, errors.New("subtitle fonts: attachment metadata exceeds probe limit or could not be read")
 	}
 	if err := cmd.Wait(); err != nil {
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return nil, -1, ctx.Err()
 		}
-		return nil, fmt.Errorf("subtitle fonts: probe attachments: %w", err)
+		return nil, -1, fmt.Errorf("subtitle fonts: probe attachments: %w", err)
 	}
 
 	var probed attachmentProbeOutput
 	if err := json.Unmarshal(out, &probed); err != nil {
-		return nil, fmt.Errorf("subtitle fonts: parse attachment probe: %w", err)
+		return nil, -1, fmt.Errorf("subtitle fonts: parse attachment probe: %w", err)
 	}
 
 	streams := make([]attachmentProbeStream, 0, len(probed.Streams))
+	videoStream := -1
 	for _, stream := range probed.Streams {
-		if isFontAttachment(stream) {
+		switch {
+		case isFontAttachment(stream):
 			streams = append(streams, stream)
+		case videoStream < 0 && strings.EqualFold(stream.CodecType, "video"):
+			videoStream = stream.Index
 		}
 	}
-	return streams, nil
+	return streams, videoStream, nil
 }
 
 func isFontAttachment(stream attachmentProbeStream) bool {

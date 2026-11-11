@@ -9,7 +9,7 @@ import subprocess
 import sys
 
 
-GO_JOBS = ("go-lint", "go-test", "go-integration", "go-db-pins", "go-db-auth")
+GO_JOBS = ("go-lint", "go-vet", "go-test", "go-integration", "go-db-pins", "go-db-auth")
 WEB_JOBS = ("web", "web-test")
 # Run on every event regardless of what the diff touched.
 ALWAYS_JOBS = ("repo-checks",)
@@ -36,7 +36,7 @@ def classify(paths):
                 or any(ord(char) < 32 for char in path)):
             return all_jobs("unrecognized path")
         if (path == ".github/evidence.yml"
-                or (path.startswith(".github/ISSUE_TEMPLATE/") and path.endswith((".yml", ".yaml", ".md")))
+                or (path.startswith((".github/ISSUE_TEMPLATE/", ".github/DISCUSSION_TEMPLATE/")) and path.endswith((".yml", ".yaml", ".md")))
                 or (path.endswith(".md") and path.startswith((".github/", "scripts/", "cmd/")))):
             continue
         if (path in GO_ONLY_CONTRACTS

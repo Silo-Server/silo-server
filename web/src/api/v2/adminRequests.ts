@@ -12,7 +12,7 @@ import type {
   RequestSettings,
   RequestUserLimit,
 } from "@/api/types";
-import { v2, type V2Body, type V2Query, V2ProblemError } from "./request";
+import { v2, type V2Body, type V2Query, problemFieldDetail, V2ProblemError } from "./request";
 import { mediaRequestFromV2 } from "./requests";
 import type { components } from "./schema";
 
@@ -46,7 +46,8 @@ export function requestValidationErrors(error: unknown) {
   if (!(error instanceof V2ProblemError) || error.problemType !== "validation_failed") return null;
   const fields: Record<string, string> = {};
   for (const field of error.problem.errors ?? []) {
-    if (field.location?.startsWith("body.")) fields[field.location.slice(5)] = field.detail;
+    if (field.location?.startsWith("body."))
+      fields[field.location.slice(5)] = problemFieldDetail(field);
   }
   return { fields, message: error.message };
 }

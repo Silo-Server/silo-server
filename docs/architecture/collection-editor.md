@@ -95,17 +95,30 @@ change forward or stops at the conflict.
 
 ## Smart rules and the live preview
 
-A Smart collection's Contents is Add row's rule sentence (`RuleBuilder`), with the libraries
-inside it: a server collection needs at least one, and a personal one with none matches every
-library the profile can see. Rules about the viewer (Watched and the like) are offered only on a
-personal collection. A rule the builder can't show stays as a locked line and is saved unchanged
-until someone removes it. The draft's libraries are the rules' `library_ids`; a library change
-counts once, as Libraries.
+A Smart collection's Contents is Add row's rule sentence (`RuleBuilder`), with the libraries it
+draws from inside it. With none picked it reads "all libraries" on a server collection and "all my
+libraries" on a personal one, and matches every library the viewer can see. Rules about the viewer
+(Watched and the like) are offered only on a personal collection. A rule the builder can't show
+stays as a locked line and is saved unchanged until someone removes it.
 
-The preview sends the whole draft `query_definition`, across every chosen library, to the scope's
-preview route (`POST …/collections/preview`, 24 titles), 300 ms after the last edit. It shows the
-unsaved rules, so the save bar says the preview already shows them. A rule set that matches nothing
-still saves.
+Where the titles come from and where the collection shows are separate on a server collection. The
+rule sentence edits the rules' `library_ids` (a change counts as Rules), and Where it shows >
+Libraries picks the collection's own `library_ids`: the Collections tabs that list it, which must
+name at least one library before Create or Save. Opened from a library, a new one starts with that
+library in both. On a personal collection the draft's libraries are the rules' `library_ids`, and
+a library change counts once, as Libraries. The server side of the rule is in
+[Server smart collection libraries](../catalog-api.md#server-smart-collection-libraries).
+
+The preview sends the whole draft `query_definition`, from the libraries the rules name, to the
+scope's preview route (`POST …/collections/preview`, 24 titles), 300 ms after the last edit. It
+shows the unsaved rules, so the save bar says the preview already shows them. A rule set that
+matches nothing still saves.
+
+A Smart collection needs at least one complete rule: a field, an operator and a filled-in value
+(`hasCompleteRule` in `web/src/lib/collections/draft.ts`). With none its rules would match every
+title, so until it has one the editor sends no preview, the preview asks for a rule, and Create
+and Save stay off with the save bar saying a rule is needed. The `/api/v2` create and update
+operations refuse the same thing (see [catalog-api.md](../catalog-api.md#rule-fields-and-operators)).
 
 A Smart collection may carry a stored default sort in `sort_config` (`field` and `order`), which
 wins over the rules' sort when viewers open it. The Order block names it with Clear. Changing the

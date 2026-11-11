@@ -173,6 +173,45 @@ func TestViewerResolverParityWithLegacyResolver(t *testing.T) {
 			wantHidden:    []int{2},
 		},
 		{
+			// The primary profile inherits the account's libraries. A library
+			// limit stored on it (an older server, a restored backup) neither
+			// narrows nor widens them; only the libraries it hid do, and it can
+			// show those again.
+			name: "primary profile ignores a stored library limit",
+			user: &models.User{
+				ID:                   1,
+				LibraryIDs:           []int{1, 2, 3, 4, 5, 6, 7},
+				AccessPolicyRevision: 5,
+			},
+			profile: &userstore.Profile{
+				ID:                         "prof-1",
+				IsPrimary:                  true,
+				LibraryRestrictionsEnabled: true,
+				AllowedLibraryIDs:          []int{6, 7},
+			},
+			settingValues: []userstore.SettingValue{hiddenLibrariesRow("prof-1", `[6,7]`)},
+			input:         access.ResolveInput{UserID: 1, SessionID: "sess-1", ProfileID: "prof-1"},
+			wantAllowed:   []int{1, 2, 3, 4, 5},
+			wantHidden:    []int{6, 7},
+		},
+		{
+			name: "primary profile on an unrestricted account ignores a stored library limit",
+			user: &models.User{
+				ID:                   1,
+				AccessPolicyRevision: 5,
+			},
+			profile: &userstore.Profile{
+				ID:                         "prof-1",
+				IsPrimary:                  true,
+				LibraryRestrictionsEnabled: true,
+				AllowedLibraryIDs:          []int{6, 7},
+			},
+			settingValues:  []userstore.SettingValue{hiddenLibrariesRow("prof-1", `[6,7]`)},
+			input:          access.ResolveInput{UserID: 1, SessionID: "sess-1", ProfileID: "prof-1"},
+			wantNilAllowed: true,
+			wantDisabled:   []int{6, 7},
+		},
+		{
 			name: "unrestricted scope carries disabled libraries",
 			user: &models.User{
 				ID:                   1,
@@ -770,5 +809,24 @@ func TestViewerResolverContentAccessOnlyIgnoresHiddenLibraries(t *testing.T) {
 				t.Fatalf("MaxContentRating = %q, want PG", policyScope.MaxContentRating)
 			}
 		})
+	}
+}
+
+// A household's allowances lift only the profile's own limits: a custom scope
+// policy that sets a rating override or a different advisory-age limit wins.
+func TestMaturityOverriddenRejectsAllowancesUnderPolicyLimits(t *testing.T) {
+	profile := &userstore.Profile{MaxContentRating: "PG", MaxAdvisoryAge: 10}
+	for _, tc := range []struct {
+		name     string
+		decision ScopeDecision
+		want     bool
+	}{
+		{"profile limits only", ScopeDecision{MaxContentRating: "PG", MaxAdvisoryAge: 10}, false},
+		{"rating override", ScopeDecision{MaxContentRating: "PG", MaxContentRatingOverride: "G", MaxAdvisoryAge: 10}, true},
+		{"advisory age lowered", ScopeDecision{MaxContentRating: "PG", MaxAdvisoryAge: 7}, true},
+	} {
+		if got := maturityOverridden(tc.decision, profile); got != tc.want {
+			t.Errorf("%s: maturityOverridden = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }

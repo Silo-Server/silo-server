@@ -36,8 +36,8 @@ export function PageHeader({ title, subtitle, actions, eyebrow, className }: Pag
         ) : null}
       </div>
       {actions ? (
-        // Stays at the right when the header wraps, so a menu opens over the content.
-        <div className="ml-auto flex flex-wrap items-center gap-2">{actions}</div>
+        // Stays at the end when the header wraps, so a menu opens over the content.
+        <div className="ms-auto flex flex-wrap items-center gap-2">{actions}</div>
       ) : null}
     </header>
   );

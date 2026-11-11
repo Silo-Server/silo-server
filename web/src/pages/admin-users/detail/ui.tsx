@@ -2,6 +2,7 @@ import { useId, type ReactNode } from "react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useT, type MessageKey } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 /**
@@ -93,13 +94,18 @@ export function StatTile({
   /** 0..1; shows a bar under the value. */
   progress?: number;
 }) {
+  const t = useT();
   return (
     <div className="bg-card/60 min-w-0 space-y-1.5 px-4 py-3.5">
       <div className="text-muted-foreground truncate text-xs">{label}</div>
       <div className="text-xl font-semibold tabular-nums">
         {value}
         {total !== undefined ? (
-          <span className="text-muted-foreground ml-1 text-sm font-normal">of {total}</span>
+          <span className="text-muted-foreground ms-1 text-sm font-normal">
+            {t("web.admin.users.detail.common.statTotal", {
+              total: typeof total === "number" ? String(total) : total,
+            })}
+          </span>
         ) : null}
       </div>
       {progress !== undefined ? <ProgressBar value={progress} label={label} /> : null}
@@ -142,8 +148,8 @@ export function KeyValueRow({
           <div className="text-muted-foreground/80 text-xs leading-relaxed">{description}</div>
         ) : null}
       </div>
-      <div className="ml-auto flex max-w-full min-w-0 items-center justify-end gap-2.5">
-        <div className="flex min-w-0 flex-col items-end text-right">
+      <div className="ms-auto flex max-w-full min-w-0 items-center justify-end gap-2.5">
+        <div className="flex min-w-0 flex-col items-end text-end">
           <div className="text-sm font-medium break-words">{value}</div>
           {below ? <div className="text-muted-foreground text-xs">{below}</div> : null}
         </div>
@@ -153,10 +159,15 @@ export function KeyValueRow({
   );
 }
 
-const SOURCE_LABELS = { default: "DEFAULT", group: "GROUP", custom: "CUSTOM" } as const;
+const SOURCE_LABELS: Record<"default" | "group" | "custom", MessageKey> = {
+  default: "web.admin.users.detail.common.source.default",
+  group: "web.admin.users.detail.common.source.group",
+  custom: "web.admin.users.detail.common.source.custom",
+};
 
 /** Where a value comes from: the server default, the account's group, or this account. */
 export function SourceTag({ source }: { source: "default" | "group" | "custom" }) {
+  const t = useT();
   return (
     <span
       data-source={source}
@@ -167,7 +178,7 @@ export function SourceTag({ source }: { source: "default" | "group" | "custom" }
           : "text-muted-foreground/80",
       )}
     >
-      {SOURCE_LABELS[source]}
+      {t(SOURCE_LABELS[source])}
     </span>
   );
 }
@@ -223,7 +234,7 @@ export function ListRow({
         {meta ? <div className="text-muted-foreground text-xs">{meta}</div> : null}
       </div>
       {trailing ? (
-        <div className="text-muted-foreground shrink-0 text-right text-xs">{trailing}</div>
+        <div className="text-muted-foreground shrink-0 text-end text-xs">{trailing}</div>
       ) : null}
     </div>
   );
@@ -267,6 +278,9 @@ const AVATAR_GRADIENTS = [
   "from-sky-500 to-blue-600",
 ] as const;
 
+/** Shown when a name has no first character; a symbol, not text to translate. */
+const NO_INITIAL = "?";
+
 /** A round avatar image, or an initial on one of five gradients (picked by `seed`)
  * when there is no image or it fails to load. */
 export function InitialAvatar({
@@ -291,7 +305,7 @@ export function InitialAvatar({
           size === "lg" ? "text-2xl sm:text-3xl" : "text-sm",
         )}
       >
-        {name.trim().charAt(0) || "?"}
+        {name.trim().charAt(0) || NO_INITIAL}
       </AvatarFallback>
     </Avatar>
   );

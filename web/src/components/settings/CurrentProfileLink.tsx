@@ -3,6 +3,7 @@ import { Link } from "react-router";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 /**
@@ -10,13 +11,14 @@ import { cn } from "@/lib/utils";
  * profile, so the settings area names the profile and links to the picker.
  */
 export function CurrentProfileLink({ className }: { className?: string }) {
+  const t = useT();
   const { profile } = useCurrentProfile();
-  const profileName = profile?.name ?? "Your profile";
+  const profileName = profile?.name ?? t("web.settings.currentProfileLink.fallbackName");
 
   return (
     <Link
       to="/profiles"
-      aria-label={`Current profile: ${profileName}`}
+      aria-label={t("web.settings.currentProfileLink.ariaLabel", { name: profileName })}
       className={cn(
         "hover:bg-accent/70 focus-visible:ring-ring/60 flex items-center gap-2.5 rounded-xl px-2 py-1.5 transition-colors focus-visible:ring-[3px] focus-visible:outline-none",
         className,
@@ -29,7 +31,9 @@ export function CurrentProfileLink({ className }: { className?: string }) {
         </AvatarFallback>
       </Avatar>
       <span className="min-w-0 flex-1">
-        <span className="text-muted-foreground block text-xs leading-tight">Current profile</span>
+        <span className="text-muted-foreground block text-xs leading-tight">
+          {t("web.settings.currentProfileLink.caption")}
+        </span>
         <span className="block truncate text-sm font-semibold">{profileName}</span>
       </span>
       <ChevronRight className="text-muted-foreground h-4 w-4 shrink-0" aria-hidden="true" />

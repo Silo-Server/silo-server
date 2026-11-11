@@ -28,7 +28,9 @@ const plexMetadataFailureStreakLimit = 3
 // fetchMetadataByKey resolves full metadata for each distinct key, in batches.
 // Individual failures stay best-effort so other records can still import; context
 // cancellation aborts the sweep, and so does a run of systematic batch failures.
-func (c *PlexClient) fetchMetadataByKey(ctx context.Context, baseURL, token string, keys []string) (plexMetadataSweep, error) {
+// streak carries that run across calls, since a streamed import looks keys up a
+// page at a time and one page rarely needs enough batches to reach the limit.
+func (c *PlexClient) fetchMetadataByKey(ctx context.Context, baseURL, token string, keys []string, streak *int) (plexMetadataSweep, error) {
 	sweep := plexMetadataSweep{items: make(map[string]*PlexItem, len(keys))}
 	pending := uniqueNonEmpty(keys)
 	noteErr := func(err error, keys []string) {
@@ -39,12 +41,11 @@ func (c *PlexClient) fetchMetadataByKey(ctx context.Context, baseURL, token stri
 		}
 	}
 
-	failureStreak := 0
 	for start := 0; start < len(pending); start += plexMetadataBatchSize {
 		batch := pending[start:min(start+plexMetadataBatchSize, len(pending))]
 		metas, err := c.FetchMetadataBatch(ctx, baseURL, token, batch)
 		if err == nil {
-			failureStreak = 0
+			*streak = 0
 			for i := range metas {
 				sweep.items[metas[i].RatingKey] = &metas[i]
 			}
@@ -62,14 +63,14 @@ func (c *PlexClient) fetchMetadataByKey(ctx context.Context, baseURL, token stri
 		// deleted. Retry that case per key, but do not multiply systematic failures
 		// such as authentication errors, outages, or timeouts into one request per item.
 		if !isPlexHTTPStatus(err, http.StatusNotFound) {
-			failureStreak++
-			if failureStreak >= plexMetadataFailureStreakLimit {
+			*streak++
+			if *streak >= plexMetadataFailureStreakLimit {
 				// Only an early stop that left keys unasked is worth reporting as
 				// one; the same streak ending on the last batch skipped nothing.
 				sweep.aborted = start+plexMetadataBatchSize < len(pending)
 				if sweep.aborted {
 					slog.WarnContext(ctx, "plex history import: giving up on item metadata after repeated failures",
-						"component", "historyimport", "consecutive_failures", failureStreak,
+						"component", "historyimport", "consecutive_failures", *streak,
 						"resolved", len(sweep.items), "requested", len(pending), "error", err)
 				}
 				return sweep, nil
@@ -78,7 +79,7 @@ func (c *PlexClient) fetchMetadataByKey(ctx context.Context, baseURL, token stri
 		}
 		// A 404 means the server answered, so it breaks the run of failures even
 		// though the keys it named are gone.
-		failureStreak = 0
+		*streak = 0
 		if len(batch) == 1 {
 			continue
 		}
@@ -102,21 +103,66 @@ func (c *PlexClient) fetchMetadataByKey(ctx context.Context, baseURL, token stri
 	return sweep, nil
 }
 
-// fetchPlexSeriesMetadata resolves the shows episodes belong to, keyed by
-// grandparent rating key, so episodes can match on series ids plus
-// season/episode numbers when they carry no usable ids of their own.
-func fetchPlexSeriesMetadata(ctx context.Context, client *PlexClient, baseURL, token string, seriesKeys []string, warnings *[]string) (map[string]*PlexItem, error) {
-	keys := uniqueNonEmpty(seriesKeys)
-	sweep, err := client.fetchMetadataByKey(ctx, baseURL, token, keys)
+// plexSeriesLookup resolves the shows episodes belong to, a page at a time
+// through a fixed-size cache, so episodes can match on series ids plus
+// season/episode numbers when they carry no usable ids of their own. It stops
+// asking after a sweep gives up, so a broken server does not cost a run of
+// timeouts on every page.
+type plexSeriesLookup struct {
+	client         *PlexClient
+	baseURL, token string
+	cache          *lookupCache[*PlexItem]
+	asked, missing int
+	firstErr       error
+	aborted        bool
+	failureStreak  int
+}
+
+func newPlexSeriesLookup(client *PlexClient, baseURL, token string) *plexSeriesLookup {
+	return &plexSeriesLookup{client: client, baseURL: baseURL, token: token, cache: newLookupCache[*PlexItem](seriesLookupCacheEntries)}
+}
+
+func (l *plexSeriesLookup) resolve(ctx context.Context, keys []string) (map[string]*PlexItem, error) {
+	result, pending := l.cache.split(keys)
+	if len(pending) == 0 || l.aborted {
+		return result, nil
+	}
+	sweep, err := l.client.fetchMetadataByKey(ctx, l.baseURL, l.token, pending, &l.failureStreak)
 	if err != nil {
 		return nil, err
 	}
-	if missing := len(keys) - len(sweep.items); missing > 0 && sweep.firstErr != nil {
-		*warnings = append(*warnings, fmt.Sprintf(
-			warnPlexSeriesMetadataUnavailable+"; their episodes can only match on their own ids%s (first error: %v)",
-			missing, len(keys), plexSweepAbortedSuffix(sweep.aborted), sweep.firstErr))
+	l.asked += len(pending)
+	if sweep.firstErr != nil {
+		l.missing += len(pending) - len(sweep.items)
+		if l.firstErr == nil {
+			l.firstErr = sweep.firstErr
+		}
 	}
-	return sweep.items, nil
+	if sweep.aborted || l.failureStreak >= plexMetadataFailureStreakLimit {
+		l.aborted = true
+	}
+	for _, key := range pending {
+		// A failed key is not cached, so a later page can still resolve it.
+		meta, ok := sweep.items[key]
+		if !ok && sweep.firstErr != nil {
+			continue
+		}
+		if ok {
+			meta = &PlexItem{RatingKey: meta.RatingKey, Title: meta.Title, Year: meta.Year, Guid: meta.Guid}
+		}
+		l.cache.put(key, meta)
+		result[key] = meta
+	}
+	return result, nil
+}
+
+// warning summarizes the run's failed lookups, or "" when none failed.
+func (l *plexSeriesLookup) warning() string {
+	if l.missing == 0 || l.firstErr == nil {
+		return ""
+	}
+	return fmt.Sprintf(warnPlexSeriesMetadataUnavailable+"; their episodes can only match on their own ids%s (first error: %v)",
+		l.missing, l.asked, plexSweepAbortedSuffix(l.aborted), l.firstErr)
 }
 
 func uniqueNonEmpty(values []string) []string {

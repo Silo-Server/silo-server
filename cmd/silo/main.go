@@ -55,6 +55,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/audiobooks/podcastfeed"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/autoscan"
+	"github.com/Silo-Server/silo-server/internal/backup"
 	"github.com/Silo-Server/silo-server/internal/blobgc"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/boxsets"
@@ -96,6 +97,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/netadmin"
+	"github.com/Silo-Server/silo-server/internal/overlays"
 
 	// Built-in metadata providers self-register into the metadata package's
 	// builtin registry on import; buildProviders resolves their seeded chain
@@ -798,6 +800,27 @@ func main() {
 		return
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "postgres-tune-conf" {
+		if err := runPostgresTuneConfCommand(os.Args[2:], os.Stdout); err != nil {
+			log.Fatalf("postgres-tune-conf: %v", err)
+		}
+		return
+	}
+
+	if len(os.Args) > 1 && os.Args[1] == "backup" {
+		if err := runBackupMain(os.Args[2:], os.Stdout, os.Stderr); err != nil {
+			log.Fatalf("backup: %v", err)
+		}
+		return
+	}
+
+	if len(os.Args) > 1 && os.Args[1] == "secret" {
+		if err := runSecretCommand(os.Args[2:], os.Stdin, os.Stdout); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+
 	envFile := flag.String("env", ".env", "path to .env bootstrap file")
 	migrateOnly := flag.Bool("migrate-only", false, "apply database migrations and exit")
 	migrateStatus := flag.Bool("migrate-status", false, "show database migration status and exit")
@@ -886,11 +909,17 @@ func main() {
 		return
 	}
 
+	// Every server that migrates runs the same sequence: wait for any other
+	// server's, back up the database when migrations are pending, then
+	// migrate (database.MigrateAtStartup, docs/architecture/backups.md).
+	migrationWait := database.MigrationWait()
+	startupMigrations := database.StartupOptions{
+		Wait:          migrationWait,
+		BeforeMigrate: beforeMigrateBackup(bc, pool, dataCipher, migrationWait),
+	}
+
 	if *migrateOnly {
-		migCtx, migCancel := database.MigrationContext(ctx)
-		migErr := database.MigrateOnly(migCtx, pool, migrations.FS, "sql")
-		migCancel()
-		if migErr != nil {
+		if migErr := database.MigrateAtStartup(ctx, pool, migrations.FS, "sql", startupMigrations); migErr != nil {
 			log.Fatalf("failed to run migrations: %v", migErr)
 		}
 		slog.Info("database migrations applied")
@@ -905,13 +934,9 @@ func main() {
 	// ciphertext; secondary nodes read whatever the primary encrypted.
 	isPrimaryNode := bc.Mode == "integrated" || bc.Mode == "api" || bc.Mode == ""
 	if isPrimaryNode {
-		migCtx, migCancel := database.MigrationContext(ctx)
-		migErr := database.MigrateOnly(migCtx, pool, migrations.FS, "sql")
-		if migErr != nil {
-			migCancel()
+		if migErr := database.MigrateAtStartup(ctx, pool, migrations.FS, "sql", startupMigrations); migErr != nil {
 			log.Fatalf("failed to run migrations: %v", migErr)
 		}
-		migCancel()
 		slog.Info("database migrations applied")
 	}
 
@@ -1419,6 +1444,19 @@ func main() {
 		ratelimit.NewOutboundLimiter(tmdbRedisClient, "outbound:tmdb", tmdb.RequestsPerSecond))
 	defer tmdbClient.Close()
 
+	// The playback control relay bounds each lane ownership read and write
+	// at one second; this client's sockets give up at that deadline.
+	var playbackControlRedisClient *redis.Client
+	if apiRedisClient != nil {
+		controlClient, controlErr := cache.NewDeadlineRedisClientForRole(cfg.Redis, "api")
+		if controlErr != nil {
+			slog.Warn("redis client init failed; administrator playback commands reach only sessions on this replica", "error", controlErr)
+		} else if controlClient != nil {
+			defer func() { _ = cache.CloseRedisClient(controlClient) }()
+			playbackControlRedisClient = controlClient
+		}
+	}
+
 	if mode == "" || mode == "integrated" || mode == "api" {
 		streamTelemetryRegistry = newStreamTelemetryRegistry(appCtx, nodeID, apiRedisClient)
 		streamTelemetryRegistry.Start(appCtx)
@@ -1464,6 +1502,7 @@ func main() {
 		SecretCipher:                 dataCipher,
 		EventBus:                     eventBus,
 		RedisClient:                  apiRedisClient,
+		PlaybackControlRedisClient:   playbackControlRedisClient,
 		TMDB:                         tmdbClient,
 		DownloadBandwidthRedis:       downloadBandwidthRedis,
 		LogStreamHub:                 logStreamHub,
@@ -1566,7 +1605,8 @@ func main() {
 		markerContributionStore := markers.NewContributionStore(deps.DB)
 		deps.MarkerContributionStore = markerContributionStore
 		deps.MarkerContributionService = markers.NewContributionService(
-			markerRegistry, markerResolver, markerProviderConfig, markerContributionStore, slog.Default(),
+			markerRegistry, markerResolver, markerProviderConfig, markerContributionStore,
+			slog.Default().With("component", "markers.contribute"),
 		)
 	}
 	var watchProviderService *watchsync.Service
@@ -1692,6 +1732,12 @@ func main() {
 	// Runs after configureS3Clients: an S3 backend takes both buckets from deps.
 	if err := configureBlobStorage(appCtx, mode, cfg, &deps, settingsRepo); err != nil {
 		log.Fatalf("configure blob storage: %v", err)
+	}
+	if needsWorkers && deps.DB != nil {
+		deps.Backups = newBackupService(pool, bc, settingsRepo, &deps)
+	}
+	if deps.DB != nil {
+		deps.ProfileTransfer = newProfileTransfer(pool, settingsRepo, cfg)
 	}
 	if storageAdmission != nil {
 		// While a failed admission session is replaced, no blob write may land:
@@ -2704,8 +2750,41 @@ func main() {
 	if watchProviderService != nil {
 		historyRepo := historyimport.NewRepository(deps.DB, deps.SecretCipher)
 		historyIdentity := watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, catalog.NewProviderIDRepository(deps.DB))
+		// A sync's episodes follow what the profile may open, as any viewer
+		// read does, so it resolves scope the same way.
+		var watchProviderScopes interface {
+			Resolve(context.Context, access.ResolveInput) (access.Scope, error)
+		}
+		if policySystem != nil {
+			watchProviderScopes = policy.NewViewerResolver(auth.NewUserRepository(deps.DB), userStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent)
+		} else {
+			// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path.
+			watchProviderScopes = access.NewResolver(auth.NewUserRepository(deps.DB), userStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent)
+		}
+		watchProviderLibrary := catalog.NewLibraryItemRepository(deps.DB)
 		watchProviderService.
 			WithMatcher(historyimport.NewMatcher(historyRepo)).
+			WithProfileAccess(func(ctx context.Context, userID int, profileID string) (watchsync.ProfileAccess, error) {
+				// A sync runs for the connection's profile without a viewer,
+				// so a PIN does not apply; the profile's hidden-library
+				// preference is not an access rule.
+				scope, err := watchProviderScopes.Resolve(ctx, access.ResolveInput{
+					UserID: userID, ProfileID: profileID, SkipPINVerification: true, ContentAccessOnly: true,
+				})
+				if err != nil {
+					return watchsync.ProfileAccess{}, err
+				}
+				allowed := scope.AllowedLibraryIDs
+				if scope.LibrariesRestricted && allowed == nil {
+					allowed = []int{}
+				}
+				return watchsync.ProfileAccess{
+					AllowedLibraryIDs: allowed,
+					Accessible: func(ctx context.Context, contentIDs []string) (map[string]bool, error) {
+						return watchProviderLibrary.FilterAccessibleContentIDs(ctx, contentIDs, allowed, scope.DisabledLibraryIDs, scope.MaturityLimits)
+					},
+				}, nil
+			}).
 			WithWatchState(watchstate.NewService(userStoreProvider).WithStableIdentityResolver(historyIdentity)).
 			WithUserStoreProvider(userStoreProvider).
 			WithRatingStore(catalog.NewRatingsRepo(deps.DB)).
@@ -3335,7 +3414,6 @@ func main() {
 			// Wired outside the autoscan service so events left by a disabled
 			// or unconfigured autoscan still age out.
 			tasks.NewAutoscanEventCleanupTask(autoscan.NewRepository(deps.DB, deps.SecretCipher), settingsRepo),
-			tasks.NewAuthSessionCleanupTask(auth.NewSessionRepository(deps.DB)),
 			tasks.NewDeviceLoginCleanupTask(auth.NewDeviceLoginRetention(deps.DB)),
 			tasks.NewOAuthFlowCleanupTask(auth.NewPGOAuthStore(deps.DB)),
 		)
@@ -3430,6 +3508,9 @@ func main() {
 			taskMgr.Register(tasks.NewRebuildReleaseInterestTask(notificationSystem))
 			maintenanceSteps = append(maintenanceSteps, tasks.NewNotificationsRetentionTask(notificationSystem))
 		}
+		// After notification retention, which reads ended sessions to tell whether
+		// an older push registration's device still has a login.
+		maintenanceSteps = append(maintenanceSteps, tasks.NewAuthSessionCleanupTask(auth.NewSessionRepository(deps.DB)))
 		if userStoreProvider != nil {
 			taskMgr.Register(tasks.NewSettingMutationsRetentionTask(userstore.NewSettingMutationSweeper(
 				auth.NewUserRepository(deps.DB), userStoreProvider,
@@ -3634,9 +3715,17 @@ func main() {
 			}
 		}
 
+		if deps.Backups != nil {
+			taskMgr.Register(backup.NewTask(deps.Backups))
+			deps.Backups.SetTaskStarter(taskMgr)
+		}
+
 		taskMgr.Start(appCtx)
 		defer taskMgr.Stop()
 		deps.TaskManager = taskMgr
+		if deps.Backups != nil {
+			syncBackupSchedule(appCtx, deps.Backups, taskMgr, eventBus, configWatcher)
+		}
 		slog.Info("task manager started")
 	}
 
@@ -3755,6 +3844,13 @@ func main() {
 	// API and the frontend handler.
 	deps.BrandingService = brandingSvc
 	server.Branding = brandingSvc
+	// Card overlay images share the assets store with branding; without one the
+	// library lists nothing new and uploads report storage as unconfigured.
+	var overlayImageStore overlays.ImageStore
+	if deps.Blobs.Assets != nil {
+		overlayImageStore = deps.Blobs.Assets
+	}
+	deps.OverlayImages = overlays.NewImageLibrary(deps.DB, overlayImageStore)
 	var transitionPrivate blobstore.Store
 	if deps.S3Private != nil {
 		transitionPrivate = deps.Blobs.Operational
@@ -3888,6 +3984,9 @@ func main() {
 		)
 		adminJobRunner.SetCancelRegistry(adminJobCancelRegistry)
 		adminJobRunner.SetStorageTransitionExecutor(storageTransitionSvc)
+		if deps.Backups != nil {
+			adminJobRunner.SetBackupRestoreExecutor(backupRestoreExecutor{svc: deps.Backups})
+		}
 		adminJobRunner.SetStorageTransitionCommitted(deps.RequestServerRestart)
 		adminJobRunner.Start()
 		defer adminJobRunner.Stop()
@@ -3941,6 +4040,7 @@ func main() {
 			RecWorker:            recWorker,
 			FrontendFS:           deps.FrontendFS,
 			ArtworkStore:         deps.Blobs.Assets,
+			AvatarStore:          handlers.NewProfileAvatarStore(deps.Blobs),
 			// Hand remote-transcode recipes to the shared recipe store so a dedicated
 			// transcode node that restarts can rebuild a jellycompat session.
 			RecipeNodeStore:  noderecipe.NewStore(apiRedisClient, 0),

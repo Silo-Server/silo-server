@@ -154,7 +154,7 @@ func NewFilteredMiddleware(w Writer, nodeID string, skipRoute func(pattern strin
 				Path:               path,
 				PathPattern:        pathPattern,
 				StatusCode:         RecordedStatus(r, wrapped.status, wrapped.wroteHeader),
-				UserAgent:          r.UserAgent(),
+				UserAgent:          auditmutation.BoundUserAgent(r.UserAgent()),
 				DurationMs:         int(time.Since(start).Milliseconds()),
 			}
 

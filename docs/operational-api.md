@@ -14,7 +14,8 @@ uses this v2 operation.
 
 `GET /api/v2/images/capabilities` reports capability `revision` and `state`, the
 query parameter `param`, ordered `sizes`, per-artwork-type `widths`, and
-`original_max_width_px`. Widths come from the current variant ladder. The image
+`original_max_width_px`, plus the members described in
+[the images API](images-api.md). Widths come from the current variant ladder. The image
 operation accepts account-only requests; when an acting profile is supplied,
 viewer-access and PIN verification still apply. This preserves the bridge gate.
 The v2 response uses capability revision/state instead of legacy `schema_version`.

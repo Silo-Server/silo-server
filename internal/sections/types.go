@@ -100,8 +100,17 @@ type PageSection struct {
 	ItemLimit   int             `json:"item_limit"`
 	Config      json.RawMessage `json:"config"`
 	Enabled     bool            `json:"enabled"`
-	CreatedAt   time.Time       `json:"created_at"`
-	UpdatedAt   time.Time       `json:"updated_at"`
+	// WebOnly keeps a featured row on the web app alone while it is the
+	// page's hero banner: see ForClient. Saving a row that is not featured
+	// clears it.
+	WebOnly bool `json:"web_only"`
+	// TitleKey and TitleArgs name the catalog message Title was written
+	// from, while Title is still the server's own text (see
+	// title_keys.go). Not serialized: v1 bodies carry this struct.
+	TitleKey  string            `json:"-"`
+	TitleArgs map[string]string `json:"-"`
+	CreatedAt time.Time         `json:"created_at"`
+	UpdatedAt time.Time         `json:"updated_at"`
 }
 
 // ProfileSectionOverride is a per-profile customization stored in the user store.
@@ -145,15 +154,31 @@ type ResolvedSection struct {
 	Customized  bool            `json:"customized"`
 	Hidden      bool            `json:"hidden,omitempty"`
 
+	// WebOnly is the admin section's web_only flag. A profile cannot change
+	// it, and a profile-built section never has it. Not serialized: v1
+	// bodies embed this struct.
+	WebOnly bool `json:"-"`
+
+	// TitleKey and TitleArgs name the catalog message Title is the English
+	// of, and are empty when Title is text an admin or profile typed. Not
+	// serialized: v1 bodies embed this struct.
+	TitleKey  string            `json:"-"`
+	TitleArgs map[string]string `json:"-"`
+
 	// DefaultTitle is the admin section's own title, before the profile's
 	// title override. Only ResolveForSettings fills it, and it is empty for a
 	// profile-built section. Not serialized: v1 bodies embed this struct.
 	DefaultTitle string `json:"-"`
+	// DefaultTitleKey and DefaultTitleArgs are the admin section's own title
+	// key and arguments, as TitleKey and TitleArgs are Title's. Only
+	// ResolveForSettings fills them, with DefaultTitle.
+	DefaultTitleKey  string            `json:"-"`
+	DefaultTitleArgs map[string]string `json:"-"`
 
 	// SuppressNextUp, when true on a continue-watching section, skips the
-	// next-up injection (and the combined series collapse/sort that pairs with
-	// it) so the section returns in-progress resume points only. Callers that
-	// need a strict "resume" view — e.g. the Jellyfin /UserItems/Resume
+	// next-up injection, the combined sort, and the one-card-per-series
+	// collapse, so the section returns every in-progress resume point. Callers
+	// that need a strict "resume" view — e.g. the Jellyfin /UserItems/Resume
 	// compatibility endpoint, which must never surface not-yet-started items —
 	// set this; admin/home rendering leaves it false to keep next-up cards.
 	SuppressNextUp bool `json:"-"`

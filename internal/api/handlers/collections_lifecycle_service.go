@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -78,6 +79,11 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 		normalized, err := normalizeSmartCollectionQueryDefinitionJSON(req.QueryDefinition, true, true, cmd.V1Rules)
 		if err != nil {
 			return none, fieldError("query_definition", "Invalid query_definition")
+		}
+		if !cmd.V1Rules && existing.CollectionType == collectionTypeSmart {
+			if err := requireSmartCollectionRule(normalized); err != nil {
+				return none, err
+			}
 		}
 		value := string(normalized)
 		input.QueryDefinition = &value
@@ -169,6 +175,31 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 			return none, apiError(http.StatusForbidden, "forbidden", "Only the creator can edit this collection")
 		}
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to update collection")
+	}
+	// Rows titled with the old name follow the rename, on the profiles that
+	// can see the collection as it now stands, and keep following while an
+	// overlapping rename lands (userstore.FollowCollectionTitle); a failure
+	// leaves them on it. The rename has committed, so a dropped request must
+	// not cut this short; it gets its own deadline instead.
+	if oldName := strings.TrimSpace(existing.Name); req.Name != nil && oldName != "" && strings.TrimSpace(*req.Name) != oldName {
+		var latest *userstore.Collection
+		currentTitle := func(ctx context.Context) (string, error) {
+			c, err := store.GetCollection(ctx, collectionID)
+			if err != nil {
+				return "", err
+			}
+			latest = c
+			return c.Name, nil
+		}
+		retitleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), userstore.RetitleTimeout)
+		err := userstore.FollowCollectionTitle(retitleCtx, existing.Name, currentTitle, func(ctx context.Context, from, to string) error {
+			return store.RenameCollectionRows(ctx, userstore.CollectionKindUser, collectionID, from, to, latest.VisibleTo)
+		})
+		cancel()
+		if err != nil {
+			slog.WarnContext(ctx, "collection rename: retitling rows failed", "component", "api",
+				"collection_id", collectionID, "error", err)
+		}
 	}
 
 	posterSource := pointerStringValue(req.PosterSourceURL)

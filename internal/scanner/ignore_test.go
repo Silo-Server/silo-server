@@ -96,8 +96,8 @@ func TestIgnoreFilePatternsAtLibraryRootSkipOnlyMatches(t *testing.T) {
 		t.Fatalf("scoped walk: %v, failures: %v", err, walkFailures)
 	}
 	assertFilePaths(t, files, root, []string{"Show/Season 01/Episode 01.mkv"})
-	if libraryRootSkipped(root) {
-		t.Fatal("a root .ignore with patterns must not skip the root")
+	if skipped, err := libraryRootSkipped(root); err != nil || skipped {
+		t.Fatalf("a root .ignore with patterns must not skip the root: skipped=%v err=%v", skipped, err)
 	}
 }
 
@@ -196,22 +196,33 @@ func TestIgnoreFileDirectoryPatternMatchesSymlinkedDirectory(t *testing.T) {
 func TestLibraryRootSkipped(t *testing.T) {
 	t.Parallel()
 
-	cases := []struct {
-		name  string
-		setup func(root string)
-		want  bool
-	}{
-		{"no ignore files", func(string) {}, false},
-		{"empty .ignore", func(root string) { writeTestFile(t, filepath.Join(root, ".ignore"), "") }, true},
-		{".ignore with patterns", func(root string) { writeTestFile(t, filepath.Join(root, ".ignore"), ".downloads\n") }, false},
-		{".nomedia", func(root string) { writeTestFile(t, filepath.Join(root, ".nomedia"), "") }, true},
-		{".ignore directory", func(root string) { writeTestFile(t, filepath.Join(root, ".ignore", "x"), "") }, false},
+	type rootCase struct {
+		name    string
+		setup   func(root string)
+		want    bool
+		wantErr bool
+	}
+	cases := []rootCase{
+		{"no ignore files", func(string) {}, false, false},
+		{"empty .ignore", func(root string) { writeTestFile(t, filepath.Join(root, ".ignore"), "") }, true, false},
+		{".ignore with patterns", func(root string) { writeTestFile(t, filepath.Join(root, ".ignore"), ".downloads\n") }, false, false},
+		{".nomedia", func(root string) { writeTestFile(t, filepath.Join(root, ".nomedia"), "") }, true, false},
+		{".ignore directory", func(root string) { writeTestFile(t, filepath.Join(root, ".ignore", "x"), "") }, false, false},
+	}
+	if os.Geteuid() != 0 { // permission bits do not deny root
+		cases = append(cases, rootCase{"unreadable .ignore", func(root string) {
+			writeTestFile(t, filepath.Join(root, ".ignore"), "")
+			if err := os.Chmod(filepath.Join(root, ".ignore"), 0o000); err != nil {
+				t.Fatal(err)
+			}
+		}, false, true})
 	}
 	for _, tc := range cases {
 		root := t.TempDir()
 		tc.setup(root)
-		if got := libraryRootSkipped(root); got != tc.want {
-			t.Errorf("%s: libraryRootSkipped = %v, want %v", tc.name, got, tc.want)
+		got, err := libraryRootSkipped(root)
+		if got != tc.want || (err != nil) != tc.wantErr {
+			t.Errorf("%s: libraryRootSkipped = %v, %v; want %v, error %v", tc.name, got, err, tc.want, tc.wantErr)
 		}
 	}
 }

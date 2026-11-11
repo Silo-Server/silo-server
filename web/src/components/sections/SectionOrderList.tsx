@@ -23,6 +23,7 @@ import {
   SortableSectionCardRow,
   type EditableSectionViewModel,
 } from "@/components/sections/EditableSectionRows";
+import { useT } from "@/i18n";
 import type { RecipeCatalogResponse } from "@/lib/recipes";
 
 function toEditableSection(section: SettingsSectionEntry): EditableSectionViewModel {
@@ -61,6 +62,7 @@ export function SectionOrderList({
   onEdit?: (section: SettingsSectionEntry) => void;
   onDelete?: (section: SettingsSectionEntry) => void;
 }) {
+  const t = useT();
   const [activeId, setActiveId] = useState<string | null>(null);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -108,7 +110,7 @@ export function SectionOrderList({
           ))}
           {sections.length === 0 && (
             <div className="surface-panel-subtle text-muted-foreground rounded-[1.2rem] py-8 text-center text-sm">
-              No sections configured.
+              {t("web.home.rows.sections.empty")}
             </div>
           )}
         </div>

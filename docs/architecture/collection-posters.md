@@ -71,7 +71,14 @@ Collection list responses differ by viewer. None of them may be cached across pr
 ## Counts and visibility
 
 A server collection's stored count is every member it has; a smart collection's
-`item_count_cached` is counted with no access filter and can be up to an hour old. A viewer whose
+`item_count_cached` is counted with no access filter. `catalog.SmartCountRefresher` recounts it
+when the collection is saved, about 10 seconds after a scan publishes `scan_complete` for a library
+its rule draws from (`catalog.SmartCountScheduler`, on the node that ran the scan), and hourly.
+Changes that are not scans, such as metadata edits or a date-based rule moving on, can leave it up
+to an hour old. The recounts are not ordered against each other: one that started earlier, on
+another pass or another node, can finish last and write an older number, which the next recount
+corrects. Only a changed count is written, because any write to the row advances the collection's
+revision and so ends open catalog cursors and fails editor saves. A viewer whose
 access narrows the catalog (library allowlist or disabled libraries, maturity limits, excluded
 media types) is shown its own count instead: `LibraryCollectionRepository.ViewerCollectionCounts`
 counts the members the collection's catalog page lists for it (manga chapters excluded), and

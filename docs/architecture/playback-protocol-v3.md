@@ -114,7 +114,7 @@ the document is always the full one:
 }
 ```
 
-The seventeen feature strings above are the full set this server version advertises on `/api/v1`. `/api/v2` advertises them plus `buffering_quality_v1`, `playback_plan_summary_v1`, `subrip_sidecar_v1`, `marker_thumbnails_v1`, `hls_subtitle_renditions_v1`, `plan_active_quality_v1`, `hls_remux_subtitle_renditions_v1`, `hls_copy_mpegts_v1`, `hls_variable_substitution_v1`, `codec_channel_ceilings_v1`, `native_embedded_limitations_v1`, and `hls_subtitle_renditions_all_v1`:
+The seventeen feature strings above are the full set this server version advertises on `/api/v1`. `/api/v2` advertises them plus `buffering_quality_v1`, `playback_plan_summary_v1`, `subrip_sidecar_v1`, `marker_thumbnails_v1`, `hls_subtitle_renditions_v1`, `plan_active_quality_v1`, `hls_remux_subtitle_renditions_v1`, `hls_copy_mpegts_v1`, `hls_variable_substitution_v1`, `codec_channel_ceilings_v1`, `native_embedded_limitations_v1`, `hls_subtitle_renditions_all_v1`, and `progressive_range_refusal_v1`:
 
 | Feature | What it promises |
 | --- | --- |
@@ -146,6 +146,7 @@ The seventeen feature strings above are the full set this server version adverti
 | `codec_channel_ceilings_v1` | `/api/v2` only. The server honors a delivery's `max_channels_by_codec` (§3). A client that needs a ceiling for one codec only (stereo AAC beside E-AC-3 5.1) sends it there instead of narrowing `max_channels` for every codec |
 | `native_embedded_limitations_v1` | `/api/v2` only. The server honors `limitations` on a `native_embedded` entry and keeps the tracks that player would show wrongly off the native route (§8). A client whose native route needs a limitation must not send that entry to a server without this feature: an older server rejects the field or ignores it and plans those tracks native |
 | `hls_subtitle_renditions_all_v1` | `/api/v2` only, and only with `hls_subtitle_renditions_v1` (and `hls_remux_subtitle_renditions_v1` for a remux). Every embedded text track the source's index can read, up to 64, becomes a WebVTT rendition of the HLS plan's stream, read on demand; those inventory rows carry `hls_rendition`, and switching among them keeps the stream (§8) |
+| `progressive_range_refusal_v1` | `/api/v2` only, and sent by the client in `deliveries.progressive.features` rather than `client_features`. The client reopens a progressive remux at its current position when the stream refuses a mid-stream range. Its `server_remux_progressive` URLs then carry `remux_range=refuse`, except one served by a proxy that does not advertise `remux_range_refusal_v1` (§4.1), and a GET whose `Range` starts past byte 0, or is a suffix range, answers `409` before the remux starts instead of streaming from the origin, which a browser would read again from byte zero ([playback API](../playback-api.md#delivery)) |
 
 `plan_source_duration_v1` is the reason feature detection is a list and not a version
 number: without it, a client cannot tell a server that never sends the runtime
@@ -560,13 +561,16 @@ populating them:
 | Field | Match |
 | --- | --- |
 | `profiles` | Case-insensitive profile identity against the source profile. H.264 ignores presentation separators, and a decoder reporting Baseline also accepts the narrower Constrained Baseline source profile; the reverse is not inferred |
-| `levels` | **At-least**: any listed level ≥ the source level passes |
+| `levels` | **At-least**: any listed level ≥ the source level passes. An `exact` hardware HEVC entry also passes a source tagged above its highest level when both levels share a picture-size family (4–4.1, 5–5.2, 6–6.2) and the source's luma sample rate and bitrate fit the entry's level, with bitrate held to the Main-tier limit and the sample rate taken at no less than 60 fps, since the stored frame rate is an average |
 | `bit_depths` | Exact integer equality |
 
 So a decoder that tops out at H.264 level 4.1 may report `[41]` and still
 validate a level-3.0 stream, while a decoder that handles 8- and 10-bit must
 list both — `[10]` alone rejects an 8-bit source. Levels use the integer form
-(4.1 → `41`).
+(4.1 → `41`), except HEVC, which uses `general_level_idc` (5.1 → `153`), the
+value FFmpeg probes. The HEVC family rule exists because encoders also choose
+the level from their declared buffer and peak bitrate: x265 tags a 4K24 encode
+with a 180 Mb/s VBV ceiling as 5.2, though a 5.1 decoder handles its pictures.
 
 **Every validated video route requires complete routing metadata.** Before any
 tier logic runs, the server requires video codec, bit depth, width, height,
@@ -837,6 +841,11 @@ proxy-executed progressive remux requires only the proxy's execution capability
 and remains eligible when relay capability is absent. During a rolling upgrade,
 an older node is therefore excluded from only the shapes it cannot serve before
 a client receives a URL rather than failing the stream on its first request.
+Proxies also publish `remux_range_refusal_v1`: a proxy-served progressive remux
+URL carries `remux_range=refuse` (`progressive_range_refusal_v1`) only when its
+proxy advertises it, because an older proxy streams a mid-stream range from the
+origin. The proxy refuses before it relays, so a transcode node needs no marker
+for it.
 The transcode-executed shape also requires the shared node-recipe store. The API
 writes the plan-scoped transport record before publishing the proxy URL; the
 transcode node validates it before starting each progressive response, and stop
@@ -954,8 +963,8 @@ parameter, and never carries a parameter across families.
 
 | Route family | Routes | Query parameters |
 | --- | --- | --- |
-| Media | `/stream/{session_id}`, `/playback/transcode/{session_id}/master.m3u8` and its segments | `seek` only — the progressive-remux start offset in seconds, present only when it is non-zero — plus `silo_rendition=video` or `silo_rendition=subtitles` on the `master.m3u8` URIs that a subtitle rendition's multivariant playlist emits (§8) |
-| Media on a designated origin | `{proxy}/stream/v3/{session_id}`, `{proxy}/stream/v3/{session_id}/master.m3u8` and its `segment/{name}` children (§4.1) | `seek` only, with the same meaning, plus `silo_rendition` on the multivariant playlist's own `master.m3u8` URIs as above; these routes never accept a credential parameter of any kind |
+| Media | `/stream/{session_id}`, `/playback/transcode/{session_id}/master.m3u8` and its segments | `seek` — the progressive-remux start offset in seconds, present only when it is non-zero — and `remux_range=refuse` on a progressive remux whose start or replan request listed `progressive_range_refusal_v1` (`seek_reanchor` and `seek_failure_recovery` keep the opt-in of the attempt's stored request; a client that drops the feature on any other replan gets an unmarked URL), plus `silo_rendition=video` or `silo_rendition=subtitles` on the `master.m3u8` URIs that a subtitle rendition's multivariant playlist emits (§8) |
+| Media on a designated origin | `{proxy}/stream/v3/{session_id}`, `{proxy}/stream/v3/{session_id}/master.m3u8` and its `segment/{name}` children (§4.1) | `seek` and `remux_range`, with the same meaning, plus `silo_rendition` on the multivariant playlist's own `master.m3u8` URIs as above; these routes never accept a credential parameter of any kind |
 | Subtitle artifact | `/stream/{session_id}/subtitles/{combined_index}{.ext}`, `/stream/{session_id}/subtitles/{combined_index}/fonts` | `file_id`, always; one identity pin: `embedded_stream_index`, `external_subtitle_key`, or `downloaded_subtitle_id` (§8); `original=1` on an original-SRT `.srt` URL (§8). VTT receivers may explicitly request `timestamp_offset` in seconds |
 
 A media route never carries `file_id` or `downloaded_subtitle_id` — the session
@@ -1069,7 +1078,11 @@ because the playlist has no bytes for positions FFmpeg has not reached yet.
 
 **Progressive remux** is a freshly generated chunked response with no byte-range
 support, so it uses the same resolved keyframe origin and player pre-roll offset;
-the window is open-ended and seeks go through the server.
+the window is open-ended and seeks go through the server. The response ends
+cleanly only when FFmpeg read the source to its end. If reading the source fails
+partway, or FFmpeg fails, the server aborts the response instead (no final chunk
+on HTTP/1.1, a stream reset on HTTP/2). A client must treat an incomplete
+response as a transport failure, never as the end of the title.
 
 ### `source.duration_seconds`
 
@@ -2236,12 +2249,27 @@ A transformation is a named, versioned media operation with claims attached.
 | `video_to_hevc` | `server` | `1` | `sdr` output | `hevc_decode` |
 | `hdr_to_sdr_tonemap` | `server` | `1` | limited-range BT.709 `sdr` output with HDR metadata removed | `hdr_metadata_removed`, `sdr_bt709_output` |
 | `server_dv7_to_hdr10` | `server` | `2` | `hdr10` output | `dolby_vision_metadata_removed`, `hdr10_base_layer_preserved`, `enhancement_layer_discarded` |
+| `server_dv7_to_dv81` | `server` | `1` | `dolby_vision` Profile 8.1 output | `profile7_rpu_converted_to_profile81`, `hdr10_base_layer_preserved`, `enhancement_layer_discarded` |
 
 `server_dv7_to_hdr10` recipe version 2 removes a single-track Profile 7
 enhancement layer (NAL unit type 63) with `filter_units` as well as the Dolby
 Vision RPUs with `dovi_rpu`. An executor on recipe 1 is never offered a recipe 2
 plan, and a copy started under recipe 1 cannot be reopened on an upgraded
 executor, so that session replans.
+
+`server_dv7_to_dv81` carries a single-track Profile 7 source (its DOVI
+record lists RPUs, enhancement layer and base layer in the copied track) as
+Profile 8.1 over an fMP4 HLS copy remux, ranked after native playback and the
+client-side `client_dv7_to_dv81` and before `server_dv7_to_hdr10`. FFmpeg only
+removes the enhancement layer (`filter_units=remove_types=63`, `-strict
+unofficial` so the DOVI record is written); the session then rewrites each
+segment as it is first served: `init.mp4`'s Profile 7 `dvcC` becomes a Profile
+8.1 `dvvC` (compatibility id 1), and every RPU is converted as dovi_tool's mode
+2 does (a FEL's mapping is reset to identity). A filler-data NAL placed before
+each converted RPU takes up the bytes it saved, so no sample or box changes
+size; an RPU that cannot be converted becomes filler and that frame plays its
+HDR10 base layer. The output keeps the `hvc1` sample entry: some players (LG
+webOS) drop to HDR10 for `dvh1`. There is no MPEG-TS or progressive form.
 
 `video_to_hevc` encodes 8-bit SDR HEVC. The planner chooses it over
 `video_to_h264` only when `playback.allow_hevc_encoding` is on and the client's
@@ -2311,6 +2339,7 @@ tone-map smoke probe is lazy and cached by binary, backend, and device:
 | Transformation | Probe |
 | --- | --- |
 | `server_dv7_to_hdr10` | `ffmpeg -bsfs` contains `dovi_rpu` and `filter_units` |
+| `server_dv7_to_dv81` | `ffmpeg -bsfs` contains `filter_units` |
 | `audio_to_aac` | `ffmpeg -encoders` contains an `aac` encoder and bounded silent-frame smoke tests execute the exact timestamp-normalisation graph (stereo input) and stereo-downmix limiter graph (5.1 input) |
 | `video_to_h264` | `ffmpeg -encoders` contains any of `libx264`, `h264_qsv`, `h264_vaapi`, `h264_nvenc`, `h264_videotoolbox` |
 | `video_to_hevc` | `ffmpeg -encoders` contains `libx265` and a bounded one-frame `libx265` 8-bit SDR encode succeeds; the transcode backend probe validates a hardware HEVC encoder before that backend is selected |

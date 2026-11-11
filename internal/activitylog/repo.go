@@ -9,6 +9,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/auditmutation"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -57,7 +58,11 @@ type ListResult struct {
 
 // Repo provides query access to the activity_log table.
 type Repo struct {
-	pool *pgxpool.Pool
+	pool queryer
+}
+
+type queryer interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
 }
 
 // NewRepo creates a new activity log repository.
@@ -209,12 +214,12 @@ func (r *Repo) List(ctx context.Context, opts ListOptions) (ListResult, error) {
 
 	query := fmt.Sprintf(`
 		SELECT id, timestamp, client_ip::text, user_id, impersonator_user_id, COALESCE(session_id, ''), COALESCE(playback_session_id, ''), COALESCE(request_id, ''), COALESCE(node_id, ''),
-		       method, path, COALESCE(path_pattern, ''), COALESCE(status_code, 0), COALESCE(user_agent, ''), COALESCE(duration_ms, 0), action, target_type, target_id, changes
+		       method, path, COALESCE(path_pattern, ''), COALESCE(status_code, 0), LEFT(COALESCE(user_agent, ''), %d), COALESCE(duration_ms, 0), action, target_type, target_id, changes
 		FROM activity_log
 		WHERE %s
 		ORDER BY timestamp DESC, id DESC
 		LIMIT $%d
-	`, strings.Join(conditions, " AND "), argIdx)
+	`, auditmutation.MaxUserAgentBytes, strings.Join(conditions, " AND "), argIdx)
 	args = append(args, limit+1)
 
 	rows, err := r.pool.Query(ctx, query, args...)
@@ -246,6 +251,7 @@ func (r *Repo) List(ctx context.Context, opts ListOptions) (ListResult, error) {
 		); err != nil {
 			return ListResult{}, fmt.Errorf("scan activity log row: %w", err)
 		}
+		entry.UserAgent = auditmutation.BoundUserAgent(entry.UserAgent)
 		entries = append(entries, entry)
 	}
 	if err := rows.Err(); err != nil {

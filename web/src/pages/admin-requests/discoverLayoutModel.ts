@@ -15,6 +15,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { RequestMediaType } from "@/api/types";
+import { createAppIntl, t, type MessageKey } from "@/i18n";
+import { formatWith } from "@/i18n/format";
 import type {
   DiscoverChart,
   DiscoverFilter,
@@ -61,53 +63,77 @@ function builtIn(id: string, title: string, chart: DiscoverChart): DiscoverRowBo
   return { id, type: "tmdb_chart", title, enabled: true, limit: 20, chart };
 }
 
-/** Each row type as the picker, the row list and the dialog show it. */
+/**
+ * Each row type as the picker, the row list and the dialog show it. `label` and
+ * `sentence` are message ids; `rowKindLabel` and `rowKindSentence` give the text.
+ */
 export const ROW_KINDS: Readonly<
-  Record<DiscoverRowType, { label: string; sentence: string; icon: LucideIcon; group: RowGroup }>
+  Record<
+    DiscoverRowType,
+    { label: MessageKey; sentence: MessageKey; icon: LucideIcon; group: RowGroup }
+  >
 > = {
   tmdb_chart: {
-    label: "TMDB chart",
-    sentence: "Trending, popular, top rated or upcoming titles, as TMDB ranks them.",
+    label: "web.admin.requests.discover.kind.tmdbChart.label",
+    sentence: "web.admin.requests.discover.kind.tmdbChart.sentence",
     icon: Flame,
     group: "popular",
   },
   tmdb_discover: {
-    label: "TMDB filter",
-    sentence: "Titles that match genres, keywords, studios, streaming services, years or scores.",
+    label: "web.admin.requests.discover.kind.tmdbFilter.label",
+    sentence: "web.admin.requests.discover.kind.tmdbFilter.sentence",
     icon: ListFilter,
     group: "picked",
   },
   mdblist: {
-    label: "MDBList list",
-    sentence: "A public list from mdblist.com.",
+    label: "web.admin.requests.discover.kind.mdblist.label",
+    sentence: "web.admin.requests.discover.kind.mdblist.sentence",
     icon: ListVideo,
     group: "new",
   },
   tmdb_list: {
-    label: "TMDB list",
-    sentence: "A public list from themoviedb.org, in list order.",
+    label: "web.admin.requests.discover.kind.tmdbList.label",
+    sentence: "web.admin.requests.discover.kind.tmdbList.sentence",
     icon: Link2,
     group: "new",
   },
   studios: {
-    label: "Studios",
-    sentence: "Studio cards, each opening the studio's titles.",
+    label: "web.admin.requests.discover.kind.studios.label",
+    sentence: "web.admin.requests.discover.kind.studios.sentence",
     icon: Clapperboard,
     group: "moods",
   },
   networks: {
-    label: "Networks",
-    sentence: "Network cards, each opening the network's series.",
+    label: "web.admin.requests.discover.kind.networks.label",
+    sentence: "web.admin.requests.discover.kind.networks.sentence",
     icon: Tv,
     group: "moods",
   },
   genres: {
-    label: "Genres",
-    sentence: "Genre cards, each opening the genre's titles.",
+    label: "web.admin.requests.discover.kind.genres.label",
+    sentence: "web.admin.requests.discover.kind.genres.sentence",
     icon: Shapes,
     group: "moods",
   },
 };
+
+/** A row type's name: "TMDB chart", "Studios". */
+export function rowKindLabel(type: DiscoverRowType): string {
+  return t(ROW_KINDS[type].label);
+}
+
+let englishIntl: ReturnType<typeof createAppIntl> | undefined;
+
+/** A row type's English name, for requests the server gets: sent text stays English (D44). */
+export function rowKindEnglishLabel(type: DiscoverRowType): string {
+  englishIntl ??= createAppIntl("en", {});
+  return formatWith(englishIntl, ROW_KINDS[type].label);
+}
+
+/** A row type in a sentence: what its rows show. */
+export function rowKindSentence(type: DiscoverRowType): string {
+  return t(ROW_KINDS[type].sentence);
+}
 
 /** The types Add row starts a new row from; brand rows come back from "Bring back". */
 export const NEW_ROW_TYPES: readonly DiscoverRowType[] = [
@@ -198,32 +224,87 @@ export function fromTMDBChart(chart: TMDBChart): DiscoverChart {
   };
 }
 
-/** The name a row gets when none is typed; empty when it needs one. */
+/** The name a row shows when none is typed, in the interface language; empty when it needs one. */
 export function defaultTitle(row: DiscoverRowBody): string {
-  if (row.chart) return chartName(toTMDBChart(row.chart));
-  if (isBrandRow(row)) return ROW_KINDS[row.type].label;
+  if (row.chart) return chartName(toTMDBChart(row.chart), t);
+  if (isBrandRow(row)) return rowKindLabel(row.type);
   return "";
 }
 
-/** The name the row is saved with. */
+/**
+ * The name the row is saved with. It is stored data, so an untyped chart row keeps its
+ * English chart name and an untyped brand row the server's English default ("Studios")
+ * in every interface language.
+ */
 export function savedTitle(row: DiscoverRowBody): string {
-  return row.title.trim() || defaultTitle(row);
+  const typed = row.title.trim();
+  if (typed) return typed;
+  if (row.chart) return chartName(toTMDBChart(row.chart));
+  if (isBrandRow(row)) return BRAND_ROWS.find((brand) => brand.type === row.type)?.title ?? "";
+  return defaultTitle(row);
 }
 
-const FILTER_SORTS: ReadonlyArray<{ value: string; label: string; media?: RequestMediaType }> = [
-  { value: "popularity.desc", label: "Most popular" },
-  { value: "vote_average.desc", label: "Highest rated" },
-  { value: "vote_count.desc", label: "Most voted" },
-  { value: "primary_release_date.desc", label: "Newest", media: "movie" },
-  { value: "primary_release_date.asc", label: "Oldest", media: "movie" },
-  { value: "first_air_date.desc", label: "Newest", media: "series" },
-  { value: "first_air_date.asc", label: "Oldest", media: "series" },
-  { value: "revenue.desc", label: "Highest grossing", media: "movie" },
+/** A filter row's sorts: the picker's label and the summary's "… first" phrase, as message ids. */
+const FILTER_SORTS: ReadonlyArray<{
+  value: string;
+  label: MessageKey;
+  summary: MessageKey;
+  media?: RequestMediaType;
+}> = [
+  {
+    value: "popularity.desc",
+    label: "web.admin.requests.discover.sort.mostPopular",
+    summary: "web.admin.requests.discover.sort.mostPopularFirst",
+  },
+  {
+    value: "vote_average.desc",
+    label: "web.admin.requests.discover.sort.highestRated",
+    summary: "web.admin.requests.discover.sort.highestRatedFirst",
+  },
+  {
+    value: "vote_count.desc",
+    label: "web.admin.requests.discover.sort.mostVoted",
+    summary: "web.admin.requests.discover.sort.mostVotedFirst",
+  },
+  {
+    value: "primary_release_date.desc",
+    label: "web.admin.requests.discover.sort.newest",
+    summary: "web.admin.requests.discover.sort.newestFirst",
+    media: "movie",
+  },
+  {
+    value: "primary_release_date.asc",
+    label: "web.admin.requests.discover.sort.oldest",
+    summary: "web.admin.requests.discover.sort.oldestFirst",
+    media: "movie",
+  },
+  {
+    value: "first_air_date.desc",
+    label: "web.admin.requests.discover.sort.newest",
+    summary: "web.admin.requests.discover.sort.newestFirst",
+    media: "series",
+  },
+  {
+    value: "first_air_date.asc",
+    label: "web.admin.requests.discover.sort.oldest",
+    summary: "web.admin.requests.discover.sort.oldestFirst",
+    media: "series",
+  },
+  {
+    value: "revenue.desc",
+    label: "web.admin.requests.discover.sort.highestGrossing",
+    summary: "web.admin.requests.discover.sort.highestGrossingFirst",
+    media: "movie",
+  },
 ];
 
-/** The sorts a filter row offers for a media type. */
-export function sortsFor(mediaType: RequestMediaType) {
+function sortEntriesFor(mediaType: RequestMediaType) {
   return FILTER_SORTS.filter((sort) => !sort.media || sort.media === mediaType);
+}
+
+/** The sorts a filter row offers for a media type, labelled for its picker. */
+export function sortsFor(mediaType: RequestMediaType) {
+  return sortEntriesFor(mediaType).map((sort) => ({ value: sort.value, label: t(sort.label) }));
 }
 
 /** A sort that fits the other media type, for when a filter switches between them. */
@@ -244,23 +325,32 @@ export const RATING_CEILINGS: Readonly<Record<RequestMediaType, readonly string[
 
 /** "Movies, most popular first, 2 genres, 1990–1999": what a filter row looks for. */
 export function filterSummary(filter: DiscoverFilter): string {
-  const parts = [filter.media_type === "series" ? "Series" : "Movies"];
-  const sort = sortsFor(filter.media_type).find((s) => s.value === filter.sort_by);
-  if (sort) parts.push(`${sort.label.toLowerCase()} first`);
-  const counts: Array<[number | undefined, string]> = [
-    [filter.genre_ids?.length, "genre"],
-    [filter.keyword_ids?.length, "keyword"],
-    [filter.company_ids?.length, "studio"],
-    [filter.network_ids?.length, "network"],
-    [filter.watch_provider_ids?.length, "streaming service"],
+  const parts = [
+    filter.media_type === "series"
+      ? t("web.admin.requests.discover.summary.series")
+      : t("web.admin.requests.discover.summary.movies"),
   ];
-  for (const [count, noun] of counts) {
-    if (count) parts.push(`${count} ${noun}${count === 1 ? "" : "s"}`);
+  const sort = sortEntriesFor(filter.media_type).find((s) => s.value === filter.sort_by);
+  if (sort) parts.push(t(sort.summary));
+  // A filter row holds at most 20 IDs of each kind.
+  const counts: Array<[number | undefined, MessageKey]> = [
+    [filter.genre_ids?.length, "web.admin.requests.discover.summary.genres"],
+    [filter.keyword_ids?.length, "web.admin.requests.discover.summary.keywords"],
+    [filter.company_ids?.length, "web.admin.requests.discover.summary.studios"],
+    [filter.network_ids?.length, "web.admin.requests.discover.summary.networks"],
+    [filter.watch_provider_ids?.length, "web.admin.requests.discover.summary.streamingServices"],
+  ];
+  for (const [count, key] of counts) {
+    if (count) parts.push(t(key, { count }));
   }
   if (filter.year_from || filter.year_to) {
     parts.push(`${filter.year_from ?? "…"}–${filter.year_to ?? "…"}`);
   }
-  if (filter.certification_lte) parts.push(`up to ${filter.certification_lte}`);
+  if (filter.certification_lte) {
+    parts.push(
+      t("web.admin.requests.discover.summary.ratingLimit", { rating: filter.certification_lte }),
+    );
+  }
   return parts.join(", ");
 }
 
@@ -283,29 +373,46 @@ function listState(row: DiscoverRow): DescriptionPart[] {
   switch (source.state) {
     case "pending":
       // Only rows that are on get fetched.
-      return [row.enabled ? " · Fetching the list…" : " · Fetched once the row is on"];
-    case "ready":
       return [
-        ` · ${source.entries} in the list${source.refreshed_at ? `, updated ${formatRelativeTime(source.refreshed_at)}` : ""}`,
+        ` · ${row.enabled ? t("web.admin.requests.discover.list.fetching") : t("web.admin.requests.discover.list.fetchedWhenOn")}`,
       ];
+    case "ready": {
+      // A stored list holds at most 200 entries.
+      const updated = source.refreshed_at ? formatRelativeTime(source.refreshed_at) : "";
+      return [
+        ` · ${
+          updated
+            ? t("web.admin.requests.discover.list.entriesUpdated", {
+                count: source.entries,
+                updated,
+              })
+            : t("web.admin.requests.discover.list.entries", { count: source.entries })
+        }`,
+      ];
+    }
     case "empty":
-      return [" · ", { warning: "The list has no movies or series" }];
+      return [" · ", { warning: t("web.admin.requests.discover.list.empty") }];
     default:
-      return [
-        " · ",
-        {
-          warning: `The last fetch failed${source.error ? `: ${source.error}` : ""}${source.entries ? `; showing the ${source.entries} titles from before` : ""}`,
-        },
-      ];
+      return [" · ", { warning: listFailure(source.error, source.entries) }];
   }
+}
+
+/** Why a list row's last fetch failed, and what it shows meanwhile. */
+function listFailure(error: string | undefined, entries: number | undefined): string {
+  if (error && entries) {
+    return t("web.admin.requests.discover.list.failedWithErrorKept", { error, count: entries });
+  }
+  if (error) return t("web.admin.requests.discover.list.failedWithError", { error });
+  if (entries) return t("web.admin.requests.discover.list.failedKept", { count: entries });
+  return t("web.admin.requests.discover.list.failed");
 }
 
 /** The orders an MDBList row can show its list in; list order is stored absent. */
 export const MDBLIST_ORDERS = [
-  { value: "list", label: "List order" },
-  { value: "newest_added", label: "Newest added first" },
-  { value: "newest_released", label: "Newest released first" },
-] as const;
+  { value: "list", label: "web.admin.requests.discover.order.list" },
+  { value: "newest_added", label: "web.admin.requests.discover.order.newestAdded" },
+  { value: "newest_released", label: "web.admin.requests.discover.order.newestReleased" },
+] as const satisfies ReadonlyArray<{ value: string; label: MessageKey }>;
 
 export type MDBListOrder = (typeof MDBLIST_ORDERS)[number]["value"];
 
@@ -317,23 +424,32 @@ export function mdblistOrder(row: DiscoverRowBody): MDBListOrder {
 /** A non-default order, as the row list's description line names it. */
 function orderPart(order: MDBListOrder): DescriptionPart[] {
   if (order === "list") return [];
-  return [` · ${MDBLIST_ORDERS.find((option) => option.value === order)?.label ?? ""}`];
+  const label = MDBLIST_ORDERS.find((option) => option.value === order)?.label;
+  return [` · ${label ? t(label) : ""}`];
 }
 
 /** What a row shows, in the line under its name in the row list. */
 export function describeDiscoverRow(row: DiscoverRow): DescriptionPart[] {
   const parts: DescriptionPart[] = [];
-  if (row.chart) parts.push(`TMDB chart: ${chartSummary(toTMDBChart(row.chart))}`);
-  else if (row.discover) parts.push(`TMDB filter: ${filterSummary(row.discover)}`);
-  else if (row.list)
+  if (row.chart) {
     parts.push(
-      `${ROW_KINDS[row.type].label}: `,
+      t("web.admin.requests.discover.describe.chart", {
+        summary: chartSummary(toTMDBChart(row.chart)),
+      }),
+    );
+  } else if (row.discover) {
+    parts.push(
+      t("web.admin.requests.discover.describe.filter", { summary: filterSummary(row.discover) }),
+    );
+  } else if (row.list)
+    parts.push(
+      `${t("web.admin.requests.discover.describe.listKind", { kind: rowKindLabel(row.type) })} `,
       { strong: shownLink(row.list.url) },
       ...orderPart(mdblistOrder(row)),
       ...listState(row),
     );
-  else parts.push(ROW_KINDS[row.type].sentence.replace(/\.$/, ""));
-  if (row.hide_available) parts.push(" · Missing titles only");
+  else parts.push(rowKindSentence(row.type).replace(/\.$/, ""));
+  if (row.hide_available) parts.push(` · ${t("web.admin.requests.discover.missingTitlesOnly")}`);
   return parts;
 }
 
@@ -344,16 +460,18 @@ export function rowErrors(fields: Readonly<Record<string, string>>, index: numbe
     .filter(([path]) => path === prefix || path.startsWith(`${prefix}.`))
     .map(([path, detail]) => {
       const field = path.slice(prefix.length + 1);
-      return field ? `${field.replaceAll("_", " ")}: ${detail}` : detail;
+      return field
+        ? t("web.admin.requests.discover.fieldError", { field: field.replaceAll("_", " "), detail })
+        : detail;
     });
 }
 
 /** Why a row can't be saved as it stands, or null: what the editor checks before the server does. */
 export function rowProblem(row: DiscoverRowBody): string | null {
-  if (row.list && !row.list.url.trim()) return "Pick a list or paste its link.";
+  if (row.list && !row.list.url.trim()) return t("web.admin.requests.discover.problem.noList");
   if (row.discover?.watch_provider_ids?.length && !row.discover.watch_region?.trim()) {
-    return "Choose the region the streaming services are in.";
+    return t("web.admin.requests.discover.problem.noRegion");
   }
-  if (!savedTitle(row)) return "Give the row a name.";
+  if (!savedTitle(row)) return t("web.admin.requests.discover.problem.noName");
   return null;
 }

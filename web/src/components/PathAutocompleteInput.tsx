@@ -93,8 +93,9 @@ export default function PathAutocompleteInput({
     onValueChange(activeAutocompleteSuggestion.path);
   }
 
+  // A path reads left to right in every language; the completion hint lines up with it.
   return (
-    <div className="relative w-full min-w-0 flex-1">
+    <div dir="ltr" className="relative w-full min-w-0 flex-1">
       {completionSuffix ? (
         <div className="text-muted-foreground pointer-events-none absolute inset-0 flex items-center px-3 text-sm">
           <span className="invisible">{value}</span>

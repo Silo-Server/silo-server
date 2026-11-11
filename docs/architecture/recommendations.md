@@ -304,8 +304,10 @@ Discover reads the profile's watched set once per request and shares it
 between its rows and the airings it blends in; Watch Tonight shares it
 between its candidates, its cold-start fallback and the handler's filter; a
 Home render shares it between its For You and Because You Watched rows. On
-the Postgres user store the set is one query planned for the profile; only a
-user store outside Postgres is walked page by page.
+the Postgres user store the set is one query planned for the profile, and the
+progress that abandoned titles and the taste profile come from is one query
+plus one for ebook reading progress; only a user store outside Postgres is
+walked page by page.
 
 Cache rows expire 26 hours after the run that wrote them, past the next daily
 cache run. A global row whose rebuild fails keeps its last good version until
@@ -535,5 +537,5 @@ Jellyfin's `/Movies/Recommendations` sends only rows its headings describe
 truthfully: up to two Because You Watched rows under their anchor's title,
 dropped when the viewer cannot see the anchor, and the taste-cluster rows
 under their genre label (see [jellycompat-api.md](../jellycompat-api.md)). A
-per-section items request that fails to load answers `500`; the aggregate
-sections endpoints still degrade to empty rows.
+per-section items request that fails to load answers `500`; the v2 aggregate
+sections endpoints leave that row out, and v1 answers it as an empty row.

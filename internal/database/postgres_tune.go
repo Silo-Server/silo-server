@@ -260,6 +260,41 @@ func RecommendPostgresOLTPSettings(opts PostgresTuneOptions, postgresMajorVersio
 	return settings
 }
 
+// RecommendPostgresStartupSettings returns the recommended settings that
+// PostgreSQL applies only when the server starts and that are sized from
+// memory and CPUs alone. Written to a configuration file before a new cluster
+// first starts, they spare it the restart ApplyPostgresTuning would otherwise
+// leave pending: none depends on the database, so ALTER SYSTEM later writes
+// the same values.
+func RecommendPostgresStartupSettings(opts PostgresTuneOptions, postgresMajorVersion int) []PostgresTuneSetting {
+	var settings []PostgresTuneSetting
+	for _, setting := range RecommendPostgresOLTPSettings(opts, postgresMajorVersion) {
+		if postgresStartupTuneSetting(setting.Name, postgresMajorVersion) {
+			setting.RequiresRestart = true
+			settings = append(settings, setting)
+		}
+	}
+	return settings
+}
+
+// postgresStartupTuneSetting reports whether RecommendPostgresStartupSettings
+// returns the named setting. Two settings PostgreSQL reads only at start stay
+// out. max_connections is sized from database.max_connections, which the
+// database holds. io_method comes from the environment unchecked: ALTER SYSTEM
+// refuses a value PostgreSQL rejects and the server keeps running, but the
+// same value in a configuration file stops the server from starting.
+func postgresStartupTuneSetting(name string, postgresMajorVersion int) bool {
+	switch name {
+	case "shared_buffers", "wal_buffers", "huge_pages", "max_worker_processes":
+		return true
+	case "autovacuum_max_workers":
+		// PostgreSQL 18 made it reloadable, within autovacuum_worker_slots.
+		return postgresMajorVersion < 18
+	default:
+		return false
+	}
+}
+
 // ApplyPostgresTuning applies pgtune-style OLTP recommendations with ALTER SYSTEM.
 func ApplyPostgresTuning(ctx context.Context, pool *pgxpool.Pool, opts PostgresTuneOptions) (*PostgresTuneResult, error) {
 	result := &PostgresTuneResult{}

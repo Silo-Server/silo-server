@@ -253,6 +253,13 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case playback.PlayRemux:
+		// A refused mid-stream range leaves the session as it is: the client
+		// reopens it at its current position. The refusal is /api/v2 only; the
+		// frozen /api/v1 route keeps streaming from the origin.
+		if isNativeAPIV2(r.Context()) && playback.RefusesRemuxRange(r) {
+			writeError(w, http.StatusConflict, "conflict", playback.RemuxRangeRefusedMessage)
+			return
+		}
 		if setter, ok := h.sessionMgr.(interface {
 			SetOutputFormat(string, string, string) error
 		}); ok {
@@ -938,8 +945,6 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 		}
 		opts.TargetFormat = "vtt"
 	}
-
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	// Only complete successful extracts enter the cache; explicit windows
 	// remain streamed. Keep failures distinguishable from a clean subtitle EOF.

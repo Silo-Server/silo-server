@@ -624,19 +624,65 @@ func GroupPolicyInTransaction(ctx context.Context, tx pgx.Tx, userID int) (*Grou
 func groupPolicyForUser(ctx context.Context, db interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, userID int) (*GroupPolicy, error) {
-	policy, err := scanGroupPolicy(db.QueryRow(ctx, `
+	return groupPolicyFromRow(db.QueryRow(ctx, groupPolicyForUserQuery, userID), userID)
+}
+
+// QueueGroupPolicy queues GetPolicyForUser's read on batch. The returned
+// function reads the result from the sent batch, in the order the batch's
+// reads were queued, with GetPolicyForUser's answer: nil for an account
+// without a group.
+func QueueGroupPolicy(batch *pgx.Batch, userID int) func(pgx.BatchResults) (*GroupPolicy, error) {
+	batch.Queue(groupPolicyForUserQuery, userID)
+	return func(results pgx.BatchResults) (*GroupPolicy, error) {
+		return groupPolicyFromRow(results.QueryRow(), userID)
+	}
+}
+
+const groupPolicyForUserQuery = `
 		SELECT g.id, g.library_ids, g.max_playback_quality, g.download_allowed,
 			g.download_transcode_allowed, g.transcode_allowed, g.audio_transcode_allowed,
 			g.max_streams, g.max_transcodes, g.max_remote_stream_bitrate_kbps, g.max_local_stream_bitrate_kbps,
 			g.max_profiles, g.allowed_permissions, g.requests_allowed
 		FROM users u
 		JOIN access_groups g ON g.id = u.access_group_id
-		WHERE u.id = $1`, userID))
+		WHERE u.id = $1`
+
+func groupPolicyFromRow(row pgx.Row, userID int) (*GroupPolicy, error) {
+	policy, err := scanGroupPolicy(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("loading access group policy for user %d: %w", userID, err)
+	}
+	return policy, nil
+}
+
+// GroupPolicyForUser reads a user's group policy through db, a pool or a
+// transaction; nil when the account has no group.
+func GroupPolicyForUser(ctx context.Context, db interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, userID int) (*GroupPolicy, error) {
+	return groupPolicyForUser(ctx, db, userID)
+}
+
+// GroupPolicyByName reads the policy and name of the group called name,
+// matched as the name's unique constraint does; nil when there is none. A
+// restore joins a restored account to its backup group's namesake here.
+func GroupPolicyByName(ctx context.Context, db interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, name string) (*GroupPolicy, error) {
+	policy, err := scanGroupPolicy(db.QueryRow(ctx, `
+		SELECT g.id, g.library_ids, g.max_playback_quality, g.download_allowed,
+			g.download_transcode_allowed, g.transcode_allowed, g.audio_transcode_allowed,
+			g.max_streams, g.max_transcodes, g.max_remote_stream_bitrate_kbps, g.max_local_stream_bitrate_kbps,
+			g.max_profiles, g.allowed_permissions, g.requests_allowed
+		FROM access_groups g WHERE g.name = $1`, name))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("loading access group %q: %w", name, err)
 	}
 	return policy, nil
 }

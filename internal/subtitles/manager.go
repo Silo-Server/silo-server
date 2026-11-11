@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
@@ -330,6 +331,9 @@ func (m *Manager) StoreSubtitle(ctx context.Context, req StoreSubtitleRequest) (
 		return nil, fmt.Errorf("check duplicate: %w", err)
 	}
 	if existing != nil {
+		if err := m.restoreMissingObject(ctx, existing, req.Data); err != nil {
+			return nil, err
+		}
 		return existing, nil
 	}
 	// Legacy keys retain their old short digest. Verify actual bytes before
@@ -370,6 +374,23 @@ func (m *Manager) StoreSubtitle(ctx context.Context, req StoreSubtitleRequest) (
 		return nil, fmt.Errorf("insert subtitle record: %w", err)
 	}
 	return sub, nil
+}
+
+// restoreMissingObject writes data back under a stored subtitle whose object
+// is gone, as after a restore that left provider downloads out of the
+// backup, so storing the same subtitle again repairs it instead of
+// returning a row with no content. The row's content hash matched data, so
+// the bytes are the row's own. Any other read result leaves the object
+// alone.
+func (m *Manager) restoreMissingObject(ctx context.Context, sub *DownloadedSubtitle, data []byte) error {
+	if _, err := m.blobs.Get(ctx, sub.S3Key); !errors.Is(err, blobstore.ErrNotFound) {
+		return nil
+	}
+	if err := m.blobs.Put(ctx, sub.S3Key, data); err != nil {
+		return fmt.Errorf("restore missing subtitle object: %w", err)
+	}
+	slog.InfoContext(ctx, "restored a missing subtitle object", "component", "subtitles", "subtitle_id", sub.ID, "object_key", sub.S3Key)
+	return nil
 }
 
 // UpdateDownloadedSubtitle changes metadata without moving immutable content.

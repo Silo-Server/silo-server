@@ -53,10 +53,11 @@ export function useCollectionCapabilities(enabled = true) {
 // across every library the viewer can access. Kept on a separate query key from
 // useCollections() (personal, editable) so personal mutations don't refetch the
 // server-wide catalog and the two sections load independently.
-export function useServerCollections() {
+export function useServerCollections({ enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: collectionKeys.server(),
     queryFn: () => v2("GET /api/v2/collections/server").then(serverCollectionsFromV2),
+    enabled,
   });
 }
 
