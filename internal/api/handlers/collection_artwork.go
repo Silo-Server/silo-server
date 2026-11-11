@@ -20,6 +20,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/collage"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/netguard"
 )
 
@@ -120,14 +121,25 @@ func invalidCollectionImage(message string, cause error) *APIError {
 	return &APIError{Status: http.StatusBadRequest, Code: policyErrorBadRequest, Message: message, cause: cause}
 }
 
-// collectionArtworkError keeps a client-facing artwork error, including the
-// 503 of a server too busy to decode another upload, and hides any other
-// failure behind a 500 with the given message.
-func collectionArtworkError(err error, message string) error {
+// collectionArtworkError keeps a client-facing artwork error: a validation
+// 400, the 503 of a server too busy to decode another upload, and the one
+// fixed answer for a source address the server will not fetch. Any other
+// failure is the server's: its cause goes to the log and the client gets a
+// 500 that says nothing about the store behind it. collectionID is empty
+// when the collection does not exist yet.
+func collectionArtworkError(ctx context.Context, collectionID string, err error) error {
 	if apiErr, ok := errors.AsType[*APIError](err); ok && (apiErr.Status < http.StatusInternalServerError || apiErr.Status == http.StatusServiceUnavailable) {
 		return apiErr
 	}
-	return apiError(http.StatusInternalServerError, "internal_error", message)
+	if errors.Is(err, errCollectionImageSourceNotAllowed) {
+		return apiError(http.StatusInternalServerError, "internal_error", "poster source: "+errCollectionImageSourceNotAllowed.Error())
+	}
+	// A request that ended on its own is not a failure to report.
+	if !errors.Is(err, context.Canceled) {
+		slog.ErrorContext(ctx, "collection artwork: storing a poster failed", "component", "api",
+			"collection_id", collectionID, "error", logredact.SanitizeText(err.Error()))
+	}
+	return apiError(http.StatusInternalServerError, "internal_error", "Failed to store collection artwork")
 }
 
 // downloadCollectionImageURL fetches an image from an http(s) URL with size

@@ -384,15 +384,27 @@ func seedPersonalPoster(t *testing.T, artwork blobstore.Store) string {
 }
 
 // A replacement whose upload succeeds but whose update fails must leave the
-// stored poster readable: the row still points at the old key.
+// stored poster readable: the row still points at the old key. The answer to
+// the client is a 500 that repeats none of the store's own words.
 func TestProcessCollectionPoster_FailedUpdateKeepsStoredPoster(t *testing.T) {
 	artwork, err := blobstore.NewFilesystem(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewFilesystem: %v", err)
 	}
 	oldPath := seedPersonalPoster(t, artwork)
-	store := &posterUpdateStore{posterURL: oldPath, updateErr: errors.New("update failed")}
-	h := &CollectionHandler{ArtworkStore: artwork}
+	const storeWords = "bucket silo-private refused the write"
+	store := &posterUpdateStore{posterURL: oldPath, updateErr: errors.New(storeWords)}
+	h := NewCollectionHandler(pagingIntegrationProvider{account: 1, store: store})
+	h.ArtworkStore = artwork
+
+	_, err = h.CreatePersonalCollection(t.Context(), PersonalCollectionCreateCommand{
+		UserID: 1, ProfileID: "p1",
+		Request:    PersonalCollectionCreateRequest{Name: "Posters"},
+		PosterFile: func() ([]byte, error) { return testCollectionSolidJPEG(t), nil },
+	})
+	if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.Status != http.StatusInternalServerError || strings.Contains(apiErr.Message, storeWords) {
+		t.Fatalf("err = %v, want a 500 without the store's error text", err)
+	}
 
 	replacement := testCollectionSolidJPEG(t)
 	if _, err := h.processCollectionPoster(t.Context(), store, "c1", "p1", func() ([]byte, error) { return replacement, nil }, ""); err == nil {
@@ -479,14 +491,14 @@ func TestDownloadCollectionImageURL_ClientErrorsAre400(t *testing.T) {
 }
 
 func TestCollectionArtworkError_HidesServerFailures(t *testing.T) {
-	err := collectionArtworkError(errors.New("uploading original: connection reset"), "Failed to store collection artwork")
+	err := collectionArtworkError(t.Context(), "c1", errors.New("uploading original: connection reset"))
 	apiErr, ok := errors.AsType[*APIError](err)
 	if !ok || apiErr.Status != http.StatusInternalServerError || apiErr.Message != "Failed to store collection artwork" {
 		t.Fatalf("err = %#v, want the 500 fallback", err)
 	}
 	// A server too busy to decode the upload is the client's cue to retry.
 	busy := apiError(http.StatusServiceUnavailable, "service_unavailable", "busy")
-	err = collectionArtworkError(busy, "Failed to store collection artwork")
+	err = collectionArtworkError(t.Context(), "c1", busy)
 	if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.Status != http.StatusServiceUnavailable {
 		t.Fatalf("err = %#v, want the 503 kept", err)
 	}
@@ -537,7 +549,7 @@ func TestProcessCollectionPoster_InvalidImageKeepsStoredPoster(t *testing.T) {
 			h := &CollectionHandler{ArtworkStore: artwork}
 
 			_, err = h.processCollectionPoster(t.Context(), store, "c1", "p1", func() ([]byte, error) { return []byte(upload), nil }, "")
-			mapped := collectionArtworkError(err, "Failed to store collection artwork")
+			mapped := collectionArtworkError(t.Context(), "c1", err)
 			if apiErr, ok := errors.AsType[*APIError](mapped); !ok || apiErr.Status != http.StatusBadRequest {
 				t.Fatalf("mapped err = %v, want a 400 APIError", mapped)
 			}

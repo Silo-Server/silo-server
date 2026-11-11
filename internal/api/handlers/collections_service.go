@@ -165,7 +165,7 @@ func (h *CollectionHandler) CreatePersonalCollection(ctx context.Context, cmd Pe
 	// collections.
 	poster, err := h.prepareCollectionPoster(ctx, cmd.PosterFile, req.PosterSourceURL)
 	if err != nil {
-		return none, collectionArtworkError(err, err.Error())
+		return none, collectionArtworkError(ctx, "", err)
 	}
 	collection, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{
 		CreatorProfileID:           cmd.ProfileID,
@@ -184,7 +184,7 @@ func (h *CollectionHandler) CreatePersonalCollection(ctx context.Context, cmd Pe
 
 	if poster != nil {
 		if err := h.storeCollectionPoster(ctx, store, collection.ID, cmd.ProfileID, poster); err != nil {
-			return none, collectionArtworkError(err, err.Error())
+			return none, collectionArtworkError(ctx, collection.ID, err)
 		}
 		if refreshed, err := store.GetCollection(ctx, collection.ID); err == nil {
 			collection = refreshed
