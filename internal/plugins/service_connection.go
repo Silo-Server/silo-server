@@ -2,9 +2,11 @@ package plugins
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -176,6 +178,13 @@ func (s *Service) TestGlobalConfigWithClears(
 // a save would, without saving it: blank secret fields keep the stored
 // secret, clearSecrets drops stored ones, emptied declared fields are
 // cleared, and the result must validate.
+//
+// A stored secret is reused only while the rest of the entry matches what
+// was saved with it and no secret is typed. Once the staged entry changes
+// any setting (a server URL, issuer, CA or anything else), only the secrets
+// the admin typed and the fields the schema declares reach the plugin, so a
+// test cannot send a saved credential to a destination it was never saved
+// for (issue #2796).
 // invalid wraps a rejected entry in the caller's error type.
 func (s *Service) prepareStagedGlobalConfig(
 	ctx context.Context,
@@ -193,14 +202,223 @@ func (s *Service) prepareStagedGlobalConfig(
 	if err != nil {
 		return nil, invalid(err)
 	}
-	merged, err := s.preserveStoredSecrets(ctx, installationID, key, value, GlobalConfigSecretPaths(manifest, key))
+	secretPaths := GlobalConfigSecretPaths(manifest, key)
+	merged, stored, err := s.preserveStoredSecrets(ctx, installationID, key, value, secretPaths)
 	if err != nil {
 		return nil, err
 	}
-	if err := applyGlobalConfigClears(manifest, key, merged, value, clearSet); err != nil {
+	removeGlobalConfigClears(manifest, key, merged, value, clearSet)
+	if len(secretPaths) > 0 && stagedConfigChangesSettings(manifest, key, merged, stored, value, secretPaths) {
+		keepOnlySubmittedSecrets(merged, value, secretPaths, clearSet)
+		dropStoredUndeclaredFields(manifest, key, merged, value)
+	}
+	if err := validateMergedGlobalConfig(manifest, key, merged, value); err != nil {
 		return nil, invalid(err)
 	}
 	return merged, nil
+}
+
+// stagedConfigChangesSettings reports whether a staged entry differs from the
+// stored one in anything a stored secret could be sent with. Both sides are
+// compared as JSON values without their secret values, and a blank or null
+// top-level field counts as absent. A field the stored entry lacks matches a
+// staged field holding its declared default, which the admin form fills in;
+// removing a stored value is still a change. A secret the admin typed is a
+// change too: it can be a destination itself (a proxy or webhook URL), and
+// comparing it with the stored value would let a caller guess at secrets.
+func stagedConfigChangesSettings(
+	manifest *pluginv1.PluginManifest,
+	key string,
+	staged map[string]any,
+	stored map[string]any,
+	submitted map[string]any,
+	secretPaths [][]string,
+) bool {
+	for _, path := range secretPaths {
+		typed, present := configPathValue(submitted, path)
+		if !present || isClearedConfigValue(typed) {
+			continue
+		}
+		switch typed.(type) {
+		case map[string]any, []any:
+			// A secret object or list is compared whole below.
+		default:
+			return true
+		}
+	}
+	stagedSettings, stagedOK := settingsForComparison(staged, secretPaths)
+	storedSettings, storedOK := settingsForComparison(stored, secretPaths)
+	if !stagedOK || !storedOK {
+		// An entry that cannot be compared counts as changed.
+		return true
+	}
+	for field, fallback := range globalConfigFieldDefaults(manifest, key) {
+		if _, inStored := storedSettings[field]; !inStored && reflect.DeepEqual(stagedSettings[field], fallback) {
+			delete(stagedSettings, field)
+		}
+	}
+	return !reflect.DeepEqual(stagedSettings, storedSettings)
+}
+
+func settingsForComparison(value map[string]any, secretPaths [][]string) (map[string]any, bool) {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, false
+	}
+	var normalized map[string]any
+	if err := json.Unmarshal(encoded, &normalized); err != nil {
+		return nil, false
+	}
+	if normalized == nil {
+		normalized = map[string]any{}
+	}
+	for _, path := range secretPaths {
+		// A secret path can name a whole object or list (a map of servers
+		// with secrets inside, or a shape the path walker cannot address).
+		// Its other values may be destinations, so it is compared whole.
+		secret, _ := configPathValue(normalized, path)
+		switch secret.(type) {
+		case map[string]any, []any:
+			continue
+		}
+		deleteConfigPath(normalized, path)
+	}
+	for field, fieldValue := range normalized {
+		if isClearedConfigValue(fieldValue) {
+			delete(normalized, field)
+		}
+	}
+	return normalized, true
+}
+
+// dropStoredUndeclaredFields removes stored top-level fields the schema does
+// not declare and the admin did not submit. Plugin-written state and fields
+// left over from an older manifest can hold credentials the admin API never
+// shows, so they do not go to changed settings either.
+func dropStoredUndeclaredFields(
+	manifest *pluginv1.PluginManifest,
+	key string,
+	merged map[string]any,
+	submitted map[string]any,
+) {
+	public, secrets := GlobalConfigFieldSets(manifest, key)
+	declared := secretFieldSet(append(append([]string(nil), public...), secrets...))
+	for field := range merged {
+		if _, isDeclared := declared[field]; isDeclared {
+			continue
+		}
+		if _, sent := submitted[field]; sent {
+			continue
+		}
+		delete(merged, field)
+	}
+}
+
+// globalConfigFieldDefaults returns the scalar defaults the admin form shows
+// for top-level fields: an admin form field's default_value, else the JSON
+// schema property's default. Values are JSON-normalized.
+func globalConfigFieldDefaults(manifest *pluginv1.PluginManifest, key string) map[string]any {
+	defaults := map[string]any{}
+	schema := globalConfigSchema(manifest, key)
+	if schema == nil {
+		return defaults
+	}
+	var document any
+	if json.Unmarshal([]byte(schema.GetJsonSchema()), &document) == nil {
+		properties := make(map[string][]any)
+		collectTopLevelSchemaProperties(document, document, make(map[string]bool), properties)
+		for field, candidates := range properties {
+			for _, candidate := range candidates {
+				property, _ := candidate.(map[string]any)
+				switch fallback := property["default"].(type) {
+				case string, float64, bool:
+					defaults[field] = fallback
+				}
+			}
+		}
+	}
+	for _, field := range schema.GetAdminForm().GetFields() {
+		fieldKey := strings.TrimSpace(field.GetKey())
+		if fieldKey == "" || field.GetDefaultValue() == nil {
+			continue
+		}
+		switch fallback := field.GetDefaultValue().AsInterface().(type) {
+		case string, float64, bool:
+			defaults[fieldKey] = fallback
+		}
+	}
+	for field, fallback := range defaults {
+		if isClearedConfigValue(fallback) {
+			delete(defaults, field)
+		}
+	}
+	return defaults
+}
+
+// keepOnlySubmittedSecrets replaces every secret in merged with the value the
+// admin submitted at the same path, removing it when the submission left it
+// blank or out, or named its field in clearSet. Stored secrets merged in by a
+// blank field are dropped.
+func keepOnlySubmittedSecrets(
+	merged map[string]any,
+	submitted map[string]any,
+	secretPaths [][]string,
+	clearSet map[string]struct{},
+) {
+	for _, path := range secretPaths {
+		_, cleared := clearSet[path[0]]
+		typed, present := configPathValue(submitted, path)
+		if cleared || !present || isClearedConfigValue(typed) {
+			deleteConfigPath(merged, path)
+			continue
+		}
+		setConfigPath(merged, path, cloneConfigValue(typed))
+	}
+}
+
+func configPathValue(value map[string]any, path []string) (any, bool) {
+	if len(path) == 0 {
+		return nil, false
+	}
+	current := value
+	for _, segment := range path[:len(path)-1] {
+		next, ok := current[segment].(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		current = next
+	}
+	found, ok := current[path[len(path)-1]]
+	return found, ok
+}
+
+func deleteConfigPath(value map[string]any, path []string) {
+	if len(path) == 0 {
+		return
+	}
+	current := value
+	for _, segment := range path[:len(path)-1] {
+		next, ok := current[segment].(map[string]any)
+		if !ok {
+			return
+		}
+		current = next
+	}
+	delete(current, path[len(path)-1])
+}
+
+// setConfigPath sets a secret at path. The submitted value had objects along
+// the path, and merged copies them, so the parents exist.
+func setConfigPath(value map[string]any, path []string, secret any) {
+	current := value
+	for _, segment := range path[:len(path)-1] {
+		next, ok := current[segment].(map[string]any)
+		if !ok {
+			return
+		}
+		current = next
+	}
+	current[path[len(path)-1]] = secret
 }
 
 // storedGlobalConfigs returns copies of an installation's saved global
