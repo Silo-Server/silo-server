@@ -8,7 +8,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -117,14 +120,12 @@ func TestAdminEndRetiresJellyfinPlay(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, upstreamID, "seg_00000.ts"), []byte("segment"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	tm := playback.NewTranscodeManager()
-	tm.Sessions = sessions
-	ffmpegPath := writeCompatTestFFmpeg(t)
-	tm.Config = func() playback.TranscodeRuntimeConfig {
-		return playback.TranscodeRuntimeConfig{TranscodeDir: root, FFmpegPath: ffmpegPath, HWAccel: playback.HWAccelNone}
-	}
+	// Built as the server builds it, so the end below reaches the handler
+	// through the hook the handler registered on the session manager.
+	handler := NewPlaybackHandler(nil, nil, nil, nil, store, sessions, nil, nil)
+	handler.TranscodeDir, handler.FFmpegPath, handler.HWAccel = root, writeCompatTestFFmpeg(t), playback.HWAccelNone
+	tm := handler.tm
 	t.Cleanup(func() { tm.CloseTranscodeSession(upstreamID, "") })
-	handler := &PlaybackHandler{playbackStore: store, sessionMgr: sessions, tm: tm}
 
 	requestSegment := func() int {
 		req := httptest.NewRequest(http.MethodGet, "/Videos/item/hls/play-1/seg_00000.ts", nil)
@@ -142,7 +143,7 @@ func TestAdminEndRetiresJellyfinPlay(t *testing.T) {
 		t.Fatalf("segment before the end = %d, transcode running = %v", code, tm.GetTranscodeSession(upstreamID) != nil)
 	}
 
-	if !handler.endUpstreamSessionAsAdmin(t.Context(), upstreamID) {
+	if !sessions.EndCompatPlayAsAdmin(t.Context(), upstreamID) {
 		t.Error("the administrator's end found no play to retire")
 	}
 	// The native administrator path stops the session next; the Jellyfin
@@ -164,5 +165,137 @@ func TestAdminEndRetiresJellyfinPlay(t *testing.T) {
 	}
 	if tm.GetTranscodeSession(upstreamID) != nil {
 		t.Error("a request after the end started the transcode again")
+	}
+}
+
+// TestAdminEndLeavesDirectPlayRouted: an administrator's end does not retire
+// a direct-play play. Its next request rebuilds the session under the same
+// id, the id a proxy's deny marker refuses. A retired row would instead let a
+// Static=true client start a fresh play under an id no marker covers.
+func TestAdminEndLeavesDirectPlayRouted(t *testing.T) {
+	handler, encodedID, _ := newStaticDirectPlayHandler(t)
+	sessions := playback.NewSessionManager(0, 0)
+	handler.sessionMgr = sessions
+	handler.tm = playback.NewTranscodeManager()
+	handler.tm.Sessions = sessions
+	if rec := serveStaticStream(handler, encodedID, "Static=true"); rec.Code != http.StatusOK {
+		t.Fatalf("direct play = %d %s", rec.Code, rec.Body.String())
+	}
+	started := sessions.AllSessions()
+	if len(started) != 1 {
+		t.Fatalf("sessions after the first request = %d, want 1", len(started))
+	}
+	upstreamID := started[0].ID
+
+	if handler.endUpstreamSessionAsAdmin(t.Context(), upstreamID) {
+		t.Error("the administrator's end retired a direct play")
+	}
+	if err := sessions.StopSession(upstreamID); err != nil {
+		t.Fatal(err)
+	}
+
+	if rec := serveStaticStream(handler, encodedID, "Static=true"); rec.Code != http.StatusOK {
+		t.Fatalf("direct play after the end = %d %s", rec.Code, rec.Body.String())
+	}
+	if after := sessions.AllSessions(); len(after) != 1 || after[0].ID != upstreamID {
+		t.Fatalf("the next request runs under %d session(s), first %q; want the ended session %q rebuilt", len(after), after[0].ID, upstreamID)
+	}
+}
+
+// retireFailingStore fails the first retirements, as a store does while
+// Postgres is unreachable.
+type retireFailingStore struct {
+	CompatPlaybackStore
+	failures atomic.Int32
+	landed   chan struct{}
+}
+
+func (s *retireFailingStore) RetireUpstreamSession(upstreamSessionID string) (bool, error) {
+	if s.failures.Add(-1) >= 0 {
+		return false, errors.New("store unavailable")
+	}
+	defer close(s.landed)
+	return s.CompatPlaybackStore.RetireUpstreamSession(upstreamSessionID)
+}
+
+// TestAdminEndRetriesFailedRetirement: a retirement the store could not write
+// is retried until it lands, so the other servers stop routing the play. The
+// bubble's clock runs the backoff; with no retry left to run, waiting for the
+// retirement deadlocks and fails the test.
+func TestAdminEndRetriesFailedRetirement(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		store := &retireFailingStore{CompatPlaybackStore: NewPlaybackSessionStore(time.Hour, nil), landed: make(chan struct{})}
+		store.failures.Store(2)
+		store.Put(PlaybackSession{ID: "play-1", CompatToken: "token-1", UpstreamSessionID: "upstream-1", UpstreamPlayMethod: "transcode"})
+		handler := &PlaybackHandler{playbackStore: store}
+
+		if handler.endUpstreamSessionAsAdmin(t.Context(), "upstream-1") {
+			t.Fatal("reported a retirement the store did not make")
+		}
+		<-store.landed
+		if _, ok := store.Get("play-1"); ok {
+			t.Fatal("the retried retirement left the play routable")
+		}
+	})
+}
+
+// headerSignalingRecorder reports when the handler has written its status.
+type headerSignalingRecorder struct {
+	*httptest.ResponseRecorder
+	wroteHeader chan struct{}
+	once        sync.Once
+}
+
+func (w *headerSignalingRecorder) WriteHeader(code int) {
+	w.ResponseRecorder.WriteHeader(code)
+	w.once.Do(func() { close(w.wroteHeader) })
+}
+
+// TestProgressiveRemuxEndsWhenItsSessionStops: a progressive remux is one
+// response, so stopping its session has to end the response itself. The fake
+// ffmpeg writes nothing and runs for 30 seconds, which is how long the
+// response would stay open without the stop reaching it.
+func TestProgressiveRemuxEndsWhenItsSessionStops(t *testing.T) {
+	handler, encodedID, _ := newStaticDirectPlayHandler(t)
+	sessions := playback.NewSessionManager(0, 0)
+	handler.sessionMgr = sessions
+	handler.FFmpegPath = writeCompatTestFFmpeg(t)
+	source := testCompatSource(handler.codec, testCompatVersion())
+	source.SupportsDirectPlay = false
+	handler.playbackStore.Put(PlaybackSession{
+		ID: "play-1", CompatToken: "token-1", RouteItemID: encodedID, MediaSources: []PlaybackMediaSource{source},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/Videos/"+encodedID+"/stream.mp4?PlaySessionId=play-1&MediaSourceId="+source.ID, nil)
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("id", encodedID)
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
+	ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"})
+	rec := &headerSignalingRecorder{ResponseRecorder: httptest.NewRecorder(), wroteHeader: make(chan struct{})}
+	served := make(chan struct{})
+	go func() {
+		defer close(served)
+		handler.HandleVideoStream(rec, req.WithContext(ctx))
+	}()
+
+	select {
+	case <-rec.wroteHeader:
+	case <-served:
+	}
+	started := sessions.AllSessions()
+	if len(started) != 1 {
+		t.Fatalf("sessions while the remux streams = %d, want 1 (status %d)", len(started), rec.Code)
+	}
+	if err := sessions.StopSession(started[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	// Only a failing run waits this long.
+	select {
+	case <-served:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the remux response outlived its stopped session")
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("remux status = %d %s", rec.Code, rec.Body.String())
 	}
 }

@@ -178,10 +178,11 @@ func (c nativeEndClaim) finish(ctx context.Context, sessionID, historyID string)
 // to end.
 //
 // A Jellyfin play has no attempt row: its own routing row is what lets any
-// replica rebuild the session, so the Jellyfin surface retires that row
-// before the session is stopped, whether or not this replica holds the
-// session. When it ended a play whose session another replica holds, the end
-// took effect and is not reported as an unknown session.
+// replica rebuild the session. For a play the server transcodes or remuxes,
+// the Jellyfin surface retires that row before the session is stopped,
+// whether or not this replica holds the session; a direct play keeps its
+// row. When the surface ended a play whose session another replica holds,
+// the end took effect and is not reported as an unknown session.
 func (h *PlaybackHandler) endSessionAsAdmin(ctx context.Context, sessionID string) error {
 	claim := claimNativeEnd(ctx, h.PlanStoreV3, h.StreamDeny, sessionID, adminStopID(sessionID))
 	defer h.forgetProgressSideEffectLock(sessionID)

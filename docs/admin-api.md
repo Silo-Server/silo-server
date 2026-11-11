@@ -2433,15 +2433,27 @@ telling the player, or may already have ended the session, so whether the
 player was notified is unknown. Retrying the terminate is safe.
 
 A Jellyfin-protocol play has no playback attempt and no realtime lane, and its
-session is rebuilt from the play's own row instead of a stream token. A
-terminate, or the stop fallback above, therefore also retires that row and
-closes the play's transcode: the play's stream requests answer `404`, and its
-progress reports no longer start the session again. A terminate that reaches a
-replica without the session succeeds when it retired the play. The replica serving the
-play may keep serving it from its cached row for up to five seconds
-([restart-resilient playback](architecture/restart-resilient-playback.md#administrator-end)).
-Ending a session does not revoke the sign-in, so the viewer can start a new
-play.
+session is rebuilt from the play's own row instead of a stream token. What a
+terminate, or the stop fallback above, does to it depends on the play's stream
+([restart-resilient playback](architecture/restart-resilient-playback.md#administrator-end)):
+
+- **Transcode or remux**, over HLS or as a progressive stream: the server also
+  retires the play's row and closes its transcode. The play's stream requests
+  are then refused, with `404`, or with `401` when the request carries only its
+  `PlaySessionId`, which the retired row no longer authenticates. Its progress
+  reports answer `204` and no longer start the session again.
+- **Direct play**: not ended by this path. The row stays, and the client's next
+  request rebuilds the session under the same ID, as before. Only the stream
+  deny marker refuses it, on a proxy node.
+
+With several API replicas, a terminate that reaches a replica without the
+session succeeds when it retired a transcode or remux play. The replica holding
+the session then stops serving the play's HLS within five seconds. It keeps
+its session copy and transcode until its idle sweep, lets a progressive remux
+already in flight run to its end, and records the play as expired, not as
+ended by an administrator. A stop command for a Jellyfin play still answers
+`404` on a replica without the session. Ending a session does not revoke the
+sign-in, so the viewer can start a new play.
 
 The JSON body is required (`{}` when there is no reason) and carries an optional
 `reason`. The `200` receipt carries

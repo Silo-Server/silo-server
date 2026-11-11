@@ -557,7 +557,7 @@ Descriptor location by route (the core change):
 | route family | descriptor (how it reconstructs) | revocation |
 |--------------|----------------------------------|------------|
 | native (1–3) | the signed token the client re-presents | producer-kill (integrated) + deny marker (API and node); ≤24h token for a passive ban |
-| jellycompat (4–6) | `jellycompat_playback_sessions.data.Recipe` (token can't round-trip) | producer-kill + retired compat row (API, §12.7), deny marker (node); ≤24h token for a passive ban |
+| jellycompat (4–6) | `jellycompat_playback_sessions.data.Recipe` (token can't round-trip) | transcode and remux: producer-kill + retired compat row (API, §12.7); deny marker (node and proxy), the only revocation for direct play; ≤24h token for a passive ban |
 | ~~all~~ | ~~`transcode_recipes` Postgres row~~ — removed | — |
 
 ### 12.2 Where the token rides
@@ -738,26 +738,54 @@ node checks the deny marker on that path too.
 
 The compat serve paths on the API reconstruct from the row, not from a token, so
 the deny marker does not gate them, and a Jellyfin play has no attempt row to
-stop. An administrator's stop or terminate therefore ends the play through the
-row: before it stops the native session, the admin end path
-(`endSessionAsAdmin`) has jellycompat set the play's row `Terminal`, the state
-the client's own stop and the expiry claim already set, and close the transcode
-in jellycompat's own manager. Stream, manifest and progress requests for the
-play then find no row, so none of them rebuilds the session.
+stop. An administrator's terminate, or the stop fallback, therefore ends a play
+whose stream the server produces through the row. Before it stops the native
+session, the admin end path (`endSessionAsAdmin`) has jellycompat set the
+play's row `Terminal`, the state the client's own stop and the expiry claim
+already set, and close the transcode in jellycompat's own manager. After that:
 
-The row is found by its upstream session, so the end also works from a replica
-that does not hold the session, and it does not depend on Redis. What remains on
-the replica that does hold it:
+- A stream, manifest or segment request finds no row and answers `404`. One
+  that carries only its `PlaySessionId`, as HLS child requests usually do, is
+  refused earlier with `401`: `PlaybackSessionAuth` authenticates it from the
+  row.
+- A progress report finds no play, answers `204`, and rebuilds nothing.
+- On the replica that stopped the session, an in-flight progressive remux is
+  aborted through `WatchTransportStop`.
 
-- It serves the play from its cached row for at most
+Which plays this ends is decided by the row's `UpstreamPlayMethod`
+(`adminEndRetiresPlay`):
+
+- `transcode` and `remux` are retired.
+- `direct` is left as it was. The play's next request rebuilds the session
+  under the same ID, which a proxy node refuses on the deny marker. Retiring
+  the row would let a `Static=true` client start a new play under a new
+  session ID that no marker covers. On API egress a direct play is therefore
+  not ended by an administrator, and an in-flight direct-play response has no
+  abort on either surface.
+- The method is the row's current one. A play that switched method is judged
+  by the stream it serves now; a switch already stopped the old upstream
+  session and attached a new one, so an end for the old ID finds no row.
+- A client whose transcode or remux play was retired can still ask for the
+  file with `Static=true`. That starts a new direct play under a new session
+  ID, as the method switch did before for a play that was not retired.
+
+The retirement is one statement keyed on the upstream session, so it works from
+a replica that does not hold the session and does not depend on Redis. A write
+that fails is retried with backoff (`scheduleCompatAdminEndRetry`); until it
+lands, the play is hidden only on the replica that received the end, and only
+if that replica had a copy of the row; without one, that terminate answers
+`404`. When the end lands on a replica that does not hold the session:
+
+- The terminate succeeds. An administrator's stop command does not reach this
+  path there: it looks the session up first and answers `404`.
+- The holder serves the play's HLS from its cached row for at most
   `compatCacheRevalidationInterval` (5 seconds).
-- Its idle session copy and transcode stay until the stale-session sweep
-  (by default 45 seconds after the last activity, 30 minutes for a paused
-  play), which closes both.
-- A progressive remux or direct-play response already in flight counts as an
+- The holder's idle session copy and transcode stay until the stale-session
+  sweep (by default 45 seconds after the last activity, 30 minutes for a
+  paused play), which closes both. The play is then recorded as expired, not
+  as ended by an administrator.
+- A progressive remux response already in flight on the holder counts as an
   active transport, which the sweep skips. It runs until the response ends.
-  On the replica that received the end, stopping the session aborts an in-flight
-  progressive remux. Direct play has no abort on either surface.
 
 #### Transcode node lost mid-stream
 

@@ -1360,6 +1360,10 @@ func (h *PlaybackHandler) handleExpiredSession(session *playback.Session) {
 // The row is retired first, so those requests answer not found on every
 // server sharing the store, and then the local transcode is closed.
 //
+// Only a play whose stream the server produces is ended this way. A
+// direct-play play keeps its row (adminEndRetiresPlay) and is not reported
+// as found.
+//
 // The native session is left to the administrator path that called this,
 // which stops it and records the play. A request already past its row lookup
 // can still register the session and a transcode again; no later request
@@ -1370,13 +1374,30 @@ func (h *PlaybackHandler) endUpstreamSessionAsAdmin(ctx context.Context, upstrea
 	}
 	retired, err := h.playbackStore.RetireUpstreamSession(upstreamSessionID)
 	if err != nil {
-		slog.WarnContext(ctx, "jellycompat could not retire a play an administrator ended", "component", "jellycompat",
+		slog.WarnContext(ctx, "jellycompat could not retire a play an administrator ended; retrying", "component", "jellycompat",
 			"upstream_session_id", upstreamSessionID, "error", err)
+		h.scheduleCompatAdminEndRetry(upstreamSessionID, time.Now().Add(playback.MaxTokenTTL), 1)
 	}
 	if h.tm != nil {
 		h.tm.CloseTranscodeSession(upstreamSessionID, "")
 	}
 	return retired
+}
+
+// scheduleCompatAdminEndRetry repeats a retirement whose write failed until
+// the store accepts it, as scheduleCompatTerminalHide does for a client's
+// stop, so the other servers do not keep routing the play. It retries by
+// upstream session, not by play: a server that does not hold the play never
+// learned its id. deadline is the default lifetime of a play's row.
+func (h *PlaybackHandler) scheduleCompatAdminEndRetry(upstreamSessionID string, deadline time.Time, attempt int) {
+	time.AfterFunc(compatTerminalRetryDelay(attempt), func() {
+		if !time.Now().Before(deadline) {
+			return
+		}
+		if _, err := h.playbackStore.RetireUpstreamSession(upstreamSessionID); err != nil {
+			h.scheduleCompatAdminEndRetry(upstreamSessionID, deadline, attempt+1)
+		}
+	})
 }
 
 func (h *PlaybackHandler) segmentRetentionSeconds() int {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -211,7 +212,10 @@ type CompatPlaybackStore interface {
 	HideFromRouting(id, compatToken string) error
 	// RetireUpstreamSession hides the play attached to an upstream session
 	// from routing, as HideFromRouting does, for every server process that
-	// shares the store. It reports whether it retired a play.
+	// shares the store. It retires only a play whose stream the server
+	// produces (adminEndRetiresPlay) and reports whether it retired one. An
+	// error means the retirement may not have reached the other processes,
+	// so the caller retries it.
 	RetireUpstreamSession(upstreamSessionID string) (bool, error)
 	// StageTerminal hides a session from playback routing and durably records
 	// the provider event. An authoritative Stopped event replaces a fallback;
@@ -405,10 +409,23 @@ func (s *PlaybackSessionStore) HideFromRouting(id, compatToken string) error {
 	return nil
 }
 
+// adminEndRetiredMethods are the upstream play methods whose play an
+// administrator's end retires: the streams the server produces. A direct play
+// stays routable. Its next request rebuilds the session under the same id,
+// which a proxy's deny marker refuses; with its row retired, a Static=true
+// client would start a new play under an id no marker covers. The method is
+// the row's current one, so a play that switched method is judged by the
+// stream it serves now.
+var adminEndRetiredMethods = []string{string(playback.PlayTranscode), string(playback.PlayRemux)}
+
+func adminEndRetiresPlay(upstreamPlayMethod string) bool {
+	return slices.Contains(adminEndRetiredMethods, upstreamPlayMethod)
+}
+
 // RetireUpstreamSession implements CompatPlaybackStore.
 func (s *PlaybackSessionStore) RetireUpstreamSession(upstreamSessionID string) (bool, error) {
 	play, ok := s.FindByUpstreamSessionID(upstreamSessionID)
-	if !ok {
+	if !ok || !adminEndRetiresPlay(play.UpstreamPlayMethod) {
 		return false, nil
 	}
 	return s.HideFromRouting(play.ID, play.CompatToken) == nil, nil

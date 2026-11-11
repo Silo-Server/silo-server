@@ -630,7 +630,7 @@ func TestDurableCompatPlaybackStoreUpdateRejectionAcrossReplicas(t *testing.T) {
 // administrator's end can land on a replica that never served the play. The
 // retirement must stop the replica that does serve it from routing the play:
 // at once on the replica that retired it, and on the other once its cached
-// copy is revalidated.
+// copy is revalidated. A direct play is retired from neither.
 func TestDurableCompatPlaybackStoreRetiresUpstreamSessionAcrossReplicas(t *testing.T) {
 	pool := newCompatTestPool(t)
 	now := time.Now()
@@ -638,11 +638,17 @@ func TestDurableCompatPlaybackStoreRetiresUpstreamSessionAcrossReplicas(t *testi
 	holder := NewDurableCompatPlaybackStore(pool, time.Hour, clock)
 	other := NewDurableCompatPlaybackStore(pool, time.Hour, clock)
 	id := t.Name()
-	for _, upstream := range []string{"up-remote", "up-local"} {
-		holder.Put(PlaybackSession{ID: id + upstream, CompatToken: id, UpstreamSessionID: id + upstream})
+	for upstream, method := range map[string]string{"up-remote": "transcode", "up-local": "remux", "up-direct": "direct"} {
+		holder.Put(PlaybackSession{ID: id + upstream, CompatToken: id, UpstreamSessionID: id + upstream, UpstreamPlayMethod: method})
 		t.Cleanup(func() { holder.Delete(id + upstream) })
 		if _, ok := holder.Get(id + upstream); !ok {
 			t.Fatalf("holder does not route %s", upstream)
+		}
+	}
+
+	for name, replica := range map[string]*DurableCompatPlaybackStore{"holder": holder, "other": other} {
+		if retired, err := replica.RetireUpstreamSession(id + "up-direct"); err != nil || retired {
+			t.Fatalf("retire a direct play from the %s = %v, %v, want it left alone", name, retired, err)
 		}
 	}
 
@@ -658,6 +664,9 @@ func TestDurableCompatPlaybackStoreRetiresUpstreamSessionAcrossReplicas(t *testi
 	now = now.Add(compatCacheRevalidationInterval)
 	if _, ok := holder.Get(id + "up-remote"); ok {
 		t.Fatal("the holder still routes a play another replica retired")
+	}
+	if _, ok := holder.Get(id + "up-direct"); !ok {
+		t.Fatal("the holder no longer routes the direct play")
 	}
 	if retired, err := holder.RetireUpstreamSession(id + "up-remote"); err != nil || retired {
 		t.Fatalf("repeat retire = %v, %v, want nothing left to retire", retired, err)
