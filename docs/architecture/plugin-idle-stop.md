@@ -1,15 +1,15 @@
 # Stopping idle plugin processes
 
 A plugin that is not resident starts on its first RPC. The host stops it again
-once nothing has used it for `SILO_PLUGIN_IDLE_STOP_AFTER`, and the next RPC
-starts it as the first one did. A server whose libraries never call a plugin
+once nothing has used it for 30 minutes, and the next RPC starts it as the first
+one did. A server whose libraries never call a plugin
 (an audiobook metadata provider on a Movies and Series server) does not keep
 that process in memory.
 
-`SILO_PLUGIN_IDLE_STOP_AFTER` is a Go duration or whole seconds. The default
-is `15m`, `0` keeps every plugin running, and a shorter period than one minute
-is raised to one minute. It is read once at start-up on the API server. Proxy
-nodes run only resident plugins and ignore it.
+The period is fixed (`pluginhost.IdleStopAfter`). Thirty minutes covers a burst
+of calls and is no shorter than the response caches plugins keep, typically half
+an hour, so a quiet spell does not throw a live cache away. Proxy nodes run only resident
+plugins, so nothing there is stopped for being idle.
 
 ## What counts as use
 

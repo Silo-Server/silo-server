@@ -2,8 +2,6 @@ package pluginhost
 
 import (
 	"context"
-	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -12,53 +10,22 @@ import (
 )
 
 const (
-	// EnvIdleStopAfter sets how long a lazily started plugin process may sit
-	// unused before the host stops it: a Go duration or whole seconds. Zero
-	// keeps every plugin running.
-	EnvIdleStopAfter = "SILO_PLUGIN_IDLE_STOP_AFTER"
-	// DefaultIdleStopAfter is long enough that a plugin called in bursts (a
-	// scan, a metadata refresh, someone browsing) stays up across the burst.
-	DefaultIdleStopAfter = 15 * time.Minute
-	// MinIdleStopAfter keeps a configured period well above the longest gap
-	// between a caller resolving a plugin client and making its call.
-	MinIdleStopAfter = time.Minute
+	// IdleStopAfter is how long a lazily started plugin process may go unused
+	// before the host stops it. It is long enough that a plugin called in
+	// bursts (a scan, a metadata refresh, someone browsing) stays up across the
+	// burst, and no shorter than the response cache a plugin keeps, typically
+	// half an hour, so a quiet spell does not throw a live cache away with
+	// the process. It is also far above the longest gap between a caller
+	// resolving a plugin client and making its call.
+	IdleStopAfter = 30 * time.Minute
 	// DefaultIdleCheckInterval is how often a running plugin is checked.
 	DefaultIdleCheckInterval = 30 * time.Second
-
-	maxIdleStopAfter = time.Duration(1<<63 - 1)
 
 	// pluginServicePrefix selects the Silo plugin protocol. The health probe
 	// and go-plugin's own broker, stdio and controller calls share the
 	// connection and say nothing about whether the plugin is in use.
 	pluginServicePrefix = "/silo.plugin.v1."
 )
-
-// ParseIdleStopAfter reads EnvIdleStopAfter's value. Empty takes the default
-// and zero disables idle stops. A shorter period than MinIdleStopAfter is
-// raised to it. An unreadable value is an error and yields the default.
-func ParseIdleStopAfter(value string) (time.Duration, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return DefaultIdleStopAfter, nil
-	}
-	period, err := time.ParseDuration(value)
-	if err != nil {
-		seconds, secondsErr := strconv.ParseInt(value, 10, 64)
-		if secondsErr != nil || seconds > int64(maxIdleStopAfter/time.Second) {
-			return DefaultIdleStopAfter, fmt.Errorf("invalid duration %q: %w", value, err)
-		}
-		period = time.Duration(seconds) * time.Second
-	}
-	switch {
-	case period < 0:
-		return DefaultIdleStopAfter, fmt.Errorf("negative duration %q", value)
-	case period == 0:
-		return 0, nil
-	case period < MinIdleStopAfter:
-		return MinIdleStopAfter, nil
-	}
-	return period, nil
-}
 
 // activity records when one plugin process was last used and how many calls
 // are in flight, in either direction. The idle watcher reads it to decide

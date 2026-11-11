@@ -3440,7 +3440,7 @@ exponential backoff from 1 s to 60 s, and is parked as `failed` after ten consec
 failures until restarted or reconfigured), `state` (`stopped`, `starting`, `running`,
 `backoff`, `failed`), `restart_count`, `last_error`, `last_started_at` and `next_restart_at`.
 Plugins declaring `network_access_provider.v1` are resident; every other plugin starts on
-first use, is stopped again after `SILO_PLUGIN_IDLE_STOP_AFTER` (default 15 minutes, `0` never)
+first use, is stopped again after 30 minutes
 without use, and reports `running`, `stopped`, or `failed` when its last launch on the answering
 server failed, with `last_error` saying why. A plugin stopped for being idle reports `stopped`
 and starts on its next use. A later successful launch, an administrator

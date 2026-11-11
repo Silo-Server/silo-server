@@ -50,31 +50,6 @@ func idleTestHost(t *testing.T, clock *idleClock, installationID int) (*Host, *i
 	return host, inst, exited
 }
 
-func TestParseIdleStopAfter(t *testing.T) {
-	tests := []struct {
-		value   string
-		want    time.Duration
-		wantErr bool
-	}{
-		{value: "", want: DefaultIdleStopAfter},
-		{value: " 30m ", want: 30 * time.Minute},
-		{value: "600", want: 10 * time.Minute},
-		{value: "0", want: 0},
-		{value: "0s", want: 0},
-		{value: "5s", want: MinIdleStopAfter},
-		{value: "-1m", want: DefaultIdleStopAfter, wantErr: true},
-		{value: "-5", want: DefaultIdleStopAfter, wantErr: true},
-		{value: "soon", want: DefaultIdleStopAfter, wantErr: true},
-		{value: "99999999999999999999", want: DefaultIdleStopAfter, wantErr: true},
-	}
-	for _, tt := range tests {
-		got, err := ParseIdleStopAfter(tt.value)
-		if got != tt.want || (err != nil) != tt.wantErr {
-			t.Errorf("ParseIdleStopAfter(%q) = %v, %v; want %v, error %v", tt.value, got, err, tt.want, tt.wantErr)
-		}
-	}
-}
-
 func TestStopIfIdleStopsAnIdleInstanceQuietly(t *testing.T) {
 	clock := &idleClock{now: time.Unix(1000, 0)}
 	host, inst, exited := idleTestHost(t, clock, 7)
