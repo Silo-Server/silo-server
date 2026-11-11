@@ -18,8 +18,8 @@ import (
 // variantSiblingOwners and variantOwnersToWiden choose. Other out-of-scope
 // files are finalized when their own scope runs.
 //
-// The scope is walked a page at a time in path order, so memory is bounded by
-// a page and not by the library. A page needs no help from its neighbors:
+// The scope is walked a page at a time in path order, so memory follows a
+// page, and the owners its files belong to, rather than the library. A page needs no help from its neighbors:
 // the sibling lookups read by owner across the whole folder, so a multipart
 // group split over pages is read in full, and written, by the first page that
 // holds one of its parts. Later pages find those files already settled.
