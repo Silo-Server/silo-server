@@ -501,6 +501,24 @@ the login rate-limit budget. `getExternalSignInCapabilities` reports it as
 `credentials_linking`. An administrator can also link any identity by its
 subject (`createAdminUserIdentity`), and email auto-match links on sign-in.
 
+### Disconnecting
+
+An account disconnects one of its identities with `deleteAccountIdentity`,
+from its own login session only. Two rules hold:
+
+- The account must keep a way to sign in: its local password (with local
+  password sign-in on, or as a break-glass account) or another identity.
+  Otherwise the call is 409 `last_sign_in_method`.
+- Only the household manager may disconnect: the account's primary profile,
+  with its PIN verified when it has one (`canManageHouseholdAs`, the rule
+  personal API key creation uses). Every profile on an account shares its
+  login session, and the account cannot always link the identity again by
+  itself, because self-service linking needs its local password. Without this
+  rule a child profile could remove a sign-in the account's owner may be
+  unable to put back. `listAccountIdentities` answers `can_unlink` by both rules
+  for the profile asking, so a client offers the control only to a profile
+  the call would accept.
+
 ## Network identity
 
 A network access provider plugin ([network-access.md](network-access.md))

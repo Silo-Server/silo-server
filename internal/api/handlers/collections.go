@@ -321,75 +321,96 @@ func firstNonEmptyCollection(values ...string) string {
 	return ""
 }
 
-// errCollectionForbidden is returned by the artwork pipeline when the caller
-// is not the collection's creator. It surfaces as a 403 to the client.
-var errCollectionForbidden = errors.New("only the creator can edit this collection")
-
-// posterInputProvided reports whether the request body or form contained
-// poster artwork inputs that the upload pipeline would act on.
-// processCollectionPoster persists an uploaded or sourced poster image on the
-// given user collection. posterFile reads the uploaded part (nil when the
-// request carried no multipart body; http.ErrMissingFile when the part is
-// absent). It is a no-op, answering false, when no poster input was provided.
-// The caller is responsible for ensuring the request profile owns the
-// collection.
+// processCollectionPoster prepares a poster, from uploaded bytes or else from
+// sourceURL, and stores it on the given collection. It is a no-op when there
+// is neither. The caller is responsible for ensuring the request profile owns
+// the collection, and answers a failure through personalCollectionPosterError.
 func (h *CollectionHandler) processCollectionPoster(
 	ctx context.Context,
 	store userstore.UserStore,
 	collectionID, requestProfileID string,
-	posterFile func() ([]byte, error),
+	data []byte,
 	sourceURL string,
-) (bool, error) {
-	source := strings.TrimSpace(sourceURL)
+) error {
+	poster, err := h.prepareCollectionPoster(ctx, data, sourceURL)
+	if err != nil || poster == nil {
+		return err
+	}
+	return h.storeCollectionPoster(ctx, store, collectionID, requestProfileID, poster)
+}
 
-	var fileData []byte
-	if posterFile != nil {
-		data, err := posterFile()
-		switch {
-		case err == nil:
-			fileData = data
-		case errors.Is(err, http.ErrMissingFile):
-			// fall through to source URL handling
-		default:
-			return true, fmt.Errorf("poster: %w", err)
-		}
+// preparedCollectionPoster is a personal collection poster decoded into the
+// variants to store, under the content revision of its source bytes.
+type preparedCollectionPoster struct {
+	variants *collectionImageVariants
+	revision string
+}
+
+// prepareCollectionPoster decodes a poster: the uploaded bytes data, or else
+// the image at sourceURL. It answers nil when there is neither. Nothing is
+// stored: create calls it before its insert, so a poster it cannot use, or a
+// server too busy to decode it, creates nothing and the request is safe to
+// repeat.
+func (h *CollectionHandler) prepareCollectionPoster(
+	ctx context.Context,
+	data []byte,
+	sourceURL string,
+) (*preparedCollectionPoster, error) {
+	source := strings.TrimSpace(sourceURL)
+	fileData := data
+	if fileData == nil && source == "" {
+		return nil, nil
+	}
+	if h.ArtworkStore == nil {
+		return nil, errors.New("poster upload requires configured artwork storage")
 	}
 	if fileData == nil {
-		if source == "" {
-			return false, nil
-		}
 		downloaded, err := downloadCollectionImageURL(ctx, h.HTTPClient, source)
 		if err != nil {
-			return true, fmt.Errorf("poster source: %w", err)
+			return nil, fmt.Errorf("poster source: %w", err)
 		}
 		fileData = downloaded
 	}
 
-	artwork := h.ArtworkStore
-	if artwork == nil {
-		return true, fmt.Errorf("poster upload requires configured artwork storage")
+	variants, err := generateCollectionImageVariants(fileData, collectionPosterWidths)
+	if err != nil {
+		return nil, fmt.Errorf("poster: %w", err)
 	}
+	return &preparedCollectionPoster{variants: variants, revision: collectionImageRevision(fileData)}, nil
+}
+
+// storeCollectionPoster writes a prepared poster and points the collection at
+// it. It decodes nothing, so the server being busy cannot fail it. The caller
+// is responsible for ensuring the request profile owns the collection.
+func (h *CollectionHandler) storeCollectionPoster(
+	ctx context.Context,
+	store userstore.UserStore,
+	collectionID, requestProfileID string,
+	poster *preparedCollectionPoster,
+) error {
+	artwork := h.ArtworkStore
 	existing, err := store.GetCollection(ctx, collectionID)
 	if err != nil {
-		return true, fmt.Errorf("loading collection: %w", err)
+		return fmt.Errorf("loading collection: %w", err)
 	}
 	// Revisioned keys (issue #1258) put the replacement under a new key, so
 	// the current poster stays in place until the new path is committed.
-	s3Path, thumbhash, err := uploadCollectionImageVariants(ctx, artwork, userCollectionImagePrefix, collectionID, collectionImagePoster, fileData)
+	basePath := collectionImageDir(userCollectionImagePrefix, collectionID, collectionImagePoster)
+	s3Path, err := storeCollectionImageVariants(ctx, artwork, basePath, poster.revision, poster.variants)
 	if err != nil {
-		return true, fmt.Errorf("poster: %w", err)
+		return fmt.Errorf("poster: %w", err)
 	}
 
 	if err := store.UpdateCollection(ctx, userstore.UpdateCollectionInput{
 		ID:               collectionID,
 		RequestProfileID: requestProfileID,
 		PosterURL:        &s3Path,
-		PosterThumbhash:  &thumbhash,
+		PosterThumbhash:  &poster.variants.thumbhash,
 	}); err != nil {
 		if strings.Contains(err.Error(), "creator") {
-			return true, errCollectionForbidden
+			return apiError(http.StatusForbidden, "forbidden", "Only the creator can edit this collection")
 		}
-		return true, fmt.Errorf("persisting poster: %w", err)
+		return fmt.Errorf("persisting poster: %w", err)
 	}
 	cleanUpReplacedCollectionImage(ctx, artwork, userCollectionImagePrefix, collectionID, collectionImagePoster, existing.PosterURL, func(ctx context.Context) (string, error) {
 		current, err := store.GetCollection(ctx, collectionID)
@@ -398,7 +419,7 @@ func (h *CollectionHandler) processCollectionPoster(
 		}
 		return current.PosterURL, nil
 	})
-	return true, nil
+	return nil
 }
 
 // previewCollectionRequest is shared with the library collection bridge handler.

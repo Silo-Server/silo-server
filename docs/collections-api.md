@@ -76,10 +76,27 @@ own network (loopback, a private or link-local range, or a name that resolves to
 one reached through a redirect, fails the poster with one fixed error. See
 [Outbound address guard](architecture/outbound-address-guard.md#collection-artwork).
 
-`uploadCollectionPoster` answers `422 validation_failed` for a poster it cannot use and keeps the
-stored one: an image libvips cannot read, whether uploaded or linked; a JPEG or PNG of up to 4
-megapixels whose pixel data does not decode; and a `source_url` with no http(s) host, an answer
-other than `200`, or more than 10 MiB. Other processing failures stay `500`.
+The server reads and decodes a poster before it writes anything. `uploadCollectionPoster`, and
+`createCollection` with a `poster_source_url`, answer a poster that fails by its cause:
+
+- `422 validation_failed` for a poster the server cannot use: an image libvips cannot read,
+  whether uploaded or linked; a JPEG or PNG of up to 4 megapixels whose pixel data does not
+  decode; and a `source_url` or `poster_source_url` with no http(s) host, an answer other than
+  `200`, or more than 10 MiB.
+- `503 dependency_unavailable` with `Retry-After` when the server is too busy to decode another
+  image. The poster may be fine; send the request again.
+- `500 internal_error` for any other failure, such as a source that could not be reached, a
+  source address the server refuses (above), or a storage error. The answer carries no detail;
+  the server logs the cause, except for a refused address, which is not logged. For a source it
+  could not download, the log line holds the source's host and the kind of failure (a
+  timeout, a DNS, connection or TLS certificate failure, or any other) and no other part of
+  the URL the request or a redirect named.
+
+A poster that fails before it is stored creates and changes nothing: `createCollection` creates
+no collection, so repeating the request cannot leave two, and `uploadCollectionPoster` keeps the
+stored poster. A poster that decoded but could not be written is the one failure left after
+`createCollection` has stored the collection: the answer is `500` and the collection exists
+without the poster.
 
 An import's `poster_url` is a bundled template poster path (`/images/collection-templates/...`)
 or an http(s) image URL. Any other value answers `422 validation_failed` at `body.poster_url`
