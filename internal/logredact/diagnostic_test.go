@@ -8,7 +8,7 @@ import (
 )
 
 func TestSanitizeQueryCredentialAliases(t *testing.T) {
-	for _, key := range []string{"ApiKey", "api_key", "API_KEY", "%41piKey", "Api%5fKey", "AccessToken", "X-Emby-Token", "Pw", "PASSWORD", "Authorization", "Cookie"} {
+	for _, key := range []string{"ApiKey", "api_key", "API_KEY", "%41piKey", "Api%5fKey", "AccessToken", "X-Emby-Token", "Pw", "PASSWORD", "Authorization", "Cookie", "PlaySessionId", "playSessionId"} {
 		t.Run(key, func(t *testing.T) {
 			got := SanitizeQuery(key + "=first-secret&" + key + "=second-secret&Limit=20&Tag=a&Tag=b")
 			if strings.Contains(got, "secret") {

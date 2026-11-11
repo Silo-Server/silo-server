@@ -463,7 +463,10 @@ evolution:
   request loggers. The native logger omits the query and redacts secret path
   parameters. The jellycompat logger masks credential-named query keys
   (`logredact.SanitizeQuery`); jellycompat stream tokens travel in the path of
-  node routes, not in requests that logger sees. The
+  node routes, not in requests that logger sees. A Jellyfin `PlaySessionId`
+  authorizes its play's media requests on its own, so the jellycompat loggers
+  mask it as a query key and as the `{playlistId}` segment of HLS paths, and
+  other jellycompat log lines record a truncated SHA-256 of it instead. The
   signature only stops a forged or altered token: anyone who reads a logged
   token can replay it until it expires (24h at most), so log retention is an
   exposure of its own.
