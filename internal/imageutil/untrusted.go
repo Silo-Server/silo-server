@@ -26,6 +26,18 @@ import "C"
 // JPEG, PNG, WebP, GIF, TIFF, HEIF and AVIF are trusted and unaffected.
 // bimg's package init has already started libvips by the time this runs.
 // libvips older than 8.13 has no untrusted flag and keeps every loader.
+//
+// The operation cache is switched off as well. libvips keeps finished
+// operations to answer an identical later call. Silo decodes each source
+// from its own buffer and gains nothing from that, while every entry held
+// memory after the request that made it had returned. With no entries, the
+// cache's memory and open-file limits have nothing left to bound.
 func init() {
 	C.silo_vips_block_untrusted()
+	C.vips_cache_set_max(0)
+}
+
+// cachedOperations reports how many finished operations libvips is holding.
+func cachedOperations() int {
+	return int(C.vips_cache_get_size())
 }

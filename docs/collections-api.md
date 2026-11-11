@@ -78,9 +78,27 @@ one reached through a redirect, fails the poster with one fixed error. See
 [Outbound address guard](architecture/outbound-address-guard.md#collection-artwork).
 
 `uploadCollectionPoster` answers `422 validation_failed` for a poster it cannot use and keeps the
-stored one: an image libvips cannot read, whether uploaded or linked; a JPEG or PNG of up to 4
-megapixels whose pixel data does not decode; and a `source_url` with no http(s) host, an answer
-other than `200`, or more than 10 MiB. Other processing failures stay `500`.
+stored one: an image libvips cannot read, whether uploaded or linked; an SVG; an image too large to
+decode, where decoded size and not file size decides; a JPEG or PNG of up to 4 megapixels whose
+pixel data does not decode; and a `source_url` with no http(s) host, an answer other than `200`,
+or more than 10 MiB. Other processing failures stay `500`. `createCollection` answers the same way
+for a `poster_source_url` it cannot use, and creates nothing.
+
+An image is too large to decode when its header declares more than 65 megapixels, more than four
+channels, or more than 160 MiB of pixels once decoded (width × height × channels × bytes per
+channel). A progressive JPEG counts two more bytes per channel, for the coefficients its decoder
+holds. An 8-bit color photo fits up to 55 megapixels, or 18 as a progressive JPEG; an 8-bit image
+with transparency up to 41; and 16-bit images half as many. The same limits apply to every image
+the server decodes, avatars and provider artwork included.
+
+A profile's own artwork, which is a personal collection poster (uploaded or linked) or an avatar,
+may not be an SVG. The bytes decide, not the type the upload declares.
+
+Each server process decodes at most two uploaded images at a time, counting personal collection
+posters and profile avatars together, and lets eight more wait for a turn. An upload beyond that
+is not decoded: `uploadCollectionPoster`, `createCollection` and `uploadProfileAvatar` answer
+`503 dependency_unavailable` with `Retry-After`. `createCollection` decodes its poster before it
+stores the collection, so that answer creates nothing and the request can be repeated.
 
 - `listCollections`, `getLibraryCollections` and `listLibraryUserCollections` return the
   collage in `poster_url` and mark it with `poster_is_collage: true`.

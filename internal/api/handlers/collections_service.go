@@ -160,6 +160,13 @@ func (h *CollectionHandler) CreatePersonalCollection(ctx context.Context, cmd Pe
 	if err != nil {
 		return none, fieldError("display_query_definition", err.Error())
 	}
+	// Decoded before the insert: an unusable poster, or a server too busy to
+	// decode it, creates nothing, so repeating the request cannot leave two
+	// collections.
+	poster, err := h.prepareCollectionPoster(ctx, cmd.PosterFile, req.PosterSourceURL)
+	if err != nil {
+		return none, collectionArtworkError(err, err.Error())
+	}
 	collection, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{
 		CreatorProfileID:           cmd.ProfileID,
 		Name:                       req.Name,
@@ -175,11 +182,10 @@ func (h *CollectionHandler) CreatePersonalCollection(ctx context.Context, cmd Pe
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to create collection")
 	}
 
-	posterProvided, err := h.processCollectionPoster(ctx, store, collection.ID, cmd.ProfileID, cmd.PosterFile, req.PosterSourceURL)
-	if err != nil {
-		return none, apiError(http.StatusInternalServerError, "internal_error", err.Error())
-	}
-	if posterProvided {
+	if poster != nil {
+		if err := h.storeCollectionPoster(ctx, store, collection.ID, cmd.ProfileID, poster); err != nil {
+			return none, collectionArtworkError(err, err.Error())
+		}
 		if refreshed, err := store.GetCollection(ctx, collection.ID); err == nil {
 			collection = refreshed
 		}

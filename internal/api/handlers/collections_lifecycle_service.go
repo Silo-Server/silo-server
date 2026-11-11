@@ -167,6 +167,11 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 		}
 	}
 
+	// Decoded before the update, as create decodes before its insert.
+	poster, err := h.prepareCollectionPoster(ctx, cmd.PosterFile, pointerStringValue(req.PosterSourceURL))
+	if err != nil {
+		return none, collectionArtworkError(err, err.Error())
+	}
 	if err := store.UpdateCollection(ctx, input); err != nil {
 		if errors.Is(err, userstore.ErrCollectionRevisionMismatch) {
 			return none, err
@@ -202,12 +207,13 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 		}
 	}
 
-	posterSource := pointerStringValue(req.PosterSourceURL)
-	if _, err := h.processCollectionPoster(ctx, store, collectionID, profileID, cmd.PosterFile, posterSource); err != nil {
-		if errors.Is(err, errCollectionForbidden) {
-			return none, apiError(http.StatusForbidden, "forbidden", "Only the creator can edit this collection")
+	if poster != nil {
+		if err := h.storeCollectionPoster(ctx, store, collectionID, profileID, poster); err != nil {
+			if errors.Is(err, errCollectionForbidden) {
+				return none, apiError(http.StatusForbidden, "forbidden", "Only the creator can edit this collection")
+			}
+			return none, collectionArtworkError(err, err.Error())
 		}
-		return none, apiError(http.StatusInternalServerError, "internal_error", err.Error())
 	}
 
 	// Re-read the collection to return updated state.

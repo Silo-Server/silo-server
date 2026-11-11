@@ -622,7 +622,8 @@ const locationAvatarPart = locationBody + ".avatar"
 // avatarProblem maps the v1 upload decisions: an unsupported or undecodable
 // image is a validation failure at the part, the file limit is the
 // payload-too-large problem naming it, a missing upload store is the
-// service's own 503.
+// service's own 503, and a server busy with other uploads keeps its own 503
+// and Retry-After.
 func avatarProblem(err error) *Problem {
 	var apiErr *handlers.APIError
 	if !errors.As(err, &apiErr) {
@@ -635,7 +636,9 @@ func avatarProblem(err error) *Problem {
 	case http.StatusRequestEntityTooLarge:
 		return NewProblem(TypePayloadTooLarge, fmt.Sprintf("The avatar exceeds the %d-byte limit.", maxAvatarBytes))
 	case http.StatusServiceUnavailable:
-		return unavailable("avatar upload")
+		if apiErr.RetryAfter == 0 {
+			return unavailable("avatar upload")
+		}
 	}
 	return serviceProblem(err)
 }

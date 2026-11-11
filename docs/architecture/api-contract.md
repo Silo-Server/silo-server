@@ -1504,7 +1504,7 @@ keeps v1's token semantics (bound to the login session and the profile's PIN rev
 reports `expires_at` as a nullable instant. PIN verification is `non_retryable`: a replayed wrong
 PIN counts as another lockout attempt. `uploadProfileAvatar` is the first Huma multipart
 operation (form part `avatar`, JPEG/PNG/WebP): a JSON body is `415`, a part outside the declared
-types or an undecodable image is `422` at `body.avatar`, an oversized avatar is `413`, and a
+types, an SVG whatever type its part declares, or an undecodable image is `422` at `body.avatar`, an oversized avatar is `413`, and a
 server without an upload store answers `503`; section overrides drop the `/reset` suffix
 (`DELETE` on the same resource), take `scope` and `library_id` as query parameters on every
 method, and read back in `snake_case` like the write (the Phase 1 catalogs flagged v1's GET/PUT
@@ -2391,11 +2391,13 @@ complete, accessible manual order; the canonical item-order read never returns m
 Artwork changes use `PUT /collections/{id}/poster` with either a bounded multipart `poster` or
 `source_url`. Definition PATCH does not download artwork. The web saves the definition first,
 then changes the poster; artwork failure leaves the saved collection intact and is reported
-separately. Artwork libvips cannot read, whether uploaded or fetched from `source_url`, a JPEG or
-PNG of up to 4 megapixels whose pixel data does not decode, and a `source_url` that has no http(s)
-host, answers other than `200`, or returns more than 10 MiB are `422 validation_failed` problems
-and leave the stored poster unchanged. Other processing failures, such as damaged pixel data in a
-larger image, stay `500`. Membership and artwork operations check creator ownership, and item additions also
+separately. Artwork libvips cannot read, whether uploaded or fetched from `source_url`, an SVG,
+an image too large to decode (more than 65 megapixels, four channels, or 160 MiB of decoded
+pixels, which a progressive JPEG reaches near 18 megapixels; see
+[Posters](../collections-api.md#posters)), a JPEG or PNG of up to 4 megapixels whose pixel data
+does not decode, and a `source_url` that has no http(s) host, answers other than `200`, or returns
+more than 10 MiB are `422 validation_failed` problems and leave the stored poster unchanged. Other processing failures, such as damaged pixel
+data in a larger image, stay `500`. Membership and artwork operations check creator ownership, and item additions also
 require catalog visibility. Adding an existing native member preserves its position; order changes
 use the explicit ordering operation. Shared viewers can read shared collections but cannot mutate them.
 Native membership operations preserve audiobook chapter entries in the same storage table.

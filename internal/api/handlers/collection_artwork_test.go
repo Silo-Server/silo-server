@@ -16,9 +16,11 @@ import (
 	"sync"
 	"testing"
 	"testing/fstest"
+	"testing/synctest"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
+	"github.com/Silo-Server/silo-server/internal/imageutil"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -350,6 +352,12 @@ type posterUpdateStore struct {
 	userstore.UserStore
 	posterURL string
 	updateErr error
+	created   int
+}
+
+func (s *posterUpdateStore) CreateCollection(_ context.Context, input userstore.CreateCollectionInput) (*userstore.Collection, error) {
+	s.created++
+	return &userstore.Collection{ID: "c1", Name: input.Name}, nil
 }
 
 func (s *posterUpdateStore) GetCollection(_ context.Context, id string) (*userstore.Collection, error) {
@@ -476,6 +484,12 @@ func TestCollectionArtworkError_HidesServerFailures(t *testing.T) {
 	if !ok || apiErr.Status != http.StatusInternalServerError || apiErr.Message != "Failed to store collection artwork" {
 		t.Fatalf("err = %#v, want the 500 fallback", err)
 	}
+	// A server too busy to decode the upload is the client's cue to retry.
+	busy := apiError(http.StatusServiceUnavailable, "service_unavailable", "busy")
+	err = collectionArtworkError(busy, "Failed to store collection artwork")
+	if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.Status != http.StatusServiceUnavailable {
+		t.Fatalf("err = %#v, want the 503 kept", err)
+	}
 }
 
 // Linux libvips reads a truncated PNG's header and fails inside Process; other
@@ -506,28 +520,156 @@ func TestUploadCollectionImageVariants_TruncatedPNGIsNotAServerError(t *testing.
 	}
 }
 
-// An upload that cannot be decoded must answer 400 and leave the stored poster
-// and the row untouched.
+// plainSVG is a small drawing of one rectangle.
+const plainSVG = `<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8"/></svg>`
+
+// An upload that cannot be decoded, or is in a format a profile may not
+// supply, must answer 400 and leave the stored poster and the row untouched.
 func TestProcessCollectionPoster_InvalidImageKeepsStoredPoster(t *testing.T) {
+	for name, upload := range map[string]string{"not an image": "not an image", "an SVG": plainSVG} {
+		t.Run(name, func(t *testing.T) {
+			artwork, err := blobstore.NewFilesystem(t.TempDir())
+			if err != nil {
+				t.Fatalf("NewFilesystem: %v", err)
+			}
+			oldPath := seedPersonalPoster(t, artwork)
+			store := &posterUpdateStore{posterURL: oldPath}
+			h := &CollectionHandler{ArtworkStore: artwork}
+
+			_, err = h.processCollectionPoster(t.Context(), store, "c1", "p1", func() ([]byte, error) { return []byte(upload), nil }, "")
+			mapped := collectionArtworkError(err, "Failed to store collection artwork")
+			if apiErr, ok := errors.AsType[*APIError](mapped); !ok || apiErr.Status != http.StatusBadRequest {
+				t.Fatalf("mapped err = %v, want a 400 APIError", mapped)
+			}
+			if store.posterURL != oldPath {
+				t.Fatalf("poster path = %q, want the stored %q", store.posterURL, oldPath)
+			}
+			for _, key := range []string{oldPath, cardThumbnailPath(oldPath)} {
+				if _, err := artwork.Stat(t.Context(), key); err != nil {
+					t.Fatalf("stored poster %q is gone after an invalid upload: %v", key, err)
+				}
+			}
+		})
+	}
+}
+
+// avatarProfileStore is a user store that knows every profile it is asked for.
+type avatarProfileStore struct{ userstore.UserStore }
+
+func (avatarProfileStore) GetProfile(_ context.Context, id string) (*userstore.Profile, error) {
+	return &userstore.Profile{ID: id}, nil
+}
+
+// The bytes decide what an avatar is: an SVG sent as a PNG part is refused
+// before anything is decoded or stored.
+func TestUploadAvatar_SVGIsUnsupported(t *testing.T) {
+	avatars, err := blobstore.NewFilesystem(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFilesystem: %v", err)
+	}
+	h := NewProfileHandler(pagingIntegrationProvider{account: 1, store: avatarProfileStore{}})
+	h.AvatarStore = avatars
+
+	_, err = h.UploadAvatar(t.Context(), ProfileAvatarUpload{
+		UserID: 1, ProfileID: "p1", ContentType: "image/png", File: strings.NewReader(plainSVG),
+	})
+	if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.Status != http.StatusBadRequest {
+		t.Fatalf("err = %v, want a 400 APIError", err)
+	}
+}
+
+// tooLargeImageHeader is a JPEG cut off after its header, which declares more
+// pixels than the server decodes. There is no image behind it.
+var tooLargeImageHeader = []byte{
+	0xFF, 0xD8, // start of image
+	0xFF, 0xC0, 0, 17, 8, 0x23, 0x28, 0x23, 0x28, 3, 1, 0x11, 0, 2, 0x11, 0, 3, 0x11, 0, // 9000×9000 frame
+	0xFF, 0xDA, 0, 12, 3, 1, 0, 2, 0, 3, 0, 0, 63, 0, // start of scan
+	0xFF, 0xD9, // end of image
+}
+
+// A create whose poster is refused stores nothing: a poster too large to
+// decode is the caller's 400, and a server too busy to decode it answers a
+// 503 the client may repeat without leaving two collections.
+func TestCreatePersonalCollection_RefusedPosterCreatesNothing(t *testing.T) {
 	artwork, err := blobstore.NewFilesystem(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewFilesystem: %v", err)
 	}
-	oldPath := seedPersonalPoster(t, artwork)
-	store := &posterUpdateStore{posterURL: oldPath}
-	h := &CollectionHandler{ArtworkStore: artwork}
+	for _, tc := range []struct {
+		name   string
+		poster []byte
+		busy   bool
+		want   int
+	}{
+		{"too large to decode", tooLargeImageHeader, false, http.StatusBadRequest},
+		{"no decode slot or place to wait", testCollectionPosterJPEG(t), true, http.StatusServiceUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.busy {
+				idle := uploadedImageDecodes
+				uploadedImageDecodes = newDecodeSlots(1, 0)
+				uploadedImageDecodes.running <- struct{}{}
+				t.Cleanup(func() { uploadedImageDecodes = idle })
+			}
+			store := &posterUpdateStore{}
+			h := NewCollectionHandler(pagingIntegrationProvider{account: 1, store: store})
+			h.ArtworkStore = artwork
 
-	_, err = h.processCollectionPoster(t.Context(), store, "c1", "p1", func() ([]byte, error) { return []byte("not an image"), nil }, "")
-	mapped := collectionArtworkError(err, "Failed to store collection artwork")
-	if apiErr, ok := errors.AsType[*APIError](mapped); !ok || apiErr.Status != http.StatusBadRequest {
-		t.Fatalf("mapped err = %v, want a 400 APIError", mapped)
+			_, err := h.CreatePersonalCollection(t.Context(), PersonalCollectionCreateCommand{
+				UserID: 1, ProfileID: "p1",
+				Request:    PersonalCollectionCreateRequest{Name: "Wide"},
+				PosterFile: func() ([]byte, error) { return tc.poster, nil },
+			})
+			if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.Status != tc.want {
+				t.Fatalf("err = %v, want a %d APIError", err, tc.want)
+			}
+			if store.created != 0 {
+				t.Fatalf("created %d collections, want none", store.created)
+			}
+		})
 	}
-	if store.posterURL != oldPath {
-		t.Fatalf("poster path = %q, want the stored %q", store.posterURL, oldPath)
-	}
-	for _, key := range []string{oldPath, cardThumbnailPath(oldPath)} {
-		if _, err := artwork.Stat(t.Context(), key); err != nil {
-			t.Fatalf("stored poster %q is gone after an invalid upload: %v", key, err)
+}
+
+// With every decode slot taken an upload waits for a turn no longer than its
+// request, with the wait full as well the next upload is refused undecoded,
+// and each way out gives its place back.
+func TestDecodeSlots_BoundDecodesAndWaiters(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		slots := newDecodeSlots(1, 1)
+		ran := 0
+		decode := func() (*imageutil.VariantResult, error) {
+			ran++
+			return nil, errors.New("decode failed")
 		}
-	}
+		slots.running <- struct{}{} // a decode in progress
+
+		gone, cancel := context.WithCancel(t.Context())
+		cancel()
+		if _, err := slots.decode(gone, decode); !errors.Is(err, context.Canceled) || len(slots.waiting) != 0 {
+			t.Fatalf("err = %v with %d waiting, want the canceled request and nobody waiting", err, len(slots.waiting))
+		}
+
+		waited := make(chan error)
+		go func() {
+			_, err := slots.decode(t.Context(), decode)
+			waited <- err
+		}()
+		synctest.Wait() // that upload now waits for the slot
+
+		_, err := slots.decode(t.Context(), decode)
+		if busy, ok := errors.AsType[*APIError](err); !ok || busy.Status != http.StatusServiceUnavailable || busy.RetryAfter == 0 {
+			t.Fatalf("err = %v, want a 503 with Retry-After", err)
+		}
+		if ran != 0 {
+			t.Fatalf("decodes = %d while the slot was taken, want 0", ran)
+		}
+
+		<-slots.running // the decode in progress ends
+		if err := <-waited; err == nil || ran != 1 {
+			t.Fatalf("err = %v after %d decodes, want the waiting upload's own decode error", err, ran)
+		}
+		if len(slots.running) != 0 || len(slots.waiting) != 0 {
+			t.Fatalf("%d running and %d waiting after every upload ended", len(slots.running), len(slots.waiting))
+		}
+	})
 }

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -286,8 +287,21 @@ func (h *ProfileHandler) UploadAvatar(ctx context.Context, up ProfileAvatarUploa
 		return none, apiError(http.StatusRequestEntityTooLarge, "too_large", "Avatar must be under 10 MB")
 	}
 
-	result, err := imageutil.GenerateSquareVariants(data, []int{256})
+	result, err := uploadedImageDecodes.decode(ctx, func() (*imageutil.VariantResult, error) {
+		// The bytes decide the format, whatever type the part declared. The
+		// check reads the whole upload, so it runs in the slot as well.
+		if imageutil.CheckProfileImage(data) != nil {
+			return nil, apiError(http.StatusBadRequest, "bad_request", "Unsupported image type; use JPEG, PNG, or WebP")
+		}
+		return imageutil.GenerateSquareVariants(data, []int{256})
+	})
 	if err != nil {
+		// An answer already decided (the server is busy, or the format is one
+		// a profile may not upload) and a wait the request did not outlast
+		// pass through as they are.
+		if _, decided := errors.AsType[*APIError](err); decided || ctx.Err() != nil {
+			return none, err
+		}
 		return none, apiError(http.StatusBadRequest, "bad_request", "Invalid image file")
 	}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/imageutil"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -409,6 +410,38 @@ func TestIsStableProviderImageFailureLocalClasses(t *testing.T) {
 	}
 	if isStableProviderImageFailure("local image read failed: io timeout") {
 		t.Error("transient local read errors must keep the normal backoff")
+	}
+}
+
+// tooLargeImageHeader is a JPEG cut off after its header, which declares more
+// pixels than the server decodes. There is no image behind it.
+var tooLargeImageHeader = []byte{
+	0xFF, 0xD8, // start of image
+	0xFF, 0xC0, 0, 17, 8, 0x23, 0x28, 0x23, 0x28, 3, 1, 0x11, 0, 2, 0x11, 0, 3, 0x11, 0, // 9000×9000 frame
+	0xFF, 0xDA, 0, 12, 3, 1, 0, 2, 0, 3, 0, 0, 63, 0, // start of scan
+	0xFF, 0xD9, // end of image
+}
+
+// The image cache's first step on downloaded bytes is the thumbhash, so its
+// error is what a job records. An image too large to decode must not be
+// downloaded again on the normal backoff; an unreadable body, which can be a
+// provider's error page, must be.
+func TestIsStableProviderImageFailureForUndecodableDownloads(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		data   []byte
+		stable bool
+	}{
+		{"too large to decode", tooLargeImageHeader, true},
+		{"not an image", []byte("<html>Bad gateway</html>"), false},
+	} {
+		_, err := imageutil.Thumbhash(tc.data)
+		if err == nil {
+			t.Fatalf("%s: thumbhash succeeded", tc.name)
+		}
+		if got := isStableProviderImageFailure("imagecache: thumbhash: " + err.Error()); got != tc.stable {
+			t.Errorf("%s: stable = %t, want %t (%v)", tc.name, got, tc.stable, err)
+		}
 	}
 }
 

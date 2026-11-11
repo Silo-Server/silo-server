@@ -120,10 +120,11 @@ func invalidCollectionImage(message string, cause error) *APIError {
 	return &APIError{Status: http.StatusBadRequest, Code: policyErrorBadRequest, Message: message, cause: cause}
 }
 
-// collectionArtworkError keeps a client-facing artwork error and hides any
-// other failure behind a 500 with the given message.
+// collectionArtworkError keeps a client-facing artwork error, including the
+// 503 of a server too busy to decode another upload, and hides any other
+// failure behind a 500 with the given message.
 func collectionArtworkError(err error, message string) error {
-	if apiErr, ok := errors.AsType[*APIError](err); ok && apiErr.Status < http.StatusInternalServerError {
+	if apiErr, ok := errors.AsType[*APIError](err); ok && (apiErr.Status < http.StatusInternalServerError || apiErr.Status == http.StatusServiceUnavailable) {
 		return apiErr
 	}
 	return apiError(http.StatusInternalServerError, "internal_error", message)
@@ -213,6 +214,37 @@ func uploadCollectionImageVariants(
 	return putCollectionImageVariants(ctx, store, basePath, collectionImageRevision(fileData), widths, fileData)
 }
 
+// profileCollectionPoster is a poster a profile supplied for its own
+// collection, decoded into the variants to store.
+type profileCollectionPoster struct {
+	variants *imageutil.VariantResult
+	revision string
+}
+
+// decodeProfileCollectionPoster decodes fileData in one of
+// uploadedImageDecodes and writes nothing, so a caller can refuse an unusable
+// poster, or an upload the server is too busy to decode, before it changes
+// anything. The format check runs in the slot too: it reads the whole upload.
+func decodeProfileCollectionPoster(ctx context.Context, fileData []byte) (*profileCollectionPoster, error) {
+	variants, err := uploadedImageDecodes.decode(ctx, func() (*imageutil.VariantResult, error) {
+		if err := imageutil.CheckProfileImage(fileData); err != nil {
+			return nil, invalidCollectionImage("The file is not a supported image.", err)
+		}
+		return generateCollectionImageVariants(fileData, collectionPosterWidths)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &profileCollectionPoster{variants: variants, revision: collectionImageRevision(fileData)}, nil
+}
+
+// upload writes the poster's variants for collectionID under the keys
+// uploadCollectionImageVariants uses.
+func (p *profileCollectionPoster) upload(ctx context.Context, store blobstore.Store, collectionID string) (s3Path, thumbhashStr string, err error) {
+	basePath := collectionImageDir(userCollectionImagePrefix, collectionID, collectionImagePoster)
+	return storeCollectionImageVariants(ctx, store, basePath, p.revision, p.variants)
+}
+
 // collectionPosterWidths are the resized variants stored beside an original
 // collection poster.
 var collectionPosterWidths = catalog.CollectionPosterWidths
@@ -234,17 +266,43 @@ func putCollectionImageVariants(
 	if store == nil {
 		return "", "", fmt.Errorf("image upload requires configured S3 storage")
 	}
-	// Bytes libvips cannot read, and JPEG or PNG pixel data that does not
-	// decode, are the caller's artwork problem; any other failure stays a
-	// server error.
-	result, err := imageutil.GenerateVariants(fileData, widths)
-	if err != nil && (errors.Is(err, imageutil.ErrInvalidImage) || imageutil.PixelDataUndecodable(fileData)) {
-		return "", "", invalidCollectionImage("The file is not a supported image.", err)
-	}
+	result, err := generateCollectionImageVariants(fileData, widths)
 	if err != nil {
-		return "", "", fmt.Errorf("generating image variants: %w", err)
+		return "", "", err
 	}
+	return storeCollectionImageVariants(ctx, store, basePath, revision, result)
+}
 
+// generateCollectionImageVariants decodes fileData into the original and the
+// given resized variants. An image too large to decode, bytes libvips cannot
+// read, and JPEG or PNG pixel data that does not decode are the caller's
+// artwork problem; any other failure stays a server error.
+func generateCollectionImageVariants(fileData []byte, widths []int) (*imageutil.VariantResult, error) {
+	result, err := imageutil.GenerateVariants(fileData, widths)
+	switch {
+	case err == nil:
+		return result, nil
+	case errors.Is(err, imageutil.ErrSourceTooLarge):
+		// A progressive JPEG holds three bytes a sample while it decodes.
+		return nil, invalidCollectionImage(fmt.Sprintf(
+			"The image is too large: more than %d megapixels, more than %d channels, or more than %d MiB once decoded, which a progressive JPEG reaches near %d megapixels.",
+			imageutil.MaxSourcePixels/1_000_000, imageutil.MaxSourceBands, imageutil.MaxSourceBytes>>20, imageutil.MaxSourceBytes/9/1_000_000), err)
+	case errors.Is(err, imageutil.ErrInvalidImage) || imageutil.PixelDataUndecodable(fileData):
+		return nil, invalidCollectionImage("The file is not a supported image.", err)
+	default:
+		return nil, fmt.Errorf("generating image variants: %w", err)
+	}
+}
+
+// storeCollectionImageVariants uploads generated variants as
+// basePath/{variant}.{revision}.{ext}. It returns the original's key and a
+// thumbhash of the w300 variant.
+func storeCollectionImageVariants(
+	ctx context.Context,
+	store blobstore.Store,
+	basePath, revision string,
+	result *imageutil.VariantResult,
+) (s3Path, thumbhashStr string, err error) {
 	var w300Data []byte
 	for _, v := range result.Variants {
 		key := artworkkey.Build(basePath, v.Key, revision, result.Ext)

@@ -729,8 +729,11 @@ the migration inventory.
 of at most 10 MiB. Movies and series take all three types and seasons take a
 poster; episodes and other item types return `422`. The bytes decide the
 format, not the part's declared type, so a part sent as
-`application/octet-stream` is accepted when the image is. Anything else
-returns `422`, except that a JPEG or PNG over 4 megapixels whose header reads
+`application/octet-stream` is accepted when the image is. Anything else, and
+an image too large to decode (more than 65 megapixels, four channels, or
+160 MiB of decoded pixels, which a progressive JPEG reaches near 18
+megapixels), returns `422`, except that a smaller JPEG or PNG over 4
+megapixels whose header reads
 but whose pixel data is damaged returns `500`, as collection artwork uploads
 do. A larger file returns `413`, and a server without artwork storage `503`.
 The image is stored as the item's local artwork and published like an applied

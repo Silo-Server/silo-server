@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/imagesize"
+	"github.com/Silo-Server/silo-server/internal/imageutil"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -188,6 +189,10 @@ func isStableProviderImageFailure(errText string) bool {
 		strings.Contains(errText, "unexpected status 404") ||
 		strings.Contains(errText, "unexpected status 410") ||
 		strings.Contains(errText, "unexpected status 418") ||
+		// An image too large to decode stays too large until the source
+		// changes. Other unreadable bytes keep the normal schedule: a provider
+		// can answer one request with an error page.
+		strings.Contains(errText, imageutil.ErrSourceTooLarge.Error()) ||
 		// Local sidecar failures that will not heal on the normal backoff:
 		// deleted files (ENOENT), unreadable files (EPERM), paths outside the
 		// owning library's roots, and files that are structurally unusable
