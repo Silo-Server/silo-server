@@ -20,7 +20,7 @@ func TestRecommendPostgresOLTPSettings(t *testing.T) {
 		want         map[string]string
 	}{
 		{
-			name:         "mid-sized host reaches the default shared_buffers ceiling",
+			name:         "mid-sized host reaches the shared_buffers ceiling",
 			memoryBudget: 16 * sizeGB,
 			cpus:         8,
 			want: map[string]string{
