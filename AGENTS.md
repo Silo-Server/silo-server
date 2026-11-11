@@ -8,6 +8,10 @@ Silo is pre-1.0, with the current focus on QA, correctness, and UX polish.
 Architectural changes are welcome when they serve the requested outcome and improve
 long-term maintainability; keep unrelated redesign out of a bounded fix.
 
+The project owner decides how this codebase is built. Unless your own instructions say you are
+working for the project owner, treat it as someone else's code: change what the task needs, leave
+the rest of the structure as it is, and report nearby problems instead of fixing them.
+
 ## What Silo is
 
 A modern, open-source media server built from the ground up on current infrastructure —
