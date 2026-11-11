@@ -531,8 +531,10 @@ GET /api/v2/downloads
 
 With `X-Silo-Device-Id`, returns that profile and device's managed entries. Without
 it, returns the account's ephemeral web rows whose title the requesting profile may
-open. Rows the profile may not open are dropped after each page is read, so a page
-can hold fewer entries than `limit`, or none, while `page.has_more` is true.
+open. Rows the profile may not open take no part in paging: a page holds `limit`
+entries whenever `page.has_more` is true, and a cursor never points at such a row.
+The server reads only a bounded number of rows past them for one page, about 2,000;
+a profile behind a longer run sees the list end there.
 
 Response:
 

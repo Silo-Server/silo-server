@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -223,15 +224,32 @@ func TestEphemeralDownloadRechecksProfileAccessDB(t *testing.T) {
 	if err != nil || !slices.Equal(ids(list), []string{open.ID}) {
 		t.Fatalf("list for a profile without access to one item: %v, err %v", ids(list), err)
 	}
-	// The first page holds only the hidden row: it comes back empty and still
-	// leads to the page with the row the profile may see.
-	first, err := svc.ListPage(t.Context(), 2, "restricted", "", nil, 1, catalog.AccessFilter{})
-	if err != nil || len(first.Items) != 0 || first.Next == nil {
-		t.Fatalf("first page: %v, next %v, err %v", ids(first.Items), first.Next, err)
+	// A page position names a row's ID and creation time, so it never comes
+	// from a hidden row, and a page has a next one only when a row the
+	// profile may see follows. Here the hidden row is the newer one.
+	page, err := svc.ListPage(t.Context(), 2, "restricted", "", nil, 1, catalog.AccessFilter{})
+	if err != nil || !slices.Equal(ids(page.Items), []string{open.ID}) || page.Next != nil {
+		t.Errorf("page behind a hidden row: %v, next %+v, err %v", ids(page.Items), page.Next, err)
 	}
-	second, err := svc.ListPage(t.Context(), 2, "restricted", "", first.Next, 1, catalog.AccessFilter{})
-	if err != nil || !slices.Equal(ids(second.Items), []string{open.ID}) || second.Next != nil {
-		t.Fatalf("second page: %v, next %v, err %v", ids(second.Items), second.Next, err)
+	// Visible rows with hidden ones between them, the second run longer than
+	// one read holds: each page's position is its own last row.
+	newest := &Download{ID: "newest-row", UserID: 2, MediaFileID: 43, ContentID: "open-movie", Kind: KindQueued, Status: StatusQueued, Format: FormatOriginal, FileSize: 5, CreatedAt: now.Add(time.Minute), UpdatedAt: now}
+	oldest := &Download{ID: "oldest-row", UserID: 2, MediaFileID: 43, ContentID: "open-movie", Kind: KindQueued, Status: StatusQueued, Format: FormatOriginal, FileSize: 5, CreatedAt: now.Add(-time.Hour), UpdatedAt: now}
+	added := []*Download{newest, oldest}
+	for i := range registryPageMaxRows + 10 {
+		added = append(added, &Download{ID: fmt.Sprintf("hidden-%03d", i), UserID: 2, MediaFileID: 42, ContentID: "movie", Kind: KindQueued, Status: StatusQueued, Format: FormatOriginal, FileSize: 5, CreatedAt: now.Add(-2*time.Minute - time.Duration(i)*time.Second), UpdatedAt: now})
+	}
+	if err := repo.CreateBatch(t.Context(), added); err != nil {
+		t.Fatal(err)
+	}
+	var after *RegistryPosition
+	for i, want := range []*Download{newest, open, oldest} {
+		page, err := svc.ListPage(t.Context(), 2, "restricted", "", after, 1, catalog.AccessFilter{})
+		more := want != oldest
+		if err != nil || !slices.Equal(ids(page.Items), []string{want.ID}) || (page.Next != nil) != more || (more && page.Next.ID != want.ID) {
+			t.Fatalf("page %d: %v, next %+v, err %v", i+1, ids(page.Items), page.Next, err)
+		}
+		after = page.Next
 	}
 
 	if err := svc.Delete(t.Context(), 2, "restricted", "", row.ID, catalog.AccessFilter{}); !errors.Is(err, ErrNotFound) {
@@ -250,6 +268,9 @@ func TestEphemeralDownloadRechecksProfileAccessDB(t *testing.T) {
 	failing := newService(&syncAccess{err: errors.New("catalog unavailable")})
 	if list, err := failing.List(t.Context(), 2, "restricted", "", catalog.AccessFilter{}); err == nil || len(list) != 0 {
 		t.Fatalf("list with a failing access check: %v, err %v", ids(list), err)
+	}
+	if page, err := failing.ListPage(t.Context(), 2, "restricted", "", nil, 1, catalog.AccessFilter{}); err == nil || len(page.Items) != 0 || page.Next != nil {
+		t.Fatalf("page with a failing access check: %v, next %+v, err %v", ids(page.Items), page.Next, err)
 	}
 	if err := failing.Delete(t.Context(), 2, "restricted", "", open.ID, catalog.AccessFilter{}); err == nil || errors.Is(err, ErrNotFound) {
 		t.Fatalf("delete with a failing access check: %v", err)
