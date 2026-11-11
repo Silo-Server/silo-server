@@ -1215,9 +1215,9 @@ func (s *Scanner) scanFolderByRoots(
 		}
 	}
 	// Ask only whether the catalog holds anything under each empty root.
-	// Loading the rows to count them decoded every file of a dropped mount
-	// in full, which for a large TV root is gigabytes on every scan for as
-	// long as the drive stays missing.
+	// Loading the rows to count them decoded every file row of a dropped
+	// mount in full, with its track, chapter and marker JSON, on every scan
+	// for as long as the drive stayed missing.
 	suspectRoots, err := s.fileRepo.ListRootsWithCatalogedFiles(ctx, folder.ID, emptyRoots)
 	if err != nil {
 		return nil, fmt.Errorf("listing files under empty roots: %w", err)

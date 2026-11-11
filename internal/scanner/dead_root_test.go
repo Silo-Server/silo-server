@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -335,6 +336,42 @@ func TestScanFolderEmptyRootKeepsCatalogedFilesDB(t *testing.T) {
 		if missing != tc.wantMissing {
 			t.Fatalf("%s: marked missing = %v, want %v", tc.name, missing, tc.wantMissing)
 		}
+	}
+}
+
+// TestListRootsWithCatalogedFilesDB pins which roots count as holding
+// cataloged files: a file at or under the root, present or marked missing,
+// and nothing that only shares a string prefix with it. Roots come back in
+// input order.
+func TestListRootsWithCatalogedFilesDB(t *testing.T) {
+	pool := newScannerTestPool(t)
+	ctx := t.Context()
+	folderID := seedDeadRootTestFolder(t, pool, "movies", fmt.Sprintf("cataloged-roots-%d", time.Now().UnixNano()))
+	for _, file := range []struct {
+		path    string
+		missing bool
+	}{
+		{"/lib/live/Movie (2001)/Movie (2001).mkv", false},
+		{"/lib/gone/Movie (2002).mkv", true},
+		{"/lib/movies2/Movie (2003).mkv", false},
+		{"/lib/100%_done/Movie (2004).mkv", false},
+		{"/lib/file.mkv", false},
+	} {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO media_files (media_folder_id, file_path, file_size, missing_since)
+			VALUES ($1, $2, 1, CASE WHEN $3 THEN now() END)`, folderID, file.path, file.missing); err != nil {
+			t.Fatalf("seed %s: %v", file.path, err)
+		}
+	}
+
+	roots := []string{"/lib/gone", "/lib/empty", "/lib/movies", "/lib/live/", "/lib/100%_done", "/lib/100x_done", "/lib/file.mkv", "/lib/f"}
+	got, err := NewFileRepository(pool).ListRootsWithCatalogedFiles(ctx, folderID, roots)
+	if err != nil {
+		t.Fatalf("ListRootsWithCatalogedFiles: %v", err)
+	}
+	want := []string{"/lib/gone", "/lib/live/", "/lib/100%_done", "/lib/file.mkv"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("roots with cataloged files = %q, want %q", got, want)
 	}
 }
 
