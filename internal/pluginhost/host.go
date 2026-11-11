@@ -208,6 +208,9 @@ func (h *Host) Start(ctx context.Context, req StartRequest) (*Client, error) {
 
 	command := exec.Command(req.BinaryPath)
 	command.Env = ProcessEnv()
+	if !isProvider {
+		command.Env = withPluginMaxProcs(command.Env)
+	}
 	process := plugin.NewClient(&plugin.ClientConfig{
 		HandshakeConfig: HandshakeConfig(),
 		GRPCDialOptions: []grpc.DialOption{grpc.WithChainUnaryInterceptor(observePluginRPC)},

@@ -28,18 +28,16 @@ var processEnvNames = map[string]bool{
 	"no_proxy":      true,
 }
 
-// pluginMaxProcs caps how many CPUs a plugin's Go runtime schedules on.
-// Plugin RPCs wait on the network far more than they compute, and the
-// server's GOMAXPROCS never reaches the child. Without a cap, a plugin on a
+// pluginMaxProcs caps how many CPUs a plugin's Go runtime schedules on. The
+// server's GOMAXPROCS never reaches the child, so without a cap a plugin on a
 // host whose CPU quota is unlimited sizes itself to every host CPU: on a
-// 224-CPU host each idle plugin ran about 70 threads, most of them GC
-// workers, with per-CPU allocator caches to match.
+// 224-CPU host each idle plugin ran 68 to 158 threads. Metadata, sync, auth
+// and scan RPCs wait on the network far more than they compute.
 const pluginMaxProcs = 2
 
 // ProcessEnv returns the environment for a plugin process: the allowlisted
-// subset of the server's own, plus a GOMAXPROCS sized for a plugin. Callers
-// starting a plugin binary set it as the command's Env, so the child never
-// sees the rest.
+// subset of the server's own. Callers starting a plugin binary set it as the
+// command's Env, so the child never sees the rest.
 func ProcessEnv() []string {
 	// Never nil: a nil exec.Cmd.Env inherits the whole environment.
 	env := []string{}
@@ -49,6 +47,14 @@ func ProcessEnv() []string {
 			env = append(env, kv)
 		}
 	}
+	return env
+}
+
+// withPluginMaxProcs adds a GOMAXPROCS of pluginMaxProcs, or the server's own
+// value when that is lower, to a plugin process environment. A network access
+// provider does not get it: proxied client traffic, streams included, runs
+// through its process.
+func withPluginMaxProcs(env []string) []string {
 	procs := min(pluginMaxProcs, runtime.GOMAXPROCS(0))
 	return append(env, "GOMAXPROCS="+strconv.Itoa(procs))
 }
