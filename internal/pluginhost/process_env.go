@@ -31,9 +31,11 @@ var processEnvNames = map[string]bool{
 // pluginMaxProcs caps how many CPUs a plugin's Go runtime schedules on. The
 // server's GOMAXPROCS never reaches the child, so without a cap a plugin on a
 // host whose CPU quota is unlimited sizes itself to every host CPU: on a
-// 224-CPU host each idle plugin ran 68 to 158 threads. Metadata, sync, auth
-// and scan RPCs wait on the network far more than they compute.
-const pluginMaxProcs = 2
+// 224-CPU host each idle plugin ran 68 to 158 threads. Most plugin work waits
+// on the network or in syscalls, which the cap does not limit; four leaves room
+// for plugins that also compute. A CPU-heavy plugin can opt out with
+// runtime.SetDefaultGOMAXPROCS, as the plugin SDK documents.
+const pluginMaxProcs = 4
 
 // ProcessEnv returns the environment for a plugin process: the allowlisted
 // subset of the server's own. Callers starting a plugin binary set it as the
