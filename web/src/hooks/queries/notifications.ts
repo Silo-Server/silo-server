@@ -605,6 +605,56 @@ export function applyNotificationsSnapshot(queryClient: QueryClient, rows: AppNo
   });
 }
 
+/**
+ * The live toast for a notification that just arrived, or null when its type
+ * has none. Built when it arrives, so it reads in the language on screen then.
+ */
+export function notificationToast(
+  notification: AppNotification,
+): { title: string; description?: string } | null {
+  if (notification.type === "episode.available" && notification.series_title) {
+    return {
+      title: t("web.notifications.toast.newEpisode", { series: notification.series_title }),
+      description: [formatEpisodeCode(notification), notification.episode_title]
+        .filter(Boolean)
+        .join(" — "),
+    };
+  }
+  if (notification.type === "request.fulfilled") {
+    const follower = notification.reason_flags?.follower === true;
+    return {
+      title: notification.series_title
+        ? t("web.notifications.toast.seriesAvailable", { series: notification.series_title })
+        : follower
+          ? t("web.notifications.inbox.followedTitleAvailable")
+          : t("web.notifications.inbox.requestAvailableBody"),
+      description: follower
+        ? t("web.notifications.toast.followedArrived")
+        : t("web.notifications.toast.requestArrived"),
+    };
+  }
+  if (notification.type === "request.approved" || notification.type === "request.declined") {
+    const approved = notification.type === "request.approved";
+    const title = notification.reason_flags?.title;
+    return {
+      title: title
+        ? t(
+            approved
+              ? "web.notifications.toast.requestApprovedTitle"
+              : "web.notifications.toast.requestDeclinedTitle",
+            { title },
+          )
+        : t(
+            approved
+              ? "web.notifications.inbox.requestApproved"
+              : "web.notifications.inbox.requestDeclined",
+          ),
+      description: approved ? undefined : notification.reason_flags?.reason,
+    };
+  }
+  return null;
+}
+
 /** Formats the "S2E5" style episode code for a notification row. */
 export function formatEpisodeCode(
   notification: Pick<AppNotification, "season_number" | "episode_number">,

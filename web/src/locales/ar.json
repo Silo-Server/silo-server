@@ -137,6 +137,12 @@
       "value": "السنة"
     }
   ],
+  "collections.collection": [
+    {
+      "type": 0,
+      "value": "مجموعة"
+    }
+  ],
   "common.back": [
     {
       "type": 0,
@@ -287,10 +293,22 @@
       "value": "هذه القيمة غير صالحة."
     }
   ],
+  "error.field.invalid_entity_tag": [
+    {
+      "type": 0,
+      "value": "يجب أن تكون القيمة «*» أو قائمة من وسوم الكيانات بين علامات اقتباس ومفصولة بفواصل."
+    }
+  ],
   "error.field.invalid_enum": [
     {
       "type": 0,
       "value": "اختر إحدى القيم المسموح بها."
+    }
+  ],
+  "error.field.invalid_sort_field": [
+    {
+      "type": 0,
+      "value": "يحدد الفرز حقلًا لا تفرز هذه العملية حسبه، أو يحدد حقلًا مرتين."
     }
   ],
   "error.field.invalid_type": [
@@ -593,6 +611,570 @@
       "value": "بعض القيم غير صالحة. تحقق منها وحاول مرة أخرى."
     }
   ],
+  "home.recipe.aclBlank.description": [
+    {
+      "type": 0,
+      "value": "قائمة يرتبها المسؤول عنصرًا بعنصر."
+    }
+  ],
+  "home.recipe.aclBlank.name": [
+    {
+      "type": 0,
+      "value": "اختيارات المحرر"
+    }
+  ],
+  "home.recipe.anniversariesDefault.description": [
+    {
+      "type": 0,
+      "value": "عناوين تحتفل هذا الشهر بذكرى بارزة لإصدارها."
+    }
+  ],
+  "home.recipe.anniversariesDefault.name": [
+    {
+      "type": 0,
+      "value": "ذكريات سنوية"
+    }
+  ],
+  "home.recipe.awCannes.description": [
+    {
+      "type": 0,
+      "value": "مختارات مهرجان كان."
+    }
+  ],
+  "home.recipe.awCannes.name": [
+    {
+      "type": 0,
+      "value": "مختارات كان"
+    }
+  ],
+  "home.recipe.awEmmy.description": [
+    {
+      "type": 0,
+      "value": "مسلسلات فائزة بجائزة إيمي."
+    }
+  ],
+  "home.recipe.awEmmy.name": [
+    {
+      "type": 0,
+      "value": "الفائزون بجائزة إيمي"
+    }
+  ],
+  "home.recipe.awOscar.description": [
+    {
+      "type": 0,
+      "value": "الفائزون بجوائز الأوسكار في مكتبتك."
+    }
+  ],
+  "home.recipe.awOscar.name": [
+    {
+      "type": 0,
+      "value": "الفائزون بالأوسكار"
+    }
+  ],
+  "home.recipe.bcwAuto.description": [
+    {
+      "type": 0,
+      "value": "اختيارات بناءً على آخر ما شاهدته."
+    }
+  ],
+  "home.recipe.caImdb.description": [
+    {
+      "type": 0,
+      "value": "بتقييم 8.0+ على TMDB و500 صوت أو أكثر."
+    }
+  ],
+  "home.recipe.caImdb.name": [
+    {
+      "type": 0,
+      "value": "إشادة النقاد"
+    }
+  ],
+  "home.recipe.collectionPick.description": [
+    {
+      "type": 0,
+      "value": "عرض عناصر من مكتبة أو مجموعة منسقة."
+    }
+  ],
+  "home.recipe.collectionPick.name": [
+    {
+      "type": 0,
+      "value": "مجموعة"
+    }
+  ],
+  "home.recipe.continueListeningDefault.description": [
+    {
+      "type": 0,
+      "value": "تابع الكتب الصوتية من حيث توقفت."
+    }
+  ],
+  "home.recipe.continueWatchingDefault.description": [
+    {
+      "type": 0,
+      "value": "تابع الأفلام والحلقات من حيث توقفت."
+    }
+  ],
+  "home.recipe.esActor.description": [
+    {
+      "type": 0,
+      "value": "تسليط الضوء أسبوعيًا على ممثل في مكتبتك."
+    }
+  ],
+  "home.recipe.esActor.name": [
+    {
+      "type": 0,
+      "value": "ممثل تحت الأضواء"
+    }
+  ],
+  "home.recipe.esDirectorAuto.description": [
+    {
+      "type": 0,
+      "value": "تسليط الضوء أسبوعيًا على مخرج في مكتبتك."
+    }
+  ],
+  "home.recipe.esDirectorAuto.name": [
+    {
+      "type": 0,
+      "value": "مخرج تحت الأضواء"
+    }
+  ],
+  "home.recipe.esEra80s.description": [
+    {
+      "type": 0,
+      "value": "أفلام من الثمانينيات."
+    }
+  ],
+  "home.recipe.esEra80s.name": [
+    {
+      "type": 0,
+      "value": "الثمانينيات"
+    }
+  ],
+  "home.recipe.esStudio.description": [
+    {
+      "type": 0,
+      "value": "تسليط الضوء أسبوعيًا على استوديو في مكتبتك."
+    }
+  ],
+  "home.recipe.esStudio.name": [
+    {
+      "type": 0,
+      "value": "استوديو تحت الأضواء"
+    }
+  ],
+  "home.recipe.favoritesDefault.description": [
+    {
+      "type": 0,
+      "value": "المفضلة لديك."
+    }
+  ],
+  "home.recipe.favoritesDefault.name": [
+    {
+      "type": 0,
+      "value": "المفضلة"
+    }
+  ],
+  "home.recipe.ffDefault.description": [
+    {
+      "type": 0,
+      "value": "بتقييم 7.0+ على TMDB و100 صوت أو أكثر، ولم تُشاهد خلال العام الماضي."
+    }
+  ],
+  "home.recipe.ffDefault.name": [
+    {
+      "type": 0,
+      "value": "المفضلة المنسية"
+    }
+  ],
+  "home.recipe.forYou.description": [
+    {
+      "type": 0,
+      "value": "اختيارات لكل ملف شخصي من محرك التوصيات."
+    }
+  ],
+  "home.recipe.forYou.name": [
+    {
+      "type": 0,
+      "value": "موصى به لك"
+    }
+  ],
+  "home.recipe.fs4k.description": [
+    {
+      "type": 0,
+      "value": "عناوين متاحة بدقة 4K UHD."
+    }
+  ],
+  "home.recipe.fs4k.name": [
+    {
+      "type": 0,
+      "value": "معرض 4K"
+    }
+  ],
+  "home.recipe.fs4kRecent.description": [
+    {
+      "type": 0,
+      "value": "أحدث عناوين 4K UHD المضافة."
+    }
+  ],
+  "home.recipe.fs4kRecent.name": [
+    {
+      "type": 0,
+      "value": "جديد بدقة 4K"
+    }
+  ],
+  "home.recipe.fsDv.description": [
+    {
+      "type": 0,
+      "value": "عناوين Dolby Vision."
+    }
+  ],
+  "home.recipe.fsDv.name": [
+    {
+      "type": 0,
+      "value": "مختارات Dolby Vision"
+    }
+  ],
+  "home.recipe.fsHdr.description": [
+    {
+      "type": 0,
+      "value": "عناوين مُعدّة بتقنية HDR."
+    }
+  ],
+  "home.recipe.fsHdr.name": [
+    {
+      "type": 0,
+      "value": "أبرز عناوين HDR"
+    }
+  ],
+  "home.recipe.genreRouletteWeekly.description": [
+    {
+      "type": 0,
+      "value": "نوع مختلف كل أسبوع، بتقييم 6.0+ على TMDB و100 صوت أو أكثر."
+    }
+  ],
+  "home.recipe.genreRouletteWeekly.name": [
+    {
+      "type": 0,
+      "value": "روليت الأنواع"
+    }
+  ],
+  "home.recipe.hiddenGemsDefault.description": [
+    {
+      "type": 0,
+      "value": "بتقييم 7.5+ على TMDB و100 صوت أو أكثر، وشوهدت مرتين أو أقل."
+    }
+  ],
+  "home.recipe.moodAfterMidnight.description": [
+    {
+      "type": 0,
+      "value": "رعب أو إثارة، بتقييم 6.0+ على TMDB و100 صوت أو أكثر."
+    }
+  ],
+  "home.recipe.moodAfterMidnight.name": [
+    {
+      "type": 0,
+      "value": "بعد منتصف الليل"
+    }
+  ],
+  "home.recipe.moodComfort.description": [
+    {
+      "type": 0,
+      "value": "كوميديا أو رومانسية أو عائلي، بتقييم 6.0+ على TMDB و100 صوت أو أكثر."
+    }
+  ],
+  "home.recipe.moodComfort.name": [
+    {
+      "type": 0,
+      "value": "إعادة مشاهدة مريحة"
+    }
+  ],
+  "home.recipe.moodDateNight.description": [
+    {
+      "type": 0,
+      "value": "رومانسية أو كوميديا، بتقييم 6.0+ على TMDB و100 صوت أو أكثر."
+    }
+  ],
+  "home.recipe.moodDateNight.name": [
+    {
+      "type": 0,
+      "value": "سهرة رومانسية"
+    }
+  ],
+  "home.recipe.moodEdgeOfSeat.description": [
+    {
+      "type": 0,
+      "value": "إثارة أو أكشن، بتقييم 6.5+ على TMDB و100 صوت أو أكثر."
+    }
+  ],
+  "home.recipe.moodEdgeOfSeat.name": [
+    {
+      "type": 0,
+      "value": "على أطراف مقعدك"
+    }
+  ],
+  "home.recipe.moodFeelGood.description": [
+    {
+      "type": 0,
+      "value": "كوميديا أو عائلي، بتقييم 6.5+ على TMDB و100 صوت أو أكثر."
+    }
+  ],
+  "home.recipe.moodFeelGood.name": [
+    {
+      "type": 0,
+      "value": "كوميديا مبهجة"
+    }
+  ],
+  "home.recipe.moodMindBending.description": [
+    {
+      "type": 0,
+      "value": "خيال علمي أو غموض، بتقييم 7.0+ على TMDB و100 صوت أو أكثر."
+    }
+  ],
+  "home.recipe.moodMindBending.name": [
+    {
+      "type": 0,
+      "value": "خيال علمي محيّر"
+    }
+  ],
+  "home.recipe.moodQuietSunday.description": [
+    {
+      "type": 0,
+      "value": "دراما أو وثائقي، بتقييم 7.0+ على TMDB و100 صوت أو أكثر."
+    }
+  ],
+  "home.recipe.moodQuietSunday.name": [
+    {
+      "type": 0,
+      "value": "سينما الأحد الهادئ"
+    }
+  ],
+  "home.recipe.moodTearjerker.description": [
+    {
+      "type": 0,
+      "value": "دراما أو رومانسية، بتقييم 7.0+ على TMDB و100 صوت أو أكثر."
+    }
+  ],
+  "home.recipe.moodTearjerker.name": [
+    {
+      "type": 0,
+      "value": "أفلام مبكية"
+    }
+  ],
+  "home.recipe.mwMonth.description": [
+    {
+      "type": 0,
+      "value": "الأكثر تشغيلًا في آخر 30 يومًا."
+    }
+  ],
+  "home.recipe.mwMonth.name": [
+    {
+      "type": 0,
+      "value": "الأكثر مشاهدة هذا الشهر"
+    }
+  ],
+  "home.recipe.mwWeek.description": [
+    {
+      "type": 0,
+      "value": "الأكثر تشغيلًا في آخر 7 أيام."
+    }
+  ],
+  "home.recipe.mwWeek.name": [
+    {
+      "type": 0,
+      "value": "الأكثر مشاهدة هذا الأسبوع"
+    }
+  ],
+  "home.recipe.nextInSeriesDefault.description": [
+    {
+      "type": 0,
+      "value": "الكتاب الصوتي التالي في السلاسل التي أنهيتها."
+    }
+  ],
+  "home.recipe.nextInSeriesDefault.name": [
+    {
+      "type": 0,
+      "value": "التالي في السلسلة"
+    }
+  ],
+  "home.recipe.nextUpDefault.description": [
+    {
+      "type": 0,
+      "value": "الحلقات التالية الجاهزة للمشاهدة."
+    }
+  ],
+  "home.recipe.ntl30.description": [
+    {
+      "type": 0,
+      "value": "أُضيفت خلال آخر 30 يومًا."
+    }
+  ],
+  "home.recipe.ntl30.name": [
+    {
+      "type": 0,
+      "value": "جديد في المكتبة هذا الشهر"
+    }
+  ],
+  "home.recipe.paHousehold.description": [
+    {
+      "type": 0,
+      "value": "آخر المشاهدات في جميع الملفات الشخصية الأخرى."
+    }
+  ],
+  "home.recipe.paHousehold.name": [
+    {
+      "type": 0,
+      "value": "ما شاهده الآخرون للتو"
+    }
+  ],
+  "home.recipe.randomDefault.description": [
+    {
+      "type": 0,
+      "value": "اختيار عشوائي من مكتبتك."
+    }
+  ],
+  "home.recipe.randomDefault.name": [
+    {
+      "type": 0,
+      "value": "فاجئني"
+    }
+  ],
+  "home.recipe.recentlyAddedDefault.description": [
+    {
+      "type": 0,
+      "value": "أحدث الإضافات إلى مكتبتك."
+    }
+  ],
+  "home.recipe.recentlyReleasedDefault.description": [
+    {
+      "type": 0,
+      "value": "عناوين صدرت مؤخرًا."
+    }
+  ],
+  "home.recipe.recentlyReleasedDefault.name": [
+    {
+      "type": 0,
+      "value": "إصدارات جديدة"
+    }
+  ],
+  "home.recipe.returningShowsDefault.description": [
+    {
+      "type": 0,
+      "value": "مسلسلات شاهدتها ولها موسم جديد في مكتبتك."
+    }
+  ],
+  "home.recipe.seAuto.description": [
+    {
+      "type": 0,
+      "value": "يتبدّل تلقائيًا — الهالوين في أكتوبر، وعيد الميلاد في ديسمبر، وغير ذلك."
+    }
+  ],
+  "home.recipe.seAuto.details": [
+    {
+      "type": 0,
+      "value": "قسم واحد يعرض اختيارات منسقة للعطلات وفق التقويم. اختر العطلات وأجواء لكل منها، وأضف عطلاتك الخاصة."
+    }
+  ],
+  "home.recipe.seFamilyMovieNight.description": [
+    {
+      "type": 0,
+      "value": "اختيارات عائلية مساء الجمعة والسبت."
+    }
+  ],
+  "home.recipe.seFamilyMovieNight.name": [
+    {
+      "type": 0,
+      "value": "سهرة أفلام عائلية"
+    }
+  ],
+  "home.recipe.shortWatchesDefault.description": [
+    {
+      "type": 0,
+      "value": "أفلام مدتها 95 دقيقة أو أقل، بتقييم 6.0+ على TMDB و100 صوت أو أكثر."
+    }
+  ],
+  "home.recipe.shortWatchesDefault.name": [
+    {
+      "type": 0,
+      "value": "قصير وممتع"
+    }
+  ],
+  "home.recipe.similar.description": [
+    {
+      "type": 0,
+      "value": "ما تحبه الملفات الشخصية المشابهة."
+    }
+  ],
+  "home.recipe.tasteTop.description": [
+    {
+      "type": 0,
+      "value": "أفضل ما يطابق ذوقك الأبرز — حدّد نوعًا لتضييق النتائج."
+    }
+  ],
+  "home.recipe.tdiscTmdbDay.description": [
+    {
+      "type": 0,
+      "value": "الأفلام والمسلسلات الرائجة اليوم على TMDB، مطابقةً لمكتبتك."
+    }
+  ],
+  "home.recipe.tdiscTmdbDay.name": [
+    {
+      "type": 0,
+      "value": "الرائج اليوم على TMDB"
+    }
+  ],
+  "home.recipe.tdiscTmdbWeek.description": [
+    {
+      "type": 0,
+      "value": "الأفلام والمسلسلات الرائجة هذا الأسبوع على TMDB، مطابقةً لمكتبتك."
+    }
+  ],
+  "home.recipe.tdiscTmdbWeek.name": [
+    {
+      "type": 0,
+      "value": "الرائج هذا الأسبوع على TMDB"
+    }
+  ],
+  "home.recipe.tr24h.description": [
+    {
+      "type": 0,
+      "value": "الأكثر تشغيلًا في آخر يوم."
+    }
+  ],
+  "home.recipe.tr24h.name": [
+    {
+      "type": 0,
+      "value": "الرائج الآن (24 ساعة)"
+    }
+  ],
+  "home.recipe.tr30d.description": [
+    {
+      "type": 0,
+      "value": "الأكثر تشغيلًا في آخر شهر."
+    }
+  ],
+  "home.recipe.tr30d.name": [
+    {
+      "type": 0,
+      "value": "الرائج هذا الشهر"
+    }
+  ],
+  "home.recipe.tr7d.description": [
+    {
+      "type": 0,
+      "value": "الأكثر تشغيلًا في آخر أسبوع."
+    }
+  ],
+  "home.recipe.watchlistDefault.description": [
+    {
+      "type": 0,
+      "value": "عناصر حفظتها لمشاهدتها."
+    }
+  ],
+  "home.recipe.watchlistDefault.name": [
+    {
+      "type": 0,
+      "value": "قائمة المشاهدة"
+    }
+  ],
   "home.section.becauseYouEnjoy": [
     {
       "type": 0,
@@ -635,6 +1217,60 @@
     {
       "type": 0,
       "value": "متابعة المشاهدة"
+    }
+  ],
+  "home.section.discoverGenres": [
+    {
+      "type": 0,
+      "value": "الأنواع"
+    }
+  ],
+  "home.section.discoverNetworks": [
+    {
+      "type": 0,
+      "value": "الشبكات"
+    }
+  ],
+  "home.section.discoverOnAirSeries": [
+    {
+      "type": 0,
+      "value": "مسلسلات تُعرض حاليًا"
+    }
+  ],
+  "home.section.discoverPopularMovies": [
+    {
+      "type": 0,
+      "value": "الأفلام الشائعة"
+    }
+  ],
+  "home.section.discoverPopularSeries": [
+    {
+      "type": 0,
+      "value": "المسلسلات الشائعة"
+    }
+  ],
+  "home.section.discoverStudios": [
+    {
+      "type": 0,
+      "value": "الاستوديوهات"
+    }
+  ],
+  "home.section.discoverTrendingMovies": [
+    {
+      "type": 0,
+      "value": "الأفلام الرائجة"
+    }
+  ],
+  "home.section.discoverTrendingSeries": [
+    {
+      "type": 0,
+      "value": "المسلسلات الرائجة"
+    }
+  ],
+  "home.section.discoverUpcomingMovies": [
+    {
+      "type": 0,
+      "value": "الأفلام القادمة"
     }
   ],
   "home.section.forYou": [
@@ -805,6 +1441,210 @@
       "value": "مسلسلات عائدة"
     }
   ],
+  "home.section.seasonal.christmas.classics": [
+    {
+      "type": 0,
+      "value": "كلاسيكيات عيد الميلاد"
+    }
+  ],
+  "home.section.seasonal.christmas.comedies": [
+    {
+      "type": 0,
+      "value": "كوميديا عيد الميلاد"
+    }
+  ],
+  "home.section.seasonal.christmas.family": [
+    {
+      "type": 0,
+      "value": "عيد الميلاد العائلي"
+    }
+  ],
+  "home.section.seasonal.christmas.favorites": [
+    {
+      "type": 0,
+      "value": "المفضلة في عيد الميلاد"
+    }
+  ],
+  "home.section.seasonal.christmas.hallmark": [
+    {
+      "type": 0,
+      "value": "أفلام Hallmark لعيد الميلاد"
+    }
+  ],
+  "home.section.seasonal.christmas.romcoms": [
+    {
+      "type": 0,
+      "value": "كوميديا رومانسية لعيد الميلاد"
+    }
+  ],
+  "home.section.seasonal.easter.faith": [
+    {
+      "type": 0,
+      "value": "قصص عيد الفصح"
+    }
+  ],
+  "home.section.seasonal.easter.family": [
+    {
+      "type": 0,
+      "value": "أفلام عيد الفصح"
+    }
+  ],
+  "home.section.seasonal.familyMovieNight.favorites": [
+    {
+      "type": 0,
+      "value": "المفضلة العائلية"
+    }
+  ],
+  "home.section.seasonal.familyMovieNight.liveAction": [
+    {
+      "type": 0,
+      "value": "سهرة أفلام عائلية"
+    }
+  ],
+  "home.section.seasonal.familyMovieNight.new": [
+    {
+      "type": 0,
+      "value": "سهرة أفلام عائلية"
+    }
+  ],
+  "home.section.seasonal.halloween.animated": [
+    {
+      "type": 0,
+      "value": "الهالوين بالرسوم المتحركة"
+    }
+  ],
+  "home.section.seasonal.halloween.family": [
+    {
+      "type": 0,
+      "value": "الهالوين العائلي"
+    }
+  ],
+  "home.section.seasonal.halloween.favorites": [
+    {
+      "type": 0,
+      "value": "المفضلة في الهالوين"
+    }
+  ],
+  "home.section.seasonal.halloween.horror": [
+    {
+      "type": 0,
+      "value": "رعب الهالوين"
+    }
+  ],
+  "home.section.seasonal.halloween.tv": [
+    {
+      "type": 0,
+      "value": "مسلسلات الهالوين"
+    }
+  ],
+  "home.section.seasonal.newYear.favorites": [
+    {
+      "type": 0,
+      "value": "أفلام رأس السنة"
+    }
+  ],
+  "home.section.seasonal.saturdayMorning.cartoons": [
+    {
+      "type": 0,
+      "value": "رسوم صباح السبت المتحركة"
+    }
+  ],
+  "home.section.seasonal.saturdayMorning.modern": [
+    {
+      "type": 0,
+      "value": "المفضلة لصباح السبت"
+    }
+  ],
+  "home.section.seasonal.saturdayMorning.nineties": [
+    {
+      "type": 0,
+      "value": "صباحات السبت في التسعينيات"
+    }
+  ],
+  "home.section.seasonal.stPatricks.irishFilm": [
+    {
+      "type": 0,
+      "value": "السينما الأيرلندية"
+    }
+  ],
+  "home.section.seasonal.stPatricks.irishTv": [
+    {
+      "type": 0,
+      "value": "المسلسلات الأيرلندية"
+    }
+  ],
+  "home.section.seasonal.summer.blockbusters": [
+    {
+      "type": 0,
+      "value": "أفلام الصيف الضخمة"
+    }
+  ],
+  "home.section.seasonal.summer.classicSummer": [
+    {
+      "type": 0,
+      "value": "أفلام صيفية كلاسيكية"
+    }
+  ],
+  "home.section.seasonal.summer.nostalgia": [
+    {
+      "type": 0,
+      "value": "حنين الصيف"
+    }
+  ],
+  "home.section.seasonal.summerBlockbuster.blockbusters": [
+    {
+      "type": 0,
+      "value": "أفلام الصيف الضخمة"
+    }
+  ],
+  "home.section.seasonal.summerBlockbuster.classicSummer": [
+    {
+      "type": 0,
+      "value": "أفلام صيفية كلاسيكية"
+    }
+  ],
+  "home.section.seasonal.summerBlockbuster.nostalgia": [
+    {
+      "type": 0,
+      "value": "حنين الصيف"
+    }
+  ],
+  "home.section.seasonal.thanksgiving.favorites": [
+    {
+      "type": 0,
+      "value": "أفلام عيد الشكر"
+    }
+  ],
+  "home.section.seasonal.thanksgiving.feelGood": [
+    {
+      "type": 0,
+      "value": "المفضلة المبهجة"
+    }
+  ],
+  "home.section.seasonal.valentines.favorites": [
+    {
+      "type": 0,
+      "value": "المفضلة في عيد الحب"
+    }
+  ],
+  "home.section.seasonal.valentines.loveStories": [
+    {
+      "type": 0,
+      "value": "قصص حب كلاسيكية"
+    }
+  ],
+  "home.section.seasonal.valentines.romanticDramas": [
+    {
+      "type": 0,
+      "value": "دراما رومانسية"
+    }
+  ],
+  "home.section.seasonal.valentines.romcoms": [
+    {
+      "type": 0,
+      "value": "كوميديا رومانسية لعيد الحب"
+    }
+  ],
   "home.section.seasonalPicks": [
     {
       "type": 0,
@@ -819,6 +1659,12 @@
     {
       "type": 1,
       "value": "genre"
+    }
+  ],
+  "home.section.topPicksToday": [
+    {
+      "type": 0,
+      "value": "أفضل اختيارات اليوم"
     }
   ],
   "home.section.topRated": [
@@ -2617,6 +3463,12 @@
     {
       "type": 0,
       "value": "المضيف فقط"
+    }
+  ],
+  "shuffle.nothingToPlay": [
+    {
+      "type": 0,
+      "value": "لا يوجد هنا ما يمكن تشغيله."
     }
   ],
   "subtitleSearch.hearingImpaired": [
@@ -30737,6 +31589,12 @@
       "value": "date"
     }
   ],
+  "web.admin.common.jobHistory.jobType.backupRestore": [
+    {
+      "type": 0,
+      "value": "استعادة نسخة احتياطية"
+    }
+  ],
   "web.admin.common.jobHistory.jobType.catalogExport": [
     {
       "type": 0,
@@ -30771,6 +31629,18 @@
     {
       "type": 0,
       "value": "تحديث المكتبة"
+    }
+  ],
+  "web.admin.common.jobHistory.jobType.storageTransition": [
+    {
+      "type": 0,
+      "value": "نقل التخزين"
+    }
+  ],
+  "web.admin.common.jobHistory.jobType.templateBundleApply": [
+    {
+      "type": 0,
+      "value": "تطبيق حزمة قوالب"
     }
   ],
   "web.admin.common.jobHistory.progress": [
@@ -37043,6 +37913,18 @@
       "value": "فاشلة"
     }
   ],
+  "web.admin.common.taskStatus.queued": [
+    {
+      "type": 0,
+      "value": "في قائمة الانتظار"
+    }
+  ],
+  "web.admin.common.taskStatus.running": [
+    {
+      "type": 0,
+      "value": "قيد التشغيل"
+    }
+  ],
   "web.admin.common.title.header.accessGroups": [
     {
       "type": 0,
@@ -42810,6 +43692,22 @@
       "value": "label"
     }
   ],
+  "web.admin.dashboard.widgets.transcodeNodes.buildDiffersFlag": [
+    {
+      "type": 0,
+      "value": "إصدار مختلف"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.buildDiffersTitle": [
+    {
+      "type": 0,
+      "value": "يختلف الإصدار عن إصدار الخادم. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.admin.dashboard.widgets.transcodeNodes.buildOutdated": [
     {
       "type": 0,
@@ -42840,6 +43738,16 @@
       "value": "date"
     }
   ],
+  "web.admin.dashboard.widgets.transcodeNodes.capSeparator": [
+    {
+      "type": 0,
+      "value": "/ "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.dashboard.widgets.transcodeNodes.checked": [
     {
       "type": 0,
@@ -42848,6 +43756,30 @@
     {
       "type": 1,
       "value": "time"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.column.active": [
+    {
+      "type": 0,
+      "value": "نشط"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.column.build": [
+    {
+      "type": 0,
+      "value": "الإصدار"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.column.mbps": [
+    {
+      "type": 0,
+      "value": "Mbps"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.column.node": [
+    {
+      "type": 0,
+      "value": "العقدة"
     }
   ],
   "web.admin.dashboard.widgets.transcodeNodes.disabled": [
@@ -42862,10 +43794,95 @@
       "value": "لا توجد عقد بث — يجري تحويل الترميز على هذا الخادم"
     }
   ],
+  "web.admin.dashboard.widgets.transcodeNodes.groupCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لا مجموعات"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "مجموعة واحدة"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "مجموعتان"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مجموعات"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مجموعةً"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مجموعة"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.dashboard.widgets.transcodeNodes.healthy": [
     {
       "type": 0,
       "value": "سليمة"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.healthyCount": [
+    {
+      "type": 1,
+      "value": "healthy"
+    },
+    {
+      "type": 0,
+      "value": "/"
+    },
+    {
+      "type": 1,
+      "value": "enabled"
+    },
+    {
+      "type": 0,
+      "value": " سليمة"
     }
   ],
   "web.admin.dashboard.widgets.transcodeNodes.jobs": [
@@ -43098,10 +44115,34 @@
       "value": "تعذّر تحميل عقد البث."
     }
   ],
+  "web.admin.dashboard.widgets.transcodeNodes.loadPercent": [
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
   "web.admin.dashboard.widgets.transcodeNodes.manage": [
     {
       "type": 0,
       "value": "إدارة ›"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.meterLabel": [
+    {
+      "type": 1,
+      "value": "metric"
+    },
+    {
+      "type": 0,
+      "value": " لـ "
+    },
+    {
+      "type": 1,
+      "value": "node"
     }
   ],
   "web.admin.dashboard.widgets.transcodeNodes.neverChecked": [
@@ -43124,6 +44165,132 @@
     {
       "type": 0,
       "value": "المراجعة غير متاحة"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.staleDisabledTitle": [
+    {
+      "type": 0,
+      "value": "هذه العقدة معطّلة، لذا لم تعد فحوصات السلامة تحدّثها."
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.staleUnreachableTitle": [
+    {
+      "type": 0,
+      "value": "لم يصل آخر فحص سلامة إلى هذه العقدة."
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.storageFlag": [
+    {
+      "type": 0,
+      "value": "التخزين "
+    },
+    {
+      "type": 1,
+      "value": "fill"
+    },
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.storageTitle": [
+    {
+      "type": 0,
+      "value": "دليل تحويل الترميز ممتلئ بنسبة "
+    },
+    {
+      "type": 1,
+      "value": "fill"
+    },
+    {
+      "type": 0,
+      "value": "%. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.streamCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لا عمليات بث"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عملية بث واحدة"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عمليتا بث"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عمليات بث"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عملية بث"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عملية بث"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.streamsAbbr": [
+    {
+      "type": 0,
+      "value": "بث"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.streamsTitle": [
+    {
+      "type": 0,
+      "value": "عمليات بث"
     }
   ],
   "web.admin.dashboard.widgets.transcodeNodes.summary": [
@@ -43426,6 +44593,88 @@
     {
       "type": 0,
       "value": "العقد"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.transcodeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لا عمليات تحويل ترميز"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عملية تحويل ترميز واحدة"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عمليتا تحويل ترميز"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عمليات تحويل ترميز"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عملية تحويل ترميز"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عملية تحويل ترميز"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.transcodesAbbr": [
+    {
+      "type": 0,
+      "value": "ترميز"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.transcodesTitle": [
+    {
+      "type": 0,
+      "value": "عمليات تحويل الترميز"
     }
   ],
   "web.admin.dashboard.widgets.transcodeNodes.unhealthy": [
@@ -58420,6 +59669,360 @@
       "value": "التخزين"
     }
   ],
+  "web.admin.errors.activityCursorRepeated": [
+    {
+      "type": 0,
+      "value": "تكرر مؤشر النشاط. أعد تحميل السجل."
+    }
+  ],
+  "web.admin.errors.activityItemsInvalid": [
+    {
+      "type": 0,
+      "value": "عناصر نشاط غير صالحة. أعد تحميل السجل."
+    }
+  ],
+  "web.admin.errors.activityPageInvalid": [
+    {
+      "type": 0,
+      "value": "صفحة نشاط غير صالحة. أعد تحميل السجل."
+    }
+  ],
+  "web.admin.errors.apiKeyCursorRepeated": [
+    {
+      "type": 0,
+      "value": "تكرر مؤشر مفاتيح API. أعد تحميل القائمة."
+    }
+  ],
+  "web.admin.errors.apiKeyPaginationInvalid": [
+    {
+      "type": 0,
+      "value": "ترقيم صفحات مفاتيح API غير صالح. أعد تحميل القائمة."
+    }
+  ],
+  "web.admin.errors.apiKeyReloadBeforeSaving": [
+    {
+      "type": 0,
+      "value": "أعد تحميل مفتاح API هذا قبل الحفظ: يلزم ETag قوي."
+    }
+  ],
+  "web.admin.errors.apiKeysProfileChanged": [
+    {
+      "type": 0,
+      "value": "أعد تحميل مفاتيح API بعد تغيير الملفات الشخصية."
+    }
+  ],
+  "web.admin.errors.artworkCacheIncomplete": [
+    {
+      "type": 0,
+      "value": "لم يكتمل التخزين المؤقت للصور الفنية. راجع تشخيصات المسؤول للاطلاع على التفاصيل."
+    }
+  ],
+  "web.admin.errors.artworkUpdateFailed": [
+    {
+      "type": 0,
+      "value": "فشل تحديث الصور الفنية"
+    }
+  ],
+  "web.admin.errors.catalogRevisionMissing": [
+    {
+      "type": 0,
+      "value": "مراجعة الكتالوج غير متاحة. أعد التحميل قبل التعديل."
+    }
+  ],
+  "web.admin.errors.collectionOrderChanged": [
+    {
+      "type": 0,
+      "value": "تغيّر ترتيب المجموعات أثناء التحميل. أعد التحميل قبل إعادة الترتيب."
+    }
+  ],
+  "web.admin.errors.devicesTooMany": [
+    {
+      "type": 0,
+      "value": "عدد الأجهزة أكبر من أن يُعرض. أعد تحميل القائمة."
+    }
+  ],
+  "web.admin.errors.diagnosticDownloadFailed": [
+    {
+      "type": 0,
+      "value": "فشل تنزيل تقرير التشخيص ("
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": ")."
+    }
+  ],
+  "web.admin.errors.diagnosticFormatUnexpected": [
+    {
+      "type": 0,
+      "value": "أعاد الخادم تقرير تشخيص بتنسيق غير متوقع."
+    }
+  ],
+  "web.admin.errors.diagnosticsAvailabilityUnknown": [
+    {
+      "type": 0,
+      "value": "حالة إتاحة التشخيصات غير معروفة. أعد التحميل قبل تغيير إعدادات الرفع."
+    }
+  ],
+  "web.admin.errors.historyImportConfigReload": [
+    {
+      "type": 0,
+      "value": "أعد تحميل هذه التهيئة قبل الحفظ."
+    }
+  ],
+  "web.admin.errors.historyImportPageIncomplete": [
+    {
+      "type": 0,
+      "value": "صفحة استيراد السجل غير مكتملة. أعد التحميل للمحاولة مرة أخرى."
+    }
+  ],
+  "web.admin.errors.historyImportStatusMissing": [
+    {
+      "type": 0,
+      "value": "لم يتضمن الاستيراد المقبول موقع الحالة المتوقع. حدّث عمليات التشغيل قبل المحاولة مرة أخرى."
+    }
+  ],
+  "web.admin.errors.imageChoicesChanged": [
+    {
+      "type": 0,
+      "value": "تغيّرت خيارات الصور. أعد التحميل للمحاولة مرة أخرى."
+    }
+  ],
+  "web.admin.errors.integrationPageIncomplete": [
+    {
+      "type": 0,
+      "value": "صفحة التكاملات غير مكتملة. أعد التحميل للمحاولة مرة أخرى."
+    }
+  ],
+  "web.admin.errors.itemFilesIncomplete": [
+    {
+      "type": 0,
+      "value": "قائمة ملفات العنصر غير مكتملة. أعد التحميل للمحاولة مرة أخرى."
+    }
+  ],
+  "web.admin.errors.layoutRevisionMissing": [
+    {
+      "type": 0,
+      "value": "مراجعة كتابة تخطيط الخادم مفقودة؛ أعد التحميل قبل الحفظ مرة أخرى."
+    }
+  ],
+  "web.admin.errors.nodeWriteAckMissing": [
+    {
+      "type": 0,
+      "value": "تأكيد كتابة العقدة غير متاح. افحص الحالة الحالية قبل الحفظ مرة أخرى."
+    }
+  ],
+  "web.admin.errors.nodesReloadReopen": [
+    {
+      "type": 0,
+      "value": "أعد تحميل العقد وافتح هذا الإجراء مجددًا للحصول على إصداره الأصلي."
+    }
+  ],
+  "web.admin.errors.playbackHistoryInvalid": [
+    {
+      "type": 0,
+      "value": "صفحة سجل التشغيل غير صالحة. أعد تحميل الصفحة."
+    }
+  ],
+  "web.admin.errors.requestPageIncomplete": [
+    {
+      "type": 0,
+      "value": "صفحة الطلبات غير مكتملة. أعد التحميل للمحاولة مرة أخرى."
+    }
+  ],
+  "web.admin.errors.requestsEditorReload": [
+    {
+      "type": 0,
+      "value": "أعد تحميل هذا المحرر قبل الحفظ."
+    }
+  ],
+  "web.admin.errors.scheduleRevisionMissing": [
+    {
+      "type": 0,
+      "value": "مراجعة الجدولة غير متاحة. أعد التحميل قبل التعديل."
+    }
+  ],
+  "web.admin.errors.seekPreviewsNoneQueued": [
+    {
+      "type": 0,
+      "value": "لم تُضف أي معاينات تنقل إلى قائمة الانتظار"
+    }
+  ],
+  "web.admin.errors.seekPreviewsQueueFailed": [
+    {
+      "type": 0,
+      "value": "تعذّرت إضافة معاينات التنقل إلى قائمة الانتظار"
+    }
+  ],
+  "web.admin.errors.seekPreviewsQueued": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "أُضيفت معاينات التنقل إلى قائمة الانتظار لـ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ملف"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "أُضيفت معاينات التنقل إلى قائمة الانتظار لملف واحد"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "أُضيفت معاينات التنقل إلى قائمة الانتظار لملفين"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "أُضيفت معاينات التنقل إلى قائمة الانتظار لـ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ملفات"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "أُضيفت معاينات التنقل إلى قائمة الانتظار لـ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ملفًا"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "أُضيفت معاينات التنقل إلى قائمة الانتظار لـ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ملف"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.errors.sessionsTooMany": [
+    {
+      "type": 0,
+      "value": "عدد الجلسات أكبر من أن يُعرض. أعد تحميل القائمة."
+    }
+  ],
+  "web.admin.errors.settingsPageInvalid": [
+    {
+      "type": 0,
+      "value": "صفحة إعدادات غير صالحة. أعد تحميل الإعدادات."
+    }
+  ],
+  "web.admin.errors.subtitleDeleteAttempted": [
+    {
+      "type": 0,
+      "value": "سبقت محاولة هذا الحذف. أغلق الترجمة وراجعها مرة أخرى."
+    }
+  ],
+  "web.admin.errors.subtitleDownloadFailed": [
+    {
+      "type": 0,
+      "value": "فشل تنزيل الترجمة ("
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": ")."
+    }
+  ],
+  "web.admin.errors.subtitleDownloadUnexpected": [
+    {
+      "type": 0,
+      "value": "استجابة غير متوقعة لتنزيل الترجمة."
+    }
+  ],
+  "web.admin.errors.subtitleIdentityChanged": [
+    {
+      "type": 0,
+      "value": "تغيّرت هوية الترجمة. أعد تحميل القائمة."
+    }
+  ],
+  "web.admin.errors.subtitleListInvalid": [
+    {
+      "type": 0,
+      "value": "قائمة ترجمات غير صالحة. أعد تحميل الصفحة."
+    }
+  ],
+  "web.admin.errors.subtitleValidatorRequired": [
+    {
+      "type": 0,
+      "value": "يلزم مدقق قوي لتعديل الترجمة. أعد فتح المحرر."
+    }
+  ],
+  "web.admin.errors.translationCancelFailed": [
+    {
+      "type": 0,
+      "value": "فشل إلغاء الترجمة"
+    }
+  ],
+  "web.admin.errors.userPaginationInvalid": [
+    {
+      "type": 0,
+      "value": "ترقيم صفحات المستخدمين غير صالح. أعد تحميل القائمة."
+    }
+  ],
+  "web.admin.errors.userReloadBeforeSaving": [
+    {
+      "type": 0,
+      "value": "أعد تحميل هذا المستخدم قبل الحفظ: يلزم ETag قوي."
+    }
+  ],
+  "web.admin.errors.watchHistoryInvalid": [
+    {
+      "type": 0,
+      "value": "صفحة سجل المشاهدة غير صالحة. أعد تحميل الصفحة."
+    }
+  ],
   "web.admin.history.column.ended": [
     {
       "type": 0,
@@ -61447,6 +63050,24 @@
     {
       "type": 0,
       "value": ": ربما تمت استعادتها، لكن Silo لم يتمكن من التأكد من ذلك. أعد تحميلها للتحقق."
+    }
+  ],
+  "web.admin.homeRows.row.cantCopyToLibraries": [
+    {
+      "type": 0,
+      "value": "لا يمكن إضافة هذا الصف إلى مكتبات أخرى."
+    }
+  ],
+  "web.admin.homeRows.row.moveFailed": [
+    {
+      "type": 0,
+      "value": "تعذّر نقل هذا الصف"
+    }
+  ],
+  "web.admin.homeRows.row.saveFailed": [
+    {
+      "type": 0,
+      "value": "تعذّر حفظ هذا الصف"
     }
   ],
   "web.admin.homeRows.rowMenu.addToOtherLibraries": [
@@ -70230,6 +71851,64 @@
       "value": "جارٍ إلغاء التثبيت..."
     }
   ],
+  "web.admin.plugins.detail.updateFailed": [
+    {
+      "type": 8,
+      "value": "b",
+      "children": [
+        {
+          "type": 0,
+          "value": "تعذّر على Silo تحديث "
+        },
+        {
+          "type": 1,
+          "value": "name"
+        },
+        {
+          "type": 0,
+          "value": " إلى "
+        },
+        {
+          "type": 1,
+          "value": "version"
+        },
+        {
+          "type": 0,
+          "value": "."
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "web.admin.plugins.detail.updateFailedStays": [
+    {
+      "type": 0,
+      "value": "يبقى على الإصدار "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": ". آخر محاولة: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.plugins.detail.updateTo": [
     {
       "type": 0,
@@ -71370,6 +73049,16 @@
     {
       "type": 0,
       "value": " متاح"
+    }
+  ],
+  "web.admin.plugins.tile.updateFailed": [
+    {
+      "type": 0,
+      "value": "فشل التحديث إلى "
+    },
+    {
+      "type": 1,
+      "value": "version"
     }
   ],
   "web.admin.plugins.tile.updatesPaused": [
@@ -98255,6 +99944,12 @@
       "value": "الحد الأقصى لمدة التشغيل (غير مُطبَّق):"
     }
   ],
+  "web.admin.tasks.detail.maxRuntimeLabel": [
+    {
+      "type": 0,
+      "value": "الحد الأقصى لمدة التشغيل:"
+    }
+  ],
   "web.admin.tasks.detail.maxRuntimeNone": [
     {
       "type": 0,
@@ -98759,6 +100454,12 @@
       "value": "صور المزود"
     }
   ],
+  "web.admin.tasks.refreshReason.providerIdIncomplete": [
+    {
+      "type": 0,
+      "value": "معرّف المزود غير مكتمل"
+    }
+  ],
   "web.admin.tasks.refreshReason.refreshFailure": [
     {
       "type": 0,
@@ -98861,6 +100562,798 @@
     {
       "type": 0,
       "value": "جارٍ الإيقاف..."
+    }
+  ],
+  "web.admin.tasks.task.autoscan_poll.description": [
+    {
+      "type": 0,
+      "value": "استطلاع مزودي مصادر الفحص المثبّتين بحثًا عن تغييرات ووضع عمليات إعادة الفحص في قائمة الانتظار"
+    }
+  ],
+  "web.admin.tasks.task.autoscan_poll.name": [
+    {
+      "type": 0,
+      "value": "استطلاع Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.autoscan_webhook_retry.description": [
+    {
+      "type": 0,
+      "value": "إعادة محاولة تسليم webhooks من Autoscan التي قُبلت وحُفظت بشكل دائم"
+    }
+  ],
+  "web.admin.tasks.task.autoscan_webhook_retry.name": [
+    {
+      "type": 0,
+      "value": "إعادة محاولة webhook في Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.backfill_ebook_metadata.description": [
+    {
+      "type": 0,
+      "value": "يُثري الكتب الإلكترونية القديمة المتراكمة دون التنافس مع مزامنة البيانات الوصفية المجدولة"
+    }
+  ],
+  "web.admin.tasks.task.backfill_ebook_metadata.name": [
+    {
+      "type": 0,
+      "value": "استكمال البيانات الوصفية للكتب الإلكترونية"
+    }
+  ],
+  "web.admin.tasks.task.backfill_hdr10_plus.description": [
+    {
+      "type": 0,
+      "value": "يقرأ الإطار الأول من فيديو HDR الذي فُحص قبل أن يكتشف Silo تنسيق HDR10+، مرة واحدة لكل ملف، لكي تُصنَّف ملفات HDR10+ على أنها HDR10+ بدلًا من HDR10."
+    }
+  ],
+  "web.admin.tasks.task.backfill_hdr10_plus.name": [
+    {
+      "type": 0,
+      "value": "اكتشاف فيديو HDR10+"
+    }
+  ],
+  "web.admin.tasks.task.backfill_matroska_track_numbers.description": [
+    {
+      "type": 0,
+      "value": "يقرأ قائمة المسارات في ملفات MKV ذات الترجمة النصية التي فُحصت قبل أن يسجّل Silo أرقام مسارات الترجمة، مرة واحدة لكل ملف، لكي تتمكن التطبيقات من عرض الترجمة المضمّنة دون استخراجها على الخادم."
+    }
+  ],
+  "web.admin.tasks.task.backfill_matroska_track_numbers.name": [
+    {
+      "type": 0,
+      "value": "تسجيل أرقام مسارات الترجمة في Matroska"
+    }
+  ],
+  "web.admin.tasks.task.backfill_media_item_aliases.description": [
+    {
+      "type": 0,
+      "value": "ينشئ أسماء بديلة قابلة للبحث من عناوين الوسائط الأصلية والمترجمة الموجودة، على دفعات قابلة للاستئناف."
+    }
+  ],
+  "web.admin.tasks.task.backfill_media_item_aliases.name": [
+    {
+      "type": 0,
+      "value": "استكمال الأسماء البديلة لعناصر الوسائط"
+    }
+  ],
+  "web.admin.tasks.task.backfill_metadata_images.description": [
+    {
+      "type": 0,
+      "value": "يكتشف يدويًا صور المزودين المفقودة في الكتالوج بأكمله ويخزّنها مؤقتًا"
+    }
+  ],
+  "web.admin.tasks.task.backfill_metadata_images.name": [
+    {
+      "type": 0,
+      "value": "استكمال صور البيانات الوصفية"
+    }
+  ],
+  "web.admin.tasks.task.backup.description": [
+    {
+      "type": 0,
+      "value": "ينشئ نسخة احتياطية من قاعدة البيانات والملفات المرفوعة في وجهة النسخ الاحتياطي، ثم يحذف النسخ الاحتياطية التي تتجاوز العدد المضبوط"
+    }
+  ],
+  "web.admin.tasks.task.backup.name": [
+    {
+      "type": 0,
+      "value": "نسخ الخادم احتياطيًا"
+    }
+  ],
+  "web.admin.tasks.task.bulk_metadata_enrichment.description": [
+    {
+      "type": 0,
+      "value": "يبحث عن الأفلام والمسلسلات لدى مزودي الإثراء الذين يجمعون الطلبات في دفعات، مثل MDBList، عددًا كبيرًا من العناوين في كل مرة"
+    }
+  ],
+  "web.admin.tasks.task.bulk_metadata_enrichment.name": [
+    {
+      "type": 0,
+      "value": "إثراء البيانات الوصفية بالجملة"
+    }
+  ],
+  "web.admin.tasks.task.cache_metadata_images.description": [
+    {
+      "type": 0,
+      "value": "يعالج فقط الصور الموجودة مسبقًا في قائمة الانتظار بسبب عمليات الفحص والتحديث وتغييرات البيانات الوصفية"
+    }
+  ],
+  "web.admin.tasks.task.cache_metadata_images.name": [
+    {
+      "type": 0,
+      "value": "التخزين المؤقت لصور البيانات الوصفية"
+    }
+  ],
+  "web.admin.tasks.task.chapter_thumbnail_backfill.description": [
+    {
+      "type": 0,
+      "value": "ينشئ الصور المصغّرة المفقودة للفصول في المكتبات التي فُعّل فيها هذا الخيار"
+    }
+  ],
+  "web.admin.tasks.task.chapter_thumbnail_backfill.name": [
+    {
+      "type": 0,
+      "value": "استكمال الصور المصغّرة للفصول"
+    }
+  ],
+  "web.admin.tasks.task.check_plugin_updates.description": [
+    {
+      "type": 0,
+      "value": "يجلب مستودعات المكونات الإضافية ويطبّق تحديثات المكونات الإضافية المتاحة أو يسجّلها"
+    }
+  ],
+  "web.admin.tasks.task.check_plugin_updates.name": [
+    {
+      "type": 0,
+      "value": "التحقق من تحديثات المكونات الإضافية"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_activity_log.description": [
+    {
+      "type": 0,
+      "value": "يحذف صفوف سجل النشاط وتقسيماته المنتهية الصلاحية"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_activity_log.name": [
+    {
+      "type": 0,
+      "value": "تنظيف سجل النشاط"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_artwork_revisions.description": [
+    {
+      "type": 0,
+      "value": "يحذف مراجعات الصور الثابتة غير المنشورة أو المستبدلة بعد فترة سماح عندما لا يشير إليها أي سجل في الكتالوج."
+    }
+  ],
+  "web.admin.tasks.task.cleanup_artwork_revisions.name": [
+    {
+      "type": 0,
+      "value": "تنظيف مراجعات الصور"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_auth_sessions.description": [
+    {
+      "type": 0,
+      "value": "يحذف جلسات تسجيل الدخول التي انتهت صلاحيتها، سواء أُلغيت أم لا"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_auth_sessions.name": [
+    {
+      "type": 0,
+      "value": "تنظيف جلسات تسجيل الدخول المنتهية"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_autoscan_events.description": [
+    {
+      "type": 0,
+      "value": "يحذف أحداث استطلاع Autoscan وwebhook القديمة من سجل النشاط"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_autoscan_events.name": [
+    {
+      "type": 0,
+      "value": "تنظيف أحداث Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_catalog_search_index_events.description": [
+    {
+      "type": 0,
+      "value": "يحذف أحداث صندوق الصادر لبحث الكتالوج التي تم تأكيدها بعد انتهاء فترة الاسترداد."
+    }
+  ],
+  "web.admin.tasks.task.cleanup_catalog_search_index_events.name": [
+    {
+      "type": 0,
+      "value": "تنظيف أحداث فهرس بحث الكتالوج"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_chapter_thumbnail_originals.description": [
+    {
+      "type": 0,
+      "value": "يحذف صور الفصول المصغّرة بالحجم الكامل التي خزّنتها الإصدارات السابقة. لا تحمّل التطبيقات إلا الصورة المصغّرة بعرض 300px؛ وتتوقف المهمة عندما لا يبقى منها شيء في التخزين."
+    }
+  ],
+  "web.admin.tasks.task.cleanup_chapter_thumbnail_originals.name": [
+    {
+      "type": 0,
+      "value": "تنظيف الصور المصغّرة للفصول بالحجم الكامل"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_client_diagnostics.description": [
+    {
+      "type": 0,
+      "value": "يحذف تقارير التشخيص المنتهية الصلاحية من العملاء والحزم اليتيمة"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_client_diagnostics.name": [
+    {
+      "type": 0,
+      "value": "تنظيف تشخيصات العملاء"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_device_logins.description": [
+    {
+      "type": 0,
+      "value": "يحذف طلبات تسجيل الدخول من الأجهزة التي انتهت صلاحيتها منذ مدة طويلة"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_device_logins.name": [
+    {
+      "type": 0,
+      "value": "تنظيف طلبات تسجيل الدخول من الأجهزة المنتهية"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_oauth_flows.description": [
+    {
+      "type": 0,
+      "value": "يحذف تدفقات تسجيل الدخول عبر OAuth التي انتهت صلاحيتها منذ مدة طويلة"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_oauth_flows.name": [
+    {
+      "type": 0,
+      "value": "تنظيف تدفقات تسجيل الدخول عبر OAuth المنتهية"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_operational_log.description": [
+    {
+      "type": 0,
+      "value": "يحذف صفوف السجل التشغيلي وتقسيماته المنتهية الصلاحية"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_operational_log.name": [
+    {
+      "type": 0,
+      "value": "تنظيف السجل التشغيلي"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_orphaned_media_items.description": [
+    {
+      "type": 0,
+      "value": "يحذف عناصر الوسائط المؤقتة المنفصلة التي لا تحتوي على ملفات أو عضويات في مكتبات أو مراجع دائمة من المستخدمين أو المزامنة."
+    }
+  ],
+  "web.admin.tasks.task.cleanup_orphaned_media_items.name": [
+    {
+      "type": 0,
+      "value": "تنظيف عناصر الوسائط اليتيمة"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_policy_decision_log.description": [
+    {
+      "type": 0,
+      "value": "يحذف صفوف سجل قرارات السياسات وتقسيماته المنتهية الصلاحية"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_policy_decision_log.name": [
+    {
+      "type": 0,
+      "value": "تنظيف سجل قرارات السياسات"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_removed_media_images.description": [
+    {
+      "type": 0,
+      "value": "يحذف، بعد فترة سماح، الصور المصغّرة للفصول ومعاينات التنقل لملفات الوسائط المُزالة من الكتالوج، ومعاينات التنقل التي استُبدلت."
+    }
+  ],
+  "web.admin.tasks.task.cleanup_removed_media_images.name": [
+    {
+      "type": 0,
+      "value": "تنظيف صور الوسائط المُزالة"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_task_history.description": [
+    {
+      "type": 0,
+      "value": "يحذف سجل تنفيذ مهام الخلفية القديم"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_task_history.name": [
+    {
+      "type": 0,
+      "value": "تنظيف سجل المهام"
+    }
+  ],
+  "web.admin.tasks.task.contribute_markers.description": [
+    {
+      "type": 0,
+      "value": "يرسل المقدمات وشارات النهاية المؤهلة التي اكتُشفت على هذا الخادم إلى المزودين الذين فُعّلت لديهم المشاركة التلقائية، والتصحيحات اليدوية التي تعذّر توصيلها عند الحفظ إلى المزودين الذين يقبلون التصحيحات."
+    }
+  ],
+  "web.admin.tasks.task.contribute_markers.name": [
+    {
+      "type": 0,
+      "value": "مشاركة العلامات المكتشفة"
+    }
+  ],
+  "web.admin.tasks.task.database_maintenance.description": [
+    {
+      "type": 0,
+      "value": "يحذف سجلات النشاط والسياسات المنتهية الصلاحية، وسجل المهام، وأحداث Autoscan، وجلسات تسجيل الدخول، وطلبات تسجيل الدخول من الأجهزة، وتدفقات تسجيل الدخول عبر OAuth، وأحداث فهرس البحث، والإشعارات، ويجهّز تقسيمات السجل القادمة"
+    }
+  ],
+  "web.admin.tasks.task.database_maintenance.name": [
+    {
+      "type": 0,
+      "value": "صيانة قاعدة البيانات"
+    }
+  ],
+  "web.admin.tasks.task.detect_intro_markers.description": [
+    {
+      "type": 0,
+      "value": "يحلل الملفات بحثًا عن المقدمات وشارات النهاية في المكتبات التي فُعّل فيها اكتشاف العلامات."
+    }
+  ],
+  "web.admin.tasks.task.detect_intro_markers.name": [
+    {
+      "type": 0,
+      "value": "اكتشاف العلامات على هذا الخادم"
+    }
+  ],
+  "web.admin.tasks.task.encode_download_artifacts.description": [
+    {
+      "type": 0,
+      "value": "يرمّز ملفات التنزيل المُعدّة بـ Remux أو تحويل الترميز الموجودة في قائمة الانتظار، ويستعيد العمليات العالقة، ويحذف الملفات القديمة"
+    }
+  ],
+  "web.admin.tasks.task.encode_download_artifacts.name": [
+    {
+      "type": 0,
+      "value": "تجهيز ملفات التنزيل"
+    }
+  ],
+  "web.admin.tasks.task.generate_extra_stills.description": [
+    {
+      "type": 0,
+      "value": "يلتقط إطارًا من كل مادة إضافية محلية لا يوجد بجانبها ملف صورة"
+    }
+  ],
+  "web.admin.tasks.task.generate_extra_stills.name": [
+    {
+      "type": 0,
+      "value": "إنشاء صور مصغّرة للمواد الإضافية"
+    }
+  ],
+  "web.admin.tasks.task.match_media.description": [
+    {
+      "type": 0,
+      "value": "يطابق ملفات الوسائط غير المطابقة مع البيانات الوصفية من المزودين"
+    }
+  ],
+  "web.admin.tasks.task.match_media.name": [
+    {
+      "type": 0,
+      "value": "مطابقة ملفات الوسائط"
+    }
+  ],
+  "web.admin.tasks.task.notifications_retention.description": [
+    {
+      "type": 0,
+      "value": "يحذف الإشعارات القديمة وأحداث الإصدارات المعالَجة وفقًا لإعدادات الاحتفاظ."
+    }
+  ],
+  "web.admin.tasks.task.notifications_retention.name": [
+    {
+      "type": 0,
+      "value": "تنظيف الإشعارات"
+    }
+  ],
+  "web.admin.tasks.task.queue_seek_previews.description": [
+    {
+      "type": 0,
+      "value": "يضع معاينات شريط التنقل في قائمة الانتظار لملفات الفيديو في المكتبات التي فُعّلت فيها، ويعيد وضع المعاينات التي لم تعد تطابق ملفها أو إعداداتها في قائمة الانتظار."
+    }
+  ],
+  "web.admin.tasks.task.queue_seek_previews.name": [
+    {
+      "type": 0,
+      "value": "وضع معاينات التنقل في قائمة الانتظار"
+    }
+  ],
+  "web.admin.tasks.task.rebuild_catalog_search_index.description": [
+    {
+      "type": 0,
+      "value": "يعيد بناء فهرس كتالوج Meilisearch المضبوط من PostgreSQL."
+    }
+  ],
+  "web.admin.tasks.task.rebuild_catalog_search_index.name": [
+    {
+      "type": 0,
+      "value": "إعادة بناء فهرس بحث الكتالوج"
+    }
+  ],
+  "web.admin.tasks.task.rebuild_release_interest.description": [
+    {
+      "type": 0,
+      "value": "يعيد حساب المسلسلات التي تهم كل ملف شخصي (المفضلة، قائمة المشاهدة، تقدم المشاهدة) لإشعارات الحلقات الجديدة."
+    }
+  ],
+  "web.admin.tasks.task.rebuild_release_interest.name": [
+    {
+      "type": 0,
+      "value": "إعادة بناء اهتمامات الإشعارات"
+    }
+  ],
+  "web.admin.tasks.task.recheck_external_identities.description": [
+    {
+      "type": 0,
+      "value": "يستعلم من مزود تسجيل الدخول الخارجي عن الحسابات التي تملك مفاتيح API أو جلسات خاملة، ويلغي وصول الحسابات التي لم يعد المزود يقبلها"
+    }
+  ],
+  "web.admin.tasks.task.recheck_external_identities.name": [
+    {
+      "type": 0,
+      "value": "إعادة التحقق من حسابات تسجيل الدخول الخارجي"
+    }
+  ],
+  "web.admin.tasks.task.reconcile_artwork_cache.description": [
+    {
+      "type": 0,
+      "value": "يتحقق يدويًا من الصور المخزّنة مؤقتًا مقابل تخزين الكائنات؛ قد يُعاد تعيين السجلات المفقودة في المكتبة بأكملها، ويتطلب ذلك استكمالًا صريحًا لصور البيانات الوصفية"
+    }
+  ],
+  "web.admin.tasks.task.reconcile_artwork_cache.name": [
+    {
+      "type": 0,
+      "value": "مطابقة ذاكرة التخزين المؤقت للصور"
+    }
+  ],
+  "web.admin.tasks.task.reconcile_requests.description": [
+    {
+      "type": 0,
+      "value": "يطابق طلبات الوسائط المعتمدة والنشطة مع Radarr وSonarr وكتالوج Silo"
+    }
+  ],
+  "web.admin.tasks.task.reconcile_requests.name": [
+    {
+      "type": 0,
+      "value": "مطابقة الطلبات"
+    }
+  ],
+  "web.admin.tasks.task.reconcile_watch_history.description": [
+    {
+      "type": 0,
+      "value": "يعيد ربط صفوف سجل المشاهدة اليتيمة بكتالوج الوسائط الحالي باستخدام المعرّفات الثابتة المخزّنة."
+    }
+  ],
+  "web.admin.tasks.task.reconcile_watch_history.name": [
+    {
+      "type": 0,
+      "value": "مطابقة سجل المشاهدة"
+    }
+  ],
+  "web.admin.tasks.task.refresh_all_library_metadata.description": [
+    {
+      "type": 0,
+      "value": "يعيد جلب البيانات الوصفية من المزودين لكل عنصر في جميع المكتبات المفعّلة. لا تعمل إلا عند بدئها يدويًا؛ وقد تستغرق المكتبات الكبيرة ساعات وتُرسل طلبات كثيرة إلى المزودين"
+    }
+  ],
+  "web.admin.tasks.task.refresh_all_library_metadata.name": [
+    {
+      "type": 0,
+      "value": "تحديث البيانات الوصفية لجميع المكتبات"
+    }
+  ],
+  "web.admin.tasks.task.refresh_anime_ids.description": [
+    {
+      "type": 0,
+      "value": "ينزّل قائمة الأنمي المستندة إلى AniDB التي يستخدمها توجيه الطلبات للتعرف على الأنمي الذي لا يصنّفه TMDB"
+    }
+  ],
+  "web.admin.tasks.task.refresh_anime_ids.name": [
+    {
+      "type": 0,
+      "value": "تحديث قائمة الأنمي"
+    }
+  ],
+  "web.admin.tasks.task.refresh_metadata.description": [
+    {
+      "type": 0,
+      "value": "يحدّث البيانات الوصفية القديمة من المزودين لعناصر الوسائط الموجودة"
+    }
+  ],
+  "web.admin.tasks.task.refresh_metadata.name": [
+    {
+      "type": 0,
+      "value": "تحديث البيانات الوصفية"
+    }
+  ],
+  "web.admin.tasks.task.refresh_request_discover_lists.description": [
+    {
+      "type": 0,
+      "value": "ينزّل قوائم TMDB وMDBList التي تستند إليها صفوف القوائم في صفحة «استكشاف» الخاصة بالطلبات"
+    }
+  ],
+  "web.admin.tasks.task.refresh_request_discover_lists.name": [
+    {
+      "type": 0,
+      "value": "تحديث قوائم استكشاف الطلبات"
+    }
+  ],
+  "web.admin.tasks.task.refresh_request_downloads.description": [
+    {
+      "type": 0,
+      "value": "يحدّث تقدم تنزيل طلبات الوسائط التي ينزّلها Radarr أو Sonarr أو مكون إضافي آخر للطلبات"
+    }
+  ],
+  "web.admin.tasks.task.refresh_request_downloads.name": [
+    {
+      "type": 0,
+      "value": "تحديث تنزيلات الطلبات"
+    }
+  ],
+  "web.admin.tasks.task.refresh_seasonal_lists.description": [
+    {
+      "type": 0,
+      "value": "ينزّل قوائم MDBList المنتقاة التي تستند إليها صفوف «اختيارات موسمية» في الرئيسية قبل كل عطلة"
+    }
+  ],
+  "web.admin.tasks.task.refresh_seasonal_lists.name": [
+    {
+      "type": 0,
+      "value": "تحديث القوائم الموسمية"
+    }
+  ],
+  "web.admin.tasks.task.refresh_series_air_dates.description": [
+    {
+      "type": 0,
+      "value": "يحدّث تاريخ آخر حلقة عُرضت للمسلسلات التي عُرضت حلقتها التالية المعروفة."
+    }
+  ],
+  "web.admin.tasks.task.refresh_series_air_dates.name": [
+    {
+      "type": 0,
+      "value": "تحديث تواريخ عرض المسلسلات"
+    }
+  ],
+  "web.admin.tasks.task.refresh_trending_discover.description": [
+    {
+      "type": 0,
+      "value": "يحدّث قوائم الرائج الخارجية المحفوظة (TMDB) لأقسام «استكشاف الرائج» في الرئيسية وعرض «الرائج» في التقويم"
+    }
+  ],
+  "web.admin.tasks.task.refresh_trending_discover.name": [
+    {
+      "type": 0,
+      "value": "تحديث استكشاف الرائج"
+    }
+  ],
+  "web.admin.tasks.task.release_stored_artwork.description": [
+    {
+      "type": 0,
+      "value": "ما دامت صور المزودين لا تُحفظ في التخزين، يعيد توجيه الصور المخزّنة إلى مزوديها ويضع في قائمة الانتظار تحديثات للصور التي لا يمكن استبدالها إلا من المزود"
+    }
+  ],
+  "web.admin.tasks.task.release_stored_artwork.name": [
+    {
+      "type": 0,
+      "value": "تحرير الصور المخزّنة"
+    }
+  ],
+  "web.admin.tasks.task.repair_provider_id_integrity.description": [
+    {
+      "type": 0,
+      "value": "يصلح عدم التطابق بين أعمدة معرّفات المزود في media_items وصفوف معرّفات المزود الموحّدة."
+    }
+  ],
+  "web.admin.tasks.task.repair_provider_id_integrity.name": [
+    {
+      "type": 0,
+      "value": "إصلاح سلامة معرّفات المزود"
+    }
+  ],
+  "web.admin.tasks.task.scan_libraries.description": [
+    {
+      "type": 0,
+      "value": "يضع عمليات فحص كاملة ومستمرة لكل المكتبات المفعّلة في قائمة الانتظار؛ ويمكن متابعة تقدّم الفحص الفعلي من مكتبات الإدارة ونشاط الخادم"
+    }
+  ],
+  "web.admin.tasks.task.scan_libraries.name": [
+    {
+      "type": 0,
+      "value": "وضع عمليات فحص مكتبات الوسائط في قائمة الانتظار"
+    }
+  ],
+  "web.admin.tasks.task.seed_content_availability.description": [
+    {
+      "type": 0,
+      "value": "يسجّل الحلقات والأفلام الموجودة مسبقًا على أنها صادرة بالفعل، حتى لا تُرسل إشعارات المحتوى الجديد إلا للعناصر التي تصل بعد ذلك."
+    }
+  ],
+  "web.admin.tasks.task.seed_content_availability.name": [
+    {
+      "type": 0,
+      "value": "تهيئة توفّر المحتوى"
+    }
+  ],
+  "web.admin.tasks.task.setting_mutations_retention.description": [
+    {
+      "type": 0,
+      "value": "يحذف إيصالات عدم التكرار المنتهية الصلاحية لتعديلات الإعدادات من مخزن كل مستخدم."
+    }
+  ],
+  "web.admin.tasks.task.setting_mutations_retention.name": [
+    {
+      "type": 0,
+      "value": "تنظيف إيصالات تعديل الإعدادات"
+    }
+  ],
+  "web.admin.tasks.task.summarize_api_usage.description": [
+    {
+      "type": 0,
+      "value": "يحصي طلبات API لكل جلسة تسجيل دخول لبطاقة عملاء API في لوحة التحكم"
+    }
+  ],
+  "web.admin.tasks.task.summarize_api_usage.name": [
+    {
+      "type": 0,
+      "value": "تلخيص استخدام API"
+    }
+  ],
+  "web.admin.tasks.task.sweep_artwork_storage.description": [
+    {
+      "type": 0,
+      "value": "يحذف كائنات الصور المخزّنة مؤقتًا التي لا يشير إليها أي سجل في الفهرس، مستعيدًا المراجعات التي لم يرصدها جامع البيانات المهملة للصور"
+    }
+  ],
+  "web.admin.tasks.task.sweep_artwork_storage.name": [
+    {
+      "type": 0,
+      "value": "تنظيف تخزين الصور"
+    }
+  ],
+  "web.admin.tasks.task.sweep_orphaned_media_images.description": [
+    {
+      "type": 0,
+      "value": "يعثر على الصور المصغّرة للفصول ومعاينات التنقل المخزّنة التي لم يعد يشير إليها أي شيء، ويجدول حذفها."
+    }
+  ],
+  "web.admin.tasks.task.sweep_orphaned_media_images.name": [
+    {
+      "type": 0,
+      "value": "تنظيف صور الوسائط اليتيمة"
+    }
+  ],
+  "web.admin.tasks.task.sync_audiobook_metadata.description": [
+    {
+      "type": 0,
+      "value": "يجلب البيانات الوصفية (صورة الغلاف والنبذة والراوي) للكتب الصوتية التي لم تُستكمل بياناتها بعد"
+    }
+  ],
+  "web.admin.tasks.task.sync_audiobook_metadata.name": [
+    {
+      "type": 0,
+      "value": "مزامنة البيانات الوصفية للكتب الصوتية"
+    }
+  ],
+  "web.admin.tasks.task.sync_catalog_search_index.description": [
+    {
+      "type": 0,
+      "value": "ينشئ فهرس بحث الكتالوج في Meilisearch أو يرقّيه عند الحاجة، ثم يزامن تغييرات الكتالوج المعلّقة."
+    }
+  ],
+  "web.admin.tasks.task.sync_catalog_search_index.name": [
+    {
+      "type": 0,
+      "value": "مزامنة فهرس بحث الكتالوج"
+    }
+  ],
+  "web.admin.tasks.task.sync_collections.description": [
+    {
+      "type": 0,
+      "value": "يزامن المجموعات التي لها مزامنة تلقائية مجدولة"
+    }
+  ],
+  "web.admin.tasks.task.sync_collections.name": [
+    {
+      "type": 0,
+      "value": "مزامنة المجموعات"
+    }
+  ],
+  "web.admin.tasks.task.sync_ebook_metadata.description": [
+    {
+      "type": 0,
+      "value": "يجلب البيانات الوصفية للكتب الإلكترونية الجديدة والكتب الإلكترونية المستحقة للتحديث الدوري"
+    }
+  ],
+  "web.admin.tasks.task.sync_ebook_metadata.name": [
+    {
+      "type": 0,
+      "value": "مزامنة البيانات الوصفية للكتب الإلكترونية"
+    }
+  ],
+  "web.admin.tasks.task.sync_manga_metadata.description": [
+    {
+      "type": 0,
+      "value": "يجلب البيانات الوصفية (صورة الغلاف والنبذة والمؤلفين) للمانغا التي لم تُستكمل بياناتها بعد"
+    }
+  ],
+  "web.admin.tasks.task.sync_manga_metadata.name": [
+    {
+      "type": 0,
+      "value": "مزامنة البيانات الوصفية للمانغا"
+    }
+  ],
+  "web.admin.tasks.task.sync_markers.description": [
+    {
+      "type": 0,
+      "value": "يجلب العلامات الناقصة من المزودين المفعّلين عبر الإنترنت ويحدّث العلامات المحفوظة. يتطلب خيار «الحفظ في المكتبة»."
+    }
+  ],
+  "web.admin.tasks.task.sync_markers.name": [
+    {
+      "type": 0,
+      "value": "مزامنة العلامات عبر الإنترنت"
+    }
+  ],
+  "web.admin.tasks.task.sync_movie_box_sets.description": [
+    {
+      "type": 0,
+      "value": "يبحث عن مجموعة TMDB التي ينتمي إليها كل فيلم في المكتبات التي فُعّلت فيها سلاسل الأفلام، ويحدّث أسماء المجموعات وصورها وترتيبها."
+    }
+  ],
+  "web.admin.tasks.task.sync_movie_box_sets.name": [
+    {
+      "type": 0,
+      "value": "مزامنة سلاسل الأفلام"
+    }
+  ],
+  "web.admin.tasks.task.sync_podcast_feeds.description": [
+    {
+      "type": 0,
+      "value": "يحدّث خلاصات RSS للبودكاست المستحقة للاستطلاع ويضيف الحلقات الجديدة أو يحدّثها"
+    }
+  ],
+  "web.admin.tasks.task.sync_podcast_feeds.name": [
+    {
+      "type": 0,
+      "value": "مزامنة خلاصات البودكاست"
+    }
+  ],
+  "web.admin.tasks.task.sync_user_collections.description": [
+    {
+      "type": 0,
+      "value": "يحدّث المجموعات المستوردة التابعة للملفات الشخصية (TMDB وMDBList) وفق جدولتها"
+    }
+  ],
+  "web.admin.tasks.task.sync_user_collections.name": [
+    {
+      "type": 0,
+      "value": "مزامنة مجموعات المستخدم"
+    }
+  ],
+  "web.admin.tasks.task.sync_watch_providers.description": [
+    {
+      "type": 0,
+      "value": "يتحقق من مزودي المشاهدة المرتبطين بحثًا عن أعمال مزامنة تلقائية مستحقة"
+    }
+  ],
+  "web.admin.tasks.task.sync_watch_providers.name": [
+    {
+      "type": 0,
+      "value": "مزامنة مزودي المشاهدة"
     }
   ],
   "web.admin.tasks.triggerText.daily": [
@@ -105552,6 +108045,66 @@
       "value": "إضافة إعداد لهذا المسلسل"
     }
   ],
+  "web.admin.users.detail.preferences.category.appearance": [
+    {
+      "type": 0,
+      "value": "المظهر"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.catalog": [
+    {
+      "type": 0,
+      "value": "الكتالوج"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.downloads": [
+    {
+      "type": 0,
+      "value": "التنزيلات"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.nav": [
+    {
+      "type": 0,
+      "value": "الشريط الجانبي"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.navigation": [
+    {
+      "type": 0,
+      "value": "التنقل"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.playback": [
+    {
+      "type": 0,
+      "value": "التشغيل"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.player": [
+    {
+      "type": 0,
+      "value": "المشغّل"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.requests": [
+    {
+      "type": 0,
+      "value": "الطلبات"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.search": [
+    {
+      "type": 0,
+      "value": "البحث"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.watch_party": [
+    {
+      "type": 0,
+      "value": "Watch Party"
+    }
+  ],
   "web.admin.users.detail.preferences.clear.confirm": [
     {
       "type": 0,
@@ -111906,6 +114459,12 @@
       "value": "…"
     }
   ],
+  "web.auth.loginSubtitle.default": [
+    {
+      "type": 0,
+      "value": "سجّل الدخول بحساب موجود."
+    }
+  ],
   "web.auth.networkSignIn.addressRequired": [
     {
       "type": 0,
@@ -113474,6 +116033,91 @@
       "value": "إزالة بيانات مشاهدة المسلسل؟"
     }
   ],
+  "web.catalog.history.removeFailed": [
+    {
+      "type": 0,
+      "value": "تعذّرت إزالة السجل"
+    }
+  ],
+  "web.catalog.history.removed": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تمت إزالة بيانات المشاهدة"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تمت إزالة بيانات المشاهدة"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تمت إزالة بيانات المشاهدة لعنصرين"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تمت إزالة بيانات المشاهدة لـ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " عناصر"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تمت إزالة بيانات المشاهدة لـ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " عنصرًا"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تمت إزالة بيانات المشاهدة لـ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " عنصر"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.catalog.letters.letterNoTitles": [
     {
       "type": 1,
@@ -114020,6 +116664,76 @@
     {
       "type": 0,
       "value": "عشوائي"
+    }
+  ],
+  "web.catalog.page.titleCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لا عناوين"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عنوان واحد"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عنوانان"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "shown"
+            },
+            {
+              "type": 0,
+              "value": " عناوين"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "shown"
+            },
+            {
+              "type": 0,
+              "value": " عنوانًا"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "shown"
+            },
+            {
+              "type": 0,
+              "value": " عنوان"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.catalog.page.watchlist": [
@@ -115326,6 +118040,18 @@
     {
       "type": 0,
       "value": "إضافة كصف"
+    }
+  ],
+  "web.collections.copy.addAtLeastOneRule": [
+    {
+      "type": 0,
+      "value": "أضف قاعدة واحدة على الأقل."
+    }
+  ],
+  "web.collections.copy.addRuleThenCreate": [
+    {
+      "type": 0,
+      "value": "أضف قاعدة، ثم أنشئها."
     }
   ],
   "web.collections.copy.addToCollectionFootnote": [
@@ -122296,6 +125022,12 @@
       "value": "اختر مكتباتها، ثم أنشئها."
     }
   ],
+  "web.collections.copy.pickWhereItShowsFirst": [
+    {
+      "type": 0,
+      "value": "اختر المكتبات التي تظهر فيها، ثم أنشئها."
+    }
+  ],
   "web.collections.copy.pinEveryLibrary": [
     {
       "type": 0,
@@ -122408,12 +125140,6 @@
       "value": "لا يزال بإمكانك الحفظ. العناوين التي تطابق لاحقًا تنضم تلقائيًا."
     }
   ],
-  "web.collections.copy.previewEveryLibrary": [
-    {
-      "type": 0,
-      "value": "من كل المكتبات حتى تختار بعضها"
-    }
-  ],
   "web.collections.copy.previewFailed": [
     {
       "type": 0,
@@ -122506,6 +125232,18 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.collections.copy.previewNeedsRule": [
+    {
+      "type": 0,
+      "value": "أضف قاعدة لترى ما يطابقها"
+    }
+  ],
+  "web.collections.copy.previewNeedsRuleHelp": [
+    {
+      "type": 0,
+      "value": "تحتاج المجموعة الذكية إلى قاعدة واحدة على الأقل. بدونها ستضم كل العناوين."
     }
   ],
   "web.collections.copy.previewShowsUnsaved": [
@@ -122760,6 +125498,16 @@
     {
       "type": 0,
       "value": "تعذّر الحفظ"
+    }
+  ],
+  "web.collections.copy.saveFailedWithError": [
+    {
+      "type": 0,
+      "value": "تعذّر الحفظ · "
+    },
+    {
+      "type": 1,
+      "value": "error"
     }
   ],
   "web.collections.copy.saveFirstDescription": [
@@ -123094,6 +125842,12 @@
     {
       "type": 0,
       "value": "لا توجد عناوين مطابقة بعد. تنضم العناوين التي تطابق لاحقًا تلقائيًا."
+    }
+  ],
+  "web.collections.copy.smartLibrariesHelp": [
+    {
+      "type": 0,
+      "value": "تعرضها علامات تبويب المجموعات في هذه المكتبات. وتحدد قواعدها مصدر العناوين."
     }
   ],
   "web.collections.copy.smartUpdatesItself": [
@@ -126339,6 +129093,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.collections.page.emptyAll": [
+    {
+      "type": 0,
+      "value": "لا توجد مجموعات بعد."
+    }
+  ],
+  "web.collections.page.emptyMine": [
+    {
+      "type": 0,
+      "value": "لم تُنشئ أي مجموعات بعد."
     }
   ],
   "web.collections.page.filterAll": [
@@ -129907,6 +132673,48 @@
       "value": "هذا الأسبوع"
     }
   ],
+  "web.collections.toast.addFailed": [
+    {
+      "type": 0,
+      "value": "تعذّرت الإضافة إلى المجموعة"
+    }
+  ],
+  "web.collections.toast.notShared": [
+    {
+      "type": 0,
+      "value": "أصبحت مرئية لك وحدك الآن"
+    }
+  ],
+  "web.collections.toast.removeItemFailed": [
+    {
+      "type": 0,
+      "value": "تعذّرت إزالة العنصر"
+    }
+  ],
+  "web.collections.toast.reorderFailed": [
+    {
+      "type": 0,
+      "value": "تعذّرت إعادة الترتيب"
+    }
+  ],
+  "web.collections.toast.reorderItemsFailed": [
+    {
+      "type": 0,
+      "value": "تعذّرت إعادة ترتيب العناصر"
+    }
+  ],
+  "web.collections.toast.sharedWithProfiles": [
+    {
+      "type": 0,
+      "value": "أصبحت ظاهرة للملفات الشخصية الأخرى"
+    }
+  ],
+  "web.collections.toast.sharingFailed": [
+    {
+      "type": 0,
+      "value": "تعذّر تغيير المشاركة"
+    }
+  ],
   "web.collections.types.kindManual": [
     {
       "type": 0,
@@ -129977,6 +132785,12 @@
     {
       "type": 0,
       "value": "أماكن الظهور"
+    }
+  ],
+  "web.collections.whereItShows.librariesTrigger": [
+    {
+      "type": 0,
+      "value": "العرض في المكتبات"
     }
   ],
   "web.collections.whereItShows.shelf": [
@@ -131081,6 +133895,60 @@
       "value": "غرب أمريكي"
     }
   ],
+  "web.common.job.cancelled": [
+    {
+      "type": 0,
+      "value": "أُلغيت العملية"
+    }
+  ],
+  "web.common.job.failed": [
+    {
+      "type": 0,
+      "value": "فشلت العملية"
+    }
+  ],
+  "web.common.libraryType.audiobooks": [
+    {
+      "type": 0,
+      "value": "كتب صوتية"
+    }
+  ],
+  "web.common.libraryType.ebooks": [
+    {
+      "type": 0,
+      "value": "كتب إلكترونية"
+    }
+  ],
+  "web.common.libraryType.manga": [
+    {
+      "type": 0,
+      "value": "مانغا"
+    }
+  ],
+  "web.common.libraryType.mixed": [
+    {
+      "type": 0,
+      "value": "مختلطة"
+    }
+  ],
+  "web.common.libraryType.movies": [
+    {
+      "type": 0,
+      "value": "أفلام"
+    }
+  ],
+  "web.common.libraryType.podcasts": [
+    {
+      "type": 0,
+      "value": "بودكاست"
+    }
+  ],
+  "web.common.libraryType.series": [
+    {
+      "type": 0,
+      "value": "مسلسلات"
+    }
+  ],
   "web.common.markers.sharingDisclosure": [
     {
       "type": 0,
@@ -131165,6 +134033,24 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.common.overlays.previewPlaceholder.movie": [
+    {
+      "type": 0,
+      "value": "معاينة فيلم"
+    }
+  ],
+  "web.common.overlays.previewPlaceholder.requested": [
+    {
+      "type": 0,
+      "value": "معاينة عنوان مطلوب"
+    }
+  ],
+  "web.common.overlays.previewPlaceholder.show": [
+    {
+      "type": 0,
+      "value": "معاينة مسلسل"
+    }
+  ],
   "web.common.overlays.previewSample": [
     {
       "type": 0,
@@ -131187,6 +134073,20 @@
     {
       "type": 0,
       "value": "مسلسل"
+    }
+  ],
+  "web.common.overlays.sampleDownloading": [
+    {
+      "type": 0,
+      "value": "جارٍ التنزيل "
+    },
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "%"
     }
   ],
   "web.common.overlays.watched": [
@@ -131841,6 +134741,136 @@
     {
       "type": 0,
       "value": "تقييم TMDB"
+    }
+  ],
+  "web.common.sortable.canceled": [
+    {
+      "type": 0,
+      "value": "أُلغي نقل "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.common.sortable.dropped": [
+    {
+      "type": 0,
+      "value": "تم إفلات "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.common.sortable.droppedAt": [
+    {
+      "type": 0,
+      "value": "تم إفلات "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " في الموضع "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " من "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.common.sortable.fallbackName": [
+    {
+      "type": 0,
+      "value": "عنصر"
+    }
+  ],
+  "web.common.sortable.instructions": [
+    {
+      "type": 0,
+      "value": "لنقل عنصر، انقل التركيز إلى مقبضه واضغط على Space أو Enter. استخدم مفاتيح الأسهم لنقله، وSpace أو Enter لإفلاته، أو Escape للإلغاء."
+    }
+  ],
+  "web.common.sortable.over": [
+    {
+      "type": 0,
+      "value": "أصبح "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " الآن في الموضع "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " من "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.common.sortable.pickedUp": [
+    {
+      "type": 0,
+      "value": "تم التقاط "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "، الموضع "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " من "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.common.speedTest.retryAfter": [
@@ -138658,6 +141688,12 @@
       "value": "مثل كريستوفر نولان"
     }
   ],
+  "web.home.addRow.params.trendingShow": [
+    {
+      "type": 0,
+      "value": "العرض"
+    }
+  ],
   "web.home.addRow.personalSentence": [
     {
       "type": 1,
@@ -139137,12 +142173,6 @@
       "value": "كل المكتبات"
     }
   ],
-  "web.home.addRow.rules.chooseLibraries": [
-    {
-      "type": 0,
-      "value": "اختيار المكتبات"
-    }
-  ],
   "web.home.addRow.rules.group": [
     {
       "type": 0,
@@ -139249,10 +142279,10 @@
       "value": "أيًّا"
     }
   ],
-  "web.home.addRow.rules.noRulesCollection": [
+  "web.home.addRow.rules.noRulesCollectionYet": [
     {
       "type": 0,
-      "value": "لا توجد قواعد بعد، لذا تضم المجموعة كل العناوين من هذه المكتبات."
+      "value": "لا قواعد بعد. أضف قاعدة لاختيار العناوين التي تضمها."
     }
   ],
   "web.home.addRow.rules.noRulesRow": [
@@ -143312,6 +146342,60 @@
       }
     }
   ],
+  "web.home.rows.describe.trendingDiscoverFiltered": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "movie": {
+          "value": [
+            {
+              "type": 0,
+              "value": "الأفلام الرائجة"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "المسلسلات الرائجة"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " على TMDB "
+    },
+    {
+      "type": 5,
+      "value": "window",
+      "options": {
+        "day": {
+          "value": [
+            {
+              "type": 0,
+              "value": "اليوم"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "هذا الأسبوع"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": "، مما لديك"
+    }
+  ],
   "web.home.rows.describe.trendingHere": [
     {
       "type": 0,
@@ -144204,6 +147288,12 @@
     {
       "type": 0,
       "value": "لم يعد هذا الصف موجودًا."
+    }
+  ],
+  "web.home.rows.links.rowMissing": [
+    {
+      "type": 0,
+      "value": "لم يعد هذا الصف في هذه الصفحة."
     }
   ],
   "web.home.rows.notes.conflict": [
@@ -147356,6 +150446,24 @@
       "value": "سيؤدي هذا إلى إلغاء قفل جميع الحقول وتحديث البيانات الوصفية من المزودين. ستُستبدل أي تعديلات يدوية عند التحديث التالي."
     }
   ],
+  "web.item.editMetadata.resetDescriptionEpisode": [
+    {
+      "type": 0,
+      "value": "سيؤدي هذا إلى إلغاء قفل عنوان هذه الحلقة ونبذتها ومدتها وتاريخ عرضها، وتحديث البيانات الوصفية من المزودين لديك. ستُستبدل أي تعديلات يدوية عليها."
+    }
+  ],
+  "web.item.editMetadata.resetDescriptionSeason": [
+    {
+      "type": 0,
+      "value": "سيؤدي هذا إلى إلغاء قفل عنوان هذا الموسم ونبذته وتاريخ عرضه، وتحديث البيانات الوصفية من المزودين لديك. ستُستبدل أي تعديلات يدوية عليها. تبقى الصور التي اخترتها مقفلة على المسلسل؛ أعد تعيين المسلسل لاستبدالها."
+    }
+  ],
+  "web.item.editMetadata.resetDescriptionSeries": [
+    {
+      "type": 0,
+      "value": "سيؤدي هذا إلى إلغاء قفل كل الحقول في هذا المسلسل وتحديث البيانات الوصفية من المزودين لديك. ستُستبدل أي تعديلات يدوية على المسلسل. تحتفظ المواسم والحلقات المقفلة بتعديلاتها."
+    }
+  ],
   "web.item.editMetadata.resetToProvider": [
     {
       "type": 0,
@@ -148353,6 +151461,12 @@
     {
       "type": 0,
       "value": "التقييم"
+    }
+  ],
+  "web.item.rating.remove": [
+    {
+      "type": 0,
+      "value": "إزالة التقييم"
     }
   ],
   "web.item.rating.stars": [
@@ -149840,6 +152954,132 @@
       "value": "تمت الإزالة من قائمة المشاهدة"
     }
   ],
+  "web.library.watchlist.statusApprovedWaiting": [
+    {
+      "type": 0,
+      "value": "تمت الموافقة · بانتظار التنزيل"
+    }
+  ],
+  "web.library.watchlist.statusAwaitingApproval": [
+    {
+      "type": 0,
+      "value": "بانتظار الموافقة"
+    }
+  ],
+  "web.library.watchlist.statusDownloading": [
+    {
+      "type": 0,
+      "value": "جارٍ التنزيل "
+    },
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
+  "web.library.watchlist.statusListedTwice": [
+    {
+      "type": 0,
+      "value": "يدرجه TMDB مرتين"
+    }
+  ],
+  "web.library.watchlist.statusNeedsAttention": [
+    {
+      "type": 0,
+      "value": "يحتاج إلى مراجعة"
+    }
+  ],
+  "web.library.watchlist.statusNoLongerListed": [
+    {
+      "type": 0,
+      "value": "لم يعد مدرجًا على TMDB"
+    }
+  ],
+  "web.library.watchlist.statusNotOnTmdb": [
+    {
+      "type": 0,
+      "value": "غير موجود على TMDB"
+    }
+  ],
+  "web.library.watchlist.statusNotRequested": [
+    {
+      "type": 0,
+      "value": "غير مطلوب"
+    }
+  ],
+  "web.library.watchlist.statusNotRequestedOut": [
+    {
+      "type": 0,
+      "value": "غير مطلوب · يصدر "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.library.watchlist.statusNotRequestedReason": [
+    {
+      "type": 0,
+      "value": "غير مطلوب · "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "web.library.watchlist.statusOut": [
+    {
+      "type": 0,
+      "value": "يصدر "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.library.watchlist.statusOutApproved": [
+    {
+      "type": 0,
+      "value": "يصدر "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " · تمت الموافقة"
+    }
+  ],
+  "web.library.watchlist.statusOutAwaitingApproval": [
+    {
+      "type": 0,
+      "value": "يصدر "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " · بانتظار الموافقة"
+    }
+  ],
+  "web.library.watchlist.titlesHint": [
+    {
+      "type": 0,
+      "value": "هذه العناوين ليست في المكتبة بعد، لذا لا يمكن تشغيلها. عندما يصل أحدها، ينتقل إلى «في مكتبتك»."
+    }
+  ],
+  "web.library.watchlist.titlesHintRequested": [
+    {
+      "type": 0,
+      "value": "هذه العناوين ليست في المكتبة بعد، لذا لا يمكن تشغيلها. وقد طُلبت لك. عندما يصل أحدها، ينتقل إلى «في مكتبتك» ويصلك إشعار."
+    }
+  ],
   "web.library.watchlist.updateFailed": [
     {
       "type": 0,
@@ -150988,6 +154228,58 @@
     {
       "type": 0,
       "value": "لن تُرسل إشعارات حاليًا"
+    }
+  ],
+  "web.notifications.toast.followedArrived": [
+    {
+      "type": 0,
+      "value": "وصل إلى المكتبة عنوان طلبت أن تُبلَّغ به."
+    }
+  ],
+  "web.notifications.toast.newEpisode": [
+    {
+      "type": 0,
+      "value": "حلقة جديدة من "
+    },
+    {
+      "type": 1,
+      "value": "series"
+    }
+  ],
+  "web.notifications.toast.requestApprovedTitle": [
+    {
+      "type": 0,
+      "value": "تمت الموافقة على الطلب: "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.notifications.toast.requestArrived": [
+    {
+      "type": 0,
+      "value": "وصل طلب الوسائط الخاص بك إلى المكتبة."
+    }
+  ],
+  "web.notifications.toast.requestDeclinedTitle": [
+    {
+      "type": 0,
+      "value": "تم رفض الطلب: "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.notifications.toast.seriesAvailable": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " متاح الآن"
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -152494,6 +155786,50 @@
       "value": "خروج"
     }
   ],
+  "web.player.hud.episode": [
+    {
+      "type": 0,
+      "value": "م"
+    },
+    {
+      "type": 1,
+      "value": "season"
+    },
+    {
+      "type": 0,
+      "value": " · ح"
+    },
+    {
+      "type": 1,
+      "value": "episode"
+    }
+  ],
+  "web.player.hud.episodeWithTitle": [
+    {
+      "type": 0,
+      "value": "م"
+    },
+    {
+      "type": 1,
+      "value": "season"
+    },
+    {
+      "type": 0,
+      "value": " · ح"
+    },
+    {
+      "type": 1,
+      "value": "episode"
+    },
+    {
+      "type": 0,
+      "value": " — "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
   "web.player.info.audioBitrate": [
     {
       "type": 0,
@@ -153802,6 +157138,12 @@
     {
       "type": 0,
       "value": ")"
+    }
+  ],
+  "web.player.tracks.resetAudioFailed": [
+    {
+      "type": 0,
+      "value": "تعذّرت إعادة تعيين تفضيل الصوت"
     }
   ],
   "web.player.tracks.saveAudioFailed": [
@@ -155829,6 +159171,12 @@
     {
       "type": 0,
       "value": "الوصول إلى المكتبات"
+    }
+  ],
+  "web.profiles.libraryAccess.primaryNote": [
+    {
+      "type": 0,
+      "value": "يرى الملف الشخصي الأساسي كل مكتبة يمكن للحساب الوصول إليها. ويمكنه إخفاء المكتبات من الإعدادات ← المكتبات."
     }
   ],
   "web.profiles.librarySelect.allLibraries": [
@@ -163521,7 +166869,7 @@
       "value": "رمز المصادقة الخاص بك في Plex"
     }
   ],
-  "web.settings.historyImport.processed": [
+  "web.settings.historyImport.processedSoFar": [
     {
       "type": 0,
       "value": "تمت معالجة "
@@ -163532,11 +166880,7 @@
     },
     {
       "type": 0,
-      "value": " / "
-    },
-    {
-      "type": 1,
-      "value": "fetched"
+      "value": " حتى الآن"
     }
   ],
   "web.settings.historyImport.reconnectPlex": [
@@ -165537,6 +168881,30 @@
       "value": "تم تفعيل إشعارات المتصفح"
     }
   ],
+  "web.settings.notifications.push.error.incompleteSubscription": [
+    {
+      "type": 0,
+      "value": "أعاد المتصفح اشتراك إشعارات فورية غير مكتمل"
+    }
+  ],
+  "web.settings.notifications.push.error.permissionDenied": [
+    {
+      "type": 0,
+      "value": "لم يُمنح إذن الإشعارات"
+    }
+  ],
+  "web.settings.notifications.push.error.unsubscribeFailed": [
+    {
+      "type": 0,
+      "value": "أُزيل التسجيل من الخادم، لكن تعذّرت إزالة اشتراك المتصفح."
+    }
+  ],
+  "web.settings.notifications.push.error.unsupported": [
+    {
+      "type": 0,
+      "value": "لا يدعم هذا المتصفح الإشعارات الفورية"
+    }
+  ],
   "web.settings.notifications.push.lastDeliveredAt": [
     {
       "type": 0,
@@ -166321,6 +169689,12 @@
       "value": "صوت متعدد اللغات"
     }
   ],
+  "web.settings.overlays.badge.multiAudio.value": [
+    {
+      "type": 0,
+      "value": "صوت متعدد"
+    }
+  ],
   "web.settings.overlays.badge.multiSub.description": [
     {
       "type": 0,
@@ -166505,6 +169879,30 @@
     {
       "type": 0,
       "value": "حالة المسلسل"
+    }
+  ],
+  "web.settings.overlays.badge.showStatus.value.cancelled": [
+    {
+      "type": 0,
+      "value": "ملغى"
+    }
+  ],
+  "web.settings.overlays.badge.showStatus.value.ended": [
+    {
+      "type": 0,
+      "value": "منتهٍ"
+    }
+  ],
+  "web.settings.overlays.badge.showStatus.value.returning": [
+    {
+      "type": 0,
+      "value": "مستمر"
+    }
+  ],
+  "web.settings.overlays.badge.showStatus.value.upcoming": [
+    {
+      "type": 0,
+      "value": "قادم"
     }
   ],
   "web.settings.overlays.badge.studio.description": [
@@ -168429,6 +171827,60 @@
       "value": "Wi-Fi"
     }
   ],
+  "web.settings.plexAuth.homeUserNoServerAccess": [
+    {
+      "type": 0,
+      "value": "لا يملك "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " وصولًا إلى خادم Plex هذا. شارك الخادم معه في Plex، أو اختر خادمًا آخر."
+    }
+  ],
+  "web.settings.plexAuth.homeUserNoSignIn": [
+    {
+      "type": 0,
+      "value": "لم يُرجع Plex تسجيل دخول لمستخدم Plex Home هذا."
+    }
+  ],
+  "web.settings.plexAuth.homeUserPinRejected": [
+    {
+      "type": 0,
+      "value": "لم يقبل Plex رمز PIN هذا. تحقّق من رمز PIN لمستخدم Plex Home هذا وحاول مرة أخرى."
+    }
+  ],
+  "web.settings.plexAuth.homeUserPinRequired": [
+    {
+      "type": 0,
+      "value": "مستخدم Plex Home هذا محمي برمز PIN. أدخل رمز PIN الخاص به وحاول مرة أخرى."
+    }
+  ],
+  "web.settings.plexAuth.invalidPinResponse": [
+    {
+      "type": 0,
+      "value": "أعاد تسجيل الدخول إلى Plex استجابة PIN غير صالحة."
+    }
+  ],
+  "web.settings.plexAuth.requestFailed": [
+    {
+      "type": 0,
+      "value": "فشل طلب Plex بالحالة "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    }
+  ],
+  "web.settings.plexAuth.signInIncomplete": [
+    {
+      "type": 0,
+      "value": "لم يكتمل تسجيل الدخول إلى Plex. حاول مرة أخرى."
+    }
+  ],
   "web.settings.profileLaunch.ask": [
     {
       "type": 0,
@@ -168555,6 +172007,85 @@
     {
       "type": 0,
       "value": "لا توجد ملفات شخصية بعد"
+    }
+  ],
+  "web.settings.profiles.limitReached": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لا يمكن أن يكون لهذا الحساب أي ملف شخصي. يمكن للمسؤول رفع الحد."
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "يمكن أن يكون لهذا الحساب ملف شخصي واحد. يمكن للمسؤول رفع الحد."
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "يمكن أن يكون لهذا الحساب ملفان شخصيان. يمكن للمسؤول رفع الحد."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "يمكن أن يكون لهذا الحساب "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ملفات شخصية. يمكن للمسؤول رفع الحد."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "يمكن أن يكون لهذا الحساب "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ملفًا شخصيًا. يمكن للمسؤول رفع الحد."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "يمكن أن يكون لهذا الحساب "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ملف شخصي. يمكن للمسؤول رفع الحد."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.settings.profiles.newProfile": [
@@ -174945,6 +178476,12 @@
     {
       "type": 0,
       "value": "تجاهل التغييرات غير المحفوظة؟"
+    }
+  ],
+  "web.shuffle.startFailed": [
+    {
+      "type": 0,
+      "value": "تعذّر بدء التشغيل العشوائي."
     }
   ],
   "web.subtitles.closeDialog": [

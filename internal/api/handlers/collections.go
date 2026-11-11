@@ -684,22 +684,5 @@ func (h *CollectionHandler) processCollectionPoster(
 	return true, nil
 }
 
-// presignUserCollectionPoster returns a presigned URL for the card-sized
-// variant of the stored poster, mirroring the admin pipeline. Empty paths
-// return "".
-func (h *CollectionHandler) presignUserCollectionPoster(ctx context.Context, path string) string {
-	if path == "" {
-		return ""
-	}
-	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") || strings.HasPrefix(path, "/") {
-		return catalog.ImageURLOrEmpty(path)
-	}
-	if h.ArtworkResolver == nil {
-		return ""
-	}
-	key := cardThumbnailPath(path)
-	return h.ArtworkResolver.ResolveURLs(ctx, []string{key})[key].URL
-}
-
 // previewCollectionRequest is shared with the library collection bridge handler.
 type previewCollectionRequest = PersonalCollectionPreviewRequest

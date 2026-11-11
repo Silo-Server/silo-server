@@ -19,6 +19,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -529,5 +530,86 @@ func TestProcessCollectionPoster_InvalidImageKeepsStoredPoster(t *testing.T) {
 		if _, err := artwork.Stat(t.Context(), key); err != nil {
 			t.Fatalf("stored poster %q is gone after an invalid upload: %v", key, err)
 		}
+	}
+}
+
+// createCountingStore is a personal collection store that counts the
+// collections it is asked to create and creates none.
+type createCountingStore struct {
+	userstore.UserStore
+	creates int
+}
+
+func (s *createCountingStore) CreateCollection(context.Context, userstore.CreateCollectionInput) (*userstore.Collection, error) {
+	s.creates++
+	return nil, errors.New("no collection is created in this test")
+}
+
+// An import's poster_url is stored and later shown as the collection's
+// poster, so it may only be a bundled template poster or an image URL. A bare
+// storage key must be refused before anything is created.
+func TestImportTMDB_RefusesStorageKeyAsPoster(t *testing.T) {
+	cases := []struct {
+		name, poster string
+		refused      bool
+	}{
+		{"storage key", "library-posters/1.jpg", true},
+		{"escaped path out of the template directory", collectionTemplateImageDir + "%2e%2e/%2e%2e/api/v2/artwork/library-posters/1.jpg", true},
+		{"template poster", collectionTemplateImageDir + "tmdb_popular_movies.jpg", false},
+		{"image URL", "https://image.example/poster.jpg", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &createCountingStore{}
+			h := NewUserCollectionImportHandler(testUserStoreProvider{store: store}, nil, nil, nil, nil, nil)
+
+			req := UserImportTMDBRequest{Preset: "popular", MediaType: "movie"}
+			req.Title = "Popular"
+			req.PosterURL = tc.poster
+			_, err := h.ImportTMDB(t.Context(), 1, "p1", req)
+
+			apiErr, _ := errors.AsType[*APIError](err)
+			refused := apiErr != nil && apiErr.Status == http.StatusBadRequest && apiErr.Field == "poster_url"
+			if refused != tc.refused || (store.creates == 0) != tc.refused {
+				t.Fatalf("err = %v with %d creates, want refused on poster_url = %v", err, store.creates, tc.refused)
+			}
+		})
+	}
+}
+
+// recordingResolver resolves each key to itself and records the keys it was
+// asked to sign.
+type recordingResolver struct{ asked []string }
+
+func (r *recordingResolver) ResolveURLs(ctx context.Context, keys []string) map[string]catalog.ResolvedImageURL {
+	r.asked = append(r.asked, keys...)
+	return keyEchoResolver{}.ResolveURLs(ctx, keys)
+}
+
+// A personal collection's stored poster is signed only when it is an object in
+// that collection's own image directory. Any other stored key reads as no
+// poster and never reaches the signer.
+func TestPersonalCollectionPoster_SignsOnlyTheCollectionsOwnKeys(t *testing.T) {
+	const own = "user-collection-images/c1/poster/original.0123456789abcdef.webp"
+	cases := []struct {
+		name, stored, want string
+	}{
+		{"another prefix", "library-posters/1.jpg", ""},
+		{"another collection", "user-collection-images/c2/poster/original.0123456789abcdef.webp", ""},
+		{"a path out of its directory", "user-collection-images/c1/../c2/poster/original.webp", ""},
+		{"its own poster", own, "resolved:" + cardThumbnailPath(own)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resolver := &recordingResolver{}
+			h := &UserCollectionImportHandler{ArtworkResolver: resolver}
+			view := h.collectionView(t.Context(), userstore.Collection{ID: "c1", PosterURL: tc.stored})
+			if view.PosterURL != tc.want {
+				t.Fatalf("poster_url = %q, want %q", view.PosterURL, tc.want)
+			}
+			if tc.want == "" && len(resolver.asked) != 0 {
+				t.Fatalf("signer was asked for %q", resolver.asked)
+			}
+		})
 	}
 }

@@ -220,7 +220,7 @@ export default function MovieContent({
         : null,
   });
   const restartHref =
-    primaryAction.label === t("web.detail.actions.resume") && item.versions.length > 0
+    primaryAction.resuming && item.versions.length > 0
       ? `/watch/${item.content_id}?restart=1`
       : undefined;
   const { data: similarData, isLoading: similarLoading } = useSimilarItems(item.content_id);
