@@ -245,7 +245,7 @@ func TestSmartCollectionRowWithDisplayFilterReadsTheViewersWatchStatePostgres(t 
 		{profile: "creator", want: []string{seenByOther, unseen}},
 		{profile: "other", want: []string{seenByCreator, unseen}},
 	} {
-		got, err := fetcher.FetchOne(ctx, row, nil, nil, userID, tc.profile, catalog.AccessFilter{})
+		got, err := fetcher.FetchOne(ctx, row, &library, nil, userID, tc.profile, catalog.AccessFilter{})
 		if err != nil {
 			t.Fatalf("FetchOne for profile %s: %v", tc.profile, err)
 		}
