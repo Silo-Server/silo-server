@@ -347,6 +347,16 @@ func TestDetailHideFileIdentity(t *testing.T) {
 			if saved.Label != "Movie.2023.2160p.WEB-DL-OTHER.en.srt" {
 				t.Errorf("the stored signature was changed in place: %q", saved.Label)
 			}
+			if !tc.keepNames {
+				// A label the viewer cannot see on a current sidecar, such as
+				// a removed sidecar's file name, is dropped; a visible title stays.
+				for label, want := range map[string]string{"Movie.2019.720p.HDTV-OLD.en.srt": "", "Commentary": "Commentary"} {
+					sig := &userstore.SubtitleTrackSignature{Source: "external", Language: "en", Codec: "srt", Label: label}
+					if got := relabelSavedSidecarChoice(sig, detail.Versions, nil); got.Label != want {
+						t.Errorf("saved choice %q relabeled to %q, want %q", label, got.Label, want)
+					}
+				}
+			}
 
 			if detail.FolderPaths != nil {
 				t.Errorf("FolderPaths = %v, want none", detail.FolderPaths)
