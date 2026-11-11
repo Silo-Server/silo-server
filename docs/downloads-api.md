@@ -1914,6 +1914,13 @@ and `"+7"` are rejected.
 
 ### File and asset delivery
 
+A download is saved under a name built from its title, such as
+`Heat (1995).mkv` or `Severance - S01E02 - Half Loop.mkv`, with the file's
+extension. Only a viewer who may see file names (see
+[File paths and names](catalog-api.md#file-paths-and-names)) gets the file's own
+name. The same name goes into `Content-Disposition` whether the API or a proxy
+serves the bytes.
+
 The `file_delivery` capability advertises the native byte routes.
 `GET` and `HEAD /api/v2/downloads/{id}/file` preserve attachment filenames,
 MIME types, byte ranges (206, multipart ranges and 416), conditional requests

@@ -2483,6 +2483,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			deps.OnDownloadService(downloadSvc)
 		}
 		downloadHandler = handlers.NewDownloadHandler(downloadSvc)
+		if itemsHandler != nil {
+			downloadHandler.FileNamesVisible = itemsHandler.CanViewFilePaths
+		}
 		if jwtService != nil {
 			downloadHandler.SetDirectDownloadLinks(jwtService)
 		}

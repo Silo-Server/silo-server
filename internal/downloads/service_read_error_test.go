@@ -29,7 +29,7 @@ func TestLocalDownloadCanceledReadReturnsCommittedError(t *testing.T) {
 	cancel()
 	svc := &Service{bandwidth: NewBandwidthManager(131072, 0)}
 	w := httptest.NewRecorder()
-	err := svc.serveLocalFile(ctx, w, httptest.NewRequest("GET", "/file", nil), path, 2)
+	err := svc.serveLocalFile(ctx, w, httptest.NewRequest("GET", "/file", nil), path, "", 2)
 	if !errors.Is(err, ErrResponseCommitted) || !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled body read must report a committed response error: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestLocalDownloadWriteFailureReturnsCommittedError(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := &interruptedResponseWriter{ResponseRecorder: httptest.NewRecorder()}
-	err := (&Service{}).serveLocalFile(t.Context(), w, httptest.NewRequest("GET", "/file", nil), path, 2)
+	err := (&Service{}).serveLocalFile(t.Context(), w, httptest.NewRequest("GET", "/file", nil), path, "", 2)
 	if !errors.Is(err, ErrResponseCommitted) || !errors.Is(err, io.ErrClosedPipe) {
 		t.Fatalf("write failure must be reported: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestLocalDownloadEarlyEOFReturnsCommittedError(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := &truncatedResponseWriter{ResponseRecorder: httptest.NewRecorder(), path: path, t: t}
-	err := (&Service{}).serveLocalFile(t.Context(), w, httptest.NewRequest("GET", "/file", nil), path, 2)
+	err := (&Service{}).serveLocalFile(t.Context(), w, httptest.NewRequest("GET", "/file", nil), path, "", 2)
 	if !errors.Is(err, ErrResponseCommitted) || !errors.Is(err, io.ErrUnexpectedEOF) {
 		t.Fatalf("short response must be reported: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestLocalDownloadCompleteResponses(t *testing.T) {
 				req.Header.Set("Range", tc.ranged)
 			}
 			w := httptest.NewRecorder()
-			if err := (&Service{}).serveLocalFile(t.Context(), w, req, path, 2); err != nil {
+			if err := (&Service{}).serveLocalFile(t.Context(), w, req, path, "", 2); err != nil {
 				t.Fatal(err)
 			}
 			if tc.length >= 0 && w.Body.Len() != tc.length {

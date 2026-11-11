@@ -1223,7 +1223,7 @@ func (s *Service) ServeDirect(ctx context.Context, w http.ResponseWriter, r *htt
 		return err
 	}
 	notifyServeAuthorized(ctx, *target)
-	return s.serveLocalFile(ctx, w, r, target.Path, userID)
+	return s.serveLocalFile(ctx, w, r, target.Path, s.AttachmentName(ctx, target), userID)
 }
 
 // ResolveDirectFile authorizes a browser-style original download without
@@ -1576,7 +1576,9 @@ func proxyDeliveryAllowed(cfg config.DownloadConfig) bool {
 	return cfg.ServerBandwidthBPS <= 0 && cfg.UserBandwidthBPS <= 0
 }
 
-func (s *Service) serveLocalFile(ctx context.Context, w http.ResponseWriter, r *http.Request, path string, userID int) error {
+// serveLocalFile serves the file at path, saved as name (the file's own name
+// when name is empty).
+func (s *Service) serveLocalFile(ctx context.Context, w http.ResponseWriter, r *http.Request, path, name string, userID int) error {
 	f, err := fspath.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1591,7 +1593,10 @@ func (s *Service) serveLocalFile(ctx context.Context, w http.ResponseWriter, r *
 		return fmt.Errorf("stat file: %w", err)
 	}
 
-	w.Header().Set("Content-Disposition", attachmentDisposition(path))
+	if name == "" {
+		name = path
+	}
+	w.Header().Set("Content-Disposition", attachmentDisposition(name))
 	w.Header().Set("Content-Type", playback.MimeFromExtension(path))
 	if etag := serveEntityTag(ctx, f, stat); etag != "" {
 		w.Header().Set("ETag", etag)
@@ -1688,7 +1693,7 @@ func (s *Service) serveFileTarget(ctx context.Context, w http.ResponseWriter, r 
 		return catalog.ErrItemNotFound
 	}
 	if target.OriginArtifactID == "" {
-		return s.serveLocalFile(ctx, w, r, target.Path, userID)
+		return s.serveLocalFile(ctx, w, r, target.Path, s.AttachmentName(ctx, target), userID)
 	}
 	secret := ""
 	if s.artifacts != nil && s.artifacts.liveCfg != nil {
@@ -1734,7 +1739,7 @@ func (s *Service) serveFileTarget(ctx context.Context, w http.ResponseWriter, r 
 	// Preserve an origin-provided disposition, but supply the same sanitized
 	// attachment filename as local delivery when the node omits one.
 	if strings.TrimSpace(target.Path) != "" {
-		w.Header().Set("Content-Disposition", attachmentDisposition(target.Path))
+		w.Header().Set("Content-Disposition", attachmentDisposition(s.AttachmentName(ctx, target)))
 	}
 	downloadprepare.CopyResponseHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
