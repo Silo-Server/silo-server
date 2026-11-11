@@ -14,7 +14,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/webhooksync"
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -54,8 +53,6 @@ func TestWebhookReceiverRealDeliveryDB(t *testing.T) {
 	deps := pilotDeps(nil, nil)
 	deps.WebhookReceiver = app
 	h := newTestHandler(t, deps)
-	bridge := chi.NewRouter()
-	bridge.Post("/api/v1/webhook-sync/webhooks/{secret}", app.HandleWebhook)
 	var payload bytes.Buffer
 	form := multipart.NewWriter(&payload)
 	if err := form.WriteField("payload", `{"event":"media.resume","Account":{"id":1},"Metadata":{"ratingKey":"1","type":"movie"}}`); err != nil {
@@ -71,22 +68,17 @@ func TestWebhookReceiverRealDeliveryDB(t *testing.T) {
 		{"ignored", payload.String(), 204}, {"malformed", "invalid multipart", 400},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			for _, v2 := range []bool{false, true} {
-				path := "/api/v1/webhook-sync/webhooks/receiver-secret"
-				var router http.Handler = bridge
-				if v2 {
-					path = Prefix + "/webhook-sync/webhooks/receiver-secret"
-					router = h
-				}
+			{
+				path := Prefix + "/webhook-sync/webhooks/receiver-secret"
 				req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(tc.body))
 				req.Header.Set("Content-Type", form.FormDataContentType())
 				req.Header.Set("Authorization", "Bearer irrelevant-invalid-token")
 				rec := httptest.NewRecorder()
-				router.ServeHTTP(rec, req)
+				h.ServeHTTP(rec, req)
 				if rec.Code != tc.status {
-					t.Fatalf("v2=%v: %d %s", v2, rec.Code, rec.Body)
+					t.Fatalf("%d %s", rec.Code, rec.Body)
 				}
-				if v2 && (rec.Header().Get("Cache-Control") != "no-store" || strings.Contains(rec.Body.String(), "receiver-secret")) {
+				if rec.Header().Get("Cache-Control") != "no-store" || strings.Contains(rec.Body.String(), "receiver-secret") {
 					t.Fatal("unsafe response", rec.Header(), rec.Body)
 				}
 				if tc.status == 204 && rec.Body.Len() != 0 {
@@ -96,7 +88,7 @@ func TestWebhookReceiverRealDeliveryDB(t *testing.T) {
 		})
 	}
 	var logs int
-	if err := pool.QueryRow(t.Context(), "SELECT count(*) FROM webhook_sync_event_logs").Scan(&logs); err != nil || logs != 4 {
+	if err := pool.QueryRow(t.Context(), "SELECT count(*) FROM webhook_sync_event_logs").Scan(&logs); err != nil || logs != 2 {
 		t.Fatal(logs, err)
 	}
 	var pattern string

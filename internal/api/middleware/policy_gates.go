@@ -6,11 +6,12 @@ import (
 	"slices"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/policy"
-	"github.com/go-chi/chi/v5"
 )
 
 const (
@@ -26,12 +27,6 @@ const (
 // gates. *policy.PDP satisfies it.
 type PermissionDecider interface {
 	CheckPermission(context.Context, policy.PermissionInput) (policy.PermissionDecision, policy.Meta, error)
-}
-
-// NewPolicyActingAdminMiddleware enforces the acting-admin gate through the
-// policy PDP while preserving RequireActingAdmin's response contract.
-func NewPolicyActingAdminMiddleware(pdp PermissionDecider, primaryChecker PrimaryProfileChecker, household HouseholdProfileRequirement) func(http.Handler) http.Handler {
-	return RequireActingAdminWith(NewPolicyActingAdminDecider(pdp, primaryChecker, household))
 }
 
 // NewPolicyActingAdminDecider is the acting-admin decision evaluated by the

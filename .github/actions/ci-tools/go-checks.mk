@@ -29,7 +29,7 @@ contracts:
 UNCACHED := cmd/silo internal/jellycompat internal/pluginhost internal/plugins scripts/ci/sizeratchet scripts/ci/migrationcheck
 # subprocess-manifest: scripts/ci/subprocess-tests.json
 # deferred: no recorded occurrence; retain UNCACHED and the subprocess guard.
-IMMUTABLE := internal/contractledger internal/contractspec internal/debugserver
+IMMUTABLE := internal/contractspec internal/debugserver
 test-dependencies:
 	@variants="$$(go list -deps -test -f '{{.ImportPath}}|{{.ForTest}}' ./internal/auth/ ./internal/api/handlers/)" || exit $$?; \
 	[ -n "$$variants" ] || { echo "::error::test dependency metadata is empty"; exit 1; }; \

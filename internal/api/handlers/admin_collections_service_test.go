@@ -139,7 +139,7 @@ func TestDeleteAdminCollectionArtworkClearsReferenceWhenVariantDeleteFailsDB(t *
 
 // A /api/v2 smart collection needs a complete rule: one with none would match
 // every title. The refusal names query_definition.groups so the editor can
-// point at the rules. Updates that leave the rules alone, and /api/v1, keep
+// point at the rules. Updates that leave the rules alone keep
 // working for collections saved before the check.
 func TestSmartCollectionNeedsACompleteRule(t *testing.T) {
 	const blank = `{"groups":[{"match":"all","rules":[{"field":"genre","op":"is","value":""}]}]}`
@@ -172,7 +172,6 @@ func TestSmartCollectionNeedsACompleteRule(t *testing.T) {
 		"switched to smart, no stored rule": {existingType: manual, existingRules: `{}`, req: AdminCollectionUpdate{CollectionType: &smart}, refused: true},
 		"switched to smart, stored rule":    {existingType: manual, existingRules: comedy, req: AdminCollectionUpdate{CollectionType: &smart}},
 		"manual sending empty rules":        {existingType: manual, req: AdminCollectionUpdate{QueryDefinition: json.RawMessage(`{"groups":[]}`)}},
-		"v1, rules removed":                 {existingType: smart, req: AdminCollectionUpdate{QueryDefinition: json.RawMessage(`{"groups":[]}`), V1Rules: true}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := adminSmartRuleCheck(tc.existingType, json.RawMessage(tc.existingRules), tc.req, tc.req.QueryDefinition)

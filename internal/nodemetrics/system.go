@@ -104,12 +104,6 @@ func cpuBusyPercent(previous, current cpuTimes) (int, bool) {
 	return clampPercent(int((busyDelta*100 + totalDelta/2) / totalDelta)), true
 }
 
-// readLoad1 parses the 1-minute load average from /proc/loadavg.
-func readLoad1(procDir string) float64 {
-	value, _ := readLoad1Value(procDir)
-	return value
-}
-
 func readLoad1Value(procDir string) (float64, bool) {
 	raw, err := os.ReadFile(filepath.Join(procDir, "loadavg"))
 	if err != nil {

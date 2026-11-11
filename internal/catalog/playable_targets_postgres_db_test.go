@@ -9,9 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // generalPathProgressStore hides the Postgres store's

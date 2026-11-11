@@ -8,12 +8,13 @@ import (
 	"net/http"
 	"strings"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/collections/templates"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
-	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -148,10 +149,10 @@ func (h *LibraryCollectionHandler) createAdminCollection(ctx context.Context, re
 		ManagementKey:    req.ManagementKey,
 		SyncSchedule:     syncSchedule,
 	}
-	if err := normalizeAdminCollectionInput(&input, req.V1Rules); err != nil {
+	if err := normalizeAdminCollectionInput(&input); err != nil {
 		return none, err
 	}
-	if !req.V1Rules && input.CollectionType == collectionTypeSmart {
+	if input.CollectionType == collectionTypeSmart {
 		if err := requireSmartCollectionRule(input.QueryDefinition); err != nil {
 			return none, err
 		}
@@ -201,18 +202,11 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 	if len(req.QueryDefinition) > 0 {
 		var err error
 		if req.CollectionType == nil || *req.CollectionType == collectionTypeSmart {
-			queryDefinition, err = normalizeSmartCollectionQueryDefinitionJSON(req.QueryDefinition, false, false, req.V1Rules)
+			queryDefinition, err = normalizeSmartCollectionQueryDefinitionJSON(req.QueryDefinition, false, false)
 		} else {
-			queryDefinition, err = normalizeQueryDefinitionJSON(req.QueryDefinition, false, false, req.V1Rules)
+			queryDefinition, err = normalizeQueryDefinitionJSON(req.QueryDefinition, false, false)
 		}
 		if err != nil {
-			return none, apiError(http.StatusBadRequest, "bad_request", "Invalid query_definition")
-		}
-	} else if req.V1Rules && req.CollectionType != nil && *req.CollectionType == collectionTypeSmart &&
-		existing.CollectionType != collectionTypeSmart && len(existing.QueryDefinition) > 0 {
-		// Switching to Smart activates the stored rules, so, as with a changed
-		// section definition, a v1 update must find them in its vocabulary.
-		if err := catalog.ValidateV1Rules(existing.QueryDefinition); err != nil {
 			return none, apiError(http.StatusBadRequest, "bad_request", "Invalid query_definition")
 		}
 	}
@@ -319,7 +313,7 @@ func normalizeCollectionVisibilityUpdate(visibility *string) (*string, error) {
 // TMDB list source, rules (a smart collection's checked as smart rules),
 // sort, sync schedule, and management fields. It fills the defaults the
 // command stores and rewrites the JSON fields in their normalized form.
-func normalizeAdminCollectionInput(in *catalog.CreateLibraryCollectionInput, v1Rules bool) error {
+func normalizeAdminCollectionInput(in *catalog.CreateLibraryCollectionInput) error {
 	if err := validateCollectionVisibility(in.Visibility); err != nil {
 		return err
 	}
@@ -332,12 +326,12 @@ func normalizeAdminCollectionInput(in *catalog.CreateLibraryCollectionInput, v1R
 	queryDefinition := defaultJSON(in.QueryDefinition)
 	if in.CollectionType == collectionTypeSmart {
 		var err error
-		if queryDefinition, err = normalizeSmartCollectionQueryDefinitionJSON(queryDefinition, false, false, v1Rules); err != nil {
+		if queryDefinition, err = normalizeSmartCollectionQueryDefinitionJSON(queryDefinition, false, false); err != nil {
 			return apiError(http.StatusBadRequest, "bad_request", "Invalid query_definition")
 		}
 	} else if len(in.QueryDefinition) > 0 {
 		var err error
-		if queryDefinition, err = normalizeQueryDefinitionJSON(queryDefinition, false, false, v1Rules); err != nil {
+		if queryDefinition, err = normalizeQueryDefinitionJSON(queryDefinition, false, false); err != nil {
 			return apiError(http.StatusBadRequest, "bad_request", "Invalid query_definition")
 		}
 	}
@@ -367,7 +361,7 @@ func normalizeAdminCollectionInput(in *catalog.CreateLibraryCollectionInput, v1R
 // checks (normalizeAdminCollectionInput) to a collection a backup restore
 // writes, so a restore stores nothing the editor would refuse.
 func (h *LibraryCollectionHandler) CheckRestoredCollection(in catalog.CreateLibraryCollectionInput) error {
-	return restoreCheckError(normalizeAdminCollectionInput(&in, false))
+	return restoreCheckError(normalizeAdminCollectionInput(&in))
 }
 
 // restoreCheckError is an editor's refusal as a restore reports it: the
@@ -425,7 +419,7 @@ func (h *LibraryCollectionHandler) PreviewAdminCollection(ctx context.Context, r
 	}
 	var def catalog.QueryDefinition
 	if len(req.QueryDefinition) > 0 {
-		normalized, err := normalizeQueryDefinitionJSON(req.QueryDefinition, false, false, req.V1Rules)
+		normalized, err := normalizeQueryDefinitionJSON(req.QueryDefinition, false, false)
 		if err != nil {
 			return none, apiError(http.StatusBadRequest, "bad_request", "Invalid query_definition")
 		}

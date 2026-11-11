@@ -2,17 +2,12 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"net/http"
-	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
-	"github.com/Silo-Server/silo-server/internal/access"
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -89,24 +84,131 @@ func newTrailerRefreshHandler(
 	}
 }
 
-func newTrailerRefreshRequest(contentID string, userID int) *http.Request {
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/items/"+contentID+"/trailers/refresh", nil)
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("id", contentID)
-	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
-	ctx = apimw.SetClaims(ctx, &auth.Claims{UserID: userID, Role: "user", TokenType: auth.TokenTypeAccess})
-	ctx = apimw.SetProfileID(ctx, "profile-1")
-	ctx = access.SetScope(ctx, access.Scope{UserID: userID, ProfileID: "profile-1"})
-	return req.WithContext(ctx)
+// RequestTrailersRefresh authorizes against the series for season and episode
+// IDs, answers not found for anything the viewer cannot see before it reveals
+// the type, and only asks the metadata service (which spends the item's
+// cooldown) once the request is authorized and supported.
+func TestRequestTrailersRefresh(t *testing.T) {
+	next := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
+	queued := metadata.TrailerRefreshOutcome{Status: metadata.TrailerRefreshStatusQueued}
+	cases := []struct {
+		name        string
+		items       map[string]*models.MediaItem
+		denied      string
+		outcome     metadata.TrailerRefreshOutcome
+		contentID   string
+		wantStatus  int
+		wantCode    string
+		wantChecked string
+		want        TrailerRefreshView
+	}{
+		{name: "movie queued", items: map[string]*models.MediaItem{"movie-1": {ContentID: "movie-1", Type: "movie"}},
+			outcome: queued, contentID: "movie-1", wantChecked: "movie-1", want: TrailerRefreshView{Status: metadata.TrailerRefreshStatusQueued}},
+		{name: "series cooldown carries next allowed", items: map[string]*models.MediaItem{"series-1": {ContentID: "series-1", Type: "series"}},
+			outcome: metadata.TrailerRefreshOutcome{Status: metadata.TrailerRefreshStatusCooldown, NextAllowedAt: &next}, contentID: "series-1",
+			wantChecked: "series-1", want: TrailerRefreshView{Status: metadata.TrailerRefreshStatusCooldown, NextAllowedAt: &next}},
+		{name: "audiobook unsupported", items: map[string]*models.MediaItem{"item-1": {ContentID: "item-1", Type: "audiobook"}},
+			contentID: "item-1", wantStatus: http.StatusBadRequest, wantCode: "unsupported_type", wantChecked: "item-1"},
+		{name: "ebook unsupported", items: map[string]*models.MediaItem{"item-1": {ContentID: "item-1", Type: "ebook"}},
+			contentID: "item-1", wantStatus: http.StatusBadRequest, wantCode: "unsupported_type", wantChecked: "item-1"},
+		{name: "episode unsupported, authorized on its series", items: map[string]*models.MediaItem{"series-1": {ContentID: "series-1", Type: "series"}},
+			contentID: "episode-1", wantStatus: http.StatusBadRequest, wantCode: "unsupported_type", wantChecked: "series-1"},
+		{name: "season unsupported, authorized on its series", items: map[string]*models.MediaItem{"series-1": {ContentID: "series-1", Type: "series"}},
+			contentID: "season-1", wantStatus: http.StatusBadRequest, wantCode: "unsupported_type", wantChecked: "series-1"},
+		{name: "episode in hidden series is not found", items: map[string]*models.MediaItem{"series-1": {ContentID: "series-1", Type: "series"}},
+			denied: "series-1", contentID: "episode-1", wantStatus: http.StatusNotFound, wantChecked: "series-1"},
+		{name: "hidden movie is not found", items: map[string]*models.MediaItem{"movie-1": {ContentID: "movie-1", Type: "movie"}},
+			denied: "movie-1", contentID: "movie-1", wantStatus: http.StatusNotFound, wantChecked: "movie-1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			itemAccess := &fakeTrailerItemAccess{items: tc.items, ensureErr: map[string]error{}}
+			if tc.denied != "" {
+				itemAccess.ensureErr[tc.denied] = catalog.ErrItemNotFound
+			}
+			requester := &fakeTrailerRefreshRequester{outcome: tc.outcome}
+			handler := newTrailerRefreshHandler(itemAccess, requester)
+			handler.trailerSeasonLookup = fakeTrailerSeasonLookup{"season-1": {ContentID: "season-1", SeriesID: "series-1"}}
+			handler.trailerEpisodeLookup = fakeTrailerEpisodeLookup{"episode-1": {ContentID: "episode-1", SeriesID: "series-1"}}
+
+			got, err := handler.RequestTrailersRefresh(t.Context(), 7, tc.contentID, func() (catalog.AccessFilter, error) {
+				return catalog.AccessFilter{UserID: 7, ProfileID: "profile-1"}, nil
+			})
+			if len(itemAccess.checked) != 1 || itemAccess.checked[0] != tc.wantChecked {
+				t.Fatalf("access checks = %v, want [%s]", itemAccess.checked, tc.wantChecked)
+			}
+			if tc.wantStatus != 0 {
+				var apiErr *APIError
+				if !errors.As(err, &apiErr) || apiErr.Status != tc.wantStatus || (tc.wantCode != "" && apiErr.Code != tc.wantCode) {
+					t.Fatalf("error = %#v, want %d %s", err, tc.wantStatus, tc.wantCode)
+				}
+				if len(requester.requests) != 0 {
+					t.Fatalf("refused request reached the service: %v", requester.requests)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("RequestTrailersRefresh() error = %v", err)
+			}
+			if got.Status != tc.want.Status || !reflect.DeepEqual(got.NextAllowedAt, tc.want.NextAllowedAt) {
+				t.Fatalf("view = %+v, want %+v", got, tc.want)
+			}
+			if len(requester.requests) != 1 || requester.requests[0] != tc.contentID {
+				t.Fatalf("requests = %v, want [%s]", requester.requests, tc.contentID)
+			}
+		})
+	}
 }
 
-func decodeTrailerResponse(t *testing.T, rr *httptest.ResponseRecorder) map[string]any {
-	t.Helper()
-	var body map[string]any
-	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode body %q: %v", rr.Body.String(), err)
+// The per-user limiter guards the action ahead of the per-item cooldown: a
+// burst answers 429 with Retry-After and never reaches the service, and the
+// budget is per user.
+func TestRequestTrailersRefreshRateLimitsPerUser(t *testing.T) {
+	allow := func() (catalog.AccessFilter, error) { return catalog.AccessFilter{}, nil }
+	newHandler := func() (*ItemsHandler, *fakeTrailerRefreshRequester) {
+		requester := &fakeTrailerRefreshRequester{outcome: metadata.TrailerRefreshOutcome{Status: metadata.TrailerRefreshStatusQueued}}
+		return newTrailerRefreshHandler(&fakeTrailerItemAccess{
+			items:     map[string]*models.MediaItem{"movie-1": {ContentID: "movie-1", Type: "movie"}},
+			ensureErr: map[string]error{},
+		}, requester), requester
 	}
-	return body
+	assertLimited := func(t *testing.T, err error) {
+		t.Helper()
+		var apiErr *APIError
+		if !errors.As(err, &apiErr) || apiErr.Status != http.StatusTooManyRequests || apiErr.RetryAfter <= 0 {
+			t.Fatalf("error = %#v, want 429 with Retry-After", err)
+		}
+	}
+
+	t.Run("default limiter is per user", func(t *testing.T) {
+		handler, _ := newHandler()
+		var err error
+		for i := 0; i < int(trailerRefreshRate.RequestsPerMinute)+5 && err == nil; i++ {
+			_, err = handler.RequestTrailersRefresh(t.Context(), 7, "movie-1", allow)
+		}
+		assertLimited(t, err)
+		if _, err := handler.RequestTrailersRefresh(t.Context(), 8, "movie-1", allow); err != nil {
+			t.Fatalf("another user was limited: %v", err)
+		}
+	})
+
+	// A Redis deployment shares one budget across instances only if the
+	// injected limiter decides, and its keyspace is shared with the rate-limit
+	// middleware, so the key is namespaced.
+	t.Run("injected shared limiter decides", func(t *testing.T) {
+		handler, requester := newHandler()
+		shared := &recordingLimiter{allowed: false}
+		handler.SetTrailerRefreshLimiter(shared)
+		handler.SetTrailerRefreshRequester(requester) // must keep the injected limiter
+		_, err := handler.RequestTrailersRefresh(t.Context(), 7, "movie-1", allow)
+		assertLimited(t, err)
+		if len(shared.keys) != 1 || shared.keys[0] != trailerRefreshLimiterKey(7) || shared.keys[0] == "7" {
+			t.Fatalf("limiter keys = %v, want one namespaced %q", shared.keys, trailerRefreshLimiterKey(7))
+		}
+		if len(requester.requests) != 0 {
+			t.Fatalf("a rate-limited request reached the service: %v", requester.requests)
+		}
+	})
 }
 
 // The router discovers both seams by type assertion, so a signature drift
@@ -132,300 +234,6 @@ func TestTrailerRefreshWiringAssertionsHold(t *testing.T) {
 	}
 }
 
-func TestTrailersRefreshReturnsQueued(t *testing.T) {
-	itemAccess := &fakeTrailerItemAccess{
-		items:     map[string]*models.MediaItem{"movie-1": {ContentID: "movie-1", Type: "movie"}},
-		ensureErr: map[string]error{},
-	}
-	requester := &fakeTrailerRefreshRequester{
-		outcome: metadata.TrailerRefreshOutcome{Status: metadata.TrailerRefreshStatusQueued},
-	}
-	handler := newTrailerRefreshHandler(itemAccess, requester)
-
-	rr := httptest.NewRecorder()
-	handler.HandleRequestTrailersRefresh(rr, newTrailerRefreshRequest("movie-1", 7))
-
-	if rr.Code != http.StatusAccepted {
-		t.Fatalf("status = %d, want %d (%s)", rr.Code, http.StatusAccepted, rr.Body.String())
-	}
-	body := decodeTrailerResponse(t, rr)
-	if body["status"] != "queued" {
-		t.Fatalf("status field = %v, want queued", body["status"])
-	}
-	if _, ok := body["next_allowed_at"]; ok {
-		t.Fatalf("queued response must omit next_allowed_at, got %v", body)
-	}
-	if len(requester.requests) != 1 || requester.requests[0] != "movie-1" {
-		t.Fatalf("requests = %v, want [movie-1]", requester.requests)
-	}
-}
-
-func TestTrailersRefreshReturnsCooldownWithNextAllowedAt(t *testing.T) {
-	next := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
-	itemAccess := &fakeTrailerItemAccess{
-		items:     map[string]*models.MediaItem{"series-1": {ContentID: "series-1", Type: "series"}},
-		ensureErr: map[string]error{},
-	}
-	requester := &fakeTrailerRefreshRequester{
-		outcome: metadata.TrailerRefreshOutcome{
-			Status:        metadata.TrailerRefreshStatusCooldown,
-			NextAllowedAt: &next,
-		},
-	}
-	handler := newTrailerRefreshHandler(itemAccess, requester)
-
-	rr := httptest.NewRecorder()
-	handler.HandleRequestTrailersRefresh(rr, newTrailerRefreshRequest("series-1", 7))
-
-	// Cooldown is an expected client-rendered state, not an error: 200, and
-	// 429 stays reserved for the per-user limiter.
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d (%s)", rr.Code, http.StatusOK, rr.Body.String())
-	}
-	body := decodeTrailerResponse(t, rr)
-	if body["status"] != "cooldown" {
-		t.Fatalf("status field = %v, want cooldown", body["status"])
-	}
-	if got := body["next_allowed_at"]; got != next.Format(time.RFC3339) {
-		t.Fatalf("next_allowed_at = %v, want %s", got, next.Format(time.RFC3339))
-	}
-}
-
-// Only movie and series detail responses carry videos, so any other
-// media_items type is a client bug rather than an empty result. These are the
-// types that actually exist as media_items rows; episodes and seasons live in
-// their own tables and are covered separately below.
-func TestTrailersRefreshRejectsNonMovieSeriesTypes(t *testing.T) {
-	for _, itemType := range []string{"audiobook", "ebook", "manga"} {
-		t.Run(itemType, func(t *testing.T) {
-			itemAccess := &fakeTrailerItemAccess{
-				items:     map[string]*models.MediaItem{"item-1": {ContentID: "item-1", Type: itemType}},
-				ensureErr: map[string]error{},
-			}
-			requester := &fakeTrailerRefreshRequester{}
-			handler := newTrailerRefreshHandler(itemAccess, requester)
-
-			rr := httptest.NewRecorder()
-			handler.HandleRequestTrailersRefresh(rr, newTrailerRefreshRequest("item-1", 7))
-
-			if rr.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d, want %d (%s)", rr.Code, http.StatusBadRequest, rr.Body.String())
-			}
-			if len(requester.requests) != 0 {
-				t.Fatalf("unsupported type must not reach the service, got %v", requester.requests)
-			}
-		})
-	}
-}
-
-// Episodes and seasons are not media_items rows, so the item lookup misses on
-// their real content IDs. Without the fallbacks the route would answer 404
-// "Item not found" for content that plainly exists; the contract is 400
-// unsupported-type. Authorization runs against the parent series, as on the
-// on-view translation route.
-func TestTrailersRefreshRejectsEpisodeAndSeasonIDsWith400(t *testing.T) {
-	tests := []struct {
-		name       string
-		contentID  string
-		wantAccess string
-	}{
-		{name: "episode", contentID: "episode-1", wantAccess: "series-1"},
-		{name: "season", contentID: "season-1", wantAccess: "series-1"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			itemAccess := &fakeTrailerItemAccess{
-				items:     map[string]*models.MediaItem{"series-1": {ContentID: "series-1", Type: "series"}},
-				ensureErr: map[string]error{},
-			}
-			requester := &fakeTrailerRefreshRequester{}
-			handler := newTrailerRefreshHandler(itemAccess, requester)
-			handler.trailerSeasonLookup = fakeTrailerSeasonLookup{
-				"season-1": {ContentID: "season-1", SeriesID: "series-1"},
-			}
-			handler.trailerEpisodeLookup = fakeTrailerEpisodeLookup{
-				"episode-1": {ContentID: "episode-1", SeriesID: "series-1"},
-			}
-
-			rr := httptest.NewRecorder()
-			handler.HandleRequestTrailersRefresh(rr, newTrailerRefreshRequest(tc.contentID, 7))
-
-			if rr.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d, want %d (%s)", rr.Code, http.StatusBadRequest, rr.Body.String())
-			}
-			body := decodeTrailerResponse(t, rr)
-			if code, _ := body["error"].(string); code != "unsupported_type" {
-				t.Fatalf("error code = %v, want unsupported_type (%s)", body["error"], rr.Body.String())
-			}
-			if len(itemAccess.checked) != 1 || itemAccess.checked[0] != tc.wantAccess {
-				t.Fatalf("access checks = %v, want [%s]", itemAccess.checked, tc.wantAccess)
-			}
-			if len(requester.requests) != 0 {
-				t.Fatalf("unsupported type must not reach the service, got %v", requester.requests)
-			}
-		})
-	}
-}
-
-// An episode inside a series the caller cannot see must not be distinguishable
-// from content that does not exist, so the access check runs before the type
-// answer.
-func TestTrailersRefreshEpisodeInInaccessibleSeriesReturns404(t *testing.T) {
-	itemAccess := &fakeTrailerItemAccess{
-		items:     map[string]*models.MediaItem{"series-1": {ContentID: "series-1", Type: "series"}},
-		ensureErr: map[string]error{"series-1": catalog.ErrItemNotFound},
-	}
-	requester := &fakeTrailerRefreshRequester{}
-	handler := newTrailerRefreshHandler(itemAccess, requester)
-	handler.trailerEpisodeLookup = fakeTrailerEpisodeLookup{
-		"episode-1": {ContentID: "episode-1", SeriesID: "series-1"},
-	}
-
-	rr := httptest.NewRecorder()
-	handler.HandleRequestTrailersRefresh(rr, newTrailerRefreshRequest("episode-1", 7))
-
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want %d (%s)", rr.Code, http.StatusNotFound, rr.Body.String())
-	}
-	if len(requester.requests) != 0 {
-		t.Fatalf("denied request must not reach the service, got %v", requester.requests)
-	}
-}
-
-// An unauthorized caller must be turned away before the metadata service is
-// asked, so it can never burn the item's cooldown slot.
-func TestTrailersRefreshDeniedAccessReturns404WithoutConsumingCooldown(t *testing.T) {
-	itemAccess := &fakeTrailerItemAccess{
-		items:     map[string]*models.MediaItem{"movie-1": {ContentID: "movie-1", Type: "movie"}},
-		ensureErr: map[string]error{"movie-1": catalog.ErrItemNotFound},
-	}
-	requester := &fakeTrailerRefreshRequester{}
-	handler := newTrailerRefreshHandler(itemAccess, requester)
-
-	rr := httptest.NewRecorder()
-	handler.HandleRequestTrailersRefresh(rr, newTrailerRefreshRequest("movie-1", 7))
-
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want %d (%s)", rr.Code, http.StatusNotFound, rr.Body.String())
-	}
-	if len(itemAccess.checked) != 1 {
-		t.Fatalf("access checks = %v, want one check", itemAccess.checked)
-	}
-	if len(requester.requests) != 0 {
-		t.Fatalf("denied request must not reach the service, got %v", requester.requests)
-	}
-}
-
-func TestTrailersRefreshRequiresAuthentication(t *testing.T) {
-	itemAccess := &fakeTrailerItemAccess{
-		items:     map[string]*models.MediaItem{"movie-1": {ContentID: "movie-1", Type: "movie"}},
-		ensureErr: map[string]error{},
-	}
-	requester := &fakeTrailerRefreshRequester{}
-	handler := newTrailerRefreshHandler(itemAccess, requester)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/items/movie-1/trailers/refresh", nil)
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("id", "movie-1")
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-
-	rr := httptest.NewRecorder()
-	handler.HandleRequestTrailersRefresh(rr, req)
-
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want %d (%s)", rr.Code, http.StatusUnauthorized, rr.Body.String())
-	}
-	if len(requester.requests) != 0 {
-		t.Fatalf("unauthenticated request must not reach the service, got %v", requester.requests)
-	}
-}
-
-// The per-user limiter is the abuse guard in front of the per-item cooldown:
-// once a user exhausts the burst it answers 429 with Retry-After.
-func TestTrailersRefreshRateLimitsPerUser(t *testing.T) {
-	itemAccess := &fakeTrailerItemAccess{
-		items:     map[string]*models.MediaItem{"movie-1": {ContentID: "movie-1", Type: "movie"}},
-		ensureErr: map[string]error{},
-	}
-	requester := &fakeTrailerRefreshRequester{
-		outcome: metadata.TrailerRefreshOutcome{Status: metadata.TrailerRefreshStatusQueued},
-	}
-	handler := newTrailerRefreshHandler(itemAccess, requester)
-
-	limited := false
-	for i := 0; i < int(trailerRefreshRate.RequestsPerMinute)+5; i++ {
-		rr := httptest.NewRecorder()
-		handler.HandleRequestTrailersRefresh(rr, newTrailerRefreshRequest("movie-1", 7))
-		if rr.Code == http.StatusTooManyRequests {
-			limited = true
-			if rr.Header().Get("Retry-After") == "" {
-				t.Fatal("429 response must carry Retry-After")
-			}
-			break
-		}
-	}
-	if !limited {
-		t.Fatal("expected the per-user limiter to reject a burst of requests")
-	}
-
-	// A different user is unaffected — the limiter keys on the user id.
-	rr := httptest.NewRecorder()
-	handler.HandleRequestTrailersRefresh(rr, newTrailerRefreshRequest("movie-1", 8))
-	if rr.Code != http.StatusAccepted {
-		t.Fatalf("second user status = %d, want %d (%s)", rr.Code, http.StatusAccepted, rr.Body.String())
-	}
-}
-
-// The capability probe is what lets a client tell "this server does not have
-// the trailer action" from "that item does not exist", so it must answer on
-// both a wired and an unwired handler.
-func TestTrailerRefreshCapability(t *testing.T) {
-	t.Run("wired", func(t *testing.T) {
-		h := newTrailerRefreshHandler(&fakeTrailerItemAccess{}, &fakeTrailerRefreshRequester{})
-		rr := httptest.NewRecorder()
-		h.HandleTrailerRefreshCapability(rr, httptest.NewRequest(http.MethodGet, "/items/trailers/capability", nil))
-		if rr.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200", rr.Code)
-		}
-		body := decodeTrailerResponse(t, rr)
-		if body["refresh"] != true {
-			t.Fatalf("refresh = %v, want true", body["refresh"])
-		}
-		if got, want := body["cooldown_seconds"], float64(metadata.TrailerRefreshCooldown/time.Second); got != want {
-			t.Fatalf("cooldown_seconds = %v, want %v", got, want)
-		}
-		// The advertised statuses are the contract the client switches on, so
-		// they must be the service's constants rather than a stale copy.
-		statuses, _ := body["statuses"].([]any)
-		want := []string{
-			metadata.TrailerRefreshStatusQueued,
-			metadata.TrailerRefreshStatusCooldown,
-			metadata.TrailerRefreshStatusDisabled,
-		}
-		if len(statuses) != len(want) {
-			t.Fatalf("statuses = %v, want %v", statuses, want)
-		}
-		for i, status := range want {
-			if statuses[i] != status {
-				t.Fatalf("statuses[%d] = %v, want %q", i, statuses[i], status)
-			}
-		}
-	})
-
-	t.Run("unwired", func(t *testing.T) {
-		h := &ItemsHandler{}
-		rr := httptest.NewRecorder()
-		h.HandleTrailerRefreshCapability(rr, httptest.NewRequest(http.MethodGet, "/items/trailers/capability", nil))
-		if rr.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200 — the probe itself must never 404", rr.Code)
-		}
-		body := decodeTrailerResponse(t, rr)
-		if body["refresh"] != false {
-			t.Fatalf("refresh = %v, want false", body["refresh"])
-		}
-	})
-}
-
 // recordingLimiter captures the keys an action limiter is called with.
 type recordingLimiter struct {
 	keys    []string
@@ -438,50 +246,6 @@ func (l *recordingLimiter) Allow(_ context.Context, key string, _ ratelimit.Rate
 }
 
 func (l *recordingLimiter) Close() {}
-
-// The action's budget must be enforced by the process's configured limiter, or
-// a Redis deployment gives every instance an independent allowance for the same
-// user and multiplies the stated budget by the instance count. The per-item
-// database cooldown cannot compensate: it bounds one item, while this bounds
-// how many distinct items a user can start refreshes for.
-func TestTrailersRefreshUsesTheInjectedSharedLimiter(t *testing.T) {
-	itemAccess := &fakeTrailerItemAccess{
-		items:     map[string]*models.MediaItem{"movie-1": {ContentID: "movie-1", Type: "movie"}},
-		ensureErr: map[string]error{},
-	}
-	requester := &fakeTrailerRefreshRequester{
-		outcome: metadata.TrailerRefreshOutcome{Status: metadata.TrailerRefreshStatusQueued},
-	}
-	handler := newTrailerRefreshHandler(itemAccess, requester)
-	shared := &recordingLimiter{allowed: false}
-	handler.SetTrailerRefreshLimiter(shared)
-	// The requester wiring must not replace an injected limiter with a private
-	// in-memory one, which is the whole point of injecting it.
-	handler.SetTrailerRefreshRequester(requester)
-
-	rr := httptest.NewRecorder()
-	handler.HandleRequestTrailersRefresh(rr, newTrailerRefreshRequest("movie-1", 7))
-
-	if rr.Code != http.StatusTooManyRequests {
-		t.Fatalf("status = %d, want %d — the injected limiter's verdict was ignored (%s)",
-			rr.Code, http.StatusTooManyRequests, rr.Body.String())
-	}
-	if len(shared.keys) != 1 {
-		t.Fatalf("shared limiter consulted %d times, want 1", len(shared.keys))
-	}
-	// The limiter may be the process-wide one, whose keyspace is shared with
-	// the rate-limit middleware ("ip:", "key:"), so this action's keys have to
-	// be namespaced too.
-	if shared.keys[0] != trailerRefreshLimiterKey(7) {
-		t.Fatalf("limiter key = %q, want the namespaced %q", shared.keys[0], trailerRefreshLimiterKey(7))
-	}
-	if shared.keys[0] == "7" {
-		t.Fatal("an unprefixed user id would collide with other keyspaces in a shared limiter")
-	}
-	if len(requester.requests) != 0 {
-		t.Fatalf("a rate-limited request must not reach the service, got %v", requester.requests)
-	}
-}
 
 // Rate limiting can be disabled outright (or the database unavailable), in
 // which case there is no shared limiter to inject. The action keeps its own
