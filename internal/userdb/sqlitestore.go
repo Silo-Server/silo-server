@@ -52,8 +52,8 @@ func (s *SQLiteUserStore) UpdateProfile(_ context.Context, id string, u userstor
 	return UpdateProfile(s.db, id, u)
 }
 
-func (s *SQLiteUserStore) DeleteProfile(_ context.Context, id string) error {
-	return DeleteProfile(s.db, id)
+func (s *SQLiteUserStore) DeleteProfile(ctx context.Context, id string) ([]string, error) {
+	return DeleteProfile(ctx, s.db, id)
 }
 
 // --- Progress ---

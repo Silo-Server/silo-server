@@ -45,6 +45,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/settingsmigrate"
 	subtitleai "github.com/Silo-Server/silo-server/internal/subtitles/ai"
 	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
 // AdminMetadataRefresher can refresh metadata for individual items.
@@ -178,7 +179,8 @@ type AdminHandler struct {
 	DownloadsStatsSource         AdminDownloadsStatsSource
 	RedisClient                  *redis.Client // health reporting only; nil means this deployment runs without Redis
 	Config                       *config.Config
-	ArtworkBackend               string // resolved artwork backend for the settings status; empty when unopened
+	ArtworkBackend               string          // resolved artwork backend for the settings status; empty when unopened
+	ArtworkStore                 blobstore.Store // personal collection artwork, removed with a deleted account's collections
 	EventBus                     cache.EventBus
 	EventsHub                    *evt.Hub
 	SettingsRepo                 ServerSettingsStore
@@ -1211,6 +1213,7 @@ func (h *AdminHandler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) 
 	}
 	// As for updates, the Owner rules run against the target account locked
 	// in the transaction that deletes it and revokes its sign-ins.
+	var collections []string
 	_, err = repo.MutateAdminAccount(r.Context(), id, -1, nil, func(current *models.User, tx pgx.Tx) (bool, error) {
 		if err := auth.CheckOwnerDelete(actor, current); err != nil {
 			return false, ownerError(err)
@@ -1218,7 +1221,9 @@ func (h *AdminHandler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) 
 		if err := auth.EnsureBreakGlassAfterAdminChange(r.Context(), tx, current, nil); err != nil {
 			return false, breakGlassError(err)
 		}
-		return true, nil
+		ids, err := h.deletedAccountCollections(r.Context(), tx, id)
+		collections = ids
+		return true, err
 	})
 	if err != nil {
 		var apiErr *APIError
@@ -1235,10 +1240,30 @@ func (h *AdminHandler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) 
 	if h.OnUserSessionsRevoked != nil {
 		h.OnUserSessionsRevoked(r.Context(), id)
 	}
+	h.removeDeletedAccountArtwork(r.Context(), collections)
 	h.sweepWatchlistTitles(r.Context(), id)
 	h.invalidateStats(r.Context(), cache.ChannelAdmin, cache.EventAdminStatsInvalidated, strconv.Itoa(id))
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// deletedAccountCollections lists, in the delete's transaction, the personal
+// collections the account delete removes through the users foreign key. A
+// handler without an artwork store, or a test repository without a
+// transaction, has nothing to clean up.
+func (h *AdminHandler) deletedAccountCollections(ctx context.Context, tx pgx.Tx, userID int) ([]string, error) {
+	if h.ArtworkStore == nil || tx == nil {
+		return nil, nil
+	}
+	return pgstore.AccountCollectionIDs(ctx, tx, userID)
+}
+
+// removeDeletedAccountArtwork removes the artwork of a deleted account's
+// personal collections. The delete has committed, so a failure only logs.
+func (h *AdminHandler) removeDeletedAccountArtwork(ctx context.Context, collectionIDs []string) {
+	for _, collectionID := range collectionIDs {
+		removeDeletedCollectionArtwork(ctx, h.ArtworkStore, userCollectionImagePrefix, collectionID)
+	}
 }
 
 // sweepWatchlistTitles removes the watchlist titles a deleted account's

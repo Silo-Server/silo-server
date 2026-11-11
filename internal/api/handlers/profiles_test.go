@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/blobstore/blobstoretest"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -344,6 +345,46 @@ func TestHandleDeleteProfile_BlocksPrimaryDeletion(t *testing.T) {
 	profile, err := store.GetProfile(context.Background(), "profile-1")
 	if err != nil || profile == nil {
 		t.Fatalf("expected primary profile to be preserved: %v", err)
+	}
+}
+
+// Deleting a profile removes the artwork of the personal collections it
+// deleted; another profile's collection keeps its artwork.
+func TestDeleteProfileRemovesItsCollectionsArtwork(t *testing.T) {
+	ctx := context.Background()
+	store := newProfileTestStore(t)
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "profile-2", Name: "Kids"}); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+	artwork := blobstoretest.New()
+	collectionOf := map[string]string{}
+	for _, profileID := range []string{"profile-1", "profile-2"} {
+		c, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{CreatorProfileID: profileID, Name: profileID, CollectionType: userstore.CollectionTypeManual})
+		if err != nil {
+			t.Fatalf("create collection: %v", err)
+		}
+		collectionOf[profileID] = c.ID
+		for _, key := range []string{"poster/w300.a.webp", "collage/b.webp"} {
+			if err := artwork.Put(ctx, userCollectionImagePrefix+"/"+c.ID+"/"+key, []byte("img")); err != nil {
+				t.Fatalf("put artwork: %v", err)
+			}
+		}
+	}
+	handler := NewProfileHandler(testUserStoreProvider{store: store})
+	handler.ArtworkStore = artwork
+
+	if err := handler.DeleteProfile(ctx, ProfileDeleteCommand{UserID: 1, ProfileID: "profile-2", ActiveProfileID: "profile-1"}); err != nil {
+		t.Fatalf("DeleteProfile: %v", err)
+	}
+
+	for profileID, want := range map[string]int{"profile-1": 2, "profile-2": 0} {
+		objects, _, err := artwork.List(ctx, userCollectionImagePrefix+"/"+collectionOf[profileID]+"/", "", 10)
+		if err != nil {
+			t.Fatalf("list artwork: %v", err)
+		}
+		if len(objects) != want {
+			t.Errorf("%s's collection has %d artwork objects after the delete, want %d", profileID, len(objects), want)
+		}
 	}
 }
 

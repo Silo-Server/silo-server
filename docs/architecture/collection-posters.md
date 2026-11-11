@@ -124,7 +124,11 @@ differences:
   and collage key, and goes with its collection or account (`ON DELETE CASCADE`). Its delete
   trigger is the same `queue_deleted_collection_collage`.
 - Objects live at `user-collection-images/{collection}/collage/{variant}.{key}.webp`, beside
-  uploaded posters.
+  uploaded posters. Deleting a collection, a profile or an account deletes the
+  `user-collection-images/{collection}/` prefix of every collection it removed once the delete
+  commits: the profile delete returns the IDs of the collections it deleted, and the account
+  delete reads them in its transaction before the `users` cascade removes them. A failed
+  cleanup only logs.
 - `catalog.PersonalCollectionCollages.Posters` is the read path. Callers group collections by
   owner, resolve each owner once, and pass only collections without an assigned poster
   (`ownerScopedCollectionReads` in `internal/api/handlers`).

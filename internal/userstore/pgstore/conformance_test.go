@@ -128,8 +128,9 @@ func TestPostgresDeleteProfileRemovesProfileState(t *testing.T) {
 // profileTablesClearedElsewhere are the user tables with a profile_id that
 // DeleteProfile leaves to another step, with the step.
 var profileTablesClearedElsewhere = map[string]string{
-	"user_devices":   "the profile handler's device-library purge (downloads.Repository.PurgeProfileDevices)",
-	"user_downloads": "the profile handler's device-library purge (downloads.Repository.PurgeProfileDevices)",
+	"user_personal_collections": "DeleteProfile's own delete, which returns the collection IDs for artwork cleanup",
+	"user_devices":              "the profile handler's device-library purge (downloads.Repository.PurgeProfileDevices)",
+	"user_downloads":            "the profile handler's device-library purge (downloads.Repository.PurgeProfileDevices)",
 }
 
 // Every user-store table (user_*) keyed by (user_id, profile_id) is cleared
@@ -245,7 +246,7 @@ func TestPostgresConcurrentProfileDeletesWithCrossVisibility(t *testing.T) {
 		var wg sync.WaitGroup
 		errs := make(chan error, 2)
 		for _, id := range []string{"a", "b"} {
-			wg.Go(func() { errs <- newStore(pool, userID).DeleteProfile(ctx, id) })
+			wg.Go(func() { _, err := newStore(pool, userID).DeleteProfile(ctx, id); errs <- err })
 		}
 		wg.Wait()
 		close(errs)
@@ -286,7 +287,7 @@ func TestPostgresConcurrentProfileAndCollectionDeletes(t *testing.T) {
 
 		var wg sync.WaitGroup
 		errs := make(chan error, 2)
-		wg.Go(func() { errs <- newStore(pool, userID).DeleteProfile(ctx, "listed") })
+		wg.Go(func() { _, err := newStore(pool, userID).DeleteProfile(ctx, "listed"); errs <- err })
 		wg.Go(func() { errs <- newStore(pool, userID).DeleteCollection(ctx, c.ID) })
 		wg.Wait()
 		close(errs)
@@ -324,7 +325,7 @@ func TestPostgresConcurrentProfileDeleteAndCollectionReorder(t *testing.T) {
 
 		var wg sync.WaitGroup
 		var deleteErr, reorderErr error
-		wg.Go(func() { deleteErr = newStore(pool, userID).DeleteProfile(ctx, "gone") })
+		wg.Go(func() { _, deleteErr = newStore(pool, userID).DeleteProfile(ctx, "gone") })
 		wg.Go(func() { reorderErr = newStore(pool, userID).ReorderCollections(ctx, "gone", ids) })
 		wg.Wait()
 		if deleteErr != nil {
