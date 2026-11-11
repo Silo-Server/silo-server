@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
 type RegistryPosition struct {
@@ -12,15 +15,54 @@ type RegistryPosition struct {
 	ID        string
 }
 
+// RegistryPage is one page of the download registry. Next is set while more
+// rows follow, whether or not this page holds any.
+type RegistryPage struct {
+	Items []*Download
+	Next  *RegistryPosition
+}
+
+// accessibleRows drops the rows whose item the filter hides. Account-level
+// rows are shared by every profile on the account, so listing them applies the
+// requesting profile's content scope (library and maturity), as serving one
+// does. A failed check is an error, never the unfiltered rows.
+func (s *Service) accessibleRows(ctx context.Context, rows []*Download, filter catalog.AccessFilter) ([]*Download, error) {
+	if len(rows) == 0 {
+		return rows, nil
+	}
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ContentID)
+	}
+	allowed, err := s.itemAccess.EnsureAccessibleIDs(ctx, ids, filter)
+	if err != nil {
+		return nil, fmt.Errorf("checking access to downloaded items: %w", err)
+	}
+	return slices.DeleteFunc(rows, func(row *Download) bool { return !allowed[row.ContentID] }), nil
+}
+
 // ListPage preserves the separate account-ephemeral and profile/device modes.
 // ID breaks timestamp ties; creation time remains stable through status reports.
-func (s *Service) ListPage(ctx context.Context, userID int, profileID, deviceID string, after *RegistryPosition, limit int) ([]*Download, error) {
+// Next comes from the rows read, before account-level rows the profile may not
+// open are dropped, so a page left short or empty still leads to the next one.
+func (s *Service) ListPage(ctx context.Context, userID int, profileID, deviceID string, after *RegistryPosition, limit int, filter catalog.AccessFilter) (RegistryPage, error) {
 	if deviceID != "" && profileID == "" {
-		return nil, ErrProfileRequired
+		return RegistryPage{}, ErrProfileRequired
 	}
-	rows, err := s.repo.ListPage(ctx, userID, profileID, deviceID, after, limit)
+	rows, err := s.repo.ListPage(ctx, userID, profileID, deviceID, after, limit+1)
 	if err != nil {
-		return nil, err
+		return RegistryPage{}, err
+	}
+	page := RegistryPage{}
+	if len(rows) > limit {
+		rows = rows[:limit]
+		last := rows[len(rows)-1]
+		page.Next = &RegistryPosition{CreatedAt: last.CreatedAt, ID: last.ID}
+	}
+	if deviceID == "" {
+		if rows, err = s.accessibleRows(ctx, rows, filter); err != nil {
+			return RegistryPage{}, err
+		}
 	}
 	if after == nil && deviceID != "" {
 		// A registry read is the device syncing: it is how a revoked copy
@@ -33,7 +75,8 @@ func (s *Service) ListPage(ctx context.Context, userID int, profileID, deviceID 
 		// Progress is decoration; the registry is still correct without it.
 		slog.WarnContext(ctx, "download preparation progress unavailable", "component", "downloads", "error", err)
 	}
-	return rows, nil
+	page.Items = rows
+	return page, nil
 }
 func (r *Repository) ListPage(ctx context.Context, userID int, profileID, deviceID string, after *RegistryPosition, limit int) ([]*Download, error) {
 	return r.listRegistryPage(ctx, userID, profileID, deviceID, "", after, limit)

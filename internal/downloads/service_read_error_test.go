@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -163,6 +164,27 @@ func TestLocalDownloadCanceledWritePersistsFailureDB(t *testing.T) {
 	}
 }
 
+// hiddenItemAccess hides one item, as a profile's rating limit or library
+// restriction does, and admits every other.
+type hiddenItemAccess struct{ hidden string }
+
+func (a hiddenItemAccess) EnsureAccessible(_ context.Context, id string, _ catalog.AccessFilter) error {
+	if id == a.hidden {
+		return catalog.ErrItemNotFound
+	}
+	return nil
+}
+
+func (a hiddenItemAccess) EnsureAccessibleIDs(_ context.Context, ids []string, _ catalog.AccessFilter) (map[string]bool, error) {
+	allowed := map[string]bool{}
+	for _, id := range ids {
+		if id != a.hidden {
+			allowed[id] = true
+		}
+	}
+	return allowed, nil
+}
+
 func TestEphemeralDownloadRechecksProfileAccessDB(t *testing.T) {
 	repo := statusEventTestRepo(t)
 	path := filepath.Join(t.TempDir(), "fixture.mp4")
@@ -170,22 +192,69 @@ func TestEphemeralDownloadRechecksProfileAccessDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	// Another profile on the account queued this account-level row.
+	// Another profile on the account queued these account-level rows. The
+	// requesting profile's limits hide the newer one's item.
 	row := &Download{ID: "shared-row", UserID: 2, MediaFileID: 42, ContentID: "movie", Kind: KindQueued, Status: StatusQueued, Format: FormatOriginal, FileSize: 5, CreatedAt: now, UpdatedAt: now}
-	if err := repo.Create(t.Context(), row); err != nil {
-		t.Fatal(err)
+	open := &Download{ID: "open-row", UserID: 2, MediaFileID: 43, ContentID: "open-movie", Kind: KindQueued, Status: StatusQueued, Format: FormatOriginal, FileSize: 5, CreatedAt: now.Add(-time.Minute), UpdatedAt: now}
+	for _, d := range []*Download{row, open} {
+		if err := repo.Create(t.Context(), d); err != nil {
+			t.Fatal(err)
+		}
 	}
-	svc := NewService(repo, nil, nil, fakeFileResolver{&models.MediaFile{ID: 42, FilePath: path}}, nil, nil, fakeUserRepo{&models.User{ID: 2, DownloadAllowed: new(true)}}, &syncAccess{err: catalog.ErrItemNotFound}, nil, &config.DownloadConfig{Enabled: true})
+	newService := func(access ItemAccessChecker) *Service {
+		return NewService(repo, nil, nil, fakeFileResolver{&models.MediaFile{ID: 42, FilePath: path}}, nil, nil, fakeUserRepo{&models.User{ID: 2, DownloadAllowed: new(true)}}, access, nil, &config.DownloadConfig{Enabled: true})
+	}
+	svc := newService(hiddenItemAccess{hidden: "movie"})
+	ids := func(rows []*Download) []string {
+		out := make([]string, 0, len(rows))
+		for _, d := range rows {
+			out = append(out, d.ID)
+		}
+		return out
+	}
+
 	w := httptest.NewRecorder()
 	err := svc.ServeFile(t.Context(), w, httptest.NewRequest("GET", "/file", nil), 2, "restricted", "", row.ID, catalog.AccessFilter{})
 	if !errors.Is(err, catalog.ErrItemNotFound) || w.Body.Len() != 0 {
 		t.Fatalf("profile without access to the item: err %v, %d bytes served", err, w.Body.Len())
+	}
+
+	list, err := svc.List(t.Context(), 2, "restricted", "", catalog.AccessFilter{})
+	if err != nil || !slices.Equal(ids(list), []string{open.ID}) {
+		t.Fatalf("list for a profile without access to one item: %v, err %v", ids(list), err)
+	}
+	// The first page holds only the hidden row: it comes back empty and still
+	// leads to the page with the row the profile may see.
+	first, err := svc.ListPage(t.Context(), 2, "restricted", "", nil, 1, catalog.AccessFilter{})
+	if err != nil || len(first.Items) != 0 || first.Next == nil {
+		t.Fatalf("first page: %v, next %v, err %v", ids(first.Items), first.Next, err)
+	}
+	second, err := svc.ListPage(t.Context(), 2, "restricted", "", first.Next, 1, catalog.AccessFilter{})
+	if err != nil || !slices.Equal(ids(second.Items), []string{open.ID}) || second.Next != nil {
+		t.Fatalf("second page: %v, next %v, err %v", ids(second.Items), second.Next, err)
+	}
+
+	if err := svc.Delete(t.Context(), 2, "restricted", "", row.ID, catalog.AccessFilter{}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("delete by a profile without access to the item: %v", err)
 	}
 	stored, err := repo.GetByID(t.Context(), row.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if stored.Status != StatusQueued {
-		t.Fatalf("refused request moved the row to %s", stored.Status)
+		t.Fatalf("refused requests moved the row to %s", stored.Status)
+	}
+
+	// A failed access check must not fall back to the unfiltered rows, nor
+	// let the delete through.
+	failing := newService(&syncAccess{err: errors.New("catalog unavailable")})
+	if list, err := failing.List(t.Context(), 2, "restricted", "", catalog.AccessFilter{}); err == nil || len(list) != 0 {
+		t.Fatalf("list with a failing access check: %v, err %v", ids(list), err)
+	}
+	if err := failing.Delete(t.Context(), 2, "restricted", "", open.ID, catalog.AccessFilter{}); err == nil || errors.Is(err, ErrNotFound) {
+		t.Fatalf("delete with a failing access check: %v", err)
+	}
+	if _, err := repo.GetByID(t.Context(), open.ID); err != nil {
+		t.Fatalf("delete with a failing access check removed the row: %v", err)
 	}
 }
