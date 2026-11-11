@@ -133,7 +133,8 @@ func TestWebhookSyncV2HouseholdAdmission(t *testing.T) {
 		{"secondary", unrestricted, profileOwner(), TypePermissionDenied},
 		{"restricted secondary", restricted, profileOwner(), TypePermissionDenied},
 		{"profileless member", unrestricted, bearer(memberToken), TypePermissionDenied},
-		{"locked primary missing proof", locked, with(bearer(memberToken), "X-Profile-Id", "p-primary-locked"), TypeProfileVerificationRequired},
+		// A session naming the locked primary without proof never gets this
+		// far: the viewer gate refuses it. A key skips that gate's PIN check.
 		{"key skipped PIN", locked, with(bearer(apiKeyToken), "X-Profile-Id", "p-primary-locked"), TypeProfileVerificationRequired},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

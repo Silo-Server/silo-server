@@ -15,9 +15,10 @@ import (
 )
 
 // TestWebhookSyncV1HouseholdAdmission: only the household manager gets past
-// the top of a v1 management handler. The handler has no service here, so a
-// refused request that went on would panic, and an admitted one is told apart
-// by the handler's own 400 for a request with no connection ID or body.
+// the top of a v1 management handler. The handler has no service here. A
+// refused request that went on would get the handler's own 400 for a request
+// with no connection ID or body, which is how an admitted one is told apart;
+// in the two list handlers, which validate nothing first, it would panic.
 func TestWebhookSyncV1HouseholdAdmission(t *testing.T) {
 	tokens := access.NewProfileTokenService("synthetic-webhook-sync-test-signing-key", 0)
 	proof, _, err := tokens.Mint(access.ProfileTokenClaims{UserID: 1, SessionID: "session-1", ProfileID: "primary", PINRevision: 2})

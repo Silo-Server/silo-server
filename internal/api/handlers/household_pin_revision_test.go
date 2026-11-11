@@ -180,6 +180,15 @@ func v1HouseholdWrites(tokens *access.ProfileTokenService) map[string]func(t *te
 				admitted: http.StatusBadRequest, // No preference store: the mode is refused after admission.
 			}
 		},
+		"webhook sync connection": func(t *testing.T) v1Write {
+			store := pinLockedHousehold(t)
+			h := NewWebhookSyncHandler(nil, testUserStoreProvider{store: store}, tokens)
+			return v1Write{
+				store: store, method: http.MethodPut, serve: h.HandleUpdateConnection,
+				target: "/api/v1/webhook-sync/connections/", body: `{"server_name":"Example"}`,
+				admitted: http.StatusBadRequest, // No connection ID in the route: refused after admission.
+			}
+		},
 		"another profile's setting": func(t *testing.T) v1Write {
 			contract, err := settingscontract.Load()
 			if err != nil {

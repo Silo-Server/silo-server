@@ -111,7 +111,9 @@ func (h *WebhookSyncHandler) MayManageWebhookSync(ctx context.Context, userID in
 }
 
 // requireManagement reports whether the v1 caller may manage connections,
-// and writes the refusal when not.
+// and writes the refusal when not. A handler that takes a body calls
+// readHouseholdRequestBody first, so the check sees the acting profile as it
+// stands once the body has arrived.
 func (h *WebhookSyncHandler) requireManagement(w http.ResponseWriter, r *http.Request) bool {
 	allowed, err := h.MayManageWebhookSync(r.Context(), apimw.GetUserID(r.Context()), activeProfileIDOf(r), func(profile *userstore.Profile) error {
 		return verifyProfileTokenFor(r, h.profileTokens, profile)
@@ -168,7 +170,7 @@ func (h *WebhookSyncHandler) HandleLegacyListConnections(w http.ResponseWriter, 
 }
 
 func (h *WebhookSyncHandler) HandleCreateConnection(w http.ResponseWriter, r *http.Request) {
-	if !h.requireManagement(w, r) {
+	if !readHouseholdRequestBody(w, r) || !h.requireManagement(w, r) {
 		return
 	}
 	userID := apimw.GetUserID(r.Context())
@@ -191,7 +193,7 @@ func (h *WebhookSyncHandler) HandleCreateConnection(w http.ResponseWriter, r *ht
 }
 
 func (h *WebhookSyncHandler) HandleLegacyCreateConnection(w http.ResponseWriter, r *http.Request) {
-	if !h.requireManagement(w, r) {
+	if !readHouseholdRequestBody(w, r) || !h.requireManagement(w, r) {
 		return
 	}
 	userID := apimw.GetUserID(r.Context())
@@ -230,7 +232,7 @@ func (h *WebhookSyncHandler) HandleLegacyCreateConnection(w http.ResponseWriter,
 }
 
 func (h *WebhookSyncHandler) HandleUpdateConnection(w http.ResponseWriter, r *http.Request) {
-	if !h.requireManagement(w, r) {
+	if !readHouseholdRequestBody(w, r) || !h.requireManagement(w, r) {
 		return
 	}
 	userID := apimw.GetUserID(r.Context())
@@ -371,7 +373,7 @@ func (h *WebhookSyncHandler) HandleLegacyGetActors(w http.ResponseWriter, r *htt
 }
 
 func (h *WebhookSyncHandler) HandleUpdateProfileMappings(w http.ResponseWriter, r *http.Request) {
-	if !h.requireManagement(w, r) {
+	if !readHouseholdRequestBody(w, r) || !h.requireManagement(w, r) {
 		return
 	}
 	userID := apimw.GetUserID(r.Context())
@@ -394,7 +396,7 @@ func (h *WebhookSyncHandler) HandleUpdateProfileMappings(w http.ResponseWriter, 
 }
 
 func (h *WebhookSyncHandler) HandleLegacyUpdateActors(w http.ResponseWriter, r *http.Request) {
-	if !h.requireManagement(w, r) {
+	if !readHouseholdRequestBody(w, r) || !h.requireManagement(w, r) {
 		return
 	}
 	userID := apimw.GetUserID(r.Context())
