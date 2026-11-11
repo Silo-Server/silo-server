@@ -254,7 +254,7 @@ func (s *Scanner) processScopeExtras(
 	if scanCanceled(ctx) {
 		return nil
 	}
-	stats :=s.processExtraFiles(ctx, folder, extras, existingByPath, sidecars)
+	stats := s.processExtraFiles(ctx, folder, extras, existingByPath, sidecars)
 	result.New += stats.New
 	result.Updated += stats.Updated
 	result.Unchanged += stats.Unchanged
