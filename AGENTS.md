@@ -274,19 +274,21 @@ problems or can be reviewed and shipped separately.
 
 Before opening it, read [Open the pull request](CONTRIBUTING.md#open-the-pull-request) and follow
 it: a Conventional Commit title in plain language (`feat(playback): add realtime session hub`),
-the template, the `Closes` and `Related issue:` lines, and evidence for every change a user can
-see. End the body with the required AI disclosure, including the exact model identifier, agent
-harness, and any other AI tooling, as
-[AI-assisted contributions](CONTRIBUTING.md#ai-assisted-contributions) requires.
+the template, the `Closes` and `Related issue:` lines, and evidence: captures for a change a user
+can see, and the steps, build, and test or API results for one they can't. End the body with the
+required AI disclosure, including the exact model identifier, agent harness, and any other AI
+tooling, as [AI-assisted contributions](CONTRIBUTING.md#ai-assisted-contributions) requires.
 
 Pull requests are welcome from contributors who have had one merged in a Silo repository, or when
 a maintainer asks for one; the contribution-gate workflow closes others without review. A feature
 (`feat`) pull request from someone without triage or write access must also link an issue in the
-same repository labeled `accepted`. When working for someone in neither group, write an issue
-instead of opening a pull request, or post a feature idea in Discussions → Ideas; feature requests
-are not filed as issues. An AI agent contributing on behalf of a non-maintainer follows
-[docs/ai-contributions.md](docs/ai-contributions.md) for the required disclosure block and
-evidence standard.
+same repository labeled `accepted`. For anyone without triage or write access, the gate also closes
+drafts, and the evidence-deadline workflow closes a pull request whose `Evidence` check still asks
+for evidence 24 hours after it opens, so open it ready for review and publish evidence right away.
+When working for someone in neither group, write an issue instead of opening a pull request, or
+post a feature idea in Discussions → Ideas; feature requests are not filed as issues. An AI agent
+contributing on behalf of a non-maintainer follows [docs/ai-contributions.md](docs/ai-contributions.md)
+for the required disclosure block and evidence standard.
 
 Do not open a pull request against an issue someone else is working on. Read the issue's comments
 and linked pull requests first, and raise a likely collision with the user instead of racing the
