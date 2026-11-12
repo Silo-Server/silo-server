@@ -4337,6 +4337,18 @@
       "value": "جارٍ تحميل الأعضاء..."
     }
   ],
+  "web.admin.access.groups.members.noMatches": [
+    {
+      "type": 0,
+      "value": "لا يوجد أعضاء يطابقون بحثك."
+    }
+  ],
+  "web.admin.access.groups.members.search": [
+    {
+      "type": 0,
+      "value": "البحث في الأعضاء"
+    }
+  ],
   "web.admin.access.groups.newGroup": [
     {
       "type": 0,
@@ -64719,6 +64731,34 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.list.hidePaths": [
+    {
+      "type": 0,
+      "value": "إخفاء المسارات"
+    }
+  ],
+  "web.admin.libraries.list.moreActions": [
+    {
+      "type": 0,
+      "value": "مزيد من الإجراءات لـ "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.moveDown": [
+    {
+      "type": 0,
+      "value": "نقل لأسفل"
+    }
+  ],
+  "web.admin.libraries.list.moveUp": [
+    {
+      "type": 0,
+      "value": "نقل لأعلى"
+    }
+  ],
   "web.admin.libraries.list.neverScanned": [
     {
       "type": 0,
@@ -64747,6 +64787,12 @@
     {
       "type": 0,
       "value": "فحص المكتبة"
+    }
+  ],
+  "web.admin.libraries.list.showPaths": [
+    {
+      "type": 0,
+      "value": "عرض المسارات"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -110292,6 +110338,16 @@
       "value": "تعذّر تحميل المستخدمين."
     }
   ],
+  "web.admin.users.list.moreActions": [
+    {
+      "type": 0,
+      "value": "مزيد من الإجراءات لـ "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    }
+  ],
   "web.admin.users.list.nextPage": [
     {
       "type": 0,
@@ -110302,6 +110358,12 @@
     {
       "type": 0,
       "value": "بلا مجموعة"
+    }
+  ],
+  "web.admin.users.list.noMatches": [
+    {
+      "type": 0,
+      "value": "لا يوجد مستخدمون يطابقون بحثك أو عامل التصفية."
     }
   ],
   "web.admin.users.list.pageRange": [

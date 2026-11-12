@@ -4052,6 +4052,18 @@
       "value": "正在加载成员……"
     }
   ],
+  "web.admin.access.groups.members.noMatches": [
+    {
+      "type": 0,
+      "value": "没有与你的搜索匹配的成员。"
+    }
+  ],
+  "web.admin.access.groups.members.search": [
+    {
+      "type": 0,
+      "value": "搜索成员"
+    }
+  ],
   "web.admin.access.groups.newGroup": [
     {
       "type": 0,
@@ -39067,6 +39079,34 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.list.hidePaths": [
+    {
+      "type": 0,
+      "value": "隐藏路径"
+    }
+  ],
+  "web.admin.libraries.list.moreActions": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "的更多操作"
+    }
+  ],
+  "web.admin.libraries.list.moveDown": [
+    {
+      "type": 0,
+      "value": "下移"
+    }
+  ],
+  "web.admin.libraries.list.moveUp": [
+    {
+      "type": 0,
+      "value": "上移"
+    }
+  ],
   "web.admin.libraries.list.neverScanned": [
     {
       "type": 0,
@@ -39095,6 +39135,12 @@
     {
       "type": 0,
       "value": "扫描媒体库"
+    }
+  ],
+  "web.admin.libraries.list.showPaths": [
+    {
+      "type": 0,
+      "value": "显示路径"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -75424,6 +75470,16 @@
       "value": "无法加载用户。"
     }
   ],
+  "web.admin.users.list.moreActions": [
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "的更多操作"
+    }
+  ],
   "web.admin.users.list.nextPage": [
     {
       "type": 0,
@@ -75434,6 +75490,12 @@
     {
       "type": 0,
       "value": "无组"
+    }
+  ],
+  "web.admin.users.list.noMatches": [
+    {
+      "type": 0,
+      "value": "没有与你的搜索或筛选条件匹配的用户。"
     }
   ],
   "web.admin.users.list.pageRange": [

@@ -4151,6 +4151,18 @@
       "value": "\u200F\u202ELoading members...\u202C"
     }
   ],
+  "web.admin.access.groups.members.noMatches": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo members match your search.\u202C"
+    }
+  ],
+  "web.admin.access.groups.members.search": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESearch members\u202C"
+    }
+  ],
   "web.admin.access.groups.newGroup": [
     {
       "type": 0,
@@ -46608,6 +46620,34 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.list.hidePaths": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHide paths\u202C"
+    }
+  ],
+  "web.admin.libraries.list.moreActions": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMore actions for \u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.moveDown": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMove down\u202C"
+    }
+  ],
+  "web.admin.libraries.list.moveUp": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMove up\u202C"
+    }
+  ],
   "web.admin.libraries.list.neverScanned": [
     {
       "type": 0,
@@ -46636,6 +46676,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EScan Library\u202C"
+    }
+  ],
+  "web.admin.libraries.list.showPaths": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EShow paths\u202C"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -86267,6 +86313,16 @@
       "value": "\u200F\u202ECould not load users.\u202C"
     }
   ],
+  "web.admin.users.list.moreActions": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMore actions for \u202C"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    }
+  ],
   "web.admin.users.list.nextPage": [
     {
       "type": 0,
@@ -86277,6 +86333,12 @@
     {
       "type": 0,
       "value": "\u200F\u202ENo group\u202C"
+    }
+  ],
+  "web.admin.users.list.noMatches": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo users match your search or filter.\u202C"
     }
   ],
   "web.admin.users.list.pageRange": [

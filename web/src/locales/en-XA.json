@@ -4203,6 +4203,18 @@
       "value": "⟦Ļöåđîñĝ ɱéɱƀéŕš...~~~~~~~~⟧"
     }
   ],
+  "web.admin.access.groups.members.noMatches": [
+    {
+      "type": 0,
+      "value": "⟦Ñö ɱéɱƀéŕš ɱåţçĥ ýöûŕ šéåŕçĥ.~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.members.search": [
+    {
+      "type": 0,
+      "value": "⟦Šéåŕçĥ ɱéɱƀéŕš~~~~~~⟧"
+    }
+  ],
   "web.admin.access.groups.newGroup": [
     {
       "type": 0,
@@ -48116,6 +48128,38 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.list.hidePaths": [
+    {
+      "type": 0,
+      "value": "⟦Ĥîđé þåţĥš~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.list.moreActions": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöŕé åçţîöñš ƒöŕ "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.list.moveDown": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöṽé đöŵñ~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.list.moveUp": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöṽé ûþ~~~⟧"
+    }
+  ],
   "web.admin.libraries.list.neverScanned": [
     {
       "type": 0,
@@ -48144,6 +48188,12 @@
     {
       "type": 0,
       "value": "⟦Šçåñ Ļîƀŕåŕý~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.list.showPaths": [
+    {
+      "type": 0,
+      "value": "⟦Šĥöŵ þåţĥš~~~~⟧"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -89171,6 +89221,20 @@
       "value": "⟦Çöûļđ ñöţ ļöåđ ûšéŕš.~~~~~~~~~⟧"
     }
   ],
+  "web.admin.users.list.moreActions": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöŕé åçţîöñš ƒöŕ "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~⟧"
+    }
+  ],
   "web.admin.users.list.nextPage": [
     {
       "type": 0,
@@ -89181,6 +89245,12 @@
     {
       "type": 0,
       "value": "⟦Ñö ĝŕöûþ~~~~⟧"
+    }
+  ],
+  "web.admin.users.list.noMatches": [
+    {
+      "type": 0,
+      "value": "⟦Ñö ûšéŕš ɱåţçĥ ýöûŕ šéåŕçĥ öŕ ƒîļţéŕ.~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.users.list.pageRange": [
