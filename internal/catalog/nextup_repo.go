@@ -777,6 +777,14 @@ func buildListResumableFirstEpisodesQuery(q NextUpQuery, inProgressIDs []string)
 		args = append(args, q.droppedSeriesIDs)
 		seriesFilter = fmt.Sprintf(" AND NOT (e.series_id = ANY($%d::text[]))", len(args))
 	}
+	// A started episode with no version within the playback-quality ceiling
+	// cannot resume, so it offers nothing.
+	if playable := EpisodePlayableUnderCeilingSQL("e.content_id", q.AccessFilter, func(value any) int {
+		args = append(args, value)
+		return len(args)
+	}); playable != "" {
+		seriesFilter += "\n\t\t  AND " + playable
+	}
 
 	query := fmt.Sprintf(`
 		SELECT DISTINCT ON (e.series_id)

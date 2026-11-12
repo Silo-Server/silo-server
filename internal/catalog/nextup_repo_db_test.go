@@ -182,67 +182,52 @@ func (f nextUpSpecialsFixture) seedSeries(t *testing.T, series string, episodes,
 func TestEpisodesAboveQualityCeilingStayHiddenPostgres(t *testing.T) {
 	ctx := t.Context()
 	f := newNextUpSpecialsFixture(t)
-	series := f.prefix + "-series"
+	series, started := f.prefix+"-series", f.prefix+"-started"
 	episode := func(n int) string { return fmt.Sprintf("%s-s01e%02d", series, n) }
-	base := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
-	f.exec(t, `INSERT INTO media_items (content_id,type,title) VALUES ($1,'series',$1)`, series)
-	f.exec(t, `INSERT INTO media_item_libraries (content_id,media_folder_id,first_seen_at) VALUES ($1,$2,$3)`, series, f.folder, base)
-	// E2 is 4K only and arrived alone a week later; E3-E4 share one 1080p file.
-	for n, arrived := range map[int]time.Time{1: base, 2: base.Add(7 * 24 * time.Hour), 3: base, 4: base} {
-		f.exec(t, `INSERT INTO episodes (content_id,series_id,season_number,episode_number,title) VALUES ($1,$2,1,$3,$1)`, episode(n), series, n)
-		f.exec(t, `INSERT INTO episode_libraries (episode_id,media_folder_id,first_seen_at) VALUES ($1,$2,$3)`, episode(n), f.folder, arrived)
-	}
-	f.exec(t, `INSERT INTO media_files (episode_id,media_folder_id,file_path,resolution) VALUES ($1,$2,$3,'1080p')`, episode(1), f.folder, "/"+episode(1))
-	f.exec(t, `INSERT INTO media_files (episode_id,media_folder_id,file_path,resolution) VALUES ($1,$2,$3,'2160p')`, episode(2), f.folder, "/"+episode(2))
-	f.exec(t, `INSERT INTO media_files (episode_id,media_folder_id,file_path,resolution,multi_episode_start,multi_episode_end) VALUES ($1,$2,$3,'1080p',3,4)`, episode(3), f.folder, "/"+episode(3))
-	f.exec(t, `INSERT INTO user_watch_progress (user_id,profile_id,media_item_id,position_seconds,completed,updated_at) VALUES ($1,$2,$3,0,true,$4)`,
-		f.userID, f.profileID, episode(1), base.Add(time.Hour))
-	// A second library holds a 1080p E2, which counts only where the viewer
-	// may use that library.
-	var other int
-	if err := f.pool.QueryRow(ctx, `INSERT INTO media_folders (type,name,enabled) VALUES ('series',$1,true) RETURNING id`, f.prefix+"-other").Scan(&other); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		bg := context.Background()
-		_, _ = f.pool.Exec(bg, `DELETE FROM media_files WHERE media_folder_id=$1`, other)
-		_, _ = f.pool.Exec(bg, `DELETE FROM media_folders WHERE id=$1`, other)
-	})
-	f.exec(t, `INSERT INTO media_files (episode_id,media_folder_id,file_path,resolution) VALUES ($1,$2,$3,'1080p')`, episode(2), other, "/other/"+episode(2))
+	startedEpisode := started + "-s01e01"
+	other := seedQualityCeilingSeries(t, f, series, started)
 
 	all := []string{episode(1), episode(2), episode(3), episode(4)}
 	for _, tc := range []struct {
-		name   string
-		access AccessFilter
-		nextUp string
-		browse []string
+		name    string
+		access  AccessFilter
+		nextUp  string
+		resumed string // the started series' resumable episode
+		browse  []string
 		// adjacent is Jellyfin's AdjacentTo window around E1: a hidden E2
 		// drops out rather than giving way to E3.
 		adjacent []string
 		recent   []string // the first library's row, where E2 arrived in 4K
 	}{
-		{"no ceiling", AccessFilter{}, episode(2), all, all[:2], []string{episode(2), series}},
-		{"1080p ceiling", AccessFilter{MaxPlaybackQuality: "1080p", DisabledLibraryIDs: []int{other}}, "", []string{episode(1), episode(3), episode(4)}, all[:1], []string{series}},
-		{"1080p ceiling with the 1080p library", AccessFilter{MaxPlaybackQuality: "1080p"}, episode(2), all, all[:2], []string{series}},
+		{"no ceiling", AccessFilter{}, episode(2), startedEpisode, all, all[:2], []string{episode(2), series}},
+		{"1080p ceiling", AccessFilter{MaxPlaybackQuality: "1080p", DisabledLibraryIDs: []int{other}}, "", "", []string{episode(1), episode(3), episode(4)}, all[:1], []string{series}},
+		{"1080p ceiling with the 1080p library", AccessFilter{MaxPlaybackQuality: "1080p"}, episode(2), "", all, all[:2], []string{series}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := NewNextUpRepository(f.pool, pgstore.NewPostgresProvider(f.pool))
 			for _, q := range []NextUpQuery{
 				{UserID: f.userID, ProfileID: f.profileID, AccessFilter: tc.access, Limit: 20, RankByRelease: true},
 				{UserID: f.userID, ProfileID: f.profileID, AccessFilter: tc.access, SeriesID: series, Limit: 5},
+				// The resumable branch offers a started episode only when it
+				// can play; the started series has only E2, in 4K.
+				{UserID: f.userID, ProfileID: f.profileID, AccessFilter: tc.access, SeriesID: started, Limit: 5, EnableResumable: true},
 			} {
 				results, err := repo.ListNextUp(ctx, q)
 				if err != nil {
 					t.Fatal(err)
 				}
+				wantSeries, want := series, tc.nextUp
+				if q.SeriesID == started {
+					wantSeries, want = started, tc.resumed
+				}
 				got := ""
 				for _, res := range results {
-					if res.SeriesID == series {
+					if res.SeriesID == wantSeries {
 						got = res.ContentID
 					}
 				}
-				if got != tc.nextUp {
-					t.Errorf("next up (series %q) = %q, want %q", q.SeriesID, got, tc.nextUp)
+				if got != want {
+					t.Errorf("next up (series %q) = %q, want %q", q.SeriesID, got, want)
 				}
 			}
 
@@ -305,4 +290,46 @@ func assertRecentTVTargets(t *testing.T, pool *pgxpool.Pool, folder int, prefix 
 			t.Errorf("recently added (%s) = %v, want %v", name, got, want)
 		}
 	}
+}
+
+// seedQualityCeilingSeries seeds TestEpisodesAboveQualityCeilingStayHiddenPostgres
+// and returns the second library. In series, E1 (1080p, watched), E2 (4K,
+// arriving alone a week later), and E3-E4 (one 1080p multi-episode file);
+// a second library holds a 1080p E2, which counts only where the viewer may
+// use that library. In started, the profile is partway through a 4K-only E1.
+// It has no library arrival row, so Recently Added doesn't count it.
+func seedQualityCeilingSeries(t *testing.T, f nextUpSpecialsFixture, series, started string) int {
+	t.Helper()
+	ctx := t.Context()
+	episode := func(n int) string { return fmt.Sprintf("%s-s01e%02d", series, n) }
+	startedEpisode := started + "-s01e01"
+	base := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	f.exec(t, `INSERT INTO media_items (content_id,type,title) VALUES ($1,'series',$1)`, series)
+	f.exec(t, `INSERT INTO media_item_libraries (content_id,media_folder_id,first_seen_at) VALUES ($1,$2,$3)`, series, f.folder, base)
+	for n, arrived := range map[int]time.Time{1: base, 2: base.Add(7 * 24 * time.Hour), 3: base, 4: base} {
+		f.exec(t, `INSERT INTO episodes (content_id,series_id,season_number,episode_number,title) VALUES ($1,$2,1,$3,$1)`, episode(n), series, n)
+		f.exec(t, `INSERT INTO episode_libraries (episode_id,media_folder_id,first_seen_at) VALUES ($1,$2,$3)`, episode(n), f.folder, arrived)
+	}
+	f.exec(t, `INSERT INTO media_files (episode_id,media_folder_id,file_path,resolution) VALUES ($1,$2,$3,'1080p')`, episode(1), f.folder, "/"+episode(1))
+	f.exec(t, `INSERT INTO media_files (episode_id,media_folder_id,file_path,resolution) VALUES ($1,$2,$3,'2160p')`, episode(2), f.folder, "/"+episode(2))
+	f.exec(t, `INSERT INTO media_files (episode_id,media_folder_id,file_path,resolution,multi_episode_start,multi_episode_end) VALUES ($1,$2,$3,'1080p',3,4)`, episode(3), f.folder, "/"+episode(3))
+	f.exec(t, `INSERT INTO user_watch_progress (user_id,profile_id,media_item_id,position_seconds,completed,updated_at) VALUES ($1,$2,$3,0,true,$4)`,
+		f.userID, f.profileID, episode(1), base.Add(time.Hour))
+	var other int
+	if err := f.pool.QueryRow(ctx, `INSERT INTO media_folders (type,name,enabled) VALUES ('series',$1,true) RETURNING id`, f.prefix+"-other").Scan(&other); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = f.pool.Exec(bg, `DELETE FROM media_files WHERE media_folder_id=$1`, other)
+		_, _ = f.pool.Exec(bg, `DELETE FROM media_folders WHERE id=$1`, other)
+	})
+	f.exec(t, `INSERT INTO media_files (episode_id,media_folder_id,file_path,resolution) VALUES ($1,$2,$3,'1080p')`, episode(2), other, "/other/"+episode(2))
+
+	f.exec(t, `INSERT INTO media_items (content_id,type,title) VALUES ($1,'series',$1)`, started)
+	f.exec(t, `INSERT INTO episodes (content_id,series_id,season_number,episode_number,title) VALUES ($1,$2,1,1,$1)`, startedEpisode, started)
+	f.exec(t, `INSERT INTO media_files (episode_id,media_folder_id,file_path,resolution) VALUES ($1,$2,$3,'2160p')`, startedEpisode, f.folder, "/"+startedEpisode)
+	f.exec(t, `INSERT INTO user_watch_progress (user_id,profile_id,media_item_id,position_seconds,completed,updated_at) VALUES ($1,$2,$3,30,false,$4)`,
+		f.userID, f.profileID, startedEpisode, base.Add(2*time.Hour))
+	return other
 }
