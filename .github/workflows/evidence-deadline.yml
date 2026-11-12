@@ -27,4 +27,6 @@ jobs:
       pull-requests: write
     uses: ./.github/workflows/reusable-evidence-deadline.yml
     with:
-      dry_run: ${{ inputs.dry_run == true }}
+      # Log only, closing nothing, until EVIDENCE_DEADLINE_ENFORCE is "true" as a
+      # repository or organization variable.
+      dry_run: ${{ inputs.dry_run == true || vars.EVIDENCE_DEADLINE_ENFORCE != 'true' }}

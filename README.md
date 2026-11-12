@@ -161,12 +161,11 @@ Feature ideas go in
 [Discussions → Ideas](https://github.com/Silo-Server/silo-server/discussions/categories/ideas),
 not issues.
 
-Pull requests are still welcome from contributors who've had one merged in a
-Silo repository, or when a maintainer asks for one; a feature pull request also
-needs an issue in this repository that a maintainer has labeled `accepted`.
-Other pull requests are closed automatically without review; when a maintainer
-asked for one, they reopen it. [CONTRIBUTING.md](CONTRIBUTING.md) explains what
-makes an issue useful.
+Pull requests from outside the team are for bug fixes. Anything else needs a
+maintainer to ask for it by labeling an issue `accepted`, and every pull request
+needs evidence. Other pull requests are closed automatically without review.
+[CONTRIBUTING.md](CONTRIBUTING.md) has the rules and explains what makes an
+issue useful.
 
 ## Supporting Silo
 

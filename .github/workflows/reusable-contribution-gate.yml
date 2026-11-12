@@ -2,20 +2,22 @@ name: Contribution gate (reusable)
 
 # Enforces the Silo pull request policy. silo-server, silo-apple, silo-android,
 # and silo-roku each call this from their own contribution-gate.yml on
-# pull_request_target, so it acts on the calling repository:
+# pull_request_target, so it acts on the calling repository. For a pull request
+# from someone without triage or write access:
 #
-# 1. Pull requests are open to people who have had one merged in a Silo-Server
-#    repository. Other pull requests are closed without review.
-# 2. Draft pull requests are closed, both when they open as drafts and when they
-#    are converted to drafts. Callers run on `converted_to_draft` for that.
-# 3. A feature pull request (title starts with `feat`) from someone without
-#    triage or write access must link an issue in the calling repository that
-#    a maintainer labeled `accepted`.
+# 1. Drafts are closed, both when they open as drafts and when they are
+#    converted to drafts. Callers run on `converted_to_draft` for that.
+# 2. A fourth open pull request from the same person in the repository is
+#    closed.
+# 3. A pull request must fix a bug: its title is a `fix` or `perf` Conventional
+#    Commit. Anything else must link an issue in the calling repository that a
+#    maintainer labeled `accepted`, which is how a maintainer asks for it.
 #
-# Maintainers (triage access or higher) and bots are exempt. A maintainer lets
-# a closed pull request through by reopening it, which adds the `invited` label;
-# a pull request with that label is never closed by this workflow. The separate
-# evidence deadline workflow still applies to it.
+# A merged pull request earns no exemption. Maintainers (triage access or
+# higher) and bots are exempt. A maintainer lets a closed pull request through
+# by reopening it, which adds the `invited` label; a pull request with that
+# label is never closed by this workflow. The separate evidence deadline
+# workflow still applies to it.
 #
 # pull_request_target runs with a write token on fork pull requests. That is safe
 # here only because this job never checks out or runs code from the pull
@@ -50,8 +52,10 @@ jobs:
             const author = pr.user.login;
             const INVITED = "invited";
             const ACCEPTED = "accepted";
+            const OPEN_LIMIT = 3;
             const contributing = process.env.CONTRIBUTING_URL || `https://github.com/${owner}/${repo}/blob/HEAD/CONTRIBUTING.md`;
             const ideas = `https://github.com/${owner}/${repo}/discussions/categories/ideas`;
+            const notJudgment = "That isn't a judgment of the work.";
 
             // Triage counts, so org members can be exempted without write access.
             async function isMaintainer(username) {
@@ -64,8 +68,8 @@ jobs:
               }
             }
 
-            async function close(reason) {
-              await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body: reason });
+            async function close(...paragraphs) {
+              await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body: paragraphs.join("\n\n") });
               await github.rest.pulls.update({ owner, repo, pull_number: pr.number, state: "closed" });
             }
 
@@ -85,41 +89,34 @@ jobs:
 
             // Decide by repository role, not author_association: MEMBER and
             // COLLABORATOR include read-only access, and CONTRIBUTOR only means a
-            // commit on the default branch, not a merged pull request.
+            // commit on the default branch.
             if (await isMaintainer(author)) {
               core.info(`${author} is a maintainer; skipping.`);
               return;
             }
 
-            const { data: merged } = await github.rest.search.issuesAndPullRequests({
-              q: `org:${owner} is:pr is:merged author:${author}`,
-              per_page: 1,
-            });
-            if (merged.incomplete_results) {
-              throw new Error(`Search for ${author}'s merged pull requests timed out; leaving #${pr.number} open.`);
-            }
-            if (merged.total_count === 0) {
-              core.info(`${author} has no merged pull request in ${owner}; closing #${pr.number}.`);
-              await close([
-                "Thanks for the pull request. Silo takes pull requests from people who have had one merged in a Silo repository, or whom a maintainer has asked for one, so this one is closed without review. That isn't a judgment of the work. If a maintainer asked you for it, they will reopen it.",
-                "",
-                `If the problem still matters, open an issue for it and link this pull request; a maintainer may reopen it or use the code as a reference. Feature ideas go in [Discussions → Ideas](${ideas}). [The contributing guide](${contributing}) explains why.`,
-              ].join("\n"));
-              return;
-            }
-
             if (pr.draft) {
               core.info(`#${pr.number} is a draft from ${author}; closing.`);
-              await close([
-                "Thanks for the pull request. Silo doesn't take draft pull requests from contributors, so this one is closed. That isn't a judgment of the work.",
-                "",
-                `When the change is ready for review, open a new pull request with its evidence, or ask a maintainer to reopen this one. [The contributing guide](${contributing}) explains why.`,
-              ].join("\n"));
+              await close(
+                `Thanks for the pull request. Silo doesn't take draft pull requests from contributors, so this one is closed. ${notJudgment}`,
+                `When the change is ready for review, open a new pull request with its evidence. [The contributing guide](${contributing}) explains why.`,
+              );
               return;
             }
 
-            if (!/^feat(\([^)]*\))?!?:/i.test(pr.title)) {
-              core.info(`#${pr.number} is not a feature pull request; nothing to check.`);
+            const others = (await github.paginate(github.rest.pulls.list, { owner, repo, state: "open", per_page: 100 }))
+              .filter((open) => open.user.login === author && open.number !== pr.number);
+            if (others.length >= OPEN_LIMIT) {
+              core.info(`${author} already has ${others.length} open pull requests; closing #${pr.number}.`);
+              await close(
+                `Thanks for the pull request. Contributors can have ${OPEN_LIMIT} open pull requests in a Silo repository at a time, and you already have ${others.length} here, so this one is closed without review. ${notJudgment}`,
+                `Once one of them merges or closes, open this again. [The contributing guide](${contributing}) explains why.`,
+              );
+              return;
+            }
+
+            if (/^(fix|perf)(\([^)]*\))?!?:/i.test(pr.title.trim())) {
+              core.info(`#${pr.number} is a bug fix; nothing more to check.`);
               return;
             }
 
@@ -143,9 +140,8 @@ jobs:
               return;
             }
 
-            core.info(`#${pr.number} is a feature pull request without an accepted issue; closing.`);
-            await close([
-              `Thanks for the pull request. A feature pull request needs a linked issue in this repository that a maintainer has labeled \`${ACCEPTED}\`, and this one doesn't link one, so it is closed without review.`,
-              "",
-              `Propose the feature in [Discussions → Ideas](${ideas}), or ask on an existing issue. Once an issue in this repository carries the \`${ACCEPTED}\` label, link it in the description (for example \`Closes #123\`) of a new pull request, or ask a maintainer to reopen this one. [The contributing guide](${contributing}) has the details.`,
-            ].join("\n"));
+            core.info(`#${pr.number} is not a bug fix and links no accepted issue; closing.`);
+            await close(
+              `Thanks for the pull request. Silo takes pull requests from contributors for bug fixes, with a \`fix\` or \`perf\` title. Anything else needs a maintainer to ask for it by labeling an issue in this repository \`${ACCEPTED}\`, and this pull request doesn't link one, so it is closed without review. ${notJudgment}`,
+              `Feature ideas go in [Discussions → Ideas](${ideas}). If this fixes a bug, open a new pull request with a \`fix:\` title. If a maintainer labels an issue \`${ACCEPTED}\` for this change, link it (for example \`Closes #123\`) in a new pull request. [The contributing guide](${contributing}) has the details.`,
+            );
