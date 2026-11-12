@@ -3815,6 +3815,21 @@ func (r *FileRepository) UpdateContentID(ctx context.Context, fileID int, filePa
 	return nil
 }
 
+// UnlinkContentID undoes a link the caller made with UpdateContentID: it
+// clears content_id only while the row still carries contentID, wherever the
+// row is now, since a scan may have moved it with its links meanwhile
+// (RelinkMovedFile). A row that another writer linked elsewhere, or that
+// lost the link already, is left alone; unlinked then reports false.
+func (r *FileRepository) UnlinkContentID(ctx context.Context, fileID int, contentID string) (unlinked bool, err error) {
+	tag, err := r.pool.Exec(ctx,
+		"UPDATE media_files SET content_id = NULL, updated_at = NOW() WHERE id = $1 AND content_id = $2",
+		fileID, contentID)
+	if err != nil {
+		return false, fmt.Errorf("unlinking media file %d from %s: %w", fileID, contentID, err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
 // unwrittenFileError explains a path-fenced write that matched no row:
 // ErrFileNotFound when the row is gone, ErrFileMoved when it has another path.
 func (r *FileRepository) unwrittenFileError(ctx context.Context, fileID int) error {

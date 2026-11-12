@@ -578,6 +578,16 @@ func newFakeFileRepo() *fakeFileRepo {
 	}
 }
 
+func (r *fakeFileRepo) UnlinkContentID(_ context.Context, fileID int, contentID string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.contentIDs[fileID] != contentID {
+		return false, nil
+	}
+	r.contentIDs[fileID] = ""
+	return true, nil
+}
+
 func (r *fakeFileRepo) UpdateContentID(_ context.Context, fileID int, _ string, contentID string) error {
 	r.mu.Lock()
 	if err := r.updateErrors[fileID]; err != nil {

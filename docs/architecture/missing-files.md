@@ -180,7 +180,11 @@ What the new path says about the title decides the row's links:
   skeleton the refusal is the job's error: the queue records it and, with
   `rerun_requested` set, runs the job again at once against the row as it is
   now, and a skeleton item the job had just created for the link is deleted
-  again while nothing references it. The episode linker skips the file and
+  again while nothing references it. When a step after a successful skeleton
+  link fails, the undo (`FileRepository.UnlinkContentID`) is keyed on the
+  link instead of the path: it clears the row while it still carries the
+  skeleton, even if a same-title move changed its path, and leaves a link
+  another writer put there. The episode linker skips the file and
   goes on with the series' other files, since the retitled row's rematch
   links it. The fence is part of the `UPDATE`, which waits on the retitle's
   row lock, so it holds between API servers too. Writes keyed by the row's

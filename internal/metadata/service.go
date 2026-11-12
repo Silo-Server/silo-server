@@ -34,6 +34,7 @@ import (
 // FileContentUpdater updates content_id on media_files.
 type FileContentUpdater interface {
 	UpdateContentID(ctx context.Context, fileID int, filePath, contentID string) error
+	UnlinkContentID(ctx context.Context, fileID int, contentID string) (bool, error)
 	ReplaceContentID(ctx context.Context, oldContentID, newContentID string) (int, error)
 	FindContentIDByRootPath(ctx context.Context, folderID int, rootPath, preferredType string) (string, error)
 	FindContentIDByObservedRootPath(ctx context.Context, folderID int, observedRootPath, preferredType string) (string, error)
@@ -8369,14 +8370,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 		return nil, fmt.Errorf("linking file to skeleton: %w", err)
 	}
 	if _, err := s.folderTypeForSkeleton(ctx, folderID); err != nil {
-		if clearErr := s.fileRepo.UpdateContentID(ctx, file.ID, file.FilePath, ""); clearErr != nil {
-			slog.WarnContext(ctx, "metadata: failed to clear file link after disabled skeleton folder", "component", "metadata",
-				"content_id", contentID,
-				"file_id", file.ID,
-				"folder_id", folderID,
-				"error", clearErr,
-			)
-		}
+		unlinkErr := s.unlinkSkeletonFile(ctx, file.ID, contentID)
 		if cleanupErr := s.deleteCreatedSkeleton(ctx, contentID); cleanupErr != nil {
 			slog.WarnContext(ctx, "metadata: failed to clean up skeleton for disabled folder", "component", "metadata",
 				"content_id", contentID,
@@ -8385,17 +8379,10 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 				"error", cleanupErr,
 			)
 		}
-		return nil, fmt.Errorf("validating skeleton folder before membership: %w", err)
+		return nil, errors.Join(fmt.Errorf("validating skeleton folder before membership: %w", err), unlinkErr)
 	}
 	if err := s.upsertLibraryMembership(ctx, contentID, folderID); err != nil {
-		if clearErr := s.fileRepo.UpdateContentID(ctx, file.ID, file.FilePath, ""); clearErr != nil {
-			slog.WarnContext(ctx, "metadata: failed to clear file link after skeleton membership failure", "component", "metadata",
-				"content_id", contentID,
-				"file_id", file.ID,
-				"folder_id", folderID,
-				"error", clearErr,
-			)
-		}
+		unlinkErr := s.unlinkSkeletonFile(ctx, file.ID, contentID)
 		if cleanupErr := s.deleteCreatedSkeleton(ctx, contentID); cleanupErr != nil {
 			slog.WarnContext(ctx, "metadata: failed to clean up membershipless skeleton", "component", "metadata",
 				"content_id", contentID,
@@ -8404,12 +8391,31 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 				"error", cleanupErr,
 			)
 		}
-		return nil, fmt.Errorf("upserting skeleton membership: %w", err)
+		return nil, errors.Join(fmt.Errorf("upserting skeleton membership: %w", err), unlinkErr)
 	}
 
 	res.ContentID = contentID
 	res.IsNew = true
 	return res, nil
+}
+
+// unlinkSkeletonFile undoes the link createOrFindSkeleton just made from the
+// file to the skeleton contentID, when a later step fails. It applies while
+// the row still carries that link, whatever its path: a scan may have moved
+// the row with its links since. A link another writer put there instead is
+// theirs and stays. A failed write is returned, so the job records it rather
+// than leaving a file linked to an item with no library membership.
+func (s *MetadataService) unlinkSkeletonFile(ctx context.Context, fileID int, contentID string) error {
+	unlinked, err := s.fileRepo.UnlinkContentID(ctx, fileID, contentID)
+	if err != nil {
+		return fmt.Errorf("undoing the file's skeleton link: %w", err)
+	}
+	if !unlinked {
+		slog.InfoContext(ctx, "metadata: file no longer carries the skeleton link to undo", "component", "metadata",
+			"content_id", contentID,
+			"file_id", fileID)
+	}
+	return nil
 }
 
 func (s *MetadataService) folderTypeForSkeleton(ctx context.Context, folderID int) (string, error) {

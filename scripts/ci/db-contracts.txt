@@ -52,6 +52,7 @@
 ./internal/scanner TestFinalizeVariantsReadsWholeGroupFoundOutsideTheScopeDB
 ./internal/scanner TestScanKeepsFileRowAcrossRenameDB
 ./internal/scanner TestMatchLinkRefusedAfterRetitleDB
+./internal/metadata TestSkeletonUndoFollowsTheLinkDB
 ./internal/scanner TestScanIndexesFileWithNonUTF8Name
 ./migrations TestScanRunForeignKeysHaveLeadingIndexesDB
 
