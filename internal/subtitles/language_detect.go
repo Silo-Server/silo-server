@@ -298,17 +298,24 @@ func languageFromContent(data []byte, format SubtitleFormat) (string, bool) {
 }
 
 // contentDetectionText returns the subtitle text handed to the language
-// detector. It holds at most contentSampleBytes runes: extraction turns each
-// byte of its input into at most one rune, and that input is at most
-// contentSampleBytes long.
+// detector, at most contentSampleBytes long. Extraction can lengthen its input,
+// since it turns each invalid UTF-8 byte into a three-byte replacement rune, so
+// the text is cut back to the limit at a rune boundary.
 func contentDetectionText(data []byte, format SubtitleFormat) string {
-	return extractSubtitleDialogue(sampleSubtitleContent(data, format), format)
+	text := extractSubtitleDialogue(sampleSubtitleContent(data, format), format)
+	if len(text) <= contentSampleBytes {
+		return text
+	}
+	cut := contentSampleBytes
+	for !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return text[:cut]
 }
 
 // sampleSubtitleContent returns data unchanged when it fits the content
-// sample. A larger file is read as evenly spaced windows of whole lines, with
-// a blank line after each window so cue parsing restarts cleanly. ASS, SSA
-// and WebVTT windows span only the lines that can carry subtitle text, so
+// sample. A larger file is read as evenly spaced windows of whole lines. ASS,
+// SSA and WebVTT windows span only the lines that can carry subtitle text, so
 // embedded fonts, graphics, or styles are not sampled in place of speech.
 func sampleSubtitleContent(data []byte, format SubtitleFormat) []byte {
 	if len(data) <= contentSampleBytes {
@@ -324,7 +331,8 @@ func sampleSubtitleContent(data []byte, format SubtitleFormat) []byte {
 
 const contentSampleWindow = contentSampleBytes/contentSampleWindows - 1
 
-// sampleLineWindows samples a format in which every line can carry text.
+// sampleLineWindows samples a format in which every line can carry text. A
+// blank line follows each window so cue parsing restarts cleanly.
 func sampleLineWindows(data []byte) []byte {
 	step := (len(data) - contentSampleWindow) / (contentSampleWindows - 1)
 	sample := make([]byte, 0, contentSampleBytes)
@@ -368,7 +376,9 @@ func lineAlignedWindow(data []byte, start, end int) (int, int) {
 
 // sampleTextLines keeps every text line when they fit the sample, and
 // otherwise windows over the text lines alone. A window takes each line that
-// reaches into it, cut short where the window's byte budget runs out.
+// reaches into it, cut short where the window's byte budget runs out. Windows
+// are joined without a blank line, which would end a WebVTT cue: a window that
+// starts inside a cue reads on as part of the previous window's cue.
 func sampleTextLines(data []byte, format SubtitleFormat) []byte {
 	total := 0
 	forEachTextLine(data, format, func(line []byte) { total += len(line) })
@@ -383,15 +393,22 @@ func sampleTextLines(data []byte, format SubtitleFormat) []byte {
 		start := offset
 		offset += len(line)
 		for w < contentSampleWindows && start >= w*step+contentSampleWindow {
-			sample = append(sample, '\n')
 			w, used = w+1, 0
 		}
 		if w == contentSampleWindows || offset <= w*step {
 			return
 		}
-		keep := min(len(line), contentSampleWindow-used)
-		sample = append(sample, line[:keep]...)
-		used += keep
+		room := contentSampleWindow - used
+		switch {
+		case len(line) <= room:
+			sample = append(sample, line...)
+			used += len(line)
+		case room > 1:
+			// Cut the line short, keeping the newline that ends it.
+			sample = append(sample, line[:room-1]...)
+			sample = append(sample, '\n')
+			used = contentSampleWindow
+		}
 	})
 	return sample
 }

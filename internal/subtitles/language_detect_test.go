@@ -178,12 +178,13 @@ func TestContentDetectionBoundsDetectorInput(t *testing.T) {
 		"vtt": {FormatVTT, largeSubtitle(FormatVTT, size, englishDialogue)},
 		"ass": {FormatASS, largeSubtitle(FormatASS, size, englishDialogue)},
 		// Each invalid byte becomes a three-byte replacement rune.
-		"invalid utf-8": {FormatSRT, largeSubtitle(FormatSRT, size, []string{string(bytes.Repeat([]byte{0xff}, 70))})},
+		"invalid utf-8":            {FormatSRT, largeSubtitle(FormatSRT, size, []string{string(bytes.Repeat([]byte{0xff}, 70))})},
+		"invalid utf-8 long lines": {FormatSRT, bytes.Repeat(append(bytes.Repeat([]byte{0xff}, 32<<10), '\n'), 64)},
 	}
 	for name, in := range inputs {
 		text := contentDetectionText(in.data, in.format)
-		if runes := utf8.RuneCountInString(text); runes > contentSampleBytes {
-			t.Errorf("%s: detector input is %d runes, want at most %d", name, runes, contentSampleBytes)
+		if len(text) > contentSampleBytes || !utf8.ValidString(text) {
+			t.Errorf("%s: detector input is %d bytes (valid UTF-8: %v), want valid text of at most %d", name, len(text), utf8.ValidString(text), contentSampleBytes)
 		}
 	}
 }
@@ -245,6 +246,11 @@ func TestSampledDetectionMatchesFullText(t *testing.T) {
 	})...)
 	// Lines longer than a sample window, but short enough for the extractors.
 	longLine := []string{strings.Repeat(strings.Join(englishDialogue, " ")+" ", 140)}
+	// One long cue whose first lines carry no text once tags are stripped.
+	longCue := "WEBVTT\n\n00:00:01.000 --> 00:02:00.000\n" + strings.Repeat("{}\n", 6000)
+	for len(longCue) < 600<<10 {
+		longCue += strings.Join(englishDialogue, "\n") + "\n"
+	}
 	cases := []struct {
 		name   string
 		format SubtitleFormat
@@ -254,6 +260,7 @@ func TestSampledDetectionMatchesFullText(t *testing.T) {
 		{"english srt with long lines", FormatSRT, largeSubtitle(FormatSRT, 600<<10, longLine), "en"},
 		{"english vtt with long cues", FormatVTT, largeSubtitle(FormatVTT, 600<<10, longLine), "en"},
 		{"english ass with long events", FormatASS, largeSubtitle(FormatASS, 600<<10, longLine), "en"},
+		{"english vtt in one long cue", FormatVTT, []byte(longCue), "en"},
 		{"english srt", FormatSRT, largeSubtitle(FormatSRT, 600<<10, englishDialogue), "en"},
 		{"french vtt", FormatVTT, largeSubtitle(FormatVTT, 600<<10, []string{
 			"Je ne sais pas pourquoi tu es revenu ici après tout ce temps.",
