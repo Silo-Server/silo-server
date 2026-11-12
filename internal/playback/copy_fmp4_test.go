@@ -170,9 +170,39 @@ func TestShiftFMP4DecodeDropsAudioBeforeZero(t *testing.T) {
 		t.Fatalf("audio data offset %d, want %d: past the dropped media, nearer by the shorter moof", offset, 600+10+20-8)
 	}
 
-	// An audio fragment wholly before zero has nothing to keep: -0.07s ends
-	// its 3072 ticks 288 before zero, while the video stays after it.
-	if _, err := shiftFMP4Decode(group(), -0.07, scales, 1); !errors.Is(err, errFMP4Box) {
-		t.Fatalf("whole-fragment shift err = %v, want errFMP4Box", err)
+	// An audio fragment wholly before zero goes: -0.07s ends its 3072 ticks
+	// 288 before zero, while the video stays after it.
+	audioTraf := len(trafs[2].raw) + 8 // two trun entries fewer than the original
+	out, err = shiftFMP4Decode(group(), -0.07, scales, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if top, err = fmp4Boxes(out); err != nil || len(top) != 2 || top[0].typ != boxMoof || top[1].typ != "mdat" {
+		t.Fatalf("boxes = %v, %v; want the moof and its mdat", top, err)
+	}
+	if trafs, err = fmp4Boxes(top[0].payload); err != nil || len(trafs) != 2 {
+		t.Fatalf("moof children = %v, %v; want mfhd and the video traf", trafs, err)
+	}
+	decode, trun = read(trafs[1].payload)
+	if offset := binary.BigEndian.Uint32(trun[8:]); decode != 1000-896 || offset != uint32(500-audioTraf) {
+		t.Fatalf("video decode %d, data offset %d; want %d, %d", decode, offset, 1000-896, 500-audioTraf)
+	}
+
+	// A moof with only that audio goes with its mdat.
+	audioOnly := bytes.Join([][]byte{
+		box("moof", fullBox("mfhd", 0, 0, u32(1)),
+			box("traf", fullBox("tfhd", 0, 0x20008, u32(2), u32(1024)), fullBox("tfdt", 1, 0, u64(0)),
+				fullBox("trun", 0, 0x201, u32(1), u32(100), u32(10)))),
+		box("mdat", make([]byte, 10)),
+		box("moof", fullBox("mfhd", 0, 0, u32(2)),
+			box("traf", fullBox("tfhd", 0, 0x20000, u32(1)), fullBox("tfdt", 1, 0, u64(1000)),
+				fullBox("trun", 0, 0x201, u32(1), u32(100), u32(40)))),
+		box("mdat", make([]byte, 40)),
+	}, nil)
+	if out, err = shiftFMP4Decode(audioOnly, -0.07, scales, 1); err != nil {
+		t.Fatal(err)
+	}
+	if top, err = fmp4Boxes(out); err != nil || len(top) != 2 || len(top[1].payload) != 40 {
+		t.Fatalf("boxes = %v, %v; want only the video moof and its mdat", top, err)
 	}
 }

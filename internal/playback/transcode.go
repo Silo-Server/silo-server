@@ -609,12 +609,22 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 
 func (s *TranscodeSession) monitorFFmpeg(ctx context.Context, cmd *exec.Cmd, done chan struct{}, releaseHWDevice func()) {
 	var processExited, assemblyFinished chan struct{}
+	var assemblyErr error
 	if groups := s.copyGroups; groups != nil {
 		processExited = make(chan struct{})
 		assemblyFinished = make(chan struct{})
 		go func() {
 			defer close(assemblyFinished)
-			groups.watch(processExited)
+			// A run that stops assembling would copy on for nothing, so stop
+			// FFmpeg. s.cancel is this run's until done closes.
+			assemblyErr = groups.watch(processExited, func() {
+				s.mu.Lock()
+				cancel := s.cancel
+				s.mu.Unlock()
+				if cancel != nil {
+					cancel()
+				}
+			})
 		}()
 	}
 	waitErr := cmd.Wait()
@@ -628,6 +638,11 @@ func (s *TranscodeSession) monitorFFmpeg(ctx context.Context, cmd *exec.Cmd, don
 		// until the watcher has finished its final scan and stopped.
 		close(processExited)
 		<-assemblyFinished
+		if assemblyErr != nil {
+			// The session failed even if FFmpeg was only stopped for it, so
+			// waiters get the transcode error rather than wait on.
+			waitErr = fmt.Errorf("keyframe playlist: %w", assemblyErr)
+		}
 	}
 	processmetrics.Record(processmetrics.Transcode, cmd.ProcessState, waitErr, ctx.Err())
 	s.flushStderr(ctx)
@@ -3440,7 +3455,6 @@ func (s *TranscodeSession) WaitError() error {
 	return s.waitErr
 }
 
-// Opts returns the TranscodeOpts used to create this session (for testing).
 // SegmentAt returns the segment that holds positionSeconds of the stream: the
 // planned segment for a keyframe-planned session, whose segments vary in
 // length, else the fixed-length one.
@@ -3457,6 +3471,7 @@ func (s *TranscodeSession) SegmentAt(positionSeconds float64) int {
 	return 0
 }
 
+// Opts returns the TranscodeOpts used to create this session (for testing).
 func (s *TranscodeSession) Opts() TranscodeOpts {
 	s.mu.Lock()
 	defer s.mu.Unlock()

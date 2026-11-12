@@ -55,7 +55,7 @@ func TestPlanCopySegments(t *testing.T) {
 	// video at 10s.
 	stubKeyframeIndex(t, keyframes.Index{Keyframes: []float64{0, 1, 2.6, 7.0, 7.4, 9.0}, Duration: 12, VideoEnd: 10}, nil)
 
-	plan := planCopySegments(t.Context(), plannedOpts())
+	plan := planOrNil(t, plannedOpts())
 	if plan == nil {
 		t.Fatal("no plan for an eligible session")
 	}
@@ -75,7 +75,7 @@ func TestPlanCopySegments(t *testing.T) {
 // A source whose timestamps start later than zero plans the same segments.
 func TestPlanCopySegmentsForALaterStart(t *testing.T) {
 	stubKeyframeIndex(t, keyframes.Index{Keyframes: []float64{7, 8, 9.6, 14.0, 14.4, 16.0}, VideoEnd: 17}, nil)
-	plan := planCopySegments(t.Context(), plannedOpts())
+	plan := planOrNil(t, plannedOpts())
 	if plan == nil {
 		t.Fatal("no plan for a source starting at 7s")
 	}
@@ -100,7 +100,7 @@ func TestPlanCopySegmentsKeepsFFmpegPlaylist(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			opts := plannedOpts()
 			change(&opts)
-			if plan := planCopySegments(t.Context(), opts); plan != nil {
+			if plan := planOrNil(t, opts); plan != nil {
 				t.Fatalf("plan = %v, want none", plan.durations)
 			}
 		})
@@ -108,31 +108,31 @@ func TestPlanCopySegmentsKeepsFFmpegPlaylist(t *testing.T) {
 
 	t.Run("unknown video end", func(t *testing.T) {
 		stubKeyframeIndex(t, keyframes.Index{Keyframes: []float64{0, 2, 4, 6, 8}}, nil)
-		if plan := planCopySegments(t.Context(), plannedOpts()); plan != nil {
+		if plan := planOrNil(t, plannedOpts()); plan != nil {
 			t.Fatalf("plan = %v, want none", plan.durations)
 		}
 	})
 	t.Run("unknown input start", func(t *testing.T) {
 		stubInputStart(t, 0, errors.New("ffprobe failed"))
-		if plan := planCopySegments(t.Context(), plannedOpts()); plan != nil {
-			t.Fatalf("plan = %v, want none", plan.durations)
+		if plan, err := planCopySegments(t.Context(), plannedOpts()); plan != nil || err == nil {
+			t.Fatalf("plan = %v, err = %v; want none and the probe's failure", plan != nil, err)
 		}
 	})
 	t.Run("input start after the first keyframe", func(t *testing.T) {
 		stubInputStart(t, 0.5, nil)
-		if plan := planCopySegments(t.Context(), plannedOpts()); plan != nil {
+		if plan := planOrNil(t, plannedOpts()); plan != nil {
 			t.Fatalf("plan = %v, want none", plan.durations)
 		}
 	})
 	t.Run("no index", func(t *testing.T) {
 		stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrNoIndex)
-		if plan := planCopySegments(t.Context(), plannedOpts()); plan != nil {
+		if plan := planOrNil(t, plannedOpts()); plan != nil {
 			t.Fatalf("plan = %v, want none", plan.durations)
 		}
 	})
 	t.Run("unreadable source", func(t *testing.T) {
 		stubKeyframeIndex(t, keyframes.Index{}, errors.New("permission denied"))
-		if plan := planCopySegments(t.Context(), plannedOpts()); plan != nil {
+		if plan := planOrNil(t, plannedOpts()); plan != nil {
 			t.Fatalf("plan = %v, want none", plan.durations)
 		}
 	})
@@ -203,6 +203,16 @@ func TestResolveCopyPlanLeavesNoRecordWhenTheRebuildIsCanceled(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(rebuilt.OutputDir, copyPlanRecordFile)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("a canceled rebuild left a plan record: %v", err)
 	}
+	// A probe that fails on its own (its timeout, a storage error) says no
+	// more about the file than a cancellation does.
+	stubInputStart(t, 0, errors.New("ffprobe failed"))
+	if plan, err := resolveCopyPlan(t.Context(), rebuilt); plan != nil || err == nil {
+		t.Fatalf("unprobed rebuild = plan %v, err %v; want no plan and the probe's failure", plan != nil, err)
+	}
+	if _, err := os.Stat(filepath.Join(rebuilt.OutputDir, copyPlanRecordFile)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("an unprobed rebuild left a plan record: %v", err)
+	}
+	stubInputStart(t, 0, nil)
 	if plan := mustResolveCopyPlan(t, t.Context(), rebuilt); plan == nil {
 		t.Fatal("the next rebuild didn't plan")
 	}
@@ -276,7 +286,7 @@ func TestRecipeOptsKeepsAPlannedSessionAtItsStart(t *testing.T) {
 		t.Fatalf("recipe start = seek %v, segment %d, anchor resolved %v; want the first run's",
 			got.SeekSeconds, got.StartSegmentNumber, got.CopySeekAnchorResolved)
 	}
-	if planCopySegments(t.Context(), got) == nil {
+	if planOrNil(t, got) == nil {
 		t.Fatal("the recipe doesn't plan")
 	}
 
@@ -632,16 +642,10 @@ func checkPlannedCopySession(t *testing.T, ctx context.Context, ffmpeg, source s
 		case <-ctx.Done():
 			t.Fatalf("%s: FFmpeg didn't finish", label)
 		}
-		deadline := time.Now().Add(10 * time.Second)
+		// Done closes only after the final groups are assembled.
 		for n := from; n < segments; n++ {
-			for {
-				if _, err := os.Stat(filepath.Join(opts.OutputDir, plannedSegmentName(n))); err == nil {
-					break
-				}
-				if time.Now().After(deadline) {
-					t.Fatalf("%s: segment %d of %d was never assembled", label, n, segments)
-				}
-				time.Sleep(20 * time.Millisecond) //nolint:forbidigo // Polls for the assembled segment file, which signals nothing when it appears.
+			if _, err := os.Stat(filepath.Join(opts.OutputDir, plannedSegmentName(n))); err != nil {
+				t.Fatalf("%s: segment %d of %d was never assembled", label, n, segments)
 			}
 		}
 	}
@@ -759,6 +763,19 @@ func checkPlannedCopySession(t *testing.T, ctx context.Context, ffmpeg, source s
 	if seam := (again[restartAt] - again[restartAt-1]) - plan.durations[restartAt-1]; math.Abs(seam) > 0.002 {
 		t.Fatalf("timeline steps %.3fs where the runs meet", seam)
 	}
+	// FFmpeg's seek for segment 1 aims at the keyframe before it. Where the
+	// keyframes are closer together than the run's shift (close-keyframes),
+	// it lands on an earlier one, and the run must still place its groups.
+	if err := os.Remove(filepath.Join(opts.OutputDir, plannedSegmentName(1))); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := s.RestartSegment(ctx, 1); err != nil || !ok {
+		t.Fatalf("RestartSegment(1) = %v, %v", ok, err)
+	}
+	waitAssembled("after an early restart", 1)
+	if early := starts(); !slices.Equal(early, again) {
+		t.Fatalf("segments after an early restart start at %v, want %v", early, again)
+	}
 	if leftovers, _ := filepath.Glob(filepath.Join(opts.OutputDir, "gop*")); len(leftovers) != 0 {
 		t.Fatalf("groups left after assembly: %v", leftovers)
 	}
@@ -786,15 +803,31 @@ func TestPlannedCopySessionSwitchesAudioAtTheStart(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
+	for name, video := range map[string][]string{
+		"two-tracks.mkv": {"-f", "lavfi", "-i", "testsrc2=size=96x54:rate=25:duration=12",
+			"-c:v", "libx264", "-preset", "ultrafast", "-bf", "0", "-g", "50", "-sc_threshold", "0"},
+		// The first keyframe group is shorter than the switch's shift, so
+		// all of its audio falls before zero.
+		"short-first-group.mkv": {"-f", "lavfi", "-i", "testsrc2=size=96x54:rate=50:duration=12",
+			"-c:v", "libx264", "-preset", "ultrafast", "-bf", "0", "-g", "1000", "-sc_threshold", "0",
+			"-force_key_frames", "0,0.02,0.04,0.06,2,4,6,8,10"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			checkPlannedAudioSwitchAtTheStart(t, ctx, ffmpeg, name, video)
+		})
+	}
+}
+
+func checkPlannedAudioSwitchAtTheStart(t *testing.T, ctx context.Context, ffmpeg, name string, video []string) {
 	dir := t.TempDir()
-	source := filepath.Join(dir, "two-tracks.mkv")
-	if out, err := exec.CommandContext(ctx, ffmpeg, "-v", "error",
-		"-f", "lavfi", "-i", "testsrc2=size=96x54:rate=25:duration=12",
+	source := filepath.Join(dir, name)
+	args := append([]string{"-v", "error"}, video[:4]...)
+	args = append(args,
 		"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=12",
 		"-itsoffset", "0.1", "-f", "lavfi", "-i", "sine=frequency=660:sample_rate=48000:duration=12",
-		"-map", "0", "-map", "2", "-map", "1",
-		"-c:v", "libx264", "-preset", "ultrafast", "-bf", "0", "-g", "50", "-sc_threshold", "0",
-		"-c:a", "flac", source).CombinedOutput(); err != nil {
+		"-map", "0", "-map", "2", "-map", "1")
+	args = append(append(args, video[4:]...), "-c:a", "flac", source)
+	if out, err := exec.CommandContext(ctx, ffmpeg, args...).CombinedOutput(); err != nil {
 		t.Skipf("ffmpeg can't make the test file (%v): %s", err, out)
 	}
 	if _, err := keyframes.LoadVerified(t.Context(), source); err != nil {
@@ -830,16 +863,12 @@ func TestPlannedCopySessionSwitchesAudioAtTheStart(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatalf("%s: FFmpeg didn't finish", label)
 		}
-		deadline := time.Now().Add(10 * time.Second)
-		for {
-			if data, err := os.ReadFile(segment0); err == nil {
-				return data
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("%s: segment 0 was never assembled", label)
-			}
-			time.Sleep(20 * time.Millisecond) //nolint:forbidigo // Polls for the assembled segment file, which signals nothing when it appears.
+		// Done closes only after the final groups are assembled.
+		data, err := os.ReadFile(segment0)
+		if err != nil {
+			t.Fatalf("%s: segment 0 was never assembled", label)
 		}
+		return data
 	}
 	waitSegment0("first track")
 
@@ -908,4 +937,14 @@ func TestNewCopyGroupAssemblerRemovesInheritedSegments(t *testing.T) {
 	if want := []string{"init.mp4", copyPlanRecordFile, "seg_7.m4s"}; !slices.Equal(left, slices.Sorted(slices.Values(want))) {
 		t.Fatalf("left %v, want %v", left, want)
 	}
+}
+
+// planOrNil is planCopySegments for a source whose start probes.
+func planOrNil(t *testing.T, opts TranscodeOpts) *copySegmentPlan {
+	t.Helper()
+	plan, err := planCopySegments(t.Context(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return plan
 }

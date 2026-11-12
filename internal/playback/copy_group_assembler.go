@@ -45,7 +45,8 @@ type copyGroupAssembler struct {
 	// segments are shifted onto it, so segments from different runs line
 	// up. A run from the file's start is shifted by the source's B-frame
 	// delay and a seek restart isn't, which would otherwise leave a step
-	// where their segments meet.
+	// where their segments meet. It is kept in the plan record, so a session
+	// rebuilt in the same directory keeps it whichever run places first.
 	timeline     float64
 	haveTimeline bool
 }
@@ -62,17 +63,30 @@ type copyGroupRun struct {
 	trackID   uint32
 	timescale uint32
 	anchored  bool
+	// pending is the run's first group while it waits for the second to
+	// anchor the run (anchorLocked).
+	pending *copyGroupFile
 	// offset is the run's constant shift between a group's presentation time
 	// and its source keyframe time, in seconds.
 	offset float64
 	// shift moves the run's segments onto the session's timeline.
-	shift    float64
-	scales   map[uint32]uint32
-	nextFile int
+	shift float64
+	// anchorKey is the keyframe the run's first group starts at, and lastKey
+	// the latest keyframe it has placed a group for, or -1.
+	anchorKey, lastKey int
+	scales             map[uint32]uint32
+	nextFile           int
 	// groups maps a keyframe index to the group file that starts there.
 	groups         map[int]string
 	lastProducedAt time.Time
 	broken         bool
+}
+
+// copyGroupFile is a group file and its first video presentation time on the
+// container's timeline.
+type copyGroupFile struct {
+	path string
+	at   float64
 }
 
 // newCopyGroupAssembler starts a session's assembly. Planned segments already
@@ -82,7 +96,11 @@ type copyGroupRun struct {
 // the audio changes; remove them, and the first run assembles them again.
 func newCopyGroupAssembler(dir string, plan *copySegmentPlan) *copyGroupAssembler {
 	removeInheritedSegments(dir)
-	return &copyGroupAssembler{dir: dir, plan: plan, assembled: make([]bool, len(plan.durations))}
+	a := &copyGroupAssembler{dir: dir, plan: plan, assembled: make([]bool, len(plan.durations))}
+	if plan.timeline != nil {
+		a.timeline, a.haveTimeline = *plan.timeline, true
+	}
+	return a
 }
 
 func removeInheritedSegments(dir string) {
@@ -122,6 +140,7 @@ func (a *copyGroupAssembler) startRun(startSegment int, audioKey string) string 
 		prefix:       fmt.Sprintf("gop%d_", a.runs),
 		startSegment: startSegment,
 		head:         startSegment - 1,
+		lastKey:      -1,
 		groups:       map[int]string{},
 	}
 	return a.run.prefix
@@ -150,29 +169,38 @@ func plannedSegmentName(n int) string {
 }
 
 // watch scans the current run's groups until done closes, then once more for
-// the groups FFmpeg wrote last.
-func (a *copyGroupAssembler) watch(done <-chan struct{}) {
+// the groups FFmpeg wrote last. When the run stops assembling, it calls stop,
+// since the rest of FFmpeg's output would be thrown away, and returns why.
+func (a *copyGroupAssembler) watch(done <-chan struct{}, stop func()) error {
 	ticker := time.NewTicker(copyGroupScanInterval)
 	defer ticker.Stop()
+	var failed error
+	scan := func(final bool) {
+		if err := a.scan(final); err != nil && failed == nil {
+			failed = err
+			stop()
+		}
+	}
 	for {
 		select {
 		case <-done:
-			a.scan()
-			return
+			scan(true)
+			return failed
 		case <-ticker.C:
-			a.scan()
+			scan(false)
 		}
 	}
 }
 
 // scan reads the run's new groups and assembles every segment whose groups
-// are all present.
-func (a *copyGroupAssembler) scan() {
+// are all present. It returns the error that stops the run's assembly, once.
+// The final scan, after FFmpeg exits, anchors a run that wrote one group.
+func (a *copyGroupAssembler) scan(final bool) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	run := a.run
 	if run == nil || run.broken {
-		return
+		return nil
 	}
 	for {
 		name := fmt.Sprintf("%s%06d.m4s", run.prefix, run.nextFile)
@@ -184,14 +212,24 @@ func (a *copyGroupAssembler) scan() {
 			break
 		}
 		if err := a.mapGroupLocked(run, path, data); err != nil {
-			slog.Warn("keyframe playlist: can't place an FFmpeg keyframe group; this run stops assembling",
-				"component", "playback", "group", name, "error", err)
-			run.broken = true
-			return
+			return breakRun(run, name, err)
 		}
 		run.nextFile++
 	}
-	a.assembleLocked(run)
+	if final && run.pending != nil {
+		if err := a.anchorLocked(run, *run.pending, nil); err != nil {
+			return breakRun(run, filepath.Base(run.pending.path), err)
+		}
+	}
+	return a.assembleLocked(run)
+}
+
+// breakRun stops a run's assembly at a group it can't place.
+func breakRun(run *copyGroupRun, group string, err error) error {
+	slog.Warn("keyframe playlist: can't place an FFmpeg keyframe group; this run stops assembling",
+		"component", "playback", "group", group, "error", err)
+	run.broken = true
+	return fmt.Errorf("place keyframe group %s: %w", group, err)
 }
 
 func (a *copyGroupAssembler) mapGroupLocked(run *copyGroupRun, path string, data []byte) error {
@@ -213,32 +251,90 @@ func (a *copyGroupAssembler) mapGroupLocked(run *copyGroupRun, path string, data
 		return err
 	}
 	at := float64(pts) / float64(run.timescale)
-	keys := a.plan.keyframes
 	// FFmpeg's output starts at zero (-start_at_zero): it subtracts the
 	// source's start time, while the keyframe times are the container's.
 	// The start is the earliest stream's, so it can be before the first
 	// keyframe.
 	at += a.plan.inputStart
 	if !run.anchored {
-		// The first group starts at the keyframe FFmpeg's seek landed on: the
-		// last keyframe at or before it, since the run's timestamps are the
-		// source's shifted later, never earlier (a B-frame delay, the gap
-		// between the file's start and its first keyframe, or none). The
-		// seek lands on the keyframe it aimed at or an earlier one, which
-		// bounds the choice when keyframes are closer together than the
-		// shift; a run from the start is anchored at the first keyframe.
-		i := sort.SearchFloat64s(keys, at+groupTimeTolerance) - 1
-		i = min(i, a.plan.restartKeyframe(run.startSegment))
-		if i < 0 {
-			return fmt.Errorf("first group at %.3fs precedes every keyframe", at)
+		if run.pending == nil {
+			// The run's first group: which keyframe it starts at is known
+			// once the next group shows how far apart they are.
+			run.pending = &copyGroupFile{path: path, at: at}
+			return nil
 		}
-		run.offset = at - keys[i]
-		run.anchored = true
-		if !a.haveTimeline {
-			a.timeline, a.haveTimeline = run.offset, true
-		}
-		run.shift = a.timeline - run.offset
+		return a.anchorLocked(run, *run.pending, &copyGroupFile{path: path, at: at})
 	}
+	return a.placeLocked(run, path, at)
+}
+
+// anchorLocked places a run's first group, and its second when there is one,
+// and fixes the run's offset from them.
+//
+// The first group starts at the keyframe FFmpeg's seek landed on: one at or
+// before its start, since the run's timestamps are the source's shifted
+// later, never earlier (a B-frame delay, the gap between the file's start and
+// its first keyframe, or none), and at or before the keyframe the seek aimed
+// at. When keyframes are closer together than the shift, more than one fits.
+// Consecutive groups start at consecutive keyframes, so the one whose gap to
+// the next keyframe matches the gap to the second group is it; of several,
+// the latest. A run from the start is anchored at the first keyframe.
+func (a *copyGroupAssembler) anchorLocked(run *copyGroupRun, first copyGroupFile, second *copyGroupFile) error {
+	keys := a.plan.keyframes
+	last := min(sort.SearchFloat64s(keys, first.at+groupTimeTolerance)-1, a.plan.restartKeyframe(run.startSegment))
+	if last < 0 {
+		return fmt.Errorf("first group at %.3fs precedes every keyframe", first.at)
+	}
+	i := last
+	if second != nil {
+		gap := second.at - first.at
+		i = -1
+		for k := last; k >= 0; k-- {
+			if k+1 < len(keys) && math.Abs(keys[k+1]-keys[k]-gap) <= 2*groupTimeTolerance {
+				i = k
+				break
+			}
+		}
+		if i < 0 {
+			return fmt.Errorf("groups at %.3fs and %.3fs match no consecutive keyframes", first.at, second.at)
+		}
+	}
+	run.offset = first.at - keys[i]
+	run.anchorKey = i
+	run.anchored = true
+	run.pending = nil
+	if !a.haveTimeline {
+		a.timeline, a.haveTimeline = run.offset, true
+		a.recordTimelineLocked()
+	}
+	run.shift = a.timeline - run.offset
+	if err := a.placeLocked(run, first.path, first.at); err != nil {
+		return err
+	}
+	if second != nil {
+		return a.placeLocked(run, second.path, second.at)
+	}
+	return nil
+}
+
+// recordTimelineLocked adds the timeline to the session's plan record.
+func (a *copyGroupAssembler) recordTimelineLocked() {
+	path := filepath.Join(a.dir, copyPlanRecordFile)
+	if _, err := os.Stat(path); err != nil {
+		// A session without a record (no output directory to keep it in)
+		// can't be rebuilt onto its plan anyway.
+		return
+	}
+	plan := *a.plan
+	plan.timeline = &a.timeline
+	if err := writeCopyPlanRecord(path, &plan); err != nil {
+		slog.Warn("keyframe playlist: record timeline", "component", "playback", "error", err)
+	}
+}
+
+// placeLocked maps an anchored run's group to the keyframe it starts at.
+func (a *copyGroupAssembler) placeLocked(run *copyGroupRun, path string, at float64) error {
+	keys := a.plan.keyframes
 	source := at - run.offset
 	i := sort.SearchFloat64s(keys, source)
 	if i > 0 && (i == len(keys) || math.Abs(keys[i-1]-source) < math.Abs(keys[i]-source)) {
@@ -248,6 +344,7 @@ func (a *copyGroupAssembler) mapGroupLocked(run *copyGroupRun, path string, data
 		return fmt.Errorf("group at %.3fs matches no keyframe", source)
 	}
 	run.groups[i] = path
+	run.lastKey = max(run.lastKey, i)
 	if info, err := os.Stat(path); err == nil && info.ModTime().After(run.lastProducedAt) {
 		run.lastProducedAt = info.ModTime()
 	}
@@ -257,7 +354,7 @@ func (a *copyGroupAssembler) mapGroupLocked(run *copyGroupRun, path string, data
 // assembleLocked joins every segment the run has all the groups for. Only
 // segments the run's groups fall in are considered. One already assembled
 // is rebuilt if its file has gone (pruned behind the player).
-func (a *copyGroupAssembler) assembleLocked(run *copyGroupRun) {
+func (a *copyGroupAssembler) assembleLocked(run *copyGroupRun) error {
 	touched := map[int]struct{}{}
 	for k := range run.groups {
 		touched[a.plan.segmentOfKeyframe(k)] = struct{}{}
@@ -290,11 +387,12 @@ func (a *copyGroupAssembler) assembleLocked(run *copyGroupRun) {
 		if err := a.writeSegmentLocked(run, n, paths); err != nil {
 			slog.Warn("keyframe playlist: assemble segment", "component", "playback", "segment", n, "error", err)
 			run.broken = true
-			return
+			return fmt.Errorf("assemble segment %d: %w", n, err)
 		}
 		a.dropGroupsLocked(run, n)
 		a.assembled[n] = true
 	}
+	return nil
 }
 
 // dropGroupsLocked removes the run's groups for segment n once it exists.
@@ -334,8 +432,6 @@ func (a *copyGroupAssembler) writeSegmentLocked(run *copyGroupRun, n int, paths 
 	return os.Rename(tmp, final)
 }
 
-// progress reports the current run: the segment it started for, the highest
-// segment assembled contiguously from there, and when its last group landed.
 // forget marks segment n as no longer assembled: the pruner removed it
 // behind the player. A run that reaches it again rebuilds it, and progress
 // doesn't count it toward the produced head.
@@ -347,6 +443,8 @@ func (a *copyGroupAssembler) forget(n int) {
 	}
 }
 
+// progress reports the current run: the segment it started for, the highest
+// segment assembled contiguously from there, and when its last group landed.
 func (a *copyGroupAssembler) progress() (start, head int, count int, last time.Time) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -365,4 +463,37 @@ func (a *copyGroupAssembler) progress() (start, head int, count int, last time.T
 		}
 	}
 	return start, head, count, a.run.lastProducedAt
+}
+
+// runHead reports how far the current run's FFmpeg has got: the last segment
+// it has written every group of, or the segment before the one it started
+// for, whether or not an earlier run had assembled those segments already.
+// It is the run's own progress, which its subtitle cues follow; ok is false
+// before it has placed a group.
+func (a *copyGroupAssembler) runHead() (head int, ok bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	run := a.run
+	if run == nil || run.lastKey < 0 {
+		return 0, false
+	}
+	head = a.plan.segmentOfKeyframe(run.lastKey)
+	if _, end := a.plan.keyframeRange(head); run.lastKey < end-1 {
+		head--
+	}
+	return max(head, run.startSegment-1), true
+}
+
+// runLead reports how much earlier, on the source's timeline, the current
+// run's first video frame is than the start of the segment it started for:
+// FFmpeg's seek lands on a keyframe before that segment. ok is false until
+// the run is anchored.
+func (a *copyGroupAssembler) runLead() (lead float64, ok bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	run := a.run
+	if run == nil || !run.anchored {
+		return 0, false
+	}
+	return a.plan.keyframes[a.plan.firstKey[run.startSegment]] - a.plan.keyframes[run.anchorKey], true
 }

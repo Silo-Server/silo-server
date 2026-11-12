@@ -292,21 +292,29 @@ func fmp4TrackTimescales(init []byte) (map[uint32]uint32, error) {
 // file's start emits it before the video, so its offset is later than the
 // run the timeline came from. The samples kept stay where the timeline puts
 // them, so the stream stays continuous; only its first audio frame or two
-// goes. A video fragment that would start before zero is an error: a run is
-// placed by its first keyframe.
+// goes, and a fragment that holds no more than those goes whole. A video
+// fragment that would start before zero is an error: a run is placed by its
+// first keyframe.
 func shiftFMP4Decode(segment []byte, shift float64, scales map[uint32]uint32, videoTrack uint32) ([]byte, error) {
 	top, err := fmp4Boxes(segment)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]byte, 0, len(segment))
+	droppedMoof := false
 	for _, b := range top {
 		if b.typ == boxMoof {
 			moof, err := shiftMoof(b, shift, scales, videoTrack)
 			if err != nil {
 				return nil, err
 			}
+			// A moof left without track fragments goes with its mdat.
+			droppedMoof = moof == nil
 			out = append(out, moof...)
+			continue
+		}
+		if droppedMoof && b.typ == "mdat" {
+			droppedMoof = false
 			continue
 		}
 		out = append(out, b.raw...)
@@ -314,7 +322,8 @@ func shiftFMP4Decode(segment []byte, shift float64, scales map[uint32]uint32, vi
 	return out, nil
 }
 
-// shiftMoof returns moof with its track fragments shifted (shiftFMP4Decode).
+// shiftMoof returns moof with its track fragments shifted (shiftFMP4Decode),
+// or nil when no track fragment is left.
 func shiftMoof(moof fmp4Box, shift float64, scales map[uint32]uint32, videoTrack uint32) ([]byte, error) {
 	children, err := fmp4Boxes(moof.payload)
 	if err != nil {
@@ -335,6 +344,12 @@ func shiftMoof(moof fmp4Box, shift float64, scales map[uint32]uint32, videoTrack
 		if err != nil {
 			return nil, err
 		}
+		if traf == nil {
+			// Every sample was before zero; the media it pointed at stays
+			// in the mdat, unreferenced.
+			trimmed = true
+			continue
+		}
 		skipped[at] = dropped
 		trimmed = trimmed || dropped > 0 || len(traf) != len(c.raw)
 		payload = append(payload, traf...)
@@ -342,6 +357,9 @@ func shiftMoof(moof fmp4Box, shift float64, scales map[uint32]uint32, videoTrack
 	if !trimmed {
 		out := append([]byte(nil), moof.raw[:len(moof.raw)-len(moof.payload)]...)
 		return append(out, payload...), nil
+	}
+	if len(skipped) == 0 {
+		return nil, nil
 	}
 	// The dropped trun entries shorten the moof, which brings the media the
 	// truns point at, in the mdat after it, that much nearer.
@@ -423,8 +441,9 @@ func putFMP4DecodeTime(tfdt []byte, v int64) error {
 
 // trimTrafStart rebuilds a track fragment that would start at decode time
 // v < 0 without its leading samples up to zero, and returns it with the media
-// size of the dropped samples. Its media must count from the moof
-// (default-base-is-moof, as FFmpeg writes it), so the moof can shrink.
+// size of the dropped samples, or nil when every sample ends by zero. Its
+// media must count from the moof (default-base-is-moof, as FFmpeg writes it),
+// so the moof can shrink.
 func trimTrafStart(traf, tfhd []byte, v int64) ([]byte, uint32, error) {
 	flags := binary.BigEndian.Uint32(tfhd) & 0xFFFFFF
 	if flags&0x1 != 0 || flags&0x020000 == 0 {
@@ -468,6 +487,9 @@ func trimTrafStart(traf, tfhd []byte, v int64) ([]byte, uint32, error) {
 		if trun, dropped, err = trimTrunStart(c.payload, defaultDuration, defaultSize, &v); err != nil {
 			return nil, 0, err
 		}
+		if trun == nil {
+			return nil, 0, nil
+		}
 		payload = appendFMP4Box(payload, "trun", trun)
 	}
 	if truns == 0 {
@@ -484,7 +506,8 @@ func trimTrafStart(traf, tfhd []byte, v int64) ([]byte, uint32, error) {
 
 // trimTrunStart drops a trun's leading samples while *v, the next sample's
 // decode time, is negative, moving *v past each. It returns the new trun
-// payload and the media size of the dropped samples.
+// payload and the media size of the dropped samples, or nil when it drops
+// them all.
 func trimTrunStart(trun []byte, defaultDuration, defaultSize uint32, v *int64) ([]byte, uint32, error) {
 	if len(trun) < 8 {
 		return nil, 0, errFMP4Box
@@ -524,7 +547,7 @@ func trimTrunStart(trun []byte, defaultDuration, defaultSize uint32, v *int64) (
 		dropped += size
 	}
 	if drop == count {
-		return nil, 0, fmt.Errorf("%w: negative decode time for a whole fragment", errFMP4Box)
+		return nil, dropped, nil
 	}
 	out := append(append([]byte(nil), trun[:header]...), trun[header+drop*entry:]...)
 	kept := count - drop

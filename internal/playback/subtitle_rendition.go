@@ -258,8 +258,9 @@ func (s *TranscodeSession) subtitleSegmentSource(segNum int) (file string, ready
 			if liveOK {
 				head = max(head, liveHead)
 			}
-			// A planned copy runs on from the start to every planned segment
-			// and its video request waits for that (plannedSegmentWait).
+			// A planned copy's video request for any segment either waits
+			// for the running FFmpeg or restarts it there, so its subtitle
+			// segment comes too.
 			imminent = imminent || segNum <= head+maxSequentialMissingSegments+1 || s.copyPlan != nil
 		}
 		covered := span.end >= 0 && segNum <= span.end
@@ -462,6 +463,16 @@ func (s *TranscodeSession) subtitleSpanOrigin(ctx context.Context, file string, 
 		shiftKnown = err == nil
 		if !shiftKnown && !s.noteSubtitleVideoStartMiss(file, span.start, err) {
 			return span
+		}
+		if shiftKnown && s.copyGroups != nil {
+			// A planned generation's first frame can be a keyframe before
+			// its first segment; measure the shift from the segment's start.
+			lead, ok := span.lead, span.leadKnown
+			if !ok && span.end < 0 {
+				lead, ok = s.copyGroups.runLead()
+			}
+			videoStart += lead
+			shiftKnown = ok
 		}
 	}
 
