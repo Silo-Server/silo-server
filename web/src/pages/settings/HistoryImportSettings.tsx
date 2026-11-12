@@ -49,57 +49,71 @@ import { cn } from "@/lib/utils";
 import { isActingAdmin } from "@/lib/permissions";
 import { AlertTriangle, CheckCircle2, CircleSlash2, Clock, Loader2, XCircle } from "lucide-react";
 import { formatRelativeTime as formatRelativeTimeBase } from "@/lib/date";
+import { useT, type Translate } from "@/i18n";
+import { formatLocale } from "@/lib/appLocale";
 
 const STATUS_CONFIG = {
   queued: {
     icon: Clock,
     colorClass: "text-info",
     bgClass: "bg-info/10 border-info/20",
-    label: "Queued",
+    labelKey: "web.settings.historyImport.status.queued",
   },
   running: {
     icon: Loader2,
     colorClass: "text-warning",
     bgClass: "bg-warning/10 border-warning/20",
-    label: "Running",
+    labelKey: "web.settings.historyImport.status.running",
     spin: true,
   },
   completed: {
     icon: CheckCircle2,
     colorClass: "text-success",
     bgClass: "bg-success/10 border-success/20",
-    label: "Completed",
+    labelKey: "web.settings.historyImport.status.completed",
   },
   failed: {
     icon: XCircle,
     colorClass: "text-destructive",
     bgClass: "bg-destructive/10 border-destructive/20",
-    label: "Failed",
+    labelKey: "web.settings.historyImport.status.failed",
   },
   canceling: {
     icon: Loader2,
     colorClass: "text-muted-foreground",
     bgClass: "bg-muted border-border",
-    label: "Cancelling",
+    labelKey: "web.settings.historyImport.status.canceling",
     spin: true,
   },
   cancelled: {
     icon: CircleSlash2,
     colorClass: "text-muted-foreground",
     bgClass: "bg-muted border-border",
-    label: "Cancelled",
+    labelKey: "web.settings.historyImport.status.cancelled",
   },
 } as const;
 
 const emptyPlexHome: PlexHome = { accountUUID: "", users: [] };
 
-function plexHomeUserLabel(user: PlexHomeUser, accountUUID: string): string {
-  if (user.uuid === accountUUID) return `${user.title} (you)`;
-  if (user.restricted) return `${user.title} (managed)`;
+function plexHomeUserLabel(t: Translate, user: PlexHomeUser, accountUUID: string): string {
+  if (user.uuid === accountUUID)
+    return t("web.settings.historyImport.plexHome.userYou", { name: user.title });
+  if (user.restricted)
+    return t("web.settings.historyImport.plexHome.userManaged", { name: user.title });
   return user.title;
 }
 
+// Brand names and their card letters; not translated.
+const SOURCE_NAMES: Record<SourceType, string> = {
+  emby: "Emby",
+  jellyfin: "Jellyfin",
+  plex: "Plex",
+};
+const SOURCE_LETTERS: Record<SourceType, string> = { emby: "E", jellyfin: "J", plex: "P" };
+const JELLYFIN_URL_EXAMPLE = "https://jellyfin.example.com";
+
 export default function HistoryImportSettings() {
+  const t = useT();
   useEventChannel("history_import");
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -206,16 +220,14 @@ export default function HistoryImportSettings() {
     }
 
     if (!returnedPlexPinId || !returnedPlexPinCode) {
-      setPlexAuthError(
-        "Plex sign-in returned without the expected session details. Please try again.",
-      );
+      setPlexAuthError(t("web.settings.historyImport.plexError.missingSession"));
       void navigate("/settings/history-import", { replace: true });
       return;
     }
 
     const pinID = Number(returnedPlexPinId);
     if (!Number.isFinite(pinID) || pinID <= 0) {
-      setPlexAuthError("Plex sign-in returned an invalid PIN. Please try again.");
+      setPlexAuthError(t("web.settings.historyImport.plexError.invalidPin"));
       void navigate("/settings/history-import", { replace: true });
       return;
     }
@@ -259,7 +271,11 @@ export default function HistoryImportSettings() {
         setPlexServerId("");
         setPlexHome(emptyPlexHome);
         setPlexHomeUserId("");
-        setPlexAuthError(error instanceof Error ? error.message : "Failed to finish Plex sign-in");
+        setPlexAuthError(
+          error instanceof Error
+            ? error.message
+            : t("web.settings.historyImport.plexError.finishFailed"),
+        );
       } finally {
         if (!cancelled) {
           setPlexAuthPending(false);
@@ -271,7 +287,7 @@ export default function HistoryImportSettings() {
     return () => {
       cancelled = true;
     };
-  }, [navigate, returnedPlexAuth, returnedPlexPinCode, returnedPlexPinId]);
+  }, [navigate, returnedPlexAuth, returnedPlexPinCode, returnedPlexPinId, t]);
 
   async function handleConnectLogin() {
     const result = await loginMutation.mutateAsync({
@@ -302,7 +318,11 @@ export default function HistoryImportSettings() {
       window.location.assign(buildPlexAuthURL(pin.code, forwardURL.toString()));
     } catch (error) {
       setPlexAuthPending(false);
-      setPlexAuthError(error instanceof Error ? error.message : "Failed to start Plex sign-in");
+      setPlexAuthError(
+        error instanceof Error
+          ? error.message
+          : t("web.settings.historyImport.plexError.startFailed"),
+      );
     }
   }
 
@@ -356,7 +376,9 @@ export default function HistoryImportSettings() {
             accountToken = resolved.accountToken;
           } catch (error) {
             setPlexSwitchError(
-              error instanceof Error ? error.message : "Could not switch to this Plex Home user.",
+              error instanceof Error
+                ? error.message
+                : t("web.settings.historyImport.plexHome.switchFailed"),
             );
             return;
           } finally {
@@ -430,14 +452,14 @@ export default function HistoryImportSettings() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="History Import"
-        subtitle="Import watch history from an external media server into a Silo profile."
+        title={t("web.settings.historyImport.title")}
+        subtitle={t("web.settings.historyImport.subtitle")}
       />
 
       {/* ── New import ──────────────────────────────────── */}
       <SettingsGroup
-        title="New import"
-        description="Choose a source, sign in, and pick a profile to receive the watch history."
+        title={t("web.settings.historyImport.newImport.title")}
+        description={t("web.settings.historyImport.newImport.description")}
       >
         {/* Source cards */}
         <div className="grid gap-3 sm:grid-cols-3">
@@ -465,8 +487,8 @@ export default function HistoryImportSettings() {
               value={embyMode}
               onChange={(v) => setEmbyMode(v as EmbyMode)}
               options={[
-                { value: "connect", label: "Emby Connect" },
-                { value: "saved", label: "Saved Server" },
+                { value: "connect", label: t("web.settings.historyImport.mode.embyConnect") },
+                { value: "saved", label: t("web.settings.historyImport.savedServer") },
               ]}
             />
 
@@ -474,14 +496,14 @@ export default function HistoryImportSettings() {
               <div className="space-y-4">
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
-                    <Label>Email or Username</Label>
+                    <Label>{t("web.settings.historyImport.emailOrUsername")}</Label>
                     <Input
                       value={connectUsername}
                       onChange={(e) => setConnectUsername(e.target.value)}
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>Password</Label>
+                    <Label>{t("web.settings.historyImport.password")}</Label>
                     <Input
                       type="password"
                       value={connectPassword}
@@ -490,20 +512,24 @@ export default function HistoryImportSettings() {
                   </div>
                 </div>
                 <Button onClick={handleConnectLogin} disabled={loginMutation.isPending}>
-                  {loginMutation.isPending ? "Connecting\u2026" : "Find Servers"}
+                  {loginMutation.isPending
+                    ? t("web.settings.historyImport.connecting")
+                    : t("web.settings.historyImport.findServers")}
                 </Button>
 
                 {connectSession && (
                   <div className="surface-panel-subtle space-y-3 rounded-[1.2rem] p-4">
                     <div className="flex items-center gap-2">
                       <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-                      <span className="text-sm font-medium">Connected</span>
+                      <span className="text-sm font-medium">
+                        {t("web.settings.historyImport.connected")}
+                      </span>
                     </div>
                     <div className="space-y-2">
-                      <Label>Server</Label>
+                      <Label>{t("web.settings.historyImport.server")}</Label>
                       <Select value={connectServerId} onValueChange={setConnectServerId}>
                         <SelectTrigger>
-                          <SelectValue placeholder="Choose a server" />
+                          <SelectValue placeholder={t("web.settings.historyImport.chooseServer")} />
                         </SelectTrigger>
                         <SelectContent>
                           {connectSession.servers.map((server) => (
@@ -520,13 +546,15 @@ export default function HistoryImportSettings() {
             ) : (
               <div className="space-y-4">
                 {sourcesLoading ? (
-                  <div className="text-muted-foreground text-sm">Loading saved servers\u2026</div>
+                  <div className="text-muted-foreground text-sm">
+                    {t("web.settings.historyImport.loadingSavedServers")}
+                  </div>
                 ) : embySources.length === 0 ? (
-                  <EmptyNotice>No server-defined Emby servers are available yet.</EmptyNotice>
+                  <EmptyNotice>{t("web.settings.historyImport.noEmbyServers")}</EmptyNotice>
                 ) : (
                   <>
                     <div className="space-y-2">
-                      <Label>Saved Server</Label>
+                      <Label>{t("web.settings.historyImport.savedServer")}</Label>
                       <Select value={effectiveSavedSourceId} onValueChange={setSavedSourceId}>
                         <SelectTrigger>
                           <SelectValue />
@@ -542,17 +570,17 @@ export default function HistoryImportSettings() {
                     </div>
                     <div className="grid gap-4 md:grid-cols-2">
                       <div className="space-y-2">
-                        <Label>Emby Username</Label>
+                        <Label>{t("web.settings.historyImport.embyUsername")}</Label>
                         <Input
                           value={savedUsername}
                           onChange={(e) => setSavedUsername(e.target.value)}
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label>Emby Password</Label>
+                        <Label>{t("web.settings.historyImport.embyPassword")}</Label>
                         <Input
                           type="password"
-                          placeholder="Leave blank if the account has none"
+                          placeholder={t("web.settings.historyImport.embyPasswordPlaceholder")}
                           value={savedPassword}
                           onChange={(e) => setSavedPassword(e.target.value)}
                         />
@@ -572,8 +600,8 @@ export default function HistoryImportSettings() {
               value={plexMode}
               onChange={(v) => setPlexMode(v as PlexMode)}
               options={[
-                { value: "oauth", label: "Plex Account" },
-                { value: "saved", label: "Saved Server" },
+                { value: "oauth", label: t("web.settings.historyImport.mode.plexAccount") },
+                { value: "saved", label: t("web.settings.historyImport.savedServer") },
               ]}
             />
 
@@ -583,42 +611,50 @@ export default function HistoryImportSettings() {
                   <div className="space-y-3 rounded-[1.2rem] border border-red-500/30 bg-red-500/[0.06] p-4 text-sm">
                     <div className="flex items-center gap-2 font-medium text-red-400">
                       <XCircle className="h-4 w-4" />
-                      Plex sign-in failed
+                      {t("web.settings.historyImport.plexSignInFailed")}
                     </div>
                     <p className="text-red-100/80">{plexAuthError}</p>
                     <Button onClick={handlePlexLogin} disabled={plexAuthPending} variant="outline">
-                      {plexAuthPending ? "Starting\u2026" : "Try Again"}
+                      {plexAuthPending
+                        ? t("web.settings.historyImport.starting")
+                        : t("web.settings.historyImport.tryAgain")}
                     </Button>
                   </div>
                 ) : plexAuthPending ? (
                   <div className="surface-panel-subtle flex items-center gap-3 rounded-[1.2rem] p-4">
                     <Loader2 className="text-muted-foreground h-4 w-4 animate-spin" />
                     <div>
-                      <div className="text-sm font-medium">Finishing Plex sign-in\u2026</div>
+                      <div className="text-sm font-medium">
+                        {t("web.settings.historyImport.finishingPlexSignIn")}
+                      </div>
                       <p className="text-muted-foreground text-[13px]">
-                        Continue in Plex, then you'll be returned here automatically.
+                        {t("web.settings.historyImport.plexContinue")}
                       </p>
                     </div>
                   </div>
                 ) : plexServers.length === 0 ? (
                   <Button onClick={handlePlexLogin} disabled={plexAuthPending}>
-                    {plexAuthPending ? "Starting\u2026" : "Sign in with Plex"}
+                    {plexAuthPending
+                      ? t("web.settings.historyImport.starting")
+                      : t("web.settings.historyImport.signInWithPlex")}
                   </Button>
                 ) : (
                   <div className="surface-panel-subtle space-y-4 rounded-[1.2rem] p-4">
                     <div className="flex items-center gap-2">
                       <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-                      <span className="text-sm font-medium">Signed in</span>
+                      <span className="text-sm font-medium">
+                        {t("web.settings.historyImport.signedIn")}
+                      </span>
                     </div>
                     <div className="space-y-2">
-                      <Label>Server</Label>
+                      <Label>{t("web.settings.historyImport.server")}</Label>
                       <Select
                         value={plexServerId}
                         onValueChange={setPlexServerId}
                         disabled={pending}
                       >
                         <SelectTrigger>
-                          <SelectValue placeholder="Choose a server" />
+                          <SelectValue placeholder={t("web.settings.historyImport.chooseServer")} />
                         </SelectTrigger>
                         <SelectContent>
                           {plexServers.map((server) => (
@@ -626,8 +662,11 @@ export default function HistoryImportSettings() {
                               key={server.clientIdentifier}
                               value={server.clientIdentifier}
                             >
-                              {server.name}
-                              {server.owned ? "" : " (shared)"}
+                              {server.owned
+                                ? server.name
+                                : t("web.settings.historyImport.sharedServer", {
+                                    name: server.name,
+                                  })}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -635,7 +674,7 @@ export default function HistoryImportSettings() {
                     </div>
                     {plexHome.users.length > 1 && (
                       <div className="space-y-2">
-                        <Label>Plex Home user</Label>
+                        <Label>{t("web.settings.historyImport.plexHome.user")}</Label>
                         <Select
                           value={plexHomeUserId}
                           disabled={pending}
@@ -645,27 +684,30 @@ export default function HistoryImportSettings() {
                             setPlexSwitchError(null);
                           }}
                         >
-                          <SelectTrigger aria-label="Plex Home user">
-                            <SelectValue placeholder="Choose a Plex Home user" />
+                          <SelectTrigger aria-label={t("web.settings.historyImport.plexHome.user")}>
+                            <SelectValue
+                              placeholder={t("web.settings.historyImport.plexHome.choose")}
+                            />
                           </SelectTrigger>
                           <SelectContent>
                             {plexHome.users.map((user) => (
                               <SelectItem key={user.uuid} value={user.uuid}>
-                                {plexHomeUserLabel(user, plexHome.accountUUID)}
+                                {plexHomeUserLabel(t, user, plexHome.accountUUID)}
                               </SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
                         <p className="text-muted-foreground text-xs leading-relaxed">
-                          Imports one person at a time. When an import finishes, choose the next
-                          Plex Home user and the profile their history goes into.
+                          {t("web.settings.historyImport.plexHome.hint")}
                         </p>
                       </div>
                     )}
                     {selectedPlexHomeUser?.protected && (
                       <div className="space-y-2">
                         <Label htmlFor="plex-home-user-pin">
-                          {selectedPlexHomeUser.title}'s Plex Home PIN
+                          {t("web.settings.historyImport.plexHome.pin", {
+                            name: selectedPlexHomeUser.title,
+                          })}
                         </Label>
                         <Input
                           id="plex-home-user-pin"
@@ -679,7 +721,7 @@ export default function HistoryImportSettings() {
                       </div>
                     )}
                     <Button onClick={handlePlexLogin} disabled={plexAuthPending} variant="outline">
-                      Reconnect Plex Account
+                      {t("web.settings.historyImport.reconnectPlex")}
                     </Button>
                   </div>
                 )}
@@ -687,13 +729,15 @@ export default function HistoryImportSettings() {
             ) : (
               <div className="space-y-4">
                 {sourcesLoading ? (
-                  <div className="text-muted-foreground text-sm">Loading saved servers\u2026</div>
+                  <div className="text-muted-foreground text-sm">
+                    {t("web.settings.historyImport.loadingSavedServers")}
+                  </div>
                 ) : plexSources.length === 0 ? (
-                  <EmptyNotice>No server-defined Plex servers are available yet.</EmptyNotice>
+                  <EmptyNotice>{t("web.settings.historyImport.noPlexServers")}</EmptyNotice>
                 ) : (
                   <>
                     <div className="space-y-2">
-                      <Label>Saved Server</Label>
+                      <Label>{t("web.settings.historyImport.savedServer")}</Label>
                       <Select
                         value={effectivePlexSavedSourceId}
                         onValueChange={setPlexSavedSourceId}
@@ -711,12 +755,12 @@ export default function HistoryImportSettings() {
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <Label>Plex Auth Token</Label>
+                      <Label>{t("web.settings.historyImport.plexToken")}</Label>
                       <Input
                         type="password"
                         value={plexToken}
                         onChange={(e) => setPlexToken(e.target.value)}
-                        placeholder="Your Plex authentication token"
+                        placeholder={t("web.settings.historyImport.plexTokenPlaceholder")}
                       />
                     </div>
                   </>
@@ -731,23 +775,23 @@ export default function HistoryImportSettings() {
           <div className="space-y-4">
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label>Jellyfin Server URL</Label>
+                <Label>{t("web.settings.historyImport.jellyfinServerUrl")}</Label>
                 <Input
                   value={jellyfinServerURL}
                   onChange={(e) => setJellyfinServerURL(e.target.value)}
-                  placeholder="https://jellyfin.example.com"
+                  placeholder={JELLYFIN_URL_EXAMPLE}
                 />
               </div>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label>Jellyfin Username</Label>
+                  <Label>{t("web.settings.historyImport.jellyfinUsername")}</Label>
                   <Input
                     value={jellyfinUsername}
                     onChange={(e) => setJellyfinUsername(e.target.value)}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Jellyfin Password</Label>
+                  <Label>{t("web.settings.historyImport.jellyfinPassword")}</Label>
                   <Input
                     type="password"
                     value={jellyfinPassword}
@@ -756,7 +800,7 @@ export default function HistoryImportSettings() {
                 </div>
               </div>
               <p className="text-muted-foreground text-xs leading-relaxed">
-                Enter the base URL for the Jellyfin server you want to import from.
+                {t("web.settings.historyImport.jellyfinHelp")}
               </p>
             </div>
           </div>
@@ -765,11 +809,11 @@ export default function HistoryImportSettings() {
         {/* Action row */}
         <div className="border-border/40 flex flex-col gap-4 border-t pt-4 sm:flex-row sm:items-end sm:justify-between">
           <div className="w-full space-y-2 sm:max-w-[280px]">
-            <Label>Import into profile</Label>
+            <Label>{t("web.settings.historyImport.importIntoProfile")}</Label>
             {canImportForOthers ? (
               <Select value={effectiveProfileId} onValueChange={setProfileId} disabled={pending}>
-                <SelectTrigger aria-label="Import into profile">
-                  <SelectValue placeholder="Choose a profile" />
+                <SelectTrigger aria-label={t("web.settings.historyImport.importIntoProfile")}>
+                  <SelectValue placeholder={t("web.settings.historyImport.chooseProfile")} />
                 </SelectTrigger>
                 <SelectContent>
                   {profiles.map((item) => (
@@ -781,9 +825,9 @@ export default function HistoryImportSettings() {
               </Select>
             ) : (
               <p className="text-muted-foreground text-sm">
-                The history goes into your profile
-                {profile?.name ? `, ${profile.name}` : ""}. Only the primary profile can import into
-                other profiles.
+                {profile?.name
+                  ? t("web.settings.historyImport.ownProfileOnlyNamed", { name: profile.name })
+                  : t("web.settings.historyImport.ownProfileOnly")}
               </p>
             )}
           </div>
@@ -792,7 +836,9 @@ export default function HistoryImportSettings() {
             disabled={!canStart || pending}
             className="sm:px-8"
           >
-            {createRunMutation.isPending || plexSwitchPending ? "Starting\u2026" : "Start Import"}
+            {createRunMutation.isPending || plexSwitchPending
+              ? t("web.settings.historyImport.starting")
+              : t("web.settings.historyImport.startImport")}
           </Button>
         </div>
         {startError && (
@@ -812,20 +858,22 @@ export default function HistoryImportSettings() {
 
       {/* ── Latest import ───────────────────────────────── */}
       <SettingsGroup
-        title={activeRunId && activeRun ? "Selected import" : "Latest import"}
+        title={
+          activeRunId && activeRun
+            ? t("web.settings.historyImport.selectedImport.title")
+            : t("web.settings.historyImport.latestImport.title")
+        }
         description={
           activeRunId && activeRun
-            ? "Details from the selected import run."
-            : "Results from the most recent import run."
+            ? t("web.settings.historyImport.selectedImport.description")
+            : t("web.settings.historyImport.latestImport.description")
         }
       >
         {runError && (
           <div role="alert" className="text-destructive mb-3 text-sm">
-            <p>
-              Import status could not be refreshed. Check its status before starting another import.
-            </p>
+            <p>{t("web.settings.historyImport.refreshFailed")}</p>
             <Button variant="outline" size="sm" onClick={() => void refreshRun()}>
-              Refresh status
+              {t("web.settings.historyImport.refreshStatus")}
             </Button>
           </div>
         )}
@@ -834,11 +882,11 @@ export default function HistoryImportSettings() {
 
       {/* ── Import history ──────────────────────────────── */}
       <SettingsGroup
-        title="Import history"
-        description="Select a past run to view its details above."
+        title={t("web.settings.historyImport.history.title")}
+        description={t("web.settings.historyImport.history.description")}
       >
         {recentRuns.length === 0 ? (
-          <EmptyNotice>No imports have been started yet.</EmptyNotice>
+          <EmptyNotice>{t("web.settings.historyImport.history.empty")}</EmptyNotice>
         ) : (
           <div className="space-y-2">
             {recentRuns.map((run) => (
@@ -870,22 +918,19 @@ function SourceCard({
   selected: boolean;
   onClick: () => void;
 }) {
+  const t = useT();
   const isEmby = type === "emby";
   const isJellyfin = type === "jellyfin";
-  const label = isEmby ? "Emby" : isJellyfin ? "Jellyfin" : "Plex";
-  const description = isEmby
-    ? "Emby Connect or saved server"
-    : isJellyfin
-      ? "Direct server URL + credentials"
-      : "Plex account or direct server";
-  const letter = isEmby ? "E" : isJellyfin ? "J" : "P";
+  const label = SOURCE_NAMES[type];
+  const description = t(`web.settings.historyImport.source.${type}`);
+  const letter = SOURCE_LETTERS[type];
 
   return (
     <button
       type="button"
       onClick={onClick}
       className={cn(
-        "relative rounded-xl border p-4 text-left transition-all duration-200",
+        "relative rounded-xl border p-4 text-start transition-all duration-200",
         selected
           ? isEmby
             ? "border-emerald-500/40 bg-emerald-500/[0.06]"
@@ -916,7 +961,7 @@ function SourceCard({
         </div>
       </div>
       {selected && (
-        <div className="absolute top-3 right-3">
+        <div className="absolute end-3 top-3">
           <div
             className={cn(
               "h-2 w-2 rounded-full",
@@ -968,6 +1013,7 @@ function EmptyNotice({ children }: { children: React.ReactNode }) {
 }
 
 function RunStatusIndicator({ status }: { status: PersonalImportRun["status"] }) {
+  const t = useT();
   const config = STATUS_CONFIG[status];
   const Icon = config.icon;
   const shouldSpin = "spin" in config && config.spin;
@@ -981,18 +1027,19 @@ function RunStatusIndicator({ status }: { status: PersonalImportRun["status"] })
       )}
     >
       <Icon className={cn("h-3 w-3", shouldSpin && "animate-spin")} />
-      {config.label}
+      {t(config.labelKey)}
     </span>
   );
 }
 
 function RunSummary({ run }: { run: PersonalImportRun | null }) {
+  const t = useT();
   if (!run) {
     return (
       <div className="surface-panel-subtle flex flex-col items-center justify-center rounded-[1.2rem] py-10 text-center">
         <Clock className="text-muted-foreground/40 mb-3 h-8 w-8" />
         <p className="text-muted-foreground text-sm">
-          Import summaries will appear here after you start a run.
+          {t("web.settings.historyImport.summary.empty")}
         </p>
       </div>
     );
@@ -1009,20 +1056,20 @@ function RunSummary({ run }: { run: PersonalImportRun | null }) {
         <div className="space-y-0.5">
           <div className="flex items-center gap-2.5">
             <span className="text-sm font-medium">
-              {run.source_type === "emby"
-                ? "Emby"
-                : run.source_type === "jellyfin"
-                  ? "Jellyfin"
-                  : "Plex"}{" "}
-              import
+              {t("web.settings.historyImport.runTitle", {
+                source: SOURCE_NAMES[sourceKind(run.source_type)],
+              })}
             </span>
             <RunStatusIndicator status={run.status} />
           </div>
           <div className="text-muted-foreground text-xs">
-            {formatRelativeTime(run.created_at)}
-            {run.completed_at && (
-              <span> &middot; took {formatDuration(run.created_at, run.completed_at)}</span>
-            )}
+            {run.completed_at
+              ? t("web.settings.historyImport.timeWithDuration", {
+                  time: formatRelativeTime(t, run.created_at),
+                  duration: formatDuration(t, run.created_at, run.completed_at),
+                  detail: (chunks) => <span>{chunks}</span>,
+                })
+              : formatRelativeTime(t, run.created_at)}
           </div>
         </div>
       </div>
@@ -1034,21 +1081,47 @@ function RunSummary({ run }: { run: PersonalImportRun | null }) {
             <div className="h-full w-1/3 animate-pulse rounded-full bg-amber-400" />
           </div>
           <div className="text-muted-foreground text-xs tabular-nums">
-            {processed.toLocaleString()} processed so far
+            {t("web.settings.historyImport.processedSoFar", {
+              processed: processed.toLocaleString(formatLocale()),
+            })}
           </div>
         </div>
       )}
 
       {/* Metrics */}
       <div className="grid grid-cols-3 gap-2 sm:grid-cols-7">
-        <MetricCard label="Fetched" value={run.fetched} />
-        <MetricCard label="Matched" value={run.matched} accent="positive" />
-        <MetricCard label="Unmatched" value={run.unmatched} accent="warning" />
-        <MetricCard label="Progress" value={run.progress_updated} accent="positive" />
-        <MetricCard label="History" value={run.history_created} accent="positive" />
-        <MetricCard label="Watchlist" value={run.watchlist_added} accent="positive" />
-        <MetricCard label="Favorites" value={run.favorites_imported} accent="positive" />
-        <MetricCard label="Skipped" value={run.skipped} />
+        <MetricCard label={t("web.settings.historyImport.metric.fetched")} value={run.fetched} />
+        <MetricCard
+          label={t("web.settings.historyImport.metric.matched")}
+          value={run.matched}
+          accent="positive"
+        />
+        <MetricCard
+          label={t("web.settings.historyImport.metric.unmatched")}
+          value={run.unmatched}
+          accent="warning"
+        />
+        <MetricCard
+          label={t("web.settings.historyImport.metric.progress")}
+          value={run.progress_updated}
+          accent="positive"
+        />
+        <MetricCard
+          label={t("web.settings.historyImport.metric.history")}
+          value={run.history_created}
+          accent="positive"
+        />
+        <MetricCard
+          label={t("web.settings.historyImport.metric.watchlist")}
+          value={run.watchlist_added}
+          accent="positive"
+        />
+        <MetricCard
+          label={t("web.settings.historyImport.metric.favorites")}
+          value={run.favorites_imported}
+          accent="positive"
+        />
+        <MetricCard label={t("web.settings.historyImport.metric.skipped")} value={run.skipped} />
       </div>
 
       {/* Error */}
@@ -1062,7 +1135,7 @@ function RunSummary({ run }: { run: PersonalImportRun | null }) {
       {/* Warnings */}
       {run.warnings.length > 0 && (
         <div className="space-y-2">
-          <Label className="text-sm font-medium">Warnings</Label>
+          <Label className="text-sm font-medium">{t("web.settings.historyImport.warnings")}</Label>
           <div className="space-y-1.5">
             {run.warnings.map((warning, index) => (
               <div key={`${index}-${warning}`} className="flex items-start gap-2 text-sm">
@@ -1077,7 +1150,9 @@ function RunSummary({ run }: { run: PersonalImportRun | null }) {
       {/* Unmatched samples */}
       {run.unmatched_samples.length > 0 && (
         <div className="space-y-2">
-          <Label className="text-sm font-medium">Unmatched examples</Label>
+          <Label className="text-sm font-medium">
+            {t("web.settings.historyImport.unmatchedExamples")}
+          </Label>
           <div className="space-y-2">
             {run.unmatched_samples.map((sample, index) => (
               <div
@@ -1087,13 +1162,16 @@ function RunSummary({ run }: { run: PersonalImportRun | null }) {
                 <div className="font-medium">
                   {sample.title}
                   {sample.year ? (
-                    <span className="text-muted-foreground ml-1.5 font-normal">
-                      ({sample.year})
+                    <span className="text-muted-foreground ms-1.5 font-normal">
+                      {t("web.settings.historyImport.sampleYear", { year: sample.year })}
                     </span>
                   ) : null}
                 </div>
                 <div className="text-muted-foreground mt-0.5 text-xs">
-                  {sample.kind} &middot; {sample.reason}
+                  {t("web.settings.historyImport.sampleDetail", {
+                    kind: sample.kind,
+                    reason: sample.reason,
+                  })}
                 </div>
               </div>
             ))}
@@ -1143,6 +1221,7 @@ function HistoryRunCard({
   active: boolean;
   onClick: () => void;
 }) {
+  const t = useT();
   const isEmby = run.source_type === "emby";
   const isJellyfin = run.source_type === "jellyfin";
 
@@ -1151,7 +1230,7 @@ function HistoryRunCard({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex w-full items-center justify-between rounded-[1.2rem] px-4 py-3 text-left transition-all duration-200",
+        "flex w-full items-center justify-between rounded-[1.2rem] px-4 py-3 text-start transition-all duration-200",
         active ? "surface-panel-subtle ring-1 ring-white/[0.08]" : "hover:surface-panel-subtle",
       )}
     >
@@ -1166,16 +1245,28 @@ function HistoryRunCard({
                 : "bg-amber-500/10 text-amber-400",
           )}
         >
-          {isEmby ? "E" : isJellyfin ? "J" : "P"}
+          {SOURCE_LETTERS[sourceKind(run.source_type)]}
         </div>
         <div>
           <div className="text-sm font-medium">
-            {isEmby ? "Emby" : isJellyfin ? "Jellyfin" : "Plex"} import
-            {profileName && <span className="text-muted-foreground"> into {profileName}</span>}
+            {profileName
+              ? t("web.settings.historyImport.runTitleForProfile", {
+                  source: SOURCE_NAMES[sourceKind(run.source_type)],
+                  profile: profileName,
+                  muted: (chunks) => <span className="text-muted-foreground">{chunks}</span>,
+                })
+              : t("web.settings.historyImport.runTitle", {
+                  source: SOURCE_NAMES[sourceKind(run.source_type)],
+                })}
           </div>
           <div className="text-muted-foreground text-xs">
-            {formatRelativeTime(run.created_at)}
-            {run.matched > 0 && <span> &middot; {run.matched} matched</span>}
+            {run.matched > 0
+              ? t("web.settings.historyImport.timeWithMatched", {
+                  time: formatRelativeTime(t, run.created_at),
+                  count: run.matched,
+                  detail: (chunks) => <span>{chunks}</span>,
+                })
+              : formatRelativeTime(t, run.created_at)}
           </div>
         </div>
       </div>
@@ -1188,20 +1279,30 @@ function HistoryRunCard({
    Helpers
    ──────────────────────────────────────────────────────────── */
 
-function formatRelativeTime(dateStr: string): string {
+/** A run's source as a card type; anything unexpected shows as Plex, as before. */
+function sourceKind(source: string): SourceType {
+  return source === "emby" || source === "jellyfin" ? source : "plex";
+}
+
+function formatRelativeTime(t: Translate, dateStr: string): string {
   return (
     formatRelativeTimeBase(dateStr, {
       rounding: "floor",
-      justNowLabel: "Just now",
+      justNowLabel: t("web.settings.historyImport.justNow"),
       absoluteAfterDays: 7,
     }) ?? ""
   );
 }
 
-function formatDuration(startStr: string, endStr: string): string {
+function formatDuration(t: Translate, startStr: string, endStr: string): string {
   const seconds = Math.floor((new Date(endStr).getTime() - new Date(startStr).getTime()) / 1000);
-  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 60) return t("web.settings.historyImport.duration.seconds", { seconds: seconds });
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
-  return s > 0 ? `${m}m ${s}s` : `${m}m`;
+  return s > 0
+    ? t("web.settings.historyImport.duration.minutesSeconds", {
+        minutes: m,
+        seconds: s,
+      })
+    : t("web.settings.historyImport.duration.minutes", { minutes: m });
 }

@@ -208,7 +208,7 @@
         "additionalProperties": false,
         "properties": {
           "can_unlink": {
-            "description": "Whether deleteAccountIdentity would disconnect an identity now: the account has another identity, or its local password still signs in (the account's password sign-in is on, and local password sign-in is on for the server or the account is break-glass). False with no identity",
+            "description": "Whether deleteAccountIdentity would disconnect an identity now for the profile asking: that profile is the account's household manager (deleteAccountIdentity describes who is), and the account has another identity, or its local password still signs in (the account's password sign-in is on, and local password sign-in is on for the server or the account is break-glass). False with no identity",
             "examples": [
               true
             ],
@@ -9040,6 +9040,25 @@
               "Trending Movies"
             ],
             "maxLength": 80,
+            "type": "string"
+          },
+          "title_args": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Values of the title_key message's placeholders by name, such as library for a generated library row; present only with title_key, and absent when the message has none",
+            "examples": [
+              {
+                "library": "Movies"
+              }
+            ],
+            "type": "object"
+          },
+          "title_key": {
+            "description": "Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section, recommendation row or request Discover row name, or a seasonal row's built-in in-season title. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. A client acts on title_key whenever it is present",
+            "examples": [
+              "home.section.recentlyAddedIn"
+            ],
             "type": "string"
           },
           "type": {
@@ -20493,6 +20512,25 @@
             "type": "string"
           },
           "title": {
+            "type": "string"
+          },
+          "title_args": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Values of the title_key message's placeholders by name, such as library for a generated library row; present only with title_key, and absent when the message has none",
+            "examples": [
+              {
+                "library": "Movies"
+              }
+            ],
+            "type": "object"
+          },
+          "title_key": {
+            "description": "Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section, recommendation row or request Discover row name, or a seasonal row's built-in in-season title. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. A client acts on title_key whenever it is present",
+            "examples": [
+              "home.section.recentlyAddedIn"
+            ],
             "type": "string"
           },
           "updated_at": {
@@ -32648,6 +32686,25 @@
             ],
             "type": "string"
           },
+          "title_args": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Values of the title_key message's placeholders by name, such as library for a generated library row; present only with title_key, and absent when the message has none",
+            "examples": [
+              {
+                "library": "Movies"
+              }
+            ],
+            "type": "object"
+          },
+          "title_key": {
+            "description": "Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section, recommendation row or request Discover row name, or a seasonal row's built-in in-season title. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. A client acts on title_key whenever it is present",
+            "examples": [
+              "home.section.recentlyAddedIn"
+            ],
+            "type": "string"
+          },
           "type": {
             "description": "What the row shows: tmdb_chart, tmdb_discover, tmdb_list or mdblist (title rows, in items), or studios, networks or genres (brand rows). More values may be added",
             "examples": [
@@ -32695,6 +32752,25 @@
           "title": {
             "examples": [
               "Trending Movies"
+            ],
+            "type": "string"
+          },
+          "title_args": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Values of the title_key message's placeholders by name, such as library for a generated library row; present only with title_key, and absent when the message has none",
+            "examples": [
+              {
+                "library": "Movies"
+              }
+            ],
+            "type": "object"
+          },
+          "title_key": {
+            "description": "Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section, recommendation row or request Discover row name, or a seasonal row's built-in in-season title. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. A client acts on title_key whenever it is present",
+            "examples": [
+              "home.section.recentlyAddedIn"
             ],
             "type": "string"
           },
@@ -35479,6 +35555,7 @@
             "type": "string"
           },
           "file_name": {
+            "description": "Absent for viewers without file-path visibility, except on audiobooks and ebooks",
             "type": "string"
           },
           "file_path": {
@@ -36677,6 +36754,13 @@
             ],
             "format": "int64",
             "type": "integer"
+          },
+          "section_title_keys": {
+            "description": "Sections, profile section settings, admin section definitions and recommendation rows carry title_key, with title_args when its message has placeholders, for titles the server writes, so a client can translate them (a few, such as an editorial row's subject title, have none; a client shows title whenever the key is absent or unknown), and profile section settings carry default_title_key and default_title_args the same way for default_title. Request Discover rows carry title_key the same way, and the section recipe gallery's presets carry display_name_key, description_short_key and description_long_key for their text; those came later, so a server that reports this flag may not send them. Informational: clients act on each key whenever it is present. Absent when the home sections service is not configured, and on a server that predates section title keys",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           },
           "state": {
             "description": "Support and configuration state, not health",
@@ -46740,6 +46824,7 @@
             "type": "string"
           },
           "library_restrictions_enabled": {
+            "description": "Whether the profile is limited to allowed_library_ids within its account's libraries. The primary profile is never limited: it sees every library its account can access and hides libraries through its settings instead",
             "examples": [
               false
             ],
@@ -46934,7 +47019,7 @@
         "additionalProperties": false,
         "properties": {
           "allowed_library_ids": {
-            "description": "Unique library identifiers the profile may see when restrictions are enabled",
+            "description": "Unique library identifiers the profile may see when restrictions are enabled. Must be empty on an account's first profile, which becomes its primary profile, even with restrictions off",
             "examples": [
               [
                 "1",
@@ -46997,6 +47082,7 @@
             "type": "string"
           },
           "library_restrictions_enabled": {
+            "description": "Limits the profile to allowed_library_ids. Must be false or omitted on an account's first profile, which becomes its primary profile",
             "examples": [
               false
             ],
@@ -47303,6 +47389,25 @@
             ],
             "type": "string"
           },
+          "default_title_args": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Values of the default_title_key message's placeholders by name; present only with default_title_key, and absent when the message has none",
+            "examples": [
+              {
+                "library": "Movies"
+              }
+            ],
+            "type": "object"
+          },
+          "default_title_key": {
+            "description": "Key of the shared translation catalog message whose English is default_title, under the same rules as title_key: present only while default_title is the server's own text, and absent when an administrator typed it",
+            "examples": [
+              "home.section.continueWatching"
+            ],
+            "type": "string"
+          },
           "featured": {
             "examples": [
               false
@@ -47354,6 +47459,25 @@
             "description": "The title this profile sees: its own title override, or the administrator's title",
             "examples": [
               "Continue Watching"
+            ],
+            "type": "string"
+          },
+          "title_args": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Values of the title_key message's placeholders by name, such as library for a generated library row; present only with title_key, and absent when the message has none",
+            "examples": [
+              {
+                "library": "Movies"
+              }
+            ],
+            "type": "object"
+          },
+          "title_key": {
+            "description": "Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section, recommendation row or request Discover row name, or a seasonal row's built-in in-season title. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. A client acts on title_key whenever it is present",
+            "examples": [
+              "home.section.recentlyAddedIn"
             ],
             "type": "string"
           }
@@ -47465,6 +47589,7 @@
             ]
           },
           "library_restrictions_enabled": {
+            "description": "Limits the profile to allowed_library_ids. The primary profile can't be limited: true, or a non-empty allowed_library_ids, fails validation on it",
             "examples": [
               false
             ],
@@ -48644,15 +48769,36 @@
             "description": "Empty when the preset has none",
             "type": "string"
           },
+          "description_long_key": {
+            "description": "Key of the shared translation catalog message whose English is description_long; absent when the preset has no description_long",
+            "examples": [
+              "home.recipe.seAuto.details"
+            ],
+            "type": "string"
+          },
           "description_short": {
             "examples": [
               "Items added in the last seven days"
             ],
             "type": "string"
           },
+          "description_short_key": {
+            "description": "Key of the shared translation catalog message whose English is description_short, with the same fallback",
+            "examples": [
+              "home.recipe.mwWeek.description"
+            ],
+            "type": "string"
+          },
           "display_name": {
             "examples": [
               "New this week"
+            ],
+            "type": "string"
+          },
+          "display_name_key": {
+            "description": "Key of the shared translation catalog message whose English is display_name. A client that has the key shows its translation and otherwise display_name",
+            "examples": [
+              "home.recipe.mwWeek.name"
             ],
             "type": "string"
           },
@@ -48707,6 +48853,25 @@
             "description": "Display label",
             "examples": [
               "Because you enjoy Crime"
+            ],
+            "type": "string"
+          },
+          "title_args": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Values of the title_key message's placeholders by name, such as library for a generated library row; present only with title_key, and absent when the message has none",
+            "examples": [
+              {
+                "library": "Movies"
+              }
+            ],
+            "type": "object"
+          },
+          "title_key": {
+            "description": "Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section, recommendation row or request Discover row name, or a seasonal row's built-in in-season title. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. A client acts on title_key whenever it is present",
+            "examples": [
+              "home.section.recentlyAddedIn"
             ],
             "type": "string"
           },
@@ -50094,6 +50259,25 @@
             ],
             "type": "string"
           },
+          "title_args": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Values of the title_key message's placeholders by name, such as library for a generated library row; present only with title_key, and absent when the message has none",
+            "examples": [
+              {
+                "library": "Movies"
+              }
+            ],
+            "type": "object"
+          },
+          "title_key": {
+            "description": "Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section, recommendation row or request Discover row name, or a seasonal row's built-in in-season title. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. A client acts on title_key whenever it is present",
+            "examples": [
+              "home.section.recentlyAddedIn"
+            ],
+            "type": "string"
+          },
           "total_count": {
             "description": "Items the section has in total, at least the number returned",
             "examples": [
@@ -50193,6 +50377,25 @@
           "title": {
             "examples": [
               "Recently Added"
+            ],
+            "type": "string"
+          },
+          "title_args": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Values of the title_key message's placeholders by name, such as library for a generated library row; present only with title_key, and absent when the message has none",
+            "examples": [
+              {
+                "library": "Movies"
+              }
+            ],
+            "type": "object"
+          },
+          "title_key": {
+            "description": "Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section, recommendation row or request Discover row name, or a seasonal row's built-in in-season title. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. A client acts on title_key whenever it is present",
+            "examples": [
+              "home.section.recentlyAddedIn"
             ],
             "type": "string"
           }
@@ -54781,6 +54984,7 @@
             "type": "boolean"
           },
           "file_name": {
+            "description": "An external track's file name; absent for viewers without file-path visibility, except on audiobooks and ebooks",
             "type": "string"
           },
           "forced": {
@@ -55315,10 +55519,11 @@
             "type": "string"
           },
           "file_name": {
+            "description": "Absent for viewers without file-path visibility, except on audiobooks and ebooks",
             "type": "string"
           },
           "file_path": {
-            "description": "Only for accounts allowed to see paths",
+            "description": "Absent for viewers without file-path visibility",
             "type": "string"
           },
           "file_size": {
@@ -56300,6 +56505,7 @@
             "type": "boolean"
           },
           "file_name": {
+            "description": "An external track's file name; absent for viewers without file-path visibility, except on audiobooks and ebooks",
             "type": "string"
           },
           "forced": {
@@ -58965,7 +59171,32 @@
   "paths": {
     "/api/v2/account/identities": {
       "get": {
+        "description": "Every profile on the account may read the list. can_unlink answers for the profile X-Profile-Id names, or for a request that names none, by deleteAccountIdentity's rule: a profile other than the account's primary one reads false.",
         "operationId": "listAccountIdentities",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -58996,6 +59227,26 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
           },
           "406": {
             "content": {
@@ -59057,7 +59308,7 @@
         "tags": [
           "account"
         ],
-        "x-silo-class": "authenticated",
+        "x-silo-class": "profile_scoped",
         "x-silo-service-backed": true
       }
     },
@@ -59918,9 +60169,31 @@
     },
     "/api/v2/account/identities/{id}": {
       "delete": {
-        "description": "Allowed only while the account can still sign in another way: its local password (with local password sign-in on, or as a break-glass account) or another identity; otherwise 409 last_sign_in_method. An API key or an impersonation session is refused with 403.",
+        "description": "How the account signs in belongs to the whole household, so only the account's household manager may disconnect an identity. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied. Allowed only while the account can still sign in another way: its local password (with local password sign-in on, or as a break-glass account) or another identity; otherwise 409 last_sign_in_method. An API key or an impersonation session is refused with 403 permission_denied.",
         "operationId": "deleteAccountIdentity",
         "parameters": [
+          {
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
           {
             "description": "Identity id",
             "in": "path",
@@ -60050,7 +60323,7 @@
         "tags": [
           "account"
         ],
-        "x-silo-class": "authenticated",
+        "x-silo-class": "profile_scoped",
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -236586,6 +236859,7 @@
     },
     "/api/v2/webhook-sync/connections": {
       "get": {
+        "description": "Webhook sync connections are account-wide: a connection's receiver URL carries its secret, and its mappings choose which profile an external user's watch state is written to. Only the account's household manager may read or change them. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's API key, or from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied.",
         "operationId": "listWebhookConnections",
         "parameters": [
           {
@@ -236761,6 +237035,7 @@
         "x-silo-service-backed": true
       },
       "post": {
+        "description": "Webhook sync connections are account-wide: a connection's receiver URL carries its secret, and its mappings choose which profile an external user's watch state is written to. Only the account's household manager may read or change them. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's API key, or from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied.",
         "operationId": "createWebhookConnection",
         "parameters": [
           {
@@ -236955,6 +237230,7 @@
     },
     "/api/v2/webhook-sync/connections/{id}": {
       "delete": {
+        "description": "Webhook sync connections are account-wide: a connection's receiver URL carries its secret, and its mappings choose which profile an external user's watch state is written to. Only the account's household manager may read or change them. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's API key, or from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied.",
         "operationId": "deleteWebhookConnection",
         "parameters": [
           {
@@ -237109,6 +237385,7 @@
         "x-silo-service-backed": true
       },
       "put": {
+        "description": "Webhook sync connections are account-wide: a connection's receiver URL carries its secret, and its mappings choose which profile an external user's watch state is written to. Only the account's household manager may read or change them. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's API key, or from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied.",
         "operationId": "updateWebhookConnection",
         "parameters": [
           {
@@ -237312,6 +237589,7 @@
     },
     "/api/v2/webhook-sync/connections/{id}/events": {
       "get": {
+        "description": "Webhook sync connections are account-wide: a connection's receiver URL carries its secret, and its mappings choose which profile an external user's watch state is written to. Only the account's household manager may read or change them. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's API key, or from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied.",
         "operationId": "listWebhookEvents",
         "parameters": [
           {
@@ -237498,6 +237776,7 @@
     },
     "/api/v2/webhook-sync/connections/{id}/profile-mappings": {
       "get": {
+        "description": "Webhook sync connections are account-wide: a connection's receiver URL carries its secret, and its mappings choose which profile an external user's watch state is written to. Only the account's household manager may read or change them. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's API key, or from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied.",
         "operationId": "getWebhookMappings",
         "parameters": [
           {
@@ -237657,6 +237936,7 @@
         "x-silo-service-backed": true
       },
       "put": {
+        "description": "Webhook sync connections are account-wide: a connection's receiver URL carries its secret, and its mappings choose which profile an external user's watch state is written to. Only the account's household manager may read or change them. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's API key, or from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied.",
         "operationId": "updateWebhookMappings",
         "parameters": [
           {
@@ -237860,6 +238140,7 @@
     },
     "/api/v2/webhook-sync/connections/{id}/webhook/rotate": {
       "post": {
+        "description": "Webhook sync connections are account-wide: a connection's receiver URL carries its secret, and its mappings choose which profile an external user's watch state is written to. Only the account's household manager may read or change them. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's API key, or from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied.",
         "operationId": "rotateWebhookConnection",
         "parameters": [
           {

@@ -17,6 +17,7 @@ import {
   useUpdateRequestSettings,
 } from "@/hooks/queries/admin/requests";
 import { useReportUnsavedChanges } from "@/hooks/useUnsavedChanges";
+import { useT } from "@/i18n";
 import { SaveBar } from "@/components/SaveBar";
 
 import { FieldGroup } from "./FieldGroup";
@@ -61,24 +62,32 @@ function wholeNumber(value: string, min: number): number | null {
 
 /** Help text for the General group's defaults that groups and accounts can override. */
 function OverridableDefault() {
+  const t = useT();
   return (
     <>
-      The server-wide default.{" "}
-      <Link to="/admin/access-groups" className="text-foreground underline underline-offset-2">
-        Access groups
-      </Link>{" "}
-      and accounts can override this.
+      {t("web.admin.settings.requests.general.overridableDefault", {
+        link: (chunks) => (
+          <Link to="/admin/access-groups" className="text-foreground underline underline-offset-2">
+            {chunks}
+          </Link>
+        ),
+      })}
     </>
   );
 }
 
 function PageSkeleton() {
+  const t = useT();
   return (
-    <div className="space-y-6" role="status" aria-label="Loading request settings">
+    <div
+      className="space-y-6"
+      role="status"
+      aria-label={t("web.admin.settings.requests.page.loading")}
+    >
       <Skeleton className="h-8 w-48" />
       <Skeleton className="h-40 w-full" />
       <Skeleton className="h-40 w-full" />
-      <span className="sr-only">Loading request settings</span>
+      <span className="sr-only">{t("web.admin.settings.requests.page.loading")}</span>
     </div>
   );
 }
@@ -88,14 +97,15 @@ function PageSkeleton() {
  * requests go to, and the rules that pick a server for each title.
  */
 export default function RequestsSettings() {
+  const t = useT();
   const capabilities = useAdminRequestCapabilities();
   if (capabilities.isLoading) return <PageSkeleton />;
   if (!capabilities.data?.available || !capabilities.data.guarded_configuration) {
     return (
       <div className="flex flex-col gap-7">
-        <SettingsPageHeader title="Requests" />
+        <SettingsPageHeader title={t("web.admin.settings.requests.page.title")} />
         <p className="text-muted-foreground text-sm">
-          Request settings are not available on this server.
+          {t("web.admin.settings.requests.page.unavailable")}
         </p>
       </div>
     );
@@ -106,6 +116,7 @@ export default function RequestsSettings() {
 /** routing: whether the server offers routing rules; without them the page
  * leaves them out rather than calling the route endpoints. */
 function RequestsSettingsContent({ routing }: { routing: boolean }) {
+  const t = useT();
   const settingsQuery = useRequestSettings();
   const routesQuery = useRequestRoutes(routing);
   const serversQuery = useRequestIntegrations();
@@ -185,8 +196,10 @@ function RequestsSettingsContent({ routing }: { routing: boolean }) {
     } else {
       toast.error(
         result.error instanceof Error
-          ? `Couldn't reload request settings: ${result.error.message}`
-          : "Couldn't reload request settings.",
+          ? t("web.admin.settings.requests.page.reloadFailedReason", {
+              error: result.error.message,
+            })
+          : t("web.admin.settings.requests.page.reloadFailed"),
       );
     }
   }
@@ -198,11 +211,11 @@ function RequestsSettingsContent({ routing }: { routing: boolean }) {
   return (
     <div className="flex h-full flex-col">
       <SettingsPageHeader
-        title="Requests"
+        title={t("web.admin.settings.requests.page.title")}
         className="mb-8"
         actions={
           <Button asChild variant="outline" size="sm">
-            <Link to="/admin/requests">Request queue</Link>
+            <Link to="/admin/requests">{t("web.admin.settings.requests.page.queue")}</Link>
           </Button>
         }
       />
@@ -211,7 +224,10 @@ function RequestsSettingsContent({ routing }: { routing: boolean }) {
         {/* Locked while the save bar is saving: a save adopts what the server
             returned, which would drop an edit made in the meantime. */}
         <fieldset disabled={saving} className="min-w-0">
-          <FieldGroup label="General" dirty={general.changes > 0}>
+          <FieldGroup
+            label={t("web.admin.settings.requests.general.label")}
+            dirty={general.changes > 0}
+          >
             {settingsQuery.isLoading ? (
               <div className="space-y-2 py-3.5">
                 <Skeleton className="h-9 w-full" />
@@ -219,24 +235,27 @@ function RequestsSettingsContent({ routing }: { routing: boolean }) {
               </div>
             ) : !draft || !baseGeneral ? (
               <p className="text-destructive py-3.5 text-sm">
-                Request settings could not be loaded.
+                {t("web.admin.settings.requests.general.loadFailed")}
               </p>
             ) : (
               <>
                 <SettingField
-                  label="Allow requests"
+                  label={t("web.admin.settings.requests.general.allowRequests")}
                   type="toggle"
-                  description="People can ask for movies and series the server does not have."
+                  description={t("web.admin.settings.requests.general.allowRequestsDescription")}
                   value={String(draft.requests_enabled)}
                   onChange={(value) => editGeneral({ requests_enabled: value === "true" })}
                   dirty={draft.requests_enabled !== baseGeneral.requests_enabled}
                 />
                 <SettingField
-                  label="Approval"
+                  label={t("web.admin.settings.requests.general.approval")}
                   type="select"
                   options={[
-                    { value: "auto", label: "Approve automatically" },
-                    { value: "admin", label: "An admin approves" },
+                    { value: "auto", label: t("web.admin.settings.requests.general.approvalAuto") },
+                    {
+                      value: "admin",
+                      label: t("web.admin.settings.requests.general.approvalAdmin"),
+                    },
                   ]}
                   description={<OverridableDefault />}
                   value={draft.auto_approve ? "auto" : "admin"}
@@ -244,14 +263,13 @@ function RequestsSettingsContent({ routing }: { routing: boolean }) {
                   dirty={draft.auto_approve !== baseGeneral.auto_approve}
                 />
                 <SettingField
-                  label="Request limit"
+                  label={t("web.admin.settings.requests.general.requestLimit")}
                   type="number"
-                  unit="requests"
+                  unit={t("web.admin.settings.requests.general.requestLimitUnit")}
                   description={
                     <>
-                      How many titles one account can request in the window below. Declined and
-                      failed requests don&apos;t count. At 0, only accounts with a group or account
-                      limit of their own can request. <OverridableDefault />
+                      {t("web.admin.settings.requests.general.requestLimitDescription")}{" "}
+                      <OverridableDefault />
                     </>
                   }
                   value={draft.max_requests}
@@ -260,38 +278,40 @@ function RequestsSettingsContent({ routing }: { routing: boolean }) {
                   status={
                     maxInvalid ? (
                       <SettingFieldStatus tone="warn">
-                        Use a whole number, 0 or more.
+                        {t("web.admin.settings.requests.general.requestLimitInvalid")}
                       </SettingFieldStatus>
                     ) : undefined
                   }
                 />
                 <SettingField
-                  label="Limit window"
+                  label={t("web.admin.settings.requests.general.limitWindow")}
                   type="number"
-                  unit="days"
+                  unit={t("web.admin.settings.requests.general.limitWindowUnit")}
                   value={draft.window_days}
                   onChange={(value) => editGeneral({ window_days: value })}
                   dirty={draft.window_days !== baseGeneral.window_days}
                   status={
                     windowInvalid ? (
-                      <SettingFieldStatus tone="warn">Use at least 1 day.</SettingFieldStatus>
+                      <SettingFieldStatus tone="warn">
+                        {t("web.admin.settings.requests.general.limitWindowInvalid")}
+                      </SettingFieldStatus>
                     ) : undefined
                   }
                 />
                 {draft.watchlist_requests !== undefined ? (
                   <SettingField
-                    label="Request titles added to a watchlist"
+                    label={t("web.admin.settings.requests.general.watchlist")}
                     type="toggle"
-                    description="When someone adds a title the library doesn't have to their watchlist, it is requested for them, as if they had pressed Request. Each profile can turn this off for itself."
+                    description={t("web.admin.settings.requests.general.watchlistDescription")}
                     value={String(draft.watchlist_requests)}
                     onChange={(value) => editGeneral({ watchlist_requests: value === "true" })}
                     dirty={draft.watchlist_requests !== baseGeneral.watchlist_requests}
                   />
                 ) : null}
                 <SettingField
-                  label="Also request a 4K version of every title"
+                  label={t("web.admin.settings.requests.general.forceDual")}
                   type="toggle"
-                  description="Normally a 4K version is requested only for people whose playback limit allows 4K, and only when a server takes 4K. With this on, every request also asks for 4K."
+                  description={t("web.admin.settings.requests.general.forceDualDescription")}
                   value={String(draft.force_dual_quality)}
                   onChange={(value) => editGeneral({ force_dual_quality: value === "true" })}
                   dirty={draft.force_dual_quality !== baseGeneral.force_dual_quality}

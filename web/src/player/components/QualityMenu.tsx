@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Settings } from "lucide-react";
-import { plainResolutionLabel, resolveActiveQualityOptionId } from "../playback-info";
+import { useT } from "@/i18n";
+import {
+  buildVersionStatusLabels,
+  plainResolutionLabel,
+  resolveActiveQualityOptionId,
+} from "../playback-info";
 import type { QualityOption } from "../types";
 import { PLAYBACK_SPEEDS, formatPlaybackSpeed } from "../utils/playbackSpeed";
 import { PlaybackSpeedTrack } from "./PlaybackSpeedTrack";
@@ -42,6 +47,7 @@ export function QualityMenu({
   playbackSpeed = 1,
   onPlaybackSpeedChange,
 }: QualityMenuProps) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -110,9 +116,9 @@ export function QualityMenu({
   const showSpeed = onPlaybackSpeedChange !== undefined;
   if (!showVersions && !showQuality && !showSpeed) return null;
 
-  let menuLabel = "Version";
-  if (showSpeed) menuLabel = "Playback settings";
-  else if (showQuality) menuLabel = "Quality";
+  let menuLabel = t("web.player.quality.version");
+  if (showSpeed) menuLabel = t("web.player.quality.playbackSettings");
+  else if (showQuality) menuLabel = t("web.player.quality.title");
 
   const resolvedActiveId = resolveActiveQualityOptionId(options, activeId, activeQuality);
   const activeOption = options.find((option) => option.id === resolvedActiveId);
@@ -120,8 +126,8 @@ export function QualityMenu({
   if (showQuality) {
     sourceLabel = isTranscoding
       ? "…"
-      : (activeOption?.label ?? plainResolutionLabel(activeId) ?? "Quality");
-  } else if (showVersions) sourceLabel = "Version";
+      : (activeOption?.label ?? plainResolutionLabel(activeId) ?? t("web.player.quality.title"));
+  } else if (showVersions) sourceLabel = t("web.player.quality.version");
   // A speed other than 1x stays on the gear in every layout: inline after the
   // quality label, or on the gear's corner where the label is hidden.
   const changedSpeed = showSpeed && playbackSpeed !== 1 ? formatPlaybackSpeed(playbackSpeed) : null;
@@ -134,7 +140,11 @@ export function QualityMenu({
         type="button"
         className="player-quality-trigger player-utility-btn sm:w-auto sm:gap-1.5 sm:px-3"
         onClick={() => setOpen((v) => !v)}
-        aria-label={changedSpeed ? `${menuLabel}, ${changedSpeed}` : menuLabel}
+        aria-label={
+          changedSpeed
+            ? t("web.player.quality.triggerWithSpeed", { menu: menuLabel, speed: changedSpeed })
+            : menuLabel
+        }
         aria-expanded={open}
         aria-haspopup="menu"
       >
@@ -147,7 +157,7 @@ export function QualityMenu({
         {changedSpeed && (
           <span
             aria-hidden="true"
-            className="player-speed-badge pointer-events-none absolute top-0.5 left-6 rounded-full bg-white px-1 text-[9px] leading-[13px] font-semibold text-black tabular-nums shadow-[0_0_0_2px_rgba(0,0,0,0.65)] sm:static"
+            className="player-speed-badge pointer-events-none absolute start-6 top-0.5 rounded-full bg-white px-1 text-[9px] leading-[13px] font-semibold text-black tabular-nums shadow-[0_0_0_2px_rgba(0,0,0,0.65)] sm:static"
           >
             {changedSpeed}
           </span>
@@ -157,7 +167,7 @@ export function QualityMenu({
       {open && (
         <PlayerMenuSurface
           anchorRef={menuRef}
-          className="absolute right-0 bottom-full z-30 mb-2 max-h-[calc(100dvh-8rem)] min-w-[224px] overflow-y-auto rounded-lg bg-black/90 py-1 shadow-lg backdrop-blur"
+          className="absolute end-0 bottom-full z-30 mb-2 max-h-[calc(100dvh-8rem)] min-w-[224px] overflow-y-auto rounded-lg bg-black/90 py-1 shadow-lg backdrop-blur"
           onClose={() => setOpen(false)}
           onKeyDown={handleMenuKeyDown}
         >
@@ -176,15 +186,14 @@ export function QualityMenu({
           )}
           {versionLocked && showQuality && (
             <p className="max-w-64 px-3 py-2 text-xs text-white/60">
-              Watch Party keeps everyone on the same version. You can adjust your streaming quality
-              below.
+              {t("web.player.quality.watchPartyVersionLocked")}
             </p>
           )}
           {/* Version switching (multiple file versions) */}
           {showVersions && (
             <>
               <div className="px-3 py-1 text-xs tracking-wider text-white/40 uppercase">
-                Version
+                {t("web.player.quality.version")}
               </div>
               {versions.map((v) => {
                 const idx = menuItemIndex++;
@@ -197,7 +206,7 @@ export function QualityMenu({
                     }}
                     role="menuitem"
                     type="button"
-                    className={`flex w-full px-3 py-2 text-left text-sm hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
+                    className={`flex w-full px-3 py-2 text-start text-sm hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
                       v.isCurrentSource ? "text-white" : "text-white/70"
                     }`}
                     onClick={() => {
@@ -229,7 +238,7 @@ export function QualityMenu({
             <>
               {showVersions && <div className="my-1 border-t border-white/10" />}
               <div className="px-3 py-1 text-xs tracking-wider text-white/40 uppercase">
-                Quality
+                {t("web.player.quality.title")}
               </div>
               {options.map((opt) => {
                 const idx = menuItemIndex++;
@@ -241,7 +250,7 @@ export function QualityMenu({
                     }}
                     role="menuitem"
                     type="button"
-                    className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
+                    className={`flex w-full items-center justify-between px-3 py-2 text-start text-sm hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
                       opt.id === resolvedActiveId ? "text-white" : "text-white/70"
                     }`}
                     aria-current={opt.id === resolvedActiveId ? "true" : undefined}
@@ -253,7 +262,7 @@ export function QualityMenu({
                       {opt.id === resolvedActiveId && (
                         <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-white text-black">
                           <Check className="size-3" strokeWidth={3} aria-hidden="true" />
-                          <span className="sr-only">Selected</span>
+                          <span className="sr-only">{t("web.player.quality.selected")}</span>
                         </span>
                       )}
                     </span>
@@ -266,19 +275,4 @@ export function QualityMenu({
       )}
     </div>
   );
-}
-
-export function buildVersionStatusLabels(version: VersionInfo): string[] {
-  if (version.isCurrentSource && version.isRequestedSource) {
-    return ["Playing"];
-  }
-
-  const labels: string[] = [];
-  if (version.isCurrentSource) {
-    labels.push("Playing");
-  }
-  if (version.isRequestedSource) {
-    labels.push("Requested");
-  }
-  return labels;
 }

@@ -80,3 +80,20 @@ func TestAudiobookshelfListenerServesSignedArtwork(t *testing.T) {
 		t.Fatalf("artwork route without a handler: %d", rec.Code)
 	}
 }
+
+type stubABSMounter struct{}
+
+func (stubABSMounter) Mount(r chi.Router) {
+	r.Get("/stub", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+}
+
+// A route that sets no header of its own still answers with nosniff, so a
+// browser cannot use an ABS response as a type it does not declare.
+func TestAudiobookshelfListenerSendsNoSniff(t *testing.T) {
+	srv := newAudiobookshelfListener(":0", stubABSMounter{}, nil, nil, nil)
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/stub", nil))
+	if got := rec.Header().Get("X-Content-Type-Options"); rec.Code != http.StatusNoContent || got != "nosniff" {
+		t.Fatalf("status = %d, X-Content-Type-Options = %q; want 204, nosniff", rec.Code, got)
+	}
+}

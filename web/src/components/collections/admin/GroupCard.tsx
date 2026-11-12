@@ -7,20 +7,22 @@ import { Info, MinusCircle, Pin, Users } from "lucide-react";
 import type { GroupSortMode, LibraryCollection } from "@/api/types";
 import { Grip, type ListRowProps } from "@/components/calm/ListRow";
 import {
-  MY_COLLECTIONS_NOTE,
-  MY_COLLECTIONS_NO_DROP,
-  MY_COLLECTIONS_TAG,
-  NO_HEADING_HELP,
-  PINNED_BAND,
+  myCollectionsNote,
+  myCollectionsNoDrop,
+  myCollectionsTag,
+  noHeadingHelp,
+  pinnedBandLabel,
 } from "@/lib/collections/copy";
 import {
-  SHELF_ORDER_LABEL,
+  SHELF_SORT_MODES,
+  shelfOrderLabel,
   pinnedBand,
   shelfCountLine,
   shownCollections,
   type Shelf,
 } from "@/lib/collections/shelves";
 import { cn } from "@/lib/utils";
+import { useT } from "@/i18n";
 
 /** What a shelf hands each card so it can be dragged by its grip only. */
 export interface SortableCardProps {
@@ -41,7 +43,7 @@ export type ArrangeDragData =
   | { kind: "collection"; id: string; shelfId: string; banded: boolean; pinned: boolean }
   | { kind: "body"; shelfId: string };
 
-const SORT_MODES = Object.keys(SHELF_ORDER_LABEL) as GroupSortMode[];
+const SORT_MODES = SHELF_SORT_MODES;
 
 function SortableCard({
   collection,
@@ -115,6 +117,7 @@ export function GroupCard({
   menu: ReactNode;
   renderCard: (collection: LibraryCollection, sortable: SortableCardProps) => ReactNode;
 }) {
+  const t = useT();
   const mine = shelf.kind === "user_collections";
   const loose = shelf.kind === "ungrouped";
   const {
@@ -160,12 +163,14 @@ export function GroupCard({
     </ol>
   );
   // The grip reads "Move shelf Studios".
-  const gripName = loose ? "the collections with no heading" : `shelf ${shelf.name}`;
+  const gripName = loose
+    ? t("web.collections.admin.gripNoHeading")
+    : t("web.collections.admin.shelfInSentence", { name: shelf.name });
 
   return (
     <section
       ref={setNodeRef}
-      aria-label={loose ? shelf.name : `Shelf ${shelf.name}`}
+      aria-label={loose ? shelf.name : t("web.collections.admin.shelfRegion", { name: shelf.name })}
       style={{ transform: CSS.Translate.toString(transform), transition }}
       className={cn(
         "surface-panel grid gap-2.5 rounded-[22px] p-3",
@@ -178,7 +183,7 @@ export function GroupCard({
           "grid items-center gap-2",
           showGrips
             ? "grid-cols-[28px_minmax(0,1fr)_auto_auto]"
-            : "grid-cols-[minmax(0,1fr)_auto_auto] pl-1",
+            : "grid-cols-[minmax(0,1fr)_auto_auto] ps-1",
         )}
       >
         {showGrips ? (
@@ -193,35 +198,35 @@ export function GroupCard({
           {mine ? (
             <span className="bg-info/15 text-info ring-info/30 inline-flex h-[22px] items-center gap-1 rounded-full px-2 text-[11.5px] font-semibold ring-1 ring-inset">
               <Users aria-hidden className="size-3" />
-              {MY_COLLECTIONS_TAG}
+              {myCollectionsTag()}
             </span>
           ) : (
             <small className="text-muted-foreground text-[12.5px] font-normal">
-              {loose ? NO_HEADING_HELP : shelfCountLine(shelf)}
+              {loose ? noHeadingHelp() : shelfCountLine(shelf)}
             </small>
           )}
         </h3>
         {mine && noDrop ? (
           <span className="text-destructive inline-flex items-center gap-1.5 text-[12.5px] font-medium">
             <MinusCircle aria-hidden className="size-3.5" />
-            {MY_COLLECTIONS_NO_DROP}
+            {myCollectionsNoDrop()}
           </span>
         ) : loose || mine ? (
           <span />
         ) : (
           <label className="text-muted-foreground inline-flex items-center gap-2 text-[12.5px]">
             {/* Phones keep the select and drop the word, which the select's label still says. */}
-            <span className="max-lg:sr-only">Order</span>
+            <span className="max-lg:sr-only">{t("web.collections.admin.order")}</span>
             <select
               value={shelf.sortMode}
               disabled={orderDisabled}
-              aria-label={`Order of ${shelf.name}`}
+              aria-label={t("web.collections.admin.orderOf", { name: shelf.name })}
               onChange={(event) => onSortChange(event.target.value as GroupSortMode)}
               className="border-input bg-background text-foreground h-8 rounded-[9px] border px-2 text-[13px] max-lg:h-11 max-lg:max-w-[140px]"
             >
               {SORT_MODES.map((mode) => (
                 <option key={mode} value={mode}>
-                  {SHELF_ORDER_LABEL[mode]}
+                  {shelfOrderLabel(mode)}
                 </option>
               ))}
             </select>
@@ -236,15 +241,15 @@ export function GroupCard({
           className="bg-muted/30 text-muted-foreground m-0 flex items-start gap-2.5 rounded-[14px] px-3.5 py-3 text-[13px] leading-normal"
         >
           <Info aria-hidden className="mt-0.5 size-4 shrink-0" />
-          {MY_COLLECTIONS_NOTE}
+          {myCollectionsNote()}
         </p>
       ) : (
         <div ref={setBodyRef} className={cn("rounded-[14px]", isOver && "bg-accent/40")}>
           {cards.length === 0 ? (
             <p className="border-border text-muted-foreground m-0 rounded-[14px] border border-dashed px-4 py-4 text-center text-[13px]">
               {loose
-                ? "Collections on no shelf show here, without a title."
-                : "Drag a collection here, or use a collection's ⋯ › Move to shelf."}
+                ? t("web.collections.admin.noHeadingEmpty")
+                : t("web.collections.admin.shelfEmpty")}
             </p>
           ) : (
             <SortableContext
@@ -265,7 +270,7 @@ export function GroupCard({
                     className="text-muted-foreground flex items-center gap-1.5 px-1 text-[12px]"
                   >
                     <Pin aria-hidden className="size-3" />
-                    {PINNED_BAND}
+                    {pinnedBandLabel()}
                   </span>
                   {sortableCards(banded)}
                 </div>

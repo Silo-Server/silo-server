@@ -37,6 +37,7 @@ import {
 import { useCanRequest } from "@/hooks/useCanRequest";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { numberText, useT, type Translate } from "@/i18n";
 import { requestSearchTypeForScope } from "@/lib/mediaRequests";
 import SearchBar from "@/components/SearchBar";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -66,19 +67,19 @@ import type { CatalogSearchState } from "./catalogSearchParams";
 const REQUEST_SEARCH_DEBOUNCE_MS = 100;
 const INTERACTIVE_SEARCH_GC_TIME_MS = 30_000;
 
-function defaultCatalogTitle(source: string, searchQuery?: string) {
-  if (source === "favorites") return "Favorites";
-  if (source === "watchlist") return "Watchlist";
-  if (source === "history") return "History";
-  if (searchQuery) return `Results for "${searchQuery}"`;
-  return "Catalog";
+function defaultCatalogTitle(t: Translate, source: string, searchQuery?: string) {
+  if (source === "favorites") return t("web.catalog.page.favorites");
+  if (source === "watchlist") return t("web.catalog.page.watchlist");
+  if (source === "history") return t("web.catalog.page.history");
+  if (searchQuery) return t("web.catalog.page.resultsFor", { query: searchQuery });
+  return t("web.catalog.page.catalog");
 }
 
-function defaultCatalogSubtitle(source: string): string {
-  if (source === "favorites") return "Movies and shows you've marked as favorites.";
-  if (source === "watchlist") return "Things you've saved to watch later.";
-  if (source === "history") return "Everything you've recently watched.";
-  return "Refine the archive by type, era, rating, or genre.";
+function defaultCatalogSubtitle(t: Translate, source: string): string {
+  if (source === "favorites") return t("web.catalog.page.favoritesSubtitle");
+  if (source === "watchlist") return t("web.catalog.page.watchlistSubtitle");
+  if (source === "history") return t("web.catalog.page.historySubtitle");
+  return t("web.catalog.page.catalogSubtitle");
 }
 
 export default function Catalog() {
@@ -98,16 +99,17 @@ export default function Catalog() {
 }
 
 function EmptySearch() {
-  useDocumentTitle("Search");
+  const t = useT();
+  useDocumentTitle(t("web.catalog.page.searchTitle"));
 
   return (
     <section className="page-shell flex min-h-[calc(100dvh-10rem)] flex-col items-center justify-center py-16 text-center">
       <div className="text-muted-foreground mb-6">
         <Search className="h-10 w-10" strokeWidth={1.5} />
       </div>
-      <h1 className="page-title mb-4">Search</h1>
+      <h1 className="page-title mb-4">{t("web.catalog.page.searchTitle")}</h1>
       <p className="page-subtitle mb-8 max-w-xl text-sm sm:text-base">
-        Find films, series, performances, and rediscover things you forgot you saved.
+        {t("web.catalog.page.searchSubtitle")}
       </p>
       <SearchBar autoFocus prominent />
     </section>
@@ -123,6 +125,7 @@ function CatalogResults({
   setSearchParams: (nextInit: URLSearchParams) => void;
   state: ReturnType<typeof parseCatalogSearchParams>;
 }) {
+  const t = useT();
   const limit = 60;
   // Paging the Request to add grid is not a new search: it keeps the library
   // results' loaded range and selection.
@@ -374,8 +377,8 @@ function CatalogResults({
   const collectionAccess = useCollectionPageAccess(collectionTarget);
   const collectionHeader = useCollectionPageHeader(collectionUnavailable ? null : collectionTarget);
   const title = collectionUnavailable
-    ? "Not found"
-    : (catalogQuery.data?.title ?? state.title ?? defaultCatalogTitle(state.source, state.q));
+    ? t("web.catalog.page.notFound")
+    : (catalogQuery.data?.title ?? state.title ?? defaultCatalogTitle(t, state.source, state.q));
 
   useDocumentTitle(title);
 
@@ -410,18 +413,23 @@ function CatalogResults({
   // For an in-app search the count reflects local library hits only; requestable
   // matches live in a separate section, so scope the label to avoid a "0 results"
   // reading while an outside-library result is visible.
-  const resultNoun =
-    state.source === "query" ? "in library" : `result${totalItems === 1 ? "" : "s"}`;
+  const inLibrary = state.source === "query";
+  const resultNoun = inLibrary
+    ? t("web.catalog.page.inLibraryNoun")
+    : t("web.catalog.page.resultNoun", { count: totalItems });
+  const resultCount = inLibrary
+    ? t("web.catalog.page.inLibraryCount", { count: totalItems })
+    : t("web.catalog.page.resultCount", { count: totalItems, shown: totalItems });
 
   if (collectionUnavailable) {
     return (
       <PageUnavailable
-        title="This collection isn't available"
-        description="It may have been deleted, or you may not have access to it."
+        title={t("web.catalog.page.collectionUnavailable")}
+        description={t("web.catalog.page.collectionUnavailableBody")}
       >
         <Button asChild variant="outline">
           <ViewTransitionLink to="/collections" up>
-            All collections
+            {t("web.catalog.page.allCollections")}
           </ViewTransitionLink>
         </Button>
       </PageUnavailable>
@@ -447,23 +455,21 @@ function CatalogResults({
           <div className="space-y-3">
             <h1 className="page-title text-[clamp(2rem,5vw,3.5rem)]">{title}</h1>
             <p className="page-subtitle text-sm sm:text-base">
-              {defaultCatalogSubtitle(state.source)}
+              {defaultCatalogSubtitle(t, state.source)}
             </p>
           </div>
           <div className="flex flex-col items-start gap-3 sm:items-end">
             <div className="items-baseline gap-3 sm:flex">
               <div className="hidden h-8 w-px bg-current opacity-15 sm:block" />
               {showExactResultCount ? (
-                <div className="text-right tabular-nums" role="status" aria-live="polite">
+                <div className="text-end tabular-nums" role="status" aria-live="polite">
                   <span className="hidden text-3xl font-extralight tracking-tight sm:inline">
-                    {totalItems}
+                    {numberText(totalItems)}
                   </span>
-                  <span className="text-muted-foreground ml-1.5 hidden text-xs font-medium tracking-widest uppercase sm:inline">
+                  <span className="text-muted-foreground ms-1.5 hidden text-xs font-medium tracking-widest uppercase sm:inline">
                     {resultNoun}
                   </span>
-                  <span className="text-muted-foreground text-xs sm:hidden">
-                    {totalItems} {resultNoun}
-                  </span>
+                  <span className="text-muted-foreground text-xs sm:hidden">{resultCount}</span>
                 </div>
               ) : null}
             </div>
@@ -513,7 +519,7 @@ function CatalogResults({
             // A collection's hero has no count of its own; the filter bar shows it.
             resultCountLabel={
               isCollectionSource && showExactResultCount
-                ? `${totalItems} title${totalItems === 1 ? "" : "s"}`
+                ? t("web.catalog.page.titleCount", { count: totalItems, shown: totalItems })
                 : undefined
             }
             resultCountLoading={
@@ -547,22 +553,21 @@ function CatalogResults({
           {isHistorySource && (
             <section className="surface-panel flex flex-col gap-3 rounded-2xl border-0 p-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="space-y-1">
-                <p className="text-sm font-semibold">Watch History</p>
+                <p className="text-sm font-semibold">{t("web.catalog.page.historyHeading")}</p>
                 <p className="text-muted-foreground text-xs sm:text-sm">
-                  Removing items clears watch history, watched status, and resume progress for this
-                  profile.
+                  {t("web.catalog.page.historyBody")}
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 {!selectionMode ? (
                   <Button variant="outline" size="sm" onClick={() => setSelectionMode(true)}>
                     <CheckSquare className="size-4" />
-                    Select
+                    {t("web.catalog.page.select")}
                   </Button>
                 ) : (
                   <>
                     <span className="text-muted-foreground text-sm">
-                      {selectedIds.size} selected
+                      {t("web.catalog.page.selectedCount", { count: selectedIds.size })}
                     </span>
                     <Button
                       variant="outline"
@@ -571,10 +576,10 @@ function CatalogResults({
                         setSelectedIds(new Set(loadedHistoryItems.map((item) => item.content_id)))
                       }
                     >
-                      Select Loaded
+                      {t("web.catalog.page.selectLoaded")}
                     </Button>
                     <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>
-                      Clear
+                      {t("web.catalog.page.clearSelection")}
                     </Button>
                     <Button
                       variant="destructive"
@@ -583,7 +588,7 @@ function CatalogResults({
                       onClick={() => setRemoveConfirmOpen(true)}
                     >
                       <Trash2 className="size-4" />
-                      Remove Selected
+                      {t("web.catalog.page.removeSelected")}
                     </Button>
                     <Button
                       variant="ghost"
@@ -594,7 +599,7 @@ function CatalogResults({
                       }}
                     >
                       <X className="size-4" />
-                      Done
+                      {t("web.catalog.page.doneSelecting")}
                     </Button>
                   </>
                 )}
@@ -605,19 +610,21 @@ function CatalogResults({
           {isQuerySource && boxSets.length > 0 ? <BoxSetSearchResults boxSets={boxSets} /> : null}
 
           {showPeopleSection ? (
-            <section aria-label="People" className="space-y-3">
-              <h2 className="text-lg font-semibold">People</h2>
+            <section aria-label={t("web.catalog.page.people")} className="space-y-3">
+              <h2 className="text-lg font-semibold">{t("web.catalog.page.people")}</h2>
               {peopleQuery.isError ? (
                 <div role="alert" className="space-y-2">
-                  <p className="text-muted-foreground text-sm">Could not load people results.</p>
+                  <p className="text-muted-foreground text-sm">
+                    {t("web.catalog.page.peopleFailed")}
+                  </p>
                   <Button variant="outline" size="sm" onClick={() => void peopleQuery.refetch()}>
                     <RefreshCw className="size-4" />
-                    Retry people search
+                    {t("web.catalog.page.retryPeople")}
                   </Button>
                 </div>
               ) : peopleQuery.isLoading ? (
                 <p role="status" className="text-muted-foreground text-sm">
-                  Searching people...
+                  {t("web.catalog.page.searchingPeople")}
                 </p>
               ) : (
                 <CastCarousel
@@ -640,17 +647,19 @@ function CatalogResults({
             >
               <p className="font-medium">
                 {isQuerySource
-                  ? "Could not load search results."
-                  : "Could not load catalog results."}
+                  ? t("web.catalog.page.searchFailed")
+                  : t("web.catalog.page.catalogFailed")}
               </p>
               <p className="text-muted-foreground max-w-md text-sm">
                 {isQuerySource
-                  ? "The search request failed. Please retry."
-                  : "The catalog request failed. Please retry."}
+                  ? t("web.catalog.page.searchFailedBody")
+                  : t("web.catalog.page.catalogFailedBody")}
               </p>
               <Button variant="outline" size="sm" onClick={() => void catalogQuery.refetch()}>
                 <RefreshCw className="size-4" />
-                {isQuerySource ? "Retry search" : "Retry catalog"}
+                {isQuerySource
+                  ? t("web.catalog.page.retrySearch")
+                  : t("web.catalog.page.retryCatalog")}
               </Button>
             </div>
           ) : tmdbMayRescueLibrary || (libraryEmpty && showPeopleSection) ? null : (
@@ -688,7 +697,7 @@ function CatalogResults({
         onOpenChange={setRemoveConfirmOpen}
         title={historyRemovalDialogTitle(selectedHistoryTargets)}
         description={historyRemovalDialogDescription(selectedHistoryTargets)}
-        confirmLabel="Remove"
+        confirmLabel={t("web.catalog.page.removeConfirm")}
         variant="destructive"
         isPending={removeHistory.isPending}
         onConfirm={() => {

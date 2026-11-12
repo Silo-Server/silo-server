@@ -2029,7 +2029,7 @@ export interface RequestSeasonProgress {
   episodes_available: number;
 }
 
-export interface RequestDiscoverySection extends RequestMediaPage {
+export interface RequestDiscoverySection extends RequestMediaPage, SectionTitleKey {
   key: string;
   title: string;
   /**
@@ -2041,7 +2041,7 @@ export interface RequestDiscoverySection extends RequestMediaPage {
 }
 
 /** One row of the Discover layout, in page order. */
-export interface RequestDiscoverRowRef {
+export interface RequestDiscoverRowRef extends SectionTitleKey {
   key: string;
   /**
    * tmdb_chart, tmdb_discover, tmdb_list or mdblist for a row of titles;
@@ -4572,7 +4572,18 @@ export interface SectionItem {
   machine_translated_fields?: string[];
 }
 
-export interface ResolvedSection {
+/**
+ * A section title the server wrote itself carries its key in the shared
+ * catalog, so a client can translate it (docs/catalog-api.md, "Section
+ * titles"). Absent on titles an administrator or profile typed; see
+ * `useSectionTitle`.
+ */
+export interface SectionTitleKey {
+  title_key?: string;
+  title_args?: Record<string, string>;
+}
+
+export interface ResolvedSection extends SectionTitleKey {
   id: string;
   section_type: string;
   title: string;
@@ -4588,7 +4599,7 @@ export interface SectionsResponse {
   sections: ResolvedSection[];
 }
 
-export interface ResolvedSectionLayout {
+export interface ResolvedSectionLayout extends SectionTitleKey {
   id: string;
   section_type: string;
   title: string;
@@ -4636,7 +4647,7 @@ export function isFilterSectionConfig(
   return config != null && "match" in config && "groups" in config;
 }
 
-export interface PageSectionConfig {
+export interface PageSectionConfig extends SectionTitleKey {
   id: string;
   scope: string;
   library_id: number | null;
@@ -4808,12 +4819,15 @@ export interface SectionOverride {
   removed?: boolean;
 }
 
-export interface SettingsSectionEntry {
+export interface SettingsSectionEntry extends SectionTitleKey {
   id: string;
   section_type: string;
   title: string;
   /** The admin row's own title; empty for a profile-built row. Absent on entries built locally. */
   default_title?: string;
+  /** The catalog key of `default_title` while it is the server's own title (see `SectionTitleKey`). */
+  default_title_key?: string;
+  default_title_args?: Record<string, string>;
   featured: boolean;
   item_limit: number;
   hidden: boolean;

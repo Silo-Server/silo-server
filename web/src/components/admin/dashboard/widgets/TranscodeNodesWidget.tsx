@@ -28,12 +28,13 @@ import {
   nodeReportsAcceleration,
   nodeState,
   positiveCap,
-  UNGROUPED_LABEL,
   type NodeState,
   type ResourceMetric,
 } from "@/pages/adminNodesPresentation";
 import { SectionError } from "../feedback";
 import { formatMbps, formatMbpsValue } from "../format";
+import { formatLocale } from "@/lib/appLocale";
+import { useT, type Translate } from "@/i18n";
 
 /**
  * Remote transcode/streaming workers from `nodepool`, as a grouped table.
@@ -55,11 +56,12 @@ import { formatMbps, formatMbpsValue } from "../format";
  * rather than reading as a missing dependency.
  */
 export function TranscodeNodesWidget() {
+  const t = useT();
   const nodesQuery = useAdminNodes();
   const buildQuery = useBuildInfo();
   const serverRevision = buildQuery.data?.revision || null;
   const nodes = nodesQuery.data ?? [];
-  const groups = nodeGroups(nodes, serverRevision);
+  const groups = nodeGroups(nodes, serverRevision, t("web.admin.nodes.groups.ungrouped"));
   const showHeadings = groups.some((group) => group.name !== "");
   const showsGPU = nodes.some(nodeReportsAcceleration);
 
@@ -68,14 +70,16 @@ export function TranscodeNodesWidget() {
     <Card className="h-full gap-0 pb-3">
       <CardHeader className="flex shrink-0 flex-row items-center justify-between space-y-0 pb-3">
         <div className="flex min-w-0 items-baseline gap-2.5">
-          <CardTitle className="text-sm font-bold">Nodes</CardTitle>
+          <CardTitle className="text-sm font-bold">
+            {t("web.admin.dashboard.widgets.transcodeNodes.title")}
+          </CardTitle>
           {nodes.length > 0 ? <FleetSummary nodes={nodes} /> : null}
         </div>
         <Link
           to="/admin/nodes"
           className="text-muted-foreground hover:text-primary shrink-0 text-[11px] whitespace-nowrap transition-colors"
         >
-          Manage ›
+          {t("web.admin.dashboard.widgets.transcodeNodes.manage")}
         </Link>
       </CardHeader>
       <CardContent className="@container/nodes min-h-0 flex-1 overflow-y-auto">
@@ -86,10 +90,10 @@ export function TranscodeNodesWidget() {
             ))}
           </div>
         ) : nodesQuery.error ? (
-          <SectionError message="Failed to load stream nodes." />
+          <SectionError message={t("web.admin.dashboard.widgets.transcodeNodes.loadFailed")} />
         ) : nodes.length === 0 ? (
           <div className="text-muted-foreground py-4 text-center text-sm">
-            No stream nodes — transcodes run on this server
+            {t("web.admin.dashboard.widgets.transcodeNodes.empty")}
           </div>
         ) : (
           <table className="w-full table-fixed border-separate border-spacing-0 text-xs tabular-nums">
@@ -126,7 +130,11 @@ const compareNames = new Intl.Collator(undefined, { numeric: true }).compare;
  * Nodes by their assigned group, worst group first. Within a group, proxies come
  * before transcode nodes so every group reads in the same order.
  */
-function nodeGroups(nodes: StreamNode[], serverRevision: string | null): NodeGroup[] {
+function nodeGroups(
+  nodes: StreamNode[],
+  serverRevision: string | null,
+  ungroupedLabel: string,
+): NodeGroup[] {
   // Ranked once up front: a rank builds several node descriptions, and the sorts
   // below would otherwise rebuild them on every comparison.
   const ranks = new Map(nodes.map((node) => [node, attentionRank(node, serverRevision)]));
@@ -149,7 +157,7 @@ function nodeGroups(nodes: StreamNode[], serverRevision: string | null): NodeGro
       const worst = members.reduce((a, b) => (rankOf(b) < rankOf(a) ? b : a));
       return {
         name,
-        label: labels.get(name) ?? UNGROUPED_LABEL,
+        label: labels.get(name) ?? ungroupedLabel,
         state: nodeState(worst),
         rank: rankOf(worst),
         nodes: members.sort(
@@ -278,24 +286,41 @@ function transcodeDirectoryWarning(node: StreamNode): ResourceMetric | null {
  * egress chart does: a disabled node keeps its last reported counts forever.
  */
 function FleetSummary({ nodes }: { nodes: StreamNode[] }) {
+  const t = useT();
   const enabled = nodes.filter((node) => node.enabled);
   const live = enabled.filter((node) => node.healthy);
   const healthy = live.length;
   const egressKbps = live.reduce((sum, node) => sum + node.egress_kbps, 0);
-  const work = (unit: string, list: StreamNode[]) => {
+  const work = (
+    id:
+      | "web.admin.dashboard.widgets.transcodeNodes.streamCount"
+      | "web.admin.dashboard.widgets.transcodeNodes.transcodeCount",
+    list: StreamNode[],
+  ) => {
     const active = list
       .filter((node) => live.includes(node))
       .reduce((sum, node) => sum + node.active_jobs, 0);
-    return `${active.toLocaleString()} ${unit}${active === 1 ? "" : "s"}`;
+    return t(id, { count: active, count_text: active.toLocaleString(formatLocale()) });
   };
   const proxies = nodes.filter((node) => node.type === "proxy");
   const others = nodes.filter((node) => node.type !== "proxy");
   const groups = new Set(nodes.map(nodeGroupOf).filter(Boolean)).size;
   const parts = [
-    groups > 0 ? `${groups} ${groups === 1 ? "group" : "groups"}` : null,
-    enabled.length > 0 ? `${healthy}/${enabled.length} healthy` : null,
-    proxies.length > 0 ? work("stream", proxies) : null,
-    others.length > 0 ? work("transcode", others) : null,
+    groups > 0
+      ? t("web.admin.dashboard.widgets.transcodeNodes.groupCount", { count: groups })
+      : null,
+    enabled.length > 0
+      ? t("web.admin.dashboard.widgets.transcodeNodes.healthyCount", {
+          healthy,
+          enabled: enabled.length,
+        })
+      : null,
+    proxies.length > 0
+      ? work("web.admin.dashboard.widgets.transcodeNodes.streamCount", proxies)
+      : null,
+    others.length > 0
+      ? work("web.admin.dashboard.widgets.transcodeNodes.transcodeCount", others)
+      : null,
     formatMbps(egressKbps / 1_000),
   ];
 
@@ -308,44 +333,61 @@ function FleetSummary({ nodes }: { nodes: StreamNode[] }) {
 
 /** Where a CPU, RAM or GPU reading turns amber. */
 const HIGH_LOAD_PERCENT = 90;
+// Between a count and its "/ cap", so the cell's text reads "3 / 8".
+const SPACE = " ";
 
 const COLUMN_HEADING =
-  "bg-card text-muted-foreground border-border sticky top-0 z-10 border-b pb-1 pl-2.5 text-right text-[11px] font-medium whitespace-nowrap";
-const CELL = "h-6 py-0.5 pl-2.5 text-right whitespace-nowrap";
+  "bg-card text-muted-foreground border-border sticky top-0 z-10 border-b pb-1 ps-2.5 text-end text-[11px] font-medium whitespace-nowrap";
+const CELL = "h-6 py-0.5 ps-2.5 text-end whitespace-nowrap";
 
 /** Narrow columns go first: the name and the two work numbers always stay. */
 const ACTIVE_COLUMN = "w-[72px]";
 const EGRESS_COLUMN = "w-[60px] @min-[620px]/nodes:w-[88px]";
 const CPU_COLUMN =
-  "w-[62px] text-left @max-[359px]/nodes:hidden @min-[620px]/nodes:w-[92px] @min-[1200px]/nodes:w-[150px]";
+  "w-[62px] text-start @max-[359px]/nodes:hidden @min-[620px]/nodes:w-[92px] @min-[1200px]/nodes:w-[150px]";
 const RAM_COLUMN =
-  "w-[62px] text-left @max-[439px]/nodes:hidden @min-[620px]/nodes:w-[92px] @min-[1200px]/nodes:w-[150px]";
+  "w-[62px] text-start @max-[439px]/nodes:hidden @min-[620px]/nodes:w-[92px] @min-[1200px]/nodes:w-[150px]";
 const GPU_COLUMN =
-  "hidden w-[92px] text-left @min-[620px]/nodes:table-cell @min-[1200px]/nodes:w-[150px]";
+  "hidden w-[92px] text-start @min-[620px]/nodes:table-cell @min-[1200px]/nodes:w-[150px]";
 const CHECKED_COLUMN = "hidden w-[86px] @min-[1200px]/nodes:table-cell";
 const BUILD_COLUMN = "hidden w-[150px] @min-[1200px]/nodes:table-cell";
 
-function dataColumns(showsGPU: boolean) {
+function dataColumns(t: Translate, showsGPU: boolean) {
   return [
-    { label: "Active", className: ACTIVE_COLUMN },
-    { label: "Mbps", className: EGRESS_COLUMN },
-    { label: "CPU", className: CPU_COLUMN },
-    { label: "RAM", className: RAM_COLUMN },
-    ...(showsGPU ? [{ label: "GPU", className: GPU_COLUMN }] : []),
-    { label: "Checked", className: CHECKED_COLUMN },
-    { label: "Build", className: BUILD_COLUMN },
+    {
+      id: "active",
+      label: t("web.admin.dashboard.widgets.transcodeNodes.column.active"),
+      className: ACTIVE_COLUMN,
+    },
+    {
+      id: "mbps",
+      label: t("web.admin.dashboard.widgets.transcodeNodes.column.mbps"),
+      className: EGRESS_COLUMN,
+    },
+    { id: "cpu", label: t("web.admin.nodes.metric.cpu"), className: CPU_COLUMN },
+    { id: "ram", label: t("web.admin.nodes.metric.memory"), className: RAM_COLUMN },
+    ...(showsGPU
+      ? [{ id: "gpu", label: t("web.admin.nodes.metric.gpu"), className: GPU_COLUMN }]
+      : []),
+    { id: "checked", label: t("web.admin.nodes.unit.checked"), className: CHECKED_COLUMN },
+    {
+      id: "build",
+      label: t("web.admin.dashboard.widgets.transcodeNodes.column.build"),
+      className: BUILD_COLUMN,
+    },
   ];
 }
 
 function ColumnHeadings({ showsGPU }: { showsGPU: boolean }) {
+  const t = useT();
   return (
     <thead>
       <tr>
-        <th scope="col" className={cn(COLUMN_HEADING, "pl-0 text-left")}>
-          Node
+        <th scope="col" className={cn(COLUMN_HEADING, "ps-0 text-start")}>
+          {t("web.admin.dashboard.widgets.transcodeNodes.column.node")}
         </th>
-        {dataColumns(showsGPU).map(({ label, className }) => (
-          <th key={label} scope="col" className={cn(COLUMN_HEADING, className)}>
+        {dataColumns(t, showsGPU).map(({ id, label, className }) => (
+          <th key={id} scope="col" className={cn(COLUMN_HEADING, className)}>
             {label}
           </th>
         ))}
@@ -399,7 +441,8 @@ function NodeFlag({
 function StatusIcon({ state, title }: { state: NodeState; title?: string }) {
   const status = NODE_STATUS[state];
   const Icon = status.icon;
-  const name = title ?? NODE_STATE_LABEL[state];
+  const t = useT();
+  const name = title ?? t(NODE_STATE_LABEL[state]);
   // An icon with a name: the tint alone would be the only signal for anyone who
   // cannot separate the hues.
   return (
@@ -425,13 +468,14 @@ function GroupRows({
   showsGPU: boolean;
   serverRevision: string | null;
 }) {
+  const t = useT();
   return (
     <tbody>
       {showHeading ? (
         <tr>
           {/* Empty cells rather than a colspan: a hidden column inside a span
               would keep its width in the fixed table layout. */}
-          <th scope="rowgroup" className="pt-1.5 pb-0.5 text-left text-[11px] font-bold">
+          <th scope="rowgroup" className="pt-1.5 pb-0.5 text-start text-[11px] font-bold">
             <div className="flex min-w-0 items-center gap-1.5">
               <StatusIcon state={group.state} />
               <span className="min-w-0 truncate" title={group.name || undefined}>
@@ -439,8 +483,8 @@ function GroupRows({
               </span>
             </div>
           </th>
-          {dataColumns(showsGPU).map(({ label, className }) => (
-            <td key={label} className={className} />
+          {dataColumns(t, showsGPU).map(({ id, className }) => (
+            <td key={id} className={className} />
           ))}
         </tr>
       ) : null}
@@ -468,18 +512,19 @@ function NodeRow({
   showsGPU: boolean;
   serverRevision: string | null;
 }) {
+  const t = useT();
   const state = nodeState(node);
   const drain = state === "draining" || state === "drained" ? describeNodeDrain(node) : null;
   const readings = nodeReadings(node);
   const build = node.last_stats?.build;
   const storage = transcodeDirectoryWarning(node);
-  const noCountsTitle = staleCountsTitle(state);
+  const noCountsTitle = staleCountsTitle(t, state);
 
   return (
     <tr className={state === "disabled" ? "text-muted-foreground" : undefined}>
       <th
         scope="row"
-        className={cn("h-6 overflow-hidden py-0.5 text-left font-normal", indent && "pl-5")}
+        className={cn("h-6 overflow-hidden py-0.5 text-start font-normal", indent && "ps-5")}
       >
         <div className="flex min-w-0 items-center gap-1.5">
           <StatusIcon state={state} title={drain?.label} />
@@ -489,19 +534,26 @@ function NodeRow({
           {storage ? (
             <NodeFlag
               icon={HardDrive}
-              title={`Transcode directory ${storage.fill}% full. ${storage.title}`}
+              title={t("web.admin.dashboard.widgets.transcodeNodes.storageTitle", {
+                fill: storage.fill ?? 0,
+                detail: storage.title,
+              })}
               labelClassName="@max-[719px]/nodes:sr-only"
             >
-              Storage {storage.fill}%
+              {t("web.admin.dashboard.widgets.transcodeNodes.storageFlag", {
+                fill: storage.fill ?? 0,
+              })}
             </NodeFlag>
           ) : null}
           {buildDiffers(node, serverRevision) ? (
             <NodeFlag
               icon={AlertTriangle}
-              title={`Build differs from the server. ${buildTitle(node)}`}
+              title={t("web.admin.dashboard.widgets.transcodeNodes.buildDiffersTitle", {
+                detail: buildTitle(t, node) ?? "",
+              })}
               labelClassName={storage ? "@max-[999px]/nodes:sr-only" : "@max-[719px]/nodes:sr-only"}
             >
-              Build differs
+              {t("web.admin.dashboard.widgets.transcodeNodes.buildDiffersFlag")}
             </NodeFlag>
           ) : null}
         </div>
@@ -516,16 +568,33 @@ function NodeRow({
         {noCountsTitle ? <NoReading /> : <EgressValue node={node} />}
       </td>
       <td className={cn(CELL, CPU_COLUMN)}>
-        <LoadReading name={`${node.name} CPU`} metric={readings.cpu} missing={readings.missing} />
+        <LoadReading
+          name={t("web.admin.dashboard.widgets.transcodeNodes.meterLabel", {
+            node: node.name,
+            metric: t("web.admin.nodes.metric.cpu"),
+          })}
+          metric={readings.cpu}
+          missing={readings.missing}
+        />
       </td>
       <td className={cn(CELL, RAM_COLUMN)}>
-        <LoadReading name={`${node.name} RAM`} metric={readings.ram} missing={readings.missing} />
+        <LoadReading
+          name={t("web.admin.dashboard.widgets.transcodeNodes.meterLabel", {
+            node: node.name,
+            metric: t("web.admin.nodes.metric.memory"),
+          })}
+          metric={readings.ram}
+          missing={readings.missing}
+        />
       </td>
       {showsGPU ? (
         <td className={cn(CELL, GPU_COLUMN)}>
           {nodeReportsAcceleration(node) ? (
             <LoadReading
-              name={`${node.name} GPU`}
+              name={t("web.admin.dashboard.widgets.transcodeNodes.meterLabel", {
+                node: node.name,
+                metric: t("web.admin.nodes.metric.gpu"),
+              })}
               metric={readings.gpu}
               missing={readings.missing}
             />
@@ -533,13 +602,13 @@ function NodeRow({
         </td>
       ) : null}
       <td className={cn(CELL, CHECKED_COLUMN, "text-muted-foreground text-[11px]")}>
-        {lastCheckLabel(node)}
+        {lastCheckLabel(t, node)}
       </td>
       <td
         className={cn(CELL, BUILD_COLUMN, "text-muted-foreground text-[11px]")}
-        title={buildTitle(node)}
+        title={buildTitle(t, node)}
       >
-        {build ? buildLabel(build) : null}
+        {build ? buildLabel(t, build) : null}
       </td>
     </tr>
   );
@@ -551,23 +620,25 @@ function NodeRow({
  * leaves the pool and is never checked again, so it keeps whatever its last
  * check reported.
  */
-function staleCountsTitle(state: NodeState): string | null {
+function staleCountsTitle(t: Translate, state: NodeState): string | null {
   if (state === "unhealthy") {
-    return "The last health check did not reach this node.";
+    return t("web.admin.dashboard.widgets.transcodeNodes.staleUnreachableTitle");
   }
   if (state === "disabled") {
-    return "This node is switched off, so health checks no longer update it.";
+    return t("web.admin.dashboard.widgets.transcodeNodes.staleDisabledTitle");
   }
   return null;
 }
 
 function NoReading() {
+  // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an en dash for "no reading", not text
   return <span className="text-muted-foreground">–</span>;
 }
 
 /** One "Active" column holds both kinds of work, so each count names its unit. */
 function ActiveCount({ node }: { node: StreamNode }) {
-  const active = node.active_jobs.toLocaleString();
+  const t = useT();
+  const active = node.active_jobs.toLocaleString(formatLocale());
   const cap = positiveCap(node.max_jobs);
   const proxy = node.type === "proxy";
   return (
@@ -575,14 +646,27 @@ function ActiveCount({ node }: { node: StreamNode }) {
       <span className={describeNodeJobs(node).warning ? "text-warning font-semibold" : undefined}>
         {active}
         {cap !== null ? (
-          <span className="text-muted-foreground font-normal"> / {cap.toLocaleString()}</span>
+          <span className="text-muted-foreground font-normal">
+            {SPACE}
+            {t("web.admin.dashboard.widgets.transcodeNodes.capSeparator", {
+              max: cap.toLocaleString(formatLocale()),
+            })}
+          </span>
         ) : null}
       </span>{" "}
       <abbr
-        title={proxy ? "streams" : "transcodes"}
+        title={t(
+          proxy
+            ? "web.admin.dashboard.widgets.transcodeNodes.streamsTitle"
+            : "web.admin.dashboard.widgets.transcodeNodes.transcodesTitle",
+        )}
         className="text-muted-foreground text-[10px] no-underline"
       >
-        {proxy ? "strm" : "trns"}
+        {t(
+          proxy
+            ? "web.admin.dashboard.widgets.transcodeNodes.streamsAbbr"
+            : "web.admin.dashboard.widgets.transcodeNodes.transcodesAbbr",
+        )}
       </abbr>
     </>
   );
@@ -590,6 +674,7 @@ function ActiveCount({ node }: { node: StreamNode }) {
 
 /** The cap is the first thing to go when the column is tight; the use stays. */
 function EgressValue({ node }: { node: StreamNode }) {
+  const t = useT();
   const cap = positiveCap(node.max_bandwidth_kbps);
   return (
     <>
@@ -603,8 +688,10 @@ function EgressValue({ node }: { node: StreamNode }) {
       </span>
       {cap !== null ? (
         <span className="text-muted-foreground hidden @min-[620px]/nodes:inline">
-          {" "}
-          / {formatMbpsValue(cap / 1_000)}
+          {SPACE}
+          {t("web.admin.dashboard.widgets.transcodeNodes.capSeparator", {
+            max: formatMbpsValue(cap / 1_000),
+          })}
         </span>
       ) : null}
     </>
@@ -641,18 +728,20 @@ function LoadReading({
   metric: ResourceMetric | null;
   missing?: string;
 }) {
+  const t = useT();
   if (!metric || metric.fill === null) {
     return (
-      <span className="text-muted-foreground block w-8 text-right" title={metric?.title ?? missing}>
-        –
+      <span className="text-muted-foreground block w-8 text-end" title={metric?.title ?? missing}>
+        {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an en dash for "no reading", not text */}
+        {"–"}
       </span>
     );
   }
   const high = metric.fill >= HIGH_LOAD_PERCENT;
   return (
     <div className="flex items-center gap-1.5" title={metric.title}>
-      <span className={cn("w-8 flex-shrink-0 text-right", high && "text-warning font-semibold")}>
-        {metric.fill}%
+      <span className={cn("w-8 flex-shrink-0 text-end", high && "text-warning font-semibold")}>
+        {t("web.admin.dashboard.widgets.transcodeNodes.loadPercent", { percent: metric.fill })}
       </span>
       <div className="bg-foreground/15 hidden h-1 max-w-[90px] min-w-5 flex-1 overflow-hidden rounded-sm @min-[620px]/nodes:block">
         <div
@@ -669,30 +758,34 @@ function LoadReading({
   );
 }
 
-function buildLabel(build: NodeBuildInfo): string {
-  const display = build.display || "unavailable";
+function buildLabel(t: Translate, build: NodeBuildInfo): string {
+  const display = build.display || t("web.admin.dashboard.widgets.transcodeNodes.buildUnavailable");
   return build.build_number ? `${build.build_number} · ${display}` : display;
 }
 
-function buildTitle(node: StreamNode): string | undefined {
+function buildTitle(t: Translate, node: StreamNode): string | undefined {
   const build = node.last_stats?.build;
   if (!build) {
     return undefined;
   }
   return [
-    build.revision ? `Revision ${build.revision}` : "Revision unavailable",
-    build.built_at ? `built ${build.built_at}` : null,
+    build.revision
+      ? t("web.admin.dashboard.widgets.transcodeNodes.revision", { revision: build.revision })
+      : t("web.admin.dashboard.widgets.transcodeNodes.revisionUnavailable"),
+    build.built_at
+      ? t("web.admin.dashboard.widgets.transcodeNodes.builtAt", { date: build.built_at })
+      : null,
   ]
     .filter(Boolean)
     .join(" · ");
 }
 
-function lastCheckLabel(node: StreamNode): string {
+function lastCheckLabel(t: Translate, node: StreamNode): string {
   return (
     formatRelativeTime(node.last_health_check, {
       rounding: "floor",
-      justNowLabel: "Just now",
-    }) ?? "Never"
+      justNowLabel: t("web.admin.dashboard.widgets.transcodeNodes.justNow"),
+    }) ?? t("web.admin.nodes.unit.never")
   );
 }
 

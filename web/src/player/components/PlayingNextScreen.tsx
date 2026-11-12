@@ -8,6 +8,7 @@ import { useAutoPlayNextSetting } from "@/hooks/queries/autoPlayNext";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
 import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
+import { codeNumber, useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
 import { parseCalendarDate, preferredDateLocale } from "@/lib/datetime";
@@ -15,6 +16,11 @@ import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 import { useDateTimeFormat } from "@/hooks/useDateTimeFormat";
 import MachineTranslatedLabel from "@/pages/ItemDetail/components/MachineTranslatedLabel";
 import { hasMachineTranslation } from "@/pages/ItemDetail/components/machineTranslation";
+
+/** Decorative separators between values; not text, so not translated. */
+const EM_DASH = "\u2014";
+const BULLET = "\u2022";
+const SEPARATOR = "\u00b7";
 
 interface PlayingNextScreenProps {
   seriesId?: string;
@@ -50,6 +56,7 @@ export function PlayingNextScreen({
   onClose,
   shuffle,
 }: PlayingNextScreenProps) {
+  const t = useT();
   useDateTimeFormat();
   // -- Auto-play setting --
   // Shared with Settings → Playback: both surfaces edit the same profile row,
@@ -146,7 +153,9 @@ export function PlayingNextScreen({
   const hideStill =
     spoilerPrefs.hideImages && nextUnwatched && isEpisodeStill(nextEpisode?.stillIsEpisodeStill);
   const hideOverview = spoilerPrefs.hideOverviews && nextUnwatched;
-  const endOfSeriesHeading = seriesTitle ? `You've finished ${seriesTitle}` : "End of playback";
+  const endOfSeriesHeading = seriesTitle
+    ? t("web.player.upNext.finishedSeries", { series: seriesTitle })
+    : t("upNext.endOfPlayback");
 
   return (
     <motion.div
@@ -180,8 +189,8 @@ export function PlayingNextScreen({
         transition={{ delay: 0.3 }}
         onClick={onClose}
         type="button"
-        className="absolute top-3 right-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white/10 backdrop-blur-sm transition-colors hover:bg-white/20 sm:top-5 sm:right-5 sm:h-10 sm:w-10"
-        title="Close (Esc)"
+        className="absolute end-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white/10 backdrop-blur-sm transition-colors hover:bg-white/20 sm:end-5 sm:top-5 sm:h-10 sm:w-10"
+        title={t("web.player.upNext.closeTitle")}
       >
         <X className="h-4 w-4 sm:h-5 sm:w-5" />
       </motion.button>
@@ -200,12 +209,18 @@ export function PlayingNextScreen({
           {shuffle && (
             <div className="mb-3 inline-flex max-w-full items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold text-white/75 ring-1 ring-white/10 backdrop-blur-sm sm:text-xs">
               <Shuffle className="size-3.5 shrink-0" aria-hidden="true" />
-              <span className="truncate">Shuffling {shuffle.scopeLabel}</span>
+              <span className="truncate">
+                {t("upNext.shuffling", { scope: shuffle.scopeLabel })}
+              </span>
             </div>
           )}
           {/* Label */}
           <div className="mb-2.5 text-[10px] font-semibold tracking-[0.25em] text-white/40 uppercase sm:mb-3 sm:text-[11px]">
-            {nextEpisode ? (shuffle ? "Up Next at Random" : "Playing Next") : "Finished"}
+            {nextEpisode
+              ? shuffle
+                ? t("upNext.headingShuffle")
+                : t("web.player.upNext.playingNext")
+              : t("upNext.headingFinished")}
           </div>
 
           {nextEpisode ? (
@@ -235,7 +250,7 @@ export function PlayingNextScreen({
                   />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center bg-white/5 text-sm text-white/30">
-                    No Preview
+                    {t("web.player.upNext.noPreview")}
                   </div>
                 )}
               </div>
@@ -252,9 +267,12 @@ export function PlayingNextScreen({
                 {nextEpisode.episodeNumber > 0 && (
                   <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5">
                     <span className="text-xs font-medium text-white/60 sm:text-sm">
-                      S{nextEpisode.seasonNumber}:E{nextEpisode.episodeNumber}
+                      {t("web.player.episode.code", {
+                        season: codeNumber(nextEpisode.seasonNumber),
+                        episode: codeNumber(nextEpisode.episodeNumber),
+                      })}
                     </span>
-                    <span className="hidden text-sm text-white/25 sm:inline">&mdash;</span>
+                    <span className="hidden text-sm text-white/25 sm:inline">{EM_DASH}</span>
                     <span className="text-sm font-semibold sm:text-base">{nextEpisode.title}</span>
                   </div>
                 )}
@@ -269,7 +287,7 @@ export function PlayingNextScreen({
                     </span>
                   )}
                   {nextAirDate && nextEpisode.runtime > 0 && (
-                    <span className="text-white/20">&bull;</span>
+                    <span className="text-white/20">{BULLET}</span>
                   )}
                   {nextEpisode.runtime > 0 && (
                     <span>{formatRuntimeMinutes(nextEpisode.runtime)}</span>
@@ -300,7 +318,7 @@ export function PlayingNextScreen({
                   className="bg-primary text-primary-foreground flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold shadow-lg transition-all hover:scale-105 hover:shadow-xl sm:px-7 sm:py-3"
                 >
                   <Play className="h-4 w-4 fill-current" />
-                  Play Now
+                  {t("upNext.playNow")}
                 </button>
 
                 {shuffle && (
@@ -310,7 +328,7 @@ export function PlayingNextScreen({
                     className="flex items-center gap-2 rounded-full bg-white/10 px-5 py-2.5 text-sm font-semibold text-white ring-1 ring-white/10 transition-colors hover:bg-white/20 sm:px-6 sm:py-3"
                   >
                     <Shuffle className="h-4 w-4" />
-                    Pick Another
+                    {t("upNext.pickAnother")}
                   </button>
                 )}
 
@@ -342,7 +360,9 @@ export function PlayingNextScreen({
                         className="text-primary transition-all duration-1000 ease-linear"
                       />
                     </svg>
-                    <span className="text-sm text-white/50 tabular-nums">{secondsRemaining}s</span>
+                    <span className="text-sm text-white/50 tabular-nums">
+                      {t("web.player.upNext.countdownSeconds", { count: secondsRemaining })}
+                    </span>
                   </motion.div>
                 )}
               </motion.div>
@@ -354,17 +374,19 @@ export function PlayingNextScreen({
                   type="button"
                   className="transition-colors hover:text-white/60"
                 >
-                  Auto-play is {autoplaySetting ? "on" : "off"}
+                  {autoplaySetting
+                    ? t("web.player.upNext.autoplayOn")
+                    : t("web.player.upNext.autoplayOff")}
                 </button>
                 {shuffle && (
                   <>
-                    <span aria-hidden="true">&middot;</span>
+                    <span aria-hidden="true">{SEPARATOR}</span>
                     <button
                       onClick={shuffle.onStop}
                       type="button"
                       className="transition-colors hover:text-white/60"
                     >
-                      Stop shuffling
+                      {t("upNext.stopShuffling")}
                     </button>
                   </>
                 )}
@@ -376,14 +398,14 @@ export function PlayingNextScreen({
                 {endOfSeriesHeading}
               </div>
               <div className="mt-2 max-w-md text-center text-sm text-white/50">
-                There are no more episodes available. Pick something else from On Deck below.
+                {t("web.player.upNext.noMoreEpisodes")}
               </div>
               <button
                 onClick={onClose}
                 type="button"
                 className="mt-5 flex items-center gap-2 rounded-full bg-white/10 px-5 py-2.5 text-sm font-semibold text-white shadow-lg transition-colors hover:bg-white/20 sm:mt-6 sm:px-7 sm:py-3"
               >
-                Back
+                {t("common.back")}
               </button>
             </>
           )}
@@ -408,6 +430,7 @@ function OnDeckCarousel({
   items: ContinueWatchingItem[];
   onPlayItem: (contentId: string) => void;
 }) {
+  const t = useT();
   const { emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } = useCarouselEmbla({
     options: { slidesToScroll: 3, align: "start" },
   });
@@ -421,7 +444,7 @@ function OnDeckCarousel({
     >
       <div className="mb-2 flex items-center justify-between sm:mb-3">
         <h3 className="text-[10px] font-semibold tracking-wider text-white/40 uppercase sm:text-xs">
-          On Deck
+          {t("upNext.onDeck")}
         </h3>
         <div className="flex gap-1">
           <button
@@ -444,18 +467,23 @@ function OnDeckCarousel({
       </div>
 
       <div ref={emblaRef} className="overflow-hidden">
-        <div className="-ml-2 flex sm:-ml-3">
+        <div className="-ms-2 flex sm:-ms-3">
           {items.map((item) => {
             const detail = item.detail;
             if (!detail) return null;
 
             const contentId = detail.content_id;
             const title = detail.series_title ?? detail.title;
-            const episodeMeta =
-              detail.season_number != null && detail.episode_number != null
-                ? `S${detail.season_number}:E${detail.episode_number}`
-                : null;
-            const episodeTitle = episodeMeta && detail.series_title ? detail.title : null;
+            const hasEpisodeNumber = detail.season_number != null && detail.episode_number != null;
+            const episodeCode = {
+              season: String(detail.season_number),
+              episode: String(detail.episode_number),
+            };
+            const episodeMeta = !hasEpisodeNumber
+              ? null
+              : detail.series_title && detail.title
+                ? t("web.player.episode.codeWithTitle", { ...episodeCode, title: detail.title })
+                : t("web.player.episode.code", episodeCode);
             const thumbnailUrl = detail.backdrop_url ?? detail.poster_url;
             const progressPercent =
               item.progress.duration_seconds > 0
@@ -469,12 +497,12 @@ function OnDeckCarousel({
             return (
               <div
                 key={contentId}
-                className="min-w-0 shrink-0 basis-1/2 pl-2 sm:basis-1/3 sm:pl-3 md:basis-1/4 lg:basis-1/5 xl:basis-1/6 2xl:basis-[14.2857%]"
+                className="min-w-0 shrink-0 basis-1/2 ps-2 sm:basis-1/3 sm:ps-3 md:basis-1/4 lg:basis-1/5 xl:basis-1/6 2xl:basis-[14.2857%]"
               >
                 <button
                   onClick={() => onPlayItem(contentId)}
                   type="button"
-                  className="group w-full text-left"
+                  className="group w-full text-start"
                 >
                   <div className="relative aspect-video overflow-hidden rounded-lg ring-1 ring-white/[0.06]">
                     {thumbnailUrl ? (
@@ -486,12 +514,13 @@ function OnDeckCarousel({
                       />
                     ) : (
                       <div className="flex h-full w-full items-center justify-center bg-white/5 text-xs text-white/30">
-                        No Image
+                        {t("web.player.upNext.noImage")}
                       </div>
                     )}
                     {/* Play overlay */}
                     <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors group-hover:bg-black/30">
                       <div className="bg-primary text-primary-foreground flex h-8 w-8 items-center justify-center rounded-full opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+                        {/* eslint-disable-next-line silo/no-physical-direction -- centres the play triangle, which doesn't mirror */}
                         <Play className="ml-0.5 h-3.5 w-3.5" fill="currentColor" />
                       </div>
                     </div>
@@ -508,13 +537,15 @@ function OnDeckCarousel({
                   <div className="mt-1.5 space-y-0.5">
                     <div className="truncate text-xs font-semibold text-white/80">{title}</div>
                     {episodeMeta && (
-                      <div className="truncate text-[11px] text-white/40">
-                        {episodeMeta}
-                        {episodeTitle ? ` \u00b7 ${episodeTitle}` : ""}
-                      </div>
+                      <div className="truncate text-[11px] text-white/40">{episodeMeta}</div>
                     )}
                     {timeLeft > 0 && (
-                      <div className="text-[11px] text-white/30">{timeLeft} min left</div>
+                      <div className="text-[11px] text-white/30">
+                        {t("web.player.upNext.minutesLeft", {
+                          count: timeLeft,
+                          minutes: timeLeft,
+                        })}
+                      </div>
                     )}
                   </div>
                 </button>

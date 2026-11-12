@@ -1,6 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
+import { t } from "@/i18n";
+
 import {
   captureProfileRequestContext,
   isCapturedProfileAuthorityActive,
@@ -45,7 +47,11 @@ export function useUploadOverlayImage() {
     },
     onError: (err, intent) => {
       if (authorityActive(intent))
-        toast.error(err instanceof Error ? err.message : "Failed to upload image");
+        toast.error(
+          err instanceof Error
+            ? err.message
+            : t("web.admin.settings.hooks.overlayImages.uploadFailed"),
+        );
     },
   });
   return {
@@ -75,7 +81,11 @@ export function useDeleteOverlayImage() {
     },
     onError: (err, intent) => {
       if (authorityActive(intent))
-        toast.error(err instanceof Error ? err.message : "Failed to remove image");
+        toast.error(
+          err instanceof Error
+            ? err.message
+            : t("web.admin.settings.hooks.overlayImages.removeFailed"),
+        );
     },
   });
   return {

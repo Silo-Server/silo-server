@@ -4,6 +4,8 @@ import { Check, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useT } from "@/i18n";
+import { TOUCH_TARGETS } from "@/lib/touchTargets";
 import { cn } from "@/lib/utils";
 
 import { replacedShort, type AddableCategory } from "./levels";
@@ -25,6 +27,7 @@ export function AddSettingPicker({
   /** Resolves once the settings are written; the picker closes then. */
   onAdd: (keys: string[]) => Promise<void>;
 }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [chosen, setChosen] = useState<string[]>([]);
@@ -91,13 +94,18 @@ export function AddSettingPicker({
           {label}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="flex w-[min(24rem,calc(100vw-2rem))] flex-col overflow-hidden">
+      <PopoverContent
+        className={cn(
+          "flex w-[min(24rem,calc(100vw-2rem))] flex-col overflow-hidden",
+          TOUCH_TARGETS,
+        )}
+      >
         <div className="border-border/70 border-b p-2.5">
           <Input
             type="search"
             autoFocus
-            aria-label="Search settings"
-            placeholder="Search settings"
+            aria-label={t("web.admin.users.detail.preferences.picker.search")}
+            placeholder={t("web.admin.users.detail.preferences.picker.search")}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             className="h-8"
@@ -106,7 +114,7 @@ export function AddSettingPicker({
         <div className="max-h-80 overflow-y-auto p-1.5">
           {visible.length === 0 ? (
             <p className="text-muted-foreground px-3 py-6 text-center text-sm">
-              No settings match.
+              {t("web.admin.users.detail.preferences.picker.noMatch")}
             </p>
           ) : (
             visible.map((group) => (
@@ -115,7 +123,9 @@ export function AddSettingPicker({
                   <span>{group.category}</span>
                   <span className="tabular-nums">
                     {query.trim()
-                      ? `${group.settings.length} ${group.settings.length === 1 ? "match" : "matches"}`
+                      ? t("web.admin.users.detail.preferences.picker.matchCount", {
+                          count: group.settings.length,
+                        })
                       : group.settings.length}
                   </span>
                 </div>
@@ -131,7 +141,7 @@ export function AddSettingPicker({
                       title={setting.description}
                       onClick={() => toggle(setting.key)}
                       className={cn(
-                        "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors",
+                        "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-start text-sm transition-colors max-lg:min-h-11",
                         "hover:bg-accent/60 focus-visible:bg-accent/60 outline-none disabled:pointer-events-none disabled:opacity-50",
                         selected && "bg-accent",
                       )}
@@ -142,7 +152,9 @@ export function AddSettingPicker({
                       />
                       <span className="min-w-0 flex-1 truncate">{setting.label}</span>
                       <span className="text-muted-foreground max-w-[45%] shrink-0 truncate text-xs">
-                        {setting.setHere ? "set here" : replacedShort(setting.replaced)}
+                        {setting.setHere
+                          ? t("web.admin.users.detail.preferences.picker.setHere")
+                          : replacedShort(setting.replaced)}
                       </span>
                     </button>
                   );
@@ -153,10 +165,12 @@ export function AddSettingPicker({
         </div>
         <div className="border-border/70 flex items-center justify-end gap-2 border-t p-2.5">
           <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button size="sm" disabled={chosen.length === 0 || saving} onClick={() => void add()}>
-            {chosen.length > 1 ? `Add ${chosen.length} settings` : "Add setting"}
+            {chosen.length > 1
+              ? t("web.admin.users.detail.preferences.picker.addMany", { count: chosen.length })
+              : t("web.admin.users.detail.preferences.picker.addOne")}
           </Button>
         </div>
       </PopoverContent>

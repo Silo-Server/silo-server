@@ -169,6 +169,6 @@ is non-retryable. After an uncertain response, inspect the current maximum befor
 trying again. The web disables automatic retries and authentication replay for
 these mutations and exposes explicit continuation for additional list pages.
 
-The signup redemption contract and frozen v1 administrator routes are unchanged.
+The signup redemption contract is unchanged.
 There are no Apple, Android, or Jellyfin administrator invite-code consumers to
 migrate.

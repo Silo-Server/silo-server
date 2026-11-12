@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams, Link } from "react-router";
-import { Play, Square, Plus, Trash2, ChevronRight, ChevronDown } from "lucide-react";
+import { Play, Square, Plus, ChevronRight, ChevronDown } from "lucide-react";
 import { isNotFoundProblem } from "@/api/v2/request";
 import { Button } from "@/components/ui/button";
 import PageUnavailable from "@/components/PageUnavailable";
@@ -8,14 +8,6 @@ import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { PageHeader } from "@/components/page/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { TaskStatusBadge } from "@/components/admin/TaskStatusBadge";
-import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   useTask,
   useTaskHistory,
@@ -28,27 +20,43 @@ import {
   taskMutationMessage,
   type TaskSchedule,
 } from "@/hooks/queries/admin/tasks";
-import type { ExecutionResult, TriggerConfig, TriggerType } from "@/api/types";
+import type { ExecutionResult, TriggerConfig } from "@/api/types";
 import { describeTrigger } from "@/lib/taskTrigger";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
 import { clampTaskProgress, formatTaskProgress } from "@/lib/taskProgress";
+import { useServerText, useT, type MessageKey, type Translate } from "@/i18n";
+import { taskText } from "@/lib/taskText";
+import { TriggerFormRow } from "./AdminTaskTriggerForm";
 
-const REFRESH_REASON_LABELS: Record<string, string> = {
-  episode_incomplete: "Episode incomplete",
-  stale_provider_id: "Stale provider ID",
-  refresh_failure: "Refresh failure",
-  core_metadata_incomplete: "Core metadata incomplete",
-  trailers_requested: "Trailers requested",
-  provider_artwork: "Provider artwork",
+const EM_DASH = "—";
+
+const REFRESH_REASON_LABELS: Record<string, MessageKey> = {
+  episode_incomplete: "web.admin.tasks.refreshReason.episodeIncomplete",
+  stale_provider_id: "web.admin.tasks.refreshReason.staleProviderId",
+  provider_id_incomplete: "web.admin.tasks.refreshReason.providerIdIncomplete",
+  refresh_failure: "web.admin.tasks.refreshReason.refreshFailure",
+  core_metadata_incomplete: "web.admin.tasks.refreshReason.coreMetadataIncomplete",
+  trailers_requested: "web.admin.tasks.refreshReason.trailersRequested",
+  provider_artwork: "web.admin.tasks.refreshReason.providerArtwork",
 };
 
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
+function refreshReasonLabel(t: Translate, reason: string): string {
+  const key = REFRESH_REASON_LABELS[reason] as MessageKey | undefined;
+  return key ? t(key) : reason;
+}
+
+function formatDuration(t: Translate, ms: number): string {
+  if (ms < 1000) return t("web.admin.tasks.duration.milliseconds", { ms: ms });
   const totalSeconds = Math.floor(ms / 1000);
-  if (totalSeconds < 60) return `${totalSeconds}s`;
+  if (totalSeconds < 60) {
+    return t("web.admin.tasks.duration.seconds", { seconds: totalSeconds });
+  }
   const minutes = Math.floor(totalSeconds / 60);
   const remainSec = totalSeconds - minutes * 60;
-  return `${minutes}m ${remainSec}s`;
+  return t("web.admin.tasks.duration.minutesSeconds", {
+    minutes: minutes,
+    seconds: remainSec,
+  });
 }
 
 function formatDateTime(dateStr: string): string {
@@ -56,10 +64,11 @@ function formatDateTime(dateStr: string): string {
 }
 
 function formatOptionalDateTime(dateStr?: string | null): string {
-  return dateStr ? formatDateTime(dateStr) : "—";
+  return dateStr ? formatDateTime(dateStr) : EM_DASH;
 }
 
 function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
+  const t = useT();
   const reasonCounts = metrics.reason_counts.filter((entry) => entry.count > 0);
 
   return (
@@ -67,25 +76,25 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <div className="surface-panel rounded-2xl border-0 p-4">
           <div className="text-muted-foreground text-xs tracking-[0.16em] uppercase">
-            Refresh Backlog
+            {t("web.admin.tasks.refreshMetrics.backlog")}
           </div>
           <div className="mt-2 text-2xl font-semibold">{metrics.total}</div>
         </div>
         <div className="surface-panel rounded-2xl border-0 p-4">
           <div className="text-muted-foreground text-xs tracking-[0.16em] uppercase">
-            Due for Refresh
+            {t("web.admin.tasks.refreshMetrics.due")}
           </div>
           <div className="mt-2 text-2xl font-semibold">{metrics.due}</div>
         </div>
         <div className="surface-panel rounded-2xl border-0 p-4">
           <div className="text-muted-foreground text-xs tracking-[0.16em] uppercase">
-            Processing
+            {t("web.admin.tasks.refreshMetrics.processing")}
           </div>
           <div className="mt-2 text-2xl font-semibold">{metrics.leased}</div>
         </div>
         <div className="surface-panel rounded-2xl border-0 p-4">
           <div className="text-muted-foreground text-xs tracking-[0.16em] uppercase">
-            Waiting Since
+            {t("web.admin.tasks.refreshMetrics.waitingSince")}
           </div>
           <div className="mt-2 text-sm font-medium">
             {formatOptionalDateTime(metrics.oldest_due_at)}
@@ -93,7 +102,7 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
         </div>
         <div className="surface-panel rounded-2xl border-0 p-4">
           <div className="text-muted-foreground text-xs tracking-[0.16em] uppercase">
-            Next Claim Timeout
+            {t("web.admin.tasks.refreshMetrics.nextClaimTimeout")}
           </div>
           <div className="mt-2 text-sm font-medium">
             {formatOptionalDateTime(metrics.oldest_lease_expires_at)}
@@ -103,21 +112,28 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
 
       <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
         <div className="surface-panel rounded-2xl border-0 p-4">
-          <h3 className="text-sm font-medium">Reason breakdown</h3>
+          <h3 className="text-sm font-medium">{t("web.admin.tasks.detail.reasonBreakdown")}</h3>
           <div className="mt-3 flex flex-wrap gap-2">
             {reasonCounts.length === 0 && (
-              <span className="text-muted-foreground text-sm">No queued debt.</span>
+              <span className="text-muted-foreground text-sm">
+                {t("web.admin.tasks.detail.noQueuedDebt")}
+              </span>
             )}
             {reasonCounts.map((entry) => (
               <Badge key={entry.reason} variant="secondary">
-                {REFRESH_REASON_LABELS[entry.reason] ?? entry.reason}: {entry.count}
+                {t("web.admin.tasks.refreshMetrics.reasonCount", {
+                  reason: refreshReasonLabel(t, entry.reason),
+                  count: entry.count,
+                })}
               </Badge>
             ))}
           </div>
           <div className="mt-4 grid gap-2 sm:grid-cols-5">
             {metrics.attempt_buckets.map((bucket) => (
               <div key={bucket.label} className="bg-muted/30 rounded-xl p-3">
-                <div className="text-muted-foreground text-xs">Attempts {bucket.label}</div>
+                <div className="text-muted-foreground text-xs">
+                  {t("web.admin.tasks.detail.attemptBucket", { range: bucket.label })}
+                </div>
                 <div className="mt-1 text-lg font-semibold">{bucket.count}</div>
               </div>
             ))}
@@ -125,10 +141,12 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
         </div>
 
         <div className="surface-panel rounded-2xl border-0 p-4">
-          <h3 className="text-sm font-medium">Recent errors</h3>
+          <h3 className="text-sm font-medium">{t("web.admin.tasks.detail.recentErrors")}</h3>
           <div className="mt-3 space-y-3">
             {metrics.recent_errors.length === 0 && (
-              <p className="text-muted-foreground text-sm">No recent queue errors.</p>
+              <p className="text-muted-foreground text-sm">
+                {t("web.admin.tasks.detail.noRecentErrors")}
+              </p>
             )}
             {metrics.recent_errors.map((entry) => (
               <div
@@ -141,7 +159,11 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
                       {entry.title || entry.content_id}
                     </div>
                     <div className="text-muted-foreground text-xs">
-                      {entry.type || "item"} · attempts {entry.attempt_count}
+                      {t("web.admin.tasks.detail.recentErrorAttempts", {
+                        type: entry.type || t("web.admin.tasks.detail.itemFallback"),
+                        count: entry.attempt_count,
+                        count_text: entry.attempt_count,
+                      })}
                     </div>
                   </div>
                   <div className="text-muted-foreground shrink-0 text-xs">
@@ -159,22 +181,30 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
 
       <div className="surface-panel overflow-hidden rounded-2xl border-0">
         <div className="border-border border-b px-4 py-3">
-          <h3 className="text-sm font-medium">Due samples</h3>
+          <h3 className="text-sm font-medium">{t("web.admin.tasks.detail.dueSamples")}</h3>
         </div>
         <table className="w-full text-sm">
           <thead>
             <tr className="border-border bg-muted/40 border-b">
-              <th className="px-4 py-2 text-left font-medium">Item</th>
-              <th className="px-4 py-2 text-left font-medium">Next refresh</th>
-              <th className="px-4 py-2 text-left font-medium">Attempts</th>
-              <th className="px-4 py-2 text-left font-medium">Last attempt</th>
+              <th className="px-4 py-2 text-start font-medium">
+                {t("web.admin.tasks.detail.columns.item")}
+              </th>
+              <th className="px-4 py-2 text-start font-medium">
+                {t("web.admin.tasks.detail.columns.nextRefresh")}
+              </th>
+              <th className="px-4 py-2 text-start font-medium">
+                {t("web.admin.tasks.detail.columns.attempts")}
+              </th>
+              <th className="px-4 py-2 text-start font-medium">
+                {t("web.admin.tasks.detail.columns.lastAttempt")}
+              </th>
             </tr>
           </thead>
           <tbody>
             {metrics.due_samples.length === 0 && (
               <tr>
                 <td colSpan={4} className="text-muted-foreground px-4 py-4 text-center">
-                  No due items right now.
+                  {t("web.admin.tasks.detail.noDueItems")}
                 </td>
               </tr>
             )}
@@ -182,7 +212,9 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
               <tr key={entry.content_id} className="border-border border-b last:border-b-0">
                 <td className="px-4 py-2">
                   <div className="font-medium">{entry.title || entry.content_id}</div>
-                  <div className="text-muted-foreground text-xs">{entry.type || "item"}</div>
+                  <div className="text-muted-foreground text-xs">
+                    {entry.type || t("web.admin.tasks.detail.itemFallback")}
+                  </div>
                 </td>
                 <td className="px-4 py-2">{formatDateTime(entry.next_refresh_at)}</td>
                 <td className="px-4 py-2">{entry.attempt_count}</td>
@@ -196,165 +228,6 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
   );
 }
 
-// --- Trigger form ---
-
-const TRIGGER_TYPES: { value: TriggerType; label: string }[] = [
-  { value: "interval", label: "Interval" },
-  { value: "daily", label: "Daily" },
-  { value: "weekly", label: "Weekly" },
-  { value: "startup", label: "On Startup" },
-];
-
-const DAYS_OF_WEEK = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-
-interface TriggerFormRowProps {
-  trigger: TriggerConfig;
-  onChange: (updated: TriggerConfig) => void;
-  onRemove: () => void;
-}
-
-function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowProps) {
-  // Convert interval_ms to a user-friendly value + unit
-  const intervalToDisplay = (ms: number): { value: number; unit: string } => {
-    if (ms >= 3_600_000 && ms % 3_600_000 === 0) return { value: ms / 3_600_000, unit: "hours" };
-    if (ms >= 60_000 && ms % 60_000 === 0) return { value: ms / 60_000, unit: "minutes" };
-    return { value: ms / 1000, unit: "seconds" };
-  };
-
-  const displayToMs = (value: number, unit: string): number => {
-    if (unit === "hours") return value * 3_600_000;
-    if (unit === "minutes") return value * 60_000;
-    return value * 1000;
-  };
-
-  const intervalDisplay = intervalToDisplay(trigger.interval_ms ?? 60_000);
-  const [intervalUnit, setIntervalUnit] = useState(intervalDisplay.unit);
-
-  return (
-    <div className="surface-panel-subtle flex flex-col gap-3 rounded-xl p-3 sm:flex-row sm:items-start">
-      <div className="flex-1 space-y-2">
-        <Select
-          value={trigger.type}
-          onValueChange={(v) => onChange({ ...trigger, type: v as TriggerType })}
-        >
-          <SelectTrigger className="w-full sm:w-[160px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {TRIGGER_TYPES.map((tt) => (
-              <SelectItem key={tt.value} value={tt.value}>
-                {tt.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        {trigger.type === "interval" && (
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <Input
-              type="number"
-              min={1}
-              className="w-full sm:w-[100px]"
-              value={intervalDisplay.value}
-              onChange={(e) => {
-                const val = parseInt(e.target.value, 10) || 1;
-                onChange({ ...trigger, interval_ms: displayToMs(val, intervalUnit) });
-              }}
-            />
-            <Select
-              value={intervalUnit}
-              onValueChange={(u) => {
-                setIntervalUnit(u);
-                onChange({
-                  ...trigger,
-                  interval_ms: displayToMs(intervalDisplay.value, u),
-                });
-              }}
-            >
-              <SelectTrigger className="w-full sm:w-[120px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="seconds">Seconds</SelectItem>
-                <SelectItem value="minutes">Minutes</SelectItem>
-                <SelectItem value="hours">Hours</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        )}
-
-        {trigger.type === "daily" && (
-          <Input
-            type="time"
-            className="w-full sm:w-[140px]"
-            value={trigger.time_of_day ?? "00:00"}
-            onChange={(e) => onChange({ ...trigger, time_of_day: e.target.value })}
-          />
-        )}
-
-        {trigger.type === "weekly" && (
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <Select
-              value={String(trigger.day_of_week ?? 0)}
-              onValueChange={(v) => onChange({ ...trigger, day_of_week: parseInt(v, 10) })}
-            >
-              <SelectTrigger className="w-full sm:w-[140px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {DAYS_OF_WEEK.map((day, i) => (
-                  <SelectItem key={i} value={String(i)}>
-                    {day}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Input
-              type="time"
-              className="w-full sm:w-[140px]"
-              value={trigger.time_of_day ?? "00:00"}
-              onChange={(e) => onChange({ ...trigger, time_of_day: e.target.value })}
-            />
-          </div>
-        )}
-
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <label className="text-muted-foreground text-xs whitespace-nowrap">Max runtime:</label>
-          <Input
-            type="number"
-            min={0}
-            step="any"
-            className="w-full sm:w-[100px]"
-            placeholder="None"
-            value={trigger.max_runtime_ms != null ? trigger.max_runtime_ms / 60_000 : ""}
-            onChange={(e) => {
-              // Fractional minutes keep sub-minute limits saved through the API.
-              // A typed 0 stays 0 (no limit) so "0.5" can be entered; only an
-              // empty field clears it.
-              const raw = e.target.value;
-              onChange({
-                ...trigger,
-                max_runtime_ms:
-                  raw === "" ? undefined : Math.max(0, Math.round(Number(raw) * 60_000)),
-              });
-            }}
-          />
-          <span className="text-muted-foreground text-xs">minutes</span>
-        </div>
-      </div>
-
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={onRemove}
-        className="shrink-0 self-end sm:self-auto"
-      >
-        <Trash2 className="h-4 w-4" />
-      </Button>
-    </div>
-  );
-}
-
 function TaskSchedulePanel({
   taskKey,
   manualOnly,
@@ -364,6 +237,7 @@ function TaskSchedulePanel({
   manualOnly: boolean;
   triggers: TriggerConfig[];
 }) {
+  const t = useT();
   const update = useUpdateTriggers();
   const [snapshot, setSnapshot] = useState<TaskSchedule | null>(null);
   const [draft, setDraft] = useState<TriggerConfig[]>([]);
@@ -412,10 +286,10 @@ function TaskSchedulePanel({
   return (
     <section className="space-y-3">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-medium">Schedule</h2>
+        <h2 className="text-lg font-medium">{t("web.admin.tasks.detail.schedule")}</h2>
         {!manualOnly && !snapshot && (
           <Button variant="outline" size="sm" disabled={busy} onClick={() => void startEditing()}>
-            Edit Schedule
+            {t("web.admin.tasks.detail.editSchedule")}
           </Button>
         )}
       </div>
@@ -425,13 +299,11 @@ function TaskSchedulePanel({
         </p>
       )}
       {manualOnly ? (
-        <p className="text-muted-foreground text-sm">
-          Manual only. Select Run Now to start this task.
-        </p>
+        <p className="text-muted-foreground text-sm">{t("web.admin.tasks.detail.manualOnly")}</p>
       ) : !snapshot ? (
         <div className="surface-panel rounded-2xl p-4">
           {triggers.length === 0
-            ? "No triggers configured."
+            ? t("web.admin.tasks.detail.noTriggers")
             : triggers.map((trigger, i) => (
                 <p key={i} className="py-2 text-sm">
                   {describeTrigger(trigger)}
@@ -456,8 +328,8 @@ function TaskSchedulePanel({
               size="sm"
               onClick={() => setDraft([...draft, { type: "interval", interval_ms: 3_600_000 }])}
             >
-              <Plus className="mr-1.5 h-3.5 w-3.5" />
-              Add Trigger
+              <Plus className="me-1.5 h-3.5 w-3.5" />
+              {t("web.admin.tasks.detail.addTrigger")}
             </Button>
           </fieldset>
           {needsReview && (
@@ -467,13 +339,13 @@ function TaskSchedulePanel({
                 disabled={busy || update.isPending}
                 onClick={() => void review()}
               >
-                Review current schedule
+                {t("web.admin.tasks.detail.reviewSchedule")}
               </Button>
               {candidate && (
                 <div className="space-y-2">
-                  <p>Current saved schedule:</p>
+                  <p>{t("web.admin.tasks.detail.currentSavedSchedule")}</p>
                   {candidate.triggers.length === 0 ? (
-                    <p>No triggers configured.</p>
+                    <p>{t("web.admin.tasks.detail.noTriggers")}</p>
                   ) : (
                     candidate.triggers.map((trigger, i) => (
                       <p key={i}>{describeTrigger(trigger)}</p>
@@ -488,7 +360,7 @@ function TaskSchedulePanel({
                       setError("");
                     }}
                   >
-                    Use this revision and keep my draft
+                    {t("web.admin.tasks.detail.useRevision")}
                   </Button>
                 </div>
               )}
@@ -500,7 +372,7 @@ function TaskSchedulePanel({
               onClick={() => void save()}
               disabled={needsReview || busy || update.isPending}
             >
-              Save
+              {t("common.save")}
             </Button>
             <Button
               variant="ghost"
@@ -512,7 +384,7 @@ function TaskSchedulePanel({
                 setError("");
               }}
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
           </div>
         </div>
@@ -532,14 +404,15 @@ function HistoryRow({
   expanded: boolean;
   onToggle: () => void;
 }) {
+  const t = useT();
   const hasResultData = result.result_data && Object.keys(result.result_data).length > 0;
   const failedSteps = (result.steps ?? [])
     .filter((step) => step.status === "failed")
     .map((step) => step.name);
   const errorText =
     failedSteps.length > 0
-      ? `Failed steps: ${failedSteps.join(", ")}`
-      : result.error_message || "—";
+      ? t("web.admin.tasks.detail.history.failedSteps", { steps: failedSteps.join(", ") })
+      : result.error_message || EM_DASH;
 
   return (
     <>
@@ -560,7 +433,7 @@ function HistoryRow({
             {formatDateTime(result.started_at)}
           </span>
         </td>
-        <td className="px-4 py-2">{formatDuration(result.duration_ms)}</td>
+        <td className="px-4 py-2">{formatDuration(t, result.duration_ms)}</td>
         <td className="px-4 py-2">
           <TaskStatusBadge result={result} />
         </td>
@@ -584,6 +457,8 @@ function HistoryRow({
 // --- Main page ---
 
 export default function AdminTaskDetail() {
+  const t = useT();
+  const serverText = useServerText();
   const { key } = useParams<{ key: string }>();
   const { data: cachedTask, isLoading, isFetching, error, refetch } = useTask(key!);
   // A 404 outranks a cached task: a refetch that finds it gone must not leave
@@ -607,7 +482,9 @@ export default function AdminTaskDetail() {
   };
 
   if (isLoading) {
-    return <p className="text-muted-foreground pb-8 text-sm">Loading...</p>;
+    return (
+      <p className="text-muted-foreground pb-8 text-sm">{t("web.admin.tasks.detail.loading")}</p>
+    );
   }
 
   // A key that names no task used to leave this on "Loading..." for good.
@@ -615,8 +492,8 @@ export default function AdminTaskDetail() {
     if (error && !isNotFoundProblem(error)) {
       return (
         <PageUnavailable
-          title="Couldn't load this task"
-          description="Something went wrong while loading it. Try again in a moment."
+          title={t("web.admin.tasks.detail.loadErrorTitle")}
+          description={t("web.admin.tasks.detail.loadErrorDescription")}
           onRetry={() => void refetch()}
           retrying={isFetching}
         />
@@ -624,12 +501,12 @@ export default function AdminTaskDetail() {
     }
     return (
       <PageUnavailable
-        title="Task not found"
-        description="No scheduled task uses this key. It may have been removed, or the link may be wrong."
+        title={t("web.admin.tasks.detail.notFoundTitle")}
+        description={t("web.admin.tasks.detail.notFoundDescription")}
       >
         <Button asChild variant="outline">
           <ViewTransitionLink to="/admin/tasks" up>
-            All tasks
+            {t("web.admin.tasks.detail.allTasks")}
           </ViewTransitionLink>
         </Button>
       </PageUnavailable>
@@ -643,22 +520,24 @@ export default function AdminTaskDetail() {
       <PageHeader
         eyebrow={
           <nav
-            aria-label="Breadcrumb"
+            aria-label={t("web.admin.tasks.detail.breadcrumb.label")}
             className="text-muted-foreground flex items-center gap-1.5 text-sm"
           >
             <Link to="/admin" className="hover:text-foreground transition-colors">
-              Admin
+              {t("web.admin.tasks.detail.breadcrumb.admin")}
             </Link>
             <ChevronRight className="h-3.5 w-3.5" />
             <Link to="/admin/tasks" className="hover:text-foreground transition-colors">
-              Scheduled Tasks
+              {t("web.admin.tasks.detail.breadcrumb.tasks")}
             </Link>
             <ChevronRight className="h-3.5 w-3.5" />
-            <span className="text-foreground font-medium">{task.name}</span>
+            <span className="text-foreground font-medium">
+              {taskText(serverText, task, "name")}
+            </span>
           </nav>
         }
-        title={task.name}
-        subtitle={task.description}
+        title={taskText(serverText, task, "name")}
+        subtitle={taskText(serverText, task, "description")}
         actions={
           <>
             <Badge variant="outline">{task.category}</Badge>
@@ -669,8 +548,8 @@ export default function AdminTaskDetail() {
                 onClick={() => cancelTask.mutate(task.key)}
                 disabled={cancelTask.isPending || task.state === "cancelling"}
               >
-                <Square className="mr-1.5 h-4 w-4" />
-                Cancel
+                <Square className="me-1.5 h-4 w-4" />
+                {t("web.admin.tasks.detail.cancelRun")}
               </Button>
             ) : (
               <Button
@@ -679,8 +558,8 @@ export default function AdminTaskDetail() {
                 onClick={() => runTask.mutate(task.key)}
                 disabled={runTask.isPending}
               >
-                <Play className="mr-1.5 h-4 w-4" />
-                Run Now
+                <Play className="me-1.5 h-4 w-4" />
+                {t("web.admin.tasks.actions.runNow")}
               </Button>
             )}
           </>
@@ -688,15 +567,17 @@ export default function AdminTaskDetail() {
       />
 
       {task.key === "scan_libraries" && (
-        <div className="surface-panel-subtle rounded-xl p-4 text-sm leading-relaxed">
-          <span className="text-muted-foreground">
-            This task history records how long it took to queue per-library scan runs. Actual scan
-            work continues in the background and is tracked from{" "}
-          </span>
-          <Link to="/admin/libraries" className="text-foreground hover:text-primary font-medium">
-            Admin Libraries
-          </Link>
-          <span className="text-muted-foreground"> and Server Activity.</span>
+        <div className="surface-panel-subtle text-muted-foreground rounded-xl p-4 text-sm leading-relaxed">
+          {t("web.admin.tasks.detail.scanLibrariesNote", {
+            link: (chunks) => (
+              <Link
+                to="/admin/libraries"
+                className="text-foreground hover:text-primary font-medium"
+              >
+                {chunks}
+              </Link>
+            ),
+          })}
         </div>
       )}
 
@@ -712,7 +593,9 @@ export default function AdminTaskDetail() {
           </div>
           <div className="text-muted-foreground flex items-center justify-between gap-3 text-sm">
             <p className="min-w-0 truncate">
-              {task.state === "cancelling" ? "Cancelling..." : "Running"}
+              {task.state === "cancelling"
+                ? t("web.admin.tasks.progress.cancelling")
+                : t("web.admin.tasks.progress.running")}
             </p>
             {task.state !== "cancelling" && task.progress > 0 && (
               <span className="shrink-0 font-medium tabular-nums">
@@ -725,7 +608,9 @@ export default function AdminTaskDetail() {
 
       {task.key === "refresh_metadata" && metrics && (
         <div className="space-y-3">
-          <h2 className="text-lg font-medium tracking-tight">Queue health</h2>
+          <h2 className="text-lg font-medium tracking-tight">
+            {t("web.admin.tasks.detail.queueHealth")}
+          </h2>
           <RefreshMetricsPanel metrics={metrics} />
         </div>
       )}
@@ -738,31 +623,44 @@ export default function AdminTaskDetail() {
       />
 
       <div className="space-y-3">
-        <h2 className="text-lg font-medium tracking-tight">Execution history</h2>
+        <h2 className="text-lg font-medium tracking-tight">
+          {t("web.admin.tasks.detail.executionHistory")}
+        </h2>
 
         {historyQuery.isError && (
           <div role="alert">
-            History could not load.{" "}
-            <Button variant="outline" onClick={() => void historyQuery.restart()}>
-              Restart history
-            </Button>
+            {t("web.admin.tasks.detail.history.loadError", {
+              restart: (chunks) => (
+                <Button variant="outline" onClick={() => void historyQuery.restart()}>
+                  {chunks}
+                </Button>
+              ),
+            })}
           </div>
         )}
         <div className="surface-panel overflow-hidden rounded-2xl border-0">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-border bg-muted/50 border-b">
-                <th className="px-4 py-2 text-left font-medium">Started</th>
-                <th className="px-4 py-2 text-left font-medium">Duration</th>
-                <th className="px-4 py-2 text-left font-medium">Status</th>
-                <th className="px-4 py-2 text-left font-medium">Error</th>
+                <th className="px-4 py-2 text-start font-medium">
+                  {t("web.admin.tasks.detail.history.columns.started")}
+                </th>
+                <th className="px-4 py-2 text-start font-medium">
+                  {t("web.admin.tasks.detail.history.columns.duration")}
+                </th>
+                <th className="px-4 py-2 text-start font-medium">
+                  {t("web.admin.tasks.detail.history.columns.status")}
+                </th>
+                <th className="px-4 py-2 text-start font-medium">
+                  {t("web.admin.tasks.detail.history.columns.error")}
+                </th>
               </tr>
             </thead>
             <tbody>
               {(!history || history.length === 0) && (
                 <tr>
                   <td colSpan={4} className="text-muted-foreground px-4 py-4 text-center">
-                    No execution history.
+                    {t("web.admin.tasks.detail.history.empty")}
                   </td>
                 </tr>
               )}
@@ -783,7 +681,7 @@ export default function AdminTaskDetail() {
             disabled={historyQuery.isFetchingNextPage}
             onClick={() => void historyQuery.fetchNextPage()}
           >
-            Load older executions
+            {t("web.admin.tasks.detail.history.loadOlder")}
           </Button>
         )}
       </div>

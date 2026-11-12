@@ -17,6 +17,7 @@ import { WidgetRangePicker } from "../WidgetRangePicker";
 import { buildEgressBands } from "./egressBands";
 import { TimeseriesChartBody } from "./timeseriesChart";
 import { buildTimeseriesPoints } from "./timeseriesSeries";
+import { useAppLanguage, useT } from "@/i18n";
 
 /**
  * Egress the deployment served over the chosen window, in Mbps.
@@ -39,10 +40,14 @@ import { buildTimeseriesPoints } from "./timeseriesSeries";
  * Installs without proxy nodes never see the switch.
  */
 export function EgressWidget() {
+  const t = useT();
+  // buildEgressBands names the "Other" band, so the bands follow the language.
+  const language = useAppLanguage();
   const { range } = useWidgetRange();
   const query = useAdminTimeseries(rangeHours(range));
   const [byNode, setByNode] = useState(false);
-  const bands = useMemo(() => buildEgressBands(query.data), [query.data]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- language re-runs the labels
+  const bands = useMemo(() => buildEgressBands(query.data), [query.data, language]);
   const showBands = byNode && bands !== null;
   const hasDownloadTraffic = useMemo(
     () => (query.data?.points ?? []).some((point) => (point.download_egress_kbps ?? 0) > 0),
@@ -67,17 +72,17 @@ export function EgressWidget() {
 
   return (
     <Card className="h-full">
-      <WidgetHeader title={rangeTitle("Egress", range)}>
+      <WidgetHeader title={rangeTitle(t("web.admin.dashboard.widgets.egress.title"), range)}>
         {totalBytes != null ? (
           // Secondary to the peak: when the header is too narrow for both
           // beside the range picker, the total is dropped rather than
           // truncated. CardHeader is the `card-header` container.
           <span className="text-muted-foreground hidden text-[11px] whitespace-nowrap tabular-nums @md/card-header:inline">
-            Total {formatDataTotal(totalBytes)}
+            {t("web.admin.dashboard.widgets.egress.total", { value: formatDataTotal(totalBytes) })}
           </span>
         ) : null}
         <span className="text-muted-foreground text-[11px] whitespace-nowrap tabular-nums">
-          Peak {formatMbps(peak)}
+          {t("web.admin.dashboard.widgets.egress.peak", { value: formatMbps(peak) })}
         </span>
         {bands ? <EgressViewToggle byNode={byNode} onChange={setByNode} /> : null}
         <WidgetRangePicker />
@@ -86,19 +91,27 @@ export function EgressWidget() {
         <TimeseriesChartBody
           query={query}
           points={points}
-          seriesLabel="Egress"
+          seriesLabel={t("web.admin.dashboard.widgets.egress.seriesLabel")}
           overlays={
             hasDownloadTraffic && !showBands
-              ? [{ label: "Downloads", points: downloadPoints, seriesIndex: 1 }]
+              ? [
+                  {
+                    label: t("web.admin.dashboard.widgets.egress.downloadsSeries"),
+                    points: downloadPoints,
+                    seriesIndex: 1,
+                  },
+                ]
               : undefined
           }
           stacks={showBands ? bands : undefined}
-          ariaLabel={`Egress over ${rangePhrase(range)}, in megabits per second`}
-          errorMessage="Failed to load egress history."
-          emptyMessage="No egress samples yet"
+          ariaLabel={t("web.admin.dashboard.widgets.egress.chartLabel", {
+            range: rangePhrase(range),
+          })}
+          errorMessage={t("web.admin.dashboard.widgets.egress.loadFailed")}
+          emptyMessage={t("web.admin.dashboard.widgets.egress.empty")}
           formatValue={formatMbps}
           formatTick={formatMbpsValue}
-          formatTimestamp={(t) => formatRangeTimestamp(range, t, { withTime: true })}
+          formatTimestamp={(time) => formatRangeTimestamp(range, time, { withTime: true })}
           edgeLabels={rangeEdgeLabels(range)}
           fill
         />
@@ -119,9 +132,18 @@ function EgressViewToggle({
   byNode: boolean;
   onChange: (byNode: boolean) => void;
 }) {
+  const t = useT();
   const options = [
-    { byNode: false, label: "Total", ariaLabel: "Show total egress" },
-    { byNode: true, label: "Nodes", ariaLabel: "Show egress by node" },
+    {
+      byNode: false,
+      label: t("web.admin.dashboard.widgets.egress.viewTotal"),
+      ariaLabel: t("web.admin.dashboard.widgets.egress.viewTotalLabel"),
+    },
+    {
+      byNode: true,
+      label: t("web.admin.dashboard.widgets.egress.viewNodes"),
+      ariaLabel: t("web.admin.dashboard.widgets.egress.viewNodesLabel"),
+    },
   ];
   return (
     <div className="border-border/60 bg-muted/20 flex shrink-0 items-center gap-0.5 rounded-full border p-0.5">
@@ -129,7 +151,7 @@ function EgressViewToggle({
         const active = option.byNode === byNode;
         return (
           <button
-            key={option.label}
+            key={String(option.byNode)}
             type="button"
             aria-pressed={active}
             aria-label={option.ariaLabel}

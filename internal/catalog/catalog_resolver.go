@@ -1434,33 +1434,6 @@ func (r *CatalogResolver) SearchFacet(ctx context.Context, req CatalogRequest, a
 	return result, nil
 }
 
-// SearchFacetV1 answers /api/v1/catalog/filters/search as that frozen
-// contract always has: see searchFacetV1. A blank prefix matches nothing.
-func (r *CatalogResolver) SearchFacetV1(ctx context.Context, req CatalogRequest, access AccessFilter, facet string, prefix string, limit int) ([]string, bool, error) {
-	if r == nil || r.browseRepo == nil {
-		return nil, false, fmt.Errorf("catalog resolver requires a browse repository")
-	}
-	prefix = strings.TrimSpace(prefix)
-	if prefix == "" {
-		return []string{}, false, nil
-	}
-	scope, err := r.facetSearchScope(ctx, req, access)
-	if err != nil {
-		return nil, false, err
-	}
-	if scope.empty {
-		return []string{}, false, nil
-	}
-	matches, hasMore, err := searchFacetV1(ctx, r.browseRepo.pool, facet, scope.filters, scope.baseRelation, scope.mediaScope, prefix, clampFacetSearchLimit(limit))
-	if err != nil {
-		return nil, false, err
-	}
-	if matches == nil {
-		matches = []string{}
-	}
-	return matches, hasMore, nil
-}
-
 // facetScope is where a facet typeahead searches.
 type facetScope struct {
 	filters      BrowseFilters
@@ -1889,11 +1862,11 @@ func validateCatalogOverlayQuery(req CatalogRequest, ruleFields, sortFields map[
 			return fmt.Errorf("%w: groups[%d].match must be 'all' or 'any'", ErrInvalidCatalogRequest, i)
 		}
 		for j, rule := range group.Rules {
-			if !ruleFields[rule.Field] || (req.V1Rules && v2RuleFields[rule.Field]) {
+			if !ruleFields[rule.Field] {
 				return fmt.Errorf("%w: groups[%d].rules[%d].field %q is not supported", ErrInvalidCatalogRequest, i, j, rule.Field)
 			}
 			fieldDef, ok := queryFieldDefs[rule.Field]
-			if !ok || !fieldDef.allows(rule.Op) || (req.V1Rules && rule.Op == ruleOpNotInLast) {
+			if !ok || !fieldDef.allows(rule.Op) {
 				return fmt.Errorf("%w: groups[%d].rules[%d] is invalid", ErrInvalidCatalogRequest, i, j)
 			}
 			if err := validateRuleValue(rule); err != nil {

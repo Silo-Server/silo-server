@@ -5,7 +5,6 @@ const DEFINITION = SETTING_DEFINITIONS[SETTING_KEYS.PLAYER_PASSOUT_THRESHOLD];
 const DEFAULT_THRESHOLD = DEFINITION.defaultValue as number;
 const MIN_THRESHOLD = DEFINITION.minimum as number;
 export const STILL_WATCHING_MAX = DEFINITION.maximum as number;
-export const STILL_WATCHING_LABEL = DEFINITION.label;
 
 /**
  * Pass-out protection: counts consecutive unattended episode advances in this tab.

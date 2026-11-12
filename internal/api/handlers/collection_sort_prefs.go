@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -35,47 +34,6 @@ type CollectionSortPreferenceResponse struct {
 // NormalizeCollectionSortConfig is catalog.NormalizeCollectionSortConfig.
 func NormalizeCollectionSortConfig(raw json.RawMessage, allowPersonalized bool) (string, error) {
 	return catalog.NormalizeCollectionSortConfig(raw, allowPersonalized)
-}
-
-// HandleSetCollectionSortPreference handles PUT /collections/sort-preference.
-func (h *CollectionHandler) HandleSetCollectionSortPreference(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-
-	var req CollectionSortPreferenceRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	view, err := h.SetPersonalCollectionSortPreference(r.Context(), userID, profileID, requestAccessFilter(r), req)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, view)
-}
-
-func (h *CollectionHandler) canSaveCollectionSortPreference(
-	r *http.Request,
-	store userstore.UserStore,
-	kind, collectionID string,
-) bool {
-	return h.canSaveCollectionSortPreferenceContext(r.Context(), apimw.GetProfileID(r.Context()), requestAccessFilter(r), store, kind, collectionID)
-}
-
-// HandleClearCollectionSortPreference handles DELETE /collections/sort-preference,
-// returning the collection or personal list to its default behavior.
-func (h *CollectionHandler) HandleClearCollectionSortPreference(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-
-	values := r.URL.Query()
-	if err := h.ClearPersonalCollectionSortPreference(r.Context(), userID, profileID, values.Get("collection_kind"), values.Get("collection_id")); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // sortPreferenceKinds is every collection_kind the sort-preference endpoints

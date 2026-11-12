@@ -14,6 +14,7 @@ import { useAvailableUserLibraries } from "@/hooks/queries/libraries";
 import { useProfiles } from "@/hooks/queries/profiles";
 import { isHouseholdSetupDone, setHouseholdSetupDone } from "@/lib/onboarding";
 import { canAddProfile } from "@/lib/profile-management";
+import { useT } from "@/i18n";
 
 /**
  * The "Who's watching?" onboarding step, shown once right after an invite is
@@ -31,12 +32,13 @@ export default function HouseholdSetup() {
     requireAdvisoryAgeSupported,
     maxProfiles,
   } = useProfiles();
-  const { data: libraries = [] } = useAvailableUserLibraries();
+  const { data: libraries = [] } = useAvailableUserLibraries({ includeHidden: true });
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<Profile | null>(null);
   const navigate = useNavigate();
 
-  useDocumentTitle("Who's watching?");
+  const t = useT();
+  useDocumentTitle(t("web.onboarding.householdSetup.title"));
 
   if (loading) {
     return (
@@ -79,11 +81,10 @@ export default function HouseholdSetup() {
       <div className="relative z-10 w-full max-w-2xl px-4">
         <div className="mb-10 text-center">
           <h1 className="text-3xl font-extrabold tracking-[-0.04em] sm:text-4xl">
-            Who&apos;s watching?
+            {t("web.onboarding.householdSetup.title")}
           </h1>
           <p className="text-muted-foreground mx-auto mt-3 max-w-md text-sm leading-6">
-            Everyone gets their own history, watchlist, and recommendations. Add the whole household
-            now or later — this is your account either way.
+            {t("web.onboarding.householdSetup.description")}
           </p>
         </div>
 
@@ -99,7 +100,7 @@ export default function HouseholdSetup() {
                 type="button"
                 onClick={() => openEditor(p)}
                 className="group flex w-24 flex-col items-center gap-2 text-center"
-                title="Edit profile"
+                title={t("web.onboarding.householdSetup.editProfile")}
               >
                 <div className="relative">
                   <Avatar className="border-border group-hover:border-primary size-20 rounded-2xl border transition-colors">
@@ -113,7 +114,9 @@ export default function HouseholdSetup() {
                       variant="outline"
                       className="bg-background absolute -bottom-2 left-1/2 -translate-x-1/2 px-1.5 py-0 font-mono text-[9px] tracking-wider uppercase"
                     >
-                      {p.is_child ? "Kids" : "PIN"}
+                      {p.is_child
+                        ? t("web.onboarding.householdSetup.kidsBadge")
+                        : t("web.onboarding.householdSetup.pinBadge")}
                     </Badge>
                   )}
                 </div>
@@ -129,7 +132,9 @@ export default function HouseholdSetup() {
                 <div className="border-border group-hover:border-primary text-muted-foreground grid size-20 place-items-center rounded-2xl border border-dashed transition-colors">
                   <Plus className="size-7" />
                 </div>
-                <span className="text-muted-foreground mt-1 text-sm font-medium">Add profile</span>
+                <span className="text-muted-foreground mt-1 text-sm font-medium">
+                  {t("web.onboarding.householdSetup.addProfile")}
+                </span>
               </button>
             ) : null}
           </div>
@@ -137,10 +142,12 @@ export default function HouseholdSetup() {
 
         <div className="mt-12 flex justify-center gap-3">
           <Button variant="ghost" onClick={finish}>
-            {profiles.length > 1 ? "Skip for now" : "Just me for now"}
+            {profiles.length > 1
+              ? t("web.ui.skipForNow")
+              : t("web.onboarding.householdSetup.justMe")}
           </Button>
           <Button onClick={finish} disabled={profilesLoading}>
-            Continue
+            {t("web.ui.continue")}
           </Button>
         </div>
       </div>
@@ -148,6 +155,7 @@ export default function HouseholdSetup() {
       <ProfileEditorDialog
         open={editorOpen}
         profile={editing}
+        createsPrimary={profiles.length === 0}
         libraries={libraries}
         avatarUploadEnabled={avatarUploadEnabled}
         advisoryAgeSupported={maxAdvisoryAgeSupported}

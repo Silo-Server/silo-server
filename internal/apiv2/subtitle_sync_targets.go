@@ -3,7 +3,6 @@ package apiv2
 import (
 	"context"
 	"net/http"
-	"path/filepath"
 	"strconv"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
@@ -23,7 +22,9 @@ type SubtitleSyncState struct {
 	StoredSubtitleID ID     `json:"stored_subtitle_id,omitempty"`
 	Language         string `json:"language" doc:"Language tag (BCP 47 for current data); may be empty or a legacy value"`
 	Format           string `json:"format"`
-	// Label is the stored subtitle's release name, or the sidecar's file name.
+	// Label is the stored subtitle's release name, or the sidecar's file name
+	// for a viewer who may see file names and its title or language for
+	// everyone else.
 	Label string `json:"label"`
 	// Timing is the correction every delivery path applies.
 	Timing SubtitleTiming `json:"timing"`
@@ -88,7 +89,7 @@ func subtitleSyncStateView(state handlers.SubtitleSyncState) SubtitleSyncState {
 		}
 	case state.External != nil:
 		view.Source = playback.SubtitleSourceExternalV3
-		view.Language, view.Format, view.Label = state.External.Language, state.External.Format, filepath.Base(state.External.Path)
+		view.Language, view.Format, view.Label = state.External.Language, state.External.Format, state.ExternalLabel
 	}
 	return view
 }

@@ -18,6 +18,10 @@
    ones this works around. :where() contributes nothing, leaving the compiled
    selectors at exactly the specificity Tailwind intends. */
 @custom-variant hover (:where(:root[data-fine-pointer="true"]) &:hover);
+/* `rtl:` means right to left here and now: like the icon mirror rule, it stops
+   at a `dir="ltr"` box (Tailwind's own variant matches anything inside an rtl
+   root, and uses `:dir()`, which older browsers drop). */
+@custom-variant rtl (&:where([dir="rtl"], [dir="rtl"] *):not(:where([dir="ltr"], [dir="ltr"] *)));
 
 /* ================================================================
    § 1  THEME BRIDGE — Tailwind ↔ CSS Custom Properties
@@ -103,7 +107,6 @@
   --animate-slide-up: slide-up 0.3s ease-out;
   --animate-scale-in: scale-in 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
   --animate-ken-burns-a: ken-burns-a 14s linear infinite;
-  --animate-ken-burns-b: ken-burns-b 18s linear infinite;
 
   /* ── Motion: Duration ──────────────────────────────────────── */
   --duration-instant: 0ms;
@@ -208,11 +211,11 @@
     opacity: 0;
   }
 }
-/* Hero backdrop drift: a slow pan over a fixed overscan. The scale stays
-   constant on purpose. Firefox redraws an element whose scale is animating at
-   each new size and lands it on whole pixels, so a slow zoom stutters there.
-   Each pan stays inside its overscan (3% a side at 1.06, 2% at 1.04), so the
-   frame never shows an edge. */
+/* Collection hero backdrop drift: a slow pan over a fixed overscan. The scale
+   stays constant on purpose. Firefox redraws an element whose scale is
+   animating at each new size and lands it on whole pixels, so a slow zoom
+   stutters there. The pan stays inside its 3%-a-side overscan, so the frame
+   never shows an edge. */
 @keyframes ken-burns-a {
   0%,
   100% {
@@ -222,17 +225,6 @@
   50% {
     scale: 1.06;
     translate: -1.5% -1%;
-  }
-}
-@keyframes ken-burns-b {
-  0%,
-  100% {
-    scale: 1.04;
-    translate: 1% 0;
-  }
-  50% {
-    scale: 1.04;
-    translate: -1% 0.6%;
   }
 }
 
@@ -268,6 +260,15 @@
   }
 }
 
+/* 1 left to right, -1 right to left: multiplies horizontal motion that follows
+   the reading direction (page slides, the sidebar collapse). */
+:root {
+  --dir-sign: 1;
+}
+:root[dir="rtl"] {
+  --dir-sign: -1;
+}
+
 /* Directional page motion for nested navigation. `--nav-slide-shift` is the
    distance the OUTGOING page travels; the incoming page always enters from the
    opposite side, so one pair of keyframes covers both directions.            */
@@ -278,13 +279,13 @@
   }
   to {
     opacity: 0;
-    transform: translateX(var(--nav-slide-shift));
+    transform: translateX(calc(var(--nav-slide-shift) * var(--dir-sign)));
   }
 }
 @keyframes nav-slide-in {
   from {
     opacity: 0;
-    transform: translateX(calc(-1 * var(--nav-slide-shift)));
+    transform: translateX(calc(-1 * var(--nav-slide-shift) * var(--dir-sign)));
   }
   to {
     opacity: 1;
@@ -392,7 +393,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
 @keyframes sidebar-entrance {
   from {
     opacity: 0;
-    transform: translateX(var(--sidebar-entrance-shift));
+    transform: translateX(calc(var(--sidebar-entrance-shift) * var(--dir-sign)));
   }
 }
 [data-sidebar-entrance="forward"] {
@@ -427,7 +428,6 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --duration-sidebar-entry: 0ms;
     --duration-sidebar-return: 0ms;
     --animate-ken-burns-a: none;
-    --animate-ken-burns-b: none;
   }
   .ambient-glow {
     transition: none;
@@ -595,6 +595,52 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   * {
     border-color: var(--border);
   }
+  /* Icons that point along the reading direction (back, forward, next, open
+     a submenu, sign out) mirror right to left. Media, time and brand icons
+     (play, skip, rewind, rotate, clock, external link) never do. `no-mirror`
+     keeps one that points at a physical side. A caret that also rotates needs
+     its own `rtl:` rotation, because `scale` applies before `rotate`. */
+  :is(
+      .lucide-chevron-left,
+      .lucide-chevron-right,
+      .lucide-chevrons-left,
+      .lucide-chevrons-right,
+      .lucide-arrow-left,
+      .lucide-arrow-right,
+      .lucide-corner-down-right,
+      .lucide-undo-2,
+      .lucide-log-in,
+      .lucide-log-out,
+      .lucide-send,
+      .lucide-panel-right-close,
+      .lucide-panel-right-open
+    ):where([dir="rtl"], [dir="rtl"] *):not(:where([dir="ltr"], [dir="ltr"] *), .no-mirror) {
+    scale: -1 1;
+  }
+  /* Code, paths, JSON and log text read left to right inside any page. Inline
+     code takes its direction from its own text and keeps the page's direction
+     for its margins (a logical margin resolves against the element's own
+     direction). */
+  pre {
+    direction: ltr;
+    unicode-bidi: isolate;
+  }
+  :is(code, kbd, samp) {
+    unicode-bidi: plaintext;
+  }
+  /* Titles, names, taglines and overviews from metadata take their direction
+     from their own text, so "56 Days" doesn't read "Days 56" in Arabic and an
+     English sentence keeps its full stop and its ellipsis at the end. They
+     still line up with the page. Chromium knows only the prefixed keyword. */
+  .bidi-text {
+    unicode-bidi: plaintext;
+    text-align: -webkit-match-parent;
+  }
+  @supports (text-align: match-parent) {
+    .bidi-text {
+      text-align: match-parent;
+    }
+  }
   /* Root size is relative to the browser's default font size (16px unless the
      user changed it), so rem-based text follows the browser text-size setting.
      The in-app text scale multiplies on top of it. */
@@ -606,6 +652,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
        (card overlay badges scale with the card in container units). Browsers
        without CSS trigonometry fall back to the in-app scale factor. */
     --ui-root-text-ratio: var(--ui-text-scale-factor);
+    /* Japanese and Chinese lines never start with "ー" or a small kana. This
+       only changes where CJK text may break. */
+    line-break: strict;
   }
   @supports (width: calc(1px * tan(atan2(1rem, 16px)))) {
     html {
@@ -806,12 +855,12 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     pointer-events: none;
   }
 
-  /* Side gradient — fades from left edge for sidebar overlap */
+  /* Side gradient — fades from the start edge for sidebar overlap */
   .hero-gradient-left {
     position: absolute;
     inset: 0;
     background: linear-gradient(
-      to right,
+      calc(90deg * var(--dir-sign)),
       color-mix(in srgb, var(--background) 88%, transparent) 0%,
       color-mix(in srgb, var(--background) 58%, transparent) 16%,
       color-mix(in srgb, var(--background) 22%, transparent) 34%,
@@ -921,7 +970,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   .detail-hero-scrim-under {
     background:
       linear-gradient(
-        to right,
+        calc(90deg * var(--dir-sign)),
         color-mix(in srgb, var(--background) 92%, transparent) 0%,
         color-mix(in srgb, var(--background) 62%, transparent) 18%,
         color-mix(in srgb, var(--background) 24%, transparent) 36%,
@@ -984,14 +1033,14 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     transition: transform var(--duration-sidebar-collapse) var(--ease-sidebar-collapse);
   }
   .sidebar-surface[data-collapsed="true"] {
-    transform: translateX(-196px);
+    transform: translateX(calc(-196px * var(--dir-sign)));
   }
   .sidebar-inner {
     transform: translateX(0);
     transition: transform var(--duration-sidebar-collapse) var(--ease-sidebar-collapse);
   }
   .sidebar-surface[data-collapsed="true"] .sidebar-inner {
-    transform: translateX(196px);
+    transform: translateX(calc(196px * var(--dir-sign)));
   }
 
   /* Main's margin snaps directly to the destination so the document lays out
@@ -1006,13 +1055,13 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     .sidebar-main-stage[data-sidebar-target-collapsed="true"]:not(
         [data-sidebar-visual-collapsed="true"]
       ) {
-      transform: translateX(196px);
+      transform: translateX(calc(196px * var(--dir-sign)));
       transition: none;
     }
     .sidebar-main-stage:not(
         [data-sidebar-target-collapsed="true"]
       )[data-sidebar-visual-collapsed="true"] {
-      transform: translateX(-196px);
+      transform: translateX(calc(-196px * var(--dir-sign)));
       transition: none;
     }
   }
@@ -1928,6 +1977,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     transform: scaleX(0);
     animation: hero-progress 8s linear forwards;
   }
+  :root[dir="rtl"] .hero-progress-rail > span {
+    transform-origin: right center;
+  }
   .hero-progress-rail[data-paused="true"] > span {
     animation-play-state: paused;
   }
@@ -2315,7 +2367,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     .admin-shell .page-header > :not(:first-child) {
       flex-wrap: wrap;
       justify-content: flex-start;
-      text-align: left;
+      text-align: start;
     }
 
     .admin-shell .page-header [data-slot="button"] {
@@ -2340,7 +2392,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
 
   /* ── Live Badge ──────────────────────────────────────────── */
   .live-badge {
-    margin-left: auto;
+    margin-inline-start: auto;
     padding: 2px 8px;
     border-radius: 6px;
     font-size: 10px;
@@ -2444,7 +2496,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     /* Snaps straight to the destination so the document lays out once; the
        compensation transform below carries the edge across. Animating this
        margin instead would re-run layout on every frame. */
-    margin-left: var(--app-sidebar-offset);
+    margin-inline-start: var(--app-sidebar-offset);
     position: sticky;
     background: linear-gradient(
       180deg,
@@ -2492,12 +2544,12 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     }
     :root[data-sidebar-collapsed="true"]:not([data-sidebar-visual-collapsed="true"])
       .impersonation-banner {
-      transform: translateX(196px);
+      transform: translateX(calc(196px * var(--dir-sign)));
       transition: none;
     }
     :root:not([data-sidebar-collapsed="true"])[data-sidebar-visual-collapsed="true"]
       .impersonation-banner {
-      transform: translateX(-196px);
+      transform: translateX(calc(-196px * var(--dir-sign)));
       transition: none;
     }
   }
@@ -2519,14 +2571,14 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     pointer-events: none;
   }
 
-  /* Soft warm wash on the left edge so the eye lands on the
+  /* Soft warm wash on the start edge so the eye lands on the
      status dot first. Fades out before the button column. */
   .impersonation-banner::after {
     content: "";
     position: absolute;
     inset: 0;
     background: linear-gradient(
-      90deg,
+      calc(90deg * var(--dir-sign)),
       color-mix(in srgb, var(--impersonation-accent) 10%, transparent),
       transparent 38%
     );
@@ -2597,7 +2649,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
 
     .player-controls[data-compact="true"][data-touch="false"] .player-compact-metadata {
       max-width: calc(50% - 12rem);
-      margin-right: auto;
+      margin-inline-end: auto;
     }
 
     .player-controls[data-compact="true"][data-touch="false"] .player-quality-trigger {
@@ -2640,6 +2692,11 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     margin: 0;
     overflow-y: auto;
     z-index: 60;
+  }
+  /* Right to left the utility buttons sit bottom left, so their menus do too. */
+  :root[dir="rtl"] .player-controls[data-compact="true"] .player-menu-surface {
+    right: auto;
+    left: max(0.75rem, env(safe-area-inset-left));
   }
 
   .player-overflow-menu {

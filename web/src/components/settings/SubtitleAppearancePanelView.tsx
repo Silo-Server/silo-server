@@ -2,6 +2,7 @@ import { useEffect, useMemo, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { RotateCcw, X } from "lucide-react";
 import { usePercentDraft } from "@/hooks/usePercentDraft";
+import { useT } from "@/i18n";
 import {
   BACKGROUND_STYLE_OPTIONS,
   BG_COLOR_PALETTE,
@@ -54,10 +55,14 @@ export function SubtitleAppearancePanelView({
   onClose,
   canReset = true,
   onReset,
-  resetLabel = "Use fallback style",
-  eyebrow = "Captions",
-  status = "Changes saved automatically",
+  resetLabel: resetLabelProp,
+  eyebrow: eyebrowProp,
+  status: statusProp,
 }: SubtitleAppearancePanelViewProps) {
+  const t = useT();
+  const resetLabel = resetLabelProp ?? t("web.settings.subtitlePanel.resetDefault");
+  const eyebrow = eyebrowProp ?? t("web.settings.subtitlePanel.eyebrowDefault");
+  const status = statusProp ?? t("web.settings.subtitlePanel.statusDefault");
   const previewStyles = useMemo(() => computeSubtitleStyles(value), [value]);
 
   // Close on Escape. Blur first: the panel unmounts on close, and React does
@@ -81,7 +86,7 @@ export function SubtitleAppearancePanelView({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Subtitle appearance"
+      aria-label={t("web.settings.subtitlePanel.title")}
       className="player-subtitle-panel fixed inset-0 z-[70] flex items-center justify-center p-4"
       onClick={onClose}
     >
@@ -100,13 +105,13 @@ export function SubtitleAppearancePanelView({
               {eyebrow}
             </div>
             <div className="text-[17px] font-semibold tracking-tight text-white">
-              Subtitle appearance
+              {t("web.settings.subtitlePanel.title")}
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t("web.settings.subtitlePanel.close")}
             className="flex h-9 w-9 items-center justify-center rounded-full text-white/70 transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
           >
             <X className="h-[18px] w-[18px]" />
@@ -131,13 +136,13 @@ export function SubtitleAppearancePanelView({
               className="inline-block rounded px-3 py-1 leading-snug"
               style={{ ...previewStyles.cueStyle, whiteSpace: "pre-line" }}
             >
-              The quick brown fox
+              {t("web.settings.subtitlePanel.previewLine1")}
             </span>
             <span
               className="inline-block rounded px-3 py-1 leading-snug"
               style={{ ...previewStyles.cueStyle, whiteSpace: "pre-line" }}
             >
-              jumps over the lazy dog.
+              {t("web.settings.subtitlePanel.previewLine2")}
             </span>
           </div>
         </div>
@@ -145,40 +150,40 @@ export function SubtitleAppearancePanelView({
         {/* Scrollable body */}
         <div className="overlay-scroll max-h-[52vh] space-y-6 overflow-y-auto px-5 py-5">
           {/* Text */}
-          <Section label="Text">
-            <Row label="Size">
+          <Section label={t("web.settings.subtitlePanel.text")}>
+            <Row label={t("web.settings.subtitlePanel.size")}>
               <PillGroup
                 options={FONT_SIZE_OPTIONS}
                 value={value.fontSize}
                 onChange={(v) => onChange({ fontSize: v })}
               />
             </Row>
-            <Row label="Font">
+            <Row label={t("web.settings.subtitlePanel.font")}>
               <PillGroup
                 options={FONT_FAMILY_OPTIONS}
                 value={value.fontFamily}
                 onChange={(v) => onChange({ fontFamily: v })}
               />
             </Row>
-            <Row label="Color">
+            <Row label={t("web.settings.subtitlePanel.color")}>
               <ColorSwatchRow
                 colors={FONT_COLOR_PALETTE}
                 value={value.fontColor}
                 onChange={(v) => onChange({ fontColor: v })}
               />
             </Row>
-            <Row label="Opacity">
+            <Row label={t("web.settings.subtitlePanel.opacity")}>
               <PercentField
                 value={value.textOpacity}
                 onChange={(v) => onChange({ textOpacity: v })}
-                ariaLabel="Text opacity"
+                ariaLabel={t("web.settings.subtitlePanel.textOpacity")}
               />
             </Row>
-            <Row label="Outline">
+            <Row label={t("web.settings.subtitlePanel.outline")}>
               <ToggleSwitch
                 checked={value.textOutline}
                 onChange={(v) => onChange({ textOutline: v })}
-                label="Text outline"
+                label={t("web.settings.subtitlePanel.textOutline")}
               />
             </Row>
           </Section>
@@ -186,8 +191,8 @@ export function SubtitleAppearancePanelView({
           <Divider />
 
           {/* Background */}
-          <Section label="Background">
-            <Row label="Style">
+          <Section label={t("web.settings.subtitlePanel.background")}>
+            <Row label={t("web.settings.subtitlePanel.style")}>
               <PillGroup
                 options={BACKGROUND_STYLE_OPTIONS}
                 value={value.backgroundStyle}
@@ -196,15 +201,15 @@ export function SubtitleAppearancePanelView({
             </Row>
             {value.backgroundStyle === "box" && (
               <>
-                <Row label="Opacity">
+                <Row label={t("web.settings.subtitlePanel.opacity")}>
                   <PercentField
                     min={0}
                     value={value.backgroundOpacity}
                     onChange={(v) => onChange({ backgroundOpacity: v })}
-                    ariaLabel="Background opacity"
+                    ariaLabel={t("web.settings.subtitlePanel.backgroundOpacity")}
                   />
                 </Row>
-                <Row label="Color">
+                <Row label={t("web.settings.subtitlePanel.color")}>
                   <ColorSwatchRow
                     colors={BG_COLOR_PALETTE}
                     value={value.backgroundColor}
@@ -218,8 +223,8 @@ export function SubtitleAppearancePanelView({
           <Divider />
 
           {/* Position */}
-          <Section label="Position">
-            <Row label="Vertical">
+          <Section label={t("web.settings.subtitlePanel.position")}>
+            <Row label={t("web.settings.subtitlePanel.vertical")}>
               <PillGroup
                 options={POSITION_OPTIONS}
                 value={value.position}
@@ -359,6 +364,8 @@ function ColorSwatchRow({
 /** A typed percentage value, for controls where dragging a slider is more
  * fiddly than just typing the number — opacity wants precision at the low
  * end where a few percent is the difference between legible and not. */
+const PERCENT_SIGN = "%";
+
 function PercentField({
   value,
   onChange,
@@ -386,9 +393,9 @@ function PercentField({
         onKeyDown={(e) => {
           if (e.key === "Enter") e.currentTarget.blur();
         }}
-        className="w-14 [appearance:textfield] rounded-md border border-white/15 bg-white/[0.06] px-2 py-1 text-right text-[13px] text-white outline-none focus-visible:ring-2 focus-visible:ring-white/70 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        className="w-14 [appearance:textfield] rounded-md border border-white/15 bg-white/[0.06] px-2 py-1 text-end text-[13px] text-white outline-none focus-visible:ring-2 focus-visible:ring-white/70 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
       />
-      <span className="text-[13px] text-white/60">%</span>
+      <span className="text-[13px] text-white/60">{PERCENT_SIGN}</span>
     </div>
   );
 }
@@ -415,7 +422,9 @@ function ToggleSwitch({
     >
       <span
         className={`inline-block h-5 w-5 transform rounded-full shadow-md transition-transform ${
-          checked ? "translate-x-[22px] bg-black" : "translate-x-[2px] bg-white"
+          checked
+            ? "translate-x-[22px] bg-black rtl:-translate-x-[22px]"
+            : "translate-x-[2px] bg-white rtl:-translate-x-[2px]"
         }`}
       />
     </button>

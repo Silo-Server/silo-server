@@ -11,6 +11,7 @@ This folder is for people and coding agents changing the server:
   invariants, and the contracts it keeps.
   [api-contract.md](architecture/api-contract.md) and
   [v1-scope.md](architecture/v1-scope.md) are the usual starting points.
+  [i18n.md](architecture/i18n.md) covers interface translation across the clients.
 - The `*-api.md` files are API references for client and integration
   developers. [api-docs.md](api-docs.md) covers the interactive OpenAPI viewer
   every server serves. [backups-api.md](backups-api.md) covers backups and

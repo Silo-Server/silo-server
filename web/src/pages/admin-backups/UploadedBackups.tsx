@@ -10,6 +10,7 @@ import {
   useCompleteAdminBackupUpload,
   useDeleteAdminBackupUpload,
 } from "@/hooks/queries/admin/backupUploads";
+import { useT, type Translate } from "@/i18n";
 import { formatFileSize } from "@/lib/mediaFormat";
 
 import {
@@ -21,25 +22,31 @@ import {
   uploadRestorePath,
 } from "./backupPresentation";
 
-function uploadLabel(upload: AdminBackupUpload): string {
+function uploadLabel(t: Translate, upload: AdminBackupUpload): string {
   const source = upload.source;
   if (!source) {
-    return `Unfinished upload from ${backupDateTime(upload.created_at)}`;
+    return t("web.admin.backups.uploads.unfinished", { date: backupDateTime(upload.created_at) });
   }
-  const taken = backupDateTime(source.created_at);
-  return `${sourceServerName(source) ?? "Another server"}, ${taken}`;
+  return t("web.admin.backups.uploads.label", {
+    server: sourceServerName(source) ?? t("web.admin.backups.uploads.anotherServer"),
+    taken: backupDateTime(source.created_at),
+  });
 }
 
 /** The line under an upload's label: its size, where it came from, and how long it stays. */
-function uploadDetails(upload: AdminBackupUpload): string {
+function uploadDetails(t: Translate, upload: AdminBackupUpload): string {
   const parts = [formatFileSize(upload.size_bytes, { fallback: "—" })];
   const source = upload.source;
-  if (source && !sourceServerName(source)) parts.push(`server ${shortServerId(source.server_id)}`);
+  if (source && !sourceServerName(source)) {
+    parts.push(t("web.admin.backups.uploads.serverId", { id: shortServerId(source.server_id) }));
+  }
   const version = source ? knownSiloVersion(source.silo_version) : null;
-  if (version) parts.push(`Silo ${version}`);
-  if (upload.status !== "complete") parts.push("deleted 24 hours after its last part");
+  if (version) parts.push(t("web.admin.backups.uploads.siloVersion", { version }));
+  if (upload.status !== "complete") parts.push(t("web.admin.backups.uploads.deletedAfter"));
   else if (upload.expires_at) {
-    parts.push(`kept until ${backupDateTime(upload.expires_at)} unless restored from again`);
+    parts.push(
+      t("web.admin.backups.uploads.keptUntil", { date: backupDateTime(upload.expires_at) }),
+    );
   }
   return parts.join(" · ");
 }
@@ -59,6 +66,7 @@ function fullyReceived(upload: AdminBackupUpload): boolean {
  * part.
  */
 export function UploadedBackups({ uploads }: { uploads: readonly AdminBackupUpload[] }) {
+  const t = useT();
   const [deleting, setDeleting] = useState<AdminBackupUpload | null>(null);
   const remove = useDeleteAdminBackupUpload();
   const check = useCompleteAdminBackupUpload();
@@ -72,11 +80,11 @@ export function UploadedBackups({ uploads }: { uploads: readonly AdminBackupUplo
     remove.mutate(target.id, {
       onSuccess: () => {
         setDeleting(null);
-        toast.success("Uploaded backup deleted");
+        toast.success(t("web.admin.backups.uploads.deleted"));
       },
       onError: (error) => {
         setDeleting(null);
-        toast.error("Couldn't delete the uploaded backup", {
+        toast.error(t("web.admin.backups.uploads.deleteFailed"), {
           description: backupErrorMessage(error),
         });
       },
@@ -87,29 +95,31 @@ export function UploadedBackups({ uploads }: { uploads: readonly AdminBackupUplo
     <section aria-labelledby="uploaded-backups-heading" className="space-y-3">
       <div>
         <h2 id="uploaded-backups-heading" className="text-[15px] font-semibold tracking-tight">
-          Uploaded backups
+          {t("web.admin.backups.uploads.heading")}
         </h2>
         <p className="text-muted-foreground text-[13px]">
-          Restore sets from other servers, kept in this server&apos;s storage until you delete them.
+          {t("web.admin.backups.uploads.description")}
         </p>
       </div>
       <ul className="surface-panel divide-border/60 divide-y rounded-2xl">
         {shown.map((upload) => {
-          const label = uploadLabel(upload);
+          const label = uploadLabel(t, upload);
           return (
             <li key={upload.id} className="flex items-center justify-between gap-3 px-4 py-3">
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium">{label}</p>
                 <p className="text-muted-foreground text-xs tabular-nums">
-                  {uploadDetails(upload)}
+                  {uploadDetails(t, upload)}
                 </p>
               </div>
               <div className="flex shrink-0 gap-1">
                 {upload.status === "complete" ? (
                   <Button asChild variant="ghost" size="sm">
                     <Link to={uploadRestorePath(upload.id)}>
-                      Restore…
-                      <span className="sr-only"> from {label}</span>
+                      {t("web.admin.backups.uploads.restore", {
+                        label,
+                        sr: (chunks) => <span className="sr-only">{chunks}</span>,
+                      })}
                     </Link>
                   </Button>
                 ) : null}
@@ -121,21 +131,23 @@ export function UploadedBackups({ uploads }: { uploads: readonly AdminBackupUplo
                     onClick={() =>
                       check.mutate(upload.id, {
                         onError: (error) =>
-                          toast.error("Couldn't check the uploaded backup", {
+                          toast.error(t("web.admin.backups.uploads.checkFailed"), {
                             description: backupErrorMessage(error),
                           }),
                       })
                     }
                   >
-                    Check again
-                    <span className="sr-only"> {label}</span>
+                    {t("web.admin.backups.uploads.checkAgain", {
+                      label,
+                      sr: (chunks) => <span className="sr-only">{chunks}</span>,
+                    })}
                   </Button>
                 ) : null}
                 <Button
                   variant="ghost"
                   size="icon-sm"
                   onClick={() => setDeleting(upload)}
-                  aria-label={`Delete ${label}`}
+                  aria-label={t("web.admin.backups.uploads.deleteLabel", { label })}
                 >
                   <Trash2 aria-hidden="true" />
                 </Button>
@@ -147,11 +159,13 @@ export function UploadedBackups({ uploads }: { uploads: readonly AdminBackupUplo
       <ConfirmDialog
         open={deleting !== null}
         onOpenChange={(open) => !open && setDeleting(null)}
-        title="Delete this uploaded backup?"
+        title={t("web.admin.backups.uploads.deleteTitle")}
         description={
-          deleting ? `${uploadLabel(deleting)} is removed from this server's storage.` : ""
+          deleting
+            ? t("web.admin.backups.uploads.deleteDescription", { label: uploadLabel(t, deleting) })
+            : ""
         }
-        confirmLabel="Delete"
+        confirmLabel={t("web.admin.backups.uploads.deleteConfirm")}
         variant="destructive"
         irreversible
         isPending={remove.isPending}

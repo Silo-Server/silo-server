@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
+import { useT } from "@/i18n";
 import { markerProvenanceLabel } from "@/lib/markerProvenance";
 import type { PlayerMarkerProvenance } from "../types";
 
@@ -34,7 +35,7 @@ interface IntroSkipButtonProps {
  */
 export function IntroSkipButton({
   onSkip,
-  label = "Skip Intro",
+  label,
   caption,
   timer,
   introPrompt = false,
@@ -44,6 +45,7 @@ export function IntroSkipButton({
   showConfidence = false,
   showSource = false,
 }: IntroSkipButtonProps) {
+  const t = useT();
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [now, setNow] = useState(() => Date.now());
 
@@ -98,28 +100,28 @@ export function IntroSkipButton({
       {progress !== null ? (
         <span
           aria-hidden="true"
-          className="absolute inset-y-0 left-0 bg-white/15"
+          className="absolute inset-y-0 start-0 bg-white/15"
           style={{ width: `${Math.min(1, Math.max(0, progress)) * 100}%` }}
         />
       ) : null}
-      <span className="relative">{label}</span>
+      <span className="relative">{label ?? t("introSkip.pill.skip")}</span>
     </button>
   );
 
   return (
     <div
-      className={`animate-in fade-in absolute right-5 z-50 flex flex-col items-end gap-1.5 duration-150 sm:right-7 ${controlsVisible ? "bottom-24 sm:bottom-28" : "bottom-5 sm:bottom-7"}`}
+      className={`animate-in fade-in absolute end-5 z-50 flex flex-col items-end gap-1.5 duration-150 sm:end-7 ${controlsVisible ? "bottom-24 sm:bottom-28" : "bottom-5 sm:bottom-7"}`}
     >
       {provenanceLabel ? (
         <span
           data-marker-provenance="true"
-          className="pr-3 text-xs font-medium text-white/75 drop-shadow"
+          className="pe-3 text-xs font-medium text-white/75 drop-shadow"
         >
           {provenanceLabel}
         </span>
       ) : null}
       {caption ? (
-        <span className="pr-3 text-xs font-medium text-white/75 drop-shadow">{caption}</span>
+        <span className="pe-3 text-xs font-medium text-white/75 drop-shadow">{caption}</span>
       ) : null}
       {button}
     </div>

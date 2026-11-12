@@ -363,6 +363,7 @@ type SessionManager struct {
 	lifecycleHooks       []LifecycleHooks
 	compatActivityReader SessionActivityReader
 	compatExpiryClaimer  SessionExpiryClaimer
+	compatAdminEnd       CompatAdminEnd
 	// deliveryActivityReader reports media that another node served for a
 	// remote-transport session. See SetDeliveryActivityReader.
 	deliveryActivityReader SessionActivityReader

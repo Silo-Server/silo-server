@@ -20,6 +20,7 @@ import CardPlayOverlay from "@/components/CardPlayOverlay";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
 import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
 import { cn } from "@/lib/utils";
+import { useAppLanguage, useT } from "@/i18n";
 
 type ContinueWatchingCardProps = (
   | {
@@ -64,6 +65,9 @@ export const ContinueWatchingRowCard = memo(function ContinueWatchingRowCard(
 });
 
 function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCardViewProps) {
+  const t = useT();
+  // The audiobook time left and the badge come from plain helpers; follow language changes.
+  useAppLanguage();
   const location = useLocation();
   const playbackController = useWatchPlaybackController();
   const { cardPresentation } = useUICustomization();
@@ -141,7 +145,7 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
   const isMangaChapter = card.type === "ebook" && !!card.seriesId && !!card.seriesTitle;
   const headingIsSeries = (hasEpisodeMeta && !!card.seriesTitle) || isMangaChapter;
   const heading = headingIsSeries ? card.seriesTitle : card.title;
-  const playTitle = heading ?? card.title ?? "item";
+  const playTitle = heading ?? card.title ?? t("web.home.continueWatching.fallbackTitle");
   // The heading shows the series title for episodes, so it should navigate to
   // the series page; everything else heads to the item's own page.
   const headingHref =
@@ -151,13 +155,14 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
   // Detail-page link target for the card's image and meta lines: manga
   // chapters head to the series page like the heading does.
   const detailHref = isMangaChapter ? headingHref : card.itemHref;
-  const episodeLabel = hasEpisodeMeta
-    ? `Season ${card.seasonNumber} Episode ${card.episodeNumber}`
-    : null;
+  const episodeNumbers = { season: card.seasonNumber, episode: card.episodeNumber };
   const episodeMeta = hasEpisodeMeta
     ? card.seriesTitle && card.title
-      ? `${episodeLabel} • ${card.title}`
-      : episodeLabel
+      ? t("web.home.continueWatching.episodeLabelWithTitle", {
+          ...episodeNumbers,
+          title: card.title,
+        })
+      : t("web.home.continueWatching.episodeLabel", episodeNumbers)
     : isMangaChapter
       ? card.title
       : null;
@@ -168,13 +173,17 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
   const timeLeftLabel = isNextUp
     ? premiereBadge
       ? null
-      : "Next Episode"
+      : t("web.home.continueWatching.nextEpisode")
     : card.type === "ebook"
-      ? `${Math.round(Math.min(Math.max(progressPercent, 0), 100))}% read`
+      ? t("web.home.continueWatching.percentRead", {
+          percent: Math.round(Math.min(Math.max(progressPercent, 0), 100)),
+        })
       : card.durationSeconds > 0
         ? card.type === "audiobook"
           ? formatListeningTimeLeft(card.positionSeconds, card.durationSeconds)
-          : `${Math.round((card.durationSeconds - card.positionSeconds) / 60)} min left`
+          : t("web.home.continueWatching.minutesLeft", {
+              minutes: Math.round((card.durationSeconds - card.positionSeconds) / 60),
+            })
         : "\u00A0";
   const handleWatchClick = useCallback(
     (event: React.MouseEvent<HTMLAnchorElement>) => {
@@ -262,7 +271,7 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
               />
             ) : (
               <div className="text-muted-foreground bg-surface flex h-full w-full items-center justify-center text-sm">
-                No Image
+                {t("web.home.continueWatching.noImage")}
               </div>
             )}
 
@@ -304,12 +313,18 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
           <ViewTransitionLink
             to={card.watchHref}
             onClick={handleWatchClick}
-            aria-label={`${card.type === "ebook" ? "Read" : "Play"} ${heading}`}
+            aria-label={t(
+              card.type === "ebook"
+                ? "web.home.continueWatching.readTitle"
+                : "web.home.continueWatching.playTitle",
+              { title: String(heading) },
+            )}
             className="media-card-play-trigger bg-primary text-primary-foreground absolute top-1/2 left-1/2 flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full shadow-lg transition-all duration-200 hover:scale-110 hover:shadow-xl hover:brightness-110 active:scale-95"
           >
             {card.type === "ebook" ? (
               <BookOpen className="h-5 w-5" />
             ) : (
+              // eslint-disable-next-line silo/no-physical-direction -- centres the play triangle, which doesn't mirror
               <Play className="ml-0.5 h-5 w-5" fill="currentColor" />
             )}
           </ViewTransitionLink>

@@ -496,7 +496,11 @@ func collectionProblem(err error) *Problem {
 	case apiErr.Status == http.StatusNotImplemented:
 		return NewProblem(TypeCapabilityUnsupported, apiErr.Message)
 	case apiErr.Status == http.StatusServiceUnavailable:
-		return NewProblem(TypeDependencyUnavailable, apiErr.Message)
+		problem := NewProblem(TypeDependencyUnavailable, apiErr.Message)
+		if apiErr.RetryAfter > 0 {
+			problem = problem.WithRetryAfter(apiErr.RetryAfter)
+		}
+		return problem
 	case apiErr.Status == http.StatusBadGateway:
 		return NewProblem(TypeDependencyUnavailable, apiErr.Message).WithRetryAfter(30)
 	}

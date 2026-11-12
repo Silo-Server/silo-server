@@ -1,5 +1,6 @@
 import type { Profile } from "@/api/types";
 import type { ProfileCreate, ProfileUpdate } from "@/hooks/queries/profiles";
+import { t } from "@/i18n";
 import { avatarPresetRef, parseProfileAvatarPresetRef } from "@/lib/profile-avatars";
 import {
   formatPlaybackQualityPreset,
@@ -49,16 +50,35 @@ export interface ProfileAccessSummary {
  * admits TV-14, and R admits TV-MA and NC-17.
  */
 export const CONTENT_RATING_OPTIONS: ContentRatingOption[] = [
-  { value: "", label: "Any content", summary: "Any content" },
-  { value: "G", label: "G / TV-G / U", summary: "G max" },
-  { value: "6", label: "6 / FSK 6", summary: "6 max" },
-  { value: "PG", label: "PG / TV-PG / TV-Y7", summary: "PG max" },
-  { value: "12", label: "12 / 12A / FSK 12", summary: "12 max" },
-  { value: "PG-13", label: "PG-13 / TV-14", summary: "PG-13 max" },
-  { value: "15", label: "15 / MA 15+", summary: "15 max" },
-  { value: "16", label: "16 / FSK 16", summary: "16 max" },
-  { value: "R", label: "R / TV-MA / NC-17 / 18", summary: "R max" },
+  {
+    value: "",
+    get label() {
+      return t("web.profiles.helpers.contentRating.any");
+    },
+    get summary() {
+      return t("web.profiles.helpers.contentRating.any");
+    },
+  },
+  ratingOption("G", "G / TV-G / U"),
+  ratingOption("6", "6 / FSK 6"),
+  ratingOption("PG", "PG / TV-PG / TV-Y7"),
+  ratingOption("12", "12 / 12A / FSK 12"),
+  ratingOption("PG-13", "PG-13 / TV-14"),
+  ratingOption("15", "15 / MA 15+"),
+  ratingOption("16", "16 / FSK 16"),
+  ratingOption("R", "R / TV-MA / NC-17 / 18"),
 ];
+
+/** A rating ceiling; `label` lists certificate codes, which are the same in every language. */
+function ratingOption(value: string, label: string): ContentRatingOption {
+  return {
+    value,
+    label,
+    get summary() {
+      return t("web.profiles.helpers.contentRating.max", { rating: value });
+    },
+  };
+}
 
 export interface AdvisoryAgeOption {
   /** null is "no limit". */
@@ -78,10 +98,20 @@ export const MAX_ADVISORY_AGE_LIMIT = 21;
  * also requires an advisory age, so the content rating still has to do its job.
  */
 export const ADVISORY_AGE_OPTIONS: AdvisoryAgeOption[] = [
-  { value: null, label: "No limit" },
+  {
+    value: null,
+    get label() {
+      return t("web.profiles.helpers.advisoryAge.noLimit");
+    },
+  },
   ...Array.from({ length: MAX_ADVISORY_AGE_LIMIT - MIN_ADVISORY_AGE_LIMIT + 1 }, (_, index) => {
     const age = index + MIN_ADVISORY_AGE_LIMIT;
-    return { value: age, label: `Ages ${age} and under` };
+    return {
+      value: age,
+      get label() {
+        return t("web.profiles.helpers.advisoryAge.agesAndUnder", { age, age_text: age });
+      },
+    };
   }),
 ];
 
@@ -218,16 +248,28 @@ export function buildProfileAccessSummary(
 ): ProfileAccessSummary {
   const contentRating =
     CONTENT_RATING_OPTIONS.find((option) => option.value === profile.max_content_rating)?.summary ??
-    "Any content";
+    t("web.profiles.helpers.contentRating.any");
   const advisoryAge = profile.max_advisory_age
-    ? `Advisory age ${profile.max_advisory_age} max${profile.require_advisory_age ? ", rated titles only" : ""}`
+    ? t(
+        profile.require_advisory_age
+          ? "web.profiles.helpers.access.advisoryAgeMaxRatedOnly"
+          : "web.profiles.helpers.access.advisoryAgeMax",
+        { age: profile.max_advisory_age },
+      )
     : "";
   const libraryCount = sortUniqueLibraryIDs(profile.allowed_library_ids).length;
   const libraries = profile.library_restrictions_enabled
-    ? `${libraryCount} ${libraryCount === 1 ? "library" : "libraries"}`
-    : "All libraries";
-  const qualityLabel = formatPlaybackQualityPreset(profile.max_playback_quality);
-  const playbackQuality = `${qualityLabel} quality`;
+    ? t("web.profiles.helpers.access.libraries", {
+        count: libraryCount,
+        count_text: libraryCount,
+      })
+    : t("web.profiles.helpers.access.allLibraries");
+  const playbackQuality =
+    playbackQualityPresetFromValue(profile.max_playback_quality) === "any"
+      ? t("web.profiles.helpers.access.anyQuality")
+      : t("web.profiles.helpers.access.quality", {
+          quality: formatPlaybackQualityPreset(profile.max_playback_quality),
+        });
 
   return {
     contentRating,
@@ -294,6 +336,5 @@ export function canSwitchProfile(profileCount: number, maxProfiles: number | nul
 
 /** The sentence shown in place of New profile once the household is full. */
 export function profileLimitMessage(maxProfiles: number): string {
-  const noun = maxProfiles === 1 ? "profile" : "profiles";
-  return `This account can have ${maxProfiles} ${noun}. An administrator can raise the limit.`;
+  return t("web.settings.profiles.limitReached", { count: maxProfiles });
 }

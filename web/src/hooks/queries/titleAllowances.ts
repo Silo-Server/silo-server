@@ -11,6 +11,7 @@ import { catalogItemFromV2 } from "@/api/v2/catalog";
 import { v2, type V2Result } from "@/api/v2/request";
 import { useProfiles } from "@/hooks/queries/profiles";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
+import { t } from "@/i18n";
 
 /**
  * Title allowances: the household's primary profile lets a limited profile
@@ -74,7 +75,8 @@ export function describeMaturityLimit(limit: {
 }): string {
   const parts: string[] = [];
   if (limit.max_content_rating.trim() !== "") parts.push(limit.max_content_rating);
-  if ((limit.max_advisory_age ?? 0) > 0) parts.push(`Age ${limit.max_advisory_age}+`);
+  if ((limit.max_advisory_age ?? 0) > 0)
+    parts.push(t("web.profiles.allowances.ageLimit", { age: limit.max_advisory_age }));
   return parts.join(" · ");
 }
 
@@ -93,9 +95,13 @@ export function allowanceRowState(state: TitleAllowanceProfile["state"]): {
     case "allowed":
       return { checked: true, disabled: false };
     case "allowed_by_collection":
-      return { checked: true, disabled: true, note: "Allowed through a collection" };
+      return {
+        checked: true,
+        disabled: true,
+        note: t("web.profiles.allowances.allowedByCollection"),
+      };
     case "no_library_access":
-      return { checked: false, disabled: true, note: "Can't see this library" };
+      return { checked: false, disabled: true, note: t("web.profiles.allowances.noLibraryAccess") };
     default:
       return { checked: false, disabled: false };
   }
@@ -204,7 +210,7 @@ export function useSetTitleAllowance() {
             path: { id: profileId, item_id: itemId },
           }),
     onError: (err) => {
-      toast.error(errorMessage(err, "Failed to change the allowed title"));
+      toast.error(errorMessage(err, t("web.profiles.allowances.setTitleFailed")));
     },
     onSettled: (_data, _err, { profileId }) => {
       refreshAllowances(queryClient, profileId);
@@ -233,7 +239,7 @@ export function useSetCollectionAllowance() {
             path: { id: profileId, collection_id: collectionId },
           }),
     onError: (err) => {
-      toast.error(errorMessage(err, "Failed to change the allowed collection"));
+      toast.error(errorMessage(err, t("web.profiles.allowances.setCollectionFailed")));
     },
     onSettled: (_data, _err, { profileId }) => {
       refreshAllowances(queryClient, profileId);
@@ -259,7 +265,7 @@ export function useAllowCollectionTitles() {
       return result.added;
     },
     onError: (err) => {
-      toast.error(errorMessage(err, "Failed to allow the collection's titles"));
+      toast.error(errorMessage(err, t("web.profiles.allowances.copyCollectionFailed")));
     },
     onSettled: (_data, _err, { profileId }) => {
       refreshAllowances(queryClient, profileId);

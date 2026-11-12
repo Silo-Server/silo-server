@@ -173,6 +173,45 @@ func TestViewerResolverParityWithLegacyResolver(t *testing.T) {
 			wantHidden:    []int{2},
 		},
 		{
+			// The primary profile inherits the account's libraries. A library
+			// limit stored on it (an older server, a restored backup) neither
+			// narrows nor widens them; only the libraries it hid do, and it can
+			// show those again.
+			name: "primary profile ignores a stored library limit",
+			user: &models.User{
+				ID:                   1,
+				LibraryIDs:           []int{1, 2, 3, 4, 5, 6, 7},
+				AccessPolicyRevision: 5,
+			},
+			profile: &userstore.Profile{
+				ID:                         "prof-1",
+				IsPrimary:                  true,
+				LibraryRestrictionsEnabled: true,
+				AllowedLibraryIDs:          []int{6, 7},
+			},
+			settingValues: []userstore.SettingValue{hiddenLibrariesRow("prof-1", `[6,7]`)},
+			input:         access.ResolveInput{UserID: 1, SessionID: "sess-1", ProfileID: "prof-1"},
+			wantAllowed:   []int{1, 2, 3, 4, 5},
+			wantHidden:    []int{6, 7},
+		},
+		{
+			name: "primary profile on an unrestricted account ignores a stored library limit",
+			user: &models.User{
+				ID:                   1,
+				AccessPolicyRevision: 5,
+			},
+			profile: &userstore.Profile{
+				ID:                         "prof-1",
+				IsPrimary:                  true,
+				LibraryRestrictionsEnabled: true,
+				AllowedLibraryIDs:          []int{6, 7},
+			},
+			settingValues:  []userstore.SettingValue{hiddenLibrariesRow("prof-1", `[6,7]`)},
+			input:          access.ResolveInput{UserID: 1, SessionID: "sess-1", ProfileID: "prof-1"},
+			wantNilAllowed: true,
+			wantDisabled:   []int{6, 7},
+		},
+		{
 			name: "unrestricted scope carries disabled libraries",
 			user: &models.User{
 				ID:                   1,

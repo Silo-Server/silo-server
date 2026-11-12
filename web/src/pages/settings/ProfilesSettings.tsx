@@ -22,28 +22,31 @@ import {
   profileLimitMessage,
 } from "@/lib/profile-management";
 import { HouseholdStreamsPanel } from "@/components/profiles/HouseholdStreamsPanel";
+import { useT, type Translate } from "@/i18n";
 
 function getDeleteGuardReason(
+  t: Translate,
   selectedProfile: Profile,
   profiles: Profile[],
   activeProfileID: string | null,
 ): string | null {
   if (profiles.length <= 1) {
-    return "At least one profile is required.";
+    return t("web.settings.profiles.deleteGuard.lastProfile");
   }
 
   if (selectedProfile.is_primary) {
-    return "The primary profile can only be removed by deleting the account.";
+    return t("web.settings.profiles.deleteGuard.primary");
   }
 
   if (selectedProfile.id === activeProfileID) {
-    return "Switch to another profile before deleting this one.";
+    return t("web.settings.profiles.deleteGuard.active");
   }
 
   return null;
 }
 
 export default function ProfilesSettings() {
+  const t = useT();
   const {
     data: profiles = [],
     isLoading: profilesLoading,
@@ -52,7 +55,9 @@ export default function ProfilesSettings() {
     requireAdvisoryAgeSupported,
     maxProfiles,
   } = useProfiles();
-  const { data: libraries = [], isLoading: librariesLoading } = useAvailableUserLibraries();
+  const { data: libraries = [], isLoading: librariesLoading } = useAvailableUserLibraries({
+    includeHidden: true,
+  });
   const { profile: activeProfile, selectProfile, verifyProfilePin } = useAuth();
   const deleteMutation = useDeleteProfile();
 
@@ -92,13 +97,13 @@ export default function ProfilesSettings() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Profiles"
-        subtitle="Manage profile names, PINs, and access rules."
+        title={t("web.settings.profiles.title")}
+        subtitle={t("web.settings.profiles.subtitle")}
         actions={
           householdFull ? undefined : (
-            <Button onClick={openCreateDialog}>
+            <Button onClick={openCreateDialog} disabled={profilesLoading}>
               <Plus className="h-4 w-4" />
-              New profile
+              {t("web.settings.profiles.newProfile")}
             </Button>
           )
         }
@@ -131,15 +136,15 @@ export default function ProfilesSettings() {
           </div>
         ) : profiles.length === 0 ? (
           <div className="border-border rounded-md border px-4 py-6">
-            <p className="text-sm font-medium">No profiles yet</p>
+            <p className="text-sm font-medium">{t("web.settings.profiles.empty.title")}</p>
             <p className="text-muted-foreground mt-1 text-sm">
-              Create a profile to manage access and playback identity.
+              {t("web.settings.profiles.empty.body")}
             </p>
           </div>
         ) : (
           profiles.map((profile) => {
             const accessSummary = buildProfileAccessSummary(profile);
-            const deleteGuardReason = getDeleteGuardReason(profile, profiles, activeProfileID);
+            const deleteGuardReason = getDeleteGuardReason(t, profile, profiles, activeProfileID);
 
             return (
               <div
@@ -161,11 +166,21 @@ export default function ProfilesSettings() {
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="truncate text-sm font-semibold">{profile.name}</span>
                         {profile.id === activeProfileID ? (
-                          <Badge variant="outline">Current</Badge>
+                          <Badge variant="outline">
+                            {t("web.settings.profiles.badge.current")}
+                          </Badge>
                         ) : null}
-                        {profile.is_primary ? <Badge variant="outline">Primary</Badge> : null}
-                        {profile.is_child ? <Badge variant="outline">Kids</Badge> : null}
-                        {profile.has_pin ? <Badge variant="outline">PIN</Badge> : null}
+                        {profile.is_primary ? (
+                          <Badge variant="outline">
+                            {t("web.settings.profiles.badge.primary")}
+                          </Badge>
+                        ) : null}
+                        {profile.is_child ? (
+                          <Badge variant="outline">{t("web.settings.profiles.badge.kids")}</Badge>
+                        ) : null}
+                        {profile.has_pin ? (
+                          <Badge variant="outline">{t("web.settings.profiles.badge.pin")}</Badge>
+                        ) : null}
                       </div>
 
                       <p className="text-muted-foreground text-sm">{accessSummary.text}</p>
@@ -178,13 +193,13 @@ export default function ProfilesSettings() {
                     {profile.id !== activeProfileID ? (
                       <Button size="sm" variant="outline" onClick={() => handleUseProfile(profile)}>
                         <UserCheck className="h-4 w-4" />
-                        Use
+                        {t("web.settings.profiles.use")}
                       </Button>
                     ) : null}
 
                     <Button size="sm" variant="outline" onClick={() => openEditDialog(profile)}>
                       <Pencil className="h-4 w-4" />
-                      Edit
+                      {t("web.settings.profiles.edit")}
                     </Button>
 
                     <Button
@@ -194,7 +209,7 @@ export default function ProfilesSettings() {
                       onClick={() => setConfirmDeleteProfile(profile)}
                     >
                       <Trash2 className="h-4 w-4" />
-                      Delete
+                      {t("web.settings.profiles.delete")}
                     </Button>
                   </div>
 
@@ -211,6 +226,7 @@ export default function ProfilesSettings() {
       <ProfileEditorDialog
         open={editorOpen}
         profile={editingProfile}
+        createsPrimary={!profilesLoading && profiles.length === 0}
         libraries={libraries}
         avatarUploadEnabled={avatarUploadEnabled}
         advisoryAgeSupported={maxAdvisoryAgeSupported}
@@ -238,8 +254,8 @@ export default function ProfilesSettings() {
               const lockout = pinLockoutMessage(err);
               toast.error(
                 lockout
-                  ? `Profile saved. ${lockout}`
-                  : "Profile saved, but PIN verification failed",
+                  ? t("web.settings.profiles.savedWithLockout", { lockout })
+                  : t("web.settings.profiles.savedPinFailed"),
               );
               return;
             }
@@ -266,13 +282,15 @@ export default function ProfilesSettings() {
             setConfirmDeleteProfile(null);
           }
         }}
-        title="Delete profile"
+        title={t("web.settings.profiles.deleteTitle")}
         description={
           confirmDeleteProfile
-            ? `Delete profile "${profilesByID.get(confirmDeleteProfile.id)?.name ?? confirmDeleteProfile.name}"? This action cannot be undone.`
+            ? t("web.settings.profiles.deleteDescription", {
+                name: profilesByID.get(confirmDeleteProfile.id)?.name ?? confirmDeleteProfile.name,
+              })
             : ""
         }
-        confirmLabel="Delete"
+        confirmLabel={t("web.settings.profiles.delete")}
         variant="destructive"
         isPending={deleteMutation.isPending}
         onConfirm={() => {

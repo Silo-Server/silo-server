@@ -10,6 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useT } from "@/i18n";
 import { canonicalLanguageTag, getLanguageName } from "@/lib/languageNames";
 import type { SettingOption } from "@/lib/languageOptions";
 
@@ -65,6 +66,7 @@ export function LanguageSelect({
   "aria-describedby": ariaDescribedBy,
   children,
 }: LanguageSelectProps) {
+  const t = useT();
   // null = closed; otherwise the tag being typed.
   const [draft, setDraft] = useState<string | null>(null);
 
@@ -112,7 +114,9 @@ export function LanguageSelect({
           {allowOther && (
             <>
               <SelectSeparator />
-              <SelectItem value={OTHER_VALUE}>Other…</SelectItem>
+              <SelectItem value={OTHER_VALUE}>
+                {t("web.settings.languageSelect.otherChoice")}
+              </SelectItem>
             </>
           )}
         </SelectContent>
@@ -125,8 +129,8 @@ export function LanguageSelect({
               autoFocus
               value={draft}
               disabled={disabled}
-              placeholder="Language code, e.g. pt-BR"
-              aria-label="Language code"
+              placeholder={t("web.settings.languageSelect.codePlaceholder")}
+              aria-label={t("web.settings.languageSelect.codeLabel")}
               aria-invalid={draftInvalid || undefined}
               className="h-9 flex-1"
               onChange={(event) => setDraft(event.target.value)}
@@ -148,7 +152,7 @@ export function LanguageSelect({
               disabled={disabled || !draftTag}
               onClick={commitDraft}
             >
-              Use
+              {t("web.settings.languageSelect.use")}
             </Button>
             <Button
               type="button"
@@ -158,7 +162,7 @@ export function LanguageSelect({
               disabled={disabled}
               onClick={() => setDraft(null)}
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
           </div>
           <p
@@ -166,10 +170,10 @@ export function LanguageSelect({
             role={draftInvalid ? "alert" : undefined}
           >
             {draftInvalid
-              ? "Not a valid language tag. Use an ISO code such as is, yue, or pt-BR."
+              ? t("web.settings.languageSelect.invalid")
               : draftTag
                 ? getLanguageName(trimmed)
-                : "Type an ISO language code to use a language not in the list."}
+                : t("web.settings.languageSelect.hint")}
           </p>
         </div>
       )}

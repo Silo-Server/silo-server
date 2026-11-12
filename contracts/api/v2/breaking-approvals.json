@@ -1,18 +1,3 @@
 {
-  "approvals": [
-    {
-      "operation_id": "getAdminDashboardLayout",
-      "change_id": "response-property-became-nullable",
-      "fingerprint": "9dcf9a83ab8edc5fc56485df21d0db3c45c67420733910622bd0de9511dec775",
-      "reason": "The handler has always answered null for layout when the account has no saved layout, and its description says so; only the schema claimed it was never null. Web already types it as unknown and falls back to the default layout on null; silo-apple and silo-android do not call this operation.",
-      "approved_in": "#2908"
-    },
-    {
-      "operation_id": "getAdminDashboardLayout",
-      "change_id": "response-property-became-nullable",
-      "fingerprint": "6beb2eaf413a2efc7fdc2e0877fbda64f3c1621a813a2badd9a7815b68251e52",
-      "reason": "The handler has always answered null for updated_at when the account has no saved layout; only the schema claimed it was never null. Web already types it as string | null; silo-apple and silo-android do not call this operation.",
-      "approved_in": "#2908"
-    }
-  ]
+  "approvals": []
 }

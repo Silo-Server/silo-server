@@ -19,6 +19,8 @@ const STORAGE_KEYS = {
   UI_HIGH_CONTRAST: "silo-ui-high-contrast",
   UI_DATE_FORMAT: "silo-ui-date-format",
   UI_TIME_FORMAT: "silo-ui-time-format",
+  UI_APP_LANGUAGE: "silo-ui-app-language",
+  UI_APP_LANGUAGE_SIGNED_OUT: "silo-ui-app-language-signed-out",
   UI_CACHE_OWNER: "silo-ui-cache-owner",
   CALENDAR_PRESET: "calendar:preset",
   BANDWIDTH_ESTIMATE: "silo-bandwidth-estimate",
@@ -221,7 +223,7 @@ function namespaceFor(owner: string | null): string {
 /**
  * Device-local mirrors of server-side, per-account settings, so the UI can
  * paint before the settings request resolves. Covers text scale, text weight,
- * high contrast, and date/time format.
+ * high contrast, date/time format, and app language.
  *
  * Values are namespaced by the identity that owns them — user id plus active
  * profile id (`silo-ui-text-scale:7:p1`) — so a second account or a sibling profile

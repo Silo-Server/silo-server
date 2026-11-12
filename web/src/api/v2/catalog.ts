@@ -25,6 +25,7 @@ import type {
   SubtitleInfo,
 } from "@/api/types";
 import type { components } from "@/api/v2/schema";
+import { sectionTitleKey } from "@/lib/sectionTitle";
 
 /**
  * Catalog item cards as the app still models them. v2 emits one shared
@@ -113,6 +114,7 @@ export function sectionFromV2(section: SectionV2): ResolvedSection {
     is_custom: section.is_custom,
     customized: section.customized,
     items: section.items.map(catalogItemFromV2),
+    ...sectionTitleKey(section),
   };
 }
 

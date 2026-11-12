@@ -25,6 +25,7 @@ import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { SettingsSubheading } from "@/components/settings/SettingsSubheading";
 import { SettingField, SettingFieldRow, SettingFieldStatus } from "./SettingField";
 import { SaveBar } from "@/components/SaveBar";
+import { useT } from "@/i18n";
 import { FieldGroup } from "./FieldGroup";
 import { MarkerTasksCard } from "./MarkerTasksCard";
 import { TrickplayNodeCapacityField } from "./TrickplayNodeCapacityField";
@@ -43,116 +44,24 @@ import {
   toggleHWDevice,
   showsPreviewKey,
 } from "./playbackSettings.utils";
-
-// Shown without a disclosure: the controls a household admin actually
-// touches, including the HDR tone mapping switches, throttling and where
-// segments are written.
-const TRANSCODING_ESSENTIAL_KEYS = [
-  "playback.transcode_enabled",
-  "playback.hw_accel",
-  "allow_4k_transcode",
-  "playback.prefer_lower_version_transcode",
-  "playback.allow_hevc_encoding",
-  "playback.transcode_hardware_tone_map_enabled",
-  "playback.transcode_software_tone_map_enabled",
-  "enable_transcode_throttle",
-  "transcode_throttle_seconds",
-  "playback.transcode_dir",
-];
-
-const TRANSCODING_ADVANCED_KEYS = [
-  "playback.ffmpeg_path",
-  "playback.hw_device",
-  "playback.segment_retention_seconds",
-  "playback.copy_keyframe_playlist",
-];
-
-// Chapter thumbnails and seek previews are images cut from the video, not part
-// of a transcode, so they get their own group. Width, interval and the chapter
-// thumbnail worker count show without a disclosure.
-const PREVIEW_SHOWN_KEYS = [
-  "playback.preview_image_width",
-  "playback.trickplay_interval_seconds",
-  "playback.chapter_thumbnail_workers",
-];
-
-// Where the images are made is only a real choice once a transcode node could
-// take the work, so these sit beside width and interval then and in Advanced
-// otherwise.
-const PREVIEW_PLACEMENT_KEYS = [
-  "playback.chapter_thumbnail_execution",
-  "playback.trickplay_execution",
-];
-
-const PREVIEW_ADVANCED_KEYS = [
-  "playback.trickplay_workers",
-  "playback.trickplay_node_capacity",
-  "playback.chapter_thumbnail_hdr_policy",
-  "playback.chapter_thumbnail_software_tone_map_enabled",
-];
-
-const PREVIEW_IMAGE_KEYS = [
-  ...PREVIEW_SHOWN_KEYS,
-  ...PREVIEW_PLACEMENT_KEYS,
-  ...PREVIEW_ADVANCED_KEYS,
-];
-
-// A new preview image width makes every chapter thumbnail and seek preview
-// again; a new interval, every seek preview. The defaults are the server's,
-// for a row that was never set.
-const PREVIEW_WIDTH_KEY = "playback.preview_image_width";
-const TRICKPLAY_INTERVAL_KEY = "playback.trickplay_interval_seconds";
-const REMAKE_DEFAULTS: Record<string, string> = {
-  [PREVIEW_WIDTH_KEY]: "300",
-  [TRICKPLAY_INTERVAL_KEY]: "10",
-};
-
-/** What saving a new width or interval makes again, for the confirmation. */
-function remakeDescription(widthChanged: boolean, previews: number | null): string {
-  const files = previews === null ? "existing" : previews === 1 ? "1 file's" : `${previews} files'`;
-  const what = !widthChanged
-    ? previews === null
-      ? "Existing seek previews are"
-      : `${files} seek previews are`
-    : previews === null || previews > 0
-      ? `Every chapter thumbnail and ${files} seek previews are`
-      : "Every chapter thumbnail is";
-  const how = widthChanged ? "at the new width" : "with the new interval";
-  return `${what} made again ${how}. This runs in the background and can take a long time on a large library; players keep the current images until each is replaced.`;
-}
-
-const WATCH_KEYS = ["playback.watched_threshold", "playback.min_resume_threshold"];
-
-const SPEED_TEST_KEYS = [
-  "playback.bandwidth_probe_automatic",
-  "playback.bandwidth_probe_max_age_days",
-];
-
-const MARKER_KEYS = [
-  "markers.mode",
-  "markers.detect_intros",
-  "markers.detect_credits",
-  "markers.online_storage",
-  "markers.lazy_playback",
-  "markers.detection_workers",
-];
-
-// `playback.chapter_thumbnail_node_capacity` is deliberately absent from the
-// UI (hidden tier): it is still saved and read through the settings API, but
-// the per-node budget is derived from the node pool rather than typed in.
-//
-// The `download.*` family is its own page (DownloadsSettings), so it is not
-// loaded or saved here.
-const KEYS = [
-  ...WATCH_KEYS,
-  ...SPEED_TEST_KEYS,
-  ...TRANSCODING_ESSENTIAL_KEYS,
-  ...TRANSCODING_ADVANCED_KEYS,
-  ...PREVIEW_IMAGE_KEYS,
-  ...MARKER_KEYS,
-];
+import {
+  KEYS,
+  MARKER_KEYS,
+  PREVIEW_ADVANCED_KEYS,
+  PREVIEW_IMAGE_KEYS,
+  PREVIEW_PLACEMENT_KEYS,
+  PREVIEW_WIDTH_KEY,
+  REMAKE_DEFAULTS,
+  remakeDescription,
+  SPEED_TEST_KEYS,
+  TRANSCODING_ADVANCED_KEYS,
+  TRANSCODING_ESSENTIAL_KEYS,
+  TRICKPLAY_INTERVAL_KEY,
+  WATCH_KEYS,
+} from "./playbackSettings.keys";
 
 export default function PlaybackSettings() {
+  const t = useT();
   const supportsTrickplay = useLibraryCapabilities().data?.trickplay === true;
   const keys = useMemo(
     () =>
@@ -255,12 +164,14 @@ export default function PlaybackSettings() {
             </SettingFieldStatus>
           ) : hwDetection.isLoading ? (
             <SettingFieldStatus key="detecting" tone="muted">
-              Detecting hardware…
+              {t("web.admin.settings.playback.hwAccel.detecting")}
             </SettingFieldStatus>
           ) : null,
           isNvenc && selectedDevices.length > 1 ? (
             <SettingFieldStatus key="nvenc" tone="warn">
-              NVENC uses the first configured device ({selectedDevices[0]}).
+              {t("web.admin.settings.playback.hwAccel.nvencFirstDevice", {
+                device: selectedDevices[0],
+              })}
             </SettingFieldStatus>
           ) : null,
         ].filter(Boolean);
@@ -271,12 +182,14 @@ export default function PlaybackSettings() {
 
   const chapterExecutionField = (
     <SettingField
-      label="Generate chapter thumbnails on"
+      label={t("web.admin.settings.playback.previews.chapterExecution")}
       type="select"
       options={imageExecutionOptions(chapterExecution, transcodeNodeAvailable)}
       status={
         transcodeNodeAvailable ? undefined : (
-          <SettingFieldStatus tone="warn">No transcode nodes are connected</SettingFieldStatus>
+          <SettingFieldStatus tone="warn">
+            {t("web.admin.settings.playback.previews.noTranscodeNodes")}
+          </SettingFieldStatus>
         )
       }
       value={chapterExecution}
@@ -286,13 +199,13 @@ export default function PlaybackSettings() {
   );
   const trickplayExecutionField = supportsTrickplay ? (
     <SettingField
-      label="Generate seek previews on"
+      label={t("web.admin.settings.playback.previews.trickplayExecution")}
       type="select"
       options={imageExecutionOptions(trickplayExecution, trickplayNodeAvailable)}
       status={
         trickplayNodeAvailable ? undefined : (
           <SettingFieldStatus tone="warn">
-            No connected transcode node supports seek previews
+            {t("web.admin.settings.playback.previews.noTrickplayNode")}
           </SettingFieldStatus>
         )
       }
@@ -302,16 +215,19 @@ export default function PlaybackSettings() {
     />
   ) : null;
 
-  if (form.isLoading) return <div>Loading...</div>;
+  if (form.isLoading) return <div>{t("web.admin.settings.playback.loading")}</div>;
 
   return (
     <div className="flex h-full flex-col">
-      <SettingsPageHeader title="Playback" />
+      <SettingsPageHeader title={t("web.admin.settings.playback.title")} />
 
       <div className="flex-1 space-y-5">
-        <FieldGroup label="Watch behavior" restartAll={allRestart(WATCH_KEYS)}>
+        <FieldGroup
+          label={t("web.admin.settings.playback.watch.group")}
+          restartAll={allRestart(WATCH_KEYS)}
+        >
           <SettingField
-            label="Mark watched at"
+            label={t("web.admin.settings.playback.watch.markWatched")}
             type="number"
             unit="%"
             value={form.getValue("playback.watched_threshold")}
@@ -319,10 +235,10 @@ export default function PlaybackSettings() {
             restartRequired={restartKeys.has("playback.watched_threshold")}
           />
           <SettingField
-            label="Show in Continue Watching after"
+            label={t("web.admin.settings.playback.watch.minResume")}
             type="number"
             unit="%"
-            description="Progress below this is ignored."
+            description={t("web.admin.settings.playback.watch.minResumeDescription")}
             value={form.getValue("playback.min_resume_threshold")}
             onChange={(v) => form.setValue("playback.min_resume_threshold", v)}
             restartRequired={restartKeys.has("playback.min_resume_threshold")}
@@ -330,89 +246,91 @@ export default function PlaybackSettings() {
         </FieldGroup>
 
         <FieldGroup
-          label="Transcoding"
+          label={t("web.admin.settings.playback.transcoding.group")}
           restartAll={allRestart([...TRANSCODING_ESSENTIAL_KEYS, ...TRANSCODING_ADVANCED_KEYS])}
         >
           <SettingField
-            label="Video transcoding"
+            label={t("web.admin.settings.playback.transcoding.enabled")}
             type="toggle"
-            description="Off never re-encodes video. Silo still repackages files and converts audio for devices that need it."
+            description={t("web.admin.settings.playback.transcoding.enabledDescription")}
             value={form.getValue("playback.transcode_enabled")}
             onChange={(v) => form.setValue("playback.transcode_enabled", v)}
             restartRequired={restartKeys.has("playback.transcode_enabled")}
           />
           <SettingField
-            label="Hardware acceleration"
+            label={t("web.admin.settings.playback.hwAccel.label")}
             type="select"
             options={HW_ACCEL_OPTIONS}
-            description="Auto picks the best device. If startup fails, it keeps GPU encoding with CPU decoding before falling back to software."
+            description={t("web.admin.settings.playback.hwAccel.description")}
             status={hwAccelStatus}
             value={hwAccel}
             onChange={(v) => form.setValue("playback.hw_accel", v)}
             restartRequired={restartKeys.has("playback.hw_accel")}
           />
           <SettingField
-            label="Allow 4K transcoding"
+            label={t("web.admin.settings.playback.transcoding.allow4k")}
             type="toggle"
-            description="Heavy load on most hardware."
+            description={t("web.admin.settings.playback.transcoding.allow4kDescription")}
             value={form.getValue("allow_4k_transcode")}
             onChange={(v) => form.setValue("allow_4k_transcode", v)}
             restartRequired={restartKeys.has("allow_4k_transcode")}
           />
           {allow4KTranscode && (
             <SettingField
-              label="Prefer 1080p versions"
+              label={t("web.admin.settings.playback.transcoding.preferLower")}
               type="toggle"
-              description="Transcode from the 1080p version instead of the 4K file when both exist."
+              description={t("web.admin.settings.playback.transcoding.preferLowerDescription")}
               value={form.getValue("playback.prefer_lower_version_transcode")}
               onChange={(v) => form.setValue("playback.prefer_lower_version_transcode", v)}
             />
           )}
           <SettingField
-            label="Allow HEVC encoding"
+            label={t("web.admin.settings.playback.transcoding.allowHevc")}
             type="toggle"
-            description="Use HEVC for clients that support HEVC over HLS. Other clients keep H.264."
+            description={t("web.admin.settings.playback.transcoding.allowHevcDescription")}
             value={form.getValue("playback.allow_hevc_encoding")}
             onChange={(v) => form.setValue("playback.allow_hevc_encoding", v)}
           />
           <SettingField
-            label="Enable Hardware HDR Tone Mapping"
+            label={t("web.admin.settings.playback.transcoding.hardwareToneMap")}
             type="toggle"
-            hint="Allows validated local or remote GPU executors to convert HDR video to SDR when transcoding."
+            hint={t("web.admin.settings.playback.transcoding.hardwareToneMapHint")}
             value={form.getValue("playback.transcode_hardware_tone_map_enabled")}
             onChange={(v) => form.setValue("playback.transcode_hardware_tone_map_enabled", v)}
             restartRequired={restartKeys.has("playback.transcode_hardware_tone_map_enabled")}
           />
           <SettingField
-            label="Enable Software HDR Tone Mapping"
+            label={t("web.admin.settings.playback.transcoding.softwareToneMap")}
             type="toggle"
-            hint="Allows the CPU to convert HDR video to SDR when transcoding. This can be very CPU-intensive."
+            hint={t("web.admin.settings.playback.transcoding.softwareToneMapHint")}
             value={form.getValue("playback.transcode_software_tone_map_enabled")}
             onChange={(v) => form.setValue("playback.transcode_software_tone_map_enabled", v)}
             restartRequired={restartKeys.has("playback.transcode_software_tone_map_enabled")}
           />
           <SettingField
-            label="Throttle transcoding"
+            label={t("web.admin.settings.playback.transcoding.throttle")}
             type="toggle"
-            description="Pause encoding once the client is far enough ahead."
+            description={t("web.admin.settings.playback.transcoding.throttleDescription")}
             value={form.getValue("enable_transcode_throttle")}
             onChange={(v) => form.setValue("enable_transcode_throttle", v)}
             restartRequired={restartKeys.has("enable_transcode_throttle")}
           />
           {throttleOn && (
             <SettingField
-              label="Buffer ahead"
+              label={t("web.admin.settings.playback.transcoding.bufferAhead")}
               type="number"
-              unit="seconds"
+              unit={t("web.admin.settings.playback.unitSeconds")}
               value={form.getValue("transcode_throttle_seconds")}
               onChange={(v) => form.setValue("transcode_throttle_seconds", v)}
               restartRequired={restartKeys.has("transcode_throttle_seconds")}
             />
           )}
           <PathSettingField
-            label="Transcode directory"
+            label={t("web.admin.settings.playback.transcoding.dir")}
             defaultValue={DEFAULT_TRANSCODE_DIR}
-            description={`Use fast local storage with room to spare. Leave blank to use ${DEFAULT_TRANSCODE_DIR}.`}
+            description={t("web.admin.settings.playback.transcoding.dirDescription", {
+              path: DEFAULT_TRANSCODE_DIR,
+            })}
             value={form.getValue("playback.transcode_dir")}
             onChange={(v) => form.setValue("playback.transcode_dir", v)}
             restartRequired={restartKeys.has("playback.transcode_dir")}
@@ -424,9 +342,11 @@ export default function PlaybackSettings() {
             forceOpen={anyDirty(TRANSCODING_ADVANCED_KEYS)}
           >
             <PathSettingField
-              label="FFmpeg path"
+              label={t("web.admin.settings.playback.transcoding.ffmpegPath")}
               defaultValue={DEFAULT_FFMPEG_PATH}
-              description={`Leave blank to use jellyfin-ffmpeg at ${DEFAULT_FFMPEG_PATH} when it is installed, then ffmpeg on PATH. macOS tries Homebrew's ffmpeg-full first.`}
+              description={t("web.admin.settings.playback.transcoding.ffmpegPathDescription", {
+                path: DEFAULT_FFMPEG_PATH,
+              })}
               value={form.getValue("playback.ffmpeg_path")}
               onChange={(v) => form.setValue("playback.ffmpeg_path", v)}
               restartRequired={restartKeys.has("playback.ffmpeg_path")}
@@ -436,25 +356,26 @@ export default function PlaybackSettings() {
                 <SettingsSubheading
                   caption={
                     selectedDevices.length === 0
-                      ? "Auto: the first available device takes every transcode."
+                      ? t("web.admin.settings.playback.devices.captionAuto")
                       : selectedDevices.length === 1
-                        ? "All transcodes run on the selected device."
-                        : "Transcodes balance across the selected devices."
+                        ? t("web.admin.settings.playback.devices.captionOne")
+                        : t("web.admin.settings.playback.devices.captionMany")
                   }
                 >
-                  GPU devices
+                  {t("web.admin.settings.playback.devices.heading")}
                 </SettingsSubheading>
                 {inventoriesDiverge && (
                   <p className="pb-2 text-xs text-amber-500">
-                    Nodes report different devices. Only paths on every node are safe to select —
-                    for the rest, set per-node overrides on the{" "}
-                    <Link
-                      to="/admin/nodes"
-                      className="font-medium underline-offset-2 hover:underline"
-                    >
-                      Nodes page
-                    </Link>
-                    .
+                    {t("web.admin.settings.playback.devices.inventoriesDiverge", {
+                      link: (chunks) => (
+                        <Link
+                          to="/admin/nodes"
+                          className="font-medium underline-offset-2 hover:underline"
+                        >
+                          {chunks}
+                        </Link>
+                      ),
+                    })}
                   </p>
                 )}
                 {/* One shared row shell per device, so these switches land on the
@@ -473,7 +394,9 @@ export default function PlaybackSettings() {
                         <span className="block font-mono">{row.path}</span>
                         {row.missingOnNodes.length > 0 && (
                           <span className="mt-0.5 block text-amber-500">
-                            Not present on: {row.missingOnNodes.join(", ")}
+                            {t("web.admin.settings.playback.devices.missingOnNodes", {
+                              nodes: row.missingOnNodes.join(", "),
+                            })}
                           </span>
                         )}
                       </>
@@ -498,18 +421,20 @@ export default function PlaybackSettings() {
               </div>
             )}
             <SettingField
-              label="Transcode back buffer"
+              label={t("web.admin.settings.playback.transcoding.backBuffer")}
               type="number"
-              unit="seconds"
-              hint="Keeps this much already-downloaded media for instant backward seeking, then reclaims older transcode segments. Use 0 to disable cleanup; enabled values must be at least 120 seconds. Pair with transcode throttling to bound both behind- and ahead-of-client disk usage."
+              unit={t("web.admin.settings.playback.unitSeconds")}
+              hint={t("web.admin.settings.playback.transcoding.backBufferHint")}
               value={form.getValue("playback.segment_retention_seconds")}
               onChange={(v) => form.setValue("playback.segment_retention_seconds", v)}
               restartRequired={restartKeys.has("playback.segment_retention_seconds")}
             />
             <SettingField
-              label="Complete playlists for copied video"
+              label={t("web.admin.settings.playback.transcoding.copyKeyframePlaylist")}
               type="toggle"
-              description="Experimental. When Silo copies a file's video, list every segment from the start, using the file's keyframes, instead of a playlist that grows as Silo copies. Stops Safari freezing partway through. A seek ahead of what Silo has copied waits for it to get there."
+              description={t(
+                "web.admin.settings.playback.transcoding.copyKeyframePlaylistDescription",
+              )}
               value={form.getValue("playback.copy_keyframe_playlist") || "false"}
               onChange={(v) => form.setValue("playback.copy_keyframe_playlist", v)}
               restartRequired={restartKeys.has("playback.copy_keyframe_playlist")}
@@ -517,20 +442,23 @@ export default function PlaybackSettings() {
           </AdvancedSection>
         </FieldGroup>
 
-        <FieldGroup label="Connection speed tests" restartAll={allRestart(SPEED_TEST_KEYS)}>
+        <FieldGroup
+          label={t("web.admin.settings.playback.speedTests.group")}
+          restartAll={allRestart(SPEED_TEST_KEYS)}
+        >
           <SettingField
-            label="Automatic speed tests"
+            label={t("web.admin.settings.playback.speedTests.automatic")}
             type="toggle"
-            description="Apps test a device's connection only when the server has no current reading for it. Off, viewers can still run Test speed in Settings."
+            description={t("web.admin.settings.playback.speedTests.automaticDescription")}
             value={form.getValue("playback.bandwidth_probe_automatic")}
             onChange={(v) => form.setValue("playback.bandwidth_probe_automatic", v)}
             restartRequired={restartKeys.has("playback.bandwidth_probe_automatic")}
           />
           <SettingField
-            label="Keep a reading for"
+            label={t("web.admin.settings.playback.speedTests.maxAge")}
             type="number"
-            unit="days"
-            description="1 to 30. An app tests again once its reading is older."
+            unit={t("web.admin.settings.playback.unitDays")}
+            description={t("web.admin.settings.playback.speedTests.maxAgeDescription")}
             value={form.getValue("playback.bandwidth_probe_max_age_days")}
             onChange={(v) => form.setValue("playback.bandwidth_probe_max_age_days", v)}
             restartRequired={restartKeys.has("playback.bandwidth_probe_max_age_days")}
@@ -538,11 +466,11 @@ export default function PlaybackSettings() {
         </FieldGroup>
 
         <FieldGroup
-          label="Preview images"
+          label={t("web.admin.settings.playback.previews.group")}
           description={
             supportsTrickplay
-              ? "Chapter thumbnails and seek previews are turned on for each library in Libraries."
-              : "Chapter thumbnails are turned on for each library in Libraries."
+              ? t("web.admin.settings.playback.previews.groupDescription")
+              : t("web.admin.settings.playback.previews.groupDescriptionNoTrickplay")
           }
           restartAll={allRestart(PREVIEW_IMAGE_KEYS)}
           // FieldGroup descriptions are plain text, so the link sits on the
@@ -552,7 +480,7 @@ export default function PlaybackSettings() {
               to="/admin/libraries"
               className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-xs font-medium transition-colors"
             >
-              Libraries
+              {t("web.admin.settings.playback.previews.librariesLink")}
               <ArrowRight className="h-3 w-3" aria-hidden="true" />
             </Link>
           }
@@ -560,19 +488,19 @@ export default function PlaybackSettings() {
           {supportsTrickplay && (
             <>
               <SettingField
-                label="Preview image width"
+                label={t("web.admin.settings.playback.previews.width")}
                 type="number"
                 unit="px"
-                description="Width of chapter thumbnails and of the thumbnails players show while seeking, 160 to 640. Changing it makes them all again; players keep the current ones until each is replaced."
+                description={t("web.admin.settings.playback.previews.widthDescription")}
                 value={form.getValue("playback.preview_image_width")}
                 onChange={(v) => form.setValue("playback.preview_image_width", v)}
                 restartRequired={restartKeys.has("playback.preview_image_width")}
               />
               <SettingField
-                label="Seek preview interval"
+                label={t("web.admin.settings.playback.previews.interval")}
                 type="number"
-                unit="seconds"
-                description="Time between seek previews, 5 to 60. Changing it makes every library's previews again."
+                unit={t("web.admin.settings.playback.unitSeconds")}
+                description={t("web.admin.settings.playback.previews.intervalDescription")}
                 value={form.getValue("playback.trickplay_interval_seconds")}
                 onChange={(v) => form.setValue("playback.trickplay_interval_seconds", v)}
                 restartRequired={restartKeys.has("playback.trickplay_interval_seconds")}
@@ -580,9 +508,9 @@ export default function PlaybackSettings() {
             </>
           )}
           <SettingField
-            label="Chapter thumbnail workers"
+            label={t("web.admin.settings.playback.previews.chapterWorkers")}
             type="number"
-            description="How many files Silo extracts chapter thumbnails from at once. One more worker takes only titles that are playing, so they aren't stuck behind the queue."
+            description={t("web.admin.settings.playback.previews.chapterWorkersDescription")}
             value={form.getValue("playback.chapter_thumbnail_workers")}
             onChange={(v) => form.setValue("playback.chapter_thumbnail_workers", v)}
             restartRequired={restartKeys.has("playback.chapter_thumbnail_workers")}
@@ -608,9 +536,9 @@ export default function PlaybackSettings() {
             {!showPreviewPlacement && chapterExecutionField}
             {supportsTrickplay && (
               <SettingField
-                label="Seek preview workers"
+                label={t("web.admin.settings.playback.previews.trickplayWorkers")}
                 type="number"
-                description="How many files each server makes seek previews for at once. They run at low priority, so playback comes first."
+                description={t("web.admin.settings.playback.previews.trickplayWorkersDescription")}
                 value={form.getValue("playback.trickplay_workers")}
                 onChange={(v) => form.setValue("playback.trickplay_workers", v)}
                 restartRequired={restartKeys.has("playback.trickplay_workers")}
@@ -624,26 +552,31 @@ export default function PlaybackSettings() {
                 software when it has to; these two settings are read only by
                 chapter thumbnail extraction. */}
             <SettingsSubheading
-              caption={supportsTrickplay ? "Seek previews always convert HDR to SDR." : undefined}
+              caption={
+                supportsTrickplay ? t("web.admin.settings.playback.previews.hdrCaption") : undefined
+              }
             >
-              HDR chapter thumbnails
+              {t("web.admin.settings.playback.previews.hdrHeading")}
             </SettingsSubheading>
             <SettingField
-              label="HDR handling"
+              label={t("web.admin.settings.playback.previews.hdrPolicy")}
               type="select"
               options={[
-                { value: "best_effort", label: "Generate when possible" },
-                { value: "disabled", label: "Skip HDR and Dolby Vision" },
+                {
+                  value: "best_effort",
+                  label: t("web.admin.settings.playback.previews.hdrBestEffort"),
+                },
+                { value: "disabled", label: t("web.admin.settings.playback.previews.hdrDisabled") },
               ]}
-              description="HDR frames need extra color conversion."
+              description={t("web.admin.settings.playback.previews.hdrPolicyDescription")}
               value={form.getValue("playback.chapter_thumbnail_hdr_policy") || "best_effort"}
               onChange={(v) => form.setValue("playback.chapter_thumbnail_hdr_policy", v)}
               restartRequired={restartKeys.has("playback.chapter_thumbnail_hdr_policy")}
             />
             <SettingField
-              label="Software HDR tone mapping"
+              label={t("web.admin.settings.playback.previews.softwareToneMap")}
               type="toggle"
-              description="Slow, but works without graphics hardware."
+              description={t("web.admin.settings.playback.previews.softwareToneMapDescription")}
               value={form.getValue("playback.chapter_thumbnail_software_tone_map_enabled")}
               onChange={(v) =>
                 form.setValue("playback.chapter_thumbnail_software_tone_map_enabled", v)
@@ -662,29 +595,29 @@ export default function PlaybackSettings() {
           providers.
         */}
         <FieldGroup
-          label="Skip markers"
-          description="Markers identify intros, credits, recaps, and previews so players can offer skip controls."
+          label={t("web.admin.settings.playback.markers.group")}
+          description={t("web.admin.settings.playback.markers.groupDescription")}
           restartAll={allRestart(MARKER_KEYS)}
           actions={
             <Link
               to="/admin/settings/providers"
               className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-xs font-medium transition-colors"
             >
-              Marker providers
+              {t("web.admin.settings.playback.markers.providersLink")}
               <ArrowRight className="h-3 w-3" aria-hidden="true" />
             </Link>
           }
         >
           <SettingField
-            label="Marker source"
+            label={t("web.admin.settings.playback.markers.mode")}
             type="select"
-            description="Online markers take priority. Silo skips local detection of an intro or credits when an online one is saved in your library. Local detection uses CPU."
-            className="[&_[data-slot=select-trigger]]:h-auto [&_[data-slot=select-trigger]]:min-h-9 [&_[data-slot=select-value]]:line-clamp-none [&_[data-slot=select-value]]:text-left [&_[data-slot=select-value]]:whitespace-normal"
+            description={t("web.admin.settings.playback.markers.modeDescription")}
+            className="[&_[data-slot=select-trigger]]:h-auto [&_[data-slot=select-trigger]]:min-h-9 [&_[data-slot=select-value]]:line-clamp-none [&_[data-slot=select-value]]:text-start [&_[data-slot=select-value]]:whitespace-normal"
             options={[
-              { value: "off", label: "Off" },
-              { value: "local", label: "Detect on this server" },
-              { value: "both", label: "Online preferred + server detection" },
-              { value: "online", label: "Online providers only" },
+              { value: "off", label: t("web.admin.settings.playback.markers.modeOff") },
+              { value: "local", label: t("web.admin.settings.playback.markers.modeLocal") },
+              { value: "both", label: t("web.admin.settings.playback.markers.modeBoth") },
+              { value: "online", label: t("web.admin.settings.playback.markers.modeOnline") },
             ]}
             value={markerMode}
             onChange={(value) => form.setValue("markers.mode", value)}
@@ -694,17 +627,17 @@ export default function PlaybackSettings() {
           {localMarkersEnabled && detectionKindSettings && (
             <>
               <SettingField
-                label="Detect intros"
+                label={t("web.admin.settings.playback.markers.detectIntros")}
                 type="toggle"
-                description="Finds each episode's opening from embedded chapters, or by comparing the start of episodes in a season."
+                description={t("web.admin.settings.playback.markers.detectIntrosDescription")}
                 value={form.getValue("markers.detect_intros") || "true"}
                 onChange={(value) => form.setValue("markers.detect_intros", value)}
                 restartRequired={restartKeys.has("markers.detect_intros")}
               />
               <SettingField
-                label="Detect credits"
+                label={t("web.admin.settings.playback.markers.detectCredits")}
                 type="toggle"
-                description="Finds end credits from embedded chapters, or by reading the end of each episode and movie. Uses more CPU than intro detection."
+                description={t("web.admin.settings.playback.markers.detectCreditsDescription")}
                 value={form.getValue("markers.detect_credits") || "true"}
                 onChange={(value) => form.setValue("markers.detect_credits", value)}
                 restartRequired={restartKeys.has("markers.detect_credits")}
@@ -714,16 +647,19 @@ export default function PlaybackSettings() {
 
           {onlineMarkersEnabled && (
             <SettingField
-              label="Save online markers"
+              label={t("web.admin.settings.playback.markers.onlineStorage")}
               type="select"
               description={
                 onlineMarkerStorage === "stored"
-                  ? "Silo saves markers from enabled providers such as TheIntroDB. The Sync online markers task fetches missing markers and refreshes saved markers daily at 03:00 (server time) by default."
-                  : "Fetch markers when needed without saving them to your library. Scheduled online sync is disabled."
+                  ? t("web.admin.settings.playback.markers.onlineStorageStored")
+                  : t("web.admin.settings.playback.markers.onlineStorageOnDemand")
               }
               options={[
-                { value: "stored", label: "Save to library" },
-                { value: "on_demand", label: "Fetch when needed" },
+                { value: "stored", label: t("web.admin.settings.playback.markers.storageStored") },
+                {
+                  value: "on_demand",
+                  label: t("web.admin.settings.playback.markers.storageOnDemand"),
+                },
               ]}
               value={onlineMarkerStorage}
               onChange={(value) => {
@@ -736,14 +672,14 @@ export default function PlaybackSettings() {
 
           {showLazyPlayback && (
             <SettingField
-              label="Find markers on playback"
+              label={t("web.admin.settings.playback.markers.lazyPlayback")}
               type="toggle"
               description={
                 onlineMarkersEnabled
                   ? markerMode === "both"
-                    ? "Check online first when playback starts. Silo detects only the intro or credits online providers don't have, using this server's CPU."
-                    : "Check online for missing or outdated markers when playback starts."
-                  : "Detect missing markers when playback starts. Local analysis uses CPU."
+                    ? t("web.admin.settings.playback.markers.lazyPlaybackBoth")
+                    : t("web.admin.settings.playback.markers.lazyPlaybackOnline")
+                  : t("web.admin.settings.playback.markers.lazyPlaybackLocal")
               }
               value={form.getValue("markers.lazy_playback") || "true"}
               onChange={(value) => form.setValue("markers.lazy_playback", value)}
@@ -753,9 +689,9 @@ export default function PlaybackSettings() {
 
           {localMarkersEnabled && (
             <SettingField
-              label="Detection workers"
+              label={t("web.admin.settings.playback.markers.detectionWorkers")}
               type="number"
-              description="How many seasons or movies Silo analyzes at once, each with its own ffmpeg process. Defaults to 1. Raise it to finish a large library sooner if your storage and CPU have room."
+              description={t("web.admin.settings.playback.markers.detectionWorkersDescription")}
               value={form.getValue("markers.detection_workers")}
               onChange={(value) => form.setValue("markers.detection_workers", value)}
               restartRequired={restartKeys.has("markers.detection_workers")}
@@ -778,19 +714,22 @@ export default function PlaybackSettings() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {widthChanged ? "Make preview images again?" : "Make seek previews again?"}
+              {widthChanged
+                ? t("web.admin.settings.playback.remake.widthTitle")
+                : t("web.admin.settings.playback.remake.intervalTitle")}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {remakeDescription(
+                t,
                 widthChanged,
                 trickplayLibraries.isSuccess ? previewsToRemake : null,
               )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction onClick={() => void form.save().catch(() => {})}>
-              Save
+              {t("common.save")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
