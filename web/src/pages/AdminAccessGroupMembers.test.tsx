@@ -138,6 +138,53 @@ describe("AdminAccessGroups members", () => {
     access_group_id: group,
   });
 
+  it("pages a large member list and picker without dropping selected members", async () => {
+    withGuestsGroup();
+    // 25 members and 60 accounts elsewhere: more than either list shows at once.
+    const name = (prefix: string, n: number) => `${prefix}${String(n).padStart(2, "0")}`;
+    adminUsers.data = [
+      ...Array.from({ length: 25 }, (_, i) => member(100 + i, name("kid", i), "user", 1)),
+      ...Array.from({ length: 60 }, (_, i) => member(200 + i, name("guest", i), "user", 2)),
+    ];
+    adminUsers.update.mockReset().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    renderPage("/admin/access-groups/1");
+    const members = await screen.findByRole("region", { name: "Members" });
+
+    expect(within(members).getByText("25")).toBeInTheDocument();
+    expect(within(members).getAllByRole("checkbox")).toHaveLength(10);
+    await user.click(within(members).getByRole("checkbox", { name: "Select kid09" }));
+    await user.click(within(members).getByRole("button", { name: "Show more" }));
+    await user.click(within(members).getByRole("button", { name: "Show more" }));
+    expect(within(members).getAllByRole("checkbox")).toHaveLength(25);
+    expect(within(members).queryByRole("button", { name: "Show more" })).not.toBeInTheDocument();
+    await user.click(within(members).getByRole("checkbox", { name: "Select kid24" }));
+
+    // Searching hides both selected members; the move still includes them.
+    await user.type(within(members).getByRole("searchbox", { name: "Search members" }), "kid1");
+    expect(within(members).getAllByRole("checkbox")).toHaveLength(10);
+    expect(
+      within(members).getByText("2 selected members aren’t shown, and a move includes them."),
+    ).toBeInTheDocument();
+    await pickOption(user, "Move selected members to", "Guests");
+    await user.click(within(members).getByRole("button", { name: "Move 2 selected" }));
+    const confirm = await screen.findByRole("alertdialog");
+    expect(within(confirm).getByText("Move 2 users to Guests?")).toBeInTheDocument();
+    await user.click(within(confirm).getByRole("button", { name: "Cancel" }));
+
+    await user.click(within(members).getByRole("button", { name: "Add users" }));
+    const picker = await screen.findByRole("dialog", { name: "Add users to Kids" });
+    expect(within(picker).getAllByRole("checkbox")).toHaveLength(50);
+    expect(within(picker).queryByText("guest59")).not.toBeInTheDocument();
+    await user.click(within(picker).getByRole("button", { name: "Show more" }));
+    expect(within(picker).getAllByRole("checkbox")).toHaveLength(60);
+    await user.type(within(picker).getByRole("searchbox", { name: "Search users" }), "guest59");
+    expect(within(picker).getAllByRole("checkbox")).toHaveLength(1);
+    await user.type(within(picker).getByRole("searchbox", { name: "Search users" }), "x");
+    expect(within(picker).getByText("No users match your search.")).toBeInTheDocument();
+    adminUsers.data = [];
+  });
+
   it("moves selected members to another group after confirming the policy changes", async () => {
     withGuestsGroup();
     adminUsers.data = [member(7, "taylor", "user", 1), member(8, "sam", "user", 1)];
@@ -449,7 +496,7 @@ describe("AdminAccessGroups members", () => {
     );
 
     expect(await within(members).findByRole("alert")).toHaveTextContent(
-      "taylor: This user's group changed. Reload and try again.",
+      "taylor: This user’s group changed. Reload and try again.",
     );
     expect(adminUsers.update).not.toHaveBeenCalled();
     adminUsers.data = [];

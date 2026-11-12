@@ -1,4 +1,5 @@
 import type { AccessGroup } from "@/api/types";
+import { t } from "@/i18n";
 import { PERMISSION_MARKER_EDIT, PERMISSION_METADATA_CURATION } from "@/lib/permissions";
 import { PLAYBACK_QUALITY_OPTIONS, playbackQualityPresetFromValue } from "@/lib/playback-quality";
 import { formatStreamBitrateLimit } from "@/lib/streamBitrateLimit";
@@ -55,37 +56,44 @@ export interface PolicyChange {
 }
 
 function limit(value: number) {
-  return value > 0 ? String(value) : "Unlimited";
+  return value > 0 ? String(value) : t("web.admin.access.groups.changes.unlimited");
 }
 
 // Whole-kbps precision: 128 and 64 kbps must not both read as 0.1 Mbps.
 function bitrate(kbps: number) {
-  return kbps <= 0 ? "Unlimited" : formatStreamBitrateLimit(kbps);
+  return kbps <= 0
+    ? t("web.admin.access.groups.changes.unlimited")
+    : formatStreamBitrateLimit(kbps);
 }
 
 function allowed(value: boolean) {
-  return value ? "Allowed" : "Not allowed";
+  return value
+    ? t("web.admin.access.groups.changes.allowed")
+    : t("web.admin.access.groups.changes.notAllowed");
 }
 
 function libraries(ids: number[] | null, names: ReadonlyMap<number, string>) {
-  if (ids === null) return "All libraries";
-  if (ids.length === 0) return "No libraries";
-  return ids.map((id) => names.get(id) ?? `#${id}`).join(", ");
+  if (ids === null) return t("web.admin.access.groups.card.allLibraries");
+  if (ids.length === 0) return t("web.admin.access.groups.changes.noLibraries");
+  return ids
+    .map(
+      (id) => names.get(id) ?? t("web.admin.access.groups.changes.libraryId", { id: String(id) }),
+    )
+    .join(", ");
 }
 
 // Names the group editor shows for the assignable permissions.
-const PERMISSION_LABELS: Record<string, string> = {
-  [PERMISSION_METADATA_CURATION]: "Metadata curation",
-  [PERMISSION_MARKER_EDIT]: "Marker editing",
-};
+function permissionLabel(value: string) {
+  if (value === PERMISSION_METADATA_CURATION)
+    return t("web.admin.access.groups.permissions.metadataCuration");
+  if (value === PERMISSION_MARKER_EDIT) return t("web.admin.access.groups.permissions.markerEdit");
+  return value;
+}
 
 function permissions(values: string[] | null) {
-  if (values === null) return "All";
-  if (values.length === 0) return "None";
-  return values
-    .map((value) => PERMISSION_LABELS[value] ?? value)
-    .sort()
-    .join(", ");
+  if (values === null) return t("web.admin.access.groups.changes.allPermissions");
+  if (values.length === 0) return t("web.admin.access.groups.changes.noPermissions");
+  return values.map(permissionLabel).sort().join(", ");
 }
 
 function quality(value: string) {
@@ -117,10 +125,15 @@ export function requestTermsChanges(
   const changes: PolicyChange[] = [];
   const quotaFrom = formatRequestQuota(a.quota);
   const quotaTo = formatRequestQuota(b.quota);
-  if (quotaFrom !== quotaTo) changes.push({ label: "Request limit", from: quotaFrom, to: quotaTo });
+  if (quotaFrom !== quotaTo)
+    changes.push({
+      label: t("web.admin.access.groups.changes.requestLimit"),
+      from: quotaFrom,
+      to: quotaTo,
+    });
   if (a.autoApprove !== b.autoApprove) {
     changes.push({
-      label: "Request approval",
+      label: t("web.admin.access.groups.changes.requestApproval"),
       from: formatRequestApproval(a.autoApprove),
       to: formatRequestApproval(b.autoApprove),
     });
@@ -140,38 +153,70 @@ export function groupPolicyChanges(
   };
   if (!sameIds(from.library_ids, to.library_ids)) {
     changes.push({
-      label: "Libraries",
+      label: t("web.admin.access.groups.changes.libraries"),
       from: libraries(from.library_ids, libraryNames),
       to: libraries(to.library_ids, libraryNames),
     });
   }
-  add("Playback quality", quality(from.max_playback_quality), quality(to.max_playback_quality));
-  add("Downloads", allowed(from.download_allowed), allowed(to.download_allowed));
   add(
-    "Converted downloads",
+    t("web.admin.access.groups.changes.playbackQuality"),
+    quality(from.max_playback_quality),
+    quality(to.max_playback_quality),
+  );
+  add(
+    t("web.admin.access.groups.changes.downloads"),
+    allowed(from.download_allowed),
+    allowed(to.download_allowed),
+  );
+  add(
+    t("web.admin.access.groups.changes.convertedDownloads"),
     allowed(from.download_transcode_allowed),
     allowed(to.download_transcode_allowed),
   );
-  add("Video transcoding", allowed(from.transcode_allowed), allowed(to.transcode_allowed));
   add(
-    "Audio transcoding",
+    t("web.admin.access.groups.changes.videoTranscoding"),
+    allowed(from.transcode_allowed),
+    allowed(to.transcode_allowed),
+  );
+  add(
+    t("web.admin.access.groups.changes.audioTranscoding"),
     allowed(from.audio_transcode_allowed),
     allowed(to.audio_transcode_allowed),
   );
-  add("Concurrent streams", limit(from.max_streams), limit(to.max_streams));
-  add("Concurrent transcodes", limit(from.max_transcodes), limit(to.max_transcodes));
-  add("Household profiles", String(from.max_profiles), String(to.max_profiles));
   add(
-    "Remote stream bitrate",
+    t("web.admin.access.groups.changes.concurrentStreams"),
+    limit(from.max_streams),
+    limit(to.max_streams),
+  );
+  add(
+    t("web.admin.access.groups.changes.concurrentTranscodes"),
+    limit(from.max_transcodes),
+    limit(to.max_transcodes),
+  );
+  add(
+    t("web.admin.access.groups.changes.householdProfiles"),
+    String(from.max_profiles),
+    String(to.max_profiles),
+  );
+  add(
+    t("web.admin.access.groups.changes.remoteBitrate"),
     bitrate(from.max_remote_stream_bitrate_kbps),
     bitrate(to.max_remote_stream_bitrate_kbps),
   );
   add(
-    "Local stream bitrate",
+    t("web.admin.access.groups.changes.localBitrate"),
     bitrate(from.max_local_stream_bitrate_kbps),
     bitrate(to.max_local_stream_bitrate_kbps),
   );
-  add("Permissions", permissions(from.allowed_permissions), permissions(to.allowed_permissions));
-  add("Requests", allowed(from.requests_allowed), allowed(to.requests_allowed));
+  add(
+    t("web.admin.access.groups.changes.permissions"),
+    permissions(from.allowed_permissions),
+    permissions(to.allowed_permissions),
+  );
+  add(
+    t("web.admin.access.groups.changes.requests"),
+    allowed(from.requests_allowed),
+    allowed(to.requests_allowed),
+  );
   return changes;
 }

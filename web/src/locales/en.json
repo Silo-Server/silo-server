@@ -3615,6 +3615,78 @@
       "value": "Group action failed."
     }
   ],
+  "web.admin.access.groups.addUsers.addSelected": [
+    {
+      "type": 0,
+      "value": "Add selected"
+    }
+  ],
+  "web.admin.access.groups.addUsers.addSelectedCount": [
+    {
+      "type": 0,
+      "value": "Add "
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " selected"
+    }
+  ],
+  "web.admin.access.groups.addUsers.description": [
+    {
+      "type": 0,
+      "value": "Regular accounts outside this group. Admin accounts can’t join groups."
+    }
+  ],
+  "web.admin.access.groups.addUsers.noGroup": [
+    {
+      "type": 0,
+      "value": "No group"
+    }
+  ],
+  "web.admin.access.groups.addUsers.noMatches": [
+    {
+      "type": 0,
+      "value": "No users match your search."
+    }
+  ],
+  "web.admin.access.groups.addUsers.none": [
+    {
+      "type": 0,
+      "value": "Every regular account is already here."
+    }
+  ],
+  "web.admin.access.groups.addUsers.search": [
+    {
+      "type": 0,
+      "value": "Search users"
+    }
+  ],
+  "web.admin.access.groups.addUsers.searchPlaceholder": [
+    {
+      "type": 0,
+      "value": "Search by username or email"
+    }
+  ],
+  "web.admin.access.groups.addUsers.title": [
+    {
+      "type": 0,
+      "value": "Add users to "
+    },
+    {
+      "type": 1,
+      "value": "group"
+    }
+  ],
+  "web.admin.access.groups.addUsers.unknownGroup": [
+    {
+      "type": 0,
+      "value": "Unknown group"
+    }
+  ],
   "web.admin.access.groups.allGroups": [
     {
       "type": 0,
@@ -3765,6 +3837,142 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.access.groups.changes.allPermissions": [
+    {
+      "type": 0,
+      "value": "All"
+    }
+  ],
+  "web.admin.access.groups.changes.allowed": [
+    {
+      "type": 0,
+      "value": "Allowed"
+    }
+  ],
+  "web.admin.access.groups.changes.audioTranscoding": [
+    {
+      "type": 0,
+      "value": "Audio transcoding"
+    }
+  ],
+  "web.admin.access.groups.changes.concurrentStreams": [
+    {
+      "type": 0,
+      "value": "Concurrent streams"
+    }
+  ],
+  "web.admin.access.groups.changes.concurrentTranscodes": [
+    {
+      "type": 0,
+      "value": "Concurrent transcodes"
+    }
+  ],
+  "web.admin.access.groups.changes.convertedDownloads": [
+    {
+      "type": 0,
+      "value": "Converted downloads"
+    }
+  ],
+  "web.admin.access.groups.changes.downloads": [
+    {
+      "type": 0,
+      "value": "Downloads"
+    }
+  ],
+  "web.admin.access.groups.changes.householdProfiles": [
+    {
+      "type": 0,
+      "value": "Household profiles"
+    }
+  ],
+  "web.admin.access.groups.changes.libraries": [
+    {
+      "type": 0,
+      "value": "Libraries"
+    }
+  ],
+  "web.admin.access.groups.changes.libraryId": [
+    {
+      "type": 0,
+      "value": "#"
+    },
+    {
+      "type": 1,
+      "value": "id"
+    }
+  ],
+  "web.admin.access.groups.changes.localBitrate": [
+    {
+      "type": 0,
+      "value": "Local stream bitrate"
+    }
+  ],
+  "web.admin.access.groups.changes.noLibraries": [
+    {
+      "type": 0,
+      "value": "No libraries"
+    }
+  ],
+  "web.admin.access.groups.changes.noPermissions": [
+    {
+      "type": 0,
+      "value": "None"
+    }
+  ],
+  "web.admin.access.groups.changes.notAllowed": [
+    {
+      "type": 0,
+      "value": "Not allowed"
+    }
+  ],
+  "web.admin.access.groups.changes.permissions": [
+    {
+      "type": 0,
+      "value": "Permissions"
+    }
+  ],
+  "web.admin.access.groups.changes.playbackQuality": [
+    {
+      "type": 0,
+      "value": "Playback quality"
+    }
+  ],
+  "web.admin.access.groups.changes.remoteBitrate": [
+    {
+      "type": 0,
+      "value": "Remote stream bitrate"
+    }
+  ],
+  "web.admin.access.groups.changes.requestApproval": [
+    {
+      "type": 0,
+      "value": "Request approval"
+    }
+  ],
+  "web.admin.access.groups.changes.requestLimit": [
+    {
+      "type": 0,
+      "value": "Request limit"
+    }
+  ],
+  "web.admin.access.groups.changes.requests": [
+    {
+      "type": 0,
+      "value": "Requests"
+    }
+  ],
+  "web.admin.access.groups.changes.unlimited": [
+    {
+      "type": 0,
+      "value": "Unlimited"
+    }
+  ],
+  "web.admin.access.groups.changes.videoTranscoding": [
+    {
+      "type": 0,
+      "value": "Video transcoding"
     }
   ],
   "web.admin.access.groups.conflict.message": [
@@ -4075,10 +4283,118 @@
       "value": "Loading access groups..."
     }
   ],
+  "web.admin.access.groups.members.addFailed": [
+    {
+      "type": 0,
+      "value": "Some users could not be added:"
+    }
+  ],
+  "web.admin.access.groups.members.addUsers": [
+    {
+      "type": 0,
+      "value": "Add users"
+    }
+  ],
+  "web.admin.access.groups.members.added": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Added "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " user to "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Added "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " users to "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.access.groups.members.couldNotAdd": [
+    {
+      "type": 0,
+      "value": "could not be added"
+    }
+  ],
+  "web.admin.access.groups.members.couldNotMove": [
+    {
+      "type": 0,
+      "value": "could not be moved"
+    }
+  ],
   "web.admin.access.groups.members.empty": [
     {
       "type": 0,
       "value": "No members yet."
+    }
+  ],
+  "web.admin.access.groups.members.failure": [
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "web.admin.access.groups.members.groupChanged": [
+    {
+      "type": 0,
+      "value": "This user’s group changed. Reload and try again."
+    }
+  ],
+  "web.admin.access.groups.members.groupsLoadFailed": [
+    {
+      "type": 0,
+      "value": "Could not load access groups, so members can’t be moved yet. "
+    },
+    {
+      "type": 8,
+      "value": "retry",
+      "children": [
+        {
+          "type": 0,
+          "value": "Retry"
+        }
+      ]
     }
   ],
   "web.admin.access.groups.members.heading": [
@@ -4115,6 +4431,98 @@
       "value": "Loading members..."
     }
   ],
+  "web.admin.access.groups.members.manageHelp": [
+    {
+      "type": 0,
+      "value": "Move members to another group, or add users to this one."
+    }
+  ],
+  "web.admin.access.groups.members.moveFailed": [
+    {
+      "type": 0,
+      "value": "Some users could not be moved:"
+    }
+  ],
+  "web.admin.access.groups.members.moveSelected": [
+    {
+      "type": 0,
+      "value": "Move selected"
+    }
+  ],
+  "web.admin.access.groups.members.moveSelectedCount": [
+    {
+      "type": 0,
+      "value": "Move "
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " selected"
+    }
+  ],
+  "web.admin.access.groups.members.moveTarget": [
+    {
+      "type": 0,
+      "value": "Move selected members to"
+    }
+  ],
+  "web.admin.access.groups.members.moveTargetPlaceholder": [
+    {
+      "type": 0,
+      "value": "Move to group..."
+    }
+  ],
+  "web.admin.access.groups.members.moved": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Moved "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " user to "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Moved "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " users to "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.access.groups.members.noMatches": [
     {
       "type": 0,
@@ -4125,6 +4533,206 @@
     {
       "type": 0,
       "value": "Search members"
+    }
+  ],
+  "web.admin.access.groups.members.selectMember": [
+    {
+      "type": 0,
+      "value": "Select "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    }
+  ],
+  "web.admin.access.groups.members.selectedHidden": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " selected member isn’t shown, and a move includes it."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " selected members aren’t shown, and a move includes them."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.change": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "from"
+    },
+    {
+      "type": 0,
+      "value": " → "
+    },
+    {
+      "type": 1,
+      "value": "to"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.description": [
+    {
+      "type": 0,
+      "value": "Settings a user has overridden on their own account stay as they are. They get the new access right away, without being signed out."
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.fromGroup": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " from "
+    },
+    {
+      "type": 1,
+      "value": "group"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.fromNoGroup": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " from no group"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.fromUnknownGroup": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " from group #"
+    },
+    {
+      "type": 1,
+      "value": "id"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.loadingTerms": [
+    {
+      "type": 0,
+      "value": "Loading request settings…"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.move": [
+    {
+      "type": 0,
+      "value": "Move"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.moving": [
+    {
+      "type": 0,
+      "value": "Moving..."
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.noChanges": [
+    {
+      "type": 0,
+      "value": "No inherited settings change."
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.sourceUnknown": [
+    {
+      "type": 0,
+      "value": "Their current group couldn’t be loaded, so the settings that change are unknown."
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.termsFailed": [
+    {
+      "type": 0,
+      "value": "The groups’ request settings couldn’t be loaded, so the settings that change are unknown."
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.title": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Move "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " user to "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            },
+            {
+              "type": 0,
+              "value": "?"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Move "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " users to "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            },
+            {
+              "type": 0,
+              "value": "?"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.access.groups.newGroup": [
