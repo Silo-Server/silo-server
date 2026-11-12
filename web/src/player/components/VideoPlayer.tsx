@@ -3725,17 +3725,12 @@ export function VideoPlayer({
     [cueStyle, subtitleSettings.fontSize, subtitleFontScale],
   );
 
-  // Measure the bottom control bar so bottom-anchored subtitles can lift just
-  // above it while it's visible (YouTube-style) instead of hiding behind it.
-  // The base offset scales with the player, but the bar is a roughly fixed
-  // pixel height, so measure rather than hardcode. The .player-hud element is
-  // laid out even while the controls are faded out, so its height is readable
-  // regardless of visibility.
-  const [controlBarHeight, setControlBarHeight] = useState(0);
-  // How far the dock's top sits above the player's bottom edge. The same as
-  // the bar's height when it is docked at the bottom; on a phone held upright
-  // the dock sits under the picture instead, and the skip pill and next-episode
-  // card must clear all of it, not just its height.
+  // How far the dock's top sits above the player's bottom edge, measured so
+  // bottom-anchored subtitles, the skip pill and the next-episode card can
+  // clear the controls while they show. It is the bar's height when the dock
+  // sits at the bottom; on a phone held upright the dock sits under the
+  // picture, and they must clear all of it. The .player-hud element is laid
+  // out even while the controls are faded out, so it is readable regardless.
   const [dockClearance, setDockClearance] = useState(0);
   useEffect(() => {
     const container = containerRef.current;
@@ -3743,7 +3738,6 @@ export function VideoPlayer({
     const hud = container.querySelector<HTMLElement>(".player-hud");
     if (!hud) return;
     const update = () => {
-      setControlBarHeight(hud.offsetHeight);
       // Layout offsets, not client rects: the hidden HUD is translated. Its
       // offset parent is the controls surface, which fills the player.
       const surface = hud.offsetParent as HTMLElement | null;
@@ -3775,12 +3769,13 @@ export function VideoPlayer({
     }
     return 0;
   })();
-  // Height the bar and its gap cover at the bottom of the player. PGS
-  // bitmaps carry their own position, so they clear this whatever the text
-  // position setting says.
+  // How far up from the player's bottom the controls reach, plus a gap: the
+  // bar's height, or on an upright phone the dock under the picture and
+  // everything below it. PGS bitmaps carry their own position, so they clear
+  // this whatever the text position setting says.
   const subtitleHudInsetPx =
-    displayMode === "foreground" && controlsVisible && controlBarHeight > 0
-      ? controlBarHeight + SUBTITLE_HUD_GAP
+    displayMode === "foreground" && controlsVisible && dockClearance > 0
+      ? dockClearance + SUBTITLE_HUD_GAP
       : 0;
   const subtitleLiftPx =
     subtitleSettings.position !== "top"
