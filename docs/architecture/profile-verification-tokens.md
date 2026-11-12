@@ -52,9 +52,11 @@ gate that resolves the acting profile for a request applies the same rule: the
 HTTP viewer gate, the events sockets, watch-together, progress bootstrap and
 plugin pages. The profile's own limits still apply. Without a valid token
 such a scope is marked `access.Scope.PINVerificationSkipped`, so the household
-writes below refuse it. A valid token still counts as a real proof, so an
-administrator viewing as an account manages its household by entering the
-primary profile's PIN, as the account holder would.
+writes below refuse it. A valid token bound to a login session still counts
+as a real proof, so an administrator viewing as an account manages its
+household by entering the primary profile's PIN, as the account holder would.
+An API key has no login session, so it stays marked skipped whatever token it
+sends.
 
 ## Household writes
 
