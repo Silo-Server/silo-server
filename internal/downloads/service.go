@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -442,7 +443,7 @@ func (s *Service) Create(ctx context.Context, userID int, req CreateRequest, fil
 	// A lookup by episode also returns a multi-episode file linked to an
 	// earlier episode of its range. That file serves the requested episode,
 	// and its download is registered under the file's first episode, as a
-	// season download registers it.
+	// season download registers it when that episode picks the file too.
 	if req.StrictIdentity && (file.ContentID != req.ContentID || (req.EpisodeID != "" && req.FileID > 0 && file.EpisodeID != req.EpisodeID)) {
 		return nil, catalog.ErrItemNotFound
 	}
@@ -846,41 +847,130 @@ func (s *Service) episodeItemsWithSkipped(ctx context.Context, userID int, profi
 	if err != nil {
 		return nil, nil, fmt.Errorf("resolving files for %d episodes: %w", len(episodes), err)
 	}
+	earlier, err := s.earlierSpannedEpisodes(ctx, seriesID, episodes, filesByEpisode)
+	if err != nil {
+		return nil, nil, err
+	}
+	considered := append(earlier, episodes...)
+	consideredIDs := episodeIDs
+	for _, ep := range earlier {
+		consideredIDs = append(consideredIDs, ep.ContentID)
+	}
 	var pref versionPreference
 	if template != nil {
 		pref = templatePreference(template)
 	} else {
 		for _, files := range filesByEpisode {
 			if len(files) > 1 {
-				pref = s.loadVersionPreference(ctx, userID, profileID, seriesID, episodeIDs)
+				pref = s.loadVersionPreference(ctx, userID, profileID, seriesID, consideredIDs)
 				break
 			}
+		}
+	}
+	picks := make(map[string]*models.MediaFile, len(considered))
+	// A multi-episode file serves each episode it spans; download it once,
+	// keyed on the earliest episode that picks it. An earlier episode with a
+	// file of its own keeps its key, and a later page of the same batch finds
+	// the entry an earlier page registered.
+	owners := make(map[int]*models.Episode)
+	for _, ep := range considered {
+		file := pref.pick(ep.ContentID, allowedCandidates(filesByEpisode[ep.ContentID], filter))
+		picks[ep.ContentID] = file
+		if file == nil || file.MultiEpisodeEnd <= file.MultiEpisodeStart {
+			continue
+		}
+		if owner, ok := owners[file.ID]; !ok || episodeBefore(ep, owner) {
+			owners[file.ID] = ep
 		}
 	}
 	items := make([]managedItem, 0, len(episodes))
 	skipped := make([]SkippedDownload, 0)
 	queued := make(map[int]bool, len(episodes))
 	for _, ep := range episodes {
-		files := filesByEpisode[ep.ContentID]
-		if len(files) == 0 {
+		if len(filesByEpisode[ep.ContentID]) == 0 {
 			skipped = append(skipped, SkippedDownload{EpisodeID: ep.ContentID, Reason: "no_file"})
 			continue
 		}
-		file := pref.pick(ep.ContentID, allowedCandidates(files, filter))
+		file := picks[ep.ContentID]
 		episodeID := ep.ContentID
-		// A multi-episode file serves each episode it spans; download it once,
-		// keyed on its first episode, so a later page of the same batch finds
-		// the entry an earlier page registered.
-		if file != nil && file.MultiEpisodeEnd > file.MultiEpisodeStart {
+		if owner, ok := owners[file.ID]; ok {
 			if queued[file.ID] {
 				continue
 			}
 			queued[file.ID] = true
-			episodeID = file.EpisodeID
+			episodeID = owner.ContentID
 		}
 		items = append(items, managedItem{file: file, contentID: seriesID, episodeID: episodeID})
 	}
 	return items, skipped, nil
+}
+
+// earlierSpannedEpisodes returns the episodes outside the batch that a
+// multi-episode file serving one of its episodes also spans earlier in the
+// season, and adds their files to filesByEpisode. Which episode keys such a
+// file depends on their picks, so a page that starts inside a span keys it as
+// the page holding the span's start did.
+func (s *Service) earlierSpannedEpisodes(ctx context.Context, seriesID string, episodes []*models.Episode, filesByEpisode map[string][]*models.MediaFile) ([]*models.Episode, error) {
+	type position struct{ season, episode int }
+	inBatch := make(map[position]bool, len(episodes))
+	for _, ep := range episodes {
+		inBatch[position{ep.SeasonNumber, ep.EpisodeNumber}] = true
+	}
+	wanted := make(map[position]bool)
+	seasons := make([]int, 0, 1)
+	for _, ep := range episodes {
+		for _, f := range filesByEpisode[ep.ContentID] {
+			if f.MultiEpisodeEnd <= f.MultiEpisodeStart || f.EpisodeID == ep.ContentID {
+				continue
+			}
+			for n := f.MultiEpisodeStart; n < ep.EpisodeNumber; n++ {
+				pos := position{ep.SeasonNumber, n}
+				if inBatch[pos] || wanted[pos] {
+					continue
+				}
+				if !slices.Contains(seasons, ep.SeasonNumber) {
+					seasons = append(seasons, ep.SeasonNumber)
+				}
+				wanted[pos] = true
+			}
+		}
+	}
+	if len(wanted) == 0 {
+		return nil, nil
+	}
+	var earlier []*models.Episode
+	var ids []string
+	for _, season := range seasons {
+		listed, err := s.episodeRepo.ListBySeason(ctx, seriesID, season)
+		if err != nil {
+			return nil, fmt.Errorf("listing season %d for a multi-episode file: %w", season, err)
+		}
+		for _, ep := range listed {
+			if wanted[position{ep.SeasonNumber, ep.EpisodeNumber}] {
+				earlier = append(earlier, ep)
+				ids = append(ids, ep.ContentID)
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	files, err := s.fileRepo.ListByEpisodeIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("resolving files for %d spanned episodes: %w", len(ids), err)
+	}
+	for id, f := range files {
+		filesByEpisode[id] = f
+	}
+	return earlier, nil
+}
+
+// episodeBefore orders episodes by season, then episode number.
+func episodeBefore(a, b *models.Episode) bool {
+	if a.SeasonNumber != b.SeasonNumber {
+		return a.SeasonNumber < b.SeasonNumber
+	}
+	return a.EpisodeNumber < b.EpisodeNumber
 }
 
 // managedItem pairs a resolved file with the (content, episode) identity its
