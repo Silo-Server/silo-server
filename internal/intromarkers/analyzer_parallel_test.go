@@ -94,6 +94,37 @@ func TestRunAnalyzesGroupsInParallelWithinFFmpegLimit(t *testing.T) {
 	}
 }
 
+// A run loads its episodes a page of seasons at a time; every page's groups
+// must still reach the workers.
+func TestRunAnalyzesEverySeasonPage(t *testing.T) {
+	var candidates []Candidate
+	for season := 1; season <= 3; season++ {
+		for episode := 1; episode <= 2; episode++ {
+			candidates = append(candidates, Candidate{
+				FileID:          season*10 + episode,
+				EpisodeID:       fmt.Sprintf("s%de%d", season, episode),
+				SeasonID:        fmt.Sprintf("season-%d", season),
+				MediaFolderID:   1,
+				DurationSeconds: 1800,
+			})
+		}
+	}
+	repo := &fakeIntroRepository{enabledLibraries: 1, eligibleCandidates: candidates}
+	analyzer := &Analyzer{
+		repo: repo, extractor: failingExtractor{}, config: DefaultConfig("ffmpeg"),
+		logger: slog.New(slog.DiscardHandler), ffmpegSlots: mediasample.NewLimiter(2),
+		episodeSeasonsPerPage: 1,
+	}
+
+	summary, err := analyzer.Run(context.Background(), EpisodeMarkerKinds{Intro: true}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if summary.FilesConsidered != 6 || summary.GroupsNotFound != 3 {
+		t.Fatalf("files = %d, groups not found = %d; want all 6 files and 3 groups across the pages", summary.FilesConsidered, summary.GroupsNotFound)
+	}
+}
+
 func TestSeasonStateSettled(t *testing.T) {
 	now := time.Date(2026, 9, 25, 3, 30, 0, 0, time.UTC)
 	cases := []struct {

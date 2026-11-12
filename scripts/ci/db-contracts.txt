@@ -462,6 +462,9 @@
 # Intro analysis state timestamps and config-hash isolation.
 ./internal/intromarkers TestSeasonStateIsKeyedByAnalysisHashPostgres
 
+# The nightly episode pass loads whole seasons a page at a time.
+./internal/intromarkers TestEligibleCandidatePagesHoldWholeSeasonsPostgres
+
 # Credits tail failures replace legacy metadata verdicts and back off.
 ./internal/intromarkers TestMovieTailFailureReplacesMetadataUnusableRowPostgres
 ./internal/mediaartifact TestArtifactFailureReplacesListedUnusableDetailsPostgres
