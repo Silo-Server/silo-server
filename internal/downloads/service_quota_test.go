@@ -86,7 +86,7 @@ func TestConcurrentArtifactCreatesCannotBypassQuotaDB(t *testing.T) {
 			defer wg.Done()
 			<-start
 			download, err := svc.createArtifactDownload(ctx, f.userID, CreateRequest{Quality: Quality5Mbps},
-				&models.MediaFile{ID: fileIDs[w], ContentID: contentIDs[w], FileSize: 4096}, decision)
+				&models.MediaFile{ID: fileIDs[w], ContentID: contentIDs[w], FileSize: 4096}, "", decision)
 			if err == nil && download.Status != StatusPreparing {
 				err = fmt.Errorf("download status = %q, want preparing", download.Status)
 			}

@@ -44,6 +44,9 @@ func (f *createFileResolver) ListByEpisodeIDs(context.Context, []string) (map[st
 func (f *createFileResolver) GetByID(context.Context, int) (*models.MediaFile, error) {
 	return f.single, nil
 }
+func (f *createFileResolver) GetByEpisodeID(_ context.Context, id string) ([]*models.MediaFile, error) {
+	return f.rows[id], nil
+}
 
 func TestDownloadCreatePagesPostgres(t *testing.T) {
 	// Managed creates clear monitor exclusions, so the schema needs the
@@ -141,6 +144,39 @@ func TestSeriesPageFollowsTheVersionTemplatePostgres(t *testing.T) {
 	page, err = svc.CreateSeriesPage(t.Context(), 1, req, new(1), nil, 10, catalog.AccessFilter{})
 	if err != nil || len(page.Items) != 2 || page.Items[0].MediaFileID != 11 || page.Items[1].MediaFileID != 21 {
 		t.Fatalf("template %+v %v", page.Items, err)
+	}
+}
+
+func TestSingleDownloadReachesTheEntryASeasonKeyedOnALaterEpisodePostgres(t *testing.T) {
+	repo := NewRepository(subscriptionMutationTestRepo(t).pool)
+	_, err := repo.pool.Exec(t.Context(), `CREATE UNIQUE INDEX managed_identity ON downloads(user_id,profile_id,device_id,content_id,COALESCE(episode_id,'')) WHERE device_id IS NOT NULL;
+ CREATE TABLE user_devices(user_id integer,profile_id text,device_id text,device_name text,device_platform text,last_seen_at timestamptz,PRIMARY KEY(user_id,profile_id,device_id))`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Episode 1 has its own file and shares a double-episode file with
+	// episode 2, which is episode 2's only file.
+	own := &models.MediaFile{ID: 1, ContentID: "series", EpisodeID: "ep-1", Resolution: "720p", FileSize: 10}
+	double := &models.MediaFile{ID: 3, ContentID: "series", EpisodeID: "ep-1", Resolution: "1080p", MultiEpisodeStart: 1, MultiEpisodeEnd: 2, FileSize: 20}
+	pager := &createEpisodePager{rows: []*models.Episode{{ContentID: "ep-1", SeasonNumber: 1, EpisodeNumber: 1}, {ContentID: "ep-2", SeasonNumber: 1, EpisodeNumber: 2}}}
+	files := &createFileResolver{rows: map[string][]*models.MediaFile{"ep-1": {own, double}, "ep-2": {double}}, single: own}
+	svc := NewService(repo, nil, nil, files, createItemResolver{}, pager, fakeUserRepo{&models.User{ID: 1, DownloadAllowed: new(true)}}, &syncAccess{}, nil, &config.DownloadConfig{Enabled: true})
+	req := CreateRequest{ContentID: "series", ProfileID: "profile", DeviceID: "device", BatchID: "season", StrictIdentity: true, VersionTemplateFileID: 1}
+	page, err := svc.CreateSeriesPage(t.Context(), 1, req, new(1), nil, 10, catalog.AccessFilter{})
+	if err != nil || len(page.Items) != 2 || page.Items[1].EpisodeID != "ep-2" || page.Items[1].MediaFileID != 3 {
+		t.Fatalf("season %+v %v", page.Items, err)
+	}
+	entry := page.Items[1]
+
+	// Downloading episode 2 again by itself finds the entry the season made
+	// for it, and leaves episode 1's own file alone.
+	single, err := svc.Create(t.Context(), 1, CreateRequest{ContentID: "series", EpisodeID: "ep-2", ProfileID: "profile", DeviceID: "device", StrictIdentity: true, ExpectedDownloadID: entry.ID, ExpectedRevision: new(entry.Revision)}, catalog.AccessFilter{})
+	if err != nil || single.ID != entry.ID || single.EpisodeID != "ep-2" || single.MediaFileID != 3 {
+		t.Fatalf("single %+v %v", single, err)
+	}
+	first, err := repo.GetManagedEntry(t.Context(), 1, "profile", "device", "series", "ep-1")
+	if err != nil || first.MediaFileID != 1 {
+		t.Fatalf("episode 1 entry %+v %v", first, err)
 	}
 }
 
