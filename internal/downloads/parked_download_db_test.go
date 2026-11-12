@@ -56,11 +56,31 @@ func TestParkedDownloadIsNotServedOrPreparedFromItsOldFileDB(t *testing.T) {
 	if _, _, err := repo.PrepareDownloadAgain(ctx, parked); !errors.Is(err, ErrDownloadNotActive) {
 		t.Fatalf("preparing a parked download again: err = %v, want not active", err)
 	}
-	var status string
-	if err := pool.QueryRow(ctx, `SELECT status FROM download_artifacts WHERE id = $1`, artifact.ID).Scan(&status); err != nil {
+	// A scan can park the download after the caller read it: the stored row
+	// is on the stand-in, the caller's copy still names the old file.
+	var userID int
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`,
+		fmt.Sprintf("parked-%d", time.Now().UnixNano())).Scan(&userID); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, userID) })
+	stored := fmt.Sprintf("parked-stored-%d", time.Now().UnixNano())
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO downloads (id, user_id, media_file_id, content_id, format, status, artifact_id)
+		VALUES ($1, $2, $3, 'parked-title', 'transcode', 'completed', $4)`, stored, userID, standInID, artifact.ID); err != nil {
+		t.Fatalf("seed parked download: %v", err)
+	}
+	stale := &Download{ID: stored, MediaFileID: fileID, Format: FormatTranscode, ArtifactID: artifact.ID, Status: StatusCompleted}
+	if _, _, err := repo.PrepareDownloadAgain(ctx, stale); !errors.Is(err, ErrDownloadNotActive) {
+		t.Fatalf("preparing a download parked after it was read: err = %v, want not active", err)
+	}
+	var status, downloadStatus string
+	if err := pool.QueryRow(ctx, `
+		SELECT a.status, d.status FROM download_artifacts a, downloads d WHERE a.id = $1 AND d.id = $2`,
+		artifact.ID, stored).Scan(&status, &downloadStatus); err != nil {
 		t.Fatal(err)
 	}
-	if status != ArtifactExpired {
-		t.Fatalf("artifact of the retitled row was requeued for a parked download: status %s", status)
+	if status != ArtifactExpired || downloadStatus != StatusCompleted {
+		t.Fatalf("parked download prepared again from the retitled row: artifact %s, download %s", status, downloadStatus)
 	}
 }
