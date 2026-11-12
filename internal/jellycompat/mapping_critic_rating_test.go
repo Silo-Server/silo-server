@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -61,19 +62,28 @@ func TestCriticRatingFollowsShownRatingSources(t *testing.T) {
 	}
 }
 
-type failingSettings struct{ reads atomic.Int32 }
+// failingSettings fails every read after taking delay on the clock.
+type failingSettings struct {
+	reads atomic.Int32
+	clock *time.Time
+	delay time.Duration
+}
 
 func (s *failingSettings) Get(context.Context, string) (string, error) {
 	s.reads.Add(1)
+	*s.clock = s.clock.Add(s.delay)
 	return "", errors.New("database unavailable")
 }
 
 // The policy caches nothing while its reads fail, and each retry can wait on
-// the database, so a list response must not retry once per item.
+// the database until it times out, so a list response must not retry once
+// per item, however long the failed read took.
 func TestCriticRatingReadsFailingPolicyOncePerList(t *testing.T) {
-	settings := &failingSettings{}
+	clock := time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC)
+	settings := &failingSettings{clock: &clock, delay: 5 * time.Second}
 	m := newMapper(NewResourceIDCodec(), &config.Config{})
 	m.ratings = newShownRatings(ratingsources.NewPolicy(settings, nil))
+	m.ratings.now = func() time.Time { return clock }
 	critic := 80
 	for range 20 {
 		if dto := m.itemFromList(upstreamListItem{ContentID: "movie", Type: "movie", RatingRTCritic: &critic}, false, nil, nil); dto.CriticRating != nil {

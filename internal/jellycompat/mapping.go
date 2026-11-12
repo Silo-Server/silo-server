@@ -63,9 +63,11 @@ func (s *shownRatings) shows(source string) bool {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if now := s.now(); !now.Before(s.until) {
+	if !s.now().Before(s.until) {
 		s.sel = s.policy.Selection(context.Background())
-		s.until = now.Add(shownRatingsTTL)
+		// From when the read ended: a failed read can take the policy's
+		// whole timeout, and must not come back already expired.
+		s.until = s.now().Add(shownRatingsTTL)
 	}
 	return s.sel.Shows(source)
 }
