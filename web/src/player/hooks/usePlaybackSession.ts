@@ -1446,7 +1446,9 @@ export function usePlaybackSession(
         if (isFailureRecovery) {
           attemptedPlanKeysRef.current = attemptedPlanKeys;
           attemptCountRef.current = Math.min(attemptCount + 1, MAX_ATTEMPT_COUNT_V3 + 1);
-        } else {
+        } else if (!reconnect) {
+          // A reconnect changes nothing the viewer asked for, so the routes
+          // that already failed in this attempt stay excluded.
           attemptedPlanKeysRef.current = [];
           attemptCountRef.current = 1;
         }

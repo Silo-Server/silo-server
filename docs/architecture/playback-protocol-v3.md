@@ -1387,7 +1387,9 @@ route, so a direct-play viewer would come back on a transcode. The web player
    `track_change` keeps the current route eligible but excludes nothing else,
    so the planner can pick a higher-ranked route that already failed in this
    attempt, such as an `original_http` plan whose browser engine missed its
-   startup deadline, and the session would loop between the two.
+   startup deadline, and the session would loop between the two. Adopting a
+   reconnect's plan keeps the attempt's failed plan keys and recovery count, so
+   a later `failure_recovery` still excludes the routes that already failed.
 3. A network failure, a 5xx, `408`, `429`, or `replan_in_progress` waits for
    the next attempt. Any other answer means the session did not survive (a
    server restart answers 404), and the client starts a new attempt at the
