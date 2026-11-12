@@ -271,7 +271,7 @@ func (h *CatalogHandler) AudiobookGroups(ctx context.Context, v ItemViewer, quer
 func (h *CatalogResourceHandler) ItemDetail(ctx context.Context, v ItemViewer, id string) (*catalog.ItemDetail, error) {
 	// Neither view carries playback previews, and only curators see folder
 	// paths, so the detail leaves out what the response would drop.
-	curates := h.items.canViewFilePaths(ctx)
+	curates := h.items.CanViewFilePaths(ctx)
 	detail, err := h.items.detailSvc.GetItemDetailWithOptions(ctx, id, v.Access, catalog.ItemDetailOptions{SkipPlaybackPreviews: true, SkipFolderPaths: !curates})
 	if err != nil {
 		if isNotFound(err) {
@@ -294,9 +294,11 @@ func (h *CatalogResourceHandler) ItemDetail(ctx context.Context, v ItemViewer, i
 }
 
 // ItemVersions answers the file versions of one item; a synthetic season
-// has none. Paths are stripped for viewers without file-path visibility.
+// has none. File paths and names are stripped for viewers without file-path
+// visibility.
 func (h *CatalogResourceHandler) ItemVersions(ctx context.Context, v ItemViewer, id string) ([]catalog.FileVersion, error) {
-	versions, err := h.items.detailSvc.GetItemVersions(ctx, id, v.Access)
+	opts := catalog.ItemVersionsOptions{HideFileIdentity: !h.items.CanViewFilePaths(ctx)}
+	versions, err := h.items.detailSvc.GetItemVersionsWithOptions(ctx, id, v.Access, opts)
 	if err != nil {
 		if isNotFound(err) {
 			if _, _, ok := parseSyntheticSeasonID(id); ok {
@@ -305,11 +307,6 @@ func (h *CatalogResourceHandler) ItemVersions(ctx context.Context, v ItemViewer,
 			return nil, apiError(http.StatusNotFound, "not_found", "Item not found")
 		}
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to get item versions")
-	}
-	if !h.items.canViewFilePaths(ctx) {
-		for i := range versions {
-			versions[i].FilePath = ""
-		}
 	}
 	return versions, nil
 }
@@ -325,7 +322,7 @@ func (h *CatalogResourceHandler) MangaFiles(ctx context.Context, v ItemViewer, i
 		}
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to get manga files")
 	}
-	if !h.items.canViewFilePaths(ctx) {
+	if !h.items.CanViewFilePaths(ctx) {
 		files.FolderPaths = nil
 		for i := range files.Files {
 			files.Files[i].FilePath = ""

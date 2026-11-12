@@ -65,7 +65,7 @@ export function MonitoredSeriesCard({
             <TableBody>
               {monitors.map((monitor) => (
                 <TableRow key={monitor.id}>
-                  <TableCell className="ps-4 font-semibold whitespace-normal sm:ps-5">
+                  <TableCell className="ps-4 font-semibold wrap-anywhere whitespace-normal sm:ps-5">
                     {monitor.series_title || monitor.series_id}
                   </TableCell>
                   <TableCell className={`${wideOnly} text-muted-foreground`}>

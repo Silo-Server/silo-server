@@ -50,13 +50,17 @@ type DownloadService interface {
 
 // DownloadHandler handles download endpoints.
 type DownloadHandler struct {
-	svc             DownloadService
-	nodePlanner     nodepool.DownloadPlanner
-	jwtSecret       func() string
-	proxyHTTPClient *http.Client
-	linkIssuer      DirectDownloadLinkIssuer
-	preflightMu     sync.Mutex
-	preflightCache  map[string]proxyPreflightResult
+	// FileNamesVisible reports whether the caller may see file names
+	// (ItemsHandler.CanViewFilePaths). Optional: without it no caller does, and
+	// every download is named by its title.
+	FileNamesVisible func(context.Context) bool
+	svc              DownloadService
+	nodePlanner      nodepool.DownloadPlanner
+	jwtSecret        func() string
+	proxyHTTPClient  *http.Client
+	linkIssuer       DirectDownloadLinkIssuer
+	preflightMu      sync.Mutex
+	preflightCache   map[string]proxyPreflightResult
 }
 
 type proxyPreflightResult struct {
@@ -129,6 +133,21 @@ func (h *DownloadHandler) CreateDirectDownloadLink(ctx context.Context, fileID i
 	return h.linkIssuer.GenerateDirectDownloadLinkToken(claims.UserID, claims.Role, claims.SessionID, profileID, claims.ImpersonatorUserID, fileID)
 }
 
+// downloadAttachmentNamer names a download's saved file for the request's
+// caller (downloads.Service.AttachmentName).
+type downloadAttachmentNamer interface {
+	AttachmentName(ctx context.Context, target *downloads.FileTarget) string
+}
+
+// withDownloadNaming marks the request when its caller may see file names, so
+// its downloads keep the file's own name instead of one built from the title.
+func (h *DownloadHandler) withDownloadNaming(r *http.Request) *http.Request {
+	if h.FileNamesVisible != nil && h.FileNamesVisible(r.Context()) {
+		return r.WithContext(downloads.WithFileNamesVisible(r.Context()))
+	}
+	return r
+}
+
 type downloadFileResolver interface {
 	ResolveDirectFile(ctx context.Context, userID, fileID int, format string, filter catalog.AccessFilter) (*downloads.FileTarget, error)
 	ResolveManagedFile(ctx context.Context, userID int, profileID, deviceID, downloadID string, filter catalog.AccessFilter) (*downloads.FileTarget, error)
@@ -160,6 +179,7 @@ func (h *DownloadHandler) HandleDirectDownloadViaProxy(w http.ResponseWriter, r 
 }
 
 func (h *DownloadHandler) handleDirectDownload(w http.ResponseWriter, r *http.Request, delegate bool) {
+	r = h.withDownloadNaming(r)
 	userID := apimw.GetUserID(r.Context())
 	if userID == 0 {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
@@ -290,11 +310,13 @@ func (h *DownloadHandler) redirectToProxy(w http.ResponseWriter, r *http.Request
 	}
 	mediaPath := target.Path
 	downloadFilename := ""
+	if namer, ok := h.svc.(downloadAttachmentNamer); ok {
+		downloadFilename = namer.AttachmentName(r.Context(), target)
+	} else if target.OriginArtifactID != "" && strings.TrimSpace(target.Path) != "" {
+		downloadFilename = filepath.Base(target.Path)
+	}
 	if target.OriginArtifactID != "" {
 		mediaPath = ""
-		if strings.TrimSpace(target.Path) != "" {
-			downloadFilename = filepath.Base(target.Path)
-		}
 	}
 	playMethod := streamtoken.PlayMethodDownload
 	if target.ExpectedExecutionFingerprint != "" {

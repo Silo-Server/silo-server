@@ -1640,6 +1640,16 @@ func TestGenerateCompatCopyVideoMasterManifestCodecsListEveryFormat(t *testing.T
 		{"vp9 profile 1", models.VideoTrack{Codec: "vp9", Profile: "Profile 1", Level: -99, BitDepth: 8, Width: 640, Height: 360}, aac, false, ""},
 		{"vp9 unknown size", models.VideoTrack{Codec: "vp9", Profile: "Profile 0", Level: -99, BitDepth: 8}, aac, false, ""},
 		{"h264 unknown level", models.VideoTrack{Codec: "h264", Profile: "High", Width: 1920, Height: 1080}, aac, false, ""},
+		// Profile bytes as FFmpeg's MP4 muxer writes them into the copy's avcC.
+		{"h264 constrained baseline", models.VideoTrack{Codec: "h264", Profile: "Constrained Baseline", Level: 30, Width: 640, Height: 360}, aac, false, "avc1.42401E,mp4a.40.2"},
+		{"h264 high 10", models.VideoTrack{Codec: "h264", Profile: "High 10", Level: 40, BitDepth: 10, Width: 1920, Height: 1080}, aac, false, "avc1.6E0028,mp4a.40.2"},
+		{"h264 high 4:2:2", models.VideoTrack{Codec: "h264", Profile: "High 4:2:2", Level: 40, Width: 1920, Height: 1080}, aac, false, "avc1.7A0028,mp4a.40.2"},
+		// The intra profiles require constraint_set3_flag.
+		{"h264 high 10 intra", models.VideoTrack{Codec: "h264", Profile: "High 10 Intra", Level: 40, Width: 1920, Height: 1080}, aac, false, "avc1.6E1028,mp4a.40.2"},
+		{"h264 unnamed profile", models.VideoTrack{Codec: "h264", Profile: "Extended", Level: 30, Width: 640, Height: 360}, aac, false, ""},
+		{"hevc main", models.VideoTrack{Codec: "hevc", Profile: "Main", Level: 120, Width: 1920, Height: 1080}, aac, false, "hvc1.1.4.L120.B0,mp4a.40.2"},
+		// Range Extensions profiles differ only in constraint flags the probe does not report.
+		{"hevc range extensions", models.VideoTrack{Codec: "hevc", Profile: "Rext", Level: 153, BitDepth: 10, PixelFormat: "yuv422p10le", Width: 3840, Height: 2160}, aac, false, ""},
 		{"hevc unknown level", models.VideoTrack{
 			Codec: "hevc", Profile: "Main 10", Width: 3840, Height: 2160,
 			DVProfile: 8, DVLevel: 6, VideoRangeType: compatRangeDOVIWithHDR,

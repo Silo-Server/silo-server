@@ -453,6 +453,25 @@ one does not
 (see "Omission is a request" in `docs/architecture/playback-protocol-v3.md`).
 The plan's `selected_tracks` names the track that plays.
 
+## File paths and names
+
+`getCatalogItem`, `listCatalogItemVersions` and `getWatchState` say where a
+file lives and what it is called only to a viewer who may curate the item's
+metadata: an admin acting as administrator, or an account with the metadata
+curation permission. Everyone else gets every technical field of each version,
+but not its `file_path` or `file_name`, an external subtitle track's
+`file_name` or a `title` that is only that file name, or an item's
+`folder_paths`. The rule covers the versions nested in
+`playback_variants` too. When two such subtitles share a language, format and
+flags, the second gets the title `en 2` (then `en 3`, and so on), as the
+playback inventory labels it, so a saved choice still tells them apart. A
+choice the viewer saved earlier under a sidecar's file name comes back in
+`effective_subtitle_track_signature` with that sidecar's new label, or with no
+label when that sidecar is gone.
+
+Audiobook and ebook versions keep `file_name` for every viewer, and lose only
+`file_path`. Those beta features name and open files by it.
+
 ## Episode files
 
 Each episode in `listSeasonEpisodes` and `listCatalogItemEpisodes` lists its

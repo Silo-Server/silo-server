@@ -118,11 +118,6 @@
       "count": 1
     }
   },
-  "src/pages/AdminLibraries.tsx": {
-    "react-hooks/exhaustive-deps": {
-      "count": 1
-    }
-  },
   "src/pages/AdminTasks.tsx": {
     "react-hooks/set-state-in-effect": {
       "count": 1

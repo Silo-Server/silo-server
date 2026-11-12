@@ -2,6 +2,7 @@ import "@/styles/player-hud.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { ChevronLeft, ChevronRight, Play, Shuffle, X } from "lucide-react";
+import { isStillWatchingGated } from "../stillWatching";
 import type { EpisodeRef, PlaybackStartTrigger } from "../types";
 import type { ContinueWatchingItem } from "@/hooks/queries/progress";
 import { useAutoPlayNextSetting } from "@/hooks/queries/autoPlayNext";
@@ -59,12 +60,14 @@ export function PlayingNextScreen({
   // -- Auto-play setting --
   // Shared with Settings → Playback: both surfaces edit the same profile row,
   // so a choice made here is the one that screen shows and vice versa.
-  const { enabled: autoplay, setEnabled: setAutoplay } = useAutoPlayNextSetting();
+  const { enabled: autoplaySetting, setEnabled: setAutoplay } = useAutoPlayNextSetting();
+  // Past the still-watching limit the card stays up without a countdown.
+  const autoplay = autoplaySetting && !isStillWatchingGated();
   const spoilerPrefs = useEpisodeSpoilerPrefs();
 
   const toggleAutoplay = useCallback(() => {
-    void setAutoplay(!autoplay);
-  }, [autoplay, setAutoplay]);
+    void setAutoplay(!autoplaySetting);
+  }, [autoplaySetting, setAutoplay]);
 
   // -- Countdown (only starts after video has ended) --
   const [secondsRemaining, setSecondsRemaining] = useState(COUNTDOWN_SECONDS);
@@ -391,7 +394,9 @@ export function PlayingNextScreen({
                   onClick={toggleAutoplay}
                   type="button"
                   role="switch"
-                  aria-checked={autoplay}
+                  // The switch shows the setting; past the still-watching limit
+                  // only the countdown waits.
+                  aria-checked={autoplaySetting}
                   className="-ms-3 flex min-h-11 items-center gap-3 rounded-full px-3 transition-colors hover:text-[var(--hud-paper)]"
                 >
                   {t("web.player.upNext.autoplay")}

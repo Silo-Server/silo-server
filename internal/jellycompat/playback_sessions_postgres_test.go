@@ -186,6 +186,42 @@ func newCompatTestPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
+// newUnreachableCompatPool returns a pool whose every query fails, standing in
+// for a Postgres outage without needing a database.
+func newUnreachableCompatPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	pool, err := pgxpool.New(context.Background(), "postgres://silo:silo@127.0.0.1:1/silo?sslmode=disable&connect_timeout=1")
+	if err != nil {
+		t.Fatalf("create pool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	return pool
+}
+
+// A negotiation that fails to persist must not cost this server the cached,
+// still-unstarted negotiation it would have replaced: the rolled-back write
+// left that one in Postgres, and its URLs are already with the client.
+func TestDurablePutNegotiatedFailureKeepsDisplacedNegotiation(t *testing.T) {
+	store := NewDurableCompatPlaybackStore(newUnreachableCompatPool(t), time.Hour, nil)
+	first := PlaybackSession{ID: "ps-first", CompatToken: "tok", ClientDeviceID: "dev", RouteItemID: "itm"}
+	store.Put(first) // cached; the failed upsert marks it unpersisted
+
+	second := first
+	second.ID = "ps-second"
+	if err := store.PutNegotiated(second); err == nil {
+		t.Fatal("PutNegotiated succeeded against an unreachable database")
+	}
+	if _, found, err := store.Lookup(first.ID); err != nil || !found {
+		t.Fatalf("displaced negotiation: found=%v err=%v, want it served from cache", found, err)
+	}
+	if !store.isUnpersisted(first.ID) {
+		t.Fatal("displaced negotiation lost its unpersisted mark")
+	}
+	if _, found, _ := store.Lookup(second.ID); found {
+		t.Fatal("unpersisted negotiation is still cached")
+	}
+}
+
 func TestPlaybackSessionStoreTerminalClaimIsAtomicAndOwnerScoped(t *testing.T) {
 	store := NewPlaybackSessionStore(time.Hour, nil)
 	store.Put(PlaybackSession{ID: "play-1", CompatToken: "owner", UpstreamSessionID: "upstream-1"})

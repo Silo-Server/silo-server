@@ -115,13 +115,13 @@ export function LibraryTranslatePanel({ libraryId }: { libraryId: number }) {
         {t("web.admin.common.libraryEditor.translate.description")}
       </p>
       <div className="flex flex-wrap items-end gap-3">
-        <div className="space-y-1">
+        <div className="min-w-0 flex-1 space-y-1 sm:flex-none">
           <Label htmlFor={`library-translate-target-${libraryId}`} className="text-xs">
             {t("web.admin.common.libraryEditor.translate.language")}
           </Label>
           <select
             id={`library-translate-target-${libraryId}`}
-            className="border-border bg-background text-foreground h-9 rounded-md border px-2 text-sm"
+            className="border-border bg-background text-foreground h-11 w-full max-w-full rounded-md border px-2 text-sm sm:h-9 sm:w-auto"
             value={targetLang}
             onChange={(event) => setTargetLang(event.target.value)}
             disabled={busy}
@@ -139,13 +139,14 @@ export function LibraryTranslatePanel({ libraryId }: { libraryId: number }) {
             type="button"
             size="sm"
             variant="outline"
+            className="h-11 sm:h-8"
             onClick={() => cancel.mutate(activeJob.id)}
             disabled={cancel.isPending}
           >
             {t("web.admin.common.libraryEditor.translate.stop")}
           </Button>
         ) : (
-          <Button type="button" size="sm" onClick={start} disabled={busy}>
+          <Button type="button" size="sm" className="h-11 sm:h-8" onClick={start} disabled={busy}>
             {translate.isPending
               ? t("web.admin.common.libraryEditor.translate.starting")
               : t("web.admin.common.libraryEditor.translate.translate")}
@@ -154,7 +155,7 @@ export function LibraryTranslatePanel({ libraryId }: { libraryId: number }) {
       </div>
       {activeJobs.map((job) => (
         <div key={job.id} className="flex items-center gap-2">
-          <p className="text-muted-foreground text-xs" role="status">
+          <p className="text-muted-foreground min-w-0 text-xs" role="status">
             {jobStatusText(t, job, activeJobs.length > 1)}
           </p>
           {!activeJob && (
@@ -162,6 +163,7 @@ export function LibraryTranslatePanel({ libraryId }: { libraryId: number }) {
               type="button"
               size="sm"
               variant="ghost"
+              className="h-11 sm:h-8"
               onClick={() => cancel.mutate(job.id)}
               disabled={cancel.isPending}
             >

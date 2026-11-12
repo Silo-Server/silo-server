@@ -51,6 +51,7 @@ import { useSubtitleLayout } from "../hooks/useSubtitleLayout";
 import { useCoarsePointer } from "../hooks/useCoarsePointer";
 import { computeSubtitleFontSize } from "@/lib/subtitleAppearance";
 import { useNextEpisode } from "../hooks/useNextEpisode";
+import { resetStillWatchingStreak } from "../stillWatching";
 import { MARKER_KINDS, useMarkerEditor } from "../hooks/useMarkerEditor";
 import { useWatchTogetherPlaybackSync } from "../hooks/useWatchTogetherPlaybackSync";
 import type { WatchTogetherRoomConnectionResult } from "../hooks/useWatchTogetherRoomConnection";
@@ -1109,6 +1110,20 @@ export function VideoPlayer({
   const canSeekAnywhere = plan.timeline.can_seek_anywhere;
   const canSeekAnywhereRef = useRef(canSeekAnywhere);
   canSeekAnywhereRef.current = canSeekAnywhere;
+  const replanningRef = useRef(replanning);
+  replanningRef.current = replanning;
+  // The viewer's newest seek while a replan of this session was in flight, and
+  // the plan revision it was made on. The replanned stream starts there
+  // instead of where the replan was asked for. A later seek, or a replan that
+  // settles without a new stream, drops it.
+  const replanSeekRef = useRef<{ sessionId: string; revision: number; seconds: number } | null>(
+    null,
+  );
+  useEffect(() => {
+    if (!replanning && replanSeekRef.current?.revision === planRevision) {
+      replanSeekRef.current = null;
+    }
+  }, [planRevision, replanning]);
   // The menu is the plan's. The session's preference decides whether Auto is
   // lit, since `auto` names no rung; otherwise the plan names the entry it
   // delivers.
@@ -1644,6 +1659,9 @@ export function VideoPlayer({
       const nativeSeconds = toPlayerTime(seconds, timelineOffsetRef.current);
       if (canSeekAnywhere || isNativePositionInRanges(video.seekable, nativeSeconds)) {
         rememberPendingSeek(seconds);
+        replanSeekRef.current = replanningRef.current
+          ? { sessionId: sessionIdRef.current, revision: planRevisionRef.current, seconds }
+          : null;
         setCurrentTime(seconds);
         if (isHlsStream) video.currentTime = nativeSeconds;
         else handleSeek(nativeSeconds);
@@ -1803,6 +1821,16 @@ export function VideoPlayer({
   // scrub instead of snapping back to where the element still is. In a room,
   // the viewer's held request comes first: the room's seeks for earlier skips
   // in a burst move the element without answering it.
+  // Automatic marker skips call handlePlayerSeek directly: only a viewer's own
+  // seek is evidence that someone is still watching.
+  const handleViewerSeek = useCallback(
+    (seconds: number) => {
+      resetStillWatchingStreak();
+      return handlePlayerSeek(seconds);
+    },
+    [handlePlayerSeek],
+  );
+
   const handleSkip = useCallback(
     (direction: "back" | "forward") => {
       const now =
@@ -1811,11 +1839,11 @@ export function VideoPlayer({
         elementMediaPosition() ??
         currentTimeRef.current;
       const seconds = direction === "back" ? seekIntervals.back : seekIntervals.forward;
-      handlePlayerSeek(
+      handleViewerSeek(
         skipTarget(now, durationRef.current, direction === "back" ? -seconds : seconds),
       );
     },
-    [elementMediaPosition, handlePlayerSeek, seekIntervals.back, seekIntervals.forward],
+    [elementMediaPosition, handleViewerSeek, seekIntervals.back, seekIntervals.forward],
   );
   const handleSkipRef = useRef(handleSkip);
   useEffect(() => {
@@ -2512,8 +2540,8 @@ export function VideoPlayer({
     (region) => region !== null && currentTime >= region.start && currentTime < region.end,
   );
   const skipMarker = useCallback(() => {
-    if (activeSkipMarker) handlePlayerSeek(activeSkipMarker.end);
-  }, [activeSkipMarker, handlePlayerSeek]);
+    if (activeSkipMarker) handleViewerSeek(activeSkipMarker.end);
+  }, [activeSkipMarker, handleViewerSeek]);
 
   const introPromptCanSeek =
     !roomPlaybackActive ||
@@ -2771,17 +2799,36 @@ export function VideoPlayer({
     video.addEventListener("loadeddata", attemptAutoplayWhenReady);
     video.addEventListener("canplay", attemptAutoplayWhenReady);
 
+    // A seek made while this stream's plan was fetched is where the stream is
+    // heading, as a seek made while it loads is. Pending, it is also where a
+    // replan resumes before this stream plays. Taken by the first transport of
+    // the plan that replaced the seek's plan.
+    const replanSeek = replanSeekRef.current;
+    if (replanSeek && replanSeek.revision !== planRevision) {
+      replanSeekRef.current = null;
+      const seconds = pendingSeekTimeRef.current ?? replanSeek.seconds;
+      if (
+        replanSeek.sessionId === sessionIdRef.current &&
+        canSeekAnywhereRef.current &&
+        seconds !== roomHeldSeekRef.current
+      ) {
+        rememberPendingSeek(seconds);
+      }
+    }
+    // A seek the viewer made while the stream loads wins over the plan's start
+    // position; on a seek-anywhere plan it never replans. A room seek request
+    // the room has not run yet waits for the room's command.
+    const hlsStartPosition = () => {
+      const seconds = canSeekAnywhereRef.current ? pendingSeekTimeRef.current : null;
+      return seconds === null || seconds === roomHeldSeekRef.current
+        ? effectiveInitialPosition
+        : toPlayerTime(seconds, timelineOffsetRef.current);
+    };
+
     const attachNativeHLS = () => {
       video.src = effectiveStreamUrl;
       nativeHLSMetadataHandler = () => {
-        // A seek the viewer made while the transport loaded wins over the
-        // start position; on a seek-anywhere plan it never replans. A room
-        // seek request the room has not run yet waits for the room's command.
-        const pendingSeconds = canSeekAnywhereRef.current ? pendingSeekTimeRef.current : null;
-        video.currentTime =
-          pendingSeconds === null || pendingSeconds === roomHeldSeekRef.current
-            ? effectiveInitialPosition
-            : toPlayerTime(pendingSeconds, timelineOffsetRef.current);
+        video.currentTime = hlsStartPosition();
         attemptAutoplayWhenReady();
       };
       video.addEventListener("loadedmetadata", nativeHLSMetadataHandler, { once: true });
@@ -2828,7 +2875,8 @@ export function VideoPlayer({
               backBufferLength: Infinity,
               maxBufferLength,
               maxMaxBufferLength: maxBufferLength,
-              startPosition: effectiveInitialPosition,
+              // hls.js seeks to this once the first fragment is buffered.
+              startPosition: hlsStartPosition(),
               startFragPrefetch: true,
               // Segment requests may block while FFmpeg encodes on demand.
               // Remote transcode nodes can also briefly defer the initial
@@ -3180,6 +3228,7 @@ export function VideoPlayer({
     playsOriginalFile,
     plannedBitrateKbps,
     plannedDynamicRange,
+    rememberPendingSeek,
     reportCurrentPlanFailure,
     shouldAutoPlay,
   ]);
@@ -3546,6 +3595,8 @@ export function VideoPlayer({
 
   const selectIntroPrompt = useCallback(() => {
     if (!selectActiveIntroPrompt()) return false;
+    // A press on the prompt is the viewer's seek; automatic skips are not.
+    resetStillWatchingStreak();
     focusTransportAfterIntroPrompt();
     return true;
   }, [focusTransportAfterIntroPrompt, selectActiveIntroPrompt]);
@@ -4012,6 +4063,7 @@ export function VideoPlayer({
   const setPlayback = useCallback(
     (action: "play" | "pause" | "toggle") => {
       if (watchTogether.replacementReason) return;
+      resetStillWatchingStreak();
       const video = videoRef.current;
       if (!video) return;
       const shouldPlay = action === "toggle" ? video.paused : action === "play";
@@ -4703,7 +4755,7 @@ export function VideoPlayer({
   );
 
   const handlePlayPauseRef = useRef(handlePlayPause);
-  const handlePlayerSeekRef = useRef(handlePlayerSeek);
+  const handleViewerSeekRef = useRef(handleViewerSeek);
   const handleTogglePiPRef = useRef(handleTogglePiP);
   const handleQualitySelectRef = useRef(handleQualitySelect);
 
@@ -4712,8 +4764,8 @@ export function VideoPlayer({
   }, [handlePlayPause]);
 
   useEffect(() => {
-    handlePlayerSeekRef.current = handlePlayerSeek;
-  }, [handlePlayerSeek]);
+    handleViewerSeekRef.current = handleViewerSeek;
+  }, [handleViewerSeek]);
 
   useEffect(() => {
     handleTogglePiPRef.current = handleTogglePiP;
@@ -5012,12 +5064,12 @@ export function VideoPlayer({
         const nextCurrentTime = currentTimeRef.current;
         const nextDuration = durationRef.current;
         const maxTime = nextDuration > 0 ? nextDuration : nextCurrentTime + Math.abs(secondsDelta);
-        handlePlayerSeekRef.current(Math.max(0, Math.min(maxTime, nextCurrentTime + secondsDelta)));
+        handleViewerSeekRef.current(Math.max(0, Math.min(maxTime, nextCurrentTime + secondsDelta)));
       },
       skipBack: skipActions.back,
       skipForward: skipActions.forward,
       seekTo: (seconds: number) => {
-        handlePlayerSeekRef.current(seconds);
+        handleViewerSeekRef.current(seconds);
       },
       togglePictureInPicture: () => handleTogglePiPRef.current(),
     };
@@ -5769,7 +5821,7 @@ export function VideoPlayer({
           onPlaybackSpeedChange={roomPlaybackActive ? undefined : setPlaybackSpeed}
           onTogglePiP={browserEngineActive ? undefined : handleTogglePiP}
           onPlayPause={handlePlayPause}
-          onSeek={handlePlayerSeek}
+          onSeek={handleViewerSeek}
           onVolumeChange={handleVolumeChange}
           onMutedChange={handleMutedChange}
           videoFit={videoFit}

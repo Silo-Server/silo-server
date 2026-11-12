@@ -1735,7 +1735,7 @@ Errors are RFC 9457 problem documents with `Content-Type: application/problem+js
   "type": "https://siloserver.org/docs/api/v2/problems/validation_failed",
   "title": "Validation failed",
   "status": 422,
-  "detail": "The request did not pass validation; see errors.",
+  "detail": "expected value to be one of \"original, 20mbps, 10mbps, 5mbps, 2mbps, 1mbps\"",
   "instance": "urn:silo:request:000000000000000000000026",
   "errors": [
     {
@@ -1913,6 +1913,13 @@ Decimal string IDs must be canonical positive values: `"7"` is valid, while `"00
 and `"+7"` are rejected.
 
 ### File and asset delivery
+
+A download is saved under a name built from its title, such as
+`Heat (1995).mkv` or `Severance - S01E02 - Half Loop.mkv`, with the file's
+extension. Only a viewer who may see file names (see
+[File paths and names](catalog-api.md#file-paths-and-names)) gets the file's own
+name. The same name goes into `Content-Disposition` whether the API or a proxy
+serves the bytes.
 
 The `file_delivery` capability advertises the native byte routes.
 `GET` and `HEAD /api/v2/downloads/{id}/file` preserve attachment filenames,

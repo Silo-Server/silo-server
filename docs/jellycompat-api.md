@@ -423,6 +423,13 @@ to the route's version, and a route version the item no longer has answers
 `404`. The negotiated session keeps the client's id as its route item id, so the
 stream URLs it hands out and later session reports can carry that id.
 
+Every compat user is a non-administrator, and only a viewer who may curate
+metadata sees where a file lives or what it is called (see
+[File paths and names](catalog-api.md#file-paths-and-names)). So an item's
+`Path` and `MediaSources[i].Path` are a stand-in, `/silo/{file id}.{container}`,
+and `MediaSources[i].Name` is the version's edition and quality, such as
+`Extended - 2160p HEVC HDR`.
+
 `GET` and `HEAD /Items/{id}/Download` serve the original file through the
 native direct download, the same service as `/api/v2/direct-download`, so they
 follow its rules. Both answer `403` when **Allow downloads** is off, the
@@ -545,6 +552,11 @@ Media URLs that Silo builds (`DirectStreamUrl`, `TranscodingUrl`, subtitle
 log grants that media only until the play session ends. A client that fetches
 one after the play session expired or stopped, or after a newer negotiation
 from the same device replaced an unstarted one, must send its own token.
+A `PlaySessionId` grant that cannot be read because the database is
+unavailable answers a retryable `503`, not `401`, unless the API server that
+answers still holds the play session. `PlaybackInfo` answers `503` instead of
+returning a `PlaySessionId` it could not store, since other API servers could
+not resolve it.
 
 Copied-video HLS master playlists name copied audio as Jellyfin 12 does:
 HE-AAC as `mp4a.40.5`, TrueHD as `mlpa`, and DTS as `dtsc`, `dtsh` (DTS-HD HRA

@@ -8,6 +8,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useT } from "@/i18n";
+import { TOUCH_HIT_AREA, TOUCH_TARGETS } from "@/lib/touchTargets";
 import { cn } from "@/lib/utils";
 
 import { KeyValueRow, SourceTag } from "../ui";
@@ -75,6 +76,7 @@ export function DefaultCustomSegment({
       }}
       className={cn(
         "rounded-md px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors disabled:opacity-50",
+        TOUCH_HIT_AREA,
         !pressed && "text-muted-foreground hover:text-foreground",
         pressed && (next ? "bg-amber-500/15 text-amber-300" : "bg-accent text-foreground"),
       )}
@@ -160,7 +162,7 @@ export function ChoicePolicyEdit<T extends string | boolean>({
             <SelectTrigger aria-label={label} className="w-36">
               <SelectValue placeholder={t("web.admin.users.detail.access.choose")} />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className={TOUCH_TARGETS}>
               {options.map((option) => (
                 <SelectItem key={key(option.value)} value={key(option.value)}>
                   {option.label}

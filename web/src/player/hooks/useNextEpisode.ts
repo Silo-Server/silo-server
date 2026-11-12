@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { isStillWatchingGated } from "../stillWatching";
 import type { EpisodeRef, PlaybackStartTrigger, PlayerTimeRange, SeriesContext } from "../types";
 
 interface NextEpisodeState {
@@ -52,7 +53,8 @@ export function useNextEpisode(
       currentTime < triggerRegion.start ||
       currentTime >= triggerRegion.end ||
       !nextEpisode ||
-      cancelledRef.current
+      cancelledRef.current ||
+      isStillWatchingGated()
     ) {
       if (countdownRef.current) {
         clearInterval(countdownRef.current);

@@ -30,6 +30,20 @@ const (
 // CPU core; see tasks.imageCacheWorkerCount. Do not raise VIPS_CONCURRENCY
 // in deployments without lowering those pools, or the host oversubscribes.
 
+// libvips operation cache: bimg's package init lets libvips keep up to 500
+// finished operations, trimmed only once libvips' tracked memory passes
+// 100 MB, to answer a repeat of the same operation. A Silo encode can never
+// be one. libvips keys a buffer load on the blob it wraps around the bytes,
+// which is new on every call, so even a second load of the same source (the
+// next rung of an artwork ladder) misses, and every later operation keys on
+// the image that load produced. The cache only kept decoded images alive
+// outside the Go heap, where GOGC and GOMEMLIMIT cannot reclaim them. Turn it
+// off. bimg's init runs before this package's, so these settings win.
+func init() {
+	bimg.VipsCacheSetMax(0)
+	bimg.VipsCacheSetMaxMem(0)
+}
+
 // ErrInvalidImage reports source bytes that libvips cannot read as an image.
 // Failures after the header was read, such as encoding a variant, do not wrap
 // it; see PixelDataUndecodable for damaged pixel data.

@@ -28,6 +28,7 @@
 ./internal/audiobooks TestABSListsLeaveOutBooksInNoLibraryDB
 ./internal/api/handlers TestAdminStatsLeaveOutFilesAndItemsHeldByRemovalGraceDB
 ./internal/sections TestRuleRowsReadTheViewersWatchStatePostgres
+./internal/sections TestSmartCollectionRowWithDisplayFilterReadsTheViewersWatchStatePostgres
 ./internal/scanner TestFileRepositoryPreservesFirstSeenScanProvenance
 ./internal/scanner TestMultiEpisodeFileServesSpannedEpisodesDB
 ./internal/scanner TestScannedGroupForItemDB
@@ -40,6 +41,7 @@
 ./internal/scanner TestHDR10PlusBackfillLeavesARowRewrittenDuringTheReadDB
 ./internal/scanner TestHDR10PlusBackfillStopsWhenStorageStallsDB
 ./internal/scanner TestRescanKeepsHDR10PlusWhenTheFrameReadFailsDB
+./internal/scanner TestRescanKeepsSidecarsItCouldNotListDB
 ./internal/scanner TestScanStateCarriesProbeRejectionDB
 ./internal/scanner TestRescanKeepsProbeFactsOfARejectedUnchangedFileDB
 ./internal/scanner TestFinalizeVariantsKeepsMatchSuppressionDB
@@ -122,6 +124,19 @@
 # reconciled first, and the removal grace holds the book for the new path.
 ./internal/scanner TestScanSubtreeAudiobookRenameKeepsBookDB
 
+# A full scan that holds a few files at a time catalogs a library like one that
+# holds them all: groups and roots spanning batches, a deleted top-level
+# folder, an unreadable folder and a dropped mount.
+./internal/scanner TestFullScanInBatchesCatalogsLikeOneBatchDB
+
+# A batched full scan finds the cataloged rows of extras, which it reads by
+# path after the primary files, instead of taking them for new files.
+./internal/scanner TestFullScanInBatchesFindsCatalogedExtrasDB
+
+# A batched full scan whose later batch read fails reconciles nothing: no file
+# is marked missing and no snapshot is rewritten from the partial walk.
+./internal/scanner TestFullScanInBatchesFailedReadReconcilesNothingDB
+
 # Stale membership removal locks the series before it deletes, in the order
 # curated rebind and split take them.
 ./internal/catalog TestStaleMembershipRemovalLocksSeriesFirstDB
@@ -195,6 +210,9 @@
 
 # Minting a key for another account holds the Owner rules against a concurrent promotion.
 ./internal/api/handlers TestAdminAPIKeyCreationHoldsOwnerRulesAgainstPromotionDB
+
+# Deleting an account removes its personal collections' artwork.
+./internal/api/handlers TestAdminAccountDeleteRemovesCollectionArtworkDB
 
 # Recovery identity changes retire links and prevent delivery to a stale address.
 ./internal/passwordreset TestResetLinkRetiresOnRecoveryEmailChangeDB
@@ -448,6 +466,9 @@
 
 # Intro analysis state timestamps and config-hash isolation.
 ./internal/intromarkers TestSeasonStateIsKeyedByAnalysisHashPostgres
+
+# The nightly episode pass loads whole seasons a page at a time.
+./internal/intromarkers TestEligibleCandidatePagesHoldWholeSeasonsPostgres
 
 # Credits tail failures replace legacy metadata verdicts and back off.
 ./internal/intromarkers TestMovieTailFailureReplacesMetadataUnusableRowPostgres

@@ -231,37 +231,48 @@ func (d *DurableCompatPlaybackStore) Put(session PlaybackSession) {
 // unstarted negotiations for the same compat token, client device, and item.
 // The advisory transaction lock makes the replacement atomic across Silo
 // processes; the in-memory mutation is likewise atomic for the local process.
-func (d *DurableCompatPlaybackStore) PutNegotiated(session PlaybackSession) {
+//
+// Unlike Put, a failed write is returned and the negotiation is dropped from
+// the cache: nothing has used its PlaySessionId yet, and an ID only this
+// process could resolve would fail on every other replica. The cached
+// negotiations it displaced are restored.
+func (d *DurableCompatPlaybackStore) PutNegotiated(session PlaybackSession) error {
 	if d.pool == nil {
-		d.mem.PutNegotiated(session)
-		return
+		return d.mem.PutNegotiated(session)
 	}
 
 	scope := negotiatedPlaybackScope(session.CompatToken, session.ClientDeviceID, session.RouteItemID)
 	unlockSession := d.lockSessionMutation(scope)
 	defer unlockSession()
 	d.cacheMutationMu.RLock()
-	stored, locallyRemoved := d.mem.putNegotiatedNormalized(session)
+	stored, displaced := d.mem.putNegotiatedNormalized(session)
 	defer d.finishCacheMutation(stored.ID, stored.CompatToken)
 	d.markIDValidated(stored.ID)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	durablyRemoved, err := d.replaceUnstartedNegotiation(ctx, stored)
+	d.clearUnpersisted(stored.ID)
 	if err != nil {
-		d.markUnpersisted(stored.ID)
 		slog.WarnContext(ctx, "persist negotiated compat playback session failed",
 			"component", "jellycompat",
 			"error", err,
 			"play_session_id", playSessionFingerprint(stored.ID),
 		)
-	} else {
-		d.clearUnpersisted(stored.ID)
+		// The transaction rolled back, so the displaced negotiations are still
+		// durable and the client may hold their URLs: put them back in the
+		// cache with their bookkeeping untouched.
+		d.mem.undoNegotiated(stored.ID, displaced)
+		for _, s := range displaced {
+			d.bumpCacheGenerations(s.ID, "")
+		}
+		d.invalidateValidation("", stored.CompatToken)
+		return err
 	}
 
-	removed := make(map[string]struct{}, len(locallyRemoved)+len(durablyRemoved))
-	for _, id := range locallyRemoved {
-		removed[id] = struct{}{}
+	removed := make(map[string]struct{}, len(displaced)+len(durablyRemoved))
+	for _, s := range displaced {
+		removed[s.ID] = struct{}{}
 	}
 	for _, id := range durablyRemoved {
 		removed[id] = struct{}{}
@@ -273,6 +284,7 @@ func (d *DurableCompatPlaybackStore) PutNegotiated(session PlaybackSession) {
 		d.bumpCacheGenerations(id, "")
 	}
 	d.invalidateValidation("", stored.CompatToken)
+	return nil
 }
 
 func (d *DurableCompatPlaybackStore) replaceUnstartedNegotiation(
@@ -358,12 +370,20 @@ func negotiatedPlaybackScope(compatToken, clientDeviceID, routeItemID string) st
 // session. Query failures preserve a still-valid cache entry: a temporary DB
 // outage must not interrupt an already-playing stream.
 func (d *DurableCompatPlaybackStore) Get(id string) (*PlaybackSession, bool) {
+	session, ok, _ := d.Lookup(id)
+	return session, ok
+}
+
+// Lookup is Get that reports a failed durable read when no cached copy can
+// stand in for the row, so a PlaySessionId grant can answer a retryable error
+// instead of treating an unreadable session as absent.
+func (d *DurableCompatPlaybackStore) Lookup(id string) (*PlaybackSession, bool, error) {
 	if d.pool == nil {
-		return d.mem.Get(id)
+		return d.mem.Lookup(id)
 	}
 	cached, cachedOK := d.mem.Get(id)
 	if cachedOK && cached.UpstreamSessionID != "" && !d.shouldRevalidateID(id) {
-		return cached, cachedOK
+		return cached, cachedOK, nil
 	}
 	if !cachedOK {
 		// Cold callers must load (or share a future single-flight); another
@@ -373,30 +393,33 @@ func (d *DurableCompatPlaybackStore) Get(id string) (*PlaybackSession, bool) {
 	generation := d.idGenerationSnapshot(id)
 	s, ok, err := d.load(id)
 	if err != nil {
-		return cached, cachedOK
+		if cachedOK {
+			return cached, true, nil
+		}
+		return nil, false, err
 	}
 	d.cacheMutationMu.Lock()
 	defer d.cacheMutationMu.Unlock()
 	if generation != d.idGenerationSnapshot(id) {
 		d.invalidateValidation(id, "")
-		return d.mem.Get(id)
+		return d.mem.Lookup(id)
 	}
 	if ok && s.Terminal {
 		d.clearPendingUpdates(id)
 	} else if ok && d.hasPendingUpdates(id) {
 		if current, currentOK := d.mem.Get(id); currentOK {
-			return current, true
+			return current, true, nil
 		}
 	}
 	if ok && !s.Terminal {
 		if local, localOK := d.mem.GetFinalizable(id, s.CompatToken); localOK && local.Terminal {
-			return nil, false
+			return nil, false, nil
 		}
 	}
 	if !ok {
 		compatToken := d.mem.compatTokenForID(id)
 		if current, currentOK := d.mem.GetFinalizable(id, compatToken); currentOK && d.repairUnpersisted(current) {
-			return d.mem.Get(id)
+			return d.mem.Lookup(id)
 		}
 		d.clearUnpersisted(id)
 		d.clearPendingUpdates(id)
@@ -404,12 +427,12 @@ func (d *DurableCompatPlaybackStore) Get(id string) (*PlaybackSession, bool) {
 		if cachedOK || compatToken != "" {
 			d.bumpCacheGenerations(id, "")
 		}
-		return nil, false
+		return nil, false, nil
 	}
 	d.clearUnpersisted(id)
 	d.mem.Put(*s)
 	d.bumpCacheGenerations(id, s.CompatToken)
-	return d.mem.Get(id)
+	return d.mem.Lookup(id)
 }
 
 // Delete removes the session from both the cache and Postgres.
