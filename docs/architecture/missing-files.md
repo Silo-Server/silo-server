@@ -159,7 +159,10 @@ What the new path says about the title decides the row's links:
   become another title: the stand-in is missing, so serving an original, its
   subtitles, or its embedded tracks is refused as for any missing file, and
   the download is deleted with the stand-in after the grace, as it was with
-  the missing row before rows were reused. Root and group claims are untouched:
+  the missing row before rows were reused. A prepared (remux or transcode) copy is served,
+  and prepared again, only for a download on the file row it was made from,
+  so a parked download is not given the copy of the row it left; a missing
+  row's own copies are served as before. Root and group claims are untouched:
   claims are kept by present files, so the old path's claims age out as they
   do when a file goes missing, and the new path is claimed by matching as for
   a new file.

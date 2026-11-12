@@ -286,11 +286,14 @@ func moveRowToTitle(ctx context.Context, q fileQueryer, moved *scanStateFile, mf
 			p.held_item_first_seen_at, p.held_episode_first_seen_at, p.held_episode_first_seen_scan_run_id
 		FROM previous p
 		WHERE EXISTS (SELECT 1 FROM moved)
-		  AND (p.content_id, p.episode_id) IS DISTINCT FROM ($32::text, $33::text)
-		  AND (p.content_id IS NOT NULL OR p.episode_id IS NOT NULL OR EXISTS (
-			SELECT 1 FROM downloads d
-			WHERE d.media_file_id = p.id AND (d.content_id, d.episode_id) IS DISTINCT FROM ($32::text, $33::text)
-		  ))
+		  AND (
+			((p.content_id IS NOT NULL OR p.episode_id IS NOT NULL)
+			  AND (p.content_id, p.episode_id) IS DISTINCT FROM ($32::text, $33::text))
+			OR EXISTS (
+				SELECT 1 FROM downloads d
+				WHERE d.media_file_id = p.id AND (d.content_id, d.episode_id) IS DISTINCT FROM ($32::text, $33::text)
+			)
+		  )
 		RETURNING id
 	),
 	-- A download was authorized for the title it names, so it stays with that

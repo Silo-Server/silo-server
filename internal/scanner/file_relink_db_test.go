@@ -276,6 +276,13 @@ func TestScanKeepsFileRowAcrossRenameDB(t *testing.T) {
 			wantSameRow: true,
 		},
 		{
+			name:        "an unlinked row's download of another title goes to a stand-in",
+			from:        "Movie (2020)/Movie (2020).mkv",
+			to:          "Other Film (2019)/Other Film (2019).mkv",
+			unlinked:    true,
+			wantSameRow: true,
+		},
+		{
 			name:         "revert after the trash sweep took the stand-in relinks the row",
 			from:         "Movie (2020)/Movie (2020).mkv",
 			to:           "Other Film (2019)/Other Film (2019).mkv",
@@ -357,6 +364,9 @@ type relinkCase struct {
 	// secondRoot puts to under a second library root, which the move leaves
 	// empty again on a revert.
 	secondRoot bool
+	// unlinked clears the original row's links after its download of the
+	// title was registered.
+	unlinked bool
 	// wantSameRow is whether the file at to keeps the original row, and
 	// wantLinks whether that row keeps its title links.
 	wantSameRow bool
@@ -570,6 +580,11 @@ func checkRelinkCase(t *testing.T, pool *pgxpool.Pool, tc relinkCase) {
 	}
 	contentID, episodeID := seedRelinkTitle(t, pool, repo, tc, original)
 	download := seedRelinkDownload(t, pool, original.ID, contentID, episodeID)
+	if tc.unlinked {
+		if _, err := pool.Exec(ctx, `UPDATE media_files SET content_id = NULL, episode_id = NULL WHERE id = $1`, original.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if tc.claimRoot != "" {
 		if _, err := pool.Exec(ctx, `INSERT INTO media_item_roots (media_folder_id, canonical_root_path, content_id) VALUES ($1, $2, $3)`,
 			folderID, tc.path(root, tc.claimRoot), contentID); err != nil {
@@ -612,9 +627,13 @@ func checkRelinkCase(t *testing.T, pool *pgxpool.Pool, tc relinkCase) {
 	if moved.IntroStart == nil {
 		t.Fatalf("moved row lost its hand-set intro marker")
 	}
-	if tc.wantLinks {
+	switch {
+	case tc.wantLinks:
 		checkRelinkKeptLinks(t, original, moved, contentID, episodeID)
-	} else {
+	case tc.unlinked:
+		checkRelinkDownloadOnlyStandIn(t, pool, repo, folderID, original, from, download)
+		return
+	default:
 		checkRelinkRematch(t, pool, repo, tc, queue, original, moved, root, from, to, contentID, episodeID)
 	}
 	// The download was authorized for the original title, so it stays with
@@ -802,6 +821,36 @@ func checkRelinkRevert(t *testing.T, pool *pgxpool.Pool, s *Scanner, folder *mod
 	}
 	if got, gotOther := relinkDownloadFile(t, pool, download), relinkDownloadFile(t, pool, otherDownload); got != wantDownload || gotOther != left.ID {
 		t.Fatalf("downloads after the revert point at %d (old title) and %d (other title), want %d and the stand-in %d", got, gotOther, wantDownload, left.ID)
+	}
+}
+
+// checkRelinkDownloadOnlyStandIn checks a retitle of a row with no links that
+// still carries a download of a title: the download goes to a stand-in that
+// holds no title, and the trash sweep deletes that stand-in, and the download
+// with it, once its grace has passed. A missing row is never queued for
+// matching.
+func checkRelinkDownloadOnlyStandIn(t *testing.T, pool *pgxpool.Pool, repo *FileRepository, folderID int, original *models.MediaFile, from, download string) {
+	t.Helper()
+	ctx := t.Context()
+	left, err := repo.GetByPath(ctx, from)
+	if err != nil {
+		t.Fatalf("GetByPath(old path): %v", err)
+	}
+	if left.MissingSince == nil || left.ContentID != "" || left.EpisodeID != "" || relinkStandInFor(t, pool, left.ID) != original.ID {
+		t.Fatalf("row left at the old path = missing %v links %q/%q stand-in for %d, want a missing stand-in for %d with no links",
+			left.MissingSince, left.ContentID, left.EpisodeID, relinkStandInFor(t, pool, left.ID), original.ID)
+	}
+	if got := relinkDownloadFile(t, pool, download); got != left.ID {
+		t.Fatalf("download of the other title points at file %d, want the stand-in %d", got, left.ID)
+	}
+	if _, err := repo.DeleteMissingByFolder(ctx, folderID, 0, nil); err != nil {
+		t.Fatalf("trash sweep: %v", err)
+	}
+	if _, err := repo.GetByPath(ctx, from); !errors.Is(err, ErrFileNotFound) {
+		t.Fatalf("trash sweep kept the stand-in with no links: err = %v", err)
+	}
+	if got := relinkDownloadFile(t, pool, download); got != 0 {
+		t.Fatalf("download survived its stand-in on file %d", got)
 	}
 }
 

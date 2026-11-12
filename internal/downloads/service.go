@@ -1532,6 +1532,12 @@ func (s *Service) resolveDownloadBytesTarget(ctx context.Context, dl *Download, 
 		if err != nil {
 			return nil, err
 		}
+		// An artifact is prepared from one file row. A download the scanner
+		// parked on a retitle's stand-in still names the artifact of the row
+		// it left, which now belongs to another title, so it is not served.
+		if artifact.MediaFileID != dl.MediaFileID {
+			return nil, catalog.ErrItemNotFound
+		}
 		// The quality ceiling applies to what is actually served — the prepared
 		// artifact's resolution, not the source's (a 720p transcode of a 4K
 		// source must stay downloadable under a 1080p ceiling).

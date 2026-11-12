@@ -108,9 +108,14 @@ func (r *ArtifactRepository) PrepareDownloadAgain(ctx context.Context, d *Downlo
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	var status string
-	if err := tx.QueryRow(ctx, `SELECT status FROM download_artifacts WHERE id = $1 FOR UPDATE`, d.ArtifactID).Scan(&status); err != nil {
+	// The artifact must be prepared from the download's own file row: a
+	// download parked on a retitle's stand-in names the artifact of a row that
+	// now belongs to another title, and preparing it again would encode that
+	// title for this download.
+	if err := tx.QueryRow(ctx, `SELECT status FROM download_artifacts WHERE id = $1 AND media_file_id = $2 FOR UPDATE`, d.ArtifactID, d.MediaFileID).Scan(&status); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			// The recipe is gone with its row; only a new download can choose one.
+			// The recipe is gone with its row, or belongs to another file;
+			// only a new download can choose one.
 			return nil, false, fmt.Errorf("prepared file recipe is gone: %w", ErrDownloadNotActive)
 		}
 		return nil, false, fmt.Errorf("locking artifact to prepare again: %w", err)
