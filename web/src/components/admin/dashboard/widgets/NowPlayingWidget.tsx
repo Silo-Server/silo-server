@@ -263,7 +263,7 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
   const methodMeta = activityMethodMeta(method);
 
   return (
-    <div className="surface-panel flex flex-1 gap-3.5 rounded-2xl border-0 p-3.5 transition-colors duration-150">
+    <div className="surface-panel flex min-w-0 flex-1 gap-3.5 rounded-2xl border-0 p-3.5 transition-colors duration-150">
       {/* Poster */}
       <div
         className="bg-surface border-border relative flex w-[60px] flex-shrink-0 items-center justify-center self-start overflow-hidden rounded-lg border"
