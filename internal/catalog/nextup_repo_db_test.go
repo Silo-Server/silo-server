@@ -184,7 +184,7 @@ func TestEpisodesAboveQualityCeilingStayHiddenPostgres(t *testing.T) {
 	f := newNextUpSpecialsFixture(t)
 	series, started := f.prefix+"-series", f.prefix+"-started"
 	episode := func(n int) string { return fmt.Sprintf("%s-s01e%02d", series, n) }
-	startedEpisode := started + "-s01e01"
+	startedEpisode := started + "-s01e02"
 	other := seedQualityCeilingSeries(t, f, series, started)
 
 	all := []string{episode(1), episode(2), episode(3), episode(4)}
@@ -208,8 +208,8 @@ func TestEpisodesAboveQualityCeilingStayHiddenPostgres(t *testing.T) {
 			for _, q := range []NextUpQuery{
 				{UserID: f.userID, ProfileID: f.profileID, AccessFilter: tc.access, Limit: 20, RankByRelease: true},
 				{UserID: f.userID, ProfileID: f.profileID, AccessFilter: tc.access, SeriesID: series, Limit: 5},
-				// The resumable branch offers a started episode only when it
-				// can play; the started series has only E2, in 4K.
+				// The resumable branch offers the started E2 only when it can
+				// play, and never E3 in its place.
 				{UserID: f.userID, ProfileID: f.profileID, AccessFilter: tc.access, SeriesID: started, Limit: 5, EnableResumable: true},
 			} {
 				results, err := repo.ListNextUp(ctx, q)
@@ -296,13 +296,14 @@ func assertRecentTVTargets(t *testing.T, pool *pgxpool.Pool, folder int, prefix 
 // and returns the second library. In series, E1 (1080p, watched), E2 (4K,
 // arriving alone a week later), and E3-E4 (one 1080p multi-episode file);
 // a second library holds a 1080p E2, which counts only where the viewer may
-// use that library. In started, the profile is partway through a 4K-only E1.
-// It has no library arrival row, so Recently Added doesn't count it.
+// use that library. In started, the profile finished E1 (1080p), is partway
+// through a 4K-only E2, and E3 is 1080p: a capped viewer's resumable Next Up
+// must wait on E2 rather than offer E3. The started series has no library
+// arrival rows, so Recently Added doesn't count it.
 func seedQualityCeilingSeries(t *testing.T, f nextUpSpecialsFixture, series, started string) int {
 	t.Helper()
 	ctx := t.Context()
 	episode := func(n int) string { return fmt.Sprintf("%s-s01e%02d", series, n) }
-	startedEpisode := started + "-s01e01"
 	base := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 	f.exec(t, `INSERT INTO media_items (content_id,type,title) VALUES ($1,'series',$1)`, series)
 	f.exec(t, `INSERT INTO media_item_libraries (content_id,media_folder_id,first_seen_at) VALUES ($1,$2,$3)`, series, f.folder, base)
@@ -327,9 +328,14 @@ func seedQualityCeilingSeries(t *testing.T, f nextUpSpecialsFixture, series, sta
 	f.exec(t, `INSERT INTO media_files (episode_id,media_folder_id,file_path,resolution) VALUES ($1,$2,$3,'1080p')`, episode(2), other, "/other/"+episode(2))
 
 	f.exec(t, `INSERT INTO media_items (content_id,type,title) VALUES ($1,'series',$1)`, started)
-	f.exec(t, `INSERT INTO episodes (content_id,series_id,season_number,episode_number,title) VALUES ($1,$2,1,1,$1)`, startedEpisode, started)
-	f.exec(t, `INSERT INTO media_files (episode_id,media_folder_id,file_path,resolution) VALUES ($1,$2,$3,'2160p')`, startedEpisode, f.folder, "/"+startedEpisode)
+	for n, resolution := range []string{"1080p", "2160p", "1080p"} {
+		id := fmt.Sprintf("%s-s01e%02d", started, n+1)
+		f.exec(t, `INSERT INTO episodes (content_id,series_id,season_number,episode_number,title) VALUES ($1,$2,1,$3,$1)`, id, started, n+1)
+		f.exec(t, `INSERT INTO media_files (episode_id,media_folder_id,file_path,resolution) VALUES ($1,$2,$3,$4)`, id, f.folder, "/"+id, resolution)
+	}
+	f.exec(t, `INSERT INTO user_watch_progress (user_id,profile_id,media_item_id,position_seconds,completed,updated_at) VALUES ($1,$2,$3,0,true,$4)`,
+		f.userID, f.profileID, started+"-s01e01", base.Add(2*time.Hour))
 	f.exec(t, `INSERT INTO user_watch_progress (user_id,profile_id,media_item_id,position_seconds,completed,updated_at) VALUES ($1,$2,$3,30,false,$4)`,
-		f.userID, f.profileID, startedEpisode, base.Add(2*time.Hour))
+		f.userID, f.profileID, started+"-s01e02", base.Add(3*time.Hour))
 	return other
 }
