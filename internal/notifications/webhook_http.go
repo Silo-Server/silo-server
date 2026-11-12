@@ -46,18 +46,9 @@ func newWebhookHTTPClient(allowPrivate func() bool) *http.Client {
 // Callers may use a longer total timeout when an upstream service has its own
 // request deadline that must expire before Silo gives up waiting for a response.
 func newNotificationHTTPClient(allowPrivate func() bool, requestTimeout time.Duration) *http.Client {
-	dialer := newNotificationDialer(allowPrivate)
-	transport := &http.Transport{
-		DialContext:           dialer.DialContext,
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          16,
-		IdleConnTimeout:       60 * time.Second,
-		TLSHandshakeTimeout:   5 * time.Second,
-		ResponseHeaderTimeout: requestTimeout,
-	}
 	return &http.Client{
 		Timeout:   requestTimeout,
-		Transport: transport,
+		Transport: newNotificationTransport(allowPrivate, requestTimeout),
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= webhookMaxRedirects {
 				return errors.New("too many redirects")
@@ -70,7 +61,47 @@ func newNotificationHTTPClient(allowPrivate func() bool, requestTimeout time.Dur
 	}
 }
 
-func newNotificationDialer(allowPrivate func() bool) *net.Dialer {
+// notificationTransport keeps separate connection pools for the two values of
+// the private-destinations setting and picks one per request (each redirect
+// hop included) from the setting's current value. The guard runs only when a
+// connection is dialed, so a single pool would let a keep-alive connection to a
+// private address opened while the setting was on keep delivering after an
+// administrator turns it off.
+type notificationTransport struct {
+	allowPrivate func() bool
+	public       *http.Transport
+	private      *http.Transport
+}
+
+func newNotificationTransport(allowPrivate func() bool, requestTimeout time.Duration) *notificationTransport {
+	pool := func(allow bool) *http.Transport {
+		dialer := newNotificationDialer(allow)
+		return &http.Transport{
+			DialContext:           dialer.DialContext,
+			ForceAttemptHTTP2:     true,
+			MaxIdleConns:          16,
+			IdleConnTimeout:       60 * time.Second,
+			TLSHandshakeTimeout:   5 * time.Second,
+			ResponseHeaderTimeout: requestTimeout,
+		}
+	}
+	return &notificationTransport{allowPrivate: allowPrivate, public: pool(false), private: pool(true)}
+}
+
+func (t *notificationTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if t.allowPrivate != nil && t.allowPrivate() {
+		return t.private.RoundTrip(req)
+	}
+	return t.public.RoundTrip(req)
+}
+
+// CloseIdleConnections closes idle connections in both pools.
+func (t *notificationTransport) CloseIdleConnections() {
+	t.public.CloseIdleConnections()
+	t.private.CloseIdleConnections()
+}
+
+func newNotificationDialer(allowPrivate bool) *net.Dialer {
 	return &net.Dialer{
 		Timeout: 5 * time.Second,
 		Control: func(_, address string, _ syscall.RawConn) error {
@@ -79,7 +110,7 @@ func newNotificationDialer(allowPrivate func() bool) *net.Dialer {
 				return fmt.Errorf("webhook dial: %w", err)
 			}
 			addr, err := netip.ParseAddr(host)
-			if err != nil || !webhookIPAllowed(addr, allowPrivate != nil && allowPrivate()) {
+			if err != nil || !webhookIPAllowed(addr, allowPrivate) {
 				return errPrivateDestination
 			}
 			return nil
