@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -30,7 +31,43 @@ type mapper struct {
 	imageTagSigner *imageTagSigner
 	// ratings decides which external ratings items carry beyond IMDb and
 	// TMDB, as on native title pages. Nil shows only those two.
-	ratings *ratingsources.Policy
+	ratings *shownRatings
+}
+
+// shownRatingsTTL is how long the compat mappers keep one read of the shown
+// rating sources, failed or not.
+const shownRatingsTTL = time.Second
+
+// shownRatings reads which rating sources the administrator shows, for the
+// compat mappers. A mapper has no request to read once for, and the policy
+// caches nothing while its reads fail, so a response would otherwise retry
+// the database once per item. Keeping each read for shownRatingsTTL bounds
+// that to one read per second.
+type shownRatings struct {
+	policy *ratingsources.Policy
+	now    func() time.Time
+
+	mu    sync.Mutex
+	sel   ratingsources.Selection
+	until time.Time
+}
+
+func newShownRatings(policy *ratingsources.Policy) *shownRatings {
+	return &shownRatings{policy: policy, now: time.Now}
+}
+
+// shows reports whether items carry ratings from source.
+func (s *shownRatings) shows(source string) bool {
+	if s == nil || s.policy == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if now := s.now(); !now.Before(s.until) {
+		s.sel = s.policy.Selection(context.Background())
+		s.until = now.Add(shownRatingsTTL)
+	}
+	return s.sel.Shows(source)
 }
 
 func newMapper(codec *ResourceIDCodec, cfg *config.Config) *mapper {
@@ -239,7 +276,7 @@ func (m *mapper) criticRating(score *int) *float64 {
 	if score == nil || *score < 0 || *score > 100 {
 		return nil
 	}
-	if !m.ratings.Selection(context.Background()).Shows(models.RatingSourceRTCritic) {
+	if !m.ratings.shows(models.RatingSourceRTCritic) {
 		return nil
 	}
 	v := float64(*score)

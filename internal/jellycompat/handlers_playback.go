@@ -407,6 +407,9 @@ type PlaybackHandler struct {
 	// compatMoves single-flights moving a transcode off a node that stopped
 	// answering, so every request that finds the node dead waits on one move.
 	compatMoves singleflight.Group
+	// ratings decides which external ratings the /Sessions NowPlayingItem
+	// carries; nil shows only IMDb and TMDB.
+	ratings *shownRatings
 }
 
 func (h *PlaybackHandler) serverBitrateCap(ctx context.Context, session *Session) (int, error) {

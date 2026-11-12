@@ -2,6 +2,8 @@ package jellycompat
 
 import (
 	"context"
+	"errors"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -43,7 +45,7 @@ func TestCriticRatingFollowsShownRatingSources(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := newMapper(NewResourceIDCodec(), &config.Config{})
-			m.ratings = tc.ratings
+			m.ratings = newShownRatings(tc.ratings)
 			for name, dto := range map[string]baseItemDTO{
 				"list":   m.itemFromList(list, false, nil, nil),
 				"detail": m.itemFromDetail(detail, false, nil),
@@ -56,6 +58,30 @@ func TestCriticRatingFollowsShownRatingSources(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+type failingSettings struct{ reads atomic.Int32 }
+
+func (s *failingSettings) Get(context.Context, string) (string, error) {
+	s.reads.Add(1)
+	return "", errors.New("database unavailable")
+}
+
+// The policy caches nothing while its reads fail, and each retry can wait on
+// the database, so a list response must not retry once per item.
+func TestCriticRatingReadsFailingPolicyOncePerList(t *testing.T) {
+	settings := &failingSettings{}
+	m := newMapper(NewResourceIDCodec(), &config.Config{})
+	m.ratings = newShownRatings(ratingsources.NewPolicy(settings, nil))
+	critic := 80
+	for range 20 {
+		if dto := m.itemFromList(upstreamListItem{ContentID: "movie", Type: "movie", RatingRTCritic: &critic}, false, nil, nil); dto.CriticRating != nil {
+			t.Fatalf("CriticRating = %v while the policy cannot be read", *dto.CriticRating)
+		}
+	}
+	if got := settings.reads.Load(); got != 1 {
+		t.Fatalf("mapping 20 items read the settings %d times, want 1", got)
 	}
 }
 
