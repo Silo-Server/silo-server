@@ -37,6 +37,11 @@ vi.mock("@/hooks/queries/libraryPageState", async (importOriginal) => ({
   }),
 }));
 
+// The page starts the Recommended tab's layout read; the tab itself is a stand-in here.
+vi.mock("@/hooks/queries/sections", () => ({
+  useLibraryLayout: () => ({}),
+}));
+
 vi.mock("@/hooks/useDocumentTitle", () => ({
   useDocumentTitle: vi.fn(),
 }));

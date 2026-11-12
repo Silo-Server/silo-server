@@ -500,16 +500,33 @@ export async function v2<K extends V2OperationKey>(
   if (timeoutMs === false) {
     return sendV2(key, url, init, snapshot, options);
   }
-  // The deadline covers the whole exchange, body included: a server can send
-  // the headers and then stall.
+  return withV2Deadline(key, timeoutMs, options.signal, (signal) => {
+    init.signal = signal;
+    return sendV2(key, url, init, snapshot, options);
+  });
+}
+
+/**
+ * Runs one v2 exchange under a deadline: `send` gets a signal that aborts
+ * after `timeoutMs` or when `callerSignal` does, and must finish reading the
+ * response under it, since a server can send the headers and then stall. A
+ * failure the deadline caused rejects with `V2TimeoutError`. Exposed for the
+ * few callers that issue the fetch themselves (an explicit bearer token
+ * outside the shared session).
+ */
+export async function withV2Deadline<T>(
+  key: V2OperationKey,
+  timeoutMs: number,
+  callerSignal: AbortSignal | null | undefined,
+  send: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
   const deadline = startRequestDeadline(
     timeoutMs,
     () => new V2TimeoutError(v2Operations[key], timeoutMs),
-    options.signal,
+    callerSignal,
   );
-  init.signal = deadline.signal;
   try {
-    return await sendV2(key, url, init, snapshot, options);
+    return await send(deadline.signal);
   } catch (err) {
     // A network or abort failure after the deadline fired is the deadline's
     // doing; a server answer or a context change that arrived in time stands.

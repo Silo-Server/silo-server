@@ -5,6 +5,7 @@ import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import LibraryHeader from "@/components/LibraryHeader";
 import { useUserLibraries } from "@/hooks/queries/libraries";
+import { useLibraryLayout } from "@/hooks/queries/sections";
 import { useStartShuffle } from "@/hooks/queries/shuffles";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useT } from "@/i18n";
@@ -108,6 +109,12 @@ export default function LibraryPage() {
     () => parseLibraryPageState(new URLSearchParams(searchParamsKey), libraryType),
     [libraryType, searchParamsKey],
   );
+
+  // The Recommended tab's layout read starts here, beside the saved-state read
+  // the page waits on, not after it: on a first visit a server that stops
+  // answering then fails the tab one deadline after the click instead of two.
+  // This observer also refetches a failed layout when the tab is shown again.
+  useLibraryLayout(id, { enabled: Boolean(library) && activeTab === "recommended" });
 
   // Tracks whether LibraryRecommended is currently rendering a hero banner.
   // We can't derive this from layout metadata alone — a featured section can

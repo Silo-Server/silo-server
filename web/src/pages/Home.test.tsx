@@ -9,6 +9,7 @@ import { waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import Home from "./Home";
+import { V2TimeoutError } from "@/api/v2/request";
 import type { HomeSectionItemsResponse } from "@/api/types";
 import { SIDEBAR_DETAILS_REVEAL_DEADLINE_MS } from "@/components/sidebarItemNavigation";
 import { sectionKeys } from "@/hooks/queries/keys";
@@ -359,6 +360,31 @@ describe("Home", () => {
 
     expect(container.querySelectorAll('[data-kind="section-row"]')).toHaveLength(20);
     expect(container.querySelectorAll("[data-home-section-placeholder]")).toHaveLength(0);
+  });
+
+  it.each([
+    {
+      name: "says the server isn't responding when the layout read times out",
+      error: new V2TimeoutError("getHomeLayout", 30_000),
+      text: "The server isn't responding. Try again in a moment.",
+    },
+    {
+      name: "keeps its own explanation for other layout failures",
+      error: new Error("Failed to fetch"),
+      text: "We couldn't load your section layout right now.",
+    },
+  ])("$name", async ({ error, text }) => {
+    mockUseHomeLayout.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      error,
+      refetch: vi.fn(),
+    });
+    await mountHome(new QueryClient());
+
+    expect(container.textContent).toContain("Unable to load the homepage");
+    expect(container.textContent).toContain(text);
   });
 
   it("renders every Home row in browsers without IntersectionObserver", async () => {
