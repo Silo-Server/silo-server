@@ -253,6 +253,34 @@ describe("engine worker", () => {
     ]);
   });
 
+  it("starts at the first IDR when the decoder rejects the recovery point the file opens on", async () => {
+    // A recording that opens on a recovery point, with its first IDR at 3 s.
+    file.packets = Array.from({ length: 12 }, (_, frame) => ({
+      timestamp: FIRST_TIMESTAMP + frame * 0.5,
+      duration: 0.5,
+      type: frame % 6 === 0 ? ("key" as const) : ("delta" as const),
+      data: accessUnit(
+        ...(frame === 0
+          ? [RECOVERY_POINT_SEI, NON_IDR_SLICE]
+          : [frame === 6 ? IDR_SLICE : NON_IDR_SLICE]),
+      ),
+      idr: frame === 6,
+    }));
+    file.description = AVCC;
+    const decoded = stubDecoder(0);
+    const { posted, send } = await openWorker();
+
+    send({ type: "start", generation: 11, position: 1 });
+    await vi.waitFor(() =>
+      expect(posted.some((m) => m.type === "video-ended" && m.generation === 11)).toBe(true),
+    );
+    expect(posted.some((m) => m.type === "error")).toBe(false);
+    expect(decoded).toEqual([
+      [0, 0.5],
+      [3, 3.5, 4, 4.5, 5, 5.5],
+    ]);
+  });
+
   it("starts at the recovery point before when decode() rejects the key from one", async () => {
     file.packets = openGop;
     file.description = AVCC;
