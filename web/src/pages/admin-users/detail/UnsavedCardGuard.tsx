@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { useT } from "@/i18n";
+import { TOUCH_TARGETS } from "@/lib/touchTargets";
 
 import { ACCESS_CARD_TITLE_KEYS, useCardEditing } from "./cardEditing";
 import { parseUserDetailTab } from "./userDetailTabs";
@@ -75,7 +76,7 @@ export function UnsavedCardGuard() {
         stay();
       }}
     >
-      <AlertDialogContent>
+      <AlertDialogContent className={TOUCH_TARGETS}>
         <AlertDialogHeader>
           <AlertDialogTitle>{t("web.admin.users.detail.common.unsaved.title")}</AlertDialogTitle>
           <AlertDialogDescription>

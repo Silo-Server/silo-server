@@ -11,6 +11,7 @@ import { useIssuePasswordReset, useUpdateUser } from "@/hooks/queries/admin/user
 import { useT } from "@/i18n";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { formatDateTime } from "@/lib/datetime";
+import { TOUCH_HIT_AREA, TOUCH_TARGETS } from "@/lib/touchTargets";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -170,7 +171,10 @@ export function AdminUserPasswordResetDialog({
       link: (chunks) => (
         <Link
           to="/admin/settings/general"
-          className="text-foreground inline-flex items-center gap-1 font-medium hover:underline"
+          className={cn(
+            "text-foreground inline-flex items-center gap-1 font-medium hover:underline",
+            TOUCH_HIT_AREA,
+          )}
         >
           {chunks}
           <ArrowRight className="h-3 w-3" aria-hidden="true" />
@@ -186,7 +190,7 @@ export function AdminUserPasswordResetDialog({
         if (!open && !busy.current) onClose();
       }}
     >
-      <DialogContent className="min-w-0 sm:max-w-lg">
+      <DialogContent className={cn("min-w-0 sm:max-w-lg", TOUCH_TARGETS)}>
         <DialogHeader>
           <DialogTitle>
             {t("web.admin.users.passwordResetDialog.title", { username: user.username })}
@@ -224,7 +228,8 @@ export function AdminUserPasswordResetDialog({
         {resetURL && (
           <div className="min-w-0 space-y-2">
             <div className="bg-muted min-w-0 overflow-hidden rounded-md p-2.5">
-              <code className="block truncate text-xs">{resetURL}</code>
+              {/* On a phone the whole link shows, wrapped; wider screens truncate it. */}
+              <code className="block text-xs max-lg:wrap-anywhere lg:truncate">{resetURL}</code>
             </div>
             <p className="text-muted-foreground text-xs">
               {t("web.admin.users.passwordResetDialog.linkShare", {
@@ -232,7 +237,12 @@ export function AdminUserPasswordResetDialog({
                 expires,
               })}
             </p>
-            <Button variant="outline" size="sm" onClick={() => void copy(resetURL)}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="max-sm:w-full"
+              onClick={() => void copy(resetURL)}
+            >
               <Copy className="me-1.5 h-4 w-4" /> {copyLabel}
             </Button>
           </div>
@@ -305,7 +315,11 @@ export function AdminUserPasswordResetDialog({
                     disabled={method !== "password" || pending}
                     onChange={(event) => setMustChange(event.target.checked)}
                   />
-                  <label htmlFor={mustChangeId} className="text-foreground text-xs">
+                  {/* Below `lg` the label fills a 44px-tall strip without moving anything. */}
+                  <label
+                    htmlFor={mustChangeId}
+                    className="text-foreground text-xs max-lg:-my-3.5 max-lg:flex-1 max-lg:py-3.5"
+                  >
                     {t("web.admin.users.passwordResetDialog.mustChange")}
                   </label>
                 </div>

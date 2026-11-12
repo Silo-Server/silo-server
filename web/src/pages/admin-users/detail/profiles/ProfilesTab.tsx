@@ -43,6 +43,8 @@ import {
 import { useAdminUserCapabilities, useAdminUsers } from "@/hooks/queries/admin/users";
 import { useProfiles } from "@/hooks/queries/profiles";
 import { useT } from "@/i18n";
+import { TOUCH_TARGETS } from "@/lib/touchTargets";
+import { cn } from "@/lib/utils";
 
 import { formatLastSeen } from "../format";
 import { DetailCard, InitialAvatar } from "../ui";
@@ -203,7 +205,9 @@ function ProfileRow({
       <InitialAvatar name={profile.name} seed={seed} src={profile.avatar_url} />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="truncate text-sm font-medium">{profile.name}</span>
+          <span title={profile.name} className="max-w-full min-w-0 truncate text-sm font-medium">
+            {profile.name}
+          </span>
           {profile.is_primary ? (
             <Badge variant="secondary">{t("web.admin.users.detail.profiles.badge.primary")}</Badge>
           ) : null}
@@ -234,7 +238,7 @@ function ProfileRow({
               <MoreHorizontal />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-44">
+          <DropdownMenuContent align="end" className={cn("min-w-44", TOUCH_TARGETS)}>
             <DropdownMenuItem onSelect={onEdit}>
               {t("web.admin.users.detail.profiles.editProfile")}
             </DropdownMenuItem>
@@ -316,7 +320,7 @@ function ProfileEditor({
   return (
     <>
       <Dialog open={loading} onOpenChange={(next) => (next ? undefined : onClose())}>
-        <DialogContent className="sm:max-w-sm">
+        <DialogContent className={cn("sm:max-w-sm", TOUCH_TARGETS)}>
           <DialogHeader>
             <DialogTitle>{t("web.admin.users.detail.profiles.editProfile")}</DialogTitle>
             <DialogDescription>{t("web.admin.users.detail.profiles.loading")}</DialogDescription>
@@ -337,6 +341,7 @@ function ProfileEditor({
         advisoryAgeSupported={server.maxAdvisoryAgeSupported}
         requireAdvisoryAgeSupported={server.requireAdvisoryAgeSupported}
         save={save}
+        className={TOUCH_TARGETS}
         onOpenChange={(next) => {
           if (!next) onClose();
         }}
@@ -361,7 +366,7 @@ function SetPinDialog({
   const primary = profile?.is_primary ? "yes" : "no";
   return (
     <Dialog open={profile !== null} onOpenChange={(next) => (next ? undefined : onClose())}>
-      <DialogContent className="sm:max-w-sm">
+      <DialogContent className={cn("wrap-anywhere sm:max-w-sm", TOUCH_TARGETS)}>
         <DialogHeader>
           <DialogTitle>
             {profile?.has_pin
@@ -481,6 +486,7 @@ function RemovePinDialog({
           : t("web.admin.users.detail.profiles.removePinDescription")
       }
       confirmLabel={t("web.admin.users.detail.profiles.removePin")}
+      className={TOUCH_TARGETS}
       isPending={update.isPending}
       onConfirm={() => {
         if (!profile) return;
@@ -520,6 +526,7 @@ function DeleteProfileDialog({
       }
       description={t("web.admin.users.detail.profiles.deleteDescription")}
       confirmLabel={t("web.admin.users.detail.profiles.deleteProfile")}
+      className={TOUCH_TARGETS}
       variant="destructive"
       irreversible
       isPending={remove.isPending}

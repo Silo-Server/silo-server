@@ -2179,6 +2179,54 @@ describe("usePlaybackSession mid-stream reconnect", () => {
     unmount();
   });
 
+  it("reopens a progressive remux on the same route and keeps the routes that failed", async () => {
+    const enginePlan = fixturePlanV3({
+      delivery: "original_http",
+      plan_attempt_key: "v3:engine000000000",
+    });
+    const remuxPlan = fixturePlanV3({
+      plan_id: "plan:2222222222222222",
+      delivery: "server_remux_progressive",
+      plan_attempt_key: "v3:remux0000000000",
+      stream: { ...fixturePlanV3().stream, url: "/stream/session-1/remux?seek=100" },
+    });
+    const harness = reconnectHarness({
+      initialPlan: enginePlan,
+      // Recovery moves to the remux; the server answers a reanchor with the
+      // same plan, reopened at the position.
+      replan: () => jsonResponse(playable("session-1", remuxPlan)),
+    });
+    const { result, unmount } = await startPlaying();
+
+    act(() =>
+      result.current.recoverFromFailure({ classification: "browser_engine_startup_timeout" }, 100),
+    );
+    await advance(0);
+    expect(result.current.plan?.delivery).toBe("server_remux_progressive");
+
+    act(() => result.current.recoverConnection(120, true));
+    await advance(RECONNECT_BASE_DELAY_MS);
+
+    // A no-op track_change would replan the route and could return the
+    // engine plan that already failed.
+    expect(harness.replanBodies[1]?.operation).toBe("seek_reanchor");
+    expect(harness.replanBodies[1]?.position_seconds).toBe(120);
+    expect(result.current.connectionStatus).toBe("connected");
+    expect(result.current.plan?.plan_id).toBe(remuxPlan.plan_id);
+
+    // The reconnect kept the attempt's history: a later recovery still
+    // excludes the engine plan.
+    act(() => result.current.recoverFromFailure({ classification: "decoder_error" }, 125));
+    await advance(0);
+    expect(harness.replanBodies[2]?.operation).toBe("failure_recovery");
+    expect(harness.replanBodies[2]?.attempted_plan_keys).toEqual([
+      "v3:engine000000000",
+      "v3:remux0000000000",
+    ]);
+
+    unmount();
+  });
+
   it("starts a new session at the saved position when the old one did not survive a restart", async () => {
     const harness = reconnectHarness({
       replan: () =>

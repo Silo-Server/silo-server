@@ -18,16 +18,6 @@ var (
 
 // --- Source admin token ---
 
-// SetSourceAdminToken stores an admin token for the given source.
-func (r *Repository) SetSourceAdminToken(ctx context.Context, sourceID int, token string) error {
-	_, err := r.SetSourceAdminTokenConditional(ctx, sourceID, token, -1)
-	return err
-}
-func (r *Repository) ClearSourceAdminToken(ctx context.Context, sourceID int) error {
-	_, err := r.ClearSourceAdminTokenConditional(ctx, sourceID, -1)
-	return err
-}
-
 // GetSourceWithAdminToken returns the source and its admin token.
 // The raw token is for internal service use only and must not be returned in API responses.
 func (r *Repository) GetSourceWithAdminToken(ctx context.Context, sourceID int) (*Source, string, error) {
@@ -149,13 +139,6 @@ func (r *Repository) GetMappingByID(ctx context.Context, id int) (*UserMapping, 
 	return enrichMapping(ctx, r, m)
 }
 
-func (r *Repository) UpdateMapping(ctx context.Context, id int, input UpdateMappingInput) (*UserMapping, error) {
-	return r.UpdateMappingConditional(ctx, id, input, -1)
-}
-func (r *Repository) DeleteMapping(ctx context.Context, id int) error {
-	return r.DeleteMappingConditional(ctx, id, -1)
-}
-
 // HasActiveRunForMapping reports whether a queued or running run already exists for the mapping.
 func (r *Repository) HasActiveRunForMapping(ctx context.Context, mappingID int) (bool, error) {
 	var exists bool
@@ -183,51 +166,6 @@ func (r *Repository) TouchMappingLastImported(ctx context.Context, mappingID int
 }
 
 // --- Admin-scoped run queries ---
-
-// ListAllRuns returns recent runs across all users. If sourceID is non-nil, only runs
-// whose mapping belongs to that source are returned.
-func (r *Repository) ListAllRuns(ctx context.Context, sourceID *int, limit int) ([]Run, error) {
-	if limit <= 0 {
-		limit = 25
-	}
-	if limit > 200 {
-		limit = 200
-	}
-
-	var query string
-	var args []any
-	if sourceID != nil {
-		query = `
-			SELECT r.id, r.user_id, r.profile_id, r.source_type, r.connection_mode, r.status,
-			       r.mapping_id,
-			       r.fetched, r.matched, r.unmatched, r.progress_updated, r.history_created, r.watchlist_added, r.favorites_imported, r.skipped,
-			       r.warnings, r.unmatched_samples, COALESCE(r.error_message, ''),
-			       r.created_at, r.started_at, r.completed_at, r.cancel_requested_at IS NOT NULL, r.played_since
-			FROM history_import_runs r
-			LEFT JOIN history_import_user_mappings m ON r.mapping_id = m.id
-			WHERE COALESCE(r.dispatch_source_id,m.source_id) = $1
-			ORDER BY r.created_at DESC, r.id DESC
-			LIMIT $2`
-		args = []any{*sourceID, limit}
-	} else {
-		query = `
-			SELECT id, user_id, profile_id, source_type, connection_mode, status,
-			       mapping_id,
-			       fetched, matched, unmatched, progress_updated, history_created, watchlist_added, favorites_imported, skipped,
-			       warnings, unmatched_samples, COALESCE(error_message, ''),
-			       created_at, started_at, completed_at, cancel_requested_at IS NOT NULL, played_since
-			FROM history_import_runs
-			ORDER BY created_at DESC, id DESC
-			LIMIT $1`
-		args = []any{limit}
-	}
-	rows, err := r.pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("listing all history import runs: %w", err)
-	}
-	defer rows.Close()
-	return scanAdminRuns(rows)
-}
 
 // GetRunByID returns any run by ID regardless of which user owns it.
 func (r *Repository) GetRunByID(ctx context.Context, runID string) (*Run, error) {

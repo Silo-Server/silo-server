@@ -34,6 +34,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	deps = withDefaults(deps)
 
 	r := chi.NewRouter()
+	r.Use(httpstream.NoSniff)
 	r.Use(stripSlashesExceptWeb)
 	r.Use(middleware.RequestID)
 	r.Use(observeCompatRequest)

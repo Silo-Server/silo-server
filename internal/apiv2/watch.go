@@ -66,8 +66,8 @@ type WatchDetail struct {
 // WatchFileVersion is one playable file of the item.
 type WatchFileVersion struct {
 	FileID                   ID                   `json:"file_id" example:"42"`
-	FileName                 string               `json:"file_name,omitempty"`
-	FilePath                 string               `json:"file_path,omitempty" doc:"Only for accounts allowed to see paths"`
+	FileName                 string               `json:"file_name,omitempty" doc:"Absent for viewers without file-path visibility, except on audiobooks and ebooks"`
+	FilePath                 string               `json:"file_path,omitempty" doc:"Absent for viewers without file-path visibility"`
 	Resolution               string               `json:"resolution" example:"1080p"`
 	CodecVideo               string               `json:"codec_video" example:"h264"`
 	CodecAudio               string               `json:"codec_audio" example:"eac3"`
@@ -161,7 +161,7 @@ type WatchSubtitleTrack struct {
 	Default         bool   `json:"default"`
 	HearingImpaired bool   `json:"hearing_impaired"`
 	External        bool   `json:"external"`
-	FileName        string `json:"file_name,omitempty"`
+	FileName        string `json:"file_name,omitempty" doc:"An external track's file name; absent for viewers without file-path visibility, except on audiobooks and ebooks"`
 }
 
 // WatchChapter is one chapter of a version.

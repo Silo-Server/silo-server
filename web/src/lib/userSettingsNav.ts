@@ -523,6 +523,7 @@ const USER_SETTINGS_GROUPS: UserSettingsNavGroupSource[] = [
           "web.settings.webhooks.mapping.title",
           "web.settings.webhooks.deliveries.title",
         ],
+        primaryOrAdmin: true,
       },
       {
         path: "history-import",
