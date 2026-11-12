@@ -170,6 +170,8 @@ type Scanner struct {
 	movieQueueSyncer     MovieQueueSyncer
 	seriesQueueSyncer    SeriesQueueSyncer
 	literaryWorkLinker   LiteraryWorkLinker
+	// scanBatchSize overrides defaultFullScanBatchSize when positive.
+	scanBatchSize int
 }
 
 // SetImageCacher installs the imagecache.Cacher used by book scanners to push
@@ -1067,7 +1069,8 @@ func (s *Scanner) scanPaths(
 	}
 
 	// protectedRoots was resolved above, before any reconciliation ran.
-	s.markMissingExcludingProtected(ctx, folder.ID, existingFiles, seenPaths, protectedRoots, result)
+	existingPresence := scanPresenceOf(existingFiles)
+	s.markMissingExcludingProtected(ctx, folder.ID, existingPresence, seenPaths, protectedRoots, result)
 
 	// Reconcile only the content this subtree's files link to, now or before
 	// processing. Present-state repair above was scoped the same way.
@@ -1093,7 +1096,7 @@ func (s *Scanner) scanPaths(
 		result.FilesDeleted += trashed
 	}
 
-	staleFileIDs := collectStaleRemovedPathFileIDs(existingFiles, seenPaths, reconcileRoots)
+	staleFileIDs := collectStaleRemovedPathFileIDs(existingPresence, seenPaths, reconcileRoots)
 	if len(filePaths) == 0 && allowEmptyCleanup {
 		staleFileIDs = make([]int, 0, len(existingFiles))
 		for _, existing := range existingFiles {
@@ -1162,9 +1165,16 @@ func (s *Scanner) scanPaths(
 type scopedScan struct {
 	walkRoots      []string
 	reconcileRoots []string
-	existingFiles  []*scanStateFile
-	filePaths      []string
-	seenPaths      map[string]bool
+	// existingCount is how many files were cataloged under the scope before
+	// the walk, and unseenExisting holds the ones the walk did not see: the
+	// only rows reconciliation acts on. walkedFiles is how many files the
+	// walk found. The walked paths and the scan state of the files that are
+	// still there are not kept once the scope's files have been processed.
+	existingCount  int
+	unseenExisting []scanPresence
+	walkedFiles    int
+	// rootInference and groupInference hold the scope's snapshots; their
+	// per-file Assignments are nil.
 	rootInference  rootInferenceResult
 	groupInference groupInferenceResult
 	result         *ScanResult
@@ -1277,14 +1287,14 @@ func (s *Scanner) scanFolderByRoots(
 		if err != nil {
 			return nil, err
 		}
-		totalExisting += len(scope.existingFiles)
+		totalExisting += scope.existingCount
 		mergeScanResult(result, scope.result)
 
 		if ctx.Err() != nil {
 			return result, ctx.Err()
 		}
 
-		if len(scope.filePaths) > 0 {
+		if scope.walkedFiles > 0 {
 			seenAnyFiles = true
 			beforeErrors := scope.result.Errors
 			// Pass both protected sets even though this scope walked files: a
@@ -1352,7 +1362,7 @@ func (s *Scanner) scanFolderByRoots(
 	// empty-root guard or reconciliation decision is made.
 	for _, pending := range pendingEmptyScopes {
 		root := firstScope(pending.reconcileRoots)
-		if root == "" || unreachableSet[root] || len(pending.existingFiles) == 0 {
+		if root == "" || unreachableSet[root] || pending.existingCount == 0 {
 			continue
 		}
 		// Re-probe this scope's nested configured children too. A parent whose
@@ -1741,18 +1751,11 @@ func (s *Scanner) scanScope(
 	reconcileRoots []string,
 ) (*scopedScan, error) {
 	result := &ScanResult{}
-	existingFiles, err := s.fileRepo.GetScanStateByFolderAndPathPrefix(ctx, folder.ID, reconcileRoots[0])
+	// List what is cataloged under the scope before walking it, so a file
+	// another scan adds meanwhile is never taken for one the walk missed.
+	existing, err := s.fileRepo.ListScanPresenceByFolderAndPathPrefix(ctx, folder.ID, reconcileRoots[0])
 	if err != nil {
 		return nil, fmt.Errorf("getting existing files for folder %d path %q: %w", folder.ID, reconcileRoots[0], err)
-	}
-
-	existingByPath := make(map[string]*scanStateFile, len(existingFiles))
-	for _, f := range existingFiles {
-		existingByPath[f.FilePath] = f
-	}
-	existingContentStatuses, err := s.itemRepo.GetStatusByIDs(ctx, collectScanStateContentIDs(existingFiles))
-	if err != nil {
-		return nil, fmt.Errorf("loading item statuses for folder %d path %q: %w", folder.ID, reconcileRoots[0], err)
 	}
 
 	filePaths, walkFailures, sidecars, walkErr := collectLogicalFilePathsAndSidecars(ctx, walkRoots, folder.Type, folder.Paths)
@@ -1768,154 +1771,43 @@ func (s *Scanner) scanScope(
 	if len(walkFailures) > 0 {
 		logIncompleteWalk(ctx, folder.ID, reconcileRoots, walkFailures)
 	}
-	reportProgress(ctx, ProgressUpdate{
-		Phase:           "processing",
-		Message:         "Processing discovered files",
-		CurrentScope:    firstScope(reconcileRoots),
-		TotalFiles:      len(filePaths),
-		FilesDiscovered: len(filePaths),
-	})
 
 	// Extras count as seen (so reconciliation keeps their rows) but are
 	// partitioned out of identity inference and match processing.
-	seenPaths := make(map[string]bool, len(filePaths))
-	for _, p := range filePaths {
-		seenPaths[p] = true
-	}
+	unseenExisting := unseenScanPresence(existing, filePaths)
+	existingCount := len(existing)
 	primaryPaths, extraCandidates := partitionExtraPaths(filePaths, folder.Type, folder.Paths, walkRoots)
-	rootOverrides, err := s.loadRootOverrides(ctx, folder.ID, reconcileRoots)
+	run, err := s.newScopeRun(ctx, folder, reconcileRoots, len(filePaths))
 	if err != nil {
-		return nil, fmt.Errorf("loading root overrides: %w", err)
+		return nil, err
 	}
-	rootInference := inferRootAssignments(primaryPaths, folder.Type, folder.ID, rootOverrides, folder.Paths...)
-	identityOverrides, err := s.loadIdentityOverrides(ctx, folder.ID)
-	if err != nil {
-		return nil, fmt.Errorf("loading identity overrides: %w", err)
+	reportProgress(ctx, run.progress("processing", "Processing discovered files"))
+
+	if err := s.processPrimaryPaths(ctx, run, primaryPaths); err != nil {
+		return nil, err
 	}
-	groupInference := inferGroupAssignments(primaryPaths, folder.Type, folder.ID, rootInference.Assignments, identityOverrides)
-	groupOverrides, err := s.loadGroupOverrides(ctx, folder.ID)
-	if err != nil {
-		return nil, fmt.Errorf("loading group overrides: %w", err)
-	}
-	applyGroupOverrides(&groupInference, groupOverrides)
+	rootInference, groupInference := run.inference()
 	result.RootObservations = append(result.RootObservations, rootInference.Observations...)
-	s.logRootInferenceDisagreements(rootInference.Assignments)
 	if _, err := s.clearLegacyLinksForUnmatchableRoots(ctx, folder.ID, result.RootObservations); err != nil {
 		return nil, fmt.Errorf("clearing legacy links for unmatchable roots: %w", err)
 	}
 
-	var wg sync.WaitGroup
-	pathCh := make(chan string, s.workerCount())
-	var newCount, updatedCount, unchangedCount, errorCount, processedCount atomic.Int64
-	subtitleCache := newExternalSubtitleDirCache(folder.Type)
+	result.New = int(run.newCount.Load())
+	result.Updated = int(run.updatedCount.Load())
+	result.Unchanged = int(run.unchangedCount.Load())
+	result.Errors = int(run.errorCount.Load())
+	reportProgress(ctx, run.progress("reconciling", "Reconciling scan state"))
 
-	for range s.workerCount() {
-		wg.Go(func() {
-			for path := range pathCh {
-				if ctx.Err() != nil {
-					continue
-				}
-				action, updateReasons, processErr := s.processFile(ctx, path, folder, existingByPath, existingContentStatuses, rootInference.Assignments[path], groupInference.Assignments[path], subtitleCache)
-				if processErr != nil {
-					slog.ErrorContext(ctx, "scanner: file processing failed", "component", "scanner", "path", path, "error", processErr)
-					errorCount.Add(1)
-					continue
-				}
-				switch action {
-				case actionNew:
-					newCount.Add(1)
-					slog.DebugContext(ctx, "scanner: new file added", "component", "scanner", "path", path)
-				case actionUpdated:
-					updatedCount.Add(1)
-					slog.DebugContext(ctx, "scanner: file updated", "component", "scanner", "path", path, "reasons", updateReasons)
-				case actionUnchanged:
-					unchangedCount.Add(1)
-				}
-				processedCount.Add(1)
-			}
-		})
-	}
-
-	stopProgress := make(chan struct{})
-	progressDone := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(scanProgressLogInterval)
-		defer ticker.Stop()
-		defer close(progressDone)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-stopProgress:
-				return
-			case <-ticker.C:
-				processed := int(processedCount.Load())
-				total := len(filePaths)
-				slog.InfoContext(ctx, "scanner: processing progress", "component", "scanner",
-					"folder_id", folder.ID,
-					"scope", firstScope(reconcileRoots),
-					"processed", processed,
-					"total", total,
-					"new", newCount.Load(),
-					"updated", updatedCount.Load(),
-					"unchanged", unchangedCount.Load(),
-					"errors", errorCount.Load(),
-				)
-				reportProgress(ctx, ProgressUpdate{
-					Phase:           "processing",
-					Message:         "Processing discovered files",
-					CurrentScope:    firstScope(reconcileRoots),
-					TotalFiles:      total,
-					FilesDiscovered: total,
-					FilesProcessed:  processed,
-					New:             int(newCount.Load()),
-					Updated:         int(updatedCount.Load()),
-					Unchanged:       int(unchangedCount.Load()),
-					Errors:          int(errorCount.Load()),
-				})
-			}
-		}
-	}()
-
-	for _, p := range primaryPaths {
-		pathCh <- p
-	}
-	close(pathCh)
-	wg.Wait()
-	close(stopProgress)
-	<-progressDone
-
-	result.New = int(newCount.Load())
-	result.Updated = int(updatedCount.Load())
-	result.Unchanged = int(unchangedCount.Load())
-	result.Errors = int(errorCount.Load())
-	reportProgress(ctx, ProgressUpdate{
-		Phase:           "reconciling",
-		Message:         "Reconciling scan state",
-		CurrentScope:    firstScope(reconcileRoots),
-		TotalFiles:      len(filePaths),
-		FilesDiscovered: len(filePaths),
-		FilesProcessed:  int(processedCount.Load()),
-		New:             result.New,
-		Updated:         result.Updated,
-		Unchanged:       result.Unchanged,
-		Errors:          result.Errors,
-	})
-
-	if ctx.Err() == nil {
-		extraStats := s.processExtraFiles(ctx, folder, extraCandidates, existingByPath, sidecars)
-		result.New += extraStats.New
-		result.Updated += extraStats.Updated
-		result.Unchanged += extraStats.Unchanged
-		result.Errors += extraStats.Errors
+	if err := s.processScopeExtras(ctx, folder, extraCandidates, sidecars, result); err != nil {
+		return nil, err
 	}
 
 	return &scopedScan{
 		walkRoots:      append([]string(nil), walkRoots...),
 		reconcileRoots: append([]string(nil), reconcileRoots...),
-		existingFiles:  existingFiles,
-		filePaths:      filePaths,
-		seenPaths:      seenPaths,
+		existingCount:  existingCount,
+		unseenExisting: unseenExisting,
+		walkedFiles:    run.totalFiles,
 		rootInference:  rootInference,
 		groupInference: groupInference,
 		result:         result,
@@ -1982,12 +1874,14 @@ func (s *Scanner) applyScopedScan(
 	if len(scope.walkFailures) > 0 {
 		protectedRoots = append(append([]string(nil), protectedRoots...), scope.walkFailures...)
 	}
-	s.markMissingExcludingProtected(ctx, folder.ID, scope.existingFiles, scope.seenPaths, protectedRoots, scope.result)
+	// unseenExisting is already the cataloged files the walk did not see, so
+	// there is no seen set left to check them against.
+	s.markMissingExcludingProtected(ctx, folder.ID, scope.unseenExisting, nil, protectedRoots, scope.result)
 
-	staleFileIDs := collectStaleRemovedPathFileIDs(scope.existingFiles, scope.seenPaths, scope.reconcileRoots)
-	if forceDeleteAll && len(scope.filePaths) == 0 {
-		staleFileIDs = make([]int, 0, len(scope.existingFiles))
-		for _, existing := range scope.existingFiles {
+	staleFileIDs := collectStaleRemovedPathFileIDs(scope.unseenExisting, nil, scope.reconcileRoots)
+	if forceDeleteAll && scope.walkedFiles == 0 {
+		staleFileIDs = make([]int, 0, len(scope.unseenExisting))
+		for _, existing := range scope.unseenExisting {
 			if pathWithinAnyRoot(existing.FilePath, protectedRoots) {
 				continue
 			}
@@ -2035,7 +1929,7 @@ func mergeScanResult(dst *ScanResult, src *ScanResult) {
 func (s *Scanner) markMissingExcludingProtected(
 	ctx context.Context,
 	folderID int,
-	existingFiles []*scanStateFile,
+	existingFiles []scanPresence,
 	seenPaths map[string]bool,
 	protectedRoots []string,
 	result *ScanResult,
@@ -2674,7 +2568,7 @@ func (s *Scanner) sweepMissingWithProtectedRoots(ctx context.Context, folder *mo
 	return trashed, removedMemberships, deletedItems, nil
 }
 
-func collectStaleRemovedPathFileIDs(existingFiles []*scanStateFile, seenPaths map[string]bool, roots []string) []int {
+func collectStaleRemovedPathFileIDs(existingFiles []scanPresence, seenPaths map[string]bool, roots []string) []int {
 	ids := make([]int, 0)
 	for _, existing := range existingFiles {
 		if seenPaths[existing.FilePath] {

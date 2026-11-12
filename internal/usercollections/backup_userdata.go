@@ -556,7 +556,7 @@ func canonicalDefinition(query, display, sort, source json.RawMessage) (definiti
 	}
 	def := definition{query: "{}", sort: "{}", source: "{}"}
 	if trimmed := strings.TrimSpace(string(query)); trimmed != "" && trimmed != "{}" && trimmed != "null" {
-		normalized, err := catalog.NormalizeSmartCollectionQueryJSON(query, true, true, false)
+		normalized, err := catalog.NormalizeSmartCollectionQueryJSON(query, true, true)
 		if err != nil {
 			return definition{}, "its rules are not ones this server accepts"
 		}

@@ -495,6 +495,205 @@ func (d *DurableCompatPlaybackStore) HideFromRouting(id, compatToken string) err
 	return nil
 }
 
+// RetireUpstreamSession lets the row decide. One statement (retireUpstreamRows)
+// retires it only while it still names this upstream session and a stream
+// the server produces, and nothing else here writes a row as retired. A play
+// another server has moved to direct play or to a new upstream session is
+// therefore left alone, whatever this process's cached copy says. A server
+// that still routes the play reads the terminal row at its next revalidation
+// that succeeds; it tries one every compatCacheRevalidationInterval.
+//
+// This process's cached copy is used in three cases:
+//   - The statement matched nothing and the copy owes the row earlier writes,
+//     which may include this upstream session. They go through Update, which
+//     replays the ones that still apply and leaves the copy holding the row's
+//     state, and the statement runs once more. Between the two the row can
+//     be routable under this upstream session. A replay that fails counts
+//     as a failed statement.
+//   - The play never reached Postgres, so there is no row to ask or to write.
+//     The copy is hidden here; a hidden copy is never persisted as routable.
+//   - The statement failed. The copy is hidden here without a row write and
+//     keeps the writes it owes the row, and the error has the caller retry.
+//     The retry runs the statement again. If that matches nothing and the
+//     hidden copy still owes writes, retireHiddenCopy replays them and
+//     retires the row in one transaction, when the row then names this
+//     upstream session. The copy stays hidden even if the row turns out to
+//     have moved.
+func (d *DurableCompatPlaybackStore) RetireUpstreamSession(upstreamSessionID string) (bool, error) {
+	// An empty id would match every play that has not started yet.
+	if upstreamSessionID == "" {
+		return false, nil
+	}
+	if d.pool == nil {
+		return d.mem.RetireUpstreamSession(upstreamSessionID)
+	}
+	rows, err := d.retireUpstreamRows(upstreamSessionID)
+	if err == nil && len(rows) == 0 {
+		if retired, hiddenErr := d.retireHiddenCopy(upstreamSessionID); retired || hiddenErr != nil {
+			return retired, hiddenErr
+		}
+		var replayed bool
+		if replayed, err = d.replayOwedWrites(upstreamSessionID); replayed && err == nil {
+			rows, err = d.retireUpstreamRows(upstreamSessionID)
+		}
+	}
+	for _, row := range rows {
+		// Hide a copy this process caches now; read any other from the row.
+		d.invalidateValidation(row[0], row[1])
+		_ = d.hideCachedCopy(row[0], row[1])
+	}
+	if len(rows) > 0 {
+		return true, nil
+	}
+	play, ok := d.cachedRetirablePlay(upstreamSessionID)
+	if !ok {
+		return false, err
+	}
+	if err == nil && !d.isUnpersisted(play.ID) {
+		// The row answered, and this copy is behind it: read it again
+		// before routing the play from the copy.
+		d.invalidateValidation(play.ID, play.CompatToken)
+		return false, nil
+	}
+	// A failed statement keeps the writes the copy owes the row: the retry
+	// needs them to find and retire the row (retireHiddenCopy).
+	return d.hideCopyStillOnUpstream(play.ID, play.CompatToken, upstreamSessionID, err != nil), err
+}
+
+// replayOwedWrites sends the writes that this process's routable copy on an
+// upstream session owes its row through Update, and reports whether there
+// were any. A replay that fails is a failed retirement, not an answer from
+// the row: the copy still routes the upstream session and the row has not
+// heard of it, so the error goes back to the caller.
+func (d *DurableCompatPlaybackStore) replayOwedWrites(upstreamSessionID string) (bool, error) {
+	play, ok := d.cachedRetirablePlay(upstreamSessionID)
+	if !ok || d.isUnpersisted(play.ID) || !d.hasPendingUpdates(play.ID) {
+		return false, nil
+	}
+	err := d.Update(play.ID, func(*PlaybackSession) error { return nil })
+	if errors.Is(err, ErrSessionNotFound) {
+		// The copy went away meanwhile; the row answers on its own.
+		err = nil
+	}
+	return true, err
+}
+
+// hideCopyStillOnUpstream hides this process's copy of a play, and writes no
+// row, only while the copy still names the upstream session with a retired
+// play method: a switch that landed after the caller looked the copy up
+// leaves the play it attached alone.
+func (d *DurableCompatPlaybackStore) hideCopyStillOnUpstream(id, compatToken, upstreamSessionID string, keepOwedWrites bool) bool {
+	unlockSession := d.lockSessionMutation(id)
+	defer unlockSession()
+	d.cacheMutationMu.RLock()
+	defer d.finishCacheMutation(id, compatToken)
+	if !d.mem.retireIfOnUpstream(id, upstreamSessionID) {
+		return false
+	}
+	if !keepOwedWrites {
+		d.clearPendingUpdates(id)
+	}
+	return true
+}
+
+// retireHiddenCopy finishes a retirement that a failed statement left half
+// done: this process hid its copy and kept the writes it owed the row, which
+// may include the upstream session itself. One transaction replays those
+// writes onto the row and retires it if it then names the upstream session
+// with a retired play method, so this step does not leave the row routable
+// under that session, and the copy stays hidden. A row that names anything
+// else is left as it is, and the owed writes are dropped with the hidden
+// copy.
+//
+// Until this runs, an Update by play id on the hidden copy would load the
+// row over it and commit the owed writes, leaving the row routable under the
+// ended session until the next retry retires it. Only a request that was
+// already past its lookup when the copy was hidden makes such an Update.
+func (d *DurableCompatPlaybackStore) retireHiddenCopy(upstreamSessionID string) (bool, error) {
+	play, ok := d.mem.findOnUpstream(upstreamSessionID, true)
+	if !ok || !adminEndRetiresPlay(play.UpstreamPlayMethod) || !d.hasPendingUpdates(play.ID) {
+		return false, nil
+	}
+	unlockSession := d.lockSessionMutation(play.ID)
+	defer unlockSession()
+	committed, err := d.updateDB(play.ID, d.pendingUpdatesSnapshot(play.ID), func(row *PlaybackSession) error {
+		if row.UpstreamSessionID != upstreamSessionID || !adminEndRetiresPlay(row.UpstreamPlayMethod) {
+			return errUpstreamReplaced
+		}
+		row.Terminal = true
+		return nil
+	})
+	var rejected *compatUpdateRejectedError
+	if err != nil && !errors.As(err, &rejected) {
+		// The owed writes stay for the next retry.
+		return false, err
+	}
+	d.clearPendingUpdates(play.ID)
+	d.invalidateValidation(play.ID, play.CompatToken)
+	return committed != nil, nil
+}
+
+// cachedRetirablePlay returns this process's routable copy of the play on an
+// upstream session, when an administrator's end retires its play method.
+func (d *DurableCompatPlaybackStore) cachedRetirablePlay(upstreamSessionID string) (*PlaybackSession, bool) {
+	play, ok := d.mem.FindByUpstreamSessionID(upstreamSessionID)
+	if !ok || !adminEndRetiresPlay(play.UpstreamPlayMethod) {
+		return nil, false
+	}
+	return play, true
+}
+
+// hideCachedCopy is the cache half of HideFromRouting: it hides this
+// process's copy of a play and writes no row. A write by play id could
+// retire a play that another server has since moved.
+func (d *DurableCompatPlaybackStore) hideCachedCopy(id, compatToken string) error {
+	unlockSession := d.lockSessionMutation(id)
+	defer unlockSession()
+	d.cacheMutationMu.RLock()
+	defer d.finishCacheMutation(id, compatToken)
+	if err := d.mem.HideFromRouting(id, compatToken); err != nil {
+		return err
+	}
+	d.clearPendingUpdates(id)
+	return nil
+}
+
+// retireUpstreamRows marks the rows of a server-produced play on an upstream
+// session terminal and returns their id and compat token. It does not take
+// the caller's context: the retirement must finish after the administrator's
+// request is canceled, and the stop fallback has no request.
+func (d *DurableCompatPlaybackStore) retireUpstreamRows(upstreamSessionID string) ([][2]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	rows, err := d.pool.Query(ctx, `
+		UPDATE jellycompat_playback_sessions
+		SET data = jsonb_set(data, '{Terminal}', 'true'::jsonb, true)
+		WHERE data->>'UpstreamSessionID' = $1 AND expires_at > $2
+			AND COALESCE((data->>'Terminal')::boolean, false) = false
+			AND data->>'UpstreamPlayMethod' = ANY($3)
+		RETURNING id, compat_token
+	`, upstreamSessionID, d.now(), adminEndRetiredMethods)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var retired [][2]string
+	for rows.Next() {
+		var id, compatToken string
+		if err := rows.Scan(&id, &compatToken); err != nil {
+			return nil, err
+		}
+		retired = append(retired, [2]string{id, compatToken})
+	}
+	// A result that fails partway does not say whether the statement
+	// committed. Report it as a failed statement, with no rows, so the
+	// caller hides its own copy and retries.
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return retired, nil
+}
+
 // StageTerminal hides a session and persists the provider event under a row
 // lock. This merge keeps an authoritative Stopped event from being overwritten
 // by a later ActiveEncodings fallback on another server process.

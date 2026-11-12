@@ -508,6 +508,49 @@ describe("AdminAccessGroups", () => {
     });
   });
 
+  it("discards every edit from the phone save bar, typed limits included", async () => {
+    // A phone: no media query matches, so the editor shows the pinned save bar.
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    }));
+    const user = userEvent.setup();
+    renderPage("/admin/access-groups/1");
+    const name = await screen.findByLabelText("Name");
+    await screen.findByRole("region", { name: "Requests" });
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).not.toBeInTheDocument();
+
+    fireEvent.change(name, { target: { value: "Teens" } });
+    // The description wraps on a phone but stays one line.
+    const description = document.getElementById("group-description") as HTMLTextAreaElement;
+    fireEvent.change(description, { target: { value: "Two\nlines" } });
+    expect(description).toHaveValue("Two lines");
+    fireEvent.click(screen.getByRole("switch", { name: "Allow downloads" }));
+    await pickOption(user, "Max remote stream bitrate", "Custom");
+    await user.type(screen.getByLabelText("Max remote stream bitrate in Mbps"), "3");
+    await pickOption(user, "Limit", "No limit");
+
+    const bar = screen.getByRole("region", { name: "Unsaved changes" });
+    await user.click(within(bar).getByRole("button", { name: "Discard" }));
+
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).not.toBeInTheDocument();
+    expect(name).toHaveValue("Kids");
+    expect(document.getElementById("group-description")).toHaveValue("");
+    expect(screen.getByRole("switch", { name: "Allow downloads" })).not.toBeChecked();
+    expect(screen.getByRole("combobox", { name: "Max remote stream bitrate" })).toHaveTextContent(
+      "Unlimited",
+    );
+    expect(screen.queryByLabelText("Max remote stream bitrate in Mbps")).not.toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Limit" })).toHaveTextContent("Use server default");
+    expect(writes).toEqual([]);
+  });
+
   it("blocks saving until a custom limit is a valid Mbps value and warns below 1 Mbps", async () => {
     const user = userEvent.setup();
     group = { ...GROUP, max_remote_stream_bitrate_kbps: 4500 };

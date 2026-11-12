@@ -90,7 +90,9 @@ export function IPAddressesCard({ userId }: { userId: number }) {
               key={entry.client_ip}
               className="border-border/50 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-t px-4 py-2.5 first:border-t-0 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:px-5"
             >
-              <span className="truncate font-mono text-[13px]">{entry.client_ip}</span>
+              <span className="truncate font-mono text-[13px] max-lg:wrap-anywhere max-lg:whitespace-normal">
+                {entry.client_ip}
+              </span>
               <span className="text-xs">
                 {isNewRemoteAddress(entry) ? (
                   <Badge
