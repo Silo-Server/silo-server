@@ -7,7 +7,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
-const fallbackReasonLowerResolution = "no_alternate_version"
+const fallbackReasonLowerResolution = playback.TerminalNoAlternateVersionV3
 
 var ErrSourceFallbackUnavailable = errors.New("no compatible room source remains")
 
@@ -22,7 +22,7 @@ func (in SourceFallbackInput) Valid() bool {
 		return false
 	}
 	switch in.Reason {
-	case fallbackReasonLowerResolution, playback.TerminalHDRTranscodeUnsupportedV3, "subtitle_conversion_unsupported", "transcoding_disabled":
+	case fallbackReasonLowerResolution, playback.TerminalHDRTranscodeUnsupportedV3, playback.TerminalSubtitleConversionUnsupportedV3, "transcoding_disabled":
 		return true
 	default:
 		return false

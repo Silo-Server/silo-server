@@ -3,7 +3,6 @@ package notifications
 import (
 	"context"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -33,23 +32,6 @@ type Cursor struct {
 func (c Cursor) Encode() string {
 	raw := c.CreatedAt.UTC().Format(time.RFC3339Nano) + "|" + c.ID
 	return base64.RawURLEncoding.EncodeToString([]byte(raw))
-}
-
-// DecodeCursor parses an opaque cursor produced by Encode.
-func DecodeCursor(encoded string) (Cursor, error) {
-	raw, err := base64.RawURLEncoding.DecodeString(encoded)
-	if err != nil {
-		return Cursor{}, errors.New("invalid cursor")
-	}
-	parts := strings.SplitN(string(raw), "|", 2)
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return Cursor{}, errors.New("invalid cursor")
-	}
-	createdAt, err := time.Parse(time.RFC3339Nano, parts[0])
-	if err != nil {
-		return Cursor{}, errors.New("invalid cursor")
-	}
-	return Cursor{CreatedAt: createdAt, ID: parts[1]}, nil
 }
 
 // deliveryRowSelect joins display metadata so clients can render a row
@@ -199,28 +181,6 @@ func (r *DeliveryRepository) LockInboxProfiles(ctx context.Context, tx pgx.Tx, p
 		}
 	}
 	return nil
-}
-
-// ListInbox returns inbox rows newest-first for the profile.
-func (r *DeliveryRepository) ListInbox(ctx context.Context, userID int, profileID string, unreadOnly bool, limit int, before *Cursor) ([]DeliveryRow, error) {
-	conditions := []string{"d.user_id = $1 AND d.profile_id = $2"}
-	args := []any{userID, profileID}
-	if unreadOnly {
-		conditions = append(conditions, "d.read_at IS NULL")
-	}
-	if before != nil {
-		args = append(args, before.CreatedAt, before.ID)
-		conditions = append(conditions, fmt.Sprintf("(d.created_at, d.id) < ($%d, $%d)", len(args)-1, len(args)))
-	}
-	args = append(args, limit)
-	query := deliveryRowSelect +
-		" WHERE " + strings.Join(conditions, " AND ") +
-		fmt.Sprintf(" ORDER BY d.created_at DESC, d.id DESC LIMIT $%d", len(args))
-	rows, err := r.pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("list inbox: %w", err)
-	}
-	return scanDeliveryRows(rows)
 }
 
 // ListSync returns rows ascending from the cursor for forward sync (the
@@ -449,19 +409,6 @@ func (r *DeliveryRepository) Exists(ctx context.Context, userID int, profileID, 
 		userID, profileID, id,
 	).Scan(&exists)
 	return exists, err
-}
-
-// MarkAllRead marks every unread delivery read for the profile.
-func (r *DeliveryRepository) MarkAllRead(ctx context.Context, userID int, profileID string) (int64, error) {
-	tag, err := r.pool.Exec(ctx, `
-		UPDATE notification_deliveries
-		SET read_at = now()
-		WHERE user_id = $1 AND profile_id = $2 AND read_at IS NULL`,
-		userID, profileID)
-	if err != nil {
-		return 0, err
-	}
-	return tag.RowsAffected(), nil
 }
 
 // DeleteAllForProfile removes every delivery for a deleted profile (profiles

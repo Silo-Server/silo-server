@@ -503,6 +503,17 @@ const (
 // administrator's local or remote per-stream bitrate limit for this version.
 const TerminalBitratePolicyUnavailableV3 = "bitrate_policy_unavailable"
 
+// TerminalNoAlternateVersionV3 reports that the requested quality needs a
+// lower-resolution version of the item: 4K transcoding is disabled, or a lower
+// version serves that quality. The caller's alternate-version fallback acts on
+// it, so a client sees it only when no version plays.
+const TerminalNoAlternateVersionV3 = "no_alternate_version"
+
+// TerminalSubtitleConversionUnsupportedV3 reports that the selected subtitle
+// cannot be delivered: its format cannot meet the fidelity policy, or it needs
+// a burn-in transcode the source cannot take.
+const TerminalSubtitleConversionUnsupportedV3 = "subtitle_conversion_unsupported"
+
 type SubtitleModeV3 string
 
 const (

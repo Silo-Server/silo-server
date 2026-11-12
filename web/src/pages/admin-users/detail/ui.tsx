@@ -43,14 +43,18 @@ export function DetailCard({
     >
       <div className="border-border/70 flex flex-wrap items-start justify-between gap-x-3 gap-y-2 border-b px-4 py-3.5 sm:px-5">
         <div className="min-w-0 flex-1 basis-48 space-y-0.5">
-          <h3 id={titleId} className="text-sm leading-snug font-semibold">
+          <h3 id={titleId} className="text-sm leading-snug font-semibold wrap-anywhere">
             {title}
           </h3>
           {description ? (
-            <div className="text-muted-foreground text-[13px] leading-relaxed">{description}</div>
+            <div className="text-muted-foreground text-[13px] leading-relaxed wrap-anywhere">
+              {description}
+            </div>
           ) : null}
         </div>
-        {actions ? <div className="flex shrink-0 items-center gap-1.5">{actions}</div> : null}
+        {actions ? (
+          <div className="flex max-w-full shrink-0 flex-wrap items-center gap-1.5">{actions}</div>
+        ) : null}
       </div>
       {children}
       {footer ? (
@@ -150,8 +154,11 @@ export function KeyValueRow({
       </div>
       <div className="ms-auto flex max-w-full min-w-0 items-center justify-end gap-2.5">
         <div className="flex min-w-0 flex-col items-end text-end">
-          <div className="text-sm font-medium break-words">{value}</div>
-          {below ? <div className="text-muted-foreground text-xs">{below}</div> : null}
+          {/* A long unbroken value (an email, an ID) wraps rather than overflowing the card. */}
+          <div className="max-w-full text-sm font-medium wrap-anywhere">{value}</div>
+          {below ? (
+            <div className="text-muted-foreground max-w-full text-xs wrap-anywhere">{below}</div>
+          ) : null}
         </div>
         {tag}
       </div>
@@ -205,7 +212,7 @@ export function SubTabs<T extends string>({
           <TabsTrigger
             key={item.value}
             value={item.value}
-            className="flex-none rounded-lg px-3 py-1.5 text-[13px]"
+            className="flex-none rounded-lg px-3 py-1.5 text-[13px] max-lg:min-h-11"
           >
             {item.label}
           </TabsTrigger>
@@ -230,8 +237,11 @@ export function ListRow({
     <div className="border-border/50 flex items-center gap-3 border-t px-4 py-3 first:border-t-0 sm:px-5">
       {leading ? <div className="shrink-0">{leading}</div> : null}
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium">{title}</div>
-        {meta ? <div className="text-muted-foreground text-xs">{meta}</div> : null}
+        {/* On a phone a long title (a device name) wraps rather than being cut off. */}
+        <div className="truncate text-sm font-medium max-lg:wrap-anywhere max-lg:whitespace-normal">
+          {title}
+        </div>
+        {meta ? <div className="text-muted-foreground text-xs wrap-anywhere">{meta}</div> : null}
       </div>
       {trailing ? (
         <div className="text-muted-foreground shrink-0 text-end text-xs">{trailing}</div>

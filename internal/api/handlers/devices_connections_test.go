@@ -4,14 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
@@ -53,22 +50,19 @@ func connectionsTestUser(t *testing.T) (*pgxpool.Pool, int, *connectionstore.Sto
 	return pool, user, &connectionstore.Store{Pool: pool}, rows
 }
 
+// forgetDeviceAs forgets deviceID's registration on profileID, acting as that
+// profile.
 func forgetDeviceAs(t *testing.T, h *DeviceHandler, user int, profileID, deviceID string) {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodDelete, "/devices/"+deviceID, nil)
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("device_id", deviceID)
-	ctx := apimw.SetProfileID(apimw.SetClaims(req.Context(), &auth.Claims{UserID: user}), profileID)
-	rec := httptest.NewRecorder()
-	h.HandleForgetDevice(rec, req.WithContext(context.WithValue(ctx, chi.RouteCtxKey, routeCtx)))
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("forget %s on %s = %d: %s", deviceID, profileID, rec.Code, rec.Body.String())
+	ctx := apimw.SetProfileID(apimw.SetClaims(t.Context(), &auth.Claims{UserID: user}), profileID)
+	if err := h.RemoveDeviceSettings(ctx, DeviceSettingsActor{UserID: user, ProfileID: profileID}, "", deviceID, true); err != nil {
+		t.Fatalf("forget %s on %s: %v", deviceID, profileID, err)
 	}
 }
 
 // TestForgetDeviceKeepsConnectionsUntilLastRegistrationDB: a device's playback
 // connection rows outlive the forget of one of its registrations and go with
-// the last, through the v1 and v2 forgets.
+// the last.
 func TestForgetDeviceKeepsConnectionsUntilLastRegistrationDB(t *testing.T) {
 	pool, user, connections, rows := connectionsTestUser(t)
 	ctx := t.Context()
@@ -89,63 +83,9 @@ func TestForgetDeviceKeepsConnectionsUntilLastRegistrationDB(t *testing.T) {
 	if rows("tv") != 1 {
 		t.Fatal("forgetting one of two registrations deleted the connection rows")
 	}
-	if err := h.RemoveDeviceSettings(ctx, DeviceSettingsActor{UserID: user, ProfileID: "p2"}, "p2", "tv", true); err != nil {
-		t.Fatal(err)
-	}
+	forgetDeviceAs(t, h, user, "p2", "tv")
 	if rows("tv") != 0 {
 		t.Fatal("forgetting the last registration kept the connection rows")
-	}
-}
-
-// TestConcurrentLastRegistrationDeletesDropConnectionsDB: two transactions
-// each delete one of a device's two registrations. Under READ COMMITTED
-// neither sees the other's delete before it commits, so a check inside either
-// transaction finds the other registration and keeps the rows. The cleanup each
-// deletion path runs after its commit must still drop them.
-func TestConcurrentLastRegistrationDeletesDropConnectionsDB(t *testing.T) {
-	pool, user, connections, rows := connectionsTestUser(t)
-	ctx := t.Context()
-	store, err := pgstore.NewPostgresProvider(pool).ForUser(ctx, user)
-	if err != nil {
-		t.Fatal(err)
-	}
-	registry := store.(userstore.DeviceRegistry)
-	for _, profile := range []string{"p1", "p2"} {
-		seedDevice(t, store, profile, "tv", "TV")
-	}
-	if err := connections.Observe(ctx, user, "tv", "local", 44100); err != nil {
-		t.Fatal(err)
-	}
-	first, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = first.Rollback(ctx) }()
-	second, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = second.Rollback(ctx) }()
-	const forget = `DELETE FROM user_devices WHERE user_id = $1 AND profile_id = $2 AND device_id = 'tv'`
-	if _, err := first.Exec(ctx, forget, user, "p1"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := second.Exec(ctx, forget, user, "p2"); err != nil {
-		t.Fatal(err)
-	}
-	if err := first.Commit(ctx); err != nil {
-		t.Fatal(err)
-	}
-	forgetPlaybackConnections(ctx, connections, registry, user, []string{"tv"})
-	if rows("tv") != 1 {
-		t.Fatal("the first deletion's cleanup dropped the rows while the second registration was still committed")
-	}
-	if err := second.Commit(ctx); err != nil {
-		t.Fatal(err)
-	}
-	forgetPlaybackConnections(ctx, connections, registry, user, []string{"tv"})
-	if rows("tv") != 0 {
-		t.Fatal("no registration is left, but the connection rows remain")
 	}
 }
 
@@ -201,5 +141,57 @@ func TestSQLiteRegistrationRemovalDropsConnectionsDB(t *testing.T) {
 	forgetDeviceAs(t, devices, user, "p1", "tv")
 	if rows("tv") != 0 {
 		t.Fatal("forgetting the last SQLite registration kept the connection rows")
+	}
+}
+
+// TestConcurrentLastRegistrationDeletesDropConnectionsDB: two transactions
+// each delete one of a device's two registrations. Under READ COMMITTED
+// neither sees the other's delete before it commits, so a check inside either
+// transaction finds the other registration and keeps the rows. The cleanup each
+// deletion path runs after its commit must still drop them.
+func TestConcurrentLastRegistrationDeletesDropConnectionsDB(t *testing.T) {
+	pool, user, connections, rows := connectionsTestUser(t)
+	ctx := t.Context()
+	store, err := pgstore.NewPostgresProvider(pool).ForUser(ctx, user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := store.(userstore.DeviceRegistry)
+	for _, profile := range []string{"p1", "p2"} {
+		seedDevice(t, store, profile, "tv", "TV")
+	}
+	if err := connections.Observe(ctx, user, "tv", "local", 44100); err != nil {
+		t.Fatal(err)
+	}
+	first, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = first.Rollback(ctx) }()
+	second, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = second.Rollback(ctx) }()
+	const forget = `DELETE FROM user_devices WHERE user_id = $1 AND profile_id = $2 AND device_id = 'tv'`
+	if _, err := first.Exec(ctx, forget, user, "p1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := second.Exec(ctx, forget, user, "p2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	forgetPlaybackConnections(ctx, connections, registry, user, []string{"tv"})
+	if rows("tv") != 1 {
+		t.Fatal("the first deletion's cleanup dropped the rows while the second registration was still committed")
+	}
+	if err := second.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	forgetPlaybackConnections(ctx, connections, registry, user, []string{"tv"})
+	if rows("tv") != 0 {
+		t.Fatal("no registration is left, but the connection rows remain")
 	}
 }

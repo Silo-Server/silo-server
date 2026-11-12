@@ -45,6 +45,14 @@ func (testDownloadAccess) EnsureAccessible(context.Context, string, catalog.Acce
 	return nil
 }
 
+func (testDownloadAccess) EnsureAccessibleIDs(_ context.Context, ids []string, _ catalog.AccessFilter) (map[string]bool, error) {
+	allowed := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		allowed[id] = true
+	}
+	return allowed, nil
+}
+
 // newTestDownloadService builds the download service the API router hands
 // the compat listener, over the given files and one account. enabled is the
 // server's Allow downloads setting; allowed is the account's permission.

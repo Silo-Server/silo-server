@@ -34,6 +34,7 @@ import { requestAdminMessages, useT } from "@/i18n";
 import { BrandingProvider } from "@/contexts/BrandingProvider";
 import { UICustomizationProvider } from "@/contexts/UICustomizationProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { RouteLoading } from "@/components/RouteLoading";
 import ImpersonationBanner from "@/components/ImpersonationBanner";
 import { loadStoredImpersonationAdminSession } from "@/lib/impersonationSession";
 import { Toaster } from "@/components/ui/sonner";
@@ -223,16 +224,6 @@ function ScrollRestorationManager() {
 function NavigationDirectionManager() {
   useNavigationDirection();
   return null;
-}
-
-function RouteLoading() {
-  const t = useT();
-  return (
-    <div className="p-8" role="status" aria-live="polite">
-      <span className="sr-only">{t("web.common.shell.loadingPage")}</span>
-      {t("web.ui.loading")}
-    </div>
-  );
 }
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -650,7 +641,14 @@ function AppRoutes() {
                   <Route path="libraries" element={<LibrarySettings />} />
                   <Route path="history-import" element={<HistoryImportSettings />} />
                   <Route path="plex-webhooks" element={<LegacyWebhookSyncRedirect />} />
-                  <Route path="webhook-sync" element={<WebhookSyncSettings />} />
+                  <Route
+                    path="webhook-sync"
+                    element={
+                      <RequirePrimaryOrAdmin>
+                        <WebhookSyncSettings />
+                      </RequirePrimaryOrAdmin>
+                    }
+                  />
                   <Route path="watch-providers" element={<WatchProvidersSettings />} />
                   <Route path="subtitle-appearance" element={<SubtitleAppearanceSettings />} />
                   <Route path="home-screen" element={<HomeScreenSettings />} />
@@ -799,6 +797,13 @@ function AppRoutes() {
 
 function RealtimeEventChannels() {
   const actingAdmin = useIsActingAdmin();
+  const { user } = useAuth();
+  // An account with a delegated permission (metadata curation, marker editing)
+  // uses item tools that show admin text, so it needs that catalog chunk too.
+  const delegated = (user?.permissions?.length ?? 0) > 0;
+  useEffect(() => {
+    if (delegated) requestAdminMessages();
+  }, [delegated]);
 
   useEventChannel("catalog");
   useEventChannel("user_state");

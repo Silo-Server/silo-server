@@ -39,6 +39,7 @@ import {
 } from "../format";
 import { DetailCard, ProgressBar } from "../ui";
 import { formatLocale } from "@/lib/appLocale";
+import { TOUCH_HIT_AREA, TOUCH_TARGETS } from "@/lib/touchTargets";
 
 const ALL_PROFILES = "all";
 const PERIODS: readonly { days: number; label: MessageKey }[] = [
@@ -163,7 +164,7 @@ export function WatchHistoryCard({
             >
               <SelectValue />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className={TOUCH_TARGETS}>
               <SelectItem value={ALL_PROFILES}>
                 {t("web.admin.users.detail.common.allProfiles")}
               </SelectItem>
@@ -182,7 +183,7 @@ export function WatchHistoryCard({
             >
               <SelectValue>{t(period.label)}</SelectValue>
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className={TOUCH_TARGETS}>
               {PERIODS.map((option) => (
                 <SelectItem key={option.days} value={String(option.days)}>
                   {t(option.label)}
@@ -254,11 +255,14 @@ export function WatchHistoryCard({
             <TableBody>
               {rows.map((row) => (
                 <TableRow key={row.key} data-live={row.live ? "true" : undefined}>
-                  <TableCell className="max-w-[18rem] ps-4 whitespace-normal sm:ps-5">
+                  <TableCell className="max-w-[18rem] ps-4 wrap-anywhere whitespace-normal sm:ps-5">
                     {row.itemId ? (
                       <Link
                         to={`/item/${encodeURIComponent(row.itemId)}`}
-                        className="hover:text-primary font-semibold transition-colors hover:underline"
+                        className={cn(
+                          "hover:text-primary font-semibold transition-colors hover:underline",
+                          TOUCH_HIT_AREA,
+                        )}
                       >
                         {row.title}
                       </Link>

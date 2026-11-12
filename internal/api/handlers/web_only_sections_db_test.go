@@ -55,7 +55,9 @@ func (p webOnlyRowsPage) layout(t *testing.T, v SectionViewer) map[string]bool {
 	var view SectionLayoutView
 	var err error
 	if p.scope == "home" {
-		view, err = p.h.HomeLayout(p.viewer(t), v)
+		var withItems HomeLayoutView
+		withItems, err = p.h.HomeLayoutWithItems(p.viewer(t), v, 0)
+		view = withItems.Layout
 	} else {
 		view, err = p.h.LibraryLayout(p.viewer(t), p.library, v)
 	}

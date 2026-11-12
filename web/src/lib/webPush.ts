@@ -2,6 +2,7 @@ import type { ProfileRequestContextSnapshot } from "@/api/client";
 import { listNotificationWebPushSubscriptions } from "@/api/v2/notificationDestinations";
 import { captureNotificationAuthority, requireNotificationAuthority } from "@/api/v2/notifications";
 import { v2 } from "@/api/v2/request";
+import { t } from "@/i18n";
 import { storage } from "@/utils/storage";
 
 /**
@@ -115,7 +116,7 @@ async function registerSubscription(
   context: ProfileRequestContextSnapshot,
 ): Promise<string> {
   if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) {
-    throw new Error("The browser returned an incomplete push subscription");
+    throw new Error(t("web.settings.notifications.push.error.incompleteSubscription"));
   }
   await v2("POST /api/v2/notifications/web-push/subscriptions", {
     profileContext: context,
@@ -142,12 +143,12 @@ export async function enableWebPush(
 ): Promise<void> {
   requireNotificationAuthority(context);
   if (webPushSupport() === "unsupported") {
-    throw new Error("This browser does not support push notifications");
+    throw new Error(t("web.settings.notifications.push.error.unsupported"));
   }
   const permission = await Notification.requestPermission();
   requireNotificationAuthority(context);
   if (permission !== "granted") {
-    throw new Error("Notification permission was not granted");
+    throw new Error(t("web.settings.notifications.push.error.permissionDenied"));
   }
   const registration = await navigator.serviceWorker.register("/sw.js");
   requireNotificationAuthority(context);
@@ -229,8 +230,5 @@ export async function disableWebPush(context = captureNotificationAuthority()): 
   requireNotificationAuthority(context);
   const removed = await subscription.unsubscribe();
   requireNotificationAuthority(context);
-  if (!removed)
-    throw new Error(
-      "Server registration removed, but the browser subscription could not be removed.",
-    );
+  if (!removed) throw new Error(t("web.settings.notifications.push.error.unsubscribeFailed"));
 }

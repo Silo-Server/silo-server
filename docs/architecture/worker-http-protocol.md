@@ -389,6 +389,27 @@ The next release removes the legacy bearer from `nodeauth.Verify`. Its release
 notes must name this release as a required step for rolling upgrades, because
 its workers refuse senders from before this release.
 
+## Media paths in stream tokens
+
+Stream, download and theme tokens name the file they serve, and clients hold
+them: they travel in worker URLs, and anyone holding a JWT can read its claims.
+So `streamtoken.Sign` never writes the media path in the clear. It seals it
+with AES-256-GCM under a key derived from `auth.jwt_secret` with HKDF-SHA256
+(no salt, info `silo/stream-token-media-path/v1`, 32 bytes) into the `spath`
+claim, and `streamtoken.Verify` opens it back into `MediaPath`. Every server
+and worker that verifies tokens already holds the secret, so none needs new
+configuration.
+
+A token signed by an earlier release carries the path in `path` and still
+verifies, so tokens issued before an upgrade keep working on upgraded workers.
+An earlier worker finds no `path` in a new token and fails the request, so a
+rolling upgrade follows the order above: transcode nodes, then proxies, then
+API servers.
+
+A proxy names a source download by the token's `dfn` claim when the API sent
+one, which keeps the file's own name on the server for a viewer who may not
+see it.
+
 ## Remaining progressive and HLS delivery chain
 
 Proxy token remux routes keep the legacy and audio-v2 suffixes distinct. The

@@ -6,8 +6,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/google/uuid"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
 type EbookAnnotationCreate = ebookReaderAnnotationRequest

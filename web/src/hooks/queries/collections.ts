@@ -21,6 +21,7 @@ import { PERSONAL_SCOPE } from "@/lib/collections/scope";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 import { putCollectionItem, useScopeDelete } from "./collectionScope";
 import { invalidateAdminCollectionQueries } from "./collectionSurfaceRefresh";
 import { catalogKeys, collectionKeys } from "./keys";
@@ -121,11 +122,15 @@ export function useSetCollectionShared() {
       });
     },
     onSuccess: (_collection, { id, shared }) => {
-      toast.success(shared ? "Shown to other profiles" : "Only you see it now");
+      toast.success(
+        shared
+          ? t("web.collections.toast.sharedWithProfiles")
+          : t("web.collections.toast.notShared"),
+      );
       return PERSONAL_SCOPE.invalidate(queryClient, id);
     },
     onError: (err) => {
-      toast.error(collectionMutationMessage(err, "Couldn't change sharing"));
+      toast.error(collectionMutationMessage(err, t("web.collections.toast.sharingFailed")));
       if (err instanceof V2ProblemError && err.status === 412)
         void PERSONAL_SCOPE.invalidate(queryClient);
     },
@@ -157,7 +162,7 @@ export function useAddItemToCollection() {
       putCollectionItem(PERSONAL_SCOPE, collectionId, mediaItemId, 0),
     onSuccess: (_data, vars) => PERSONAL_SCOPE.invalidate(queryClient, vars.collectionId),
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to add to collection");
+      toast.error(err instanceof Error ? err.message : t("web.collections.toast.addFailed"));
     },
   });
 }
@@ -180,7 +185,7 @@ export function useRemoveCollectionItem(collectionId: string, source: "user" | "
         ? PERSONAL_SCOPE.invalidate(queryClient, collectionId)
         : invalidateAdminCollectionQueries(queryClient),
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to remove item");
+      toast.error(err instanceof Error ? err.message : t("web.collections.toast.removeItemFailed"));
     },
   });
 }
@@ -237,7 +242,7 @@ export function useReorderCollections() {
     },
     onError: (err, _vars, ctx) => {
       if (ctx?.snapshot) queryClient.setQueryData(collectionKeys.list(), ctx.snapshot);
-      toast.error(collectionMutationMessage(err, "Failed to reorder"));
+      toast.error(collectionMutationMessage(err, t("web.collections.toast.reorderFailed")));
       if (err instanceof V2ProblemError && err.status === 412)
         void PERSONAL_SCOPE.invalidate(queryClient);
     },
@@ -264,7 +269,7 @@ export function useReorderCollectionItems(
         },
       ),
     onError: (err) => {
-      toast.error(collectionMutationMessage(err, "Failed to reorder items"));
+      toast.error(collectionMutationMessage(err, t("web.collections.toast.reorderItemsFailed")));
       if (source === "user" && err instanceof V2ProblemError && err.status === 412)
         void PERSONAL_SCOPE.invalidate(queryClient);
     },

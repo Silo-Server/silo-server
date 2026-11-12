@@ -81,8 +81,12 @@ interface ItemRefreshJobResult {
   detail_content_id?: string;
   scan_path?: string;
   matched_files?: number;
-  // Set when the metadata refresh committed but its artwork did not finish
-  // caching. The refresh itself succeeded, so this is a warning, not an error.
+  // Either is set when the metadata refresh committed but its artwork did not
+  // finish caching. The refresh itself succeeded, so this is a warning, not an
+  // error. A job read through the API carries the flag, and the warning as
+  // admin text; a job that arrives as a live event carries only the server's
+  // own warning text.
+  artwork_cache_incomplete?: boolean;
   artwork_cache_warning?: string;
   scan_result?: {
     new?: number;
@@ -121,12 +125,12 @@ export function useRefreshItemMetadata() {
       const refreshContentID = result.refresh_content_id;
       const detailContentID = result.detail_content_id;
       const newFiles = result.scan_result?.new ?? 0;
-      const artworkWarning = result.artwork_cache_warning;
 
-      if (artworkWarning) {
+      if (result.artwork_cache_incomplete || result.artwork_cache_warning) {
         toast.warning(t("web.item.toast.refreshArtworkWarning"), {
           id: context?.toastID,
-          description: artworkWarning,
+          // Empty when it is admin text a curator's session has not loaded.
+          description: result.artwork_cache_warning || undefined,
         });
       } else if (mode === "complete") {
         toast.success(t("web.item.toast.completeRefreshFinished"), { id: context?.toastID });

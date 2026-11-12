@@ -18,7 +18,7 @@ export async function fetchTaskSchedule(key: string): Promise<TaskSchedule> {
     },
   });
   if (!etag || etag === "*" || etag.startsWith("W/"))
-    throw new Error("Schedule revision unavailable. Reload before editing.");
+    throw new Error(t("web.admin.errors.scheduleRevisionMissing"));
   return { ...schedule, etag };
 }
 export function taskMutationMessage(error: unknown) {
