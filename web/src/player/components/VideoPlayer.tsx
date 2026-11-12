@@ -3752,9 +3752,10 @@ export function VideoPlayer({
     ro.observe(hud);
     ro.observe(container);
     return () => ro.disconnect();
-    // videoAspect moves the upright-phone dock without resizing anything the
-    // observer watches, so a change in it measures again.
-  }, [isDetached, isPlayerReady, displayMode, videoAspect]);
+    // videoAspect and videoFit move the upright-phone dock (Fill has none)
+    // without necessarily resizing anything the observer watches, so a change
+    // in either measures again.
+  }, [isDetached, isPlayerReady, displayMode, videoAspect, videoFit]);
 
   // Bottom-anchored cues rise to clear the control bar (plus a small gap) only
   // while the bar is up and only in the main foreground player; top-anchored
