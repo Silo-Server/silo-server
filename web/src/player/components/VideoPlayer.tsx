@@ -2774,21 +2774,27 @@ export function VideoPlayer({
     video.addEventListener("loadeddata", attemptAutoplayWhenReady);
     video.addEventListener("canplay", attemptAutoplayWhenReady);
 
-    // Taken by the first transport of the plan that replaced the seek's plan.
-    let seekDuringReplan: number | null = null;
+    // A seek made while this stream's plan was fetched is where the stream is
+    // heading, as a seek made while it loads is. Pending, it is also where a
+    // replan resumes before this stream plays. Taken by the first transport of
+    // the plan that replaced the seek's plan.
     const replanSeek = replanSeekRef.current;
     if (replanSeek && replanSeek.revision !== planRevision) {
       replanSeekRef.current = null;
-      if (replanSeek.sessionId === sessionIdRef.current) seekDuringReplan = replanSeek.seconds;
+      const seconds = pendingSeekTimeRef.current ?? replanSeek.seconds;
+      if (
+        replanSeek.sessionId === sessionIdRef.current &&
+        canSeekAnywhereRef.current &&
+        seconds !== roomHeldSeekRef.current
+      ) {
+        rememberPendingSeek(seconds);
+      }
     }
-    // A seek the viewer made while this stream's plan was fetched or while the
-    // stream loads wins over the plan's start position; on a seek-anywhere plan
-    // it never replans. A room seek request the room has not run yet waits for
-    // the room's command.
+    // A seek the viewer made while the stream loads wins over the plan's start
+    // position; on a seek-anywhere plan it never replans. A room seek request
+    // the room has not run yet waits for the room's command.
     const hlsStartPosition = () => {
-      const seconds = canSeekAnywhereRef.current
-        ? (pendingSeekTimeRef.current ?? seekDuringReplan)
-        : null;
+      const seconds = canSeekAnywhereRef.current ? pendingSeekTimeRef.current : null;
       return seconds === null || seconds === roomHeldSeekRef.current
         ? effectiveInitialPosition
         : toPlayerTime(seconds, timelineOffsetRef.current);
@@ -3197,6 +3203,7 @@ export function VideoPlayer({
     playsOriginalFile,
     plannedBitrateKbps,
     plannedDynamicRange,
+    rememberPendingSeek,
     reportCurrentPlanFailure,
     shouldAutoPlay,
   ]);

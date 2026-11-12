@@ -4183,6 +4183,27 @@ describe("VideoPlayer source timeline", () => {
       expect(video.currentTime).toBe(30);
     });
 
+    it("resumes another quality change at the seek before the new stream plays", async () => {
+      hlsJS.supported = true;
+      const onQualitySelect = vi.fn();
+      const { rerenderPlayer } = await seekDuringReplan();
+      rerenderPlayer({
+        plan,
+        replanning: false,
+        planRevision: 2,
+        streamUrl: "/api/v1/stream/session-1?revision=2",
+        onQualitySelect,
+      });
+      await waitFor(() => expect(hlsJS.constructed).toHaveBeenCalled());
+
+      const selectQuality = (
+        controls.current as unknown as { onQualitySelect: (id: string) => void }
+      ).onQualitySelect;
+      act(() => selectQuality("480p"));
+
+      expect(onQualitySelect).toHaveBeenCalledWith("480p", 30, undefined, expect.any(Function));
+    });
+
     it("forgets the seek when the replan settles without a new stream", async () => {
       hlsJS.supported = true;
       const { rerenderPlayer } = await seekDuringReplan();
