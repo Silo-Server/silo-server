@@ -3,6 +3,7 @@ package requests
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -72,12 +73,11 @@ const maxRequesterChoices = 16
 // dialog open.
 const requesterOptionsTimeout = 15 * time.Second
 
-func encodeRequesterChoices(choices RequesterChoices) ([]byte, error) {
-	raw, err := json.Marshal(choices)
-	if err != nil {
-		return nil, fmt.Errorf("encode requester choices: %w", err)
-	}
-	return raw, nil
+// encodeRequesterChoices writes the picks as JSON. The value holds only
+// strings, so encoding cannot fail.
+func encodeRequesterChoices(choices RequesterChoices) []byte {
+	raw, _ := json.Marshal(choices)
+	return raw
 }
 
 func decodeRequesterChoices(raw []byte) (RequesterChoices, error) {
@@ -234,7 +234,7 @@ func (s *Service) RequesterOptions(ctx context.Context, viewer Viewer, mediaType
 		return nil, err
 	}
 	if s == nil || s.store == nil {
-		return nil, fmt.Errorf("request service is not configured")
+		return nil, errors.New("request service is not configured")
 	}
 	if err := s.ensureRequestsEnabled(ctx); err != nil {
 		return nil, err
@@ -259,7 +259,7 @@ func (s *Service) RequesterOptions(ctx context.Context, viewer Viewer, mediaType
 	return options, nil
 }
 
-// errRequesterOptions refuses a request whose picks cannot be honoured.
+// errRequesterOptions refuses a request whose picks cannot be honored.
 func errRequesterOptions(message string) error {
 	return &ValidationError{FieldErrors: map[string]string{"options": message}}
 }

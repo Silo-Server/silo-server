@@ -371,10 +371,7 @@ func (r *Repository) insertRequest(
 	if err != nil {
 		return nil, err
 	}
-	choices, err := encodeRequesterChoices(input.Choices)
-	if err != nil {
-		return nil, err
-	}
+	choices := encodeRequesterChoices(input.Choices)
 	row := exec.QueryRow(ctx, `
 		INSERT INTO media_requests (
 			id, provider, media_type, tmdb_id, tvdb_id, imdb_id, title, year,
@@ -687,10 +684,7 @@ func (r *Repository) SetStatus(ctx context.Context, id string, from StateGuard, 
 }
 
 func (r *Repository) SetPendingRequesterChoices(ctx context.Context, id string, choices RequesterChoices) error {
-	raw, err := encodeRequesterChoices(choices)
-	if err != nil {
-		return err
-	}
+	raw := encodeRequesterChoices(choices)
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE media_requests
 		SET requester_choices = $2, updated_at = now()

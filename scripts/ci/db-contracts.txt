@@ -405,6 +405,7 @@
 ./internal/requests TestReplaceFailedIsScopedToRequesterDatabase
 ./internal/requests TestDeleteFailedRequestDatabase
 ./internal/requests TestListDownloadingRequestsOrderDatabase
+./internal/requests TestRequesterChoicesDatabase
 ./internal/downloads TestConcurrentArtifactCreatesCannotBypassQuotaDB
 ./internal/downloads TestSubscriptionSyncPagePostgres
 ./internal/downloads TestMonitorSyncKeepsDeletedEpisodesDeletedPostgres

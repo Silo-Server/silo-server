@@ -32,7 +32,7 @@ func optionsService(config map[string]any) (*Service, *fakeStore, *fakeRouterPro
 }
 
 func TestRequesterOptionsOffersOnlyWhatTheServerAllows(t *testing.T) {
-	service, _, router := optionsService(map[string]any{"profile_chosen_by": "requester", "radarr_profile_id": "default"})
+	service, _, _ := optionsService(map[string]any{"profile_chosen_by": "requester", "radarr_profile_id": "default"})
 	options, err := service.RequesterOptions(context.Background(), testViewer(1), MediaTypeMovie, 550)
 	if err != nil {
 		t.Fatalf("RequesterOptions: %v", err)
@@ -44,7 +44,7 @@ func TestRequesterOptionsOffersOnlyWhatTheServerAllows(t *testing.T) {
 
 	// The admin has not turned the choice on: nothing is offered, and the
 	// plugin is not asked.
-	service, _, router = optionsService(map[string]any{"profile_chosen_by": "admin"})
+	service, _, router := optionsService(map[string]any{"profile_chosen_by": "admin"})
 	router.optionsErr = errors.New("must not be called")
 	options, err = service.RequesterOptions(context.Background(), testViewer(1), MediaTypeMovie, 550)
 	if err != nil || len(options) != 0 {
