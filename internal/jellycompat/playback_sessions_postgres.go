@@ -234,7 +234,8 @@ func (d *DurableCompatPlaybackStore) Put(session PlaybackSession) {
 //
 // Unlike Put, a failed write is returned and the negotiation is dropped from
 // the cache: nothing has used its PlaySessionId yet, and an ID only this
-// process could resolve would fail on every other replica.
+// process could resolve would fail on every other replica. The cached
+// negotiations it displaced are restored.
 func (d *DurableCompatPlaybackStore) PutNegotiated(session PlaybackSession) error {
 	if d.pool == nil {
 		return d.mem.PutNegotiated(session)
@@ -244,26 +245,34 @@ func (d *DurableCompatPlaybackStore) PutNegotiated(session PlaybackSession) erro
 	unlockSession := d.lockSessionMutation(scope)
 	defer unlockSession()
 	d.cacheMutationMu.RLock()
-	stored, locallyRemoved := d.mem.putNegotiatedNormalized(session)
+	stored, displaced := d.mem.putNegotiatedNormalized(session)
 	defer d.finishCacheMutation(stored.ID, stored.CompatToken)
 	d.markIDValidated(stored.ID)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	durablyRemoved, err := d.replaceUnstartedNegotiation(ctx, stored)
+	d.clearUnpersisted(stored.ID)
 	if err != nil {
-		d.mem.Delete(stored.ID)
 		slog.WarnContext(ctx, "persist negotiated compat playback session failed",
 			"component", "jellycompat",
 			"error", err,
 			"play_session_id", playSessionFingerprint(stored.ID),
 		)
+		// The transaction rolled back, so the displaced negotiations are still
+		// durable and the client may hold their URLs: put them back in the
+		// cache with their bookkeeping untouched.
+		d.mem.undoNegotiated(stored.ID, displaced)
+		for _, s := range displaced {
+			d.bumpCacheGenerations(s.ID, "")
+		}
+		d.invalidateValidation("", stored.CompatToken)
+		return err
 	}
-	d.clearUnpersisted(stored.ID)
 
-	removed := make(map[string]struct{}, len(locallyRemoved)+len(durablyRemoved))
-	for _, id := range locallyRemoved {
-		removed[id] = struct{}{}
+	removed := make(map[string]struct{}, len(displaced)+len(durablyRemoved))
+	for _, s := range displaced {
+		removed[s.ID] = struct{}{}
 	}
 	for _, id := range durablyRemoved {
 		removed[id] = struct{}{}
@@ -275,7 +284,7 @@ func (d *DurableCompatPlaybackStore) PutNegotiated(session PlaybackSession) erro
 		d.bumpCacheGenerations(id, "")
 	}
 	d.invalidateValidation("", stored.CompatToken)
-	return err
+	return nil
 }
 
 func (d *DurableCompatPlaybackStore) replaceUnstartedNegotiation(

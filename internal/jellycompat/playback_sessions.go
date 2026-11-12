@@ -335,12 +335,12 @@ func (s *PlaybackSessionStore) putNormalized(session PlaybackSession) PlaybackSe
 	return session
 }
 
-func (s *PlaybackSessionStore) putNegotiatedNormalized(session PlaybackSession) (PlaybackSession, []string) {
+func (s *PlaybackSessionStore) putNegotiatedNormalized(session PlaybackSession) (PlaybackSession, []PlaybackSession) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	session = s.normalizeSession(session)
-	removed := make([]string, 0, 1)
+	removed := make([]PlaybackSession, 0, 1)
 	if session.CompatToken != "" && session.ClientDeviceID != "" && session.RouteItemID != "" {
 		for id, existing := range s.sessions {
 			if id == session.ID || existing.Terminal || existing.UpstreamSessionID != "" {
@@ -351,12 +351,26 @@ func (s *PlaybackSessionStore) putNegotiatedNormalized(session PlaybackSession) 
 				mediaSourceIDsEqual(existing.RouteItemID, session.RouteItemID) &&
 				existing.NegotiationVariant == session.NegotiationVariant {
 				delete(s.sessions, id)
-				removed = append(removed, id)
+				removed = append(removed, existing)
 			}
 		}
 	}
 	s.sessions[session.ID] = session
 	return session, removed
+}
+
+// undoNegotiated reverses putNegotiatedNormalized: it drops the negotiation id
+// and restores the sessions it displaced, unless one was stored again since.
+func (s *PlaybackSessionStore) undoNegotiated(id string, displaced []PlaybackSession) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	delete(s.sessions, id)
+	for _, session := range displaced {
+		if _, ok := s.sessions[session.ID]; !ok {
+			s.sessions[session.ID] = session
+		}
+	}
 }
 
 func (s *PlaybackSessionStore) normalizeSession(session PlaybackSession) PlaybackSession {
