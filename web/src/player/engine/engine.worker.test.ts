@@ -96,12 +96,17 @@ vi.mock("mediabunny", () => {
       );
     }
     async getFirstKeyPacket(options?: { verifyKeyPackets?: boolean }) {
-      const verified = options?.verifyKeyPackets === true && file.description !== undefined;
-      return (
-        file.packets.find(
-          (packet) => packet.type === "key" && (!verified || packet.idr === true),
-        ) ?? null
-      );
+      let key = file.packets.find((packet) => packet.type === "key") ?? null;
+      // Verified, it walks forward key by key to an IDR, as on Chromium.
+      if (options?.verifyKeyPackets === true && file.description !== undefined) {
+        while (key && !key.idr) key = await this.getNextKeyPacket(key);
+      }
+      return key;
+    }
+    async getNextKeyPacket(after: Packet) {
+      file.keyLookups.push(after.timestamp);
+      const keys = file.packets.filter((packet) => packet.type === "key");
+      return keys[keys.indexOf(after) + 1] ?? null;
     }
     async *packets(start: Packet) {
       yield* file.packets.slice(file.packets.indexOf(start));
@@ -313,6 +318,27 @@ describe("engine worker", () => {
     );
     // The first run makes one lookup and stops; the second makes all 42.
     expect(file.keyLookups.length).toBe(43);
+  });
+
+  it("fails over when no key near the start of the file starts an H.264 stream", async () => {
+    file.packets = Array.from({ length: 120 }, (_, second) => ({
+      timestamp: FIRST_TIMESTAMP + second * 0.5,
+      duration: 0.5,
+      type: "key" as const,
+      data: accessUnit(NON_IDR_SLICE),
+    }));
+    file.description = AVCC;
+    stubDecoder();
+    const { posted, send } = await openWorker();
+
+    send({ type: "start", generation: 12, position: 1 });
+    await vi.waitFor(() =>
+      expect(posted.find((m) => m.type === "error" && m.generation === 12)).toMatchObject({
+        classification: "browser_engine_video_unsupported",
+      }),
+    );
+    // Not to the end of the file: the forward search stops 20 s past the position.
+    expect(Math.max(...file.keyLookups)).toBeLessThanOrEqual(FIRST_TIMESTAMP + 21);
   });
 
   it("fails over when no key packet before the position starts an H.264 stream", async () => {

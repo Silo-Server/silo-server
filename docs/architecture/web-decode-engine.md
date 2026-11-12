@@ -225,8 +225,8 @@ source gamut to BT.709, sRGB encode. These match the server's tone-map recipes i
   can decode from is tried however far back), the run fails over as
   `browser_engine_video_unsupported` instead of walking back to the start of
   the file. A search that reaches the start of the file without a start that
-  worked tries the first key the verified lookup accepts, which can be after
-  the position, unless it already tried that key. A newer run stops the search. Other codecs use the verified
+  worked looks forward from the first key, past the position, for a start it
+  has not tried, within the same bounds. A newer run stops the search. Other codecs use the verified
   lookup.
 - **Dolby Vision.** RPU (NAL 62) and enhancement-layer (NAL 63 or
   `nuh_layer_id > 0`) units are removed before decode (`engine/hevc.ts`).

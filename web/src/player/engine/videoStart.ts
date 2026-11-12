@@ -61,10 +61,20 @@ export async function* videoStarts(
     if (!packet) {
       if (first) return "no-keys";
       // Back at the start of the file without a start that worked, as in a
-      // recording cut mid-GOP: start at the first key the verified lookup
-      // accepts, which can be after the position, unless it was tried.
-      const key = await sink.getFirstKeyPacket({ verifyKeyPackets: true });
-      if (key && !tried.has(key.timestamp)) yield { packet: key, recoveryPoint: false };
+      // recording cut mid-GOP: look forward from the first key, past the
+      // position, for a start not yet tried, as far as the lookback reaches.
+      for (
+        let key = await sink.getFirstKeyPacket();
+        key && key.timestamp <= target + MAX_H264_START_LOOKBACK_SECONDS;
+        key = await sink.getNextKeyPacket(key)
+      ) {
+        if (cancelled() || attempts >= MAX_H264_START_ATTEMPTS) return "exhausted";
+        const access = h264RandomAccess(key.data, h264LengthSize);
+        if (!access || tried.has(key.timestamp)) continue;
+        attempts += 1;
+        tried.add(key.timestamp);
+        yield { packet: key, recoveryPoint: access === "recovery-point" };
+      }
       return "exhausted";
     }
     const access = h264RandomAccess(packet.data, h264LengthSize);
