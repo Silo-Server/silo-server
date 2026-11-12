@@ -1116,8 +1116,13 @@ func (s *Service) Approve(ctx context.Context, viewer Viewer, id string) (*Reque
 	if err != nil {
 		return nil, err
 	}
+	return s.afterAdminApproval(ctx, viewer, approved), nil
+}
+
+// afterAdminApproval notifies about and submits a request an admin approved.
+func (s *Service) afterAdminApproval(ctx context.Context, viewer Viewer, approved *Request) *Request {
 	s.notifyApproval(ctx, *approved, ApprovalOriginAdmin)
-	return s.withLibraryContent(ctx, s.submitAfterCommit(ctx, *approved, viewer)), nil
+	return s.withLibraryContent(ctx, s.submitAfterCommit(ctx, *approved, viewer))
 }
 
 // Decline rejects a request nothing has been sent for: a pending one, or an

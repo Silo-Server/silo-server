@@ -55,7 +55,7 @@ describe("RequestSeasonsDialog", () => {
     mocks.options = { data: [], isLoading: false };
   });
 
-  it("sends only the download server settings the viewer changed", () => {
+  it("sends the download server settings the dialog shows", () => {
     mocks.options.data = [
       {
         key: "sonarr_profile_id",
@@ -70,8 +70,10 @@ describe("RequestSeasonsDialog", () => {
     const dialog = open(series({ seasons: [season(1)] }));
     expect(within(dialog).getByRole("combobox", { name: "Quality" })).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Request Season 1" }));
-    // Untouched, the server's own setting applies and nothing is sent.
-    expect(mocks.create.mock.calls[0]![0]).not.toHaveProperty("options");
+    // Untouched, the shown default is sent; the server leaves out its own setting.
+    expect(mocks.create.mock.calls[0]![0]).toMatchObject({
+      options: { sonarr_profile_id: "default" },
+    });
   });
 
   it("leaves an untouched pick to the server", () => {

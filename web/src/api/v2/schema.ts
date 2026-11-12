@@ -33301,7 +33301,7 @@ export interface components {
       /** @description The values on offer; never empty */
       choices: components["schemas"]["RequestOptionValue"][];
       /**
-       * @description The value in effect when the requester chooses nothing, for preselecting; always one of choices
+       * @description The value to preselect; always one of choices. It is the download server's own setting when that is on offer, and the first choice otherwise, so send the selected value of every option, also when it is the default. A value that is the server's own setting is not stored as a pick
        * @example default
        */
       default: string;

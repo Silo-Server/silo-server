@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import type { MediaRequest, RequestMediaDetail, RequestOption } from "@/api/types";
 import { V2ProblemError } from "@/api/v2/request";
@@ -40,10 +40,7 @@ vi.mock("@/hooks/queries/useRequests", () => ({
   useToggleRequestFollow: () => ({ mutate: mocks.toggleFollow, isPending: false }),
   useRequestFeatureStatus: () => ({ data: undefined }),
   useRequestOptions: () => ({ data: mocks.requestOptions, isLoading: false }),
-  useLoadRequestOptions: () => ({
-    supported: mocks.requestOptions.length > 0,
-    load: () => Promise.resolve(mocks.requestOptions),
-  }),
+  useLoadRequestOptions: () => ({ load: () => Promise.resolve(mocks.requestOptions) }),
 }));
 vi.mock("@/hooks/queries/watchlistTitles", () => ({
   useToggleWatchlistTitle: () => ({ mutate: vi.fn(), isPending: false }),
@@ -230,7 +227,7 @@ describe("TitleDetail", () => {
     it.each([
       ["movie", "Request movie"],
       ["series", "Request series"],
-    ] as const)("offers to request a requestable %s", (mediaType, label) => {
+    ] as const)("offers to request a requestable %s", async (mediaType, label) => {
       renderDetail({
         ...baseDetail,
         media_type: mediaType,
@@ -242,8 +239,11 @@ describe("TitleDetail", () => {
       expect(request).toBeEnabled();
       fireEvent.click(request);
 
-      expect(mocks.create).toHaveBeenCalledExactlyOnceWith(
-        expect.objectContaining({ media_type: mediaType, tmdb_id: 603, title: "The Matrix" }),
+      // The click first asks whether the title has settings to choose.
+      await waitFor(() =>
+        expect(mocks.create).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({ media_type: mediaType, tmdb_id: 603, title: "The Matrix" }),
+        ),
       );
     });
 
@@ -269,8 +269,10 @@ describe("TitleDetail", () => {
 
       fireEvent.click(within(dialog).getByRole("button", { name: "Request" }));
       expect(mocks.create).toHaveBeenCalledOnce();
-      // The default was kept, so the server's own setting applies.
-      expect(mocks.create.mock.calls[0]![0]).not.toHaveProperty("options");
+      // The selected value is sent as shown; the server leaves out its own setting.
+      expect(mocks.create.mock.calls[0]![0]).toMatchObject({
+        options: { radarr_profile_id: "default" },
+      });
     });
 
     it("requests a series season by season", () => {

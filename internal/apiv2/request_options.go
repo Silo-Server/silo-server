@@ -31,7 +31,7 @@ func requestOptionChoicesOf(choices mediarequests.RequesterChoices) []RequestOpt
 type RequestOption struct {
 	Key     string               `json:"key" doc:"The key to send in createRequest's options" example:"radarr_profile_id"`
 	Label   string               `json:"label" doc:"The option's name" example:"Quality"`
-	Default string               `json:"default" doc:"The value in effect when the requester chooses nothing, for preselecting; always one of choices" example:"default"`
+	Default string               `json:"default" doc:"The value to preselect; always one of choices. It is the download server's own setting when that is on offer, and the first choice otherwise, so send the selected value of every option, also when it is the default. A value that is the server's own setting is not stored as a pick" example:"default"`
 	Choices []RequestOptionValue `json:"choices" doc:"The values on offer; never empty"`
 }
 

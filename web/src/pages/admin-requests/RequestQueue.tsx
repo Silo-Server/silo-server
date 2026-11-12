@@ -170,7 +170,10 @@ export function RequestQueue() {
     track(request, "approve", async () => {
       const options = await listAdminRequestOptionsV2(request.id).catch(() => []);
       if (!options || options.length === 0) return approve.mutateAsync({ id: request.id });
-      setApprovePrompt({ request, options });
+      // A prompt already open keeps the dialog: replacing it would put this
+      // request under settings chosen for the other. Approve is pressed
+      // again once that dialog closes.
+      setApprovePrompt((open) => open ?? { request, options });
       return request;
     });
   }

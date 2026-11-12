@@ -210,14 +210,16 @@ describe("requestOptionsToSend", () => {
     },
   ];
 
-  it("sends a pick that differs from the default", () => {
+  it("sends the selected value of every option", () => {
     expect(requestOptionsToSend(options, { profile: "4" })).toEqual({ profile: "4" });
+    // The default is what the form shows, so it is sent too.
+    expect(requestOptionsToSend(options, {})).toEqual({ profile: "default" });
   });
 
-  it("sends nothing for a default, a stale value or an unknown option", () => {
-    expect(requestOptionsToSend(options, {})).toBeUndefined();
-    expect(requestOptionsToSend(options, { profile: "default" })).toBeUndefined();
-    expect(requestOptionsToSend(options, { profile: "7", folder: "/x" })).toBeUndefined();
+  it("falls back to the default for a stale value and ignores an unknown option", () => {
+    expect(requestOptionsToSend(options, { profile: "7", folder: "/x" })).toEqual({
+      profile: "default",
+    });
     expect(requestOptionsToSend(undefined, { profile: "4" })).toBeUndefined();
   });
 });

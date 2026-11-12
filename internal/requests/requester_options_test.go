@@ -226,3 +226,67 @@ func TestApproverOptionsLeaveOutWhatTheAdminFixed(t *testing.T) {
 		t.Fatalf("a refused approval submitted the request: %+v", router.gotConns)
 	}
 }
+
+func TestRequesterPickOfTheShownDefaultIsKeptWhenItIsNotTheSavedSetting(t *testing.T) {
+	// The saved profile is gone from the server, so the form shows the first
+	// choice. Sending that choice must apply it, not the stale saved value.
+	service, store, router := optionsService(map[string]any{"profile_chosen_by": "requester", "radarr_profile_id": "12"})
+	options, err := service.RequesterOptions(context.Background(), testViewer(1), MediaTypeMovie, 550)
+	if err != nil || len(options) != 1 || options[0].Default != "default" || options[0].DefaultIsSaved {
+		t.Fatalf("options = %+v, err = %v; want the first choice shown, not as the saved setting", options, err)
+	}
+	input := fightClubInput
+	input.Options = map[string]string{"radarr_profile_id": "default"}
+	req, err := service.CreateRequest(context.Background(), testViewer(1), input)
+	if err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+	if stored := store.requests[req.ID].RequesterChoices; len(stored.Choices) != 1 || stored.Choices[0].Value != "default" {
+		t.Fatalf("stored choices = %+v, want the shown default kept", stored)
+	}
+	if len(router.gotConns) != 1 || router.gotConns[0].Config["radarr_profile_id"] != "default" {
+		t.Fatalf("fulfill connections = %+v, want radarr_profile_id default", router.gotConns)
+	}
+}
+
+func TestRequesterPickOfTheSavedSettingIsNotStored(t *testing.T) {
+	service, store, _ := optionsService(map[string]any{"profile_chosen_by": "requester", "radarr_profile_id": "default"})
+	input := fightClubInput
+	input.Options = map[string]string{"radarr_profile_id": "default"}
+	req, err := service.CreateRequest(context.Background(), testViewer(1), input)
+	if err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+	if stored := store.requests[req.ID].RequesterChoices; len(stored.Choices) != 0 {
+		t.Fatalf("stored choices = %+v, want none for the server's own setting", stored)
+	}
+}
+
+func TestRequesterOptionsRefuseABlockedAccount(t *testing.T) {
+	service, store, router := optionsService(map[string]any{"profile_chosen_by": "requester", "radarr_profile_id": "default"})
+	store.limit = &UserLimit{UserID: 1, LimitMode: LimitModeBlocked, ApprovalMode: ApprovalModeInherit}
+	router.optionsErr = errors.New("must not be called")
+	if _, err := service.RequesterOptions(context.Background(), testViewer(1), MediaTypeMovie, 550); !errors.Is(err, ErrUserBlocked) {
+		t.Fatalf("err = %v, want ErrUserBlocked", err)
+	}
+}
+
+func TestApproveWithOptionsKeepsTheRequestersPickTheAdminLeft(t *testing.T) {
+	service, store, _ := optionsService(map[string]any{"profile_chosen_by": "requester", "radarr_profile_id": "default"})
+	store.settings.GlobalAutoApprovalEnabled = false
+	input := fightClubInput
+	input.Options = map[string]string{"radarr_profile_id": "4"}
+	req, err := service.CreateRequest(context.Background(), testViewer(1), input)
+	if err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+	admin := Viewer{UserID: 9, ProfileID: "9", IsAdmin: true}
+	// The approval form sends what it shows: the requester's pick, unchanged.
+	if _, err := service.ApproveWithOptions(context.Background(), admin, req.ID, map[string]string{"radarr_profile_id": "4"}); err != nil {
+		t.Fatalf("ApproveWithOptions: %v", err)
+	}
+	stored := store.requests[req.ID].RequesterChoices
+	if len(stored.Choices) != 1 || stored.Choices[0].Value != "4" || stored.Choices[0].ByAdmin {
+		t.Fatalf("stored choices = %+v, want the requester's pick as they made it", stored)
+	}
+}

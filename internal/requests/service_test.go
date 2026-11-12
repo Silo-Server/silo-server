@@ -1693,18 +1693,24 @@ func (f *fakeStore) SetStatus(_ context.Context, id string, from StateGuard, sta
 	return &copy, nil
 }
 
-func (f *fakeStore) SetPendingRequesterChoices(_ context.Context, id string, choices RequesterChoices) error {
+func (f *fakeStore) ApproveWithRequesterChoices(_ context.Context, id string, choices RequesterChoices, _ Viewer) (*Request, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	req := f.lookupLocked(id)
 	if req == nil {
-		return ErrNotFound
+		return nil, ErrNotFound
 	}
 	if !f.guardAccepts(guardPending, req) {
-		return ErrInvalidState
+		return nil, ErrInvalidState
 	}
+	f.statusUpdates = append(f.statusUpdates, StatusApproved)
 	req.RequesterChoices = choices
-	return nil
+	req.Status = StatusApproved
+	req.SubmitAttempts = 0
+	req.SubmitLeaseUntil = nil
+	req.NextSubmitAt = nil
+	approved := *req
+	return &approved, nil
 }
 
 func (f *fakeStore) SetOutcome(_ context.Context, id string, from StateGuard, outcome Outcome, _ Viewer, message string) (*Request, error) {

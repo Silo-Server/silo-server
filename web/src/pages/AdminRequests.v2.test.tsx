@@ -476,8 +476,10 @@ describe("request administration", () => {
     expect(calls("POST /api/v2/admin/requests/{id}/approve")).toHaveLength(0);
     fireEvent.click(within(dialog).getByRole("button", { name: "Approve" }));
     await waitFor(() => expect(calls("POST /api/v2/admin/requests/{id}/approve")).toHaveLength(1));
-    // The default was kept, so no pick is sent.
-    expect(calls("POST /api/v2/admin/requests/{id}/approve")[0]?.body).toEqual({});
+    // The selected value is sent as shown; the server leaves out its own setting.
+    expect(calls("POST /api/v2/admin/requests/{id}/approve")[0]?.body).toEqual({
+      options: { radarr_profile_id: "default" },
+    });
   });
 
   it("loads the next page from the cursor the last one returned", async () => {

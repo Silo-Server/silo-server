@@ -386,9 +386,11 @@ export function requestInputFromMediaResult(item: RequestMediaResult): CreateMed
 export type RequestOptionPicks = Record<string, string>;
 
 /**
- * The picks to send with a request: only those that differ from an option's
- * default and are still on offer. Nothing to send is undefined, so the
- * request leaves the download server's own settings alone.
+ * The picks to send with a request: every option's selected value, which is
+ * its default until the viewer picks another. The default is sent too: it is
+ * what the form shows, and it is not always the download server's own
+ * setting. The server leaves out a pick that is its own setting. No options
+ * is undefined.
  */
 export function requestOptionsToSend(
   options: readonly RequestOption[] | undefined,
@@ -396,14 +398,12 @@ export function requestOptionsToSend(
 ): Record<string, string> | undefined {
   const out: Record<string, string> = {};
   for (const option of options ?? []) {
-    const pick = picks[option.key];
-    if (
-      pick !== undefined &&
-      pick !== option.default &&
-      option.choices.some((choice) => choice.value === pick)
-    ) {
-      out[option.key] = pick;
-    }
+    const chosen = picks[option.key];
+    const pick =
+      chosen !== undefined && option.choices.some((choice) => choice.value === chosen)
+        ? chosen
+        : option.default;
+    if (option.choices.some((choice) => choice.value === pick)) out[option.key] = pick;
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }

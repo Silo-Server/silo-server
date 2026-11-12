@@ -21,7 +21,7 @@ export interface ApprovePrompt {
 
 interface ApproveOptionsDialogProps {
   prompt: ApprovePrompt | null;
-  /** Approves with the picks that differ from what would apply anyway. */
+  /** Approves with the value selected for each option. */
   onConfirm: (request: MediaRequest, options?: Record<string, string>) => void;
   onOpenChange: (open: boolean) => void;
 }
@@ -38,6 +38,12 @@ export function ApproveOptionsDialog({
 }: ApproveOptionsDialogProps) {
   const t = useT();
   const [picks, setPicks] = useState<RequestOptionPicks>({});
+  // A prompt for another request starts without the last one's picks.
+  const [pickedFor, setPickedFor] = useState(prompt?.request.id);
+  if (pickedFor !== prompt?.request.id) {
+    setPickedFor(prompt?.request.id);
+    setPicks({});
+  }
   const close = (next: boolean) => {
     if (!next) setPicks({});
     onOpenChange(next);

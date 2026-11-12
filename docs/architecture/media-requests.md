@@ -387,6 +387,15 @@ listed for that server passes, and a plugin cannot offer a config key routing
 sets itself. The picks are stored on the request (`requester_choices`) with the
 labels they were offered under and the server they were offered on.
 
+An option's `default` is the value a form preselects. It is the server's own
+setting when that is one of the choices, and the first choice otherwise (a
+saved profile that was since deleted, say). A client therefore sends the
+selected value of every option it showed, the default included, so what the
+requester saw is what applies. A pick that is the server's own setting is not
+stored: that setting applies anyway, and it keeps following the server.
+Listing the options runs the same access check as creating a request, so an
+account that may not request cannot read the choices.
+
 At submission the picks are set in that server's config, over the server's own
 values and the route's overrides, and the plugin reads its config as always.
 They apply only to the server they were offered on, and only while that server
@@ -408,7 +417,10 @@ the approver, and may change those it leaves to requesters.
 the server the request would go to, each defaulting to the requester's pick
 when there is one. `adminApproveRequest` takes the admin's picks as `options`
 and checks them the same way; a pick replaces the requester's for that option
-and is stored as the admin's. A request that is approved automatically, or
+and is stored as the admin's, unless it is the requester's own pick, which
+stays theirs. The picks are stored in the same guarded update that approves
+the request, so when two admins approve at once the one whose approval wins is
+the one whose picks apply. A request that is approved automatically, or
 with several others at once, gets no approver pick, so an option left to the
 approver keeps the server's saved value there.
 

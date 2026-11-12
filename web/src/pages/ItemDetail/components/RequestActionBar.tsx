@@ -123,11 +123,7 @@ export default function RequestActionBar({ item, libraryHref }: RequestActionBar
           : t("web.detail.request.requestMovie"),
       icon: Plus,
       pending: createRequest.isPending || loadingOptions,
-      onClick: seasonPicker
-        ? () => setPickSeasons(true)
-        : requestOptions.supported
-          ? () => void requestOrChoose()
-          : requestNow,
+      onClick: seasonPicker ? () => setPickSeasons(true) : () => void requestOrChoose(),
     };
   } else if (inLibrary) {
     primaryAction = libraryHref

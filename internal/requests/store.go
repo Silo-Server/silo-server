@@ -43,9 +43,10 @@ type Store interface {
 	// Declining or withdrawing also clears the title's follows in the same
 	// transaction.
 	SetStatus(ctx context.Context, id string, from StateGuard, status Status, actor Viewer) (*Request, error)
-	// SetPendingRequesterChoices replaces a request's picks while it still
-	// waits for approval; any other request returns ErrInvalidState.
-	SetPendingRequesterChoices(ctx context.Context, id string, choices RequesterChoices) error
+	// ApproveWithRequesterChoices approves a pending request and replaces
+	// its picks in one guarded update; any other request returns
+	// ErrInvalidState and keeps its picks.
+	ApproveWithRequesterChoices(ctx context.Context, id string, choices RequesterChoices, actor Viewer) (*Request, error)
 	SetOutcome(ctx context.Context, id string, from StateGuard, outcome Outcome, actor Viewer, message string) (*Request, error)
 	// ReopenFailed moves a failed request back to active + approved with a
 	// fresh submission budget, in one guarded write.

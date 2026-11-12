@@ -648,6 +648,19 @@ func guardMiss(ctx context.Context, exec requestExecutor, id string) error {
 }
 
 func (r *Repository) SetStatus(ctx context.Context, id string, from StateGuard, status Status, actor Viewer) (*Request, error) {
+	return r.setStatus(ctx, id, from, status, actor, nil)
+}
+
+// ApproveWithRequesterChoices approves a pending request and replaces its
+// picks in one guarded update, so of two admins approving at once the one
+// whose approval wins also has their picks stored.
+func (r *Repository) ApproveWithRequesterChoices(ctx context.Context, id string, choices RequesterChoices, actor Viewer) (*Request, error) {
+	return r.setStatus(ctx, id, guardPending, StatusApproved, actor, encodeRequesterChoices(choices))
+}
+
+// setStatus applies a guarded status transition. choices, when not nil,
+// replaces the request's picks in the same update.
+func (r *Repository) setStatus(ctx context.Context, id string, from StateGuard, status Status, actor Viewer, choices []byte) (*Request, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin request status transaction: %w", err)
@@ -664,10 +677,11 @@ func (r *Repository) SetStatus(ctx context.Context, id string, from StateGuard, 
 		    completed_at = CASE WHEN $5 = 'completed' AND completed_at IS NULL THEN now() ELSE completed_at END,
 		    submit_attempts = CASE WHEN $5 = 'approved' THEN 0 ELSE submit_attempts END,
 		    submit_lease_until = CASE WHEN $5 = 'approved' THEN NULL ELSE submit_lease_until END,
-		    next_submit_at = CASE WHEN $5 = 'approved' THEN NULL ELSE next_submit_at END
+		    next_submit_at = CASE WHEN $5 = 'approved' THEN NULL ELSE next_submit_at END,
+		    requester_choices = COALESCE($6::jsonb, requester_choices)
 		WHERE id = $1
 		  AND `+guardCondition+`
-		RETURNING `+requestColumns(), id, statuses, outcomes, unsent, status))
+		RETURNING `+requestColumns(), id, statuses, outcomes, unsent, status, choices))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, guardMiss(ctx, tx, id)
@@ -681,21 +695,6 @@ func (r *Repository) SetStatus(ctx context.Context, id string, from StateGuard, 
 		return nil, fmt.Errorf("commit request status transaction: %w", err)
 	}
 	return req, nil
-}
-
-func (r *Repository) SetPendingRequesterChoices(ctx context.Context, id string, choices RequesterChoices) error {
-	raw := encodeRequesterChoices(choices)
-	tag, err := r.pool.Exec(ctx, `
-		UPDATE media_requests
-		SET requester_choices = $2, updated_at = now()
-		WHERE id = $1 AND status = 'pending' AND outcome = 'active'`, id, raw)
-	if err != nil {
-		return fmt.Errorf("set request choices: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrInvalidState
-	}
-	return nil
 }
 
 func (r *Repository) SetOutcome(ctx context.Context, id string, from StateGuard, outcome Outcome, actor Viewer, message string) (*Request, error) {

@@ -95,13 +95,17 @@ export function useRequestDiscovery() {
   });
 }
 
+const requestStatusQuery = {
+  queryKey: requestKeys.status(),
+  queryFn: () => v2("GET /api/v2/requests/status"),
+  staleTime: REQUESTS_STALE_TIME,
+};
+
 export function useRequestFeatureStatus(
   options: { enabled?: boolean; refetchOnMount?: boolean } = {},
 ) {
   return useQuery({
-    queryKey: requestKeys.status(),
-    queryFn: () => v2("GET /api/v2/requests/status"),
-    staleTime: REQUESTS_STALE_TIME,
+    ...requestStatusQuery,
     enabled: options.enabled ?? true,
     ...(options.refetchOnMount !== undefined && { refetchOnMount: options.refetchOnMount }),
   });
@@ -321,25 +325,31 @@ export function useRequestOptions(
   tmdbID: number,
   options: { enabled: boolean },
 ) {
-  const supported = useRequestFeatureStatus().data?.request_options_supported === true;
-  return useQuery({
+  const status = useRequestFeatureStatus();
+  const supported = status.data?.request_options_supported === true;
+  const query = useQuery({
     ...requestOptionsQuery(mediaType, tmdbID),
     enabled: options.enabled && supported && tmdbID > 0,
   });
+  // Until the server has said whether it has request options, the choices
+  // are still unknown: a form must not submit as if there were none.
+  return { ...query, isLoading: query.isLoading || (options.enabled && status.isLoading) };
 }
 
 /**
  * Reads a title's request options once, for a control that requests on a
- * single click when there is nothing to choose. `supported` is false on a
- * server without request options, which has nothing to read. `load` resolves
- * to none when the read fails.
+ * single click when there is nothing to choose. `load` first waits for the
+ * server to say whether it has request options, so a click made before that
+ * is known does not skip the choices. It resolves to none on a server without
+ * request options, and when a read fails.
  */
 export function useLoadRequestOptions() {
   const queryClient = useQueryClient();
-  const supported = useRequestFeatureStatus().data?.request_options_supported === true;
   const load = useCallback(
     async (mediaType: RequestMediaType, tmdbID: number): Promise<RequestOption[]> => {
       try {
+        const status = await queryClient.ensureQueryData(requestStatusQuery);
+        if (status.request_options_supported !== true) return [];
         return await queryClient.fetchQuery(requestOptionsQuery(mediaType, tmdbID));
       } catch {
         return [];
@@ -347,7 +357,7 @@ export function useLoadRequestOptions() {
     },
     [queryClient],
   );
-  return { supported, load };
+  return { load };
 }
 
 /** Follows or unfollows a title someone else has already requested. */

@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
 // Requester options: a router plugin can let the requester choose some of a
@@ -41,7 +43,11 @@ type RequesterOption struct {
 	// Default is the value in effect when the requester picks nothing, when
 	// it is one of the choices; otherwise the first choice.
 	Default string
-	Choices []RouterOption
+	// DefaultIsSaved reports that Default is the server's own setting, which
+	// applies without a pick. It is false when that setting is not one of
+	// the choices and Default is only what a form shows first.
+	DefaultIsSaved bool
+	Choices        []RouterOption
 }
 
 // RequesterChoice is one pick, with the words it was offered in so it can be
@@ -202,15 +208,19 @@ func (s *Service) requesterOffer(ctx context.Context, probe Request, approver bo
 		if len(choices) == 0 {
 			continue
 		}
+		// The server's own value is the default when it is on offer.
+		// Otherwise the first choice is shown, and it is not what applies
+		// without a pick, so resolveChoices must keep a pick of it.
 		current := fmt.Sprint(conn.Config[option.Field])
-		if !slices.ContainsFunc(choices, func(c RouterOption) bool { return c.Value == current }) {
+		saved := slices.ContainsFunc(choices, func(c RouterOption) bool { return c.Value == current })
+		if !saved {
 			current = choices[0].Value
 		}
 		label := option.Label
 		if label == "" {
 			label = option.Field
 		}
-		options = append(options, RequesterOption{Key: option.Field, Label: label, Default: current, Choices: choices})
+		options = append(options, RequesterOption{Key: option.Field, Label: label, Default: current, DefaultIsSaved: saved, Choices: choices})
 	}
 	return conn.ID, options, nil
 }
@@ -249,11 +259,20 @@ func (s *Service) RequesterOptions(ctx context.Context, viewer Viewer, mediaType
 	if tmdbID <= 0 {
 		return nil, fmt.Errorf("%w: tmdb_id is required", ErrInvalidInput)
 	}
+	// The same access check as creating a request: someone who may not
+	// request must not read the server's choices, which can be folder paths.
+	policy, err := s.EffectivePolicy(ctx, viewer.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateCreateAccess(policy); err != nil {
+		return nil, err
+	}
 	facts := s.routingFacts(ctx, s.requestDetail(ctx, mediaType, tmdbID))
 	_, options, err := s.requesterOffer(ctx, requestProbe(viewer, mediaType, tmdbID, facts), false)
 	if err != nil {
 		slog.WarnContext(ctx, "requests: could not list requester options", "component", "requests",
-			"media_type", string(mediaType), "tmdb_id", tmdbID, "err", err)
+			"media_type", string(mediaType), "tmdb_id", tmdbID, "err", logredact.SanitizeText(err.Error()))
 		return nil, nil
 	}
 	return options, nil
@@ -285,7 +304,7 @@ func (s *Service) resolveChoices(ctx context.Context, probe Request, picks map[s
 	integrationID, options, err := s.requesterOffer(ctx, probe, approver)
 	if err != nil {
 		slog.WarnContext(ctx, "requests: could not check requester options", "component", "requests",
-			"media_type", string(probe.MediaType), "tmdb_id", probe.TMDBID, "err", err)
+			"media_type", string(probe.MediaType), "tmdb_id", probe.TMDBID, "err", logredact.SanitizeText(err.Error()))
 		return RequesterChoices{}, errRequesterOptions("The download server's choices could not be read. Try again, or continue without choosing.")
 	}
 	out := RequesterChoices{IntegrationID: integrationID}
@@ -298,6 +317,10 @@ func (s *Service) resolveChoices(ctx context.Context, probe Request, picks map[s
 		j := slices.IndexFunc(option.Choices, func(c RouterOption) bool { return c.Value == picks[key] })
 		if j < 0 {
 			return RequesterChoices{}, errRequesterOptions(fmt.Sprintf("That %s is no longer offered. Reload and try again.", strings.ToLower(option.Label)))
+		}
+		if option.DefaultIsSaved && picks[key] == option.Default {
+			// The server's own setting: it applies without a pick.
+			continue
 		}
 		out.Choices = append(out.Choices, RequesterChoice{
 			Key: key, Label: option.Label, Value: option.Choices[j].Value, ValueLabel: option.Choices[j].Label,
@@ -324,7 +347,7 @@ func (s *Service) ApproverOptions(ctx context.Context, viewer Viewer, id string)
 	integrationID, options, err := s.requesterOffer(ctx, *req, true)
 	if err != nil {
 		slog.WarnContext(ctx, "requests: could not list approver options", "component", "requests",
-			"request_id", req.ID, "err", err)
+			"request_id", req.ID, "err", logredact.SanitizeText(err.Error()))
 		return nil, nil
 	}
 	if req.RequesterChoices.IntegrationID != integrationID {
@@ -361,16 +384,22 @@ func (s *Service) ApproveWithOptions(ctx context.Context, viewer Viewer, id stri
 	}
 	if req.RequesterChoices.IntegrationID == chosen.IntegrationID {
 		for _, earlier := range req.RequesterChoices.Choices {
-			if _, replaced := picks[earlier.Key]; !replaced {
+			// The admin's pick replaces the requester's, unless it is the
+			// same value: then the requester's stays as it was made.
+			if pick, replaced := picks[earlier.Key]; !replaced || pick == earlier.Value {
+				chosen.Choices = slices.DeleteFunc(chosen.Choices, func(c RequesterChoice) bool { return c.Key == earlier.Key })
 				chosen.Choices = append(chosen.Choices, earlier)
 			}
 		}
 		slices.SortFunc(chosen.Choices, func(a, b RequesterChoice) int { return strings.Compare(a.Key, b.Key) })
 	}
-	if err := s.store.SetPendingRequesterChoices(ctx, id, chosen); err != nil {
+	// One guarded update: of two admins approving at once, the one whose
+	// approval wins is the one whose picks are stored.
+	approved, err := s.store.ApproveWithRequesterChoices(ctx, id, chosen, viewer)
+	if err != nil {
 		return nil, err
 	}
-	return s.Approve(ctx, viewer, id)
+	return s.afterAdminApproval(ctx, viewer, approved), nil
 }
 
 // applyRequesterChoices sets a request's picks in conn's config when conn is
