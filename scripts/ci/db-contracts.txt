@@ -13,6 +13,7 @@
 ./internal/catalog TestMixedCatalogMangaCounts
 ./internal/catalog TestContentRatingCeilingAcrossSystemsDB
 ./internal/catalog TestRatingsPageFollowsAccessDB
+./internal/catalog TestEpisodesAboveQualityCeilingStayHiddenPostgres
 ./internal/userstore/pgstore TestTitleAllowancesLiftProfileLimitsDB
 ./internal/catalog TestJellyfinPersonReadsMatchNativeVisibilityPostgres
 ./internal/recommendations TestRecentCompletedItemIDsGroupsSeriesBeforeLimit

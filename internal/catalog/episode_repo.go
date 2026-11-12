@@ -1416,6 +1416,13 @@ func (r *EpisodeRepository) BrowseEpisodes(ctx context.Context, seriesID, season
 	} else {
 		conditions = append(conditions, "EXISTS (SELECT 1 FROM episode_libraries el WHERE el.episode_id=e.content_id)")
 	}
+	if playable := EpisodePlayableUnderCeilingSQL("e.content_id", access, func(value any) int {
+		args = append(args, value)
+		index = len(args) + 1
+		return len(args)
+	}); playable != "" {
+		conditions = append(conditions, playable)
+	}
 	appendLibraryAccessConditions("s.content_id", access, &conditions, &args, &index)
 	applyAccessFilter("s", access, &conditions, &args, &index)
 	if seasonID != "" {

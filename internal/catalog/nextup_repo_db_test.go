@@ -173,3 +173,113 @@ func (f nextUpSpecialsFixture) seedSeries(t *testing.T, series string, episodes,
 			f.userID, f.profileID, episodeID(e), position, !e.partial, start.Add(time.Duration(i)*time.Minute))
 	}
 }
+
+// A viewer with a playback-quality ceiling never meets an episode whose every
+// file exceeds it. Next Up waits for a version they can play rather than
+// offering it or skipping past it, the Jellyfin season browse and Recently
+// Added leave it out, and a multi-episode file within the ceiling still serves
+// every episode it spans.
+func TestEpisodesAboveQualityCeilingStayHiddenPostgres(t *testing.T) {
+	ctx := t.Context()
+	f := newNextUpSpecialsFixture(t)
+	series := f.prefix + "-series"
+	episode := func(n int) string { return fmt.Sprintf("%s-s01e%02d", series, n) }
+	base := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	f.exec(t, `INSERT INTO media_items (content_id,type,title) VALUES ($1,'series',$1)`, series)
+	f.exec(t, `INSERT INTO media_item_libraries (content_id,media_folder_id,first_seen_at) VALUES ($1,$2,$3)`, series, f.folder, base)
+	// E2 is 4K only and arrived alone a week later; E3-E4 share one 1080p file.
+	for n, arrived := range map[int]time.Time{1: base, 2: base.Add(7 * 24 * time.Hour), 3: base, 4: base} {
+		f.exec(t, `INSERT INTO episodes (content_id,series_id,season_number,episode_number,title) VALUES ($1,$2,1,$3,$1)`, episode(n), series, n)
+		f.exec(t, `INSERT INTO episode_libraries (episode_id,media_folder_id,first_seen_at) VALUES ($1,$2,$3)`, episode(n), f.folder, arrived)
+	}
+	f.exec(t, `INSERT INTO media_files (episode_id,media_folder_id,file_path,resolution) VALUES ($1,$2,$3,'1080p')`, episode(1), f.folder, "/"+episode(1))
+	f.exec(t, `INSERT INTO media_files (episode_id,media_folder_id,file_path,resolution) VALUES ($1,$2,$3,'2160p')`, episode(2), f.folder, "/"+episode(2))
+	f.exec(t, `INSERT INTO media_files (episode_id,media_folder_id,file_path,resolution,multi_episode_start,multi_episode_end) VALUES ($1,$2,$3,'1080p',3,4)`, episode(3), f.folder, "/"+episode(3))
+	f.exec(t, `INSERT INTO user_watch_progress (user_id,profile_id,media_item_id,position_seconds,completed,updated_at) VALUES ($1,$2,$3,0,true,$4)`,
+		f.userID, f.profileID, episode(1), base.Add(time.Hour))
+	// A second library holds a 1080p E2, which counts only where the viewer
+	// may use that library.
+	var other int
+	if err := f.pool.QueryRow(ctx, `INSERT INTO media_folders (type,name,enabled) VALUES ('series',$1,true) RETURNING id`, f.prefix+"-other").Scan(&other); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = f.pool.Exec(bg, `DELETE FROM media_files WHERE media_folder_id=$1`, other)
+		_, _ = f.pool.Exec(bg, `DELETE FROM media_folders WHERE id=$1`, other)
+	})
+	f.exec(t, `INSERT INTO media_files (episode_id,media_folder_id,file_path,resolution) VALUES ($1,$2,$3,'1080p')`, episode(2), other, "/other/"+episode(2))
+
+	all := []string{episode(1), episode(2), episode(3), episode(4)}
+	for _, tc := range []struct {
+		name   string
+		access AccessFilter
+		nextUp string
+		browse []string
+		recent []string // the first library's row, where E2 arrived in 4K
+	}{
+		{"no ceiling", AccessFilter{}, episode(2), all, []string{episode(2), series}},
+		{"1080p ceiling", AccessFilter{MaxPlaybackQuality: "1080p", DisabledLibraryIDs: []int{other}}, "", []string{episode(1), episode(3), episode(4)}, []string{series}},
+		{"1080p ceiling with the 1080p library", AccessFilter{MaxPlaybackQuality: "1080p"}, episode(2), all, []string{series}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := NewNextUpRepository(f.pool, pgstore.NewPostgresProvider(f.pool))
+			for _, q := range []NextUpQuery{
+				{UserID: f.userID, ProfileID: f.profileID, AccessFilter: tc.access, Limit: 20, RankByRelease: true},
+				{UserID: f.userID, ProfileID: f.profileID, AccessFilter: tc.access, SeriesID: series, Limit: 5},
+			} {
+				results, err := repo.ListNextUp(ctx, q)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got := ""
+				for _, res := range results {
+					if res.SeriesID == series {
+						got = res.ContentID
+					}
+				}
+				if got != tc.nextUp {
+					t.Errorf("next up (series %q) = %q, want %q", q.SeriesID, got, tc.nextUp)
+				}
+			}
+
+			season := 1
+			browsed, _, err := NewEpisodeRepository(f.pool).BrowseEpisodes(ctx, series, "", &season, "", BrowseFilters{Limit: 20}, tc.access, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var gotBrowse []string
+			for _, ep := range browsed {
+				gotBrowse = append(gotBrowse, ep.ContentID)
+			}
+			if fmt.Sprint(gotBrowse) != fmt.Sprint(tc.browse) {
+				t.Errorf("season browse = %v, want %v", gotBrowse, tc.browse)
+			}
+
+			recentRepo := NewRecentTVRepository(f.pool)
+			q := RecentTVQuery{LibraryIDs: []int{f.folder}, Access: tc.access, Limit: 10}
+			newest, _, err := recentRepo.ListNewest(ctx, q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plain, _, _, err := recentRepo.List(ctx, q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			q.NamePrefix = f.prefix
+			prefixed, _, _, err := recentRepo.List(ctx, q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for name, targets := range map[string][]RecentTVTarget{"newest": newest, "plain": plain, "name prefix": prefixed} {
+				var got []string
+				for _, target := range targets {
+					got = append(got, target.ContentID)
+				}
+				if fmt.Sprint(got) != fmt.Sprint(tc.recent) {
+					t.Errorf("recently added (%s) = %v, want %v", name, got, tc.recent)
+				}
+			}
+		})
+	}
+}

@@ -451,6 +451,19 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 		activityExpr = "GREATEST(es.updated_at, released.released_at)"
 	}
 
+	// The successor stays the next episode with any present file. When none of
+	// its files fits the viewer's quality ceiling the series waits off Next Up
+	// until one arrives, rather than skipping to a later episode.
+	ceilingWhere := ""
+	if playable := EpisodePlayableUnderCeilingSQL("next_ep.content_id", q.AccessFilter, func(value any) int {
+		// Numbered from args itself: the release scope above binds a value
+		// without advancing argIdx.
+		args = append(args, value)
+		return len(args)
+	}); playable != "" {
+		ceilingWhere = "\n\t\tWHERE " + playable
+	}
+
 	// When resumable items are disabled, suppress next-up only if the series has
 	// newer in-progress activity than the most recent completed episode. Older
 	// partial watches should not block the user's current progression. Once the
@@ -659,9 +672,9 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 			ORDER BY e2.season_number, e2.episode_number
 			LIMIT 1
 		) next_ep ON true
-		%s
+		%s%s
 		ORDER BY es.updated_at DESC
-		LIMIT $3`, completedEpisodesCTE, nextUpAnchorsCTE, inProgressExclusion, activityExpr, sourceTable, releaseLateral)
+		LIMIT $3`, completedEpisodesCTE, nextUpAnchorsCTE, inProgressExclusion, activityExpr, sourceTable, releaseLateral, ceilingWhere)
 		return query, args
 	}
 
@@ -692,9 +705,9 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 			ORDER BY e2.season_number, e2.episode_number
 			LIMIT 1
 		) next_ep ON true
-		%s
+		%s%s
 		ORDER BY es.updated_at DESC
-		LIMIT $3`, activityExpr, sourceTable, releaseLateral)
+		LIMIT $3`, activityExpr, sourceTable, releaseLateral, ceilingWhere)
 
 	query := fmt.Sprintf(`
 		WITH %s%s%s
