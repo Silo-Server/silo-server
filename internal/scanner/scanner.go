@@ -3037,6 +3037,13 @@ func (s *Scanner) processFile(
 	// lets rescans repair legacy rows when local ffprobe metadata is available
 	// without forcing endless rewrites on nodes that cannot probe.
 	if existing, ok := existingByPath[filePath]; ok {
+		// A missing row may be a retitle's stand-in, and the file the one that
+		// left it; that row takes its path back before anything probes the
+		// file onto the stand-in.
+		if existing.MissingSince != nil &&
+			s.reclaimStandIn(ctx, folder, filePath, existing, fileSize, fileModifiedAt, assignment, groupAssignment, loadExternalSubs) {
+			return actionUpdated, []string{"moved"}, nil
+		}
 		currentExternalSubtitlePaths := externalSubtitleInfoPaths(loadExternalSubs())
 		updateReasons := scanStateUpdateReasons(existing, fileSize, fileModifiedAt, currentExternalSubtitlePaths, externalSubsChecked, assignment, groupAssignment, folder.Type, s.ffprobePath != "")
 		if shouldSkipStableConfirmedScanState(existing, existingContentStatuses[existing.ContentID], fileSize, fileModifiedAt, updateReasons, s.ffprobePath != "") {

@@ -84,19 +84,84 @@ like any other emptied root.
 
 A video file that appears at a new path takes over the row of the file it was
 (`Scanner.relinkMovedFile`), so everything keyed to `media_files.id` follows
-it: markers and their edits, subtitles and timing corrections, trickplay,
-analysis artifacts, and users' downloads. Two things still key on the path and
-start over: marker thumbnails (their trigger treats a new path as a new file)
-and download preparations, whose recipe fingerprint includes the source path.
-The row qualifies when it is in the same library with the same size, OSHash,
-and modification time; the new path parses to the same title (content group,
-filename hints such as season, episode, and air date, the episode range, and
-every provider ID tag on the path); and its old path is gone under a library
-root that answers and is not empty. Exactly one row may qualify. A copy whose
-original is still in place, a rename to another title, and a file under an
-offline or suspect-empty root get a new row as before, so renaming to fix a
-wrong match still matches afresh. The update is fenced on the row's path,
-bytes, and links, and `MarkMissing` only marks a row still at the path its
-caller saw, so a scan holding the old path cannot hide the moved row. OSHash
-samples the head and tail only, so the byte comparison is a strong heuristic,
-not proof.
+it: probe data, chapters and chapter images, markers and their edits, marker
+thumbnails, subtitles and timing corrections, trickplay, analysis artifacts,
+and users' downloads. Download preparations start over, because their recipe
+fingerprint includes the source path. Marker thumbnail identities hash the
+path, so the relink rewrites them for the new path in the same update, and
+their trigger ignores a path change.
+
+Whether a row is the file depends only on its bytes and presence. A row
+qualifies when it is in the same library, has no extra link, and recorded the
+same size, OSHash, and modification time, and its old path is gone under a
+library root that answers and is not empty. One qualifying row is the file.
+When several qualify, the one whose old path parses to the same title as the
+new path (content group, filename hints such as season, episode, and air date,
+the episode range, and every provider ID tag on the path) is the file, but
+only when exactly one does; otherwise the file gets a new row, since picking
+between equal claims could hand one file's state to another. A copy whose
+original is still in place, a file under an offline or suspect-empty root,
+and a file whose bytes match no vanished row also get a new row.
+
+What the new path says about the title decides the row's links:
+
+- **Same title.** The row keeps its links, as before. A row stored under an
+  older group key scheme cannot be compared by key with the current scan's, so
+  for it the path identity alone decides.
+- **Provider tags agreeing with the linked title.** The row keeps its links
+  when the provider ID tags on the new path (folder, file, or both, any of
+  `{tmdb-…}`, `{imdb-…}`, `{tvdb-…}`) agree with the provider IDs stored on
+  the title it is linked to: at least one tagged provider carries the title's
+  ID and none carries another. Tags that disagree with each other (a folder
+  naming one film and its file another) never agree. The movie or series must
+  be unchanged, and the path must still name the same season, episode, air
+  date, and episode range. The stored group and identity columns move to the
+  new key, as when a group key scheme changes in place, and detected markers
+  and marker thumbnails stay.
+- **Another title.** Any other change (a different title, year, or tag, a
+  corrected air date, a new episode range) retitles the row
+  (`FileRepository.RetitleMovedFile`) and queues it like a new file, so
+  renaming to fix a wrong match still matches afresh. The row drops its
+  content and episode links, takes its season and episode numbers and its
+  edition and episode range from the new path alone (an import edition
+  belonged to the old title), loses match suppression and its last match
+  attempt, and drops its marker thumbnails. It also counts as first seen now
+  (`created_at`, `first_seen_scan_run_id`), since episode memberships date
+  from their files' first sighting and the new title must not inherit the old
+  one's added date. The marker trigger drops markers not set by hand, as on
+  any rematch; everything derived from the bytes stays.
+
+  In the same statement a stand-in row is left at the old path: missing, with
+  the old links, root, group, numbers, first sighting, `missing_since` (or
+  now), and held first-seen dates, no OSHash, and `stand_in_for_file_id`
+  naming the moved row. To the old title this is exactly a file going missing:
+  it is hidden, held for the removal grace, keeps its added date if a rematch
+  lands on it again, and is deleted after the grace if nothing does. A row
+  that had no links leaves no stand-in. Root and group claims are untouched:
+  claims are kept by present files, so the old path's claims age out as they
+  do when a file goes missing, and the new path is claimed by matching as for
+  a new file.
+- **Back to a stand-in.** A file that appears at a stand-in's path is checked
+  against the moved-file rows before anything probes it onto the stand-in.
+  When it is the row the stand-in stands for, with the same bytes and its new
+  path gone, the rename is undone (`FileRepository.ReclaimStandIn`): in one
+  transaction the stand-in is deleted and the row takes the path back with the
+  stand-in's links, numbers, edition and presentation (an import edition
+  included), first sighting, and held dates. If a match had linked the row to
+  another title meanwhile, that title gets a stand-in at the path the row
+  leaves. A match that changes the row during the reclaim fails its fence, and
+  the reclaim reads the row again and retries once. If the stand-in is gone by
+  then (the trash sweep took it as the file came back), the row takes the free
+  path through the ordinary moved-file rules. Any other file at a stand-in's
+  path is written onto it like any file appearing at a missing row's path, and
+  stops being a stand-in. `stand_in_for_file_id` is a plain column, not a
+  foreign key: ids are never reused, so a stand-in whose row was deleted only
+  declines the reclaim, since the moved-file lookup cannot return that row.
+
+Every write is fenced on the row's path, bytes, and links, and `MarkMissing`
+only marks a row still at the path its caller saw, so a scan holding the old
+path cannot hide the moved row. A relink that loses the new path to another
+scan's write leaves that row alone. OSHash samples the head and tail only, so
+the byte comparison is a strong heuristic, not proof. The same rules apply to
+full, subtree, and single-file scans (watcher and arr webhooks), because they
+all reach the relink through the scanner's per-file step.
