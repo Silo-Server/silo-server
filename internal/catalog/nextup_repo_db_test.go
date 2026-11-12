@@ -216,11 +216,14 @@ func TestEpisodesAboveQualityCeilingStayHiddenPostgres(t *testing.T) {
 		access AccessFilter
 		nextUp string
 		browse []string
-		recent []string // the first library's row, where E2 arrived in 4K
+		// adjacent is Jellyfin's AdjacentTo window around E1: a hidden E2
+		// drops out rather than giving way to E3.
+		adjacent []string
+		recent   []string // the first library's row, where E2 arrived in 4K
 	}{
-		{"no ceiling", AccessFilter{}, episode(2), all, []string{episode(2), series}},
-		{"1080p ceiling", AccessFilter{MaxPlaybackQuality: "1080p", DisabledLibraryIDs: []int{other}}, "", []string{episode(1), episode(3), episode(4)}, []string{series}},
-		{"1080p ceiling with the 1080p library", AccessFilter{MaxPlaybackQuality: "1080p"}, episode(2), all, []string{series}},
+		{"no ceiling", AccessFilter{}, episode(2), all, all[:2], []string{episode(2), series}},
+		{"1080p ceiling", AccessFilter{MaxPlaybackQuality: "1080p", DisabledLibraryIDs: []int{other}}, "", []string{episode(1), episode(3), episode(4)}, all[:1], []string{series}},
+		{"1080p ceiling with the 1080p library", AccessFilter{MaxPlaybackQuality: "1080p"}, episode(2), all, all[:2], []string{series}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := NewNextUpRepository(f.pool, pgstore.NewPostgresProvider(f.pool))
@@ -256,30 +259,50 @@ func TestEpisodesAboveQualityCeilingStayHiddenPostgres(t *testing.T) {
 				t.Errorf("season browse = %v, want %v", gotBrowse, tc.browse)
 			}
 
-			recentRepo := NewRecentTVRepository(f.pool)
-			q := RecentTVQuery{LibraryIDs: []int{f.folder}, Access: tc.access, Limit: 10}
-			newest, _, err := recentRepo.ListNewest(ctx, q)
+			adjacent, err := NewEpisodeRepository(f.pool).ListAdjacentInSeriesFor(ctx, series, 1, 1, tc.access)
 			if err != nil {
 				t.Fatal(err)
 			}
-			plain, _, _, err := recentRepo.List(ctx, q)
-			if err != nil {
-				t.Fatal(err)
+			var gotAdjacent []string
+			for _, ep := range adjacent {
+				gotAdjacent = append(gotAdjacent, ep.ContentID)
 			}
-			q.NamePrefix = f.prefix
-			prefixed, _, _, err := recentRepo.List(ctx, q)
-			if err != nil {
-				t.Fatal(err)
+			if fmt.Sprint(gotAdjacent) != fmt.Sprint(tc.adjacent) {
+				t.Errorf("episodes adjacent to E1 = %v, want %v", gotAdjacent, tc.adjacent)
 			}
-			for name, targets := range map[string][]RecentTVTarget{"newest": newest, "plain": plain, "name prefix": prefixed} {
-				var got []string
-				for _, target := range targets {
-					got = append(got, target.ContentID)
-				}
-				if fmt.Sprint(got) != fmt.Sprint(tc.recent) {
-					t.Errorf("recently added (%s) = %v, want %v", name, got, tc.recent)
-				}
-			}
+
+			assertRecentTVTargets(t, f.pool, f.folder, f.prefix, tc.access, tc.recent)
 		})
+	}
+}
+
+// assertRecentTVTargets checks every recently added TV query shape for one
+// library: the home row's ListNewest, the plain List, and a name-prefix List.
+func assertRecentTVTargets(t *testing.T, pool *pgxpool.Pool, folder int, prefix string, access AccessFilter, want []string) {
+	t.Helper()
+	ctx := t.Context()
+	recentRepo := NewRecentTVRepository(pool)
+	q := RecentTVQuery{LibraryIDs: []int{folder}, Access: access, Limit: 10}
+	newest, _, err := recentRepo.ListNewest(ctx, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, _, _, err := recentRepo.List(ctx, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q.NamePrefix = prefix
+	prefixed, _, _, err := recentRepo.List(ctx, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, targets := range map[string][]RecentTVTarget{"newest": newest, "plain": plain, "name prefix": prefixed} {
+		var got []string
+		for _, target := range targets {
+			got = append(got, target.ContentID)
+		}
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Errorf("recently added (%s) = %v, want %v", name, got, want)
+		}
 	}
 }

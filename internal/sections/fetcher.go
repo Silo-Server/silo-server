@@ -3127,6 +3127,15 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 	}
 
 	catalog.ApplySectionAccessFilter("si", filter, &conditions, &args, &argIdx)
+	// An episode with no version within the viewer's playback-quality ceiling
+	// cannot start, so it makes no card.
+	if playable := catalog.EpisodePlayableUnderCeilingSQL("e.content_id", filter, func(value any) int {
+		args = append(args, value)
+		argIdx = len(args) + 1
+		return len(args)
+	}); playable != "" {
+		conditions = append(conditions, playable)
+	}
 
 	query := fmt.Sprintf(`
 		SELECT
