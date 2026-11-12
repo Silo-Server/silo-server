@@ -71,7 +71,8 @@ export type RefreshItemMetadataMode = "quick" | "complete";
 
 interface RefreshItemMetadataVariables {
   item: RefreshMutationItem;
-  mode: RefreshItemMetadataMode;
+  // reset is Reset to Provider in Edit Metadata, not a refresh dialog choice.
+  mode: RefreshItemMetadataMode | "reset";
   onReplaced?: (contentID: string) => void | Promise<void>;
 }
 

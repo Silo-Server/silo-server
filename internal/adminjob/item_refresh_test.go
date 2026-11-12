@@ -211,6 +211,7 @@ type itemRefreshTestRefresher struct {
 	targetType string
 	contentID  string
 	folderID   int
+	reset      bool
 	err        error
 }
 
@@ -245,6 +246,11 @@ func (r *itemRefreshTestRefresher) RefreshTargetForLibrary(_ context.Context, ta
 	r.contentID = contentID
 	r.folderID = folderID
 	return r.err
+}
+
+func (r *itemRefreshTestRefresher) ResetTargetForLibrary(ctx context.Context, targetType, contentID string, folderID int) error {
+	r.reset = true
+	return r.RefreshTargetForLibrary(ctx, targetType, contentID, folderID)
 }
 
 // newItemRefreshTestExecutor builds an executor over enabled folder 3 with
@@ -546,6 +552,35 @@ func TestItemRefreshExecutorReportsArtworkCacheFailureAsWarning(t *testing.T) {
 	}
 	if got, want := result.RefreshContentID, "series-1"; got != want {
 		t.Fatalf("Execute() refresh content id = %q, want %q", got, want)
+	}
+}
+
+// A reset job resets its target. Run as a plain refresh, it would keep every
+// value its providers lack (#3581).
+func TestItemRefreshExecutorRunsResetJobsAsResets(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		mode      ItemRefreshMode
+		wantReset bool
+	}{
+		{mode: ItemRefreshModeQuick},
+		{mode: ItemRefreshModeReset, wantReset: true},
+	} {
+		refresher := &itemRefreshTestRefresher{}
+		executor := newItemRefreshTestExecutor(&itemRefreshTestIngester{}, &itemRefreshTestScanRuns{}, refresher, nil)
+		if _, err := executor.Execute(context.Background(), ItemRefreshRequest{
+			RequestedContentID: "movie-1",
+			RefreshContentID:   "movie-1",
+			ScanFolderID:       3,
+			ScanPath:           "/media/movie-1",
+			Mode:               tc.mode,
+		}, nil); err != nil {
+			t.Fatalf("%s: Execute() error = %v, want nil", tc.mode, err)
+		}
+		if refresher.reset != tc.wantReset || refresher.contentID != "movie-1" {
+			t.Errorf("%s: reset=%v content_id=%q, want reset=%v on movie-1", tc.mode, refresher.reset, refresher.contentID, tc.wantReset)
+		}
 	}
 }
 

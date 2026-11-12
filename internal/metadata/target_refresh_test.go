@@ -15,6 +15,7 @@ type targetRefreshProvider struct {
 	searchResults    []SearchResult
 	seasons          []SeasonResult
 	episodesBySeason map[int][]EpisodeResult
+	episodesErr      error
 	episodeRequests  []int
 	lastEpisodesReq  EpisodesRequest
 }
@@ -41,6 +42,9 @@ func (p *targetRefreshProvider) GetSeasons(context.Context, SeasonsRequest) ([]S
 func (p *targetRefreshProvider) GetEpisodes(_ context.Context, req EpisodesRequest) ([]EpisodeResult, error) {
 	p.episodeRequests = append(p.episodeRequests, req.SeasonNumber)
 	p.lastEpisodesReq = req
+	if p.episodesErr != nil {
+		return nil, p.episodesErr
+	}
 	return append([]EpisodeResult(nil), p.episodesBySeason[req.SeasonNumber]...), nil
 }
 
@@ -116,7 +120,7 @@ func TestResolveSeriesRefreshProviderIDsUsesStaleSuppressedSelectionIdentity(t *
 	})
 	h.service.staleIDRepo = staleRepo
 
-	providerIDs, err := h.service.resolveSeriesRefreshProviderIDs(context.Background(), series, 0, "en", false)
+	providerIDs, err := h.service.resolveSeriesRefreshProviderIDs(context.Background(), series, 0, "en", false, false)
 	if err != nil {
 		t.Fatalf("resolveSeriesRefreshProviderIDs: %v", err)
 	}
@@ -224,13 +228,13 @@ func TestResolveSeriesRefreshProviderIDsSkipsLocalSearchWhenAsked(t *testing.T) 
 	h.service.chainCache["0:series"] = chainCacheEntry{providers: []Provider{local, remote}, expiresAt: time.Now().Add(time.Hour)}
 	series := h.itemRepo.items[seriesID]
 
-	if _, err := h.service.resolveSeriesRefreshProviderIDs(context.Background(), series, 0, "en", true); err != nil {
+	if _, err := h.service.resolveSeriesRefreshProviderIDs(context.Background(), series, 0, "en", true, false); err != nil {
 		t.Fatalf("resolveSeriesRefreshProviderIDs: %v", err)
 	}
 	if local.searchCalls != 0 {
 		t.Errorf("local provider searched %d times, want none", local.searchCalls)
 	}
-	if _, err := h.service.resolveSeriesRefreshProviderIDs(context.Background(), series, 0, "en", false); err != nil {
+	if _, err := h.service.resolveSeriesRefreshProviderIDs(context.Background(), series, 0, "en", false, false); err != nil {
 		t.Fatalf("resolveSeriesRefreshProviderIDs: %v", err)
 	}
 	if local.searchCalls != 1 {
