@@ -74,7 +74,7 @@ type notificationTransport struct {
 }
 
 func newNotificationTransport(allowPrivate func() bool, requestTimeout time.Duration) *notificationTransport {
-	pool := func(allow bool) *http.Transport {
+	pool := func(allow func() bool) *http.Transport {
 		dialer := newNotificationDialer(allow)
 		return &http.Transport{
 			DialContext:           dialer.DialContext,
@@ -85,7 +85,10 @@ func newNotificationTransport(allowPrivate func() bool, requestTimeout time.Dura
 			ResponseHeaderTimeout: requestTimeout,
 		}
 	}
-	return &notificationTransport{allowPrivate: allowPrivate, public: pool(false), private: pool(true)}
+	// The private pool's dialer still reads the live setting: a request can
+	// pick the pool just before an administrator turns the setting off and
+	// dial just after.
+	return &notificationTransport{allowPrivate: allowPrivate, public: pool(nil), private: pool(allowPrivate)}
 }
 
 func (t *notificationTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -101,7 +104,7 @@ func (t *notificationTransport) CloseIdleConnections() {
 	t.private.CloseIdleConnections()
 }
 
-func newNotificationDialer(allowPrivate bool) *net.Dialer {
+func newNotificationDialer(allowPrivate func() bool) *net.Dialer {
 	return &net.Dialer{
 		Timeout: 5 * time.Second,
 		Control: func(_, address string, _ syscall.RawConn) error {
@@ -110,7 +113,7 @@ func newNotificationDialer(allowPrivate bool) *net.Dialer {
 				return fmt.Errorf("webhook dial: %w", err)
 			}
 			addr, err := netip.ParseAddr(host)
-			if err != nil || !webhookIPAllowed(addr, allowPrivate) {
+			if err != nil || !webhookIPAllowed(addr, allowPrivate != nil && allowPrivate()) {
 				return errPrivateDestination
 			}
 			return nil
