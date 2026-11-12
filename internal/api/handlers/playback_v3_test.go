@@ -3165,7 +3165,7 @@ func TestV3SessionOutputFormatMatchesDelivery(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result := playback.PlannerResultV3{
-				Plan: &playback.PlanV3{Delivery: tc.delivery}, TargetVideoCodec: tc.target,
+				Plan: &playback.PlanV3{Delivery: tc.delivery}, TargetVideoCodec: tc.target, TargetResolution: "1080p",
 				FrozenSourceMetadata: &playback.SourceExecutionMetadataV3{VideoCodec: tc.source},
 			}
 			state := handler.v3SessionStreamState(context.Background(), &playback.Session{}, &models.MediaFile{Container: "mkv"}, result, preparedTransportV3{}, mediaAuthModeV3{})
@@ -3174,6 +3174,11 @@ func TestV3SessionOutputFormatMatchesDelivery(t *testing.T) {
 			}
 			if tc.delivery == playback.DeliveryRemuxHLSV3 && state.TargetVideoCodec != "copy" {
 				t.Fatal("remux delivery must report the executor's copy decision")
+			}
+			// A session rebuilt from a copy card reports no target resolution,
+			// so the live session must not either.
+			if (state.TargetVideoCodec == "copy") != (state.TargetResolution == "") {
+				t.Fatalf("video codec %q reports target resolution %q", state.TargetVideoCodec, state.TargetResolution)
 			}
 		})
 	}
