@@ -150,7 +150,8 @@ export function distinctTargets(
         : undefined;
     const earlier = key === undefined ? undefined : seen.get(key);
     if (earlier !== undefined) {
-      out[earlier].shared = true;
+      const first = out[earlier];
+      if (first) first.shared = true;
       continue;
     }
     if (key !== undefined) seen.set(key, out.length);

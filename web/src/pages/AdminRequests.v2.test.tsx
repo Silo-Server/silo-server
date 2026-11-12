@@ -477,7 +477,7 @@ describe("request administration", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Approve" }));
     await waitFor(() => expect(calls("POST /api/v2/admin/requests/{id}/approve")).toHaveLength(1));
     // The default was kept, so no pick is sent.
-    expect(calls("POST /api/v2/admin/requests/{id}/approve")[0].body).toEqual({});
+    expect(calls("POST /api/v2/admin/requests/{id}/approve")[0]?.body).toEqual({});
   });
 
   it("loads the next page from the cursor the last one returned", async () => {
