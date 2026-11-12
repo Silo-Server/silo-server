@@ -4378,7 +4378,7 @@
   "web.admin.access.groups.members.groupChanged": [
     {
       "type": 0,
-      "value": "This user’s group changed. Reload and try again."
+      "value": "This account changed after you confirmed. Check the change and try again."
     }
   ],
   "web.admin.access.groups.members.groupsLoadFailed": [

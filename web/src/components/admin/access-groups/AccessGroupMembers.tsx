@@ -44,6 +44,7 @@ import { useRequestSettings } from "@/hooks/queries/admin/requests";
 import { useRequestGroupLimits } from "@/hooks/queries/admin/requestGroupLimits";
 import { adminUsersKey, useAdminUsers } from "@/hooks/queries/admin/users";
 import { useT } from "@/i18n";
+import { TOUCH_TARGETS } from "@/lib/touchTargets";
 import {
   NO_GROUP_POLICY,
   groupPolicyChanges,
@@ -157,7 +158,12 @@ export function AccessGroupMembers({
     for (const user of move.users) {
       try {
         const editor = await getAdminUser(user.id, context);
-        if (editor.user.access_group_id !== user.access_group_id) {
+        // The confirmation's changes depend on the account's group and its
+        // request override; when either changed since, it no longer applies.
+        if (
+          editor.user.access_group_id !== user.access_group_id ||
+          (editor.user.requests_allowed ?? null) !== (user.requests_allowed ?? null)
+        ) {
           throw new Error(t("web.admin.access.groups.members.groupChanged"));
         }
         await updateAdminUser(editor, { access_group_id: move.target.id });
@@ -363,7 +369,7 @@ export function AccessGroupMembers({
                 placeholder={t("web.admin.access.groups.members.moveTargetPlaceholder")}
               />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className={TOUCH_TARGETS}>
               {otherGroups.map((candidate) => (
                 <SelectItem key={candidate.id} value={String(candidate.id)}>
                   {candidate.name}
@@ -463,7 +469,7 @@ function AddUsersDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent>
+      <DialogContent className={TOUCH_TARGETS}>
         <DialogHeader>
           <DialogTitle>
             {t("web.admin.access.groups.addUsers.title", { group: group.name })}
@@ -605,7 +611,7 @@ function ConfirmMoveDialog({
   };
   return (
     <AlertDialog open onOpenChange={(open) => !open && !saving && onCancel()}>
-      <AlertDialogContent>
+      <AlertDialogContent className={TOUCH_TARGETS}>
         <AlertDialogHeader>
           <AlertDialogTitle>
             {t("web.admin.access.groups.moveConfirm.title", { count, group: move.target.name })}

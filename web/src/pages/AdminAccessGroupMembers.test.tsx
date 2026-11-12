@@ -20,6 +20,7 @@ vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({}) }));
 const adminUsers = vi.hoisted(() => ({
   update: vi.fn(),
   currentGroups: new Map<number, number | null>(),
+  currentRequests: new Map<number, boolean | null>(),
   data: [] as Array<{
     id: number;
     username: string;
@@ -48,6 +49,9 @@ vi.mock("@/api/v2/adminUsers", async (importOriginal) => ({
       access_group_id: adminUsers.currentGroups.has(id)
         ? adminUsers.currentGroups.get(id)
         : adminUsers.data.find((candidate) => candidate.id === id)?.access_group_id,
+      requests_allowed: adminUsers.currentRequests.has(id)
+        ? adminUsers.currentRequests.get(id)
+        : adminUsers.data.find((candidate) => candidate.id === id)?.requests_allowed,
     },
     etag: `"user-${id}"`,
     profileContext: null,
@@ -107,6 +111,7 @@ describe("AdminAccessGroups members", () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     adminUsers.currentGroups.clear();
+    adminUsers.currentRequests.clear();
   });
 
   function withGuestsGroup() {
@@ -479,7 +484,12 @@ describe("AdminAccessGroups members", () => {
     adminUsers.data = [];
   });
 
-  it("does not move a member whose group changed after confirmation", async () => {
+  it.each([
+    { change: "group", apply: () => adminUsers.currentGroups.set(7, 2) },
+    // Turning on the account's request override changes which request
+    // terms the move applies, so the confirmation no longer holds.
+    { change: "request override", apply: () => adminUsers.currentRequests.set(7, true) },
+  ])("does not move a member whose $change changed after confirmation", async ({ apply }) => {
     withGuestsGroup();
     adminUsers.data = [member(7, "taylor", "user", 1)];
     adminUsers.update.mockReset().mockResolvedValue(undefined);
@@ -490,13 +500,13 @@ describe("AdminAccessGroups members", () => {
     await user.click(within(members).getByRole("checkbox", { name: "Select taylor" }));
     await pickOption(user, "Move selected members to", "Guests");
     await user.click(within(members).getByRole("button", { name: /Move 1 selected/ }));
-    adminUsers.currentGroups.set(7, 2);
+    apply();
     await user.click(
       within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Move" }),
     );
 
     expect(await within(members).findByRole("alert")).toHaveTextContent(
-      "taylor: This user’s group changed. Reload and try again.",
+      "taylor: This account changed after you confirmed. Check the change and try again.",
     );
     expect(adminUsers.update).not.toHaveBeenCalled();
     adminUsers.data = [];
