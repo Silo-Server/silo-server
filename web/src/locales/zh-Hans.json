@@ -1925,6 +1925,16 @@
       "value": "返回"
     }
   ],
+  "player.scrubber.endsAt": [
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "结束"
+    }
+  ],
   "player.seekInterval.choice": [
     {
       "type": 6,

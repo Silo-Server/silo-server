@@ -14,6 +14,8 @@ import { numberText, useT } from "@/i18n";
 
 /** Decorative separator between values; not text, so not translated. */
 const SEPARATOR = "·";
+/** Between elapsed time and length, as in "10:00 / 41:42"; not text either. */
+const TIME_SEPARATOR = "/";
 
 /* ─────────────────────────────────────────────────────────────────────
    Building blocks of the player controls
@@ -23,12 +25,20 @@ export function TitleBlock({
   title,
   subtitleLabel,
   chapterTitle,
+  endsAt,
+  times,
 }: {
   title?: string;
   subtitleLabel?: string;
   chapterTitle?: string;
+  /** "Ends 7:02 PM", while the length is known. */
+  endsAt?: string | null;
+  /** Elapsed time and length: a time line of their own, followed by `endsAt`. */
+  times?: { elapsed: string; total: string };
 }) {
-  const meta = [subtitleLabel, chapterTitle].filter((part): part is string => Boolean(part));
+  const meta = [subtitleLabel, chapterTitle, times ? null : endsAt].filter((part): part is string =>
+    Boolean(part),
+  );
   return (
     <div className="player-compact-metadata flex min-w-0 flex-1 flex-col gap-1">
       {title ? (
@@ -44,6 +54,20 @@ export function TitleBlock({
               <span className={index === 0 ? "shrink-0" : "truncate"}>{part}</span>
             </span>
           ))}
+        </div>
+      ) : null}
+      {times ? (
+        <div className="hud-meta tabular-nums">
+          {/* Clock times read left to right in every language. */}
+          <span dir="ltr" className="shrink-0">
+            {times.elapsed} {TIME_SEPARATOR} {times.total}
+          </span>
+          {endsAt ? (
+            <>
+              <span aria-hidden="true" className="hud-dot" />
+              <span className="truncate">{endsAt}</span>
+            </>
+          ) : null}
         </div>
       ) : null}
     </div>

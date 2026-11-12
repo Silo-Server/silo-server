@@ -5763,7 +5763,9 @@ export function VideoPlayer({
                 }
               : undefined
           }
-          playbackSpeed={playbackSpeed}
+          // A Watch Party plays at 1x whatever the local speed: the finish time
+          // and the speed shown follow the room.
+          playbackSpeed={baseRate}
           onPlaybackSpeedChange={roomPlaybackActive ? undefined : setPlaybackSpeed}
           onTogglePiP={browserEngineActive ? undefined : handleTogglePiP}
           onPlayPause={handlePlayPause}

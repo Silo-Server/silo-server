@@ -2,7 +2,8 @@
 
 import type { ComponentProps } from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setDateTimeFormatPreferences } from "@/lib/datetime";
 import { PlayerControls } from "./PlayerControls";
 
 function renderControls(
@@ -53,6 +54,39 @@ describe("PlayerControls", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  describe("end time", () => {
+    beforeEach(() => {
+      vi.useFakeTimers({
+        toFake: ["Date", "setInterval", "clearInterval", "setTimeout", "clearTimeout"],
+      });
+      vi.setSystemTime(new Date(2026, 10, 9, 18, 21, 0));
+      setDateTimeFormatPreferences({ dateFormat: "auto", timeFormat: "12h" });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+      setDateTimeFormatPreferences({ dateFormat: "auto", timeFormat: "auto" });
+    });
+
+    it("keeps moving forward with the clock while paused", () => {
+      renderControls(false, { playing: false, currentTime: 3600, duration: 6000 });
+      expect(screen.getByText(/^Ends 7:01\sPM$/)).toBeTruthy();
+
+      act(() => vi.advanceTimersByTime(60_000));
+
+      expect(screen.getByText(/^Ends 7:02\sPM$/)).toBeTruthy();
+    });
+
+    it("counts real time at the current playback speed", () => {
+      renderControls(false, { currentTime: 3600, duration: 6000, playbackSpeed: 2 });
+      expect(screen.getByText(/^Ends 6:41\sPM$/)).toBeTruthy();
+    });
+
+    it("is hidden while the length is unknown", () => {
+      renderControls(false, { currentTime: 0, duration: 0 });
+      expect(screen.queryByText(/^Ends /)).toBeNull();
+    });
   });
 
   it("keeps rarely used toggles under More and moves secondary controls there as the player narrows", () => {

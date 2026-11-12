@@ -1925,6 +1925,16 @@
       "value": "戻る"
     }
   ],
+  "player.scrubber.endsAt": [
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "に終了"
+    }
+  ],
   "player.seekInterval.choice": [
     {
       "type": 6,

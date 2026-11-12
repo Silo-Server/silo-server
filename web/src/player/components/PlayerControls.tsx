@@ -45,6 +45,7 @@ import {
   TransportButton,
 } from "./PlayerControlsParts";
 import { useT } from "@/i18n";
+import { usePlayerEndTime } from "../hooks/usePlayerEndTime";
 
 interface PlayerControlsProps {
   /** The profile's rewind/fast-forward intervals, shown on the transport buttons. */
@@ -223,6 +224,9 @@ export function PlayerControls({
   const [size, setSize] = useState({ width: 0, height: 0, rem: 16, dock: 0 });
   const narrowPlayer = size.width > 0 && size.width < FULL_LAYOUT_MIN_REM * size.rem;
   const compactControls = isCoarsePointer || narrowPlayer;
+  // The finish time follows the bar while it is dragged.
+  const [scrubTime, setScrubTime] = useState<number | null>(null);
+  const endsAt = usePlayerEndTime(scrubTime ?? currentTime, duration, playbackSpeed ?? 1, visible);
 
   useLayoutEffect(() => {
     const element = controlsRef.current;
@@ -268,6 +272,7 @@ export function PlayerControls({
     chapters && chapters.length > 1 && activeChapterIndex >= 0
       ? chapters[activeChapterIndex]?.title
       : undefined;
+  const titleProps = { title, subtitleLabel, chapterTitle, endsAt };
   const remaining = Math.max(0, duration - currentTime);
 
   // A phone held upright letterboxes the picture into a band mid-screen. The
@@ -464,7 +469,7 @@ export function PlayerControls({
           className="hud-portrait-title pointer-events-none absolute inset-x-0 z-10 flex px-[max(1.25rem,env(safe-area-inset-left))]"
           style={{ bottom: portraitTitleBottom }}
         >
-          <TitleBlock title={title} subtitleLabel={subtitleLabel} chapterTitle={chapterTitle} />
+          <TitleBlock {...titleProps} />
         </div>
       ) : null}
 
@@ -478,13 +483,16 @@ export function PlayerControls({
         {/* On touch the title gets its own line; the row below is all controls. */}
         {isCoarsePointer && dockTop === null && !landscapeTouch ? (
           <div className="hud-touch-title mb-1 flex px-1">
-            <TitleBlock title={title} subtitleLabel={subtitleLabel} chapterTitle={chapterTitle} />
+            <TitleBlock {...titleProps} />
           </div>
         ) : null}
-        {/* Timeline: elapsed, the bar, and time remaining, left to right in
-            every language. */}
+        {/* Timeline, left to right in every language. Compact layouts flank the
+            bar with elapsed and remaining time; the full layout's times sit
+            with the title under it. */}
         <div dir="ltr" className="flex items-center gap-2 sm:gap-3">
-          <span className="hud-time text-end">{formatTime(currentTime)}</span>
+          {compactControls ? (
+            <span className="hud-time text-end">{formatTime(currentTime)}</span>
+          ) : null}
           <div className="min-w-0 flex-1">
             <SeekBar
               currentTime={currentTime}
@@ -500,16 +508,19 @@ export function PlayerControls({
               onRegionEdgeChange={onRegionEdgeChange}
               onSeek={onSeek}
               onSkip={onSkip}
+              onScrubTimeChange={setScrubTime}
             />
           </div>
-          <span className="hud-time">
-            <span className="sr-only">
-              {t("web.player.controls.remainingTimeLabel", { time: formatTime(remaining) })}
+          {compactControls ? (
+            <span className="hud-time">
+              <span className="sr-only">
+                {t("web.player.controls.remainingTimeLabel", { time: formatTime(remaining) })}
+              </span>
+              <span aria-hidden="true">
+                {t("web.player.controls.remainingTime", { time: formatTime(remaining) })}
+              </span>
             </span>
-            <span aria-hidden="true">
-              {t("web.player.controls.remainingTime", { time: formatTime(remaining) })}
-            </span>
-          </span>
+          ) : null}
         </div>
 
         {dockTop !== null ? (
@@ -537,7 +548,7 @@ export function PlayerControls({
                 <span className="flex-1" />
               ) : null
             ) : (
-              <TitleBlock title={title} subtitleLabel={subtitleLabel} chapterTitle={chapterTitle} />
+              <TitleBlock {...titleProps} />
             )}
             {subtitleMenu}
             {qualityMenu}
@@ -559,7 +570,14 @@ export function PlayerControls({
                 settings at the end. When the settings need more room the title
                 gives it up first. The transport reads left to right in every
                 language. */}
-            <TitleBlock title={title} subtitleLabel={subtitleLabel} chapterTitle={chapterTitle} />
+            <TitleBlock
+              {...titleProps}
+              times={
+                duration > 0
+                  ? { elapsed: formatTime(currentTime), total: formatTime(duration) }
+                  : undefined
+              }
+            />
             <div dir="ltr" className="flex items-center gap-3">
               {transport(false)}
             </div>

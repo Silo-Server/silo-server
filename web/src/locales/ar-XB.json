@@ -1925,6 +1925,16 @@
       "value": "\u200F\u202EGo Back\u202C"
     }
   ],
+  "player.scrubber.endsAt": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEnds \u202C"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "player.seekInterval.choice": [
     {
       "type": 6,

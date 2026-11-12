@@ -1949,6 +1949,20 @@
       "value": "⟦Ĝö Ɓåçķ~~~⟧"
     }
   ],
+  "player.scrubber.endsAt": [
+    {
+      "type": 0,
+      "value": "⟦Éñđš "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "~~⟧"
+    }
+  ],
   "player.seekInterval.choice": [
     {
       "type": 6,
