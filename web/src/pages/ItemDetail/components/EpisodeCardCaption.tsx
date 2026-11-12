@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { EpisodeListItem } from "@/api/types";
+import { useAppLanguage } from "@/i18n";
 import MachineTranslatedLabel from "./MachineTranslatedLabel";
 import { hasMachineTranslation } from "./machineTranslation";
 import { episodeCardMetadata, episodeCardSpokenTitle, episodeCardTitle } from "./episodeCardText";
@@ -27,6 +28,7 @@ export default function EpisodeCardCaption({
   badges,
   notice,
 }: EpisodeCardCaptionProps) {
+  useAppLanguage();
   const metadata = episodeCardMetadata(episode);
   const overview = hideOverview ? "" : (episode.overview?.trim() ?? "");
   const showsTranslationLabel =
@@ -54,7 +56,7 @@ export default function EpisodeCardCaption({
       {overview && (
         // Three lines are reserved, as on the Apple card, so short descriptions
         // keep the row's cards the same height.
-        <p className="text-muted-foreground line-clamp-3 min-h-[3lh] text-xs leading-relaxed">
+        <p className="bidi-text text-muted-foreground line-clamp-3 min-h-[3lh] text-xs leading-relaxed">
           {overview}
         </p>
       )}

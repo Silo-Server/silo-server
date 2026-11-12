@@ -7,6 +7,7 @@ import { adminUserScope, getAdminUser, type AdminUserEditor } from "@/api/v2/adm
 import { V2ProblemError } from "@/api/v2/request";
 import { useUpdateUser } from "@/hooks/queries/admin/users";
 import { adminKeys } from "@/hooks/queries/keys";
+import { t } from "@/i18n";
 
 import { useCardEditing, type AccessCardId } from "../cardEditing";
 
@@ -66,14 +67,15 @@ export function rebaseDraft<D>(draft: D, oldBase: D, freshBase: D): D {
   return next as D;
 }
 
-export interface AccountCardDraft<D> {
+/** `R` names a changed row: the cards use the row label's message id. */
+export interface AccountCardDraft<D, R extends string = string> {
   editing: boolean;
   draft: D | undefined;
   setDraft(update: (d: D) => D): void;
   /** The account the edit started from (or was last reloaded as). */
   base: AdminUser | undefined;
-  /** Labels of the rows that differ from `base`. */
-  changed: string[];
+  /** The rows that differ from `base`. */
+  changed: R[];
   conflict: boolean;
   saving: boolean;
   error: string;
@@ -92,12 +94,12 @@ export interface AccountCardDraft<D> {
  * reloads, which swaps in the newer account and rebases the draft onto it:
  * the admin's own edits stay, and every other field takes the newer value.
  */
-export function useAccountCardDraft<D>(opts: {
+export function useAccountCardDraft<D, R extends string = string>(opts: {
   id: AccessCardId;
   editor: AdminUserEditor | undefined;
   toDraft: (user: AdminUser) => D;
   toBody: (draft: D, base: AdminUser) => UpdateUserRequest;
-  changedRows: (draft: D, base: D) => string[];
+  changedRows: (draft: D, base: D) => R[];
   /** Refuses a save, on every path that saves, with the message to show. */
   validate?: (draft: D, base: AdminUser) => string | null;
   extra?: CardExtraWrite<D>;
@@ -106,7 +108,7 @@ export function useAccountCardDraft<D>(opts: {
    * each); defaults to a field-by-field rebase.
    */
   rebase?: (draft: D, oldBase: D, freshBase: D) => D;
-}): AccountCardDraft<D> {
+}): AccountCardDraft<D, R> {
   const { begin, update, end } = useCardEditing();
   const updateUser = useUpdateUser();
   const queryClient = useQueryClient();
@@ -173,17 +175,23 @@ export function useAccountCardDraft<D>(opts: {
       if (hasBody) await updateUser.mutateAsync({ editor: captured, body });
       reset();
       end(opts.id);
-      toast.success("Saved");
+      toast.success(t("web.admin.users.detail.access.card.saved"));
       return true;
     } catch (err) {
-      const partly = extraSaved ? `${opts.extra?.savedLabel ?? "Part of this card"} saved. ` : "";
+      const part = extraSaved
+        ? (opts.extra?.savedLabel ?? t("web.admin.users.detail.access.card.partOfCard"))
+        : undefined;
       if (isConflict(err)) {
         setConflict(true);
-        if (partly)
-          setError(`${partly}The account change wasn't, because another admin changed it.`);
+        if (part) setError(t("web.admin.users.detail.access.card.partlySavedConflict", { part }));
       } else {
-        const reason = err instanceof Error ? err.message : "Could not save this account.";
-        setError(partly ? `${partly}The account change wasn't: ${reason}` : reason);
+        const reason =
+          err instanceof Error ? err.message : t("web.admin.users.detail.access.card.saveFailed");
+        setError(
+          part
+            ? t("web.admin.users.detail.access.card.partlySavedFailed", { part, reason })
+            : reason,
+        );
       }
       return false;
     } finally {
@@ -233,7 +241,9 @@ export function useAccountCardDraft<D>(opts: {
         queryKey: [...adminKeys.users(), adminUserScope(captured.profileContext)],
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not reload this account.");
+      setError(
+        err instanceof Error ? err.message : t("web.admin.users.detail.access.card.reloadFailed"),
+      );
     } finally {
       busy.current = false;
       setSaving(false);

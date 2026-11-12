@@ -6,7 +6,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -130,5 +132,151 @@ func TestLegacyPushRegistrationStaysOnTheAccount(t *testing.T) {
 	}
 	if _, err := register(accountB, "shared-phone"); err != nil {
 		t.Fatalf("registration after owner unregisters: %v", err)
+	}
+}
+
+// emailAccountsDB returns a pool on a fresh schema holding the email
+// notification tables, migrated to the account key, and accounts A and B.
+func emailAccountsDB(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	pool := schemaDB(t, "notification_email_")
+	if _, err := pool.Exec(t.Context(), `CREATE TABLE users (id integer PRIMARY KEY, username text, email text);
+		INSERT INTO users VALUES (1, 'a', 'a-login@example.test'), (2, 'b', 'b-login@example.test')`); err != nil {
+		t.Fatal(err)
+	}
+	preAccountKeyEmailTables(t, pool)
+	return pool
+}
+
+func TestEmailPrefsStayOnTheAccountDB(t *testing.T) {
+	pool := emailAccountsDB(t)
+	ctx := t.Context()
+	up, _ := emailAccountKeyMigration(t)
+	if _, err := pool.Exec(ctx, up); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewEmailPrefsRepository(pool)
+	get := func(user int) EmailPrefs {
+		t.Helper()
+		prefs, err := repo.Get(ctx, user, sharedID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return prefs
+	}
+	checkB := func(step string) {
+		t.Helper()
+		if got := get(accountB); got.UserID != accountB || got.Mode != EmailModePerEpisode || got.CustomEmail != "b@example.test" {
+			t.Fatalf("%s changed account B's email settings: %+v", step, got)
+		}
+	}
+
+	queue := func(user int, address string) (EmailVerificationReceipt, error) {
+		return repo.QueueVerification(ctx, EmailVerificationIntent{
+			ID: uuid.NewString(), UserID: user, ProfileID: sharedID, Address: address,
+			ProfileName: "Synthetic profile", LinkBase: "https://example.test",
+		}, testPushCipher(t))
+	}
+	// verify takes an address from the queue to its followed link.
+	verify := func(user int, address string) {
+		t.Helper()
+		receipt, err := queue(user, address)
+		if err != nil || !receipt.Current {
+			t.Fatalf("account %d queue = %+v, %v", user, receipt, err)
+		}
+		claim, err := repo.ClaimVerificationDispatch(ctx, time.Now())
+		if err != nil || claim == nil {
+			t.Fatalf("account %d claim = %v, %v", user, claim, err)
+		}
+		if !claim.PrefsFound || claim.PrefsUser != user || claim.PrefsHash != claim.TokenHash {
+			t.Fatalf("account %d claim read another row's pending state: %+v", user, claim)
+		}
+		if outcome, err := repo.ConsumeVerifyToken(ctx, claim.TokenHash); err != nil || outcome != EmailVerifyOK {
+			t.Fatalf("account %d verification = %v, %v", user, outcome, err)
+		}
+	}
+
+	if err := repo.SetMode(ctx, accountB, sharedID, EmailModePerEpisode); err != nil {
+		t.Fatal(err)
+	}
+	verify(accountB, "b@example.test")
+	if got := get(accountA); got.Mode != EmailModeOff || got.CustomEmail != "" {
+		t.Fatalf("account A sees account B's email settings: %+v", got)
+	}
+
+	if err := repo.SetMode(ctx, accountA, sharedID, EmailModeDailyDigest); err != nil {
+		t.Fatal(err)
+	}
+	checkB("account A's mode change")
+	// A verified address still serves one profile on the whole server.
+	if _, err := queue(accountA, "B@example.test"); !errors.Is(err, ErrEmailAddressInUse) {
+		t.Fatalf("account A claiming account B's address = %v", err)
+	}
+
+	verify(accountA, "a@example.test")
+	if got := get(accountA); got.Mode != EmailModeDailyDigest || got.CustomEmail != "a@example.test" {
+		t.Fatalf("account A's email settings = %+v", got)
+	}
+	checkB("account A's verification")
+
+	if err := repo.ClearCustomAddress(ctx, accountA, sharedID); err != nil {
+		t.Fatal(err)
+	}
+	checkB("account A's address removal")
+	if err := repo.DeleteForProfile(ctx, accountA, sharedID); err != nil {
+		t.Fatal(err)
+	}
+	checkB("deleting account A's profile")
+}
+
+// The upgrade cannot tell which account verified the address on a row two
+// accounts' profiles shared, so it resets that row and keeps every other row
+// as it was. Going back refuses once both accounts have a row.
+func TestEmailPrefsAccountKeyMigrationResetsSharedRowsDB(t *testing.T) {
+	pool := emailAccountsDB(t)
+	ctx := t.Context()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO notification_email_prefs
+			(profile_id, user_id, mode, custom_email, pending_email, pending_token_hash, pending_expires_at,
+			 pending_last_sent_at, verify_sends_today, unsubscribe_token)
+		VALUES ('default', 1, 'per_episode', 'b@example.test', 'b2@example.test', 'hash', now() + interval '1 hour',
+		        now(), 3, 'unsubscribe-shared'),
+		       ('kids', 1, 'daily_digest', 'kids@example.test', '', '', NULL, NULL, 0, 'unsubscribe-kids');
+		-- Account 9 was deleted; its leftover profile id does not make "kids" shared.
+		INSERT INTO user_profiles VALUES (1, 'default'), (1, 'kids'), (2, 'default'), (9, 'kids')`); err != nil {
+		t.Fatal(err)
+	}
+	up, down := emailAccountKeyMigration(t)
+	if _, err := pool.Exec(ctx, up); err != nil {
+		t.Fatal(err)
+	}
+	type row struct {
+		Mode, Custom, Pending, PendingHash, Unsubscribe string
+		Expires, LastSent                               *time.Time
+		SendsToday                                      int
+	}
+	read := func(profile string) row {
+		t.Helper()
+		var r row
+		if err := pool.QueryRow(ctx, `SELECT mode, custom_email, pending_email, pending_token_hash, unsubscribe_token,
+			       pending_expires_at, pending_last_sent_at, verify_sends_today
+			FROM notification_email_prefs WHERE user_id = 1 AND profile_id = $1`, profile).
+			Scan(&r.Mode, &r.Custom, &r.Pending, &r.PendingHash, &r.Unsubscribe, &r.Expires, &r.LastSent, &r.SendsToday); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	if got := read("default"); got != (row{Mode: EmailModeOff}) {
+		t.Fatalf("shared row kept settings: %+v", got)
+	}
+	if got := read("kids"); got.Mode != EmailModeDailyDigest || got.Custom != "kids@example.test" || got.Unsubscribe != "unsubscribe-kids" {
+		t.Fatalf("unshared row changed: %+v", got)
+	}
+
+	if err := NewEmailPrefsRepository(pool).SetMode(ctx, accountB, sharedID, EmailModePerEpisode); err != nil {
+		t.Fatalf("account B's own row: %v", err)
+	}
+	if _, err := pool.Exec(ctx, down); err == nil || !strings.Contains(err.Error(), "cannot be keyed by profile id alone") {
+		t.Fatalf("down with two accounts' rows = %v", err)
 	}
 }

@@ -46,6 +46,7 @@ import {
 } from "@/components/ui/table";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import { useDebounce } from "@/hooks/useDebounce";
+import { numberText, useT, type MessageKey, type Translate } from "@/i18n";
 import {
   useAutoscanConnections,
   useAutoscanEvents,
@@ -61,27 +62,32 @@ import {
   compareActiveScans,
   formatActiveScanMode,
   formatActiveScanProgress,
-  formatActiveScanTime,
+  formatActiveScanStarted,
   formatActiveScanTrigger,
 } from "@/lib/scanRuns";
 import { cn } from "@/lib/utils";
 import { formatTime as formatTimePreferred, preferredDateLocale } from "@/lib/datetime";
 
 import { eventSourceName } from "./sourceDisplay";
+import { formatLocale } from "@/lib/appLocale";
+import { formatDecimal } from "@/lib/numberFormat";
 
 const HISTORY_PAGE_SIZE_OPTIONS = [25, 50, 100];
 const DEFAULT_HISTORY_PAGE_SIZE = 25;
 const QUEUE_PAGE_SIZE = 8;
+/** Shown where a time or result is not known yet. */
+const NO_VALUE = "-";
+const SEPARATOR = " · ";
 
 type HistoryView = "scans" | "polls";
 
 function formatTime(value: string | undefined): string {
-  if (!value) return "-";
+  if (!value) return NO_VALUE;
   return formatTimePreferred(value, { hour: "2-digit" });
 }
 
 function formatTimestamp(value: string | undefined): string {
-  if (!value) return "-";
+  if (!value) return NO_VALUE;
   const day = new Date(value).toLocaleDateString(preferredDateLocale(), {
     month: "short",
     day: "numeric",
@@ -89,20 +95,26 @@ function formatTimestamp(value: string | undefined): string {
   return `${day}, ${formatTimePreferred(value, { hour: "2-digit" })}`;
 }
 
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60_000) return `${Math.round(ms / 100) / 10}s`;
+function formatDuration(t: Translate, ms: number): string {
+  if (ms < 1000) return t("web.admin.autoscan.activity.duration.milliseconds", { value: ms });
+  if (ms < 60_000)
+    return t("web.admin.autoscan.activity.duration.seconds", {
+      value: formatDecimal(Math.round(ms / 100) / 10, 1, 0),
+    });
   const minutes = Math.floor(ms / 60_000);
   const seconds = Math.round((ms % 60_000) / 1000);
-  return `${minutes}m ${seconds}s`;
+  return t("web.admin.autoscan.activity.duration.minutesSeconds", {
+    minutes: minutes,
+    seconds: seconds,
+  });
 }
 
-function pollEventDuration(event: AutoscanEvent): string {
+function pollEventDuration(t: Translate, event: AutoscanEvent): string {
   if (event.status !== "running") {
-    return formatDuration(event.duration_ms);
+    return formatDuration(t, event.duration_ms);
   }
   const elapsed = Math.max(0, Date.now() - new Date(event.started_at).getTime());
-  return formatDuration(elapsed);
+  return formatDuration(t, elapsed);
 }
 
 function pollEventTimestamp(event: AutoscanEvent): string {
@@ -110,32 +122,32 @@ function pollEventTimestamp(event: AutoscanEvent): string {
 }
 
 function eventStatusTone(status: AutoscanEventStatus): {
-  label: string;
+  label: MessageKey;
   icon: typeof CheckCircle2;
   className: string;
 } {
   switch (status) {
     case "success":
       return {
-        label: "Success",
+        label: "web.admin.autoscan.activity.pollStatus.success",
         icon: CheckCircle2,
         className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-500",
       };
     case "running":
       return {
-        label: "Running",
+        label: "web.admin.autoscan.activity.pollStatus.running",
         icon: RefreshCw,
         className: "border-primary/30 bg-primary/10 text-primary",
       };
     case "unresolved":
       return {
-        label: "Unresolved",
+        label: "web.admin.autoscan.activity.pollStatus.unresolved",
         icon: AlertTriangle,
         className: "border-amber-500/30 bg-amber-500/10 text-amber-500",
       };
     case "error":
       return {
-        label: "Error",
+        label: "web.admin.autoscan.activity.pollStatus.error",
         icon: AlertTriangle,
         className: "border-destructive/30 bg-destructive/10 text-destructive",
       };
@@ -157,9 +169,14 @@ function scanStatusClass(status: AutoscanEventScanRun["status"] | ScanRun["statu
   }
 }
 
-function scanStatusLabel(status: AutoscanScanStatus | ScanRun["status"]) {
-  return status === "accepted" ? "queued" : status;
-}
+// Lowercase: the badge capitalizes the first letter with CSS.
+const SCAN_STATUS_LABELS: Record<AutoscanScanStatus | ScanRun["status"], MessageKey> = {
+  accepted: "web.admin.autoscan.activity.scanStatus.queued",
+  running: "web.admin.autoscan.activity.scanStatus.running",
+  completed: "web.admin.autoscan.activity.scanStatus.completed",
+  failed: "web.admin.autoscan.activity.scanStatus.failed",
+  cancelled: "web.admin.autoscan.activity.scanStatus.cancelled",
+};
 
 // Name every Activity row the way the Sources list titles the source, so the
 // two tabs agree on what a source is called.
@@ -169,33 +186,43 @@ type PollSourceRef = {
   capability_id?: string;
 };
 
-function pollSourceName(event: PollSourceRef, lookups: SourceLabelLookups): string {
-  return eventSourceName(event, lookups) || event.plugin_id || event.capability_id || "Autoscan";
+function pollSourceName(t: Translate, event: PollSourceRef, lookups: SourceLabelLookups): string {
+  return (
+    eventSourceName(event, lookups) ||
+    event.plugin_id ||
+    event.capability_id ||
+    t("web.admin.autoscan.activity.sourceFallback")
+  );
 }
 
-function scanSourceName(scan: AutoscanScan, lookups: SourceLabelLookups): string {
-  return eventSourceName(scan, lookups) || "Autoscan";
+function scanSourceName(t: Translate, scan: AutoscanScan, lookups: SourceLabelLookups): string {
+  return eventSourceName(scan, lookups) || t("web.admin.autoscan.activity.sourceFallback");
 }
 
-function libraryName(librariesByID: Map<number, Library>, libraryID: number): string {
-  return librariesByID.get(libraryID)?.name ?? `Library #${libraryID}`;
+function libraryName(t: Translate, librariesByID: Map<number, Library>, libraryID: number): string {
+  return (
+    librariesByID.get(libraryID)?.name ??
+    t("web.admin.autoscan.activity.libraryFallback", { id: libraryID })
+  );
 }
 
 function PollStatusBadge({ status }: { status: AutoscanEventStatus }) {
+  const t = useT();
   const tone = eventStatusTone(status);
   const Icon = tone.icon;
   return (
     <Badge variant="outline" className={tone.className}>
       <Icon className={cn("h-3.5 w-3.5", status === "running" && "animate-spin")} />
-      {tone.label}
+      {t(tone.label)}
     </Badge>
   );
 }
 
 function ScanStatusBadge({ status }: { status: AutoscanScanStatus | ScanRun["status"] }) {
+  const t = useT();
   return (
     <Badge variant="outline" className={cn("capitalize tabular-nums", scanStatusClass(status))}>
-      {scanStatusLabel(status)}
+      {Object.hasOwn(SCAN_STATUS_LABELS, status) ? t(SCAN_STATUS_LABELS[status]) : status}
     </Badge>
   );
 }
@@ -206,11 +233,15 @@ function ScanStatusBadge({ status }: { status: AutoscanScanStatus | ScanRun["sta
  * default and labeling every row would be noise.
  */
 function DeliveryBadge({ event }: { event: AutoscanEvent }) {
+  const t = useT();
   if (event.delivery_mode !== "webhook") return null;
   return (
     <Badge variant="secondary" className="text-xs">
-      Webhook
-      {event.provider_event_type ? ` · ${event.provider_event_type}` : ""}
+      {event.provider_event_type
+        ? t("web.admin.autoscan.activity.delivery.webhookEvent", {
+            event_type: event.provider_event_type,
+          })
+        : t("web.admin.autoscan.activity.delivery.webhook")}
     </Badge>
   );
 }
@@ -232,8 +263,9 @@ function DataTable({ head, children }: { head: ReactNode; children: ReactNode })
 
 type ScanResultSummary = { text: string; tone: "skipped" | "errors" | "changes" | "none" };
 
-function plural(count: number, noun: string): string {
-  return `${count.toLocaleString()} ${noun}${count === 1 ? "" : "s"}`;
+/** Plural values for a count shown with the locale's digit grouping. */
+function countValues(count: number) {
+  return { count, count_text: count.toLocaleString(formatLocale()) };
 }
 
 /**
@@ -241,34 +273,60 @@ function plural(count: number, noun: string): string {
  * overlapping scan of the same scope was already running, which must not read
  * like a run that found nothing.
  */
-function summarizeScanResult(result: AutoscanScanResult | undefined): ScanResultSummary | null {
+function summarizeScanResult(
+  t: Translate,
+  result: AutoscanScanResult | undefined,
+): ScanResultSummary | null {
   if (!result) return null;
   if (result.skipped > 0) {
-    return { text: "Skipped — overlapping scan in progress", tone: "skipped" };
+    return { text: t("web.admin.autoscan.activity.result.skipped"), tone: "skipped" };
   }
   const parts: string[] = [];
-  if (result.new > 0) parts.push(`${result.new.toLocaleString()} new`);
-  if (result.updated > 0) parts.push(`${result.updated.toLocaleString()} updated`);
-  if (result.missing > 0) parts.push(`${result.missing.toLocaleString()} missing`);
-  if (result.files_deleted > 0) parts.push(`${plural(result.files_deleted, "file")} removed`);
+  if (result.new > 0)
+    parts.push(t("web.admin.autoscan.activity.result.new", countValues(result.new)));
+  if (result.updated > 0)
+    parts.push(t("web.admin.autoscan.activity.result.updated", countValues(result.updated)));
+  if (result.missing > 0)
+    parts.push(t("web.admin.autoscan.activity.result.missing", countValues(result.missing)));
+  if (result.files_deleted > 0)
+    parts.push(
+      t("web.admin.autoscan.activity.result.filesRemoved", countValues(result.files_deleted)),
+    );
   // A scan can drop catalog items whose files were already gone.
-  if (result.items_deleted > 0) parts.push(`${plural(result.items_deleted, "item")} removed`);
+  if (result.items_deleted > 0)
+    parts.push(
+      t("web.admin.autoscan.activity.result.itemsRemoved", countValues(result.items_deleted)),
+    );
   // A scoped scan can drop a title from this library without deleting it.
   if (result.memberships_removed > 0)
-    parts.push(`${plural(result.memberships_removed, "title")} removed from library`);
+    parts.push(
+      t(
+        "web.admin.autoscan.activity.result.titlesRemoved",
+        countValues(result.memberships_removed),
+      ),
+    );
   if (result.missing_skipped_protected > 0)
-    parts.push(`${result.missing_skipped_protected.toLocaleString()} kept (storage offline)`);
-  if (result.errors > 0) parts.push(plural(result.errors, "error"));
+    parts.push(
+      t(
+        "web.admin.autoscan.activity.result.keptOffline",
+        countValues(result.missing_skipped_protected),
+      ),
+    );
+  if (result.errors > 0)
+    parts.push(t("web.admin.autoscan.activity.result.errors", countValues(result.errors)));
   if (parts.length === 0) {
     return {
       text:
         result.unchanged > 0
-          ? `No changes · ${result.unchanged.toLocaleString()} unchanged`
-          : "No changes",
+          ? t(
+              "web.admin.autoscan.activity.result.noChangesUnchanged",
+              countValues(result.unchanged),
+            )
+          : t("web.admin.autoscan.activity.result.noChanges"),
       tone: "none",
     };
   }
-  return { text: parts.join(" · "), tone: result.errors > 0 ? "errors" : "changes" };
+  return { text: parts.join(SEPARATOR), tone: result.errors > 0 ? "errors" : "changes" };
 }
 
 function ScanResultText({
@@ -278,7 +336,8 @@ function ScanResultText({
   result: AutoscanScanResult | undefined;
   className?: string;
 }) {
-  const summary = summarizeScanResult(result);
+  const t = useT();
+  const summary = summarizeScanResult(t, result);
   if (!summary) return null;
   return (
     <span
@@ -297,12 +356,13 @@ function ScanResultText({
 }
 
 function RunList({ runs, joinedRuns }: { runs: AutoscanEventScanRun[]; joinedRuns: number }) {
+  const t = useT();
   if (runs.length === 0) {
     return (
       <span className="text-muted-foreground text-xs">
         {joinedRuns > 0
-          ? "No new scan rows were created. The changes joined scans that were already queued or running."
-          : "No new scan rows were created."}
+          ? t("web.admin.autoscan.activity.runs.noneJoined")
+          : t("web.admin.autoscan.activity.runs.none")}
       </span>
     );
   }
@@ -317,7 +377,7 @@ function RunList({ runs, joinedRuns }: { runs: AutoscanEventScanRun[]; joinedRun
           <div className="min-w-0">
             <div className="font-medium">{run.mode}</div>
             <div className="text-muted-foreground [overflow-wrap:anywhere]">
-              {run.path || "Entire library"}
+              {run.path || t("web.admin.autoscan.activity.entireLibrary")}
             </div>
             <ScanResultText result={run.result} className="mt-0.5 block" />
           </div>
@@ -330,25 +390,34 @@ function RunList({ runs, joinedRuns }: { runs: AutoscanEventScanRun[]; joinedRun
   );
 }
 
-const CHANGE_OUTCOME_TONES: Record<AutoscanChangeOutcome, { label: string; className: string }> = {
+const CHANGE_OUTCOME_TONES: Record<
+  AutoscanChangeOutcome,
+  { label: MessageKey; className: string }
+> = {
   queued: {
-    label: "Queued",
+    label: "web.admin.autoscan.activity.outcome.queued",
     className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-500",
   },
-  joined: { label: "Joined scan", className: "border-sky-500/30 bg-sky-500/10 text-sky-500" },
+  joined: {
+    label: "web.admin.autoscan.activity.outcome.joined",
+    className: "border-sky-500/30 bg-sky-500/10 text-sky-500",
+  },
   suppressed: {
-    label: "Suppressed",
+    label: "web.admin.autoscan.activity.outcome.suppressed",
     className: "border-muted-foreground/25 bg-muted/60 text-muted-foreground",
   },
   unresolved: {
-    label: "Unresolved",
+    label: "web.admin.autoscan.activity.outcome.unresolved",
     className: "border-amber-500/30 bg-amber-500/10 text-amber-500",
   },
   ignored: {
-    label: "Ignored",
+    label: "web.admin.autoscan.activity.outcome.ignored",
     className: "border-muted-foreground/25 bg-muted/60 text-muted-foreground",
   },
-  error: { label: "Error", className: "border-destructive/30 bg-destructive/10 text-destructive" },
+  error: {
+    label: "web.admin.autoscan.activity.outcome.error",
+    className: "border-destructive/30 bg-destructive/10 text-destructive",
+  },
 };
 
 function isKnownChangeOutcome(outcome: string): outcome is AutoscanChangeOutcome {
@@ -357,8 +426,9 @@ function isKnownChangeOutcome(outcome: string): outcome is AutoscanChangeOutcome
 
 // An outcome added by a newer server shows its raw value in a neutral badge.
 function ChangeOutcomeBadge({ outcome }: { outcome: AutoscanEventChange["outcome"] }) {
+  const t = useT();
   const tone = isKnownChangeOutcome(outcome)
-    ? CHANGE_OUTCOME_TONES[outcome]
+    ? { ...CHANGE_OUTCOME_TONES[outcome], label: t(CHANGE_OUTCOME_TONES[outcome].label) }
     : { label: outcome, className: "border-muted-foreground/25 bg-muted/60 text-muted-foreground" };
   return (
     <Badge variant="outline" className={cn("whitespace-nowrap", tone.className)}>
@@ -369,28 +439,53 @@ function ChangeOutcomeBadge({ outcome }: { outcome: AutoscanEventChange["outcome
 
 // Plain-language explanations for the resolver's reason codes. Unknown codes
 // fall back to the server's detail text so a new reason still reads sensibly.
-const CHANGE_REASON_TEXT: Record<string, string> = {
-  no_library_match:
-    "No Silo library folder contains this path. Add a path mapping for this source or check the library folders.",
-  subtree_outside_library: "This path is not below a library root.",
-  path_outside_library: "This path is outside the matched library.",
-  path_ambiguous: "This path matches more than one library.",
-  library_disabled: "The matching library is disabled.",
-  library_root_offline: "The library's storage root is not available.",
-  unsupported_extension: "This file type is not supported for the library.",
-  path_permission_denied: "Silo is not allowed to read this path.",
-  path_not_inspectable: "Silo could not inspect this path.",
-  path_not_file_or_dir: "This path is not a file or directory.",
-  path_required: "The source sent an empty path.",
-  resolves_to_library: "The file change resolved to a whole library, so it was not scanned.",
-  enqueue_failed: "The scan could not be queued.",
+const CHANGE_REASON_TEXT: Record<string, MessageKey> = {
+  no_library_match: "web.admin.autoscan.activity.reason.noLibraryMatch",
+  subtree_outside_library: "web.admin.autoscan.activity.reason.subtreeOutsideLibrary",
+  path_outside_library: "web.admin.autoscan.activity.reason.pathOutsideLibrary",
+  path_ambiguous: "web.admin.autoscan.activity.reason.pathAmbiguous",
+  library_disabled: "web.admin.autoscan.activity.reason.libraryDisabled",
+  library_root_offline: "web.admin.autoscan.activity.reason.libraryRootOffline",
+  unsupported_extension: "web.admin.autoscan.activity.reason.unsupportedExtension",
+  path_permission_denied: "web.admin.autoscan.activity.reason.pathPermissionDenied",
+  path_not_inspectable: "web.admin.autoscan.activity.reason.pathNotInspectable",
+  path_not_file_or_dir: "web.admin.autoscan.activity.reason.pathNotFileOrDir",
+  path_required: "web.admin.autoscan.activity.reason.pathRequired",
+  resolves_to_library: "web.admin.autoscan.activity.reason.resolvesToLibrary",
+  enqueue_failed: "web.admin.autoscan.activity.reason.enqueueFailed",
 };
 
-function changeScopeLabel(change: AutoscanEventChange): string {
+function changeReasonText(t: Translate, reason: string | undefined): string | undefined {
+  if (!reason || !Object.prototype.hasOwnProperty.call(CHANGE_REASON_TEXT, reason)) return;
+  return t(CHANGE_REASON_TEXT[reason]!);
+}
+
+function changeScopeLabel(t: Translate, change: AutoscanEventChange): string {
   const mode = change.target_mode
     ? formatActiveScanMode({ mode: change.target_mode as ScanRun["mode"] })
-    : "Scan";
-  return `${mode} · ${change.target_path || "Entire library"}`;
+    : t("web.admin.autoscan.activity.change.scanFallback");
+  return t("web.admin.autoscan.activity.change.scope", {
+    mode,
+    path: change.target_path || t("web.admin.autoscan.activity.entireLibrary"),
+  });
+}
+
+/** The explanation of a queued or joined change, without and with its library. */
+function changeScanKeys(change: AutoscanEventChange): [MessageKey, MessageKey] {
+  if (change.outcome === "queued")
+    return [
+      "web.admin.autoscan.activity.change.queued",
+      "web.admin.autoscan.activity.change.queuedInLibrary",
+    ];
+  if (change.reason === "follow_up_scan")
+    return [
+      "web.admin.autoscan.activity.change.followUp",
+      "web.admin.autoscan.activity.change.followUpInLibrary",
+    ];
+  return [
+    "web.admin.autoscan.activity.change.joined",
+    "web.admin.autoscan.activity.change.joinedInLibrary",
+  ];
 }
 
 function ChangeExplanation({
@@ -400,20 +495,17 @@ function ChangeExplanation({
   change: AutoscanEventChange;
   librariesByID: Map<number, Library>;
 }) {
-  const library = change.library_id ? libraryName(librariesByID, change.library_id) : null;
+  const t = useT();
+  const library = change.library_id ? libraryName(t, librariesByID, change.library_id) : null;
   switch (change.outcome) {
     case "queued":
-    case "joined":
+    case "joined": {
+      const [plain, inLibrary] = changeScanKeys(change);
+      const scope = changeScopeLabel(t, change);
       return (
         <>
           <div className="text-muted-foreground [overflow-wrap:anywhere]">
-            {change.outcome === "queued"
-              ? "New scan: "
-              : change.reason === "follow_up_scan"
-                ? "A scan of this scope was already running, so it is scanned again when that scan finishes: "
-                : "Added to a scan that was already queued: "}
-            {changeScopeLabel(change)}
-            {library ? ` in ${library}` : ""}
+            {library ? t(inLibrary, { scope, library }) : t(plain, { scope })}
           </div>
           {change.scan_run_id ? (
             <div className="text-muted-foreground font-mono text-[11px] [overflow-wrap:anywhere]">
@@ -422,27 +514,35 @@ function ChangeExplanation({
           ) : null}
         </>
       );
+    }
     case "suppressed":
       return (
         <div className="text-muted-foreground [overflow-wrap:anywhere]">
-          Already requested within the debounce window, so no new scan was requested
-          {change.target_path ? ` (${change.target_path})` : ""}.
+          {change.target_path
+            ? t("web.admin.autoscan.activity.change.suppressedPath", { path: change.target_path })
+            : t("web.admin.autoscan.activity.change.suppressed")}
         </div>
       );
     case "error":
       return (
         <div className="text-destructive [overflow-wrap:anywhere]">
           {change.reason === "resolve_failed"
-            ? `Resolving the path failed${change.detail ? `: ${change.detail}` : ""}.`
-            : (CHANGE_REASON_TEXT[change.reason ?? ""] ?? change.detail ?? "Processing failed.")}
+            ? change.detail
+              ? t("web.admin.autoscan.activity.change.resolveFailedDetail", {
+                  detail: change.detail,
+                })
+              : t("web.admin.autoscan.activity.change.resolveFailed")
+            : (changeReasonText(t, change.reason) ??
+              change.detail ??
+              t("web.admin.autoscan.activity.change.processingFailed"))}
         </div>
       );
     default: {
       const text =
-        CHANGE_REASON_TEXT[change.reason ?? ""] ??
+        changeReasonText(t, change.reason) ??
         change.detail ??
         change.reason ??
-        "This path was not scanned.";
+        t("web.admin.autoscan.activity.change.notScanned");
       return (
         <div
           className={cn(
@@ -450,8 +550,7 @@ function ChangeExplanation({
             change.outcome === "unresolved" ? "text-amber-500" : "text-muted-foreground",
           )}
         >
-          {text}
-          {library ? ` (${library})` : ""}
+          {library ? t("web.admin.autoscan.activity.change.withLibrary", { text, library }) : text}
         </div>
       );
     }
@@ -465,12 +564,13 @@ function ChangeList({
   event: AutoscanEvent;
   librariesByID: Map<number, Library>;
 }) {
+  const t = useT();
   if (event.changes.length === 0) {
     return (
       <span className="text-muted-foreground text-xs">
         {event.changes_returned > 0
-          ? "Paths were not recorded for this event."
-          : "The source reported no changes."}
+          ? t("web.admin.autoscan.activity.changes.notRecorded")
+          : t("web.admin.autoscan.activity.changes.none")}
       </span>
     );
   }
@@ -486,8 +586,10 @@ function ChangeList({
             <div className="font-mono [overflow-wrap:anywhere]">{change.source_path}</div>
             {change.rewritten_path && change.rewritten_path !== change.source_path ? (
               <div className="text-muted-foreground font-mono [overflow-wrap:anywhere]">
-                <span className="font-sans">Rewritten to </span>
-                {change.rewritten_path}
+                {t("web.admin.autoscan.activity.change.rewrittenTo", {
+                  path: change.rewritten_path,
+                  label: (chunks) => <span className="font-sans">{chunks}</span>,
+                })}
               </div>
             ) : null}
             <ChangeExplanation change={change} librariesByID={librariesByID} />
@@ -496,8 +598,10 @@ function ChangeList({
       ))}
       {event.changes_truncated ? (
         <p className="text-muted-foreground text-xs">
-          Showing the first {event.changes.length.toLocaleString()} of{" "}
-          {plural(event.changes_returned, "change")}.
+          {t("web.admin.autoscan.activity.changes.truncated", {
+            ...countValues(event.changes_returned),
+            shown: event.changes.length.toLocaleString(formatLocale()),
+          })}
         </p>
       ) : null}
     </div>
@@ -511,17 +615,18 @@ function EventDetails({
   event: AutoscanEvent;
   librariesByID: Map<number, Library>;
 }) {
+  const t = useT();
   return (
     <div className="space-y-3">
       <div className="space-y-1.5">
         <div className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
-          Paths
+          {t("web.admin.autoscan.activity.details.paths")}
         </div>
         <ChangeList event={event} librariesByID={librariesByID} />
       </div>
       <div className="space-y-1.5">
         <div className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
-          Scans created
+          {t("web.admin.autoscan.activity.details.scansCreated")}
         </div>
         <RunList runs={event.scan_runs} joinedRuns={joinedRunCount(event)} />
       </div>
@@ -540,21 +645,48 @@ function joinedRunCount(event: AutoscanEvent): number {
   return joined.size;
 }
 
-function eventDetailsSummary(event: AutoscanEvent): string {
+function eventDetailsSummary(t: Translate, event: AutoscanEvent): string {
   const linked = event.scan_runs.length + joinedRunCount(event);
   // Joined runs are only known from recorded changes, so a truncated log can
   // omit some; the count is then a lower bound.
-  return `${plural(event.changes_returned, "path")} · ${linked}${event.changes_truncated ? "+" : ""} linked`;
+  const paths = t(
+    "web.admin.autoscan.activity.details.pathCount",
+    countValues(event.changes_returned),
+  );
+  const linkedText = t("web.admin.autoscan.activity.details.linkedCount", {
+    count: linked,
+    count_text: `${numberText(linked)}${event.changes_truncated ? "+" : ""}`,
+  });
+  return [paths, linkedText].join(SEPARATOR);
+}
+
+/** Plural values for a count printed without digit grouping. */
+function rawCountValues(count: number) {
+  return { count, count_text: count };
 }
 
 function PollMetricStrip({ event }: { event: AutoscanEvent }) {
+  const t = useT();
   return (
     <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-xs tabular-nums">
-      <span>{event.changes_returned} changes</span>
-      <span>{event.targets_claimed} targets</span>
-      <span>{event.scans_created} created</span>
-      <span>{event.scans_reused} reused</span>
-      <span>{event.scans_suppressed} suppressed</span>
+      <span>
+        {t("web.admin.autoscan.activity.metrics.changes", rawCountValues(event.changes_returned))}
+      </span>
+      <span>
+        {t("web.admin.autoscan.activity.metrics.targets", rawCountValues(event.targets_claimed))}
+      </span>
+      <span>
+        {t("web.admin.autoscan.activity.metrics.created", rawCountValues(event.scans_created))}
+      </span>
+      <span>
+        {t("web.admin.autoscan.activity.metrics.reused", rawCountValues(event.scans_reused))}
+      </span>
+      <span>
+        {t(
+          "web.admin.autoscan.activity.metrics.suppressed",
+          rawCountValues(event.scans_suppressed),
+        )}
+      </span>
     </div>
   );
 }
@@ -570,6 +702,7 @@ function QueueCard({
   cancellingLibraryID: number | null;
   onCancel: (libraryID: number) => void;
 }) {
+  const t = useT();
   const progress = formatActiveScanProgress(scan);
   return (
     <div className="border-border rounded-lg border p-4">
@@ -577,15 +710,15 @@ function QueueCard({
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <ScanStatusBadge status={scan.status} />
-            <span className="font-medium">{libraryName(librariesByID, scan.library_id)}</span>
+            <span className="font-medium">{libraryName(t, librariesByID, scan.library_id)}</span>
           </div>
           <div className="text-muted-foreground flex flex-wrap gap-x-3 gap-y-1 text-xs">
             <span>{formatActiveScanMode(scan)}</span>
             <span>{formatActiveScanTrigger(scan.trigger)}</span>
             <span>
               {scan.status === "running"
-                ? formatActiveScanTime(scan.started_at, "Started")
-                : "Waiting for capacity"}
+                ? formatActiveScanStarted(scan.started_at)
+                : t("web.admin.autoscan.activity.queue.waiting")}
             </span>
           </div>
         </div>
@@ -595,13 +728,13 @@ function QueueCard({
           className="text-destructive h-8 w-8"
           disabled={cancellingLibraryID === scan.library_id}
           onClick={() => onCancel(scan.library_id)}
-          aria-label="Cancel scans for this library"
+          aria-label={t("web.admin.autoscan.activity.queue.cancelLabel")}
         >
           <Square className="h-3.5 w-3.5" />
         </Button>
       </div>
       <div className="text-muted-foreground mt-3 font-mono text-xs [overflow-wrap:anywhere]">
-        {scan.path || "Entire library"}
+        {scan.path || t("web.admin.autoscan.activity.entireLibrary")}
       </div>
       {progress ? (
         <div className="text-muted-foreground mt-2 text-xs [overflow-wrap:anywhere]">
@@ -625,6 +758,7 @@ function AutoscanQueue({
   cancellingLibraryID: number | null;
   onCancel: (libraryID: number) => void;
 }) {
+  const t = useT();
   const [page, setPage] = useState(0);
   const pageCount = Math.max(1, Math.ceil(scans.length / QUEUE_PAGE_SIZE));
   // Live scans complete out from under us; the active set length is known
@@ -638,12 +772,12 @@ function AutoscanQueue({
       <div className="border-border rounded-lg border border-dashed p-6">
         <div className="flex items-center gap-2 text-sm font-medium">
           <ScanLine className="text-muted-foreground h-4 w-4" />
-          Autoscan queue
+          {t("web.admin.autoscan.activity.queue.title")}
         </div>
         <p className="text-muted-foreground mt-2 text-sm">
           {statusActiveCount > 0
-            ? "Queue counts are active, but live scan details have not arrived yet."
-            : "No autoscan scans are queued or running."}
+            ? t("web.admin.autoscan.activity.queue.pendingDetails")
+            : t("web.admin.autoscan.activity.queue.empty")}
         </p>
       </div>
     );
@@ -655,14 +789,14 @@ function AutoscanQueue({
         <div>
           <div className="flex items-center gap-2 text-sm font-semibold">
             <ScanLine className="text-primary h-4 w-4" />
-            Autoscan queue
+            {t("web.admin.autoscan.activity.queue.title")}
           </div>
           <p className="text-muted-foreground mt-1 text-xs">
-            Live scans created by autoscan sources.
+            {t("web.admin.autoscan.activity.queue.description")}
           </p>
         </div>
         <Badge variant="secondary" className="tabular-nums">
-          {scans.length} active
+          {t("web.admin.autoscan.activity.activeCount", rawCountValues(scans.length))}
         </Badge>
       </div>
 
@@ -681,11 +815,13 @@ function AutoscanQueue({
       <DataTable
         head={
           <>
-            <TableHead>Status</TableHead>
-            <TableHead>Library</TableHead>
-            <TableHead>Scope</TableHead>
-            <TableHead>Progress</TableHead>
-            <TableHead className="w-20 text-right">Action</TableHead>
+            <TableHead>{t("web.admin.autoscan.activity.column.status")}</TableHead>
+            <TableHead>{t("web.admin.autoscan.activity.column.library")}</TableHead>
+            <TableHead>{t("web.admin.autoscan.activity.column.scope")}</TableHead>
+            <TableHead>{t("web.admin.autoscan.activity.column.progress")}</TableHead>
+            <TableHead className="w-20 text-end">
+              {t("web.admin.autoscan.activity.column.action")}
+            </TableHead>
           </>
         }
       >
@@ -697,30 +833,30 @@ function AutoscanQueue({
                 <ScanStatusBadge status={scan.status} />
               </TableCell>
               <TableCell className="font-medium">
-                {libraryName(librariesByID, scan.library_id)}
+                {libraryName(t, librariesByID, scan.library_id)}
                 <div className="text-muted-foreground mt-1 text-xs">
                   {scan.status === "running"
-                    ? formatActiveScanTime(scan.started_at, "Started")
-                    : "Waiting for capacity"}
+                    ? formatActiveScanStarted(scan.started_at)
+                    : t("web.admin.autoscan.activity.queue.waiting")}
                 </div>
               </TableCell>
               <TableCell>
                 <div className="text-sm">{formatActiveScanMode(scan)}</div>
                 <div className="text-muted-foreground mt-1 max-w-xl font-mono text-xs [overflow-wrap:anywhere] whitespace-normal">
-                  {scan.path || "Entire library"}
+                  {scan.path || t("web.admin.autoscan.activity.entireLibrary")}
                 </div>
               </TableCell>
               <TableCell className="text-muted-foreground text-xs [overflow-wrap:anywhere]">
                 {progress || formatActiveScanTrigger(scan.trigger)}
               </TableCell>
-              <TableCell className="text-right">
+              <TableCell className="text-end">
                 <Button
                   variant="ghost"
                   size="icon"
                   className="text-destructive h-8 w-8"
                   disabled={cancellingLibraryID === scan.library_id}
                   onClick={() => onCancel(scan.library_id)}
-                  aria-label="Cancel scans for this library"
+                  aria-label={t("web.admin.autoscan.activity.queue.cancelLabel")}
                 >
                   <Square className="h-3.5 w-3.5" />
                 </Button>
@@ -736,7 +872,7 @@ function AutoscanQueue({
           pageSize={QUEUE_PAGE_SIZE}
           total={scans.length}
           onPageChange={setPage}
-          itemNoun="scan"
+          summaryKey="web.admin.common.pagination.scans"
         />
       ) : null}
     </section>
@@ -750,6 +886,7 @@ function RunningPolls({
   polls: AutoscanRunningPoll[];
   lookups: SourceLabelLookups;
 }) {
+  const t = useT();
   if (polls.length === 0) return null;
 
   return (
@@ -758,14 +895,14 @@ function RunningPolls({
         <div>
           <div className="flex items-center gap-2 text-sm font-semibold">
             <RefreshCw className="text-primary h-4 w-4 animate-spin" />
-            Polling now
+            {t("web.admin.autoscan.activity.polls.title")}
           </div>
           <p className="text-muted-foreground mt-1 text-xs">
-            Scan-source plugin calls currently in progress.
+            {t("web.admin.autoscan.activity.polls.description")}
           </p>
         </div>
         <Badge variant="secondary" className="tabular-nums">
-          {polls.length} active
+          {t("web.admin.autoscan.activity.activeCount", rawCountValues(polls.length))}
         </Badge>
       </div>
 
@@ -774,16 +911,24 @@ function RunningPolls({
           <div key={poll.id} className="border-border rounded-lg border p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="font-medium">{pollSourceName(poll, lookups)}</div>
+                <div className="font-medium">{pollSourceName(t, poll, lookups)}</div>
                 <div className="text-muted-foreground mt-1 text-xs [overflow-wrap:anywhere]">
-                  {poll.plugin_id} · {poll.capability_id}
+                  {[poll.plugin_id, poll.capability_id].join(SEPARATOR)}
                 </div>
               </div>
               <PollStatusBadge status="running" />
             </div>
             <div className="text-muted-foreground mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs tabular-nums">
-              <span>Started {formatTimestamp(poll.started_at)}</span>
-              <span>{formatDuration(poll.elapsed_ms)} elapsed</span>
+              <span>
+                {t("web.admin.autoscan.activity.polls.started", {
+                  time: formatTimestamp(poll.started_at),
+                })}
+              </span>
+              <span>
+                {t("web.admin.autoscan.activity.polls.elapsed", {
+                  duration: formatDuration(t, poll.elapsed_ms),
+                })}
+              </span>
             </div>
           </div>
         ))}
@@ -801,17 +946,18 @@ function ScanHistoryCard({
   librariesByID: Map<number, Library>;
   lookups: SourceLabelLookups;
 }) {
+  const t = useT();
   return (
     <div className="border-border rounded-lg border p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <ScanStatusBadge status={scan.status} />
-            <span className="font-medium">{libraryName(librariesByID, scan.library_id)}</span>
+            <span className="font-medium">{libraryName(t, librariesByID, scan.library_id)}</span>
           </div>
           <div className="text-muted-foreground flex flex-wrap gap-x-3 gap-y-1 text-xs">
             <span>{formatActiveScanMode(scan)}</span>
-            <span>{scanSourceName(scan, lookups)}</span>
+            <span>{scanSourceName(t, scan, lookups)}</span>
             <span>
               {formatTimestamp(scan.completed_at ?? scan.started_at ?? scan.requested_at)}
             </span>
@@ -820,7 +966,7 @@ function ScanHistoryCard({
         {scan.event_status ? <PollStatusBadge status={scan.event_status} /> : null}
       </div>
       <div className="text-muted-foreground mt-3 font-mono text-xs [overflow-wrap:anywhere]">
-        {scan.path || "Entire library"}
+        {scan.path || t("web.admin.autoscan.activity.entireLibrary")}
       </div>
       <ScanResultText result={scan.result} className="mt-2 block" />
       {scan.error_message ? (
@@ -844,6 +990,7 @@ export function ScanHistoryTable({
   librariesByID: Map<number, Library>;
   lookups: SourceLabelLookups;
 }) {
+  const t = useT();
   return (
     <>
       <div className="space-y-3 lg:hidden">
@@ -859,13 +1006,13 @@ export function ScanHistoryTable({
       <DataTable
         head={
           <>
-            <TableHead>Status</TableHead>
-            <TableHead>Library</TableHead>
-            <TableHead>Source</TableHead>
-            <TableHead>Scope</TableHead>
-            <TableHead>Result</TableHead>
-            <TableHead>Time</TableHead>
-            <TableHead>Poll</TableHead>
+            <TableHead>{t("web.admin.autoscan.activity.column.status")}</TableHead>
+            <TableHead>{t("web.admin.autoscan.activity.column.library")}</TableHead>
+            <TableHead>{t("web.admin.autoscan.activity.column.source")}</TableHead>
+            <TableHead>{t("web.admin.autoscan.activity.column.scope")}</TableHead>
+            <TableHead>{t("web.admin.autoscan.activity.column.result")}</TableHead>
+            <TableHead>{t("web.admin.autoscan.activity.column.time")}</TableHead>
+            <TableHead>{t("web.admin.autoscan.activity.column.poll")}</TableHead>
           </>
         }
       >
@@ -875,17 +1022,17 @@ export function ScanHistoryTable({
               <ScanStatusBadge status={scan.status} />
             </TableCell>
             <TableCell className="font-medium">
-              {libraryName(librariesByID, scan.library_id)}
+              {libraryName(t, librariesByID, scan.library_id)}
               <div className="text-muted-foreground mt-1 font-mono text-[11px]">{scan.id}</div>
             </TableCell>
-            <TableCell className="whitespace-nowrap">{scanSourceName(scan, lookups)}</TableCell>
+            <TableCell className="whitespace-nowrap">{scanSourceName(t, scan, lookups)}</TableCell>
             {/* Table cells default to nowrap. The path and error set their own
                 width bounds so the text wraps within them, and the error keeps a
                 minimum so a failed scan's column does not collapse to a sliver. */}
             <TableCell>
               <div className="text-sm">{formatActiveScanMode(scan)}</div>
               <div className="text-muted-foreground mt-1 max-w-xl font-mono text-xs [overflow-wrap:anywhere] whitespace-normal">
-                {scan.path || "Entire library"}
+                {scan.path || t("web.admin.autoscan.activity.entireLibrary")}
               </div>
               {scan.error_message ? (
                 <div className="text-destructive mt-1 max-w-xl min-w-[16rem] text-xs [overflow-wrap:anywhere] whitespace-normal">
@@ -897,14 +1044,14 @@ export function ScanHistoryTable({
               {scan.result ? (
                 <ScanResultText result={scan.result} />
               ) : (
-                <span className="text-muted-foreground">-</span>
+                <span className="text-muted-foreground">{NO_VALUE}</span>
               )}
             </TableCell>
             <TableCell className="text-muted-foreground whitespace-nowrap tabular-nums">
               {formatTimestamp(scan.completed_at ?? scan.started_at ?? scan.requested_at)}
             </TableCell>
             <TableCell>
-              {scan.event_status ? <PollStatusBadge status={scan.event_status} /> : "-"}
+              {scan.event_status ? <PollStatusBadge status={scan.event_status} /> : NO_VALUE}
             </TableCell>
           </TableRow>
         ))}
@@ -922,20 +1069,21 @@ function PollEventCard({
   lookups: SourceLabelLookups;
   librariesByID: Map<number, Library>;
 }) {
+  const t = useT();
   return (
     <div className="border-border rounded-lg border p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <PollStatusBadge status={event.status} />
-            <span className="font-medium">{pollSourceName(event, lookups)}</span>
+            <span className="font-medium">{pollSourceName(t, event, lookups)}</span>
             <DeliveryBadge event={event} />
           </div>
           <PollMetricStrip event={event} />
         </div>
-        <div className="text-muted-foreground text-right text-xs tabular-nums">
+        <div className="text-muted-foreground text-end text-xs tabular-nums">
           <div>{pollEventTimestamp(event)}</div>
-          <div>{pollEventDuration(event)}</div>
+          <div>{pollEventDuration(t, event)}</div>
         </div>
       </div>
       {event.error_message ? (
@@ -945,7 +1093,7 @@ function PollEventCard({
       ) : null}
       <details className="mt-3">
         <summary className="text-muted-foreground cursor-pointer text-xs">
-          {eventDetailsSummary(event)}
+          {eventDetailsSummary(t, event)}
         </summary>
         <div className="mt-2">
           <EventDetails event={event} librariesByID={librariesByID} />
@@ -964,6 +1112,7 @@ export function PollEventTable({
   lookups: SourceLabelLookups;
   librariesByID: Map<number, Library>;
 }) {
+  const t = useT();
   return (
     <>
       <div className="space-y-3 lg:hidden">
@@ -979,12 +1128,12 @@ export function PollEventTable({
       <DataTable
         head={
           <>
-            <TableHead>Status</TableHead>
-            <TableHead>Source</TableHead>
-            <TableHead>Counts</TableHead>
-            <TableHead>Details</TableHead>
-            <TableHead>Duration</TableHead>
-            <TableHead>Time</TableHead>
+            <TableHead>{t("web.admin.autoscan.activity.column.status")}</TableHead>
+            <TableHead>{t("web.admin.autoscan.activity.column.source")}</TableHead>
+            <TableHead>{t("web.admin.autoscan.activity.column.counts")}</TableHead>
+            <TableHead>{t("web.admin.autoscan.activity.column.details")}</TableHead>
+            <TableHead>{t("web.admin.autoscan.activity.column.duration")}</TableHead>
+            <TableHead>{t("web.admin.autoscan.activity.column.time")}</TableHead>
           </>
         }
       >
@@ -995,7 +1144,7 @@ export function PollEventTable({
             </TableCell>
             <TableCell className="font-medium">
               <div className="flex flex-wrap items-center gap-1.5">
-                {pollSourceName(event, lookups)}
+                {pollSourceName(t, event, lookups)}
                 <DeliveryBadge event={event} />
               </div>
             </TableCell>
@@ -1011,7 +1160,7 @@ export function PollEventTable({
             <TableCell>
               <details>
                 <summary className="text-muted-foreground cursor-pointer text-xs whitespace-nowrap">
-                  {eventDetailsSummary(event)}
+                  {eventDetailsSummary(t, event)}
                 </summary>
                 {/* Table cells default to nowrap; paths and explanations must wrap. */}
                 <div className="mt-2 max-w-[32rem] min-w-[16rem] whitespace-normal">
@@ -1020,7 +1169,7 @@ export function PollEventTable({
               </details>
             </TableCell>
             <TableCell className="whitespace-nowrap tabular-nums">
-              {pollEventDuration(event)}
+              {pollEventDuration(t, event)}
             </TableCell>
             <TableCell className="text-muted-foreground whitespace-nowrap tabular-nums">
               {pollEventTimestamp(event)}
@@ -1063,6 +1212,7 @@ function StatTile({
 }
 
 export default function ActivityPanel() {
+  const t = useT();
   useEventChannel("scans");
   const [historyView, setHistoryView] = useState<HistoryView>("scans");
   const [historyQuery, setHistoryQuery] = useState("");
@@ -1122,7 +1272,10 @@ export default function ActivityPanel() {
   const activeStatus = historyView === "scans" ? scanStatus : pollStatus;
   const hasHistoryFilters = debouncedHistoryQuery !== "" || activeStatus !== "all";
   const isRefreshing = status.isFetching || activeQuery.isFetching;
-  const itemNoun = historyView === "scans" ? "scan" : "poll";
+  const summaryKey =
+    historyView === "scans"
+      ? "web.admin.common.pagination.scans"
+      : "web.admin.common.pagination.polls";
 
   // If a background refresh shrinks the result set below the current page,
   // pull the viewer back to the last page that still has rows. Adjusting state
@@ -1153,19 +1306,37 @@ export default function ActivityPanel() {
   return (
     <div className="space-y-6">
       <div className="border-border grid gap-4 rounded-lg border p-4 sm:grid-cols-5">
-        <StatTile label="Active" value={queue?.active_scans ?? 0} icon={ScanLine} />
-        <StatTile label="Queued" value={queue?.accepted_scans ?? 0} />
-        <StatTile label="Running scans" value={queue?.running_scans ?? 0} />
-        <StatTile label="Polling" value={queue?.running_polls?.length ?? 0} icon={RefreshCw} />
+        <StatTile
+          label={t("web.admin.autoscan.activity.stats.active")}
+          value={queue?.active_scans ?? 0}
+          icon={ScanLine}
+        />
+        <StatTile
+          label={t("web.admin.autoscan.activity.stats.queued")}
+          value={queue?.accepted_scans ?? 0}
+        />
+        <StatTile
+          label={t("web.admin.autoscan.activity.stats.runningScans")}
+          value={queue?.running_scans ?? 0}
+        />
+        <StatTile
+          label={t("web.admin.autoscan.activity.stats.polling")}
+          value={queue?.running_polls?.length ?? 0}
+          icon={RefreshCw}
+        />
         <div className="flex items-start justify-between gap-3 sm:block">
-          <StatTile label="Latest poll" value={formatTime(queue?.latest_event_at)} icon={Clock} />
+          <StatTile
+            label={t("web.admin.autoscan.activity.stats.latestPoll")}
+            value={formatTime(queue?.latest_event_at)}
+            icon={Clock}
+          />
           <Button
             variant="outline"
             size="icon"
             className="sm:mt-2"
             onClick={refresh}
             disabled={isRefreshing}
-            aria-label="Refresh autoscan activity"
+            aria-label={t("web.admin.autoscan.activity.refreshLabel")}
           >
             <RefreshCw className={cn(isRefreshing && "animate-spin")} />
           </Button>
@@ -1191,12 +1362,14 @@ export default function ActivityPanel() {
               ) : (
                 <History className="text-primary h-4 w-4" />
               )}
-              {historyView === "scans" ? "Scan history" : "Poll log"}
+              {historyView === "scans"
+                ? t("web.admin.autoscan.activity.history.scansTitle")
+                : t("web.admin.autoscan.activity.history.pollsTitle")}
             </div>
             <p className="text-muted-foreground mt-1 text-xs">
               {historyView === "scans"
-                ? "Real scan rows created by autoscan, searchable by path, library, source, status, or scan id."
-                : "Diagnostic poll records from scan-source plugins."}
+                ? t("web.admin.autoscan.activity.history.scansDescription")
+                : t("web.admin.autoscan.activity.history.pollsDescription")}
             </p>
           </div>
           <div className="grid gap-2 sm:grid-cols-[auto_minmax(0,1fr)_10rem_auto] lg:w-[50rem]">
@@ -1208,7 +1381,7 @@ export default function ActivityPanel() {
                 className="h-7"
                 onClick={() => switchHistoryView("scans")}
               >
-                Scans
+                {t("web.admin.autoscan.activity.history.scans")}
               </Button>
               <Button
                 type="button"
@@ -1217,26 +1390,30 @@ export default function ActivityPanel() {
                 className="h-7"
                 onClick={() => switchHistoryView("polls")}
               >
-                Polls
+                {t("web.admin.autoscan.activity.history.polls")}
               </Button>
             </div>
             <div className="relative min-w-0">
-              <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
+              <Search className="text-muted-foreground pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2" />
               <Input
                 value={historyQuery}
                 onChange={(event) => {
                   setHistoryQuery(event.target.value);
                   setPage(0);
                 }}
-                placeholder={historyView === "scans" ? "Search scan history" : "Search poll log"}
-                className="pr-9 pl-9"
+                placeholder={
+                  historyView === "scans"
+                    ? t("web.admin.autoscan.activity.history.searchScans")
+                    : t("web.admin.autoscan.activity.history.searchPolls")
+                }
+                className="ps-9 pe-9"
               />
               {historyQuery ? (
                 <button
                   type="button"
-                  className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 rounded p-1 transition-colors"
+                  className="text-muted-foreground hover:text-foreground absolute end-2 top-1/2 rounded p-1 transition-colors"
                   onClick={() => setHistoryQuery("")}
-                  aria-label="Clear history search"
+                  aria-label={t("web.admin.autoscan.activity.history.clearSearch")}
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
@@ -1254,12 +1431,24 @@ export default function ActivityPanel() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All statuses</SelectItem>
-                  <SelectItem value="accepted">Queued</SelectItem>
-                  <SelectItem value="running">Running</SelectItem>
-                  <SelectItem value="completed">Completed</SelectItem>
-                  <SelectItem value="failed">Failed</SelectItem>
-                  <SelectItem value="cancelled">Cancelled</SelectItem>
+                  <SelectItem value="all">
+                    {t("web.admin.autoscan.activity.filter.allStatuses")}
+                  </SelectItem>
+                  <SelectItem value="accepted">
+                    {t("web.admin.autoscan.activity.scanFilter.queued")}
+                  </SelectItem>
+                  <SelectItem value="running">
+                    {t("web.admin.autoscan.activity.scanFilter.running")}
+                  </SelectItem>
+                  <SelectItem value="completed">
+                    {t("web.admin.autoscan.activity.scanFilter.completed")}
+                  </SelectItem>
+                  <SelectItem value="failed">
+                    {t("web.admin.autoscan.activity.scanFilter.failed")}
+                  </SelectItem>
+                  <SelectItem value="cancelled">
+                    {t("web.admin.autoscan.activity.scanFilter.cancelled")}
+                  </SelectItem>
                 </SelectContent>
               </Select>
             ) : (
@@ -1274,16 +1463,26 @@ export default function ActivityPanel() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All statuses</SelectItem>
-                  <SelectItem value="running">Running</SelectItem>
-                  <SelectItem value="success">Success</SelectItem>
-                  <SelectItem value="unresolved">Unresolved</SelectItem>
-                  <SelectItem value="error">Error</SelectItem>
+                  <SelectItem value="all">
+                    {t("web.admin.autoscan.activity.filter.allStatuses")}
+                  </SelectItem>
+                  <SelectItem value="running">
+                    {t("web.admin.autoscan.activity.pollStatus.running")}
+                  </SelectItem>
+                  <SelectItem value="success">
+                    {t("web.admin.autoscan.activity.pollStatus.success")}
+                  </SelectItem>
+                  <SelectItem value="unresolved">
+                    {t("web.admin.autoscan.activity.pollStatus.unresolved")}
+                  </SelectItem>
+                  <SelectItem value="error">
+                    {t("web.admin.autoscan.activity.pollStatus.error")}
+                  </SelectItem>
                 </SelectContent>
               </Select>
             )}
             <Button variant="outline" onClick={resetHistoryFilters} disabled={!hasHistoryFilters}>
-              Reset
+              {t("web.admin.autoscan.activity.history.reset")}
             </Button>
           </div>
         </div>
@@ -1292,19 +1491,21 @@ export default function ActivityPanel() {
           <HistorySkeleton />
         ) : activeQuery.isError ? (
           <div className="border-destructive/30 bg-destructive/5 rounded-lg border p-8 text-center">
-            <p className="text-destructive text-sm">Failed to load autoscan activity.</p>
+            <p className="text-destructive text-sm">
+              {t("web.admin.autoscan.activity.history.loadFailed")}
+            </p>
             <Button variant="outline" size="sm" className="mt-3" onClick={refresh}>
-              Try again
+              {t("common.tryAgain")}
             </Button>
           </div>
         ) : activeRows.length === 0 ? (
           <div className="rounded-lg border border-dashed p-8 text-center">
             <p className="text-muted-foreground text-sm">
               {hasHistoryFilters
-                ? "No autoscan activity matches those filters."
+                ? t("web.admin.autoscan.activity.history.emptyFiltered")
                 : historyView === "scans"
-                  ? "No autoscan scans have been created yet."
-                  : "No autoscan polls have been recorded yet."}
+                  ? t("web.admin.autoscan.activity.history.emptyScans")
+                  : t("web.admin.autoscan.activity.history.emptyPolls")}
             </p>
           </div>
         ) : (
@@ -1333,7 +1534,7 @@ export default function ActivityPanel() {
                 setPage(0);
               }}
               pageSizeOptions={HISTORY_PAGE_SIZE_OPTIONS}
-              itemNoun={itemNoun}
+              summaryKey={summaryKey}
               isFetching={activeQuery.isFetching}
             />
           </div>

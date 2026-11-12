@@ -105,7 +105,7 @@ type DeviceLoginStart struct {
 	DeviceCode              string  `json:"device_code" doc:"Secret the device polls with; never shown to a person" example:"d3v1c3c0d3"`
 	UserCode                string  `json:"user_code" doc:"Short code a person types into the approving browser or app: eight digits, shown grouped 4+4. Lookups ignore spaces and dashes. Unique only on this server" example:"4821-7730"`
 	MatchCode               string  `json:"match_code" doc:"Legacy confirmation words; clients compare user_code instead and do not display this" example:"warm pony"`
-	VerificationURI         string  `json:"verification_uri" doc:"Page on this server where the approver enters the user code; server.public_url when configured, otherwise the address the device used" example:"https://silo.example.test/activate"`
+	VerificationURI         string  `json:"verification_uri" format:"uri" doc:"Page on this server where the approver enters the user code; server.public_url when configured, otherwise the address the device used" example:"https://silo.example.test/activate"`
 	VerificationURIComplete string  `json:"verification_uri_complete" doc:"verification_uri with the user code prefilled, for the QR code" example:"https://silo.example.test/activate?code=48217730"`
 	ExpiresAt               Instant `json:"expires_at" doc:"When the request expires" example:"2026-01-02T03:14:05.678Z"`
 	ExpiresIn               int     `json:"expires_in" doc:"Seconds until the request expires" example:"900"`

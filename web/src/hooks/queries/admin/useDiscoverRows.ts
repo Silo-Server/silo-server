@@ -16,6 +16,7 @@ import {
   type DiscoverRow,
   type DiscoverRowBody,
 } from "@/api/v2/adminRequests";
+import { t } from "@/i18n";
 import { HOME_PAGE } from "@/lib/homeRows/pages";
 import { stableJson } from "@/lib/homeRows/stableJson";
 import {
@@ -65,11 +66,11 @@ function message(error: unknown, fallback: string) {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
-/** The one page Discover has; the shared page names it by its label. */
-const PAGES = [{ ref: HOME_PAGE, label: "Discover" }];
-
 export function useDiscoverRows(): DiscoverRowsAdapter {
   const queryClient = useQueryClient();
+  // The one page Discover has; the shared page names it by its label.
+  const discoverLabel = t("web.admin.requests.discover.pageName");
+  const pages = useMemo(() => [{ ref: HOME_PAGE, label: discoverLabel }], [discoverLabel]);
   const layoutQuery = useRequestDiscoverLayout();
   const layout = layoutQuery.data;
   // The rows as the writes still in flight leave them.
@@ -88,7 +89,7 @@ export function useDiscoverRows(): DiscoverRowsAdapter {
           const latest = queryClient.getQueryData<DiscoverLayout>(
             adminKeys.requestDiscoverLayout(),
           );
-          if (!latest) throw new Error("The Discover page hasn't loaded.");
+          if (!latest) throw new Error(t("web.admin.requests.discoverRows.notLoaded"));
           return job(latest);
         })
         .finally(() => {
@@ -137,10 +138,12 @@ export function useDiscoverRows(): DiscoverRowsAdapter {
   return {
     surface: "admin",
     page: HOME_PAGE,
-    pages: PAGES,
+    pages,
     setPage: () => undefined,
     status,
-    error: layoutQuery.error ? message(layoutQuery.error, "Could not load the rows.") : null,
+    error: layoutQuery.error
+      ? message(layoutQuery.error, t("web.admin.requests.discoverRows.loadFailed"))
+      : null,
     canEdit: status === "ready",
     rows,
     discoverRows,
@@ -159,16 +162,19 @@ export function useDiscoverRows(): DiscoverRowsAdapter {
           [...current].sort(
             (a, b) => orderedIds.indexOf(a.id ?? "") - orderedIds.indexOf(b.id ?? ""),
           ),
-        "Could not move this row",
+        t("web.admin.requests.discoverRows.moveFailed"),
         typeof orderToken === "string" ? orderToken : undefined,
       ),
     setShown: (id, shown) =>
       listWrite(
         (current) => current.map((row) => (row.id === id ? { ...row, enabled: shown } : row)),
-        "Could not save this row",
+        t("web.admin.requests.discoverRows.saveFailed"),
       ),
     removeRow: (id) =>
-      listWrite((current) => current.filter((row) => row.id !== id), "Could not delete this row"),
+      listWrite(
+        (current) => current.filter((row) => row.id !== id),
+        t("web.admin.requests.discoverRows.deleteFailed"),
+      ),
     saveRow: (row, base) =>
       run(async (latest) => {
         if (base) {
@@ -201,7 +207,7 @@ export function useDiscoverRows(): DiscoverRowsAdapter {
         () => true,
         (error: unknown) => {
           if (isRequestEditorConflict(error)) setConflict({ scope: "page" });
-          else toast.error(message(error, "Could not restore the default rows"));
+          else toast.error(message(error, t("web.admin.requests.discoverRows.restoreFailed")));
           return false;
         },
       ),

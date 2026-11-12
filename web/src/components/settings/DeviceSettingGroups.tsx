@@ -12,27 +12,40 @@ import {
 import { LanguageSelect } from "@/components/settings/LanguageSelect";
 import { SettingSlider } from "@/components/settings/SettingSlider";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
+import { useAppLanguage, useT, type Translate } from "@/i18n";
 import { groupDeviceSettings } from "@/lib/deviceSettingGroups";
 import type { EffectiveSetting } from "@/hooks/queries/settingValues";
 import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { bitrateSelectChoices } from "@/lib/bitrateOptions";
 import { namedLanguageOptionsFor } from "@/lib/languageOptions";
 import { controlKindFor, formatSettingValue, optionsFor } from "@/lib/settingsDisplay";
+import { settingDescription, settingLabel, settingUnsetLabel } from "@/lib/settingsText";
 import { cn } from "@/lib/utils";
 import { normalizeQualityPreferenceV3 } from "@/player/protocol-v3";
 
 const EMPTY_SELECT_VALUE = "__empty__";
+
+/**
+ * Whose settings these are: the viewer's own (`self`), or the named profile's
+ * when the household parent is acting for someone else.
+ */
+export interface DeviceSettingsOwner {
+  self: boolean;
+  name: string;
+}
+
+/** The select and placeholder values for the "your" / "Sam's" messages. */
+function ownerValues(owner: DeviceSettingsOwner) {
+  return { owner: owner.self ? "self" : "other", name: owner.name };
+}
 
 export interface DeviceSettingGroupsProps {
   /** Effective values resolved for the device being edited. */
   settings: Partial<Record<SettingKey, EffectiveSetting>>;
   /** Definitions supported by the connected server contract. */
   keys?: readonly SettingKey[];
-  /**
-   * Whose settings these are, for the reset label. "your" on your own devices,
-   * a name when the household parent is acting for someone else.
-   */
-  ownerLabel: string;
+  /** Whose settings these are, for the reset label and the source note. */
+  owner: DeviceSettingsOwner;
   /**
    * The target device's self-reported platform string. When given, settings
    * the manifest marks as not applying to that platform are hidden — unless
@@ -56,7 +69,7 @@ export interface DeviceSettingGroupsProps {
 export function DeviceSettingGroups({
   settings,
   keys,
-  ownerLabel,
+  owner,
   devicePlatform,
   storedOnDevice,
   disabled = false,
@@ -64,6 +77,8 @@ export function DeviceSettingGroups({
   onReset,
   onOpenPanel,
 }: DeviceSettingGroupsProps) {
+  // Group titles come from groupDeviceSettings; re-render when the language changes.
+  useAppLanguage();
   const storedHere = new Set([
     ...(Object.keys(settings) as SettingKey[]).filter(
       (key) => settings[key]?.scope === "profile_device",
@@ -83,7 +98,7 @@ export function DeviceSettingGroups({
               settingKey={key}
               effective={settings[key]}
               storedOnDevice={storedOnDevice}
-              ownerLabel={ownerLabel}
+              owner={owner}
               disabled={disabled}
               onChange={onChange}
               onReset={onReset}
@@ -100,7 +115,7 @@ interface DeviceSettingRowProps {
   settingKey: SettingKey;
   effective: EffectiveSetting | undefined;
   storedOnDevice: Partial<Record<SettingKey, unknown>> | undefined;
-  ownerLabel: string;
+  owner: DeviceSettingsOwner;
   disabled: boolean;
   onChange: (key: SettingKey, value: unknown) => void;
   onReset: (key: SettingKey) => void;
@@ -111,12 +126,13 @@ function DeviceSettingRow({
   settingKey,
   effective,
   storedOnDevice,
-  ownerLabel,
+  owner,
   disabled,
   onChange,
   onReset,
   onOpenPanel,
 }: DeviceSettingRowProps) {
+  const t = useT();
   const definition = SETTING_DEFINITIONS[settingKey];
   if (!definition) return null;
 
@@ -142,7 +158,7 @@ function DeviceSettingRow({
   const inheritedFrom =
     changedHere || profileWide || constrained
       ? null
-      : sourceLabel(effective, ownerLabel, definition.adminDefault === true);
+      : sourceLabel(t, effective, owner, definition.adminDefault === true);
   // A stored null is a value ("No limit"), not a missing one, so only a
   // missing answer falls back to the default.
   const value = displayedValue(settingKey, effective ? effective.value : definition.defaultValue);
@@ -165,10 +181,10 @@ function DeviceSettingRow({
       >
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium">{definition.label}</span>
+            <span className="text-sm font-medium">{settingLabel(definition)}</span>
             {changedHere ? (
               <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-px text-xs font-semibold tracking-[0.04em] text-amber-300 uppercase">
-                Changed here
+                {t("web.settings.deviceSettingGroups.changedHere")}
               </span>
             ) : null}
             {inheritedFrom ? (
@@ -177,24 +193,25 @@ function DeviceSettingRow({
             {constrained ? (
               <span className="border-info/30 bg-info/10 text-info inline-flex items-center gap-1 rounded-full border px-1.5 py-px text-xs font-semibold tracking-[0.04em] uppercase">
                 <Lock className="h-2.5 w-2.5" />
-                Household limit
+                {t("web.settings.deviceSettingGroups.householdLimit")}
               </span>
             ) : null}
           </div>
           <p className="text-muted-foreground text-[13px] leading-relaxed">
-            {definition.description}
+            {settingDescription(definition)}
           </p>
           {constrained ? (
             <p className="text-[13px] leading-relaxed text-amber-300/90">
-              {constraintExplanation(effective)}
+              {constraintExplanation(t, effective)}
             </p>
           ) : null}
           {profileWide ? (
             <p className="text-muted-foreground text-[13px] leading-relaxed">
               {retainedHere
-                ? `Set for all devices on this profile, so this device's own choice (${retainedValueLabel(settingKey, storedOnDevice?.[settingKey])}) isn't used right now. `
-                : "Set for all devices on this profile. "}
-              Turn off &ldquo;Apply to all devices&rdquo; to choose per device.
+                ? t("web.settings.deviceSettingGroups.profileWideRetained", {
+                    value: retainedValueLabel(settingKey, storedOnDevice?.[settingKey]),
+                  })
+                : t("web.settings.deviceSettingGroups.profileWide")}
             </p>
           ) : null}
           {/* Under the description rather than beside the control, so it never
@@ -207,7 +224,7 @@ function DeviceSettingRow({
               className="text-muted-foreground hover:text-foreground inline-flex min-h-11 items-center gap-1 text-[13px] transition-colors disabled:opacity-50 sm:min-h-0 sm:pt-0.5 sm:text-xs"
             >
               <RotateCcw className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
-              Use {ownerLabel} setting
+              {t("web.settings.deviceSettingGroups.useOwnerSetting", ownerValues(owner))}
             </button>
           ) : null}
         </div>
@@ -245,16 +262,19 @@ function displayedValue(settingKey: SettingKey, value: unknown): unknown {
  * Anything else it might name is left unlabelled rather than guessed at.
  */
 function sourceLabel(
+  t: Translate,
   effective: EffectiveSetting | undefined,
-  ownerLabel: string,
+  owner: DeviceSettingsOwner,
   adminDefault: boolean,
 ): string | null {
   switch (effective?.source) {
     case "profile":
-      return `From ${ownerLabel} profile`;
+      return t("web.settings.deviceSettingGroups.fromOwnerProfile", ownerValues(owner));
     case "default":
       // An administrator may have replaced this one's default for the server.
-      return adminDefault ? "Server default" : "App default";
+      return adminDefault
+        ? t("web.settings.deviceSettingGroups.serverDefault")
+        : t("web.settings.deviceSettingGroups.appDefault");
     default:
       return null;
   }
@@ -267,18 +287,21 @@ function retainedValueLabel(settingKey: SettingKey, value: unknown): string {
   );
 }
 
-function constraintExplanation(effective: EffectiveSetting | undefined): string {
+function constraintExplanation(t: Translate, effective: EffectiveSetting | undefined): string {
   if (!effective) return "";
   const permitted = effective.value;
   if (effective.constraint_kind === "locked") {
-    return "This is set for your household and can't be changed here.";
+    return t("web.settings.deviceSettingGroups.constraintLocked");
   }
   // The stored preference is still theirs; it is just capped today. Saying so
   // beats silently showing a value they did not choose.
   if (effective.stored_value !== undefined && effective.stored_value !== permitted) {
-    return `Your household settings limit this to ${String(permitted)}, so your choice of ${String(effective.stored_value)} isn't available right now.`;
+    return t("web.settings.deviceSettingGroups.constraintCapped", {
+      permitted: String(permitted),
+      stored: String(effective.stored_value),
+    });
   }
-  return "Your household settings limit this option.";
+  return t("web.settings.deviceSettingGroups.constraintLimited");
 }
 
 interface DeviceSettingControlProps {
@@ -306,6 +329,7 @@ function DeviceSettingControl({
   onChange,
   onOpenPanel,
 }: DeviceSettingControlProps) {
+  const t = useT();
   const definition = SETTING_DEFINITIONS[settingKey];
   const control = controlKindFor(definition);
 
@@ -317,7 +341,7 @@ function DeviceSettingControl({
         onClick={() => onOpenPanel?.(settingKey)}
         className="min-h-11 w-full sm:h-8 sm:min-h-0 sm:px-3 sm:text-sm @lg:w-auto"
       >
-        Change how they look
+        {t("web.settings.deviceSettingGroups.changeAppearance")}
       </Button>
     );
   }
@@ -326,7 +350,7 @@ function DeviceSettingControl({
     return (
       <span className="flex min-h-11 items-center sm:min-h-0">
         <Switch
-          aria-label={definition.label}
+          aria-label={settingLabel(definition)}
           checked={value === true}
           disabled={disabled}
           onCheckedChange={(checked) => onChange(settingKey, checked)}
@@ -346,7 +370,7 @@ function DeviceSettingControl({
         step={definition.step}
         unit={definition.unit}
         disabled={disabled}
-        aria-label={definition.label}
+        aria-label={settingLabel(definition)}
         onCommit={(next) => onChange(settingKey, next)}
       />
     );
@@ -367,7 +391,7 @@ function DeviceSettingControl({
     return (
       <div className="w-full @lg:w-[220px]">
         <LanguageSelect
-          aria-label={definition.label}
+          aria-label={settingLabel(definition)}
           value={asString === "" ? EMPTY_SELECT_VALUE : asString}
           options={languageOptions}
           disabled={disabled}
@@ -376,7 +400,7 @@ function DeviceSettingControl({
           onValueChange={(next) => onChange(settingKey, next === EMPTY_SELECT_VALUE ? null : next)}
         >
           {definition.nullable && (
-            <SelectItem value={EMPTY_SELECT_VALUE}>{definition.unsetLabel ?? "Unset"}</SelectItem>
+            <SelectItem value={EMPTY_SELECT_VALUE}>{settingUnsetLabel(definition)}</SelectItem>
           )}
         </LanguageSelect>
       </div>
@@ -388,7 +412,7 @@ function DeviceSettingControl({
   // showing nothing at all. Present the range as bandwidth choices people
   // recognise instead, and keep the stored value visible if it is not one of
   // them.
-  const numericChoices = numericSelectChoices(definition, options, asString);
+  const numericChoices = numericSelectChoices(t, definition, options, asString);
   if (numericChoices) {
     return (
       <Select
@@ -399,7 +423,7 @@ function DeviceSettingControl({
         }
       >
         <SelectTrigger
-          aria-label={definition.label}
+          aria-label={settingLabel(definition)}
           className={cn("h-11 w-full text-base sm:h-9 sm:text-sm @lg:w-[220px]")}
         >
           <SelectValue />
@@ -430,7 +454,7 @@ function DeviceSettingControl({
       }
     >
       <SelectTrigger
-        aria-label={definition.label}
+        aria-label={settingLabel(definition)}
         className={cn("h-11 w-full text-base sm:h-9 sm:text-sm @lg:w-[220px]")}
       >
         <SelectValue />
@@ -473,6 +497,7 @@ function permittedOptions(settingKey: SettingKey, effective: EffectiveSetting | 
  * profile Defaults screen offers the same choices.
  */
 function numericSelectChoices(
+  t: Translate,
   definition: (typeof SETTING_DEFINITIONS)[SettingKey],
   options: { value: string; label: string }[],
   currentValue: string,
@@ -481,7 +506,8 @@ function numericSelectChoices(
   const hasMembers = options.some((option) => option.value !== "");
   if (!isNumeric || hasMembers) return null;
 
-  const unsetLabel = definition.unit === "kbps" ? "No limit" : "Unset";
+  const unsetLabel =
+    definition.unit === "kbps" ? t("web.settings.value.noLimit") : t("web.settings.value.unset");
   return bitrateSelectChoices(definition, currentValue, unsetLabel);
 }
 

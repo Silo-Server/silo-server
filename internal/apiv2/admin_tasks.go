@@ -141,8 +141,13 @@ func taskExecutionOf(e taskmanager.ExecutionResult) AdminTaskExecution {
 			out.Steps = result.Steps
 		}
 	}
-	if e.Status == adminjob.StatusFailed {
+	switch e.Status {
+	case adminjob.StatusFailed:
 		out.ErrorMessage = "Task failed. Inspect administrator diagnostics for details."
+	case adminjob.StatusCancelled:
+		// The task runner writes the message of a run it stopped itself (a
+		// max runtime stop), so unlike failure text it is safe to show.
+		out.ErrorMessage = e.ErrorMessage
 	}
 	return out
 }

@@ -140,7 +140,7 @@ it("counts skipped items once in a running import's progress", () => {
   } as unknown as ReturnType<typeof useHistoryImportRun>);
   renderPage();
 
-  expect(screen.getByText("13 / 13 processed")).toBeTruthy();
+  expect(screen.getByText("13 processed so far")).toBeTruthy();
   expect(screen.getAllByText("An import item could not be processed.")).toHaveLength(2);
 });
 

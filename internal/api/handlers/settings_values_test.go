@@ -19,14 +19,11 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/settingsresolve"
@@ -78,414 +75,6 @@ func valuesRequest(method, target string, body []byte) *http.Request {
 	return req.WithContext(apimw.SetProfileID(ctx, "profile-1"))
 }
 
-// routeValues wires the chi URL params the handlers read from the path.
-func routeValues(t *testing.T, h *SettingValuesHandler, method, key, query string, body []byte) *httptest.ResponseRecorder {
-	t.Helper()
-	target := "/settings/values/" + key
-	if query != "" {
-		target += "?" + query
-	}
-	req := valuesRequest(method, target, body)
-
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("key", key)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-
-	rec := httptest.NewRecorder()
-	switch method {
-	case http.MethodGet:
-		h.HandleGetValue(rec, req)
-	case http.MethodPut:
-		h.HandleSetValue(rec, req)
-	case http.MethodDelete:
-		h.HandleDeleteValue(rec, req)
-	}
-	return rec
-}
-
-func routeNavigationShortcutMutation(
-	t *testing.T,
-	h *SettingValuesHandler,
-	body string,
-	mutationID string,
-) *httptest.ResponseRecorder {
-	t.Helper()
-	req := valuesRequest(http.MethodPut, "/settings/values/nav.shortcuts/item", []byte(body))
-	if mutationID != "" {
-		req.Header.Set(mutationIDHeader, mutationID)
-	}
-	rec := httptest.NewRecorder()
-	h.HandleSetNavigationShortcut(rec, req)
-	return rec
-}
-
-func decodeShortcutResponse(t *testing.T, rec *httptest.ResponseRecorder) (settingValueResponse, navigationShortcutDocument) {
-	t.Helper()
-	var response settingValueResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
-		t.Fatalf("decode shortcut response: %v; body=%s", err, rec.Body.String())
-	}
-	var document navigationShortcutDocument
-	if err := json.Unmarshal(response.Value, &document); err != nil {
-		t.Fatalf("decode shortcut document: %v; value=%s", err, response.Value)
-	}
-	return response, document
-}
-
-func TestNavigationShortcutMutationLifecycle(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-
-	addLibrary := `{"item":{"type":"library","library_id":42,"label":"Movies"},"present":true}`
-	rec := routeNavigationShortcutMutation(t, handler, addLibrary, "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("add library = %d: %s", rec.Code, rec.Body.String())
-	}
-	response, document := decodeShortcutResponse(t, rec)
-	if response.Key != settingskeys.NavShortcuts || response.Scope != "profile" || response.Revision != 1 {
-		t.Fatalf("add response = %+v, want profile nav.shortcuts revision 1", response)
-	}
-	if len(document.Items) != 1 || document.Items[0].Label != "Movies" {
-		t.Fatalf("add document = %+v, want Movies", document)
-	}
-
-	addSection := `{"item":{"type":"section","library_id":42,"section_id":"recent","label":"Recent"},"present":true}`
-	rec = routeNavigationShortcutMutation(t, handler, addSection, "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("add section = %d: %s", rec.Code, rec.Body.String())
-	}
-	response, document = decodeShortcutResponse(t, rec)
-	if response.Revision != 2 || len(document.Items) != 2 || document.Items[1].SectionID != "recent" {
-		t.Fatalf("add section = revision %d document %+v, want both items at revision 2", response.Revision, document)
-	}
-
-	refreshLibrary := `{"item":{"type":"library","library_id":42,"label":"Films"},"present":true}`
-	rec = routeNavigationShortcutMutation(t, handler, refreshLibrary, "")
-	response, document = decodeShortcutResponse(t, rec)
-	if response.Revision != 3 || len(document.Items) != 2 || document.Items[0].Label != "Films" || document.Items[1].SectionID != "recent" {
-		t.Fatalf("label refresh reordered or dropped items: revision %d document %+v", response.Revision, document)
-	}
-
-	// Exact desired state is a no-op: no revision churn and no duplicate.
-	rec = routeNavigationShortcutMutation(t, handler, refreshLibrary, "")
-	response, document = decodeShortcutResponse(t, rec)
-	if response.Revision != 3 || len(document.Items) != 2 {
-		t.Fatalf("repeat add = revision %d document %+v, want unchanged revision 3", response.Revision, document)
-	}
-
-	// Removal matches semantic identity only; a stale label cannot stop it.
-	removeLibrary := `{"item":{"type":"library","library_id":42,"label":"Old label"},"present":false}`
-	rec = routeNavigationShortcutMutation(t, handler, removeLibrary, "")
-	response, document = decodeShortcutResponse(t, rec)
-	if response.Revision != 4 || len(document.Items) != 1 || document.Items[0].SectionID != "recent" {
-		t.Fatalf("remove library = revision %d document %+v, want section preserved", response.Revision, document)
-	}
-
-	rec = routeNavigationShortcutMutation(t, handler, removeLibrary, "")
-	response, _ = decodeShortcutResponse(t, rec)
-	if response.Revision != 4 {
-		t.Fatalf("repeat remove revision = %d, want unchanged 4", response.Revision)
-	}
-}
-
-func TestNavigationShortcutCollectionLibraryIDValidationCannotMutateExistingTargets(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-	global := `{"item":{"type":"collection","collection_id":"favorites","label":"All Favorites"},"present":true}`
-	withinLibrary := `{"item":{"type":"collection","library_id":42,"collection_id":"favorites","label":"Movie Favorites"},"present":true}`
-	for _, tc := range []struct {
-		name string
-		body string
-	}{
-		{"omitted library id is global", global},
-		{"positive library id", withinLibrary},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			rec := routeNavigationShortcutMutation(t, handler, tc.body, "")
-			if rec.Code != http.StatusOK {
-				t.Fatalf("valid collection = %d: %s", rec.Code, rec.Body.String())
-			}
-		})
-	}
-
-	invalidLibraryIDs := map[string]string{
-		"explicit null": `null`,
-		"string":        `"42"`,
-		"zero":          `0`,
-	}
-	for name, libraryID := range invalidLibraryIDs {
-		t.Run(name, func(t *testing.T) {
-			body := fmt.Sprintf(
-				`{"item":{"type":"collection","library_id":%s,"collection_id":"favorites","label":"Ignored"},"present":false}`,
-				libraryID,
-			)
-			rec := routeNavigationShortcutMutation(t, handler, body, "")
-			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid_value") {
-				t.Fatalf("invalid collection library_id = %d: %s", rec.Code, rec.Body.String())
-			}
-
-			stored, err := store.GetSettingValue(context.Background(), userstore.SettingIdentity{
-				Key: settingskeys.NavShortcuts, Scope: settingscontract.ScopeProfile, ProfileID: "profile-1",
-			})
-			if err != nil || stored == nil {
-				t.Fatalf("read catalog after rejected remove: value=%+v err=%v", stored, err)
-			}
-			var document navigationShortcutDocument
-			if err := json.Unmarshal(stored.Value, &document); err != nil {
-				t.Fatalf("decode catalog after rejected remove: %v", err)
-			}
-			if stored.Revision != 2 || len(document.Items) != 2 {
-				t.Fatalf("rejected remove mutated catalog: revision %d items %+v", stored.Revision, document.Items)
-			}
-			if document.Items[0].LibraryID != nil {
-				t.Fatalf("global collection gained library identity: %+v", document.Items[0])
-			}
-			if document.Items[1].LibraryID == nil || *document.Items[1].LibraryID != 42 {
-				t.Fatalf("library-specific collection changed identity: %+v", document.Items[1])
-			}
-		})
-	}
-
-	removeGlobal := `{"item":{"type":"collection","collection_id":"favorites","label":"Ignored"},"present":false}`
-	rec := routeNavigationShortcutMutation(t, handler, removeGlobal, "")
-	response, document := decodeShortcutResponse(t, rec)
-	if response.Revision != 3 || len(document.Items) != 1 || document.Items[0].LibraryID == nil || *document.Items[0].LibraryID != 42 {
-		t.Fatalf("global removal = revision %d document %+v, want scoped collection preserved", response.Revision, document)
-	}
-}
-
-func TestNavigationShortcutMutationIdempotency(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-	handler.storeProvider = notifications.WrapUserStoreProvider(testUserStoreProvider{store: store}, &notifications.System{})
-	const mutationID = "d615e91d-988f-4928-bb32-8956a26c7608"
-	body := `{"item":{"type":"collection","collection_id":"watchlist","label":"Watchlist"},"present":true}`
-	first := routeNavigationShortcutMutation(t, handler, body, mutationID)
-	if first.Code != http.StatusOK {
-		t.Fatalf("first mutation = %d: %s", first.Code, first.Body.String())
-	}
-	replay := routeNavigationShortcutMutation(t, handler, body, mutationID)
-	if replay.Code != http.StatusOK || replay.Header().Get("X-Silo-Idempotent-Replay") != "true" {
-		t.Fatalf("replay = %d header %q: %s", replay.Code, replay.Header().Get("X-Silo-Idempotent-Replay"), replay.Body.String())
-	}
-	if strings.TrimSpace(replay.Body.String()) != strings.TrimSpace(first.Body.String()) {
-		t.Fatalf("replay body = %s, want exact %s", replay.Body.String(), first.Body.String())
-	}
-
-	conflict := routeNavigationShortcutMutation(t, handler,
-		`{"item":{"type":"collection","collection_id":"watchlist","label":"Renamed"},"present":true}`,
-		mutationID)
-	if conflict.Code != http.StatusConflict || !strings.Contains(conflict.Body.String(), "mutation_id_conflict") {
-		t.Fatalf("mutation id reuse = %d: %s", conflict.Code, conflict.Body.String())
-	}
-
-	// A remove's label is not part of its semantics or request fingerprint.
-	const removeID = "f2f65f5e-918a-46bf-bee0-65a84491d298"
-	removed := routeNavigationShortcutMutation(t, handler,
-		`{"item":{"type":"collection","collection_id":"watchlist","label":"First"},"present":false}`,
-		removeID)
-	removeReplay := routeNavigationShortcutMutation(t, handler,
-		`{"item":{"type":"collection","collection_id":"watchlist","label":"Second"},"present":false}`,
-		removeID)
-	if removed.Code != http.StatusOK || removeReplay.Code != http.StatusOK || removeReplay.Header().Get("X-Silo-Idempotent-Replay") != "true" {
-		t.Fatalf("semantic remove replay = %d/%d header %q", removed.Code, removeReplay.Code, removeReplay.Header().Get("X-Silo-Idempotent-Replay"))
-	}
-}
-
-func TestNavigationShortcutConcurrentSameMutationID(t *testing.T) {
-	for _, tc := range []struct {
-		name          string
-		bodies        []string
-		wantConflicts int
-	}{
-		{
-			name: "same hash replays one receipt",
-			bodies: []string{
-				`{"item":{"type":"library","library_id":42,"label":"Movies"},"present":true}`,
-				`{"item":{"type":"library","library_id":42,"label":"Movies"},"present":true}`,
-			},
-		},
-		{
-			name: "different hash conflicts before CAS",
-			bodies: []string{
-				`{"item":{"type":"library","library_id":42,"label":"Movies"},"present":true}`,
-				`{"item":{"type":"library","library_id":99,"label":"Shows"},"present":true}`,
-			},
-			wantConflicts: 1,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			handler, store := newValuesTestHandler(t)
-			const mutationID = "concurrent-same-id"
-			start := make(chan struct{})
-			responses := make(chan *httptest.ResponseRecorder, len(tc.bodies))
-			var ready sync.WaitGroup
-			ready.Add(len(tc.bodies))
-			for _, body := range tc.bodies {
-				body := body
-				go func() {
-					ready.Done()
-					<-start
-					responses <- routeNavigationShortcutMutation(t, handler, body, mutationID)
-				}()
-			}
-			ready.Wait()
-			close(start)
-
-			conflicts := 0
-			replays := 0
-			var successes [][]byte
-			for range tc.bodies {
-				rec := <-responses
-				switch rec.Code {
-				case http.StatusOK:
-					successes = append(successes, bytes.TrimSpace(rec.Body.Bytes()))
-					if rec.Header().Get("X-Silo-Idempotent-Replay") == "true" {
-						replays++
-					}
-				case http.StatusConflict:
-					if !strings.Contains(rec.Body.String(), "mutation_id_conflict") {
-						t.Fatalf("conflict = %s, want mutation_id_conflict", rec.Body.String())
-					}
-					conflicts++
-				default:
-					t.Fatalf("concurrent mutation = %d: %s", rec.Code, rec.Body.String())
-				}
-			}
-			if conflicts != tc.wantConflicts {
-				t.Fatalf("conflicts = %d, want %d", conflicts, tc.wantConflicts)
-			}
-			if tc.wantConflicts == 0 {
-				if len(successes) != 2 || replays != 1 || !bytes.Equal(successes[0], successes[1]) {
-					t.Fatalf("same-hash outcomes: successes=%d replays=%d bodies=%q", len(successes), replays, successes)
-				}
-			} else if len(successes) != 1 || replays != 0 {
-				t.Fatalf("different-hash outcomes: successes=%d replays=%d", len(successes), replays)
-			}
-
-			stored, err := store.GetSettingValue(context.Background(), userstore.SettingIdentity{
-				Key: settingskeys.NavShortcuts, Scope: settingscontract.ScopeProfile, ProfileID: "profile-1",
-			})
-			if err != nil || stored == nil || stored.Revision != 1 {
-				t.Fatalf("stored shortcut = %+v (%v), want exactly one CAS revision", stored, err)
-			}
-			receipt, err := store.GetSettingMutation(context.Background(), mutationID)
-			if err != nil || receipt == nil {
-				t.Fatalf("stored receipt = %+v (%v)", receipt, err)
-			}
-			if len(successes) > 0 && !bytes.Equal(successes[0], bytes.TrimSpace(receipt.Result)) {
-				t.Fatalf("success = %s, receipt = %s", successes[0], receipt.Result)
-			}
-		})
-	}
-}
-
-func TestNavigationShortcutMutationValidationAndWholeDocumentGuard(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-
-	wholeDocument := routeValues(t, handler, http.MethodPut, settingskeys.NavShortcuts,
-		"scope=profile", []byte(`{"value":{"items":[]}}`))
-	if wholeDocument.Code != http.StatusBadRequest || !strings.Contains(wholeDocument.Body.String(), "atomic_update_required") {
-		t.Fatalf("whole-document PUT = %d: %s", wholeDocument.Code, wholeDocument.Body.String())
-	}
-	if value, err := store.GetSettingValue(context.Background(), userstore.SettingIdentity{
-		Key: settingskeys.NavShortcuts, Scope: settingscontract.ScopeProfile, ProfileID: "profile-1",
-	}); err != nil || value != nil {
-		t.Fatalf("guarded PUT stored %+v, err=%v", value, err)
-	}
-
-	invalidBodies := []string{
-		`{"item":{"type":"builtin","destination":"home","label":"Home"},"present":true}`,
-		`{"item":{"type":"library","library_id":42,"label":"Movies","extra":true},"present":true}`,
-		`{"item":{"type":"library","library_id":42,"label":"Movies"},"present":true,"extra":true}`,
-		`{"item":{"type":"section","library_id":42,"section_id":"","label":"Recent"},"present":true}`,
-		`{"item":{"type":"collection","collection_id":"favorites","label":"   "},"present":true}`,
-		`{"item":{"type":"library","library_id":0,"label":"Movies"},"present":true}`,
-		`{"item":{"type":"library","library_id":42,"label":"Movies"}}`,
-	}
-	for _, body := range invalidBodies {
-		rec := routeNavigationShortcutMutation(t, handler, body, "")
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("invalid body %s = %d: %s", body, rec.Code, rec.Body.String())
-		}
-	}
-}
-
-func TestNavigationShortcutWholeDocumentDeleteCannotCreateRevisionABA(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-	first := routeNavigationShortcutMutation(t, handler,
-		`{"item":{"type":"library","library_id":42,"label":"Movies"},"present":true}`, "")
-	firstResponse, _ := decodeShortcutResponse(t, first)
-	if first.Code != http.StatusOK || firstResponse.Revision != 1 {
-		t.Fatalf("seed shortcut = %d revision %d: %s", first.Code, firstResponse.Revision, first.Body.String())
-	}
-
-	identity := userstore.SettingIdentity{
-		Key: settingskeys.NavShortcuts, Scope: settingscontract.ScopeProfile, ProfileID: "profile-1",
-	}
-	beforeDelete, err := store.GetSettingValue(context.Background(), identity)
-	if err != nil || beforeDelete == nil {
-		t.Fatalf("read shortcut before guarded delete: value=%+v err=%v", beforeDelete, err)
-	}
-	deleteRec := routeValues(t, handler, http.MethodDelete, settingskeys.NavShortcuts,
-		"scope=profile", nil)
-	if deleteRec.Code != http.StatusBadRequest || !strings.Contains(deleteRec.Body.String(), "atomic_update_required") {
-		t.Fatalf("whole-document DELETE = %d: %s", deleteRec.Code, deleteRec.Body.String())
-	}
-
-	second := routeNavigationShortcutMutation(t, handler,
-		`{"item":{"type":"library","library_id":99,"label":"Shows"},"present":true}`, "")
-	secondResponse, secondDocument := decodeShortcutResponse(t, second)
-	if second.Code != http.StatusOK || secondResponse.Revision != 2 || len(secondDocument.Items) != 2 {
-		t.Fatalf("second shortcut = %d revision %d document %+v", second.Code, secondResponse.Revision, secondDocument)
-	}
-
-	// If session DELETE had removed and recreated the row, its revision would
-	// return to one and this stale writer could pass an ABA-shaped precondition.
-	// Keeping the row alive makes the stale revision conflict instead.
-	cas := store.(userstore.SettingValueCompareAndSetter)
-	if _, err := cas.CompareAndSetSettingValue(context.Background(), identity,
-		beforeDelete.Value, beforeDelete.Revision); !errors.Is(err, userstore.ErrSettingValueRevisionConflict) {
-		t.Fatalf("stale CAS after guarded DELETE error = %v, want revision conflict", err)
-	}
-	final, err := store.GetSettingValue(context.Background(), identity)
-	if err != nil || final == nil || final.Revision != 2 {
-		t.Fatalf("final shortcut row = %+v err=%v, want revision 2", final, err)
-	}
-}
-
-func TestNavigationShortcutMutationEnforcesDocumentCap(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-	items := make([]navigationShortcutItem, 0, 256)
-	for id := 1; id <= 256; id++ {
-		libraryID := id
-		items = append(items, navigationShortcutItem{Type: "library", LibraryID: &libraryID, Label: fmt.Sprintf("Library %d", id)})
-	}
-	raw, err := json.Marshal(navigationShortcutDocument{Items: items})
-	if err != nil {
-		t.Fatal(err)
-	}
-	def, _ := handler.contract.Lookup(settingskeys.NavShortcuts)
-	normalized, err := def.ValueSchema.NormalizeValue(raw, settingscontract.ObjectSchemas())
-	if err != nil {
-		t.Fatalf("normalize seed: %v", err)
-	}
-	identity := userstore.SettingIdentity{
-		Key: settingskeys.NavShortcuts, Scope: settingscontract.ScopeProfile, ProfileID: "profile-1",
-	}
-	seed, err := store.UpsertSettingValue(context.Background(), identity, normalized)
-	if err != nil {
-		t.Fatalf("seed full catalog: %v", err)
-	}
-
-	rec := routeNavigationShortcutMutation(t, handler,
-		`{"item":{"type":"library","library_id":257,"label":"Too Many"},"present":true}`, "")
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid_value") {
-		t.Fatalf("257th shortcut = %d: %s", rec.Code, rec.Body.String())
-	}
-	got, err := store.GetSettingValue(context.Background(), identity)
-	if err != nil || got == nil || got.Revision != seed.Revision {
-		t.Fatalf("catalog after rejected add = %+v, err=%v; want unchanged revision %d", got, err, seed.Revision)
-	}
-}
-
 type synchronizedShortcutStore struct {
 	userstore.UserStore
 	cas   userstore.SettingValueCompareAndSetter
@@ -518,48 +107,6 @@ func (s *synchronizedShortcutStore) CompareAndSetSettingValue(
 	s.casMu.Lock()
 	defer s.casMu.Unlock()
 	return s.cas.CompareAndSetSettingValue(ctx, id, value, expectedRevision)
-}
-
-func TestNavigationShortcutConcurrentAddsMerge(t *testing.T) {
-	baseHandler, baseStore := newValuesTestHandler(t)
-	wrapped := &synchronizedShortcutStore{
-		UserStore: baseStore,
-		cas:       baseStore.(userstore.SettingValueCompareAndSetter),
-		ready:     make(chan struct{}),
-	}
-	handler := NewSettingValuesHandler(testUserStoreProvider{store: wrapped}, baseHandler.contract)
-	bodies := []string{
-		`{"item":{"type":"library","library_id":42,"label":"Movies"},"present":true}`,
-		`{"item":{"type":"library","library_id":99,"label":"Shows"},"present":true}`,
-	}
-
-	responses := make(chan *httptest.ResponseRecorder, len(bodies))
-	for _, body := range bodies {
-		body := body
-		go func() {
-			responses <- routeNavigationShortcutMutation(t, handler, body, "")
-		}()
-	}
-	for range bodies {
-		rec := <-responses
-		if rec.Code != http.StatusOK {
-			t.Fatalf("concurrent add = %d: %s", rec.Code, rec.Body.String())
-		}
-	}
-
-	got, err := baseStore.GetSettingValue(context.Background(), userstore.SettingIdentity{
-		Key: settingskeys.NavShortcuts, Scope: settingscontract.ScopeProfile, ProfileID: "profile-1",
-	})
-	if err != nil || got == nil {
-		t.Fatalf("read merged catalog: value=%+v err=%v", got, err)
-	}
-	var document navigationShortcutDocument
-	if err := json.Unmarshal(got.Value, &document); err != nil {
-		t.Fatalf("decode merged catalog: %v", err)
-	}
-	if got.Revision != 2 || len(document.Items) != 2 {
-		t.Fatalf("merged catalog = revision %d items %+v, want both adds at revision 2", got.Revision, document.Items)
-	}
 }
 
 func TestMutationHashPreservesExistingScopesAndSeparatesClientFamilies(t *testing.T) {
@@ -602,449 +149,6 @@ func (l settingValuesLibraryLookup) GetByID(_ context.Context, id int) (*models.
 	return &models.MediaFolder{ID: id}, nil
 }
 
-func TestSettingValuesRejectNonexistentLibraryContext(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-	handler.SetLibraryLookup(settingValuesLibraryLookup{existing: map[int]bool{7: true}})
-
-	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
-		var body []byte
-		if method == http.MethodPut {
-			body = []byte(`{"value":"de"}`)
-		}
-		rec := routeValues(t, handler, method, "playback.subtitle_language",
-			"scope=profile_library&library_id=99", body)
-		if rec.Code != http.StatusNotFound {
-			t.Errorf("%s nonexistent library = %d, want 404: %s", method, rec.Code, rec.Body.String())
-		}
-	}
-	value, err := store.GetSettingValue(context.Background(), userstore.SettingIdentity{
-		Key: "playback.subtitle_language", Scope: settingscontract.ScopeProfileLibrary,
-		ProfileID: "profile-1", LibraryID: 99,
-	})
-	if err != nil || value != nil {
-		t.Fatalf("nonexistent library left value (%+v, %v)", value, err)
-	}
-
-	if rec := routeValues(t, handler, http.MethodPut, "playback.subtitle_language",
-		"scope=profile_library&library_id=7", []byte(`{"value":"de"}`)); rec.Code != http.StatusOK {
-		t.Errorf("existing library write = %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
-// TestUnknownKeysAreRefused is the extension bag closing. The legacy endpoint
-// stored any unregistered key as an unvalidated string, which is how six ui.*
-// settings and five orphan keys reached production untyped.
-func TestUnknownKeysAreRefused(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-
-	rec := routeValues(t, handler, http.MethodPut, "totally.invented.key",
-		"scope=profile", []byte(`{"value":"x"}`))
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("PUT of an unknown key = %d, want 404: %s", rec.Code, rec.Body.String())
-	}
-
-	// A contract-known local setting is not server storage either.
-	rec = routeValues(t, handler, http.MethodPut, "downloads.wifi_only",
-		"scope=profile", []byte(`{"value":true}`))
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("PUT of a client_local key = %d, want 400: %s", rec.Code, rec.Body.String())
-	}
-}
-
-// TestScopeMustBeAllowedByTheContract. A definition declares where it may be
-// written; the identity being well-formed is a separate question.
-func TestScopeMustBeAllowedByTheContract(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-
-	// ui.custom_css is profile-only, so a device override is refused.
-	rec := routeValues(t, handler, http.MethodPut, "ui.custom_css",
-		"scope=profile_device", []byte(`{"value":"body{}"}`))
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("device write to a profile-only setting = %d, want 400: %s",
-			rec.Code, rec.Body.String())
-	}
-
-	// A missing scope is a request error rather than a silent default: writing
-	// to the wrong scope is exactly the mistake this API exists to prevent.
-	rec = routeValues(t, handler, http.MethodPut, "playback.subtitle_mode", "",
-		[]byte(`{"value":"always"}`))
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("write with no scope = %d, want 400", rec.Code)
-	}
-}
-
-// TestLibraryAndSeriesScopesNeedTheirIdentity.
-func TestLibraryAndSeriesScopesNeedTheirIdentity(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-
-	if rec := routeValues(t, handler, http.MethodPut, "playback.subtitle_language",
-		"scope=profile_library", []byte(`{"value":"de"}`)); rec.Code != http.StatusBadRequest {
-		t.Errorf("library scope without library_id = %d, want 400", rec.Code)
-	}
-	if rec := routeValues(t, handler, http.MethodPut, "playback.subtitle_language",
-		"scope=profile_series", []byte(`{"value":"de"}`)); rec.Code != http.StatusBadRequest {
-		t.Errorf("series scope without series_id = %d, want 400", rec.Code)
-	}
-
-	if rec := routeValues(t, handler, http.MethodPut, "playback.subtitle_language",
-		"scope=profile_library&library_id=7", []byte(`{"value":"de"}`)); rec.Code != http.StatusOK {
-		t.Errorf("library write = %d, want 200", rec.Code)
-	}
-	if rec := routeValues(t, handler, http.MethodPut, "playback.subtitle_language",
-		"scope=profile_series&series_id=s1", []byte(`{"value":"ja"}`)); rec.Code != http.StatusOK {
-		t.Errorf("series write = %d, want 200", rec.Code)
-	}
-}
-
-// TestEffectiveResolvesThroughTheLadder proves the route is wired to the real
-// resolver rather than reading one scope.
-func TestEffectiveResolvesThroughTheLadder(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-
-	write := func(query, value string) {
-		t.Helper()
-		if rec := routeValues(t, handler, http.MethodPut, "playback.subtitle_language",
-			query, []byte(`{"value":`+value+`}`)); rec.Code != http.StatusOK {
-			t.Fatalf("seeding %s = %d: %s", query, rec.Code, rec.Body.String())
-		}
-	}
-	write("scope=profile", `"en"`)
-	write("scope=profile_device", `"de"`)
-	write("scope=profile_series&series_id=s1", `"ja"`)
-
-	effective := func(query string) effectiveSettingValueResponse {
-		t.Helper()
-		req := valuesRequest(http.MethodGet, "/settings/values/effective?"+query, nil)
-		rec := httptest.NewRecorder()
-		handler.HandleGetEffective(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("effective %s = %d: %s", query, rec.Code, rec.Body.String())
-		}
-		var body struct {
-			Settings []effectiveSettingValueResponse `json:"settings"`
-		}
-		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-			t.Fatalf("decoding: %v", err)
-		}
-		if len(body.Settings) != 1 {
-			t.Fatalf("got %d settings, want 1", len(body.Settings))
-		}
-		return body.Settings[0]
-	}
-
-	// Without a series context the device override is the most specific match.
-	got := effective("keys=playback.subtitle_language")
-	if string(got.Value) != `"de"` || got.Source != "profile_device" {
-		t.Errorf("no-series resolution = %s from %s, want \"de\" from profile_device",
-			got.Value, got.Source)
-	}
-
-	// Naming the series promotes its override.
-	got = effective("keys=playback.subtitle_language&series_ids=s1")
-	if string(got.Value) != `"ja"` || got.Source != "profile_series" {
-		t.Errorf("series resolution = %s from %s, want \"ja\" from profile_series",
-			got.Value, got.Source)
-	}
-	if got.SeriesID != "s1" {
-		t.Errorf("resolved identity series = %q, want s1 so a client can reset it", got.SeriesID)
-	}
-}
-
-func TestPostEffectiveRejectsInvalidContexts(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-	for name, body := range map[string]string{
-		"empty":           `{"keys":["ui.custom_css"],"contexts":[]}`,
-		"duplicate id":    `{"keys":["ui.custom_css"],"contexts":[{"context_id":"x","series_id":"s1"},{"context_id":"x","series_id":"s2"}]}`,
-		"missing content": `{"keys":["ui.custom_css"],"contexts":[{"context_id":"x"}]}`,
-		"invalid library": `{"keys":["ui.custom_css"],"contexts":[{"context_id":"x","library_id":"nope"}]}`,
-	} {
-		t.Run(name, func(t *testing.T) {
-			req := valuesRequest(http.MethodPost, "/settings/values/effective", []byte(body))
-			rec := httptest.NewRecorder()
-			handler.HandlePostEffective(rec, req)
-			if rec.Code != http.StatusBadRequest {
-				t.Errorf("status = %d, want 400: %s", rec.Code, rec.Body.String())
-			}
-		})
-	}
-}
-
-// TestEffectiveRejectsUnknownKeys. Omitting an unknown key silently lets a
-// client fill the gap with its own vendored default and present a value this
-// server would refuse to store.
-func TestEffectiveRejectsUnknownKeys(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-
-	req := valuesRequest(http.MethodGet,
-		"/settings/values/effective?keys=playback.subtitle_mode,totally.invented.key", nil)
-	rec := httptest.NewRecorder()
-	handler.HandleGetEffective(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("unknown key = %d, want 404: %s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "totally.invented.key") {
-		t.Errorf("the error does not name the offending key: %s", rec.Body.String())
-	}
-}
-
-// TestEffectiveRequiresDeviceIdentityForDeviceAwareKeys: resolving a
-// device-capable key without a device identity would silently skip stored
-// device overrides and pass the profile fallback off as effective.
-func TestEffectiveRequiresDeviceIdentityForDeviceAwareKeys(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-
-	effective := func(query string) *httptest.ResponseRecorder {
-		req := valuesRequest(http.MethodGet, "/settings/values/effective?"+query, nil)
-		req.Header.Del(deviceIDHeader)
-		rec := httptest.NewRecorder()
-		handler.HandleGetEffective(rec, req)
-		return rec
-	}
-
-	// playback.subtitle_language allows profile_device, so it needs the header.
-	if rec := effective("keys=playback.subtitle_language"); rec.Code != http.StatusBadRequest {
-		t.Errorf("device-aware key without a device id = %d, want 400: %s",
-			rec.Code, rec.Body.String())
-	}
-	// The no-keys form resolves every remote definition, which includes
-	// device-aware ones.
-	if rec := effective(""); rec.Code != http.StatusBadRequest {
-		t.Errorf("all-keys request without a device id = %d, want 400", rec.Code)
-	}
-	// ui.custom_css is profile-only: no device identity needed.
-	if rec := effective("keys=ui.custom_css"); rec.Code != http.StatusOK {
-		t.Errorf("profile-only key without a device id = %d, want 200: %s",
-			rec.Code, rec.Body.String())
-	}
-}
-
-// TestEffectiveAppliesViewerQualityCap wires the preferences-versus-restrictions
-// seam end to end: the access scope's MaxPlaybackQuality becomes the resolver's
-// ceiling, the effective value is the cap, and the authored preference survives
-// untouched so it takes effect the day the cap lifts.
-func TestEffectiveAppliesViewerQualityCap(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-
-	if rec := routeValues(t, handler, http.MethodPut, "playback.preferred_quality",
-		"scope=profile", []byte(`{"value":"2160p"}`)); rec.Code != http.StatusOK {
-		t.Fatalf("seeding preference = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	effective := func(maxQuality string) effectiveSettingValueResponse {
-		t.Helper()
-		req := valuesRequest(http.MethodGet,
-			"/settings/values/effective?keys=playback.preferred_quality", nil)
-		req = req.WithContext(access.SetScope(req.Context(), access.Scope{
-			UserID:             1,
-			ProfileID:          "profile-1",
-			MaxPlaybackQuality: maxQuality,
-		}))
-		rec := httptest.NewRecorder()
-		handler.HandleGetEffective(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("effective = %d: %s", rec.Code, rec.Body.String())
-		}
-		var body struct {
-			Settings []effectiveSettingValueResponse `json:"settings"`
-		}
-		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-			t.Fatalf("decoding: %v", err)
-		}
-		if len(body.Settings) != 1 {
-			t.Fatalf("got %d settings, want 1", len(body.Settings))
-		}
-		return body.Settings[0]
-	}
-
-	// Capped at 1080p: the cap is the answer, the choice is reported alongside.
-	got := effective("1080p")
-	if string(got.Value) != `"1080p"` {
-		t.Errorf("capped effective = %s, want \"1080p\"", got.Value)
-	}
-	if !got.Constrained || got.ConstraintKind != string(settingscontract.ConstraintCeiling) {
-		t.Errorf("constrained=%v kind=%q, want true/ceiling", got.Constrained, got.ConstraintKind)
-	}
-	if string(got.StoredValue) != `"2160p"` {
-		t.Errorf("stored_value = %s, want the authored \"2160p\" reported", got.StoredValue)
-	}
-	if string(got.RequestedValue) != `"2160p"` {
-		t.Errorf("requested_value = %s, want authored 2160p", got.RequestedValue)
-	}
-	if got.ConstrainedBy == nil || got.ConstrainedBy.PolicyInput != policyInputMaxPlaybackQuality ||
-		got.ConstrainedBy.Constraint != settingscontract.ConstraintCeiling {
-		t.Errorf("constrained_by = %#v", got.ConstrainedBy)
-	}
-	if len(got.PermittedValues) == 0 || string(got.PermittedValues[len(got.PermittedValues)-1]) != `"1080p"` {
-		t.Errorf("permitted_values = %q, want choices through 1080p", got.PermittedValues)
-	}
-
-	// The stored row itself was not rewritten by resolution.
-	stored, err := store.GetSettingValue(context.Background(), userstore.SettingIdentity{
-		Key:       "playback.preferred_quality",
-		Scope:     settingscontract.ScopeProfile,
-		ProfileID: "profile-1",
-	})
-	if err != nil || stored == nil {
-		t.Fatalf("reading stored value: %v", err)
-	}
-	if string(stored.Value) != `"2160p"` {
-		t.Errorf("stored row = %s, want \"2160p\" untouched", stored.Value)
-	}
-
-	// An uncapped viewer ("" means the policy sets no cap) gets the preference
-	// as authored, with no constraint reported.
-	got = effective("")
-	if string(got.Value) != `"2160p"` || got.Constrained {
-		t.Errorf("uncapped effective = %s constrained=%v, want \"2160p\"/false",
-			got.Value, got.Constrained)
-	}
-	if got.StoredValue != nil {
-		t.Errorf("stored_value = %s, want absent when nothing was narrowed", got.StoredValue)
-	}
-}
-
-// TestMutationIDMakesWritesIdempotent covers the retry a mobile client performs
-// when a response is lost.
-func TestMutationIDMakesWritesIdempotent(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-
-	send := func(mutationID, value string) *httptest.ResponseRecorder {
-		req := valuesRequest(http.MethodPut,
-			"/settings/values/playback.subtitle_mode?scope=profile",
-			[]byte(`{"value":`+value+`}`))
-		req.Header.Set(mutationIDHeader, mutationID)
-		routeCtx := chi.NewRouteContext()
-		routeCtx.URLParams.Add("key", "playback.subtitle_mode")
-		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-		rec := httptest.NewRecorder()
-		handler.HandleSetValue(rec, req)
-		return rec
-	}
-
-	first := send("mut-1", `"always"`)
-	if first.Code != http.StatusOK {
-		t.Fatalf("first write = %d: %s", first.Code, first.Body.String())
-	}
-
-	// The same id and body replays the receipt rather than writing again.
-	replay := send("mut-1", `"always"`)
-	if replay.Code != http.StatusOK {
-		t.Fatalf("replay = %d: %s", replay.Code, replay.Body.String())
-	}
-	if replay.Header().Get("X-Silo-Idempotent-Replay") != "true" {
-		t.Error("a repeated mutation id was not reported as a replay")
-	}
-
-	if strings.TrimSpace(first.Body.String()) != strings.TrimSpace(replay.Body.String()) {
-		t.Errorf("replay body diverged from the original response:\n first: %s\nreplay: %s",
-			first.Body.String(), replay.Body.String())
-	}
-	var original settingValueResponse
-	if err := json.Unmarshal(first.Body.Bytes(), &original); err != nil {
-		t.Fatalf("decoding original response: %v", err)
-	}
-	if original.Revision == 0 || original.UpdatedAt == "" {
-		t.Errorf("original response revision=%d updated_at=%q — the replayed "+
-			"receipt must carry the stored row, not the request",
-			original.Revision, original.UpdatedAt)
-	}
-
-	// The same id with different content is a conflict, not a silent overwrite.
-	conflict := send("mut-1", `"off"`)
-	if conflict.Code != http.StatusConflict {
-		t.Errorf("reused id with new content = %d, want 409", conflict.Code)
-	}
-
-	// The stored value is still the first write's.
-	value, err := store.GetSettingValue(context.Background(), userstore.SettingIdentity{
-		Key:       "playback.subtitle_mode",
-		Scope:     settingscontract.ScopeProfile,
-		ProfileID: "profile-1",
-	})
-	if err != nil || value == nil {
-		t.Fatalf("reading stored value: %v", err)
-	}
-	if string(value.Value) != `"always"` {
-		t.Errorf("stored value = %s, want the first write preserved", value.Value)
-	}
-}
-
-// failingUpsertStore simulates the store failing the write itself — the
-// PostgreSQL profile FK rejecting a row, a dropped connection — while every
-// other operation, the receipt lookup and insert included, works.
-type failingUpsertStore struct {
-	userstore.UserStore
-}
-
-type failingUpsertMutationWriter struct {
-	userstore.SettingMutationWriter
-}
-
-func (failingUpsertStore) UpsertSettingValue(
-	context.Context, userstore.SettingIdentity, json.RawMessage,
-) (*userstore.SettingValue, error) {
-	return nil, errors.New("simulated write failure")
-}
-
-func (s failingUpsertStore) WithSettingMutationTransaction(
-	ctx context.Context,
-	mutationID string,
-	fn func(userstore.SettingMutationWriter) error,
-) error {
-	transactioner := s.UserStore.(userstore.SettingMutationTransactioner)
-	return transactioner.WithSettingMutationTransaction(ctx, mutationID,
-		func(writer userstore.SettingMutationWriter) error {
-			return fn(failingUpsertMutationWriter{SettingMutationWriter: writer})
-		})
-}
-
-func (failingUpsertMutationWriter) UpsertSettingValue(
-	context.Context, userstore.SettingIdentity, json.RawMessage,
-) (*userstore.SettingValue, error) {
-	return nil, errors.New("simulated write failure")
-}
-
-// TestFailedWritesLeaveNoReceipt: a receipt for a write that never landed
-// would turn the client's retry of a 500 into a silent success replay.
-func TestFailedWritesLeaveNoReceipt(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-	handler.storeProvider = testUserStoreProvider{store: failingUpsertStore{UserStore: store}}
-
-	send := func() *httptest.ResponseRecorder {
-		req := valuesRequest(http.MethodPut,
-			"/settings/values/playback.subtitle_mode?scope=profile",
-			[]byte(`{"value":"always"}`))
-		req.Header.Set(mutationIDHeader, "mut-fail")
-		routeCtx := chi.NewRouteContext()
-		routeCtx.URLParams.Add("key", "playback.subtitle_mode")
-		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-		rec := httptest.NewRecorder()
-		handler.HandleSetValue(rec, req)
-		return rec
-	}
-
-	if rec := send(); rec.Code != http.StatusInternalServerError {
-		t.Fatalf("failed write = %d, want 500", rec.Code)
-	}
-	prior, err := store.GetSettingMutation(context.Background(), "mut-fail")
-	if err != nil {
-		t.Fatalf("reading mutation receipt: %v", err)
-	}
-	if prior != nil {
-		t.Error("a failed write left an idempotency receipt; its retry would replay a success")
-	}
-	// And the retry actually retries: with the store healthy again it stores
-	// the value rather than replaying a phantom result.
-	handler.storeProvider = testUserStoreProvider{store: store}
-	retry := send()
-	if retry.Code != http.StatusOK {
-		t.Fatalf("retry after failure = %d: %s", retry.Code, retry.Body.String())
-	}
-	if retry.Header().Get("X-Silo-Idempotent-Replay") == "true" {
-		t.Error("the retry was served as a replay of the failed attempt")
-	}
-}
-
 // storedDeviceIDFor reports the device a profile_device row was written for, or
 // "" when the key has no device-scoped row at all. The device-widening tests
 // assert on stored rows rather than status codes: before the query parameter is
@@ -1062,41 +166,6 @@ func storedDeviceIDFor(t *testing.T, store userstore.UserStore, key string) stri
 		}
 	}
 	return ""
-}
-
-func TestSetValue_RejectsDeviceNotOwnedByCaller(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-
-	registry, ok := store.(userstore.DeviceRegistry)
-	if !ok {
-		t.Fatal("store does not implement DeviceRegistry")
-	}
-	if err := registry.RegisterDevice(context.Background(), userstore.DeviceEntry{
-		ProfileID: "profile-1", DeviceID: "device-1", DeviceName: "Laptop",
-	}); err != nil {
-		t.Fatalf("registering caller device: %v", err)
-	}
-
-	rec := routeValues(t, handler, http.MethodPut, "player.hdr_enabled",
-		"scope=profile_device&device_id=device-someone-else", []byte(`{"value":false}`))
-
-	// 404 rather than 403: a 403 would confirm the device id exists.
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("PUT naming an unknown device = %d, want 404: %s", rec.Code, rec.Body.String())
-	}
-	if got := storedDeviceIDFor(t, store, "player.hdr_enabled"); got != "" {
-		t.Fatalf("wrote a row for device %q; want no write", got)
-	}
-}
-
-func TestDeleteValue_RejectsDeviceNotOwnedByCaller(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-
-	rec := routeValues(t, handler, http.MethodDelete, "player.hdr_enabled",
-		"scope=profile_device&device_id=device-someone-else", nil)
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("DELETE naming an unknown device = %d, want 404", rec.Code)
-	}
 }
 
 // --- Household widening: a primary profile addressing a sibling profile ---
@@ -1132,193 +201,7 @@ func newHouseholdValuesHandler(t *testing.T, pin string) (*SettingValuesHandler,
 		t.Fatalf("registering sibling device: %v", err)
 	}
 
-	handler.ProfileTokens = access.NewProfileTokenService("test-secret-value-at-least-32-chars", 0)
 	return handler, store
-}
-
-// routeValuesAs is routeValues with an explicit acting profile, so a test can
-// call as a non-primary member of the same household.
-func routeValuesAs(
-	t *testing.T, h *SettingValuesHandler, actingProfileID, method, key, query string, body []byte,
-) *httptest.ResponseRecorder {
-	t.Helper()
-	target := "/settings/values/" + key
-	if query != "" {
-		target += "?" + query
-	}
-	req := valuesRequest(method, target, body)
-	req = req.WithContext(apimw.SetProfileID(req.Context(), actingProfileID))
-
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("key", key)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-
-	rec := httptest.NewRecorder()
-	switch method {
-	case http.MethodGet:
-		h.HandleGetValue(rec, req)
-	case http.MethodPut:
-		h.HandleSetValue(rec, req)
-	case http.MethodDelete:
-		h.HandleDeleteValue(rec, req)
-	}
-	return rec
-}
-
-func TestSetValue_NonPrimaryCannotNameSiblingProfile(t *testing.T) {
-	handler, store := newHouseholdValuesHandler(t, "")
-
-	rec := routeValuesAs(t, handler, "profile-2", http.MethodPut, "player.hdr_enabled",
-		"scope=profile_device&profile_id=profile-1&device_id=device-1", []byte(`{"value":false}`))
-
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("non-primary naming a sibling = %d, want 403: %s", rec.Code, rec.Body.String())
-	}
-	if got := storedDeviceIDFor(t, store, "player.hdr_enabled"); got != "" {
-		t.Errorf("wrote a row on device %q; want no write", got)
-	}
-}
-
-func TestSetValue_PrimaryWithUnverifiedPINCannotNameSibling(t *testing.T) {
-	handler, store := newHouseholdValuesHandler(t, "1234")
-
-	rec := routeValuesAs(t, handler, "profile-1", http.MethodPut, "player.hdr_enabled",
-		"scope=profile_device&profile_id=profile-2&device_id=robin-ipad", []byte(`{"value":false}`))
-
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("primary with unverified PIN = %d, want 403: %s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(strings.ToLower(rec.Body.String()), "pin") {
-		t.Errorf("error does not mention the PIN: %s", rec.Body.String())
-	}
-	if got := storedDeviceIDFor(t, store, "player.hdr_enabled"); got != "" {
-		t.Errorf("wrote a row on device %q; want no write", got)
-	}
-}
-
-// A profile id that is not on this account resolves out of the caller's own
-// store, so it is simply absent — 404, and the caller learns nothing about
-// whether it exists elsewhere.
-func TestSetValue_ProfileFromAnotherAccountIsNotFound(t *testing.T) {
-	handler, store := newHouseholdValuesHandler(t, "")
-
-	rec := routeValuesAs(t, handler, "profile-1", http.MethodPut, "player.hdr_enabled",
-		"scope=profile_device&profile_id=someone-elses-profile&device_id=device-1",
-		[]byte(`{"value":false}`))
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("foreign profile = %d, want 404: %s", rec.Code, rec.Body.String())
-	}
-	if got := storedDeviceIDFor(t, store, "player.hdr_enabled"); got != "" {
-		t.Errorf("wrote a row on device %q; want no write", got)
-	}
-}
-
-func TestSetValue_PrimaryWritesSiblingProfileDeviceSetting(t *testing.T) {
-	handler, store := newHouseholdValuesHandler(t, "")
-
-	rec := routeValuesAs(t, handler, "profile-1", http.MethodPut, "playback.subtitle_mode",
-		"scope=profile_device&profile_id=profile-2&device_id=robin-ipad", []byte(`{"value":"always"}`))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("primary writing a sibling = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	values, err := store.ListAllSettingValues(context.Background())
-	if err != nil {
-		t.Fatalf("listing: %v", err)
-	}
-	var found bool
-	for _, value := range values {
-		if value.Key != "playback.subtitle_mode" {
-			continue
-		}
-		found = true
-		if value.ProfileID != "profile-2" || value.DeviceID != "robin-ipad" {
-			t.Errorf("stored on (%s, %s), want (profile-2, robin-ipad)",
-				value.ProfileID, value.DeviceID)
-		}
-	}
-	if !found {
-		t.Error("no row stored for the sibling profile")
-	}
-}
-
-// A device belonging to a different profile than the one being addressed is
-// still rejected: the household widening changes who you may act for, not
-// which devices belong to whom.
-func TestSetValue_PrimaryCannotMixSiblingProfileWithForeignDevice(t *testing.T) {
-	handler, _ := newHouseholdValuesHandler(t, "")
-
-	rec := routeValuesAs(t, handler, "profile-1", http.MethodPut, "player.hdr_enabled",
-		"scope=profile_device&profile_id=profile-2&device_id=not-robins-device",
-		[]byte(`{"value":false}`))
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("sibling profile with a foreign device = %d, want 404: %s",
-			rec.Code, rec.Body.String())
-	}
-}
-
-// Naming your own profile explicitly is not a household action and must work
-// for anyone — it is what a client does when it sends the identity it read back.
-func TestSetValue_NamingOwnProfileIsAllowedForAnyone(t *testing.T) {
-	handler, store := newHouseholdValuesHandler(t, "")
-
-	rec := routeValuesAs(t, handler, "profile-2", http.MethodPut, "player.hdr_enabled",
-		"scope=profile_device&profile_id=profile-2&device_id=robin-ipad", []byte(`{"value":false}`))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("naming own profile = %d: %s", rec.Code, rec.Body.String())
-	}
-	if got := storedDeviceIDFor(t, store, "player.hdr_enabled"); got != "robin-ipad" {
-		t.Errorf("stored on device %q, want robin-ipad", got)
-	}
-}
-
-// Registration means "this device is in use by this profile". A write aimed at
-// some *other* device, or made on another profile's behalf, is not that — and
-// registering the actor's browser under the target profile would invent a
-// device nobody is holding.
-func TestSetValue_DoesNotRegisterWhenActingOnAnotherDevice(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-
-	registry := store.(userstore.DeviceRegistry)
-	if err := registry.RegisterDevice(context.Background(), userstore.DeviceEntry{
-		ProfileID: "profile-1", DeviceID: "apple-tv", DeviceName: "Apple TV",
-	}); err != nil {
-		t.Fatalf("registering apple-tv: %v", err)
-	}
-
-	// Header device is device-1; the write targets apple-tv.
-	if rec := routeValues(t, handler, http.MethodPut, "player.hdr_enabled",
-		"scope=profile_device&device_id=apple-tv", []byte(`{"value":false}`)); rec.Code != http.StatusOK {
-		t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	exists, err := registry.DeviceExists(context.Background(), "profile-1", "device-1")
-	if err != nil {
-		t.Fatalf("DeviceExists: %v", err)
-	}
-	if exists {
-		t.Error("registered the acting device while writing to a different device")
-	}
-}
-
-func TestSetValue_DoesNotRegisterActorsDeviceUnderAnotherProfile(t *testing.T) {
-	handler, store := newHouseholdValuesHandler(t, "")
-
-	if rec := routeValuesAs(t, handler, "profile-1", http.MethodPut, "player.hdr_enabled",
-		"scope=profile_device&profile_id=profile-2&device_id=robin-ipad",
-		[]byte(`{"value":false}`)); rec.Code != http.StatusOK {
-		t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	registry := store.(userstore.DeviceRegistry)
-	exists, err := registry.DeviceExists(context.Background(), "profile-2", "device-1")
-	if err != nil {
-		t.Fatalf("DeviceExists: %v", err)
-	}
-	if exists {
-		t.Error("registered the parent's browser under the child's profile")
-	}
 }
 
 // captureAuditLogs swaps the default slog handler for the duration of a test.
@@ -1346,98 +229,6 @@ func captureAuditLogs(t *testing.T) func() []map[string]any {
 			}
 		}
 		return records
-	}
-}
-
-func TestSetValue_AuditsCrossProfileWrite(t *testing.T) {
-	handler, _ := newHouseholdValuesHandler(t, "")
-	audited := captureAuditLogs(t)
-
-	if rec := routeValuesAs(t, handler, "profile-1", http.MethodPut, "playback.subtitle_mode",
-		"scope=profile_device&profile_id=profile-2&device_id=robin-ipad",
-		[]byte(`{"value":"always"}`)); rec.Code != http.StatusOK {
-		t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	records := audited()
-	if len(records) != 1 {
-		t.Fatalf("emitted %d audit records, want 1: %+v", len(records), records)
-	}
-	record := records[0]
-	if record["actor_profile_id"] != "profile-1" || record["target_profile_id"] != "profile-2" {
-		t.Errorf("actor/target = %v/%v, want profile-1/profile-2",
-			record["actor_profile_id"], record["target_profile_id"])
-	}
-	if record["setting_key"] != "playback.subtitle_mode" || record["device_id"] != "robin-ipad" {
-		t.Errorf("key/device = %v/%v", record["setting_key"], record["device_id"])
-	}
-	// Identity only: the value must never reach an operator's log.
-	for key, value := range record {
-		if text, ok := value.(string); ok && text == "always" {
-			t.Errorf("audit record leaked the value under %q", key)
-		}
-	}
-}
-
-func TestGetEffective_RejectsDeviceNotOwnedByCaller(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-
-	req := valuesRequest(http.MethodGet,
-		"/settings/values/effective?keys=playback.subtitle_mode&device_id=not-mine", nil)
-	rec := httptest.NewRecorder()
-	handler.HandleGetEffective(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("effective read of a foreign device = %d, want 404: %s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestGetEffective_NonPrimaryCannotResolveSiblingProfile(t *testing.T) {
-	handler, _ := newHouseholdValuesHandler(t, "")
-
-	req := valuesRequest(http.MethodGet,
-		"/settings/values/effective?keys=playback.subtitle_mode&profile_id=profile-1", nil)
-	req = req.WithContext(apimw.SetProfileID(req.Context(), "profile-2"))
-	rec := httptest.NewRecorder()
-	handler.HandleGetEffective(rec, req)
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("non-primary effective read of a sibling = %d, want 403: %s",
-			rec.Code, rec.Body.String())
-	}
-}
-
-// The admin role does not make a non-primary profile the household parent: a
-// child profile on an admin account is refused like any other household
-// member, the same way RequireActingAdmin refuses it admin powers.
-func TestSetValue_NonPrimaryProfileOnAdminAccountMayNotNameSibling(t *testing.T) {
-	handler, store := newHouseholdValuesHandler(t, "")
-	if err := store.(userstore.DeviceRegistry).RegisterDevice(t.Context(), userstore.DeviceEntry{
-		ProfileID: "profile-1", DeviceID: "parent-tv",
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	target := "/settings/values/player.hdr_enabled" +
-		"?scope=profile_device&profile_id=profile-1&device_id=parent-tv"
-	req := valuesRequest(http.MethodPut, target, []byte(`{"value":false}`))
-	// Acting as the *non-primary* profile, on an admin account.
-	ctx := apimw.SetClaims(req.Context(), &auth.Claims{UserID: 1, Role: "admin"})
-	req = req.WithContext(apimw.SetProfileID(ctx, "profile-2"))
-
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("key", "player.hdr_enabled")
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-
-	rec := httptest.NewRecorder()
-	handler.HandleSetValue(rec, req)
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("admin account's non-primary naming a sibling = %d, want 403: %s", rec.Code, rec.Body.String())
-	}
-	value, err := store.GetSettingValue(t.Context(), userstore.SettingIdentity{
-		Key: "player.hdr_enabled", Scope: settingscontract.ScopeProfileDevice,
-		ProfileID: "profile-1", DeviceID: "parent-tv",
-	})
-	if err != nil || value != nil {
-		t.Fatalf("refused write stored a value: %+v, %v", value, err)
 	}
 }
 
@@ -1528,44 +319,6 @@ func TestObservedLanguageSuggestionsSkipsPlaybackKeys(t *testing.T) {
 	}
 }
 
-func TestEffectiveContextsPreservesV2TokensAndLegacyNormalization(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-	keys := []string{"ui.custom_css", "ui.custom_css"}
-	contexts := []EffectiveContextRequest{{ContextID: " row-1 ", SeriesID: "s1"}, {ContextID: "row-1", SeriesID: "s2"}}
-	views, err := handler.ResolveEffectiveSettingContexts(t.Context(), 1, EffectiveSettingsQuery{
-		ActiveProfileID: "profile-1", Keys: keys,
-	}, contexts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(views) != 2 {
-		t.Fatalf("contexts = %d", len(views))
-	}
-	for i, view := range views {
-		if view.ContextID != contexts[i].ContextID {
-			t.Fatalf("context id = %q, want %q", view.ContextID, contexts[i].ContextID)
-		}
-		if len(view.Settings) != 2 || view.Settings[0].Key != keys[0] || view.Settings[1].Key != keys[1] {
-			t.Fatalf("settings = %+v; want both requested keys in order", view.Settings)
-		}
-	}
-	req := valuesRequest(http.MethodPost, "/settings/values/effective", []byte(`{"keys":["ui.custom_css","ui.custom_css"],"contexts":[{"context_id":" row-1 ","series_id":"s1"}]}`))
-	rec := httptest.NewRecorder()
-	handler.HandlePostEffective(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("v1 status %d: %s", rec.Code, rec.Body.String())
-	}
-	var legacy struct {
-		Contexts []effectiveContextResponse `json:"contexts"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &legacy); err != nil {
-		t.Fatal(err)
-	}
-	if len(legacy.Contexts) != 1 || legacy.Contexts[0].ContextID != "row-1" || len(legacy.Contexts[0].Settings) != 1 {
-		t.Fatalf("v1 normalization changed: %+v", legacy.Contexts)
-	}
-}
-
 // TestV2SettingReadsBoundRepeatedValueBytes: v2 answers a repeated key once
 // per mention, and the batch once per context too, so a large stored document
 // must not be copied into one response without limit.
@@ -1626,81 +379,568 @@ func TestV2SettingReadsBoundRepeatedValueBytes(t *testing.T) {
 	}
 }
 
+func TestNavigationShortcutMutationLifecycle(t *testing.T) {
+	handler, _ := newValuesTestHandler(t)
+
+	response, document := mustSetShortcut(t, handler, `{"type":"library","library_id":42,"label":"Movies"}`, true)
+	if response.Key != settingskeys.NavShortcuts || response.Scope != "profile" || response.Revision != 1 {
+		t.Fatalf("add response = %+v, want profile nav.shortcuts revision 1", response)
+	}
+	if len(document.Items) != 1 || document.Items[0].Label != "Movies" {
+		t.Fatalf("add document = %+v, want Movies", document)
+	}
+
+	response, document = mustSetShortcut(t, handler, `{"type":"section","library_id":42,"section_id":"recent","label":"Recent"}`, true)
+	if response.Revision != 2 || len(document.Items) != 2 || document.Items[1].SectionID != "recent" {
+		t.Fatalf("add section = revision %d document %+v, want both items at revision 2", response.Revision, document)
+	}
+
+	refresh := `{"type":"library","library_id":42,"label":"Films"}`
+	response, document = mustSetShortcut(t, handler, refresh, true)
+	if response.Revision != 3 || len(document.Items) != 2 || document.Items[0].Label != "Films" || document.Items[1].SectionID != "recent" {
+		t.Fatalf("label refresh reordered or dropped items: revision %d document %+v", response.Revision, document)
+	}
+
+	// Exact desired state is a no-op: no revision churn and no duplicate.
+	response, document = mustSetShortcut(t, handler, refresh, true)
+	if response.Revision != 3 || len(document.Items) != 2 {
+		t.Fatalf("repeat add = revision %d document %+v, want unchanged revision 3", response.Revision, document)
+	}
+
+	// Removal matches semantic identity only; a stale label cannot stop it.
+	remove := `{"type":"library","library_id":42,"label":"Old label"}`
+	response, document = mustSetShortcut(t, handler, remove, false)
+	if response.Revision != 4 || len(document.Items) != 1 || document.Items[0].SectionID != "recent" {
+		t.Fatalf("remove library = revision %d document %+v, want section preserved", response.Revision, document)
+	}
+	if response, _ = mustSetShortcut(t, handler, remove, false); response.Revision != 4 {
+		t.Fatalf("repeat remove revision = %d, want unchanged 4", response.Revision)
+	}
+}
+
+func TestNavigationShortcutCollectionLibraryIDValidationCannotMutateExistingTargets(t *testing.T) {
+	handler, store := newValuesTestHandler(t)
+	mustSetShortcut(t, handler, `{"type":"collection","collection_id":"favorites","label":"All Favorites"}`, true)
+	mustSetShortcut(t, handler, `{"type":"collection","library_id":42,"collection_id":"favorites","label":"Movie Favorites"}`, true)
+
+	for name, libraryID := range map[string]string{
+		"explicit null": `null`,
+		"string":        `"42"`,
+		"zero":          `0`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, _, err := setShortcut(t, handler, fmt.Sprintf(
+				`{"type":"collection","library_id":%s,"collection_id":"favorites","label":"Ignored"}`, libraryID), false)
+			if apiErr := requireSettingStatus(t, err, http.StatusBadRequest, "invalid collection library_id"); apiErr.Code != settingErrorInvalidValue {
+				t.Fatalf("code = %q, want %q", apiErr.Code, settingErrorInvalidValue)
+			}
+
+			stored, err := store.GetSettingValue(context.Background(), navShortcutIdentity())
+			if err != nil || stored == nil {
+				t.Fatalf("read catalog after rejected remove: value=%+v err=%v", stored, err)
+			}
+			var document navigationShortcutDocument
+			if err := json.Unmarshal(stored.Value, &document); err != nil {
+				t.Fatalf("decode catalog after rejected remove: %v", err)
+			}
+			if stored.Revision != 2 || len(document.Items) != 2 {
+				t.Fatalf("rejected remove mutated catalog: revision %d items %+v", stored.Revision, document.Items)
+			}
+			if document.Items[0].LibraryID != nil {
+				t.Fatalf("global collection gained library identity: %+v", document.Items[0])
+			}
+			if document.Items[1].LibraryID == nil || *document.Items[1].LibraryID != 42 {
+				t.Fatalf("library-specific collection changed identity: %+v", document.Items[1])
+			}
+		})
+	}
+
+	response, document := mustSetShortcut(t, handler, `{"type":"collection","collection_id":"favorites","label":"Ignored"}`, false)
+	if response.Revision != 3 || len(document.Items) != 1 || document.Items[0].LibraryID == nil || *document.Items[0].LibraryID != 42 {
+		t.Fatalf("global removal = revision %d document %+v, want scoped collection preserved", response.Revision, document)
+	}
+}
+
+func TestNavigationShortcutMutationValidationAndWholeDocumentGuard(t *testing.T) {
+	handler, store := newValuesTestHandler(t)
+	ctx := seamCtx(t, "profile-1")
+
+	_, err := handler.SetSettingValue(ctx, seamUserID,
+		seamReq(settingskeys.NavShortcuts, settingscontract.ScopeProfile), json.RawMessage(`{"items":[]}`))
+	if apiErr := requireSettingStatus(t, err, http.StatusBadRequest, "whole-document write"); apiErr.Code != settingErrorAtomicRequired {
+		t.Fatalf("code = %q, want %q", apiErr.Code, settingErrorAtomicRequired)
+	}
+	if value, err := store.GetSettingValue(context.Background(), navShortcutIdentity()); err != nil || value != nil {
+		t.Fatalf("guarded write stored %+v, err=%v", value, err)
+	}
+
+	for _, item := range []string{
+		`{"type":"builtin","destination":"home","label":"Home"}`,
+		`{"type":"library","library_id":42,"label":"Movies","extra":true}`,
+		`{"type":"section","library_id":42,"section_id":"","label":"Recent"}`,
+		`{"type":"collection","collection_id":"favorites","label":"   "}`,
+		`{"type":"library","library_id":0,"label":"Movies"}`,
+	} {
+		if _, _, err := setShortcut(t, handler, item, true); err == nil {
+			t.Errorf("invalid item %s was accepted", item)
+		} else {
+			requireSettingStatus(t, err, http.StatusBadRequest, "invalid item "+item)
+		}
+	}
+}
+
+func TestNavigationShortcutWholeDocumentDeleteCannotCreateRevisionABA(t *testing.T) {
+	handler, store := newValuesTestHandler(t)
+	if first, _ := mustSetShortcut(t, handler, `{"type":"library","library_id":42,"label":"Movies"}`, true); first.Revision != 1 {
+		t.Fatalf("seed revision = %d, want 1", first.Revision)
+	}
+	identity := navShortcutIdentity()
+	beforeDelete, err := store.GetSettingValue(context.Background(), identity)
+	if err != nil || beforeDelete == nil {
+		t.Fatalf("read shortcut before guarded delete: value=%+v err=%v", beforeDelete, err)
+	}
+
+	err = handler.DeleteSettingValue(seamCtx(t, "profile-1"), seamUserID,
+		seamReq(settingskeys.NavShortcuts, settingscontract.ScopeProfile))
+	if apiErr := requireSettingStatus(t, err, http.StatusBadRequest, "whole-document delete"); apiErr.Code != settingErrorAtomicRequired {
+		t.Fatalf("code = %q, want %q", apiErr.Code, settingErrorAtomicRequired)
+	}
+
+	if second, document := mustSetShortcut(t, handler, `{"type":"library","library_id":99,"label":"Shows"}`, true); second.Revision != 2 || len(document.Items) != 2 {
+		t.Fatalf("second shortcut = revision %d document %+v", second.Revision, document)
+	}
+
+	// Had the delete removed and recreated the row, its revision would return
+	// to one and this stale writer could pass an ABA-shaped precondition.
+	cas := store.(userstore.SettingValueCompareAndSetter)
+	if _, err := cas.CompareAndSetSettingValue(context.Background(), identity,
+		beforeDelete.Value, beforeDelete.Revision); !errors.Is(err, userstore.ErrSettingValueRevisionConflict) {
+		t.Fatalf("stale CAS after guarded delete error = %v, want revision conflict", err)
+	}
+}
+
+func TestNavigationShortcutMutationEnforcesDocumentCap(t *testing.T) {
+	handler, store := newValuesTestHandler(t)
+	items := make([]navigationShortcutItem, 0, 256)
+	for id := 1; id <= 256; id++ {
+		libraryID := id
+		items = append(items, navigationShortcutItem{Type: "library", LibraryID: &libraryID, Label: fmt.Sprintf("Library %d", id)})
+	}
+	raw, err := json.Marshal(navigationShortcutDocument{Items: items})
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, _ := handler.contract.Lookup(settingskeys.NavShortcuts)
+	normalized, err := def.ValueSchema.NormalizeValue(raw, settingscontract.ObjectSchemas())
+	if err != nil {
+		t.Fatalf("normalize seed: %v", err)
+	}
+	seed, err := store.UpsertSettingValue(context.Background(), navShortcutIdentity(), normalized)
+	if err != nil {
+		t.Fatalf("seed full catalog: %v", err)
+	}
+
+	_, _, err = setShortcut(t, handler, `{"type":"library","library_id":257,"label":"Too Many"}`, true)
+	if apiErr := requireSettingStatus(t, err, http.StatusBadRequest, "257th shortcut"); apiErr.Code != settingErrorInvalidValue {
+		t.Fatalf("code = %q, want %q", apiErr.Code, settingErrorInvalidValue)
+	}
+	got, err := store.GetSettingValue(context.Background(), navShortcutIdentity())
+	if err != nil || got == nil || got.Revision != seed.Revision {
+		t.Fatalf("catalog after rejected add = %+v, err=%v; want unchanged revision %d", got, err, seed.Revision)
+	}
+}
+
+func TestNavigationShortcutConcurrentAddsMerge(t *testing.T) {
+	baseHandler, baseStore := newValuesTestHandler(t)
+	wrapped := &synchronizedShortcutStore{
+		UserStore: baseStore,
+		cas:       baseStore.(userstore.SettingValueCompareAndSetter),
+		ready:     make(chan struct{}),
+	}
+	handler := NewSettingValuesHandler(testUserStoreProvider{store: wrapped}, baseHandler.contract)
+	items := []string{
+		`{"type":"library","library_id":42,"label":"Movies"}`,
+		`{"type":"library","library_id":99,"label":"Shows"}`,
+	}
+
+	errs := make(chan error, len(items))
+	for _, item := range items {
+		go func() {
+			_, err := handler.SetNavigationShortcut(t.Context(), seamUserID, "profile-1", json.RawMessage(item), true)
+			errs <- err
+		}()
+	}
+	for range items {
+		if err := <-errs; err != nil {
+			t.Fatalf("concurrent add: %v", err)
+		}
+	}
+
+	got, err := baseStore.GetSettingValue(context.Background(), navShortcutIdentity())
+	if err != nil || got == nil {
+		t.Fatalf("read merged catalog: value=%+v err=%v", got, err)
+	}
+	var document navigationShortcutDocument
+	if err := json.Unmarshal(got.Value, &document); err != nil {
+		t.Fatalf("decode merged catalog: %v", err)
+	}
+	if got.Revision != 2 || len(document.Items) != 2 {
+		t.Fatalf("merged catalog = revision %d items %+v, want both adds at revision 2", got.Revision, document.Items)
+	}
+}
+
+func TestSettingValuesRejectNonexistentLibraryContext(t *testing.T) {
+	handler, store := newValuesTestHandler(t)
+	handler.SetLibraryLookup(settingValuesLibraryLookup{existing: map[int]bool{7: true}})
+	ctx := seamCtx(t, "profile-1")
+	req := seamReq("playback.subtitle_language", settingscontract.ScopeProfileLibrary)
+	req.LibraryID = "99"
+
+	_, err := handler.GetSettingValue(ctx, seamUserID, req)
+	requireSettingStatus(t, err, http.StatusNotFound, "read at a nonexistent library")
+	_, err = handler.SetSettingValue(ctx, seamUserID, req, json.RawMessage(`"de"`))
+	requireSettingStatus(t, err, http.StatusNotFound, "write at a nonexistent library")
+	err = handler.DeleteSettingValue(ctx, seamUserID, req)
+	requireSettingStatus(t, err, http.StatusNotFound, "clear at a nonexistent library")
+
+	value, err := store.GetSettingValue(context.Background(), userstore.SettingIdentity{
+		Key: "playback.subtitle_language", Scope: settingscontract.ScopeProfileLibrary,
+		ProfileID: "profile-1", LibraryID: 99,
+	})
+	if err != nil || value != nil {
+		t.Fatalf("nonexistent library left value (%+v, %v)", value, err)
+	}
+
+	req.LibraryID = "7"
+	seamSet(t, ctx, handler, req, `"de"`)
+}
+
+// TestSettingWritesAreRefusedOutsideTheContract: the contract decides which
+// keys the server stores, at which scopes, and in what shape. A refused write
+// stores nothing.
+func TestSettingWritesAreRefusedOutsideTheContract(t *testing.T) {
+	for name, tc := range map[string]struct {
+		key, value string
+		scope      settingscontract.Scope
+		seriesID   string
+		libraryID  string
+		wantStatus int
+	}{
+		// The legacy endpoint stored any unregistered key as an unvalidated
+		// string, which is how untyped keys reached production.
+		"unknown key":                         {key: "totally.invented.key", value: `"x"`, scope: settingscontract.ScopeProfile, wantStatus: http.StatusNotFound},
+		"client-local key":                    {key: "downloads.wifi_only", value: `true`, scope: settingscontract.ScopeProfile, wantStatus: http.StatusBadRequest},
+		"scope the definition does not allow": {key: "ui.custom_css", value: `"body{}"`, scope: settingscontract.ScopeProfileDevice, wantStatus: http.StatusBadRequest},
+		"missing scope":                       {key: "playback.subtitle_mode", value: `"always"`, wantStatus: http.StatusBadRequest},
+		"library scope without library_id":    {key: "playback.subtitle_language", value: `"de"`, scope: settingscontract.ScopeProfileLibrary, wantStatus: http.StatusBadRequest},
+		"series scope without series_id":      {key: "playback.subtitle_language", value: `"de"`, scope: settingscontract.ScopeProfileSeries, wantStatus: http.StatusBadRequest},
+		"value outside the schema":            {key: "playback.subtitle_mode", value: `"sideways"`, scope: settingscontract.ScopeProfile, wantStatus: http.StatusBadRequest},
+		"library write":                       {key: "playback.subtitle_language", value: `"de"`, scope: settingscontract.ScopeProfileLibrary, libraryID: "7"},
+		"series write":                        {key: "playback.subtitle_language", value: `"ja"`, scope: settingscontract.ScopeProfileSeries, seriesID: "s1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			handler, store := newValuesTestHandler(t)
+			req := seamReq(tc.key, tc.scope)
+			req.LibraryID, req.SeriesID = tc.libraryID, tc.seriesID
+			_, err := handler.SetSettingValue(seamCtx(t, "profile-1"), seamUserID, req, json.RawMessage(tc.value))
+			if tc.wantStatus == 0 {
+				if err != nil {
+					t.Fatalf("write: %v", err)
+				}
+				return
+			}
+			requireSettingStatus(t, err, tc.wantStatus, "refused write")
+			if values, err := store.ListAllSettingValues(context.Background()); err != nil || len(values) != 0 {
+				t.Fatalf("refused write stored %+v (%v)", values, err)
+			}
+		})
+	}
+}
+
+// TestEffectiveResolutionRefusals: an effective read fails closed instead of
+// returning a plausible wrong answer. An unknown key would let a client fill
+// the gap with its own vendored default, and a device-aware key resolved
+// without a device would pass the profile fallback off as effective.
+func TestEffectiveResolutionRefusals(t *testing.T) {
+	handler, _ := newValuesTestHandler(t)
+	ctx := seamCtx(t, "profile-1")
+	noDevice := func(keys ...string) EffectiveSettingsQuery {
+		q := seamQuery(keys...)
+		q.Device = DeviceMetadata{}
+		return q
+	}
+	badFamily := seamQuery(settingskeys.UiCardPresentation)
+	badFamily.ClientFamily = "TV"
+
+	for name, tc := range map[string]struct {
+		query      EffectiveSettingsQuery
+		wantStatus int
+	}{
+		"unknown key":                     {query: seamQuery("playback.subtitle_mode", "totally.invented.key"), wantStatus: http.StatusNotFound},
+		"device-aware key without device": {query: noDevice("playback.subtitle_language"), wantStatus: http.StatusBadRequest},
+		"all keys without device":         {query: noDevice(), wantStatus: http.StatusBadRequest},
+		"invalid client family":           {query: badFamily, wantStatus: http.StatusBadRequest},
+		"profile-only key without device": {query: noDevice("ui.custom_css")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := handler.ResolveEffectiveSettings(ctx, seamUserID, tc.query)
+			if tc.wantStatus == 0 {
+				if err != nil {
+					t.Fatalf("resolve: %v", err)
+				}
+				return
+			}
+			apiErr := requireSettingStatus(t, err, tc.wantStatus, "refused resolve")
+			if tc.wantStatus == http.StatusNotFound && !strings.Contains(apiErr.Message, "totally.invented.key") {
+				t.Errorf("the error does not name the offending key: %s", apiErr.Message)
+			}
+		})
+	}
+}
+
+func TestPostEffectiveRejectsInvalidContexts(t *testing.T) {
+	handler, _ := newValuesTestHandler(t)
+	for name, contexts := range map[string][]EffectiveContextRequest{
+		"empty":           {},
+		"duplicate id":    {{ContextID: "x", SeriesID: "s1"}, {ContextID: "x", SeriesID: "s2"}},
+		"missing content": {{ContextID: "x"}},
+		"invalid library": {{ContextID: "x", LibraryID: json.RawMessage(`"nope"`)}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := handler.ResolveEffectiveSettingContexts(seamCtx(t, "profile-1"), seamUserID,
+				seamQuery("ui.custom_css"), contexts)
+			requireSettingStatus(t, err, http.StatusBadRequest, "invalid contexts")
+		})
+	}
+}
+
+// TestEffectiveClientFamilyIsOptionalButValidated: an absent family drops the
+// profile_client layer so older callers keep resolving broader fallbacks.
 func TestEffectiveClientFamilyIsOptionalButValidated(t *testing.T) {
 	handler, _ := newValuesTestHandler(t)
+	ctx := seamCtx(t, "profile-1")
 	key := settingskeys.UiCardPresentation
-	if rec := routeValues(t, handler, http.MethodPut, key, "scope=profile",
-		[]byte(`{"value":{"poster_size":"compact","caption":"title"}}`)); rec.Code != http.StatusOK {
-		t.Fatalf("seed profile fallback = %d: %s", rec.Code, rec.Body.String())
-	}
-	if rec := routeValues(t, handler, http.MethodPut, key, "scope=profile_client",
-		[]byte(`{"value":{"poster_size":"large","caption":"artwork"}}`)); rec.Code != http.StatusOK {
-		t.Fatalf("seed family value = %d: %s", rec.Code, rec.Body.String())
-	}
+	seamSet(t, ctx, handler, seamReq(key, settingscontract.ScopeProfile), `{"poster_size":"compact","caption":"title"}`)
+	seamSet(t, ctx, handler, seamReq(key, settingscontract.ScopeProfileClient), `{"poster_size":"large","caption":"artwork"}`)
 
-	effective := func(t *testing.T, family *string) (int, effectiveSettingValueResponse, string) {
+	absent := seamQuery(key)
+	absent.ClientFamily = ""
+	if got := seamEffective(t, ctx, handler, absent); got.Source != string(settingscontract.ScopeProfile) ||
+		string(got.Value) != `{"poster_size":"compact","caption":"title"}` {
+		t.Fatalf("effective without family = %s from %s, want profile fallback", got.Value, got.Source)
+	}
+	all := seamQuery()
+	all.ClientFamily = ""
+	if _, err := handler.ResolveEffectiveSettings(ctx, seamUserID, all); err != nil {
+		t.Fatalf("resolve all without client family: %v", err)
+	}
+	if got := seamEffective(t, ctx, handler, seamQuery(key)); got.Source != string(settingscontract.ScopeProfileClient) || got.ClientFamily != "web" {
+		t.Fatalf("effective with family = %s/%s, want profile_client/web", got.Source, got.ClientFamily)
+	}
+}
+
+// TestEffectiveAppliesViewerQualityCap: the access scope's MaxPlaybackQuality
+// becomes the resolver's ceiling, so a capped viewer resolves the cap, and the
+// authored preference survives untouched to take effect when the cap lifts.
+func TestEffectiveAppliesViewerQualityCap(t *testing.T) {
+	handler, store := newValuesTestHandler(t)
+	ctx := seamCtx(t, "profile-1")
+	seamSet(t, ctx, handler, seamReq("playback.preferred_quality", settingscontract.ScopeProfile), `"2160p"`)
+
+	effective := func(maxQuality string) EffectiveSettingValueView {
 		t.Helper()
-		req := valuesRequest(http.MethodGet, "/settings/values/effective?keys="+key, nil)
-		if family == nil {
-			req.Header.Del(clientFamilyHeader)
-		} else {
-			req.Header.Set(clientFamilyHeader, *family)
-		}
-		rec := httptest.NewRecorder()
-		handler.HandleGetEffective(rec, req)
-		if rec.Code != http.StatusOK {
-			return rec.Code, effectiveSettingValueResponse{}, rec.Body.String()
-		}
-		var body struct {
-			Settings []effectiveSettingValueResponse `json:"settings"`
-		}
-		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-			t.Fatalf("decode effective response: %v", err)
-		}
-		if len(body.Settings) != 1 {
-			t.Fatalf("settings = %d, want 1", len(body.Settings))
-		}
-		return rec.Code, body.Settings[0], rec.Body.String()
+		scoped := access.SetScope(ctx, access.Scope{UserID: 1, ProfileID: "profile-1", MaxPlaybackQuality: maxQuality})
+		return seamEffective(t, scoped, handler, seamQuery("playback.preferred_quality"))
 	}
 
-	t.Run("absent skips profile client layer", func(t *testing.T) {
-		code, got, body := effective(t, nil)
-		if code != http.StatusOK {
-			t.Fatalf("effective without client family = %d: %s", code, body)
-		}
-		if got.Source != string(settingscontract.ScopeProfile) || string(got.Value) != `{"poster_size":"compact","caption":"title"}` {
-			t.Fatalf("effective without family = %s from %s, want profile fallback", got.Value, got.Source)
-		}
-	})
+	got := effective("1080p")
+	if string(got.Value) != `"1080p"` || !got.Constrained || got.ConstraintKind != string(settingscontract.ConstraintCeiling) {
+		t.Errorf("capped effective = %s constrained=%v kind=%q, want \"1080p\"/true/ceiling",
+			got.Value, got.Constrained, got.ConstraintKind)
+	}
+	if string(got.StoredValue) != `"2160p"` || string(got.RequestedValue) != `"2160p"` {
+		t.Errorf("stored/requested = %s/%s, want the authored \"2160p\"", got.StoredValue, got.RequestedValue)
+	}
+	if got.ConstrainedBy == nil || got.ConstrainedBy.PolicyInput != policyInputMaxPlaybackQuality {
+		t.Errorf("constrained_by = %#v", got.ConstrainedBy)
+	}
 
-	t.Run("absent remains compatible with resolve all", func(t *testing.T) {
-		req := valuesRequest(http.MethodGet, "/settings/values/effective", nil)
-		req.Header.Del(clientFamilyHeader)
-		rec := httptest.NewRecorder()
-		handler.HandleGetEffective(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("resolve all without client family = %d: %s", rec.Code, rec.Body.String())
-		}
+	stored, err := store.GetSettingValue(context.Background(), userstore.SettingIdentity{
+		Key: "playback.preferred_quality", Scope: settingscontract.ScopeProfile, ProfileID: "profile-1",
 	})
+	if err != nil || stored == nil || string(stored.Value) != `"2160p"` {
+		t.Fatalf("stored row = %+v (%v), want \"2160p\" untouched", stored, err)
+	}
 
-	t.Run("valid selects profile client layer", func(t *testing.T) {
-		family := "web"
-		code, got, body := effective(t, &family)
-		if code != http.StatusOK {
-			t.Fatalf("effective with client family = %d: %s", code, body)
-		}
-		if got.Source != string(settingscontract.ScopeProfileClient) || got.ClientFamily != family {
-			t.Fatalf("effective with family = %s/%s, want profile_client/web", got.Source, got.ClientFamily)
-		}
-	})
+	if got = effective(""); string(got.Value) != `"2160p"` || got.Constrained || got.StoredValue != nil {
+		t.Errorf("uncapped effective = %s constrained=%v stored=%s, want \"2160p\" unconstrained",
+			got.Value, got.Constrained, got.StoredValue)
+	}
+}
 
-	t.Run("nonempty invalid is rejected", func(t *testing.T) {
-		family := "TV"
-		code, _, _ := effective(t, &family)
-		if code != http.StatusBadRequest {
-			t.Fatalf("effective with invalid client family = %d, want 400", code)
+// TestSettingAuthorityForOtherProfilesAndDevices: a request may name another
+// profile only as the household parent, and another device only when it
+// belongs to the addressed profile. Unknown ids answer 404 so the caller
+// learns nothing about ids elsewhere.
+func TestSettingAuthorityForOtherProfilesAndDevices(t *testing.T) {
+	type call int
+	const (
+		set call = iota
+		clearValue
+		resolve
+	)
+	for name, tc := range map[string]struct {
+		pin        string
+		acting     string
+		admin      bool
+		profileID  string
+		deviceID   string
+		op         call
+		wantStatus int
+		wantMsg    string
+		// wantRow is the (profile, device) a successful write lands on.
+		wantRow [2]string
+	}{
+		"write to a device the profile does not own":    {acting: "profile-1", deviceID: "device-someone-else", wantStatus: http.StatusNotFound},
+		"clear on a device the profile does not own":    {acting: "profile-1", deviceID: "device-someone-else", op: clearValue, wantStatus: http.StatusNotFound},
+		"resolve a device the profile does not own":     {acting: "profile-1", deviceID: "not-mine", op: resolve, wantStatus: http.StatusNotFound},
+		"non-primary names a sibling":                   {acting: "profile-2", profileID: "profile-1", deviceID: "device-1", wantStatus: http.StatusForbidden},
+		"non-primary resolves a sibling":                {acting: "profile-2", profileID: "profile-1", op: resolve, wantStatus: http.StatusForbidden},
+		"non-primary on an admin account":               {acting: "profile-2", admin: true, profileID: "profile-1", deviceID: "device-1", wantStatus: http.StatusForbidden},
+		"primary with an unverified PIN":                {pin: "1234", acting: "profile-1", profileID: "profile-2", deviceID: "robin-ipad", wantStatus: http.StatusForbidden, wantMsg: "PIN"},
+		"profile from another account":                  {acting: "profile-1", profileID: "someone-elses-profile", deviceID: "device-1", wantStatus: http.StatusNotFound},
+		"primary names a sibling with a foreign device": {acting: "profile-1", profileID: "profile-2", deviceID: "not-robins-device", wantStatus: http.StatusNotFound},
+		"primary writes a sibling's device":             {acting: "profile-1", profileID: "profile-2", deviceID: "robin-ipad", wantRow: [2]string{"profile-2", "robin-ipad"}},
+		"anyone may name their own profile":             {acting: "profile-2", profileID: "profile-2", deviceID: "robin-ipad", wantRow: [2]string{"profile-2", "robin-ipad"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			handler, store := newHouseholdValuesHandler(t, tc.pin)
+			ctx := seamCtx(t, tc.acting)
+			if tc.admin {
+				ctx = apimw.SetClaims(ctx, &auth.Claims{UserID: seamUserID, Role: "admin"})
+			}
+			const key = "player.hdr_enabled"
+			req := seamReq(key, settingscontract.ScopeProfileDevice)
+			req.ActiveProfileID, req.ProfileID, req.DeviceID = tc.acting, tc.profileID, tc.deviceID
+
+			var err error
+			switch tc.op {
+			case set:
+				_, err = handler.SetSettingValue(ctx, seamUserID, req, json.RawMessage(`false`))
+			case clearValue:
+				err = handler.DeleteSettingValue(ctx, seamUserID, req)
+			case resolve:
+				q := seamQuery("playback.subtitle_mode")
+				q.ActiveProfileID, q.ProfileID, q.DeviceID = tc.acting, tc.profileID, tc.deviceID
+				_, err = handler.ResolveEffectiveSettings(ctx, seamUserID, q)
+			}
+
+			if tc.wantStatus != 0 {
+				apiErr := requireSettingStatus(t, err, tc.wantStatus, "refused call")
+				if !strings.Contains(apiErr.Message, tc.wantMsg) {
+					t.Errorf("message %q does not mention %q", apiErr.Message, tc.wantMsg)
+				}
+				if got := storedDeviceIDFor(t, store, key); got != "" {
+					t.Errorf("refused call wrote a row on device %q", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("call: %v", err)
+			}
+			values, err := store.ListAllSettingValues(context.Background())
+			if err != nil || len(values) != 1 || values[0].ProfileID != tc.wantRow[0] || values[0].DeviceID != tc.wantRow[1] {
+				t.Fatalf("stored rows = %+v (%v), want one on %v", values, err, tc.wantRow)
+			}
+		})
+	}
+}
+
+// TestSettingWritesRegisterOnlyTheCallersOwnDevice: registration means "this
+// device is in use by this profile". A write aimed at another device, or made
+// on another profile's behalf, must not file the actor's device anywhere.
+func TestSettingWritesRegisterOnlyTheCallersOwnDevice(t *testing.T) {
+	for name, tc := range map[string]struct {
+		profileID, deviceID string
+		checkProfile        string
+	}{
+		"another device of the same profile": {deviceID: "apple-tv", checkProfile: "profile-1"},
+		"a sibling profile's device":         {profileID: "profile-2", deviceID: "robin-ipad", checkProfile: "profile-2"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			handler, store := newHouseholdValuesHandler(t, "")
+			registry := store.(userstore.DeviceRegistry)
+			if err := registry.RegisterDevice(context.Background(), userstore.DeviceEntry{
+				ProfileID: "profile-1", DeviceID: "apple-tv", DeviceName: "Apple TV",
+			}); err != nil {
+				t.Fatalf("registering apple-tv: %v", err)
+			}
+			req := seamReq("player.hdr_enabled", settingscontract.ScopeProfileDevice)
+			req.ProfileID, req.DeviceID = tc.profileID, tc.deviceID
+			seamSet(t, seamCtx(t, "profile-1"), handler, req, `false`)
+
+			exists, err := registry.DeviceExists(context.Background(), tc.checkProfile, "device-1")
+			if err != nil {
+				t.Fatalf("DeviceExists: %v", err)
+			}
+			if exists {
+				t.Errorf("registered the acting device-1 under %s", tc.checkProfile)
+			}
+		})
+	}
+}
+
+func TestSetValue_AuditsCrossProfileWrite(t *testing.T) {
+	handler, _ := newHouseholdValuesHandler(t, "")
+	audited := captureAuditLogs(t)
+
+	req := seamReq("playback.subtitle_mode", settingscontract.ScopeProfileDevice)
+	req.ProfileID, req.DeviceID = "profile-2", "robin-ipad"
+	seamSet(t, seamCtx(t, "profile-1"), handler, req, `"always"`)
+
+	records := audited()
+	if len(records) != 1 {
+		t.Fatalf("emitted %d audit records, want 1: %+v", len(records), records)
+	}
+	record := records[0]
+	if record["actor_profile_id"] != "profile-1" || record["target_profile_id"] != "profile-2" {
+		t.Errorf("actor/target = %v/%v, want profile-1/profile-2",
+			record["actor_profile_id"], record["target_profile_id"])
+	}
+	if record["setting_key"] != "playback.subtitle_mode" || record["device_id"] != "robin-ipad" {
+		t.Errorf("key/device = %v/%v", record["setting_key"], record["device_id"])
+	}
+	// Identity only: the value must never reach an operator's log.
+	for key, value := range record {
+		if text, ok := value.(string); ok && text == "always" {
+			t.Errorf("audit record leaked the value under %q", key)
 		}
-	})
+	}
+}
+
+// TestEffectiveContextsPreserveContextIDsAndRepeatedKeys: v2 echoes each
+// context_id exactly as sent and answers a repeated key once per mention.
+func TestEffectiveContextsPreserveContextIDsAndRepeatedKeys(t *testing.T) {
+	handler, _ := newValuesTestHandler(t)
+	keys := []string{"ui.custom_css", "ui.custom_css"}
+	contexts := []EffectiveContextRequest{{ContextID: " row-1 ", SeriesID: "s1"}, {ContextID: "row-1", SeriesID: "s2"}}
+	views, err := handler.ResolveEffectiveSettingContexts(t.Context(), seamUserID, EffectiveSettingsQuery{
+		ActiveProfileID: "profile-1", Keys: keys,
+	}, contexts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(views) != 2 {
+		t.Fatalf("contexts = %d", len(views))
+	}
+	for i, view := range views {
+		if view.ContextID != contexts[i].ContextID {
+			t.Fatalf("context id = %q, want %q", view.ContextID, contexts[i].ContextID)
+		}
+		if len(view.Settings) != 2 || view.Settings[0].Key != keys[0] || view.Settings[1].Key != keys[1] {
+			t.Fatalf("settings = %+v; want both requested keys in order", view.Settings)
+		}
+	}
 }
 
 func TestGetSettingValuesReportsSetAndUnsetAtOneScope(t *testing.T) {
@@ -1711,102 +951,19 @@ func TestGetSettingValuesReportsSetAndUnsetAtOneScope(t *testing.T) {
 		t.Fatalf("seeding explicit value: %v", err)
 	}
 
-	req := valuesRequest(http.MethodGet,
-		"/settings/values?keys=playback.subtitle_mode,playback.subtitle_language&scope=profile", nil)
-	rec := httptest.NewRecorder()
-	handler.HandleGetValues(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET collection = %d: %s", rec.Code, rec.Body.String())
+	views, err := handler.ListSettingValues(seamCtx(t, "profile-1"), seamUserID,
+		[]string{"playback.subtitle_mode", "playback.subtitle_language"},
+		seamReq("", settingscontract.ScopeProfile))
+	if err != nil {
+		t.Fatalf("list: %v", err)
 	}
-	var body struct {
-		Values   []map[string]any `json:"values"`
-		Revision int              `json:"revision"`
+	if len(views) != 2 {
+		t.Fatalf("values = %d, want 2", len(views))
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decoding collection: %v", err)
+	if views[0].Key != "playback.subtitle_mode" || !views[0].IsSet || string(views[0].Value) != `"always"` {
+		t.Errorf("stored entry = %+v", views[0])
 	}
-	if len(body.Values) != 2 {
-		t.Fatalf("values = %d, want 2: %s", len(body.Values), rec.Body.String())
-	}
-	if body.Values[0]["key"] != "playback.subtitle_mode" || body.Values[0]["is_set"] != true ||
-		body.Values[0]["value"] != "always" {
-		t.Errorf("stored entry = %#v", body.Values[0])
-	}
-	if body.Values[1]["key"] != "playback.subtitle_language" || body.Values[1]["is_set"] != false {
-		t.Errorf("unset entry = %#v", body.Values[1])
-	}
-	if _, present := body.Values[1]["value"]; present {
-		t.Errorf("unset entry contains value: %#v", body.Values[1])
-	}
-	contract, _ := settingscontract.Load()
-	if body.Revision != contract.Revision {
-		t.Errorf("contract revision = %d, want %d", body.Revision, contract.Revision)
-	}
-}
-
-// TestInvalidValuesAreRefusedByType covers what the string-only endpoint could
-// not check at all.
-func TestInvalidValuesAreRefusedByType(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-
-	for name, tc := range map[string]struct{ key, body string }{
-		"enum member":      {"playback.subtitle_mode", `{"value":"sideways"}`},
-		"integer range":    {"playback.next_up_prompt_seconds", `{"value":9999}`},
-		"wrong type":       {"playback.auto_skip_intro", `{"value":"yes"}`},
-		"quoted number":    {"playback.next_up_prompt_seconds", `{"value":"30"}`},
-		"bad language":     {"playback.subtitle_language", `{"value":"!!!"}`},
-		"object schema":    {"playback.subtitle_appearance", `{"value":{"fontSize":"enormous"}}`},
-		"null when not ok": {"playback.subtitle_mode", `{"value":null}`},
-	} {
-		t.Run(name, func(t *testing.T) {
-			rec := routeValues(t, handler, http.MethodPut, tc.key, "scope=profile", []byte(tc.body))
-			if rec.Code != http.StatusBadRequest {
-				t.Errorf("PUT %s = %d, want 400: %s", tc.body, rec.Code, rec.Body.String())
-			}
-		})
-	}
-}
-
-func TestPostEffectiveResolvesContentContexts(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-	for seriesID, value := range map[string]string{"s1": `"ja"`, "s2": `"de"`} {
-		if rec := routeValues(t, handler, http.MethodPut, "playback.subtitle_language",
-			"scope=profile_series&series_id="+seriesID,
-			[]byte(`{"value":`+value+`}`)); rec.Code != http.StatusOK {
-			t.Fatalf("seeding %s = %d: %s", seriesID, rec.Code, rec.Body.String())
-		}
-	}
-
-	body := []byte(`{
-		"keys":["playback.subtitle_language"],
-		"contexts":[
-			{"context_id":"first","library_id":"7","series_id":"s1"},
-			{"context_id":"second","library_id":7,"series_id":"s2"}
-		]
-	}`)
-	req := valuesRequest(http.MethodPost, "/settings/values/effective", body)
-	rec := httptest.NewRecorder()
-	handler.HandlePostEffective(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("POST effective = %d: %s", rec.Code, rec.Body.String())
-	}
-	var response struct {
-		Contexts []struct {
-			ContextID string                          `json:"context_id"`
-			Settings  []effectiveSettingValueResponse `json:"settings"`
-		} `json:"contexts"`
-		Revision int `json:"revision"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
-		t.Fatalf("decoding response: %v", err)
-	}
-	if len(response.Contexts) != 2 {
-		t.Fatalf("contexts = %d, want 2", len(response.Contexts))
-	}
-	if response.Contexts[0].ContextID != "first" ||
-		string(response.Contexts[0].Settings[0].Value) != `"ja"` ||
-		response.Contexts[1].ContextID != "second" ||
-		string(response.Contexts[1].Settings[0].Value) != `"de"` {
-		t.Errorf("context response = %#v", response.Contexts)
+	if views[1].Key != "playback.subtitle_language" || views[1].IsSet || views[1].Value != nil {
+		t.Errorf("unset entry = %+v", views[1])
 	}
 }

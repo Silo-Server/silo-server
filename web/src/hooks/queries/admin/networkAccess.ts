@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
+import { t } from "@/i18n";
+
 import {
   captureProfileRequestContext,
   isCapturedProfileAuthorityActive,
@@ -96,7 +98,6 @@ type NetworkAccessCommandIntent = NetworkAccessCommandRequest & {
  */
 function useNetworkAccessCommand(kind: "connect" | "disconnect") {
   const queryClient = useQueryClient();
-  const failed = kind === "connect" ? "Failed to connect" : "Failed to disconnect";
   const mutation = useMutation({
     retry: false,
     mutationFn: async (intent: NetworkAccessCommandIntent): Promise<NetworkAccessStatus> => {
@@ -129,7 +130,13 @@ function useNetworkAccessCommand(kind: "connect" | "disconnect") {
     onError: (err, intent) => {
       if (!intent.profileContext || !isCapturedProfileAuthorityActive(intent.profileContext))
         return;
-      toast.error(err instanceof Error ? err.message : failed);
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : kind === "connect"
+            ? t("web.admin.settings.hooks.networkAccess.connectFailed")
+            : t("web.admin.settings.hooks.networkAccess.disconnectFailed"),
+      );
     },
   });
   return {

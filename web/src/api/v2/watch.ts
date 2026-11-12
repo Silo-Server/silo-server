@@ -159,5 +159,7 @@ export function watchDetailFromV2(detail: WatchDetailV2): WatchDetail {
     effective_version_hdr: detail.effective_version_hdr,
     effective_version_codec_video: detail.effective_version_codec_video,
     effective_version_edition_key: detail.effective_version_edition_key,
+    backdrop_url: detail.backdrop_url || undefined,
+    backdrop_thumbhash: detail.backdrop_thumbhash || undefined,
   };
 }

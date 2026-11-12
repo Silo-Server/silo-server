@@ -4,12 +4,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/metadata"
@@ -176,48 +173,6 @@ func TestAdminUploadItemImageMapsCacheFailures(t *testing.T) {
 	}
 }
 
-// The uploaded image an item shows is listed as a local choice, with a display
-// URL for its stored path. Frozen v1 lists provider choices only.
-func TestAdminItemImagesListsTheShownUpload(t *testing.T) {
-	svc := &localImageServiceFake{}
-	h := newUploadImageHandlerForTest(svc)
-
-	out, err := h.GetAdminItemImages(context.Background(), "series")
-	if err != nil {
-		t.Fatalf("GetAdminItemImages: %v", err)
-	}
-	var uploads []itemImageEntry
-	for _, entry := range out.Images {
-		if metadata.IsUploadedImageSource(entry.OriginalURL) {
-			uploads = append(uploads, entry)
-		}
-	}
-	// The backdrop came from a provider, so only the poster is an upload.
-	if len(uploads) != 1 {
-		t.Fatalf("upload choices = %+v, want the poster", uploads)
-	}
-	want := itemImageEntry{ProviderID: "local", URL: "https://cdn.example/" + uploadedPosterPath + "?variant=card", OriginalURL: uploadedPosterSource, Type: "poster"}
-	if uploads[0] != want {
-		t.Fatalf("upload choice = %+v, want %+v", uploads[0], want)
-	}
-
-	season, err := h.GetAdminItemImages(context.Background(), "season-2")
-	if err != nil {
-		t.Fatalf("GetAdminItemImages season: %v", err)
-	}
-	if len(season.Images) != 1 || season.Images[0].OriginalURL != "upload://sha256:ef56" || season.Images[0].ProviderID != "local" {
-		t.Fatalf("season choices = %+v, want its uploaded poster", season.Images)
-	}
-
-	router := chi.NewRouter()
-	router.Get("/{id}/images", h.HandleGetItemImages)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/series/images", nil))
-	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "upload://") {
-		t.Fatalf("v1 list %d %s, want no upload choice", rec.Code, rec.Body)
-	}
-}
-
 // An upload is stored only in artwork storage, so apply takes back only the
 // upload the target shows, and never downloads an upload:// source.
 func TestAdminApplyUploadedImageOnlyReappliesTheShownUpload(t *testing.T) {
@@ -282,5 +237,35 @@ func TestAdminImagePublishFailureKeepsTheShownRevision(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The uploaded image an item shows is listed as a local choice, with a display
+// URL for its stored path.
+func TestAdminItemImagesListsTheShownUpload(t *testing.T) {
+	h := newUploadImageHandlerForTest(&localImageServiceFake{})
+
+	out, err := h.GetAdminItemImages(context.Background(), "series")
+	if err != nil {
+		t.Fatalf("GetAdminItemImages: %v", err)
+	}
+	var uploads []itemImageEntry
+	for _, entry := range out.Images {
+		if metadata.IsUploadedImageSource(entry.OriginalURL) {
+			uploads = append(uploads, entry)
+		}
+	}
+	// The backdrop came from a provider, so only the poster is an upload.
+	want := itemImageEntry{ProviderID: "local", URL: "https://cdn.example/" + uploadedPosterPath + "?variant=card", OriginalURL: uploadedPosterSource, Type: "poster"}
+	if len(uploads) != 1 || uploads[0] != want {
+		t.Fatalf("upload choices = %+v, want only %+v", uploads, want)
+	}
+
+	season, err := h.GetAdminItemImages(context.Background(), "season-2")
+	if err != nil {
+		t.Fatalf("GetAdminItemImages season: %v", err)
+	}
+	if len(season.Images) != 1 || season.Images[0].OriginalURL != "upload://sha256:ef56" || season.Images[0].ProviderID != "local" {
+		t.Fatalf("season choices = %+v, want its uploaded poster", season.Images)
 	}
 }

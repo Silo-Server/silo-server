@@ -6,18 +6,21 @@
 ./internal/catalog TestDualLibraryItemDeniedByDisabledLibraryDB
 ./internal/catalog TestEpisodeOpensUnderEveryLibraryOfItsSeriesDB
 ./internal/catalog TestCatalogQueryRequestedLibraryOutsideAccessDB
-./internal/catalog TestLibraryCollectionWithoutLibraryOverlapResolvesEmptyDB
+./internal/catalog TestLibraryCollectionDrawsFromItsRulesLibrariesDB
 ./internal/catalog TestLibraryCollectionReplaceItemsWritesOnlyTheDifferenceDB
 ./internal/catalog TestLibraryCollectionReplaceItemsRacesMemberDeleteDB
 ./internal/catalog TestCatalogManualCollectionCursorDB
 ./internal/catalog TestMixedCatalogMangaCounts
 ./internal/catalog TestContentRatingCeilingAcrossSystemsDB
 ./internal/catalog TestRatingsPageFollowsAccessDB
+./internal/catalog TestEpisodesAboveQualityCeilingStayHiddenPostgres
+./internal/sections TestEpisodeCardsSkipEpisodesAboveQualityCeilingPostgres
 ./internal/userstore/pgstore TestTitleAllowancesLiftProfileLimitsDB
 ./internal/catalog TestJellyfinPersonReadsMatchNativeVisibilityPostgres
 ./internal/recommendations TestRecentCompletedItemIDsGroupsSeriesBeforeLimit
 ./internal/sections TestCompatibilityRecentlyAddedReturnsFlatDistinctSeries
 ./internal/sections TestSectionsSkipItemsInNoLibraryPostgres
+./internal/sections TestPersonalSmartCollectionRowKeepsTheCollectionLimitPostgres
 ./internal/sections TestEpisodeCardsCarryParentArtworkPostgres
 ./internal/catalog TestCatalogQueryWithoutLibraryLeavesOutItemsInNoLibraryDB
 ./internal/catalog TestCountsAndListingsLeaveOutItemsHeldByRemovalGraceDB
@@ -28,6 +31,7 @@
 ./internal/audiobooks TestABSListsLeaveOutBooksInNoLibraryDB
 ./internal/api/handlers TestAdminStatsLeaveOutFilesAndItemsHeldByRemovalGraceDB
 ./internal/sections TestRuleRowsReadTheViewersWatchStatePostgres
+./internal/sections TestSmartCollectionRowWithDisplayFilterReadsTheViewersWatchStatePostgres
 ./internal/scanner TestFileRepositoryPreservesFirstSeenScanProvenance
 ./internal/scanner TestMultiEpisodeFileServesSpannedEpisodesDB
 ./internal/scanner TestScannedGroupForItemDB
@@ -40,6 +44,7 @@
 ./internal/scanner TestHDR10PlusBackfillLeavesARowRewrittenDuringTheReadDB
 ./internal/scanner TestHDR10PlusBackfillStopsWhenStorageStallsDB
 ./internal/scanner TestRescanKeepsHDR10PlusWhenTheFrameReadFailsDB
+./internal/scanner TestRescanKeepsSidecarsItCouldNotListDB
 ./internal/scanner TestScanStateCarriesProbeRejectionDB
 ./internal/scanner TestRescanKeepsProbeFactsOfARejectedUnchangedFileDB
 ./internal/scanner TestFinalizeVariantsKeepsMatchSuppressionDB
@@ -49,6 +54,15 @@
 ./internal/scanner TestScanIndexesFileWithNonUTF8Name
 ./migrations TestScanRunForeignKeysHaveLeadingIndexesDB
 
+# Locked season and episode fields survive refreshes, seed imports and a change of show.
+./internal/catalog TestSeasonEpisodeLockedFieldsSurviveUpsertsDB
+./internal/catalogseed TestSeedCarriesSeasonEpisodeLocksDB
+./internal/metadata TestIdentify_SeasonEpisodeLocksFollowTheShow
+./internal/metadata TestIdentify_SeasonEpisodeLocksClearOnEveryCorrectionPath
+./internal/metadata TestResetToProvider_SeasonAndEpisodeRows
+./internal/metadata TestResetToProvider_ItemRowClearsStoredLocks
+./internal/metadata TestResetToProvider_DoesNotFollowARebind
+
 # Movie box sets: grouping by viewer access and the minimum, grouped browse
 # and letters, search, sync bookkeeping, and collection artwork.
 ./internal/catalog TestBoxSetGroupsDB
@@ -56,6 +70,9 @@
 ./internal/catalog TestBoxSetCollectionsOfDisabledLibraryDB
 ./internal/catalog TestMovieBoxSetDB
 ./internal/catalog TestBoxSetCollectionArtworkDB
+
+# A corrected match empties an item's localized text, keeping locks and manual translations.
+./internal/catalog TestClearMatchTextDB
 
 # A watched special does not anchor Next Up for a series with regular seasons.
 ./internal/catalog TestNextUpSkipsSpecialAnchorsPostgres
@@ -95,6 +112,9 @@
 # caller but the web on Home and library pages, and clears with the hero.
 ./internal/api/handlers TestWebOnlyHeroRowsDB
 
+# The v2 aggregate Home and library section reads leave out rows the viewer has nothing in.
+./internal/api/handlers TestAggregateSectionsOmitRowsWithNoAccessibleItemsDB
+
 # Scan membership reconciliation retries a transaction Postgres aborts as a deadlock victim.
 ./internal/catalog TestFolderMembershipReconciliationRetriesDeadlockDB
 
@@ -109,6 +129,19 @@
 # A monitored rename of a book folder keeps the book: the old path is
 # reconciled first, and the removal grace holds the book for the new path.
 ./internal/scanner TestScanSubtreeAudiobookRenameKeepsBookDB
+
+# A full scan that holds a few files at a time catalogs a library like one that
+# holds them all: groups and roots spanning batches, a deleted top-level
+# folder, an unreadable folder and a dropped mount.
+./internal/scanner TestFullScanInBatchesCatalogsLikeOneBatchDB
+
+# A batched full scan finds the cataloged rows of extras, which it reads by
+# path after the primary files, instead of taking them for new files.
+./internal/scanner TestFullScanInBatchesFindsCatalogedExtrasDB
+
+# A batched full scan whose later batch read fails reconciles nothing: no file
+# is marked missing and no snapshot is rewritten from the partial walk.
+./internal/scanner TestFullScanInBatchesFailedReadReconcilesNothingDB
 
 # Stale membership removal locks the series before it deletes, in the order
 # curated rebind and split take them.
@@ -135,6 +168,7 @@
 ./internal/api/handlers TestClearResumePositionTargetsDB
 ./internal/api/handlers TestEbookProgressEventsPostgres
 ./internal/api/handlers TestRemoveHistoryHidesEpisodesWithoutLibraryFilePostgres
+./internal/api/handlers TestHistoryImportProfileAuthorizationDB
 ./internal/api/handlers TestParentUnwatchClearsEpisodesWithoutLibraryFilePostgres
 ./internal/api/handlers TestAudiobookMarkListenedPostgres
 ./internal/api/handlers TestAudiobookMarkListenedBoundariesPostgres
@@ -153,6 +187,10 @@
 ./internal/jellycompat TestRevokedCompatSessionStaysDeletedPostgres
 ./internal/jellycompat TestDurableCompatPlaybackStoreUpdateRejectionAcrossReplicas
 ./internal/jellycompat TestDurableCompatPlaybackStoreDropsRejectedPendingUpdate
+./internal/jellycompat TestDurableCompatPlaybackStoreRetiresUpstreamSessionAcrossReplicas
+./internal/jellycompat TestDurableCompatPlaybackStoreRetireLeavesMovedPlay
+./internal/jellycompat TestDurableCompatPlaybackStoreRetryAfterFailedStatement
+./internal/jellycompat TestDurableCompatPlaybackStoreRetireHidesCopyWhenReplayFails
 ./internal/jellycompat TestPseudoUserOwnerAcrossReplicasPostgres
 ./internal/invitations TestLinkInvitationLifecycleDB
 ./internal/invitations TestEmailedInvitationLinkReplacementDB
@@ -174,11 +212,13 @@
 ./internal/auth TestAPIKeyVerifierLegacyDigestCollision
 ./internal/auth TestAPIKeyVerifierMigrationRollback
 ./internal/auth TestAPIKeyVerifierDownSeesConcurrentInsert
-./internal/api/handlers TestAPIKeyLegacyListsAndEditorNeverReturnStoredSecret
-./internal/api/handlers TestAPIKeyCreationStillReturnsTheOnlyFullSecretResponse
+./internal/api/handlers TestAPIKeyEditorNeverReturnsStoredSecret
 
 # Minting a key for another account holds the Owner rules against a concurrent promotion.
 ./internal/api/handlers TestAdminAPIKeyCreationHoldsOwnerRulesAgainstPromotionDB
+
+# Deleting an account removes its personal collections' artwork.
+./internal/api/handlers TestAdminAccountDeleteRemovesCollectionArtworkDB
 
 # Recovery identity changes retire links and prevent delivery to a stale address.
 ./internal/passwordreset TestResetLinkRetiresOnRecoveryEmailChangeDB
@@ -223,6 +263,11 @@
 # Verification delivery survives a lost persistence receipt with bounded retries.
 ./internal/notifications TestEmailVerificationDispatchRetriesUncertainSendOnceWithSameMessage
 ./internal/notifications TestEmailVerificationDispatchStopsAfterSecondUncertainty
+
+# Two accounts' profiles with the same id keep separate email settings and
+# addresses, and the upgrade resets a row they shared instead of guessing.
+./internal/notifications TestEmailPrefsStayOnTheAccountDB
+./internal/notifications TestEmailPrefsAccountKeyMigrationResetsSharedRowsDB
 
 # Legacy mobile registration protects account ownership under the installation lock.
 ./internal/notifications TestLegacyMobilePushRefusesForeignAccountDB
@@ -428,6 +473,9 @@
 # Intro analysis state timestamps and config-hash isolation.
 ./internal/intromarkers TestSeasonStateIsKeyedByAnalysisHashPostgres
 
+# The nightly episode pass loads whole seasons a page at a time.
+./internal/intromarkers TestEligibleCandidatePagesHoldWholeSeasonsPostgres
+
 # Credits tail failures replace legacy metadata verdicts and back off.
 ./internal/intromarkers TestMovieTailFailureReplacesMetadataUnusableRowPostgres
 ./internal/mediaartifact TestArtifactFailureReplacesListedUnusableDetailsPostgres
@@ -465,6 +513,7 @@
 ./internal/api/handlers TestPlaybackLifecycleOrderAndStartStateDB
 ./internal/api/handlers TestLifecycleSweepSelectsWhatItCanEndDB
 ./internal/api/handlers TestLifecycleSweepPassesLiveJellyfinPlaysDB
+./internal/api/handlers TestLifecycleSweepBacksOffFailedEndsDB
 
 # Transactional administrator audit details and rollback isolation.
 ./internal/activitylog TestMutationCommitRollbackAndHistoryDB
@@ -571,6 +620,10 @@
 # returns its row.
 ./internal/api/handlers TestPluginListsKeepWorkingWithAnUnreadableArchiveDB
 
+# A refused automatic plugin update stays on its installation until it is
+# cleared or the installed version changes.
+./internal/plugins TestInstallationStoreUpdateFailureDB
+
 # Autoscan poll markers restart from now, and poll at once, only when the upstream changes.
 ./internal/autoscan TestUpdateSourceMarkerReset
 ./internal/autoscan TestUpdateConnectionMarkerReset
@@ -590,7 +643,7 @@
 # Recommendations: job locks, refresh marks, signal triggers, embedding lock and
 # reset, build-time access, exclusion set, profile purge, and section fill.
 ./internal/api/handlers TestLibrarySectionItemsAnswersAnErrorWhenTheFetchFailsDB
-./internal/api/handlers TestV1RecentlyAddedDropsInaccessibleItemsPostgres
+./internal/api/handlers TestRecentlyAddedItemsKeepsTheViewersLibrariesDB
 ./internal/api/handlers TestWatchedFilterDoesNotFallBackToPostgres
 ./internal/historyimport TestImportRunReportsSignalChangesOncePostgres
 ./internal/metadata TestMergeKeepsTheSourceEmbeddingPostgres
@@ -671,6 +724,10 @@
 ./internal/recommendations TestTopGenresRankByCrowdThenCatalogPostgres
 ./internal/recommendations TestTVLibrarySectionFillsFromTheMainRowTailPostgres
 ./internal/sections TestRecommendationSectionsTakeTheServedRowTitlePostgres
+./internal/sections TestSectionTitleKeysFollowServerTitlesPostgres
+./internal/apiv2 TestSectionTitleKeysOnRowReadsAndAdminSectionsDB
+./internal/apiv2 TestRecommendationRowTitleKeysDB
+./migrations TestTrendingOnServerTitleKeyMigrationPostgres
 
 # Banner, thumb, clear art, disc art and extra backdrops: the migration's Up
 # and Down, slot write-back, backdrop row identity and GC queueing, and the
@@ -726,6 +783,11 @@
 # values fails the run without allocating it.
 ./internal/historyimport TestImportRunReadsLargeSourcesWithinLimits
 ./internal/historyimport TestImportRunFailsOnExpandingSourceListing
+./internal/historyimport TestInterruptedRunResumesWithoutDuplicates
+./internal/historyimport TestMatchFailureRequeuesTheRun
+./internal/historyimport TestRejectedMatchValueStaysOnItsRecord
+./internal/historyimport TestStaleSweepRequeuesOnlyRunsThatCanContinue
+./internal/historyimport TestOnlyOneLargeImportSlot
 
 # Buffering quality: a learned limit expires after seven days, a reset keeps the
 # probe and plan summary, rows go with the device's last registration (in either
@@ -758,6 +820,10 @@
 # Server collections show a restricted viewer only the members it can open, and
 # leave out a collection whose members it can open none of (#2828).
 ./internal/api/handlers TestServerCollectionCountsFollowTheViewerDB
+
+# A scan that adds or removes titles refreshes the stored counts of the smart
+# collections drawing from that library, and only those (#3697).
+./internal/catalog TestSmartCountRefreshFollowsScannedLibraryDB
 
 # The household profile limit holds under concurrent creates (issue #2423).
 ./internal/api/handlers TestCreateProfileLimitConcurrentDB
@@ -887,6 +953,7 @@
 # a restored library whose setup partly failed, or whose provider placement
 # could not be read, reports it so it is retried without a fallback chain.
 ./internal/backup TestBackupRestoreRoundTripDB
+./internal/backup TestCarryOntoAnOlderKeyDropsSharedRowsDB
 ./internal/backup TestEncryptedS3RoundTripDB
 ./internal/backup TestFullRestoresAreSerializedDB
 ./internal/backup TestServerSpecificSettingsComeFromTheLiveServerDB

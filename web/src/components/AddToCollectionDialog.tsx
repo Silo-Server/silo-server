@@ -24,12 +24,13 @@ import {
 import { putCollectionItem } from "@/hooks/queries/collectionScope";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import {
-  ADD_TO_COLLECTION_FOOTNOTE,
+  addToCollectionFootnote,
   inCollections,
   madeButNotAdded,
   manualTitleCount,
 } from "@/lib/collections/copy";
 import { PERSONAL_SCOPE, type SavableDraft } from "@/lib/collections/scope";
+import { useT } from "@/i18n";
 
 interface AddToCollectionDialogProps {
   open: boolean;
@@ -60,20 +61,22 @@ export default function AddToCollectionDialog({
   mediaItemId,
   itemTitle,
 }: AddToCollectionDialogProps) {
+  const t = useT();
+  const title = itemTitle ?? t("web.collections.addToCollection.thisTitle");
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="gap-4 sm:max-w-[520px]">
         <DialogHeader>
-          <DialogTitle>Add to a collection</DialogTitle>
+          <DialogTitle>{t("web.collections.addToCollection.title")}</DialogTitle>
           <DialogDescription className="sr-only">
-            Tick a collection to add {itemTitle ?? "this title"} to it. Ticking saves right away.
+            {t("web.collections.addToCollection.description", { title })}
           </DialogDescription>
         </DialogHeader>
         {/* Mounted only while open and keyed by title, so each opening or title starts from the server's ticks. */}
         <AddToCollectionPanel
           key={mediaItemId}
           mediaItemId={mediaItemId}
-          itemTitle={itemTitle ?? "this title"}
+          itemTitle={title}
           onClose={() => onOpenChange(false)}
         />
       </DialogContent>
@@ -90,6 +93,7 @@ function AddToCollectionPanel({
   itemTitle: string;
   onClose: () => void;
 }) {
+  const t = useT();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { profile } = useCurrentProfile();
@@ -139,9 +143,9 @@ function AddToCollectionPanel({
       changed(id, true);
     } catch {
       toast.warning(madeButNotAdded(name, itemTitle), {
-        action: { label: "Try again", onClick: () => void addToNew(id, name) },
+        action: { label: t("common.tryAgain"), onClick: () => void addToNew(id, name) },
         cancel: {
-          label: "Open it",
+          label: t("web.collections.addToCollection.openIt"),
           onClick: () => void navigate(PERSONAL_SCOPE.paths.edit(id, { focus: "titles" })),
         },
       });
@@ -161,7 +165,9 @@ function AddToCollectionPanel({
     try {
       ({ id } = await PERSONAL_SCOPE.create(draft));
     } catch (error) {
-      toast.error(PERSONAL_SCOPE.errorMessage(error, "Couldn't make the collection"));
+      toast.error(
+        PERSONAL_SCOPE.errorMessage(error, t("web.collections.addToCollection.createFailed")),
+      );
       return false;
     }
     setQuery("");
@@ -175,7 +181,7 @@ function AddToCollectionPanel({
         <ItemChip title={itemTitle} />
         <p className="text-muted-foreground flex items-center justify-center gap-2 py-10 text-sm">
           <Loader2 aria-hidden className="size-4 animate-spin" />
-          Loading collections…
+          {t("web.collections.addToCollection.loading")}
         </p>
       </>
     );
@@ -186,14 +192,14 @@ function AddToCollectionPanel({
       <>
         <ItemChip title={itemTitle} />
         <div role="alert" className="grid justify-items-center gap-3 py-8 text-center">
-          <p className="font-semibold">Couldn't load your collections</p>
+          <p className="font-semibold">{t("web.collections.addToCollection.loadFailed")}</p>
           <Button variant="outline" onClick={() => void list.refetch()}>
-            Try again
+            {t("common.tryAgain")}
           </Button>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </Button>
         </DialogFooter>
       </>
@@ -209,27 +215,29 @@ function AddToCollectionPanel({
             <ListPlus aria-hidden className="size-5" />
           </span>
           <div className="grid gap-1">
-            <p className="font-semibold">Start your first collection</p>
+            <p className="font-semibold">{t("web.collections.addToCollection.firstTitle")}</p>
             <p className="text-muted-foreground text-sm">
-              Name it and {itemTitle} goes straight in. You can add more titles and change the order
-              later.
+              {t("web.collections.addToCollection.firstHelp", { title: itemTitle })}
             </p>
           </div>
           <NewCollectionForm onCreate={createAndAdd} className="w-full" />
         </div>
         <p className="text-muted-foreground text-sm">
-          Want one that fills itself?{" "}
-          <Link
-            to={PERSONAL_SCOPE.paths.create({ type: "smart" })}
-            onClick={onClose}
-            className="text-foreground underline underline-offset-2"
-          >
-            New smart collection
-          </Link>
+          {t("web.collections.addToCollection.wantSmart", {
+            link: (chunks) => (
+              <Link
+                to={PERSONAL_SCOPE.paths.create({ type: "smart" })}
+                onClick={onClose}
+                className="text-foreground underline underline-offset-2"
+              >
+                {chunks}
+              </Link>
+            ),
+          })}
         </p>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </Button>
         </DialogFooter>
       </>
@@ -242,13 +250,13 @@ function AddToCollectionPanel({
       <div className="relative">
         <Search
           aria-hidden
-          className="text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2"
+          className="text-muted-foreground absolute start-3 top-1/2 size-4 -translate-y-1/2"
         />
         <Input
           type="search"
-          aria-label="Find one of your collections"
-          placeholder="Find one of your collections"
-          className="h-10 pl-9"
+          aria-label={t("web.collections.addToCollection.find")}
+          placeholder={t("web.collections.addToCollection.find")}
+          className="h-10 ps-9"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
@@ -270,7 +278,7 @@ function AddToCollectionPanel({
           </ul>
         ) : (
           <p className="text-muted-foreground px-4 py-6 text-sm">
-            No collections match "{query.trim()}".
+            {t("web.collections.addToCollection.noMatches", { query: query.trim() })}
           </p>
         )}
         <div className="border-border grid grid-cols-[36px_minmax(0,1fr)] items-center gap-3 border-t px-4 py-3">
@@ -283,11 +291,11 @@ function AddToCollectionPanel({
           <NewCollectionForm onCreate={createAndAdd} labelled />
         </div>
       </div>
-      <p className="text-muted-foreground text-[13px]">{ADD_TO_COLLECTION_FOOTNOTE}</p>
+      <p className="text-muted-foreground text-[13px]">{addToCollectionFootnote()}</p>
       <DialogFooter className="items-center sm:justify-between">
         <p className="text-muted-foreground text-sm">{inCollections(tickedCount)}</p>
         <Button variant="outline" onClick={onClose}>
-          Done
+          {t("common.done")}
         </Button>
       </DialogFooter>
     </>
@@ -325,6 +333,7 @@ function CollectionChoice({
   onTick: (id: string, ticked: boolean) => void;
   onSaved: (id: string, ticked: boolean) => void;
 }) {
+  const t = useT();
   const boxId = useId();
   const metaId = useId();
   const add = useAddItemToCollection();
@@ -383,15 +392,16 @@ function CollectionChoice({
             {collection.is_shared ? (
               <span className="bg-info/10 text-info ring-info/30 inline-flex h-5 shrink-0 items-center gap-1 rounded-full px-2 text-[11px] font-semibold ring-1 ring-inset">
                 <Users aria-hidden className="size-3" />
-                Shared
+                {t("web.collections.tags.shared")}
               </span>
             ) : null}
           </span>
         </span>
-        <span role="status" className="text-success min-w-12 text-right text-xs font-semibold">
-          {flash}
+        <span role="status" className="text-success min-w-12 text-end text-xs font-semibold">
+          {flash === "Added" ? t("web.collections.addToCollection.added") : null}
+          {flash === "Removed" ? t("web.collections.addToCollection.removed") : null}
           {!flash && saving ? (
-            <Loader2 aria-hidden className="ml-auto size-3.5 animate-spin" />
+            <Loader2 aria-hidden className="ms-auto size-3.5 animate-spin" />
           ) : null}
         </span>
       </label>
@@ -410,6 +420,7 @@ function NewCollectionForm({
   labelled?: boolean;
   className?: string;
 }) {
+  const t = useT();
   const inputId = useId();
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -432,20 +443,20 @@ function NewCollectionForm({
         htmlFor={inputId}
         className={labelled ? "mb-1.5 block text-[13px] font-medium" : "sr-only"}
       >
-        New manual collection
+        {t("web.collections.addToCollection.newManual")}
       </label>
       <div className="flex gap-2">
         <Input
           id={inputId}
           value={name}
-          placeholder="e.g. Ghibli Night"
+          placeholder={t("web.collections.addToCollection.namePlaceholder")}
           autoComplete="off"
           className="h-10 min-w-0 flex-1"
           onChange={(event) => setName(event.target.value)}
         />
         <Button type="submit" className="h-10 gap-2" disabled={!trimmed || creating}>
           {creating ? <Loader2 aria-hidden className="size-4 animate-spin" /> : null}
-          Create and add
+          {t("web.collections.addToCollection.createAndAdd")}
         </Button>
       </div>
     </form>

@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import { SectionError } from "../feedback";
 import { useReportCollapsed } from "../widgetChrome";
 import { SessionProfilePill } from "./SessionProfilePill";
+import { useT } from "@/i18n";
 
 /**
  * Most cards the widget mounts at once. The widget shows only what fits, and a
@@ -36,6 +37,7 @@ const FIXED_ROWS_QUERY = "(min-width: 1024px)";
 const MORE_LINK_HEIGHT_PX = 24;
 
 export function NowPlayingWidget() {
+  const t = useT();
   const sessionsQuery = useAdminSessions();
   const sessions = sessionsQuery.data ?? [];
   const fixedRows = useMediaQuery(FIXED_ROWS_QUERY, true);
@@ -51,15 +53,17 @@ export function NowPlayingWidget() {
   if (isIdle) {
     return (
       <div className="flex h-full min-w-0 items-center gap-3">
-        <div className="shrink-0 text-base font-bold">Now Playing</div>
+        <div className="shrink-0 text-base font-bold">
+          {t("web.admin.dashboard.widgets.nowPlaying.title")}
+        </div>
         <div className="text-muted-foreground min-w-0 flex-1 truncate text-sm">
-          Nothing playing right now
+          {t("web.admin.dashboard.widgets.nowPlaying.idle")}
         </div>
         <Link
           to="/admin/activity"
           className="text-muted-foreground hover:text-primary shrink-0 text-[11px] transition-colors"
         >
-          View activity ›
+          {t("web.admin.dashboard.widgets.nowPlaying.viewActivity")}
         </Link>
       </div>
     );
@@ -68,13 +72,18 @@ export function NowPlayingWidget() {
   return (
     <div className="flex h-full flex-col">
       <div className="mb-3 flex shrink-0 items-center justify-between">
-        <div className="text-base font-bold">Now Playing</div>
+        <div className="text-base font-bold">
+          {t("web.admin.dashboard.widgets.nowPlaying.title")}
+        </div>
         {sessions.length > 0 && (
           <Link
             to="/admin/activity"
             className="text-muted-foreground hover:text-primary text-[11px] transition-colors"
           >
-            View all {sessions.length} streams ›
+            {t("web.admin.dashboard.widgets.nowPlaying.viewAll", {
+              count: sessions.length,
+              count_text: sessions.length,
+            })}
           </Link>
         )}
       </div>
@@ -88,7 +97,7 @@ export function NowPlayingWidget() {
             ))}
           </div>
         ) : sessionsQuery.error ? (
-          <SectionError message="Failed to load streams." />
+          <SectionError message={t("web.admin.dashboard.widgets.nowPlaying.loadFailed")} />
         ) : (
           /* The empty case never reaches here — it returned the collapsed strip
              above — so this branch always has at least one stream to show. */
@@ -124,7 +133,10 @@ export function NowPlayingWidget() {
                   fixedRows ? "absolute inset-x-0 bottom-0" : "mt-1",
                 )}
               >
-                +{sessions.length - visibleCount} more active streams
+                {t("web.admin.dashboard.widgets.nowPlaying.moreStreams", {
+                  count: sessions.length - visibleCount,
+                  count_text: sessions.length - visibleCount,
+                })}
               </Link>
             )}
           </>
@@ -225,15 +237,25 @@ function useFittedCardCount(cardCount: number) {
 // poster box has a fixed aspect ratio, so the card keeps the height the fit
 // measures either way.
 function StreamCard({ session, showPoster }: { session: AdminSession; showPoster: boolean }) {
+  const t = useT();
   const isEpisode =
     session.series_name && session.season_number != null && session.episode_number != null;
   const title = isEpisode
-    ? session.episode_name || `S${session.season_number}E${session.episode_number}`
-    : session.media_title || `File #${session.media_file_id}`;
-  const username = session.username || `User #${session.user_id}`;
+    ? session.episode_name ||
+      t("web.admin.dashboard.widgets.nowPlaying.episodeFallback", {
+        season: String(session.season_number),
+        episode: String(session.episode_number),
+      })
+    : session.media_title ||
+      t("web.admin.dashboard.widgets.nowPlaying.fileFallback", {
+        id: session.media_file_id,
+      });
+  const username =
+    session.username ||
+    t("web.admin.dashboard.widgets.nowPlaying.userFallback", { id: session.user_id });
   const elapsed = formatRelativeTime(session.started_at, {
     rounding: "floor",
-    justNowLabel: "Just now",
+    justNowLabel: t("web.admin.dashboard.widgets.nowPlaying.justNow"),
   });
   const position = formatPlaybackPosition(session);
   const clientLabel = getSessionClientLabel(session);
@@ -260,7 +282,7 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
           <div className="absolute inset-0 flex items-center justify-center bg-black/35">
             <div className="border-border/40 bg-background/90 text-foreground inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-semibold shadow-sm backdrop-blur">
               <Pause className="h-3 w-3" />
-              Paused
+              {t("web.admin.dashboard.widgets.nowPlaying.paused")}
             </div>
           </div>
         ) : null}
@@ -281,8 +303,16 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
               <div className="truncate text-sm font-bold">{title}</div>
             )}
             <div className="text-muted-foreground mb-1.5 truncate text-xs">
-              S{session.season_number} · E{session.episode_number}
-              {session.series_name ? ` — ${session.series_name}` : ""}
+              {session.series_name
+                ? t("web.admin.dashboard.widgets.nowPlaying.episodeLineWithSeries", {
+                    season: String(session.season_number),
+                    episode: String(session.episode_number),
+                    series: session.series_name,
+                  })
+                : t("web.admin.dashboard.widgets.nowPlaying.episodeLine", {
+                    season: String(session.season_number),
+                    episode: String(session.episode_number),
+                  })}
             </div>
           </>
         ) : (
@@ -299,7 +329,9 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
             )}
             {session.media_type && (
               <div className="text-muted-foreground mb-1.5 truncate text-xs">
-                {session.media_type === "movie" ? "Movie" : "Series"}
+                {session.media_type === "movie"
+                  ? t("web.admin.dashboard.widgets.nowPlaying.movie")
+                  : t("web.admin.dashboard.widgets.nowPlaying.series")}
               </div>
             )}
           </>
@@ -340,10 +372,11 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
             </div>
             <span className="min-w-0 truncate text-xs font-medium">{username}</span>
           </div>
-          <span className="text-muted-foreground ml-auto flex max-w-full min-w-0 flex-wrap justify-end gap-x-1.5 text-[10px]">
+          <span className="text-muted-foreground ms-auto flex max-w-full min-w-0 flex-wrap justify-end gap-x-1.5 text-[10px]">
             <span className="min-w-0 truncate tabular-nums" title={position}>
               {position}
             </span>
+            {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- punctuation separating two already-formatted times */}
             <span className="shrink-0">· {elapsed}</span>
           </span>
         </div>

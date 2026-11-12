@@ -332,7 +332,17 @@ export function useDashboardLayout(): DashboardLayout {
   }, []);
 
   // Send a queued write before this page goes away rather than dropping it.
-  useEffect(() => flushSave, [flushSave]);
+  // A reload or tab close inside the debounce window would otherwise lose it,
+  // and the next load would adopt the older server copy over the admin's last
+  // change. Layout saves use keepalive, so the request outlives the page.
+  useEffect(() => {
+    const flushOnPageHide = () => flushSave();
+    window.addEventListener("pagehide", flushOnPageHide);
+    return () => {
+      window.removeEventListener("pagehide", flushOnPageHide);
+      flushSave();
+    };
+  }, [flushSave]);
 
   // A different account while the hook stays mounted (impersonation starts or
   // ends without a remount) must not inherit the previous account's state: its

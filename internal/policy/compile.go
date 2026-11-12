@@ -178,11 +178,6 @@ const (
 	DomainAction     = "action"
 )
 
-// ValidDomain reports whether domain is a recognized custom policy domain.
-func ValidDomain(domain string) bool {
-	return validPolicyDomain(domain)
-}
-
 func validPolicyDomain(domain string) bool {
 	switch domain {
 	case DomainScope, DomainPermission, DomainAction:

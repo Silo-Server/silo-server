@@ -21,6 +21,8 @@ import {
 import { useAdminRequestCapabilities } from "@/hooks/queries/admin/requests";
 import { useDiscoverRows } from "@/hooks/queries/admin/useDiscoverRows";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { useT, type MessageKey } from "@/i18n";
+import { useHomeRowTitle } from "@/lib/sectionTitle";
 import type { HomeRow } from "@/lib/homeRows/types";
 import { EmptyPanel, RowsSkeleton } from "@/pages/admin-requests/queueParts";
 import { DiscoverRowDialog } from "@/pages/admin-requests/DiscoverRowDialog";
@@ -29,6 +31,7 @@ import {
   isBrandRow,
   isBuiltInRow,
   ROW_KINDS,
+  toHomeRow,
 } from "@/pages/admin-requests/discoverLayoutModel";
 
 /**
@@ -37,14 +40,15 @@ import {
  * dialog over the Discover layout, and every change saves right away.
  */
 export default function AdminRequestDiscover() {
-  useDocumentTitle("Discover Page - Admin");
+  const t = useT();
+  useDocumentTitle(t("web.admin.requests.discoverPage.documentTitle"));
   const capabilities = useAdminRequestCapabilities();
   if (capabilities.isLoading) return <RowsSkeleton />;
   if (!capabilities.data?.discover_layout) {
     return (
       <EmptyPanel
-        title="Discover page editing unavailable"
-        detail="This server can't change the Requests Discover page."
+        title={t("web.admin.requests.discoverPage.unavailable.title")}
+        detail={t("web.admin.requests.discoverPage.unavailable.detail")}
       />
     );
   }
@@ -63,40 +67,43 @@ function RestoreDefaultsDialog({
   onConfirm: () => void;
   onOpenChange: (open: boolean) => void;
 }) {
-  const bullets: Array<[LucideIcon, string]> = [
-    [Rows3, "The built-in rows and Studios, Networks and Genres come back, in their first order."],
-    [Trash2, "Rows you added are deleted."],
-    [RotateCcw, "The page follows Silo's defaults again until you change it."],
+  const t = useT();
+  const bullets: Array<[LucideIcon, MessageKey]> = [
+    [Rows3, "web.admin.requests.discoverPage.restore.builtInsBack"],
+    [Trash2, "web.admin.requests.discoverPage.restore.addedDeleted"],
+    [RotateCcw, "web.admin.requests.discoverPage.restore.followsDefaults"],
   ];
   return (
     <Dialog open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
       <DialogContent className="gap-5 sm:max-w-[560px]">
         <DialogHeader>
-          <DialogTitle>Restore Discover to the default rows?</DialogTitle>
+          <DialogTitle>{t("web.admin.requests.discoverPage.restore.title")}</DialogTitle>
           <DialogDescription>
-            Everyone&apos;s Discover page goes back to the rows Silo starts with.
+            {t("web.admin.requests.discoverPage.restore.description")}
           </DialogDescription>
         </DialogHeader>
         <ul
-          aria-label="What changes"
+          aria-label={t("web.admin.requests.discoverPage.restore.changesLabel")}
           className="text-foreground/85 m-0 grid list-none gap-2.5 p-0 text-sm leading-normal"
         >
           {bullets.map(([Icon, text]) => (
             <li key={text} className="grid grid-cols-[18px_1fr] gap-2.5">
               <Icon aria-hidden className="text-muted-foreground mt-[3px] size-4" />
-              <span>{text}</span>
+              <span>{t(text)}</span>
             </li>
           ))}
         </ul>
         <DialogFooter className="items-center sm:justify-between">
-          <p className="text-muted-foreground text-[13px]">This can&apos;t be undone.</p>
+          <p className="text-muted-foreground text-[13px]">
+            {t("web.admin.requests.discoverPage.restore.cannotUndo")}
+          </p>
           <div className="flex gap-2">
             <Button variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button variant="destructive" disabled={busy} onClick={onConfirm}>
               <RotateCcw />
-              Restore
+              {t("web.admin.requests.discoverPage.restore.confirm")}
             </Button>
           </div>
         </DialogFooter>
@@ -106,6 +113,8 @@ function RestoreDefaultsDialog({
 }
 
 function DiscoverLayoutEditor() {
+  const t = useT();
+  const rowTitle = useHomeRowTitle();
   const adapter = useDiscoverRows();
   const { layout, discoverRows } = adapter;
   const navigate = useNavigate();
@@ -148,15 +157,15 @@ function DiscoverLayoutEditor() {
   const moreItems: PageMoreMenuItem[] = [
     {
       key: "open",
-      label: "Open Discover",
-      help: "See the page as viewers do.",
+      label: t("web.admin.requests.discoverPage.more.open"),
+      help: t("web.admin.requests.discoverPage.more.openHelp"),
       icon: ExternalLink,
       onSelect: () => void navigate("/requests"),
     },
     {
       key: "restore",
-      label: "Restore defaults…",
-      help: "Put back the rows Discover starts with.",
+      label: t("web.admin.requests.discoverPage.more.restore"),
+      help: t("web.admin.requests.discoverPage.more.restoreHelp"),
       icon: RotateCcw,
       disabled: !adapter.canEdit || adapter.pending || !layout?.customized,
       onSelect: () => setRestoring(true),
@@ -167,7 +176,7 @@ function DiscoverLayoutEditor() {
     return [
       {
         key: "edit",
-        label: "Edit row…",
+        label: t("web.admin.requests.discoverPage.rowMenu.edit"),
         icon: Pencil,
         disabled: !adapter.canEdit,
         onSelect: () => openRow(row),
@@ -176,7 +185,7 @@ function DiscoverLayoutEditor() {
       shared.moveToBottom,
       {
         key: "delete",
-        label: "Delete row…",
+        label: t("web.admin.requests.discoverPage.rowMenu.delete"),
         icon: Trash2,
         destructive: true,
         group: true,
@@ -194,8 +203,8 @@ function DiscoverLayoutEditor() {
   return (
     <HomeRowsPage
       adapter={adapter}
-      title="Discover Page"
-      subtitle="The rows everyone sees on the Requests page's Discover tab, in order."
+      title={t("web.admin.requests.discoverPage.title")}
+      subtitle={t("web.admin.requests.discoverPage.subtitle")}
       focus={focus}
       pageSwitcher={false}
       describe={(row) => {
@@ -211,23 +220,28 @@ function DiscoverLayoutEditor() {
       notices={
         layout ? (
           <p className="text-muted-foreground max-w-3xl text-sm">
-            {layout.customized
-              ? "You've changed this page from the default."
-              : "This is the default layout, which follows Silo's defaults until you change it."}{" "}
-            Apps released before custom rows show only the trending and popular rows, merged into
-            two.
-            {full ? ` A page holds at most ${layout.max_rows} rows.` : null}
+            {[
+              layout.customized
+                ? t("web.admin.requests.discoverPage.notice.customized")
+                : t("web.admin.requests.discoverPage.notice.default"),
+              t("web.admin.requests.discoverPage.notice.olderApps"),
+              full
+                ? t("web.admin.requests.discoverPage.notice.full", { count: layout.max_rows })
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" ")}
           </p>
         ) : null
       }
     >
       <DeleteRowDialog
-        rowTitle={deleting?.title ?? ""}
-        pageLabel="Discover"
+        rowTitle={deleting ? rowTitle(toHomeRow(deleting)) : ""}
+        pageLabel={t("web.admin.requests.discover.pageName")}
         description={
           stockRow
-            ? "The row goes away from Discover for everyone. Add row can bring it back."
-            : "The row goes away from Discover for everyone."
+            ? t("web.admin.requests.discoverPage.delete.stockDescription")
+            : t("web.admin.requests.discoverPage.delete.description")
         }
         open={deleting !== null}
         conflict={false}

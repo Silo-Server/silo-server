@@ -24,8 +24,9 @@ import (
 
 // RecommendationRow is one recommendation row with its cards.
 type RecommendationRow struct {
-	Type  string        `json:"type" doc:"Row type: cluster, similar_users_liked, popular, recently_added, top_rated, genre_sampler" example:"cluster"`
-	Title string        `json:"title" doc:"Display label" example:"Because you enjoy Crime"`
+	Type  string `json:"type" doc:"Row type: cluster, similar_users_liked, popular, recently_added, top_rated, genre_sampler" example:"cluster"`
+	Title string `json:"title" doc:"Display label" example:"Because you enjoy Crime"`
+	SectionTitleKey
 	Kind  string        `json:"kind,omitempty" doc:"Section kind for getRecommendationSection; absent when the row has no dedicated page" example:"cluster"`
 	Key   string        `json:"key,omitempty" doc:"Section key paired with kind (cluster index or genre name)" example:"0"`
 	Items []CatalogItem `json:"items" doc:"Empty, never null"`
@@ -267,7 +268,20 @@ func (reg *Registry) recommendationsService() (RecommendationService, *Problem) 
 // recommendationRowOf renders a discover row; the cards are the shared
 // section card.
 func recommendationRowOf(v handlers.DiscoverRowView, sel ratingsources.Selection) RecommendationRow {
-	return RecommendationRow{Type: v.Type, Title: v.Label, Kind: v.SectionKind, Key: v.SectionKey, Items: catalogItemsOfSection(v.Items, sel)}
+	return recommendationRow(v.Type, v.Label, v.SectionKind, v.SectionKey, v.Items, sel)
+}
+
+// recommendationRow renders a recommendation row, keying its title when the
+// server worded it.
+func recommendationRow(rowType, label, kind, key string, items []handlers.SectionItemView, sel ratingsources.Selection) RecommendationRow {
+	return RecommendationRow{
+		Type:            rowType,
+		Title:           label,
+		SectionTitleKey: sectionTitleKeyOf(recommendations.ForYouRow{Type: rowType, Label: label}.TitleKey()),
+		Kind:            kind,
+		Key:             key,
+		Items:           catalogItemsOfSection(items, sel),
+	}
 }
 
 func catalogItemsOfSection(views []handlers.SectionItemView, sel ratingsources.Selection) []CatalogItem {
@@ -386,7 +400,7 @@ func (reg *Registry) getRecommendationSection(ctx context.Context, in *Recommend
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	return &RecommendationRowOutput{Body: RecommendationRow{Type: view.Type, Title: view.Label, Kind: view.Kind, Key: view.Key, Items: catalogItemsOfSection(view.Items, reg.ratingSelection(ctx))}}, nil
+	return &RecommendationRowOutput{Body: recommendationRow(view.Type, view.Label, view.Kind, view.Key, view.Items, reg.ratingSelection(ctx))}, nil
 }
 
 // invalidSectionKey explains why key cannot name a section of kind, or is
