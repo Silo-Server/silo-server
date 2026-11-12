@@ -82,8 +82,8 @@ review or a merge.
   maintainer reopens it, is closed without review. Publish or attach evidence
   soon after you open it.
 
-A workflow applies these rules when a pull request opens. Closing isn't a
-judgment of the work. If the problem still matters, open an issue for it, or
+A workflow applies these rules when a pull request opens and again when its
+title or description changes. Closing isn't a judgment of the work. If the problem still matters, open an issue for it, or
 post a feature idea in Ideas, and link the closed pull request; we may use the
 code as a reference. A maintainer who wants a closed pull request reopens it,
 and the workflow leaves it alone from then on, apart from the evidence deadline.
