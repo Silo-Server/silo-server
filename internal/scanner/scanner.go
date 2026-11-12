@@ -3040,9 +3040,15 @@ func (s *Scanner) processFile(
 		// A missing row may be a retitle's stand-in, and the file the one that
 		// left it; that row takes its path back before anything probes the
 		// file onto the stand-in.
-		if existing.MissingSince != nil &&
-			s.reclaimStandIn(ctx, folder, filePath, existing, fileSize, fileModifiedAt, assignment, groupAssignment, loadExternalSubs) {
-			return actionUpdated, []string{"moved"}, nil
+		if existing.MissingSince != nil {
+			reclaimed, err := s.reclaimStandIn(ctx, folder, filePath, existing, fileSize, fileModifiedAt, assignment, groupAssignment, loadExternalSubs)
+			if err != nil {
+				// Left for a later scan; see reclaimStandIn.
+				return 0, nil, err
+			}
+			if reclaimed {
+				return actionUpdated, []string{"moved"}, nil
+			}
 		}
 		currentExternalSubtitlePaths := externalSubtitleInfoPaths(loadExternalSubs())
 		updateReasons := scanStateUpdateReasons(existing, fileSize, fileModifiedAt, currentExternalSubtitlePaths, externalSubsChecked, assignment, groupAssignment, folder.Type, s.ffprobePath != "")

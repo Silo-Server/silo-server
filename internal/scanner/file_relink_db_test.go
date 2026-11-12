@@ -137,10 +137,36 @@ func TestScanKeepsFileRowAcrossRenameDB(t *testing.T) {
 			wantSameRow: true, wantLinks: true,
 		},
 		{
-			name:        "folder and file tagging different films rematch",
+			// Matching reads the folder's tag over the file's, as the scan
+			// stores the group's IDs.
+			name:        "a folder tag beats a file tag naming another film",
 			from:        "Movie (2020)/Movie (2020).mkv",
 			to:          "Movie (2020) {tmdb-{id}}/Movie (2020) {tmdb-{other}}.mkv",
+			wantSameRow: true, wantLinks: true,
+		},
+		{
+			// TMDB decides for a movie, so an unknown TVDB ID cannot move it.
+			name:        "movie tags with an unknown tvdb id keep its title",
+			from:        "Movie (2020)/Movie (2020).mkv",
+			to:          "Movie (2020) {tmdb-{id}} {tvdb-{other}}/Movie (2020).mkv",
+			wantSameRow: true, wantLinks: true,
+		},
+		{
+			// TVDB decides for a series, so a matching TMDB ID cannot hold it.
+			name:        "series tags whose tvdb id names another show rematch",
+			folderType:  "series",
+			from:        "Show/Season 1/Show S01E01.mkv",
+			to:          "Show {tvdb-{other}} {tmdb-{id}}/Season 1/Show S01E01.mkv",
 			wantSameRow: true,
+		},
+		{
+			// Matching gives a file under a claimed root to the root's title
+			// before it reads any name.
+			name:        "a rename into a root claimed for the title keeps it",
+			from:        "Movie (2020)/Movie (2020).mkv",
+			to:          "Other Film (2019)/Other Film (2019).mkv",
+			claimRoot:   "Other Film (2019)",
+			wantSameRow: true, wantLinks: true,
 		},
 		{
 			name:        "provider tag naming another title rematches",
@@ -231,6 +257,14 @@ func TestScanKeepsFileRowAcrossRenameDB(t *testing.T) {
 			wantSameRow: true,
 		},
 		{
+			name:        "revert that cannot read the old path waits for a later scan",
+			from:        "Movie (2020)/Movie (2020).mkv",
+			to:          "Other Film (2019)/Other Film (2019).mkv",
+			secondRoot:  true,
+			revert:      true,
+			wantSameRow: true,
+		},
+		{
 			name:         "revert after the trash sweep took the stand-in relinks the row",
 			from:         "Movie (2020)/Movie (2020).mkv",
 			to:           "Other Film (2019)/Other Film (2019).mkv",
@@ -307,6 +341,11 @@ type relinkCase struct {
 	// deleteOriginal deletes the retitled row, then puts the same bytes back
 	// at the stand-in's path.
 	deleteOriginal bool
+	// claimRoot is a content root claimed for the original row's title.
+	claimRoot string
+	// secondRoot puts to under a second library root, which the move leaves
+	// empty again on a revert.
+	secondRoot bool
 	// wantSameRow is whether the file at to keeps the original row, and
 	// wantLinks whether that row keeps its title links.
 	wantSameRow bool
@@ -449,13 +488,18 @@ func checkRelinkCase(t *testing.T, pool *pgxpool.Pool, tc relinkCase) {
 	}
 	folderID := seedDeadRootTestFolder(t, pool, tc.folderType, fmt.Sprintf("relink-%d", time.Now().UnixNano()))
 	folder := &models.MediaFolder{ID: folderID, Type: tc.folderType, Paths: []string{root}}
+	toRoot := root
+	if tc.secondRoot {
+		toRoot = t.TempDir()
+		folder.Paths = append(folder.Paths, toRoot)
+	}
 	repo := NewFileRepository(pool)
 	s := NewScanner(repo, "", nil, 2, false, time.Hour)
 	queue := &relinkQueue{}
 	s.SetMetadataQueueProducer(queue)
 
 	from := tc.path(root, tc.from)
-	to := tc.path(root, tc.to)
+	to := tc.path(toRoot, tc.to)
 	writeRelinkTestMedia(t, from, 1)
 	if tc.twin != "" {
 		twin := tc.path(root, tc.twin)
@@ -479,6 +523,12 @@ func checkRelinkCase(t *testing.T, pool *pgxpool.Pool, tc relinkCase) {
 		t.Fatalf("GetByPath(original): %v", err)
 	}
 	contentID, episodeID := seedRelinkTitle(t, pool, repo, tc, original)
+	if tc.claimRoot != "" {
+		if _, err := pool.Exec(ctx, `INSERT INTO media_item_roots (media_folder_id, canonical_root_path, content_id) VALUES ($1, $2, $3)`,
+			folderID, tc.path(root, tc.claimRoot), contentID); err != nil {
+			t.Fatalf("seed root claim: %v", err)
+		}
+	}
 	if tc.twin != "" {
 		if err := os.Remove(tc.path(root, tc.twin)); err != nil {
 			t.Fatal(err)
@@ -632,6 +682,9 @@ func checkRelinkRevert(t *testing.T, pool *pgxpool.Pool, s *Scanner, folder *mod
 	if err := os.Rename(to, from); err != nil {
 		t.Fatal(err)
 	}
+	if tc.secondRoot {
+		checkRelinkUndecidedRevert(t, pool, s, folder, original, from, to)
+	}
 	switch {
 	case tc.standInSwept:
 		standIn, err := s.fileRepo.GetByPath(ctx, from)
@@ -728,6 +781,29 @@ func processRelinkFile(t *testing.T, s *Scanner, folder *models.MediaFolder, fil
 		roots.Assignments[filePath], groups.Assignments[filePath], newExternalSubtitleDirCache(folder.Type)); err != nil {
 		t.Fatalf("processing %s: %v", filePath, err)
 	}
+}
+
+// checkRelinkUndecidedRevert scans a revert out of a root the move leaves
+// empty, the signature of a lost mount: the scan cannot tell a revert from a
+// copy and leaves both rows. A file in that root then lets the next scan
+// decide.
+func checkRelinkUndecidedRevert(t *testing.T, pool *pgxpool.Pool, s *Scanner, folder *models.MediaFolder, original *models.MediaFile, from, to string) {
+	t.Helper()
+	ctx := t.Context()
+	if err := os.Remove(filepath.Dir(to)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ScanFolder(ctx, folder); err != nil {
+		t.Fatalf("scan after the revert: %v", err)
+	}
+	standIn, err := s.fileRepo.GetByPath(ctx, from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if standIn.ID == original.ID || standIn.MissingSince == nil || relinkStandInFor(t, pool, standIn.ID) != original.ID {
+		t.Fatalf("undecided revert wrote the file onto its stand-in: row %d missing %v stand-in for %d", standIn.ID, standIn.MissingSince, relinkStandInFor(t, pool, standIn.ID))
+	}
+	writeRelinkTestMedia(t, filepath.Join(folder.Paths[1], "Keeper Two (2011)", "Keeper Two (2011).mkv"), 8)
 }
 
 // relocateRelinkFile moves (or copies) the scanned file from from to to and

@@ -91,33 +91,46 @@ fingerprint includes the source path. Marker thumbnail identities hash the
 path, so the relink rewrites them for the new path in the same update, and
 their trigger ignores a path change.
 
-Whether a row is the file depends only on its bytes and presence. A row
-qualifies when it is in the same library, has no extra link, and recorded the
-same size, OSHash, and modification time, and its old path is gone under a
-library root that answers and is not empty. One qualifying row is the file.
-When several qualify, the one whose old path parses to the same title as the
-new path (content group, filename hints such as season, episode, and air date,
-the episode range, and every provider ID tag on the path) is the file, but
-only when exactly one does; otherwise the file gets a new row, since picking
-between equal claims could hand one file's state to another. A copy whose
-original is still in place, a file under an offline or suspect-empty root,
-and a file whose bytes match no vanished row also get a new row.
+Whether a row is the file does not depend on what the path says about the
+title. A row qualifies when it is in the same library, has no extra link, and
+recorded the same size, OSHash, and modification time as the file, and its old
+path is gone under a library root that answers and is not empty. A file whose
+bytes are unchanged but whose modification time differs does not qualify. One
+qualifying row is the file. When several qualify, the one whose old path
+parses to the same title as the new path (content group, filename hints such
+as season, episode, and air date, the episode range, and every provider ID tag
+on the path) is the file, but only when exactly one does; otherwise the file
+gets a new row, since picking between equal claims could hand one file's
+state to another. A copy whose original is still in place, a file under an
+offline or suspect-empty root, and a file whose bytes match no vanished row
+also get a new row. Each library root is probed once per lookup, same-title
+rows are probed first, and probing stops once the pick is settled.
 
 What the new path says about the title decides the row's links:
 
 - **Same title.** The row keeps its links, as before. A row stored under an
   older group key scheme cannot be compared by key with the current scan's, so
   for it the path identity alone decides.
-- **Provider tags agreeing with the linked title.** The row keeps its links
-  when the provider ID tags on the new path (folder, file, or both, any of
-  `{tmdb-…}`, `{imdb-…}`, `{tvdb-…}`) agree with the provider IDs stored on
-  the title it is linked to: at least one tagged provider carries the title's
-  ID and none carries another. Tags that disagree with each other (a folder
-  naming one film and its file another) never agree. The movie or series must
-  be unchanged, and the path must still name the same season, episode, air
-  date, and episode range. The stored group and identity columns move to the
-  new key, as when a group key scheme changes in place, and detected markers
-  and marker thumbnails stay.
+- **Matching would find the linked title.** Otherwise the row keeps its links
+  exactly when matching the new path would link it to the title it is linked
+  to, as far as the catalog can tell without asking a provider. The scanner
+  follows matching's own order (`Scanner.matchKeepsLinkedTitle`): a confirmed
+  claim on the new content group, then on the new content root; for a series,
+  a title already linked to another file under the new observed root; then the
+  provider IDs the scan stores on the file's group (the folder's tags win and
+  the file's fill the rest, `naming.GroupIdentity`). With those, the first
+  catalog item they name counts when it is matched and agrees on the first ID
+  both carry in the type's anchor precedence (TMDB, IMDb, TVDB for a movie;
+  TVDB, TMDB, IMDb for a series; `catalog.IdentityProviderIDsContradict`), and
+  otherwise a matched item at the tags' anchored content ID. So `{tvdb-…}` or
+  `{imdb-…}` tags on a movie matched by TMDB keep its links, and a series whose
+  TVDB tag names another show is rematched even when its TMDB tag agrees. An
+  operator override on the new path or group, a series file directly in the
+  library root, a path with neither tags nor claims, and a different season,
+  episode, air date, or episode range all mean a rematch. The movie or series
+  must be unchanged. The stored group and identity columns move to the new
+  key, as when a group key scheme changes in place, and detected markers and
+  marker thumbnails stay.
 - **Another title.** Any other change (a different title, year, or tag, a
   corrected air date, a new episode range) retitles the row
   (`FileRepository.RetitleMovedFile`) and queues it like a new file, so
@@ -152,9 +165,14 @@ What the new path says about the title decides the row's links:
   leaves. A match that changes the row during the reclaim fails its fence, and
   the reclaim reads the row again and retries once. If the stand-in is gone by
   then (the trash sweep took it as the file came back), the row takes the free
-  path through the ordinary moved-file rules. Any other file at a stand-in's
-  path is written onto it like any file appearing at a missing row's path, and
-  stops being a stand-in. `stand_in_for_file_id` is a plain column, not a
+  path through the ordinary moved-file rules. A file that is certainly not the
+  stand-in's row (other bytes or modification time, or a copy whose original
+  is still in place) is written onto the stand-in like any file appearing at a
+  missing row's path, and the stand-in stops being one. When the scan cannot
+  tell (a database error, an old path under an unreachable or empty root, or a
+  row that changes under the fence twice), it fails that file and leaves both
+  rows for a later scan, since writing onto the stand-in would leave the row
+  missing for good. `stand_in_for_file_id` is a plain column, not a
   foreign key: ids are never reused, so a stand-in whose row was deleted only
   declines the reclaim, since the moved-file lookup cannot return that row.
 

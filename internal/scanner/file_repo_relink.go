@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -301,19 +302,62 @@ func (r *FileRepository) StandInFor(ctx context.Context, fileID int) (standInFor
 	return *id, true, nil
 }
 
-// ItemProviderIDs returns the provider IDs stored on a catalog item, and
-// whether the item exists.
-func (r *FileRepository) ItemProviderIDs(ctx context.Context, contentID string) (contentid.ProviderIDs, bool, error) {
-	var ids contentid.ProviderIDs
-	err := r.pool.QueryRow(ctx, `SELECT tmdb_id, imdb_id, tvdb_id FROM media_items WHERE content_id = $1`, contentID).
-		Scan(&ids.Tmdb, &ids.Imdb, &ids.Tvdb)
+// ItemIdentity returns the identity provider IDs matching compares a file's
+// tags with for a catalog item (its stored provider ID rows, with its TMDB,
+// TVDB and IMDb columns filling any it lacks), whether the item is matched,
+// and whether it exists.
+func (r *FileRepository) ItemIdentity(ctx context.Context, contentID string) (ids map[string]string, matched, found bool, err error) {
+	var tmdb, imdb, tvdb, status string
+	var rows map[string]string
+	err = r.pool.QueryRow(ctx, `
+		SELECT mi.tmdb_id, mi.imdb_id, mi.tvdb_id, mi.status,
+			COALESCE((
+				SELECT jsonb_object_agg(lower(p.provider), p.provider_id)
+				FROM media_item_provider_ids p
+				WHERE p.content_id = mi.content_id
+				  AND lower(p.provider) IN ('tmdb', 'tvdb', 'imdb')
+				  AND btrim(p.provider_id) <> ''
+			), '{}'::jsonb)
+		FROM media_items mi WHERE mi.content_id = $1`, contentID).Scan(&tmdb, &imdb, &tvdb, &status, &rows)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ids, false, nil
+		return nil, false, false, nil
 	}
 	if err != nil {
-		return ids, false, fmt.Errorf("reading item provider IDs: %w", err)
+		return nil, false, false, fmt.Errorf("reading item identity: %w", err)
 	}
-	return ids, true, nil
+	ids = map[string]string{contentid.ProviderTMDB: tmdb, contentid.ProviderIMDB: imdb, contentid.ProviderTVDB: tvdb}
+	for provider, value := range rows {
+		ids[provider] = value
+	}
+	return ids, strings.EqualFold(strings.TrimSpace(status), "matched"), true, nil
+}
+
+// ClaimedContentID returns the matched title that confirmed ownership gives a
+// file with this content group or content root, the first two steps of
+// matching: the group claim, then the root claim. It returns "" when neither
+// names a matched title.
+func (r *FileRepository) ClaimedContentID(ctx context.Context, folderID, groupKeyVersion int, contentGroupKey, canonicalRootPath string) (string, error) {
+	var contentID string
+	err := r.pool.QueryRow(ctx, `
+		SELECT claim.content_id FROM (
+			SELECT 1 AS rank, mig.content_id
+			FROM media_item_groups mig
+			WHERE mig.media_folder_id = $1 AND mig.group_key_version = $2 AND mig.content_group_key = $3 AND $3 <> ''
+			UNION ALL
+			SELECT 2, mir.content_id
+			FROM media_item_roots mir
+			WHERE mir.media_folder_id = $1 AND mir.canonical_root_path = $4 AND $4 <> ''
+		) claim
+		JOIN media_items mi ON mi.content_id = claim.content_id AND lower(btrim(mi.status)) = 'matched'
+		ORDER BY claim.rank
+		LIMIT 1`, folderID, groupKeyVersion, contentGroupKey, canonicalRootPath).Scan(&contentID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("reading content claims: %w", err)
+	}
+	return contentID, nil
 }
 
 // relinkWriteError reports a relink that lost the new path to another row as
