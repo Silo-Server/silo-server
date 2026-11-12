@@ -110,11 +110,12 @@ export default function LibraryPage() {
     [libraryType, searchParamsKey],
   );
 
-  // The Recommended tab's layout read starts here, beside the saved-state read
-  // the page waits on, not after it: on a first visit a server that stops
-  // answering then fails the tab one deadline after the click instead of two.
-  // This observer also refetches a failed layout when the tab is shown again.
-  useLibraryLayout(id, { enabled: Boolean(library) && activeTab === "recommended" });
+  // The Recommended tab's layout read starts here, beside the library-list and
+  // saved-state reads the page waits on, not after them: on a first visit a
+  // server that stops answering then fails the tab one deadline after the
+  // click instead of two. This observer also refetches a failed layout when
+  // the tab is shown again.
+  useLibraryLayout(id, { enabled: activeTab === "recommended" });
 
   // Tracks whether LibraryRecommended is currently rendering a hero banner.
   // We can't derive this from layout metadata alone — a featured section can
