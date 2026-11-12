@@ -1,7 +1,9 @@
 import { Link, Navigate } from "react-router";
 import { useUserLibraries } from "@/hooks/queries/libraries";
+import { useT } from "@/i18n";
 
 export default function HomeRedirect() {
+  const t = useT();
   const { data: libraries, isLoading } = useUserLibraries();
 
   if (isLoading) {
@@ -19,9 +21,9 @@ export default function HomeRedirect() {
 
   return (
     <div className="text-muted-foreground flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-      <p>No visible libraries are available right now.</p>
+      <p>{t("web.common.shell.noLibraries")}</p>
       <Link to="/settings/libraries" className="text-primary text-sm font-medium hover:underline">
-        Manage library visibility in Settings
+        {t("web.common.shell.manageLibraryVisibility")}
       </Link>
     </div>
   );

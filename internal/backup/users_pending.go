@@ -105,13 +105,24 @@ func (s *Service) previewUsers(ctx context.Context, rs *RestoreSet, serverID str
 	if _, err := tx.Exec(ctx, "SET LOCAL plan_cache_mode = force_custom_plan"); err != nil {
 		return nil, fmt.Errorf("opening a snapshot of the accounts: %w", err)
 	}
+	// Each comparison is one account's few thousand entries, run one after
+	// another for every account: launching parallel workers for one costs
+	// more than it saves (tens of milliseconds each on a busy server).
+	if _, err := tx.Exec(ctx, "SET LOCAL max_parallel_workers_per_gather = 0"); err != nil {
+		return nil, fmt.Errorf("opening a snapshot of the accounts: %w", err)
+	}
 	u := s.newUserPlanner(rs, tx, serverID, libMap)
 	u.pending = &pendingCompare{tx: tx, allowUnrated: allowUnrated, now: s.opts.Now(), phases: map[string]time.Duration{},
 		planner: s.newPlanner(rs, tx), adminCollections: map[string]string{}}
 	started := time.Now()
+	// The next accounts load on other cores while this one is compared.
+	loads := loadAhead(len(rs.Users), func(i int) int64 { return rs.Users[i].size }, func(i int) (*UserDocument, error) {
+		return rs.loadUser(rs.Users[i])
+	})
+	defer loads.close()
 	items := make([]PreviewItem, 0, len(rs.Users))
-	for _, ref := range rs.Users {
-		item, err := u.previewAccount(ctx, rs, ref)
+	for range rs.Users {
+		item, err := u.previewAccount(ctx, loads)
 		if err != nil {
 			return nil, err
 		}
@@ -121,11 +132,14 @@ func (s *Service) previewUsers(ctx context.Context, rs *RestoreSet, serverID str
 	return items, nil
 }
 
-// previewAccount loads and plans one account, decoding its large data
+// previewAccount plans the next loaded account, decoding its large data
 // documents ahead of their comparison.
-func (u *userPlanner) previewAccount(ctx context.Context, rs *RestoreSet, ref UserRef) (PreviewItem, error) {
+func (u *userPlanner) previewAccount(ctx context.Context, loads *aheadLoads[*UserDocument]) (PreviewItem, error) {
+	if err := ctx.Err(); err != nil {
+		return PreviewItem{}, err
+	}
 	started := time.Now()
-	doc, err := rs.loadUser(ref)
+	doc, err := loads.take()
 	u.pending.time("load", started)
 	if err != nil {
 		return PreviewItem{}, err

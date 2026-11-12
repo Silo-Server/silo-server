@@ -119,42 +119,6 @@ func (d queryFieldDef) allows(op string) bool {
 	return d.validOps[op] || (op == ruleOpNotInLast && d.validOps[ruleOpInLast])
 }
 
-// v2RuleFields are the rule fields added after /api/v1 froze. A v1 request
-// keeps the frozen vocabulary: these fields and not_in_last are refused there,
-// with the messages v1 gave them before they existed.
-var v2RuleFields = map[string]bool{
-	ruleFieldShowTitle:          true,
-	querySortTitle:              true,
-	ruleFieldDecade:             true,
-	querySortRuntime:            true,
-	querySortRatingTMDb:         true,
-	querySortRatingRTCritic:     true,
-	querySortRatingRTAudience:   true,
-	querySortLatestEpisodeAdded: true,
-	querySortLastAirDate:        true,
-}
-
-// ValidateV1Rules refuses a rule the frozen /api/v1 vocabulary lacks, with
-// the message QueryDefinition validation gave it there. input is anything
-// QueryBuilder.Build takes.
-func ValidateV1Rules(input any) error {
-	def, err := normalizeBuilderInput(input)
-	if err != nil {
-		return err
-	}
-	for i, group := range def.Groups {
-		for j, rule := range group.Rules {
-			if v2RuleFields[rule.Field] {
-				return fmt.Errorf("groups[%d].rules[%d].field %q is not supported", i, j, rule.Field)
-			}
-			if rule.Op == ruleOpNotInLast {
-				return fmt.Errorf("groups[%d].rules[%d].op %q is not supported for field %q", i, j, rule.Op, rule.Field)
-			}
-		}
-	}
-	return nil
-}
-
 // validateRuleValue rejects a value the SQL builder cannot use, so a malformed
 // span or a new field's malformed value fails validation instead of the
 // query that runs it.
@@ -470,6 +434,45 @@ func EncodeCollectionDefaultSort(qs QuerySort, ok bool) (string, error) {
 		return "", fmt.Errorf("encoding collection sort_config: %w", err)
 	}
 	return string(encoded), nil
+}
+
+// HasCompleteRule reports whether the definition holds a rule complete enough
+// to filter: a field, an operator and a filled-in value. With none, the query
+// matches every title, so a smart collection must have one. The web editor's
+// hasCompleteRule applies the same test before it saves.
+func (q QueryDefinition) HasCompleteRule() bool {
+	for _, group := range q.Groups {
+		for _, rule := range group.Rules {
+			if strings.TrimSpace(rule.Field) != "" && strings.TrimSpace(rule.Op) != "" && ruleValueFilled(rule.Value) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ruleValueFilled reports whether a rule's value is filled in: a blank string,
+// a missing value, or a range with an open end filters nothing yet. Numbers and
+// booleans, zero and false included, are values.
+func ruleValueFilled(value any) bool {
+	switch v := value.(type) {
+	case nil:
+		return false
+	case string:
+		return strings.TrimSpace(v) != ""
+	case []any:
+		if len(v) == 0 {
+			return false
+		}
+		for _, entry := range v {
+			if !ruleValueFilled(entry) {
+				return false
+			}
+		}
+		return true
+	default:
+		return true
+	}
 }
 
 func (q QueryDefinition) Normalize() QueryDefinition {

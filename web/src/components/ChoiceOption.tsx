@@ -61,7 +61,7 @@ export function ChoiceOption<T extends string>({
         <label htmlFor={id} className="block text-sm font-medium">
           {title}
         </label>
-        <div className="text-muted-foreground text-xs leading-relaxed">{children}</div>
+        <div className="text-muted-foreground text-xs leading-relaxed break-words">{children}</div>
       </div>
     </div>
   );

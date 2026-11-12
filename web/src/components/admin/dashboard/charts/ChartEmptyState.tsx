@@ -1,4 +1,5 @@
 import { Skeleton } from "@/components/ui/skeleton";
+import { useT } from "@/i18n";
 import { formatRelativeTime } from "@/lib/date";
 import { cn } from "@/lib/utils";
 
@@ -12,7 +13,7 @@ import { cn } from "@/lib/utils";
 export function ChartEmptyState({
   height = 160,
   fill = false,
-  message = "No data yet",
+  message,
   since,
   detail,
   className,
@@ -26,9 +27,14 @@ export function ChartEmptyState({
   detail?: string;
   className?: string;
 }) {
+  const t = useT();
   const collectingSince = since ? formatRelativeTime(since) : null;
-  const headline = collectingSince ? "Collecting data" : message;
-  const sub = collectingSince ? `Samples since ${collectingSince}` : detail;
+  const headline = collectingSince
+    ? t("web.admin.dashboard.chart.collectingData")
+    : (message ?? t("web.admin.dashboard.chart.noDataYet"));
+  const sub = collectingSince
+    ? t("web.admin.dashboard.chart.samplesSince", { since: collectingSince })
+    : detail;
 
   return (
     <div

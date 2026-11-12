@@ -15,8 +15,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
@@ -141,9 +139,6 @@ type createSectionRequest struct {
 	// ValidateRecipe runs the section type's own config check. Only /api/v2
 	// sets it; the frozen /api/v1 routes keep accepting what they always did.
 	ValidateRecipe bool `json:"-"`
-	// V1Rules keeps the frozen /api/v1 rule vocabulary: a rule on a field or
-	// with not_in_last that /api/v2 added is refused. Only /api/v1 sets it.
-	V1Rules bool `json:"-"`
 }
 
 type updateSectionRequest struct {
@@ -159,12 +154,6 @@ type updateSectionRequest struct {
 	WebOnly *bool `json:"-"`
 	// ValidateRecipe: see createSectionRequest.
 	ValidateRecipe bool `json:"-"`
-	// V1Rules: see createSectionRequest.
-	V1Rules bool `json:"-"`
-}
-
-type reorderSectionsRequest struct {
-	Entries []sections.ReorderEntry `json:"entries"`
 }
 
 type restoreDefaultsRequest struct {
@@ -189,6 +178,10 @@ type sectionResponse struct {
 	// WebOnly is answered by /api/v2 only; the frozen /api/v1 body has no
 	// such member.
 	WebOnly bool `json:"-"`
+	// TitleKey and TitleArgs are the stored row's; see
+	// sections.PageSection. Answered by /api/v2 only.
+	TitleKey  string            `json:"-"`
+	TitleArgs map[string]string `json:"-"`
 }
 
 type sectionListResponse struct {
@@ -210,11 +203,13 @@ func toSectionResponse(s *sections.PageSection) sectionResponse {
 		CreatedAt:   s.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:   s.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 		WebOnly:     s.WebOnly,
+		TitleKey:    s.TitleKey,
+		TitleArgs:   s.TitleArgs,
 	}
 }
 
 // validateSectionConfig checks config requirements for the given section type.
-func validateSectionConfig(sectionType sections.SectionType, config json.RawMessage, v1Rules bool) (string, bool) {
+func validateSectionConfig(sectionType sections.SectionType, config json.RawMessage) (string, bool) {
 	if sectionType == sections.SectionCollection {
 		collectionConfig := sections.ParseCollectionConfig(config)
 		if strings.TrimSpace(collectionConfig.LibraryCollectionID) == "" {
@@ -246,14 +241,8 @@ func validateSectionConfig(sectionType sections.SectionType, config json.RawMess
 		}
 	}
 	if sectionType == sections.SectionCustomFilter || sectionType == sections.SectionGenre || sectionType == sections.SectionRandom || len(config) > 0 {
-		def, err := sections.ParseQueryDefinition(config)
-		if err != nil {
+		if _, err := sections.ParseQueryDefinition(config); err != nil {
 			return err.Error(), false
-		}
-		if v1Rules {
-			if err := catalog.ValidateV1Rules(def); err != nil {
-				return err.Error(), false
-			}
 		}
 	}
 	return "", true
@@ -292,82 +281,6 @@ func validateSectionScope(scope string, libraryID *int) (string, bool) {
 
 // --- Admin CRUD endpoints ---
 
-// HandleListSections handles GET /admin/sections?scope=home&library_id=123
-func (h *SectionHandler) HandleListSections(w http.ResponseWriter, r *http.Request) {
-	scope := r.URL.Query().Get("scope")
-	if scope == "" {
-		scope = "home"
-	}
-
-	var libraryID *int
-	if lid := r.URL.Query().Get("library_id"); lid != "" {
-		v, err := strconv.Atoi(lid)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", "Invalid library_id")
-			return
-		}
-		libraryID = &v
-	}
-
-	list, err := h.ListAdminSections(r.Context(), scope, libraryID)
-	if err != nil {
-		writeAPIError(w, adminSectionServiceError(err))
-		return
-	}
-	writeJSON(w, http.StatusOK, sectionListResponse{Sections: list})
-}
-
-// HandleCreateSection handles POST /admin/sections
-func (h *SectionHandler) HandleCreateSection(w http.ResponseWriter, r *http.Request) {
-	var req createSectionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	req.V1Rules = true
-
-	resp, err := h.CreateAdminSection(r.Context(), req)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, resp)
-}
-
-// HandleUpdateSection handles PUT /admin/sections/{id}
-func (h *SectionHandler) HandleUpdateSection(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	var req updateSectionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, 400, "bad_request", "Invalid request body")
-		return
-	}
-	req.V1Rules = true
-	resp, err := h.UpdateAdminSection(r.Context(), id, req)
-	if err != nil {
-		writeAPIError(w, adminSectionServiceError(err))
-		return
-	}
-	writeJSON(w, 200, resp)
-}
-
-// HandleDeleteSection handles DELETE /admin/sections/{id}
-func (h *SectionHandler) HandleDeleteSection(w http.ResponseWriter, r *http.Request) {
-	if err := h.DeleteAdminSection(r.Context(), chi.URLParam(r, "id")); err != nil {
-		writeSectionDeleteError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func writeSectionDeleteError(w http.ResponseWriter, err error) {
-	if errors.Is(err, sections.ErrSectionNotFound) {
-		writeError(w, http.StatusNotFound, "not_found", "Section not found")
-		return
-	}
-	writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete section")
-}
-
 func (h *SectionHandler) deleteUnreferencedSectionManagedCollection(ctx context.Context, collectionID string) {
 	if collectionID == "" || h.CollectionRepo == nil {
 		return
@@ -382,21 +295,6 @@ func (h *SectionHandler) deleteUnreferencedSectionManagedCollection(ctx context.
 	if deleted && h.SortPreferenceCleaner != nil {
 		h.SortPreferenceCleaner.DeleteForCollection(ctx, userstore.CollectionKindLibrary, collectionID)
 	}
-}
-
-// HandleReorderSections handles PUT /admin/sections/reorder
-func (h *SectionHandler) HandleReorderSections(w http.ResponseWriter, r *http.Request) {
-	var req reorderSectionsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	if err := h.reorderLegacySections(r.Context(), req.Entries); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to reorder sections")
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // --- Batch section endpoints ---
@@ -452,10 +350,10 @@ type sectionItemResponse struct {
 	LogoURL                string                 `json:"logo_url,omitempty"`
 	OverlaySummary         *models.OverlaySummary `json:"overlay_summary,omitempty"`
 	// Availability is the series poster fraction. json:"-" because /api/v1 is frozen.
-	Availability *catalog.Availability `json:"-"`
-	Badges       []string              `json:"badges,omitempty"`
-	ItemSource   string                `json:"item_source,omitempty"`
-	UserState    *itemUserStateResponse `json:"user_state,omitempty"`
+	Availability  *catalog.Availability  `json:"-"`
+	Badges        []string               `json:"badges,omitempty"`
+	ItemSource    string                 `json:"item_source,omitempty"`
+	UserState     *itemUserStateResponse `json:"user_state,omitempty"`
 	UpcomingEvent *upcomingEventResponse `json:"upcoming_event,omitempty"`
 	// PendingTranslationLanguage and MachineTranslatedFields reach the v2
 	// card only; v1 is frozen.
@@ -493,6 +391,10 @@ type resolvedSectionResponse struct {
 	IsCustom    bool                  `json:"is_custom"`
 	Customized  bool                  `json:"customized"`
 	Items       []sectionItemResponse `json:"items"`
+	// TitleKey and TitleArgs are the section's; see
+	// sections.ResolvedSection. Only the v2 API carries them.
+	TitleKey  string            `json:"-"`
+	TitleArgs map[string]string `json:"-"`
 	// HasMore reports that a capped Home row read (SectionViewer.ItemLimitCap)
 	// answered fewer cards than the row holds. Only the v2 API carries it.
 	HasMore bool `json:"-"`
@@ -510,122 +412,14 @@ type resolvedSectionLayoutResponse struct {
 	ItemLimit   int    `json:"item_limit"`
 	IsCustom    bool   `json:"is_custom"`
 	Customized  bool   `json:"customized"`
+	// TitleKey and TitleArgs are the section's; see
+	// sections.ResolvedSection. Only the v2 API carries them.
+	TitleKey  string            `json:"-"`
+	TitleArgs map[string]string `json:"-"`
 }
 
 type homeLayoutResponse struct {
 	Sections []resolvedSectionLayoutResponse `json:"sections"`
-}
-
-type homeSectionItemsResponse struct {
-	Section resolvedSectionResponse `json:"section"`
-}
-
-// HandleHomeLayout handles GET /home/layout
-func (h *SectionHandler) HandleHomeLayout(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.HomeLayout(r.Context(), sectionViewerFromRequest(r))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// HandleLibraryLayout handles GET /library/{id}/layout
-func (h *SectionHandler) HandleLibraryLayout(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	libraryID, err := strconv.Atoi(idStr)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid library ID")
-		return
-	}
-
-	resp, err := h.LibraryLayout(r.Context(), libraryID, sectionViewerFromRequest(r))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// HandleHomeSections handles GET /home/sections
-func (h *SectionHandler) HandleHomeSections(w http.ResponseWriter, r *http.Request) {
-	if !rejectInvalidImageSize(w, r) {
-		return
-	}
-	resp, err := h.HomeSections(r.Context(), sectionViewerFromRequest(r))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// HandleHomeSectionItems handles GET /home/sections/{id}/items
-func (h *SectionHandler) HandleHomeSectionItems(w http.ResponseWriter, r *http.Request) {
-	if !rejectInvalidImageSize(w, r) {
-		return
-	}
-	sectionID := chi.URLParam(r, "id")
-	if sectionID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Section ID is required")
-		return
-	}
-
-	// The frozen v1 endpoint answers a section whose items cannot be fetched
-	// with no items; v2 answers the error.
-	section, err := h.homeSectionItems(r.Context(), sectionID, sectionViewerFromRequest(r), true)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, homeSectionItemsResponse{Section: section})
-}
-
-// HandleLibrarySections handles GET /library/{id}/sections
-func (h *SectionHandler) HandleLibrarySections(w http.ResponseWriter, r *http.Request) {
-	if !rejectInvalidImageSize(w, r) {
-		return
-	}
-	idStr := chi.URLParam(r, "id")
-	libraryID, err := strconv.Atoi(idStr)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid library ID")
-		return
-	}
-
-	resp, err := h.LibrarySections(r.Context(), libraryID, sectionViewerFromRequest(r))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// HandleLibrarySectionItems handles GET /library/{id}/sections/{sectionId}/items
-func (h *SectionHandler) HandleLibrarySectionItems(w http.ResponseWriter, r *http.Request) {
-	if !rejectInvalidImageSize(w, r) {
-		return
-	}
-	idStr := chi.URLParam(r, "id")
-	libraryID, err := strconv.Atoi(idStr)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid library ID")
-		return
-	}
-
-	sectionID := chi.URLParam(r, "sectionId")
-	if sectionID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Section ID is required")
-		return
-	}
-
-	// As on Home, v1 answers a failed fetch with no items.
-	section, err := h.librarySectionItems(r.Context(), libraryID, sectionID, sectionViewerFromRequest(r), true)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, homeSectionItemsResponse{Section: section})
 }
 
 // loadProfileSectionOverrides fails closed so a settings outage cannot restore
@@ -678,6 +472,9 @@ func (h *SectionHandler) loadResolvedHomeSections(ctx context.Context) ([]sectio
 		accessFilter.AllowedLibraryIDs = scope.AllowedLibraryIDs
 		accessFilter.DisabledLibraryIDs = scope.DisabledLibraryIDs
 		accessFilter.MaturityLimits = scope.MaturityLimits
+		// Next Up and recently added TV leave out episodes with no version
+		// within the playback-quality ceiling.
+		accessFilter.MaxPlaybackQuality = scope.MaxPlaybackQuality
 	} else if h.UserRepo != nil {
 		// Fail closed: an unresolved policy must not serve unrestricted
 		// sections, so a lookup failure becomes an error for the caller
@@ -738,18 +535,15 @@ func (h *SectionHandler) loadResolvedLibrarySections(ctx context.Context, librar
 		accessFilter.AllowedLibraryIDs = scope.AllowedLibraryIDs
 		accessFilter.DisabledLibraryIDs = scope.DisabledLibraryIDs
 		accessFilter.MaturityLimits = scope.MaturityLimits
+		// Next Up and recently added TV leave out episodes with no version
+		// within the playback-quality ceiling.
+		accessFilter.MaxPlaybackQuality = scope.MaxPlaybackQuality
 	}
 
 	return resolved, accessFilter, profileID, nil
 }
 
 // --- Profile override endpoints ---
-
-type saveOverridesRequest struct {
-	Scope     string                 `json:"scope"`
-	LibraryID string                 `json:"library_id"`
-	Overrides []SectionOverrideWrite `json:"overrides"`
-}
 
 // SectionOverrideWrite is one override as a client sends it: the v1 PUT
 // /profile/sections member shape, which v2 replaceProfileSectionOverrides
@@ -769,25 +563,6 @@ type SectionOverrideWrite struct {
 	UserSectionType string          `json:"user_section_type,omitempty"`
 	UserConfig      json.RawMessage `json:"user_config,omitempty"`
 	UserTitle       string          `json:"user_title,omitempty"`
-}
-
-// HandleGetProfileOverrides handles GET /profile/sections?scope=home
-func (h *SectionHandler) HandleGetProfileOverrides(w http.ResponseWriter, r *http.Request) {
-	profileID := apimw.GetProfileID(r.Context())
-	userID := apimw.GetUserID(r.Context())
-
-	scope := r.URL.Query().Get("scope")
-	if scope == "" {
-		scope = "home"
-	}
-	libraryID := r.URL.Query().Get("library_id")
-
-	overrides, err := h.ListProfileOverrides(r.Context(), SectionOverridesQuery{UserID: userID, ProfileID: profileID, Scope: scope, LibraryID: libraryID})
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string][]userstore.SectionOverride{"overrides": overrides})
 }
 
 // SectionOverridesQuery names one profile's override set: the profile, the
@@ -859,29 +634,6 @@ func (h *SectionHandler) listProfileOverrides(ctx context.Context, q SectionOver
 		}
 	}
 	return overrides, nil
-}
-
-// HandleSaveProfileOverrides handles PUT /profile/sections
-func (h *SectionHandler) HandleSaveProfileOverrides(w http.ResponseWriter, r *http.Request) {
-	profileID := apimw.GetProfileID(r.Context())
-	userID := apimw.GetUserID(r.Context())
-
-	var req saveOverridesRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	if req.Scope == "" {
-		req.Scope = "home"
-	}
-
-	if err := h.SaveProfileOverrides(r.Context(), SectionOverridesQuery{UserID: userID, ProfileID: profileID, Scope: req.Scope, LibraryID: req.LibraryID}, req.Overrides); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // adminOnlyRecipeError refuses a new section of an admin-only recipe
@@ -1153,25 +905,6 @@ func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOver
 	return nil
 }
 
-// HandleResetProfileOverrides handles DELETE /profile/sections/reset?scope=home
-func (h *SectionHandler) HandleResetProfileOverrides(w http.ResponseWriter, r *http.Request) {
-	profileID := apimw.GetProfileID(r.Context())
-	userID := apimw.GetUserID(r.Context())
-
-	scope := r.URL.Query().Get("scope")
-	if scope == "" {
-		scope = "home"
-	}
-	libraryID := r.URL.Query().Get("library_id")
-
-	if err := h.ResetProfileOverrides(r.Context(), SectionOverridesQuery{UserID: userID, ProfileID: profileID, Scope: scope, LibraryID: libraryID}); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
 // ResetProfileOverrides deletes the profile's override set for one page.
 // v1 DELETE /profile/sections/reset and v2 resetProfileSectionOverrides both
 // call it; a failure is an *APIError carrying the v1 status, code and message.
@@ -1195,64 +928,6 @@ func (h *SectionHandler) resetProfileOverrides(ctx context.Context, q SectionOve
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to reset overrides")
 	}
 	return nil
-}
-
-// HandleSectionSettings handles GET /profile/sections/settings?scope=home&library_id=123
-func (h *SectionHandler) HandleSectionSettings(w http.ResponseWriter, r *http.Request) {
-	profileID := apimw.GetProfileID(r.Context())
-	userID := apimw.GetUserID(r.Context())
-
-	scope := r.URL.Query().Get("scope")
-	if scope == "" {
-		scope = "home"
-	}
-
-	var libIDPtr *int
-	if lid := r.URL.Query().Get("library_id"); lid != "" {
-		v, err := strconv.Atoi(lid)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", "Invalid library_id")
-			return
-		}
-		libIDPtr = &v
-	}
-
-	resolved, err := h.ResolveProfileSectionSettings(r.Context(), userID, profileID, scope, libIDPtr, requestAccessFilter(r))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	type settingsEntry struct {
-		ID          string          `json:"id"`
-		SectionType string          `json:"section_type"`
-		Title       string          `json:"title"`
-		Featured    bool            `json:"featured"`
-		ItemLimit   int             `json:"item_limit"`
-		Hidden      bool            `json:"hidden"`
-		IsCustom    bool            `json:"is_custom"`
-		Customized  bool            `json:"customized"`
-		Position    int             `json:"position"`
-		Config      json.RawMessage `json:"config,omitempty"`
-	}
-
-	entries := make([]settingsEntry, 0, len(resolved))
-	for _, s := range resolved {
-		entries = append(entries, settingsEntry{
-			ID:          s.ID,
-			SectionType: string(s.SectionType),
-			Title:       s.Title,
-			Featured:    s.Featured,
-			ItemLimit:   s.ItemLimit,
-			Hidden:      s.Hidden,
-			IsCustom:    s.IsCustom,
-			Customized:  s.Customized,
-			Position:    s.Position,
-			Config:      s.Config,
-		})
-	}
-
-	writeJSON(w, http.StatusOK, map[string][]settingsEntry{"sections": entries})
 }
 
 // ResolveProfileSectionSettings merges the admin sections of one page with
@@ -1358,13 +1033,28 @@ func applyDiversityFilter(withItems []sections.SectionWithItems) []sections.Sect
 }
 
 // dropEmptySeasonalSections removes seasonal_themed sections that produced
-// no items so the home page doesn't render an empty row off-season. Called
-// from the aggregate handlers; per-section endpoints still return empty
-// seasonal sections when explicitly requested by ID.
+// no items so the home page doesn't render an empty row off-season. The frozen
+// v1 aggregate handlers use it; v2 drops every empty section instead.
 func dropEmptySeasonalSections(withItems []sections.SectionWithItems) []sections.SectionWithItems {
 	out := withItems[:0]
 	for _, w := range withItems {
 		if w.SectionType == sections.SectionSeasonalThemed && len(w.Items) == 0 {
+			continue
+		}
+		out = append(out, w)
+	}
+	return out
+}
+
+// dropEmptySections removes every section that produced no items, so the v2
+// aggregate Home and library reads never answer a row the viewer cannot fill:
+// one whose titles all sit outside their access, an off-season seasonal row,
+// or a row whose fetch failed. The per-section endpoints still answer an empty
+// section when it is asked for by ID.
+func dropEmptySections(withItems []sections.SectionWithItems) []sections.SectionWithItems {
+	out := withItems[:0]
+	for _, w := range withItems {
+		if len(w.Items) == 0 {
 			continue
 		}
 		out = append(out, w)
@@ -1394,13 +1084,6 @@ type episodeParentImageURLs struct {
 	seriesBackdropURL string
 	seasonPosterURL   string
 	seasonBackdropURL string
-}
-
-// buildSectionsResponse renders resolved sections. libraryID carries the
-// already-validated library scope of library-scoped endpoints (nil for the
-// home/profile surfaces) so play-target resolution stays scoped to it.
-func (h *SectionHandler) buildSectionsResponse(r *http.Request, withItems []sections.SectionWithItems, libraryID *int) homeSectionsResponse {
-	return h.buildSections(r.Context(), withItems, libraryID, requestAccessFilter(r), requestArtwork(r), false)
 }
 
 // buildSections renders sections for a viewer described by its context,
@@ -1510,6 +1193,8 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 			IsCustom:    s.IsCustom,
 			Customized:  s.Customized,
 			Items:       items,
+			TitleKey:    s.TitleKey,
+			TitleArgs:   s.TitleArgs,
 		})
 	}
 	if includeAvailability {
@@ -2060,13 +1745,6 @@ func (h *SectionHandler) listSectionItemUserStates(ctx context.Context, items []
 	return states
 }
 
-func (h *SectionHandler) sectionPresignURL(r *http.Request, path string, variant string) string {
-	if h.DetailSvc != nil {
-		return h.DetailSvc.PresignURL(r.Context(), path, variant)
-	}
-	return ""
-}
-
 // maybeInjectNextUp injects a SectionNextUp entry after SectionContinueWatching
 // if the profile's ui.next_up_mode setting resolves to "separate".
 func (h *SectionHandler) maybeInjectNextUp(ctx context.Context, resolved []sections.ResolvedSection, userID int) []sections.ResolvedSection {
@@ -2096,6 +1774,7 @@ func injectNextUpSection(resolved []sections.ResolvedSection) []sections.Resolve
 		ID:          "system-next-up",
 		SectionType: sections.SectionNextUp,
 		Title:       "Next Up",
+		TitleKey:    sections.TitleKeyNextUp,
 		ItemLimit:   20,
 	}
 
@@ -2167,23 +1846,6 @@ func toSectionOverrides(storeOverrides []userstore.SectionOverride) []sections.P
 		}
 	}
 	return result
-}
-
-// HandleRestoreDefaults handles POST /admin/sections/restore-defaults.
-// It replaces all sections for a scope with the canonical defaults.
-func (h *SectionHandler) HandleRestoreDefaults(w http.ResponseWriter, r *http.Request) {
-	var req restoreDefaultsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	resp, err := h.RestoreAdminSections(r.Context(), req)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, sectionListResponse{Sections: resp})
 }
 
 // Only the shared PostgreSQL provider stores every account's overrides in the

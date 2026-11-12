@@ -118,6 +118,6 @@ Settings revision 26 added the `resolution_hdr_audio` badge. A server below revi
 document that contains it, so a client offers that badge only when the server advertises revision
 26 or later.
 
-Settings revision 27 added the `availability` badge. A server below revision 27 rejects a document
-that contains it, so a client offers that badge only when the server advertises revision 27 or
+Settings revision 29 added the `availability` badge. A server below revision 29 rejects a document
+that contains it, so a client offers that badge only when the server advertises revision 29 or
 later.

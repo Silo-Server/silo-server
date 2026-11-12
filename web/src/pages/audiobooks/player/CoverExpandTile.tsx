@@ -1,4 +1,5 @@
 import { Maximize2 } from "lucide-react";
+import { useT } from "@/i18n";
 
 interface CoverExpandTileProps {
   contentId: string;
@@ -8,11 +9,12 @@ interface CoverExpandTileProps {
 }
 
 export function CoverExpandTile({ contentId, posterUrl, title, onExpand }: CoverExpandTileProps) {
+  const t = useT();
   return (
     <button
       type="button"
       onClick={onExpand}
-      aria-label="Open Now Listening"
+      aria-label={t("web.audiobooks.player.openNowListening")}
       className="group/tile bg-muted relative h-[54px] w-[36px] shrink-0 overflow-hidden rounded-md transition-transform hover:scale-[1.04] focus-visible:scale-[1.04] focus-visible:outline-none"
       style={{ viewTransitionName: `audiobook-cover-${contentId}` }}
     >

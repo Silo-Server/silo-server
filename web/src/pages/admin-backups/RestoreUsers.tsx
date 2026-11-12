@@ -4,6 +4,7 @@ import { ShieldCheck } from "lucide-react";
 import type { RestoreDataTypeId, RestoreItem, RestoreProfile } from "@/api/v2/adminBackupRestore";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { useT, type Translate } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { DATA_TYPE_IDS, DATA_TYPE_LABELS, pendingSummary } from "@/lib/profileDataTypes";
 import { SettingFieldStatus } from "@/pages/admin-settings/SettingField";
@@ -19,18 +20,21 @@ import {
   toggleKeys,
 } from "./restoreModel";
 
-function droppedLibraries(count: number): string {
-  return count === 1
-    ? "1 library it could use isn't on this server and is dropped."
-    : `${count} libraries it could use aren't on this server and are dropped.`;
+function droppedLibraries(t: Translate, count: number): string {
+  return t("web.admin.backups.restore.users.droppedLibraries", {
+    count,
+    count_text: count,
+  });
 }
 
-function profileDetail(profile: RestoreProfile): string {
+function profileDetail(t: Translate, profile: RestoreProfile): string {
   const parts = [
-    profile.is_primary ? "Primary" : null,
-    profile.has_pin ? "Has a PIN" : null,
-    profile.restricted ? "Restricted libraries" : null,
-    profile.target === "new" ? "Created here" : "Merges into the profile here",
+    profile.is_primary ? t("web.admin.backups.restore.users.primary") : null,
+    profile.has_pin ? t("web.admin.backups.restore.users.hasPin") : null,
+    profile.restricted ? t("web.admin.backups.restore.users.restricted") : null,
+    profile.target === "new"
+      ? t("web.admin.backups.restore.users.createdHere")
+      : t("web.admin.backups.restore.users.mergesHere"),
   ];
   return parts.filter(Boolean).join(" · ");
 }
@@ -52,6 +56,7 @@ function ProfileRow({
   primary: RestoreProfile | undefined;
   onToggle: ToggleKeys;
 }) {
+  const t = useT();
   const controlId = useId();
   const selectable = profile.selectable && account.selectable && !locked;
   const keys = (value: boolean) => {
@@ -67,10 +72,10 @@ function ProfileRow({
   const why =
     profile.selectable || same
       ? null
-      : profile.message || (profile.reason ? REASON_SENTENCES[profile.reason] : null);
+      : profile.message || (profile.reason ? t(REASON_SENTENCES[profile.reason]) : null);
   const detail = same
-    ? "Matches this server"
-    : [profileDetail(profile), pendingSummary(profile.data_types)].filter(Boolean).join(" · ");
+    ? t("web.admin.backups.restore.users.matches")
+    : [profileDetail(t, profile), pendingSummary(profile.data_types)].filter(Boolean).join(" · ");
   return (
     <li className="flex items-start gap-3 py-1.5">
       <Checkbox
@@ -99,18 +104,16 @@ function ProfileRow({
         ) : null}
         {locked ? (
           <SettingFieldStatus tone="muted">
-            Restored with the account&apos;s other profiles: only a primary profile manages the
-            household.
+            {t("web.admin.backups.restore.users.lockedPrimary")}
           </SettingFieldStatus>
         ) : null}
         {profile.no_library_access ? (
           <SettingFieldStatus tone="warn">
-            None of its allowed libraries are on this server, so it&apos;s restored with no library
-            access.
+            {t("web.admin.backups.restore.users.noLibraryAccess")}
           </SettingFieldStatus>
         ) : profile.libraries_left_out > 0 ? (
           <SettingFieldStatus tone="warn">
-            {droppedLibraries(profile.libraries_left_out)}
+            {droppedLibraries(t, profile.libraries_left_out)}
           </SettingFieldStatus>
         ) : null}
       </div>
@@ -134,6 +137,7 @@ export const AccountRow = memo(function AccountRow({
   chosenProfiles: string;
   onToggle: ToggleKeys;
 }) {
+  const t = useT();
   const controlId = useId();
   const detailsId = useId();
   const [open, setOpen] = useState(false);
@@ -146,7 +150,7 @@ export const AccountRow = memo(function AccountRow({
     (profile) => profile.selectable && profile.target === "new",
   ).length;
   const why =
-    item.message || (!item.selectable && item.reason ? REASON_SENTENCES[item.reason] : null);
+    item.message || (!item.selectable && item.reason ? t(REASON_SENTENCES[item.reason]) : null);
   // A matched account says what merging would add, then who it is.
   const pending =
     item.selectable && merges
@@ -166,8 +170,10 @@ export const AccountRow = memo(function AccountRow({
   const status = !item.selectable
     ? null
     : merges
-      ? `Merge into ${account.local_username || account.username}`
-      : "New account";
+      ? t("web.admin.backups.restore.users.mergeInto", {
+          name: account.local_username || account.username,
+        })
+      : t("web.admin.backups.restore.users.newAccount");
   return (
     <li className="border-border/60 border-b last:border-b-0">
       <div className="flex min-h-10 items-center gap-3 py-1.5">
@@ -197,12 +203,15 @@ export const AccountRow = memo(function AccountRow({
         {account.admin ? (
           <span className="text-muted-foreground hidden shrink-0 items-center gap-1 text-[11px] sm:inline-flex">
             <ShieldCheck aria-hidden="true" className="size-3.5" />
-            Administrator
+            {t("web.admin.backups.restore.users.administrator")}
           </span>
         ) : null}
         {account.profiles.length > 0 ? (
           <span className="text-muted-foreground hidden shrink-0 text-[11px] whitespace-nowrap md:inline">
-            {account.profiles.length} {account.profiles.length === 1 ? "profile" : "profiles"}
+            {t("web.admin.backups.restore.users.profileCount", {
+              count: account.profiles.length,
+              count_text: account.profiles.length,
+            })}
           </span>
         ) : null}
         {status ? (
@@ -215,14 +224,21 @@ export const AccountRow = memo(function AccountRow({
           open={open}
           onOpenChange={setOpen}
           controls={detailsId}
-          label={open ? `Hide ${item.label}'s profiles` : `Show ${item.label}'s profiles`}
+          label={t(
+            open
+              ? "web.admin.backups.restore.users.hideProfiles"
+              : "web.admin.backups.restore.users.showProfiles",
+            { name: item.label },
+          )}
         />
       </div>
       {open ? (
-        <div id={detailsId} className="space-y-1 pb-3 pl-7">
+        <div id={detailsId} className="space-y-1 ps-7 pb-3">
           {status ? <p className="text-[13px] md:hidden">{status}</p> : null}
           {account.admin ? (
-            <p className="text-muted-foreground text-xs sm:hidden">Administrator</p>
+            <p className="text-muted-foreground text-xs sm:hidden">
+              {t("web.admin.backups.restore.users.administrator")}
+            </p>
           ) : null}
           {why ? (
             <SettingFieldStatus tone={item.selectable || item.reason === "same" ? "muted" : "warn"}>
@@ -240,18 +256,21 @@ export const AccountRow = memo(function AccountRow({
             : null}
           {account.libraries_left_out > 0 ? (
             <SettingFieldStatus tone="warn">
-              {droppedLibraries(account.libraries_left_out)}
+              {droppedLibraries(t, account.libraries_left_out)}
             </SettingFieldStatus>
           ) : null}
           {item.selectable && newProfiles > account.profile_room ? (
             <SettingFieldStatus tone="warn">
               {account.profile_room === 0
-                ? "This account here has no room for more profiles, so new ones are left out."
-                : `This account here has room for ${account.profile_room} more ${account.profile_room === 1 ? "profile" : "profiles"}; any more are left out.`}
+                ? t("web.admin.backups.restore.users.noRoom")
+                : t("web.admin.backups.restore.users.room", {
+                    count: account.profile_room,
+                    count_text: account.profile_room,
+                  })}
             </SettingFieldStatus>
           ) : null}
           {account.profiles.length > 0 ? (
-            <ul aria-label={`Profiles of ${item.label}`}>
+            <ul aria-label={t("web.admin.backups.restore.users.profilesOf", { name: item.label })}>
               {account.profiles.map((profile) => (
                 <ProfileRow
                   key={profile.id}
@@ -282,11 +301,14 @@ export function DataTypesPanel({
   /** Entries of each type across the chosen profiles. */
   counts: ReadonlyMap<RestoreDataTypeId, number>;
 }) {
+  const t = useT();
   const baseId = useId();
   return (
     <div className="bg-background/60 my-2 rounded-lg border p-3">
       <fieldset className="space-y-2">
-        <legend className="mb-2 text-[13px] font-medium">For the chosen profiles, restore:</legend>
+        <legend className="mb-2 text-[13px] font-medium">
+          {t("web.admin.backups.restore.users.dataLegend")}
+        </legend>
         <div className="grid gap-x-4 gap-y-1.5 sm:grid-cols-2 xl:grid-cols-3">
           {DATA_TYPE_IDS.map((id) => {
             const controlId = `${baseId}-${id}`;
@@ -304,18 +326,22 @@ export function DataTypesPanel({
                   }}
                 />
                 <Label htmlFor={controlId} className="text-[13px] font-normal">
-                  {DATA_TYPE_LABELS[id]}
-                  {count > 0 ? (
-                    <span className="text-muted-foreground tabular-nums"> ({count})</span>
-                  ) : null}
+                  {count > 0
+                    ? t("web.admin.backups.restore.users.dataTypeCount", {
+                        label: DATA_TYPE_LABELS[id],
+                        count: count,
+                        muted: (chunks) => (
+                          <span className="text-muted-foreground tabular-nums">{chunks}</span>
+                        ),
+                      })
+                    : DATA_TYPE_LABELS[id]}
                 </Label>
               </div>
             );
           })}
         </div>
         <p className="text-muted-foreground text-xs leading-relaxed">
-          Merging keeps whichever progress is newer and never deletes anything on this server. A new
-          account keeps the password it had in the backup.
+          {t("web.admin.backups.restore.users.mergeNote")}
         </p>
       </fieldset>
     </div>

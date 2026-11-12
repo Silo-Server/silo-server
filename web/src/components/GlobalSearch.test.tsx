@@ -593,7 +593,7 @@ describe("GlobalSearch people results", () => {
     [
       "shows people instead of 'No matches' when no title matches",
       { data: [personFixture], isFetching: false },
-      ["Test Actor, Person", "1 results found"],
+      ["Test Actor, Person", "1 result found"],
     ],
     [
       "keeps searching instead of showing 'No matches' while people are still loading",

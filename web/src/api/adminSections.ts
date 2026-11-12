@@ -1,6 +1,7 @@
 import type { PageSectionConfig } from "@/api/types";
 import type { components } from "@/api/v2/schema";
 import { v2, V2ProblemError, type V2Body } from "@/api/v2/request";
+import { t } from "@/i18n";
 
 export function adminSectionFromV2(
   value: components["schemas"]["AdminSection"],
@@ -8,17 +9,17 @@ export function adminSectionFromV2(
   return { ...value, library_id: value.library_id === null ? null : Number(value.library_id) };
 }
 function scopeQuery(scope: string, libraryId?: number) {
-  if (scope !== "home" && scope !== "library") throw new Error("Select a valid section scope.");
+  if (scope !== "home" && scope !== "library")
+    throw new Error(t("web.common.catalog.sections.invalidScope"));
   return { scope, library_id: libraryId === undefined ? undefined : String(libraryId) } as const;
 }
 function requiredSectionETag(etag: string | null | undefined): string {
-  if (!etag || etag === "*")
-    throw new Error("Reload these sections before editing; their version is unavailable.");
+  if (!etag || etag === "*") throw new Error(t("web.common.catalog.sections.versionUnavailable"));
   return etag;
 }
 export function adminSectionMutationMessage(error: unknown, fallback: string) {
   return error instanceof V2ProblemError && error.status === 412
-    ? "These sections changed. Reload and review your changes before trying again."
+    ? t("web.common.catalog.sections.changedConflict")
     : error instanceof Error
       ? error.message
       : fallback;
@@ -64,7 +65,7 @@ export async function fetchAdminSections(scope: string, libraryId?: number, sign
     after.ordered_ids.some((id) => !byID.has(id)) ||
     byID.size !== list.items.length
   ) {
-    throw new Error("Sections changed while loading. Reload before editing.");
+    throw new Error(t("web.common.catalog.sections.changedWhileLoading"));
   }
   return {
     sections: after.ordered_ids.map((id) => adminSectionFromV2(byID.get(id)!)),
@@ -99,7 +100,8 @@ export function fetchAdminSectionCapabilities() {
   return v2("GET /api/v2/admin/sections/capabilities");
 }
 export async function createAdminSection(data: Partial<PageSectionConfig>) {
-  if (!data.section_type || !data.title) throw new Error("A section type and title are required.");
+  if (!data.section_type || !data.title)
+    throw new Error(t("web.common.catalog.sections.typeAndTitleRequired"));
   const body: V2Body<"POST /api/v2/admin/sections"> = {
     ...scopeQuery(data.scope ?? "home", data.library_id ?? undefined),
     section_type: data.section_type,
@@ -119,7 +121,7 @@ export type BulkCreateAdminSections = Omit<
 > & { library_ids?: number[] };
 export function bulkCreateAdminSections(data: BulkCreateAdminSections) {
   if ((data.library_ids?.length ?? 0) > 100)
-    throw new Error("Select at most 100 libraries per request.");
+    throw new Error(t("web.common.catalog.sections.tooManyLibraries"));
   return v2("POST /api/v2/admin/sections/bulk", {
     body: { ...data, library_ids: data.library_ids?.map(String) },
   });

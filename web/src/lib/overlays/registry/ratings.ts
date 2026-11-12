@@ -1,5 +1,6 @@
 import { formatOutOfTen, formatPercent } from "@/components/ratings/ratings";
 
+import { t } from "@/i18n";
 import type { OverlayDef } from "../types";
 
 // A rating badge carries its source's mark in the label ("IMDb 8.5", "RT
@@ -20,8 +21,12 @@ export const RATINGS_OVERLAYS: readonly OverlayDef[] = [
   {
     id: "rating_imdb",
     category: "ratings",
-    label: "IMDb Rating",
-    description: "IMDb score out of 10",
+    get label() {
+      return t("web.settings.overlays.badge.ratingImdb.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.ratingImdb.description");
+    },
     defaultPosition: "left-edge",
     defaultEnabled: false,
     defaultAccent: "#f5c518",
@@ -33,8 +38,12 @@ export const RATINGS_OVERLAYS: readonly OverlayDef[] = [
   {
     id: "rating_tmdb",
     category: "ratings",
-    label: "TMDB Rating",
-    description: "TMDB score out of 10",
+    get label() {
+      return t("web.settings.overlays.badge.ratingTmdb.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.ratingTmdb.description");
+    },
     defaultPosition: "left-edge",
     defaultEnabled: false,
     defaultAccent: "#01b4e4",
@@ -46,8 +55,12 @@ export const RATINGS_OVERLAYS: readonly OverlayDef[] = [
   {
     id: "rating_rt",
     category: "ratings",
-    label: "RT Critics",
-    description: "Rotten Tomatoes critic score, when an administrator shows it",
+    get label() {
+      return t("web.settings.overlays.badge.ratingRt.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.ratingRt.description");
+    },
     defaultPosition: "left-edge",
     defaultEnabled: false,
     defaultAccent: "#fa320a",
@@ -60,22 +73,32 @@ export const RATINGS_OVERLAYS: readonly OverlayDef[] = [
   {
     id: "rating_rt_audience",
     category: "ratings",
-    label: "RT Audience",
-    description: "Rotten Tomatoes audience score, when an administrator shows it",
+    get label() {
+      return t("web.settings.overlays.badge.ratingRtAudience.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.ratingRtAudience.description");
+    },
     defaultPosition: "left-edge",
     defaultEnabled: false,
     defaultAccent: "#fa6400",
     iconCapable: false,
     ratingSource: "rt_audience",
-    getValue: (d) => ratingLabel("RT Audience", d.rating_rt_audience, 100),
-    sourceMark: "RT Audience",
+    getValue: (d) => ratingLabel(t("web.item.card.rtAudience"), d.rating_rt_audience, 100),
+    get sourceMark() {
+      return t("web.item.card.rtAudience");
+    },
     getScore: (d) => ratingScore(d.rating_rt_audience, 100),
   },
   {
     id: "content_rating",
     category: "ratings",
-    label: "Age Rating",
-    description: "Content rating (PG-13, TV-MA, R, etc.)",
+    get label() {
+      return t("web.settings.overlays.badge.contentRating.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.contentRating.description");
+    },
     defaultPosition: "bottom-right",
     defaultEnabled: false,
     iconId: "shield",
@@ -86,8 +109,12 @@ export const RATINGS_OVERLAYS: readonly OverlayDef[] = [
   {
     id: "advisory_age",
     category: "ratings",
-    label: "Advisory Age",
-    description: "Recommended minimum viewer age, such as Common Sense Media's 13+",
+    get label() {
+      return t("web.settings.overlays.badge.advisoryAge.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.advisoryAge.description");
+    },
     defaultPosition: "bottom-right",
     defaultEnabled: false,
     iconId: "users",

@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { useAppLanguage, useT, type Translate } from "@/i18n";
 import { Check, Layers } from "lucide-react";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import MediaCardArtwork, {
@@ -9,6 +10,7 @@ import MediaCardArtwork, {
 import type { BrowseItem } from "@/api/types";
 import { timeAgo } from "@/lib/timeAgo";
 import MediaItemMenu from "@/components/MediaItemMenu";
+import { homeDismissalForCard } from "@/hooks/queries/homeDismissals";
 import CardOverlays from "@/components/overlays/CardOverlays";
 import CardWatchStatus from "@/components/overlays/CardWatchStatus";
 import { overlayDataFromBrowseItem, type CardOverlayPrefs } from "@/lib/overlays";
@@ -27,16 +29,21 @@ function formatDate(value?: string | null) {
   return formatPreferredDate(value, "medium") || null;
 }
 
-function formatRuntime(minutes?: number | null) {
+function formatRuntime(t: Translate, minutes?: number | null) {
   if (!minutes || minutes <= 0) {
     return null;
   }
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
   if (hours === 0) {
-    return `${remainingMinutes}m`;
+    return t("web.item.card.runtimeMinutes", { minutes: remainingMinutes });
   }
-  return remainingMinutes === 0 ? `${hours}h` : `${hours}h ${remainingMinutes}m`;
+  return remainingMinutes === 0
+    ? t("web.item.card.runtimeHours", { hours: hours })
+    : t("web.item.card.runtimeHoursMinutes", {
+        hours: hours,
+        minutes: remainingMinutes,
+      });
 }
 
 // A rating reads the same as on the title page: its source's mark, then the
@@ -71,7 +78,7 @@ function formatProgress(ratio?: number | null) {
 // so the chip fits narrow cards without occluding the cover; the detail page
 // carries the spelled-out counts. Strictly manga-gated so no other card type
 // renders it.
-function mangaCountChipLabel(item: BrowseItem): string | null {
+function mangaCountChipLabel(t: Translate, item: BrowseItem): string | null {
   if (item.type !== "manga") {
     return null;
   }
@@ -79,10 +86,10 @@ function mangaCountChipLabel(item: BrowseItem): string | null {
   const chapters = item.manga_chapter_count ?? 0;
   const parts: string[] = [];
   if (volumes > 0) {
-    parts.push(`${volumes} Vol`);
+    parts.push(t("web.item.card.mangaVolumes", { count: volumes }));
   }
   if (chapters > 0) {
-    parts.push(`${chapters} Ch`);
+    parts.push(t("web.item.card.mangaChapters", { count: chapters }));
   }
   return parts.length > 0 ? parts.join(" · ") : null;
 }
@@ -110,8 +117,11 @@ function mangaStatusChip(item: BrowseItem): { label: string; tone: string } | nu
 }
 
 function SortMeta({ item, sortField }: { item: BrowseItem; sortField?: string }) {
+  // "Added 3 minutes ago" comes from a plain helper; follow language changes.
+  useAppLanguage();
+  const t = useT();
   const episodeLabels = buildEpisodeCardLabels(item);
-  const defaultLabel = [item.year || "", item.type === "series" ? "Series" : ""]
+  const defaultLabel = [item.year || "", item.type === "series" ? t("web.item.card.series") : ""]
     .filter(Boolean)
     .join(" · ");
 
@@ -132,7 +142,7 @@ function SortMeta({ item, sortField }: { item: BrowseItem; sortField?: string })
       return <>{item.content_rating || defaultLabel}</>;
     case "runtime":
       return (
-        <>{formatRuntime(item.sort_metrics?.runtime_minutes ?? item.runtime) ?? defaultLabel}</>
+        <>{formatRuntime(t, item.sort_metrics?.runtime_minutes ?? item.runtime) ?? defaultLabel}</>
       );
     case "rating_imdb":
       return ratingLabel("IMDb", outOfTen(item.rating_imdb)) ?? <>{defaultLabel}</>;
@@ -141,7 +151,11 @@ function SortMeta({ item, sortField }: { item: BrowseItem; sortField?: string })
     case "rating_rt_critic":
       return ratingLabel("RT", percent(item.rating_rt_critic)) ?? <>{defaultLabel}</>;
     case "rating_rt_audience":
-      return ratingLabel("RT Audience", percent(item.rating_rt_audience)) ?? <>{defaultLabel}</>;
+      return (
+        ratingLabel(t("web.item.card.rtAudience"), percent(item.rating_rt_audience)) ?? (
+          <>{defaultLabel}</>
+        )
+      );
     case "release_date":
       return (
         <>{formatDate(item.sort_metrics?.release_date ?? item.release_date) ?? defaultLabel}</>
@@ -195,6 +209,7 @@ export default function ItemCard({
   selected?: boolean;
   onToggleSelect?: (item: BrowseItem) => void;
 }) {
+  const t = useT();
   const itemHref = buildItemHref({ contentId: item.content_id, libraryId });
   const episodeLabels = buildEpisodeCardLabels(item);
   const displayTitle = episodeLabels ? episodeLabels.seriesTitle : item.title;
@@ -202,7 +217,7 @@ export default function ItemCard({
     item.type === "episode" && item.series_id
       ? buildItemHref({ contentId: item.series_id, libraryId })
       : itemHref;
-  const mangaCountLabel = mangaCountChipLabel(item);
+  const mangaCountLabel = mangaCountChipLabel(t, item);
   const mangaStatus = mangaStatusChip(item);
   const cardRef = useRef<HTMLDivElement>(null);
 
@@ -224,18 +239,21 @@ export default function ItemCard({
             lazy
           >
             {item.status === "pending" && (
+              // eslint-disable-next-line silo/no-physical-direction -- on the poster artwork, which doesn't mirror; matches CardOverlays and CardWatchStatus
               <span className="glass-subtle text-foreground absolute top-2.5 left-2.5 rounded-full border border-white/15 px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] uppercase">
-                Scanning
+                {t("web.item.card.statusScanning")}
               </span>
             )}
             {item.status === "unmatched" && (
+              // eslint-disable-next-line silo/no-physical-direction -- on the poster artwork, which doesn't mirror; matches CardOverlays and CardWatchStatus
               <span className="glass-subtle absolute top-2.5 left-2.5 rounded-full border border-red-500/25 px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] text-red-300 uppercase">
-                Unmatched
+                {t("web.item.card.statusUnmatched")}
               </span>
             )}
             {item.status === "ambiguous" && (
+              // eslint-disable-next-line silo/no-physical-direction -- on the poster artwork, which doesn't mirror; matches CardOverlays and CardWatchStatus
               <span className="glass-subtle absolute top-2.5 left-2.5 rounded-full border border-amber-500/25 px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] text-amber-200 uppercase">
-                Ambiguous
+                {t("web.item.card.statusAmbiguous")}
               </span>
             )}
             {/* Manga cards carry purpose-built status/count chips in both top
@@ -248,8 +266,12 @@ export default function ItemCard({
             )}
             {(mangaStatus || mangaCountLabel) && (
               /* One shared row so the two chips split the card width and
-                 truncate instead of overlapping on narrow cards. */
-              <div className="pointer-events-none absolute inset-x-2.5 top-2.5 flex items-start justify-between gap-1.5">
+                 truncate instead of overlapping on narrow cards. Left to right
+                 in every language, like the rest of the artwork's corners. */
+              <div
+                dir="ltr"
+                className="pointer-events-none absolute inset-x-2.5 top-2.5 flex items-start justify-between gap-1.5"
+              >
                 {mangaStatus ? (
                   <span
                     className={`glass-chip min-w-0 truncate rounded-full border px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] uppercase ${mangaStatus.tone}`}
@@ -280,7 +302,11 @@ export default function ItemCard({
         {selectionMode && onToggleSelect && (
           <button
             type="button"
-            aria-label={selected ? `Deselect ${item.title}` : `Select ${item.title}`}
+            aria-label={
+              selected
+                ? t("web.item.card.deselect", { title: item.title })
+                : t("web.item.card.select", { title: item.title })
+            }
             aria-pressed={selected}
             onClick={(event) => {
               event.preventDefault();
@@ -291,6 +317,7 @@ export default function ItemCard({
               event.preventDefault();
               event.stopPropagation();
             }}
+            // eslint-disable-next-line silo/no-physical-direction -- on the poster artwork, which doesn't mirror; matches CardOverlays and CardWatchStatus
             className="absolute top-2.5 left-2.5 z-20 inline-flex size-8 items-center justify-center rounded-full border border-white/20 bg-black/55 text-white shadow-sm backdrop-blur-sm transition-colors hover:bg-black/70"
           >
             <span
@@ -312,6 +339,7 @@ export default function ItemCard({
           quickActionMode={quickActionMode}
           longPressRef={cardRef}
           itemTitle={displayTitle}
+          dismissAction={homeDismissalForCard(item)}
         />
       </div>
       <div className={MEDIA_CARD_CAPTION_CLASS}>
@@ -321,7 +349,7 @@ export default function ItemCard({
         {episodeLabels?.episodeTitle ? (
           <ViewTransitionLink
             to={itemHref}
-            className="text-muted-foreground mt-1 block truncate text-[0.75rem] font-medium hover:underline"
+            className="bidi-text text-muted-foreground mt-1 block truncate text-[0.75rem] font-medium hover:underline"
           >
             {episodeLabels.episodeTitle}
           </ViewTransitionLink>

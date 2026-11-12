@@ -15,6 +15,7 @@ import { readEbookBlob } from "@/api/v2/ebookFile";
 import { captureProfileRequestContext, isCapturedProfileAuthorityActive } from "@/api/client";
 import type { FileVersion } from "@/api/types";
 import { ebookKeys } from "@/hooks/queries/keys";
+import { useT } from "@/i18n";
 import type { EbookReaderAnnotation } from "@/reader/ebookReaderApi";
 import { DocumentLoader, type BookDoc, type TOCItem } from "@/reader/readest/libs/document";
 
@@ -487,6 +488,7 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
     },
     ref,
   ) {
+    const t = useT();
     const queryClient = useQueryClient();
     const containerRef = useRef<HTMLDivElement>(null);
     const viewRef = useRef<FoliateViewElement | null>(null);
@@ -500,7 +502,10 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
     const drawnCfisRef = useRef<Set<string>>(new Set());
     const selectionCleanupRef = useRef<(() => void)[]>([]);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState("");
+    // null is a failure with no message of its own; its fallback text resolves at
+    // render so a language change does not reopen the book.
+    const [error, setError] = useState<string | null>("");
+    const errorText = error ?? t("web.reader.error.openFailed");
 
     const applyReaderSettings = useCallback((nextSettings: Partial<ReaderSettings> | undefined) => {
       const normalized = normalizeReaderSettings(nextSettings);
@@ -854,7 +859,7 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
             disposeOpenArtifacts();
             return;
           }
-          setError(err instanceof Error ? err.message : "Unable to open ebook");
+          setError(err instanceof Error ? err.message : null);
           setLoading(false);
         }
       }
@@ -897,14 +902,14 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
     return (
       <div className="relative h-full w-full overflow-hidden bg-white text-neutral-950">
         <div ref={containerRef} className="h-full w-full" />
-        {loading && !error && (
+        {loading && !errorText && (
           <div className="absolute inset-0 flex items-center justify-center bg-white text-sm text-neutral-500">
-            Loading reader...
+            {t("web.reader.loading")}
           </div>
         )}
-        {error && (
+        {errorText && (
           <div className="absolute inset-0 flex items-center justify-center bg-white p-6 text-center text-sm text-red-600">
-            {error}
+            {errorText}
           </div>
         )}
       </div>

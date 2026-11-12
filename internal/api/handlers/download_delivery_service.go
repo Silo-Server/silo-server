@@ -16,6 +16,7 @@ func (h *DownloadHandler) ServeDownloadFile(w http.ResponseWriter, r *http.Reque
 	if h == nil || h.svc == nil {
 		return &APIError{Status: 503, Message: "Downloads not configured"}
 	}
+	r = h.withDownloadNaming(r)
 	userID := apimw.GetUserID(r.Context())
 	if userID == 0 {
 		return &APIError{Status: 401, Message: "Authentication required"}

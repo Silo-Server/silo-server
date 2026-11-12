@@ -13,8 +13,7 @@ lifecycle; `internal/mediasample` decodes and tiles the frames (see
 A library opts in through `trickplay_enabled` on the v2 library resources
 (`createLibrary`, `updateLibrary`); `trickplay_supported` reports whether the
 server can generate them (an assets store is configured), and
-`GET /api/v2/libraries/capabilities` reports `trickplay: true`. The frozen
-v1 library bodies neither read nor write it. Turning it on or off, or changing
+`GET /api/v2/libraries/capabilities` reports `trickplay: true`. Turning it on or off, or changing
 the library's type or whether it is enabled, runs a reconcile pass right away
 on the server that handled the change; turning it off, disabling the library,
 or changing it to a non-video type deletes the library's previews.
@@ -211,7 +210,11 @@ the lease, and the uploads; a node only decodes and tiles
   with playback and downloads and chooses among nodes by available capacity
   and load. Those provisional reservations belong to one API process; a node's
   reported load accounts for work accepted from other replicas.
-- A node takes one run at a time. `node_busy`, `node_unavailable`, a
+- A node takes up to `playback.trickplay_node_capacity` runs at once
+  (default 1, at most 64, applied live, counted across every API server that
+  sends it work) and refuses the next at once with `node_busy` rather than
+  queueing it. Each run counts in the node's reported active jobs, so it
+  takes one of the node's `max_jobs` slots from playback while it runs. `node_busy`, `node_unavailable`, a
   refused request, or a connection that drops moves the run to the next
   node. A node whose ffmpeg cannot open an input that passed its path check
   (such as a file its user may not read) answers `input_unreadable`, which

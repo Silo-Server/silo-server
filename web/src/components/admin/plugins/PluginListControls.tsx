@@ -2,6 +2,7 @@ import { Search, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 export function PluginSearchField({
@@ -13,10 +14,11 @@ export function PluginSearchField({
   placeholder: string;
   onQueryChange: (query: string) => void;
 }) {
+  const t = useT();
   return (
     <div className="relative w-full sm:max-w-xs">
       <Search
-        className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2"
+        className="text-muted-foreground pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2"
         aria-hidden
       />
       <Input
@@ -25,7 +27,7 @@ export function PluginSearchField({
         onChange={(event) => onQueryChange(event.target.value)}
         placeholder={placeholder}
         aria-label={placeholder}
-        className="pr-9 pl-9"
+        className="ps-9 pe-9"
       />
       {query ? (
         <Button
@@ -33,8 +35,8 @@ export function PluginSearchField({
           variant="ghost"
           size="icon-sm"
           onClick={() => onQueryChange("")}
-          aria-label="Clear plugin search"
-          className="absolute top-1/2 right-1 -translate-y-1/2"
+          aria-label={t("web.admin.plugins.list.clearSearch")}
+          className="absolute end-1 top-1/2 -translate-y-1/2"
         >
           <X className="h-3.5 w-3.5" />
         </Button>

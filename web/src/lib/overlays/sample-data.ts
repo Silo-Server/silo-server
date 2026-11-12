@@ -1,4 +1,5 @@
 import type { MediaItemUserState } from "@/api/types";
+import { t } from "@/i18n";
 import type { OverlayData } from "./types";
 
 // Sample OverlayData used by the settings preview cards so users can see how
@@ -56,7 +57,9 @@ export const SAMPLE_REQUEST_DATA: OverlayData = {
   rating_tmdb: 8.1,
   content_rating: "PG-13",
   year: 2026,
-  request_status: "Downloading 43%",
+  get request_status() {
+    return t("web.common.overlays.sampleDownloading", { percent: 43 });
+  },
   request_status_icon: "download",
   request_status_attention: false,
   request_download_percent: 43,

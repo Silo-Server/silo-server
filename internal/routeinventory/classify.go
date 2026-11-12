@@ -840,6 +840,9 @@ var infrastructureMiddleware = []string{
 	// apimw.ProvideActingAdmin only makes the acting-admin decision available
 	// to handlers (apimw.ActingAdmin); it admits and refuses nothing itself.
 	"apimw.ProvideActingAdmin",
+	// httpstream.NoSniff sets one response header on every response; it
+	// admits and refuses nothing.
+	"httpstream.NoSniff",
 }
 
 func classifyAuth(middleware []string) (string, []string) {

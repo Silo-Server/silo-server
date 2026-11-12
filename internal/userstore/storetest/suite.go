@@ -155,7 +155,7 @@ func testCollectionSortPreferences(t *testing.T, newStore func(t *testing.T) use
 		t.Fatalf("SetCollectionSortPreference(profile delete target): %v", err)
 	}
 
-	if err := store.DeleteProfile(ctx, profileID); err != nil {
+	if _, err := store.DeleteProfile(ctx, profileID); err != nil {
 		t.Fatalf("DeleteProfile: %v", err)
 	}
 	deletedPref, err = store.GetCollectionSortPreference(ctx, viewerProfileID, userstore.CollectionKindUser, profileDeletedCollection.ID)
@@ -737,7 +737,7 @@ func RunNotInterested(t *testing.T, newStore func(t *testing.T) userstore.UserSt
 			t.Fatalf("keyset walk = %v, want %s", got, want)
 		}
 
-		if err := store.DeleteProfile(ctx, "p1"); err != nil {
+		if _, err := store.DeleteProfile(ctx, "p1"); err != nil {
 			t.Fatalf("DeleteProfile: %v", err)
 		}
 		if rows, err := store.ListNotInterestedPage(ctx, "p1", nil, 10); err != nil || len(rows) != 0 {

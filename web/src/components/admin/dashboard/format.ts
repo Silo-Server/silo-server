@@ -1,11 +1,16 @@
 import type { ScanRun } from "@/api/types";
 import { formatActiveScanMode, formatActiveScanProgress } from "@/lib/scanRuns";
+import { formatLocale } from "@/lib/appLocale";
+import { t } from "@/i18n";
 
 export function formatFileCount(count: number | null | undefined) {
   if (count == null) {
     return "—";
   }
-  return count === 1 ? "1 file" : `${count.toLocaleString()} files`;
+  return t("web.admin.dashboard.format.fileCount", {
+    count,
+    count_text: count.toLocaleString(formatLocale()),
+  });
 }
 
 /**
@@ -20,7 +25,7 @@ export function formatWatchTime(totalSeconds: number | null | undefined) {
     return `${Math.max(1, Math.round(totalSeconds / 60))}m`;
   }
   const hours = totalSeconds / 3600;
-  return `${hours.toLocaleString(undefined, { maximumFractionDigits: 1 })}h`;
+  return `${hours.toLocaleString(formatLocale(), { maximumFractionDigits: 1 })}h`;
 }
 
 /**
@@ -32,7 +37,7 @@ export function formatMbpsValue(mbps: number) {
     return "—";
   }
   const decimals = mbps > 0 && mbps < 10 ? 1 : 0;
-  return mbps.toLocaleString(undefined, {
+  return mbps.toLocaleString(formatLocale(), {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   });
@@ -71,7 +76,7 @@ export function formatDataTotal(bytes: number | null | undefined) {
       continue;
     }
     const shown = unit > 0 && rounded < 100 ? 1 : 0;
-    return `${rounded.toLocaleString(undefined, {
+    return `${rounded.toLocaleString(formatLocale(), {
       minimumFractionDigits: shown,
       maximumFractionDigits: shown,
     })} ${DATA_TOTAL_UNITS[unit]}`;
@@ -79,12 +84,23 @@ export function formatDataTotal(bytes: number | null | undefined) {
 }
 
 export function formatDashboardLibraryScanProgress(scan: ScanRun, activeScanCount: number) {
-  const status = scan.status === "running" ? "Scanning" : "Queued";
+  const running = scan.status === "running";
   const progress = formatActiveScanProgress(scan);
   const detail =
-    progress || (scan.status === "running" ? formatActiveScanMode(scan) : "Waiting for capacity");
-  const extraScans = activeScanCount > 1 ? ` + ${activeScanCount - 1} more` : "";
-  return `${status}: ${detail}${extraScans}`;
+    progress ||
+    (running ? formatActiveScanMode(scan) : t("web.admin.dashboard.format.scanWaitingForCapacity"));
+  if (activeScanCount > 1) {
+    return t(
+      running
+        ? "web.admin.dashboard.format.scanRunningWithMore"
+        : "web.admin.dashboard.format.scanQueuedWithMore",
+      { detail, more: activeScanCount - 1, more_text: activeScanCount - 1 },
+    );
+  }
+  return t(
+    running ? "web.admin.dashboard.format.scanRunning" : "web.admin.dashboard.format.scanQueued",
+    { detail },
+  );
 }
 
 /**
@@ -151,7 +167,7 @@ export function formatLatency(latencyMs: number) {
   if (!Number.isFinite(latencyMs)) {
     return "—";
   }
-  return `${latencyMs.toLocaleString(undefined, {
+  return `${latencyMs.toLocaleString(formatLocale(), {
     maximumFractionDigits: latencyMs < 10 ? 2 : 0,
   })} ms`;
 }

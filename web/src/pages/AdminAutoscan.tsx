@@ -15,6 +15,7 @@ import {
 import SourcesPanel from "@/pages/admin/autoscan/SourcesPanel";
 import { showRunNow } from "@/pages/admin/autoscan/runNow";
 import { legacyAutoscanPageTarget } from "@/pages/autoscanSearchParams";
+import { useT } from "@/i18n";
 
 /**
  * Autoscan › Sources: what Autoscan watches, with the switch that turns it on
@@ -29,6 +30,7 @@ export default function AdminAutoscan() {
 }
 
 function AutoscanSourcesPage() {
+  const t = useT();
   const trigger = useTriggerAutoscan();
   const settings = useAutoscanSettings();
   const readAuthority = captureProfileRequestContext();
@@ -50,28 +52,28 @@ function AutoscanSourcesPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Autoscan"
-        subtitle="Silo re-scans a library as soon as something changes, instead of waiting for the next scheduled scan. Add a source for each thing you want watched."
+        title={t("web.admin.autoscan.page.title")}
+        subtitle={t("web.admin.autoscan.page.subtitle")}
         actions={
           <>
             {settings.data &&
               (enabled ? (
-                <Badge variant="secondary">Enabled</Badge>
+                <Badge variant="secondary">{t("web.admin.autoscan.page.enabled")}</Badge>
               ) : (
                 <Badge variant="outline" className="text-muted-foreground">
-                  Disabled
+                  {t("web.admin.autoscan.page.disabled")}
                 </Badge>
               ))}
             <div className="flex items-center gap-2">
               <Label htmlFor="autoscan-enabled" className="text-muted-foreground text-sm">
-                Autoscan
+                {t("web.admin.autoscan.page.switchLabel")}
               </Label>
               <Switch
                 id="autoscan-enabled"
                 checked={enabled}
                 onCheckedChange={toggleEnabled}
                 disabled={!settings.data || updateSettings.isPending}
-                aria-label="Enable autoscan"
+                aria-label={t("web.admin.autoscan.page.enableAria")}
               />
             </div>
             {runNowVisible ? (
@@ -82,7 +84,9 @@ function AutoscanSourcesPage() {
                 onClick={() => trigger.mutate()}
               >
                 <Play />
-                {trigger.isPending ? "Triggering…" : "Run now"}
+                {trigger.isPending
+                  ? t("web.admin.autoscan.page.triggering")
+                  : t("web.admin.autoscan.page.runNow")}
               </Button>
             ) : null}
           </>

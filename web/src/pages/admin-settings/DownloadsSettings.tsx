@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useRestartKeys } from "@/hooks/useRestartKeys";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
+import { useT } from "@/i18n";
 import { SaveBar } from "@/components/SaveBar";
 
 import { FieldGroup } from "./FieldGroup";
@@ -52,6 +53,7 @@ const ADVANCED_KEYS = [...PER_USER_ADVANCED_KEYS, ...GLOBAL_ADVANCED_KEYS];
 const KEYS = [...ESSENTIAL_KEYS, ...ADVANCED_KEYS];
 
 export default function DownloadsSettings() {
+  const t = useT();
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
   const restartKeys = useRestartKeys();
 
@@ -69,23 +71,27 @@ export default function DownloadsSettings() {
 
   if (form.isPending)
     return (
-      <div className="space-y-6" role="status" aria-label="Loading settings">
+      <div
+        className="space-y-6"
+        role="status"
+        aria-label={t("web.admin.settings.fields.loadingSettings")}
+      >
         <Skeleton className="h-8 w-40" />
         <div className="space-y-4">
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full" />
         </div>
-        <span className="sr-only">Loading settings</span>
+        <span className="sr-only">{t("web.admin.settings.fields.loadingSettings")}</span>
       </div>
     );
 
   if (form.loadError && !form.loaded) {
     return (
       <div className="space-y-4">
-        <SettingsPageHeader title="Downloads" />
-        <p role="alert">Download settings could not be loaded. Retry before editing limits.</p>
+        <SettingsPageHeader title={t("web.admin.settings.downloads.title")} />
+        <p role="alert">{t("web.admin.settings.downloads.loadError")}</p>
         <Button variant="outline" onClick={() => void form.retryLoad()}>
-          Retry
+          {t("common.retry")}
         </Button>
       </div>
     );
@@ -94,28 +100,32 @@ export default function DownloadsSettings() {
   return (
     <div className="flex h-full flex-col">
       <SettingsPageHeader
-        title="Downloads"
+        title={t("web.admin.settings.downloads.title")}
         className="mb-8"
         actions={
           <Link to="/admin/downloads" className="text-sm underline underline-offset-3">
-            See storage on the server and nodes
+            {t("web.admin.settings.downloads.storageLink")}
           </Link>
         }
       />
 
       <div className="flex-1 space-y-5">
-        <FieldGroup label="Downloads" restartAll={allRestart(KEYS)} dirty={anyDirty(KEYS)}>
+        <FieldGroup
+          label={t("web.admin.settings.downloads.group")}
+          restartAll={allRestart(KEYS)}
+          dirty={anyDirty(KEYS)}
+        >
           <SettingField
-            label="Allow downloads"
+            label={t("web.admin.settings.downloads.enabled.label")}
             type="toggle"
             value={form.getValue("download.enabled")}
             onChange={(v) => form.setValue("download.enabled", v)}
             restartRequired={restartKeys.has("download.enabled")}
           />
           <SettingField
-            label="Prepare device-friendly copies"
+            label={t("web.admin.settings.downloads.transcode.label")}
             type="toggle"
-            description="Converts video the device can't play and offers lower qualities. Off, every download keeps the original video, even where the device can't play it."
+            description={t("web.admin.settings.downloads.transcode.description")}
             value={form.getValue("download.transcode_enabled")}
             onChange={(v) => form.setValue("download.transcode_enabled", v)}
             restartRequired={restartKeys.has("download.transcode_enabled")}
@@ -123,17 +133,17 @@ export default function DownloadsSettings() {
           {/* Not a LimitField: the server reads 0 as "use the built-in
               worker count" (2), not as unlimited. */}
           <SettingField
-            label="Files prepared at once"
+            label={t("web.admin.settings.downloads.prepares.label")}
             type="number"
-            description="0 uses the built-in default of 2."
+            description={t("web.admin.settings.downloads.prepares.description")}
             value={form.getValue("download.max_concurrent_prepares")}
             onChange={(v) => form.setValue("download.max_concurrent_prepares", v)}
             restartRequired={restartKeys.has("download.max_concurrent_prepares")}
           />
           <PathSettingField
-            label="Prepared file directory"
+            label={t("web.admin.settings.downloads.artifactDir.label")}
             defaultValue={derivedArtifactDir}
-            description="Leave blank for a silo-download-artifacts folder beside this server's transcode directory. Transcode nodes use download-artifacts inside their own transcode directory unless a node has its own directory."
+            description={t("web.admin.settings.downloads.artifactDir.description")}
             value={form.getValue("download.artifact_dir")}
             onChange={(v) => form.setValue("download.artifact_dir", v)}
             restartRequired={restartKeys.has("download.artifact_dir")}
@@ -142,26 +152,26 @@ export default function DownloadsSettings() {
               because nobody sizes a disk budget in bytes. Unlimited stays
               the default and still writes the 0 sentinel. */}
           <LimitField
-            label="Default storage budget per location"
+            label={t("web.admin.settings.downloads.budget.label")}
             unit="GB"
             scale={BYTES_PER_GB}
-            hint="Applies to this server and to every node without its own budget. Over budget, cached files go first, least recently used first; files a device is still waiting on stay."
+            hint={t("web.admin.settings.downloads.budget.hint")}
             value={form.getValue("download.artifact_max_bytes")}
             onChange={(v) => form.setValue("download.artifact_max_bytes", v)}
             restartRequired={restartKeys.has("download.artifact_max_bytes")}
           />
           <SettingField
-            label="Disk ceiling (%)"
+            label={t("web.admin.settings.downloads.diskCeiling.label")}
             type="number"
-            description="Above this disk fill, cached files at that location are deleted early, whatever the budget. 50 to 95; nodes stop taking playback at 95% when downloads share their transcode disk."
+            description={t("web.admin.settings.downloads.diskCeiling.description")}
             value={form.getValue("download.artifact_disk_ceiling_percent")}
             onChange={(v) => form.setValue("download.artifact_disk_ceiling_percent", v)}
             restartRequired={restartKeys.has("download.artifact_disk_ceiling_percent")}
           />
           <LimitField
-            label="Server bandwidth"
+            label={t("web.admin.settings.downloads.serverBandwidth.label")}
             unit="Mbps"
-            hint="All downloads on this server combined."
+            hint={t("web.admin.settings.downloads.serverBandwidth.hint")}
             value={form.getValue("download.server_bandwidth_mbps")}
             onChange={(v) => form.setValue("download.server_bandwidth_mbps", v)}
             restartRequired={restartKeys.has("download.server_bandwidth_mbps")}
@@ -172,50 +182,54 @@ export default function DownloadsSettings() {
             count={ADVANCED_KEYS.length}
             forceOpen={anyDirty(ADVANCED_KEYS)}
           >
-            <SettingsSubheading>Per user</SettingsSubheading>
+            <SettingsSubheading>
+              {t("web.admin.settings.downloads.perUser.heading")}
+            </SettingsSubheading>
             <LimitField
-              label="Per-user bandwidth"
+              label={t("web.admin.settings.downloads.perUser.bandwidth.label")}
               unit="Mbps"
               value={form.getValue("download.user_bandwidth_mbps")}
               onChange={(v) => form.setValue("download.user_bandwidth_mbps", v)}
               restartRequired={restartKeys.has("download.user_bandwidth_mbps")}
             />
             <LimitField
-              label="Downloads at once per user"
-              hint="Counted per user, alongside the per-user bandwidth cap."
+              label={t("web.admin.settings.downloads.perUser.concurrent.label")}
+              hint={t("web.admin.settings.downloads.perUser.concurrent.hint")}
               value={form.getValue("download.max_concurrent_per_user")}
               onChange={(v) => form.setValue("download.max_concurrent_per_user", v)}
               restartRequired={restartKeys.has("download.max_concurrent_per_user")}
             />
             <LimitField
-              label="Downloads per period"
-              hint="How many each user may start in the period below."
+              label={t("web.admin.settings.downloads.perUser.perPeriod.label")}
+              hint={t("web.admin.settings.downloads.perUser.perPeriod.hint")}
               value={form.getValue("download.max_per_period")}
               onChange={(v) => form.setValue("download.max_per_period", v)}
               restartRequired={restartKeys.has("download.max_per_period")}
             />
             <SettingField
-              label="Period length"
+              label={t("web.admin.settings.downloads.perUser.period.label")}
               type="duration"
-              description="Rolling window each user's count is measured over, e.g. 24h or 168h."
+              description={t("web.admin.settings.downloads.perUser.period.description")}
               value={form.getValue("download.period_duration")}
               onChange={(v) => form.setValue("download.period_duration", v)}
               restartRequired={restartKeys.has("download.period_duration")}
             />
 
-            <SettingsSubheading>Whole server</SettingsSubheading>
+            <SettingsSubheading>
+              {t("web.admin.settings.downloads.server.heading")}
+            </SettingsSubheading>
             <SettingField
-              label="Prepare locally when workers are unavailable"
+              label={t("web.admin.settings.downloads.server.localFallback.label")}
               type="toggle"
-              description="This is separate from live playback routing."
+              description={t("web.admin.settings.downloads.server.localFallback.description")}
               value={form.getValue("download.local_transcode_fallback") || "true"}
               onChange={(v) => form.setValue("download.local_transcode_fallback", v)}
               restartRequired={restartKeys.has("download.local_transcode_fallback")}
             />
             <SettingField
-              label="Keep cached files for"
+              label={t("web.admin.settings.downloads.server.cacheHours.label")}
               type="number"
-              description="Hours a prepared file nothing is waiting on stays after its last use, so another download or a re-download can reuse it. 0 to 720; 0 deletes it once nothing needs it and it has gone unused for ten minutes."
+              description={t("web.admin.settings.downloads.server.cacheHours.description")}
               value={form.getValue("download.artifact_cache_hours")}
               onChange={(v) => form.setValue("download.artifact_cache_hours", v)}
               restartRequired={restartKeys.has("download.artifact_cache_hours")}

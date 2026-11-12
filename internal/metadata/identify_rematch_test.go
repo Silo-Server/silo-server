@@ -2,6 +2,8 @@ package metadata
 
 import (
 	"context"
+	"errors"
+	"slices"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -318,5 +320,341 @@ func TestRejectIdentityProviderIDsIncludesMalformedStoredValues(t *testing.T) {
 	suppressProviderIDValues(stored, rejected)
 	if len(stored) != 0 {
 		t.Fatalf("stored IDs after suppression = %#v, want the malformed IMDb value rejected too", stored)
+	}
+}
+
+// runIdentify applies an Identify to tmdb, whose provider returns only a title
+// and that ID.
+func runIdentify(t *testing.T, h *testHarness, contentID, tmdb, language string) {
+	t.Helper()
+	provider := &capturingMetadataProvider{response: &MetadataResult{
+		HasMetadata: true, Title: "A Film", ProviderIDs: map[string]string{"tmdb": tmdb},
+	}}
+	if _, err := h.service.ProcessWithProviders(t.Context(), ProcessRequest{
+		ContentID: contentID, ProviderIDs: map[string]string{"tmdb": tmdb}, Language: language, Mode: ModeIdentify,
+	}, []Provider{provider}); err != nil {
+		t.Fatalf("ProcessWithProviders: %v", err)
+	}
+}
+
+// seedDescribedWrongMatch gives the wrong-match movie a value in every field a
+// provider supplies, each of which the providers in these tests never send.
+func seedDescribedWrongMatch(t *testing.T, h *testHarness, contentID string, locked ...MetadataField) {
+	t.Helper()
+	seedWrongMatch(t, h, contentID)
+	item := h.itemRepo.items[contentID]
+	imdbRating, tmdbRating, rtRating := 7.5, 7.1, 80
+	advisoryAge, seasonCount := 16, 3
+	date, airTime, airTimezone := "2006-01-01", "20:00", "UTC"
+	item.SortTitle, item.OriginalTitle, item.Overview, item.Tagline = "Wrong Sort", "Wrong Original", "Wrong overview.", "Wrong tagline."
+	item.Runtime, item.ContentRating = 90, "TV-MA"
+	item.AdvisoryAge, item.AdvisorySource = &advisoryAge, AdvisorySourceCommonSense
+	item.RatingIMDB, item.RatingTMDB, item.RatingRTCritic, item.RatingRTAudience = &imdbRating, &tmdbRating, &rtRating, &rtRating
+	item.ReleaseDate, item.FirstAirDate, item.LastAirDate = &date, &date, &date
+	item.OriginalLanguage, item.ShowStatus, item.SeasonCount = "fr", "ended", &seasonCount
+	item.AirTime, item.AirTimezone = &airTime, &airTimezone
+	item.Genres, item.Studios, item.Networks = []string{"Wrong Genre"}, []string{"Wrong Studio"}, []string{"Wrong Network"}
+	item.Countries, item.Keywords = []string{"fr"}, []string{"wrong"}
+	item.LockedFields = lockFields(locked...)
+}
+
+// describedFieldsKept names the seeded fields still holding a value.
+func describedFieldsKept(item *models.MediaItem) []string {
+	var kept []string
+	for _, field := range []struct {
+		name    string
+		present bool
+	}{
+		{"sort title", item.SortTitle == "Wrong Sort"},
+		{"original title", item.OriginalTitle != ""},
+		{"overview", item.Overview != ""},
+		{"tagline", item.Tagline != ""},
+		{"runtime", item.Runtime != 0},
+		{"content rating", item.ContentRating != ""},
+		{"advisory", item.AdvisoryAge != nil || item.AdvisorySource != ""},
+		{"ratings", item.RatingIMDB != nil || item.RatingTMDB != nil || item.RatingRTCritic != nil || item.RatingRTAudience != nil},
+		{"release date", item.ReleaseDate != nil},
+		{"air dates", item.FirstAirDate != nil || item.LastAirDate != nil},
+		{"original language", item.OriginalLanguage != ""},
+		{"show status", item.ShowStatus != ""},
+		{"season count", item.SeasonCount != nil},
+		{"air schedule", item.AirTime != nil || item.AirTimezone != nil},
+		{"genres", len(item.Genres) > 0},
+		{"studios", len(item.Studios) > 0 || len(item.Networks) > 0},
+		{"tags", len(item.Countries) > 0 || len(item.Keywords) > 0},
+	} {
+		if field.present {
+			kept = append(kept, field.name)
+		}
+	}
+	return kept
+}
+
+// A correction names a different title, so a value the new match lacks must not
+// stay behind from the wrong one (#3363). Locks still hold, and a refresh or a
+// confirmed match can't tell a missing value from an unsent one, so they keep
+// what is stored.
+func TestCorrectionClearsWhatTheNewMatchLacks(t *testing.T) {
+	const contentID = "146000000000000100"
+	for _, tc := range []struct {
+		name     string
+		locked   []MetadataField
+		run      func(*testing.T, *testHarness)
+		keepsAll bool
+		wantKept []string
+	}{
+		{name: "identify correction", run: func(t *testing.T, h *testHarness) {
+			t.Helper()
+			runIdentify(t, h, contentID, "200", "en")
+		}},
+		{name: "corrected NFO on a manual refresh", run: func(t *testing.T, h *testHarness) {
+			t.Helper()
+			runNFOCorrection(t, h, contentID)
+		}},
+		{
+			name:   "locks hold through a correction",
+			locked: []MetadataField{FieldOverview, FieldContentRating, FieldGenres},
+			run: func(t *testing.T, h *testHarness) {
+				t.Helper()
+				runIdentify(t, h, contentID, "200", "en")
+			},
+			wantKept: []string{"overview", "tagline", "content rating", "genres"},
+		},
+		{name: "a confirmed match keeps stored values", keepsAll: true, run: func(t *testing.T, h *testHarness) {
+			t.Helper()
+			runIdentify(t, h, contentID, "100", "en")
+		}},
+		{name: "a manual refresh keeps stored values", keepsAll: true, run: func(t *testing.T, h *testHarness) {
+			t.Helper()
+			provider := &capturingMetadataProvider{response: &MetadataResult{
+				HasMetadata: true, Title: "Wrong Film", ProviderIDs: map[string]string{"tmdb": "100"},
+			}}
+			if _, err := h.service.ProcessWithProviders(t.Context(), ProcessRequest{
+				ContentID: contentID, Language: "en", Mode: ModeManualRefresh,
+			}, []Provider{provider}); err != nil {
+				t.Fatalf("ProcessWithProviders: %v", err)
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTestHarness()
+			seedDescribedWrongMatch(t, h, contentID, tc.locked...)
+			want := tc.wantKept
+			if tc.keepsAll {
+				want = describedFieldsKept(h.itemRepo.items[contentID])
+			}
+			tc.run(t, h)
+			item, err := h.itemRepo.GetByID(t.Context(), contentID)
+			if err != nil {
+				t.Fatalf("load item: %v", err)
+			}
+			if got := describedFieldsKept(item); !slices.Equal(got, want) {
+				t.Errorf("fields kept = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+// A correction to a title with no listed credits drops the wrong title's, except
+// a group a lock holds. A confirmed match leaves them alone.
+func TestCorrectionClearsCreditsTheNewMatchLacks(t *testing.T) {
+	const contentID = "146000000000000100"
+	cast, crew := actor("Wrong Actor", "Lead"), crewMember("Wrong Director", models.PersonKindDirector)
+	stored := []models.ItemPerson{cast, crew}
+	for _, tc := range []struct {
+		name         string
+		tmdb         string
+		locked       []MetadataField
+		stored       []models.ItemPerson
+		wantReplaced bool
+		wantPeople   []string
+	}{
+		{name: "no lock", tmdb: "200", stored: stored, wantReplaced: true},
+		{name: "cast lock", tmdb: "200", locked: []MetadataField{FieldCast}, stored: stored, wantReplaced: true, wantPeople: []string{"Wrong Actor"}},
+		{name: "crew lock", tmdb: "200", locked: []MetadataField{FieldCrew}, stored: stored, wantReplaced: true, wantPeople: []string{"Wrong Director"}},
+		{name: "a lock on an empty group", tmdb: "200", locked: []MetadataField{FieldCrew}, stored: []models.ItemPerson{cast}, wantReplaced: true},
+		{name: "both locked", tmdb: "200", locked: []MetadataField{FieldCast, FieldCrew}, stored: stored},
+		{name: "confirmed match", tmdb: "100", stored: stored},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, repo := newLocalPipelineHarness()
+			h.service.personRepo = stubPersonRepo{ids: []int64{1, 2}}
+			seedDescribedWrongMatch(t, h, contentID, tc.locked...)
+			repo.people[contentID] = tc.stored
+			runIdentify(t, h, contentID, tc.tmdb, "en")
+			people, replaced := h.itemRepo.replacedPeople[contentID]
+			if replaced != tc.wantReplaced {
+				t.Fatalf("ReplacePeople called = %v, want %v", replaced, tc.wantReplaced)
+			}
+			if got := personNames(people); len(got)+len(tc.wantPeople) > 0 && !slices.Equal(got, tc.wantPeople) {
+				t.Errorf("people = %v, want %v", got, tc.wantPeople)
+			}
+		})
+	}
+}
+
+// Localization rows hold the wrong title's text too, and the serving layer
+// prefers them over the base row. A correction empties them in every language,
+// whichever one the write fetched, so each falls back or takes the new match's
+// text. A lock keeps its field, and a confirmed match keeps the rows.
+func TestCorrectionClearsLocalizedTextTheNewMatchLacks(t *testing.T) {
+	const contentID = "146000000000000100"
+	for _, tc := range []struct {
+		name        string
+		language    string
+		tmdb        string
+		locked      []MetadataField
+		wantTitle   string
+		wantTagline string
+	}{
+		{name: "another language's row", language: "en", tmdb: "200"},
+		{name: "the fetched language's row", language: "fr", tmdb: "200", wantTitle: "A Film"},
+		{name: "locks keep their fields", language: "en", tmdb: "200", locked: []MetadataField{FieldName, FieldOverview},
+			wantTitle: "Mauvais Film", wantTagline: "Mauvaise accroche."},
+		{name: "a confirmed match keeps the row", language: "en", tmdb: "100",
+			wantTitle: "Mauvais Film", wantTagline: "Mauvaise accroche."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTestHarness()
+			seedDescribedWrongMatch(t, h, contentID, tc.locked...)
+			h.itemRepo.items[contentID].DefaultMetadataLanguage = "en"
+			locs := newFakeItemLocalizationRepo()
+			h.service.itemLocalizationRepo = locs
+			locs.rows[contentID+"/fr"] = &models.MediaItemLocalization{
+				ContentID: contentID, Language: "fr", Title: "Mauvais Film", Overview: "Mauvais résumé.", Tagline: "Mauvaise accroche.",
+			}
+			runIdentify(t, h, contentID, tc.tmdb, tc.language)
+			row := locs.rows[contentID+"/fr"]
+			if row.Title != tc.wantTitle || row.Tagline != tc.wantTagline {
+				t.Errorf("fr row title=%q tagline=%q, want %q and %q", row.Title, row.Tagline, tc.wantTitle, tc.wantTagline)
+			}
+		})
+	}
+}
+
+// A corrected NFO names a different title just as Identify does, so a rating
+// source only the previous match reported goes too.
+func TestManualRefresh_CorrectedNFOReplacesRatingSources(t *testing.T) {
+	const contentID = "146000000000000100"
+	h := newTestHarness()
+	seedWrongMatch(t, h, contentID)
+	repo := &fakeRatingSourceRepo{}
+	h.service.ratingSourceRepo = repo
+
+	runNFOCorrection(t, h, contentID)
+
+	if len(repo.upserts) != 1 || !repo.upserts[0].wholeSet || len(repo.upserts[0].sources) != 0 {
+		t.Fatalf("writes = %+v, want one empty Replace", repo.upserts)
+	}
+}
+
+// A refresh prefers stored text to text in a language nobody asked for, but
+// after a correction the stored text belongs to another title, so the new
+// match's original-language text stands when no language has better.
+func TestCorrectedNFOKeepsTheNewMatchsOriginalLanguageText(t *testing.T) {
+	const contentID = "146000000000000100"
+	h := newTestHarness()
+	seedDescribedWrongMatch(t, h, contentID)
+	h.itemRepo.items[contentID].DefaultMetadataLanguage = "sv"
+	h.service.SetFallbackLanguage("en")
+	nfo := &localHintStubProvider{hints: map[string]string{"tmdb": "200"}, metadata: &MetadataResult{}}
+	remote := &languageTextProvider{slug: "tmdb", types: []string{"movie"}, items: map[string]*MetadataResult{"sv": {
+		Title: "正しい映画", TitleLanguage: "ja", TitleIsFallback: true,
+		Overview: "正しいあらすじ", OverviewLanguage: "ja", ProviderIDs: map[string]string{"tmdb": "200"},
+	}}}
+
+	if _, err := h.service.ProcessWithProviders(t.Context(), ProcessRequest{
+		ContentID: contentID, Language: "sv", Mode: ModeManualRefresh,
+	}, []Provider{nfo, remote}); err != nil {
+		t.Fatalf("ProcessWithProviders: %v", err)
+	}
+	item, err := h.itemRepo.GetByID(t.Context(), contentID)
+	if err != nil {
+		t.Fatalf("load item: %v", err)
+	}
+	if item.Title != "正しい映画" || item.Overview != "正しいあらすじ" {
+		t.Errorf("item = %q / %q, want the new match's original-language text", item.Title, item.Overview)
+	}
+}
+
+// A correction that can't clear what the new match lacks fails before it stores
+// the new identity, so retrying is still a correction and clears it.
+func TestCorrectionFailingToClearCanBeRetried(t *testing.T) {
+	const contentID = "146000000000000100"
+	cleared := errors.New("connection lost")
+	type failures struct {
+		h    *testHarness
+		repo *localPipelineItemRepo
+		locs *fakeItemLocalizationRepo
+	}
+	for _, tc := range []struct {
+		name   string
+		locked []MetadataField
+		fail   func(failures, error)
+	}{
+		{name: "localized text", fail: func(f failures, err error) { f.locs.clearErr = err }},
+		{name: "credits", fail: func(f failures, err error) { f.h.itemRepo.replacePeopleErr = err }},
+		// With one group locked, the stored credits must be read to drop the other.
+		{name: "credit read", locked: []MetadataField{FieldCast}, fail: func(f failures, err error) { f.repo.peopleErr = err }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, repo := newLocalPipelineHarness()
+			h.service.personRepo = stubPersonRepo{ids: []int64{1, 2}}
+			seedDescribedWrongMatch(t, h, contentID, tc.locked...)
+			repo.people[contentID] = []models.ItemPerson{actor("Wrong Actor", "Lead"), crewMember("Wrong Director", models.PersonKindDirector)}
+			locs := newFakeItemLocalizationRepo()
+			h.service.itemLocalizationRepo = locs
+			locs.rows[contentID+"/fr"] = &models.MediaItemLocalization{ContentID: contentID, Language: "fr", Tagline: "Mauvaise accroche."}
+			provider := &capturingMetadataProvider{response: &MetadataResult{
+				HasMetadata: true, Title: "A Film", ProviderIDs: map[string]string{"tmdb": "200"},
+			}}
+			request := ProcessRequest{ContentID: contentID, ProviderIDs: map[string]string{"tmdb": "200"}, Language: "en", Mode: ModeIdentify}
+
+			f := failures{h: h, repo: repo, locs: locs}
+			tc.fail(f, cleared)
+			if _, err := h.service.ProcessWithProviders(t.Context(), request, []Provider{provider}); !errors.Is(err, cleared) {
+				t.Fatalf("ProcessWithProviders = %v, want the clear's error", err)
+			}
+			if got := h.itemRepo.items[contentID].TmdbID; got != "100" {
+				t.Fatalf("stored tmdb id = %q, want the old match until the clear succeeds", got)
+			}
+
+			tc.fail(f, nil)
+			if _, err := h.service.ProcessWithProviders(t.Context(), request, []Provider{provider}); err != nil {
+				t.Fatalf("retry: %v", err)
+			}
+			if got := locs.rows[contentID+"/fr"].Tagline; got != "" {
+				t.Errorf("fr tagline after the retry = %q, want it cleared", got)
+			}
+			people, replaced := h.itemRepo.replacedPeople[contentID]
+			if !replaced {
+				t.Error("retry did not clear the credits")
+			}
+			if slices.Contains(personNames(people), "Wrong Director") {
+				t.Errorf("credits after the retry = %v, want the wrong title's crew gone", personNames(people))
+			}
+		})
+	}
+}
+
+// The first ID both sides carry decides, in the series order TVDB, TMDB, IMDb,
+// and a correction sharing no ID has nothing showing it is the same show.
+func TestCorrectionNamesDifferentShow(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		stored, resolved map[string]string
+		want             bool
+	}{
+		{"a corrected lower-priority id", map[string]string{"tvdb": "1", "imdb": "tt1"}, map[string]string{"tvdb": "1", "imdb": "tt2"}, false},
+		{"a corrected anchor with the first shared id agreeing", map[string]string{"tvdb": "1", "tmdb": "2"}, map[string]string{"tvdb": "1", "tmdb": "3"}, false},
+		{"a different first id despite a shared later one", map[string]string{"tvdb": "1", "tmdb": "2"}, map[string]string{"tvdb": "9", "tmdb": "2"}, true},
+		{"the same show by another provider's id", map[string]string{"tvdb": "1"}, map[string]string{"tvdb": "1", "tmdb": "2"}, false},
+		{"no shared id", map[string]string{"tvdb": "1"}, map[string]string{"tmdb": "2"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := correctionNamesDifferentShow("series", tc.stored, tc.resolved); got != tc.want {
+				t.Errorf("correctionNamesDifferentShow = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

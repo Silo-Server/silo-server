@@ -101,7 +101,7 @@ describe("overlayPrefsForServer", () => {
     expect(storable).toEqual({ ...prefs, items });
   });
 
-  it("drops the revision 27 availability badge for a server at revision 26", () => {
+  it("drops the revision 29 availability badge for a server at revision 28", () => {
     const withAvailability = {
       ...prefs,
       items: {
@@ -109,13 +109,13 @@ describe("overlayPrefsForServer", () => {
         availability: { enabled: true, position: "top-left" as const },
       },
     };
-    const at26 = overlayPrefsForServer(withAvailability, {
-      manifestRevision: 26,
+    const at28 = overlayPrefsForServer(withAvailability, {
+      manifestRevision: 28,
       storedIds: new Set(),
     });
-    expect(at26.items).not.toHaveProperty("availability");
+    expect(at28.items).not.toHaveProperty("availability");
     expect(
-      overlayPrefsForServer(withAvailability, { manifestRevision: 27, storedIds: new Set() }),
+      overlayPrefsForServer(withAvailability, { manifestRevision: 29, storedIds: new Set() }),
     ).toEqual(withAvailability);
   });
 });

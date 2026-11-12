@@ -1,5 +1,6 @@
 import { buildLibraryCollectionCatalogHref } from "./catalogSearchParams";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSectionTitle } from "@/lib/sectionTitle";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { LayoutDashboard } from "lucide-react";
@@ -30,6 +31,7 @@ import { useUICustomization } from "@/hooks/useUICustomization";
 import { carouselCardWidthClasses } from "@/lib/uiCustomization";
 import { useSectionRefreshSignal } from "./homeSurfaceRefresh";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
+import { useT, type Translate } from "@/i18n";
 
 interface LibraryRecommendedProps {
   libraryId: number;
@@ -51,6 +53,7 @@ export default function LibraryRecommended({
   libraryType = "",
   onHeroStateChange,
 }: LibraryRecommendedProps) {
+  const t = useT();
   const queryClient = useQueryClient();
   const {
     data,
@@ -61,6 +64,7 @@ export default function LibraryRecommended({
     isFetching: layoutFetching,
   } = useLibraryLayout(libraryId);
   const { data: sectionRefreshSignal = 0 } = useSectionRefreshSignal();
+  const sectionTitle = useSectionTitle();
   const [loadedSections, setLoadedSections] = useState<Map<string, ResolvedSection>>(new Map());
   const [failedIds, setFailedIds] = useState<Set<string>>(new Set());
   const [inFlightIds, setInFlightIds] = useState<Set<string>>(new Set());
@@ -252,7 +256,7 @@ export default function LibraryRecommended({
   if (layoutUnavailable) {
     return (
       <PageUnavailable
-        title="Couldn't load recommendations"
+        title={t("web.library.recommended.loadFailed")}
         description={loadErrorDescription(error)}
         onRetry={() => void refetch()}
         retrying={layoutFetching}
@@ -270,13 +274,13 @@ export default function LibraryRecommended({
 
   return (
     <div className="space-y-10 sm:space-y-12">
-      {renderHeroSlot(viewModel.hero, retrySection, refreshSection, libraryId, libraryType)}
+      {renderHeroSlot(t, viewModel.hero, retrySection, refreshSection, libraryId, libraryType)}
       {/* A layout refetch (after playback, a library change, a reconnect)
           failed: the cached layout stays, and the layout can be retried. */}
       {isError ? (
         <div className="px-4 sm:px-6 lg:px-10 xl:px-12">
           <RefreshFailedNotice
-            message="Couldn't refresh recommendations."
+            message={t("web.library.recommended.refreshFailed")}
             error={error}
             onRetry={() => void refetch()}
             retrying={layoutFetching}
@@ -299,12 +303,12 @@ export default function LibraryRecommended({
           return (
             <SectionErrorRow
               key={slot.layout.id}
-              title={slot.layout.title}
+              title={sectionTitle(slot.layout)}
               onRetry={() => retrySection(slot.layout.id)}
             />
           );
         }
-        return <SectionLoadingRow key={slot.layout.id} title={slot.layout.title} />;
+        return <SectionLoadingRow key={slot.layout.id} title={sectionTitle(slot.layout)} />;
       })}
 
       {/* Pinned Collections */}
@@ -314,6 +318,7 @@ export default function LibraryRecommended({
 }
 
 function renderHeroSlot(
+  t: Translate,
   hero: HomeSectionSlot | null,
   retrySection: (sectionId: string) => void,
   refreshSection: (sectionId: string) => void,
@@ -346,15 +351,13 @@ function renderHeroSlot(
     return (
       <section className="px-4 pt-24 sm:px-6 lg:px-10 xl:px-12">
         <div className="surface-panel flex items-center justify-between rounded-[1.8rem] border-0 px-5 py-6">
-          <p className="text-muted-foreground text-sm">
-            The featured section could not be loaded right now.
-          </p>
+          <p className="text-muted-foreground text-sm">{t("web.library.recommended.heroFailed")}</p>
           <button
             type="button"
             onClick={() => retrySection(hero.layout.id)}
             className="border-border hover:bg-muted/40 rounded-lg border px-4 py-2 text-sm font-medium"
           >
-            Retry section
+            {t("web.library.recommended.retrySection")}
           </button>
         </div>
       </section>
@@ -371,30 +374,31 @@ function renderHeroSlot(
 // The library has media but this page has no sections. Settings > Home Screen
 // edits a library page once that library is picked as its scope.
 function NoSectionsState() {
+  const t = useT();
   const actingAdmin = useIsActingAdmin();
 
   return (
     <div className="surface-panel flex min-h-64 flex-col items-center justify-center gap-3 rounded-[1.8rem] border-0 px-6 py-10 text-center">
       <LayoutDashboard className="text-muted-foreground h-10 w-10" aria-hidden="true" />
       <div className="space-y-1">
-        <p className="text-sm font-medium">No sections yet</p>
+        <p className="text-sm font-medium">{t("web.library.recommended.noSections")}</p>
         <p className="text-muted-foreground max-w-sm text-sm">
           {actingAdmin
-            ? "Add sections for everyone in Admin Sections, or just for you in Home Screen settings."
-            : "Add sections to this library page in Home Screen settings."}
+            ? t("web.library.recommended.noSectionsAdmin")
+            : t("web.library.recommended.noSectionsBody")}
         </p>
       </div>
       <div className="flex flex-wrap items-center justify-center gap-4">
         {actingAdmin ? (
           <Link to="/admin/sections" className="text-primary text-sm font-medium hover:underline">
-            Manage sections
+            {t("web.library.recommended.manageSections")}
           </Link>
         ) : null}
         <Link
           to="/settings/home-screen"
           className="text-primary text-sm font-medium hover:underline"
         >
-          Customize Home Screen
+          {t("web.library.recommended.customize")}
         </Link>
       </div>
     </div>
@@ -410,17 +414,20 @@ function SectionLoadingRow({ title }: { title: string }) {
 }
 
 function SectionErrorRow({ title, onRetry }: { title: string; onRetry: () => void }) {
+  const t = useT();
   return (
     <section className="space-y-3 px-4 sm:px-6 lg:px-10 xl:px-12">
       <h2 className="text-foreground text-xl font-semibold tracking-tight">{title}</h2>
       <div className="surface-panel flex items-center justify-between rounded-[1.4rem] border-0 px-5 py-4">
-        <p className="text-muted-foreground text-sm">This section could not be loaded right now.</p>
+        <p className="text-muted-foreground text-sm">
+          {t("web.library.recommended.sectionFailed")}
+        </p>
         <button
           type="button"
           onClick={onRetry}
           className="border-border hover:bg-muted/40 rounded-lg border px-4 py-2 text-sm font-medium"
         >
-          Retry
+          {t("common.retry")}
         </button>
       </div>
     </section>

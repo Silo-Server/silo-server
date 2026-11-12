@@ -1,6 +1,7 @@
 import type { ButtonHTMLAttributes, CSSProperties, ReactNode, Ref } from "react";
 import { EyeOff, GripVertical } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { SelectCheckbox } from "./SelectCheckbox";
 
@@ -43,7 +44,8 @@ export interface ListRowProps {
 export function MetaDot() {
   return (
     <span aria-hidden className="mx-[7px] inline-block opacity-55">
-      ·
+      {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a decorative separator, hidden from assistive tech */}
+      {"·"}
     </span>
   );
 }
@@ -57,12 +59,13 @@ export function Grip({
   collapsed: boolean;
   handleProps: NonNullable<ListRowProps["handleProps"]>;
 }) {
+  const t = useT();
   const { ref, className, ...rest } = handleProps;
   return (
     <button
       ref={ref}
       type="button"
-      aria-label={`Move ${title}`}
+      aria-label={t("web.ui.listRow.move", { title })}
       className={cn(
         "text-muted-foreground/70 hover:text-foreground focus-visible:ring-ring/50 grid w-7 cursor-grab touch-none place-items-center rounded-lg outline-none focus-visible:ring-[3px] aria-disabled:cursor-not-allowed aria-disabled:opacity-50",
         collapsed ? "h-[30px]" : "h-9",
@@ -110,12 +113,12 @@ export function ListRow({
       data-highlighted={highlighted || undefined}
       data-selected={selection?.selected || undefined}
       className={cn(
-        "group/row hover:bg-accent/60 relative grid items-center gap-2 rounded-[18px] py-[11px] pr-3 pl-2 sm:gap-3.5",
-        "before:bg-border/75 before:absolute before:top-0 before:right-4 before:h-px first:before:hidden hover:before:hidden [&:hover+li]:before:hidden",
+        "group/row hover:bg-accent/60 relative grid items-center gap-2 rounded-[18px] py-[11px] ps-2 pe-3 sm:gap-3.5",
+        "before:bg-border/75 before:absolute before:end-4 before:top-0 before:h-px first:before:hidden hover:before:hidden [&:hover+li]:before:hidden",
         // Under 1024px the ⋯ column widens to a 44px touch target.
         lead
-          ? "grid-cols-[28px_48px_minmax(0,1fr)_auto_44px] before:left-[124px] sm:grid-cols-[28px_74px_minmax(0,1fr)_auto_44px] lg:grid-cols-[28px_74px_minmax(0,1fr)_auto_36px]"
-          : "grid-cols-[48px_minmax(0,1fr)_auto_44px] pl-3 before:left-[96px] sm:grid-cols-[74px_minmax(0,1fr)_auto_44px] lg:grid-cols-[74px_minmax(0,1fr)_auto_36px]",
+          ? "grid-cols-[28px_48px_minmax(0,1fr)_auto_44px] before:start-[124px] sm:grid-cols-[28px_74px_minmax(0,1fr)_auto_44px] lg:grid-cols-[28px_74px_minmax(0,1fr)_auto_36px]"
+          : "grid-cols-[48px_minmax(0,1fr)_auto_44px] ps-3 before:start-[96px] sm:grid-cols-[74px_minmax(0,1fr)_auto_44px] lg:grid-cols-[74px_minmax(0,1fr)_auto_36px]",
         collapsed &&
           "border-muted-foreground/30 bg-background/40 my-1.5 border border-dashed py-[5px] before:hidden [&+li]:before:hidden",
         selection?.selected && "bg-accent/75",

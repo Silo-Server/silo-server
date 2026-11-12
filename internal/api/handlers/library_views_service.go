@@ -82,8 +82,8 @@ func capSectionItemLimit(s sections.ResolvedSection, limit int) sections.Resolve
 // effective item limit, as homeSectionRow does for one row. Most fetchers
 // stop at the row's limit already, but an admin curated list returns every
 // configured item, so without the cut a capped aggregate read would answer
-// more cards than item_limit allows. A non-positive limit (an uncapped read,
-// including every /api/v1 read) returns withItems as is.
+// more cards than item_limit allows. A non-positive limit (an uncapped read)
+// returns withItems as is.
 func cutCappedSectionItems(withItems []sections.SectionWithItems, limit int) []sections.SectionWithItems {
 	if limit <= 0 {
 		return withItems
@@ -94,10 +94,6 @@ func cutCappedSectionItems(withItems []sections.SectionWithItems, limit int) []s
 		}
 	}
 	return withItems
-}
-
-func sectionViewerFromRequest(r *http.Request) SectionViewer {
-	return SectionViewer{Access: requestAccessFilter(r), ImageSize: requestImageSize(r), Web: IsWebClientFamily(r.Header.Get(clientFamilyHeader))}
 }
 
 // IsWebClientFamily reports whether an X-Silo-Client-Family value names the
@@ -144,13 +140,6 @@ type LibraryCollectionTabEntryView = libraryTabCollection
 
 // LibraryCollectionTabUngroupedView is the tab's ungrouped collections.
 type LibraryCollectionTabUngroupedView = libraryTabUngrouped
-
-// HomeLayout answers the home page's section layout for the profile on the
-// context.
-func (h *SectionHandler) HomeLayout(ctx context.Context, viewer SectionViewer) (SectionLayoutView, error) {
-	view, err := h.HomeLayoutWithItems(ctx, viewer, 0)
-	return view.Layout, err
-}
 
 // requireViewableLibrary is the gate every profile-scoped section read
 // shares: the viewer scope must admit the library and, when a folder
@@ -215,14 +204,22 @@ func sectionLayoutOf(resolved []sections.ResolvedSection) SectionLayoutView {
 			ItemLimit:   s.ItemLimit,
 			IsCustom:    s.IsCustom,
 			Customized:  s.Customized,
+			TitleKey:    s.TitleKey,
+			TitleArgs:   s.TitleArgs,
 		})
 	}
 	return resp
 }
 
-// LibrarySections answers every section of the library with its items, each
+// LibrarySections answers every section of the library that has items, each
 // row capped at viewer.ItemLimitCap items when it is set.
 func (h *SectionHandler) LibrarySections(ctx context.Context, libraryID int, viewer SectionViewer) (SectionsView, error) {
+	return h.librarySections(ctx, libraryID, viewer, false)
+}
+
+// librarySections is LibrarySections. With keepEmptyRows, it answers sections
+// with no items, other than an off-season seasonal row, as v1 always has.
+func (h *SectionHandler) librarySections(ctx context.Context, libraryID int, viewer SectionViewer, keepEmptyRows bool) (SectionsView, error) {
 	if err := h.requireViewableLibrary(ctx, libraryID); err != nil {
 		return SectionsView{}, err
 	}
@@ -236,7 +233,11 @@ func (h *SectionHandler) LibrarySections(ctx context.Context, libraryID int, vie
 	withItems := h.fetcher.FetchAll(ctx, resolved, &libraryID, nil, userID, profileID, accessFilter)
 	withItems = cutCappedSectionItems(withItems, viewer.ItemLimitCap)
 	withItems = applyDiversityFilter(withItems)
-	withItems = dropEmptySeasonalSections(withItems)
+	if keepEmptyRows {
+		withItems = dropEmptySeasonalSections(withItems)
+	} else {
+		withItems = dropEmptySections(withItems)
+	}
 	return h.buildSections(ctx, withItems, &libraryID, viewer.Access, viewer.Artwork(), viewer.IncludeCardAvailability), nil
 }
 
@@ -286,6 +287,8 @@ func (h *SectionHandler) librarySectionItems(ctx context.Context, libraryID int,
 				IsCustom:    withItems.IsCustom,
 				Customized:  withItems.Customized,
 				Items:       []sectionItemResponse{},
+				TitleKey:    withItems.TitleKey,
+				TitleArgs:   withItems.TitleArgs,
 			}, nil
 		}
 		return resp.Sections[0], nil
@@ -322,7 +325,7 @@ func (h *LibraryCollectionHandler) LibraryUserCollections(ctx context.Context, l
 	}
 	collections = h.withVisibleItemCounts(ctx, userID, profileID, collections)
 	for i := range collections {
-		collections[i].PosterURL = h.presignGPURLCtx(ctx, collections[i].PosterPath)
+		collections[i].PosterURL = personalCollectionPosterURL(ctx, h.ArtworkResolver, collections[i].ID, collections[i].PosterPath)
 	}
 	return collections, nil
 }
@@ -406,7 +409,7 @@ func (h *LibraryCollectionHandler) LibraryCollectionsTab(ctx context.Context, li
 			}
 			sorted := applyUserCollectionSort(userCollections, g.DefaultSortMode)
 			for i := range sorted {
-				posterURL := h.presignGPURLCtx(ctx, sorted[i].PosterPath)
+				posterURL := personalCollectionPosterURL(ctx, h.ArtworkResolver, sorted[i].ID, sorted[i].PosterPath)
 				creatorProfileID := sorted[i].CreatorProfileID
 				colls = append(colls, libraryTabCollection{
 					ID:               sorted[i].ID,
@@ -468,43 +471,6 @@ func (h *LibraryCollectionHandler) libraryCollectionResponsesOf(ctx context.Cont
 type CollectionItemPage struct {
 	Limit  int
 	Offset int
-}
-
-// paged reports whether the caller asked for a page rather than the whole
-// collection.
-func (p CollectionItemPage) paged() bool {
-	return p.Limit > 0
-}
-
-// LibraryCollectionItems answers the items of one visible collection of the
-// library, in curated order or as the smart query resolves them. With a
-// page it answers that window of the order and whether more follow; the
-// zero page answers everything and never reports more.
-func (h *LibraryCollectionHandler) LibraryCollectionItems(ctx context.Context, libraryID int, collectionID string, access catalog.AccessFilter, page CollectionItemPage) ([]CollectionItemView, bool, error) {
-	if err := h.requireViewableLibrary(ctx, libraryID); err != nil {
-		return nil, false, err
-	}
-	collection, err := h.repo.GetByID(ctx, collectionID)
-	if err != nil || !collectionSpansLibrary(collection, libraryID) || collection.Visibility != catalog.LibraryCollectionVisibilityVisible {
-		return nil, false, apiError(http.StatusNotFound, "not_found", "Collection not found")
-	}
-	var (
-		items   []itemListResponse
-		hasMore bool
-	)
-	if catalog.IsLiveQueryType(collection.CollectionType) {
-		items, hasMore, err = h.loadLiveCollectionItems(ctx, collection, access, page)
-	} else {
-		items, hasMore, err = h.loadOrderedCollectionItems(ctx, collectionID, access, page)
-	}
-	if err != nil {
-		var queryErr smartCollectionQueryError
-		if errors.As(err, &queryErr) {
-			return nil, false, apiError(http.StatusBadRequest, "bad_request", err.Error())
-		}
-		return nil, false, apiError(http.StatusInternalServerError, "internal_error", "Failed to load collection items")
-	}
-	return items, hasMore, nil
 }
 
 // collectionSpansLibrary reports whether the collection is a member of the

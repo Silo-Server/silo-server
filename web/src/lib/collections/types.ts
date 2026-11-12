@@ -1,4 +1,5 @@
 import type { LibraryCollection } from "@/api/types";
+import { t, type MessageKey } from "@/i18n";
 
 // List-backed collections follow an MDBList or TMDB list, and
 // only they can be synced: a manual collection has no list, and a smart one
@@ -21,19 +22,29 @@ export type SyncedSource =
   | "tmdb_franchise"
   | "tmdb_discover";
 
-export const COLLECTION_KIND_LABEL: Readonly<Record<CollectionKind, string>> = {
-  manual: "Manual",
-  smart: "Smart",
-  synced: "Synced list",
+const COLLECTION_KIND_LABEL: Readonly<Record<CollectionKind, MessageKey>> = {
+  manual: "web.collections.types.kindManual",
+  smart: "web.collections.types.kindSmart",
+  synced: "web.collections.types.kindSynced",
 };
 
-export const SYNCED_SOURCE_LABEL: Readonly<Record<SyncedSource, string>> = {
-  mdblist: "MDBList",
-  tmdb_chart: "TMDB chart",
-  tmdb_list: "TMDB list",
-  tmdb_franchise: "TMDB franchise",
-  tmdb_discover: "TMDB Discover",
+const SYNCED_SOURCE_LABEL: Readonly<Record<SyncedSource, MessageKey>> = {
+  mdblist: "web.collections.types.sourceMdblist",
+  tmdb_chart: "web.collections.types.sourceTmdbChart",
+  tmdb_list: "web.collections.types.sourceTmdbList",
+  tmdb_franchise: "web.collections.types.sourceTmdbFranchise",
+  tmdb_discover: "web.collections.types.sourceTmdbDiscover",
 };
+
+/** "Manual", "Smart", "Synced list". */
+export function collectionKindLabel(kind: CollectionKind): string {
+  return t(COLLECTION_KIND_LABEL[kind]);
+}
+
+/** "MDBList", "TMDB chart": where a synced list comes from. */
+export function syncedSourceLabel(source: SyncedSource): string {
+  return t(SYNCED_SOURCE_LABEL[source]);
+}
 
 export function collectionKindOf(collectionType: string): CollectionKind {
   if (collectionType === "manual" || collectionType === "smart") return collectionType;
@@ -76,6 +87,6 @@ export function collectionTypeLabel(collection: {
   const kind = collectionKindOf(collection.collection_type);
   const source = syncedSourceOf(collection.collection_type, collection.source_config);
   return source
-    ? `${COLLECTION_KIND_LABEL[kind]} · ${SYNCED_SOURCE_LABEL[source]}`
-    : COLLECTION_KIND_LABEL[kind];
+    ? `${collectionKindLabel(kind)} · ${syncedSourceLabel(source)}`
+    : collectionKindLabel(kind);
 }

@@ -119,6 +119,13 @@ func (s *MetadataService) LocalImagePreview(ctx context.Context, contentID strin
 	if err != nil {
 		return "", err
 	}
+	// A sidecar may be a HEIC or AVIF under a .jpg name; the image cache
+	// renders those the same way when the image is applied.
+	if imageutil.NeedsRasterizing(data) {
+		if data, err = imageutil.Rasterize(data); err != nil {
+			return "", err
+		}
+	}
 	preview, err := imageutil.EncodeWebPWidth(data, localArtworkPreviewWidth)
 	if err != nil {
 		return "", err

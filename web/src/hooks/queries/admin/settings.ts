@@ -30,6 +30,7 @@ import { adminKeys, compatKeys, settingsKeys, themeKeys } from "../keys";
 import { invalidateAdminDefaultQueries } from "../settingValues";
 import { adminDefaultSettingFor } from "@/lib/settingsAdminDefaults";
 import { toast } from "sonner";
+import { t, type MessageKey } from "@/i18n";
 
 /**
  * server_settings keys surfaced by GET /settings/overlay-config, in the order
@@ -298,7 +299,9 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
     },
     onError: (err, intent) => {
       if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
-      toast.error(err instanceof Error ? err.message : "Failed to update settings");
+      toast.error(
+        err instanceof Error ? err.message : t("web.admin.settings.hooks.settings.updateFailed"),
+      );
     },
   });
   const capture = (values: SettingsValues) => ({
@@ -321,7 +324,11 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
           },
         });
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Reload settings before saving.");
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : t("web.admin.settings.hooks.settings.reloadBeforeSaving"),
+        );
       }
     },
     mutateAsync: async (values: SettingsValues) => {
@@ -329,7 +336,11 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
       try {
         intent = capture(values);
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Reload settings before saving.");
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : t("web.admin.settings.hooks.settings.reloadBeforeSaving"),
+        );
         throw error;
       }
       const result = await mutation.mutateAsync(intent);
@@ -409,7 +420,9 @@ export function useUpdateServerSetting(displayed?: SettingsValues) {
     },
     onError: (err, intent) => {
       if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
-      toast.error(err instanceof Error ? err.message : "Failed to update setting");
+      toast.error(
+        err instanceof Error ? err.message : t("web.admin.settings.hooks.settings.updateOneFailed"),
+      );
     },
   });
   const capture = (values: { key: string; value: string }) => ({
@@ -434,7 +447,11 @@ export function useUpdateServerSetting(displayed?: SettingsValues) {
           },
         });
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Reload settings before saving.");
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : t("web.admin.settings.hooks.settings.reloadBeforeSaving"),
+        );
       }
     },
     mutateAsync: async (values: { key: string; value: string }) => {
@@ -530,7 +547,11 @@ export function useUpdateJellyfinCompatSettings() {
     },
     onError: (err, intent) => {
       if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
-      toast.error(err instanceof Error ? err.message : "Failed to update Jellyfin compatibility");
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : t("web.admin.settings.hooks.settings.jellyfinCompat.updateFailed"),
+      );
     },
   });
   const capture = (body: JellyfinCompatSettingsPatch) => ({
@@ -544,7 +565,11 @@ export function useUpdateJellyfinCompatSettings() {
       try {
         mutation.mutate(capture(body));
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Reload settings before saving.");
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : t("web.admin.settings.hooks.settings.reloadBeforeSaving"),
+        );
       }
     },
     mutateAsync: async (body: JellyfinCompatSettingsPatch) => {
@@ -574,7 +599,11 @@ function jellyfinWebIntent(body: JellyfinCompatWebInstallRequest = {}): Jellyfin
 function jellyfinWebAuthorityActive(intent: JellyfinWebIntent): boolean {
   return intent.profileContext !== null && isCapturedProfileAuthorityActive(intent.profileContext);
 }
-function useJellyfinWebCommand(kind: "install" | "remove", started: string, failed: string) {
+function useJellyfinWebCommand(
+  kind: "install" | "remove",
+  started: MessageKey,
+  failed: MessageKey,
+) {
   const queryClient = useQueryClient();
   return useMutation({
     retry: false,
@@ -599,7 +628,7 @@ function useJellyfinWebCommand(kind: "install" | "remove", started: string, fail
     },
     onSuccess: async (_result, intent) => {
       if (!intent.profileContext || !jellyfinWebAuthorityActive(intent)) return;
-      toast.success(started);
+      toast.success(t(started));
       await Promise.all([
         queryClient.invalidateQueries({
           queryKey: jellyfinCompatStatusKey(intent.profileContext),
@@ -611,7 +640,7 @@ function useJellyfinWebCommand(kind: "install" | "remove", started: string, fail
     },
     onError: (err, intent) => {
       if (!jellyfinWebAuthorityActive(intent)) return;
-      toast.error(err instanceof Error ? err.message : failed);
+      toast.error(err instanceof Error ? err.message : t(failed));
     },
   });
 }
@@ -619,8 +648,8 @@ function useJellyfinWebCommand(kind: "install" | "remove", started: string, fail
 export function useInstallJellyfinCompatWeb() {
   const mutation = useJellyfinWebCommand(
     "install",
-    "Jellyfin Web install started",
-    "Failed to install Jellyfin Web assets",
+    "web.admin.settings.hooks.settings.jellyfinWeb.installStarted",
+    "web.admin.settings.hooks.settings.jellyfinWeb.installFailed",
   );
   return {
     ...mutation,
@@ -635,8 +664,8 @@ export function useInstallJellyfinCompatWeb() {
 export function useRemoveJellyfinCompatWeb() {
   const mutation = useJellyfinWebCommand(
     "remove",
-    "Jellyfin Web removal started",
-    "Failed to remove Jellyfin Web assets",
+    "web.admin.settings.hooks.settings.jellyfinWeb.removeStarted",
+    "web.admin.settings.hooks.settings.jellyfinWeb.removeFailed",
   );
   return {
     ...mutation,

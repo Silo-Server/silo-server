@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useOptionalAuth } from "@/hooks/useAuth";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
+import { englishText, useT, type Translate } from "@/i18n";
 import {
   copyWatchTogetherInvite,
   endWatchTogetherRoom,
@@ -30,17 +31,17 @@ import { BrowseShelf, type BrowseSelection } from "./room/browse/BrowseShelf";
 import { CandidateStage, type CandidateChoice } from "./room/browse/CandidateStage";
 import { itemHeadline } from "./room/stage/StagedHero";
 
-function describeRoomError(error: unknown) {
-  if (error === "not_found") return "Room not found.";
-  if (error === "ended") return "That watch party is no longer active.";
-  if (error === "forbidden") return "You don't have access to this watch party.";
-  if (error === "host_left" || error === "room_closed") return "The room has ended.";
+function describeRoomError(error: unknown, t: Translate) {
+  if (error === "not_found") return t("web.watchTogether.common.roomNotFound");
+  if (error === "ended") return t("web.watchTogether.room.ended");
+  if (error === "forbidden") return t("web.watchTogether.room.forbidden");
+  if (error === "host_left" || error === "room_closed") return t("web.watchTogether.room.closed");
   if (error instanceof ApiClientError) {
-    if (error.status === 404) return "Room not found.";
-    if (error.status === 410) return "That room is no longer active.";
+    if (error.status === 404) return t("web.watchTogether.common.roomNotFound");
+    if (error.status === 410) return t("web.watchTogether.common.roomInactive");
     return error.message;
   }
-  return error instanceof Error ? error.message : "Room is unavailable.";
+  return error instanceof Error ? error.message : t("web.watchTogether.room.unavailable");
 }
 
 type WatchTogetherRoomLocationState = {
@@ -85,7 +86,8 @@ function RoomTerminalState({
  * puts a candidate on the stage; confirming there stages or suggests it.
  */
 export default function WatchTogetherRoomPage() {
-  useDocumentTitle("Watch Party");
+  const t = useT();
+  useDocumentTitle(t("watchParty.title"));
   const { roomId } = useParams<{ roomId: string }>();
   const location = useLocation();
   const navigate = useNavigate();
@@ -138,7 +140,8 @@ export default function WatchTogetherRoomPage() {
       token: roomToken,
       userId: auth.user.id,
       profileId: auth.profile.id,
-      title: stagedDetail.data ? itemHeadline(stagedDetail.data) : undefined,
+      // Stored with the room, so English like the title the start sheet stores.
+      title: stagedDetail.data ? itemHeadline(stagedDetail.data, englishText) : undefined,
     });
   }, [room, roomToken, auth?.user, auth?.profile, stagedDetail.data]);
   useEffect(() => {
@@ -215,9 +218,13 @@ export default function WatchTogetherRoomPage() {
     });
     void connection.createSuggestion(draft).catch((error: unknown) => {
       if (!(error instanceof StaleApiRequestContextError))
-        toast.error(error instanceof Error ? error.message : "Could not add the first suggestion");
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : t("web.watchTogether.room.firstSuggestionFailed"),
+        );
     });
-  }, [connection, room, roomId, roomToken]);
+  }, [connection, room, roomId, roomToken, t]);
 
   const rejoinPlayback = useCallback(() => {
     if (!room?.selected_content_id || !roomId || !roomToken) return;
@@ -287,14 +294,16 @@ export default function WatchTogetherRoomPage() {
             poster_url: choice.poster_url,
           }),
         );
-        toast.success(`Suggested ${choice.title}`);
+        toast.success(t("web.watchTogether.room.suggested", { title: choice.title }));
         setCandidate(null);
       } catch (error) {
         if (error instanceof StaleApiRequestContextError) return;
-        toast.error(error instanceof Error ? error.message : "Could not suggest that");
+        toast.error(
+          error instanceof Error ? error.message : t("web.watchTogether.common.suggestFailed"),
+        );
       }
     },
-    [actions, browseVerb, connection, roomId, roomToken],
+    [actions, browseVerb, connection, roomId, roomToken, t],
   );
 
   const handleVoteToggle = useCallback(
@@ -305,12 +314,14 @@ export default function WatchTogetherRoomPage() {
         else await connection.vote(suggestion.id);
       } catch (error) {
         if (!(error instanceof StaleApiRequestContextError))
-          toast.error(error instanceof Error ? error.message : "Vote failed");
+          toast.error(
+            error instanceof Error ? error.message : t("web.watchTogether.room.voteFailed"),
+          );
       } finally {
         setBusySuggestion(null);
       }
     },
-    [connection],
+    [connection, t],
   );
   const handleDelete = useCallback(
     async (id: string) => {
@@ -319,12 +330,14 @@ export default function WatchTogetherRoomPage() {
         await connection.deleteSuggestion(id);
       } catch (error) {
         if (!(error instanceof StaleApiRequestContextError))
-          toast.error(error instanceof Error ? error.message : "Could not remove that");
+          toast.error(
+            error instanceof Error ? error.message : t("web.watchTogether.room.removeFailed"),
+          );
       } finally {
         setBusySuggestion(null);
       }
     },
-    [connection],
+    [connection, t],
   );
   // Host-pick lobbies still take suggestions; the host queues one by staging
   // its item, which is the same move as picking it from the shelf.
@@ -343,9 +356,9 @@ export default function WatchTogetherRoomPage() {
     ) : null;
   const handleCopyInvite = useCallback(() => {
     void copyWatchTogetherInvite(room?.invite_path, room?.code).then((copied) => {
-      if (!copied) toast.error("Invite link isn't ready yet");
+      if (!copied) toast.error(t("web.watchTogether.room.inviteNotReady"));
     });
-  }, [room?.code, room?.invite_path]);
+  }, [room?.code, room?.invite_path, t]);
   const handleEnd = useCallback(async () => {
     setEnding(true);
     try {
@@ -358,11 +371,11 @@ export default function WatchTogetherRoomPage() {
   if (!roomId || !roomToken) {
     return (
       <RoomTerminalState
-        title="This invite link is incomplete"
-        description="The link is missing its access token. Ask the host for a fresh invite, or join with a room code."
+        title={t("web.watchTogether.room.incompleteTitle")}
+        description={t("web.watchTogether.room.incompleteBody")}
       >
         <Button type="button" onClick={() => navigate("/rooms")}>
-          Join with a code
+          {t("watchParty.page.joinWithCode")}
         </Button>
       </RoomTerminalState>
     );
@@ -370,11 +383,11 @@ export default function WatchTogetherRoomPage() {
   if (connection.closedReason) {
     return (
       <RoomTerminalState
-        title={describeRoomError(connection.closedReason)}
-        description="Start a new watch party or join another room to keep watching together."
+        title={describeRoomError(connection.closedReason, t)}
+        description={t("web.watchTogether.room.closedBody")}
       >
         <Button type="button" onClick={() => navigate("/rooms")}>
-          Back to Watch Party
+          {t("web.watchTogether.room.backToHub")}
         </Button>
       </RoomTerminalState>
     );
@@ -382,14 +395,14 @@ export default function WatchTogetherRoomPage() {
   if (connection.replacementReason) {
     return (
       <RoomTerminalState
-        title="Watch Party joined on another device"
+        title={t("web.watchTogether.room.replacedTitle")}
         description={connection.replacementReason}
       >
         <Button type="button" onClick={connection.rejoinRoom}>
-          Rejoin Watch Party
+          {t("web.watchTogether.room.rejoin")}
         </Button>
         <Button type="button" variant="outline" onClick={() => navigate("/rooms")}>
-          Back to Watch Party
+          {t("web.watchTogether.room.backToHub")}
         </Button>
       </RoomTerminalState>
     );
@@ -413,7 +426,7 @@ export default function WatchTogetherRoomPage() {
           <div className="overlay-scroll flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-x-hidden overflow-y-auto px-4 py-4 sm:px-5">
             {!room ? (
               <div className="text-muted-foreground flex flex-1 items-center justify-center text-sm">
-                Connecting to the room…
+                {t("web.watchTogether.room.connecting")}
               </div>
             ) : (
               <>
@@ -427,7 +440,7 @@ export default function WatchTogetherRoomPage() {
                       verb={browseVerb}
                       replaces={
                         browseVerb === "stage" && staged && stagedDetail.data
-                          ? itemHeadline(stagedDetail.data)
+                          ? itemHeadline(stagedDetail.data, t)
                           : undefined
                       }
                       busy={actions.busy === "stage"}
@@ -503,7 +516,9 @@ export default function WatchTogetherRoomPage() {
                   verb={browseVerb === "stage" ? "pick" : "suggest"}
                   collapsible={shelfCollapsible}
                   collapsedLabel={
-                    isPlaying ? "Suggest something for after" : "Change what's up next"
+                    isPlaying
+                      ? t("web.watchTogether.room.suggestAfter")
+                      : t("web.watchTogether.room.changeUpNext")
                   }
                   open={shelfOpen}
                   onOpenChange={setShelfOpen}
@@ -519,13 +534,17 @@ export default function WatchTogetherRoomPage() {
           now={now}
           footer={
             isHost
-              ? "If you drop, the room waits 2 minutes for you before it ends."
+              ? t("web.watchTogether.room.hostFooter")
               : room
-                ? `Host: ${room.members?.find((m) => m.is_host)?.display_name ?? "unknown"} · ${
-                    room.guest_control_policy === "guest_play_pause"
-                      ? "guests can pause"
-                      : "host controls playback"
-                  }`
+                ? t("web.watchTogether.room.guestFooter", {
+                    host:
+                      room.members?.find((m) => m.is_host)?.display_name ??
+                      t("web.watchTogether.room.unknownHost"),
+                    policy:
+                      room.guest_control_policy === "guest_play_pause"
+                        ? t("web.watchTogether.common.policyGuestPlayPause")
+                        : t("web.watchTogether.common.policyHostOnly"),
+                  })
                 : undefined
           }
         />

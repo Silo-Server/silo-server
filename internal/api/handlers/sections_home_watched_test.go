@@ -10,6 +10,7 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
@@ -343,12 +344,12 @@ func TestHomePreferenceFiltersOnlyHomeResponses(t *testing.T) {
 	}
 	resolved := []sections.ResolvedSection{sectionItems[0].ResolvedSection}
 	prepared, states := handler.filterWatchedHomeSections(ctx, sectionItems, resolved)
-	home := handler.buildSectionsWithUserStates(ctx, prepared, nil, requestAccessFilter(req), requestArtwork(req), states, false)
+	home := handler.buildSectionsWithUserStates(ctx, prepared, nil, requestAccessFilter(req), imagesize.Request{}, states, false)
 	if got := home.Sections[0].Items; len(got) != 1 || got[0].ContentID != "unwatched" {
 		t.Fatalf("Home response items = %#v, want only unwatched", got)
 	}
 
-	library := handler.buildSectionsResponse(req, sectionItems, nil)
+	library := handler.buildSections(req.Context(), sectionItems, nil, requestAccessFilter(req), imagesize.Request{}, false)
 	if got := len(library.Sections[0].Items); got != 2 {
 		t.Fatalf("non-Home response has %d items, want 2", got)
 	}

@@ -2,10 +2,10 @@
 
 A profile verification token (`X-Profile-Token`) proves that the caller entered a
 PIN-locked profile's PIN in the current login session. `POST
-/api/v2/profiles/{id}/verify-pin` and v1 `POST /profiles/{id}/verify-pin` mint it,
-and a remote-playback device sign-in returns one for the approved profile. The
-viewer gate (`access.VerifyProfileForRequest`) and the v1 household check
-(`handlers.verifyProfileTokenFor`) accept it through one function,
+/api/v2/profiles/{id}/verify-pin` (`verifyProfilePIN`) mints it, and a
+remote-playback device sign-in returns one for the approved profile. The viewer
+gate (`access.VerifyProfileForRequest`) and the household-management check
+(`handlers.canManageHouseholdAs`) accept it through one function,
 `access.CheckProfileToken`.
 
 ## What the token is bound to
@@ -41,6 +41,22 @@ the events socket's `access_changed` signal. It no longer gates profile tokens.
 Before this binding, a household parent whose PIN-locked profile saved a child's
 parental controls advanced the account revision and lost its own token on the
 next request.
+
+## Credentials that need no token
+
+API keys and administrator view-as (impersonation) sessions act as a
+PIN-locked profile without its token (`auth.Claims.SkipsProfilePIN`). An API
+key has no way to carry a PIN proof. An administrator viewing as an account
+can already reset its profiles' PINs, so the PIN guards nothing from them. Every
+gate that resolves the acting profile for a request applies the same rule: the
+HTTP viewer gate, the events sockets, watch-together, progress bootstrap and
+plugin pages. The profile's own limits still apply. Without a valid token
+such a scope is marked `access.Scope.PINVerificationSkipped`, so the household
+writes below refuse it. A valid token bound to a login session still counts
+as a real proof, so an administrator viewing as an account manages its
+household by entering the primary profile's PIN, as the account holder would.
+An API key has no login session, so it stays marked skipped whatever token it
+sends.
 
 ## Household writes
 

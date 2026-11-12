@@ -728,16 +728,19 @@ func checkLiveReleasesAndNodes(t *testing.T, loader PGLoader, pool *pgxpool.Pool
 	install(restored, same, "release-plugin", "1.0.0", "backup")
 	install(pool, other, "live-plugin", "1.0.0", "live")
 	install(restored, other, "backup-plugin", "1.0.0", "backup")
+	// The backup refused an update the live server has since installed.
+	exec(restored, `UPDATE plugin_installations SET update_failed_version = '2.0.0', update_failure_reason = 'refused', update_failed_at = now() WHERE id = $1`, same)
 	off, err := loader.CarryPluginReleases(ctx, into, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var version, checksum, capability string
+	var refused *string
 	var enabled bool
-	if err := restored.QueryRow(ctx, `SELECT i.version, a.checksum, c.capability_id FROM plugin_installations i
+	if err := restored.QueryRow(ctx, `SELECT i.version, a.checksum, c.capability_id, i.update_failed_version FROM plugin_installations i
 		JOIN plugin_archives a ON a.plugin_installation_id = i.id JOIN plugin_capabilities c ON c.plugin_installation_id = i.id
-		WHERE i.id = $1`, same).Scan(&version, &checksum, &capability); err != nil || version != "2.0.0" || checksum != "live" || capability != "2.0.0" {
-		t.Fatalf("a plugin both have runs %s %s %s (%v), want the live release", version, checksum, capability, err)
+		WHERE i.id = $1`, same).Scan(&version, &checksum, &capability, &refused); err != nil || version != "2.0.0" || checksum != "live" || capability != "2.0.0" || refused != nil {
+		t.Fatalf("a plugin both have runs %s %s %s, refused update %v (%v), want the live release", version, checksum, capability, refused, err)
 	}
 	if err := restored.QueryRow(ctx, `SELECT enabled FROM plugin_installations WHERE id = $1`, other).Scan(&enabled); err != nil || enabled ||
 		!slices.ContainsFunc(off, func(s string) bool { return strings.Contains(s, "backup-plugin") }) {
@@ -1839,5 +1842,72 @@ func TestCustomPoliciesComeFromTheLiveServerDB(t *testing.T) {
 	var enabled int
 	if err := restored.QueryRow(ctx, `SELECT count(*) FROM policy_documents WHERE enabled`).Scan(&enabled); err != nil || enabled != 0 || len(off) != 1 {
 		t.Fatalf("with no live policy: %d enabled (%v), reported %v; want the backup's off and reported", enabled, err, off)
+	}
+}
+
+// A backup taken before notification_email_prefs was keyed by account holds
+// one row per profile id. The carry upserts on the key that backup has, and
+// drops the live rows two accounts' profiles with the same id hold instead
+// of keeping one of them there.
+func TestCarryOntoAnOlderKeyDropsSharedRowsDB(t *testing.T) {
+	pool, dsn := testDB(t)
+	ctx := t.Context()
+	conn, err := pgx.Connect(ctx, createDatabase(t, pool, dsn))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	if _, err = tx.Exec(ctx, `
+		CREATE TABLE notification_email_prefs (
+			profile_id text PRIMARY KEY, user_id integer NOT NULL, custom_email text NOT NULL DEFAULT '');
+		CREATE TABLE user_profiles (id text, user_id integer);
+		CREATE TEMP TABLE carried_owners (id bigint);
+		INSERT INTO notification_email_prefs VALUES ('default', 1, 'stale@example.test');
+		INSERT INTO user_profiles VALUES ('default', 1), ('default', 2), ('kids', 1);
+		INSERT INTO carried_owners VALUES (1), (2)`); err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(secretTables, func(s secretTable) bool { return s.name == "notification_email_prefs" })
+	live := `[{"user_id": 1, "profile_id": "default", "custom_email": "a@example.test"},
+		{"user_id": 2, "profile_id": "default", "custom_email": "b@example.test"},
+		{"user_id": 1, "profile_id": "kids", "custom_email": "kids@example.test"}]`
+	result := CarriedCredentials{Kept: map[string]int{}}
+	if err = secretTables[i].carryInto(ctx, tx, live, &result); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := tx.Query(ctx, `SELECT profile_id || ' ' || user_id || ' ' || custom_email FROM notification_email_prefs ORDER BY 1`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got, []string{"kids 1 kids@example.test"}) || len(result.Dropped) != 2 || result.Kept["notification_email_prefs"] != 1 {
+		t.Fatalf("carried %v, dropped %v, kept %v", got, result.Dropped, result.Kept)
+	}
+
+	// A live row the backup would not carry anyway (its account is not in
+	// the backup) does not cost the other account its row.
+	if _, err = tx.Exec(ctx, `DELETE FROM carried_owners WHERE id = 2`); err != nil {
+		t.Fatal(err)
+	}
+	result = CarriedCredentials{Kept: map[string]int{}}
+	if err = secretTables[i].carryInto(ctx, tx, live, &result); err != nil {
+		t.Fatal(err)
+	}
+	if rows, err = tx.Query(ctx, `SELECT profile_id || ' ' || user_id || ' ' || custom_email FROM notification_email_prefs ORDER BY 1`); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = pgx.CollectRows(rows, pgx.RowTo[string]); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got, []string{"default 1 a@example.test", "kids 1 kids@example.test"}) || len(result.Dropped) != 1 {
+		t.Fatalf("with account 2 not in the backup: carried %v, dropped %v", got, result.Dropped)
 	}
 }

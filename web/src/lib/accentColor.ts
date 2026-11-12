@@ -35,6 +35,51 @@ function prefersWhiteLabel(hex: string): boolean {
   return (1 + 0.05) / (background + 0.05) > (background + 0.05) / (dark + 0.05);
 }
 
+/** The video player's panel color: the darkest surface its accent marks. */
+const PLAYER_PANEL = "#101013";
+/** The player uses the accent for short labels as well as marks, so text contrast. */
+const MIN_PLAYER_CONTRAST = 4.5;
+
+function contrastRatio(a: string, b: string): number {
+  const [light, dark] = [relativeLuminance(a), relativeLuminance(b)].sort((x, y) => y - x);
+  return (light! + 0.05) / (dark! + 0.05);
+}
+
+function mixWithWhite(hex: string, amount: number): string {
+  const value = parseInt(hex.slice(1), 16);
+  const channel = (shift: number) => {
+    const c = (value >> shift) & 0xff;
+    return Math.round(c + (255 - c) * amount)
+      .toString(16)
+      .padStart(2, "0");
+  };
+  return `#${channel(16)}${channel(8)}${channel(0)}`;
+}
+
+/** The label drawn on an accent: white or Cinema Dark's dark label, whichever reads better. */
+function labelOn(hex: string): string {
+  return prefersWhiteLabel(hex) ? WHITE_LABEL : DARK_LABEL;
+}
+
+/**
+ * The accent as the video player draws it on its dark panels: unchanged when
+ * it already reads there, otherwise lightened just enough that a selected
+ * row's check and the focus ring stay visible, and the label on it (the speed
+ * badge) still reads.
+ */
+function accentOnDark(hex: string): string {
+  for (let step = 0; step <= 20; step++) {
+    const candidate = mixWithWhite(hex, step / 20);
+    if (
+      contrastRatio(candidate, PLAYER_PANEL) >= MIN_PLAYER_CONTRAST &&
+      contrastRatio(candidate, labelOn(candidate)) >= MIN_PLAYER_CONTRAST
+    ) {
+      return candidate;
+    }
+  }
+  return WHITE_LABEL;
+}
+
 /**
  * The CSS custom properties the admin's accent sets, or null when the stored
  * value is not a hex color, which is then ignored as email ignores it. The
@@ -45,10 +90,13 @@ function prefersWhiteLabel(hex: string): boolean {
 export function accentDeclarations(accent: string): Record<string, string> | null {
   const hex = normalizeHex(accent);
   if (!hex) return null;
+  const onDark = accentOnDark(hex);
   const declarations: Record<string, string> = {
     primary: hex,
     ring: hex,
     "sidebar-primary": hex,
+    "accent-on-dark": onDark,
+    "accent-on-dark-foreground": labelOn(onDark),
   };
   if (prefersWhiteLabel(hex)) {
     declarations["primary-foreground"] = WHITE_LABEL;

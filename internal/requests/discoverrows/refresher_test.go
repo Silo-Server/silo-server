@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -87,7 +88,8 @@ func (f *fakeSnapshots) DeleteUnreferenced(_ context.Context, keep []string, _ t
 
 type fakeListTMDB struct {
 	cardErr map[int]error
-	calls   int
+	// calls is atomic: the refresher looks cards up concurrently.
+	calls atomic.Int64
 }
 
 func (f *fakeListTMDB) GetListMedia(context.Context, int, int) ([]tmdb.MediaResult, error) {
@@ -95,7 +97,7 @@ func (f *fakeListTMDB) GetListMedia(context.Context, int, int) ([]tmdb.MediaResu
 }
 
 func (f *fakeListTMDB) MediaCard(_ context.Context, mediaType string, id int) (*tmdb.MediaResult, error) {
-	f.calls++
+	f.calls.Add(1)
 	if err := f.cardErr[id]; err != nil {
 		return nil, err
 	}
@@ -170,8 +172,8 @@ func TestRefresherKeepsTheLastGoodListAndRetriesOnSchedule(t *testing.T) {
 			if fmt.Sprint(got.Cards) != fmt.Sprint(tt.wantCards) {
 				t.Fatalf("stored cards = %+v, want %+v", got.Cards, tt.wantCards)
 			}
-			if client.calls != tt.wantCalls {
-				t.Fatalf("card lookups = %d, want %d", client.calls, tt.wantCalls)
+			if n := client.calls.Load(); n != int64(tt.wantCalls) {
+				t.Fatalf("card lookups = %d, want %d", n, tt.wantCalls)
 			}
 		})
 	}

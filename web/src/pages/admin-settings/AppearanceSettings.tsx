@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { useBranding } from "@/hooks/useBranding";
+import { useT } from "@/i18n";
 import { useRestartKeys } from "@/hooks/useRestartKeys";
 import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
@@ -44,6 +45,7 @@ import {
 } from "@/lib/overlays";
 import { adminDefaultServerKey } from "@/lib/settingsAdminDefaults";
 import { SETTING_DEFINITIONS, SETTING_KEYS } from "@/lib/settingsContract";
+import { settingLabel } from "@/lib/settingsText";
 import { parseCardPresentation } from "@/lib/uiCustomization";
 import { cn } from "@/lib/utils";
 import { FieldGroup } from "./FieldGroup";
@@ -96,6 +98,7 @@ const KEYS = [ACCENT_KEY, ...OVERLAY_KEYS, ...TITLE_ART_KEYS];
 const BUILT_IN_OVERLAY_DEFAULTS = serializeOverlayPrefs(buildDefaultPrefs());
 
 export default function AppearanceSettings() {
+  const t = useT();
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
   const branding = useBranding();
   const restartKeys = useRestartKeys();
@@ -154,34 +157,31 @@ export default function AppearanceSettings() {
 
   const allRestart = (keys: string[]) => keys.every((key) => restartKeys.has(key));
 
-  if (form.isLoading) return <div>Loading...</div>;
+  if (form.isLoading) return <div>{t("web.admin.settings.appearance.loading")}</div>;
 
   return (
     <div className="flex h-full flex-col">
-      <SettingsPageHeader title="Appearance" />
+      <SettingsPageHeader title={t("web.admin.settings.appearance.title")} />
 
       <div className="flex-1 space-y-5">
-        <FieldGroup label="Logos and icons">
+        <FieldGroup label={t("web.admin.settings.appearance.logos.group")}>
           {!assetStorageAvailable && (
             <div className="mt-3 flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
               <p className="text-muted-foreground text-[13px] leading-relaxed">
-                {s3Configured ? (
-                  <>Restart the server to finish enabling image uploads.</>
-                ) : (
-                  <>
-                    Image uploads need artwork storage (local disk or S3), set in{" "}
-                    <span className="text-foreground font-medium">Storage</span> settings.
-                  </>
-                )}
+                {s3Configured
+                  ? t("web.admin.settings.appearance.logos.restartForUploads")
+                  : t("web.admin.settings.appearance.logos.storageNeeded", {
+                      b: (chunks) => <span className="text-foreground font-medium">{chunks}</span>,
+                    })}
               </p>
             </div>
           )}
 
           <div className="space-y-2 py-3.5">
             <BrandingAssetField
-              label="Logo (wordmark)"
-              description="Shown in the expanded sidebar."
+              label={t("web.admin.settings.appearance.logos.wordmark.label")}
+              description={t("web.admin.settings.appearance.logos.wordmark.description")}
               kind="wordmark"
               currentUrl={branding.wordmarkUrl}
               accept={IMAGE_ACCEPT}
@@ -189,8 +189,8 @@ export default function AppearanceSettings() {
               preview="wide"
             />
             <BrandingAssetField
-              label="Logo (icon)"
-              description="Shown in the collapsed sidebar and the installed app."
+              label={t("web.admin.settings.appearance.logos.mark.label")}
+              description={t("web.admin.settings.appearance.logos.mark.description")}
               kind="mark"
               currentUrl={branding.markUrl}
               accept={IMAGE_ACCEPT}
@@ -198,8 +198,8 @@ export default function AppearanceSettings() {
               preview="square"
             />
             <BrandingAssetField
-              label="Favicon"
-              description="Shown in the browser tab."
+              label={t("web.admin.settings.appearance.logos.favicon.label")}
+              description={t("web.admin.settings.appearance.logos.favicon.description")}
               kind="favicon"
               currentUrl={branding.faviconUrl}
               accept={FAVICON_ACCEPT}
@@ -207,8 +207,8 @@ export default function AppearanceSettings() {
               preview="square"
             />
             <BrandingAssetField
-              label="Login background"
-              description="Shown on the login and signup pages."
+              label={t("web.admin.settings.appearance.logos.loginBackground.label")}
+              description={t("web.admin.settings.appearance.logos.loginBackground.description")}
               kind="login_bg"
               currentUrl={branding.loginBgUrl}
               accept={IMAGE_ACCEPT}
@@ -218,10 +218,13 @@ export default function AppearanceSettings() {
           </div>
         </FieldGroup>
 
-        <FieldGroup label="Colors" restartAll={restartKeys.has(ACCENT_KEY)}>
+        <FieldGroup
+          label={t("web.admin.settings.appearance.colors.group")}
+          restartAll={restartKeys.has(ACCENT_KEY)}
+        >
           <SettingFieldRow
-            label="Accent color"
-            description="Recolors buttons, focus outlines, and the sidebar."
+            label={t("web.admin.settings.appearance.colors.accent.label")}
+            description={t("web.admin.settings.appearance.colors.accent.description")}
           >
             <div className="flex flex-wrap items-center justify-end gap-2 sm:max-w-[300px]">
               {/* Exactly one control in this row is always marked selected:
@@ -231,9 +234,9 @@ export default function AppearanceSettings() {
               <button
                 type="button"
                 onClick={() => form.setValue(ACCENT_KEY, "")}
-                aria-label="Use theme default accent"
+                aria-label={t("web.admin.settings.appearance.colors.accent.useDefault")}
                 aria-pressed={!accentColor}
-                title="Theme default"
+                title={t("web.admin.settings.appearance.colors.accent.themeDefault")}
                 className={cn(
                   "bg-muted text-muted-foreground relative grid h-8 w-8 place-items-center rounded-full border transition-transform hover:scale-110",
                   !accentColor
@@ -250,7 +253,7 @@ export default function AppearanceSettings() {
                     key={hex}
                     type="button"
                     onClick={() => form.setValue(ACCENT_KEY, hex)}
-                    aria-label={`Use accent ${hex}`}
+                    aria-label={t("web.admin.settings.appearance.colors.accent.usePreset", { hex })}
                     aria-pressed={selected}
                     className={cn(
                       "relative h-8 w-8 rounded-full border transition-transform hover:scale-110",
@@ -276,12 +279,12 @@ export default function AppearanceSettings() {
               >
                 <input
                   type="color"
-                  aria-label="Custom accent color"
+                  aria-label={t("web.admin.settings.appearance.colors.accent.customLabel")}
                   value={accentColor || "#4f46e5"}
                   onChange={(e) => form.setValue(ACCENT_KEY, e.target.value)}
                   className="h-5 w-5 cursor-pointer border-0 bg-transparent p-0"
                 />
-                Custom
+                {t("web.admin.settings.appearance.colors.accent.custom")}
                 {customAccentActive && <Check className="h-3.5 w-3.5" />}
               </label>
             </div>
@@ -289,7 +292,7 @@ export default function AppearanceSettings() {
         </FieldGroup>
 
         <FieldGroup
-          label="Card overlays"
+          label={t("web.admin.settings.appearance.overlays.group")}
           restartAll={allRestart(OVERLAY_KEYS)}
           actions={
             <button
@@ -299,13 +302,13 @@ export default function AppearanceSettings() {
               className="text-muted-foreground hover:text-destructive inline-flex items-center gap-1.5 text-xs font-medium transition-colors disabled:pointer-events-none disabled:opacity-40"
             >
               <RotateCcw className="h-3 w-3" aria-hidden="true" />
-              Restore defaults
+              {t("web.admin.settings.appearance.overlays.restoreDefaults")}
             </button>
           }
         >
           <SettingField
-            label="Show badges on poster art"
-            description="The default for every profile. A profile that turns badges on or off for itself keeps its own choice."
+            label={t("web.admin.settings.appearance.overlays.enabled.label")}
+            description={t("web.admin.settings.appearance.overlays.enabled.description")}
             type="toggle"
             value={form.getValue(OVERLAYS_ENABLED_KEY) || "true"}
             onChange={(v) => form.setValue(OVERLAYS_ENABLED_KEY, v)}
@@ -320,9 +323,11 @@ export default function AppearanceSettings() {
             className={overlaysEnabled ? undefined : "pointer-events-none opacity-50"}
           >
             <div className="space-y-2 py-4">
-              <p className="text-sm font-medium">Badge style</p>
+              <p className="text-sm font-medium">
+                {t("web.admin.settings.appearance.overlays.style.label")}
+              </p>
               <p className="text-muted-foreground text-[13px] leading-relaxed">
-                Default for people who have not chosen their own.
+                {t("web.admin.settings.appearance.overlays.style.description")}
               </p>
               <OverlayLookControls
                 prefs={overlayPrefs}
@@ -333,7 +338,7 @@ export default function AppearanceSettings() {
             <div className="border-border/70 bg-foreground/[0.02] mb-4 rounded-xl border p-3">
               <div className="flex items-center justify-between gap-3 px-1">
                 <span className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-                  Preview
+                  {t("web.admin.settings.appearance.overlays.preview")}
                 </span>
                 <OverlayPreviewVariantToggle value={previewVariant} onChange={setPreviewVariant} />
               </div>
@@ -377,7 +382,9 @@ export default function AppearanceSettings() {
                           >
                             <SelectTrigger
                               className="w-[140px]"
-                              aria-label={`${def.label} position`}
+                              aria-label={t("web.admin.settings.appearance.overlays.position", {
+                                label: def.label,
+                              })}
                             >
                               <SelectValue />
                             </SelectTrigger>
@@ -398,7 +405,9 @@ export default function AppearanceSettings() {
                                   variant="ghost"
                                   size="icon"
                                   disabled={!config.enabled}
-                                  aria-label={`${def.label} images`}
+                                  aria-label={t("web.admin.settings.appearance.overlays.images", {
+                                    label: def.label,
+                                  })}
                                   className={cn(
                                     (config.image || config.valueImages) && "text-primary",
                                   )}
@@ -418,7 +427,9 @@ export default function AppearanceSettings() {
                           ) : null}
                           <Switch
                             checked={config.enabled}
-                            aria-label={`Show ${def.label}`}
+                            aria-label={t("web.admin.settings.appearance.overlays.show", {
+                              label: def.label,
+                            })}
                             onCheckedChange={(checked) =>
                               updateOverlayItem(def.id, { enabled: checked })
                             }
@@ -434,15 +445,18 @@ export default function AppearanceSettings() {
         </FieldGroup>
 
         {supportsStyles ? (
-          <FieldGroup label="Badge images">
+          <FieldGroup label={t("web.admin.settings.appearance.badgeImages.group")}>
             <OverlayImageLibrary images={images} uploadsAvailable={imageUploadsAvailable} />
           </FieldGroup>
         ) : null}
 
-        <FieldGroup label="Title pages" restartAll={allRestart(TITLE_ART_KEYS)}>
+        <FieldGroup
+          label={t("web.admin.settings.appearance.titlePages.group")}
+          restartAll={allRestart(TITLE_ART_KEYS)}
+        >
           <SettingField
-            label={TITLE_ART.label}
-            description="Default for people who have not chosen their own. Anyone can still change it for themselves."
+            label={settingLabel(TITLE_ART)}
+            description={t("web.admin.settings.appearance.titlePages.titleArt.description")}
             type="toggle"
             value={form.getValue(TITLE_ART_DEFAULT_KEY) || String(TITLE_ART.defaultValue)}
             onChange={(v) => form.setValue(TITLE_ART_DEFAULT_KEY, v)}
@@ -454,9 +468,9 @@ export default function AppearanceSettings() {
       <ConfirmDialog
         open={confirmRestoreOverlaysOpen}
         onOpenChange={setConfirmRestoreOverlaysOpen}
-        title="Restore badge defaults"
-        description="Replace the server-wide badge defaults with Silo's built-in configuration. The badge on/off switch is left alone, and nothing is written until you save."
-        confirmLabel="Restore"
+        title={t("web.admin.settings.appearance.restoreDialog.title")}
+        description={t("web.admin.settings.appearance.restoreDialog.description")}
+        confirmLabel={t("web.admin.settings.appearance.restoreDialog.confirm")}
         variant="destructive"
         onConfirm={restoreOverlayDefaults}
       />

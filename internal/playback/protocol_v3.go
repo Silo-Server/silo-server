@@ -175,6 +175,24 @@ const (
 // capabilities features list.
 const FeatureHLSVariableSubstitutionV3 = "hls_variable_substitution_v1"
 
+// FeatureProgressiveRangeRefusalV3 is a progressive delivery feature: the
+// client recovers from a refused mid-stream range on a progressive remux by
+// reopening the stream at its current position. A progressive remux is one
+// forward-only response, so it cannot honor `Range: bytes=N-` for N > 0, and
+// the 200 it answers instead restarts at the stream's origin. A browser takes
+// that 200 as the whole resource and reads it again from byte zero, which on
+// a long title stalls for longer each time. With the opt-in the plan's
+// progressive remux URL carries RemuxRangeQueryParam, and the stream answers
+// such a range 409 before it starts any work. /api/v2 advertises it in the
+// capabilities features list.
+const FeatureProgressiveRangeRefusalV3 = "progressive_range_refusal_v1"
+
+// ProgressiveRangeRefusalV3 reports whether the request's progressive delivery
+// listed progressive_range_refusal_v1.
+func ProgressiveRangeRefusalV3(request StartRequestV3) bool {
+	return deliverySupportsFeatureV3(request, DeliveryClassProgressiveV3, FeatureProgressiveRangeRefusalV3)
+}
+
 // FeatureCodecChannelCeilingsV3 tells a client that the server honors a
 // delivery's max_channels_by_codec. /api/v2 advertises it in the capabilities
 // features list.
@@ -186,6 +204,11 @@ const FeatureCodecChannelCeilingsV3 = "codec_channel_ceilings_v1"
 const (
 	TransportFeatureProgressiveRemuxExecutionV1 = "progressive_remux_execution_v1"
 	TransportFeatureProgressiveRemuxRelayV1     = "progressive_remux_relay_v1"
+	// A proxy that refuses a mid-stream range on a progressive remux URL
+	// carrying RemuxRangeQueryParam. An older proxy streams such a range from
+	// the origin, so the planner publishes the parameter only to one that
+	// advertises this.
+	TransportFeatureRemuxRangeRefusalV1 = "remux_range_refusal_v1"
 	// Theme audio markers: a proxy that serves /stream/theme, and a transcode
 	// node that approves theme files as progressive AAC inputs.
 	TransportFeatureBandwidthProbeV1      = "bandwidth_probe_v1"
@@ -304,7 +327,7 @@ func ServerFeaturesV3() []string {
 // advertises and honors only on /api/v2. They postdate the /api/v1 freeze, so
 // the frozen surface neither advertises nor negotiates them.
 func NativeServerFeaturesV3() []string {
-	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3, FeatureHLSRemuxSubtitleRenditionsV3, FeatureHLSCopyMPEGTSV3, FeatureHLSVariableSubstitutionV3, FeatureCodecChannelCeilingsV3, FeatureNativeEmbeddedLimitationsV3, FeatureHLSSubtitleRenditionsAllV3)
+	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3, FeatureHLSRemuxSubtitleRenditionsV3, FeatureHLSCopyMPEGTSV3, FeatureHLSVariableSubstitutionV3, FeatureCodecChannelCeilingsV3, FeatureNativeEmbeddedLimitationsV3, FeatureHLSSubtitleRenditionsAllV3, FeatureProgressiveRangeRefusalV3)
 }
 
 // HLSVariableSubstitutionV3 reports whether the request's hls delivery
@@ -479,6 +502,17 @@ const (
 // TerminalBitratePolicyUnavailableV3 reports that no route fits the
 // administrator's local or remote per-stream bitrate limit for this version.
 const TerminalBitratePolicyUnavailableV3 = "bitrate_policy_unavailable"
+
+// TerminalNoAlternateVersionV3 reports that the requested quality needs a
+// lower-resolution version of the item: 4K transcoding is disabled, or a lower
+// version serves that quality. The caller's alternate-version fallback acts on
+// it, so a client sees it only when no version plays.
+const TerminalNoAlternateVersionV3 = "no_alternate_version"
+
+// TerminalSubtitleConversionUnsupportedV3 reports that the selected subtitle
+// cannot be delivered: its format cannot meet the fidelity policy, or it needs
+// a burn-in transcode the source cannot take.
+const TerminalSubtitleConversionUnsupportedV3 = "subtitle_conversion_unsupported"
 
 type SubtitleModeV3 string
 

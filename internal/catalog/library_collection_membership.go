@@ -17,12 +17,13 @@ type LibraryCollectionMembership struct {
 	// collection's stored items.
 	Live bool
 	// Query selects a live collection's members: its rules narrowed to the
-	// collection's libraries and the requested scope, with the smart item
-	// limit applied. Its sort and limit decide which titles are members.
+	// requested scope, with the smart item limit applied. Its sort and limit
+	// decide which titles are members.
 	Query QueryDefinition
 	// OutOfScope reports that a live collection has no members because none of
-	// its libraries is in scope. Query must not run then: its empty LibraryIDs
-	// would mean every library.
+	// the libraries its rules draw from, or none of the libraries it shows in,
+	// is in scope. Query must not run then: its empty LibraryIDs would mean
+	// every library.
 	OutOfScope bool
 	// Sort is the order the members are listed in when the viewer picks none:
 	// the creator's default from sort_config, otherwise Query's own sort for a
@@ -42,10 +43,11 @@ type LibraryCollectionMembership struct {
 // the admin API accepts one on any type, and a PATCH without collection_type
 // normalizes it as smart, but neither makes the collection live.
 //
-// scope lists the libraries the reader may list, nil for no limit. Library
-// collections are shared across profiles, so a query with per-profile rules or
-// sorts is an error.
-func ResolveLibraryCollectionMembership(c *models.LibraryCollection, scope []int) (LibraryCollectionMembership, error) {
+// access is the reader's: its AllowedLibraryIDs list the libraries the reader
+// may list, nil for no limit, and its disabled libraries can't make the
+// collection reachable. Library collections are shared across profiles, so a
+// query with per-profile rules or sorts is an error.
+func ResolveLibraryCollectionMembership(c *models.LibraryCollection, access AccessFilter) (LibraryCollectionMembership, error) {
 	defaultSort, hasDefaultSort := ParseCollectionDefaultSort(c.SortConfig, false)
 	if !IsLiveQueryType(c.CollectionType) {
 		return LibraryCollectionMembership{Sort: defaultSort}, nil
@@ -63,26 +65,27 @@ func ResolveLibraryCollectionMembership(c *models.LibraryCollection, scope []int
 		m.Sort = defaultSort
 	}
 
-	var collectionLibraries []int
-	switch {
-	case len(c.LibraryIDs) > 0:
-		collectionLibraries = c.LibraryIDs
-	case c.LibraryID > 0:
-		collectionLibraries = []int{c.LibraryID}
+	// The rules' own libraries are where its titles come from, every library
+	// when they name none. The collection's libraries only decide which
+	// Collections tabs show it, so they never narrow the rules. A reader who
+	// can't reach any of those libraries lists none of it, as the collection's
+	// own page refuses them (CanAccessLibraryCollection).
+	placement := c.LibraryIDs
+	if len(placement) == 0 && c.LibraryID > 0 {
+		placement = []int{c.LibraryID}
 	}
-	for _, allowed := range [][]int{collectionLibraries, scope} {
-		if allowed == nil {
-			continue
-		}
-		if len(def.LibraryIDs) == 0 {
-			def.LibraryIDs = slices.Clone(allowed)
-		} else {
-			def.LibraryIDs = intersectInts(def.LibraryIDs, allowed)
-		}
-		if len(def.LibraryIDs) == 0 {
+	if len(placement) > 0 {
+		if _, none := access.LibraryScope(placement); none {
 			m.OutOfScope = true
-			break
 		}
+	}
+	if scope := access.AllowedLibraryIDs; scope != nil {
+		if len(def.LibraryIDs) == 0 {
+			def.LibraryIDs = slices.Clone(scope)
+		} else {
+			def.LibraryIDs = intersectInts(def.LibraryIDs, scope)
+		}
+		m.OutOfScope = m.OutOfScope || len(def.LibraryIDs) == 0
 	}
 	m.Query = ApplySmartCollectionItemLimit(def)
 	return m, nil

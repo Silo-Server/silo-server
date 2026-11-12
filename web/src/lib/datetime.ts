@@ -8,7 +8,13 @@
  * Preferences live in module state so plain (non-React) helpers can format
  * correctly; `DateTimeFormatProvider` keeps this state in sync with the
  * persisted settings, and `useDateTimeFormat` lets components subscribe.
+ * Formats use the app locale (lib/appLocale); the preferences decide only the
+ * field order and the clock.
  */
+
+// Relative with its extension: datetime.test.ts imports this file in plain
+// Node (to set a time zone), which resolves neither "@/" nor extensionless paths.
+import { formatLocale, pinnedLocaleUnlessLocalized, subscribeAppLocale } from "./appLocale.ts";
 
 export const DATE_FORMAT_PREFERENCES = ["auto", "DD/MM/YYYY", "MM/DD/YYYY", "YYYY-MM-DD"] as const;
 export const TIME_FORMAT_PREFERENCES = ["auto", "12h", "24h"] as const;
@@ -50,10 +56,21 @@ export function setDateTimeFormatPreferences(next: DateTimeFormatPreferences): v
     return;
   }
   preferences = { dateFormat: next.dateFormat, timeFormat: next.timeFormat };
+  notifyListeners();
+}
+
+function notifyListeners(): void {
   for (const listener of listeners) {
     listener();
   }
 }
+
+// A new app locale reformats every date, so subscribers get a new snapshot
+// even though the preferences themselves did not change.
+subscribeAppLocale(() => {
+  preferences = { ...preferences };
+  notifyListeners();
+});
 
 export function subscribeDateTimeFormatPreferences(listener: () => void): () => void {
   listeners.add(listener);
@@ -62,18 +79,21 @@ export function subscribeDateTimeFormatPreferences(listener: () => void): () => 
 
 /**
  * Locale whose composed date formats ("Jun 5, 2026" vs "5 Jun 2026") match the
- * preferred day/month order. Returns undefined for "auto" (browser locale) and
- * for ISO, which has no month-name form and falls back to browser ordering.
+ * preferred day/month order. Returns the app's format locale for "auto" and
+ * for ISO, which has no month-name form and falls back to locale ordering.
+ * Once dates come out in a non-English interface language, month names follow
+ * that language and so does their order: no locale puts German month names
+ * first.
  * Use for fragments like `d.toLocaleDateString(preferredDateLocale(), { month: "short", day: "numeric" })`.
  */
 export function preferredDateLocale(): string | undefined {
   switch (preferences.dateFormat) {
     case "DD/MM/YYYY":
-      return "en-GB";
+      return pinnedLocaleUnlessLocalized("en-GB");
     case "MM/DD/YYYY":
-      return "en-US";
+      return pinnedLocaleUnlessLocalized("en-US");
     default:
-      return undefined;
+      return formatLocale();
   }
 }
 
@@ -141,7 +161,7 @@ export function formatDate(
       case "MM/DD/YYYY":
         return `${pad2(date.getMonth() + 1)}/${pad2(date.getDate())}/${date.getFullYear()}`;
       default:
-        return date.toLocaleDateString();
+        return date.toLocaleDateString(formatLocale());
     }
   }
   return date.toLocaleDateString(preferredDateLocale(), {
@@ -179,7 +199,7 @@ export function formatTime(
       merged.hour = "2-digit";
     }
   }
-  return date.toLocaleTimeString(undefined, merged);
+  return date.toLocaleTimeString(formatLocale(), merged);
 }
 
 /**
