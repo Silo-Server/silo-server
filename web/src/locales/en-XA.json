@@ -1949,6 +1949,20 @@
       "value": "⟦Ĝö Ɓåçķ~~~⟧"
     }
   ],
+  "player.scrubber.endsAt": [
+    {
+      "type": 0,
+      "value": "⟦Éñđš "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "~~⟧"
+    }
+  ],
   "player.seekInterval.choice": [
     {
       "type": 6,
@@ -4187,6 +4201,18 @@
     {
       "type": 0,
       "value": "⟦Ļöåđîñĝ ɱéɱƀéŕš...~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.members.noMatches": [
+    {
+      "type": 0,
+      "value": "⟦Ñö ɱéɱƀéŕš ɱåţçĥ ýöûŕ šéåŕçĥ.~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.members.search": [
+    {
+      "type": 0,
+      "value": "⟦Šéåŕçĥ ɱéɱƀéŕš~~~~~~⟧"
     }
   ],
   "web.admin.access.groups.newGroup": [
@@ -48102,6 +48128,38 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.list.hidePaths": [
+    {
+      "type": 0,
+      "value": "⟦Ĥîđé þåţĥš~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.list.moreActions": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöŕé åçţîöñš ƒöŕ "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.list.moveDown": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöṽé đöŵñ~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.list.moveUp": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöṽé ûþ~~~⟧"
+    }
+  ],
   "web.admin.libraries.list.neverScanned": [
     {
       "type": 0,
@@ -48130,6 +48188,12 @@
     {
       "type": 0,
       "value": "⟦Šçåñ Ļîƀŕåŕý~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.list.showPaths": [
+    {
+      "type": 0,
+      "value": "⟦Šĥöŵ þåţĥš~~~~⟧"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -89157,6 +89221,20 @@
       "value": "⟦Çöûļđ ñöţ ļöåđ ûšéŕš.~~~~~~~~~⟧"
     }
   ],
+  "web.admin.users.list.moreActions": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöŕé åçţîöñš ƒöŕ "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~⟧"
+    }
+  ],
   "web.admin.users.list.nextPage": [
     {
       "type": 0,
@@ -89167,6 +89245,12 @@
     {
       "type": 0,
       "value": "⟦Ñö ĝŕöûþ~~~~⟧"
+    }
+  ],
+  "web.admin.users.list.noMatches": [
+    {
+      "type": 0,
+      "value": "⟦Ñö ûšéŕš ɱåţçĥ ýöûŕ šéåŕçĥ öŕ ƒîļţéŕ.~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.users.list.pageRange": [
@@ -125783,6 +125867,12 @@
       "value": "⟦Åûđîö~~⟧"
     }
   ],
+  "web.player.audioMenu.onlyOneTrack": [
+    {
+      "type": 0,
+      "value": "⟦Öñļý öñé åûđîö ţŕåçķ~~~~~~~~⟧"
+    }
+  ],
   "web.player.audioMenu.trackFallback": [
     {
       "type": 0,
@@ -125801,6 +125891,20 @@
     {
       "type": 0,
       "value": "⟦Åûđîö ţŕåçķš~~~~~⟧"
+    }
+  ],
+  "web.player.audioMenu.triggerWithTrack": [
+    {
+      "type": 0,
+      "value": "⟦Åûđîö ţŕåçķš, "
+    },
+    {
+      "type": 1,
+      "value": "track"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~⟧"
     }
   ],
   "web.player.bar.backgroundPlayback": [
@@ -126073,6 +126177,20 @@
       "value": " Ṁƀþš~~⟧"
     }
   ],
+  "web.player.buffering.loadingFrom": [
+    {
+      "type": 0,
+      "value": "⟦Ļöåđîñĝ ƒŕöɱ "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~⟧"
+    }
+  ],
   "web.player.buffering.undoCaption": [
     {
       "type": 0,
@@ -126089,6 +126207,34 @@
     {
       "type": 0,
       "value": "⟦Çĥåþţéŕš~~~~⟧"
+    }
+  ],
+  "web.player.chaptersMenu.nowPlaying": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 8,
+      "value": "now",
+      "children": [
+        {
+          "type": 0,
+          "value": "Ñöŵ þļåýîñĝ"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~⟧"
     }
   ],
   "web.player.chaptersMenu.trigger": [
@@ -126151,6 +126297,12 @@
       "value": "⟦Éẋîţ ƒûļļšçŕééñ~~~~~~⟧"
     }
   ],
+  "web.player.controls.exitFullscreenShortcut": [
+    {
+      "type": 0,
+      "value": "⟦Éẋîţ ƒûļļšçŕééñ (Ƒ)~~~~~~~~⟧"
+    }
+  ],
   "web.player.controls.fillScreen": [
     {
       "type": 0,
@@ -126161,6 +126313,18 @@
     {
       "type": 0,
       "value": "⟦Ƒûļļšçŕééñ~~~~⟧"
+    }
+  ],
+  "web.player.controls.fullscreenShortcut": [
+    {
+      "type": 0,
+      "value": "⟦Ƒûļļšçŕééñ (Ƒ)~~~~~~⟧"
+    }
+  ],
+  "web.player.controls.more": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöŕé~~⟧"
     }
   ],
   "web.player.controls.moreOptions": [
@@ -126187,6 +126351,12 @@
       "value": "⟦Þîçţûŕé îñ Þîçţûŕé~~~~~~~~⟧"
     }
   ],
+  "web.player.controls.pictureInPictureItem": [
+    {
+      "type": 0,
+      "value": "⟦Þîçţûŕé îñ þîçţûŕé~~~~~~~~⟧"
+    }
+  ],
   "web.player.controls.pictureInPictureShortcut": [
     {
       "type": 0,
@@ -126209,6 +126379,34 @@
     {
       "type": 0,
       "value": "⟦Þŕéṽîöûš éþîšöđé~~~~~~~⟧"
+    }
+  ],
+  "web.player.controls.remainingTime": [
+    {
+      "type": 0,
+      "value": "⟦−"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "~⟧"
+    }
+  ],
+  "web.player.controls.remainingTimeLabel": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéɱåîñîñĝ "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
     }
   ],
   "web.player.controls.skipBack": [
@@ -126931,6 +127129,12 @@
       "value": "⟦Đŕöþþéđ ƒŕåɱéš~~~~~~⟧"
     }
   ],
+  "web.player.info.heading": [
+    {
+      "type": 0,
+      "value": "⟦Þļåýƀåçķ îñƒö~~~~~~⟧"
+    }
+  ],
   "web.player.info.playMethod": [
     {
       "type": 0,
@@ -127139,6 +127343,106 @@
       "value": "~~~⟧"
     }
   ],
+  "web.player.nextEpisode.playNow": [
+    {
+      "type": 0,
+      "value": "⟦Þļåý ñöŵ~~~~⟧"
+    }
+  ],
+  "web.player.nextEpisode.regionLabel": [
+    {
+      "type": 0,
+      "value": "⟦Ûþ ñéẋţ~~~⟧"
+    }
+  ],
+  "web.player.nextEpisode.seasonEpisode": [
+    {
+      "type": 0,
+      "value": "⟦Šéåšöñ "
+    },
+    {
+      "type": 1,
+      "value": "season"
+    },
+    {
+      "type": 0,
+      "value": " · Éþîšöđé "
+    },
+    {
+      "type": 1,
+      "value": "episode"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~⟧"
+    }
+  ],
+  "web.player.nextEpisode.upNextIn": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Ûþ ñéẋţ îñ "
+            },
+            {
+              "type": 8,
+              "value": "num",
+              "children": [
+                {
+                  "type": 7
+                },
+                {
+                  "type": 0,
+                  "value": "š"
+                }
+              ]
+            },
+            {
+              "type": 0,
+              "value": "~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Ûþ ñéẋţ îñ "
+            },
+            {
+              "type": 8,
+              "value": "num",
+              "children": [
+                {
+                  "type": 7
+                },
+                {
+                  "type": 0,
+                  "value": "š"
+                }
+              ]
+            },
+            {
+              "type": 0,
+              "value": "~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.player.postRoll.stillPlaying": [
+    {
+      "type": 0,
+      "value": "⟦Šţîļļ þļåýîñĝ · Çļîçķ ţö ŕéţûŕñ~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.player.quality.auto": [
     {
       "type": 0,
@@ -127185,6 +127489,18 @@
       "value": "⟦Šéļéçţéđ~~~~⟧"
     }
   ],
+  "web.player.quality.sourceFile": [
+    {
+      "type": 0,
+      "value": "⟦Šöûŕçé ƒîļé~~~~~⟧"
+    }
+  ],
+  "web.player.quality.streamingQuality": [
+    {
+      "type": 0,
+      "value": "⟦Šţŕéåɱîñĝ ǫûåļîţý~~~~~~~⟧"
+    }
+  ],
   "web.player.quality.title": [
     {
       "type": 0,
@@ -127211,6 +127527,58 @@
     {
       "type": 0,
       "value": "~⟧"
+    }
+  ],
+  "web.player.quality.triggerWithValue": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "menu"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "~⟧"
+    }
+  ],
+  "web.player.quality.triggerWithValueAndSpeed": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "menu"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "speed"
+    },
+    {
+      "type": 0,
+      "value": "~~⟧"
     }
   ],
   "web.player.quality.version": [
@@ -128115,6 +128483,12 @@
       "value": "⟦Šîļö çöûļđñ'ţ ŕéåđ ţĥîš ƒîļé. Îţ åþþéåŕš ţö ƀé éɱþţý öŕ đåɱåĝéđ.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.player.upNext.autoplay": [
+    {
+      "type": 0,
+      "value": "⟦Åûţö-þļåý~~~~⟧"
+    }
+  ],
   "web.player.upNext.autoplayOff": [
     {
       "type": 0,
@@ -128187,6 +128561,18 @@
       "value": "~~~~~~~⟧"
     }
   ],
+  "web.player.upNext.heading": [
+    {
+      "type": 0,
+      "value": "⟦Ûþ ñéẋţ~~~⟧"
+    }
+  ],
+  "web.player.upNext.headingShuffle": [
+    {
+      "type": 0,
+      "value": "⟦Ûþ ñéẋţ åţ ŕåñđöɱ~~~~~~~⟧"
+    }
+  ],
   "web.player.upNext.minutesLeft": [
     {
       "type": 6,
@@ -128247,10 +128633,68 @@
       "value": "⟦Ñö Þŕéṽîéŵ~~~~⟧"
     }
   ],
+  "web.player.upNext.onDeckScrollBack": [
+    {
+      "type": 0,
+      "value": "⟦Šçŕöļļ Öñ Đéçķ ƀåçķ~~~~~~~~⟧"
+    }
+  ],
+  "web.player.upNext.onDeckScrollForward": [
+    {
+      "type": 0,
+      "value": "⟦Šçŕöļļ Öñ Đéçķ ƒöŕŵåŕđ~~~~~~~~~⟧"
+    }
+  ],
   "web.player.upNext.playingNext": [
     {
       "type": 0,
       "value": "⟦Þļåýîñĝ Ñéẋţ~~~~~⟧"
+    }
+  ],
+  "web.player.upNext.startsAfterCredits": [
+    {
+      "type": 0,
+      "value": "⟦Šţåŕţš öñ îţš öŵñ ŵĥéñ ţĥé çŕéđîţš éñđ~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.player.upNext.startsIn": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šţåŕţš îñ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "š~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šţåŕţš îñ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "š~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.player.volume.label": [
@@ -147153,6 +147597,12 @@
       "value": "⟦Éñåƀļé çåþţîöñš~~~~~~⟧"
     }
   ],
+  "web.subtitles.menu.heading": [
+    {
+      "type": 0,
+      "value": "⟦Šûƀţîţļéš~~~~⟧"
+    }
+  ],
   "web.subtitles.menu.noMatch": [
     {
       "type": 0,
@@ -147199,6 +147649,18 @@
     {
       "type": 0,
       "value": "⟦Éẋţéŕñåļ~~~~⟧"
+    }
+  ],
+  "web.subtitles.menu.subtitlesOffShortcut": [
+    {
+      "type": 0,
+      "value": "⟦Šûƀţîţļéš öƒƒ (Ç)~~~~~~~⟧"
+    }
+  ],
+  "web.subtitles.menu.subtitlesShortcut": [
+    {
+      "type": 0,
+      "value": "⟦Šûƀţîţļéš (Ç)~~~~~~⟧"
     }
   ],
   "web.subtitles.menu.syncHint": [
@@ -147251,10 +147713,36 @@
       "value": "⟦Ţĥîš šéŕṽéŕ đöéšñ'ţ åļļöŵ çĥåñĝîñĝ šûƀţîţļé ţîɱîñĝ.~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.subtitles.menu.toolsLabel": [
+    {
+      "type": 0,
+      "value": "⟦Šûƀţîţļé ţööļš~~~~~~⟧"
+    }
+  ],
+  "web.subtitles.menu.tracksLabel": [
+    {
+      "type": 0,
+      "value": "⟦Šûƀţîţļé ţŕåçķš~~~~~~⟧"
+    }
+  ],
   "web.subtitles.menu.translateWithAi": [
     {
       "type": 0,
       "value": "⟦Ţŕåñšļåţé ŵîţĥ ÅÎ…~~~~~~~~⟧"
+    }
+  ],
+  "web.subtitles.menu.triggerWithValue": [
+    {
+      "type": 0,
+      "value": "⟦Šûƀţîţļéš, "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~⟧"
     }
   ],
   "web.subtitles.quotaWindow.day": [

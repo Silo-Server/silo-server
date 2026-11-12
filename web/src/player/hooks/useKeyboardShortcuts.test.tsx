@@ -69,9 +69,18 @@ it("leaves Space to a focused player menu item", () => {
   menu.appendChild(item);
   document.body.appendChild(menu);
 
+  // The touch sheet's close button sits beside the menu element.
+  const sheet = document.createElement("div");
+  sheet.setAttribute("data-player-menu", "");
+  const close = document.createElement("button");
+  sheet.appendChild(close);
+  document.body.appendChild(sheet);
+
   expect(fireEvent.keyDown(item, { key: " " })).toBe(true);
+  expect(fireEvent.keyDown(close, { key: " " })).toBe(true);
   expect(handlePlayPause).not.toHaveBeenCalled();
   fireEvent.keyDown(document.body, { key: " " });
   expect(handlePlayPause).toHaveBeenCalledOnce();
   menu.remove();
+  sheet.remove();
 });

@@ -1925,6 +1925,16 @@
       "value": "Voltar"
     }
   ],
+  "player.scrubber.endsAt": [
+    {
+      "type": 0,
+      "value": "Termina às "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "player.seekInterval.choice": [
     {
       "type": 6,
@@ -4162,6 +4172,18 @@
     {
       "type": 0,
       "value": "Carregando membros…"
+    }
+  ],
+  "web.admin.access.groups.members.noMatches": [
+    {
+      "type": 0,
+      "value": "Nenhum membro corresponde à sua pesquisa."
+    }
+  ],
+  "web.admin.access.groups.members.search": [
+    {
+      "type": 0,
+      "value": "Pesquisar membros"
     }
   ],
   "web.admin.access.groups.newGroup": [
@@ -49558,6 +49580,34 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.list.hidePaths": [
+    {
+      "type": 0,
+      "value": "Ocultar caminhos"
+    }
+  ],
+  "web.admin.libraries.list.moreActions": [
+    {
+      "type": 0,
+      "value": "Mais ações para "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.moveDown": [
+    {
+      "type": 0,
+      "value": "Mover para baixo"
+    }
+  ],
+  "web.admin.libraries.list.moveUp": [
+    {
+      "type": 0,
+      "value": "Mover para cima"
+    }
+  ],
   "web.admin.libraries.list.neverScanned": [
     {
       "type": 0,
@@ -49586,6 +49636,12 @@
     {
       "type": 0,
       "value": "Fazer varredura da biblioteca"
+    }
+  ],
+  "web.admin.libraries.list.showPaths": [
+    {
+      "type": 0,
+      "value": "Mostrar caminhos"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -89643,6 +89699,16 @@
       "value": "Não foi possível carregar os usuários."
     }
   ],
+  "web.admin.users.list.moreActions": [
+    {
+      "type": 0,
+      "value": "Mais ações para "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    }
+  ],
   "web.admin.users.list.nextPage": [
     {
       "type": 0,
@@ -89653,6 +89719,12 @@
     {
       "type": 0,
       "value": "Sem grupo"
+    }
+  ],
+  "web.admin.users.list.noMatches": [
+    {
+      "type": 0,
+      "value": "Nenhum usuário corresponde à sua pesquisa ou ao filtro."
     }
   ],
   "web.admin.users.list.pageRange": [
@@ -125871,6 +125943,12 @@
       "value": "Áudio"
     }
   ],
+  "web.player.audioMenu.onlyOneTrack": [
+    {
+      "type": 0,
+      "value": "Apenas uma faixa de áudio"
+    }
+  ],
   "web.player.audioMenu.trackFallback": [
     {
       "type": 0,
@@ -125885,6 +125963,16 @@
     {
       "type": 0,
       "value": "Faixas de áudio"
+    }
+  ],
+  "web.player.audioMenu.triggerWithTrack": [
+    {
+      "type": 0,
+      "value": "Faixas de áudio, "
+    },
+    {
+      "type": 1,
+      "value": "track"
     }
   ],
   "web.player.bar.backgroundPlayback": [
@@ -126198,6 +126286,16 @@
       "value": " Mbps"
     }
   ],
+  "web.player.buffering.loadingFrom": [
+    {
+      "type": 0,
+      "value": "Carregando a partir de "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.player.buffering.undoCaption": [
     {
       "type": 0,
@@ -126214,6 +126312,26 @@
     {
       "type": 0,
       "value": "Capítulos"
+    }
+  ],
+  "web.player.chaptersMenu.nowPlaying": [
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 8,
+      "value": "now",
+      "children": [
+        {
+          "type": 0,
+          "value": "Reproduzindo agora"
+        }
+      ]
     }
   ],
   "web.player.chaptersMenu.trigger": [
@@ -126276,6 +126394,12 @@
       "value": "Sair da tela cheia"
     }
   ],
+  "web.player.controls.exitFullscreenShortcut": [
+    {
+      "type": 0,
+      "value": "Sair da tela cheia (F)"
+    }
+  ],
   "web.player.controls.fillScreen": [
     {
       "type": 0,
@@ -126286,6 +126410,18 @@
     {
       "type": 0,
       "value": "Tela cheia"
+    }
+  ],
+  "web.player.controls.fullscreenShortcut": [
+    {
+      "type": 0,
+      "value": "Tela cheia (F)"
+    }
+  ],
+  "web.player.controls.more": [
+    {
+      "type": 0,
+      "value": "Mais"
     }
   ],
   "web.player.controls.moreOptions": [
@@ -126307,6 +126443,12 @@
     }
   ],
   "web.player.controls.pictureInPicture": [
+    {
+      "type": 0,
+      "value": "Picture in Picture"
+    }
+  ],
+  "web.player.controls.pictureInPictureItem": [
     {
       "type": 0,
       "value": "Picture in Picture"
@@ -126334,6 +126476,26 @@
     {
       "type": 0,
       "value": "Episódio anterior"
+    }
+  ],
+  "web.player.controls.remainingTime": [
+    {
+      "type": 0,
+      "value": "−"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.player.controls.remainingTimeLabel": [
+    {
+      "type": 0,
+      "value": "Tempo restante: "
+    },
+    {
+      "type": 1,
+      "value": "time"
     }
   ],
   "web.player.controls.skipBack": [
@@ -127054,6 +127216,12 @@
       "value": "Quadros perdidos"
     }
   ],
+  "web.player.info.heading": [
+    {
+      "type": 0,
+      "value": "Informações de reprodução"
+    }
+  ],
   "web.player.info.playMethod": [
     {
       "type": 0,
@@ -127273,6 +127441,115 @@
       "value": "title"
     }
   ],
+  "web.player.nextEpisode.playNow": [
+    {
+      "type": 0,
+      "value": "Reproduzir agora"
+    }
+  ],
+  "web.player.nextEpisode.regionLabel": [
+    {
+      "type": 0,
+      "value": "A seguir"
+    }
+  ],
+  "web.player.nextEpisode.seasonEpisode": [
+    {
+      "type": 0,
+      "value": "Temporada "
+    },
+    {
+      "type": 1,
+      "value": "season"
+    },
+    {
+      "type": 0,
+      "value": " · Episódio "
+    },
+    {
+      "type": 1,
+      "value": "episode"
+    }
+  ],
+  "web.player.nextEpisode.upNextIn": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "A seguir em "
+            },
+            {
+              "type": 8,
+              "value": "num",
+              "children": [
+                {
+                  "type": 7
+                },
+                {
+                  "type": 0,
+                  "value": " s"
+                }
+              ]
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "A seguir em "
+            },
+            {
+              "type": 8,
+              "value": "num",
+              "children": [
+                {
+                  "type": 7
+                },
+                {
+                  "type": 0,
+                  "value": " s"
+                }
+              ]
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "A seguir em "
+            },
+            {
+              "type": 8,
+              "value": "num",
+              "children": [
+                {
+                  "type": 7
+                },
+                {
+                  "type": 0,
+                  "value": " s"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.player.postRoll.stillPlaying": [
+    {
+      "type": 0,
+      "value": "Ainda reproduzindo · Clique para voltar"
+    }
+  ],
   "web.player.quality.auto": [
     {
       "type": 0,
@@ -127311,6 +127588,18 @@
       "value": "Selecionada"
     }
   ],
+  "web.player.quality.sourceFile": [
+    {
+      "type": 0,
+      "value": "Arquivo de origem"
+    }
+  ],
+  "web.player.quality.streamingQuality": [
+    {
+      "type": 0,
+      "value": "Qualidade do streaming"
+    }
+  ],
   "web.player.quality.title": [
     {
       "type": 0,
@@ -127321,6 +127610,42 @@
     {
       "type": 1,
       "value": "menu"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "speed"
+    }
+  ],
+  "web.player.quality.triggerWithValue": [
+    {
+      "type": 1,
+      "value": "menu"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.player.quality.triggerWithValueAndSpeed": [
+    {
+      "type": 1,
+      "value": "menu"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "value"
     },
     {
       "type": 0,
@@ -128156,6 +128481,12 @@
       "value": "O Silo não conseguiu ler este arquivo. Ele parece estar vazio ou danificado."
     }
   ],
+  "web.player.upNext.autoplay": [
+    {
+      "type": 0,
+      "value": "Reprodução automática"
+    }
+  ],
   "web.player.upNext.autoplayOff": [
     {
       "type": 0,
@@ -128225,6 +128556,18 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.player.upNext.heading": [
+    {
+      "type": 0,
+      "value": "A seguir"
+    }
+  ],
+  "web.player.upNext.headingShuffle": [
+    {
+      "type": 0,
+      "value": "A seguir, em ordem aleatória"
     }
   ],
   "web.player.upNext.minutesLeft": [
@@ -128303,10 +128646,83 @@
       "value": "Sem prévia"
     }
   ],
+  "web.player.upNext.onDeckScrollBack": [
+    {
+      "type": 0,
+      "value": "Rolar Em andamento para trás"
+    }
+  ],
+  "web.player.upNext.onDeckScrollForward": [
+    {
+      "type": 0,
+      "value": "Rolar Em andamento para a frente"
+    }
+  ],
   "web.player.upNext.playingNext": [
     {
       "type": 0,
       "value": "A seguir"
+    }
+  ],
+  "web.player.upNext.startsAfterCredits": [
+    {
+      "type": 0,
+      "value": "Começa automaticamente quando os créditos terminarem"
+    }
+  ],
+  "web.player.upNext.startsIn": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Começa em "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " s"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Começa em "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " s"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Começa em "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " s"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.player.volume.label": [
@@ -147034,6 +147450,12 @@
       "value": "Ativar legendas"
     }
   ],
+  "web.subtitles.menu.heading": [
+    {
+      "type": 0,
+      "value": "Legendas"
+    }
+  ],
   "web.subtitles.menu.noMatch": [
     {
       "type": 0,
@@ -147082,6 +147504,18 @@
       "value": "Externa"
     }
   ],
+  "web.subtitles.menu.subtitlesOffShortcut": [
+    {
+      "type": 0,
+      "value": "Legendas desativadas (C)"
+    }
+  ],
+  "web.subtitles.menu.subtitlesShortcut": [
+    {
+      "type": 0,
+      "value": "Legendas (C)"
+    }
+  ],
   "web.subtitles.menu.syncHint": [
     {
       "type": 0,
@@ -147128,10 +147562,32 @@
       "value": "Este servidor não permite alterar a sincronia das legendas."
     }
   ],
+  "web.subtitles.menu.toolsLabel": [
+    {
+      "type": 0,
+      "value": "Ferramentas de legendas"
+    }
+  ],
+  "web.subtitles.menu.tracksLabel": [
+    {
+      "type": 0,
+      "value": "Faixas de legendas"
+    }
+  ],
   "web.subtitles.menu.translateWithAi": [
     {
       "type": 0,
       "value": "Traduzir com IA…"
+    }
+  ],
+  "web.subtitles.menu.triggerWithValue": [
+    {
+      "type": 0,
+      "value": "Legendas, "
+    },
+    {
+      "type": 1,
+      "value": "value"
     }
   ],
   "web.subtitles.quotaWindow.day": [

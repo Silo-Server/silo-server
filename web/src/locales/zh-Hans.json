@@ -1925,6 +1925,16 @@
       "value": "返回"
     }
   ],
+  "player.scrubber.endsAt": [
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "结束"
+    }
+  ],
   "player.seekInterval.choice": [
     {
       "type": 6,
@@ -4040,6 +4050,18 @@
     {
       "type": 0,
       "value": "正在加载成员……"
+    }
+  ],
+  "web.admin.access.groups.members.noMatches": [
+    {
+      "type": 0,
+      "value": "没有与你的搜索匹配的成员。"
+    }
+  ],
+  "web.admin.access.groups.members.search": [
+    {
+      "type": 0,
+      "value": "搜索成员"
     }
   ],
   "web.admin.access.groups.newGroup": [
@@ -39057,6 +39079,34 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.list.hidePaths": [
+    {
+      "type": 0,
+      "value": "隐藏路径"
+    }
+  ],
+  "web.admin.libraries.list.moreActions": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "的更多操作"
+    }
+  ],
+  "web.admin.libraries.list.moveDown": [
+    {
+      "type": 0,
+      "value": "下移"
+    }
+  ],
+  "web.admin.libraries.list.moveUp": [
+    {
+      "type": 0,
+      "value": "上移"
+    }
+  ],
   "web.admin.libraries.list.neverScanned": [
     {
       "type": 0,
@@ -39085,6 +39135,12 @@
     {
       "type": 0,
       "value": "扫描媒体库"
+    }
+  ],
+  "web.admin.libraries.list.showPaths": [
+    {
+      "type": 0,
+      "value": "显示路径"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -75414,6 +75470,16 @@
       "value": "无法加载用户。"
     }
   ],
+  "web.admin.users.list.moreActions": [
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "的更多操作"
+    }
+  ],
   "web.admin.users.list.nextPage": [
     {
       "type": 0,
@@ -75424,6 +75490,12 @@
     {
       "type": 0,
       "value": "无组"
+    }
+  ],
+  "web.admin.users.list.noMatches": [
+    {
+      "type": 0,
+      "value": "没有与你的搜索或筛选条件匹配的用户。"
     }
   ],
   "web.admin.users.list.pageRange": [
@@ -106327,6 +106399,12 @@
       "value": "音频"
     }
   ],
+  "web.player.audioMenu.onlyOneTrack": [
+    {
+      "type": 0,
+      "value": "仅有一条音轨"
+    }
+  ],
   "web.player.audioMenu.trackFallback": [
     {
       "type": 0,
@@ -106341,6 +106419,16 @@
     {
       "type": 0,
       "value": "音轨"
+    }
+  ],
+  "web.player.audioMenu.triggerWithTrack": [
+    {
+      "type": 0,
+      "value": "音轨，"
+    },
+    {
+      "type": 1,
+      "value": "track"
     }
   ],
   "web.player.bar.backgroundPlayback": [
@@ -106548,6 +106636,20 @@
       "value": " Mbps"
     }
   ],
+  "web.player.buffering.loadingFrom": [
+    {
+      "type": 0,
+      "value": "正在从"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "加载"
+    }
+  ],
   "web.player.buffering.undoCaption": [
     {
       "type": 0,
@@ -106564,6 +106666,26 @@
     {
       "type": 0,
       "value": "章节"
+    }
+  ],
+  "web.player.chaptersMenu.nowPlaying": [
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 8,
+      "value": "now",
+      "children": [
+        {
+          "type": 0,
+          "value": "正在播放"
+        }
+      ]
     }
   ],
   "web.player.chaptersMenu.trigger": [
@@ -106626,6 +106748,12 @@
       "value": "退出全屏"
     }
   ],
+  "web.player.controls.exitFullscreenShortcut": [
+    {
+      "type": 0,
+      "value": "退出全屏（F）"
+    }
+  ],
   "web.player.controls.fillScreen": [
     {
       "type": 0,
@@ -106636,6 +106764,18 @@
     {
       "type": 0,
       "value": "全屏"
+    }
+  ],
+  "web.player.controls.fullscreenShortcut": [
+    {
+      "type": 0,
+      "value": "全屏（F）"
+    }
+  ],
+  "web.player.controls.more": [
+    {
+      "type": 0,
+      "value": "更多"
     }
   ],
   "web.player.controls.moreOptions": [
@@ -106657,6 +106797,12 @@
     }
   ],
   "web.player.controls.pictureInPicture": [
+    {
+      "type": 0,
+      "value": "画中画"
+    }
+  ],
+  "web.player.controls.pictureInPictureItem": [
     {
       "type": 0,
       "value": "画中画"
@@ -106684,6 +106830,26 @@
     {
       "type": 0,
       "value": "上一集"
+    }
+  ],
+  "web.player.controls.remainingTime": [
+    {
+      "type": 0,
+      "value": "−"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.player.controls.remainingTimeLabel": [
+    {
+      "type": 0,
+      "value": "剩余"
+    },
+    {
+      "type": 1,
+      "value": "time"
     }
   ],
   "web.player.controls.skipBack": [
@@ -107344,6 +107510,12 @@
       "value": "丢帧"
     }
   ],
+  "web.player.info.heading": [
+    {
+      "type": 0,
+      "value": "播放信息"
+    }
+  ],
   "web.player.info.playMethod": [
     {
       "type": 0,
@@ -107529,6 +107701,77 @@
       "value": "title"
     }
   ],
+  "web.player.nextEpisode.playNow": [
+    {
+      "type": 0,
+      "value": "立即播放"
+    }
+  ],
+  "web.player.nextEpisode.regionLabel": [
+    {
+      "type": 0,
+      "value": "即将播放"
+    }
+  ],
+  "web.player.nextEpisode.seasonEpisode": [
+    {
+      "type": 0,
+      "value": "第"
+    },
+    {
+      "type": 1,
+      "value": "season"
+    },
+    {
+      "type": 0,
+      "value": "季 · 第"
+    },
+    {
+      "type": 1,
+      "value": "episode"
+    },
+    {
+      "type": 0,
+      "value": "集"
+    }
+  ],
+  "web.player.nextEpisode.upNextIn": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 8,
+              "value": "num",
+              "children": [
+                {
+                  "type": 7
+                },
+                {
+                  "type": 0,
+                  "value": "秒"
+                }
+              ]
+            },
+            {
+              "type": 0,
+              "value": "后播放下一集"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.player.postRoll.stillPlaying": [
+    {
+      "type": 0,
+      "value": "仍在播放 · 点击返回"
+    }
+  ],
   "web.player.quality.auto": [
     {
       "type": 0,
@@ -107567,6 +107810,18 @@
       "value": "已选择"
     }
   ],
+  "web.player.quality.sourceFile": [
+    {
+      "type": 0,
+      "value": "来源文件"
+    }
+  ],
+  "web.player.quality.streamingQuality": [
+    {
+      "type": 0,
+      "value": "串流画质"
+    }
+  ],
   "web.player.quality.title": [
     {
       "type": 0,
@@ -107577,6 +107832,42 @@
     {
       "type": 1,
       "value": "menu"
+    },
+    {
+      "type": 0,
+      "value": "，"
+    },
+    {
+      "type": 1,
+      "value": "speed"
+    }
+  ],
+  "web.player.quality.triggerWithValue": [
+    {
+      "type": 1,
+      "value": "menu"
+    },
+    {
+      "type": 0,
+      "value": "，"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.player.quality.triggerWithValueAndSpeed": [
+    {
+      "type": 1,
+      "value": "menu"
+    },
+    {
+      "type": 0,
+      "value": "，"
+    },
+    {
+      "type": 1,
+      "value": "value"
     },
     {
       "type": 0,
@@ -108354,6 +108645,12 @@
       "value": "Silo无法读取此文件。它似乎是空的或已损坏。"
     }
   ],
+  "web.player.upNext.autoplay": [
+    {
+      "type": 0,
+      "value": "自动播放"
+    }
+  ],
   "web.player.upNext.autoplayOff": [
     {
       "type": 0,
@@ -108403,6 +108700,18 @@
       "value": "series"
     }
   ],
+  "web.player.upNext.heading": [
+    {
+      "type": 0,
+      "value": "即将播放"
+    }
+  ],
+  "web.player.upNext.headingShuffle": [
+    {
+      "type": 0,
+      "value": "即将随机播放"
+    }
+  ],
   "web.player.upNext.minutesLeft": [
     {
       "type": 6,
@@ -108447,10 +108756,49 @@
       "value": "无预览"
     }
   ],
+  "web.player.upNext.onDeckScrollBack": [
+    {
+      "type": 0,
+      "value": "将进行中向回滚动"
+    }
+  ],
+  "web.player.upNext.onDeckScrollForward": [
+    {
+      "type": 0,
+      "value": "将进行中向前滚动"
+    }
+  ],
   "web.player.upNext.playingNext": [
     {
       "type": 0,
       "value": "即将播放"
+    }
+  ],
+  "web.player.upNext.startsAfterCredits": [
+    {
+      "type": 0,
+      "value": "片尾结束后将自动开始"
+    }
+  ],
+  "web.player.upNext.startsIn": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "秒后开始"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.player.volume.label": [
@@ -125534,6 +125882,12 @@
       "value": "开启字幕"
     }
   ],
+  "web.subtitles.menu.heading": [
+    {
+      "type": 0,
+      "value": "字幕"
+    }
+  ],
   "web.subtitles.menu.noMatch": [
     {
       "type": 0,
@@ -125582,6 +125936,18 @@
       "value": "外部"
     }
   ],
+  "web.subtitles.menu.subtitlesOffShortcut": [
+    {
+      "type": 0,
+      "value": "字幕已关闭（C）"
+    }
+  ],
+  "web.subtitles.menu.subtitlesShortcut": [
+    {
+      "type": 0,
+      "value": "字幕（C）"
+    }
+  ],
   "web.subtitles.menu.syncHint": [
     {
       "type": 0,
@@ -125628,10 +125994,32 @@
       "value": "此服务器不允许更改字幕时间轴。"
     }
   ],
+  "web.subtitles.menu.toolsLabel": [
+    {
+      "type": 0,
+      "value": "字幕工具"
+    }
+  ],
+  "web.subtitles.menu.tracksLabel": [
+    {
+      "type": 0,
+      "value": "字幕轨道"
+    }
+  ],
   "web.subtitles.menu.translateWithAi": [
     {
       "type": 0,
       "value": "使用AI翻译……"
+    }
+  ],
+  "web.subtitles.menu.triggerWithValue": [
+    {
+      "type": 0,
+      "value": "字幕，"
+    },
+    {
+      "type": 1,
+      "value": "value"
     }
   ],
   "web.subtitles.quotaWindow.day": [

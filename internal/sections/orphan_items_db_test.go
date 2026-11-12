@@ -86,6 +86,101 @@ func TestSectionsSkipItemsInNoLibraryPostgres(t *testing.T) {
 	}
 }
 
+// A Home row for a personal smart collection holds at most the collection's
+// own item limit, as the collection's page does, and at most the row's size.
+func TestPersonalSmartCollectionRowKeepsTheCollectionLimitPostgres(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	resetResolvedListCacheForTest()
+	t.Cleanup(resetResolvedListCacheForTest)
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	prefix := "coll-limit-" + uuid.NewString()[:8] + "-"
+	var library, userID int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ('movies', $1, true) RETURNING id`, prefix+"lib").Scan(&library); err != nil {
+		t.Fatalf("seed library: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username, email, password_hash, role) VALUES ($1, $2, '', 'user') RETURNING id`, prefix+"user", prefix+"user@example.test").Scan(&userID); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, userID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM user_collection_revisions WHERE user_id = $1`, userID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM user_collection_order_revisions WHERE user_id = $1`, userID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id LIKE $1`, prefix+"%")
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id = $1`, library)
+	})
+
+	movies := []string{prefix + "a", prefix + "b", prefix + "c"}
+	for _, id := range movies {
+		if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title, status) VALUES ($1, 'movie', $1, 'matched')`, id); err != nil {
+			t.Fatalf("seed item: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at) VALUES ($1, $2, $3)`, id, library, time.Now()); err != nil {
+			t.Fatalf("seed membership: %v", err)
+		}
+	}
+
+	stores := pgstore.NewPostgresProvider(pool)
+	store, err := stores.ForUser(ctx, userID)
+	if err != nil {
+		t.Fatalf("user store: %v", err)
+	}
+	fetcher := NewFetcher(pool)
+	fetcher.StoreProvider = stores
+
+	for _, tc := range []struct {
+		name      string
+		query     string
+		itemLimit int
+		want      []string
+	}{
+		{
+			name:      "collection limit below the row size",
+			query:     `{"match":"all","groups":[{"match":"all","rules":[{"field":"type","op":"is","value":"movie"}]}],"sort":{"field":"title","order":"asc"},"limit":1}`,
+			itemLimit: 20,
+			want:      movies[:1],
+		},
+		{
+			name:      "row size below the collection",
+			query:     `{"match":"all","groups":[{"match":"all","rules":[{"field":"type","op":"is","value":"movie"}]}],"sort":{"field":"title","order":"asc"}}`,
+			itemLimit: 2,
+			want:      movies[:2],
+		},
+	} {
+		collection, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{
+			CreatorProfileID: "creator",
+			Name:             tc.name,
+			CollectionType:   "smart",
+			QueryDefinition:  tc.query,
+		})
+		if err != nil {
+			t.Fatalf("%s: create collection: %v", tc.name, err)
+		}
+		row := ResolvedSection{
+			ID:          "row-" + collection.ID,
+			SectionType: SectionCollection,
+			Title:       tc.name,
+			ItemLimit:   tc.itemLimit,
+			Config:      mustJSON(t, SectionCollectionConfig{UserCollectionID: collection.ID}),
+		}
+		got, err := fetcher.FetchOne(ctx, row, &library, nil, userID, "creator", catalog.AccessFilter{})
+		if err != nil {
+			t.Fatalf("%s: FetchOne: %v", tc.name, err)
+		}
+		if ids := contentIDs(got.Items); !slices.Equal(ids, tc.want) {
+			t.Errorf("%s: row = %v, want %v", tc.name, ids, tc.want)
+		}
+	}
+}
+
 // A rule row may use a viewer's own state ("Watched is No"). It reads that
 // state for the profile asking, and leaves another profile's history out.
 func TestRuleRowsReadTheViewersWatchStatePostgres(t *testing.T) {
