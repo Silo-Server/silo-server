@@ -4174,6 +4174,18 @@
       "value": "Chargement des membres…"
     }
   ],
+  "web.admin.access.groups.members.noMatches": [
+    {
+      "type": 0,
+      "value": "Aucun membre ne correspond à votre recherche."
+    }
+  ],
+  "web.admin.access.groups.members.search": [
+    {
+      "type": 0,
+      "value": "Rechercher des membres"
+    }
+  ],
   "web.admin.access.groups.newGroup": [
     {
       "type": 0,
@@ -49280,6 +49292,34 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.list.hidePaths": [
+    {
+      "type": 0,
+      "value": "Masquer les chemins"
+    }
+  ],
+  "web.admin.libraries.list.moreActions": [
+    {
+      "type": 0,
+      "value": "Autres actions pour "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.moveDown": [
+    {
+      "type": 0,
+      "value": "Descendre"
+    }
+  ],
+  "web.admin.libraries.list.moveUp": [
+    {
+      "type": 0,
+      "value": "Monter"
+    }
+  ],
   "web.admin.libraries.list.neverScanned": [
     {
       "type": 0,
@@ -49308,6 +49348,12 @@
     {
       "type": 0,
       "value": "Analyser la bibliothèque"
+    }
+  ],
+  "web.admin.libraries.list.showPaths": [
+    {
+      "type": 0,
+      "value": "Afficher les chemins"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -89341,6 +89387,16 @@
       "value": "Impossible de charger les utilisateurs."
     }
   ],
+  "web.admin.users.list.moreActions": [
+    {
+      "type": 0,
+      "value": "Autres actions pour "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    }
+  ],
   "web.admin.users.list.nextPage": [
     {
       "type": 0,
@@ -89351,6 +89407,12 @@
     {
       "type": 0,
       "value": "Aucun groupe"
+    }
+  ],
+  "web.admin.users.list.noMatches": [
+    {
+      "type": 0,
+      "value": "Aucun utilisateur ne correspond à votre recherche ou à votre filtre."
     }
   ],
   "web.admin.users.list.pageRange": [

@@ -4060,6 +4060,18 @@
       "value": "メンバーを読み込み中…"
     }
   ],
+  "web.admin.access.groups.members.noMatches": [
+    {
+      "type": 0,
+      "value": "検索に一致するメンバーはいません。"
+    }
+  ],
+  "web.admin.access.groups.members.search": [
+    {
+      "type": 0,
+      "value": "メンバーを検索"
+    }
+  ],
   "web.admin.access.groups.newGroup": [
     {
       "type": 0,
@@ -38815,6 +38827,34 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.list.hidePaths": [
+    {
+      "type": 0,
+      "value": "パスを非表示"
+    }
+  ],
+  "web.admin.libraries.list.moreActions": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "のその他の操作"
+    }
+  ],
+  "web.admin.libraries.list.moveDown": [
+    {
+      "type": 0,
+      "value": "下へ移動"
+    }
+  ],
+  "web.admin.libraries.list.moveUp": [
+    {
+      "type": 0,
+      "value": "上へ移動"
+    }
+  ],
   "web.admin.libraries.list.neverScanned": [
     {
       "type": 0,
@@ -38843,6 +38883,12 @@
     {
       "type": 0,
       "value": "ライブラリをスキャン"
+    }
+  ],
+  "web.admin.libraries.list.showPaths": [
+    {
+      "type": 0,
+      "value": "パスを表示"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -74876,6 +74922,16 @@
       "value": "ユーザーを読み込めませんでした。"
     }
   ],
+  "web.admin.users.list.moreActions": [
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "のその他の操作"
+    }
+  ],
   "web.admin.users.list.nextPage": [
     {
       "type": 0,
@@ -74886,6 +74942,12 @@
     {
       "type": 0,
       "value": "グループなし"
+    }
+  ],
+  "web.admin.users.list.noMatches": [
+    {
+      "type": 0,
+      "value": "検索またはフィルターに一致するユーザーはいません。"
     }
   ],
   "web.admin.users.list.pageRange": [

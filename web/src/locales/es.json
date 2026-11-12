@@ -4178,6 +4178,18 @@
       "value": "Cargando miembros..."
     }
   ],
+  "web.admin.access.groups.members.noMatches": [
+    {
+      "type": 0,
+      "value": "Ningún miembro coincide con tu búsqueda."
+    }
+  ],
+  "web.admin.access.groups.members.search": [
+    {
+      "type": 0,
+      "value": "Buscar miembros"
+    }
+  ],
   "web.admin.access.groups.newGroup": [
     {
       "type": 0,
@@ -49480,6 +49492,34 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.list.hidePaths": [
+    {
+      "type": 0,
+      "value": "Ocultar rutas"
+    }
+  ],
+  "web.admin.libraries.list.moreActions": [
+    {
+      "type": 0,
+      "value": "Más acciones para "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.moveDown": [
+    {
+      "type": 0,
+      "value": "Bajar"
+    }
+  ],
+  "web.admin.libraries.list.moveUp": [
+    {
+      "type": 0,
+      "value": "Subir"
+    }
+  ],
   "web.admin.libraries.list.neverScanned": [
     {
       "type": 0,
@@ -49508,6 +49548,12 @@
     {
       "type": 0,
       "value": "Analizar biblioteca"
+    }
+  ],
+  "web.admin.libraries.list.showPaths": [
+    {
+      "type": 0,
+      "value": "Mostrar rutas"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -89549,6 +89595,16 @@
       "value": "No se pudieron cargar los usuarios."
     }
   ],
+  "web.admin.users.list.moreActions": [
+    {
+      "type": 0,
+      "value": "Más acciones para "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    }
+  ],
   "web.admin.users.list.nextPage": [
     {
       "type": 0,
@@ -89559,6 +89615,12 @@
     {
       "type": 0,
       "value": "Sin grupo"
+    }
+  ],
+  "web.admin.users.list.noMatches": [
+    {
+      "type": 0,
+      "value": "Ningún usuario coincide con tu búsqueda o filtro."
     }
   ],
   "web.admin.users.list.pageRange": [

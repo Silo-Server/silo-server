@@ -4123,6 +4123,18 @@
       "value": "Mitglieder werden geladen …"
     }
   ],
+  "web.admin.access.groups.members.noMatches": [
+    {
+      "type": 0,
+      "value": "Keine Mitglieder entsprechen deiner Suche."
+    }
+  ],
+  "web.admin.access.groups.members.search": [
+    {
+      "type": 0,
+      "value": "Mitglieder durchsuchen"
+    }
+  ],
   "web.admin.access.groups.newGroup": [
     {
       "type": 0,
@@ -43856,6 +43868,34 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.list.hidePaths": [
+    {
+      "type": 0,
+      "value": "Pfade ausblenden"
+    }
+  ],
+  "web.admin.libraries.list.moreActions": [
+    {
+      "type": 0,
+      "value": "Weitere Aktionen für "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.moveDown": [
+    {
+      "type": 0,
+      "value": "Nach unten verschieben"
+    }
+  ],
+  "web.admin.libraries.list.moveUp": [
+    {
+      "type": 0,
+      "value": "Nach oben verschieben"
+    }
+  ],
   "web.admin.libraries.list.neverScanned": [
     {
       "type": 0,
@@ -43884,6 +43924,12 @@
     {
       "type": 0,
       "value": "Mediathek scannen"
+    }
+  ],
+  "web.admin.libraries.list.showPaths": [
+    {
+      "type": 0,
+      "value": "Pfade anzeigen"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -82007,6 +82053,16 @@
       "value": "Benutzer konnten nicht geladen werden."
     }
   ],
+  "web.admin.users.list.moreActions": [
+    {
+      "type": 0,
+      "value": "Weitere Aktionen für "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    }
+  ],
   "web.admin.users.list.nextPage": [
     {
       "type": 0,
@@ -82017,6 +82073,12 @@
     {
       "type": 0,
       "value": "Keine Gruppe"
+    }
+  ],
+  "web.admin.users.list.noMatches": [
+    {
+      "type": 0,
+      "value": "Keine Benutzer entsprechen deiner Suche oder deinem Filter."
     }
   ],
   "web.admin.users.list.pageRange": [
