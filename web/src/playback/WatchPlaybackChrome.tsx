@@ -387,6 +387,10 @@ export function WatchPlaybackProvider({ children }: { children: ReactNode }) {
             request,
             mode: "background-bar",
           });
+          // No route follows a background start, so nothing else would use
+          // up its automatic marker, and a later pick of this title from a
+          // link would keep the count.
+          consumeAutomaticStart(request.contentId);
           return;
         }
 
