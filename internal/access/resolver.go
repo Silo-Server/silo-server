@@ -159,9 +159,11 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 // for a resolved profile. It reports whether the profile is verified for the
 // request and whether that verification was only skipped: a PIN-locked
 // profile accepted through input.SkipPINVerification without a valid profile
-// token. A valid token counts as a real proof even when the PIN could be
-// skipped, so an exempt credential that did enter the PIN can still manage
-// the household.
+// token. A valid token bound to a login session counts as a real proof even
+// when the PIN could be skipped, so a view-as session that did enter the PIN
+// can still manage the household. A sessionless credential (an API key) stays
+// skipped whatever token it sends: its token is bound to no login session and
+// outlives the key.
 func VerifyProfileForRequest(
 	profile *userstore.Profile,
 	input ResolveInput,
@@ -174,7 +176,7 @@ func VerifyProfileForRequest(
 	if profile.PINHash == "" {
 		return true, false, nil
 	}
-	if input.SkipPINVerification && input.ProfileToken == "" {
+	if input.SkipPINVerification && (input.ProfileToken == "" || input.SessionID == "") {
 		return true, true, nil
 	}
 	if err := CheckProfileToken(tokens, input.ProfileToken, userID, input.SessionID, profile); err != nil {

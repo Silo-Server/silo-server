@@ -844,20 +844,25 @@ func TestViewerResolverExemptCredentialWithProfileTokenCountsAsVerified(t *testi
 	// Minted before the PIN last changed.
 	stale := stubProfileTokenValidator{claims: &access.ProfileTokenClaims{UserID: 1, SessionID: "sess-1", ProfileID: "prof-1", PINRevision: 2}}
 
+	// An API key has no login session; verify-pin mints its token for "".
+	sessionless := stubProfileTokenValidator{claims: &access.ProfileTokenClaims{UserID: 1, ProfileID: "prof-1", PINRevision: 3}}
+
 	for _, tc := range []struct {
 		name        string
+		sessionID   string
 		token       string
 		tokens      stubProfileTokenValidator
 		wantSkipped bool
 	}{
-		{"valid token", "valid", valid, false},
-		{"no token", "", valid, true},
-		{"stale token", "stale", stale, true},
+		{"valid token", "sess-1", "valid", valid, false},
+		{"no token", "sess-1", "", valid, true},
+		{"stale token", "sess-1", "stale", stale, true},
+		{"API key with a sessionless token", "", "valid", sessionless, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stores := viewerResolverStoreProvider{store: viewerResolverTestStore{profile: profile}}
 			users := viewerResolverUserRepo{user: user}
-			input := access.ResolveInput{UserID: 1, SessionID: "sess-1", ProfileID: "prof-1", ProfileToken: tc.token, SkipPINVerification: true}
+			input := access.ResolveInput{UserID: 1, SessionID: tc.sessionID, ProfileID: "prof-1", ProfileToken: tc.token, SkipPINVerification: true}
 			for name, resolver := range map[string]interface {
 				Resolve(context.Context, access.ResolveInput) (access.Scope, error)
 			}{
