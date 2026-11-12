@@ -592,7 +592,7 @@ export const PAGE_CONTAINER = "px-4 py-4 sm:px-6 lg:px-12 lg:py-6";
  * Hero banner container sizing — shared between HeroBanner and Home skeletons.
  * It is a minimum height, not a fixed one: a title that wraps to several
  * lines on a short viewport makes the hero taller instead of pushing the
- * eyebrow and title out of its top edge. Everything inside the hero other
+ * title out of its top edge. Everything inside the hero other
  * than its bottom-anchored text block is absolutely positioned.
  */
 export const HERO_BANNER_SIZE =
