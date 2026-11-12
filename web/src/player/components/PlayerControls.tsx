@@ -147,6 +147,15 @@ interface PlayerControlsProps {
  */
 const FULL_LAYOUT_MIN_REM = 64;
 
+/** .hud-transport-btn's width. */
+const TRANSPORT_BUTTON_REM = 3;
+/** The docked transport's sizings, largest first; play is .hud-play-btn(--large). */
+const DOCK_TRANSPORT_SIZINGS = [
+  { large: true, playRem: 4.5, gapRem: 1.25, gapClass: "gap-5" },
+  { large: false, playRem: 3.75, gapRem: 0.75, gapClass: "gap-3" },
+  { large: false, playRem: 3.75, gapRem: 0.375, gapClass: "gap-1.5" },
+] as const;
+
 export function PlayerControls({
   skipSeconds,
   onSkip,
@@ -265,6 +274,16 @@ export function PlayerControls({
   // both prev/next slots so the cluster remains symmetric around the play
   // button. Movies (no episode nav at all) skip the slots entirely.
   const showEpisodeSlots = hasPrevEpisode || hasNextEpisode;
+  // The upright-phone dock's transport row cannot wrap or shrink, so it takes
+  // the largest sizing that fits across the player (less the dock's 1rem
+  // sides): the large play button with wide gaps, then standard sizes, then
+  // tight gaps.
+  const dockSlots = showEpisodeSlots ? 5 : 3;
+  const dockSizing =
+    DOCK_TRANSPORT_SIZINGS.find(
+      ({ playRem, gapRem }) =>
+        ((dockSlots - 1) * (TRANSPORT_BUTTON_REM + gapRem) + playRem + 2) * size.rem <= size.width,
+    ) ?? DOCK_TRANSPORT_SIZINGS[DOCK_TRANSPORT_SIZINGS.length - 1]!;
   const pipAvailable = Boolean(onTogglePiP) && document.pictureInPictureEnabled;
 
   const activeChapterIndex = findActiveChapterIndex(chapters ?? [], currentTime);
@@ -524,8 +543,8 @@ export function PlayerControls({
         </div>
 
         {dockTop !== null ? (
-          <div dir="ltr" className="mt-2 flex items-center justify-center gap-5">
-            {transport(true)}
+          <div dir="ltr" className={`mt-2 flex items-center justify-center ${dockSizing.gapClass}`}>
+            {transport(dockSizing.large)}
           </div>
         ) : null}
 
