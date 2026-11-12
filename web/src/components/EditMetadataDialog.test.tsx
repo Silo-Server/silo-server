@@ -257,3 +257,34 @@ describe("EditMetadataDialog cleared fields", () => {
     );
   });
 });
+
+describe("EditMetadataDialog audiobooks", () => {
+  beforeEach(() => {
+    mocks.update.mockReset();
+  });
+
+  it("edits and locks an audiobook's title and year", () => {
+    const book = {
+      content_id: "book-test",
+      type: "audiobook",
+      title: "Test Book",
+      year: 2019,
+      locked_fields: [],
+    } as unknown as ItemDetail;
+    render(<EditMetadataDialog item={book} open onOpenChange={vi.fn()} />);
+
+    // Video provider IDs don't apply to a book; Match Item sets its provider IDs.
+    expect(screen.queryByRole("button", { name: "External IDs" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Images" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByDisplayValue("Test Book"), { target: { value: "Edited Book" } });
+    fireEvent.click(screen.getByRole("button", { name: "Dates & Ratings" }));
+    fireEvent.change(screen.getByDisplayValue("2019"), { target: { value: "2001" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+
+    expect(mocks.update).toHaveBeenCalledWith(
+      { title: "Edited Book", year: 2001, locked_fields: [0, 13] },
+      expect.any(Object),
+    );
+  });
+});

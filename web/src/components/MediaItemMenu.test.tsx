@@ -256,7 +256,19 @@ describe("buildMediaItemMenuModel", () => {
     expect(labels).not.toContain("View Play History");
   });
 
-  it("limits edit and match card actions to movies and series", () => {
+  it("offers Edit Metadata and Match Item on an audiobook", () => {
+    const model = buildModel({
+      mediaType: "audiobook",
+      isAdmin: false,
+      canCurateMetadata: true,
+    });
+    const labels = model.filter((item) => item.kind === "action").map((item) => item.label);
+
+    expect(labels).toContain("Edit Metadata");
+    expect(labels).toContain("Match Item");
+  });
+
+  it("limits edit and match card actions to movies, series and audiobooks", () => {
     const model = buildModel({
       mediaType: "episode",
       isAdmin: true,
