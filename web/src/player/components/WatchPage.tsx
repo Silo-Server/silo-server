@@ -12,6 +12,7 @@ import { usePlayerConfig } from "../context/PlayerConfigContext";
 import { resolvePlayableSubtitles } from "../utils/playableSubtitles";
 import { patchVersionMarkers, resolveActiveVersionMarkers } from "../utils/watchPageMarkers";
 import { VideoPlayer } from "./VideoPlayer";
+import { PlayerLoadingCover } from "./PlayerLoadingCover";
 import { fetchWatchDetail } from "@/hooks/queries/items";
 import { transientTrickplayError, useWatchTrickplay } from "@/hooks/queries/trickplay";
 import { itemKeys } from "@/hooks/queries/keys";
@@ -150,6 +151,7 @@ function WatchPagePlayer({
   contentId,
   title,
   year,
+  backdrop,
   playbackRequestKey,
   fileId,
   versionPicked = false,
@@ -613,16 +615,21 @@ function WatchPagePlayer({
   if (!session.plan || !session.streamUrl || !session.sessionId) {
     if (session.loading || fallingBack) {
       return (
-        <div className="hud fixed inset-0 z-50 flex items-center justify-center bg-black">
-          <div className="flex flex-col items-center gap-4">
-            <div className="hud-spinner" />
+        <PlayerLoadingCover
+          backdrop={backdrop}
+          label={
+            fallingBack
+              ? t("web.player.watch.findingCompatibleVersion")
+              : t("web.player.watch.loadingPlayer")
+          }
+          className="fixed inset-0 z-50"
+        >
+          {fallingBack ? (
             <span className="text-sm text-[var(--hud-ash)]">
-              {fallingBack
-                ? t("web.player.watch.findingCompatibleVersion")
-                : t("web.player.watch.loadingPlayer")}
+              {t("web.player.watch.findingCompatibleVersion")}
             </span>
-          </div>
-        </div>
+          ) : null}
+        </PlayerLoadingCover>
       );
     }
 
@@ -677,6 +684,7 @@ function WatchPagePlayer({
     <VideoPlayer
       title={title}
       year={year}
+      backdrop={backdrop}
       streamUrl={session.streamUrl}
       plan={session.plan}
       planRevision={session.planRevision}

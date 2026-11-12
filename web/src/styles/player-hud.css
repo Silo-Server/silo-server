@@ -769,6 +769,16 @@
     border-color: rgb(255 255 255 / 0.16);
     border-top-color: var(--hud-lamp);
   }
+  /* Loading covers show the title's backdrop dimmed well under the spinner. */
+  .hud-loading-backdrop {
+    opacity: 0.22;
+  }
+
+  /* Over playing video: a dark disc keeps the ring visible on a light frame. */
+  .hud-spinner--float {
+    background: rgb(0 0 0 / 0.55);
+    box-shadow: 0 0 1rem rgb(0 0 0 / 0.35);
+  }
 
   /* ── Keyboard focus ─────────────────────────────────────────
      Accent ring plus a dark halo: it reads on white buttons, on the
@@ -815,8 +825,8 @@
     }
   }
 
-  /* Full-width rails spell out what each menu holds and what it is set to;
-     the title, above the timeline, leads the hierarchy. */
+  /* Full-width rails spell out what each menu holds and what it is set to.
+     The title shares the control row, so it stays row-sized. */
   .player-controls[data-compact="false"] .hud-rail-btn {
     padding-inline: 0.625rem 0.875rem;
   }
@@ -824,14 +834,63 @@
     display: inline;
   }
   .player-controls[data-compact="false"] .hud-title {
-    font-size: 1.625rem;
-    letter-spacing: -0.018em;
+    font-size: 1.125rem;
+  }
+
+  /* Below desktop-monitor widths the rail drops its value labels, so it fits
+     beside the centred transport without pushing it off the centreline. */
+  @container player-controls (width < 96rem) {
+    .player-controls[data-compact="false"] .hud-rail-label {
+      display: none;
+    }
+    .player-controls[data-compact="false"] .hud-rail-btn {
+      padding-inline: 0;
+    }
   }
 
   /* Laptop-wide rails: a shorter volume slider leaves the groups room. */
   @container player-controls (width < 100rem) {
     .player-controls .group\/vol [role="slider"] {
       width: 4.5rem;
+    }
+  }
+
+  /* Laptop rails: the volume slider rises above the mute button on hover or
+     focus instead of taking a place in the row, and the gear drops its label,
+     so the transport stays on the centreline. The pill is drawn behind the
+     slider, not as padding, because the slider maps the pointer across its
+     own width. */
+  @container player-controls (width < 80rem) {
+    .player-controls[data-compact="false"] .group\/vol {
+      position: relative;
+    }
+    .player-controls[data-compact="false"] .group\/vol [role="slider"] {
+      position: absolute;
+      bottom: 100%;
+      left: 50%;
+      width: 6rem;
+      transform: translateX(-50%);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 160ms var(--hud-ease);
+    }
+    .player-controls[data-compact="false"] .group\/vol [role="slider"]::before {
+      content: "";
+      position: absolute;
+      inset-block: 0.375rem;
+      inset-inline: -0.875rem;
+      z-index: -1;
+      border-radius: 9999px;
+      background: var(--hud-panel);
+      border: 1px solid var(--hud-hairline);
+    }
+    .player-controls[data-compact="false"] .group\/vol:hover [role="slider"],
+    .player-controls[data-compact="false"] .group\/vol:focus-within [role="slider"] {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .player-controls[data-compact="false"] .player-quality-label {
+      display: none;
     }
   }
 

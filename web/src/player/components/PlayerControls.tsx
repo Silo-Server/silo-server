@@ -482,11 +482,6 @@ export function PlayerControls({
             <TitleBlock title={title} subtitleLabel={subtitleLabel} chapterTitle={chapterTitle} />
           </div>
         ) : null}
-        {!compactControls ? (
-          <div className="mb-2 flex">
-            <TitleBlock title={title} subtitleLabel={subtitleLabel} chapterTitle={chapterTitle} />
-          </div>
-        ) : null}
         {/* Timeline: elapsed, the bar, and time remaining, left to right in
             every language. */}
         <div dir="ltr" className="flex items-center gap-2 sm:gap-3">
@@ -560,14 +555,17 @@ export function PlayerControls({
             {fullscreenButton}
           </div>
         ) : (
-          <div className="mt-2 flex items-center justify-between gap-6">
-            {/* Playback at the start, where the eye starts; settings at the end.
-                The transport itself reads left to right in every language. */}
-            <div className="flex items-center gap-3">
-              <div dir="ltr" className="flex items-center gap-3">
-                {transport(false, false)}
-              </div>
-              <span aria-hidden="true" className="mx-1.5 h-6 w-px bg-white/15" />
+          <div className="player-full-row mt-3 grid grid-cols-[minmax(0,1fr)_auto_minmax(max-content,1fr)] items-center gap-6">
+            {/* What is playing at the start, the transport on the centreline,
+                settings at the end. When the settings need more room the title
+                gives it up first. The transport reads left to right in every
+                language. */}
+            <TitleBlock title={title} subtitleLabel={subtitleLabel} chapterTitle={chapterTitle} />
+            <div dir="ltr" className="flex items-center gap-3">
+              {transport(false)}
+            </div>
+
+            <div className="flex items-center justify-end gap-1.5">
               <VolumeControl
                 tone="hud"
                 volume={volume}
@@ -575,9 +573,7 @@ export function PlayerControls({
                 onVolumeChange={onVolumeChange}
                 onMutedChange={onMutedChange}
               />
-            </div>
-
-            <div className="flex items-center justify-end gap-1.5">
+              <span aria-hidden="true" className="mx-1.5 h-6 w-px bg-white/15" />
               {onAudioSelect && (
                 <AudioTrackMenu
                   tracks={audioTracks}

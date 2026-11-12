@@ -1,6 +1,5 @@
 import { ChevronDown, X } from "lucide-react";
 import "@/styles/player-hud.css";
-import { formatTime } from "../utils/formatTime";
 import { useMediaSkipHandlers } from "../hooks/useMediaSkipHandlers";
 import {
   MEDIA_ENDED_EVENT,
@@ -20,6 +19,7 @@ import type { ParsedCue } from "../utils/parseVTT";
 import { resolveSubtitleAutoSelect } from "../utils/subtitleSort";
 import type HlsType from "hls.js";
 import { PlayerControls } from "./PlayerControls";
+import { PlayerLoadingCover } from "./PlayerLoadingCover";
 import { PlaybackInfoOverlay } from "./PlaybackInfoOverlay";
 import { PlaybackNoticeOverlay, PlaybackNoticeStack } from "./PlaybackNoticeOverlay";
 import { IntroSkipButton } from "./IntroSkipButton";
@@ -101,6 +101,7 @@ import type {
   SeriesContext,
   SubtitleMode,
   VideoFitMode,
+  PlayerBackdrop,
 } from "../types";
 import type { PlayerTrickplay } from "../trickplay";
 import type { FailureV3, PlanV3, SubtitleInventoryItemV3 } from "../protocol-v3";
@@ -221,6 +222,8 @@ function skipMarkerLabel(t: Translate, kind: MarkerKind): string {
 interface VideoPlayerProps {
   title: string;
   year?: number;
+  /** Shown dimmed behind the spinner until the first frame. */
+  backdrop?: PlayerBackdrop;
   streamUrl: string;
   /**
    * The server's plan for this session. Everything about *how* the media plays —
@@ -501,6 +504,7 @@ function readStringPayload(
 export function VideoPlayer({
   title,
   year,
+  backdrop,
   streamUrl,
   plan,
   planRevision,
@@ -5382,14 +5386,11 @@ export function VideoPlayer({
 
       {/* Loading overlay — stays up until the session's first frame renders */}
       {!isDetached && startupCover && !error && (
-        <div
-          role="status"
-          aria-label={t("web.player.loadingVideo")}
-          className="absolute inset-0 z-40 flex items-center justify-center bg-black"
-        >
-          <div className="hud-spinner" />
-          <span className="sr-only">{t("web.player.loadingVideo")}</span>
-        </div>
+        <PlayerLoadingCover
+          backdrop={backdrop}
+          label={t("web.player.loadingVideo")}
+          className="absolute inset-0 z-40"
+        />
       )}
 
       {/* Room sync overlay */}
@@ -5418,28 +5419,21 @@ export function VideoPlayer({
         </div>
       )}
 
-      {/* Buffering spinner (mid-playback stalls, outages and replanned transports) */}
+      {/* Loading spinner (mid-playback stalls, outages and replanned transports).
+          Viewers read a visible "Buffering" as a fault, so an ordinary stall shows
+          the spinner alone; only a party catch-up or a reconnect says why. */}
       {bufferingShown && (
         <div
           role="status"
           aria-label={stallLabel ?? t("web.player.bufferingStatus")}
-          className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center"
+          className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-center gap-3"
         >
-          {/* Centred and solid, so a stall is never mistaken for a pause or
-              lost on a white frame; it says where playback picks up. */}
-          <div className="hud-card flex items-center gap-4 rounded-2xl py-4 ps-4 pe-6">
-            <div className="hud-spinner hud-spinner--lamp size-10 border-[0.25rem]" />
-            <div className="flex flex-col gap-0.5">
-              <span className="text-base font-semibold">
-                {stallLabel ?? t("web.player.bufferingStatus")}
-              </span>
-              <span className="text-[0.8125rem] text-[var(--hud-ash)] tabular-nums">
-                {t("web.player.buffering.loadingFrom", {
-                  time: formatTime(roomHeldSeek ?? currentTime),
-                })}
-              </span>
-            </div>
-          </div>
+          <div className="hud-spinner hud-spinner--float size-14 border-[0.25rem]" />
+          {stallLabel ? (
+            <span className="hud-card rounded-full px-3 py-1 text-xs font-medium">
+              {stallLabel}
+            </span>
+          ) : null}
         </div>
       )}
 
