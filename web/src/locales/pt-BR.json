@@ -137,6 +137,12 @@
       "value": "Ano"
     }
   ],
+  "collections.collection": [
+    {
+      "type": 0,
+      "value": "Coleção"
+    }
+  ],
   "common.back": [
     {
       "type": 0,
@@ -287,10 +293,22 @@
       "value": "Este valor não é válido."
     }
   ],
+  "error.field.invalid_entity_tag": [
+    {
+      "type": 0,
+      "value": "Esperava-se “*” ou uma lista de entity-tags entre aspas, separadas por vírgulas."
+    }
+  ],
   "error.field.invalid_enum": [
     {
       "type": 0,
       "value": "Escolha um dos valores permitidos."
+    }
+  ],
+  "error.field.invalid_sort_field": [
+    {
+      "type": 0,
+      "value": "A ordenação indica um campo pelo qual esta operação não ordena ou indica o mesmo campo duas vezes."
     }
   ],
   "error.field.invalid_type": [
@@ -593,6 +611,570 @@
       "value": "Alguns valores não são válidos. Verifique-os e tente novamente."
     }
   ],
+  "home.recipe.aclBlank.description": [
+    {
+      "type": 0,
+      "value": "Lista ordenada item por item, com curadoria do administrador."
+    }
+  ],
+  "home.recipe.aclBlank.name": [
+    {
+      "type": 0,
+      "value": "Escolhas da curadoria"
+    }
+  ],
+  "home.recipe.anniversariesDefault.description": [
+    {
+      "type": 0,
+      "value": "Títulos que celebram um aniversário marcante de lançamento neste mês."
+    }
+  ],
+  "home.recipe.anniversariesDefault.name": [
+    {
+      "type": 0,
+      "value": "Aniversários"
+    }
+  ],
+  "home.recipe.awCannes.description": [
+    {
+      "type": 0,
+      "value": "Seleções do Festival de Cannes."
+    }
+  ],
+  "home.recipe.awCannes.name": [
+    {
+      "type": 0,
+      "value": "Seleções de Cannes"
+    }
+  ],
+  "home.recipe.awEmmy.description": [
+    {
+      "type": 0,
+      "value": "Séries vencedoras do Emmy."
+    }
+  ],
+  "home.recipe.awEmmy.name": [
+    {
+      "type": 0,
+      "value": "Vencedores do Emmy"
+    }
+  ],
+  "home.recipe.awOscar.description": [
+    {
+      "type": 0,
+      "value": "Vencedores do Oscar na sua biblioteca."
+    }
+  ],
+  "home.recipe.awOscar.name": [
+    {
+      "type": 0,
+      "value": "Vencedores do Oscar"
+    }
+  ],
+  "home.recipe.bcwAuto.description": [
+    {
+      "type": 0,
+      "value": "Sugestões com base no que você assistiu por último."
+    }
+  ],
+  "home.recipe.caImdb.description": [
+    {
+      "type": 0,
+      "value": "Avaliados com 8.0+ no TMDB e 500+ votos."
+    }
+  ],
+  "home.recipe.caImdb.name": [
+    {
+      "type": 0,
+      "value": "Aclamados pela crítica"
+    }
+  ],
+  "home.recipe.collectionPick.description": [
+    {
+      "type": 0,
+      "value": "Mostra itens de uma biblioteca ou de uma coleção com curadoria."
+    }
+  ],
+  "home.recipe.collectionPick.name": [
+    {
+      "type": 0,
+      "value": "Coleção"
+    }
+  ],
+  "home.recipe.continueListeningDefault.description": [
+    {
+      "type": 0,
+      "value": "Retome audiolivros de onde parou."
+    }
+  ],
+  "home.recipe.continueWatchingDefault.description": [
+    {
+      "type": 0,
+      "value": "Retome filmes e episódios de onde parou."
+    }
+  ],
+  "home.recipe.esActor.description": [
+    {
+      "type": 0,
+      "value": "Destaque semanal para alguém do elenco da sua biblioteca."
+    }
+  ],
+  "home.recipe.esActor.name": [
+    {
+      "type": 0,
+      "value": "Elenco em destaque"
+    }
+  ],
+  "home.recipe.esDirectorAuto.description": [
+    {
+      "type": 0,
+      "value": "Destaque semanal para alguém da direção da sua biblioteca."
+    }
+  ],
+  "home.recipe.esDirectorAuto.name": [
+    {
+      "type": 0,
+      "value": "Direção em destaque"
+    }
+  ],
+  "home.recipe.esEra80s.description": [
+    {
+      "type": 0,
+      "value": "Filmes dos anos 1980."
+    }
+  ],
+  "home.recipe.esEra80s.name": [
+    {
+      "type": 0,
+      "value": "Anos 80"
+    }
+  ],
+  "home.recipe.esStudio.description": [
+    {
+      "type": 0,
+      "value": "Destaque semanal para um estúdio da sua biblioteca."
+    }
+  ],
+  "home.recipe.esStudio.name": [
+    {
+      "type": 0,
+      "value": "Estúdio em destaque"
+    }
+  ],
+  "home.recipe.favoritesDefault.description": [
+    {
+      "type": 0,
+      "value": "Seus favoritos."
+    }
+  ],
+  "home.recipe.favoritesDefault.name": [
+    {
+      "type": 0,
+      "value": "Favoritos"
+    }
+  ],
+  "home.recipe.ffDefault.description": [
+    {
+      "type": 0,
+      "value": "Avaliados com 7.0+ no TMDB e 100+ votos, e não assistidos no último ano."
+    }
+  ],
+  "home.recipe.ffDefault.name": [
+    {
+      "type": 0,
+      "value": "Favoritos esquecidos"
+    }
+  ],
+  "home.recipe.forYou.description": [
+    {
+      "type": 0,
+      "value": "Sugestões do mecanismo de recomendação para cada perfil."
+    }
+  ],
+  "home.recipe.forYou.name": [
+    {
+      "type": 0,
+      "value": "Recomendados para você"
+    }
+  ],
+  "home.recipe.fs4k.description": [
+    {
+      "type": 0,
+      "value": "Títulos disponíveis em 4K UHD."
+    }
+  ],
+  "home.recipe.fs4k.name": [
+    {
+      "type": 0,
+      "value": "Vitrine 4K"
+    }
+  ],
+  "home.recipe.fs4kRecent.description": [
+    {
+      "type": 0,
+      "value": "Títulos em 4K UHD adicionados recentemente."
+    }
+  ],
+  "home.recipe.fs4kRecent.name": [
+    {
+      "type": 0,
+      "value": "Novidades em 4K"
+    }
+  ],
+  "home.recipe.fsDv.description": [
+    {
+      "type": 0,
+      "value": "Títulos em Dolby Vision."
+    }
+  ],
+  "home.recipe.fsDv.name": [
+    {
+      "type": 0,
+      "value": "Destaques em Dolby Vision"
+    }
+  ],
+  "home.recipe.fsHdr.description": [
+    {
+      "type": 0,
+      "value": "Títulos masterizados em HDR."
+    }
+  ],
+  "home.recipe.fsHdr.name": [
+    {
+      "type": 0,
+      "value": "Destaques em HDR"
+    }
+  ],
+  "home.recipe.genreRouletteWeekly.description": [
+    {
+      "type": 0,
+      "value": "Um gênero diferente a cada semana, avaliados com 6.0+ no TMDB e 100+ votos."
+    }
+  ],
+  "home.recipe.genreRouletteWeekly.name": [
+    {
+      "type": 0,
+      "value": "Roleta de gêneros"
+    }
+  ],
+  "home.recipe.hiddenGemsDefault.description": [
+    {
+      "type": 0,
+      "value": "Avaliados com 7.5+ no TMDB e 100+ votos, e assistidos no máximo duas vezes."
+    }
+  ],
+  "home.recipe.moodAfterMidnight.description": [
+    {
+      "type": 0,
+      "value": "Terror ou Thriller, avaliados com 6.0+ no TMDB e 100+ votos."
+    }
+  ],
+  "home.recipe.moodAfterMidnight.name": [
+    {
+      "type": 0,
+      "value": "Depois da meia-noite"
+    }
+  ],
+  "home.recipe.moodComfort.description": [
+    {
+      "type": 0,
+      "value": "Comédia, Romance ou Família, avaliados com 6.0+ no TMDB e 100+ votos."
+    }
+  ],
+  "home.recipe.moodComfort.name": [
+    {
+      "type": 0,
+      "value": "Para rever com conforto"
+    }
+  ],
+  "home.recipe.moodDateNight.description": [
+    {
+      "type": 0,
+      "value": "Romance ou Comédia, avaliados com 6.0+ no TMDB e 100+ votos."
+    }
+  ],
+  "home.recipe.moodDateNight.name": [
+    {
+      "type": 0,
+      "value": "Noite a dois"
+    }
+  ],
+  "home.recipe.moodEdgeOfSeat.description": [
+    {
+      "type": 0,
+      "value": "Thriller ou Ação, avaliados com 6.5+ no TMDB e 100+ votos."
+    }
+  ],
+  "home.recipe.moodEdgeOfSeat.name": [
+    {
+      "type": 0,
+      "value": "Na ponta da cadeira"
+    }
+  ],
+  "home.recipe.moodFeelGood.description": [
+    {
+      "type": 0,
+      "value": "Comédia ou Família, avaliados com 6.5+ no TMDB e 100+ votos."
+    }
+  ],
+  "home.recipe.moodFeelGood.name": [
+    {
+      "type": 0,
+      "value": "Comédias para animar"
+    }
+  ],
+  "home.recipe.moodMindBending.description": [
+    {
+      "type": 0,
+      "value": "Ficção científica ou Mistério, avaliados com 7.0+ no TMDB e 100+ votos."
+    }
+  ],
+  "home.recipe.moodMindBending.name": [
+    {
+      "type": 0,
+      "value": "Sci-fi de dar nó na cabeça"
+    }
+  ],
+  "home.recipe.moodQuietSunday.description": [
+    {
+      "type": 0,
+      "value": "Drama ou Documentário, avaliados com 7.0+ no TMDB e 100+ votos."
+    }
+  ],
+  "home.recipe.moodQuietSunday.name": [
+    {
+      "type": 0,
+      "value": "Cinema para um domingo tranquilo"
+    }
+  ],
+  "home.recipe.moodTearjerker.description": [
+    {
+      "type": 0,
+      "value": "Drama ou Romance, avaliados com 7.0+ no TMDB e 100+ votos."
+    }
+  ],
+  "home.recipe.moodTearjerker.name": [
+    {
+      "type": 0,
+      "value": "Para chorar"
+    }
+  ],
+  "home.recipe.mwMonth.description": [
+    {
+      "type": 0,
+      "value": "Mais reproduzidos nos últimos 30 dias."
+    }
+  ],
+  "home.recipe.mwMonth.name": [
+    {
+      "type": 0,
+      "value": "Mais assistidos neste mês"
+    }
+  ],
+  "home.recipe.mwWeek.description": [
+    {
+      "type": 0,
+      "value": "Mais reproduzidos nos últimos 7 dias."
+    }
+  ],
+  "home.recipe.mwWeek.name": [
+    {
+      "type": 0,
+      "value": "Mais assistidos nesta semana"
+    }
+  ],
+  "home.recipe.nextInSeriesDefault.description": [
+    {
+      "type": 0,
+      "value": "O próximo audiolivro das séries que você terminou."
+    }
+  ],
+  "home.recipe.nextInSeriesDefault.name": [
+    {
+      "type": 0,
+      "value": "Próximo da série"
+    }
+  ],
+  "home.recipe.nextUpDefault.description": [
+    {
+      "type": 0,
+      "value": "Próximos episódios prontos para assistir."
+    }
+  ],
+  "home.recipe.ntl30.description": [
+    {
+      "type": 0,
+      "value": "Adicionados nos últimos 30 dias."
+    }
+  ],
+  "home.recipe.ntl30.name": [
+    {
+      "type": 0,
+      "value": "Novidades na biblioteca neste mês"
+    }
+  ],
+  "home.recipe.paHousehold.description": [
+    {
+      "type": 0,
+      "value": "Assistidos recentemente em todos os outros perfis."
+    }
+  ],
+  "home.recipe.paHousehold.name": [
+    {
+      "type": 0,
+      "value": "O que os outros acabaram de assistir"
+    }
+  ],
+  "home.recipe.randomDefault.description": [
+    {
+      "type": 0,
+      "value": "Uma seleção aleatória da sua biblioteca."
+    }
+  ],
+  "home.recipe.randomDefault.name": [
+    {
+      "type": 0,
+      "value": "Surpreenda-me"
+    }
+  ],
+  "home.recipe.recentlyAddedDefault.description": [
+    {
+      "type": 0,
+      "value": "As últimas adições à sua biblioteca."
+    }
+  ],
+  "home.recipe.recentlyReleasedDefault.description": [
+    {
+      "type": 0,
+      "value": "Títulos lançados recentemente."
+    }
+  ],
+  "home.recipe.recentlyReleasedDefault.name": [
+    {
+      "type": 0,
+      "value": "Lançamentos"
+    }
+  ],
+  "home.recipe.returningShowsDefault.description": [
+    {
+      "type": 0,
+      "value": "Séries que você assistiu e que têm uma temporada nova na sua biblioteca."
+    }
+  ],
+  "home.recipe.seAuto.description": [
+    {
+      "type": 0,
+      "value": "Muda automaticamente — Halloween em outubro, Natal em dezembro etc."
+    }
+  ],
+  "home.recipe.seAuto.details": [
+    {
+      "type": 0,
+      "value": "Uma seção que alterna sugestões de datas comemorativas com curadoria conforme o calendário. Escolha as datas, um clima para cada uma e adicione suas próprias datas comemorativas."
+    }
+  ],
+  "home.recipe.seFamilyMovieNight.description": [
+    {
+      "type": 0,
+      "value": "Sugestões para a família nas noites de sexta e sábado."
+    }
+  ],
+  "home.recipe.seFamilyMovieNight.name": [
+    {
+      "type": 0,
+      "value": "Sessão de cinema em família"
+    }
+  ],
+  "home.recipe.shortWatchesDefault.description": [
+    {
+      "type": 0,
+      "value": "Filmes de até 95 minutos, avaliados com 6.0+ no TMDB e 100+ votos."
+    }
+  ],
+  "home.recipe.shortWatchesDefault.name": [
+    {
+      "type": 0,
+      "value": "Curtos e bons"
+    }
+  ],
+  "home.recipe.similar.description": [
+    {
+      "type": 0,
+      "value": "O que perfis parecidos com o seu estão adorando."
+    }
+  ],
+  "home.recipe.tasteTop.description": [
+    {
+      "type": 0,
+      "value": "As melhores combinações com o seu gosto principal — defina um gênero para refinar."
+    }
+  ],
+  "home.recipe.tdiscTmdbDay.description": [
+    {
+      "type": 0,
+      "value": "Filmes e séries em alta hoje no TMDB, encontrados na sua biblioteca."
+    }
+  ],
+  "home.recipe.tdiscTmdbDay.name": [
+    {
+      "type": 0,
+      "value": "Em alta hoje no TMDB"
+    }
+  ],
+  "home.recipe.tdiscTmdbWeek.description": [
+    {
+      "type": 0,
+      "value": "Filmes e séries em alta nesta semana no TMDB, encontrados na sua biblioteca."
+    }
+  ],
+  "home.recipe.tdiscTmdbWeek.name": [
+    {
+      "type": 0,
+      "value": "Em alta nesta semana no TMDB"
+    }
+  ],
+  "home.recipe.tr24h.description": [
+    {
+      "type": 0,
+      "value": "Mais reproduzidos no último dia."
+    }
+  ],
+  "home.recipe.tr24h.name": [
+    {
+      "type": 0,
+      "value": "Em alta agora (24 h)"
+    }
+  ],
+  "home.recipe.tr30d.description": [
+    {
+      "type": 0,
+      "value": "Mais reproduzidos no último mês."
+    }
+  ],
+  "home.recipe.tr30d.name": [
+    {
+      "type": 0,
+      "value": "Em alta neste mês"
+    }
+  ],
+  "home.recipe.tr7d.description": [
+    {
+      "type": 0,
+      "value": "Mais reproduzidos na última semana."
+    }
+  ],
+  "home.recipe.watchlistDefault.description": [
+    {
+      "type": 0,
+      "value": "Itens que você salvou para assistir."
+    }
+  ],
+  "home.recipe.watchlistDefault.name": [
+    {
+      "type": 0,
+      "value": "Lista para assistir"
+    }
+  ],
   "home.section.becauseYouEnjoy": [
     {
       "type": 0,
@@ -635,6 +1217,60 @@
     {
       "type": 0,
       "value": "Continuar assistindo"
+    }
+  ],
+  "home.section.discoverGenres": [
+    {
+      "type": 0,
+      "value": "Gêneros"
+    }
+  ],
+  "home.section.discoverNetworks": [
+    {
+      "type": 0,
+      "value": "Emissoras"
+    }
+  ],
+  "home.section.discoverOnAirSeries": [
+    {
+      "type": 0,
+      "value": "Séries no ar"
+    }
+  ],
+  "home.section.discoverPopularMovies": [
+    {
+      "type": 0,
+      "value": "Filmes populares"
+    }
+  ],
+  "home.section.discoverPopularSeries": [
+    {
+      "type": 0,
+      "value": "Séries populares"
+    }
+  ],
+  "home.section.discoverStudios": [
+    {
+      "type": 0,
+      "value": "Estúdios"
+    }
+  ],
+  "home.section.discoverTrendingMovies": [
+    {
+      "type": 0,
+      "value": "Filmes em alta"
+    }
+  ],
+  "home.section.discoverTrendingSeries": [
+    {
+      "type": 0,
+      "value": "Séries em alta"
+    }
+  ],
+  "home.section.discoverUpcomingMovies": [
+    {
+      "type": 0,
+      "value": "Filmes em breve"
     }
   ],
   "home.section.forYou": [
@@ -805,6 +1441,210 @@
       "value": "Séries que estão de volta"
     }
   ],
+  "home.section.seasonal.christmas.classics": [
+    {
+      "type": 0,
+      "value": "Clássicos de Natal"
+    }
+  ],
+  "home.section.seasonal.christmas.comedies": [
+    {
+      "type": 0,
+      "value": "Comédias de Natal"
+    }
+  ],
+  "home.section.seasonal.christmas.family": [
+    {
+      "type": 0,
+      "value": "Natal em família"
+    }
+  ],
+  "home.section.seasonal.christmas.favorites": [
+    {
+      "type": 0,
+      "value": "Favoritos de Natal"
+    }
+  ],
+  "home.section.seasonal.christmas.hallmark": [
+    {
+      "type": 0,
+      "value": "Natal da Hallmark"
+    }
+  ],
+  "home.section.seasonal.christmas.romcoms": [
+    {
+      "type": 0,
+      "value": "Comédias românticas de Natal"
+    }
+  ],
+  "home.section.seasonal.easter.faith": [
+    {
+      "type": 0,
+      "value": "Histórias de Páscoa"
+    }
+  ],
+  "home.section.seasonal.easter.family": [
+    {
+      "type": 0,
+      "value": "Filmes de Páscoa"
+    }
+  ],
+  "home.section.seasonal.familyMovieNight.favorites": [
+    {
+      "type": 0,
+      "value": "Favoritos da família"
+    }
+  ],
+  "home.section.seasonal.familyMovieNight.liveAction": [
+    {
+      "type": 0,
+      "value": "Noite de filmes em família"
+    }
+  ],
+  "home.section.seasonal.familyMovieNight.new": [
+    {
+      "type": 0,
+      "value": "Noite de filmes em família"
+    }
+  ],
+  "home.section.seasonal.halloween.animated": [
+    {
+      "type": 0,
+      "value": "Halloween animado"
+    }
+  ],
+  "home.section.seasonal.halloween.family": [
+    {
+      "type": 0,
+      "value": "Halloween em família"
+    }
+  ],
+  "home.section.seasonal.halloween.favorites": [
+    {
+      "type": 0,
+      "value": "Favoritos de Halloween"
+    }
+  ],
+  "home.section.seasonal.halloween.horror": [
+    {
+      "type": 0,
+      "value": "Terror de Halloween"
+    }
+  ],
+  "home.section.seasonal.halloween.tv": [
+    {
+      "type": 0,
+      "value": "Séries de Halloween"
+    }
+  ],
+  "home.section.seasonal.newYear.favorites": [
+    {
+      "type": 0,
+      "value": "Filmes de Ano-Novo"
+    }
+  ],
+  "home.section.seasonal.saturdayMorning.cartoons": [
+    {
+      "type": 0,
+      "value": "Desenhos de sábado de manhã"
+    }
+  ],
+  "home.section.seasonal.saturdayMorning.modern": [
+    {
+      "type": 0,
+      "value": "Favoritos de sábado de manhã"
+    }
+  ],
+  "home.section.seasonal.saturdayMorning.nineties": [
+    {
+      "type": 0,
+      "value": "Manhãs de sábado dos anos 90"
+    }
+  ],
+  "home.section.seasonal.stPatricks.irishFilm": [
+    {
+      "type": 0,
+      "value": "Filmes irlandeses"
+    }
+  ],
+  "home.section.seasonal.stPatricks.irishTv": [
+    {
+      "type": 0,
+      "value": "Séries irlandesas"
+    }
+  ],
+  "home.section.seasonal.summer.blockbusters": [
+    {
+      "type": 0,
+      "value": "Sucessos de bilheteria do verão"
+    }
+  ],
+  "home.section.seasonal.summer.classicSummer": [
+    {
+      "type": 0,
+      "value": "Filmes clássicos de verão"
+    }
+  ],
+  "home.section.seasonal.summer.nostalgia": [
+    {
+      "type": 0,
+      "value": "Nostalgia de verão"
+    }
+  ],
+  "home.section.seasonal.summerBlockbuster.blockbusters": [
+    {
+      "type": 0,
+      "value": "Sucessos de bilheteria do verão"
+    }
+  ],
+  "home.section.seasonal.summerBlockbuster.classicSummer": [
+    {
+      "type": 0,
+      "value": "Filmes clássicos de verão"
+    }
+  ],
+  "home.section.seasonal.summerBlockbuster.nostalgia": [
+    {
+      "type": 0,
+      "value": "Nostalgia de verão"
+    }
+  ],
+  "home.section.seasonal.thanksgiving.favorites": [
+    {
+      "type": 0,
+      "value": "Filmes de Ação de Graças"
+    }
+  ],
+  "home.section.seasonal.thanksgiving.feelGood": [
+    {
+      "type": 0,
+      "value": "Favoritos para se sentir bem"
+    }
+  ],
+  "home.section.seasonal.valentines.favorites": [
+    {
+      "type": 0,
+      "value": "Favoritos do Dia dos Namorados"
+    }
+  ],
+  "home.section.seasonal.valentines.loveStories": [
+    {
+      "type": 0,
+      "value": "Histórias de amor clássicas"
+    }
+  ],
+  "home.section.seasonal.valentines.romanticDramas": [
+    {
+      "type": 0,
+      "value": "Dramas românticos"
+    }
+  ],
+  "home.section.seasonal.valentines.romcoms": [
+    {
+      "type": 0,
+      "value": "Comédias românticas do Dia dos Namorados"
+    }
+  ],
   "home.section.seasonalPicks": [
     {
       "type": 0,
@@ -819,6 +1659,12 @@
     {
       "type": 1,
       "value": "genre"
+    }
+  ],
+  "home.section.topPicksToday": [
+    {
+      "type": 0,
+      "value": "Melhores escolhas de hoje"
     }
   ],
   "home.section.topRated": [
@@ -1077,6 +1923,16 @@
     {
       "type": 0,
       "value": "Voltar"
+    }
+  ],
+  "player.scrubber.endsAt": [
+    {
+      "type": 0,
+      "value": "Termina às "
+    },
+    {
+      "type": 1,
+      "value": "time"
     }
   ],
   "player.seekInterval.choice": [
@@ -2592,6 +3448,12 @@
       "value": "Somente o anfitrião"
     }
   ],
+  "shuffle.nothingToPlay": [
+    {
+      "type": 0,
+      "value": "Nada aqui pode ser reproduzido."
+    }
+  ],
   "subtitleSearch.hearingImpaired": [
     {
       "type": 0,
@@ -3310,6 +4172,18 @@
     {
       "type": 0,
       "value": "Carregando membros…"
+    }
+  ],
+  "web.admin.access.groups.members.noMatches": [
+    {
+      "type": 0,
+      "value": "Nenhum membro corresponde à sua pesquisa."
+    }
+  ],
+  "web.admin.access.groups.members.search": [
+    {
+      "type": 0,
+      "value": "Pesquisar membros"
     }
   ],
   "web.admin.access.groups.newGroup": [
@@ -24376,6 +25250,12 @@
       "value": "date"
     }
   ],
+  "web.admin.common.jobHistory.jobType.backupRestore": [
+    {
+      "type": 0,
+      "value": "Restauração de backup"
+    }
+  ],
   "web.admin.common.jobHistory.jobType.catalogExport": [
     {
       "type": 0,
@@ -24410,6 +25290,18 @@
     {
       "type": 0,
       "value": "Atualização de biblioteca"
+    }
+  ],
+  "web.admin.common.jobHistory.jobType.storageTransition": [
+    {
+      "type": 0,
+      "value": "Transição de armazenamento"
+    }
+  ],
+  "web.admin.common.jobHistory.jobType.templateBundleApply": [
+    {
+      "type": 0,
+      "value": "Aplicação de pacote de modelos"
     }
   ],
   "web.admin.common.jobHistory.progress": [
@@ -29152,6 +30044,18 @@
       "value": "com falha"
     }
   ],
+  "web.admin.common.taskStatus.queued": [
+    {
+      "type": 0,
+      "value": "na fila"
+    }
+  ],
+  "web.admin.common.taskStatus.running": [
+    {
+      "type": 0,
+      "value": "em execução"
+    }
+  ],
   "web.admin.common.title.header.accessGroups": [
     {
       "type": 0,
@@ -33644,6 +34548,22 @@
       "value": "label"
     }
   ],
+  "web.admin.dashboard.widgets.transcodeNodes.buildDiffersFlag": [
+    {
+      "type": 0,
+      "value": "Build diferente"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.buildDiffersTitle": [
+    {
+      "type": 0,
+      "value": "Build diferente da do servidor. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.admin.dashboard.widgets.transcodeNodes.buildOutdated": [
     {
       "type": 0,
@@ -33674,6 +34594,16 @@
       "value": "date"
     }
   ],
+  "web.admin.dashboard.widgets.transcodeNodes.capSeparator": [
+    {
+      "type": 0,
+      "value": "/ "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.dashboard.widgets.transcodeNodes.checked": [
     {
       "type": 0,
@@ -33682,6 +34612,30 @@
     {
       "type": 1,
       "value": "time"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.column.active": [
+    {
+      "type": 0,
+      "value": "Ativos"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.column.build": [
+    {
+      "type": 0,
+      "value": "Build"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.column.mbps": [
+    {
+      "type": 0,
+      "value": "Mbps"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.column.node": [
+    {
+      "type": 0,
+      "value": "Nó"
     }
   ],
   "web.admin.dashboard.widgets.transcodeNodes.disabled": [
@@ -33696,10 +34650,71 @@
       "value": "Nenhum nó de streaming — as transcodificações são executadas neste servidor"
     }
   ],
+  "web.admin.dashboard.widgets.transcodeNodes.groupCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " grupo"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de grupos"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " grupos"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.dashboard.widgets.transcodeNodes.healthy": [
     {
       "type": 0,
       "value": "Íntegro"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.healthyCount": [
+    {
+      "type": 1,
+      "value": "healthy"
+    },
+    {
+      "type": 0,
+      "value": "/"
+    },
+    {
+      "type": 1,
+      "value": "enabled"
+    },
+    {
+      "type": 0,
+      "value": " íntegros"
     }
   ],
   "web.admin.dashboard.widgets.transcodeNodes.jobs": [
@@ -33840,10 +34855,34 @@
       "value": "Não foi possível carregar os nós de streaming."
     }
   ],
+  "web.admin.dashboard.widgets.transcodeNodes.loadPercent": [
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
   "web.admin.dashboard.widgets.transcodeNodes.manage": [
     {
       "type": 0,
       "value": "Gerenciar ›"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.meterLabel": [
+    {
+      "type": 1,
+      "value": "node"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "metric"
     }
   ],
   "web.admin.dashboard.widgets.transcodeNodes.neverChecked": [
@@ -33866,6 +34905,108 @@
     {
       "type": 0,
       "value": "Revisão indisponível"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.staleDisabledTitle": [
+    {
+      "type": 0,
+      "value": "Este nó está desativado, então as verificações de integridade não o atualizam mais."
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.staleUnreachableTitle": [
+    {
+      "type": 0,
+      "value": "A última verificação de integridade não alcançou este nó."
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.storageFlag": [
+    {
+      "type": 0,
+      "value": "Armazenamento "
+    },
+    {
+      "type": 1,
+      "value": "fill"
+    },
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.storageTitle": [
+    {
+      "type": 0,
+      "value": "Diretório de transcodificação "
+    },
+    {
+      "type": 1,
+      "value": "fill"
+    },
+    {
+      "type": 0,
+      "value": "% cheio. "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.streamCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " transmissão"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de transmissões"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " transmissões"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.streamsAbbr": [
+    {
+      "type": 0,
+      "value": "transm."
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.streamsTitle": [
+    {
+      "type": 0,
+      "value": "transmissões"
     }
   ],
   "web.admin.dashboard.widgets.transcodeNodes.summary": [
@@ -34036,6 +35177,64 @@
     {
       "type": 0,
       "value": "Nós"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.transcodeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " transcodificação"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de transcodificações"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " transcodificações"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.transcodesAbbr": [
+    {
+      "type": 0,
+      "value": "transcod."
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.transcodesTitle": [
+    {
+      "type": 0,
+      "value": "transcodificações"
     }
   ],
   "web.admin.dashboard.widgets.transcodeNodes.unhealthy": [
@@ -44444,6 +45643,329 @@
       "value": "Armazenamento"
     }
   ],
+  "web.admin.errors.activityCursorRepeated": [
+    {
+      "type": 0,
+      "value": "Cursor de atividade repetido. Recarregue o histórico."
+    }
+  ],
+  "web.admin.errors.activityItemsInvalid": [
+    {
+      "type": 0,
+      "value": "Itens de atividade inválidos. Recarregue o histórico."
+    }
+  ],
+  "web.admin.errors.activityPageInvalid": [
+    {
+      "type": 0,
+      "value": "Página de atividade inválida. Recarregue o histórico."
+    }
+  ],
+  "web.admin.errors.apiKeyCursorRepeated": [
+    {
+      "type": 0,
+      "value": "Cursor de chaves de API repetido. Recarregue a lista."
+    }
+  ],
+  "web.admin.errors.apiKeyPaginationInvalid": [
+    {
+      "type": 0,
+      "value": "Paginação de chaves de API inválida. Recarregue a lista."
+    }
+  ],
+  "web.admin.errors.apiKeyReloadBeforeSaving": [
+    {
+      "type": 0,
+      "value": "Recarregue esta chave de API antes de salvar: é necessário um ETag forte."
+    }
+  ],
+  "web.admin.errors.apiKeysProfileChanged": [
+    {
+      "type": 0,
+      "value": "Recarregue as chaves de API depois de trocar de perfil."
+    }
+  ],
+  "web.admin.errors.artworkCacheIncomplete": [
+    {
+      "type": 0,
+      "value": "O cache das artes não foi concluído. Consulte os diagnósticos de administrador para ver os detalhes."
+    }
+  ],
+  "web.admin.errors.artworkUpdateFailed": [
+    {
+      "type": 0,
+      "value": "Falha ao atualizar a arte"
+    }
+  ],
+  "web.admin.errors.catalogRevisionMissing": [
+    {
+      "type": 0,
+      "value": "Revisão do catálogo indisponível. Recarregue antes de editar."
+    }
+  ],
+  "web.admin.errors.collectionOrderChanged": [
+    {
+      "type": 0,
+      "value": "A ordem das coleções mudou durante o carregamento. Recarregue antes de reordenar."
+    }
+  ],
+  "web.admin.errors.devicesTooMany": [
+    {
+      "type": 0,
+      "value": "Dispositivos demais para exibir. Recarregue a lista."
+    }
+  ],
+  "web.admin.errors.diagnosticDownloadFailed": [
+    {
+      "type": 0,
+      "value": "Falha ao baixar o relatório de diagnóstico ("
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": ")."
+    }
+  ],
+  "web.admin.errors.diagnosticFormatUnexpected": [
+    {
+      "type": 0,
+      "value": "O servidor retornou um relatório de diagnóstico em um formato inesperado."
+    }
+  ],
+  "web.admin.errors.diagnosticsAvailabilityUnknown": [
+    {
+      "type": 0,
+      "value": "Disponibilidade de diagnósticos não reconhecida. Recarregue antes de alterar as configurações de envio."
+    }
+  ],
+  "web.admin.errors.historyImportConfigReload": [
+    {
+      "type": 0,
+      "value": "Recarregue esta configuração antes de salvar."
+    }
+  ],
+  "web.admin.errors.historyImportPageIncomplete": [
+    {
+      "type": 0,
+      "value": "Página de importação de histórico incompleta. Recarregue para tentar novamente."
+    }
+  ],
+  "web.admin.errors.historyImportStatusMissing": [
+    {
+      "type": 0,
+      "value": "A importação aceita não incluiu o local de status esperado. Atualize as execuções antes de tentar novamente."
+    }
+  ],
+  "web.admin.errors.imageChoicesChanged": [
+    {
+      "type": 0,
+      "value": "As opções de imagem mudaram. Recarregue para tentar novamente."
+    }
+  ],
+  "web.admin.errors.integrationPageIncomplete": [
+    {
+      "type": 0,
+      "value": "Página de integrações incompleta. Recarregue para tentar novamente."
+    }
+  ],
+  "web.admin.errors.itemFilesIncomplete": [
+    {
+      "type": 0,
+      "value": "Lista de arquivos do item incompleta. Recarregue para tentar novamente."
+    }
+  ],
+  "web.admin.errors.layoutRevisionMissing": [
+    {
+      "type": 0,
+      "value": "Revisão de gravação do layout do servidor ausente; recarregue antes de salvar novamente."
+    }
+  ],
+  "web.admin.errors.nodeWriteAckMissing": [
+    {
+      "type": 0,
+      "value": "A confirmação da gravação do nó não está disponível. Verifique o estado atual antes de salvar novamente."
+    }
+  ],
+  "web.admin.errors.nodesReloadReopen": [
+    {
+      "type": 0,
+      "value": "Recarregue os nós e reabra esta ação para obter a versão original."
+    }
+  ],
+  "web.admin.errors.playbackHistoryInvalid": [
+    {
+      "type": 0,
+      "value": "Página do histórico de reprodução inválida. Recarregue a página."
+    }
+  ],
+  "web.admin.errors.requestPageIncomplete": [
+    {
+      "type": 0,
+      "value": "Página de solicitações incompleta. Recarregue para tentar novamente."
+    }
+  ],
+  "web.admin.errors.requestsEditorReload": [
+    {
+      "type": 0,
+      "value": "Recarregue este editor antes de salvar."
+    }
+  ],
+  "web.admin.errors.scheduleRevisionMissing": [
+    {
+      "type": 0,
+      "value": "Revisão do agendamento indisponível. Recarregue antes de editar."
+    }
+  ],
+  "web.admin.errors.seekPreviewsNoneQueued": [
+    {
+      "type": 0,
+      "value": "Nenhuma prévia de navegação foi adicionada à fila"
+    }
+  ],
+  "web.admin.errors.seekPreviewsQueueFailed": [
+    {
+      "type": 0,
+      "value": "Não foi possível adicionar as prévias de navegação à fila"
+    }
+  ],
+  "web.admin.errors.seekPreviewsQueued": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prévias de navegação na fila para "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " arquivo"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prévias de navegação na fila para "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de arquivos"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prévias de navegação na fila para "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " arquivos"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.errors.sessionsTooMany": [
+    {
+      "type": 0,
+      "value": "Sessões demais para exibir. Recarregue a lista."
+    }
+  ],
+  "web.admin.errors.settingsPageInvalid": [
+    {
+      "type": 0,
+      "value": "Página de configurações inválida. Recarregue as configurações."
+    }
+  ],
+  "web.admin.errors.subtitleDeleteAttempted": [
+    {
+      "type": 0,
+      "value": "Esta exclusão já foi tentada. Feche e revise a legenda novamente."
+    }
+  ],
+  "web.admin.errors.subtitleDownloadFailed": [
+    {
+      "type": 0,
+      "value": "Falha ao baixar a legenda ("
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": ")."
+    }
+  ],
+  "web.admin.errors.subtitleDownloadUnexpected": [
+    {
+      "type": 0,
+      "value": "Resposta inesperada ao baixar a legenda."
+    }
+  ],
+  "web.admin.errors.subtitleIdentityChanged": [
+    {
+      "type": 0,
+      "value": "A identidade da legenda mudou. Recarregue a lista."
+    }
+  ],
+  "web.admin.errors.subtitleListInvalid": [
+    {
+      "type": 0,
+      "value": "Lista de legendas inválida. Recarregue a página."
+    }
+  ],
+  "web.admin.errors.subtitleValidatorRequired": [
+    {
+      "type": 0,
+      "value": "É necessário um validador forte de edição da legenda. Reabra o editor."
+    }
+  ],
+  "web.admin.errors.translationCancelFailed": [
+    {
+      "type": 0,
+      "value": "Falha ao cancelar a tradução"
+    }
+  ],
+  "web.admin.errors.userPaginationInvalid": [
+    {
+      "type": 0,
+      "value": "Paginação de usuários inválida. Recarregue a lista."
+    }
+  ],
+  "web.admin.errors.userReloadBeforeSaving": [
+    {
+      "type": 0,
+      "value": "Recarregue este usuário antes de salvar: é necessário um ETag forte."
+    }
+  ],
+  "web.admin.errors.watchHistoryInvalid": [
+    {
+      "type": 0,
+      "value": "Página do histórico de exibição inválida. Recarregue a página."
+    }
+  ],
   "web.admin.history.column.ended": [
     {
       "type": 0,
@@ -46913,6 +48435,24 @@
       "value": ": a página pode ter sido restaurada, mas o Silo não conseguiu confirmar. Recarregue-a para verificar."
     }
   ],
+  "web.admin.homeRows.row.cantCopyToLibraries": [
+    {
+      "type": 0,
+      "value": "Esta fileira não pode ser adicionada a outras bibliotecas."
+    }
+  ],
+  "web.admin.homeRows.row.moveFailed": [
+    {
+      "type": 0,
+      "value": "Não foi possível mover esta fileira"
+    }
+  ],
+  "web.admin.homeRows.row.saveFailed": [
+    {
+      "type": 0,
+      "value": "Não foi possível salvar esta fileira"
+    }
+  ],
   "web.admin.homeRows.rowMenu.addToOtherLibraries": [
     {
       "type": 0,
@@ -48040,6 +49580,34 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.list.hidePaths": [
+    {
+      "type": 0,
+      "value": "Ocultar caminhos"
+    }
+  ],
+  "web.admin.libraries.list.moreActions": [
+    {
+      "type": 0,
+      "value": "Mais ações para "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.moveDown": [
+    {
+      "type": 0,
+      "value": "Mover para baixo"
+    }
+  ],
+  "web.admin.libraries.list.moveUp": [
+    {
+      "type": 0,
+      "value": "Mover para cima"
+    }
+  ],
   "web.admin.libraries.list.neverScanned": [
     {
       "type": 0,
@@ -48068,6 +49636,12 @@
     {
       "type": 0,
       "value": "Fazer varredura da biblioteca"
+    }
+  ],
+  "web.admin.libraries.list.showPaths": [
+    {
+      "type": 0,
+      "value": "Mostrar caminhos"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -54033,6 +55607,64 @@
       "value": "Desinstalando…"
     }
   ],
+  "web.admin.plugins.detail.updateFailed": [
+    {
+      "type": 8,
+      "value": "b",
+      "children": [
+        {
+          "type": 0,
+          "value": "O Silo não conseguiu atualizar "
+        },
+        {
+          "type": 1,
+          "value": "name"
+        },
+        {
+          "type": 0,
+          "value": " para a versão "
+        },
+        {
+          "type": 1,
+          "value": "version"
+        },
+        {
+          "type": 0,
+          "value": "."
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "web.admin.plugins.detail.updateFailedStays": [
+    {
+      "type": 0,
+      "value": "Ele continua na versão "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": ". Última tentativa em "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.plugins.detail.updateTo": [
     {
       "type": 0,
@@ -55089,6 +56721,16 @@
     {
       "type": 0,
       "value": " disponível"
+    }
+  ],
+  "web.admin.plugins.tile.updateFailed": [
+    {
+      "type": 0,
+      "value": "Falha ao atualizar para "
+    },
+    {
+      "type": 1,
+      "value": "version"
     }
   ],
   "web.admin.plugins.tile.updatesPaused": [
@@ -79453,6 +81095,12 @@
       "value": "Tempo máximo de execução (não aplicado):"
     }
   ],
+  "web.admin.tasks.detail.maxRuntimeLabel": [
+    {
+      "type": 0,
+      "value": "Tempo máximo de execução:"
+    }
+  ],
   "web.admin.tasks.detail.maxRuntimeNone": [
     {
       "type": 0,
@@ -79905,6 +81553,12 @@
       "value": "Arte do provedor"
     }
   ],
+  "web.admin.tasks.refreshReason.providerIdIncomplete": [
+    {
+      "type": 0,
+      "value": "ID do provedor incompleto"
+    }
+  ],
   "web.admin.tasks.refreshReason.refreshFailure": [
     {
       "type": 0,
@@ -80007,6 +81661,798 @@
     {
       "type": 0,
       "value": "Parando…"
+    }
+  ],
+  "web.admin.tasks.task.autoscan_poll.description": [
+    {
+      "type": 0,
+      "value": "Consulta os provedores de origem de verificação instalados em busca de alterações e enfileira novas verificações"
+    }
+  ],
+  "web.admin.tasks.task.autoscan_poll.name": [
+    {
+      "type": 0,
+      "value": "Consulta do Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.autoscan_webhook_retry.description": [
+    {
+      "type": 0,
+      "value": "Tenta novamente as entregas de webhook do Autoscan aceitas de forma durável"
+    }
+  ],
+  "web.admin.tasks.task.autoscan_webhook_retry.name": [
+    {
+      "type": 0,
+      "value": "Nova tentativa de webhook do Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.backfill_ebook_metadata.description": [
+    {
+      "type": 0,
+      "value": "Enriquece o acúmulo de e-books legados sem competir com a sincronização agendada de metadados"
+    }
+  ],
+  "web.admin.tasks.task.backfill_ebook_metadata.name": [
+    {
+      "type": 0,
+      "value": "Preencher metadados de e-books"
+    }
+  ],
+  "web.admin.tasks.task.backfill_hdr10_plus.description": [
+    {
+      "type": 0,
+      "value": "Lê o primeiro quadro dos vídeos HDR verificados antes de o Silo detectar HDR10+, uma vez por arquivo, para que arquivos HDR10+ sejam identificados como HDR10+ em vez de HDR10."
+    }
+  ],
+  "web.admin.tasks.task.backfill_hdr10_plus.name": [
+    {
+      "type": 0,
+      "value": "Detectar vídeo HDR10+"
+    }
+  ],
+  "web.admin.tasks.task.backfill_matroska_track_numbers.description": [
+    {
+      "type": 0,
+      "value": "Lê a lista de faixas dos arquivos MKV com legendas em texto verificados antes de o Silo registrar os números das faixas de legendas, uma vez por arquivo, para que os apps possam mostrar legendas incorporadas sem extração no servidor."
+    }
+  ],
+  "web.admin.tasks.task.backfill_matroska_track_numbers.name": [
+    {
+      "type": 0,
+      "value": "Registrar números das faixas de legendas Matroska"
+    }
+  ],
+  "web.admin.tasks.task.backfill_media_item_aliases.description": [
+    {
+      "type": 0,
+      "value": "Gera aliases pesquisáveis a partir dos títulos de mídia originais e localizados existentes, em lotes que podem ser retomados."
+    }
+  ],
+  "web.admin.tasks.task.backfill_media_item_aliases.name": [
+    {
+      "type": 0,
+      "value": "Preencher aliases de itens de mídia"
+    }
+  ],
+  "web.admin.tasks.task.backfill_metadata_images.description": [
+    {
+      "type": 0,
+      "value": "Descobre e armazena em cache manualmente a arte ausente dos provedores em todo o catálogo"
+    }
+  ],
+  "web.admin.tasks.task.backfill_metadata_images.name": [
+    {
+      "type": 0,
+      "value": "Preencher imagens de metadados"
+    }
+  ],
+  "web.admin.tasks.task.backup.description": [
+    {
+      "type": 0,
+      "value": "Faz backup do banco de dados e dos arquivos enviados no destino de backup e depois exclui os backups além da quantidade configurada"
+    }
+  ],
+  "web.admin.tasks.task.backup.name": [
+    {
+      "type": 0,
+      "value": "Fazer backup do servidor"
+    }
+  ],
+  "web.admin.tasks.task.bulk_metadata_enrichment.description": [
+    {
+      "type": 0,
+      "value": "Consulta filmes e séries com provedores de enriquecimento que agrupam solicitações, como o MDBList, muitos títulos de cada vez"
+    }
+  ],
+  "web.admin.tasks.task.bulk_metadata_enrichment.name": [
+    {
+      "type": 0,
+      "value": "Enriquecimento de metadados em massa"
+    }
+  ],
+  "web.admin.tasks.task.cache_metadata_images.description": [
+    {
+      "type": 0,
+      "value": "Processa apenas a arte já enfileirada por verificações, atualizações e alterações de metadados"
+    }
+  ],
+  "web.admin.tasks.task.cache_metadata_images.name": [
+    {
+      "type": 0,
+      "value": "Armazenar imagens de metadados em cache"
+    }
+  ],
+  "web.admin.tasks.task.chapter_thumbnail_backfill.description": [
+    {
+      "type": 0,
+      "value": "Gera as miniaturas de capítulos ausentes nas bibliotecas que ativaram essa opção"
+    }
+  ],
+  "web.admin.tasks.task.chapter_thumbnail_backfill.name": [
+    {
+      "type": 0,
+      "value": "Preencher miniaturas de capítulos"
+    }
+  ],
+  "web.admin.tasks.task.check_plugin_updates.description": [
+    {
+      "type": 0,
+      "value": "Busca os repositórios de plugins e aplica ou registra as atualizações de plugins disponíveis"
+    }
+  ],
+  "web.admin.tasks.task.check_plugin_updates.name": [
+    {
+      "type": 0,
+      "value": "Verificar atualizações de plugins"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_activity_log.description": [
+    {
+      "type": 0,
+      "value": "Remove linhas e partições expiradas do log de atividades"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_activity_log.name": [
+    {
+      "type": 0,
+      "value": "Limpar log de atividades"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_artwork_revisions.description": [
+    {
+      "type": 0,
+      "value": "Exclui revisões imutáveis de arte não publicadas ou substituídas após um período de carência, quando nenhum registro do catálogo as referencia."
+    }
+  ],
+  "web.admin.tasks.task.cleanup_artwork_revisions.name": [
+    {
+      "type": 0,
+      "value": "Limpar revisões de arte"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_auth_sessions.description": [
+    {
+      "type": 0,
+      "value": "Exclui sessões de login cuja validade expirou, revogadas ou não"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_auth_sessions.name": [
+    {
+      "type": 0,
+      "value": "Limpar sessões de login expiradas"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_autoscan_events.description": [
+    {
+      "type": 0,
+      "value": "Remove eventos antigos de consulta e webhook do Autoscan do histórico de Atividade"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_autoscan_events.name": [
+    {
+      "type": 0,
+      "value": "Limpar eventos do Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_catalog_search_index_events.description": [
+    {
+      "type": 0,
+      "value": "Remove eventos confirmados da caixa de saída da pesquisa do catálogo após a janela de recuperação."
+    }
+  ],
+  "web.admin.tasks.task.cleanup_catalog_search_index_events.name": [
+    {
+      "type": 0,
+      "value": "Limpar eventos do índice de pesquisa do catálogo"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_chapter_thumbnail_originals.description": [
+    {
+      "type": 0,
+      "value": "Exclui as imagens de miniaturas de capítulos em tamanho original armazenadas por versões anteriores. Os clientes carregam apenas a miniatura de 300 px; a tarefa para quando não houver mais nenhuma no armazenamento."
+    }
+  ],
+  "web.admin.tasks.task.cleanup_chapter_thumbnail_originals.name": [
+    {
+      "type": 0,
+      "value": "Limpar miniaturas de capítulos em tamanho original"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_client_diagnostics.description": [
+    {
+      "type": 0,
+      "value": "Remove relatórios de diagnóstico de clientes expirados e pacotes órfãos"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_client_diagnostics.name": [
+    {
+      "type": 0,
+      "value": "Limpar diagnósticos de clientes"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_device_logins.description": [
+    {
+      "type": 0,
+      "value": "Exclui solicitações de login de dispositivos expiradas há muito tempo"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_device_logins.name": [
+    {
+      "type": 0,
+      "value": "Limpar solicitações de login de dispositivos expiradas"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_oauth_flows.description": [
+    {
+      "type": 0,
+      "value": "Exclui fluxos de login OAuth expirados há muito tempo"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_oauth_flows.name": [
+    {
+      "type": 0,
+      "value": "Limpar fluxos de login OAuth expirados"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_operational_log.description": [
+    {
+      "type": 0,
+      "value": "Remove linhas e partições expiradas do log operacional"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_operational_log.name": [
+    {
+      "type": 0,
+      "value": "Limpar log operacional"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_orphaned_media_items.description": [
+    {
+      "type": 0,
+      "value": "Exclui itens de mídia provisórios desvinculados que não têm arquivos, vínculos com bibliotecas nem referências duráveis de usuário ou de sincronização."
+    }
+  ],
+  "web.admin.tasks.task.cleanup_orphaned_media_items.name": [
+    {
+      "type": 0,
+      "value": "Limpar itens de mídia órfãos"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_policy_decision_log.description": [
+    {
+      "type": 0,
+      "value": "Remove linhas e partições expiradas do log de decisões de políticas"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_policy_decision_log.name": [
+    {
+      "type": 0,
+      "value": "Limpar log de decisões de políticas"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_removed_media_images.description": [
+    {
+      "type": 0,
+      "value": "Exclui, após um período de carência, as miniaturas de capítulos e as prévias de busca dos arquivos de mídia removidos do catálogo, além das prévias de busca que foram substituídas."
+    }
+  ],
+  "web.admin.tasks.task.cleanup_removed_media_images.name": [
+    {
+      "type": 0,
+      "value": "Limpar imagens de mídia removida"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_task_history.description": [
+    {
+      "type": 0,
+      "value": "Remove o histórico antigo de execuções de tarefas em segundo plano"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_task_history.name": [
+    {
+      "type": 0,
+      "value": "Limpar histórico de tarefas"
+    }
+  ],
+  "web.admin.tasks.task.contribute_markers.description": [
+    {
+      "type": 0,
+      "value": "Envia as aberturas e os créditos qualificados detectados neste servidor aos provedores com compartilhamento automático ativado, além das correções manuais que um salvamento não conseguiu entregar aos provedores que aceitam correções."
+    }
+  ],
+  "web.admin.tasks.task.contribute_markers.name": [
+    {
+      "type": 0,
+      "value": "Compartilhar marcadores detectados"
+    }
+  ],
+  "web.admin.tasks.task.database_maintenance.description": [
+    {
+      "type": 0,
+      "value": "Remove logs de atividades e de políticas expirados, histórico de tarefas, eventos do Autoscan, sessões de login, solicitações de login de dispositivos, fluxos de login OAuth, eventos do índice de pesquisa e notificações, e prepara as próximas partições de log"
+    }
+  ],
+  "web.admin.tasks.task.database_maintenance.name": [
+    {
+      "type": 0,
+      "value": "Manutenção do banco de dados"
+    }
+  ],
+  "web.admin.tasks.task.detect_intro_markers.description": [
+    {
+      "type": 0,
+      "value": "Analisa arquivos em busca de aberturas e créditos nas bibliotecas com a detecção de marcadores ativada."
+    }
+  ],
+  "web.admin.tasks.task.detect_intro_markers.name": [
+    {
+      "type": 0,
+      "value": "Detectar marcadores neste servidor"
+    }
+  ],
+  "web.admin.tasks.task.encode_download_artifacts.description": [
+    {
+      "type": 0,
+      "value": "Codifica os artefatos de download de remux/transcodificação na fila, recupera trabalhos interrompidos e remove artefatos antigos"
+    }
+  ],
+  "web.admin.tasks.task.encode_download_artifacts.name": [
+    {
+      "type": 0,
+      "value": "Preparar artefatos de download"
+    }
+  ],
+  "web.admin.tasks.task.generate_extra_stills.description": [
+    {
+      "type": 0,
+      "value": "Captura um quadro de cada extra local que não tem um arquivo de imagem ao lado"
+    }
+  ],
+  "web.admin.tasks.task.generate_extra_stills.name": [
+    {
+      "type": 0,
+      "value": "Gerar miniaturas de extras"
+    }
+  ],
+  "web.admin.tasks.task.match_media.description": [
+    {
+      "type": 0,
+      "value": "Associa arquivos de mídia sem correspondência aos metadados dos provedores"
+    }
+  ],
+  "web.admin.tasks.task.match_media.name": [
+    {
+      "type": 0,
+      "value": "Associar arquivos de mídia"
+    }
+  ],
+  "web.admin.tasks.task.notifications_retention.description": [
+    {
+      "type": 0,
+      "value": "Remove notificações antigas e eventos de lançamento processados de acordo com as configurações de retenção."
+    }
+  ],
+  "web.admin.tasks.task.notifications_retention.name": [
+    {
+      "type": 0,
+      "value": "Limpar notificações"
+    }
+  ],
+  "web.admin.tasks.task.queue_seek_previews.description": [
+    {
+      "type": 0,
+      "value": "Enfileira prévias da barra de busca para os arquivos de vídeo das bibliotecas que as têm ativadas e reenfileira as prévias que não correspondem mais ao arquivo ou às configurações."
+    }
+  ],
+  "web.admin.tasks.task.queue_seek_previews.name": [
+    {
+      "type": 0,
+      "value": "Enfileirar prévias de busca"
+    }
+  ],
+  "web.admin.tasks.task.rebuild_catalog_search_index.description": [
+    {
+      "type": 0,
+      "value": "Recria o índice de catálogo do Meilisearch configurado a partir do PostgreSQL."
+    }
+  ],
+  "web.admin.tasks.task.rebuild_catalog_search_index.name": [
+    {
+      "type": 0,
+      "value": "Recriar índice de pesquisa do catálogo"
+    }
+  ],
+  "web.admin.tasks.task.rebuild_release_interest.description": [
+    {
+      "type": 0,
+      "value": "Recalcula quais perfis se interessam por quais séries (favoritos, lista para assistir, progresso de exibição) para as notificações de novos episódios."
+    }
+  ],
+  "web.admin.tasks.task.rebuild_release_interest.name": [
+    {
+      "type": 0,
+      "value": "Recriar interesse em notificações"
+    }
+  ],
+  "web.admin.tasks.task.recheck_external_identities.description": [
+    {
+      "type": 0,
+      "value": "Consulta o provedor de login externo sobre contas que têm chaves de API ou sessões ociosas e revoga o acesso das contas que o provedor não admite mais"
+    }
+  ],
+  "web.admin.tasks.task.recheck_external_identities.name": [
+    {
+      "type": 0,
+      "value": "Verificar novamente contas de login externo"
+    }
+  ],
+  "web.admin.tasks.task.reconcile_artwork_cache.description": [
+    {
+      "type": 0,
+      "value": "Verifica manualmente a arte em cache em relação ao armazenamento de objetos; registros ausentes podem ser redefinidos em toda a biblioteca e exigir um preenchimento explícito de imagens de metadados"
+    }
+  ],
+  "web.admin.tasks.task.reconcile_artwork_cache.name": [
+    {
+      "type": 0,
+      "value": "Reconciliar cache de arte"
+    }
+  ],
+  "web.admin.tasks.task.reconcile_requests.description": [
+    {
+      "type": 0,
+      "value": "Verifica as solicitações de mídia aprovadas e ativas em relação ao Radarr, ao Sonarr e ao catálogo do Silo"
+    }
+  ],
+  "web.admin.tasks.task.reconcile_requests.name": [
+    {
+      "type": 0,
+      "value": "Reconciliar solicitações"
+    }
+  ],
+  "web.admin.tasks.task.reconcile_watch_history.description": [
+    {
+      "type": 0,
+      "value": "Resolve novamente as linhas órfãs do histórico de exibição em relação ao catálogo de mídia atual usando as identidades estáveis armazenadas."
+    }
+  ],
+  "web.admin.tasks.task.reconcile_watch_history.name": [
+    {
+      "type": 0,
+      "value": "Reconciliar histórico de exibição"
+    }
+  ],
+  "web.admin.tasks.task.refresh_all_library_metadata.description": [
+    {
+      "type": 0,
+      "value": "Busca novamente os metadados dos provedores para todos os itens de todas as bibliotecas ativadas. Executada somente quando iniciada manualmente; bibliotecas grandes podem levar horas e fazer muitas solicitações aos provedores"
+    }
+  ],
+  "web.admin.tasks.task.refresh_all_library_metadata.name": [
+    {
+      "type": 0,
+      "value": "Atualizar metadados de todas as bibliotecas"
+    }
+  ],
+  "web.admin.tasks.task.refresh_anime_ids.description": [
+    {
+      "type": 0,
+      "value": "Baixa a lista de animes baseada no AniDB que o roteamento de solicitações usa para reconhecer animes que o TMDB não marca"
+    }
+  ],
+  "web.admin.tasks.task.refresh_anime_ids.name": [
+    {
+      "type": 0,
+      "value": "Atualizar lista de animes"
+    }
+  ],
+  "web.admin.tasks.task.refresh_metadata.description": [
+    {
+      "type": 0,
+      "value": "Atualiza metadados desatualizados dos provedores para os itens de mídia existentes"
+    }
+  ],
+  "web.admin.tasks.task.refresh_metadata.name": [
+    {
+      "type": 0,
+      "value": "Atualizar metadados"
+    }
+  ],
+  "web.admin.tasks.task.refresh_request_discover_lists.description": [
+    {
+      "type": 0,
+      "value": "Baixa as listas do TMDB e do MDBList por trás das fileiras de listas da página Descobrir de Solicitações"
+    }
+  ],
+  "web.admin.tasks.task.refresh_request_discover_lists.name": [
+    {
+      "type": 0,
+      "value": "Atualizar listas do Descobrir de solicitações"
+    }
+  ],
+  "web.admin.tasks.task.refresh_request_downloads.description": [
+    {
+      "type": 0,
+      "value": "Atualiza o progresso de download das solicitações de mídia que o Radarr, o Sonarr ou outro plugin de solicitações está baixando"
+    }
+  ],
+  "web.admin.tasks.task.refresh_request_downloads.name": [
+    {
+      "type": 0,
+      "value": "Atualizar downloads de solicitações"
+    }
+  ],
+  "web.admin.tasks.task.refresh_seasonal_lists.description": [
+    {
+      "type": 0,
+      "value": "Baixa as listas selecionadas do MDBList por trás das fileiras Seleções sazonais do Início antes de cada feriado"
+    }
+  ],
+  "web.admin.tasks.task.refresh_seasonal_lists.name": [
+    {
+      "type": 0,
+      "value": "Atualizar listas sazonais"
+    }
+  ],
+  "web.admin.tasks.task.refresh_series_air_dates.description": [
+    {
+      "type": 0,
+      "value": "Atualiza a data do episódio exibido mais recentemente das séries cujo próximo episódio conhecido já foi exibido."
+    }
+  ],
+  "web.admin.tasks.task.refresh_series_air_dates.name": [
+    {
+      "type": 0,
+      "value": "Atualizar datas de exibição das séries"
+    }
+  ],
+  "web.admin.tasks.task.refresh_trending_discover.description": [
+    {
+      "type": 0,
+      "value": "Atualiza as listas externas em alta salvas (TMDB) para as seções Descobrir em alta do Início e a visualização Em alta do calendário"
+    }
+  ],
+  "web.admin.tasks.task.refresh_trending_discover.name": [
+    {
+      "type": 0,
+      "value": "Atualizar Descobrir em alta"
+    }
+  ],
+  "web.admin.tasks.task.release_stored_artwork.description": [
+    {
+      "type": 0,
+      "value": "Enquanto a arte dos provedores não é salva no armazenamento, aponta a arte armazenada de volta para os provedores e enfileira atualizações da arte que só um provedor pode substituir"
+    }
+  ],
+  "web.admin.tasks.task.release_stored_artwork.name": [
+    {
+      "type": 0,
+      "value": "Liberar arte armazenada"
+    }
+  ],
+  "web.admin.tasks.task.repair_provider_id_integrity.description": [
+    {
+      "type": 0,
+      "value": "Corrige divergências entre as colunas de ID do provedor em media_items e os registros normalizados de ID do provedor."
+    }
+  ],
+  "web.admin.tasks.task.repair_provider_id_integrity.name": [
+    {
+      "type": 0,
+      "value": "Reparar integridade dos IDs de provedor"
+    }
+  ],
+  "web.admin.tasks.task.scan_libraries.description": [
+    {
+      "type": 0,
+      "value": "Enfileira verificações completas e persistentes de todas as bibliotecas ativadas; o progresso da verificação em si pode ser acompanhado em Bibliotecas da administração e em Atividade do servidor"
+    }
+  ],
+  "web.admin.tasks.task.scan_libraries.name": [
+    {
+      "type": 0,
+      "value": "Enfileirar verificações das bibliotecas de mídia"
+    }
+  ],
+  "web.admin.tasks.task.seed_content_availability.description": [
+    {
+      "type": 0,
+      "value": "Registra o catálogo existente de episódios e filmes como já lançado, para que as notificações de novo conteúdo só sejam enviadas para itens que chegarem depois."
+    }
+  ],
+  "web.admin.tasks.task.seed_content_availability.name": [
+    {
+      "type": 0,
+      "value": "Inicializar disponibilidade de conteúdo"
+    }
+  ],
+  "web.admin.tasks.task.setting_mutations_retention.description": [
+    {
+      "type": 0,
+      "value": "Exclui os recibos de idempotência expirados de alterações de configurações do armazenamento de cada usuário."
+    }
+  ],
+  "web.admin.tasks.task.setting_mutations_retention.name": [
+    {
+      "type": 0,
+      "value": "Limpar recibos de alterações de configurações"
+    }
+  ],
+  "web.admin.tasks.task.summarize_api_usage.description": [
+    {
+      "type": 0,
+      "value": "Conta as solicitações de API por sessão para o cartão de clientes de API do painel"
+    }
+  ],
+  "web.admin.tasks.task.summarize_api_usage.name": [
+    {
+      "type": 0,
+      "value": "Resumir uso da API"
+    }
+  ],
+  "web.admin.tasks.task.sweep_artwork_storage.description": [
+    {
+      "type": 0,
+      "value": "Exclui objetos de arte em cache que nenhum registro do catálogo referencia, recuperando revisões que o coletor de lixo de arte nunca viu"
+    }
+  ],
+  "web.admin.tasks.task.sweep_artwork_storage.name": [
+    {
+      "type": 0,
+      "value": "Limpar armazenamento de arte"
+    }
+  ],
+  "web.admin.tasks.task.sweep_orphaned_media_images.description": [
+    {
+      "type": 0,
+      "value": "Encontra miniaturas de capítulos e prévias de navegação armazenadas que nada mais referencia e agenda a exclusão delas."
+    }
+  ],
+  "web.admin.tasks.task.sweep_orphaned_media_images.name": [
+    {
+      "type": 0,
+      "value": "Limpar imagens de mídia órfãs"
+    }
+  ],
+  "web.admin.tasks.task.sync_audiobook_metadata.description": [
+    {
+      "type": 0,
+      "value": "Busca metadados (capa, sinopse, narrador) para audiolivros que ainda não foram enriquecidos"
+    }
+  ],
+  "web.admin.tasks.task.sync_audiobook_metadata.name": [
+    {
+      "type": 0,
+      "value": "Sincronizar metadados de audiolivros"
+    }
+  ],
+  "web.admin.tasks.task.sync_catalog_search_index.description": [
+    {
+      "type": 0,
+      "value": "Cria ou atualiza o índice de catálogo do Meilisearch quando necessário e depois sincroniza as alterações pendentes do catálogo."
+    }
+  ],
+  "web.admin.tasks.task.sync_catalog_search_index.name": [
+    {
+      "type": 0,
+      "value": "Sincronizar índice de busca do catálogo"
+    }
+  ],
+  "web.admin.tasks.task.sync_collections.description": [
+    {
+      "type": 0,
+      "value": "Sincroniza as coleções que têm uma sincronização automática agendada"
+    }
+  ],
+  "web.admin.tasks.task.sync_collections.name": [
+    {
+      "type": 0,
+      "value": "Sincronizar coleções"
+    }
+  ],
+  "web.admin.tasks.task.sync_ebook_metadata.description": [
+    {
+      "type": 0,
+      "value": "Busca metadados para ebooks novos e para ebooks com atualização periódica pendente"
+    }
+  ],
+  "web.admin.tasks.task.sync_ebook_metadata.name": [
+    {
+      "type": 0,
+      "value": "Sincronizar metadados de ebooks"
+    }
+  ],
+  "web.admin.tasks.task.sync_manga_metadata.description": [
+    {
+      "type": 0,
+      "value": "Busca metadados (capa, sinopse, autores) para mangás que ainda não foram enriquecidos"
+    }
+  ],
+  "web.admin.tasks.task.sync_manga_metadata.name": [
+    {
+      "type": 0,
+      "value": "Sincronizar metadados de mangás"
+    }
+  ],
+  "web.admin.tasks.task.sync_markers.description": [
+    {
+      "type": 0,
+      "value": "Busca marcadores ausentes nos provedores online ativados e atualiza os marcadores salvos. Requer a opção Salvar na biblioteca."
+    }
+  ],
+  "web.admin.tasks.task.sync_markers.name": [
+    {
+      "type": 0,
+      "value": "Sincronizar marcadores online"
+    }
+  ],
+  "web.admin.tasks.task.sync_movie_box_sets.description": [
+    {
+      "type": 0,
+      "value": "Identifica a qual coletânea do TMDB cada filme pertence nas bibliotecas com coletâneas ativadas e atualiza os nomes, a arte e a ordem das coletâneas."
+    }
+  ],
+  "web.admin.tasks.task.sync_movie_box_sets.name": [
+    {
+      "type": 0,
+      "value": "Sincronizar coletâneas de filmes"
+    }
+  ],
+  "web.admin.tasks.task.sync_podcast_feeds.description": [
+    {
+      "type": 0,
+      "value": "Atualiza os feeds RSS de podcasts com consulta pendente e insere ou atualiza os novos episódios"
+    }
+  ],
+  "web.admin.tasks.task.sync_podcast_feeds.name": [
+    {
+      "type": 0,
+      "value": "Sincronizar feeds de podcasts"
+    }
+  ],
+  "web.admin.tasks.task.sync_user_collections.description": [
+    {
+      "type": 0,
+      "value": "Atualiza as coleções importadas de cada perfil (TMDB, MDBList) conforme o agendamento delas"
+    }
+  ],
+  "web.admin.tasks.task.sync_user_collections.name": [
+    {
+      "type": 0,
+      "value": "Sincronizar coleções de usuários"
+    }
+  ],
+  "web.admin.tasks.task.sync_watch_providers.description": [
+    {
+      "type": 0,
+      "value": "Verifica se os provedores de streaming vinculados têm sincronização automática pendente"
+    }
+  ],
+  "web.admin.tasks.task.sync_watch_providers.name": [
+    {
+      "type": 0,
+      "value": "Sincronizar provedores de streaming"
     }
   ],
   "web.admin.tasks.triggerText.daily": [
@@ -85110,6 +87556,66 @@
       "value": "Adicionar uma configuração para esta série"
     }
   ],
+  "web.admin.users.detail.preferences.category.appearance": [
+    {
+      "type": 0,
+      "value": "Aparência"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.catalog": [
+    {
+      "type": 0,
+      "value": "Catálogo"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.downloads": [
+    {
+      "type": 0,
+      "value": "Downloads"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.nav": [
+    {
+      "type": 0,
+      "value": "Barra lateral"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.navigation": [
+    {
+      "type": 0,
+      "value": "Navegação"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.playback": [
+    {
+      "type": 0,
+      "value": "Reprodução"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.player": [
+    {
+      "type": 0,
+      "value": "Player"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.requests": [
+    {
+      "type": 0,
+      "value": "Solicitações"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.search": [
+    {
+      "type": 0,
+      "value": "Pesquisa"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.watch_party": [
+    {
+      "type": 0,
+      "value": "Watch Party"
+    }
+  ],
   "web.admin.users.detail.preferences.clear.confirm": [
     {
       "type": 0,
@@ -87193,6 +89699,16 @@
       "value": "Não foi possível carregar os usuários."
     }
   ],
+  "web.admin.users.list.moreActions": [
+    {
+      "type": 0,
+      "value": "Mais ações para "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    }
+  ],
   "web.admin.users.list.nextPage": [
     {
       "type": 0,
@@ -87203,6 +89719,12 @@
     {
       "type": 0,
       "value": "Sem grupo"
+    }
+  ],
+  "web.admin.users.list.noMatches": [
+    {
+      "type": 0,
+      "value": "Nenhum usuário corresponde à sua pesquisa ou ao filtro."
     }
   ],
   "web.admin.users.list.pageRange": [
@@ -90671,6 +93193,12 @@
       "value": "…"
     }
   ],
+  "web.auth.loginSubtitle.default": [
+    {
+      "type": 0,
+      "value": "Entre com uma conta existente."
+    }
+  ],
   "web.auth.networkSignIn.addressRequired": [
     {
       "type": 0,
@@ -92113,6 +94641,60 @@
       "value": "Remover dados de exibição da série?"
     }
   ],
+  "web.catalog.history.removeFailed": [
+    {
+      "type": 0,
+      "value": "Não foi possível remover o histórico"
+    }
+  ],
+  "web.catalog.history.removed": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Dados de exibição removidos"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Dados de exibição removidos de "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de itens"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Dados de exibição removidos de "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " itens"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.catalog.letters.letterNoTitles": [
     {
       "type": 1,
@@ -92563,6 +95145,52 @@
     {
       "type": 0,
       "value": "Aleatório"
+    }
+  ],
+  "web.catalog.page.titleCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "shown"
+            },
+            {
+              "type": 0,
+              "value": " título"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "shown"
+            },
+            {
+              "type": 0,
+              "value": " de títulos"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "shown"
+            },
+            {
+              "type": 0,
+              "value": " títulos"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.catalog.page.watchlist": [
@@ -93801,6 +96429,18 @@
     {
       "type": 0,
       "value": "Adicionar como fileira"
+    }
+  ],
+  "web.collections.copy.addAtLeastOneRule": [
+    {
+      "type": 0,
+      "value": "Adicione pelo menos uma regra."
+    }
+  ],
+  "web.collections.copy.addRuleThenCreate": [
+    {
+      "type": 0,
+      "value": "Adicione uma regra e depois crie a coleção."
     }
   ],
   "web.collections.copy.addToCollectionFootnote": [
@@ -97925,6 +100565,12 @@
       "value": "Escolha as bibliotecas e depois crie a coleção."
     }
   ],
+  "web.collections.copy.pickWhereItShowsFirst": [
+    {
+      "type": 0,
+      "value": "Escolha as bibliotecas em que ela aparece e depois crie a coleção."
+    }
+  ],
   "web.collections.copy.pinEveryLibrary": [
     {
       "type": 0,
@@ -98037,12 +100683,6 @@
       "value": "Você ainda pode salvar. Títulos que corresponderem depois entram sozinhos."
     }
   ],
-  "web.collections.copy.previewEveryLibrary": [
-    {
-      "type": 0,
-      "value": "De todas as bibliotecas até você escolher algumas"
-    }
-  ],
   "web.collections.copy.previewFailed": [
     {
       "type": 0,
@@ -98099,6 +100739,18 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.collections.copy.previewNeedsRule": [
+    {
+      "type": 0,
+      "value": "Adicione uma regra para ver o que ela encontra"
+    }
+  ],
+  "web.collections.copy.previewNeedsRuleHelp": [
+    {
+      "type": 0,
+      "value": "Uma coleção inteligente precisa de pelo menos uma regra. Sem ela, a coleção teria todos os títulos."
     }
   ],
   "web.collections.copy.previewShowsUnsaved": [
@@ -98289,6 +100941,16 @@
     {
       "type": 0,
       "value": "Não foi possível salvar"
+    }
+  ],
+  "web.collections.copy.saveFailedWithError": [
+    {
+      "type": 0,
+      "value": "Não foi possível salvar · "
+    },
+    {
+      "type": 1,
+      "value": "error"
     }
   ],
   "web.collections.copy.saveFirstDescription": [
@@ -98567,6 +101229,12 @@
     {
       "type": 0,
       "value": "Nenhum título corresponde ainda. Os que corresponderem depois entram sozinhos."
+    }
+  ],
+  "web.collections.copy.smartLibrariesHelp": [
+    {
+      "type": 0,
+      "value": "Ela aparece nas abas Coleções dessas bibliotecas. As regras dela escolhem de onde vêm os títulos."
     }
   ],
   "web.collections.copy.smartUpdatesItself": [
@@ -101543,6 +104211,18 @@
       "value": "name"
     }
   ],
+  "web.collections.page.emptyAll": [
+    {
+      "type": 0,
+      "value": "Ainda não há coleções."
+    }
+  ],
+  "web.collections.page.emptyMine": [
+    {
+      "type": 0,
+      "value": "Você ainda não criou nenhuma coleção."
+    }
+  ],
   "web.collections.page.filterAll": [
     {
       "type": 0,
@@ -104319,6 +106999,48 @@
       "value": "Esta semana"
     }
   ],
+  "web.collections.toast.addFailed": [
+    {
+      "type": 0,
+      "value": "Não foi possível adicionar à coleção"
+    }
+  ],
+  "web.collections.toast.notShared": [
+    {
+      "type": 0,
+      "value": "Agora só você vê esta coleção"
+    }
+  ],
+  "web.collections.toast.removeItemFailed": [
+    {
+      "type": 0,
+      "value": "Não foi possível remover o item"
+    }
+  ],
+  "web.collections.toast.reorderFailed": [
+    {
+      "type": 0,
+      "value": "Não foi possível reordenar"
+    }
+  ],
+  "web.collections.toast.reorderItemsFailed": [
+    {
+      "type": 0,
+      "value": "Não foi possível reordenar os itens"
+    }
+  ],
+  "web.collections.toast.sharedWithProfiles": [
+    {
+      "type": 0,
+      "value": "Visível para outros perfis"
+    }
+  ],
+  "web.collections.toast.sharingFailed": [
+    {
+      "type": 0,
+      "value": "Não foi possível alterar o compartilhamento"
+    }
+  ],
   "web.collections.types.kindManual": [
     {
       "type": 0,
@@ -104389,6 +107111,12 @@
     {
       "type": 0,
       "value": "Onde aparece"
+    }
+  ],
+  "web.collections.whereItShows.librariesTrigger": [
+    {
+      "type": 0,
+      "value": "Mostrar nas bibliotecas"
     }
   ],
   "web.collections.whereItShows.shelf": [
@@ -105281,6 +108009,60 @@
       "value": "Faroeste"
     }
   ],
+  "web.common.job.cancelled": [
+    {
+      "type": 0,
+      "value": "Trabalho cancelado"
+    }
+  ],
+  "web.common.job.failed": [
+    {
+      "type": 0,
+      "value": "O trabalho falhou"
+    }
+  ],
+  "web.common.libraryType.audiobooks": [
+    {
+      "type": 0,
+      "value": "Audiolivros"
+    }
+  ],
+  "web.common.libraryType.ebooks": [
+    {
+      "type": 0,
+      "value": "E-books"
+    }
+  ],
+  "web.common.libraryType.manga": [
+    {
+      "type": 0,
+      "value": "Mangás"
+    }
+  ],
+  "web.common.libraryType.mixed": [
+    {
+      "type": 0,
+      "value": "Mista"
+    }
+  ],
+  "web.common.libraryType.movies": [
+    {
+      "type": 0,
+      "value": "Filmes"
+    }
+  ],
+  "web.common.libraryType.podcasts": [
+    {
+      "type": 0,
+      "value": "Podcasts"
+    }
+  ],
+  "web.common.libraryType.series": [
+    {
+      "type": 0,
+      "value": "Séries"
+    }
+  ],
   "web.common.markers.sharingDisclosure": [
     {
       "type": 0,
@@ -105333,6 +108115,24 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.common.overlays.previewPlaceholder.movie": [
+    {
+      "type": 0,
+      "value": "Prévia de filme"
+    }
+  ],
+  "web.common.overlays.previewPlaceholder.requested": [
+    {
+      "type": 0,
+      "value": "Prévia de solicitação"
+    }
+  ],
+  "web.common.overlays.previewPlaceholder.show": [
+    {
+      "type": 0,
+      "value": "Prévia de série"
+    }
+  ],
   "web.common.overlays.previewSample": [
     {
       "type": 0,
@@ -105355,6 +108155,20 @@
     {
       "type": 0,
       "value": "Série"
+    }
+  ],
+  "web.common.overlays.sampleDownloading": [
+    {
+      "type": 0,
+      "value": "Baixando "
+    },
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "%"
     }
   ],
   "web.common.overlays.watched": [
@@ -105845,6 +108659,120 @@
     {
       "type": 0,
       "value": "Avaliação no TMDB"
+    }
+  ],
+  "web.common.sortable.canceled": [
+    {
+      "type": 0,
+      "value": "A movimentação de "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " foi cancelada."
+    }
+  ],
+  "web.common.sortable.dropped": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " solto."
+    }
+  ],
+  "web.common.sortable.droppedAt": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " solto na posição "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " de "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.common.sortable.fallbackName": [
+    {
+      "type": 0,
+      "value": "Item"
+    }
+  ],
+  "web.common.sortable.instructions": [
+    {
+      "type": 0,
+      "value": "Para mover um item, foque a alça dele e pressione Space ou Enter. Use as teclas de seta para movê-lo, Space ou Enter para soltá-lo ou Escape para cancelar."
+    }
+  ],
+  "web.common.sortable.over": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " agora está na posição "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " de "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.common.sortable.pickedUp": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " selecionado, posição "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " de "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "web.common.speedTest.retryAfter": [
@@ -111540,6 +114468,12 @@
       "value": "ex.: Christopher Nolan"
     }
   ],
+  "web.home.addRow.params.trendingShow": [
+    {
+      "type": 0,
+      "value": "Mostrar"
+    }
+  ],
   "web.home.addRow.personalSentence": [
     {
       "type": 1,
@@ -111914,12 +114848,6 @@
       "value": "todas as bibliotecas"
     }
   ],
-  "web.home.addRow.rules.chooseLibraries": [
-    {
-      "type": 0,
-      "value": "escolher bibliotecas"
-    }
-  ],
   "web.home.addRow.rules.group": [
     {
       "type": 0,
@@ -112030,10 +114958,10 @@
       "value": "qualquer uma"
     }
   ],
-  "web.home.addRow.rules.noRulesCollection": [
+  "web.home.addRow.rules.noRulesCollectionYet": [
     {
       "type": 0,
-      "value": "Ainda não há regras, então a coleção contém todos os títulos destas bibliotecas."
+      "value": "Nenhuma regra ainda. Adicione uma para escolher quais títulos a coleção contém."
     }
   ],
   "web.home.addRow.rules.noRulesRow": [
@@ -115566,6 +118494,60 @@
       }
     }
   ],
+  "web.home.rows.describe.trendingDiscoverFiltered": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "movie": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Filmes em alta"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Séries em alta"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " no TMDB "
+    },
+    {
+      "type": 5,
+      "value": "window",
+      "options": {
+        "day": {
+          "value": [
+            {
+              "type": 0,
+              "value": "hoje"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "nesta semana"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": ", entre o que você tem"
+    }
+  ],
   "web.home.rows.describe.trendingHere": [
     {
       "type": 0,
@@ -116446,6 +119428,12 @@
     {
       "type": 0,
       "value": "Essa fileira não existe mais."
+    }
+  ],
+  "web.home.rows.links.rowMissing": [
+    {
+      "type": 0,
+      "value": "Esta fileira não está mais nesta página."
     }
   ],
   "web.home.rows.notes.conflict": [
@@ -119186,6 +122174,24 @@
       "value": "Isso desbloqueará todos os campos e atualizará os metadados a partir dos seus provedores. Todas as edições manuais serão substituídas na próxima atualização."
     }
   ],
+  "web.item.editMetadata.resetDescriptionEpisode": [
+    {
+      "type": 0,
+      "value": "Isso desbloqueia o título, a sinopse, a duração e a data de exibição deste episódio e atualiza os metadados dos seus provedores. Todas as edições manuais desses campos serão substituídas."
+    }
+  ],
+  "web.item.editMetadata.resetDescriptionSeason": [
+    {
+      "type": 0,
+      "value": "Isso desbloqueia o título, a sinopse e a data de exibição desta temporada e atualiza os metadados dos seus provedores. Todas as edições manuais desses campos serão substituídas. As imagens que você escolheu continuam bloqueadas na série; redefina a série para substituí-las."
+    }
+  ],
+  "web.item.editMetadata.resetDescriptionSeries": [
+    {
+      "type": 0,
+      "value": "Isso desbloqueia todos os campos desta série e atualiza os metadados dos seus provedores. Todas as edições manuais da série serão substituídas. Temporadas e episódios bloqueados mantêm suas edições."
+    }
+  ],
   "web.item.editMetadata.resetToProvider": [
     {
       "type": 0,
@@ -120099,6 +123105,12 @@
     {
       "type": 0,
       "value": "Avaliação"
+    }
+  ],
+  "web.item.rating.remove": [
+    {
+      "type": 0,
+      "value": "Remover avaliação"
     }
   ],
   "web.item.rating.stars": [
@@ -121312,6 +124324,132 @@
       "value": "Removido da lista para assistir"
     }
   ],
+  "web.library.watchlist.statusApprovedWaiting": [
+    {
+      "type": 0,
+      "value": "Aprovada · aguardando download"
+    }
+  ],
+  "web.library.watchlist.statusAwaitingApproval": [
+    {
+      "type": 0,
+      "value": "Aguardando aprovação"
+    }
+  ],
+  "web.library.watchlist.statusDownloading": [
+    {
+      "type": 0,
+      "value": "Baixando "
+    },
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
+  "web.library.watchlist.statusListedTwice": [
+    {
+      "type": 0,
+      "value": "O TMDB lista este título duas vezes"
+    }
+  ],
+  "web.library.watchlist.statusNeedsAttention": [
+    {
+      "type": 0,
+      "value": "Precisa de atenção"
+    }
+  ],
+  "web.library.watchlist.statusNoLongerListed": [
+    {
+      "type": 0,
+      "value": "Não está mais no TMDB"
+    }
+  ],
+  "web.library.watchlist.statusNotOnTmdb": [
+    {
+      "type": 0,
+      "value": "Fora do TMDB"
+    }
+  ],
+  "web.library.watchlist.statusNotRequested": [
+    {
+      "type": 0,
+      "value": "Não solicitado"
+    }
+  ],
+  "web.library.watchlist.statusNotRequestedOut": [
+    {
+      "type": 0,
+      "value": "Não solicitado · lançamento em "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.library.watchlist.statusNotRequestedReason": [
+    {
+      "type": 0,
+      "value": "Não solicitado · "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "web.library.watchlist.statusOut": [
+    {
+      "type": 0,
+      "value": "Lançamento em "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.library.watchlist.statusOutApproved": [
+    {
+      "type": 0,
+      "value": "Lançamento em "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " · aprovada"
+    }
+  ],
+  "web.library.watchlist.statusOutAwaitingApproval": [
+    {
+      "type": 0,
+      "value": "Lançamento em "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " · aguardando aprovação"
+    }
+  ],
+  "web.library.watchlist.titlesHint": [
+    {
+      "type": 0,
+      "value": "Estes títulos ainda não estão na biblioteca, então não podem ser reproduzidos. Quando um chegar, ele vai para Na sua biblioteca."
+    }
+  ],
+  "web.library.watchlist.titlesHintRequested": [
+    {
+      "type": 0,
+      "value": "Estes títulos ainda não estão na biblioteca, então não podem ser reproduzidos. Eles foram solicitados para você. Quando um chegar, ele vai para Na sua biblioteca e você recebe uma notificação."
+    }
+  ],
   "web.library.watchlist.updateFailed": [
     {
       "type": 0,
@@ -122462,6 +125600,58 @@
       "value": "Sem notificações no momento"
     }
   ],
+  "web.notifications.toast.followedArrived": [
+    {
+      "type": 0,
+      "value": "Um título que você pediu para acompanhar chegou à biblioteca."
+    }
+  ],
+  "web.notifications.toast.newEpisode": [
+    {
+      "type": 0,
+      "value": "Novo episódio de "
+    },
+    {
+      "type": 1,
+      "value": "series"
+    }
+  ],
+  "web.notifications.toast.requestApprovedTitle": [
+    {
+      "type": 0,
+      "value": "Solicitação aprovada: "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.notifications.toast.requestArrived": [
+    {
+      "type": 0,
+      "value": "Sua solicitação de mídia chegou à biblioteca."
+    }
+  ],
+  "web.notifications.toast.requestDeclinedTitle": [
+    {
+      "type": 0,
+      "value": "Solicitação recusada: "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.notifications.toast.seriesAvailable": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " já está disponível"
+    }
+  ],
   "web.onboarding.gate.progressFailed": [
     {
       "type": 0,
@@ -122753,6 +125943,12 @@
       "value": "Áudio"
     }
   ],
+  "web.player.audioMenu.onlyOneTrack": [
+    {
+      "type": 0,
+      "value": "Apenas uma faixa de áudio"
+    }
+  ],
   "web.player.audioMenu.trackFallback": [
     {
       "type": 0,
@@ -122767,6 +125963,16 @@
     {
       "type": 0,
       "value": "Faixas de áudio"
+    }
+  ],
+  "web.player.audioMenu.triggerWithTrack": [
+    {
+      "type": 0,
+      "value": "Faixas de áudio, "
+    },
+    {
+      "type": 1,
+      "value": "track"
     }
   ],
   "web.player.bar.backgroundPlayback": [
@@ -123080,6 +126286,16 @@
       "value": " Mbps"
     }
   ],
+  "web.player.buffering.loadingFrom": [
+    {
+      "type": 0,
+      "value": "Carregando a partir de "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.player.buffering.undoCaption": [
     {
       "type": 0,
@@ -123096,6 +126312,26 @@
     {
       "type": 0,
       "value": "Capítulos"
+    }
+  ],
+  "web.player.chaptersMenu.nowPlaying": [
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 8,
+      "value": "now",
+      "children": [
+        {
+          "type": 0,
+          "value": "Reproduzindo agora"
+        }
+      ]
     }
   ],
   "web.player.chaptersMenu.trigger": [
@@ -123158,6 +126394,12 @@
       "value": "Sair da tela cheia"
     }
   ],
+  "web.player.controls.exitFullscreenShortcut": [
+    {
+      "type": 0,
+      "value": "Sair da tela cheia (F)"
+    }
+  ],
   "web.player.controls.fillScreen": [
     {
       "type": 0,
@@ -123168,6 +126410,18 @@
     {
       "type": 0,
       "value": "Tela cheia"
+    }
+  ],
+  "web.player.controls.fullscreenShortcut": [
+    {
+      "type": 0,
+      "value": "Tela cheia (F)"
+    }
+  ],
+  "web.player.controls.more": [
+    {
+      "type": 0,
+      "value": "Mais"
     }
   ],
   "web.player.controls.moreOptions": [
@@ -123189,6 +126443,12 @@
     }
   ],
   "web.player.controls.pictureInPicture": [
+    {
+      "type": 0,
+      "value": "Picture in Picture"
+    }
+  ],
+  "web.player.controls.pictureInPictureItem": [
     {
       "type": 0,
       "value": "Picture in Picture"
@@ -123216,6 +126476,26 @@
     {
       "type": 0,
       "value": "Episódio anterior"
+    }
+  ],
+  "web.player.controls.remainingTime": [
+    {
+      "type": 0,
+      "value": "−"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.player.controls.remainingTimeLabel": [
+    {
+      "type": 0,
+      "value": "Tempo restante: "
+    },
+    {
+      "type": 1,
+      "value": "time"
     }
   ],
   "web.player.controls.skipBack": [
@@ -123760,6 +127040,50 @@
       "value": "Sair"
     }
   ],
+  "web.player.hud.episode": [
+    {
+      "type": 0,
+      "value": "T"
+    },
+    {
+      "type": 1,
+      "value": "season"
+    },
+    {
+      "type": 0,
+      "value": " · E"
+    },
+    {
+      "type": 1,
+      "value": "episode"
+    }
+  ],
+  "web.player.hud.episodeWithTitle": [
+    {
+      "type": 0,
+      "value": "T"
+    },
+    {
+      "type": 1,
+      "value": "season"
+    },
+    {
+      "type": 0,
+      "value": " · E"
+    },
+    {
+      "type": 1,
+      "value": "episode"
+    },
+    {
+      "type": 0,
+      "value": " — "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
   "web.player.info.audioBitrate": [
     {
       "type": 0,
@@ -123890,6 +127214,12 @@
     {
       "type": 0,
       "value": "Quadros perdidos"
+    }
+  ],
+  "web.player.info.heading": [
+    {
+      "type": 0,
+      "value": "Informações de reprodução"
     }
   ],
   "web.player.info.playMethod": [
@@ -124111,6 +127441,115 @@
       "value": "title"
     }
   ],
+  "web.player.nextEpisode.playNow": [
+    {
+      "type": 0,
+      "value": "Reproduzir agora"
+    }
+  ],
+  "web.player.nextEpisode.regionLabel": [
+    {
+      "type": 0,
+      "value": "A seguir"
+    }
+  ],
+  "web.player.nextEpisode.seasonEpisode": [
+    {
+      "type": 0,
+      "value": "Temporada "
+    },
+    {
+      "type": 1,
+      "value": "season"
+    },
+    {
+      "type": 0,
+      "value": " · Episódio "
+    },
+    {
+      "type": 1,
+      "value": "episode"
+    }
+  ],
+  "web.player.nextEpisode.upNextIn": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "A seguir em "
+            },
+            {
+              "type": 8,
+              "value": "num",
+              "children": [
+                {
+                  "type": 7
+                },
+                {
+                  "type": 0,
+                  "value": " s"
+                }
+              ]
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "A seguir em "
+            },
+            {
+              "type": 8,
+              "value": "num",
+              "children": [
+                {
+                  "type": 7
+                },
+                {
+                  "type": 0,
+                  "value": " s"
+                }
+              ]
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "A seguir em "
+            },
+            {
+              "type": 8,
+              "value": "num",
+              "children": [
+                {
+                  "type": 7
+                },
+                {
+                  "type": 0,
+                  "value": " s"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.player.postRoll.stillPlaying": [
+    {
+      "type": 0,
+      "value": "Ainda reproduzindo · Clique para voltar"
+    }
+  ],
   "web.player.quality.auto": [
     {
       "type": 0,
@@ -124149,6 +127588,18 @@
       "value": "Selecionada"
     }
   ],
+  "web.player.quality.sourceFile": [
+    {
+      "type": 0,
+      "value": "Arquivo de origem"
+    }
+  ],
+  "web.player.quality.streamingQuality": [
+    {
+      "type": 0,
+      "value": "Qualidade do streaming"
+    }
+  ],
   "web.player.quality.title": [
     {
       "type": 0,
@@ -124159,6 +127610,42 @@
     {
       "type": 1,
       "value": "menu"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "speed"
+    }
+  ],
+  "web.player.quality.triggerWithValue": [
+    {
+      "type": 1,
+      "value": "menu"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.player.quality.triggerWithValueAndSpeed": [
+    {
+      "type": 1,
+      "value": "menu"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "value"
     },
     {
       "type": 0,
@@ -124970,6 +128457,12 @@
       "value": ")"
     }
   ],
+  "web.player.tracks.resetAudioFailed": [
+    {
+      "type": 0,
+      "value": "Não foi possível redefinir a preferência de áudio"
+    }
+  ],
   "web.player.tracks.saveAudioFailed": [
     {
       "type": 0,
@@ -124986,6 +128479,12 @@
     {
       "type": 0,
       "value": "O Silo não conseguiu ler este arquivo. Ele parece estar vazio ou danificado."
+    }
+  ],
+  "web.player.upNext.autoplay": [
+    {
+      "type": 0,
+      "value": "Reprodução automática"
     }
   ],
   "web.player.upNext.autoplayOff": [
@@ -125057,6 +128556,18 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.player.upNext.heading": [
+    {
+      "type": 0,
+      "value": "A seguir"
+    }
+  ],
+  "web.player.upNext.headingShuffle": [
+    {
+      "type": 0,
+      "value": "A seguir, em ordem aleatória"
     }
   ],
   "web.player.upNext.minutesLeft": [
@@ -125135,10 +128646,83 @@
       "value": "Sem prévia"
     }
   ],
+  "web.player.upNext.onDeckScrollBack": [
+    {
+      "type": 0,
+      "value": "Rolar Em andamento para trás"
+    }
+  ],
+  "web.player.upNext.onDeckScrollForward": [
+    {
+      "type": 0,
+      "value": "Rolar Em andamento para a frente"
+    }
+  ],
   "web.player.upNext.playingNext": [
     {
       "type": 0,
       "value": "A seguir"
+    }
+  ],
+  "web.player.upNext.startsAfterCredits": [
+    {
+      "type": 0,
+      "value": "Começa automaticamente quando os créditos terminarem"
+    }
+  ],
+  "web.player.upNext.startsIn": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Começa em "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " s"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Começa em "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " s"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Começa em "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " s"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.player.volume.label": [
@@ -126630,6 +130214,12 @@
     {
       "type": 0,
       "value": "Acesso às bibliotecas"
+    }
+  ],
+  "web.profiles.libraryAccess.primaryNote": [
+    {
+      "type": 0,
+      "value": "O perfil principal vê todas as bibliotecas que a conta pode acessar. Ele pode ocultar bibliotecas em Configurações → Bibliotecas."
     }
   ],
   "web.profiles.librarySelect.allLibraries": [
@@ -133071,22 +136661,14 @@
       "value": "Seu token de autenticação do Plex"
     }
   ],
-  "web.settings.historyImport.processed": [
+  "web.settings.historyImport.processedSoFar": [
     {
       "type": 1,
       "value": "processed"
     },
     {
       "type": 0,
-      "value": " / "
-    },
-    {
-      "type": 1,
-      "value": "fetched"
-    },
-    {
-      "type": 0,
-      "value": " processados"
+      "value": " processados até agora"
     }
   ],
   "web.settings.historyImport.reconnectPlex": [
@@ -135021,6 +138603,30 @@
       "value": "Notificações do navegador ativadas"
     }
   ],
+  "web.settings.notifications.push.error.incompleteSubscription": [
+    {
+      "type": 0,
+      "value": "O navegador retornou uma assinatura de push incompleta"
+    }
+  ],
+  "web.settings.notifications.push.error.permissionDenied": [
+    {
+      "type": 0,
+      "value": "A permissão de notificação não foi concedida"
+    }
+  ],
+  "web.settings.notifications.push.error.unsubscribeFailed": [
+    {
+      "type": 0,
+      "value": "O registro no servidor foi removido, mas não foi possível remover a assinatura do navegador."
+    }
+  ],
+  "web.settings.notifications.push.error.unsupported": [
+    {
+      "type": 0,
+      "value": "Este navegador não é compatível com notificações push"
+    }
+  ],
   "web.settings.notifications.push.lastDeliveredAt": [
     {
       "type": 0,
@@ -135757,6 +139363,12 @@
       "value": "Vários áudios"
     }
   ],
+  "web.settings.overlays.badge.multiAudio.value": [
+    {
+      "type": 0,
+      "value": "Multiáudio"
+    }
+  ],
   "web.settings.overlays.badge.multiSub.description": [
     {
       "type": 0,
@@ -135941,6 +139553,30 @@
     {
       "type": 0,
       "value": "Status da série"
+    }
+  ],
+  "web.settings.overlays.badge.showStatus.value.cancelled": [
+    {
+      "type": 0,
+      "value": "Cancelada"
+    }
+  ],
+  "web.settings.overlays.badge.showStatus.value.ended": [
+    {
+      "type": 0,
+      "value": "Encerrada"
+    }
+  ],
+  "web.settings.overlays.badge.showStatus.value.returning": [
+    {
+      "type": 0,
+      "value": "Em andamento"
+    }
+  ],
+  "web.settings.overlays.badge.showStatus.value.upcoming": [
+    {
+      "type": 0,
+      "value": "Em breve"
     }
   ],
   "web.settings.overlays.badge.studio.description": [
@@ -137613,6 +141249,56 @@
       "value": "Wi-Fi"
     }
   ],
+  "web.settings.plexAuth.homeUserNoServerAccess": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " não tem acesso a este servidor Plex. Compartilhe o servidor com essa pessoa no Plex ou escolha outro servidor."
+    }
+  ],
+  "web.settings.plexAuth.homeUserNoSignIn": [
+    {
+      "type": 0,
+      "value": "O Plex não retornou um login para este usuário do Plex Home."
+    }
+  ],
+  "web.settings.plexAuth.homeUserPinRejected": [
+    {
+      "type": 0,
+      "value": "O Plex não aceitou esse PIN. Verifique o PIN deste usuário do Plex Home e tente novamente."
+    }
+  ],
+  "web.settings.plexAuth.homeUserPinRequired": [
+    {
+      "type": 0,
+      "value": "Este usuário do Plex Home é protegido por PIN. Digite o PIN e tente novamente."
+    }
+  ],
+  "web.settings.plexAuth.invalidPinResponse": [
+    {
+      "type": 0,
+      "value": "O login do Plex retornou uma resposta de PIN inválida."
+    }
+  ],
+  "web.settings.plexAuth.requestFailed": [
+    {
+      "type": 0,
+      "value": "A solicitação ao Plex falhou com o status "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    }
+  ],
+  "web.settings.plexAuth.signInIncomplete": [
+    {
+      "type": 0,
+      "value": "O login no Plex não foi concluído. Tente novamente."
+    }
+  ],
   "web.settings.profileLaunch.ask": [
     {
       "type": 0,
@@ -137739,6 +141425,61 @@
     {
       "type": 0,
       "value": "Nenhum perfil ainda"
+    }
+  ],
+  "web.settings.profiles.limitReached": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Esta conta pode ter "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " perfil. Um administrador pode aumentar o limite."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Esta conta pode ter "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de perfis. Um administrador pode aumentar o limite."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Esta conta pode ter "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " perfis. Um administrador pode aumentar o limite."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.settings.profiles.newProfile": [
@@ -143623,6 +147364,12 @@
       "value": "Descartar alterações não salvas?"
     }
   ],
+  "web.shuffle.startFailed": [
+    {
+      "type": 0,
+      "value": "Não foi possível iniciar a reprodução aleatória."
+    }
+  ],
   "web.subtitles.closeDialog": [
     {
       "type": 0,
@@ -143703,6 +147450,12 @@
       "value": "Ativar legendas"
     }
   ],
+  "web.subtitles.menu.heading": [
+    {
+      "type": 0,
+      "value": "Legendas"
+    }
+  ],
   "web.subtitles.menu.noMatch": [
     {
       "type": 0,
@@ -143751,6 +147504,18 @@
       "value": "Externa"
     }
   ],
+  "web.subtitles.menu.subtitlesOffShortcut": [
+    {
+      "type": 0,
+      "value": "Legendas desativadas (C)"
+    }
+  ],
+  "web.subtitles.menu.subtitlesShortcut": [
+    {
+      "type": 0,
+      "value": "Legendas (C)"
+    }
+  ],
   "web.subtitles.menu.syncHint": [
     {
       "type": 0,
@@ -143797,10 +147562,32 @@
       "value": "Este servidor não permite alterar a sincronia das legendas."
     }
   ],
+  "web.subtitles.menu.toolsLabel": [
+    {
+      "type": 0,
+      "value": "Ferramentas de legendas"
+    }
+  ],
+  "web.subtitles.menu.tracksLabel": [
+    {
+      "type": 0,
+      "value": "Faixas de legendas"
+    }
+  ],
   "web.subtitles.menu.translateWithAi": [
     {
       "type": 0,
       "value": "Traduzir com IA…"
+    }
+  ],
+  "web.subtitles.menu.triggerWithValue": [
+    {
+      "type": 0,
+      "value": "Legendas, "
+    },
+    {
+      "type": 1,
+      "value": "value"
     }
   ],
   "web.subtitles.quotaWindow.day": [

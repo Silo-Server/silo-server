@@ -2,11 +2,11 @@ package handlers
 
 import (
 	"encoding/json"
-	"net/http"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
 )
 
 // receiveUserSettingsEvent drains one envelope from the subscription, which is
@@ -55,24 +55,22 @@ func assertUserSettingsEnvelope(t *testing.T, env evt.Envelope, wantKey, wantSco
 	}
 }
 
+// TestDeleteValuePublishesUserSettingsEvent: both a write and a clear tell the
+// account's other devices to refetch, or a reset on one screen never reaches
+// the rest of the household.
 func TestDeleteValuePublishesUserSettingsEvent(t *testing.T) {
 	handler, _ := newValuesTestHandler(t)
 	handler.EventsHub = evt.NewHub("test", &cache.NoopEventBus{})
 	events, unsubscribe := handler.EventsHub.Subscribe()
 	defer unsubscribe()
+	ctx := seamCtx(t, "profile-1")
+	req := seamReq("playback.subtitle_language", settingscontract.ScopeProfile)
 
-	if rec := routeValues(t, handler, http.MethodPut, "playback.subtitle_language",
-		"scope=profile", []byte(`{"value":"ja"}`)); rec.Code != http.StatusOK {
-		t.Fatalf("seeding PUT = %d: %s", rec.Code, rec.Body.String())
-	}
+	seamSet(t, ctx, handler, req, `"ja"`)
 	assertUserSettingsEnvelope(t, receiveUserSettingsEvent(t, events), "playback.subtitle_language", "profile")
 
-	rec := routeValues(t, handler, http.MethodDelete, "playback.subtitle_language",
-		"scope=profile", nil)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("DELETE = %d: %s", rec.Code, rec.Body.String())
+	if err := handler.DeleteSettingValue(ctx, seamUserID, req); err != nil {
+		t.Fatalf("delete: %v", err)
 	}
-
-	env := receiveUserSettingsEvent(t, events)
-	assertUserSettingsEnvelope(t, env, "playback.subtitle_language", "profile")
+	assertUserSettingsEnvelope(t, receiveUserSettingsEvent(t, events), "playback.subtitle_language", "profile")
 }

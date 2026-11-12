@@ -51,7 +51,7 @@ export function CollapsibleDiagnosticsSection({
     <section className="surface-panel-subtle overflow-hidden rounded-2xl">
       <button
         type="button"
-        className="hover:bg-surface-hover/40 flex w-full items-center gap-3 px-5 py-4 text-start transition-colors"
+        className="hover:bg-surface-hover/40 flex min-h-11 w-full items-center gap-3 px-4 py-4 text-start transition-colors lg:px-5"
         aria-expanded={open}
         onClick={() => onOpenChange(!open)}
       >
@@ -64,8 +64,8 @@ export function CollapsibleDiagnosticsSection({
           {icon}
         </div>
         <div className="min-w-0 flex-1 space-y-0.5">
-          <h2 className="text-sm font-semibold tracking-wide">{title}</h2>
-          <p className="text-muted-foreground text-xs leading-relaxed">{description}</p>
+          <h2 className="text-sm font-semibold tracking-wide break-words">{title}</h2>
+          <p className="text-muted-foreground text-xs leading-relaxed break-words">{description}</p>
         </div>
         {isError ? (
           open ? (
@@ -74,7 +74,7 @@ export function CollapsibleDiagnosticsSection({
               <span aria-hidden="true">{ERROR_MARK}</span>
             </Badge>
           ) : (
-            <div className="text-destructive text-2xl leading-none font-bold tabular-nums">
+            <div className="text-destructive shrink-0 text-2xl leading-none font-bold tabular-nums">
               <span className="sr-only">{t("web.admin.common.diagnosticsSection.countError")}</span>
               <span aria-hidden="true">{ERROR_MARK}</span>
             </div>
@@ -86,7 +86,7 @@ export function CollapsibleDiagnosticsSection({
         ) : (
           <div
             className={cn(
-              "text-2xl leading-none font-bold tabular-nums",
+              "shrink-0 text-2xl leading-none font-bold tabular-nums",
               (count === undefined || count === 0) && "text-muted-foreground",
             )}
           >
@@ -100,7 +100,7 @@ export function CollapsibleDiagnosticsSection({
           )}
         />
       </button>
-      {open ? <div className="px-3 pb-3">{children}</div> : null}
+      {open ? <div className="min-w-0 px-3 pb-3">{children}</div> : null}
     </section>
   );
 }

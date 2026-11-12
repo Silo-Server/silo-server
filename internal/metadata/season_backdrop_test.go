@@ -169,7 +169,7 @@ func TestTargetSeasonFetchIsCompleteOnlyWhenEveryProviderAnswered(t *testing.T) 
 			service := &MetadataService{chainCache: map[string]chainCacheEntry{
 				"0:season": {providers: []Provider{provider}, expiresAt: time.Now().Add(time.Hour)},
 			}}
-			_, _, complete, err := service.fetchTargetSeasonResults(context.Background(), nil, 0, "en", 1, seriesChildLocalContext{}, false)
+			_, _, complete, err := service.fetchTargetSeasonResults(context.Background(), nil, 0, "en", 1, seriesChildLocalContext{}, false, false)
 			if err != nil {
 				t.Fatalf("fetch seasons: %v", err)
 			}

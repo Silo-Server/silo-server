@@ -629,10 +629,10 @@ function renderHeroSlot(
   if (hero.state === "error") {
     return (
       <div
-        className={`bg-muted relative ${HERO_BANNER_SIZE} w-full overflow-hidden rounded-[1.8rem]`}
+        className={`bg-muted relative flex flex-col ${HERO_BANNER_SIZE} w-full overflow-hidden rounded-[1.8rem]`}
       >
         <div className="from-background via-background/70 absolute inset-0 bg-gradient-to-t to-transparent" />
-        <div className="relative flex h-full items-end px-4 pb-10 sm:px-6 sm:pb-12 lg:px-12 lg:pb-16">
+        <div className="relative flex flex-1 items-end px-4 pb-10 sm:px-6 sm:pb-12 lg:px-12 lg:pb-16">
           <div className="max-w-xl space-y-3">
             <p className="text-3xl font-bold">{sectionTitle(hero.layout)}</p>
             <p className="text-muted-foreground text-sm">{t("web.home.page.heroFailed")}</p>

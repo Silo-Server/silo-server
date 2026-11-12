@@ -12,7 +12,7 @@ import { SETTING_DEFINITIONS, SETTING_KEYS } from "@/lib/settingsContract";
  * The one place playback.auto_play_next is read and written.
  *
  * Two surfaces edit this setting — the Playback settings screen and the
- * post-roll "Auto-play is on/off" toggle — and both render the *resolved*
+ * post-roll "Auto-play" switch — and both render the *resolved*
  * value. The contract resolves profile_device above profile, so a surface that
  * writes the device row while the other writes the profile row makes the
  * second control inert: it saves a profile value the device row keeps

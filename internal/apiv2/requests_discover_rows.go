@@ -13,6 +13,7 @@ type DiscoverRowRef struct {
 	Key   string `json:"key" doc:"The row's stable ID: an items key for a title row; studios, networks or genres for a brand row" example:"trending_movies"`
 	Type  string `json:"type" doc:"What the row shows: tmdb_chart, tmdb_discover, tmdb_list or mdblist (title rows, in items), or studios, networks or genres (brand rows). More values may be added" example:"tmdb_chart"`
 	Title string `json:"title" example:"Trending Movies"`
+	SectionTitleKey
 }
 
 // DiscoverRowInput names one row of the Discover layout.

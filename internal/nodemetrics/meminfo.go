@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"math"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 )
@@ -223,4 +225,31 @@ func readCgroupStatKey(path, key string) (int64, error) {
 		return strconv.ParseInt(fields[1], 10, 64)
 	}
 	return 0, fmt.Errorf("%s not found in %s", key, path)
+}
+
+// ProcessMemoryLimitBytes returns the tightest memory bound the process can
+// see, or 0 when none is detectable (macOS dev boxes, bare Linux without
+// cgroups). Every source is consulted and the smallest wins, because none
+// implies the others: GOMEMLIMIT can be set looser than a cgroup limit, and
+// the effective cgroup limit — own cgroup, ancestors, and root, so a systemd
+// MemoryMax= or an inherited pod/slice limit binds, not just a namespaced
+// container's root files — can sit above or below host memory.
+func ProcessMemoryLimitBytes() int64 {
+	goLimit := int64(0)
+	if limit := debug.SetMemoryLimit(-1); limit < math.MaxInt64 {
+		goLimit = limit
+	}
+	hostTotal, _ := ReadMeminfoTotalBytes("/proc/meminfo")
+	return tightestMemoryLimit(goLimit, EffectiveMemoryLimitBytes(), hostTotal)
+}
+
+// tightestMemoryLimit returns the smallest positive limit, or 0 when none is.
+func tightestMemoryLimit(limits ...int64) int64 {
+	tightest := int64(0)
+	for _, limit := range limits {
+		if limit > 0 && (tightest == 0 || limit < tightest) {
+			tightest = limit
+		}
+	}
+	return tightest
 }

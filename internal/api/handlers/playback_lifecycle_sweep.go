@@ -160,16 +160,16 @@ func (h *PlaybackHandler) sweepLifecycleCandidate(ctx context.Context, pool *pgx
 	case c.attemptFound:
 		// The attempt's end was finalized without stopping the lifecycle
 		// (its writer failed, or ended before the upgrade): record it now.
-		h.endLifecycleFromFacts(ctx, c.sessionID, endReasonForStop(c.sessionID, c.stopID))
+		h.endLifecycleFromFacts(ctx, pool, c.sessionID, endReasonForStop(c.sessionID, c.stopID), now)
 	case c.frontend == LifecycleFrontendJellyfin:
-		h.expireIdleJellyfinSession(ctx, pool, c, idleBefore)
+		h.expireIdleJellyfinSession(ctx, pool, c, idleBefore, now)
 	case c.frontend == LifecycleFrontendABS:
 		if c.activity.Before(now.Add(-lifecycleABSGrace)) {
-			h.endLifecycleFromFacts(ctx, c.sessionID, PlaybackEndExpired)
+			h.endLifecycleFromFacts(ctx, pool, c.sessionID, PlaybackEndExpired, now)
 		}
 	case c.activity.Before(idleBefore):
 		// A native session whose attempt is gone (expired and cleaned up).
-		h.endLifecycleFromFacts(ctx, c.sessionID, PlaybackEndExpired)
+		h.endLifecycleFromFacts(ctx, pool, c.sessionID, PlaybackEndExpired, now)
 	}
 }
 
@@ -260,7 +260,7 @@ func (h *PlaybackHandler) finishInterruptedNativeEnd(ctx context.Context, sessio
 // expireIdleJellyfinSession ends a Jellyfin play no server holds through the
 // shared compatibility expiry claim, which marks its play row terminal so no
 // report revives it.
-func (h *PlaybackHandler) expireIdleJellyfinSession(ctx context.Context, pool *pgxpool.Pool, c lifecycleCandidate, idleBefore time.Time) {
+func (h *PlaybackHandler) expireIdleJellyfinSession(ctx context.Context, pool *pgxpool.Pool, c lifecycleCandidate, idleBefore, now time.Time) {
 	if c.activity.After(idleBefore) {
 		return
 	}
@@ -285,13 +285,21 @@ func (h *PlaybackHandler) expireIdleJellyfinSession(ctx context.Context, pool *p
 		recordLifecycleActivity(ctx, pool, c.sessionID, idleBefore)
 		return
 	}
-	h.endLifecycleFromFacts(ctx, c.sessionID, PlaybackEndExpired)
+	h.endLifecycleFromFacts(ctx, pool, c.sessionID, PlaybackEndExpired, now)
 }
 
 // endLifecycleFromFacts records the end of a session nothing richer is left
 // for: the row it recorded when it started, at the last position the shared
 // state knows.
-func (h *PlaybackHandler) endLifecycleFromFacts(ctx context.Context, sessionID string, reason PlaybackEndReason) {
+//
+// A history write that fails leaves the session live, so a later sweep
+// retries it and keeps the row once the cause is fixed. The failure counts
+// as activity at now, so a session the sweep selects by idleness waits a
+// full grace before the next try instead of failing every sweep, and moves
+// behind sessions idle for longer, so rows that keep failing never fill the
+// sweep's batch. (A session whose attempt is stopped is selected regardless
+// of activity until the attempt row expires.)
+func (h *PlaybackHandler) endLifecycleFromFacts(ctx context.Context, pool *pgxpool.Pool, sessionID string, reason PlaybackEndReason, now time.Time) {
 	reader, ok := h.AdminStore.(liveSessionReader)
 	if !ok {
 		return
@@ -308,5 +316,7 @@ func (h *PlaybackHandler) endLifecycleFromFacts(ctx context.Context, sessionID s
 	if record, err := h.PlanStoreV3.GetAttempt(ctx, sessionID); err == nil && record.LastSample != nil {
 		session.Position = record.LastSample.Position
 	}
-	h.recordAdminStopHistory(ctx, session, reason)
+	if err := h.recordAdminStopHistory(ctx, session, reason); err != nil {
+		recordLifecycleActivity(ctx, pool, sessionID, now)
+	}
 }

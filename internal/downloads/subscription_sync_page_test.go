@@ -48,6 +48,17 @@ func (a *syncAccess) EnsureAccessible(context.Context, string, catalog.AccessFil
 	return a.err
 }
 
+func (a *syncAccess) EnsureAccessibleIDs(_ context.Context, ids []string, _ catalog.AccessFilter) (map[string]bool, error) {
+	if a.err != nil {
+		return nil, a.err
+	}
+	allowed := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		allowed[id] = true
+	}
+	return allowed, nil
+}
+
 func TestSubscriptionSyncPagePostgres(t *testing.T) {
 	subRepo := subscriptionMutationTestRepo(t)
 	// One connection proves monitor locking never waits for another pool slot

@@ -2494,7 +2494,7 @@ func (h *ItemsHandler) writeAdjacentEpisodesResponse(w http.ResponseWriter, r *h
 		return
 	}
 
-	episodeModels, err := h.episodeRepo.ListAdjacentInSeries(r.Context(), target.SeriesID, target.SeasonNumber, target.EpisodeNumber)
+	episodeModels, err := h.episodeRepo.ListAdjacentInSeriesFor(r.Context(), target.SeriesID, target.SeasonNumber, target.EpisodeNumber, h.resolveAccessFilter(r.Context(), session))
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return

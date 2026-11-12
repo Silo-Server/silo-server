@@ -49,7 +49,7 @@ async function openAddSubtitles() {
   await waitFor(() =>
     expect(mocks.v2).toHaveBeenCalledWith(config, "GET /api/v2/subtitles/providers/status", {}),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Enable captions" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Subtitles/ }));
   fireEvent.click(screen.getByRole("menuitem", { name: "Add Subtitles…" }));
   return screen.getByRole("dialog", { name: "Add Subtitles" });
 }
@@ -111,7 +111,7 @@ it("does not carry a disabled answer over to a new server", async () => {
     </QueryClientProvider>
   );
   const view = render(menu(config));
-  fireEvent.click(screen.getByRole("button", { name: "Enable captions" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Subtitles/ }));
   fireEvent.click(screen.getByRole("menuitem", { name: "Add Subtitles…" }));
   await waitFor(() => expect(screen.queryByText("Search online")).not.toBeInTheDocument());
   view.rerender(menu(serverB));
@@ -182,7 +182,7 @@ it.each([
     </QueryClientProvider>
   );
   const view = render(component());
-  fireEvent.click(screen.getByRole("button", { name: "Enable captions" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Subtitles/ }));
   fireEvent.click(screen.getByRole("menuitem", { name: "Add Subtitles…" }));
   fireEvent.click(screen.getByRole("button", { name: "Search" }));
   fireEvent.click(await screen.findByRole("button", { name: /Own download/ }));
@@ -206,8 +206,8 @@ it.each([
     props = { ...props, sessionId: "session-2" };
   }
   if (order === "viewer chose Off") {
-    fireEvent.click(screen.getByRole("button", { name: "Enable captions" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /Off/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Subtitles/ }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Off/ }));
     onSelect.mockClear();
   }
   props = { ...props, tracks: [other, own] };

@@ -519,7 +519,7 @@ function CatalogResults({
             // A collection's hero has no count of its own; the filter bar shows it.
             resultCountLabel={
               isCollectionSource && showExactResultCount
-                ? `${totalItems} title${totalItems === 1 ? "" : "s"}`
+                ? t("web.catalog.page.titleCount", { count: totalItems, shown: totalItems })
                 : undefined
             }
             resultCountLoading={

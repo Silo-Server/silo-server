@@ -6,8 +6,9 @@
 > [Discussions → Ideas](https://github.com/Silo-Server/silo-server/discussions/categories/ideas),
 > not issues. Pull requests are welcome from contributors who've had one merged
 > in a Silo repository, or when a maintainer asks for one; a feature pull request
-> also needs an issue a maintainer has labeled `accepted`. Other pull requests
-> are closed automatically without review.
+> also needs an issue a maintainer has labeled `accepted`. Every pull request
+> needs evidence. Other pull requests, drafts, and pull requests still without
+> evidence a day after they open are closed automatically without review.
 
 ## Why we're asking for issues
 
@@ -76,6 +77,16 @@ a new pull request, or ask a maintainer to reopen the closed one. If a
 maintainer asked you for a pull request and you haven't had one merged yet, the
 workflow still closes it when it opens; the maintainer reopens it, and the
 check leaves it alone from then on.
+
+Two more rules apply to pull requests from anyone without triage or write
+access, including invited ones:
+
+- Open the pull request ready for review. The workflow closes drafts, both when
+  they open and when they are converted to drafts.
+- Every pull request needs evidence, as [Show visible changes](#show-visible-changes)
+  describes. A pull request whose `Evidence` check still asks for evidence 24
+  hours after it opens, or after a maintainer reopens it, is closed without
+  review. Publish or attach evidence soon after you open it.
 
 ## Before you start
 
@@ -162,8 +173,8 @@ Outside these areas, don't add a test. That includes:
 - Small changes, UI layout, styling, or copy.
 - Code with no logic of its own: constants, defaults, field copies, getters,
   constructors, handlers and adapters that pass values through.
-- `/api/v1` beyond its own authorization checks. It is frozen; test shared
-  behavior through the service or `/api/v2`.
+- The retired `/api/v1` namespace beyond its tombstone. Test shared behavior
+  through the service or `/api/v2`.
 - Migrations that only add a table, column, or index.
 - Behavior an existing test already covers, at this layer or another.
 - The language, the standard library, or a dependency.
@@ -246,9 +257,6 @@ make test-web
 make verify-settings-bindings-all
 make verify-playback-fixtures
 make verify-route-inventory
-make verify-migration-ledger
-make verify-scenario-catalogs
-make verify-offline-routes
 make verify-apiv2-openapi
 make verify-apiv2-web-types
 make verify-apiv2-contract          # BASE_REF=origin/<pr-base> when not main
@@ -261,7 +269,6 @@ make verify-shellcheck              # ShellCheck 0.11.0
 make verify-size-ratchet            # BASE_REF=origin/<pr-base> when not main
 make verify-bidi
 make verify-migrations              # BASE_REF=origin/<pr-base> when not main
-make verify-v1-route-freeze         # BASE_REF=origin/<pr-base> when not main
 docker pull prom/prometheus:v3.5.0   # Required first: the target uses --pull=never
 make verify-prometheus-rules
 ```
@@ -281,17 +288,17 @@ canceled, missing, or unexpectedly skipped work; only jobs excluded by the
 selection may skip. Selection tools come from the trusted reusable workflow's
 main branch.
 
-`Go test` runs the full Go suite, which owns the ledger, scenario,
-offline-route, spec, and fixture assertions. `Go lint` runs the contract checks
-after lint: the generator freshness checks and the semantic API comparison. The
+`Go test` runs the full Go suite, which owns the spec and fixture assertions.
+`Go vet and contracts` runs whole-tree `go vet` and then the contract checks:
+the generator freshness checks and the semantic API comparison. `Go lint` runs
+golangci-lint beside it. The
 contract checks pass `CONTRACT_GO_TESTS=0` to avoid repeating the suite's
 assertions; local verify targets remain complete by default. `Go integration`
 runs its race tests against two databases of its own: a PostgreSQL 17 database
 for the Watch Party, history import, and marker claim migration tests, and a
 migrated pgvector database for the tests that need the full schema. `Go DB pins`
 and `Go DB external auth` each start a separate pgvector database, and the unit
-suite has no database. No CI job sets `SILO_SCENARIO_DATABASE_URL`, so the
-scenario executor, which truncates its database, gets none of these databases.
+suite has no database.
 
 Touching `internal/apiv2` registrations? Run
 `make apiv2-openapi apiv2-fixtures apiv2-web-types` and commit what they write;
@@ -301,12 +308,14 @@ stale.
 `make test-go` has no database, so every DB-backed test in it skips. The
 `Go DB pins` CI job covers the DB-backed pins listed in
 [scripts/ci/db-pins.txt](scripts/ci/db-pins.txt): it migrates a fresh database
-and runs `make test-db-pins`, which checks those budgets and then the database
-contracts in `scripts/ci/db-contracts.txt`. Both lists fail when a named test is
-missing, skipped or failing. A test that pins a statement count or query plan
+and runs `make test-db-pins`, which checks those budgets and the database
+contracts in `scripts/ci/db-contracts.txt` in one pass, each package against its
+own copy of the database. Both lists fail when a named test is missing, skipped
+or failing. A test that pins a statement count or query plan
 belongs in the budget list, added in the same change. Run this target when you
 change database or query code or add a pin. It needs a disposable, migrated
-database; with the PostgreSQL service from
+database that nothing else is connected to (`go run ./scripts/ci/dbpins -shared`
+runs against it directly instead); with the PostgreSQL service from
 [DEVELOPMENT.md](DEVELOPMENT.md#local-development)
 running under the Compose defaults:
 
@@ -406,13 +415,24 @@ in the pull request template. For each issue the change fully resolves, add a
 GitHub closes the issue when the pull request merges into `main`; the
 `Related issue:` line alone does not close anything. Name an epic, scope item,
 or partly addressed issue on `Related issue:`, and write `Related issue: N/A`
-when none applies. Either way, the Problem section has to stand on its own. Keep the commit history intentional and the diff
-limited to the stated problem. Keep the description proportional to the change;
-omit session history, full logs, and private report links other than an
-`Evidence:` line. Follow the
-[public-content and media rules](AGENTS.md#pull-requests), and include evidence
-for every change users can see, as [Show visible changes](#show-visible-changes)
-describes.
+when none applies. Keep both lines accurate when the pull request's scope
+changes. Either way, the Problem section has to stand on its own. Keep the
+commit history intentional and the diff limited to the stated problem. Keep the
+description proportional to the change; omit session history, full logs, and
+private report links other than an `Evidence:` line. Follow the
+[public-content and media rules](AGENTS.md#pull-requests), and include
+evidence, as [Show visible changes](#show-visible-changes) describes.
+
+Until 1.0 ships, maintainers check each 1.0 feature by hand on the
+[Silo v1.0.0 board](https://github.com/orgs/Silo-Server/projects/5). A
+`[v1] <Feature>` issue holds the acceptance criteria, and each validation task
+under it records a result for its cases `C1…`. Work out which passed cases your
+change could reach, and list the affected tasks and cases on the
+`Validation tasks:` line, for example
+`Validation tasks: unblocks #1144 C3; changes #1200 C1`, or write `none`.
+Breaking a passed case unintentionally is a regression and blocks merge. A
+deliberate change to validated behavior must say why and still meet the
+published criterion; changing the criterion itself needs a maintainer decision.
 
 ### Write the description
 
@@ -439,10 +459,15 @@ change does; the rest should help them decide how closely to review.
 
 ### Show visible changes
 
+Every pull request shows evidence that the change works, so reviewers can see it
+without building the branch. A change users can see shows the change itself. A
+change users can't see shows how you checked it: the steps you ran, the build or
+commit, and trimmed test or API results.
+
 A pull request that changes what a user sees must show the change in its
-Evidence section, so reviewers can see it without building the branch. In this
-repository that means the web app and web admin, and every client that renders
-server data. A change is visible when it alters any of these:
+Evidence section. In this repository that means the web app and web admin, and
+every client that renders server data. A change is visible when it alters any of
+these:
 
 - layout, styling, copy, navigation, focus, empty and error states;
 - which items a screen shows, or in what order: search results, home sections,
@@ -466,6 +491,9 @@ Provide evidence that fits the change:
 - **Server changes no client shows yet:** before-and-after excerpts of the API
   response for the same request, trimmed to the fields that changed, such as the
   ordered list of result titles.
+- **Changes nothing shows**, such as internal refactors, CI, or performance
+  work: the steps you ran, the build or commit, and trimmed test, benchmark, or
+  API results that show the change does what the description says.
 - Name the surface and the build or commit each capture came from.
 
 Capture against a test library or public-domain media where you can, and keep
@@ -488,15 +516,17 @@ one of two places:
   the folder. Then write
   `Evidence: https://evidence.siloserver.org/r/silo-server/pr-<number>/` under
   the Evidence heading. Until a pull request of yours has merged here, a
-  maintainer approves you once before your first upload.
+  maintainer approves you once before your first upload. If that approval
+  hasn't come through, attach the evidence on GitHub instead.
 
-The pull request's `Evidence` check passes once evidence is published or
-attached. It asks for evidence when the change touches the web app, the native
-API, or jellycompat, or when a maintainer adds the `evidence-required` label; a
-maintainer adds `evidence-not-needed` when nothing visible changed. Changes
-users cannot see write `Evidence: none, no user-visible change`. If you could
-not capture evidence, say why; the reviewer decides whether the pull request
-can merge without it.
+The pull request's `Evidence` check asks for evidence on every pull request and
+passes once evidence is published or attached. A maintainer can waive it with
+the `evidence-not-needed` label, for example for an automated dependency
+update. A pull request from someone without triage or write access whose check
+still asks for evidence 24 hours after it opens is closed without review; a
+maintainer can reopen it once evidence is up. If you could not capture part of
+the evidence, say why; the reviewer decides whether the pull request can merge
+without it.
 
 ## Review expectations
 
