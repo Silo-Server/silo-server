@@ -41,6 +41,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/settingsmigrate"
 	subtitleai "github.com/Silo-Server/silo-server/internal/subtitles/ai"
 	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
 // AdminMetadataRefresher can refresh metadata for individual items.
@@ -174,7 +175,8 @@ type AdminHandler struct {
 	DownloadsStatsSource         AdminDownloadsStatsSource
 	RedisClient                  *redis.Client // health reporting only; nil means this deployment runs without Redis
 	Config                       *config.Config
-	ArtworkBackend               string // resolved artwork backend for the settings status; empty when unopened
+	ArtworkBackend               string          // resolved artwork backend for the settings status; empty when unopened
+	ArtworkStore                 blobstore.Store // personal collection artwork, removed with a deleted account's collections
 	EventBus                     cache.EventBus
 	EventsHub                    *evt.Hub
 	SettingsRepo                 ServerSettingsStore
@@ -543,6 +545,17 @@ func (h *AdminHandler) adminUserViews(ctx context.Context, users []*models.User)
 		applyLastActiveAt(&resp[i], lastActive)
 	}
 	return resp, nil
+}
+
+// deletedAccountCollections lists, in the delete's transaction, the personal
+// collections the account delete removes through the users foreign key. A
+// handler without an artwork store, or a test repository without a
+// transaction, has nothing to clean up.
+func (h *AdminHandler) deletedAccountCollections(ctx context.Context, tx pgx.Tx, userID int) ([]string, error) {
+	if h.ArtworkStore == nil || tx == nil {
+		return nil, nil
+	}
+	return pgstore.AccountCollectionIDs(ctx, tx, userID)
 }
 
 // sweepWatchlistTitles removes the watchlist titles a deleted account's

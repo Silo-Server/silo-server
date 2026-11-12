@@ -19,6 +19,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
@@ -40,6 +41,9 @@ type ProfileHandler struct {
 	AvatarStore    profileAvatarStore
 	AvatarResolver artworkurl.Resolver
 	AvatarTTL      time.Duration
+	// ArtworkStore holds personal collection artwork; a profile delete
+	// removes the artwork of the collections it deleted.
+	ArtworkStore blobstore.Store
 	// DeviceLibraryPurger removes a deleted profile's device rows (and, via
 	// cascade, its managed downloads and subscriptions). Profiles may live
 	// outside Postgres, so no FK cascade covers these shared tables.
@@ -834,13 +838,14 @@ func (h *ProfileHandler) DeleteProfile(ctx context.Context, cmd ProfileDeleteCom
 	var audit *auditmutation.Entry
 	var auditErr error
 	var deleteErr error
+	var deletedCollections []string
 	if deleter, ok := store.(userstore.AuditedProfileDeleter); ok && auditmutation.Recording(ctx) {
-		deleteErr = deleter.DeleteProfileAudited(ctx, profileID, func(tx pgx.Tx, deleted *userstore.Profile) error {
+		deletedCollections, deleteErr = deleter.DeleteProfileAudited(ctx, profileID, func(tx pgx.Tx, deleted *userstore.Profile) error {
 			audit, auditErr = recordProfileMutation(ctx, tx, deleted, nil)
 			return auditErr
 		})
 	} else {
-		deleteErr = store.DeleteProfile(ctx, profileID)
+		deletedCollections, deleteErr = store.DeleteProfile(ctx, profileID)
 	}
 	if auditErr != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to delete profile")
@@ -861,6 +866,7 @@ func (h *ProfileHandler) DeleteProfile(ctx context.Context, cmd ProfileDeleteCom
 			slog.WarnContext(ctx, "profile avatar cleanup failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", cleanupErr)
 		}
 	}
+	removeDeletedCollectionArtwork(ctx, h.ArtworkStore, userCollectionImagePrefix, deletedCollections...)
 	if h.DeviceLibraryPurger != nil {
 		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()

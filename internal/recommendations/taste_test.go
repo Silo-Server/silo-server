@@ -382,7 +382,7 @@ func (s deletingStore) GetProfile(ctx context.Context, profileID string) (*users
 	if err != nil || s.p.checks > 1 || profileID != s.p.profile {
 		return profile, err
 	}
-	if err := s.DeleteProfile(ctx, profileID); err != nil {
+	if _, err := s.DeleteProfile(ctx, profileID); err != nil {
 		return nil, err
 	}
 	return profile, s.p.repo.PurgeProfile(ctx, s.p.userID, profileID)
@@ -485,7 +485,7 @@ func TestRefreshWritesNoTasteRowForADeletedProfilePostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.DeleteProfile(ctx, gone); err != nil {
+	if _, err := store.DeleteProfile(ctx, gone); err != nil {
 		t.Fatal(err)
 	}
 
