@@ -36,8 +36,8 @@ func TestPolicyActingAdminMiddlewareParity(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			legacy := captureActingAdminResponse(RequireActingAdmin(test.check, nil), test.claims, test.profileID)
-			policyBacked := captureActingAdminResponse(NewPolicyActingAdminMiddleware(pdp, test.check, nil), test.claims, test.profileID)
+			legacy := captureActingAdminResponse(RequireActingAdminWith(NewActingAdminDecider(test.check, nil)), test.claims, test.profileID)
+			policyBacked := captureActingAdminResponse(RequireActingAdminWith(NewPolicyActingAdminDecider(pdp, test.check, nil)), test.claims, test.profileID)
 			assertMiddlewareResponsesEqual(t, policyBacked, legacy)
 		})
 	}
@@ -164,7 +164,7 @@ func assertCurationAuthority(t *testing.T, ctx context.Context, mode string, leg
 
 func TestPolicyActingAdminMiddlewareEvalErrorIsInternal(t *testing.T) {
 	rec := captureActingAdminResponse(
-		NewPolicyActingAdminMiddleware(errorPermissionDecider{}, nil, nil),
+		RequireActingAdminWith(NewPolicyActingAdminDecider(errorPermissionDecider{}, nil, nil)),
 		adminClaims(),
 		"",
 	)

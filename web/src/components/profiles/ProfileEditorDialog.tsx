@@ -79,6 +79,7 @@ export function ProfileEditorDialog({
   profileContext,
   save,
   onOpenChange,
+  className,
   onSaveSuccess,
 }: ProfileEditorDialogProps) {
   const t = useT();
@@ -90,7 +91,7 @@ export function ProfileEditorDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-3xl">
+      <DialogContent className={cn("sm:max-w-3xl", className)}>
         <DialogHeader>
           <DialogTitle>
             {mode === "edit"

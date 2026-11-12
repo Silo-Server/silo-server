@@ -109,22 +109,11 @@ func inferRootAssignments(
 	overrides map[string]models.MediaRootOverride,
 	libraryRoots ...string,
 ) rootInferenceResult {
-	snapshots, assignments := naming.InferRootAssignments(filePaths, libraryType, folderID, overrides, libraryRoots...)
-	fileTaggedRoots := make(map[string]bool)
-	for _, assignment := range assignments {
-		if assignment.HasFileIDs {
-			fileTaggedRoots[assignment.RootPath] = true
-		}
-	}
-	observations := make([]RootObservation, 0, len(snapshots))
-	for _, snapshot := range snapshots {
-		observations = append(observations, observationFromSnapshot(snapshot, fileTaggedRoots[snapshot.RootPath]))
-	}
-	return rootInferenceResult{
-		Observations: observations,
-		Snapshots:    snapshots,
-		Assignments:  assignments,
-	}
+	inference := newScanRootInference(libraryType, folderID, overrides, libraryRoots...)
+	assignments := inference.add(filePaths)
+	result := inference.result()
+	result.Assignments = assignments
+	return result
 }
 
 // observationFromAssignment counts a file-name tag only for a movie file: a

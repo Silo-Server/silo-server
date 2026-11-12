@@ -2,10 +2,11 @@ package handlers
 
 import (
 	"context"
+	"net/http"
+
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
-	"net/http"
 )
 
 type MarkerContributionOutcomeView = contributionOutcomeResponse

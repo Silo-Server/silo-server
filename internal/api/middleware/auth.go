@@ -266,34 +266,10 @@ func (am *AuthMiddleware) sessionClaims(r *http.Request) *auth.Claims {
 // sign out. Refreshing the session afterwards is a public route; the refreshed
 // tokens drop the restriction once the account has a new password.
 var passwordChangeRoutes = map[string]bool{
-	"GET /api/v1/auth/me":                     true,
-	"GET /api/v1/auth/account/capability":     true,
-	"POST /api/v1/auth/account/password":      true,
-	"POST /api/v1/auth/logout":                true,
 	"GET /api/v2/account/me":                  true,
 	"GET /api/v2/account/password/capability": true,
 	"POST /api/v2/account/password":           true,
 	"POST /api/v2/auth/logout":                true,
-}
-
-// RequireAdmin is a standalone HTTP middleware that checks if the authenticated
-// user has the "admin" role. It expects RequireAuth to have already placed
-// claims in the request context.
-func RequireAdmin(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		claims := GetClaims(r.Context())
-		if claims == nil {
-			writeUnauthorized(w, "Authentication required", ReasonAuthenticationRequired)
-			return
-		}
-
-		if claims.Role != "admin" {
-			writeForbidden(w, "Admin access required")
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
 }
 
 // PrimaryProfileChecker reports whether profileID belongs to userID and, if
@@ -307,31 +283,17 @@ type PrimaryProfileChecker func(ctx context.Context, userID int, profileID strin
 // request that declares no profile may exercise admin powers.
 type HouseholdProfileRequirement func(ctx context.Context, userID int) (bool, error)
 
-// RequireActingAdmin enforces the admin role plus the household policy that
-// admin powers are only exercised through the account's primary profile.
-// When the request declares an active profile (X-Profile-Id) that belongs to
-// the admin account but is not the primary profile, the request is refused.
-// A request with no declared profile keeps working (clients that haven't
-// selected a profile yet) only while the household has no PIN-protected or
-// access-limited profile; otherwise a device signed into the account could
-// regain admin powers, and mint credentials that skip profile PINs, by
-// omitting the header. API keys keep their profile-less access. A nil
-// checkPrimary disables the declared-profile policy, and a nil
-// requiresProfile the profile-less one; with both nil it behaves exactly
-// like RequireAdmin.
+// RequireActingAdminWith enforces the admin role plus the household policy
+// that admin powers are only exercised through the account's primary profile
+// (see NewActingAdminDecider). It takes a prebuilt decision so the router can
+// hand the same decider to ProvideActingAdmin and the routes outside the admin
+// groups answer exactly as the gate does.
 //
 // Note this enforces the declared profile, not an authenticated one: all
 // profiles on an account share the login session, so this is a policy
 // boundary for well-behaved clients, not a defense against the account
 // holder themselves. The viewer gate that runs before it on the admin route
 // groups verifies a PIN-locked declared profile's X-Profile-Token.
-func RequireActingAdmin(checkPrimary PrimaryProfileChecker, requiresProfile HouseholdProfileRequirement) func(http.Handler) http.Handler {
-	return RequireActingAdminWith(NewActingAdminDecider(checkPrimary, requiresProfile))
-}
-
-// RequireActingAdminWith is RequireActingAdmin over a prebuilt decision, so
-// the router can hand the same decider to ProvideActingAdmin and the routes
-// outside the admin groups answer exactly as the gate does.
 func RequireActingAdminWith(decide ActingAdminDecider) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

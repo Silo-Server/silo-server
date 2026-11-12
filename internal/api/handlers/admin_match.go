@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -10,7 +9,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -93,39 +91,6 @@ type matchApplyResponse struct {
 	Updated   bool   `json:"updated"`
 }
 
-// HandleSearchItemMatchCandidates handles POST /admin/items/{id}/match/search.
-// It searches metadata providers for candidate matches based on the given
-// query parameters (title, year, external IDs) and returns normalized,
-// deduplicated candidates.
-func (h *AdminMatchHandler) HandleSearchItemMatchCandidates(w http.ResponseWriter, r *http.Request) {
-	contentID := chi.URLParam(r, "id")
-	if contentID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
-		return
-	}
-
-	var req matchSearchRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	// The frozen /api/v1 route keeps its historical fallback to the item's
-	// stored year.
-	if req.Year == 0 {
-		if item, err := h.items.GetByID(r.Context(), contentID); err == nil {
-			req.Year = item.Year
-		}
-	}
-
-	out, err := h.SearchAdminItemMatches(r.Context(), contentID, req)
-	if err != nil {
-		writeMatchErrorV1(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
 type AdminMatchSearchResult = matchSearchResponse
 type AdminMatchSearchRequest = matchSearchRequest
 
@@ -199,31 +164,6 @@ func (h *AdminMatchHandler) AdminItemMatchHints(ctx context.Context, contentID s
 	setMatchProviderID(hints.ProviderIDs, "imdb", group.ImdbID)
 	setMatchProviderID(hints.ProviderIDs, "tvdb", group.TvdbID)
 	return hints, nil
-}
-
-// HandleApplyItemMatch handles POST /admin/items/{id}/match/apply.
-// It applies the user-selected provider IDs to the item via ModeIdentify. A
-// local item, or one whose match the choice corrects, moves to the content_id
-// its new identity derives; the response carries the resulting content_id.
-func (h *AdminMatchHandler) HandleApplyItemMatch(w http.ResponseWriter, r *http.Request) {
-	contentID := chi.URLParam(r, "id")
-	if contentID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
-		return
-	}
-
-	var req matchApplyRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	out, err := h.ApplyAdminItemMatch(r.Context(), contentID, req)
-	if err != nil {
-		writeMatchErrorV1(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, out)
 }
 
 type AdminMatchApplyResult = matchApplyResponse
@@ -333,15 +273,6 @@ var (
 	errAmbiguousMatchLibrary = apiError(http.StatusBadRequest, "bad_request", "library_id is required for items in multiple libraries")
 	errMatchFolderLookup     = apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve the item's library")
 )
-
-// writeMatchErrorV1 renders a match error for the frozen /api/v1 routes, which
-// answer a failed folder lookup as an invalid library_id.
-func writeMatchErrorV1(w http.ResponseWriter, err error) {
-	if errors.Is(err, errMatchFolderLookup) {
-		err = errInvalidMatchLibrary
-	}
-	writeAPIError(w, err)
-}
 
 // matchTarget loads the item and resolves the library folder a match action
 // runs in, mapping failures to API errors.
