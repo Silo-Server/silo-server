@@ -3014,12 +3014,13 @@ func (s *Scanner) processFile(
 	// externalSubsToStore is the sidecar list a write to an existing row
 	// stores. After a failed listing it keeps the stored sidecars the scan
 	// could not see instead of storing only the ones it found.
-	externalSubsToStore := func(existing *scanStateFile) ([]models.ExternalSubtitle, error) {
+	externalSubsToStore := func() ([]models.ExternalSubtitle, error) {
 		found := externalSubtitleModels(loadExternalSubs())
 		if externalSubsChecked {
 			return found, nil
 		}
-		stored, err := s.fileRepo.GetByID(ctx, existing.ID)
+		// Read by path, the key both writes use, not the snapshot's ID.
+		stored, err := s.fileRepo.GetByPath(ctx, filePath)
 		if errors.Is(err, ErrFileNotFound) {
 			// Deleted since the snapshot: there is nothing stored to keep,
 			// and the upsert re-ingests the file.
@@ -3099,7 +3100,7 @@ func (s *Scanner) processFile(
 			if rejectionStands || len(updateReasons) > 1 {
 				mf := models.MediaFile{MediaFolderID: folder.ID, FilePath: filePath}
 				populateScanIdentity(&mf, filePath, folder.Type, assignment, groupAssignment, existing)
-				externalSubtitles, err := externalSubsToStore(existing)
+				externalSubtitles, err := externalSubsToStore()
 				if err != nil {
 					return 0, nil, err
 				}
@@ -3124,7 +3125,7 @@ func (s *Scanner) processFile(
 			}
 		}
 
-		externalSubtitles, err := externalSubsToStore(existing)
+		externalSubtitles, err := externalSubsToStore()
 		if err != nil {
 			return 0, nil, err
 		}
