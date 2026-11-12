@@ -4,7 +4,7 @@ import { useParams, useSearchParams } from "react-router";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useUserLibraries } from "@/hooks/queries/libraries";
 import type { ItemDetail } from "@/api/types";
-import { isNotFoundProblem, V2TimeoutError } from "@/api/v2/request";
+import { isNotFoundProblem } from "@/api/v2/request";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { Button } from "@/components/ui/button";
 import { loadErrorDescription } from "@/components/loadErrorDescription";
@@ -193,11 +193,10 @@ export default function ItemDetail() {
     // A 404 has the page to itself; a toast would only repeat it.
     if (itemError && !isNotFoundProblem(itemError)) {
       toast.error(
-        itemError instanceof V2TimeoutError
-          ? loadErrorDescription(itemError)
-          : itemError instanceof Error
-            ? itemError.message
-            : t("web.detail.page.loadFailedToast"),
+        loadErrorDescription(
+          itemError,
+          itemError instanceof Error ? itemError.message : t("web.detail.page.loadFailedToast"),
+        ),
       );
     }
   }, [itemError, t]);
