@@ -45,6 +45,7 @@ vi.mock("@/hooks/useCarouselEmbla", () => ({
   }),
 }));
 
+import { recordAutoAdvance, resetStillWatchingStreak } from "../stillWatching";
 import { PlayingNextScreen } from "./PlayingNextScreen";
 
 const KEY = SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT;
@@ -159,6 +160,7 @@ describe("PlayingNextScreen next-episode start", () => {
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
+    resetStillWatchingStreak();
   });
 
   it("starts the next episode as an automatic start when the countdown runs out", () => {
@@ -170,6 +172,18 @@ describe("PlayingNextScreen next-episode start", () => {
 
     expect(onPlayNow).toHaveBeenCalledOnce();
     expect(onPlayNow).toHaveBeenCalledWith("automatic");
+  });
+
+  it("waits for the viewer once the automatic streak reaches the limit", () => {
+    vi.useFakeTimers();
+    for (let i = 0; i < 3; i++) recordAutoAdvance();
+    const onPlayNow = vi.fn();
+    renderScreen({ videoEnded: true, onPlayNow });
+
+    act(() => vi.advanceTimersByTime(20_000));
+
+    expect(onPlayNow).not.toHaveBeenCalled();
+    expect(screen.queryByText("10s")).toBeNull();
   });
 
   it("keeps counting down while the parent re-renders the same next episode", () => {

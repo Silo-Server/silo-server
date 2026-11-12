@@ -48,6 +48,7 @@ import { useSubtitleLayout } from "../hooks/useSubtitleLayout";
 import { useCoarsePointer } from "../hooks/useCoarsePointer";
 import { computeSubtitleFontSize } from "@/lib/subtitleAppearance";
 import { useNextEpisode } from "../hooks/useNextEpisode";
+import { resetStillWatchingStreak } from "../stillWatching";
 import { MARKER_KINDS, useMarkerEditor } from "../hooks/useMarkerEditor";
 import { useWatchTogetherPlaybackSync } from "../hooks/useWatchTogetherPlaybackSync";
 import type { WatchTogetherRoomConnectionResult } from "../hooks/useWatchTogetherRoomConnection";
@@ -1806,6 +1807,16 @@ export function VideoPlayer({
   // scrub instead of snapping back to where the element still is. In a room,
   // the viewer's held request comes first: the room's seeks for earlier skips
   // in a burst move the element without answering it.
+  // Automatic marker skips call handlePlayerSeek directly: only a viewer's own
+  // seek is evidence that someone is still watching.
+  const handleViewerSeek = useCallback(
+    (seconds: number) => {
+      resetStillWatchingStreak();
+      return handlePlayerSeek(seconds);
+    },
+    [handlePlayerSeek],
+  );
+
   const handleSkip = useCallback(
     (direction: "back" | "forward") => {
       const now =
@@ -1814,11 +1825,11 @@ export function VideoPlayer({
         elementMediaPosition() ??
         currentTimeRef.current;
       const seconds = direction === "back" ? seekIntervals.back : seekIntervals.forward;
-      handlePlayerSeek(
+      handleViewerSeek(
         skipTarget(now, durationRef.current, direction === "back" ? -seconds : seconds),
       );
     },
-    [elementMediaPosition, handlePlayerSeek, seekIntervals.back, seekIntervals.forward],
+    [elementMediaPosition, handleViewerSeek, seekIntervals.back, seekIntervals.forward],
   );
   const handleSkipRef = useRef(handleSkip);
   useEffect(() => {
@@ -2515,8 +2526,8 @@ export function VideoPlayer({
     (region) => region !== null && currentTime >= region.start && currentTime < region.end,
   );
   const skipMarker = useCallback(() => {
-    if (activeSkipMarker) handlePlayerSeek(activeSkipMarker.end);
-  }, [activeSkipMarker, handlePlayerSeek]);
+    if (activeSkipMarker) handleViewerSeek(activeSkipMarker.end);
+  }, [activeSkipMarker, handleViewerSeek]);
 
   const introPromptCanSeek =
     !roomPlaybackActive ||
@@ -3570,6 +3581,8 @@ export function VideoPlayer({
 
   const selectIntroPrompt = useCallback(() => {
     if (!selectActiveIntroPrompt()) return false;
+    // A press on the prompt is the viewer's seek; automatic skips are not.
+    resetStillWatchingStreak();
     focusTransportAfterIntroPrompt();
     return true;
   }, [focusTransportAfterIntroPrompt, selectActiveIntroPrompt]);
@@ -4017,6 +4030,7 @@ export function VideoPlayer({
   const setPlayback = useCallback(
     (action: "play" | "pause" | "toggle") => {
       if (watchTogether.replacementReason) return;
+      resetStillWatchingStreak();
       const video = videoRef.current;
       if (!video) return;
       const shouldPlay = action === "toggle" ? video.paused : action === "play";
@@ -4708,7 +4722,7 @@ export function VideoPlayer({
   );
 
   const handlePlayPauseRef = useRef(handlePlayPause);
-  const handlePlayerSeekRef = useRef(handlePlayerSeek);
+  const handleViewerSeekRef = useRef(handleViewerSeek);
   const handleTogglePiPRef = useRef(handleTogglePiP);
   const handleQualitySelectRef = useRef(handleQualitySelect);
 
@@ -4717,8 +4731,8 @@ export function VideoPlayer({
   }, [handlePlayPause]);
 
   useEffect(() => {
-    handlePlayerSeekRef.current = handlePlayerSeek;
-  }, [handlePlayerSeek]);
+    handleViewerSeekRef.current = handleViewerSeek;
+  }, [handleViewerSeek]);
 
   useEffect(() => {
     handleTogglePiPRef.current = handleTogglePiP;
@@ -5017,12 +5031,12 @@ export function VideoPlayer({
         const nextCurrentTime = currentTimeRef.current;
         const nextDuration = durationRef.current;
         const maxTime = nextDuration > 0 ? nextDuration : nextCurrentTime + Math.abs(secondsDelta);
-        handlePlayerSeekRef.current(Math.max(0, Math.min(maxTime, nextCurrentTime + secondsDelta)));
+        handleViewerSeekRef.current(Math.max(0, Math.min(maxTime, nextCurrentTime + secondsDelta)));
       },
       skipBack: skipActions.back,
       skipForward: skipActions.forward,
       seekTo: (seconds: number) => {
-        handlePlayerSeekRef.current(seconds);
+        handleViewerSeekRef.current(seconds);
       },
       togglePictureInPicture: () => handleTogglePiPRef.current(),
     };
@@ -5774,7 +5788,7 @@ export function VideoPlayer({
           onPlaybackSpeedChange={roomPlaybackActive ? undefined : setPlaybackSpeed}
           onTogglePiP={browserEngineActive ? undefined : handleTogglePiP}
           onPlayPause={handlePlayPause}
-          onSeek={handlePlayerSeek}
+          onSeek={handleViewerSeek}
           onVolumeChange={handleVolumeChange}
           onMutedChange={handleMutedChange}
           videoFit={videoFit}
