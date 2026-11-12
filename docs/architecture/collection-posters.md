@@ -127,8 +127,9 @@ differences:
   uploaded posters. Deleting a collection, a profile or an account deletes the
   `user-collection-images/{collection}/` prefix of every collection it removed once the delete
   commits: the profile delete returns the IDs of the collections it deleted, and the account
-  delete reads them in its transaction before the `users` cascade removes them. A failed
-  cleanup only logs.
+  delete reads them from Postgres in its transaction before the `users` cascade removes them,
+  so deleting an account on the per-user SQLite store leaves its collections' artwork. A failed
+  cleanup only logs, and nothing retries it.
 - `catalog.PersonalCollectionCollages.Posters` is the read path. Callers group collections by
   owner, resolve each owner once, and pass only collections without an assigned poster
   (`ownerScopedCollectionReads` in `internal/api/handlers`).
