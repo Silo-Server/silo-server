@@ -224,6 +224,12 @@ var ErrKeyframePlanChanged = errors.New("keyframe playlist can't be rebuilt")
 // migrateCopyPlanRecord replaces a durations-only plan record with the plan
 // the verified index gives, if its durations match.
 func migrateCopyPlanRecord(ctx context.Context, opts TranscodeOpts, path string, durations []float64) (*copySegmentPlan, error) {
+	// The previous implementation also planned copies packaged as MPEG-TS.
+	// Planned segments are now assembled only as fMP4, so a TS session's
+	// playlist can't be served again.
+	if !videoUsesFMP4(opts) {
+		return nil, fmt.Errorf("%w: its recorded playlist lists MPEG-TS segments", ErrKeyframePlanChanged)
+	}
 	plan, err := planFromKeyframeIndex(ctx, opts, true)
 	if err != nil {
 		// The record stays, so the next rebuild tries again.
@@ -395,6 +401,25 @@ func (s *TranscodeSession) plannedSegmentRecoveryDecision(segNum int, decision S
 		decision.Reason = "planned_segment_restart"
 	}
 	return decision
+}
+
+// plannedRunCoversSince reports whether a planned session's FFmpeg was
+// replaced after seenGeneration and the current one makes a restart for
+// segNum unneeded: the segment is assembled, or the run is about to write it,
+// as plannedSegmentRecoveryDecision waits for.
+func (s *TranscodeSession) plannedRunCoversSince(segNum int, seenGeneration time.Time) bool {
+	if s.copyPlan == nil || s.copyGroups == nil {
+		return false
+	}
+	progress := s.plannedSegmentProgress()
+	if progress.GenerationStartedAt.Equal(seenGeneration) {
+		return false
+	}
+	if s.copyGroups.hasSegment(segNum) {
+		return true
+	}
+	return progress.Running && segNum >= progress.StartSegmentNumber &&
+		segNum <= progress.ProducedHead+plannedWaitSegments
 }
 
 // retentionFloor is the first segment the pruner keeps when the player has

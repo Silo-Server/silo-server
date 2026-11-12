@@ -3623,6 +3623,18 @@ func (s *TranscodeSession) RestartWithCopySeekAnchor(
 // the manifest used for copy-anchor mapping cannot be replaced by another
 // restart before the resolved numbering is applied.
 func (s *TranscodeSession) RestartSegment(ctx context.Context, segNum int) (SegmentRecoveryTarget, bool, error) {
+	return s.RestartSegmentSince(ctx, segNum, time.Time{})
+}
+
+// RestartSegmentSince is RestartSegment for a request that decided to restart
+// while the FFmpeg started at seenGeneration (its decision's
+// Progress.GenerationStartedAt) was running. In a planned session, if another
+// restart has replaced that FFmpeg since, and the new one already has the
+// segment or is about to write it, the request waits for it instead of
+// replacing that run: two requests for nearby segments far ahead must not
+// restart one after the other, each discarding the other's run. A zero
+// seenGeneration always restarts.
+func (s *TranscodeSession) RestartSegmentSince(ctx context.Context, segNum int, seenGeneration time.Time) (SegmentRecoveryTarget, bool, error) {
 	// A request can wait on the lifecycle lock behind another restart, and a
 	// player that seeks again abandons it. Restarting for it would move FFmpeg
 	// to a position nobody wants and delay the restart the player now waits
@@ -3633,6 +3645,9 @@ func (s *TranscodeSession) RestartSegment(ctx context.Context, segNum int) (Segm
 	target, ok, err := s.ResolveSegmentRecoveryTarget(ctx, segNum)
 	if err != nil || !ok {
 		return SegmentRecoveryTarget{}, ok, err
+	}
+	if !seenGeneration.IsZero() && s.plannedRunCoversSince(segNum, seenGeneration) {
+		return target, true, nil
 	}
 
 	if target.CopySeekAnchorResolved {

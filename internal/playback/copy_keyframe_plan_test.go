@@ -272,6 +272,83 @@ func TestResolveCopyPlanMigratesADurationsOnlyRecord(t *testing.T) {
 	}
 }
 
+// The previous implementation also planned copies packaged as MPEG-TS.
+// Planned segments are assembled only as fMP4, so a rebuild of such a
+// session ends it rather than serve a .ts playlist from fMP4 assembly, even
+// when the index gives the recorded durations.
+func TestResolveCopyPlanRejectsADurationsOnlyRecordOfAnMPEGTSCopy(t *testing.T) {
+	verified := keyframes.Index{Keyframes: []float64{0, 1, 2.6, 7.0, 7.4, 9.0}, VideoEnd: 10}
+	stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrUnverified)
+	previous := loadVerifiedKeyframeIndex
+	loadVerifiedKeyframeIndex = func(context.Context, string) (keyframes.Index, error) { return verified, nil }
+	t.Cleanup(func() { loadVerifiedKeyframeIndex = previous })
+
+	rebuilt := plannedOpts()
+	rebuilt.CopyVideoMPEGTS = true
+	rebuilt.OutputDir = t.TempDir()
+	rebuilt.Reconstructed = true
+	record := filepath.Join(rebuilt.OutputDir, copyPlanRecordFile)
+	if err := os.WriteFile(record, []byte(`{"planned":true,"durations":[2.6,4.4,0.4,1.6,1]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if plan, err := resolveCopyPlan(t.Context(), rebuilt); !errors.Is(err, ErrKeyframePlanChanged) {
+		t.Fatalf("MPEG-TS record = %+v, %v; want ErrKeyframePlanChanged", plan, err)
+	}
+}
+
+// Two requests for segments far ahead can both decide to restart against the
+// same run. The one that waited on the lifecycle lock behind the other's
+// restart finds the new run about to write its segment, and waits for it
+// instead of replacing that run. A request that decided on the run that is
+// still current, such as one whose wait near the head timed out, restarts.
+func TestPlannedRestartQueuedBehindAnotherKeepsTheNewRun(t *testing.T) {
+	const segments = 45
+	plan := &copySegmentPlan{
+		durations: make([]float64, segments),
+		keyframes: make([]float64, segments),
+		firstKey:  make([]int, segments),
+	}
+	for n := range segments {
+		plan.durations[n], plan.keyframes[n], plan.firstKey[n] = 2, float64(2*n), n
+	}
+	groups := newCopyGroupAssembler(t.TempDir(), plan)
+	groups.startRun(20, "")
+	groups.assembled[5] = true
+	seen, current := time.Unix(100, 0), time.Unix(200, 0)
+	s := &TranscodeSession{
+		opts:                plannedOpts(),
+		copyPlan:            plan,
+		copyGroups:          groups,
+		running:             true,
+		generationStartedAt: current,
+	}
+
+	for _, tc := range []struct {
+		segment int
+		seen    time.Time
+		want    bool
+	}{
+		{21, seen, true}, // the new run is about to write it
+		{20 + 10 - 1, seen, true},
+		{5, seen, true},      // already assembled
+		{19, seen, false},    // before the new run's start
+		{31, seen, false},    // too far past the new run's head
+		{21, current, false}, // decided on the current run
+	} {
+		if got := s.plannedRunCoversSince(tc.segment, tc.seen); got != tc.want {
+			t.Errorf("plannedRunCoversSince(%d, seen %v) = %v, want %v", tc.segment, tc.seen.Unix(), got, tc.want)
+		}
+	}
+
+	target, ok, err := s.RestartSegmentSince(t.Context(), 21, seen)
+	if err != nil || !ok || target.StartSegmentNumber != 21 {
+		t.Fatalf("RestartSegmentSince = %+v, %v, %v; want segment 21's target", target, ok, err)
+	}
+	if s.restartCount != 0 || s.Opts().StartSegmentNumber != 0 {
+		t.Fatalf("restartCount = %d, start segment %d; want the new run kept", s.restartCount, s.Opts().StartSegmentNumber)
+	}
+}
+
 // A planned session's recipe starts from the beginning however far a restart
 // moved its run, so a rebuild plans again instead of reading the restart's
 // position as a mid-stream start and serving FFmpeg's playlist.

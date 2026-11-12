@@ -445,6 +445,13 @@ func (a *copyGroupAssembler) forget(n int) {
 
 // progress reports the current run: the segment it started for, the highest
 // segment assembled contiguously from there, and when its last group landed.
+// hasSegment reports whether planned segment n is assembled.
+func (a *copyGroupAssembler) hasSegment(n int) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return n >= 0 && n < len(a.assembled) && a.assembled[n]
+}
+
 func (a *copyGroupAssembler) progress() (start, head int, count int, last time.Time) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
