@@ -1925,6 +1925,16 @@
       "value": "Volver"
     }
   ],
+  "player.scrubber.endsAt": [
+    {
+      "type": 0,
+      "value": "Termina a las "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "player.seekInterval.choice": [
     {
       "type": 6,
@@ -125965,6 +125975,12 @@
       "value": "Audio"
     }
   ],
+  "web.player.audioMenu.onlyOneTrack": [
+    {
+      "type": 0,
+      "value": "Solo hay una pista de audio"
+    }
+  ],
   "web.player.audioMenu.trackFallback": [
     {
       "type": 0,
@@ -125979,6 +125995,16 @@
     {
       "type": 0,
       "value": "Pistas de audio"
+    }
+  ],
+  "web.player.audioMenu.triggerWithTrack": [
+    {
+      "type": 0,
+      "value": "Pistas de audio, "
+    },
+    {
+      "type": 1,
+      "value": "track"
     }
   ],
   "web.player.bar.backgroundPlayback": [
@@ -126292,6 +126318,16 @@
       "value": " Mbps"
     }
   ],
+  "web.player.buffering.loadingFrom": [
+    {
+      "type": 0,
+      "value": "Cargando desde "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.player.buffering.undoCaption": [
     {
       "type": 0,
@@ -126308,6 +126344,26 @@
     {
       "type": 0,
       "value": "Capítulos"
+    }
+  ],
+  "web.player.chaptersMenu.nowPlaying": [
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 8,
+      "value": "now",
+      "children": [
+        {
+          "type": 0,
+          "value": "En reproducción"
+        }
+      ]
     }
   ],
   "web.player.chaptersMenu.trigger": [
@@ -126370,6 +126426,12 @@
       "value": "Salir de pantalla completa"
     }
   ],
+  "web.player.controls.exitFullscreenShortcut": [
+    {
+      "type": 0,
+      "value": "Salir de pantalla completa (F)"
+    }
+  ],
   "web.player.controls.fillScreen": [
     {
       "type": 0,
@@ -126380,6 +126442,18 @@
     {
       "type": 0,
       "value": "Pantalla completa"
+    }
+  ],
+  "web.player.controls.fullscreenShortcut": [
+    {
+      "type": 0,
+      "value": "Pantalla completa (F)"
+    }
+  ],
+  "web.player.controls.more": [
+    {
+      "type": 0,
+      "value": "Más"
     }
   ],
   "web.player.controls.moreOptions": [
@@ -126401,6 +126475,12 @@
     }
   ],
   "web.player.controls.pictureInPicture": [
+    {
+      "type": 0,
+      "value": "Imagen en imagen"
+    }
+  ],
+  "web.player.controls.pictureInPictureItem": [
     {
       "type": 0,
       "value": "Imagen en imagen"
@@ -126428,6 +126508,26 @@
     {
       "type": 0,
       "value": "Episodio anterior"
+    }
+  ],
+  "web.player.controls.remainingTime": [
+    {
+      "type": 0,
+      "value": "−"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.player.controls.remainingTimeLabel": [
+    {
+      "type": 0,
+      "value": "Tiempo restante: "
+    },
+    {
+      "type": 1,
+      "value": "time"
     }
   ],
   "web.player.controls.skipBack": [
@@ -127148,6 +127248,12 @@
       "value": "Fotogramas perdidos"
     }
   ],
+  "web.player.info.heading": [
+    {
+      "type": 0,
+      "value": "Información de reproducción"
+    }
+  ],
   "web.player.info.playMethod": [
     {
       "type": 0,
@@ -127367,6 +127473,115 @@
       "value": "title"
     }
   ],
+  "web.player.nextEpisode.playNow": [
+    {
+      "type": 0,
+      "value": "Reproducir ahora"
+    }
+  ],
+  "web.player.nextEpisode.regionLabel": [
+    {
+      "type": 0,
+      "value": "A continuación"
+    }
+  ],
+  "web.player.nextEpisode.seasonEpisode": [
+    {
+      "type": 0,
+      "value": "Temporada "
+    },
+    {
+      "type": 1,
+      "value": "season"
+    },
+    {
+      "type": 0,
+      "value": " · Episodio "
+    },
+    {
+      "type": 1,
+      "value": "episode"
+    }
+  ],
+  "web.player.nextEpisode.upNextIn": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "A continuación en "
+            },
+            {
+              "type": 8,
+              "value": "num",
+              "children": [
+                {
+                  "type": 7
+                },
+                {
+                  "type": 0,
+                  "value": " s"
+                }
+              ]
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "A continuación en "
+            },
+            {
+              "type": 8,
+              "value": "num",
+              "children": [
+                {
+                  "type": 7
+                },
+                {
+                  "type": 0,
+                  "value": " s"
+                }
+              ]
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "A continuación en "
+            },
+            {
+              "type": 8,
+              "value": "num",
+              "children": [
+                {
+                  "type": 7
+                },
+                {
+                  "type": 0,
+                  "value": " s"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.player.postRoll.stillPlaying": [
+    {
+      "type": 0,
+      "value": "Sigue reproduciéndose · Haz clic para volver"
+    }
+  ],
   "web.player.quality.auto": [
     {
       "type": 0,
@@ -127405,6 +127620,18 @@
       "value": "Seleccionada"
     }
   ],
+  "web.player.quality.sourceFile": [
+    {
+      "type": 0,
+      "value": "Archivo de origen"
+    }
+  ],
+  "web.player.quality.streamingQuality": [
+    {
+      "type": 0,
+      "value": "Calidad de transmisión"
+    }
+  ],
   "web.player.quality.title": [
     {
       "type": 0,
@@ -127415,6 +127642,42 @@
     {
       "type": 1,
       "value": "menu"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "speed"
+    }
+  ],
+  "web.player.quality.triggerWithValue": [
+    {
+      "type": 1,
+      "value": "menu"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.player.quality.triggerWithValueAndSpeed": [
+    {
+      "type": 1,
+      "value": "menu"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "value"
     },
     {
       "type": 0,
@@ -128246,6 +128509,12 @@
       "value": "Silo no pudo leer este archivo. Parece estar vacío o dañado."
     }
   ],
+  "web.player.upNext.autoplay": [
+    {
+      "type": 0,
+      "value": "Reproducción automática"
+    }
+  ],
   "web.player.upNext.autoplayOff": [
     {
       "type": 0,
@@ -128315,6 +128584,18 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.player.upNext.heading": [
+    {
+      "type": 0,
+      "value": "A continuación"
+    }
+  ],
+  "web.player.upNext.headingShuffle": [
+    {
+      "type": 0,
+      "value": "A continuación, al azar"
     }
   ],
   "web.player.upNext.minutesLeft": [
@@ -128393,10 +128674,83 @@
       "value": "Sin vista previa"
     }
   ],
+  "web.player.upNext.onDeckScrollBack": [
+    {
+      "type": 0,
+      "value": "Desplazar En curso hacia atrás"
+    }
+  ],
+  "web.player.upNext.onDeckScrollForward": [
+    {
+      "type": 0,
+      "value": "Desplazar En curso hacia adelante"
+    }
+  ],
   "web.player.upNext.playingNext": [
     {
       "type": 0,
       "value": "A continuación"
+    }
+  ],
+  "web.player.upNext.startsAfterCredits": [
+    {
+      "type": 0,
+      "value": "Se inicia automáticamente al terminar los créditos"
+    }
+  ],
+  "web.player.upNext.startsIn": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Empieza en "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " s"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Empieza en "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " s"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Empieza en "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " s"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.player.volume.label": [
@@ -147144,6 +147498,12 @@
       "value": "Activar subtítulos"
     }
   ],
+  "web.subtitles.menu.heading": [
+    {
+      "type": 0,
+      "value": "Subtítulos"
+    }
+  ],
   "web.subtitles.menu.noMatch": [
     {
       "type": 0,
@@ -147192,6 +147552,18 @@
       "value": "Externo"
     }
   ],
+  "web.subtitles.menu.subtitlesOffShortcut": [
+    {
+      "type": 0,
+      "value": "Subtítulos desactivados (C)"
+    }
+  ],
+  "web.subtitles.menu.subtitlesShortcut": [
+    {
+      "type": 0,
+      "value": "Subtítulos (C)"
+    }
+  ],
   "web.subtitles.menu.syncHint": [
     {
       "type": 0,
@@ -147238,10 +147610,32 @@
       "value": "Este servidor no permite cambiar los tiempos de los subtítulos."
     }
   ],
+  "web.subtitles.menu.toolsLabel": [
+    {
+      "type": 0,
+      "value": "Herramientas de subtítulos"
+    }
+  ],
+  "web.subtitles.menu.tracksLabel": [
+    {
+      "type": 0,
+      "value": "Pistas de subtítulos"
+    }
+  ],
   "web.subtitles.menu.translateWithAi": [
     {
       "type": 0,
       "value": "Traducir con IA…"
+    }
+  ],
+  "web.subtitles.menu.triggerWithValue": [
+    {
+      "type": 0,
+      "value": "Subtítulos, "
+    },
+    {
+      "type": 1,
+      "value": "value"
     }
   ],
   "web.subtitles.quotaWindow.day": [

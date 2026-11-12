@@ -40,6 +40,12 @@ import {
 } from "./mediaSurfaceRefresh";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 
+/** Device pixels across the screen, capped at 1080p width, for the loading backdrop. */
+function loadingBackdropWidth(): number | undefined {
+  if (typeof window === "undefined" || !window.screen?.width) return undefined;
+  return Math.min(1920, Math.round(window.screen.width * (window.devicePixelRatio || 1)));
+}
+
 export async function fetchWatchDetail(
   id: string,
   fileId?: number,
@@ -51,6 +57,8 @@ export async function fetchWatchDetail(
     query: {
       file_id: fileId != null ? String(fileId) : undefined,
       library_id: libraryId != null ? String(libraryId) : undefined,
+      // The backdrop fills the loading screen, dimmed: screen width is enough.
+      backdrop_width: loadingBackdropWidth(),
     },
     signal: options?.signal ?? undefined,
   });
