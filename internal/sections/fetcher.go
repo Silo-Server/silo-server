@@ -1522,12 +1522,15 @@ func (f *Fetcher) fetchUserCollection(ctx context.Context, s ResolvedSection, li
 			qd = qd.Normalize()
 			// Build a synthetic resolved section with the query definition as config.
 			cfgBytes, _ := json.Marshal(qd)
+			// fetchFiltered replaces the query's limit with the row's, so a
+			// collection limit below the row size has to cap the row itself.
+			itemLimit := min(s.ItemLimit, *catalog.ApplySmartCollectionItemLimit(qd).Limit)
 			synth := ResolvedSection{
 				ID:          s.ID,
 				SectionType: SectionCustomFilter,
 				Title:       s.Title,
 				Featured:    s.Featured,
-				ItemLimit:   s.ItemLimit,
+				ItemLimit:   itemLimit,
 				Config:      cfgBytes,
 				Position:    s.Position,
 			}
