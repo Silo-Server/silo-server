@@ -77,8 +77,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
   const updateMutation = useUpdateItemMetadata(item.content_id);
   const refreshMutation = useRefreshItemMetadata();
 
-  const ownsImageLock =
-    item.type === "movie" || item.type === "series" || item.type === "audiobook";
+  const ownsImageLock = item.type === "movie" || item.type === "series";
   const fieldLockMap = FIELD_LOCK_MAPS[item.type];
   const canEditImages = useIsActingAdmin();
   const visibleSections = SECTIONS.filter(

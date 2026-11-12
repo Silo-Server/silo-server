@@ -59,7 +59,7 @@ export const SECTIONS: { key: Section; label: MessageKey; types: ItemDetail["typ
   {
     key: "images",
     label: "web.item.editMetadata.sectionImages",
-    types: ["movie", "series", "season", "audiobook"],
+    types: ["movie", "series", "season"],
   },
 ];
 

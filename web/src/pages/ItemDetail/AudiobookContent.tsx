@@ -203,15 +203,25 @@ export default function AudiobookContent({
       />
       {canCurateMetadata && (
         <>
-          <EditMetadataDialog item={item} open={editOpen} onOpenChange={setEditOpen} />
+          {/* Mounted per open: the form takes its values from the item when it
+              mounts, so a dialog kept open across a match would save stale fields. */}
+          {editOpen && <EditMetadataDialog item={item} open onOpenChange={setEditOpen} />}
           <MatchItemDialog
             key={item.content_id}
             item={scopedItem}
             open={matchOpen}
             onOpenChange={setMatchOpen}
-            onReplaced={(contentID) =>
-              navigate({ pathname: `/item/${contentID}`, search }, { replace: true })
-            }
+            onReplaced={(contentID) => {
+              // Keep the page context but not a request to start playback.
+              const params = new URLSearchParams(search);
+              params.delete("play");
+              params.delete("restart");
+              const query = params.toString();
+              navigate(
+                { pathname: `/item/${contentID}`, search: query ? `?${query}` : "" },
+                { replace: true },
+              );
+            }}
           />
         </>
       )}

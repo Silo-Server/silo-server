@@ -273,9 +273,10 @@ describe("EditMetadataDialog audiobooks", () => {
     } as unknown as ItemDetail;
     render(<EditMetadataDialog item={book} open onOpenChange={vi.fn()} />);
 
-    // Video provider IDs don't apply to a book; Match Item sets its provider IDs.
+    // Video provider IDs don't apply to a book, and the server takes no image
+    // uploads for one; Match Item sets its provider IDs and cover.
     expect(screen.queryByRole("button", { name: "External IDs" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Images" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Images" })).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByDisplayValue("Test Book"), { target: { value: "Edited Book" } });
     fireEvent.click(screen.getByRole("button", { name: "Dates & Ratings" }));
