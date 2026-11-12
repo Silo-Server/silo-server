@@ -67,11 +67,13 @@ func SanitizeJSON(body []byte) []byte {
 }
 
 func diagnosticSecretKey(key string) bool {
-	// Pw is the Jellyfin login alias. Normalisation covers the casing and
-	// separators used by compatibility clients without changing auth parsing.
+	// Pw is the Jellyfin login alias. PlaySessionId is the Jellyfin play
+	// session ID, which on its own authorizes that play's media requests.
+	// Normalisation covers the casing and separators used by compatibility
+	// clients without changing auth parsing.
 	key = strings.ToLower(strings.TrimSpace(key))
 	key = strings.ReplaceAll(strings.ReplaceAll(key, "_", ""), "-", "")
-	return key == "pw" || SecretKey(key)
+	return key == "pw" || key == "playsessionid" || SecretKey(key)
 }
 
 func sanitizeDiagnosticValue(value any) any {

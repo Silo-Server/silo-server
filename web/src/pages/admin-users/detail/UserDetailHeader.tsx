@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { ChevronRight, Info, MoreHorizontal } from "lucide-react";
 
@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useT, type MessageKey } from "@/i18n";
+import { TOUCH_HIT_AREA, TOUCH_TARGETS } from "@/lib/touchTargets";
 import { cn } from "@/lib/utils";
 
 import { roleLabel } from "./access/policySources";
@@ -39,8 +40,11 @@ export interface UserDetailHeaderProps {
   onDelete(): void;
 }
 
-/** Meta items marked `wide`, and the separator before them, only fit from `sm` up. */
-const WIDE_ONLY = "hidden sm:inline";
+/** Meta items marked `wide` only fit from `sm` up. */
+const WIDE_ONLY = "hidden sm:inline-flex";
+/** A header action shares the row on a phone; a long label wraps instead of overflowing. */
+const HEADER_ACTION =
+  "flex-1 max-lg:h-auto max-lg:min-w-0 max-lg:py-1 max-lg:text-center max-lg:whitespace-normal";
 /** The separator between meta items; punctuation, not text to translate. */
 const MIDDLE_DOT = "·";
 
@@ -134,11 +138,14 @@ export function UserDetailHeader({
         aria-label={t("web.admin.users.detail.header.breadcrumb")}
         className="text-muted-foreground flex items-center gap-1.5 text-sm"
       >
-        <Link to="/admin" className="hover:text-foreground transition-colors">
+        <Link to="/admin" className={cn("hover:text-foreground transition-colors", TOUCH_HIT_AREA)}>
           {t("web.admin.users.detail.header.breadcrumbAdmin")}
         </Link>
         <ChevronRight aria-hidden="true" className="h-3.5 w-3.5" />
-        <Link to="/admin/users" className="hover:text-foreground transition-colors">
+        <Link
+          to="/admin/users"
+          className={cn("hover:text-foreground transition-colors", TOUCH_HIT_AREA)}
+        >
           {t("web.admin.users.detail.header.breadcrumbUsers")}
         </Link>
         <ChevronRight aria-hidden="true" className="h-3.5 w-3.5" />
@@ -175,21 +182,27 @@ export function UserDetailHeader({
                 </Badge>
               ) : null}
             </div>
-            <p className="text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-              {meta.map((item, index) => (
-                <Fragment key={item.key}>
-                  {index > 0 ? (
+            {/* Each item carries the separator before it, and the list starts one
+                separator's width past the clipped start edge: the separator that
+                opens a line is cut off, so a wrap never leaves one dangling. */}
+            <div className="overflow-hidden">
+              <p className="text-muted-foreground -ms-5 flex flex-wrap items-center gap-y-1 text-sm">
+                {meta.map((item) => (
+                  <span
+                    key={item.key}
+                    className={cn("inline-flex max-w-full min-w-0", item.wide && WIDE_ONLY)}
+                  >
                     <span
                       aria-hidden="true"
-                      className={cn("text-muted-foreground/50", item.wide && WIDE_ONLY)}
+                      className="text-muted-foreground/50 w-5 shrink-0 text-center"
                     >
                       {MIDDLE_DOT}
                     </span>
-                  ) : null}
-                  <span className={cn(item.wide && WIDE_ONLY)}>{item.node}</span>
-                </Fragment>
-              ))}
-            </p>
+                    <span className="min-w-0 wrap-anywhere">{item.node}</span>
+                  </span>
+                ))}
+              </p>
+            </div>
             {!manageable ? (
               <div className="border-info/25 bg-info/5 text-muted-foreground flex items-start gap-2 rounded-xl border px-3 py-2.5 text-sm">
                 <Info aria-hidden="true" className="text-info mt-0.5 size-4 shrink-0" />
@@ -217,12 +230,12 @@ export function UserDetailHeader({
 
         <div className="flex w-full items-center gap-2 sm:w-auto sm:shrink-0">
           {/* A disabled button gets no pointer events, so its wrapper carries the reason. */}
-          <span title={viewAsReason} className="flex flex-1 sm:flex-none">
+          <span title={viewAsReason} className="flex min-w-0 flex-1 sm:flex-none">
             <Button
               type="button"
               variant="outline"
               size="sm"
-              className="flex-1"
+              className={HEADER_ACTION}
               onClick={onViewAs}
               disabled={!available || viewAsDisabled}
               aria-description={viewAsReason}
@@ -234,12 +247,12 @@ export function UserDetailHeader({
               sign-in provider manages) gets a password set directly on the
               Sign-in tab, and setting one turns its password sign-in back on. */}
           {showReset ? (
-            <span className="flex flex-1 sm:flex-none">
+            <span className="flex min-w-0 flex-1 sm:flex-none">
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                className="flex-1"
+                className={HEADER_ACTION}
                 onClick={onResetPassword}
                 disabled={!available}
               >
@@ -248,12 +261,12 @@ export function UserDetailHeader({
             </span>
           ) : null}
           {showSetPassword ? (
-            <span className="flex flex-1 sm:flex-none">
+            <span className="flex min-w-0 flex-1 sm:flex-none">
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                className="flex-1"
+                className={HEADER_ACTION}
                 onClick={onSetPassword}
                 disabled={!available || !user.enabled}
               >
@@ -273,7 +286,7 @@ export function UserDetailHeader({
                   <MoreHorizontal />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-52">
+              <DropdownMenuContent align="end" className={cn("min-w-52", TOUCH_TARGETS)}>
                 {transferable ? (
                   <DropdownMenuItem disabled={!available} onSelect={onTransfer}>
                     {t("web.admin.users.detail.header.makeOwner")}

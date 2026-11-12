@@ -122,7 +122,7 @@ func (fx monitorFixture) deleteEpisode(t *testing.T, episodeID string) {
 		t.Fatalf("episode %s is not registered", episodeID)
 		return
 	}
-	if err := fx.svc.Delete(context.Background(), fx.userID, fx.profileA, fx.deviceA, row.ID); err != nil {
+	if err := fx.svc.Delete(context.Background(), fx.userID, fx.profileA, fx.deviceA, row.ID, catalog.AccessFilter{}); err != nil {
 		t.Fatalf("delete %s: %v", episodeID, err)
 	}
 }

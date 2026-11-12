@@ -31,7 +31,7 @@ serves as External. The key matches case-insensitively; any other key returns
 built from configuration alone, so routes that need further dependencies, such
 as `GET /Persons/{name}` and `POST /Library/Media/Updated`, are not in it.
 `internal/jellycompat/router.go`
-owns registration; the native `/api/v1` contract is separate.
+owns registration; the native `/api/v2` contract is separate.
 
 ## Users and avatars
 
@@ -423,6 +423,13 @@ to the route's version, and a route version the item no longer has answers
 `404`. The negotiated session keeps the client's id as its route item id, so the
 stream URLs it hands out and later session reports can carry that id.
 
+Every compat user is a non-administrator, and only a viewer who may curate
+metadata sees where a file lives or what it is called (see
+[File paths and names](catalog-api.md#file-paths-and-names)). So an item's
+`Path` and `MediaSources[i].Path` are a stand-in, `/silo/{file id}.{container}`,
+and `MediaSources[i].Name` is the version's edition and quality, such as
+`Extended - 2160p HEVC HDR`.
+
 `GET` and `HEAD /Items/{id}/Download` serve the original file through the
 native direct download, the same service as `/api/v2/direct-download`, so they
 follow its rules. Both answer `403` when **Allow downloads** is off, the
@@ -690,7 +697,9 @@ per-address budgets are listed under [Rate limiting](#rate-limiting).
 
 `GET /Sessions` lists started playback mappings owned by the caller's token,
 including mappings persisted by another API process. Device and activity filters
-apply to the returned list. Current native play state is included when locally
+apply to the returned list. Each entry's `Id` is 32 lowercase hex characters
+that stay the same for the life of the play; it is derived from the
+`PlaySessionId`, is not accepted in its place, and authorizes nothing. Current native play state is included when locally
 available and its account/profile ownership matches; unavailable remote state
 is omitted.
 
@@ -750,9 +759,9 @@ connection's shared budget, as described in
 [Sign-in rate limits](auth-api.md#sign-in-rate-limits).
 
 - `POST /Users/AuthenticateByName` spends the per-IP and `login` budgets before
-  the global budget, like native sign-in (`POST /api/v2/auth/login`, and
-  `POST /api/v1/auth/login` during the bridge). It shares the per-IP `login`
-  counter with every native operation that spends that budget. The account name also spends its
+  the global budget, like native sign-in (`POST /api/v2/auth/login`). It shares
+  the per-IP `login` counter with every native operation that spends that
+  budget. The account name also spends its
   sign-in attempt budget, shared with native sign-in on every node
   ([Sign-in attempts per name](auth-api.md#sign-in-attempts-per-name)); a
   locked name answers 429 `TooManyRequests` with `Retry-After`. It reads at
