@@ -56,15 +56,26 @@ function mixWithWhite(hex: string, amount: number): string {
   return `#${channel(16)}${channel(8)}${channel(0)}`;
 }
 
+/** The label drawn on an accent: white or Cinema Dark's dark label, whichever reads better. */
+function labelOn(hex: string): string {
+  return prefersWhiteLabel(hex) ? WHITE_LABEL : DARK_LABEL;
+}
+
 /**
  * The accent as the video player draws it on its dark panels: unchanged when
  * it already reads there, otherwise lightened just enough that a selected
- * row's check and the focus ring stay visible.
+ * row's check and the focus ring stay visible, and the label on it (the speed
+ * badge) still reads.
  */
 function accentOnDark(hex: string): string {
   for (let step = 0; step <= 20; step++) {
     const candidate = mixWithWhite(hex, step / 20);
-    if (contrastRatio(candidate, PLAYER_PANEL) >= MIN_PLAYER_CONTRAST) return candidate;
+    if (
+      contrastRatio(candidate, PLAYER_PANEL) >= MIN_PLAYER_CONTRAST &&
+      contrastRatio(candidate, labelOn(candidate)) >= MIN_PLAYER_CONTRAST
+    ) {
+      return candidate;
+    }
   }
   return WHITE_LABEL;
 }
@@ -85,7 +96,7 @@ export function accentDeclarations(accent: string): Record<string, string> | nul
     ring: hex,
     "sidebar-primary": hex,
     "accent-on-dark": onDark,
-    "accent-on-dark-foreground": prefersWhiteLabel(onDark) ? WHITE_LABEL : DARK_LABEL,
+    "accent-on-dark-foreground": labelOn(onDark),
   };
   if (prefersWhiteLabel(hex)) {
     declarations["primary-foreground"] = WHITE_LABEL;

@@ -4,6 +4,20 @@ import type { PlayerBackdrop } from "../types";
 import "@/styles/player-hud.css";
 
 /**
+ * The backdrop's thumbhash as an image, or "" for none. Provider artwork is
+ * stored unchecked, and a malformed hash must cost the placeholder, not the
+ * loading screen.
+ */
+function placeholderFor(thumbhash: string | undefined): string {
+  if (!thumbhash) return "";
+  try {
+    return decodeThumbhash(thumbhash);
+  } catch {
+    return "";
+  }
+}
+
+/**
  * The black screen a title loads behind, with its backdrop dimmed under a
  * spinner. The plan read and the first frame both show it, so the backdrop
  * stays put from one to the other. The thumbhash paints at once; the image
@@ -23,7 +37,7 @@ export function PlayerLoadingCover({
   children?: ReactNode;
 }) {
   const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
-  const placeholder = backdrop?.thumbhash ? decodeThumbhash(backdrop.thumbhash) : "";
+  const placeholder = placeholderFor(backdrop?.thumbhash);
   return (
     <div
       role="status"

@@ -36,19 +36,22 @@ interface PlayerMenuSurfaceProps {
 const ITEM_SELECTOR = '[role^="menuitem"]:not([disabled]):not([aria-disabled="true"])';
 
 /**
- * Scrolls the menu's own list, not the page, until the item shows: the
- * nearest scrolling box between the item and the surface.
+ * Scrolls the menu's own boxes, not the page, until the item shows: every
+ * scrolling box from the item up to the surface, innermost first (a short
+ * panel scrolls as a whole around its own scrolling track list).
  */
 function revealInMenu(item: HTMLElement, surface: HTMLElement) {
-  let box = item.parentElement;
-  while (box && box !== surface && box.scrollHeight <= box.clientHeight) {
-    box = box.parentElement;
+  for (let box = item.parentElement; box; box = box.parentElement) {
+    if (box.scrollHeight > box.clientHeight) {
+      const itemRect = item.getBoundingClientRect();
+      const boxRect = box.getBoundingClientRect();
+      if (itemRect.top < boxRect.top) box.scrollTop -= boxRect.top - itemRect.top;
+      else if (itemRect.bottom > boxRect.bottom) {
+        box.scrollTop += itemRect.bottom - boxRect.bottom;
+      }
+    }
+    if (box === surface) break;
   }
-  if (!box || box.scrollHeight <= box.clientHeight) return;
-  const itemRect = item.getBoundingClientRect();
-  const boxRect = box.getBoundingClientRect();
-  if (itemRect.top < boxRect.top) box.scrollTop -= boxRect.top - itemRect.top;
-  else if (itemRect.bottom > boxRect.bottom) box.scrollTop += itemRect.bottom - boxRect.bottom;
 }
 
 /** Arrow keys, Home and End move between a menu's items, in document order. */

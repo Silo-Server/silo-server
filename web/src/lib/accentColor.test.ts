@@ -27,13 +27,19 @@ describe("accentDeclarations", () => {
     });
   });
 
-  // The player draws the accent on its dark panels: a check or focus ring in a
-  // dark accent would vanish there.
-  it("lightens a dark accent until it reads on the player's panels", () => {
-    for (const accent of ["#000000", "#4f46e5", "#1e3a8a"]) {
-      const onDark = accentDeclarations(accent)!["accent-on-dark"]!;
+  // The player draws the accent on its dark panels, and a label on it: a check
+  // or focus ring in a dark accent would vanish there, and a mid-grey one can
+  // clear the panel but not its own label.
+  it("lightens an accent until it and its label read on the player's panels", () => {
+    for (const accent of ["#000000", "#4f46e5", "#1e3a8a", "#7c7c7c"]) {
+      const declarations = accentDeclarations(accent)!;
+      const onDark = declarations["accent-on-dark"]!;
       expect(onDark, accent).not.toBe(accent);
       expect(contrast(onDark, "#101013"), accent).toBeGreaterThanOrEqual(4.5);
+      expect(
+        contrast(onDark, declarations["accent-on-dark-foreground"]!),
+        accent,
+      ).toBeGreaterThanOrEqual(4.5);
     }
   });
 
