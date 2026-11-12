@@ -552,6 +552,11 @@ Media URLs that Silo builds (`DirectStreamUrl`, `TranscodingUrl`, subtitle
 log grants that media only until the play session ends. A client that fetches
 one after the play session expired or stopped, or after a newer negotiation
 from the same device replaced an unstarted one, must send its own token.
+A `PlaySessionId` grant that cannot be read because the database is
+unavailable answers a retryable `503`, not `401`, unless the API server that
+answers still holds the play session. `PlaybackInfo` answers `503` instead of
+returning a `PlaySessionId` it could not store, since other API servers could
+not resolve it.
 
 Copied-video HLS master playlists name copied audio as Jellyfin 12 does:
 HE-AAC as `mp4a.40.5`, TrueHD as `mlpa`, and DTS as `dtsc`, `dtsh` (DTS-HD HRA
