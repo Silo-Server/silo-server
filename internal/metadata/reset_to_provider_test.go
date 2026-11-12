@@ -3,6 +3,7 @@ package metadata
 import (
 	"context"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -196,5 +197,99 @@ func TestProcess_ResetToProviderAcceptsANotFoundAnswer(t *testing.T) {
 	}
 	if item.Tagline != "" {
 		t.Errorf("tagline = %q, want the reset applied", item.Tagline)
+	}
+}
+
+// A reset fetches the fallback language for every field it is about to
+// replace, locked ones included, and fails rather than empty a field when that
+// lookup doesn't answer.
+func TestProcess_ResetToProviderFallbackLanguage(t *testing.T) {
+	swedish := &MetadataResult{
+		Title: "響け！ユーフォニアム", TitleIsFallback: true, TitleLanguage: "ja", OriginalLanguage: "ja",
+		ProviderIDs: map[string]string{"tmdb": "7"},
+	}
+	english := &MetadataResult{Title: "Sound! Euphonium", Overview: "An English overview.", ProviderIDs: map[string]string{"tmdb": "7"}}
+	for _, tc := range []struct {
+		name         string
+		failIn       string
+		wantErr      bool
+		wantTitle    string
+		wantOverview string
+		wantLocks    int
+	}{
+		{name: "locked fields take the fallback text", wantTitle: "Sound! Euphonium", wantOverview: "An English overview."},
+		{name: "a failed fallback lookup fails the reset", failIn: "en", wantErr: true, wantTitle: "Typed Title", wantOverview: "Typed overview", wantLocks: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			h := newTestFilmHarness(ctx, t, models.MediaItem{
+				DefaultMetadataLanguage: "sv", Overview: "Typed overview",
+				LockedFields: []int{int(FieldName), int(FieldOverview)},
+			})
+			stored, err := h.itemRepo.GetByID(ctx, testFilmContentID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stored.Title = "Typed Title"
+			if err := h.itemRepo.Upsert(ctx, stored); err != nil {
+				t.Fatal(err)
+			}
+			h.service.SetFallbackLanguage("en")
+			provider := &languageTextProvider{
+				slug: "tmdb", types: []string{"movie"}, failIn: tc.failIn,
+				items: map[string]*MetadataResult{"sv": swedish, "en": english},
+			}
+
+			_, err = h.service.ProcessWithProviders(ctx, ProcessRequest{
+				ContentID: testFilmContentID, Mode: ModeManualRefresh, Language: "sv", resetToProvider: true,
+			}, []Provider{provider})
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("ProcessWithProviders error = %v, want error %v", err, tc.wantErr)
+			}
+			got, err := h.itemRepo.GetByID(ctx, testFilmContentID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Title != tc.wantTitle || got.Overview != tc.wantOverview || len(got.LockedFields) != tc.wantLocks {
+				t.Errorf("item = %q / %q locks %v, want %q / %q with %d locks",
+					got.Title, got.Overview, got.LockedFields, tc.wantTitle, tc.wantOverview, tc.wantLocks)
+			}
+		})
+	}
+}
+
+// An episode reset fetches its fallback text before it empties the episode,
+// so a fallback lookup that fails leaves the episode's edits and locks alone.
+func TestResetTargetForLibrary_EpisodeFallbackFailureKeepsTheEpisode(t *testing.T) {
+	ctx := context.Background()
+	h, seriesID, seasonID, episodeID := seedTargetRefreshHarness(&targetRefreshProvider{})
+	h.itemRepo.items[seriesID].DefaultMetadataLanguage = "sv"
+	h.service.SetFallbackLanguage("en")
+	provider := &languageTextProvider{
+		slug: "tmdb", types: []string{"series"}, failIn: "en",
+		seasons:  map[string][]SeasonResult{"sv": {{SeasonNumber: 5, Title: "Säsong 5"}}},
+		episodes: map[string][]EpisodeResult{"sv": {{SeasonNumber: 5, EpisodeNumber: 3, Title: "Avsnitt 3"}}},
+	}
+	expiresAt := time.Now().Add(time.Hour)
+	for _, level := range []string{"series", "season", "episode"} {
+		h.service.chainCache["0:"+level] = chainCacheEntry{providers: []Provider{provider}, expiresAt: expiresAt}
+	}
+	if err := h.service.episodeRepo.Upsert(ctx, &models.Episode{
+		ContentID: episodeID, SeriesID: seriesID, SeasonID: seasonID, SeasonNumber: 5, EpisodeNumber: 3,
+		Title: "Typed title", Overview: "Typed overview", LockedFields: []int{int(FieldName), int(FieldOverview)},
+		MetadataSource: "provider",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := h.service.ResetTargetForLibrary(ctx, RefreshTargetEpisode, episodeID, 0); err == nil {
+		t.Fatal("ResetTargetForLibrary succeeded, want the failed fallback lookup to fail it")
+	}
+	got, err := h.service.episodeRepo.GetBySeriesAndNumber(ctx, seriesID, 5, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Title != "Typed title" || got.Overview != "Typed overview" || len(got.LockedFields) != 2 {
+		t.Errorf("episode = %q / %q locks %v, want the admin's edits and locks kept", got.Title, got.Overview, got.LockedFields)
 	}
 }

@@ -174,3 +174,53 @@ func TestResetToProvider_ItemRowClearsStoredLocks(t *testing.T) {
 	// The series' own reset leaves its seasons' and episodes' edits alone.
 	f.assertLocksKept(t, seriesID)
 }
+
+// A reset whose write merges the item onto another existing item resets
+// nothing there: that item's edits and locks are its own, as they are for the
+// conflict-recovery retry (itemWriteSteps.forRetry).
+func TestResetToProvider_DoesNotFollowARebind(t *testing.T) {
+	pool := chainBuiltinTestPool(t)
+	f := newIdentifyLockFixture(pool)
+	ctx := t.Context()
+	suffix := strconv.FormatInt(time.Now().UnixNano()%1_000_000_000, 10)
+	copyID, filmID, tmdbID := "reset-rebind-copy-"+suffix, "reset-rebind-film-"+suffix, "83"+suffix
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{copyID, filmID})
+	})
+	if err := f.items.Upsert(ctx, &models.MediaItem{ContentID: copyID, Type: "movie", Title: "Film", SortTitle: "film", Year: 2006, Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.items.Upsert(ctx, &models.MediaItem{
+		ContentID: filmID, Type: "movie", Title: "Film", SortTitle: "film", Year: 2006, Status: "matched", TmdbID: tmdbID,
+		Overview: "Curated overview", Tagline: "Curated tagline",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.providerIDs.ReplaceByContentID(ctx, filmID, map[string]string{"tmdb": tmdbID}); err != nil {
+		t.Fatal(err)
+	}
+	locks := []int{int(FieldOverview)}
+	if err := f.items.UpdateMetadata(ctx, filmID, &catalog.MetadataUpdate{LockedFields: &locks}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := f.service.mergeAndPersist(ctx, ProcessRequest{
+		ContentID: copyID, Language: "en", Mode: ModeManualRefresh, resetToProvider: true,
+	}, &MetadataResult{
+		HasMetadata: true, Title: "Film", Year: 2006, Overview: "Provider overview",
+		ProviderIDs: map[string]string{"tmdb": tmdbID},
+	}, nil, nil, nil, "movie")
+	if err != nil {
+		t.Fatalf("mergeAndPersist: %v", err)
+	}
+	if result == nil || result.ContentID != filmID {
+		t.Fatalf("result = %#v, want the write rebound onto %s", result, filmID)
+	}
+	got, err := f.items.GetByID(ctx, filmID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Tagline != "Curated tagline" || got.Overview != "Curated overview" || !slices.Equal(got.LockedFields, locks) {
+		t.Errorf("tagline %q overview %q locks %v, want the item's own edits and lock kept", got.Tagline, got.Overview, got.LockedFields)
+	}
+}

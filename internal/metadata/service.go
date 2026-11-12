@@ -1973,6 +1973,11 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			}
 			results, searchErr := sp.Search(ctx, searchQuery)
 			if searchErr != nil {
+				// A provider whose search failed may never get the ID it
+				// answers metadata by, so it fails a reset like a failed lookup.
+				if failure := resetProviderFailure(req.resetToProvider, p, "search", searchErr); failure != nil {
+					return nil, failure
+				}
 				if handleProvider404(provider404s, accumulatedIDs, p.Slug(), searchErr,
 					"content_id", req.ContentID,
 				) {
@@ -2382,8 +2387,11 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 
 	// Text the providers lack in req.Language is fetched in the fallback
 	// language now, before persistence takes its locks.
-	req.fallback = s.fetchFallbackText(ctx, req, contentType, accumulatedIDs, accumulator, allSeasons, allEpisodes,
+	req.fallback, err = s.fetchFallbackText(ctx, req, contentType, accumulatedIDs, accumulator, allSeasons, allEpisodes,
 		fallbackSources{item: itemChain, season: seasonChain, episode: episodeChain})
+	if err != nil {
+		return nil, err
+	}
 
 	ctx = withLocalMetadataUnreadable(ctx, localMetadataUnreadable)
 	if s.localArtworkUsable() {
@@ -2793,6 +2801,10 @@ func (s *MetadataService) mergeAndPersist(
 	// merge onto another row takes on that row's, whose edits are its own.
 	replacesShow := req.identityCorrection && normalizeItemTypeForContentID(contentType) == matchContentTypeSeries &&
 		correctionNamesDifferentShow(contentType, storedItemIdentity(existingItem, req.durableProviderIDs), accumulator.ProviderIDs)
+	// A Reset to Provider resets the row it was asked for. Like replacesShow,
+	// it doesn't follow a merge onto another row, whose edits and locks are
+	// that row's own: the merged row gets an ordinary refresh.
+	resetsRow := req.resetToProvider
 	// Identity repairs (rebinding, local-ID promotion) belong to matching and
 	// refreshes, never to an enrichment write.
 	if !req.writesFieldsOnly() && !isNew && contentID != "" && existingItem != nil && (isProvisionalOwnershipStatus(existingItem.Status) || len(durableIDs) == 0) {
@@ -2803,6 +2815,7 @@ func (s *MetadataService) mergeAndPersist(
 		if reboundTo != "" {
 			contentID = reboundTo
 			replacesShow = false
+			resetsRow = false
 			existingItem, err = s.itemRepo.GetByID(ctx, contentID)
 			if err != nil {
 				return nil, fmt.Errorf("loading rebound item: %w", err)
@@ -2830,6 +2843,7 @@ func (s *MetadataService) mergeAndPersist(
 		if canonical != contentID {
 			contentID = canonical
 			replacesShow = replacesShow && renamed
+			resetsRow = resetsRow && renamed
 			existingItem, err = s.itemRepo.GetByID(ctx, contentID)
 			if err != nil {
 				return nil, fmt.Errorf("loading canonicalized item: %w", err)
@@ -2859,6 +2873,7 @@ func (s *MetadataService) mergeAndPersist(
 		if reanchored != contentID {
 			contentID = reanchored
 			replacesShow = replacesShow && renamed
+			resetsRow = resetsRow && renamed
 			existingItem, err = s.itemRepo.GetByID(ctx, contentID)
 			if err != nil {
 				return nil, fmt.Errorf("loading reanchored item: %w", err)
@@ -2874,7 +2889,7 @@ func (s *MetadataService) mergeAndPersist(
 	// Reset to Provider drops the item's locks with this write, so nothing
 	// below keeps a field for one: the stored locks are gone once it commits,
 	// and a reset that fails before then leaves them in place.
-	if req.resetToProvider && existingItem != nil {
+	if resetsRow && existingItem != nil {
 		existingItem.LockedFields = []int{}
 		locked = nil
 	}
@@ -2920,7 +2935,7 @@ func (s *MetadataService) mergeAndPersist(
 		// Fallback text belongs to the provider IDs it was fetched with, so it
 		// applies after persistence moved the item to another content ID too.
 		keepStoredTitle := req.Mode != ModeInitialMatch || existingItem == nil || !isSkeletonLikeStatus(existingItem.Status)
-		if corrected || req.resetToProvider {
+		if corrected || resetsRow {
 			req.fallback.ignoreStoredText()
 		}
 		req.fallback.applyToItem(accumulator, req.Language, existingItem, keepStoredTitle)
@@ -2995,7 +3010,7 @@ func (s *MetadataService) mergeAndPersist(
 		// A correction's stored values describe another title, and a reset's
 		// are what the admin asked to replace: either way a value the
 		// providers lack must not stay behind.
-		if corrected || req.resetToProvider {
+		if corrected || resetsRow {
 			sortTitle, overview, tagline := existingResult.SortTitle, existingResult.Overview, existingResult.Tagline
 			clearPreviousMatch(existingResult, mergeLocked)
 			// A reset in another language fetched that language's text for
@@ -3142,8 +3157,8 @@ func (s *MetadataService) mergeAndPersist(
 		itemWriteSteps{
 			identityChosen:  req.Mode == ModeIdentify,
 			clearChildEdits: replacesShow,
-			resetLocks:      req.resetToProvider,
-			clearCredits:    req.resetToProvider && creditsUnlisted(item, mergeLocked),
+			resetLocks:      resetsRow,
+			clearCredits:    resetsRow && creditsUnlisted(item, mergeLocked),
 		},
 	)
 	if err != nil {
@@ -3271,7 +3286,7 @@ func (s *MetadataService) mergeAndPersist(
 		replace := mergeMode == MergeReplaceUnlocked || (req.Mode == ModeScheduledRefresh && !req.enrichmentOnly)
 		var err error
 		switch {
-		case req.Mode == ModeIdentify || corrected || req.resetToProvider:
+		case req.Mode == ModeIdentify || corrected || resetsRow:
 			err = s.ratingSourceRepo.Replace(ctx, contentID, sources)
 		case len(sources) > 0:
 			err = s.ratingSourceRepo.Upsert(ctx, contentID, sources, replace)
@@ -3571,6 +3586,11 @@ func (s *MetadataService) refreshItemTarget(ctx context.Context, contentID strin
 	if err != nil {
 		s.recordRefreshFailure(ctx, contentID, err, incrementDebtAttempt)
 		return err
+	}
+	if result != nil && result.Pinned && reset {
+		// A pinned item has no provider values to reset to, and reporting
+		// success would claim its edits and locks were replaced.
+		return fmt.Errorf("metadata: reset to provider: %s is pinned unmatched, so no provider describes it", contentID)
 	}
 	if result != nil && result.Pinned {
 		// An admin left the item unmatched on purpose: there is nothing to
@@ -4739,7 +4759,7 @@ func (s *MetadataService) refreshSeriesChildTarget(
 			canonicalLanguage = "en"
 		}
 
-		providerIDs, err := s.resolveSeriesRefreshProviderIDs(ctx, series, folderID, language, skipLocal)
+		providerIDs, err := s.resolveSeriesRefreshProviderIDs(ctx, series, folderID, language, skipLocal, reset != nil)
 		if err != nil {
 			return err
 		}
@@ -4755,17 +4775,19 @@ func (s *MetadataService) refreshSeriesChildTarget(
 			continue
 		}
 		canonical := strings.EqualFold(language, canonicalLanguage)
+		if canonical {
+			if err := s.fillTargetChildText(ctx, series, providerIDs, folderID, language, seasonNumber, episodeNumber, childCtx, seasons, episodes, mode, mergeMode, reset); err != nil {
+				return err
+			}
+		} else if s.configuredFallbackLanguage() != "" {
+			// Text a provider marked as another language is no translation.
+			dropForeignChildText(seasons, episodes, language)
+		}
 		if reset != nil && !resetApplied && (canonical || !resetLanguageListed) {
 			if err := reset.apply(ctx, s, !canonical); err != nil {
 				return err
 			}
 			resetApplied = true
-		}
-		if canonical {
-			s.fillTargetChildText(ctx, series, providerIDs, folderID, language, seasonNumber, episodeNumber, childCtx, seasons, episodes, mode, mergeMode)
-		} else if s.configuredFallbackLanguage() != "" {
-			// Text a provider marked as another language is no translation.
-			dropForeignChildText(seasons, episodes, language)
 		}
 		// A scoped refresh sees part of the series, so it never clears the
 		// seasons it was not asked about, even for Identify.
@@ -4780,10 +4802,17 @@ func (s *MetadataService) refreshSeriesChildTarget(
 	if !updated {
 		return ErrMetadataNotFound
 	}
+	// The providers listed nothing in the series' own language but did in
+	// another, whose write leaves the base row alone: the target was not reset.
+	if reset != nil && !resetApplied {
+		return fmt.Errorf("metadata: reset to provider: the providers have no %s data for this series", seriesLanguage)
+	}
 	return nil
 }
 
-func (s *MetadataService) resolveSeriesRefreshProviderIDs(ctx context.Context, series *models.MediaItem, folderID int, language string, skipLocal bool) (map[string]string, error) {
+// resolveSeriesRefreshProviderIDs fails a Reset to Provider (reset) when a
+// provider's search didn't answer, as processInternal's search does.
+func (s *MetadataService) resolveSeriesRefreshProviderIDs(ctx context.Context, series *models.MediaItem, folderID int, language string, skipLocal, reset bool) (map[string]string, error) {
 	accumulatedIDs := make(map[string]string)
 	if series == nil {
 		return accumulatedIDs, nil
@@ -4840,6 +4869,9 @@ func (s *MetadataService) resolveSeriesRefreshProviderIDs(ctx context.Context, s
 		}
 		results, searchErr := sp.Search(ctx, searchQuery)
 		if searchErr != nil {
+			if failure := resetProviderFailure(reset, p, "search", searchErr); failure != nil {
+				return nil, failure
+			}
 			if handleProvider404(provider404s, accumulatedIDs, p.Slug(), searchErr,
 				"content_id", series.ContentID,
 			) {

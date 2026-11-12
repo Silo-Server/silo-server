@@ -356,8 +356,11 @@ provider has one. A season or episode the providers don't list is emptied too.
 A refresh keeps a stored value a provider sends empty, because it can't tell a
 value the provider lacks from one it failed to send; a reset clears it. So a
 reset fails, and the target keeps its values and locks, when a provider in the
-chain fails to answer. A not-found answer, or an enrichment provider that isn't
-configured, doesn't fail it. A reset through a library whose metadata language
+chain fails to answer, including a search and a fallback-language lookup. A
+not-found answer, or an enrichment provider that isn't configured, doesn't fail
+it. A reset of an item pinned unmatched fails too, since no provider describes
+it, and a reset whose write merges the item onto another existing item leaves
+that item's edits and locks alone. A reset through a library whose metadata language
 isn't the item's own writes that language's text to the localization rows, as
 any refresh does, and keeps the base row's title, overview and tagline. When
 the refresh adopts that language as the item's own, because every library
