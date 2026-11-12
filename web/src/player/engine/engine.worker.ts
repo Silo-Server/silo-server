@@ -398,7 +398,12 @@ async function* readPackets(
 
 async function runVideo(run: number, position: number): Promise<void> {
   const sink = new EncodedPacketSink(videoTrack!);
-  const starts = videoStarts(sink, position + timelineOrigin, h264LengthSize);
+  const starts = videoStarts(
+    sink,
+    position + timelineOrigin,
+    h264LengthSize,
+    () => run !== generation,
+  );
   for (;;) {
     const next = (await findStartPacket("video", () => starts.next()))!;
     if (run !== generation) return;
@@ -506,14 +511,22 @@ async function decodeVideo(
     if (decoder.state === "closed") return rejected ? "rejected" : "done";
     if (packet.timestamp < skipBefore) continue;
     const data = nalLengthSize ? stripDolbyVisionNalUnits(packet.data, nalLengthSize) : packet.data;
-    decoder.decode(
-      new EncodedVideoChunk({
-        type: packet.type,
-        timestamp: Math.round(playerTime(packet) * 1e6),
-        duration: Math.round(packet.duration * 1e6),
-        data,
-      }),
-    );
+    const chunk = new EncodedVideoChunk({
+      type: packet.type,
+      timestamp: Math.round(playerTime(packet) * 1e6),
+      duration: Math.round(packet.duration * 1e6),
+      data,
+    });
+    try {
+      decoder.decode(chunk);
+    } catch (error) {
+      // A browser that does not take a recovery point as a key rejects the
+      // first chunk here, with a DataError, instead of through `error`.
+      const dataError = error instanceof Error && error.name === "DataError";
+      if (!start.recoveryPoint || decodedPicture || !dataError) throw error;
+      decoder.close();
+      return "rejected";
+    }
   }
   if (run !== generation) return "done";
   if (decoder.state === "closed") return rejected ? "rejected" : "done";

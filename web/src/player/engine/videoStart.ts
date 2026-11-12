@@ -34,12 +34,14 @@ export const MAX_H264_START_LOOKBACK_SECONDS = 20;
  * next only when the decoder rejected the last. Returns "no-keys" when the
  * track has no key packet at all, and "exhausted" when no start within the
  * bounds is left. `h264LengthSize` is the NAL length-field size of an H.264
- * track, or null for any other video.
+ * track, or null for any other video. The search stops, as exhausted, once
+ * `cancelled` returns true, so a newer run does not wait behind it.
  */
 export async function* videoStarts(
   sink: EncodedPacketSink,
   target: number,
   h264LengthSize: number | null,
+  cancelled: () => boolean,
 ): AsyncGenerator<VideoStart, "no-keys" | "exhausted"> {
   if (h264LengthSize === null) {
     const packet =
@@ -52,9 +54,18 @@ export async function* videoStarts(
   let before = target;
   let attempts = 0;
   for (let first = true; attempts < MAX_H264_START_ATTEMPTS; first = false) {
+    if (cancelled()) return "exhausted";
     const packet =
       (await sink.getKeyPacket(before)) ?? (first ? await sink.getFirstKeyPacket() : null);
-    if (!packet) return first ? "no-keys" : "exhausted";
+    if (!packet) {
+      if (first) return "no-keys";
+      // Back at the start of the file without a start to try, as in a
+      // recording cut mid-GOP: start at the first key the verified lookup
+      // accepts, which can be after the position.
+      const key = attempts === 0 ? await sink.getFirstKeyPacket({ verifyKeyPackets: true }) : null;
+      if (key) yield { packet: key, recoveryPoint: false };
+      return "exhausted";
+    }
     const access = h264RandomAccess(packet.data, h264LengthSize);
     if (access) {
       attempts += 1;

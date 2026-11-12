@@ -95,8 +95,13 @@ vi.mock("mediabunny", () => {
           ) ?? null
       );
     }
-    async getFirstKeyPacket() {
-      return file.packets[0];
+    async getFirstKeyPacket(options?: { verifyKeyPackets?: boolean }) {
+      const verified = options?.verifyKeyPackets === true && file.description !== undefined;
+      return (
+        file.packets.find(
+          (packet) => packet.type === "key" && (!verified || packet.idr === true),
+        ) ?? null
+      );
     }
     async *packets(start: Packet) {
       yield* file.packets.slice(file.packets.indexOf(start));
@@ -122,9 +127,11 @@ describe("engine worker", () => {
    * Records the player time of each chunk decoded, one list per decoder.
    * A decoder whose first chunk is at `rejectFrom` fails on its second, as
    * Chrome's does when a picture references the GOP before the start; with
-   * `outputFirst` it decodes the first picture before failing.
+   * `outputFirst` it decodes the first picture before failing. With
+   * `throwFirst` it throws a DataError from `decode()` on the first chunk
+   * instead, as Chrome does where a recovery point is not a key.
    */
-  function stubDecoder(rejectFrom?: number, outputFirst = false): number[][] {
+  function stubDecoder(rejectFrom?: number, outputFirst = false, throwFirst = false): number[][] {
     const decoded: number[][] = [];
     vi.stubGlobal(
       "VideoDecoder",
@@ -145,6 +152,9 @@ describe("engine worker", () => {
         addEventListener() {}
         decode(chunk: { timestamp: number }) {
           this.chunks.push(chunk.timestamp / 1e6);
+          if (throwFirst && this.chunks.length === 1 && this.chunks[0] === rejectFrom) {
+            throw new DOMException("Not a key frame.", "DataError");
+          }
           if (this.chunks.length === 2 && this.chunks[0] === rejectFrom) {
             if (outputFirst) {
               this.init.output({ timestamp: this.chunks[0]! * 1e6, duration: 0, close() {} });
@@ -243,6 +253,40 @@ describe("engine worker", () => {
     ]);
   });
 
+  it("starts at the recovery point before when decode() rejects the key from one", async () => {
+    file.packets = openGop;
+    file.description = AVCC;
+    const decoded = stubDecoder(6, false, true);
+    const { posted, send } = await openWorker();
+
+    send({ type: "start", generation: 8, position: 7 });
+    await vi.waitFor(() =>
+      expect(posted.some((m) => m.type === "video-ended" && m.generation === 8)).toBe(true),
+    );
+    expect(posted.some((m) => m.type === "error")).toBe(false);
+    expect(decoded).toEqual([[6], [3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 5.5, 7, 7.5, 8, 8.5]]);
+  });
+
+  it("stops searching for a start when a newer run begins", async () => {
+    file.packets = Array.from({ length: 120 }, (_, second) => ({
+      timestamp: FIRST_TIMESTAMP + second * 0.5,
+      duration: 0.5,
+      type: "key" as const,
+      data: accessUnit(NON_IDR_SLICE),
+    }));
+    file.description = AVCC;
+    stubDecoder();
+    const { posted, send } = await openWorker();
+
+    send({ type: "start", generation: 9, position: 59 });
+    send({ type: "start", generation: 10, position: 59 });
+    await vi.waitFor(() =>
+      expect(posted.some((m) => m.type === "error" && m.generation === 10)).toBe(true),
+    );
+    // The first run makes one lookup and stops; the second makes all 42.
+    expect(file.keyLookups.length).toBe(43);
+  });
+
   it("fails over when no key packet before the position starts an H.264 stream", async () => {
     // I-frames marked as keys, with no IDR and no recovery point anywhere.
     file.packets = Array.from({ length: 120 }, (_, second) => ({
@@ -321,5 +365,27 @@ describe("engine worker", () => {
       expect(posted.some((m) => m.type === "video-ended" && m.generation === 6)).toBe(true),
     );
     expect(decoded[0]?.[0]).toBe(0);
+  });
+
+  it("starts at the first IDR when no key packet before the position starts an H.264 stream", async () => {
+    // A recording cut mid-GOP: it opens on an I-frame marked as a key that
+    // has neither an IDR nor a recovery point, and its first IDR comes later.
+    file.packets = Array.from({ length: 12 }, (_, frame) => ({
+      timestamp: FIRST_TIMESTAMP + frame * 0.5,
+      duration: 0.5,
+      type: frame % 4 === 0 ? ("key" as const) : ("delta" as const),
+      data: accessUnit(frame === 4 ? IDR_SLICE : NON_IDR_SLICE),
+      idr: frame === 4,
+    }));
+    file.description = AVCC;
+    const decoded = stubDecoder();
+    const { posted, send } = await openWorker();
+
+    send({ type: "start", generation: 7, position: 1 });
+    await vi.waitFor(() =>
+      expect(posted.some((m) => m.type === "video-ended" && m.generation === 7)).toBe(true),
+    );
+    expect(posted.some((m) => m.type === "error")).toBe(false);
+    expect(decoded[0]?.[0]).toBe(2);
   });
 });
