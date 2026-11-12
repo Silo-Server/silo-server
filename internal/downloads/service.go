@@ -454,20 +454,20 @@ func (s *Service) Create(ctx context.Context, userID int, req CreateRequest, fil
 	if err != nil {
 		return nil, err
 	}
-	episodeID, err := s.singleManagedEpisodeKey(ctx, userID, req, file)
-	if err != nil {
-		return nil, err
-	}
 	if decision.RequiresArtifact {
-		d, err := s.createArtifactDownload(ctx, userID, req, file, episodeID, decision)
+		d, err := s.createArtifactDownload(ctx, userID, req, file, decision)
 		if err != nil {
 			return nil, err
 		}
-		s.forgetMonitorDeletes(ctx, userID, req, file.ContentID, episodeID)
+		s.forgetMonitorDeletes(ctx, userID, req, file.ContentID, d.EpisodeID)
 		return d, nil
 	}
 
 	if req.DeviceID != "" {
+		episodeID, err := s.singleManagedEpisodeKey(ctx, userID, req, file)
+		if err != nil {
+			return nil, err
+		}
 		rows, err := s.ensureManaged(ctx, userID, req, []managedItem{{file: file, contentID: file.ContentID, episodeID: episodeID}}, decision, "")
 		if err != nil {
 			return nil, err
@@ -511,19 +511,28 @@ func (s *Service) Create(ctx context.Context, userID int, req CreateRequest, fil
 }
 
 // singleManagedEpisodeKey returns the episode a single managed download of
-// file is keyed on. That is the file's own episode, except for a multi-episode
-// file requested through a later episode of its range when the device already
-// holds an entry under that episode: a season download registers the file
-// there when the range's first episode picked a file of its own.
+// file is keyed on: the file's own episode, as a season download keys it when
+// that episode picks the file too. A multi-episode file requested through a
+// later episode of its range is keyed on the requested episode instead when the
+// device already holds an entry there, which a season download makes when the
+// range's first episode picked a file of its own, or when the first episode's
+// entry holds another file, so a download never replaces it.
 func (s *Service) singleManagedEpisodeKey(ctx context.Context, userID int, req CreateRequest, file *models.MediaFile) (string, error) {
 	if req.DeviceID == "" || req.EpisodeID == "" || req.EpisodeID == file.EpisodeID || file.MultiEpisodeEnd <= file.MultiEpisodeStart {
 		return file.EpisodeID, nil
 	}
 	_, err := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, file.ContentID, req.EpisodeID)
-	switch {
-	case err == nil:
+	if err == nil {
 		return req.EpisodeID, nil
-	case errors.Is(err, ErrNotFound):
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return "", err
+	}
+	first, err := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, file.ContentID, file.EpisodeID)
+	switch {
+	case err == nil && first.MediaFileID != file.ID:
+		return req.EpisodeID, nil
+	case err == nil || errors.Is(err, ErrNotFound):
 		return file.EpisodeID, nil
 	default:
 		return "", err
@@ -531,13 +540,17 @@ func (s *Service) singleManagedEpisodeKey(ctx context.Context, userID int, req C
 }
 
 // createArtifactDownload ensures a prepared (remux/transcode) artifact for file
-// and creates the linked download row under episodeID — ready when the artifact
-// already exists, otherwise preparing until the encode worker completes it.
-// Handles both managed (idempotent per device) and ephemeral rows.
-func (s *Service) createArtifactDownload(ctx context.Context, userID int, req CreateRequest, file *models.MediaFile, episodeID string, decision QualityDecision) (*Download, error) {
+// and creates the linked download row — ready when the artifact already exists,
+// otherwise preparing until the encode worker completes it. Handles both managed
+// (idempotent per device) and ephemeral rows.
+func (s *Service) createArtifactDownload(ctx context.Context, userID int, req CreateRequest, file *models.MediaFile, decision QualityDecision) (*Download, error) {
 	managed := req.DeviceID != ""
 	if managed && req.ProfileID == "" {
 		return nil, ErrProfileRequired
+	}
+	episodeID, err := s.singleManagedEpisodeKey(ctx, userID, req, file)
+	if err != nil {
+		return nil, err
 	}
 
 	// Resolve any existing managed entry first: replacing one doesn't add a
@@ -551,8 +564,6 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 		case !errors.Is(err, ErrNotFound):
 			return nil, err
 		}
-	}
-	if managed {
 		if err := checkManagedCreateRevision(existing, req.ExpectedRevision, req.ExpectedDownloadID); err != nil {
 			return nil, err
 		}
@@ -592,7 +603,7 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 	// Capability discovery is complete, but the lock still spans artifact row
 	// creation so a rejected request cannot leave an encode job behind.
 	var d *Download
-	err := s.repo.WithUserQuotaLock(ctx, userID, func(ctx context.Context) error {
+	err = s.repo.WithUserQuotaLock(ctx, userID, func(ctx context.Context) error {
 		if err := s.limiter.Check(ctx, userID, 1); err != nil {
 			return err
 		}

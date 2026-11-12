@@ -174,6 +174,15 @@ func TestSingleDownloadReachesTheEntryASeasonKeyedOnALaterEpisodePostgres(t *tes
 	if err != nil || single.ID != entry.ID || single.EpisodeID != "ep-2" || single.MediaFileID != 3 {
 		t.Fatalf("single %+v %v", single, err)
 	}
+	// After the device deletes episode 2, downloading it again registers it
+	// under episode 2 rather than over episode 1's own file.
+	if _, err := repo.pool.Exec(t.Context(), `DELETE FROM downloads WHERE id = $1`, entry.ID); err != nil {
+		t.Fatal(err)
+	}
+	again, err := svc.Create(t.Context(), 1, CreateRequest{ContentID: "series", EpisodeID: "ep-2", ProfileID: "profile", DeviceID: "device", StrictIdentity: true, ExpectedRevision: new(0)}, catalog.AccessFilter{})
+	if err != nil || again.EpisodeID != "ep-2" || again.MediaFileID != 3 {
+		t.Fatalf("download after delete %+v %v", again, err)
+	}
 	first, err := repo.GetManagedEntry(t.Context(), 1, "profile", "device", "series", "ep-1")
 	if err != nil || first.MediaFileID != 1 {
 		t.Fatalf("episode 1 entry %+v %v", first, err)
