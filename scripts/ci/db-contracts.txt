@@ -18,6 +18,7 @@
 ./internal/recommendations TestRecentCompletedItemIDsGroupsSeriesBeforeLimit
 ./internal/sections TestCompatibilityRecentlyAddedReturnsFlatDistinctSeries
 ./internal/sections TestSectionsSkipItemsInNoLibraryPostgres
+./internal/sections TestPersonalSmartCollectionRowKeepsTheCollectionLimitPostgres
 ./internal/sections TestEpisodeCardsCarryParentArtworkPostgres
 ./internal/catalog TestCatalogQueryWithoutLibraryLeavesOutItemsInNoLibraryDB
 ./internal/catalog TestCountsAndListingsLeaveOutItemsHeldByRemovalGraceDB
