@@ -422,7 +422,9 @@ func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.U
 		if authority.Role != identity.Role {
 			return ctx, nil, errSocketAccessChanged
 		}
-		scope, err := resolver.Resolve(checkCtx, access.ResolveInput{UserID: identity.UserID, SessionID: identity.SessionID, ProfileID: identity.ProfileID, ProfileToken: identity.ProfileToken})
+		// The login-session claims the ticket stands for; Role is set below.
+		base := auth.Claims{ImpersonatorUserID: identity.ImpersonatorUserID, UserID: identity.UserID, SessionID: identity.SessionID, TokenType: auth.TokenTypeAccess}
+		scope, err := resolver.Resolve(checkCtx, access.ResolveInput{UserID: identity.UserID, SessionID: identity.SessionID, ProfileID: identity.ProfileID, ProfileToken: identity.ProfileToken, SkipPINVerification: base.SkipsProfilePIN()})
 		if errors.Is(err, access.ErrProfileUnverified) || (err == nil && !scope.ProfileVerified) {
 			return ctx, nil, errSocketAccessChanged
 		}
@@ -436,8 +438,10 @@ func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.U
 		}
 		role := authority.Role
 		if role == eventsAdminRole {
+			admin := base
+			admin.Role = role
 			acting, err := actingAdmin(checkCtx, apimw.ActingAdminRequest{
-				Claims:    &auth.Claims{ImpersonatorUserID: identity.ImpersonatorUserID, UserID: identity.UserID, SessionID: identity.SessionID, Role: role, TokenType: auth.TokenTypeAccess},
+				Claims:    &admin,
 				ProfileID: identity.ProfileID,
 				DeviceID:  identity.DeviceID,
 			})
@@ -451,7 +455,9 @@ func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.U
 		if identity.AccessFingerprint != "" && identity.EffectiveRole != role {
 			return ctx, nil, errSocketAccessChanged
 		}
-		claims := &auth.Claims{ImpersonatorUserID: identity.ImpersonatorUserID, UserID: identity.UserID, SessionID: identity.SessionID, Role: role, TokenType: auth.TokenTypeAccess}
+		final := base
+		final.Role = role
+		claims := &final
 		authority.Narrow(claims)
 		ctx = apimw.SetClaims(ctx, claims)
 		ctx = apimw.SetProfileID(ctx, identity.ProfileID)
