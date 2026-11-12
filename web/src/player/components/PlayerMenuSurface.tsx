@@ -35,6 +35,22 @@ interface PlayerMenuSurfaceProps {
 
 const ITEM_SELECTOR = '[role^="menuitem"]:not([disabled]):not([aria-disabled="true"])';
 
+/**
+ * Scrolls the menu's own list, not the page, until the item shows: the
+ * nearest scrolling box between the item and the surface.
+ */
+function revealInMenu(item: HTMLElement, surface: HTMLElement) {
+  let box = item.parentElement;
+  while (box && box !== surface && box.scrollHeight <= box.clientHeight) {
+    box = box.parentElement;
+  }
+  if (!box || box.scrollHeight <= box.clientHeight) return;
+  const itemRect = item.getBoundingClientRect();
+  const boxRect = box.getBoundingClientRect();
+  if (itemRect.top < boxRect.top) box.scrollTop -= boxRect.top - itemRect.top;
+  else if (itemRect.bottom > boxRect.bottom) box.scrollTop += itemRect.bottom - boxRect.bottom;
+}
+
 /** Arrow keys, Home and End move between a menu's items, in document order. */
 function moveFocus(surface: HTMLElement, event: KeyboardEvent<HTMLDivElement>) {
   const items = [...surface.querySelectorAll<HTMLElement>(ITEM_SELECTOR)];
@@ -45,9 +61,11 @@ function moveFocus(surface: HTMLElement, event: KeyboardEvent<HTMLDivElement>) {
   // in between.
   if (current === -1 && event.key.startsWith("Arrow")) return;
   let next: number;
-  // Left and right read along the menu's direction: right to left, ArrowLeft
-  // is the next item.
-  switch (readingArrowKey(event)) {
+  // Left and right read along the focused item's direction: right to left,
+  // ArrowLeft is the next item, but a row laid out left to right in every
+  // language (the playback speeds) keeps ArrowRight as the next one.
+  const focused = items[current];
+  switch (readingArrowKey({ key: event.key, currentTarget: focused ?? surface })) {
     case "ArrowDown":
     case "ArrowRight":
       next = current < items.length - 1 ? current + 1 : 0;
@@ -81,6 +99,8 @@ export function PlayerMenuSurface({
   const t = useT();
   const isCoarsePointer = useCoarsePointer();
   const surfaceRef = useRef<HTMLDivElement>(null);
+  // The touch sheet around the surface, which also holds its close button.
+  const sheetRef = useRef<HTMLDivElement>(null);
   // Whether the viewer is driving the menu from the keyboard: a key pressed in
   // it says yes, a pointer press in it says no.
   const keyboardRef = useRef(false);
@@ -97,15 +117,23 @@ export function PlayerMenuSurface({
         '[role^="menuitem"][aria-checked="true"], [role^="menuitem"][aria-current="true"]',
       ) ?? surface.querySelector<HTMLElement>(ITEM_SELECTOR);
     item?.focus({ preventScroll: true });
-    item?.scrollIntoView?.({ block: "nearest" });
+    if (item) revealInMenu(item, surface);
+    // On touch the sheet's close button sits outside the surface but is still
+    // part of the menu, for presses and for where focus was.
+    const boundary = sheetRef.current ?? surface;
     const pointerPress = () => {
       keyboardRef.current = false;
     };
-    surface.addEventListener("pointerdown", pointerPress);
+    const keyPress = () => {
+      keyboardRef.current = true;
+    };
+    boundary.addEventListener("pointerdown", pointerPress);
+    boundary.addEventListener("keydown", keyPress);
     return () => {
-      surface.removeEventListener("pointerdown", pointerPress);
+      boundary.removeEventListener("pointerdown", pointerPress);
+      boundary.removeEventListener("keydown", keyPress);
       const active = document.activeElement;
-      const focusWasInside = !active || active === document.body || surface.contains(active);
+      const focusWasInside = !active || active === document.body || boundary.contains(active);
       if (keyboardRef.current && focusWasInside && opener?.isConnected) {
         opener.focus({ preventScroll: true });
       }
@@ -131,7 +159,6 @@ export function PlayerMenuSurface({
   }, [anchorRef, isCoarsePointer, onClose]);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    keyboardRef.current = true;
     onKeyDown?.(event);
     if (!event.defaultPrevented && surfaceRef.current) moveFocus(surfaceRef.current, event);
   };
@@ -168,6 +195,7 @@ export function PlayerMenuSurface({
         }}
       />
       <div
+        ref={sheetRef}
         className="hud-sheet fixed bottom-0 z-50 flex flex-col"
         onClick={(event) => event.stopPropagation()}
       >

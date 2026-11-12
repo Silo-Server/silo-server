@@ -3707,7 +3707,9 @@ export function VideoPlayer({
     ro.observe(hud);
     ro.observe(container);
     return () => ro.disconnect();
-  }, [isDetached, isPlayerReady, displayMode]);
+    // videoAspect moves the upright-phone dock without resizing anything the
+    // observer watches, so a change in it measures again.
+  }, [isDetached, isPlayerReady, displayMode, videoAspect]);
 
   // Bottom-anchored cues rise to clear the control bar (plus a small gap) only
   // while the bar is up and only in the main foreground player; top-anchored
@@ -5172,7 +5174,9 @@ export function VideoPlayer({
       e.stopPropagation();
       isDraggingRef.current = true;
       const startX = e.clientX;
-      const startWidth = miniPlayerWidth ?? containerRef.current?.offsetWidth ?? 320;
+      // The width on screen, which a narrowed window may hold below the
+      // width the viewer last dragged to.
+      const startWidth = containerRef.current?.offsetWidth ?? miniPlayerWidth ?? 320;
       reservedMiniWidthRef.current ??= startWidth;
       const maxWidth = reservedMiniWidthRef.current;
       const target = e.currentTarget as HTMLElement;
@@ -5249,7 +5253,14 @@ export function VideoPlayer({
       }
       style={
         displayMode === "postroll"
-          ? { width: miniPlayerWidth ?? "var(--postroll-video-width)" }
+          ? {
+              // A width the viewer dragged still yields when the window narrows
+              // and the end screen's reserved column shrinks with it.
+              width:
+                miniPlayerWidth === null
+                  ? "var(--postroll-video-width)"
+                  : `min(${miniPlayerWidth}px, var(--postroll-video-width))`,
+            }
           : undefined
       }
       onClick={isPostrollVisible ? handleMiniPlayerClick : undefined}
@@ -5260,7 +5271,7 @@ export function VideoPlayer({
       {/* Post-roll caption: the corner picture is this episode, still playing
           its credits; a click returns to it. */}
       {isPostrollVisible && (
-        <div className="hud pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent px-3 pt-6 pb-2.5 text-xs font-semibold">
+        <div className="hud pointer-events-none absolute inset-x-0 bottom-0 z-[5] bg-gradient-to-t from-black/85 to-transparent px-3 pt-6 pb-2.5 text-xs font-semibold">
           {t("web.player.postRoll.stillPlaying")}
         </div>
       )}

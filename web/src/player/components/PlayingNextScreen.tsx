@@ -377,6 +377,13 @@ export function PlayingNextScreen({
                     )}
                   </div>
                 )}
+                {/* Said once when the countdown starts, not on every tick, so a
+                    screen reader hears how long there is to turn autoplay off. */}
+                <span className="sr-only" aria-live="polite">
+                  {autoplay && videoEnded
+                    ? t("web.player.upNext.startsIn", { count: COUNTDOWN_SECONDS })
+                    : ""}
+                </span>
               </motion.div>
 
               <div className="mt-3 flex flex-wrap items-center justify-center gap-x-2 text-sm text-[var(--hud-ash)] lg:justify-start">

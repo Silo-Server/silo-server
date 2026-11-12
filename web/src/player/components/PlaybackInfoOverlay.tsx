@@ -75,7 +75,7 @@ export function PlaybackInfoOverlay({
       // switch off the player's shortcuts and the skip pill's focus.
       role="region"
       aria-label={t("web.player.info.heading")}
-      className="hud-panel hud-panel-scroll absolute top-[max(5rem,calc(env(safe-area-inset-top)+4.5rem))] left-[max(1rem,env(safe-area-inset-left))] z-50 max-h-[calc(100%-14rem)] w-[min(20rem,calc(100vw-2rem))] sm:left-[max(2rem,env(safe-area-inset-left))] rtl:right-[max(1rem,env(safe-area-inset-right))] rtl:left-auto sm:rtl:right-[max(2rem,env(safe-area-inset-right))]"
+      className="hud-panel hud-panel-scroll absolute top-[max(5rem,calc(env(safe-area-inset-top)+4.5rem))] left-[max(1rem,env(safe-area-inset-left))] z-50 max-h-[max(10rem,calc(100%-14rem))] w-[min(20rem,calc(100vw-2rem))] sm:left-[max(2rem,env(safe-area-inset-left))] rtl:right-[max(1rem,env(safe-area-inset-right))] rtl:left-auto sm:rtl:right-[max(2rem,env(safe-area-inset-right))]"
     >
       <div className="hud-panel-header pe-2">
         <span>{t("web.player.info.heading")}</span>

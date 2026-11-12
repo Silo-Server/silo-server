@@ -3,7 +3,7 @@
    ================================================================
    The HUD always sits on a picture, never on an app surface, so its
    tokens are fixed rather than themed. The exception is the lamp, the
-   server's accent color (--primary). It marks where the viewer is and
+   server's accent color. It marks where the viewer is and
    what they have chosen: the played part of the timeline, the selected
    row in a panel, keyboard focus. Nothing else uses it.
 
@@ -14,8 +14,10 @@
 :root {
   --hud-paper: #f5f3ef;
   --hud-ash: #bdbab3;
-  --hud-lamp: var(--primary);
-  --hud-lamp-ink: var(--primary-foreground);
+  /* The server accent, lightened where it would not read on the HUD's dark
+     panels (lib/accentColor.ts); Cinema Dark's primary without one. */
+  --hud-lamp: var(--accent-on-dark, var(--primary));
+  --hud-lamp-ink: var(--accent-on-dark-foreground, var(--primary-foreground));
   --hud-ink: #0e0e11;
   --hud-panel: rgb(16 16 19 / 0.93);
   --hud-glass: rgb(20 20 24 / 0.62);
@@ -506,6 +508,9 @@
     bottom: calc(100% + 0.75rem);
     z-index: 30;
     max-height: min(32rem, calc(100cqh - 10rem));
+    /* A short player can hold less than the panel's fixed rows; the panel
+       then scrolls as a whole, its track list still scrolling on its own. */
+    overflow-y: auto;
   }
 
   /* A long list inside a panel scrolls on its own under the header, with a
@@ -616,6 +621,14 @@
     padding: 0.1875rem;
     border-radius: 0.625rem;
     background: rgb(255 255 255 / 0.07);
+  }
+  /* In a touch sheet the speeds wrap to two rows of full-size targets. */
+  .hud-sheet .hud-segmented {
+    grid-auto-flow: row;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+  .hud-sheet .hud-segment {
+    height: 2.75rem;
   }
   .hud-segment {
     height: 2.25rem;
