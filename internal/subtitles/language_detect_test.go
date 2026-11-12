@@ -27,6 +27,9 @@ Bonjour tout le monde, comment allez-vous aujourd'hui?
 00:00:05,000 --> 00:00:08,000
 Je suis tres heureux de vous voir ici ce soir.
 `)
+	// Aegisub-style attachments can put script info past the first 128 KiB.
+	lateInfo := append([]byte("[Fonts]\nfontname: attached.ttf\n"), bytes.Repeat([]byte(strings.Repeat("A", 80)+"\n"), 3000)...)
+	lateInfo = append(lateInfo, ass...)
 	cases := []struct {
 		filename string
 		format   SubtitleFormat
@@ -41,6 +44,7 @@ Je suis tres heureux de vous voir ici ce soir.
 		{"some.movie.pob.srt", FormatSRT, nil, "pt-BR", LanguageSourceFilename},
 		{"some.movie.pt.srt", FormatSRT, nil, "pt", LanguageSourceFilename},
 		{"subtitle.ass", FormatASS, ass, "es", LanguageSourceMetadata},
+		{"subtitle.ass", FormatASS, lateInfo, "es", LanguageSourceMetadata},
 		{"subtitle.srt", FormatSRT, srt, "fr", LanguageSourceContent},
 	}
 	for _, tc := range cases {
@@ -201,6 +205,7 @@ func TestResolveUploadLanguageWorkIsBounded(t *testing.T) {
 		{FormatASS, largeSubtitle(FormatASS, MaxUploadSize, englishDialogue)},
 		{FormatASS, assWithAttachments(MaxUploadSize/2, 100<<10, MaxUploadSize/2-(200<<10))},
 		{FormatVTT, longHeader},
+		{FormatASS, append(bytes.Repeat([]byte("Language: ???\n"), MaxUploadSize/16), largeSubtitle(FormatASS, 100<<10, englishDialogue)...)},
 	}
 	for _, tc := range cases {
 		filename := "subtitle." + string(tc.format)
@@ -238,12 +243,17 @@ func TestSampledDetectionMatchesFullText(t *testing.T) {
 		"あの駅の前で待っているから、遅れないでください。",
 		"どうしてそんなことを言うのか、私にはわからない。",
 	})...)
+	// Lines longer than a sample window, but short enough for the extractors.
+	longLine := []string{strings.Repeat(strings.Join(englishDialogue, " ")+" ", 140)}
 	cases := []struct {
 		name   string
 		format SubtitleFormat
 		data   []byte
 		want   string
 	}{
+		{"english srt with long lines", FormatSRT, largeSubtitle(FormatSRT, 600<<10, longLine), "en"},
+		{"english vtt with long cues", FormatVTT, largeSubtitle(FormatVTT, 600<<10, longLine), "en"},
+		{"english ass with long events", FormatASS, largeSubtitle(FormatASS, 600<<10, longLine), "en"},
 		{"english srt", FormatSRT, largeSubtitle(FormatSRT, 600<<10, englishDialogue), "en"},
 		{"french vtt", FormatVTT, largeSubtitle(FormatVTT, 600<<10, []string{
 			"Je ne sais pas pourquoi tu es revenu ici après tout ce temps.",

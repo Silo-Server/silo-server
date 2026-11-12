@@ -194,13 +194,7 @@ func containsDigit(value string) bool {
 	return false
 }
 
-// languageFromMetadata reads only the start of the file, where ASS script info
-// and WebVTT headers live, so its cost does not grow with file size.
 func languageFromMetadata(format SubtitleFormat, data []byte) (string, bool) {
-	if len(data) > contentSampleBytes {
-		head := data[:contentSampleBytes]
-		data = head[:bytes.LastIndexByte(head, '\n')+1]
-	}
 	switch format {
 	case FormatASS, FormatSSA:
 		return languageFromASSMetadata(data)
@@ -211,26 +205,50 @@ func languageFromMetadata(format SubtitleFormat, data []byte) (string, bool) {
 	}
 }
 
+// maxMetadataLanguageFields bounds how many Language fields a metadata scan
+// parses, so a file of repeated unrecognized fields stays cheap to read.
+const maxMetadataLanguageFields = 16
+
+// languageFromASSMetadata returns the first recognized Language or Lang field.
+// It reads the whole file, since attached fonts or graphics can come before a
+// script info section, but visits only lines that hold a colon and parses only
+// those that start with "lang".
 func languageFromASSMetadata(data []byte) (string, bool) {
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
+	for pos, parsed := 0, 0; parsed < maxMetadataLanguageFields; {
+		colon := bytes.IndexByte(data[pos:], ':')
+		if colon < 0 {
+			break
+		}
+		start := pos + bytes.LastIndexByte(data[pos:pos+colon], '\n') + 1
+		end := len(data)
+		if nl := bytes.IndexByte(data[pos+colon:], '\n'); nl >= 0 {
+			end = pos + colon + nl + 1
+		}
+		line := bytes.TrimSpace(data[start:end])
+		pos = end
+		if len(line) < 4 || !bytes.EqualFold(line[:4], []byte("lang")) {
 			continue
 		}
-		if strings.HasPrefix(strings.ToLower(line), "[") {
+		matches := metadataLanguageLine.FindSubmatch(line)
+		if len(matches) != 2 {
 			continue
 		}
-		if matches := metadataLanguageLine.FindStringSubmatch(line); len(matches) == 2 {
-			if language, ok := languageFromMetadataValue(matches[1]); ok {
-				return language, true
-			}
+		parsed++
+		if language, ok := languageFromMetadataValue(string(matches[1])); ok {
+			return language, true
 		}
 	}
 	return "", false
 }
 
+// languageFromVTTMetadata reads the WebVTT header, which ends at the first
+// cue. Only the start of the file is read, so a header with no cue after it
+// does not make the scan cost grow with file size.
 func languageFromVTTMetadata(data []byte) (string, bool) {
+	if len(data) > contentSampleBytes {
+		head := data[:contentSampleBytes]
+		data = head[:bytes.LastIndexByte(head, '\n')+1]
+	}
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -310,28 +328,47 @@ const contentSampleWindow = contentSampleBytes/contentSampleWindows - 1
 func sampleLineWindows(data []byte) []byte {
 	step := (len(data) - contentSampleWindow) / (contentSampleWindows - 1)
 	sample := make([]byte, 0, contentSampleBytes)
+	read := 0 // end of the last chunk taken
 	for i := range contentSampleWindows {
-		chunk := data[i*step : i*step+contentSampleWindow]
+		start, end := i*step, i*step+contentSampleWindow
 		if i > 0 {
-			// Drop the partial line the window starts inside.
-			start := bytes.IndexByte(chunk, '\n')
-			if start < 0 {
+			start, end = lineAlignedWindow(data, start, end)
+			if start < read { // unreadable, or taken by the last window
 				continue
 			}
-			chunk = chunk[start+1:]
 		}
-		end := bytes.LastIndexByte(chunk, '\n')
-		if end < 0 {
-			continue
+		chunk := data[start:end]
+		if nl := bytes.LastIndexByte(chunk, '\n'); nl >= 0 {
+			chunk = chunk[:nl+1]
 		}
-		sample = append(sample, chunk[:end+1]...)
+		read = start + len(chunk)
+		sample = append(sample, chunk...)
 		sample = append(sample, '\n')
 	}
 	return sample
 }
 
+// lineAlignedWindow moves the window [start, end) to the first line that
+// begins inside it. When one line covers the whole window, the window moves to
+// the start of that line instead, or start is -1 when the line began more than
+// bufio.MaxScanTokenSize bytes earlier: the text extractors cannot read a line
+// that long, so it carries no sample text.
+func lineAlignedWindow(data []byte, start, end int) (int, int) {
+	if nl := bytes.IndexByte(data[start:end], '\n'); nl >= 0 {
+		return start + nl + 1, end
+	}
+	from := max(0, start-bufio.MaxScanTokenSize)
+	nl := bytes.LastIndexByte(data[from:start], '\n')
+	if nl < 0 && from > 0 {
+		return -1, -1
+	}
+	start = from + nl + 1
+	return start, min(start+contentSampleWindow, len(data))
+}
+
 // sampleTextLines keeps every text line when they fit the sample, and
-// otherwise windows over the text lines alone.
+// otherwise windows over the text lines alone. A window takes each line that
+// reaches into it, cut short where the window's byte budget runs out.
 func sampleTextLines(data []byte, format SubtitleFormat) []byte {
 	total := 0
 	forEachTextLine(data, format, func(line []byte) { total += len(line) })
@@ -341,17 +378,20 @@ func sampleTextLines(data []byte, format SubtitleFormat) []byte {
 		return sample
 	}
 	step := (total - contentSampleWindow) / (contentSampleWindows - 1)
-	w, offset := 0, 0
+	w, used, offset := 0, 0, 0
 	forEachTextLine(data, format, func(line []byte) {
 		start := offset
 		offset += len(line)
 		for w < contentSampleWindows && start >= w*step+contentSampleWindow {
 			sample = append(sample, '\n')
-			w++
+			w, used = w+1, 0
 		}
-		if w < contentSampleWindows && start >= w*step && offset <= w*step+contentSampleWindow {
-			sample = append(sample, line...)
+		if w == contentSampleWindows || offset <= w*step {
+			return
 		}
+		keep := min(len(line), contentSampleWindow-used)
+		sample = append(sample, line[:keep]...)
+		used += keep
 	})
 	return sample
 }
