@@ -117,8 +117,14 @@ func (r *FileRepository) RelinkMovedFile(ctx context.Context, moved *scanStateFi
 // before rows were reused, and a rematch that finds the same title restores
 // it as it was. The stand-in names the row in stand_in_for_file_id and records
 // no OSHash, so it is never taken for a moved file; if the file comes back,
-// ReclaimStandIn gives the row its path back. A row that had no links leaves
-// nothing behind.
+// ReclaimStandIn gives the row its path back.
+//
+// Offline downloads of the old title move to the stand-in with it: they were
+// authorized for that title, so a download is never served for a file that
+// now belongs to another one. The stand-in is missing, so its originals are
+// refused as a missing file's are, and they are deleted with the stand-in
+// after the grace, as before rows were reused. A row that had neither links
+// nor such downloads leaves nothing behind.
 //
 // The update is fenced like RelinkMovedFile's and runs in one statement with
 // the insert.
@@ -134,9 +140,10 @@ func (r *FileRepository) RetitleMovedFile(ctx context.Context, moved *scanStateF
 // there: the stand-in standInID at mf.FilePath is deleted and the row takes
 // the path with the stand-in's links, numbers, edition and presentation,
 // first sighting, and held first-seen dates, so the old title gets its file
-// back as it was, import edition included. If the row was linked to another
-// title meanwhile, that title gets a stand-in at the row's current path, as on
-// any retitle. Everything runs in one transaction and applies only while the
+// back as it was, import edition included, and the stand-in's downloads
+// return to the row. If the row was linked to another title meanwhile, that
+// title and its downloads get a stand-in at the row's current path, as on any
+// retitle. Everything runs in one transaction and applies only while the
 // stand-in still stands in for this row at that path and the row passes
 // RelinkMovedFile's fence.
 //
@@ -154,6 +161,14 @@ func (r *FileRepository) ReclaimStandIn(ctx context.Context, standInID int, move
 	var heldItem, heldEpisode *time.Time
 	var heldEpisodeRun *string
 	var partIndex, partTotal, episodeStart, episodeEnd *int
+	// The stand-in's downloads come back to the row before the delete would
+	// cascade them away; nothing commits unless the stand-in is deleted and
+	// the row moves.
+	if _, err := tx.Exec(ctx, `
+		UPDATE downloads SET media_file_id = $2, updated_at = NOW()
+		WHERE media_file_id = $1`, standInID, moved.ID); err != nil {
+		return false, false, fmt.Errorf("returning stand-in downloads: %w", err)
+	}
 	err = tx.QueryRow(ctx, `
 		DELETE FROM media_files
 		WHERE id = $1 AND stand_in_for_file_id = $2 AND file_path = $3 AND missing_since IS NOT NULL
@@ -271,9 +286,23 @@ func moveRowToTitle(ctx context.Context, q fileQueryer, moved *scanStateFile, mf
 			p.held_item_first_seen_at, p.held_episode_first_seen_at, p.held_episode_first_seen_scan_run_id
 		FROM previous p
 		WHERE EXISTS (SELECT 1 FROM moved)
-		  AND (p.content_id IS NOT NULL OR p.episode_id IS NOT NULL)
 		  AND (p.content_id, p.episode_id) IS DISTINCT FROM ($32::text, $33::text)
+		  AND (p.content_id IS NOT NULL OR p.episode_id IS NOT NULL OR EXISTS (
+			SELECT 1 FROM downloads d
+			WHERE d.media_file_id = p.id AND (d.content_id, d.episode_id) IS DISTINCT FROM ($32::text, $33::text)
+		  ))
 		RETURNING id
+	),
+	-- A download was authorized for the title it names, so it stays with that
+	-- title: downloads of another title than the row's new one move to the
+	-- stand-in and share its fate, as they did with the missing row before
+	-- rows were reused.
+	parked_downloads AS (
+		UPDATE downloads d SET media_file_id = (SELECT id FROM left_behind), updated_at = NOW()
+		WHERE d.media_file_id = $1
+		  AND EXISTS (SELECT 1 FROM left_behind)
+		  AND (d.content_id, d.episode_id) IS DISTINCT FROM ($32::text, $33::text)
+		RETURNING d.id
 	)
 	SELECT count(*)::int FROM moved`, args...).Scan(&count)
 	if err != nil {

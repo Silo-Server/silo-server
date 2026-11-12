@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -157,6 +159,15 @@ func TestScanKeepsFileRowAcrossRenameDB(t *testing.T) {
 			folderType:  "series",
 			from:        "Show/Season 1/Show S01E01.mkv",
 			to:          "Show {tvdb-{other}} {tmdb-{id}}/Season 1/Show S01E01.mkv",
+			wantSameRow: true,
+		},
+		{
+			// The row is still present at its old path under the same root
+			// when the scan reaches the new one; it is not its own sibling.
+			name:        "a file tag naming another show in the same series folder rematches",
+			folderType:  "series",
+			from:        "Show/Season 1/Show S01E01.mkv",
+			to:          "Show/Season 1/Show S01E01 {tvdb-{other}}.mkv",
 			wantSameRow: true,
 		},
 		{
@@ -468,6 +479,41 @@ func relinkArtifacts(t *testing.T, pool *pgxpool.Pool, fileID int) (timings, tri
 	return timings, trickplay
 }
 
+// seedRelinkDownload gives a new account an offline download of the title
+// on the file and returns its id.
+func seedRelinkDownload(t *testing.T, pool *pgxpool.Pool, fileID int, contentID, episodeID string) string {
+	t.Helper()
+	ctx := t.Context()
+	var userID int64
+	if err := pool.QueryRow(ctx, `INSERT INTO users (role, username) VALUES ('user', $1) RETURNING id`,
+		fmt.Sprintf("relink-%d-%d", fileID, time.Now().UnixNano())).Scan(&userID); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, userID) })
+	id := fmt.Sprintf("relink-%d-%s", fileID, contentID)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO downloads (id, user_id, media_file_id, content_id, episode_id, status)
+		VALUES ($1, $2, $3, $4, NULLIF($5, ''), 'completed')`, id, userID, fileID, contentID, episodeID); err != nil {
+		t.Fatalf("seed download: %v", err)
+	}
+	return id
+}
+
+// relinkDownloadFile returns the file a download points at, or 0 when the
+// download is gone.
+func relinkDownloadFile(t *testing.T, pool *pgxpool.Pool, downloadID string) int {
+	t.Helper()
+	var fileID int
+	err := pool.QueryRow(t.Context(), `SELECT media_file_id FROM downloads WHERE id = $1`, downloadID).Scan(&fileID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fileID
+}
+
 func relinkStandInFor(t *testing.T, pool *pgxpool.Pool, fileID int) int {
 	t.Helper()
 	var standInFor *int
@@ -523,6 +569,7 @@ func checkRelinkCase(t *testing.T, pool *pgxpool.Pool, tc relinkCase) {
 		t.Fatalf("GetByPath(original): %v", err)
 	}
 	contentID, episodeID := seedRelinkTitle(t, pool, repo, tc, original)
+	download := seedRelinkDownload(t, pool, original.ID, contentID, episodeID)
 	if tc.claimRoot != "" {
 		if _, err := pool.Exec(ctx, `INSERT INTO media_item_roots (media_folder_id, canonical_root_path, content_id) VALUES ($1, $2, $3)`,
 			folderID, tc.path(root, tc.claimRoot), contentID); err != nil {
@@ -570,8 +617,22 @@ func checkRelinkCase(t *testing.T, pool *pgxpool.Pool, tc relinkCase) {
 	} else {
 		checkRelinkRematch(t, pool, repo, tc, queue, original, moved, root, from, to, contentID, episodeID)
 	}
+	// The download was authorized for the original title, so it stays with
+	// the row while the row keeps that title and moves to the stand-in that
+	// holds the title otherwise.
+	wantDownload := moved.ID
+	if !tc.wantLinks {
+		left, err := repo.GetByPath(ctx, from)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantDownload = left.ID
+	}
+	if got := relinkDownloadFile(t, pool, download); got != wantDownload {
+		t.Fatalf("download of the original title points at file %d, want %d", got, wantDownload)
+	}
 	if tc.revert {
-		checkRelinkRevert(t, pool, s, folder, tc, original, from, to, contentID, episodeID)
+		checkRelinkRevert(t, pool, s, folder, tc, original, from, to, contentID, episodeID, download)
 		return
 	}
 	if tc.deleteOriginal {
@@ -671,7 +732,7 @@ func checkRelinkRematch(t *testing.T, pool *pgxpool.Pool, repo *FileRepository, 
 // checkRelinkRevert links the retitled row to another title, as a match
 // would, renames the file back, and checks that the row takes its old path
 // and title back while the other title is held by a stand-in.
-func checkRelinkRevert(t *testing.T, pool *pgxpool.Pool, s *Scanner, folder *models.MediaFolder, tc relinkCase, original *models.MediaFile, from, to, contentID, episodeID string) {
+func checkRelinkRevert(t *testing.T, pool *pgxpool.Pool, s *Scanner, folder *models.MediaFolder, tc relinkCase, original *models.MediaFile, from, to, contentID, episodeID, download string) {
 	t.Helper()
 	ctx := t.Context()
 	otherContent, otherEpisode := seedRelinkItem(t, pool, tc.folderType, tc.otherID())
@@ -679,6 +740,7 @@ func checkRelinkRevert(t *testing.T, pool *pgxpool.Pool, s *Scanner, folder *mod
 		original.ID, otherContent, otherEpisode); err != nil {
 		t.Fatal(err)
 	}
+	otherDownload := seedRelinkDownload(t, pool, original.ID, otherContent, otherEpisode)
 	if err := os.Rename(to, from); err != nil {
 		t.Fatal(err)
 	}
@@ -732,6 +794,14 @@ func checkRelinkRevert(t *testing.T, pool *pgxpool.Pool, s *Scanner, folder *mod
 	if left.MissingSince == nil || left.ContentID != otherContent || left.EpisodeID != otherEpisode || relinkStandInFor(t, pool, left.ID) != original.ID {
 		t.Fatalf("row at the abandoned path = missing %v links %q/%q, want a stand-in for %d with links %q/%q",
 			left.MissingSince, left.ContentID, left.EpisodeID, original.ID, otherContent, otherEpisode)
+	}
+	wantDownload := original.ID
+	if tc.standInSwept {
+		// Deleted with the stand-in, as a missing file's downloads are.
+		wantDownload = 0
+	}
+	if got, gotOther := relinkDownloadFile(t, pool, download), relinkDownloadFile(t, pool, otherDownload); got != wantDownload || gotOther != left.ID {
+		t.Fatalf("downloads after the revert point at %d (old title) and %d (other title), want %d and the stand-in %d", got, gotOther, wantDownload, left.ID)
 	}
 }
 

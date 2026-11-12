@@ -4164,6 +4164,17 @@ func findContentIDByRootPath(ctx context.Context, queryer fileQueryer, folderID 
 // FindContentIDByObservedRootPath finds an existing linked content item for
 // files under the same observed root path within a media folder.
 func (r *FileRepository) FindContentIDByObservedRootPath(ctx context.Context, folderID int, observedRootPath, preferredType string) (string, error) {
+	return r.findContentIDByObservedRootPath(ctx, folderID, observedRootPath, preferredType, 0)
+}
+
+// FindOtherContentIDByObservedRootPath is FindContentIDByObservedRootPath
+// over every file but excludeFileID, the lookup matching makes for a file
+// that is not linked yet.
+func (r *FileRepository) FindOtherContentIDByObservedRootPath(ctx context.Context, folderID int, observedRootPath, preferredType string, excludeFileID int) (string, error) {
+	return r.findContentIDByObservedRootPath(ctx, folderID, observedRootPath, preferredType, excludeFileID)
+}
+
+func (r *FileRepository) findContentIDByObservedRootPath(ctx context.Context, folderID int, observedRootPath, preferredType string, excludeFileID int) (string, error) {
 	query := `SELECT mf.content_id
 		FROM media_files mf
 		JOIN media_items mi ON mi.content_id = mf.content_id
@@ -4171,11 +4182,12 @@ func (r *FileRepository) FindContentIDByObservedRootPath(ctx context.Context, fo
 		  AND mf.observed_root_path = $2
 		  AND mf.content_id IS NOT NULL
 		  AND mf.missing_since IS NULL
+		  AND mf.id <> $3
 		ORDER BY `
 
-	args := []any{folderID, observedRootPath}
+	args := []any{folderID, observedRootPath, excludeFileID}
 	if preferredType != "" {
-		query += `CASE WHEN mi.type = $3 THEN 0 ELSE 1 END, `
+		query += `CASE WHEN mi.type = $4 THEN 0 ELSE 1 END, `
 		args = append(args, preferredType)
 	}
 	query += `CASE WHEN lower(trim(mi.status)) = 'matched' THEN 0 ELSE 1 END,

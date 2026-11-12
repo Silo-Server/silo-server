@@ -150,7 +150,16 @@ What the new path says about the title decides the row's links:
   naming the moved row. To the old title this is exactly a file going missing:
   it is hidden, held for the removal grace, keeps its added date if a rematch
   lands on it again, and is deleted after the grace if nothing does. A row
-  that had no links leaves no stand-in. Root and group claims are untouched:
+  that had no links leaves no stand-in.
+
+  Offline downloads follow the title they were authorized for, not the
+  bytes: a download whose title is not the row's new one moves to the
+  stand-in (and a row with no links but such downloads leaves a stand-in for
+  them). A download is then never served or prepared from a file that has
+  become another title: the stand-in is missing, so serving an original, its
+  subtitles, or its embedded tracks is refused as for any missing file, and
+  the download is deleted with the stand-in after the grace, as it was with
+  the missing row before rows were reused. Root and group claims are untouched:
   claims are kept by present files, so the old path's claims age out as they
   do when a file goes missing, and the new path is claimed by matching as for
   a new file.
@@ -160,7 +169,8 @@ What the new path says about the title decides the row's links:
   path gone, the rename is undone (`FileRepository.ReclaimStandIn`): in one
   transaction the stand-in is deleted and the row takes the path back with the
   stand-in's links, numbers, edition and presentation (an import edition
-  included), first sighting, and held dates. If a match had linked the row to
+  included), first sighting, and held dates, and the stand-in's downloads
+  return to the row. If a match had linked the row to
   another title meanwhile, that title gets a stand-in at the path the row
   leaves. A match that changes the row during the reclaim fails its fence, and
   the reclaim reads the row again and retries once. If the stand-in is gone by

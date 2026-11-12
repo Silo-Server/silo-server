@@ -458,7 +458,9 @@ func (s *Scanner) matchKeepsLinkedTitle(ctx context.Context, moved *scanStateFil
 		if filepath.Clean(next.ObservedRootPath) == filepath.Clean(next.FilePath) {
 			return false, nil
 		}
-		resolved, err = s.fileRepo.FindContentIDByObservedRootPath(ctx, next.MediaFolderID, next.ObservedRootPath, itemType)
+		// Matching runs for the row once it is unlinked, so the row itself
+		// is never its own sibling.
+		resolved, err = s.fileRepo.FindOtherContentIDByObservedRootPath(ctx, next.MediaFolderID, next.ObservedRootPath, itemType, moved.ID)
 		if err != nil || resolved != "" {
 			return resolved == moved.ContentID, err
 		}
