@@ -33,8 +33,11 @@ export function TitleBlock({
   chapterTitle?: string;
   /** "Ends 7:02 PM", while the length is known. */
   endsAt?: string | null;
-  /** Elapsed time and length: a time line of their own, followed by `endsAt`. */
-  times?: { elapsed: string; total: string };
+  /**
+   * Elapsed time and, once known, the length: a time line of their own,
+   * followed by `endsAt`.
+   */
+  times?: { elapsed: string; total?: string };
 }) {
   const meta = [subtitleLabel, chapterTitle, times ? null : endsAt].filter((part): part is string =>
     Boolean(part),
@@ -60,7 +63,13 @@ export function TitleBlock({
         <div className="hud-meta tabular-nums">
           {/* Clock times read left to right in every language. */}
           <span dir="ltr" className="shrink-0">
-            {times.elapsed} {TIME_SEPARATOR} {times.total}
+            {times.elapsed}
+            {times.total ? (
+              <>
+                {" "}
+                {TIME_SEPARATOR} {times.total}
+              </>
+            ) : null}
           </span>
           {endsAt ? (
             <>

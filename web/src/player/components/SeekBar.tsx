@@ -294,6 +294,15 @@ export function SeekBar({
     [dragging, getTimeFromTouch, onSeek],
   );
 
+  // A touch the system takes away (a gesture, a call) ends the drag without
+  // seeking, so neither the preview nor the finish time stays on it.
+  const handleTouchCancel = useCallback(() => {
+    if (!dragging) return;
+    setDragging(false);
+    setDragTime(null);
+    setHoverTime(null);
+  }, [dragging]);
+
   // Dragging a marker edge: its own pointer loop, isolated from the seek click.
   const handleEdgePointerDown = useCallback(
     (kind: MarkerKind, edge: "start" | "end") => (e: React.PointerEvent) => {
@@ -502,6 +511,7 @@ export function SeekBar({
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchCancel}
         onKeyDown={handleKeyDown}
       >
         <div className="relative w-full">

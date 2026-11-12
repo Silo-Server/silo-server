@@ -572,11 +572,10 @@ export function PlayerControls({
                 language. */}
             <TitleBlock
               {...titleProps}
-              times={
-                duration > 0
-                  ? { elapsed: formatTime(currentTime), total: formatTime(duration) }
-                  : undefined
-              }
+              times={{
+                elapsed: formatTime(currentTime),
+                total: duration > 0 ? formatTime(duration) : undefined,
+              }}
             />
             <div dir="ltr" className="flex items-center gap-3">
               {transport(false)}
