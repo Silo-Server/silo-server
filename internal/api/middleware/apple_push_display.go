@@ -22,8 +22,15 @@ import (
 // must stop working) while skipping the PIN proof, which the token already
 // represents. The header rewrite means a token cannot be replayed against
 // another profile's inbox.
+//
+// `beforeSession`, when set, runs once the display token's signature and type
+// are valid and before its login-session lookup, with the token's claims
+// attached so per-account budgets apply. It is meant for the rate limiter:
+// the lookup is bounded, while a credential that does not validate is refused
+// before any limiter, as RequireAuth refuses it, and spends no budget.
 func (am *AuthMiddleware) RequireApplePushDisplayAuth(
 	fallback func(http.Handler) http.Handler,
+	beforeSession func(http.Handler) http.Handler,
 	afterAuth func(http.Handler) http.Handler,
 ) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -31,6 +38,12 @@ func (am *AuthMiddleware) RequireApplePushDisplayAuth(
 		display := next
 		if afterAuth != nil {
 			display = afterAuth(next)
+		}
+		var session http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			am.serveApplePushDisplaySession(w, r, GetClaims(r.Context()), display)
+		})
+		if beforeSession != nil {
+			session = beforeSession(session)
 		}
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Header only. extractBearerToken also accepts ?token= for media
@@ -52,42 +65,48 @@ func (am *AuthMiddleware) RequireApplePushDisplayAuth(
 				writeUnauthorized(w, "Invalid or expired token", ReasonInvalidCredential)
 				return
 			}
-			authority, active, err := am.sessionValidator.ActiveSession(r.Context(), claims.SessionID, claims.UserID)
-			if err != nil {
-				writeCredentialCheckUnavailable(w, r, err)
-				return
-			}
-			if !active {
-				writeUnauthorized(w, "Session is no longer valid", ReasonSessionInvalid)
-				return
-			}
-			// A remote-playback handoff never registers for push; a display
-			// token an older release minted for one is refused.
-			if authority.IsRemotePlayback() {
-				writeForbidden(w, "A remote-playback session cannot read notifications")
-				return
-			}
-			// A display token lives as long as the session and is not
-			// refreshed, so a role change does not refuse it the way it
-			// refuses an access token; the request carries the current role
-			// instead of the one the token was minted with.
-			claims.Role = authority.Role
-			// Same attribution RequireAuth performs, so display fetches are
-			// not anonymous in the activity and request logs.
-			if lc := activitylog.GetLogContext(r.Context()); lc != nil {
-				uid := claims.UserID
-				lc.UserID = &uid
-				lc.ImpersonatorUserID = claims.ImpersonatorUserID
-				lc.SessionID = claims.SessionID
-			}
-			ctx := SetClaims(r.Context(), claims)
-			ctx = SetProfileID(ctx, claims.ProfileID)
-			r = r.WithContext(ctx)
-			r.Header.Set("X-Profile-Id", claims.ProfileID)
-			r.Header.Del("X-Profile-Token")
-			display.ServeHTTP(w, r)
+			session.ServeHTTP(w, r.WithContext(SetClaims(r.Context(), claims)))
 		})
 	}
+}
+
+// serveApplePushDisplaySession checks the display token's login session and
+// serves display with the token's claims and bound profile.
+func (am *AuthMiddleware) serveApplePushDisplaySession(w http.ResponseWriter, r *http.Request, claims *auth.Claims, display http.Handler) {
+	authority, active, err := am.sessionValidator.ActiveSession(r.Context(), claims.SessionID, claims.UserID)
+	if err != nil {
+		writeCredentialCheckUnavailable(w, r, err)
+		return
+	}
+	if !active {
+		writeUnauthorized(w, "Session is no longer valid", ReasonSessionInvalid)
+		return
+	}
+	// A remote-playback handoff never registers for push; a display
+	// token an older release minted for one is refused.
+	if authority.IsRemotePlayback() {
+		writeForbidden(w, "A remote-playback session cannot read notifications")
+		return
+	}
+	// A display token lives as long as the session and is not
+	// refreshed, so a role change does not refuse it the way it
+	// refuses an access token; the request carries the current role
+	// instead of the one the token was minted with.
+	claims.Role = authority.Role
+	// Same attribution RequireAuth performs, so display fetches are
+	// not anonymous in the activity and request logs.
+	if lc := activitylog.GetLogContext(r.Context()); lc != nil {
+		uid := claims.UserID
+		lc.UserID = &uid
+		lc.ImpersonatorUserID = claims.ImpersonatorUserID
+		lc.SessionID = claims.SessionID
+	}
+	ctx := SetClaims(r.Context(), claims)
+	ctx = SetProfileID(ctx, claims.ProfileID)
+	r = r.WithContext(ctx)
+	r.Header.Set("X-Profile-Id", claims.ProfileID)
+	r.Header.Del("X-Profile-Token")
+	display.ServeHTTP(w, r)
 }
 
 // headerBearerToken reads only the Authorization header, ignoring the

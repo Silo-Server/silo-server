@@ -174,8 +174,10 @@ The route accepts ordinary bearer/API-key authentication with `X-Profile-Id`,
 or the existing Apple display token in the Authorization header. A display
 token binds its own profile, ignores a supplied profile header, and requires a
 valid login session and a still-owned profile. It is rejected by other API v2
-operations. Query-string display credentials are not accepted. Existing
-pre-auth and post-auth rate limits apply. This read neither marks a notification
+operations. Query-string display credentials are not accepted. A display
+token spends rate-limit budget once its signature checks out and before its
+login session is looked up, and again after authentication; a credential that
+does not validate is refused without spending any. This read neither marks a notification
 read nor sends a push. Apple registration and display-token issuance use
 `registerApplePushDevice`; see
 [Apple registration and display renewal](#apple-registration-and-display-renewal).

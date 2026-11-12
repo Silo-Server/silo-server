@@ -399,8 +399,10 @@ func registerNotificationInbox(reg *Registry) {
 }
 
 // Only the extension display operation admits a display token. Reuse the
-// bridge's session/profile validation and both limiter positions, including
-// the pre-auth budget protecting the long-lived token's session lookup.
+// bridge's session/profile validation and both limiter positions: the
+// display-token path is limited before the long-lived token's session lookup,
+// and a credential that does not validate is refused before any limiter, as
+// on every other authenticated operation.
 func notificationDisplayGateChain(deps Dependencies) ([]func(http.Handler) http.Handler, string) {
 	if deps.Auth == nil {
 		return nil, "auth"
@@ -416,11 +418,7 @@ func notificationDisplayGateChain(deps Dependencies) ([]func(http.Handler) http.
 		return h
 	}
 	fallback := func(next http.Handler) http.Handler { return deps.Auth.RequireAuth(postAuth(next)) }
-	chain := make([]func(http.Handler) http.Handler, 0, 2)
-	if deps.RateLimit != nil {
-		chain = append(chain, deps.RateLimit)
-	}
-	return append(chain, deps.Auth.RequireApplePushDisplayAuth(fallback, postAuth)), ""
+	return []func(http.Handler) http.Handler{deps.Auth.RequireApplePushDisplayAuth(fallback, deps.RateLimit, postAuth)}, ""
 }
 
 // NotificationCapabilities is the v2 projection of configured notification channels.

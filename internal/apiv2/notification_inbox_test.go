@@ -252,3 +252,43 @@ func TestNotificationDisplayCredentialScope(t *testing.T) {
 		})
 	}
 }
+
+// The display route's limiter guards the display token's session lookup, but
+// a credential that does not validate must be refused before it, as on every
+// other authenticated route: otherwise a client rotating X-Forwarded-For
+// gets a fresh per-address allowance each request and spends the global
+// budget for everyone (#2750). The limiter here refuses every request it
+// sees, so a 429 means the request reached it.
+func TestNotificationDisplayLimiterSkipsInvalidCredentials(t *testing.T) {
+	deps := pilotDeps(nil, nil)
+	deps.NotificationInbox = fixtureNotificationInbox()
+	claims := map[string]*auth.Claims{
+		"display":    {UserID: 1, Role: "user", SessionID: "live", ProfileID: "p-owner", TokenType: auth.TokenTypeApplePushDisplay},
+		"store-down": {UserID: 1, Role: "user", SessionID: storeDownSession, ProfileID: "p-owner", TokenType: auth.TokenTypeApplePushDisplay},
+		"access":     {UserID: 1, Role: "user", SessionID: "live", TokenType: auth.TokenTypeAccess},
+	}
+	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{claims}, fakeSessions{map[string]string{"live": "user"}}, nil, nil)
+	deps.RateLimit = func(http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTooManyRequests) })
+	}
+	h := NewHandler(deps)
+	displayPath := Prefix + "/notifications/push/apple/display/" + notificationFixtureID
+	for _, tc := range []struct {
+		name    string
+		headers map[string]string
+		status  int
+	}{
+		{"invalid token is refused before the limiter", bearer("junk"), http.StatusUnauthorized},
+		{"no credential is refused before the limiter", map[string]string{}, http.StatusUnauthorized},
+		{"display token is limited before its session lookup", bearer("store-down"), http.StatusTooManyRequests},
+		{"valid display token is limited", bearer("display"), http.StatusTooManyRequests},
+		{"access token is limited", with(bearer("access"), "X-Profile-Id", "p-owner"), http.StatusTooManyRequests},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := do(t, h, http.MethodGet, displayPath, "", tc.headers)
+			if rec.Code != tc.status {
+				t.Fatalf("got %d, want %d: %s", rec.Code, tc.status, rec.Body.String())
+			}
+		})
+	}
+}
