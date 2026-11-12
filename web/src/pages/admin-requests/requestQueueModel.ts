@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import type { MediaRequest, RequestMediaType, RequestTarget } from "@/api/types";
 import type { AdminRequestCounts, AdminRequestQueueView } from "@/api/v2/adminRequests";
 import { t, type MessageKey } from "@/i18n";
@@ -190,4 +191,11 @@ export function requestProblemText(
   if (request.last_error) return { text: request.last_error, error: true };
   if (request.outcome_reason) return { text: request.outcome_reason, error: false };
   return null;
+}
+
+/** The queue's columns: request, state, servers, then one per chosen setting. */
+export function queueColumnsStyle(optionColumns: number) {
+  return {
+    "--queue-columns": `minmax(0,1.4fr) minmax(0,1fr) minmax(0,1.3fr)${" minmax(0,0.8fr)".repeat(optionColumns)}`,
+  } as CSSProperties;
 }

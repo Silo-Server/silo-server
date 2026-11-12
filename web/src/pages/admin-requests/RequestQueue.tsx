@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import type { CSSProperties, MouseEvent } from "react";
+import type { MouseEvent } from "react";
 import { Link, useSearchParams } from "react-router";
 import { Maximize2, RefreshCw, Search, X } from "lucide-react";
 import type { MediaRequest } from "@/api/types";
 import { listAdminRequestOptionsV2, type AdminRequestCounts } from "@/api/v2/adminRequests";
 import { BulkSelectionCheckbox } from "@/components/BulkSelectionCheckbox";
-import { RequestDownloadProgress } from "@/components/RequestDownloadProgress";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,23 +30,21 @@ import { RequestActionButtons, type RequestQueueActionHandlers } from "./Request
 import { RequestQueueDialog } from "./RequestQueueDialog";
 import { ApproveOptionsDialog, type ApprovePrompt } from "./ApproveOptionsDialog";
 import { BulkProgress } from "./BulkProgress";
+import { OptionCells, TargetList } from "./QueueCells";
 import {
   EmptyPanel,
   ReasonDialog,
   RequestPoster,
   RequestStateSummary,
   RowsSkeleton,
-  TargetStatusBadge,
 } from "./queueParts";
 import {
   defaultRequestQueueView,
   parseRequestQueueUser,
   parseRequestQueueView,
+  queueColumnsStyle,
   REQUEST_QUEUE_VIEWS,
-  distinctTargets,
   requestOptionColumns,
-  requestOptionValue,
-  targetServerName,
   type RequestQueueAction,
   type RequestQueueMediaFilter,
   type RequestQueueView,
@@ -55,8 +52,6 @@ import {
 
 const SEARCH_DEBOUNCE_MS = 300;
 const SEPARATOR = " · ";
-const SPACE = " ";
-const NO_VALUE = "—";
 
 const MEDIA_FILTERS: { value: RequestQueueMediaFilter; label: MessageKey }[] = [
   { value: "all", label: "web.admin.requests.queue.media.all" },
@@ -662,13 +657,6 @@ function fromControl(event: MouseEvent) {
   return (event.target as HTMLElement).closest("a, button, input, label") !== null;
 }
 
-/** The queue's columns: request, state, servers, then one per chosen setting. */
-function queueColumnsStyle(optionColumns: number) {
-  return {
-    "--queue-columns": `minmax(0,1.4fr) minmax(0,1fr) minmax(0,1.3fr)${" minmax(0,0.8fr)".repeat(optionColumns)}`,
-  } as CSSProperties;
-}
-
 function QueueRow({
   request,
   requester,
@@ -763,23 +751,7 @@ function QueueRow({
         </div>
         <RequestStateSummary request={request} />
         <TargetList request={request} />
-        {optionColumns.map((column) => {
-          const value = requestOptionValue(request, column);
-          return (
-            // Below the wide layout there is no header row, so the cell
-            // names its setting, and an empty one is left out.
-            <p
-              key={column}
-              className={cn("min-w-0 text-xs break-words", !value && "max-lg:hidden")}
-            >
-              <span className="text-muted-foreground lg:hidden">
-                {column}
-                {SEPARATOR}
-              </span>
-              {value ?? NO_VALUE}
-            </p>
-          );
-        })}
+        <OptionCells request={request} columns={optionColumns} />
       </div>
       <div className="flex w-full items-center justify-end gap-2 lg:w-60 lg:shrink-0">
         <RequestActionButtons request={request} handlers={handlers} />
@@ -795,47 +767,5 @@ function QueueRow({
         </Button>
       </div>
     </li>
-  );
-}
-
-function TargetList({ request }: { request: MediaRequest }) {
-  const t = useT();
-  const targets = distinctTargets(request.targets);
-  if (targets.length === 0) {
-    return <p className="text-muted-foreground text-xs">{t("web.admin.requests.queue.notSent")}</p>;
-  }
-  return (
-    <ul className="min-w-0 space-y-1.5 text-xs">
-      {targets.map(({ target, shared }) => (
-        <li key={target.id} className="min-w-0">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {shared ? null : (
-              <>
-                <span className="font-medium">{target.quality}</span>
-                {SPACE}
-              </>
-            )}
-            <span>{targetServerName(target)}</span>
-            {SPACE}
-            <TargetStatusBadge target={target} />
-          </div>
-          {target.route_name ? (
-            <p className="text-muted-foreground truncate">
-              {t("web.admin.requests.queue.byRoute", { route: target.route_name })}
-            </p>
-          ) : null}
-          {target.download ? (
-            <RequestDownloadProgress
-              download={target.download}
-              admin
-              className="mt-1 w-56 max-w-full"
-            />
-          ) : null}
-          {target.last_error ? (
-            <p className="text-destructive line-clamp-2 break-words">{target.last_error}</p>
-          ) : null}
-        </li>
-      ))}
-    </ul>
   );
 }
