@@ -51,6 +51,7 @@
 ./internal/scanner TestFinalizeVariantsRetotalsPartsLeftByARenameDB
 ./internal/scanner TestFinalizeVariantsReadsWholeGroupFoundOutsideTheScopeDB
 ./internal/scanner TestScanKeepsFileRowAcrossRenameDB
+./internal/scanner TestMatchLinkRefusedAfterRetitleDB
 ./internal/scanner TestScanIndexesFileWithNonUTF8Name
 ./migrations TestScanRunForeignKeysHaveLeadingIndexesDB
 

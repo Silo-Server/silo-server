@@ -166,6 +166,27 @@ What the new path says about the title decides the row's links:
   claims are kept by present files, so the old path's claims age out as they
   do when a file goes missing, and the new path is claimed by matching as for
   a new file.
+
+  A match job that read the row before the retitle must not link it back to
+  the old title. The queues cannot stop that job: the movie worker loads a
+  claimed batch up front and can hold a snapshot for minutes, and the
+  retitle's re-enqueue only sets `rerun_requested` on the leased queue row.
+  So the matcher's per-file link writes apply only while the row still has
+  the path the match read: `FileRepository.UpdateContentID` (every link write
+  in `MetadataService.createOrFindSkeleton`, in
+  `internal/metadata/service.go`) and `FileRepository.UpdateEpisodeLink` (the
+  series episode linker) both take that path, and a write that finds the row
+  at another path changes nothing and returns `scanner.ErrFileMoved`. For a
+  skeleton the refusal is the job's error: the queue records it and, with
+  `rerun_requested` set, runs the job again at once against the row as it is
+  now, and a skeleton item the job had just created for the link is deleted
+  again while nothing references it. The episode linker skips the file and
+  goes on with the series' other files, since the retitled row's rematch
+  links it. The fence is part of the `UPDATE`, which waits on the retitle's
+  row lock, so it holds between API servers too. Writes keyed by the row's
+  current columns (`UpdateContentIDByObservedRootPath`,
+  `BulkLinkEpisodesBySeries`, group relinks) need no fence: a retitled row
+  no longer has the root, group, or content link they select by.
 - **Back to a stand-in.** A file that appears at a stand-in's path is checked
   against the moved-file rows before anything probes it onto the stand-in.
   When it is the row the stand-in stands for, with the same bytes and its new

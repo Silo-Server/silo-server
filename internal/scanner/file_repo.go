@@ -31,6 +31,10 @@ var (
 	// bytes nobody is serving any more, so it must not overwrite the row and
 	// must not be pushed at live sessions.
 	ErrStaleCopySafetyScan = errors.New("copy-safety verdict superseded by a newer generation of the file")
+	// ErrFileMoved reports a link write refused because the row no longer has
+	// the path the caller read: a scan moved it, typically retitling it for
+	// rematch (see RetitleMovedFile), after the caller's snapshot was taken.
+	ErrFileMoved = errors.New("media file moved since it was read")
 )
 
 // FileRepository provides CRUD operations for the media_files table.
@@ -3793,18 +3797,35 @@ func (r *FileRepository) listServedEpisodeFiles(
 }
 
 // UpdateContentID sets the content_id on a media file, linking it to a matched
-// media item. This is called by the matcher after a successful resolution.
-func (r *FileRepository) UpdateContentID(ctx context.Context, fileID int, contentID string) error {
+// media item. The matcher calls it with the path it read the file at, and the
+// write applies only while the row still has that path: a scan that moved the
+// row to another title meanwhile (RetitleMovedFile) cleared its links for a
+// rematch, and a decision made from the old path must not link it back. A
+// refused write returns ErrFileMoved; a missing row returns ErrFileNotFound.
+func (r *FileRepository) UpdateContentID(ctx context.Context, fileID int, filePath, contentID string) error {
 	tag, err := r.pool.Exec(ctx,
-		"UPDATE media_files SET content_id = $1, updated_at = NOW() WHERE id = $2",
-		contentID, fileID)
+		"UPDATE media_files SET content_id = $1, updated_at = NOW() WHERE id = $2 AND file_path = $3",
+		contentID, fileID, filePath)
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrFileNotFound
+		return r.unwrittenFileError(ctx, fileID)
 	}
 	return nil
+}
+
+// unwrittenFileError explains a path-fenced write that matched no row:
+// ErrFileNotFound when the row is gone, ErrFileMoved when it has another path.
+func (r *FileRepository) unwrittenFileError(ctx context.Context, fileID int) error {
+	var exists bool
+	if err := r.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM media_files WHERE id = $1)`, fileID).Scan(&exists); err != nil {
+		return fmt.Errorf("checking media file %d: %w", fileID, err)
+	}
+	if !exists {
+		return ErrFileNotFound
+	}
+	return ErrFileMoved
 }
 
 // ReplaceContentID reassigns all files linked to one content item to another.
@@ -3956,8 +3977,11 @@ func (r *FileRepository) ClearContentLinksByPathPrefix(ctx context.Context, fold
 	return cleared, nil
 }
 
-// UpdateEpisodeLink sets the episode linkage fields on a media file.
-func (r *FileRepository) UpdateEpisodeLink(ctx context.Context, fileID int, episodeID string, seasonNum, episodeNum int) error {
+// UpdateEpisodeLink sets the episode linkage fields on a media file. Like
+// UpdateContentID it applies only while the row still has filePath, the path
+// the caller read it at, and returns ErrFileMoved otherwise: the episode was
+// chosen from that path's numbers within the series the file was linked to.
+func (r *FileRepository) UpdateEpisodeLink(ctx context.Context, fileID int, filePath, episodeID string, seasonNum, episodeNum int) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin episode link transaction: %w", err)
@@ -3966,16 +3990,20 @@ func (r *FileRepository) UpdateEpisodeLink(ctx context.Context, fileID int, epis
 
 	var folderID int
 	var oldEpisodeID *string
+	var currentPath string
 	if err := tx.QueryRow(ctx, `
-		SELECT media_folder_id, episode_id
+		SELECT media_folder_id, episode_id, file_path
 		FROM media_files
 		WHERE id = $1
 		FOR UPDATE
-	`, fileID).Scan(&folderID, &oldEpisodeID); err != nil {
+	`, fileID).Scan(&folderID, &oldEpisodeID, &currentPath); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
 		return fmt.Errorf("loading existing episode link: %w", err)
+	}
+	if currentPath != filePath {
+		return ErrFileMoved
 	}
 
 	// The INSERT is the top-level statement: a data-modifying CTE can only be

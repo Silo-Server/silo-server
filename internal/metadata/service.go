@@ -33,7 +33,7 @@ import (
 
 // FileContentUpdater updates content_id on media_files.
 type FileContentUpdater interface {
-	UpdateContentID(ctx context.Context, fileID int, contentID string) error
+	UpdateContentID(ctx context.Context, fileID int, filePath, contentID string) error
 	ReplaceContentID(ctx context.Context, oldContentID, newContentID string) (int, error)
 	FindContentIDByRootPath(ctx context.Context, folderID int, rootPath, preferredType string) (string, error)
 	FindContentIDByObservedRootPath(ctx context.Context, folderID int, observedRootPath, preferredType string) (string, error)
@@ -46,7 +46,7 @@ type FileContentUpdater interface {
 // EpisodeLinker extends FileContentUpdater with episode linking.
 type EpisodeLinker interface {
 	FileContentUpdater
-	UpdateEpisodeLink(ctx context.Context, fileID int, episodeID string, seasonNum, episodeNum int) error
+	UpdateEpisodeLink(ctx context.Context, fileID int, filePath, episodeID string, seasonNum, episodeNum int) error
 	ListBySeriesUnlinked(ctx context.Context, seriesContentID string) ([]*models.MediaFile, error)
 }
 
@@ -7067,7 +7067,15 @@ func (s *MetadataService) linkSeriesFilesToEpisodesWithOptions(ctx context.Conte
 			}
 		}
 
-		if err := linker.UpdateEpisodeLink(ctx, file.ID, episode.ContentID, seasonNum, episodeNum); err != nil {
+		if err := linker.UpdateEpisodeLink(ctx, file.ID, file.FilePath, episode.ContentID, seasonNum, episodeNum); errors.Is(err, scanner.ErrFileMoved) {
+			// A scan moved the file since it was listed; when that took it to
+			// another title its links were cleared and its rematch links it.
+			slog.InfoContext(ctx, "metadata: file moved before its episode link; leaving it to its rematch", "component", "metadata",
+				"series_id", seriesID,
+				"file_id", file.ID,
+				"file_path", file.FilePath,
+				"episode_id", episode.ContentID)
+		} else if err != nil {
 			slog.WarnContext(ctx, "metadata: failed to link file to episode", "component", "metadata",
 				"series_id", seriesID,
 				"file_id", file.ID,
@@ -8156,7 +8164,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 				if _, linkErr := s.claimGroupAndRelink(ctx, folderID, groupKeyVersion, contentGroupKey, contentRootPath, existing.ContentID); linkErr != nil {
 					return nil, fmt.Errorf("claiming confirmed content group: %w", linkErr)
 				}
-				if linkErr := s.fileRepo.UpdateContentID(ctx, file.ID, existing.ContentID); linkErr != nil {
+				if linkErr := s.fileRepo.UpdateContentID(ctx, file.ID, file.FilePath, existing.ContentID); linkErr != nil {
 					return nil, fmt.Errorf("linking file to confirmed group item: %w", linkErr)
 				}
 				if err := s.upsertLibraryMembership(ctx, existing.ContentID, folderID); err != nil {
@@ -8177,7 +8185,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 		if claimedRoot != nil {
 			if existing, ok := s.confirmedOwnershipItem(ctx, claimedRoot.ContentID); ok {
 				s.claimRoot(ctx, folderID, contentRootPath, existing.ContentID)
-				if linkErr := s.fileRepo.UpdateContentID(ctx, file.ID, existing.ContentID); linkErr != nil {
+				if linkErr := s.fileRepo.UpdateContentID(ctx, file.ID, file.FilePath, existing.ContentID); linkErr != nil {
 					return nil, fmt.Errorf("linking file to confirmed root item: %w", linkErr)
 				}
 				if err := s.upsertLibraryMembership(ctx, existing.ContentID, folderID); err != nil {
@@ -8198,7 +8206,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 			return nil, fmt.Errorf("finding existing item by observed root path: %w", err)
 		}
 		if existingContentID != "" {
-			if linkErr := s.fileRepo.UpdateContentID(ctx, file.ID, existingContentID); linkErr != nil {
+			if linkErr := s.fileRepo.UpdateContentID(ctx, file.ID, file.FilePath, existingContentID); linkErr != nil {
 				return nil, fmt.Errorf("linking file to existing root item: %w", linkErr)
 			}
 			if err := s.upsertLibraryMembership(ctx, existingContentID, folderID); err != nil {
@@ -8221,7 +8229,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 			return nil, err
 		}
 		if existingContentID != "" {
-			if linkErr := s.fileRepo.UpdateContentID(ctx, file.ID, existingContentID); linkErr != nil {
+			if linkErr := s.fileRepo.UpdateContentID(ctx, file.ID, file.FilePath, existingContentID); linkErr != nil {
 				return nil, fmt.Errorf("linking file to existing group item: %w", linkErr)
 			}
 			if err := s.upsertLibraryMembership(ctx, existingContentID, folderID); err != nil {
@@ -8266,7 +8274,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 					return nil, fmt.Errorf("claiming existing group: %w", linkErr)
 				}
 			}
-			if linkErr := s.fileRepo.UpdateContentID(ctx, file.ID, existing.ContentID); linkErr != nil {
+			if linkErr := s.fileRepo.UpdateContentID(ctx, file.ID, file.FilePath, existing.ContentID); linkErr != nil {
 				return nil, fmt.Errorf("linking file to existing item: %w", linkErr)
 			}
 			if err := s.upsertLibraryMembership(ctx, existing.ContentID, folderID); err != nil {
@@ -8335,7 +8343,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 			return nil, fmt.Errorf("creating skeleton item: %w", err)
 		}
 		if !inserted {
-			if linkErr := s.fileRepo.UpdateContentID(ctx, file.ID, contentID); linkErr != nil {
+			if linkErr := s.fileRepo.UpdateContentID(ctx, file.ID, file.FilePath, contentID); linkErr != nil {
 				return nil, fmt.Errorf("linking file to existing group item: %w", linkErr)
 			}
 			if err := s.upsertLibraryMembership(ctx, contentID, folderID); err != nil {
@@ -8349,7 +8357,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	}
 
 	// Link file, claim root, and create library membership.
-	if err := s.fileRepo.UpdateContentID(ctx, file.ID, contentID); err != nil {
+	if err := s.fileRepo.UpdateContentID(ctx, file.ID, file.FilePath, contentID); err != nil {
 		if cleanupErr := s.deleteCreatedSkeleton(ctx, contentID); cleanupErr != nil {
 			slog.WarnContext(ctx, "metadata: failed to clean up unlinked skeleton", "component", "metadata",
 				"content_id", contentID,
@@ -8361,7 +8369,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 		return nil, fmt.Errorf("linking file to skeleton: %w", err)
 	}
 	if _, err := s.folderTypeForSkeleton(ctx, folderID); err != nil {
-		if clearErr := s.fileRepo.UpdateContentID(ctx, file.ID, ""); clearErr != nil {
+		if clearErr := s.fileRepo.UpdateContentID(ctx, file.ID, file.FilePath, ""); clearErr != nil {
 			slog.WarnContext(ctx, "metadata: failed to clear file link after disabled skeleton folder", "component", "metadata",
 				"content_id", contentID,
 				"file_id", file.ID,
@@ -8380,7 +8388,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 		return nil, fmt.Errorf("validating skeleton folder before membership: %w", err)
 	}
 	if err := s.upsertLibraryMembership(ctx, contentID, folderID); err != nil {
-		if clearErr := s.fileRepo.UpdateContentID(ctx, file.ID, ""); clearErr != nil {
+		if clearErr := s.fileRepo.UpdateContentID(ctx, file.ID, file.FilePath, ""); clearErr != nil {
 			slog.WarnContext(ctx, "metadata: failed to clear file link after skeleton membership failure", "component", "metadata",
 				"content_id", contentID,
 				"file_id", file.ID,

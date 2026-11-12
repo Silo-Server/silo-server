@@ -64,7 +64,7 @@ func TestMultiEpisodeFileServesSpannedEpisodesDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upsert file: %v", err)
 	}
-	if err := repo.UpdateEpisodeLink(ctx, file.ID, episodeIDs[0], 1, 1); err != nil {
+	if err := repo.UpdateEpisodeLink(ctx, file.ID, file.FilePath, episodeIDs[0], 1, 1); err != nil {
 		t.Fatalf("link file: %v", err)
 	}
 	assertEpisodeMemberships(t, ctx, pool, folderID, episodeIDs[:2])
