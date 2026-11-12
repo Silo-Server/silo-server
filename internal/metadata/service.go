@@ -4758,23 +4758,30 @@ func (s *MetadataService) refreshSeriesChildTarget(
 		if canonicalLanguage == "" {
 			canonicalLanguage = "en"
 		}
+		canonical := strings.EqualFold(language, canonicalLanguage)
+		// Only the pass that empties the target, or one that writes its base
+		// text, is held to the reset's every-provider-answered rule. Another
+		// language's write keeps the base text and, like any refresh, keeps a
+		// stored value a provider sends empty, so a lookup that fails there
+		// can't empty anything and fails as softly as an ordinary refresh's,
+		// even after the reset committed.
+		strict := reset != nil && (canonical || (!resetApplied && !resetLanguageListed))
 
-		providerIDs, err := s.resolveSeriesRefreshProviderIDs(ctx, series, folderID, language, skipLocal, reset != nil)
+		providerIDs, err := s.resolveSeriesRefreshProviderIDs(ctx, series, folderID, language, skipLocal, strict)
 		if err != nil {
 			return err
 		}
-		seasons, seasonSearched, seasonsComplete, err := s.fetchTargetSeasonResults(ctx, providerIDs, folderID, language, seasonNumber, childCtx, skipLocal, reset != nil)
+		seasons, seasonSearched, seasonsComplete, err := s.fetchTargetSeasonResults(ctx, providerIDs, folderID, language, seasonNumber, childCtx, skipLocal, strict)
 		if err != nil {
 			return err
 		}
-		episodes, episodeSearched, err := s.fetchTargetEpisodeResults(ctx, providerIDs, folderID, language, seasonNumber, episodeNumber, childCtx, skipLocal, reset != nil)
+		episodes, episodeSearched, err := s.fetchTargetEpisodeResults(ctx, providerIDs, folderID, language, seasonNumber, episodeNumber, childCtx, skipLocal, strict)
 		if err != nil {
 			return err
 		}
 		if len(seasons) == 0 && len(episodes) == 0 {
 			continue
 		}
-		canonical := strings.EqualFold(language, canonicalLanguage)
 		if canonical {
 			if err := s.fillTargetChildText(ctx, series, providerIDs, folderID, language, seasonNumber, episodeNumber, childCtx, seasons, episodes, mode, mergeMode, reset); err != nil {
 				return err

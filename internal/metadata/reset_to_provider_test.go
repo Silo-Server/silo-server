@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -215,10 +216,10 @@ func TestProcess_ResetToProviderFallbackLanguage(t *testing.T) {
 		wantErr      bool
 		wantTitle    string
 		wantOverview string
-		wantLocks    int
+		wantLocks    []int
 	}{
 		{name: "locked fields take the fallback text", wantTitle: "Sound! Euphonium", wantOverview: "An English overview."},
-		{name: "a failed fallback lookup fails the reset", failIn: "en", wantErr: true, wantTitle: "Typed Title", wantOverview: "Typed overview", wantLocks: 2},
+		{name: "a failed fallback lookup fails the reset", failIn: "en", wantErr: true, wantTitle: "Typed Title", wantOverview: "Typed overview", wantLocks: []int{int(FieldName), int(FieldOverview)}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -250,46 +251,110 @@ func TestProcess_ResetToProviderFallbackLanguage(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got.Title != tc.wantTitle || got.Overview != tc.wantOverview || len(got.LockedFields) != tc.wantLocks {
-				t.Errorf("item = %q / %q locks %v, want %q / %q with %d locks",
+			if got.Title != tc.wantTitle || got.Overview != tc.wantOverview || !slices.Equal(got.LockedFields, tc.wantLocks) {
+				t.Errorf("item = %q / %q locks %v, want %q / %q with locks %v",
 					got.Title, got.Overview, got.LockedFields, tc.wantTitle, tc.wantOverview, tc.wantLocks)
 			}
 		})
 	}
 }
 
-// An episode reset fetches its fallback text before it empties the episode,
-// so a fallback lookup that fails leaves the episode's edits and locks alone.
-func TestResetTargetForLibrary_EpisodeFallbackFailureKeepsTheEpisode(t *testing.T) {
+// childResetHarness seeds the target-refresh show with an edited, locked S05
+// and S05E03, served by provider for every level, in a series whose own
+// language is Swedish.
+func childResetHarness(t *testing.T, provider Provider) (h *testHarness, seriesID, seasonID, episodeID string) {
+	t.Helper()
 	ctx := context.Background()
-	h, seriesID, seasonID, episodeID := seedTargetRefreshHarness(&targetRefreshProvider{})
+	h, seriesID, seasonID, episodeID = seedTargetRefreshHarness(&targetRefreshProvider{})
 	h.itemRepo.items[seriesID].DefaultMetadataLanguage = "sv"
-	h.service.SetFallbackLanguage("en")
-	provider := &languageTextProvider{
-		slug: "tmdb", types: []string{"series"}, failIn: "en",
-		seasons:  map[string][]SeasonResult{"sv": {{SeasonNumber: 5, Title: "Säsong 5"}}},
-		episodes: map[string][]EpisodeResult{"sv": {{SeasonNumber: 5, EpisodeNumber: 3, Title: "Avsnitt 3"}}},
-	}
 	expiresAt := time.Now().Add(time.Hour)
 	for _, level := range []string{"series", "season", "episode"} {
 		h.service.chainCache["0:"+level] = chainCacheEntry{providers: []Provider{provider}, expiresAt: expiresAt}
 	}
-	if err := h.service.episodeRepo.Upsert(ctx, &models.Episode{
-		ContentID: episodeID, SeriesID: seriesID, SeasonID: seasonID, SeasonNumber: 5, EpisodeNumber: 3,
-		Title: "Typed title", Overview: "Typed overview", LockedFields: []int{int(FieldName), int(FieldOverview)},
+	if err := h.service.seasonRepo.Upsert(ctx, &models.Season{
+		ContentID: seasonID, SeriesID: seriesID, SeasonNumber: 5,
+		Title: "Typed season", Overview: "Typed season overview", LockedFields: slices.Clone(childResetSeasonLocks),
 		MetadataSource: "provider",
 	}); err != nil {
 		t.Fatal(err)
 	}
-
-	if err := h.service.ResetTargetForLibrary(ctx, RefreshTargetEpisode, episodeID, 0); err == nil {
-		t.Fatal("ResetTargetForLibrary succeeded, want the failed fallback lookup to fail it")
+	if err := h.service.episodeRepo.Upsert(ctx, &models.Episode{
+		ContentID: episodeID, SeriesID: seriesID, SeasonID: seasonID, SeasonNumber: 5, EpisodeNumber: 3,
+		Title: "Typed title", Overview: "Typed overview", LockedFields: slices.Clone(childResetEpisodeLocks),
+		MetadataSource: "provider",
+	}); err != nil {
+		t.Fatal(err)
 	}
-	got, err := h.service.episodeRepo.GetBySeriesAndNumber(ctx, seriesID, 5, 3)
+	return h, seriesID, seasonID, episodeID
+}
+
+var (
+	childResetSeasonLocks  = []int{int(FieldName), int(FieldOverview)}
+	childResetEpisodeLocks = []int{int(FieldName), int(FieldOverview)}
+)
+
+// A season or episode reset fetches its fallback text before it empties the
+// row, so a fallback lookup that fails leaves the row's edits and locks alone.
+func TestResetTargetForLibrary_ChildFallbackFailureKeepsTheRow(t *testing.T) {
+	for _, targetType := range []string{RefreshTargetSeason, RefreshTargetEpisode} {
+		t.Run(targetType, func(t *testing.T) {
+			ctx := context.Background()
+			provider := &languageTextProvider{
+				slug: "tmdb", types: []string{"series"}, failIn: "en",
+				seasons:  map[string][]SeasonResult{"sv": {{SeasonNumber: 5}}},
+				episodes: map[string][]EpisodeResult{"sv": {{SeasonNumber: 5, EpisodeNumber: 3}}},
+			}
+			h, seriesID, seasonID, episodeID := childResetHarness(t, provider)
+			h.service.SetFallbackLanguage("en")
+			target := seasonID
+			if targetType == RefreshTargetEpisode {
+				target = episodeID
+			}
+
+			if err := h.service.ResetTargetForLibrary(ctx, targetType, target, 0); err == nil {
+				t.Fatal("ResetTargetForLibrary succeeded, want the failed fallback lookup to fail it")
+			}
+			season, err := h.service.seasonRepo.GetBySeriesAndNumber(ctx, seriesID, 5)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if season.Title != "Typed season" || season.Overview != "Typed season overview" || !slices.Equal(season.LockedFields, childResetSeasonLocks) {
+				t.Errorf("season = %q / %q locks %v, want the admin's edits and locks %v", season.Title, season.Overview, season.LockedFields, childResetSeasonLocks)
+			}
+			episode, err := h.service.episodeRepo.GetBySeriesAndNumber(ctx, seriesID, 5, 3)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if episode.Title != "Typed title" || episode.Overview != "Typed overview" || !slices.Equal(episode.LockedFields, childResetEpisodeLocks) {
+				t.Errorf("episode = %q / %q locks %v, want the admin's edits and locks %v", episode.Title, episode.Overview, episode.LockedFields, childResetEpisodeLocks)
+			}
+		})
+	}
+}
+
+// Only the series-language pass empties the row, so a lookup failing in
+// another of the series' languages neither fails the reset nor undoes it.
+func TestResetTargetForLibrary_OtherLanguageFailureDoesNotFailTheReset(t *testing.T) {
+	ctx := context.Background()
+	provider := &languageTextProvider{
+		slug: "tmdb", types: []string{"series"}, failIn: "de",
+		seasons:  map[string][]SeasonResult{"sv": {{SeasonNumber: 5, Title: "Säsong 5"}}},
+		episodes: map[string][]EpisodeResult{"sv": {{SeasonNumber: 5, EpisodeNumber: 3, Title: "Avsnitt 3"}}},
+	}
+	h, seriesID, _, episodeID := childResetHarness(t, provider)
+	h.libraryRepo.setMetadataLanguages(seriesID, []string{"sv", "de"}, nil)
+
+	if err := h.service.ResetTargetForLibrary(ctx, RefreshTargetEpisode, episodeID, 0); err != nil {
+		t.Fatalf("ResetTargetForLibrary: %v", err)
+	}
+	if !provider.askedFor("de") {
+		t.Fatal("the reset never asked for German, so the test proves nothing")
+	}
+	episode, err := h.service.episodeRepo.GetBySeriesAndNumber(ctx, seriesID, 5, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Title != "Typed title" || got.Overview != "Typed overview" || len(got.LockedFields) != 2 {
-		t.Errorf("episode = %q / %q locks %v, want the admin's edits and locks kept", got.Title, got.Overview, got.LockedFields)
+	if episode.Title != "Avsnitt 3" || episode.Overview != "" || len(episode.LockedFields) != 0 {
+		t.Errorf("episode = %q / %q locks %v, want the provider's values and no locks", episode.Title, episode.Overview, episode.LockedFields)
 	}
 }
