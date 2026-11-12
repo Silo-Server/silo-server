@@ -11,6 +11,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 func statusEventTestRepo(t *testing.T) *Repository {
@@ -53,6 +55,12 @@ func statusEventTestRepo(t *testing.T) *Repository {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Registration writes a download only for a present file linked to the
+	// download's title, so the schema keeps the columns it checks.
+	_, err = pool.Exec(t.Context(), `CREATE TABLE media_files(id integer PRIMARY KEY,content_id text,episode_id text,missing_since timestamptz)`)
+	if err != nil {
+		t.Fatal(err)
+	}
 	migration, err := os.ReadFile("../../migrations/sql/20260906025444_download_status_events.sql")
 	if err != nil {
 		t.Fatal(err)
@@ -62,6 +70,21 @@ func statusEventTestRepo(t *testing.T) *Repository {
 		t.Fatal(err)
 	}
 	return NewRepository(pool)
+}
+
+// seedSchemaFiles stores files in statusEventTestRepo's schema as present
+// files linked to their ContentID and EpisodeID.
+func seedSchemaFiles(t *testing.T, repo *Repository, files ...*models.MediaFile) {
+	t.Helper()
+	for _, f := range files {
+		var episodeID *string
+		if f.EpisodeID != "" {
+			episodeID = &f.EpisodeID
+		}
+		if _, err := repo.pool.Exec(t.Context(), `INSERT INTO media_files (id, content_id, episode_id) VALUES ($1, $2, $3)`, f.ID, f.ContentID, episodeID); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func TestDownloadStatusEventValidation(t *testing.T) {

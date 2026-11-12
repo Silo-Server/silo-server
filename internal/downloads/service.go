@@ -618,7 +618,7 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 			d.DeviceID = req.DeviceID
 		}
 		if err := s.repo.Create(ctx, d); err != nil {
-			if managed {
+			if managed && !errors.Is(err, errFileNotRegistrable) {
 				if existing, gerr := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, file.ContentID, file.EpisodeID); gerr == nil {
 					replacement := buildManagedDownload(userID, req.ProfileID, req.DeviceID, managedItem{file: file, contentID: file.ContentID, episodeID: file.EpisodeID}, decision, "", status, size, artifact.ID)
 					row, rerr := s.reuseOrReplaceManaged(ctx, existing, replacement, req.ExpectedRevision, req.ExpectedDownloadID)
@@ -1068,8 +1068,13 @@ func (s *Service) ensureManagedDecisions(ctx context.Context, userID int, req Cr
 			continue
 		}
 		// A concurrent create won this identity between the fetch and the
-		// batch insert (ON CONFLICT skipped it); return the winning row.
+		// batch insert (ON CONFLICT skipped it); return the winning row. With
+		// no winner, the insert skipped the row because its file went missing
+		// or left the title.
 		row, err := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, items[i].contentID, items[i].episodeID)
+		if errors.Is(err, ErrNotFound) {
+			return nil, errFileNotRegistrable
+		}
 		if err != nil {
 			return nil, err
 		}

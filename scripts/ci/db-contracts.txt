@@ -435,6 +435,8 @@
 ./internal/requests TestListDownloadingRequestsOrderDatabase
 ./internal/downloads TestConcurrentArtifactCreatesCannotBypassQuotaDB
 ./internal/downloads TestParkedDownloadIsNotServedOrPreparedFromItsOldFileDB
+./internal/downloads TestRegistrationRefusesAFileOfAnotherTitleDB
+./internal/downloads TestRegistrationAndRetitleSerializeOnTheFileRowDB
 ./internal/downloads TestSubscriptionSyncPagePostgres
 ./internal/downloads TestMonitorSyncKeepsDeletedEpisodesDeletedPostgres
 ./internal/downloads TestMonitorSyncSkipsWatchedEpisodesPostgres

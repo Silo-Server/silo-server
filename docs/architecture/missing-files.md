@@ -159,7 +159,19 @@ What the new path says about the title decides the row's links:
   become another title: the stand-in is missing, so serving an original, its
   subtitles, or its embedded tracks is refused as for any missing file, and
   the download is deleted with the stand-in after the grace, as it was with
-  the missing row before rows were reused. A prepared (remux or transcode) copy is served,
+  the missing row before rows were reused. Registration cannot slip a
+  download past the move: every statement that writes a download's file (in
+  `internal/downloads/repo.go`) locks the file row `FOR SHARE` in that
+  statement and writes only while the file is present and linked to the
+  download's own content and episode, answering the missing-file not-found
+  otherwise. The retitle, and a reclaim of a stand-in, lock the row
+  `FOR UPDATE` in a statement of their own first, before the statement that
+  moves downloads, in one transaction. A registration that holds the row
+  first commits before that statement takes its snapshot, so its download
+  moves with the others; one that waits rereads the retitled row and writes
+  nothing. A single statement would not do: under READ COMMITTED its snapshot
+  predates its wait for the lock. The locks are database row locks, so this
+  holds across API servers. A prepared (remux or transcode) copy is served,
   and prepared again, only for a download on the file row it was made from,
   so a parked download is not given the copy of the row it left; a missing
   row's own copies are served as before. Root and group claims are untouched:

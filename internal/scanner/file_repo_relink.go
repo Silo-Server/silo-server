@@ -127,13 +127,42 @@ func (r *FileRepository) RelinkMovedFile(ctx context.Context, moved *scanStateFi
 // nor such downloads leaves nothing behind.
 //
 // The update is fenced like RelinkMovedFile's and runs in one statement with
-// the insert.
+// the insert, after the row is locked (see lockRowForRetitle).
 func (r *FileRepository) RetitleMovedFile(ctx context.Context, moved *scanStateFile, mf models.MediaFile) (bool, error) {
 	var links titleLinks
 	if runID := scanbatch.RunID(ctx); runID != "" {
 		links.firstSeenScanRunID = &runID
 	}
-	return moveRowToTitle(ctx, r.pool, moved, mf, links)
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("beginning retitle: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	retitled, err := moveRowToTitle(ctx, tx, moved, mf, links)
+	if err != nil || !retitled {
+		return false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, relinkWriteError(err)
+	}
+	return true, nil
+}
+
+// lockRowForRetitle takes the row fileID FOR UPDATE in a statement of its
+// own, before the statement that moves the row's downloads. Download
+// registration locks the file FOR SHARE in the statement that writes the
+// download and requires the file to be present and linked to the download's
+// title (see downloads.registrableFile). Under READ COMMITTED a statement
+// reads the snapshot it took before waiting for a lock, so the download
+// move, as a later statement, sees every download whose registration held
+// the lock first; a registration that waits for this lock rereads the row
+// once the retitle commits and writes nothing for the old title. A row that
+// is gone locks nothing, and the fenced statement then moves nothing.
+func lockRowForRetitle(ctx context.Context, tx pgx.Tx, fileID int) error {
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM media_files WHERE id = $1 FOR UPDATE`, fileID); err != nil {
+		return fmt.Errorf("locking moved media file: %w", err)
+	}
+	return nil
 }
 
 // ReclaimStandIn gives a retitled row its old path back when its file returns
@@ -150,13 +179,18 @@ func (r *FileRepository) RetitleMovedFile(ctx context.Context, moved *scanStateF
 // standInGone reports that no such stand-in was left to delete (the trash
 // sweep took it, or a file was written onto it), so the caller can relink the
 // row the ordinary way. Otherwise a false result means the row changed under
-// the fence.
+// the fence. The row is locked first (see lockRowForRetitle), so a download
+// registered for the row's title meanwhile either commits before the reclaim
+// reads the row's downloads or is refused.
 func (r *FileRepository) ReclaimStandIn(ctx context.Context, standInID int, moved *scanStateFile, mf models.MediaFile) (reclaimed, standInGone bool, err error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return false, false, fmt.Errorf("beginning stand-in reclaim: %w", err)
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	if err := lockRowForRetitle(ctx, tx, moved.ID); err != nil {
+		return false, false, err
+	}
 	var links titleLinks
 	var heldItem, heldEpisode *time.Time
 	var heldEpisodeRun *string
@@ -230,15 +264,20 @@ type titleLinks struct {
 // moveRowToTitle is the fenced statement behind RetitleMovedFile and
 // ReclaimStandIn: it moves the row to mf.FilePath with links, and leaves a
 // stand-in holding the links it had at its old path unless it had none or
-// keeps the same ones.
-func moveRowToTitle(ctx context.Context, q fileQueryer, moved *scanStateFile, mf models.MediaFile, links titleLinks) (bool, error) {
+// keeps the same ones. It locks the row first (lockRowForRetitle; a no-op when
+// tx holds the lock already), so the statement's snapshot includes every
+// download registered against the row before the lock.
+func moveRowToTitle(ctx context.Context, tx pgx.Tx, moved *scanStateFile, mf models.MediaFile, links titleLinks) (bool, error) {
 	args, err := movedFileArgs(moved, mf)
 	if err != nil {
 		return false, err
 	}
+	if err := lockRowForRetitle(ctx, tx, moved.ID); err != nil {
+		return false, err
+	}
 	args = append(args, links.contentID, links.episodeID, links.seasonNumber, links.episodeNumber, links.createdAt, links.firstSeenScanRunID)
 	var count int
-	err = q.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 	WITH previous AS (
 		SELECT * FROM media_files WHERE id = $1`+movedFileFence+`
 		FOR UPDATE
