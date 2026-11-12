@@ -292,3 +292,34 @@ func TestNotificationDisplayLimiterSkipsInvalidCredentials(t *testing.T) {
 		})
 	}
 }
+
+// A display-token request spends the limiter once, as an access-token request
+// does: the pre-session limiter already charged it.
+func TestNotificationDisplayLimiterChargesOnce(t *testing.T) {
+	deps := pilotDeps(nil, nil)
+	deps.NotificationInbox = fixtureNotificationInbox()
+	claims := map[string]*auth.Claims{
+		"display": {UserID: 1, Role: "user", SessionID: "live", ProfileID: "p-owner", TokenType: auth.TokenTypeApplePushDisplay},
+		"access":  {UserID: 1, Role: "user", SessionID: "live", TokenType: auth.TokenTypeAccess},
+	}
+	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{claims}, fakeSessions{map[string]string{"live": "user"}}, nil, nil)
+	calls := 0
+	deps.RateLimit = func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++; next.ServeHTTP(w, r) })
+	}
+	h := NewHandler(deps)
+	displayPath := Prefix + "/notifications/push/apple/display/" + notificationFixtureID
+	for name, headers := range map[string]map[string]string{
+		"display": bearer("display"),
+		"access":  with(bearer("access"), "X-Profile-Id", "p-owner"),
+	} {
+		calls = 0
+		rec := do(t, h, http.MethodGet, displayPath, "", headers)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: got %d: %s", name, rec.Code, rec.Body.String())
+		}
+		if calls != 1 {
+			t.Fatalf("%s: limiter ran %d times, want 1", name, calls)
+		}
+	}
+}
