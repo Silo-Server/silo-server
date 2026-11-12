@@ -8,10 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/Silo-Server/silo-server/internal/ai/chatgpt"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/secret"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func (s *memSettings) UpdateValueAndSettingsAtomic(ctx context.Context, _ string, update func(map[string]string) (map[string]string, error)) error {

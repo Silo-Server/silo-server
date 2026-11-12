@@ -175,6 +175,34 @@ func BuildSubtitleInventoryV3(file *models.MediaFile, additional []SubtitleInven
 	return items
 }
 
+// HideSidecarFileNamesV3 relabels the external sidecars of inventory for a
+// viewer who may not see file names. A sidecar keeps its label only when that
+// label is the title of the sidecar file currently holds at its ordinal; any
+// other label, its file name or one left in a restored plan after the
+// sidecars changed, is replaced. The replacement is the sidecar's embedded
+// title, or its language numbered by models.SidecarLabels, as the catalog
+// labels the same track.
+func HideSidecarFileNamesV3(inventory []SubtitleInventoryItemV3, file *models.MediaFile) {
+	labels := models.SidecarLabels{}
+	for i, item := range inventory {
+		if item.Source != SubtitleSourceExternalV3 {
+			continue
+		}
+		var sub *models.ExternalSubtitle
+		if file != nil && item.CombinedIndex >= 0 && item.CombinedIndex < len(file.ExternalSubtitles) {
+			sub = &file.ExternalSubtitles[item.CombinedIndex]
+		}
+		switch {
+		case sub != nil && !sub.TitleIsFileName() && item.Label == sub.Title:
+			// Its own title: keep it.
+		case sub != nil && sub.TitleIsFileName() && strings.TrimSpace(sub.EmbeddedTitle) != "":
+			inventory[i].Label = sub.EmbeddedTitle
+		default:
+			inventory[i].Label = labels.Next(item.Language, item.Codec, item.Forced, item.HearingImpaired)
+		}
+	}
+}
+
 // SubtitleInventoryV3 returns the combined-ordinal inventory with
 // session-scoped stream URLs attached to every sidecar-deliverable track. It
 // knows no client features, so every URL takes its default representation.

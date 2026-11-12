@@ -10,7 +10,7 @@ The shared application method resolves the source token before reading at most
 The declared request schema is attached after Huma input registration so its
 decoder does not read or re-encode provider bytes before token resolution.
 HTTP request compression and non-JSON media types are refused. When configured,
-the same `autoscan_webhook` per-endpoint rate-limit bucket as the bridge applies,
+the `autoscan_webhook` per-endpoint rate-limit bucket applies,
 including the per-connection cap for forwarded clients described in
 [Sign-in rate limits](auth-api.md#sign-in-rate-limits); rate-limit problems retain
 `Retry-After`.
@@ -55,9 +55,10 @@ The service's internal processing retry is separate from caller replay.
 `available` when the ingress service exists, otherwise `not_configured`. It does not reveal
 source configuration, delivery tokens or whether a particular source is enabled.
 
-The bridge remains unchanged. Operations administration owns source-management
-UI and callback URL projection; source management emits the v2 delivery URL, and
-both legacy registration rows are ratified. Existing external webhook
-configurations require an explicit update; this implementation does not contact
-providers or modify their registered destinations. There is no first-party
+The retired `/api/v1/autoscan/webhooks/{token}` answers `410 Gone` without
+resolving the token. Operations administration owns source-management UI and
+callback URL projection, which emit the v2 URL. Existing external webhook
+configurations that still name the v1 URL require an explicit update; this
+implementation does not contact providers or modify their registered
+destinations. There is no first-party
 native or Jellyfin delivery consumer.

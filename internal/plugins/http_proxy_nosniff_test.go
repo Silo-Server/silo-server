@@ -55,7 +55,7 @@ func TestHTTPProxyPluginContentIsNosniff(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v2/plugins/1/page", nil)
 	req = req.WithContext(WithPluginAccess(req.Context(), false, false))
 	rec := httptest.NewRecorder()
-	proxy.ServeRoute(rec, req, 1, false, false)
+	proxy.serveRoute(rec, req, 1, false, false)
 	if rec.Code != http.StatusOK || rec.Header().Get("X-Content-Type-Options") != "nosniff" ||
 		rec.Header().Get("Content-Type") != "text/plain" || rec.Header().Get("Set-Cookie") != "" {
 		t.Fatalf("route: status = %d headers = %v", rec.Code, rec.Header())

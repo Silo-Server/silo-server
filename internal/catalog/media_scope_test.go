@@ -105,18 +105,16 @@ func TestQueryDefinitionValidate_VideoScope(t *testing.T) {
 }
 
 // TestParseCatalogRequest_VideoWithEpisodesScope pins the search-only scope:
-// the v2 grammar records it for text search and narrows every other read to
-// video, the v1 grammar keeps dropping it, and sources without text search
-// refuse it.
+// the grammar records it for text search and narrows every other read to
+// video, and sources without text search refuse it.
 func TestParseCatalogRequest_VideoWithEpisodesScope(t *testing.T) {
-	v2 := CatalogRequestOptions{SearchMediaScopes: true}
-	req, err := ParseCatalogRequestWithOptions(url.Values{
+	req, err := ParseCatalogRequest(url.Values{
 		"source": {"query"},
 		"q":      {"the rookie"},
 		"type":   {" Video_With_Episodes "},
-	}, v2)
+	})
 	if err != nil {
-		t.Fatalf("ParseCatalogRequestWithOptions: %v", err)
+		t.Fatalf("ParseCatalogRequest: %v", err)
 	}
 	if req.Query.MediaScope != MediaScopeVideo || req.SearchMediaScope != MediaScopeVideoWithEpisodes {
 		t.Fatalf("scopes = query %q search %q, want video and video_with_episodes", req.Query.MediaScope, req.SearchMediaScope)
@@ -129,7 +127,7 @@ func TestParseCatalogRequest_VideoWithEpisodesScope(t *testing.T) {
 		t.Fatalf("search item types = %v (early empty %v), want movie+series+episode", itemTypes, earlyEmpty)
 	}
 
-	browse, err := ParseCatalogRequestWithOptions(url.Values{"type": {"video_with_episodes"}}, v2)
+	browse, err := ParseCatalogRequest(url.Values{"type": {"video_with_episodes"}})
 	if err != nil {
 		t.Fatalf("browse parse: %v", err)
 	}
@@ -137,17 +135,9 @@ func TestParseCatalogRequest_VideoWithEpisodesScope(t *testing.T) {
 		t.Fatalf("browse scope = %q, want video", browse.Query.MediaScope)
 	}
 
-	v1, err := ParseCatalogRequest(url.Values{"q": {"the rookie"}, "type": {"video_with_episodes"}})
-	if err != nil {
-		t.Fatalf("v1 parse: %v", err)
-	}
-	if v1.Query.MediaScope != "" || v1.SearchMediaScope != "" {
-		t.Fatalf("v1 grammar accepted the search-only scope: query %q search %q", v1.Query.MediaScope, v1.SearchMediaScope)
-	}
-
 	for _, source := range []string{"favorites", "watchlist", "history", "user_collection", "section"} {
 		values := url.Values{"source": {source}, "q": {"x"}, "type": {"video_with_episodes"}, "collection_id": {"7"}, "scope": {"home"}, "section_id": {"s"}}
-		if _, err := ParseCatalogRequestWithOptions(values, v2); !errors.Is(err, ErrSearchMediaScopeSource) {
+		if _, err := ParseCatalogRequest(values); !errors.Is(err, ErrSearchMediaScopeSource) {
 			t.Fatalf("source %s accepted the search-only scope (err %v)", source, err)
 		}
 	}
@@ -159,7 +149,7 @@ func TestParseCatalogRequest_VideoWithEpisodesScope(t *testing.T) {
 func TestResolveDirectSearchSource_VideoWithEpisodesScope(t *testing.T) {
 	provider := &fakeSearchProvider{result: &CatalogSearchResult{Items: []*models.MediaItem{}}}
 	resolver := &CatalogResolver{searchProvider: provider}
-	req, err := ParseCatalogRequestWithOptions(url.Values{"q": {"dune"}, "type": {"video_with_episodes"}}, CatalogRequestOptions{SearchMediaScopes: true})
+	req, err := ParseCatalogRequest(url.Values{"q": {"dune"}, "type": {"video_with_episodes"}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -37,6 +37,8 @@ export interface ProfileEditorDialogProps {
    */
   save?: ProfileEditorSave;
   onOpenChange: (open: boolean) => void;
+  /** Extra classes for the dialog's content, e.g. a page's touch-target sizing. */
+  className?: string;
   onSaveSuccess?: (
     profile: Profile,
     context: {

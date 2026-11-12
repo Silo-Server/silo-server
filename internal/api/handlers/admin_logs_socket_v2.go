@@ -9,10 +9,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	evt "github.com/Silo-Server/silo-server/internal/events"
-	"github.com/gorilla/websocket"
 )
 
 // Administrator log stream, v2 handshake.

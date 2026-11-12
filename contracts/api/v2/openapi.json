@@ -208,7 +208,7 @@
         "additionalProperties": false,
         "properties": {
           "can_unlink": {
-            "description": "Whether deleteAccountIdentity would disconnect an identity now: the account has another identity, or its local password still signs in (the account's password sign-in is on, and local password sign-in is on for the server or the account is break-glass). False with no identity",
+            "description": "Whether deleteAccountIdentity would disconnect an identity now for the profile asking: that profile is the account's household manager (deleteAccountIdentity describes who is), and the account has another identity, or its local password still signs in (the account's password sign-in is on, and local password sign-in is on for the server or the account is break-glass). False with no identity",
             "examples": [
               true
             ],
@@ -35555,6 +35555,7 @@
             "type": "string"
           },
           "file_name": {
+            "description": "Absent for viewers without file-path visibility, except on audiobooks and ebooks",
             "type": "string"
           },
           "file_path": {
@@ -54983,6 +54984,7 @@
             "type": "boolean"
           },
           "file_name": {
+            "description": "An external track's file name; absent for viewers without file-path visibility, except on audiobooks and ebooks",
             "type": "string"
           },
           "forced": {
@@ -55517,10 +55519,11 @@
             "type": "string"
           },
           "file_name": {
+            "description": "Absent for viewers without file-path visibility, except on audiobooks and ebooks",
             "type": "string"
           },
           "file_path": {
-            "description": "Only for accounts allowed to see paths",
+            "description": "Absent for viewers without file-path visibility",
             "type": "string"
           },
           "file_size": {
@@ -56502,6 +56505,7 @@
             "type": "boolean"
           },
           "file_name": {
+            "description": "An external track's file name; absent for viewers without file-path visibility, except on audiobooks and ebooks",
             "type": "string"
           },
           "forced": {
@@ -59167,7 +59171,32 @@
   "paths": {
     "/api/v2/account/identities": {
       "get": {
+        "description": "Every profile on the account may read the list. can_unlink answers for the profile X-Profile-Id names, or for a request that names none, by deleteAccountIdentity's rule: a profile other than the account's primary one reads false.",
         "operationId": "listAccountIdentities",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -59198,6 +59227,26 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
           },
           "406": {
             "content": {
@@ -59259,7 +59308,7 @@
         "tags": [
           "account"
         ],
-        "x-silo-class": "authenticated",
+        "x-silo-class": "profile_scoped",
         "x-silo-service-backed": true
       }
     },
@@ -60120,9 +60169,31 @@
     },
     "/api/v2/account/identities/{id}": {
       "delete": {
-        "description": "Allowed only while the account can still sign in another way: its local password (with local password sign-in on, or as a break-glass account) or another identity; otherwise 409 last_sign_in_method. An API key or an impersonation session is refused with 403.",
+        "description": "How the account signs in belongs to the whole household, so only the account's household manager may disconnect an identity. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied. Allowed only while the account can still sign in another way: its local password (with local password sign-in on, or as a break-glass account) or another identity; otherwise 409 last_sign_in_method. An API key or an impersonation session is refused with 403 permission_denied.",
         "operationId": "deleteAccountIdentity",
         "parameters": [
+          {
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
           {
             "description": "Identity id",
             "in": "path",
@@ -60252,7 +60323,7 @@
         "tags": [
           "account"
         ],
-        "x-silo-class": "authenticated",
+        "x-silo-class": "profile_scoped",
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -236788,6 +236859,7 @@
     },
     "/api/v2/webhook-sync/connections": {
       "get": {
+        "description": "Webhook sync connections are account-wide: a connection's receiver URL carries its secret, and its mappings choose which profile an external user's watch state is written to. Only the account's household manager may read or change them. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's API key, or from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied.",
         "operationId": "listWebhookConnections",
         "parameters": [
           {
@@ -236963,6 +237035,7 @@
         "x-silo-service-backed": true
       },
       "post": {
+        "description": "Webhook sync connections are account-wide: a connection's receiver URL carries its secret, and its mappings choose which profile an external user's watch state is written to. Only the account's household manager may read or change them. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's API key, or from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied.",
         "operationId": "createWebhookConnection",
         "parameters": [
           {
@@ -237157,6 +237230,7 @@
     },
     "/api/v2/webhook-sync/connections/{id}": {
       "delete": {
+        "description": "Webhook sync connections are account-wide: a connection's receiver URL carries its secret, and its mappings choose which profile an external user's watch state is written to. Only the account's household manager may read or change them. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's API key, or from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied.",
         "operationId": "deleteWebhookConnection",
         "parameters": [
           {
@@ -237311,6 +237385,7 @@
         "x-silo-service-backed": true
       },
       "put": {
+        "description": "Webhook sync connections are account-wide: a connection's receiver URL carries its secret, and its mappings choose which profile an external user's watch state is written to. Only the account's household manager may read or change them. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's API key, or from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied.",
         "operationId": "updateWebhookConnection",
         "parameters": [
           {
@@ -237514,6 +237589,7 @@
     },
     "/api/v2/webhook-sync/connections/{id}/events": {
       "get": {
+        "description": "Webhook sync connections are account-wide: a connection's receiver URL carries its secret, and its mappings choose which profile an external user's watch state is written to. Only the account's household manager may read or change them. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's API key, or from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied.",
         "operationId": "listWebhookEvents",
         "parameters": [
           {
@@ -237700,6 +237776,7 @@
     },
     "/api/v2/webhook-sync/connections/{id}/profile-mappings": {
       "get": {
+        "description": "Webhook sync connections are account-wide: a connection's receiver URL carries its secret, and its mappings choose which profile an external user's watch state is written to. Only the account's household manager may read or change them. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's API key, or from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied.",
         "operationId": "getWebhookMappings",
         "parameters": [
           {
@@ -237859,6 +237936,7 @@
         "x-silo-service-backed": true
       },
       "put": {
+        "description": "Webhook sync connections are account-wide: a connection's receiver URL carries its secret, and its mappings choose which profile an external user's watch state is written to. Only the account's household manager may read or change them. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's API key, or from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied.",
         "operationId": "updateWebhookMappings",
         "parameters": [
           {
@@ -238062,6 +238140,7 @@
     },
     "/api/v2/webhook-sync/connections/{id}/webhook/rotate": {
       "post": {
+        "description": "Webhook sync connections are account-wide: a connection's receiver URL carries its secret, and its mappings choose which profile an external user's watch state is written to. Only the account's household manager may read or change them. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's API key, or from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied.",
         "operationId": "rotateWebhookConnection",
         "parameters": [
           {

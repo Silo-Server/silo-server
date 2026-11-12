@@ -24,6 +24,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useT, type MessageKey } from "@/i18n";
+import { TOUCH_HIT_AREA } from "@/lib/touchTargets";
 import { cn } from "@/lib/utils";
 
 import { episodeCode, formatBytes, formatLastSeen, formatShortDate } from "../format";
@@ -103,7 +104,7 @@ function GroupRows({ group, android }: { group: DownloadGroup; android: boolean 
     const code = row.episode ? episodeLabel(row.episode) : "";
     return (
       <TableRow>
-        <TableCell className="ps-4 whitespace-normal sm:ps-5">
+        <TableCell className="ps-4 wrap-anywhere whitespace-normal sm:ps-5">
           <span className="font-semibold">{group.title}</span>
           {monitored}
           {code ? <div className="text-muted-foreground text-xs">{code}</div> : null}
@@ -123,12 +124,15 @@ function GroupRows({ group, android }: { group: DownloadGroup; android: boolean 
   return (
     <>
       <TableRow>
-        <TableCell className="ps-4 whitespace-normal sm:ps-5">
+        <TableCell className="ps-4 wrap-anywhere whitespace-normal sm:ps-5">
           <button
             type="button"
             aria-expanded={open}
             onClick={() => setOpen((value) => !value)}
-            className="hover:text-foreground -ms-1 inline-flex items-center gap-1 text-start font-semibold"
+            className={cn(
+              "hover:text-foreground -ms-1 inline-flex items-center gap-1 text-start font-semibold",
+              TOUCH_HIT_AREA,
+            )}
           >
             {open ? (
               <ChevronDown aria-hidden className="h-3.5 w-3.5" />
