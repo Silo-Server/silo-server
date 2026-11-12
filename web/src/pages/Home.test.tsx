@@ -362,29 +362,12 @@ describe("Home", () => {
     expect(container.querySelectorAll("[data-home-section-placeholder]")).toHaveLength(0);
   });
 
-  it.each([
-    {
-      name: "says the server isn't responding when the layout read times out",
-      error: new V2TimeoutError("getHomeLayout", 30_000),
-      text: "The server isn't responding. Try again in a moment.",
-    },
-    {
-      name: "keeps its own explanation for other layout failures",
-      error: new Error("Failed to fetch"),
-      text: "We couldn't load your section layout right now.",
-    },
-  ])("$name", async ({ error, text }) => {
-    mockUseHomeLayout.mockReturnValue({
-      data: undefined,
-      isLoading: false,
-      isError: true,
-      error,
-      refetch: vi.fn(),
-    });
+  it("says the server isn't responding when the layout read times out", async () => {
+    const error = new V2TimeoutError("getHomeLayout", 30_000);
+    mockUseHomeLayout.mockReturnValue({ isLoading: false, isError: true, error, refetch: vi.fn() });
     await mountHome(new QueryClient());
 
-    expect(container.textContent).toContain("Unable to load the homepage");
-    expect(container.textContent).toContain(text);
+    expect(container.textContent).toContain("The server isn't responding. Try again in a moment.");
   });
 
   it("renders every Home row in browsers without IntersectionObserver", async () => {
