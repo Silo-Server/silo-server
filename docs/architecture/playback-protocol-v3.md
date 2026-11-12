@@ -1382,6 +1382,12 @@ route, so a direct-play viewer would come back on a transcode. The web player
 2. Retry with backoff (1 s doubling to a 15 s cap, about two minutes in total).
    Each attempt is a `track_change` that changes nothing, at the saved
    position. It keeps the current route eligible and returns a fresh plan.
+   A `server_remux_progressive` plan sends `seek_reanchor` instead, which
+   reopens the remux at the saved position on the same route. The no-op
+   `track_change` keeps the current route eligible but excludes nothing else,
+   so the planner can pick a higher-ranked route that already failed in this
+   attempt, such as an `original_http` plan whose browser engine missed its
+   startup deadline, and the session would loop between the two.
 3. A network failure, a 5xx, `408`, `429`, or `replan_in_progress` waits for
    the next attempt. Any other answer means the session did not survive (a
    server restart answers 404), and the client starts a new attempt at the
@@ -1412,7 +1418,10 @@ node. If the dead node was the only proxy a progressive remux could use, the
 remux has no route left and is planned as HLS on a transcode node instead. The
 pool's health flag cannot be trusted for this: it changes only at the next health
 sweep, up to 30 seconds after the node went away, and until then the node still
-looks healthy.
+looks healthy. A progressive remux reconnects with `seek_reanchor`, which skips
+this check: once the health flag drops, the reanchored remux leaves the dead
+node, and before that it opens on the dead node, fails before its first frame,
+and the ordinary failure path below moves it.
 
 A network failure before a transport's own first frame stays on the ordinary
 failure path, even when an earlier transport of the same viewing played: the

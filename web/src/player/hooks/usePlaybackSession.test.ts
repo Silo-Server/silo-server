@@ -2179,6 +2179,40 @@ describe("usePlaybackSession mid-stream reconnect", () => {
     unmount();
   });
 
+  it("reopens a progressive remux on the same route instead of replanning it", async () => {
+    const remuxPlan = fixturePlanV3({
+      delivery: "server_remux_progressive",
+      stream: { ...fixturePlanV3().stream, url: "/stream/session-1/remux?seek=100" },
+    });
+    const harness = reconnectHarness({
+      initialPlan: remuxPlan,
+      // The server answers a reanchor with the same plan, reopened at the
+      // position.
+      replan: () =>
+        jsonResponse(
+          playable("session-1", {
+            ...remuxPlan,
+            stream: { ...remuxPlan.stream, url: "/stream/session-1/remux?seek=120" },
+          }),
+        ),
+    });
+    const { result, unmount } = await startPlaying();
+
+    act(() => result.current.recoverConnection(120, true));
+    await advance(RECONNECT_BASE_DELAY_MS);
+
+    // A no-op track_change would replan the route and could return one that
+    // already failed in this attempt.
+    expect(harness.replanBodies).toHaveLength(1);
+    expect(harness.replanBodies[0]?.operation).toBe("seek_reanchor");
+    expect(harness.replanBodies[0]?.position_seconds).toBe(120);
+    expect(result.current.connectionStatus).toBe("connected");
+    expect(result.current.planRevision).toBe(2);
+    expect(result.current.plan?.plan_id).toBe(remuxPlan.plan_id);
+
+    unmount();
+  });
+
   it("starts a new session at the saved position when the old one did not survive a restart", async () => {
     const harness = reconnectHarness({
       replan: () =>
