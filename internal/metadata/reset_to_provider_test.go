@@ -358,3 +358,20 @@ func TestResetTargetForLibrary_OtherLanguageFailureDoesNotFailTheReset(t *testin
 		t.Errorf("episode = %q / %q locks %v, want the provider's values and no locks", episode.Title, episode.Overview, episode.LockedFields)
 	}
 }
+
+// An item an admin pinned unmatched has no provider to reset to: the reset
+// fails rather than report success with every edit and lock in place, while
+// an ordinary refresh of it still settles as a success.
+func TestRefreshItemTarget_ResetOfAPinnedItemFails(t *testing.T) {
+	const contentID = "146000000000000100"
+	h := newTestHarness()
+	h.service.hooks.process = func(context.Context, ProcessRequest) (*ProcessResult, error) {
+		return &ProcessResult{ContentID: contentID, Pinned: true}, nil
+	}
+	if err := h.service.RefreshTargetForLibrary(context.Background(), RefreshTargetItem, contentID, 0); err != nil {
+		t.Errorf("refresh of a pinned item: %v, want success", err)
+	}
+	if err := h.service.ResetTargetForLibrary(context.Background(), RefreshTargetItem, contentID, 0); err == nil {
+		t.Error("reset of a pinned item succeeded, want an error")
+	}
+}
