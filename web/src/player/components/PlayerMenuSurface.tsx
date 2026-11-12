@@ -190,6 +190,7 @@ export function PlayerMenuSurface({
     <>
       <button
         type="button"
+        data-player-menu
         className="fixed inset-0 z-40 bg-black/55"
         aria-label={t("web.player.menu.close")}
         onClick={(event) => {
@@ -199,6 +200,7 @@ export function PlayerMenuSurface({
       />
       <div
         ref={sheetRef}
+        data-player-menu
         className="hud-sheet fixed bottom-0 z-50 flex flex-col"
         onClick={(event) => event.stopPropagation()}
       >
