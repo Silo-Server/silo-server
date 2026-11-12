@@ -511,12 +511,15 @@ func (s *Service) Create(ctx context.Context, userID int, req CreateRequest, fil
 }
 
 // singleManagedEpisodeKey returns the episode a single managed download of
-// file is keyed on: the file's own episode, as a season download keys it when
-// that episode picks the file too. A multi-episode file requested through a
-// later episode of its range is keyed on the requested episode instead when the
-// device already holds an entry there, which a season download makes when the
-// range's first episode picked a file of its own, or when the first episode's
-// entry holds another file, so a download never replaces it.
+// file is keyed on. A multi-episode file requested through a later episode of
+// its range is keyed on the requested episode when:
+//   - the device already holds an entry under that episode (a season download
+//     makes one when the range's first episode picked a file of its own), or
+//   - the first episode's entry holds a different file, which this download
+//     must not replace.
+//
+// Otherwise it is keyed on the file's first episode, as a season download keys
+// it when that episode picks the file too.
 func (s *Service) singleManagedEpisodeKey(ctx context.Context, userID int, req CreateRequest, file *models.MediaFile) (string, error) {
 	if req.DeviceID == "" || req.EpisodeID == "" || req.EpisodeID == file.EpisodeID || file.MultiEpisodeEnd <= file.MultiEpisodeStart {
 		return file.EpisodeID, nil
