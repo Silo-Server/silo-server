@@ -98,6 +98,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		subtitleRepo = subtitles.NewPgRepository(deps.DB, deps.SecretCipher)
 	}
 	itemsHandler := NewItemsHandler(deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config, deps.ImageCache, nextUpRepo, deps.BrowseRepo, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.EpisodeRepo, deps.SeasonRepo, deps.AccessFilterFn, subtitleRepo)
+	itemsHandler.mapper.ratings = deps.RatingSources
 	itemsHandler.storeProvider = deps.UserStoreProvider
 	itemsHandler.adminDefaults = deps.AdminDefaults
 	itemsHandler.MarkerPopulation = deps.MarkerPopulation
@@ -144,6 +145,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		autoscanVirtualFoldersRegistered = true
 	}
 	userDataHandler := NewUserDataHandler(deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config)
+	userDataHandler.mapper.ratings = deps.RatingSources
 	if store, ok := deps.PlaybackStore.(*DurableCompatPlaybackStore); ok && store.pool != nil {
 		if manager, ok := deps.SessionMgr.(interface {
 			SetCompatActivityReader(playback.SessionActivityReader)
@@ -224,6 +226,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	authHandler.avatars = userAvatars
 	displayPrefsHandler := NewDisplayPreferencesHandler(deps.UserStoreProvider)
 	recsHandler := NewRecommendationsHandler(deps.RecommendationReader, deps.ItemRepo, deps.DetailSvc, deps.UserDataService, deps.IDCodec, deps.Config, deps.AccessFilterFn)
+	recsHandler.mapper.ratings = deps.RatingSources
 
 	r.Get("/System/Info/Public", systemHandler.HandlePublicInfo)
 	r.Get("/System/Info", systemHandler.HandleInfo)

@@ -1,6 +1,7 @@
 package jellycompat
 
 import (
+	"context"
 	"crypto/sha1"
 	"encoding/hex"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
 )
 
 // allDetailFields is a sentinel passed to itemFromList so detail views include all fields.
@@ -26,6 +28,9 @@ type mapper struct {
 	codec          *ResourceIDCodec
 	serverID       string
 	imageTagSigner *imageTagSigner
+	// ratings decides which external ratings items carry beyond IMDb and
+	// TMDB, as on native title pages. Nil shows only those two.
+	ratings *ratingsources.Policy
 }
 
 func newMapper(codec *ResourceIDCodec, cfg *config.Config) *mapper {
@@ -101,6 +106,7 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 		ProductionYear:  item.Year,
 		OfficialRating:  item.ContentRating,
 		CommunityRating: item.RatingIMDB,
+		CriticRating:    m.criticRating(item.RatingRTCritic),
 		// Jellyfin 12 reports the item's own original language, uninherited.
 		OriginalLanguage: item.OriginalLanguage,
 		ImageTags:        map[string]string{},
@@ -226,6 +232,20 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 	return dto
 }
 
+// criticRating is Jellyfin's CriticRating, which clients render as the Rotten
+// Tomatoes percentage: the stored critic score, when the administrator shows
+// that source on title pages.
+func (m *mapper) criticRating(score *int) *float64 {
+	if score == nil || *score < 0 || *score > 100 {
+		return nil
+	}
+	if !m.ratings.Selection(context.Background()).Shows(models.RatingSourceRTCritic) {
+		return nil
+	}
+	v := float64(*score)
+	return &v
+}
+
 // itemFromDetail maps a detail payload into a full baseItemDTO, including every
 // heavy field (People, MediaSources, MediaStreams, Chapters). Use this from
 // single-item detail endpoints where the client expects the full payload.
@@ -255,6 +275,7 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 		Genres:            item.Genres,
 		ContentRating:     item.ContentRating,
 		RatingIMDB:        item.RatingIMDB,
+		RatingRTCritic:    item.RatingRTCritic,
 		Overview:          item.Overview,
 		PosterURL:         item.PosterURL,
 		BackdropURL:       item.BackdropURL,
