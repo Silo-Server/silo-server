@@ -161,10 +161,13 @@ What the new path says about the title decides the row's links:
   the download is deleted with the stand-in after the grace, as it was with
   the missing row before rows were reused. Registration cannot slip a
   download past the move: every statement that writes a download's file (in
-  `internal/downloads/repo.go`) locks the file row `FOR SHARE` in that
-  statement and writes only while the file is present and linked to the
-  download's own content and episode, answering the missing-file not-found
-  otherwise. The retitle, and a reclaim of a stand-in, lock the row
+  `internal/downloads/registration_fence.go`) locks the file row
+  `FOR SHARE` in that statement and writes only while the file is present
+  and linked to the download's own content and episode, answering the
+  missing-file not-found otherwise. A request that registers several
+  downloads at once (a season, a series, or a managed batch) writes none of
+  them when one is refused; a monitor sync skips the refused episode and
+  registers it on a later sync, as it does an episode with no file. The retitle, and a reclaim of a stand-in, lock the row
   `FOR UPDATE` in a statement of their own first, before the statement that
   moves downloads, in one transaction. A registration that holds the row
   first commits before that statement takes its snapshot, so its download

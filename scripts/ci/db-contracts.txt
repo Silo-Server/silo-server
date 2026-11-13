@@ -437,6 +437,8 @@
 ./internal/downloads TestParkedDownloadIsNotServedOrPreparedFromItsOldFileDB
 ./internal/downloads TestRegistrationRefusesAFileOfAnotherTitleDB
 ./internal/downloads TestRegistrationAndRetitleSerializeOnTheFileRowDB
+./internal/downloads TestManagedRequestRegistersNothingWhenAFileLeftItsTitleDB
+./internal/downloads TestMonitorSyncSkipsAnEpisodeWhoseFileLeftItsTitleDB
 ./internal/downloads TestSubscriptionSyncPagePostgres
 ./internal/downloads TestMonitorSyncKeepsDeletedEpisodesDeletedPostgres
 ./internal/downloads TestMonitorSyncSkipsWatchedEpisodesPostgres

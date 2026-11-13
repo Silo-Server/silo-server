@@ -1046,7 +1046,10 @@ func (s *Service) ensureManagedDecisions(ctx context.Context, userID int, req Cr
 			}
 			toInsert = append(toInsert, d)
 		}
-		rows, err := s.repo.CreateManagedEntriesBatch(ctx, toInsert)
+		// One request registers its entries together: a file that left its
+		// title since it was resolved fails the request without registering
+		// the others, as a file deleted meanwhile failed the insert.
+		rows, err := s.repo.CreateManagedEntriesAllOrNothing(ctx, toInsert)
 		if err != nil {
 			return err
 		}
@@ -1069,8 +1072,8 @@ func (s *Service) ensureManagedDecisions(ctx context.Context, userID int, req Cr
 		}
 		// A concurrent create won this identity between the fetch and the
 		// batch insert (ON CONFLICT skipped it); return the winning row. With
-		// no winner, the insert skipped the row because its file went missing
-		// or left the title.
+		// no winner, the insert wrote nothing because a file of the request
+		// went missing or left its title.
 		row, err := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, items[i].contentID, items[i].episodeID)
 		if errors.Is(err, ErrNotFound) {
 			return nil, errFileNotRegistrable

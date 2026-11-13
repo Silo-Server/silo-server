@@ -129,31 +129,53 @@ func (r *Repository) CreateBatch(ctx context.Context, downloads []*Download) err
 // identities that already exist (including concurrent-insert races) via ON
 // CONFLICT DO NOTHING on the managed-entry unique index, and rows whose file
 // fails registrableFile. Returns only the rows actually inserted, so callers
-// can report an honest newly-registered count.
+// can report an honest newly-registered count. A monitor sync relies on the
+// skip: an episode whose file left its title registers on a later sync, as
+// one with no file does.
 func (r *Repository) CreateManagedEntriesBatch(ctx context.Context, ds []*Download) ([]*Download, error) {
 	return (managedRegistryStore{r.pool}).CreateManagedEntriesBatch(ctx, ds)
 }
 
+// CreateManagedEntriesAllOrNothing is CreateManagedEntriesBatch for a request
+// that registers its entries together: when any row's file fails
+// registrableFile, the statement inserts none of them. Conflicts still skip
+// only their own rows.
+func (r *Repository) CreateManagedEntriesAllOrNothing(ctx context.Context, ds []*Download) ([]*Download, error) {
+	return (managedRegistryStore{r.pool}).createManagedEntries(ctx, ds, true)
+}
+
 func (r managedRegistryStore) CreateManagedEntriesBatch(ctx context.Context, ds []*Download) ([]*Download, error) {
+	return r.createManagedEntries(ctx, ds, false)
+}
+
+func (r managedRegistryStore) createManagedEntries(ctx context.Context, ds []*Download, allOrNothing bool) ([]*Download, error) {
 	if len(ds) == 0 {
 		return nil, nil
 	}
-	var sb strings.Builder
-	sb.WriteString(`INSERT INTO downloads (` + downloadInsertColumns + `)
-		SELECT v.* FROM (VALUES `)
+	var values strings.Builder
 	args := make([]any, 0, len(ds)*len(downloadInsertTypes))
 	for i, d := range ds {
 		if i > 0 {
-			sb.WriteString(", ")
+			values.WriteString(", ")
 		}
-		sb.WriteString("(" + downloadValues(i*len(downloadInsertTypes)) + ")")
+		values.WriteString("(" + downloadValues(i*len(downloadInsertTypes)) + ")")
 		args = append(args, downloadInsertArgs(d)...)
 	}
-	sb.WriteString(`) AS v(` + downloadInsertColumns + `)
+	registrable := `SELECT v.* FROM (VALUES ` + values.String() + `) AS v(` + downloadInsertColumns + `)
 		JOIN media_files mf ON mf.id = v.media_file_id AND ` + registrableFile("v.content_id", "v.episode_id") + `
-		FOR SHARE OF mf
-		ON CONFLICT (user_id, profile_id, device_id, content_id, (COALESCE(episode_id, ''))) WHERE device_id IS NOT NULL DO NOTHING RETURNING ` + downloadColumns)
-	rows, err := r.db.Query(ctx, sb.String(), args...)
+		FOR SHARE OF mf`
+	query := `INSERT INTO downloads (` + downloadInsertColumns + `)
+		` + registrable
+	if allOrNothing {
+		// The CTE locks and checks every row's file once; the insert reads
+		// rows only when none was refused.
+		query = `WITH registrable AS (` + registrable + `)
+		INSERT INTO downloads (` + downloadInsertColumns + `)
+		SELECT * FROM registrable WHERE (SELECT count(*) FROM registrable) = ` + strconv.Itoa(len(ds))
+	}
+	query += `
+		ON CONFLICT (user_id, profile_id, device_id, content_id, (COALESCE(episode_id, ''))) WHERE device_id IS NOT NULL DO NOTHING RETURNING ` + downloadColumns
+	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("batch inserting managed entries: %w", err)
 	}
