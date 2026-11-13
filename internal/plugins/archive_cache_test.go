@@ -401,6 +401,33 @@ func TestArchiveCacheKeepsPluginsWhoseIDsDifferOnlyInSeparators(t *testing.T) {
 	}
 }
 
+// An identity whose escaped name would pass the component limit gets a
+// bounded, distinct name, so a proxy node can still rehydrate it.
+func TestCachePathSegmentStaysWithinTheComponentLimit(t *testing.T) {
+	long := strings.Repeat("a/", 100)
+	other := strings.Repeat("a:", 100)
+	names := map[string]string{}
+	for _, value := range []string{long, other, strings.Repeat("a", 255), "acme/x"} {
+		got, err := cachePathSegment(value, "plugin id")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) > maxCacheSegmentBytes {
+			t.Errorf("segment for a %d-byte identity is %d bytes, want at most %d", len(value), len(got), maxCacheSegmentBytes)
+		}
+		if previous, ok := names[got]; ok {
+			t.Errorf("%q and %q share segment %q", previous, value, got)
+		}
+		names[got] = value
+	}
+	if got, _ := cachePathSegment(strings.Repeat("a", 255), "plugin id"); got != strings.Repeat("a", 255) {
+		t.Errorf("a 255-byte identity without escapes = %q, want it unchanged", got)
+	}
+	if got, _ := cachePathSegment(long, "plugin id"); !strings.HasPrefix(got, "%h") {
+		t.Errorf("an over-long escaped identity = %q, want its hashed name", got)
+	}
+}
+
 type blockedArchiveStore struct {
 	*legacyArchiveStore
 	calls   atomic.Int32
