@@ -295,6 +295,29 @@ export interface ActionBarProps {
   showForcedSubtitles?: boolean;
 }
 
+/**
+ * Start Over can play another file than the one the pickers describe (part 1
+ * of a later part's presentation). Audio indexes belong to the picked file, so
+ * the server resolves the saved audio preference instead. A manual subtitle
+ * pick still matches by language, source and flags, but loses the picked
+ * file's track index, sidecar path and downloaded subtitle.
+ */
+function withoutFileSpecificPicks<
+  T extends { audioTrackIndex?: number; prePlaySubtitleSelection: PrePlaySubtitleSelection | null },
+>(input: T): T {
+  const selection = input.prePlaySubtitleSelection;
+  return {
+    ...input,
+    audioTrackIndex: undefined,
+    prePlaySubtitleSelection: selection && {
+      ...selection,
+      track_index: undefined,
+      external_subtitle_path: undefined,
+      downloaded_subtitle_id: undefined,
+    },
+  };
+}
+
 export default function ActionBar({
   compactMobile = false,
   contentId,
@@ -460,14 +483,15 @@ export default function ActionBar({
 
       const restart = restartOverride ?? parsed.restart;
       const file = restart ? (restartVersion ?? selectedVersion) : selectedVersion;
+      const input = buildPrePlayStartInput({
+        contentId: parsed.contentId,
+        fileId: file?.file_id ?? parsed.fileId,
+        libraryId: parsed.libraryId,
+        restart,
+        returnHref: currentHref,
+      });
       playbackController.startPlayback(
-        buildPrePlayStartInput({
-          contentId: parsed.contentId,
-          fileId: file?.file_id ?? parsed.fileId,
-          libraryId: parsed.libraryId,
-          restart,
-          returnHref: currentHref,
-        }),
+        file && file.file_id !== selectedVersion?.file_id ? withoutFileSpecificPicks(input) : input,
         "viewer",
       );
     },

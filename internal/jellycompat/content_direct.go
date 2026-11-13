@@ -1560,13 +1560,16 @@ func itemDetailToUpstream(d *catalog.ItemDetail) upstreamItemDetail {
 	versions := append([]catalog.FileVersion(nil), d.Versions...)
 	// applyListFileFields picks the same first version in SQL (widest first
 	// track, ties in file id order); keep the two orders in step. The catalog
-	// ranks versions its own way, so break ties by file id here too.
+	// ranks movie, episode and extra versions best first, so those break ties
+	// by file id here. Other types arrive in their builder's order (an
+	// audiobook's or ebook's parts in sequence), which ties keep.
+	idTieBreak := d.Type == compatMovieType || d.Type == compatEpisodeType || d.Type == "extra"
 	sort.SliceStable(versions, func(i, j int) bool {
 		wi, wj := compatPrimaryVideoTrack(versions[i]).Width, compatPrimaryVideoTrack(versions[j]).Width
 		if wi != wj {
 			return wi > wj
 		}
-		return versions[i].FileID < versions[j].FileID
+		return idTieBreak && versions[i].FileID < versions[j].FileID
 	})
 	detail := upstreamItemDetail{
 		ContentID:        d.ContentID,
