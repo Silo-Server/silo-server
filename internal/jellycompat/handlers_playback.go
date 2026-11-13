@@ -1918,6 +1918,19 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	// Jellyfin-compat remote starts are not otherwise waited on. Let the node
 	// wait only when its live auto pipeline can fall back.
 	reqBody.AutoFallbackReady = compatRemoteAutoFallbackEligible(reqBody)
+	// An explicit hardware backend has no pipeline, but the node's decoder can
+	// still reject the source, and the node moves to CPU decoding only for a
+	// start it waits on.
+	if playback.HardwareDecodeRetryEligible(playback.TranscodeOpts{
+		HWAccel:             reqBody.HWAccel,
+		ToneMapMode:         reqBody.ToneMapMode,
+		TargetCodecVideo:    reqBody.TargetCodecVideo,
+		SourceVideoCodec:    reqBody.SourceVideoCodec,
+		SourceVideoProfile:  reqBody.SourceVideoProfile,
+		SourceVideoBitDepth: reqBody.SourceVideoBitDepth,
+	}) {
+		reqBody.RequireReady = true
+	}
 
 	dispatch := func(request transcodenode.TranscodeStartRequest) (transcodenode.TranscodeStartResponse, int, bool, error) {
 		body, err := json.Marshal(request)

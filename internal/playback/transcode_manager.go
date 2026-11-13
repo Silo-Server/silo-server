@@ -1048,8 +1048,8 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 	}
 	// Under hw_accel=auto a reconstruct walks the same safer paths as a fresh
 	// start, keeping a slow process rather than duplicating it. Every other
-	// recipe starts once without waiting, as segment requests already wait for
-	// a reconstructed process.
+	// recipe starts once, and only one that decodes on the GPU is waited on,
+	// so a decoder that rejects the source can move to CPU decoding.
 	transcodeSession, err := StartReconstructTranscode(ctx, newPipeline(ctx, opts), TranscodeStartup{Start: startTranscode})
 	if err != nil {
 		slog.ErrorContext(ctx, "reconstruct transcode start failed", "component", "playback", "error", err, "session", sessionID, "playback_session_id", sessionID)
@@ -1108,6 +1108,8 @@ func reconstructionOutputDir(root, sessionID, signedSubdir string) string {
 // MonitorLocalTranscodeExit watches a local ffmpeg process and, on an error exit,
 // invokes OnFFmpegCrash so the embedding handler tears down the playback session.
 // A clean exit (no error) leaves the segments servable until the client stops.
+// A failure the session answers by restarting on CPU decode is restarted here
+// instead (see restartCrashedOnCPUDecode).
 func (m *TranscodeManager) MonitorLocalTranscodeExit(sessionID string, session *TranscodeSession) {
 	if m == nil || sessionID == "" || session == nil {
 		return
@@ -1128,15 +1130,19 @@ func (m *TranscodeManager) MonitorLocalTranscodeExit(sessionID string, session *
 		if current != session {
 			return
 		}
-		if session.IsRunning() {
-			return
-		}
-
 		// When ffmpeg exits cleanly (no error), the segments are fully written and
 		// should remain servable until the client stops the session. This is
 		// critical for copy-mode where ffmpeg finishes writing all content much
 		// faster than real-time playback. Only tear down the session on error exits.
-		if session.WaitError() == nil {
+		//
+		// Both facts come from one read: a segment request can restart the
+		// session between separate reads, and its replacement must not be torn
+		// down for the crash it recovered from.
+		crashed, restartsOnCPU := session.crashState()
+		if !crashed {
+			return
+		}
+		if restartsOnCPU && m.restartCrashedOnCPUDecode(sessionID, session) {
 			return
 		}
 
@@ -1148,6 +1154,42 @@ func (m *TranscodeManager) MonitorLocalTranscodeExit(sessionID string, session *
 			m.OnFFmpegCrash(context.Background(), sessionID, session)
 		}
 	}()
+}
+
+// restartCrashedOnCPUDecode restarts a crashed session whose restart moves it
+// to CPU decode and reports whether it should stay registered. Tearing it down
+// would let the client reconstruct it on GPU decode, which fails at the same
+// frame, and a stream whose playlist lists only produced segments never asks
+// for the missing one.
+func (m *TranscodeManager) restartCrashedOnCPUDecode(sessionID string, session *TranscodeSession) bool {
+	ctx := context.Background()
+	keep := true
+	err := m.restartSessionLocked(sessionID, session, func() error {
+		crashed, restartsOnCPU := session.crashState()
+		if !restartsOnCPU {
+			// A segment request restarted it while this waited for the lock.
+			// Keep it unless that restart failed as well.
+			keep = !crashed
+			return nil
+		}
+		// Resume at the client's position, as a segment request would, so the
+		// pruner and throttler keep a true view of it. Segments FFmpeg had
+		// produced beyond that point are encoded again.
+		_, _, err := session.RestartSegment(ctx, session.LastRequestedSegment())
+		return err
+	})
+	if errors.Is(err, ErrSessionSuperseded) {
+		return true
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "restarting a crashed transcode with CPU decoding failed; tearing it down",
+			"component", "playback",
+			"playback_session_id", sessionID,
+			"error", err,
+		)
+		return false
+	}
+	return keep
 }
 
 // CloseTranscodeSession stops a transcode session. If transcodeNodeURL is

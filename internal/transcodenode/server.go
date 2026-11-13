@@ -2295,14 +2295,21 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 
 	// Under hw_accel=auto the reconstruct walks the same safer paths as a
 	// fresh start in this output directory, keeping a slow process rather than
-	// duplicating it.
+	// duplicating it. Under an explicit backend it starts once, and when the
+	// GPU decoder rejects the source (a card minted where the GPU decodes it)
+	// it moves to CPU decoding. An accel StartupRetryHWAccel would change
+	// (VideoToolbox, or QSV/VAAPI without a render device) is not waited on
+	// here: it keeps the software-encode retry below, which has its own wait.
 	pipeline := s.autoTranscodePipeline(r.Context(), opts)
-	adaptive := pipeline.Enabled()
+	retryAccel := opts.HWAccel
+	if !pipeline.Enabled() {
+		retryAccel = playback.StartupRetryHWAccel(opts)
+	}
 	var session *playback.TranscodeSession
-	if adaptive {
-		session, err = playback.StartReconstructTranscode(r.Context(), pipeline, playback.TranscodeStartup{Timeout: playback.ManifestStartupTimeout})
-	} else {
+	if retryAccel != opts.HWAccel {
 		session, err = playback.StartTranscode(r.Context(), opts)
+	} else {
+		session, err = playback.StartReconstructTranscode(r.Context(), pipeline, playback.TranscodeStartup{Timeout: playback.ManifestStartupTimeout})
 	}
 	if err != nil {
 		slog.ErrorContext(r.Context(), "transcode node reconstruct start failed", "component", "transcodenode", "error", err,
@@ -2315,11 +2322,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	// these dimensions), and registering the dead session would serve this
 	// media as permanently missing. Outside the automatic pipeline, mirror
 	// handleStart's software retry for the accel StartupRetryHWAccel would
-	// change; other accels keep the existing register-immediately behavior.
-	retryAccel := opts.HWAccel
-	if !adaptive {
-		retryAccel = playback.StartupRetryHWAccel(opts)
-	}
+	// change.
 	if retryAccel != opts.HWAccel {
 		if _, waitErr := session.WaitForManifest(playback.ManifestStartupTimeout); waitErr != nil {
 			if session.IsRunning() {
