@@ -53,7 +53,7 @@ vi.mock("sonner", () => ({ toast: mocks.toast }));
 vi.mock("@/hooks/queries/pluginSettings", () => ({
   usePluginInstallation: () => ({ installation: null }),
   usePluginSettingsValues: () => ({ data: undefined }),
-  useUpdatePluginSettings: () => ({ mutate: vi.fn(), isPending: false }),
+  useUpdatePluginEntry: () => ({ setEntryValue: vi.fn(), isPending: false }),
 }));
 
 vi.mock("@/hooks/queries/settingValues", async () => {

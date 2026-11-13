@@ -4,12 +4,8 @@ import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { SettingRow } from "@/components/settings/SettingRow";
 import { Switch } from "@/components/ui/switch";
 import { useReportGate } from "@/hooks/queries/markerReportSettings";
-import { usePluginSettingsValues, useUpdatePluginSettings } from "@/hooks/queries/pluginSettings";
-import {
-  entryBoolean,
-  readPluginEntryObject,
-  updatePluginEntryObject,
-} from "@/lib/pluginEntryValues";
+import { usePluginSettingsValues, useUpdatePluginEntry } from "@/hooks/queries/pluginSettings";
+import { entryBoolean, readPluginEntryObject } from "@/lib/pluginEntryValues";
 
 /** The per-account settings entry the switch writes. */
 const REPORT_SETTING_KEY = "report";
@@ -30,14 +26,14 @@ export function TheIntroDbReportSettings() {
   const settings = usePluginSettingsValues(gate.installationId, {
     enabled: gate.declaresReport && gate.serverConfigured,
   });
-  const update = useUpdatePluginSettings(gate.installationId);
+  const update = useUpdatePluginEntry(gate.installationId);
 
   if (!gate.installationId || !gate.declaresReport) return null;
 
   const values = settings.data;
-  // The write replaces the whole stored set for this account and plugin, so it may only
-  // run once the current set is known. Merging onto an unknown one would send this entry
-  // alone and delete every other entry the account has stored.
+  // The write replaces the whole stored set for this account and plugin, so the control
+  // is only offered once the current set is known; the write itself then re-reads and
+  // merges onto that read, so a change another tab made in the meantime survives.
   const loaded = settings.isSuccess && values !== undefined;
 
   const entry = readPluginEntryObject(values, REPORT_SETTING_KEY);
@@ -45,10 +41,15 @@ export function TheIntroDbReportSettings() {
 
   const setShowReport = (checked: boolean) => {
     if (!loaded) return;
-    update.mutate(updatePluginEntryObject(values, REPORT_SETTING_KEY, { show_report: checked }), {
-      onSuccess: () => toast.success(checked ? "Report button enabled." : "Report button hidden."),
-      onError: () => toast.error("Could not change the reporting setting."),
-    });
+    update.setEntryValue(
+      REPORT_SETTING_KEY,
+      { show_report: checked },
+      {
+        onSuccess: () =>
+          toast.success(checked ? "Report button enabled." : "Report button hidden."),
+        onError: () => toast.error("Could not change the reporting setting."),
+      },
+    );
   };
 
   return (

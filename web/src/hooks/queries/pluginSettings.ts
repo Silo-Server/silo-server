@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { v2, type V2Result } from "@/api/v2/request";
+import { updatePluginEntryObject } from "@/lib/pluginEntryValues";
 import { settingsKeys } from "./keys";
 
 type PluginSettingsInstallationV2 = V2Result<"GET /api/v2/settings/plugins">["items"][number];
@@ -53,7 +54,15 @@ export function usePluginInstallation(pluginId: string) {
   return { ...query, installation };
 }
 
-/** The acting account's stored values for one installation. */
+/** The acting account's stored values for one installation, read from the server. */
+async function fetchPluginSettingsValues(installationId: number): Promise<Record<string, string>> {
+  const result = await v2("GET /api/v2/settings/plugins/{installation_id}", {
+    path: { installation_id: String(installationId) },
+  });
+  return result.values ?? {};
+}
+
+/** The acting account's stored values for one installation, as a query. */
 export function usePluginSettingsValues(
   installationId: number | null,
   options?: { enabled?: boolean },
@@ -61,12 +70,7 @@ export function usePluginSettingsValues(
   return useQuery({
     queryKey: settingsKeys.pluginDetail(installationId ?? -1),
     enabled: (options?.enabled ?? true) && installationId != null,
-    queryFn: async (): Promise<Record<string, string>> => {
-      const result = await v2("GET /api/v2/settings/plugins/{installation_id}", {
-        path: { installation_id: String(installationId) },
-      });
-      return result.values ?? {};
-    },
+    queryFn: async () => (installationId == null ? {} : fetchPluginSettingsValues(installationId)),
     staleTime: 30_000,
   });
 }
@@ -98,4 +102,55 @@ export function useUpdatePluginSettings(installationId: number | null) {
       void queryClient.invalidateQueries({ queryKey: settingsKeys.plugins() });
     },
   });
+}
+
+/** What a caller wants to hear about one entry write. */
+interface EntryWriteCallbacks {
+  onSuccess?: () => void;
+  onError?: () => void;
+}
+
+/**
+ * Write one schema entry, merged onto a read taken now.
+ *
+ * A screen's copy of the values is not a safe base for a replace-all write: it can
+ * be half a minute old, and a change another tab stored since then would be sent
+ * back to its old value. The settings contract carries no version for a caller to
+ * compare against and no per-entry write, so re-reading immediately before the write
+ * and merging onto that read is the closest this surface gets to a conditional
+ * write — it narrows the window from the query's whole `staleTime` to one round trip.
+ *
+ * A failed re-read writes nothing: a write is only allowed onto values that are
+ * known, which is the same rule the screen applies before it offers the control.
+ */
+export function useUpdatePluginEntry(installationId: number | null) {
+  const queryClient = useQueryClient();
+  const mutation = useUpdatePluginSettings(installationId);
+
+  const setEntryValue = (
+    entryKey: string,
+    patch: Record<string, unknown>,
+    callbacks?: EntryWriteCallbacks,
+  ) => {
+    if (installationId == null) {
+      callbacks?.onError?.();
+      return;
+    }
+
+    void queryClient
+      .fetchQuery({
+        queryKey: settingsKeys.pluginDetail(installationId),
+        queryFn: () => fetchPluginSettingsValues(installationId),
+        staleTime: 0,
+      })
+      .then((current) =>
+        mutation.mutate(updatePluginEntryObject(current, entryKey, patch), {
+          onSuccess: callbacks?.onSuccess,
+          onError: callbacks?.onError,
+        }),
+      )
+      .catch(() => callbacks?.onError?.());
+  };
+
+  return { ...mutation, setEntryValue };
 }
