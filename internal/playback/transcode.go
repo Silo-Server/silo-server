@@ -380,7 +380,9 @@ func NewTranscodeSessionForTest(outputDir string) *TranscodeSession {
 // SetRestartHook registers a callback fired after every successful Restart.
 // The owning handler uses it to re-arm the transcode throttler and the exit
 // monitor; firing it from Restart itself keeps every restart caller (web
-// segment recovery, audio switch, jellycompat seek) consistent.
+// segment recovery, audio switch, jellycompat seek) consistent. The callback's
+// context ends when the new FFmpeg process is closed or restartHookTimeout
+// passes, and anything in it that can block must honor that context.
 func (s *TranscodeSession) SetRestartHook(fn func(context.Context)) {
 	s.mu.Lock()
 	s.restartHook = fn
@@ -3643,6 +3645,12 @@ func (s *TranscodeSession) crashState() (crashed, restartsOnCPU bool) {
 // wait (30s) so a slow validation cannot consume the entire recovery window.
 var restartToneMapValidationTimeout = 20 * time.Second
 
+// restartHookTimeout bounds a restart hook. A restart runs under the session
+// lifecycle lock, and a stop takes that lock before it closes the session, so
+// the close that cancels the hook's FFmpeg context cannot reach a hook that
+// waits on it, as the throttler's settings read does when the database stalls.
+var restartHookTimeout = 5 * time.Second
+
 func (s *TranscodeSession) restart(
 	ctx context.Context,
 	seekSeconds float64,
@@ -3873,7 +3881,16 @@ func (s *TranscodeSession) restart(
 	go s.monitorFFmpeg(ctx, cmd, s.done, releaseHWDevice)
 
 	if hook != nil {
-		hook(ctx)
+		hookCtx, cancelHook := context.WithTimeout(ctx, restartHookTimeout)
+		hook(hookCtx)
+		if errors.Is(hookCtx.Err(), context.DeadlineExceeded) {
+			slog.WarnContext(ctx, "transcode restart hook timed out; the transcode throttle may not match its settings until the next restart",
+				"component", "playback",
+				"playback_session_id", opts.SessionID,
+				"timeout", restartHookTimeout,
+			)
+		}
+		cancelHook()
 	}
 
 	return nil
