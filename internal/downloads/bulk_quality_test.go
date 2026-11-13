@@ -196,8 +196,8 @@ func TestReplacementAddsActive(t *testing.T) {
 		{"ready entry, target still to prepare", StatusReady, false, true},
 		{"ready entry, target already prepared", StatusReady, true, false},
 		{"failed entry, target still to prepare", StatusFailed, false, true},
-		{"entry already active", StatusPreparing, false, false},
-		{"entry downloading", StatusDownloading, false, false},
+		{"entry already preparing", StatusPreparing, false, false},
+		{"entry its device reported downloading", StatusDownloading, false, true},
 	}
 	for _, tc := range cases {
 		if got := replacementAddsActive(&Download{Status: tc.status}, tc.ready); got != tc.want {

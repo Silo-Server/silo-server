@@ -1185,15 +1185,12 @@ func reusableManagedStatus(status string) bool {
 }
 
 // replacementAddsActive reports whether replacing existing with a prepared
-// entry adds an active download: existing is not already active, and the
-// target's prepared file is not ready, so the entry would start preparing. A
-// ready target, or one existing already holds, registers ready.
+// entry adds an active download: the target's prepared file is not ready, so
+// the entry would start preparing, and existing does not already hold a slot
+// of the concurrent limit. A device entry holds one only while it is
+// preparing (concurrentSlotPredicate). A ready target registers ready.
 func replacementAddsActive(existing *Download, targetReady bool) bool {
-	switch existing.Status {
-	case StatusQueued, StatusDownloading, StatusPreparing:
-		return false
-	}
-	return !targetReady
+	return existing.Status != StatusPreparing && !targetReady
 }
 
 func sameManagedTarget(a, b *Download) bool {
