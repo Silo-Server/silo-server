@@ -267,9 +267,11 @@ type Recommender interface {
 	Similar(ctx context.Context, contentID string, limit int) ([]string, error)
 }
 
-// Downloads applies Silo's download rules to the ABS surfaces that hand out
-// whole files: the server's Allow downloads setting, the account's download
-// permission, the policy engine, and the download bandwidth limits.
+// Downloads applies Silo's download rules to ABS downloads: the server's Allow
+// downloads setting, the account's download permission, and the policy engine.
+// The /download route is served through ServeDirect, so the download bandwidth
+// limits apply there too; RSS feeds only check their owner with
+// CheckDownloadAllowed, and their files are served without those limits.
 // *downloads.Service satisfies it, as it does jellycompat.DownloadServer.
 type Downloads interface {
 	// CheckDownloadAllowed returns nil when the account may download now.

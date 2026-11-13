@@ -148,6 +148,10 @@ func (h *Handler) serveFileDownload(w http.ResponseWriter, r *http.Request, a ct
 	// Keep the validator this route sent before it applied the download
 	// rules, so a client resuming with If-Range still matches.
 	ctx = downloads.WithServeEntityTag(ctx, playback.DirectPlayEntityTag)
+	// Keep each track's own file name, as this route did before: the ABS item
+	// JSON already shows every caller its file names, and a title-based name
+	// would save every track of a multi-file book under the same name.
+	ctx = downloads.WithFileNamesVisible(ctx)
 	err = h.downloads.ServeDirect(ctx, httpstream.NewRollingDeadlineWriter(w), r, userID, fileID, "", access)
 	switch {
 	case err == nil, errors.Is(err, downloads.ErrResponseCommitted):

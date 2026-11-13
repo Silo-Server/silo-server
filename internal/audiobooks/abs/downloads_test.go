@@ -109,8 +109,12 @@ func TestFileRoutes_FollowDownloadPermission(t *testing.T) {
 				t.Errorf("Content-Type = %q, want audio/mp4", got)
 			}
 			wantAttachment := tc.route == "/download"
-			if got := rec.Header().Get("Content-Disposition"); strings.HasPrefix(got, "attachment") != wantAttachment {
+			got := rec.Header().Get("Content-Disposition")
+			if strings.HasPrefix(got, "attachment") != wantAttachment {
 				t.Errorf("Content-Disposition = %q, want attachment: %v", got, wantAttachment)
+			}
+			if wantAttachment && !strings.Contains(got, "book.m4b") {
+				t.Errorf("Content-Disposition = %q, want the track's own file name", got)
 			}
 		})
 	}

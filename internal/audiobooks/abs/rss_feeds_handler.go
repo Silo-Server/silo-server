@@ -90,7 +90,7 @@ func (h *Handler) handleOpenItemFeed(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "download not allowed", http.StatusForbidden)
 		} else {
 			slog.ErrorContext(r.Context(), "abs feed download check failed", "component", "audiobooks", "err", err, "user", a.UserID)
-			http.Error(w, "feed persist failed", http.StatusInternalServerError)
+			http.Error(w, "feed open failed", http.StatusInternalServerError)
 		}
 		return
 	}
