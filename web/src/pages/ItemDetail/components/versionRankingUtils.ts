@@ -196,7 +196,9 @@ export interface PlaybackEdition {
 
 /**
  * One cut can have several presentations. Only their first parts start
- * playback. Editions come in preference order, then the server's order.
+ * playback. Editions come in preference order, then the server's order, and a
+ * merged cut's first parts keep the top-level `versions` (server) order, so a
+ * complete tie goes to the file the server lists first.
  */
 export function playbackEditions(
   versions: FileVersion[],
@@ -219,6 +221,11 @@ export function playbackEditions(
         parts[0].versions,
         parts.flatMap((p) => p.versions),
       );
+    }
+    const order = new Map(versions.map((v, i) => [v.file_id, i]));
+    const position = (v: FileVersion) => order.get(v.file_id) ?? Number.MAX_SAFE_INTEGER;
+    for (const edition of editions.values()) {
+      edition.versions.sort((a, b) => position(a) - position(b));
     }
   } else {
     for (const version of versions) {

@@ -36,7 +36,6 @@ import WatchedActionBar from "./components/WatchedActionBar";
 import DetailBreadcrumb from "./components/DetailBreadcrumb";
 import MediaInfoDialog from "./components/MediaInfoDialog";
 import SubtitleSearchDialog from "./components/SubtitleSearchDialog";
-import { sortByResolution } from "./components/VersionFlyout";
 import {
   selectDefaultPlaybackVariantVersion,
   selectedDownloadVersions,
@@ -108,7 +107,6 @@ export default function EpisodeContent({
   const setSubtitlePreference = useSetSubtitlePreference();
 
   // Version selection state — drives the Play button and inline stream popovers.
-  const sortedVersions = useMemo(() => sortByResolution(item.versions ?? []), [item.versions]);
   const userData = leafUserData(item.user_data);
   const { hideOverviews } = useEpisodeSpoilerPrefs();
   // Keyed by episode so a reveal survives an on-view translation of the same
@@ -135,21 +133,21 @@ export default function EpisodeContent({
   const defaultSelectedVersion = useMemo(
     () =>
       selectDefaultPlaybackVariantVersion(
-        sortedVersions,
+        item.versions ?? [],
         item.playback_variants,
         userData,
         qualityPreference,
         selectedEditionKey,
       ),
-    [qualityPreference, selectedEditionKey, item.playback_variants, sortedVersions, userData],
+    [qualityPreference, selectedEditionKey, item.playback_variants, item.versions, userData],
   );
   const [manualSelectedFileId, setManualSelectedFileId] = useState<number | null>(null);
   const pickedVersion = useMemo(
     () =>
       manualSelectedFileId != null
-        ? (sortedVersions.find((version) => version.file_id === manualSelectedFileId) ?? null)
+        ? (item.versions?.find((version) => version.file_id === manualSelectedFileId) ?? null)
         : null,
-    [manualSelectedFileId, sortedVersions],
+    [manualSelectedFileId, item.versions],
   );
   const selectedVersion = pickedVersion ?? defaultSelectedVersion;
   const selectedMediaSummary = useMemo(
@@ -534,6 +532,7 @@ export default function EpisodeContent({
         open={downloadOpen}
         onOpenChange={setDownloadOpen}
         versions={downloadVersions}
+        partsInOrder
         title={title}
       />
       <SubtitleSearchDialog

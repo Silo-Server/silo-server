@@ -213,6 +213,16 @@ describe("detail edition Auto", () => {
     expect(selectDefaultVersion(files, "1080p")?.file_id).toBe(2);
   });
 
+  it("breaks a complete tie within a merged cut by the server's version order", () => {
+    const single = makeVersion({ file_id: 1, resolution: "2160p" });
+    const firstPart = makeVersion({ file_id: 2, resolution: "2160p", presentation_part_index: 1 });
+    const variants = [
+      { variant_id: "multipart", parts: [{ part_index: 1, versions: [firstPart] }] },
+      { variant_id: "single", parts: [{ part_index: 1, versions: [single] }] },
+    ] as PlaybackVariant[];
+    expect(selectDefaultPlaybackVariantVersion([single, firstPart], variants)?.file_id).toBe(1);
+  });
+
   it("breaks a no-history tie between cuts by edition preference, not file size", () => {
     const cut = (file_id: number, edition_key: string, file_size: number) => {
       const file = makeVersion({ file_id, edition_key, resolution: "2160p", file_size });
