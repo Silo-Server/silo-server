@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/collage"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // A collection without an uploaded, template or imported poster shows a
@@ -337,4 +338,136 @@ func splitCollectionCollageRefs(refs []CollectionCollageRef) ([]string, []string
 		keys[i] = ref.Key
 	}
 	return ids, keys
+}
+
+// A smart collection's collage comes from its query's first matches, which
+// are too costly to read on every list read. A background refresh reads them
+// and records which stored collage each viewer's access sees. A list read
+// serves that record without running the query, and asks for a refresh when
+// there is none for the collection's current definition or it is older than
+// the refresh interval, so a new match reaches the collage within that time.
+// Personal and server smart collections share this; only where the records
+// live and how the matches are read differ.
+
+// smartCollageStore keeps one kind of collection's stored collages and the
+// record of which one each viewer access sees for a smart collection.
+type smartCollageStore interface {
+	collageStore
+	// getSmartCollages returns the collages recorded for the viewer access
+	// accessKey names, keyed by collection ID.
+	getSmartCollages(ctx context.Context, collectionIDs []string, accessKey string) (map[string]smartCollage, error)
+	// saveSmartCollage records variantKey, empty for none, as the collage the
+	// viewer access accessKey names sees for a smart collection's definition.
+	saveSmartCollage(ctx context.Context, collectionID, accessKey, definitionKey, variantKey string) error
+}
+
+// smartCollage is the collage recorded for one smart collection and viewer
+// access. collage.Path is empty when the viewer can see no match with a
+// poster.
+type smartCollage struct {
+	definitionKey string
+	refreshedAt   time.Time
+	collage       CollectionCollage
+}
+
+// smartCollageCollection is one smart collection as one viewer reads it.
+type smartCollageCollection struct {
+	id string
+	// definitionKey names everything that decides the collection's matches
+	// and their order.
+	definitionKey string
+	// sources reads the posters of the first matches the viewer can see, at
+	// most CollectionCollageSourceLimit, in the collection's order.
+	sources func(ctx context.Context) ([]string, error)
+}
+
+// smartCollageSet serves and refreshes smart collections' recorded collages.
+type smartCollageSet struct {
+	set             collageSet
+	records         smartCollageStore
+	refreshInterval time.Duration
+}
+
+// serve returns the recorded collage each collection shows the viewer whose
+// access accessKey names, and asks for a background refresh of each one whose
+// record is missing, made for another definition, or due.
+func (s smartCollageSet) serve(ctx context.Context, collections []smartCollageCollection, accessKey string) map[string]CollectionPoster {
+	posters := make(map[string]CollectionPoster, len(collections))
+	if len(collections) == 0 {
+		return posters
+	}
+	ids := make([]string, 0, len(collections))
+	for _, c := range collections {
+		ids = append(ids, c.id)
+	}
+	recorded, err := s.records.getSmartCollages(ctx, ids, accessKey)
+	if err != nil {
+		slog.WarnContext(ctx, "collage: failed to load smart collection collages", "component", "catalog", "error", err)
+		return posters
+	}
+	var touch []CollectionCollageRef
+	now := time.Now()
+	for _, c := range collections {
+		r, ok := recorded[c.id]
+		if !ok || r.definitionKey != c.definitionKey {
+			s.refreshLater(c, accessKey)
+			continue
+		}
+		if now.Sub(r.refreshedAt) >= s.refreshInterval {
+			s.refreshLater(c, accessKey)
+		}
+		if r.collage.Path == "" {
+			continue
+		}
+		posters[c.id] = CollectionPoster{Path: r.collage.Path, Thumbhash: r.collage.Thumbhash, CollageKey: r.collage.Key}
+		if now.Sub(r.collage.LastUsedAt) > collectionCollageTouchInterval {
+			touch = append(touch, r.collage.CollectionCollageRef)
+		}
+	}
+	if err := s.records.TouchCollectionCollages(ctx, touch); err != nil {
+		slog.DebugContext(ctx, "collage: failed to touch collection collages", "component", "catalog", "error", err)
+	}
+	return posters
+}
+
+// refreshLater runs refresh off the request. Refreshes of one collection for
+// one viewer access and definition share a run.
+func (s smartCollageSet) refreshLater(c smartCollageCollection, accessKey string) {
+	ref := CollectionCollageRef{CollectionID: c.id, Key: "smart:" + accessKey + ":" + c.definitionKey}
+	s.set.queue.runLater(ref, func(ctx context.Context) error { return s.refresh(ctx, c, accessKey) })
+}
+
+// refresh reads c's first matches, builds their collage unless it is stored,
+// and records it as the collage the viewer whose access accessKey names sees.
+// When no match has a poster it records that there is none and succeeds: the
+// record holds off the next refresh until the refresh interval, so the build
+// queue keeps no retry marker for it.
+func (s smartCollageSet) refresh(ctx context.Context, c smartCollageCollection, accessKey string) error {
+	sources, err := c.sources(ctx)
+	if err != nil {
+		return err
+	}
+	key := ""
+	if len(sources) > 0 {
+		if err := s.set.prepare(ctx, c.id, sources); err != nil {
+			return err
+		}
+		key = CollectionCollageKey(sources)
+	}
+	return s.records.saveSmartCollage(ctx, c.id, accessKey, c.definitionKey, key)
+}
+
+// firstPosters returns the posters of the first items that have one, at most
+// CollectionCollageSourceLimit, in order.
+func firstPosters(items []*models.MediaItem) []string {
+	var sources []string
+	for _, item := range items {
+		if item.PosterPath != "" {
+			sources = append(sources, item.PosterPath)
+			if len(sources) == CollectionCollageSourceLimit {
+				break
+			}
+		}
+	}
+	return sources
 }
