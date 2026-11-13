@@ -407,13 +407,16 @@ such as an import's, still save their other fields. Imports, templates and resto
 the rule.
 
 The `slug` is a URL name the server derives from the title when a create leaves it out. It is
-unique only within the collection's `library_id`: `library_id` when the create gives one, else
-the first of `library_ids`. A create takes the first free `<slug>-<n>` there instead of failing,
-so titles that differ only in punctuation ("Sci-Fi" and "Sci Fi"), or that have no Latin letters
-or digits (which derive `collection`), save as separate collections. `library_id` stays while
-that library is anywhere in `library_ids`. When an update drops it, the collection moves to the
-first remaining library and takes a free slug there the same way. An update that names a `slug`
-another collection of its `library_id` uses is refused at `body.slug`.
+unique only within the collection's `library_id`: `library_id` when the create gives one, else the
+first of `library_ids`. A create takes the first free `<slug>-<n>` there instead of failing,
+including for a `slug` the request names, and the response carries the slug it got. So titles that
+differ only in punctuation ("Sci-Fi" and "Sci Fi"), or that have no Latin letters or digits (which
+derive `collection`), save as separate collections. `library_id` stays while that library is
+anywhere in `library_ids`. When an update drops it, the collection moves to the first remaining
+library and takes a free slug there the same way; a `slug` the update repeats unchanged doesn't
+count as a request for it. An update that names a different `slug` another collection of its
+`library_id` uses is refused at `body.slug`. An update with an empty `library_ids` is refused at
+`body.library_ids`.
 
 ## Collections that hold a title
 

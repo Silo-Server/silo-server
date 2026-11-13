@@ -197,6 +197,11 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 		return none, err
 	}
 	req.Visibility = visibility
+	// A collection shows in at least one library; with none it would drop out
+	// of every library's list while the update reported success.
+	if req.LibraryIDs != nil && len(uniquePositiveInts(*req.LibraryIDs)) == 0 {
+		return none, fieldError("library_ids", "Choose at least one library")
+	}
 	existing, err := h.repo.GetByID(ctx, collectionID)
 	if err != nil {
 		return none, adminCollectionLookupAPIError(err)

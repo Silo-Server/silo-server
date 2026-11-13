@@ -93,33 +93,38 @@ func TestLibraryCollectionNamesDB(t *testing.T) {
 		t.Fatalf("rename to %q: err = %v, want the title taken", rename, err)
 	}
 
+	// moveToShows moves a collection to Shows alone, sending slug when it is
+	// not empty, and checks the slug it ends up with there.
+	scope := []int{shows}
+	moveToShows := func(key, slug, wantSlug string) {
+		t.Helper()
+		in := UpdateLibraryCollectionInput{ID: created[key], LibraryIDs: &scope}
+		if slug != "" {
+			in.Slug = &slug
+		}
+		if err := repo.Update(ctx, in); err != nil {
+			t.Fatalf("move %s to Shows sending slug %q: %v", key, slug, err)
+		}
+		if got, err := repo.GetByID(ctx, created[key]); err != nil || got.LibraryID != shows || got.Slug != wantSlug {
+			t.Fatalf("move %s to Shows sending slug %q: got %+v, %v, want slug %q", key, slug, got, err, wantSlug)
+		}
+	}
+
 	// A collection whose libraries no longer include its slug's library moves
 	// to the first one, with a free "<slug>-<n>" when Sci.Fi has its slug there.
-	scope := []int{shows}
-	if err := repo.Update(ctx, UpdateLibraryCollectionInput{ID: created["scifi"], LibraryIDs: &scope, UniqueTitle: true}); err != nil {
-		t.Fatalf("move Sci-Fi to Shows: %v", err)
-	}
-	got, err := repo.GetByID(ctx, created["scifi"])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.LibraryID != shows || got.Slug != "sci-fi-2" {
-		t.Fatalf("move Sci-Fi to Shows: library %d slug %q, want %d %q", got.LibraryID, got.Slug, shows, "sci-fi-2")
-	}
+	moveToShows("scifi", "", "sci-fi-2")
 
 	// A slug sent with a scope change is checked where the collection lands:
 	// one taken only in Movies is free in Shows, one taken in Shows is refused
 	// rather than suffixed.
-	takenInMovies := "server-picks-2"
-	if err := repo.Update(ctx, UpdateLibraryCollectionInput{ID: created["scifi2"], LibraryIDs: &scope, Slug: &takenInMovies}); err != nil {
-		t.Fatalf("move Sci Fi to Shows as %q: %v", takenInMovies, err)
-	}
-	if got, err := repo.GetByID(ctx, created["scifi2"]); err != nil || got.LibraryID != shows || got.Slug != takenInMovies {
-		t.Fatalf("move Sci Fi to Shows as %q: got %+v, %v", takenInMovies, got, err)
-	}
+	moveToShows("scifi2", "server-picks-2", "server-picks-2")
 	takenInShows := "sci-fi"
 	err = repo.Update(ctx, UpdateLibraryCollectionInput{ID: created["import"], LibraryIDs: &scope, Slug: &takenInShows})
 	if !IsLibraryCollectionSlugConflict(err) {
 		t.Fatalf("move the import to Shows as %q: err = %v, want a slug conflict", takenInShows, err)
 	}
+
+	// A client that sends the whole collection echoes the slug it read; the
+	// move still takes a free one where the slug is taken.
+	moveToShows("picks", "server-picks", "server-picks-3")
 }

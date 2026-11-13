@@ -173,6 +173,12 @@ func TestAdminCollectionUpdateNameRuleDB(t *testing.T) {
 			t.Fatalf("%s: err = %v, want title taken %v", tc.name, err, tc.wantTaken)
 		}
 	}
+
+	// Without a library the collection would leave every library's list.
+	_, err := h.UpdateAdminCollection(t.Context(), other, AdminCollectionUpdate{LibraryIDs: &[]int{}})
+	if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.Field != "library_ids" {
+		t.Fatalf("update to no libraries: err = %v, want a field error at library_ids", err)
+	}
 }
 
 // A variant that fails to delete must not leave an admin collection pointing

@@ -790,6 +790,14 @@ func (r *LibraryCollectionRepository) Update(ctx context.Context, input UpdateLi
 			if len(updatedLibraryIDs) > 0 {
 				legacyLibraryID = updatedLibraryIDs[0]
 			}
+			// A client that sends the whole collection echoes the slug it read;
+			// that one is not a request, so the move's free slug stands.
+			var slugBeforeMove string
+			if slugAfterMove {
+				if err := tx.QueryRow(ctx, `SELECT slug FROM library_collections WHERE id = $1`, input.ID).Scan(&slugBeforeMove); err != nil {
+					return fmt.Errorf("loading collection slug: %w", err)
+				}
+			}
 			// Keep a legacy library_id that is still in scope: the collection's
 			// slug is unique within it, and another scope library may already
 			// use the same slug. A collection leaving it moves to the first
@@ -799,7 +807,7 @@ func (r *LibraryCollectionRepository) Update(ctx context.Context, input UpdateLi
 					return fmt.Errorf("updating legacy library_id: %w", err)
 				}
 			}
-			if slugAfterMove {
+			if slugAfterMove && *input.Slug != slugBeforeMove {
 				if _, err := tx.Exec(ctx, `UPDATE library_collections SET slug = $2, updated_at = NOW() WHERE id = $1`, input.ID, *input.Slug); err != nil {
 					return fmt.Errorf("updating library collection slug: %w", err)
 				}
