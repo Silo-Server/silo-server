@@ -485,6 +485,7 @@
 ./internal/userstore/pgstore TestPostgresProgressHints
 ./internal/userstore/pgstore TestPostgresUnmarkKeepsHistory
 ./internal/userstore/pgstore TestPostgresAtomicJellycompatProgress
+./internal/userstore/pgstore TestPostgresJellycompatPlayedByDate
 ./internal/userstore/pgstore TestPostgresPersonalListPage
 ./internal/userstore/pgstore TestPostgresReplaceCollectionItemsWritesOnlyTheDifference
 ./internal/userstore/pgstore TestPostgresReplaceCollectionItemsWaitsOutADelete
