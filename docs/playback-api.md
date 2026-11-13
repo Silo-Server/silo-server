@@ -404,8 +404,8 @@ The HLS manifest and segment answers, refusals included, carry
 validator headers exposed, so a player on another origin, such as a Google Cast
 receiver, can read them. Subtitle sidecars send the same wildcard from their
 handler. The wildcard never comes with `Access-Control-Allow-Credentials`, and
-the API answers no `OPTIONS` preflight: a GET with a single-range `Range` needs
-none.
+the API answers no `OPTIONS` preflight. Cast receivers fetch playlists and
+segments with plain GETs and have not been seen to send one.
 
 Subtitle inventory URLs in v2 playback responses use the `/api/v2/stream/`
 mount, including relative `/stream/` values produced by the shared inventory

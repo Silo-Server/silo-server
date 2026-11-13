@@ -39,8 +39,8 @@ const (
 
 // mediaCrossOrigin runs outside the authorization gate, so a refusal still
 // reaches the player as a readable status instead of an opaque CORS failure.
-// The native listener answers no OPTIONS preflight: a GET whose only extra
-// header is a single-range Range is CORS-safelisted and needs none.
+// The native listener answers no OPTIONS preflight. Cast receivers fetch
+// playlists and segments with plain GETs and have not been seen to send one.
 func mediaCrossOrigin(ctx huma.Context, next func(huma.Context)) {
 	ctx.SetHeader("Access-Control-Allow-Origin", "*")
 	ctx.SetHeader("Access-Control-Allow-Headers", mediaCORSAllowHeaders)

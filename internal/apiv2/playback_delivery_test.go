@@ -195,8 +195,9 @@ func TestPlaybackHLSDeliveryAnswersCrossOrigin(t *testing.T) {
 		}),
 	}
 	h := newTestHandler(t, deps)
-	origin := map[string]string{"Origin": "https://www.gstatic.com"}
-	viewer := with(viewerHeaders(), "Origin", origin["Origin"])
+	const castOrigin = "https://www.gstatic.com"
+	anonymous := map[string]string{"Origin": castOrigin}
+	viewer := with(viewerHeaders(), "Origin", castOrigin)
 	transcode := Prefix + "/playback/transcode/" + deliveryTestSession
 	requireCORS := func(name string, rec *httptest.ResponseRecorder) {
 		t.Helper()
@@ -221,8 +222,8 @@ func TestPlaybackHLSDeliveryAnswersCrossOrigin(t *testing.T) {
 	requireCORS("segment", segment)
 
 	// The authorization gate refuses before the handler runs.
-	requireCORS("unauthenticated manifest", requireProblemResponse(t, do(t, h, http.MethodGet, transcode+"/master.m3u8?st=opaque", "", origin), TypeAuthenticationRequired))
-	requireCORS("unauthenticated segment", requireProblemResponse(t, do(t, h, http.MethodGet, transcode+"/segment/seg_00001.m4s?st=opaque", "", origin), TypeAuthenticationRequired))
+	requireCORS("unauthenticated manifest", requireProblemResponse(t, do(t, h, http.MethodGet, transcode+"/master.m3u8?st=opaque", "", anonymous), TypeAuthenticationRequired))
+	requireCORS("unauthenticated segment", requireProblemResponse(t, do(t, h, http.MethodGet, transcode+"/segment/seg_00001.m4s?st=opaque", "", anonymous), TypeAuthenticationRequired))
 	// A handler failure becomes a problem through the delivery writer.
 	gone := do(t, h, http.MethodGet, transcode+"/segment/gone.m4s?st=opaque", "", viewer)
 	if gone.Code != http.StatusGone {
