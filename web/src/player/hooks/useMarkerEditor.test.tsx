@@ -65,10 +65,10 @@ it("reports the provenance the save recorded, so a source line survives it", asy
         new Response(
           JSON.stringify({
             file_id: "42",
-            intro: { start_seconds: 0, end_seconds: 70, source: "manual", provider: null },
-            credits: { start_seconds: null, end_seconds: null },
-            recap: { start_seconds: null, end_seconds: null },
-            preview: { start_seconds: null, end_seconds: null },
+            intro: { start_seconds: 0, end_seconds: 70, source: "manual" },
+            credits: {},
+            recap: {},
+            preview: {},
             marker_segments: [],
           }),
           { status: 200 },
