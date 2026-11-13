@@ -308,6 +308,11 @@ describe("ConnectAppsSettings", () => {
     expect(container.textContent).not.toContain("This account can't sign in to a Jellyfin app");
     expect(container.textContent).toContain("j.doe#Doe Household");
     expect(container.textContent).not.toContain("johndoe#");
+    // A PIN never reaches the directory, so a PIN-protected profile can't be
+    // reached with password#PIN and isn't offered.
+    expect(findButton(container, "Kids")).toBeUndefined();
+    expect(container.textContent).not.toContain("j.doe#Kids");
+    expect(container.textContent).not.toContain("needs #PIN");
   });
 
   it("flags a loopback compat address rather than offering it for copying", () => {

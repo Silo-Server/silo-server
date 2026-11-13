@@ -54,11 +54,11 @@ type CompatConnectAccountInfo struct {
 	PasswordLoginAvailable bool `json:"password_login_available"`
 	// DirectoryLoginAvailable reports whether a password sign-in that names
 	// no provider, as a Jellyfin client's does, goes to the server's
-	// directory (LDAP) for this account: the directory username and
-	// password sign in.
+	// directory (LDAP), where this account has a linked identity: the
+	// directory username and password sign in.
 	DirectoryLoginAvailable bool `json:"directory_login_available"`
-	// DirectoryUsername is the account's username at that directory; empty
-	// when no directory identity is linked.
+	// DirectoryUsername is the username of that identity, set when
+	// DirectoryLoginAvailable is.
 	DirectoryUsername string `json:"directory_username,omitempty"`
 }
 

@@ -97,10 +97,10 @@ type CompatConnectAccountInfo struct {
 	PasswordLoginAvailable bool `json:"password_login_available" doc:"True when the account's own Silo password signs in"`
 	// DirectoryLoginAvailable reports whether a password sign-in that names
 	// no provider, as a Jellyfin client's does, goes to the server's
-	// directory (LDAP) for this account.
-	DirectoryLoginAvailable bool `json:"directory_login_available" doc:"True when a password sign-in without a provider, such as a Jellyfin client's, goes to the server's directory (LDAP) for this account, so the directory username and password sign in"`
-	// DirectoryUsername is the account's username at that directory.
-	DirectoryUsername string `json:"directory_username,omitempty" doc:"The account's username at that directory; omitted when no directory identity is linked" example:"alice"`
+	// directory (LDAP), where this account has a linked identity.
+	DirectoryLoginAvailable bool `json:"directory_login_available" doc:"True when a password sign-in without a provider, such as a Jellyfin client's, goes to the server's directory (LDAP), where this account has a linked identity, so the directory username and password sign in"`
+	// DirectoryUsername is the username of that identity.
+	DirectoryUsername string `json:"directory_username,omitempty" doc:"The account's username at that directory; present when directory_login_available is true" example:"alice"`
 }
 
 // CompatConnectInfoResponse is the native transport projection, independent of handler views.

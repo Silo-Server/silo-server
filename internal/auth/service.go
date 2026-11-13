@@ -347,10 +347,10 @@ type PasswordSignIn struct {
 	// Local: the account's own Silo password signs in.
 	Local bool
 	// Directory: the name and password go to the directory (LDAP), which
-	// answers for the account.
+	// answers for the account through the identity linked there.
 	Directory bool
-	// DirectoryUsername is the username of the account's identity at that
-	// directory, the name to sign in with; empty when it has none linked.
+	// DirectoryUsername is the username of that identity, the name to sign
+	// in with.
 	DirectoryUsername string
 }
 
@@ -379,14 +379,16 @@ func (s *Service) PasswordSignInFor(ctx context.Context, userID int) (PasswordSi
 		if err != nil {
 			return PasswordSignIn{}, err
 		}
-		out := PasswordSignIn{Directory: true}
+		// The directory answers for the account through an identity linked
+		// there. Account resolution never matches a directory person to an
+		// account by name, so without one (an OIDC account, say) there is
+		// no directory username known to sign in with.
 		for _, identity := range identities {
 			if identity.InstallationID == directory.Info.InstallationID {
-				out.DirectoryUsername = identity.Username
-				break
+				return PasswordSignIn{Directory: true, DirectoryUsername: identity.Username}, nil
 			}
 		}
-		return out, nil
+		return PasswordSignIn{}, nil
 	}
 	if !user.LocalPasswordLoginEnabled || user.PasswordHash == "" {
 		return PasswordSignIn{}, nil

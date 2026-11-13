@@ -255,6 +255,14 @@ func TestPasswordSignInForDB(t *testing.T) {
 	env.setSetting(t, config.AuthLocalPasswordLoginSettingKey, "true")
 	// Without the directory provider nothing signs the account in.
 	check(newService(), member, PasswordSignIn{})
+	// An account without a local password and without a directory identity,
+	// as an OIDC account has, has no password that signs it in: its name
+	// would go to the directory, which knows no one linked to it.
+	oidcOnly := env.localAccount(t, "oidc-only", models.RoleUser)
+	if _, err := env.pool.Exec(ctx, `UPDATE users SET local_password_login_enabled = false WHERE id = $1`, oidcOnly.ID); err != nil {
+		t.Fatal(err)
+	}
+	check(svc, oidcOnly, PasswordSignIn{})
 
 	// A network provider refusing the person refuses the password too.
 	viewer := env.localAccount(t, "viewer", models.RoleUser)
