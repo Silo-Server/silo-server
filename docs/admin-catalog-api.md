@@ -396,7 +396,9 @@ IDs. An episode stores the same text fields and IDs, plus `episode_number`,
 `content_rating`: the series' rating decides age limits for its episodes. No
 metadata provider writes a season's or episode's sort title, original title or
 tagline, or a season's IDs, so a refresh keeps them without a lock. A refresh
-does write an episode's IDs.
+does write an episode's IDs. Reset to Provider empties them, except that a reset
+in another language than the series' own keeps the sort title, original title
+and tagline, as it keeps the title and overview.
 
 `locked_fields` holds the `MetadataField` numbers a refresh, library scan or
 seed import must keep. A season accepts the name, overview and release-date

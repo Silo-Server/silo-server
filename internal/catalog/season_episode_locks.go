@@ -70,11 +70,9 @@ var (
 // writes them, so they need no lock, but they describe one show like a locked
 // field does. An episode's provider IDs are not among them: refreshes write those.
 var (
-	seasonEditedColumns = []string{
-		childColumnSortTitle, childColumnOriginalTitle, childColumnTagline,
-		childColumnImdbID, childColumnTmdbID, childColumnTvdbID,
-	}
-	episodeEditedColumns = []string{childColumnSortTitle, childColumnOriginalTitle, childColumnTagline}
+	childEditedTextColumns = []string{childColumnSortTitle, childColumnOriginalTitle, childColumnTagline}
+	seasonEditedColumns    = slices.Concat(childEditedTextColumns, []string{childColumnImdbID, childColumnTmdbID, childColumnTvdbID})
+	episodeEditedColumns   = childEditedTextColumns
 )
 
 func lockedAssignments(table string, columns []childLockedColumn) string {
@@ -123,7 +121,7 @@ func ClearSeriesChildEditsTx(ctx context.Context, tx pgx.Tx, seriesID string) er
 	}{{seasonsTable, seasonLockedColumns, seasonEditedColumns}, {episodesTable, episodeLockedColumns, episodeEditedColumns}} {
 		editedPredicates := make([]string, 0, len(target.edited))
 		for _, column := range target.edited {
-			editedPredicates = append(editedPredicates, column+" <> ''")
+			editedPredicates = append(editedPredicates, column+" <> "+sqlEmptyText)
 		}
 		query := clearChildEditsSQL(target.table, target.columns, target.edited, true) +
 			fmt.Sprintf(` WHERE series_id = $1 AND (locked_fields <> '{}' OR %s)`, strings.Join(editedPredicates, " OR "))
@@ -155,13 +153,14 @@ func clearChildEditsSQL(table string, columns []childLockedColumn, edited []stri
 	return fmt.Sprintf(`UPDATE %s SET %s, locked_fields = '{}', updated_at = NOW()`, table, assignments)
 }
 
-// ResetEdits empties a season's lockable fields and removes its locks, for
-// Reset to Provider. The refresh that follows writes the provider's values over
-// the empty ones, so a field the provider has no value for stays empty. With
-// keepText the title and overview stay: a refresh in another language than the
-// series' own writes neither.
+// ResetEdits empties a season's lockable fields and title details and removes
+// its locks, for Reset to Provider. The refresh that follows writes the
+// provider's values over the empty ones, so a field the provider has no value
+// for stays empty. With keepText the title, overview and text title details
+// stay: a reset in another language than the series' own keeps the row's own
+// text, as an item's reset does.
 func (r *SeasonRepository) ResetEdits(ctx context.Context, contentID string, keepText bool) error {
-	if _, err := r.pool.Exec(ctx, clearChildEditsSQL(seasonsTable, resetColumns(seasonLockedColumns, keepText), nil, false)+` WHERE content_id = $1`, contentID); err != nil {
+	if _, err := r.pool.Exec(ctx, clearChildEditsSQL(seasonsTable, resetColumns(seasonLockedColumns, keepText), resetEditedColumns(seasonEditedColumns, keepText), false)+` WHERE content_id = $1`, contentID); err != nil {
 		return fmt.Errorf("resetting season %s: %w", contentID, err)
 	}
 	return nil
@@ -172,7 +171,7 @@ func (r *SeasonRepository) ResetEdits(ctx context.Context, contentID string, kee
 func (r *EpisodeRepository) ResetEdits(ctx context.Context, contentID string, keepText bool) error {
 	err := pgx.BeginTxFunc(ctx, r.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
 		var seriesID string
-		query := clearChildEditsSQL(episodesTable, resetColumns(episodeLockedColumns, keepText), nil, false) + ` WHERE content_id = $1 RETURNING series_id`
+		query := clearChildEditsSQL(episodesTable, resetColumns(episodeLockedColumns, keepText), resetEditedColumns(episodeEditedColumns, keepText), false) + ` WHERE content_id = $1 RETURNING series_id`
 		if err := tx.QueryRow(ctx, query, contentID).Scan(&seriesID); err != nil {
 			return err
 		}
@@ -192,5 +191,16 @@ func resetColumns(columns []childLockedColumn, keepText bool) []childLockedColum
 	}
 	return slices.DeleteFunc(slices.Clone(columns), func(c childLockedColumn) bool {
 		return c.column == childColumnTitle || c.column == childColumnOverview
+	})
+}
+
+// resetEditedColumns is the edited columns a reset empties: all of them, or
+// all but the text ones.
+func resetEditedColumns(columns []string, keepText bool) []string {
+	if !keepText {
+		return columns
+	}
+	return slices.DeleteFunc(slices.Clone(columns), func(c string) bool {
+		return slices.Contains(childEditedTextColumns, c)
 	})
 }
