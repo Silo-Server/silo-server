@@ -3648,6 +3648,15 @@ func (s *TranscodeSession) restart(
 	}
 
 	s.mu.Lock()
+	if s.closing {
+		// Close began while this restart validated or stopped the previous
+		// generation: stop before touching the output or starting FFmpeg.
+		flight.err = errSessionClosing
+		s.restarting = nil
+		s.mu.Unlock()
+		close(flight.done)
+		return flight.err
+	}
 	s.running = false
 	s.waitErr = nil
 	if s.stderr != nil {

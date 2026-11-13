@@ -1181,14 +1181,13 @@ func (m *TranscodeManager) StartShutdownCleanup(ctx context.Context) <-chan stru
 		transcodes := m.transcodes
 		m.transcodes = make(map[string]*TranscodeSession)
 		m.transcodeMu.Unlock()
-		for id, session := range transcodes {
+		// Close without the lifecycle lock. A restart holds that lock through
+		// its restart hook, which can block on the FFmpeg context only Close
+		// cancels. Close itself waits for a restart in flight, and none starts
+		// after it: the session is gone from the map and refuses restarts.
+		for _, session := range transcodes {
 			if session != nil {
-				// Under the session's lifecycle lock: a restart in flight,
-				// which holds it, finishes before the close, and none starts
-				// after it (the session is gone from the map).
-				unlock := m.LockSessionLifecycle(id)
 				_ = session.Close()
-				unlock()
 			}
 		}
 	}()

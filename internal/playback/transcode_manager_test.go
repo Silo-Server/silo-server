@@ -701,42 +701,35 @@ func TestReconstructTranscodeWithoutAutoStartsOnceWithoutWaiting(t *testing.T) {
 	}
 }
 
-// Shutdown cleanup closes each session under its lifecycle lock, so a
-// restart in flight, which holds it, finishes before the close.
-func TestStartShutdownCleanup_ClosesUnderTheLifecycleLock(t *testing.T) {
+// A restart hook can block on its FFmpeg context, as the throttler's settings
+// read does when the database stalls. Shutdown cleanup must still close the
+// session, which cancels that context, rather than wait for the hook.
+func TestStartShutdownCleanup_DoesNotWaitForARestartHook(t *testing.T) {
 	m := NewTranscodeManager()
-	dir := t.TempDir()
-	m.RegisterTranscodeSession("held", &TranscodeSession{outputDir: dir})
-	unlock := m.LockSessionLifecycle("held")
+	s := newRunningFakeSession(t)
+	m.RegisterTranscodeSession("hooked", s)
+	hookEntered := make(chan struct{})
+	hookReturned := make(chan struct{})
+	s.SetRestartHook(func(ctx context.Context) {
+		close(hookEntered)
+		<-ctx.Done()
+		close(hookReturned)
+	})
+	restarted := make(chan error, 1)
+	go func() { restarted <- m.RestartSessionLocked(context.Background(), "hooked", s, 0, 0) }()
+	<-hookEntered
+
 	ctx, cancel := context.WithCancel(context.Background())
 	done := m.StartShutdownCleanup(ctx)
 	cancel()
-	waiting := func() bool {
-		m.lifecycleMu.Lock()
-		defer m.lifecycleMu.Unlock()
-		lk := m.lifecycleLocks["held"]
-		return lk != nil && lk.refs == 2
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("shutdown cleanup waited on a restart hook that only Close can release")
 	}
-	deadline := time.Now().Add(10 * time.Second)
-	for !waiting() {
-		select {
-		case <-done:
-			unlock()
-			t.Fatal("shutdown cleanup closed the session without its lifecycle lock")
-		default:
-		}
-		if time.Now().After(deadline) {
-			unlock()
-			t.Fatal("shutdown cleanup never waited for the lifecycle lock")
-		}
-		time.Sleep(time.Millisecond) //nolint:forbidigo // polls the lifecycle lock refs that shutdown takes on its own goroutine
+	<-hookReturned
+	if err := <-restarted; err != nil {
+		t.Fatalf("restart published before shutdown = %v", err)
 	}
-	if _, err := os.Stat(dir); err != nil {
-		t.Fatalf("the session closed while its lifecycle lock was held: %v", err)
-	}
-	unlock()
-	<-done
-	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Fatalf("the session's output survived shutdown: %v", err)
-	}
+	requireClosed(t, s, nil)
 }
