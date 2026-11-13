@@ -41,9 +41,11 @@ func selectedSortKey(sortBy string) string {
 // browses episodes, so a request with no type filter, or one that mixes
 // Episode with other types, keeps the played list rather than lose its
 // watched episodes. ItemsHandler.browsesPlayedListByCatalog also checks that
-// an Episode-only request has an episode browse to go to.
+// an Episode-only request has an episode browse to go to. The browse does not
+// apply MediaTypes, so a request whose MediaTypes excludes Video keeps the
+// played list, which returns nothing for it.
 func (q itemsQuery) sortsPlayedListByCatalog() bool {
-	if q.isPlayed == nil || !*q.isPlayed || q.sortByKey == sortKeyDatePlayed {
+	if q.isPlayed == nil || !*q.isPlayed || q.sortByKey == sortKeyDatePlayed || !q.allowsVideo() {
 		return false
 	}
 	if mapped, ok := sortKey(q.sortByKey); !ok || (mapped == "" && !q.episodeOnly()) {
