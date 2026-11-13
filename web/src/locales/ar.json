@@ -3653,6 +3653,78 @@
       "value": "فشل إجراء المجموعة."
     }
   ],
+  "web.admin.access.groups.addUsers.addSelected": [
+    {
+      "type": 0,
+      "value": "إضافة المحددين"
+    }
+  ],
+  "web.admin.access.groups.addUsers.addSelectedCount": [
+    {
+      "type": 0,
+      "value": "إضافة المحددين ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.access.groups.addUsers.description": [
+    {
+      "type": 0,
+      "value": "الحسابات العادية خارج هذه المجموعة. لا يمكن لحسابات المسؤولين الانضمام إلى المجموعات."
+    }
+  ],
+  "web.admin.access.groups.addUsers.noGroup": [
+    {
+      "type": 0,
+      "value": "بلا مجموعة"
+    }
+  ],
+  "web.admin.access.groups.addUsers.noMatches": [
+    {
+      "type": 0,
+      "value": "لا يوجد مستخدمون يطابقون بحثك."
+    }
+  ],
+  "web.admin.access.groups.addUsers.none": [
+    {
+      "type": 0,
+      "value": "كل الحسابات العادية موجودة هنا بالفعل."
+    }
+  ],
+  "web.admin.access.groups.addUsers.search": [
+    {
+      "type": 0,
+      "value": "البحث في المستخدمين"
+    }
+  ],
+  "web.admin.access.groups.addUsers.searchPlaceholder": [
+    {
+      "type": 0,
+      "value": "البحث باسم المستخدم أو البريد الإلكتروني"
+    }
+  ],
+  "web.admin.access.groups.addUsers.title": [
+    {
+      "type": 0,
+      "value": "إضافة مستخدمين إلى "
+    },
+    {
+      "type": 1,
+      "value": "group"
+    }
+  ],
+  "web.admin.access.groups.addUsers.unknownGroup": [
+    {
+      "type": 0,
+      "value": "مجموعة غير معروفة"
+    }
+  ],
   "web.admin.access.groups.allGroups": [
     {
       "type": 0,
@@ -3935,6 +4007,142 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.access.groups.changes.allPermissions": [
+    {
+      "type": 0,
+      "value": "الكل"
+    }
+  ],
+  "web.admin.access.groups.changes.allowed": [
+    {
+      "type": 0,
+      "value": "مسموح"
+    }
+  ],
+  "web.admin.access.groups.changes.audioTranscoding": [
+    {
+      "type": 0,
+      "value": "تحويل ترميز الصوت"
+    }
+  ],
+  "web.admin.access.groups.changes.concurrentStreams": [
+    {
+      "type": 0,
+      "value": "البث المتزامن"
+    }
+  ],
+  "web.admin.access.groups.changes.concurrentTranscodes": [
+    {
+      "type": 0,
+      "value": "عمليات تحويل الترميز المتزامنة"
+    }
+  ],
+  "web.admin.access.groups.changes.convertedDownloads": [
+    {
+      "type": 0,
+      "value": "التنزيلات المحوّلة"
+    }
+  ],
+  "web.admin.access.groups.changes.downloads": [
+    {
+      "type": 0,
+      "value": "التنزيلات"
+    }
+  ],
+  "web.admin.access.groups.changes.householdProfiles": [
+    {
+      "type": 0,
+      "value": "الملفات الشخصية للأسرة"
+    }
+  ],
+  "web.admin.access.groups.changes.libraries": [
+    {
+      "type": 0,
+      "value": "المكتبات"
+    }
+  ],
+  "web.admin.access.groups.changes.libraryId": [
+    {
+      "type": 0,
+      "value": "#"
+    },
+    {
+      "type": 1,
+      "value": "id"
+    }
+  ],
+  "web.admin.access.groups.changes.localBitrate": [
+    {
+      "type": 0,
+      "value": "معدل بت البث المحلي"
+    }
+  ],
+  "web.admin.access.groups.changes.noLibraries": [
+    {
+      "type": 0,
+      "value": "لا مكتبات"
+    }
+  ],
+  "web.admin.access.groups.changes.noPermissions": [
+    {
+      "type": 0,
+      "value": "لا شيء"
+    }
+  ],
+  "web.admin.access.groups.changes.notAllowed": [
+    {
+      "type": 0,
+      "value": "غير مسموح"
+    }
+  ],
+  "web.admin.access.groups.changes.permissions": [
+    {
+      "type": 0,
+      "value": "الصلاحيات"
+    }
+  ],
+  "web.admin.access.groups.changes.playbackQuality": [
+    {
+      "type": 0,
+      "value": "جودة التشغيل"
+    }
+  ],
+  "web.admin.access.groups.changes.remoteBitrate": [
+    {
+      "type": 0,
+      "value": "معدل بت البث البعيد"
+    }
+  ],
+  "web.admin.access.groups.changes.requestApproval": [
+    {
+      "type": 0,
+      "value": "الموافقة على الطلبات"
+    }
+  ],
+  "web.admin.access.groups.changes.requestLimit": [
+    {
+      "type": 0,
+      "value": "حدّ الطلبات"
+    }
+  ],
+  "web.admin.access.groups.changes.requests": [
+    {
+      "type": 0,
+      "value": "الطلبات"
+    }
+  ],
+  "web.admin.access.groups.changes.unlimited": [
+    {
+      "type": 0,
+      "value": "غير محدود"
+    }
+  ],
+  "web.admin.access.groups.changes.videoTranscoding": [
+    {
+      "type": 0,
+      "value": "تحويل ترميز الفيديو"
     }
   ],
   "web.admin.access.groups.conflict.message": [
@@ -4297,10 +4505,173 @@
       "value": "جارٍ تحميل مجموعات الوصول..."
     }
   ],
+  "web.admin.access.groups.members.addFailed": [
+    {
+      "type": 0,
+      "value": "تعذّرت إضافة بعض المستخدمين:"
+    }
+  ],
+  "web.admin.access.groups.members.addUsers": [
+    {
+      "type": 0,
+      "value": "إضافة مستخدمين"
+    }
+  ],
+  "web.admin.access.groups.members.added": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لم تتم إضافة أي مستخدم إلى "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تمت إضافة مستخدم واحد إلى "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تمت إضافة مستخدمَين إلى "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تمت إضافة "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مستخدمين إلى "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تمت إضافة "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مستخدمًا إلى "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تمت إضافة "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مستخدم إلى "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.access.groups.members.couldNotAdd": [
+    {
+      "type": 0,
+      "value": "تعذّرت الإضافة"
+    }
+  ],
+  "web.admin.access.groups.members.couldNotMove": [
+    {
+      "type": 0,
+      "value": "تعذّر النقل"
+    }
+  ],
   "web.admin.access.groups.members.empty": [
     {
       "type": 0,
       "value": "لا أعضاء بعد."
+    }
+  ],
+  "web.admin.access.groups.members.failure": [
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "web.admin.access.groups.members.groupChanged": [
+    {
+      "type": 0,
+      "value": "تغيّر هذا الحساب بعد تأكيدك. تحقق من التغيير وحاول مرة أخرى."
+    }
+  ],
+  "web.admin.access.groups.members.groupsLoadFailed": [
+    {
+      "type": 0,
+      "value": "تعذّر تحميل مجموعات الوصول، لذا لا يمكن نقل الأعضاء بعد. "
+    },
+    {
+      "type": 8,
+      "value": "retry",
+      "children": [
+        {
+          "type": 0,
+          "value": "إعادة المحاولة"
+        }
+      ]
     }
   ],
   "web.admin.access.groups.members.heading": [
@@ -4337,6 +4708,153 @@
       "value": "جارٍ تحميل الأعضاء..."
     }
   ],
+  "web.admin.access.groups.members.manageHelp": [
+    {
+      "type": 0,
+      "value": "انقل الأعضاء إلى مجموعة أخرى، أو أضف مستخدمين إلى هذه المجموعة."
+    }
+  ],
+  "web.admin.access.groups.members.moveFailed": [
+    {
+      "type": 0,
+      "value": "تعذّر نقل بعض المستخدمين:"
+    }
+  ],
+  "web.admin.access.groups.members.moveSelected": [
+    {
+      "type": 0,
+      "value": "نقل المحددين"
+    }
+  ],
+  "web.admin.access.groups.members.moveSelectedCount": [
+    {
+      "type": 0,
+      "value": "نقل المحددين ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.access.groups.members.moveTarget": [
+    {
+      "type": 0,
+      "value": "نقل الأعضاء المحددين إلى"
+    }
+  ],
+  "web.admin.access.groups.members.moveTargetPlaceholder": [
+    {
+      "type": 0,
+      "value": "النقل إلى مجموعة..."
+    }
+  ],
+  "web.admin.access.groups.members.moved": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لم يُنقل أي مستخدم إلى "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تم نقل مستخدم واحد إلى "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تم نقل مستخدمَين إلى "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تم نقل "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مستخدمين إلى "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تم نقل "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مستخدمًا إلى "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تم نقل "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مستخدم إلى "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.access.groups.members.noMatches": [
     {
       "type": 0,
@@ -4347,6 +4865,338 @@
     {
       "type": 0,
       "value": "البحث في الأعضاء"
+    }
+  ],
+  "web.admin.access.groups.members.selectMember": [
+    {
+      "type": 0,
+      "value": "تحديد "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    }
+  ],
+  "web.admin.access.groups.members.selectedHidden": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لا يظهر "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " عضو محدد، وسيشملهم النقل."
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لا يظهر عضو محدد واحد، وسيشمله النقل."
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لا يظهر عضوان محددان، وسيشملهما النقل."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لا يظهر "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " أعضاء محددين، وسيشملهم النقل."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لا يظهر "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " عضوًا محددًا، وسيشملهم النقل."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لا يظهر "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " عضو محدد، وسيشملهم النقل."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.change": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "from"
+    },
+    {
+      "type": 0,
+      "value": " ← "
+    },
+    {
+      "type": 1,
+      "value": "to"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.description": [
+    {
+      "type": 0,
+      "value": "تبقى الإعدادات التي تجاوزها المستخدم في حسابه كما هي. ويحصل المستخدمون على الصلاحيات الجديدة فورًا دون تسجيل خروجهم."
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.fromGroup": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " من "
+    },
+    {
+      "type": 1,
+      "value": "group"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.fromNoGroup": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " بلا مجموعة"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.fromUnknownGroup": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " من المجموعة #"
+    },
+    {
+      "type": 1,
+      "value": "id"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.loadingTerms": [
+    {
+      "type": 0,
+      "value": "جارٍ تحميل إعدادات الطلبات…"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.move": [
+    {
+      "type": 0,
+      "value": "نقل"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.moving": [
+    {
+      "type": 0,
+      "value": "جارٍ النقل..."
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.noChanges": [
+    {
+      "type": 0,
+      "value": "لا تتغير أي إعدادات موروثة."
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.sourceUnknown": [
+    {
+      "type": 0,
+      "value": "تعذّر تحميل مجموعتهم الحالية، لذا فالإعدادات التي ستتغير غير معروفة."
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.termsFailed": [
+    {
+      "type": 0,
+      "value": "تعذّر تحميل إعدادات الطلبات للمجموعات، لذا فالإعدادات التي ستتغير غير معروفة."
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.title": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "نقل "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مستخدم إلى "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            },
+            {
+              "type": 0,
+              "value": "؟"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "نقل مستخدم واحد إلى "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            },
+            {
+              "type": 0,
+              "value": "؟"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "نقل مستخدمَين إلى "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            },
+            {
+              "type": 0,
+              "value": "؟"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "نقل "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مستخدمين إلى "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            },
+            {
+              "type": 0,
+              "value": "؟"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "نقل "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مستخدمًا إلى "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            },
+            {
+              "type": 0,
+              "value": "؟"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "نقل "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مستخدم إلى "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            },
+            {
+              "type": 0,
+              "value": "؟"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.access.groups.newGroup": [
@@ -88217,7 +89067,7 @@
   "web.admin.settings.playback.transcoding.copyKeyframePlaylistDescription": [
     {
       "type": 0,
-      "value": "تجريبي. عندما ينسخ Silo فيديو ملف، يُدرج كل مقطع من البداية باستخدام الإطارات المفتاحية للملف، بدلًا من قائمة تشغيل تنمو مع تقدّم النسخ. يمنع تجمّد Safari في منتصف التشغيل. التنقل إلى ما بعد ما نسخه Silo ينتظر حتى يصل إليه."
+      "value": "تجريبي. عندما ينسخ Silo فيديو ملف، يُدرج كل مقطع من البداية باستخدام الإطارات المفتاحية للملف، بدلًا من قائمة تشغيل تنمو مع تقدّم النسخ. يمنع تجمّد Safari في منتصف التشغيل. التنقل إلى نقطة بعيدة عمّا نسخه Silo يعيد بدء النسخ من تلك النقطة."
     }
   ],
   "web.admin.settings.playback.transcoding.dir": [

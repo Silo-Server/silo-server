@@ -3655,6 +3655,82 @@
       "value": "⟦Ĝŕöûþ åçţîöñ ƒåîļéđ.~~~~~~~~⟧"
     }
   ],
+  "web.admin.access.groups.addUsers.addSelected": [
+    {
+      "type": 0,
+      "value": "⟦Åđđ šéļéçţéđ~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.addUsers.addSelectedCount": [
+    {
+      "type": 0,
+      "value": "⟦Åđđ "
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " šéļéçţéđ~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.addUsers.description": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéĝûļåŕ åççöûñţš öûţšîđé ţĥîš ĝŕöûþ. Åđɱîñ åççöûñţš çåñ’ţ ĵöîñ ĝŕöûþš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.addUsers.noGroup": [
+    {
+      "type": 0,
+      "value": "⟦Ñö ĝŕöûþ~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.addUsers.noMatches": [
+    {
+      "type": 0,
+      "value": "⟦Ñö ûšéŕš ɱåţçĥ ýöûŕ šéåŕçĥ.~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.addUsers.none": [
+    {
+      "type": 0,
+      "value": "⟦Éṽéŕý ŕéĝûļåŕ åççöûñţ îš åļŕéåđý ĥéŕé.~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.addUsers.search": [
+    {
+      "type": 0,
+      "value": "⟦Šéåŕçĥ ûšéŕš~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.addUsers.searchPlaceholder": [
+    {
+      "type": 0,
+      "value": "⟦Šéåŕçĥ ƀý ûšéŕñåɱé öŕ éɱåîļ~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.addUsers.title": [
+    {
+      "type": 0,
+      "value": "⟦Åđđ ûšéŕš ţö "
+    },
+    {
+      "type": 1,
+      "value": "group"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.addUsers.unknownGroup": [
+    {
+      "type": 0,
+      "value": "⟦Ûñķñöŵñ ĝŕöûþ~~~~~~⟧"
+    }
+  ],
   "web.admin.access.groups.allGroups": [
     {
       "type": 0,
@@ -3829,6 +3905,146 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.access.groups.changes.allPermissions": [
+    {
+      "type": 0,
+      "value": "⟦Åļļ~~⟧"
+    }
+  ],
+  "web.admin.access.groups.changes.allowed": [
+    {
+      "type": 0,
+      "value": "⟦Åļļöŵéđ~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.changes.audioTranscoding": [
+    {
+      "type": 0,
+      "value": "⟦Åûđîö ţŕåñšçöđîñĝ~~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.changes.concurrentStreams": [
+    {
+      "type": 0,
+      "value": "⟦Çöñçûŕŕéñţ šţŕéåɱš~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.changes.concurrentTranscodes": [
+    {
+      "type": 0,
+      "value": "⟦Çöñçûŕŕéñţ ţŕåñšçöđéš~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.changes.convertedDownloads": [
+    {
+      "type": 0,
+      "value": "⟦Çöñṽéŕţéđ đöŵñļöåđš~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.changes.downloads": [
+    {
+      "type": 0,
+      "value": "⟦Đöŵñļöåđš~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.changes.householdProfiles": [
+    {
+      "type": 0,
+      "value": "⟦Ĥöûšéĥöļđ þŕöƒîļéš~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.changes.libraries": [
+    {
+      "type": 0,
+      "value": "⟦Ļîƀŕåŕîéš~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.changes.libraryId": [
+    {
+      "type": 0,
+      "value": "⟦#"
+    },
+    {
+      "type": 1,
+      "value": "id"
+    },
+    {
+      "type": 0,
+      "value": "~⟧"
+    }
+  ],
+  "web.admin.access.groups.changes.localBitrate": [
+    {
+      "type": 0,
+      "value": "⟦Ļöçåļ šţŕéåɱ ƀîţŕåţé~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.changes.noLibraries": [
+    {
+      "type": 0,
+      "value": "⟦Ñö ļîƀŕåŕîéš~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.changes.noPermissions": [
+    {
+      "type": 0,
+      "value": "⟦Ñöñé~~⟧"
+    }
+  ],
+  "web.admin.access.groups.changes.notAllowed": [
+    {
+      "type": 0,
+      "value": "⟦Ñöţ åļļöŵéđ~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.changes.permissions": [
+    {
+      "type": 0,
+      "value": "⟦Þéŕɱîššîöñš~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.changes.playbackQuality": [
+    {
+      "type": 0,
+      "value": "⟦Þļåýƀåçķ ǫûåļîţý~~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.changes.remoteBitrate": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéɱöţé šţŕéåɱ ƀîţŕåţé~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.changes.requestApproval": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéǫûéšţ åþþŕöṽåļ~~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.changes.requestLimit": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéǫûéšţ ļîɱîţ~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.changes.requests": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéǫûéšţš~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.changes.unlimited": [
+    {
+      "type": 0,
+      "value": "⟦Ûñļîɱîţéđ~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.changes.videoTranscoding": [
+    {
+      "type": 0,
+      "value": "⟦Ṽîđéö ţŕåñšçöđîñĝ~~~~~~~⟧"
     }
   ],
   "web.admin.access.groups.conflict.message": [
@@ -4159,10 +4375,138 @@
       "value": "⟦Ļöåđîñĝ åççéšš ĝŕöûþš...~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.access.groups.members.addFailed": [
+    {
+      "type": 0,
+      "value": "⟦Šöɱé ûšéŕš çöûļđ ñöţ ƀé åđđéđ:~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.members.addUsers": [
+    {
+      "type": 0,
+      "value": "⟦Åđđ ûšéŕš~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.members.added": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Åđđéđ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ûšéŕ ţö "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            },
+            {
+              "type": 0,
+              "value": "~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Åđđéđ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ûšéŕš ţö "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            },
+            {
+              "type": 0,
+              "value": "~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.access.groups.members.couldNotAdd": [
+    {
+      "type": 0,
+      "value": "⟦çöûļđ ñöţ ƀé åđđéđ~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.members.couldNotMove": [
+    {
+      "type": 0,
+      "value": "⟦çöûļđ ñöţ ƀé ɱöṽéđ~~~~~~~~⟧"
+    }
+  ],
   "web.admin.access.groups.members.empty": [
     {
       "type": 0,
       "value": "⟦Ñö ɱéɱƀéŕš ýéţ.~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.members.failure": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": "~⟧"
+    }
+  ],
+  "web.admin.access.groups.members.groupChanged": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš åççöûñţ çĥåñĝéđ åƒţéŕ ýöû çöñƒîŕɱéđ. Çĥéçķ ţĥé çĥåñĝé åñđ ţŕý åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.members.groupsLoadFailed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđ ñöţ ļöåđ åççéšš ĝŕöûþš, šö ɱéɱƀéŕš çåñ’ţ ƀé ɱöṽéđ ýéţ. "
+    },
+    {
+      "type": 8,
+      "value": "retry",
+      "children": [
+        {
+          "type": 0,
+          "value": "Ŕéţŕý"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.access.groups.members.heading": [
@@ -4203,6 +4547,106 @@
       "value": "⟦Ļöåđîñĝ ɱéɱƀéŕš...~~~~~~~~⟧"
     }
   ],
+  "web.admin.access.groups.members.manageHelp": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöṽé ɱéɱƀéŕš ţö åñöţĥéŕ ĝŕöûþ, öŕ åđđ ûšéŕš ţö ţĥîš öñé.~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.members.moveFailed": [
+    {
+      "type": 0,
+      "value": "⟦Šöɱé ûšéŕš çöûļđ ñöţ ƀé ɱöṽéđ:~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.members.moveSelected": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöṽé šéļéçţéđ~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.members.moveSelectedCount": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöṽé "
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " šéļéçţéđ~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.members.moveTarget": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöṽé šéļéçţéđ ɱéɱƀéŕš ţö~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.members.moveTargetPlaceholder": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöṽé ţö ĝŕöûþ...~~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.members.moved": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Ṁöṽéđ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ûšéŕ ţö "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            },
+            {
+              "type": 0,
+              "value": "~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Ṁöṽéđ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ûšéŕš ţö "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            },
+            {
+              "type": 0,
+              "value": "~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.access.groups.members.noMatches": [
     {
       "type": 0,
@@ -4213,6 +4657,246 @@
     {
       "type": 0,
       "value": "⟦Šéåŕçĥ ɱéɱƀéŕš~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.members.selectMember": [
+    {
+      "type": 0,
+      "value": "⟦Šéļéçţ "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.members.selectedHidden": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " šéļéçţéđ ɱéɱƀéŕ îšñ’ţ šĥöŵñ, åñđ å ɱöṽé îñçļûđéš îţ.~~~~~~~~~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " šéļéçţéđ ɱéɱƀéŕš åŕéñ’ţ šĥöŵñ, åñđ å ɱöṽé îñçļûđéš ţĥéɱ.~~~~~~~~~~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.change": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "from"
+    },
+    {
+      "type": 0,
+      "value": " → "
+    },
+    {
+      "type": 1,
+      "value": "to"
+    },
+    {
+      "type": 0,
+      "value": "~~⟧"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.description": [
+    {
+      "type": 0,
+      "value": "⟦Šéţţîñĝš å ûšéŕ ĥåš öṽéŕŕîđđéñ öñ ţĥéîŕ öŵñ åççöûñţ šţåý åš ţĥéý åŕé. Ţĥéý ĝéţ ţĥé ñéŵ åççéšš ŕîĝĥţ åŵåý, ŵîţĥöûţ ƀéîñĝ šîĝñéđ öûţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.fromGroup": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " ƒŕöɱ "
+    },
+    {
+      "type": 1,
+      "value": "group"
+    },
+    {
+      "type": 0,
+      "value": "~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.fromNoGroup": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " ƒŕöɱ ñö ĝŕöûþ~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.fromUnknownGroup": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " ƒŕöɱ ĝŕöûþ #"
+    },
+    {
+      "type": 1,
+      "value": "id"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.loadingTerms": [
+    {
+      "type": 0,
+      "value": "⟦Ļöåđîñĝ ŕéǫûéšţ šéţţîñĝš…~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.move": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöṽé~~⟧"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.moving": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöṽîñĝ...~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.noChanges": [
+    {
+      "type": 0,
+      "value": "⟦Ñö îñĥéŕîţéđ šéţţîñĝš çĥåñĝé.~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.sourceUnknown": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥéîŕ çûŕŕéñţ ĝŕöûþ çöûļđñ’ţ ƀé ļöåđéđ, šö ţĥé šéţţîñĝš ţĥåţ çĥåñĝé åŕé ûñķñöŵñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.termsFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé ĝŕöûþš’ ŕéǫûéšţ šéţţîñĝš çöûļđñ’ţ ƀé ļöåđéđ, šö ţĥé šéţţîñĝš ţĥåţ çĥåñĝé åŕé ûñķñöŵñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.title": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Ṁöṽé "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ûšéŕ ţö "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            },
+            {
+              "type": 0,
+              "value": "?~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Ṁöṽé "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ûšéŕš ţö "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            },
+            {
+              "type": 0,
+              "value": "?~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.access.groups.newGroup": [
@@ -24479,6 +25163,46 @@
     {
       "type": 0,
       "value": "⟦Çöûñţ ñöţ ļöåđéđ~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.downloadAccess.conversionOff": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé šéŕṽéŕ îšñ'ţ þŕéþåŕîñĝ đéṽîçé-ƒŕîéñđļý çöþîéš, šö éṽéŕý đöŵñļöåđ îš ţĥé öŕîĝîñåļ ƒîļé. Ţûŕñ îţ öñ îñ "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Šéţţîñĝš → Đöŵñļöåđš"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ".~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.downloadAccess.serverOff": [
+    {
+      "type": 0,
+      "value": "⟦Đöŵñļöåđš åŕé ţûŕñéđ öƒƒ ƒöŕ ţĥé ŵĥöļé šéŕṽéŕ, šö ñöƀöđý çåñ đöŵñļöåđ. Ţûŕñ ţĥéɱ öñ îñ "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Šéţţîñĝš → Đöŵñļöåđš"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ".~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.common.editorConflict.message": [
@@ -62583,6 +63307,12 @@
       "value": "⟦Đîšķ çéîļîñĝ (%)~~~~~~~⟧"
     }
   ],
+  "web.admin.settings.downloads.enabled.description": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé šŵîţçĥ ƒöŕ ţĥé ŵĥöļé šéŕṽéŕ. Öñ, åççéšš ĝŕöûþš åñđ åççöûñţš đéçîđé ŵĥö ɱåý đöŵñļöåđ. Öƒƒ, ñöƀöđý çåñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.settings.downloads.enabled.label": [
     {
       "type": 0,
@@ -68674,7 +69404,7 @@
   "web.admin.settings.playback.transcoding.copyKeyframePlaylistDescription": [
     {
       "type": 0,
-      "value": "⟦Éẋþéŕîɱéñţåļ. Ŵĥéñ Šîļö çöþîéš å ƒîļé'š ṽîđéö, ļîšţ éṽéŕý šéĝɱéñţ ƒŕöɱ ţĥé šţåŕţ, ûšîñĝ ţĥé ƒîļé'š ķéýƒŕåɱéš, îñšţéåđ öƒ å þļåýļîšţ ţĥåţ ĝŕöŵš åš Šîļö çöþîéš. Šţöþš Šåƒåŕî ƒŕééžîñĝ þåŕţŵåý ţĥŕöûĝĥ. Å šééķ åĥéåđ öƒ ŵĥåţ Šîļö ĥåš çöþîéđ ŵåîţš ƒöŕ îţ ţö ĝéţ ţĥéŕé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Éẋþéŕîɱéñţåļ. Ŵĥéñ Šîļö çöþîéš å ƒîļé'š ṽîđéö, ļîšţ éṽéŕý šéĝɱéñţ ƒŕöɱ ţĥé šţåŕţ, ûšîñĝ ţĥé ƒîļé'š ķéýƒŕåɱéš, îñšţéåđ öƒ å þļåýļîšţ ţĥåţ ĝŕöŵš åš Šîļö çöþîéš. Šţöþš Šåƒåŕî ƒŕééžîñĝ þåŕţŵåý ţĥŕöûĝĥ. Å šééķ ŵéļļ þåšţ ŵĥåţ Šîļö ĥåš çöþîéđ šţåŕţš ţĥé çöþý åĝåîñ ƒŕöɱ ţĥéŕé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.settings.playback.transcoding.dir": [
@@ -86197,6 +86927,12 @@
     {
       "type": 0,
       "value": "⟦Đöŵñļöåđš ñöţ åļļöŵéđ~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.overview.access.downloadsServerOff": [
+    {
+      "type": 0,
+      "value": "⟦Đöŵñļöåđš åŕé öƒƒ ƒöŕ ţĥé ŵĥöļé šéŕṽéŕ~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.users.detail.overview.access.groupSource": [
