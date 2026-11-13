@@ -2,7 +2,11 @@ package apiv2
 
 import "net/http"
 
-const playbackManifestOperation = "getPlaybackManifest"
+const (
+	playbackMediaOperation     = "getPlaybackMedia"
+	playbackMediaHeadOperation = "headPlaybackMedia"
+	playbackManifestOperation  = "getPlaybackManifest"
+)
 
 // streamReferenceOperations are the delivery routes whose gate chain also
 // accepts the plan's signed stream reference (`st`) in place of the account
@@ -10,12 +14,12 @@ const playbackManifestOperation = "getPlaybackManifest"
 // play the session. Subtitle fonts are left out: they are read by a client
 // that renders ASS itself and sends its own credential.
 var streamReferenceOperations = map[string]bool{
-	"getPlaybackMedia":        true,
-	"headPlaybackMedia":       true,
-	playbackManifestOperation: true,
-	playbackSegmentOperation:  true,
-	playbackSubtitleOperation: true,
-	playbackSubtitleHead:      true,
+	playbackMediaOperation:     true,
+	playbackMediaHeadOperation: true,
+	playbackManifestOperation:  true,
+	playbackSegmentOperation:   true,
+	playbackSubtitleOperation:  true,
+	playbackSubtitleHead:       true,
 }
 
 // streamReferenceGateChain swaps the account authentication at the head of a
