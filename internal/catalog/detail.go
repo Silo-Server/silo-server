@@ -4806,13 +4806,23 @@ func playbackVariantID(version FileVersion) string {
 
 // sortVideoVersions gives a movie, episode or extra's top-level versions the
 // order sortFileVersions gives each playback variant part, so clients read one
-// ranking from either list. The files of other types keep the order their
-// builder chose: an audiobook's files are its parts in sequence.
+// ranking from either list. Files that start playback (a single file or a
+// multipart presentation's first part) come before later parts, so a caller
+// taking versions[0] as a default never starts mid-title. The files of other
+// types keep the order their builder chose: an audiobook's files are its parts
+// in sequence.
 func sortVideoVersions(itemType string, versions []FileVersion) {
 	switch itemType {
 	case playableTypeMovie, detailTypeEpisode, detailTypeExtra:
 		sortFileVersions(versions)
+		sort.SliceStable(versions, func(i, j int) bool {
+			return !isLaterPart(versions[i]) && isLaterPart(versions[j])
+		})
 	}
+}
+
+func isLaterPart(v FileVersion) bool {
+	return v.PresentationPartIndex > 1
 }
 
 func sortFileVersions(versions []FileVersion) {
