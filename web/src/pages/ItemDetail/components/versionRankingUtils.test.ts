@@ -1,10 +1,12 @@
 // @vitest-environment node
 
 import { describe, expect, it } from "vitest";
+import type { LeafItemUserData, PlaybackVariant } from "@/api/types";
 import { makeFileVersion as makeVersion } from "../itemDetail.test-support";
 import {
   playbackEditions,
   selectedDownloadVersions,
+  selectedStartVersion,
   pickBestAttributes,
   selectDefaultVersion,
   selectDefaultPlaybackVariantVersion,
@@ -108,18 +110,21 @@ describe("pickBestAttributes", () => {
   });
 });
 
-describe("selectDefaultVersion audio matching", () => {
-  it("still matches versions by codec when the preferred track's profile names Atmos", () => {
-    const plain = makeVersion({ file_id: 1, resolution: "2160p", codec_audio: "aac" });
-    const atmos = makeVersion({
-      file_id: 2,
-      resolution: "2160p",
-      codec_audio: "eac3",
-      audio_tracks: [
-        { codec: "eac3", profile: "Dolby Digital Plus + Dolby Atmos", language: "en" },
-      ],
-    });
-    expect(selectDefaultVersion([plain, atmos])?.file_id).toBe(2);
+describe("selectDefaultVersion tie-break", () => {
+  // Same order as the server's sortFileVersions; audio never breaks a tie.
+  it.each([
+    [
+      "HDR before SDR",
+      { hdr: false, file_size: 9, codec_audio: "truehd" },
+      { hdr: true, file_size: 1, codec_audio: "aac" },
+    ],
+    ["larger file", { file_size: 1, codec_audio: "truehd" }, { file_size: 2, codec_audio: "aac" }],
+  ] as const)("prefers %s at the same resolution", (_name, first, second) => {
+    const files = [
+      makeVersion({ file_id: 1, resolution: "2160p", ...first }),
+      makeVersion({ file_id: 2, resolution: "2160p", ...second }),
+    ];
+    expect(selectDefaultVersion(files)?.file_id).toBe(2);
   });
 });
 
@@ -172,7 +177,7 @@ describe("detail edition Auto", () => {
         versions: versions.filter((v) => v.edition_key === edition_key),
       },
     ],
-  })) as import("@/api/types").PlaybackVariant[];
+  })) as PlaybackVariant[];
 
   it.each([
     ["quality chooses the initial edition", undefined, undefined, undefined, 2],
@@ -192,7 +197,7 @@ describe("detail edition Auto", () => {
       selectDefaultPlaybackVariantVersion(
         versions,
         variants,
-        history as import("@/api/types").LeafItemUserData,
+        history as LeafItemUserData,
         quality,
         edition,
       )?.file_id,
@@ -205,7 +210,16 @@ describe("detail edition Auto", () => {
       makeVersion({ file_id: 2, resolution: "1080p", hdr: false, codec_audio: "aac" }),
       makeVersion({ file_id: 3, resolution: "720p", hdr: true, codec_audio: "truehd" }),
     ];
-    expect(selectDefaultVersion(files, undefined, "1080p")?.file_id).toBe(2);
+    expect(selectDefaultVersion(files, "1080p")?.file_id).toBe(2);
+  });
+
+  it("breaks a no-history tie between cuts by edition preference, not file size", () => {
+    const cut = (file_id: number, edition_key: string, file_size: number) => {
+      const file = makeVersion({ file_id, edition_key, resolution: "2160p", file_size });
+      return { variant_id: edition_key, edition_key, parts: [{ part_index: 1, versions: [file] }] };
+    };
+    const cuts = [cut(1, "extended", 9), cut(2, "theatrical", 1)] as PlaybackVariant[];
+    expect(selectDefaultPlaybackVariantVersion([], cuts)?.file_id).toBe(2);
   });
 });
 
@@ -228,7 +242,7 @@ it("groups presentations by edition and recovers history from a later part", () 
       edition_key: "extended",
       parts: [{ part_index: 1, versions: [extended] }],
     },
-  ] as import("@/api/types").PlaybackVariant[];
+  ] as PlaybackVariant[];
   const files = [standard, partOne, partTwo, extended];
   expect(
     playbackEditions(files, variants).map((e) => [e.key, e.versions.map((v) => v.file_id)]),
@@ -236,19 +250,30 @@ it("groups presentations by edition and recovers history from a later part", () 
     ["", [1, 2]],
     ["extended", [4]],
   ]);
-  expect(
-    selectDefaultPlaybackVariantVersion(files, variants, {
-      last_file_id: 3,
-    } as import("@/api/types").LeafItemUserData)?.file_id,
-  ).toBe(1);
+  // A later part last played resumes as is; Start Over and Download begin at part 1.
+  const resumed = selectDefaultPlaybackVariantVersion(files, variants, {
+    last_file_id: 3,
+  } as LeafItemUserData);
+  expect(resumed?.file_id).toBe(3);
+  expect(selectedStartVersion(resumed, variants)?.file_id).toBe(2);
+  expect(selectedDownloadVersions(resumed, variants).map((v) => v.file_id)).toEqual([2, 3]);
+  // Picking another cut leaves the later part behind.
   expect(
     selectDefaultPlaybackVariantVersion(
       files,
       variants,
-      { last_edition_key: "extended" } as import("@/api/types").LeafItemUserData,
+      { last_file_id: 3 } as LeafItemUserData,
+      undefined,
+      "extended",
+    )?.file_id,
+  ).toBe(4);
+  expect(
+    selectDefaultPlaybackVariantVersion(
+      files,
+      variants,
+      { last_edition_key: "extended" } as LeafItemUserData,
       undefined,
       "",
     )?.file_id,
   ).toBe(1);
-  expect(selectedDownloadVersions(partOne, variants).map((v) => v.file_id)).toEqual([2, 3]);
 });

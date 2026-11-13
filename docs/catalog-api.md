@@ -435,6 +435,17 @@ every version rather than nothing to play. An entry also has no file when the vi
 may access none of the episode's files, or the episode has none; that episode opens
 without the library, and so without its metadata-language fallback.
 
+## Version order
+
+For a movie, episode or extra, `getCatalogItem`, `listCatalogItemVersions` and
+`getWatchState` list `versions` in the order each `playback_variants[].parts[].versions`
+list uses: higher resolution first (`4320p`, `2160p`, `1080p`, `720p`, `480p`, then
+unknown), then HDR before SDR, then the larger file. A multipart presentation's later
+parts sit in that order beside its first parts, so a client that picks a default reads
+first parts from `playback_variants`, which keeps its own order: a variant comes before
+another when its lowest file ID is lower. Audiobook and ebook versions keep their part
+and file order.
+
 ## Device-scoped playback answers
 
 `getCatalogItem` and `listCatalogItemVersions` accept the optional

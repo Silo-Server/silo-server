@@ -265,6 +265,8 @@ export interface ActionBarProps {
   versions?: FileVersion[];
   playbackVariants?: PlaybackVariant[];
   selectedVersion?: FileVersion | null;
+  /** The file Start Over plays: the first part of selectedVersion's presentation. */
+  restartVersion?: FileVersion | null;
   /** The viewer chose selectedVersion rather than playing the default version. */
   versionPicked?: boolean;
   onSelectVersion?: (version: FileVersion | null) => void;
@@ -337,6 +339,7 @@ export default function ActionBar({
   versions,
   playbackVariants,
   selectedVersion,
+  restartVersion,
   versionPicked = false,
   onSelectVersion,
   onSelectEdition,
@@ -455,18 +458,27 @@ export default function ActionBar({
         return;
       }
 
+      const restart = restartOverride ?? parsed.restart;
+      const file = restart ? (restartVersion ?? selectedVersion) : selectedVersion;
       playbackController.startPlayback(
         buildPrePlayStartInput({
           contentId: parsed.contentId,
-          fileId: selectedVersion?.file_id ?? parsed.fileId,
+          fileId: file?.file_id ?? parsed.fileId,
           libraryId: parsed.libraryId,
-          restart: restartOverride ?? parsed.restart,
+          restart,
           returnHref: currentHref,
         }),
         "viewer",
       );
     },
-    [buildPrePlayStartInput, currentHref, navigate, playbackController, selectedVersion?.file_id],
+    [
+      buildPrePlayStartInput,
+      currentHref,
+      navigate,
+      playbackController,
+      restartVersion,
+      selectedVersion,
+    ],
   );
   const handleResumePlayback = () => {
     if (!playHref) return;

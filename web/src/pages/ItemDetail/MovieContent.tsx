@@ -38,6 +38,7 @@ import { sortByResolution } from "./components/VersionFlyout";
 import {
   selectDefaultPlaybackVariantVersion,
   selectedDownloadVersions,
+  selectedStartVersion,
 } from "./components/versionRankingUtils";
 import { resolveSelectedMediaSummary } from "./components/selectedMediaSummary";
 import { RecommendationGridSkeleton } from "./components/SectionSkeletons";
@@ -196,6 +197,10 @@ export default function MovieContent({
   );
   const downloadVersions = useMemo(
     () => selectedDownloadVersions(selectedVersion, item.playback_variants, qualityPreference),
+    [selectedVersion, item.playback_variants, qualityPreference],
+  );
+  const restartVersion = useMemo(
+    () => selectedStartVersion(selectedVersion, item.playback_variants, qualityPreference),
     [selectedVersion, item.playback_variants, qualityPreference],
   );
 
@@ -364,6 +369,7 @@ export default function MovieContent({
               versions={item.versions}
               playbackVariants={item.playback_variants}
               selectedVersion={selectedVersion}
+              restartVersion={restartVersion}
               versionPicked={pickedVersion != null}
               onSelectVersion={handleSelectVersion}
               onSelectEdition={handleSelectEdition}

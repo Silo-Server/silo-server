@@ -1788,6 +1788,8 @@ func (s *DetailService) GetItemDetailWithOptions(ctx context.Context, contentID 
 const (
 	detailTypeAudiobook = "audiobook"
 	detailTypeEbook     = "ebook"
+	detailTypeEpisode   = "episode"
+	detailTypeExtra     = "extra"
 )
 
 // GetItemVersions builds the browse version selector without loading unrelated
@@ -1836,11 +1838,15 @@ func (s *DetailService) GetItemVersionsWithOptions(ctx context.Context, contentI
 	}
 	files = s.prepareBrowseFiles(ctx, files)
 	versions, _, _, _, _, _, _ := s.buildPlaybackInfo(ctx, files, filter, audioPreferenceContentID)
+	itemType := detailTypeExtra
+	switch {
+	case target.item != nil:
+		itemType = target.item.Type
+	case target.episode != nil:
+		itemType = detailTypeEpisode
+	}
+	sortVideoVersions(itemType, versions)
 	if opts.HideFileIdentity {
-		itemType := ""
-		if target.item != nil {
-			itemType = target.item.Type
-		}
 		HideFileIdentity(versions, itemType)
 	}
 	return versions, nil
@@ -1957,6 +1963,7 @@ func (s *DetailService) buildExtraItemDetail(ctx context.Context, extra *models.
 		trickplay,
 		markerPreviews,
 	)
+	sortVideoVersions(detail.Type, detail.Versions)
 	if parent, parentErr := s.itemRepo.GetByID(ctx, extra.ParentID); parentErr == nil {
 		if localized, locErr := s.LocalizeItemModel(ctx, parent, filter); locErr == nil {
 			parent = localized
@@ -2681,6 +2688,7 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		detail.Versions, detail.PlaybackVariants, detail.Subtitles, detail.Intro, detail.Credits, detail.Recap, detail.Preview = s.buildPlaybackInfoWith(
 			ctx, files, filter, audioResolver, availability, pf == nil || !pf.skipMarkerPreviews,
 		)
+		sortVideoVersions(item.Type, detail.Versions)
 		detail.OverlaySummary = overlays.BuildSummary(files)
 		if withSubtitleDefaults {
 			if !subtitlesResolved {
@@ -3700,6 +3708,7 @@ func (s *DetailService) buildEpisodeDetail(ctx context.Context, episode *models.
 		seriesCtx.trickplay,
 		!seriesCtx.skipMarkerPreviews,
 	)
+	sortVideoVersions(detail.Type, detail.Versions)
 	detail.OverlaySummary = overlays.BuildSummary(files)
 	s.episodeSubtitleDefaults(ctx, seriesCtx, filter, episode.SeriesID, files).applyToItemDetail(detail)
 	versionPref := seriesCtx.versionPref
@@ -3942,6 +3951,7 @@ func (s *DetailService) newWatchDetail(
 		filter,
 		audioPreferenceContentID,
 	)
+	sortVideoVersions(contentType, versions)
 	return &WatchDetail{
 		ContentID:        contentID,
 		Type:             contentType,
@@ -4792,6 +4802,17 @@ func playbackVariantID(version FileVersion) string {
 		return "default"
 	}
 	return strings.Join([]string{editionKey, presentationKind, groupKey}, "|")
+}
+
+// sortVideoVersions gives a movie, episode or extra's top-level versions the
+// order sortFileVersions gives each playback variant part, so clients read one
+// ranking from either list. The files of other types keep the order their
+// builder chose: an audiobook's files are its parts in sequence.
+func sortVideoVersions(itemType string, versions []FileVersion) {
+	switch itemType {
+	case playableTypeMovie, detailTypeEpisode, detailTypeExtra:
+		sortFileVersions(versions)
+	}
 }
 
 func sortFileVersions(versions []FileVersion) {

@@ -325,6 +325,33 @@ describe("MovieContent", () => {
     });
   });
 
+  it("resumes a later part and starts over from the first part", () => {
+    const partOne = movieVersion({ file_id: 1, presentation_part_index: 1 });
+    const partTwo = movieVersion({ file_id: 2, presentation_part_index: 2 });
+    renderMovie(
+      makeMovieItem({
+        versions: [partOne, partTwo],
+        playback_variants: [
+          {
+            variant_id: "multipart",
+            part_count: 2,
+            parts: [
+              { part_index: 1, versions: [partOne] },
+              { part_index: 2, versions: [partTwo] },
+            ],
+          },
+        ],
+        user_data: { played: false, position_seconds: 600, last_file_id: 2 },
+      }),
+    );
+
+    expect(mocks.capturedActionBarProps.value).toMatchObject({
+      selectedVersion: { file_id: 2 },
+      restartVersion: { file_id: 1 },
+      versionPicked: false,
+    });
+  });
+
   it("clears a version pin when choosing an edition and keeps Auto within that cut", () => {
     const theatrical = movieVersion({ file_id: 1, edition_key: "", resolution: "1080p" });
     const extended = movieVersion({ file_id: 2, edition_key: "extended", resolution: "2160p" });
