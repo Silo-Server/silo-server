@@ -1733,6 +1733,7 @@ func TestRouteRequestsAnswer503WhenPlaySessionStoreUnavailable(t *testing.T) {
 		{"stream by play session", "/Videos/itm/stream?PlaySessionId=ps-abc", map[string]string{"id": "itm"}, (*PlaybackHandler).HandleVideoStream},
 		{"stream by route", "/Videos/itm/stream", map[string]string{"id": "itm"}, (*PlaybackHandler).HandleVideoStream},
 		{"static stream by play session", "/Videos/itm/stream?Static=true&PlaySessionId=ps-abc", map[string]string{"id": "itm"}, (*PlaybackHandler).HandleVideoStream},
+		{"static stream without a play session", "/Videos/itm/stream?Static=true", map[string]string{"id": "itm"}, (*PlaybackHandler).HandleVideoStream},
 		{"subtitle", "/Videos/itm/src/Subtitles/0/Stream.srt?PlaySessionId=ps-abc",
 			map[string]string{"routeItemId": "itm", "routeMediaSourceId": "src", "index": "0", "format": "srt"}, (*PlaybackHandler).HandleSubtitleStream},
 		{"attachment", "/Videos/itm/src/Attachments/0",
@@ -1771,6 +1772,26 @@ func TestRouteRequestsAnswer503WhenPlaySessionStoreUnavailable(t *testing.T) {
 			})
 		}
 	}
+
+	// An ID-less static request that two started plays match can't be bound to
+	// either: that stays the 404 it was, not a retryable outage.
+	t.Run("static stream without a play session/two started plays", func(t *testing.T) {
+		ambiguous := NewPlaybackSessionStore(time.Hour, nil)
+		for _, id := range []string{"ps-one", "ps-two"} {
+			ambiguous.Put(PlaybackSession{ID: id, CompatToken: "compat-tok", RouteItemID: "itm", UpstreamSessionID: "up-" + id})
+		}
+		handler := &PlaybackHandler{playbackStore: ambiguous}
+		req := httptest.NewRequest(http.MethodGet, "/Videos/itm/stream?Static=true", nil)
+		routeCtx := chi.NewRouteContext()
+		routeCtx.URLParams.Add("id", "itm")
+		ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
+		ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "compat-tok", StreamAppUserID: 1})
+		rec := httptest.NewRecorder()
+		handler.HandleVideoStream(rec, req.WithContext(ctx))
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404 (body: %s)", rec.Code, rec.Body.String())
+		}
+	})
 }
 
 // A token-authenticated HLS request whose play session cannot be read from

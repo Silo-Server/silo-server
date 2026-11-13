@@ -3948,7 +3948,14 @@ func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *S
 	if clientPlaySessionID == "" && staticRequest {
 		active, err := h.playbackStore.FindUnidentifiedPlayback(compatSession.Token, routeID, mediaSourceID)
 		if err != nil {
-			return nil, nil, err
+			// Two started plays matching is an answer: the request can't be
+			// bound to either. Any other failure (an unreadable store, a write
+			// still pending, an identity that changed mid-lookup) passes, so
+			// the request is answered as retryable.
+			if errors.Is(err, errUnidentifiedPlaybackAmbiguous) {
+				return nil, nil, err
+			}
+			return nil, nil, &playSessionReadError{err: err}
 		}
 		if active != nil {
 			return active, playbackRouteSource(active, mediaSourceID, allowItemAlias, staticRequest), nil
