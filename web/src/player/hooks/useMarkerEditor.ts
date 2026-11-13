@@ -1,8 +1,8 @@
 import { useCallback, useRef, useState } from "react";
 import { t, type MessageKey } from "@/i18n";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
-import { playerV2 } from "../player-v2";
-import { markerUpdateToV2 } from "../marker-wire";
+import { playerV2, type PlayerV2Response } from "../player-v2";
+import { markerDraftFromV2, markerUpdateToV2 } from "../marker-wire";
 import type { MarkerDraft, MarkerKind, PlayerTimeRange } from "../types";
 
 /** Edit order shown in the panel: chronological-ish within an episode. */
@@ -181,8 +181,9 @@ export function useMarkerEditor({
     }
     setSaving(true);
     setError(null);
+    let saved: PlayerV2Response<"PUT /api/v2/markers/files/{file_id}"> | undefined;
     try {
-      await playerV2(config, "PUT /api/v2/markers/files/{file_id}", {
+      saved = await playerV2(config, "PUT /api/v2/markers/files/{file_id}", {
         path: { file_id: String(fileId) },
         body: markerUpdateToV2(body),
       });
@@ -196,7 +197,8 @@ export function useMarkerEditor({
     setDraft(draft);
     setEditing(false);
     try {
-      onSaved?.(draft);
+      // The response's provenance, not the draft's silence: see markerDraftFromV2.
+      onSaved?.(markerDraftFromV2(draft, saved ?? {}));
     } catch (e) {
       console.error("Marker save callback failed:", e);
     }
