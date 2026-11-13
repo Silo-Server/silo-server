@@ -94,39 +94,6 @@ func (h *PlaybackHandler) resolveDesiredSubtitleV3(ctx context.Context, want pla
 	return subtitleVariantIndexV3(target, want.Language, want.Title, want.Forced, want.HearingImpaired), nil
 }
 
-// keepDesiredSubtitleOrdinalV3 moves request's subtitle to the combined
-// ordinal desired's subtitle holds on file now, when request only carries over
-// current, the playing plan's subtitle, and the viewer chose it on file. That
-// ordinal goes stale when a stored subtitle before it is deleted, and the next
-// one added takes its place; replanning it would switch the viewer to the added
-// track. A new choice is left for planning to check, and request is left alone
-// when the chosen subtitle is gone. It errors only when the downloaded
-// subtitles cannot be read.
-func (h *PlaybackHandler) keepDesiredSubtitleOrdinalV3(ctx context.Context, desired *playback.DesiredTracksV3, current *playback.TrackIdentityV3, file *models.MediaFile, request *playback.StartRequestV3) error {
-	if desired == nil || desired.Subtitle == nil || file == nil || request == nil || desired.Subtitle.FileID != file.ID {
-		return nil
-	}
-	requested := trackIdentityIndexV3(&playback.TrackIdentityV3{ID: request.SubtitleTrackID, Index: request.SubtitleTrackIndex}, file, "subtitle")
-	if requested < 0 || requested != trackIdentityIndexV3(current, file, "subtitle") {
-		return nil
-	}
-	var downloaded []subtitles.DownloadedSubtitle
-	if desired.Subtitle.Source == playback.SubtitleSourceDownloadedV3 && h.SubtitleRepo != nil {
-		var err error
-		downloaded, err = h.SubtitleRepo.ListDownloadedSubtitles(ctx, file.ID)
-		if err != nil {
-			return fmt.Errorf("load downloaded subtitles: %w", wrapSubtitleStoreErrorV3(err))
-		}
-	}
-	index := sameFileSubtitleIndexV3(*desired.Subtitle, file, downloaded)
-	if index < 0 || index == requested {
-		return nil
-	}
-	request.SubtitleTrackIndex = &index
-	request.SubtitleTrackID = playback.TrackIDV3(file.ID, "subtitle", index)
-	return nil
-}
-
 // sameFileSubtitleIndexV3 finds want on the file it was chosen on by its
 // source identity, or returns -1 when that file no longer holds it.
 func sameFileSubtitleIndexV3(want playback.DesiredSubtitleTrackV3, target *models.MediaFile, downloaded []subtitles.DownloadedSubtitle) int {

@@ -5808,13 +5808,8 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 	}
 	start.FileID = effectiveFile.ID
-	// On the same file, a subtitle the replan only carries over still names the
-	// ordinal the playing plan gave it; follow the viewer's track if stored
-	// subtitles were deleted since.
 	if !seekScopedRecovery && effectiveFile.ID == currentEffectiveFile.ID {
-		if err := h.keepDesiredSubtitleOrdinalV3(r.Context(), desired, record.CurrentPlan.SelectedTracks.Subtitle, effectiveFile, &start); err != nil {
-			return playback.DecisionResponseV3{}, *record, nil, subtitleArtifactErrorV3("Downloaded subtitles are temporarily unavailable.", err)
-		}
+		h.keepPlayingDownloadedSubtitleV3(r.Context(), record, effectiveFile, &start)
 	}
 	if err := preflightPlaybackFile(r.Context(), effectiveFile, h.MissingMarker, h.EventsHub); err != nil {
 		return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{
@@ -6732,6 +6727,39 @@ func subtitleSelectionDiffersFromStartV3(selected playback.SelectedTracksV3, sta
 		return start.SubtitleTrackIndex != nil
 	}
 	return selected.Subtitle.ID != start.SubtitleTrackID || !optionalIntEqualV3(selected.Subtitle.Index, start.SubtitleTrackIndex)
+}
+
+// keepPlayingDownloadedSubtitleV3 moves request's subtitle to the combined
+// ordinal the playing stored subtitle holds on file now, when request only
+// carries over the playing plan's subtitle. That ordinal goes stale when a
+// stored subtitle before it is deleted, and the next one added takes its
+// place; replanning it would switch the viewer to the added track. A new
+// choice is left alone, and so is the request when the playing subtitle is
+// gone or the stored subtitles cannot be read: planning decides those.
+func (h *PlaybackHandler) keepPlayingDownloadedSubtitleV3(ctx context.Context, record *playback.AttemptRecordV3, file *models.MediaFile, request *playback.StartRequestV3) {
+	if h.SubtitleRepo == nil || record == nil || file == nil || request == nil || record.EffectiveMediaFileID != file.ID {
+		return
+	}
+	recipe := record.FrozenRecipe
+	if !recipe.ValidFor(record.CurrentPlan) || recipe.SubtitleSource != playback.SubtitleSourceDownloadedV3 || recipe.DownloadedSubtitleID <= 0 {
+		return
+	}
+	requested := trackIdentityIndexV3(&playback.TrackIdentityV3{ID: request.SubtitleTrackID, Index: request.SubtitleTrackIndex}, file, "subtitle")
+	if requested < 0 || requested != trackIdentityIndexV3(record.CurrentPlan.SelectedTracks.Subtitle, file, "subtitle") {
+		return
+	}
+	downloaded, err := h.SubtitleRepo.ListDownloadedSubtitles(ctx, file.ID)
+	if err != nil {
+		return
+	}
+	index := sameFileSubtitleIndexV3(playback.DesiredSubtitleTrackV3{
+		Source: playback.SubtitleSourceDownloadedV3, DownloadedSubtitleID: recipe.DownloadedSubtitleID,
+	}, file, downloaded)
+	if index < 0 || index == requested {
+		return
+	}
+	request.SubtitleTrackIndex = &index
+	request.SubtitleTrackID = playback.TrackIDV3(file.ID, "subtitle", index)
 }
 
 func sameSelectedTracksV3(left, right playback.SelectedTracksV3) bool {

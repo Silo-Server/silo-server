@@ -281,15 +281,6 @@ function subtitleSourceOf(source: string): PlayerSubtitleInfo["source"] {
 }
 
 /**
- * Maps the plan's subtitle inventory onto the player's track shape.
- *
- * `index` is the server's combined ordinal, copied verbatim: it is the identity
- * the client echoes back on a track change, and the key every subtitle consumer
- * in the player looks tracks up by. Entries the server publishes as
- * `burn_in_only` have no URL and are kept anyway — they are selectable, and
- * selecting one is what asks the server to burn them in.
- */
-/**
  * Whether an announced track can join `inventory` at the ordinal the server
  * gave it: it either takes the next free ordinal or re-announces the stored
  * subtitle already at that ordinal. Ordinals are dense, so anything else
@@ -307,6 +298,15 @@ function canFoldAnnouncedSubtitleTrack(
   );
 }
 
+/**
+ * Maps the plan's subtitle inventory onto the player's track shape.
+ *
+ * `index` is the server's combined ordinal, copied verbatim: it is the identity
+ * the client echoes back on a track change, and the key every subtitle consumer
+ * in the player looks tracks up by. Entries the server publishes as
+ * `burn_in_only` have no URL and are kept anyway — they are selectable, and
+ * selecting one is what asks the server to burn them in.
+ */
 function mapSubtitleInventory(
   inventory: SubtitleInventoryItemV3[],
   mediaFileId: number,
@@ -2028,7 +2028,7 @@ export function usePlaybackSession(
       const plan = planRef.current;
       if (!plan) return;
       if (!canFoldAnnouncedSubtitleTrack(plan.subtitle.inventory, track)) {
-        void replan({ operation: "track_change", positionSeconds: playbackPositionRef.current });
+        refreshSubtitles(playbackPositionRef.current);
         return;
       }
       const inventory = [
@@ -2043,7 +2043,7 @@ export function usePlaybackSession(
         subtitleUrls: mapSubtitleInventory(inventory, nextPlan.effective_media_file_id, config),
       }));
     },
-    [config, replan],
+    [config, refreshSubtitles],
   );
 
   const updatePlaybackState = useCallback((positionSeconds: number, playing: boolean) => {

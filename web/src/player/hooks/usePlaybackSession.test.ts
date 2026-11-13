@@ -3160,6 +3160,7 @@ describe("usePlaybackSession announced subtitle tracks", () => {
     },
   ])("$name", async ({ track, folds }) => {
     const initial = [stored(0, 1, "en"), stored(1, 2, "es")];
+    const selected = { id: "file:7:subtitle:1", index: 1 };
     const replanBodies: Array<Record<string, unknown>> = [];
     vi.stubGlobal(
       "fetch",
@@ -3168,7 +3169,10 @@ describe("usePlaybackSession announced subtitle tracks", () => {
           replanBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
           return new Promise<Response>(() => {});
         },
-        fixturePlanV3({ subtitle: { mode: "off", inventory: initial } }),
+        fixturePlanV3({
+          subtitle: { mode: "render", inventory: initial },
+          selected_tracks: { ...fixturePlanV3().selected_tracks, subtitle: selected },
+        }),
       ),
     );
     const { result, unmount } = renderSession();
@@ -3183,8 +3187,12 @@ describe("usePlaybackSession announced subtitle tracks", () => {
     } else {
       expect(inventory).toEqual(initial);
       await waitFor(() => expect(replanBodies).toHaveLength(1));
-      expect(replanBodies[0]).toMatchObject({ operation: "track_change" });
-      expect(replanBodies[0]).not.toHaveProperty("subtitle");
+      // The refetch carries the viewer's subtitle over; the server keeps it
+      // on the same stored subtitle.
+      expect(replanBodies[0]).toMatchObject({
+        operation: "track_change",
+        selected_tracks: { subtitle: selected },
+      });
     }
     unmount();
   });
