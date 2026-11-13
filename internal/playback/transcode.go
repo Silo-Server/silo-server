@@ -117,6 +117,16 @@ type TranscodeOpts struct {
 	// stream tokens never freeze it: a reconstruct under auto rebuilds the
 	// pipeline and derives it again from live configuration.
 	nvencSoftwareDecode bool
+	// gpuDecodeFailed moves a running QSV or VAAPI session to CPU decode after
+	// its GPU-decoded generation failed (see gpuDecodeFailedFilterSetupLocked).
+	// On VAAPI it also stops FFmpeg rotating the CPU-decoded frames by the
+	// source's display matrix: FFmpeg never rotates hardware frames, so the
+	// segments already served are in coded orientation. QSV always passes
+	// -noautorotate. It is deliberately unexported and leaves
+	// SoftwareVideoDecode alone, so a recipe card or stream token written from
+	// the live options still records GPU decode and a reconstruct produces the
+	// same orientation.
+	gpuDecodeFailed bool
 	// softwareEncode retains a frozen GPU tone-map graph while its final
 	// SDR frames feed a software encoder: libx265 on a device without HEVC
 	// encoding, or either codec on a VAAPI device with no capped rate
@@ -712,6 +722,9 @@ func normalizeTranscodeOptsContext(ctx context.Context, opts TranscodeOpts) Tran
 	opts.EncoderHWAccel = ""
 	opts.FFmpegPath = ResolveFFmpegPath(opts.FFmpegPath)
 	opts = resolveSoftwareVideoDecode(opts)
+	if opts.gpuDecodeFailed {
+		opts.SoftwareVideoDecode = true
+	}
 	if opts.ToneMapMode == tonemap.ModeSoftware {
 		opts.SoftwareVideoDecode = true
 		opts.HWAccel = HWAccelNone
@@ -848,7 +861,7 @@ func validateToneMapSource(ctx context.Context, opts TranscodeOpts) error {
 		InputPath:           opts.InputPath,
 		DurationSeconds:     opts.TotalDuration,
 		SourceBitDepth:      opts.SourceVideoBitDepth,
-		SoftwareVideoDecode: opts.SoftwareVideoDecode,
+		SoftwareVideoDecode: opts.SoftwareVideoDecode || opts.gpuDecodeFailed,
 		Mode:                opts.ToneMapMode,
 		Backend:             backend,
 		Filter:              opts.ToneMapFilter,
@@ -1250,6 +1263,8 @@ func appendHWAccelArgs(args []string, opts TranscodeOpts) []string {
 		args = append(args, "-filter_hw_device", vaapiHWDeviceAlias)
 		if !opts.SoftwareVideoDecode {
 			args = append(args, "-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi")
+		} else if opts.gpuDecodeFailed {
+			args = append(args, "-noautorotate")
 		}
 	case transcodeHWNVENC:
 		if opts.SoftwareVideoDecode {
@@ -3584,6 +3599,45 @@ type restartFlight struct {
 	err  error
 }
 
+// ffmpegFilterSetupFailure is the line FFmpeg prints when it cannot configure
+// a filter graph. Silo runs FFmpeg at -loglevel error, so FFmpeg's reason for
+// rebuilding a graph mid-stream (an info line) is never captured; this is.
+const ffmpegFilterSetupFailure = "Error reinitializing filters!"
+
+// gpuDecodeFailedFilterSetupLocked reports whether the last generation decoded
+// on an Intel GPU and exited by itself because FFmpeg could not configure its
+// filter graph. That is how a QSV or VAAPI transcode dies when the VAAPI
+// decoder replaces its frames context mid-stream: the rebuilt graph cannot
+// feed hardware frames to the encoder that is already open, and it fails at
+// the same frame on every restart. CPU-decoded frames reach the same graph
+// through an upload, so the restart takes that route once. The caller holds
+// s.mu.
+//
+// The line also follows unrelated graph failures. Those sessions were failing
+// anyway and lose only GPU decode. NVENC is left out: with CPU decode an
+// explicit NVENC setting encodes on libx264.
+func (s *TranscodeSession) gpuDecodeFailedFilterSetupLocked() bool {
+	if s.running || s.waitErr == nil || s.stderr == nil || s.opts.SoftwareVideoDecode || s.opts.gpuDecodeFailed {
+		return false
+	}
+	if s.opts.HWAccel != transcodeHWQSV && s.opts.HWAccel != transcodeHWVAAPI {
+		return false
+	}
+	return strings.Contains(s.stderr.String(), ffmpegFilterSetupFailure)
+}
+
+// crashState reports, in one read, whether FFmpeg exited with an error and has
+// not been restarted, and whether the next restart would then move the session
+// from GPU to CPU decode (see gpuDecodeFailedFilterSetupLocked).
+func (s *TranscodeSession) crashState() (crashed, restartsOnCPU bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.running || s.waitErr == nil {
+		return false, false
+	}
+	return true, s.gpuDecodeFailedFilterSetupLocked()
+}
+
 // restartToneMapValidationTimeout bounds the tone-map source recheck on a
 // restart. It is deliberately shorter than the caller's post-restart segment
 // wait (30s) so a slow validation cannot consume the entire recovery window.
@@ -3614,9 +3668,16 @@ func (s *TranscodeSession) restart(
 	flight := &restartFlight{done: make(chan struct{})}
 	s.restarting = flight
 	opts := s.opts
+	decodeOnCPU := s.gpuDecodeFailedFilterSetupLocked()
 	cancelCurrent := s.cancel
 	done := s.done
 	s.mu.Unlock()
+	if decodeOnCPU {
+		// The same command would fail the same way at the same frame. Decide
+		// before the tone-map recheck below, so it validates the route this
+		// restart will run.
+		opts.gpuDecodeFailed = true
+	}
 	// A tone-map recipe is valid only for the frozen source revision. Recheck it
 	// while the current process is still serving so replacement bytes can never
 	// displace a valid generation or inherit its cached preflight verdict. The
@@ -3721,6 +3782,13 @@ func (s *TranscodeSession) restart(
 	}
 
 	log.Printf("playback: ffmpeg restart cmd: %s %s", bin, strings.Join(args, " "))
+	if decodeOnCPU {
+		slog.WarnContext(ctx, "transcode could not configure its filter graph on GPU-decoded frames; restarting with CPU decoding",
+			"component", "playback",
+			"playback_session_id", opts.SessionID,
+			"hw_accel", opts.HWAccel,
+		)
+	}
 	s.logFFmpegEvent(ctx, "ffmpeg process restart", "")
 
 	// As on initial start, the caller bounds synchronous validation; the new
