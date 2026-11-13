@@ -225,12 +225,17 @@ func guessedContainerDemuxer(format ffprobeFormat, filePath string) string {
 // once more over probeWideFormatBytes, and a confident reading of the same
 // format there keeps the guess as well. Otherwise the file fails with the exit error of the
 // demuxer read, which IsProbeRejection classifies like any other refusal.
-// When the wider detection itself fails, its error is returned instead, so a
-// timeout or a storage failure there stays retryable.
+// A demuxer read that failed on storage says nothing about the file and is
+// returned as it is. When the wider detection itself fails, its error is
+// returned instead, so a timeout or a storage failure there stays retryable.
 func confirmContainer(ctx context.Context, ffprobePath, filePath, demuxer string, guess ffprobeFormat, limits probeLimits) error {
 	_, err := runFormatProbe(ctx, ffprobePath, filePath, limits, "-f", demuxer)
 	if err == nil || errors.Is(err, errProbeTimeout) {
 		return err
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && probeStderrAccessFailure(exitErr.Stderr) != nil {
+		return fmt.Errorf("ffprobe failed for %s: %w", filePath, err)
 	}
 	output, wideErr := runFormatProbe(ctx, ffprobePath, filePath, limits, "-formatprobesize", probeWideFormatBytes)
 	if wideErr != nil {

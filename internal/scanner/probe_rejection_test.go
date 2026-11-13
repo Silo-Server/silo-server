@@ -64,27 +64,31 @@ func TestIsProbeRejectionSeparatesRefusedFilesFromProbeTrouble(t *testing.T) {
 	// (AVPROBE_SCORE_RETRY, 25, or lower) of a format the extension does not
 	// name is checked by reading the file with the extension's own demuxer,
 	// and counts as a rejection only when that read fails too.
+	const invalid = "Invalid data found when processing input"
 	avi := filepath.Join(t.TempDir(), "Movie (2019).avi")
 	if err := os.WriteFile(avi, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
-		name       string
-		score      int
-		forcedExit int
-		wideScore  int
-		wideFormat string
-		rejection  bool
-		failure    bool
+		name        string
+		score       int
+		forcedExit  int
+		forcedError string
+		wideScore   int
+		wideFormat  string
+		rejection   bool
+		failure     bool
 	}{
-		{"guess the container demuxer refuses", 25, 1, 25, "m4v", true, true},
-		{"guess the container demuxer reads", 5, 0, 5, "m4v", false, false},
-		{"guess a wider read is sure of", 25, 1, 26, "m4v", false, false},
+		{"guess the container demuxer refuses", 25, 1, invalid, 25, "m4v", true, true},
+		{"guess the container demuxer reads", 5, 0, invalid, 5, "m4v", false, false},
+		{"guess a wider read is sure of", 25, 1, invalid, 26, "m4v", false, false},
 		// A wider read that finds another format does not confirm the guess.
-		{"guess a wider read contradicts", 25, 1, 26, "mp3", true, true},
-		// A wider read that storage fails says nothing about the file.
-		{"guess a wider read cannot finish", 25, 1, -1, "m4v", false, true},
-		{"confident reading", 26, 1, 26, "m4v", false, false},
+		{"guess a wider read contradicts", 25, 1, invalid, 26, "mp3", true, true},
+		// A read that storage fails says nothing about the file, whichever
+		// of the two reads it is.
+		{"guess a wider read cannot finish", 25, 1, invalid, -1, "m4v", false, true},
+		{"guess the container demuxer cannot finish reading", 25, 1, "Input/output error", -2, "m4v", false, true},
+		{"confident reading", 26, 1, invalid, 26, "m4v", false, false},
 	} {
 		guess := filepath.Join(t.TempDir(), "ffprobe")
 		writeFakeTool(t, guess, fmt.Sprintf(`#!/bin/sh
@@ -93,7 +97,7 @@ format=m4v
 for arg; do
 	case "$arg" in
 	-f)
-		echo 'Invalid data found when processing input' >&2
+		echo '%s' >&2
 		exit %d
 		;;
 	-formatprobesize)
@@ -102,12 +106,15 @@ for arg; do
 		;;
 	esac
 done
-if [ "$score" -lt 0 ]; then
+if [ "$score" -eq -1 ]; then
 	echo 'Movie.avi: Input/output error' >&2
+	exit 1
+elif [ "$score" -lt 0 ]; then
+	echo 'Movie.avi: Invalid data found when processing input' >&2
 	exit 1
 fi
 printf '%%s\n' '{"format":{"format_name":"'"$format"'","probe_score":'"$score"'},"streams":[{"codec_type":"video","codec_name":"mpeg4","width":640,"height":360}]}'
-`, tc.score, tc.forcedExit, tc.wideScore, tc.wideFormat))
+`, tc.score, tc.forcedError, tc.forcedExit, tc.wideScore, tc.wideFormat))
 		probe, err := ProbeFile(ctx, guess, avi)
 		if got := err != nil && IsProbeRejection(ctx, avi, err); got != tc.rejection || (err != nil) != tc.failure {
 			t.Fatalf("%s: err = %v, rejection = %v, want rejection %v and failure %v", tc.name, err, got, tc.rejection, tc.failure)
