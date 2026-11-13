@@ -68,4 +68,26 @@ describe("restoreUserSession", () => {
     expect(await outcome).toBeInstanceOf(V2TimeoutError);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
+
+  it("refreshes after a 401 whose body breaks off", async () => {
+    const brokenUnauthorized = unauthorized();
+    Object.defineProperty(brokenUnauthorized, "text", {
+      value: () => Promise.reject(new TypeError("network error")),
+    });
+    const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+      if (String(input).endsWith("/auth/refresh")) {
+        return Response.json({ access_token: "new-access", refresh_token: "new-refresh" });
+      }
+      const expired = new Headers(init?.headers).get("Authorization") === "Bearer expired-access";
+      return expired ? brokenUnauthorized : Response.json({ id: "1", username: "admin" });
+    });
+
+    const restored = await restoreUserSession({
+      accessToken: "expired-access",
+      refreshToken: "admin-refresh",
+      fetchImpl,
+    });
+
+    expect(restored).toMatchObject({ accessToken: "new-access", refreshToken: "new-refresh" });
+  });
 });

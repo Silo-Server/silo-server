@@ -1,13 +1,7 @@
 import { refreshAccessToken } from "@/api/client";
 import { API_READ_TIMEOUT_MS } from "@/api/requestDeadline";
 import type { LoginResponse, User } from "@/api/types";
-import {
-  decodeV2Response,
-  V2_CLIENT_HEADERS,
-  V2ProblemError,
-  V2TransportError,
-  withV2Deadline,
-} from "@/api/v2/request";
+import { decodeV2Response, V2_CLIENT_HEADERS, withV2Deadline } from "@/api/v2/request";
 import type { components } from "@/api/v2/schema";
 
 /** The account document as every v2 credential and account response carries it. */
@@ -77,29 +71,29 @@ export async function restoreUserSession({
   refreshToken: string;
   fetchImpl?: typeof fetch;
 }): Promise<RestoredUserSession> {
+  // A 401 asks for a refresh whatever happens to its body, which is read only
+  // for the error a refused refresh reports; a body that breaks off or stalls
+  // must not stop the refresh.
+  let accountStatus: number | undefined;
   const readAccount = (token: string) =>
-    withV2Deadline("GET /api/v2/account/me", API_READ_TIMEOUT_MS, null, async (signal) =>
-      decodeV2Response(
-        "GET /api/v2/account/me",
-        await fetchImpl("/api/v2/account/me", {
-          headers: {
-            Accept: "application/json",
-            ...V2_CLIENT_HEADERS,
-            Authorization: `Bearer ${token}`,
-          },
-          signal,
-        }),
-      ),
-    );
+    withV2Deadline("GET /api/v2/account/me", API_READ_TIMEOUT_MS, null, async (signal) => {
+      const res = await fetchImpl("/api/v2/account/me", {
+        headers: {
+          Accept: "application/json",
+          ...V2_CLIENT_HEADERS,
+          Authorization: `Bearer ${token}`,
+        },
+        signal,
+      });
+      accountStatus = res.status;
+      return decodeV2Response("GET /api/v2/account/me", res);
+    });
 
   try {
     const account = await readAccount(accessToken);
     return { user: userFromAccount(account), accessToken, refreshToken };
   } catch (error) {
-    const unauthorized =
-      (error instanceof V2ProblemError || error instanceof V2TransportError) &&
-      error.status === 401;
-    if (!unauthorized) throw error;
+    if (accountStatus !== 401) throw error;
     const refreshed = await withV2Deadline(
       "POST /api/v2/auth/refresh",
       API_READ_TIMEOUT_MS,
