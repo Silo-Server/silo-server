@@ -63,7 +63,7 @@ func readIndex(t *testing.T, path string) Index {
 	if err != nil {
 		t.Fatal(err)
 	}
-	idx, err := ReadMatroska(f, info.Size())
+	idx, err := readPlanIndex(f, info.Size())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func checkPlanMatchesFFmpegHLS(t *testing.T, ffmpeg, path string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	idx, err := ReadMatroska(f, info.Size())
+	idx, err := readPlanIndex(f, info.Size())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +209,7 @@ func playlistDurations(t *testing.T, path string) []float64 {
 	return durations
 }
 
-// ReadMatroska's video end is where ffprobe's last video frame ends, and a
+// The planning read's video end (readPlanIndex) is where ffprobe's last video frame ends, and a
 // longer audio track doesn't move it.
 func TestReadMatroskaVideoEndMatchesFFprobe(t *testing.T) {
 	ffmpeg, ffprobe := requireFFmpeg(t)
@@ -247,7 +247,7 @@ func TestReadMatroskaVideoEndMatchesFFprobe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	idx, err := ReadMatroska(f, info.Size())
+	idx, err := readPlanIndex(f, info.Size())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +295,7 @@ func TestReadMatroskaReadsLittleOfTheFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := &regionReaderAt{r: f, regions: map[int64]bool{}}
-	idx, err := ReadMatroska(r, info.Size())
+	idx, err := readPlanIndex(r, info.Size())
 	if err != nil {
 		t.Fatal(err)
 	}

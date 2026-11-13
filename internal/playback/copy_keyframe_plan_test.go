@@ -155,11 +155,20 @@ func TestResolveCopyPlanReplansAfterTheRecordIsGone(t *testing.T) {
 
 	rebuilt := plannedOpts()
 	rebuilt.OutputDir = t.TempDir()
-	rebuilt.Reconstructed = true
 	again := resolveCopyPlan(rebuilt)
 	if again == nil || !slices.Equal(again.durations, original.durations) {
 		t.Fatalf("rebuilt plan = %+v, want the original %+v", again, original)
 	}
+}
+
+// sourceVersion is the version keyframes.Load reads for path.
+func sourceVersion(t *testing.T, path string) keyframes.Version {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return keyframes.Version{Path: path, Size: info.Size(), ModTime: info.ModTime()}
 }
 
 // A segment FFmpeg cut where the plan doesn't rejects the file, so later
@@ -178,6 +187,9 @@ func TestCheckCopyPlanRejectsTheFileOnAMismatch(t *testing.T) {
 		"shorter segment": {written: []manifestSegmentEntry{{0, 2.6}, {1, 2.2}, {2, 2.2}}, reject: true},
 		"extra segment":   {written: []manifestSegmentEntry{{0, 2.6}, {1, 4.4}, {2, 1.0}, {3, 0.5}}, reject: true},
 		"finished short":  {written: []manifestSegmentEntry{{0, 2.6}, {1, 4.4}}, complete: true, reject: true},
+		// FFmpeg measures the last segment from packet durations, which a
+		// file whose frame rate changes needn't fill.
+		"last segment short": {written: []manifestSegmentEntry{{0, 2.6}, {1, 4.4}, {2, 0.4}}, complete: true},
 		// A failed run ended segment 1 early and stopped.
 		"failed run": {written: []manifestSegmentEntry{{0, 2.6}, {1, 1.2}}},
 	} {
@@ -190,7 +202,7 @@ func TestCheckCopyPlanRejectsTheFileOnAMismatch(t *testing.T) {
 			}
 			s := &TranscodeSession{
 				opts:     TranscodeOpts{InputPath: source, SessionID: "checked"},
-				copyPlan: &copySegmentPlan{durations: plan},
+				copyPlan: &copySegmentPlan{durations: plan, file: sourceVersion(t, source)},
 			}
 			s.checkCopyPlan(tc.written, tc.complete)
 			_, err := keyframes.Load(source)
@@ -202,16 +214,22 @@ func TestCheckCopyPlanRejectsTheFileOnAMismatch(t *testing.T) {
 }
 
 // A session checks its plan as FFmpeg exits, even if nothing read its
-// progress while it ran. A clean finish vouches for the whole playlist; a
-// failed one only for the segments before its last.
+// progress while it ran. A clean finish of the whole stream vouches for the
+// whole playlist. A failed run, or one a read error ended early (FFmpeg exits
+// cleanly then too), only for the segments before its last.
 func TestCheckCopyPlanOutputReadsFFmpegsPlaylist(t *testing.T) {
+	// The Cues put a boundary at 7.0 where FFmpeg found no keyframe, so it
+	// cut segments 1 and 2 as one.
+	merged := "#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:2.600000,\nseg_00000.m4s\n#EXTINF:5.400000,\nseg_00001.m4s\n#EXT-X-ENDLIST\n"
 	short := "#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:2.600000,\nseg_00000.m4s\n#EXTINF:1.200000,\nseg_00001.m4s\n#EXT-X-ENDLIST\n"
 	for name, tc := range map[string]struct {
-		waitErr error
-		reject  bool
+		playlist string
+		waitErr  error
+		reject   bool
 	}{
-		"finished": {reject: true},
-		"failed":   {waitErr: errors.New("exit status 1")},
+		"finished":      {playlist: merged, reject: true},
+		"failed":        {playlist: merged, waitErr: errors.New("exit status 1")},
+		"stopped early": {playlist: short},
 	} {
 		t.Run(name, func(t *testing.T) {
 			source := filepath.Join(t.TempDir(), "source.mkv")
@@ -219,13 +237,13 @@ func TestCheckCopyPlanOutputReadsFFmpegsPlaylist(t *testing.T) {
 				t.Fatal(err)
 			}
 			out := t.TempDir()
-			if err := os.WriteFile(filepath.Join(out, "stream.m3u8"), []byte(short), 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(out, "stream.m3u8"), []byte(tc.playlist), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			s := &TranscodeSession{
 				outputDir: out,
 				opts:      TranscodeOpts{InputPath: source, SessionID: "exited"},
-				copyPlan:  &copySegmentPlan{durations: []float64{2.6, 4.4, 1.0}},
+				copyPlan:  &copySegmentPlan{durations: []float64{2.6, 4.4, 1.0}, file: sourceVersion(t, source)},
 			}
 			s.checkCopyPlanOutput(tc.waitErr)
 			_, err := keyframes.Load(source)
@@ -233,6 +251,30 @@ func TestCheckCopyPlanOutputReadsFFmpegsPlaylist(t *testing.T) {
 				t.Fatalf("rejected = %v (session %v, Load err %v), want %v", rejected, s.copyPlanRejected, err, tc.reject)
 			}
 		})
+	}
+}
+
+// A planned segment FFmpeg didn't write in a run that finished the whole
+// stream gets a 404: restarting would copy the file again and still not cut
+// it.
+func TestPlannedSegmentFFmpegNeverWroteIsNotRegenerated(t *testing.T) {
+	out := t.TempDir()
+	merged := "#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:2.600000,\nseg_00000.m4s\n#EXTINF:5.400000,\nseg_00001.m4s\n#EXT-X-ENDLIST\n"
+	if err := os.WriteFile(filepath.Join(out, "stream.m3u8"), []byte(merged), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := &TranscodeSession{
+		outputDir: out,
+		opts:      TranscodeOpts{InputPath: filepath.Join(t.TempDir(), "source.mkv"), SessionID: "finished", SegmentDuration: 2},
+		copyPlan:  &copySegmentPlan{durations: []float64{2.6, 4.4, 1.0}},
+	}
+	s.checkCopyPlanOutput(nil)
+	if d := s.SegmentRecoveryDecision(2, time.Now()); d.Wait || d.RestartOnTimeout {
+		t.Fatalf("segment 2: %+v, want neither a wait nor a restart", d)
+	}
+	// A segment FFmpeg did write, since pruned, is still regenerated.
+	if d := s.SegmentRecoveryDecision(1, time.Now()); !d.RestartOnTimeout {
+		t.Fatalf("segment 1: %+v, want a restart", d)
 	}
 }
 
@@ -251,7 +293,7 @@ func TestSegmentProgressDoesNotTrustAnEndedPlaylist(t *testing.T) {
 	s := &TranscodeSession{
 		outputDir: out,
 		opts:      TranscodeOpts{InputPath: source, SessionID: "failed", SegmentDuration: 2},
-		copyPlan:  &copySegmentPlan{durations: []float64{2.6, 4.4, 1.0}},
+		copyPlan:  &copySegmentPlan{durations: []float64{2.6, 4.4, 1.0}, file: sourceVersion(t, source)},
 		waitErr:   errors.New("exit status 1"),
 	}
 	s.SegmentProgress(time.Now())

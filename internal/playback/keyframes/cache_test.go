@@ -87,9 +87,7 @@ func TestRejectHoldsUntilTheFileChanges(t *testing.T) {
 	got, err := Load(path)
 	wantIndex(t, got, err)
 
-	if err := Reject(path); err != nil {
-		t.Fatal(err)
-	}
+	Reject(got.File)
 	if _, err := Load(path); !errors.Is(err, ErrIncompleteIndex) || !errors.Is(err, ErrNoIndex) {
 		t.Fatalf("after Reject err = %v, want ErrIncompleteIndex (an ErrNoIndex)", err)
 	}
@@ -100,14 +98,14 @@ func TestRejectHoldsUntilTheFileChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	key := cacheKey{path: path, size: info.Size(), modTime: info.ModTime()}
+	key := Version{Path: path, Size: info.Size(), ModTime: info.ModTime()}
 	if _, err := storeFirst(key, got, nil); !errors.Is(err, ErrIncompleteIndex) {
 		t.Fatalf("a late load's store err = %v, want the rejection kept", err)
 	}
 
 	// Evicting the results doesn't forget the rejection.
 	for i := range maxCachedFiles + 1 {
-		storeFirst(cacheKey{path: filepath.Join("evict", strconv.Itoa(i))}, Index{}, ErrNoIndex)
+		storeFirst(Version{Path: filepath.Join("evict", strconv.Itoa(i))}, Index{}, ErrNoIndex)
 	}
 	if _, err := Load(path); !errors.Is(err, ErrIncompleteIndex) {
 		t.Fatalf("after evictions err = %v, want the rejection kept", err)
@@ -117,6 +115,13 @@ func TestRejectHoldsUntilTheFileChanges(t *testing.T) {
 	if err := os.Chtimes(path, later, later); err != nil {
 		t.Fatal(err)
 	}
+	rejected := got.File
+	got, err = Load(path)
+	wantIndex(t, got, err)
+
+	// A late rejection of the old version, from a playback that read the
+	// file before it changed, leaves the new version alone.
+	Reject(rejected)
 	got, err = Load(path)
 	wantIndex(t, got, err)
 }

@@ -15,14 +15,16 @@ import (
 // kilobytes to a few hundred, one float per keyframe.
 const maxCachedFiles = 256
 
-type cacheKey struct {
-	path    string
-	size    int64
-	modTime time.Time
+// Version identifies the file an index was read from: its path, size and
+// modification time. A file replaced at the same path is another version.
+type Version struct {
+	Path    string
+	Size    int64
+	ModTime time.Time
 }
 
 type cacheEntry struct {
-	key   cacheKey
+	key   Version
 	index Index
 	err   error
 }
@@ -39,16 +41,16 @@ const maxRejectedFiles = 4096
 var indexCache = struct {
 	sync.Mutex
 	order    *list.List
-	entries  map[cacheKey]*list.Element
-	rejected map[cacheKey]struct{}
-}{order: list.New(), entries: map[cacheKey]*list.Element{}, rejected: map[cacheKey]struct{}{}}
+	entries  map[Version]*list.Element
+	rejected map[Version]struct{}
+}{order: list.New(), entries: map[Version]*list.Element{}, rejected: map[Version]struct{}{}}
 
-// Load returns the keyframe index of the media file at path (ReadMatroska).
-// It reads only the file's metadata and a few clusters' block headers, so a
-// playback can plan from it on its first start, and it reads nothing in the
-// background (#2453). A file without a usable index, including any that isn't
-// Matroska or WebM or is malformed, gets ErrNoIndex, as does one Reject
-// marked.
+// Load returns the keyframe index of the media file at path, with VideoEnd
+// and the File version it was read from (readPlanIndex). It reads only the
+// file's metadata and a few clusters' block headers, so a playback can plan
+// from it on its first start, and it reads nothing in the background (#2453).
+// A file without a usable index, including any that isn't Matroska or WebM or
+// is malformed, gets ErrNoIndex, as does a version Reject marked.
 func Load(path string) (Index, error) {
 	f, err := fspath.Open(path)
 	if err != nil {
@@ -59,30 +61,32 @@ func Load(path string) (Index, error) {
 	if err != nil {
 		return Index{}, err
 	}
-	key := cacheKey{path: path, size: info.Size(), modTime: info.ModTime()}
+	key := Version{Path: path, Size: info.Size(), ModTime: info.ModTime()}
 	if idx, err, ok := cached(key); ok {
 		return idx, err
 	}
 
-	idx, err := ReadMatroska(f, info.Size())
+	idx, err := readPlanIndex(f, info.Size())
 	if err != nil && transient(err) {
 		return Index{}, err
 	}
 	idx, err = settle(idx, err)
+	if err == nil {
+		idx.File = key
+	}
 	return storeFirst(key, idx, err)
 }
 
-// Reject records that the file at path has an index FFmpeg doesn't cut at:
-// its Cues leave out keyframes the checks didn't read. Until the file
-// changes, Load reports ErrIncompleteIndex for it, so later playbacks keep
-// FFmpeg's playlist. The cache is in memory, so a restart reads the file
-// again.
-func Reject(path string) error {
-	info, err := fspath.Stat(path)
-	if err != nil {
-		return err
+// Reject records that file has an index FFmpeg doesn't cut at: its Cues
+// leave out keyframes the checks didn't read. Until the file changes, Load
+// reports ErrIncompleteIndex for it, so later playbacks keep FFmpeg's
+// playlist. It takes the version Load read rather than looking at the path
+// again, so a file replaced since isn't rejected for its predecessor, and it
+// reads nothing. The cache is in memory, so a restart reads the file again.
+func Reject(file Version) {
+	if file == (Version{}) {
+		return
 	}
-	key := cacheKey{path: path, size: info.Size(), modTime: info.ModTime()}
 	indexCache.Lock()
 	defer indexCache.Unlock()
 	if len(indexCache.rejected) >= maxRejectedFiles {
@@ -92,8 +96,7 @@ func Reject(path string) error {
 			break
 		}
 	}
-	indexCache.rejected[key] = struct{}{}
-	return nil
+	indexCache.rejected[file] = struct{}{}
 }
 
 // transient reports an error reading the file, which says nothing lasting
@@ -111,7 +114,7 @@ func settle(idx Index, err error) (Index, error) {
 	return Index{}, fmt.Errorf("%w: %w", ErrNoIndex, err)
 }
 
-func cached(key cacheKey) (Index, error, bool) {
+func cached(key Version) (Index, error, bool) {
 	indexCache.Lock()
 	defer indexCache.Unlock()
 	if _, ok := indexCache.rejected[key]; ok {
@@ -129,7 +132,7 @@ func cached(key cacheKey) (Index, error, bool) {
 // storeFirst stores a read result unless the cache already has one for key,
 // and returns the result the cache holds. A Reject that landed while this
 // read ran isn't undone.
-func storeFirst(key cacheKey, idx Index, err error) (Index, error) {
+func storeFirst(key Version, idx Index, err error) (Index, error) {
 	indexCache.Lock()
 	defer indexCache.Unlock()
 	if _, ok := indexCache.rejected[key]; ok {
@@ -144,7 +147,7 @@ func storeFirst(key cacheKey, idx Index, err error) (Index, error) {
 	return idx, err
 }
 
-func storeLocked(key cacheKey, idx Index, err error) {
+func storeLocked(key Version, idx Index, err error) {
 	if el, ok := indexCache.entries[key]; ok {
 		entry, _ := el.Value.(*cacheEntry)
 		entry.index, entry.err = idx, err

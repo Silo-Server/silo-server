@@ -157,7 +157,7 @@ func cuesFor(l layout, posA, posB uint64) []byte {
 func ptr[T any](v T) *T { return &v }
 
 func read(f []byte) (Index, error) {
-	return ReadMatroska(bytes.NewReader(f), int64(len(f)))
+	return readPlanIndex(bytes.NewReader(f), int64(len(f)))
 }
 
 func wantIndex(t *testing.T, got Index, err error) {
@@ -448,13 +448,18 @@ func TestReadMatroskaRejectsCuesThatStopEarly(t *testing.T) {
 	pos := uint64(len(head) + len(cuesFor(0)))
 	f := slices.Concat(ebmlHeader, el(idSegment, slices.Concat(head, cuesFor(pos), slices.Concat(clusters...))))
 	r := &readCounter{r: bytes.NewReader(f)}
-	if _, err := ReadMatroska(r, int64(len(f))); !errors.Is(err, ErrIncompleteIndex) {
+	if _, err := readPlanIndex(r, int64(len(f))); !errors.Is(err, ErrIncompleteIndex) {
 		t.Fatalf("err = %v, want ErrIncompleteIndex", err)
 	}
 	// The header and metadata, the sampled clusters, and one read per tail
 	// element: not the timestamp and block of each tail cluster too.
 	if r.reads > maxTailElements+25 {
 		t.Fatalf("%d reads, want the tail's element headers and few more", r.reads)
+	}
+	// ReadMatroska, trickplay's keyframe lookup, doesn't need the video's
+	// end, so the tail doesn't cost it the keyframes the Cues give.
+	if idx, err := ReadMatroska(bytes.NewReader(f), int64(len(f))); err != nil || len(idx.Keyframes) != 1 {
+		t.Fatalf("ReadMatroska = %v, %v; want the cued keyframe", idx.Keyframes, err)
 	}
 }
 

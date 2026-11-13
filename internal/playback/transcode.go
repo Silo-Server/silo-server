@@ -78,10 +78,7 @@ type TranscodeOpts struct {
 	// durable because a reconstructed session must keep serving the playlist
 	// the player already has.
 	KeyframePlaylist bool
-	// Reconstructed marks a session rebuilt from its recipe after its server
-	// or node lost it. It isn't durable: each rebuild sets it.
-	Reconstructed bool
-	SeekSeconds   float64
+	SeekSeconds      float64
 	// StreamOriginSeconds is the keyframe timestamp at which a copy-video
 	// stream actually begins. SeekSeconds remains the client-requested -ss so
 	// FFmpeg performs exactly one demuxer seek; this origin keeps response and
@@ -336,6 +333,9 @@ type TranscodeSession struct {
 	// copyPlanRejected is set once FFmpeg has cut a segment the plan
 	// doesn't list (checkCopyPlan).
 	copyPlanRejected bool
+	// copyPlanWritten is how many segments FFmpeg wrote in a run that
+	// finished the whole stream, or 0 (checkCopyPlanOutput). Guarded by mu.
+	copyPlanWritten int
 	// subtitleSpans lists each generation's subtitle rendition cue file,
 	// oldest first, including those an earlier session recorded in the same
 	// output directory. Guarded by mu.
