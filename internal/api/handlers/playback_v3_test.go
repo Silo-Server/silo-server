@@ -5900,6 +5900,47 @@ func TestReplanPlaybackV2VersionChangeKeepsDownloadedSubtitleOfSameRelease(t *te
 	}
 }
 
+// Deleting a stored subtitle moves the later ones down an ordinal, and an
+// added one takes the freed place. A replan that echoes the viewer's subtitle
+// at the ordinal the playing plan gave it keeps that stored subtitle rather
+// than the one now at that ordinal.
+func TestReplanPlaybackV2KeepsDownloadedSubtitleWhenEarlierOneIsDeleted(t *testing.T) {
+	var repo *handlerMockSubtitleRepo
+	f := newVersionChangeFixtureV3(t, func(f *versionChangeFixtureV3) {
+		repo = newMockSubtitleRepoForHandler()
+		repo.list = []subtitles.DownloadedSubtitle{
+			{ID: 71, MediaFileID: f.source.ID, Language: "en", Format: subtitles.FormatSRT, ReleaseName: "x"},
+			{ID: 72, MediaFileID: f.source.ID, Language: "es", Format: subtitles.FormatSRT, ReleaseName: "y"},
+		}
+		for i := range repo.list {
+			repo.subtitles[repo.list[i].ID] = &repo.list[i]
+		}
+		f.handler.SubtitleRepo = perFileSubtitleRepoV3{repo}
+		spanish := len(f.source.ExternalSubtitles) + len(f.source.SubtitleTracks) + 1
+		f.startRequest.SubtitleTrackIndex = &spanish
+		f.startRequest.SubtitleTrackID = playback.TrackIDV3(f.source.ID, "subtitle", spanish)
+	})
+	base := len(f.source.ExternalSubtitles) + len(f.source.SubtitleTracks)
+	if got, want := selectedTrackIDV3(f.started.PlaybackPlan.SelectedTracks.Subtitle), playback.TrackIDV3(f.source.ID, "subtitle", base+1); got != want {
+		t.Fatalf("start selected subtitle %q, want %q", got, want)
+	}
+
+	// 71 is deleted and 73 is added: 72 moves to base, 73 takes base+1.
+	french := subtitles.DownloadedSubtitle{ID: 73, MediaFileID: f.source.ID, Language: "fr", Format: subtitles.FormatSRT, ReleaseName: "z"}
+	repo.list = []subtitles.DownloadedSubtitle{repo.list[1], french}
+	delete(repo.subtitles, 71)
+	repo.subtitles[73] = &repo.list[1]
+
+	refreshed := f.replan(t, f.started, "deleted-earlier-subtitle-0001", playback.ReplanOperationTrackChangeV3, "", f.started.PlaybackPlan.SelectedTracks)
+	plan := refreshed.PlaybackPlan
+	if got, want := selectedTrackIDV3(plan.SelectedTracks.Subtitle), playback.TrackIDV3(f.source.ID, "subtitle", base); got != want {
+		t.Fatalf("refreshed plan selected subtitle %q, want %q (stored subtitle 72)", got, want)
+	}
+	if item, ok := playback.SubtitleInventoryItemAtV3(plan.Subtitle.Inventory, base); !ok || item.StoredSubtitleID != 72 {
+		t.Fatalf("inventory at the selected ordinal = %+v, want stored subtitle 72", item)
+	}
+}
+
 // With 4K transcoding disabled, a 4K version still offers lower qualities when
 // the item has a lower-resolution version: choosing one moves playback to that
 // version, and Original moves it back. The menu stays the same throughout.

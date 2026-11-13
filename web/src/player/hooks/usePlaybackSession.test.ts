@@ -3127,3 +3127,65 @@ it("carries a displaced Restore's clear on the request that replaced it", async 
   });
   unmount();
 });
+
+describe("usePlaybackSession announced subtitle tracks", () => {
+  const stored = (index: number, id: number, language: string) =>
+    fixtureSubtitleInventoryItemV3({
+      track_id: `file:7:subtitle:${index}`,
+      combined_index: index,
+      source: "downloaded",
+      language,
+      label: language,
+      stored_subtitle_id: id,
+      url: `/stream/session-1/subtitles/${index}.vtt?file_id=7&downloaded_subtitle_id=${id}`,
+    });
+
+  // The plan lists stored subtitles 1 (en) and 2 (es) at ordinals 0 and 1.
+  // When a stored subtitle is deleted the server's later ordinals shift down,
+  // so an announced track can land on an ordinal this plan gives another
+  // stored subtitle. Only an append or a re-announcement of the same stored
+  // subtitle may be folded in; anything else means the plan is stale.
+  it.each([
+    { name: "appends a new track", track: stored(2, 3, "fr"), folds: true },
+    { name: "replaces a re-announced track", track: stored(1, 2, "es"), folds: true },
+    {
+      name: "refetches when a different stored track holds the ordinal",
+      track: stored(1, 3, "fr"),
+      folds: false,
+    },
+    {
+      name: "refetches when the announced track would leave a gap",
+      track: stored(3, 3, "fr"),
+      folds: false,
+    },
+  ])("$name", async ({ track, folds }) => {
+    const initial = [stored(0, 1, "en"), stored(1, 2, "es")];
+    const replanBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      sessionFetch(
+        (init) => {
+          replanBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+          return new Promise<Response>(() => {});
+        },
+        fixturePlanV3({ subtitle: { mode: "off", inventory: initial } }),
+      ),
+    );
+    const { result, unmount } = renderSession();
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    act(() => result.current.applySubtitleTrack(track));
+
+    const inventory = result.current.plan?.subtitle.inventory ?? [];
+    if (folds) {
+      expect(inventory.find((item) => item.combined_index === track.combined_index)).toEqual(track);
+      expect(replanBodies).toEqual([]);
+    } else {
+      expect(inventory).toEqual(initial);
+      await waitFor(() => expect(replanBodies).toHaveLength(1));
+      expect(replanBodies[0]).toMatchObject({ operation: "track_change" });
+      expect(replanBodies[0]).not.toHaveProperty("subtitle");
+    }
+    unmount();
+  });
+});

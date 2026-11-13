@@ -289,6 +289,24 @@ function subtitleSourceOf(source: string): PlayerSubtitleInfo["source"] {
  * `burn_in_only` have no URL and are kept anyway — they are selectable, and
  * selecting one is what asks the server to burn them in.
  */
+/**
+ * Whether an announced track can join `inventory` at the ordinal the server
+ * gave it: it either takes the next free ordinal or re-announces the stored
+ * subtitle already at that ordinal. Ordinals are dense, so anything else
+ * means the inventory no longer matches the server's.
+ */
+function canFoldAnnouncedSubtitleTrack(
+  inventory: readonly SubtitleInventoryItemV3[],
+  track: SubtitleInventoryItemV3,
+): boolean {
+  const current = inventory.find((item) => item.combined_index === track.combined_index);
+  if (!current) return track.combined_index === inventory.length;
+  return (
+    track.stored_subtitle_id !== undefined &&
+    current.stored_subtitle_id === track.stored_subtitle_id
+  );
+}
+
 function mapSubtitleInventory(
   inventory: SubtitleInventoryItemV3[],
   mediaFileId: number,
@@ -1997,11 +2015,22 @@ export function usePlaybackSession(
    * Folds a track the server pushed over the realtime socket into the plan's
    * inventory at the ordinal the server assigned it. The ordinal is never
    * derived client-side, which is why the payload carries the whole entry.
+   *
+   * The ordinal is only meaningful against the server's current inventory.
+   * Deleting a stored subtitle shifts the later ones down without telling
+   * this player, so the announced ordinal can name a different track in this
+   * plan. The track is folded in only when it extends the inventory or
+   * re-announces the stored subtitle already there; otherwise the plan is
+   * refetched, and the server keeps the viewer's subtitle by its identity.
    */
   const applySubtitleTrack = useCallback(
     (track: SubtitleInventoryItemV3) => {
       const plan = planRef.current;
       if (!plan) return;
+      if (!canFoldAnnouncedSubtitleTrack(plan.subtitle.inventory, track)) {
+        void replan({ operation: "track_change", positionSeconds: playbackPositionRef.current });
+        return;
+      }
       const inventory = [
         ...plan.subtitle.inventory.filter((item) => item.combined_index !== track.combined_index),
         track,
@@ -2014,7 +2043,7 @@ export function usePlaybackSession(
         subtitleUrls: mapSubtitleInventory(inventory, nextPlan.effective_media_file_id, config),
       }));
     },
-    [config],
+    [config, replan],
   );
 
   const updatePlaybackState = useCallback((positionSeconds: number, playing: boolean) => {

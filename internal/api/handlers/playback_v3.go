@@ -5808,6 +5808,14 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 	}
 	start.FileID = effectiveFile.ID
+	// On the same file, a subtitle the replan only carries over still names the
+	// ordinal the playing plan gave it; follow the viewer's track if stored
+	// subtitles were deleted since.
+	if !seekScopedRecovery && effectiveFile.ID == currentEffectiveFile.ID {
+		if err := h.keepDesiredSubtitleOrdinalV3(r.Context(), desired, record.CurrentPlan.SelectedTracks.Subtitle, effectiveFile, &start); err != nil {
+			return playback.DecisionResponseV3{}, *record, nil, subtitleArtifactErrorV3("Downloaded subtitles are temporarily unavailable.", err)
+		}
+	}
 	if err := preflightPlaybackFile(r.Context(), effectiveFile, h.MissingMarker, h.EventsHub); err != nil {
 		return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{
 			reason:  "source_unavailable",
