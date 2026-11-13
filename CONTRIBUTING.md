@@ -436,7 +436,7 @@ published criterion; changing the criterion itself needs a maintainer decision.
 
 A change users can notice in the web app, or a server change that clients show,
 is not done until each client the pull request leaves out (Apple, Android, Roku,
-and Web) has it or has a reason not to. For each one that needs the same change,
+and Web) has been handled or ruled out. For each one that needs the same change,
 open an issue in its repository at minimum, linking your pull request; search
 first and add to an existing issue when there is one. Open a pull request there
 too if you can build and verify that client and its contribution rules let you.
