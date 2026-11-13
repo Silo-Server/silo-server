@@ -172,6 +172,7 @@ function SeasonEpisodeCard({
                 data={overlayDataFromEpisodeListItem(episode)}
                 prefs={overlayPrefs}
                 variant="wide"
+                hasProgressBar={hasPartialProgress}
               />
             )}
             {/* Hover dim behind the play button */}
