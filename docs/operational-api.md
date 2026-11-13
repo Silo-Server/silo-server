@@ -15,14 +15,17 @@ local-password checks that sign-in runs (`auth.Service.PasswordSignInFor`):
   a password, its own password sign-in is on, `auth.local_password_login` is on
   or the account is break-glass, and no network identity provider refuses the
   person.
-- `directory_login_available`: the sign-in goes to the enabled directory (LDAP)
-  provider, and the account has an identity linked there, so the directory
+- `directory_login_available`: the account's own password does not sign in,
+  and it has an identity at the enabled directory (LDAP) provider, with a
+  recorded username that a sign-in sends to that directory, so the directory
   username and password sign in. A PIN appended to the password never reaches
   the directory, so PIN-protected profiles cannot be reached this way.
 - `directory_username`: that identity's username, present when
   `directory_login_available` is true.
 
-At most one of the two flags is true. When the account's sign-in cannot be read,
+Neither flag is true for a disabled account or one that must change a
+temporary password first: compatibility sign-ins refuse both. At most one of
+the two flags is true. When the account's sign-in cannot be read,
 the answer is `password_login_available: true`. The web Connect Apps page uses
 this v2 operation.
 

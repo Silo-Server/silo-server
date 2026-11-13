@@ -366,7 +366,9 @@ func (s *Service) PasswordSignInFor(ctx context.Context, userID int) (PasswordSi
 	if err != nil {
 		return PasswordSignIn{}, err
 	}
-	if !user.Enabled {
+	// Compatibility sign-ins refuse a temporary password's holder whichever
+	// provider answers (loginWithProvider, OpenIdentitySession).
+	if !user.Enabled || user.PasswordChangeRequired {
 		return PasswordSignIn{}, nil
 	}
 	directory, hasDirectory := s.directoryProvider()
@@ -374,25 +376,26 @@ func (s *Service) PasswordSignInFor(ctx context.Context, userID int) (PasswordSi
 	if hasDirectory {
 		directoryID = directory.Info.ID
 	}
-	if passwordRoute(user, directoryID) != LocalProviderID {
-		return s.directorySignIn(ctx, user.ID, directory)
+	if passwordRoute(user, directoryID) == LocalProviderID && user.LocalPasswordLoginEnabled && user.PasswordHash != "" {
+		err = localPasswordPolicy(ctx, s.users.pool, user)
+		if err == nil {
+			return PasswordSignIn{Local: true}, nil
+		}
+		if !errors.Is(err, ErrLocalLoginDisabled) && !errors.Is(err, ErrNotPermitted) {
+			return PasswordSignIn{}, err
+		}
 	}
-	if !user.LocalPasswordLoginEnabled || user.PasswordHash == "" {
+	// The account's own name does not sign it in. A directory identity
+	// linked under another name is routed by that name, so it may still.
+	if !hasDirectory {
 		return PasswordSignIn{}, nil
 	}
-	err = localPasswordPolicy(ctx, s.users.pool, user)
-	if errors.Is(err, ErrLocalLoginDisabled) || errors.Is(err, ErrNotPermitted) {
-		return PasswordSignIn{}, nil
-	}
-	if err != nil {
-		return PasswordSignIn{}, err
-	}
-	return PasswordSignIn{Local: true}, nil
+	return s.directorySignIn(ctx, user.ID, directory)
 }
 
-// directorySignIn is PasswordSignInFor for an account whose name goes to
-// directory. The directory answers for the account through an identity
-// linked there. Account resolution never matches a directory person to an
+// directorySignIn is PasswordSignInFor for an account whose own name and
+// password do not sign it in. The directory answers for the account through
+// an identity linked there. Account resolution never matches a directory person to an
 // account by name, so without one (an OIDC account, say) there is no
 // directory username known to sign in with.
 func (s *Service) directorySignIn(ctx context.Context, userID int, directory RegisteredProvider) (PasswordSignIn, error) {
@@ -403,6 +406,11 @@ func (s *Service) directorySignIn(ctx context.Context, userID int, directory Reg
 	for _, identity := range identities {
 		if identity.InstallationID != directory.Info.InstallationID {
 			continue
+		}
+		// An administrator's link may record no username until the
+		// directory signs the person in: there is no name to offer.
+		if strings.TrimSpace(identity.Username) == "" {
+			return PasswordSignIn{}, nil
 		}
 		// The sign-in routes the typed name, which is the directory
 		// username: another account holding that name with a local password

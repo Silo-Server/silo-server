@@ -50,11 +50,13 @@ type CompatConnectAccountInfo struct {
 	// PasswordLoginAvailable reports whether this account's own Silo
 	// password signs in: it has one, its own password sign-in is on, the
 	// server's switch is on or the account is break-glass, and no network
-	// provider refuses the person.
+	// provider refuses the person. Neither flag is set while the account
+	// must change a temporary password.
 	PasswordLoginAvailable bool `json:"password_login_available"`
-	// DirectoryLoginAvailable reports whether a password sign-in that names
-	// no provider, as a Jellyfin client's does, goes to the server's
-	// directory (LDAP), where this account has a linked identity: the
+	// DirectoryLoginAvailable reports whether, the account's own password
+	// not signing in, a password sign-in that names no provider, as a
+	// Jellyfin client's does, goes to the server's directory (LDAP) under
+	// the username of the identity this account has linked there: the
 	// directory username and password sign in.
 	DirectoryLoginAvailable bool `json:"directory_login_available"`
 	// DirectoryUsername is the username of that identity, set when
