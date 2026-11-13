@@ -549,7 +549,9 @@ function OnDeckCarousel({
                       </div>
                     </div>
                     {/* Progress bar */}
-                    {progressPercent > 0 && <WatchProgressBar percent={progressPercent} />}
+                    {progressPercent > 0 && (
+                      <WatchProgressBar percent={progressPercent} fillColor="var(--hud-lamp)" />
+                    )}
                   </div>
                   <div className="mt-1.5 space-y-0.5">
                     <div className="truncate text-sm font-semibold" title={title}>
