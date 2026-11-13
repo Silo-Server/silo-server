@@ -1879,11 +1879,11 @@ func main() {
 			return info, nil
 		}
 		// Release signatures are checked and recorded for every catalog
-		// install. Enforce stays false until every first-party catalog entry
-		// is signed; then it refuses first-party plugins without a valid
-		// signature (docs/architecture/plugin-trust.md#release-signatures).
+		// install, and a first-party plugin without a valid signature is
+		// refused before its binary runs
+		// (docs/architecture/plugin-trust.md#release-signatures).
 		pluginSignatures := plugins.NewSignatureChecker(plugins.SignatureCheckerOptions{
-			Enforce:   false,
+			Enforce:   true,
 			CacheRoot: pluginCacheDir,
 		})
 		catalogService := plugins.NewCatalogService(repositoryStore, plugins.CatalogServiceOptions{
