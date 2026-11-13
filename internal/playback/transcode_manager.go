@@ -1289,12 +1289,19 @@ func (m *TranscodeManager) CloseTranscodeSessionIf(sessionID string, expected *T
 // So either that request registered the session before this read, which then
 // finds it, or it reads the map after the removal and starts its own
 // transcode. A check followed by CloseTranscodeSessionIf would close a
-// transcode adopted in between. hasSession must not call into the manager.
+// transcode adopted in between.
+//
+// The close removes the output directory, so it runs under the session
+// lifecycle lock, which a start or rebuild holds before it writes there. The
+// caller must not hold that lock, and hasSession must not call into the
+// manager.
 func (m *TranscodeManager) CloseTranscodeSessionIfSessionGone(sessionID string, expected *TranscodeSession, hasSession func() bool) bool {
 	// The usual case takes no lock: the session is there.
 	if hasSession() {
 		return false
 	}
+	unlock := m.LockSessionLifecycle(sessionID)
+	defer unlock()
 	m.transcodeMu.Lock()
 	if hasSession() {
 		m.transcodeMu.Unlock()
