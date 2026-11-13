@@ -1,6 +1,7 @@
 import { Flag } from "lucide-react";
 import { useState } from "react";
 
+import { useT, type MessageKey } from "@/i18n";
 import {
   parseMarkerReportTarget,
   reportMarkerSegment,
@@ -15,6 +16,19 @@ interface MarkerReportButtonProps {
   /** Which marked range the report is about, for the label only. */
   kind?: string;
 }
+
+/**
+ * The segment names a tooltip can use in a sentence, by marker kind.
+ *
+ * Named one by one rather than built from the kind, so a kind the player grows
+ * without a name shows the tooltip without one instead of an unknown message id.
+ */
+const KIND_LABELS: Record<string, MessageKey> = {
+  intro: "web.markers.kind.intro",
+  recap: "web.markers.kind.recap",
+  credits: "web.markers.kind.credits",
+  preview: "web.markers.kind.preview",
+};
 
 type Phase =
   | { state: "idle" }
@@ -34,9 +48,11 @@ type Phase =
  *
  * The result replaces the control in place: a report that succeeded says so, a
  * repeat report is not an error (one vote per account per media), and a rejection
- * carries the plugin's own words for what was wrong.
+ * carries the plugin's own words for what was wrong — that text is the server's and
+ * is shown as sent rather than as a second phrasing of the same rule.
  */
 export function MarkerReportButton({ installationId, contentId, kind }: MarkerReportButtonProps) {
+  const t = useT();
   const [phase, setPhase] = useState<Phase>({ state: "idle" });
   const target = parseMarkerReportTarget(contentId);
 
@@ -50,13 +66,13 @@ export function MarkerReportButton({ installationId, contentId, kind }: MarkerRe
 
     switch (result.status) {
       case "reported":
-        setPhase({ state: "done", message: "Reported" });
+        setPhase({ state: "done", message: t("web.markers.report.reported") });
         return;
       case "already_reported":
-        setPhase({ state: "done", message: "Already reported" });
+        setPhase({ state: "done", message: t("web.markers.report.alreadyReported") });
         return;
       case "unauthorized":
-        setPhase({ state: "failed", message: "Your session expired — sign in and try again" });
+        setPhase({ state: "failed", message: t("web.markers.report.sessionExpired") });
         return;
       default:
         setPhase({ state: "failed", message: result.message });
@@ -64,9 +80,10 @@ export function MarkerReportButton({ installationId, contentId, kind }: MarkerRe
   };
 
   // Names the action for the tooltip, which is where "which segment" is spelled out.
-  const label = kind
-    ? `Report the ${kind} segment as incorrect to TheIntroDB`
-    : "Report this segment as incorrect to TheIntroDB";
+  const kindLabel = kind ? KIND_LABELS[kind] : undefined;
+  const label = kindLabel
+    ? t("web.markers.report.titleForKind", { kind: t(kindLabel) })
+    : t("web.markers.report.title");
 
   const baseClass =
     "rounded-full border border-white/20 bg-black/75 px-3 py-1.5 text-xs font-medium text-white/85 shadow-2xl backdrop-blur-md hover:border-white/35 hover:bg-black/85 focus-visible:border-white/55 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none";
@@ -77,7 +94,7 @@ export function MarkerReportButton({ installationId, contentId, kind }: MarkerRe
         type="button"
         onClick={() => setPhase({ state: "idle" })}
         className={`${baseClass} max-w-56 text-start`}
-        title="Retry the report"
+        title={t("web.markers.report.retry")}
       >
         {phase.message}
       </button>
@@ -99,7 +116,7 @@ export function MarkerReportButton({ installationId, contentId, kind }: MarkerRe
   if (phase.state === "sending") {
     return (
       <button type="button" disabled className={`${baseClass} text-white/50`}>
-        Reporting…
+        {t("web.markers.report.sending")}
       </button>
     );
   }
@@ -108,14 +125,14 @@ export function MarkerReportButton({ installationId, contentId, kind }: MarkerRe
     return (
       <span className="flex items-center gap-1.5">
         <button type="button" onClick={send} className={baseClass}>
-          Confirm report
+          {t("web.markers.report.confirm")}
         </button>
         <button
           type="button"
           onClick={() => setPhase({ state: "idle" })}
           className={`${baseClass} text-white/60`}
         >
-          Cancel
+          {t("common.cancel")}
         </button>
       </span>
     );
@@ -131,7 +148,7 @@ export function MarkerReportButton({ installationId, contentId, kind }: MarkerRe
       {/* The same glyph TheIntroDB's own site puts on this action, so the control
           reads as the by-now-familiar one rather than as a new affordance. */}
       <Flag className="h-4 w-4" aria-hidden="true" />
-      Report issue
+      {t("web.markers.report.action")}
     </button>
   );
 }

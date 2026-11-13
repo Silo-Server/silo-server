@@ -5,6 +5,7 @@ import { SettingRow } from "@/components/settings/SettingRow";
 import { Switch } from "@/components/ui/switch";
 import { useReportGate } from "@/hooks/queries/markerReportSettings";
 import { usePluginSettingsValues, useUpdatePluginEntry } from "@/hooks/queries/pluginSettings";
+import { useT } from "@/i18n";
 import { entryBoolean, readPluginEntryObject } from "@/lib/pluginEntryValues";
 
 /** The per-account settings entry the switch writes. */
@@ -22,6 +23,7 @@ const REPORT_SETTING_KEY = "report";
  * stays visible and off, because that is something the viewer can act on.
  */
 export function TheIntroDbReportSettings() {
+  const t = useT();
   const gate = useReportGate();
   const settings = usePluginSettingsValues(gate.installationId, {
     enabled: gate.declaresReport && gate.serverConfigured,
@@ -46,25 +48,31 @@ export function TheIntroDbReportSettings() {
       { show_report: checked },
       {
         onSuccess: () =>
-          toast.success(checked ? "Report button enabled." : "Report button hidden."),
-        onError: () => toast.error("Could not change the reporting setting."),
+          toast.success(
+            t(
+              checked
+                ? "web.settings.playback.theintrodb.enabled"
+                : "web.settings.playback.theintrodb.hidden",
+            ),
+          ),
+        onError: () => toast.error(t("web.settings.playback.theintrodb.saveFailed")),
       },
     );
   };
 
   return (
     <SettingsGroup
-      title="TheIntroDB"
-      description="Contest a segment TheIntroDB got wrong. Reports are sent using this server's TheIntroDB key."
+      title={t("web.settings.playback.theintrodb.title")}
+      description={t("web.settings.playback.theintrodb.description")}
     >
       <SettingRow
-        label="Show a Report button under the skip prompt"
+        label={t("web.settings.playback.theintrodb.label")}
         description={
           settings.isError
-            ? "Could not load this account's plugin settings, so this switch stays off until they load."
+            ? t("web.settings.playback.theintrodb.loadFailed")
             : gate.serverConfigured
-              ? "Draws a button under the Skip Intro prompt. It asks for confirmation before sending, because a report cannot be taken back from here."
-              : "Unavailable: this server has no TheIntroDB API key. An administrator can add one under the plugin's settings."
+              ? t("web.settings.playback.theintrodb.hint")
+              : t("web.settings.playback.theintrodb.unavailable")
         }
         control={(id) => (
           <Switch
