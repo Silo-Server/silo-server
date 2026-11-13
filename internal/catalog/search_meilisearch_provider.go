@@ -53,9 +53,12 @@ const (
 	// search's embedding and an item's embedding for the item to count as a
 	// match by meaning. Without a floor the meaning-only half of a hybrid
 	// search ranks every item that has a vector, so a search of two or more
-	// words returned the whole library. For the OpenAI text-embedding-3
-	// models and MiniLM, unrelated texts usually sit below 0.2 and related
-	// ones above 0.35, so 0.3 keeps related items and drops the rest.
+	// words returned the whole library. 0.3 is a starting value, not one
+	// measured against a real library: it sits above the cosine that
+	// unrelated texts usually get from the OpenAI text-embedding-3 models and
+	// MiniLM. A short search scored against a long title and overview tends to
+	// score lower than two similar sentences, so it may drop some weak
+	// meaning matches.
 	meilisearchSemanticMinCosine = 0.3
 )
 
@@ -716,8 +719,9 @@ func isMeilisearchFederationUnsupported(err error) bool {
 
 	// Older Meilisearch versions expose /multi-search but reject the newer
 	// federation object as an unknown field. Cache only that capability-shaped
-	// failure; malformed or incompatible federated queries should keep falling
-	// through to PostgreSQL so a request bug is not hidden for the process life.
+	// failure; a malformed or incompatible federated query falls back to
+	// keyword search for that request only, so a request bug is not hidden for
+	// the process life.
 	details := code + " " + message
 	mentionsFederation := strings.Contains(details, "federation")
 	unsupported := strings.Contains(details, "not supported") ||
