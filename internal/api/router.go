@@ -1514,15 +1514,15 @@ func newChiRouter(deps Dependencies) chi.Router {
 				secret, attempts := deps.Config.Auth.JWTSecret, playbackHandler.PlanStoreV3
 				authMiddleware.SetStreamReferenceVerifier(func(reference string) (*streamtoken.Claims, error) {
 					return streamtoken.Verify(reference, secret)
-				}, func(ctx context.Context, sessionID string) (int, string, bool, error) {
+				}, func(ctx context.Context, sessionID string) (apimw.StreamReferenceAttempt, error) {
 					identity, err := attempts.GetAttemptIdentity(ctx, sessionID)
 					if errors.Is(err, playback.ErrSessionNotFound) {
-						return 0, "", false, nil
+						return apimw.StreamReferenceAttempt{}, nil
 					}
 					if err != nil {
-						return 0, "", false, err
+						return apimw.StreamReferenceAttempt{}, err
 					}
-					return identity.UserID, identity.ProfileID, !identity.Stopped, nil
+					return apimw.StreamReferenceAttempt{UserID: identity.UserID, ProfileID: identity.ProfileID, LoginSessionID: identity.LoginSessionID, Live: !identity.Stopped}, nil
 				})
 			}
 		}

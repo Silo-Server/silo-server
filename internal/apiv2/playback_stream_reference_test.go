@@ -20,8 +20,9 @@ func TestPlaybackDeliveryAcceptsStreamReferenceAlone(t *testing.T) {
 	deps, _ := catalogDeps(t)
 	deps.Auth.SetStreamReferenceVerifier(func(reference string) (*streamtoken.Claims, error) {
 		return streamtoken.Verify(reference, secret)
-	}, func(_ context.Context, sessionID string) (int, string, bool, error) {
-		return 1, "p-owner", sessionID == deliveryTestSession, nil
+	}, func(_ context.Context, sessionID string) (apimw.StreamReferenceAttempt, error) {
+		// s1 is the member's active login session in the shared test fakes.
+		return apimw.StreamReferenceAttempt{UserID: 1, ProfileID: "p-owner", LoginSessionID: "s1", Live: sessionID == deliveryTestSession}, nil
 	})
 	var seenUser int
 	var seenProfile string

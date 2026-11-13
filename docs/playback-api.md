@@ -379,11 +379,14 @@ may send the account bearer as the `token` query parameter, and the viewer
 headers select the profile. Without an account credential, `st` on its own
 authorizes the media, sidecar and HLS requests of the one session it names, as
 its account and profile: a Google Cast receiver gets only the URL. Viewer
-authorization still runs for that profile. The session's playback attempt must
-still be live, so stopping the session, or disabling the account, ends the
-reference before its 24-hour expiry. Plans that
-negotiated `header_authenticated_media_v1` carry no `st`. After a restart the session is rebuilt from the token the
-client re-presents
+authorization still runs for that profile. The reference is bound to the login
+session that started playback, and the session's playback attempt must still be
+live, so stopping the session, signing out or disabling the account ends it
+before its 24-hour expiry. A session started with an API key keeps needing the
+account credential. After a restart the session is rebuilt from the token the
+client re-presents. Plans that negotiated `header_authenticated_media_v1` carry
+no `st`; the API rebuilds those from its Redis recovery card for the
+authenticated owner, while the card exists
 ([restart-resilient playback](architecture/restart-resilient-playback.md)).
 Ranges, conditional requests and HEAD keep their HTTP semantics; an
 unsatisfiable range is `416 range_not_satisfiable`. A `server_remux_progressive`

@@ -26,11 +26,31 @@ const CodePlaybackSessionEnded = "playback_session_ended"
 // signing secret.
 type StreamReferenceVerifier func(reference string) (*streamtoken.Claims, error)
 
-// StreamReferenceSession reports the playback attempt a reference names: the
-// account and profile that own it, and whether it is still live (not stopped
-// and not expired). A missing attempt is live=false with no error; an error
-// means the attempt could not be checked.
-type StreamReferenceSession func(ctx context.Context, sessionID string) (userID int, profileID string, live bool, err error)
+// StreamReferenceAttempt is the playback attempt a reference names: the
+// account and profile that own it, the login session that started it (empty
+// when an API key did), and whether it is still live (not stopped and not
+// expired).
+type StreamReferenceAttempt struct {
+	UserID         int
+	ProfileID      string
+	LoginSessionID string
+	Live           bool
+}
+
+// StreamReferenceSession looks up the playback attempt for a session ID. A
+// missing attempt is a zero attempt with no error; an error means the attempt
+// could not be checked.
+type StreamReferenceSession func(ctx context.Context, sessionID string) (StreamReferenceAttempt, error)
+
+// LoginSessionID returns the login session of the request's access token, or
+// "" for an API key or any other credential. A playback attempt records it so
+// the plan URL's stream reference ends when that session does.
+func LoginSessionID(ctx context.Context) string {
+	if claims := GetClaims(ctx); claims != nil && claims.TokenType == auth.TokenTypeAccess {
+		return claims.SessionID
+	}
+	return ""
+}
 
 // SetStreamReferenceVerifier enables RequireStreamReferenceAuth. Without both
 // functions the native delivery routes accept only the account credential.
@@ -46,25 +66,25 @@ func (am *AuthMiddleware) SetStreamReferenceVerifier(verify StreamReferenceVerif
 // query parameter), or without `st`, runs RequireAuth unchanged. Otherwise
 // the reference authorizes the request when it verifies, names a playback
 // session rather than a download or theme song, names the session in the
-// path, that session's playback attempt is still live and owned by the
-// reference's account and profile, and the account still exists and is
-// enabled. The attempt check is what ends a reference when its session is
-// stopped, even where no session-deny marker store is configured. The
-// request then runs as that account with the current role, and X-Profile-Id
-// is rewritten to the reference's profile, so the viewer access that runs
-// next re-resolves that profile's limits and skips only the PIN proof the
-// plan already required. The handlers then apply the session-deny marker and
-// ownership checks they apply to every request.
+// path, and that session's playback attempt is still live, owned by the
+// reference's account and profile, and was started by a login session that
+// is still active. The request then runs as that account with its current
+// role, and X-Profile-Id is rewritten to the reference's profile, so the
+// viewer access that runs next re-resolves that profile's limits and skips
+// only the PIN proof the plan already required. The handlers then apply the
+// session-deny marker and ownership checks they apply to every request.
 //
-// A reference is not tied to a login session. It lasts as long as
-// playback.MaxTokenTTL unless its session is stopped or the account is
-// disabled. Plans that negotiated header-authenticated media carry no
-// reference.
+// A reference therefore ends when its playback session stops or expires, even
+// where no session-deny marker store is configured, and when the login
+// session that started it signs out or is revoked (disabling the account
+// revokes it). An attempt with no login session, started with an API key or
+// before attempts recorded one, falls back to RequireAuth. Plans that
+// negotiated header-authenticated media carry no reference.
 func (am *AuthMiddleware) RequireStreamReferenceAuth(next http.Handler) http.Handler {
 	standard := am.RequireAuth(next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
-		if _, credential := extractBearerToken(r); credential || !query.Has(StreamReferenceParam) || am.streamReference == nil || am.streamReferenceSession == nil || am.apiKeyUserLoader == nil {
+		if _, credential := extractBearerToken(r); credential || !query.Has(StreamReferenceParam) || am.streamReference == nil || am.streamReferenceSession == nil || am.sessionValidator == nil {
 			standard.ServeHTTP(w, r)
 			return
 		}
@@ -77,43 +97,47 @@ func (am *AuthMiddleware) RequireStreamReferenceAuth(next http.Handler) http.Han
 			writeForbidden(w, "The stream reference does not authorize this session")
 			return
 		}
-		owner, ownerProfile, live, err := am.streamReferenceSession(r.Context(), reference.SessionID)
+		attempt, err := am.streamReferenceSession(r.Context(), reference.SessionID)
 		if err != nil {
 			writeCredentialCheckUnavailable(w, r, err)
 			return
 		}
-		if !live {
+		if !attempt.Live {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusGone)
 			_ = json.NewEncoder(w).Encode(errorResponse{Error: CodePlaybackSessionEnded, Message: "The playback session has ended"})
 			return
 		}
-		if owner != reference.UserID || ownerProfile != reference.ProfileID {
+		if attempt.UserID != reference.UserID || attempt.ProfileID != reference.ProfileID {
 			writeForbidden(w, "The stream reference does not authorize this session")
 			return
 		}
-		user, err := am.apiKeyUserLoader.GetByID(r.Context(), reference.UserID)
-		if err != nil && !auth.IsNotFound(err) {
+		if attempt.LoginSessionID == "" {
+			// Not bound to a login session: the account credential is required.
+			standard.ServeHTTP(w, r)
+			return
+		}
+		authority, active, err := am.sessionValidator.ActiveSession(r.Context(), attempt.LoginSessionID, reference.UserID)
+		if err != nil {
 			writeCredentialCheckUnavailable(w, r, err)
 			return
 		}
-		if err != nil || user == nil || user.ID != reference.UserID {
-			writeUnauthorized(w, "Invalid or expired stream reference", ReasonInvalidCredential)
+		if !active {
+			writeUnauthorized(w, "The login session that started this playback has ended", ReasonSessionInvalid)
 			return
 		}
-		if !user.Enabled {
-			writeUnauthorized(w, "User account is disabled", ReasonAccountDisabled)
-			return
-		}
+		// SessionID stays empty: these claims stand for one playback session's
+		// media, never for the login session itself.
 		claims := &auth.Claims{
-			UserID:    user.ID,
-			Role:      user.Role,
+			UserID:    reference.UserID,
+			Role:      authority.Role,
 			ProfileID: reference.ProfileID,
 			TokenType: auth.TokenTypeStreamReference,
 		}
 		if lc := activitylog.GetLogContext(r.Context()); lc != nil {
 			uid := claims.UserID
 			lc.UserID = &uid
+			lc.SessionID = attempt.LoginSessionID
 		}
 		r = r.Clone(SetClaims(r.Context(), claims))
 		if reference.ProfileID != "" {

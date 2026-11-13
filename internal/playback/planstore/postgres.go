@@ -113,14 +113,14 @@ func (s *Postgres) SaveAttempt(ctx context.Context, record playback.AttemptRecor
 			requested_media_file_id, effective_media_file_id,
 			current_plan_id, current_replan_request_id, current_plan, frozen_recipe,
 			normalized_request, start_response, request_digest, expires_at, server_bitrate_cap_kbps,
-			desired_tracks
-		) VALUES ($1, NULLIF($2, '')::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+			desired_tracks, login_session_id
+		) VALUES ($1, NULLIF($2, '')::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 		ON CONFLICT DO NOTHING`,
 		record.PlaybackAttemptID, record.SessionID, record.UserID, record.ProfileID,
 		record.RequestedMediaFileID, record.EffectiveMediaFileID,
 		record.CurrentPlanID, record.CurrentReplanRequestID, planJSON, recipeJSON,
 		requestJSON, responseJSON, record.RequestDigest, record.ExpiresAt, record.ServerBitrateCapKbps,
-		desiredJSON)
+		desiredJSON, record.LoginSessionID)
 	if err != nil {
 		return err
 	}
@@ -160,10 +160,10 @@ func (s *Postgres) GetAttemptIdentityByPlaybackAttemptID(ctx context.Context, at
 func (s *Postgres) getAttemptIdentity(ctx context.Context, predicate string, value any) (*playback.AttemptIdentityV3, error) {
 	var identity playback.AttemptIdentityV3
 	err := s.db.QueryRow(ctx, `
-		SELECT playback_attempt_id, COALESCE(session_id::text, ''), user_id, profile_id, stopped_at IS NOT NULL
+		SELECT playback_attempt_id, COALESCE(session_id::text, ''), user_id, profile_id, stopped_at IS NOT NULL, login_session_id
 		FROM playback_v3_attempts
 		WHERE `+predicate+` AND expires_at > NOW()`, value).Scan(
-		&identity.PlaybackAttemptID, &identity.SessionID, &identity.UserID, &identity.ProfileID, &identity.Stopped,
+		&identity.PlaybackAttemptID, &identity.SessionID, &identity.UserID, &identity.ProfileID, &identity.Stopped, &identity.LoginSessionID,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, playback.ErrSessionNotFound
