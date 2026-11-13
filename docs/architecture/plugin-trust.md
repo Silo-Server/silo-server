@@ -34,8 +34,8 @@ Installation runs code too. `loadManifestFromBinary`
 the admin configures or enables it. Installing a package is the point of
 trust, not enabling it: whatever passes the install checks runs. For a
 first-party plugin ID, those checks include its
-[release signature](#release-signatures) once enforcement is on, and a binary
-that fails it is refused before it runs. For anything else the admin's choice
+[release signature](#release-signatures), and a binary that fails it is
+refused before it runs. For anything else the admin's choice
 of catalog or file is the check.
 
 Whoever can write the plugin cache can replace a plugin binary together with
@@ -131,11 +131,14 @@ Every catalog install, manual or automatic, resolves through
    `loadManifestFromBinary` run the binary, followed by the catalog identity
    check. A first-party binary that fails verification never runs.
 
-These refusals apply while `SignatureCheckerOptions.Enforce` is on. It is one
-switch, set where `cmd/silo` builds the `SignatureChecker` that the catalog
-service and the installer share. With it off, the same checks run and are
-recorded, and nothing is refused. Refusals are `PackageError`s with
-admin-facing text; the cause goes to the server log.
+The server enforces these refusals: `cmd/silo` builds the one
+`SignatureChecker` that the catalog service and the installer share with
+`SignatureCheckerOptions.Enforce` on. With the option off, which only tests
+use, the same checks run and are recorded, and nothing is refused. Refusals
+are `PackageError`s with admin-facing text; the cause goes to the server log.
+A first-party install or update therefore also fails when the server cannot
+load the Sigstore trust root; an installation that already exists keeps
+running.
 
 Uploads (binary or zip) and direct `archive_url` installs carry no signature
 and are recorded `unsigned`. They are the admin's own decision, including
@@ -144,8 +147,9 @@ replacing a first-party installation. A restore downloads nothing.
 ### What is recorded
 
 `plugin_installations.signature_state` is `verified`, `unsigned`, `invalid`, or
-`unknown`. `unknown` covers rows from before the check and checks that could
-not run (trust root or bundle unreachable) while enforcement is off. A verified
+`unknown`. `unknown` covers rows from before the check, and checks that could
+not run (trust root or bundle unreachable) for a plugin the check never
+refuses. For a first-party plugin that case is a refusal. A verified
 row also stores `signature_source_repo` and `signature_verified_at`. Replacing
 an installation records the new package's result, so an upload over a verified
 install reads `unsigned`. The bundle is not stored. Verification happens once,
