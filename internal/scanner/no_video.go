@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -144,9 +145,16 @@ func (s *Scanner) sameBytesHaveNoVideo(ctx context.Context, folder *models.Media
 
 // dropNoVideoPaths removes from paths the files a recorded verdict still
 // describes, before the scan infers roots and groups from them, and retires
-// any row still present at one (a scan that wrote the row after another scan
-// recorded the verdict). It returns the remaining paths in order, how many
-// were dropped, and how many rows it retired.
+// any row still present at one: a scan cut short after it recorded the
+// verdict, or one that wrote the row after another scan recorded it. It
+// returns the remaining paths in order, how many were dropped, and how many
+// rows it retired.
+//
+// The rows are read before the files are stat'ed, and each is retired only
+// while it is still the row that was read (RetireNoVideoFile). A file that
+// matches its verdict after its row was read is not the file a differing row
+// describes, and a row another scan writes for a replacement afterwards no
+// longer matches the fence.
 func (s *Scanner) dropNoVideoPaths(ctx context.Context, folder *models.MediaFolder, paths []string) (kept []string, dropped, retired int, err error) {
 	if len(paths) == 0 || !catalogsOnlyVideo(folder.Type) {
 		return paths, 0, 0, nil
@@ -158,27 +166,37 @@ func (s *Scanner) dropNoVideoPaths(ctx context.Context, folder *models.MediaFold
 	if len(verdicts) == 0 {
 		return paths, 0, 0, nil
 	}
-	excluded := make([]string, 0, len(verdicts))
-	kept = make([]string, 0, len(paths))
-	for _, path := range paths {
-		verdict, ok := verdicts[path]
-		if ok {
-			// A stat failure leaves the path to processFile, which reports it.
-			if info, statErr := fspath.Stat(path); statErr == nil && verdict.describes(info.Size(), normalizeFileModifiedAt(info.ModTime())) {
-				excluded = append(excluded, path)
-				observeFile(actionNoVideo, nil)
-				continue
-			}
+	rows, err := s.fileRepo.GetScanStateByFolderAndPaths(ctx, folder.ID, slices.Collect(maps.Keys(verdicts)))
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	now := time.Now().UTC()
+	excluded := make(map[string]bool, len(verdicts))
+	for path, verdict := range verdicts {
+		// A stat failure leaves the path to processFile, which reports it.
+		info, statErr := fspath.Stat(path)
+		if statErr != nil || !verdict.describes(info.Size(), normalizeFileModifiedAt(info.ModTime())) {
+			continue
 		}
-		kept = append(kept, path)
+		excluded[path] = true
+		observeFile(actionNoVideo, nil)
+	}
+	for _, row := range rows {
+		if !excluded[row.FilePath] || row.MissingSince != nil {
+			continue
+		}
+		ok, err := s.fileRepo.RetireNoVideoFile(ctx, row, now)
+		if err != nil {
+			return nil, 0, 0, err
+		}
+		if ok {
+			retired++
+		}
 	}
 	if len(excluded) == 0 {
 		return paths, 0, 0, nil
 	}
-	retired, err = s.fileRepo.RetirePresentFilesAtPaths(ctx, folder.ID, excluded, time.Now().UTC())
-	if err != nil {
-		return nil, 0, 0, err
-	}
+	kept = slices.DeleteFunc(slices.Clone(paths), func(path string) bool { return excluded[path] })
 	return kept, len(excluded), retired, nil
 }
 
@@ -305,19 +323,4 @@ func (r *FileRepository) RetireNoVideoFile(ctx context.Context, read *scanStateF
 		return false, fmt.Errorf("marking file without video missing: %w", err)
 	}
 	return tag.RowsAffected() == 1, nil
-}
-
-// RetirePresentFilesAtPaths marks the folder's present rows at the given paths
-// missing and returns how many it marked.
-func (r *FileRepository) RetirePresentFilesAtPaths(ctx context.Context, folderID int, paths []string, since time.Time) (int, error) {
-	tag, err := r.pool.Exec(ctx, `
-		UPDATE media_files
-		SET missing_since = $1, updated_at = NOW()
-		WHERE media_folder_id = $2 AND file_path = ANY($3::text[]) AND missing_since IS NULL`,
-		since, folderID, paths,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("marking files without video missing: %w", err)
-	}
-	return int(tag.RowsAffected()), nil
 }

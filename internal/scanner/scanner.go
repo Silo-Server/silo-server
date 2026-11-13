@@ -2763,12 +2763,9 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 	}
 	// A file already known to hold no video is left out before anything is
 	// inferred from its path.
-	if kept, _, retired, err := s.dropNoVideoPaths(ctx, folder, []string{filePath}); err != nil {
+	if kept, _, _, err := s.dropNoVideoPaths(ctx, folder, []string{filePath}); err != nil {
 		return fmt.Errorf("reading files without video: %w", err)
 	} else if len(kept) == 0 {
-		if retired == 0 {
-			return nil
-		}
 		return s.reconcileRetiredNoVideoFile(ctx, folder, cleanFile, existingByPath[filePath])
 	}
 	existingContentStatuses, err := s.itemRepo.GetStatusByIDs(ctx, collectScanStateContentIDs([]*scanStateFile{existingByPath[filePath]}))
@@ -2813,11 +2810,8 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 	if err != nil {
 		return err
 	}
-	// Nothing was cataloged, so no root or group is recorded for the path.
-	switch action {
-	case actionNoVideo:
-		return nil
-	case actionNoVideoRetired:
+	if action == actionNoVideo || action == actionNoVideoRetired {
+		// Nothing was cataloged, so no root or group is recorded for the path.
 		return s.reconcileRetiredNoVideoFile(ctx, folder, cleanFile, existingByPath[filePath])
 	}
 	if err := s.reconcileScannedRoots(
@@ -2859,10 +2853,15 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 }
 
 // reconcileRetiredNoVideoFile finishes a single-file scan that left the file
-// out for having no video. Only the title the retired row was linked to can
-// have lost its last file, so only its memberships are reconciled, and the
-// row waits for a folder scan's trash sweep.
+// out for having no video. Only the title of the row at the path, retired now
+// or by an earlier scan, can have lost its last file, so only its memberships
+// are reconciled, and the row waits for a folder scan's trash sweep. An
+// earlier scan's row is reconciled again because its own reconcile may have
+// failed after the row was marked. A file that never had a row needs nothing.
 func (s *Scanner) reconcileRetiredNoVideoFile(ctx context.Context, folder *models.MediaFolder, filePath string, retired *scanStateFile) error {
+	if retired == nil {
+		return nil
+	}
 	protectedRoots, err := s.protectedConfiguredRoots(ctx, folder)
 	if err != nil {
 		return err
