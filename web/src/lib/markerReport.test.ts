@@ -169,6 +169,34 @@ describe("reportMarkerSegment", () => {
     expect(result.status === "rejected" && result.message).not.toContain("introdb:");
   });
 
+  it("tells the viewer to come back when the provider is blocking reports", async () => {
+    // A provider-wide block reaches the browser as a 429 with the delay the provider
+    // asked for, relayed from the plugin's typed retry contract. Nothing was sent, so
+    // "try again in 90 seconds" is the answer; a generic failure would read as the
+    // report having gone wrong.
+    const { reportMarkerSegment } = await freshModule();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("plugin route is rate limited; try again later", {
+        status: 429,
+        headers: { "Retry-After": "90" },
+      }),
+    );
+
+    const result = await reportMarkerSegment(4, { type: "movie", tmdb_id: 1 });
+    expect(result.status).toBe("rejected");
+    expect(result.status === "rejected" && result.message).toContain("90 seconds");
+  });
+
+  it("still says to come back when the block carries no delay", async () => {
+    const { reportMarkerSegment } = await freshModule();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(reply(429, {}));
+
+    const result = await reportMarkerSegment(4, { type: "movie", tmdb_id: 1 });
+    expect(result.status).toBe("rejected");
+    // Never "retry in 0 seconds", which would read as "go now" against a block.
+    expect(result.status === "rejected" && result.message).toContain("Try again later");
+  });
+
   it("mints a new cookie once the host refuses the remembered one", async () => {
     const { v2, reportMarkerSegment } = await freshModule();
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(reply(401, {}));

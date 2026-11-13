@@ -123,6 +123,10 @@ async function mintPluginAccess(): Promise<boolean> {
  * A 409 is not a failure: TheIntroDB allows one vote per account per media, so it
  * means this account already reported it. Saying so is the honest outcome — retrying
  * cannot change anything.
+ *
+ * A 429 is not a failure of the report either: it is a provider-wide block the plugin
+ * reported through the host's typed retry contract, which the host relays with the delay
+ * the provider asked for. Nothing was sent, so the viewer is told when to come back.
  */
 export async function reportMarkerSegment(
   installationId: number,
@@ -143,6 +147,19 @@ export async function reportMarkerSegment(
   }
 
   if (response.status === 409) return { status: "already_reported" };
+  if (response.status === 429) {
+    // The plugin refused the report for now: a provider-wide block asked for a delay, and
+    // the host relays that as this status and its Retry-After. Nothing was sent, so the
+    // honest answer is to come back later rather than to present it as a failed report.
+    const after = Number(response.headers.get("Retry-After"));
+    return {
+      status: "rejected",
+      message:
+        Number.isFinite(after) && after > 0
+          ? `TheIntroDB is blocking reports right now. Try again in ${after} seconds.`
+          : "TheIntroDB is blocking reports right now. Try again later.",
+    };
+  }
   if (response.status === 401 || response.status === 403) {
     // Nothing is remembered to invalidate: the next report mints its own launch, which
     // is also what re-reads whoever is signed in by then.
