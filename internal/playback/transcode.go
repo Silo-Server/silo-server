@@ -3703,7 +3703,7 @@ func (s *TranscodeSession) restart(
 		return flight.err
 	}
 	cancelValidation()
-	s.StopThrottler()
+	previousThrottleSeconds := s.stopThrottler()
 
 	// Kill current process without removing output directory.
 	if cancelCurrent != nil {
@@ -3884,6 +3884,14 @@ func (s *TranscodeSession) restart(
 		hookCtx, cancelHook := context.WithTimeout(ctx, restartHookTimeout)
 		hook(hookCtx)
 		if errors.Is(hookCtx.Err(), context.DeadlineExceeded) {
+			// The hook gave up before it armed a throttler. Keep the threshold
+			// this session had rather than let the new process run unthrottled.
+			s.mu.Lock()
+			unthrottled := s.throttler == nil
+			s.mu.Unlock()
+			if unthrottled {
+				s.StartThrottler(previousThrottleSeconds)
+			}
 			slog.WarnContext(ctx, "transcode restart hook timed out; the transcode throttle may not match its settings until the next restart",
 				"component", "playback",
 				"playback_session_id", opts.SessionID,
@@ -4465,13 +4473,21 @@ func (s *TranscodeSession) StartThrottler(thresholdSeconds int) {
 
 // StopThrottler stops the throttler if one is running.
 func (s *TranscodeSession) StopThrottler() {
+	s.stopThrottler()
+}
+
+// stopThrottler stops the throttler and returns its threshold in seconds, or
+// zero when none was running.
+func (s *TranscodeSession) stopThrottler() int {
 	s.mu.Lock()
 	t := s.throttler
 	s.throttler = nil
 	s.mu.Unlock()
-	if t != nil {
-		t.Stop()
+	if t == nil {
+		return 0
 	}
+	t.Stop()
+	return t.thresholdSeconds
 }
 
 type ffmpegStderrWriter struct {

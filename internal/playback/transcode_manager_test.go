@@ -748,12 +748,15 @@ func TestStartShutdownCleanup_DoesNotWaitForARestartHook(t *testing.T) {
 // A restart holds the session lifecycle lock through its restart hook, and a
 // stop takes that lock before it closes the session, so the stop cannot be
 // the close that cancels a stalled hook. The hook has to run out of time on
-// its own, leaving the FFmpeg process it restarted for the stop to close.
+// its own, leaving the FFmpeg process it restarted, still throttled as it
+// was, for the stop to close.
 func TestRestartSessionLocked_StalledRestartHookDoesNotHoldAStop(t *testing.T) {
 	setRestartHookTimeout(t, 30*time.Millisecond)
 	m := NewTranscodeManager()
 	s := newRunningFakeSession(t)
 	m.RegisterTranscodeSession("hooked", s)
+	const throttleSeconds = 120
+	s.StartThrottler(throttleSeconds)
 	hookEntered := make(chan struct{})
 	s.SetRestartHook(func(ctx context.Context) {
 		close(hookEntered)
@@ -763,17 +766,30 @@ func TestRestartSessionLocked_StalledRestartHookDoesNotHoldAStop(t *testing.T) {
 	go func() { restarted <- m.RestartSessionLocked(context.Background(), "hooked", s, 0, 0) }()
 	<-hookEntered
 
-	runningAtStop := make(chan bool, 1)
+	type sessionAtStop struct {
+		running         bool
+		throttleSeconds int
+	}
+	atStop := make(chan sessionAtStop, 1)
 	go func() {
 		unlock := m.LockSessionLifecycle("hooked")
 		defer unlock()
-		runningAtStop <- s.IsRunning()
+		seen := sessionAtStop{running: s.IsRunning()}
+		s.mu.Lock()
+		if s.throttler != nil {
+			seen.throttleSeconds = s.throttler.thresholdSeconds
+		}
+		s.mu.Unlock()
+		atStop <- seen
 		m.CloseTranscodeSession("hooked", "")
 	}()
 	select {
-	case running := <-runningAtStop:
-		if !running {
+	case seen := <-atStop:
+		if !seen.running {
 			t.Fatal("the restart hook's timeout ended the FFmpeg process it restarted")
+		}
+		if seen.throttleSeconds != throttleSeconds {
+			t.Fatalf("throttle after a stalled restart hook = %ds, want the %ds the session had", seen.throttleSeconds, throttleSeconds)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("a stop waited on the lifecycle lock behind a restart hook that only its own close could release")
