@@ -1,12 +1,22 @@
+import { t, type MessageKey } from "@/i18n";
 import { cn } from "@/lib/utils";
 
-export const SUBTITLE_PROVIDER_OPTIONS = [
-  { value: "all", label: "All" },
-  { value: "upload", label: "Upload" },
+// Provider names stay as the provider spells them; the page's own options translate.
+export const SUBTITLE_PROVIDER_OPTIONS: ReadonlyArray<{
+  value: string;
+  label: string | { key: MessageKey };
+}> = [
+  { value: "all", label: { key: "web.admin.common.subtitles.provider.all" } },
+  { value: "upload", label: { key: "web.admin.common.subtitles.provider.upload" } },
   { value: "opensubtitles", label: "OpenSubtitles" },
   { value: "subdl", label: "SubDL" },
   { value: "subsource", label: "SubSource" },
-] as const;
+];
+
+/** A provider option's label in the interface language. */
+export function providerOptionLabel(option: (typeof SUBTITLE_PROVIDER_OPTIONS)[number]): string {
+  return typeof option.label === "string" ? option.label : t(option.label.key);
+}
 
 export function providerBadgeClass(provider: string): string {
   switch (provider) {
@@ -24,7 +34,8 @@ export function providerBadgeClass(provider: string): string {
 }
 
 export function providerLabel(provider: string): string {
-  return SUBTITLE_PROVIDER_OPTIONS.find((option) => option.value === provider)?.label ?? provider;
+  const option = SUBTITLE_PROVIDER_OPTIONS.find((entry) => entry.value === provider);
+  return option ? providerOptionLabel(option) : provider;
 }
 
 export function languageChipClass(): string {

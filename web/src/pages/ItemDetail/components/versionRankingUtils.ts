@@ -3,6 +3,8 @@ import { audioTrackAtmosEvidence, mapAudioLabel } from "@/lib/mediaFormat";
 import { versionAudioAtmosEvidence } from "./versionFormatUtils";
 
 const RESOLUTION_RANK: Record<string, number> = {
+  "8k": 5,
+  "4320p": 5,
   "4k": 4,
   "2160p": 4,
   "1440p": 3,
@@ -176,54 +178,80 @@ function bestAttributes(
   };
 }
 
-/**
- * Pick the best default version based on user watch history, quality preference,
- * and resolution ranking.
- */
+/** Rank actual files, keeping the quality cap in effect through tie breaking. */
 export function selectDefaultVersion(
   versions: FileVersion[],
   userData?: LeafItemUserData,
   qualityPreference?: string | null,
   preferredEditionKey?: string | null,
 ): FileVersion | null {
-  if (versions.length === 0) return null;
+  const editionKey =
+    preferredEditionKey ??
+    userData?.last_edition_key ??
+    versions.find((version) => version.file_id === userData?.last_file_id)?.edition_key;
+  let candidates =
+    editionKey != null && versions.some((v) => (v.edition_key ?? "") === editionKey)
+      ? versions.filter((v) => (v.edition_key ?? "") === editionKey)
+      : versions;
+  // An unmeasured file is a fallback, not evidence that it fits a quality cap.
+  const knownResolution = candidates.filter((v) => resolutionScore(v.resolution) >= 0);
+  if (knownResolution.length > 0) candidates = knownResolution;
+  const cap = resolutionScore(qualityPreference ?? "auto");
+  let aboveCap = false;
+  if (cap >= 0) {
+    const withinCap = candidates.filter((v) => {
+      const score = resolutionScore(v.resolution);
+      return score >= 0 && score <= cap;
+    });
+    aboveCap = withinCap.length === 0;
+    if (!aboveCap) candidates = withinCap;
+  }
+  return (
+    [...candidates].sort(
+      (a, b) =>
+        (aboveCap ? 1 : -1) * (resolutionScore(a.resolution) - resolutionScore(b.resolution)) ||
+        Number(b.hdr) - Number(a.hdr) ||
+        audioScore(b.codec_audio) - audioScore(a.codec_audio),
+    )[0] ?? null
+  );
+}
 
-  const effectiveEditionKey = preferredEditionKey ?? userData?.last_edition_key;
+export interface PlaybackEdition {
+  key: string;
+  raw?: string;
+  versions: FileVersion[];
+  allVersions: FileVersion[];
+}
 
-  // Prefer the version they last watched.
-  if (userData?.last_file_id != null) {
-    const matching = versions.find((v) => v.file_id === userData.last_file_id);
-    if (matching && (!effectiveEditionKey || matching.edition_key === effectiveEditionKey)) {
-      return matching;
+/** One cut can have several presentations. Only their first parts start playback. */
+export function playbackEditions(
+  versions: FileVersion[],
+  variants?: PlaybackVariant[],
+): PlaybackEdition[] {
+  const editions = new Map<string, PlaybackEdition>();
+  const add = (key: string, raw: string | undefined, first: FileVersion[], all: FileVersion[]) => {
+    const edition = editions.get(key) ?? { key, raw, versions: [], allVersions: [] };
+    edition.versions.push(...first);
+    edition.allVersions.push(...all);
+    editions.set(key, edition);
+  };
+  if (variants?.length) {
+    for (const variant of sortPlaybackVariantsByEditionPreference(variants)) {
+      const parts = [...variant.parts].sort((a, b) => a.part_index - b.part_index);
+      if (!parts[0]?.versions.length) continue;
+      add(
+        variant.edition_key ?? "",
+        variant.edition_raw,
+        parts[0].versions,
+        parts.flatMap((p) => p.versions),
+      );
+    }
+  } else {
+    for (const version of versions) {
+      add(version.edition_key ?? "", version.edition_raw, [version], [version]);
     }
   }
-
-  const candidates =
-    effectiveEditionKey && versions.some((v) => v.edition_key === effectiveEditionKey)
-      ? versions.filter((v) => v.edition_key === effectiveEditionKey)
-      : versions;
-
-  if (candidates.length === 1) return candidates[0] ?? null;
-
-  // Use quality-preference ranking to find the best match.
-  const preferred = bestAttributes(candidates, qualityPreference);
-  if (preferred) {
-    const preferredAudio = preferred.audioCodec ? mapAudioLabel(preferred.audioCodec) : "";
-    const matching = candidates.find(
-      (v) =>
-        v.resolution === preferred.resolution &&
-        v.hdr === preferred.hdr &&
-        (preferredAudio === "" ||
-          mapAudioLabel(v.codec_audio).toLowerCase() === preferredAudio.toLowerCase()),
-    );
-    if (matching) return matching;
-  }
-
-  // Fall back to highest resolution.
-  const sorted = [...candidates].sort(
-    (a, b) => resolutionScore(b.resolution) - resolutionScore(a.resolution),
-  );
-  return sorted[0] ?? null;
+  return [...editions.values()];
 }
 
 export function selectDefaultPlaybackVariantVersion(
@@ -233,63 +261,36 @@ export function selectDefaultPlaybackVariantVersion(
   qualityPreference?: string | null,
   preferredEditionKey?: string | null,
 ): FileVersion | null {
-  if (!playbackVariants || playbackVariants.length === 0) {
-    return selectDefaultVersion(versions, userData, qualityPreference, preferredEditionKey);
-  }
+  const editions = playbackEditions(versions, playbackVariants);
+  const edition =
+    editions.find((e) => e.key === preferredEditionKey) ??
+    editions.find((e) => e.key === userData?.last_edition_key) ??
+    editions.find((e) => e.allVersions.some((v) => v.file_id === userData?.last_file_id));
+  return selectDefaultVersion(
+    edition?.versions ?? editions.flatMap((e) => e.versions),
+    undefined,
+    qualityPreference,
+  );
+}
 
-  const effectiveEditionKey = preferredEditionKey ?? userData?.last_edition_key;
-  const rankedVariants = sortPlaybackVariantsByEditionPreference(playbackVariants);
-  let candidateVariants = rankedVariants;
-  if (
-    effectiveEditionKey &&
-    rankedVariants.some((variant) => variant.edition_key === effectiveEditionKey)
-  ) {
-    candidateVariants = rankedVariants.filter(
-      (variant) => variant.edition_key === effectiveEditionKey,
-    );
-  } else {
-    const firstRankedVariant = rankedVariants[0];
-    if (!firstRankedVariant) {
-      return selectDefaultVersion(versions, userData, qualityPreference, preferredEditionKey);
-    }
-    const preferredRank = playbackVariantEditionPreference(firstRankedVariant);
-    candidateVariants = rankedVariants.filter(
-      (variant) => playbackVariantEditionPreference(variant) === preferredRank,
-    );
-  }
-
-  if (userData?.last_file_id != null) {
-    for (const variant of candidateVariants) {
-      for (const part of variant.parts ?? []) {
-        const matching = part.versions.find((version) => version.file_id === userData.last_file_id);
-        if (matching) {
-          return matching;
-        }
-      }
-    }
-  }
-
-  for (const variant of candidateVariants) {
-    const firstPart = [...(variant.parts ?? [])].sort((a, b) => a.part_index - b.part_index)[0];
-    if (!firstPart) {
-      continue;
-    }
-    if (firstPart.default_file_id != null) {
-      const matching = versions.find((version) => version.file_id === firstPart.default_file_id);
-      if (matching) {
-        return matching;
-      }
-    }
-    const fallback = selectDefaultVersion(
-      firstPart.versions ?? versions,
-      userData,
-      qualityPreference,
-      variant.edition_key ?? effectiveEditionKey,
-    );
-    if (fallback) {
-      return fallback;
-    }
-  }
-
-  return selectDefaultVersion(versions, userData, qualityPreference, preferredEditionKey);
+/** Download the resolved file; multipart presentations also expose their later parts. */
+export function selectedDownloadVersions(
+  selected: FileVersion | null,
+  variants?: PlaybackVariant[],
+  qualityPreference?: string | null,
+): FileVersion[] {
+  if (!selected) return [];
+  const variant = variants?.find((v) =>
+    v.parts.some((p) => p.versions.some((file) => file.file_id === selected.file_id)),
+  );
+  const remainingParts =
+    variant?.parts.filter((p) => !p.versions.some((file) => file.file_id === selected.file_id)) ??
+    [];
+  return [
+    selected,
+    ...remainingParts.flatMap((part) => {
+      const file = selectDefaultVersion(part.versions, undefined, qualityPreference);
+      return file ? [file] : [];
+    }),
+  ];
 }

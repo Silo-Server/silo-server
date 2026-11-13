@@ -77,6 +77,7 @@ type TranscodeStartRequest struct {
 	TargetResolution           string                 `json:"target_resolution"`
 	TargetCodecVideo           string                 `json:"target_codec_video"`
 	TargetCodecAudio           string                 `json:"target_codec_audio"`
+	CopyAudioCodec             string                 `json:"copy_audio_codec,omitempty"`
 	TargetAudioChannels        int                    `json:"target_audio_channels,omitempty"`
 	TargetAudioBitrateKbps     int                    `json:"target_audio_bitrate_kbps,omitempty"`
 	TargetBitrateKbps          int                    `json:"target_bitrate_kbps"`
@@ -154,6 +155,10 @@ type TranscodeStartResponse struct {
 	// remux as MPEG-TS. Older nodes omit it and are rejected before an fMP4
 	// stream is published under a plan that promises MPEG-TS.
 	CopyVideoMPEGTS bool `json:"copy_video_mpegts,omitempty"`
+	// CopyAudioCodec attests the copied audio codec the executor applies.
+	// Older nodes omit it and are rejected before they copy AAC into fMP4
+	// segments without aac_adtstoasc.
+	CopyAudioCodec string `json:"copy_audio_codec,omitempty"`
 }
 
 var ErrAudioRecipeAttestationMismatch = errors.New("transcode node audio recipe attestation mismatch")
@@ -238,6 +243,27 @@ var ErrCopyVideoMPEGTSAttestationMismatch = errors.New("transcode node mpeg-ts c
 func ValidateCopyVideoMPEGTSAttestation(req TranscodeStartRequest, response TranscodeStartResponse) error {
 	if req.CopyVideoMPEGTS && !response.CopyVideoMPEGTS {
 		return ErrCopyVideoMPEGTSAttestationMismatch
+	}
+	return nil
+}
+
+// ErrCopyAudioCodecAttestationMismatch reports an executor that ignored the
+// copied audio codec of a run that needs aac_adtstoasc.
+var ErrCopyAudioCodecAttestationMismatch = errors.New("transcode node copied audio codec attestation mismatch")
+
+// ValidateCopyAudioCodecAttestation rejects an executor that did not confirm
+// the copied codec of a run that copies AAC into fMP4 segments. Other requests
+// stay compatible with older nodes, which omit the field.
+func ValidateCopyAudioCodecAttestation(req TranscodeStartRequest, response TranscodeStartResponse) error {
+	opts := playback.TranscodeOpts{
+		SourceVideoCodec: req.SourceVideoCodec,
+		TargetCodecVideo: req.TargetCodecVideo,
+		TargetCodecAudio: req.TargetCodecAudio,
+		CopyAudioCodec:   req.CopyAudioCodec,
+		CopyVideoMPEGTS:  req.CopyVideoMPEGTS,
+	}
+	if playback.HLSCopiesAACIntoFMP4(opts) && response.CopyAudioCodec != req.CopyAudioCodec {
+		return fmt.Errorf("%w: got %q, want %q", ErrCopyAudioCodecAttestationMismatch, response.CopyAudioCodec, req.CopyAudioCodec)
 	}
 	return nil
 }
@@ -1812,6 +1838,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		TargetResolution:           req.TargetResolution,
 		TargetCodecVideo:           req.TargetCodecVideo,
 		TargetCodecAudio:           req.TargetCodecAudio,
+		CopyAudioCodec:             req.CopyAudioCodec,
 		TargetAudioChannels:        req.TargetAudioChannels,
 		TargetAudioBitrateKbps:     req.TargetAudioBitrateKbps,
 		TargetBitrateKbps:          req.TargetBitrateKbps,
@@ -1994,6 +2021,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		KeyframePlaylist:      session.Opts().KeyframePlaylist,
 		SubtitleRendition:     session.HasSubtitleRendition(),
 		CopyVideoMPEGTS:       session.Opts().CopyVideoMPEGTS,
+		CopyAudioCodec:        session.Opts().CopyAudioCodec,
 	}
 	response.SubtitleRenditionTracks = session.SubtitleRenditionTrackCount()
 	if err := json.NewEncoder(w).Encode(response); err != nil {
@@ -2189,7 +2217,6 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	outputDir := s.sessionOutputDir(sessionID)
 	opts := card.TranscodeOpts(outputDir, cfg.Playback.FFmpegPath, s.ffmpegSink)
 	opts.SessionID = sessionID
-	opts.Reconstructed = true
 	// Recipe cards preserve the original launch tuning, but reconstruction must
 	// retain the normal manifest cushion rather than the fresh-start fast path.
 	opts.FastStart = false

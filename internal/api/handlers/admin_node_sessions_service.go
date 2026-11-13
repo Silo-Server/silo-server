@@ -5,9 +5,10 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/redis/go-redis/v9"
+
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
-	"github.com/redis/go-redis/v9"
 )
 
 type AdminNodeSessionsService struct {

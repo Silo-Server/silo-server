@@ -159,26 +159,3 @@ func serveConvertedEpub(w http.ResponseWriter, r *http.Request, file *models.Med
 	http.ServeContent(httpstream.NewRollingDeadlineWriter(w), r, name, stat.ModTime(), f)
 	return nil
 }
-
-// ebookConversionCapability is the client-facing advertisement for the
-// Kindle->EPUB feature. Clients flip mobi/azw/azw3 to in-app reading only when
-// Enabled is true; otherwise they keep the external-open path.
-type ebookConversionCapability struct {
-	Enabled        bool     `json:"enabled"`
-	SourceFormats  []string `json:"source_formats"`
-	ServedFormat   string   `json:"served_format"`
-	Header         string   `json:"header"`
-	HeaderOnFailed string   `json:"header_failed_value"`
-}
-
-// HandleConversionCapability reports whether Kindle->EPUB conversion is active
-// (admin flag on AND the converter initialized). GET /api/v1/ebooks/capability.
-func (h *EbookReaderHandler) HandleConversionCapability(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, ebookConversionCapability{
-		Enabled:        h.Conversion.active(r.Context()),
-		SourceFormats:  []string{"mobi", "azw", "azw3"},
-		ServedFormat:   "epub",
-		Header:         ConversionHeader,
-		HeaderOnFailed: "failed",
-	})
-}

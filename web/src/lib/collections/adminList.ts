@@ -3,6 +3,7 @@
  * which collections the List view shows for it.
  */
 import type { LibraryCollection } from "@/api/types";
+import { t } from "@/i18n";
 
 import { joinNames } from "./copy";
 import { collectionKindOf, type CollectionKind } from "./types";
@@ -94,6 +95,10 @@ export function rowTag(collection: LibraryCollection): "hidden" | "home" | null 
 
 /** The row switch's name: what turning it on does, and where. */
 export function showOnTabsLabel(name: string, libraryNames: readonly string[]): string {
-  if (libraryNames.length === 0) return `Show ${name} on its Collections tabs`;
-  return `Show ${name} on the ${joinNames(libraryNames)} Collections tab${libraryNames.length === 1 ? "" : "s"}`;
+  if (libraryNames.length === 0) return t("web.collections.adminList.showOnItsTabs", { name });
+  return t("web.collections.adminList.showOnTabs", {
+    count: libraryNames.length,
+    name,
+    libraries: joinNames(libraryNames),
+  });
 }

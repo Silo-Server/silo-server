@@ -23,6 +23,7 @@ import {
 } from "@/lib/deviceCode";
 import { QuickConnectApproval } from "@/components/auth/QuickConnectApproval";
 import { Smartphone } from "lucide-react";
+import { useT } from "@/i18n";
 
 type DeviceLoginDetails = V2Result<"GET /api/v2/auth/device">;
 
@@ -79,8 +80,9 @@ function ActivateDeviceRequest() {
   const watchStarted = useRef<number | null>(null);
   const resultRef = useRef<HTMLParagraphElement>(null);
   const { serverName: brandedName } = useBranding();
+  const t = useT();
 
-  useDocumentTitle("Sign in a TV");
+  useDocumentTitle(t("web.auth.activate.documentTitle"));
 
   const token = searchParams.get("token") ?? "";
   const code = compactDeviceCode(searchParams.get("code") ?? "");
@@ -189,8 +191,9 @@ function ActivateDeviceRequest() {
   async function handleDecision(action: "approve" | "deny") {
     setActing(true);
     setActionError(null);
-    const failure =
-      action === "approve" ? "Couldn't sign in the TV. Try again." : "Couldn't decline. Try again.";
+    const failure = t(
+      action === "approve" ? "web.auth.activate.approveFailed" : "web.auth.activate.declineFailed",
+    );
     // Every Quick Connect lookup spends the account's code budget, so a
     // decision on one is followed by a reload only when the request moved on.
     let reload = !isQuickConnect;
@@ -282,7 +285,9 @@ function ActivateDeviceRequest() {
   }
 
   const serverName = details?.server_name || brandedName;
-  const impersonationText = `Stop viewing as ${user?.username ?? "this user"} to approve a TV. Only the account itself can sign in a TV.`;
+  const impersonationText = user?.username
+    ? t("web.auth.activate.impersonating", { username: user.username })
+    : t("web.auth.activate.impersonatingUnknown");
   // A tapped link into the phone app, which approves with its own session.
   // Offered only where a Silo app exists, and never opened automatically.
   const appLink =
@@ -290,13 +295,13 @@ function ActivateDeviceRequest() {
       ? buildDeviceDeepLink(details.server_id, window.location.origin, details.user_code || code)
       : null;
   const serverHost = window.location.host;
-  const deviceName = details?.device_name || "this device";
+  // Empty when the device sent no name; each sentence then says "this device".
+  const deviceName = details?.device_name || "";
   const shownCode = displayDeviceCode(details?.user_code || code);
-  const screen = isQuickConnect ? "app" : "TV";
   const requestedAgo = formatRelativeTime(details?.requested_at);
   const deviceLine = [
     details?.device_platform ? platformLabel(details.device_platform) : "",
-    requestedAgo ? `requested ${requestedAgo}` : "",
+    requestedAgo ? t("web.auth.activate.requestedAgo", { time: requestedAgo }) : "",
   ]
     .filter(Boolean)
     .join(" · ");
@@ -305,41 +310,60 @@ function ActivateDeviceRequest() {
   switch (details?.status) {
     case "approved":
       if (remotePlayback) {
-        resultMessage = "This request was approved in the Silo app.";
+        resultMessage = t("web.auth.activate.result.remoteApproved");
       } else if (isQuickConnect) {
-        resultMessage = approvedProfile
-          ? `Done. ${deviceName} is signing in as ${approvedProfile}.`
-          : "This device was approved and is finishing sign-in.";
+        if (!approvedProfile) {
+          resultMessage = t("web.auth.activate.result.quickConnectApproved");
+        } else if (deviceName) {
+          resultMessage = t("web.auth.activate.result.quickConnectDone", {
+            device: deviceName,
+            profile: approvedProfile,
+          });
+        } else {
+          resultMessage = t("web.auth.activate.result.quickConnectDoneUnknown", {
+            profile: approvedProfile,
+          });
+        }
       } else {
-        resultMessage = approvedHere
-          ? "Done. Your TV is signing in."
-          : "This TV was approved and is finishing sign-in.";
+        resultMessage = t(
+          approvedHere ? "web.auth.activate.result.tvDone" : "web.auth.activate.result.tvApproved",
+        );
       }
       break;
     case "consumed":
       if (remotePlayback) {
-        resultMessage = "This request was approved in the Silo app.";
+        resultMessage = t("web.auth.activate.result.remoteApproved");
       } else if (isQuickConnect) {
-        resultMessage = "That device is signed in.";
+        resultMessage = t("web.auth.activate.result.quickConnectSignedIn");
       } else {
-        resultMessage = approvedHere ? "Your TV is signed in." : "That TV is already signed in.";
+        resultMessage = t(
+          approvedHere
+            ? "web.auth.activate.result.tvSignedIn"
+            : "web.auth.activate.result.tvAlreadySignedIn",
+        );
       }
       break;
     case "denied":
-      resultMessage = remotePlayback ? "This request was declined." : "This sign-in was declined.";
+      resultMessage = t(
+        remotePlayback
+          ? "web.auth.activate.result.remoteDeclined"
+          : "web.auth.activate.result.declined",
+      );
       break;
     case "canceled":
-      resultMessage = remotePlayback
-        ? "The TV stopped waiting. Send playback from the Silo app again."
-        : "This TV stopped waiting. Start again on the TV.";
+      resultMessage = t(
+        remotePlayback
+          ? "web.auth.activate.result.remoteCanceled"
+          : "web.auth.activate.result.canceled",
+      );
       break;
     case "expired":
       if (remotePlayback) {
-        resultMessage = "This request expired. Send playback from the Silo app again.";
+        resultMessage = t("web.auth.activate.result.remoteExpired");
       } else if (isQuickConnect) {
-        resultMessage = "This code expired. Start Quick Connect again in the app.";
+        resultMessage = t("web.auth.activate.result.quickConnectExpired");
       } else {
-        resultMessage = "This code expired. Your TV is showing a new one. Use that code instead.";
+        resultMessage = t("web.auth.activate.result.expired");
       }
       break;
   }
@@ -352,14 +376,14 @@ function ActivateDeviceRequest() {
           <CardTitle className="text-3xl font-extrabold tracking-[-0.04em]">{serverName}</CardTitle>
           <p className="text-muted-foreground text-xs">{serverHost}</p>
           <CardDescription className="mt-2 text-sm leading-6">
-            Sign in a TV or other device with your account.
+            {t("web.auth.activate.description")}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           {!token && !code ? (
             <form onSubmit={handleCodeSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="device-code">Enter the code on your TV or app</Label>
+                <Label htmlFor="device-code">{t("web.auth.activate.codeLabel")}</Label>
                 <Input
                   id="device-code"
                   value={codeInput}
@@ -368,6 +392,7 @@ function ActivateDeviceRequest() {
                   autoCapitalize="characters"
                   autoComplete="one-time-code"
                   autoCorrect="off"
+                  // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- example code digits, not language text
                   placeholder="1234 5678"
                 />
               </div>
@@ -376,41 +401,41 @@ function ActivateDeviceRequest() {
                 className="w-full"
                 disabled={!isCompleteDeviceCode(compactDeviceCode(codeInput))}
               >
-                Continue
+                {t("web.ui.continue")}
               </Button>
             </form>
           ) : loadingDetails || loading || setupLoading ? (
-            <div className="text-muted-foreground text-sm">Looking up the code...</div>
+            <div className="text-muted-foreground text-sm">{t("web.auth.activate.lookingUp")}</div>
           ) : needsAccount && !user ? (
             <div className="space-y-3">
               <p className="text-sm">
-                Sign in to {serverName} to approve code {code} from your Jellyfin app.
+                {t("web.auth.activate.quickConnectSignIn", { server: serverName, code })}
               </p>
               <Button asChild className="w-full">
-                <Link to={loginHref}>Sign in to approve</Link>
+                <Link to={loginHref}>{t("web.auth.activate.signInToApprove")}</Link>
               </Button>
               <Button type="button" variant="outline" className="w-full" onClick={enterAnotherCode}>
-                Enter another code
+                {t("web.auth.activate.enterAnotherCode")}
               </Button>
             </div>
           ) : loadError ? (
             <div className="space-y-4">
               <p className="text-sm" role="alert">
                 {loadError === "not_found"
-                  ? "We couldn't find that code. Check the code on your TV."
+                  ? t("web.auth.activate.notFound")
                   : loadError === "rate_limited"
                     ? tooManyCodesMessage(retryAfter)
                     : loadError === "impersonating"
                       ? impersonationText
-                      : "Couldn't look up this code. Try again."}
+                      : t("web.auth.activate.lookupFailed")}
               </p>
               {loadError === "failed" ? (
                 <Button type="button" className="w-full" onClick={() => void loadDetails()}>
-                  Try again
+                  {t("common.tryAgain")}
                 </Button>
               ) : null}
               <Button type="button" variant="outline" className="w-full" onClick={enterAnotherCode}>
-                Enter another code
+                {t("web.auth.activate.enterAnotherCode")}
               </Button>
             </div>
           ) : details ? (
@@ -420,7 +445,13 @@ function ActivateDeviceRequest() {
                     drops the question. */}
                 {details.status === "expired" ? null : (
                   <h2 className="text-lg font-semibold">
-                    {remotePlayback ? `Play on ${deviceName}?` : `Sign in ${deviceName}?`}
+                    {remotePlayback
+                      ? deviceName
+                        ? t("web.auth.activate.playOn", { device: deviceName })
+                        : t("web.auth.activate.playOnUnknown")
+                      : deviceName
+                        ? t("web.auth.activate.signInDevice", { device: deviceName })
+                        : t("web.auth.activate.signInDeviceUnknown")}
                   </h2>
                 )}
                 {deviceLine ? <p className="text-muted-foreground text-sm">{deviceLine}</p> : null}
@@ -429,7 +460,7 @@ function ActivateDeviceRequest() {
               {details.status === "pending" && shownCode ? (
                 <div className="border-border/60 bg-background/50 rounded-md border p-4">
                   <div className="text-muted-foreground text-sm">
-                    Check that your {screen} shows
+                    {t(isQuickConnect ? "web.auth.activate.checkApp" : "web.auth.activate.checkTv")}
                   </div>
                   <div
                     className="mt-1 font-mono text-3xl font-semibold tracking-[0.12em]"
@@ -442,7 +473,9 @@ function ActivateDeviceRequest() {
                     // TV apps released before user codes show only these
                     // words. Remove once both TV apps show the user code.
                     <div className="text-muted-foreground mt-2 text-xs">
-                      Older TV apps show {details.match_code.toUpperCase()} instead.
+                      {t("web.auth.activate.olderTvApps", {
+                        words: details.match_code.toUpperCase(),
+                      })}
                     </div>
                   ) : null}
                 </div>
@@ -451,13 +484,9 @@ function ActivateDeviceRequest() {
               {details.status === "pending" ? (
                 remotePlayback ? (
                   <div className="space-y-4">
-                    <p className="text-sm">
-                      This request comes from the Silo app that sent playback to this TV. Approve it
-                      in that app.
-                    </p>
+                    <p className="text-sm">{t("web.auth.activate.remotePlaybackApproveInApp")}</p>
                     <p className="text-muted-foreground text-sm">
-                      The TV plays with the profile chosen in the app instead of signing in, so this
-                      page can&apos;t approve it.
+                      {t("web.auth.activate.remotePlaybackCantApprove")}
                     </p>
                     {/* No "Open in the Silo app": the apps' link opens their TV
                         sign-in, which can't approve a handoff. */}
@@ -474,23 +503,25 @@ function ActivateDeviceRequest() {
                           disabled={acting}
                           onClick={() => void handleDecision("deny")}
                         >
-                          Not now
+                          {t("web.auth.activate.notNow")}
                         </Button>
                       </>
                     ) : null}
                   </div>
                 ) : !user ? (
                   <div className="space-y-3">
-                    <p className="text-sm">Sign in to {serverName} to approve this TV.</p>
+                    <p className="text-sm">
+                      {t("web.auth.activate.signInToApproveTv", { server: serverName })}
+                    </p>
                     {appLink ? (
                       <Button asChild className="w-full">
                         <a href={appLink}>
-                          <Smartphone aria-hidden="true" /> Open in the Silo app
+                          <Smartphone aria-hidden="true" /> {t("web.auth.openInApp")}
                         </a>
                       </Button>
                     ) : null}
                     <Button asChild className="w-full" variant={appLink ? "outline" : "default"}>
-                      <Link to={loginHref}>Sign in to approve</Link>
+                      <Link to={loginHref}>{t("web.auth.activate.signInToApprove")}</Link>
                     </Button>
                   </div>
                 ) : isImpersonating ? (
@@ -500,29 +531,36 @@ function ActivateDeviceRequest() {
                 ) : (
                   <div className="space-y-4">
                     <p className="text-sm">
-                      You&apos;ll sign it in to {serverName} as{" "}
-                      <span className="font-medium">{user.username}</span>.{" "}
-                      <button
-                        type="button"
-                        className="text-primary underline"
-                        onClick={switchAccount}
-                      >
-                        Not you? Switch account
-                      </button>
+                      {t("web.auth.activate.signInAs", {
+                        server: serverName,
+                        username: user.username,
+                        name: (chunks) => <span className="font-medium">{chunks}</span>,
+                        switch: (chunks) => (
+                          <button
+                            type="button"
+                            className="text-primary underline"
+                            onClick={switchAccount}
+                          >
+                            {chunks}
+                          </button>
+                        ),
+                      })}
                     </p>
                     {isQuickConnect ? null : (
                       <p className="text-muted-foreground text-sm">
-                        Anyone using this TV can pick from your profiles. Profiles with a PIN stay
-                        locked.
+                        {t("web.auth.activate.profilesShared")}
                       </p>
                     )}
                     <p className="text-sm font-medium">
-                      Only approve a {isQuickConnect ? "device" : "TV"} that&apos;s in front of you
-                      right now.
+                      {t(
+                        isQuickConnect
+                          ? "web.auth.activate.onlyApproveDevice"
+                          : "web.auth.activate.onlyApproveTv",
+                      )}
                     </p>
                     {details.ip_address_hint ? (
                       <p className="text-muted-foreground text-xs">
-                        Requested from {details.ip_address_hint}
+                        {t("web.auth.activate.requestedFrom", { ip: details.ip_address_hint })}
                       </p>
                     ) : null}
                     {actionError ? (
@@ -547,7 +585,7 @@ function ActivateDeviceRequest() {
                           disabled={acting}
                           onClick={() => void handleDecision("approve")}
                         >
-                          {acting ? "Signing in..." : "Sign in TV"}
+                          {acting ? t("web.auth.login.signingIn") : t("web.auth.activate.signInTv")}
                         </Button>
                         <Button
                           variant="outline"
@@ -555,7 +593,7 @@ function ActivateDeviceRequest() {
                           disabled={acting}
                           onClick={() => void handleDecision("deny")}
                         >
-                          Not now
+                          {t("web.auth.activate.notNow")}
                         </Button>
                       </div>
                     )}
@@ -584,7 +622,7 @@ function ActivateDeviceRequest() {
                   className="w-full"
                   onClick={enterAnotherCode}
                 >
-                  Enter another code
+                  {t("web.auth.activate.enterAnotherCode")}
                 </Button>
               ) : null}
             </div>

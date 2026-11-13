@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import PathAutocompleteInput from "@/components/PathAutocompleteInput";
+import { useT, type MessageKey } from "@/i18n";
 
 interface FolderBrowserProps {
   open: boolean;
@@ -24,6 +25,8 @@ interface FolderBrowserProps {
 }
 
 const ROOT_PATH = "/";
+// An example absolute path, which is data in every language.
+const PATH_PLACEHOLDER = "/mnt/media";
 
 export default function FolderBrowser({
   open,
@@ -31,9 +34,11 @@ export default function FolderBrowser({
   onSelect,
   existingPaths = [],
 }: FolderBrowserProps) {
+  const t = useT();
   const [currentPath, setCurrentPath] = useState(ROOT_PATH);
   const [draftPath, setDraftPath] = useState(ROOT_PATH);
-  const [validationError, setValidationError] = useState("");
+  // A validation failure: the server's text, or a catalog message of the dialog's own.
+  const [validationError, setValidationError] = useState<string | { key: MessageKey }>("");
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const queryClient = useQueryClient();
   const debouncedDraftPath = useDebounce(draftPath.trim(), 200);
@@ -88,7 +93,7 @@ export default function FolderBrowser({
   async function handleBrowseSubmit() {
     const trimmed = draftPath.trim();
     if (!trimmed.startsWith(ROOT_PATH)) {
-      setValidationError("Use an absolute path that starts with /.");
+      setValidationError({ key: "web.admin.common.folderBrowser.absolutePath" });
       return;
     }
 
@@ -102,7 +107,9 @@ export default function FolderBrowser({
       setCurrentPath(nextFolder.path);
       setDraftPath(nextFolder.path);
     } catch (err) {
-      setValidationError(err instanceof Error ? err.message : "Failed to browse folder");
+      setValidationError(
+        err instanceof Error ? err.message : { key: "web.admin.common.folderBrowser.browseFailed" },
+      );
     }
   }
 
@@ -136,6 +143,9 @@ export default function FolderBrowser({
     onOpenChange(false);
   }
 
+  const validationText =
+    typeof validationError === "string" ? validationError : t(validationError.key);
+
   // Count selected paths that aren't already on the library
   const addableSelected = Array.from(selectedPaths).filter(
     (p) => !existingPaths.includes(p),
@@ -151,7 +161,7 @@ export default function FolderBrowser({
     >
       <DialogContent className="overflow-x-hidden sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Browse Library Folders</DialogTitle>
+          <DialogTitle>{t("web.admin.common.folderBrowser.title")}</DialogTitle>
         </DialogHeader>
 
         <div className="min-w-0 space-y-3">
@@ -162,7 +172,7 @@ export default function FolderBrowser({
                 setValidationError("");
                 setDraftPath(value);
               }}
-              placeholder="/mnt/media"
+              placeholder={PATH_PLACEHOLDER}
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
                   event.preventDefault();
@@ -171,26 +181,27 @@ export default function FolderBrowser({
               }}
             />
             <Button type="button" variant="outline" onClick={() => void handleBrowseSubmit()}>
-              Browse
+              {t("web.admin.common.folderBrowser.browse")}
             </Button>
           </div>
 
-          {validationError ? <p className="text-destructive text-sm">{validationError}</p> : null}
-          {!validationError && error instanceof Error ? (
+          {validationText ? <p className="text-destructive text-sm">{validationText}</p> : null}
+          {!validationText && error instanceof Error ? (
             <p className="text-destructive text-sm">{error.message}</p>
           ) : null}
           {alreadyAdded ? (
             <p className="text-muted-foreground text-sm">
-              This folder is already listed on the library.
+              {t("web.admin.common.folderBrowser.alreadyListed")}
             </p>
           ) : null}
 
           <div className="border-border/60 overflow-hidden rounded-md border">
             <div className="border-border/60 flex items-center justify-between border-b px-3 py-2 text-sm">
               <div className="min-w-0 overflow-x-auto">
-                <p className="font-medium">Current folder</p>
+                <p className="font-medium">{t("web.admin.common.folderBrowser.currentFolder")}</p>
                 <p className="text-muted-foreground font-mono text-xs whitespace-nowrap">
-                  {resolvedPath}
+                  {/* A path reads left to right in every language. */}
+                  <span dir="ltr">{resolvedPath}</span>
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
@@ -201,8 +212,8 @@ export default function FolderBrowser({
                   disabled={!canGoUp}
                   onClick={() => navigate(parentPath)}
                 >
-                  <ArrowUp className="mr-1 h-3.5 w-3.5" />
-                  Up
+                  <ArrowUp className="me-1 h-3.5 w-3.5" />
+                  {t("web.admin.common.folderBrowser.up")}
                 </Button>
                 <Button type="button" variant="ghost" size="icon" onClick={() => refetch()}>
                   <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} />
@@ -222,7 +233,7 @@ export default function FolderBrowser({
 
                 {!isLoading && data?.entries.length === 0 ? (
                   <p className="text-muted-foreground px-2 py-6 text-sm">
-                    No subfolders found here.
+                    {t("web.admin.common.folderBrowser.empty")}
                   </p>
                 ) : null}
 
@@ -244,7 +255,13 @@ export default function FolderBrowser({
                           className="flex shrink-0 items-center justify-center px-2 py-2"
                           onClick={() => !isExisting && toggleSelected(entry.path)}
                           disabled={isExisting}
-                          title={isExisting ? "Already added" : isSelected ? "Deselect" : "Select"}
+                          title={
+                            isExisting
+                              ? t("web.admin.common.folderBrowser.alreadyAdded")
+                              : isSelected
+                                ? t("web.admin.common.folderBrowser.deselect")
+                                : t("web.admin.common.folderBrowser.select")
+                          }
                         >
                           <div
                             className={`flex h-4 w-4 items-center justify-center rounded border transition-colors ${
@@ -262,7 +279,7 @@ export default function FolderBrowser({
                         {/* Navigate into folder */}
                         <button
                           type="button"
-                          className="flex min-w-0 flex-1 items-center gap-2 py-2 pr-2 text-left text-sm"
+                          className="flex min-w-0 flex-1 items-center gap-2 py-2 pe-2 text-start text-sm"
                           onClick={() => navigate(entry.path)}
                         >
                           <FolderOpen className="text-muted-foreground h-4 w-4 shrink-0" />
@@ -283,31 +300,37 @@ export default function FolderBrowser({
             disabled={browseQuery.isFetchingNextPage}
             onClick={() => void browseQuery.fetchNextPage()}
           >
-            Load more folders
+            {t("web.admin.common.folderBrowser.loadMore")}
           </Button>
         )}
         {browseQuery.isError && (
           <Button type="button" variant="outline" onClick={() => void browseQuery.restart()}>
-            Restart folder listing
+            {t("web.admin.common.folderBrowser.restart")}
           </Button>
         )}
         <DialogFooter className="flex-row items-center gap-2 sm:justify-between">
           <div className="text-muted-foreground text-xs">
             {selectedPaths.size > 0
-              ? `${selectedPaths.size} folder${selectedPaths.size !== 1 ? "s" : ""} selected`
-              : "Select folders or use current"}
+              ? t("web.admin.common.folderBrowser.selectedCount", {
+                  count: selectedPaths.size,
+                  count_text: selectedPaths.size,
+                })
+              : t("web.admin.common.folderBrowser.selectHint")}
           </div>
           <div className="flex gap-2">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             {addableSelected > 0 ? (
               <Button type="button" onClick={handleAddSelected}>
-                Add {addableSelected} Folder{addableSelected !== 1 ? "s" : ""}
+                {t("web.admin.common.folderBrowser.addFolders", {
+                  count: addableSelected,
+                  count_text: addableSelected,
+                })}
               </Button>
             ) : (
               <Button type="button" onClick={handleSelectCurrent} disabled={alreadyAdded}>
-                Use Current Folder
+                {t("web.admin.common.folderBrowser.useCurrent")}
               </Button>
             )}
           </div>

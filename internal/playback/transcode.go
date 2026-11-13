@@ -67,16 +67,18 @@ type TranscodeOpts struct {
 	// CopyVideoMPEGTS packages copied video in MPEG-TS instead of fMP4. It is
 	// durable because the segment extension and bytes must survive restarts.
 	CopyVideoMPEGTS bool
+	// CopyAudioCodec is the codec of the source audio track a "copy"
+	// TargetCodecAudio keeps. fMP4 segments add aac_adtstoasc for a copied AAC
+	// track; empty (older recipes and tokens) keeps the plain copy. It is
+	// durable because reconstruction must write the same segment bytes.
+	CopyAudioCodec string
 	// KeyframePlaylist serves a copy-video stream that starts at the
 	// beginning as one complete VOD playlist planned from the source's
 	// keyframe index, instead of FFmpeg's growing playlist (#1466). It is
 	// durable because a reconstructed session must keep serving the playlist
 	// the player already has.
 	KeyframePlaylist bool
-	// Reconstructed marks a session rebuilt from its recipe after its server
-	// or node lost it. It isn't durable: each rebuild sets it.
-	Reconstructed bool
-	SeekSeconds   float64
+	SeekSeconds      float64
 	// StreamOriginSeconds is the keyframe timestamp at which a copy-video
 	// stream actually begins. SeekSeconds remains the client-requested -ss so
 	// FFmpeg performs exactly one demuxer seek; this origin keeps response and
@@ -328,6 +330,12 @@ type TranscodeSession struct {
 	// copyPlan is the planned segment list served instead of FFmpeg's
 	// playlist, or nil. It is fixed when the session starts.
 	copyPlan *copySegmentPlan
+	// copyPlanRejected is set once FFmpeg has cut a segment the plan
+	// doesn't list (checkCopyPlan).
+	copyPlanRejected bool
+	// copyPlanWritten is how many segments FFmpeg wrote in a run that
+	// finished the whole stream, or 0 (checkCopyPlanOutput). Guarded by mu.
+	copyPlanWritten int
 	// subtitleSpans lists each generation's subtitle rendition cue file,
 	// oldest first, including those an earlier session recorded in the same
 	// output directory. Guarded by mu.
@@ -493,13 +501,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		releaseHWDevice()
 		return nil, err
 	}
-	copyPlan := resolveCopyPlan(ctx, opts)
-	if copyPlan == nil && opts.Reconstructed && opts.KeyframePlaylist && ctx.Err() != nil {
-		// Rebuilding without the plan would serve FFmpeg's playlist to a
-		// player that may hold the planned one; a later request rebuilds.
-		releaseHWDevice()
-		return nil, fmt.Errorf("plan rebuilt keyframe playlist: %w", ctx.Err())
-	}
+	copyPlan := resolveCopyPlan(opts)
 	if copyPlan != nil {
 		log.Printf("playback: session %s serves a %d-segment keyframe playlist", opts.SessionID, len(copyPlan.durations))
 	}
@@ -593,6 +595,7 @@ func (s *TranscodeSession) monitorFFmpeg(ctx context.Context, cmd *exec.Cmd, don
 	s.waitErr = waitErr
 	s.mu.Unlock()
 	s.logWaitResult(ctx, waitErr)
+	s.checkCopyPlanOutput(waitErr)
 	close(done)
 }
 
@@ -958,6 +961,9 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 
 	// Audio codec.
 	args = appendAudioArgs(args, opts)
+	if HLSCopiesAACIntoFMP4(opts) {
+		args = appendCopiedAACToMP4Args(args, opts.CopyAudioCodec)
+	}
 
 	// Subtitle burn-in and resolution scaling — only when encoding video.
 	if !isVideoCopy {
@@ -1110,6 +1116,16 @@ func HLSOutputContainer(opts TranscodeOpts) string {
 		return OutputContainerFMP4
 	}
 	return OutputContainerMPEGTS
+}
+
+// HLSCopiesAACIntoFMP4 reports whether an HLS run copies an AAC track into
+// fMP4 segments, the one case that adds aac_adtstoasc. MPEG-TS segments carry
+// ADTS as it is. Remote executors must confirm the copied codec for such a run
+// because an older one ignores it and fails after the first segment.
+func HLSCopiesAACIntoFMP4(opts TranscodeOpts) bool {
+	return !TranscodesAudio(opts.TargetCodecAudio) &&
+		HLSOutputContainer(opts) == OutputContainerFMP4 &&
+		copiedAudioIsAAC(opts.CopyAudioCodec)
 }
 
 // copyVideoUsesFMP4 reports whether copied video is packaged as fragmented MP4
@@ -2945,6 +2961,12 @@ func (s *TranscodeSession) SegmentProgress(time.Time) SegmentProgress {
 	timeline, err := parseManifestTimeline(manifest)
 	if err != nil {
 		return progress
+	}
+	if s.copyPlan != nil {
+		// An ended playlist doesn't say FFmpeg finished cleanly; only the
+		// exit (checkCopyPlanOutput) knows, so this checks what FFmpeg has
+		// moved past.
+		s.checkCopyPlan(timeline.entries, false)
 	}
 
 	// FFmpeg numbers segments in order, renames each finished segment into

@@ -7,6 +7,8 @@
  * only guaranteed to ignore none of these, so they are removed before decode.
  */
 
+import { nalUnitRanges } from "./nalUnits";
+
 const NAL_UNSPEC62_RPU = 62;
 const NAL_UNSPEC63_ENHANCEMENT = 63;
 
@@ -25,26 +27,21 @@ export function hevcLengthSize(hvcC: Uint8Array | null | undefined): number | nu
  * and the input as-is when it does not parse as length-prefixed NAL units.
  */
 export function stripDolbyVisionNalUnits(data: Uint8Array, lengthSize: number): Uint8Array {
+  const units = nalUnitRanges(data, lengthSize, 2);
+  if (!units) return data;
   const keep: Array<[number, number]> = [];
   let kept = 0;
   let removed = false;
-  let offset = 0;
-  while (offset < data.byteLength) {
-    if (offset + lengthSize > data.byteLength) return data;
-    let length = 0;
-    for (let i = 0; i < lengthSize; i++) length = length * 256 + data[offset + i]!;
-    const start = offset + lengthSize;
-    const end = start + length;
-    if (length < 2 || end > data.byteLength) return data;
+  for (const [start, end] of units) {
     const type = (data[start]! >> 1) & 0x3f;
     const layer = ((data[start]! & 0x01) << 5) | (data[start + 1]! >> 3);
     if (type === NAL_UNSPEC62_RPU || type === NAL_UNSPEC63_ENHANCEMENT || layer > 0) {
       removed = true;
     } else {
-      keep.push([offset, end]);
-      kept += end - offset;
+      // Kept with its length field.
+      keep.push([start - lengthSize, end]);
+      kept += end - start + lengthSize;
     }
-    offset = end;
   }
   if (!removed) return data;
   const out = new Uint8Array(kept);

@@ -11,6 +11,8 @@ import { rangeDays, rangePhrase, rangeTitle } from "../range";
 import { useWidgetRange } from "../widgetChrome";
 import { WidgetHeader } from "../WidgetHeader";
 import { WidgetRangePicker } from "../WidgetRangePicker";
+import { formatLocale } from "@/lib/appLocale";
+import { useT } from "@/i18n";
 
 const ROW_LIMIT = 8;
 
@@ -20,6 +22,7 @@ const ROW_LIMIT = 8;
  * episodes.
  */
 export function TopTitlesWidget() {
+  const t = useT();
   const { range } = useWidgetRange();
   const query = useAdminTopActivity(rangeDays(range));
   const items = useMemo<BarListItem[]>(
@@ -39,12 +42,12 @@ export function TopTitlesWidget() {
 
   return (
     <Card className="h-full">
-      <WidgetHeader title={rangeTitle("Top titles", range)}>
+      <WidgetHeader title={rangeTitle(t("web.admin.dashboard.widgets.topTitles.title"), range)}>
         <Link
           to="/admin/history"
           className="text-muted-foreground hover:text-primary text-[11px] whitespace-nowrap transition-colors"
         >
-          All history ›
+          {t("web.admin.dashboard.widgets.topTitles.allHistory")}
         </Link>
         <WidgetRangePicker />
       </WidgetHeader>
@@ -52,12 +55,19 @@ export function TopTitlesWidget() {
         {query.isLoading ? (
           <BarListSkeleton />
         ) : query.error ? (
-          <SectionError message="Failed to load top titles." />
+          <SectionError message={t("web.admin.dashboard.widgets.topTitles.loadFailed")} />
         ) : (
           <BarList
             items={items}
-            formatValue={(plays) => `${plays.toLocaleString()} ${plays === 1 ? "play" : "plays"}`}
-            emptyLabel={`No plays in ${rangePhrase(range)}`}
+            formatValue={(plays) =>
+              t("web.admin.dashboard.widgets.topTitles.playCount", {
+                count: plays,
+                count_text: plays.toLocaleString(formatLocale()),
+              })
+            }
+            emptyLabel={t("web.admin.dashboard.widgets.topTitles.empty", {
+              range: rangePhrase(range),
+            })}
           />
         )}
       </CardContent>

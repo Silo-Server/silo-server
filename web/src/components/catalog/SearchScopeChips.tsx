@@ -1,10 +1,11 @@
+import { useT, type MessageKey } from "@/i18n";
 import { cn } from "@/lib/utils";
 import type { SearchMediaScope } from "@/hooks/useSearchMediaScope";
 
-const SCOPE_OPTIONS: Array<{ value: SearchMediaScope; label: string }> = [
-  { value: "video", label: "Media" },
-  { value: "audiobook", label: "Audiobooks" },
-  { value: "all", label: "All" },
+const SCOPE_OPTIONS: Array<{ value: SearchMediaScope; label: MessageKey }> = [
+  { value: "video", label: "web.catalog.mediaType.media" },
+  { value: "audiobook", label: "web.catalog.mediaType.audiobooks" },
+  { value: "all", label: "web.catalog.mediaType.all" },
 ];
 
 export interface SearchScopeChipsProps {
@@ -18,10 +19,11 @@ export interface SearchScopeChipsProps {
  * results and saves the choice as the user's default search scope.
  */
 export default function SearchScopeChips({ activeScope, onScopeChange }: SearchScopeChipsProps) {
+  const t = useT();
   return (
     <div
       role="radiogroup"
-      aria-label="Search scope"
+      aria-label={t("web.catalog.search.scopeLabel")}
       className="search-paint-surface inline-flex items-center gap-1 rounded-full border p-1"
     >
       {SCOPE_OPTIONS.map((option) => {
@@ -44,7 +46,7 @@ export default function SearchScopeChips({ activeScope, onScopeChange }: SearchS
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
-            {option.label}
+            {t(option.label)}
           </button>
         );
       })}

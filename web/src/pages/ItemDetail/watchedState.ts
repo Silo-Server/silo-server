@@ -1,6 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 import type { EpisodesResponse, ItemDetail, SeasonsResponse } from "@/api/types";
 import { catalogKeys, ebookKeys, episodeKeys, itemKeys, progressKeys } from "@/hooks/queries/keys";
+import { t } from "@/i18n";
 
 type WatchedStateItem = Pick<
   ItemDetail,
@@ -25,30 +26,38 @@ export function getWatchedActionLabel(item: Pick<ItemDetail, "type" | "user_data
 
   switch (item.type) {
     case "series":
-      return played ? "Mark Series Unwatched" : "Mark Series Watched";
+      return played
+        ? t("web.detail.actions.markSeriesUnwatched")
+        : t("web.detail.actions.markSeriesWatched");
     case "season":
-      return played ? "Mark Season Unwatched" : "Mark Season Watched";
+      return played
+        ? t("web.detail.actions.markSeasonUnwatched")
+        : t("web.detail.actions.markSeasonWatched");
     case "audiobook":
-      return played ? "Mark Unlistened" : "Mark Listened";
+      return played ? t("web.detail.actions.markUnlistened") : t("web.detail.actions.markListened");
     case "ebook":
     case "manga":
-      return played ? "Mark Unread" : "Mark Read";
+      return played ? t("web.detail.actions.markUnread") : t("web.detail.actions.markRead");
     case "episode":
-      return played ? "Mark Unwatched" : "Mark Watched";
+      return played ? t("web.detail.actions.markUnwatched") : t("web.detail.actions.markWatched");
     default:
-      return played ? "Mark Unwatched" : "Mark Watched";
+      return played ? t("web.detail.actions.markUnwatched") : t("web.detail.actions.markWatched");
   }
 }
 
 export function getWatchedToastMessage(item: Pick<ItemDetail, "type">, played: boolean): string {
   switch (item.type) {
     case "audiobook":
-      return played ? "Marked as listened" : "Marked as unlistened";
+      return played
+        ? t("web.detail.actions.markedListened")
+        : t("web.detail.actions.markedUnlistened");
     case "ebook":
     case "manga":
-      return played ? "Marked as read" : "Marked as unread";
+      return played ? t("web.detail.actions.markedRead") : t("web.detail.actions.markedUnread");
     default:
-      return played ? "Marked as watched" : "Marked as unwatched";
+      return played
+        ? t("web.detail.actions.markedWatched")
+        : t("web.detail.actions.markedUnwatched");
   }
 }
 

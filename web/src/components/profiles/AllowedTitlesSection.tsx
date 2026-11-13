@@ -14,6 +14,7 @@ import {
   useSetTitleAllowance,
 } from "@/hooks/queries/titleAllowances";
 import { useDebounce } from "@/hooks/useDebounce";
+import { useT, type MessageKey } from "@/i18n";
 
 const SEARCH_LIMIT = 10;
 const SEARCH_DEBOUNCE_MS = 250;
@@ -24,19 +25,22 @@ const SEARCH_DEBOUNCE_MS = 250;
  * refresh failed (`stale` true).
  */
 function LoadError({
-  what,
+  staleKey,
+  failedKey,
   stale,
   onRetry,
 }: {
-  what: string;
+  staleKey: MessageKey;
+  failedKey: MessageKey;
   stale: boolean;
   onRetry: () => void;
 }) {
+  const t = useT();
   return (
     <p role="alert" className="text-muted-foreground flex items-center gap-2 text-sm">
-      {stale ? `The ${what} may be out of date.` : `Couldn't load the ${what}.`}
+      {stale ? t(staleKey) : t(failedKey)}
       <Button type="button" variant="link" size="sm" onClick={onRetry}>
-        Retry
+        {t("common.retry")}
       </Button>
     </p>
   );
@@ -48,6 +52,7 @@ function LoadError({
  * limit. Changes save at once, separately from the profile form.
  */
 export function AllowedTitlesSection({ profileId }: { profileId: string }) {
+  const t = useT();
   const titles = useAllowedTitles(profileId, true);
   const collections = useAllowedCollections(profileId, true);
   const setTitle = useSetTitleAllowance();
@@ -60,10 +65,8 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
   return (
     <section className="border-border space-y-4 rounded-md border p-4">
       <div className="space-y-1">
-        <h3 className="text-sm font-semibold">Allowed titles</h3>
-        <p className="text-muted-foreground text-sm">
-          Titles this profile can watch even though they're above its limit.
-        </p>
+        <h3 className="text-sm font-semibold">{t("web.profiles.allowedTitles.heading")}</h3>
+        <p className="text-muted-foreground text-sm">{t("web.profiles.allowedTitles.hint")}</p>
       </div>
 
       <AddAllowedTitle
@@ -73,21 +76,25 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
 
       {titles.isError ? (
         <LoadError
-          what="allowed titles"
+          staleKey="web.profiles.allowedTitles.titlesStale"
+          failedKey="web.profiles.allowedTitles.titlesFailed"
           stale={titles.data !== undefined}
           onRetry={() => void titles.refetch()}
         />
       ) : null}
       {titles.isLoading ? (
-        <p className="text-muted-foreground text-sm">Loading…</p>
+        <p className="text-muted-foreground text-sm">{t("web.profiles.allowedTitles.loading")}</p>
       ) : titles.isError && !allowedTitles ? null : (allowedTitles ?? []).length === 0 ? (
         // Cards the acting profile can't see are left out of each page, so
         // an empty page is an empty list only when no page follows.
         titles.hasNextPage ? null : (
-          <p className="text-muted-foreground text-sm">No titles allowed yet.</p>
+          <p className="text-muted-foreground text-sm">{t("web.profiles.allowedTitles.none")}</p>
         )
       ) : (
-        <ul aria-label="Allowed titles" className="grid gap-2 sm:grid-cols-2">
+        <ul
+          aria-label={t("web.profiles.allowedTitles.heading")}
+          className="grid gap-2 sm:grid-cols-2"
+        >
           {(allowedTitles ?? []).map((item) => (
             <li
               key={item.content_id}
@@ -101,14 +108,14 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
               <span className="min-w-0 flex-1 truncate text-sm">
                 {item.title}
                 {item.year ? (
-                  <span className="text-muted-foreground ml-1.5 text-xs">{item.year}</span>
+                  <span className="text-muted-foreground ms-1.5 text-xs">{item.year}</span>
                 ) : null}
               </span>
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
-                aria-label={`Stop allowing ${item.title}`}
+                aria-label={t("web.profiles.allowedTitles.stopAllowing", { name: item.title })}
                 disabled={setTitle.isPending}
                 onClick={() =>
                   setTitle.mutate({ profileId, itemId: item.content_id, allowed: false })
@@ -128,21 +135,29 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
           disabled={titles.isFetchingNextPage}
           onClick={() => void titles.fetchNextPage()}
         >
-          {titles.isFetchingNextPage ? "Loading…" : "Show more"}
+          {titles.isFetchingNextPage
+            ? t("web.profiles.allowedTitles.loading")
+            : t("web.profiles.allowedTitles.showMore")}
         </Button>
       ) : null}
 
       {collections.isError ? (
         <LoadError
-          what="allowed collections"
+          staleKey="web.profiles.allowedTitles.collectionsStale"
+          failedKey="web.profiles.allowedTitles.collectionsFailed"
           stale={collections.data !== undefined}
           onRetry={() => void collections.refetch()}
         />
       ) : null}
       {(collections.data ?? []).length > 0 ? (
         <div className="space-y-2">
-          <h4 className="text-sm font-medium">Allowed collections</h4>
-          <ul aria-label="Allowed collections" className="grid gap-2">
+          <h4 className="text-sm font-medium">
+            {t("web.profiles.allowedTitles.collectionsHeading")}
+          </h4>
+          <ul
+            aria-label={t("web.profiles.allowedTitles.collectionsHeading")}
+            className="grid gap-2"
+          >
             {(collections.data ?? []).map((collection) => (
               <li
                 key={collection.collection_id}
@@ -151,17 +166,24 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm">{collection.name}</span>
                   <span className="text-muted-foreground text-xs">
-                    {collection.item_count === 1 ? "1 title" : `${collection.item_count} titles`}
                     {collection.live
-                      ? ""
-                      : " · Paused: only a manual collection the primary profile made can allow titles"}
+                      ? t("web.profiles.allowedTitles.titleCount", {
+                          count: collection.item_count,
+                          count_text: collection.item_count,
+                        })
+                      : t("web.profiles.allowedTitles.titleCountPaused", {
+                          count: collection.item_count,
+                          count_text: collection.item_count,
+                        })}
                   </span>
                 </span>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  aria-label={`Stop allowing ${collection.name}`}
+                  aria-label={t("web.profiles.allowedTitles.stopAllowing", {
+                    name: collection.name,
+                  })}
                   disabled={setCollection.isPending}
                   onClick={() =>
                     setCollection.mutate({
@@ -190,6 +212,7 @@ function AddAllowedTitle({
   allowedIds: Set<string>;
   onPick: (item: BrowseItem) => void;
 }) {
+  const t = useT();
   const [query, setQuery] = useState("");
   const debounced = useDebounce(query.trim(), SEARCH_DEBOUNCE_MS);
   const searchState = useMemo(
@@ -219,9 +242,9 @@ function AddAllowedTitle({
   const hasResults = results.data !== undefined;
   let status: string | null = null;
   if (debounced.length > 0) {
-    if (results.isLoading) status = "Searching…";
-    else if (results.isError && !hasResults) status = "The search didn't work. Try again.";
-    else if (found.length === 0) status = "No movies or series match.";
+    if (results.isLoading) status = t("web.profiles.allowedTitles.searching");
+    else if (results.isError && !hasResults) status = t("web.profiles.allowedTitles.searchFailed");
+    else if (found.length === 0) status = t("web.profiles.allowedTitles.noMatch");
   }
   const staleResults = results.isError && hasResults;
 
@@ -230,13 +253,13 @@ function AddAllowedTitle({
       <div className="relative">
         <Search
           aria-hidden
-          className="text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2"
+          className="text-muted-foreground absolute start-3 top-1/2 size-4 -translate-y-1/2"
         />
         <Input
           type="search"
-          aria-label="Search titles to allow"
-          placeholder="Add a movie or series"
-          className="pl-9"
+          aria-label={t("web.profiles.allowedTitles.searchLabel")}
+          placeholder={t("web.profiles.allowedTitles.searchPlaceholder")}
+          className="ps-9"
           autoComplete="off"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
@@ -253,15 +276,15 @@ function AddAllowedTitle({
       ) : null}
       {staleResults ? (
         <p role="status" className="text-muted-foreground flex items-center gap-2 text-[13px]">
-          These results may be out of date.
+          {t("web.profiles.allowedTitles.resultsStale")}
           <Button type="button" variant="link" size="sm" onClick={() => void results.refetch()}>
-            Retry
+            {t("common.retry")}
           </Button>
         </p>
       ) : null}
       {!status && debounced.length > 0 ? (
         <ul
-          aria-label="Search results"
+          aria-label={t("web.profiles.allowedTitles.results")}
           className="border-border divide-border max-h-52 divide-y overflow-y-auto rounded-xl border"
         >
           {found.map((item) => {
@@ -270,9 +293,10 @@ function AddAllowedTitle({
               <li key={item.content_id} className="flex items-center gap-2 px-3 py-2 text-sm">
                 <span className="min-w-0 flex-1 truncate">
                   {item.title}
-                  <span className="text-muted-foreground ml-1.5 text-xs">
-                    {item.year ? `${item.year} · ` : ""}
-                    {item.type}
+                  <span className="text-muted-foreground ms-1.5 text-xs">
+                    {[item.year, t("web.profiles.allowedTitles.resultType", { type: item.type })]
+                      .filter(Boolean)
+                      .join(" · ")}
                   </span>
                 </span>
                 <Button
@@ -283,11 +307,11 @@ function AddAllowedTitle({
                   onClick={() => onPick(item)}
                 >
                   {already ? (
-                    "Allowed"
+                    t("web.profiles.allowedTitles.allowed")
                   ) : (
                     <>
                       <Plus className="size-3.5" />
-                      Allow
+                      {t("web.profiles.allowedTitles.allow")}
                     </>
                   )}
                 </Button>

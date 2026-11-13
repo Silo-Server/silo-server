@@ -4,6 +4,7 @@ import {
   StaleApiRequestContextError,
 } from "@/api/client";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 import {
   buildWatchTogetherInviteUrl,
   type GuestControlPolicy,
@@ -26,9 +27,13 @@ export async function copyWatchTogetherInvite(
   }
   try {
     await copyTextToClipboard(inviteUrl);
-    toast.success(`Invite copied. Room code ${roomCode ?? ""}`.trim());
+    toast.success(
+      roomCode
+        ? t("web.watchTogether.actions.inviteCopiedWithCode", { code: roomCode })
+        : t("web.watchTogether.actions.inviteCopied"),
+    );
   } catch {
-    toast.error("Failed to copy invite link");
+    toast.error(t("web.watchTogether.actions.inviteCopyFailed"));
   }
   return true;
 }
@@ -44,14 +49,16 @@ export async function setWatchTogetherGuestControl(
     if (nextRoom && authority && isCapturedProfileAuthorityActive(authority)) {
       toast.success(
         nextRoom.guest_control_policy === "guest_play_pause"
-          ? "Guests can now pause and resume"
-          : "Room is now host controlled",
+          ? t("web.watchTogether.actions.guestControlOn")
+          : t("web.watchTogether.actions.guestControlOff"),
       );
     }
   } catch (error) {
     if (error instanceof StaleApiRequestContextError) return;
     if (authority && isCapturedProfileAuthorityActive(authority))
-      toast.error(error instanceof Error ? error.message : "Failed to update room");
+      toast.error(
+        error instanceof Error ? error.message : t("web.watchTogether.actions.updateRoomFailed"),
+      );
   }
 }
 
@@ -63,12 +70,14 @@ export async function stopWatchTogetherPlayback(
   try {
     const room = await stopPlayback();
     if (room && authority && isCapturedProfileAuthorityActive(authority))
-      toast.success("Stopped for everyone. The room is still open.");
+      toast.success(t("web.watchTogether.actions.stoppedRoomOpen"));
     return room;
   } catch (error) {
     if (error instanceof StaleApiRequestContextError) return null;
     if (authority && isCapturedProfileAuthorityActive(authority))
-      toast.error(error instanceof Error ? error.message : "Could not stop playback");
+      toast.error(
+        error instanceof Error ? error.message : t("web.watchTogether.actions.stopFailed"),
+      );
     return null;
   }
 }
@@ -78,11 +87,14 @@ export async function endWatchTogetherRoom(closeRoom: () => Promise<void>): Prom
   const authority = captureProfileRequestContext();
   try {
     await closeRoom();
-    if (authority && isCapturedProfileAuthorityActive(authority)) toast.success("Room ended");
+    if (authority && isCapturedProfileAuthorityActive(authority))
+      toast.success(t("web.watchTogether.actions.roomEnded"));
   } catch (error) {
     if (error instanceof StaleApiRequestContextError) return;
     if (authority && isCapturedProfileAuthorityActive(authority))
-      toast.error(error instanceof Error ? error.message : "Failed to end room");
+      toast.error(
+        error instanceof Error ? error.message : t("web.watchTogether.actions.endRoomFailed"),
+      );
   }
 }
 
@@ -95,10 +107,14 @@ export async function promoteWatchTogetherWithFeedback(
   try {
     const room = await promote(id);
     if (room && authority && isCapturedProfileAuthorityActive(authority))
-      toast.success("Room selection updated");
+      toast.success(t("web.watchTogether.actions.selectionUpdated"));
   } catch (error) {
     if (error instanceof StaleApiRequestContextError) return;
     if (authority && isCapturedProfileAuthorityActive(authority))
-      toast.error(error instanceof Error ? error.message : "Failed to start suggestion");
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t("web.watchTogether.actions.startSuggestionFailed"),
+      );
   }
 }

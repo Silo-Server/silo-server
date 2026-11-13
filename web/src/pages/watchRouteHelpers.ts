@@ -235,6 +235,8 @@ function buildInitialSubtitleTrackIndexes({
         track.embedded_title?.trim() ||
         track.file_name?.trim() ||
         track.language?.trim() ||
+        // Matched against a saved track signature, which stores this label in
+        // English, so it is data and is not translated (D44).
         `Subtitle ${index + 1}`,
       source: track.external ? "external" : "embedded",
       forced: track.forced,
@@ -406,6 +408,7 @@ export function buildWatchPageProps({
     contentId: request.contentId,
     title: item.title,
     year: item.year,
+    backdrop: { url: item.backdrop_url, thumbhash: item.backdrop_thumbhash },
     fileId: request.fileId,
     versionPicked: request.versionPicked,
     libraryId: request.libraryId,

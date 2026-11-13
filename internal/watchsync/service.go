@@ -68,16 +68,28 @@ const (
 
 	manualSyncCooldown = time.Hour
 	manualSyncTimeout  = 10 * time.Minute
-	// A completed stop may require a cold metadata lookup in a provider plugin.
+	// ConfirmedStopDispatchTimeout bounds one provider's confirmed stop. A
+	// completed stop may require a cold metadata lookup in a provider plugin.
 	// Match the plugin-host watch-sync deadline so the durable confirmation path
 	// does not cancel valid provider work before the RPC can finish. The reclaim
 	// lease must remain longer than that entire dispatch and finalization window
 	// so a second request cannot take over while the first is still valid.
-	confirmedStopDispatchTimeout = 2 * time.Minute
-	confirmedStopLease           = confirmedStopDispatchTimeout + 30*time.Second
+	// Callers of ScrobbleStopConfirmed must leave at least this much time.
+	ConfirmedStopDispatchTimeout = 2 * time.Minute
+	confirmedStopLease           = ConfirmedStopDispatchTimeout + 30*time.Second
+
+	// importedWatchSamePlayWindow is how close a provider's watch time must be
+	// to a scrobble stop the connection sent for a watched import to treat it
+	// as that scrobbled play. A scrobble carries no watch time, so the provider
+	// stamps its copy when the stop arrives, within a second of it; the window
+	// covers clock skew and a slow provider. A second play of the same item
+	// can't finish inside it unless the item is shorter than the window.
+	importedWatchSamePlayWindow = 2 * time.Minute
 )
 
-var errConfirmedStopInProgress = errors.New("watch provider stop confirmation already in progress")
+// ErrConfirmedStopInProgress means another dispatch of the same confirmed stop
+// still holds its claim, so its outcome is not known yet.
+var ErrConfirmedStopInProgress = errors.New("watch provider stop confirmation already in progress")
 
 func NewService(repo Repository, registry *Registry) *Service {
 	return &Service{
@@ -910,7 +922,7 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			result, err := s.ImportWatched(ctx, conn, cfg, importer)
 			run.InboundWatchedFound = result.Found
 			run.InboundWatchedImported = result.Imported
-			signalsChanged = signalsChanged || result.Imported > 0
+			signalsChanged = signalsChanged || result.Imported > 0 || result.ProgressUpdated > 0
 			run.Warning = appendWarning(run.Warning, result.Warnings)
 			afterFlow("watched import", err)
 		}
@@ -1169,10 +1181,13 @@ func summarizeWarnings(warnings []string) []string {
 }
 
 type ImportWatchedResult struct {
-	Found     int
-	Imported  int
-	Unmatched int
-	Warnings  []string
+	Found    int
+	Imported int
+	// ProgressUpdated counts provider copies of Silo's own plays that added
+	// no history row but moved the item's progress.
+	ProgressUpdated int
+	Unmatched       int
+	Warnings        []string
 }
 
 type matchedWatchedLeaf struct {
@@ -1263,10 +1278,33 @@ func (s *Service) ImportWatched(
 		mediaItemIDs = append(mediaItemIDs, mediaItemID)
 	}
 	sort.Strings(mediaItemIDs)
+	var store userstore.UserStore
+	var scrobbleStops map[string][]time.Time
+	if s.storeProvider != nil && len(mediaItemIDs) > 0 {
+		store, err = s.storeProvider.ForUser(ctx, conn.UserID)
+		if err != nil {
+			return result, fmt.Errorf("open user store: %w", err)
+		}
+		if scrobbleStops, err = s.repo.ListScrobbleStops(ctx, conn.ID, mediaItemIDs); err != nil {
+			return result, err
+		}
+	}
 	for _, mediaItemID := range mediaItemIDs {
 		leaf := matchedLeaves[mediaItemID]
-		duration, _ := s.mediaDuration(ctx, leaf.match.MediaItemID)
 		watchedAt := leaf.watchedAt
+		duration, _ := s.mediaDuration(ctx, leaf.match.MediaItemID)
+		if playNear(scrobbleStops[mediaItemID], watchedAt, importedWatchSamePlayWindow) {
+			// The provider's copy of a play this connection scrobbled: Silo
+			// recorded the play, but a later completion still counts.
+			wrote, err := store.SetProgressIfNewer(ctx, conn.ProfileID, mediaItemID, 0, duration, true, watchedAt)
+			if err != nil {
+				return result, err
+			}
+			if wrote {
+				result.ProgressUpdated++
+			}
+			continue
+		}
 		created, err := s.watchState.RecordImportedWatchIfNewerWithSource(
 			ctx,
 			conn.UserID,
@@ -1642,6 +1680,16 @@ func visiblePlays(ctx context.Context, store completedHistoryLister, query users
 		}
 	}
 	return kept, nil
+}
+
+// playNear reports whether any of times is within window of at, either side.
+func playNear(times []time.Time, at time.Time, window time.Duration) bool {
+	for _, play := range times {
+		if play.Sub(at).Abs() <= window {
+			return true
+		}
+	}
+	return false
 }
 
 func hasVisibleCompletedHistoryAtOrAfter(ctx context.Context, store completedHistoryLister, profileID, mediaItemID string, at time.Time) (bool, error) {
@@ -2435,7 +2483,7 @@ func (s *Service) scrobble(ctx context.Context, event ScrobbleEvent, action stri
 		results := make(chan error, len(confirmedTargets))
 		for _, target := range confirmedTargets {
 			go func() {
-				providerCtx, cancel := context.WithTimeout(ctx, confirmedStopDispatchTimeout)
+				providerCtx, cancel := context.WithTimeout(ctx, ConfirmedStopDispatchTimeout)
 				defer cancel()
 				results <- s.dispatchScrobbleConfirmed(
 					providerCtx,
@@ -2506,7 +2554,7 @@ func (s *Service) dispatchScrobbleConfirmed(ctx context.Context, provider Provid
 		case confirmedStopAlreadySent:
 			return nil
 		case confirmedStopInProgress:
-			return errConfirmedStopInProgress
+			return ErrConfirmedStopInProgress
 		}
 
 		cfg, err := s.serverConfig(ctx, conn.Provider)

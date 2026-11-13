@@ -1,4 +1,4 @@
-import type { EmblaCarouselType, EmblaOptionsType } from "embla-carousel";
+import type { EmblaCarouselType, EmblaOptionsType, EmblaPluginType } from "embla-carousel";
 
 export const CAROUSEL_RESIZE_SETTLE_DELAY_MS = 120;
 
@@ -42,6 +42,28 @@ export function getCarouselWheelGestureOptions(target?: Element | null) {
     forceWheelAxis: "x" as const,
     target: target ?? undefined,
   };
+}
+
+/**
+ * Fixes the wheel-gestures plugin for right to left. When it decides whether
+ * a gesture has hit the end, it takes a leftward swipe as "next", which is
+ * backwards right to left. There it reads the progress from the other end, so
+ * the swipe that scrolls forward isn't cut off at the first slide. Embla calls
+ * `init` again on every reInit, so a direction change is picked up.
+ */
+export function wheelGesturesForDirection(plugin: EmblaPluginType): EmblaPluginType {
+  const init = plugin.init;
+  plugin.init = (embla, optionsHandler) => {
+    if (embla.internalEngine().options.direction !== "rtl") return init(embla, optionsHandler);
+    const mirrored = new Proxy(embla, {
+      get: (target, key, receiver) =>
+        key === "scrollProgress"
+          ? () => 1 - target.scrollProgress()
+          : Reflect.get(target, key, receiver),
+    });
+    return init(mirrored, optionsHandler);
+  };
+  return plugin;
 }
 
 /**

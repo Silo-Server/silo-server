@@ -2,7 +2,7 @@
   "type": "https://siloserver.org/docs/api/v2/problems/validation_failed",
   "title": "Validation failed",
   "status": 422,
-  "detail": "The request did not pass validation; see errors.",
+  "detail": "expected value to be one of \"query, section, library_collection, user_collection, favorites, watchlist, history, person\"",
   "instance": "urn:silo:request:00000000000000000000011b",
   "errors": [
     {

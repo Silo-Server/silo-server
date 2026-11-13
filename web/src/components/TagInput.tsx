@@ -1,5 +1,6 @@
 import { useState, useRef, type KeyboardEvent } from "react";
 import { X } from "lucide-react";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 interface TagInputProps {
@@ -9,7 +10,8 @@ interface TagInputProps {
   className?: string;
 }
 
-export function TagInput({ value, onChange, placeholder = "Add...", className }: TagInputProps) {
+export function TagInput({ value, onChange, placeholder, className }: TagInputProps) {
+  const t = useT();
   const [input, setInput] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -69,7 +71,9 @@ export function TagInput({ value, onChange, placeholder = "Add...", className }:
         onBlur={() => {
           if (input.trim()) addTag(input);
         }}
-        placeholder={value.length === 0 ? placeholder : ""}
+        placeholder={
+          value.length === 0 ? (placeholder ?? t("web.common.ui.tagInput.placeholder")) : ""
+        }
         className="text-foreground placeholder:text-muted-foreground/50 min-w-[80px] flex-1 border-0 bg-transparent text-sm outline-none"
       />
     </div>

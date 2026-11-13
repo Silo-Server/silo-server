@@ -1,6 +1,7 @@
 package apiv2
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -195,6 +196,16 @@ func TestListProfiles(t *testing.T) {
 	want := `{"items":[{"id":"p-owner","name":"Laura","avatar":"preset:fox","avatar_url":"/avatars/presets/fox.png","avatar_source":"preset","has_pin":false,"is_child":false,"is_primary":true,"max_content_rating":"","max_advisory_age":null,"require_advisory_age":false,"quality_preference":"auto","language":"en","preferred_metadata_language":"","subtitle_language":"","subtitle_mode":"auto","auto_skip_intro":true,"auto_skip_credits":false,"auto_skip_recap":false,"auto_play_next_preview":false,"show_forced_subtitles":false,"library_restrictions_enabled":false,"allowed_library_ids":["3"],"max_playback_quality":"1080p","created_at":"2026-01-02T03:04:05.000Z","updated_at":"2026-01-02T03:04:05.000Z"}],"avatar_upload_enabled":true,"max_advisory_age_supported":true,"require_advisory_age_supported":true}` + "\n"
 	if rec.Body.String() != want {
 		t.Fatalf("body = %s", rec.Body.String())
+	}
+	// A readable household limit is reported; without one (above) the
+	// member is omitted.
+	*profiles = fakeProfiles{view: fixtureProfileView(), maxProfiles: 1}
+	rec = do(t, h, http.MethodGet, "/api/v2/profiles", "", bearer(memberToken))
+	var limited struct {
+		MaxProfiles *int `json:"max_profiles"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &limited); err != nil || limited.MaxProfiles == nil || *limited.MaxProfiles != 1 {
+		t.Fatalf("limited body = %s (%v)", rec.Body.String(), err)
 	}
 	// A declared profile is still judged; the offset parameter is unknown.
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/profiles", "", with(bearer(memberToken), "X-Profile-Id", "p-other")), TypeNotFound)

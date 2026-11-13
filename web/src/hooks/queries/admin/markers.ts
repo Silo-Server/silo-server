@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 import { getAllMarkerHistory } from "@/api/v2/markers";
 import { v2 } from "@/api/v2/request";
 import type { MarkerProviderUpdateRequest } from "@/api/types";
@@ -82,7 +83,7 @@ export function useUpdateMarkerProvider() {
         retryAuthentication: false,
       }),
     onSuccess: async (_data, variables) => {
-      toast.success("Marker provider settings saved");
+      toast.success(t("web.admin.markers.providers.saved"));
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: adminKeys.markerProviders() }),
         queryClient.invalidateQueries({
@@ -94,7 +95,7 @@ export function useUpdateMarkerProvider() {
       ]);
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to save marker provider settings");
+      toast.error(err instanceof Error ? err.message : t("web.admin.markers.providers.saveFailed"));
     },
   });
 }
@@ -110,17 +111,28 @@ export function useValidateMarkerProvider() {
         retryAuthentication: false,
       }),
     onSuccess: (data, variables) => {
-      const label = variables.displayName || "Marker provider";
+      const label = variables.displayName;
       const provider = variables.provider;
       queryClient.setQueryData(adminKeys.markerProviderValidation(provider), data);
       if (data.valid) {
-        toast.success(`${label} connection successful`);
+        toast.success(
+          label
+            ? t("web.admin.markers.providers.testSucceeded", { provider: label })
+            : t("web.admin.markers.providers.testSucceededDefault"),
+        );
       } else {
-        toast.error(data.error || `${label} connection test failed`);
+        toast.error(
+          data.error ||
+            (label
+              ? t("web.admin.markers.providers.testFailed", { provider: label })
+              : t("web.admin.markers.providers.testFailedDefault")),
+        );
       }
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Marker provider connection test failed");
+      toast.error(
+        err instanceof Error ? err.message : t("web.admin.markers.providers.testFailedDefault"),
+      );
     },
   });
 }

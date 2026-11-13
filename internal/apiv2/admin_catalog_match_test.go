@@ -3,11 +3,14 @@ package apiv2
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/metadata"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/policy"
 )
 
@@ -114,6 +117,80 @@ func TestAdminMatchPermissionAndProjection(t *testing.T) {
 		t.Fatalf("missing gate %d", rec.Code)
 	}
 }
+
+type matchItems struct{}
+
+func (matchItems) GetByID(_ context.Context, id string) (*models.MediaItem, error) {
+	return &models.MediaItem{ContentID: id, Title: "Parasite", Type: "movie"}, nil
+}
+
+type matchFolders struct {
+	ids []int
+	err error
+}
+
+func (f matchFolders) GetFolderIDForItem(context.Context, string) (int, error) {
+	return 0, errors.New("unused")
+}
+
+func (f matchFolders) GetFolderIDsForItem(context.Context, string) ([]int, error) {
+	return f.ids, f.err
+}
+
+type matchMetadata struct{}
+
+func (matchMetadata) SearchAndNormalize(context.Context, metadata.SearchQuery, int) ([]metadata.MatchCandidate, error) {
+	return nil, errors.New("unused")
+}
+
+func (matchMetadata) Process(context.Context, metadata.ProcessRequest) (*metadata.ProcessResult, error) {
+	return nil, errors.New("unused")
+}
+
+// A failed folder lookup is the server's fault, so it must not reach the caller
+// as an invalid library_id, while a library_id that really is wrong stays a
+// validation problem.
+func TestAdminMatchLibraryFailures(t *testing.T) {
+	const secret = "private database detail"
+	cases := []struct {
+		name    string
+		folders matchFolders
+		library string
+		want    ProblemType
+		detail  string
+	}{
+		{name: "lookup fails, no library_id", folders: matchFolders{err: errors.New(secret)}, want: TypeInternalError},
+		{name: "lookup fails, library_id named", folders: matchFolders{err: errors.New(secret)}, library: "7", want: TypeInternalError},
+		{name: "item not in library_id", folders: matchFolders{ids: []int{1}}, library: "7", want: TypeValidationFailed, detail: "Invalid library_id"},
+		{name: "several libraries, no library_id", folders: matchFolders{ids: []int{1, 2}}, want: TypeValidationFailed, detail: "library_id is required for items in multiple libraries"},
+	}
+	for _, tc := range cases {
+		deps := pilotDeps(nil, nil)
+		deps.AdminCatalogMatch = handlers.NewAdminMatchHandler(matchItems{}, tc.folders, matchMetadata{})
+		deps.PermissionGates[policy.PermissionMetadataCuration] = adminTranslationGate
+		h := newTestHandler(t, deps)
+		path := Prefix + "/admin/items/item-1/match/"
+		body, query := `{"provider_ids":{"tmdb":"42"}}`, ""
+		if tc.library != "" {
+			body, query = `{"provider_ids":{"tmdb":"42"},"library_id":"`+tc.library+`"}`, "?library_id="+tc.library
+		}
+		requests := map[string]func() *httptest.ResponseRecorder{
+			"search": func() *httptest.ResponseRecorder { return do(t, h, "POST", path+"search", body, bearer(memberToken)) },
+			"apply":  func() *httptest.ResponseRecorder { return do(t, h, "POST", path+"apply", body, bearer(memberToken)) },
+			"hints":  func() *httptest.ResponseRecorder { return do(t, h, "GET", path+"hints"+query, "", bearer(memberToken)) },
+		}
+		for action, request := range requests {
+			t.Run(action+"/"+tc.name, func(t *testing.T) {
+				rec := request()
+				requireProblem(t, rec, tc.want)
+				if !strings.Contains(rec.Body.String(), tc.detail) || strings.Contains(rec.Body.String(), secret) {
+					t.Fatalf("body %s, want detail %q and no lookup error", rec.Body, tc.detail)
+				}
+			})
+		}
+	}
+}
+
 func adminCatalogMatchFixtureCases() []fixtureCase {
 	return []fixtureCase{
 		{name: "admin_match_search", operationID: "searchAdminItemMatches", method: "POST", path: Prefix + "/admin/items/item-1/match/search", body: `{}`, headers: bearer(memberToken), status: 200, schema: "#/components/schemas/AdminMatchCandidates", assertHeaders: []string{"Content-Type"}, scenario: "Delegated curator searches bounded provider candidates."},

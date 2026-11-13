@@ -340,7 +340,6 @@ var shapePending = map[string]string{
 	"components.schemas.AdminItemMetadataUpdate.first_air_date": pendingItemDates,
 	"components.schemas.AdminItemMetadataUpdate.last_air_date":  pendingItemDates,
 	"components.schemas.AdminItemMetadataUpdate.air_date":       pendingItemDates,
-	"components.schemas.DeviceLoginStart.verification_uri":      "#2917: built from any client's X-Forwarded-Proto when no public URL is set",
 }
 
 const pendingItemDates = "#2810 validates the item metadata dates in the handler"

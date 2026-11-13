@@ -318,21 +318,6 @@ type ApplyStatus struct {
 	Generation int64
 }
 
-// Applied reports whether the local engine now serves the stored policy.
-func (st ApplyStatus) Applied() bool { return st.LocalReloadErr == nil }
-
-// FailedStep names the first failed apply step ("local_reload" or
-// "event_publish"), or "" when both steps succeeded.
-func (st ApplyStatus) FailedStep() string {
-	switch {
-	case st.LocalReloadErr != nil:
-		return "local_reload"
-	case st.PublishErr != nil:
-		return "event_publish"
-	}
-	return ""
-}
-
 // Err joins the per-step errors, nil when the change fully applied.
 func (st ApplyStatus) Err() error { return errors.Join(st.LocalReloadErr, st.PublishErr) }
 

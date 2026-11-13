@@ -7,6 +7,7 @@ import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { fetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { catalogKeys } from "@/hooks/queries/keys";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
+import { useT } from "@/i18n";
 
 type LibraryItemLinkProps = Omit<ComponentProps<typeof ViewTransitionLink>, "to"> & {
   contentId: string;
@@ -22,6 +23,7 @@ type LibraryItemLinkProps = Omit<ComponentProps<typeof ViewTransitionLink>, "to"
  */
 const LibraryItemLink = forwardRef<HTMLAnchorElement, LibraryItemLinkProps>(
   function LibraryItemLink({ contentId, onClick, ...rest }, ref) {
+    const t = useT();
     const queryClient = useQueryClient();
     const navigate = useViewTransitionNavigate();
     const location = useLocation();
@@ -70,7 +72,7 @@ const LibraryItemLink = forwardRef<HTMLAnchorElement, LibraryItemLinkProps>(
               (error: unknown) => {
                 if (pendingCheck.current !== check) return;
                 if (isNotFoundProblem(error)) {
-                  toast.error("This title is in a library this profile can't open.");
+                  toast.error(t("web.common.ui.libraryItemLink.noAccess"));
                   return;
                 }
                 // A failed check says nothing about access; the item page answers.

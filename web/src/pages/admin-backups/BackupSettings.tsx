@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import type { AdminBackupDestination as BackupDestination } from "@/api/v2/adminBackups";
 import type { useSettingsForm } from "@/hooks/useSettingsForm";
+import { useT, type MessageKey } from "@/i18n";
 import { adminSettingsHref } from "@/lib/adminSettingsSearch";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
@@ -34,29 +35,30 @@ import {
 type SettingsForm = ReturnType<typeof useSettingsForm>;
 
 export function BackupScheduleSettings({ form }: { form: SettingsForm }) {
+  const t = useT();
   const timeId = useId();
   const keepId = useId();
   const anyDirty = (keys: string[]) => keys.some((key) => form.isDirty(key));
   return (
     <>
       <FieldGroup
-        label="Schedule"
-        description="One server in the cluster takes the backup. The oldest copy is deleted only after a new one succeeds."
+        label={t("web.admin.backups.schedule.group")}
+        description={t("web.admin.backups.schedule.groupDescription")}
         dirty={anyDirty(BACKUP_SCHEDULE_KEYS)}
       >
         <SettingField
-          label="Nightly backups"
+          label={t("web.admin.backups.schedule.enabled")}
           type="toggle"
           dirty={form.isDirty(BACKUP_ENABLED_KEY)}
-          description="Turning this off stops new backups. Saved copies stay."
+          description={t("web.admin.backups.schedule.enabledDescription")}
           value={form.getValue(BACKUP_ENABLED_KEY)}
           onChange={(value) => form.setValue(BACKUP_ENABLED_KEY, value)}
         />
         <SettingFieldRow
-          label="Start time"
+          label={t("web.admin.backups.schedule.time")}
           htmlFor={timeId}
           dirty={form.isDirty(BACKUP_TIME_KEY)}
-          description="In the server's time zone."
+          description={t("web.admin.backups.schedule.timeDescription")}
         >
           <Input
             id={timeId}
@@ -69,11 +71,11 @@ export function BackupScheduleSettings({ form }: { form: SettingsForm }) {
           />
         </SettingFieldRow>
         <SettingFieldRow
-          label="Copies to keep"
+          label={t("web.admin.backups.schedule.keep")}
           htmlFor={keepId}
           dirty={form.isDirty(BACKUP_KEEP_KEY)}
-          description="Nightly and manual copies count toward this. From 1 to 60."
-          unit="copies"
+          description={t("web.admin.backups.schedule.keepDescription")}
+          unit={t("web.admin.backups.schedule.keepUnit")}
         >
           <Input
             id={keepId}
@@ -89,23 +91,23 @@ export function BackupScheduleSettings({ form }: { form: SettingsForm }) {
       </FieldGroup>
 
       <FieldGroup
-        label="What's included"
-        description="The database and uploaded artwork, avatars, and branding are always included. Logs never are."
+        label={t("web.admin.backups.content.group")}
+        description={t("web.admin.backups.content.groupDescription")}
         dirty={anyDirty(BACKUP_CONTENT_KEYS)}
       >
         <SettingField
-          label="Intro detection data"
+          label={t("web.admin.backups.content.intro")}
           type="toggle"
           dirty={form.isDirty(BACKUP_INTRO_KEY)}
-          description="Makes each copy larger. Without it, Silo analyzes a season again when its next episode arrives."
+          description={t("web.admin.backups.content.introDescription")}
           value={form.getValue(BACKUP_INTRO_KEY)}
           onChange={(value) => form.setValue(BACKUP_INTRO_KEY, value)}
         />
         <SettingField
-          label="Downloaded subtitles"
+          label={t("web.admin.backups.content.subtitles")}
           type="toggle"
           dirty={form.isDirty(BACKUP_SUBTITLES_KEY)}
-          description="Saves fetching them again. Subtitle sites limit downloads per day. Uploaded subtitles are always backed up."
+          description={t("web.admin.backups.content.subtitlesDescription")}
           value={form.getValue(BACKUP_SUBTITLES_KEY)}
           onChange={(value) => form.setValue(BACKUP_SUBTITLES_KEY, value)}
         />
@@ -114,28 +116,31 @@ export function BackupScheduleSettings({ form }: { form: SettingsForm }) {
   );
 }
 
-const DEFAULT_LOCATION_COPY: Record<BackupLocation, { label: string; description: string }> = {
+const DEFAULT_LOCATION_COPY: Record<
+  BackupLocation,
+  { label: MessageKey; description: MessageKey }
+> = {
   none: {
-    label: "On this server",
-    description:
-      "This server has no private storage for backups: its artwork is in S3 and no private bucket is set up. Add a private bucket in Storage settings to turn backups on.",
+    label: "web.admin.backups.location.onThisServer",
+    description: "web.admin.backups.location.noneDescription",
   },
   bucket: {
-    label: "In the private bucket",
-    description:
-      "In the private S3 bucket Silo also uses for avatars and diagnostic bundles, encrypted with your SECRET_KEY.",
+    label: "web.admin.backups.location.bucket",
+    description: "web.admin.backups.location.bucketDescription",
   },
   local: {
-    label: "On this server",
-    description:
-      "In Silo's data folder, on the same disk as the database. Covers bad upgrades and mistakes, not a failed disk.",
+    label: "web.admin.backups.location.onThisServer",
+    description: "web.admin.backups.location.localDescription",
   },
 };
 
 function StorageSettingsLink() {
+  const t = useT();
   return (
     <Button asChild variant="outline" size="sm" className={SETTINGS_BUTTON}>
-      <Link to={adminSettingsHref("storage")}>Open Storage settings</Link>
+      <Link to={adminSettingsHref("storage")}>
+        {t("web.admin.backups.location.storageSettings")}
+      </Link>
     </Button>
   );
 }
@@ -176,7 +181,7 @@ function DestinationOption({
         </div>
       </div>
       {children ? (
-        <div className="flex items-center gap-2 pl-[30px] sm:ml-auto sm:shrink-0 sm:pl-0">
+        <div className="flex items-center gap-2 ps-[30px] sm:ms-auto sm:shrink-0 sm:ps-0">
           {children}
         </div>
       ) : null}
@@ -216,17 +221,21 @@ export function BackupLocationGroup({
    */
   onConfirmKey?: () => void;
 }) {
-  const ownCopy = DEFAULT_LOCATION_COPY[location];
+  const t = useT();
+  const ownCopy = {
+    label: t(DEFAULT_LOCATION_COPY[location].label),
+    description: t(DEFAULT_LOCATION_COPY[location].description),
+  };
   const confirmKey = onConfirmKey ? (
     <Button variant="outline" size="sm" className={SETTINGS_BUTTON} onClick={onConfirmKey}>
-      Confirm the key
+      {t("web.admin.backups.confirmKey.button")}
     </Button>
   ) : null;
   if (!s3Offered) {
     return (
-      <FieldGroup label="Where backups are kept">
+      <FieldGroup label={t("web.admin.backups.location.group")}>
         <SettingFieldRow
-          label={location === "none" ? "Nowhere yet" : ownCopy.label}
+          label={location === "none" ? t("web.admin.backups.location.nowhere") : ownCopy.label}
           description={ownCopy.description}
         >
           {location === "none" ? <StorageSettingsLink /> : confirmKey}
@@ -240,11 +249,11 @@ export function BackupLocationGroup({
   };
   return (
     <div className="space-y-2">
-      <FieldGroup label="Where backups are kept" dirty={dirty}>
+      <FieldGroup label={t("web.admin.backups.location.group")} dirty={dirty}>
         <RadioGroup
           value={destination}
           onValueChange={choose}
-          aria-label="Where backups are kept"
+          aria-label={t("web.admin.backups.location.group")}
           className="gap-0"
         >
           <DestinationOption
@@ -261,21 +270,22 @@ export function BackupLocationGroup({
           </DestinationOption>
           <DestinationOption
             value="s3"
-            label="In an S3 bucket"
-            description="Off this server, encrypted with your SECRET_KEY."
+            label={t("web.admin.backups.location.s3")}
+            description={t("web.admin.backups.location.s3Description")}
           >
             <div className="flex flex-wrap justify-end gap-2">
               {savedDestination === "s3" ? confirmKey : null}
               <Button variant="outline" size="sm" className={SETTINGS_BUTTON} onClick={onSetUpS3}>
-                {s3Configured ? "Change" : "Set up"}
+                {s3Configured
+                  ? t("web.admin.backups.location.change")
+                  : t("web.admin.backups.location.setUp")}
               </Button>
             </div>
           </DestinationOption>
         </RadioGroup>
       </FieldGroup>
       <p className="text-muted-foreground px-1 text-[13px] leading-relaxed">
-        Copies at the previous destination stay where they are. The list above shows only the
-        current destination&apos;s backups.
+        {t("web.admin.backups.location.previousStays")}
       </p>
     </div>
   );
@@ -284,18 +294,17 @@ export function BackupLocationGroup({
 /** How a full restore reaches the backup the command names. */
 export type FullRestoreSource = "folder" | "bucket" | "download";
 
-const BUCKET_ENV =
-  "SILO_BACKUP_S3_ENDPOINT, SILO_BACKUP_S3_REGION, SILO_BACKUP_S3_ACCESS_KEY, SILO_BACKUP_S3_SECRET_KEY, and SILO_BACKUP_S3_PATH_STYLE";
-
 /** How the command finds the backup, as the start of the hint under it. */
-function commandHint(source: FullRestoreSource, encrypted: boolean): string {
+function commandHint(source: FullRestoreSource, encrypted: boolean): MessageKey {
   switch (source) {
     case "download":
-      return "Download the backup's files into one folder on the server and pass that folder. ";
+      return "web.admin.backups.command.hintDownload";
     case "bucket":
-      return `The command uses the backup selected above, or the newest one, and reads it from the bucket. Set ${encrypted ? "this server's SECRET_KEY and " : ""}${BUCKET_ENV} in its environment. `;
+      return encrypted
+        ? "web.admin.backups.command.hintBucketEncrypted"
+        : "web.admin.backups.command.hintBucket";
     case "folder":
-      return "The command uses the backup selected above, or the newest one. ";
+      return "web.admin.backups.command.hintFolder";
   }
 }
 
@@ -313,29 +322,36 @@ export function RestoreCommandGroup({
   /** The backup is encrypted, so the command needs this server's SECRET_KEY. */
   encrypted: boolean;
 }) {
+  const t = useT();
   const copy = () =>
     copyTextToClipboard(command).then(
-      () => toast.success("Command copied"),
-      () => toast.error("Couldn't copy the command. Select it and copy it by hand."),
+      () => toast.success(t("web.admin.backups.command.copied")),
+      () => toast.error(t("web.admin.backups.command.copyFailed")),
     );
   return (
     <FieldGroup
-      label="Replace the whole server"
-      description="Restoring everything replaces the database, so the server has to be stopped first."
+      label={t("web.admin.backups.command.group")}
+      description={t("web.admin.backups.command.groupDescription")}
     >
       <div className="space-y-2 py-3.5">
         <div className="bg-background/60 flex items-start gap-2 rounded-lg border px-3 py-2">
           <pre className="min-w-0 flex-1 overflow-x-auto py-1 font-mono text-xs leading-5">
             <code>{command}</code>
           </pre>
-          <Button variant="ghost" size="icon-sm" onClick={() => void copy()} aria-label="Copy">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => void copy()}
+            aria-label={t("web.admin.backups.command.copy")}
+          >
             <Copy aria-hidden="true" />
           </Button>
         </div>
         <p className="text-muted-foreground text-[13px] leading-relaxed">
-          {commandHint(source, encrypted)}
-          Run <code className="font-mono text-xs">silo backup</code> without arguments for every
-          option, including restoring into a separate database.
+          {t("web.admin.backups.command.runHelp", {
+            hint: t(commandHint(source, encrypted)),
+            code: (chunks) => <code className="font-mono text-xs">{chunks}</code>,
+          })}
         </p>
       </div>
     </FieldGroup>
