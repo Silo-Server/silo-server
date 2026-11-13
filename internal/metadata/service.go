@@ -7658,27 +7658,9 @@ func itemIdentityProviderIDs(item *models.MediaItem, stored map[string]string) m
 	return out
 }
 
-// identityProviderIDsContradict reports whether two ID sets of itemType name
-// different titles: they disagree on the first ID both carry, in the order
-// the type's content IDs anchor (contentid.AnchorPrecedence). For a movie
-// that is TMDB, IMDb, then TVDB, whose movie mappings are the cross-IDs
-// providers most often get wrong; for a series it is TVDB, TMDB, then IMDb.
-// Later IDs do not decide, so a movie whose TVDB mapping changed since it was
-// matched still matches on its TMDB ID, and a series whose TMDB mapping
-// changed still matches on its TVDB ID. A stored TMDB ID in TMDB's "id-slug"
-// URL form is the same ID as its number.
+// identityProviderIDsContradict is catalog.IdentityProviderIDsContradict.
 func identityProviderIDsContradict(itemType string, a, b map[string]string) bool {
-	for _, key := range contentid.AnchorPrecedence(itemType) {
-		left, right := strings.TrimSpace(a[key]), strings.TrimSpace(b[key])
-		if key == "tmdb" {
-			left, right = catalog.NormalizeTMDBID(left), catalog.NormalizeTMDBID(right)
-		}
-		if left == "" || right == "" {
-			continue
-		}
-		return !strings.EqualFold(left, right)
-	}
-	return false
+	return catalog.IdentityProviderIDsContradict(itemType, a, b)
 }
 
 // skeletonResult carries the outcome of skeleton creation plus parsed hints so
