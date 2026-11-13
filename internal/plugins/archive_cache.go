@@ -93,12 +93,19 @@ func (c *ArchiveCache) LocalInstallPath(installation *Installation) (string, err
 	if installation == nil {
 		return "", errors.New("plugin installation is required")
 	}
-	id, version, err := pluginIdentitySegments(installation.PluginID, installation.Version)
-	if err != nil {
+	if _, _, err := pluginIdentitySegments(installation.PluginID, installation.Version); err != nil {
 		return "", err
 	}
 	if c == nil || c.root == "" {
 		return installation.InstallPath, nil
+	}
+	id, err := cachePathSegment(installation.PluginID, "plugin id")
+	if err != nil {
+		return "", err
+	}
+	version, err := cachePathSegment(installation.Version, "plugin version")
+	if err != nil {
+		return "", err
 	}
 	releaseName := filepath.Base(filepath.Dir(installation.InstallPath))
 	release, err := pluginPathSegment(releaseName, "plugin release")

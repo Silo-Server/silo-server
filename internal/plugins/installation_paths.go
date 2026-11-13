@@ -37,6 +37,22 @@ func pluginPathSegment(value, label string) (string, error) {
 	return segment, nil
 }
 
+// cacheSegmentEscaper names a plugin's directory under a node's own archive
+// cache. The installer's mapping replaces / \ : @ with _, so acme/x and
+// acme_x would share a directory, and each rehydration prunes every other
+// release under it (#2800). Escaping them, and the escape character %, gives
+// distinct identities distinct directories; an identity without these
+// characters keeps its name.
+var cacheSegmentEscaper = strings.NewReplacer("%", "%25", "/", "%2F", "\\", "%5C", ":", "%3A", "@", "%40")
+
+func cachePathSegment(value, label string) (string, error) {
+	segment := cacheSegmentEscaper.Replace(value)
+	if segment == "" || segment == "." || segment == ".." {
+		return "", fmt.Errorf("%s %q: %w", label, value, ErrInvalidPluginIdentity)
+	}
+	return segment, nil
+}
+
 func pluginVersionRoot(root, pluginID, version string) (string, error) {
 	id, v, err := pluginIdentitySegments(pluginID, version)
 	if err != nil {
