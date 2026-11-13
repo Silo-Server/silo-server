@@ -116,8 +116,8 @@ func (reg *Registry) updateDownloadSubscription(ctx context.Context, in *Downloa
 		return nil, p
 	}
 	b := in.Body
-	if b.MaxStorageBytes.Present && b.MaxStorageBytes.Value < 0 || len(b.SeasonNumbers.Value) > 10000 {
-		return nil, NewProblem(TypeMalformedRequest, "Invalid monitor storage or season bounds.")
+	if p := subscriptionPatchBoundsProblem(b); p != nil {
+		return nil, p
 	}
 	patch := downloads.SubscriptionPatch{Mode: subscriptionPatchPointer(b.Mode), SeasonNumbers: subscriptionPatchPointer(b.SeasonNumbers), DeleteWatched: subscriptionPatchPointer(b.DeleteWatched), MaxStorageBytes: subscriptionPatchPointer(b.MaxStorageBytes), Quality: subscriptionPatchPointer(b.Quality), Active: subscriptionPatchPointer(b.Active)}
 	row, err := reg.deps.DownloadSubscriptionMutations.UpdateSubscriptionMonitor(ctx, user, profile, in.DeviceID, in.ID, patch, handlers.AccessFilterFromContext(ctx, ""), subscriptionGuard(in.IfMatch, in.IfNoneMatch))
@@ -126,6 +126,25 @@ func (reg *Registry) updateDownloadSubscription(ctx context.Context, in *Downloa
 	}
 	return subscriptionOutput(row), nil
 }
+
+// subscriptionPatchBoundsProblem answers an out-of-range bound the way create
+// does, where the schema carries it: 422 at the member, code out_of_range.
+// The patch body checks them here because adding them to its schema would
+// change the documented request contract.
+func subscriptionPatchBoundsProblem(b DownloadSubscriptionPatchBody) *Problem {
+	var errs []ProblemError
+	if b.MaxStorageBytes.Present && b.MaxStorageBytes.Value < 0 {
+		errs = append(errs, ProblemError{Location: locationBody + ".max_storage_bytes", Code: codeOutOfRange, Detail: "expected number >= 0"})
+	}
+	if len(b.SeasonNumbers.Value) > 10000 {
+		errs = append(errs, ProblemError{Location: locationBody + ".season_numbers", Code: codeOutOfRange, Detail: "expected array length <= 10000"})
+	}
+	if len(errs) == 0 {
+		return nil
+	}
+	return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").WithErrors(errs...)
+}
+
 func subscriptionGuard(match, none string) func(*downloads.Subscription) error {
 	return func(row *downloads.Subscription) error {
 		tag, _ := ParseEntityTag(downloadSubscriptionOf(row).ETag)
