@@ -377,6 +377,17 @@ func (p *MeilisearchSearchProvider) searchMeilisearch(ctx context.Context, req C
 		useFederation = false
 	}
 
+	// fallBackToKeyword switches the scan to keyword search. Keyword ranking
+	// differs from hybrid ranking, so the scan restarts from the first hit
+	// instead of carrying over hybrid-ranked offsets and items.
+	fallBackToKeyword := func(reason string) {
+		semanticFallback = reason
+		baseSearchReq.Vector = nil
+		baseSearchReq.Hybrid = nil
+		useFederation = false
+		accessible, meiliOffset, scanned = nil, 0, 0
+	}
+
 	for len(accessible) < target && !exhausted {
 		if scanned >= meilisearchCandidateScanCap {
 			return nil, fmt.Errorf("meilisearch candidate scan cap reached")
@@ -402,27 +413,15 @@ func (p *MeilisearchSearchProvider) searchMeilisearch(ctx context.Context, req C
 				p.markFederationSupported()
 			} else if isMeilisearchFederationUnsupported(err) {
 				p.markFederationUnsupported()
-				semanticFallback = "meilisearch federation unsupported; using keyword search"
-				baseSearchReq.Vector = nil
-				baseSearchReq.Hybrid = nil
-				useFederation = false
-				searchReq = baseSearchReq
-				searchReq.Offset = meiliOffset
-				searchReq.Limit = nextLimit
-				resp, err = p.client.Search(ctx, indexUID, searchReq)
+				fallBackToKeyword("meilisearch federation unsupported; using keyword search")
+				continue
 			}
 		} else {
 			resp, err = p.client.Search(ctx, indexUID, searchReq)
 		}
 		if err != nil && baseSearchReq.Hybrid != nil {
-			semanticFallback = "meilisearch hybrid search failed: " + err.Error()
-			baseSearchReq.Vector = nil
-			baseSearchReq.Hybrid = nil
-			useFederation = false
-			searchReq = baseSearchReq
-			searchReq.Offset = meiliOffset
-			searchReq.Limit = nextLimit
-			resp, err = p.client.Search(ctx, indexUID, searchReq)
+			fallBackToKeyword("meilisearch hybrid search failed: " + err.Error())
+			continue
 		}
 		if err != nil {
 			return nil, err
@@ -612,7 +611,8 @@ func (p *MeilisearchSearchProvider) buildFederatedSearchRequest(
 	queries := []meilisearchFederatedQuery{keywordQuery(mediaFilter)}
 	if semanticWeight > 0 {
 		// An empty q with a semanticRatio of 1 makes Meilisearch rank by the
-		// supplied vector alone.
+		// supplied vector alone. A meaning-only search never applies q, so
+		// negative terms (-word) narrow only the keyword query.
 		semanticQuery := meilisearchFederatedQuery{
 			IndexUID:              indexUID,
 			Filter:                mediaFilter,
