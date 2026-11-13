@@ -264,7 +264,10 @@ network position:
   Registration in either mode requires every resolved address to be allowed;
   lookup failure, an empty answer, or the two-second lookup deadline rejects
   the destination. Public-only requests also refuse the server's own interface
-  addresses, as required by the shared policy.
+  addresses, as required by the shared policy. The delivery client keeps
+  one connection pool per value of the setting and picks one from its current
+  value on every request, so turning it off also stops deliveries over
+  keep-alive connections opened while it was on.
 
 Webhook URLs and generic signing secrets are encrypted at rest, never
 returned by the API after creation (only the host is readable — a Discord
