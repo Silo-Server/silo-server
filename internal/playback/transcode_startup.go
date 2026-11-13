@@ -2,6 +2,7 @@ package playback
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -198,19 +199,41 @@ var hardwareDecodeUnsupportedMarkers = []string{
 	"Hardware is lacking required capabilities",
 }
 
+// ErrHardwareDecodeUnsupported marks an FFmpeg failure whose diagnostics say
+// the hardware decoder cannot decode the source. errors.Is finds it on the
+// startup errors TranscodeSession and PrepareFile return.
+var ErrHardwareDecodeUnsupported = errors.New("hardware decoder cannot decode the source")
+
 // IsHardwareDecodeUnsupported reports whether a startup error says the
 // hardware decoder cannot decode this source.
 func IsHardwareDecodeUnsupported(err error) bool {
+	return errors.Is(err, ErrHardwareDecodeUnsupported)
+}
+
+// classifyFFmpegFailure marks err with ErrHardwareDecodeUnsupported when
+// stderr carries a decoder rejection, leaving its message unchanged. Callers
+// pass FFmpeg's whole retained stderr, not the excerpt an error message keeps,
+// so earlier output cannot push the rejection out of view.
+func classifyFFmpegFailure(err error, stderr string) error {
 	if err == nil {
-		return false
+		return nil
 	}
-	message := err.Error()
 	for _, marker := range hardwareDecodeUnsupportedMarkers {
-		if strings.Contains(message, marker) {
-			return true
+		if strings.Contains(stderr, marker) {
+			return &hardwareDecodeUnsupportedError{err: err}
 		}
 	}
-	return false
+	return err
+}
+
+type hardwareDecodeUnsupportedError struct{ err error }
+
+func (e *hardwareDecodeUnsupportedError) Error() string { return e.err.Error() }
+
+func (e *hardwareDecodeUnsupportedError) Unwrap() error { return e.err }
+
+func (e *hardwareDecodeUnsupportedError) Is(target error) bool {
+	return target == ErrHardwareDecodeUnsupported
 }
 
 // NewSoftwareDecodeRetryPipeline returns the fallback for a startup whose

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -426,6 +427,8 @@ func TestStartReadyTranscodeRetriesDecoderRejectionOnCPU(t *testing.T) {
 			wantAccel: []string{transcodeHWNVENC, transcodeHWNVENC}},
 		{name: "software after mixed fails", policy: TranscodeStartupRetryOtherDevice, stderr: nvdecRejection,
 			wantAccel: []string{transcodeHWNVENC, transcodeHWNVENC, HWAccelNone}},
+		{name: "rejection after long output", policy: TranscodeStartupRetryAccelChange, stderr: strings.Repeat("x", 600) + "\n" + nvdecRejection, readyOn: 2,
+			wantAccel: []string{transcodeHWNVENC, transcodeHWNVENC}},
 		{name: "no retry policy", policy: TranscodeStartupRetryNone, stderr: nvdecRejection,
 			wantAccel: []string{transcodeHWNVENC}},
 		{name: "other failure keeps accel change rule", policy: TranscodeStartupRetryAccelChange, stderr: "[vost#0:0/h264_nvenc] Could not open encoder",
