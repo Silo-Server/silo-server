@@ -114,8 +114,10 @@ next value of the sequence `plugin_auth_identity_answer_seq`. A re-check
 that records an `ACTIVE` answer or a refusal, a pending refusal included,
 takes a value as it records it and stores it on the identity
 (`plugin_auth_identities.answer_seq`); an answer that decides nothing takes
-none. A link an administrator makes starts with a value, and a link a
-sign-in makes with 0. Account resolution, holding the lock on (installation, subject) that the
+none, and a pending refusal applied again keeps the value it took when the
+provider gave it. A link the account's holder or an administrator makes starts with a
+value, and a link a sign-in makes for itself (account creation, email
+auto-match) with 0. Account resolution, holding the lock on (installation, subject) that the
 re-check holds from before its call until its commit, refuses a sign-in
 whose fence is older than the identity's `answer_seq` with
 `provider_unavailable`, before it writes anything. The person signs in
@@ -194,7 +196,8 @@ sign-in with a new session after its credentials were retired. A directory
 redemption does (see Completion codes): account resolution commits first, then
 the session's transaction locks the account, rechecks that it is enabled, and
 locks the enabled installation and the linked identity. A disable or unlink
-that commits in between refuses the sign-in instead of missing its session.
+that commits in between refuses the sign-in instead of missing its session,
+and so does a re-check that refuses the account in between (`not_permitted`).
 
 Jellyfin's `password#PIN` convention (a profile PIN after the last `#`)
 applies to local accounts only: a name routed to the directory gets one

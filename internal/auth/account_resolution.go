@@ -344,7 +344,7 @@ func linkIdentityTx(ctx context.Context, tx pgx.Tx, user *models.User, installat
 	if alreadyLinked {
 		return nil, ErrAccountAlreadyLinked
 	}
-	linked, err := insertIdentity(ctx, tx, user.ID, installationID, identity, signedIn)
+	linked, err := insertIdentity(ctx, tx, user.ID, installationID, identity, signedIn, attachSessions)
 	if err != nil {
 		if isDuplicateKeyError(err) {
 			return nil, ErrIdentityLinkedElsewhere
@@ -478,7 +478,7 @@ func (r *AccountResolver) createAccount(ctx context.Context, tx pgx.Tx, in Resol
 		if err := savepoint.Commit(ctx); err != nil {
 			return nil, 0, err
 		}
-		linked, err := insertIdentity(ctx, tx, user.ID, in.InstallationID, identity, true)
+		linked, err := insertIdentity(ctx, tx, user.ID, in.InstallationID, identity, true, false)
 		if err != nil {
 			return nil, 0, err
 		}

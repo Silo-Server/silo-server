@@ -7,8 +7,9 @@
 -- because a clock can step back.
 --
 -- 0 means no such answer is on record: existing links, and links a sign-in
--- creates. A link an administrator makes takes a value, so an answer obtained
--- before that link existed is not applied to it.
+-- creates for itself. A link the account's holder or an administrator makes
+-- takes a value, so an answer obtained before that link existed is not
+-- applied to it.
 
 -- +goose Up
 -- +goose StatementBegin

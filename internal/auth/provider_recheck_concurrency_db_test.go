@@ -365,3 +365,19 @@ func TestProviderRecheckOutlastsOverlappingSignInDB(t *testing.T) {
 		t.Fatalf("after the overlap: role %q with %d live sessions, want the re-check's demotion to stand", role, sessions)
 	}
 }
+
+// TestProviderRecheckRefusalStopsSessionOfResolvedSignInDB: a sign-in
+// resolves, then a re-check refuses the account before the sign-in's session
+// is created. The session must not open after the refusal.
+func TestProviderRecheckRefusalStopsSessionOfResolvedSignInDB(t *testing.T) {
+	env := newRecheckEnv(t, "refused_before_session", "")
+	ctx := t.Context()
+	env.checker.respond = answer(pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_NOT_PERMITTED, "")
+	if checkStatus, _, err := env.recheck.recheck(ctx, env.identityState(t), 0, false); err != nil || checkStatus != CheckStatusNotPermitted {
+		t.Fatalf("re-check = %q, %v", checkStatus, err)
+	}
+	_, err := env.svc.OpenIdentitySession(ctx, nil, IdentitySession{UserID: env.user.ID, IdentityID: env.identityID, DeviceName: "refused-test"})
+	if !errors.Is(err, ErrNotPermitted) {
+		t.Fatalf("session after the refusal = %v, want ErrNotPermitted", err)
+	}
+}
