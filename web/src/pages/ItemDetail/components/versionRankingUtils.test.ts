@@ -124,6 +124,21 @@ describe("selectDefaultVersion audio matching", () => {
 });
 
 describe("detail edition Auto", () => {
+  it.each([
+    ["4320p", undefined, 1],
+    ["8k", undefined, 1],
+    ["4320p", "1080p", 2],
+    ["", "1080p", 2],
+  ] as const)("ranks %s against 2160p with preference %s", (resolution, quality, expected) => {
+    const files = [
+      makeVersion({ file_id: 1, resolution }),
+      makeVersion({ file_id: 2, resolution: "2160p" }),
+    ];
+    expect(selectDefaultPlaybackVariantVersion(files, undefined, undefined, quality)?.file_id).toBe(
+      expected,
+    );
+  });
+
   const versions = [
     makeVersion({
       file_id: 1,

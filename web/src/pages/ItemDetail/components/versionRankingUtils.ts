@@ -3,6 +3,8 @@ import { audioTrackAtmosEvidence, mapAudioLabel } from "@/lib/mediaFormat";
 import { versionAudioAtmosEvidence } from "./versionFormatUtils";
 
 const RESOLUTION_RANK: Record<string, number> = {
+  "8k": 5,
+  "4320p": 5,
   "4k": 4,
   "2160p": 4,
   "1440p": 3,
@@ -191,10 +193,16 @@ export function selectDefaultVersion(
     editionKey != null && versions.some((v) => (v.edition_key ?? "") === editionKey)
       ? versions.filter((v) => (v.edition_key ?? "") === editionKey)
       : versions;
+  // An unmeasured file is a fallback, not evidence that it fits a quality cap.
+  const knownResolution = candidates.filter((v) => resolutionScore(v.resolution) >= 0);
+  if (knownResolution.length > 0) candidates = knownResolution;
   const cap = resolutionScore(qualityPreference ?? "auto");
   let aboveCap = false;
   if (cap >= 0) {
-    const withinCap = candidates.filter((v) => resolutionScore(v.resolution) <= cap);
+    const withinCap = candidates.filter((v) => {
+      const score = resolutionScore(v.resolution);
+      return score >= 0 && score <= cap;
+    });
     aboveCap = withinCap.length === 0;
     if (!aboveCap) candidates = withinCap;
   }
