@@ -94,8 +94,10 @@ of it on every scan and every playback decision.
   or 100 MB (`deepProbeLimits`), because MPEG transport and program streams
   and FLV announce a stream only when its first packet arrives. When the
   second probe finds video, the row is written from it. A probe that fails,
-  times out, or is rejected decides nothing: the file is cataloged as before
-  and judged again on a later scan.
+  times out, or is rejected decides nothing, and the file is cataloged as
+  before. A later scan probes it again and judges it then, except after a
+  rejection: a scan does not probe rejected bytes again until the file's
+  size or modification time changes.
 - **The verdict is stored by path** in `scanner_no_video_files`, with the
   file's size, modification time, and OSHash. It holds only while the file at
   the path still has that size and modification time, so replacing the file,
