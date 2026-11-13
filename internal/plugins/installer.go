@@ -47,6 +47,10 @@ type InstallBinaryRequest struct {
 	// BundleURL is the release's Sigstore bundle; empty when the catalog
 	// lists none.
 	BundleURL string
+	// BundleURLErr is set when the catalog's bundle_url doesn't resolve.
+	// BundleURL is then empty, and the signature check treats the bundle as
+	// failed.
+	BundleURLErr error
 	// SourceRepoURL is the catalog's repo_url, which the advisory signature
 	// policy checks a third-party release against.
 	SourceRepoURL string

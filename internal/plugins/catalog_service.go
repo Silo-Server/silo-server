@@ -63,6 +63,9 @@ type ResolvedCatalogInstall struct {
 	LegacyArchive bool
 	// BundleURL is the resolved bundle_url, empty when the entry has none.
 	BundleURL string
+	// BundleURLErr is set when the entry's bundle_url doesn't resolve. The
+	// signature check decides what that means, like a bundle that fails.
+	BundleURLErr error
 	// RepoURL is the entry's repo_url, which the advisory signature policy
 	// checks a third-party release against.
 	RepoURL string
@@ -90,6 +93,7 @@ func (t *ResolvedCatalogInstall) BinaryRequest() InstallBinaryRequest {
 		BinaryURL:     t.ArchiveURL,
 		Checksum:      t.Checksum,
 		BundleURL:     t.BundleURL,
+		BundleURLErr:  t.BundleURLErr,
 		SourceRepoURL: t.RepoURL,
 		RepositoryID:  &repositoryID,
 		PluginID:      t.PluginID,
@@ -340,11 +344,10 @@ func (s *CatalogService) catalogEntryFromPackage(repository *Repository, pkg Cat
 				return CatalogEntry{}, false, err
 			}
 		}
-		for _, resourceURL := range []string{pkg.ChecksumsURL, pkg.BundleURL} {
-			if strings.TrimSpace(resourceURL) == "" {
-				continue
-			}
-			if _, err := resolveRepositoryURL(repository.URL, resourceURL); err != nil {
+		// A bundle_url that doesn't resolve is a signature outcome decided at
+		// install, not a broken entry.
+		if strings.TrimSpace(pkg.ChecksumsURL) != "" {
+			if _, err := resolveRepositoryURL(repository.URL, pkg.ChecksumsURL); err != nil {
 				return CatalogEntry{}, false, err
 			}
 		}
@@ -433,10 +436,9 @@ func (s *CatalogService) installTargetFromPackage(ctx context.Context, repositor
 		}
 
 		var bundleURL string
+		var bundleURLErr error
 		if strings.TrimSpace(pkg.BundleURL) != "" {
-			if bundleURL, err = resolveRepositoryURL(repository.URL, pkg.BundleURL); err != nil {
-				return nil, invalidCatalogAddressError(err)
-			}
+			bundleURL, bundleURLErr = resolveRepositoryURL(repository.URL, pkg.BundleURL)
 		}
 
 		return &ResolvedCatalogInstall{
@@ -445,6 +447,7 @@ func (s *CatalogService) installTargetFromPackage(ctx context.Context, repositor
 			Checksum:      checksum,
 			LegacyArchive: false,
 			BundleURL:     bundleURL,
+			BundleURLErr:  bundleURLErr,
 			RepoURL:       pkg.RepoURL,
 		}, nil
 	}

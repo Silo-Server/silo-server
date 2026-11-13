@@ -78,8 +78,9 @@ func TestTUFTrustRootServesCacheOffline(t *testing.T) {
 	}
 }
 
-// A verification whose context ends stops waiting on a mirror that doesn't
-// answer, instead of holding the cache lock until the fetch timeout.
+// A verification whose context ends stops waiting, both on a mirror that
+// doesn't answer and behind another verification holding the cache, instead
+// of waiting out the fetch timeout.
 func TestTUFTrustRootStopsWithItsContext(t *testing.T) {
 	arrived := make(chan struct{}, 1)
 	mirror := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -90,31 +91,51 @@ func TestTUFTrustRootStopsWithItsContext(t *testing.T) {
 		<-r.Context().Done()
 	}))
 	t.Cleanup(mirror.Close)
-	trust := NewTUFTrustRoot(TUFTrustRootOptions{CacheDir: filepath.Join(t.TempDir(), "tuf"), Transport: http.DefaultTransport, RepositoryURL: mirror.URL})
+	waiting := make(chan struct{}, 1)
+	trust := NewTUFTrustRoot(TUFTrustRootOptions{
+		CacheDir:      filepath.Join(t.TempDir(), "tuf"),
+		Transport:     http.DefaultTransport,
+		RepositoryURL: mirror.URL,
+		onLockWait:    func() { waiting <- struct{}{} },
+	})
+	start := func(ctx context.Context) <-chan error {
+		done := make(chan error, 1)
+		go func() {
+			_, err := trust.TrustedMaterial(ctx)
+			done <- err
+		}()
+		return done
+	}
+	// A fetcher or lock that ignores the context returns only at
+	// tufFetchTimeout.
+	requireCanceled := func(who string, done <-chan error) {
+		t.Helper()
+		select {
+		case err := <-done:
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("%s: TrustedMaterial() error = %v, want context.Canceled", who, err)
+			}
+		case <-time.After(tufFetchTimeout / 2):
+			t.Fatalf("%s: TrustedMaterial() kept waiting after its context was canceled", who)
+		}
+	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() {
-		_, err := trust.TrustedMaterial(ctx)
-		done <- err
-	}()
+	fetchCtx, cancelFetch := context.WithCancel(context.Background())
+	defer cancelFetch()
+	fetching := start(fetchCtx)
 	<-arrived
-	cancel()
-	defer func() {
-		trust.mu.Lock()
-		defer trust.mu.Unlock()
-		if !trust.refreshFailedAt.IsZero() {
-			t.Error("a canceled verification was recorded as a failed refresh")
-		}
-	}()
-	// A fetcher that ignores the context returns only at tufFetchTimeout.
-	select {
-	case err := <-done:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("TrustedMaterial() error = %v, want context.Canceled", err)
-		}
-	case <-time.After(tufFetchTimeout / 2):
-		t.Fatal("TrustedMaterial() kept waiting on the mirror after its context was canceled")
+
+	waitCtx, cancelWait := context.WithCancel(context.Background())
+	queued := start(waitCtx)
+	<-waiting
+	cancelWait()
+	requireCanceled("caller waiting for the cache", queued)
+
+	cancelFetch()
+	requireCanceled("caller fetching", fetching)
+	// Once both returned, the cache lock is free and nothing else runs.
+	if !trust.refreshFailedAt.IsZero() {
+		t.Error("a canceled verification was recorded as a failed refresh")
 	}
 }
 

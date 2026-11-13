@@ -98,10 +98,12 @@ The plugin ID decides the policy, not the catalog that lists it:
   The Source Repository URI must be the table's repository for that ID, the
   Source Repository Ref `refs/tags/v<catalog version>`, the runner environment
   `github-hosted`, and the predicate SLSA provenance v1. A request with an
-  empty plugin ID or version gets this policy too, since it can't be ruled out
-  as first-party.
+  empty plugin ID gets this policy too, since it can't be ruled out as
+  first-party. Under this policy an empty plugin ID or version fails the
+  check, since there is no tag to require.
 - Any other ID gets the **advisory** policy, and only when the entry has
-  `bundle_url`. It applies the same issuer, timestamp and digest checks, with
+  `bundle_url`. An empty version there gets no tag to compare, so the check
+  records `invalid`. It applies the same issuer, timestamp and digest checks, with
   the catalog entry's `repo_url` as Source Repository URI, ref
   `refs/tags/v<version>`, and any workflow. The outcome is recorded and never
   refuses an install.

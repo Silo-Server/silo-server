@@ -155,6 +155,10 @@ func (c *SignatureChecker) checkBinary(
 		cause := fmt.Errorf("catalog install of %q version %q names no plugin ID or version", req.PluginID, req.Version)
 		return c.outcome(ctx, req, refusing, SignatureStateInvalid, packageError(cause, signatureIdentityMessage))
 	}
+	if req.BundleURLErr != nil {
+		cause := fmt.Errorf("bundle_url of %s %s doesn't resolve: %w", req.PluginID, req.Version, req.BundleURLErr)
+		return c.outcome(ctx, req, refusing, SignatureStateInvalid, packageError(cause, signatureInvalidMessage))
+	}
 	if strings.TrimSpace(req.BundleURL) == "" {
 		if !required {
 			return unsignedSignature, nil

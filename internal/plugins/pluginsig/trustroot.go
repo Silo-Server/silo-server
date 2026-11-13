@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/sigstore/sigstore-go/pkg/root"
@@ -55,6 +54,9 @@ type TUFTrustRootOptions struct {
 	embeddedRoot []byte
 	// now replaces time.Now in tests.
 	now func() time.Time
+	// onLockWait, in tests, runs when a caller starts waiting for another
+	// verification to release the cache.
+	onLockWait func()
 }
 
 // TUFTrustRoot loads Sigstore's public-good trusted root through TUF. Nothing
@@ -64,8 +66,10 @@ type TUFTrustRootOptions struct {
 // metadata expired, TrustedMaterial fails.
 type TUFTrustRoot struct {
 	opts TUFTrustRootOptions
-	// mu serializes access to the cache directory and refreshFailedAt.
-	mu sync.Mutex
+	// lock holds one token while a caller uses the cache directory and
+	// refreshFailedAt. A channel rather than a mutex, so a caller whose
+	// context ends stops waiting behind a slow fetch.
+	lock chan struct{}
 	// refreshFailedAt is when the last refresh from the mirror failed; zero
 	// after a refresh succeeds.
 	refreshFailedAt time.Time
@@ -82,7 +86,7 @@ func NewTUFTrustRoot(opts TUFTrustRootOptions) *TUFTrustRoot {
 	if opts.now == nil {
 		opts.now = time.Now
 	}
-	return &TUFTrustRoot{opts: opts}
+	return &TUFTrustRoot{opts: opts, lock: make(chan struct{}, 1)}
 }
 
 // TrustedMaterial returns the current trusted root. It refreshes TUF once the
@@ -95,8 +99,10 @@ func (t *TUFTrustRoot) TrustedMaterial(ctx context.Context) (root.TrustedMateria
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	if err := t.acquire(ctx); err != nil {
+		return nil, err
+	}
+	defer func() { <-t.lock }()
 	// Another verification may have held the lock until ctx ended.
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -128,6 +134,24 @@ func (t *TUFTrustRoot) TrustedMaterial(ctx context.Context) (root.TrustedMateria
 		return nil, errors.Join(err, t.noteFailure(ctx, cacheErr))
 	}
 	return cached, nil
+}
+
+// acquire takes the cache lock, or returns ctx's error once ctx ends first.
+func (t *TUFTrustRoot) acquire(ctx context.Context) error {
+	select {
+	case t.lock <- struct{}{}:
+		return nil
+	default:
+	}
+	if t.opts.onLockWait != nil {
+		t.opts.onLockWait()
+	}
+	select {
+	case t.lock <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // noteFailure records a failed load as a failed refresh, unless ctx ended,

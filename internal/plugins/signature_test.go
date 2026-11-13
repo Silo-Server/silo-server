@@ -34,6 +34,8 @@ type signedRelease struct {
 	sign    func(digest []byte) *pluginsigtest.Release
 	repoURL string
 	trust   pluginsig.TrustedMaterialFunc
+	// bundleURLErr stands for a catalog bundle_url that doesn't resolve.
+	bundleURLErr error
 }
 
 // serveSignedRelease serves rel's binary and bundle and returns the catalog
@@ -65,7 +67,7 @@ func serveSignedRelease(t *testing.T, sigstore *pluginsigtest.Sigstore, rel sign
 		trust = sigstore.TrustedMaterial
 	}
 	installer := NewInstaller(store, InstallerOptions{BaseDir: t.TempDir(), HTTPClient: server.Client(), Signatures: testSignatureChecker(trust, enforce)})
-	req := InstallBinaryRequest{BinaryURL: server.URL + "/plugin", Checksum: sha256Hex(binary), PluginID: rel.pluginID, Version: rel.version, SourceRepoURL: rel.repoURL}
+	req := InstallBinaryRequest{BinaryURL: server.URL + "/plugin", Checksum: sha256Hex(binary), PluginID: rel.pluginID, Version: rel.version, SourceRepoURL: rel.repoURL, BundleURLErr: rel.bundleURLErr}
 	if rel.sign != nil {
 		req.BundleURL = server.URL + "/bundle"
 	}
@@ -133,6 +135,8 @@ func TestInstallBinarySignaturePolicy(t *testing.T) {
 		{name: "first-party with the trust root unreachable", release: signedRelease{pluginID: tmdbID, version: "1.2.3", sign: official(tmdbRepoURL), trust: offline}, wantState: SignatureStateUnknown, refusedWhenEnforcing: true},
 		{name: "third-party signed release", release: signedRelease{pluginID: "test.plugin", version: "1.2.3", sign: thirdParty, repoURL: thirdRepo + "/"}, wantState: SignatureStateVerified},
 		{name: "third-party without bundle", release: signedRelease{pluginID: "test.plugin", version: "1.2.3"}, wantState: SignatureStateUnsigned},
+		{name: "first-party with an unresolvable bundle_url", release: signedRelease{pluginID: tmdbID, version: "1.2.3", bundleURLErr: errors.New("bad url")}, wantState: SignatureStateInvalid, refusedWhenEnforcing: true},
+		{name: "third-party with an unresolvable bundle_url", release: signedRelease{pluginID: "test.plugin", version: "1.2.3", bundleURLErr: errors.New("bad url")}, wantState: SignatureStateInvalid},
 		{name: "third-party signed from another repo", release: signedRelease{pluginID: "test.plugin", version: "1.2.3", sign: thirdParty, repoURL: "https://github.com/someone/other"}, wantState: SignatureStateInvalid},
 	} {
 		for _, enforce := range []bool{false, true} {
@@ -186,6 +190,9 @@ func TestInstallTargetRefusesUnsignableFirstPartyEntries(t *testing.T) {
 		{name: "first-party with bundle_url", pkg: CatalogPackage{Manifest: packageErrorTestManifest(tmdbID, "1.2.3"), Binaries: binaries, BundleURL: "plugin.sigstore.json"}},
 		{name: "third-party legacy archive", pkg: CatalogPackage{Manifest: packageErrorTestManifest("test.plugin", "1.2.3"), ArchiveURL: "plugin.zip"}},
 		{name: "third-party without bundle_url", pkg: CatalogPackage{Manifest: packageErrorTestManifest("test.plugin", "1.2.3"), Binaries: binaries}},
+		// An unresolvable bundle_url is left to the signature check at install.
+		{name: "first-party with unresolvable bundle_url", pkg: CatalogPackage{Manifest: packageErrorTestManifest(tmdbID, "1.2.3"), Binaries: binaries, BundleURL: "%zz"}},
+		{name: "third-party with unresolvable bundle_url", pkg: CatalogPackage{Manifest: packageErrorTestManifest("test.plugin", "1.2.3"), Binaries: binaries, BundleURL: "%zz"}},
 	} {
 		for _, enforce := range []bool{false, true} {
 			catalog := NewCatalogService(nil, CatalogServiceOptions{CurrentOS: "linux", CurrentArch: "amd64", Signatures: testSignatureChecker(nil, enforce)})
@@ -200,7 +207,15 @@ func TestInstallTargetRefusesUnsignableFirstPartyEntries(t *testing.T) {
 				t.Errorf("%s, enforced %v: error = %v", tc.name, enforce, err)
 				continue
 			}
-			if tc.pkg.BundleURL != "" && target.BundleURL != "https://catalog.example.test/plugin.sigstore.json" {
+			switch {
+			case tc.pkg.BundleURL == "%zz":
+				if target.BundleURLErr == nil || target.BinaryRequest().BundleURLErr == nil || target.BundleURL != "" {
+					t.Errorf("%s: target = %+v, want the resolution error carried to the install request", tc.name, target)
+				}
+				if _, listed, err := catalog.catalogEntryFromPackage(external, tc.pkg); !listed || err != nil {
+					t.Errorf("%s: catalog entry listed = %v, error = %v; want it listed", tc.name, listed, err)
+				}
+			case tc.pkg.BundleURL != "" && target.BundleURL != "https://catalog.example.test/plugin.sigstore.json":
 				t.Errorf("%s: bundle URL = %q, want it resolved against the catalog", tc.name, target.BundleURL)
 			}
 		}
