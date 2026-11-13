@@ -1275,10 +1275,10 @@ tombstone. The retained contract is:
   `degraded` when Postgres is healthy. Artwork probes remain shared and cached for 30 seconds;
   a request stops waiting at its deadline without canceling the shared probe or starting
   another while it is still running. While a refresh is still running, a request reports the
-  previous artwork result until the refresh's five-second timeout, then reports failure. Before
-  the first artwork probe finishes there is no previous result, so a request that reaches its
-  deadline first reports `artwork: false`; with Postgres healthy that answer is `200` with
-  `degraded`.
+  previous artwork result until the refresh's five-second timeout, then reports failure at once
+  without waiting out its deadline, until the stuck probe returns. Before the first artwork
+  probe finishes there is no previous result, so a request that reaches its deadline first
+  reports `artwork: false`; with Postgres healthy that answer is `200` with `degraded`.
   Revision (2026-10-11, with graceful shutdown): once the process receives SIGTERM or SIGINT it
   answers `503` with `{"status":"shutting_down","postgres":<bool>,"s3":<bool>,"artwork":<bool>}`
   while it keeps serving for `SILO_SHUTDOWN_DELAY`, so load balancers route away before the

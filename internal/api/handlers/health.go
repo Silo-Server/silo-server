@@ -241,6 +241,11 @@ func (h *ReadyHandler) checkArtwork(ctx context.Context) bool {
 			h.artworkPending = nil
 			close(pending)
 		}()
+	} else if time.Since(h.artworkStarted) >= artworkProbeTimeout {
+		// The refresh is stuck past its timeout, so the answer is failure
+		// whatever it does next; waiting would only delay that answer.
+		h.artworkMu.Unlock()
+		return false
 	}
 	h.artworkMu.Unlock()
 	select {

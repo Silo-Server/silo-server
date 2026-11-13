@@ -86,8 +86,18 @@ func TestArtworkRefreshReportsPreviousResultUntilItTimesOut(t *testing.T) {
 	h.artworkMu.Lock()
 	h.artworkStarted = time.Now().Add(-artworkProbeTimeout)
 	h.artworkMu.Unlock()
-	if h.checkArtwork(expired) {
-		t.Fatal("a refresh stuck past its timeout still reported healthy storage")
+	// Its answer is now decided, so a caller with time left must not wait on
+	// it: a stuck mount would otherwise cost every readiness answer its whole
+	// budget.
+	result := make(chan bool, 1)
+	go func() { result <- h.checkArtwork(t.Context()) }()
+	select {
+	case ok := <-result:
+		if ok {
+			t.Fatal("a refresh stuck past its timeout still reported healthy storage")
+		}
+	case <-time.After(readyProbeTimeout):
+		t.Fatal("a caller waited on a refresh already stuck past its timeout")
 	}
 }
 

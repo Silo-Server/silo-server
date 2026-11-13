@@ -36,7 +36,7 @@ func TestReadinessBoundsDatabaseOutageAndRecovers(t *testing.T) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if elapsed := time.Since(started); elapsed >= 1500*time.Millisecond {
-		t.Fatalf("readiness took %v; must leave headroom for a two-second monitor", elapsed)
+		t.Fatalf("readiness took %v; want an answer soon after the one-second budget", elapsed)
 	}
 	var body readyStatus
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
