@@ -235,7 +235,7 @@ func (s *Service) subscriptionEpisodeItems(ctx context.Context, sub *Subscriptio
 	if versionFromHistory {
 		historyProfile = sub.ProfileID
 	}
-	return s.episodeItems(ctx, sub.UserID, historyProfile, sub.SeriesID, inScope, entryOwner{sub.ProfileID, sub.DeviceID}, filter)
+	return s.episodeItems(ctx, sub.UserID, historyProfile, sub.SeriesID, inScope, entryOwner{profileID: sub.ProfileID, deviceID: sub.DeviceID, replaces: map[string]ManagedCreateExpectation{}}, filter)
 }
 
 // watchedLookupChunk bounds one progress lookup, as the catalog's playable

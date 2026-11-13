@@ -746,7 +746,7 @@ func (s *Service) createSeriesScoped(ctx context.Context, userID int, req Create
 		return nil, "", nil, fmt.Errorf("listing episodes: %w", err)
 	}
 
-	items, skipped, err := s.episodeItemsWithSkipped(ctx, userID, req.historyProfile(), req.ContentID, episodes, template, entryOwner{req.ProfileID, req.DeviceID}, filter)
+	items, skipped, err := s.episodeItemsWithSkipped(ctx, userID, req.historyProfile(), req.ContentID, episodes, template, entryOwner{profileID: req.ProfileID, deviceID: req.DeviceID, replaces: req.ExpectedEntries}, filter)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -864,7 +864,7 @@ func (s *Service) episodeItemsWithSkipped(ctx context.Context, userID int, profi
 	}
 	items := make([]managedItem, 0, len(episodes))
 	skipped := make([]SkippedDownload, 0)
-	queued := make(map[int]bool, len(episodes))
+	queued := make(map[string]bool, len(episodes))
 	for _, ep := range episodes {
 		files := filesByEpisode[ep.ContentID]
 		if len(files) == 0 {
@@ -884,6 +884,8 @@ func (s *Service) episodeItemsWithSkipped(ctx context.Context, userID int, profi
 			}
 			switch {
 			case first == nil:
+				// Later episodes of the range share what this one queues.
+				picks[file.EpisodeID] = file
 			case servedBy(files, first.ID):
 				file = first
 			default:
@@ -894,14 +896,15 @@ func (s *Service) episodeItemsWithSkipped(ctx context.Context, userID int, profi
 		episodeID := ep.ContentID
 		// A multi-episode file is downloaded once, under its first episode,
 		// so a later page of the same batch finds the entry an earlier page
-		// registered.
+		// registered. One item per entry: an episode sharing an entry this
+		// page already queues adds nothing.
 		if file.MultiEpisodeEnd > file.MultiEpisodeStart {
-			if queued[file.ID] {
-				continue
-			}
-			queued[file.ID] = true
 			episodeID = file.EpisodeID
 		}
+		if queued[episodeID] {
+			continue
+		}
+		queued[episodeID] = true
 		items = append(items, managedItem{file: file, contentID: seriesID, episodeID: episodeID})
 	}
 	return items, skipped, nil
@@ -915,23 +918,39 @@ const SkipReasonMultiEpisodeConflict = "multi_episode_conflict"
 
 // entryOwner is the profile and device a batch registers managed entries
 // for; an empty deviceID is an ephemeral batch with no entries to consult.
-type entryOwner struct{ profileID, deviceID string }
+// replaces names the episodes whose existing entries the batch replaces with
+// its pick (CreateRequest.ExpectedEntries); nil replaces every entry, and an
+// empty map, as a monitor sync uses, keeps them all.
+type entryOwner struct {
+	profileID, deviceID string
+	replaces            map[string]ManagedCreateExpectation
+}
+
+// keeps reports whether the batch leaves the existing entry of episodeID as
+// it is.
+func (o entryOwner) keeps(episodeID string) bool {
+	if o.replaces == nil {
+		return false
+	}
+	_, replaced := o.replaces[episodeID]
+	return !replaced
+}
 
 // linkedEpisodeFile returns the file the first episode of a multi-episode
-// range registers: its pick when the batch holds it, otherwise the file of
-// the device's entry for it, looked up among served, the files serving the
-// later episode. It returns nil when neither is known, and the later episode
-// then registers its pick under the first episode.
+// range ends up registered with: the file of the device's entry for it when
+// the batch keeps that entry or does not hold the episode, otherwise its pick.
+// An entry's file is looked up among served, the files serving the later
+// episode. It returns nil when neither is known, and the later episode then
+// registers its pick under the first episode; the caller records that pick so
+// the range's other episodes share it.
 func (s *Service) linkedEpisodeFile(ctx context.Context, userID int, seriesID, linkedID string, picks map[string]*models.MediaFile, owner entryOwner, served []*models.MediaFile) (*models.MediaFile, error) {
-	if pick, ok := picks[linkedID]; ok {
+	pick, onPage := picks[linkedID]
+	if owner.deviceID == "" || (onPage && !owner.keeps(linkedID)) {
 		return pick, nil
-	}
-	if owner.deviceID == "" {
-		return nil, nil
 	}
 	entry, err := s.repo.GetManagedEntry(ctx, userID, owner.profileID, owner.deviceID, seriesID, linkedID)
 	if errors.Is(err, ErrNotFound) {
-		return nil, nil
+		return pick, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("reading the entry of episode %s: %w", linkedID, err)

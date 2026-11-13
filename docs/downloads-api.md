@@ -515,8 +515,9 @@ no entry of their own. A later episode with a file of its own takes that file.
 An episode served only by multi-episode files shares the first episode's entry
 when that entry's file serves it. When the first episode keeps a file that does
 not, the episode is listed in `skipped` with reason `multi_episode_conflict`.
-The first episode's file is its pick on the same page, otherwise the file of the
-device's existing entry for it.
+The first episode's file is the one its entry holds after the request: the
+device's existing entry when the page keeps it (see below) or the episode is on
+another page, otherwise the page's pick for it.
 
 Batch pages preserve existing managed entries by default, including their chosen
 bytes, completion or terminal status, revision and previous batch membership. Use

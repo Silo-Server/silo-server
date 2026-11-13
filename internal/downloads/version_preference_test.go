@@ -266,6 +266,16 @@ func TestEpisodeItemsKeepEachRowOnItsFilesLinkedEpisode(t *testing.T) {
 		"ep-2": {UpdatedAt: "2026-11-02T10:00:00Z", LastFileID: new(8)},
 	}}}
 
+	// Two versions of S01E01-E03; the profile last played episode 2 in 720p
+	// and episode 3 in 1080p.
+	span720 := &models.MediaFile{ID: 9, ContentID: "series", EpisodeID: "ep-1", Resolution: "720p", MultiEpisodeStart: 1, MultiEpisodeEnd: 3}
+	span1080 := &models.MediaFile{ID: 10, ContentID: "series", EpisodeID: "ep-1", Resolution: "1080p", MultiEpisodeStart: 1, MultiEpisodeEnd: 3}
+	spanning := episodeFiles{"ep-2": {span720, span1080}, "ep-3": {span720, span1080}}
+	laterHistory := hintProgressStores{&hintProgressStore{rows: map[string]userstore.WatchProgress{
+		"ep-2": {UpdatedAt: "2026-11-01T10:00:00Z", LastFileID: new(9)},
+		"ep-3": {UpdatedAt: "2026-11-02T10:00:00Z", LastFileID: new(10)},
+	}}}
+
 	cases := map[string]struct {
 		svc      *Service
 		episodes []*models.Episode
@@ -283,6 +293,9 @@ func TestEpisodeItemsKeepEachRowOnItsFilesLinkedEpisode(t *testing.T) {
 		// Episode 2 would pick the 1080p range, but episode 1's 720p range
 		// already serves it.
 		"episode 1's range serves episode 2": {&Service{fileRepo: versions, progressStores: history}, season[:2], nil, map[string]int{"ep-1": 7}, nil},
+		// Without episode 1 on the page or an entry for it, the first range
+		// queued under episode 1 serves the later episodes too.
+		"the first queued range serves later episodes": {&Service{fileRepo: spanning, progressStores: laterHistory}, season[1:], nil, map[string]int{"ep-1": 9}, nil},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

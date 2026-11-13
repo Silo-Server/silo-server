@@ -169,11 +169,19 @@ func TestSeasonWithAMultiEpisodeFileRegistersEachEpisodeOncePostgres(t *testing.
 	svc := NewService(repo, nil, nil, files, createItemResolver{}, pager, fakeUserRepo{&models.User{ID: 1, DownloadAllowed: new(true)}}, &syncAccess{}, nil, &config.DownloadConfig{Enabled: true})
 	req := CreateRequest{ContentID: "series", ProfileID: "profile", DeviceID: "device", BatchID: "season", StrictIdentity: true, VersionTemplateFileID: 1}
 
+	var pageWith func(string, CreateRequest, ...*models.Episode) CreatePage
 	pageOf := func(device string, eps ...*models.Episode) CreatePage {
 		t.Helper()
+		return pageWith(device, req, eps...)
+	}
+	pageWith = func(device string, r CreateRequest, eps ...*models.Episode) CreatePage {
+		t.Helper()
 		pager.rows = eps
-		r := req
 		r.DeviceID = device
+		files.single = own // the version template the request names
+		if r.VersionTemplateFileID == multi.ID {
+			files.single = multi
+		}
 		page, err := svc.CreateSeriesPage(t.Context(), 1, r, new(1), nil, 10, catalog.AccessFilter{})
 		if err != nil {
 			t.Fatal(err)
@@ -206,6 +214,26 @@ func TestSeasonWithAMultiEpisodeFileRegistersEachEpisodeOncePostgres(t *testing.
 	// episode 1, episode 3 registers the range under episode 1.
 	if alone := pageOf("fresh", ep3); !reflect.DeepEqual(registered(alone), map[string]int{"ep-1": 3}) {
 		t.Fatalf("episode 3 alone %+v skipped %+v", alone.Items, alone.Skipped)
+	}
+
+	// A page that keeps existing entries follows episode 1's entry, not its
+	// pick. Episode 1 kept on the range serves episode 3 through that one
+	// entry; kept on its own file, episode 3 is skipped.
+	keep := req
+	keep.ExpectedEntries = map[string]ManagedCreateExpectation{}
+	rangeFirst := req
+	rangeFirst.VersionTemplateFileID = 3
+	pageWith("kept-range", rangeFirst, ep1, ep2, ep3)
+	kept := pageWith("kept-range", keep, ep1, ep2, ep3)
+	if got := registered(kept); !reflect.DeepEqual(got, map[string]int{"ep-1": 3, "ep-2": 2}) || len(kept.Items) != 2 || len(kept.Skipped) != 0 {
+		t.Fatalf("kept range %+v skipped %+v", kept.Items, kept.Skipped)
+	}
+	pageWith("kept-own", req, ep1, ep2, ep3)
+	keepRange := rangeFirst
+	keepRange.ExpectedEntries = map[string]ManagedCreateExpectation{}
+	ownKept := pageWith("kept-own", keepRange, ep1, ep2, ep3)
+	if got := registered(ownKept); !reflect.DeepEqual(got, map[string]int{"ep-1": 1, "ep-2": 2}) || len(ownKept.Skipped) != 1 || ownKept.Skipped[0].EpisodeID != "ep-3" {
+		t.Fatalf("kept own file %+v skipped %+v", ownKept.Items, ownKept.Skipped)
 	}
 }
 
