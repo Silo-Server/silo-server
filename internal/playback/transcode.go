@@ -193,7 +193,11 @@ type TranscodeOpts struct {
 	TargetAudioBitrateKbps int
 	TargetBitrateKbps      int     // max video bitrate in kbps; 0 = CRF-only (no cap)
 	TotalDuration          float64 // total media duration in seconds (for VOD manifest)
-	FastStart              bool    // use superfast preset for faster first-segment production
+	// SourceFrameRate is the source video's frame rate, which a prepared file
+	// keeps. A prepared download reads its progress from the frames encoded
+	// at this rate (see prepareProgressWriter). Zero when unknown.
+	SourceFrameRate float64
+	FastStart       bool // use superfast preset for faster first-segment production
 	// ThrottleSeconds is the resolved forward-buffer policy for this session.
 	// Zero disables throttling. It is durable so a remote executor can preserve
 	// the API server's policy across node reconstruction without reading settings.

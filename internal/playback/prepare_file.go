@@ -404,7 +404,11 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 			cmd.Stderr = io.MultiWriter(stderr, logs)
 		}
 		if runOpts.PrepareProgressSink != nil {
-			cmd.Stdout = newPrepareProgressWriter(runOpts.PrepareProgressSink, runOpts.TotalDuration)
+			frameRate := runOpts.SourceFrameRate
+			if runOpts.AudioOnly {
+				frameRate = 0
+			}
+			cmd.Stdout = newPrepareProgressWriter(runOpts.PrepareProgressSink, runOpts.TotalDuration, frameRate)
 		}
 		cmd.WaitDelay = 3 * time.Second
 
