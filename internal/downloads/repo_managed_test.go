@@ -24,6 +24,41 @@ type managedFixture struct {
 	deviceB   string
 	contentID string
 	fileID    int
+	folderID  int
+}
+
+// episodeFile seeds a present file in the fixture's folder linked to the
+// fixture's title as a series and to its episode episodeID, as a scanned and
+// matched episode file is, and returns its id. A download of the episode
+// names the file's (series, episode) links, which registration requires.
+// episodeID must be unique to the fixture (prefix it with contentID).
+func (f managedFixture) episodeFile(t *testing.T, episodeID string) int {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := f.pool.Exec(ctx,
+		`INSERT INTO media_items (content_id, type, title) VALUES ($1, 'series', $1) ON CONFLICT (content_id) DO NOTHING`,
+		f.contentID,
+	); err != nil {
+		t.Fatalf("seed series: %v", err)
+	}
+	t.Cleanup(func() { _, _ = f.pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = $1`, f.contentID) })
+	if _, err := f.pool.Exec(ctx,
+		`INSERT INTO episodes (content_id, series_id, season_number, episode_number)
+		 VALUES ($1, $2, 1, (SELECT count(*) + 1 FROM episodes WHERE series_id = $2))`,
+		episodeID, f.contentID,
+	); err != nil {
+		t.Fatalf("seed episode %s: %v", episodeID, err)
+	}
+	var fileID int
+	if err := f.pool.QueryRow(ctx,
+		`INSERT INTO media_files (content_id, episode_id, media_folder_id, file_path, file_size)
+		 VALUES ($1, $2, $3, $4, 1024) RETURNING id`,
+		f.contentID, episodeID, f.folderID, "/tmp/downloads-test-"+episodeID+".mkv",
+	).Scan(&fileID); err != nil {
+		t.Fatalf("seed episode file %s: %v", episodeID, err)
+	}
+	t.Cleanup(func() { _, _ = f.pool.Exec(ctx, `DELETE FROM media_files WHERE id = $1`, fileID) })
+	return fileID
 }
 
 func newDownloadsTestPool(t *testing.T) *pgxpool.Pool {
@@ -117,6 +152,6 @@ func seedManagedFixture(t *testing.T) managedFixture {
 	return managedFixture{
 		pool: pool, repo: repo, userID: userID,
 		profileA: profileA, profileB: profileB, deviceA: deviceA, deviceB: deviceB,
-		contentID: contentID, fileID: fileID,
+		contentID: contentID, fileID: fileID, folderID: folderID,
 	}
 }

@@ -44,9 +44,6 @@ func (f *createFileResolver) ListByEpisodeIDs(context.Context, []string) (map[st
 func (f *createFileResolver) GetByID(context.Context, int) (*models.MediaFile, error) {
 	return f.single, nil
 }
-func (f *createFileResolver) GetByEpisodeID(_ context.Context, id string) ([]*models.MediaFile, error) {
-	return f.rows[id], nil
-}
 
 func TestDownloadCreatePagesPostgres(t *testing.T) {
 	// Managed creates clear monitor exclusions, so the schema needs the
@@ -69,6 +66,7 @@ func TestDownloadCreatePagesPostgres(t *testing.T) {
 	pager.rows = []*models.Episode{{ContentID: "special", SeasonNumber: 0, EpisodeNumber: 2}}
 	pager.more = false
 	files.rows = map[string][]*models.MediaFile{"special": {{ID: 42, ContentID: "series", EpisodeID: "special", FileSize: 10}}}
+	seedSchemaFiles(t, repo, files.rows["special"][0])
 	page, err = svc.CreateSeriesPage(t.Context(), 1, req, new(0), page.Next, 1, catalog.AccessFilter{})
 	if err != nil || len(page.Items) != 1 || page.Items[0].Status != StatusReady || page.Items[0].BatchID != "intent" || pager.after == nil {
 		t.Fatalf("managed %+v %v", page, err)
@@ -97,6 +95,7 @@ func TestDownloadCreatePagesPostgres(t *testing.T) {
 	}
 	// Single ephemeral registration uses the same policy and queued lifecycle.
 	files.single = &models.MediaFile{ID: 43, ContentID: "movie", FileSize: 12, Container: "mp4", CodecVideo: "h264", CodecAudio: "aac"}
+	seedSchemaFiles(t, repo, files.single)
 	single, err := svc.Create(t.Context(), 1, CreateRequest{ContentID: "movie", FileID: 43, StrictIdentity: true}, catalog.AccessFilter{})
 	if err != nil || single.DeviceID != "" || single.Status != StatusQueued || single.MediaFileID != 43 {
 		t.Fatalf("single ephemeral %+v %v", single, err)
@@ -129,6 +128,9 @@ func TestSeriesPageFollowsTheVersionTemplatePostgres(t *testing.T) {
 	}
 	template := hd(11, "ep-1")
 	files := &createFileResolver{rows: map[string][]*models.MediaFile{"ep-1": {uhd(10, "ep-1"), template}, "ep-2": {uhd(20, "ep-2"), hd(21, "ep-2")}}, single: template}
+	for _, episodeFiles := range files.rows {
+		seedSchemaFiles(t, repo, episodeFiles...)
+	}
 	svc := NewService(repo, nil, nil, files, createItemResolver{}, pager, fakeUserRepo{&models.User{ID: 1, DownloadAllowed: new(true)}}, &syncAccess{}, nil, &config.DownloadConfig{Enabled: true})
 	req := CreateRequest{ContentID: "series", ProfileID: "profile", BatchID: "intent", StrictIdentity: true}
 
@@ -147,45 +149,33 @@ func TestSeriesPageFollowsTheVersionTemplatePostgres(t *testing.T) {
 	}
 }
 
-func TestSingleDownloadReachesTheEntryASeasonKeyedOnALaterEpisodePostgres(t *testing.T) {
+func TestSeasonWithAMultiEpisodeFileRegistersEachEpisodeOncePostgres(t *testing.T) {
 	repo := NewRepository(subscriptionMutationTestRepo(t).pool)
 	_, err := repo.pool.Exec(t.Context(), `CREATE UNIQUE INDEX managed_identity ON downloads(user_id,profile_id,device_id,content_id,COALESCE(episode_id,'')) WHERE device_id IS NOT NULL;
  CREATE TABLE user_devices(user_id integer,profile_id text,device_id text,device_name text,device_platform text,last_seen_at timestamptz,PRIMARY KEY(user_id,profile_id,device_id))`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Episode 1 has its own file and shares a double-episode file with
-	// episode 2, which is episode 2's only file.
+	// The 720p S01E01-E03 file is linked to episode 1, as the catalog links a
+	// multi-episode file to its first episode. Episode 1 also has its own
+	// 720p file, episode 2 its own 1080p file, and episode 3 only the range.
 	own := &models.MediaFile{ID: 1, ContentID: "series", EpisodeID: "ep-1", Resolution: "720p", FileSize: 10}
-	double := &models.MediaFile{ID: 3, ContentID: "series", EpisodeID: "ep-1", Resolution: "1080p", MultiEpisodeStart: 1, MultiEpisodeEnd: 2, FileSize: 20}
-	pager := &createEpisodePager{rows: []*models.Episode{{ContentID: "ep-1", SeasonNumber: 1, EpisodeNumber: 1}, {ContentID: "ep-2", SeasonNumber: 1, EpisodeNumber: 2}}}
-	files := &createFileResolver{rows: map[string][]*models.MediaFile{"ep-1": {own, double}, "ep-2": {double}}, single: own}
+	multi := &models.MediaFile{ID: 3, ContentID: "series", EpisodeID: "ep-1", Resolution: "720p", MultiEpisodeStart: 1, MultiEpisodeEnd: 3, FileSize: 30}
+	second := &models.MediaFile{ID: 2, ContentID: "series", EpisodeID: "ep-2", Resolution: "1080p", FileSize: 20}
+	seedSchemaFiles(t, repo, own, multi, second)
+	pager := &createEpisodePager{rows: []*models.Episode{{ContentID: "ep-1", SeasonNumber: 1, EpisodeNumber: 1}, {ContentID: "ep-2", SeasonNumber: 1, EpisodeNumber: 2}, {ContentID: "ep-3", SeasonNumber: 1, EpisodeNumber: 3}}}
+	files := &createFileResolver{rows: map[string][]*models.MediaFile{"ep-1": {own, multi}, "ep-2": {multi, second}, "ep-3": {multi}}, single: own}
 	svc := NewService(repo, nil, nil, files, createItemResolver{}, pager, fakeUserRepo{&models.User{ID: 1, DownloadAllowed: new(true)}}, &syncAccess{}, nil, &config.DownloadConfig{Enabled: true})
 	req := CreateRequest{ContentID: "series", ProfileID: "profile", DeviceID: "device", BatchID: "season", StrictIdentity: true, VersionTemplateFileID: 1}
-	page, err := svc.CreateSeriesPage(t.Context(), 1, req, new(1), nil, 10, catalog.AccessFilter{})
-	if err != nil || len(page.Items) != 2 || page.Items[1].EpisodeID != "ep-2" || page.Items[1].MediaFileID != 3 {
-		t.Fatalf("season %+v %v", page.Items, err)
-	}
-	entry := page.Items[1]
 
-	// Downloading episode 2 again by itself finds the entry the season made
-	// for it, and leaves episode 1's own file alone.
-	single, err := svc.Create(t.Context(), 1, CreateRequest{ContentID: "series", EpisodeID: "ep-2", ProfileID: "profile", DeviceID: "device", StrictIdentity: true, ExpectedDownloadID: entry.ID, ExpectedRevision: new(entry.Revision)}, catalog.AccessFilter{})
-	if err != nil || single.ID != entry.ID || single.EpisodeID != "ep-2" || single.MediaFileID != 3 {
-		t.Fatalf("single %+v %v", single, err)
-	}
-	// After the device deletes episode 2, downloading it again registers it
-	// under episode 2 rather than over episode 1's own file.
-	if _, err := repo.pool.Exec(t.Context(), `DELETE FROM downloads WHERE id = $1`, entry.ID); err != nil {
-		t.Fatal(err)
-	}
-	again, err := svc.Create(t.Context(), 1, CreateRequest{ContentID: "series", EpisodeID: "ep-2", ProfileID: "profile", DeviceID: "device", StrictIdentity: true, ExpectedRevision: new(0)}, catalog.AccessFilter{})
-	if err != nil || again.EpisodeID != "ep-2" || again.MediaFileID != 3 {
-		t.Fatalf("download after delete %+v %v", again, err)
-	}
-	first, err := repo.GetManagedEntry(t.Context(), 1, "profile", "device", "series", "ep-1")
-	if err != nil || first.MediaFileID != 1 {
-		t.Fatalf("episode 1 entry %+v %v", first, err)
+	// Following episode 1's own file, each episode with a file of its own
+	// gets one entry, and episode 3 is skipped rather than refusing the page.
+	page, err := svc.CreateSeriesPage(t.Context(), 1, req, new(1), nil, 10, catalog.AccessFilter{})
+	if err != nil || len(page.Items) != 2 ||
+		page.Items[0].EpisodeID != "ep-1" || page.Items[0].MediaFileID != 1 ||
+		page.Items[1].EpisodeID != "ep-2" || page.Items[1].MediaFileID != 2 ||
+		len(page.Skipped) != 1 || page.Skipped[0].EpisodeID != "ep-3" {
+		t.Fatalf("season %+v skipped %+v %v", page.Items, page.Skipped, err)
 	}
 }
 

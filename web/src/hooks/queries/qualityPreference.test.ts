@@ -3,15 +3,16 @@ import { describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   effective: undefined as Record<string, { value: unknown }> | undefined,
+  failed: false,
 }));
 
 vi.mock("@/hooks/queries/settingValues", () => ({
-  useEffectiveSettings: () => ({ data: mocks.effective, isLoading: false }),
+  useEffectiveSettings: () => ({ data: mocks.effective, isError: mocks.failed }),
 }));
 
 import { SETTING_KEYS } from "@/lib/settingsContract";
 
-import { useQualityPreference } from "./qualityPreference";
+import { useQualityPreference, useQualityPreferenceState } from "./qualityPreference";
 
 function setResolved(value: unknown) {
   mocks.effective =
@@ -33,9 +34,14 @@ describe("useQualityPreference", () => {
     expect(result.current).toBe("auto");
   });
 
-  it("falls back to the profile column until the settings read resolves", () => {
+  it("keeps fallback initialization provisional until a settings read succeeds", () => {
     setResolved(undefined);
-    const { result } = renderHook(() => useQualityPreference("720p"));
-    expect(result.current).toBe("720p");
+    mocks.failed = true;
+    const { result, rerender } = renderHook(() => useQualityPreferenceState("720p"));
+    expect(result.current).toEqual({ preference: "720p", settled: false });
+    mocks.failed = false;
+    setResolved("1080p");
+    rerender();
+    expect(result.current).toEqual({ preference: "1080p", settled: true });
   });
 });

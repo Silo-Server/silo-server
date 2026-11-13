@@ -441,8 +441,9 @@ func (s *Service) Create(ctx context.Context, userID int, req CreateRequest, fil
 		return nil, err
 	}
 	// A lookup by episode also returns a multi-episode file linked to an
-	// earlier episode of its range. That file serves the requested episode;
-	// singleManagedEpisodeKey says which episode its entry is keyed on.
+	// earlier episode of its range. That file serves the requested episode,
+	// and its download is registered under the file's first episode, as a
+	// season download registers it.
 	if req.StrictIdentity && (file.ContentID != req.ContentID || (req.EpisodeID != "" && req.FileID > 0 && file.EpisodeID != req.EpisodeID)) {
 		return nil, catalog.ErrItemNotFound
 	}
@@ -459,20 +460,16 @@ func (s *Service) Create(ctx context.Context, userID int, req CreateRequest, fil
 		if err != nil {
 			return nil, err
 		}
-		s.forgetMonitorDeletes(ctx, userID, req, file.ContentID, d.EpisodeID)
+		s.forgetMonitorDeletes(ctx, userID, req, file.ContentID, file.EpisodeID)
 		return d, nil
 	}
 
 	if req.DeviceID != "" {
-		episodeID, err := s.singleManagedEpisodeKey(ctx, userID, req, file)
+		rows, err := s.ensureManaged(ctx, userID, req, []managedItem{{file: file, contentID: file.ContentID, episodeID: file.EpisodeID}}, decision, "")
 		if err != nil {
 			return nil, err
 		}
-		rows, err := s.ensureManaged(ctx, userID, req, []managedItem{{file: file, contentID: file.ContentID, episodeID: episodeID}}, decision, "")
-		if err != nil {
-			return nil, err
-		}
-		s.forgetMonitorDeletes(ctx, userID, req, file.ContentID, episodeID)
+		s.forgetMonitorDeletes(ctx, userID, req, file.ContentID, file.EpisodeID)
 		return rows[0], nil
 	}
 
@@ -510,38 +507,6 @@ func (s *Service) Create(ctx context.Context, userID int, req CreateRequest, fil
 	return d, nil
 }
 
-// singleManagedEpisodeKey returns the episode a single managed download of
-// file is keyed on. A multi-episode file requested through a later episode of
-// its range is keyed on the requested episode when:
-//   - the device already holds an entry under that episode (a season download
-//     makes one when the range's first episode picked a file of its own), or
-//   - the first episode's entry holds a different file, which this download
-//     must not replace.
-//
-// Otherwise it is keyed on the file's first episode, as a season download keys
-// it when that episode picks the file too.
-func (s *Service) singleManagedEpisodeKey(ctx context.Context, userID int, req CreateRequest, file *models.MediaFile) (string, error) {
-	if req.DeviceID == "" || req.EpisodeID == "" || req.EpisodeID == file.EpisodeID || file.MultiEpisodeEnd <= file.MultiEpisodeStart {
-		return file.EpisodeID, nil
-	}
-	_, err := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, file.ContentID, req.EpisodeID)
-	if err == nil {
-		return req.EpisodeID, nil
-	}
-	if !errors.Is(err, ErrNotFound) {
-		return "", err
-	}
-	first, err := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, file.ContentID, file.EpisodeID)
-	switch {
-	case err == nil && first.MediaFileID != file.ID:
-		return req.EpisodeID, nil
-	case err == nil || errors.Is(err, ErrNotFound):
-		return file.EpisodeID, nil
-	default:
-		return "", err
-	}
-}
-
 // createArtifactDownload ensures a prepared (remux/transcode) artifact for file
 // and creates the linked download row — ready when the artifact already exists,
 // otherwise preparing until the encode worker completes it. Handles both managed
@@ -551,22 +516,20 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 	if managed && req.ProfileID == "" {
 		return nil, ErrProfileRequired
 	}
-	episodeID, err := s.singleManagedEpisodeKey(ctx, userID, req, file)
-	if err != nil {
-		return nil, err
-	}
 
 	// Resolve any existing managed entry first: replacing one doesn't add a
 	// row, so it stays quota-exempt and needs no quota lock.
 	var existing *Download
 	if managed {
-		ex, err := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, file.ContentID, episodeID)
+		ex, err := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, file.ContentID, file.EpisodeID)
 		switch {
 		case err == nil:
 			existing = ex
 		case !errors.Is(err, ErrNotFound):
 			return nil, err
 		}
+	}
+	if managed {
 		if err := checkManagedCreateRevision(existing, req.ExpectedRevision, req.ExpectedDownloadID); err != nil {
 			return nil, err
 		}
@@ -577,7 +540,7 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 			return nil, err
 		}
 		status, size := artifactRowStatus(artifact, file)
-		replacement := buildManagedDownload(userID, req.ProfileID, req.DeviceID, managedItem{file: file, contentID: file.ContentID, episodeID: episodeID}, decision, "", status, size, artifact.ID)
+		replacement := buildManagedDownload(userID, req.ProfileID, req.DeviceID, managedItem{file: file, contentID: file.ContentID, episodeID: file.EpisodeID}, decision, "", status, size, artifact.ID)
 		d, err := s.reuseOrReplaceManaged(ctx, existing, replacement, req.ExpectedRevision, req.ExpectedDownloadID)
 		if err != nil {
 			return nil, err
@@ -606,7 +569,7 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 	// Capability discovery is complete, but the lock still spans artifact row
 	// creation so a rejected request cannot leave an encode job behind.
 	var d *Download
-	err = s.repo.WithUserQuotaLock(ctx, userID, func(ctx context.Context) error {
+	err := s.repo.WithUserQuotaLock(ctx, userID, func(ctx context.Context) error {
 		if err := s.limiter.Check(ctx, userID, 1); err != nil {
 			return err
 		}
@@ -638,7 +601,7 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 			UserID:            userID,
 			MediaFileID:       file.ID,
 			ContentID:         file.ContentID,
-			EpisodeID:         episodeID,
+			EpisodeID:         file.EpisodeID,
 			Kind:              KindQueued,
 			Status:            status,
 			Format:            decision.DeliveryFormat,
@@ -656,9 +619,9 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 			d.DeviceID = req.DeviceID
 		}
 		if err := s.repo.Create(ctx, d); err != nil {
-			if managed {
-				if existing, gerr := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, file.ContentID, episodeID); gerr == nil {
-					replacement := buildManagedDownload(userID, req.ProfileID, req.DeviceID, managedItem{file: file, contentID: file.ContentID, episodeID: episodeID}, decision, "", status, size, artifact.ID)
+			if managed && !errors.Is(err, errFileNotRegistrable) {
+				if existing, gerr := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, file.ContentID, file.EpisodeID); gerr == nil {
+					replacement := buildManagedDownload(userID, req.ProfileID, req.DeviceID, managedItem{file: file, contentID: file.ContentID, episodeID: file.EpisodeID}, decision, "", status, size, artifact.ID)
 					row, rerr := s.reuseOrReplaceManaged(ctx, existing, replacement, req.ExpectedRevision, req.ExpectedDownloadID)
 					if rerr != nil {
 						return rerr
@@ -884,17 +847,27 @@ func (s *Service) episodeItemsWithSkipped(ctx context.Context, userID int, profi
 	if err != nil {
 		return nil, nil, fmt.Errorf("resolving files for %d episodes: %w", len(episodes), err)
 	}
-	earlier, earlierFiles, err := s.earlierSpannedEpisodes(ctx, seriesID, episodes, filesByEpisode)
-	if err != nil {
-		return nil, nil, err
+	// An episode served only by a multi-episode file linked to an earlier
+	// episode can register it only under that episode, so its pick decides
+	// whether the file is free. Load the linked episodes this page lacks.
+	pickIDs := episodeIDs
+	var linked []string
+	for _, ep := range episodes {
+		for _, f := range filesByEpisode[ep.ContentID] {
+			if linkedElsewhere(f, ep.ContentID) && !slices.Contains(pickIDs, f.EpisodeID) && !slices.Contains(linked, f.EpisodeID) {
+				linked = append(linked, f.EpisodeID)
+			}
+		}
 	}
-	for id, files := range earlierFiles {
-		filesByEpisode[id] = files
-	}
-	considered := append(earlier, episodes...)
-	consideredIDs := episodeIDs
-	for _, ep := range earlier {
-		consideredIDs = append(consideredIDs, ep.ContentID)
+	if len(linked) > 0 {
+		linkedFiles, err := s.fileRepo.ListByEpisodeIDs(ctx, linked)
+		if err != nil {
+			return nil, nil, fmt.Errorf("resolving files for %d linked episodes: %w", len(linked), err)
+		}
+		for id, files := range linkedFiles {
+			filesByEpisode[id] = files
+		}
+		pickIDs = append(slices.Clone(episodeIDs), linked...)
 	}
 	var pref versionPreference
 	if template != nil {
@@ -902,26 +875,14 @@ func (s *Service) episodeItemsWithSkipped(ctx context.Context, userID int, profi
 	} else {
 		for _, files := range filesByEpisode {
 			if len(files) > 1 {
-				pref = s.loadVersionPreference(ctx, userID, profileID, seriesID, consideredIDs)
+				pref = s.loadVersionPreference(ctx, userID, profileID, seriesID, pickIDs)
 				break
 			}
 		}
 	}
-	picks := make(map[string]*models.MediaFile, len(considered))
-	// A multi-episode file serves each episode it spans; download it once,
-	// keyed on the earliest episode that picks it. An earlier episode with a
-	// file of its own keeps its key, and a later page of the same batch finds
-	// the entry an earlier page registered.
-	owners := make(map[int]*models.Episode)
-	for _, ep := range considered {
-		file := pref.pick(ep.ContentID, allowedCandidates(filesByEpisode[ep.ContentID], filter))
-		picks[ep.ContentID] = file
-		if file == nil || file.MultiEpisodeEnd <= file.MultiEpisodeStart {
-			continue
-		}
-		if owner, ok := owners[file.ID]; !ok || episodeBefore(ep, owner) {
-			owners[file.ID] = ep
-		}
+	picks := make(map[string]*models.MediaFile, len(pickIDs))
+	for _, id := range pickIDs {
+		picks[id] = pref.pick(id, ownCandidates(id, allowedCandidates(filesByEpisode[id], filter)))
 	}
 	items := make([]managedItem, 0, len(episodes))
 	skipped := make([]SkippedDownload, 0)
@@ -932,82 +893,50 @@ func (s *Service) episodeItemsWithSkipped(ctx context.Context, userID int, profi
 			continue
 		}
 		file := picks[ep.ContentID]
+		// Every row is keyed on its file's linked episode (see
+		// registrableFile). A multi-episode file serves each episode it spans
+		// and is downloaded once, under its first episode, so a later page of
+		// the same batch finds the entry an earlier page registered. When that
+		// episode keeps a different file, the later episode has no entry.
+		if linkedElsewhere(file, ep.ContentID) {
+			if first := picks[file.EpisodeID]; first != nil && first.ID != file.ID {
+				skipped = append(skipped, SkippedDownload{EpisodeID: ep.ContentID, Reason: "multi_episode_conflict"})
+				continue
+			}
+		}
 		episodeID := ep.ContentID
-		if owner, ok := owners[file.ID]; ok {
+		if file.MultiEpisodeEnd > file.MultiEpisodeStart {
 			if queued[file.ID] {
 				continue
 			}
 			queued[file.ID] = true
-			episodeID = owner.ContentID
+			episodeID = file.EpisodeID
 		}
 		items = append(items, managedItem{file: file, contentID: seriesID, episodeID: episodeID})
 	}
 	return items, skipped, nil
 }
 
-// earlierSpannedEpisodes returns the episodes outside the batch that a
-// multi-episode file serving one of its episodes also spans earlier in the
-// season, with their files. Which episode keys such a file depends on their
-// picks, so a page that starts inside a span keys it as the page holding the
-// span's start did.
-func (s *Service) earlierSpannedEpisodes(ctx context.Context, seriesID string, episodes []*models.Episode, filesByEpisode map[string][]*models.MediaFile) ([]*models.Episode, map[string][]*models.MediaFile, error) {
-	type position struct{ season, episode int }
-	inBatch := make(map[position]bool, len(episodes))
-	for _, ep := range episodes {
-		inBatch[position{ep.SeasonNumber, ep.EpisodeNumber}] = true
-	}
-	wanted := make(map[position]bool)
-	seasons := make([]int, 0, 1)
-	for _, ep := range episodes {
-		for _, f := range filesByEpisode[ep.ContentID] {
-			if f.MultiEpisodeEnd <= f.MultiEpisodeStart || f.EpisodeID == ep.ContentID {
-				continue
-			}
-			for n := f.MultiEpisodeStart; n < ep.EpisodeNumber; n++ {
-				pos := position{ep.SeasonNumber, n}
-				if inBatch[pos] || wanted[pos] {
-					continue
-				}
-				if !slices.Contains(seasons, ep.SeasonNumber) {
-					seasons = append(seasons, ep.SeasonNumber)
-				}
-				wanted[pos] = true
-			}
-		}
-	}
-	if len(wanted) == 0 {
-		return nil, nil, nil
-	}
-	var earlier []*models.Episode
-	var ids []string
-	for _, season := range seasons {
-		listed, err := s.episodeRepo.ListBySeason(ctx, seriesID, season)
-		if err != nil {
-			return nil, nil, fmt.Errorf("listing season %d for a multi-episode file: %w", season, err)
-		}
-		for _, ep := range listed {
-			if wanted[position{ep.SeasonNumber, ep.EpisodeNumber}] {
-				earlier = append(earlier, ep)
-				ids = append(ids, ep.ContentID)
-			}
-		}
-	}
-	if len(ids) == 0 {
-		return nil, nil, nil
-	}
-	files, err := s.fileRepo.ListByEpisodeIDs(ctx, ids)
-	if err != nil {
-		return nil, nil, fmt.Errorf("resolving files for %d spanned episodes: %w", len(ids), err)
-	}
-	return earlier, files, nil
+// linkedElsewhere reports whether f is a multi-episode file serving episodeID
+// from the earlier episode of its range it is linked to.
+func linkedElsewhere(f *models.MediaFile, episodeID string) bool {
+	return f.MultiEpisodeEnd > f.MultiEpisodeStart && f.EpisodeID != episodeID
 }
 
-// episodeBefore orders episodes by season, then episode number.
-func episodeBefore(a, b *models.Episode) bool {
-	if a.SeasonNumber != b.SeasonNumber {
-		return a.SeasonNumber < b.SeasonNumber
+// ownCandidates narrows an episode's files to those linked to it, so a
+// multi-episode file linked to an earlier episode is picked only when the
+// episode has no file of its own.
+func ownCandidates(episodeID string, files []*models.MediaFile) []*models.MediaFile {
+	own := make([]*models.MediaFile, 0, len(files))
+	for _, f := range files {
+		if !linkedElsewhere(f, episodeID) {
+			own = append(own, f)
+		}
 	}
-	return a.EpisodeNumber < b.EpisodeNumber
+	if len(own) == 0 {
+		return files
+	}
+	return own
 }
 
 // managedItem pairs a resolved file with the (content, episode) identity its
@@ -1173,7 +1102,10 @@ func (s *Service) ensureManagedDecisions(ctx context.Context, userID int, req Cr
 			}
 			toInsert = append(toInsert, d)
 		}
-		rows, err := s.repo.CreateManagedEntriesBatch(ctx, toInsert)
+		// One request registers its entries together: a file that left its
+		// title since it was resolved fails the request without registering
+		// the others, as a file deleted meanwhile failed the insert.
+		rows, err := s.repo.CreateManagedEntriesAllOrNothing(ctx, toInsert)
 		if err != nil {
 			return err
 		}
@@ -1195,8 +1127,13 @@ func (s *Service) ensureManagedDecisions(ctx context.Context, userID int, req Cr
 			continue
 		}
 		// A concurrent create won this identity between the fetch and the
-		// batch insert (ON CONFLICT skipped it); return the winning row.
+		// batch insert (ON CONFLICT skipped it); return the winning row. With
+		// no winner, the insert wrote nothing because a file of the request
+		// went missing or left its title.
 		row, err := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, items[i].contentID, items[i].episodeID)
+		if errors.Is(err, ErrNotFound) {
+			return nil, errFileNotRegistrable
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -1658,6 +1595,12 @@ func (s *Service) resolveDownloadBytesTarget(ctx context.Context, dl *Download, 
 		artifact, err := s.artifacts.Ready(ctx, dl.ArtifactID)
 		if err != nil {
 			return nil, err
+		}
+		// An artifact is prepared from one file row. A download the scanner
+		// parked on a retitle's stand-in still names the artifact of the row
+		// it left, which now belongs to another title, so it is not served.
+		if artifact.MediaFileID != dl.MediaFileID {
+			return nil, catalog.ErrItemNotFound
 		}
 		// The quality ceiling applies to what is actually served — the prepared
 		// artifact's resolution, not the source's (a 720p transcode of a 4K

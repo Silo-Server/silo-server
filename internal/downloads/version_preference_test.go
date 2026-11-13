@@ -240,82 +240,72 @@ func TestAutomaticPickSkipsVersionsTheProfileCannotPlay(t *testing.T) {
 	}
 }
 
-// seasonEpisodes lists a fixed season, for a page whose multi-episode file
-// spans episodes before the page.
-type seasonEpisodes []*models.Episode
-
-func (s seasonEpisodes) ListBySeries(context.Context, string) ([]*models.Episode, error) {
-	return s, nil
-}
-
-func (s seasonEpisodes) ListBySeason(_ context.Context, _ string, season int) ([]*models.Episode, error) {
-	var out []*models.Episode
-	for _, ep := range s {
-		if ep.SeasonNumber == season {
-			out = append(out, ep)
-		}
-	}
-	return out, nil
-}
-
-func (s seasonEpisodes) ListSeasons(context.Context, string) ([]catalog.SeasonSummary, error) {
-	return nil, nil
-}
-
-func TestEpisodeItemsKeyAMultiEpisodeFileOnTheEpisodeThatPicksIt(t *testing.T) {
-	// Episode 1 has its own 720p file and the 720p S01E01-E03 file spanning
-	// episodes 1 to 3; episodes 2 and 3 also have a 1080p file each. Following
-	// episode 1's 720p file, episode 1 keeps its own file and episodes 2 and 3
-	// pick the double-episode file.
+func TestEpisodeItemsKeepEachRowOnItsFilesLinkedEpisode(t *testing.T) {
+	// The 720p S01E01-E03 file is linked to episode 1, which also has its own
+	// 720p file. Episode 2 has its own 1080p file; episode 3 has only the
+	// multi-episode file.
 	single := &models.MediaFile{ID: 1, ContentID: "series", EpisodeID: "ep-1", Resolution: "720p"}
 	multi := &models.MediaFile{ID: 3, ContentID: "series", EpisodeID: "ep-1", Resolution: "720p", MultiEpisodeStart: 1, MultiEpisodeEnd: 3}
 	files := episodeFiles{
 		"ep-1": {single, multi},
 		"ep-2": {multi, {ID: 5, ContentID: "series", EpisodeID: "ep-2", Resolution: "1080p"}},
-		"ep-3": {multi, {ID: 6, ContentID: "series", EpisodeID: "ep-3", Resolution: "1080p"}},
+		"ep-3": {multi},
 		"ep-4": {{ID: 2, ContentID: "series", EpisodeID: "ep-4", Resolution: "1080p"}},
 	}
-	season := seasonEpisodes{
+	season := []*models.Episode{
 		{ContentID: "ep-1", SeasonNumber: 1, EpisodeNumber: 1},
 		{ContentID: "ep-2", SeasonNumber: 1, EpisodeNumber: 2},
 		{ContentID: "ep-3", SeasonNumber: 1, EpisodeNumber: 3},
 		{ContentID: "ep-4", SeasonNumber: 1, EpisodeNumber: 4},
 	}
-	svc := &Service{fileRepo: files, episodeRepo: season}
+	svc := &Service{fileRepo: files}
 
-	pages := map[string][][]*models.Episode{
-		"one page":     {season},
-		"one per page": {season[:1], season[1:2], season[2:3], season[3:]},
+	cases := map[string]struct {
+		template *models.MediaFile
+		want     map[string]int
+		skipped  []string
+	}{
+		// Episode 1 keeps its own file, so episode 3, whose only file is the
+		// multi-episode file linked to episode 1, has no entry of its own.
+		// Episode 2 takes its own file over the matching 720p range.
+		"episode 1 picks its own file": {single, map[string]int{"ep-1": 1, "ep-2": 5, "ep-4": 2}, []string{"ep-3"}},
+		// Episode 1 picks the multi-episode file, which then serves episode 3
+		// through episode 1's entry.
+		"episode 1 picks the range": {multi, map[string]int{"ep-1": 3, "ep-2": 5, "ep-4": 2}, nil},
 	}
-	for name, batch := range pages {
-		t.Run(name, func(t *testing.T) {
-			got := map[string]int{}
-			for _, page := range batch {
-				items, _, err := svc.episodeItemsWithSkipped(context.Background(), 7, "", "series", page, single, catalog.AccessFilter{})
-				if err != nil {
-					t.Fatal(err)
-				}
-				for _, it := range items {
-					if prev, ok := got[it.episodeID]; ok && prev != it.file.ID {
-						t.Fatalf("episode %s registered files %d and %d", it.episodeID, prev, it.file.ID)
+	for name, tc := range cases {
+		for pages, batch := range map[string][][]*models.Episode{
+			"one page":     {season},
+			"one per page": {season[:1], season[1:2], season[2:3], season[3:]},
+		} {
+			t.Run(name+"/"+pages, func(t *testing.T) {
+				got := map[string]int{}
+				var skipped []string
+				for _, page := range batch {
+					items, skips, err := svc.episodeItemsWithSkipped(context.Background(), 7, "", "series", page, tc.template, catalog.AccessFilter{})
+					if err != nil {
+						t.Fatal(err)
 					}
-					got[it.episodeID] = it.file.ID
+					for _, it := range items {
+						if prev, ok := got[it.episodeID]; ok && prev != it.file.ID {
+							t.Fatalf("episode %s registered files %d and %d", it.episodeID, prev, it.file.ID)
+						}
+						if it.episodeID != it.file.EpisodeID {
+							t.Fatalf("file %d registered under %s, linked to %s", it.file.ID, it.episodeID, it.file.EpisodeID)
+						}
+						got[it.episodeID] = it.file.ID
+					}
+					for _, s := range skips {
+						if s.Reason != "multi_episode_conflict" {
+							t.Fatalf("episode %s skipped as %q", s.EpisodeID, s.Reason)
+						}
+						skipped = append(skipped, s.EpisodeID)
+					}
 				}
-			}
-			want := map[string]int{"ep-1": 1, "ep-2": 3, "ep-4": 2}
-			if !reflect.DeepEqual(got, want) {
-				t.Fatalf("registered %v, want %v (the double-episode file once, under episode 2)", got, want)
-			}
-		})
-	}
-
-	// When episode 1 picks the multi-episode file too, it stays keyed on its
-	// first episode, so a later page finds the entry an earlier one made.
-	items, _, err := svc.episodeItemsWithSkipped(context.Background(), 7, "", "series", season[1:3], multi, catalog.AccessFilter{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(items) != 1 || items[0].episodeID != "ep-1" || items[0].file.ID != 3 {
-		t.Fatalf("items = %+v, want file 3 once under ep-1", items)
+				if !reflect.DeepEqual(got, tc.want) || !reflect.DeepEqual(skipped, tc.skipped) {
+					t.Fatalf("registered %v skipped %v, want %v skipped %v", got, skipped, tc.want, tc.skipped)
+				}
+			})
+		}
 	}
 }
