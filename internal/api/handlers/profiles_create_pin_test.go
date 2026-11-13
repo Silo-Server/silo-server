@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -32,6 +33,70 @@ func (s profileCommitObserver) WithPreferenceSettingsTransaction(ctx context.Con
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+}
+
+// failingProfileUpdateStore fails every UpdateProfile, inside the create
+// transaction and outside it.
+type failingProfileUpdateStore struct {
+	userstore.UserStore
+}
+
+type failingProfileUpdateWriter struct {
+	userstore.PreferenceSettingsWriter
+}
+
+var errProfileUpdateFailed = errors.New("profile update failed")
+
+func (s failingProfileUpdateStore) UpdateProfile(context.Context, string, userstore.UpdateProfileInput) error {
+	return errProfileUpdateFailed
+}
+
+func (s failingProfileUpdateStore) WithPreferenceSettingsTransaction(ctx context.Context, fn func(userstore.PreferenceSettingsWriter) error) error {
+	return s.UserStore.(userstore.PreferenceSettingsTransactioner).WithPreferenceSettingsTransaction(ctx, func(tx userstore.PreferenceSettingsWriter) error {
+		return fn(failingProfileUpdateWriter{PreferenceSettingsWriter: tx})
+	})
+}
+
+func (failingProfileUpdateWriter) UpdateProfile(context.Context, string, userstore.UpdateProfileInput) error {
+	return errProfileUpdateFailed
+}
+
+// TestCreateProfileStoresForcedSubtitlesOffInOneCommit pins #2743: a profile
+// created with show_forced_subtitles false stores it in the transaction that
+// creates the profile. When that write fails, no profile is left behind, so a
+// retry doesn't meet a name conflict.
+func TestCreateProfileStoresForcedSubtitlesOffInOneCommit(t *testing.T) {
+	ctx := t.Context()
+	base := newProfileTestStore(t)
+	off := false
+	request := ProfileCreateRequest{Name: "Second", ShowForcedSubtitles: &off}
+
+	_, err := createAsPrimary(NewProfileHandler(testUserStoreProvider{store: failingProfileUpdateStore{UserStore: base}}), request)
+	requireAPIStatus(t, err, http.StatusInternalServerError)
+	profiles, err := base.ListProfiles(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range profiles {
+		if p.Name == "Second" {
+			t.Fatalf("profile %q survived a failed create", p.Name)
+		}
+	}
+
+	created, err := createAsPrimary(NewProfileHandler(testUserStoreProvider{store: base}), request)
+	if err != nil {
+		t.Fatalf("retry create: %v", err)
+	}
+	stored, err := base.GetProfile(ctx, created.ID)
+	if err != nil || stored == nil {
+		t.Fatalf("read created profile: %+v, %v", stored, err)
+	}
+	if stored.ShowForcedSubtitles {
+		t.Fatal("stored show_forced_subtitles = true, want the requested false")
+	}
+	if value := storedProfileSetting(t, base, settingskeys.PlaybackShowForcedSubtitles, created.ID); value == nil || string(value.Value) != "false" {
+		t.Fatalf("canonical show_forced_subtitles = %v, want false", value)
 	}
 }
 
