@@ -101,6 +101,13 @@ type itemRefreshTestIngester struct {
 	runID    string
 	result   *libraryingest.Result
 	err      error
+	// unlinked is set when the subtree was ingested as unlinked.
+	unlinked bool
+}
+
+func (s *itemRefreshTestIngester) IngestUnlinkedSubtree(ctx context.Context, folder *models.MediaFolder, subtreePath string) (*libraryingest.Result, error) {
+	s.unlinked = true
+	return s.IngestSubtree(ctx, folder, subtreePath)
 }
 
 func (s *itemRefreshTestIngester) IngestSubtree(ctx context.Context, _ *models.MediaFolder, subtreePath string) (*libraryingest.Result, error) {
@@ -648,6 +655,9 @@ func TestItemRefreshExecutorCompleteRefreshRebuildsAndMapsEpisodeTarget(t *testi
 	}
 	if got, want := fileRepo.clearedPath, "/media/mixed/Show/Season 01"; got != want {
 		t.Fatalf("ClearContentLinksByPathPrefix() path = %q, want %q", got, want)
+	}
+	if !ingester.unlinked {
+		t.Fatal("complete refresh ingested its scope as unchanged, want IngestUnlinkedSubtree")
 	}
 	if got, want := rootClaimRepo.deletedRoot, "/media/mixed/Show"; got != want {
 		t.Fatalf("DeleteByFolderAndRoot() root = %q, want %q", got, want)

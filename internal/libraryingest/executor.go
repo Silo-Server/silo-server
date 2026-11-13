@@ -170,6 +170,24 @@ func (e *Executor) IngestSubtree(ctx context.Context, folder *models.MediaFolder
 	return e.ingest(ctx, folder, scopeModeSubtree, subtreePath)
 }
 
+// IngestUnlinkedSubtree is IngestSubtree for a subtree whose files lost their
+// content links without changing on disk, as a complete item refresh leaves
+// them. The scan finds those files unchanged, so on its own it would not wait
+// out the TV match queue's quiet window, and the series roots it queued would
+// still be unmatched when the ingest returns (#934). It waits as for new files.
+func (e *Executor) IngestUnlinkedSubtree(ctx context.Context, folder *models.MediaFolder, subtreePath string) (*Result, error) {
+	return e.ingest(context.WithValue(ctx, unlinkedIngestKey{}, true), folder, scopeModeSubtree, subtreePath)
+}
+
+// unlinkedIngestKey marks an ingest of a subtree whose files lost their
+// content links; see IngestUnlinkedSubtree.
+type unlinkedIngestKey struct{}
+
+func ingestsUnlinked(ctx context.Context) bool {
+	unlinked, _ := ctx.Value(unlinkedIngestKey{}).(bool)
+	return unlinked
+}
+
 // IngestFile runs the full ingest workflow for one file path.
 func (e *Executor) IngestFile(ctx context.Context, folder *models.MediaFolder, filePath string) (*Result, error) {
 	return e.ingest(ctx, folder, scopeModeFile, filePath)
@@ -294,7 +312,7 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 		return nil, err
 	}
 	matchScopes = scanMatchScopes
-	if shouldWaitForTVQueueSettle(folder, scanResult) {
+	if shouldWaitForTVQueueSettle(folder, scanResult, ingestsUnlinked(ctx)) {
 		settleWindow := e.tvDrainSettleWindow
 		if settleWindow <= 0 {
 			settleWindow = scopedTVDrainSettleWindow
@@ -559,9 +577,16 @@ func (e *Executor) checkLocalSidecars(ctx context.Context, folder *models.MediaF
 	}
 }
 
-func shouldWaitForTVQueueSettle(folder *models.MediaFolder, scanResult *scanner.ScanResult) bool {
+// shouldWaitForTVQueueSettle reports whether the ingest waits out the TV match
+// queue's quiet window before it stops matching: the scan queued series roots,
+// which it does for new or changed files and, when unlinked, for files that
+// lost their content links.
+func shouldWaitForTVQueueSettle(folder *models.MediaFolder, scanResult *scanner.ScanResult, unlinked bool) bool {
 	if folder == nil || (!librarykind.IsTV(folder.Type) && !librarykind.IsMixed(folder.Type)) {
 		return false
+	}
+	if unlinked {
+		return true
 	}
 	if scanResult == nil {
 		return false

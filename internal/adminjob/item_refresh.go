@@ -433,6 +433,9 @@ func firstPresentFileInLibrary(files []*models.MediaFile, libraryID int) (*model
 
 type ItemRefreshIngester interface {
 	IngestSubtree(ctx context.Context, folder *models.MediaFolder, subtreePath string) (*libraryingest.Result, error)
+	// IngestUnlinkedSubtree ingests a subtree whose content links a complete
+	// refresh cleared, matching it before it returns.
+	IngestUnlinkedSubtree(ctx context.Context, folder *models.MediaFolder, subtreePath string) (*libraryingest.Result, error)
 }
 
 type ItemRefreshArtworkCacher interface {
@@ -545,7 +548,11 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 		return nil, fmt.Errorf("scan scope: %w", err)
 	}
 	stopScanHeartbeat := startDirectScanHeartbeat(e.scanRuns, scanRun, directScanHeartbeatEvery)
-	ingestResult, err := e.ingester.IngestSubtree(scanCtx, folder, req.ScanPath)
+	ingest := e.ingester.IngestSubtree
+	if req.Mode == ItemRefreshModeComplete {
+		ingest = e.ingester.IngestUnlinkedSubtree
+	}
+	ingestResult, err := ingest(scanCtx, folder, req.ScanPath)
 	stopScanHeartbeat()
 	if err != nil {
 		return nil, fmt.Errorf("scan scope: %w", failDirectScan(ctx, e.scanRuns, scanRun, err))
