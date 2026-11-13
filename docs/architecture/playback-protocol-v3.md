@@ -2336,6 +2336,11 @@ executor's advertised filter names the choice.
 Dolby Vision compatibility IDs `1` through `6` resolve to their declared
 standards-compatible base layer: `1` and `6` are PQ, `2` is BT.709 SDR, `3` is
 legacy BT.709-gamut HLG, `4` is BT.2100 HLG, and `5` is BT.2020 SDR.
+Every executor converts that base layer, not the picture the stream's RPU
+describes. Left at their default, `tonemap_opencl` and `tonemap_cuda` reshape
+an HDR base through any single-layer RPU, `tonemap_opencl` only on some GPU
+models, so their graphs set `apply_dovi=0`; `tonemapx` reshapes only through a
+Profile 5 style RPU and keeps its default.
 A plain HLG source resolves to BT.2100 HLG, or to the BT.709-gamut HLG kind
 when its primaries and matrix are both tagged BT.709.
 Profile 5 and ID `0` carry a base only the stream's RPU can map to PQ, so they
@@ -2349,8 +2354,10 @@ record. ID `0` on any other profile says nothing about the base, so it is
 accepted only when the stream is tagged PQ, and the decoded samples must carry
 both the PQ transfer and Dolby Vision metadata; an untagged base can be plain
 SDR, which the RPU path renders blown out. The `dolby_vision` kind is not part of an executor's
-complete inventory, so an FFmpeg build that refuses `apply_dovi` keeps its
-other kinds cached. A `dolby_vision` smoke that fails for any other reason is
+complete inventory, so a `tonemapx` build that refuses `apply_dovi` keeps its
+other kinds cached. A `tonemap_opencl` or `tonemap_cuda` build that refuses it
+converts no HDR kind, because their HDR graphs always set the option. A
+`dolby_vision` smoke that fails for any other reason is
 retried after five minutes instead of being cached.
 A PQ base whose stream is tagged full range (`pc`) resolves to the
 `pq_full_range` kind. Every other kind's graph declares limited-range input;
