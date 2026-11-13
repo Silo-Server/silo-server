@@ -81,6 +81,11 @@ type TranscodeManager struct {
 	// StartThrottler optionally starts the segment throttler for a (re)started
 	// transcode, reading the embedding handler's settings. No-op when nil.
 	StartThrottler func(ctx context.Context, ts *TranscodeSession)
+	// RestoreReconstructedClient fills in the client metadata of a card that
+	// carries none (a stream token's card never does) from what the embedding
+	// handler stored for the session, so a session rebuilt after a restart
+	// keeps its client. No-op when nil.
+	RestoreReconstructedClient func(ctx context.Context, card *RecipeCard)
 
 	// Package-private execution seams keep reconstruction lifecycle tests
 	// deterministic without invoking a host FFmpeg binary. Production always
@@ -762,6 +767,9 @@ func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID str
 	if deferToneMapConfirmation && method == PlayTranscode {
 		toneMapMode = ""
 	}
+	if m.RestoreReconstructedClient != nil && card.ClientName == "" && card.ClientUserAgent == "" && card.DeviceID == "" {
+		m.RestoreReconstructedClient(ctx, &card)
+	}
 	s := &Session{
 		ID:                            card.SessionID,
 		UserID:                        card.UserID,
@@ -1181,6 +1189,10 @@ func (m *TranscodeManager) StartShutdownCleanup(ctx context.Context) <-chan stru
 		transcodes := m.transcodes
 		m.transcodes = make(map[string]*TranscodeSession)
 		m.transcodeMu.Unlock()
+		// Close without the lifecycle lock. A restart holds that lock through
+		// its restart hook, which can block on the FFmpeg context only Close
+		// cancels. Close itself waits for a restart in flight, and none starts
+		// after it: the session is gone from the map and refuses restarts.
 		for _, session := range transcodes {
 			if session != nil {
 				_ = session.Close()

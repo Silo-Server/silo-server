@@ -51,7 +51,9 @@ func (h homeHides) nextUpVisible(nextEpisodeID string) bool {
 	return !dismissed
 }
 
-// completedEpisode is a completed progress row of the series.
+// completedEpisode is a completed progress row of the series. at is the
+// store's UpdatedAt, the time Home's Continue Watching compares
+// (catalog.ProgressSnapshots).
 type completedEpisode struct {
 	key int
 	at  time.Time

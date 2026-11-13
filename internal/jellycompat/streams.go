@@ -753,6 +753,24 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 	}
 }
 
+// lookupOwnPlaySession returns the play session playSessionID names when it
+// belongs to the requesting compat session. Otherwise it answers the request
+// and reports false: a retryable 503 when the playback store could not be
+// read, so a brief outage does not end playback, and 404 when the session is
+// absent or another token's.
+func (h *PlaybackHandler) lookupOwnPlaySession(w http.ResponseWriter, r *http.Request, session *Session, playSessionID string) (*PlaybackSession, bool) {
+	playSession, found, err := h.playbackStore.Lookup(playSessionID)
+	if err != nil {
+		writePlaySessionLookupFailed(w, r, playSessionID, err)
+		return nil, false
+	}
+	if !found || playSession.CompatToken != session.Token {
+		writeError(w, http.StatusNotFound, "NotFound", "Playback session not found")
+		return nil, false
+	}
+	return playSession, true
+}
+
 // HandleMasterManifest serves the compat-owned HLS manifest route.
 // It returns a full-duration VOD manifest so clients can seek to any position.
 // Segments that haven't been transcoded yet are served on-demand by the segment handler.
@@ -769,9 +787,8 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	playSession, ok := h.playbackStore.Get(playSessionID)
-	if !ok || playSession.CompatToken != session.Token {
-		writeError(w, http.StatusNotFound, "NotFound", "Playback session not found")
+	playSession, ok := h.lookupOwnPlaySession(w, r, session, playSessionID)
+	if !ok {
 		return
 	}
 
@@ -1038,9 +1055,8 @@ func (h *PlaybackHandler) HandleHLSManifest(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	playSessionID := chiURLParam(r, "playlistId")
-	playSession, ok := h.playbackStore.Get(playSessionID)
-	if !ok || playSession.CompatToken != session.Token {
-		writeError(w, http.StatusNotFound, "NotFound", "Playback session not found")
+	playSession, ok := h.lookupOwnPlaySession(w, r, session, playSessionID)
+	if !ok {
 		return
 	}
 	source := firstMediaSource(playSession)
@@ -1109,8 +1125,11 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 	}
 
 	playSessionID := chiURLParam(r, "playlistId")
-	playSession, ok := h.playbackStore.Get(playSessionID)
-	if !ok || playSession.CompatToken != session.Token || playSession.UpstreamSessionID == "" {
+	playSession, ok := h.lookupOwnPlaySession(w, r, session, playSessionID)
+	if !ok {
+		return
+	}
+	if playSession.UpstreamSessionID == "" {
 		writeError(w, http.StatusNotFound, "NotFound", "Playback session not found")
 		return
 	}

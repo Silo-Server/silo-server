@@ -5,8 +5,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -993,19 +991,16 @@ func main() {
 	}
 
 	// Step 5: Auto-generate secrets
-	if strings.TrimSpace(settings["auth.jwt_secret"]) == "" {
-		secret := make([]byte, 32)
-		if _, err := rand.Read(secret); err != nil {
-			log.Fatalf("generating jwt secret: %v", err)
-		}
-		encoded := base64.StdEncoding.EncodeToString(secret)
+	if strings.TrimSpace(settings[auth.JWTSecretSettingKey]) == "" {
 		// Fatal, not a warning: every process, this one too once its config
 		// watcher starts, reads the secret from the database, so a secret
-		// held only in memory would leave them with none.
-		if err := settingsRepo.Set(ctx, "auth.jwt_secret", encoded); err != nil {
-			log.Fatalf("persisting generated JWT secret: %v", err)
+		// held only in memory would leave them with none. Processes starting
+		// at once converge on the first secret stored (#3312).
+		jwtSecret, err := auth.EnsureJWTSecret(ctx, settingsRepo)
+		if err != nil {
+			log.Fatalf("provisioning JWT secret: %v", err)
 		}
-		settings["auth.jwt_secret"] = encoded
+		settings[auth.JWTSecretSettingKey] = jwtSecret
 	}
 	if settings["jellyfin_compat.server_id"] == "" {
 		serverID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("https://silo.local/jellycompat")).String()

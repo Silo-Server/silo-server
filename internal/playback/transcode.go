@@ -252,6 +252,7 @@ const (
 	transcodeCodecH264       = "h264"
 	transcodeCodecHEVC       = "hevc"
 	HWAccelNone              = "none"
+	HWAccelAuto              = "auto"
 	transcodeHWQSV           = "qsv"
 	transcodeHWVAAPI         = "vaapi"
 	transcodeHWNVENC         = "nvenc"
@@ -351,6 +352,9 @@ type TranscodeSession struct {
 	// subtitleOriginMu serializes observations of a span's origin, so
 	// concurrent subtitle requests share one ffprobe run.
 	subtitleOriginMu sync.Mutex
+	// closing is set once Close or CloseProcess begins. It is terminal: from
+	// then on no restart publishes a generation and no throttler is armed.
+	closing bool
 }
 
 // NewTranscodeSessionForTest exposes only the output directory needed by tests
@@ -1062,9 +1066,10 @@ func resolveEffectiveTranscodeHWAccelContext(ctx context.Context, opts Transcode
 	}
 	// An explicit NVENC setting keeps the established libx264 fallback for a
 	// source the CUDA decoder must not receive. Intel QSV/VAAPI have the
-	// explicit upload paths below and retain hardware encoding. Only the
-	// automatic pipeline's mixed stage, which falls back to software itself if
-	// the CUDA upload fails, keeps NVENC encoding after a CPU decode.
+	// explicit upload paths below and retain hardware encoding. Only an
+	// AutoTranscodePipeline's mixed stage (hw_accel=auto, or the
+	// NewSoftwareDecodeRetryPipeline fallback), which falls back to software
+	// itself if the CUDA upload fails, keeps NVENC encoding after a CPU decode.
 	if opts.SoftwareVideoDecode && hwAccel == transcodeHWNVENC &&
 		(!opts.nvencSoftwareDecode || opts.ToneMapMode != "") {
 		return HWAccelNone
@@ -2242,9 +2247,9 @@ func (s *TranscodeSession) getManifest(currentGeneration bool) ([]byte, error) {
 					return nil, ErrManifestNotReady
 				}
 				if s.waitErr != nil {
-					stderr := truncateStderr(s.stderr.String())
-					if stderr != "" {
-						return nil, fmt.Errorf("%w: %w (stderr: %s)", ErrTranscodeFailed, s.waitErr, stderr)
+					retained := s.stderr.String()
+					if stderr := truncateStderr(retained); stderr != "" {
+						return nil, classifyFFmpegFailure(fmt.Errorf("%w: %w (stderr: %s)", ErrTranscodeFailed, s.waitErr, stderr), retained)
 					}
 					return nil, fmt.Errorf("%w: %w", ErrTranscodeFailed, s.waitErr)
 				}
@@ -3329,18 +3334,32 @@ func (s *TranscodeSession) CloseProcess() error {
 // shutdown kills the ffmpeg process and, when removeOutput is true, removes the
 // temporary output directory.
 func (s *TranscodeSession) shutdown(removeOutput bool) error {
+	// Closing is terminal: a restart that has not published its generation
+	// yet publishes none. A restart in flight swaps the generation's cancel
+	// and done, so wait for it before reading them.
+	s.mu.Lock()
+	s.closing = true
+	flight := s.restarting
+	s.mu.Unlock()
 	s.StopThrottler()
-	// Cancel the context to kill the process (no mutex needed for cancel).
-	if s.cancel != nil {
-		s.cancel()
+	if flight != nil {
+		<-flight.done
+	}
+	s.mu.Lock()
+	cancel, done := s.cancel, s.done
+	s.mu.Unlock()
+
+	// Cancel the context to kill the process.
+	if cancel != nil {
+		cancel()
 	}
 
 	// Wait for the monitor goroutine to finish reaping the process.
 	// This avoids a deadlock: the goroutine needs s.mu to mark running=false,
 	// so we must not hold s.mu while waiting.
 	// done is nil when no process was started (e.g. test-only sessions).
-	if s.done != nil {
-		<-s.done
+	if done != nil {
+		<-done
 	}
 
 	if removeOutput {
@@ -3549,6 +3568,10 @@ func (s *TranscodeSession) RestartSegment(ctx context.Context, segNum int) (Segm
 	return target, true, err
 }
 
+// errSessionClosing is a restart of a session whose Close has begun. It is
+// ErrSessionSuperseded to callers: the handle is no longer the live session.
+var errSessionClosing = fmt.Errorf("%w: the session is closing", ErrSessionSuperseded)
+
 // restartFlight carries the outcome of an in-flight restart so a concurrent
 // caller waits for it and receives the result instead of assuming success and
 // falling through to a stream the failed restart never produced.
@@ -3579,6 +3602,10 @@ func (s *TranscodeSession) restart(
 		s.mu.Unlock()
 		<-flight.done
 		return flight.err
+	}
+	if s.closing {
+		s.mu.Unlock()
+		return errSessionClosing
 	}
 	flight := &restartFlight{done: make(chan struct{})}
 	s.restarting = flight
@@ -3623,6 +3650,15 @@ func (s *TranscodeSession) restart(
 	}
 
 	s.mu.Lock()
+	if s.closing {
+		// Close began while this restart validated or stopped the previous
+		// generation: stop before touching the output or starting FFmpeg.
+		flight.err = errSessionClosing
+		s.restarting = nil
+		s.mu.Unlock()
+		close(flight.done)
+		return flight.err
+	}
 	s.running = false
 	s.waitErr = nil
 	if s.stderr != nil {
@@ -3728,6 +3764,20 @@ func (s *TranscodeSession) restart(
 	}
 
 	s.mu.Lock()
+	if s.closing {
+		// Close began while this generation started: end it here, before
+		// the flight lets Close read the session's generation.
+		s.mu.Unlock()
+		cancel()
+		_ = cmd.Wait()
+		releaseHWDevice()
+		s.mu.Lock()
+		flight.err = errSessionClosing
+		s.restarting = nil
+		s.mu.Unlock()
+		close(flight.done)
+		return flight.err
+	}
 	if s.stdinPipe != nil {
 		s.stdinPipe.Close()
 	}
@@ -4057,15 +4107,16 @@ func (s *TranscodeSession) manifestTimeoutError(timeout time.Duration) error {
 	s.mu.Lock()
 	running := s.running
 	waitErr := s.waitErr
-	stderr := ""
+	retained := ""
 	if s.stderr != nil {
-		stderr = truncateStderr(s.stderr.String())
+		retained = s.stderr.String()
 	}
 	s.mu.Unlock()
+	stderr := truncateStderr(retained)
 
 	switch {
 	case waitErr != nil && stderr != "":
-		return fmt.Errorf("%w after %s: ffmpeg exited: %w (stderr: %s)", ErrManifestNotReady, timeout, waitErr, stderr)
+		return classifyFFmpegFailure(fmt.Errorf("%w after %s: ffmpeg exited: %w (stderr: %s)", ErrManifestNotReady, timeout, waitErr, stderr), retained)
 	case waitErr != nil:
 		return fmt.Errorf("%w after %s: ffmpeg exited: %w", ErrManifestNotReady, timeout, waitErr)
 	case running:
@@ -4310,10 +4361,10 @@ func (s *TranscodeSession) LastRequestedSegment() int {
 }
 
 // StartThrottler creates and starts a throttler for this session.
-// No-op if thresholdSeconds <= 0 or stdinPipe is nil.
+// No-op if thresholdSeconds <= 0, stdinPipe is nil, or the session is closing.
 func (s *TranscodeSession) StartThrottler(thresholdSeconds int) {
 	s.mu.Lock()
-	if s.stdinPipe == nil || thresholdSeconds <= 0 {
+	if s.stdinPipe == nil || thresholdSeconds <= 0 || s.closing {
 		s.mu.Unlock()
 		return
 	}

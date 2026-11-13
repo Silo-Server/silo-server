@@ -1712,3 +1712,53 @@ func TestCompatMasterAudioCodecJellyfin12Strings(t *testing.T) {
 		}
 	}
 }
+
+// A token-authenticated HLS request whose play session cannot be read from
+// the store answers a retryable 503, not a 404 that ends playback (#4008).
+// An absent play session, or one owned by another token, still answers 404.
+func TestHLSRoutesAnswer503WhenPlaySessionStoreUnavailable(t *testing.T) {
+	cold := NewDurableCompatPlaybackStore(newUnreachableCompatPool(t), time.Hour, nil)
+	other := NewPlaybackSessionStore(time.Hour, nil)
+	other.Put(PlaybackSession{ID: "ps-abc", CompatToken: "someone-else", RouteItemID: "itm", UpstreamSessionID: "up"})
+
+	routes := []struct {
+		name   string
+		path   string
+		params map[string]string
+		serve  func(*PlaybackHandler, http.ResponseWriter, *http.Request)
+	}{
+		{"master", "/Videos/itm/master.m3u8?PlaySessionId=ps-abc", map[string]string{"id": "itm"}, (*PlaybackHandler).HandleMasterManifest},
+		{"playlist", "/Videos/itm/hls/ps-abc/stream.m3u8", map[string]string{"id": "itm", "playlistId": "ps-abc"}, (*PlaybackHandler).HandleHLSManifest},
+		{"segment", "/Videos/itm/hls/ps-abc/seg_00000.ts", map[string]string{"id": "itm", "playlistId": "ps-abc", "segmentId": "seg_00000", "segmentContainer": "ts"}, (*PlaybackHandler).HandleHLSSegment},
+	}
+	for _, route := range routes {
+		for _, tc := range []struct {
+			name     string
+			store    CompatPlaybackStore
+			wantCode int
+		}{
+			{"store unreadable", cold, http.StatusServiceUnavailable},
+			{"session absent", NewPlaybackSessionStore(time.Hour, nil), http.StatusNotFound},
+			{"session of another token", other, http.StatusNotFound},
+		} {
+			t.Run(route.name+"/"+tc.name, func(t *testing.T) {
+				handler := &PlaybackHandler{playbackStore: tc.store}
+				req := httptest.NewRequest(http.MethodGet, route.path, nil)
+				routeCtx := chi.NewRouteContext()
+				for k, v := range route.params {
+					routeCtx.URLParams.Add(k, v)
+				}
+				ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
+				ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "compat-tok", StreamAppUserID: 1})
+				rec := httptest.NewRecorder()
+				route.serve(handler, rec, req.WithContext(ctx))
+				if rec.Code != tc.wantCode {
+					t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tc.wantCode, rec.Body.String())
+				}
+				if tc.wantCode == http.StatusServiceUnavailable && rec.Header().Get("Retry-After") == "" {
+					t.Fatal("503 carries no Retry-After")
+				}
+			})
+		}
+	}
+}

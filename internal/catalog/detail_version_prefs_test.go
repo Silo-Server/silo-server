@@ -495,6 +495,23 @@ func TestSortFileVersions_PrefersLargerFilesWithinQualityTier(t *testing.T) {
 	}
 }
 
+// A caller that takes versions[0] as the default (Jellyfin Download, the
+// download manifest fallback) must never get a later part, even a larger one.
+func TestSortVideoVersions_KeepsLaterPartsBehindStartingFiles(t *testing.T) {
+	versions := []FileVersion{
+		{FileID: 1, Resolution: "1080p", FileSize: 1_000, PresentationPartIndex: 1, PresentationPartTotal: 2},
+		{FileID: 2, Resolution: "1080p", FileSize: 3_000, PresentationPartIndex: 2, PresentationPartTotal: 2},
+		{FileID: 3, Resolution: "720p", FileSize: 500},
+	}
+
+	sortVideoVersions(playableTypeMovie, versions)
+
+	got := []int{versions[0].FileID, versions[1].FileID, versions[2].FileID}
+	if want := []int{1, 3, 2}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("order = %v, want %v", got, want)
+	}
+}
+
 func TestEffectiveAudioTrackIndex_ResolvesProfileOriginalWhenSeriesPreferenceFallsBack(t *testing.T) {
 	store := newDetailTestStore(t)
 	language := playback.OriginalLanguageSentinel
