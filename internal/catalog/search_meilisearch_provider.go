@@ -588,16 +588,14 @@ func (p *MeilisearchSearchProvider) buildFederatedSearchRequest(
 	}
 	keywordWeight := 1 - semanticWeight
 
-	mediaFilter := base.Filter
-	mixed := searchRequestMixesEpisodeAndMedia(req.ItemTypes)
-	if mixed {
-		mediaTypes, _ := splitSearchItemTypes(req.ItemTypes)
-		if len(req.ItemTypes) == 0 {
-			mediaFilter = joinMeilisearchFilters(`type != "episode"`, meilisearchSearchFilter(nil, req.Access))
-		} else {
-			mediaFilter = meilisearchSearchFilter(mediaTypes, req.Access)
-		}
+	mediaTypes, _ := splitSearchItemTypes(req.ItemTypes)
+	var mediaFilter string
+	if len(req.ItemTypes) == 0 {
+		mediaFilter = joinMeilisearchFilters(`type != "episode"`, meilisearchSearchFilter(nil, req.Access))
+	} else {
+		mediaFilter = meilisearchSearchFilter(mediaTypes, req.Access)
 	}
+	episodeFilter := meilisearchSearchFilter([]string{"episode"}, req.Access)
 	keywordQuery := func(filter string) meilisearchFederatedQuery {
 		query := meilisearchFederatedQuery{
 			IndexUID:             indexUID,
@@ -626,8 +624,8 @@ func (p *MeilisearchSearchProvider) buildFederatedSearchRequest(
 		semanticQuery.FederationOptions.Weight = semanticWeight
 		queries = append(queries, semanticQuery)
 	}
-	if mixed {
-		queries = append(queries, keywordQuery(meilisearchSearchFilter([]string{"episode"}, req.Access)))
+	if searchRequestMixesEpisodeAndMedia(req.ItemTypes) {
+		queries = append(queries, keywordQuery(episodeFilter))
 	}
 	return meilisearchFederatedSearchRequest{
 		Federation: meilisearchFederationOptions{Offset: offset, Limit: limit},
