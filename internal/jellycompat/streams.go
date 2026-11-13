@@ -3284,7 +3284,9 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 				return nil, fallbackErr
 			}
 		}
-	} else if autoPipeline.Enabled() {
+	} else if autoPipeline.Enabled() || playback.HardwareDecodeRetryEligible(opts) {
+		// An explicit hardware backend has no fallback order, but its decoder
+		// can still reject the source, so it is waited on too.
 		var successor *playback.TranscodeSession
 		transcodeSession, successor, err = h.awaitCompatAutoTranscode(ctx, upstreamSessionID, source, requiredToneMapMode, autoPipeline, transcodeSession)
 		if err != nil {
@@ -3360,6 +3362,11 @@ func (h *PlaybackHandler) newCompatAutoTranscodePipeline(ctx context.Context, op
 // deadline is kept: it is already registered for concurrent manifest requests,
 // and a second encoder would duplicate it. It returns the ready (or slow)
 // session, or the live successor another caller installed instead.
+//
+// A disabled pipeline is an explicit hardware backend. It has no safer path
+// unless the GPU decoder rejected the source, which walks
+// playback.NewSoftwareDecodeRetryPipeline. Any other early exit returns the
+// registered session as an unwaited start would, for its exit monitor to end.
 func (h *PlaybackHandler) awaitCompatAutoTranscode(
 	ctx context.Context,
 	upstreamSessionID string,
@@ -3380,7 +3387,16 @@ func (h *PlaybackHandler) awaitCompatAutoTranscode(
 			return transcodeSession, nil, nil
 		}
 		failedDevice := transcodeSession.Opts().HWDevice
-		advanced := pipeline.AdvanceAfterFailure(failedDevice)
+		advanced := true
+		if pipeline.Enabled() {
+			advanced = pipeline.AdvanceAfterFailure(failedDevice)
+		} else {
+			// An explicit backend: only a decoder rejection has a safer path.
+			pipeline = playback.NewSoftwareDecodeRetryPipeline(pipeline.Current(), readyErr)
+			if !pipeline.Enabled() {
+				return transcodeSession, nil, nil
+			}
+		}
 		replaceUnlock := h.tm.LockSessionLifecycle(upstreamSessionID)
 		if live := h.tm.GetTranscodeSession(upstreamSessionID); live != transcodeSession {
 			replaceUnlock()

@@ -259,6 +259,51 @@ func TestStartReconstructTranscodeKeepsOutputForNextAttempt(t *testing.T) {
 	}
 }
 
+// A recipe card can be rebuilt where the GPU decoder rejects its source: on
+// another node, or after the operator chose this backend. An explicit backend
+// has no fallback order, so the reconstruct must still move to CPU decoding,
+// in the same directory, after the request that triggered it has gone.
+func TestStartReconstructTranscodeRetriesDecoderRejectionOnCPU(t *testing.T) {
+	opts := startupTestOpts()
+	opts.HWAccel = transcodeHWNVENC
+	opts.HWDevice = ""
+	pipeline := newAutoTranscodePipeline(context.Background(), opts, newAutoTranscodePipelineCache())
+	outputDir := t.TempDir()
+	servedSegment := filepath.Join(outputDir, "seg_00010.ts")
+	if err := os.WriteFile(servedSegment, []byte("segment"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var attempts []TranscodeOpts
+	start := func(startCtx context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
+		attempts = append(attempts, opts)
+		if len(attempts) > 1 && startCtx.Err() != nil {
+			t.Errorf("attempt %d launched on the ended request's context", len(attempts))
+		}
+		if _, err := os.Stat(servedSegment); err != nil {
+			t.Fatalf("attempt %d: rejected attempt removed the shared output dir: %v", len(attempts), err)
+		}
+		session := fakeStartupSession(t, opts, outputDir, len(attempts) == 2, false)
+		if len(attempts) == 1 {
+			_, _ = session.stderr.Write([]byte("[hevc @ 0x1] Hardware is lacking required capabilities"))
+			cancel()
+		}
+		return session, nil
+	}
+
+	session, err := StartReconstructTranscode(ctx, pipeline, TranscodeStartup{Timeout: time.Millisecond, Start: start})
+	if err != nil {
+		t.Fatalf("StartReconstructTranscode: %v", err)
+	}
+	if len(attempts) != 2 {
+		t.Fatalf("attempt count = %d, want GPU decode then CPU decode", len(attempts))
+	}
+	if got := session.Opts(); got.HWAccel != transcodeHWNVENC || !got.SoftwareVideoDecode {
+		t.Fatalf("returned attempt = %s software decode %v, want NVENC with CPU decode", got.HWAccel, got.SoftwareVideoDecode)
+	}
+}
+
 // seedPreviousGeneration leaves the manifest and segment an earlier
 // generation wrote into outputDir, as a restart-surviving directory holds.
 func seedPreviousGeneration(t *testing.T, outputDir string) {
