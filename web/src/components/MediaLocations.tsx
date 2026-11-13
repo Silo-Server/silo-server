@@ -3,6 +3,7 @@ import { Copy, Info } from "lucide-react";
 import { toast } from "sonner";
 import type { FileVersion } from "@/api/types";
 import { Button } from "@/components/ui/button";
+import { useT, type Translate } from "@/i18n";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 import { resolutionScore } from "@/pages/ItemDetail/components/versionRankingUtils";
@@ -28,7 +29,8 @@ interface MediaLocationEntry {
 
 function splitMediaPath(
   filePath: string,
-  fallbackName?: string,
+  fallbackName: string | undefined,
+  t: Translate,
 ): Omit<MediaLocationEntry, "fileId" | "versionLabel"> | null {
   const lastSlash = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
   if (lastSlash < 0) {
@@ -43,7 +45,8 @@ function splitMediaPath(
   }
 
   const folderPath = filePath.slice(0, lastSlash);
-  const fileName = filePath.slice(lastSlash + 1) || fallbackName?.trim() || "Unknown file";
+  const fileName =
+    filePath.slice(lastSlash + 1) || fallbackName?.trim() || t("web.item.locations.unknownFile");
   const folderSegments = folderPath.split(/[\\/]/).filter(Boolean);
   const folderName = folderSegments[folderSegments.length - 1] || folderPath || "/";
 
@@ -57,6 +60,7 @@ function splitMediaPath(
 function deriveMediaLocationsWithSummary(
   versions: FileVersion[],
   summaryBuilder: (version: FileVersion) => string,
+  t: Translate,
 ): MediaLocationEntry[] {
   return [...versions]
     .sort((a, b) => {
@@ -69,24 +73,25 @@ function deriveMediaLocationsWithSummary(
       const path = version.file_path?.trim();
       if (!path) return null;
 
-      const location = splitMediaPath(path, version.file_name);
+      const location = splitMediaPath(path, version.file_name, t);
       if (!location) return null;
 
       return {
         ...location,
         fileId: version.file_id,
-        versionLabel: summaryBuilder(version) || `Version ${index + 1}`,
+        versionLabel:
+          summaryBuilder(version) || t("web.item.locations.version", { number: index + 1 }),
       };
     })
     .filter((location): location is MediaLocationEntry => Boolean(location));
 }
 
-async function copyText(text: string, successMessage: string) {
+async function copyText(text: string, successMessage: string, failureMessage: string) {
   try {
     await copyTextToClipboard(text);
     toast.success(successMessage);
   } catch {
-    toast.error("Failed to copy path");
+    toast.error(failureMessage);
   }
 }
 
@@ -99,9 +104,10 @@ export default function MediaLocations({
   summaryBuilder = buildQualitySummary,
   onShowMediaInfo,
 }: MediaLocationsProps) {
+  const t = useT();
   const locations = useMemo(
-    () => deriveMediaLocationsWithSummary(versions, summaryBuilder),
-    [versions, summaryBuilder],
+    () => deriveMediaLocationsWithSummary(versions, summaryBuilder, t),
+    [versions, summaryBuilder, t],
   );
 
   if (locations.length === 0) {
@@ -134,16 +140,22 @@ export default function MediaLocations({
               <div className="min-w-0 flex-1 space-y-1.5">
                 <div className="text-sm font-medium">{location.versionLabel}</div>
                 <div className="min-w-0 font-mono text-xs leading-relaxed sm:text-[0.75rem]">
-                  {location.folderName ? (
-                    <span
-                      className="text-muted-foreground"
-                      title={location.folderPath}
-                      aria-label={`Parent folder ${location.folderPath}`}
-                    >
-                      {location.folderName}/
-                    </span>
-                  ) : null}
-                  <span className="text-foreground ml-1 break-all">{location.fileName}</span>
+                  {/* A path reads left to right in every language; inline, so it
+                    keeps the panel's alignment. */}
+                  <span dir="ltr">
+                    {location.folderName ? (
+                      <span
+                        className="text-muted-foreground"
+                        title={location.folderPath}
+                        aria-label={t("web.item.locations.parentFolder", {
+                          path: location.folderPath,
+                        })}
+                      >
+                        {t("web.item.locations.folderName", { folder: location.folderName })}
+                      </span>
+                    ) : null}
+                    <span className="text-foreground ms-1 break-all">{location.fileName}</span>
+                  </span>
                 </div>
               </div>
 
@@ -155,8 +167,10 @@ export default function MediaLocations({
                     size="icon"
                     className="text-muted-foreground hover:text-foreground h-7 w-7"
                     onClick={() => onShowMediaInfo(location.fileId)}
-                    title="View media info"
-                    aria-label={`View media info for ${location.fileName}`}
+                    title={t("web.item.locations.viewMediaInfo")}
+                    aria-label={t("web.item.locations.viewMediaInfoFor", {
+                      file: location.fileName,
+                    })}
                   >
                     <Info className="h-3.5 w-3.5" />
                   </Button>
@@ -167,9 +181,17 @@ export default function MediaLocations({
                     variant="ghost"
                     size="icon"
                     className="text-muted-foreground hover:text-foreground h-7 w-7"
-                    onClick={() => copyText(location.folderPath, "Copied folder path")}
-                    title="Copy full folder path"
-                    aria-label={`Copy full folder path for ${location.fileName}`}
+                    onClick={() =>
+                      copyText(
+                        location.folderPath,
+                        t("web.item.dialog.copiedFolderPath"),
+                        t("web.item.dialog.copyPathFailed"),
+                      )
+                    }
+                    title={t("web.item.locations.copyFolderPath")}
+                    aria-label={t("web.item.locations.copyFolderPathFor", {
+                      file: location.fileName,
+                    })}
                   >
                     <Copy className="h-3.5 w-3.5" />
                   </Button>

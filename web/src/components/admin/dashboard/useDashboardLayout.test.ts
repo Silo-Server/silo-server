@@ -577,6 +577,32 @@ describe("useDashboardLayout server persistence", () => {
     });
   });
 
+  // A reload inside the debounce window must not drop the queued save.
+  it("sends a queued save immediately when the page is hidden", () => {
+    vi.useFakeTimers();
+    writeStored([{ id: "egress-24h", span: 6, rows: 3, range: "day" }]);
+    serverLayout(readStored().entries);
+    const { result } = renderHook(() => useDashboardLayout());
+
+    act(() => {
+      result.current.setWidgetRange("egress-24h", "week");
+    });
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+
+    expect(mocks.save).toHaveBeenCalledTimes(1);
+    expect(mocks.save).toHaveBeenCalledWith({
+      version: 1,
+      entries: [{ id: "egress-24h", span: 6, rows: 3, range: "week" }],
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(DASHBOARD_LAYOUT_SAVE_DEBOUNCE_MS);
+    });
+    expect(mocks.save).toHaveBeenCalledTimes(1);
+  });
+
   it("resetLayout refuses an obsolete authority callback before local reset", () => {
     writeStored([{ id: "users", span: 5, rows: 4 }]);
     const { result } = renderHook(() => useDashboardLayout());

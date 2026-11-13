@@ -6,13 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -91,10 +87,6 @@ type PersonalCollectionUpdateRequest struct {
 	// or "" to stop syncing. Set only by the /api/v2 adapter; the frozen
 	// /api/v1 update never accepted one and still ignores it.
 	SyncSchedule *string `json:"-"`
-}
-
-type collectionItemRequest struct {
-	Position int `json:"position"`
 }
 
 type PersonalCollectionView struct {
@@ -182,10 +174,6 @@ type CollectionGroupUpdateRequest struct {
 	DefaultSortMode *string `json:"default_sort_mode"`
 }
 
-type reorderCollectionGroupsRequest struct {
-	OrderedIDs []string `json:"ordered_ids"`
-}
-
 type PersonalCollectionItemView struct {
 	Title        string `json:"-"` // Catalog title for v2 membership; v1 stays unchanged.
 	CollectionID string `json:"collection_id"`
@@ -204,9 +192,6 @@ type PersonalCollectionPreviewRequest struct {
 	// WithPosters signs each item's poster. Only the /api/v2 adapter sets it;
 	// the frozen /api/v1 body drops posters, so it skips the presign batch.
 	WithPosters bool `json:"-"`
-	// V1Rules keeps the frozen /api/v1 rule vocabulary: a rule on a field or
-	// with not_in_last that /api/v2 added is refused. Only /api/v1 sets it.
-	V1Rules bool `json:"-"`
 }
 
 type PersonalCollectionPreviewView struct {
@@ -225,261 +210,7 @@ type PersonalCollectionPreviewItemView struct {
 
 // --- Handler methods ---
 
-// HandleListCollections handles GET /collections.
-func (h *CollectionHandler) HandleListCollections(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	resp, err := h.ListPersonalCollections(r.Context(), userID, apimw.GetProfileID(r.Context()))
-	if err == nil {
-		views := make([]*PersonalCollectionView, len(resp.Collections))
-		for i := range resp.Collections {
-			views[i] = &resp.Collections[i]
-		}
-		err = v1CollectionAudience(r.Context(), h.storeProvider, userID, views...)
-	}
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// HandleCapabilities exposes additive feature support for collection clients.
-func (h *CollectionHandler) HandleCapabilities(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, h.Capabilities())
-}
-
-// HandleCreateCollection handles POST /collections.
-func (h *CollectionHandler) HandleCreateCollection(w http.ResponseWriter, r *http.Request) {
-	var req PersonalCollectionCreateRequest
-	if err := decodeJSONOrMultipart(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	userID := apimw.GetUserID(r.Context())
-	created, err := h.CreatePersonalCollection(r.Context(), PersonalCollectionCreateCommand{
-		UserID:     userID,
-		ProfileID:  apimw.GetProfileID(r.Context()),
-		Request:    req,
-		PosterFile: posterFileReader(r),
-		V1Rules:    true,
-	})
-	if err == nil {
-		err = v1CollectionAudience(r.Context(), h.storeProvider, userID, &created)
-	}
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, created)
-}
-
-// HandleUpdateCollection handles PUT /collections/{id}.
-func (h *CollectionHandler) HandleUpdateCollection(w http.ResponseWriter, r *http.Request) {
-	var req PersonalCollectionUpdateRequest
-	if err := decodeJSONOrMultipart(r, &req); err != nil {
-		writeError(w, 400, "bad_request", "Invalid request body")
-		return
-	}
-	userID := apimw.GetUserID(r.Context())
-	resp, err := h.UpdatePersonalCollection(r.Context(), PersonalCollectionUpdateCommand{UserID: userID, ProfileID: apimw.GetProfileID(r.Context()), CollectionID: chi.URLParam(r, "id"), Request: req, PosterFile: posterFileReader(r), V1Rules: true})
-	if err == nil {
-		err = v1CollectionAudience(r.Context(), h.storeProvider, userID, &resp)
-	}
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-func (h *CollectionHandler) HandlePreviewCollection(w http.ResponseWriter, r *http.Request) {
-	var req PersonalCollectionPreviewRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, 400, "bad_request", "Invalid request body")
-		return
-	}
-	req.V1Rules = true
-	resp, err := h.PreviewPersonalCollection(r.Context(), req, requestAccessFilter(r))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// HandleDeleteCollection handles DELETE /collections/{id}.
-func (h *CollectionHandler) HandleDeleteCollection(w http.ResponseWriter, r *http.Request) {
-	if err := h.DeletePersonalCollection(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), chi.URLParam(r, "id")); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleListCollectionItems handles GET /collections/{id}/items.
-func (h *CollectionHandler) HandleListCollectionItems(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.ListPersonalCollectionItems(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), chi.URLParam(r, "id"))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// HandleAddCollectionItem handles PUT /collections/{id}/items/{item_id}.
-func (h *CollectionHandler) HandleAddCollectionItem(w http.ResponseWriter, r *http.Request) {
-	var req collectionItemRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		req.Position = 0
-	}
-	if err := h.AddPersonalCollectionItem(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), chi.URLParam(r, "id"), chi.URLParam(r, "item_id"), req.Position); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-type reorderRequest struct {
-	OrderedIDs []string `json:"ordered_ids"`
-	// GroupID is kept for v1 clients; personal collection groups no longer
-	// exist, so only null or absent is accepted.
-	GroupID *string `json:"group_id,omitempty"`
-}
-
-// HandleReorderCollections handles PUT /collections/order.
-// The body must name each of the profile's own collections exactly once;
-// concurrent edits that would silently drop one are rejected.
-func (h *CollectionHandler) HandleReorderCollections(w http.ResponseWriter, r *http.Request) {
-	var req reorderRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	if req.GroupID != nil {
-		writeAPIError(w, fieldError("group_id", "Personal collection groups are not supported; omit group_id"))
-		return
-	}
-	if err := h.ReorderPersonalCollections(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), req.OrderedIDs); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleCreateCollectionGroup handles POST /collections/groups.
-func (h *CollectionHandler) HandleCreateCollectionGroup(w http.ResponseWriter, r *http.Request) {
-	var req CollectionGroupCreateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	group, err := h.CreateCollectionGroup(r.Context(), apimw.GetUserID(r.Context()), req)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, group)
-}
-
-// HandleUpdateCollectionGroup handles PUT /collections/groups/{id}.
-func (h *CollectionHandler) HandleUpdateCollectionGroup(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	if id == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "id is required")
-		return
-	}
-	var req CollectionGroupUpdateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	group, err := h.UpdateCollectionGroup(r.Context(), apimw.GetUserID(r.Context()), id, req)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, group)
-}
-
-// HandleDeleteCollectionGroup handles DELETE /collections/groups/{id}.
-func (h *CollectionHandler) HandleDeleteCollectionGroup(w http.ResponseWriter, r *http.Request) {
-	if err := h.DeleteCollectionGroup(r.Context(), apimw.GetUserID(r.Context()), chi.URLParam(r, "id")); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleReorderCollectionGroups handles PUT /collections/groups/order.
-func (h *CollectionHandler) HandleReorderCollectionGroups(w http.ResponseWriter, r *http.Request) {
-	var req reorderCollectionGroupsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	if err := h.ReorderCollectionGroups(r.Context(), apimw.GetUserID(r.Context()), req.OrderedIDs); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleReorderCollectionItems handles PUT /collections/{id}/items/order.
-// The body must contain every item currently in the collection.
-func (h *CollectionHandler) HandleReorderCollectionItems(w http.ResponseWriter, r *http.Request) {
-	var req reorderRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, 400, "bad_request", "Invalid request body")
-		return
-	}
-	if err := h.ReorderPersonalCollectionItems(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), chi.URLParam(r, "id"), req.OrderedIDs); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleRemoveCollectionItem handles DELETE /collections/{id}/items/{item_id}.
-func (h *CollectionHandler) HandleRemoveCollectionItem(w http.ResponseWriter, r *http.Request) {
-	if err := h.RemovePersonalCollectionItem(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), chi.URLParam(r, "id"), chi.URLParam(r, "item_id")); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
 // --- Helpers ---
-
-// v1CollectionAudience fills allowed_profile_ids for the /api/v1 bridge, which
-// still reports it: the creator alone for a private collection, every profile
-// on the login (sorted by ID) for a shared one. Visibility itself is decided
-// from is_shared; the reported list is never read back.
-func v1CollectionAudience(ctx context.Context, provider userstore.UserStoreProvider, userID int, views ...*PersonalCollectionView) error {
-	var login []string
-	for _, v := range views {
-		if !v.IsShared {
-			v.AllowedProfileIDs = []string{v.CreatorProfileID}
-			continue
-		}
-		if login == nil {
-			store, err := provider.ForUser(ctx, userID)
-			if err != nil {
-				return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
-			}
-			profiles, err := store.ListProfiles(ctx)
-			if err != nil {
-				return apiError(http.StatusInternalServerError, "internal_error", "Failed to list profiles")
-			}
-			login = make([]string, 0, len(profiles))
-			for _, p := range profiles {
-				login = append(login, p.ID)
-			}
-			slices.Sort(login)
-		}
-		v.AllowedProfileIDs = slices.Clone(login)
-	}
-	return nil
-}
 
 func toCollectionResponse(c userstore.Collection) PersonalCollectionView {
 	queryDefinition := defaultJSON([]byte(c.QueryDefinition))
@@ -531,44 +262,54 @@ func defaultJSON(raw []byte) json.RawMessage {
 	return json.RawMessage(raw)
 }
 
-func normalizeQueryDefinitionJSON(raw []byte, allowPersonalizedSorts, allowPersonalizedFields, v1Rules bool) (json.RawMessage, error) {
-	var def catalog.QueryDefinition
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &def); err != nil {
-			return nil, err
-		}
-	}
-	def = def.Normalize()
-	if err := def.ValidateWithOptions(allowPersonalizedSorts, allowPersonalizedFields); err != nil {
-		return nil, err
-	}
-	if v1Rules {
-		if err := catalog.ValidateV1Rules(def); err != nil {
-			return nil, err
-		}
-	}
-	normalized, err := json.Marshal(def)
-	if err != nil {
-		return nil, err
-	}
-	return normalized, nil
+func normalizeQueryDefinitionJSON(raw []byte, allowPersonalizedSorts, allowPersonalizedFields bool) (json.RawMessage, error) {
+	return catalog.NormalizeQueryDefinitionJSON(raw, allowPersonalizedSorts, allowPersonalizedFields)
 }
 
-func normalizeSmartCollectionQueryDefinitionJSON(raw []byte, allowPersonalizedSorts, allowPersonalizedFields, v1Rules bool) (json.RawMessage, error) {
-	normalized, err := normalizeQueryDefinitionJSON(raw, allowPersonalizedSorts, allowPersonalizedFields, v1Rules)
-	if err != nil {
-		return nil, err
+func normalizeSmartCollectionQueryDefinitionJSON(raw []byte, allowPersonalizedSorts, allowPersonalizedFields bool) (json.RawMessage, error) {
+	return catalog.NormalizeSmartCollectionQueryJSON(raw, allowPersonalizedSorts, allowPersonalizedFields)
+}
+
+// smartCollectionNeedsRule is why a smart collection with no complete rule is
+// refused: its empty rules would match every title.
+const smartCollectionNeedsRule = "A smart collection needs at least one rule with a field, an operator and a value"
+
+// requireSmartCollectionRule refuses a smart collection's normalized
+// query_definition when it holds no rule complete enough to filter, as a
+// validation error at query_definition.groups. Only /api/v2 applies it: /api/v1
+// is frozen, and restores keep collections saved before the check.
+func requireSmartCollectionRule(queryDefinition json.RawMessage) error {
+	var definition catalog.QueryDefinition
+	if len(queryDefinition) > 0 {
+		if err := json.Unmarshal(queryDefinition, &definition); err != nil {
+			return fieldError("query_definition", "Invalid query_definition")
+		}
 	}
-	var def catalog.QueryDefinition
-	if err := json.Unmarshal(normalized, &def); err != nil {
-		return nil, err
+	if definition.HasCompleteRule() {
+		return nil
 	}
-	def = catalog.ApplySmartCollectionItemLimit(def)
-	out, err := json.Marshal(def)
-	if err != nil {
-		return nil, err
+	return fieldError("query_definition.groups", smartCollectionNeedsRule)
+}
+
+// adminSmartRuleCheck applies requireSmartCollectionRule to an admin update
+// that would leave the collection Smart: to the rules it sends, or, when it
+// switches a collection to Smart without sending any, to the stored rules that
+// switch activates. An update that leaves the rules alone, such as a rename or
+// a visibility change, keeps a collection saved before the check working.
+func adminSmartRuleCheck(existingType string, existingRules json.RawMessage, req AdminCollectionUpdate, rules json.RawMessage) error {
+	collectionType := existingType
+	if req.CollectionType != nil {
+		collectionType = *req.CollectionType
 	}
-	return out, nil
+	switch {
+	case collectionType != collectionTypeSmart:
+		return nil
+	case len(req.QueryDefinition) > 0:
+		return requireSmartCollectionRule(rules)
+	case existingType != collectionTypeSmart:
+		return requireSmartCollectionRule(existingRules)
+	}
+	return nil
 }
 
 func firstNonEmptyCollection(values ...string) string {
@@ -580,86 +321,96 @@ func firstNonEmptyCollection(values ...string) string {
 	return ""
 }
 
-// errCollectionForbidden is returned by the artwork pipeline when the caller
-// is not the collection's creator. It surfaces as a 403 to the client.
-var errCollectionForbidden = errors.New("only the creator can edit this collection")
-
-// HandleDeleteCollectionImage clears the poster on a personal collection.
-// The query parameter "type" is required and currently only "poster" is
-// supported.
-func (h *CollectionHandler) HandleDeleteCollectionImage(w http.ResponseWriter, r *http.Request) {
-	if err := h.DeletePersonalCollectionImage(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), chi.URLParam(r, "id"), r.URL.Query().Get("type")); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// posterInputProvided reports whether the request body or form contained
-// poster artwork inputs that the upload pipeline would act on.
-// processCollectionPoster persists an uploaded or sourced poster image on the
-// given user collection. posterFile reads the uploaded part (nil when the
-// request carried no multipart body; http.ErrMissingFile when the part is
-// absent). It is a no-op, answering false, when no poster input was provided.
-// The caller is responsible for ensuring the request profile owns the
-// collection.
+// processCollectionPoster prepares a poster, from uploaded bytes or else from
+// sourceURL, and stores it on the given collection. It is a no-op when there
+// is neither. The caller is responsible for ensuring the request profile owns
+// the collection, and answers a failure through personalCollectionPosterError.
 func (h *CollectionHandler) processCollectionPoster(
 	ctx context.Context,
 	store userstore.UserStore,
 	collectionID, requestProfileID string,
-	posterFile func() ([]byte, error),
+	data []byte,
 	sourceURL string,
-) (bool, error) {
-	source := strings.TrimSpace(sourceURL)
+) error {
+	poster, err := h.prepareCollectionPoster(ctx, data, sourceURL)
+	if err != nil || poster == nil {
+		return err
+	}
+	return h.storeCollectionPoster(ctx, store, collectionID, requestProfileID, poster)
+}
 
-	var fileData []byte
-	if posterFile != nil {
-		data, err := posterFile()
-		switch {
-		case err == nil:
-			fileData = data
-		case errors.Is(err, http.ErrMissingFile):
-			// fall through to source URL handling
-		default:
-			return true, fmt.Errorf("poster: %w", err)
-		}
+// preparedCollectionPoster is a personal collection poster decoded into the
+// variants to store, under the content revision of its source bytes.
+type preparedCollectionPoster struct {
+	variants *collectionImageVariants
+	revision string
+}
+
+// prepareCollectionPoster decodes a poster: the uploaded bytes data, or else
+// the image at sourceURL. It answers nil when there is neither. Nothing is
+// stored: create calls it before its insert, so a poster it cannot use, or a
+// server too busy to decode it, creates nothing and the request is safe to
+// repeat.
+func (h *CollectionHandler) prepareCollectionPoster(
+	ctx context.Context,
+	data []byte,
+	sourceURL string,
+) (*preparedCollectionPoster, error) {
+	source := strings.TrimSpace(sourceURL)
+	fileData := data
+	if fileData == nil && source == "" {
+		return nil, nil
+	}
+	if h.ArtworkStore == nil {
+		return nil, errors.New("poster upload requires configured artwork storage")
 	}
 	if fileData == nil {
-		if source == "" {
-			return false, nil
-		}
 		downloaded, err := downloadCollectionImageURL(ctx, h.HTTPClient, source)
 		if err != nil {
-			return true, fmt.Errorf("poster source: %w", err)
+			return nil, fmt.Errorf("poster source: %w", err)
 		}
 		fileData = downloaded
 	}
 
-	artwork := h.ArtworkStore
-	if artwork == nil {
-		return true, fmt.Errorf("poster upload requires configured artwork storage")
+	variants, err := generateCollectionImageVariants(fileData, collectionPosterWidths)
+	if err != nil {
+		return nil, fmt.Errorf("poster: %w", err)
 	}
+	return &preparedCollectionPoster{variants: variants, revision: collectionImageRevision(fileData)}, nil
+}
+
+// storeCollectionPoster writes a prepared poster and points the collection at
+// it. It decodes nothing, so the server being busy cannot fail it. The caller
+// is responsible for ensuring the request profile owns the collection.
+func (h *CollectionHandler) storeCollectionPoster(
+	ctx context.Context,
+	store userstore.UserStore,
+	collectionID, requestProfileID string,
+	poster *preparedCollectionPoster,
+) error {
+	artwork := h.ArtworkStore
 	existing, err := store.GetCollection(ctx, collectionID)
 	if err != nil {
-		return true, fmt.Errorf("loading collection: %w", err)
+		return fmt.Errorf("loading collection: %w", err)
 	}
 	// Revisioned keys (issue #1258) put the replacement under a new key, so
 	// the current poster stays in place until the new path is committed.
-	s3Path, thumbhash, err := uploadCollectionImageVariants(ctx, artwork, userCollectionImagePrefix, collectionID, collectionImagePoster, fileData)
+	basePath := collectionImageDir(userCollectionImagePrefix, collectionID, collectionImagePoster)
+	s3Path, err := storeCollectionImageVariants(ctx, artwork, basePath, poster.revision, poster.variants)
 	if err != nil {
-		return true, fmt.Errorf("poster: %w", err)
+		return fmt.Errorf("poster: %w", err)
 	}
 
 	if err := store.UpdateCollection(ctx, userstore.UpdateCollectionInput{
 		ID:               collectionID,
 		RequestProfileID: requestProfileID,
 		PosterURL:        &s3Path,
-		PosterThumbhash:  &thumbhash,
+		PosterThumbhash:  &poster.variants.thumbhash,
 	}); err != nil {
 		if strings.Contains(err.Error(), "creator") {
-			return true, errCollectionForbidden
+			return apiError(http.StatusForbidden, "forbidden", "Only the creator can edit this collection")
 		}
-		return true, fmt.Errorf("persisting poster: %w", err)
+		return fmt.Errorf("persisting poster: %w", err)
 	}
 	cleanUpReplacedCollectionImage(ctx, artwork, userCollectionImagePrefix, collectionID, collectionImagePoster, existing.PosterURL, func(ctx context.Context) (string, error) {
 		current, err := store.GetCollection(ctx, collectionID)
@@ -668,24 +419,7 @@ func (h *CollectionHandler) processCollectionPoster(
 		}
 		return current.PosterURL, nil
 	})
-	return true, nil
-}
-
-// presignUserCollectionPoster returns a presigned URL for the card-sized
-// variant of the stored poster, mirroring the admin pipeline. Empty paths
-// return "".
-func (h *CollectionHandler) presignUserCollectionPoster(ctx context.Context, path string) string {
-	if path == "" {
-		return ""
-	}
-	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") || strings.HasPrefix(path, "/") {
-		return catalog.ImageURLOrEmpty(path)
-	}
-	if h.ArtworkResolver == nil {
-		return ""
-	}
-	key := cardThumbnailPath(path)
-	return h.ArtworkResolver.ResolveURLs(ctx, []string{key})[key].URL
+	return nil
 }
 
 // previewCollectionRequest is shared with the library collection bridge handler.

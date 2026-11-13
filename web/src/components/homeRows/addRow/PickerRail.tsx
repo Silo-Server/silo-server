@@ -1,8 +1,10 @@
 import type { KeyboardEvent } from "react";
+import { useT } from "@/i18n";
 import type { PickerGroup, RowGroup } from "@/lib/homeRows/catalog";
 import { cn } from "@/lib/utils";
 import { GROUP_ICONS, GROUP_TINTS } from "../rowIcons";
 import { groupTabId, groupPanelId } from "./pickerIds";
+import { readingArrowKey } from "@/lib/direction";
 
 /**
  * The picker's groups as tabs that scroll the card list to their group.
@@ -22,6 +24,7 @@ export function PickerRail({
   onSelect: (group: RowGroup) => void;
   orientation: "vertical" | "horizontal";
 }) {
+  const t = useT();
   const vertical = orientation === "vertical";
   const activeIndex = Math.max(
     0,
@@ -32,8 +35,9 @@ export function PickerRail({
     const back = vertical ? "ArrowUp" : "ArrowLeft";
     const forward = vertical ? "ArrowDown" : "ArrowRight";
     let next: number | null = null;
-    if (event.key === back) next = (activeIndex - 1 + groups.length) % groups.length;
-    else if (event.key === forward) next = (activeIndex + 1) % groups.length;
+    const key = readingArrowKey(event);
+    if (key === back) next = (activeIndex - 1 + groups.length) % groups.length;
+    else if (key === forward) next = (activeIndex + 1) % groups.length;
     else if (event.key === "Home") next = 0;
     else if (event.key === "End") next = groups.length - 1;
     if (next === null) return;
@@ -46,7 +50,7 @@ export function PickerRail({
   return (
     <div
       role="tablist"
-      aria-label="Kinds of rows"
+      aria-label={t("web.home.addRow.picker.kinds")}
       aria-orientation={orientation}
       onKeyDown={handleKeyDown}
       className={cn(
@@ -71,7 +75,7 @@ export function PickerRail({
             className={cn(
               "focus-visible:ring-ring/50 outline-none focus-visible:ring-[3px]",
               vertical
-                ? "text-muted-foreground hover:text-foreground aria-selected:bg-accent aria-selected:text-foreground aria-selected:ring-border flex items-center gap-2.5 rounded-[10px] px-3 py-[9px] text-left text-sm aria-selected:ring-1 aria-selected:ring-inset"
+                ? "text-muted-foreground hover:text-foreground aria-selected:bg-accent aria-selected:text-foreground aria-selected:ring-border flex items-center gap-2.5 rounded-[10px] px-3 py-[9px] text-start text-sm aria-selected:ring-1 aria-selected:ring-inset"
                 : "border-border text-foreground/80 aria-selected:bg-foreground aria-selected:text-background h-10 shrink-0 rounded-full border px-4 text-sm font-medium whitespace-nowrap",
             )}
           >
@@ -88,9 +92,11 @@ export function PickerRail({
             ) : null}
             {group.label}
             {vertical ? (
-              <span className="ml-auto text-xs tabular-nums opacity-80">
-                {group.cards.length}
-                <span className="sr-only"> kinds</span>
+              <span className="ms-auto text-xs tabular-nums opacity-80">
+                {t("web.home.addRow.picker.groupCount", {
+                  count: group.cards.length,
+                  hidden: (chunks) => <span className="sr-only">{chunks}</span>,
+                })}
               </span>
             ) : null}
           </button>

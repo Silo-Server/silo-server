@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useT } from "@/i18n";
 
 interface EditPersonDialogProps {
   person: Person;
@@ -34,6 +35,7 @@ function createFormState(person: Person) {
 }
 
 export default function EditPersonDialog({ person, open, onOpenChange }: EditPersonDialogProps) {
+  const t = useT();
   const [form, setForm] = useState(() => createFormState(person));
   const mutation = useUpdatePersonMetadata(String(person.id));
   const originalForm = useMemo(() => createFormState(person), [person]);
@@ -69,12 +71,12 @@ export default function EditPersonDialog({ person, open, onOpenChange }: EditPer
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Edit Person Metadata</DialogTitle>
+          <DialogTitle>{t("web.item.editPerson.title")}</DialogTitle>
         </DialogHeader>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1.5 sm:col-span-2">
-            <Label htmlFor="person-name">Name</Label>
+            <Label htmlFor="person-name">{t("web.item.editPerson.name")}</Label>
             <Input
               id="person-name"
               value={form.name}
@@ -83,7 +85,7 @@ export default function EditPersonDialog({ person, open, onOpenChange }: EditPer
           </div>
 
           <div className="space-y-1.5 sm:col-span-2">
-            <Label htmlFor="person-bio">Bio</Label>
+            <Label htmlFor="person-bio">{t("web.item.editPerson.bio")}</Label>
             <textarea
               id="person-bio"
               value={form.bio}
@@ -93,7 +95,7 @@ export default function EditPersonDialog({ person, open, onOpenChange }: EditPer
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="person-birth-date">Birth Date</Label>
+            <Label htmlFor="person-birth-date">{t("web.item.editPerson.birthDate")}</Label>
             <Input
               id="person-birth-date"
               type="date"
@@ -103,7 +105,7 @@ export default function EditPersonDialog({ person, open, onOpenChange }: EditPer
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="person-death-date">Death Date</Label>
+            <Label htmlFor="person-death-date">{t("web.item.editPerson.deathDate")}</Label>
             <Input
               id="person-death-date"
               type="date"
@@ -113,7 +115,7 @@ export default function EditPersonDialog({ person, open, onOpenChange }: EditPer
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="person-birthplace">Birthplace</Label>
+            <Label htmlFor="person-birthplace">{t("web.item.editPerson.birthplace")}</Label>
             <Input
               id="person-birthplace"
               value={form.birthplace}
@@ -122,7 +124,7 @@ export default function EditPersonDialog({ person, open, onOpenChange }: EditPer
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="person-homepage">Homepage</Label>
+            <Label htmlFor="person-homepage">{t("web.item.editPerson.homepage")}</Label>
             <Input
               id="person-homepage"
               value={form.homepage}
@@ -131,7 +133,7 @@ export default function EditPersonDialog({ person, open, onOpenChange }: EditPer
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="person-tmdb-id">TMDB ID</Label>
+            <Label htmlFor="person-tmdb-id">{t("web.item.dialog.tmdbId")}</Label>
             <Input
               id="person-tmdb-id"
               value={form.tmdb_id}
@@ -140,7 +142,7 @@ export default function EditPersonDialog({ person, open, onOpenChange }: EditPer
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="person-imdb-id">IMDb ID</Label>
+            <Label htmlFor="person-imdb-id">{t("web.item.dialog.imdbId")}</Label>
             <Input
               id="person-imdb-id"
               value={form.imdb_id}
@@ -149,7 +151,7 @@ export default function EditPersonDialog({ person, open, onOpenChange }: EditPer
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="person-tvdb-id">TVDB ID</Label>
+            <Label htmlFor="person-tvdb-id">{t("web.item.dialog.tvdbId")}</Label>
             <Input
               id="person-tvdb-id"
               value={form.tvdb_id}
@@ -160,10 +162,10 @@ export default function EditPersonDialog({ person, open, onOpenChange }: EditPer
 
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button type="button" onClick={handleSave} disabled={mutation.isPending}>
-            {mutation.isPending ? "Saving..." : "Save"}
+            {mutation.isPending ? t("web.item.dialog.saving") : t("web.item.dialog.save")}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -52,6 +52,10 @@ type Host interface {
 	// StartSeq is at or below the value read before a launch was issued by
 	// an earlier launch that the singleflight joined.
 	NextStartSeq() uint64
+	// Running reports whether the installation's process is up. Unlike
+	// Client it does not count as a use, so a status read cannot keep an
+	// idle plugin running.
+	Running(installationID int) bool
 }
 
 type serviceInstallationStore interface {
@@ -601,6 +605,10 @@ func (s *Service) start(ctx context.Context, installationID int, allowResident b
 		BinaryPath:     binaryPath,
 		Manifest:       manifest,
 		Config:         configEntries,
+		// Every RPC to a lazily started plugin resolves its client through
+		// ensureClient, which starts it again. A resident is the
+		// supervisor's to keep up.
+		StopWhenIdle: !isResidentManifest(manifest),
 	})
 }
 
@@ -1143,6 +1151,15 @@ func (s *Service) readInstalledManifest(
 		return LoadManifestFile(InstalledManifestPath(binaryPath))
 	}
 	return s.archiveCache.Manifest(ctx, installation)
+}
+
+// readInstalledManifestFrom is readInstalledManifest reading a stored
+// archive, when it needs one, through archives.
+func (s *Service) readInstalledManifestFrom(ctx context.Context, installation *Installation, archives archiveStore) (*pluginv1.PluginManifest, error) {
+	if s.archiveCache == nil {
+		return s.readInstalledManifest(ctx, installation)
+	}
+	return s.archiveCache.ManifestFrom(ctx, installation, archives)
 }
 
 func (s *Service) globalConfigEntries(ctx context.Context, installationID int) ([]*pluginv1.ConfigEntry, error) {

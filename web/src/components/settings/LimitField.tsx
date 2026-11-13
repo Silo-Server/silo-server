@@ -1,6 +1,7 @@
 import { useId, useState } from "react";
 
 import { Input } from "@/components/ui/input";
+import { useT } from "@/i18n";
 import { SETTINGS_NUMBER_WIDTH, SettingFieldRow } from "@/pages/admin-settings/SettingField";
 
 export interface LimitFieldProps {
@@ -63,7 +64,7 @@ export function LimitField({
   onChange,
   unlimitedValue = "0",
   fallbackValue = "",
-  unlimitedLabel = "Unlimited",
+  unlimitedLabel: unlimitedLabelProp,
   unit,
   scale = 1,
   hint,
@@ -71,6 +72,8 @@ export function LimitField({
   disabled = false,
   restartRequired = false,
 }: LimitFieldProps) {
+  const t = useT();
+  const unlimitedLabel = unlimitedLabelProp ?? t("web.settings.limitField.unlimited");
   const controlId = useId();
   const checkboxId = useId();
   const hintId = useId();

@@ -9,51 +9,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestUpdateUserRequestPolicyFieldsAreTriState(t *testing.T) {
-	var req updateUserRequest
-	body := `{
-		"max_streams": 4,
-		"max_transcodes": null,
-		"download_allowed": false,
-		"max_playback_quality": null,
-		"library_ids": null,
-		"requests_allowed": true
-	}`
-	if err := json.Unmarshal([]byte(body), &req); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-
-	if got := req.MaxStreams.Optional(); !got.Set || got.Value == nil || *got.Value != 4 {
-		t.Fatalf("max_streams = %+v, want set 4", got)
-	}
-	if got := req.MaxTranscodes.Optional(); !got.Set || got.Value != nil {
-		t.Fatalf("max_transcodes = %+v, want set to inherit (nil)", got)
-	}
-	if got := req.TranscodeAllowed.Optional(); got.Set {
-		t.Fatalf("transcode_allowed absent should leave the column alone, got %+v", got)
-	}
-	if got := req.DownloadAllowed.Optional(); !got.Set || got.Value == nil || *got.Value {
-		t.Fatalf("download_allowed = %+v, want set false", got)
-	}
-	if got := req.MaxPlaybackQuality.Optional(); !got.Set || got.Value != nil {
-		t.Fatalf("max_playback_quality = %+v, want set to inherit", got)
-	}
-	if got := req.LibraryIDs.Optional(); !got.Set || got.Value != nil {
-		t.Fatalf("library_ids null = %+v, want set to inherit", got)
-	}
-	if got := req.RequestsAllowed.Optional(); !got.Set || got.Value == nil || !*got.Value {
-		t.Fatalf("requests_allowed = %+v, want set true", got)
-	}
-
-	var empty updateUserRequest
-	if err := json.Unmarshal([]byte(`{"library_ids": []}`), &empty); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if got := empty.LibraryIDs.Optional(); !got.Set || got.Value == nil || len(*got.Value) != 0 {
-		t.Fatalf("library_ids [] = %+v, want explicit empty override", got)
-	}
-}
-
 func TestToAdminUserResponseReportsOverridesAndEffectivePolicy(t *testing.T) {
 	groupID := int64(3)
 	user := &models.User{

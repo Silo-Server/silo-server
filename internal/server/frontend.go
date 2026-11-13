@@ -36,6 +36,14 @@ var Branding *branding.Service
 // the API. Do not add 'unsafe-inline', 'unsafe-eval', blob:, or data: to
 // script-src without revisiting that threat model.
 //
+// 'self' still lets a book name a script by URL on this origin, and API
+// routes return bytes users and libraries supply. Those do not run because
+// every API response carries X-Content-Type-Options: nosniff
+// (httpstream.NoSniff on the native router), so a browser refuses one as a
+// script unless it is typed as one. No API route may answer with a script
+// type for bytes a user, a library or a remote host supplied. Plugin routes
+// choose their own response types and are trusted as the plugin is.
+//
 // Allowances beyond 'self' exist for concrete app needs:
 //   - script-src 'wasm-unsafe-eval': JASSUB (libass) subtitle rendering and
 //     node-unrar-js CBR extraction compile WebAssembly.

@@ -1,6 +1,7 @@
 import { useId, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import MediaCarousel from "@/components/MediaCarousel";
+import { codeNumber, useT, type Translate } from "@/i18n";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import type { PickerEntry } from "@/api/v2/watchTogetherPicker";
 import type { WatchTogetherRoomMember } from "@/lib/watchTogether";
@@ -36,6 +37,7 @@ export function PosterTile({
   onClick: () => void;
   selected?: boolean;
 }) {
+  const t = useT();
   const [loaded, setLoaded] = useState(false);
   const memberDescriptionId = useId();
   const memberNames = who?.map((member) => member.display_name).join(", ");
@@ -44,7 +46,7 @@ export function PosterTile({
     <button
       type="button"
       onClick={onClick}
-      className="group/tile focus-visible:outline-ring w-28 shrink-0 rounded-lg text-left focus-visible:outline-2 focus-visible:outline-offset-4 sm:w-32"
+      className="group/tile focus-visible:outline-ring w-28 shrink-0 rounded-lg text-start focus-visible:outline-2 focus-visible:outline-offset-4 sm:w-32"
       aria-label={card.title}
       aria-describedby={memberNames ? memberDescriptionId : undefined}
     >
@@ -70,8 +72,8 @@ export function PosterTile({
           </div>
         )}
         {card.type === "series" ? (
-          <span className="glass-subtle absolute right-1.5 bottom-1.5 flex items-center gap-0.5 rounded-full border border-white/15 px-1.5 py-0.5 text-[10px] font-semibold text-white/90">
-            Series <ChevronRight className="size-2.5" />
+          <span className="glass-subtle absolute end-1.5 bottom-1.5 flex items-center gap-0.5 rounded-full border border-white/15 px-1.5 py-0.5 text-[10px] font-semibold text-white/90">
+            {t("web.watchTogether.common.series")} <ChevronRight className="size-2.5" />
           </span>
         ) : null}
         {who && who.length > 0 ? (
@@ -81,7 +83,7 @@ export function PosterTile({
             </span>
             <span
               aria-hidden="true"
-              className="absolute top-2 left-2 flex items-center gap-1 rounded-full border border-white/20 bg-zinc-900 p-0.5 shadow-md"
+              className="absolute start-2 top-2 flex items-center gap-1 rounded-full border border-white/20 bg-zinc-900 p-0.5 shadow-md"
             >
               {who.slice(0, 2).map((member) => (
                 <MemberAvatar
@@ -93,7 +95,9 @@ export function PosterTile({
                 />
               ))}
               {who.length > 2 ? (
-                <span className="pr-1 text-[11px] font-semibold text-white">+{who.length - 2}</span>
+                <span className="pe-1 text-[11px] font-semibold text-white">
+                  {t("web.watchTogether.picker.moreMembers", { count: who.length - 2 })}
+                </span>
               ) : null}
             </span>
           </>
@@ -110,7 +114,12 @@ export function PosterTile({
       <div className="px-0.5 pt-2">
         <div className="truncate text-[13px] font-semibold">{card.title}</div>
         <div className="text-muted-foreground mt-0.5 truncate text-[11px]">
-          {caption ?? (card.year ? String(card.year) : card.type === "series" ? "Series" : "Movie")}
+          {caption ??
+            (card.year
+              ? String(card.year)
+              : card.type === "series"
+                ? t("web.watchTogether.common.series")
+                : t("web.watchTogether.common.movie"))}
         </div>
       </div>
     </button>
@@ -129,9 +138,12 @@ export function PosterTile({
   );
 }
 
-function pickerCaption(entry: PickerEntry) {
+function pickerCaption(entry: PickerEntry, t: Translate) {
   if (entry.next_up) {
-    return `S${entry.next_up.season_number} E${entry.next_up.episode_number}`;
+    return t("web.watchTogether.common.episodeCode", {
+      season: codeNumber(entry.next_up.season_number),
+      episode: codeNumber(entry.next_up.episode_number),
+    });
   }
   return undefined;
 }
@@ -156,6 +168,7 @@ export function PickerRowSection({
   loading?: boolean;
   children: React.ReactNode;
 }) {
+  const t = useT();
   return (
     <MediaCarousel
       title={title}
@@ -164,7 +177,11 @@ export function PickerRowSection({
       loading={loading}
       skeletonCount={5}
       headerActions={
-        hint ? <span className="text-muted-foreground text-[11px]">· {hint}</span> : undefined
+        hint ? (
+          <span className="text-muted-foreground text-[11px]">
+            {t("web.watchTogether.picker.rowHint", { hint })}
+          </span>
+        ) : undefined
       }
     >
       {children}
@@ -187,6 +204,7 @@ export function TogetherRow({
   selectedId?: string;
   onSelect: (entry: PickerEntry) => void;
 }) {
+  const t = useT();
   if (entries.length === 0) return null;
   const tints = memberTints(members);
   return (
@@ -195,7 +213,7 @@ export function TogetherRow({
         <PosterTile
           key={entry.item.content_id}
           card={entry.item}
-          caption={pickerCaption(entry)}
+          caption={pickerCaption(entry, t)}
           who={entry.members}
           tints={tints}
           progress={groupProgress(entry)}

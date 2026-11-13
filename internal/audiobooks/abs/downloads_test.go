@@ -42,6 +42,14 @@ func (allowAllItems) EnsureAccessible(context.Context, string, catalog.AccessFil
 	return nil
 }
 
+func (allowAllItems) EnsureAccessibleIDs(_ context.Context, ids []string, _ catalog.AccessFilter) (map[string]bool, error) {
+	ok := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		ok[id] = true
+	}
+	return ok, nil
+}
+
 // newDownloadService builds the real download service, so ABS tests apply the
 // native download rules rather than a fake's. enabled is the server's Allow
 // downloads setting.

@@ -173,6 +173,45 @@ func TestViewerResolverParityWithLegacyResolver(t *testing.T) {
 			wantHidden:    []int{2},
 		},
 		{
+			// The primary profile inherits the account's libraries. A library
+			// limit stored on it (an older server, a restored backup) neither
+			// narrows nor widens them; only the libraries it hid do, and it can
+			// show those again.
+			name: "primary profile ignores a stored library limit",
+			user: &models.User{
+				ID:                   1,
+				LibraryIDs:           []int{1, 2, 3, 4, 5, 6, 7},
+				AccessPolicyRevision: 5,
+			},
+			profile: &userstore.Profile{
+				ID:                         "prof-1",
+				IsPrimary:                  true,
+				LibraryRestrictionsEnabled: true,
+				AllowedLibraryIDs:          []int{6, 7},
+			},
+			settingValues: []userstore.SettingValue{hiddenLibrariesRow("prof-1", `[6,7]`)},
+			input:         access.ResolveInput{UserID: 1, SessionID: "sess-1", ProfileID: "prof-1"},
+			wantAllowed:   []int{1, 2, 3, 4, 5},
+			wantHidden:    []int{6, 7},
+		},
+		{
+			name: "primary profile on an unrestricted account ignores a stored library limit",
+			user: &models.User{
+				ID:                   1,
+				AccessPolicyRevision: 5,
+			},
+			profile: &userstore.Profile{
+				ID:                         "prof-1",
+				IsPrimary:                  true,
+				LibraryRestrictionsEnabled: true,
+				AllowedLibraryIDs:          []int{6, 7},
+			},
+			settingValues:  []userstore.SettingValue{hiddenLibrariesRow("prof-1", `[6,7]`)},
+			input:          access.ResolveInput{UserID: 1, SessionID: "sess-1", ProfileID: "prof-1"},
+			wantNilAllowed: true,
+			wantDisabled:   []int{6, 7},
+		},
+		{
 			name: "unrestricted scope carries disabled libraries",
 			user: &models.User{
 				ID:                   1,
@@ -768,6 +807,78 @@ func TestViewerResolverContentAccessOnlyIgnoresHiddenLibraries(t *testing.T) {
 			}
 			if policyScope.MaxContentRating != "PG" {
 				t.Fatalf("MaxContentRating = %q, want PG", policyScope.MaxContentRating)
+			}
+		})
+	}
+}
+
+// A household's allowances lift only the profile's own limits: a custom scope
+// policy that sets a rating override or a different advisory-age limit wins.
+func TestMaturityOverriddenRejectsAllowancesUnderPolicyLimits(t *testing.T) {
+	profile := &userstore.Profile{MaxContentRating: "PG", MaxAdvisoryAge: 10}
+	for _, tc := range []struct {
+		name     string
+		decision ScopeDecision
+		want     bool
+	}{
+		{"profile limits only", ScopeDecision{MaxContentRating: "PG", MaxAdvisoryAge: 10}, false},
+		{"rating override", ScopeDecision{MaxContentRating: "PG", MaxContentRatingOverride: "G", MaxAdvisoryAge: 10}, true},
+		{"advisory age lowered", ScopeDecision{MaxContentRating: "PG", MaxAdvisoryAge: 7}, true},
+	} {
+		if got := maturityOverridden(tc.decision, profile); got != tc.want {
+			t.Errorf("%s: maturityOverridden = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// A credential exempt from the PIN (an API key, a view-as session) that still
+// sends a valid profile token proved the PIN: household management, which
+// refuses a skipped verification, must accept it. Without a valid token the
+// scope stays skipped: still browsable, never enough to manage the household.
+func TestViewerResolverExemptCredentialWithProfileTokenCountsAsVerified(t *testing.T) {
+	ctx := context.Background()
+	pdp := newViewerResolverTestPDP(t, ctx)
+	user := &models.User{ID: 1, AccessPolicyRevision: 5}
+	profile := &userstore.Profile{ID: "prof-1", PINHash: "pin-hash", PINRevision: 3}
+	valid := stubProfileTokenValidator{claims: &access.ProfileTokenClaims{UserID: 1, SessionID: "sess-1", ProfileID: "prof-1", PINRevision: 3}}
+	// Minted before the PIN last changed.
+	stale := stubProfileTokenValidator{claims: &access.ProfileTokenClaims{UserID: 1, SessionID: "sess-1", ProfileID: "prof-1", PINRevision: 2}}
+
+	// An API key has no login session; verify-pin mints its token for "".
+	sessionless := stubProfileTokenValidator{claims: &access.ProfileTokenClaims{UserID: 1, ProfileID: "prof-1", PINRevision: 3}}
+
+	for _, tc := range []struct {
+		name        string
+		sessionID   string
+		token       string
+		tokens      stubProfileTokenValidator
+		wantSkipped bool
+	}{
+		{"valid token", "sess-1", "valid", valid, false},
+		{"no token", "sess-1", "", valid, true},
+		{"stale token", "sess-1", "stale", stale, true},
+		{"API key with a sessionless token", "", "valid", sessionless, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stores := viewerResolverStoreProvider{store: viewerResolverTestStore{profile: profile}}
+			users := viewerResolverUserRepo{user: user}
+			input := access.ResolveInput{UserID: 1, SessionID: tc.sessionID, ProfileID: "prof-1", ProfileToken: tc.token, SkipPINVerification: true}
+			for name, resolver := range map[string]interface {
+				Resolve(context.Context, access.ResolveInput) (access.Scope, error)
+			}{
+				"legacy": access.NewResolver(users, stores, tc.tokens),
+				"policy": NewViewerResolver(users, stores, tc.tokens, pdp),
+			} {
+				scope, err := resolver.Resolve(ctx, input)
+				if err != nil {
+					t.Fatalf("%s Resolve() error: %v", name, err)
+				}
+				if !scope.ProfileVerified || scope.PINVerificationSkipped != tc.wantSkipped {
+					t.Fatalf("%s: verified=%v skipped=%v, want verified skipped=%v", name, scope.ProfileVerified, scope.PINVerificationSkipped, tc.wantSkipped)
+				}
+				if err := scope.CheckProfileVerification(profile); (err == nil) == tc.wantSkipped {
+					t.Fatalf("%s: household check error = %v, want refused=%v", name, err, tc.wantSkipped)
+				}
 			}
 		})
 	}

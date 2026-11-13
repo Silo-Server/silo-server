@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import type { AdminUser, UpdateUserRequest } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { useAdminUserCapabilities } from "@/hooks/queries/admin/users";
+import { useT, type MessageKey } from "@/i18n";
 
 import { userDetailTabSearch } from "../userDetailTabs";
 import { EditableCard, type AccessCardProps } from "./EditableCard";
@@ -14,8 +15,8 @@ import {
   rowDraft,
   rowOverride,
   rowSource,
+  allowedOptions,
   type RowDraft,
-  ALLOWED_OPTIONS,
 } from "./policySources";
 import { useAccountCardDraft } from "./useAccountCardDraft";
 
@@ -25,11 +26,9 @@ interface DownloadsDraft {
 }
 
 const LABELS = {
-  download: "Offline downloads",
-  serverPrepared: "Server-prepared downloads",
-} as const;
-
-const SERVER_PREPARED_DESCRIPTION = "The server converts a smaller copy to download";
+  download: "web.admin.users.detail.access.downloads.offline",
+  serverPrepared: "web.admin.users.detail.access.downloads.serverPrepared",
+} as const satisfies Record<string, MessageKey>;
 
 function toDraft(user: AdminUser): DownloadsDraft {
   return {
@@ -51,8 +50,8 @@ function toBody(d: DownloadsDraft, base: AdminUser): UpdateUserRequest {
   return body;
 }
 
-function changedRows(d: DownloadsDraft, base: DownloadsDraft): string[] {
-  const rows: string[] = [];
+function changedRows(d: DownloadsDraft, base: DownloadsDraft): MessageKey[] {
+  const rows: MessageKey[] = [];
   if (rowChanged(d.download, rowOverride(base.download) ?? null)) rows.push(LABELS.download);
   if (rowChanged(d.serverPrepared, rowOverride(base.serverPrepared) ?? null)) {
     rows.push(LABELS.serverPrepared);
@@ -69,10 +68,14 @@ export function DownloadsPolicyCard({
   ctx,
   hints,
 }: AccessCardProps) {
+  const t = useT();
   const capabilities = useAdminUserCapabilities();
   const draft = useAccountCardDraft({ id: "downloads", editor, toDraft, toBody, changedRows });
   const d = draft.draft;
   const base = draft.base ?? user;
+  const serverPreparedDescription = t(
+    "web.admin.users.detail.access.downloads.serverPreparedDescription",
+  );
 
   return (
     <EditableCard
@@ -84,7 +87,9 @@ export function DownloadsPolicyCard({
       actions={
         capabilities.data?.account_downloads === true ? (
           <Button asChild variant="ghost" size="xs">
-            <Link to={userDetailTabSearch("downloads")}>On devices →</Link>
+            <Link to={userDetailTabSearch("downloads")}>
+              {t("web.admin.users.detail.access.downloads.onDevices")}
+            </Link>
           </Button>
         ) : null
       }
@@ -92,34 +97,34 @@ export function DownloadsPolicyCard({
       {draft.editing && d ? (
         <>
           <ChoicePolicyEdit
-            label={LABELS.download}
+            label={t(LABELS.download)}
             row={d.download}
             saved={base.download_allowed}
             inherited={hints.download_allowed}
-            options={ALLOWED_OPTIONS}
+            options={allowedOptions()}
             onChange={(download) => draft.setDraft((prev) => ({ ...prev, download }))}
           />
           <ChoicePolicyEdit
-            label={LABELS.serverPrepared}
-            description={SERVER_PREPARED_DESCRIPTION}
+            label={t(LABELS.serverPrepared)}
+            description={serverPreparedDescription}
             row={d.serverPrepared}
             saved={base.download_transcode_allowed}
             inherited={hints.download_transcode_allowed}
-            options={ALLOWED_OPTIONS}
+            options={allowedOptions()}
             onChange={(serverPrepared) => draft.setDraft((prev) => ({ ...prev, serverPrepared }))}
           />
         </>
       ) : (
         <>
           <PolicyValueRow
-            label={LABELS.download}
+            label={t(LABELS.download)}
             value={formatAllowed(user.effective_policy.download_allowed)}
             source={rowSource(user, "downloads", ctx)}
             base={inheritedValueText("downloads", hints, ctx, libraries)}
           />
           <PolicyValueRow
-            label={LABELS.serverPrepared}
-            description={SERVER_PREPARED_DESCRIPTION}
+            label={t(LABELS.serverPrepared)}
+            description={serverPreparedDescription}
             value={formatAllowed(user.effective_policy.download_transcode_allowed)}
             source={rowSource(user, "serverPrepared", ctx)}
             base={inheritedValueText("serverPrepared", hints, ctx, libraries)}

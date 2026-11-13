@@ -3,6 +3,7 @@ package playback
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -175,9 +176,61 @@ type RemuxSession struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 	outputPipe io.ReadCloser
+	stderr     *remuxStderr
 	closeOnce  sync.Once
 	closeErr   error
+	// contextEnded records that the session's context ended before it was
+	// reaped: the request went away or Abort withdrew the stream.
+	contextEnded bool
 }
+
+// ffmpegDemuxErrorLine starts the line FFmpeg logs when reading its input
+// fails with anything other than end of file: a disk that drops out, an I/O
+// error, a network source that closes early. FFmpeg then finishes the output
+// as though the input had ended there and exits 0, so this line is the only
+// sign that the output stops short of the source. FFmpeg 7.1.4 (the
+// jellyfin-ffmpeg build) and 9.0.2 both behave this way.
+const ffmpegDemuxErrorLine = "Error during demuxing"
+
+// remuxStderrTailBytes bounds the FFmpeg diagnostics a remux keeps for its
+// failure log. -loglevel error keeps them short; the bound only matters for a
+// damaged source that logs an error per packet.
+const remuxStderrTailBytes = 4 << 10
+
+// remuxStderr keeps the end of FFmpeg's diagnostics and notes whether the
+// demuxer stopped on an error. exec copies stderr on its own goroutine, and
+// Wait returns only after that copy finishes.
+type remuxStderr struct {
+	mu         sync.Mutex
+	tail       []byte
+	demuxError bool
+}
+
+func (e *remuxStderr) Write(p []byte) (int, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	// Search from just before the new bytes so a line split across writes
+	// is still found.
+	from := max(len(e.tail)-len(ffmpegDemuxErrorLine)+1, 0)
+	e.tail = append(e.tail, p...)
+	if !e.demuxError && bytes.Contains(e.tail[from:], []byte(ffmpegDemuxErrorLine)) {
+		e.demuxError = true
+	}
+	if excess := len(e.tail) - remuxStderrTailBytes; excess > 0 {
+		e.tail = append(e.tail[:0], e.tail[excess:]...)
+	}
+	return len(p), nil
+}
+
+func (e *remuxStderr) snapshot() (tail string, demuxError bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return strings.TrimSpace(string(e.tail)), e.demuxError
+}
+
+// errRemuxSourceEndedEarly reports an FFmpeg run that exited 0 after its
+// demuxer failed, so its output ends before the source does.
+var errRemuxSourceEndedEarly = errors.New("ffmpeg stopped reading the source on a demux error")
 
 // RemuxDVMode makes Profile 7 handling an explicit byte-level recipe choice.
 // The empty/legacy mode exists only for pre-v3 callers and old stream tokens.
@@ -317,16 +370,7 @@ func buildRemuxArgsWithLeadingPictureDropV3(filePath, outputFormat string, seekS
 		args = appendAACEncodeFilterArgs(args, sourceAudioChannels, "aac", targetAudioChannels, channels)
 	} else {
 		args = append(args, "-c", "copy")
-		if strings.EqualFold(strings.TrimSpace(copyAudioCodec), "aac") {
-			// AAC in MPEG-TS (and raw .aac) is ADTS-framed; MP4 needs the
-			// ADTS headers stripped into a config record. FFmpeg normally
-			// inserts this filter on its own, but not under delay_moov: the
-			// muxer rejects the first ADTS packet ("Malformed AAC bitstream")
-			// and the response ends after the header. The filter passes
-			// already-raw AAC from MKV/MP4 through unchanged, but it refuses
-			// any other codec, so it is only added for a copied AAC track.
-			args = append(args, "-bsf:a", "aac_adtstoasc")
-		}
+		args = appendCopiedAACToMP4Args(args, copyAudioCodec)
 	}
 
 	args = append(args,
@@ -422,6 +466,8 @@ func startRemuxWithOptions(ctx context.Context, filePath, outputFormat string, s
 	dropLeadingPictures = dropLeadingPictures && seekSeconds > 0 && !audioOnly && supportsLeadingPictureDropFilter(bin)
 	args := buildRemuxArgsWithLeadingPictureDropV3(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, effectiveProfile, tagSampleEntry, audioOnly, sourceAudioChannels, targetAudioChannels, targetAudioBitrateKbps, dropLeadingPictures, copyAudioCodec)
 	cmd := fspath.CommandContext(ctx, bin, args...)
+	stderr := &remuxStderr{}
+	cmd.Stderr = stderr
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -440,6 +486,7 @@ func startRemuxWithOptions(ctx context.Context, filePath, outputFormat string, s
 		ctx:        ctx,
 		cancel:     cancel,
 		outputPipe: stdout,
+		stderr:     stderr,
 	}, nil
 }
 
@@ -465,18 +512,73 @@ func (s *RemuxSession) Abort() {
 // Close stops the ffmpeg process and cleans up all resources.
 // It is safe to call Close multiple times.
 func (s *RemuxSession) Close() error {
+	return s.close(true)
+}
+
+// finishOutput reaps an FFmpeg whose output stopped with readErr and reports
+// whether that output ends before the source does: reading it failed with
+// anything other than EOF, FFmpeg exited non-zero or was killed, or it logged
+// a demux error and then exited 0. It does not cancel first, so an exit
+// status is FFmpeg's own and not this cleanup's. A session whose context
+// ended first, because the request went away or Abort withdrew the stream,
+// reports nil: that end was the caller's choice.
+func (s *RemuxSession) finishOutput(readErr error) error {
+	err := s.close(false)
+	if s.contextEnded {
+		return nil
+	}
+	if readErr != nil && !errors.Is(readErr, io.EOF) {
+		return fmt.Errorf("reading ffmpeg remux output: %w", readErr)
+	}
+	// ErrWaitDelay means FFmpeg exited 0 but something it started still held
+	// a pipe: the output is complete.
+	if err != nil && !errors.Is(err, exec.ErrWaitDelay) {
+		return fmt.Errorf("ffmpeg remux failed: %w", err)
+	}
+	if s.stderr != nil {
+		if _, demuxError := s.stderr.snapshot(); demuxError {
+			return errRemuxSourceEndedEarly
+		}
+	}
+	return nil
+}
+
+// stderrTail returns the end of FFmpeg's diagnostics for a failure log.
+func (s *RemuxSession) stderrTail() string {
+	if s.stderr == nil {
+		return ""
+	}
+	tail, _ := s.stderr.snapshot()
+	return tail
+}
+
+func (s *RemuxSession) close(cancelFirst bool) error {
 	s.closeOnce.Do(func() {
 		contextErr := s.ctx.Err()
-		s.cancel()
+		if cancelFirst {
+			s.cancel()
+		}
 		// The owner drains and waits exactly once, including repeated Close.
 		_, _ = io.Copy(io.Discard, s.outputPipe)
 		s.closeErr = s.cmd.Wait()
+		if !cancelFirst && contextErr == nil {
+			// The request went away, or Abort fired, while FFmpeg was reaped.
+			contextErr = s.ctx.Err()
+		}
+		s.contextEnded = contextErr != nil
+		s.cancel()
 		// Cleanup cancellation must not relabel an already completed FFmpeg
 		// failure. A process killed by this Close has a signal exit instead.
-		if contextErr == nil && s.closeErr != nil && s.cmd.ProcessState != nil && !s.cmd.ProcessState.Exited() {
+		if cancelFirst && contextErr == nil && s.closeErr != nil && s.cmd.ProcessState != nil && !s.cmd.ProcessState.Exited() {
 			contextErr = context.Canceled
 		}
-		processmetrics.Record(processmetrics.Remux, s.cmd.ProcessState, s.closeErr, contextErr)
+		metricsErr := s.closeErr
+		if metricsErr == nil && contextErr == nil && s.stderr != nil {
+			if _, demuxError := s.stderr.snapshot(); demuxError {
+				metricsErr = errRemuxSourceEndedEarly
+			}
+		}
+		processmetrics.Record(processmetrics.Remux, s.cmd.ProcessState, metricsErr, contextErr)
 	})
 	return s.closeErr
 }
@@ -495,6 +597,27 @@ func containerMIME(format string) string {
 	default:
 		return "application/octet-stream"
 	}
+}
+
+// appendCopiedAACToMP4Args adds aac_adtstoasc when a copied audio track of
+// codec copyAudioCodec is muxed into MP4 (the progressive fMP4 remux and fMP4
+// HLS segments). AAC in MPEG-TS (and raw .aac) is ADTS-framed; MP4 needs the
+// ADTS headers stripped into a config record. FFmpeg normally inserts this
+// filter on its own, but neither under delay_moov nor inside the HLS muxer's
+// fMP4 segments: the muxer rejects the first ADTS packet ("Malformed AAC
+// bitstream") and the output ends there. The filter passes already-raw AAC
+// from MKV/MP4 through unchanged, but it refuses any other codec, so it is only
+// added for a copied AAC track. An empty codec (older tokens and recipes)
+// keeps the plain copy.
+func appendCopiedAACToMP4Args(args []string, copyAudioCodec string) []string {
+	if !copiedAudioIsAAC(copyAudioCodec) {
+		return args
+	}
+	return append(args, "-bsf:a", "aac_adtstoasc")
+}
+
+func copiedAudioIsAAC(copyAudioCodec string) bool {
+	return strings.EqualFold(strings.TrimSpace(copyAudioCodec), "aac")
 }
 
 // RemuxServeOptions carries the optional serving concerns that not every
@@ -637,7 +760,34 @@ func ServeRemuxWithOptions(w http.ResponseWriter, r *http.Request, filePath, out
 			}
 		}
 		if readErr != nil {
-			return nil // EOF or error — done streaming.
+			finishRemuxResponse(r, filePath, session, streamWriter, readErr)
+			return nil
 		}
 	}
+}
+
+// finishRemuxResponse ends a progressive remux whose FFmpeg output stopped
+// with readErr. A complete output ends the response normally. An output that stops
+// short of the source, such as a disk that stopped returning data mid-title,
+// must not: a clean end of a chunked response tells the player it has
+// reached the end of the title, which marks it watched and starts the next
+// one. Aborting the response instead leaves the stream visibly broken, so
+// the player stalls and then reports a network error that its reconnect
+// handling owns.
+func finishRemuxResponse(r *http.Request, filePath string, session *RemuxSession, streamWriter *httpstream.RollingDeadlineWriter, readErr error) {
+	err := session.finishOutput(readErr)
+	if err == nil || r.Context().Err() != nil {
+		return
+	}
+	slog.WarnContext(r.Context(), "progressive remux ended before the end of its source; aborting the response",
+		"component", "playback",
+		"path", filePath,
+		"bytes_written", streamWriter.BytesWritten(),
+		"error", err,
+		"ffmpeg_stderr", session.stderrTail(),
+	)
+	// The status and some of the body are already on the wire, so the only
+	// way left to report the failure is to break the response: net/http then
+	// omits the final chunk on HTTP/1.1 and resets the stream on HTTP/2.
+	panic(http.ErrAbortHandler)
 }

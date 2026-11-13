@@ -138,4 +138,61 @@ describe("getCachedWatchedInvalidationKeys", () => {
       ]),
     );
   });
+
+  it("finds the season and episode lists a series page cached under its library", () => {
+    const queryClient = new QueryClient();
+    const libraryId = 4;
+
+    queryClient.setQueryData(catalogKeys.seriesSeasons("series-1", libraryId), {
+      seasons: [
+        {
+          content_id: "season-1",
+          season_number: 1,
+          is_specials: false,
+          title: "Season 1",
+          overview: "",
+          air_date: null,
+          episode_count: 1,
+          poster_url: "",
+          poster_thumbhash: "",
+        },
+      ],
+    });
+    queryClient.setQueryData(catalogKeys.seasonEpisodes("series-1", 1, libraryId), {
+      episodes: [
+        {
+          content_id: "episode-1",
+          season_number: 1,
+          episode_number: 1,
+          title: "Episode 1",
+          overview: "",
+          air_date: null,
+          runtime: 42,
+          still_url: "",
+          still_thumbhash: "",
+          files: [],
+        },
+      ],
+    });
+    // A season detail under the same series prefix is not a season list.
+    queryClient.setQueryData(catalogKeys.seasonDetail("series-1", 1, libraryId), {
+      season: { content_id: "season-1" },
+    });
+
+    const keys = getCachedWatchedInvalidationKeys(
+      queryClient,
+      makeItem({ content_id: "series-1", type: "series" }),
+    );
+
+    expect(keys).toEqual(
+      expect.arrayContaining([
+        catalogKeys.itemDetail("season-1"),
+        catalogKeys.itemEpisodes("season-1"),
+        catalogKeys.seasonEpisodes("series-1", 1),
+        catalogKeys.itemDetail("episode-1"),
+        itemKeys.detail("episode-1"),
+      ]),
+    );
+    expect(keys.filter((key) => key[2] === "episode-1" && key[3] === "detail")).toHaveLength(1);
+  });
 });

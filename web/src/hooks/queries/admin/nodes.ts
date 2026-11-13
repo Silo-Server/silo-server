@@ -24,6 +24,7 @@ import { adminKeys } from "../keys";
 import { usePageActivity } from "@/hooks/usePageActivity";
 import { describeReprobeOutcome } from "@/pages/adminNodesPresentation";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 
 const ADMIN_STALE_TIME = 30_000;
 
@@ -148,8 +149,7 @@ function useNodeWrite() {
           onResponse,
         });
       } else {
-        if (!intent.node?.config_etag)
-          throw new Error("Reload nodes and reopen this action to obtain its original version.");
+        if (!intent.node?.config_etag) throw new Error(t("web.admin.errors.nodesReloadReopen"));
         const options = {
           ...common,
           path: { id: String(intent.node.id) },
@@ -170,15 +170,17 @@ function useNodeWrite() {
       if (!mounted.current || !isNodeWriteAuthorityActive(intent.authority))
         throw new StaleApiRequestContextError();
       if (result && (!etag || result.config_etag !== etag))
-        throw new Error(
-          "Node write acknowledgement is unavailable. Inspect current state before saving again.",
-        );
+        throw new Error(t("web.admin.errors.nodeWriteAckMissing"));
       return result;
     },
     onSuccess: (result, intent) => {
       if (!mounted.current || !intent.authority || !isNodeWriteAuthorityActive(intent.authority))
         return;
-      toast.success(intent.action === "delete" ? "Node deleted" : "Node configuration saved");
+      toast.success(
+        intent.action === "delete"
+          ? t("web.admin.nodes.hooks.nodes.deleted")
+          : t("web.admin.nodes.hooks.nodes.saved"),
+      );
       intent.onSuccess?.();
       // A new node has never been checked, so it lists as unhealthy and takes
       // no work until the next health sweep, up to 30 seconds later. Check it
@@ -201,9 +203,7 @@ function useNodeWrite() {
     },
     onError: (_error, intent) => {
       if (mounted.current && intent.authority && isNodeWriteAuthorityActive(intent.authority))
-        toast.error(
-          "Node change could not be confirmed. Reload nodes and reopen the action before another submission; retained edits have not been rebased.",
-        );
+        toast.error(t("web.admin.nodes.hooks.nodes.changeUnconfirmed"));
     },
     onSettled: (_result, _error, intent) => {
       if (intent.authority && isNodeWriteAuthorityActive(intent.authority))
@@ -339,10 +339,12 @@ function useNodeObservationCommand(action: "check" | "reprobe") {
     onResult: (result, intent) => {
       if ("healthy" in result) {
         toast.success(
-          result.healthy ? `${intent.node.name} is healthy` : `${intent.node.name} is unhealthy`,
+          result.healthy
+            ? t("web.admin.nodes.hooks.nodes.health.healthy", { name: intent.node.name })
+            : t("web.admin.nodes.hooks.nodes.health.unhealthy", { name: intent.node.name }),
         );
         if (!result.health_persisted)
-          toast.error("Health was observed but could not be stored. Refresh node state.");
+          toast.error(t("web.admin.nodes.hooks.nodes.health.notStored"));
       } else {
         const outcome = describeReprobeOutcome(intent.node, {
           ...result,
@@ -352,8 +354,7 @@ function useNodeObservationCommand(action: "check" | "reprobe") {
         else toast.error(outcome.message);
       }
     },
-    errorMessage: () =>
-      "Node command could not be confirmed. Inspect node state before another explicit command.",
+    errorMessage: () => t("web.admin.nodes.hooks.nodes.commandUnconfirmed"),
   });
   return { ...command, mutate: (node: StreamNode) => command.mutate(node, action) };
 }
@@ -378,13 +379,13 @@ export function useSetNodeDrain() {
     onResult: (result, intent) =>
       toast.success(
         result.drain_requested
-          ? `Draining ${intent.node.name}. New work goes to other nodes.`
-          : `${intent.node.name} takes new work again.`,
+          ? t("web.admin.nodes.hooks.nodes.drain.draining", { name: intent.node.name })
+          : t("web.admin.nodes.hooks.nodes.drain.resumed", { name: intent.node.name }),
       ),
     errorMessage: (intent) =>
       intent.action
-        ? `Could not drain ${intent.node.name}. Refresh node state and try again.`
-        : `Could not resume ${intent.node.name}. Refresh node state and try again.`,
+        ? t("web.admin.nodes.hooks.nodes.drain.drainFailed", { name: intent.node.name })
+        : t("web.admin.nodes.hooks.nodes.drain.resumeFailed", { name: intent.node.name }),
   });
 }
 

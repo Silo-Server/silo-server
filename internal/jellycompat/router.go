@@ -34,6 +34,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	deps = withDefaults(deps)
 
 	r := chi.NewRouter()
+	r.Use(httpstream.NoSniff)
 	r.Use(stripSlashesExceptWeb)
 	r.Use(middleware.RequestID)
 	r.Use(observeCompatRequest)
@@ -313,7 +314,6 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Shows/NextUp", itemsHandler.HandleNextUp)
 			r.Get("/Shows/Upcoming", itemsHandler.HandleUpcoming)
 			r.Get("/MediaSegments/{id}", itemsHandler.HandleMediaSegments)
-			r.Get(compatTrickplaySheetRoute, playbackHandler.HandleTrickplaySheet)
 			r.Get(compatTrickplayPlaylistRoute, playbackHandler.HandleTrickplayPlaylist)
 			r.Get("/Episode/{id}/Timestamps", itemsHandler.HandleItemStub)
 			r.Get("/Episode/{id}/IntroTimestamps", itemsHandler.HandleItemStub)
@@ -408,6 +408,8 @@ func NewRouter(deps Dependencies) chi.Router {
 		r.Get("/Videos/{id}/remux-dv-v1/hls/{playlistId}/stream.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-dv-v1/hls/{playlistId}/stream.m3u8", playbackHandler.HandleRemuxDVV1HLSManifest))
 		r.Get("/Videos/{id}/remux-dv-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-dv-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", playbackHandler.HandleRemuxDVV1HLSSegment))
 		r.Get("/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}", playbackHandler.HandleSubtitleStream))
+		// Sheet URLs in a trickplay playlist carry a PlaySessionId, not a token.
+		r.Get(compatTrickplaySheetRoute, playbackHandler.HandleTrickplaySheet)
 		r.Get("/Videos/{id}/{routeMediaSourceId}/Attachments/{routeIndex}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/{routeMediaSourceId}/Attachments/{routeIndex}", playbackHandler.HandleAttachment))
 		// Jellyfin subtitle routes encode the start position in ticks in this component.
 		r.Get("/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeStartPositionTicks}/stream.{routeFormat}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeStartPositionTicks}/stream.{routeFormat}", playbackHandler.HandleSubtitleStream))
@@ -441,7 +443,10 @@ func skipCompatActivityLog(pattern string) bool {
 		compatTrickplaySheetRoute, compatTrickplayPlaylistRoute:
 		return true
 	}
-	return strings.HasPrefix(pattern, "/Videos/") && strings.Contains(pattern, "/hls/{playlistId}/")
+	// A request the router refused on an HLS path, such as a HEAD, arrives here
+	// as the path the client sent, which carries the play session ID. Matching
+	// the path shape skips it along with the HLS route patterns.
+	return redactHLSPlaySessionID(pattern) != pattern
 }
 
 func skipCompatMediaCompression(r *http.Request) bool {

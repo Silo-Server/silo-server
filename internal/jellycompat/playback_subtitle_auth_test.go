@@ -63,7 +63,10 @@ func (r fakeSubtitleRepository) UpsertProviderConfig(context.Context, *subtitles
 	panic("unused")
 }
 
-func TestHandlePlaybackInfo_AuthenticatesSubtitleDeliveryURLs(t *testing.T) {
+// The media URLs PlaybackInfo builds are authorized by PlaySessionId alone and
+// never carry the caller's token, which grants the whole account for as long
+// as the login lasts.
+func TestHandlePlaybackInfoKeepsTokenOutOfMediaURLs(t *testing.T) {
 	codec := NewResourceIDCodec()
 	contentID := "movie-1"
 	routeID := codec.EncodeStringID(EncodedIDItem, contentID)
@@ -138,12 +141,17 @@ func TestHandlePlaybackInfo_AuthenticatesSubtitleDeliveryURLs(t *testing.T) {
 		if parsed.IsAbs() || parsed.Host != "" || !strings.HasPrefix(parsed.Path, "/Videos/") {
 			t.Fatalf("subtitle URL %q is not API-relative", rawURL)
 		}
-		query := parsed.Query()
-		if got := query.Get("api_key"); got != "token-1" {
-			t.Fatalf("api_key for %q = %q, want token-1", rawURL, got)
-		}
-		if got := query.Get("PlaySessionId"); got != resp.PlaySessionID {
+		if got := parsed.Query().Get("PlaySessionId"); got != resp.PlaySessionID {
 			t.Fatalf("PlaySessionId for %q = %q, want %q", rawURL, got, resp.PlaySessionID)
+		}
+	}
+	source := resp.MediaSources[0]
+	if source.DirectStreamURL == "" {
+		t.Fatal("no DirectStreamUrl to check")
+	}
+	for _, rawURL := range append(subtitleURLs, source.DirectStreamURL, source.TranscodingURL) {
+		if strings.Contains(rawURL, "token-1") {
+			t.Fatalf("media URL %q carries the caller's token", rawURL)
 		}
 	}
 }

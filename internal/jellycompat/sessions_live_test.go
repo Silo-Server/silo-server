@@ -48,8 +48,13 @@ func TestSessionsExposeOnlyCallerActiveDeviceAndPingPreservesPosition(t *testing
 	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if rec.Code != 200 || len(result) != 1 || result[0].ID != "own" || result[0].PlayState == nil || result[0].PlayState.PositionTicks != 1230000000 || result[0].PlayState.PlayMethod != "DirectPlay" || result[0].SupportsRemoteControl {
+	if rec.Code != 200 || len(result) != 1 || result[0].DeviceID != "device-1" || result[0].PlayState == nil || result[0].PlayState.PositionTicks != 1230000000 || result[0].PlayState.PlayMethod != "DirectPlay" || result[0].SupportsRemoteControl {
 		t.Fatalf("sessions %d %+v %s", rec.Code, result, rec.Body.String())
+	}
+	// The play session ID alone authorizes the play's media requests, so the
+	// list names the play by a value of Jellyfin's shape that is not that ID.
+	if id := result[0].ID; strings.Contains(rec.Body.String(), `"own"`) || len(id) != 32 || strings.Trim(id, "0123456789abcdef") != "" {
+		t.Errorf("SessionInfo.Id = %q, want 32 lowercase hex characters and no play session ID in %s", id, rec.Body.String())
 	}
 	// jellyfin-sdk-kotlin rejects the whole list when a required
 	// SessionInfoDto or PlayerStateInfo field is missing or null.

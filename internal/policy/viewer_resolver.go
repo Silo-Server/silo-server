@@ -237,12 +237,13 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 		return access.Scope{}, access.ErrProfileNotFound
 	}
 	profileVerified := input.ProfileID == ""
+	pinSkipped := false
 	if input.ProfileID != "" {
 		if profile == nil || profile.ID != input.ProfileID {
 			return access.Scope{}, access.ErrProfileNotFound
 		}
 		var err error
-		profileVerified, err = access.VerifyProfileForRequest(profile, input, user.ID, r.tokens)
+		profileVerified, pinSkipped, err = access.VerifyProfileForRequest(profile, input, user.ID, r.tokens)
 		if err != nil {
 			return access.Scope{}, err
 		}
@@ -273,8 +274,9 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 		policyInput.ProfileMaxRating = profile.MaxContentRating
 		policyInput.ProfileMaxAdvisoryAge = profile.MaxAdvisoryAge
 		policyInput.ProfileMaxQuality = profile.MaxPlaybackQuality
-		policyInput.ProfileLibraryLimited = profile.LibraryRestrictionsEnabled
-		policyInput.ProfileLibraryIDs = slices.Clone(profile.AllowedLibraryIDs)
+		profileLibraryIDs, profileLibraryLimited := access.ProfileLibraryLimit(profile)
+		policyInput.ProfileLibraryLimited = profileLibraryLimited
+		policyInput.ProfileLibraryIDs = slices.Clone(profileLibraryIDs)
 		policyInput.ProfileHasPIN = profile.PINHash != ""
 		// Resolved canonically (profile scope -> contract default), not read off
 		// the legacy profile column it migrated from. scope.rego relays this
@@ -326,8 +328,15 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 	requireAdvisory := profile != nil && profile.RequireAdvisoryAge && decision.MaxAdvisoryAge > 0
 
 	var pinRevision int64
+	var allowedTitles []string
 	if profile != nil {
 		pinRevision = profile.PINRevision
+		// A household's allowances lift the profile's own limits only. When
+		// a custom scope policy tightens them, the administrator's limit
+		// wins and no allowance applies.
+		if !maturityOverridden(decision, profile) {
+			allowedTitles = profile.AllowedTitleIDs
+		}
 	}
 	return access.Scope{
 		UserID:              user.ID,
@@ -342,7 +351,7 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 			AllowUnratedContent: allowUnrated,
 			MaxAdvisoryAge:      decision.MaxAdvisoryAge,
 			RequireAdvisoryAge:  requireAdvisory,
-		},
+		}.WithAllowedTitles(allowedTitles),
 		MaxPlaybackQuality:         decision.MaxPlaybackQuality,
 		MaxRemoteStreamBitrateKbps: effective.MaxRemoteStreamBitrateKbps,
 		MaxLocalStreamBitrateKbps:  effective.MaxLocalStreamBitrateKbps,
@@ -359,9 +368,16 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 		// emitted true for an unverified profile.
 		ProfileVerified: profileVerified && decision.ProfileVerified,
 		// Same fact the legacy resolver records: the profile counts as
-		// verified only because the caller (an API key) skipped the PIN
-		// check. Mutations that v1 gates on a real verification read this.
-		PINVerificationSkipped: profileVerified && decision.ProfileVerified &&
-			profile != nil && profile.PINHash != "" && input.SkipPINVerification,
+		// verified only because the caller (an API key, a view-as session)
+		// skipped the PIN check without a valid profile token. Household
+		// management, which needs a real verification, reads this.
+		PINVerificationSkipped: profileVerified && decision.ProfileVerified && pinSkipped,
 	}, nil
+}
+
+// maturityOverridden reports whether the scope policy set limits other than
+// the profile's own: a content-rating override, or an advisory-age limit
+// that is not the profile's.
+func maturityOverridden(decision ScopeDecision, profile *userstore.Profile) bool {
+	return access.HasCeiling(decision.MaxContentRatingOverride) || decision.MaxAdvisoryAge != profile.MaxAdvisoryAge
 }

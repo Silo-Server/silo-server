@@ -3,6 +3,8 @@ package taskmanager
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -141,8 +143,17 @@ func (p *progressReporter) SetResultData(data json.RawMessage) {
 	p.resultData = data
 }
 
+// maxRuntimeError is the cause of a run stopped at its trigger's max runtime.
+// Its text is the run's recorded error_message, which admins see.
+type maxRuntimeError struct{ limit time.Duration }
+
+func (e maxRuntimeError) Error() string {
+	return fmt.Sprintf("Stopped after reaching the max runtime of %s", e.limit)
+}
+
 // reserve claims the local worker before an asynchronous caller acknowledges it.
-func (w *taskWorker) reserve(ctx context.Context) (context.Context, context.CancelFunc, error) {
+// A positive maxRuntime stops the run when it elapses, the way a cancel does.
+func (w *taskWorker) reserve(ctx context.Context, maxRuntime time.Duration) (context.Context, context.CancelFunc, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.state == TaskStateRunning || w.state == TaskStateCancelling {
@@ -152,14 +163,20 @@ func (w *taskWorker) reserve(ctx context.Context) (context.Context, context.Canc
 	w.progress = 0
 	w.progressMessage = ""
 	w.lastStarted = time.Now()
-	execCtx, cancel := context.WithCancel(ctx)
+	var execCtx context.Context
+	var cancel context.CancelFunc
+	if maxRuntime > 0 {
+		execCtx, cancel = context.WithTimeoutCause(ctx, maxRuntime, maxRuntimeError{limit: maxRuntime})
+	} else {
+		execCtx, cancel = context.WithCancel(ctx)
+	}
 	w.cancel = cancel
 	return execCtx, cancel, nil
 }
 
 // run executes the task. Returns ErrTaskAlreadyRunning if already running.
-func (w *taskWorker) run(ctx context.Context) (*ExecutionResult, error) {
-	execCtx, cancel, err := w.reserve(ctx)
+func (w *taskWorker) run(ctx context.Context, maxRuntime time.Duration) (*ExecutionResult, error) {
+	execCtx, cancel, err := w.reserve(ctx, maxRuntime)
 	if err != nil {
 		return nil, err
 	}
@@ -177,6 +194,11 @@ func (w *taskWorker) executeReserved(execCtx context.Context, cancel context.Can
 	var err error
 	workmetrics.Do(execCtx, func(ctx context.Context) { err = w.task.Execute(ctx, reporter) })
 	completedAt := time.Now()
+	// Stop the max runtime timer now, so it can't relabel a run that already
+	// returned while this goroutine waits for the worker lock.
+	cancel()
+	var limitErr maxRuntimeError
+	limitReached := errors.As(context.Cause(execCtx), &limitErr)
 
 	result := &ExecutionResult{
 		TaskKey:     w.task.Key(),
@@ -187,8 +209,18 @@ func (w *taskWorker) executeReserved(execCtx context.Context, cancel context.Can
 	}
 
 	metricOutcome := telemetry.Outcome(err)
+	if limitReached && err != nil && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+		// The run is recorded as stopped at its limit; keep the task's own error.
+		slog.WarnContext(execCtx, "task returned an error after reaching its max runtime", "task", w.task.Key(), "error", err)
+	}
 	w.mu.Lock()
 	switch {
+	case limitReached:
+		// Checked before TaskStateCancelling: an admin who cancels a run already past
+		// its limit still sees why it stopped.
+		result.Status = "cancelled" //nolint:misspell // Existing task state vocabulary.
+		result.ErrorMessage = limitErr.Error()
+		metricOutcome = "canceled"
 	case w.state == TaskStateCancelling:
 		result.Status = "cancelled"
 		metricOutcome = "canceled"

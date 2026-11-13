@@ -34,6 +34,10 @@ const (
 	imageKeyPrefix = "overlay-images/"
 )
 
+// ImageKeyPrefix is where uploaded overlay images live in the assets store:
+// ImageKeyPrefix + ref. A backup carries what is under it.
+const ImageKeyPrefix = imageKeyPrefix
+
 var (
 	ErrImageNotFound           = errors.New("overlays: image not found")
 	ErrUnsupportedImage        = errors.New("overlays: unsupported image")
@@ -118,7 +122,7 @@ func (l *ImageLibrary) Upload(ctx context.Context, name, declaredType string, da
 	}
 	out, width, height, err := imageutil.EncodeWebPWithin(data, maxImageWidth, maxImageHeight)
 	if err != nil {
-		if errors.Is(err, imageutil.ErrInvalidImage) || imageutil.PixelDataUndecodable(data) {
+		if imageutil.SourceUnusable(err, data) {
 			return Image{}, ErrUnsupportedImage
 		}
 		return Image{}, fmt.Errorf("encoding overlay image: %w", err)

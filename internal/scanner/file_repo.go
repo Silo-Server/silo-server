@@ -18,7 +18,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/pathscope"
 	"github.com/Silo-Server/silo-server/internal/scanbatch"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -32,6 +31,10 @@ var (
 	// bytes nobody is serving any more, so it must not overwrite the row and
 	// must not be pushed at live sessions.
 	ErrStaleCopySafetyScan = errors.New("copy-safety verdict superseded by a newer generation of the file")
+	// ErrFileMoved reports a link write refused because the row no longer has
+	// the path the caller read: a scan moved it, typically retitling it for
+	// rematch (see RetitleMovedFile), after the caller's snapshot was taken.
+	ErrFileMoved = errors.New("media file moved since it was read")
 )
 
 // FileRepository provides CRUD operations for the media_files table.
@@ -1092,6 +1095,8 @@ func (r *FileRepository) upsertWithQueryer(ctx context.Context, queryer fileQuer
 		END,
 		match_suppressed_at = NULL,
 		missing_since = NULL,
+		-- A file written onto a retitle's stand-in is a real file now.
+		stand_in_for_file_id = NULL,
 		updated_at = NOW()
 	RETURNING ` + fileColumns
 
@@ -1224,7 +1229,16 @@ func (r *FileRepository) updateIdentity(ctx context.Context, mf models.MediaFile
 
 // identityAssignments sets the path-derived identity columns, and the
 // sidecar list when one is given, from arguments $2 to $24 of identityArgs.
-const identityAssignments = `media_folder_id = $2,
+// A path that names no season or episode keeps the stored numbers, which a
+// match may have filled in.
+const identityAssignments = identityGroupColumns + `
+		season_number = COALESCE($12, season_number),
+		episode_number = COALESCE($13, episode_number),
+		` + identityVariantColumns
+
+// identityGroupColumns and identityVariantColumns are the assignments of
+// identityAssignments around the season and episode numbers.
+const identityGroupColumns = `media_folder_id = $2,
 		canonical_root_path = $3,
 		observed_root_path = $4,
 		content_group_key = $5,
@@ -1233,10 +1247,9 @@ const identityAssignments = `media_folder_id = $2,
 		base_year = $8,
 		base_type = $9,
 		identity_confidence = $10,
-		identity_json = $11,
-		season_number = COALESCE($12, season_number),
-		episode_number = COALESCE($13, episode_number),
-		edition_raw = $14,
+		identity_json = $11,`
+
+const identityVariantColumns = `edition_raw = $14,
 		edition_key = $15,
 		edition_confidence = $16,
 		edition_source = $17,
@@ -1278,65 +1291,6 @@ func identityArgs(key any, mf models.MediaFile, externalSubtitlesJSON []byte) []
 		nilIfZero(mf.MultiEpisodeEnd),
 		externalSubtitlesJSON,
 	}
-}
-
-// MovedFileCandidates returns the rows in a folder that recorded the same size
-// and OSHash as the file that appeared at filePath, the rows it may have moved
-// from, along with any row already at filePath. A scan whose snapshot predates
-// another scan's write finds that row here and leaves it alone.
-func (r *FileRepository) MovedFileCandidates(ctx context.Context, folderID int, filePath string, fileSize int64, fileHash string) ([]*scanStateFile, error) {
-	rows, err := r.pool.Query(ctx, `SELECT `+scanStateColumns+` FROM media_files
-		WHERE media_folder_id = $3
-		  AND (file_path = $4 OR (file_hash = $1 AND file_size = $2 AND extra_id IS NULL))`,
-		fileHash, fileSize, folderID, filePath,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("querying moved file candidates: %w", err)
-	}
-	return scanScanStateRows(rows)
-}
-
-// RelinkMovedFile moves the row of a file that left moved.FilePath to
-// mf.FilePath, marks it present, and rewrites its path-derived identity and
-// sidecars from mf. Probe data, chapters, markers, and every row keyed to the
-// file's id stay as they are. The update only applies while the row is still
-// the one the caller verified: same path, bytes, modification time, and links.
-// It reports false when the row changed meanwhile or another row holds the new
-// path; the caller then treats the file as new.
-func (r *FileRepository) RelinkMovedFile(ctx context.Context, moved *scanStateFile, mf models.MediaFile) (bool, error) {
-	externalSubtitlesJSON, err := serializeJSONB(mf.ExternalSubtitles)
-	if err != nil {
-		return false, fmt.Errorf("marshaling external_subtitles: %w", err)
-	}
-	args := append(identityArgs(moved.ID, mf, externalSubtitlesJSON),
-		mf.FilePath,
-		moved.FilePath,
-		moved.FileHash,
-		moved.FileSize,
-		moved.FileModifiedAt,
-		nilIfEmpty(moved.ContentID),
-		nilIfEmpty(moved.EpisodeID),
-	)
-	tag, err := r.pool.Exec(ctx, `UPDATE media_files SET `+identityAssignments+`,
-		file_path = $25,
-		missing_since = NULL,
-		updated_at = NOW()
-	WHERE id = $1
-	  AND file_path = $26
-	  AND file_hash = $27
-	  AND file_size = $28
-	  AND file_modified_at IS NOT DISTINCT FROM $29
-	  AND content_id IS NOT DISTINCT FROM $30
-	  AND episode_id IS NOT DISTINCT FROM $31
-	  AND extra_id IS NULL`, args...)
-	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return false, nil
-		}
-		return false, fmt.Errorf("relinking moved media file: %w", err)
-	}
-	return tag.RowsAffected() == 1, nil
 }
 
 type ChapterThumbnailFailureState struct {
@@ -3843,18 +3797,50 @@ func (r *FileRepository) listServedEpisodeFiles(
 }
 
 // UpdateContentID sets the content_id on a media file, linking it to a matched
-// media item. This is called by the matcher after a successful resolution.
-func (r *FileRepository) UpdateContentID(ctx context.Context, fileID int, contentID string) error {
+// media item. The matcher calls it with the path it read the file at, and the
+// write applies only while the row still has that path: a scan that moved the
+// row to another title meanwhile (RetitleMovedFile) cleared its links for a
+// rematch, and a decision made from the old path must not link it back. A
+// refused write returns ErrFileMoved; a missing row returns ErrFileNotFound.
+func (r *FileRepository) UpdateContentID(ctx context.Context, fileID int, filePath, contentID string) error {
 	tag, err := r.pool.Exec(ctx,
-		"UPDATE media_files SET content_id = $1, updated_at = NOW() WHERE id = $2",
-		contentID, fileID)
+		"UPDATE media_files SET content_id = $1, updated_at = NOW() WHERE id = $2 AND file_path = $3",
+		contentID, fileID, filePath)
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrFileNotFound
+		return r.unwrittenFileError(ctx, fileID)
 	}
 	return nil
+}
+
+// UnlinkContentID undoes a link the caller made with UpdateContentID: it
+// clears content_id only while the row still carries contentID, wherever the
+// row is now, since a scan may have moved it with its links meanwhile
+// (RelinkMovedFile). A row that another writer linked elsewhere, or that
+// lost the link already, is left alone; unlinked then reports false.
+func (r *FileRepository) UnlinkContentID(ctx context.Context, fileID int, contentID string) (unlinked bool, err error) {
+	tag, err := r.pool.Exec(ctx,
+		"UPDATE media_files SET content_id = NULL, updated_at = NOW() WHERE id = $1 AND content_id = $2",
+		fileID, contentID)
+	if err != nil {
+		return false, fmt.Errorf("unlinking media file %d from %s: %w", fileID, contentID, err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// unwrittenFileError explains a path-fenced write that matched no row:
+// ErrFileNotFound when the row is gone, ErrFileMoved when it has another path.
+func (r *FileRepository) unwrittenFileError(ctx context.Context, fileID int) error {
+	var exists bool
+	if err := r.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM media_files WHERE id = $1)`, fileID).Scan(&exists); err != nil {
+		return fmt.Errorf("checking media file %d: %w", fileID, err)
+	}
+	if !exists {
+		return ErrFileNotFound
+	}
+	return ErrFileMoved
 }
 
 // ReplaceContentID reassigns all files linked to one content item to another.
@@ -4006,8 +3992,11 @@ func (r *FileRepository) ClearContentLinksByPathPrefix(ctx context.Context, fold
 	return cleared, nil
 }
 
-// UpdateEpisodeLink sets the episode linkage fields on a media file.
-func (r *FileRepository) UpdateEpisodeLink(ctx context.Context, fileID int, episodeID string, seasonNum, episodeNum int) error {
+// UpdateEpisodeLink sets the episode linkage fields on a media file. Like
+// UpdateContentID it applies only while the row still has filePath, the path
+// the caller read it at, and returns ErrFileMoved otherwise: the episode was
+// chosen from that path's numbers within the series the file was linked to.
+func (r *FileRepository) UpdateEpisodeLink(ctx context.Context, fileID int, filePath, episodeID string, seasonNum, episodeNum int) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin episode link transaction: %w", err)
@@ -4016,16 +4005,20 @@ func (r *FileRepository) UpdateEpisodeLink(ctx context.Context, fileID int, epis
 
 	var folderID int
 	var oldEpisodeID *string
+	var currentPath string
 	if err := tx.QueryRow(ctx, `
-		SELECT media_folder_id, episode_id
+		SELECT media_folder_id, episode_id, file_path
 		FROM media_files
 		WHERE id = $1
 		FOR UPDATE
-	`, fileID).Scan(&folderID, &oldEpisodeID); err != nil {
+	`, fileID).Scan(&folderID, &oldEpisodeID, &currentPath); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
 		return fmt.Errorf("loading existing episode link: %w", err)
+	}
+	if currentPath != filePath {
+		return ErrFileMoved
 	}
 
 	// The INSERT is the top-level statement: a data-modifying CTE can only be
@@ -4214,6 +4207,17 @@ func findContentIDByRootPath(ctx context.Context, queryer fileQueryer, folderID 
 // FindContentIDByObservedRootPath finds an existing linked content item for
 // files under the same observed root path within a media folder.
 func (r *FileRepository) FindContentIDByObservedRootPath(ctx context.Context, folderID int, observedRootPath, preferredType string) (string, error) {
+	return r.findContentIDByObservedRootPath(ctx, folderID, observedRootPath, preferredType, 0)
+}
+
+// FindOtherContentIDByObservedRootPath is FindContentIDByObservedRootPath
+// over every file but excludeFileID, the lookup matching makes for a file
+// that is not linked yet.
+func (r *FileRepository) FindOtherContentIDByObservedRootPath(ctx context.Context, folderID int, observedRootPath, preferredType string, excludeFileID int) (string, error) {
+	return r.findContentIDByObservedRootPath(ctx, folderID, observedRootPath, preferredType, excludeFileID)
+}
+
+func (r *FileRepository) findContentIDByObservedRootPath(ctx context.Context, folderID int, observedRootPath, preferredType string, excludeFileID int) (string, error) {
 	query := `SELECT mf.content_id
 		FROM media_files mf
 		JOIN media_items mi ON mi.content_id = mf.content_id
@@ -4221,11 +4225,12 @@ func (r *FileRepository) FindContentIDByObservedRootPath(ctx context.Context, fo
 		  AND mf.observed_root_path = $2
 		  AND mf.content_id IS NOT NULL
 		  AND mf.missing_since IS NULL
+		  AND mf.id <> $3
 		ORDER BY `
 
-	args := []any{folderID, observedRootPath}
+	args := []any{folderID, observedRootPath, excludeFileID}
 	if preferredType != "" {
-		query += `CASE WHEN mi.type = $3 THEN 0 ELSE 1 END, `
+		query += `CASE WHEN mi.type = $4 THEN 0 ELSE 1 END, `
 		args = append(args, preferredType)
 	}
 	query += `CASE WHEN lower(trim(mi.status)) = 'matched' THEN 0 ELSE 1 END,

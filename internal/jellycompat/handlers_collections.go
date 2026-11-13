@@ -1225,12 +1225,11 @@ func (h *ItemsHandler) writeListItemsPage(w http.ResponseWriter, r *http.Request
 }
 
 // prepareSmartCollectionQuery resolves a smart (live-query) collection's stored
-// query definition into an executable form: normalized, validated, item-limited,
-// and intersected with the collection's own bound library scope, plus the
-// session access filter. ok is false when the collection has no executable
-// query — no executor wired, a malformed or invalid definition, or an empty
-// library intersection — so callers degrade to no children rather than error
-// and a single bad collection never 500s a browse.
+// query definition into an executable form: normalized, validated and
+// item-limited, over the rules' own libraries, plus the session access filter.
+// ok is false when the collection has no executable query (no executor wired,
+// or a malformed or invalid definition), so callers degrade to no children
+// rather than error and a single bad collection never 500s a browse.
 func (h *ItemsHandler) prepareSmartCollectionQuery(ctx context.Context, session *Session, c *models.LibraryCollection) (catalog.QueryDefinition, catalog.AccessFilter, bool) {
 	if h.queryExecutor == nil {
 		return catalog.QueryDefinition{}, catalog.AccessFilter{}, false
@@ -1250,20 +1249,9 @@ func (h *ItemsHandler) prepareSmartCollectionQuery(ctx context.Context, session 
 			"collection_id", c.ID, "error", err)
 		return catalog.QueryDefinition{}, catalog.AccessFilter{}, false
 	}
+	// The rules' own libraries pick the titles (every library when they name
+	// none); the session's access filter narrows them to what the viewer may see.
 	def = catalog.ApplySmartCollectionItemLimit(def)
-
-	switch {
-	case len(c.LibraryIDs) > 0:
-		def.LibraryIDs = catalog.IntersectCollectionLibraryIDs(def.LibraryIDs, c.LibraryIDs)
-		if len(def.LibraryIDs) == 0 {
-			return catalog.QueryDefinition{}, catalog.AccessFilter{}, false
-		}
-	case c.LibraryID > 0:
-		def.LibraryIDs = catalog.IntersectCollectionLibraryIDs(def.LibraryIDs, []int{c.LibraryID})
-		if len(def.LibraryIDs) == 0 {
-			return catalog.QueryDefinition{}, catalog.AccessFilter{}, false
-		}
-	}
 
 	return def, h.resolveAccessFilter(ctx, session), true
 }

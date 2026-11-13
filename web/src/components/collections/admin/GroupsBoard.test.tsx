@@ -14,7 +14,7 @@ import getAdminCollectionOk from "../../../../../contracts/api/v2/fixtures/get_a
 import { adminCollectionFromV2 } from "@/api/adminCollections";
 import type { LibraryCollection, LibraryCollectionGroup } from "@/api/types";
 import { stubPhone } from "@/components/homeRows/phoneLayout.test-support";
-import { MOVE_FAILED, ORDER_CHANGED, PIN_LABEL } from "@/lib/collections/copy";
+import { moveFailedMessage, orderChanged, pinLabel } from "@/lib/collections/copy";
 import { adminCapabilities } from "@/test/fixtures/collectionAnswers";
 import { installV2Recorder, v2Recorder } from "@/test/v2Recorder";
 import { GroupsBoard } from "./GroupsBoard";
@@ -319,14 +319,14 @@ describe("GroupsBoard", () => {
     someoneReorders({ ungrouped: ["c", "a", "b"] });
     await act(async () => fail(new Error("precondition failed")));
     await vi.waitFor(() =>
-      expect(toast.error).toHaveBeenCalledWith(MOVE_FAILED, expect.anything()),
+      expect(toast.error).toHaveBeenCalledWith(moveFailedMessage(), expect.anything()),
     );
     const [, options] = vi.mocked(toast.error).mock.calls[0]!;
     await act(async () => {
       (options as unknown as { action: { onClick: () => void } }).action.onClick();
     });
 
-    await vi.waitFor(() => expect(toast.error).toHaveBeenCalledWith(ORDER_CHANGED));
+    await vi.waitFor(() => expect(toast.error).toHaveBeenCalledWith(orderChanged()));
     expect(v2Recorder.writes()).toHaveLength(1);
   });
 
@@ -338,7 +338,7 @@ describe("GroupsBoard", () => {
     await user.keyboard("{ArrowRight}");
     await user.click(await screen.findByRole("menuitemradio", { name: "No heading" }));
 
-    await vi.waitFor(() => expect(toast.error).toHaveBeenCalledWith(ORDER_CHANGED));
+    await vi.waitFor(() => expect(toast.error).toHaveBeenCalledWith(orderChanged()));
     expect(v2Recorder.writes()).toEqual([]);
   });
 
@@ -492,7 +492,7 @@ describe("GroupsBoard", () => {
       await renderBoard();
       expect(band(noHeading())).toBeNull();
       const user = await openMenu("More for New this month");
-      const pin = await screen.findByRole("menuitem", { name: PIN_LABEL });
+      const pin = await screen.findByRole("menuitem", { name: pinLabel() });
       expect(pin).toHaveAccessibleDescription(
         "Shows first on this shelf and in Server collections on the Collections page.",
       );
@@ -542,7 +542,7 @@ describe("GroupsBoard", () => {
         expect(v2Recorder.callsOf("GET /api/v2/admin/collections/capabilities")).toHaveLength(1),
       );
       await openMenu("More for Staff picks");
-      expect(await screen.findByRole("menuitem", { name: PIN_LABEL })).toHaveAttribute(
+      expect(await screen.findByRole("menuitem", { name: pinLabel() })).toHaveAttribute(
         "aria-disabled",
         "true",
       );

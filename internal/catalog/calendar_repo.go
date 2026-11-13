@@ -6,8 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/access"
 )
 
 // CalendarEvent represents a single calendar entry — a movie release,

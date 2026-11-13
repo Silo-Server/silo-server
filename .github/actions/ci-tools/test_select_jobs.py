@@ -112,7 +112,7 @@ class GitSelectionTests(unittest.TestCase):
             ("web/public/vendor/pdfjs/pdf.worker.mjs", False, True),
             ("web/public/vendor/pdfjs/standard_fonts_other/font.pfb", False, True),
             ("internal/catalog/history.go", True, False),
-            ("internal/scenariocatalog/testdata/fixture.json", True, False),
+            ("internal/routeinventory/testdata/fixture.json", True, False),
             ("internal/policy/vendor/README.md", True, False),
             ("internal/userdb/testdata/schema.sql", True, False),
             ("internal/ebookconvert/mobitool.wasm", True, False),
@@ -125,13 +125,11 @@ class GitSelectionTests(unittest.TestCase):
             ("cmd/silo/main.go", True, False),
             ("scripts/ci/db-pins.txt", True, False),
             ("scripts/ci/db-contracts.txt", True, False),
-            ("contracts/api/v2/migration.json", True, False),
-            ("contracts/api/v2/migration.schema.json", True, False),
-            ("contracts/api/v2/offline-routes.txt", True, False),
             ("contracts/api/v2/breaking-approvals.json", True, False),
             (".github/actions/README.md", False, False),
             (".github/evidence.yml", False, False),
             (".github/ISSUE_TEMPLATE/bug-report.yml", False, False),
+            (".github/DISCUSSION_TEMPLATE/ideas.yml", False, False),
         ]
         for number, (path, go, web) in enumerate(cases):
             with self.subTest(path=path):

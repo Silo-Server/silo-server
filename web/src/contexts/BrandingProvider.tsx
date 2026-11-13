@@ -8,7 +8,13 @@ import { accentDeclarations } from "@/lib/accentColor";
 import { setAppDocumentTitle } from "@/lib/documentTitle";
 
 const DEFAULT_SERVER_NAME = "Silo";
-const DEFAULT_LOGIN_SUBTITLE = "Sign in with an existing account.";
+
+/**
+ * The subtitle the server sends when no administrator set one
+ * (`DefaultLoginSubtitle` in internal/branding). It is server text the web
+ * compares against, so it stays English; matching it shows the translated default.
+ */
+const SERVER_DEFAULT_LOGIN_SUBTITLE = "Sign in with an existing account.";
 
 /** Raw shape of GET /theme/branding. All fields optional / additive. */
 interface BrandingApiResponse {
@@ -24,6 +30,7 @@ interface BrandingApiResponse {
 
 export interface BrandingContextValue {
   serverName: string;
+  /** The subtitle an administrator set; empty when unset. `useServerBranding` supplies the translated default. */
   loginSubtitle: string;
   /** Brand accent color (hex), or null when unset. */
   accentColor: string | null;
@@ -40,7 +47,7 @@ export interface BrandingContextValue {
 
 const DEFAULT_BRANDING: BrandingContextValue = {
   serverName: DEFAULT_SERVER_NAME,
-  loginSubtitle: DEFAULT_LOGIN_SUBTITLE,
+  loginSubtitle: "",
   accentColor: null,
   wordmarkUrl: null,
   markUrl: null,
@@ -57,7 +64,8 @@ export const BrandingContext = createContext<BrandingContextValue>(DEFAULT_BRAND
 function mapResponse(data: BrandingApiResponse | undefined): BrandingContextValue {
   return {
     serverName: data?.server_name || DEFAULT_SERVER_NAME,
-    loginSubtitle: data?.login_subtitle || DEFAULT_LOGIN_SUBTITLE,
+    loginSubtitle:
+      data?.login_subtitle === SERVER_DEFAULT_LOGIN_SUBTITLE ? "" : data?.login_subtitle || "",
     accentColor: data?.accent_color || null,
     wordmarkUrl: data?.wordmark_url || null,
     markUrl: data?.mark_url || null,

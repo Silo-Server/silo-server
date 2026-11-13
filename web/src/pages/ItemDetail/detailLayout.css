@@ -512,7 +512,7 @@
   @media (max-width: 1023px) {
     /* Only the current-episode ring needs room at the rail's leading edge. */
     .episode-detail-navigation .embla__viewport {
-      padding-left: 2px;
+      padding-inline-start: 2px;
     }
     .series-detail-navigation .embla__viewport {
       padding-bottom: 4px;

@@ -8,7 +8,7 @@ import { decodeThumbhash } from "@/lib/thumbhash";
 import { cn } from "@/lib/utils";
 import MediaItemMenu from "@/components/MediaItemMenu";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
-import type { EpisodeNavigationState } from "../itemDetailLayout";
+import { episodeLinkLibraryId, type EpisodeNavigationState } from "../itemDetailLayout";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
 import { usePrefetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useDwellPrefetch } from "@/hooks/useDwellPrefetch";
@@ -16,23 +16,30 @@ import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
 import type { ScrollPreservingState } from "@/hooks/useScrollRestoration";
+import { buildItemHref } from "@/lib/mediaNavigation";
+import { useT } from "@/i18n";
 import EpisodeCardCaption from "./EpisodeCardCaption";
 
 interface EpisodeCarouselProps {
   episodes: EpisodeListItem[];
   currentEpisodeNumber: number;
   episodeLinkState?: EpisodeNavigationState;
+  /** The page's library scope, kept on each episode link. */
+  libraryId?: number;
 }
 
 export default function EpisodeCarousel({
   episodes,
   currentEpisodeNumber,
   episodeLinkState,
+  libraryId,
 }: EpisodeCarouselProps) {
+  const t = useT();
   const currentEpisodeIndex = episodes.findIndex(
     (episode) => episode.episode_number === currentEpisodeNumber,
   );
-  const prefetchEpisodeDetail = usePrefetchCatalogItemDetail();
+  const prefetchScopedEpisode = usePrefetchCatalogItemDetail(libraryId);
+  const prefetchEpisode = usePrefetchCatalogItemDetail();
   const { quickActionMode } = useOverlayPrefs();
   const { hideImages, hideOverviews } = useEpisodeSpoilerPrefs();
   // Moving between siblings keeps the viewer where they scrolled to: the page
@@ -61,14 +68,14 @@ export default function EpisodeCarousel({
           <button
             type="button"
             onClick={scrollPrev}
-            className="from-background/90 absolute top-0 bottom-0 left-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-r to-transparent opacity-0 transition-opacity duration-200 group-hover/carousel:opacity-100 focus-visible:opacity-100"
-            aria-label="Scroll left"
+            className="from-background/90 absolute start-0 top-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-r to-transparent opacity-0 transition-opacity duration-200 group-hover/carousel:opacity-100 focus-visible:opacity-100 rtl:bg-gradient-to-l"
+            aria-label={t("web.detail.carousel.scrollLeft")}
           >
             <ChevronLeft className="text-foreground h-6 w-6" />
           </button>
         )}
 
-        <div ref={emblaRef} className="embla__viewport overflow-hidden py-4 pl-4">
+        <div ref={emblaRef} className="embla__viewport overflow-hidden py-4 ps-4">
           <ul role="list" className="embla__container flex cursor-grab list-none gap-3">
             {episodes.map((ep) => (
               <EpisodeCarouselCard
@@ -76,10 +83,15 @@ export default function EpisodeCarousel({
                 ep={ep}
                 isCurrent={ep.episode_number === currentEpisodeNumber}
                 episodeLinkState={linkState}
+                libraryId={libraryId}
                 quickActionMode={quickActionMode}
                 hideImageIfUnwatched={hideImages}
                 hideOverviewIfUnwatched={hideOverviews}
-                onPrefetch={() => prefetchEpisodeDetail(ep.content_id)}
+                onPrefetch={() =>
+                  (episodeLinkLibraryId(ep, libraryId) === undefined
+                    ? prefetchEpisode
+                    : prefetchScopedEpisode)(ep.content_id)
+                }
               />
             ))}
           </ul>
@@ -89,8 +101,8 @@ export default function EpisodeCarousel({
           <button
             type="button"
             onClick={scrollNext}
-            className="from-background/90 absolute top-0 right-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-l to-transparent opacity-0 transition-opacity duration-200 group-hover/carousel:opacity-100 focus-visible:opacity-100"
-            aria-label="Scroll right"
+            className="from-background/90 absolute end-0 top-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-l to-transparent opacity-0 transition-opacity duration-200 group-hover/carousel:opacity-100 focus-visible:opacity-100 rtl:bg-gradient-to-r"
+            aria-label={t("web.detail.carousel.scrollRight")}
           >
             <ChevronRight className="text-foreground h-6 w-6" />
           </button>
@@ -104,6 +116,7 @@ function EpisodeCarouselCard({
   ep,
   isCurrent,
   episodeLinkState,
+  libraryId,
   quickActionMode,
   hideImageIfUnwatched,
   hideOverviewIfUnwatched,
@@ -112,15 +125,22 @@ function EpisodeCarouselCard({
   ep: EpisodeListItem;
   isCurrent: boolean;
   episodeLinkState?: EpisodeNavigationState;
+  libraryId?: number;
   quickActionMode: CardQuickActionMode;
   hideImageIfUnwatched: boolean;
   hideOverviewIfUnwatched: boolean;
   onPrefetch: () => void;
 }) {
+  const t = useT();
   const cardRef = useRef<HTMLDivElement>(null);
   const prefetchHandlers = useDwellPrefetch(onPrefetch);
   const thumbhashUrl = ep.still_thumbhash ? decodeThumbhash(ep.still_thumbhash) : "";
-  const episodeTitle = ep.title || `Episode ${ep.episode_number}`;
+  const episodeTitle =
+    ep.title || t("web.detail.episodes.numbered", { episode: ep.episode_number });
+  const episodeHref = buildItemHref({
+    contentId: ep.content_id,
+    libraryId: episodeLinkLibraryId(ep, libraryId),
+  });
   const hideImage =
     hideImageIfUnwatched &&
     isEpisodeStill(ep.still_is_episode_still) &&
@@ -147,7 +167,7 @@ function EpisodeCarouselCard({
       >
         <div className="relative">
           <ViewTransitionLink
-            to={`/item/${ep.content_id}`}
+            to={episodeHref}
             state={episodeLinkState}
             aria-current={isCurrent ? "page" : undefined}
             className="block"
@@ -179,12 +199,12 @@ function EpisodeCarouselCard({
                 </div>
               )}
               {isCurrent && (
-                <div className="bg-primary text-primary-foreground pointer-events-none absolute top-2.5 left-2.5 z-10 flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[0.625rem] leading-none font-semibold tracking-[0.08em] uppercase shadow-[0_2px_8px_rgb(0_0_0/0.28)]">
+                <div className="bg-primary text-primary-foreground pointer-events-none absolute start-2.5 top-2.5 z-10 flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[0.625rem] leading-none font-semibold tracking-[0.08em] uppercase shadow-[0_2px_8px_rgb(0_0_0/0.28)]">
                   <span className="relative flex size-1.5">
                     <span className="bg-primary-foreground absolute inline-flex h-full w-full animate-ping rounded-full opacity-60" />
                     <span className="bg-primary-foreground relative inline-flex size-1.5 rounded-full" />
                   </span>
-                  Now Viewing
+                  {t("web.detail.episodes.nowViewing")}
                 </div>
               )}
               {progress != null && (
@@ -212,7 +232,7 @@ function EpisodeCarouselCard({
           />
         </div>
         <ViewTransitionLink
-          to={`/item/${ep.content_id}`}
+          to={episodeHref}
           state={episodeLinkState}
           aria-current={isCurrent ? "page" : undefined}
           className="block"

@@ -548,10 +548,18 @@ describe("seek preview settings", () => {
 it("hides unsupported seek preview settings and leaves their keys out", () => {
   expandPreviewImages();
   useLibraryCapabilitiesMock.mockReturnValue({ data: { trickplay: false } });
-  useSettingsFormMock.mockReturnValue(makeForm({ "playback.hw_accel": "none" }));
+  // A saved node mode still reads back through the form, so the node limit
+  // must stay hidden on its own account.
+  useSettingsFormMock.mockReturnValue(
+    makeForm({
+      "playback.hw_accel": "none",
+      "playback.trickplay_execution": "transcode_nodes_only",
+    }),
+  );
   render(<Page />);
   expect(screen.queryByLabelText("Seek preview interval")).toBeNull();
   expect(screen.queryByLabelText("Preview image width")).toBeNull();
+  expect(screen.queryByText("Seek previews per transcode node")).toBeNull();
   expect(useSettingsFormMock.mock.calls[0]?.[0]?.keys).not.toContain("playback.trickplay_workers");
   // The chapter thumbnail half of the group stays, and the count follows it:
   // the two HDR fields, with workers shown and placement outside beside a node.

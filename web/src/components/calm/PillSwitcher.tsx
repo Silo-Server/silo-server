@@ -122,10 +122,12 @@ function PageButton({ side, onClick }: { side: "left" | "right"; onClick: () => 
       onClick={onClick}
       className={cn(
         "bg-background/90 text-foreground/80 hover:text-foreground hover:bg-accent border-border absolute top-1/2 hidden size-7 -translate-y-1/2 items-center justify-center rounded-full border shadow-sm backdrop-blur-sm transition-colors [:root[data-fine-pointer=true]_&]:inline-flex",
+        // The strip's edges are measured physically (useScrollStrip), in every direction.
+        // eslint-disable-next-line silo/no-physical-direction -- pages toward a physical edge
         side === "left" ? "left-0" : "right-0",
       )}
     >
-      <Icon className="size-4" />
+      <Icon className="no-mirror size-4" />
     </button>
   );
 }

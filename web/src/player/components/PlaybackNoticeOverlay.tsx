@@ -1,3 +1,4 @@
+import "@/styles/player-hud.css";
 import type { ReactNode } from "react";
 
 /**
@@ -27,20 +28,21 @@ export function PlaybackNoticeOverlay({
   actionLabel,
   onAction,
 }: PlaybackNoticeOverlayProps) {
-  const accentClass =
-    tone === "warning" ? "border-amber-400/50 bg-amber-500/15" : "border-sky-400/50 bg-sky-500/15";
+  // Tone shows as a coloured rule on the card's leading edge; the card itself
+  // stays the HUD's glass so text contrast never depends on the tint.
+  const accentClass = tone === "warning" ? "border-s-amber-300" : "border-s-sky-300";
 
   return (
-    <div
-      className={`max-w-xl rounded-2xl border px-5 py-4 text-white shadow-2xl backdrop-blur ${accentClass}`}
-    >
-      {title ? <div className="text-sm font-semibold tracking-wide text-white">{title}</div> : null}
-      <div className={`text-sm leading-6 text-white/85 ${title ? "mt-1" : ""}`}>{message}</div>
+    <div className={`hud-card max-w-xl border-s-4 px-5 py-4 ${accentClass}`}>
+      {title ? <div className="text-sm font-semibold">{title}</div> : null}
+      <div className={`text-sm leading-6 text-[var(--hud-ash)] ${title ? "mt-1" : ""}`}>
+        {message}
+      </div>
       {actionLabel && onAction ? (
         <button
           type="button"
           onClick={onAction}
-          className="pointer-events-auto mt-3 rounded-lg bg-white/15 px-3 py-2 text-sm font-medium text-white hover:bg-white/25"
+          className="hud-secondary-btn pointer-events-auto mt-3"
         >
           {actionLabel}
         </button>

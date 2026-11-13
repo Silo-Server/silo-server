@@ -8,6 +8,7 @@ import type {
 import { normalizeQueryDefinition } from "@/api/types";
 import { v2, V2ProblemError } from "@/api/v2/request";
 import { withETag } from "@/api/v2/etag";
+import { t } from "@/i18n";
 
 type AdminCollection = components["schemas"]["AdminCollection"];
 export function adminCollectionFromV2(value: AdminCollection): LibraryCollection {
@@ -111,7 +112,7 @@ export async function saveAdminArtwork(
       );
     } catch (error) {
       artworkErrors.push(
-        `${type}: ${error instanceof Error ? error.message : "Artwork update failed"}`,
+        `${type}: ${error instanceof Error ? error.message : t("web.admin.errors.artworkUpdateFailed")}`,
       );
     }
   }
@@ -119,7 +120,7 @@ export async function saveAdminArtwork(
 }
 export function adminMutationMessage(error: unknown, fallback: string) {
   return error instanceof V2ProblemError && error.status === 412
-    ? "This collection changed. Reload and review your changes before trying again."
+    ? t("web.collections.api.changedElsewhere")
     : error instanceof Error
       ? error.message
       : fallback;
@@ -262,6 +263,6 @@ export async function fetchAdminBoardOrderSnapshot(libraryId: number, groupIds: 
     for (const [id, snapshot] of batch) collectionOrders.set(id, snapshot);
   }
   if ((await fetchAdminGroupOrderSnapshot(libraryId)).etag !== groupOrder.etag)
-    throw new Error("Collection order changed while loading. Reload before reordering.");
+    throw new Error(t("web.admin.errors.collectionOrderChanged"));
   return { groupOrder, collectionOrders };
 }

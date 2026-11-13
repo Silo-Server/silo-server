@@ -53,7 +53,7 @@ export function PluginMarkdown({ source, className }: { source?: string; classNa
         return (
           <List
             key={index}
-            className={cn("space-y-1 pl-5", block.ordered ? "list-decimal" : "list-disc")}
+            className={cn("space-y-1 ps-5", block.ordered ? "list-decimal" : "list-disc")}
           >
             {block.items.map((item, itemIndex) => (
               <li key={itemIndex}>

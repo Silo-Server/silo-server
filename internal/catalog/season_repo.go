@@ -54,7 +54,7 @@ const seasonColumns = `content_id, series_id, season_number, title, default_meta
 	air_date, poster_path, poster_source_path, poster_thumbhash,
 	metadata_s3_path, metadata_etag, metadata_source,
 	created_at, updated_at,
-	backdrop_path, backdrop_source_path, backdrop_thumbhash`
+	backdrop_path, backdrop_source_path, backdrop_thumbhash, locked_fields`
 
 // scanSeason scans a single row into a *models.Season.
 func scanSeason(row pgx.Row) (*models.Season, error) {
@@ -78,6 +78,7 @@ func scanSeason(row pgx.Row) (*models.Season, error) {
 		&s.BackdropPath,
 		&s.BackdropSourcePath,
 		&s.BackdropThumbhash,
+		&s.LockedFields,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -112,6 +113,7 @@ func scanSeasons(rows pgx.Rows) ([]*models.Season, error) {
 			&s.BackdropPath,
 			&s.BackdropSourcePath,
 			&s.BackdropThumbhash,
+			&s.LockedFields,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning season row: %w", err)
@@ -228,10 +230,8 @@ func (r *SeasonRepository) Upsert(ctx context.Context, s *models.Season) error {
 			$11, $12, $13
 		)
 		ON CONFLICT (series_id, season_number) DO UPDATE SET
-			title = EXCLUDED.title,
+			` + seasonLockableAssignments + `,
 			default_metadata_language = COALESCE(NULLIF(EXCLUDED.default_metadata_language, ''), seasons.default_metadata_language),
-			overview = EXCLUDED.overview,
-			air_date = EXCLUDED.air_date,
 			` + seasonArtworkAssignments + `,
 			metadata_s3_path = EXCLUDED.metadata_s3_path,
 			metadata_etag = EXCLUDED.metadata_etag,
@@ -337,10 +337,8 @@ func (r *SeasonRepository) BulkUpsert(ctx context.Context, seasons []*models.Sea
 			$11::text[], $12::text[], $13::text[]
 		)
 		ON CONFLICT (series_id, season_number) DO UPDATE SET
-			title = EXCLUDED.title,
+			` + seasonLockableAssignments + `,
 			default_metadata_language = COALESCE(NULLIF(EXCLUDED.default_metadata_language, ''), seasons.default_metadata_language),
-			overview = EXCLUDED.overview,
-			air_date = EXCLUDED.air_date,
 			` + seasonArtworkAssignments + `,
 			metadata_s3_path = EXCLUDED.metadata_s3_path,
 			metadata_etag = EXCLUDED.metadata_etag,
@@ -500,6 +498,11 @@ func (r *SeasonRepository) UpdateMetadata(ctx context.Context, contentID string,
 
 	addString("title", upd.Title)
 	addString("overview", upd.Overview)
+	if upd.LockedFields != nil {
+		setClauses = append(setClauses, fmt.Sprintf("locked_fields = $%d", argIdx))
+		args = append(args, lockableFields(*upd.LockedFields, seasonLockedColumns))
+		argIdx++
+	}
 	addInt("season_number", upd.SeasonNumber)
 	addString("air_date", upd.AirDate)
 	addString("poster_path", upd.PosterPath)

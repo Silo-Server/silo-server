@@ -40,18 +40,20 @@ import {
   loadFFmpegAudioDecoders,
   type DecodedAudioFrame,
 } from "./ffmpegAudioDecoder";
+import { avcLengthSize } from "./h264";
 import { hevcLengthSize, stripDolbyVisionNalUnits } from "./hevc";
 import { IMPORT_COLOR_TAG, pictureColorOf } from "./pictureColor";
 import {
   ENGINE_READ_FAILED,
   ENGINE_VIDEO_DECODE_FAILED,
-  type EnginePlaneFrame,
   type PageToWorkerMessage,
   type WorkerToPageMessage,
   type WorkerToWorkletMessage,
   type WorkletToWorkerMessage,
 } from "./protocol";
 import { redactStreamUrls, type EngineSourceSpec } from "./source";
+import { copyPlanes, planePool, RAW_PLANE_FORMATS } from "./planeCopy";
+import { videoStarts, type VideoStart } from "./videoStart";
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 
@@ -131,6 +133,8 @@ let videoConfig: VideoDecoderConfig | null = null;
  */
 let timelineOrigin = 0;
 let nalLengthSize: number | null = null;
+/** NAL length-field size of an H.264 track, or null for any other video. */
+let h264LengthSize: number | null = null;
 let audioOutput: { port: MessagePort; channels: number; sampleRate: number } | null = null;
 
 let generation = -1;
@@ -138,7 +142,6 @@ let framesInFlight = 0;
 let audioPostedSeconds = 0;
 let audioConsumedSeconds = 0;
 const waker = new Waker();
-const planePool: ArrayBuffer[] = [];
 let activeVideoDecoder: VideoDecoder | null = null;
 let activeAudioDecoder: AudioDecoderAdapter | null = null;
 
@@ -279,10 +282,11 @@ async function open(spec: EngineSourceSpec): Promise<void> {
     );
   }
   videoConfig = config;
+  const videoCodec = await videoTrack.getCodec();
+  const description = config.description ? toBytes(config.description) : null;
   nalLengthSize =
-    spec.video.stripDolbyVision && (await videoTrack.getCodec()) === "hevc"
-      ? hevcLengthSize(config.description ? toBytes(config.description) : null)
-      : null;
+    spec.video.stripDolbyVision && videoCodec === "hevc" ? hevcLengthSize(description) : null;
+  h264LengthSize = videoCodec === "avc" ? avcLengthSize(description) : null;
 
   let duration = spec.durationSeconds ?? 0;
   if (!(duration > 0)) duration = (await input.computeDuration()) - timelineOrigin;
@@ -345,57 +349,6 @@ function start(run: number, position: number): void {
   }
 }
 
-const RAW_PLANE_FORMATS = /^I4(20|22|44)P1[02]$/;
-
-function planeBuffer(size: number): ArrayBuffer {
-  const index = planePool.findIndex((buffer) => buffer.byteLength >= size);
-  if (index >= 0) return planePool.splice(index, 1)[0]!;
-  return new ArrayBuffer(size);
-}
-
-/**
- * Copies a high-bit-depth software frame out as planes. GPU paths quantize an
- * imported frame to 8 bits; HDR needs the 10-bit codes for clean gradients.
- */
-async function copyPlanes(frame: VideoFrame): Promise<EnginePlaneFrame> {
-  const format = frame.format!;
-  const rect = frame.visibleRect!;
-  const bitDepth = format.endsWith("P12") ? 12 : 10;
-  const chromaWidth = format.startsWith("I444") ? rect.width : Math.ceil(rect.width / 2);
-  const chromaHeight = format.startsWith("I420") ? Math.ceil(rect.height / 2) : rect.height;
-  const lumaBytes = rect.width * rect.height * 2;
-  const chromaBytes = chromaWidth * chromaHeight * 2;
-  const buffer = planeBuffer(lumaBytes + chromaBytes * 2);
-  const offsets: [number, number, number] = [0, lumaBytes, lumaBytes + chromaBytes];
-  const strides: [number, number, number] = [rect.width * 2, chromaWidth * 2, chromaWidth * 2];
-  try {
-    await frame.copyTo(buffer, {
-      rect,
-      layout: [
-        { offset: offsets[0], stride: strides[0] },
-        { offset: offsets[1], stride: strides[1] },
-        { offset: offsets[2], stride: strides[2] },
-      ],
-    });
-  } catch (error) {
-    // The caller falls back to handing the frame over; keep the buffer for the next copy.
-    planePool.push(buffer);
-    throw error;
-  }
-  return {
-    timestamp: frame.timestamp / 1e6,
-    duration: (frame.duration ?? 0) / 1e6,
-    bitDepth,
-    width: rect.width,
-    height: rect.height,
-    chromaWidth,
-    chromaHeight,
-    buffer,
-    offsets,
-    strides,
-  };
-}
-
 function readFailure(kind: "video" | "audio", error: unknown): EngineFailure {
   return new EngineFailure(ENGINE_FAILURES.read, `Reading ${kind} failed: ${String(error)}`);
 }
@@ -404,10 +357,10 @@ function readFailure(kind: "video" | "audio", error: unknown): EngineFailure {
  * Finds where a run starts. The lookup reads the file, so its failure is a
  * read failure like any other, not a decoder one.
  */
-async function findStartPacket(
+async function findStartPacket<T>(
   kind: "video" | "audio",
-  lookup: () => Promise<EncodedPacket | null>,
-): Promise<EncodedPacket | null> {
+  lookup: () => Promise<T | null>,
+): Promise<T | null> {
   try {
     return await lookup();
   } catch (error) {
@@ -444,26 +397,54 @@ async function* readPackets(
 }
 
 async function runVideo(run: number, position: number): Promise<void> {
-  const track = videoTrack!;
-  const config = videoConfig!;
-  const sink = new EncodedPacketSink(track);
-  const startPacket = await findStartPacket(
-    "video",
-    async () =>
-      (await sink.getKeyPacket(position + timelineOrigin, { verifyKeyPackets: true })) ??
-      (await sink.getFirstKeyPacket({ verifyKeyPackets: true })),
+  const sink = new EncodedPacketSink(videoTrack!);
+  const starts = videoStarts(
+    sink,
+    position + timelineOrigin,
+    h264LengthSize,
+    () => run !== generation,
   );
-  if (run !== generation) return;
-  if (!startPacket) {
-    post({ type: "video-ended", generation: run });
-    return;
+  for (;;) {
+    const next = (await findStartPacket("video", () => starts.next()))!;
+    if (run !== generation) return;
+    if (next.done) {
+      if (next.value === "no-keys") post({ type: "video-ended", generation: run });
+      else {
+        const message = "The browser cannot start decoding this video near the position.";
+        fail(run, new EngineFailure(ENGINE_FAILURES.videoUnsupported, message), "");
+      }
+      return;
+    }
+    if ((await decodeVideo(run, position, sink, next.value)) === "done") return;
   }
+}
+
+/**
+ * Decodes video from `start` until the end of the run. Resolves "rejected"
+ * when the decoder failed on the stream from a recovery point before it
+ * decoded any picture, so the caller can start earlier instead of failing.
+ */
+async function decodeVideo(
+  run: number,
+  position: number,
+  sink: EncodedPacketSink,
+  start: VideoStart,
+): Promise<"done" | "rejected"> {
+  const config = videoConfig!;
+  const startPacket = start.packet;
+  // Leading pictures follow a recovery point in decode order and show before
+  // it. They reference the GOP before, which was not decoded, and show
+  // before the position, so none is decoded.
+  const skipBefore = start.recoveryPoint ? startPacket.timestamp : -Infinity;
+  let decodedPicture = false;
+  let rejected = false;
 
   // Frames are handed over strictly in output order; copying planes is async.
   let delivery = Promise.resolve();
   const usePlanes = source!.video.transfer !== "sdr";
   const decoder = new VideoDecoder({
     output: (frame) => {
+      decodedPicture = true;
       if (run !== generation) {
         frame.close();
         return;
@@ -505,7 +486,14 @@ async function runVideo(run: number, position: number): Promise<void> {
         post({ type: "frame", generation: run, frame }, [frame]);
       });
     },
-    error: (error) => fail(run, error, ENGINE_FAILURES.videoDecode),
+    error: (error) => {
+      if (start.recoveryPoint && !decodedPicture && run === generation) {
+        rejected = true;
+        waker.wake();
+        return;
+      }
+      fail(run, error, ENGINE_FAILURES.videoDecode);
+    },
   });
   activeVideoDecoder = decoder;
   decoder.addEventListener("dequeue", () => waker.wake());
@@ -514,25 +502,43 @@ async function runVideo(run: number, position: number): Promise<void> {
   for await (const packet of readPackets("video", sink, startPacket)) {
     while (
       run === generation &&
+      decoder.state !== "closed" &&
       (framesInFlight >= MAX_FRAMES_IN_FLIGHT || decoder.decodeQueueSize >= MAX_VIDEO_DECODE_QUEUE)
     ) {
       await waker.wait();
     }
-    if (run !== generation || decoder.state === "closed") return;
+    if (run !== generation) return "done";
+    if (decoder.state === "closed") return rejected ? "rejected" : "done";
+    if (packet.timestamp < skipBefore) continue;
     const data = nalLengthSize ? stripDolbyVisionNalUnits(packet.data, nalLengthSize) : packet.data;
-    decoder.decode(
-      new EncodedVideoChunk({
-        type: packet.type,
-        timestamp: Math.round(playerTime(packet) * 1e6),
-        duration: Math.round(packet.duration * 1e6),
-        data,
-      }),
-    );
+    const chunk = new EncodedVideoChunk({
+      type: packet.type,
+      timestamp: Math.round(playerTime(packet) * 1e6),
+      duration: Math.round(packet.duration * 1e6),
+      data,
+    });
+    try {
+      decoder.decode(chunk);
+    } catch (error) {
+      // A browser that does not take a recovery point as a key rejects the
+      // first chunk here, with a DataError, instead of through `error`.
+      const dataError = error instanceof Error && error.name === "DataError";
+      if (!start.recoveryPoint || decodedPicture || !dataError) throw error;
+      decoder.close();
+      return "rejected";
+    }
   }
-  if (run !== generation || decoder.state === "closed") return;
-  await decoder.flush();
+  if (run !== generation) return "done";
+  if (decoder.state === "closed") return rejected ? "rejected" : "done";
+  try {
+    await decoder.flush();
+  } catch (error) {
+    if (rejected) return "rejected";
+    throw error;
+  }
   await delivery;
   if (run === generation) post({ type: "video-ended", generation: run });
+  return "done";
 }
 
 function webCodecsAudioDecoder(config: AudioDecoderConfig, run: number): AudioDecoderAdapter {

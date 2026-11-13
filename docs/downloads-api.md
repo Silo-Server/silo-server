@@ -1,9 +1,7 @@
 # Downloads & Offline Sync API (client integration guide)
 
 > **API lifecycle:** this documents the stable `/api/v2` native contract, which locks with Silo
-> 1.0. The frozen alpha `/api/v1` surface is summarized in
-> [section 16](#16-bridge-the-frozen-apiv1-surface) and is retired after the pre-1.0 bridge
-> window. See [the native API contract](architecture/api-contract.md).
+> 1.0. See [the native API contract](architecture/api-contract.md).
 
 This is the client-facing integration guide for downloads v2 / offline sync. It is
 the contract the Apple (`silo-apple`) and Android (`silo-android`) apps should use
@@ -47,6 +45,12 @@ The `/downloads` family serves two lifecycles. The presence of
 | Intended clients                | Web convenience download     | Mobile / TV offline library        |
 
 Mobile clients should always send `X-Silo-Device-Id` and operate on managed entries.
+
+Every profile on the account shares its ephemeral rows, but a profile reaches only
+the rows whose title it may open. When a library restriction or a rating or
+advisory-age limit hides a row's title from the requesting profile, the list
+leaves the row out and the file and delete routes answer `404`. An episode row
+follows its series.
 
 Ephemeral rows are one-shot convenience records: the server prunes them
 automatically about 7 days after their last update. Managed device entries are
@@ -215,8 +219,7 @@ identifier: letters, digits, `.`, `_`, `:` or `-`, with no comma or interior
 whitespace (surrounding whitespace is ignored; each operation keeps its 128-character
 bound). A repeated header line or a comma-joined value is refused with
 `422 validation_failed` at `header.x-silo-device-id` before any operation runs, so a
-joined value can never be stored as a device identity. v1 reads only the first header
-line and is unchanged.
+joined value can never be stored as a device identity.
 
 > **Warning:** any client that sends `X-Silo-Device-Id` on download routes MUST
 > also send `X-Profile-Id`. A device header without a profile is rejected with
@@ -276,6 +279,7 @@ Response:
   "bounded_subscription_sync": true,
   "bulk_quality": true,
   "monitor_quality": true,
+  "batch_version": true,
   "preparation_progress": true,
   "direct_download_links": true,
   "prepare_again": true,
@@ -301,6 +305,7 @@ Response:
 | `preparation_progress`   | Listed preparing entries (§4.2) carry `preparation`: queue position or encode progress. |
 | `bulk_quality`           | Managed series and season batches (§4.1) accept any of `quality_presets`. Without it, or without a device header, send `original`. |
 | `monitor_quality`        | Monitors (§8) store a `quality`. Without it, monitors download originals and the field is absent. |
+| `batch_version`          | Series and season pages (§4.1) accept `media_file_id` as a version template: each episode gets its version closest to that file. Without it, omit `media_file_id` on a batch. |
 | `direct_download_links`  | `POST /api/v2/direct-download/links` (§4.10) mints profile-bound direct-download links. |
 | `prepare_again`          | The server cleans up prepared files after the device finishes; the file route answers `409 prepared_file_expired` for such an entry and `POST /api/v2/downloads/{id}/prepare` (§4.12) prepares it again. |
 | `revoked_removes_local`  | Administrators can revoke entries. A `revoked` entry means: delete the local copy, then delete the entry (§9.3). |
@@ -339,7 +344,7 @@ Request body:
 | --------------- | ------ | ---------------------------------------------------------------------------- |
 | `content_id`    | string | Required. Movie or series content id.                                        |
 | `episode_id`    | string | Episode content id for an episode download.                                  |
-| `media_file_id` | string | Optional explicit media-file/version id, as a canonical positive decimal string. Omitted: the server picks the version (see below). |
+| `media_file_id` | string | Optional explicit media-file/version id, as a canonical positive decimal string. Omitted: the server picks the version (see below). On a series or season page it is a version template (see below; needs `batch_version`). |
 | `quality`       | string | `original` by default, or one of `quality_presets`.                          |
 | `series`        | bool   | `true` means download every episode of `content_id` at `quality`.            |
 | `season_number` | int    | With `series: true`, restrict to one season. `0` is the Specials season; values outside 0 to 9999 are rejected with `422 validation_failed`. Dispatch is on field presence: omit the field entirely for a whole-series download. |
@@ -366,6 +371,20 @@ unless a `quality` preset brings the download under the ceiling.
 
 A client that shows a version to the user should send its `media_file_id`, so
 the download is the file the user saw.
+
+When the capability reports `batch_version`, a series or season page also
+accepts `media_file_id`: an episode file of the same series that serves as a
+version template. Each episode then gets its version closest to that file,
+matched on edition, then resolution, HDR and video codec, with the highest
+resolution breaking ties; watch history is not read. A file that is missing,
+belongs to another title, or sits in a library the profile can't open is
+`404 not_found`. Each episode chooses only among the versions the profile may
+play, as an automatic pick does, so the template's own episode gets the template
+file only when it is within the profile's quality ceiling or no other version
+is. `quality` still applies on top of the chosen source. Like `quality`, the template applies to
+entries the page registers; existing managed entries keep their file unless an
+`expected_entries` guard names them. Without `batch_version`, a series page
+with `media_file_id` is `400 malformed_request`.
 
 Capabilities mirror streaming playback caps:
 
@@ -499,7 +518,7 @@ reused entry that belongs to an earlier batch.
 Creation is **non-retryable**: it has no durable receipt and does not promise atomic
 application of every replacement in a page. After an uncertain response, reconcile
 the registry and make an explicit new request for unresolved work rather than
-replaying, refreshing revision guards, or falling back to v1.
+replaying or refreshing revision guards.
 
 ### 4.2 List downloads
 
@@ -508,7 +527,11 @@ GET /api/v2/downloads
 ```
 
 With `X-Silo-Device-Id`, returns that profile and device's managed entries. Without
-it, returns the account's ephemeral web rows.
+it, returns the account's ephemeral web rows whose title the requesting profile may
+open. Rows the profile may not open take no part in paging: a page holds `limit`
+entries whenever `page.has_more` is true, and a cursor never points at such a row.
+The server reads only a bounded number of rows past them for one page, about 2,000;
+a profile behind a longer run sees the list end there.
 
 Response:
 
@@ -568,7 +591,9 @@ DELETE /api/v2/downloads/{id}
 
 Deletes the managed entry owned by `(account, profile, header device)` or cancels an
 ephemeral transfer, and returns a bodyless `204`. Missing or incorrectly scoped
-entries return `404`. The client is responsible for deleting local files.
+entries return `404`, as does an ephemeral row whose title the requesting profile
+may not open; that row is left unchanged. The client is responsible for deleting
+local files.
 
 Deleting a `revoked` entry is how the app confirms it removed its copy; the server
 records that in the administrator's history.
@@ -1464,8 +1489,10 @@ For a single movie or episode:
 
 For series or season download:
 
-1. `POST /api/v2/downloads` with `series: true`, optional `season_number`, and
-   the chosen `quality` (`original` unless the capability reports `bulk_quality`).
+1. `POST /api/v2/downloads` with `series: true`, optional `season_number`, the
+   chosen `quality` (`original` unless the capability reports `bulk_quality`),
+   and, when the capability reports `batch_version`, the `media_file_id` of the
+   version the user picked.
 2. Persist each returned row under the shared `batch_id`.
 3. Record `skipped` entries for user-visible diagnostics.
 4. Fetch `GET /api/v2/downloads/batches/{batch_id}/manifests` after rows are ready, or
@@ -1714,7 +1741,7 @@ Errors are RFC 9457 problem documents with `Content-Type: application/problem+js
   "type": "https://siloserver.org/docs/api/v2/problems/validation_failed",
   "title": "Validation failed",
   "status": 422,
-  "detail": "The request did not pass validation; see errors.",
+  "detail": "expected value to be one of \"original, 20mbps, 10mbps, 5mbps, 2mbps, 1mbps\"",
   "instance": "urn:silo:request:000000000000000000000026",
   "errors": [
     {
@@ -1878,8 +1905,7 @@ Detail behind sections 3-8, kept for client and server maintainers.
 ### Ordered status events
 
 Database migration initializes existing managed downloading/completed rows from
-their last bridge update time. Subsequent v1 status writes advance this same
-ordering fence using server time. Replacing an entry increments its revision and
+their last update time. Replacing an entry increments its revision and
 clears its prior event timestamp, so a previous version's event cannot cross
 the revision boundary.
 
@@ -1890,10 +1916,16 @@ flow rather than assuming one implies the others.
 ### Canonical decimal string IDs
 
 Decimal string IDs must be canonical positive values: `"7"` is valid, while `"007"`
-and `"+7"` are rejected. These conventions apply to the native v2 surface; the
-bridge retains its existing error contract.
+and `"+7"` are rejected.
 
 ### File and asset delivery
+
+A download is saved under a name built from its title, such as
+`Heat (1995).mkv` or `Severance - S01E02 - Half Loop.mkv`, with the file's
+extension. Only a viewer who may see file names (see
+[File paths and names](catalog-api.md#file-paths-and-names)) gets the file's own
+name. The same name goes into `Content-Disposition` whether the API or a proxy
+serves the bytes.
 
 The `file_delivery` capability advertises the native byte routes.
 `GET` and `HEAD /api/v2/downloads/{id}/file` preserve attachment filenames,
@@ -1930,8 +1962,7 @@ A native manifest has `manifest_version: 3`, a string `media_file_id`,
 millisecond UTC `generated_at`, and authenticated `/api/v2/downloads/...`
 artwork/subtitle references. It preserves the complete metadata, stable provider
 identity, integrity, source or artifact media details, chapters, markers and
-selected audio information. Bridge manifests remain version 2 and carry the same
-`/api/v2/...` asset references.
+selected audio information.
 
 Each encoded native manifest is limited to 1 MiB. A single manifest beyond that
 bound returns 413; no fields or arrays are silently truncated. Batch responses
@@ -1997,9 +2028,7 @@ and storage accounting use that same transaction; a changed monitor returns 409
 and requires a fresh monitor read before a new sync. Repeating a page skips
 already-registered entries and may report zero new registrations. Paused monitors
 never register episodes. Episodes the device deleted while monitored, and finished
-episodes of a `delete_watched` monitor, are skipped (8.2). The bridge retains
-immediate best-effort backfill on create/edit and now discards delayed sync
-snapshots after a monitor change.
+episodes of a `delete_watched` monitor, are skipped (8.2).
 Capabilities `subscription_mutations` and `bounded_subscription_sync` identify
 these operations separately from subscription reads.
 
@@ -2023,13 +2052,14 @@ ephemeral transfer flow and rejects managed revision guards.
 
 For a series or season, send `series:true`, a client-selected `batch_id`, and
 optional `season_number` (zero selects Specials). The `limit` query defaults to
-50 and is capped at 100 examined episodes. Keep batch, content, season, quality
-and device/profile identity unchanged while following `page.next_cursor` through
+50 and is capped at 100 examined episodes. Keep batch, content, season, quality,
+version template and device/profile identity unchanged while following `page.next_cursor` through
 the `cursor` query. Continue through empty `items` when `page.has_more` is true;
 `skipped` reports episodes with no file (`no_file`) and episodes the preset cannot
 reach (`quality_unavailable`). When `bulk_quality` is reported, a managed batch
 accepts any of `quality_presets`; a batch without a device header takes only
-`original`.
+`original`. When `batch_version` is reported, `media_file_id` on a batch names
+the version template described in §4.1.
 
 Batch pages preserve existing managed entries by default, including their chosen
 bytes, completion/terminal status, revision and previous batch membership. An
@@ -2044,7 +2074,7 @@ needed for episodes inserted behind a cursor.
 
 Creation has no durable response receipt and does not promise atomic application
 of all replacements in a page. Do not automatically replay an uncertain request,
-refresh revision guards, or fall back to v1. Reconcile the registry after
+or refresh revision guards. Reconcile the registry after
 uncertainty, then make an explicit new request for unresolved work. This also
 prevents duplicate ephemeral transfers. The download capability exposes
 `bounded_creation` when this full native creation flow is configured.
@@ -2060,35 +2090,6 @@ The service opens the authorized source file and closes it after streaming. Succ
 The proxy producer resolves permission before creating a token for the selected FileTarget. The existing planner, short-lived signed target, preflight and local fallback remain authoritative; callers cannot supply a path or proxy URL. A successful proxy preflight may yield 307. HEAD releases its provisional planner reservation; GET retains the existing reservation lifecycle, with no new completion/cleanup guarantee. Preflight failure releases the reservation and falls back to a freshly authorized local serve. A redirect is not proof of delivery, and an issued proxy token retains its existing expiration/revocation limits.
 
 The bundled DownloadVersionPicker captures account/session and current profile/PIN UI authority, mints a link with those headers, probes the link once with HEAD, and launches browser GET on the identical link URL only while that authority and selection remain current. Closing/replacing the picker or changing authority prevents a late launch. There is no refresh replay, whole-file buffering or proxy URL fabrication. HEAD success and navigation dispatch do not prove that the subsequent browser download completed. No first-party direct-proxy producer was found; exact native method-family inventories remain required for ordinary ratification. Managed downloads, worker routes and Jellyfin retain their separate implementations.
-
----
-
-## 16. Bridge: the frozen `/api/v1` surface
-
-The alpha surface serves the same downloads and offline-sync features under
-`/api/v1` through the pre-1.0 bridge window. It is frozen: no feature work lands
-there. After the bridge window, and once a maintainer decides to retire it (#886),
-the main API listener answers the `/api/v1` business routes with `410 Gone` and the
-`client_upgrade_required` problem code; `/api/v1/health` and `/api/v1/ready` keep
-answering ([API contract](architecture/api-contract.md)).
-
-The differences a migrating client has to handle:
-
-| Area | Bridge (`/api/v1`) | Stable (`/api/v2`) |
-| --- | --- | --- |
-| Capability | `GET /api/v1/downloads/capability` | `GET /api/v2/capabilities/downloads`, plus the bounded-flow flags |
-| Identifiers | Integer `media_file_id` and `file_id` | Canonical positive decimal strings |
-| Collections | `{downloads: [...]}`, `{manifests: [...]}`, `{progress: [...]}` | `{items, page}` with opaque cursors |
-| Creation | `202` with a bare row or `{downloads, skipped}` | `202` with `{items, skipped, page}` and revision guards |
-| Status report | `PATCH` `{status}` answering `204` | `PATCH` `{status, updated_at, revision}` answering `200` with the entry |
-| Manifest | `manifest_version: 2`; asset URLs are `/api/v2/...` because both versions share the manifest builder | `manifest_version: 3`, millisecond `generated_at`, `/api/v2/...` asset URLs, 1 MiB bound |
-| Progress flush | `position`/`duration` seconds, `{results}` | `position_ms`/`duration_ms`, `{items, summary}` |
-| Progress pull | `GET /api/v1/progress?since=` delta | No incremental pull: re-read `GET /api/v2/progress` or take a bootstrap snapshot (§7.2) |
-| Subscriptions | No `ETag`; sync registers across every monitor | `If-Match` on mutations; bounded per-monitor sync |
-| Errors | Flat `{error, message}` envelope | RFC 9457 problem documents (section 12) |
-
-Do not fall back to the bridge after an uncertain v2 request. Reconcile the
-registry on v2 and make an explicit new request.
 
 ## Download bandwidth accounting
 

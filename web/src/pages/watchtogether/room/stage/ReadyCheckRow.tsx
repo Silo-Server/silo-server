@@ -1,9 +1,11 @@
 import { Check } from "lucide-react";
+import { useT } from "@/i18n";
 import type { WatchTogetherRoomSnapshot } from "@/lib/watchTogether";
 import { MemberAvatar } from "../MemberAvatar";
 import { memberKey, memberTints, guestReadyCount } from "../members";
 
 export function ReadyCheckRow({ room }: { room: WatchTogetherRoomSnapshot }) {
+  const t = useT();
   const members = room.members?.filter((member) => !member.is_host) ?? [];
   const tints = memberTints(room.members);
   const { ready, total } = guestReadyCount(room);
@@ -11,9 +13,13 @@ export function ReadyCheckRow({ room }: { room: WatchTogetherRoomSnapshot }) {
   return (
     <div className="surface-panel-subtle flex flex-wrap items-center gap-4 rounded-xl px-4 py-3">
       <div>
-        <div className="text-sm font-semibold">Guest ready check</div>
+        <div className="text-sm font-semibold">{t("web.watchTogether.readyCheck.title")}</div>
         <div className="text-muted-foreground text-xs">
-          {ready} of {total} ready
+          {t("web.watchTogether.presence.ready", {
+            ready: ready,
+            total,
+            total_text: total,
+          })}
         </div>
       </div>
       <ul className="flex flex-wrap items-center gap-3">
@@ -28,10 +34,13 @@ export function ReadyCheckRow({ room }: { room: WatchTogetherRoomSnapshot }) {
               {member.display_name}
             </span>
             {member.lobby_ready ? (
-              <Check className="size-3.5 text-emerald-400" aria-label="ready" />
+              <Check
+                className="size-3.5 text-emerald-400"
+                aria-label={t("web.watchTogether.readyCheck.ready")}
+              />
             ) : (
               <span
-                aria-label="not ready"
+                aria-label={t("watchParty.seat.notReady")}
                 className="inline-block size-3 rounded-full border border-white/25"
               />
             )}

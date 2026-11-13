@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 import { v2 } from "@/api/v2/request";
 import {
   invalidateMediaSurfaceQueries,
@@ -17,6 +18,34 @@ export interface DismissHomeItemVariables {
   progressUpdatedAt?: string;
 }
 
+/** A card's removal, when its row lets it be removed from Home. */
+export function homeDismissalForCard(card: {
+  content_id: string;
+  type: string;
+  series_id?: string;
+  item_source?: string;
+  progress_updated_at?: string;
+}): DismissHomeItemVariables | undefined {
+  if (card.item_source === "next_up") {
+    return card.series_id
+      ? {
+          itemId: card.content_id,
+          surface: "next_up",
+          mediaType: card.type,
+          seriesId: card.series_id,
+        }
+      : undefined;
+  }
+  return card.progress_updated_at
+    ? {
+        itemId: card.content_id,
+        surface: "continue_watching",
+        mediaType: card.type,
+        progressUpdatedAt: card.progress_updated_at,
+      }
+    : undefined;
+}
+
 function dismissalPath({ itemId, surface }: DismissHomeItemVariables) {
   return { surface, item_id: itemId };
 }
@@ -30,12 +59,12 @@ function dismissalBody({ progressUpdatedAt, seriesId, surface }: DismissHomeItem
 function dismissalSuccessLabel({ mediaType, surface }: DismissHomeItemVariables) {
   // Dismissing an episode or series hides the whole show from both rows.
   if (mediaType === "episode" || mediaType === "series") {
-    return "Removed from Continue Watching and Next Up";
+    return t("web.home.dismiss.removedContinueWatchingAndNextUp");
   }
-  if (surface === "next_up") return "Removed from Next Up";
-  if (mediaType === "audiobook") return "Removed from Continue Listening";
-  if (mediaType === "ebook") return "Removed from Continue Reading";
-  return "Removed from Continue Watching";
+  if (surface === "next_up") return t("web.home.dismiss.removedNextUp");
+  if (mediaType === "audiobook") return t("web.home.dismiss.removedContinueListening");
+  if (mediaType === "ebook") return t("web.home.dismiss.removedContinueReading");
+  return t("web.home.dismiss.removedContinueWatching");
 }
 
 export function useDismissHomeItem() {
@@ -45,7 +74,7 @@ export function useDismissHomeItem() {
     mutationFn: (variables: DismissHomeItemVariables) =>
       v2("DELETE /api/v2/home/dismissals/{surface}/{item_id}", { path: dismissalPath(variables) }),
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Failed to undo removal");
+      toast.error(error instanceof Error ? error.message : t("web.home.dismiss.undoFailed"));
     },
     onSuccess: async (_data, variables) => {
       await invalidateMediaSurfaceQueries(queryClient, { itemId: variables.itemId });
@@ -60,7 +89,7 @@ export function useDismissHomeItem() {
         body: dismissalBody(variables),
       }),
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Failed to remove item");
+      toast.error(error instanceof Error ? error.message : t("web.home.dismiss.removeFailed"));
     },
     onSuccess: async (_data, variables) => {
       removeItemFromHomeSectionCaches(queryClient, variables.itemId, variables.surface);
@@ -68,7 +97,7 @@ export function useDismissHomeItem() {
       bumpHomeRefreshSignal(queryClient);
       toast.success(dismissalSuccessLabel(variables), {
         action: {
-          label: "Undo",
+          label: t("web.home.dismiss.undo"),
           onClick: () => undoMutation.mutate(variables),
         },
       });
