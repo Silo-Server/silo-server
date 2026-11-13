@@ -51,22 +51,12 @@ func (h homeHides) nextUpVisible(nextEpisodeID string) bool {
 	return !dismissed
 }
 
-// completedEpisode is a completed progress row of the series.
+// completedEpisode is a completed progress row of the series. at is the
+// store's UpdatedAt, the time Home's Continue Watching compares
+// (catalog.ProgressSnapshots).
 type completedEpisode struct {
 	key int
 	at  time.Time
-}
-
-// progressUpdatedAt is when entry was last written, at the store's full
-// precision when it keeps one. Home compares progress by the full Postgres
-// timestamps, so two writes within one second must keep their order (#2878).
-// ok is false when the store's time doesn't parse.
-func progressUpdatedAt(entry userstore.WatchProgress) (at time.Time, ok bool) {
-	if !entry.UpdatedAtTime.IsZero() {
-		return entry.UpdatedAtTime, true
-	}
-	at, err := time.Parse(time.RFC3339, entry.UpdatedAt)
-	return at, err == nil
 }
 
 // supersededInProgress returns the in-progress episodes Home's Continue
@@ -82,8 +72,8 @@ func supersededInProgress(inProgress []userstore.WatchProgress, completed []comp
 		if !ok {
 			continue
 		}
-		at, ok := progressUpdatedAt(entry)
-		if !ok {
+		at, err := time.Parse(time.RFC3339, entry.UpdatedAt)
+		if err != nil {
 			continue
 		}
 		special := key < firstRegularEpisodeKey

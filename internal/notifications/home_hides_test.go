@@ -251,19 +251,6 @@ func TestSupersededInProgress(t *testing.T) {
 	if got := supersededInProgress(special, []completedEpisode{{key: EpisodeKey(0, 6), at: at(10)}}, keys); len(got) != 1 {
 		t.Fatalf("special after a later special finish: superseded = %v, want s5", got)
 	}
-
-	// Within one second, the store's full-precision time decides: E3 resumed
-	// at .900 after E5 was completed at .100 stays, and E2 resumed at .050
-	// before it is superseded.
-	second := at(30)
-	precise := []userstore.WatchProgress{
-		{MediaItemID: "e2", PositionSeconds: 30, UpdatedAt: second.Format(time.RFC3339), UpdatedAtTime: second.Add(50 * time.Millisecond)},
-		{MediaItemID: "e3", PositionSeconds: 30, UpdatedAt: second.Format(time.RFC3339), UpdatedAtTime: second.Add(900 * time.Millisecond)},
-	}
-	got = supersededInProgress(precise, []completedEpisode{{key: EpisodeKey(1, 5), at: second.Add(100 * time.Millisecond)}}, keys)
-	if _, ok := got["e2"]; !ok || len(got) != 1 {
-		t.Fatalf("within one second: superseded = %v, want only e2", got)
-	}
 }
 
 type allLibrariesScope struct{}
@@ -516,8 +503,8 @@ func TestRecomputeSeriesFollowsHomeRemovalsPostgres(t *testing.T) {
 // finished a special: the next regular episode, not the next special.
 func TestRecomputeSeriesNextUpCardSkipsSpecialAnchorPostgres(t *testing.T) {
 	watchedAt := time.Now().Add(-2 * time.Hour).UTC().Truncate(time.Second)
-	nextUp := recomputeNextUpCandidate(t, "special-anchor", [][2]int{{0, 5}, {0, 6}, {2, 4}, {2, 5}},
-		[]completedAt{{season: 2, number: 4, at: watchedAt}, {season: 0, number: 5, at: watchedAt.Add(time.Minute)}},
+	_, nextUp := recomputeSeriesInterest(t, "special-anchor", [][2]int{{0, 5}, {0, 6}, {2, 4}, {2, 5}},
+		[]progressAt{{season: 2, number: 4, at: watchedAt}, {season: 0, number: 5, at: watchedAt.Add(time.Minute)}},
 		[2]int{2, 5})
 	if nextUp {
 		t.Fatal("next_up_candidate = true; the dismissed S02E05 is Home's Next Up card, so want false")
@@ -529,8 +516,8 @@ func TestRecomputeSeriesNextUpCardSkipsSpecialAnchorPostgres(t *testing.T) {
 // does with the full timestamps (#2878), not on the higher episode.
 func TestRecomputeSeriesNextUpAnchorKeepsSubsecondOrderPostgres(t *testing.T) {
 	second := time.Now().Add(-2 * time.Hour).UTC().Truncate(time.Second)
-	nextUp := recomputeNextUpCandidate(t, "subsecond-anchor", [][2]int{{2, 4}, {2, 5}, {2, 8}, {2, 9}},
-		[]completedAt{
+	_, nextUp := recomputeSeriesInterest(t, "subsecond-anchor", [][2]int{{2, 4}, {2, 5}, {2, 8}, {2, 9}},
+		[]progressAt{
 			{season: 2, number: 8, at: second.Add(100 * time.Millisecond)},
 			{season: 2, number: 4, at: second.Add(900 * time.Millisecond)},
 		},
@@ -540,15 +527,37 @@ func TestRecomputeSeriesNextUpAnchorKeepsSubsecondOrderPostgres(t *testing.T) {
 	}
 }
 
-type completedAt struct {
-	season, number int
-	at             time.Time
+// TestRecomputeSeriesContinueWatchingKeepsWholeSecondSupersedePostgres pins
+// that Continue Watching supersession compares the store's UpdatedAt, whole
+// seconds on Postgres, as catalog.ProgressSnapshots does for Home: a later
+// episode completed in the same second as an earlier episode's resume, even
+// after it, does not hide the resume.
+func TestRecomputeSeriesContinueWatchingKeepsWholeSecondSupersedePostgres(t *testing.T) {
+	second := time.Now().Add(-2 * time.Hour).UTC().Truncate(time.Second)
+	continueWatching, _ := recomputeSeriesInterest(t, "subsecond-resume", [][2]int{{2, 4}, {2, 5}, {2, 8}, {2, 9}},
+		[]progressAt{
+			{season: 2, number: 4, at: second.Add(100 * time.Millisecond), position: 30},
+			{season: 2, number: 8, at: second.Add(900 * time.Millisecond)},
+		},
+		[2]int{2, 9})
+	if !continueWatching {
+		t.Fatal("continue_watching = false; Home compares whole seconds, so S02E08's completion does not supersede S02E04's resume and want true")
+	}
 }
 
-// recomputeNextUpCandidate seeds a series with the given episodes, each with a
-// file, marks the completed ones, dismisses one episode from Next Up, runs
-// RecomputeSeries, and returns the series' next_up_candidate.
-func recomputeNextUpCandidate(t *testing.T, name string, episodes [][2]int, completed []completedAt, dismissed [2]int) bool {
+// progressAt is a seeded progress row: completed when position is zero,
+// otherwise in progress at that position.
+type progressAt struct {
+	season, number int
+	at             time.Time
+	position       float64
+}
+
+// recomputeSeriesInterest seeds a series with the given episodes, each with a
+// file, writes the progress rows, dismisses one episode from Next Up, runs
+// RecomputeSeries, and returns the series' continue_watching and
+// next_up_candidate.
+func recomputeSeriesInterest(t *testing.T, name string, episodes [][2]int, progress []progressAt, dismissed [2]int) (bool, bool) {
 	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -613,10 +622,10 @@ func recomputeNextUpCandidate(t *testing.T, name string, episodes [][2]int, comp
 	if err := store.CreateProfile(ctx, userstore.Profile{ID: profileID, Name: "Viewer"}); err != nil {
 		t.Fatalf("CreateProfile: %v", err)
 	}
-	for _, c := range completed {
+	for _, p := range progress {
 		if _, err := pool.Exec(ctx, `
 			INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at)
-			VALUES ($1, $2, $3, 0, 100, TRUE, $4)`, userID, profileID, episode(c.season, c.number), c.at); err != nil {
+			VALUES ($1, $2, $3, $4, 100, $5, $6)`, userID, profileID, episode(p.season, p.number), p.position, p.position == 0, p.at); err != nil {
 			t.Fatalf("seed progress: %v", err)
 		}
 	}
@@ -631,13 +640,13 @@ func recomputeNextUpCandidate(t *testing.T, name string, episodes [][2]int, comp
 	if err := updater.RecomputeSeries(ctx, userID, profileID, seriesID); err != nil {
 		t.Fatalf("RecomputeSeries: %v", err)
 	}
-	var nextUp bool
+	var continueWatching, nextUp bool
 	if err := pool.QueryRow(ctx, `
-		SELECT next_up_candidate FROM profile_series_interest
+		SELECT continue_watching, next_up_candidate FROM profile_series_interest
 		WHERE profile_id = $1 AND library_id = $2 AND series_id = $3`,
 		profileID, libraryID, seriesID,
-	).Scan(&nextUp); err != nil {
+	).Scan(&continueWatching, &nextUp); err != nil {
 		t.Fatalf("read interest: %v", err)
 	}
-	return nextUp
+	return continueWatching, nextUp
 }
