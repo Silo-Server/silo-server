@@ -267,9 +267,9 @@ function bestEditionAuto(
 /**
  * The file the detail page shows and plays when no version is pinned: Auto
  * within the current edition (picked, remembered, or the edition of the last
- * played file), or the best cut when there is no history. A last played file
- * that is a later part of a presentation in the current edition is resumed
- * as is.
+ * played file), or the best cut when there is no history. While the item has
+ * a resume point, a last played file that is a later part of a presentation in
+ * the current edition is resumed as is; otherwise playback starts at part 1.
  */
 export function selectDefaultPlaybackVariantVersion(
   versions: FileVersion[],
@@ -285,9 +285,10 @@ export function selectDefaultPlaybackVariantVersion(
     editions.find((e) => e.key === userData?.last_edition_key?.trim()) ??
     editions.find((e) => e.allVersions.some((v) => v.file_id === lastFileId));
   if (!edition) return bestEditionAuto(editions, qualityPreference);
-  const laterPart = edition.allVersions.find(
-    (v) => v.file_id === lastFileId && !edition.versions.includes(v),
-  );
+  const resumable = (userData?.position_seconds ?? 0) > 0 && !userData?.played;
+  const laterPart = resumable
+    ? edition.allVersions.find((v) => v.file_id === lastFileId && !edition.versions.includes(v))
+    : undefined;
   return laterPart ?? selectDefaultVersion(edition.versions, qualityPreference);
 }
 

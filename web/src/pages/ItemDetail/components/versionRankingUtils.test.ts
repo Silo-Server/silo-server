@@ -252,9 +252,19 @@ it("groups presentations by edition and recovers history from a later part", () 
   ]);
   // A later part last played resumes as is; Start Over and Download begin at part 1.
   const resumed = selectDefaultPlaybackVariantVersion(files, variants, {
+    played: false,
+    position_seconds: 600,
     last_file_id: 3,
-  } as LeafItemUserData);
+  });
   expect(resumed?.file_id).toBe(3);
+  // Finished on the last part: no resume point, so a rewatch starts at part 1.
+  expect(
+    selectDefaultPlaybackVariantVersion(files, variants, {
+      played: true,
+      position_seconds: 0,
+      last_file_id: 3,
+    })?.file_id,
+  ).toBe(1);
   expect(selectedStartVersion(resumed, variants)?.file_id).toBe(2);
   expect(selectedDownloadVersions(resumed, variants).map((v) => v.file_id)).toEqual([2, 3]);
   // Picking another cut leaves the later part behind.
