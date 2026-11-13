@@ -2,8 +2,10 @@ package playback
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -187,5 +189,106 @@ func TestRestartReleasesReservationOnSpawnFailure(t *testing.T) {
 	}
 	if err := s.CloseProcess(); err != nil {
 		t.Fatalf("CloseProcess: %v", err)
+	}
+}
+
+// hwaccelReinitFailingFFmpeg writes a fake FFmpeg that records each
+// invocation's arguments under logDir and, whenever it is asked to decode on
+// the GPU, exits the way an Intel transcode does when the VAAPI decoder
+// rebuilds its frames context mid-stream. Without -hwaccel it runs until
+// killed.
+func hwaccelReinitFailingFFmpeg(t *testing.T, logDir string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "ffmpeg")
+	script := `#!/bin/sh
+n=1
+while [ -e "` + logDir + `/args-$n" ]; do n=$((n+1)); done
+printf '%s\n' "$@" > "` + logDir + `/args-$n.tmp"
+mv "` + logDir + `/args-$n.tmp" "` + logDir + `/args-$n"
+for arg in "$@"; do
+  if [ "$arg" = "-hwaccel" ]; then
+    cat >&2 <<'EOF'
+Impossible to convert between the formats supported by the filter 'Parsed_sidedata_10' and the filter 'auto_scale_0'
+[vf#0:0 @ 0x5ad071e0c0c0] Error reinitializing filters!
+[vf#0:0 @ 0x5ad071e0c0c0] Task finished with error code: -38 (Function not implemented)
+[vost#0:0/h264_vaapi @ 0x5ad071df5a80] [enc:h264_vaapi @ 0x5ad071df2680] Could not open encoder before EOF
+EOF
+    exit 187
+  fi
+done
+while :; do sleep 0.1; done
+`
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// A transcode whose GPU decode cannot survive a filter graph rebuild fails the
+// same way on every restart, so the restart must move the session to CPU
+// decode instead of launching the same command again.
+func TestRestartDecodesOnCPUAfterHardwareFilterReinitFailure(t *testing.T) {
+	for _, hwAccel := range []string{"qsv", "vaapi"} {
+		t.Run(hwAccel, func(t *testing.T) {
+			resetDeviceLoad(t)
+			fakeDeviceStat(t, qsvPairDevA)
+			logDir := t.TempDir()
+			s, err := StartTranscode(context.Background(), TranscodeOpts{
+				InputPath: "/nonexistent/input.mkv", OutputDir: t.TempDir(), SessionID: "reinit-" + hwAccel,
+				SourceVideoCodec: "hevc", SourceVideoProfile: "Main 10", SourceVideoBitDepth: 10,
+				TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+				FFmpegPath: hwaccelReinitFailingFFmpeg(t, logDir), HWAccel: hwAccel, HWDevice: qsvPairDevA,
+			})
+			if err != nil {
+				t.Fatalf("StartTranscode: %v", err)
+			}
+			t.Cleanup(func() { _ = s.Close() })
+			awaitTranscodeProcessExit(t, s, "initial ffmpeg process")
+			if s.WaitError() == nil {
+				t.Fatal("initial GPU-decode attempt exited cleanly; the fake FFmpeg did not fail it")
+			}
+			first := readFFmpegInvocation(t, logDir, 1)
+			if !strings.Contains(first, "\n-hwaccel\n") {
+				t.Fatalf("initial attempt did not decode on the GPU:\n%s", first)
+			}
+
+			if err := s.Restart(context.Background(), 602, 301); err != nil {
+				t.Fatalf("Restart: %v", err)
+			}
+			second := readFFmpegInvocation(t, logDir, 2)
+			if strings.Contains(second, "\n-hwaccel\n") {
+				t.Fatalf("restart repeated the GPU decode that had just failed:\n%s", second)
+			}
+			// FFmpeg rotates CPU-decoded frames by the display matrix but never
+			// hardware frames, so the replacement must not start rotating. QSV
+			// always passes the flag; only the VAAPI row checks new behavior.
+			if !strings.Contains(second, "\n-noautorotate\n") {
+				t.Fatalf("restart would rotate frames the GPU-decoded segments left unrotated:\n%s", second)
+			}
+			if !s.Opts().SoftwareVideoDecode {
+				t.Fatal("session did not record that it now decodes on the CPU")
+			}
+			if !s.IsRunning() {
+				t.Fatal("restarted transcode is not running")
+			}
+		})
+	}
+}
+
+// readFFmpegInvocation returns the newline-separated arguments of the fake
+// FFmpeg's n-th invocation, waiting for the process to record them.
+func readFFmpegInvocation(t *testing.T, logDir string, n int) string {
+	t.Helper()
+	path := filepath.Join(logDir, fmt.Sprintf("args-%d", n))
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			return "\n" + string(data)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("fake FFmpeg invocation %d was never recorded: %v", n, err)
+		}
+		time.Sleep(time.Millisecond) //nolint:forbidigo // Polls observable state: the fake FFmpeg records its arguments from its own process.
 	}
 }
