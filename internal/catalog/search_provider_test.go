@@ -322,18 +322,22 @@ func TestMeilisearchMixedSemanticSearchBuildsFederation(t *testing.T) {
 	if federated.Federation.Offset != 100 || federated.Federation.Limit != 25 {
 		t.Fatalf("federation pagination = %#v", federated.Federation)
 	}
-	if len(federated.Queries) != 2 {
+	if len(federated.Queries) != 3 {
 		t.Fatalf("federated queries = %#v", federated.Queries)
 	}
-	media, episode := federated.Queries[0], federated.Queries[1]
-	if media.Hybrid == nil || len(media.Vector) == 0 || !strings.Contains(media.Filter, `type != "episode"`) {
-		t.Fatalf("media federation branch = %#v", media)
+	media, meaning, episode := federated.Queries[0], federated.Queries[1], federated.Queries[2]
+	if media.Hybrid != nil || media.Vector != nil || media.Query != base.Query || !strings.Contains(media.Filter, `type != "episode"`) {
+		t.Fatalf("media keyword branch = %#v", media)
 	}
-	if episode.Hybrid != nil || episode.Vector != nil || !strings.Contains(episode.Filter, `type = "episode"`) {
+	if meaning.Hybrid == nil || meaning.Hybrid.SemanticRatio != 1 || len(meaning.Vector) == 0 ||
+		meaning.RankingScoreThreshold == 0 || meaning.Filter != media.Filter {
+		t.Fatalf("media meaning branch = %#v", meaning)
+	}
+	if episode.Hybrid != nil || episode.Vector != nil || episode.RankingScoreThreshold != 0 || !strings.Contains(episode.Filter, `type = "episode"`) {
 		t.Fatalf("episode federation branch = %#v", episode)
 	}
-	if media.FederationOptions.Weight != 1 || episode.FederationOptions.Weight != 1 {
-		t.Fatalf("federation weights = %v/%v", media.FederationOptions.Weight, episode.FederationOptions.Weight)
+	if media.FederationOptions.Weight != 0.6 || meaning.FederationOptions.Weight != 0.4 || episode.FederationOptions.Weight != 0.6 {
+		t.Fatalf("federation weights = %v/%v/%v", media.FederationOptions.Weight, meaning.FederationOptions.Weight, episode.FederationOptions.Weight)
 	}
 }
 
