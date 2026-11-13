@@ -222,8 +222,8 @@ func guessedContainerDemuxer(format ffprobeFormat, filePath string) string {
 // A file that does not read may still be healthy under the wrong extension:
 // a bare stream at a high bitrate scores low because FFmpeg's default
 // look-ahead holds only a few of its frames. So ffprobe detects the format
-// once more over probeWideFormatBytes, and a confident reading there keeps
-// the guess as well. Otherwise the file fails with the exit error of the
+// once more over probeWideFormatBytes, and a confident reading of the same
+// format there keeps the guess as well. Otherwise the file fails with the exit error of the
 // demuxer read, which IsProbeRejection classifies like any other refusal.
 // When the wider detection itself fails, its error is returned instead, so a
 // timeout or a storage failure there stays retryable.
@@ -243,7 +243,7 @@ func confirmContainer(ctx context.Context, ffprobePath, filePath, demuxer string
 	if err := json.Unmarshal(output, &wide); err != nil {
 		return fmt.Errorf("ffprobe JSON parse failed for %s: %w", filePath, err)
 	}
-	if wide.Format.ProbeScore > probeScoreRetry {
+	if wide.Format.ProbeScore > probeScoreRetry && wide.Format.FormatName == guess.FormatName {
 		return nil
 	}
 	return fmt.Errorf("ffprobe only guessed that %s is %s (probe score %d) and could not read it as %s: %w",

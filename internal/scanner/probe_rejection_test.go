@@ -73,34 +73,41 @@ func TestIsProbeRejectionSeparatesRefusedFilesFromProbeTrouble(t *testing.T) {
 		score      int
 		forcedExit int
 		wideScore  int
+		wideFormat string
 		rejection  bool
 		failure    bool
 	}{
-		{"guess the container demuxer refuses", 25, 1, 25, true, true},
-		{"guess the container demuxer reads", 5, 0, 5, false, false},
-		{"guess a wider read is sure of", 25, 1, 26, false, false},
+		{"guess the container demuxer refuses", 25, 1, 25, "m4v", true, true},
+		{"guess the container demuxer reads", 5, 0, 5, "m4v", false, false},
+		{"guess a wider read is sure of", 25, 1, 26, "m4v", false, false},
+		// A wider read that finds another format does not confirm the guess.
+		{"guess a wider read contradicts", 25, 1, 26, "mp3", true, true},
 		// A wider read that storage fails says nothing about the file.
-		{"guess a wider read cannot finish", 25, 1, -1, false, true},
-		{"confident reading", 26, 1, 26, false, false},
+		{"guess a wider read cannot finish", 25, 1, -1, "m4v", false, true},
+		{"confident reading", 26, 1, 26, "m4v", false, false},
 	} {
 		guess := filepath.Join(t.TempDir(), "ffprobe")
 		writeFakeTool(t, guess, fmt.Sprintf(`#!/bin/sh
 score=%d
+format=m4v
 for arg; do
 	case "$arg" in
 	-f)
 		echo 'Invalid data found when processing input' >&2
 		exit %d
 		;;
-	-formatprobesize) score=%d ;;
+	-formatprobesize)
+		score=%d
+		format=%s
+		;;
 	esac
 done
 if [ "$score" -lt 0 ]; then
 	echo 'Movie.avi: Input/output error' >&2
 	exit 1
 fi
-printf '%%s\n' '{"format":{"format_name":"m4v","probe_score":'"$score"'},"streams":[{"codec_type":"video","codec_name":"mpeg4","width":640,"height":360}]}'
-`, tc.score, tc.forcedExit, tc.wideScore))
+printf '%%s\n' '{"format":{"format_name":"'"$format"'","probe_score":'"$score"'},"streams":[{"codec_type":"video","codec_name":"mpeg4","width":640,"height":360}]}'
+`, tc.score, tc.forcedExit, tc.wideScore, tc.wideFormat))
 		probe, err := ProbeFile(ctx, guess, avi)
 		if got := err != nil && IsProbeRejection(ctx, avi, err); got != tc.rejection || (err != nil) != tc.failure {
 			t.Fatalf("%s: err = %v, rejection = %v, want rejection %v and failure %v", tc.name, err, got, tc.rejection, tc.failure)
