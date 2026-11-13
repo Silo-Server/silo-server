@@ -59,7 +59,7 @@ func TestAdminSectionPreviewPresignsPostersLikeLiveRows(t *testing.T) {
 	live := h.buildSections(t.Context(), []sections.SectionWithItems{{
 		ResolvedSection: sections.ResolvedSection{ID: "row", SectionType: sections.SectionRecentlyAdded},
 		Items:           []*models.MediaItem{stored},
-	}}, nil, catalog.AccessFilter{}, imagesize.Request{})
+	}}, nil, catalog.AccessFilter{}, imagesize.Request{}, false)
 	if got := live.Sections[0].Items[0].PosterURL; got != result.PosterURLs["stored"] {
 		t.Fatalf("live row poster %q, preview poster %q", got, result.PosterURLs["stored"])
 	}

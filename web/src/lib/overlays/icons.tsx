@@ -3,6 +3,7 @@ import {
   Award,
   Building2,
   Calendar,
+  Check,
   Clock,
   Download,
   Film,
@@ -46,6 +47,7 @@ const LUCIDE_ICONS: Partial<Record<OverlayIconId, LucideIcon>> = {
   download: Download,
   hourglass: Hourglass,
   alert: TriangleAlert,
+  check: Check,
 };
 
 // The marks' text: format and brand names, the same in every language.

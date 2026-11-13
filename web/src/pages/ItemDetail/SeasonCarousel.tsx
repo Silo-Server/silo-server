@@ -6,8 +6,11 @@ import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
 import { buildItemHref } from "@/lib/mediaNavigation";
 import { formatSeasonMeta, formatSeasonProgress, getSeasonDisplayTitle } from "./itemDetailLayout";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
+import CardOverlays from "@/components/overlays/CardOverlays";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
+import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import { useAppLanguage, useT } from "@/i18n";
+import { overlayDataFromSeason } from "@/lib/overlays";
 
 interface SeasonCarouselProps {
   seasons: Season[];
@@ -19,6 +22,7 @@ export default function SeasonCarousel({ seasons, libraryId }: SeasonCarouselPro
   useAppLanguage();
   const sorted = seasons.slice().sort((a, b) => a.season_number - b.season_number);
   const prefetchSeason = usePrefetchCatalogSeason(libraryId);
+  const { prefs: overlayPrefs } = useOverlayPrefs();
 
   if (sorted.length === 0) {
     return null;
@@ -67,9 +71,17 @@ export default function SeasonCarousel({ seasons, libraryId }: SeasonCarouselPro
                     </div>
                   )}
 
+                  {overlayPrefs && (
+                    <CardOverlays
+                      data={overlayDataFromSeason(season)}
+                      prefs={overlayPrefs}
+                      hasProgressBar={isCompleted || hasProgress}
+                    />
+                  )}
+
                   {/* Completed checkmark */}
                   {isCompleted && (
-                    <div className="absolute end-2.5 top-2.5 rounded-full bg-green-500/90 p-1 text-white shadow-sm">
+                    <div className="absolute end-2.5 top-2.5 z-20 rounded-full bg-green-500/90 p-1 text-white shadow-sm">
                       <Check className="size-3.5" strokeWidth={3} />
                     </div>
                   )}

@@ -1033,7 +1033,7 @@ var cardOverlayIDs = map[string]bool{
 	"rating_rt_audience": true, "content_rating": true, "advisory_age": true,
 	"request_status": true, "year": true, "runtime": true,
 	"original_language": true, "studio": true, "network": true,
-	"show_status": true, "imdb_top_250": true, "rt_certified_fresh": true,
+	"show_status": true, "availability": true, "imdb_top_250": true, "rt_certified_fresh": true,
 }
 
 // cardOverlayPositions and cardOverlayAccent mirror the per-item constraints in
