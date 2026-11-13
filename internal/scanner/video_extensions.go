@@ -24,6 +24,32 @@ var videoExtensions = extensionSet(
 	".ogv .ogm",                     // Ogg video and legacy Ogg Media
 )
 
+// containerDemuxers names the ffprobe demuxer of the container each video
+// extension stands for. ProbeFile reads a file with it when ffprobe only
+// guessed another format (see confirmContainer).
+//
+// .m4v, .mpg and .mpeg have no entry: such a file may be a bare MPEG-4 or
+// MPEG video stream, or an MPEG-TS, instead of the MP4 or MPEG-PS the
+// extension suggests, and the demuxers for bare streams read any bytes at
+// all, so no single demuxer settles what the file is.
+var containerDemuxers = func() map[string]string {
+	demuxers := make(map[string]string)
+	for demuxer, extensions := range map[string]string{
+		demuxerMatroska: ".mkv .webm",
+		demuxerMOV:      ".mp4 .mov .3gp .3g2 .f4v",
+		demuxerAVI:      ".avi .divx",
+		demuxerMPEGTS:   ".ts .m2ts .mts",
+		demuxerASF:      ".wmv .asf",
+		demuxerFLV:      ".flv",
+		demuxerOgg:      ".ogv .ogm",
+	} {
+		for _, ext := range strings.Fields(extensions) {
+			demuxers[ext] = demuxer
+		}
+	}
+	return demuxers
+}()
+
 // extensionSet builds a set from groups of space-separated extensions.
 func extensionSet(groups ...string) map[string]bool {
 	set := make(map[string]bool)
