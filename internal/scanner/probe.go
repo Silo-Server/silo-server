@@ -41,6 +41,7 @@ type ffprobeFormat struct {
 	Filename       string            `json:"filename"`
 	FormatName     string            `json:"format_name"`
 	FormatLongName string            `json:"format_long_name"`
+	ProbeScore     int               `json:"probe_score"`
 	StartTime      string            `json:"start_time"`
 	Duration       string            `json:"duration"`
 	Size           string            `json:"size"`
@@ -155,6 +156,11 @@ func probeMediaFile(ctx context.Context, ffprobePath string, filePath string, li
 	if err := json.Unmarshal(output, &raw); err != nil {
 		return nil, fmt.Errorf("ffprobe JSON parse failed for %s: %w", filePath, err)
 	}
+	if demuxer := guessedContainerDemuxer(raw.Format, filePath); demuxer != "" {
+		if err := confirmContainer(ctx, ffprobePath, filePath, demuxer, raw.Format, limits); err != nil {
+			return nil, err
+		}
+	}
 	if readFrameSideData {
 		if err := applyPrimaryVideoFrameSideData(ctx, ffprobePath, filePath, raw.Streams); err != nil {
 			return nil, err
@@ -187,11 +193,62 @@ func probeMediaFile(ctx context.Context, ffprobePath string, filePath string, li
 	return probe, nil
 }
 
+// probeScoreRetry is FFmpeg's AVPROBE_SCORE_RETRY. A format detected at or
+// below it is a guess: FFmpeg warns "misdetection possible" when it settles
+// on one.
+const probeScoreRetry = 25
+
+// guessedContainerDemuxer returns the demuxer filePath's extension names when
+// ffprobe only guessed the format and guessed a different one, such as an AVI
+// with a damaged header read as a bare MPEG-4 stream at score 5. It returns
+// "" for a confident reading, a guess the extension agrees with, and an
+// extension with no entry in containerDemuxers.
+func guessedContainerDemuxer(format ffprobeFormat, filePath string) string {
+	if format.ProbeScore <= 0 || format.ProbeScore > probeScoreRetry {
+		return ""
+	}
+	demuxer := containerDemuxers[strings.ToLower(filepath.Ext(filePath))]
+	if demuxer == "" || slices.Contains(strings.Split(format.FormatName, ","), demuxer) {
+		return ""
+	}
+	return demuxer
+}
+
+// confirmContainer decides whether a guessed format stands by asking ffprobe
+// to read filePath with demuxer, the one its extension names. A file that
+// reads is healthy and keeps the guess: a stream of a few frames scores low
+// too, and FFmpeg detects the same format again when the file is played. A
+// file that does not read fails with ffprobe's own exit error, which
+// IsProbeRejection classifies like any other refusal.
+func confirmContainer(ctx context.Context, ffprobePath, filePath, demuxer string, guess ffprobeFormat, limits probeLimits) error {
+	runCtx, cancel := context.WithTimeout(ctx, limits.probe)
+	defer cancel()
+	cmd := fspath.CommandContext(runCtx, ffprobePath,
+		"-v", "error",
+		"-f", demuxer,
+		"-show_entries", "format=format_name",
+		filePath,
+	)
+	cmd.WaitDelay = limits.waitDelay
+	_, err := cmd.Output()
+	processmetrics.Record(processmetrics.Probe, cmd.ProcessState, err, runCtx.Err())
+	if err == nil {
+		return nil
+	}
+	if probeTimedOut(ctx, runCtx) {
+		return fmt.Errorf("%w: no result for %s within %s", errProbeTimeout, filePath, limits.probe)
+	}
+	return fmt.Errorf("ffprobe only guessed that %s is %s (probe score %d) and could not read it as %s: %w",
+		filePath, guess.FormatName, guess.ProbeScore, demuxer, err)
+}
+
 // IsProbeRejection reports whether err, returned by ProbeFile for filePath
 // under ctx, means ffprobe ran to completion and refused the file's content:
 // a non-zero exit status while the caller's context was still live, for a file
 // this process can read, with no sign that ffprobe itself hit a read failure.
-// Zero-byte, corrupt, and truncated media end this way.
+// Zero-byte, corrupt, and truncated media end this way, and so does a file
+// whose format ffprobe only guessed and whose own container demuxer then
+// refused it (confirmContainer).
 //
 // ffprobe exits the same way when it cannot read the file (permission denied,
 // an I/O error or timeout on a network mount, a stale handle, a file that
@@ -1294,6 +1351,18 @@ const (
 	containerMPEGTS = "ts"
 	containerBDAV   = "m2ts"
 	containerOgg    = "ogg"
+)
+
+// Names ffprobe gives its container demuxers, as they appear in format_name
+// and as its -f option takes them.
+const (
+	demuxerMatroska = "matroska"
+	demuxerMOV      = "mov"
+	demuxerAVI      = "avi"
+	demuxerMPEGTS   = "mpegts"
+	demuxerASF      = "asf"
+	demuxerFLV      = "flv"
+	demuxerOgg      = "ogg"
 )
 
 // detectContainer maps ffprobe format names to common container names.
