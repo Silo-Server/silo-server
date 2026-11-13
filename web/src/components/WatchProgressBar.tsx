@@ -21,6 +21,8 @@ interface WatchProgressBarProps extends Omit<HTMLAttributes<HTMLDivElement>, "ch
  *
  * It sits at the card's bottom edge, inset like the other card overlays, or
  * lower with `belowCornerLabel`.
+ * It stacks above the card overlay layer (also z-10, earlier in the card) so
+ * a band preset's bottom scrim never darkens it.
  */
 export default function WatchProgressBar({
   percent,
@@ -35,7 +37,7 @@ export default function WatchProgressBar({
     <div
       data-slot="watch-progress"
       className={cn(
-        "pointer-events-none absolute inset-x-2.5 h-[3px] rounded-full bg-black/55",
+        "pointer-events-none absolute inset-x-2.5 z-10 h-[3px] rounded-full bg-black/55",
         belowCornerLabel ? "bottom-1" : "bottom-2",
         "shadow-[0_0_0_1px_rgba(0,0,0,0.35),0_1px_3px_rgba(0,0,0,0.45)]",
         className,
