@@ -492,7 +492,12 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 			if entry.Completed {
 				markCompleted(episodeID)
 				if key, ok := episodeKeys[episodeID]; ok {
-					at, _ := time.Parse(time.RFC3339, entry.UpdatedAt)
+					// Home orders completions by the full timestamp, so two
+					// within one second must keep their order here (#2878).
+					at := entry.UpdatedAtTime
+					if at.IsZero() {
+						at, _ = time.Parse(time.RFC3339, entry.UpdatedAt)
+					}
 					completedEpisodes = append(completedEpisodes, completedEpisode{key: key, at: at})
 					if !hasAnchor || completedLater(at, key, anchorAt, anchorKey) {
 						anchorKey, anchorAt, hasAnchor = key, at, true

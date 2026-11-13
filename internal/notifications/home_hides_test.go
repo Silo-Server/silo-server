@@ -502,6 +502,41 @@ func TestRecomputeSeriesFollowsHomeRemovalsPostgres(t *testing.T) {
 // Up card notifications check is the one Home shows when the profile last
 // finished a special: the next regular episode, not the next special.
 func TestRecomputeSeriesNextUpCardSkipsSpecialAnchorPostgres(t *testing.T) {
+	watchedAt := time.Now().Add(-2 * time.Hour).UTC().Truncate(time.Second)
+	nextUp := recomputeNextUpCandidate(t, "special-anchor", [][2]int{{0, 5}, {0, 6}, {2, 4}, {2, 5}},
+		[]completedAt{{season: 2, number: 4, at: watchedAt}, {season: 0, number: 5, at: watchedAt.Add(time.Minute)}},
+		[2]int{2, 5})
+	if nextUp {
+		t.Fatal("next_up_candidate = true; the dismissed S02E05 is Home's Next Up card, so want false")
+	}
+}
+
+// TestRecomputeSeriesNextUpAnchorKeepsSubsecondOrderPostgres pins that two
+// completions within one second anchor on the later one, as Home's Next Up
+// does with the full timestamps (#2878), not on the higher episode.
+func TestRecomputeSeriesNextUpAnchorKeepsSubsecondOrderPostgres(t *testing.T) {
+	second := time.Now().Add(-2 * time.Hour).UTC().Truncate(time.Second)
+	nextUp := recomputeNextUpCandidate(t, "subsecond-anchor", [][2]int{{2, 4}, {2, 5}, {2, 8}, {2, 9}},
+		[]completedAt{
+			{season: 2, number: 8, at: second.Add(100 * time.Millisecond)},
+			{season: 2, number: 4, at: second.Add(900 * time.Millisecond)},
+		},
+		[2]int{2, 5})
+	if nextUp {
+		t.Fatal("next_up_candidate = true; S02E04 was completed last, so the dismissed S02E05 is Home's Next Up card and want false")
+	}
+}
+
+type completedAt struct {
+	season, number int
+	at             time.Time
+}
+
+// recomputeNextUpCandidate seeds a series with the given episodes, each with a
+// file, marks the completed ones, dismisses one episode from Next Up, runs
+// RecomputeSeries, and returns the series' next_up_candidate.
+func recomputeNextUpCandidate(t *testing.T, name string, episodes [][2]int, completed []completedAt, dismissed [2]int) bool {
+	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
@@ -514,10 +549,10 @@ func TestRecomputeSeriesNextUpCardSkipsSpecialAnchorPostgres(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	nonce := time.Now().UnixNano()
-	prefix := fmt.Sprintf("special-anchor-%d", nonce)
+	prefix := fmt.Sprintf("%s-%d", name, nonce)
 	libraryID := 900000 + int(nonce%90000)
 	seriesID := prefix + "-series"
-	const profileID = "profile-special-anchor"
+	profileID := "profile-" + name
 	var userID int
 	if err := pool.QueryRow(ctx,
 		`INSERT INTO users (username, email, password_hash, role) VALUES ($1, $2, '', 'user') RETURNING id`,
@@ -541,15 +576,20 @@ func TestRecomputeSeriesNextUpCardSkipsSpecialAnchorPostgres(t *testing.T) {
 		{`INSERT INTO media_folders (id, type, name) VALUES ($1, 'series', $2)`, []any{libraryID, prefix}},
 		{`INSERT INTO media_items (content_id, type, title, genres) VALUES ($1, 'series', 'Series', '{}')`, []any{seriesID}},
 		{`INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, []any{seriesID, libraryID}},
-		{`INSERT INTO episodes (content_id, series_id, season_number, episode_number, title)
-			VALUES ($1, $5, 0, 5, 'S00E05'), ($2, $5, 0, 6, 'S00E06'), ($3, $5, 2, 4, 'S02E04'), ($4, $5, 2, 5, 'S02E05')`,
-			[]any{episode(0, 5), episode(0, 6), episode(2, 4), episode(2, 5), seriesID}},
-		{`INSERT INTO media_files (media_folder_id, file_path, episode_id)
-			SELECT $1, '/' || content_id, content_id FROM episodes WHERE series_id = $2`, []any{libraryID, seriesID}},
 	} {
 		if _, err := pool.Exec(ctx, stmt.sql, stmt.args...); err != nil {
 			t.Fatalf("seed catalog: %v", err)
 		}
+	}
+	for _, e := range episodes {
+		if _, err := pool.Exec(ctx, `INSERT INTO episodes (content_id, series_id, season_number, episode_number, title) VALUES ($1, $2, $3, $4, $1)`,
+			episode(e[0], e[1]), seriesID, e[0], e[1]); err != nil {
+			t.Fatalf("seed episode: %v", err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO media_files (media_folder_id, file_path, episode_id)
+		SELECT $1, '/' || content_id, content_id FROM episodes WHERE series_id = $2`, libraryID, seriesID); err != nil {
+		t.Fatalf("seed files: %v", err)
 	}
 
 	provider := pgstore.NewPostgresProvider(pool)
@@ -560,19 +600,18 @@ func TestRecomputeSeriesNextUpCardSkipsSpecialAnchorPostgres(t *testing.T) {
 	if err := store.CreateProfile(ctx, userstore.Profile{ID: profileID, Name: "Viewer"}); err != nil {
 		t.Fatalf("CreateProfile: %v", err)
 	}
-	watchedAt := time.Now().Add(-2 * time.Hour).UTC().Truncate(time.Second)
-	for i, id := range []string{episode(2, 4), episode(0, 5)} {
+	for _, c := range completed {
 		if _, err := pool.Exec(ctx, `
 			INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at)
-			VALUES ($1, $2, $3, 0, 100, TRUE, $4)`, userID, profileID, id, watchedAt.Add(time.Duration(i)*time.Minute)); err != nil {
+			VALUES ($1, $2, $3, 0, 100, TRUE, $4)`, userID, profileID, episode(c.season, c.number), c.at); err != nil {
 			t.Fatalf("seed progress: %v", err)
 		}
 	}
 	if err := store.UpsertHomeDismissal(ctx, userstore.HomeItemDismissal{
-		ProfileID: profileID, Surface: userstore.HomeSurfaceNextUp, MediaItemID: episode(2, 5),
+		ProfileID: profileID, Surface: userstore.HomeSurfaceNextUp, MediaItemID: episode(dismissed[0], dismissed[1]),
 		SeriesID: &seriesID, DismissedAt: time.Now().UTC().Format(time.RFC3339),
 	}); err != nil {
-		t.Fatalf("dismiss S02E05 from Next Up: %v", err)
+		t.Fatalf("dismiss from Next Up: %v", err)
 	}
 
 	updater := NewInterestUpdater(pool, NewInterestRepository(pool), provider, allLibrariesScope{})
@@ -587,7 +626,5 @@ func TestRecomputeSeriesNextUpCardSkipsSpecialAnchorPostgres(t *testing.T) {
 	).Scan(&nextUp); err != nil {
 		t.Fatalf("read interest: %v", err)
 	}
-	if nextUp {
-		t.Fatal("next_up_candidate = true; the dismissed S02E05 is Home's Next Up card, so want false")
-	}
+	return nextUp
 }
