@@ -3238,7 +3238,11 @@ describe("usePlaybackSession announced subtitle tracks", () => {
   // added at 1, and the viewer picks es at 1 from the stale menu. The
   // conflicting announcement shows the pick's ordinal is stale: the plan is
   // refetched first, and the pick then goes out at es's new ordinal.
-  it("replays a queued stored-subtitle pick at its ordinal after a refetch", async () => {
+  it.each([
+    { name: "replays a queued stored-subtitle pick at its ordinal after a refetch", next: "none" },
+    { name: "replays the pick over a seek made while the refetch runs", next: "seek" },
+    { name: "keeps a newer pick made while the refetch runs", next: "pick" },
+  ] as const)("$name", async ({ next }) => {
     const initial = [stored(0, 1, "en"), stored(1, 2, "es")];
     const plan = fixturePlanV3({ subtitle: { mode: "render", inventory: initial } });
     const refreshed = fixturePlanV3({
@@ -3250,13 +3254,17 @@ describe("usePlaybackSession announced subtitle tracks", () => {
     const qualityReplanResponse = new Promise<Response>((resolve) => {
       resolveQualityReplan = resolve;
     });
+    let resolveRefresh: ((response: Response) => void) | undefined;
+    const refreshResponse = new Promise<Response>((resolve) => {
+      resolveRefresh = resolve;
+    });
     const replanBodies: Array<Record<string, unknown>> = [];
     vi.stubGlobal(
       "fetch",
       sessionFetch((init) => {
         replanBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
         if (replanBodies.length === 1) return qualityReplanResponse;
-        if (replanBodies.length === 2) return jsonResponse(playable("session-1", refreshed));
+        if (replanBodies.length === 2) return refreshResponse;
         return new Promise<Response>(() => {});
       }, plan),
     );
@@ -3271,14 +3279,25 @@ describe("usePlaybackSession announced subtitle tracks", () => {
       resolveQualityReplan?.(jsonResponse(playable("session-1", plan)));
       await qualityReplanResponse;
     });
-
-    await waitFor(() => expect(replanBodies).toHaveLength(3));
+    await waitFor(() => expect(replanBodies).toHaveLength(2));
     expect(replanBodies[1]).toMatchObject({ operation: "track_change" });
     expect(replanBodies[1]?.selected_tracks).not.toHaveProperty("subtitle.index", 1);
+    // A pick made now names an ordinal in the refetched inventory.
+    act(() => {
+      if (next === "pick") result.current.changeSubtitleTrack(1, 32);
+      if (next === "seek") void result.current.reanchorSeek(200);
+    });
+    await act(async () => {
+      resolveRefresh?.(jsonResponse(playable("session-1", refreshed)));
+      await refreshResponse;
+    });
+
+    await waitFor(() => expect(replanBodies).toHaveLength(3));
     expect(replanBodies[2]).toMatchObject({
       operation: "track_change",
-      selected_tracks: { subtitle: { index: 0 } },
+      selected_tracks: { subtitle: { index: next === "pick" ? 1 : 0 } },
     });
+    if (next === "seek") expect(replanBodies[2]).toMatchObject({ position_seconds: 200 });
     unmount();
   });
 });

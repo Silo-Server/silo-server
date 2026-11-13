@@ -2056,6 +2056,17 @@ export function usePlaybackSession(
             false,
             false,
             () => {
+              // A choice made while the refetch ran is newer than this pick; a
+              // queued seek or refresh is not, and the pick replaces it.
+              const queued = pendingReplanRef.current?.options;
+              if (
+                queued?.operation === "quality_change" ||
+                queued?.operation === "output_change" ||
+                (queued?.operation === "track_change" &&
+                  (queued.subtitle !== undefined || queued.audio !== undefined))
+              ) {
+                return;
+              }
               const picked = planRef.current?.subtitle.inventory.find(
                 (item) => item.stored_subtitle_id === pickedStoredId,
               );
@@ -2063,7 +2074,8 @@ export function usePlaybackSession(
               void replan(
                 {
                   ...pick,
-                  positionSeconds: playbackPositionRef.current,
+                  // A queued seek is replaced, so its target goes out with the pick.
+                  positionSeconds: queued?.positionSeconds ?? playbackPositionRef.current,
                   subtitle: { id: "", index: picked.combined_index },
                 },
                 pending.retireSessionOnRefusal,
