@@ -13,7 +13,8 @@ export interface PluginStatus {
   title?: string;
   /**
    * The plugin needs an admin: it is failing, restarting, missing required
-   * settings, or its last automatic update was refused.
+   * settings, its last automatic update was refused, or its release signature
+   * failed the check.
    */
   attention: boolean;
   /** Sort rank: problems first (most severe first), healthy plugins next, off plugins last. */
@@ -49,7 +50,7 @@ export function pluginStatus(installation: PluginInstallation): PluginStatus {
       rank: 2,
     };
   }
-  if (installation.update_failure) {
+  if (installation.update_failure || installation.signature.state === "invalid") {
     return { ...indicator, textClass: "", attention: true, rank: 2 };
   }
   return { ...indicator, textClass: "", attention: false, rank: 3 };

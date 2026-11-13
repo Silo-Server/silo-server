@@ -3623,6 +3623,78 @@
       "value": "Gruppenaktion fehlgeschlagen."
     }
   ],
+  "web.admin.access.groups.addUsers.addSelected": [
+    {
+      "type": 0,
+      "value": "Ausgewählte hinzufügen"
+    }
+  ],
+  "web.admin.access.groups.addUsers.addSelectedCount": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " ausgewählte hinzufügen"
+    }
+  ],
+  "web.admin.access.groups.addUsers.description": [
+    {
+      "type": 0,
+      "value": "Normale Konten außerhalb dieser Gruppe. Admin-Konten können keiner Gruppe beitreten."
+    }
+  ],
+  "web.admin.access.groups.addUsers.noGroup": [
+    {
+      "type": 0,
+      "value": "Keine Gruppe"
+    }
+  ],
+  "web.admin.access.groups.addUsers.noMatches": [
+    {
+      "type": 0,
+      "value": "Keine Benutzer entsprechen deiner Suche."
+    }
+  ],
+  "web.admin.access.groups.addUsers.none": [
+    {
+      "type": 0,
+      "value": "Alle normalen Konten sind bereits hier."
+    }
+  ],
+  "web.admin.access.groups.addUsers.search": [
+    {
+      "type": 0,
+      "value": "Benutzer durchsuchen"
+    }
+  ],
+  "web.admin.access.groups.addUsers.searchPlaceholder": [
+    {
+      "type": 0,
+      "value": "Nach Benutzername oder E-Mail suchen"
+    }
+  ],
+  "web.admin.access.groups.addUsers.title": [
+    {
+      "type": 0,
+      "value": "Benutzer zu "
+    },
+    {
+      "type": 1,
+      "value": "group"
+    },
+    {
+      "type": 0,
+      "value": " hinzufügen"
+    }
+  ],
+  "web.admin.access.groups.addUsers.unknownGroup": [
+    {
+      "type": 0,
+      "value": "Unbekannte Gruppe"
+    }
+  ],
   "web.admin.access.groups.allGroups": [
     {
       "type": 0,
@@ -3773,6 +3845,142 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.access.groups.changes.allPermissions": [
+    {
+      "type": 0,
+      "value": "Alle"
+    }
+  ],
+  "web.admin.access.groups.changes.allowed": [
+    {
+      "type": 0,
+      "value": "Erlaubt"
+    }
+  ],
+  "web.admin.access.groups.changes.audioTranscoding": [
+    {
+      "type": 0,
+      "value": "Audio-Transkodierung"
+    }
+  ],
+  "web.admin.access.groups.changes.concurrentStreams": [
+    {
+      "type": 0,
+      "value": "Gleichzeitige Streams"
+    }
+  ],
+  "web.admin.access.groups.changes.concurrentTranscodes": [
+    {
+      "type": 0,
+      "value": "Gleichzeitige Transkodierungen"
+    }
+  ],
+  "web.admin.access.groups.changes.convertedDownloads": [
+    {
+      "type": 0,
+      "value": "Konvertierte Downloads"
+    }
+  ],
+  "web.admin.access.groups.changes.downloads": [
+    {
+      "type": 0,
+      "value": "Downloads"
+    }
+  ],
+  "web.admin.access.groups.changes.householdProfiles": [
+    {
+      "type": 0,
+      "value": "Haushaltsprofile"
+    }
+  ],
+  "web.admin.access.groups.changes.libraries": [
+    {
+      "type": 0,
+      "value": "Mediatheken"
+    }
+  ],
+  "web.admin.access.groups.changes.libraryId": [
+    {
+      "type": 0,
+      "value": "#"
+    },
+    {
+      "type": 1,
+      "value": "id"
+    }
+  ],
+  "web.admin.access.groups.changes.localBitrate": [
+    {
+      "type": 0,
+      "value": "Bitrate für lokale Streams"
+    }
+  ],
+  "web.admin.access.groups.changes.noLibraries": [
+    {
+      "type": 0,
+      "value": "Keine Mediatheken"
+    }
+  ],
+  "web.admin.access.groups.changes.noPermissions": [
+    {
+      "type": 0,
+      "value": "Keine"
+    }
+  ],
+  "web.admin.access.groups.changes.notAllowed": [
+    {
+      "type": 0,
+      "value": "Nicht erlaubt"
+    }
+  ],
+  "web.admin.access.groups.changes.permissions": [
+    {
+      "type": 0,
+      "value": "Berechtigungen"
+    }
+  ],
+  "web.admin.access.groups.changes.playbackQuality": [
+    {
+      "type": 0,
+      "value": "Wiedergabequalität"
+    }
+  ],
+  "web.admin.access.groups.changes.remoteBitrate": [
+    {
+      "type": 0,
+      "value": "Bitrate für Remote-Streams"
+    }
+  ],
+  "web.admin.access.groups.changes.requestApproval": [
+    {
+      "type": 0,
+      "value": "Anfrage-Genehmigung"
+    }
+  ],
+  "web.admin.access.groups.changes.requestLimit": [
+    {
+      "type": 0,
+      "value": "Anfrage-Limit"
+    }
+  ],
+  "web.admin.access.groups.changes.requests": [
+    {
+      "type": 0,
+      "value": "Anfragen"
+    }
+  ],
+  "web.admin.access.groups.changes.unlimited": [
+    {
+      "type": 0,
+      "value": "Unbegrenzt"
+    }
+  ],
+  "web.admin.access.groups.changes.videoTranscoding": [
+    {
+      "type": 0,
+      "value": "Video-Transkodierung"
     }
   ],
   "web.admin.access.groups.conflict.message": [
@@ -4083,10 +4291,118 @@
       "value": "Zugriffsgruppen werden geladen …"
     }
   ],
+  "web.admin.access.groups.members.addFailed": [
+    {
+      "type": 0,
+      "value": "Einige Benutzer konnten nicht hinzugefügt werden:"
+    }
+  ],
+  "web.admin.access.groups.members.addUsers": [
+    {
+      "type": 0,
+      "value": "Benutzer hinzufügen"
+    }
+  ],
+  "web.admin.access.groups.members.added": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " Benutzer zu "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            },
+            {
+              "type": 0,
+              "value": " hinzugefügt"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " Benutzer zu "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            },
+            {
+              "type": 0,
+              "value": " hinzugefügt"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.access.groups.members.couldNotAdd": [
+    {
+      "type": 0,
+      "value": "konnte nicht hinzugefügt werden"
+    }
+  ],
+  "web.admin.access.groups.members.couldNotMove": [
+    {
+      "type": 0,
+      "value": "konnte nicht verschoben werden"
+    }
+  ],
   "web.admin.access.groups.members.empty": [
     {
       "type": 0,
       "value": "Noch keine Mitglieder."
+    }
+  ],
+  "web.admin.access.groups.members.failure": [
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "web.admin.access.groups.members.groupChanged": [
+    {
+      "type": 0,
+      "value": "Dieses Konto wurde nach deiner Bestätigung geändert. Prüfe die Änderung und versuche es erneut."
+    }
+  ],
+  "web.admin.access.groups.members.groupsLoadFailed": [
+    {
+      "type": 0,
+      "value": "Zugriffsgruppen konnten nicht geladen werden, daher können Mitglieder noch nicht verschoben werden. "
+    },
+    {
+      "type": 8,
+      "value": "retry",
+      "children": [
+        {
+          "type": 0,
+          "value": "Erneut versuchen"
+        }
+      ]
     }
   ],
   "web.admin.access.groups.members.heading": [
@@ -4123,6 +4439,94 @@
       "value": "Mitglieder werden geladen …"
     }
   ],
+  "web.admin.access.groups.members.manageHelp": [
+    {
+      "type": 0,
+      "value": "Verschiebe Mitglieder in eine andere Gruppe oder füge dieser Gruppe Benutzer hinzu."
+    }
+  ],
+  "web.admin.access.groups.members.moveFailed": [
+    {
+      "type": 0,
+      "value": "Einige Benutzer konnten nicht verschoben werden:"
+    }
+  ],
+  "web.admin.access.groups.members.moveSelected": [
+    {
+      "type": 0,
+      "value": "Ausgewählte verschieben"
+    }
+  ],
+  "web.admin.access.groups.members.moveSelectedCount": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " ausgewählte verschieben"
+    }
+  ],
+  "web.admin.access.groups.members.moveTarget": [
+    {
+      "type": 0,
+      "value": "Ausgewählte Mitglieder verschieben nach"
+    }
+  ],
+  "web.admin.access.groups.members.moveTargetPlaceholder": [
+    {
+      "type": 0,
+      "value": "In Gruppe verschieben …"
+    }
+  ],
+  "web.admin.access.groups.members.moved": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " Benutzer nach "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            },
+            {
+              "type": 0,
+              "value": " verschoben"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " Benutzer nach "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            },
+            {
+              "type": 0,
+              "value": " verschoben"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.access.groups.members.noMatches": [
     {
       "type": 0,
@@ -4133,6 +4537,198 @@
     {
       "type": 0,
       "value": "Mitglieder durchsuchen"
+    }
+  ],
+  "web.admin.access.groups.members.selectMember": [
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " auswählen"
+    }
+  ],
+  "web.admin.access.groups.members.selectedHidden": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ausgewähltes Mitglied wird nicht angezeigt, wird beim Verschieben aber einbezogen."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ausgewählte Mitglieder werden nicht angezeigt, werden beim Verschieben aber einbezogen."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.change": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "from"
+    },
+    {
+      "type": 0,
+      "value": " → "
+    },
+    {
+      "type": 1,
+      "value": "to"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.description": [
+    {
+      "type": 0,
+      "value": "Einstellungen, die im eigenen Konto überschrieben sind, bleiben unverändert. Der neue Zugriff gilt sofort, ohne dass jemand abgemeldet wird."
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.fromGroup": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " aus "
+    },
+    {
+      "type": 1,
+      "value": "group"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.fromNoGroup": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " ohne Gruppe"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.fromUnknownGroup": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " aus Gruppe #"
+    },
+    {
+      "type": 1,
+      "value": "id"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.loadingTerms": [
+    {
+      "type": 0,
+      "value": "Anfrage-Einstellungen werden geladen …"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.move": [
+    {
+      "type": 0,
+      "value": "Verschieben"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.moving": [
+    {
+      "type": 0,
+      "value": "Wird verschoben …"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.noChanges": [
+    {
+      "type": 0,
+      "value": "Keine geerbten Einstellungen ändern sich."
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.sourceUnknown": [
+    {
+      "type": 0,
+      "value": "Die aktuelle Gruppe konnte nicht geladen werden, daher ist unbekannt, welche Einstellungen sich ändern."
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.termsFailed": [
+    {
+      "type": 0,
+      "value": "Die Anfrage-Einstellungen der Gruppen konnten nicht geladen werden, daher ist unbekannt, welche Einstellungen sich ändern."
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.title": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " Benutzer nach "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            },
+            {
+              "type": 0,
+              "value": " verschieben?"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " Benutzer nach "
+            },
+            {
+              "type": 1,
+              "value": "group"
+            },
+            {
+              "type": 0,
+              "value": " verschieben?"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.access.groups.newGroup": [
@@ -50347,6 +50943,102 @@
       "value": "Einstellungen"
     }
   ],
+  "web.admin.plugins.signature.invalid": [
+    {
+      "type": 0,
+      "value": "Prüfung fehlgeschlagen"
+    }
+  ],
+  "web.admin.plugins.signature.invalidBanner": [
+    {
+      "type": 8,
+      "value": "b",
+      "children": [
+        {
+          "type": 0,
+          "value": "Die Prüfung der Release-Signatur von "
+        },
+        {
+          "type": 1,
+          "value": "name"
+        },
+        {
+          "type": 0,
+          "value": " ist fehlgeschlagen."
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " Die mitgelieferte Signatur dieser Version belegt nicht, welches Repository sie erstellt hat. Details stehen im Server-Log."
+    }
+  ],
+  "web.admin.plugins.signature.label": [
+    {
+      "type": 0,
+      "value": "Release-Signatur"
+    }
+  ],
+  "web.admin.plugins.signature.tileInvalid": [
+    {
+      "type": 0,
+      "value": "Signatur ungültig"
+    }
+  ],
+  "web.admin.plugins.signature.tileVerified": [
+    {
+      "type": 0,
+      "value": "Signiertes Release, erstellt aus "
+    },
+    {
+      "type": 1,
+      "value": "repository"
+    }
+  ],
+  "web.admin.plugins.signature.unknown": [
+    {
+      "type": 0,
+      "value": "Nicht geprüft"
+    }
+  ],
+  "web.admin.plugins.signature.unsigned": [
+    {
+      "type": 0,
+      "value": "Nicht signiert"
+    }
+  ],
+  "web.admin.plugins.signature.verified": [
+    {
+      "type": 0,
+      "value": "Erstellt aus "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "repository"
+        }
+      ]
+    }
+  ],
+  "web.admin.plugins.signature.verifiedAt": [
+    {
+      "type": 0,
+      "value": "Verifiziert: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.plugins.signature.verifiedNoRepository": [
+    {
+      "type": 0,
+      "value": "Verifiziert"
+    }
+  ],
   "web.admin.plugins.source.approvedCommunity": [
     {
       "type": 0,
@@ -62986,7 +63678,7 @@
   "web.admin.settings.playback.transcoding.copyKeyframePlaylistDescription": [
     {
       "type": 0,
-      "value": "Experimentell. Wenn Silo das Video einer Datei kopiert, werden anhand der Keyframes der Datei alle Segmente von Anfang an aufgelistet, statt einer Playlist, die beim Kopieren wächst. Verhindert, dass Safari mittendrin einfriert. Ein Sprung über den bereits kopierten Teil hinaus wartet, bis Silo dort angekommen ist."
+      "value": "Experimentell. Wenn Silo das Video einer Datei kopiert, werden anhand der Keyframes der Datei alle Segmente von Anfang an aufgelistet, statt einer Playlist, die beim Kopieren wächst. Verhindert, dass Safari mittendrin einfriert. Ein Sprung weit über den bereits kopierten Teil hinaus startet das Kopieren ab dieser Stelle neu."
     }
   ],
   "web.admin.settings.playback.transcoding.dir": [

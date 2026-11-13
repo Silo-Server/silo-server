@@ -58,10 +58,23 @@ func AsPackageError(err error) (*PackageError, bool) {
 // a permanent one. A body that sends nothing for packageFetchReadIdleTimeout
 // counts as cut off. A canceled ctx returns its own error, not a PackageError.
 func fetchPackageResource(ctx context.Context, client *http.Client, rawURL, subject string) ([]byte, error) {
-	return fetchPackageResourceWithIdle(ctx, client, rawURL, subject, packageFetchReadIdleTimeout)
+	return fetchPackageResourceWithIdle(ctx, client, rawURL, subject, packageFetchReadIdleTimeout, 0)
 }
 
-func fetchPackageResourceWithIdle(ctx context.Context, client *http.Client, rawURL, subject string, readIdle time.Duration) ([]byte, error) {
+// errPackageResourceTooLarge is the cause when a body exceeds the limit given
+// to fetchPackageResourceLimited.
+var errPackageResourceTooLarge = errors.New("response body exceeds the size limit")
+
+// fetchPackageResourceLimited is fetchPackageResource for a small resource:
+// a body longer than maxBytes stops the read and returns
+// errPackageResourceTooLarge, which the caller turns into its own
+// PackageError.
+func fetchPackageResourceLimited(ctx context.Context, client *http.Client, rawURL, subject string, maxBytes int64) ([]byte, error) {
+	return fetchPackageResourceWithIdle(ctx, client, rawURL, subject, packageFetchReadIdleTimeout, maxBytes)
+}
+
+// fetchPackageResourceWithIdle fetches rawURL; maxBytes > 0 caps the body.
+func fetchPackageResourceWithIdle(ctx context.Context, client *http.Client, rawURL, subject string, readIdle time.Duration, maxBytes int64) ([]byte, error) {
 	fetchCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	// Only admins add repositories, and a repository on the server's own
@@ -98,7 +111,11 @@ func fetchPackageResourceWithIdle(ctx context.Context, client *http.Client, rawU
 	}
 	body := newIdleTimeoutReader(resp.Body, readIdle, cancel)
 	defer body.stop()
-	data, err := io.ReadAll(body)
+	var reader io.Reader = body
+	if maxBytes > 0 {
+		reader = io.LimitReader(body, maxBytes+1)
+	}
+	data, err := io.ReadAll(reader)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("read %q: %w", rawURL, ctx.Err())
@@ -107,6 +124,9 @@ func fetchPackageResourceWithIdle(ctx context.Context, client *http.Client, rawU
 			err = cause
 		}
 		return nil, transientPackageError(fmt.Errorf("read %q: %w", rawURL, err), "The download of %s was interrupted. Try again.", subject)
+	}
+	if maxBytes > 0 && int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("read %q: %w (%d bytes)", rawURL, errPackageResourceTooLarge, maxBytes)
 	}
 	return data, nil
 }
