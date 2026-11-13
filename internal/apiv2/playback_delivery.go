@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"reflect"
 	"strconv"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
@@ -40,7 +41,8 @@ const (
 	playbackBinaryFormat       = "binary"
 	playbackCacheControlHeader = "Cache-Control"
 	playbackContentEncoding    = "Content-Encoding"
-	playbackProtocolHLS        = "hls"
+	// playbackTranscodePath prefixes the HLS playlist and segment routes.
+	playbackTranscodePath = "/playback/transcode/"
 )
 
 // PlaybackMediaHandlers shares the raw byte delivery protocols and the typed
@@ -96,8 +98,8 @@ func registerPlaybackDelivery(reg *Registry) {
 	}{
 		{http.MethodGet, "/stream/{session_id}", "getPlaybackMedia", "media-bytes", handlers.Original, append(playback.MediaMIMETypes(), playbackMediaBinary, "multipart/byteranges"), true},
 		{http.MethodHead, "/stream/{session_id}", "headPlaybackMedia", "media-bytes", handlers.Original, nil, true},
-		{http.MethodGet, "/playback/transcode/{session_id}/master.m3u8", "getPlaybackManifest", playbackProtocolHLS, handlers.Manifest, []string{"application/vnd.apple.mpegurl"}, false},
-		{http.MethodGet, "/playback/transcode/{session_id}/segment/{name}", playbackSegmentOperation, playbackProtocolHLS, handlers.Segment, []string{"video/mp4", "video/mp2t", playbackSubtitleVTT, playbackMediaBinary, "multipart/byteranges"}, true},
+		{http.MethodGet, "/playback/transcode/{session_id}/master.m3u8", "getPlaybackManifest", "hls", handlers.Manifest, []string{"application/vnd.apple.mpegurl"}, false},
+		{http.MethodGet, "/playback/transcode/{session_id}/segment/{name}", playbackSegmentOperation, "hls", handlers.Segment, []string{"video/mp4", "video/mp2t", playbackSubtitleVTT, playbackMediaBinary, "multipart/byteranges"}, true},
 		{http.MethodGet, "/stream/{session_id}/subtitles/{track}", playbackSubtitleOperation, "subtitle-sidecar", handlers.Subtitle, []string{playbackSubtitleVTT, playbackSubtitleSSA, playbackSubtitleSubrip, playbackMediaBinary}, false},
 		{http.MethodHead, "/stream/{session_id}/subtitles/{track}", playbackSubtitleHead, "subtitle-sidecar", handlers.Subtitle, nil, false},
 	} {
@@ -160,7 +162,7 @@ func registerPlaybackDelivery(reg *Registry) {
 		}
 		// A Google Cast receiver plays HLS through a script on its own origin,
 		// so the playlist and segments must be readable cross-origin.
-		raw := RawOperation{Operation: Operation{Operation: huma.Operation{Method: route.method, Path: Prefix + route.path, OperationID: route.id, Tags: []string{playbackTag}, Parameters: params, Responses: responses}, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true}, Protocol: route.protocol, Reason: reason, CrossOrigin: route.protocol == playbackProtocolHLS}
+		raw := RawOperation{Operation: Operation{Operation: huma.Operation{Method: route.method, Path: Prefix + route.path, OperationID: route.id, Tags: []string{playbackTag}, Parameters: params, Responses: responses}, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true}, Protocol: route.protocol, Reason: reason, CrossOrigin: strings.HasPrefix(route.path, playbackTranscodePath)}
 		RegisterRaw(reg, raw, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !playbackUUID(chi.URLParam(r, "session_id")) {
 				writeProblem(w, r, validationProblem("path.session_id", "invalid", "Expected a canonical UUID."))
