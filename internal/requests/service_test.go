@@ -831,7 +831,10 @@ func TestReconcileRequestsPresenceRetiresOnlyStalledTargets(t *testing.T) {
 // the library: not at which quality, and for a whole series, not which
 // episodes. So a target with download progress, a whole-series request, a
 // season request whose seasons are not all complete, and a request that asked
-// for another quality as well all keep their downloading target.
+// for another quality as well all keep their downloading target. A failed
+// target fetched nothing, so it does not hold the other tier open; the request
+// then aggregates to failed, as when its router reports the completion, so
+// Retry can resubmit the failed tier.
 func TestReconcileRequestsPresenceRetiresStalledDownloadingTargets(t *testing.T) {
 	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
 	stale := now.Add(-30 * 24 * time.Hour)
@@ -847,21 +850,27 @@ func TestReconcileRequestsPresenceRetiresStalledDownloadingTargets(t *testing.T)
 	uhd := downloading
 	uhd.Quality = Quality2160p
 	hdDone := Target{Quality: Quality1080p, Status: StatusCompleted, ExternalStatus: "5", UpdatedAt: stale}
+	uhdFailed := Target{Quality: Quality2160p, Status: StatusFailed, LastError: msgNoTargetForQuality, UpdatedAt: stale}
 
 	for _, tc := range []struct {
 		name    string
 		req     Request
 		seasons map[int]SeasonCounts
 		targets []Target
+		// retired is whether the last target is completed by presence, and
+		// status and outcome are the request's aggregate afterwards.
 		retired bool
+		status  Status
+		outcome Outcome
 	}{
-		{"movie", movie, nil, []Target{downloading}, true},
-		{"movie with download progress", movie, nil, []Target{withProgress}, false},
-		{"2160p beside a completed 1080p target", movie, nil, []Target{hdDone, uhd}, false},
-		{"2160p alone", movie, nil, []Target{uhd}, true},
-		{"whole series", wholeSeries, nil, []Target{downloading}, false},
-		{"seasons all complete", seasons, complete, []Target{downloading}, true},
-		{"a season incomplete", seasons, partial, []Target{downloading}, false},
+		{"movie", movie, nil, []Target{downloading}, true, StatusCompleted, OutcomeActive},
+		{"movie with download progress", movie, nil, []Target{withProgress}, false, StatusDownloading, OutcomeActive},
+		{"2160p beside a completed 1080p target", movie, nil, []Target{hdDone, uhd}, false, StatusDownloading, OutcomeActive},
+		{"2160p alone", movie, nil, []Target{uhd}, true, StatusCompleted, OutcomeActive},
+		{"1080p beside a failed 2160p target", movie, nil, []Target{uhdFailed, downloading}, true, StatusQueued, OutcomeFailed},
+		{"whole series", wholeSeries, nil, []Target{downloading}, false, StatusDownloading, OutcomeActive},
+		{"seasons all complete", seasons, complete, []Target{downloading}, true, StatusCompleted, OutcomeActive},
+		{"a season incomplete", seasons, partial, []Target{downloading}, false, StatusDownloading, OutcomeActive},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newFakeStore()
@@ -889,18 +898,18 @@ func TestReconcileRequestsPresenceRetiresStalledDownloadingTargets(t *testing.T)
 			}
 			targets, _ := store.ListTargets(context.Background(), req.ID)
 			last := targets[len(targets)-1]
-			if !tc.retired {
-				if result.Completed != 0 || last.Status != StatusDownloading || store.requests[req.ID].Status != StatusDownloading {
-					t.Fatalf("result = %+v target = %+v request status = %q, want the target and request left downloading",
-						result, last, store.requests[req.ID].Status)
-				}
-				return
+			switch {
+			case !tc.retired && last.Status != StatusDownloading:
+				t.Fatalf("target = %+v, want it left downloading", last)
+			case tc.retired && (last.Status != StatusCompleted || last.ExternalStatus != ExternalStatusPresenceConfirmed):
+				t.Fatalf("target = %+v, want it completed as %s", last, ExternalStatusPresenceConfirmed)
 			}
-			if result.Completed != 1 || last.Status != StatusCompleted || last.ExternalStatus != ExternalStatusPresenceConfirmed {
-				t.Fatalf("result = %+v target = %+v, want the target completed as %s", result, last, ExternalStatusPresenceConfirmed)
+			got := store.requests[req.ID]
+			if got.Status != tc.status || got.Outcome != tc.outcome {
+				t.Fatalf("request = %s/%s, want %s/%s", got.Status, got.Outcome, tc.status, tc.outcome)
 			}
-			if store.requests[req.ID].Status != StatusCompleted {
-				t.Fatalf("request status = %q, want completed", store.requests[req.ID].Status)
+			if wantCompleted := tc.status == StatusCompleted; (result.Completed == 1) != wantCompleted {
+				t.Fatalf("result = %+v, want completed %v", result, wantCompleted)
 			}
 		})
 	}

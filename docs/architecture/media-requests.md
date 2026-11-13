@@ -490,7 +490,7 @@ the target has gone without a status change for 24 hours while `queued`, or
 for good after the file is imported. Because presence matches the title only,
 a `downloading` target is kept while its plugin reports download progress, on a
 whole-series request, and on a request that also has a target at another
-quality. A season request counts as present only once every requested season is
+quality that has not failed. A season request counts as present only once every requested season is
 complete.
 
 A second task, `refresh_request_downloads`, runs every minute between reconcile

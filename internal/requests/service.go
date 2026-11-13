@@ -3188,8 +3188,8 @@ const ExternalStatusPresenceConfirmed = "presence_confirmed"
 //   - the request is for a movie or for named seasons, never a whole series,
 //     whose presence any one episode satisfies (present already requires every
 //     requested season to be complete);
-//   - every target of the request is at its quality, since presence cannot
-//     tell a 1080p copy from a 2160p one.
+//   - every target of the request that has not failed is at its quality,
+//     since presence cannot tell a 1080p copy from a 2160p one.
 //
 // The request status follows from the usual target aggregate. It returns the
 // request as of the last retirement, if any.
@@ -3248,7 +3248,9 @@ func downloadRetirable(req Request, t Target, all []Target, now time.Time) bool 
 		return false
 	}
 	for _, other := range all {
-		if other.Quality != t.Quality {
+		// A failed target fetched nothing, so the file is not its own. A
+		// quality no server could take is recorded as one (recordTargets).
+		if other.Quality != t.Quality && other.Status != StatusFailed {
 			return false
 		}
 	}
