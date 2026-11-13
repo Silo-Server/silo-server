@@ -24,6 +24,7 @@ import {
   shuffleKeys,
   watchlistKeys,
 } from "./keys";
+import { sectionShowsWholeList } from "./homeRowLimit";
 import {
   activeCatalogQueryMatchesLibrary,
   activeSectionQueryMatchesLibrary,
@@ -161,6 +162,19 @@ export function removeItemFromHomeSectionCaches(
       if (nextItems.length === current.section.items.length) {
         return current;
       }
+      const section = {
+        ...current.section,
+        total_count: Math.max(
+          0,
+          current.section.total_count - (current.section.items.length - nextItems.length),
+        ),
+        items: nextItems,
+      };
+      // A row cut at its limit can hold more than its count says, so losing a
+      // card must not make it read as its whole list.
+      if (!sectionShowsWholeList(current.section) && sectionShowsWholeList(section)) {
+        section.total_count = nextItems.length + 1;
+      }
       return {
         ...current,
         // A completed row's shown cards lose the removed ones, so none of its
@@ -168,14 +182,7 @@ export function removeItemFromHomeSectionCaches(
         ...(current.shown !== undefined && {
           shown: current.section.items.slice(0, current.shown).filter(kept).length,
         }),
-        section: {
-          ...current.section,
-          total_count: Math.max(
-            0,
-            current.section.total_count - (current.section.items.length - nextItems.length),
-          ),
-          items: nextItems,
-        },
+        section,
       };
     },
   );

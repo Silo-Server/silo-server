@@ -4600,6 +4600,11 @@ export interface ResolvedSection extends SectionTitleKey {
   is_custom: boolean;
   customized: boolean;
   items: SectionItem[];
+  /**
+   * The row was read with an item_limit and holds more cards than `items`
+   * (see homeRowLimit). Absent when false.
+   */
+  has_more?: boolean;
 }
 
 export interface SectionsResponse {

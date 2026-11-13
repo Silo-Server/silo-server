@@ -222,6 +222,14 @@ describe("SectionRow", () => {
     }
   });
 
+  it("leaves the links off a Continue Watching row that shows its whole list", () => {
+    renderRow(continueSection([pilotEpisode]));
+
+    expect(latestCarouselProps).toBeDefined();
+    expect(latestCarouselProps?.titleHref).toBeUndefined();
+    expect(latestCarouselProps?.viewAllHref).toBeUndefined();
+  });
+
   it("links and pins library rows of every type", () => {
     const markup = renderRow({ ...continueSection([pilotEpisode]), item_limit: 1 }, 7);
 

@@ -114,6 +114,7 @@ export function sectionFromV2(section: SectionV2): ResolvedSection {
     is_custom: section.is_custom,
     customized: section.customized,
     items: section.items.map(catalogItemFromV2),
+    ...(section.has_more && { has_more: true }),
     ...sectionTitleKey(section),
   };
 }

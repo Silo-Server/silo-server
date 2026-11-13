@@ -14,6 +14,8 @@ import {
   sectionKeys,
   watchlistKeys,
 } from "./keys";
+import type { HomeSectionItemsResponse } from "@/api/types";
+import { sectionShowsWholeList } from "./homeRowLimit";
 import {
   cancelItemDetailQueries,
   dropInactiveWatchDetail,
@@ -385,6 +387,30 @@ describe("invalidateMediaSurfaceQueries", () => {
         items: [{ content_id: "item-2" }],
       },
     });
+  });
+
+  it("keeps a row filled to its limit from reading as its whole list after a removal", () => {
+    const queryClient = new QueryClient();
+    const items = Array.from({ length: 20 }, (_, index) => ({ content_id: `item-${index}` }));
+    queryClient.setQueryData(sectionKeys.homeItems("continue"), {
+      section: {
+        id: "continue",
+        section_type: "continue_watching",
+        item_limit: 20,
+        total_count: 20,
+        items,
+      },
+    });
+
+    removeItemFromHomeSectionCaches(queryClient, "item-0", "continue_watching");
+
+    const row = queryClient.getQueryData<HomeSectionItemsResponse>(
+      sectionKeys.homeItems("continue"),
+    );
+    expect(row?.section.items).toHaveLength(19);
+    // The server cut the row at 20, so its list may hold a card to take the
+    // removed one's place.
+    expect(row && sectionShowsWholeList(row.section)).toBe(false);
   });
 
   it("does not invalidate detail queries for a different item ID when itemId is specified", async () => {
