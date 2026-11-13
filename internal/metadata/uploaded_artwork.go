@@ -80,7 +80,7 @@ func (s *MetadataService) ApplyUploadedItemImage(ctx context.Context, req ApplyU
 		KeyDiscriminator: hex.EncodeToString(digest[:4]),
 	})
 	if err != nil {
-		if errors.Is(err, imageutil.ErrInvalidImage) || imageutil.PixelDataUndecodable(req.Data) {
+		if imageutil.SourceUnusable(err, req.Data) {
 			return nil, fmt.Errorf("%w: %w", ErrUnsupportedUploadedImage, err)
 		}
 		return nil, fmt.Errorf("caching image: %w", err)

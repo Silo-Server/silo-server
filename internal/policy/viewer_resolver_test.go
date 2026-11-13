@@ -830,3 +830,56 @@ func TestMaturityOverriddenRejectsAllowancesUnderPolicyLimits(t *testing.T) {
 		}
 	}
 }
+
+// A credential exempt from the PIN (an API key, a view-as session) that still
+// sends a valid profile token proved the PIN: household management, which
+// refuses a skipped verification, must accept it. Without a valid token the
+// scope stays skipped: still browsable, never enough to manage the household.
+func TestViewerResolverExemptCredentialWithProfileTokenCountsAsVerified(t *testing.T) {
+	ctx := context.Background()
+	pdp := newViewerResolverTestPDP(t, ctx)
+	user := &models.User{ID: 1, AccessPolicyRevision: 5}
+	profile := &userstore.Profile{ID: "prof-1", PINHash: "pin-hash", PINRevision: 3}
+	valid := stubProfileTokenValidator{claims: &access.ProfileTokenClaims{UserID: 1, SessionID: "sess-1", ProfileID: "prof-1", PINRevision: 3}}
+	// Minted before the PIN last changed.
+	stale := stubProfileTokenValidator{claims: &access.ProfileTokenClaims{UserID: 1, SessionID: "sess-1", ProfileID: "prof-1", PINRevision: 2}}
+
+	// An API key has no login session; verify-pin mints its token for "".
+	sessionless := stubProfileTokenValidator{claims: &access.ProfileTokenClaims{UserID: 1, ProfileID: "prof-1", PINRevision: 3}}
+
+	for _, tc := range []struct {
+		name        string
+		sessionID   string
+		token       string
+		tokens      stubProfileTokenValidator
+		wantSkipped bool
+	}{
+		{"valid token", "sess-1", "valid", valid, false},
+		{"no token", "sess-1", "", valid, true},
+		{"stale token", "sess-1", "stale", stale, true},
+		{"API key with a sessionless token", "", "valid", sessionless, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stores := viewerResolverStoreProvider{store: viewerResolverTestStore{profile: profile}}
+			users := viewerResolverUserRepo{user: user}
+			input := access.ResolveInput{UserID: 1, SessionID: tc.sessionID, ProfileID: "prof-1", ProfileToken: tc.token, SkipPINVerification: true}
+			for name, resolver := range map[string]interface {
+				Resolve(context.Context, access.ResolveInput) (access.Scope, error)
+			}{
+				"legacy": access.NewResolver(users, stores, tc.tokens),
+				"policy": NewViewerResolver(users, stores, tc.tokens, pdp),
+			} {
+				scope, err := resolver.Resolve(ctx, input)
+				if err != nil {
+					t.Fatalf("%s Resolve() error: %v", name, err)
+				}
+				if !scope.ProfileVerified || scope.PINVerificationSkipped != tc.wantSkipped {
+					t.Fatalf("%s: verified=%v skipped=%v, want verified skipped=%v", name, scope.ProfileVerified, scope.PINVerificationSkipped, tc.wantSkipped)
+				}
+				if err := scope.CheckProfileVerification(profile); (err == nil) == tc.wantSkipped {
+					t.Fatalf("%s: household check error = %v, want refused=%v", name, err, tc.wantSkipped)
+				}
+			}
+		})
+	}
+}

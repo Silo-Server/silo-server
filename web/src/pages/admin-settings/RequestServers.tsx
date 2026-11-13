@@ -790,6 +790,10 @@ export function RequestServerEditor({
       .filter((key) => !ROUTING_OWNED_CONFIG_KEYS.includes(key) || key === FOUR_K_KEY),
   ]);
   const unshownErrors = Object.entries(fieldErrors).filter(([key]) => !shownKeys.has(key));
+  // A refusal with one field error carries that error as its message too; skip
+  // the message when this box already shows the same text.
+  const formSummary =
+    formError && !unshownErrors.some(([, detail]) => detail === formError) ? formError : null;
   const urlError = fieldErrors.base_url ?? probeError?.fields.base_url;
   const keyError = fieldErrors.api_key_ref ?? probeError?.fields.api_key_ref;
 
@@ -802,12 +806,12 @@ export function RequestServerEditor({
         </DialogDescription>
       </DialogHeader>
 
-      {formError || unshownErrors.length > 0 ? (
+      {formSummary || unshownErrors.length > 0 ? (
         <div
           role="alert"
           className="border-destructive/40 bg-destructive/10 text-destructive space-y-1 rounded-md border px-3 py-2 text-sm"
         >
-          {formError ? <p>{formError}</p> : null}
+          {formSummary ? <p>{formSummary}</p> : null}
           {unshownErrors.map(([key, detail]) => (
             <p key={key}>{detail}</p>
           ))}

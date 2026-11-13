@@ -137,6 +137,12 @@
       "value": "年份"
     }
   ],
+  "collections.collection": [
+    {
+      "type": 0,
+      "value": "合集"
+    }
+  ],
   "common.back": [
     {
       "type": 0,
@@ -287,10 +293,22 @@
       "value": "此值无效。"
     }
   ],
+  "error.field.invalid_entity_tag": [
+    {
+      "type": 0,
+      "value": "应为“*”或以逗号分隔的带引号实体标签列表。"
+    }
+  ],
   "error.field.invalid_enum": [
     {
       "type": 0,
       "value": "请选择一个允许的值。"
+    }
+  ],
+  "error.field.invalid_sort_field": [
+    {
+      "type": 0,
+      "value": "排序指定了此操作不支持排序的字段，或重复指定了同一字段。"
     }
   ],
   "error.field.invalid_type": [
@@ -593,6 +611,570 @@
       "value": "部分值无效。请检查后重试。"
     }
   ],
+  "home.recipe.aclBlank.description": [
+    {
+      "type": 0,
+      "value": "由管理员逐项挑选并排序的列表。"
+    }
+  ],
+  "home.recipe.aclBlank.name": [
+    {
+      "type": 0,
+      "value": "编辑精选"
+    }
+  ],
+  "home.recipe.anniversariesDefault.description": [
+    {
+      "type": 0,
+      "value": "本月迎来发行纪念日的作品。"
+    }
+  ],
+  "home.recipe.anniversariesDefault.name": [
+    {
+      "type": 0,
+      "value": "周年纪念"
+    }
+  ],
+  "home.recipe.awCannes.description": [
+    {
+      "type": 0,
+      "value": "戛纳电影节入选作品。"
+    }
+  ],
+  "home.recipe.awCannes.name": [
+    {
+      "type": 0,
+      "value": "戛纳入选"
+    }
+  ],
+  "home.recipe.awEmmy.description": [
+    {
+      "type": 0,
+      "value": "荣获艾美奖的剧集。"
+    }
+  ],
+  "home.recipe.awEmmy.name": [
+    {
+      "type": 0,
+      "value": "艾美奖得主"
+    }
+  ],
+  "home.recipe.awOscar.description": [
+    {
+      "type": 0,
+      "value": "你的媒体库中的奥斯卡获奖作品。"
+    }
+  ],
+  "home.recipe.awOscar.name": [
+    {
+      "type": 0,
+      "value": "奥斯卡得主"
+    }
+  ],
+  "home.recipe.bcwAuto.description": [
+    {
+      "type": 0,
+      "value": "根据你最近观看的内容推荐。"
+    }
+  ],
+  "home.recipe.caImdb.description": [
+    {
+      "type": 0,
+      "value": "TMDB评分8.0+，且投票数500+。"
+    }
+  ],
+  "home.recipe.caImdb.name": [
+    {
+      "type": 0,
+      "value": "口碑佳作"
+    }
+  ],
+  "home.recipe.collectionPick.description": [
+    {
+      "type": 0,
+      "value": "显示某个媒体库或精选合集中的项目。"
+    }
+  ],
+  "home.recipe.collectionPick.name": [
+    {
+      "type": 0,
+      "value": "合集"
+    }
+  ],
+  "home.recipe.continueListeningDefault.description": [
+    {
+      "type": 0,
+      "value": "从上次停下的地方继续收听有声书。"
+    }
+  ],
+  "home.recipe.continueWatchingDefault.description": [
+    {
+      "type": 0,
+      "value": "从上次停下的地方继续观看电影和剧集。"
+    }
+  ],
+  "home.recipe.esActor.description": [
+    {
+      "type": 0,
+      "value": "每周聚焦你的媒体库中的一位演员。"
+    }
+  ],
+  "home.recipe.esActor.name": [
+    {
+      "type": 0,
+      "value": "演员聚焦"
+    }
+  ],
+  "home.recipe.esDirectorAuto.description": [
+    {
+      "type": 0,
+      "value": "每周聚焦你的媒体库中的一位导演。"
+    }
+  ],
+  "home.recipe.esDirectorAuto.name": [
+    {
+      "type": 0,
+      "value": "导演聚焦"
+    }
+  ],
+  "home.recipe.esEra80s.description": [
+    {
+      "type": 0,
+      "value": "20世纪80年代的电影。"
+    }
+  ],
+  "home.recipe.esEra80s.name": [
+    {
+      "type": 0,
+      "value": "80年代"
+    }
+  ],
+  "home.recipe.esStudio.description": [
+    {
+      "type": 0,
+      "value": "每周聚焦你的媒体库中的一家制片公司。"
+    }
+  ],
+  "home.recipe.esStudio.name": [
+    {
+      "type": 0,
+      "value": "制片公司聚焦"
+    }
+  ],
+  "home.recipe.favoritesDefault.description": [
+    {
+      "type": 0,
+      "value": "你的收藏。"
+    }
+  ],
+  "home.recipe.favoritesDefault.name": [
+    {
+      "type": 0,
+      "value": "收藏"
+    }
+  ],
+  "home.recipe.ffDefault.description": [
+    {
+      "type": 0,
+      "value": "TMDB评分7.0+，投票数100+，且过去一年内未观看。"
+    }
+  ],
+  "home.recipe.ffDefault.name": [
+    {
+      "type": 0,
+      "value": "被遗忘的心头好"
+    }
+  ],
+  "home.recipe.forYou.description": [
+    {
+      "type": 0,
+      "value": "推荐引擎为每个个人资料挑选的内容。"
+    }
+  ],
+  "home.recipe.forYou.name": [
+    {
+      "type": 0,
+      "value": "为你推荐"
+    }
+  ],
+  "home.recipe.fs4k.description": [
+    {
+      "type": 0,
+      "value": "提供4K UHD版本的作品。"
+    }
+  ],
+  "home.recipe.fs4k.name": [
+    {
+      "type": 0,
+      "value": "4K精选"
+    }
+  ],
+  "home.recipe.fs4kRecent.description": [
+    {
+      "type": 0,
+      "value": "最近添加的4K UHD作品。"
+    }
+  ],
+  "home.recipe.fs4kRecent.name": [
+    {
+      "type": 0,
+      "value": "4K新片"
+    }
+  ],
+  "home.recipe.fsDv.description": [
+    {
+      "type": 0,
+      "value": "Dolby Vision作品。"
+    }
+  ],
+  "home.recipe.fsDv.name": [
+    {
+      "type": 0,
+      "value": "Dolby Vision精选"
+    }
+  ],
+  "home.recipe.fsHdr.description": [
+    {
+      "type": 0,
+      "value": "HDR母版作品。"
+    }
+  ],
+  "home.recipe.fsHdr.name": [
+    {
+      "type": 0,
+      "value": "HDR精选"
+    }
+  ],
+  "home.recipe.genreRouletteWeekly.description": [
+    {
+      "type": 0,
+      "value": "每周换一种类型，TMDB评分6.0+，且投票数100+。"
+    }
+  ],
+  "home.recipe.genreRouletteWeekly.name": [
+    {
+      "type": 0,
+      "value": "类型轮盘"
+    }
+  ],
+  "home.recipe.hiddenGemsDefault.description": [
+    {
+      "type": 0,
+      "value": "TMDB评分7.5+，投票数100+，且观看次数不超过两次。"
+    }
+  ],
+  "home.recipe.moodAfterMidnight.description": [
+    {
+      "type": 0,
+      "value": "恐怖或惊悚片，TMDB评分6.0+，且投票数100+。"
+    }
+  ],
+  "home.recipe.moodAfterMidnight.name": [
+    {
+      "type": 0,
+      "value": "午夜时分"
+    }
+  ],
+  "home.recipe.moodComfort.description": [
+    {
+      "type": 0,
+      "value": "喜剧、爱情或家庭片，TMDB评分6.0+，且投票数100+。"
+    }
+  ],
+  "home.recipe.moodComfort.name": [
+    {
+      "type": 0,
+      "value": "百看不厌"
+    }
+  ],
+  "home.recipe.moodDateNight.description": [
+    {
+      "type": 0,
+      "value": "爱情或喜剧片，TMDB评分6.0+，且投票数100+。"
+    }
+  ],
+  "home.recipe.moodDateNight.name": [
+    {
+      "type": 0,
+      "value": "约会之夜"
+    }
+  ],
+  "home.recipe.moodEdgeOfSeat.description": [
+    {
+      "type": 0,
+      "value": "惊悚或动作片，TMDB评分6.5+，且投票数100+。"
+    }
+  ],
+  "home.recipe.moodEdgeOfSeat.name": [
+    {
+      "type": 0,
+      "value": "扣人心弦"
+    }
+  ],
+  "home.recipe.moodFeelGood.description": [
+    {
+      "type": 0,
+      "value": "喜剧或家庭片，TMDB评分6.5+，且投票数100+。"
+    }
+  ],
+  "home.recipe.moodFeelGood.name": [
+    {
+      "type": 0,
+      "value": "开心喜剧"
+    }
+  ],
+  "home.recipe.moodMindBending.description": [
+    {
+      "type": 0,
+      "value": "科幻或悬疑片，TMDB评分7.0+，且投票数100+。"
+    }
+  ],
+  "home.recipe.moodMindBending.name": [
+    {
+      "type": 0,
+      "value": "烧脑科幻"
+    }
+  ],
+  "home.recipe.moodQuietSunday.description": [
+    {
+      "type": 0,
+      "value": "剧情或纪录片，TMDB评分7.0+，且投票数100+。"
+    }
+  ],
+  "home.recipe.moodQuietSunday.name": [
+    {
+      "type": 0,
+      "value": "静谧周日影院"
+    }
+  ],
+  "home.recipe.moodTearjerker.description": [
+    {
+      "type": 0,
+      "value": "剧情或爱情片，TMDB评分7.0+，且投票数100+。"
+    }
+  ],
+  "home.recipe.moodTearjerker.name": [
+    {
+      "type": 0,
+      "value": "催泪之作"
+    }
+  ],
+  "home.recipe.mwMonth.description": [
+    {
+      "type": 0,
+      "value": "过去30天内播放最多的内容。"
+    }
+  ],
+  "home.recipe.mwMonth.name": [
+    {
+      "type": 0,
+      "value": "本月最多观看"
+    }
+  ],
+  "home.recipe.mwWeek.description": [
+    {
+      "type": 0,
+      "value": "过去7天内播放最多的内容。"
+    }
+  ],
+  "home.recipe.mwWeek.name": [
+    {
+      "type": 0,
+      "value": "本周最多观看"
+    }
+  ],
+  "home.recipe.nextInSeriesDefault.description": [
+    {
+      "type": 0,
+      "value": "你已听完的系列中的下一本有声书。"
+    }
+  ],
+  "home.recipe.nextInSeriesDefault.name": [
+    {
+      "type": 0,
+      "value": "系列下一部"
+    }
+  ],
+  "home.recipe.nextUpDefault.description": [
+    {
+      "type": 0,
+      "value": "可以观看的下一集。"
+    }
+  ],
+  "home.recipe.ntl30.description": [
+    {
+      "type": 0,
+      "value": "过去30天内添加。"
+    }
+  ],
+  "home.recipe.ntl30.name": [
+    {
+      "type": 0,
+      "value": "本月新入库"
+    }
+  ],
+  "home.recipe.paHousehold.description": [
+    {
+      "type": 0,
+      "value": "所有其他个人资料最近观看的内容。"
+    }
+  ],
+  "home.recipe.paHousehold.name": [
+    {
+      "type": 0,
+      "value": "其他人刚刚看过"
+    }
+  ],
+  "home.recipe.randomDefault.description": [
+    {
+      "type": 0,
+      "value": "从你的媒体库中随机挑选。"
+    }
+  ],
+  "home.recipe.randomDefault.name": [
+    {
+      "type": 0,
+      "value": "给我惊喜"
+    }
+  ],
+  "home.recipe.recentlyAddedDefault.description": [
+    {
+      "type": 0,
+      "value": "你的媒体库中最新添加的内容。"
+    }
+  ],
+  "home.recipe.recentlyReleasedDefault.description": [
+    {
+      "type": 0,
+      "value": "最近发布的作品。"
+    }
+  ],
+  "home.recipe.recentlyReleasedDefault.name": [
+    {
+      "type": 0,
+      "value": "新发布"
+    }
+  ],
+  "home.recipe.returningShowsDefault.description": [
+    {
+      "type": 0,
+      "value": "你看过的剧集在你的媒体库中有了全新一季。"
+    }
+  ],
+  "home.recipe.seAuto.description": [
+    {
+      "type": 0,
+      "value": "自动轮换——10月是万圣节，12月是圣诞节，等等。"
+    }
+  ],
+  "home.recipe.seAuto.details": [
+    {
+      "type": 0,
+      "value": "一个根据日历自动切换精选节日内容的版块。选择节日，为每个节日设定氛围，还可以添加你自己的节日。"
+    }
+  ],
+  "home.recipe.seFamilyMovieNight.description": [
+    {
+      "type": 0,
+      "value": "周五和周六晚上的家庭精选。"
+    }
+  ],
+  "home.recipe.seFamilyMovieNight.name": [
+    {
+      "type": 0,
+      "value": "家庭电影之夜"
+    }
+  ],
+  "home.recipe.shortWatchesDefault.description": [
+    {
+      "type": 0,
+      "value": "95分钟以内的电影，TMDB评分6.0+，且投票数100+。"
+    }
+  ],
+  "home.recipe.shortWatchesDefault.name": [
+    {
+      "type": 0,
+      "value": "短小精悍"
+    }
+  ],
+  "home.recipe.similar.description": [
+    {
+      "type": 0,
+      "value": "口味相似的个人资料正在喜欢的内容。"
+    }
+  ],
+  "home.recipe.tasteTop.description": [
+    {
+      "type": 0,
+      "value": "最符合你主要口味的内容——设置类型可缩小范围。"
+    }
+  ],
+  "home.recipe.tdiscTmdbDay.description": [
+    {
+      "type": 0,
+      "value": "TMDB今日热门电影和剧集，与你的媒体库匹配。"
+    }
+  ],
+  "home.recipe.tdiscTmdbDay.name": [
+    {
+      "type": 0,
+      "value": "TMDB今日热门"
+    }
+  ],
+  "home.recipe.tdiscTmdbWeek.description": [
+    {
+      "type": 0,
+      "value": "TMDB本周热门电影和剧集，与你的媒体库匹配。"
+    }
+  ],
+  "home.recipe.tdiscTmdbWeek.name": [
+    {
+      "type": 0,
+      "value": "TMDB本周热门"
+    }
+  ],
+  "home.recipe.tr24h.description": [
+    {
+      "type": 0,
+      "value": "过去一天内播放最多的内容。"
+    }
+  ],
+  "home.recipe.tr24h.name": [
+    {
+      "type": 0,
+      "value": "当前热门（24小时）"
+    }
+  ],
+  "home.recipe.tr30d.description": [
+    {
+      "type": 0,
+      "value": "过去一个月内播放最多的内容。"
+    }
+  ],
+  "home.recipe.tr30d.name": [
+    {
+      "type": 0,
+      "value": "本月热门"
+    }
+  ],
+  "home.recipe.tr7d.description": [
+    {
+      "type": 0,
+      "value": "过去一周内播放最多的内容。"
+    }
+  ],
+  "home.recipe.watchlistDefault.description": [
+    {
+      "type": 0,
+      "value": "你保存待看的项目。"
+    }
+  ],
+  "home.recipe.watchlistDefault.name": [
+    {
+      "type": 0,
+      "value": "待看清单"
+    }
+  ],
   "home.section.becauseYouEnjoy": [
     {
       "type": 0,
@@ -635,6 +1217,60 @@
     {
       "type": 0,
       "value": "继续观看"
+    }
+  ],
+  "home.section.discoverGenres": [
+    {
+      "type": 0,
+      "value": "类型"
+    }
+  ],
+  "home.section.discoverNetworks": [
+    {
+      "type": 0,
+      "value": "电视网"
+    }
+  ],
+  "home.section.discoverOnAirSeries": [
+    {
+      "type": 0,
+      "value": "正在播出的剧集"
+    }
+  ],
+  "home.section.discoverPopularMovies": [
+    {
+      "type": 0,
+      "value": "人气电影"
+    }
+  ],
+  "home.section.discoverPopularSeries": [
+    {
+      "type": 0,
+      "value": "人气剧集"
+    }
+  ],
+  "home.section.discoverStudios": [
+    {
+      "type": 0,
+      "value": "制片公司"
+    }
+  ],
+  "home.section.discoverTrendingMovies": [
+    {
+      "type": 0,
+      "value": "热门电影"
+    }
+  ],
+  "home.section.discoverTrendingSeries": [
+    {
+      "type": 0,
+      "value": "热门剧集"
+    }
+  ],
+  "home.section.discoverUpcomingMovies": [
+    {
+      "type": 0,
+      "value": "即将上映的电影"
     }
   ],
   "home.section.forYou": [
@@ -805,6 +1441,210 @@
       "value": "回归剧集"
     }
   ],
+  "home.section.seasonal.christmas.classics": [
+    {
+      "type": 0,
+      "value": "圣诞经典"
+    }
+  ],
+  "home.section.seasonal.christmas.comedies": [
+    {
+      "type": 0,
+      "value": "圣诞喜剧"
+    }
+  ],
+  "home.section.seasonal.christmas.family": [
+    {
+      "type": 0,
+      "value": "家庭圣诞"
+    }
+  ],
+  "home.section.seasonal.christmas.favorites": [
+    {
+      "type": 0,
+      "value": "圣诞最爱"
+    }
+  ],
+  "home.section.seasonal.christmas.hallmark": [
+    {
+      "type": 0,
+      "value": "Hallmark圣诞电影"
+    }
+  ],
+  "home.section.seasonal.christmas.romcoms": [
+    {
+      "type": 0,
+      "value": "圣诞爱情喜剧"
+    }
+  ],
+  "home.section.seasonal.easter.faith": [
+    {
+      "type": 0,
+      "value": "复活节故事"
+    }
+  ],
+  "home.section.seasonal.easter.family": [
+    {
+      "type": 0,
+      "value": "复活节电影"
+    }
+  ],
+  "home.section.seasonal.familyMovieNight.favorites": [
+    {
+      "type": 0,
+      "value": "家庭最爱"
+    }
+  ],
+  "home.section.seasonal.familyMovieNight.liveAction": [
+    {
+      "type": 0,
+      "value": "家庭电影之夜"
+    }
+  ],
+  "home.section.seasonal.familyMovieNight.new": [
+    {
+      "type": 0,
+      "value": "家庭电影之夜"
+    }
+  ],
+  "home.section.seasonal.halloween.animated": [
+    {
+      "type": 0,
+      "value": "万圣节动画"
+    }
+  ],
+  "home.section.seasonal.halloween.family": [
+    {
+      "type": 0,
+      "value": "家庭万圣节"
+    }
+  ],
+  "home.section.seasonal.halloween.favorites": [
+    {
+      "type": 0,
+      "value": "万圣节最爱"
+    }
+  ],
+  "home.section.seasonal.halloween.horror": [
+    {
+      "type": 0,
+      "value": "万圣节恐怖片"
+    }
+  ],
+  "home.section.seasonal.halloween.tv": [
+    {
+      "type": 0,
+      "value": "万圣节剧集"
+    }
+  ],
+  "home.section.seasonal.newYear.favorites": [
+    {
+      "type": 0,
+      "value": "新年电影"
+    }
+  ],
+  "home.section.seasonal.saturdayMorning.cartoons": [
+    {
+      "type": 0,
+      "value": "周六早间动画"
+    }
+  ],
+  "home.section.seasonal.saturdayMorning.modern": [
+    {
+      "type": 0,
+      "value": "周六早间最爱"
+    }
+  ],
+  "home.section.seasonal.saturdayMorning.nineties": [
+    {
+      "type": 0,
+      "value": "90年代周六早间动画"
+    }
+  ],
+  "home.section.seasonal.stPatricks.irishFilm": [
+    {
+      "type": 0,
+      "value": "爱尔兰电影"
+    }
+  ],
+  "home.section.seasonal.stPatricks.irishTv": [
+    {
+      "type": 0,
+      "value": "爱尔兰剧集"
+    }
+  ],
+  "home.section.seasonal.summer.blockbusters": [
+    {
+      "type": 0,
+      "value": "夏日大片"
+    }
+  ],
+  "home.section.seasonal.summer.classicSummer": [
+    {
+      "type": 0,
+      "value": "经典夏日电影"
+    }
+  ],
+  "home.section.seasonal.summer.nostalgia": [
+    {
+      "type": 0,
+      "value": "夏日怀旧"
+    }
+  ],
+  "home.section.seasonal.summerBlockbuster.blockbusters": [
+    {
+      "type": 0,
+      "value": "夏日大片"
+    }
+  ],
+  "home.section.seasonal.summerBlockbuster.classicSummer": [
+    {
+      "type": 0,
+      "value": "经典夏日电影"
+    }
+  ],
+  "home.section.seasonal.summerBlockbuster.nostalgia": [
+    {
+      "type": 0,
+      "value": "夏日怀旧"
+    }
+  ],
+  "home.section.seasonal.thanksgiving.favorites": [
+    {
+      "type": 0,
+      "value": "感恩节电影"
+    }
+  ],
+  "home.section.seasonal.thanksgiving.feelGood": [
+    {
+      "type": 0,
+      "value": "暖心最爱"
+    }
+  ],
+  "home.section.seasonal.valentines.favorites": [
+    {
+      "type": 0,
+      "value": "情人节最爱"
+    }
+  ],
+  "home.section.seasonal.valentines.loveStories": [
+    {
+      "type": 0,
+      "value": "经典爱情故事"
+    }
+  ],
+  "home.section.seasonal.valentines.romanticDramas": [
+    {
+      "type": 0,
+      "value": "爱情剧情片"
+    }
+  ],
+  "home.section.seasonal.valentines.romcoms": [
+    {
+      "type": 0,
+      "value": "情人节爱情喜剧"
+    }
+  ],
   "home.section.seasonalPicks": [
     {
       "type": 0,
@@ -819,6 +1659,12 @@
     {
       "type": 1,
       "value": "genre"
+    }
+  ],
+  "home.section.topPicksToday": [
+    {
+      "type": 0,
+      "value": "今日精选"
     }
   ],
   "home.section.topRated": [
@@ -1077,6 +1923,16 @@
     {
       "type": 0,
       "value": "返回"
+    }
+  ],
+  "player.scrubber.endsAt": [
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "结束"
     }
   ],
   "player.seekInterval.choice": [
@@ -2570,6 +3426,12 @@
       "value": "仅主持人"
     }
   ],
+  "shuffle.nothingToPlay": [
+    {
+      "type": 0,
+      "value": "这里没有可播放的内容。"
+    }
+  ],
   "subtitleSearch.hearingImpaired": [
     {
       "type": 0,
@@ -3188,6 +4050,18 @@
     {
       "type": 0,
       "value": "正在加载成员……"
+    }
+  ],
+  "web.admin.access.groups.members.noMatches": [
+    {
+      "type": 0,
+      "value": "没有与你的搜索匹配的成员。"
+    }
+  ],
+  "web.admin.access.groups.members.search": [
+    {
+      "type": 0,
+      "value": "搜索成员"
     }
   ],
   "web.admin.access.groups.newGroup": [
@@ -19898,6 +20772,12 @@
       "value": "date"
     }
   ],
+  "web.admin.common.jobHistory.jobType.backupRestore": [
+    {
+      "type": 0,
+      "value": "备份恢复"
+    }
+  ],
   "web.admin.common.jobHistory.jobType.catalogExport": [
     {
       "type": 0,
@@ -19932,6 +20812,18 @@
     {
       "type": 0,
       "value": "媒体库刷新"
+    }
+  ],
+  "web.admin.common.jobHistory.jobType.storageTransition": [
+    {
+      "type": 0,
+      "value": "存储迁移"
+    }
+  ],
+  "web.admin.common.jobHistory.jobType.templateBundleApply": [
+    {
+      "type": 0,
+      "value": "应用模板包"
     }
   ],
   "web.admin.common.jobHistory.progress": [
@@ -23602,6 +24494,18 @@
       "value": "失败"
     }
   ],
+  "web.admin.common.taskStatus.queued": [
+    {
+      "type": 0,
+      "value": "排队中"
+    }
+  ],
+  "web.admin.common.taskStatus.running": [
+    {
+      "type": 0,
+      "value": "运行中"
+    }
+  ],
   "web.admin.common.title.header.accessGroups": [
     {
       "type": 0,
@@ -27214,6 +28118,22 @@
       "value": "label"
     }
   ],
+  "web.admin.dashboard.widgets.transcodeNodes.buildDiffersFlag": [
+    {
+      "type": 0,
+      "value": "版本不同"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.buildDiffersTitle": [
+    {
+      "type": 0,
+      "value": "版本与服务器不同。"
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
   "web.admin.dashboard.widgets.transcodeNodes.buildOutdated": [
     {
       "type": 0,
@@ -27244,6 +28164,16 @@
       "value": "date"
     }
   ],
+  "web.admin.dashboard.widgets.transcodeNodes.capSeparator": [
+    {
+      "type": 0,
+      "value": "/ "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
   "web.admin.dashboard.widgets.transcodeNodes.checked": [
     {
       "type": 0,
@@ -27252,6 +28182,30 @@
     {
       "type": 1,
       "value": "time"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.column.active": [
+    {
+      "type": 0,
+      "value": "活动"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.column.build": [
+    {
+      "type": 0,
+      "value": "版本"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.column.mbps": [
+    {
+      "type": 0,
+      "value": "Mbps"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.column.node": [
+    {
+      "type": 0,
+      "value": "节点"
     }
   ],
   "web.admin.dashboard.widgets.transcodeNodes.disabled": [
@@ -27266,7 +28220,46 @@
       "value": "没有串流节点——转码在此服务器上运行"
     }
   ],
+  "web.admin.dashboard.widgets.transcodeNodes.groupCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "个组"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.dashboard.widgets.transcodeNodes.healthy": [
+    {
+      "type": 0,
+      "value": "正常"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.healthyCount": [
+    {
+      "type": 1,
+      "value": "healthy"
+    },
+    {
+      "type": 0,
+      "value": "/"
+    },
+    {
+      "type": 1,
+      "value": "enabled"
+    },
     {
       "type": 0,
       "value": "正常"
@@ -27346,10 +28339,34 @@
       "value": "无法加载串流节点。"
     }
   ],
+  "web.admin.dashboard.widgets.transcodeNodes.loadPercent": [
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
   "web.admin.dashboard.widgets.transcodeNodes.manage": [
     {
       "type": 0,
       "value": "管理 ›"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.meterLabel": [
+    {
+      "type": 1,
+      "value": "node"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "metric"
     }
   ],
   "web.admin.dashboard.widgets.transcodeNodes.neverChecked": [
@@ -27372,6 +28389,84 @@
     {
       "type": 0,
       "value": "修订版本不可用"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.staleDisabledTitle": [
+    {
+      "type": 0,
+      "value": "此节点已关闭，因此健康检查不再更新它。"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.staleUnreachableTitle": [
+    {
+      "type": 0,
+      "value": "上次健康检查未能连接到此节点。"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.storageFlag": [
+    {
+      "type": 0,
+      "value": "存储"
+    },
+    {
+      "type": 1,
+      "value": "fill"
+    },
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.storageTitle": [
+    {
+      "type": 0,
+      "value": "转码目录已用"
+    },
+    {
+      "type": 1,
+      "value": "fill"
+    },
+    {
+      "type": 0,
+      "value": "%。"
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.streamCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "个串流"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.streamsAbbr": [
+    {
+      "type": 0,
+      "value": "串流"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.streamsTitle": [
+    {
+      "type": 0,
+      "value": "串流"
     }
   ],
   "web.admin.dashboard.widgets.transcodeNodes.summary": [
@@ -27446,6 +28541,40 @@
     {
       "type": 0,
       "value": "节点"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.transcodeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "个转码"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.transcodesAbbr": [
+    {
+      "type": 0,
+      "value": "转码"
+    }
+  ],
+  "web.admin.dashboard.widgets.transcodeNodes.transcodesTitle": [
+    {
+      "type": 0,
+      "value": "转码"
     }
   ],
   "web.admin.dashboard.widgets.transcodeNodes.unhealthy": [
@@ -34791,6 +35920,299 @@
       "value": "存储"
     }
   ],
+  "web.admin.errors.activityCursorRepeated": [
+    {
+      "type": 0,
+      "value": "活动游标重复。请重新加载历史记录。"
+    }
+  ],
+  "web.admin.errors.activityItemsInvalid": [
+    {
+      "type": 0,
+      "value": "活动条目无效。请重新加载历史记录。"
+    }
+  ],
+  "web.admin.errors.activityPageInvalid": [
+    {
+      "type": 0,
+      "value": "活动页面无效。请重新加载历史记录。"
+    }
+  ],
+  "web.admin.errors.apiKeyCursorRepeated": [
+    {
+      "type": 0,
+      "value": "API密钥游标重复。请重新加载列表。"
+    }
+  ],
+  "web.admin.errors.apiKeyPaginationInvalid": [
+    {
+      "type": 0,
+      "value": "API密钥分页无效。请重新加载列表。"
+    }
+  ],
+  "web.admin.errors.apiKeyReloadBeforeSaving": [
+    {
+      "type": 0,
+      "value": "保存前请重新加载此API密钥：需要强ETag。"
+    }
+  ],
+  "web.admin.errors.apiKeysProfileChanged": [
+    {
+      "type": 0,
+      "value": "更改个人资料后，请重新加载API密钥。"
+    }
+  ],
+  "web.admin.errors.artworkCacheIncomplete": [
+    {
+      "type": 0,
+      "value": "图片缓存未完成。请查看管理员诊断了解详情。"
+    }
+  ],
+  "web.admin.errors.artworkUpdateFailed": [
+    {
+      "type": 0,
+      "value": "图片更新失败"
+    }
+  ],
+  "web.admin.errors.catalogRevisionMissing": [
+    {
+      "type": 0,
+      "value": "目录版本不可用。请先重新加载，再进行编辑。"
+    }
+  ],
+  "web.admin.errors.collectionOrderChanged": [
+    {
+      "type": 0,
+      "value": "加载期间合集顺序已更改。请先重新加载，再调整顺序。"
+    }
+  ],
+  "web.admin.errors.devicesTooMany": [
+    {
+      "type": 0,
+      "value": "设备过多，无法显示。请重新加载列表。"
+    }
+  ],
+  "web.admin.errors.diagnosticDownloadFailed": [
+    {
+      "type": 0,
+      "value": "诊断报告下载失败（"
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "）。"
+    }
+  ],
+  "web.admin.errors.diagnosticFormatUnexpected": [
+    {
+      "type": 0,
+      "value": "服务器返回了意外的诊断报告格式。"
+    }
+  ],
+  "web.admin.errors.diagnosticsAvailabilityUnknown": [
+    {
+      "type": 0,
+      "value": "无法识别诊断可用状态。请先重新加载，再更改上传设置。"
+    }
+  ],
+  "web.admin.errors.historyImportConfigReload": [
+    {
+      "type": 0,
+      "value": "保存前请重新加载此配置。"
+    }
+  ],
+  "web.admin.errors.historyImportPageIncomplete": [
+    {
+      "type": 0,
+      "value": "历史记录导入页面不完整。请重新加载后重试。"
+    }
+  ],
+  "web.admin.errors.historyImportStatusMissing": [
+    {
+      "type": 0,
+      "value": "已接受的导入未包含预期的状态位置。请先刷新运行记录，再重试。"
+    }
+  ],
+  "web.admin.errors.imageChoicesChanged": [
+    {
+      "type": 0,
+      "value": "图片选项已更改。请重新加载后重试。"
+    }
+  ],
+  "web.admin.errors.integrationPageIncomplete": [
+    {
+      "type": 0,
+      "value": "集成页面不完整。请重新加载后重试。"
+    }
+  ],
+  "web.admin.errors.itemFilesIncomplete": [
+    {
+      "type": 0,
+      "value": "条目文件列表不完整。请重新加载后重试。"
+    }
+  ],
+  "web.admin.errors.layoutRevisionMissing": [
+    {
+      "type": 0,
+      "value": "缺少服务器布局写入版本；请先重新加载，再重新保存。"
+    }
+  ],
+  "web.admin.errors.nodeWriteAckMissing": [
+    {
+      "type": 0,
+      "value": "无法获取节点写入确认。请先检查当前状态，再重新保存。"
+    }
+  ],
+  "web.admin.errors.nodesReloadReopen": [
+    {
+      "type": 0,
+      "value": "请重新加载节点并重新打开此操作，以获取其原始版本。"
+    }
+  ],
+  "web.admin.errors.playbackHistoryInvalid": [
+    {
+      "type": 0,
+      "value": "播放历史记录页面无效。请重新加载页面。"
+    }
+  ],
+  "web.admin.errors.requestPageIncomplete": [
+    {
+      "type": 0,
+      "value": "请求页面不完整。请重新加载后重试。"
+    }
+  ],
+  "web.admin.errors.requestsEditorReload": [
+    {
+      "type": 0,
+      "value": "保存前请重新加载此编辑器。"
+    }
+  ],
+  "web.admin.errors.scheduleRevisionMissing": [
+    {
+      "type": 0,
+      "value": "计划版本不可用。请先重新加载，再进行编辑。"
+    }
+  ],
+  "web.admin.errors.seekPreviewsNoneQueued": [
+    {
+      "type": 0,
+      "value": "没有加入队列的进度预览"
+    }
+  ],
+  "web.admin.errors.seekPreviewsQueueFailed": [
+    {
+      "type": 0,
+      "value": "无法将进度预览加入队列"
+    }
+  ],
+  "web.admin.errors.seekPreviewsQueued": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "已为"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "个文件将进度预览加入队列"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.errors.sessionsTooMany": [
+    {
+      "type": 0,
+      "value": "会话过多，无法显示。请重新加载列表。"
+    }
+  ],
+  "web.admin.errors.settingsPageInvalid": [
+    {
+      "type": 0,
+      "value": "设置页面无效。请重新加载设置。"
+    }
+  ],
+  "web.admin.errors.subtitleDeleteAttempted": [
+    {
+      "type": 0,
+      "value": "已尝试过此删除操作。请关闭后重新查看字幕。"
+    }
+  ],
+  "web.admin.errors.subtitleDownloadFailed": [
+    {
+      "type": 0,
+      "value": "字幕下载失败（"
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "）。"
+    }
+  ],
+  "web.admin.errors.subtitleDownloadUnexpected": [
+    {
+      "type": 0,
+      "value": "字幕下载响应异常。"
+    }
+  ],
+  "web.admin.errors.subtitleIdentityChanged": [
+    {
+      "type": 0,
+      "value": "字幕标识已更改。请重新加载列表。"
+    }
+  ],
+  "web.admin.errors.subtitleListInvalid": [
+    {
+      "type": 0,
+      "value": "字幕列表无效。请重新加载页面。"
+    }
+  ],
+  "web.admin.errors.subtitleValidatorRequired": [
+    {
+      "type": 0,
+      "value": "需要强字幕编辑验证器。请重新打开编辑器。"
+    }
+  ],
+  "web.admin.errors.translationCancelFailed": [
+    {
+      "type": 0,
+      "value": "无法取消翻译"
+    }
+  ],
+  "web.admin.errors.userPaginationInvalid": [
+    {
+      "type": 0,
+      "value": "用户分页无效。请重新加载列表。"
+    }
+  ],
+  "web.admin.errors.userReloadBeforeSaving": [
+    {
+      "type": 0,
+      "value": "保存前请重新加载此用户：需要强ETag。"
+    }
+  ],
+  "web.admin.errors.watchHistoryInvalid": [
+    {
+      "type": 0,
+      "value": "观看历史记录页面无效。请重新加载页面。"
+    }
+  ],
   "web.admin.history.column.ended": [
     {
       "type": 0,
@@ -36894,6 +38316,24 @@
       "value": "：可能已恢复，但Silo无法确认。请重新加载以检查。"
     }
   ],
+  "web.admin.homeRows.row.cantCopyToLibraries": [
+    {
+      "type": 0,
+      "value": "无法将此行添加到其他媒体库。"
+    }
+  ],
+  "web.admin.homeRows.row.moveFailed": [
+    {
+      "type": 0,
+      "value": "无法移动此行"
+    }
+  ],
+  "web.admin.homeRows.row.saveFailed": [
+    {
+      "type": 0,
+      "value": "无法保存此行"
+    }
+  ],
   "web.admin.homeRows.rowMenu.addToOtherLibraries": [
     {
       "type": 0,
@@ -37639,6 +39079,34 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.list.hidePaths": [
+    {
+      "type": 0,
+      "value": "隐藏路径"
+    }
+  ],
+  "web.admin.libraries.list.moreActions": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "的更多操作"
+    }
+  ],
+  "web.admin.libraries.list.moveDown": [
+    {
+      "type": 0,
+      "value": "下移"
+    }
+  ],
+  "web.admin.libraries.list.moveUp": [
+    {
+      "type": 0,
+      "value": "上移"
+    }
+  ],
   "web.admin.libraries.list.neverScanned": [
     {
       "type": 0,
@@ -37667,6 +39135,12 @@
     {
       "type": 0,
       "value": "扫描媒体库"
+    }
+  ],
+  "web.admin.libraries.list.showPaths": [
+    {
+      "type": 0,
+      "value": "显示路径"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -42864,6 +44338,60 @@
       "value": "正在卸载……"
     }
   ],
+  "web.admin.plugins.detail.updateFailed": [
+    {
+      "type": 8,
+      "value": "b",
+      "children": [
+        {
+          "type": 0,
+          "value": "Silo无法将"
+        },
+        {
+          "type": 1,
+          "value": "name"
+        },
+        {
+          "type": 0,
+          "value": "更新到"
+        },
+        {
+          "type": 1,
+          "value": "version"
+        },
+        {
+          "type": 0,
+          "value": "。"
+        }
+      ]
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "web.admin.plugins.detail.updateFailedStays": [
+    {
+      "type": 0,
+      "value": "它仍为"
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "版本。上次尝试时间："
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
   "web.admin.plugins.detail.updateTo": [
     {
       "type": 0,
@@ -43856,6 +45384,20 @@
     {
       "type": 0,
       "value": "可用"
+    }
+  ],
+  "web.admin.plugins.tile.updateFailed": [
+    {
+      "type": 0,
+      "value": "更新到"
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "失败"
     }
   ],
   "web.admin.plugins.tile.updatesPaused": [
@@ -66640,6 +68182,12 @@
       "value": "最长运行时间（不强制执行）："
     }
   ],
+  "web.admin.tasks.detail.maxRuntimeLabel": [
+    {
+      "type": 0,
+      "value": "最长运行时间："
+    }
+  ],
   "web.admin.tasks.detail.maxRuntimeNone": [
     {
       "type": 0,
@@ -67040,6 +68588,12 @@
       "value": "提供商图片"
     }
   ],
+  "web.admin.tasks.refreshReason.providerIdIncomplete": [
+    {
+      "type": 0,
+      "value": "提供商ID不完整"
+    }
+  ],
   "web.admin.tasks.refreshReason.refreshFailure": [
     {
       "type": 0,
@@ -67142,6 +68696,798 @@
     {
       "type": 0,
       "value": "正在停止……"
+    }
+  ],
+  "web.admin.tasks.task.autoscan_poll.description": [
+    {
+      "type": 0,
+      "value": "轮询已安装的扫描来源提供商以检测更改，并将重新扫描加入队列"
+    }
+  ],
+  "web.admin.tasks.task.autoscan_poll.name": [
+    {
+      "type": 0,
+      "value": "Autoscan轮询"
+    }
+  ],
+  "web.admin.tasks.task.autoscan_webhook_retry.description": [
+    {
+      "type": 0,
+      "value": "重试已持久接收的Autoscan webhook投递"
+    }
+  ],
+  "web.admin.tasks.task.autoscan_webhook_retry.name": [
+    {
+      "type": 0,
+      "value": "Autoscan webhook重试"
+    }
+  ],
+  "web.admin.tasks.task.backfill_ebook_metadata.description": [
+    {
+      "type": 0,
+      "value": "补全旧版电子书积压数据，且不与计划的元数据同步争用资源"
+    }
+  ],
+  "web.admin.tasks.task.backfill_ebook_metadata.name": [
+    {
+      "type": 0,
+      "value": "回填电子书元数据"
+    }
+  ],
+  "web.admin.tasks.task.backfill_hdr10_plus.description": [
+    {
+      "type": 0,
+      "value": "对于在Silo支持检测HDR10+之前扫描的HDR视频，每个文件读取一次首帧，使HDR10+文件被标记为HDR10+而非HDR10。"
+    }
+  ],
+  "web.admin.tasks.task.backfill_hdr10_plus.name": [
+    {
+      "type": 0,
+      "value": "检测HDR10+视频"
+    }
+  ],
+  "web.admin.tasks.task.backfill_matroska_track_numbers.description": [
+    {
+      "type": 0,
+      "value": "对于在Silo记录字幕轨道编号之前扫描的含文本字幕的MKV文件，每个文件读取一次轨道列表，使应用无需服务器提取即可显示内嵌字幕。"
+    }
+  ],
+  "web.admin.tasks.task.backfill_matroska_track_numbers.name": [
+    {
+      "type": 0,
+      "value": "记录Matroska字幕轨道编号"
+    }
+  ],
+  "web.admin.tasks.task.backfill_media_item_aliases.description": [
+    {
+      "type": 0,
+      "value": "以可续传的批次，根据现有的原始和本地化媒体标题生成可搜索的别名。"
+    }
+  ],
+  "web.admin.tasks.task.backfill_media_item_aliases.name": [
+    {
+      "type": 0,
+      "value": "回填媒体项目别名"
+    }
+  ],
+  "web.admin.tasks.task.backfill_metadata_images.description": [
+    {
+      "type": 0,
+      "value": "手动在整个目录中查找并缓存缺失的提供商图片"
+    }
+  ],
+  "web.admin.tasks.task.backfill_metadata_images.name": [
+    {
+      "type": 0,
+      "value": "回填元数据图片"
+    }
+  ],
+  "web.admin.tasks.task.backup.description": [
+    {
+      "type": 0,
+      "value": "将数据库和上传的文件备份到备份目标位置，然后删除超出配置数量的备份"
+    }
+  ],
+  "web.admin.tasks.task.backup.name": [
+    {
+      "type": 0,
+      "value": "备份服务器"
+    }
+  ],
+  "web.admin.tasks.task.bulk_metadata_enrichment.description": [
+    {
+      "type": 0,
+      "value": "使用支持批量请求的扩充提供商（如MDBList），一次查询多部电影和剧集"
+    }
+  ],
+  "web.admin.tasks.task.bulk_metadata_enrichment.name": [
+    {
+      "type": 0,
+      "value": "批量元数据扩充"
+    }
+  ],
+  "web.admin.tasks.task.cache_metadata_images.description": [
+    {
+      "type": 0,
+      "value": "仅处理已由扫描、刷新和元数据更改加入队列的图片"
+    }
+  ],
+  "web.admin.tasks.task.cache_metadata_images.name": [
+    {
+      "type": 0,
+      "value": "缓存元数据图片"
+    }
+  ],
+  "web.admin.tasks.task.chapter_thumbnail_backfill.description": [
+    {
+      "type": 0,
+      "value": "为已启用此功能的媒体库生成缺失的章节缩略图"
+    }
+  ],
+  "web.admin.tasks.task.chapter_thumbnail_backfill.name": [
+    {
+      "type": 0,
+      "value": "回填章节缩略图"
+    }
+  ],
+  "web.admin.tasks.task.check_plugin_updates.description": [
+    {
+      "type": 0,
+      "value": "获取插件仓库，并应用或记录可用的插件更新"
+    }
+  ],
+  "web.admin.tasks.task.check_plugin_updates.name": [
+    {
+      "type": 0,
+      "value": "检查插件更新"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_activity_log.description": [
+    {
+      "type": 0,
+      "value": "清理已过期的活动日志行和分区"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_activity_log.name": [
+    {
+      "type": 0,
+      "value": "清理活动日志"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_artwork_revisions.description": [
+    {
+      "type": 0,
+      "value": "在宽限期后，删除没有任何目录记录引用的未发布或已被替换的不可变图片版本。"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_artwork_revisions.name": [
+    {
+      "type": 0,
+      "value": "清理图片版本"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_auth_sessions.description": [
+    {
+      "type": 0,
+      "value": "删除已过期的登录会话，无论是否已撤销"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_auth_sessions.name": [
+    {
+      "type": 0,
+      "value": "清理已过期的登录会话"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_autoscan_events.description": [
+    {
+      "type": 0,
+      "value": "从活动历史中清理旧的Autoscan轮询和webhook事件"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_autoscan_events.name": [
+    {
+      "type": 0,
+      "value": "清理Autoscan事件"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_catalog_search_index_events.description": [
+    {
+      "type": 0,
+      "value": "在恢复窗口期后，清理已确认的目录搜索发件箱事件。"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_catalog_search_index_events.name": [
+    {
+      "type": 0,
+      "value": "清理目录搜索索引事件"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_chapter_thumbnail_originals.description": [
+    {
+      "type": 0,
+      "value": "删除早期版本存储的全尺寸章节缩略图。客户端只加载300px缩略图；存储中不再有此类图片时，此任务会停止。"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_chapter_thumbnail_originals.name": [
+    {
+      "type": 0,
+      "value": "清理全尺寸章节缩略图"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_client_diagnostics.description": [
+    {
+      "type": 0,
+      "value": "清理已过期的客户端诊断报告和孤立的数据包"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_client_diagnostics.name": [
+    {
+      "type": 0,
+      "value": "清理客户端诊断"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_device_logins.description": [
+    {
+      "type": 0,
+      "value": "删除早已过期的设备登录请求"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_device_logins.name": [
+    {
+      "type": 0,
+      "value": "清理已过期的设备登录请求"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_oauth_flows.description": [
+    {
+      "type": 0,
+      "value": "删除早已过期的OAuth登录流程"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_oauth_flows.name": [
+    {
+      "type": 0,
+      "value": "清理已过期的OAuth登录流程"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_operational_log.description": [
+    {
+      "type": 0,
+      "value": "清理已过期的运行日志行和分区"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_operational_log.name": [
+    {
+      "type": 0,
+      "value": "清理运行日志"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_orphaned_media_items.description": [
+    {
+      "type": 0,
+      "value": "删除没有文件、媒体库归属或持久用户/同步引用的已分离临时媒体项目。"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_orphaned_media_items.name": [
+    {
+      "type": 0,
+      "value": "清理孤立的媒体项目"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_policy_decision_log.description": [
+    {
+      "type": 0,
+      "value": "清理已过期的策略决策日志行和分区"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_policy_decision_log.name": [
+    {
+      "type": 0,
+      "value": "清理策略决策日志"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_removed_media_images.description": [
+    {
+      "type": 0,
+      "value": "在宽限期后，删除已从目录中移除的媒体文件的章节缩略图和拖动预览，以及已被替换的拖动预览。"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_removed_media_images.name": [
+    {
+      "type": 0,
+      "value": "清理已移除媒体的图片"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_task_history.description": [
+    {
+      "type": 0,
+      "value": "清理旧的后台任务运行历史"
+    }
+  ],
+  "web.admin.tasks.task.cleanup_task_history.name": [
+    {
+      "type": 0,
+      "value": "清理任务历史"
+    }
+  ],
+  "web.admin.tasks.task.contribute_markers.description": [
+    {
+      "type": 0,
+      "value": "将此服务器检测到的符合条件的片头和片尾发送给已开启自动共享的提供商，并将保存时未能送达的手动更正发送给接受更正的提供商。"
+    }
+  ],
+  "web.admin.tasks.task.contribute_markers.name": [
+    {
+      "type": 0,
+      "value": "共享检测到的标记"
+    }
+  ],
+  "web.admin.tasks.task.database_maintenance.description": [
+    {
+      "type": 0,
+      "value": "清理已过期的活动和策略日志、任务历史、Autoscan事件、登录会话、设备登录请求、OAuth登录流程、搜索索引事件和通知，并准备即将使用的日志分区"
+    }
+  ],
+  "web.admin.tasks.task.database_maintenance.name": [
+    {
+      "type": 0,
+      "value": "数据库维护"
+    }
+  ],
+  "web.admin.tasks.task.detect_intro_markers.description": [
+    {
+      "type": 0,
+      "value": "在已启用标记检测的媒体库中分析文件的片头和片尾。"
+    }
+  ],
+  "web.admin.tasks.task.detect_intro_markers.name": [
+    {
+      "type": 0,
+      "value": "在此服务器上检测标记"
+    }
+  ],
+  "web.admin.tasks.task.encode_download_artifacts.description": [
+    {
+      "type": 0,
+      "value": "编码队列中的Remux/转码下载文件，恢复滞留的作业，并清除旧文件"
+    }
+  ],
+  "web.admin.tasks.task.encode_download_artifacts.name": [
+    {
+      "type": 0,
+      "value": "准备下载文件"
+    }
+  ],
+  "web.admin.tasks.task.generate_extra_stills.description": [
+    {
+      "type": 0,
+      "value": "为旁边没有图片文件的每个本地花絮截取一帧"
+    }
+  ],
+  "web.admin.tasks.task.generate_extra_stills.name": [
+    {
+      "type": 0,
+      "value": "生成花絮缩略图"
+    }
+  ],
+  "web.admin.tasks.task.match_media.description": [
+    {
+      "type": 0,
+      "value": "将未匹配的媒体文件与提供商的元数据进行匹配"
+    }
+  ],
+  "web.admin.tasks.task.match_media.name": [
+    {
+      "type": 0,
+      "value": "匹配媒体文件"
+    }
+  ],
+  "web.admin.tasks.task.notifications_retention.description": [
+    {
+      "type": 0,
+      "value": "根据保留设置清理旧通知和已处理的发布事件。"
+    }
+  ],
+  "web.admin.tasks.task.notifications_retention.name": [
+    {
+      "type": 0,
+      "value": "清理通知"
+    }
+  ],
+  "web.admin.tasks.task.queue_seek_previews.description": [
+    {
+      "type": 0,
+      "value": "为已开启拖动预览的媒体库中的视频文件将预览加入队列，并将与文件或设置不再匹配的预览重新加入队列。"
+    }
+  ],
+  "web.admin.tasks.task.queue_seek_previews.name": [
+    {
+      "type": 0,
+      "value": "将拖动预览加入队列"
+    }
+  ],
+  "web.admin.tasks.task.rebuild_catalog_search_index.description": [
+    {
+      "type": 0,
+      "value": "从PostgreSQL重建已配置的Meilisearch目录索引。"
+    }
+  ],
+  "web.admin.tasks.task.rebuild_catalog_search_index.name": [
+    {
+      "type": 0,
+      "value": "重建目录搜索索引"
+    }
+  ],
+  "web.admin.tasks.task.rebuild_release_interest.description": [
+    {
+      "type": 0,
+      "value": "重新计算各个人资料关注哪些剧集（收藏、待看清单、观看进度），用于新集通知。"
+    }
+  ],
+  "web.admin.tasks.task.rebuild_release_interest.name": [
+    {
+      "type": 0,
+      "value": "重建通知关注"
+    }
+  ],
+  "web.admin.tasks.task.recheck_external_identities.description": [
+    {
+      "type": 0,
+      "value": "向外部登录提供商查询持有API密钥或空闲会话的账户，并撤销提供商不再允许的账户的访问权限"
+    }
+  ],
+  "web.admin.tasks.task.recheck_external_identities.name": [
+    {
+      "type": 0,
+      "value": "重新检查外部登录账户"
+    }
+  ],
+  "web.admin.tasks.task.reconcile_artwork_cache.description": [
+    {
+      "type": 0,
+      "value": "手动对照对象存储验证已缓存的图片；缺失的记录可能会在整个媒体库中被重置，需要明确运行回填元数据图片任务"
+    }
+  ],
+  "web.admin.tasks.task.reconcile_artwork_cache.name": [
+    {
+      "type": 0,
+      "value": "核对图片缓存"
+    }
+  ],
+  "web.admin.tasks.task.reconcile_requests.description": [
+    {
+      "type": 0,
+      "value": "对照Radarr、Sonarr和Silo目录检查已批准和进行中的媒体请求"
+    }
+  ],
+  "web.admin.tasks.task.reconcile_requests.name": [
+    {
+      "type": 0,
+      "value": "核对请求"
+    }
+  ],
+  "web.admin.tasks.task.reconcile_watch_history.description": [
+    {
+      "type": 0,
+      "value": "使用存储的稳定标识，对照当前媒体目录重新解析孤立的观看历史记录。"
+    }
+  ],
+  "web.admin.tasks.task.reconcile_watch_history.name": [
+    {
+      "type": 0,
+      "value": "核对观看历史"
+    }
+  ],
+  "web.admin.tasks.task.refresh_all_library_metadata.description": [
+    {
+      "type": 0,
+      "value": "为所有已启用媒体库中的每个项目重新获取提供商元数据。仅在手动启动时运行；大型媒体库可能需要数小时，并会发出大量提供商请求"
+    }
+  ],
+  "web.admin.tasks.task.refresh_all_library_metadata.name": [
+    {
+      "type": 0,
+      "value": "刷新所有媒体库元数据"
+    }
+  ],
+  "web.admin.tasks.task.refresh_anime_ids.description": [
+    {
+      "type": 0,
+      "value": "下载基于AniDB的动画列表，请求路由使用该列表识别TMDB未标记的动画"
+    }
+  ],
+  "web.admin.tasks.task.refresh_anime_ids.name": [
+    {
+      "type": 0,
+      "value": "刷新动画列表"
+    }
+  ],
+  "web.admin.tasks.task.refresh_metadata.description": [
+    {
+      "type": 0,
+      "value": "从提供商刷新现有媒体项目的过期元数据"
+    }
+  ],
+  "web.admin.tasks.task.refresh_metadata.name": [
+    {
+      "type": 0,
+      "value": "刷新元数据"
+    }
+  ],
+  "web.admin.tasks.task.refresh_request_discover_lists.description": [
+    {
+      "type": 0,
+      "value": "下载请求发现页面中列表行所使用的TMDB和MDBList列表"
+    }
+  ],
+  "web.admin.tasks.task.refresh_request_discover_lists.name": [
+    {
+      "type": 0,
+      "value": "刷新请求发现列表"
+    }
+  ],
+  "web.admin.tasks.task.refresh_request_downloads.description": [
+    {
+      "type": 0,
+      "value": "刷新Radarr、Sonarr或其他请求插件正在下载的媒体请求的下载进度"
+    }
+  ],
+  "web.admin.tasks.task.refresh_request_downloads.name": [
+    {
+      "type": 0,
+      "value": "刷新请求下载"
+    }
+  ],
+  "web.admin.tasks.task.refresh_seasonal_lists.description": [
+    {
+      "type": 0,
+      "value": "在每个节日前下载首页季节精选行所使用的精选MDBList列表"
+    }
+  ],
+  "web.admin.tasks.task.refresh_seasonal_lists.name": [
+    {
+      "type": 0,
+      "value": "刷新季节列表"
+    }
+  ],
+  "web.admin.tasks.task.refresh_series_air_dates.description": [
+    {
+      "type": 0,
+      "value": "对于下一集已播出的剧集，更新其最新播出集的日期。"
+    }
+  ],
+  "web.admin.tasks.task.refresh_series_air_dates.name": [
+    {
+      "type": 0,
+      "value": "刷新剧集播出日期"
+    }
+  ],
+  "web.admin.tasks.task.refresh_trending_discover.description": [
+    {
+      "type": 0,
+      "value": "刷新为热门发现首页版块和日历热门视图保存的外部热门列表（TMDB）"
+    }
+  ],
+  "web.admin.tasks.task.refresh_trending_discover.name": [
+    {
+      "type": 0,
+      "value": "刷新热门发现"
+    }
+  ],
+  "web.admin.tasks.task.release_stored_artwork.description": [
+    {
+      "type": 0,
+      "value": "在提供商图片未保存到存储期间，将已存储的图片重新指向其提供商，并为只能由提供商替换的图片将刷新加入队列"
+    }
+  ],
+  "web.admin.tasks.task.release_stored_artwork.name": [
+    {
+      "type": 0,
+      "value": "释放已存储的图片"
+    }
+  ],
+  "web.admin.tasks.task.repair_provider_id_integrity.description": [
+    {
+      "type": 0,
+      "value": "修复media_items表中提供商ID列与规范化提供商ID行之间的不一致。"
+    }
+  ],
+  "web.admin.tasks.task.repair_provider_id_integrity.name": [
+    {
+      "type": 0,
+      "value": "修复提供商ID完整性"
+    }
+  ],
+  "web.admin.tasks.task.scan_libraries.description": [
+    {
+      "type": 0,
+      "value": "为所有已启用的媒体库将持久的完整媒体库扫描加入队列；实际扫描进度可在管理媒体库和服务器活动中查看"
+    }
+  ],
+  "web.admin.tasks.task.scan_libraries.name": [
+    {
+      "type": 0,
+      "value": "将媒体库扫描加入队列"
+    }
+  ],
+  "web.admin.tasks.task.seed_content_availability.description": [
+    {
+      "type": 0,
+      "value": "将现有的集和电影存档内容记录为已发布，使新内容通知只针对之后加入的项目发送。"
+    }
+  ],
+  "web.admin.tasks.task.seed_content_availability.name": [
+    {
+      "type": 0,
+      "value": "初始化内容可用性"
+    }
+  ],
+  "web.admin.tasks.task.setting_mutations_retention.description": [
+    {
+      "type": 0,
+      "value": "从每个用户的存储中删除已过期的设置更改幂等回执。"
+    }
+  ],
+  "web.admin.tasks.task.setting_mutations_retention.name": [
+    {
+      "type": 0,
+      "value": "清理设置更改回执"
+    }
+  ],
+  "web.admin.tasks.task.summarize_api_usage.description": [
+    {
+      "type": 0,
+      "value": "按登录会话统计API请求数，用于仪表板的API客户端卡片"
+    }
+  ],
+  "web.admin.tasks.task.summarize_api_usage.name": [
+    {
+      "type": 0,
+      "value": "汇总API使用情况"
+    }
+  ],
+  "web.admin.tasks.task.sweep_artwork_storage.description": [
+    {
+      "type": 0,
+      "value": "删除没有任何目录记录引用的已缓存图片对象，回收图片垃圾回收器未处理到的版本"
+    }
+  ],
+  "web.admin.tasks.task.sweep_artwork_storage.name": [
+    {
+      "type": 0,
+      "value": "清理图片存储"
+    }
+  ],
+  "web.admin.tasks.task.sweep_orphaned_media_images.description": [
+    {
+      "type": 0,
+      "value": "查找已不再被引用的章节缩略图和跳转预览图，并安排删除。"
+    }
+  ],
+  "web.admin.tasks.task.sweep_orphaned_media_images.name": [
+    {
+      "type": 0,
+      "value": "清理孤立的媒体图片"
+    }
+  ],
+  "web.admin.tasks.task.sync_audiobook_metadata.description": [
+    {
+      "type": 0,
+      "value": "为尚未补充信息的有声书获取元数据（封面、简介、朗读者）"
+    }
+  ],
+  "web.admin.tasks.task.sync_audiobook_metadata.name": [
+    {
+      "type": 0,
+      "value": "同步有声书元数据"
+    }
+  ],
+  "web.admin.tasks.task.sync_catalog_search_index.description": [
+    {
+      "type": 0,
+      "value": "在需要时构建或升级Meilisearch目录索引，然后同步待处理的目录更改。"
+    }
+  ],
+  "web.admin.tasks.task.sync_catalog_search_index.name": [
+    {
+      "type": 0,
+      "value": "同步目录搜索索引"
+    }
+  ],
+  "web.admin.tasks.task.sync_collections.description": [
+    {
+      "type": 0,
+      "value": "同步设置了自动同步计划的合集"
+    }
+  ],
+  "web.admin.tasks.task.sync_collections.name": [
+    {
+      "type": 0,
+      "value": "同步合集"
+    }
+  ],
+  "web.admin.tasks.task.sync_ebook_metadata.description": [
+    {
+      "type": 0,
+      "value": "为新电子书和需要定期刷新的电子书获取元数据"
+    }
+  ],
+  "web.admin.tasks.task.sync_ebook_metadata.name": [
+    {
+      "type": 0,
+      "value": "同步电子书元数据"
+    }
+  ],
+  "web.admin.tasks.task.sync_manga_metadata.description": [
+    {
+      "type": 0,
+      "value": "为尚未补充信息的漫画获取元数据（封面、简介、作者）"
+    }
+  ],
+  "web.admin.tasks.task.sync_manga_metadata.name": [
+    {
+      "type": 0,
+      "value": "同步漫画元数据"
+    }
+  ],
+  "web.admin.tasks.task.sync_markers.description": [
+    {
+      "type": 0,
+      "value": "从已启用的在线提供商获取缺失的标记，并刷新已保存的标记。需要开启保存到媒体库。"
+    }
+  ],
+  "web.admin.tasks.task.sync_markers.name": [
+    {
+      "type": 0,
+      "value": "同步在线标记"
+    }
+  ],
+  "web.admin.tasks.task.sync_movie_box_sets.description": [
+    {
+      "type": 0,
+      "value": "在开启了系列电影的媒体库中，查找每部电影所属的TMDB系列电影，并刷新这些系列电影的名称、图片和顺序。"
+    }
+  ],
+  "web.admin.tasks.task.sync_movie_box_sets.name": [
+    {
+      "type": 0,
+      "value": "同步系列电影"
+    }
+  ],
+  "web.admin.tasks.task.sync_podcast_feeds.description": [
+    {
+      "type": 0,
+      "value": "刷新到期需要轮询的RSS播客订阅源，并更新或插入新的单集"
+    }
+  ],
+  "web.admin.tasks.task.sync_podcast_feeds.name": [
+    {
+      "type": 0,
+      "value": "同步播客订阅源"
+    }
+  ],
+  "web.admin.tasks.task.sync_user_collections.description": [
+    {
+      "type": 0,
+      "value": "按计划刷新个人资料拥有的导入合集（TMDB、MDBList）"
+    }
+  ],
+  "web.admin.tasks.task.sync_user_collections.name": [
+    {
+      "type": 0,
+      "value": "同步用户合集"
+    }
+  ],
+  "web.admin.tasks.task.sync_watch_providers.description": [
+    {
+      "type": 0,
+      "value": "检查已关联的观看提供商是否有到期的自动同步工作"
+    }
+  ],
+  "web.admin.tasks.task.sync_watch_providers.name": [
+    {
+      "type": 0,
+      "value": "同步观看提供商"
     }
   ],
   "web.admin.tasks.triggerText.daily": [
@@ -71031,6 +73377,66 @@
       "value": "为此剧集添加设置项"
     }
   ],
+  "web.admin.users.detail.preferences.category.appearance": [
+    {
+      "type": 0,
+      "value": "外观"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.catalog": [
+    {
+      "type": 0,
+      "value": "目录"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.downloads": [
+    {
+      "type": 0,
+      "value": "下载"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.nav": [
+    {
+      "type": 0,
+      "value": "侧边栏"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.navigation": [
+    {
+      "type": 0,
+      "value": "导航"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.playback": [
+    {
+      "type": 0,
+      "value": "播放"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.player": [
+    {
+      "type": 0,
+      "value": "播放器"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.requests": [
+    {
+      "type": 0,
+      "value": "请求"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.search": [
+    {
+      "type": 0,
+      "value": "搜索"
+    }
+  ],
+  "web.admin.users.detail.preferences.category.watch_party": [
+    {
+      "type": 0,
+      "value": "Watch Party"
+    }
+  ],
   "web.admin.users.detail.preferences.clear.confirm": [
     {
       "type": 0,
@@ -73064,6 +75470,16 @@
       "value": "无法加载用户。"
     }
   ],
+  "web.admin.users.list.moreActions": [
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "的更多操作"
+    }
+  ],
   "web.admin.users.list.nextPage": [
     {
       "type": 0,
@@ -73074,6 +75490,12 @@
     {
       "type": 0,
       "value": "无组"
+    }
+  ],
+  "web.admin.users.list.noMatches": [
+    {
+      "type": 0,
+      "value": "没有与你的搜索或筛选条件匹配的用户。"
     }
   ],
   "web.admin.users.list.pageRange": [
@@ -76074,6 +78496,12 @@
       "value": "……"
     }
   ],
+  "web.auth.loginSubtitle.default": [
+    {
+      "type": 0,
+      "value": "使用现有账户登录。"
+    }
+  ],
   "web.auth.networkSignIn.addressRequired": [
     {
       "type": 0,
@@ -77432,6 +79860,37 @@
       "value": "移除剧集观看数据？"
     }
   ],
+  "web.catalog.history.removeFailed": [
+    {
+      "type": 0,
+      "value": "无法移除历史记录"
+    }
+  ],
+  "web.catalog.history.removed": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "已移除"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "项的观看数据"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.catalog.letters.letterNoTitles": [
     {
       "type": 1,
@@ -77830,6 +80289,28 @@
     {
       "type": 0,
       "value": "随机"
+    }
+  ],
+  "web.catalog.page.titleCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "shown"
+            },
+            {
+              "type": 0,
+              "value": "个作品"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.catalog.page.watchlist": [
@@ -79044,6 +81525,18 @@
     {
       "type": 0,
       "value": "添加为行"
+    }
+  ],
+  "web.collections.copy.addAtLeastOneRule": [
+    {
+      "type": 0,
+      "value": "请至少添加一条规则。"
+    }
+  ],
+  "web.collections.copy.addRuleThenCreate": [
+    {
+      "type": 0,
+      "value": "请先添加规则，再创建。"
     }
   ],
   "web.collections.copy.addToCollectionFootnote": [
@@ -81468,6 +83961,12 @@
       "value": "先选择其媒体库，再创建。"
     }
   ],
+  "web.collections.copy.pickWhereItShowsFirst": [
+    {
+      "type": 0,
+      "value": "请先选择要显示它的媒体库，再创建。"
+    }
+  ],
   "web.collections.copy.pinEveryLibrary": [
     {
       "type": 0,
@@ -81584,12 +84083,6 @@
       "value": "你仍然可以保存。之后匹配的作品会自动加入。"
     }
   ],
-  "web.collections.copy.previewEveryLibrary": [
-    {
-      "type": 0,
-      "value": "在你选择媒体库前，来自所有媒体库"
-    }
-  ],
   "web.collections.copy.previewFailed": [
     {
       "type": 0,
@@ -81622,6 +84115,18 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.collections.copy.previewNeedsRule": [
+    {
+      "type": 0,
+      "value": "添加规则以查看匹配的内容"
+    }
+  ],
+  "web.collections.copy.previewNeedsRuleHelp": [
+    {
+      "type": 0,
+      "value": "智能合集至少需要一条规则。没有规则时，它会包含所有作品。"
     }
   ],
   "web.collections.copy.previewShowsUnsaved": [
@@ -81764,6 +84269,16 @@
     {
       "type": 0,
       "value": "无法保存"
+    }
+  ],
+  "web.collections.copy.saveFailedWithError": [
+    {
+      "type": 0,
+      "value": "无法保存 · "
+    },
+    {
+      "type": 1,
+      "value": "error"
     }
   ],
   "web.collections.copy.saveFirstDescription": [
@@ -82010,6 +84525,12 @@
     {
       "type": 0,
       "value": "暂无匹配的作品。之后匹配的作品会自动加入。"
+    }
+  ],
+  "web.collections.copy.smartLibrariesHelp": [
+    {
+      "type": 0,
+      "value": "这些媒体库的合集标签页会列出它。它的规则决定作品的来源。"
     }
   ],
   "web.collections.copy.smartUpdatesItself": [
@@ -84708,6 +87229,18 @@
       "value": "name"
     }
   ],
+  "web.collections.page.emptyAll": [
+    {
+      "type": 0,
+      "value": "还没有合集。"
+    }
+  ],
+  "web.collections.page.emptyMine": [
+    {
+      "type": 0,
+      "value": "你还没有创建任何合集。"
+    }
+  ],
   "web.collections.page.filterAll": [
     {
       "type": 0,
@@ -87000,6 +89533,48 @@
       "value": "本周"
     }
   ],
+  "web.collections.toast.addFailed": [
+    {
+      "type": 0,
+      "value": "无法添加到合集"
+    }
+  ],
+  "web.collections.toast.notShared": [
+    {
+      "type": 0,
+      "value": "现在只有你能看到"
+    }
+  ],
+  "web.collections.toast.removeItemFailed": [
+    {
+      "type": 0,
+      "value": "无法移除项目"
+    }
+  ],
+  "web.collections.toast.reorderFailed": [
+    {
+      "type": 0,
+      "value": "无法调整顺序"
+    }
+  ],
+  "web.collections.toast.reorderItemsFailed": [
+    {
+      "type": 0,
+      "value": "无法调整项目顺序"
+    }
+  ],
+  "web.collections.toast.sharedWithProfiles": [
+    {
+      "type": 0,
+      "value": "已向其他个人资料显示"
+    }
+  ],
+  "web.collections.toast.sharingFailed": [
+    {
+      "type": 0,
+      "value": "无法更改共享设置"
+    }
+  ],
   "web.collections.types.kindManual": [
     {
       "type": 0,
@@ -87070,6 +89645,12 @@
     {
       "type": 0,
       "value": "显示位置"
+    }
+  ],
+  "web.collections.whereItShows.librariesTrigger": [
+    {
+      "type": 0,
+      "value": "在媒体库中显示"
     }
   ],
   "web.collections.whereItShows.shelf": [
@@ -87814,6 +90395,60 @@
       "value": "西部"
     }
   ],
+  "web.common.job.cancelled": [
+    {
+      "type": 0,
+      "value": "作业已取消"
+    }
+  ],
+  "web.common.job.failed": [
+    {
+      "type": 0,
+      "value": "作业失败"
+    }
+  ],
+  "web.common.libraryType.audiobooks": [
+    {
+      "type": 0,
+      "value": "有声书"
+    }
+  ],
+  "web.common.libraryType.ebooks": [
+    {
+      "type": 0,
+      "value": "电子书"
+    }
+  ],
+  "web.common.libraryType.manga": [
+    {
+      "type": 0,
+      "value": "漫画"
+    }
+  ],
+  "web.common.libraryType.mixed": [
+    {
+      "type": 0,
+      "value": "混合"
+    }
+  ],
+  "web.common.libraryType.movies": [
+    {
+      "type": 0,
+      "value": "电影"
+    }
+  ],
+  "web.common.libraryType.podcasts": [
+    {
+      "type": 0,
+      "value": "播客"
+    }
+  ],
+  "web.common.libraryType.series": [
+    {
+      "type": 0,
+      "value": "剧集"
+    }
+  ],
   "web.common.markers.sharingDisclosure": [
     {
       "type": 0,
@@ -87846,6 +90481,24 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.common.overlays.previewPlaceholder.movie": [
+    {
+      "type": 0,
+      "value": "电影预览"
+    }
+  ],
+  "web.common.overlays.previewPlaceholder.requested": [
+    {
+      "type": 0,
+      "value": "已请求预览"
+    }
+  ],
+  "web.common.overlays.previewPlaceholder.show": [
+    {
+      "type": 0,
+      "value": "剧集预览"
+    }
+  ],
   "web.common.overlays.previewSample": [
     {
       "type": 0,
@@ -87868,6 +90521,20 @@
     {
       "type": 0,
       "value": "剧集"
+    }
+  ],
+  "web.common.overlays.sampleDownloading": [
+    {
+      "type": 0,
+      "value": "正在下载"
+    },
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "%"
     }
   ],
   "web.common.overlays.watched": [
@@ -88278,6 +90945,132 @@
     {
       "type": 0,
       "value": "TMDB评分"
+    }
+  ],
+  "web.common.sortable.canceled": [
+    {
+      "type": 0,
+      "value": "已取消移动"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
+  "web.common.sortable.dropped": [
+    {
+      "type": 0,
+      "value": "已放下"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
+  "web.common.sortable.droppedAt": [
+    {
+      "type": 0,
+      "value": "已将"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "放在第"
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": "个位置，共"
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "个。"
+    }
+  ],
+  "web.common.sortable.fallbackName": [
+    {
+      "type": 0,
+      "value": "项目"
+    }
+  ],
+  "web.common.sortable.instructions": [
+    {
+      "type": 0,
+      "value": "要移动项目，请聚焦其拖动手柄并按Space或Enter。使用方向键移动，按Space或Enter放下，或按Escape取消。"
+    }
+  ],
+  "web.common.sortable.over": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "现在位于第"
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": "个位置，共"
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "个。"
+    }
+  ],
+  "web.common.sortable.pickedUp": [
+    {
+      "type": 0,
+      "value": "已拿起"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "，位于第"
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": "个位置，共"
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "个。"
     }
   ],
   "web.common.speedTest.retryAfter": [
@@ -93115,6 +95908,12 @@
       "value": "例如：Christopher Nolan"
     }
   ],
+  "web.home.addRow.params.trendingShow": [
+    {
+      "type": 0,
+      "value": "显示"
+    }
+  ],
   "web.home.addRow.personalSentence": [
     {
       "type": 1,
@@ -93427,12 +96226,6 @@
       "value": "全部媒体库"
     }
   ],
-  "web.home.addRow.rules.chooseLibraries": [
-    {
-      "type": 0,
-      "value": "选择媒体库"
-    }
-  ],
   "web.home.addRow.rules.group": [
     {
       "type": 0,
@@ -93535,10 +96328,10 @@
       "value": "任一"
     }
   ],
-  "web.home.addRow.rules.noRulesCollection": [
+  "web.home.addRow.rules.noRulesCollectionYet": [
     {
       "type": 0,
-      "value": "尚无规则，因此合集包含这些媒体库中的所有作品。"
+      "value": "还没有规则。添加一条规则来选择它包含哪些作品。"
     }
   ],
   "web.home.addRow.rules.noRulesRow": [
@@ -96671,6 +99464,64 @@
       }
     }
   ],
+  "web.home.rows.describe.trendingDiscoverFiltered": [
+    {
+      "type": 0,
+      "value": "TMDB上"
+    },
+    {
+      "type": 5,
+      "value": "window",
+      "options": {
+        "day": {
+          "value": [
+            {
+              "type": 0,
+              "value": "今天"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "本周"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": "热门的"
+    },
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "movie": {
+          "value": [
+            {
+              "type": 0,
+              "value": "电影"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "剧集"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": "，来自你已有的内容"
+    }
+  ],
   "web.home.rows.describe.trendingHere": [
     {
       "type": 0,
@@ -97575,6 +100426,12 @@
     {
       "type": 0,
       "value": "该行已不存在。"
+    }
+  ],
+  "web.home.rows.links.rowMissing": [
+    {
+      "type": 0,
+      "value": "此行已不在此页面上。"
     }
   ],
   "web.home.rows.notes.conflict": [
@@ -99983,6 +102840,24 @@
       "value": "这将解锁所有字段，并从你的提供商刷新元数据。下次刷新时，所有手动编辑都将被覆盖。"
     }
   ],
+  "web.item.editMetadata.resetDescriptionEpisode": [
+    {
+      "type": 0,
+      "value": "这将解锁此集的标题、简介、时长和播出日期，并从你的提供商刷新元数据。对这些字段的任何手动编辑都将被覆盖。"
+    }
+  ],
+  "web.item.editMetadata.resetDescriptionSeason": [
+    {
+      "type": 0,
+      "value": "这将解锁此季的标题、简介和播出日期，并从你的提供商刷新元数据。对这些字段的任何手动编辑都将被覆盖。你选择的图片在剧集上保持锁定；如要替换，请重置剧集。"
+    }
+  ],
+  "web.item.editMetadata.resetDescriptionSeries": [
+    {
+      "type": 0,
+      "value": "这将解锁此剧集的所有字段，并从你的提供商刷新元数据。对此剧集的任何手动编辑都将被覆盖。已锁定的季和集会保留其编辑。"
+    }
+  ],
   "web.item.editMetadata.resetToProvider": [
     {
       "type": 0,
@@ -100858,6 +103733,12 @@
     {
       "type": 0,
       "value": "评分"
+    }
+  ],
+  "web.item.rating.remove": [
+    {
+      "type": 0,
+      "value": "移除评分"
     }
   ],
   "web.item.rating.stars": [
@@ -101931,6 +104812,128 @@
     {
       "type": 0,
       "value": "已从待看清单移除"
+    }
+  ],
+  "web.library.watchlist.statusApprovedWaiting": [
+    {
+      "type": 0,
+      "value": "已批准 · 等待下载"
+    }
+  ],
+  "web.library.watchlist.statusAwaitingApproval": [
+    {
+      "type": 0,
+      "value": "等待批准"
+    }
+  ],
+  "web.library.watchlist.statusDownloading": [
+    {
+      "type": 0,
+      "value": "正在下载"
+    },
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
+  "web.library.watchlist.statusListedTwice": [
+    {
+      "type": 0,
+      "value": "TMDB重复收录了此作品"
+    }
+  ],
+  "web.library.watchlist.statusNeedsAttention": [
+    {
+      "type": 0,
+      "value": "需要处理"
+    }
+  ],
+  "web.library.watchlist.statusNoLongerListed": [
+    {
+      "type": 0,
+      "value": "TMDB上已不再收录"
+    }
+  ],
+  "web.library.watchlist.statusNotOnTmdb": [
+    {
+      "type": 0,
+      "value": "不在TMDB上"
+    }
+  ],
+  "web.library.watchlist.statusNotRequested": [
+    {
+      "type": 0,
+      "value": "未请求"
+    }
+  ],
+  "web.library.watchlist.statusNotRequestedOut": [
+    {
+      "type": 0,
+      "value": "未请求 · "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "上映"
+    }
+  ],
+  "web.library.watchlist.statusNotRequestedReason": [
+    {
+      "type": 0,
+      "value": "未请求 · "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "web.library.watchlist.statusOut": [
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "上映"
+    }
+  ],
+  "web.library.watchlist.statusOutApproved": [
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "上映 · 已批准"
+    }
+  ],
+  "web.library.watchlist.statusOutAwaitingApproval": [
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "上映 · 等待批准"
+    }
+  ],
+  "web.library.watchlist.titlesHint": [
+    {
+      "type": 0,
+      "value": "这些作品还不在媒体库中，因此无法播放。作品到达后，会移到在你的媒体库中。"
+    }
+  ],
+  "web.library.watchlist.titlesHintRequested": [
+    {
+      "type": 0,
+      "value": "这些作品还不在媒体库中，因此无法播放。已为你请求这些作品。作品到达后，会移到在你的媒体库中，你也会收到通知。"
     }
   ],
   "web.library.watchlist.updateFailed": [
@@ -103075,6 +106078,58 @@
       "value": "目前不会通知"
     }
   ],
+  "web.notifications.toast.followedArrived": [
+    {
+      "type": 0,
+      "value": "你关注的一部作品已进入媒体库。"
+    }
+  ],
+  "web.notifications.toast.newEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": "有新的一集"
+    }
+  ],
+  "web.notifications.toast.requestApprovedTitle": [
+    {
+      "type": 0,
+      "value": "请求已批准："
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.notifications.toast.requestArrived": [
+    {
+      "type": 0,
+      "value": "你请求的媒体已进入媒体库。"
+    }
+  ],
+  "web.notifications.toast.requestDeclinedTitle": [
+    {
+      "type": 0,
+      "value": "请求已拒绝："
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.notifications.toast.seriesAvailable": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": "现已可看"
+    }
+  ],
   "web.onboarding.gate.progressFailed": [
     {
       "type": 0,
@@ -103344,6 +106399,12 @@
       "value": "音频"
     }
   ],
+  "web.player.audioMenu.onlyOneTrack": [
+    {
+      "type": 0,
+      "value": "仅有一条音轨"
+    }
+  ],
   "web.player.audioMenu.trackFallback": [
     {
       "type": 0,
@@ -103358,6 +106419,16 @@
     {
       "type": 0,
       "value": "音轨"
+    }
+  ],
+  "web.player.audioMenu.triggerWithTrack": [
+    {
+      "type": 0,
+      "value": "音轨，"
+    },
+    {
+      "type": 1,
+      "value": "track"
     }
   ],
   "web.player.bar.backgroundPlayback": [
@@ -103565,6 +106636,20 @@
       "value": " Mbps"
     }
   ],
+  "web.player.buffering.loadingFrom": [
+    {
+      "type": 0,
+      "value": "正在从"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "加载"
+    }
+  ],
   "web.player.buffering.undoCaption": [
     {
       "type": 0,
@@ -103581,6 +106666,26 @@
     {
       "type": 0,
       "value": "章节"
+    }
+  ],
+  "web.player.chaptersMenu.nowPlaying": [
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 8,
+      "value": "now",
+      "children": [
+        {
+          "type": 0,
+          "value": "正在播放"
+        }
+      ]
     }
   ],
   "web.player.chaptersMenu.trigger": [
@@ -103643,6 +106748,12 @@
       "value": "退出全屏"
     }
   ],
+  "web.player.controls.exitFullscreenShortcut": [
+    {
+      "type": 0,
+      "value": "退出全屏（F）"
+    }
+  ],
   "web.player.controls.fillScreen": [
     {
       "type": 0,
@@ -103653,6 +106764,18 @@
     {
       "type": 0,
       "value": "全屏"
+    }
+  ],
+  "web.player.controls.fullscreenShortcut": [
+    {
+      "type": 0,
+      "value": "全屏（F）"
+    }
+  ],
+  "web.player.controls.more": [
+    {
+      "type": 0,
+      "value": "更多"
     }
   ],
   "web.player.controls.moreOptions": [
@@ -103674,6 +106797,12 @@
     }
   ],
   "web.player.controls.pictureInPicture": [
+    {
+      "type": 0,
+      "value": "画中画"
+    }
+  ],
+  "web.player.controls.pictureInPictureItem": [
     {
       "type": 0,
       "value": "画中画"
@@ -103701,6 +106830,26 @@
     {
       "type": 0,
       "value": "上一集"
+    }
+  ],
+  "web.player.controls.remainingTime": [
+    {
+      "type": 0,
+      "value": "−"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.player.controls.remainingTimeLabel": [
+    {
+      "type": 0,
+      "value": "剩余"
+    },
+    {
+      "type": 1,
+      "value": "time"
     }
   ],
   "web.player.controls.skipBack": [
@@ -104185,6 +107334,50 @@
       "value": "退出"
     }
   ],
+  "web.player.hud.episode": [
+    {
+      "type": 0,
+      "value": "S"
+    },
+    {
+      "type": 1,
+      "value": "season"
+    },
+    {
+      "type": 0,
+      "value": " · E"
+    },
+    {
+      "type": 1,
+      "value": "episode"
+    }
+  ],
+  "web.player.hud.episodeWithTitle": [
+    {
+      "type": 0,
+      "value": "S"
+    },
+    {
+      "type": 1,
+      "value": "season"
+    },
+    {
+      "type": 0,
+      "value": " · E"
+    },
+    {
+      "type": 1,
+      "value": "episode"
+    },
+    {
+      "type": 0,
+      "value": " — "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
   "web.player.info.audioBitrate": [
     {
       "type": 0,
@@ -104315,6 +107508,12 @@
     {
       "type": 0,
       "value": "丢帧"
+    }
+  ],
+  "web.player.info.heading": [
+    {
+      "type": 0,
+      "value": "播放信息"
     }
   ],
   "web.player.info.playMethod": [
@@ -104502,6 +107701,77 @@
       "value": "title"
     }
   ],
+  "web.player.nextEpisode.playNow": [
+    {
+      "type": 0,
+      "value": "立即播放"
+    }
+  ],
+  "web.player.nextEpisode.regionLabel": [
+    {
+      "type": 0,
+      "value": "即将播放"
+    }
+  ],
+  "web.player.nextEpisode.seasonEpisode": [
+    {
+      "type": 0,
+      "value": "第"
+    },
+    {
+      "type": 1,
+      "value": "season"
+    },
+    {
+      "type": 0,
+      "value": "季 · 第"
+    },
+    {
+      "type": 1,
+      "value": "episode"
+    },
+    {
+      "type": 0,
+      "value": "集"
+    }
+  ],
+  "web.player.nextEpisode.upNextIn": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 8,
+              "value": "num",
+              "children": [
+                {
+                  "type": 7
+                },
+                {
+                  "type": 0,
+                  "value": "秒"
+                }
+              ]
+            },
+            {
+              "type": 0,
+              "value": "后播放下一集"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.player.postRoll.stillPlaying": [
+    {
+      "type": 0,
+      "value": "仍在播放 · 点击返回"
+    }
+  ],
   "web.player.quality.auto": [
     {
       "type": 0,
@@ -104540,6 +107810,18 @@
       "value": "已选择"
     }
   ],
+  "web.player.quality.sourceFile": [
+    {
+      "type": 0,
+      "value": "来源文件"
+    }
+  ],
+  "web.player.quality.streamingQuality": [
+    {
+      "type": 0,
+      "value": "串流画质"
+    }
+  ],
   "web.player.quality.title": [
     {
       "type": 0,
@@ -104550,6 +107832,42 @@
     {
       "type": 1,
       "value": "menu"
+    },
+    {
+      "type": 0,
+      "value": "，"
+    },
+    {
+      "type": 1,
+      "value": "speed"
+    }
+  ],
+  "web.player.quality.triggerWithValue": [
+    {
+      "type": 1,
+      "value": "menu"
+    },
+    {
+      "type": 0,
+      "value": "，"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.player.quality.triggerWithValueAndSpeed": [
+    {
+      "type": 1,
+      "value": "menu"
+    },
+    {
+      "type": 0,
+      "value": "，"
+    },
+    {
+      "type": 1,
+      "value": "value"
     },
     {
       "type": 0,
@@ -105303,6 +108621,12 @@
       "value": "）"
     }
   ],
+  "web.player.tracks.resetAudioFailed": [
+    {
+      "type": 0,
+      "value": "无法重置音频偏好"
+    }
+  ],
   "web.player.tracks.saveAudioFailed": [
     {
       "type": 0,
@@ -105319,6 +108643,12 @@
     {
       "type": 0,
       "value": "Silo无法读取此文件。它似乎是空的或已损坏。"
+    }
+  ],
+  "web.player.upNext.autoplay": [
+    {
+      "type": 0,
+      "value": "自动播放"
     }
   ],
   "web.player.upNext.autoplayOff": [
@@ -105370,6 +108700,18 @@
       "value": "series"
     }
   ],
+  "web.player.upNext.heading": [
+    {
+      "type": 0,
+      "value": "即将播放"
+    }
+  ],
+  "web.player.upNext.headingShuffle": [
+    {
+      "type": 0,
+      "value": "即将随机播放"
+    }
+  ],
   "web.player.upNext.minutesLeft": [
     {
       "type": 6,
@@ -105414,10 +108756,49 @@
       "value": "无预览"
     }
   ],
+  "web.player.upNext.onDeckScrollBack": [
+    {
+      "type": 0,
+      "value": "将进行中向回滚动"
+    }
+  ],
+  "web.player.upNext.onDeckScrollForward": [
+    {
+      "type": 0,
+      "value": "将进行中向前滚动"
+    }
+  ],
   "web.player.upNext.playingNext": [
     {
       "type": 0,
       "value": "即将播放"
+    }
+  ],
+  "web.player.upNext.startsAfterCredits": [
+    {
+      "type": 0,
+      "value": "片尾结束后将自动开始"
+    }
+  ],
+  "web.player.upNext.startsIn": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "秒后开始"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.player.volume.label": [
@@ -106715,6 +110096,12 @@
     {
       "type": 0,
       "value": "媒体库访问权限"
+    }
+  ],
+  "web.profiles.libraryAccess.primaryNote": [
+    {
+      "type": 0,
+      "value": "主个人资料可以看到该账户能访问的所有媒体库。可以在设置 → 媒体库中隐藏媒体库。"
     }
   ],
   "web.profiles.librarySelect.allLibraries": [
@@ -112356,7 +115743,7 @@
       "value": "你的Plex身份验证令牌"
     }
   ],
-  "web.settings.historyImport.processed": [
+  "web.settings.historyImport.processedSoFar": [
     {
       "type": 0,
       "value": "已处理"
@@ -112367,11 +115754,7 @@
     },
     {
       "type": 0,
-      "value": " / "
-    },
-    {
-      "type": 1,
-      "value": "fetched"
+      "value": "项"
     }
   ],
   "web.settings.historyImport.reconnectPlex": [
@@ -114246,6 +117629,30 @@
       "value": "已开启浏览器通知"
     }
   ],
+  "web.settings.notifications.push.error.incompleteSubscription": [
+    {
+      "type": 0,
+      "value": "浏览器返回的推送订阅不完整"
+    }
+  ],
+  "web.settings.notifications.push.error.permissionDenied": [
+    {
+      "type": 0,
+      "value": "未获得通知权限"
+    }
+  ],
+  "web.settings.notifications.push.error.unsubscribeFailed": [
+    {
+      "type": 0,
+      "value": "已移除服务器上的注册，但无法移除浏览器订阅。"
+    }
+  ],
+  "web.settings.notifications.push.error.unsupported": [
+    {
+      "type": 0,
+      "value": "此浏览器不支持推送通知"
+    }
+  ],
   "web.settings.notifications.push.lastDeliveredAt": [
     {
       "type": 0,
@@ -114950,6 +118357,12 @@
       "value": "多音轨"
     }
   ],
+  "web.settings.overlays.badge.multiAudio.value": [
+    {
+      "type": 0,
+      "value": "多音轨"
+    }
+  ],
   "web.settings.overlays.badge.multiSub.description": [
     {
       "type": 0,
@@ -115134,6 +118547,30 @@
     {
       "type": 0,
       "value": "剧集状态"
+    }
+  ],
+  "web.settings.overlays.badge.showStatus.value.cancelled": [
+    {
+      "type": 0,
+      "value": "已取消"
+    }
+  ],
+  "web.settings.overlays.badge.showStatus.value.ended": [
+    {
+      "type": 0,
+      "value": "已完结"
+    }
+  ],
+  "web.settings.overlays.badge.showStatus.value.returning": [
+    {
+      "type": 0,
+      "value": "连载中"
+    }
+  ],
+  "web.settings.overlays.badge.showStatus.value.upcoming": [
+    {
+      "type": 0,
+      "value": "即将推出"
     }
   ],
   "web.settings.overlays.badge.studio.description": [
@@ -116634,6 +120071,56 @@
       "value": "Wi-Fi"
     }
   ],
+  "web.settings.plexAuth.homeUserNoServerAccess": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "无权访问此Plex服务器。请在Plex中与其共享服务器，或选择其他服务器。"
+    }
+  ],
+  "web.settings.plexAuth.homeUserNoSignIn": [
+    {
+      "type": 0,
+      "value": "Plex未返回此Plex Home用户的登录信息。"
+    }
+  ],
+  "web.settings.plexAuth.homeUserPinRejected": [
+    {
+      "type": 0,
+      "value": "Plex未接受该PIN。请检查此Plex Home用户的PIN，然后重试。"
+    }
+  ],
+  "web.settings.plexAuth.homeUserPinRequired": [
+    {
+      "type": 0,
+      "value": "此Plex Home用户受PIN保护。请输入其PIN，然后重试。"
+    }
+  ],
+  "web.settings.plexAuth.invalidPinResponse": [
+    {
+      "type": 0,
+      "value": "Plex登录返回了无效的PIN响应。"
+    }
+  ],
+  "web.settings.plexAuth.requestFailed": [
+    {
+      "type": 0,
+      "value": "Plex请求失败，状态码"
+    },
+    {
+      "type": 1,
+      "value": "status"
+    }
+  ],
+  "web.settings.plexAuth.signInIncomplete": [
+    {
+      "type": 0,
+      "value": "Plex登录未完成。请重试。"
+    }
+  ],
   "web.settings.profileLaunch.ask": [
     {
       "type": 0,
@@ -116760,6 +120247,31 @@
     {
       "type": 0,
       "value": "还没有个人资料"
+    }
+  ],
+  "web.settings.profiles.limitReached": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "此账户最多可有"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "个个人资料。管理员可以提高此上限。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.settings.profiles.newProfile": [
@@ -122284,6 +125796,12 @@
       "value": "要丢弃未保存的更改吗？"
     }
   ],
+  "web.shuffle.startFailed": [
+    {
+      "type": 0,
+      "value": "无法开始随机播放。"
+    }
+  ],
   "web.subtitles.closeDialog": [
     {
       "type": 0,
@@ -122364,6 +125882,12 @@
       "value": "开启字幕"
     }
   ],
+  "web.subtitles.menu.heading": [
+    {
+      "type": 0,
+      "value": "字幕"
+    }
+  ],
   "web.subtitles.menu.noMatch": [
     {
       "type": 0,
@@ -122412,6 +125936,18 @@
       "value": "外部"
     }
   ],
+  "web.subtitles.menu.subtitlesOffShortcut": [
+    {
+      "type": 0,
+      "value": "字幕已关闭（C）"
+    }
+  ],
+  "web.subtitles.menu.subtitlesShortcut": [
+    {
+      "type": 0,
+      "value": "字幕（C）"
+    }
+  ],
   "web.subtitles.menu.syncHint": [
     {
       "type": 0,
@@ -122458,10 +125994,32 @@
       "value": "此服务器不允许更改字幕时间轴。"
     }
   ],
+  "web.subtitles.menu.toolsLabel": [
+    {
+      "type": 0,
+      "value": "字幕工具"
+    }
+  ],
+  "web.subtitles.menu.tracksLabel": [
+    {
+      "type": 0,
+      "value": "字幕轨道"
+    }
+  ],
   "web.subtitles.menu.translateWithAi": [
     {
       "type": 0,
       "value": "使用AI翻译……"
+    }
+  ],
+  "web.subtitles.menu.triggerWithValue": [
+    {
+      "type": 0,
+      "value": "字幕，"
+    },
+    {
+      "type": 1,
+      "value": "value"
     }
   ],
   "web.subtitles.quotaWindow.day": [

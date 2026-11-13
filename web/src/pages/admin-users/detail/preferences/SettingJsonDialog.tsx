@@ -1,6 +1,8 @@
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useT } from "@/i18n";
+import { TOUCH_TARGETS } from "@/lib/touchTargets";
+import { cn } from "@/lib/utils";
 
 /** The title while the dialog closes (no key): a format name, not translated. */
 const CLOSING_TITLE = "JSON";
@@ -36,16 +38,18 @@ export function SettingJsonDialog({
         if (!open) onCancel();
       }}
     >
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className={cn("sm:max-w-2xl", TOUCH_TARGETS)}>
         <DialogHeader>
-          <DialogTitle className="font-mono text-sm">{settingKey ?? CLOSING_TITLE}</DialogTitle>
+          <DialogTitle className="font-mono text-sm wrap-anywhere">
+            {settingKey ?? CLOSING_TITLE}
+          </DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
           <p className="text-muted-foreground text-[12.5px]">{description}</p>
           <textarea
             spellCheck={false}
             aria-label={t("web.admin.users.detail.preferences.json.rawValueAria")}
-            className="border-border bg-background focus:border-foreground/40 min-h-[260px] w-full rounded-md border px-3 py-2 font-mono text-[13px] leading-relaxed transition-colors outline-none"
+            className="border-border bg-background focus:border-foreground/40 min-h-[260px] w-full rounded-md border px-3 py-2 font-mono text-[13px] leading-relaxed transition-colors outline-none max-sm:text-base"
             value={value}
             onChange={(event) => onValueChange(event.target.value)}
           />

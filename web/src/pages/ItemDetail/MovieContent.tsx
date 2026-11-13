@@ -220,7 +220,7 @@ export default function MovieContent({
         : null,
   });
   const restartHref =
-    primaryAction.label === t("web.detail.actions.resume") && item.versions.length > 0
+    primaryAction.resuming && item.versions.length > 0
       ? `/watch/${item.content_id}?restart=1`
       : undefined;
   const { data: similarData, isLoading: similarLoading } = useSimilarItems(item.content_id);
@@ -338,9 +338,7 @@ export default function MovieContent({
               onSplitItem={
                 canCurateMetadata && item.versions.length > 1 ? () => setSplitOpen(true) : undefined
               }
-              onShowMediaInfo={
-                canCurateMetadata && item.versions.length > 0 ? () => openMediaInfo() : undefined
-              }
+              onShowMediaInfo={item.versions.length > 0 ? () => openMediaInfo() : undefined}
               versions={item.versions}
               playbackVariants={item.playback_variants}
               selectedVersion={selectedVersion}
@@ -406,15 +404,13 @@ export default function MovieContent({
             version={selectedVersion}
             title={title}
           />
-          {canCurateMetadata && (
-            <MediaInfoDialog
-              open={mediaInfoOpen}
-              onOpenChange={setMediaInfoOpen}
-              versions={item.versions}
-              title={title}
-              initialFileId={mediaInfoFileId}
-            />
-          )}
+          <MediaInfoDialog
+            open={mediaInfoOpen}
+            onOpenChange={setMediaInfoOpen}
+            versions={item.versions}
+            title={title}
+            initialFileId={mediaInfoFileId}
+          />
           {watchTogether.sheet}
         </>
       }

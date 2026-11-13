@@ -448,20 +448,21 @@ func TestRunPagesMovies(t *testing.T) {
 	}
 }
 
-// stallingEpisodes is a repository whose episode listing waits for its
-// context to end, like an episode pass on a library too large to finish. It
-// then returns err, or the context's error when err is nil.
+// stallingEpisodes is a repository whose episode count, the episode pass's
+// first read, waits for its context to end, like an episode pass on a library
+// too large to finish. It then returns err, or the context's error when err
+// is nil.
 type stallingEpisodes struct {
 	*fakeIntroRepository
 	err error
 }
 
-func (s stallingEpisodes) ListEligibleCandidates(ctx context.Context) ([]Candidate, error) {
+func (s stallingEpisodes) CountEligibleCandidates(ctx context.Context) (int, error) {
 	<-ctx.Done()
 	if s.err != nil {
-		return nil, s.err
+		return 0, s.err
 	}
-	return nil, ctx.Err()
+	return 0, ctx.Err()
 }
 
 // Issue #3421: a run with a deadline stops its episodes early enough for the

@@ -103,7 +103,7 @@ func waitNodeConfiguration(t *testing.T, ready func() bool) {
 // is the committed row either way and does not wait on the worker.
 func TestUpdateAdminNodeNudgesWorkerOnlyOnPolicyTargetChange(t *testing.T) {
 	reloaded := make(chan bool, 4)
-	var destructive atomic.Bool
+	var destructive, refuse atomic.Bool
 	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/admin/reload-config":
@@ -111,13 +111,16 @@ func TestUpdateAdminNodeNudgesWorkerOnlyOnPolicyTargetChange(t *testing.T) {
 		case "/admin/force-reload":
 			destructive.Store(true)
 		}
+		if refuse.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	t.Cleanup(worker.Close)
 	qsv, nvenc := "qsv", "nvenc"
 	base := nodepool.Node{ID: 1, AdminRevision: 1, Name: "gpu-1", Type: nodepool.NodeTypeTranscode, URL: worker.URL, HWAccelOverride: &qsv}
-	run := func(t *testing.T, after nodepool.Node, input nodepool.UpdateNodeInput) (reloads, invalidations int) {
-		before := base
+	run := func(t *testing.T, before, after nodepool.Node, input nodepool.UpdateNodeInput) (reloads, invalidations int) {
 		after.AdminRevision = 2
 		s := &scriptedNodeConfiguration{update: &struct{ before, after *nodepool.Node }{&before, &after}}
 		h := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, "secret")
@@ -152,15 +155,43 @@ func TestUpdateAdminNodeNudgesWorkerOnlyOnPolicyTargetChange(t *testing.T) {
 	t.Run("override change nudges and invalidates", func(t *testing.T) {
 		after := base
 		after.HWAccelOverride = &nvenc
-		if r, i := run(t, after, nodepool.UpdateNodeInput{HWAccelOverride: &nvenc}); r != 1 || i != 1 {
+		if r, i := run(t, base, after, nodepool.UpdateNodeInput{HWAccelOverride: &nvenc}); r != 1 || i != 1 {
 			t.Fatalf("reloads=%d invalidations=%d, want 1 and 1", r, i)
 		}
 	})
 	t.Run("rename does neither", func(t *testing.T) {
 		after := base
 		after.Name = "gpu-renamed"
-		if r, i := run(t, after, nodepool.UpdateNodeInput{Name: &after.Name}); r != 0 || i != 0 {
+		if r, i := run(t, base, after, nodepool.UpdateNodeInput{Name: &after.Name}); r != 0 || i != 0 {
 			t.Fatalf("reloads=%d invalidations=%d, want 0 and 0", r, i)
+		}
+	})
+	// A repoint moves the policy to a different worker even when the overrides
+	// are unchanged, so the replacement must be nudged.
+	t.Run("url-only repoint nudges the replacement", func(t *testing.T) {
+		before := base
+		before.URL = "http://retired-worker.invalid"
+		if r, i := run(t, before, base, nodepool.UpdateNodeInput{URL: &base.URL}); r != 1 || i != 1 {
+			t.Fatalf("reloads=%d invalidations=%d, want 1 and 1", r, i)
+		}
+	})
+	// The pools and fences compare URLs without the trailing slash.
+	t.Run("trailing slash is not a repoint", func(t *testing.T) {
+		before := base
+		before.URL = worker.URL + "/"
+		if r, i := run(t, before, base, nodepool.UpdateNodeInput{URL: &base.URL}); r != 0 || i != 0 {
+			t.Fatalf("reloads=%d invalidations=%d, want 0 and 0", r, i)
+		}
+	})
+	// A worker that refuses the reload still has its cached capabilities
+	// dropped; the committed row stands either way.
+	t.Run("unconfirmed reload still invalidates", func(t *testing.T) {
+		refuse.Store(true)
+		defer refuse.Store(false)
+		after := base
+		after.HWAccelOverride = &nvenc
+		if r, i := run(t, base, after, nodepool.UpdateNodeInput{HWAccelOverride: &nvenc}); r != 1 || i != 1 {
+			t.Fatalf("reloads=%d invalidations=%d, want 1 and 1", r, i)
 		}
 	})
 	if destructive.Load() {

@@ -10,7 +10,7 @@ import { adminKeys } from "@/hooks/queries/keys";
 import {
   librariesNotPicked,
   noHeading,
-  SMART_LIBRARIES_HELP,
+  smartLibrariesHelp,
   personalTabHelp,
   shelfAfterCreate,
   showOnTabLabel,
@@ -97,7 +97,7 @@ function ServerFacts({
       {picker ? (
         <SettingRow
           label={t("web.collections.copy.fieldLibraries")}
-          value={SMART_LIBRARIES_HELP}
+          value={smartLibrariesHelp()}
           action={
             <LibraryMultiSelect
               libraries={picker.options}
@@ -105,7 +105,7 @@ function ServerFacts({
               onChange={picker.onChange}
               hideAllOption
               emptyLabel={t("web.collections.fields.chooseLibraries")}
-              triggerLabel="Show in libraries"
+              triggerLabel={t("web.collections.whereItShows.librariesTrigger")}
               triggerClassName="h-8 max-w-[14rem] justify-between gap-1 rounded-[10px] px-3"
             />
           }

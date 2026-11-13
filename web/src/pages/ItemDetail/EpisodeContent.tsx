@@ -264,7 +264,7 @@ export default function EpisodeContent({
     initialSeasonNumber: item.season_number ?? undefined,
   });
   const restartHref =
-    primaryAction.label === t("web.detail.actions.resume") && (item.versions?.length ?? 0) > 0
+    primaryAction.resuming && (item.versions?.length ?? 0) > 0
       ? `/watch/${item.content_id}?restart=1`
       : undefined;
 
@@ -421,11 +421,7 @@ export default function EpisodeContent({
               canEditMarkers={canEditMarkers}
               canManageTrickplay={canManageTrickplay}
               onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
-              onShowMediaInfo={
-                canCurateMetadata && (item.versions?.length ?? 0) > 0
-                  ? () => openMediaInfo()
-                  : undefined
-              }
+              onShowMediaInfo={(item.versions?.length ?? 0) > 0 ? () => openMediaInfo() : undefined}
               versions={item.versions ?? []}
               playbackVariants={item.playback_variants}
               selectedVersion={selectedVersion}
@@ -517,15 +513,13 @@ export default function EpisodeContent({
         version={selectedVersion}
         title={title}
       />
-      {canCurateMetadata && (
-        <MediaInfoDialog
-          open={mediaInfoOpen}
-          onOpenChange={setMediaInfoOpen}
-          versions={item.versions ?? []}
-          title={title}
-          initialFileId={mediaInfoFileId}
-        />
-      )}
+      <MediaInfoDialog
+        open={mediaInfoOpen}
+        onOpenChange={setMediaInfoOpen}
+        versions={item.versions ?? []}
+        title={title}
+        initialFileId={mediaInfoFileId}
+      />
       {watchTogether.sheet}
     </div>
   );

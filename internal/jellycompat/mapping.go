@@ -3,14 +3,12 @@ package jellycompat
 import (
 	"crypto/sha1"
 	"encoding/hex"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
-	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -982,31 +980,44 @@ func detailMediaSourceDTO(sourceID string, version catalog.FileVersion, streams 
 	}
 }
 
+// Every compat user is a non-administrator (see userDTO), and only a viewer
+// who may curate metadata sees where a file lives or what it is called. So a
+// media source is named by its edition and quality, and its path is a stand-in
+// that keeps only the container's extension.
+
+// mediaSourceName names a version for a client's version picker: its edition,
+// then its resolution, video codec and dynamic range ("Extended - 2160p HEVC
+// HDR").
 func mediaSourceName(version catalog.FileVersion) string {
-	name := strings.TrimSpace(version.FileName)
-	if name == "" {
-		name = fspath.Display(filepath.Base(version.FilePath))
+	var quality []string
+	for _, part := range []string{strings.TrimSpace(version.Resolution), strings.ToUpper(strings.TrimSpace(version.CodecVideo))} {
+		if part != "" {
+			quality = append(quality, part)
+		}
 	}
-	if name == "" {
-		return ""
+	if version.HDR {
+		quality = append(quality, "HDR")
 	}
-	ext := filepath.Ext(name)
-	return strings.TrimSuffix(name, ext)
+	parts := make([]string, 0, 2)
+	if edition := strings.TrimSpace(version.EditionRaw); edition != "" {
+		parts = append(parts, edition)
+	}
+	if len(quality) > 0 {
+		parts = append(parts, strings.Join(quality, " "))
+	}
+	return strings.Join(parts, " - ")
 }
 
+// compatMediaPath is a version's stand-in path, /silo/{file id}.{container}.
 func compatMediaPath(version catalog.FileVersion) string {
-	if strings.TrimSpace(version.FilePath) != "" {
-		return version.FilePath
-	}
-	name := mediaSourceName(version)
-	if name == "" {
+	if version.FileID <= 0 {
 		return ""
 	}
-	ext := strings.ToLower(strings.TrimSpace(version.Container))
-	if ext == "" {
-		return filepath.ToSlash(filepath.Join("/silo", name))
+	name := strconv.Itoa(version.FileID)
+	if ext := strings.ToLower(strings.TrimSpace(version.Container)); ext != "" {
+		name += "." + ext
 	}
-	return filepath.ToSlash(filepath.Join("/silo", name+"."+ext))
+	return "/silo/" + name
 }
 
 func formatCompatTime(value time.Time) string {
