@@ -148,9 +148,12 @@ type SourceMetadata struct {
 	DVBLPresent         bool
 	DVRPUPresent        bool
 	ColorRange          string
-	ColorPrimaries      string
-	ColorTransfer       string
-	ColorSpace          string
+	// FrameColorRange is the range on the first decoded frame, as the
+	// scanner recorded it: models.VideoTrack.FrameColorRange.
+	FrameColorRange string
+	ColorPrimaries  string
+	ColorTransfer   string
+	ColorSpace      string
 }
 
 // SourceResolution is the safe execution classification for one HDR source.
@@ -187,24 +190,12 @@ func MetadataForFile(file *models.MediaFile) SourceMetadata {
 		DVBLCompatIDPresent: track.DVBLCompatIDPresent,
 		DVBLPresent:         track.DVBLPresent,
 		DVRPUPresent:        track.DVRPUPresent,
-		ColorRange:          DecodedColorRange(track),
+		ColorRange:          track.ColorRange,
+		FrameColorRange:     track.FrameColorRange,
 		ColorPrimaries:      track.ColorPrimaries,
 		ColorTransfer:       track.ColorTransfer,
 		ColorSpace:          track.ColorSpace,
 	}
-}
-
-// DecodedColorRange returns the range a tone-map graph will see on the
-// track's decoded frames: the first frame's explicit range when the scanner
-// read one, otherwise the stream's tag. The decoder takes the range from the
-// bitstream, so a container tag that contradicts it would classify full-range
-// samples as limited, or the reverse.
-func DecodedColorRange(track models.VideoTrack) string {
-	frameRange := normalizeColorValue(track.FrameColorRange)
-	if rangeIsFull(frameRange) || rangeIsLimited(frameRange) {
-		return track.FrameColorRange
-	}
-	return track.ColorRange
 }
 
 // NeedsToneMap preserves the broad chapter-thumbnail policy gate: thumbnails
@@ -318,6 +309,15 @@ func ResolveSource(source SourceMetadata) SourceResolution {
 	}
 	if candidate == "" {
 		return SourceResolution{}
+	}
+	// The decoder takes the range from the bitstream before the container's
+	// tag, and the graphs see the decoder's value, so an explicit range on the
+	// first decoded frame overrides a stream tag that contradicts it. A track
+	// whose frame was not read yet keeps its tag until the scanner or the
+	// HDR10+ backfill reads it.
+	frameRange := normalizeColorValue(source.FrameColorRange)
+	if rangeIsFull(frameRange) || rangeIsLimited(frameRange) {
+		source.ColorRange = frameRange
 	}
 	// Graphs for this kind trust the decoded frames' range, so the frames
 	// must prove they carry one.

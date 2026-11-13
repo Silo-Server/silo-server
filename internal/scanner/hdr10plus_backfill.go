@@ -305,12 +305,16 @@ func (b *HDR10PlusBackfiller) backfillFile(ctx context.Context, c hdr10PlusCandi
 	if info.Size() != c.size || (c.modifiedAt != nil && !sameFileModifiedAt(c.modifiedAt, info.ModTime())) {
 		return hdr10PlusOutcomeChanged, nil
 	}
+	hdr10Plus := mediaprobe.HasHDR10Plus(frame.SideData)
+	// A track already checked keeps its status: only its frame range is new.
+	recorded := hdr10Plus
+	if !c.track.HDR10PlusUnchecked {
+		recorded = c.track.HDR10Plus
+	}
 	outcome := hdr10PlusOutcomeNotHDR10Plus
-	if mediaprobe.HasHDR10Plus(frame.SideData) {
+	if recorded {
 		outcome = hdr10PlusOutcomeHDR10Plus
 	}
-
-	hdr10Plus := outcome == hdr10PlusOutcomeHDR10Plus
 	// Set only frame_color_range and, on a track not yet checked for HDR10+,
 	// hdr10_plus and for an HDR10+ file video_range_type, on the first track,
 	// so fields this binary does not know survive. Write only over the exact

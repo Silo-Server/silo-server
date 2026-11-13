@@ -430,7 +430,7 @@ type VideoTrack struct {
 	// takes it from the bitstream, which can contradict the container's tag in
 	// ColorRange, and tone-map graphs see the decoder's value. It is empty
 	// when the frame was not read.
-	FrameColorRange string `json:"frame_color_range,omitempty"`
+	FrameColorRange string `json:"frame_color_range,omitempty" doc:"Color range FFmpeg reported on the first decoded frame of a PQ track (tv, pc, or unknown when the frame carried none); absent when the frame was not read. Can differ from color_range, the container's tag"`
 	ColorPrimaries  string `json:"color_primaries,omitempty"`
 	ColorSpace      string `json:"color_space,omitempty"`
 	ColorTransfer   string `json:"color_transfer,omitempty"`

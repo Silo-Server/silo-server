@@ -48,7 +48,7 @@ func NewBackfillHDR10PlusTask(pool *pgxpool.Pool, backfiller HDR10PlusBackfiller
 func (t *BackfillHDR10PlusTask) Key() string  { return "backfill_hdr10_plus" }
 func (t *BackfillHDR10PlusTask) Name() string { return "Detect HDR10+ Video" }
 func (t *BackfillHDR10PlusTask) Description() string {
-	return "Reads the first frame of HDR video scanned before Silo read it, once per file, so HDR10+ files are labeled HDR10+ instead of HDR10 and tone mapping uses the range the video is coded at."
+	return "Reads the first frame of HDR video scanned before Silo detected HDR10+, once per file, so HDR10+ files are labeled HDR10+ instead of HDR10."
 }
 func (t *BackfillHDR10PlusTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategoryLibrary

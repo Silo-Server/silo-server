@@ -55168,6 +55168,7 @@
             "type": "boolean"
           },
           "frame_color_range": {
+            "description": "Color range FFmpeg reported on the first decoded frame of a PQ track (tv, pc, or unknown when the frame carried none); absent when the frame was not read. Can differ from color_range, the container's tag",
             "type": "string"
           },
           "frame_rate": {

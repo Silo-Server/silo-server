@@ -619,6 +619,13 @@ unchecked files and sets only `hdr10_plus` and, for an HDR10+ file,
 `video_range_type`, writing only while the file and the track still match the
 row it read.
 
+The same read records the frame's color range as `frame_color_range`
+(`unknown` when the frame carries none). The decoder takes the range from the
+bitstream before the container's tag, so the two can disagree; `color_range`
+keeps the tag, which the live stream probe at transcode start compares. The
+backfill task also adds `frame_color_range` to PQ tracks checked for HDR10+
+before it was recorded, keeping their `hdr10_plus`.
+
 A client may additionally report the raw display probe in `output.display`
 with an evidence tier:
 
@@ -2352,10 +2359,13 @@ SDR, which the RPU path renders blown out. The `dolby_vision` kind is not part o
 complete inventory, so an FFmpeg build that refuses `apply_dovi` keeps its
 other kinds cached. A `dolby_vision` smoke that fails for any other reason is
 retried after five minutes instead of being cached.
-A PQ base whose stream is tagged full range (`pc`) resolves to the
-`pq_full_range` kind. Every other kind's graph declares limited-range input;
-this one keeps each decoded frame's own range, because a container can tag a
-stream full range while its bitstream codes limited levels. Only the software
+A PQ base whose range is full (`pc`) resolves to the `pq_full_range` kind.
+The range is the first decoded frame's `frame_color_range` when it is
+explicit, and the stream tag otherwise (a track whose frame was not read
+yet). A full-range bitstream under a limited-range tag is therefore
+`pq_full_range`, and a limited-range bitstream under a full-range tag is
+`pq`. Every other kind's graph declares limited-range input; this one keeps
+each decoded frame's own range. Only the software
 executor advertises it, because its `zscale` and `tonemapx` stages read that
 range; the hardware filters have not been shown to, so a hardware-only policy
 refuses these sources with `hdr_transcode_unsupported`. The software
