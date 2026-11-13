@@ -702,10 +702,20 @@ func TestReconstructTranscodeWithoutAutoStartsOnceWithoutWaiting(t *testing.T) {
 	}
 }
 
+// setRestartHookTimeout sets how long a restart hook may run, for one test.
+func setRestartHookTimeout(t *testing.T, timeout time.Duration) {
+	t.Helper()
+	previous := restartHookTimeout
+	restartHookTimeout = timeout
+	t.Cleanup(func() { restartHookTimeout = previous })
+}
+
 // A restart hook can block on its FFmpeg context, as the throttler's settings
 // read does when the database stalls. Shutdown cleanup must still close the
-// session, which cancels that context, rather than wait for the hook.
+// session, which cancels that context, rather than wait for the hook. The
+// hook's own timeout is out of reach here, so only the close can end it.
 func TestStartShutdownCleanup_DoesNotWaitForARestartHook(t *testing.T) {
+	setRestartHookTimeout(t, time.Hour)
 	m := NewTranscodeManager()
 	s := newRunningFakeSession(t)
 	m.RegisterTranscodeSession("hooked", s)
@@ -732,5 +742,62 @@ func TestStartShutdownCleanup_DoesNotWaitForARestartHook(t *testing.T) {
 	if err := <-restarted; err != nil {
 		t.Fatalf("restart published before shutdown = %v", err)
 	}
+	requireClosed(t, s, nil)
+}
+
+// A restart holds the session lifecycle lock through its restart hook, and a
+// stop takes that lock before it closes the session, so the stop cannot be
+// the close that cancels a stalled hook. The hook has to run out of time on
+// its own, leaving the FFmpeg process it restarted, still throttled as it
+// was, for the stop to close.
+func TestRestartSessionLocked_StalledRestartHookDoesNotHoldAStop(t *testing.T) {
+	setRestartHookTimeout(t, 30*time.Millisecond)
+	m := NewTranscodeManager()
+	s := newRunningFakeSession(t)
+	m.RegisterTranscodeSession("hooked", s)
+	const throttleSeconds = 120
+	s.StartThrottler(throttleSeconds)
+	hookEntered := make(chan struct{})
+	s.SetRestartHook(func(ctx context.Context) {
+		close(hookEntered)
+		<-ctx.Done()
+	})
+	restarted := make(chan error, 1)
+	go func() { restarted <- m.RestartSessionLocked(context.Background(), "hooked", s, 0, 0) }()
+	<-hookEntered
+
+	type sessionAtStop struct {
+		running         bool
+		throttleSeconds int
+	}
+	atStop := make(chan sessionAtStop, 1)
+	go func() {
+		unlock := m.LockSessionLifecycle("hooked")
+		defer unlock()
+		seen := sessionAtStop{running: s.IsRunning()}
+		s.mu.Lock()
+		if s.throttler != nil {
+			seen.throttleSeconds = s.throttler.thresholdSeconds
+		}
+		s.mu.Unlock()
+		atStop <- seen
+		m.CloseTranscodeSession("hooked", "")
+	}()
+	select {
+	case seen := <-atStop:
+		if !seen.running {
+			t.Fatal("the restart hook's timeout ended the FFmpeg process it restarted")
+		}
+		if seen.throttleSeconds != throttleSeconds {
+			t.Fatalf("throttle after a stalled restart hook = %ds, want the %ds the session had", seen.throttleSeconds, throttleSeconds)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("a stop waited on the lifecycle lock behind a restart hook that only its own close could release")
+	}
+	if err := <-restarted; err != nil {
+		t.Fatalf("restart with a stalled hook = %v", err)
+	}
+	// The stop closes the session before it releases the lock.
+	m.LockSessionLifecycle("hooked")()
 	requireClosed(t, s, nil)
 }
