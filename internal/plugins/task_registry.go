@@ -146,6 +146,11 @@ func (t *pluginTask) DefaultTriggers() []taskmanager.TriggerConfig {
 // otherwise follows its binding and manifest default.
 func (t *pluginTask) FollowsDefaultTriggers() bool { return true }
 
+// ClaimsFirings makes each scheduled firing run on one API server: every API
+// server registers the task, and a plugin's work is not safe to repeat per
+// server.
+func (t *pluginTask) ClaimsFirings() bool { return true }
+
 func (t *pluginTask) Execute(ctx context.Context, progress taskmanager.ProgressReporter) error {
 	progress.Report(0, "Running plugin task")
 
