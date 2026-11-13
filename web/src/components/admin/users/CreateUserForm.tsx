@@ -39,6 +39,7 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import { useT } from "@/i18n";
 import { invalidEmailMessage, isValidEmail } from "@/lib/email";
+import { newPasswordLengthProblem } from "@/lib/newPassword";
 import {
   PERMISSION_MARKER_EDIT,
   PERMISSION_METADATA_CURATION,
@@ -202,6 +203,14 @@ function CreateUserForm({
       return;
     if (!isValidEmail(email)) {
       setError(invalidEmailMessage());
+      return;
+    }
+    // The server's refusal names the limit in Huma's words, which a translated
+    // interface replaces with "This value is out of range."
+    const passwordProblem = newPasswordLengthProblem(password);
+    if (passwordProblem) {
+      setDialogTab("account");
+      setError(passwordProblem);
       return;
     }
     // A cleared or half-typed limit is not in the policy state, which still
