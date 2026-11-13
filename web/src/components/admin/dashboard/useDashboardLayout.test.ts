@@ -238,6 +238,35 @@ describe("useDashboardLayout", () => {
     expect(readStored().entries).toEqual([{ id: "egress-24h", span: 6, rows: 3, range: "week" }]);
   });
 
+  // The Egress Total/Nodes switch is a viewing choice like the window, so it
+  // must come back after a reload; a value this build does not know is dropped.
+  it("setWidgetView persists a view the widget offers and drops one it does not", () => {
+    writeStored([
+      { id: "egress-24h", span: 6, rows: 3, range: "day", view: "sideways" },
+      { id: "users", span: 5, rows: 4, view: "nodes" },
+    ]);
+    const { result } = renderHook(() => useDashboardLayout());
+    expect(result.current.entries).toEqual([
+      { id: "egress-24h", span: 6, rows: 3, range: "day" },
+      { id: "users", span: 5, rows: 4 },
+    ]);
+
+    act(() => {
+      result.current.setWidgetView("egress-24h", "nodes");
+      result.current.setWidgetView("users", "nodes");
+    });
+
+    const expected = [
+      { id: "egress-24h", span: 6, rows: 3, range: "day", view: "nodes" },
+      { id: "users", span: 5, rows: 4 },
+    ];
+    expect(result.current.entries).toEqual(expected);
+    expect(readStored().entries).toEqual(expected);
+
+    const { result: reloaded } = renderHook(() => useDashboardLayout());
+    expect(reloaded.current.entries).toEqual(expected);
+  });
+
   // Picking a window is an everyday viewing action, not an arrangement one.
 
   it("setWidgetRange ignores a window the widget does not offer", () => {
