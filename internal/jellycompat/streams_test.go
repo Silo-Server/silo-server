@@ -1713,6 +1713,66 @@ func TestCompatMasterAudioCodecJellyfin12Strings(t *testing.T) {
 	}
 }
 
+// Progressive stream, subtitle and attachment requests resolve their play
+// session by PlaySessionId or by route. When the store cannot be read and
+// holds no cached copy, they answer the retryable 503, not a 404 that ends
+// direct play or drops subtitles (#4067). An absent play session, or one owned
+// by another token, still answers 404, and a Static=true request does not
+// create a session in its place while the store is down.
+func TestRouteRequestsAnswer503WhenPlaySessionStoreUnavailable(t *testing.T) {
+	cold := NewDurableCompatPlaybackStore(newUnreachableCompatPool(t), time.Hour, nil)
+	other := NewPlaybackSessionStore(time.Hour, nil)
+	other.Put(PlaybackSession{ID: "ps-abc", CompatToken: "someone-else", RouteItemID: "itm", UpstreamSessionID: "up"})
+
+	routes := []struct {
+		name   string
+		path   string
+		params map[string]string
+		serve  func(*PlaybackHandler, http.ResponseWriter, *http.Request)
+	}{
+		{"stream by play session", "/Videos/itm/stream?PlaySessionId=ps-abc", map[string]string{"id": "itm"}, (*PlaybackHandler).HandleVideoStream},
+		{"stream by route", "/Videos/itm/stream", map[string]string{"id": "itm"}, (*PlaybackHandler).HandleVideoStream},
+		{"static stream by play session", "/Videos/itm/stream?Static=true&PlaySessionId=ps-abc", map[string]string{"id": "itm"}, (*PlaybackHandler).HandleVideoStream},
+		{"subtitle", "/Videos/itm/src/Subtitles/0/Stream.srt?PlaySessionId=ps-abc",
+			map[string]string{"routeItemId": "itm", "routeMediaSourceId": "src", "index": "0", "format": "srt"}, (*PlaybackHandler).HandleSubtitleStream},
+		{"attachment", "/Videos/itm/src/Attachments/0",
+			map[string]string{"routeItemId": "itm", "routeMediaSourceId": "src", "index": "0"}, (*PlaybackHandler).HandleAttachment},
+	}
+	for _, route := range routes {
+		for _, tc := range []struct {
+			name     string
+			store    CompatPlaybackStore
+			wantCode int
+		}{
+			{"store unreadable", cold, http.StatusServiceUnavailable},
+			{"session absent", NewPlaybackSessionStore(time.Hour, nil), http.StatusNotFound},
+			{"session of another token", other, http.StatusNotFound},
+		} {
+			if strings.HasPrefix(route.name, "static") && tc.wantCode == http.StatusNotFound {
+				continue // an absent session sends Static=true to on-the-fly creation
+			}
+			t.Run(route.name+"/"+tc.name, func(t *testing.T) {
+				handler := &PlaybackHandler{playbackStore: tc.store}
+				req := httptest.NewRequest(http.MethodGet, route.path, nil)
+				routeCtx := chi.NewRouteContext()
+				for k, v := range route.params {
+					routeCtx.URLParams.Add(k, v)
+				}
+				ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
+				ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "compat-tok", StreamAppUserID: 1})
+				rec := httptest.NewRecorder()
+				route.serve(handler, rec, req.WithContext(ctx))
+				if rec.Code != tc.wantCode {
+					t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tc.wantCode, rec.Body.String())
+				}
+				if tc.wantCode == http.StatusServiceUnavailable && rec.Header().Get("Retry-After") == "" {
+					t.Fatal("503 carries no Retry-After")
+				}
+			})
+		}
+	}
+}
+
 // A token-authenticated HLS request whose play session cannot be read from
 // the store answers a retryable 503, not a 404 that ends playback (#4008).
 // An absent play session, or one owned by another token, still answers 404.
