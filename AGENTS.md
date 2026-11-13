@@ -135,6 +135,7 @@ Sibling repos are usually checked out side-by-side in the same parent directory.
 
 - `silo-android` — Android phone and TV clients.
 - `silo-apple` — iOS, tvOS, and macOS clients.
+- `silo-roku` — Roku client.
 - `silo-plugin-sdk` — public plugin SDK, protobuf contracts, generated plugin API, manifest
   helpers, runtime bootstrap.
 - `silo-plugins` — central plugin catalog / repository manifest.
@@ -150,8 +151,9 @@ done until each of these has been handled or ruled out:
 
 - The API change fits the current contract posture (see "API contract rules" below); new
   features still expose a capability endpoint.
-- Follow-up work is done or filed for both `silo-apple` and `silo-android` — prefer
-  coordinated multi-repo changes over leaving a platform behind.
+- Follow-up work is done or filed for `silo-apple`, `silo-android`, and `silo-roku`, and
+  for the web app when this change leaves it out, as "Cross-client parity" below
+  describes. Prefer coordinated multi-repo changes over leaving a platform behind.
 - jellycompat parity was considered (does the Jellyfin surface need the same behavior?).
 - The relevant `docs/*-api.md` is updated when the contract changes.
 
@@ -160,6 +162,37 @@ setting, default, label, setup step, or feature behavior it describes) is not do
 issue is open on `Silo-Server/siloserver.org`.
 [Update the user manual](CONTRIBUTING.md#update-the-user-manual) covers when to open one and
 what goes in it.
+
+## Cross-client parity
+
+Silo has four clients: Apple (`silo-apple`), Android (`silo-android`), Roku (`silo-roku`), and
+Web (this repository, under `web/`). A feature, fix, or other change a user can notice in one
+client is not done until each other client has been handled or ruled out. That covers web app
+changes made here and server changes that clients show. The change's author owns this, whether a
+person or an agent.
+
+For each client the change does not already update:
+
+- Rule it out when the change is specific to one platform (a browser layout fix, a web admin
+  page with no client counterpart), the client already behaves correctly, or the feature is
+  outside that client's scope (for example Roku's deferred features in `silo-roku/docs/spec.md`,
+  or ebooks on a TV client). Note the reason.
+- Otherwise, open an issue in that client's repository at minimum. Search its issues first and
+  add to an existing one rather than filing a duplicate. Title it
+  `Parity: <behavior> (from Silo-Server/silo-server#NNN)`, describe what users should get, link
+  this pull request, and point to the code or API that implements it here. A parity issue
+  follows up work already in review or merged, so it goes in Issues, not Discussions → Ideas.
+- Also open a pull request there when you can build and verify that client and its contribution
+  rules let you open one. Link it from the issue.
+
+Open parity issues when this pull request opens, so each one can link it. List the outcome on the
+pull request's `Other clients:` line, one entry per client:
+`Other clients: Apple Silo-Server/silo-apple#NNN; Android Silo-Server/silo-android#NNN; Roku N/A (not in the first release)`.
+Write `Other clients: N/A (no client-visible change)` when nothing a client shows changes.
+
+Agents open the parity issues without asking and apply [Writing](#writing) to them. Ask the
+developer before opening a pull request in another repository; approval to open one here does not
+cover the others.
 
 ## Translations
 
