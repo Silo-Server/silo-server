@@ -265,8 +265,11 @@ func TestRestartDecodesOnCPUAfterHardwareFilterReinitFailure(t *testing.T) {
 			if !strings.Contains(second, "\n-noautorotate\n") {
 				t.Fatalf("restart would rotate frames the GPU-decoded segments left unrotated:\n%s", second)
 			}
-			if !s.Opts().SoftwareVideoDecode {
-				t.Fatal("session did not record that it now decodes on the CPU")
+			// A recipe written from the live options (an audio-track switch
+			// persists one) must still say GPU decode: a reconstruct that
+			// started on CPU decode would rotate what earlier segments did not.
+			if NewRecipeCard(1, "profile", 1, "", s.Opts()).SoftwareVideoDecode {
+				t.Fatal("the session's fallback leaked into a recipe written from its live options")
 			}
 			if !s.IsRunning() {
 				t.Fatal("restarted transcode is not running")

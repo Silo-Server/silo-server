@@ -117,12 +117,16 @@ type TranscodeOpts struct {
 	// stream tokens never freeze it: a reconstruct under auto rebuilds the
 	// pipeline and derives it again from live configuration.
 	nvencSoftwareDecode bool
-	// skipAutorotate stops FFmpeg rotating CPU-decoded VAAPI frames by the
-	// source's display matrix. A session that falls back from GPU decode on a
-	// restart sets it: FFmpeg never rotates hardware frames, so the segments
-	// already served are in coded orientation and the replacement generation
-	// has to match them. QSV always passes -noautorotate. Process-local.
-	skipAutorotate bool
+	// gpuDecodeFailed moves a running QSV or VAAPI session to CPU decode after
+	// its GPU-decoded generation failed (see gpuDecodeFailedFilterSetupLocked).
+	// On VAAPI it also stops FFmpeg rotating the CPU-decoded frames by the
+	// source's display matrix: FFmpeg never rotates hardware frames, so the
+	// segments already served are in coded orientation. QSV always passes
+	// -noautorotate. It is deliberately unexported and leaves
+	// SoftwareVideoDecode alone, so a recipe card or stream token written from
+	// the live options still records GPU decode and a reconstruct produces the
+	// same orientation.
+	gpuDecodeFailed bool
 	// softwareEncode retains a frozen GPU tone-map graph while its final
 	// SDR frames feed a software encoder: libx265 on a device without HEVC
 	// encoding, or either codec on a VAAPI device with no capped rate
@@ -718,6 +722,9 @@ func normalizeTranscodeOptsContext(ctx context.Context, opts TranscodeOpts) Tran
 	opts.EncoderHWAccel = ""
 	opts.FFmpegPath = ResolveFFmpegPath(opts.FFmpegPath)
 	opts = resolveSoftwareVideoDecode(opts)
+	if opts.gpuDecodeFailed {
+		opts.SoftwareVideoDecode = true
+	}
 	if opts.ToneMapMode == tonemap.ModeSoftware {
 		opts.SoftwareVideoDecode = true
 		opts.HWAccel = HWAccelNone
@@ -854,7 +861,7 @@ func validateToneMapSource(ctx context.Context, opts TranscodeOpts) error {
 		InputPath:           opts.InputPath,
 		DurationSeconds:     opts.TotalDuration,
 		SourceBitDepth:      opts.SourceVideoBitDepth,
-		SoftwareVideoDecode: opts.SoftwareVideoDecode,
+		SoftwareVideoDecode: opts.SoftwareVideoDecode || opts.gpuDecodeFailed,
 		Mode:                opts.ToneMapMode,
 		Backend:             backend,
 		Filter:              opts.ToneMapFilter,
@@ -1256,7 +1263,7 @@ func appendHWAccelArgs(args []string, opts TranscodeOpts) []string {
 		args = append(args, "-filter_hw_device", vaapiHWDeviceAlias)
 		if !opts.SoftwareVideoDecode {
 			args = append(args, "-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi")
-		} else if opts.skipAutorotate {
+		} else if opts.gpuDecodeFailed {
 			args = append(args, "-noautorotate")
 		}
 	case transcodeHWNVENC:
@@ -3610,7 +3617,7 @@ const ffmpegFilterSetupFailure = "Error reinitializing filters!"
 // anyway and lose only GPU decode. NVENC is left out: with CPU decode an
 // explicit NVENC setting encodes on libx264.
 func (s *TranscodeSession) gpuDecodeFailedFilterSetupLocked() bool {
-	if s.running || s.waitErr == nil || s.stderr == nil || s.opts.SoftwareVideoDecode {
+	if s.running || s.waitErr == nil || s.stderr == nil || s.opts.SoftwareVideoDecode || s.opts.gpuDecodeFailed {
 		return false
 	}
 	if s.opts.HWAccel != transcodeHWQSV && s.opts.HWAccel != transcodeHWVAAPI {
@@ -3620,9 +3627,7 @@ func (s *TranscodeSession) gpuDecodeFailedFilterSetupLocked() bool {
 }
 
 // restartDecodesOnCPU reports whether the session's next restart would move it
-// from GPU to CPU decode (see gpuDecodeFailedFilterSetupLocked). The switch is
-// kept in the running session only: a recipe card or stream token still says
-// GPU decode, so a reconstruct starts there again.
+// from GPU to CPU decode (see gpuDecodeFailedFilterSetupLocked).
 func (s *TranscodeSession) restartDecodesOnCPU() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -3667,8 +3672,7 @@ func (s *TranscodeSession) restart(
 		// The same command would fail the same way at the same frame. Decide
 		// before the tone-map recheck below, so it validates the route this
 		// restart will run.
-		opts.SoftwareVideoDecode = true
-		opts.skipAutorotate = true
+		opts.gpuDecodeFailed = true
 	}
 	// A tone-map recipe is valid only for the frozen source revision. Recheck it
 	// while the current process is still serving so replacement bytes can never
