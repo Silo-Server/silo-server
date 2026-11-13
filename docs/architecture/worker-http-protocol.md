@@ -288,6 +288,9 @@ for that textual payload rather than claiming application/json on the wire.
 `hw_accel=auto` (a video transcode without tone mapping that resolves to a
 hardware backend), the node tries CPU decode with GPU encode, then software;
 otherwise it keeps the limited software retry for an early VideoToolbox failure.
+Outside `auto`, a start whose GPU decoder rejects the source (FFmpeg's
+`Hardware is lacking required capabilities`) walks the same CPU decode with GPU
+encode, then software, instead of repeating the command.
 `auto_fallback_ready` asks for that wait only when the node's own `hw_accel=auto`
 pipeline is enabled for the start, judged from its live hardware; otherwise the
 start is not waited on. The Jellyfin-compatible surface sends it for `auto` video
