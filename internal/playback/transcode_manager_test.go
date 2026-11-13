@@ -677,31 +677,6 @@ func TestReconstructTranscodeWalksAutoPipelineInSameOutputDir(t *testing.T) {
 	}
 }
 
-func TestReconstructTranscodeWithoutAutoStartsOnceWithoutWaiting(t *testing.T) {
-	m := NewTranscodeManager()
-	m.Config = func() TranscodeRuntimeConfig {
-		return TranscodeRuntimeConfig{TranscodeDir: t.TempDir(), HWAccel: transcodeHWQSV}
-	}
-	starts := 0
-	m.startTranscode = func(_ context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
-		starts++
-		// Never ready and already exited for a reason other than a decoder
-		// rejection: the session is still returned, as an unwaited one was.
-		return &TranscodeSession{opts: opts, stderr: newBoundedTailBuffer(stderrTailMaxBytes)}, nil
-	}
-	card := NewRecipeCard(5, "p", 77, "", TranscodeOpts{
-		SessionID: "s", InputPath: "/media/movie.mkv",
-		TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
-	})
-	got, err := m.ReconstructTranscodeWithError(context.Background(), "s", -1, card)
-	if err != nil || got == nil {
-		t.Fatalf("reconstruct = %v, %v; want the single unwaited session", got, err)
-	}
-	if starts != 1 {
-		t.Fatalf("starts = %d, want 1", starts)
-	}
-}
-
 // A rebuild is shared by every request waiting on it, so once it is admitted
 // the request that triggered it can end without failing the others. Each step
 // here answers an ended request as production does for some recipes: with
@@ -738,6 +713,31 @@ func TestReconstructTranscodeOutlivesTriggeringRequest(t *testing.T) {
 	got, err := m.ReconstructTranscodeWithError(ctx, "s", -1, card)
 	if err != nil || got == nil {
 		t.Fatalf("reconstruct = %v, %v; want the session the other requests wait for", got, err)
+	}
+}
+
+func TestReconstructTranscodeWithoutAutoStartsOnceWithoutWaiting(t *testing.T) {
+	m := NewTranscodeManager()
+	m.Config = func() TranscodeRuntimeConfig {
+		return TranscodeRuntimeConfig{TranscodeDir: t.TempDir(), HWAccel: transcodeHWQSV}
+	}
+	starts := 0
+	m.startTranscode = func(_ context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
+		starts++
+		// Never ready and already exited for a reason other than a decoder
+		// rejection: the session is still returned, as an unwaited one was.
+		return &TranscodeSession{opts: opts, stderr: newBoundedTailBuffer(stderrTailMaxBytes)}, nil
+	}
+	card := NewRecipeCard(5, "p", 77, "", TranscodeOpts{
+		SessionID: "s", InputPath: "/media/movie.mkv",
+		TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+	})
+	got, err := m.ReconstructTranscodeWithError(context.Background(), "s", -1, card)
+	if err != nil || got == nil {
+		t.Fatalf("reconstruct = %v, %v; want the single unwaited session", got, err)
+	}
+	if starts != 1 {
+		t.Fatalf("starts = %d, want 1", starts)
 	}
 }
 
