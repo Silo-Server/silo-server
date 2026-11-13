@@ -167,8 +167,12 @@ transport with public addresses only, and stop when the verification's
 context ends. Nothing is fetched until the first
 verification, so a server without network access still starts, and each node
 keeps its own cache. A cache older than a day is refreshed. When that refresh
-fails, unexpired cached metadata is used. With the mirror unreachable and the
-metadata expired or missing, verification fails closed. No bundled
+fails, unexpired cached metadata is used, and for the next ten minutes
+verifications use it without contacting the mirror. A stalled mirror would
+otherwise cost each plugin of an automatic update a 30-second fetch timeout. A
+canceled verification doesn't count as a failed refresh. With the mirror
+unreachable and the metadata expired or missing, verification fails closed,
+inside those ten minutes too. No bundled
 `trusted_root.json` stands in.
 
 ### Accepted risks

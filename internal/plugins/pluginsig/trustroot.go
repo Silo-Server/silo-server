@@ -28,6 +28,15 @@ const tufCacheValidityDays = 1
 // a few kilobytes.
 const tufFetchTimeout = 30 * time.Second
 
+// tufRefreshRetryInterval is how long after a failed refresh verifications use
+// the unexpired cache without contacting the mirror. A stalled mirror costs up
+// to tufFetchTimeout per attempt, and an automatic update verifies its plugins
+// one after another, so without it every plugin would wait. Ten minutes covers
+// one update pass, and is short against the day between scheduled refreshes
+// and the days Sigstore's TUF metadata stays valid, so a recovered mirror is
+// used again well before anything depends on it.
+const tufRefreshRetryInterval = 10 * time.Minute
+
 // TUFTrustRootOptions configures a TUFTrustRoot.
 type TUFTrustRootOptions struct {
 	// CacheDir holds the TUF metadata and the fetched trusted root. It is
@@ -44,6 +53,8 @@ type TUFTrustRootOptions struct {
 	// embeddedRoot replaces sigstore-go's embedded root.json in tests, which
 	// serve their own TUF repository.
 	embeddedRoot []byte
+	// now replaces time.Now in tests.
+	now func() time.Time
 }
 
 // TUFTrustRoot loads Sigstore's public-good trusted root through TUF. Nothing
@@ -53,8 +64,11 @@ type TUFTrustRootOptions struct {
 // metadata expired, TrustedMaterial fails.
 type TUFTrustRoot struct {
 	opts TUFTrustRootOptions
-	// mu serializes access to the cache directory.
+	// mu serializes access to the cache directory and refreshFailedAt.
 	mu sync.Mutex
+	// refreshFailedAt is when the last refresh from the mirror failed; zero
+	// after a refresh succeeds.
+	refreshFailedAt time.Time
 }
 
 // NewTUFTrustRoot returns a TUFTrustRoot for opts.
@@ -65,13 +79,18 @@ func NewTUFTrustRoot(opts TUFTrustRootOptions) *TUFTrustRoot {
 	if opts.embeddedRoot == nil {
 		opts.embeddedRoot = tuf.DefaultRoot()
 	}
+	if opts.now == nil {
+		opts.now = time.Now
+	}
 	return &TUFTrustRoot{opts: opts}
 }
 
 // TrustedMaterial returns the current trusted root. It refreshes TUF once the
 // cache is older than a day; when that refresh fails it uses the cached
-// metadata while it is unexpired, and otherwise fails. Fetches stop when ctx
-// ends.
+// metadata while it is unexpired, and otherwise fails. For
+// tufRefreshRetryInterval after a failed refresh it goes straight to the
+// unexpired cache; with the cache expired or missing it still tries the
+// mirror, as go-tuf does for a cache-only load. Fetches stop when ctx ends.
 func (t *TUFTrustRoot) TrustedMaterial(ctx context.Context) (root.TrustedMaterial, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -88,18 +107,37 @@ func (t *TUFTrustRoot) TrustedMaterial(ctx context.Context) (root.TrustedMateria
 	if err := privatedir.Ensure(t.opts.CacheDir); err != nil {
 		return nil, fmt.Errorf("TUF cache dir %w", err)
 	}
+	if !t.refreshFailedAt.IsZero() && t.opts.now().Before(t.refreshFailedAt.Add(tufRefreshRetryInterval)) {
+		cached, err := t.load(ctx, true)
+		if err != nil {
+			return nil, t.noteFailure(ctx, err)
+		}
+		return cached, nil
+	}
 	trusted, err := t.load(ctx, false)
 	if err == nil {
+		t.refreshFailedAt = time.Time{}
 		return trusted, nil
 	}
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return nil, ctxErr
+	err = t.noteFailure(ctx, err)
+	if ctx.Err() != nil {
+		return nil, err
 	}
 	cached, cacheErr := t.load(ctx, true)
 	if cacheErr != nil {
-		return nil, errors.Join(err, cacheErr)
+		return nil, errors.Join(err, t.noteFailure(ctx, cacheErr))
 	}
 	return cached, nil
+}
+
+// noteFailure records a failed load as a failed refresh, unless ctx ended,
+// which says nothing about the mirror. It returns the error to report.
+func (t *TUFTrustRoot) noteFailure(ctx context.Context, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	t.refreshFailedAt = t.opts.now()
+	return err
 }
 
 // load builds a TUF client and reads the trusted root target. forceCache uses

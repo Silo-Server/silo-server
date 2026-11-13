@@ -100,6 +100,13 @@ func TestTUFTrustRootStopsWithItsContext(t *testing.T) {
 	}()
 	<-arrived
 	cancel()
+	defer func() {
+		trust.mu.Lock()
+		defer trust.mu.Unlock()
+		if !trust.refreshFailedAt.IsZero() {
+			t.Error("a canceled verification was recorded as a failed refresh")
+		}
+	}()
 	// A fetcher that ignores the context returns only at tufFetchTimeout.
 	select {
 	case err := <-done:
@@ -111,9 +118,15 @@ func TestTUFTrustRootStopsWithItsContext(t *testing.T) {
 	}
 }
 
-type switchableTransport struct{ offline atomic.Bool }
+// switchableTransport counts every request it is asked to send, including
+// those it fails while offline.
+type switchableTransport struct {
+	offline  atomic.Bool
+	attempts atomic.Int32
+}
 
 func (s *switchableTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	s.attempts.Add(1)
 	if s.offline.Load() {
 		return nil, errors.New("offline")
 	}
@@ -202,4 +215,62 @@ func (r *testTUFRepo) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	_, _ = w.Write(data)
+}
+
+// After a refresh fails, verifications inside tufRefreshRetryInterval use the
+// unexpired cache without waiting on the mirror; after it they try the mirror
+// again. Expired cached metadata still fails closed inside the interval.
+func TestTUFTrustRootBacksOffAfterFailedRefresh(t *testing.T) {
+	repo := newTestTUFRepo(t)
+	server := httptest.NewServer(repo)
+	t.Cleanup(server.Close)
+	transport := &switchableTransport{}
+	now := time.Now()
+	trust := NewTUFTrustRoot(TUFTrustRootOptions{
+		CacheDir:      filepath.Join(t.TempDir(), "tuf"),
+		Transport:     transport,
+		RepositoryURL: server.URL,
+		embeddedRoot:  repo.files["/1.root.json"],
+		now:           func() time.Time { return now },
+	})
+	call := func() (int32, error) {
+		t.Helper()
+		transport.attempts.Store(0)
+		_, err := trust.TrustedMaterial(context.Background())
+		return transport.attempts.Load(), err
+	}
+	if _, err := call(); err != nil {
+		t.Fatalf("first TrustedMaterial() error = %v", err)
+	}
+
+	// The cache passes its one-day validity and the mirror stalls.
+	cacheConfig := filepath.Join(trust.opts.CacheDir, tuf.URLToPath(server.URL)+".json")
+	if err := (&tuf.Config{LastTimestamp: time.Now().Add(-48 * time.Hour)}).Persist(cacheConfig); err != nil {
+		t.Fatal(err)
+	}
+	transport.offline.Store(true)
+	if attempts, err := call(); err != nil || attempts == 0 {
+		t.Fatalf("stale cache: attempts = %d, error = %v; want a refresh attempt, then the cache", attempts, err)
+	}
+	now = now.Add(tufRefreshRetryInterval / 2)
+	if attempts, err := call(); err != nil || attempts != 0 {
+		t.Fatalf("inside the interval: attempts = %d, error = %v; want the cache without the mirror", attempts, err)
+	}
+	now = now.Add(tufRefreshRetryInterval)
+	if attempts, err := call(); err != nil || attempts == 0 {
+		t.Fatalf("after the interval: attempts = %d, error = %v; want a refresh attempt, then the cache", attempts, err)
+	}
+
+	// Inside the interval again, the cached metadata expires.
+	now = now.Add(time.Minute)
+	expired := metadata.Timestamp(time.Now().Add(-time.Minute))
+	expired.Signed.Version = 2
+	expired.Signed.Meta["snapshot.json"] = metadata.MetaFile(1)
+	cachedTimestamp := filepath.Join(trust.opts.CacheDir, tuf.URLToPath(server.URL), "timestamp.json")
+	if err := os.WriteFile(cachedTimestamp, repo.sign(t, expired), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if attempts, err := call(); err == nil || attempts == 0 {
+		t.Fatalf("expired cache inside the interval: attempts = %d, error = %v; want the mirror tried and a failure", attempts, err)
+	}
 }
