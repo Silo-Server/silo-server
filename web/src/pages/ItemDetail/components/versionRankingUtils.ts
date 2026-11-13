@@ -285,7 +285,8 @@ export function selectDefaultPlaybackVariantVersion(
     editions.find((e) => e.key === userData?.last_edition_key?.trim()) ??
     editions.find((e) => e.allVersions.some((v) => v.file_id === lastFileId));
   if (!edition) return bestEditionAuto(editions, qualityPreference);
-  const resumable = (userData?.position_seconds ?? 0) > 0 && !userData?.played;
+  // Finishing resets the position to 0; a rewatch keeps played set while it has one.
+  const resumable = (userData?.position_seconds ?? 0) > 0;
   const laterPart = resumable
     ? edition.allVersions.find((v) => v.file_id === lastFileId && !edition.versions.includes(v))
     : undefined;

@@ -257,6 +257,14 @@ it("groups presentations by edition and recovers history from a later part", () 
     last_file_id: 3,
   });
   expect(resumed?.file_id).toBe(3);
+  // A rewatch in progress keeps played set and still resumes its later part.
+  expect(
+    selectDefaultPlaybackVariantVersion(files, variants, {
+      played: true,
+      position_seconds: 600,
+      last_file_id: 3,
+    })?.file_id,
+  ).toBe(3);
   // Finished on the last part: no resume point, so a rewatch starts at part 1.
   expect(
     selectDefaultPlaybackVariantVersion(files, variants, {
