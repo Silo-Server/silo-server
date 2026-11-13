@@ -1025,6 +1025,9 @@ func writeCompatTranscodeError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusUnsupportedMediaType, "TranscodeUnsupported", "The media source changed; refresh playback information")
 	case errors.Is(err, tonemap.ErrSourcePreflightRejected):
 		writeError(w, http.StatusUnsupportedMediaType, "TranscodeUnsupported", "The media source is unsupported by the selected tone-map executor")
+	case errors.Is(err, errCompatUpstreamSessionGone):
+		// As the segment route answers a rebuild whose session is gone.
+		writeError(w, http.StatusNotFound, "NotFound", "Upstream session not found")
 	case errors.Is(err, errTranscode4KDisallowed):
 		writeError(w, http.StatusForbidden, "Forbidden", "4K video transcoding is disabled on this server")
 	case errors.Is(err, errHDRTranscodeUnsupported):
@@ -3025,7 +3028,11 @@ func (h *PlaybackHandler) ensureTranscodeManifestWithToneMapMode(
 	transcodeSession, err := h.ensureTranscodeSessionWithToneMapMode(ctx, playSessionID, playSession.UpstreamSessionID, source, requiredToneMapMode)
 	if err != nil {
 		requestErr := ctx.Err()
-		if requestErr == nil || !errors.Is(err, requestErr) {
+		// A rebuild that found the native session gone has closed its own
+		// transcode. Either the play has already ended, or its session expired
+		// and the play can still resume, which a teardown here would prevent by
+		// deleting its row.
+		if !errors.Is(err, errCompatUpstreamSessionGone) && (requestErr == nil || !errors.Is(err, requestErr)) {
 			h.teardownPlaySession(ctx, playSession, nil, nil)
 		}
 		return nil, err
@@ -3047,6 +3054,10 @@ func (h *PlaybackHandler) ensureTranscodeManifestWithToneMapMode(
 }
 
 var compatManifestStartupTimeout = playback.ManifestStartupTimeout
+
+// errCompatUpstreamSessionGone means a rebuilt transcode was closed because the
+// play's native session went away while the rebuild was starting.
+var errCompatUpstreamSessionGone = errors.New("upstream session ended during the transcode rebuild")
 
 func compatTranscodeSessionUsesToneMapMode(session *playback.TranscodeSession, required tonemap.Mode) bool {
 	return required == "" || (session != nil && session.Opts().ToneMapMode == required)
@@ -3094,6 +3105,13 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 				// the manager after the fast-path check. Never adopt it solely by ID.
 				if !compatLiveTranscodeMatchesAudioSource(reconstructed, source) {
 					return nil, errCompatRecipeSourceMismatch
+				}
+				// A stop, an expiry or an administrator's end that ran while this
+				// rebuild was starting found no transcode to close. With the native
+				// session gone, nothing else would close the one just registered.
+				if _, err := h.sessionMgr.GetSession(upstreamSessionID); errors.Is(err, playback.ErrSessionNotFound) {
+					h.tm.CloseTranscodeSessionIf(upstreamSessionID, reconstructed, "")
+					return nil, errCompatUpstreamSessionGone
 				}
 				h.recordTranscodeStreamDetails(ctx, upstreamSessionID, reconstructed.Opts())
 				return reconstructed, nil

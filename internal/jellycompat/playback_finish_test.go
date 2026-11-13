@@ -168,6 +168,83 @@ func TestAdminEndRetiresJellyfinPlay(t *testing.T) {
 	}
 }
 
+// TestPlaylistRebuildClosesTranscodeOfEndedSession covers issue #4120. A
+// playlist request rebuilds a play's lost transcode. When the native session
+// goes away after the request found it and before the rebuild registers its
+// transcode, whatever removed the session found no transcode to close. The
+// rebuild has to close the one it registered, or FFmpeg keeps encoding with
+// no session left to expire it. The play itself stays resumable.
+func TestPlaylistRebuildClosesTranscodeOfEndedSession(t *testing.T) {
+	const upstreamID = "upstream-1"
+	// A title this short gets a generated playlist, so the request does not
+	// wait on the stand-in FFmpeg, which writes none.
+	source := PlaybackMediaSource{ID: "source-42", FileID: 42, Version: catalog.FileVersion{FileID: 42, Duration: 3600}}
+	sessions := playback.NewSessionManager(0, 0)
+	sessions.RegisterReconstructed(&playback.Session{
+		ID: upstreamID, UserID: 1, ProfileID: "profile-1", MediaFileID: 42,
+		PlayMethod: playback.PlayTranscode, BasePlayMethod: playback.PlayTranscode, IsJellyfinCompat: true,
+	})
+	card := playback.NewRecipeCard(1, "profile-1", 42, "", playback.TranscodeOpts{
+		SessionID: upstreamID, InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "aac",
+		AudioTrackIndex: compatAudioTrackIndexOrDefault(source), SegmentDuration: 2, TotalDuration: 3600,
+	})
+	store := NewPlaybackSessionStore(time.Hour, nil)
+	store.Put(PlaybackSession{
+		ID: "play-1", CompatToken: "token-1", RouteItemID: "item", UpstreamSessionID: upstreamID,
+		UpstreamPlayMethod: "transcode", ProgressPersistenceKnown: true, MediaSources: []PlaybackMediaSource{source},
+		Recipe: &card, RoutingAssignment: compatLocalVideoAPIRoutingAssignment(),
+	})
+	handler := NewPlaybackHandler(nil, nil, nil, nil, store, sessions, nil, nil)
+	handler.TranscodeDir, handler.FFmpegPath, handler.HWAccel = t.TempDir(), writeCompatTestFFmpeg(t), playback.HWAccelNone
+	tm := handler.tm
+	t.Cleanup(func() { tm.CloseTranscodeSession(upstreamID, "") })
+
+	// The rebuild reads its config after the request has found the native
+	// session and before it starts FFmpeg, so the session goes away in between,
+	// as it does when it expires and the expiry's close finds no transcode.
+	config := tm.Config
+	sessionRemoved := false
+	tm.Config = func() playback.TranscodeRuntimeConfig {
+		if !sessionRemoved {
+			sessionRemoved = true
+			if err := sessions.StopSession(upstreamID); err != nil {
+				t.Error(err)
+			}
+		}
+		return config()
+	}
+	requestPlaylist := func() int {
+		req := httptest.NewRequest(http.MethodGet, "/Videos/item/hls/play-1/stream.m3u8", nil)
+		routeCtx := chi.NewRouteContext()
+		routeCtx.URLParams.Add("id", "item")
+		routeCtx.URLParams.Add("playlistId", "play-1")
+		ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
+		ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"})
+		rec := httptest.NewRecorder()
+		handler.HandleHLSManifest(rec, req.WithContext(ctx))
+		return rec.Code
+	}
+
+	code := requestPlaylist()
+	if !sessionRemoved {
+		t.Fatalf("the playlist request rebuilt nothing: status %d", code)
+	}
+	if code != http.StatusNotFound || tm.GetTranscodeSession(upstreamID) != nil {
+		t.Errorf("playlist status = %d, rebuilt transcode still registered = %v; want 404 and no transcode left without a native session",
+			code, tm.GetTranscodeSession(upstreamID) != nil)
+	}
+	if _, ok := store.Get("play-1"); !ok {
+		t.Fatal("the play is no longer routable, so the client cannot resume it")
+	}
+	if code := requestPlaylist(); code != http.StatusOK || tm.GetTranscodeSession(upstreamID) == nil {
+		t.Errorf("the next playlist request = %d, transcode running = %v; want the play resumed",
+			code, tm.GetTranscodeSession(upstreamID) != nil)
+	}
+	if _, err := sessions.GetSession(upstreamID); err != nil {
+		t.Errorf("the resumed play has no native session to expire its transcode: %v", err)
+	}
+}
+
 // TestAdminEndLeavesDirectPlayRouted: an administrator's end does not retire
 // a direct-play play. Its next request rebuilds the session under the same
 // id, the id a proxy's deny marker refuses. A retired row would instead let a
