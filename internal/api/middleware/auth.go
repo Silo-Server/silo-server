@@ -66,6 +66,9 @@ type AuthMiddleware struct {
 
 	apiKeyLastUsed  *auth.APIKeyLastUsedTracker
 	sessionLastSeen *auth.SessionLastSeenTracker
+	// streamReference verifies a playback plan's `st` on the native delivery
+	// routes; nil disables RequireStreamReferenceAuth's reference path.
+	streamReference StreamReferenceVerifier
 }
 
 // NewAuthMiddleware creates a new AuthMiddleware with the given token validator

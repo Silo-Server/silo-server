@@ -73,6 +73,12 @@ const (
 	// parameter, so a browser navigation that cannot send headers still
 	// carries the selected profile's limits.
 	TokenTypeDirectDownloadLink = "direct_download_link"
+	// TokenTypeStreamReference marks claims built from a playback plan's
+	// signed stream reference (`st`). It is never issued as an account JWT:
+	// only the native delivery routes accept the reference, for the one
+	// session it names, so a receiver that is handed a URL and cannot send
+	// headers (a Google Cast device) can play that session.
+	TokenTypeStreamReference = "stream_reference"
 )
 
 // DirectDownloadLinkTTL bounds how long a direct-download link may start a

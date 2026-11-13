@@ -376,8 +376,12 @@ These reuse the shared byte-delivery handlers behind the v2 listener, as the raw
 playback registry allows. The plan's URLs
 carry the signed stream reference `st`; a media element that cannot set headers
 may send the account bearer as the `token` query parameter, and the viewer
-headers select the profile. Account authentication and viewer authorization are
-always required. After a restart the session is rebuilt from the token the
+headers select the profile. Without an account credential, `st` on its own
+authorizes the media, sidecar and HLS requests of the one session it names, as
+its account and profile: a Google Cast receiver gets only the URL. Viewer
+authorization still runs for that profile, and stopping the session or
+disabling the account ends the reference before its 24-hour expiry. Plans that
+negotiated `header_authenticated_media_v1` carry no `st`. After a restart the session is rebuilt from the token the
 client re-presents
 ([restart-resilient playback](architecture/restart-resilient-playback.md)).
 Ranges, conditional requests and HEAD keep their HTTP semantics; an

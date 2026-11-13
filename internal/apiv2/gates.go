@@ -56,6 +56,9 @@ func classGate(deps Dependencies) func(huma.Context, func(huma.Context)) {
 		if link, _ := op.Metadata[metaDirectDownloadLink].(bool); link && missing == "" {
 			chain = directDownloadGateChain(deps, chain)
 		}
+		if streamReferenceOperations[op.OperationID] && missing == "" {
+			chain = streamReferenceGateChain(deps, chain)
+		}
 		if attach, _ := op.Metadata[metaAttachSession].(bool); attach && class == ClassPublic && deps.Auth != nil {
 			chain = append(chain, deps.Auth.AttachSession)
 		}

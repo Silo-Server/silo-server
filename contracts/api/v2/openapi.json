@@ -200560,7 +200560,7 @@
             }
           },
           {
-            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required.",
+            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names; viewer authorization still applies. Omitted for header-authenticated media.",
             "in": "query",
             "name": "st",
             "schema": {
@@ -200774,7 +200774,7 @@
             }
           },
           {
-            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required.",
+            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names; viewer authorization still applies. Omitted for header-authenticated media.",
             "in": "query",
             "name": "st",
             "schema": {
@@ -220785,7 +220785,7 @@
             }
           },
           {
-            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required.",
+            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names; viewer authorization still applies. Omitted for header-authenticated media.",
             "in": "query",
             "name": "st",
             "schema": {
@@ -221373,7 +221373,7 @@
             }
           },
           {
-            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required.",
+            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names; viewer authorization still applies. Omitted for header-authenticated media.",
             "in": "query",
             "name": "st",
             "schema": {
@@ -221665,7 +221665,7 @@
             }
           },
           {
-            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required.",
+            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names; viewer authorization still applies. Omitted for header-authenticated media.",
             "in": "query",
             "name": "st",
             "schema": {
@@ -221945,7 +221945,7 @@
             }
           },
           {
-            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required.",
+            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names; viewer authorization still applies. Omitted for header-authenticated media.",
             "in": "query",
             "name": "st",
             "schema": {
