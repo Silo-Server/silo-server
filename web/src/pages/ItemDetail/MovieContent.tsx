@@ -35,7 +35,10 @@ import MediaUserActionBar from "./components/MediaUserActionBar";
 import MediaInfoDialog from "./components/MediaInfoDialog";
 import SubtitleSearchDialog from "./components/SubtitleSearchDialog";
 import { sortByResolution } from "./components/VersionFlyout";
-import { selectDefaultPlaybackVariantVersion } from "./components/versionRankingUtils";
+import {
+  selectDefaultPlaybackVariantVersion,
+  selectedDownloadVersions,
+} from "./components/versionRankingUtils";
 import { resolveSelectedMediaSummary } from "./components/selectedMediaSummary";
 import { RecommendationGridSkeleton } from "./components/SectionSkeletons";
 import { resolveLeafPrimaryAction } from "./itemDetailLayout";
@@ -109,6 +112,7 @@ export default function MovieContent({
   // Version selection state — drives the Play button and inline stream popovers.
   const sortedVersions = useMemo(() => sortByResolution(item.versions), [item.versions]);
   const userData = leafUserData(item.user_data);
+  const [selectedEditionKey, setSelectedEditionKey] = useState<string | undefined>(undefined);
   const defaultSelectedVersion = useMemo(
     () =>
       selectDefaultPlaybackVariantVersion(
@@ -116,15 +120,9 @@ export default function MovieContent({
         item.playback_variants,
         userData,
         qualityPreference,
-        item.effective_version_edition_key,
+        selectedEditionKey,
       ),
-    [
-      qualityPreference,
-      item.effective_version_edition_key,
-      item.playback_variants,
-      sortedVersions,
-      userData,
-    ],
+    [qualityPreference, selectedEditionKey, item.playback_variants, sortedVersions, userData],
   );
   const [manualSelectedFileId, setManualSelectedFileId] = useState<number | null>(null);
   const pickedVersion = useMemo(
@@ -163,18 +161,32 @@ export default function MovieContent({
   if (prevContentId !== item.content_id) {
     setPrevContentId(item.content_id);
     setManualSelectedFileId(null);
+    setSelectedEditionKey(undefined);
     setSubtitleSelectionMode("auto");
     setExplicitSubtitleSelection(null);
   }
   const handleSelectVersion = useCallback(
-    (version: FileVersion) => {
-      setManualSelectedFileId(version.file_id);
+    (version: FileVersion | null) => {
+      setManualSelectedFileId(version?.file_id ?? null);
+      if (version) setSelectedEditionKey(version.edition_key ?? "");
       // Track indexes belong to a file, so another version starts from Auto.
       clearAudioSelection();
       setSubtitleSelectionMode("auto");
       setExplicitSubtitleSelection(null);
     },
     [clearAudioSelection],
+  );
+
+  const handleSelectEdition = useCallback(
+    (key: string) => {
+      setSelectedEditionKey(key);
+      handleSelectVersion(null);
+    },
+    [handleSelectVersion],
+  );
+  const downloadVersions = useMemo(
+    () => selectedDownloadVersions(selectedVersion, item.playback_variants, qualityPreference),
+    [selectedVersion, item.playback_variants, qualityPreference],
   );
 
   const handleSelectSubtitle = (selection: PrePlaySubtitleSelection) => {
@@ -344,6 +356,7 @@ export default function MovieContent({
               selectedVersion={selectedVersion}
               versionPicked={pickedVersion != null}
               onSelectVersion={handleSelectVersion}
+              onSelectEdition={handleSelectEdition}
               onDownload={
                 user?.download_allowed && item.versions.length > 0
                   ? () => setDownloadOpen(true)
@@ -395,7 +408,7 @@ export default function MovieContent({
           <DownloadVersionPicker
             open={downloadOpen}
             onOpenChange={setDownloadOpen}
-            versions={item.versions}
+            versions={downloadVersions}
             title={title}
           />
           <SubtitleSearchDialog

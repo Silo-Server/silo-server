@@ -288,7 +288,7 @@ describe("MovieContent", () => {
     });
   });
 
-  it("opens on the remembered version when the movie has no resume point", () => {
+  it("opens on Auto within the remembered edition when the movie has no resume point", () => {
     const uhd = movieVersion({ file_id: 1, resolution: "2160p", codec_audio: "truehd", hdr: true });
     const hd = movieVersion({ file_id: 2, resolution: "1080p", codec_audio: "dts", hdr: false });
 
@@ -308,7 +308,33 @@ describe("MovieContent", () => {
     );
 
     expect(mocks.capturedQualityBadgesProps.value).toMatchObject({
-      summary: { resolution: "1080p" },
+      summary: { resolution: "2160p" },
+    });
+  });
+
+  it("clears a version pin when choosing an edition and keeps Auto within that cut", () => {
+    const theatrical = movieVersion({ file_id: 1, edition_key: "", resolution: "1080p" });
+    const extended = movieVersion({ file_id: 2, edition_key: "extended", resolution: "2160p" });
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter>
+          <MovieContent item={makeMovieItem({ versions: [theatrical, extended] })} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    act(() =>
+      (mocks.capturedActionBarProps.value?.onSelectVersion as (v: FileVersion) => void)(extended),
+    );
+    expect(mocks.capturedActionBarProps.value).toMatchObject({ versionPicked: true });
+    act(() => (mocks.capturedActionBarProps.value?.onSelectEdition as (key: string) => void)(""));
+    expect(mocks.capturedActionBarProps.value).toMatchObject({
+      versionPicked: false,
+      selectedVersion: { file_id: 1 },
+    });
+    act(() => (mocks.capturedActionBarProps.value?.onSelectVersion as (v: null) => void)(null));
+    expect(mocks.capturedActionBarProps.value).toMatchObject({
+      versionPicked: false,
+      selectedVersion: { file_id: 1 },
     });
   });
 
