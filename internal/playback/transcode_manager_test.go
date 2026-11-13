@@ -374,6 +374,39 @@ func TestLoadOrReconstructTranscode_FailedAttemptPreservesConcurrentSession(t *t
 // returns true. The closures (handlers.OnFFmpegCrash / jellycompat
 // OnFFmpegCrash) wire `matched` directly to the StopSession/stopPlaybackSessionByID
 // decision, so a false gate guarantees the live session is left intact.
+// TestCloseTranscodeSessionIfSessionGoneFencesTheOutputDirectory: the close
+// removes the session's output directory. A retry that started in between
+// would write its playlist and segments into the directory being removed, so
+// no start may take the session's lifecycle lock until the close is done.
+func TestCloseTranscodeSessionIfSessionGoneFencesTheOutputDirectory(t *testing.T) {
+	m := NewTranscodeManager()
+	rejected := &TranscodeSession{outputDir: t.TempDir()}
+	m.RegisterTranscodeSession("s1", rejected)
+	// Close cancels the process before it removes the directory.
+	startCouldRun := true
+	rejected.cancel = func() {
+		m.lifecycleMu.Lock()
+		lock := m.lifecycleLocks["s1"]
+		m.lifecycleMu.Unlock()
+		if lock == nil {
+			return
+		}
+		if startCouldRun = lock.mu.TryLock(); startCouldRun {
+			lock.mu.Unlock()
+		}
+	}
+
+	if !m.CloseTranscodeSessionIfSessionGone("s1", rejected, func() bool { return false }) {
+		t.Fatal("reported a session for an id that has none")
+	}
+	if startCouldRun {
+		t.Error("a start for the session could take its lifecycle lock while the close was removing the output directory")
+	}
+	if m.GetTranscodeSession("s1") != nil {
+		t.Error("the transcode is still registered")
+	}
+}
+
 func TestCloseTranscodeSessionIf_GateContract(t *testing.T) {
 	m := NewTranscodeManager()
 	dead := &TranscodeSession{}
