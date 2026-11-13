@@ -151,6 +151,11 @@ func assertNativeSocketResponse(t *testing.T, client *http.Client, method, url s
 	if encoding := resp.Header.Get("Content-Encoding"); encoding != "" {
 		t.Fatalf("%s Content-Encoding = %q, want empty", method, encoding)
 	}
+	// The stub route sets no header of its own: the chain must, or a browser
+	// runs user-supplied bytes from an API route as a same-origin script.
+	if got := resp.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("%s X-Content-Type-Options = %q, want nosniff", method, got)
+	}
 }
 
 func assertNativeMultiRange(t *testing.T, client *http.Client, url string) {

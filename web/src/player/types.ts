@@ -136,6 +136,8 @@ export interface PlayerSubtitleInfo {
   hearing_impaired?: boolean;
   /** Names the track to the subtitle sync operations; absent when it can't be synced. */
   sync_key?: string;
+  /** Stored row identity, also present when the track has no URL or timing support. */
+  stored_subtitle_id?: number;
   url: string;
   /**
    * Optional endpoint returning base64-encoded container font attachments for
@@ -289,11 +291,19 @@ export interface PlayerPlaybackTransport {
  */
 export type PlaybackStartTrigger = "viewer" | "automatic";
 
+/** A title's backdrop, as the watch detail sends it. */
+export interface PlayerBackdrop {
+  url?: string;
+  thumbhash?: string;
+}
+
 /** Props for the top-level WatchPage component. */
 export interface WatchPageProps {
   contentId: string;
   title: string;
   year?: number;
+  /** Shown dimmed behind the loading spinner. */
+  backdrop?: PlayerBackdrop;
   fileId?: number;
   /** The viewer chose fileId, so Auto must not swap in another version. */
   versionPicked?: boolean;

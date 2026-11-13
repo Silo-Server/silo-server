@@ -58,14 +58,24 @@ func (h *Handler) handleOpenItemFeed(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	if h.deps.RSSFeedStore == nil {
+	if h.deps.RSSFeedStore == nil || h.deps.AccessResolver == nil {
 		http.Error(w, "feed store unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	itemID := chi.URLParam(r, "itemId")
-	access, err := h.accessFilterForAuth(r.Context(), a)
+	// A feed serves its book to anyone who has the link, so only the acting
+	// administrator may open one: Audiobookshelf allows administrators only,
+	// and here that is the primary profile of an admin account. The caller is
+	// resolved as the feed's owner, the way resolvePublicFeed resolves it
+	// again on every fetch.
+	access, actingAdmin, err := h.deps.AccessResolver.ResolveABSOwnerAccess(r.Context(), a.UserID, a.ProfileID)
+	if errors.Is(err, ErrOwnerUnavailable) || (err == nil && !actingAdmin) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		slog.ErrorContext(r.Context(), "abs feed owner access failed", "component", "audiobooks", "err", err, "user", a.UserID)
+		http.Error(w, "feed open failed", http.StatusInternalServerError)
 		return
 	}
 	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), itemID, access)
@@ -179,10 +189,11 @@ func (h *Handler) handlePublicFeed(w http.ResponseWriter, r *http.Request) {
 
 // resolvePublicFeed loads the open feed for slug and its owner's current
 // access. The slug grants no access of its own: the feed serves only what its
-// stored owner and profile could fetch through the authenticated routes today.
-// A closed or unknown feed, an unavailable owner, and an item the owner can no
-// longer see all answer the same 404, so the response does not reveal which
-// applies. On false the response is written.
+// stored owner and profile could fetch through the authenticated routes today,
+// and only while the owner is the acting administrator. A closed or unknown
+// feed, an owner who is not the acting administrator, an unavailable owner,
+// and an item the owner can no longer see all answer the same 404, so the
+// response does not reveal which applies. On false the response is written.
 func (h *Handler) resolvePublicFeed(w http.ResponseWriter, r *http.Request, slug string) (RSSFeed, catalog.AccessFilter, bool) {
 	ctx := r.Context()
 	if h.deps.RSSFeedStore == nil || h.deps.AccessResolver == nil {
@@ -200,8 +211,8 @@ func (h *Handler) resolvePublicFeed(w http.ResponseWriter, r *http.Request, slug
 		return RSSFeed{}, catalog.AccessFilter{}, false
 	}
 
-	access, err := h.deps.AccessResolver.ResolveABSOwnerAccess(ctx, f.UserID, f.ProfileID)
-	if errors.Is(err, ErrOwnerUnavailable) {
+	access, actingAdmin, err := h.deps.AccessResolver.ResolveABSOwnerAccess(ctx, f.UserID, f.ProfileID)
+	if errors.Is(err, ErrOwnerUnavailable) || (err == nil && !actingAdmin) {
 		http.Error(w, "feed not found", http.StatusNotFound)
 		return RSSFeed{}, catalog.AccessFilter{}, false
 	}

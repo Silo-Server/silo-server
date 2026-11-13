@@ -1,10 +1,15 @@
 import type { CSSProperties } from "react";
+import { Direction } from "radix-ui";
 import { Toaster as SonnerToaster, type ToasterProps } from "sonner";
 
 const Toaster = ({ ...props }: ToasterProps) => {
+  const dir = Direction.useDirection();
   return (
     <SonnerToaster
       theme="dark"
+      dir={dir}
+      // Sonner's corners are physical; toasts sit at the bottom end corner.
+      position={dir === "rtl" ? "bottom-left" : "bottom-right"}
       className="toaster group"
       toastOptions={{
         classNames: {

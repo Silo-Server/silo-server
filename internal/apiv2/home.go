@@ -109,9 +109,10 @@ type HomeLayoutOutput struct {
 // HomeCapabilities is the getHomeCapabilities body.
 type HomeCapabilities struct {
 	Capability
-	IncludeItemsMax     int `json:"include_items_max,omitzero" doc:"The largest include_items getHomeLayout accepts: the layout then also answers that many first sections with their cards in included_sections. Absent when the home sections service is not configured" example:"4"`
-	SectionItemLimitMax int `json:"section_item_limit_max,omitzero" doc:"The largest item_limit listHomeSections and listLibrarySections accept: each section then answers at most that many cards. Absent when the home sections service is not configured" example:"100"`
-	RowItemLimitMax     int `json:"row_item_limit_max,omitzero" doc:"The largest item_limit getHomeSectionItems and getHomeLayout accept: the section, or each section the layout includes, then answers at most that many cards. Absent when the home sections service is not configured, and on a server whose Home row reads take no item_limit" example:"100"`
+	IncludeItemsMax     int  `json:"include_items_max,omitzero" doc:"The largest include_items getHomeLayout accepts: the layout then also answers that many first sections with their cards in included_sections. Absent when the home sections service is not configured" example:"4"`
+	SectionItemLimitMax int  `json:"section_item_limit_max,omitzero" doc:"The largest item_limit listHomeSections and listLibrarySections accept: each section then answers at most that many cards. Absent when the home sections service is not configured" example:"100"`
+	RowItemLimitMax     int  `json:"row_item_limit_max,omitzero" doc:"The largest item_limit getHomeSectionItems and getHomeLayout accept: the section, or each section the layout includes, then answers at most that many cards. Absent when the home sections service is not configured, and on a server whose Home row reads take no item_limit" example:"100"`
+	SectionTitleKeys    bool `json:"section_title_keys,omitzero" doc:"Sections, profile section settings, admin section definitions and recommendation rows carry title_key, with title_args when its message has placeholders, for titles the server writes, so a client can translate them (a few, such as an editorial row's subject title, have none; a client shows title whenever the key is absent or unknown), and profile section settings carry default_title_key and default_title_args the same way for default_title. Request Discover rows carry title_key the same way, and the section recipe gallery's presets carry display_name_key, description_short_key and description_long_key for their text; those came later, so a server that reports this flag may not send them. Informational: clients act on each key whenever it is present. Absent when the home sections service is not configured, and on a server that predates section title keys" example:"true"`
 }
 
 // HomeCapabilitiesOutput is the getHomeCapabilities response.
@@ -148,6 +149,12 @@ type RecipePreset struct {
 	DescriptionShort string        `json:"description_short" example:"Items added in the last seven days"`
 	DescriptionLong  string        `json:"description_long" doc:"Empty when the preset has none"`
 	DefaultParams    SectionConfig `json:"default_params" doc:"The config the preset starts from; empty, never null"`
+	// The keys name shared translation catalog messages whose English is the
+	// matching text above. A client that has a key shows its translation and
+	// otherwise the text. The text stays English in every answer.
+	DisplayNameKey      string `json:"display_name_key,omitempty" doc:"Key of the shared translation catalog message whose English is display_name. A client that has the key shows its translation and otherwise display_name" example:"home.recipe.mwWeek.name"`
+	DescriptionShortKey string `json:"description_short_key,omitempty" doc:"Key of the shared translation catalog message whose English is description_short, with the same fallback" example:"home.recipe.mwWeek.description"`
+	DescriptionLongKey  string `json:"description_long_key,omitempty" doc:"Key of the shared translation catalog message whose English is description_long; absent when the preset has no description_long" example:"home.recipe.seAuto.details"`
 }
 
 // RecipeDefinition is one recipe as the gallery shows it.
@@ -448,6 +455,7 @@ func (reg *Registry) getHomeCapabilities(_ context.Context, _ *CapabilityInput) 
 		IncludeItemsMax:     handlers.MaxHomeLayoutIncludedSections,
 		SectionItemLimitMax: handlers.MaxSectionItemLimitCap,
 		RowItemLimitMax:     handlers.MaxSectionItemLimitCap,
+		SectionTitleKeys:    true,
 	}}, nil
 }
 
@@ -524,7 +532,9 @@ func recipeDefaultConfigOf(raw json.RawMessage) SectionConfig {
 func recipeDefinitionOf(def recipes.RecipeDefinition) RecipeDefinition {
 	presets := make([]RecipePreset, 0, len(def.Presets))
 	for _, p := range def.Presets {
-		presets = append(presets, RecipePreset{Key: p.Key, DisplayName: p.DisplayName, Icon: p.Icon, DescriptionShort: p.DescriptionShort, DescriptionLong: p.DescriptionLong, DefaultParams: recipeDefaultConfigOf(p.DefaultParams)})
+		text := recipes.PresetTextKeys(p)
+		presets = append(presets, RecipePreset{Key: p.Key, DisplayName: p.DisplayName, Icon: p.Icon, DescriptionShort: p.DescriptionShort, DescriptionLong: p.DescriptionLong, DefaultParams: recipeDefaultConfigOf(p.DefaultParams),
+			DisplayNameKey: text.DisplayName, DescriptionShortKey: text.DescriptionShort, DescriptionLongKey: text.DescriptionLong})
 	}
 	return RecipeDefinition{Type: def.Type, Category: string(def.Category), Presets: presets, AvoidDuplicates: def.AvoidDuplicates, SupportsRotation: def.SupportsRotation, AdminOnly: def.AdminOnly}
 }

@@ -58,6 +58,8 @@ type UserResolver interface {
 // ItemAccessChecker checks library/content-rating access.
 type ItemAccessChecker interface {
 	EnsureAccessible(ctx context.Context, contentID string, filter catalog.AccessFilter) error
+	// EnsureAccessibleIDs is the batch form: the IDs the filter admits map to true.
+	EnsureAccessibleIDs(ctx context.Context, contentIDs []string, filter catalog.AccessFilter) (map[string]bool, error)
 }
 
 // SettingsReader loads all server settings as a flat map.
@@ -616,7 +618,7 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 			d.DeviceID = req.DeviceID
 		}
 		if err := s.repo.Create(ctx, d); err != nil {
-			if managed {
+			if managed && !errors.Is(err, errFileNotRegistrable) {
 				if existing, gerr := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, file.ContentID, file.EpisodeID); gerr == nil {
 					replacement := buildManagedDownload(userID, req.ProfileID, req.DeviceID, managedItem{file: file, contentID: file.ContentID, episodeID: file.EpisodeID}, decision, "", status, size, artifact.ID)
 					row, rerr := s.reuseOrReplaceManaged(ctx, existing, replacement, req.ExpectedRevision, req.ExpectedDownloadID)
@@ -1044,7 +1046,10 @@ func (s *Service) ensureManagedDecisions(ctx context.Context, userID int, req Cr
 			}
 			toInsert = append(toInsert, d)
 		}
-		rows, err := s.repo.CreateManagedEntriesBatch(ctx, toInsert)
+		// One request registers its entries together: a file that left its
+		// title since it was resolved fails the request without registering
+		// the others, as a file deleted meanwhile failed the insert.
+		rows, err := s.repo.CreateManagedEntriesAllOrNothing(ctx, toInsert)
 		if err != nil {
 			return err
 		}
@@ -1066,8 +1071,13 @@ func (s *Service) ensureManagedDecisions(ctx context.Context, userID int, req Cr
 			continue
 		}
 		// A concurrent create won this identity between the fetch and the
-		// batch insert (ON CONFLICT skipped it); return the winning row.
+		// batch insert (ON CONFLICT skipped it); return the winning row. With
+		// no winner, the insert wrote nothing because a file of the request
+		// went missing or left its title.
 		row, err := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, items[i].contentID, items[i].episodeID)
+		if errors.Is(err, ErrNotFound) {
+			return nil, errFileNotRegistrable
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -1197,15 +1207,20 @@ func sameManagedTarget(a, b *Download) bool {
 }
 
 // List returns the calling device's managed entries, or the user's
-// ephemeral/account-level rows when no device header is present.
-func (s *Service) List(ctx context.Context, userID int, profileID, deviceID string) ([]*Download, error) {
+// ephemeral/account-level rows when no device header is present, leaving out
+// the account-level rows whose item the requesting profile may not open.
+func (s *Service) List(ctx context.Context, userID int, profileID, deviceID string, filter catalog.AccessFilter) ([]*Download, error) {
 	if deviceID != "" {
 		if profileID == "" {
 			return nil, ErrProfileRequired
 		}
 		return s.repo.ListManaged(ctx, userID, profileID, deviceID)
 	}
-	return s.repo.ListEphemeral(ctx, userID)
+	rows, err := s.repo.ListEphemeral(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return s.accessibleRows(ctx, rows, filter)
 }
 
 // ServeDirect validates permissions and serves a file directly for browser
@@ -1216,7 +1231,7 @@ func (s *Service) ServeDirect(ctx context.Context, w http.ResponseWriter, r *htt
 		return err
 	}
 	notifyServeAuthorized(ctx, *target)
-	return s.serveLocalFile(ctx, w, r, target.Path, userID)
+	return s.serveLocalFile(ctx, w, r, target.Path, s.AttachmentName(ctx, target), userID)
 }
 
 // ResolveDirectFile authorizes a browser-style original download without
@@ -1372,9 +1387,9 @@ func (s *Service) PatchStatus(ctx context.Context, userID int, profileID, device
 }
 
 // Delete removes a managed entry (authorized on user, profile, device) or
-// cancels/deletes an ephemeral row. Each path is scoped to its own row mode so
-// neither can touch the other's rows.
-func (s *Service) Delete(ctx context.Context, userID int, profileID, deviceID, downloadID string) error {
+// cancels/deletes an ephemeral row the requesting profile may open. Each path
+// is scoped to its own row mode so neither can touch the other's rows.
+func (s *Service) Delete(ctx context.Context, userID int, profileID, deviceID, downloadID string, filter catalog.AccessFilter) error {
 	if deviceID != "" {
 		if profileID == "" {
 			return ErrProfileRequired
@@ -1395,6 +1410,15 @@ func (s *Service) Delete(ctx context.Context, userID int, profileID, deviceID, d
 	}
 	if dl.UserID != userID || dl.IsManaged() {
 		return ErrNotFound
+	}
+	// Account-level rows are shared by every profile on the account, so only
+	// a profile whose content scope admits the item may cancel or remove one.
+	// A refusal answers as a missing row does.
+	if err := s.itemAccess.EnsureAccessible(ctx, dl.ContentID, filter); err != nil {
+		if errors.Is(err, catalog.ErrItemNotFound) {
+			return ErrNotFound
+		}
+		return err
 	}
 	switch dl.Status {
 	case StatusQueued, StatusDownloading:
@@ -1516,6 +1540,12 @@ func (s *Service) resolveDownloadBytesTarget(ctx context.Context, dl *Download, 
 		if err != nil {
 			return nil, err
 		}
+		// An artifact is prepared from one file row. A download the scanner
+		// parked on a retitle's stand-in still names the artifact of the row
+		// it left, which now belongs to another title, so it is not served.
+		if artifact.MediaFileID != dl.MediaFileID {
+			return nil, catalog.ErrItemNotFound
+		}
 		// The quality ceiling applies to what is actually served — the prepared
 		// artifact's resolution, not the source's (a 720p transcode of a 4K
 		// source must stay downloadable under a 1080p ceiling).
@@ -1560,7 +1590,9 @@ func proxyDeliveryAllowed(cfg config.DownloadConfig) bool {
 	return cfg.ServerBandwidthBPS <= 0 && cfg.UserBandwidthBPS <= 0
 }
 
-func (s *Service) serveLocalFile(ctx context.Context, w http.ResponseWriter, r *http.Request, path string, userID int) error {
+// serveLocalFile serves the file at path, saved as name (the file's own name
+// when name is empty).
+func (s *Service) serveLocalFile(ctx context.Context, w http.ResponseWriter, r *http.Request, path, name string, userID int) error {
 	f, err := fspath.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1575,7 +1607,10 @@ func (s *Service) serveLocalFile(ctx context.Context, w http.ResponseWriter, r *
 		return fmt.Errorf("stat file: %w", err)
 	}
 
-	w.Header().Set("Content-Disposition", attachmentDisposition(path))
+	if name == "" {
+		name = path
+	}
+	w.Header().Set("Content-Disposition", attachmentDisposition(name))
 	w.Header().Set("Content-Type", playback.MimeFromExtension(path))
 	if etag := serveEntityTag(ctx, f, stat); etag != "" {
 		w.Header().Set("ETag", etag)
@@ -1672,7 +1707,7 @@ func (s *Service) serveFileTarget(ctx context.Context, w http.ResponseWriter, r 
 		return catalog.ErrItemNotFound
 	}
 	if target.OriginArtifactID == "" {
-		return s.serveLocalFile(ctx, w, r, target.Path, userID)
+		return s.serveLocalFile(ctx, w, r, target.Path, s.AttachmentName(ctx, target), userID)
 	}
 	secret := ""
 	if s.artifacts != nil && s.artifacts.liveCfg != nil {
@@ -1718,7 +1753,7 @@ func (s *Service) serveFileTarget(ctx context.Context, w http.ResponseWriter, r 
 	// Preserve an origin-provided disposition, but supply the same sanitized
 	// attachment filename as local delivery when the node omits one.
 	if strings.TrimSpace(target.Path) != "" {
-		w.Header().Set("Content-Disposition", attachmentDisposition(target.Path))
+		w.Header().Set("Content-Disposition", attachmentDisposition(s.AttachmentName(ctx, target)))
 	}
 	downloadprepare.CopyResponseHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)

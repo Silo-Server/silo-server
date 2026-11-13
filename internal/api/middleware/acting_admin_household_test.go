@@ -45,11 +45,11 @@ func TestActingAdminHouseholdRule(t *testing.T) {
 		{"no requirement wired", session, "", primaryChecker(true, true, nil), nil, http.StatusNoContent},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			legacy := captureActingAdminResponse(RequireActingAdmin(tc.check, tc.household), tc.claims, tc.profileID)
+			legacy := captureActingAdminResponse(RequireActingAdminWith(NewActingAdminDecider(tc.check, tc.household)), tc.claims, tc.profileID)
 			if legacy.code != tc.want {
 				t.Fatalf("legacy status = %d, want %d: %s", legacy.code, tc.want, legacy.body)
 			}
-			policyBacked := captureActingAdminResponse(NewPolicyActingAdminMiddleware(pdp, tc.check, tc.household), tc.claims, tc.profileID)
+			policyBacked := captureActingAdminResponse(RequireActingAdminWith(NewPolicyActingAdminDecider(pdp, tc.check, tc.household)), tc.claims, tc.profileID)
 			assertMiddlewareResponsesEqual(t, policyBacked, legacy)
 		})
 	}

@@ -30,28 +30,29 @@ import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useHasUnsavedChanges, useReportUnsavedChanges } from "@/hooks/useUnsavedChanges";
 import {
-  ADD_A_RULE,
-  ADD_A_RULE_THEN_CREATE,
-  CHANGED_BEFORE_DELETE,
-  CHECK_BEFORE_DELETE_FAILED,
-  DRAFT_FIELD_LABEL,
-  NAME_FILLED_HELP,
-  NAME_IT_THEN_CREATE,
-  NOT_CREATED_YET,
-  PICK_A_LIBRARY,
-  PICK_A_LIST_FIRST,
-  PICK_LIBRARIES_FIRST,
-  PREVIEW_EVERY_LIBRARY,
-  PREVIEW_SHOWS_UNSAVED,
-  SAVE_AFTER_CONFLICTS,
-  SAVE_FAILED,
-  SAVE_NOT_READY,
-  SHOW_IT_FIRST,
-  DISCARD_KEEPS_IT_HIDDEN,
-  SMART_UPDATES_ITSELF,
-  SYNCED_CREATE_SUBTITLE,
-  SYNCS_ON_CREATE,
-  TITLES_ALREADY_SAVED,
+  addARuleThenCreate,
+  addAtLeastOneRule,
+  changedBeforeDelete,
+  checkBeforeDeleteFailed,
+  draftFieldLabel,
+  nameFilledHelp,
+  nameItThenCreate,
+  newCollection,
+  notCreatedYet,
+  pickALibrary,
+  pickAListFirst,
+  pickLibrariesFirst,
+  pickWhereItShowsFirst,
+  previewShowsUnsaved,
+  saveAfterConflicts,
+  saveFailedWithError,
+  saveNotReady,
+  showItFirst,
+  discardKeepsItHidden,
+  smartUpdatesItself,
+  syncedCreateSubtitle,
+  syncsOnCreate,
+  titlesAlreadySaved,
   firstSyncMessage,
   joinNames,
   keptMessage,
@@ -88,7 +89,7 @@ import type {
   WireCollection,
 } from "@/lib/collections/scope";
 import { savedListProblem, type SyncedDraft, type SyncedTab } from "@/lib/collections/synced";
-import { SYNCED_SOURCE_LABEL } from "@/lib/collections/types";
+import { syncedSourceLabel } from "@/lib/collections/types";
 import type { AddedRowState } from "@/lib/homeRows/rowLinks";
 import type { PageRef } from "@/lib/homeRows/types";
 import { buildLibraryCollectionCatalogHref } from "@/pages/catalogSearchParams";
@@ -111,6 +112,7 @@ import { SmartRulesPanel } from "./SmartRulesPanel";
 import { SyncedListPanel, type SyncedListPanelProps } from "./SyncedListPanel";
 import { useAddedRowHighlight } from "./useAddedRowHighlight";
 import { WhereItShowsPanel, type HideConfirm } from "./WhereItShowsPanel";
+import { useAppLanguage, useT } from "@/i18n";
 
 const NO_TITLES: readonly string[] = [];
 /** The fields the live preview already reflects before they are saved. */
@@ -142,6 +144,7 @@ function useUntickWarning(
   chosen: readonly number[],
   libraries: ReadonlyArray<{ id: number; name: string }>,
 ) {
+  const t = useT();
   const removed = saved.filter((id) => !chosen.includes(id));
   const pending = Boolean(collectionId) && removed.length > 0;
   const titlesIn = useQueries({
@@ -171,8 +174,12 @@ function useUntickWarning(
   const names = removed.map((id) => libraries.find((library) => library.id === id)?.name ?? "");
   const titles = [...onlyRemoved.values()];
   const shown = titles.slice(0, 3).join(", ") + (titles.length > 3 ? "…" : "");
-  const count = `${titles.length} title${titles.length === 1 ? " is" : "s are"}`;
-  return `${count} only in ${joinNames(names.filter(Boolean))}: ${shown}. They'll stop showing when you save.`;
+  return t("web.collections.editor.untickWarning", {
+    count: titles.length,
+    count_text: titles.length,
+    libraries: joinNames(names.filter(Boolean)),
+    titles: shown,
+  });
 }
 
 /** A Smart collection's rules and, under them, their live preview. */
@@ -189,9 +196,7 @@ function SmartContents<Raw extends WireCollection>({
   libraries: Array<{ id: number; name: string }>;
   preview: ScopePreview;
 }) {
-  // A server collection with no library yet still previews, across every library, so
-  // the rules can be tried before picking where it shows.
-  const needsLibraries = scope.requireLibraries && draft.libraryIds.length === 0;
+  useAppLanguage();
   return (
     <>
       <SmartRulesPanel
@@ -200,11 +205,7 @@ function SmartContents<Raw extends WireCollection>({
         onChange={onChange}
         libraries={libraries}
       />
-      <CollectionPreviewPane
-        preview={preview}
-        needsRules={!hasCompleteRule(draftRules(draft))}
-        note={needsLibraries ? PREVIEW_EVERY_LIBRARY : undefined}
-      />
+      <CollectionPreviewPane preview={preview} needsRules={!hasCompleteRule(draftRules(draft))} />
     </>
   );
 }
@@ -231,7 +232,7 @@ function syncedNameNote(draft: CollectionDraft): string | undefined {
   if (!synced?.list) return undefined;
   const kept = keptMessage(synced.kept);
   if (kept) return kept;
-  return draft.name !== "" && draft.name === synced.filled.name ? NAME_FILLED_HELP : undefined;
+  return draft.name !== "" && draft.name === synced.filled.name ? nameFilledHelp() : undefined;
 }
 
 /** Whether anything in a new synced list's step was picked or typed. */
@@ -271,6 +272,7 @@ export function CollectionEditor<Raw extends WireCollection>({
   /** Create mode, Manual and Smart: told the new id before the page moves to its edit URL. */
   onCreated?: (id: string) => void;
 }) {
+  const t = useT();
   const navigate = useNavigate();
   const kind = snapshot ? snapshot.view.kind : createKind;
   const smart = kind === "smart";
@@ -285,7 +287,11 @@ export function CollectionEditor<Raw extends WireCollection>({
   const preview = useScopePreview(scope, draftRules(draft), { enabled: smart && !needsRules });
   const created = Boolean(editor.id) && !newList;
   const isServer = scope.kind === "server";
-  useDocumentTitle(created ? `Edit ${view?.name ?? draft.name}` : "New collection");
+  useDocumentTitle(
+    created
+      ? t("web.collections.editor.documentTitle", { name: view?.name ?? draft.name })
+      : newCollection(),
+  );
   const { data: adminLibraries = [] } = useAdminLibraries({ enabled: isServer });
   const { profile } = useCurrentProfile();
   const { data: profiles = [] } = useProfiles({ enabled: !isServer });
@@ -479,7 +485,7 @@ export function CollectionEditor<Raw extends WireCollection>({
   }
   // Only a hidden server collection waits to be shown: a personal row's See all
   // opens however its Collections tab switch is set.
-  const addRowBlocked = draft.server?.visibility === "hidden" ? SHOW_IT_FIRST : null;
+  const addRowBlocked = draft.server?.visibility === "hidden" ? showItFirst() : null;
   // Hidden as saved: discarding keeps it hidden, so only saving lets Home rows add it.
   const discardKeepsHidden = view?.server?.visibility === "hidden";
 
@@ -514,7 +520,7 @@ export function CollectionEditor<Raw extends WireCollection>({
       if (current && current !== editor.etag) await reread();
       setCheckingDelete(false);
       if (current !== editor.etag) {
-        setDeleteError(current ? CHANGED_BEFORE_DELETE : CHECK_BEFORE_DELETE_FAILED);
+        setDeleteError(current ? changedBeforeDelete() : checkBeforeDeleteFailed());
         return;
       }
       setDeletingRows(rows);
@@ -548,7 +554,7 @@ export function CollectionEditor<Raw extends WireCollection>({
           label: library.name,
           href: buildLibraryCollectionCatalogHref(view.id, view.name, library.id),
         }))
-      : [{ label: "Open", href: scope.paths.browse(view) }];
+      : [{ label: t("web.collections.editorHeader.open"), href: scope.paths.browse(view) }];
   }
 
   async function create() {
@@ -575,28 +581,30 @@ export function CollectionEditor<Raw extends WireCollection>({
     !editor.id && draft.name.trim() !== "" && !needsLibraries && !needsList && !needsRules;
   const pending = editor.pendingLabels;
   // What the save bar adds after the pending fields.
-  let afterPending: string | null = kind === "manual" ? TITLES_ALREADY_SAVED : listProblem;
+  let afterPending: string | null = kind === "manual" ? titlesAlreadySaved() : listProblem;
   if (smart) {
-    afterPending = editor.changed.some((field) => PREVIEWED.has(field))
-      ? PREVIEW_SHOWS_UNSAVED
-      : null;
+    // A server collection's libraries are only where it shows, so the preview doesn't follow them.
+    const previewed = (field: DraftField) =>
+      PREVIEWED.has(field) && !(isServer && field === "libraryIds");
+    afterPending = editor.changed.some(previewed) ? previewShowsUnsaved() : null;
   }
-  if (needsLibraries && !needsList) afterPending = PICK_A_LIBRARY;
-  else if (needsRules) afterPending = ADD_A_RULE;
+  if (needsLibraries && !needsList) afterPending = pickALibrary();
+  else if (needsRules) afterPending = addAtLeastOneRule();
   // Before Create: what's still missing, in the order the page asks for it.
   let createHint: string | null = null;
-  if (needsList) createHint = PICK_A_LIST_FIRST;
-  else if (draft.name.trim() === "") createHint = NAME_IT_THEN_CREATE;
-  else if (needsLibraries) createHint = PICK_LIBRARIES_FIRST;
-  else if (needsRules) createHint = ADD_A_RULE_THEN_CREATE;
-  else if (newList) createHint = SYNCS_ON_CREATE;
+  if (needsList) createHint = pickAListFirst();
+  else if (draft.name.trim() === "") createHint = nameItThenCreate();
+  else if (needsLibraries)
+    createHint = smart && isServer ? pickWhereItShowsFirst() : pickLibrariesFirst();
+  else if (needsRules) createHint = addARuleThenCreate();
+  else if (newList) createHint = syncsOnCreate();
   else if (smart && preview.status === "ready") createHint = smartCreateHint(preview.total);
   else if (staged.length > 0) createHint = titlesReadyToAdd(staged.length);
   // Save and Save and continue wait for the same things.
   let saveBlockedReason: string | null = null;
-  if (editor.conflicts.length > 0) saveBlockedReason = SAVE_AFTER_CONFLICTS;
+  if (editor.conflicts.length > 0) saveBlockedReason = saveAfterConflicts();
   else if (draft.name.trim() === "" || needsLibraries || listProblem || needsRules)
-    saveBlockedReason = SAVE_NOT_READY;
+    saveBlockedReason = saveNotReady();
   const saveBar = created ? (
     <SaveBar
       placement="page"
@@ -604,7 +612,7 @@ export function CollectionEditor<Raw extends WireCollection>({
       dirtyCount={pending.length}
       visible={editor.isDirty || Boolean(editor.saveError)}
       isSaving={editor.isSaving}
-      saveLabel={editor.saveError ? "Try again" : "Save"}
+      saveLabel={editor.saveError ? t("common.tryAgain") : t("common.save")}
       canSave={!saveBlockedReason}
       onSave={() => void editor.save()}
       onDiscard={() => {
@@ -613,12 +621,12 @@ export function CollectionEditor<Raw extends WireCollection>({
       }}
       message={
         editor.saveError ? (
-          `${SAVE_FAILED} · ${editor.saveError}`
+          saveFailedWithError(editor.saveError)
         ) : (
           <>
             {notSavedMessage(pending)}{" "}
             {afterPending ? (
-              <span className="text-muted-foreground ml-3 font-normal">{afterPending}</span>
+              <span className="text-muted-foreground ms-3 font-normal">{afterPending}</span>
             ) : null}
           </>
         )
@@ -632,19 +640,19 @@ export function CollectionEditor<Raw extends WireCollection>({
       visible
       tone="idle"
       isSaving={editor.isSaving}
-      saveLabel="Create collection"
-      discardLabel="Cancel"
+      saveLabel={t("web.collections.editor.createCollection")}
+      discardLabel={t("common.cancel")}
       canSave={canCreate}
       onSave={() => void create()}
       onDiscard={() => navigate(listPath)}
       message={
         editor.saveError ? (
-          `${SAVE_FAILED} · ${editor.saveError}`
+          saveFailedWithError(editor.saveError)
         ) : (
           <>
-            {NOT_CREATED_YET} {/* A phone's bar has room for the state and the buttons only. */}
+            {notCreatedYet()} {/* A phone's bar has room for the state and the buttons only. */}
             {createHint ? (
-              <span className="text-muted-foreground ml-3 font-normal max-sm:sr-only">
+              <span className="text-muted-foreground ms-3 font-normal max-sm:sr-only">
                 {createHint}
               </span>
             ) : null}
@@ -696,8 +704,8 @@ export function CollectionEditor<Raw extends WireCollection>({
 
   // The meta line ends with what keeps the collection filled: its rules or its list.
   let metaExtra: string | undefined;
-  if (smart) metaExtra = SMART_UPDATES_ITSELF;
-  else if (view?.source) metaExtra = SYNCED_SOURCE_LABEL[view.source];
+  if (smart) metaExtra = smartUpdatesItself();
+  else if (view?.source) metaExtra = syncedSourceLabel(view.source);
 
   let contents: ReactNode;
   let panel: WithoutLibraries<SyncedListPanelProps> | null = null;
@@ -752,7 +760,7 @@ export function CollectionEditor<Raw extends WireCollection>({
         librariesLine={
           isServer ? (
             <LibrariesLine
-              lead="Titles from"
+              lead={t("web.collections.editor.titlesFrom")}
               libraries={libraryOptions}
               value={draft.libraryIds}
               onChange={(libraryIds) => editor.setDraft((next) => ({ ...next, libraryIds }))}
@@ -785,7 +793,7 @@ export function CollectionEditor<Raw extends WireCollection>({
       <CollectionEditorShell
         header={
           <EditorHeader
-            back={{ label: "Collections", href: listPath }}
+            back={{ label: t("web.collections.editor.backToCollections"), href: listPath }}
             kind={kind}
             name={view?.name ?? draft.name}
             created={created}
@@ -793,7 +801,7 @@ export function CollectionEditor<Raw extends WireCollection>({
             posterUrl={posterUrl}
             meta={
               newList ? (
-                <p className="text-muted-foreground text-[14px]">{SYNCED_CREATE_SUBTITLE}</p>
+                <p className="text-muted-foreground text-[14px]">{syncedCreateSubtitle()}</p>
               ) : view ? (
                 <CollectionMetaLine
                   libraryNames={
@@ -815,7 +823,7 @@ export function CollectionEditor<Raw extends WireCollection>({
         banner={
           editor.conflicts.length > 0 ? (
             <ConflictBanner
-              fields={editor.conflicts.map((field) => DRAFT_FIELD_LABEL[field])}
+              fields={editor.conflicts.map((field) => draftFieldLabel(field))}
               onKeepMine={() => editor.resolveConflicts("mine")}
               onUseTheirs={() => editor.resolveConflicts("theirs")}
             />
@@ -836,6 +844,15 @@ export function CollectionEditor<Raw extends WireCollection>({
           draft={draft}
           onChange={editor.setDraft}
           libraries={chosenLibraries}
+          libraryPicker={
+            smart && isServer
+              ? {
+                  options: libraryOptions,
+                  value: draft.libraryIds,
+                  onChange: (libraryIds) => editor.setDraft((next) => ({ ...next, libraryIds })),
+                }
+              : undefined
+          }
           otherProfileNames={otherProfileNames}
           savedShared={view?.personal?.shared ?? false}
           rows={rowsThatShowIt}
@@ -860,7 +877,7 @@ export function CollectionEditor<Raw extends WireCollection>({
         <DeleteCollectionDialog
           open={confirmDelete}
           onOpenChange={(open) => (open ? setConfirmDelete(true) : closeDelete())}
-          title={`Delete "${view.name}"?`}
+          title={t("web.collections.pageActions.deleteTitle", { name: view.name })}
           libraryNames={savedLibraries.map((library) => library.name)}
           rows={deletingRows ? { status: "ready", rows: deletingRows } : deleteRowsState}
           rowLibraryNames={libraryNames}
@@ -873,9 +890,9 @@ export function CollectionEditor<Raw extends WireCollection>({
         <ConfirmDialog
           open={confirmDelete}
           onOpenChange={setConfirmDelete}
-          title={`Delete "${view.name}"?`}
+          title={t("web.collections.pageActions.deleteTitle", { name: view.name })}
           description={personalDeleteDescription(view.personal?.shared ?? false)}
-          confirmLabel="Delete"
+          confirmLabel={t("web.collections.deleteDialog.delete")}
           variant="destructive"
           isPending={remove.isPending}
           onConfirm={() => remove.mutate({ id: view.id, etag: editor.etag! })}
@@ -895,7 +912,7 @@ export function CollectionEditor<Raw extends WireCollection>({
         }
         isSaving={editor.isSaving}
         onCancel={() => setSavingFirst(null)}
-        discardBlockedReason={discardKeepsHidden ? DISCARD_KEEPS_IT_HIDDEN : null}
+        discardBlockedReason={discardKeepsHidden ? discardKeepsItHidden() : null}
         saveBlockedReason={saveBlockedReason}
         onDiscard={() => {
           if (!savingFirst || discardKeepsHidden) return;

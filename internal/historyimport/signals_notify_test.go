@@ -40,8 +40,8 @@ func TestRunChangedSignals(t *testing.T) {
 
 type failingFetchProvider struct{}
 
-func (failingFetchProvider) Fetch(context.Context) ([]Record, []string, error) {
-	return nil, nil, errors.New("media server unreachable")
+func (failingFetchProvider) Stream(context.Context, *StreamPosition, RecordSink) error {
+	return errors.New("media server unreachable")
 }
 
 // A completed run reports one signal change for its profile, however many

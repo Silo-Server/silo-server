@@ -1,0 +1,30 @@
+name: Evidence deadline
+
+# Closes contributors' pull requests that still have no evidence 24 hours after
+# they open, as "Show visible changes" in CONTRIBUTING.md describes. The rules
+# live in reusable-evidence-deadline.yml, which the client repositories call too.
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Log the pull requests that would close without closing them.
+        type: boolean
+        default: true
+
+permissions: {}
+
+concurrency:
+  group: evidence-deadline
+
+jobs:
+  close:
+    permissions:
+      checks: read
+      issues: read
+      pull-requests: write
+    uses: ./.github/workflows/reusable-evidence-deadline.yml
+    with:
+      dry_run: ${{ inputs.dry_run == true }}

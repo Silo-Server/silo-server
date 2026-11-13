@@ -8,6 +8,7 @@ import {
 } from "@/api/adminPolicy";
 import { useSetPolicyDocumentEnabled } from "@/hooks/queries/admin/policy";
 import { Button } from "@/components/ui/button";
+import { useT } from "@/i18n";
 
 export function PolicyRevisionReview({
   documentId,
@@ -18,6 +19,7 @@ export function PolicyRevisionReview({
   onAdopt: (snapshot: PolicySnapshot) => void;
   disabled?: boolean;
 }) {
+  const t = useT();
   const [candidate, setCandidate] = useState<PolicySnapshot>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -28,7 +30,7 @@ export function PolicyRevisionReview({
     try {
       setCandidate(await fetchPolicySnapshot(documentId));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to read current policy.");
+      setError(err instanceof Error ? err.message : t("web.admin.access.policy.review.readFailed"));
     } finally {
       setLoading(false);
     }
@@ -36,22 +38,22 @@ export function PolicyRevisionReview({
   return (
     <div className="flex flex-col gap-2 rounded-lg border p-3 text-sm">
       <Button variant="outline" onClick={() => void review()} disabled={disabled || loading}>
-        {loading ? "Loading current policy..." : "Review current policy"}
+        {loading
+          ? t("web.admin.access.policy.review.loading")
+          : t("web.admin.access.policy.review.button")}
       </Button>
       {error && <p role="alert">{error}</p>}
       {candidate && (
         <div className="flex flex-col gap-2">
           <p>
-            {candidate.name}: {candidate.enabled ? "enabled" : "disabled"};{" "}
-            {candidate.active_version
-              ? `active version ${candidate.active_version.version_number}`
-              : "no active version"}
-            .
+            {t("web.admin.access.policy.review.summary", {
+              name: candidate.name,
+              state: candidate.enabled ? "enabled" : "disabled",
+              has_version: candidate.active_version ? "yes" : "no",
+              version: String(candidate.active_version?.version_number ?? ""),
+            })}
           </p>
-          <p>
-            Your draft and selected version will be kept. A later change by another administrator
-            will still require a new review.
-          </p>
+          <p>{t("web.admin.access.policy.review.keepNote")}</p>
           <Button
             className="h-auto whitespace-normal"
             disabled={disabled || loading}
@@ -60,7 +62,7 @@ export function PolicyRevisionReview({
               setCandidate(undefined);
             }}
           >
-            Use this revision and keep my draft
+            {t("web.admin.access.policy.review.adopt")}
           </Button>
         </div>
       )}
@@ -69,6 +71,7 @@ export function PolicyRevisionReview({
 }
 
 export function PolicyEnabledControl({ document }: { document: PolicyDocumentSummary }) {
+  const t = useT();
   const [intent, setIntent] = useState<{ snapshot: PolicySnapshot; enabled: boolean }>();
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -79,7 +82,9 @@ export function PolicyEnabledControl({ document }: { document: PolicyDocumentSum
     try {
       setIntent({ snapshot: await fetchPolicySnapshot(document.id), enabled: !document.enabled });
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Unable to load policy.");
+      setMessage(
+        err instanceof Error ? err.message : t("web.admin.access.policy.enabled.loadFailed"),
+      );
     } finally {
       setLoading(false);
     }
@@ -95,31 +100,40 @@ export function PolicyEnabledControl({ document }: { document: PolicyDocumentSum
       setMessage(policyApplyMessage(result));
       setIntent(undefined);
     } catch (err) {
-      setMessage(policyMutationMessage(err, "Unable to update policy."));
+      setMessage(policyMutationMessage(err, t("web.admin.access.policy.enabled.updateFailed")));
     }
   }
   return (
     <div className="flex flex-col gap-2 text-sm">
       {!intent && (
         <Button size="sm" variant="outline" onClick={() => void review()} disabled={loading}>
-          {loading ? "Loading..." : document.enabled ? "Disable override" : "Enable override"}
+          {loading
+            ? t("web.admin.access.policy.enabled.loading")
+            : document.enabled
+              ? t("web.admin.access.policy.enabled.disable")
+              : t("web.admin.access.policy.enabled.enable")}
         </Button>
       )}
       {intent && (
         <div className="flex flex-col gap-2 rounded-lg border p-3">
           <p>
-            {intent.snapshot.name} is currently {intent.snapshot.enabled ? "enabled" : "disabled"}.
-            Set it to {intent.enabled ? "enabled" : "disabled"}?
+            {t("web.admin.access.policy.enabled.confirmText", {
+              name: intent.snapshot.name,
+              state: intent.snapshot.enabled ? "enabled" : "disabled",
+              target: intent.enabled ? "enabled" : "disabled",
+            })}
           </p>
           <Button onClick={() => void apply()} disabled={mutation.isPending || mutation.isError}>
-            Confirm {intent.enabled ? "enable" : "disable"}
+            {t("web.admin.access.policy.enabled.confirm", {
+              target: intent.enabled ? "enabled" : "disabled",
+            })}
           </Button>
           <Button
             variant="ghost"
             onClick={() => setIntent(undefined)}
             disabled={mutation.isPending}
           >
-            Cancel
+            {t("common.cancel")}
           </Button>
           {mutation.isError && (
             <PolicyRevisionReview

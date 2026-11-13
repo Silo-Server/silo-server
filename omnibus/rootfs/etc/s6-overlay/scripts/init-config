@@ -116,9 +116,9 @@ else
 fi
 
 # Redis: off by default. An explicit REDIS_URL always wins over the bundle.
-# Meilisearch search keeps its paging sessions in Redis and answers 503
-# without it, so choosing Meilisearch turns the bundled Redis on too. Silo
-# trims and lowercases the provider, so compare it the same way.
+# Meilisearch uses Redis for shared, restart-surviving paging sessions, so
+# choosing Meilisearch turns the bundled Redis on too. Silo trims and
+# lowercases the provider, so compare it the same way.
 env_provider="$(printf '%s' "${SILO_SEARCH_PROVIDER:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
 if [[ -n "${REDIS_URL:-}" ]]; then
   redis_state="external"
@@ -142,7 +142,7 @@ elif truthy "${ENABLE_REDIS:-false}" || truthy "${ENABLE_MEILISEARCH:-false}" ||
   : > "$STATE_DIR/redis.enabled"
   export_env REDIS_URL "redis://127.0.0.1:6379"
   redis_state="bundled"
-  truthy "${ENABLE_REDIS:-false}" || redis_state="bundled (Meilisearch search needs it)"
+  truthy "${ENABLE_REDIS:-false}" || redis_state="bundled (for Meilisearch search sessions)"
 else
   redis_state="off"
 fi

@@ -1,4 +1,5 @@
 import type { BrandingAssetKind } from "@/hooks/queries/admin/branding";
+import { t, type MessageKey } from "@/i18n";
 
 /** How the server treats one uploaded branding asset, and what it serves without one. */
 export interface BrandingAssetSpec {
@@ -6,12 +7,12 @@ export interface BrandingAssetSpec {
   storedPx: number | null;
   /** Server-side upload cap in bytes. */
   maxUploadBytes: number;
-  /** One line of upload guidance, shown under the slot description. */
-  guidance: string;
+  /** One line of upload guidance, shown under the slot description, in the current language. */
+  guidance: () => string;
   /** Bundled asset served while the slot is empty, or null when there is none. */
   defaultUrl: string | null;
   /** Caption under the preview while the slot is empty. */
-  emptyCaption: string;
+  emptyCaption: MessageKey;
 }
 
 const MB = 1024 * 1024;
@@ -41,29 +42,44 @@ export const BRANDING_ASSET_SPECS: Record<BrandingAssetKind, BrandingAssetSpec> 
   wordmark: {
     storedPx: WORDMARK_PX,
     maxUploadBytes: WORDMARK_MAX_BYTES,
-    guidance: `Wide artwork, ${WORDMARK_PX}px or wider. Stored as WebP capped at ${WORDMARK_PX}px wide; narrower images are not enlarged. PNG, JPEG, or WebP up to ${megabytes(WORDMARK_MAX_BYTES)}.`,
+    guidance: () =>
+      t("web.admin.common.brandingAssets.wordmarkGuidance", {
+        px: WORDMARK_PX,
+        size: megabytes(WORDMARK_MAX_BYTES),
+      }),
     defaultUrl: "/silo-wordmark-sidebar.png",
-    emptyCaption: "Default",
+    emptyCaption: "web.admin.common.brandingAssets.defaultCaption",
   },
   mark: {
     storedPx: MARK_PX,
     maxUploadBytes: MARK_MAX_BYTES,
-    guidance: `Square artwork, ${MARK_PX}×${MARK_PX} or larger. Anything else is center-cropped to a square, then stored as WebP at exactly ${MARK_PX}×${MARK_PX} — smaller art is upscaled. PNG, JPEG, or WebP up to ${megabytes(MARK_MAX_BYTES)}.`,
+    guidance: () =>
+      t("web.admin.common.brandingAssets.markGuidance", {
+        px: MARK_PX,
+        size: megabytes(MARK_MAX_BYTES),
+      }),
     defaultUrl: "/silo-icon-1024.png",
-    emptyCaption: "Default",
+    emptyCaption: "web.admin.common.brandingAssets.defaultCaption",
   },
   favicon: {
     storedPx: null,
     maxUploadBytes: FAVICON_MAX_BYTES,
-    guidance: `Square PNG, ICO, or SVG up to ${megabytes(FAVICON_MAX_BYTES)}. Stored exactly as uploaded — never resized or re-encoded.`,
+    guidance: () =>
+      t("web.admin.common.brandingAssets.faviconGuidance", {
+        size: megabytes(FAVICON_MAX_BYTES),
+      }),
     defaultUrl: "/favicon.ico",
-    emptyCaption: "Default",
+    emptyCaption: "web.admin.common.brandingAssets.defaultCaption",
   },
   login_bg: {
     storedPx: LOGIN_BG_PX,
     maxUploadBytes: LOGIN_BG_MAX_BYTES,
-    guidance: `Wide photo, ${LOGIN_BG_PX}px or wider. Stored as WebP capped at ${LOGIN_BG_PX}px wide and shown cover-cropped, so keep the subject centered. PNG, JPEG, or WebP up to ${megabytes(LOGIN_BG_MAX_BYTES)}.`,
+    guidance: () =>
+      t("web.admin.common.brandingAssets.loginBackgroundGuidance", {
+        px: LOGIN_BG_PX,
+        size: megabytes(LOGIN_BG_MAX_BYTES),
+      }),
     defaultUrl: null,
-    emptyCaption: "Theme gradient",
+    emptyCaption: "web.admin.common.brandingAssets.themeGradientCaption",
   },
 };

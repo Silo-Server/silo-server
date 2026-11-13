@@ -521,7 +521,7 @@ func (r *fakeEpisodeLinkerFileRepo) addFile(file *models.MediaFile) {
 	r.files[file.ID] = &cp
 }
 
-func (r *fakeEpisodeLinkerFileRepo) UpdateEpisodeLink(_ context.Context, fileID int, episodeID string, seasonNum, episodeNum int) error {
+func (r *fakeEpisodeLinkerFileRepo) UpdateEpisodeLink(_ context.Context, fileID int, _ string, episodeID string, seasonNum, episodeNum int) error {
 	r.fakeFileRepo.mu.Lock()
 	defer r.fakeFileRepo.mu.Unlock()
 	r.episodeLinks[fileID] = episodeID
@@ -1510,4 +1510,38 @@ func TestRefreshSeriesEpisodeMetadataState_KeepsSeriesDebtWhenByDateCheckFails(t
 		!debt.NextRefreshAt.Equal(queued.NextRefreshAt) {
 		t.Errorf("series debt = %+v, want it kept as queued", debt)
 	}
+}
+
+// ResetEdits empties a stored season's lockable fields and locks, as
+// catalog.SeasonRepository.ResetEdits does.
+func (r *fakeSeasonRepo) ResetEdits(_ context.Context, contentID string, keepText bool) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.seasons {
+		if s.ContentID == contentID {
+			if !keepText {
+				s.Title, s.Overview = "", ""
+			}
+			s.AirDate, s.LockedFields = nil, []int{}
+			return nil
+		}
+	}
+	return fmt.Errorf("season %s not found", contentID)
+}
+
+// ResetEdits empties a stored episode's lockable fields and locks, as
+// catalog.EpisodeRepository.ResetEdits does.
+func (r *fakeEpisodeRepo) ResetEdits(_ context.Context, contentID string, keepText bool) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, ep := range r.episodes {
+		if ep.ContentID == contentID {
+			if !keepText {
+				ep.Title, ep.Overview = "", ""
+			}
+			ep.AirDate, ep.Runtime, ep.LockedFields = nil, 0, []int{}
+			return nil
+		}
+	}
+	return fmt.Errorf("episode %s not found", contentID)
 }

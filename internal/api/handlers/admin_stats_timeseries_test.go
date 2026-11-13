@@ -2,30 +2,9 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 )
-
-// stubTimeseriesSource records what the handler asked for so the tests can
-// assert on parameter handling without a database.
-type stubTimeseriesSource struct {
-	series      *AdminTimeseries
-	err         error
-	gotHours    int
-	invalidated int
-	callCount   int
-}
-
-func (s *stubTimeseriesSource) Get(_ context.Context, hours int) (*AdminTimeseries, error) {
-	s.callCount++
-	s.gotHours = hours
-	return s.series, s.err
-}
-
-func (s *stubTimeseriesSource) Invalidate() { s.invalidated++ }
 
 func int64Ptr(value int64) *int64 { return &value }
 
@@ -199,51 +178,6 @@ func TestTimeseriesBucketSeconds(t *testing.T) {
 					tt.hours, points, got, adminTimeseriesMaxPoints)
 			}
 		})
-	}
-}
-
-func TestHandleGetTimeseriesFreshInstallSerializesCollectingState(t *testing.T) {
-	t.Parallel()
-
-	source := &stubTimeseriesSource{series: &AdminTimeseries{
-		ResolutionSeconds:   adminTimeseriesResolutionSeconds,
-		EgressBytes:         1,
-		DownloadEgressBytes: 1,
-		Points:              []AdminTimeseriesPoint{},
-	}}
-	handler := &AdminHandler{TimeseriesSource: source}
-	rec := httptest.NewRecorder()
-	handler.HandleGetTimeseries(rec, httptest.NewRequest(http.MethodGet, "/admin/stats/timeseries", nil))
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	var body struct {
-		ResolutionSeconds int               `json:"resolution_seconds"`
-		Points            []json.RawMessage `json:"points"`
-		OldestSampleAt    *string           `json:"oldest_sample_at"`
-		EgressBytes       *int64            `json:"egress_bytes"`
-		DownloadBytes     *int64            `json:"download_egress_bytes"`
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-		t.Fatalf("decode body: %v", err)
-	}
-	if body.Points == nil {
-		t.Fatal("points decoded as null; a server with no samples must send []")
-	}
-	if len(body.Points) != 0 {
-		t.Fatalf("points = %v, want empty", body.Points)
-	}
-	if body.OldestSampleAt != nil {
-		t.Fatalf("oldest_sample_at = %v, want null before the first sample", *body.OldestSampleAt)
-	}
-	if body.ResolutionSeconds != adminTimeseriesResolutionSeconds {
-		t.Fatalf("resolution_seconds = %d, want %d", body.ResolutionSeconds, adminTimeseriesResolutionSeconds)
-	}
-	// /api/v1 is frozen: the window totals are v2-only and must not leak into
-	// the bridge contract.
-	if body.EgressBytes != nil || body.DownloadBytes != nil {
-		t.Fatalf("egress_bytes = %v, download_egress_bytes = %v, want both absent from v1", body.EgressBytes, body.DownloadBytes)
 	}
 }
 

@@ -70,6 +70,7 @@ type Repository interface {
 	ListOpenScrobbleSessions(ctx context.Context) ([]ScrobbleSession, error)
 	ListPendingScrobbleReconciliations(ctx context.Context) ([]ScrobbleSession, error)
 	MarkScrobbleHistoryReconciled(ctx context.Context, playbackSessionID, connectionID string, reconciledAt time.Time) error
+	ListScrobbleStops(ctx context.Context, connectionID string, mediaItemIDs []string) (map[string][]time.Time, error)
 }
 
 type confirmedStopPreparation uint8
@@ -1953,6 +1954,40 @@ func (r *PostgresRepository) ListPendingScrobbleReconciliations(ctx context.Cont
 		return nil, fmt.Errorf("iterate pending scrobble reconciliations: %w", err)
 	}
 	return sessions, nil
+}
+
+// ListScrobbleStops returns when the connection sent, or last tried to send, a
+// scrobble stop for a play Silo recorded, for each of mediaItemIDs that has
+// one. A stop still in flight counts at its attempt: the provider may already
+// hold its copy before stop_sent_at is written, and a stop it never received
+// left no copy to match.
+func (r *PostgresRepository) ListScrobbleStops(ctx context.Context, connectionID string, mediaItemIDs []string) (map[string][]time.Time, error) {
+	stops := make(map[string][]time.Time)
+	if len(mediaItemIDs) == 0 {
+		return stops, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT media_item_id, COALESCE(stop_sent_at, updated_at)
+		FROM watch_provider_scrobble_sessions
+		WHERE connection_id = $1::uuid AND media_item_id = ANY($2)
+			AND history_id <> '' AND last_action LIKE 'stop%'
+	`, connectionID, mediaItemIDs)
+	if err != nil {
+		return nil, fmt.Errorf("list scrobble stops: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var mediaItemID string
+		var stopSentAt time.Time
+		if err := rows.Scan(&mediaItemID, &stopSentAt); err != nil {
+			return nil, fmt.Errorf("scan scrobble stop: %w", err)
+		}
+		stops[mediaItemID] = append(stops[mediaItemID], stopSentAt)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate scrobble stops: %w", err)
+	}
+	return stops, nil
 }
 
 func (r *PostgresRepository) MarkScrobbleHistoryReconciled(

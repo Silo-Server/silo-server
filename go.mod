@@ -24,7 +24,7 @@ require (
 	filippo.io/age v1.3.2
 	github.com/SherClockHolmes/webpush-go v1.4.0
 	github.com/abadojack/whatlanggo v1.0.1
-	github.com/andybalholm/brotli v1.2.1
+	github.com/andybalholm/brotli v1.2.8
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.22.34
 	github.com/danielgtaylor/huma/v2 v2.38.0
 	github.com/getkin/kin-openapi v0.149.0

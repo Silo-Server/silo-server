@@ -101,6 +101,7 @@ type AdminCatalogCapabilities struct {
 	ItemChangeEvents      bool `json:"item_change_events" doc:"catalog.item.changed on the v2 events socket also carries change added, removed and files_changed to administrators"`
 	ItemMatchHints        bool `json:"item_match_hints" doc:"getAdminItemMatchHints is served: the title, year and provider IDs the scanner parsed from an item's folder and file names"`
 	ItemMetadata          bool `json:"item_metadata" doc:"listAdminCatalogItems returns genres, content_rating, studios, networks, ratings and dates on movies and series and air_date on episodes, and accepts include_people"`
+	ItemMetadataReset     bool `json:"item_metadata_reset" doc:"refreshAdminItemMetadata accepts mode reset, which resets an item, season or episode to its providers"`
 }
 type AdminCatalogCapabilitiesOutput struct {
 	Status       int
@@ -121,6 +122,7 @@ func registerAdminCatalogItems(reg *Registry) {
 			ItemChangeEvents:      served,
 			ItemMatchHints:        reg.deps.AdminCatalogMatch != nil,
 			ItemMetadata:          served,
+			ItemMetadataReset:     reg.deps.AdminItemMetadata != nil,
 		}}, nil
 	})
 

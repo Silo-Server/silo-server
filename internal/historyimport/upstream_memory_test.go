@@ -213,15 +213,6 @@ func TestRunBudgetCoversLookups(t *testing.T) {
 	server := serveBody(t, []byte(`{"Items":[{"Id":"1","Type":"Series","ProviderIds":{"Tvdb":"1"}}]}`))
 	auth := jellyfinLocalAuth{BaseURL: server.URL, UserID: "u", AccessToken: "t"}
 
-	t.Run("retained items", func(t *testing.T) {
-		t.Parallel()
-		runCtx := withRunBudget(ctx)
-		runBudgetFrom(runCtx).retained = maxRunRetainedBytes - 10
-		_, err := newUnthrottledJellyfinClient().FetchItemsByIDs(runCtx, auth, []string{"1"}, "Series")
-		if !errors.Is(err, ErrUpstreamResponseTooLarge) || !strings.Contains(err.Error(), "import keeps") {
-			t.Fatalf("err = %v, want the run retained-items limit", err)
-		}
-	})
 	t.Run("bytes", func(t *testing.T) {
 		t.Parallel()
 		runCtx := withRunBudget(ctx)
@@ -257,10 +248,8 @@ func TestPlexSectionsShareRunBudget(t *testing.T) {
 	if _, _, err := NewPlexServerProvider(newUnthrottledPlexClient(), []string{server.URL}, "t").Fetch(runCtx); err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
-	item := PlexItem{RatingKey: "1", Type: "movie", Title: "Movie", ViewCount: 1, Guid: PlexGuids{{ID: "imdb://tt1"}}}
-	// Watched and in-progress listings of every section each keep one item.
-	if got, want := runBudgetFrom(runCtx).retained, 2*sections*item.retainedSize(); got != want {
-		t.Fatalf("retained = %d, want %d across all sections", got, want)
+	if got := runBudgetFrom(runCtx).retained; got != 0 {
+		t.Fatalf("retained = %d after the run, want every held list released", got)
 	}
 	if got := runBudgetFrom(runCtx).bytes; got < int64(2*sections*len(page)) {
 		t.Fatalf("bytes = %d, want every section listing counted", got)

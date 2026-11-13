@@ -6,6 +6,7 @@ import {
 } from "@/api/client";
 import { adminSubtitleListScope, type AdminStoredSubtitle } from "./adminSubtitles";
 import { v2, type V2Body, type V2Result } from "./request";
+import { t } from "@/i18n";
 
 export type AdminSubtitleEditIntent = {
   subtitle: AdminStoredSubtitle;
@@ -36,12 +37,12 @@ function requireIntent(intent: AdminSubtitleEditIntent) {
 }
 function requireTag(value: string | null): string {
   if (!value || !/^"[\x21\x23-\x7e\x80-\xff]*"$/.test(value))
-    throw new Error("A strong subtitle edit validator is required. Reopen the editor.");
+    throw new Error(t("web.admin.errors.subtitleValidatorRequired"));
   return value;
 }
 function requireIdentity(body: AdminSubtitleEditor["body"], intent: AdminSubtitleEditIntent) {
   if (body.id !== intent.subtitle.id || body.media_file_id !== intent.subtitle.media_file_id)
-    throw new Error("Subtitle identity changed. Reload the list.");
+    throw new Error(t("web.admin.errors.subtitleIdentityChanged"));
 }
 export async function getAdminSubtitleEditor(
   intent: AdminSubtitleEditIntent,

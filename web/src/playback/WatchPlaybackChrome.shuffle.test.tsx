@@ -188,7 +188,7 @@ describe("WatchPlaybackHost shuffle", () => {
     movie.nearEnd();
     expect(movie.controller().state.mode).toBe("post-roll");
     expect(await screen.findByText("Shuffling Movies")).toBeTruthy();
-    expect(screen.getByText("Up Next at Random")).toBeTruthy();
+    expect(screen.getByText("Up next at random")).toBeTruthy();
     expect(screen.getByText("Title movie-2")).toBeTruthy();
     expect(screen.queryByText(/S0:E0/)).toBeNull();
   });
@@ -355,7 +355,7 @@ describe("WatchPlaybackHost shuffle", () => {
     expect(movie.controller().state.mode).toBe("foreground");
     act(() => movie.player().onEnded?.());
 
-    expect(screen.queryByText("Up Next at Random")).toBeNull();
+    expect(screen.queryByText("Up next at random")).toBeNull();
     expect(mocks.navigate).toHaveBeenCalledWith("/item/movie-1", { up: true });
     expect(mocks.getShuffle).not.toHaveBeenCalled();
   });

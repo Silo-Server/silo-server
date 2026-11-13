@@ -51,7 +51,7 @@ type episodeRepoForBatchLoader interface {
 	ListBySeriesIDs(ctx context.Context, seriesIDs []string) (map[string][]*models.Episode, error)
 	ListIDsBySeriesIDs(ctx context.Context, seriesIDs []string) (map[string][]string, error)
 	ListIDsBySeasonIDs(ctx context.Context, seasonIDs []string) (map[string][]string, error)
-	ListAdjacentInSeries(ctx context.Context, seriesID string, seasonNumber, episodeNumber int) ([]*models.Episode, error)
+	ListAdjacentInSeriesFor(ctx context.Context, seriesID string, seasonNumber, episodeNumber int, access catalog.AccessFilter) ([]*models.Episode, error)
 }
 
 func (h *ItemsHandler) fetchCompatItemsByContentIDs(ctx context.Context, session *Session, contentIDs []string, libraryID *int) (map[string]upstreamListItem, error) {

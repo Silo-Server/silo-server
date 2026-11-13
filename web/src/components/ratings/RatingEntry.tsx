@@ -34,6 +34,7 @@ export function RatingEntry({ rating, size = "md", className }: RatingEntryProps
         >
           {rating.name}
         </span>
+        // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a space, not text
       )}{" "}
       <span
         className={cn("font-bold tabular-nums", size === "sm" ? "text-sm" : "text-[0.9375rem]")}

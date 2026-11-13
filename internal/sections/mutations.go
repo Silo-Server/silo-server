@@ -310,14 +310,6 @@ func (r *Repository) RenameLibraryCollectionRows(ctx context.Context, collection
 		return err
 	})
 }
-func (r *Repository) Reorder(ctx context.Context, entries []ReorderEntry) error {
-	ids := make([]string, 0, len(entries))
-	for _, e := range entries {
-		ids = append(ids, e.ID)
-	}
-	m := sectionMutation{where: "id=ANY($1)", args: []any{ids}}
-	return r.mutate(ctx, m, func(ctx context.Context) error { return r.reorder(ctx, entries) })
-}
 func (r *Repository) ReorderScopeIfRevision(ctx context.Context, scope string, library *int, ids []string, expected int64) error {
 	m := scopeMutation(scope, library)
 	m.expected = &expected
@@ -430,9 +422,9 @@ func insertSectionInTx(ctx context.Context, tx pgx.Tx, s *PageSection) error {
 		}
 		s.ID = id
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO page_sections (id, scope, library_id, position, section_type, title, featured, item_limit, config, enabled, web_only, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW(),NOW())`,
-		s.ID, s.Scope, s.LibraryID, s.Position, s.SectionType, s.Title, s.Featured, s.ItemLimit, s.Config, s.Enabled, s.WebOnly); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO page_sections (id, scope, library_id, position, section_type, title, featured, item_limit, config, enabled, web_only, title_key, title_args, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW(),NOW())`,
+		s.ID, s.Scope, s.LibraryID, s.Position, s.SectionType, s.Title, s.Featured, s.ItemLimit, s.Config, s.Enabled, s.WebOnly, s.TitleKey, s.TitleArgs); err != nil {
 		return fmt.Errorf("creating section: %w", err)
 	}
 	return nil
@@ -479,8 +471,19 @@ func WriteSectionInTx(ctx context.Context, tx pgx.Tx, s *PageSection, create boo
 		if err := insertSectionInTx(ctx, tx, s); err != nil {
 			return err
 		}
-	} else if err := r.update(txCtx, s); err != nil {
-		return err
+	} else {
+		if err := r.update(txCtx, s); err != nil {
+			return err
+		}
+		// update leaves the key alone, and the clearing trigger drops it
+		// when the title changed. A written key goes back after the title,
+		// which this statement does not change.
+		if s.TitleKey != "" {
+			if _, err := tx.Exec(ctx, `UPDATE page_sections SET title_key = $2, title_args = $3 WHERE id = $1`,
+				s.ID, s.TitleKey, s.TitleArgs); err != nil {
+				return fmt.Errorf("keying section title: %w", err)
+			}
+		}
 	}
 	if s.Featured {
 		return r.clearFeaturedForSurface(txCtx, s.Scope, s.LibraryID, s.ID)

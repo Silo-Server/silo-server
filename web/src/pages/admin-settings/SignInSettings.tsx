@@ -14,11 +14,12 @@ import {
   useExternalSignInCapabilities,
 } from "@/hooks/queries/admin/externalSignIn";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
+import { useT } from "@/i18n";
 import { useRestartKeys } from "@/hooks/useRestartKeys";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import {
   activeSignInInstallation,
-  BREAK_GLASS_REQUIRED_TEXT,
+  breakGlassRequiredText,
   primarySignInInstallations,
 } from "@/lib/externalSignInAdmin";
 import { SaveBar } from "@/components/SaveBar";
@@ -50,7 +51,12 @@ const KEYS = [LOCAL_LOGIN_KEY, ...PASSWORD_ACCOUNT_KEYS, EMAIL_MATCH_KEY, "serve
  * on or off applies at once. The rules are in
  * docs/architecture/external-sign-in.md.
  */
+// Code shown in the Locked out? note: a path and a server command.
+const LOCAL_LOGIN_PATH = "/login?local=1";
+const LOCAL_LOGIN_COMMAND = "silo auth local-login enable";
+
 export default function SignInSettings() {
+  const t = useT();
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
   const restartKeys = useRestartKeys();
   const capabilities = useExternalSignInCapabilities();
@@ -91,15 +97,11 @@ export default function SignInSettings() {
 
   function changeLocalLogin(value: string) {
     if (value === "false" && breakGlassKnown && breakGlass.length === 0) {
-      showLocalError(
-        "Password sign-in can't be turned off yet: no admin is a break-glass account. Open an admin on the Users page and turn on Break-glass account first, so someone can still sign in if the provider is down.",
-      );
+      showLocalError(t("web.admin.settings.signIn.page.noBreakGlassError"));
       return;
     }
     if (value === "false" && providerKnown && !providerOn) {
-      showLocalError(
-        "Turn on a sign-in provider first. With password sign-in off and no provider on, only break-glass admins could sign in.",
-      );
+      showLocalError(t("web.admin.settings.signIn.page.noProviderError"));
       return;
     }
     setLocalError(null);
@@ -121,7 +123,7 @@ export default function SignInSettings() {
       await form.save();
     } catch (error) {
       if (error instanceof V2ProblemError && error.problemType === "break_glass_required") {
-        showLocalError(BREAK_GLASS_REQUIRED_TEXT);
+        showLocalError(breakGlassRequiredText());
       }
       // Every other failure is already reported by the save's own toast.
     }
@@ -129,11 +131,15 @@ export default function SignInSettings() {
 
   if (form.isLoading) {
     return (
-      <div className="space-y-6" role="status" aria-label="Loading settings">
+      <div
+        className="space-y-6"
+        role="status"
+        aria-label={t("web.admin.settings.signIn.page.loading")}
+      >
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-24 w-full" />
         <Skeleton className="h-24 w-full" />
-        <span className="sr-only">Loading settings</span>
+        <span className="sr-only">{t("web.admin.settings.signIn.page.loading")}</span>
       </div>
     );
   }
@@ -151,48 +157,52 @@ export default function SignInSettings() {
 
   return (
     <div className="flex h-full flex-col">
-      <SettingsPageHeader title="Sign-in" />
+      <SettingsPageHeader title={t("web.admin.settings.signIn.page.title")} />
 
       <div className="flex-1 space-y-5">
         {capabilities.isError || (caps && !supported) ? (
           <p className="text-muted-foreground text-sm" role="status">
-            External sign-in isn't available on this server, so only Silo passwords sign in.
+            {t("web.admin.settings.signIn.page.externalUnavailable")}
           </p>
         ) : null}
 
         <FieldGroup
-          label="Silo passwords"
+          label={t("web.admin.settings.signIn.page.passwordsGroup")}
           dirty={[LOCAL_LOGIN_KEY, ...PASSWORD_ACCOUNT_KEYS].some((key) => form.isDirty(key))}
           actions={
             <Link
               to="/admin/users?tab=invite-codes"
               className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-xs font-medium transition-colors"
             >
-              Manage invite codes
+              {t("web.admin.settings.signIn.page.manageInviteCodes")}
               <ArrowRight className="h-3 w-3" aria-hidden="true" />
             </Link>
           }
         >
           <SettingField
-            label="Allow password sign-in"
+            label={t("web.admin.settings.signIn.page.allowPasswordLabel")}
             dirty={form.isDirty(LOCAL_LOGIN_KEY)}
             type="toggle"
-            description="Off: everyone signs in with the provider, except break-glass admins. Needs at least one break-glass admin; the server owner is one by default."
+            description={t("web.admin.settings.signIn.page.allowPasswordDescription")}
             value={localLoginOn ? "true" : "false"}
             onChange={changeLocalLogin}
             status={
               !breakGlassKnown ? null : breakGlass.length > 0 ? (
                 <SettingFieldStatus tone="muted">
-                  Break-glass {breakGlass.length === 1 ? "admin" : "admins"}:{" "}
-                  {breakGlass.map((user) => user.username).join(", ")}
+                  {t("web.admin.settings.signIn.page.breakGlassAdmins", {
+                    count: breakGlass.length,
+                    names: breakGlass.map((user) => user.username).join(", "),
+                  })}
                 </SettingFieldStatus>
               ) : (
                 <SettingFieldStatus tone="warn">
-                  No break-glass admin yet. Turn on Break-glass account on an admin's{" "}
-                  <Link to="/admin/users" className="underline underline-offset-4">
-                    user page
-                  </Link>
-                  .
+                  {t("web.admin.settings.signIn.page.noBreakGlassStatus", {
+                    link: (chunks) => (
+                      <Link to="/admin/users" className="underline underline-offset-4">
+                        {chunks}
+                      </Link>
+                    ),
+                  })}
                 </SettingFieldStatus>
               )
             }
@@ -208,36 +218,40 @@ export default function SignInSettings() {
             </p>
           ) : null}
           <SettingField
-            label="Public signups"
+            label={t("web.admin.settings.signIn.page.publicSignupsLabel")}
             dirty={form.isDirty("signup.enabled")}
             type="toggle"
-            description="Anyone with a valid invite code can create an account."
+            description={t("web.admin.settings.signIn.page.publicSignupsDescription")}
             value={form.getValue("signup.enabled")}
             onChange={(v) => form.setValue("signup.enabled", v)}
             restartRequired={restartKeys.has("signup.enabled")}
           />
           <SettingField
-            label="Self-service password reset"
+            label={t("web.admin.settings.signIn.page.passwordResetLabel")}
             dirty={form.isDirty("password_reset.self_service_enabled")}
             type="toggle"
-            description="Adds “Forgot password?” to the sign-in page, so people can get a reset link by email. Needs email and the public URL."
+            description={t("web.admin.settings.signIn.page.passwordResetDescription")}
             value={form.getValue("password_reset.self_service_enabled")}
             onChange={(v) => form.setValue("password_reset.self_service_enabled", v)}
             restartRequired={restartKeys.has("password_reset.self_service_enabled")}
           />
-          <AdvancedSection id="sign-in.locked-out" title="Locked out?">
+          <AdvancedSection
+            id="sign-in.locked-out"
+            title={t("web.admin.settings.signIn.page.lockedOutTitle")}
+          >
             <p className="settings-field-note text-muted-foreground py-2 text-xs leading-relaxed">
-              <code className="font-mono">/login?local=1</code> shows the password form for
-              break-glass admins, and{" "}
-              <code className="font-mono">silo auth local-login enable</code> run on the server
-              turns password sign-in back on.
+              {t("web.admin.settings.signIn.page.lockedOutNote", {
+                login_path: LOCAL_LOGIN_PATH,
+                command: LOCAL_LOGIN_COMMAND,
+                code: (chunks) => <code className="font-mono">{chunks}</code>,
+              })}
             </p>
           </AdvancedSection>
         </FieldGroup>
 
         <FieldGroup
-          label="Single sign-on"
-          description="Let people sign in with your identity provider. A server uses one provider at a time."
+          label={t("web.admin.settings.signIn.page.ssoGroup")}
+          description={t("web.admin.settings.signIn.page.ssoDescription")}
           dirty={drafts.changeCount > 0 || form.isDirty(EMAIL_MATCH_KEY)}
         >
           <div className="settings-field-note">
@@ -254,19 +268,15 @@ export default function SignInSettings() {
           </div>
           {showEmailMatch ? (
             <SettingField
-              label="Match existing accounts by email"
+              label={t("web.admin.settings.signIn.page.emailMatchLabel")}
               dirty={form.isDirty(EMAIL_MATCH_KEY)}
               type="toggle"
-              description="A first sign-in connects to the regular Silo account with the same email, when the provider says the email is verified. Admin, owner and break-glass accounts are never matched."
+              description={t("web.admin.settings.signIn.page.emailMatchDescription")}
               value={emailMatchOn ? "true" : "false"}
               onChange={(value) => form.setValue(EMAIL_MATCH_KEY, value)}
               status={
                 <SettingFieldStatus tone={emailMatchOn ? "warn" : "muted"}>
-                  Whoever controls that email at the provider takes over the Silo account. Silo
-                  doesn't verify account emails, so the account matched is whichever one registered
-                  or set the address first; matching signs it out everywhere and deletes its API
-                  keys. Turn this on only if the provider verifies every email and people can't
-                  change their own.
+                  {t("web.admin.settings.signIn.page.emailMatchWarning")}
                 </SettingFieldStatus>
               }
             />

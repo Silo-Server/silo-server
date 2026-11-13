@@ -2,6 +2,7 @@ import { useEffect, useId, useRef } from "react";
 import { Search, X } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
+import { useT } from "@/i18n";
 import { SEARCH_SHORTCUT_LABEL } from "@/lib/keyboardShortcut";
 import { cn } from "@/lib/utils";
 
@@ -25,13 +26,16 @@ export function SettingsSearchInput({
   value,
   onChange,
   resultCount,
-  placeholder = "Search settings",
-  emptyLabel = "No matching settings",
+  placeholder: placeholderProp,
+  emptyLabel: emptyLabelProp,
   className,
   shortcutMediaQuery,
   showShortcutHint = false,
   captureShortcut = true,
 }: SettingsSearchInputProps) {
+  const t = useT();
+  const placeholder = placeholderProp ?? t("web.settings.search.placeholder");
+  const emptyLabel = emptyLabelProp ?? t("web.settings.search.noMatches");
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const hasQuery = value.trim().length > 0;
@@ -40,7 +44,7 @@ export function SettingsSearchInput({
   const status = hasQuery
     ? resultCount === 0
       ? emptyLabel
-      : `${resultCount} ${resultCount === 1 ? "match" : "matches"}`
+      : t("web.settings.search.matchCount", { count: resultCount, count_text: resultCount })
     : null;
 
   useEffect(() => {
@@ -72,7 +76,7 @@ export function SettingsSearchInput({
       </label>
       <div className="relative">
         <Search
-          className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2"
+          className="text-muted-foreground pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2"
           aria-hidden="true"
         />
         <Input
@@ -82,22 +86,28 @@ export function SettingsSearchInput({
           value={value}
           placeholder={placeholder}
           onChange={(event) => onChange(event.target.value)}
-          className={cn("h-11 rounded-xl pr-10 pl-9", showShortcutHint && !hasQuery && "sm:pr-16")}
+          className={cn(
+            "h-11 rounded-xl ps-9",
+            // Only the clear button needs the end padding; an empty field
+            // gives it to the placeholder, which runs longer in translation.
+            hasQuery ? "pe-10" : "pe-3",
+            showShortcutHint && !hasQuery && "sm:pe-16",
+          )}
           autoComplete="off"
         />
         {hasQuery ? (
           <button
             type="button"
-            aria-label="Clear settings search"
+            aria-label={t("web.settings.search.clear")}
             onClick={() => onChange("")}
-            className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 absolute inset-y-0 right-0 inline-flex w-11 items-center justify-center rounded-xl transition-colors focus-visible:ring-[3px] focus-visible:outline-none"
+            className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 absolute inset-y-0 end-0 inline-flex w-11 items-center justify-center rounded-xl transition-colors focus-visible:ring-[3px] focus-visible:outline-none"
           >
             <X className="h-4 w-4" aria-hidden="true" />
           </button>
         ) : showShortcutHint ? (
           <kbd
             aria-hidden="true"
-            className="border-border/80 bg-surface text-muted-foreground pointer-events-none absolute top-1/2 right-2 hidden h-6 -translate-y-1/2 items-center rounded-md border px-1.5 font-sans text-xs font-medium sm:inline-flex"
+            className="border-border/80 bg-surface text-muted-foreground pointer-events-none absolute end-2 top-1/2 hidden h-6 -translate-y-1/2 items-center rounded-md border px-1.5 font-sans text-xs font-medium sm:inline-flex"
           >
             {SEARCH_SHORTCUT_LABEL}
           </kbd>

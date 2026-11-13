@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { Link } from "react-router";
 import { Library, ScanLine, Square } from "lucide-react";
+import { libraryTypeLabel } from "@/components/admin/libraries/libraryTypes";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,8 +16,12 @@ import { cn } from "@/lib/utils";
 import type { ScanRun } from "@/api/types";
 import { formatDashboardLibraryScanProgress } from "../format";
 import { LibrarySkeletonRows, SectionError } from "../feedback";
+import { useT } from "@/i18n";
+
+const SEPARATOR = "·";
 
 export function LibrariesWidget() {
+  const t = useT();
   useEventChannel("scans");
   const librariesQuery = useAdminLibraries();
   const libraries = librariesQuery.data ?? [];
@@ -43,22 +48,24 @@ export function LibrariesWidget() {
   return (
     <Card className="h-full">
       <CardHeader className="flex shrink-0 flex-row items-center justify-between space-y-0 pb-3">
-        <CardTitle className="text-sm font-bold">Libraries</CardTitle>
+        <CardTitle className="text-sm font-bold">
+          {t("web.admin.dashboard.widgets.libraries.title")}
+        </CardTitle>
         <Link
           to="/admin/libraries"
           className="text-muted-foreground hover:text-primary text-[11px] transition-colors"
         >
-          Manage ›
+          {t("web.admin.dashboard.widgets.libraries.manage")}
         </Link>
       </CardHeader>
       <CardContent className="min-h-0 flex-1 space-y-2 overflow-y-auto">
         {librariesQuery.isLoading ? (
           <LibrarySkeletonRows />
         ) : librariesQuery.error ? (
-          <SectionError message="Failed to load libraries." />
+          <SectionError message={t("web.admin.dashboard.widgets.libraries.loadFailed")} />
         ) : libraries.length === 0 ? (
           <div className="text-muted-foreground py-4 text-center text-sm">
-            No libraries configured.
+            {t("web.admin.dashboard.widgets.libraries.empty")}
           </div>
         ) : (
           libraries.map((lib) => {
@@ -70,7 +77,7 @@ export function LibrariesWidget() {
             const scanProgressLabel = primaryActiveScan
               ? formatDashboardLibraryScanProgress(primaryActiveScan, activeLibraryScans.length)
               : isScanStarting
-                ? "Starting scan..."
+                ? t("web.admin.dashboard.widgets.libraries.startingScan")
                 : "";
 
             return (
@@ -93,11 +100,15 @@ export function LibrariesWidget() {
                   <div className="text-sm font-bold">{lib.name}</div>
                   <div className="text-muted-foreground flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px]">
                     <span>
-                      {lib.type} · {lib.paths.length} {lib.paths.length === 1 ? "path" : "paths"}
+                      {t("web.admin.dashboard.widgets.libraries.typeAndPaths", {
+                        count: lib.paths.length,
+                        count_text: lib.paths.length,
+                        type: libraryTypeLabel(lib.type),
+                      })}
                     </span>
                     {scanProgressLabel ? (
                       <>
-                        <span className="text-border/70">·</span>
+                        <span className="text-border/70">{SEPARATOR}</span>
                         <span className="max-w-[22rem] truncate text-amber-300 tabular-nums">
                           {scanProgressLabel}
                         </span>
@@ -119,8 +130,18 @@ export function LibrariesWidget() {
                       scanLibrary.mutate(lib.id);
                     }}
                     disabled={hasActiveScan ? isCancellingScan : isScanStarting}
-                    title={hasActiveScan ? "Stop Library Scans" : "Scan Library"}
-                    aria-label={hasActiveScan ? `Stop scans for ${lib.name}` : `Scan ${lib.name}`}
+                    title={
+                      hasActiveScan
+                        ? t("web.admin.dashboard.widgets.libraries.stopScansTitle")
+                        : t("web.admin.dashboard.widgets.libraries.scanTitle")
+                    }
+                    aria-label={
+                      hasActiveScan
+                        ? t("web.admin.dashboard.widgets.libraries.stopScansLabel", {
+                            name: lib.name,
+                          })
+                        : t("web.admin.dashboard.widgets.libraries.scanLabel", { name: lib.name })
+                    }
                   >
                     {hasActiveScan ? (
                       <Square className="h-3 w-3 fill-current" />
@@ -140,10 +161,10 @@ export function LibrariesWidget() {
                     )}
                     title={
                       hasActiveScan
-                        ? "Scan in progress"
+                        ? t("web.admin.dashboard.widgets.libraries.scanInProgress")
                         : lib.enabled
-                          ? "Library enabled"
-                          : "Library disabled"
+                          ? t("web.admin.dashboard.widgets.libraries.enabled")
+                          : t("web.admin.dashboard.widgets.libraries.disabled")
                     }
                   />
                 </div>

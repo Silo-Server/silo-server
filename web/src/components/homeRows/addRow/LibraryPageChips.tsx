@@ -1,5 +1,6 @@
 import { useId } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
+import { useT } from "@/i18n";
 import { BULK_LIBRARY_LIMIT } from "@/lib/homeRows/bulkCopy";
 import type { LibraryPage } from "@/lib/homeRows/types";
 import { cn } from "@/lib/utils";
@@ -31,6 +32,7 @@ export function LibraryPageChips({
   maxSelected: number;
   help: string;
 }) {
+  const t = useT();
   const id = useId();
   const full = selectedIds.length >= maxSelected;
   const showLimit = full && !disabled;
@@ -41,7 +43,7 @@ export function LibraryPageChips({
       aria-describedby={showLimit ? `${id}-help ${id}-limit` : `${id}-help`}
     >
       <span id={`${id}-label`} className="mb-2 block text-sm leading-none font-medium">
-        Add to these library pages
+        {t("web.home.addRow.pages.label")}
       </span>
       <div className="flex flex-wrap gap-2">
         {pages.map((page) => {
@@ -52,7 +54,7 @@ export function LibraryPageChips({
             <label
               key={page.id}
               className={cn(
-                "border-border has-focus-visible:ring-ring/50 inline-flex h-10 items-center gap-2.5 rounded-[12px] border pr-3.5 pl-3 text-sm font-medium transition-colors has-focus-visible:ring-[3px]",
+                "border-border has-focus-visible:ring-ring/50 inline-flex h-10 items-center gap-2.5 rounded-[12px] border ps-3 pe-3.5 text-sm font-medium transition-colors has-focus-visible:ring-[3px]",
                 checked && "bg-accent border-foreground/55",
                 current || locked
                   ? "cursor-default opacity-80"
@@ -81,9 +83,10 @@ export function LibraryPageChips({
                 <>
                   {" "}
                   <span className="text-muted-foreground text-xs font-normal">
-                    <span className="sr-only">(</span>
-                    {currentNote}
-                    <span className="sr-only">)</span>
+                    {t("web.home.addRow.pages.currentNote", {
+                      note: currentNote,
+                      hidden: (chunks) => <span className="sr-only">{chunks}</span>,
+                    })}
                   </span>
                 </>
               ) : null}
@@ -96,7 +99,7 @@ export function LibraryPageChips({
       </p>
       {showLimit ? (
         <p id={`${id}-limit`} className="text-muted-foreground mt-1 text-[13px]">
-          You can add a row to up to {BULK_LIBRARY_LIMIT} pages at once.
+          {t("web.home.addRow.pages.limit", { count: BULK_LIBRARY_LIMIT })}
         </p>
       ) : null}
     </div>

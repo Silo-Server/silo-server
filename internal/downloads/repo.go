@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -16,11 +14,6 @@ import (
 const downloadColumns = `id, user_id, profile_id, device_id, media_file_id, content_id, episode_id, batch_id,
 	kind, status, format, quality, effective_quality, target_bitrate_kbps, revision, artifact_id, file_size, bytes_sent, error_message,
 	created_at, updated_at, completed_at, status_event_at`
-
-const insertDownloadSQL = `INSERT INTO downloads (id, user_id, profile_id, device_id, media_file_id, content_id,
-		episode_id, batch_id, kind, status, format, quality, effective_quality, target_bitrate_kbps, revision, artifact_id, file_size, bytes_sent, error_message,
-		created_at, updated_at, completed_at)
-	VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`
 
 // Repository provides CRUD operations for the downloads table.
 type Repository struct {
@@ -137,59 +130,6 @@ func scanDownloads(rows pgx.Rows) ([]*Download, error) {
 		downloads = append(downloads, &d)
 	}
 	return downloads, rows.Err()
-}
-
-func downloadInsertArgs(d *Download) []any {
-	format := d.Format
-	if format == "" {
-		format = FormatOriginal
-	}
-	quality := d.Quality
-	if quality == "" {
-		quality = QualityOriginal
-	}
-	effectiveQuality := d.EffectiveQuality
-	if effectiveQuality == "" {
-		effectiveQuality = quality
-	}
-	revision := d.Revision
-	if revision <= 0 {
-		revision = 1
-	}
-	return []any{
-		d.ID, d.UserID, nilIfEmpty(d.ProfileID), nilIfEmpty(d.DeviceID), d.MediaFileID, d.ContentID,
-		nilIfEmpty(d.EpisodeID), nilIfEmpty(d.BatchID), d.Kind, d.Status, format, quality, effectiveQuality,
-		d.TargetBitrateKbps, revision, nilIfEmpty(d.ArtifactID), d.FileSize, d.BytesSent, d.ErrorMessage,
-		d.CreatedAt, d.UpdatedAt, d.CompletedAt,
-	}
-}
-
-// Create inserts a new download record.
-func (r *Repository) Create(ctx context.Context, d *Download) error {
-	if _, err := r.pool.Exec(ctx, insertDownloadSQL, downloadInsertArgs(d)...); err != nil {
-		return fmt.Errorf("inserting download: %w", err)
-	}
-	return nil
-}
-
-// CreateBatch inserts multiple download records in a single transaction.
-func (r *Repository) CreateBatch(ctx context.Context, downloads []*Download) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("beginning batch insert: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	for _, d := range downloads {
-		if _, err := tx.Exec(ctx, insertDownloadSQL, downloadInsertArgs(d)...); err != nil {
-			return fmt.Errorf("inserting batch download: %w", err)
-		}
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("committing batch insert: %w", err)
-	}
-	return nil
 }
 
 // GetByID retrieves a download by its ID.
@@ -362,6 +302,9 @@ func (r *Repository) GetManagedEntry(ctx context.Context, userID int, profileID,
 // Callers have already classified the item as new.
 func (r *Repository) CreateManagedEntry(ctx context.Context, d *Download) (*Download, error) {
 	if err := r.Create(ctx, d); err != nil {
+		if errors.Is(err, errFileNotRegistrable) {
+			return nil, err
+		}
 		if existing, gerr := r.GetManagedEntry(ctx, d.UserID, d.ProfileID, d.DeviceID, d.ContentID, d.EpisodeID); gerr == nil {
 			return existing, nil
 		}
@@ -462,87 +405,6 @@ func (r managedRegistryStore) MonitorEntriesToRegister(ctx context.Context, sub 
 		out[k] = true
 	}
 	return out, rows.Err()
-}
-
-// CreateManagedEntriesBatch inserts managed rows in one statement, skipping
-// identities that already exist (including concurrent-insert races) via ON
-// CONFLICT DO NOTHING on the managed-entry unique index. Returns only the rows
-// actually inserted, so callers can report an honest newly-registered count.
-func (r *Repository) CreateManagedEntriesBatch(ctx context.Context, ds []*Download) ([]*Download, error) {
-	return (managedRegistryStore{r.pool}).CreateManagedEntriesBatch(ctx, ds)
-}
-
-func (r managedRegistryStore) CreateManagedEntriesBatch(ctx context.Context, ds []*Download) ([]*Download, error) {
-	if len(ds) == 0 {
-		return nil, nil
-	}
-	const insertCols = 22
-	var sb strings.Builder
-	sb.WriteString(`INSERT INTO downloads (id, user_id, profile_id, device_id, media_file_id, content_id,
-		episode_id, batch_id, kind, status, format, quality, effective_quality, target_bitrate_kbps, revision, artifact_id, file_size, bytes_sent, error_message,
-		created_at, updated_at, completed_at) VALUES `)
-	args := make([]any, 0, len(ds)*insertCols)
-	for i, d := range ds {
-		if i > 0 {
-			sb.WriteString(", ")
-		}
-		sb.WriteByte('(')
-		for j := 0; j < insertCols; j++ {
-			if j > 0 {
-				sb.WriteByte(',')
-			}
-			sb.WriteByte('$')
-			sb.WriteString(strconv.Itoa(i*insertCols + j + 1))
-		}
-		sb.WriteByte(')')
-		args = append(args, downloadInsertArgs(d)...)
-	}
-	sb.WriteString(` ON CONFLICT (user_id, profile_id, device_id, content_id, (COALESCE(episode_id, ''))) WHERE device_id IS NOT NULL DO NOTHING RETURNING ` + downloadColumns)
-	rows, err := r.db.Query(ctx, sb.String(), args...)
-	if err != nil {
-		return nil, fmt.Errorf("batch inserting managed entries: %w", err)
-	}
-	defer rows.Close()
-	return scanDownloads(rows)
-}
-
-// ReplaceManagedEntry updates an existing managed row to a new file/quality
-// target, incrementing its revision so clients can replace stale local bytes.
-func (r *Repository) ReplaceManagedEntry(ctx context.Context, existing *Download, replacement *Download) (*Download, error) {
-	query := `UPDATE downloads SET
-			media_file_id = $6,
-			batch_id = $7,
-			kind = $8,
-			status = $9,
-			format = $10,
-			quality = $11,
-			effective_quality = $12,
-			target_bitrate_kbps = $13,
-			artifact_id = $14,
-			file_size = $15,
-			bytes_sent = 0,
-			error_message = '',
-			completed_at = NULL,
-			revision = revision + 1,
- status_event_at = NULL,
-			revoked_at = NULL, revoked_by = NULL, revoked_reason = '',
-			updated_at = now()
-		WHERE id = $1 AND user_id = $2 AND profile_id = $3 AND device_id = $4 AND revision = $5
-		RETURNING ` + downloadColumns
-	row := r.pool.QueryRow(ctx, query,
-		existing.ID, existing.UserID, existing.ProfileID, existing.DeviceID, existing.Revision,
-		replacement.MediaFileID, nilIfEmpty(replacement.BatchID), replacement.Kind, replacement.Status,
-		replacement.Format, replacement.Quality, replacement.EffectiveQuality, replacement.TargetBitrateKbps,
-		nilIfEmpty(replacement.ArtifactID), replacement.FileSize,
-	)
-	d, err := scanDownload(row)
-	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return r.GetManagedEntry(ctx, existing.UserID, existing.ProfileID, existing.DeviceID, existing.ContentID, existing.EpisodeID)
-		}
-		return nil, fmt.Errorf("replacing managed download: %w", err)
-	}
-	return d, nil
 }
 
 // UpdateManagedBatch moves an otherwise unchanged managed row into the latest

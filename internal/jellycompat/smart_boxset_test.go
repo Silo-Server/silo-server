@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -52,10 +53,11 @@ func (f *fakeSmartExecutor) PreviewPage(_ context.Context, def catalog.QueryDefi
 	return f.items[offset:end], total, true, nil
 }
 
-// TestHandleItems_SmartBoxSetChildrenIntersectLibraryScope asserts the query's
-// own library_ids are intersected with the collection's bound libraries before
-// the executor runs, so a restricted collection cannot widen its scope.
-func TestHandleItems_SmartBoxSetChildrenIntersectLibraryScope(t *testing.T) {
+// TestHandleItems_SmartBoxSetChildrenFollowTheRulesLibraries asserts the
+// executor runs the query's own library_ids, not the collection's libraries:
+// those only decide where the collection shows. The session's access filter
+// narrows the result to what the viewer may see.
+func TestHandleItems_SmartBoxSetChildrenFollowTheRulesLibraries(t *testing.T) {
 	collections := &fakeCollectionSource{
 		collections: []*models.LibraryCollection{
 			{ID: "202", LibraryIDs: []int{1, 2}, Title: "Scoped", Visibility: "visible", CollectionType: "smart", ItemCount: 1, QueryDefinition: json.RawMessage(`{"library_ids":[2,3]}`)},
@@ -74,9 +76,8 @@ func TestHandleItems_SmartBoxSetChildrenIntersectLibraryScope(t *testing.T) {
 	if len(result.Items) != 1 || result.Items[0].Name != "Only Two" {
 		t.Fatalf("expected the single resolved child, got %+v", result.Items)
 	}
-	// query library_ids [2,3] ∩ collection [1,2] = [2].
-	if len(exec.gotDef.LibraryIDs) != 1 || exec.gotDef.LibraryIDs[0] != 2 {
-		t.Fatalf("expected executor to receive intersected library scope [2], got %v", exec.gotDef.LibraryIDs)
+	if !slices.Equal(exec.gotDef.LibraryIDs, []int{2, 3}) {
+		t.Fatalf("expected executor to receive the rules' libraries [2 3], got %v", exec.gotDef.LibraryIDs)
 	}
 }
 

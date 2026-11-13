@@ -255,13 +255,6 @@ func (r *Repository) CreateSource(ctx context.Context, input CreateSourceInput) 
 	return source, nil
 }
 
-func (r *Repository) UpdateSource(ctx context.Context, id int, input UpdateSourceInput) (*Source, error) {
-	return r.UpdateSourceConditional(ctx, id, input, -1)
-}
-func (r *Repository) DeleteSource(ctx context.Context, id int) error {
-	return r.DeleteSourceConditional(ctx, id, -1)
-}
-
 func (r *Repository) CreateConnectSession(ctx context.Context, session ConnectSession) (*ConnectSession, error) {
 	serversJSON, err := r.marshalConnectServersForWrite(session.ID, session.Servers)
 	if err != nil {
@@ -655,6 +648,7 @@ func (r *Repository) completeRun(ctx context.Context, claim RunClaim, summary Ex
 			warnings = $11,
 			unmatched_samples = $12,
 			error_message = NULL,
+			checkpoint = NULL,
 			completed_at = NOW(),
 			last_heartbeat_at = NOW()
 		WHERE id = $1 AND status='running' AND claim_generation=$13 AND cancel_requested_at IS NULL`,
