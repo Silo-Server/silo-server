@@ -55167,6 +55167,9 @@
           "dv_rpu_present": {
             "type": "boolean"
           },
+          "frame_color_range": {
+            "type": "string"
+          },
           "frame_rate": {
             "type": "string"
           },

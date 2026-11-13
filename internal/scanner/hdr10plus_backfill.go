@@ -75,9 +75,14 @@ type HDR10PlusBackfillResult struct {
 // scanner read it from a decoded frame. FFmpeg reports HDR10+ only as frame
 // side data, so earlier probes stored every HDR10+ file as plain HDR10.
 //
-// Candidates are present files whose first video track is PQ and has no
-// hdr10_plus key. The backfiller decodes the first frame of the primary video
-// stream and sets only hdr10_plus and, for an HDR10+ file, video_range_type on
+// It also records the first frame's color range, which the decoder takes from
+// the bitstream and tone mapping trusts over a container tag that contradicts
+// it (see models.VideoTrack.FrameColorRange).
+//
+// Candidates are present files whose first video track is PQ and lacks the
+// hdr10_plus or the frame_color_range key. The backfiller decodes the first
+// frame of the primary video stream and sets frame_color_range and, on a
+// track without one, hdr10_plus and, for an HDR10+ file, video_range_type on
 // that track. It leaves the rest of the probe alone, so chapters, probe time,
 // and everything keyed to them stay as they are. A pass is resumable by
 // construction: a file drops out once its track has the key, and a pass that
@@ -89,7 +94,7 @@ type HDR10PlusBackfiller struct {
 	batch       int
 	// readFrame is the frame read and statFile the on-disk check; tests
 	// replace them.
-	readFrame func(ctx context.Context, ffprobePath, filePath, streamSpecifier string) ([]ffprobeSideData, error)
+	readFrame func(ctx context.Context, ffprobePath, filePath, streamSpecifier string) (firstVideoFrame, error)
 	statFile  func(path string) (fs.FileInfo, error)
 	// statSlots caps on-disk checks still blocked in the kernel; see
 	// statFileBounded.
@@ -108,7 +113,7 @@ func NewHDR10PlusBackfiller(repo *FileRepository, ffprobePath string) *HDR10Plus
 		ffprobePath: ffprobePath,
 		workers:     hdr10PlusBackfillWorkers,
 		batch:       hdr10PlusBackfillBatchSize,
-		readFrame:   probeVideoFrameSideData,
+		readFrame:   probeFirstVideoFrame,
 		statFile:    os.Stat,
 		statSlots:   make(chan struct{}, hdr10PlusStatSlots),
 		statTimeout: hdr10PlusStatTimeout,
@@ -224,7 +229,7 @@ func (b *HDR10PlusBackfiller) loadCandidates(ctx context.Context, afterID int) (
 		  AND jsonb_typeof(mf.video_tracks) = 'array'
 		  AND jsonb_typeof(mf.video_tracks->0) = 'object'
 		  AND lower(COALESCE(mf.video_tracks->0->>'color_transfer', '')) LIKE '%smpte2084%'
-		  AND NOT (mf.video_tracks->0 ? 'hdr10_plus')
+		  AND NOT (mf.video_tracks->0 ?& ARRAY['hdr10_plus', 'frame_color_range'])
 		ORDER BY mf.id
 		LIMIT $2`, afterID, b.batch)
 	if err != nil {
@@ -260,7 +265,7 @@ func (b *HDR10PlusBackfiller) backfillFile(ctx context.Context, c hdr10PlusCandi
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
-	sideData, err := b.readFrame(ctx, b.ffprobePath, c.path, hdr10PlusPrimaryVideoStream)
+	frame, err := b.readFrame(ctx, b.ffprobePath, c.path, hdr10PlusPrimaryVideoStream)
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return 0, ctxErr
 	}
@@ -301,28 +306,31 @@ func (b *HDR10PlusBackfiller) backfillFile(ctx context.Context, c hdr10PlusCandi
 		return hdr10PlusOutcomeChanged, nil
 	}
 	outcome := hdr10PlusOutcomeNotHDR10Plus
-	if mediaprobe.HasHDR10Plus(sideData) {
+	if mediaprobe.HasHDR10Plus(frame.SideData) {
 		outcome = hdr10PlusOutcomeHDR10Plus
 	}
 
 	hdr10Plus := outcome == hdr10PlusOutcomeHDR10Plus
-	// Set only hdr10_plus, and for an HDR10+ file video_range_type, on the
-	// first track, so fields this binary does not know survive. Write only
-	// over the exact row that was read: the same file revision and the same
-	// first track. A scan that rewrote the row in the meantime read the frame
-	// itself.
+	// Set only frame_color_range and, on a track not yet checked for HDR10+,
+	// hdr10_plus and for an HDR10+ file video_range_type, on the first track,
+	// so fields this binary does not know survive. Write only over the exact
+	// row that was read: the same file revision and the same first track. A
+	// scan that rewrote the row in the meantime read the frame itself.
 	tag, err := b.pool.Exec(ctx, `
 		UPDATE media_files
-		SET video_tracks = CASE WHEN $5::boolean
-		        THEN jsonb_set(jsonb_set(video_tracks, '{0,hdr10_plus}', 'true'::jsonb), '{0,video_range_type}', to_jsonb($6::text))
-		        ELSE jsonb_set(video_tracks, '{0,hdr10_plus}', 'false'::jsonb)
-		    END,
+		SET video_tracks = jsonb_set(
+		        CASE WHEN video_tracks->0 ? 'hdr10_plus' THEN video_tracks
+		            WHEN $5::boolean
+		            THEN jsonb_set(jsonb_set(video_tracks, '{0,hdr10_plus}', 'true'::jsonb), '{0,video_range_type}', to_jsonb($6::text))
+		            ELSE jsonb_set(video_tracks, '{0,hdr10_plus}', 'false'::jsonb)
+		        END,
+		        '{0,frame_color_range}', to_jsonb($7::text)),
 		    updated_at = NOW()
 		WHERE id = $1
 		  AND file_size = $2
 		  AND date_trunc('microseconds', file_modified_at) IS NOT DISTINCT FROM $3::timestamptz
 		  AND video_tracks->0 = $4::jsonb`,
-		c.id, c.size, c.normalizedModifiedAt(), c.trackJSON, hdr10Plus, mediaprobe.RangeTypeWithHDR10Plus(c.track))
+		c.id, c.size, c.normalizedModifiedAt(), c.trackJSON, hdr10Plus, mediaprobe.RangeTypeWithHDR10Plus(c.track), mediaprobe.RecordedFrameColorRange(frame.ColorRange))
 	if err != nil {
 		return 0, fmt.Errorf("recording HDR10+ status for file %d: %w", c.id, err)
 	}

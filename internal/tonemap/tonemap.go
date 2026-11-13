@@ -187,11 +187,24 @@ func MetadataForFile(file *models.MediaFile) SourceMetadata {
 		DVBLCompatIDPresent: track.DVBLCompatIDPresent,
 		DVBLPresent:         track.DVBLPresent,
 		DVRPUPresent:        track.DVRPUPresent,
-		ColorRange:          track.ColorRange,
+		ColorRange:          DecodedColorRange(track),
 		ColorPrimaries:      track.ColorPrimaries,
 		ColorTransfer:       track.ColorTransfer,
 		ColorSpace:          track.ColorSpace,
 	}
+}
+
+// DecodedColorRange returns the range a tone-map graph will see on the
+// track's decoded frames: the first frame's explicit range when the scanner
+// read one, otherwise the stream's tag. The decoder takes the range from the
+// bitstream, so a container tag that contradicts it would classify full-range
+// samples as limited, or the reverse.
+func DecodedColorRange(track models.VideoTrack) string {
+	frameRange := normalizeColorValue(track.FrameColorRange)
+	if rangeIsFull(frameRange) || rangeIsLimited(frameRange) {
+		return track.FrameColorRange
+	}
+	return track.ColorRange
 }
 
 // NeedsToneMap preserves the broad chapter-thumbnail policy gate: thumbnails

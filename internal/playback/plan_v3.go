@@ -1355,7 +1355,7 @@ func toneMapSourceResolutionV3(file *models.MediaFile, source SourceDescriptorV3
 		metadata.DVBLCompatIDPresent = track.DVBLCompatIDPresent
 		metadata.DVBLPresent = track.DVBLPresent
 		metadata.DVRPUPresent = track.DVRPUPresent
-		metadata.ColorRange = track.ColorRange
+		metadata.ColorRange = tonemap.DecodedColorRange(track)
 		metadata.ColorPrimaries = track.ColorPrimaries
 		metadata.ColorTransfer = track.ColorTransfer
 		metadata.ColorSpace = track.ColorSpace
