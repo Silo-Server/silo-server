@@ -11,12 +11,9 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-// connectInfoUsers serves one account by id and the server-wide local
-// password switch.
+// connectInfoUsers serves one account by id.
 type connectInfoUsers struct {
-	user         *models.User
-	switchOff    bool
-	switchFailed bool
+	user *models.User
 }
 
 func (r connectInfoUsers) GetByID(_ context.Context, id int) (*models.User, error) {
@@ -26,44 +23,55 @@ func (r connectInfoUsers) GetByID(_ context.Context, id int) (*models.User, erro
 	return r.user, nil
 }
 
-func (r connectInfoUsers) LocalPasswordLoginAllowed(context.Context) (bool, error) {
-	if r.switchFailed {
-		return false, errors.New("settings unavailable")
-	}
-	return !r.switchOff, nil
+// connectInfoSignIn answers for the account it is asked about and records it.
+// Which accounts can sign in is auth.Service's rule, pinned by
+// TestPasswordSignInAvailableDB.
+type connectInfoSignIn struct {
+	available bool
+	err       error
+	asked     *int
+}
+
+func (s connectInfoSignIn) PasswordSignInAvailable(_ context.Context, user *models.User) (bool, error) {
+	*s.asked = user.ID
+	return s.available, s.err
 }
 
 func TestCompatConnectInfoPasswordLoginAvailable(t *testing.T) {
-	passwordAccount := models.User{ID: 7, LocalPasswordLoginEnabled: true, PasswordHash: "$2a$hash"}
-	providerAccount := models.User{ID: 7, PasswordHash: "$2a$unusable"}
-	breakGlass := passwordAccount
-	breakGlass.BreakGlass = true
-	noHash := passwordAccount
-	noHash.PasswordHash = ""
-	otherAccount := passwordAccount
+	account := models.User{ID: 7, PasswordHash: "$2a$hash"}
+	otherAccount := account
 	otherAccount.ID = 8
 
 	tests := []struct {
-		name  string
-		users connectInfoUsers
-		want  bool
+		name      string
+		user      *models.User
+		available bool
+		err       error
+		noSignIn  bool
+		want      bool
 	}{
-		{name: "password account", users: connectInfoUsers{user: &passwordAccount}, want: true},
-		{name: "provider account", users: connectInfoUsers{user: &providerAccount}, want: false},
-		{name: "password account, switch off", users: connectInfoUsers{user: &passwordAccount, switchOff: true}, want: false},
-		{name: "break-glass account, switch off", users: connectInfoUsers{user: &breakGlass, switchOff: true}, want: true},
-		{name: "account without a password", users: connectInfoUsers{user: &noHash}, want: false},
-		{name: "unreadable switch counts as on", users: connectInfoUsers{user: &passwordAccount, switchFailed: true}, want: true},
-		{name: "unknown account keeps the password instructions", users: connectInfoUsers{user: &otherAccount, switchOff: true}, want: true},
+		{name: "account that can sign in", user: &account, available: true, want: true},
+		{name: "account that cannot sign in", user: &account, available: false, want: false},
+		{name: "unreadable answer keeps the password instructions", user: &account, err: errors.New("settings unavailable"), want: true},
+		{name: "unknown account keeps the password instructions", user: &otherAccount, want: true},
+		{name: "no sign-in service keeps the password instructions", user: &account, noSignIn: true, want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := NewCompatConnectInfoHandler(&config.Config{}, &fakeServerSettingsStore{}, tt.users)
+			asked := 0
+			var signIn CompatPasswordSignIn = connectInfoSignIn{available: tt.available, err: tt.err, asked: &asked}
+			if tt.noSignIn {
+				signIn = nil
+			}
+			handler := NewCompatConnectInfoHandler(&config.Config{}, &fakeServerSettingsStore{}, connectInfoUsers{user: tt.user}, signIn)
 			ctx := middleware.SetClaims(t.Context(), &auth.Claims{UserID: 7})
 
 			got := handler.GetConnectInfo(ctx).Account.PasswordLoginAvailable
 			if got != tt.want {
 				t.Fatalf("password_login_available = %v, want %v", got, tt.want)
+			}
+			if tt.user.ID == 7 && !tt.noSignIn && asked != 7 {
+				t.Fatalf("asked about account %d, want the requesting account 7", asked)
 			}
 		})
 	}

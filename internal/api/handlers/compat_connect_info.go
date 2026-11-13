@@ -29,30 +29,39 @@ type CompatConnectInfoHandler struct {
 	Config       *config.Config
 	SettingsRepo ServerSettingsStore
 	Users        CompatConnectUsers
+	SignIn       CompatPasswordSignIn
 }
 
-// CompatConnectUsers looks up the requesting account and reads the server-wide
-// local password switch; *auth.UserRepository serves both.
+// CompatConnectUsers looks up the requesting account; *auth.UserRepository
+// serves it.
 type CompatConnectUsers interface {
 	GetByID(ctx context.Context, id int) (*models.User, error)
-	LocalPasswordLoginAllowed(ctx context.Context) (bool, error)
+}
+
+// CompatPasswordSignIn answers whether an account can sign in with a password
+// where no provider is named; *auth.Service serves it.
+type CompatPasswordSignIn interface {
+	PasswordSignInAvailable(ctx context.Context, user *models.User) (bool, error)
 }
 
 func NewCompatConnectInfoHandler(
 	cfg *config.Config,
 	settings ServerSettingsStore,
 	users CompatConnectUsers,
+	signIn CompatPasswordSignIn,
 ) *CompatConnectInfoHandler {
-	return &CompatConnectInfoHandler{Config: cfg, SettingsRepo: settings, Users: users}
+	return &CompatConnectInfoHandler{Config: cfg, SettingsRepo: settings, Users: users, SignIn: signIn}
 }
 
 type CompatConnectAccountInfo struct {
-	// PasswordLoginAvailable reports whether this account can authenticate
-	// with its local password at all: it has a password, its own password
-	// sign-in is on, and the server's switch is on or the account is
-	// break-glass. Compat login is
-	// hardwired to the local provider, so SSO/plugin-provisioned accounts
-	// cannot sign in to a Jellyfin client no matter what they type.
+	// PasswordLoginAvailable reports whether this account can sign in to a
+	// Jellyfin client with a password. Compat login routes it as any
+	// password sign-in that names no provider: an account with its own
+	// password sign-in uses its local password, which the server's switch
+	// (unless break-glass) and a network provider's refusal can stop; any
+	// other account uses its directory (LDAP) password when it is linked to
+	// the enabled directory. An account with neither, such as one that only
+	// signs in with OIDC, cannot sign in to a Jellyfin client.
 	PasswordLoginAvailable bool `json:"password_login_available"`
 }
 
@@ -90,14 +99,13 @@ func (h *CompatConnectInfoHandler) compatSettings(ctx context.Context) map[strin
 	return settings
 }
 
-// passwordLoginAvailable reports whether the requesting account's local
-// password passes the account and server-wide switches LocalProvider.Authenticate
-// checks (a network provider's refusal is not consulted). It defaults
-// to true when the user or the server switch cannot be read: the page then
-// shows its normal instructions rather than telling someone their working
-// login is unsupported because of a lookup blip.
+// passwordLoginAvailable asks the sign-in service whether the requesting
+// account can sign in to a Jellyfin client with a password. It defaults to
+// true when the account or the answer cannot be read: the page then shows its
+// normal instructions rather than telling someone their working login is
+// unsupported because of a lookup blip.
 func (h *CompatConnectInfoHandler) passwordLoginAvailable(ctx context.Context) bool {
-	if h.Users == nil {
+	if h.Users == nil || h.SignIn == nil {
 		return true
 	}
 	userID := middleware.GetUserID(ctx)
@@ -108,13 +116,6 @@ func (h *CompatConnectInfoHandler) passwordLoginAvailable(ctx context.Context) b
 	if err != nil || user == nil {
 		return true
 	}
-	if !user.LocalPasswordLoginEnabled || user.PasswordHash == "" {
-		return false
-	}
-	// Break-glass admins keep their password while the server switch is off.
-	if user.BreakGlass {
-		return true
-	}
-	allowed, err := h.Users.LocalPasswordLoginAllowed(ctx)
-	return err != nil || allowed
+	available, err := h.SignIn.PasswordSignInAvailable(ctx, user)
+	return err != nil || available
 }
