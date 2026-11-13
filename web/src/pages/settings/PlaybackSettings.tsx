@@ -737,9 +737,8 @@ export default function PlaybackSettings() {
         />
       </SettingsGroup>
 
-      {/* Sits with the marker settings above: these are the same feature seen
-          from the reporting side, and the viewer's own key lives here rather
-          than on the admin plugin page, which is server-wide. */}
+      {/* Sits with the marker settings above: the same feature from the reporting
+          side, whose switch lives here rather than on the admin plugin page. */}
       <TheIntroDbReportSettings />
 
       <SettingsGroup title={t("web.settings.playback.nextEpisode.title")}>
