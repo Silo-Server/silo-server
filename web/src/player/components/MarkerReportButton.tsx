@@ -76,7 +76,7 @@ export function MarkerReportButton({ installationId, contentId, kind }: MarkerRe
       <button
         type="button"
         onClick={() => setPhase({ state: "idle" })}
-        className={`${baseClass} max-w-56 text-left`}
+        className={`${baseClass} max-w-56 text-start`}
         title="Retry the report"
       >
         {phase.message}

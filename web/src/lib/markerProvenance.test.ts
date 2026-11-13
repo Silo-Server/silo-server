@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { confidencePercent, markerProvenanceLabel, markerSourceLabel } from "./markerProvenance";
+import {
+  confidencePercent,
+  isTheIntroDbRange,
+  markerProvenanceLabel,
+  markerSourceLabel,
+} from "./markerProvenance";
 
 describe("markerSourceLabel", () => {
   it("names a plugin provider by its capability, not its installation id", () => {
@@ -87,5 +92,38 @@ describe("markerProvenanceLabel", () => {
 
   it("draws nothing when nothing is known", () => {
     expect(markerProvenanceLabel({}, { showConfidence: true, showSource: true })).toBeNull();
+  });
+});
+
+describe("isTheIntroDbRange", () => {
+  it("claims a range TheIntroDB itself served", () => {
+    // The capability is the stable half of a plugin provider id, and a report is
+    // addressed to TheIntroDB, so a range this provider supplied is the one it can be
+    // asked about. Measured on a live server: the qualification carries the local
+    // installation id.
+    expect(isTheIntroDbRange({ source: "plugin", provider: "plugin:4:introdb" })).toBe(true);
+    expect(isTheIntroDbRange({ source: "plugin", provider: "plugin:11:introdb" })).toBe(true);
+    expect(isTheIntroDbRange({ source: "online", provider: "introdb" })).toBe(true);
+  });
+
+  it("leaves a range TheIntroDB never supplied alone", () => {
+    // Reporting one of these would contest something TheIntroDB never published: a
+    // range Silo's own scanner detected, one a person edited, or one another provider
+    // supplied.
+    expect(isTheIntroDbRange({ source: "scanner", provider: "built_in" })).toBe(false);
+    expect(isTheIntroDbRange({ source: "manual", provider: null })).toBe(false);
+    expect(isTheIntroDbRange({ source: "plugin", provider: "plugin:4:some.other.plugin" })).toBe(
+      false,
+    );
+    expect(isTheIntroDbRange({ source: "plugin", provider: "plugin:4:introdb2" })).toBe(false);
+  });
+
+  it("claims nothing when nothing is recorded", () => {
+    // An unattributable range is not a reportable one, and an older host records no
+    // provenance at all.
+    expect(isTheIntroDbRange({})).toBe(false);
+    expect(isTheIntroDbRange({ source: "plugin" })).toBe(false);
+    expect(isTheIntroDbRange(null)).toBe(false);
+    expect(isTheIntroDbRange(undefined)).toBe(false);
   });
 });

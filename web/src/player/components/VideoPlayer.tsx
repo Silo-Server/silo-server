@@ -24,6 +24,7 @@ import { PlaybackInfoOverlay } from "./PlaybackInfoOverlay";
 import { PlaybackNoticeOverlay, PlaybackNoticeStack } from "./PlaybackNoticeOverlay";
 import { IntroSkipButton } from "./IntroSkipButton";
 import { MarkerReportButton } from "./MarkerReportButton";
+import { isTheIntroDbRange } from "@/lib/markerProvenance";
 import { BufferingQualityPill } from "./BufferingQualityPill";
 import { MarkerEditPanel } from "./MarkerEditPanel";
 import { NextEpisodeOverlay } from "./NextEpisodeOverlay";
@@ -99,6 +100,7 @@ import type {
   MarkerDraft,
   MarkerKind,
   MarkerRegionView,
+  PlayerMarkerProvenance,
   PlaybackStartTrigger,
   SeriesContext,
   SubtitleMode,
@@ -3632,14 +3634,17 @@ export function VideoPlayer({
 
   // The report control is handed to whichever pill is showing, so both the skip and
   // the undo prompt offer it in the same place. It carries the installation serving
-  // the route: without one there is nothing to call. The kind is taken per prompt,
-  // so the tooltip names the segment actually on screen.
-  const markerReportAction = (kind?: string) =>
-    markerReportInstallationId && markerReportContentId ? (
+  // the route: without one there is nothing to call. A report contests a range
+  // TheIntroDB served, so it is drawn only under such a range — under one Silo's own
+  // scanner found, one a person edited, or one another provider supplied, it would
+  // contest something TheIntroDB never published. The kind is taken per prompt, so
+  // the tooltip names the segment actually on screen.
+  const markerReportAction = (marker?: (PlayerMarkerProvenance & { kind?: MarkerKind }) | null) =>
+    markerReportInstallationId && markerReportContentId && isTheIntroDbRange(marker) ? (
       <MarkerReportButton
         installationId={markerReportInstallationId}
         contentId={markerReportContentId}
-        kind={kind}
+        kind={marker?.kind}
       />
     ) : null;
 
@@ -5719,7 +5724,7 @@ export function VideoPlayer({
           provenance={activeIntro}
           showConfidence={showMarkerConfidence}
           showSource={showMarkerSource}
-          trailing={markerReportAction(activeIntro?.kind)}
+          trailing={markerReportAction(activeIntro)}
         />
       )}
       {!isDetached && !activeIntroPrompt && !nextEpisode.showCountdown && activeSkipMarker && (
@@ -5731,7 +5736,7 @@ export function VideoPlayer({
           provenance={activeSkipMarker}
           showConfidence={showMarkerConfidence}
           showSource={showMarkerSource}
-          trailing={markerReportAction(activeSkipMarker.kind)}
+          trailing={markerReportAction(activeSkipMarker)}
         />
       )}
 
