@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
 func TestPreparationControlsPauseResumeAndCancel(t *testing.T) {
@@ -296,7 +298,7 @@ func TestDownloadLinkedToCanceledPreparationFails(t *testing.T) {
 	}
 	suffix := time.Now().UnixNano()
 
-	confirmed, err := m.downloads.ConfirmArtifactLink(ctx, create(fmt.Sprintf("ctl-confirm-%d", suffix)))
+	confirmed, _, err := m.downloads.ConfirmArtifactLink(ctx, create(fmt.Sprintf("ctl-confirm-%d", suffix)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,4 +411,183 @@ func linkRecoveryDownload(t *testing.T, pool *pgxpool.Pool, fileID int, artifact
 		_, _ = pool.Exec(ctx, `DELETE FROM downloads WHERE id = $1`, downloadID)
 		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
 	})
+}
+
+// requesterDownloadID returns the id of the download seedPreparationRequester
+// linked for userID.
+func requesterDownloadID(t *testing.T, pool *pgxpool.Pool, userID int) string {
+	t.Helper()
+	var id string
+	if err := pool.QueryRow(context.Background(), `SELECT id FROM downloads WHERE user_id = $1`, userID).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func TestDeletingTheLastDownloadStopsItsPreparationDB(t *testing.T) {
+	repo, pool, fileID := newArtifactTestRepo(t)
+	ctx := context.Background()
+	m := &ArtifactManager{repo: repo, downloads: NewRepository(pool), owner: "api-test"}
+	svc := &Service{repo: m.downloads, artifacts: m}
+	ensure := func(hash string) string {
+		t.Helper()
+		row, _, err := repo.EnsureQueued(ctx, newArtifact(t, fileID, hash))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return row.ID
+	}
+	status := func(id string) string {
+		t.Helper()
+		var s string
+		if err := pool.QueryRow(ctx, `SELECT status FROM download_artifacts WHERE id = $1`, id).Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	deleteRequester := func(userID int, deviceID string) {
+		t.Helper()
+		if err := svc.Delete(ctx, userID, "profile-prep", deviceID, requesterDownloadID(t, pool, userID), catalog.AccessFilter{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	running := ensure("hash-abandon-running")
+	if _, err := pool.Exec(ctx, `UPDATE download_artifacts SET status = 'running', attempts = 1,
+		lease_owner = 'api-test', lease_expires_at = now() + interval '1 minute' WHERE id = $1`, running); err != nil {
+		t.Fatal(err)
+	}
+	encodeCtx, stopEncode := context.WithCancel(ctx)
+	defer stopEncode()
+	untrack := m.trackLocalAttempt(running, stopEncode)
+	defer untrack()
+	runningUser, runningDevice := seedPreparationRequester(t, pool, fileID, running, StatusPreparing)
+
+	queued := ensure("hash-abandon-queued")
+	queuedUser, queuedDevice := seedPreparationRequester(t, pool, fileID, queued, StatusPreparing)
+
+	shared := ensure("hash-abandon-shared")
+	sharedUser, sharedDevice := seedPreparationRequester(t, pool, fileID, shared, StatusPreparing)
+	linkRecoveryDownload(t, pool, fileID, shared, StatusPreparing)
+
+	// Deleting the only download of a running job stops its encode.
+	deleteRequester(runningUser, runningDevice)
+	if encodeCtx.Err() == nil {
+		t.Fatal("the encode of a job no download needs kept running")
+	}
+	if got := status(running); got != ArtifactExpired {
+		t.Fatalf("running job after its last download was deleted = %q, want expired", got)
+	}
+	if ok, err := repo.Heartbeat(ctx, running, "api-test", time.Minute); err != nil || ok {
+		t.Fatalf("Heartbeat of the stopped job = (%v, %v), want fenced", ok, err)
+	}
+
+	// A queued job no download needs is never started.
+	deleteRequester(queuedUser, queuedDevice)
+	if got := status(queued); got != ArtifactExpired {
+		t.Fatalf("queued job after its last download was deleted = %q, want expired", got)
+	}
+
+	// A job another download still waits on keeps preparing.
+	deleteRequester(sharedUser, sharedDevice)
+	if got := status(shared); got != ArtifactQueued {
+		t.Fatalf("shared job after one of its downloads was deleted = %q, want queued", got)
+	}
+
+	// A create that read the queued job before the delete stopped it links a
+	// new download afterwards; confirming that link prepares the job again.
+	var userID int
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role, download_allowed) VALUES ($1, 'user', true) RETURNING id`,
+		fmt.Sprintf("abandon-late-%d", time.Now().UnixNano())).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	late := &Download{
+		ID: fmt.Sprintf("abandon-late-%d", time.Now().UnixNano()), UserID: userID, MediaFileID: fileID,
+		ContentID: fileContentID(t, pool, fileID), Kind: KindQueued, Status: StatusPreparing,
+		Format: FormatTranscode, ArtifactID: queued, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	if err := m.downloads.Create(ctx, late); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM downloads WHERE id = $1`, late.ID)
+		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
+	})
+	confirmed, requeued, err := m.downloads.ConfirmArtifactLink(ctx, late)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !requeued || confirmed.Status != StatusPreparing || status(queued) != ArtifactQueued {
+		t.Fatalf("late link = requeued %v, download %q, job %q; want the job queued again for a preparing download",
+			requeued, confirmed.Status, status(queued))
+	}
+}
+
+func TestStaleAbandonedPreparationsAreRetiredNotClaimedDB(t *testing.T) {
+	repo, pool, fileID := newArtifactTestRepo(t)
+	ctx := context.Background()
+	m := &ArtifactManager{repo: repo, downloads: NewRepository(pool), owner: "api-test"}
+	ensure := func(hash, set string) string {
+		t.Helper()
+		row, _, err := repo.EnsureQueued(ctx, newArtifact(t, fileID, hash))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `UPDATE download_artifacts SET last_used_at = now() - interval '1 hour'`+set+` WHERE id = $1`, row.ID); err != nil {
+			t.Fatal(err)
+		}
+		return row.ID
+	}
+	status := func(id string) string {
+		t.Helper()
+		var s string
+		if err := pool.QueryRow(ctx, `SELECT status FROM download_artifacts WHERE id = $1`, id).Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	// Jobs whose downloads were removed by a path that did not stop them, or
+	// before this check existed: one queued, one whose worker died mid-encode.
+	orphanQueued := ensure("hash-stale-orphan-queued", "")
+	orphanRunning := ensure("hash-stale-orphan-running",
+		`, status = 'audio_v2_running', audio_recipe_version = '4', attempts = 1, lease_owner = 'gone', lease_expires_at = now() - interval '1 minute'`)
+	needed := ensure("hash-stale-needed", "")
+	linkRecoveryDownload(t, pool, fileID, needed, StatusPreparing)
+	// A job a create queued moments ago, before inserting its download.
+	fresh, _, err := repo.EnsureQueued(ctx, newArtifact(t, fileID, "hash-stale-fresh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// No worker starts an abandoned job.
+	claimed := map[string]bool{}
+	for {
+		claim, err := repo.ClaimNext(ctx, "worker-drain", time.Minute)
+		if errors.Is(err, ErrNoArtifactJob) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		claimed[claim.ID] = true
+		if _, err := pool.Exec(ctx, `UPDATE download_artifacts SET status = 'failed', lease_owner = NULL WHERE id = $1`, claim.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if claimed[orphanQueued] || claimed[orphanRunning] || !claimed[needed] || !claimed[fresh.ID] {
+		t.Fatalf("claimed %v; want the needed and the fresh job, not the abandoned ones", claimed)
+	}
+
+	// The preparation run retires them.
+	if _, err := pool.Exec(ctx, `UPDATE download_artifacts SET status = 'queued' WHERE id = ANY($1)`, []string{needed, fresh.ID}); err != nil {
+		t.Fatal(err)
+	}
+	m.recoverQueueState(ctx)
+	for id, want := range map[string]string{
+		orphanQueued: ArtifactExpired, orphanRunning: ArtifactExpired, needed: ArtifactQueued, fresh.ID: ArtifactQueued,
+	} {
+		if got := status(id); got != want {
+			t.Fatalf("job %s after the preparation run = %q, want %q", id, got, want)
+		}
+	}
 }

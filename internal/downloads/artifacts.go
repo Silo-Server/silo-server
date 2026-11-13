@@ -657,6 +657,13 @@ func (m *ArtifactManager) recoverQueueState(ctx context.Context) {
 			changed[d.ArtifactID] = struct{}{}
 		}
 	}
+	// Retire jobs no download needs before anything claims them. A create
+	// that links one meanwhile is repaired by the requeue below.
+	if retired, err := m.repo.RetireStaleAbandonedPreparations(ctx); err != nil {
+		slog.WarnContext(ctx, "retiring preparations no download needs failed", "component", "downloads", "error", err)
+	} else {
+		m.announceRetired(ctx, retired)
+	}
 	// A replica that predates expiry links new downloads to an expired row
 	// as if it were queued. Requeue those so they are prepared.
 	if requeued, err := m.repo.RequeueExpiredWithWaiters(ctx); err != nil {

@@ -149,7 +149,8 @@ func (r *ArtifactRepository) GetByKey(ctx context.Context, mediaFileID int, form
 
 // ClaimNext atomically claims one runnable job: a queued, unpaused row whose
 // backoff has elapsed, or a running row whose lease has expired (lease
-// stealing). A queued row can carry an unowned lease_expires_at after a pause
+// stealing). A job no in-flight download needs is skipped once it is older
+// than abandonedPreparationGrace; the preparation run retires it. A queued row can carry an unowned lease_expires_at after a pause
 // took it from a worker that may still be running; it waits that out. FOR UPDATE
 // SKIP LOCKED makes concurrent workers (and nodes) safe without double-encoding.
 // Returns ErrNoArtifactJob when nothing is claimable.
@@ -172,16 +173,17 @@ func (r *ArtifactRepository) ClaimNext(ctx context.Context, owner string, lease 
 		     progress_encoded_seconds = NULL, progress_duration_seconds = NULL, progress_speed = NULL,
 		     progress_updated_at = NULL, progress_unavailable = false
 		 WHERE id = (
-		     SELECT id FROM download_artifacts
-		     WHERE (status IN ('queued', 'tone_map_queued', 'audio_v2_queued', 'tracks_v1_queued') AND paused_at IS NULL
-		            AND (next_retry_at IS NULL OR next_retry_at <= now()) AND (lease_expires_at IS NULL OR lease_expires_at <= now()))
-		        OR (status IN ('running', 'tone_map_running', 'audio_v2_running', 'tracks_v1_running') AND lease_expires_at < now())
+		     SELECT id FROM download_artifacts a
+		     WHERE ((status IN ('queued', 'tone_map_queued', 'audio_v2_queued', 'tracks_v1_queued') AND paused_at IS NULL
+		             AND (next_retry_at IS NULL OR next_retry_at <= now()) AND (lease_expires_at IS NULL OR lease_expires_at <= now()))
+		            OR (status IN ('running', 'tone_map_running', 'audio_v2_running', 'tracks_v1_running') AND lease_expires_at < now()))
+		       AND NOT (a.last_used_at < now() - make_interval(secs => $3) AND `+abandonedPreparationPredicate+`)
 		     ORDER BY created_at, id
 		     LIMIT 1
 		     FOR UPDATE SKIP LOCKED
 		 )
 		 RETURNING `+artifactColumns,
-		owner, leaseSecs,
+		owner, leaseSecs, abandonedPreparationGrace.Seconds(),
 	))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
