@@ -147,10 +147,11 @@ func clearChildEditsSQL(table string, columns []childLockedColumn, edited []stri
 		}
 		return fmt.Sprintf("%s = %s", c.column, c.empty)
 	})
+	parts := []string{assignments}
 	for _, column := range edited {
-		assignments += ", " + column + " = " + sqlEmptyText
+		parts = append(parts, column+" = "+sqlEmptyText)
 	}
-	return fmt.Sprintf(`UPDATE %s SET %s, locked_fields = '{}', updated_at = NOW()`, table, assignments)
+	return fmt.Sprintf(`UPDATE %s SET %s, locked_fields = '{}', updated_at = NOW()`, table, strings.Join(parts, ", "))
 }
 
 // ResetEdits empties a season's lockable fields and title details and removes
