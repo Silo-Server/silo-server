@@ -22,7 +22,6 @@ interface VersionDropdownProps {
 interface EditionOption {
   id: string;
   label: string;
-
   defaultVersion: FileVersion;
   versions: FileVersion[];
 }
@@ -123,8 +122,7 @@ function VersionDropdown({
               <Disc3 className="size-3.5" />
               {t("web.detail.versions.versionButton")}
               <span className="text-muted-foreground max-w-44 truncate text-[0.6875rem] font-normal sm:max-w-64">
-                {!versionPicked && `${t("web.player.quality.auto")} · `}
-                {activeVersion ? buildVersionTriggerSummary(t, activeVersion) : ""}
+                {activeVersion ? buildVersionTriggerSummary(t, activeVersion, versionPicked) : ""}
               </span>
               <ChevronDown className="text-muted-foreground size-3" />
             </Button>
@@ -192,12 +190,12 @@ function VersionDropdown({
 
 export default memo(VersionDropdown);
 
-function buildVersionTriggerSummary(t: Translate, version: FileVersion): string {
-  return (
+function buildVersionTriggerSummary(t: Translate, version: FileVersion, picked: boolean): string {
+  const summary =
     buildQualitySummary(version) ||
     buildDetailLine(version) ||
-    t("web.detail.versions.fileIdFallback", { id: version.file_id })
-  );
+    t("web.detail.versions.fileIdFallback", { id: version.file_id });
+  return picked ? summary : [t("web.player.quality.auto"), summary].join(" · ");
 }
 
 function buildEditionOptions(
