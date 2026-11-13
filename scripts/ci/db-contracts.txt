@@ -53,6 +53,7 @@
 ./internal/scanner TestScanKeepsFileRowAcrossRenameDB
 ./internal/scanner TestMatchLinkRefusedAfterRetitleDB
 ./internal/metadata TestSkeletonUndoFollowsTheLinkDB
+./internal/metadata TestEpisodeLinkFollowsSameTitleMoveDB
 ./internal/scanner TestScanIndexesFileWithNonUTF8Name
 ./migrations TestScanRunForeignKeysHaveLeadingIndexesDB
 

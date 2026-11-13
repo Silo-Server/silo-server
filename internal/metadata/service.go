@@ -7068,15 +7068,11 @@ func (s *MetadataService) linkSeriesFilesToEpisodesWithOptions(ctx context.Conte
 			}
 		}
 
-		if err := linker.UpdateEpisodeLink(ctx, file.ID, file.FilePath, episode.ContentID, seasonNum, episodeNum); errors.Is(err, scanner.ErrFileMoved) {
-			// A scan moved the file since it was listed; when that took it to
-			// another title its links were cleared and its rematch links it.
-			slog.InfoContext(ctx, "metadata: file moved before its episode link; leaving it to its rematch", "component", "metadata",
-				"series_id", seriesID,
-				"file_id", file.ID,
-				"file_path", file.FilePath,
-				"episode_id", episode.ContentID)
-		} else if err != nil {
+		err := linker.UpdateEpisodeLink(ctx, file.ID, file.FilePath, episode.ContentID, seasonNum, episodeNum)
+		if errors.Is(err, scanner.ErrFileMoved) {
+			err = s.linkMovedEpisodeFile(ctx, linker, seriesID, file, hint, episode.ContentID, seasonNum, episodeNum, rootsByFolder[file.MediaFolderID]...)
+		}
+		if err != nil {
 			slog.WarnContext(ctx, "metadata: failed to link file to episode", "component", "metadata",
 				"series_id", seriesID,
 				"file_id", file.ID,
@@ -7094,6 +7090,46 @@ func (s *MetadataService) linkSeriesFilesToEpisodesWithOptions(ctx context.Conte
 			"example_air_date", exampleAmbiguousAirDate)
 	}
 	return nil
+}
+
+// linkMovedEpisodeFile handles an episode link refused because a scan moved
+// the file after the linker listed it. A move to another title cleared the
+// row's links and queued its rematch, so it is left alone. A move within the
+// title (RelinkMovedFile) kept the series link, and with it the series queue
+// has nothing to queue, so the link is retried once at the row's current path
+// when the row is present, still linked to seriesID with no episode, and that
+// path names the same episode the linker resolved. The retry is fenced like
+// the first write; a row that moves again is left for the next linker run.
+func (s *MetadataService) linkMovedEpisodeFile(ctx context.Context, linker EpisodeLinker, seriesID string, listed *models.MediaFile, hint episodeLinkHint, episodeID string, seasonNum, episodeNum int, libraryRoots ...string) error {
+	reloader, ok := linker.(interface {
+		GetByID(ctx context.Context, id int) (*models.MediaFile, error)
+	})
+	if !ok {
+		return nil
+	}
+	current, err := reloader.GetByID(ctx, listed.ID)
+	if errors.Is(err, scanner.ErrFileNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("reloading moved file: %w", err)
+	}
+	if current == nil || current.MissingSince != nil || current.ContentID != seriesID || current.EpisodeID != "" ||
+		parseEpisodeLinkHint(current, libraryRoots...) != hint ||
+		(hint.airDate == "" && !hint.seasonKnown &&
+			extractEpisodeMatchTitle(current.FilePath, libraryRoots...) != extractEpisodeMatchTitle(listed.FilePath, libraryRoots...)) {
+		slog.InfoContext(ctx, "metadata: file moved before its episode link; leaving it to its rematch", "component", "metadata",
+			"series_id", seriesID,
+			"file_id", listed.ID,
+			"file_path", listed.FilePath,
+			"episode_id", episodeID)
+		return nil
+	}
+	err = linker.UpdateEpisodeLink(ctx, current.ID, current.FilePath, episodeID, seasonNum, episodeNum)
+	if errors.Is(err, scanner.ErrFileMoved) {
+		return nil
+	}
+	return err
 }
 
 // selectAirDateEpisodeCandidate picks the episode a by-date file belongs to

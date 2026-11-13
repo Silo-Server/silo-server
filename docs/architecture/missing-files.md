@@ -184,9 +184,12 @@ What the new path says about the title decides the row's links:
   link fails, the undo (`FileRepository.UnlinkContentID`) is keyed on the
   link instead of the path: it clears the row while it still carries the
   skeleton, even if a same-title move changed its path, and leaves a link
-  another writer put there. The episode linker skips the file and
-  goes on with the series' other files, since the retitled row's rematch
-  links it. The fence is part of the `UPDATE`, which waits on the retitle's
+  another writer put there. When the episode linker's write is refused it
+  reloads the row: a retitled row has no series link and is left for its
+  rematch, but a row moved within its title (`RelinkMovedFile`) keeps the
+  series link, so the series queue queues nothing for it, and the linker
+  retries once at the row's current path when that path names the same
+  episode. The fence is part of the `UPDATE`, which waits on the retitle's
   row lock, so it holds between API servers too. Writes keyed by the row's
   current columns (`UpdateContentIDByObservedRootPath`,
   `BulkLinkEpisodesBySeries`, group relinks) need no fence: a retitled row
