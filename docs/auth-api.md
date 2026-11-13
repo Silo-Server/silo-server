@@ -213,17 +213,27 @@ because those clients cannot run the change; the account signs in to Silo first.
 
 An administrator can issue a single-use link that lets the account holder choose a
 new password (see [administrator accounts](admin-users-api.md#passwords)). The link
-opens `/reset-password/{token}` in the web client, which uses two public operations:
+is `/reset-password#{token}`: the token is the URL fragment, which a browser never
+sends to the server or in a `Referer` header, so reverse proxies in front of Silo do
+not log it. The web client takes the token out of the address before it renders and
+uses two public operations, which carry it in the request body:
 
-- `GET /password-resets/{token}` returns `username`, `server_name`, and `expires_at`.
-- `POST /password-resets/{token}/complete` with `{ "password": "..." }` sets the new
-  password and returns 200.
+- `POST /password-resets/lookup` (`lookupPasswordResetLink`) with `{ "token": "..." }`
+  returns `username`, `server_name`, and `expires_at`.
+- `POST /password-resets/complete` (`completePasswordResetLink`) with
+  `{ "token": "...", "password": "..." }` sets the new password and returns 200.
+
+The earlier path forms, `GET /password-resets/{token}` (`lookupPasswordReset`) and
+`POST /password-resets/{token}/complete` (`completePasswordReset`), still answer the
+same way but are deprecated, because a token in the path reaches proxy access logs.
+They send the `Deprecation` and `Link` headers and will be removed before `/api/v2`
+locks. A link issued in the old `/reset-password/{token}` form still opens.
 
 Every unusable link returns the same `404 not_found`, whether it is unknown, expired,
 used, replaced, or outdated by a password or recovery email change, or its account
 is disabled. Changing only the email's letter case preserves the link.
 Invalid passwords return `422 validation_failed` at `body.password` and leave the link
-unspent. Both operations spend the `password_reset` rate-limit budget, 20 requests per
+unspent. While password resets are not configured, every link operation returns `409`. Both operations spend the `password_reset` rate-limit budget, 20 requests per
 minute per client IP by default.
 
 Completing the reset spends the link, sets the password, clears a pending temporary
@@ -257,7 +267,7 @@ client IP by default).
 
 The server emails a link only to an enabled account that signs in with a local
 password and has a valid email address. The link opens the same
-`/reset-password/{token}` screen as an administrator's link and expires after an
+`/reset-password#{token}` screen as an administrator's link and expires after an
 hour. An account gets at most one requested link every five minutes. A requested
 link replaces the account's earlier requested link, but never a live link an
 administrator issued; while one exists, requests send nothing.

@@ -5,8 +5,8 @@ export type PasswordResetLookup = components["schemas"]["PasswordResetLookup"];
 export type PasswordResetCompletion = components["schemas"]["PasswordResetCompletion"];
 
 export async function lookupPasswordReset(token: string, signal: AbortSignal) {
-  const result = await v2("GET /api/v2/password-resets/{token}", {
-    path: { token },
+  const result = await v2("POST /api/v2/password-resets/lookup", {
+    body: { token },
     signal,
     retryAuthentication: false,
   });
@@ -28,9 +28,8 @@ export async function completePasswordReset(
   password: string,
   signal: AbortSignal,
 ): Promise<PasswordResetCompletion> {
-  const result = await v2("POST /api/v2/password-resets/{token}/complete", {
-    path: { token },
-    body: { password },
+  const result = await v2("POST /api/v2/password-resets/complete", {
+    body: { token, password },
     signal,
     retryAuthentication: false,
   });

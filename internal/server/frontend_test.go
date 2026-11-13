@@ -21,7 +21,7 @@ func TestFrontendHandlerSetsSecurityHeadersOnSPAHTML(t *testing.T) {
 
 	handler := FrontendHandler()
 
-	for _, path := range []string{"/", "/index.html", "/library/ebooks"} {
+	for _, path := range []string{"/", "/index.html", "/library/ebooks", "/reset-password/old-form-token"} {
 		t.Run(path, func(t *testing.T) {
 			rr := httptest.NewRecorder()
 			handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
@@ -35,6 +35,11 @@ func TestFrontendHandlerSetsSecurityHeadersOnSPAHTML(t *testing.T) {
 			csp := rr.Header().Get("Content-Security-Policy")
 			if csp != frontendContentSecurityPolicy {
 				t.Fatalf("csp = %q", csp)
+			}
+			// A link in the old path form must not hand its token to every
+			// asset and API request as a Referer.
+			if got := rr.Header().Get("Referrer-Policy"); got != "strict-origin" {
+				t.Fatalf("referrer-policy = %q", got)
 			}
 			// The ebook-reader threat model depends on these directives; fail
 			// loudly if they are weakened.
