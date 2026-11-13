@@ -37,7 +37,10 @@ import DetailBreadcrumb from "./components/DetailBreadcrumb";
 import MediaInfoDialog from "./components/MediaInfoDialog";
 import SubtitleSearchDialog from "./components/SubtitleSearchDialog";
 import { sortByResolution } from "./components/VersionFlyout";
-import { selectDefaultPlaybackVariantVersion } from "./components/versionRankingUtils";
+import {
+  selectDefaultPlaybackVariantVersion,
+  selectedDownloadVersions,
+} from "./components/versionRankingUtils";
 import { resolveSelectedMediaSummary } from "./components/selectedMediaSummary";
 import { EpisodeCarouselSkeleton } from "./components/SectionSkeletons";
 import {
@@ -51,19 +54,26 @@ import {
   canEditMarkers as canEditMarkersForUser,
 } from "@/lib/permissions";
 import { isEpisodeUnwatched } from "@/lib/episodeSpoilers";
+import { buildItemHref } from "@/lib/mediaNavigation";
 import { formatDate } from "@/lib/datetime";
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
-import { useQualityPreference } from "@/hooks/queries/qualityPreference";
+import { useQualityPreferenceState } from "@/hooks/queries/qualityPreference";
 import { hasMachineTranslation } from "./components/machineTranslation";
+import { useT } from "@/i18n";
 
 export default function EpisodeContent({
   item,
   libraryId,
 }: {
   item: ItemDetail & { type: "episode" };
-  /** The page's ?libraryId= scope; the series overview fallback resolves its language in it. */
+  /**
+   * The page's ?libraryId= scope. Series, season and episode links keep it;
+   * Play does not, because playback always sees every version. The series
+   * overview fallback resolves its language in it.
+   */
   libraryId?: number;
 }) {
+  const t = useT();
   const navigate = useNavigate();
   const location = useLocation();
   useAmbientColor(item.backdrop_thumbhash);
@@ -73,7 +83,9 @@ export default function EpisodeContent({
   // The resolution cap comes from the settings contract, where the quality
   // picker writes; the profile column it falls back to is only the pre-cutover
   // choice, since that picker no longer mirrors into it.
-  const qualityPreference = useQualityPreference(currentProfile?.quality_preference);
+  const { preference: qualityPreference, settled: qualitySettled } = useQualityPreferenceState(
+    currentProfile?.quality_preference,
+  );
   const canCurateMetadata = canCurateMetadataForUser(user, currentProfile);
   const canEditMarkers = canEditMarkersForUser(user, currentProfile);
   const [editOpen, setEditOpen] = useState(false);
@@ -118,6 +130,7 @@ export default function EpisodeContent({
     hideOverviews &&
     isEpisodeUnwatched(item.user_data) &&
     revealedOverviewId !== item.content_id;
+  const [selectedEditionKey, setSelectedEditionKey] = useState<string | undefined>(undefined);
   const defaultSelectedVersion = useMemo(
     () =>
       selectDefaultPlaybackVariantVersion(
@@ -125,15 +138,9 @@ export default function EpisodeContent({
         item.playback_variants,
         userData,
         qualityPreference,
-        item.effective_version_edition_key,
+        selectedEditionKey,
       ),
-    [
-      qualityPreference,
-      item.effective_version_edition_key,
-      item.playback_variants,
-      sortedVersions,
-      userData,
-    ],
+    [qualityPreference, selectedEditionKey, item.playback_variants, sortedVersions, userData],
   );
   const [manualSelectedFileId, setManualSelectedFileId] = useState<number | null>(null);
   const pickedVersion = useMemo(
@@ -165,22 +172,44 @@ export default function EpisodeContent({
 
   // Reset selection when navigating to a different episode (adjust state during render).
   const [prevContentId, setPrevContentId] = useState(item.content_id);
+  const [prevSelectedFileId, setPrevSelectedFileId] = useState(selectedVersion?.file_id);
   if (prevContentId !== item.content_id) {
     setPrevContentId(item.content_id);
     setManualSelectedFileId(null);
+    setSelectedEditionKey(undefined);
+    setSubtitleSelectionMode("auto");
+    setExplicitSubtitleSelection(null);
+  } else if (selectedEditionKey === undefined && qualitySettled && defaultSelectedVersion) {
+    setSelectedEditionKey(defaultSelectedVersion.edition_key ?? "");
+  }
+  if (prevSelectedFileId !== selectedVersion?.file_id) {
+    setPrevSelectedFileId(selectedVersion?.file_id);
     setSubtitleSelectionMode("auto");
     setExplicitSubtitleSelection(null);
   }
 
   const handleSelectVersion = useCallback(
-    (version: FileVersion) => {
-      setManualSelectedFileId(version.file_id);
+    (version: FileVersion | null) => {
+      setManualSelectedFileId(version?.file_id ?? null);
+      if (version) setSelectedEditionKey(version.edition_key ?? "");
       // Track indexes belong to a file, so another version starts from Auto.
       clearAudioSelection();
       setSubtitleSelectionMode("auto");
       setExplicitSubtitleSelection(null);
     },
     [clearAudioSelection],
+  );
+
+  const handleSelectEdition = useCallback(
+    (key: string) => {
+      setSelectedEditionKey(key);
+      handleSelectVersion(null);
+    },
+    [handleSelectVersion],
+  );
+  const downloadVersions = useMemo(
+    () => selectedDownloadVersions(selectedVersion, item.playback_variants, qualityPreference),
+    [selectedVersion, item.playback_variants, qualityPreference],
   );
 
   const handleSelectSubtitle = (selection: PrePlaySubtitleSelection) => {
@@ -237,7 +266,7 @@ export default function EpisodeContent({
         }
       : null;
   const navigationState = location.state as EpisodeNavigationState | null;
-  const primaryAction = resolveLeafPrimaryAction(item, "Play Episode");
+  const primaryAction = resolveLeafPrimaryAction(item, t("web.detail.actions.playEpisode"));
   const watchTogether = useDetailWatchTogether({
     item,
     target:
@@ -257,12 +286,12 @@ export default function EpisodeContent({
     initialSeasonNumber: item.season_number ?? undefined,
   });
   const restartHref =
-    primaryAction.label === "Resume" && (item.versions?.length ?? 0) > 0
+    primaryAction.resuming && (item.versions?.length ?? 0) > 0
       ? `/watch/${item.content_id}?restart=1`
       : undefined;
 
   const title = item.title ?? "";
-  const seriesTitle = item.series_title ?? "Series";
+  const seriesTitle = item.series_title ?? t("web.detail.hero.typeSeries");
   const seriesId = item.series_id;
   const seasonNum = item.season_number;
   const episodeNum = item.episode_number;
@@ -270,12 +299,14 @@ export default function EpisodeContent({
   const { data: currentSeason } = useSeasonDetail(
     siblingSeason?.seriesId,
     siblingSeason?.seasonNumber ?? -1,
+    libraryId,
   );
 
   // Sibling episodes now come from the season collection, not the current episode ID.
   const { data: episodesData, isLoading: siblingsLoading } = useSeasonEpisodes(
     siblingSeason?.seriesId,
     siblingSeason?.seasonNumber ?? -1,
+    libraryId,
   );
   const siblingEpisodes = episodesData?.episodes ?? [];
   const seasonLabel =
@@ -283,13 +314,13 @@ export default function EpisodeContent({
     (currentSeason
       ? getSeasonDisplayTitle(currentSeason)
       : seasonNum === 0
-        ? "Specials"
+        ? t("web.detail.seasons.specials")
         : seasonNum != null
-          ? `Season ${seasonNum}`
-          : "Season");
+          ? t("web.detail.seasons.numbered", { season: seasonNum })
+          : t("web.detail.seasons.seasonFallback"));
   const seasonHref =
     navigationState?.parentSeasonHref ??
-    (currentSeason ? `/item/${currentSeason.content_id}` : undefined);
+    (currentSeason ? buildItemHref({ contentId: currentSeason.content_id, libraryId }) : undefined);
   const episodeLinkState =
     seasonHref || seasonLabel
       ? {
@@ -300,13 +331,18 @@ export default function EpisodeContent({
 
   // Build breadcrumb segments
   const breadcrumbSegments = [
-    { label: seriesTitle, href: seriesId ? `/item/${seriesId}` : "/" },
+    {
+      label: seriesTitle,
+      href: seriesId ? buildItemHref({ contentId: seriesId, libraryId }) : "/",
+    },
   ] as Array<{ label: string; href?: string }>;
   if (seasonNum != null) {
     breadcrumbSegments.push({ label: seasonLabel, href: seasonHref });
   }
   if (episodeNum != null) {
-    breadcrumbSegments.push({ label: `Episode ${episodeNum}` });
+    breadcrumbSegments.push({
+      label: t("web.detail.episodes.numbered", { episode: episodeNum }),
+    });
   }
 
   return (
@@ -384,7 +420,9 @@ export default function EpisodeContent({
                         item,
                         mode,
                         onReplaced: (contentID) =>
-                          navigate(`/item/${contentID}`, { replace: true }),
+                          navigate(buildItemHref({ contentId: contentID, libraryId }), {
+                            replace: true,
+                          }),
                       })
                   : undefined
               }
@@ -405,16 +443,13 @@ export default function EpisodeContent({
               canEditMarkers={canEditMarkers}
               canManageTrickplay={canManageTrickplay}
               onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
-              onShowMediaInfo={
-                canCurateMetadata && (item.versions?.length ?? 0) > 0
-                  ? () => openMediaInfo()
-                  : undefined
-              }
+              onShowMediaInfo={(item.versions?.length ?? 0) > 0 ? () => openMediaInfo() : undefined}
               versions={item.versions ?? []}
               playbackVariants={item.playback_variants}
               selectedVersion={selectedVersion}
               versionPicked={pickedVersion != null}
               onSelectVersion={handleSelectVersion}
+              onSelectEdition={handleSelectEdition}
               onDownload={
                 user?.download_allowed && (item.versions ?? []).length > 0
                   ? () => setDownloadOpen(true)
@@ -442,17 +477,23 @@ export default function EpisodeContent({
         />
 
         {(siblingsLoading || siblingEpisodes.length > 1) && (
-          <section className="page-shell episode-detail-navigation" aria-label="More episodes">
+          <section
+            className="page-shell episode-detail-navigation"
+            aria-label={t("web.detail.episodes.moreEpisodesRegion")}
+          >
             {/* More Episodes carousel — most useful, so show first */}
             {siblingsLoading ? (
               <EpisodeCarouselSkeleton />
             ) : (
               <div>
-                <h2 className="mb-5 text-xl font-semibold tracking-tight">More Episodes</h2>
+                <h2 className="mb-5 text-xl font-semibold tracking-tight">
+                  {t("web.detail.episodes.moreEpisodes")}
+                </h2>
                 <EpisodeCarousel
                   episodes={siblingEpisodes}
                   currentEpisodeNumber={episodeNum ?? -1}
                   episodeLinkState={episodeLinkState}
+                  libraryId={libraryId}
                 />
               </div>
             )}
@@ -463,7 +504,7 @@ export default function EpisodeContent({
       <div className="page-shell detail-supporting-content space-y-12 py-10 sm:space-y-14">
         {canCurateMetadata && (
           <MediaLocations
-            title="Media locations"
+            title={t("web.detail.sections.mediaLocations")}
             versions={item.versions}
             onShowMediaInfo={openMediaInfo}
           />
@@ -471,7 +512,9 @@ export default function EpisodeContent({
 
         {item.cast && item.cast.length > 0 && (
           <div>
-            <h2 className="mb-5 text-xl font-semibold tracking-tight">Cast</h2>
+            <h2 className="mb-5 text-xl font-semibold tracking-tight">
+              {t("web.detail.sections.cast")}
+            </h2>
             <CastCarousel cast={item.cast} prefetchPeople />
           </div>
         )}
@@ -484,7 +527,7 @@ export default function EpisodeContent({
       <DownloadVersionPicker
         open={downloadOpen}
         onOpenChange={setDownloadOpen}
-        versions={item.versions ?? []}
+        versions={downloadVersions}
         title={title}
       />
       <SubtitleSearchDialog
@@ -493,15 +536,13 @@ export default function EpisodeContent({
         version={selectedVersion}
         title={title}
       />
-      {canCurateMetadata && (
-        <MediaInfoDialog
-          open={mediaInfoOpen}
-          onOpenChange={setMediaInfoOpen}
-          versions={item.versions ?? []}
-          title={title}
-          initialFileId={mediaInfoFileId}
-        />
-      )}
+      <MediaInfoDialog
+        open={mediaInfoOpen}
+        onOpenChange={setMediaInfoOpen}
+        versions={item.versions ?? []}
+        title={title}
+        initialFileId={mediaInfoFileId}
+      />
       {watchTogether.sheet}
     </div>
   );

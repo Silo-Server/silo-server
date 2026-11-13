@@ -5,8 +5,8 @@
 > replaces it (no assigned release date). See the
 > [scope decision](architecture/v1-scope.md#library-scope-books-deferred).
 
-The v2 reader progress operations share the existing reader stores and media
-authorization with the frozen v1 bridge. They require account authentication and
+The v2 reader progress operations use the reader stores and the shared media
+authorization. They require account authentication and
 a verified `X-Profile-Id`. Current item access is checked on reads; writes also
 check that the accessible ebook file belongs to the requested item.
 
@@ -40,9 +40,9 @@ and does not gain v2 retry guarantees.
 
 The progress request body is capped at 16 KiB; locations are limited to 8192
 characters. Invalid input returns a validation problem. Inaccessible files and
-files belonging to another item return not found. Reader config, annotations,
-and binary delivery migration are tracked separately; the progress capability
-does not advertise completion of those flows.
+files belonging to another item return not found. Reader configuration,
+annotations and ebook bytes are described below; the capability advertises each
+with its own field (`guarded_config`, `guarded_annotations`, `reader_files`).
 
 ## Reader configuration
 
@@ -56,9 +56,8 @@ current ETag. `If-None-Match`, when supplied, is evaluated after `If-Match`.
 The configuration object is client-owned, and the entire request is limited to
 256 KiB. The server does not interpret renderer-specific keys.
 
-The database locks the same configuration row that v1 writes. Concurrent first
-writes serialize; a failed guard leaves no persisted default. A legacy write
-invalidates the v2 validator. Clients should retain their validator while the
+The database locks the configuration row. Concurrent first writes serialize; a
+failed guard leaves no persisted default. Clients should retain their validator while the
 user edits and handle a conflict by reloading and reconciling, rather than
 retrying with an unconditional overwrite. The capability's `guarded_config`
 field advertises this contract.
@@ -108,11 +107,10 @@ Each annotation carries `etag`; create and edit also return the `ETag` header.
 `PATCH /api/v2/ebooks/{content_id}/annotations/{annotation_id}` and `DELETE`
 require this validator in `If-Match`. Missing validators return 428; stale
 validators return 412. Optional `If-None-Match` is evaluated second.
-Guards run under the same database row lock used by legacy edits.
+Guards run under a database row lock on the annotation.
 Successful deletion returns a bodyless 204; a missing annotation returns 404.
 
 PATCH omission retains a field, explicit null clears a string, and metadata null
 clears the client-owned object. The merged annotation must still have a valid
 kind and a CFI range or location. Create and edit requests are capped at 256 KiB.
 All operations check current item access before reaching scoped annotation storage.
-The frozen v1 routes retain their existing shapes and unguarded semantics.

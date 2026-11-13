@@ -23,9 +23,22 @@ import { normalizeQualityPreferenceV3 } from "@/player/protocol-v3";
  * column still holds the pre-cutover choice for anyone who has not re-picked.
  */
 export function useQualityPreference(fallback?: string | null): string | null {
-  const { data } = useEffectiveSettings({ keys: [SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY] });
-  const resolved = data?.[SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY]?.value;
+  return useQualityPreferenceState(fallback).preference;
+}
 
-  if (typeof resolved === "string") return normalizeQualityPreferenceV3(resolved);
-  return fallback ? normalizeQualityPreferenceV3(fallback) : null;
+/** Detail pages initialize their edition after the first successful settings read. */
+export function useQualityPreferenceState(fallback?: string | null) {
+  const { data } = useEffectiveSettings({
+    keys: [SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY],
+  });
+  const resolved = data?.[SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY]?.value;
+  return {
+    preference:
+      typeof resolved === "string"
+        ? normalizeQualityPreferenceV3(resolved)
+        : fallback
+          ? normalizeQualityPreferenceV3(fallback)
+          : null,
+    settled: data != null,
+  };
 }

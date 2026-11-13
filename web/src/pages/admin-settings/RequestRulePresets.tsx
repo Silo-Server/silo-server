@@ -4,6 +4,7 @@ import { isRequestEditorConflict, requestValidationErrors } from "@/api/v2/admin
 import { Button } from "@/components/ui/button";
 import { DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useCreateRequestRoute } from "@/hooks/queries/admin/requests";
+import { useT } from "@/i18n";
 import { ChoiceCard } from "@/pages/admin/autoscan/ChoiceCard";
 
 import { RouteDestinationEditor } from "./RequestRouteFields";
@@ -46,6 +47,7 @@ export function AddRuleFlow({
   /** Called after an add (with the new rule's ID) and on cancel. */
   onDone: (addedId?: string) => void;
 }) {
+  const t = useT();
   const [picked, setPicked] = useState<RulePresetId | null>(null);
   if (picked) {
     return (
@@ -63,8 +65,10 @@ export function AddRuleFlow({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Add a rule</DialogTitle>
-        <DialogDescription>Start from a common rule or build your own.</DialogDescription>
+        <DialogTitle>{t("web.admin.settings.requests.presets.title")}</DialogTitle>
+        <DialogDescription>
+          {t("web.admin.settings.requests.presets.description")}
+        </DialogDescription>
       </DialogHeader>
       <div className="grid gap-2 sm:grid-cols-2">
         {RULE_PRESET_IDS.map((id) => {
@@ -74,22 +78,24 @@ export function AddRuleFlow({
               key={id}
               title={preset.name}
               description={preset.description}
-              badge={inUse.has(id) ? "Already added" : undefined}
+              badge={
+                inUse.has(id) ? t("web.admin.settings.requests.presets.alreadyAdded") : undefined
+              }
               selected={false}
               onSelect={() => setPicked(id)}
             />
           );
         })}
         <ChoiceCard
-          title="Custom rule"
-          description="Choose your own conditions."
+          title={t("web.admin.settings.requests.presets.custom")}
+          description={t("web.admin.settings.requests.presets.customDescription")}
           selected={false}
           onSelect={onCustom}
         />
       </div>
       <DialogFooter>
         <Button type="button" variant="outline" onClick={() => onDone()}>
-          Cancel
+          {t("common.cancel")}
         </Button>
       </DialogFooter>
     </>
@@ -112,6 +118,7 @@ function PresetStep({
   onBack: () => void;
   onDone: (addedId?: string) => void;
 }) {
+  const t = useT();
   const { mediaType } = scope;
   const [rows, setRows] = useState<ConditionRow[]>(() => conditionRows(preset.conditions));
   const [changing, setChanging] = useState(false);
@@ -148,7 +155,7 @@ function PresetStep({
 
   function note(tier: Tier) {
     return setByPreset[tier] && choices[tier].dest.overrides.series_type === "anime"
-      ? "Series type: Anime (set by the Anime preset)"
+      ? t("web.admin.settings.requests.presets.animeSeriesTypeNote")
       : undefined;
   }
 
@@ -158,7 +165,7 @@ function PresetStep({
     createRoute.mutate(
       ruleBody(
         {
-          name: preset.name,
+          name: preset.ruleName,
           enabled: true,
           conditions: rowsToConditions(rows),
           hd: choices.hd.dest,
@@ -197,23 +204,29 @@ function PresetStep({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Where should {preset.noun} go?</DialogTitle>
+        <DialogTitle>
+          {t("web.admin.settings.requests.presets.whereTitle", { noun: preset.noun })}
+        </DialogTitle>
         {!changing && !conditionErrors ? (
           <DialogDescription>
-            Matches: {preset.matches}.{" "}
-            <Button
-              type="button"
-              variant="link"
-              size="xs"
-              className="h-auto p-0 align-baseline"
-              onClick={() => setChanging(true)}
-            >
-              Change
-            </Button>
+            {t("web.admin.settings.requests.presets.matches", {
+              matches: preset.matches,
+              change: (chunks) => (
+                <Button
+                  type="button"
+                  variant="link"
+                  size="xs"
+                  className="h-auto p-0 align-baseline"
+                  onClick={() => setChanging(true)}
+                >
+                  {chunks}
+                </Button>
+              ),
+            })}
           </DialogDescription>
         ) : (
           <DialogDescription>
-            Change which requests the rule takes, then where they go.
+            {t("web.admin.settings.requests.presets.changeDescription")}
           </DialogDescription>
         )}
       </DialogHeader>
@@ -264,14 +277,16 @@ function PresetStep({
 
       <DialogFooter className="gap-2 sm:justify-between">
         <Button type="button" variant="outline" onClick={onBack}>
-          Back
+          {t("common.back")}
         </Button>
         <Button
           type="button"
           onClick={add}
           disabled={createRoute.isPending || !choices.hd.dest.integration_id}
         >
-          {createRoute.isPending ? "Adding…" : "Add rule"}
+          {createRoute.isPending
+            ? t("web.admin.settings.requests.presets.adding")
+            : t("web.admin.settings.requests.shared.addRule")}
         </Button>
       </DialogFooter>
     </>

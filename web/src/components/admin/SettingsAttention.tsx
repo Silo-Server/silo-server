@@ -4,6 +4,7 @@ import { Link } from "react-router";
 import { isSettingsAttentionDismissible } from "@/hooks/admin/useSettingsAttentionDismissals";
 import type { SettingsHealthItem } from "@/hooks/admin/useSettingsHealth";
 import { adminSettingsHref } from "@/lib/adminSettingsSearch";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 /**
@@ -25,16 +26,17 @@ export function SettingsAttention({
   dismissDisabled?: boolean;
   className?: string;
 }) {
+  const t = useT();
   if (items.length === 0) return null;
 
   return (
     <section
-      aria-label="Needs attention"
+      aria-label={t("web.admin.settings.attention.title")}
       className={cn("border-warning/30 bg-warning/8 rounded-2xl border p-4", className)}
     >
       <p className="text-warning flex items-center gap-2 text-sm font-semibold">
         <TriangleAlert className="h-4 w-4" aria-hidden="true" />
-        Needs attention
+        {t("web.admin.settings.attention.title")}
       </p>
       <ul className="mt-3 grid list-none gap-2 sm:grid-cols-2 xl:grid-cols-3">
         {items.map((item) => {
@@ -46,12 +48,15 @@ export function SettingsAttention({
                 to={adminSettingsHref(item.action.page)}
                 className={cn(
                   "hover:bg-warning/10 focus-visible:ring-ring/60 border-warning/20 flex h-full items-start gap-3 rounded-xl border px-3 py-2.5 transition-colors focus-visible:ring-[3px] focus-visible:outline-none",
-                  dismissible && "pr-10",
+                  dismissible && "pe-10",
                 )}
               >
                 <span className="min-w-0 flex-1 text-sm leading-snug">
                   <span className="text-foreground block font-medium">
-                    {item.label} · {item.stateText}
+                    {t("web.admin.settings.attention.itemHeading", {
+                      label: item.label,
+                      state: item.stateText,
+                    })}
                   </span>
                   <span className="text-muted-foreground block text-xs">{item.detail}</span>
                 </span>
@@ -65,9 +70,9 @@ export function SettingsAttention({
                   type="button"
                   onClick={() => onDismiss(item)}
                   disabled={dismissDisabled}
-                  aria-label={`Hide ${item.label} notice`}
-                  title="Hide"
-                  className="text-muted-foreground hover:text-foreground hover:bg-warning/15 focus-visible:ring-ring/60 absolute top-2 right-2 inline-flex size-6 cursor-pointer items-center justify-center rounded-md transition-colors focus-visible:ring-[3px] focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+                  aria-label={t("web.admin.settings.attention.hideLabel", { label: item.label })}
+                  title={t("web.admin.settings.attention.hide")}
+                  className="text-muted-foreground hover:text-foreground hover:bg-warning/15 focus-visible:ring-ring/60 absolute end-2 top-2 inline-flex size-6 cursor-pointer items-center justify-center rounded-md transition-colors focus-visible:ring-[3px] focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
                 >
                   <X className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>

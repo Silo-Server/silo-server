@@ -1,0 +1,338 @@
+// @vitest-environment node
+
+import { describe, expect, it } from "vitest";
+
+import type {
+  RestoreAccount,
+  RestoreItem,
+  RestoreProfile,
+  RestoreSet,
+} from "@/api/v2/adminBackupRestore";
+
+import {
+  chooseItems,
+  chosenProfiles,
+  DEFAULT_DATA_TYPES,
+  indexItems,
+  itemKey,
+  profileKey,
+  requiredPrimary,
+  toggleKeys,
+  restorePlan,
+  selectionRequest,
+  unchooseItems,
+} from "./restoreModel";
+
+function item(overrides: Partial<RestoreItem> & Pick<RestoreItem, "id" | "kind">): RestoreItem {
+  return {
+    label: overrides.id,
+    status: "not_on_this_server",
+    selectable: true,
+    requires: [],
+    restart_required: false,
+    external_service: false,
+    missing_blobs: [],
+    ...overrides,
+  };
+}
+
+function account(overrides: Partial<RestoreAccount>): RestoreAccount {
+  return {
+    username: "user",
+    email: "",
+    role: "user",
+    admin: false,
+    match: "new",
+    target: "new",
+    policy_differences: [],
+    libraries_left_out: 0,
+    profile_room: 5,
+    profiles: [],
+    ...overrides,
+  };
+}
+
+function profile(overrides: Partial<RestoreProfile> & Pick<RestoreProfile, "id">): RestoreProfile {
+  return {
+    name: overrides.id,
+    status: "not_on_this_server",
+    selectable: true,
+    match: "new",
+    target: "new",
+    is_primary: false,
+    restricted: false,
+    libraries_left_out: 0,
+    no_library_access: false,
+    has_pin: false,
+    data_types: [],
+    ...overrides,
+  };
+}
+
+const SET = {
+  backup_id: "b",
+  digest: "d",
+  format_version: 1,
+  server_id: "s",
+  server_name: "Home",
+  silo_version: "1.0.0",
+  created_at: "2026-10-31T04:00:00Z",
+  same_server: true,
+  key_matches: true,
+  authenticated: true,
+  missing_blobs: [],
+  library_map: [],
+  never_restored_settings: [],
+  omitted: [],
+  sections: [
+    {
+      id: "libraries",
+      count: 3,
+      items: [
+        item({ id: "1", kind: "library", label: "Kids" }),
+        item({
+          id: "2",
+          kind: "library",
+          label: "Anime",
+          status: "folder_missing",
+          selectable: false,
+        }),
+        item({
+          id: "3",
+          kind: "library",
+          label: "Movies",
+          status: "on_this_server",
+          selectable: false,
+        }),
+      ],
+    },
+    {
+      id: "users",
+      count: 3,
+      items: [
+        item({
+          id: "account:1",
+          kind: "account",
+          label: "anna",
+          status: "differs",
+          account: account({
+            username: "anna",
+            match: "username_email",
+            target: "7",
+            local_id: "7",
+            profiles: [
+              profile({
+                id: "p1",
+                name: "Anna",
+                status: "differs",
+                match: "name",
+                target: "11",
+                data_types: [
+                  { id: "watch_history", count: 100 },
+                  { id: "ratings", count: 5 },
+                  { id: "preferences", count: 1 },
+                ],
+              }),
+              profile({ id: "p2", name: "Kids", data_types: [{ id: "favorites", count: 3 }] }),
+            ],
+          }),
+        }),
+        item({
+          id: "account:2",
+          kind: "account",
+          label: "ben",
+          account: account({
+            username: "ben",
+            profiles: [
+              profile({ id: "p3", name: "Ben", data_types: [{ id: "watch_history", count: 10 }] }),
+              profile({
+                id: "p4",
+                name: "Ben",
+                status: "ambiguous",
+                selectable: false,
+                reason: "ambiguous_profile",
+              }),
+            ],
+          }),
+        }),
+        item({
+          id: "account:3",
+          kind: "account",
+          label: "cara",
+          selectable: false,
+          reason: "policy_wider",
+          account: account({ username: "cara", profiles: [profile({ id: "p5", name: "Cara" })] }),
+        }),
+      ],
+    },
+    {
+      id: "collections",
+      count: 3,
+      items: [
+        item({
+          id: "collection:9",
+          kind: "collection",
+          label: "Cartoons",
+          requires: ["libraries:1"],
+          collection: { items: 12, missing_items: 12, unknown_items: 2 },
+        }),
+        item({
+          id: "collection:10",
+          kind: "collection",
+          label: "Shows",
+          requires: ["libraries:2"],
+          collection: { items: 4, missing_items: 4, unknown_items: 0 },
+        }),
+        item({
+          id: "collection:11",
+          kind: "collection",
+          label: "Favourites",
+          status: "differs",
+          collection: { items: 20, missing_items: 3, unknown_items: 0, local_id: "7" },
+        }),
+      ],
+    },
+    {
+      id: "home_sections",
+      count: 1,
+      items: [
+        item({
+          id: "section:5",
+          kind: "home_section",
+          label: "Saturday morning",
+          requires: ["collections:collection:9"],
+        }),
+      ],
+    },
+  ],
+} satisfies RestoreSet;
+
+const index = indexItems(SET);
+const [anna, ben, cara] = SET.sections[1]!.items;
+
+describe("choosing items", () => {
+  it("chooses the library a collection needs", () => {
+    const change = chooseItems(index, new Set(), ["collections:collection:9"]);
+    expect([...change.selection].sort()).toEqual(["collections:collection:9", "libraries:1"]);
+  });
+
+  it("chooses what a requirement itself requires", () => {
+    const change = chooseItems(index, new Set(), ["home_sections:section:5"]);
+    expect([...change.selection].sort()).toEqual([
+      "collections:collection:9",
+      "home_sections:section:5",
+      "libraries:1",
+    ]);
+    const unchosen = unchooseItems(index, change.selection, ["libraries:1"]);
+    expect(unchosen.selection.size).toBe(0);
+  });
+
+  it("refuses a collection whose library can't be restored", () => {
+    const change = chooseItems(index, new Set(), ["collections:collection:10"]);
+    expect(change.selection.size).toBe(0);
+  });
+
+  it("unchooses collections with the library they need", () => {
+    const chosen = chooseItems(index, new Set(), [
+      "collections:collection:9",
+      "collections:collection:11",
+    ]).selection;
+    const change = unchooseItems(index, chosen, ["libraries:1"]);
+    expect([...change.selection]).toEqual(["collections:collection:11"]);
+  });
+
+  it("sends item ids per section", () => {
+    const chosen = chooseItems(index, new Set(), ["collections:collection:9"]).selection;
+    expect(selectionRequest(SET, chosen, DEFAULT_DATA_TYPES)).toEqual({
+      libraries: ["1"],
+      plugins: [],
+      settings: [],
+      users: [],
+      collections: ["collection:9"],
+      home_sections: [],
+    });
+  });
+});
+
+describe("choosing accounts and profiles", () => {
+  it("chooses the account a profile belongs to", () => {
+    const change = chooseItems(index, new Set(), [profileKey("account:1", "p2")]);
+    expect([...change.selection].sort()).toEqual(["users:account:1", "users:account:1/profile:p2"]);
+  });
+
+  it("unchooses an account's profiles with it", () => {
+    const chosen = chooseItems(index, new Set(), toggleKeys("users", anna!)).selection;
+    expect(chosen.size).toBe(3);
+    expect(unchooseItems(index, chosen, ["users:account:1"]).selection.size).toBe(0);
+  });
+
+  it("chooses neither an account that can't be restored nor its profiles", () => {
+    expect(chooseItems(index, new Set(), toggleKeys("users", cara!)).selection.size).toBe(0);
+  });
+
+  it("sends each account and profile with the target the preview showed and its chosen data", () => {
+    const chosen = chooseItems(index, new Set(), [
+      ...toggleKeys("users", anna!),
+      ...toggleKeys("users", ben!),
+    ]).selection;
+    expect(selectionRequest(SET, chosen, DEFAULT_DATA_TYPES).users).toEqual([
+      {
+        account: "account:1",
+        target: "7",
+        profiles: [
+          { profile: "p1", target: "11", data_types: ["watch_history", "ratings"] },
+          { profile: "p2", target: "new", data_types: ["favorites"] },
+        ],
+      },
+      {
+        account: "account:2",
+        target: "new",
+        profiles: [{ profile: "p3", target: "new", data_types: ["watch_history"] }],
+      },
+    ]);
+  });
+});
+
+describe("users plan", () => {
+  it("says when the chosen data has nothing pending to merge", () => {
+    // Only the merged account, whose chosen types are all already here.
+    const settled = structuredClone(SET);
+    const settledAnna = settled.sections[1]!.items[0]!;
+    for (const profile of settledAnna.account!.profiles) {
+      profile.target = "11";
+      profile.data_types = profile.data_types.map((data) => ({ ...data, pending: 0 }));
+    }
+    const annaOnly = chooseItems(
+      indexItems(settled),
+      new Set(),
+      toggleKeys("users", settledAnna),
+    ).selection;
+    expect(restorePlan(settled, annaOnly, DEFAULT_DATA_TYPES)[0]?.sentences.at(-1)).toBe(
+      "Nothing to merge for the chosen data",
+    );
+  });
+});
+
+describe("a new account's primary profile", () => {
+  const accountItem = (target: string) =>
+    item({
+      id: "7",
+      kind: "account",
+      account: account({
+        target,
+        profiles: [profile({ id: "parent", is_primary: true }), profile({ id: "kid" })],
+      }),
+    });
+
+  it("is restored with any of its other profiles", () => {
+    const chosen = new Set([itemKey("users", "7"), profileKey("7", "kid")]);
+    expect(chosenProfiles(accountItem("new"), chosen).map((p) => p.id)).toEqual(["parent", "kid"]);
+    expect(requiredPrimary(accountItem("new"))?.id).toBe("parent");
+  });
+
+  it("is not required of an account that merges into one here", () => {
+    const chosen = new Set([itemKey("users", "7"), profileKey("7", "kid")]);
+    expect(requiredPrimary(accountItem("12"))).toBeUndefined();
+    expect(chosenProfiles(accountItem("12"), chosen).map((p) => p.id)).toEqual(["kid"]);
+  });
+});

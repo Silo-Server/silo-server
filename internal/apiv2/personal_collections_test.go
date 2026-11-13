@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -349,6 +350,34 @@ func TestCollectionProblemPreservesUnsupportedSource(t *testing.T) {
 	}
 }
 
+// Sync now answers a source that refused or did not answer with its reason,
+// and keeps the rest of a failed sync an internal error. The v1 route the
+// handler also serves keeps its 500 in both cases.
+func TestPersonalSyncProblem(t *testing.T) {
+	source := &usercollections.SourceError{Err: errors.New("mdblist request failed with status 404")}
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantType   string
+		wantDetail string
+	}{
+		{"source refused", (&handlers.APIError{Status: http.StatusInternalServerError, Code: "internal_error", Message: "Sync failed: " + source.Error()}).WithCause(source), http.StatusServiceUnavailable, TypeDependencyUnavailable.URI(), "Sync failed: mdblist request failed with status 404"},
+		{"other failure", (&handlers.APIError{Status: http.StatusInternalServerError, Code: "internal_error", Message: "Sync failed: connection reset"}).WithCause(errors.New("connection reset")), http.StatusInternalServerError, TypeInternalError.URI(), ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := personalSyncProblem(tt.err)
+			if p.Status != tt.wantStatus || p.Type != tt.wantType || (tt.wantDetail != "" && p.Detail != tt.wantDetail) {
+				t.Fatalf("problem = %#v, want status %d type %s detail %q", p, tt.wantStatus, tt.wantType, tt.wantDetail)
+			}
+			if got := p.headers.Get("Retry-After"); got != "" {
+				t.Fatalf("Retry-After = %q, want none", got)
+			}
+		})
+	}
+}
+
 func (f *fakePersonalCollections) PersonalCollectionEditor(_ context.Context, _ int, _ string, id string) (handlers.PersonalCollectionEditorView, error) {
 	return handlers.PersonalCollectionEditorView{Collection: fixtureCollectionView(), Revision: 1}, f.err
 }
@@ -405,3 +434,10 @@ func TestImportableCollectionTemplatesKeepsPersonalSources(t *testing.T) {
 		}
 	}
 }
+
+// The lifecycle operations find these methods by runtime assertion, so a
+// removed method would only show up as a 503; keep the check at compile time.
+var (
+	_ personalCollectionLifecycle       = (*handlers.CollectionHandler)(nil)
+	_ personalCollectionImportLifecycle = (*handlers.UserCollectionImportHandler)(nil)
+)

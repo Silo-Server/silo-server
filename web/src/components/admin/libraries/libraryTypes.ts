@@ -1,17 +1,82 @@
 import { BookHeadphones, BookMarked, BookOpen, Film, Layers, Podcast, Tv } from "lucide-react";
 
+import { t } from "@/i18n";
+
+// Each type's name is read when shown, in the interface language. The names are not admin
+// text: Settings > Libraries shows them to every profile.
 export const LIBRARY_TYPES = [
-  { value: "movies", label: "Movies", icon: Film },
-  { value: "series", label: "Series", icon: Tv },
-  { value: "mixed", label: "Mixed", icon: Layers },
-  { value: "audiobooks", label: "Audiobooks", icon: BookHeadphones },
-  { value: "ebooks", label: "Ebooks", icon: BookOpen },
-  { value: "manga", label: "Manga", icon: BookMarked },
-  { value: "podcasts", label: "Podcasts", icon: Podcast },
+  {
+    value: "movies",
+    icon: Film,
+    get label() {
+      return t("web.common.libraryType.movies");
+    },
+  },
+  {
+    value: "series",
+    icon: Tv,
+    get label() {
+      return t("web.common.libraryType.series");
+    },
+  },
+  {
+    value: "mixed",
+    icon: Layers,
+    get label() {
+      return t("web.common.libraryType.mixed");
+    },
+  },
+  {
+    value: "audiobooks",
+    icon: BookHeadphones,
+    get label() {
+      return t("web.common.libraryType.audiobooks");
+    },
+  },
+  {
+    value: "ebooks",
+    icon: BookOpen,
+    get label() {
+      return t("web.common.libraryType.ebooks");
+    },
+  },
+  {
+    value: "manga",
+    icon: BookMarked,
+    get label() {
+      return t("web.common.libraryType.manga");
+    },
+  },
+  {
+    value: "podcasts",
+    icon: Podcast,
+    get label() {
+      return t("web.common.libraryType.podcasts");
+    },
+  },
 ] as const;
 
+// Other spellings internal/librarykind accepts for each library type; the
+// server stores the type as free text.
+const LIBRARY_TYPE_ALIASES: Readonly<Record<string, string>> = {
+  movie: "movies",
+  tv: "series",
+  show: "series",
+  tvshows: "series",
+  audiobook: "audiobooks",
+  ebook: "ebooks",
+  podcast: "podcasts",
+};
+
+/** The library type a stored type string means, or undefined for an unknown type. */
+export function findLibraryType(type: string) {
+  const kind = type.trim().toLowerCase();
+  const value = LIBRARY_TYPE_ALIASES[kind] ?? kind;
+  return LIBRARY_TYPES.find((entry) => entry.value === value);
+}
+
 export function libraryTypeMeta(type: string) {
-  return LIBRARY_TYPES.find((t) => t.value === type) ?? LIBRARY_TYPES[0];
+  return findLibraryType(type) ?? LIBRARY_TYPES[0];
 }
 
 // Keep these aligned with the video scanner and intro-marker library filters.
@@ -46,4 +111,9 @@ export function librarySettingSupport(type: string) {
     // Box sets group movies, so only libraries that hold movies offer them.
     boxSets: ["movie", "movies", "mixed"].includes(kind),
   };
+}
+
+/** A stored library type's name in the interface language; an unknown type shows as stored. */
+export function libraryTypeLabel(type: string): string {
+  return findLibraryType(type)?.label ?? type;
 }

@@ -56,9 +56,23 @@ func deviceHeaderProblem(detail string) *Problem {
 		WithErrors(ProblemError{Location: locationDeviceHeader, Code: codeInvalid, Detail: detail})
 }
 
+// SignInDeviceHeaders declare the X-Silo-Device-* headers a sign-in operation
+// records on the login session it opens (withClientDevice). The id keeps the
+// 128-character bound the settings operations declare: auth.NewClientDevice
+// drops a longer id rather than truncating it, so an unbounded declaration
+// would let a sign-in succeed with no device id. Name and platform stay
+// unbounded and are clamped when recorded, so a long device name never
+// refuses a sign-in.
+type SignInDeviceHeaders struct {
+	SiloDeviceID       string `header:"X-Silo-Device-Id" maxLength:"128" doc:"The client's stable device identifier, recorded on the login session this sign-in opens" example:"8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"`
+	SiloDeviceName     string `header:"X-Silo-Device-Name" doc:"Optional device name recorded on the login session (first 120 characters)" example:"Living Room Apple TV"`
+	SiloDevicePlatform string `header:"X-Silo-Device-Platform" doc:"Optional platform recorded on the login session (first 40 characters)" example:"tvOS"`
+}
+
 // withClientDevice attaches the request's X-Silo-Device-* headers for the
 // login session a sign-in operation opens (auth.WithClientDevice). The id has
-// already passed rejectMalformedDeviceHeader.
+// already passed rejectMalformedDeviceHeader, and the operation declares the
+// headers through SignInDeviceHeaders.
 func withClientDevice(ctx context.Context) context.Context {
 	if r := requestFrom(ctx); r != nil {
 		return auth.WithClientDevice(ctx, r.Header)

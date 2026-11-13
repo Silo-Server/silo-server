@@ -1,0 +1,119 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+
+import { captureProfileRequestContext } from "@/api/client";
+import { captureAdminAuthority } from "@/api/v2/adminAuthority";
+import { getUploadRestoreSet, startUploadRestore } from "@/api/v2/adminBackupUpload";
+import {
+  cancelRestoreJob,
+  getRestoreJob,
+  getRestoreSet,
+  listRestoreJobs,
+  startRestore,
+  type RestoreSelection,
+} from "@/api/v2/adminBackupRestore";
+import { backupsRootKey } from "@/hooks/queries/admin/backups";
+import { adminKeys } from "@/hooks/queries/keys";
+
+/** How often a running restore is read again. */
+const RESTORE_POLL_MS = 2_000;
+
+/** What a restore reads: a backup of this server, or an uploaded restore set. */
+export interface RestoreSource {
+  kind: "backup" | "upload";
+  id: string;
+}
+
+function restoreRootKey() {
+  return [...backupsRootKey(), "restore"] as const;
+}
+
+/**
+ * The preview of a source's restore set against this server; none while
+ * `source` is null. `acceptUnauthenticated` opens a source this server can't
+ * verify (an upload, or a backup under another key), which the admin has
+ * confirmed.
+ */
+export function useRestoreSet(source: RestoreSource | null, acceptUnauthenticated = false) {
+  const context = captureProfileRequestContext();
+  return useQuery({
+    queryKey: [...restoreRootKey(), "set", source?.kind, source?.id, acceptUnauthenticated],
+    queryFn: () =>
+      source?.kind === "upload"
+        ? getUploadRestoreSet(captureAdminAuthority(), source.id, acceptUnauthenticated)
+        : getRestoreSet(captureAdminAuthority(), source?.id ?? "", acceptUnauthenticated),
+    enabled: context !== null && source !== null && source.id !== "",
+    // A preview is compared against the server as it is now; read it fresh
+    // each time the page opens rather than restoring from a stale cache.
+    staleTime: 0,
+    gcTime: 0,
+    retry: false,
+    // The chooser and review work from this plan and its digest: a refetch on
+    // focus or reconnect could replace the plan under the admin, or turn a
+    // failed read into an error screen. It is read again only when asked.
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+}
+
+/** One restore job, read until it ends. */
+export function useRestoreJob(jobId: string | null) {
+  const context = captureProfileRequestContext();
+  return useQuery({
+    queryKey: [...restoreRootKey(), "job", jobId],
+    queryFn: () => getRestoreJob(captureAdminAuthority(), jobId!),
+    enabled: context !== null && jobId !== null,
+    refetchInterval: (query) => (query.state.data?.terminal ? false : RESTORE_POLL_MS),
+  });
+}
+
+/** Recent restore jobs, to find the one for a backup after a reload. */
+export function useRestoreJobs() {
+  const context = captureProfileRequestContext();
+  return useQuery({
+    queryKey: [...restoreRootKey(), "jobs"],
+    queryFn: () => listRestoreJobs(captureAdminAuthority()),
+    enabled: context !== null,
+    staleTime: 0,
+  });
+}
+
+export function useStartRestore(source: RestoreSource) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      digest,
+      selection,
+      acceptUnauthenticated,
+    }: {
+      digest: string;
+      selection: RestoreSelection;
+      acceptUnauthenticated?: boolean;
+    }) =>
+      source.kind === "upload"
+        ? startUploadRestore(
+            captureAdminAuthority(),
+            source.id,
+            digest,
+            selection,
+            acceptUnauthenticated,
+          )
+        : startRestore(
+            captureAdminAuthority(),
+            source.id,
+            digest,
+            selection,
+            acceptUnauthenticated,
+          ),
+    retry: false,
+    onSettled: () => queryClient.invalidateQueries({ queryKey: adminKeys.backups() }),
+  });
+}
+
+export function useCancelRestore() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (jobId: string) => cancelRestoreJob(captureAdminAuthority(), jobId),
+    retry: false,
+    onSettled: () => queryClient.invalidateQueries({ queryKey: restoreRootKey() }),
+  });
+}

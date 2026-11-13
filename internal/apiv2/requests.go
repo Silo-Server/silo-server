@@ -12,6 +12,7 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
+	"github.com/Silo-Server/silo-server/internal/requests/discoverrows"
 )
 
 // The requests domain: a profile's media requests and the TMDB-backed
@@ -141,8 +142,9 @@ type RequestMediaPage struct {
 
 // DiscoverSection is one discovery row.
 type DiscoverSection struct {
-	Key          string               `json:"key" doc:"The row's stable ID. The six built-in rows keep trending_movies, trending_series, popular_movies, popular_series, upcoming_movies and on_air_series; a row an admin adds has an opaque ID" example:"trending_movies"`
-	Title        string               `json:"title" example:"Trending Movies"`
+	Key   string `json:"key" doc:"The row's stable ID. The six built-in rows keep trending_movies, trending_series, popular_movies, popular_series, upcoming_movies and on_air_series; a row an admin adds has an opaque ID" example:"trending_movies"`
+	Title string `json:"title" example:"Trending Movies"`
+	SectionTitleKey
 	Page         int                  `json:"page" example:"1"`
 	TotalPages   int                  `json:"total_pages" example:"500"`
 	TotalResults int                  `json:"total_results" example:"10000"`
@@ -676,7 +678,7 @@ func (reg *Registry) listDiscoverSections(ctx context.Context, _ *struct{}) (*Di
 	reg.markInWatchlist(ctx, marks)
 	order := make([]DiscoverRowRef, 0, len(page.Order))
 	for _, r := range page.Order {
-		order = append(order, DiscoverRowRef{Key: r.Key, Type: string(r.Type), Title: r.Title})
+		order = append(order, DiscoverRowRef{Key: r.Key, Type: string(r.Type), Title: r.Title, SectionTitleKey: sectionTitleKeyOf(discoverrows.TitleKey(r.Key, r.Title), nil)})
 	}
 	return &DiscoverSectionCollectionOutput{Body: DiscoverSectionCollection{Collection: NewCollection(items), RowOrder: order}}, nil
 }
@@ -876,9 +878,12 @@ func mediaRequestOf(r *mediarequests.Request, viewer mediarequests.Viewer) Media
 }
 
 // requestDownloadOf maps download progress. The byte counts and percent are
-// left out while the size is unknown (a total of 0).
+// left out while the size is unknown (a total of 0). Progress with no report
+// time, which only an out-of-band database edit can leave behind, is left out
+// whole: a zero Instant cannot be marshaled and would fail the entire response.
+// It stays on the domain value so the download refresh pass can still clear it.
 func requestDownloadOf(d *mediarequests.DownloadProgress) *RequestDownload {
-	if d == nil {
+	if d == nil || d.UpdatedAt.IsZero() {
 		return nil
 	}
 	out := &RequestDownload{
@@ -965,7 +970,7 @@ func requestMediaSeasonsOf(seasons []mediarequests.RequestSeason) []RequestMedia
 
 func discoverSectionOf(s *mediarequests.DiscoverySection) DiscoverSection {
 	return DiscoverSection{
-		Key: s.Key, Title: s.Title, Page: s.Page, TotalPages: s.TotalPages, TotalResults: s.TotalResults,
+		Key: s.Key, Title: s.Title, SectionTitleKey: sectionTitleKeyOf(discoverrows.TitleKey(s.Key, s.Title), nil), Page: s.Page, TotalPages: s.TotalPages, TotalResults: s.TotalResults,
 		Results: requestMediaResultsOf(s.Results), NextPage: s.NextPage,
 	}
 }

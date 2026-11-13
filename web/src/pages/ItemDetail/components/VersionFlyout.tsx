@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { formatFileSize, mapAudioLabel } from "@/lib/mediaFormat";
 import { videoRangeLabel } from "@/lib/videoRange";
+import { useT } from "@/i18n";
 import { extractSourceHint, versionAudioAtmosEvidence } from "./versionFormatUtils";
 import { resolutionScore } from "./versionRankingUtils";
 
@@ -58,11 +59,12 @@ interface VersionFlyoutItemsProps {
 }
 
 export default function VersionFlyoutItems({ versions, onPlayVersion }: VersionFlyoutItemsProps) {
+  const t = useT();
   const sorted = sortByResolution(versions);
 
   return (
     <>
-      <DropdownMenuLabel>Play Version</DropdownMenuLabel>
+      <DropdownMenuLabel>{t("web.detail.versions.playVersion")}</DropdownMenuLabel>
       <DropdownMenuSeparator />
 
       {sorted.map((version) => {

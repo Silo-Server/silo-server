@@ -9,6 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useT } from "@/i18n";
 import { formatFileSize } from "@/lib/mediaFormat";
 import { StaleApiRequestContextError } from "@/api/client";
 import { launchDirectDownload } from "@/api/v2/directDownloads";
@@ -29,6 +30,7 @@ export default function DownloadVersionPicker({
   title,
   summaryBuilder,
 }: DownloadVersionPickerProps) {
+  const t = useT();
   const sorted = sortByResolution(versions);
   const [downloading, setDownloading] = useState<number | null>(null);
 
@@ -52,7 +54,7 @@ export default function DownloadVersionPicker({
       if (isCurrent()) onOpenChange(false);
     } catch (error) {
       if (isCurrent() && !(error instanceof StaleApiRequestContextError))
-        toast.error("Download could not be started. Check access and try again.");
+        toast.error(t("web.downloads.versionPicker.startFailed"));
     } finally {
       if (isCurrent()) {
         active.current = null;
@@ -65,10 +67,12 @@ export default function DownloadVersionPicker({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Download{title ? `: ${title}` : ""}</DialogTitle>
-          <DialogDescription>
-            Choose a file to download. Make sure you have enough disk space.
-          </DialogDescription>
+          <DialogTitle>
+            {title
+              ? t("web.downloads.versionPicker.titleWithName", { title })
+              : t("web.downloads.versionPicker.title")}
+          </DialogTitle>
+          <DialogDescription>{t("web.downloads.versionPicker.description")}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-2">
@@ -82,7 +86,7 @@ export default function DownloadVersionPicker({
                 type="button"
                 onClick={() => handleDownload(version)}
                 disabled={downloading !== null}
-                className="border-border/50 bg-accent/30 hover:bg-accent/60 flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left transition-colors disabled:opacity-50"
+                className="border-border/50 bg-accent/30 hover:bg-accent/60 flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-start transition-colors disabled:opacity-50"
               >
                 <span className="bg-primary/10 text-primary flex size-9 shrink-0 items-center justify-center rounded-full">
                   {downloading === version.file_id ? (
@@ -101,7 +105,9 @@ export default function DownloadVersionPicker({
         </div>
 
         {sorted.length > 1 && (
-          <p className="text-muted-foreground text-xs">Larger files require more storage space.</p>
+          <p className="text-muted-foreground text-xs">
+            {t("web.downloads.versionPicker.sizeNote")}
+          </p>
         )}
       </DialogContent>
     </Dialog>

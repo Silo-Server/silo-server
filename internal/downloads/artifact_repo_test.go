@@ -42,8 +42,8 @@ func newArtifactTestRepo(t *testing.T) (*ArtifactRepository, *pgxpool.Pool, int)
 	}
 	var fileID int
 	if err := pool.QueryRow(ctx,
-		`INSERT INTO media_files (media_folder_id, file_path) VALUES ($1, $2) RETURNING id`,
-		folderID, fmt.Sprintf("/tmp/artifact-%d.mkv", suffix),
+		`INSERT INTO media_files (media_folder_id, file_path, content_id) VALUES ($1, $2, $3) RETURNING id`,
+		folderID, fmt.Sprintf("/tmp/artifact-%d.mkv", suffix), fmt.Sprintf("artifact-content-%d", suffix),
 	).Scan(&fileID); err != nil {
 		t.Fatalf("seed media file: %v", err)
 	}
@@ -53,6 +53,17 @@ func newArtifactTestRepo(t *testing.T) (*ArtifactRepository, *pgxpool.Pool, int)
 		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, folderID)
 	})
 	return NewArtifactRepository(pool), pool, fileID
+}
+
+// fileContentID returns the title fileID is linked to, which a download of
+// the file names.
+func fileContentID(t *testing.T, pool *pgxpool.Pool, fileID int) string {
+	t.Helper()
+	var contentID string
+	if err := pool.QueryRow(context.Background(), `SELECT content_id FROM media_files WHERE id = $1`, fileID).Scan(&contentID); err != nil {
+		t.Fatalf("read file title: %v", err)
+	}
+	return contentID
 }
 
 func newArtifact(t *testing.T, fileID int, hash string) *Artifact {

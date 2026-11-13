@@ -1,26 +1,182 @@
-import { useId } from "react";
+import { useId, useRef } from "react";
+import { toast } from "sonner";
+import { captureProfileRequestContext, isProfileRequestContextCurrent } from "@/api/client";
 import { PageHeader } from "@/components/page/PageHeader";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  isSettingValueMissing,
+  settingsCapabilitiesSupportKey,
+  useClearSettingValue,
+  useSetSettingValue,
+  useSettingsCapabilities,
+  useStoredSettingValues,
+} from "@/hooks/queries/settingValues";
 import { useDateTimeFormat, useDateTimeFormatSettings } from "@/hooks/useDateTimeFormat";
 import { useTheme } from "@/hooks/useTheme";
+import { PSEUDO_LOCALES_ENABLED, useT, type MessageKey } from "@/i18n";
+import { matchAppLanguage, pickerLanguages } from "@/lib/appLocale";
 import { formatDate, formatTime } from "@/lib/datetime";
 import type { DateFormatPreference, TimeFormatPreference } from "@/lib/datetime";
+import { getLanguageName } from "@/lib/languageNames";
+import { SETTING_KEYS } from "@/lib/settingsContract";
 
-const DATE_FORMAT_CHOICES: ReadonlyArray<{ value: DateFormatPreference; label: string }> = [
-  { value: "auto", label: "Auto (browser)" },
-  { value: "DD/MM/YYYY", label: "DD/MM/YYYY" },
-  { value: "MM/DD/YYYY", label: "MM/DD/YYYY" },
-  { value: "YYYY-MM-DD", label: "YYYY-MM-DD" },
+/** A pattern choice without a `labelKey` is its own label. */
+const DATE_FORMAT_CHOICES: ReadonlyArray<{ value: DateFormatPreference; labelKey?: MessageKey }> = [
+  { value: "auto", labelKey: "web.settings.accessibility.formatAuto" },
+  { value: "DD/MM/YYYY" },
+  { value: "MM/DD/YYYY" },
+  { value: "YYYY-MM-DD" },
 ];
 
-const TIME_FORMAT_CHOICES: ReadonlyArray<{ value: TimeFormatPreference; label: string }> = [
-  { value: "auto", label: "Auto (browser)" },
-  { value: "12h", label: "12-hour" },
-  { value: "24h", label: "24-hour" },
+const TIME_FORMAT_CHOICES: ReadonlyArray<{ value: TimeFormatPreference; labelKey: MessageKey }> = [
+  { value: "auto", labelKey: "web.settings.accessibility.formatAuto" },
+  { value: "12h", labelKey: "web.settings.accessibility.time12h" },
+  { value: "24h", labelKey: "web.settings.accessibility.time24h" },
 ];
+
+const APP_LANGUAGE_KEYS = [SETTING_KEYS.UI_APP_LANGUAGE] as const;
+const PROFILE_SCOPE = { scope: "profile" } as const;
+/** This browser's own value; the server reads the device from X-Silo-Device-Id. */
+const THIS_DEVICE_SCOPE = { scope: "profile_device" } as const;
+const MATCH_DEVICE = "device";
+
+/**
+ * The profile's app language. It edits the profile's own value and then
+ * clears this browser's per-device value, so the choice follows the person
+ * across devices (a per-device value set elsewhere still wins on its device).
+ * A stored tag the web app doesn't ship stays selected under its name, so
+ * saving here never clears what another app chose.
+ */
+function AppLanguageSetting() {
+  const t = useT();
+  const labelId = useId();
+  const { data: stored } = useStoredSettingValues({
+    keys: APP_LANGUAGE_KEYS,
+    identity: PROFILE_SCOPE,
+  });
+  const mutation = useSetSettingValue();
+  const clearDevice = useClearSettingValue();
+  const saving = useRef(false);
+  // mutateAsync, not mutate: the clear must still run if the page closes first.
+  async function save(next: string) {
+    // One save at a time: two in flight could land in either order and
+    // leave the earlier choice stored. The select shows the pending one. The
+    // ref is set synchronously, so a second choice before the next render is
+    // refused too.
+    if (saving.current || mutation.isPending || clearDevice.isPending) return;
+    saving.current = true;
+    try {
+      // The clear runs later; skip it if the person switched profile meanwhile.
+      const requestContext = captureProfileRequestContext();
+      try {
+        await mutation.mutateAsync({
+          key: SETTING_KEYS.UI_APP_LANGUAGE,
+          value: next === MATCH_DEVICE ? null : next,
+          identity: PROFILE_SCOPE,
+        });
+      } catch {
+        toast.error(t("web.settings.accessibility.appLanguageSaveFailed"));
+        return;
+      }
+      await clearThisBrowser(requestContext);
+    } finally {
+      saving.current = false;
+    }
+  }
+  // Deletes this browser's own value so the profile's applies here. Skipped if
+  // the profile or session changed since the save; a failure offers a retry,
+  // since picking the same language again changes nothing.
+  async function clearThisBrowser(requestContext: ReturnType<typeof captureProfileRequestContext>) {
+    const current = captureProfileRequestContext();
+    if (
+      !requestContext ||
+      !isProfileRequestContextCurrent(requestContext) ||
+      current?.profileId !== requestContext.profileId
+    ) {
+      return;
+    }
+    try {
+      await clearDevice.mutateAsync({
+        key: SETTING_KEYS.UI_APP_LANGUAGE,
+        identity: THIS_DEVICE_SCOPE,
+      });
+    } catch (error) {
+      // No per-device value is the usual case.
+      if (!isSettingValueMissing(error)) {
+        toast.error(t("web.settings.accessibility.appLanguageDeviceClearFailed"), {
+          action: {
+            label: t("common.tryAgain"),
+            onClick: () => void clearThisBrowser(requestContext),
+          },
+        });
+      }
+    }
+  }
+  const savedValue = stored?.[SETTING_KEYS.UI_APP_LANGUAGE];
+  const shownValue = mutation.isPending ? mutation.variables.value : savedValue;
+  const tag = typeof shownValue === "string" ? shownValue : null;
+  const languages = pickerLanguages(PSEUDO_LOCALES_ENABLED);
+  const offered = tag !== null && languages.some((language) => language.tag === tag);
+
+  return (
+    <div className="space-y-2">
+      <p id={labelId} className="text-sm font-medium">
+        {t("web.settings.accessibility.appLanguage")}
+      </p>
+      <Select
+        value={tag ?? MATCH_DEVICE}
+        disabled={stored === undefined}
+        onValueChange={(next) => void save(next)}
+      >
+        <SelectTrigger aria-labelledby={labelId} className="w-full sm:w-64">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={MATCH_DEVICE}>
+            {t("web.settings.accessibility.matchDevice")}
+          </SelectItem>
+          {tag !== null && !offered && <SelectItem value={tag}>{getLanguageName(tag)}</SelectItem>}
+          {languages.map((language) => (
+            <SelectItem key={language.tag} value={language.tag} lang={language.tag}>
+              {language.endonym}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {tag !== null && matchAppLanguage(tag, PSEUDO_LOCALES_ENABLED) === null && (
+        <p className="text-muted-foreground text-[13px]">
+          {t("web.settings.accessibility.appLanguageUnavailable")}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Shown once the server knows the setting; an older server has nowhere to save it. */
+function AppLanguageGroup() {
+  const t = useT();
+  const { data: capabilities } = useSettingsCapabilities();
+  if (!settingsCapabilitiesSupportKey(capabilities, SETTING_KEYS.UI_APP_LANGUAGE)) return null;
+  return (
+    <SettingsGroup
+      title={t("web.settings.accessibility.languageTitle")}
+      description={t("web.settings.accessibility.languageDescription")}
+    >
+      <AppLanguageSetting />
+    </SettingsGroup>
+  );
+}
 
 export default function AccessibilitySettings() {
+  const t = useT();
   const { textScale, setTextScale, textWeight, setTextWeight, highContrast, setHighContrast } =
     useTheme();
 
@@ -36,18 +192,20 @@ export default function AccessibilitySettings() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Accessibility"
-        subtitle="Text size, weight, contrast, and date and time formats."
+        title={t("web.settings.accessibility.title")}
+        subtitle={t("web.settings.accessibility.subtitle")}
       />
 
+      <AppLanguageGroup />
+
       <SettingsGroup
-        title="Readability"
-        description="Increase text size, strengthen type weight, and raise contrast for clearer reading."
+        title={t("web.settings.accessibility.readabilityTitle")}
+        description={t("web.settings.accessibility.readabilityDescription")}
       >
         <div className="space-y-4">
           <div className="space-y-2">
             <p id={textSizeLabelId} className="text-sm font-medium">
-              Text size
+              {t("web.settings.accessibility.textSize")}
             </p>
             <div
               role="radiogroup"
@@ -55,9 +213,12 @@ export default function AccessibilitySettings() {
               className="flex flex-wrap gap-2"
             >
               {[
-                { value: "default" as const, label: "Default" },
-                { value: "large" as const, label: "Large" },
-                { value: "x-large" as const, label: "Extra Large" },
+                { value: "default" as const, label: t("web.settings.accessibility.default") },
+                { value: "large" as const, label: t("web.settings.accessibility.textSizeLarge") },
+                {
+                  value: "x-large" as const,
+                  label: t("web.settings.accessibility.textSizeExtraLarge"),
+                },
               ].map((option) => (
                 <Button
                   key={option.value}
@@ -75,7 +236,7 @@ export default function AccessibilitySettings() {
 
           <div className="space-y-2">
             <p id={textWeightLabelId} className="text-sm font-medium">
-              Text weight
+              {t("web.settings.accessibility.textWeight")}
             </p>
             <div
               role="radiogroup"
@@ -83,8 +244,11 @@ export default function AccessibilitySettings() {
               className="flex flex-wrap gap-2"
             >
               {[
-                { value: "default" as const, label: "Default" },
-                { value: "strong" as const, label: "Bolder" },
+                { value: "default" as const, label: t("web.settings.accessibility.default") },
+                {
+                  value: "strong" as const,
+                  label: t("web.settings.accessibility.textWeightBolder"),
+                },
               ].map((option) => (
                 <Button
                   key={option.value}
@@ -102,7 +266,7 @@ export default function AccessibilitySettings() {
 
           <div className="space-y-2">
             <p id={contrastLabelId} className="text-sm font-medium">
-              Contrast
+              {t("web.settings.accessibility.contrast")}
             </p>
             <div
               role="radiogroup"
@@ -116,7 +280,7 @@ export default function AccessibilitySettings() {
                 size="sm"
                 onClick={() => setHighContrast(false)}
               >
-                Standard
+                {t("web.settings.accessibility.contrastStandard")}
               </Button>
               <Button
                 role="radio"
@@ -125,7 +289,7 @@ export default function AccessibilitySettings() {
                 size="sm"
                 onClick={() => setHighContrast(true)}
               >
-                High Contrast
+                {t("web.settings.accessibility.contrastHigh")}
               </Button>
             </div>
           </div>
@@ -133,29 +297,28 @@ export default function AccessibilitySettings() {
       </SettingsGroup>
 
       <SettingsGroup
-        title="Preview"
-        description="See how text looks with your current readability settings."
+        title={t("web.settings.accessibility.previewTitle")}
+        description={t("web.settings.accessibility.previewDescription")}
       >
         <div className="border-border/50 space-y-2 rounded-lg border p-4">
-          <p className="text-lg font-semibold">The quick brown fox jumps over the lazy dog</p>
+          <p className="text-lg font-semibold">{t("web.settings.accessibility.previewHeadline")}</p>
           <p className="text-muted-foreground text-sm">
-            This sample paragraph reflects your current text size, weight, and contrast preferences.
-            Adjustments take effect across the entire interface.
+            {t("web.settings.accessibility.previewParagraph")}
           </p>
           <p className="text-muted-foreground text-xs">
-            Secondary text &middot; Metadata &middot; Captions
+            {t("web.settings.accessibility.previewSecondary")}
           </p>
         </div>
       </SettingsGroup>
 
       <SettingsGroup
-        title="Date & time"
-        description="Choose how dates and clock times are displayed across the app. Saved for the active profile."
+        title={t("web.settings.accessibility.dateTimeTitle")}
+        description={t("web.settings.accessibility.dateTimeDescription")}
       >
         <div className="space-y-4">
           <div className="space-y-2">
             <p id={dateFormatLabelId} className="text-sm font-medium">
-              Date format
+              {t("web.settings.accessibility.dateFormat")}
             </p>
             <div
               role="radiogroup"
@@ -171,7 +334,7 @@ export default function AccessibilitySettings() {
                   size="sm"
                   onClick={() => setDateFormat(option.value)}
                 >
-                  {option.label}
+                  {option.labelKey ? t(option.labelKey) : option.value}
                 </Button>
               ))}
             </div>
@@ -179,7 +342,7 @@ export default function AccessibilitySettings() {
 
           <div className="space-y-2">
             <p id={timeFormatLabelId} className="text-sm font-medium">
-              Time format
+              {t("web.settings.accessibility.timeFormat")}
             </p>
             <div
               role="radiogroup"
@@ -195,15 +358,18 @@ export default function AccessibilitySettings() {
                   size="sm"
                   onClick={() => setTimeFormat(option.value)}
                 >
-                  {option.label}
+                  {t(option.labelKey)}
                 </Button>
               ))}
             </div>
           </div>
 
           <p className="text-muted-foreground text-[13px]">
-            Preview: {formatDate(previewDate)} · {formatDate(previewDate, "medium")} ·{" "}
-            {formatTime(previewDate)}
+            {t("web.settings.accessibility.dateTimePreview", {
+              short: formatDate(previewDate),
+              medium: formatDate(previewDate, "medium"),
+              time: formatTime(previewDate),
+            })}
           </p>
         </div>
       </SettingsGroup>

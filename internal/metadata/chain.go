@@ -204,6 +204,20 @@ func (r *ChainRepository) AppendProviderToAllChains(
 	capabilityID string,
 	placement func(contentLevel string) SeedPlacement,
 ) error {
+	return r.AppendProviderToAllChainsChecked(ctx, pluginInstallationID, capabilityID, func(level string) (SeedPlacement, error) {
+		return placement(level), nil
+	})
+}
+
+// AppendProviderToAllChainsChecked is AppendProviderToAllChains with a
+// placement that can fail. Every level's placement is resolved before any
+// chain changes, so a failed lookup writes nothing.
+func (r *ChainRepository) AppendProviderToAllChainsChecked(
+	ctx context.Context,
+	pluginInstallationID int,
+	capabilityID string,
+	placement func(contentLevel string) (SeedPlacement, error),
+) error {
 	// Find every distinct (folder, level) pair that has chain entries.
 	rows, err := r.pool.Query(ctx,
 		`SELECT DISTINCT media_folder_id, content_level
@@ -228,13 +242,26 @@ func (r *ChainRepository) AppendProviderToAllChains(
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("iterating chain groups: %w", err)
 	}
+	rows.Close()
+
+	placements := map[string]SeedPlacement{}
+	for _, g := range groups {
+		if _, done := placements[g.contentLevel]; done {
+			continue
+		}
+		p, err := placement(g.contentLevel)
+		if err != nil {
+			return fmt.Errorf("resolving provider placement for %q: %w", g.contentLevel, err)
+		}
+		placements[g.contentLevel] = p
+	}
 
 	for _, g := range groups {
 		// Only attach the provider to levels it actually serves. A single-purpose
 		// provider (e.g. audiobook/ebook/manga metadata, or a sports provider that
 		// only declares series levels) must not clutter every library's chain with
 		// a disabled row for content it cannot handle.
-		p := placement(g.contentLevel)
+		p := placements[g.contentLevel]
 		if !p.SupportsLevel {
 			continue
 		}
@@ -365,6 +392,9 @@ type CapabilityInfo struct {
 	// capability declares it can look an item up by, from its manifest's
 	// lookup_provider_ids. See extractLookupProviderIDs.
 	LookupProviderIDs []string
+	// LookupImages reports that the capability also serves artwork by those
+	// keys (lookup_images). See extractLookupImages.
+	LookupImages bool
 	// BulkLookupLimit is how many concurrent lookups the capability can combine
 	// into one upstream request (bulk_lookup_limit), or 0 when it did not opt
 	// into the bulk enrichment pass. See extractBulkLookupLimit.
@@ -496,6 +526,7 @@ func ListEnabledMetadataCapabilities(ctx context.Context, pool *pgxpool.Pool) ([
 			return nil, fmt.Errorf("scanning capability: %w", err)
 		}
 		c.LookupProviderIDs = extractLookupProviderIDs(metadataJSON)
+		c.LookupImages = extractLookupImages(metadataJSON)
 		c.defaultEnabled = extractDefaultEnabled(metadataJSON)
 		c.BulkLookupLimit = extractBulkLookupLimit(metadataJSON)
 		c.RatingSources = extractRatingSources(metadataJSON)
@@ -608,7 +639,7 @@ func providersFromCapabilities(ctx context.Context, caps []CapabilityInfo, resol
 			continue
 		}
 
-		provider, err := NewPluginProviderFromCapability(c.PluginInstallationID, c.CapabilityID, c.DisplayName, c.LookupProviderIDs, c.RatingSources, resolver)
+		provider, err := NewPluginProviderFromCapability(c.PluginInstallationID, c.CapabilityID, c.DisplayName, c.LookupProviderIDs, c.LookupImages, c.RatingSources, resolver)
 		if err != nil {
 			slog.WarnContext(ctx, "skipping metadata provider during chain resolution", "component", "metadata",
 				"installation_id", c.PluginInstallationID,
@@ -679,6 +710,7 @@ func lookupCapabilityInfo(ctx context.Context, pool *pgxpool.Pool, installationI
 		return info
 	}
 	info.LookupProviderIDs = extractLookupProviderIDs(metadataJSON)
+	info.LookupImages = extractLookupImages(metadataJSON)
 	info.BulkLookupLimit = extractBulkLookupLimit(metadataJSON)
 	info.RatingSources = extractRatingSources(metadataJSON)
 	return info

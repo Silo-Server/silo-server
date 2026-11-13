@@ -37,6 +37,7 @@ type AdminAccountView struct {
 type AdminProfileView struct {
 	ID, Name                        string
 	Avatar, AvatarURL, AvatarSource string
+	HasPIN, IsPrimary, IsChild      bool
 	LastSeenAt                      *time.Time
 }
 
@@ -297,6 +298,7 @@ func (h *AdminHandler) DeleteAdminAccount(ctx context.Context, id int, revision,
 	if err != nil {
 		return err
 	}
+	var collections []string
 	_, err = repo.MutateAdminAccount(ctx, id, revision, nil, func(current *models.User, tx pgx.Tx) (bool, error) {
 		if revision != -1 {
 			_, actual, err := adminAccountTransactionGroup(ctx, tx, current)
@@ -313,7 +315,9 @@ func (h *AdminHandler) DeleteAdminAccount(ctx context.Context, id int, revision,
 		if err := auth.EnsureBreakGlassAfterAdminChange(ctx, tx, current, nil); err != nil {
 			return false, breakGlassError(err)
 		}
-		return true, nil
+		ids, err := h.deletedAccountCollections(ctx, tx, id)
+		collections = ids
+		return true, err
 	})
 	if err != nil {
 		return err
@@ -321,6 +325,7 @@ func (h *AdminHandler) DeleteAdminAccount(ctx context.Context, id int, revision,
 	if h.OnUserSessionsRevoked != nil {
 		h.OnUserSessionsRevoked(ctx, id)
 	}
+	removeDeletedCollectionArtwork(ctx, h.ArtworkStore, userCollectionImagePrefix, collections...)
 	h.sweepWatchlistTitles(ctx, id)
 	h.invalidateStats(ctx, cache.ChannelAdmin, cache.EventAdminStatsInvalidated, strconv.Itoa(id))
 	return nil
@@ -407,7 +412,7 @@ func (h *AdminHandler) ListAdminAccountProfiles(ctx context.Context, id int) ([]
 	lastSeen := profileLastSeen(devices)
 	result := make([]AdminProfileView, 0, len(rows))
 	for _, row := range rows {
-		view := AdminProfileView{ID: row.ID, Name: strings.TrimSpace(row.Name), Avatar: row.Avatar}
+		view := AdminProfileView{ID: row.ID, Name: strings.TrimSpace(row.Name), Avatar: row.Avatar, HasPIN: row.PINHash != "", IsPrimary: row.IsPrimary, IsChild: row.IsChild}
 		view.AvatarSource, view.AvatarURL = h.resolveProfileAvatar(ctx, row.Avatar)
 		if at, ok := lastSeen[row.ID]; ok {
 			view.LastSeenAt = &at

@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import type { ReactNode, Ref } from "react";
-import { Check, Download } from "lucide-react";
+import { AlertTriangle, Check, Download } from "lucide-react";
 import { useLocation } from "react-router";
 
 import type { PluginCatalogEntry, PluginInstallation } from "@/api/types";
@@ -8,6 +8,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { Button } from "@/components/ui/button";
 import { useInstallPlugin } from "@/hooks/queries/admin/plugins";
+import { useT } from "@/i18n";
 import {
   installationTier,
   pendingUpdateVersion,
@@ -123,6 +124,7 @@ export function InstalledPluginTile({
   installation: PluginInstallation;
   catalogEntry?: PluginCatalogEntry;
 }) {
+  const t = useT();
   const presentation = installation.presentation ?? catalogEntry?.presentation;
   const capabilities = installation.capabilities ?? [];
   const name = pluginDisplayName(installation.plugin_id, presentation);
@@ -134,20 +136,37 @@ export function InstalledPluginTile({
     <TileShell attention={status.attention} dimmed={off} state={off ? "off" : undefined}>
       <TileHeading
         name={name}
-        subline={`${installation.version}, ${sourceLabel(installationTier(installation))}`}
+        subline={t("web.admin.plugins.tile.installedSubline", {
+          version: installation.version,
+          source: sourceLabel(installationTier(installation)),
+        })}
         to={pluginPagePath(installation.plugin_id)}
         dimmed={off}
       />
       <TileSummary>{pluginSummary(presentation, capabilities)}</TileSummary>
       <TileFooter>
         <PluginStatusLabel {...status} />
-        {updateVersion ? (
+        {installation.update_failure ? (
+          <span
+            className="text-warning inline-flex min-w-0 items-center gap-1 text-[12.5px]"
+            title={installation.update_failure.reason}
+          >
+            <AlertTriangle aria-hidden="true" className="size-3.5 shrink-0" />
+            <span className="truncate">
+              {t("web.admin.plugins.tile.updateFailed", {
+                version: installation.update_failure.version,
+              })}
+            </span>
+          </span>
+        ) : updateVersion ? (
           <span className="bg-surface-raised text-foreground/85 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[12.5px]">
             <Download aria-hidden="true" className="size-3.5" />
-            {updateVersion} available
+            {t("web.admin.plugins.tile.updateAvailable", { version: updateVersion })}
           </span>
         ) : installation.updates_paused ? (
-          <span className="text-muted-foreground text-[12.5px]">Updates paused</span>
+          <span className="text-muted-foreground text-[12.5px]">
+            {t("web.admin.plugins.tile.updatesPaused")}
+          </span>
         ) : (
           <PluginCapabilityIcons capabilities={capabilities} />
         )}
@@ -163,6 +182,7 @@ export function CatalogPluginTile({
   entry: PluginCatalogEntry;
   isInstalled: boolean;
 }) {
+  const t = useT();
   const installPlugin = useInstallPlugin();
   const capabilities = entry.capabilities ?? [];
   const name = pluginDisplayName(entry.plugin_id, entry.presentation);
@@ -192,7 +212,11 @@ export function CatalogPluginTile({
       <TileHeading
         name={name}
         // The catalog group heading already names the tier.
-        subline={`${publisher ? `by ${publisher}, ` : ""}${entry.version}`}
+        subline={
+          publisher
+            ? t("web.admin.plugins.tile.catalogSubline", { publisher, version: entry.version })
+            : entry.version
+        }
         to={pluginPagePath(entry.plugin_id, {
           repositoryId: entry.repository_id,
           version: entry.version,
@@ -206,7 +230,7 @@ export function CatalogPluginTile({
         {isInstalled ? (
           <span className="text-muted-foreground relative z-10 inline-flex items-center gap-1 text-[12.5px]">
             <Check aria-hidden="true" className="size-3.5" />
-            Installed
+            {t("web.admin.plugins.tile.installed")}
           </span>
         ) : (
           <Button
@@ -214,12 +238,14 @@ export function CatalogPluginTile({
             variant="outline"
             className="relative z-10"
             ref={installButton}
-            aria-label={`Install ${name}`}
+            aria-label={t("web.admin.plugins.tile.installLabel", { name })}
             disabled={installPlugin.isPending}
             onClick={() => (notice ? setConfirmInstall(true) : install())}
           >
             <Download aria-hidden="true" />
-            {installPlugin.isPending ? "Installing…" : "Install"}
+            {installPlugin.isPending
+              ? t("web.admin.plugins.tile.installing")
+              : t("web.admin.plugins.tile.install")}
           </Button>
         )}
       </TileFooter>
@@ -227,9 +253,12 @@ export function CatalogPluginTile({
         <ConfirmDialog
           open={confirmInstall}
           onOpenChange={setConfirmInstall}
-          title={`Install ${name}?`}
-          description={`${sourceLabel(entry.source_kind)}. ${notice}`}
-          confirmLabel="Install plugin"
+          title={t("web.admin.plugins.tile.confirmTitle", { name })}
+          description={t("web.admin.plugins.tile.confirmDescription", {
+            source: sourceLabel(entry.source_kind),
+            notice,
+          })}
+          confirmLabel={t("web.admin.plugins.tile.confirmInstall")}
           onConfirm={install}
           isPending={installPlugin.isPending}
           onCloseAutoFocus={(event) => {

@@ -2,6 +2,7 @@ import type { AdminTimeseries, AdminTimeseriesEgressSource } from "@/api/types";
 import { chartSeriesColor } from "../charts";
 import type { LineChartPoint } from "../charts";
 import { buildTimeseriesPoints } from "./timeseriesSeries";
+import { t } from "@/i18n";
 
 /** One stacked band of the egress-by-node view, in Mbps. */
 export interface EgressBand {
@@ -89,7 +90,15 @@ export function buildEgressBands(series: AdminTimeseries | undefined): EgressBan
   const hasOther = other.some((point) => (point.value ?? 0) > 0);
 
   return hasOther
-    ? [{ key: OTHER_KEY, label: "Other", color: OTHER_COLOR, points: other }, ...named]
+    ? [
+        {
+          key: OTHER_KEY,
+          label: t("web.admin.dashboard.widgets.egress.otherBand"),
+          color: OTHER_COLOR,
+          points: other,
+        },
+        ...named,
+      ]
     : named;
 }
 
@@ -106,7 +115,10 @@ function bandLabels(sources: readonly AdminTimeseriesEgressSource[]): Map<string
     sources.map((source) => [
       source.key,
       (uses.get(source.name) ?? 0) > 1 && source.node_id !== undefined
-        ? `${source.name} (#${source.node_id})`
+        ? t("web.admin.dashboard.widgets.egress.duplicateNodeName", {
+            name: source.name,
+            id: String(source.node_id),
+          })
         : source.name,
     ]),
   );

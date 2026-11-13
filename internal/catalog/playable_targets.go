@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/access"
-	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 const (
@@ -187,14 +187,8 @@ func (r *PlayableTargetResolver) ResolveTargets(ctx context.Context, q PlayableT
 		playableFileExists,
 		"EXISTS (SELECT 1 FROM media_folders pf WHERE pf.id = mf.media_folder_id AND pf.enabled = TRUE)",
 	}
-	if maxQuality := access.NormalizePlaybackQuality(q.Access.MaxPlaybackQuality); maxQuality != "" {
-		maxRank := 3
-		if maxQuality == access.PlaybackQuality4K {
-			maxRank = 4
-		}
-		fileConditions = append(fileConditions, fmt.Sprintf(`CASE UPPER(BTRIM(COALESCE(mf.resolution, '')))
-			WHEN '480P' THEN 1 WHEN '720P' THEN 2 WHEN '1080P' THEN 3
-			WHEN '2160P' THEN 4 WHEN '4320P' THEN 5 ELSE 0 END <= %d`, maxRank))
+	if ceiling := MediaFileQualityCeilingSQL("mf", q.Access.MaxPlaybackQuality); ceiling != "" {
+		fileConditions = append(fileConditions, ceiling)
 	}
 	effectiveLibraries, none := q.Access.LibraryScope(uniquePositiveInts(q.LibraryIDs))
 	switch {
@@ -463,24 +457,12 @@ func progressUpdatedAfter(candidate, current string) bool {
 // row. The planner prices the per-card candidate subqueries far above their
 // real cost, which crosses jit_above_cost for a page of cards; compiling then
 // takes about twice as long as running the query.
+//
+// Each connection also keeps one generic plan. Planning the movie and episode
+// statement takes 3-5 ms, against 0.2 ms to run it for a detail page's single
+// card. PostgreSQL would plan it again on every call with one card, because
+// the generic plan is priced for ten. That plan reads each card's files and
+// episodes by index, so it reads the same rows as a custom plan.
 func (r *PlayableTargetResolver) queryPlayableTargets(ctx context.Context, query string, args []any, scan func(pgx.Rows) error) error {
-	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
-	if _, err := tx.Exec(ctx, "SET LOCAL jit = off"); err != nil {
-		return fmt.Errorf("disabling JIT: %w", err)
-	}
-	rows, err := tx.Query(ctx, query, args...)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		if err := scan(rows); err != nil {
-			return err
-		}
-	}
-	return rows.Err()
+	return queryGenericPlanWithoutJIT(ctx, r.pool, query, args, scan)
 }

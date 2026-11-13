@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
-import { getPlexFallbackURLs, MAX_PLEX_FALLBACK_URLS, type BrowserPlexServer } from "./plexAuth";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  getPlexFallbackURLs,
+  loadPlexHome,
+  MAX_PLEX_FALLBACK_URLS,
+  resolvePlexHomeUserServer,
+  type BrowserPlexServer,
+} from "./plexAuth";
 
 function server(fields: Partial<BrowserPlexServer>): BrowserPlexServer {
   return {
@@ -45,5 +51,56 @@ describe("getPlexFallbackURLs", () => {
 
     expect(fallbacks).toHaveLength(MAX_PLEX_FALLBACK_URLS);
     expect(fallbacks[0]).toBe("https://relay.plex.direct:443");
+  });
+});
+
+// Answers plex.tv requests by method and path; anything unlisted is a 404.
+function stubPlexTV(routes: Record<string, () => Response>) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string, init?: RequestInit) => {
+      const route = `${init?.method ?? "GET"} ${new URL(input).pathname}`;
+      return routes[route]?.() ?? new Response("not found", { status: 404 });
+    }),
+  );
+}
+
+const json =
+  (body: unknown, status = 200) =>
+  () =>
+    Response.json(body, { status });
+
+describe("Plex Home", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("treats an account outside a Plex Home as having no Home users", async () => {
+    stubPlexTV({ "GET /api/v2/user": json({ uuid: "owner" }) });
+
+    expect((await loadPlexHome("owner-token")).users).toEqual([]);
+  });
+
+  it("explains a rejected PIN instead of showing plex.tv's error body", async () => {
+    stubPlexTV({
+      "POST /api/v2/home/users/kid/switch": json({ errors: [{ code: 1041 }] }, 403),
+    });
+    const kid = { uuid: "kid", title: "Kid", protected: true, restricted: true };
+
+    await expect(resolvePlexHomeUserServer("owner-token", kid, "0000", "srv")).rejects.toThrow(
+      "Plex did not accept that PIN",
+    );
+  });
+
+  it("refuses a server the Home user cannot reach", async () => {
+    stubPlexTV({
+      "POST /api/v2/home/users/kid/switch": json({ authToken: "kid-token" }),
+      "GET /api/v2/resources": json([]),
+    });
+    const kid = { uuid: "kid", title: "Kid", protected: false, restricted: true };
+
+    await expect(resolvePlexHomeUserServer("owner-token", kid, "", "srv")).rejects.toThrow(
+      "Kid does not have access to this Plex server",
+    );
   });
 });

@@ -91,7 +91,7 @@ func TestFinalizeVariantsKeepsMatchSuppressionDB(t *testing.T) {
 	if suppressed, err := repo.SuppressUnmatchedMatchBacklogByFolder(ctx, folderID, RawMatchBacklogGeneric); err != nil || suppressed != 1 {
 		t.Fatalf("suppress unmatched backlog = %d, %v; want 1", suppressed, err)
 	}
-	if err := repo.UpdateContentID(ctx, cutID, movieID); err != nil {
+	if err := repo.UpdateContentID(ctx, cutID, cutPath, movieID); err != nil {
 		t.Fatalf("link cut: %v", err)
 	}
 

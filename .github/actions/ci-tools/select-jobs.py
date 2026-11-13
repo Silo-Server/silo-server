@@ -9,15 +9,14 @@ import subprocess
 import sys
 
 
-GO_JOBS = ("go-lint", "go-test", "go-integration", "go-db-pins", "go-db-auth")
+GO_JOBS = ("go-lint", "go-vet", "go-test", "go-integration", "go-db-pins", "go-db-auth")
 WEB_JOBS = ("web", "web-test")
 # Run on every event regardless of what the diff touched.
 ALWAYS_JOBS = ("repo-checks",)
 SHA = re.compile(r"[0-9a-fA-F]{40}\Z")
-# These are embedded by contracts/api/v2 and consumed by the Go ledger,
-# scenario and compatibility gates. Web generation consumes openapi/fixtures.
+# These are embedded by contracts/api/v2 and consumed by the Go compatibility
+# gate. Web generation consumes openapi/fixtures.
 GO_ONLY_CONTRACTS = frozenset("contracts/api/v2/" + name for name in (
-    "migration.json", "migration.schema.json", "offline-routes.txt",
     "breaking-approvals.json", "breaking-approvals.schema.json",
 ))
 
@@ -36,7 +35,7 @@ def classify(paths):
                 or any(ord(char) < 32 for char in path)):
             return all_jobs("unrecognized path")
         if (path == ".github/evidence.yml"
-                or (path.startswith(".github/ISSUE_TEMPLATE/") and path.endswith((".yml", ".yaml", ".md")))
+                or (path.startswith((".github/ISSUE_TEMPLATE/", ".github/DISCUSSION_TEMPLATE/")) and path.endswith((".yml", ".yaml", ".md")))
                 or (path.endswith(".md") and path.startswith((".github/", "scripts/", "cmd/")))):
             continue
         if (path in GO_ONLY_CONTRACTS

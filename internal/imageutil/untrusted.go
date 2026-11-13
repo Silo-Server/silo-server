@@ -23,7 +23,9 @@ import "C"
 // more); bimg does not recognize the ImageMagick 7 loader's name. Silo uses
 // neither format for artwork. SVG is untrusted too but stays enabled:
 // providers such as TMDB serve logos as SVG, and librsvg is written in Rust.
-// JPEG, PNG, WebP, GIF, TIFF, HEIF and AVIF are trusted and unaffected.
+// Only Rasterize reads one; see checkFormat.
+// JPEG, PNG, WebP, GIF, TIFF, HEIF and AVIF are trusted and unaffected by
+// the block; checkFormat separately refuses TIFF, HEIF and AVIF as sources.
 // bimg's package init has already started libvips by the time this runs.
 // libvips older than 8.13 has no untrusted flag and keeps every loader.
 func init() {

@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import type { AdminUser, PluginInstallation } from "@/api/types";
 import { v2, V2ProblemError } from "@/api/v2/request";
-import { BREAK_GLASS_REQUIRED_TEXT } from "@/lib/externalSignInAdmin";
+import { breakGlassRequiredText } from "@/lib/externalSignInAdmin";
 
 import SignInSettings from "./SignInSettings";
 
@@ -853,7 +853,7 @@ describe("SignInSettings password sign-in", () => {
     state.save.mockRejectedValue(problem("break_glass_required", 409));
     mount();
     await user.click(screen.getByRole("button", { name: "Save" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(BREAK_GLASS_REQUIRED_TEXT);
+    expect(await screen.findByRole("alert")).toHaveTextContent(breakGlassRequiredText());
   });
 });
 

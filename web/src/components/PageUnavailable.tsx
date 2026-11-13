@@ -4,6 +4,7 @@ import { ChevronLeft, CircleAlert, SearchX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
+import { useT } from "@/i18n";
 import { hasEarlierEntry } from "@/lib/navigationHistory";
 
 interface PageUnavailableProps {
@@ -30,6 +31,7 @@ export default function PageUnavailable({
   retrying = false,
   children,
 }: PageUnavailableProps) {
+  const t = useT();
   const navigate = useViewTransitionNavigate();
   // A cold entry — a shared link, a reload — has nothing behind it to go back to.
   const canGoBack = hasEarlierEntry();
@@ -45,7 +47,7 @@ export default function PageUnavailable({
       <div className="flex flex-wrap items-center justify-center gap-3">
         {onRetry && (
           <Button type="button" onClick={onRetry} disabled={retrying}>
-            Try again
+            {t("common.tryAgain")}
           </Button>
         )}
         {canGoBack && (
@@ -55,12 +57,12 @@ export default function PageUnavailable({
             onClick={() => navigate(-1)}
           >
             <ChevronLeft />
-            Back
+            {t("common.back")}
           </Button>
         )}
         {children}
         <Button asChild variant={onRetry || canGoBack ? "outline" : "default"}>
-          <ViewTransitionLink to="/">Go home</ViewTransitionLink>
+          <ViewTransitionLink to="/">{t("web.shell.pageUnavailable.goHome")}</ViewTransitionLink>
         </Button>
       </div>
     </div>

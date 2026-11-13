@@ -18,11 +18,13 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
-// monitorFileResolver gives every episode one 10-byte file backed by the
-// fixture's real media_files row, so managed rows satisfy their FK.
+// monitorFileResolver gives each episode a 10-byte file: its row in files
+// (the fixture's real media_files row linked to the episode, which managed
+// rows require), or fileID when files has none.
 type monitorFileResolver struct {
 	FileResolver
 	fileID   int
+	files    map[string]int
 	seriesID string
 }
 
@@ -39,12 +41,17 @@ func (f *monitorFileResolver) GetByEpisodeID(_ context.Context, id string) ([]*m
 }
 
 func (f *monitorFileResolver) file(episodeID string) *models.MediaFile {
-	return &models.MediaFile{ID: f.fileID, ContentID: f.seriesID, EpisodeID: episodeID, FileSize: 10}
+	id, ok := f.files[episodeID]
+	if !ok {
+		id = f.fileID
+	}
+	return &models.MediaFile{ID: id, ContentID: f.seriesID, EpisodeID: episodeID, FileSize: 10}
 }
 
 type monitorFixture struct {
 	managedFixture
 	svc      *Service
+	files    *monitorFileResolver
 	subRepo  *SubscriptionRepository
 	pager    *syncEpisodePager
 	monitor  *Subscription
@@ -63,12 +70,14 @@ func seedMonitorFixture(t *testing.T, maxStorageBytes int64, deleteWatched bool)
 	})
 	seriesID := f.contentID
 	fx := monitorFixture{managedFixture: f, seriesID: seriesID, pager: &syncEpisodePager{}}
+	files := &monitorFileResolver{fileID: f.fileID, files: map[string]int{}, seriesID: seriesID}
 	for i := 1; i <= 3; i++ {
 		id := fmt.Sprintf("%s-ep-%d", seriesID, i)
 		fx.episodes = append(fx.episodes, id)
 		fx.pager.rows = append(fx.pager.rows, &models.Episode{ContentID: id, SeriesID: seriesID, SeasonNumber: 1, EpisodeNumber: i})
+		files.files[id] = f.episodeFile(t, id)
 	}
-	files := &monitorFileResolver{fileID: f.fileID, seriesID: seriesID}
+	fx.files = files
 	user := fakeUserRepo{&models.User{ID: f.userID, DownloadAllowed: new(true)}}
 	fx.svc = NewService(f.repo, nil, nil, files, createItemResolver{}, fx.pager, user, &syncAccess{}, nil, &config.DownloadConfig{Enabled: true})
 	fx.subRepo = NewSubscriptionRepository(f.pool)
@@ -122,7 +131,7 @@ func (fx monitorFixture) deleteEpisode(t *testing.T, episodeID string) {
 		t.Fatalf("episode %s is not registered", episodeID)
 		return
 	}
-	if err := fx.svc.Delete(context.Background(), fx.userID, fx.profileA, fx.deviceA, row.ID); err != nil {
+	if err := fx.svc.Delete(context.Background(), fx.userID, fx.profileA, fx.deviceA, row.ID, catalog.AccessFilter{}); err != nil {
 		t.Fatalf("delete %s: %v", episodeID, err)
 	}
 }
@@ -267,7 +276,7 @@ func TestConcurrentPreparedMonitorSyncsShareFreeSlotsDB(t *testing.T) {
 	}
 	plan := monitorPlan{decisions: map[ManagedEntryKey]QualityDecision{}, prepared: true}
 	for _, ep := range fx.episodes {
-		it := managedItem{file: &models.MediaFile{ID: fx.fileID, ContentID: fx.seriesID, FileSize: 10}, contentID: fx.seriesID, episodeID: ep}
+		it := managedItem{file: fx.files.file(ep), contentID: fx.seriesID, episodeID: ep}
 		plan.items = append(plan.items, it)
 		plan.decisions[managedItemKey(it)] = prepared
 	}
@@ -321,7 +330,7 @@ func TestPreparedMonitorSyncQueuesNothingForAStaleMonitorDB(t *testing.T) {
 		TargetBitrateKbps: 5000, RequiresArtifact: true,
 		PrepareTarget: playback.PrepareTarget{Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", TargetBitrateKbps: 5000},
 	}
-	it := managedItem{file: &models.MediaFile{ID: fx.fileID, ContentID: fx.seriesID, FileSize: 10}, contentID: fx.seriesID, episodeID: fx.episodes[0]}
+	it := managedItem{file: fx.files.file(fx.episodes[0]), contentID: fx.seriesID, episodeID: fx.episodes[0]}
 	plan := monitorPlan{items: []managedItem{it}, decisions: map[ManagedEntryKey]QualityDecision{managedItemKey(it): prepared}, prepared: true}
 	if _, err := fx.subRepo.Mutate(ctx, fx.userID, fx.profileA, fx.deviceA, fx.monitor.ID, false, func(row *Subscription) error { row.Active = false; return nil }); err != nil {
 		t.Fatal(err)
@@ -338,7 +347,7 @@ func TestPreparedMonitorSyncQueuesNothingForAStaleMonitorDB(t *testing.T) {
 		t.Fatalf("stale monitor registered %+v %v", rows, err)
 	}
 	var jobs int
-	if err := fx.pool.QueryRow(ctx, `SELECT count(*) FROM download_artifacts WHERE media_file_id = $1`, fx.fileID).Scan(&jobs); err != nil {
+	if err := fx.pool.QueryRow(ctx, `SELECT count(*) FROM download_artifacts WHERE media_file_id = $1`, it.file.ID).Scan(&jobs); err != nil {
 		t.Fatal(err)
 	}
 	if jobs != 0 {

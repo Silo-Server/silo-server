@@ -256,6 +256,13 @@ func TestResolveOriginalAssertsServedQuality(t *testing.T) {
 	if _, err := resolver.Resolve(ctx, QualityOriginal, user, cfg, compliant, playback.ClientCapabilities{}, true, ""); err != nil {
 		t.Fatalf("Resolve(compliant original) error: %v", err)
 	}
+
+	// An older probe recorded an audiobook's cover as 2160p video; the book
+	// serves no video, so the ceiling does not refuse it.
+	staleCover := &models.MediaFile{ID: 5, BaseType: "audiobook", CodecVideo: "mjpeg", CodecAudio: "aac", Container: "mp4", Resolution: "2160p"}
+	if _, err := resolver.Resolve(ctx, QualityOriginal, user, cfg, staleCover, playback.ClientCapabilities{}, true, ""); err != nil {
+		t.Fatalf("Resolve(audiobook with stale cover resolution) error: %v", err)
+	}
 }
 
 // ceilingOverrideSource is a custom action override that keeps every grant

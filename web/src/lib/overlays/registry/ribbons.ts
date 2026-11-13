@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import type { OverlayDef } from "../types";
 
 // "Ribbon" overlays — status badges that sit in the visual register of corner
@@ -7,7 +8,13 @@ import type { OverlayDef } from "../types";
 // Amber, for a title TMDB no longer lists as saved.
 export const ATTENTION_ACCENT = "#f59e0b";
 
-function formatShowStatus(value: string | undefined): string | null {
+type ShowStatusKey = "Returning" | "Ended" | "Cancelled" | "Upcoming";
+
+/**
+ * The status as the English badge key a viewer's per-value image matches (see
+ * `getValueKey`), or the API's own value when it is not one we know.
+ */
+function showStatusKey(value: string | undefined): string | null {
   if (!value) return null;
   switch (value.toLowerCase()) {
     case "returning":
@@ -29,25 +36,50 @@ function formatShowStatus(value: string | undefined): string | null {
   }
 }
 
+const SHOW_STATUS_LABELS: Record<ShowStatusKey, () => string> = {
+  Returning: () => t("web.settings.overlays.badge.showStatus.value.returning"),
+  Ended: () => t("web.settings.overlays.badge.showStatus.value.ended"),
+  Cancelled: () => t("web.settings.overlays.badge.showStatus.value.cancelled"),
+  Upcoming: () => t("web.settings.overlays.badge.showStatus.value.upcoming"),
+};
+
+/** The badge text: the known statuses in the interface language, any other value as the API sent it. */
+function formatShowStatus(value: string | undefined): string | null {
+  const key = showStatusKey(value);
+  if (key === null) return null;
+  return Object.hasOwn(SHOW_STATUS_LABELS, key) ? SHOW_STATUS_LABELS[key as ShowStatusKey]() : key;
+}
+
 export const RIBBON_OVERLAYS: readonly OverlayDef[] = [
   {
     id: "show_status",
     category: "ribbons",
-    label: "Show Status",
-    description: "Series lifecycle: Returning, Ended, Cancelled",
-    defaultPosition: "top-right",
+    get label() {
+      return t("web.settings.overlays.badge.showStatus.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.showStatus.description");
+    },
+    defaultPosition: "right-edge",
     defaultEnabled: false,
     iconId: "tv",
     iconCapable: true,
-    availabilityNote: "Populated by metadata plugins (TMDB/TVDB updates pending)",
+    get availabilityNote() {
+      return t("web.settings.overlays.badge.showStatus.availabilityNote");
+    },
     getValue: (d) => formatShowStatus(d.show_status),
+    getValueKey: (d) => showStatusKey(d.show_status),
+    valueKeySuggestions: ["Returning", "Ended", "Cancelled", "Upcoming"],
   },
   {
     id: "request_status",
     category: "ribbons",
-    label: "Request Status",
-    description:
-      "Where a watchlist title the library doesn't have yet stands: downloading, release date, awaiting approval",
+    get label() {
+      return t("web.settings.overlays.badge.requestStatus.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.requestStatus.description");
+    },
     defaultPosition: "top-left",
     defaultEnabled: true,
     iconCapable: true,
