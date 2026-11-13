@@ -6,13 +6,16 @@ name: Contribution gate (reusable)
 #
 # 1. Pull requests are open to people who have had one merged in a Silo-Server
 #    repository. Other pull requests are closed without review.
-# 2. A feature pull request (title starts with `feat`) from someone without
+# 2. Draft pull requests are closed, both when they open as drafts and when they
+#    are converted to drafts. Callers run on `converted_to_draft` for that.
+# 3. A feature pull request (title starts with `feat`) from someone without
 #    triage or write access must link an issue in the calling repository that
 #    a maintainer labeled `accepted`.
 #
 # Maintainers (triage access or higher) and bots are exempt. A maintainer lets
 # a closed pull request through by reopening it, which adds the `invited` label;
-# a pull request with that label is never closed by this workflow.
+# a pull request with that label is never closed by this workflow. The separate
+# evidence deadline workflow still applies to it.
 #
 # pull_request_target runs with a write token on fork pull requests. That is safe
 # here only because this job never checks out or runs code from the pull
@@ -101,6 +104,16 @@ jobs:
                 "Thanks for the pull request. Silo takes pull requests from people who have had one merged in a Silo repository, or whom a maintainer has asked for one, so this one is closed without review. That isn't a judgment of the work. If a maintainer asked you for it, they will reopen it.",
                 "",
                 `If the problem still matters, open an issue for it and link this pull request; a maintainer may reopen it or use the code as a reference. Feature ideas go in [Discussions → Ideas](${ideas}). [The contributing guide](${contributing}) explains why.`,
+              ].join("\n"));
+              return;
+            }
+
+            if (pr.draft) {
+              core.info(`#${pr.number} is a draft from ${author}; closing.`);
+              await close([
+                "Thanks for the pull request. Silo doesn't take draft pull requests from contributors, so this one is closed. That isn't a judgment of the work.",
+                "",
+                `When the change is ready for review, open a new pull request with its evidence, or ask a maintainer to reopen this one. [The contributing guide](${contributing}) explains why.`,
               ].join("\n"));
               return;
             }

@@ -1,16 +1,6 @@
-# Pull requests that change these paths need evidence before the Evidence check passes:
-# the web app and web admin, the native API, and jellycompat. The check reads this file at
-# a pull request's base commit. Maintainers override it with the evidence-required and
-# evidence-not-needed labels. See "Show visible changes" in CONTRIBUTING.md.
+# Every pull request needs evidence before the Evidence check passes: before-and-after
+# captures for a change users can see, and the steps, build, and test or API results for a
+# change they can't. The check reads this file at a pull request's base commit. Maintainers
+# waive it with the evidence-not-needed label. See "Show visible changes" in CONTRIBUTING.md.
 require:
-  - web/src/**
-  - contracts/api/**
-  - internal/api/**
-  - internal/apiv2/**
-  - internal/jellycompat/**
-except:
-  - "**/*.test.ts"
-  - "**/*.test.tsx"
-  - "**/*_test.go"
-  - "**/testdata/**"
-  - web/src/test/**
+  - "**"
