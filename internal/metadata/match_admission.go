@@ -57,6 +57,12 @@ type SearchMatchAdmissionRequest struct {
 	Owner               ProviderIDOwnerLookup
 	ItemType            string
 	ContentID           string
+	// NoAuthor marks an item that names no author. Then only the title vouches
+	// for a candidate, and the author check after GetMetadata passes by
+	// default, so a candidate must carry the whole wanted title. A candidate
+	// matching only part of it, "Raw" for "Raw Stream", is not credible
+	// (#3161). An item with provider IDs is checked against those instead.
+	NoAuthor bool
 }
 
 // SearchMatchAdmission is the result of applying title credibility,
@@ -76,6 +82,9 @@ type SearchMatchAdmission struct {
 func AdmitSearchMatch(ctx context.Context, req SearchMatchAdmissionRequest) (SearchMatchAdmission, error) {
 	selection, ok := selectBestMatchYear(req.WantTitle, req.WantYear, req.Results)
 	if !ok {
+		return SearchMatchAdmission{Status: SearchMatchNoCredibleMatch}, nil
+	}
+	if req.NoAuthor && !hasProviderID(req.ExistingProviderIDs) && !titleCovers(req.WantTitle, selection.matchedTitle) {
 		return SearchMatchAdmission{Status: SearchMatchNoCredibleMatch}, nil
 	}
 
@@ -114,6 +123,15 @@ func AdmitSearchMatch(ctx context.Context, req SearchMatchAdmissionRequest) (Sea
 		result.AgreedTitle = selection.matchedTitle
 	}
 	return result, nil
+}
+
+func hasProviderID(ids map[string]string) bool {
+	for provider, id := range ids {
+		if strings.TrimSpace(provider) != "" && strings.TrimSpace(id) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // AdmitProviderIDs stages new identities only after every ownership lookup

@@ -169,3 +169,41 @@ func TestAdmitSearchMatchRejectsConflictingExistingProviderID(t *testing.T) {
 		t.Fatalf("admission = %+v, want provider-ID conflict with no admitted IDs", got)
 	}
 }
+
+// An item with no author has only its title to vouch for a candidate, so the
+// candidate must carry the whole title (#3161). The two untagged books from the
+// issue stay unmatched; a provider's longer form of the same title, an item
+// with an author, and an item with a provider ID are admitted as before.
+func TestAdmitSearchMatchWithoutAnAuthorNeedsTheWholeTitle(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		want      string
+		candidate string
+		noAuthor  bool
+		existing  map[string]string
+		accept    bool
+	}{
+		{name: "a one-word prefix", want: "Raw Stream", candidate: "Raw", noAuthor: true},
+		{name: "two shared words", want: "Unknown Author Book", candidate: "The Book of Unknown Americans", noAuthor: true},
+		{name: "a contained shorter title", want: "Dune Messiah", candidate: "Dune", noAuthor: true},
+		{name: "the same title", want: "Raw Stream", candidate: "Raw Stream", noAuthor: true, accept: true},
+		{name: "the title with a series suffix", want: "Project Hail Mary", candidate: "Project Hail Mary (Unabridged)", noAuthor: true, accept: true},
+		{name: "a partial match with an author", want: "Raw Stream", candidate: "Raw", accept: true},
+		{name: "a partial match with a provider ID", want: "Raw Stream", candidate: "Raw", noAuthor: true, existing: map[string]string{"audible": "B0OTHER"}, accept: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := AdmitSearchMatch(context.Background(), SearchMatchAdmissionRequest{
+				WantTitle:           tc.want,
+				Results:             []SearchResult{{Name: tc.candidate, ProviderIDs: map[string]string{"apple_books": "1417703839"}}},
+				ExistingProviderIDs: tc.existing,
+				NoAuthor:            tc.noAuthor,
+			})
+			if err != nil {
+				t.Fatalf("AdmitSearchMatch: %v", err)
+			}
+			if accepted := got.Status == SearchMatchAccepted; accepted != tc.accept {
+				t.Fatalf("%q for %q: status %s, want accepted = %v", tc.candidate, tc.want, got.Status, tc.accept)
+			}
+		})
+	}
+}

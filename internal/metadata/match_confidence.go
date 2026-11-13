@@ -135,6 +135,17 @@ func normaliseTitle(s string) string {
 	return foldNumberWords(strings.Join(strings.Fields(s), " "))
 }
 
+// titleCovers reports whether candidate carries every word of want, in order:
+// the same title, or the title with more around it, as providers return
+// "Title (Series Book 2)" for "Title". "Raw" does not cover "Raw Stream".
+func titleCovers(want, candidate string) bool {
+	w, c := normaliseTitle(want), normaliseTitle(candidate)
+	if w == "" || c == "" {
+		return false
+	}
+	return strings.Contains(" "+c+" ", " "+w+" ")
+}
+
 type volumeIdentity struct {
 	first int
 	last  int
