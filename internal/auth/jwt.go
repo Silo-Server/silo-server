@@ -90,6 +90,14 @@ func (c *Claims) IsOwnLoginSession() bool {
 		!c.IsRemotePlayback()
 }
 
+// SkipsProfilePIN reports whether the credential may act as a PIN-locked
+// profile without its verification token: an API key or a view-as session.
+// Scopes resolved this way are PINVerificationSkipped; see
+// docs/architecture/profile-verification-tokens.md.
+func (c *Claims) SkipsProfilePIN() bool {
+	return c != nil && (c.TokenType == TokenTypeAPIKey || c.ImpersonatorUserID != nil)
+}
+
 // IsRemotePlayback reports whether the claims belong to a remote-playback
 // handoff session.
 func (c *Claims) IsRemotePlayback() bool {

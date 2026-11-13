@@ -7,10 +7,12 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // The external sign-in domain (docs/architecture/external-sign-in.md): the
@@ -24,6 +26,9 @@ type ExternalSignInService interface {
 	ConnectionTestAvailable() bool
 	ListIdentities(ctx context.Context, userID int) ([]handlers.ExternalIdentityView, error)
 	CanUnlinkAccountIdentity(ctx context.Context, userID int) (bool, error)
+	// MayUnlinkAccountIdentity applies the household-manager rule to
+	// disconnecting an identity: (account, acting profile, PIN verifier).
+	MayUnlinkAccountIdentity(ctx context.Context, userID int, activeProfileID string, verify func(*userstore.Profile) error) (bool, error)
 	UnlinkAccountIdentity(ctx context.Context, userID int, identityID int64) error
 	LinkAdminUserIdentity(ctx context.Context, userID int, in handlers.AdminIdentityLinkInput) (handlers.ExternalIdentityView, error)
 	UnlinkAdminUserIdentity(ctx context.Context, userID int, identityID int64) error
@@ -89,7 +94,7 @@ type AccountIdentity struct {
 // AccountIdentityCollection is the listAccountIdentities response body.
 type AccountIdentityCollection struct {
 	Collection[AccountIdentity]
-	CanUnlink bool `json:"can_unlink" doc:"Whether deleteAccountIdentity would disconnect an identity now: the account has another identity, or its local password still signs in (the account's password sign-in is on, and local password sign-in is on for the server or the account is break-glass). False with no identity" example:"true"`
+	CanUnlink bool `json:"can_unlink" doc:"Whether deleteAccountIdentity would disconnect an identity now for the profile asking: that profile is the account's household manager (deleteAccountIdentity describes who is), and the account has another identity, or its local password still signs in (the account's password sign-in is on, and local password sign-in is on for the server or the account is break-glass). False with no identity" example:"true"`
 }
 
 // AccountIdentityCollectionOutput is the listAccountIdentities response.
@@ -349,8 +354,14 @@ func registerExternalSignIn(reg *Registry) {
 			return out, nil
 		})
 
-	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/account/identities", "listAccountIdentities", "account",
-		"List the external sign-in identities linked to the caller's account."), Class: ClassAuthenticated, ServiceBacked: true},
+	// Both identity operations are profile scoped, profile optional, like
+	// createPersonalAPIKey: disconnecting is held to the household manager,
+	// and the list answers can_unlink for the profile asking, so the viewer
+	// gate must resolve that profile first.
+	list := humaOp(http.MethodGet, Prefix+"/account/identities", "listAccountIdentities", "account",
+		"List the external sign-in identities linked to the caller's account.")
+	list.Description = "Every profile on the account may read the list. can_unlink answers for the profile X-Profile-Id names, or for a request that names none, by deleteAccountIdentity's rule: a profile other than the account's primary one reads false."
+	Register(reg, Operation{Operation: list, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true},
 		func(ctx context.Context, _ *struct{}) (*AccountIdentityCollectionOutput, error) {
 			svc, p := reg.externalSignIn()
 			if p != nil {
@@ -374,15 +385,25 @@ func registerExternalSignIn(reg *Registry) {
 					return nil, serviceProblem(err)
 				}
 			}
+			if canUnlink {
+				// The viewer gate already turned away a PIN-locked profile that
+				// sent no proof. What can still arrive unverified is an API key,
+				// which skips the PIN, or a request the primary profile's PIN
+				// changed under: either reads false rather than failing the list.
+				canUnlink, err = svc.MayUnlinkAccountIdentity(ctx, claims.UserID, profileFrom(ctx), verifyHouseholdProfile(ctx))
+				if err != nil && !errors.Is(err, access.ErrProfileUnverified) {
+					return nil, serviceProblem(err)
+				}
+			}
 			return &AccountIdentityCollectionOutput{Body: AccountIdentityCollection{Collection: NewCollection(items), CanUnlink: canUnlink}}, nil
 		})
 
 	unlink := humaOp(http.MethodDelete, Prefix+"/account/identities/{id}", "deleteAccountIdentity", "account",
 		"Disconnect an external sign-in identity from the caller's account.")
-	unlink.Description = "Allowed only while the account can still sign in another way: its local password (with local password sign-in on, or as a break-glass account) or another identity; otherwise 409 last_sign_in_method. An API key or an impersonation session is refused with 403."
+	unlink.Description = "How the account signs in belongs to the whole household, so only the account's household manager may disconnect an identity. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied. Allowed only while the account can still sign in another way: its local password (with local password sign-in on, or as a break-glass account) or another identity; otherwise 409 last_sign_in_method. An API key or an impersonation session is refused with 403 permission_denied."
 	unlink.DefaultStatus = http.StatusNoContent
 	unlink.Errors = []int{http.StatusForbidden, http.StatusNotFound, http.StatusConflict}
-	Register(reg, Operation{Operation: unlink, Class: ClassAuthenticated, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent},
+	Register(reg, Operation{Operation: unlink, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent},
 		func(ctx context.Context, in *AccountIdentityInput) (*struct{}, error) {
 			svc, p := reg.externalSignIn()
 			if p != nil {
@@ -394,6 +415,16 @@ func registerExternalSignIn(reg *Registry) {
 			}
 			if !claims.IsOwnLoginSession() {
 				return nil, NewProblem(TypePermissionDenied, "Only the account's own signed-in session can disconnect a sign-in.")
+			}
+			allowed, err := svc.MayUnlinkAccountIdentity(ctx, claims.UserID, profileFrom(ctx), verifyHouseholdProfile(ctx))
+			if errors.Is(err, access.ErrProfileUnverified) {
+				return nil, NewProblem(TypeProfileVerificationRequired, "Disconnecting a sign-in requires verifying the primary profile PIN.")
+			}
+			if err != nil {
+				return nil, serviceProblem(err)
+			}
+			if !allowed {
+				return nil, NewProblem(TypePermissionDenied, "Disconnecting a sign-in requires the account's primary profile.")
 			}
 			identityID, p := in.ID.positive64("path.id")
 			if p != nil {

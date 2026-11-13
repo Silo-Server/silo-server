@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import type { ItemDetail } from "@/api/types";
 import { useWatchedStateMutation } from "@/hooks/queries/items";
+import { useAppLanguage } from "@/i18n";
 import { getWatchedActionLabel } from "../watchedState";
 
 /**
@@ -9,6 +10,7 @@ import { getWatchedActionLabel } from "../watchedState";
  * Unwatched for the More menu.
  */
 export function useDetailWatchedActions(item: ItemDetail) {
+  useAppLanguage();
   const { mutate: setWatched, isPending: isUpdatingWatched } = useWatchedStateMutation(item);
   // Leaf detail also carries the season counters, so read the position itself.
   const userData = item.user_data;

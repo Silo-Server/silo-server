@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Silo-Server/silo-server/internal/metadata"
+	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 )
 
 type fakeMetadataImageCacheRunner struct {
@@ -141,28 +142,7 @@ func TestImageCacheWorkerCount(t *testing.T) {
 	// The admin setting flows through to the next run.
 	SetImageWorkers(3)
 	defer SetImageWorkers(0)
-	if got := cacheMetadataImagesWorkers(); got != 3 && detectImageCacheMemoryBytes() >= 3*imageCacheWorkerMemoryBudget {
+	if got := cacheMetadataImagesWorkers(); got != 3 && nodemetrics.ProcessMemoryLimitBytes() >= 3*imageCacheWorkerMemoryBudget {
 		t.Errorf("configured workers = %d, want 3", got)
-	}
-}
-
-// Conflicting memory bounds resolve to the smallest positive one: GOMEMLIMIT
-// can be set looser than the cgroup limit and the cgroup limit can sit above
-// host memory, so no single source can be preferred outright.
-func TestTightestMemoryLimit(t *testing.T) {
-	const gib = int64(1) << 30
-	cases := []struct {
-		limits []int64
-		want   int64
-	}{
-		{limits: []int64{4 * gib, 2 * gib, 8 * gib}, want: 2 * gib}, // smallest wins
-		{limits: []int64{0, 2 * gib, 0}, want: 2 * gib},             // zeros mean "no bound", not zero bytes
-		{limits: []int64{0, 0, 0}, want: 0},                         // nothing detectable
-		{limits: []int64{6 * gib}, want: 6 * gib},
-	}
-	for _, tc := range cases {
-		if got := tightestMemoryLimit(tc.limits...); got != tc.want {
-			t.Errorf("tightestMemoryLimit(%v) = %d, want %d", tc.limits, got, tc.want)
-		}
 	}
 }

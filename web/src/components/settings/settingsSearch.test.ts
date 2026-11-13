@@ -65,6 +65,18 @@ describe("settingsSearch", () => {
     expect(countSettingsSearchItems(filtered)).toBe(2);
   });
 
+  it("matches a group's keywords by returning the full group", () => {
+    // A translated heading keeps its English name as a keyword.
+    const translated = [
+      {
+        label: "Reproducción",
+        keywords: ["Playback"],
+        items: [{ label: "Subtítulos", description: "Comportamiento y estilo" }],
+      },
+    ];
+    expect(filterSettingsSearchGroups(translated, "playback")).toEqual(translated);
+  });
+
   it("does not match short tokens from the middle of a word", () => {
     expect(filterSettingsSearchGroups(groups, "pin")).toEqual([]);
   });

@@ -2,8 +2,9 @@ package handlers
 
 import (
 	"context"
-	"github.com/Silo-Server/silo-server/internal/config"
 	"net/http"
+
+	"github.com/Silo-Server/silo-server/internal/config"
 )
 
 // ReadAdminSetting preserves protected-key hiding and empty-value absence.

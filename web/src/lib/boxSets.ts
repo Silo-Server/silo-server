@@ -1,15 +1,16 @@
 import type { BoxSetSummary, BrowseItem } from "@/api/types";
+import { numberText, t } from "@/i18n";
 
 /** "2001 – 2011", or one year when the box set spans one. */
 export function boxSetYears(boxSet: Pick<BoxSetSummary, "first_year" | "last_year">) {
   const first = boxSet.first_year || undefined;
   const last = boxSet.last_year || undefined;
-  if (first && last && first !== last) return `${first} – ${last}`;
-  return String(first ?? last ?? "");
+  if (first && last && first !== last) return `${numberText(first)} – ${numberText(last)}`;
+  return numberText(first ?? last ?? "");
 }
 
 export function boxSetFilmCount(count: number) {
-  return `${count} ${count === 1 ? "film" : "films"}`;
+  return t("web.detail.boxSet.filmCount", { count });
 }
 
 /**

@@ -42,6 +42,9 @@ func (p *MeilisearchSearchProvider) searchCursorPage(ctx context.Context, req Ca
 		if cursor.Provider != SearchProviderMeilisearch || cursor.Config != config {
 			return nil, ErrCatalogCursorChanged
 		}
+		if p.sessions == nil {
+			return nil, ErrSearchContinuationUnavailable
+		}
 		var err error
 		session, err = p.sessions.get(ctx, req.Access.UserID, cursor.SessionID)
 		if err != nil {
@@ -62,6 +65,9 @@ func (p *MeilisearchSearchProvider) searchCursorPage(ctx context.Context, req Ca
 				return nil, err
 			}
 			return p.fallbackSearch(ctx, req, "Meilisearch ranking unavailable before traversal")
+		}
+		if p.sessions == nil {
+			return nil, ErrSearchContinuationUnavailable
 		}
 		sessionID, err = p.sessions.put(ctx, req.Access.UserID, *session)
 		if err != nil {

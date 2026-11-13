@@ -241,7 +241,7 @@ describe("Layout sidebar collapse", () => {
 
       expect(document.documentElement.hasAttribute("data-sidebar-collapsed")).toBe(collapsed);
       expect(screen.getByTestId("sidebar-surface").hasAttribute("data-collapsed")).toBe(collapsed);
-      expect(screen.getByRole("main")).toHaveClass(collapsed ? "lg:ml-16" : "lg:ml-[260px]");
+      expect(screen.getByRole("main")).toHaveClass(collapsed ? "lg:ms-16" : "lg:ms-[260px]");
     }
   });
 
@@ -250,7 +250,7 @@ describe("Layout sidebar collapse", () => {
     renderLayout();
 
     expect(screen.getByTestId("sidebar-surface")).toHaveAttribute("data-collapsed", "true");
-    expect(screen.getByRole("main")).toHaveClass("lg:ml-16");
+    expect(screen.getByRole("main")).toHaveClass("lg:ms-16");
     expect(screen.getByRole("status", { name: "details-ready" })).toHaveTextContent("true");
   });
 });
@@ -272,7 +272,7 @@ describe("Layout request routes", () => {
 
     expect(isShellPadded()).toBe(padded);
     expect(screen.getByTestId("sidebar-surface").hasAttribute("data-collapsed")).toBe(collapsed);
-    expect(screen.getByRole("main")).toHaveClass(collapsed ? "lg:ml-16" : "lg:ml-[260px]");
+    expect(screen.getByRole("main")).toHaveClass(collapsed ? "lg:ms-16" : "lg:ms-[260px]");
   });
 });
 

@@ -1,6 +1,8 @@
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
+import { t } from "@/i18n";
+
 import {
   captureProfileRequestContext,
   StaleApiRequestContextError,
@@ -71,7 +73,7 @@ export function useSetAudioPreference() {
       ),
     onSuccess: () => invalidateItemDetails(queryClient),
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to save audio preference");
+      toast.error(err instanceof Error ? err.message : t("web.player.tracks.saveAudioFailed"));
     },
   });
 }
@@ -94,7 +96,7 @@ export function useDeleteAudioPreference() {
       ),
     onSuccess: () => invalidateItemDetails(queryClient),
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to reset audio preference");
+      toast.error(err instanceof Error ? err.message : t("web.player.tracks.resetAudioFailed"));
     },
   });
 }

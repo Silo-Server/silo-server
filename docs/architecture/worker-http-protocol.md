@@ -84,8 +84,9 @@ extraction can acquire the GPU admission gate. There is no native API alias.
 the run's `mediasample.Result` as JSON, sheets base64-encoded. A request with
 `sheets.use_input_aspect` uses the execution probe's display geometry and
 returns its actual cell height as `sheet_tile_height`. It passes node
-bearer authentication and approved-input-path authority first, runs one
-request at a time (a second answers `503` with reason `node_busy`), runs at
+bearer authentication and approved-input-path authority first, runs up to
+`playback.trickplay_node_capacity` requests at once (default 1; the next
+answers `503` with reason `node_busy`), runs at
 idle priority, and decodes on the node's own hardware: it drops hardware
 attempts its accelerator cannot run. It takes the GPU admission gate before
 resolving the hardware backend, which can run probes, and holds it for the
@@ -387,6 +388,27 @@ rolling one worker back alone leaves it refusing every upgraded sender.
 The next release removes the legacy bearer from `nodeauth.Verify`. Its release
 notes must name this release as a required step for rolling upgrades, because
 its workers refuse senders from before this release.
+
+## Media paths in stream tokens
+
+Stream, download and theme tokens name the file they serve, and clients hold
+them: they travel in worker URLs, and anyone holding a JWT can read its claims.
+So `streamtoken.Sign` never writes the media path in the clear. It seals it
+with AES-256-GCM under a key derived from `auth.jwt_secret` with HKDF-SHA256
+(no salt, info `silo/stream-token-media-path/v1`, 32 bytes) into the `spath`
+claim, and `streamtoken.Verify` opens it back into `MediaPath`. Every server
+and worker that verifies tokens already holds the secret, so none needs new
+configuration.
+
+A token signed by an earlier release carries the path in `path` and still
+verifies, so tokens issued before an upgrade keep working on upgraded workers.
+An earlier worker finds no `path` in a new token and fails the request, so a
+rolling upgrade follows the order above: transcode nodes, then proxies, then
+API servers.
+
+A proxy names a source download by the token's `dfn` claim when the API sent
+one, which keeps the file's own name on the server for a viewer who may not
+see it.
 
 ## Remaining progressive and HLS delivery chain
 

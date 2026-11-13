@@ -161,21 +161,6 @@ func (m *Manager) Search(ctx context.Context, req SearchRequest) (*SearchRespons
 	return resp, nil
 }
 
-// SearchBridge returns the legacy provider language payload for the frozen v1
-// bridge while sharing the canonical search and scoring path.
-func (m *Manager) SearchBridge(ctx context.Context, req SearchRequest) (*SearchResponse, error) {
-	resp, err := m.Search(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	for i := range resp.Results {
-		if resp.Results[i].rawLanguage != "" {
-			resp.Results[i].Language = resp.Results[i].rawLanguage
-		}
-	}
-	return resp, nil
-}
-
 // DownloadRequest contains metadata from the search result the user selected.
 type DownloadRequest struct {
 	ProviderName    string
@@ -473,18 +458,4 @@ func (m *Manager) GetSubtitleContent(ctx context.Context, id int) (*DownloadedSu
 // file (used to enumerate offline subtitle assets).
 func (m *Manager) ListDownloadedSubtitles(ctx context.Context, mediaFileID int) ([]DownloadedSubtitle, error) {
 	return m.repo.ListDownloadedSubtitles(ctx, mediaFileID)
-}
-
-// DeleteSubtitle removes the database row, then attempts object cleanup.
-// Success means metadata is absent; object cleanup is best effort.
-func (m *Manager) DeleteSubtitle(ctx context.Context, id int) error {
-	sub, err := m.repo.DeleteDownloadedSubtitle(ctx, id)
-	if err != nil {
-		return fmt.Errorf("delete subtitle record: %w", err)
-	}
-	if sub == nil {
-		return nil
-	}
-	m.cleanupSubtitleObject(ctx, sub.S3Key)
-	return nil
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SlidersHorizontal } from "lucide-react";
+import { useT } from "@/i18n";
 import type { AudiobookPrefs } from "./useAudiobookPrefs";
 
 interface PlayerSettingsMenuProps {
@@ -8,6 +9,7 @@ interface PlayerSettingsMenuProps {
 
 /** Skip-interval and smart-rewind preferences, anchored to the player bar. */
 export function PlayerSettingsMenu({ prefs }: PlayerSettingsMenuProps) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   // Intervals are unavailable while the server's support is still being
@@ -15,12 +17,12 @@ export function PlayerSettingsMenu({ prefs }: PlayerSettingsMenuProps) {
   // stays browser-local and editable throughout.
   const intervalsDisabled = !prefs.canEditSkipIntervals || prefs.isSavingSkipIntervals;
   const intervalsNote = !prefs.canEditSkipIntervals
-    ? "Checking what this server supports…"
+    ? t("web.audiobooks.player.intervalsChecking")
     : !prefs.hasSharedSkipIntervals
-      ? "Saved on this browser only"
+      ? t("web.audiobooks.player.intervalsBrowserOnly")
       : prefs.sharedSkipIntervalsError
-        ? "Couldn't load your profile's intervals; showing defaults"
-        : "Saved to your profile for every Silo app";
+        ? t("web.audiobooks.player.intervalsLoadFailed")
+        : t("web.audiobooks.player.intervalsShared");
 
   const handleBlur = useCallback((e: React.FocusEvent) => {
     if (!containerRef.current?.contains(e.relatedTarget as Node)) {
@@ -41,10 +43,10 @@ export function PlayerSettingsMenu({ prefs }: PlayerSettingsMenuProps) {
         type="button"
         className="player-utility-btn"
         onClick={() => setOpen((v) => !v)}
-        aria-label="Player settings"
+        aria-label={t("web.audiobooks.player.settings")}
         aria-expanded={open}
         aria-haspopup="dialog"
-        title="Player settings"
+        title={t("web.audiobooks.player.settings")}
       >
         <SlidersHorizontal className="h-[18px] w-[18px]" />
       </button>
@@ -52,18 +54,18 @@ export function PlayerSettingsMenu({ prefs }: PlayerSettingsMenuProps) {
       {open && (
         <div
           role="dialog"
-          aria-label="Player settings"
-          className="absolute right-0 bottom-full mb-2 flex w-[260px] flex-col gap-4 rounded-lg bg-black/90 px-4 py-3.5 shadow-xl backdrop-blur-sm"
+          aria-label={t("web.audiobooks.player.settings")}
+          className="absolute end-0 bottom-full mb-2 flex w-[260px] flex-col gap-4 rounded-lg bg-black/90 px-4 py-3.5 shadow-xl backdrop-blur-sm"
         >
           <SkipIntervalRow
-            label="Skip back"
+            label={t("web.audiobooks.player.settingsSkipBack")}
             value={prefs.skipBack}
             choices={prefs.choices.back}
             onChange={prefs.setSkipBack}
             disabled={intervalsDisabled}
           />
           <SkipIntervalRow
-            label="Skip forward"
+            label={t("web.audiobooks.player.settingsSkipForward")}
             value={prefs.skipForward}
             choices={prefs.choices.forward}
             onChange={prefs.setSkipForward}
@@ -75,13 +77,15 @@ export function PlayerSettingsMenu({ prefs }: PlayerSettingsMenuProps) {
             type="button"
             role="switch"
             aria-checked={prefs.smartRewind}
-            className="group flex items-start justify-between gap-3 text-left focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
+            className="group flex items-start justify-between gap-3 text-start focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
             onClick={() => prefs.setSmartRewind(!prefs.smartRewind)}
           >
             <span className="flex flex-col gap-0.5">
-              <span className="text-sm text-white/85">Smart rewind</span>
+              <span className="text-sm text-white/85">
+                {t("web.audiobooks.player.smartRewind")}
+              </span>
               <span className="text-[11px] leading-snug text-white/40">
-                Backs up a little after a pause
+                {t("web.audiobooks.player.smartRewindHint")}
               </span>
             </span>
             <span
@@ -92,7 +96,7 @@ export function PlayerSettingsMenu({ prefs }: PlayerSettingsMenuProps) {
             >
               <span
                 className={`h-[14px] w-[14px] rounded-full bg-black/80 transition-transform ${
-                  prefs.smartRewind ? "translate-x-[14px]" : "translate-x-0"
+                  prefs.smartRewind ? "translate-x-[14px] rtl:-translate-x-[14px]" : "translate-x-0"
                 }`}
               />
             </span>
@@ -116,6 +120,7 @@ function SkipIntervalRow({
   onChange: (seconds: number) => void;
   disabled?: boolean;
 }) {
+  const t = useT();
   return (
     <div
       role="group"
@@ -137,7 +142,7 @@ function SkipIntervalRow({
             }`}
             onClick={() => onChange(seconds)}
           >
-            {seconds}s
+            {t("web.audiobooks.player.settingsSeconds", { seconds: seconds })}
           </button>
         ))}
       </div>

@@ -13,6 +13,7 @@ import {
   useArtworkPreview,
   type ArtworkFallback,
 } from "../fields/artworkPreview";
+import { useT } from "@/i18n";
 
 /** A small poster or backdrop for the closed card. */
 function Thumb({
@@ -50,6 +51,7 @@ function Thumb({
  * an image couldn't be saved, so Retry is in sight.
  */
 export function LookPanel(props: ComponentProps<typeof ArtworkFields>) {
+  const t = useT();
   const { slots, saved, value, errors, posterFallback = { collages: true } } = props;
   const fallbackOf = (slot: ArtworkSlot) => (slot === "poster" ? posterFallback : NO_FALLBACK);
   const id = useId();
@@ -84,7 +86,7 @@ export function LookPanel(props: ComponentProps<typeof ArtworkFields>) {
         <div id={`${id}-body`} className="grid gap-4 p-5 sm:p-6">
           <div className="flex items-center justify-between gap-3">
             <h2 id={`${id}-heading`} className="text-[17px] font-semibold">
-              Look
+              {t("web.collections.look.heading")}
             </h2>
             <Button
               ref={doneButton}
@@ -95,7 +97,7 @@ export function LookPanel(props: ComponentProps<typeof ArtworkFields>) {
               aria-controls={`${id}-body`}
               onClick={() => toggle(false)}
             >
-              Done
+              {t("common.done")}
               <ChevronUp aria-hidden className="opacity-70" />
             </Button>
           </div>
@@ -109,7 +111,7 @@ export function LookPanel(props: ComponentProps<typeof ArtworkFields>) {
           aria-labelledby={`${id}-heading`}
           aria-describedby={`${id}-summary`}
           onClick={() => toggle(true)}
-          className="hover:bg-accent/30 focus-visible:ring-ring/50 grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 rounded-[22px] px-4 py-4 text-left outline-none focus-visible:ring-[3px] max-sm:grid-cols-[auto_minmax(0,1fr)] sm:pr-6"
+          className="hover:bg-accent/30 focus-visible:ring-ring/50 grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 rounded-[22px] px-4 py-4 text-start outline-none focus-visible:ring-[3px] max-sm:grid-cols-[auto_minmax(0,1fr)] sm:pe-6"
         >
           <span className="flex items-center gap-2">
             {slots.map((slot) => (
@@ -124,7 +126,7 @@ export function LookPanel(props: ComponentProps<typeof ArtworkFields>) {
           </span>
           <span className="grid min-w-0 gap-0.5">
             <span id={`${id}-heading`} className="text-[15px] font-semibold">
-              Look
+              {t("web.collections.look.heading")}
             </span>
             <span id={`${id}-summary`} className="text-muted-foreground text-[13px]">
               {summary}
@@ -134,7 +136,7 @@ export function LookPanel(props: ComponentProps<typeof ArtworkFields>) {
             aria-hidden
             className="border-border inline-flex h-8 items-center gap-1.5 rounded-[10px] border px-3 text-[13.5px] font-medium max-sm:hidden"
           >
-            Change
+            {t("web.collections.look.change")}
             <ChevronDown className="size-3.5 opacity-70" />
           </span>
         </button>

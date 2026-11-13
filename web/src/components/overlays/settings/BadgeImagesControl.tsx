@@ -10,6 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useT } from "@/i18n";
 import type { OverlayDef, OverlayImage, OverlayItemConfig } from "@/lib/overlays";
 
 const NONE = "__none__";
@@ -27,6 +28,7 @@ function ImageSelect({
   noneLabel: string;
   onChange: (next: string | undefined) => void;
 }) {
+  const t = useT();
   return (
     <Select
       value={value ?? NONE}
@@ -47,7 +49,7 @@ function ImageSelect({
         ))}
         {/* A ref the library no longer holds still shows, so it can be cleared. */}
         {value && !images.some((image) => image.ref === value) ? (
-          <SelectItem value={value}>Removed image</SelectItem>
+          <SelectItem value={value}>{t("web.settings.overlays.images.removed")}</SelectItem>
         ) : null}
       </SelectContent>
     </Select>
@@ -69,6 +71,7 @@ export function BadgeImagesControl({
   images: readonly OverlayImage[];
   onChange: (next: Partial<OverlayItemConfig>) => void;
 }) {
+  const t = useT();
   const [newKey, setNewKey] = useState("");
   const [newImage, setNewImage] = useState<string | undefined>(undefined);
   const suggestionsId = useId();
@@ -82,20 +85,20 @@ export function BadgeImagesControl({
   return (
     <div className="space-y-3">
       <div className="space-y-1.5">
-        <p className="text-sm font-medium">Icon image</p>
+        <p className="text-sm font-medium">{t("web.settings.overlays.images.iconImage")}</p>
         <ImageSelect
           value={config.image}
           images={images}
-          label={`${def.label} icon image`}
-          noneLabel="Built-in icon"
+          label={t("web.settings.overlays.images.iconImageLabel", { badge: def.label })}
+          noneLabel={t("web.settings.overlays.images.builtInIcon")}
           onChange={(image) => onChange({ image })}
         />
       </div>
       {def.getValueKey ? (
         <div className="space-y-1.5">
-          <p className="text-sm font-medium">Images for values</p>
+          <p className="text-sm font-medium">{t("web.settings.overlays.images.valueImages")}</p>
           <p className="text-muted-foreground text-[13px] leading-relaxed">
-            Replaces the whole badge while it shows that value.
+            {t("web.settings.overlays.images.valueImagesHelp")}
           </p>
           {entries.map(([key, ref]) => (
             <div key={key} className="flex items-center gap-2">
@@ -105,8 +108,8 @@ export function BadgeImagesControl({
               <ImageSelect
                 value={ref}
                 images={images}
-                label={`Image for ${key}`}
-                noneLabel="No image"
+                label={t("web.settings.overlays.images.imageFor", { value: key })}
+                noneLabel={t("web.settings.overlays.images.noImage")}
                 onChange={(next) => {
                   const rest = { ...valueImages };
                   if (next) rest[key] = next;
@@ -118,7 +121,7 @@ export function BadgeImagesControl({
                 type="button"
                 variant="ghost"
                 size="icon"
-                aria-label={`Remove the image for ${key}`}
+                aria-label={t("web.settings.overlays.images.removeFor", { value: key })}
                 onClick={() => {
                   const rest = { ...valueImages };
                   delete rest[key];
@@ -134,8 +137,8 @@ export function BadgeImagesControl({
               <Input
                 value={newKey}
                 onChange={(event) => setNewKey(event.target.value)}
-                placeholder="Value"
-                aria-label="Value"
+                placeholder={t("web.settings.overlays.images.value")}
+                aria-label={t("web.settings.overlays.images.value")}
                 list={def.valueKeySuggestions ? suggestionsId : undefined}
                 className="w-24 shrink-0"
                 maxLength={64}
@@ -152,15 +155,15 @@ export function BadgeImagesControl({
               <ImageSelect
                 value={newImage}
                 images={images}
-                label="Image for the new value"
-                noneLabel="Pick an image"
+                label={t("web.settings.overlays.images.newValueImage")}
+                noneLabel={t("web.settings.overlays.images.pickImage")}
                 onChange={setNewImage}
               />
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
-                aria-label="Add the value image"
+                aria-label={t("web.settings.overlays.images.addValueImage")}
                 disabled={!canAdd}
                 onClick={() => {
                   if (!canAdd || newImage === undefined) return;

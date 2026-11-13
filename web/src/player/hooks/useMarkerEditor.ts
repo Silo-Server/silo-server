@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { t, type MessageKey } from "@/i18n";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
 import { playerV2 } from "../player-v2";
 import { markerUpdateToV2 } from "../marker-wire";
@@ -7,12 +8,12 @@ import type { MarkerDraft, MarkerKind, PlayerTimeRange } from "../types";
 /** Edit order shown in the panel: chronological-ish within an episode. */
 export const MARKER_KINDS: MarkerKind[] = ["intro", "recap", "credits", "preview"];
 
-/** Human labels. "credits" doubles as the outro, so we say so. */
-export const MARKER_LABELS: Record<MarkerKind, string> = {
-  intro: "Intro",
-  recap: "Recap",
-  credits: "Credits / Outro",
-  preview: "Preview",
+/** Message ids of the human labels. "credits" doubles as the outro, so we say so. */
+export const MARKER_LABEL_KEYS: Record<MarkerKind, MessageKey> = {
+  intro: "web.markers.kind.intro",
+  recap: "web.markers.kind.recap",
+  credits: "web.markers.kind.credits",
+  preview: "web.markers.kind.preview",
 };
 
 // Initial span (seconds) given to a freshly created marker before the user
@@ -202,7 +203,7 @@ export function useMarkerEditor({
         body: markerUpdateToV2(body),
       });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save markers");
+      setError(e instanceof Error ? e.message : t("web.markers.saveFailed"));
       return;
     } finally {
       setSaving(false);

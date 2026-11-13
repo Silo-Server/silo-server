@@ -89,3 +89,13 @@ func TestRewriteFileRecordKeepsSidecarsInsideTheLibrary(t *testing.T) {
 		})
 	}
 }
+
+// The locked_fields columns don't take NULL, so a bundle's explicit empty list
+// must stay an empty list.
+func TestCloneIntsNeverReturnsNil(t *testing.T) {
+	for _, values := range [][]int{nil, {}} {
+		if cloneInts(values) == nil {
+			t.Errorf("cloneInts(%#v) = nil", values)
+		}
+	}
+}

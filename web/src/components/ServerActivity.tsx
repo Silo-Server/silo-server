@@ -28,6 +28,7 @@ import {
 } from "@/pages/adminActivityPresentation";
 import { cn } from "@/lib/utils";
 import { clampTaskProgress, formatTaskProgress } from "@/lib/taskProgress";
+import { taskText } from "@/lib/taskText";
 import {
   activePreparationCount,
   formatPreparationKind,
@@ -38,12 +39,16 @@ import {
   preparationRunningLabel,
   preparationWorker,
 } from "@/pages/adminDownloadPreparationPresentation";
+import { formatLocale } from "@/lib/appLocale";
+import { useAdminMessages, useServerText, useT, type MessageKey, type Translate } from "@/i18n";
 
 const CONNECTION_PROBLEM_INDICATOR_DELAY_MS = 4_000;
 const MAX_ACTIVITY_SCAN_ROWS = 25;
 const MAX_BADGE_COUNT = 99;
 const ACTIVE_SCAN_SNAPSHOT_LIMIT = 500;
 const MAX_ACTIVITY_PREPARATION_ROWS = 3;
+// Joins a scan's mode and its path, which is data.
+const DETAIL_SEPARATOR = " · ";
 export const PREPARATIONS_HREF = "/admin/downloads?tab=preparation";
 
 interface ServerActivityProps {
@@ -56,6 +61,7 @@ interface ServerActivityProps {
 // Channel subscriptions are owned by the parent layout
 // (AdminLayoutEventChannels / AdminEventChannels), not here.
 function useServerActivityData() {
+  const t = useT();
   const { data: sessions = [] } = useAdminSessions();
   const { data: tasks = [] } = useTasksIncludingHidden();
   const { data: scans } = useActiveScans();
@@ -92,7 +98,9 @@ function useServerActivityData() {
   const totalActive =
     sessions.length + runningTasks.length + activeScans.length + activePreparations;
 
-  const libraryName = (id: number) => libraries.find((l) => l.id === id)?.name ?? `Library #${id}`;
+  const libraryName = (id: number) =>
+    libraries.find((l) => l.id === id)?.name ??
+    t("web.admin.common.serverActivity.libraryFallback", { id: id });
 
   return {
     sessions,
@@ -139,7 +147,13 @@ function useDelayedConnectionProblem(connectionState: RealtimeConnectionState) {
   return isNonLive && connectionProblemState;
 }
 
-export default function ServerActivity({ hideWhenEmpty = false, className }: ServerActivityProps) {
+export default function ServerActivity(props: ServerActivityProps) {
+  // The sidebar mounts this for an admin outside the admin layout, so its text may not have loaded.
+  return useAdminMessages({ optional: true }) ? <ServerActivityContent {...props} /> : null;
+}
+
+function ServerActivityContent({ hideWhenEmpty = false, className }: ServerActivityProps) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const location = useLocation();
 
@@ -172,8 +186,16 @@ export default function ServerActivity({ hideWhenEmpty = false, className }: Ser
           type="button"
           aria-label={
             totalActive > 0
-              ? `Server activity: ${activeScansMayBeTruncated ? "at least " : ""}${totalActive} active`
-              : "Server activity"
+              ? t(
+                  activeScansMayBeTruncated
+                    ? "web.admin.common.serverActivity.trigger.atLeast"
+                    : "web.admin.common.serverActivity.trigger.active",
+                  {
+                    count: totalActive,
+                    count_text: totalActive,
+                  },
+                )
+              : t("web.admin.common.serverActivity.trigger.idle")
           }
           className={cn(
             "hover:bg-accent/60 relative flex h-9 w-9 items-center justify-center rounded-xl transition-colors",
@@ -186,13 +208,13 @@ export default function ServerActivity({ hideWhenEmpty = false, className }: Ser
             }`}
           />
           {totalActive > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 flex h-[18px] min-w-[18px] animate-[pulse-opacity_2s_ease-in-out_infinite] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white shadow-sm">
+            <span className="absolute -end-0.5 -top-0.5 flex h-[18px] min-w-[18px] animate-[pulse-opacity_2s_ease-in-out_infinite] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white shadow-sm">
               {totalActiveLabel}
             </span>
           )}
           {showConnectionProblem && (
             <span
-              className="ring-background absolute -right-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full bg-red-500 ring-2"
+              className="ring-background absolute -end-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full bg-red-500 ring-2"
               aria-hidden="true"
             />
           )}
@@ -208,10 +230,14 @@ export default function ServerActivity({ hideWhenEmpty = false, className }: Ser
         >
           {/* Header */}
           <div className="flex items-center justify-between border-b border-[color-mix(in_srgb,var(--border)_50%,transparent)] px-4 py-3">
-            <span className="text-[13px] font-bold">Server Activity</span>
+            <span className="text-[13px] font-bold">
+              {t("web.admin.common.serverActivity.title")}
+            </span>
             {connectionState !== "live" && (
               <span className="text-warning text-[10px] font-medium">
-                {connectionState === "connecting" ? "Connecting…" : "Disconnected"}
+                {connectionState === "connecting"
+                  ? t("web.admin.common.serverActivity.connecting")
+                  : t("web.admin.common.serverActivity.disconnected")}
               </span>
             )}
           </div>
@@ -221,13 +247,13 @@ export default function ServerActivity({ hideWhenEmpty = false, className }: Ser
                 behind the empty state would leave them nowhere to be seen. */}
             {totalActive === 0 && scansLoaded && !preparationCounts?.failed_recent ? (
               <div className="text-muted-foreground px-4 py-8 text-center text-sm">
-                No active server activity
+                {t("web.admin.common.serverActivity.empty")}
               </div>
             ) : (
               <>
                 {/* Streams */}
                 <ActivitySection
-                  title="Streams"
+                  title={t("web.admin.common.serverActivity.streams")}
                   count={sessions.length}
                   href="/admin/activity"
                   onNavigate={() => setOpen(false)}
@@ -241,13 +267,13 @@ export default function ServerActivity({ hideWhenEmpty = false, className }: Ser
                         ))}
                     </div>
                   ) : (
-                    <EmptyRow>No active streams</EmptyRow>
+                    <EmptyRow>{t("web.admin.common.serverActivity.noStreams")}</EmptyRow>
                   )}
                 </ActivitySection>
 
                 {/* Tasks */}
                 <ActivitySection
-                  title="Tasks"
+                  title={t("web.admin.common.serverActivity.tasks")}
                   count={runningTasks.length}
                   href="/admin/tasks"
                   onNavigate={() => setOpen(false)}
@@ -259,13 +285,13 @@ export default function ServerActivity({ hideWhenEmpty = false, className }: Ser
                       ))}
                     </div>
                   ) : (
-                    <EmptyRow>No running tasks</EmptyRow>
+                    <EmptyRow>{t("web.admin.common.serverActivity.noTasks")}</EmptyRow>
                   )}
                 </ActivitySection>
 
                 {/* Scans */}
                 <ActivitySection
-                  title="Scans"
+                  title={t("web.admin.common.serverActivity.scans")}
                   count={activeScans.length}
                   countIsLowerBound={activeScansMayBeTruncated}
                   href="/admin/libraries"
@@ -284,19 +310,18 @@ export default function ServerActivity({ hideWhenEmpty = false, className }: Ser
                       {hiddenActiveScanCount > 0 && (
                         <MoreRows
                           count={hiddenActiveScanCount}
-                          label="more scans queued"
                           countIsLowerBound={activeScansMayBeTruncated}
                         />
                       )}
                     </div>
                   ) : (
-                    <EmptyRow>No active scans</EmptyRow>
+                    <EmptyRow>{t("web.admin.common.serverActivity.noScans")}</EmptyRow>
                   )}
                 </ActivitySection>
 
                 {preparationCounts && (
                   <ActivitySection
-                    title="Preparing downloads"
+                    title={t("web.admin.common.serverActivity.preparing")}
                     count={activePreparations}
                     href={PREPARATIONS_HREF}
                     onNavigate={() => setOpen(false)}
@@ -340,6 +365,7 @@ function ActivitySection({
   last?: boolean;
   children: React.ReactNode;
 }) {
+  const t = useT();
   return (
     <div
       className={
@@ -364,7 +390,7 @@ function ActivitySection({
           onClick={onNavigate}
           className="text-muted-foreground hover:text-primary flex items-center gap-0.5 text-[10px] font-medium transition-colors"
         >
-          View all
+          {t("web.admin.common.serverActivity.viewAll")}
           <ChevronRight className="h-3 w-3" />
         </Link>
       </div>
@@ -381,18 +407,25 @@ function formatBadgeCount(count: number, countIsLowerBound = false) {
 }
 
 function StreamCountRow({ method, count }: { method: string; count: number }) {
+  const t = useT();
   const meta = activityMethodMeta(method);
   return (
     <div className="flex items-center gap-2.5">
       <span className={`h-2 w-2 rounded-full ${meta.swatchClass}`} />
       <span className="text-[12px] font-medium">
-        {count} {meta.label}
+        {t("web.admin.common.serverActivity.streamCount", {
+          count,
+          count_text: count,
+          method: meta.label,
+        })}
       </span>
     </div>
   );
 }
 
 function TaskRow({ task, onNavigate }: { task: TaskInfo; onNavigate: () => void }) {
+  const t = useT();
+  const serverText = useServerText();
   const hasDeterminateProgress = task.progress > 0;
 
   return (
@@ -404,16 +437,16 @@ function TaskRow({ task, onNavigate }: { task: TaskInfo; onNavigate: () => void 
           onClick={onNavigate}
           className="hover:text-primary truncate text-[12px] font-medium transition-colors"
         >
-          {task.name}
+          {taskText(serverText, task, "name")}
         </Link>
         {hasDeterminateProgress ? (
-          <span className="text-muted-foreground ml-2 shrink-0 text-[10px] font-semibold tabular-nums">
+          <span className="text-muted-foreground ms-2 shrink-0 text-[10px] font-semibold tabular-nums">
             {formatTaskProgress(task.progress)}
           </span>
         ) : (
-          <span className="text-primary ml-2 flex shrink-0 items-center gap-1 text-[10px] font-semibold">
+          <span className="text-primary ms-2 flex shrink-0 items-center gap-1 text-[10px] font-semibold">
             <Loader className="h-3 w-3 animate-spin" aria-hidden="true" />
-            Running
+            {t("web.admin.common.serverActivity.running")}
           </span>
         )}
       </div>
@@ -444,18 +477,24 @@ function PreparationsSummary({
   failed: number;
   onNavigate: () => void;
 }) {
+  const t = useT();
   const visible = running.slice(0, MAX_ACTIVITY_PREPARATION_ROWS);
   // Running jobs past the visible rows join the waiting line, so the counts
   // still add up to the section badge.
   const hiddenRunning = running.length - visible.length;
   const waiting = [
-    hiddenRunning > 0 ? `${hiddenRunning} more running` : "",
-    queued > 0 ? `${queued.toLocaleString()} queued` : "",
-    retrying > 0 ? `${retrying.toLocaleString()} waiting to retry` : "",
+    hiddenRunning > 0
+      ? t("web.admin.common.serverActivity.moreRunning", {
+          count: hiddenRunning,
+          count_text: hiddenRunning,
+        })
+      : "",
+    queued > 0 ? t("web.admin.common.serverActivity.queued", localeCount(queued)) : "",
+    retrying > 0 ? t("web.admin.common.serverActivity.retrying", localeCount(retrying)) : "",
   ].filter(Boolean);
 
   if (visible.length === 0 && waiting.length === 0 && paused === 0 && failed === 0) {
-    return <EmptyRow>No downloads being prepared</EmptyRow>;
+    return <EmptyRow>{t("web.admin.common.serverActivity.noPreparations")}</EmptyRow>;
   }
   return (
     <div className="space-y-2.5">
@@ -477,13 +516,13 @@ function PreparationsSummary({
       {paused > 0 && (
         <div className="text-muted-foreground flex items-center gap-1.5 text-[11px]">
           <Pause className="h-3 w-3 shrink-0" aria-hidden="true" />
-          {paused.toLocaleString()} paused
+          {t("web.admin.common.serverActivity.paused", localeCount(paused))}
         </div>
       )}
       {failed > 0 && (
         <div className="text-destructive flex items-center gap-1.5 text-[11px] font-medium">
           <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden="true" />
-          {failed.toLocaleString()} failed in the last 24 hours
+          {t("web.admin.common.serverActivity.failedRecent", localeCount(failed))}
         </div>
       )}
     </div>
@@ -497,6 +536,7 @@ function PreparationRow({
   prep: AdminDownloadPreparation;
   onNavigate: () => void;
 }) {
+  const t = useT();
   const percent = preparationPercent(prep);
   const worker = preparationWorker(prep);
   const detail = [
@@ -517,11 +557,11 @@ function PreparationRow({
           {preparationCompactTitle(prep)}
         </Link>
         {percent != null ? (
-          <span className="text-muted-foreground ml-2 shrink-0 text-[10px] font-semibold tabular-nums">
-            {Math.floor(percent)}%
+          <span className="text-muted-foreground ms-2 shrink-0 text-[10px] font-semibold tabular-nums">
+            {t("web.admin.common.serverActivity.percent", { percent: Math.floor(percent) })}
           </span>
         ) : (
-          <span className="text-primary ml-2 flex shrink-0 items-center gap-1 text-[10px] font-semibold">
+          <span className="text-primary ms-2 flex shrink-0 items-center gap-1 text-[10px] font-semibold">
             <Loader className="h-3 w-3 animate-spin" aria-hidden="true" />
             {preparationRunningLabel(prep)}
           </span>
@@ -531,7 +571,9 @@ function PreparationRow({
         <div
           className="bg-muted h-1.5 overflow-hidden rounded-full"
           role="progressbar"
-          aria-label={`${preparationCompactTitle(prep)} progress`}
+          aria-label={t("web.admin.common.serverActivity.progressLabel", {
+            title: preparationCompactTitle(prep),
+          })}
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={Math.floor(percent)}
@@ -548,7 +590,8 @@ function PreparationRow({
 }
 
 function ScanRow({ scan, libraryName }: { scan: ScanRun; libraryName: string }) {
-  const progressLabel = formatScanProgress(scan);
+  const t = useT();
+  const progressLabel = formatScanProgress(scan, t);
   return (
     <div className="flex items-start gap-2.5">
       {scan.status === "running" ? (
@@ -559,13 +602,15 @@ function ScanRow({ scan, libraryName }: { scan: ScanRun; libraryName: string }) 
       <div className="min-w-0 flex-1 space-y-0.5">
         <div className="flex items-center gap-2">
           <span className="truncate text-[12px] font-medium">{libraryName}</span>
-          <span className="text-muted-foreground ml-auto shrink-0 text-[10px]">
-            {scan.status === "running" ? "Scanning…" : "Queued"}
+          <span className="text-muted-foreground ms-auto shrink-0 text-[10px]">
+            {scan.status === "running"
+              ? t("web.admin.common.serverActivity.scanning")
+              : t("web.admin.common.serverActivity.scanQueued")}
           </span>
         </div>
         <div className="text-muted-foreground truncate text-[10px]">
-          {formatScanLabel(scan)}
-          {scan.path ? ` · ${scan.path}` : ""}
+          {formatScanLabel(scan, t)}
+          {scan.path ? DETAIL_SEPARATOR + scan.path : null}
         </div>
         {progressLabel && (
           <div className="text-muted-foreground/80 truncate text-[10px]">{progressLabel}</div>
@@ -575,20 +620,18 @@ function ScanRow({ scan, libraryName }: { scan: ScanRun; libraryName: string }) 
   );
 }
 
-function formatScanLabel(scan: ScanRun) {
-  switch (scan.mode) {
-    case "library":
-      return "Full library";
-    case "subtree":
-      return "Subtree";
-    case "file":
-      return "Single file";
-    default:
-      return scan.mode;
-  }
+const SCAN_MODE_LABELS: Record<string, MessageKey> = {
+  library: "web.admin.common.serverActivity.scanMode.library",
+  subtree: "web.admin.common.serverActivity.scanMode.subtree",
+  file: "web.admin.common.serverActivity.scanMode.file",
+};
+
+function formatScanLabel(scan: ScanRun, t: Translate) {
+  const key = SCAN_MODE_LABELS[scan.mode];
+  return key ? t(key) : scan.mode;
 }
 
-function formatScanProgress(scan: ScanRun) {
+function formatScanProgress(scan: ScanRun, t: Translate) {
   const result = scan.result;
   if (!result) {
     return null;
@@ -598,7 +641,12 @@ function formatScanProgress(scan: ScanRun) {
       0,
       Math.min(100, Math.round((result.files_processed / result.total_files) * 100)),
     );
-    return `${result.message ?? "Processing files"} · ${result.files_processed.toLocaleString()} / ${result.total_files.toLocaleString()} (${percent}%)`;
+    return t("web.admin.common.serverActivity.scanProgress", {
+      message: result.message ?? t("web.admin.common.serverActivity.processingFiles"),
+      processed: result.files_processed.toLocaleString(formatLocale()),
+      total: result.total_files.toLocaleString(formatLocale()),
+      percent: percent,
+    });
   }
   if (result.message) {
     return result.message;
@@ -612,17 +660,25 @@ function EmptyRow({ children }: { children: React.ReactNode }) {
 
 function MoreRows({
   count,
-  label,
   countIsLowerBound = false,
 }: {
   count: number;
-  label: string;
   countIsLowerBound?: boolean;
 }) {
+  const t = useT();
   return (
     <div className="text-muted-foreground border-t border-[color-mix(in_srgb,var(--border)_35%,transparent)] pt-1.5 text-[11px]">
-      {countIsLowerBound ? "At least " : ""}
-      {count.toLocaleString()} {label}
+      {t(
+        countIsLowerBound
+          ? "web.admin.common.serverActivity.moreScansAtLeast"
+          : "web.admin.common.serverActivity.moreScans",
+        localeCount(count),
+      )}
     </div>
   );
+}
+
+/** Plural values for a count printed in the interface locale's digits. */
+function localeCount(count: number) {
+  return { count, count_text: count.toLocaleString(formatLocale()) };
 }

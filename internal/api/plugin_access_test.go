@@ -106,7 +106,7 @@ func runPluginAccessCases(t *testing.T, jwt *auth.JWTService, cases []pluginAcce
 				renewer: pluginTestRenewer{jwt: jwt, refused: tc.sessionCannotRefresh},
 				viewer:  pluginTestViewer{}, actingAdmin: pluginTestActingAdmin,
 			}
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/plugins/1/settings", nil)
+			req := httptest.NewRequest(http.MethodGet, "/api/v2/plugin-content/plugins/1/settings", nil)
 			if tc.cookie != "" {
 				req.AddCookie(&http.Cookie{Name: auth.PluginAccessCookieName, Value: tc.cookie})
 			}
@@ -285,7 +285,7 @@ func TestPluginAccessResolverAPIKeys(t *testing.T) {
 		{"an admin key acting as the primary profile is admin", "sa_admin", "primary", pluginAccess{authenticated: true, admin: true, userID: 8, profileID: "primary"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/plugins/1/settings", nil)
+			req := httptest.NewRequest(http.MethodGet, "/api/v2/plugin-content/plugins/1/settings", nil)
 			req.Header.Set("Authorization", "Bearer "+tc.key)
 			if tc.profile != "" {
 				req.Header.Set("X-Profile-Id", tc.profile)
@@ -312,7 +312,7 @@ func TestPluginAccessNormalizesTheDeviceID(t *testing.T) {
 		strings.Repeat("d", 129):                  "",
 		"  550e8400-e29b-41d4-a716-446655440000 ": "550e8400-e29b-41d4-a716-446655440000",
 	} {
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/plugins/1/settings", nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/plugin-content/plugins/1/settings", nil)
 		req.Header.Set("X-Silo-Device-Id", header)
 		resolver.actingAsAdmin(req, admin, "")
 		if seen != want {

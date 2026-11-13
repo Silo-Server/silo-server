@@ -2,7 +2,7 @@
   "type": "https://siloserver.org/docs/api/v2/problems/validation_failed",
   "title": "Validation failed",
   "status": 422,
-  "detail": "The request did not pass validation; see errors.",
+  "detail": "Only a movie or an episode has a resume position",
   "instance": "urn:silo:request:000000000000000000000300",
   "errors": [
     {

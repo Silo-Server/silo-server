@@ -197,21 +197,6 @@ describe("RuleBuilder", () => {
 });
 
 describe("RuleBuilder in a Smart collection", () => {
-  it("offers no all-libraries choice when a library is required", async () => {
-    render(
-      <RuleBuilder
-        context="collection"
-        librariesRequired
-        value={query({ library_ids: [1] })}
-        libraries={libraries}
-        onChange={() => {}}
-      />,
-    );
-    await userEvent.click(screen.getByRole("button", { name: /^Libraries:\s*Movies$/ }));
-    expect(screen.queryByRole("menuitem", { name: "All libraries" })).toBeNull();
-    expect(screen.getByRole("menuitemcheckbox", { name: "TV" })).toBeInTheDocument();
-  });
-
   it("names every library the way the scope does", async () => {
     render(
       <RuleBuilder

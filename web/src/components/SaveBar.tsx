@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import "@/styles/admin-settings.css";
 
@@ -37,10 +38,6 @@ interface SaveBarProps {
   className?: string;
 }
 
-function plural(count: number, word: string) {
-  return `${count} ${word}${count === 1 ? "" : "s"}`;
-}
-
 /**
  * The floating save bar: what is staged and the two actions. Hidden while
  * the page is clean (unless a page bar is shown on purpose, as in create mode),
@@ -54,19 +51,21 @@ export function SaveBar({
   onSave,
   onDiscard,
   isSaving,
-  saveLabel = "Save",
-  discardLabel = "Discard",
+  saveLabel,
+  discardLabel,
   canSave = true,
   message,
   placement = "settings",
   visible = dirtyCount > 0,
   tone = "pending",
-  label = "Unsaved changes",
+  label,
   className,
 }: SaveBarProps) {
-  const text = message ?? plural(dirtyCount, "unsaved change");
+  const t = useT();
+  const text = message ?? t("web.shell.saveBar.count", { count: dirtyCount, shown: dirtyCount });
   const saveDisabled = isSaving || !canSave;
-  const saveText = isSaving ? "Saving..." : saveLabel;
+  const saveText = isSaving ? t("web.ui.saving") : (saveLabel ?? t("common.save"));
+  const discardText = discardLabel ?? t("web.shell.unsavedChanges.discard");
 
   if (placement === "page") {
     return (
@@ -79,7 +78,7 @@ export function SaveBar({
             <div aria-hidden="true" className="h-[calc(7rem+var(--playback-bar-clearance,0px))]" />
             <div
               aria-hidden="true"
-              className="pointer-events-none fixed right-0 bottom-(--playback-bar-clearance,0px) left-[var(--app-sidebar-offset,0px)] z-30 h-40 bg-gradient-to-t from-[var(--background)] via-[color-mix(in_srgb,var(--background)_72%,transparent)] to-transparent"
+              className="pointer-events-none fixed start-[var(--app-sidebar-offset,0px)] end-0 bottom-(--playback-bar-clearance,0px) z-30 h-40 bg-gradient-to-t from-[var(--background)] via-[color-mix(in_srgb,var(--background)_72%,transparent)] to-transparent"
             />
           </>
         )}
@@ -94,17 +93,17 @@ export function SaveBar({
         <div
           className={
             visible
-              ? "pointer-events-none fixed right-0 bottom-[calc(var(--playback-bar-clearance,0px)+0.75rem)] left-[var(--app-sidebar-offset,0px)] z-40 flex justify-center px-(--page-gutter,1rem) lg:bottom-[calc(var(--playback-bar-clearance,0px)+1.125rem)]"
+              ? "pointer-events-none fixed start-[var(--app-sidebar-offset,0px)] end-0 bottom-[calc(var(--playback-bar-clearance,0px)+0.75rem)] z-40 flex justify-center px-(--page-gutter,1rem) lg:bottom-[calc(var(--playback-bar-clearance,0px)+1.125rem)]"
               : "sr-only"
           }
         >
           <div
             role={visible ? "region" : undefined}
-            aria-label={visible ? label : undefined}
+            aria-label={visible ? (label ?? t("web.shell.saveBar.regionLabel")) : undefined}
             className={
               visible
                 ? cn(
-                    "bg-popover/95 border-border pointer-events-auto flex w-full max-w-[1000px] items-center justify-between gap-2 rounded-2xl border py-2 pr-2 pl-4 shadow-2xl backdrop-blur-xl",
+                    "bg-popover/95 border-border pointer-events-auto flex w-full max-w-[1000px] items-center justify-between gap-2 rounded-2xl border py-2 ps-4 pe-2 shadow-2xl backdrop-blur-xl",
                     className,
                   )
                 : undefined
@@ -127,7 +126,7 @@ export function SaveBar({
             {visible && (
               <span className="flex shrink-0 items-center gap-2">
                 <Button variant="ghost" className="h-11 lg:h-8" onClick={onDiscard}>
-                  {discardLabel}
+                  {discardText}
                 </Button>
                 <Button
                   className="h-11 lg:h-8"
@@ -156,20 +155,20 @@ export function SaveBar({
           Stops at the desktop sidebar so it never tints the nav. */}
       <div
         aria-hidden="true"
-        className="pointer-events-none fixed right-0 bottom-0 left-0 z-30 h-40 bg-gradient-to-t from-[var(--background)] via-[color-mix(in_srgb,var(--background)_72%,transparent)] to-transparent lg:left-[240px]"
+        className="pointer-events-none fixed start-0 end-0 bottom-0 z-30 h-40 bg-gradient-to-t from-[var(--background)] via-[color-mix(in_srgb,var(--background)_72%,transparent)] to-transparent lg:start-[240px]"
       />
-      {/* `lg:left-[240px]` matches AdminLayout's `lg:ml-[240px]`: the pill
+      {/* `lg:start-[240px]` matches AdminLayout's `lg:ms-[240px]`: the pill
           centers over the content column, not the whole viewport, and stays
           clear of the sidebar it would otherwise paint under. */}
       <div
         role="status"
-        className="pointer-events-none fixed right-0 bottom-6 left-0 z-40 flex justify-center px-4 lg:left-[240px]"
+        className="pointer-events-none fixed start-0 end-0 bottom-6 z-40 flex justify-center px-4 lg:start-[240px]"
       >
-        <div className="glass pointer-events-auto flex max-w-full items-center gap-3 rounded-full py-2 pr-2 pl-4 shadow-2xl backdrop-blur-xl sm:gap-4 sm:pl-5">
+        <div className="glass pointer-events-auto flex max-w-full items-center gap-3 rounded-full py-2 ps-4 pe-2 shadow-2xl backdrop-blur-xl sm:gap-4 sm:ps-5">
           <span className="min-w-0 truncate text-[13px] font-medium">{text}</span>
           <span className="flex shrink-0 items-center gap-1.5">
             <Button variant="ghost" size="sm" className="rounded-full" onClick={onDiscard}>
-              {discardLabel}
+              {discardText}
             </Button>
             <Button
               size="sm"

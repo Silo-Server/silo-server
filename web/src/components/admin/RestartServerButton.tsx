@@ -1,5 +1,6 @@
 import { useState, type ComponentProps } from "react";
 import { Button } from "@/components/ui/button";
+import { useT } from "@/i18n";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useRequestServerRestart } from "@/hooks/queries/admin/serverRestart";
 import { RotateCcw } from "lucide-react";
@@ -13,11 +14,12 @@ export interface RestartServerButtonProps {
 }
 
 export function RestartServerButton({
-  label = "Restart Server",
+  label,
   variant = "outline",
   size = "sm",
   className,
 }: RestartServerButtonProps = {}) {
+  const t = useT();
   const [showConfirm, setShowConfirm] = useState(false);
   const restart = useRequestServerRestart();
 
@@ -27,11 +29,11 @@ export function RestartServerButton({
       const result = await restart.mutateAsync();
       toast.success(
         result.status === "already_requested"
-          ? "Server restart is already in progress."
-          : "Silo is shutting down to restart.",
+          ? t("web.admin.common.restartServer.alreadyRequested")
+          : t("web.admin.common.restartServer.shuttingDown"),
       );
     } catch {
-      toast.error("Could not confirm the restart. Check server status or restart manually.");
+      toast.error(t("web.admin.common.restartServer.failed"));
     }
   }
 
@@ -44,15 +46,15 @@ export function RestartServerButton({
         onClick={() => setShowConfirm(true)}
         disabled={restart.isPending}
       >
-        <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
-        {label}
+        <RotateCcw className="me-1.5 h-3.5 w-3.5" />
+        {label ?? t("web.admin.common.restartServer.button")}
       </Button>
       <ConfirmDialog
         open={showConfirm}
         onOpenChange={setShowConfirm}
-        title="Restart server?"
-        description="Silo will shut down. It comes back on its own only if a service manager such as Docker or systemd restarts it; otherwise, start it again yourself. Active streams will be interrupted."
-        confirmLabel="Restart"
+        title={t("web.admin.common.restartServer.confirmTitle")}
+        description={t("web.admin.common.restartServer.confirmDescription")}
+        confirmLabel={t("web.admin.common.restartServer.confirm")}
         variant="destructive"
         onConfirm={handleRestart}
       />

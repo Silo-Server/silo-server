@@ -236,7 +236,7 @@ func TestRefreshLeavesIgnoredItemAloneDB(t *testing.T) {
 		refreshDebtRepo: NewRefreshDebtRepository(pool),
 	}
 
-	if err := svc.refreshItemTarget(ctx, movieID, 0, ModeManualRefresh, false); err != nil {
+	if err := svc.refreshItemTarget(ctx, movieID, 0, ModeManualRefresh, false, false); err != nil {
 		t.Fatalf("refresh of an ignored movie = %v, want no error", err)
 	}
 	var failures int
@@ -254,7 +254,7 @@ func TestRefreshLeavesIgnoredItemAloneDB(t *testing.T) {
 		t.Fatalf("refresh of an ignored movie left %d refresh debt rows, want the claimed row settled", debtRows)
 	}
 
-	if err := svc.refreshSeriesChildTarget(ctx, seriesID, 1, 1, 0, ModeManualRefresh); !errors.Is(err, ErrMetadataNotFound) {
+	if err := svc.refreshSeriesChildTarget(ctx, seriesID, 1, 1, 0, ModeManualRefresh, nil); !errors.Is(err, ErrMetadataNotFound) {
 		t.Fatalf("episode refresh of an ignored series = %v, want ErrMetadataNotFound", err)
 	}
 }

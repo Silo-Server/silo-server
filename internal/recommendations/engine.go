@@ -238,8 +238,8 @@ func (e *Engine) profileAccessFilter(ctx context.Context, userID int, profileID 
 		filter.AllowUnratedContent = e.unrated.AllowUnratedContent(ctx)
 	}
 	filter.MaturityLimits = filter.WithAllowedTitles(profile.AllowedTitleIDs)
-	if profile.LibraryRestrictionsEnabled {
-		filter.AllowedLibraryIDs = append([]int{}, profile.AllowedLibraryIDs...)
+	if libraryIDs, limited := access.ProfileLibraryLimit(profile); limited {
+		filter.AllowedLibraryIDs = append([]int{}, libraryIDs...)
 	}
 	return filter, nil
 }

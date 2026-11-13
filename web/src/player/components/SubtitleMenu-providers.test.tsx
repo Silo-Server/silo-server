@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { SubtitleMenu } from "./SubtitleMenu";
 import { SubtitleSearchModal } from "./SubtitleSearchModal";
+import type { PlayerSubtitleInfo } from "../types";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
 
 const mocks = vi.hoisted(() => ({ v2: vi.fn() }));
@@ -48,7 +49,7 @@ async function openAddSubtitles() {
   await waitFor(() =>
     expect(mocks.v2).toHaveBeenCalledWith(config, "GET /api/v2/subtitles/providers/status", {}),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Enable captions" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Subtitles/ }));
   fireEvent.click(screen.getByRole("menuitem", { name: "Add Subtitles…" }));
   return screen.getByRole("dialog", { name: "Add Subtitles" });
 }
@@ -110,9 +111,110 @@ it("does not carry a disabled answer over to a new server", async () => {
     </QueryClientProvider>
   );
   const view = render(menu(config));
-  fireEvent.click(screen.getByRole("button", { name: "Enable captions" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Subtitles/ }));
   fireEvent.click(screen.getByRole("menuitem", { name: "Add Subtitles…" }));
   await waitFor(() => expect(screen.queryByText("Search online")).not.toBeInTheDocument());
   view.rerender(menu(serverB));
   await waitFor(() => expect(screen.getByText("Search online")).toBeInTheDocument());
+});
+
+it.each([
+  "inventory first",
+  "response first",
+  "session changed",
+  "file changed",
+  "session changed after response",
+  "viewer chose Off",
+  "viewer toggled captions during download",
+])("selects only this viewer's download when %s", async (order) => {
+  let finish!: (value: unknown) => void;
+  const download = new Promise((resolve) => {
+    finish = resolve;
+  });
+  mocks.v2.mockImplementation((_config: PlayerConfig, route: string) => {
+    if (route === "POST /api/v2/subtitles/search")
+      return Promise.resolve({
+        results: [
+          {
+            provider: "example",
+            id: "opaque",
+            language: "en",
+            release_name: "Own download",
+            format: "srt",
+            score: 80,
+            hearing_impaired: false,
+            downloads: 1,
+          },
+        ],
+      });
+    if (route === "POST /api/v2/subtitles/download") return download;
+    return Promise.resolve({});
+  });
+  const own: PlayerSubtitleInfo = {
+    index: 3,
+    language: "en",
+    label: "Own download",
+    source: "downloaded",
+    stored_subtitle_id: order === "inventory first" ? undefined : 9,
+    url: order === "inventory first" ? "/subtitles/3.vtt?downloaded_subtitle_id=9" : "",
+  };
+  const other: PlayerSubtitleInfo = {
+    ...own,
+    index: 2,
+    label: "Other viewer",
+    stored_subtitle_id: 8,
+  };
+  const onSelect = vi.fn();
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  let props = {
+    tracks: [] as PlayerSubtitleInfo[],
+    activeIndex: null as number | null,
+    onSelect,
+    delayMs: 0,
+    onDelayChange: () => {},
+    mediaFileId: 42,
+    sessionId: "session-1",
+    playerConfig: config,
+  };
+  const component = () => (
+    <QueryClientProvider client={queryClient}>
+      <SubtitleMenu {...props} />
+    </QueryClientProvider>
+  );
+  const view = render(component());
+  fireEvent.click(screen.getByRole("button", { name: /^Subtitles/ }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Add Subtitles…" }));
+  fireEvent.click(screen.getByRole("button", { name: "Search" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Own download/ }));
+  props = { ...props, tracks: order === "inventory first" ? [other, own] : [other] };
+  view.rerender(component());
+  expect(onSelect).not.toHaveBeenCalled();
+  if (order === "session changed") props = { ...props, sessionId: "session-2" };
+  if (order === "file changed") props = { ...props, mediaFileId: 43 };
+  view.rerender(component());
+  if (order === "viewer toggled captions during download") {
+    props = { ...props, activeIndex: 2 };
+    view.rerender(component());
+    props = { ...props, activeIndex: null };
+    view.rerender(component());
+  }
+  await act(async () => {
+    finish({ subtitle: { id: "9", media_file_id: "42" } });
+    await download;
+  });
+  if (order === "session changed after response") {
+    props = { ...props, sessionId: "session-2" };
+  }
+  if (order === "viewer chose Off") {
+    fireEvent.click(screen.getByRole("button", { name: /^Subtitles/ }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Off/ }));
+    onSelect.mockClear();
+  }
+  props = { ...props, tracks: [other, own] };
+  view.rerender(component());
+  if (order === "inventory first" || order === "response first") {
+    await waitFor(() => expect(onSelect).toHaveBeenCalledExactlyOnceWith(3));
+  } else {
+    expect(onSelect).not.toHaveBeenCalled();
+  }
 });

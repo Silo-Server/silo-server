@@ -446,6 +446,26 @@ func MediaFileQualityCeilingSQL(alias string, maxPlaybackQuality string) string 
 		WHEN '2160P' THEN 4 WHEN '4320P' THEN 5 ELSE 0 END <= %d`, alias, SQLTrimSpaceChars, maxRank)
 }
 
+// EpisodePlayableUnderCeilingSQL renders, for the episode whose content ID is
+// episodeExpr, the condition that a present file linked to it or spanning it
+// passes FileAllowedByAccess, or "" when the filter sets no playback-quality
+// ceiling. An episode that fails it has no version the viewer may play, so
+// episode lists leave it out rather than offer a title that cannot start.
+// bind records a value and returns its placeholder position, as for
+// mediaFileAccessConditions.
+func EpisodePlayableUnderCeilingSQL(episodeExpr string, filter AccessFilter, bind func(any) int) string {
+	if MediaFileQualityCeilingSQL("mf", filter.MaxPlaybackQuality) == "" {
+		return ""
+	}
+	fileAccess := strings.Join(mediaFileAccessConditions("mf", filter, bind), " AND ")
+	return `(EXISTS (
+		SELECT 1 FROM media_files mf
+		WHERE mf.episode_id = ` + episodeExpr + `
+		  AND mf.missing_since IS NULL
+		  AND ` + fileAccess + `
+	) OR ` + SpanningEpisodeFileExistsSQL(episodeExpr, fileAccess) + `)`
+}
+
 // MediaFileAccessSQL renders FileAllowedByAccess as SQL conditions over the
 // given media_files alias, appending any bind values to args and numbering
 // placeholders from the resulting argument positions. Callers must append the

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 import { createShuffle, getShuffle, type ShuffleScopeRequest } from "@/api/v2/shuffles";
 import { V2ProblemError } from "@/api/v2/request";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
@@ -20,9 +21,9 @@ export function useShuffle(shuffleId: string | undefined) {
 
 function startShuffleErrorMessage(error: unknown): string {
   if (error instanceof V2ProblemError && error.status === 409) {
-    return "Nothing here can be played.";
+    return t("shuffle.nothingToPlay");
   }
-  return "Couldn't start shuffle.";
+  return t("web.shuffle.startFailed");
 }
 
 /**
