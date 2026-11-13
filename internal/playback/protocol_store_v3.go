@@ -179,6 +179,8 @@ type AttemptIdentityV3 struct {
 	SessionID         string
 	UserID            int
 	ProfileID         string
+	// Stopped reports that the attempt has been stopped (StoppedAt is set).
+	Stopped bool
 }
 
 type RouteEventRecordV3 struct {
@@ -438,7 +440,7 @@ func (s *MemoryPlanStoreV3) GetAttemptIdentity(ctx context.Context, sessionID st
 	if err != nil {
 		return nil, err
 	}
-	return &AttemptIdentityV3{PlaybackAttemptID: record.PlaybackAttemptID, SessionID: record.SessionID, UserID: record.UserID, ProfileID: record.ProfileID}, nil
+	return &AttemptIdentityV3{PlaybackAttemptID: record.PlaybackAttemptID, SessionID: record.SessionID, UserID: record.UserID, ProfileID: record.ProfileID, Stopped: record.StoppedAt != nil}, nil
 }
 
 func (s *MemoryPlanStoreV3) GetAttemptIdentityByPlaybackAttemptID(ctx context.Context, attemptID string) (*AttemptIdentityV3, error) {
@@ -446,7 +448,7 @@ func (s *MemoryPlanStoreV3) GetAttemptIdentityByPlaybackAttemptID(ctx context.Co
 	if err != nil {
 		return nil, err
 	}
-	return &AttemptIdentityV3{PlaybackAttemptID: record.PlaybackAttemptID, SessionID: record.SessionID, UserID: record.UserID, ProfileID: record.ProfileID}, nil
+	return &AttemptIdentityV3{PlaybackAttemptID: record.PlaybackAttemptID, SessionID: record.SessionID, UserID: record.UserID, ProfileID: record.ProfileID, Stopped: record.StoppedAt != nil}, nil
 }
 
 func (s *MemoryPlanStoreV3) RecordRouteEvent(_ context.Context, record RouteEventRecordV3) (bool, error) {

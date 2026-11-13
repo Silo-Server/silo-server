@@ -1510,10 +1510,19 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		if deps.Config != nil && deps.Config.Auth.JWTSecret != "" {
 			playbackHandler.JWTSecret = deps.Config.Auth.JWTSecret
-			if authMiddleware != nil {
-				secret := deps.Config.Auth.JWTSecret
+			if authMiddleware != nil && playbackHandler.PlanStoreV3 != nil {
+				secret, attempts := deps.Config.Auth.JWTSecret, playbackHandler.PlanStoreV3
 				authMiddleware.SetStreamReferenceVerifier(func(reference string) (*streamtoken.Claims, error) {
 					return streamtoken.Verify(reference, secret)
+				}, func(ctx context.Context, sessionID string) (int, string, bool, error) {
+					identity, err := attempts.GetAttemptIdentity(ctx, sessionID)
+					if errors.Is(err, playback.ErrSessionNotFound) {
+						return 0, "", false, nil
+					}
+					if err != nil {
+						return 0, "", false, err
+					}
+					return identity.UserID, identity.ProfileID, !identity.Stopped, nil
 				})
 			}
 		}

@@ -739,12 +739,14 @@ same way, for a receiver such as a Google Cast device that is handed only the pl
 with an `Authorization` header or a `token` parameter takes the account path unchanged. Without
 either, a valid `st` that names a playback session (not a download, theme song or bandwidth
 probe) and the session in the path authorizes the request as its account, with the account's
-current role, and `X-Profile-Id` is rewritten to the reference's profile. Viewer access then
-resolves that profile's limits and skips only the PIN proof, and the handlers apply the
-session-deny marker and ownership checks as for any request. The reference is not tied to a login
-session: it lasts up to the 24-hour stream-token lifetime unless the session is stopped or the
-account is disabled, as on the proxy's token routes. Plans that negotiated
-`header_authenticated_media_v1` carry no `st`, so their media still needs the header.
+current role, while that session's playback attempt is live and owned by the reference's account
+and profile. `X-Profile-Id` is rewritten to the reference's profile; viewer access then resolves
+that profile's limits and skips only the PIN proof, and the handlers apply the session-deny marker
+and ownership checks as for any request. The reference is not tied to a login session: it lasts
+up to the 24-hour stream-token lifetime unless the session is stopped or the account is disabled.
+The attempt check ends it on a stop even where no session-deny marker store is configured. Plans
+that negotiated `header_authenticated_media_v1` carry no `st`, so their media still needs the
+header.
 
 Household management (creating, editing, and deleting profiles, listing household sessions,
 managing another profile's devices or settings, importing history for another profile, and

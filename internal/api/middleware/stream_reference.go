@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -14,15 +16,26 @@ import (
 // signed stream reference on the native delivery routes.
 const StreamReferenceParam = "st"
 
+// CodePlaybackSessionEnded refuses a stream reference whose playback session
+// was stopped or has expired, with the 410 the delivery handlers give a
+// stopped session.
+const CodePlaybackSessionEnded = "playback_session_ended"
+
 // StreamReferenceVerifier checks a stream reference's signature and expiry
 // and returns its claims. The router supplies it, so this package holds no
 // signing secret.
 type StreamReferenceVerifier func(reference string) (*streamtoken.Claims, error)
 
-// SetStreamReferenceVerifier enables RequireStreamReferenceAuth. Without a
-// verifier the native delivery routes accept only the account credential.
-func (am *AuthMiddleware) SetStreamReferenceVerifier(verify StreamReferenceVerifier) {
-	am.streamReference = verify
+// StreamReferenceSession reports the playback attempt a reference names: the
+// account and profile that own it, and whether it is still live (not stopped
+// and not expired). A missing attempt is live=false with no error; an error
+// means the attempt could not be checked.
+type StreamReferenceSession func(ctx context.Context, sessionID string) (userID int, profileID string, live bool, err error)
+
+// SetStreamReferenceVerifier enables RequireStreamReferenceAuth. Without both
+// functions the native delivery routes accept only the account credential.
+func (am *AuthMiddleware) SetStreamReferenceVerifier(verify StreamReferenceVerifier, session StreamReferenceSession) {
+	am.streamReference, am.streamReferenceSession = verify, session
 }
 
 // RequireStreamReferenceAuth authenticates the native playback delivery
@@ -33,7 +46,10 @@ func (am *AuthMiddleware) SetStreamReferenceVerifier(verify StreamReferenceVerif
 // query parameter), or without `st`, runs RequireAuth unchanged. Otherwise
 // the reference authorizes the request when it verifies, names a playback
 // session rather than a download or theme song, names the session in the
-// path, and belongs to an account that still exists and is enabled. The
+// path, that session's playback attempt is still live and owned by the
+// reference's account and profile, and the account still exists and is
+// enabled. The attempt check is what ends a reference when its session is
+// stopped, even where no session-deny marker store is configured. The
 // request then runs as that account with the current role, and X-Profile-Id
 // is rewritten to the reference's profile, so the viewer access that runs
 // next re-resolves that profile's limits and skips only the PIN proof the
@@ -42,13 +58,13 @@ func (am *AuthMiddleware) SetStreamReferenceVerifier(verify StreamReferenceVerif
 //
 // A reference is not tied to a login session. It lasts as long as
 // playback.MaxTokenTTL unless its session is stopped or the account is
-// disabled, as on the proxy's token routes. Plans that negotiated
-// header-authenticated media carry no reference.
+// disabled. Plans that negotiated header-authenticated media carry no
+// reference.
 func (am *AuthMiddleware) RequireStreamReferenceAuth(next http.Handler) http.Handler {
 	standard := am.RequireAuth(next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
-		if _, credential := extractBearerToken(r); credential || !query.Has(StreamReferenceParam) || am.streamReference == nil || am.apiKeyUserLoader == nil {
+		if _, credential := extractBearerToken(r); credential || !query.Has(StreamReferenceParam) || am.streamReference == nil || am.streamReferenceSession == nil || am.apiKeyUserLoader == nil {
 			standard.ServeHTTP(w, r)
 			return
 		}
@@ -58,6 +74,21 @@ func (am *AuthMiddleware) RequireStreamReferenceAuth(next http.Handler) http.Han
 			return
 		}
 		if reference.SessionID != chi.URLParam(r, "session_id") {
+			writeForbidden(w, "The stream reference does not authorize this session")
+			return
+		}
+		owner, ownerProfile, live, err := am.streamReferenceSession(r.Context(), reference.SessionID)
+		if err != nil {
+			writeCredentialCheckUnavailable(w, r, err)
+			return
+		}
+		if !live {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusGone)
+			_ = json.NewEncoder(w).Encode(errorResponse{Error: CodePlaybackSessionEnded, Message: "The playback session has ended"})
+			return
+		}
+		if owner != reference.UserID || ownerProfile != reference.ProfileID {
 			writeForbidden(w, "The stream reference does not authorize this session")
 			return
 		}

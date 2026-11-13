@@ -160,10 +160,10 @@ func (s *Postgres) GetAttemptIdentityByPlaybackAttemptID(ctx context.Context, at
 func (s *Postgres) getAttemptIdentity(ctx context.Context, predicate string, value any) (*playback.AttemptIdentityV3, error) {
 	var identity playback.AttemptIdentityV3
 	err := s.db.QueryRow(ctx, `
-		SELECT playback_attempt_id, COALESCE(session_id::text, ''), user_id, profile_id
+		SELECT playback_attempt_id, COALESCE(session_id::text, ''), user_id, profile_id, stopped_at IS NOT NULL
 		FROM playback_v3_attempts
 		WHERE `+predicate+` AND expires_at > NOW()`, value).Scan(
-		&identity.PlaybackAttemptID, &identity.SessionID, &identity.UserID, &identity.ProfileID,
+		&identity.PlaybackAttemptID, &identity.SessionID, &identity.UserID, &identity.ProfileID, &identity.Stopped,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, playback.ErrSessionNotFound

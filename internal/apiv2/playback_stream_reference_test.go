@@ -20,6 +20,8 @@ func TestPlaybackDeliveryAcceptsStreamReferenceAlone(t *testing.T) {
 	deps, _ := catalogDeps(t)
 	deps.Auth.SetStreamReferenceVerifier(func(reference string) (*streamtoken.Claims, error) {
 		return streamtoken.Verify(reference, secret)
+	}, func(_ context.Context, sessionID string) (int, string, bool, error) {
+		return 1, "p-owner", sessionID == deliveryTestSession, nil
 	})
 	var seenUser int
 	var seenProfile string
@@ -64,6 +66,12 @@ func TestPlaybackDeliveryAcceptsStreamReferenceAlone(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, transcode+"/master.m3u8?st=forged", "", nil), TypeInvalidToken)
 	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/playback/transcode/22222222-2222-4222-8222-222222222222/master.m3u8?st="+reference, "", nil), TypePermissionDenied)
 	requireProblem(t, do(t, h, http.MethodGet, stream+"/subtitles/0/fonts?st="+reference, "", nil), TypeAuthenticationRequired)
+	// A stopped or expired attempt ends its references.
+	ended, err := streamtoken.Sign(streamtoken.Claims{SessionID: "33333333-3333-4333-8333-333333333333", PlayMethod: "transcode", UserID: 1, ProfileID: "p-owner"}, secret, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/playback/transcode/33333333-3333-4333-8333-333333333333/master.m3u8?st="+ended, "", nil), TypePlaybackSessionEnded)
 	if fontCalls != 0 {
 		t.Fatal("subtitle fonts accepted the stream reference")
 	}

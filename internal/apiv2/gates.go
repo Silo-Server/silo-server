@@ -301,6 +301,10 @@ func (d *denialWriter) problem() *Problem {
 		} else {
 			p = p.WithRetryAfter(apimw.CredentialCheckRetryAfterSeconds)
 		}
+	case apimw.CodePlaybackSessionEnded:
+		// A stream reference whose session was stopped: the same answer the
+		// delivery handlers give that session, not a sign-in problem.
+		p = NewProblem(TypePlaybackSessionEnded, "The playback session has ended.")
 	case legacyBadRequestCode:
 		p = badRequestProblem(d.reason)
 	case TypeInternalError.ID:
