@@ -1015,12 +1015,15 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 		return nil, ctx.Err()
 	}
 	defer slotRelease()
+	// Past admission the rebuild serves every request waiting on it, so its
+	// probes and its start must not end with the request that triggered it.
+	rebuildCtx := context.WithoutCancel(ctx)
 	var toneMapErr error
 	resolveToneMapExecutor := m.resolveToneMapExecutor
 	if resolveToneMapExecutor == nil {
 		resolveToneMapExecutor = ResolveToneMapExecutor
 	}
-	opts, toneMapErr = resolveToneMapExecutor(ctx, opts)
+	opts, toneMapErr = resolveToneMapExecutor(rebuildCtx, opts)
 	if toneMapErr != nil {
 		slog.ErrorContext(ctx, "reconstruct tone-map recipe unavailable", "component", "playback", "error", toneMapErr,
 			"session", sessionID, "playback_session_id", sessionID)
@@ -1050,7 +1053,7 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 	// start, keeping a slow process rather than duplicating it. Every other
 	// recipe starts once, and only one that decodes on the GPU is waited on,
 	// so a decoder that rejects the source can move to CPU decoding.
-	transcodeSession, err := StartReconstructTranscode(ctx, newPipeline(ctx, opts), TranscodeStartup{Start: startTranscode})
+	transcodeSession, err := StartReconstructTranscode(rebuildCtx, newPipeline(rebuildCtx, opts), TranscodeStartup{Start: startTranscode})
 	if err != nil {
 		slog.ErrorContext(ctx, "reconstruct transcode start failed", "component", "playback", "error", err, "session", sessionID, "playback_session_id", sessionID)
 		return nil, err

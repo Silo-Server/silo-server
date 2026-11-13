@@ -702,6 +702,45 @@ func TestReconstructTranscodeWithoutAutoStartsOnceWithoutWaiting(t *testing.T) {
 	}
 }
 
+// A rebuild is shared by every request waiting on it, so once it is admitted
+// the request that triggered it can end without failing the others. Each step
+// here answers an ended request as production does for some recipes: with
+// that request's error.
+func TestReconstructTranscodeOutlivesTriggeringRequest(t *testing.T) {
+	m := NewTranscodeManager()
+	m.Config = func() TranscodeRuntimeConfig {
+		return TranscodeRuntimeConfig{TranscodeDir: t.TempDir(), HWAccel: transcodeHWQSV}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// The first step after admission: the request ends here.
+	m.resolveToneMapExecutor = func(stepCtx context.Context, opts TranscodeOpts) (TranscodeOpts, error) {
+		cancel()
+		return opts, stepCtx.Err()
+	}
+	m.autoTranscodePipeline = func(stepCtx context.Context, opts TranscodeOpts) *AutoTranscodePipeline {
+		if stepCtx.Err() != nil {
+			t.Error("fallback order resolved on the ended request's context")
+		}
+		return NewAutoTranscodePipeline(stepCtx, opts)
+	}
+	m.startTranscode = func(stepCtx context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
+		if err := stepCtx.Err(); err != nil {
+			return nil, err
+		}
+		return &TranscodeSession{opts: opts, stderr: newBoundedTailBuffer(stderrTailMaxBytes)}, nil
+	}
+	card := NewRecipeCard(5, "p", 77, "", TranscodeOpts{
+		SessionID: "s", InputPath: "/media/movie.mkv",
+		TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+	})
+
+	got, err := m.ReconstructTranscodeWithError(ctx, "s", -1, card)
+	if err != nil || got == nil {
+		t.Fatalf("reconstruct = %v, %v; want the session the other requests wait for", got, err)
+	}
+}
+
 // A restart hook can block on its FFmpeg context, as the throttler's settings
 // read does when the database stalls. Shutdown cleanup must still close the
 // session, which cancels that context, rather than wait for the hook.
