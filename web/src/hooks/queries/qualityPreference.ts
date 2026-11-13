@@ -26,9 +26,9 @@ export function useQualityPreference(fallback?: string | null): string | null {
   return useQualityPreferenceState(fallback).preference;
 }
 
-/** Detail pages initialize their edition after the first settings read settles. */
+/** Detail pages initialize their edition after the first successful settings read. */
 export function useQualityPreferenceState(fallback?: string | null) {
-  const { data, isError } = useEffectiveSettings({
+  const { data } = useEffectiveSettings({
     keys: [SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY],
   });
   const resolved = data?.[SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY]?.value;
@@ -39,6 +39,6 @@ export function useQualityPreferenceState(fallback?: string | null) {
         : fallback
           ? normalizeQualityPreferenceV3(fallback)
           : null,
-    settled: data != null || isError,
+    settled: data != null,
   };
 }
