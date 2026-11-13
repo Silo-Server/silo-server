@@ -225,16 +225,26 @@ func guessedContainerDemuxer(format ffprobeFormat, filePath string) string {
 // once more over probeWideFormatBytes, and a confident reading there keeps
 // the guess as well. Otherwise the file fails with the exit error of the
 // demuxer read, which IsProbeRejection classifies like any other refusal.
+// When the wider detection itself fails, its error is returned instead, so a
+// timeout or a storage failure there stays retryable.
 func confirmContainer(ctx context.Context, ffprobePath, filePath, demuxer string, guess ffprobeFormat, limits probeLimits) error {
 	_, err := runFormatProbe(ctx, ffprobePath, filePath, limits, "-f", demuxer)
 	if err == nil || errors.Is(err, errProbeTimeout) {
 		return err
 	}
-	if output, wideErr := runFormatProbe(ctx, ffprobePath, filePath, limits, "-formatprobesize", probeWideFormatBytes); wideErr == nil {
-		var wide ffprobeOutput
-		if json.Unmarshal(output, &wide) == nil && wide.Format.ProbeScore > probeScoreRetry {
-			return nil
+	output, wideErr := runFormatProbe(ctx, ffprobePath, filePath, limits, "-formatprobesize", probeWideFormatBytes)
+	if wideErr != nil {
+		if errors.Is(wideErr, errProbeTimeout) {
+			return wideErr
 		}
+		return fmt.Errorf("ffprobe failed for %s: %w", filePath, wideErr)
+	}
+	var wide ffprobeOutput
+	if err := json.Unmarshal(output, &wide); err != nil {
+		return fmt.Errorf("ffprobe JSON parse failed for %s: %w", filePath, err)
+	}
+	if wide.Format.ProbeScore > probeScoreRetry {
+		return nil
 	}
 	return fmt.Errorf("ffprobe only guessed that %s is %s (probe score %d) and could not read it as %s: %w",
 		filePath, guess.FormatName, guess.ProbeScore, demuxer, err)

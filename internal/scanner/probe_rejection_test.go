@@ -74,11 +74,14 @@ func TestIsProbeRejectionSeparatesRefusedFilesFromProbeTrouble(t *testing.T) {
 		forcedExit int
 		wideScore  int
 		rejection  bool
+		failure    bool
 	}{
-		{"guess the container demuxer refuses", 25, 1, 25, true},
-		{"guess the container demuxer reads", 5, 0, 5, false},
-		{"guess a wider read is sure of", 25, 1, 26, false},
-		{"confident reading", 26, 1, 26, false},
+		{"guess the container demuxer refuses", 25, 1, 25, true, true},
+		{"guess the container demuxer reads", 5, 0, 5, false, false},
+		{"guess a wider read is sure of", 25, 1, 26, false, false},
+		// A wider read that storage fails says nothing about the file.
+		{"guess a wider read cannot finish", 25, 1, -1, false, true},
+		{"confident reading", 26, 1, 26, false, false},
 	} {
 		guess := filepath.Join(t.TempDir(), "ffprobe")
 		writeFakeTool(t, guess, fmt.Sprintf(`#!/bin/sh
@@ -92,11 +95,15 @@ for arg; do
 	-formatprobesize) score=%d ;;
 	esac
 done
+if [ "$score" -lt 0 ]; then
+	echo 'Movie.avi: Input/output error' >&2
+	exit 1
+fi
 printf '%%s\n' '{"format":{"format_name":"m4v","probe_score":'"$score"'},"streams":[{"codec_type":"video","codec_name":"mpeg4","width":640,"height":360}]}'
 `, tc.score, tc.forcedExit, tc.wideScore))
 		probe, err := ProbeFile(ctx, guess, avi)
-		if got := err != nil && IsProbeRejection(ctx, avi, err); got != tc.rejection || (err == nil) == tc.rejection {
-			t.Fatalf("%s: err = %v, rejection = %v, want rejection %v", tc.name, err, got, tc.rejection)
+		if got := err != nil && IsProbeRejection(ctx, avi, err); got != tc.rejection || (err != nil) != tc.failure {
+			t.Fatalf("%s: err = %v, rejection = %v, want rejection %v and failure %v", tc.name, err, got, tc.rejection, tc.failure)
 		}
 		if err == nil && probe.Container != "m4v" {
 			t.Fatalf("%s: container = %q, want the guess kept", tc.name, probe.Container)
