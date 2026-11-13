@@ -212,8 +212,9 @@ prepare attempt running on the node: `encoded_seconds`, `duration_seconds`, and
 `speed` from FFmpeg's `-progress` stream. FFmpeg's output time waits for every
 stream, so a subtitle track with no cue yet holds it back while the encode runs.
 With `source_frame_rate`, a reading is the frames encoded at that rate when that is
-further, and `speed` is FFmpeg's encode rate in frames per second over it. It
-requires node bearer authorization.
+further, and `speed` is FFmpeg's encode rate in frames per second over it. A remux
+that copies the video reads output time alone, since copied video keeps the source's
+own timing. It requires node bearer authorization.
 An id with no encode in flight answers `running: false`, never 404, so the API
 treats 404 as a node that predates the operation and reports the attempt as unable
 to report progress. Readings are not durable and say nothing about a completed

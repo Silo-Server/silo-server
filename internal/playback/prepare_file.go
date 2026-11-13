@@ -404,8 +404,10 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 			cmd.Stderr = io.MultiWriter(stderr, logs)
 		}
 		if runOpts.PrepareProgressSink != nil {
+			// Copied video keeps the source's own timing, which the probed
+			// average rate can misstate, so a remux reads out_time alone.
 			frameRate := runOpts.SourceFrameRate
-			if runOpts.AudioOnly {
+			if runOpts.AudioOnly || runOpts.TargetCodecVideo == codecCopyV3 {
 				frameRate = 0
 			}
 			cmd.Stdout = newPrepareProgressWriter(runOpts.PrepareProgressSink, runOpts.TotalDuration, frameRate)

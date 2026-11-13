@@ -150,6 +150,7 @@ func (w *prepareProgressWriter) line(line string) {
 // is the share of frames encoded, not of time: a file with most of its frames
 // early reads close to the duration with much of its time left. It reaches
 // the duration only at the last frame. The speed is in the same terms.
+// PrepareFile passes no frame rate when the video is copied.
 func (w *prepareProgressWriter) byFrames(reading PrepareProgress) PrepareProgress {
 	if w.frameRate <= 0 {
 		return reading

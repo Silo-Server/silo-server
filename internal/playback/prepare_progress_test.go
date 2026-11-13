@@ -247,6 +247,10 @@ func TestPrepareFileReportsProgressAndLogsStderr(t *testing.T) {
 // Issue #3495 with FFmpeg: a forced subtitle track whose only cue is near the
 // end holds FFmpeg's out_time at 0 until that cue. With the frame rate,
 // progress rises through the first half of the file.
+//
+// Only FFmpeg 8.x (Silo ships jellyfin-ffmpeg 8) holds out_time at 0 here, so
+// only there does this test tell fixed from unfixed code. FFmpeg 9 moves
+// out_time ahead of the video for this source, and the test passes either way.
 func TestPrepareFileProgressRisesBeforeASparseSubtitleCue(t *testing.T) {
 	if testing.Short() {
 		t.Skip("encodes a two-and-a-half-minute source")
@@ -313,5 +317,45 @@ func TestPrepareFileProgressRisesBeforeASparseSubtitleCue(t *testing.T) {
 	}
 	if firstHalf == 0 {
 		t.Fatalf("no reading between 0 and %ds, half the sparse cue's time: %+v", sparseCue/2, readings)
+	}
+}
+
+// A remux copies the video with the source's own timing, which the probed
+// average rate can misstate: on a variable-rate file the frames read past the
+// duration with time left. Only an encode reads progress from frames.
+func TestPrepareFileReadsFramesOnlyWhenEncodingVideo(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "ffmpeg")
+	// 1500 frames at 24 fps is 62.5 s, further than FFmpeg's 30 s.
+	body := "#!/bin/sh\n" +
+		"printf 'frame=1500\\nfps=240\\nout_time_us=30000000\\nspeed=4.0x\\nprogress=continue\\n'\n" +
+		"eval \"touch \\${$#}\"\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		videoCodec string
+		want       float64
+	}{
+		{"h264", 62.5},
+		{"copy", 30},
+	} {
+		progress := &recordedPrepareProgress{}
+		err := PrepareFile(context.Background(), TranscodeOpts{
+			InputPath:           "/nonexistent/input.mkv",
+			TargetCodecVideo:    tc.videoCodec,
+			TargetCodecAudio:    "aac",
+			FFmpegPath:          script,
+			HWAccel:             HWAccelNone,
+			TotalDuration:       120,
+			SourceFrameRate:     24,
+			PrepareProgressSink: progress,
+		}, filepath.Join(dir, tc.videoCodec+".mp4"))
+		if err != nil {
+			t.Fatalf("%s: PrepareFile: %v", tc.videoCodec, err)
+		}
+		if got := progress.all(); len(got) != 1 || got[0].EncodedSeconds != tc.want {
+			t.Fatalf("%s: readings = %+v, want %vs", tc.videoCodec, got, tc.want)
+		}
 	}
 }
