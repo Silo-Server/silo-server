@@ -312,6 +312,11 @@ export default function ConnectAppsSettings() {
   const jellyfinAccountName =
     (directoryLoginAvailable && connectInfo?.account?.directory_username?.trim()) ||
     accountUsername;
+  // The directory is the server's credentials provider other than Silo's own.
+  const directoryProviderName = directoryLoginAvailable
+    ? authProviders?.items.find((entry) => entry.mode === "credentials" && entry.id !== "local")
+        ?.display_name
+    : undefined;
 
   // Default to the profile the user is already using — the one they're most
   // likely setting an app up for.
@@ -661,7 +666,14 @@ export default function ConnectAppsSettings() {
                 kind={kind}
                 hint={
                   isJellyfin
-                    ? buildJellyfinPasswordHint(selectedProfile)
+                    ? directoryLoginAvailable
+                      ? // Its PIN profiles aren't offered, and the hint names
+                        // the directory once its name has loaded.
+                        directoryProviderName &&
+                        t("web.settings.connectApps.password.directoryHint", {
+                          provider: directoryProviderName,
+                        })
+                      : buildJellyfinPasswordHint(selectedProfile)
                     : siloSignIn.kind === "directory"
                       ? t("web.settings.connectApps.password.directoryHint", {
                           provider: siloSignIn.provider.display_name,

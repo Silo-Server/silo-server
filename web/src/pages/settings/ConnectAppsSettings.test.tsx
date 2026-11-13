@@ -302,11 +302,18 @@ describe("ConnectAppsSettings", () => {
       ),
       isLoading: false,
     });
+    mocks.useAuthProviders.mockReturnValue({
+      data: { items: [LOCAL_PROVIDER, LDAP_PROVIDER], password_login: true },
+      isLoading: false,
+    });
 
     render();
 
     expect(container.textContent).not.toContain("This account can't sign in to a Jellyfin app");
     expect(container.textContent).toContain("j.doe#Doe Household");
+    // The directory password signs in, not the account's Silo one.
+    expect(container.textContent).toContain("Your Office Directory password");
+    expect(container.textContent).not.toContain("just your account password");
     expect(container.textContent).not.toContain("johndoe#");
     // A PIN never reaches the directory, so a PIN-protected profile can't be
     // reached with password#PIN and isn't offered.
