@@ -297,7 +297,8 @@ start is not waited on. The Jellyfin-compatible surface sends it for `auto` vide
 transcodes instead of `RequireReady`, and older nodes ignore it. Each attempt
 gets its own manifest wait, so callers size the start deadline of an `auto`
 video transcode that sets either field to `TranscodeStartReadyMaxDuration` (one
-wait per path); every other start keeps the single-wait deadline. Readiness is
+wait per path); every other start keeps the single-wait deadline, which a
+legacy retry or the CPU-decode retry above shares with the first attempt. Readiness is
 judged only on a manifest the current FFmpeg process wrote; an earlier
 generation's `stream.m3u8` in a reused directory does not count. A process still
 running at the deadline is closed, never duplicated. The response reports `software_video_decode`

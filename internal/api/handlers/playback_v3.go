@@ -4290,9 +4290,9 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 			return preparedTransportV3{}, transportErr
 		} else if decodeRetry := playback.NewSoftwareDecodeRetryPipeline(opts, startupFailure.cause); decodeRetry.Enabled() {
 			// The GPU's decoder cannot take this source (NVDEC without HEVC
-			// on a Maxwell card, for example), so the same command fails on
-			// every device. Decode on the CPU and keep the hardware encoder,
-			// then fall back to software, as hw_accel=auto would.
+			// on a Maxwell card, for example), so repeating the command fails
+			// again. Decode on the CPU and keep the hardware encoder, then
+			// fall back to software, as hw_accel=auto would.
 			slog.WarnContext(r.Context(), "hardware decoder rejected the source during startup; retrying with CPU decoding",
 				logComponentKey, playbackLogValueV3,
 				"playback_session_id", session.ID,

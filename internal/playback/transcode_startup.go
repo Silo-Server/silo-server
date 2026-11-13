@@ -157,8 +157,8 @@ func runTranscodeStartup(ctx context.Context, pipeline *AutoTranscodePipeline, s
 				attempt = pipeline.Current()
 				next = true
 			} else if decodeRetry := legacyDecodeRetryPipeline(startup.LegacyRetry, pipeline, legacyRetryUsed, attempt, err); decodeRetry.Enabled() {
-				// The decoder rejected the source; the same command fails
-				// on every device. Walk CPU decode instead, as auto would.
+				// The decoder rejected the source, so repeating the GPU
+				// decode fails again. Walk CPU decode instead, as auto would.
 				pipeline = decodeRetry
 				attempt = pipeline.Current()
 				legacyRetryUsed = true
@@ -191,9 +191,9 @@ func runTranscodeStartup(ctx context.Context, pipeline *AutoTranscodePipeline, s
 
 // hardwareDecodeUnsupportedMarkers are FFmpeg startup errors that mean the
 // GPU's decoder cannot take this source at all, so running the same command
-// again or on another render device fails the same way. NVDEC prints the
-// first one when the card has no decoder for the codec, profile or bit depth
-// (HEVC on a Maxwell GM204, for example) even though NVENC encodes fine.
+// again fails the same way. NVDEC prints the first one when the card has no
+// decoder for the codec, profile or bit depth (HEVC on a Maxwell GM204, for
+// example) even though NVENC encodes fine.
 var hardwareDecodeUnsupportedMarkers = []string{
 	"Hardware is lacking required capabilities",
 }
