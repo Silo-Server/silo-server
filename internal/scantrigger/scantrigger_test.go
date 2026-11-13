@@ -82,6 +82,7 @@ func TestResolverTargets(t *testing.T) {
 		files      []string
 		path       string
 		trigger    string // Resolve's request trigger; "" is an admin request
+		unreadable bool   // make the .siloignore unreadable
 		wantMode   string
 		wantPath   string // "" for a library target
 		wantStatus int
@@ -112,6 +113,11 @@ func TestResolverTargets(t *testing.T) {
 		{name: "monitor event for a root file no rule excludes", call: resolve, folder: models.MediaFolder{ID: 14, Type: "movies", Enabled: true},
 			files: []string{".siloignore", "Movie (2024).mkv"}, path: "Movie (2024).mkv", trigger: "realtime_monitor",
 			wantMode: ModeFile, wantPath: "Movie (2024).mkv"},
+		// An ignore file that cannot be read must not drop the change: the
+		// monitor and autoscan would never retry a rejected path.
+		{name: "monitor event for a root file with an unreadable .siloignore", call: resolve, folder: models.MediaFolder{ID: 16, Type: "movies", Enabled: true},
+			files: []string{".siloignore", "Movie.sample.mkv"}, path: "Movie.sample.mkv", trigger: "realtime_monitor", unreadable: true,
+			wantMode: ModeFile, wantPath: "Movie.sample.mkv"},
 		{name: "admin request for a root file a .siloignore excludes", call: resolve, folder: models.MediaFolder{ID: 15, Type: "movies", Enabled: true},
 			files: []string{".siloignore", "Movie.sample.mkv"}, path: "Movie.sample.mkv",
 			wantMode: ModeFile, wantPath: "Movie.sample.mkv"},
@@ -159,6 +165,14 @@ func TestResolverTargets(t *testing.T) {
 				}
 				if err := os.WriteFile(path, content, 0o644); err != nil {
 					t.Fatal(err)
+				}
+				if tc.unreadable && filepath.Base(file) == ".siloignore" {
+					if os.Geteuid() == 0 {
+						t.Skip("root reads files regardless of permissions")
+					}
+					if err := os.Chmod(path, 0); err != nil {
+						t.Fatal(err)
+					}
 				}
 			}
 			folder := tc.folder

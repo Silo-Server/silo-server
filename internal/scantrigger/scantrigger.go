@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -370,7 +371,7 @@ func (r *Resolver) resolve(ctx context.Context, req Request, pathFolders []*mode
 			return nil, err
 		}
 		if mode == ModeFile && !explicit {
-			if err := requireFileNotIgnored(cleanPath, folder.Paths); err != nil {
+			if err := requireFileNotIgnored(ctx, cleanPath, folder.Paths); err != nil {
 				return nil, err
 			}
 		}
@@ -383,11 +384,18 @@ func (r *Resolver) resolve(ctx context.Context, req Request, pathFolders []*mode
 // such a file (one in a flat library root, or any audiobook, ebook, or manga
 // file) would import what the next library scan retires again. Directory
 // targets need no check: a subtree scan applies the rules itself.
-func requireFileNotIgnored(path string, libraryRoots []string) error {
+//
+// An ignore file that cannot be read lets the file through, as before the
+// check existed. Rejecting it would lose the change for good, since the
+// monitor and autoscan do not retry a rejected path, and a library walk that
+// meets the same unreadable file protects the rows below it instead of
+// retiring them.
+func requireFileNotIgnored(ctx context.Context, path string, libraryRoots []string) error {
 	ignored, err := scanner.FileIgnored(path, libraryRoots)
 	switch {
 	case err != nil:
-		return &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: msgPathNotInspectable, Reason: ReasonPathNotInspectable}
+		slog.WarnContext(ctx, "scantrigger: could not read ignore files; scanning the file anyway", "component", "scantrigger",
+			"path", path, "error", err)
 	case ignored:
 		return &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: "Path is excluded by the library's ignore files", Reason: ReasonPathIgnored}
 	}

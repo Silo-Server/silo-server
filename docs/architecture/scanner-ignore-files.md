@@ -106,9 +106,13 @@ scope is a skipped directory, or lies below one, reads nothing.
   plugin source, or the Jellyfin `/Library/Media/Updated` endpoint) that
   would become a single-file scan is checked against the ignore files from
   its configured library root down when it is resolved, and dropped when they
-  exclude it, so automation never imports a file that the next library scan
-  retires again. A file change that becomes a subtree scan needs no check;
-  the subtree scan applies the rules.
+  exclude it, so automation does not import that file only for the next
+  library scan to retire it again. If an ignore file on the way cannot be
+  read, the change is scanned anyway rather than dropped. Only the changed
+  file is checked: an audiobook file that passes still rebuilds its whole
+  book without ignore files, so excluded sibling chapters are imported until
+  the next library scan. A file change that becomes a subtree scan needs no
+  check; the subtree scan applies the rules.
 - Subtree folder scans inherit markers and patterns from their configured
   library root through the subtree's ancestors. Rules outside the configured
   root do not apply. If an ancestor directory cannot be read, the subtree is
