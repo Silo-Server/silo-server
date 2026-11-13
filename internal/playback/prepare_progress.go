@@ -145,6 +145,11 @@ func (w *prepareProgressWriter) line(line string) {
 // byFrames moves reading to the frames encoded at the video's frame rate when
 // that is further than FFmpeg's out_time, which a sparse subtitle can hold
 // back, capped at the duration.
+//
+// The frame rate is the file's average, so on variable-rate video the reading
+// is the share of frames encoded, not of time: a file with most of its frames
+// early reads close to the duration with much of its time left. It reaches
+// the duration only at the last frame. The speed is in the same terms.
 func (w *prepareProgressWriter) byFrames(reading PrepareProgress) PrepareProgress {
 	if w.frameRate <= 0 {
 		return reading

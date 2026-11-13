@@ -122,6 +122,39 @@ func TestPrepareProgressWriterFollowsFramesWhileOutTimeWaits(t *testing.T) {
 	}
 }
 
+// On variable-rate video the average frame rate turns frames into the share
+// of frames encoded, which runs ahead of time when most frames come early. It
+// stays below the duration until the last frame, and out_time takes over once
+// it is further.
+func TestPrepareProgressWriterFramesOnUnevenFrameRate(t *testing.T) {
+	// 600 s at an average of 24 fps is 14400 frames. 90% of them, 12960,
+	// fall in the first 300 s (43.2 fps), the rest in the last 300 s (4.8 fps).
+	sink := &recordedPrepareProgress{}
+	w := newPrepareProgressWriter(sink, 600, 24)
+	_, _ = w.Write([]byte(
+		// The first half is encoded while a sparse subtitle holds out_time at 0.
+		"frame=12960\nfps=240.0\nout_time_us=0\nspeed=0x\nprogress=continue\n" +
+			// One frame short of the end, the reading is still short of the duration.
+			"frame=14399\nfps=200.0\nout_time_us=0\nspeed=0x\nprogress=continue\n" +
+			// out_time further than the frames stands.
+			"frame=14399\nfps=200.0\nout_time_us=599990000\nspeed=4.5x\nprogress=continue\n" +
+			"frame=14400\nfps=200.0\nout_time_us=600000000\nspeed=4.5x\nprogress=end\n"))
+	got := sink.all()
+	want := []PrepareProgress{
+		// 90% read after half the time.
+		{EncodedSeconds: 540, DurationSeconds: 600, Speed: 10},
+		{EncodedSeconds: 14399.0 / 24, DurationSeconds: 600, Speed: 200.0 / 24},
+		{EncodedSeconds: 599.99, DurationSeconds: 600, Speed: 4.5},
+		{EncodedSeconds: 600, DurationSeconds: 600, Speed: 4.5},
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("readings = %+v, want %+v", got, want)
+	}
+	if got[1].EncodedSeconds >= got[1].DurationSeconds {
+		t.Fatalf("reading one frame short of the end = %v, want below the duration", got[1].EncodedSeconds)
+	}
+}
+
 func TestFileFrameRate(t *testing.T) {
 	for _, tc := range []struct {
 		name string
