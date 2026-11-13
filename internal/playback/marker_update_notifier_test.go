@@ -77,6 +77,7 @@ func TestMarkerUpdateNotifierCarriesMarkerProvenance(t *testing.T) {
 	pluginSource := models.MarkerSourcePlugin
 	pluginProvider := "plugin:4:introdb"
 	rated := 0.2
+	zero := 0.0
 	scannerSource := models.MarkerSourceScanner
 	cases := []struct {
 		name         string
@@ -105,6 +106,18 @@ func TestMarkerUpdateNotifierCarriesMarkerProvenance(t *testing.T) {
 			},
 			wantSource: models.MarkerSourceScanner,
 			wantConf:   nil,
+		},
+		{
+			name: "a marker rated zero reports the zero, not nothing",
+			file: &models.MediaFile{
+				ID:                     100,
+				IntroMarkersSource:     &pluginSource,
+				IntroMarkersProvider:   &pluginProvider,
+				IntroMarkersConfidence: &zero,
+			},
+			wantSource:   models.MarkerSourcePlugin,
+			wantProvider: "plugin:4:introdb",
+			wantConf:     &zero,
 		},
 	}
 
@@ -144,6 +157,35 @@ func TestMarkerUpdateNotifierCarriesMarkerProvenance(t *testing.T) {
 				t.Fatalf("payload.Intro.Confidence = %v, want %v", payload.Intro.Confidence, *tc.wantConf)
 			}
 		})
+	}
+}
+
+func TestMarkerUpdateNotifierDerivesRangesFromAnOlderReplicaSnapshot(t *testing.T) {
+	bus := &markerUpdateTestBus{}
+	remote, conn := newMarkerUpdateTestReplica(t)
+	if err := remote.UseEventBus(context.Background(), bus.publish, bus.subscribe); err != nil {
+		t.Fatal(err)
+	}
+	if len(bus.handlers) != 1 {
+		t.Fatalf("subscriptions = %d, want 1", len(bus.handlers))
+	}
+
+	// What a replica on the previous build publishes: the segments, and none of
+	// the four ranges this build reads.
+	bus.handlers[0](`{"source_id":"older-replica","file_id":100,"marker_segments":[{"kind":"credits","start_seconds":100,"end_seconds":120}]}`)
+
+	if len(conn.messages) != 1 {
+		t.Fatalf("messages = %d, want 1", len(conn.messages))
+	}
+	var payload MarkersUpdatedPayload
+	if err := json.Unmarshal(conn.messages[0].(EventEnvelope).Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Credits == nil || payload.Credits.Start != 100 || payload.Credits.End != 120 {
+		t.Fatalf("payload.Credits = %#v, want the range the snapshot's segments hold", payload.Credits)
+	}
+	if payload.Intro != nil || payload.Recap != nil || payload.Preview != nil {
+		t.Fatalf("payload = %#v, want no range for the kinds without one", payload)
 	}
 }
 

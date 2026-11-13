@@ -184,6 +184,14 @@ func stringOrEmpty(value *string) string {
 }
 
 func (n *MarkerUpdateNotifier) dispatch(ctx context.Context, snapshot markerUpdateSnapshot) {
+	if snapshot.Intro == nil && snapshot.Credits == nil && snapshot.Recap == nil && snapshot.Preview == nil {
+		// A snapshot published by a replica on an older build (a rolling
+		// deploy) carries segments and no ranges. Deriving them here keeps its
+		// subscribers from announcing four empty ranges for a file that has
+		// markers, which would erase a viewer's marker and its source line.
+		// The file is unknown, so those ranges carry no provenance.
+		snapshot.Intro, snapshot.Credits, snapshot.Recap, snapshot.Preview = markerUpdateRanges(nil, snapshot.Segments)
+	}
 	for _, session := range n.sessions.GetSessionsByMediaFileID(snapshot.FileID) {
 		if ctx.Err() != nil {
 			return
