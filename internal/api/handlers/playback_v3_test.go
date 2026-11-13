@@ -3207,19 +3207,27 @@ func TestRemotePlaybackTransportTimeoutCoversAutoFallbackAttempts(t *testing.T) 
 		}
 	}
 
+	// An explicit hardware start can retry with CPU decode, then software,
+	// after its GPU decoder rejects the source at init.
+	handler := &PlaybackHandler{}
+	explicit := ready
+	explicit.HWAccel = "nvenc"
+	if got, want := handler.remotePlaybackTransportTimeout(nodeURL, explicit), 2*transcodenode.TranscodeStartReadinessTimeout+5*time.Second; got != want {
+		t.Errorf("explicit accel: start timeout = %s, want %s", got, want)
+	}
+
 	// Starts that cannot fall back keep the single-wait budget, so an
 	// unresponsive node fails over as quickly as before.
 	singleWait := playback.ManifestStartupTimeout + 5*time.Second
 	unready := ready
 	unready.RequireReady = false
-	explicit := ready
-	explicit.HWAccel = "nvenc"
+	softwareAccel := ready
+	softwareAccel.HWAccel = playback.HWAccelNone
 	copyVideo := ready
 	copyVideo.TargetCodecVideo = "copy"
-	handler := &PlaybackHandler{}
 	for name, request := range map[string]transcodenode.TranscodeStartRequest{
 		"unready":        unready,
-		"explicit accel": explicit,
+		"software accel": softwareAccel,
 		"copy video":     copyVideo,
 	} {
 		if got := handler.remotePlaybackTransportTimeout(nodeURL, request); got != singleWait {
