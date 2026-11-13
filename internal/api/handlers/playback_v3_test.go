@@ -3837,8 +3837,11 @@ func (f *versionChangeFixtureV3) replan(t *testing.T, previous playback.Decision
 		Capabilities:          f.startRequest.Capabilities,
 		ClientPlaybackContext: f.startRequest.ClientPlaybackContext,
 	}
-	if operation == playback.ReplanOperationQualityChangeV3 {
+	switch operation {
+	case playback.ReplanOperationQualityChangeV3:
 		request.AttemptedPlanKeys = []string{key}
+	case playback.ReplanOperationSeekFailureRecoveryV3:
+		request.Failure = playback.FailureV3{Classification: "decoder_failure"}
 	}
 	body, err := json.Marshal(request)
 	if err != nil {
@@ -5903,41 +5906,71 @@ func TestReplanPlaybackV2VersionChangeKeepsDownloadedSubtitleOfSameRelease(t *te
 // Deleting a stored subtitle moves the later ones down an ordinal, and an
 // added one takes the freed place. A replan that echoes the viewer's subtitle
 // at the ordinal the playing plan gave it keeps that stored subtitle rather
-// than the one now at that ordinal.
+// than the one now at that ordinal, and turns subtitles off when the playing
+// stored subtitle itself was deleted.
 func TestReplanPlaybackV2KeepsDownloadedSubtitleWhenEarlierOneIsDeleted(t *testing.T) {
-	var repo *handlerMockSubtitleRepo
-	f := newVersionChangeFixtureV3(t, func(f *versionChangeFixtureV3) {
-		repo = newMockSubtitleRepoForHandler()
-		repo.list = []subtitles.DownloadedSubtitle{
-			{ID: 71, MediaFileID: f.source.ID, Language: "en", Format: subtitles.FormatSRT, ReleaseName: "x"},
-			{ID: 72, MediaFileID: f.source.ID, Language: "es", Format: subtitles.FormatSRT, ReleaseName: "y"},
-		}
-		for i := range repo.list {
-			repo.subtitles[repo.list[i].ID] = &repo.list[i]
-		}
-		f.handler.SubtitleRepo = perFileSubtitleRepoV3{repo}
-		spanish := len(f.source.ExternalSubtitles) + len(f.source.SubtitleTracks) + 1
-		f.startRequest.SubtitleTrackIndex = &spanish
-		f.startRequest.SubtitleTrackID = playback.TrackIDV3(f.source.ID, "subtitle", spanish)
-	})
-	base := len(f.source.ExternalSubtitles) + len(f.source.SubtitleTracks)
-	if got, want := selectedTrackIDV3(f.started.PlaybackPlan.SelectedTracks.Subtitle), playback.TrackIDV3(f.source.ID, "subtitle", base+1); got != want {
-		t.Fatalf("start selected subtitle %q, want %q", got, want)
-	}
+	for _, tc := range []struct {
+		name      string
+		operation playback.ReplanOperationV3
+		deleted   int
+		wantID    int // stored subtitle the refreshed plan selects; 0 means none
+	}{
+		{name: "track change, earlier deleted", operation: playback.ReplanOperationTrackChangeV3, deleted: 71, wantID: 72},
+		{name: "seek failure recovery, earlier deleted", operation: playback.ReplanOperationSeekFailureRecoveryV3, deleted: 71, wantID: 72},
+		{name: "track change, playing deleted", operation: playback.ReplanOperationTrackChangeV3, deleted: 72},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var repo *handlerMockSubtitleRepo
+			f := newVersionChangeFixtureV3(t, func(f *versionChangeFixtureV3) {
+				repo = newMockSubtitleRepoForHandler()
+				repo.list = []subtitles.DownloadedSubtitle{
+					{ID: 71, MediaFileID: f.source.ID, Language: "en", Format: subtitles.FormatSRT, ReleaseName: "x"},
+					{ID: 72, MediaFileID: f.source.ID, Language: "es", Format: subtitles.FormatSRT, ReleaseName: "y"},
+				}
+				for i := range repo.list {
+					repo.subtitles[repo.list[i].ID] = &repo.list[i]
+				}
+				f.handler.SubtitleRepo = perFileSubtitleRepoV3{repo}
+				if tc.operation == playback.ReplanOperationSeekFailureRecoveryV3 {
+					// Recovery leaves the failed route, so its remux must start.
+					f.handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpegSleep(t, "5"), t.TempDir())
+				}
+				spanish := len(f.source.ExternalSubtitles) + len(f.source.SubtitleTracks) + 1
+				f.startRequest.SubtitleTrackIndex = &spanish
+				f.startRequest.SubtitleTrackID = playback.TrackIDV3(f.source.ID, "subtitle", spanish)
+			})
+			base := len(f.source.ExternalSubtitles) + len(f.source.SubtitleTracks)
+			if got, want := selectedTrackIDV3(f.started.PlaybackPlan.SelectedTracks.Subtitle), playback.TrackIDV3(f.source.ID, "subtitle", base+1); got != want {
+				t.Fatalf("start selected subtitle %q, want %q", got, want)
+			}
 
-	// 71 is deleted and 73 is added: 72 moves to base, 73 takes base+1.
-	french := subtitles.DownloadedSubtitle{ID: 73, MediaFileID: f.source.ID, Language: "fr", Format: subtitles.FormatSRT, ReleaseName: "z"}
-	repo.list = []subtitles.DownloadedSubtitle{repo.list[1], french}
-	delete(repo.subtitles, 71)
-	repo.subtitles[73] = &repo.list[1]
+			// One stored subtitle is deleted and 73 is added: the survivor
+			// moves to base, and 73 takes base+1.
+			french := subtitles.DownloadedSubtitle{ID: 73, MediaFileID: f.source.ID, Language: "fr", Format: subtitles.FormatSRT, ReleaseName: "z"}
+			survivor := repo.list[0]
+			if tc.deleted == survivor.ID {
+				survivor = repo.list[1]
+			}
+			repo.list = []subtitles.DownloadedSubtitle{survivor, french}
+			delete(repo.subtitles, tc.deleted)
+			repo.subtitles[survivor.ID] = &repo.list[0]
+			repo.subtitles[73] = &repo.list[1]
 
-	refreshed := f.replan(t, f.started, "deleted-earlier-subtitle-0001", playback.ReplanOperationTrackChangeV3, "", f.started.PlaybackPlan.SelectedTracks)
-	plan := refreshed.PlaybackPlan
-	if got, want := selectedTrackIDV3(plan.SelectedTracks.Subtitle), playback.TrackIDV3(f.source.ID, "subtitle", base); got != want {
-		t.Fatalf("refreshed plan selected subtitle %q, want %q (stored subtitle 72)", got, want)
-	}
-	if item, ok := playback.SubtitleInventoryItemAtV3(plan.Subtitle.Inventory, base); !ok || item.StoredSubtitleID != 72 {
-		t.Fatalf("inventory at the selected ordinal = %+v, want stored subtitle 72", item)
+			refreshed := f.replan(t, f.started, "deleted-subtitle-0001", tc.operation, "", f.started.PlaybackPlan.SelectedTracks)
+			plan := refreshed.PlaybackPlan
+			if tc.wantID == 0 {
+				if plan.SelectedTracks.Subtitle != nil {
+					t.Fatalf("refreshed plan selected subtitle %+v, want none", plan.SelectedTracks.Subtitle)
+				}
+				return
+			}
+			if got, want := selectedTrackIDV3(plan.SelectedTracks.Subtitle), playback.TrackIDV3(f.source.ID, "subtitle", base); got != want {
+				t.Fatalf("refreshed plan selected subtitle %q, want %q (stored subtitle %d)", got, want, tc.wantID)
+			}
+			if item, ok := playback.SubtitleInventoryItemAtV3(plan.Subtitle.Inventory, base); !ok || item.StoredSubtitleID != tc.wantID {
+				t.Fatalf("inventory at the selected ordinal = %+v, want stored subtitle %d", item, tc.wantID)
+			}
+		})
 	}
 }
 

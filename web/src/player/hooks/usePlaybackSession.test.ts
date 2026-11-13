@@ -3196,4 +3196,42 @@ describe("usePlaybackSession announced subtitle tracks", () => {
     }
     unmount();
   });
+
+  // A refetch is any replan; one already queued returns the fresh inventory
+  // itself, so the refetch must not replace a subtitle the viewer picked.
+  it("keeps a queued subtitle pick when an announcement needs a refetch", async () => {
+    const initial = [stored(0, 1, "en"), stored(1, 2, "es")];
+    const plan = fixturePlanV3({ subtitle: { mode: "render", inventory: initial } });
+    let resolveQualityReplan: ((response: Response) => void) | undefined;
+    const qualityReplanResponse = new Promise<Response>((resolve) => {
+      resolveQualityReplan = resolve;
+    });
+    const replanBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      sessionFetch((init) => {
+        replanBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        if (replanBodies.length === 1) return qualityReplanResponse;
+        return new Promise<Response>(() => {});
+      }, plan),
+    );
+    const { result, unmount } = renderSession();
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    act(() => result.current.changeQuality("1080p", 30));
+    await waitFor(() => expect(replanBodies).toHaveLength(1));
+    act(() => result.current.changeSubtitleTrack(1, 31));
+    act(() => result.current.applySubtitleTrack(stored(1, 3, "fr")));
+    await act(async () => {
+      resolveQualityReplan?.(jsonResponse(playable("session-1", plan)));
+      await qualityReplanResponse;
+    });
+
+    await waitFor(() => expect(replanBodies).toHaveLength(2));
+    expect(replanBodies[1]).toMatchObject({
+      operation: "track_change",
+      selected_tracks: { subtitle: { index: 1 } },
+    });
+    unmount();
+  });
 });

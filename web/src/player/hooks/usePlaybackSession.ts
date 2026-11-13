@@ -2002,10 +2002,16 @@ export function usePlaybackSession(
    * There is no "refresh" operation in v3, and there does not need to be: a
    * `track_change` that changes nothing returns a fresh plan — inventory
    * included — without excluding the route already playing.
+   *
+   * A track or quality change queued behind the replan in flight returns a
+   * fresh plan too, so the refresh leaves it queued rather than replacing
+   * the viewer's choice with an echo of the current tracks.
    */
   const refreshSubtitles = useCallback(
     (currentPosition: number) => {
       if (!planRef.current) return;
+      const queued = pendingReplanRef.current?.options.operation;
+      if (queued === "track_change" || queued === "quality_change") return;
       void replan({ operation: "track_change", positionSeconds: currentPosition });
     },
     [replan],
