@@ -3,9 +3,6 @@ package handlers
 import (
 	"context"
 	"errors"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
@@ -43,24 +40,6 @@ func requireRegisteredDevice(t *testing.T, store userstore.UserStore, profileID,
 	}
 }
 
-// effectiveRequest is valuesRequest (profile-1, header device device-1) with
-// the device's display name and platform declared.
-func effectiveRequest(method, target string, body []byte) *http.Request {
-	req := valuesRequest(method, target, body)
-	req.Header.Set(deviceNameHeader, "Living room")
-	req.Header.Set(devicePlatformHeader, "tvOS")
-	return req
-}
-
-func getEffective(t *testing.T, h *SettingValuesHandler, req *http.Request) {
-	t.Helper()
-	rec := httptest.NewRecorder()
-	h.HandleGetEffective(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET effective = %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
 // The seam is what the v2 operations call; it registers as the v1 route does.
 func TestResolveEffectiveSettingsSeamRegistersCallersOwnDevice(t *testing.T) {
 	handler, store := newValuesTestHandler(t)
@@ -76,98 +55,12 @@ func TestResolveEffectiveSettingsSeamRegistersCallersOwnDevice(t *testing.T) {
 	requireRegisteredDevice(t, store, "profile-1", "phone-1", "Pocket", "iOS")
 }
 
-func TestEffectiveReadOfAnotherDeviceDoesNotRegisterCaller(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-	if err := store.(userstore.DeviceRegistry).RegisterDevice(context.Background(), userstore.DeviceEntry{
-		ProfileID: "profile-1", DeviceID: "apple-tv",
-	}); err != nil {
-		t.Fatalf("registering apple-tv: %v", err)
-	}
-
-	getEffective(t, handler, effectiveRequest(http.MethodGet,
-		"/settings/values/effective?keys=playback.subtitle_mode&device_id=apple-tv", nil))
-
-	if registeredDevice(t, store, "profile-1", "device-1") != nil {
-		t.Error("registered the caller's device while it read another device's settings")
-	}
-	if got := registeredDevice(t, store, "profile-1", "apple-tv"); got == nil || got.DeviceName != "" {
-		t.Errorf("the named device's row was rewritten from the caller's headers: %+v", got)
-	}
-}
-
-func TestEffectiveReadForAnotherProfileDoesNotRegisterCaller(t *testing.T) {
-	handler, store := newHouseholdValuesHandler(t, "")
-
-	getEffective(t, handler, effectiveRequest(http.MethodGet,
-		"/settings/values/effective?keys=playback.subtitle_mode&profile_id=profile-2", nil))
-
-	if registeredDevice(t, store, "profile-2", "device-1") != nil {
-		t.Error("registered the parent's device under the child's profile")
-	}
-	if registeredDevice(t, store, "profile-1", "device-1") != nil {
-		t.Error("registered the parent's device from a read made on the child's behalf")
-	}
-}
-
 // impersonating marks a context as an administrator's view-as session on the
 // account's profile-1.
 func impersonating(ctx context.Context) context.Context {
 	admin := 99
 	ctx = apimw.SetClaims(ctx, &auth.Claims{UserID: 1, Role: "user", TokenType: auth.TokenTypeAccess, ImpersonatorUserID: &admin})
 	return apimw.SetProfileID(ctx, "profile-1")
-}
-
-// An administrator viewing as the account is using their own browser, not one
-// of the profile's devices: settings reads and playback starts register
-// nothing, and do not hold the throttle against the profile's own sessions.
-func TestImpersonationSessionDoesNotRegisterDevice(t *testing.T) {
-	sightings := NewDeviceSightings()
-	values, store := newValuesTestHandler(t)
-	values.DeviceSightings = sightings
-	playbackHandler := newDeviceSightingsPlaybackHandler(t, store, sightings)
-
-	read := effectiveRequest(http.MethodGet, "/settings/values/effective?keys=playback.subtitle_mode", nil)
-	getEffective(t, values, read.WithContext(impersonating(read.Context())))
-	if registeredDevice(t, store, "profile-1", "device-1") != nil {
-		t.Error("an impersonated settings read registered the administrator's device")
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start",
-		strings.NewReader(marshalV3StartRequest(t, v3HandlerStartRequest()))).WithContext(impersonating(context.Background()))
-	req.Header.Set(deviceIDHeader, "device-1")
-	rec := httptest.NewRecorder()
-	playbackHandler.HandleStartPlayback(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("start = %d: %s", rec.Code, rec.Body.String())
-	}
-	if registeredDevice(t, store, "profile-1", "device-1") != nil {
-		t.Error("an impersonated playback start registered the administrator's device")
-	}
-
-	getEffective(t, values, effectiveRequest(http.MethodGet, "/settings/values/effective?keys=playback.subtitle_mode", nil))
-	requireRegisteredDevice(t, store, "profile-1", "device-1", "Living room", "tvOS")
-}
-
-// Within the throttle window a repeat read does not upsert again. Forgetting
-// the row in between makes a second upsert observable.
-func TestEffectiveReadRegistrationIsThrottled(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-	read := func() {
-		getEffective(t, handler, effectiveRequest(http.MethodGet,
-			"/settings/values/effective?keys=playback.subtitle_mode", nil))
-	}
-
-	read()
-	if registeredDevice(t, store, "profile-1", "device-1") == nil {
-		t.Fatal("first read did not register the device")
-	}
-	if err := store.(userstore.DeviceRegistry).ForgetDevice(context.Background(), "profile-1", "device-1"); err != nil {
-		t.Fatalf("ForgetDevice: %v", err)
-	}
-	read()
-	if registeredDevice(t, store, "profile-1", "device-1") != nil {
-		t.Error("a repeat read within the throttle window upserted the device again")
-	}
 }
 
 func newDeviceSightingsPlaybackHandler(t *testing.T, store userstore.UserStore, sightings *DeviceSightings) *PlaybackHandler {
@@ -193,71 +86,6 @@ func TestPlaybackStartV2RegistersDeclaredDevice(t *testing.T) {
 	}
 
 	requireRegisteredDevice(t, store, "profile-1", "phone-1", "Pocket", "iOS")
-}
-
-// A refused start registers nothing: the device did not play.
-func TestRefusedPlaybackStartDoesNotRegister(t *testing.T) {
-	store := newPlaybackTestStore(t)
-	handler := newDeviceSightingsPlaybackHandler(t, store, NewDeviceSightings())
-
-	start := v3HandlerStartRequest()
-	start.ProfileID = "someone-else"
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start",
-		strings.NewReader(marshalV3StartRequest(t, start))).WithContext(newAuthorizedPlaybackContext())
-	req.Header.Set(deviceIDHeader, "tv-1")
-	rec := httptest.NewRecorder()
-	handler.HandleStartPlayback(rec, req)
-	if rec.Code == http.StatusCreated {
-		t.Fatalf("start for another profile was accepted: %s", rec.Body.String())
-	}
-	if registeredDevice(t, store, "profile-1", "tv-1") != nil || registeredDevice(t, store, "someone-else", "tv-1") != nil {
-		t.Error("a refused start registered the device")
-	}
-}
-
-// A start that returns a terminal decision did not play, so it registers
-// nothing, on the v1 route and the v2 seam alike.
-func TestTerminalPlaybackDecisionDoesNotRegister(t *testing.T) {
-	store := newPlaybackTestStore(t)
-	handler := newDeviceSightingsPlaybackHandler(t, store, NewDeviceSightings())
-	handler.InstallationID = serviceInstallation
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"transcode_enabled": "false"}}
-	unplayable := func() playback.StartRequestV3 {
-		start := v3HandlerStartRequest()
-		start.Capabilities.CodecsVideo = nil
-		start.Capabilities.CodecsVideoHardware = nil
-		start.Capabilities.VideoDecode = nil
-		start.Capabilities.Containers = nil
-		return start
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start",
-		strings.NewReader(marshalV3StartRequest(t, unplayable()))).WithContext(newAuthorizedPlaybackContext())
-	req.Header.Set(deviceIDHeader, "tv-1")
-	rec := httptest.NewRecorder()
-	handler.HandleStartPlayback(rec, req)
-	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"terminal"`) {
-		t.Fatalf("start = %d, want a terminal decision: %s", rec.Code, rec.Body.String())
-	}
-	if registeredDevice(t, store, "profile-1", "tv-1") != nil {
-		t.Error("a terminal v1 start registered the device")
-	}
-
-	v2Start := unplayable()
-	v2Start.PlaybackAttemptID = "terminal-v2-attempt"
-	response, err := handler.StartPlaybackV2(newAuthorizedPlaybackContext(), PlaybackCaller{
-		UserID: 1, ProfileID: "profile-1", InstallationID: serviceInstallation,
-		DeclaredDevice: NewDeviceMetadata("phone-1", "Pocket", "iOS"),
-	}, v2Start)
-	if err != nil {
-		t.Fatalf("StartPlaybackV2: %v", err)
-	}
-	if response.Terminal == nil {
-		t.Fatalf("v2 start = %#v, want a terminal decision", response)
-	}
-	if registeredDevice(t, store, "profile-1", "phone-1") != nil {
-		t.Error("a terminal v2 start registered the device")
-	}
 }
 
 type failingThenStoreProvider struct {
@@ -292,30 +120,151 @@ func TestFailedRegistrationIsRetried(t *testing.T) {
 	requireRegisteredDevice(t, store, "profile-1", "tv-1", "Den TV", "Android TV")
 }
 
-// Settings and playback share one recorder in the router, so a device that
-// read its settings is not upserted again when it starts playback within the
-// window.
-func TestDeviceSightingsThrottleIsSharedAcrossSurfaces(t *testing.T) {
-	sightings := NewDeviceSightings()
-	values, store := newValuesTestHandler(t)
-	values.DeviceSightings = sightings
-	playbackHandler := newDeviceSightingsPlaybackHandler(t, store, sightings)
+// livingRoom is the caller's own device as it declares itself.
+var livingRoom = NewDeviceMetadata("device-1", "Living room", "tvOS")
 
-	getEffective(t, values, effectiveRequest(http.MethodGet,
-		"/settings/values/effective?keys=playback.subtitle_mode", nil))
-	if err := store.(userstore.DeviceRegistry).ForgetDevice(context.Background(), "profile-1", "device-1"); err != nil {
-		t.Fatalf("ForgetDevice: %v", err)
+// readEffectiveAs resolves effective settings acting as profile-1 from
+// livingRoom; query fills in the rest.
+func readEffectiveAs(t *testing.T, ctx context.Context, h *SettingValuesHandler, query EffectiveSettingsQuery) {
+	t.Helper()
+	query.Keys = []string{"playback.subtitle_mode"}
+	query.ActiveProfileID = "profile-1"
+	query.Device = livingRoom
+	if _, err := h.ResolveEffectiveSettings(ctx, 1, query); err != nil {
+		t.Fatalf("ResolveEffectiveSettings: %v", err)
+	}
+}
+
+// A settings read registers only the caller's own device on the caller's own
+// profile, at most once per throttle window: a read of another device or on
+// another profile's behalf is a household parent inspecting it, and an
+// administrator viewing as the account is using their own browser.
+func TestEffectiveReadRegistersOnlyTheCallersOwnDevice(t *testing.T) {
+	ctx := apimw.SetProfileID(apimw.SetClaims(context.Background(), &auth.Claims{UserID: 1}), "profile-1")
+
+	t.Run("another device", func(t *testing.T) {
+		handler, store := newValuesTestHandler(t)
+		if err := store.(userstore.DeviceRegistry).RegisterDevice(context.Background(), userstore.DeviceEntry{
+			ProfileID: "profile-1", DeviceID: "apple-tv",
+		}); err != nil {
+			t.Fatalf("registering apple-tv: %v", err)
+		}
+		readEffectiveAs(t, ctx, handler, EffectiveSettingsQuery{DeviceID: "apple-tv"})
+		if registeredDevice(t, store, "profile-1", "device-1") != nil {
+			t.Error("registered the caller's device while it read another device's settings")
+		}
+		if got := registeredDevice(t, store, "profile-1", "apple-tv"); got == nil || got.DeviceName != "" {
+			t.Errorf("the named device's row was rewritten from the caller's device: %+v", got)
+		}
+	})
+
+	t.Run("another profile", func(t *testing.T) {
+		handler, store := newHouseholdValuesHandler(t, "")
+		readEffectiveAs(t, ctx, handler, EffectiveSettingsQuery{ProfileID: "profile-2", VerifyProfile: noProfileVerification})
+		if registeredDevice(t, store, "profile-2", "device-1") != nil {
+			t.Error("registered the parent's device under the child's profile")
+		}
+		if registeredDevice(t, store, "profile-1", "device-1") != nil {
+			t.Error("registered the parent's device from a read made on the child's behalf")
+		}
+	})
+
+	t.Run("impersonation", func(t *testing.T) {
+		handler, store := newValuesTestHandler(t)
+		readEffectiveAs(t, impersonating(context.Background()), handler, EffectiveSettingsQuery{})
+		if registeredDevice(t, store, "profile-1", "device-1") != nil {
+			t.Error("an impersonated settings read registered the administrator's device")
+		}
+		// It did not hold the throttle against the profile's own sessions.
+		readEffectiveAs(t, ctx, handler, EffectiveSettingsQuery{})
+		requireRegisteredDevice(t, store, "profile-1", "device-1", "Living room", "tvOS")
+	})
+
+	// Within the throttle window a repeat read does not upsert again.
+	// Forgetting the row in between makes a second upsert observable.
+	t.Run("throttled", func(t *testing.T) {
+		handler, store := newValuesTestHandler(t)
+		readEffectiveAs(t, ctx, handler, EffectiveSettingsQuery{})
+		requireRegisteredDevice(t, store, "profile-1", "device-1", "Living room", "tvOS")
+		if err := store.(userstore.DeviceRegistry).ForgetDevice(context.Background(), "profile-1", "device-1"); err != nil {
+			t.Fatalf("ForgetDevice: %v", err)
+		}
+		readEffectiveAs(t, ctx, handler, EffectiveSettingsQuery{})
+		if registeredDevice(t, store, "profile-1", "device-1") != nil {
+			t.Error("a repeat read within the throttle window upserted the device again")
+		}
+	})
+}
+
+// A playback start registers its device only when the device played as the
+// caller: a refused start, a terminal decision and an administrator's
+// view-as session register nothing, and the throttle is shared with the
+// settings reads.
+func TestPlaybackStartRegistersOnlyAPlayedDevice(t *testing.T) {
+	caller := PlaybackCaller{UserID: 1, ProfileID: "profile-1", InstallationID: serviceInstallation, DeclaredDevice: livingRoom}
+	newHandler := func(t *testing.T, store userstore.UserStore, sightings *DeviceSightings) *PlaybackHandler {
+		handler := newDeviceSightingsPlaybackHandler(t, store, sightings)
+		handler.InstallationID = serviceInstallation
+		return handler
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start",
-		strings.NewReader(marshalV3StartRequest(t, v3HandlerStartRequest()))).WithContext(newAuthorizedPlaybackContext())
-	req.Header.Set(deviceIDHeader, "device-1")
-	rec := httptest.NewRecorder()
-	playbackHandler.HandleStartPlayback(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("start = %d: %s", rec.Code, rec.Body.String())
-	}
-	if registeredDevice(t, store, "profile-1", "device-1") != nil {
-		t.Error("playback start upserted a device the settings read had just registered")
-	}
+	t.Run("refused start", func(t *testing.T) {
+		store := newPlaybackTestStore(t)
+		start := v3HandlerStartRequest()
+		start.ProfileID = "someone-else"
+		if response, err := newHandler(t, store, NewDeviceSightings()).StartPlaybackV2(newAuthorizedPlaybackContext(), caller, start); err == nil {
+			t.Fatalf("start for another profile was accepted: %+v", response)
+		}
+		if registeredDevice(t, store, "profile-1", "device-1") != nil || registeredDevice(t, store, "someone-else", "device-1") != nil {
+			t.Error("a refused start registered the device")
+		}
+	})
+
+	t.Run("terminal decision", func(t *testing.T) {
+		store := newPlaybackTestStore(t)
+		handler := newHandler(t, store, NewDeviceSightings())
+		handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"transcode_enabled": "false"}}
+		start := v3HandlerStartRequest()
+		start.Capabilities.CodecsVideo = nil
+		start.Capabilities.CodecsVideoHardware = nil
+		start.Capabilities.VideoDecode = nil
+		start.Capabilities.Containers = nil
+		response, err := handler.StartPlaybackV2(newAuthorizedPlaybackContext(), caller, start)
+		if err != nil {
+			t.Fatalf("StartPlaybackV2: %v", err)
+		}
+		if response.Terminal == nil {
+			t.Fatalf("start = %#v, want a terminal decision", response)
+		}
+		if registeredDevice(t, store, "profile-1", "device-1") != nil {
+			t.Error("a terminal start registered the device")
+		}
+	})
+
+	t.Run("impersonation", func(t *testing.T) {
+		store := newPlaybackTestStore(t)
+		if _, err := newHandler(t, store, NewDeviceSightings()).StartPlaybackV2(impersonating(context.Background()), caller, v3HandlerStartRequest()); err != nil {
+			t.Fatalf("StartPlaybackV2: %v", err)
+		}
+		if registeredDevice(t, store, "profile-1", "device-1") != nil {
+			t.Error("an impersonated playback start registered the administrator's device")
+		}
+	})
+
+	t.Run("throttle shared with settings reads", func(t *testing.T) {
+		sightings := NewDeviceSightings()
+		values, store := newValuesTestHandler(t)
+		values.DeviceSightings = sightings
+		readEffectiveAs(t, context.Background(), values, EffectiveSettingsQuery{})
+		requireRegisteredDevice(t, store, "profile-1", "device-1", "Living room", "tvOS")
+		if err := store.(userstore.DeviceRegistry).ForgetDevice(context.Background(), "profile-1", "device-1"); err != nil {
+			t.Fatalf("ForgetDevice: %v", err)
+		}
+		if _, err := newHandler(t, store, sightings).StartPlaybackV2(newAuthorizedPlaybackContext(), caller, v3HandlerStartRequest()); err != nil {
+			t.Fatalf("StartPlaybackV2: %v", err)
+		}
+		if registeredDevice(t, store, "profile-1", "device-1") != nil {
+			t.Error("playback start upserted a device the settings read had just registered")
+		}
+	})
 }

@@ -731,12 +731,22 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 		} else {
 			copyAudioCodec = compatSourceAudioCodec(*source)
 		}
+		// A progressive remux is one long response whose ffmpeg belongs to
+		// this request. No later request exists for a stop to refuse, so the
+		// stop has to reach the stream itself, as in the native handler.
+		var abort <-chan struct{}
+		if watcher, ok := h.sessionMgr.(transportStopWatcher); ok {
+			var release func()
+			abort, release = watcher.WatchTransportStop(playSession.UpstreamSessionID)
+			defer release()
+		}
 		_ = playback.ServeRemuxWithOptions(w, r, file.FilePath, "mp4", seekSeconds, source.TranscodeAudio, audioTrackIndex, file.PrimaryDVProfile(), playback.RemuxServeOptions{
 			ContentType:         playback.RemuxContentType(file.IsAudioOnly()),
 			AudioOnly:           file.IsAudioOnly(),
 			FFmpegPath:          h.FFmpegPath,
 			SourceAudioChannels: sourceAudioChannels,
 			CopyAudioCodec:      copyAudioCodec,
+			Abort:               abort,
 		})
 	default:
 		_ = playback.ServeDirectPlay(w, r, file.FilePath)
@@ -1222,7 +1232,7 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 				"last_produced_age_ms", lastProducedAgeMS,
 				"wait_timeout_ms", decision.WaitTimeout.Milliseconds(),
 				"reason", decision.Reason,
-				"play_session", playSessionID,
+				"play_session", playSessionFingerprint(playSessionID),
 				"session", playSession.UpstreamSessionID,
 				"playback_session_id", playSession.UpstreamSessionID,
 			)
@@ -1236,7 +1246,7 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 					"last_produced_age_ms", lastProducedAgeMS,
 					"wait_timeout_ms", decision.WaitTimeout.Milliseconds(),
 					"reason", decision.Reason,
-					"play_session", playSessionID,
+					"play_session", playSessionFingerprint(playSessionID),
 					"session", playSession.UpstreamSessionID,
 					"playback_session_id", playSession.UpstreamSessionID,
 				)
@@ -1251,7 +1261,7 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 						"last_produced_age_ms", lastProducedAgeMS,
 						"wait_timeout_ms", decision.WaitTimeout.Milliseconds(),
 						"reason", decision.Reason,
-						"play_session", playSessionID,
+						"play_session", playSessionFingerprint(playSessionID),
 						"session", playSession.UpstreamSessionID,
 						"playback_session_id", playSession.UpstreamSessionID,
 					)
@@ -1271,7 +1281,7 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 					slog.ErrorContext(r.Context(), "restart transcode at missing segment", "component", "jellycompat",
 						"error", restartErr,
 						"segment", segmentName,
-						"play_session", playSessionID,
+						"play_session", playSessionFingerprint(playSessionID),
 						"session", playSession.UpstreamSessionID,
 						"playback_session_id", playSession.UpstreamSessionID,
 					)
@@ -1302,7 +1312,7 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 						"seek_seconds", target.SeekSeconds,
 						"stream_origin_seconds", target.StreamOriginSeconds,
 						"resolved_start_segment", target.StartSegmentNumber,
-						"play_session", playSessionID,
+						"play_session", playSessionFingerprint(playSessionID),
 						"session", playSession.UpstreamSessionID,
 						"playback_session_id", playSession.UpstreamSessionID,
 					)
@@ -2581,7 +2591,7 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 				h.syncSessionsNow(context.WithoutCancel(r.Context()), "compat_unidentified_stop")
 			} else if !errors.Is(err, playback.ErrSessionNotFound) {
 				slog.WarnContext(r.Context(), "jellycompat could not mark an unidentified stop", "component", "jellycompat",
-					"play_session_id", playSession.ID, "error", err)
+					"play_session_id", playSessionFingerprint(playSession.ID), "error", err)
 			}
 		}
 	}
@@ -2692,7 +2702,7 @@ func (h *PlaybackHandler) reviveUpstreamForReport(ctx context.Context, session *
 	revived, err := h.ensureUpstreamPlayback(ctx, session, playSession.ID, *source, playSession.UpstreamPlayMethod)
 	if err != nil {
 		slog.WarnContext(ctx, "jellycompat upstream session revive failed", "component", "jellycompat",
-			"play_session_id", playSession.ID,
+			"play_session_id", playSessionFingerprint(playSession.ID),
 			"upstream_session_id", playSession.UpstreamSessionID,
 			"error", err,
 		)
@@ -3549,7 +3559,7 @@ func (h *PlaybackHandler) applyReportedAudioSelection(ctx context.Context, playS
 	}
 	if selectionErr != nil {
 		slog.WarnContext(ctx, "jellycompat audio selection update failed", "component", "jellycompat",
-			"play_session_id", playSession.ID,
+			"play_session_id", playSessionFingerprint(playSession.ID),
 			"audio_stream_index", selectedAudioStreamIndex,
 			"error", selectionErr,
 		)
@@ -3558,7 +3568,7 @@ func (h *PlaybackHandler) applyReportedAudioSelection(ctx context.Context, playS
 			audioTrackIndex = resolvedAudioTrackIndex
 		}
 		slog.InfoContext(ctx, "jellycompat audio selection updated", "component", "jellycompat",
-			"play_session_id", playSession.ID,
+			"play_session_id", playSessionFingerprint(playSession.ID),
 			"media_source_id", updatedSource.ID,
 			"audio_stream_index", selectedAudioStreamIndex,
 			"audio_track_index", audioTrackIndex,
@@ -3769,7 +3779,7 @@ func (h *PlaybackHandler) restartCompatTranscodeForAudioSelection(
 		opts := transcodeSession.RecipeOpts()
 		if err := h.persistTranscodeRecipe(context.WithoutCancel(ctx), playSession.ID, playSession.UpstreamSessionID, opts); err != nil {
 			slog.WarnContext(ctx, "persist audio-restarted transcode recipe", "component", "jellycompat", "error", err,
-				"playback_session_id", playSession.ID)
+				"play_session_id", playSessionFingerprint(playSession.ID), "playback_session_id", playSession.UpstreamSessionID)
 		}
 		return true, nil
 	}
@@ -4172,29 +4182,18 @@ func compatMasterCodecs(videoCodec string, source PlaybackMediaSource, audio mod
 }
 
 // compatMasterVideoCodec returns the RFC 6381 CODECS entry for the copied
-// video, or "" when the probe lacks the level or another fact the entry
-// needs.
+// video, or "" when the probe lacks the level, names a profile the entry
+// cannot describe, or lacks another fact the entry needs.
 func compatMasterVideoCodec(video models.VideoTrack) string {
 	switch strings.ToLower(strings.TrimSpace(video.Codec)) {
 	case compatVideoCodecHEVC, "h265":
-		if video.Level > 0 {
-			profile := "1.4"
-			if strings.EqualFold(strings.ReplaceAll(video.Profile, " ", ""), "main10") {
-				profile = "2.4"
-			}
+		profile := compatHEVCCodecProfiles[strings.ToLower(strings.ReplaceAll(video.Profile, " ", ""))]
+		if video.Level > 0 && profile != "" {
 			return fmt.Sprintf("hvc1.%s.L%d.B0", profile, video.Level)
 		}
 	case compatTargetVideoCodec, "avc":
-		if video.Level > 0 {
-			profile := "4240"
-			switch strings.ToLower(strings.TrimSpace(video.Profile)) {
-			case "high":
-				profile = "6400"
-			case "main":
-				profile = "4D40"
-			case "baseline":
-				profile = "42E0"
-			}
+		profile := compatH264CodecProfiles[strings.ToLower(strings.TrimSpace(video.Profile))]
+		if video.Level > 0 && profile != "" {
 			return fmt.Sprintf("avc1.%s%02X", profile, video.Level)
 		}
 	case compatVideoCodecAV1:
@@ -4203,6 +4202,34 @@ func compatMasterVideoCodec(video models.VideoTrack) string {
 		return compatVP9CodecString(video)
 	}
 	return ""
+}
+
+// compatH264CodecProfiles maps FFprobe's H.264 profile name to the
+// profile_idc and constraint flag bytes of the avc1 entry. The intra profiles
+// require constraint_set3_flag. Other profiles (Extended, CAVLC 4:4:4) are
+// left out rather than declared as a profile the stream does not have.
+//
+//nolint:goconst // FFprobe profile names, listed verbatim.
+var compatH264CodecProfiles = map[string]string{
+	"constrained baseline":  "4240",
+	"baseline":              "42E0",
+	"main":                  "4D40",
+	"high":                  "6400",
+	"high 10":               "6E00",
+	"high 10 intra":         "6E10",
+	"high 4:2:2":            "7A00",
+	"high 4:2:2 intra":      "7A10",
+	"high 4:4:4 predictive": "F400",
+	"high 4:4:4 intra":      "F410",
+}
+
+// compatHEVCCodecProfiles maps FFprobe's HEVC profile name, spaces removed,
+// to the profile and compatibility fields of the hvc1 entry. Range Extensions
+// and the other extension profiles are told apart only by constraint flags
+// the probe does not report, so they get no entry.
+var compatHEVCCodecProfiles = map[string]string{
+	"main":   "1.4",
+	"main10": "2.4",
 }
 
 // compatAV1CodecString builds the short form av01.0.LLM.DD (AV1 ISOBMFF,

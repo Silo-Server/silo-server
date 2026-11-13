@@ -388,6 +388,9 @@ func (p *restoreSetParser) validateHomeSections() error {
 		if e.WebOnly && p.index.Version < 4 {
 			return errors.New("a web-only section is not part of this format version")
 		}
+		if (e.TitleKey != "" || len(e.TitleArgs) > 0) && p.index.Version < restoreSetSectionTitleKeys {
+			return errors.New("a section title key is not part of this format version")
+		}
 		if validItemSegment(e.ID) && seen[e.ID] {
 			return fmt.Errorf("section %q is listed twice", e.ID)
 		}
@@ -414,6 +417,8 @@ func homeSectionProblem(e HomeSectionEntry) string {
 	// An empty title is kept: bulk section creation persists one.
 	case !validSectionID(e.SectionType) || len(e.Title) > 512 || e.ItemLimit < 0:
 		return "It has no valid type, title, or item limit."
+	case len(e.TitleKey) > maxSectionTitleKey || len(e.TitleArgs) > maxSectionTitleArgs:
+		return "It has no valid title key."
 	case !validRawJSON(e.Config):
 		return "Its configuration is not valid JSON."
 	}
@@ -467,6 +472,14 @@ func collectionTooLarge(c CollectionEntry) bool {
 
 // maxThumbhashLength bounds a thumbhash: base64 of at most 25 bytes.
 const maxThumbhashLength = 64
+
+// Bounds on a section's title key and its placeholder values: a key is a
+// catalog id such as home.section.recentlyAddedIn, and a message names few
+// placeholders.
+const (
+	maxSectionTitleKey  = 128
+	maxSectionTitleArgs = 8
+)
 
 // validThumbhash reports whether s could be a thumbhash; a restore stores
 // none that is not.

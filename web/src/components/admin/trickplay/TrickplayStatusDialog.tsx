@@ -15,7 +15,7 @@ import {
   useAdminItemTrickplay,
   useRegenerateItemTrickplay,
 } from "@/hooks/queries/admin/trickplay";
-import { useT, type Translate } from "@/i18n";
+import { useAdminMessages, useT, type Translate } from "@/i18n";
 import { formatDateTime } from "@/lib/datetime";
 import { buildQualitySummary } from "@/pages/ItemDetail/components/VersionFlyout";
 
@@ -83,7 +83,12 @@ function FileRow({ file, label }: { file: AdminTrickplayFile; label: string }) {
  * An item's seek previews, file by file, with the admin action that makes them
  * again. Read on open, not with the page: most visits never look.
  */
-export function TrickplayStatusDialog({
+export function TrickplayStatusDialog(props: TrickplayStatusDialogProps) {
+  // Item pages show this outside the admin layout, so its text may not have loaded.
+  return useAdminMessages({ optional: true }) ? <TrickplayStatusDialogContent {...props} /> : null;
+}
+
+function TrickplayStatusDialogContent({
   open,
   onOpenChange,
   itemId,

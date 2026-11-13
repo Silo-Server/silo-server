@@ -18,6 +18,7 @@ import {
 } from "@/hooks/queries/admin/userActivity";
 import { useAdminUserCapabilities } from "@/hooks/queries/admin/users";
 import { useT, type MessageKey } from "@/i18n";
+import { TOUCH_TARGETS } from "@/lib/touchTargets";
 
 import { StatStrip, StatTile, SubTabs } from "../ui";
 import { DeviceDownloadsCard } from "./DeviceDownloadsCard";
@@ -226,7 +227,7 @@ export function DownloadsTab({ user }: { user: AdminUser }) {
               >
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className={TOUCH_TARGETS}>
                 <SelectItem value={ALL}>
                   {t("web.admin.users.detail.common.allProfiles")}
                 </SelectItem>
@@ -248,7 +249,7 @@ export function DownloadsTab({ user }: { user: AdminUser }) {
               >
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className={TOUCH_TARGETS}>
                 {STATUS_OPTIONS.filter((option) => option.value !== "requested" || anyAndroid).map(
                   (option) => (
                     <SelectItem key={option.value} value={option.value}>

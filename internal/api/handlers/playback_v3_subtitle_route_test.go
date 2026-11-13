@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -130,6 +129,63 @@ func TestSubtitleArtifactOffersOriginalSubRipOnlyToOptedInClients(t *testing.T) 
 	}
 }
 
+// A server that predates subrip_sidecar_v1 stored the token verbatim for any
+// client while publishing WebVTT, and never offered the feature. The published
+// representation decides once there is one; before that, the token counts only
+// when a /api/v2 decision of this server offered the feature.
+func TestLegacyAttemptWithStoredSubripTokenKeepsWebVTT(t *testing.T) {
+	file := &models.MediaFile{ID: 42, ExternalSubtitles: []models.ExternalSubtitle{{Path: "/media/movie.ar.srt", Format: "srt"}}}
+	inventory := func(features []string) []playback.SubtitleInventoryItemV3 {
+		return playback.ScopeSubtitleInventoryV3("session", file, playback.BuildSubtitleInventoryV3(file, nil), features)
+	}
+	record := func(stored, offered []string, published []playback.SubtitleInventoryItemV3) *playback.AttemptRecordV3 {
+		r := &playback.AttemptRecordV3{}
+		r.NormalizedRequest.ClientFeatures = stored
+		r.StartResponse.ServerFeatures = offered
+		r.CurrentPlan.Subtitle.Inventory = published
+		return r
+	}
+	withToken := []string{playback.FeatureSubripSidecarV3}
+	shared, native := playback.ServerFeaturesV3(), playback.NativeServerFeaturesV3()
+	legacyWebVTT := record(withToken, shared, inventory(nil))
+	legacyNoSRT := record(withToken, shared, nil)
+	v2SRT := record(withToken, native, inventory(withToken))
+	v2NoSRT := record(withToken, native, nil)
+	v1NoSRT := record(nil, shared, nil)
+
+	for name, tc := range map[string]struct {
+		record    *playback.AttemptRecordV3
+		requested []string
+		refused   bool
+	}{
+		"replan of a WebVTT attempt continues":         {legacyWebVTT, nil, false},
+		"replan of an original-SRT attempt continues":  {v2SRT, nil, false},
+		"retry of a WebVTT attempt is refused":         {legacyWebVTT, withToken, true},
+		"retry of a legacy token-only attempt refused": {legacyNoSRT, withToken, true},
+		"retry of a v1 attempt is refused":             {v1NoSRT, withToken, true},
+		"retry of a negotiated attempt replays":        {v2NoSRT, withToken, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := requireAttemptAPISurfaceV3(tc.record, tc.requested); (err != nil) != tc.refused {
+				t.Fatalf("refused = %v, want %v", err != nil, tc.refused)
+			}
+		})
+	}
+	for name, tc := range map[string]struct {
+		record   *playback.AttemptRecordV3
+		original bool
+	}{
+		"legacy WebVTT attempt": {legacyWebVTT, false},
+		"legacy token-only":     {legacyNoSRT, false},
+		"original-SRT attempt":  {v2SRT, true},
+		"v2 attempt, no SRT":    {v2NoSRT, true},
+	} {
+		if got := playback.HasFeatureV3(replanSubtitleFeaturesV3(tc.record, withToken), playback.FeatureSubripSidecarV3); got != tc.original {
+			t.Errorf("%s: replan keeps original SRT = %v, want %v", name, got, tc.original)
+		}
+	}
+}
+
 // A seek reanchor replays the frozen plan, so its SRT artifact keeps the
 // representation the plan published. An attempt started by a server that did
 // not know subrip_sidecar_v1 persisted WebVTT URLs beside a feature list that
@@ -159,7 +215,7 @@ func TestSeekReanchorKeepsTheFrozenSRTRepresentation(t *testing.T) {
 			startRequest.SubtitleTrackID = playback.TrackIDV3(file.ID, "subtitle", subtitleIndex)
 			startRequest.SubtitleTrackIndex = &subtitleIndex
 			startRR := httptest.NewRecorder()
-			handler.HandleStartPlayback(startRR, httptest.NewRequest(http.MethodPost, "/api/v2/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(WithNativeAPIV2(newAuthorizedPlaybackContext())))
+			serveStartPlaybackV2(t, handler, startRR, httptest.NewRequest(http.MethodPost, "/api/v2/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(WithNativeAPIV2(newAuthorizedPlaybackContext())))
 			if startRR.Code != http.StatusCreated {
 				t.Fatalf("start status = %d, body = %s", startRR.Code, startRR.Body.String())
 			}
@@ -201,7 +257,7 @@ func TestSeekReanchorKeepsTheFrozenSRTRepresentation(t *testing.T) {
 			}
 			req := withPlaybackRouteParam(httptest.NewRequest(http.MethodPost, "/api/v2/playback/"+started.SessionID+"/replan", strings.NewReader(string(body))).WithContext(WithNativeAPIV2(newAuthorizedPlaybackContext())), "session_id", started.SessionID)
 			rr := httptest.NewRecorder()
-			handler.HandleReplanPlaybackV3(rr, req)
+			serveReplanPlaybackV2(t, handler, rr, req)
 			if rr.Code != http.StatusOK {
 				t.Fatalf("reanchor status = %d, body = %s", rr.Code, rr.Body.String())
 			}
@@ -220,68 +276,6 @@ func TestSeekReanchorKeepsTheFrozenSRTRepresentation(t *testing.T) {
 	}
 }
 
-// A server that predates subrip_sidecar_v1 stored the token verbatim for any
-// client while publishing WebVTT, and never offered the feature. The published
-// representation decides once there is one; before that, the token counts only
-// when a /api/v2 decision of this server offered the feature.
-func TestLegacyAttemptWithStoredSubripTokenKeepsWebVTT(t *testing.T) {
-	file := &models.MediaFile{ID: 42, ExternalSubtitles: []models.ExternalSubtitle{{Path: "/media/movie.ar.srt", Format: "srt"}}}
-	inventory := func(features []string) []playback.SubtitleInventoryItemV3 {
-		return playback.ScopeSubtitleInventoryV3("session", file, playback.BuildSubtitleInventoryV3(file, nil), features)
-	}
-	record := func(stored, offered []string, published []playback.SubtitleInventoryItemV3) *playback.AttemptRecordV3 {
-		r := &playback.AttemptRecordV3{}
-		r.NormalizedRequest.ClientFeatures = stored
-		r.StartResponse.ServerFeatures = offered
-		r.CurrentPlan.Subtitle.Inventory = published
-		return r
-	}
-	withToken := []string{playback.FeatureSubripSidecarV3}
-	shared, native := playback.ServerFeaturesV3(), playback.NativeServerFeaturesV3()
-	legacyWebVTT := record(withToken, shared, inventory(nil))
-	legacyNoSRT := record(withToken, shared, nil)
-	v2SRT := record(withToken, native, inventory(withToken))
-	v2NoSRT := record(withToken, native, nil)
-	v1NoSRT := record(nil, shared, nil)
-	v1, v2 := t.Context(), WithNativeAPIV2(t.Context())
-
-	for name, tc := range map[string]struct {
-		ctx       context.Context
-		record    *playback.AttemptRecordV3
-		requested []string
-		refused   bool
-	}{
-		"legacy WebVTT attempt continues on v1":           {v1, legacyWebVTT, nil, false},
-		"legacy token-only attempt continues on v1":       {v1, legacyNoSRT, nil, false},
-		"original-SRT attempt is refused on v1":           {v1, v2SRT, nil, true},
-		"v2 attempt with no SRT yet is refused on v1":     {v1, v2NoSRT, nil, true},
-		"v1 attempt continues on v1":                      {v1, v1NoSRT, nil, false},
-		"v2 retry of a WebVTT attempt is refused":         {v2, legacyWebVTT, withToken, true},
-		"v2 retry of a legacy token-only attempt refused": {v2, legacyNoSRT, withToken, true},
-		"v2 retry of a v1 attempt is refused":             {v2, v1NoSRT, withToken, true},
-		"v2 retry of a v2 attempt replays":                {v2, v2NoSRT, withToken, false},
-	} {
-		t.Run(name, func(t *testing.T) {
-			if err := requireAttemptAPISurfaceV3(tc.ctx, tc.record, tc.requested); (err != nil) != tc.refused {
-				t.Fatalf("refused = %v, want %v", err != nil, tc.refused)
-			}
-		})
-	}
-	for name, tc := range map[string]struct {
-		record   *playback.AttemptRecordV3
-		original bool
-	}{
-		"legacy WebVTT attempt": {legacyWebVTT, false},
-		"legacy token-only":     {legacyNoSRT, false},
-		"original-SRT attempt":  {v2SRT, true},
-		"v2 attempt, no SRT":    {v2NoSRT, true},
-	} {
-		if got := playback.HasFeatureV3(replanSubtitleFeaturesV3(tc.record, withToken), playback.FeatureSubripSidecarV3); got != tc.original {
-			t.Errorf("%s: replan keeps original SRT = %v, want %v", name, got, tc.original)
-		}
-	}
-}
-
 // A terminal start publishes no subtitle URLs, so an identical opted-in retry
 // through /api/v2 replays it instead of failing the surface check.
 func TestV2RetryReplaysATerminalStartWithSubripSidecar(t *testing.T) {
@@ -296,7 +290,7 @@ func TestV2RetryReplaysATerminalStartWithSubripSidecar(t *testing.T) {
 	body := marshalV3StartRequest(t, startRequest)
 	start := func() (*httptest.ResponseRecorder, playback.DecisionResponseV3) {
 		rr := httptest.NewRecorder()
-		handler.HandleStartPlayback(rr, httptest.NewRequest(http.MethodPost, "/api/v2/playback/start", strings.NewReader(body)).WithContext(WithNativeAPIV2(newAuthorizedPlaybackContext())))
+		serveStartPlaybackV2(t, handler, rr, httptest.NewRequest(http.MethodPost, "/api/v2/playback/start", strings.NewReader(body)).WithContext(WithNativeAPIV2(newAuthorizedPlaybackContext())))
 		var response playback.DecisionResponseV3
 		_ = json.Unmarshal(rr.Body.Bytes(), &response)
 		return rr, response
@@ -308,66 +302,5 @@ func TestV2RetryReplaysATerminalStartWithSubripSidecar(t *testing.T) {
 	retryRR, retry := start()
 	if retryRR.Code != firstRR.Code || retry.Terminal == nil || retry.Terminal.Reason != first.Terminal.Reason {
 		t.Fatalf("terminal retry = %d %s, want a replay of %d", retryRR.Code, retryRR.Body.String(), firstRR.Code)
-	}
-}
-
-// An attempt that negotiated subrip_sidecar_v1 on /api/v2 cannot continue on
-// the frozen /api/v1 surface, which would publish its .srt?original=1 URLs on a
-// route that serves WebVTT for them.
-func TestV1RefusesAnAttemptNegotiatedWithSubripSidecar(t *testing.T) {
-	file := v3HandlerFixtureFile(t)
-	file.ExternalSubtitles = []models.ExternalSubtitle{{Path: "/media/movie.ar.srt", Language: "ar", Format: "srt"}}
-	manager := playback.NewSessionManager(0, 0)
-	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "false"}}
-	handler.ItemAccess = allowAllPlaybackItemAccess{}
-	startRequest := v3HandlerStartRequest()
-	startRequest.ClientFeatures = append(startRequest.ClientFeatures, playback.FeatureSubripSidecarV3)
-	subtitleIndex := 0
-	startRequest.SubtitleTrackID = playback.TrackIDV3(file.ID, "subtitle", subtitleIndex)
-	startRequest.SubtitleTrackIndex = &subtitleIndex
-	startBody := marshalV3StartRequest(t, startRequest)
-	start := func(ctx context.Context) *httptest.ResponseRecorder {
-		rr := httptest.NewRecorder()
-		handler.HandleStartPlayback(rr, httptest.NewRequest(http.MethodPost, "/api/v2/playback/start", strings.NewReader(startBody)).WithContext(ctx))
-		return rr
-	}
-	startRR := start(WithNativeAPIV2(newAuthorizedPlaybackContext()))
-	if startRR.Code != http.StatusCreated {
-		t.Fatalf("v2 start status = %d, body = %s", startRR.Code, startRR.Body.String())
-	}
-	var started playback.DecisionResponseV3
-	if err := json.Unmarshal(startRR.Body.Bytes(), &started); err != nil {
-		t.Fatal(err)
-	}
-	if started.PlaybackPlan == nil || started.PlaybackPlan.Subtitle.Artifact == nil || started.PlaybackPlan.Subtitle.Artifact.Format != "srt" {
-		t.Fatalf("v2 start must negotiate original SRT: %#v", started.PlaybackPlan)
-	}
-
-	// An identical start retried through /api/v1 must not replay the v2 plan.
-	if rr := start(newAuthorizedPlaybackContext()); rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "playback_attempt_reused") {
-		t.Fatalf("v1 start replay status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-
-	body, err := json.Marshal(playback.ReplanRequestV3{
-		ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationSeekReanchorV3,
-		PlaybackAttemptID: startRequest.PlaybackAttemptID,
-		ReplanRequestID:   "seek-reanchor-v1", FailedPlanID: started.PlaybackPlan.PlanID,
-		PlanAttemptID: "plan-attempt-seek-v1", AttemptCount: 1,
-		PlanAttemptKey:    playback.PlanAttemptKeyV3(*started.PlaybackPlan, startRequest.ClientPlaybackContext.Output.OutputContextID, nil),
-		QualityPreference: "original", PositionSeconds: 60,
-		SelectedTracks: started.PlaybackPlan.SelectedTracks,
-		Capabilities:   startRequest.Capabilities, ClientPlaybackContext: startRequest.ClientPlaybackContext,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := manager.UpdateProgress(started.SessionID, 12, true); err != nil {
-		t.Fatal(err)
-	}
-	rr := httptest.NewRecorder()
-	handler.HandleReplanPlaybackV3(rr, withPlaybackRouteParam(httptest.NewRequest(http.MethodPost, "/api/v1/playback/"+started.SessionID+"/replan", strings.NewReader(string(body))).WithContext(newAuthorizedPlaybackContext()), "session_id", started.SessionID))
-	if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "playback_attempt_reused") {
-		t.Fatalf("v1 replan status = %d, body = %s", rr.Code, rr.Body.String())
 	}
 }

@@ -14,8 +14,7 @@
 #   scripts/sync-translations --local <checkout>      generate from a silo-translations checkout
 #   scripts/sync-translations --platform <p> ...      first run, before .silo-translations exists
 #
-# Downloads use `gh release download` (the repository is private; needs gh auth with read
-# access). Set SILO_TRANSLATIONS_PUBLIC=1 to use plain curl once the repository is public.
+# Downloads use curl from the repository's public GitHub releases; no sign-in needed.
 # Nothing in the client changes until the download is verified and unpacked. Then the files are
 # copied in, files the previous install listed in .silo-translations-files and this one doesn't
 # are removed (a language that stopped shipping), the new list is saved, and .silo-translations
@@ -67,13 +66,8 @@ else
   [ -n "$version" ] || die "no version pinned; pass --version <v>"
   case $version in local-*) die "pinned to a local build ($version); rerun with --local <checkout> or --version <release>" ;; esac
   asset=silo-translations-$platform-$version.tar.gz
-  if [ "${SILO_TRANSLATIONS_PUBLIC:-}" = 1 ]; then
-    curl -fsSL -o "$tmp/$asset" "$BASE_URL/v$version/$asset"
-    [ -n "$sha" ] || curl -fsSL -o "$tmp/SHA256SUMS" "$BASE_URL/v$version/SHA256SUMS"
-  else
-    gh release download "v$version" -R "$REPO" -D "$tmp" -p "$asset"
-    [ -n "$sha" ] || gh release download "v$version" -R "$REPO" -D "$tmp" -p SHA256SUMS
-  fi
+  curl -fsSL -o "$tmp/$asset" "$BASE_URL/v$version/$asset"
+  [ -n "$sha" ] || curl -fsSL -o "$tmp/SHA256SUMS" "$BASE_URL/v$version/SHA256SUMS"
   if [ -z "$sha" ]; then
     sha=$(awk -v f="$asset" '$2 == f || $2 == "*" f { print $1 }' "$tmp/SHA256SUMS")
     [ -n "$sha" ] || die "SHA256SUMS of v$version has no entry for $asset"

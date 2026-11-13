@@ -88,6 +88,11 @@ an admin history row with an `end_reason` and `lifecycle_seq` within its idle gr
 plus one sweep interval after its last activity, while at least one API server runs.
 Each sweep ends at most 100 sessions per server, oldest activity first, so a larger
 backlog (a server dying with many sessions) drains over the following sweeps.
+When the history write of an end the sweep makes from the start row fails, the
+session stays live and the failure counts as activity: a session selected by its
+idleness is tried again after another grace instead of every 15 seconds, and sessions
+that keep failing move behind the others, so they never fill a batch. The row is
+recorded once the cause is fixed.
 Lifecycle events themselves are at most once.
 
 ## Listing

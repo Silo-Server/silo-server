@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router";
 import { Pencil, Plus, Trash2, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 
@@ -58,8 +59,9 @@ export default function ProfilesSettings() {
   const { data: libraries = [], isLoading: librariesLoading } = useAvailableUserLibraries({
     includeHidden: true,
   });
-  const { profile: activeProfile, selectProfile, verifyProfilePin } = useAuth();
+  const { profile: activeProfile, selectProfile, verifyProfilePin, isImpersonating } = useAuth();
   const deleteMutation = useDeleteProfile();
+  const navigate = useNavigate();
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingProfile, setEditingProfile] = useState<Profile | null>(null);
@@ -86,12 +88,35 @@ export default function ProfilesSettings() {
   }
 
   function handleUseProfile(profile: Profile) {
-    if (profile.has_pin) {
+    // View-as opens a locked profile without its PIN; the server allows it too.
+    if (profile.has_pin && !isImpersonating) {
       setPinProfile(profile);
       return;
     }
 
     selectProfile(profile);
+  }
+
+  // View-as opens a locked profile without its PIN, but managing the
+  // household still needs the primary profile's. Ask for it before loading
+  // anything that needs it: the server refuses those reads, and that refusal
+  // would send the browser back to the profile picker.
+  if (isImpersonating && activeProfile?.has_pin && !getProfileToken()) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title={t("web.settings.profiles.title")}
+          subtitle={t("web.settings.profiles.subtitle")}
+        />
+        <ProfilePinDialog
+          profile={profiles.find((profile) => profile.is_primary) ?? null}
+          description={t("web.profiles.picker.manageNeedsPin")}
+          onClose={() => navigate("/settings")}
+          onVerified={(profile, token) => selectProfile(profile, token)}
+          verifyPin={verifyProfilePin}
+        />
+      </div>
+    );
   }
 
   return (

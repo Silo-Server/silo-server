@@ -162,7 +162,7 @@ export default function Collections() {
   // only once what it shows has loaded: a slow or failed request isn't "none".
   let emptyMessage: string | undefined;
   if (show === "mine" && personalLoaded && own.length === 0)
-    emptyMessage = "You haven't made any collections yet.";
+    emptyMessage = t("web.collections.page.emptyMine");
   else if (
     show === "all" &&
     personalLoaded &&
@@ -170,7 +170,7 @@ export default function Collections() {
     server.isSuccess &&
     own.length + sharedCards.length + libraries.length === 0
   )
-    emptyMessage = "There are no collections yet.";
+    emptyMessage = t("web.collections.page.emptyAll");
 
   function changeShow(next: string) {
     setSearchParams(
@@ -553,7 +553,11 @@ function SortableCollectionGrid({
       sensors={sensors}
       collisionDetection={closestCenter}
       // In the body, not inline: inline it would put divs inside the wall's list.
-      accessibility={{ announcements: moveAnnouncements(t, collections), container: document.body }}
+      accessibility={{
+        announcements: moveAnnouncements(t, collections),
+        screenReaderInstructions: { draggable: t("web.common.sortable.instructions") },
+        container: document.body,
+      }}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
       onDragCancel={blockClicks.settle}

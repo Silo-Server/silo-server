@@ -74,6 +74,7 @@ export default function EmailSettings() {
           <SettingField
             label={t("web.admin.settings.email.fromAddress")}
             dirty={form.isDirty("email.from_address")}
+            // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
             hint="silo@example.com"
             value={form.getValue("email.from_address")}
             onChange={(v) => form.setValue("email.from_address", v)}
@@ -82,6 +83,7 @@ export default function EmailSettings() {
           <SettingField
             label={t("web.admin.settings.email.fromName")}
             dirty={form.isDirty("email.from_name")}
+            // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
             hint="Silo"
             value={form.getValue("email.from_name")}
             onChange={(v) => form.setValue("email.from_name", v)}
@@ -90,6 +92,7 @@ export default function EmailSettings() {
           <SettingField
             label={t("web.admin.settings.email.host")}
             dirty={form.isDirty("email.smtp_host")}
+            // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
             hint="smtp.example.com"
             value={form.getValue("email.smtp_host")}
             onChange={(v) => form.setValue("email.smtp_host", v)}

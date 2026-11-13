@@ -2,7 +2,7 @@
 
 Recommendation administration uses acting-administrator authorization. All six
 routes remain registered when the recommendation worker is absent and return
-`503` until it is available. The frozen v1 handlers remain unchanged.
+`503` until it is available.
 
 | Endpoint | Result |
 | --- | --- |

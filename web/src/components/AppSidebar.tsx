@@ -1103,6 +1103,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
               <DropdownMenuItem
                 onClick={() => {
                   navigate("/settings");
+                  onNavigate?.();
                 }}
                 className="gap-2.5 rounded-lg px-2.5 py-2 text-[0.8125rem]"
               >
@@ -1118,6 +1119,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                     onClick={() => {
                       clearProfile();
                       navigate("/profiles");
+                      onNavigate?.();
                     }}
                     className="border-sidebar-border/60 bg-sidebar-accent/40 hover:bg-sidebar-accent focus:bg-sidebar-accent gap-3 rounded-xl border px-3 py-3 text-[0.8125rem] font-semibold"
                   >

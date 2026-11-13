@@ -2,15 +2,10 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
@@ -140,7 +135,9 @@ func TestMergePremieresIntoDiscoverRow_PromotesAndRanksCandidates(t *testing.T) 
 	}
 }
 
-func TestRecommendationsHandleDiscover_FallsBackToLegacyRowsWhenUpcomingLoadFails(t *testing.T) {
+// A failed calendar read costs Discover its airings blend, not the page: the
+// cached rows still answer, without upcoming events.
+func TestDiscoverFallsBackToCachedRowsWhenUpcomingLoadFails(t *testing.T) {
 	t.Parallel()
 
 	handler := NewRecommendationsHandler(nil, stubRecommendationsReader{
@@ -151,43 +148,20 @@ func TestRecommendationsHandleDiscover_FallsBackToLegacyRowsWhenUpcomingLoadFail
 		}},
 	}, nil, nil, nil, false)
 	handler.Fetcher = stubDiscoverFetcher{
-		items: []*models.MediaItem{{
-			ContentID: "movie-1",
-			Type:      "movie",
-			Title:     "Movie One",
-			Genres:    []string{"Drama"},
-			Status:    "matched",
-		}},
+		items: []*models.MediaItem{{ContentID: "movie-1", Type: "movie", Title: "Movie One", Genres: []string{"Drama"}, Status: "matched"}},
 	}
 	handler.CalendarRepo = stubCalendarRepository{err: errors.New("calendar unavailable")}
 
-	req := httptest.NewRequest(http.MethodGet, "/recommendations/discover", nil)
-	ctx := apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7})
-	ctx = apimw.SetProfileID(ctx, "profile-1")
-	req = req.WithContext(ctx)
-	rec := httptest.NewRecorder()
-
-	handler.HandleDiscover(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
+	view, err := handler.Discover(t.Context(), 7, "profile-1", catalog.AccessFilter{UserID: 7, ProfileID: "profile-1"})
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
 	}
-
-	var resp discoverResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
+	if len(view.Rows) != 1 || view.Rows[0].Label != "For You" {
+		t.Fatalf("rows = %+v, want the cached For You row", view.Rows)
 	}
-	if len(resp.Rows) != 1 {
-		t.Fatalf("rows = %d, want 1", len(resp.Rows))
-	}
-	if resp.Rows[0].Label != "For You" {
-		t.Fatalf("row label = %q, want For You", resp.Rows[0].Label)
-	}
-	if len(resp.Rows[0].Items) != 1 || resp.Rows[0].Items[0].ContentID != "movie-1" {
-		t.Fatalf("legacy row items = %+v, want movie-1", resp.Rows[0].Items)
-	}
-	if resp.Rows[0].Items[0].UpcomingEvent != nil {
-		t.Fatalf("legacy row should not include upcoming event metadata")
+	items := view.Rows[0].Items
+	if len(items) != 1 || items[0].ContentID != "movie-1" || items[0].UpcomingEvent != nil {
+		t.Fatalf("row items = %+v, want movie-1 without an upcoming event", items)
 	}
 }
 

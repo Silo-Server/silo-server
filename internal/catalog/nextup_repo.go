@@ -50,6 +50,10 @@ type NextUpResult struct {
 	// caught up on moves to the front when its next episode arrives.
 	ActivityAt  time.Time
 	IsResumable bool // true if this is an in-progress item (enableResumable)
+	// unplayable marks a resumable episode with no version within the
+	// viewer's playback-quality ceiling: it holds its series back instead of
+	// being offered.
+	unplayable bool
 }
 
 // NextUpRepository queries for next unwatched episodes per series.
@@ -180,7 +184,12 @@ func (r *NextUpRepository) ListNextUp(ctx context.Context, q NextUpQuery) ([]Nex
 			// Show-detail tile: the in-progress episode wins over whatever
 			// "next aired" row the completed-episodes branch produced.
 			// The user is mid-watching this episode; surfacing the
-			// following one would skip past their actual position.
+			// following one would skip past their actual position. When
+			// that episode can't play under the quality ceiling, the series
+			// waits rather than skipping ahead.
+			if resumable[0].unplayable {
+				return nil, nil
+			}
 			return resumable, nil
 		}
 
@@ -190,7 +199,7 @@ func (r *NextUpRepository) ListNextUp(ctx context.Context, q NextUpQuery) ([]Nex
 			seen[res.SeriesID] = true
 		}
 		for _, res := range resumable {
-			if !seen[res.SeriesID] {
+			if !seen[res.SeriesID] && !res.unplayable {
 				results = append(results, res)
 			}
 		}
@@ -451,6 +460,19 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 		activityExpr = "GREATEST(es.updated_at, released.released_at)"
 	}
 
+	// The successor stays the next episode with any present file. When none of
+	// its files fits the viewer's quality ceiling the series waits off Next Up
+	// until one arrives, rather than skipping to a later episode.
+	ceilingWhere := ""
+	if playable := EpisodePlayableUnderCeilingSQL("next_ep.content_id", q.AccessFilter, func(value any) int {
+		// Numbered from args itself: the release scope above binds a value
+		// without advancing argIdx.
+		args = append(args, value)
+		return len(args)
+	}); playable != "" {
+		ceilingWhere = "\n\t\tWHERE " + playable
+	}
+
 	// When resumable items are disabled, suppress next-up only if the series has
 	// newer in-progress activity than the most recent completed episode. Older
 	// partial watches should not block the user's current progression. Once the
@@ -659,9 +681,9 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 			ORDER BY e2.season_number, e2.episode_number
 			LIMIT 1
 		) next_ep ON true
-		%s
+		%s%s
 		ORDER BY es.updated_at DESC
-		LIMIT $3`, completedEpisodesCTE, nextUpAnchorsCTE, inProgressExclusion, activityExpr, sourceTable, releaseLateral)
+		LIMIT $3`, completedEpisodesCTE, nextUpAnchorsCTE, inProgressExclusion, activityExpr, sourceTable, releaseLateral, ceilingWhere)
 		return query, args
 	}
 
@@ -692,9 +714,9 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 			ORDER BY e2.season_number, e2.episode_number
 			LIMIT 1
 		) next_ep ON true
-		%s
+		%s%s
 		ORDER BY es.updated_at DESC
-		LIMIT $3`, activityExpr, sourceTable, releaseLateral)
+		LIMIT $3`, activityExpr, sourceTable, releaseLateral, ceilingWhere)
 
 	query := fmt.Sprintf(`
 		WITH %s%s%s
@@ -764,6 +786,16 @@ func buildListResumableFirstEpisodesQuery(q NextUpQuery, inProgressIDs []string)
 		args = append(args, q.droppedSeriesIDs)
 		seriesFilter = fmt.Sprintf(" AND NOT (e.series_id = ANY($%d::text[]))", len(args))
 	}
+	// Whether the started episode has a version within the playback-quality
+	// ceiling. It stays in the result either way, so a blocked episode holds
+	// its series back instead of letting a later episode take its place.
+	playable := cursorTruePredicate
+	if ceiling := EpisodePlayableUnderCeilingSQL("e.content_id", q.AccessFilter, func(value any) int {
+		args = append(args, value)
+		return len(args)
+	}); ceiling != "" {
+		playable = ceiling
+	}
 
 	query := fmt.Sprintf(`
 		SELECT DISTINCT ON (e.series_id)
@@ -772,7 +804,8 @@ func buildListResumableFirstEpisodesQuery(q NextUpQuery, inProgressIDs []string)
 			si.title,
 			e.season_number,
 			e.episode_number,
-			uwp.updated_at
+			uwp.updated_at,
+			%s AS playable
 		FROM user_watch_progress uwp
 		JOIN episodes e ON e.content_id = uwp.media_item_id
 		JOIN media_items si ON si.content_id = e.series_id
@@ -780,7 +813,7 @@ func buildListResumableFirstEpisodesQuery(q NextUpQuery, inProgressIDs []string)
 		  AND uwp.profile_id = $2
 		  AND uwp.position_seconds > 0
 		  AND uwp.media_item_id = ANY($3)%s%s
-		ORDER BY e.series_id, uwp.updated_at DESC`, seriesFilter, completedSeriesGate)
+		ORDER BY e.series_id, uwp.updated_at DESC`, playable, seriesFilter, completedSeriesGate)
 
 	return query, args
 }
@@ -831,14 +864,16 @@ func (r *NextUpRepository) listResumableFirstEpisodes(ctx context.Context, q Nex
 	var results []NextUpResult
 	for rows.Next() {
 		var res NextUpResult
+		var playable bool
 		res.IsResumable = true
 		if err := rows.Scan(
 			&res.ContentID, &res.SeriesID, &res.SeriesTitle,
-			&res.SeasonNumber, &res.EpisodeNumber, &res.CompletedAt,
+			&res.SeasonNumber, &res.EpisodeNumber, &res.CompletedAt, &playable,
 		); err != nil {
 			return nil, fmt.Errorf("scanning resumable row: %w", err)
 		}
 		res.ActivityAt = res.CompletedAt
+		res.unplayable = !playable
 		results = append(results, res)
 	}
 	return results, rows.Err()

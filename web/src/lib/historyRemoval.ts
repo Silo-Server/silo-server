@@ -24,12 +24,6 @@ export function buildHistoryRemovalTarget(
   };
 }
 
-export function historyRemovalLabelForMediaType(mediaType: HistoryRemovalMediaType): string {
-  return historyRemovalScopeForMediaType(mediaType) === "show"
-    ? "Remove Show Watch Data"
-    : "Remove Watch Data";
-}
-
 export function historyRemovalDialogTitle(
   targets: Array<Pick<HistoryRemovalTarget, "scope">>,
 ): string {

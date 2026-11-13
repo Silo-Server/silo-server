@@ -818,6 +818,11 @@ func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID str
 		RequestedMediaFileID:       card.RequestedMediaFileID,
 		DisableProgressPersistence: card.DisableProgressPersistence,
 	}
+	if card.VideoStreamCopy() {
+		// A copy applies neither target; the card keeps them only to match and
+		// rebuild the negotiated stream, so the admin views must not show them.
+		s.TargetResolution, s.TargetBitrateKbps = "", 0
+	}
 	if card.IsTranscodeRecipe() {
 		s.OutputContainer = HLSOutputContainer(card.TranscodeOpts("", "", nil))
 		s.OutputProtocol = OutputProtocolHLS
