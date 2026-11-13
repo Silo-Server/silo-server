@@ -168,6 +168,14 @@ func (t *TranscodeThrottler) CheckOnce() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	// A check that read progress before Stop took the lock sends nothing. Its
+	// replacement never saw a pause sent here, so it would not resume it.
+	select {
+	case <-t.stopCh:
+		return
+	default:
+	}
+
 	// Never pause on output the current ffmpeg process did not produce. A
 	// manifest left behind by an earlier generation in the same output
 	// directory reports that generation's head, which after a restart at an
