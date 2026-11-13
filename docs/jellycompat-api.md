@@ -554,7 +554,10 @@ one after the play session expired or stopped, or after a newer negotiation
 from the same device replaced an unstarted one, must send its own token.
 A `PlaySessionId` grant that cannot be read because the database is
 unavailable answers a retryable `503`, not `401`, unless the API server that
-answers still holds the play session. `PlaybackInfo` answers `503` instead of
+answers still holds the play session. HLS master playlist, playlist and
+segment requests that carry a token answer the same retryable `503` when their
+play session cannot be read; a play session that is absent or belongs to
+another token answers `404`. `PlaybackInfo` answers `503` instead of
 returning a `PlaySessionId` it could not store, since other API servers could
 not resolve it.
 
