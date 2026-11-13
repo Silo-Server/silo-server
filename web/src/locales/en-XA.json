@@ -125513,6 +125513,68 @@
       "value": "⟦Ŕé-đéţéçţ Ṁåŕķéŕš~~~~~~~⟧"
     }
   ],
+  "web.markers.report.action": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéþöŕţ îššûé~~~~~⟧"
+    }
+  ],
+  "web.markers.report.alreadyReported": [
+    {
+      "type": 0,
+      "value": "⟦Åļŕéåđý ŕéþöŕţéđ~~~~~~~⟧"
+    }
+  ],
+  "web.markers.report.confirm": [
+    {
+      "type": 0,
+      "value": "⟦Çöñƒîŕɱ ŕéþöŕţ~~~~~~⟧"
+    }
+  ],
+  "web.markers.report.reported": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéþöŕţéđ~~~~⟧"
+    }
+  ],
+  "web.markers.report.retry": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéţŕý ţĥé ŕéþöŕţ~~~~~~~⟧"
+    }
+  ],
+  "web.markers.report.sending": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéþöŕţîñĝ…~~~~⟧"
+    }
+  ],
+  "web.markers.report.sessionExpired": [
+    {
+      "type": 0,
+      "value": "⟦Ýöûŕ šéššîöñ éẋþîŕéđ — šîĝñ îñ åñđ ţŕý åĝåîñ~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.markers.report.title": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéþöŕţ ţĥîš šéĝɱéñţ åš îñçöŕŕéçţ ţö ŢĥéÎñţŕöĐƁ~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.markers.report.titleForKind": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéþöŕţ ţĥé "
+    },
+    {
+      "type": 1,
+      "value": "kind"
+    },
+    {
+      "type": 0,
+      "value": " šéĝɱéñţ åš îñçöŕŕéçţ ţö ŢĥéÎñţŕöĐƁ~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.markers.save": [
     {
       "type": 0,
@@ -141755,6 +141817,60 @@
     {
       "type": 0,
       "value": "⟦Ţĥé đéƒåûļţš ţĥîš þŕöƒîļé šţåŕţš þļåýƀåçķ ŵîţĥ. Å ļîƀŕåŕý, å šéŕîéš, öŕ öñé öƒ ýöûŕ đéṽîçéš çåñ öṽéŕŕîđé šöɱé öƒ ţĥéɱ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.playback.theintrodb.description": [
+    {
+      "type": 0,
+      "value": "⟦Çöñţéšţ å šéĝɱéñţ ŢĥéÎñţŕöĐƁ ĝöţ ŵŕöñĝ. Ŕéþöŕţš åŕé šéñţ ûšîñĝ ţĥîš šéŕṽéŕ’š ŢĥéÎñţŕöĐƁ ķéý.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.playback.theintrodb.enabled": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéþöŕţ ƀûţţöñ éñåƀļéđ.~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.playback.theintrodb.hidden": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéþöŕţ ƀûţţöñ ĥîđđéñ.~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.playback.theintrodb.hint": [
+    {
+      "type": 0,
+      "value": "⟦Đŕåŵš å ƀûţţöñ ûñđéŕ ţĥé šķîþ þŕöɱþţ. Îţ åšķš ƒöŕ çöñƒîŕɱåţîöñ ƀéƒöŕé šéñđîñĝ, ƀéçåûšé å ŕéþöŕţ çåññöţ ƀé ţåķéñ ƀåçķ ƒŕöɱ ĥéŕé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.playback.theintrodb.label": [
+    {
+      "type": 0,
+      "value": "⟦Šĥöŵ å Ŕéþöŕţ ƀûţţöñ ûñđéŕ ţĥé šķîþ þŕöɱþţ~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.playback.theintrodb.loadFailed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđ ñöţ ļöåđ ţĥîš åççöûñţ’š þļûĝîñ šéţţîñĝš, šö ţĥîš šŵîţçĥ šţåýš öƒƒ ûñţîļ ţĥéý ļöåđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.playback.theintrodb.saveFailed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđ ñöţ çĥåñĝé ţĥé ŕéþöŕţîñĝ šéţţîñĝ.~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.playback.theintrodb.title": [
+    {
+      "type": 0,
+      "value": "⟦ŢĥéÎñţŕöĐƁ~~~~⟧"
+    }
+  ],
+  "web.settings.playback.theintrodb.unavailable": [
+    {
+      "type": 0,
+      "value": "⟦Ûñåṽåîļåƀļé: ţĥîš šéŕṽéŕ ĥåš ñö ŢĥéÎñţŕöĐƁ ÅÞÎ ķéý. Åñ åđɱîñîšţŕåţöŕ çåñ åđđ öñé ûñđéŕ ţĥé þļûĝîñ’š šéţţîñĝš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.settings.playback.title": [
