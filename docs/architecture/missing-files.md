@@ -166,8 +166,12 @@ What the new path says about the title decides the row's links:
   and linked to the download's own content and episode, answering the
   missing-file not-found otherwise. A request that registers several
   downloads at once (a season, a series, or a managed batch) writes none of
-  them when one is refused; a monitor sync skips the refused episode and
-  registers it on a later sync, as it does an episode with no file. The retitle, and a reclaim of a stand-in, lock the row
+  its new downloads when one is refused; a monitor sync skips the refused
+  episode and registers it on a later sync, as it does an episode with no
+  file. A managed request replaces entries that already exist before it
+  inserts new ones, in separate statements, so a replacement made earlier in a
+  refused request stays, as it does when the insert fails for any other
+  reason. The retitle, and a reclaim of a stand-in, lock the row
   `FOR UPDATE` in a statement of their own first, before the statement that
   moves downloads, in one transaction. A registration that holds the row
   first commits before that statement takes its snapshot, so its download
