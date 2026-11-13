@@ -47,7 +47,9 @@ func (l *QuantityLimiter) Check(ctx context.Context, userID int, batchSize int) 
 
 // CheckCounts is Check with separate counts: activating is how many downloads
 // become active, created how many new downloads are created. Replacing an
-// entry in place can make it active without creating one.
+// entry in place can make it active without creating one. A request that
+// makes nothing active is not held to the concurrent limit, whatever the
+// account already has in flight.
 func (l *QuantityLimiter) CheckCounts(ctx context.Context, userID int, activating, created int) error {
 	if l == nil {
 		return nil
@@ -59,7 +61,7 @@ func (l *QuantityLimiter) CheckCounts(ctx context.Context, userID int, activatin
 	period := l.periodDuration
 	l.mu.RUnlock()
 
-	if maxConc > 0 {
+	if maxConc > 0 && activating > 0 {
 		active, err := l.repo.CountActiveByUser(ctx, userID)
 		if err != nil {
 			return err

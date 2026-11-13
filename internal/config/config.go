@@ -386,7 +386,7 @@ type DownloadConfig struct {
 	Enabled              bool          `yaml:"-"`
 	ServerBandwidthBPS   int64         `yaml:"-"` // server-wide bytes/sec cap (0 = unlimited)
 	UserBandwidthBPS     int64         `yaml:"-"` // per-user bytes/sec across all their downloads (0 = unlimited)
-	MaxConcurrentPerUser int           `yaml:"-"` // max simultaneous downloads per user (0 = unlimited)
+	MaxConcurrentPerUser int           `yaml:"-"` // max downloads per user being prepared, or queued or transferring at account level (0 = unlimited)
 	MaxPerPeriod         int           `yaml:"-"` // max downloads per user per period (0 = unlimited)
 	PeriodDuration       time.Duration `yaml:"-"` // rolling window for MaxPerPeriod
 

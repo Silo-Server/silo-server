@@ -850,9 +850,10 @@ its own. A device that needs the bytes again (it lost its copy, or a transfer re
 after the cache period) gets `409 prepared_file_expired` from the file route and calls
 this operation.
 
-The response is `200` with the current `DownloadEntry`. A finished entry whose file
-expired returns to `preparing` and becomes `ready` like a new download, with the same
-`revision`, because the recipe is unchanged. An entry whose file is still on the
+The response is `200` with the current `DownloadEntry`. A finished entry, or one
+its device was still transferring, whose file expired returns to `preparing` and
+becomes `ready` like a new download, with the same `revision`, because the recipe is
+unchanged. An entry whose file is still on the
 server, an `original` entry (served from the source), and one already preparing come
 back unchanged. A `revoked`, `failed`, or `cancelled` entry answers `409 conflict`;
 create a new download instead. Returning to `preparing` counts toward the account's
@@ -1765,7 +1766,7 @@ operations use:
 | 422  | `validation_failed`      | A well-formed request with an invalid domain value: quality, status, revision guard, device identity, subtitle ref, subscription option, non-canonical decimal ID, or an unknown/duplicated query parameter. `errors[].location` names the member. |
 | 428  | `precondition_required`  | A subscription mutation without `If-Match`.                               |
 | 412  | `precondition_failed`    | A stale `If-Match` validator.                                             |
-| 429  | `rate_limited`           | Concurrent download cap or period quota hit. New managed entries that register `ready` (original quality, or a prepared file that is already ready) count only toward the period quota; the app queues their transfers. |
+| 429  | `rate_limited`           | Concurrent download cap or period quota hit. The concurrent cap counts entries being prepared and account-level rows that are queued or transferring. A managed entry its device reported as `downloading` does not count, so a transfer the device abandons cannot hold a place. New managed entries that register `ready` (original quality, or a prepared file that is already ready) count only toward the period quota; the app queues their transfers. |
 | 500  | `internal_error`         | Unexpected server error.                                                  |
 | 501  | `capability_unsupported` | The requested delivery is not supported by configuration or policy — tone mapping disabled or disallowed, a quality the server cannot prepare, or a missing prepare pipeline. |
 | 503  | `dependency_unavailable` | Downloads, offline assets, series monitoring, or capability discovery is temporarily unavailable; retry the same request. |

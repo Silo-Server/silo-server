@@ -467,6 +467,7 @@
 ./internal/downloads TestPreparedSeasonReplacementCountsTowardConcurrentLimitDB
 ./internal/downloads TestPreparedReplacementQuotaAccountingDB
 ./internal/downloads TestManagedBatchOverConcurrentCapDB
+./internal/downloads TestDeviceReportedTransfersHoldNoConcurrentSlotDB
 ./internal/downloads TestAttachPreparationsPostgres
 ./internal/downloads TestFailedPreparationRefreshIsSharedPostgres
 ./internal/downloads TestPreparationControlsPauseResumeAndCancel

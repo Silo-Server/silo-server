@@ -152,13 +152,20 @@ func (r *Repository) PruneEphemeralOlderThan(ctx context.Context, cutoff time.Ti
 	return tag.RowsAffected(), nil
 }
 
-// CountActiveByUser returns the number of active downloads for a user.
-// 'preparing' counts: an artifact-backed row holds encode work in flight, so
-// it must consume the concurrent quota like a live transfer does.
+// concurrentSlotPredicate matches the download rows that count toward an
+// account's concurrent limit: an entry whose file is being prepared, and an
+// account-level row that is queued or transferring, whose transitions the
+// server makes itself. A device entry is downloading because its device said
+// so, and nothing ends that report when the transfer fails, is paused, or the
+// app is removed, so it holds no slot.
+const concurrentSlotPredicate = `(status = 'preparing' OR (device_id IS NULL AND status IN ('queued', 'downloading')))`
+
+// CountActiveByUser returns how many of a user's downloads hold a slot of the
+// concurrent limit.
 func (r *Repository) CountActiveByUser(ctx context.Context, userID int) (int, error) {
 	var count int
 	err := r.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM downloads WHERE user_id = $1 AND status IN ('queued', 'downloading', 'preparing')`,
+		`SELECT COUNT(*) FROM downloads WHERE user_id = $1 AND `+concurrentSlotPredicate,
 		userID,
 	).Scan(&count)
 	if err != nil {
