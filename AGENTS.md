@@ -161,6 +161,38 @@ issue is open on `Silo-Server/siloserver.org`.
 [Update the user manual](CONTRIBUTING.md#update-the-user-manual) covers when to open one and
 what goes in it.
 
+## Translations
+
+Every piece of text a user can see ships with its catalog entry and translations. That covers
+new UI text and changed wording, and also server text that clients translate: default section
+titles, new problem types and field-error codes, and settings manifest labels. A change that
+adds such text is not done until the catalog side is handled.
+[docs/architecture/i18n.md](docs/architecture/i18n.md) is the authority; the web call sites
+are in `web/src/i18n/README.md`.
+
+- Interface text lives in `Silo-Server/silo-translations` (`catalog/en.arb`), never in client
+  code. Add the key there with a `description`, typed `placeholders`, and `x-platforms` when
+  only some clients show it. Web text goes under `web.<area>.*`, and admin-only text under
+  `web.admin.*`. Reuse a key only when its English and meaning both match.
+- Never edit `web/src/locales/*.json` or `keys.ts` by hand. They are generated, and the next
+  `scripts/sync-translations --version` silently drops any key the catalog lacks, which breaks
+  the typecheck in whichever pull request syncs next.
+- The catalog pull request carries the translation pass for its keys (`make translate`, run as
+  silo-translations' CONTRIBUTING describes) as a separate commit, and merges first. Never
+  write translations by hand.
+- While the catalog change is unmerged, sync with `--local <checkout>`. Before the client
+  pull request merges, re-sync with `--version <release>` so `.silo-translations` names a
+  published release, not `local-<commit>`. Commit the generated files,
+  `.silo-translations`, and `.silo-translations-files` with the code that uses the keys.
+- Server text: a new default section title gets a `home.section.*` key and its constant in
+  `internal/sections/title_keys.go`; a new problem type or field code in
+  `internal/apiv2/problem.go` gets its `error.*` key; a manifest label change is re-imported
+  into the catalog, never edited there.
+- Data stays English: text that is stored, sent, matched, or compared is not translated. Only
+  the shown label is.
+- Check new web UI under the `en-XA` pseudo-locale (`vite dev` includes it). Any plain English
+  left on screen is unconverted text.
+
 ## Building and verifying
 
 `make build`, `make dev-backend`, `make dev-frontend`, `make lint`, `make test`,
