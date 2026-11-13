@@ -408,6 +408,10 @@ func TestItemRefreshIngestsWithoutRunWhenScopeAlreadyClaimed(t *testing.T) {
 type itemRefreshTestFileRepo struct {
 	filesByPath []*models.MediaFile
 	clearedPath string
+	// unlinkedReads is how many scope reads after the clear find no linked
+	// file, as while another worker's match is still running.
+	unlinkedReads int
+	reads         int
 }
 
 func (r *itemRefreshTestFileRepo) GetByContentID(_ context.Context, _ string) ([]*models.MediaFile, error) {
@@ -419,6 +423,10 @@ func (r *itemRefreshTestFileRepo) GetByEpisodeID(_ context.Context, _ string) ([
 }
 
 func (r *itemRefreshTestFileRepo) GetByFolderAndPathPrefix(_ context.Context, _ int, _ string) ([]*models.MediaFile, error) {
+	r.reads++
+	if r.clearedPath != "" && r.reads <= r.unlinkedReads {
+		return nil, nil
+	}
 	return r.filesByPath, nil
 }
 
@@ -588,6 +596,49 @@ func TestItemRefreshExecutorRunsResetJobsAsResets(t *testing.T) {
 		if refresher.reset != tc.wantReset || refresher.contentID != "movie-1" {
 			t.Errorf("%s: reset=%v content_id=%q, want reset=%v on movie-1", tc.mode, refresher.reset, refresher.contentID, tc.wantReset)
 		}
+	}
+}
+
+// A complete refresh whose scope another worker is still matching waits for
+// its files to be linked again before it resolves the rebuilt item, and gives
+// up with errNoRebuiltContent once relinkWait passes. A movie target, which no
+// series root queue matches, ingests without the unlinked settle wait.
+func TestItemRefreshExecutorCompleteRefreshWaitsForTheRelink(t *testing.T) {
+	t.Parallel()
+	run := func(t *testing.T, requestedType string, unlinkedReads int, wait time.Duration) (*ItemRefreshResult, *itemRefreshTestIngester, *itemRefreshTestFileRepo, error) {
+		t.Helper()
+		ingester := &itemRefreshTestIngester{}
+		fileRepo := &itemRefreshTestFileRepo{
+			filesByPath:   []*models.MediaFile{{ContentID: "new-id", FilePath: "/media/mixed/Title/Title.mkv"}},
+			unlinkedReads: unlinkedReads,
+		}
+		executor := NewItemRefreshExecutor(
+			&itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 7, Enabled: true, Paths: []string{"/media/mixed"}}},
+			fileRepo, &itemRefreshTestRootClaimRepo{}, &itemRefreshTestGroupClaimRepo{}, newItemRefreshTestSkippedRootRepo(),
+			nil, nil, ingester, &itemRefreshTestScanRuns{}, &itemRefreshTestRefresher{}, nil, nil,
+		)
+		executor.relinkWait = wait
+		result, err := executor.Execute(context.Background(), ItemRefreshRequest{
+			RequestedContentID: "old-id", RequestedType: requestedType, RefreshContentID: "old-id",
+			ScanFolderID: 7, ScanPath: "/media/mixed/Title", Mode: ItemRefreshModeComplete,
+		}, nil)
+		return result, ingester, fileRepo, err
+	}
+
+	result, ingester, files, err := run(t, "series", 3, 5*time.Second)
+	if err != nil || result.RefreshContentID != "new-id" {
+		t.Fatalf("relinked after %d reads: result %+v, err %v; want new-id", files.reads, result, err)
+	}
+	if !ingester.unlinked {
+		t.Fatal("a series target ingested as unchanged, want IngestUnlinkedSubtree")
+	}
+
+	if _, _, _, err := run(t, "series", 1_000, 50*time.Millisecond); !errors.Is(err, errNoRebuiltContent) {
+		t.Fatalf("never relinked: err = %v, want errNoRebuiltContent", err)
+	}
+
+	if _, ingester, _, err := run(t, "movie", 0, time.Second); err != nil || ingester.unlinked {
+		t.Fatalf("movie target: err %v, unlinked ingest %v; want the plain ingest", err, ingester.unlinked)
 	}
 }
 

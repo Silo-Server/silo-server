@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -473,6 +474,33 @@ type ItemRefreshExecutor struct {
 	// evictRails drops this node's cached home rails that list the given
 	// content IDs; tests replace it.
 	evictRails func(contentIDs ...string)
+	// relinkWait bounds how long a complete refresh waits for its scope's
+	// files to be linked again; zero means completeRefreshRelinkWait.
+	relinkWait time.Duration
+}
+
+// A complete refresh resolves the rebuilt item from the files its scope links
+// again. The ingest matches them itself, but the background match worker can
+// claim a series root first; the refresh then waits for that match to link the
+// files, up to completeRefreshRelinkWait, checking every
+// completeRefreshRelinkPoll.
+const (
+	completeRefreshRelinkWait = 60 * time.Second
+	completeRefreshRelinkPoll = 500 * time.Millisecond
+)
+
+// errNoRebuiltContent is a complete refresh scope whose files are not linked
+// to any item.
+var errNoRebuiltContent = errors.New("no rebuilt content found in refresh scope")
+
+// isSeriesTarget reports whether a refresh of requestedType rebuilds a series
+// root, which the TV match queue matches.
+func isSeriesTarget(requestedType string) bool {
+	switch requestedType {
+	case "series", "season", "episode":
+		return true
+	}
+	return false
 }
 
 func NewItemRefreshExecutor(
@@ -549,7 +577,9 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 	}
 	stopScanHeartbeat := startDirectScanHeartbeat(e.scanRuns, scanRun, directScanHeartbeatEvery)
 	ingest := e.ingester.IngestSubtree
-	if req.Mode == ItemRefreshModeComplete {
+	// Only a series root goes through the TV match queue whose quiet window
+	// the unlinked ingest waits out; a movie in a mixed library doesn't.
+	if req.Mode == ItemRefreshModeComplete && isSeriesTarget(req.RequestedType) {
 		ingest = e.ingester.IngestUnlinkedSubtree
 	}
 	ingestResult, err := ingest(scanCtx, folder, req.ScanPath)
@@ -571,7 +601,7 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 	matched := ingestResult.MatchedFiles
 
 	if req.Mode == ItemRefreshModeComplete {
-		resolvedRefreshContentID, resolvedDetailContentID, err := e.resolveCompleteRefreshTargets(ctx, req)
+		resolvedRefreshContentID, resolvedDetailContentID, err := e.resolveRelinkedTargets(ctx, req)
 		if err != nil {
 			return nil, fmt.Errorf("resolve rebuilt item: %w", err)
 		}
@@ -688,6 +718,30 @@ func (e *ItemRefreshExecutor) prepareCompleteRefresh(ctx context.Context, req It
 	return nil
 }
 
+// resolveRelinkedTargets is resolveCompleteRefreshTargets once the scope's
+// files are linked again: while none is, it checks again until relinkWait
+// passes, then reports errNoRebuiltContent.
+func (e *ItemRefreshExecutor) resolveRelinkedTargets(ctx context.Context, req ItemRefreshRequest) (string, string, error) {
+	wait := e.relinkWait
+	if wait <= 0 {
+		wait = completeRefreshRelinkWait
+	}
+	deadline := time.Now().Add(wait)
+	for {
+		refreshID, detailID, err := e.resolveCompleteRefreshTargets(ctx, req)
+		if !errors.Is(err, errNoRebuiltContent) || !time.Now().Before(deadline) {
+			return refreshID, detailID, err
+		}
+		timer := time.NewTimer(min(completeRefreshRelinkPoll, time.Until(deadline)))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return "", "", ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
 func (e *ItemRefreshExecutor) resolveCompleteRefreshTargets(ctx context.Context, req ItemRefreshRequest) (string, string, error) {
 	files, err := e.fileRepo.GetByFolderAndPathPrefix(ctx, req.ScanFolderID, req.ScanPath)
 	if err != nil {
@@ -704,7 +758,7 @@ func (e *ItemRefreshExecutor) resolveCompleteRefreshTargets(ctx context.Context,
 
 	switch len(distinctContentIDs) {
 	case 0:
-		return "", "", fmt.Errorf("no rebuilt content found in refresh scope")
+		return "", "", errNoRebuiltContent
 	case 1:
 	default:
 		return "", "", fmt.Errorf("multiple rebuilt content IDs found in refresh scope")
