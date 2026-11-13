@@ -55,9 +55,10 @@ func (s *Service) ReportStatus(ctx context.Context, userID int, profileID, devic
 // expireUnneededQueuedJobSQL moves a job ($1) still waiting in the queue to
 // expired when no in-flight download needs its bytes. The row keeps the recipe
 // that finished downloads refer to. A job a worker may still hold, under its
-// own lease or the unowned one a pause leaves, finishes into the cache instead:
-// an expired row keeps its id and output path, so stopping a live encode could
-// race a later prepare-again.
+// own lease or the unowned one a pause leaves, finishes into the cache instead;
+// stopping a live encode is left to RetireAbandonedPreparations, which keeps
+// the stopped worker's lease window so a prepare-again cannot race it on the
+// shared output path.
 const expireUnneededQueuedJobSQL = `UPDATE download_artifacts a SET ` + expireArtifactAssignment + `, paused_at = NULL
 	WHERE a.id = $1 AND a.status IN ('queued', 'tone_map_queued', 'audio_v2_queued', 'tracks_v1_queued')
 	  AND a.lease_owner IS NULL AND (a.lease_expires_at IS NULL OR a.lease_expires_at <= now())
