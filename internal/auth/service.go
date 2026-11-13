@@ -336,7 +336,8 @@ func (s *Service) routePasswordLogin(ctx context.Context, username string) (stri
 // signs in locally, so it needs a password, the server-wide switch unless it
 // is break-glass, and no network provider refusing it (see
 // LocalProvider.Authenticate). Any other account goes to the directory, so
-// it needs an enabled credentials provider it is linked to.
+// it needs an enabled credentials provider it is linked to, or one whose
+// sign-in would link it by email.
 func (s *Service) PasswordSignInAvailable(ctx context.Context, user *models.User) (bool, error) {
 	if user == nil {
 		return false, nil
@@ -354,9 +355,26 @@ func (s *Service) PasswordSignInAvailable(ctx context.Context, user *models.User
 		if registered.Info.InstallationID <= 0 {
 			return false, nil
 		}
-		return accountHasIdentityAt(ctx, s.users.pool, user.ID, registered.Info.InstallationID)
+		return s.directoryPasswordSignInAvailable(ctx, user, registered.Info.InstallationID)
 	}
 	return false, nil
+}
+
+// directoryPasswordSignInAvailable is PasswordSignInAvailable for an account
+// whose password goes to the directory at installationID. A linked account
+// can sign in there. So can one the directory's first sign-in would link by
+// email (AccountResolver.Resolve): email auto-match is on and it is an
+// ordinary account with an email. Whether the directory vouches for that
+// email only the directory knows, so such an account counts as able.
+func (s *Service) directoryPasswordSignInAvailable(ctx context.Context, user *models.User, installationID int) (bool, error) {
+	linked, err := accountHasIdentityAt(ctx, s.users.pool, user.ID, installationID)
+	if err != nil || linked {
+		return linked, err
+	}
+	if user.Email == "" || user.Role != models.RoleUser || user.IsOwner || user.BreakGlass {
+		return false, nil
+	}
+	return emailAutoMatchEnabled(ctx, s.users.pool)
 }
 
 // localPasswordSignInAvailable is PasswordSignInAvailable for an account with
