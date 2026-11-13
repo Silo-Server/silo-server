@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -52,6 +53,8 @@ type copyGroupAssembler struct {
 	// rebuilt in the same directory keeps it whichever run places first.
 	timeline     float64
 	haveTimeline bool
+	// timelineSet closes once the timeline is known.
+	timelineSet chan struct{}
 }
 
 // copyGroupRun is one FFmpeg run's progress.
@@ -103,11 +106,34 @@ type copyGroupFile struct {
 // the audio changes; remove them, and the first run assembles them again.
 func newCopyGroupAssembler(dir string, plan *copySegmentPlan) *copyGroupAssembler {
 	removeInheritedSegments(dir)
-	a := &copyGroupAssembler{dir: dir, plan: plan, assembled: make([]bool, len(plan.durations))}
+	a := &copyGroupAssembler{dir: dir, plan: plan, assembled: make([]bool, len(plan.durations)), timelineSet: make(chan struct{})}
 	if plan.timeline != nil {
 		a.timeline, a.haveTimeline = *plan.timeline, true
+		close(a.timelineSet)
 	}
 	return a
+}
+
+// planTimelineWait bounds how long a restart waits for the run it replaces to
+// set the session's timeline (awaitTimeline). A copy from the start places its
+// first two groups within moments.
+const planTimelineWait = 3 * time.Second
+
+// awaitTimeline waits, up to planTimelineWait, until a run has set the
+// session's timeline or the FFmpeg writing the current run has exited (done).
+// A session rebuilt without its plan record starts again from the beginning,
+// and a request far ahead restarts it at once: had that seek run set the
+// timeline, its segments would sit a B-frame delay off the ones the player
+// already has from the original from-start run.
+func (a *copyGroupAssembler) awaitTimeline(ctx context.Context, done <-chan struct{}) {
+	timer := time.NewTimer(planTimelineWait)
+	defer timer.Stop()
+	select {
+	case <-a.timelineSet:
+	case <-done:
+	case <-timer.C:
+	case <-ctx.Done():
+	}
 }
 
 func removeInheritedSegments(dir string) {
@@ -325,6 +351,7 @@ func (a *copyGroupAssembler) anchorLocked(run *copyGroupRun, first copyGroupFile
 	run.pending = nil
 	if !a.haveTimeline {
 		a.timeline, a.haveTimeline = run.offset, true
+		close(a.timelineSet)
 		a.recordTimelineLocked()
 	}
 	run.shift = a.timeline - run.offset

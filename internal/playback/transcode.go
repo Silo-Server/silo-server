@@ -3721,6 +3721,10 @@ func (s *TranscodeSession) restart(
 	}
 	cancelValidation()
 	s.StopThrottler()
+	if s.copyGroups != nil && done != nil {
+		// Let the run being replaced set the session's timeline first.
+		s.copyGroups.awaitTimeline(ctx, done)
+	}
 
 	// Kill current process without removing output directory.
 	if cancelCurrent != nil {

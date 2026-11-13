@@ -1011,3 +1011,69 @@ func planOrNil(t *testing.T, opts TranscodeOpts) *copySegmentPlan {
 	}
 	return plan
 }
+
+// A session rebuilt without its plan record starts from the beginning, and a
+// request far ahead restarts it at once. That seek run's offset is the
+// source's B-frame delay short of a from-start run's, so the restart waits
+// for the from-start run to set the timeline: the rebuilt segments then line
+// up with those the player has from the original session.
+func TestPlannedRestartKeepsTheFromStartTimeline(t *testing.T) {
+	if testing.Short() {
+		t.Skip("real FFmpeg integration test")
+	}
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is not installed")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer cancel()
+	dir := t.TempDir()
+	source := filepath.Join(dir, "b-frames.mkv")
+	// -preset veryfast keeps B-frames, which ultrafast turns off.
+	if out, err := exec.CommandContext(ctx, ffmpeg, "-v", "error",
+		"-f", "lavfi", "-i", "testsrc2=size=96x54:rate=25:duration=30",
+		"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=30",
+		"-c:v", "libx264", "-preset", "veryfast", "-bf", "2", "-g", "50", "-sc_threshold", "0",
+		"-c:a", "aac", source).CombinedOutput(); err != nil {
+		t.Skipf("ffmpeg can't make the test file (%v): %s", err, out)
+	}
+	if _, err := keyframes.Load(source); err != nil {
+		t.Fatal(err)
+	}
+	start := func(label string, restartAt int) float64 {
+		t.Helper()
+		s, err := StartTranscode(ctx, TranscodeOpts{
+			InputPath: source, OutputDir: filepath.Join(t.TempDir(), "out"), SessionID: label,
+			SourceVideoCodec: "h264", TargetCodecVideo: "copy", TargetCodecAudio: "copy",
+			SegmentDuration: 2, TotalDuration: 30, KeyframePlaylist: true, FFmpegPath: ffmpeg, HWAccel: HWAccelNone,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = s.Close() })
+		if s.copyGroups == nil {
+			t.Fatal("no plan for a Matroska source with complete Cues")
+		}
+		if restartAt > 0 {
+			if _, ok, err := s.RestartSegment(ctx, restartAt); err != nil || !ok {
+				t.Fatalf("RestartSegment = %v, %v", ok, err)
+			}
+		}
+		select {
+		case <-s.Done():
+		case <-ctx.Done():
+			t.Fatalf("%s: FFmpeg didn't finish", label)
+		}
+		s.copyGroups.mu.Lock()
+		defer s.copyGroups.mu.Unlock()
+		if !s.copyGroups.haveTimeline {
+			t.Fatalf("%s: no timeline", label)
+		}
+		return s.copyGroups.timeline
+	}
+	original := start("original", 0)
+	rebuilt := start("rebuilt", 10)
+	if math.Abs(rebuilt-original) > 0.001 {
+		t.Fatalf("rebuilt session's timeline %.3fs, the original's %.3fs", rebuilt, original)
+	}
+}
