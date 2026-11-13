@@ -3334,9 +3334,7 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 		}
 		h.tm.MonitorLocalTranscodeExit(upstreamSessionID, transcodeSession)
 	})
-	if h.tm.StartThrottler != nil {
-		h.tm.StartThrottler(ctx, transcodeSession)
-	}
+	h.tm.StartInitialThrottler(ctx, transcodeSession)
 	h.tm.MonitorLocalTranscodeExit(upstreamSessionID, transcodeSession)
 
 	if err := h.persistTranscodeRecipe(ctx, playSessionID, upstreamSessionID, effectiveOpts); err != nil {
