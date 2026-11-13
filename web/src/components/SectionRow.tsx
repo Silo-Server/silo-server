@@ -2,6 +2,7 @@ import { memo, useCallback, useMemo } from "react";
 import { ContinueWatchingRowCard } from "@/components/ContinueWatchingCard";
 import MediaCarousel, { type MediaCarouselWindowing } from "@/components/MediaCarousel";
 import SectionItemCard from "@/components/SectionItemCard";
+import { isProgressSectionType, sectionShowsWholeList } from "@/hooks/queries/homeRowLimit";
 import { useToggleSidebarPin } from "@/hooks/queries/sidebarPins";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import { buildSectionCatalogHref } from "@/pages/catalogSearchParams";
@@ -86,8 +87,7 @@ export default memo(function SectionRow({
   const { cardPresentation } = useUICustomization();
   const posterSize = cardPresentation.poster_size;
   const posterWidthClasses = carouselCardWidthClasses(posterSize);
-  const isProgressRow =
-    section.section_type === "continue_watching" || section.section_type === "next_up";
+  const isProgressRow = isProgressSectionType(section.section_type);
   // One spoiler lookup per row rather than one per card.
   const { hideImages, hideOverviews } = useEpisodeSpoilerPrefs({ enabled: isProgressRow });
   const spoilerPrefs = useMemo(() => ({ hideImages, hideOverviews }), [hideImages, hideOverviews]);
@@ -122,12 +122,14 @@ export default memo(function SectionRow({
   const headerActions = libraryId ? (
     <SectionPinButton sectionId={section.id} sectionTitle={section.title} libraryId={libraryId} />
   ) : undefined;
+  // The browse page of a row that shows its whole list holds the same cards.
+  const rowHref = sectionShowsWholeList(section) ? undefined : browseHref;
 
   return (
     <MediaCarousel
       title={shownTitle}
-      titleHref={browseHref}
-      viewAllHref={browseHref}
+      titleHref={rowHref}
+      viewAllHref={rowHref}
       headerActions={headerActions}
       windowing={windowing}
       onNearEnd={onNearEnd ? handleNearEnd : undefined}

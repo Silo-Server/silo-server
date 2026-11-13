@@ -32,7 +32,7 @@ import {
   homeLayoutQueryOptions,
   HOME_LAYOUT_INCLUDED_ROWS,
 } from "./sections";
-import { completeHomeRow, HOME_ROW_ITEM_LIMIT } from "./homeRowLimit";
+import { completeHomeRow, HOME_ROW_ITEM_LIMIT, sectionShowsWholeList } from "./homeRowLimit";
 import { sectionKeys } from "./keys";
 import type { ResolvedSection } from "@/api/types";
 
@@ -208,5 +208,38 @@ describe("home row limit", () => {
 
     expect(second.shownAt).toBeGreaterThan(first.shownAt ?? Infinity);
     vi.restoreAllMocks();
+  });
+
+  const cards = (count: number) => Array.from({ length: count }, (_, index) => `item-${index}`);
+
+  it.each<[string, ResolvedSection, boolean]>([
+    ["a short Continue Watching row", row(cards(1), { section_type: "continue_watching" }), true],
+    ["a short Next Up row", row(cards(3), { section_type: "next_up" }), true],
+    [
+      "a row whose list holds more",
+      row(cards(3), { section_type: "continue_watching", total_count: 5 }),
+      false,
+    ],
+    ["a row filled to the cap", row(cards(20), { section_type: "continue_watching" }), false],
+    [
+      "a row filled to its own limit",
+      row(cards(1), { section_type: "continue_watching", item_limit: 1 }),
+      false,
+    ],
+    [
+      "a row the server reports holds more",
+      row(cards(3), { section_type: "continue_watching", has_more: true }),
+      false,
+    ],
+    [
+      "a row with no count",
+      row(cards(1), { section_type: "continue_watching", total_count: undefined }),
+      false,
+    ],
+    // The server counts a recommendation row after dropping titles an
+    // earlier row shows, so its page can hold more than the count.
+    ["a short row of another type", row(cards(1), { section_type: "recommended_for_you" }), false],
+  ])("tells whether %s shows its whole list", (_name, section, whole) => {
+    expect(sectionShowsWholeList(section)).toBe(whole);
   });
 });
