@@ -15,18 +15,41 @@ type secretStore struct {
 	writes int
 	// dropWrites makes writes succeed without storing anything.
 	dropWrites bool
+	// heldReads makes the first that many Get calls wait until all of them
+	// have read, so concurrent processes all read before any of them writes.
+	heldReads int
+	readsDone chan struct{}
 }
 
 func (s *secretStore) Get(_ context.Context, key string) (string, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.values[key], nil
+	value := s.values[key]
+	if s.heldReads == 0 {
+		s.mu.Unlock()
+		return value, nil
+	}
+	s.heldReads--
+	if s.heldReads == 0 {
+		close(s.readsDone)
+	}
+	s.mu.Unlock()
+	<-s.readsDone
+	return value, nil
 }
 
-func (s *secretStore) Set(_ context.Context, key, value string) error {
+// UpdateValueAtomic runs update on the current value under the store's lock,
+// as ServerSettingsRepo does under its key lock. Writing back the same value
+// does not count as a write.
+func (s *secretStore) UpdateValueAtomic(_ context.Context, key string, update func(string) (string, error)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.store(key, value)
+	value, err := update(s.values[key])
+	if err != nil {
+		return err
+	}
+	if value != s.values[key] {
+		s.store(key, value)
+	}
 	return nil
 }
 
@@ -52,30 +75,45 @@ func (s *secretStore) store(key, value string) {
 }
 
 // Issue #3312: processes starting at once on a new database each generate a
-// secret, and all of them must end up with the one that was stored.
+// secret, and all of them must end up with the one that was stored. The same
+// holds when they start on a stored secret of only whitespace.
 func TestEnsureJWTSecretConcurrentStartsConverge(t *testing.T) {
-	store := &secretStore{}
-	const processes = 16
-	secrets := make([]string, processes)
-	var wg sync.WaitGroup
-	for i := range processes {
-		wg.Go(func() {
-			secret, err := EnsureJWTSecret(t.Context(), store)
-			if err != nil {
-				t.Error(err)
+	for _, tc := range []struct {
+		name   string
+		stored string
+	}{
+		{name: "no secret", stored: ""},
+		{name: "whitespace-only secret", stored: "  \n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const processes = 16
+			store := &secretStore{
+				values:    map[string]string{JWTSecretSettingKey: tc.stored},
+				heldReads: processes,
+				readsDone: make(chan struct{}),
 			}
-			secrets[i] = secret
+			secrets := make([]string, processes)
+			var wg sync.WaitGroup
+			for i := range processes {
+				wg.Go(func() {
+					secret, err := EnsureJWTSecret(t.Context(), store)
+					if err != nil {
+						t.Error(err)
+					}
+					secrets[i] = secret
+				})
+			}
+			wg.Wait()
+			stored := store.values[JWTSecretSettingKey]
+			if stored == tc.stored || store.writes != 1 {
+				t.Fatalf("stored %q after %d writes, want one generated secret", stored, store.writes)
+			}
+			for i, secret := range secrets {
+				if secret != stored {
+					t.Fatalf("process %d uses %q, want the stored %q", i, secret, stored)
+				}
+			}
 		})
-	}
-	wg.Wait()
-	stored := store.values[JWTSecretSettingKey]
-	if stored == "" || store.writes != 1 {
-		t.Fatalf("stored %q after %d writes, want one generated secret", stored, store.writes)
-	}
-	for i, secret := range secrets {
-		if secret != stored {
-			t.Fatalf("process %d uses %q, want the stored %q", i, secret, stored)
-		}
 	}
 }
 
