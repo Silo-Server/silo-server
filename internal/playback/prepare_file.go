@@ -446,8 +446,13 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 				"hw_accel", opts.HWAccel, "output", outputPath, "error", err)
 			logs.event("retrying with CPU decoding", "")
 			for {
+				started := time.Now()
 				err = runOnce(decodeRetry.Current())
-				if err == nil || ctx.Err() != nil || !decodeRetry.AdvanceAfterFailure("") {
+				// Only an attempt that died while starting says the hardware
+				// path is unusable. One that failed after encoding for a while
+				// (a full disk, say) would fail a software encode too.
+				if err == nil || ctx.Err() != nil || time.Since(started) > ManifestStartupTimeout ||
+					!decodeRetry.AdvanceAfterFailure("") {
 					break
 				}
 				logs.event("retrying with software encoding", "")
