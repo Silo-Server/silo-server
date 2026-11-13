@@ -35,7 +35,8 @@ const (
 	// library location; Reason says why.
 	ChangeOutcomeUnresolved ChangeOutcome = "unresolved"
 	// ChangeOutcomeIgnored: the change was deliberately not scanned (an empty
-	// path, or a file change that resolved to a whole library).
+	// path, a file change that resolved to a whole library, or a file the
+	// library's ignore files exclude).
 	ChangeOutcomeIgnored ChangeOutcome = "ignored"
 	// ChangeOutcomeError: resolving or enqueueing failed internally.
 	ChangeOutcomeError ChangeOutcome = "error"

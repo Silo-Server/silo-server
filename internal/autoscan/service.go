@@ -1119,6 +1119,11 @@ func (s *Service) resolveChange(ctx context.Context, change Change, stats *resol
 			rec.setOutcome(ChangeOutcomeIgnored, ChangeReasonResolvesToLibrary, "")
 			return nil, false
 		}
+		if reqErr, ok := errors.AsType[*scantrigger.RequestError](err); ok && reqErr.Reason == scantrigger.ReasonPathIgnored {
+			// The file is there, but the library's ignore files exclude it.
+			rec.setOutcome(ChangeOutcomeIgnored, string(reqErr.Reason), reqErr.Message)
+			return nil, false
+		}
 		if isRequestError(err) {
 			// The file may have been deleted (upgrade/replacement). Fall back
 			// to a reconciling scan so the stale row is marked missing

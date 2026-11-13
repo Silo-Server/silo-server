@@ -58,6 +58,24 @@ func TestChangeLogPrefersPrimaryReasonOverStillExistsFallback(t *testing.T) {
 	}
 }
 
+type ignoringResolver struct{ reasonResolver }
+
+func (ignoringResolver) Resolve(context.Context, scantrigger.Request) (*scantrigger.Target, error) {
+	return nil, &scantrigger.RequestError{Message: "Path is excluded by the library's ignore files", Reason: scantrigger.ReasonPathIgnored}
+}
+
+// A file the library's ignore files exclude maps to a library but is
+// deliberately not scanned, so it is recorded as ignored, not unresolved.
+func TestChangeLogRecordsIgnoredFileAsIgnored(t *testing.T) {
+	event := pollOneSource(t, arrSource(),
+		[]Change{{SourcePath: "/mnt/media/Movie.sample.mkv", Scope: ChangeScopeFile}},
+		&recordingQueuer{}, allowSuppressor{}, ignoringResolver{})
+	got := event.Changes[0]
+	if got.Outcome != ChangeOutcomeIgnored || got.Reason != string(scantrigger.ReasonPathIgnored) || got.Detail != "Path is excluded by the library's ignore files" {
+		t.Fatalf("change = %+v", got)
+	}
+}
+
 func TestChangeLogRecordsRewriteTargetAndRunIDs(t *testing.T) {
 	created := 1
 	q := &recordingQueuer{createdCount: &created}

@@ -2930,11 +2930,11 @@ change logging have an empty list. Each change has `source_path` (as reported),
 `outcome`: `queued` (created a scan run), `joined` (coalesced into a run for the
 same scope that was already queued or running), `suppressed` (debounced),
 `unresolved` (did not map to a scannable library location), `ignored` (empty path,
-or a file change that resolved to a whole library) or `error` (resolve or enqueue
-failure). `reason` is a machine code for unresolved, ignored and error outcomes:
-resolver reasons such as `no_library_match`, `library_root_offline` or
-`unsupported_extension`, plus `resolves_to_library`, `resolve_failed` and
-`enqueue_failed`; clients treat unknown codes and unknown outcomes as opaque and
+a file change that resolved to a whole library, or a file the library's ignore files
+exclude) or `error` (resolve or enqueue failure). `reason` is a machine code for
+unresolved, ignored and error outcomes: resolver reasons such as `no_library_match`,
+`library_root_offline`, `unsupported_extension` or `path_ignored`, plus
+`resolves_to_library`, `resolve_failed` and `enqueue_failed`; clients treat unknown codes and unknown outcomes as opaque and
 may show `detail`. Resolved changes include `library_id`, `target_mode` and
 `target_path`; queued and joined changes include the covering `scan_run_id`, which
 is how a joined change names a run another event created. A change that joins a
