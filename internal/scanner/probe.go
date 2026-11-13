@@ -214,32 +214,51 @@ func guessedContainerDemuxer(format ffprobeFormat, filePath string) string {
 	return demuxer
 }
 
-// confirmContainer decides whether a guessed format stands by asking ffprobe
+// confirmContainer decides whether a guessed format stands. It asks ffprobe
 // to read filePath with demuxer, the one its extension names. A file that
 // reads is healthy and keeps the guess: a stream of a few frames scores low
-// too, and FFmpeg detects the same format again when the file is played. A
-// file that does not read fails with ffprobe's own exit error, which
-// IsProbeRejection classifies like any other refusal.
+// too, and FFmpeg detects the same format again when the file is played.
+//
+// A file that does not read may still be healthy under the wrong extension:
+// a bare stream at a high bitrate scores low because FFmpeg's default
+// look-ahead holds only a few of its frames. So ffprobe detects the format
+// once more over probeWideFormatBytes, and a confident reading there keeps
+// the guess as well. Otherwise the file fails with the exit error of the
+// demuxer read, which IsProbeRejection classifies like any other refusal.
 func confirmContainer(ctx context.Context, ffprobePath, filePath, demuxer string, guess ffprobeFormat, limits probeLimits) error {
-	runCtx, cancel := context.WithTimeout(ctx, limits.probe)
-	defer cancel()
-	cmd := fspath.CommandContext(runCtx, ffprobePath,
-		"-v", "error",
-		"-f", demuxer,
-		"-show_entries", "format=format_name",
-		filePath,
-	)
-	cmd.WaitDelay = limits.waitDelay
-	_, err := cmd.Output()
-	processmetrics.Record(processmetrics.Probe, cmd.ProcessState, err, runCtx.Err())
-	if err == nil {
-		return nil
+	_, err := runFormatProbe(ctx, ffprobePath, filePath, limits, "-f", demuxer)
+	if err == nil || errors.Is(err, errProbeTimeout) {
+		return err
 	}
-	if probeTimedOut(ctx, runCtx) {
-		return fmt.Errorf("%w: no result for %s within %s", errProbeTimeout, filePath, limits.probe)
+	if output, wideErr := runFormatProbe(ctx, ffprobePath, filePath, limits, "-formatprobesize", probeWideFormatBytes); wideErr == nil {
+		var wide ffprobeOutput
+		if json.Unmarshal(output, &wide) == nil && wide.Format.ProbeScore > probeScoreRetry {
+			return nil
+		}
 	}
 	return fmt.Errorf("ffprobe only guessed that %s is %s (probe score %d) and could not read it as %s: %w",
 		filePath, guess.FormatName, guess.ProbeScore, demuxer, err)
+}
+
+// probeWideFormatBytes is how much of a file ffprobe may read to detect its
+// format when confirmContainer asks again: five times FFmpeg's default limit
+// of 1 MiB.
+const probeWideFormatBytes = "5242880"
+
+// runFormatProbe runs ffprobe on filePath with inputOptions and returns its
+// JSON output, which holds the format without the streams.
+func runFormatProbe(ctx context.Context, ffprobePath, filePath string, limits probeLimits, inputOptions ...string) ([]byte, error) {
+	runCtx, cancel := context.WithTimeout(ctx, limits.probe)
+	defer cancel()
+	args := append(slices.Clone(inputOptions), "-v", "error", "-print_format", "json", "-show_entries", "format=format_name,probe_score", filePath)
+	cmd := fspath.CommandContext(runCtx, ffprobePath, args...)
+	cmd.WaitDelay = limits.waitDelay
+	output, err := cmd.Output()
+	processmetrics.Record(processmetrics.Probe, cmd.ProcessState, err, runCtx.Err())
+	if err != nil && probeTimedOut(ctx, runCtx) {
+		return nil, fmt.Errorf("%w: no result for %s within %s", errProbeTimeout, filePath, limits.probe)
+	}
+	return output, err
 }
 
 // IsProbeRejection reports whether err, returned by ProbeFile for filePath

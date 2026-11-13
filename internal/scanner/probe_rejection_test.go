@@ -72,22 +72,28 @@ func TestIsProbeRejectionSeparatesRefusedFilesFromProbeTrouble(t *testing.T) {
 		name       string
 		score      int
 		forcedExit int
+		wideScore  int
 		rejection  bool
 	}{
-		{"guess the container demuxer refuses", 25, 1, true},
-		{"guess the container demuxer reads", 5, 0, false},
-		{"confident reading", 26, 1, false},
+		{"guess the container demuxer refuses", 25, 1, 25, true},
+		{"guess the container demuxer reads", 5, 0, 5, false},
+		{"guess a wider read is sure of", 25, 1, 26, false},
+		{"confident reading", 26, 1, 26, false},
 	} {
 		guess := filepath.Join(t.TempDir(), "ffprobe")
 		writeFakeTool(t, guess, fmt.Sprintf(`#!/bin/sh
+score=%d
 for arg; do
-	if [ "$arg" = -f ]; then
+	case "$arg" in
+	-f)
 		echo 'Invalid data found when processing input' >&2
 		exit %d
-	fi
+		;;
+	-formatprobesize) score=%d ;;
+	esac
 done
-printf '%%s\n' '{"format":{"format_name":"m4v","probe_score":%d},"streams":[{"codec_type":"video","codec_name":"mpeg4","width":640,"height":360}]}'
-`, tc.forcedExit, tc.score))
+printf '%%s\n' '{"format":{"format_name":"m4v","probe_score":'"$score"'},"streams":[{"codec_type":"video","codec_name":"mpeg4","width":640,"height":360}]}'
+`, tc.score, tc.forcedExit, tc.wideScore))
 		probe, err := ProbeFile(ctx, guess, avi)
 		if got := err != nil && IsProbeRejection(ctx, avi, err); got != tc.rejection || (err == nil) == tc.rejection {
 			t.Fatalf("%s: err = %v, rejection = %v, want rejection %v", tc.name, err, got, tc.rejection)
@@ -153,9 +159,10 @@ func TestIsProbeRejectionWithRealFFprobe(t *testing.T) {
 // writeGuessedFormatFiles returns the AVI from issue #2862 as rejected: its
 // first 4 KiB are overwritten with damage, so ffprobe exits 0 after guessing a
 // bare MPEG-4 stream. The healthy files must still probe: a one-frame MPEG-TS
-// small enough that ffprobe only guesses at it, and the undamaged AVI under an
-// .mkv name, which ffprobe identifies with confidence. It returns nothing
-// when ffmpeg is unavailable.
+// small enough that ffprobe only guesses at it, the undamaged AVI under an
+// .mkv name, which ffprobe identifies with confidence, and a bare 4K MPEG-4
+// stream under an .avi name, which ffprobe is sure of only when it reads
+// further than its default. It returns nothing when ffmpeg is unavailable.
 func writeGuessedFormatFiles(t *testing.T, dir string, damage []byte) (rejected, healthy []string) {
 	t.Helper()
 	ffmpeg, err := exec.LookPath("ffmpeg")
@@ -183,7 +190,8 @@ func writeGuessedFormatFiles(t *testing.T, dir string, damage []byte) (rejected,
 		t.Fatal(err)
 	}
 	oneFrame := encode("one-frame.ts", "-i", "color=black:size=64x64:rate=24", "-frames:v", "1", "-c:v", "mpeg2video", "-f", "mpegts")
-	return []string{broken}, []string{oneFrame, mislabeled}
+	bareStream := encode("bare-stream.avi", "-i", "testsrc2=size=3840x2160:rate=24", "-frames:v", "12", "-c:v", "mpeg4", "-q:v", "2", "-f", "m4v")
+	return []string{broken}, []string{oneFrame, mislabeled, bareStream}
 }
 
 // writeTruncatedMP4 encodes a short MP4 whose moov atom is written at the end,
