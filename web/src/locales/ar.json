@@ -32105,6 +32105,46 @@
       "value": "لم يُحمَّل العدد"
     }
   ],
+  "web.admin.common.downloadAccess.conversionOff": [
+    {
+      "type": 0,
+      "value": "لا يُعدّ الخادم نسخًا ملائمة للأجهزة، لذا يكون كل تنزيل هو الملف الأصلي. فعّل ذلك في "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "الإعدادات ← التنزيلات"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.downloadAccess.serverOff": [
+    {
+      "type": 0,
+      "value": "التنزيلات معطّلة على الخادم بأكمله، لذا لا يمكن لأحد التنزيل. فعّلها في "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "الإعدادات ← التنزيلات"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.common.editorConflict.message": [
     {
       "type": 0,
@@ -73739,6 +73779,102 @@
       "value": "الإعدادات"
     }
   ],
+  "web.admin.plugins.signature.invalid": [
+    {
+      "type": 0,
+      "value": "فشل التحقق"
+    }
+  ],
+  "web.admin.plugins.signature.invalidBanner": [
+    {
+      "type": 8,
+      "value": "b",
+      "children": [
+        {
+          "type": 0,
+          "value": "فشل التحقق من توقيع إصدار "
+        },
+        {
+          "type": 1,
+          "value": "name"
+        },
+        {
+          "type": 0,
+          "value": "."
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " التوقيع المرفق بهذا الإصدار لا يثبت المستودع الذي بناه. تجد التفاصيل في سجل الخادم."
+    }
+  ],
+  "web.admin.plugins.signature.label": [
+    {
+      "type": 0,
+      "value": "توقيع الإصدار"
+    }
+  ],
+  "web.admin.plugins.signature.tileInvalid": [
+    {
+      "type": 0,
+      "value": "فشل التوقيع"
+    }
+  ],
+  "web.admin.plugins.signature.tileVerified": [
+    {
+      "type": 0,
+      "value": "إصدار موقّع مبني من "
+    },
+    {
+      "type": 1,
+      "value": "repository"
+    }
+  ],
+  "web.admin.plugins.signature.unknown": [
+    {
+      "type": 0,
+      "value": "لم يُتحقق منه"
+    }
+  ],
+  "web.admin.plugins.signature.unsigned": [
+    {
+      "type": 0,
+      "value": "غير موقّع"
+    }
+  ],
+  "web.admin.plugins.signature.verified": [
+    {
+      "type": 0,
+      "value": "مبني من "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "repository"
+        }
+      ]
+    }
+  ],
+  "web.admin.plugins.signature.verifiedAt": [
+    {
+      "type": 0,
+      "value": "تم التحقق في "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.plugins.signature.verifiedNoRepository": [
+    {
+      "type": 0,
+      "value": "تم التحقق منه"
+    }
+  ],
   "web.admin.plugins.source.approvedCommunity": [
     {
       "type": 0,
@@ -82826,6 +82962,12 @@
     {
       "type": 0,
       "value": "الحد الأعلى للقرص (%)"
+    }
+  ],
+  "web.admin.settings.downloads.enabled.description": [
+    {
+      "type": 0,
+      "value": "المفتاح الخاص بالخادم بأكمله. عند تفعيله، تحدد مجموعات الوصول والحسابات من يمكنه التنزيل. وعند تعطيله، لا يمكن لأحد التنزيل."
     }
   ],
   "web.admin.settings.downloads.enabled.label": [
@@ -107946,6 +108088,12 @@
     {
       "type": 0,
       "value": "التنزيلات غير مسموح بها"
+    }
+  ],
+  "web.admin.users.detail.overview.access.downloadsServerOff": [
+    {
+      "type": 0,
+      "value": "التنزيلات معطّلة على الخادم بأكمله"
     }
   ],
   "web.admin.users.detail.overview.access.groupSource": [

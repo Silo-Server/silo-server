@@ -23089,6 +23089,46 @@
       "value": "Anzahl nicht geladen"
     }
   ],
+  "web.admin.common.downloadAccess.conversionOff": [
+    {
+      "type": 0,
+      "value": "Der Server erstellt keine gerätefreundlichen Kopien, daher ist jeder Download die Originaldatei. Schalte das unter "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Einstellungen → Downloads"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " ein."
+    }
+  ],
+  "web.admin.common.downloadAccess.serverOff": [
+    {
+      "type": 0,
+      "value": "Downloads sind für den gesamten Server ausgeschaltet, daher kann niemand etwas herunterladen. Schalte sie unter "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Einstellungen → Downloads"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " ein."
+    }
+  ],
   "web.admin.common.editorConflict.message": [
     {
       "type": 0,
@@ -50943,6 +50983,102 @@
       "value": "Einstellungen"
     }
   ],
+  "web.admin.plugins.signature.invalid": [
+    {
+      "type": 0,
+      "value": "Prüfung fehlgeschlagen"
+    }
+  ],
+  "web.admin.plugins.signature.invalidBanner": [
+    {
+      "type": 8,
+      "value": "b",
+      "children": [
+        {
+          "type": 0,
+          "value": "Die Prüfung der Release-Signatur von "
+        },
+        {
+          "type": 1,
+          "value": "name"
+        },
+        {
+          "type": 0,
+          "value": " ist fehlgeschlagen."
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " Die mitgelieferte Signatur dieser Version belegt nicht, welches Repository sie erstellt hat. Details stehen im Server-Log."
+    }
+  ],
+  "web.admin.plugins.signature.label": [
+    {
+      "type": 0,
+      "value": "Release-Signatur"
+    }
+  ],
+  "web.admin.plugins.signature.tileInvalid": [
+    {
+      "type": 0,
+      "value": "Signatur ungültig"
+    }
+  ],
+  "web.admin.plugins.signature.tileVerified": [
+    {
+      "type": 0,
+      "value": "Signiertes Release, erstellt aus "
+    },
+    {
+      "type": 1,
+      "value": "repository"
+    }
+  ],
+  "web.admin.plugins.signature.unknown": [
+    {
+      "type": 0,
+      "value": "Nicht geprüft"
+    }
+  ],
+  "web.admin.plugins.signature.unsigned": [
+    {
+      "type": 0,
+      "value": "Nicht signiert"
+    }
+  ],
+  "web.admin.plugins.signature.verified": [
+    {
+      "type": 0,
+      "value": "Erstellt aus "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "repository"
+        }
+      ]
+    }
+  ],
+  "web.admin.plugins.signature.verifiedAt": [
+    {
+      "type": 0,
+      "value": "Verifiziert: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.plugins.signature.verifiedNoRepository": [
+    {
+      "type": 0,
+      "value": "Verifiziert"
+    }
+  ],
   "web.admin.plugins.source.approvedCommunity": [
     {
       "type": 0,
@@ -57769,6 +57905,12 @@
     {
       "type": 0,
       "value": "Datenträger-Obergrenze (%)"
+    }
+  ],
+  "web.admin.settings.downloads.enabled.description": [
+    {
+      "type": 0,
+      "value": "Der Schalter für den gesamten Server. Ein: Zugriffsgruppen und Konten legen fest, wer herunterladen darf. Aus: Niemand kann herunterladen."
     }
   ],
   "web.admin.settings.downloads.enabled.label": [
@@ -79905,6 +80047,12 @@
     {
       "type": 0,
       "value": "Downloads nicht erlaubt"
+    }
+  ],
+  "web.admin.users.detail.overview.access.downloadsServerOff": [
+    {
+      "type": 0,
+      "value": "Downloads sind für den gesamten Server ausgeschaltet"
     }
   ],
   "web.admin.users.detail.overview.access.groupSource": [

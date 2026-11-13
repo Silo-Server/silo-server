@@ -21100,6 +21100,46 @@
       "value": "计数未加载"
     }
   ],
+  "web.admin.common.downloadAccess.conversionOff": [
+    {
+      "type": 0,
+      "value": "服务器未准备适合设备的副本，因此所有下载都是原始文件。请在"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "设置→下载"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "中开启。"
+    }
+  ],
+  "web.admin.common.downloadAccess.serverOff": [
+    {
+      "type": 0,
+      "value": "整个服务器已关闭下载，因此任何人都无法下载。请在"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "设置→下载"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "中开启。"
+    }
+  ],
   "web.admin.common.editorConflict.message": [
     {
       "type": 0,
@@ -45728,6 +45768,102 @@
       "value": "设置"
     }
   ],
+  "web.admin.plugins.signature.invalid": [
+    {
+      "type": 0,
+      "value": "检查未通过"
+    }
+  ],
+  "web.admin.plugins.signature.invalidBanner": [
+    {
+      "type": 8,
+      "value": "b",
+      "children": [
+        {
+          "type": 1,
+          "value": "name"
+        },
+        {
+          "type": 0,
+          "value": "的发布签名检查失败。"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "此版本附带的签名无法证明它由哪个存储库构建。详细信息请查看服务器日志。"
+    }
+  ],
+  "web.admin.plugins.signature.label": [
+    {
+      "type": 0,
+      "value": "发布签名"
+    }
+  ],
+  "web.admin.plugins.signature.tileInvalid": [
+    {
+      "type": 0,
+      "value": "签名检查失败"
+    }
+  ],
+  "web.admin.plugins.signature.tileVerified": [
+    {
+      "type": 0,
+      "value": "由"
+    },
+    {
+      "type": 1,
+      "value": "repository"
+    },
+    {
+      "type": 0,
+      "value": "构建的已签名版本"
+    }
+  ],
+  "web.admin.plugins.signature.unknown": [
+    {
+      "type": 0,
+      "value": "未检查"
+    }
+  ],
+  "web.admin.plugins.signature.unsigned": [
+    {
+      "type": 0,
+      "value": "未签名"
+    }
+  ],
+  "web.admin.plugins.signature.verified": [
+    {
+      "type": 0,
+      "value": "构建自"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "repository"
+        }
+      ]
+    }
+  ],
+  "web.admin.plugins.signature.verifiedAt": [
+    {
+      "type": 0,
+      "value": "验证时间："
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.plugins.signature.verifiedNoRepository": [
+    {
+      "type": 0,
+      "value": "已验证"
+    }
+  ],
   "web.admin.plugins.source.approvedCommunity": [
     {
       "type": 0,
@@ -52042,6 +52178,12 @@
     {
       "type": 0,
       "value": "磁盘上限（%）"
+    }
+  ],
+  "web.admin.settings.downloads.enabled.description": [
+    {
+      "type": 0,
+      "value": "整个服务器的开关。开启时，由访问组和账户决定谁可以下载。关闭时，任何人都无法下载。"
     }
   ],
   "web.admin.settings.downloads.enabled.label": [
@@ -73398,6 +73540,12 @@
     {
       "type": 0,
       "value": "不允许下载"
+    }
+  ],
+  "web.admin.users.detail.overview.access.downloadsServerOff": [
+    {
+      "type": 0,
+      "value": "整个服务器已关闭下载"
     }
   ],
   "web.admin.users.detail.overview.access.groupSource": [

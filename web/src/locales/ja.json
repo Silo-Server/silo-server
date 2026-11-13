@@ -21048,6 +21048,46 @@
       "value": "件数は未読み込み"
     }
   ],
+  "web.admin.common.downloadAccess.conversionOff": [
+    {
+      "type": 0,
+      "value": "サーバーがデバイスに適したコピーを準備していないため、ダウンロードはすべて元のファイルになります。"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "設定 → ダウンロード"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "でオンにしてください。"
+    }
+  ],
+  "web.admin.common.downloadAccess.serverOff": [
+    {
+      "type": 0,
+      "value": "サーバー全体でダウンロードがオフになっているため、誰もダウンロードできません。"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "設定 → ダウンロード"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "でオンにしてください。"
+    }
+  ],
   "web.admin.common.editorConflict.message": [
     {
       "type": 0,
@@ -45428,6 +45468,98 @@
       "value": "設定"
     }
   ],
+  "web.admin.plugins.signature.invalid": [
+    {
+      "type": 0,
+      "value": "検証に失敗"
+    }
+  ],
+  "web.admin.plugins.signature.invalidBanner": [
+    {
+      "type": 8,
+      "value": "b",
+      "children": [
+        {
+          "type": 1,
+          "value": "name"
+        },
+        {
+          "type": 0,
+          "value": "のリリース署名の検証に失敗しました。"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "このバージョンに付属する署名では、どのリポジトリでビルドされたかを証明できません。詳細はサーバーのログを確認してください。"
+    }
+  ],
+  "web.admin.plugins.signature.label": [
+    {
+      "type": 0,
+      "value": "リリース署名"
+    }
+  ],
+  "web.admin.plugins.signature.tileInvalid": [
+    {
+      "type": 0,
+      "value": "署名の検証に失敗"
+    }
+  ],
+  "web.admin.plugins.signature.tileVerified": [
+    {
+      "type": 1,
+      "value": "repository"
+    },
+    {
+      "type": 0,
+      "value": "でビルドされた署名済みリリース"
+    }
+  ],
+  "web.admin.plugins.signature.unknown": [
+    {
+      "type": 0,
+      "value": "未検証"
+    }
+  ],
+  "web.admin.plugins.signature.unsigned": [
+    {
+      "type": 0,
+      "value": "署名なし"
+    }
+  ],
+  "web.admin.plugins.signature.verified": [
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "repository"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "でビルド"
+    }
+  ],
+  "web.admin.plugins.signature.verifiedAt": [
+    {
+      "type": 0,
+      "value": "検証日時："
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.plugins.signature.verifiedNoRepository": [
+    {
+      "type": 0,
+      "value": "検証済み"
+    }
+  ],
   "web.admin.plugins.source.approvedCommunity": [
     {
       "type": 0,
@@ -51690,6 +51822,12 @@
     {
       "type": 0,
       "value": "ディスク使用率の上限（%）"
+    }
+  ],
+  "web.admin.settings.downloads.enabled.description": [
+    {
+      "type": 0,
+      "value": "サーバー全体のスイッチです。オンの場合、ダウンロードできるユーザーはアクセスグループとアカウントで決まります。オフの場合、誰もダウンロードできません。"
     }
   ],
   "web.admin.settings.downloads.enabled.label": [
@@ -72910,6 +73048,12 @@
     {
       "type": 0,
       "value": "ダウンロード不可"
+    }
+  ],
+  "web.admin.users.detail.overview.access.downloadsServerOff": [
+    {
+      "type": 0,
+      "value": "サーバー全体でダウンロードがオフです"
     }
   ],
   "web.admin.users.detail.overview.access.groupSource": [

@@ -20007,6 +20007,8 @@ export interface components {
       repository_name?: string;
       routes: components["schemas"]["PluginRoute"][];
       runtime: components["schemas"]["AdminPluginRuntime"];
+      /** @description The release signature check of the installed package. */
+      signature: components["schemas"]["AdminPluginSignature"];
       /** @enum {string} */
       source_kind: "silo" | "approved_community" | "external";
       task_bindings: components["schemas"]["AdminPluginTaskBinding"][];
@@ -20127,6 +20129,23 @@ export interface components {
        * @enum {string}
        */
       state: "stopped" | "starting" | "running" | "backoff" | "failed";
+    };
+    AdminPluginSignature: {
+      /**
+       * Format: uri
+       * @description The repository the verified signature names. Present only when state is verified.
+       */
+      source_repo?: string;
+      /**
+       * @description verified: the release's Sigstore bundle proved it was built from source_repo at the version's tag. unsigned: there was nothing to check, as for an upload, an archive install, or a catalog entry without a signature. invalid: a signature was checked and did not prove that. unknown: not checked, as for an installation from before Silo checked signatures or an install whose check could not run.
+       * @enum {string}
+       */
+      state: "unknown" | "verified" | "unsigned" | "invalid";
+      /**
+       * Format: date-time
+       * @description When Silo verified the signature. Present only when state is verified.
+       */
+      verified_at?: string;
     };
     AdminPluginTaskBinding: {
       capability_id: string;

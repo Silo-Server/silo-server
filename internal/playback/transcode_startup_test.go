@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -402,5 +403,69 @@ func TestStartReadyTranscodeStopsWaitingWhenRequestEnds(t *testing.T) {
 		if len(cache.preferred) != 0 {
 			t.Fatalf("running=%v: a cancellation must never be cached", running)
 		}
+	}
+}
+
+// An explicit NVENC start on a card whose NVDEC cannot decode the source
+// (HEVC on a Maxwell GTX 970) failed the same way on its retry, because the
+// retry changed only the render device. A decoder rejection now walks CPU
+// decode with NVENC, then software; any other early exit keeps the old retry.
+func TestStartReadyTranscodeRetriesDecoderRejectionOnCPU(t *testing.T) {
+	const nvdecRejection = "[hevc @ 0x1] Hardware is lacking required capabilities\n" +
+		"[hevc @ 0x1] Failed setup for format cuda: hwaccel initialisation returned error."
+	base := startupTestOpts()
+	base.HWAccel = transcodeHWNVENC
+	base.HWDevice = ""
+	tests := []struct {
+		name      string
+		policy    TranscodeStartupRetry
+		stderr    string
+		readyOn   int
+		wantAccel []string
+	}{
+		{name: "mixed stage plays", policy: TranscodeStartupRetryAccelChange, stderr: nvdecRejection, readyOn: 2,
+			wantAccel: []string{transcodeHWNVENC, transcodeHWNVENC}},
+		{name: "software after mixed fails", policy: TranscodeStartupRetryOtherDevice, stderr: nvdecRejection,
+			wantAccel: []string{transcodeHWNVENC, transcodeHWNVENC, HWAccelNone}},
+		{name: "rejection after long output", policy: TranscodeStartupRetryAccelChange, stderr: strings.Repeat("x", 600) + "\n" + nvdecRejection, readyOn: 2,
+			wantAccel: []string{transcodeHWNVENC, transcodeHWNVENC}},
+		{name: "no retry policy", policy: TranscodeStartupRetryNone, stderr: nvdecRejection,
+			wantAccel: []string{transcodeHWNVENC}},
+		{name: "other failure keeps accel change rule", policy: TranscodeStartupRetryAccelChange, stderr: "[vost#0:0/h264_nvenc] Could not open encoder",
+			wantAccel: []string{transcodeHWNVENC}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pipeline := newAutoTranscodePipeline(context.Background(), base, newAutoTranscodePipelineCache())
+			if pipeline.Enabled() {
+				t.Fatal("explicit nvenc must not enable the auto pipeline")
+			}
+			var attempts []TranscodeOpts
+			start := func(_ context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
+				attempts = append(attempts, opts)
+				session := fakeStartupSession(t, opts, t.TempDir(), len(attempts) == tt.readyOn, false)
+				_, _ = session.stderr.Write([]byte(tt.stderr))
+				return session, nil
+			}
+
+			_, err := StartReadyTranscode(context.Background(), pipeline, TranscodeStartup{Timeout: time.Millisecond, Start: start, LegacyRetry: tt.policy})
+			if (err == nil) != (tt.readyOn > 0) {
+				t.Fatalf("error = %v, want ready on attempt %d", err, tt.readyOn)
+			}
+			if len(attempts) != len(tt.wantAccel) {
+				t.Fatalf("attempt count = %d, want %d", len(attempts), len(tt.wantAccel))
+			}
+			for i, attempt := range attempts {
+				if attempt.HWAccel != tt.wantAccel[i] {
+					t.Fatalf("attempt %d HWAccel = %q, want %q", i, attempt.HWAccel, tt.wantAccel[i])
+				}
+				if wantCPUDecode := i > 0; attempt.SoftwareVideoDecode != wantCPUDecode {
+					t.Fatalf("attempt %d SoftwareVideoDecode = %v, want %v", i, attempt.SoftwareVideoDecode, wantCPUDecode)
+				}
+			}
+			if len(attempts) > 1 && !attempts[1].nvencSoftwareDecode {
+				t.Fatal("CPU-decode retry must keep the NVENC encoder")
+			}
+		})
 	}
 }

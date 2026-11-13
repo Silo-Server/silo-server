@@ -55975,6 +55975,118 @@
       "value": "⟦Šéţţîñĝš~~~~⟧"
     }
   ],
+  "web.admin.plugins.signature.invalid": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţĥé çĥéçķ~~~~~~~⟧"
+    }
+  ],
+  "web.admin.plugins.signature.invalidBanner": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 8,
+      "value": "b",
+      "children": [
+        {
+          "type": 0,
+          "value": "Ţĥé ŕéļéåšé šîĝñåţûŕé çĥéçķ ƒåîļéđ ƒöŕ "
+        },
+        {
+          "type": 1,
+          "value": "name"
+        },
+        {
+          "type": 0,
+          "value": "."
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " Ţĥé šîĝñåţûŕé ţĥåţ çåɱé ŵîţĥ ţĥîš ṽéŕšîöñ đöéšñ'ţ þŕöṽé ŵĥîçĥ ŕéþöšîţöŕý ƀûîļţ îţ. Ţĥé šéŕṽéŕ ļöĝ ĥåš ţĥé đéţåîļš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.plugins.signature.label": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéļéåšé šîĝñåţûŕé~~~~~~~⟧"
+    }
+  ],
+  "web.admin.plugins.signature.tileInvalid": [
+    {
+      "type": 0,
+      "value": "⟦Šîĝñåţûŕé ƒåîļéđ~~~~~~~⟧"
+    }
+  ],
+  "web.admin.plugins.signature.tileVerified": [
+    {
+      "type": 0,
+      "value": "⟦Šîĝñéđ ŕéļéåšé ƀûîļţ ƒŕöɱ "
+    },
+    {
+      "type": 1,
+      "value": "repository"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.plugins.signature.unknown": [
+    {
+      "type": 0,
+      "value": "⟦Ñöţ çĥéçķéđ~~~~~⟧"
+    }
+  ],
+  "web.admin.plugins.signature.unsigned": [
+    {
+      "type": 0,
+      "value": "⟦Ñöţ šîĝñéđ~~~~⟧"
+    }
+  ],
+  "web.admin.plugins.signature.verified": [
+    {
+      "type": 0,
+      "value": "⟦Ɓûîļţ ƒŕöɱ "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "repository"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "~~~~~⟧"
+    }
+  ],
+  "web.admin.plugins.signature.verifiedAt": [
+    {
+      "type": 0,
+      "value": "⟦Ṽéŕîƒîéđ "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
+    }
+  ],
+  "web.admin.plugins.signature.verifiedNoRepository": [
+    {
+      "type": 0,
+      "value": "⟦Ṽéŕîƒîéđ~~~~⟧"
+    }
+  ],
   "web.admin.plugins.source.approvedCommunity": [
     {
       "type": 0,

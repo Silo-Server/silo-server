@@ -700,3 +700,36 @@ func TestReconstructTranscodeWithoutAutoStartsOnceWithoutWaiting(t *testing.T) {
 		t.Fatalf("starts = %d, want 1", starts)
 	}
 }
+
+// A restart hook can block on its FFmpeg context, as the throttler's settings
+// read does when the database stalls. Shutdown cleanup must still close the
+// session, which cancels that context, rather than wait for the hook.
+func TestStartShutdownCleanup_DoesNotWaitForARestartHook(t *testing.T) {
+	m := NewTranscodeManager()
+	s := newRunningFakeSession(t)
+	m.RegisterTranscodeSession("hooked", s)
+	hookEntered := make(chan struct{})
+	hookReturned := make(chan struct{})
+	s.SetRestartHook(func(ctx context.Context) {
+		close(hookEntered)
+		<-ctx.Done()
+		close(hookReturned)
+	})
+	restarted := make(chan error, 1)
+	go func() { restarted <- m.RestartSessionLocked(context.Background(), "hooked", s, 0, 0) }()
+	<-hookEntered
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := m.StartShutdownCleanup(ctx)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("shutdown cleanup waited on a restart hook that only Close can release")
+	}
+	<-hookReturned
+	if err := <-restarted; err != nil {
+		t.Fatalf("restart published before shutdown = %v", err)
+	}
+	requireClosed(t, s, nil)
+}

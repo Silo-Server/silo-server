@@ -716,6 +716,7 @@ function WatchPagePlayer({
       connectionError={session.connectionError}
       onPlanInvalidated={session.invalidatePlan}
       onReanchorSeek={session.reanchorSeek}
+      onSeek={session.reportSeek}
       onApplySubtitleTrack={session.applySubtitleTrack}
       preferredSubtitleLanguage={preferredSubtitleLanguage}
       preferredSubtitleTrackSignature={preferredSubtitleTrackSignature}

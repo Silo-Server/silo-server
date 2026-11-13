@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import type { ReactNode, Ref } from "react";
-import { AlertTriangle, Check, Download } from "lucide-react";
+import { AlertTriangle, Check, Download, ShieldAlert, ShieldCheck } from "lucide-react";
 import { useLocation } from "react-router";
 
 import type { PluginCatalogEntry, PluginInstallation } from "@/api/types";
@@ -15,6 +15,7 @@ import {
   pluginDisplayName,
   pluginPagePath,
   pluginSummary,
+  signatureRepositoryLabel,
   sourceLabel,
   tierNotice,
 } from "@/lib/pluginPresentation";
@@ -131,6 +132,14 @@ export function InstalledPluginTile({
   const status = pluginStatus(installation);
   const off = !installation.enabled;
   const updateVersion = pendingUpdateVersion(installation);
+  const signature = installation.signature;
+  // A quiet mark for a verified release; unknown and unsigned show nothing.
+  const verifiedLabel =
+    signature.state === "verified" && signature.source_repo
+      ? t("web.admin.plugins.signature.tileVerified", {
+          repository: signatureRepositoryLabel(signature.source_repo),
+        })
+      : undefined;
 
   return (
     <TileShell attention={status.attention} dimmed={off} state={off ? "off" : undefined}>
@@ -145,8 +154,25 @@ export function InstalledPluginTile({
       />
       <TileSummary>{pluginSummary(presentation, capabilities)}</TileSummary>
       <TileFooter>
-        <PluginStatusLabel {...status} />
-        {installation.update_failure ? (
+        <span className="inline-flex min-w-0 items-center gap-1.5">
+          <PluginStatusLabel {...status} />
+          {verifiedLabel ? (
+            <span
+              role="img"
+              aria-label={verifiedLabel}
+              title={verifiedLabel}
+              className="text-muted-foreground relative z-10 inline-flex"
+            >
+              <ShieldCheck aria-hidden="true" className="size-3.5 shrink-0" />
+            </span>
+          ) : null}
+        </span>
+        {signature.state === "invalid" ? (
+          <span className="text-warning inline-flex min-w-0 items-center gap-1 text-[12.5px]">
+            <ShieldAlert aria-hidden="true" className="size-3.5 shrink-0" />
+            <span className="truncate">{t("web.admin.plugins.signature.tileInvalid")}</span>
+          </span>
+        ) : installation.update_failure ? (
           <span
             className="text-warning inline-flex min-w-0 items-center gap-1 text-[12.5px]"
             title={installation.update_failure.reason}
