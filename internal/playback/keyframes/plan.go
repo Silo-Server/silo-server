@@ -1,10 +1,13 @@
 package keyframes
 
+import "math"
+
 // PlanSegments returns the start time of each HLS segment for a stream copied
 // from a file with these keyframes, cut the way FFmpeg's HLS muxer cuts
 // copied video: a segment ends at the first keyframe at or after its target,
 // and each cut moves the target on by segmentSeconds. Targets count from the
-// first keyframe, where FFmpeg's output starts. Jellyfin's
+// first keyframe, where FFmpeg's output starts when its first packet is
+// video; PlanMuxSegments covers audio that comes first. Jellyfin's
 // DynamicHlsPlaylistGenerator.ComputeSegments uses the same rule.
 //
 // When keyframes are further apart than segmentSeconds the targets fall
@@ -14,19 +17,34 @@ func PlanSegments(keyframes []float64, segmentSeconds float64) []float64 {
 	if len(keyframes) == 0 || segmentSeconds <= 0 {
 		return nil
 	}
+	starts, _ := planFrom(keyframes, segmentSeconds, keyframes[0])
+	return starts
+}
+
+// planFrom is PlanSegments with the targets measured from origin, which
+// FFmpeg takes from the first packet it muxes (PlanMuxSegments). It reports
+// false for an origin before the first keyframe that leaves a keyframe
+// within muxTie of a target: rounded to FFmpeg's time bases, it could fall
+// on either side.
+func planFrom(keyframes []float64, segmentSeconds, origin float64) ([]float64, bool) {
 	starts := []float64{keyframes[0]}
-	// Targets are measured from the first keyframe, and a keyframe within
-	// targetSlack of one counts as reaching it: FFmpeg compares integer
-	// timestamps, where a keyframe exactly on a target reaches it, but a
-	// nonzero origin leaves float error ("2.28 - 0.28" isn't quite 2).
+	// A keyframe within targetSlack of a target counts as reaching it:
+	// FFmpeg compares integer timestamps, where a keyframe exactly on a
+	// target reaches it, but a nonzero origin leaves float error ("2.28 -
+	// 0.28" isn't quite 2).
+	exact := origin == keyframes[0]
 	target := segmentSeconds
 	for _, k := range keyframes[1:] {
-		if k-keyframes[0] >= target-targetSlack {
+		at := k - origin
+		if !exact && math.Abs(at-target) < muxTie {
+			return nil, false
+		}
+		if at >= target-targetSlack {
 			starts = append(starts, k)
 			target += segmentSeconds
 		}
 	}
-	return starts
+	return starts, true
 }
 
 // targetSlack is the float error PlanSegments allows when comparing a

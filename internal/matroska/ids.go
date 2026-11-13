@@ -38,6 +38,9 @@ const (
 	IDDefaultDuration      = 0x23E383
 	IDTrackTimestampScale  = 0x23314F
 	IDCodecDelay           = 0x56AA
+	IDAudio                = 0xE1
+	IDSamplingFrequency    = 0xB5
+	IDOutputSamplingFreq   = 0x78B5
 	IDName                 = 0x536E
 	IDLanguage             = 0x22B59C
 	IDLanguageBCP47        = 0x22B59D

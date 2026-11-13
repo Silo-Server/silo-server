@@ -23,7 +23,7 @@ import (
 // stop mid-stream.
 //
 // FFmpeg's HLS muxer, run from the start of the file, cuts copied video at
-// the planned keyframes (keyframes.PlanSegments), so its seg_NNNNN files are
+// the planned keyframes (keyframes.PlanMuxSegments), so its seg_NNNNN files are
 // the planned segments. A seek restart would cut at different keyframes, so
 // a planned session restarts from the beginning instead (see restart).
 type copySegmentPlan struct {
@@ -31,6 +31,8 @@ type copySegmentPlan struct {
 	// file is the source version the plan was made from, which a mismatch
 	// rejects (checkCopyPlan); zero for a plan rebuilt from its record.
 	file keyframes.Version
+	// audio is the audio the plan was made for: FFmpeg's cuts depend on it.
+	audio keyframes.MuxAudio
 }
 
 // loadKeyframeIndex reads a source's keyframe index; tests replace it.
@@ -58,7 +60,14 @@ func planCopySegments(opts TranscodeOpts) *copySegmentPlan {
 	if segmentSeconds <= 0 {
 		segmentSeconds = defaultSegmentDuration
 	}
-	starts := keyframes.PlanSegments(idx.Keyframes, segmentSeconds)
+	// FFmpeg's muxer counts its targets from the first packet, which can
+	// be the audio's (#4049).
+	audio := copyPlanAudio(opts)
+	starts, ok := keyframes.PlanMuxSegments(idx, segmentSeconds, audio)
+	if !ok {
+		log.Printf("playback: session %s can't predict FFmpeg's segments with its audio; using FFmpeg's playlist", opts.SessionID)
+		return nil
+	}
 	if len(starts) == 0 || len(starts) > maxSyntheticManifestSegments {
 		return nil
 	}
@@ -70,7 +79,21 @@ func planCopySegments(opts TranscodeOpts) *copySegmentPlan {
 		return nil
 	}
 	durations := keyframes.SegmentDurations(starts, idx.VideoEnd)
-	return &copySegmentPlan{durations: durations, file: idx.File}
+	return &copySegmentPlan{durations: durations, file: idx.File, audio: audio}
+}
+
+// copyPlanAudio describes the audio buildFFmpegArgs maps and how
+// appendAudioArgs encodes it.
+func copyPlanAudio(opts TranscodeOpts) keyframes.MuxAudio {
+	audio := keyframes.MuxAudio{Track: max(opts.AudioTrackIndex, 0), Encoder: keyframes.AudioOtherEncoder}
+	switch codec := strings.ToLower(strings.TrimSpace(opts.TargetCodecAudio)); codec {
+	case codecCopyV3:
+		audio.Encoder = keyframes.AudioCopied
+	case audioCodecAC3, audioCodecEAC3, audioCodecOpus:
+	default:
+		audio.Encoder = keyframes.AudioAAC
+	}
+	return audio
 }
 
 // copyPlanRecordFile keeps a session's planning decision in its output
@@ -207,8 +230,15 @@ func (s *TranscodeSession) checkCopyPlan(entries []manifestSegmentEntry, complet
 	}
 	s.copyPlanRejected = true
 	opts := s.opts
+	audioChanged := s.copyPlanAudioChanged
 	s.mu.Unlock()
 
+	if audioChanged {
+		// A Jellyfin audio switch restarted FFmpeg with other audio, which
+		// can move its cuts (#4049); that says nothing about the Cues.
+		log.Printf("playback: session %s: %s after its audio changed", opts.SessionID, mismatch)
+		return
+	}
 	log.Printf("playback: session %s: %s; later playbacks of %s use FFmpeg's playlist", opts.SessionID, mismatch, opts.InputPath)
 	keyframes.Reject(s.copyPlan.file)
 }

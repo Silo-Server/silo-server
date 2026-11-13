@@ -84,12 +84,50 @@ func checkCueCoverage(r io.ReaderAt, segStart, segEnd int64, video uint64, ticks
 // keyframes in the cluster at off, and where the next element starts. It
 // reads element headers and the first bytes of each block, never the frames.
 func clusterKeyframes(r io.ReaderAt, off, segEnd int64, video uint64, last *videoEnd) ([]uint64, int64, error) {
-	id, size, headerLen, err := matroska.ReadElementHeader(r, off)
+	var (
+		keys   []int64
+		latest videoEnd // relative to the cluster
+	)
+	clusterTicks, end, err := walkCluster(r, off, segEnd, func(track uint64, rel int64, key bool, duration int64) {
+		if track == video {
+			latest.add(rel, duration)
+			if key {
+				keys = append(keys, rel)
+			}
+		}
+	})
 	if err != nil {
 		return nil, 0, err
 	}
+	if last != nil {
+		if latest.n > 0 {
+			last.add(clusterTicks+latest.last, latest.lastDuration)
+		}
+		if latest.n > 1 {
+			last.add(clusterTicks+latest.prev, 0)
+		}
+	}
+	ticks := make([]uint64, 0, len(keys))
+	for _, rel := range keys {
+		if t := clusterTicks + rel; t >= 0 {
+			ticks = append(ticks, uint64(t))
+		}
+	}
+	return ticks, end, nil
+}
+
+// walkCluster calls fn with each block of the cluster at off, in the order
+// they are stored: its track, timestamp relative to the cluster, whether it
+// is a keyframe, and its BlockDuration in ticks, or 0. It returns the
+// cluster's timestamp and where the next element starts. It reads element
+// headers and the first bytes of each block, never the frames.
+func walkCluster(r io.ReaderAt, off, segEnd int64, fn func(track uint64, rel int64, key bool, duration int64)) (int64, int64, error) {
+	id, size, headerLen, err := matroska.ReadElementHeader(r, off)
+	if err != nil {
+		return 0, 0, err
+	}
 	if id != idCluster {
-		return nil, 0, fmt.Errorf("cue points at element %#x, not a cluster", id)
+		return 0, 0, fmt.Errorf("cue points at element %#x, not a cluster", id)
 	}
 	end := segEnd
 	if size != unknownSize && off+headerLen+size < end {
@@ -97,10 +135,8 @@ func clusterKeyframes(r io.ReaderAt, off, segEnd int64, video uint64, last *vide
 	}
 
 	var (
-		clusterTicks uint64
+		clusterTicks int64
 		haveTicks    bool
-		keys         []int64
-		latest       videoEnd // relative to the cluster
 	)
 	at := off + headerLen
 	n := 0
@@ -110,7 +146,7 @@ func clusterKeyframes(r io.ReaderAt, off, segEnd int64, video uint64, last *vide
 			if isShortRead(err) {
 				break
 			}
-			return nil, 0, err
+			return 0, 0, err
 		}
 		// An unknown-size cluster ends where the next top-level element
 		// starts.
@@ -123,56 +159,38 @@ func clusterKeyframes(r io.ReaderAt, off, segEnd int64, video uint64, last *vide
 		case idClusterTimestamp:
 			b, err := matroska.ReadElementData(r, data, size, 8)
 			if err != nil {
-				return nil, 0, err
+				return 0, 0, err
 			}
-			clusterTicks, haveTicks = matroska.Uint(b), true
+			v := matroska.Uint(b)
+			if v > math.MaxInt64 {
+				return 0, 0, fmt.Errorf("cluster at %d has timestamp %d, past any media", off, v)
+			}
+			clusterTicks, haveTicks = int64(v), true
 		case idSimpleBlock:
 			track, rel, flags, err := readBlockHeader(r, data, size)
 			if err != nil {
-				return nil, 0, err
+				return 0, 0, err
 			}
-			if track == video {
-				latest.add(rel, 0)
-				if flags&0x80 != 0 {
-					keys = append(keys, rel)
-				}
-			}
+			fn(track, rel, flags&0x80 != 0, 0)
 		case idBlockGroup:
 			track, rel, key, duration, err := readBlockGroup(r, data, size)
 			if err != nil {
-				return nil, 0, err
+				return 0, 0, err
 			}
-			if track == video {
-				latest.add(rel, duration)
-				if key {
-					keys = append(keys, rel)
-				}
+			if track != 0 {
+				fn(track, rel, key, duration)
 			}
 		}
 		at = data + size
 	}
 	if n == maxClusterChildren && at < end {
 		// Not every block was read, so the cluster can't vouch for the Cues.
-		return nil, 0, ErrIncompleteIndex
+		return 0, 0, ErrIncompleteIndex
 	}
 	if !haveTicks {
-		return nil, 0, fmt.Errorf("cluster at %d has no timestamp", off)
+		return 0, 0, fmt.Errorf("cluster at %d has no timestamp", off)
 	}
-	if last != nil {
-		if latest.n > 0 {
-			last.add(int64(clusterTicks)+latest.last, latest.lastDuration)
-		}
-		if latest.n > 1 {
-			last.add(int64(clusterTicks)+latest.prev, 0)
-		}
-	}
-	ticks := make([]uint64, 0, len(keys))
-	for _, rel := range keys {
-		if t := int64(clusterTicks) + rel; t >= 0 {
-			ticks = append(ticks, uint64(t))
-		}
-	}
-	return ticks, end, nil
+	return clusterTicks, end, nil
 }
 
 // readBlockHeader reads a (Simple)Block's track number, timestamp relative

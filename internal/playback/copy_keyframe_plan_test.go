@@ -179,7 +179,12 @@ func TestCheckCopyPlanRejectsTheFileOnAMismatch(t *testing.T) {
 	for name, tc := range map[string]struct {
 		written  []manifestSegmentEntry
 		complete bool
-		reject   bool
+		// audioTrack is the audio track the session switched to before
+		// FFmpeg wrote them, and back to track 0, which the plan was made
+		// for, when switchBack is set.
+		audioTrack int
+		switchBack bool
+		reject     bool
 	}{
 		"matches":       {written: []manifestSegmentEntry{{0, 2.6}, {1, 4.401}, {2, 1.04}}, complete: true},
 		"still running": {written: []manifestSegmentEntry{{0, 2.6}, {1, 4.4}}},
@@ -192,6 +197,11 @@ func TestCheckCopyPlanRejectsTheFileOnAMismatch(t *testing.T) {
 		"last segment short": {written: []manifestSegmentEntry{{0, 2.6}, {1, 4.4}, {2, 0.4}}, complete: true},
 		// A failed run ended segment 1 early and stopped.
 		"failed run": {written: []manifestSegmentEntry{{0, 2.6}, {1, 1.2}}},
+		// An audio switch restarted FFmpeg with another track, which can
+		// move its cuts without the Cues being wrong.
+		"after an audio switch": {written: []manifestSegmentEntry{{0, 2.6}, {1, 2.2}, {2, 2.2}}, audioTrack: 1},
+		// The switch back doesn't make the other track's run evidence.
+		"after switching back": {written: []manifestSegmentEntry{{0, 2.6}, {1, 2.2}, {2, 2.2}}, audioTrack: 1, switchBack: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			// Not Matroska: Load reports ErrNoIndex, and ErrIncompleteIndex
@@ -201,13 +211,22 @@ func TestCheckCopyPlanRejectsTheFileOnAMismatch(t *testing.T) {
 				t.Fatal(err)
 			}
 			s := &TranscodeSession{
-				opts:     TranscodeOpts{InputPath: source, SessionID: "checked"},
+				opts:     TranscodeOpts{InputPath: source, SessionID: "checked", TargetCodecAudio: "copy"},
 				copyPlan: &copySegmentPlan{durations: plan, file: sourceVersion(t, source)},
+			}
+			if tc.audioTrack != 0 {
+				s.SetAudioTrackIndex(tc.audioTrack)
+			}
+			if tc.switchBack {
+				s.SetAudioTrackIndex(0)
 			}
 			s.checkCopyPlan(tc.written, tc.complete)
 			_, err := keyframes.Load(source)
-			if rejected := errors.Is(err, keyframes.ErrIncompleteIndex); rejected != tc.reject || s.copyPlanRejected != tc.reject {
-				t.Fatalf("rejected = %v (session %v, Load err %v), want %v", rejected, s.copyPlanRejected, err, tc.reject)
+			// The session stops checking on any mismatch, even one it
+			// doesn't blame on the file.
+			mismatch := tc.reject || tc.audioTrack != 0
+			if rejected := errors.Is(err, keyframes.ErrIncompleteIndex); rejected != tc.reject || s.copyPlanRejected != mismatch {
+				t.Fatalf("file rejected = %v (session %v, Load err %v), want %v (session %v)", rejected, s.copyPlanRejected, err, tc.reject, mismatch)
 			}
 		})
 	}
@@ -242,7 +261,7 @@ func TestCheckCopyPlanOutputReadsFFmpegsPlaylist(t *testing.T) {
 			}
 			s := &TranscodeSession{
 				outputDir: out,
-				opts:      TranscodeOpts{InputPath: source, SessionID: "exited"},
+				opts:      TranscodeOpts{InputPath: source, SessionID: "exited", TargetCodecAudio: "copy"},
 				copyPlan:  &copySegmentPlan{durations: []float64{2.6, 4.4, 1.0}, file: sourceVersion(t, source)},
 			}
 			s.checkCopyPlanOutput(tc.waitErr)

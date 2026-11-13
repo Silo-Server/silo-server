@@ -333,6 +333,10 @@ type TranscodeSession struct {
 	// copyPlanRejected is set once FFmpeg has cut a segment the plan
 	// doesn't list (checkCopyPlan).
 	copyPlanRejected bool
+	// copyPlanAudioChanged is set once the session's audio has differed
+	// from the audio its plan was made for (SetAudioTrackIndex). Guarded by
+	// mu.
+	copyPlanAudioChanged bool
 	// copyPlanWritten is how many segments FFmpeg wrote in a run that
 	// finished the whole stream, or 0 (checkCopyPlanOutput). Guarded by mu.
 	copyPlanWritten int
@@ -3402,6 +3406,11 @@ func (s *TranscodeSession) SetAudioTrackIndex(index int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.opts.AudioTrackIndex = index
+	if s.copyPlan != nil && copyPlanAudio(s.opts) != s.copyPlan.audio {
+		// FFmpeg's cuts can move with the audio (#4049), so from now on a
+		// mismatch doesn't fault the file's Cues (checkCopyPlan).
+		s.copyPlanAudioChanged = true
+	}
 }
 
 // SetRequireAudioTrack updates whether ffmpeg must fail rather than drop the

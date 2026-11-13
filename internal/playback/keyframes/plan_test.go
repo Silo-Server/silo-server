@@ -46,3 +46,58 @@ func TestSegmentDurations(t *testing.T) {
 		t.Fatalf("last duration past the end = %v, want 0", got[1])
 	}
 }
+
+// FFmpeg's HLS muxer measures its targets from the first packet it muxes,
+// which is audio when the audio starts before the video (#4049); the
+// FFmpeg-in-the-loop tests check the same against FFmpeg itself.
+func TestPlanMuxSegments(t *testing.T) {
+	keyframes := []float64{0, 1.98, 4, 6, 8}
+	video := Track{Type: 1, HasStart: true}
+	audio := func(start float64) Track {
+		return Track{Type: 2, Start: start, HasStart: true, SampleRate: 48000}
+	}
+	fromKeyframe, fromAudio := []float64{0, 4, 6, 8}, []float64{0, 1.98, 4, 6, 8}
+	for _, tc := range []struct {
+		name    string
+		tracks  []Track
+		reorder int
+		frame   float64
+		audio   MuxAudio
+		want    []float64 // nil: no plan
+	}{
+		{name: "no audio track", tracks: []Track{video}, want: fromKeyframe},
+		{name: "mapped track missing", tracks: []Track{video, audio(-0.021)}, audio: MuxAudio{Track: 1}, want: fromKeyframe},
+		{name: "audio starts after the video", tracks: []Track{video, audio(0.01)}, want: fromKeyframe},
+		// 1.98s is 2.001s after the audio's first packet, 1.985s after
+		// this one's.
+		{name: "AAC copied, 21ms ahead", tracks: []Track{video, audio(-0.021)}, want: fromAudio},
+		{name: "AC3 copied, 5ms ahead", tracks: []Track{video, audio(-0.005)}, want: fromKeyframe},
+		{name: "second audio track, earliest of all", tracks: []Track{video, audio(-0.005), audio(-0.021)}, audio: MuxAudio{Track: 1}, want: fromAudio},
+		// The AAC encoder's 1024 samples at 48kHz put the AC3 track 26ms
+		// ahead.
+		{name: "encoded to AAC", tracks: []Track{video, audio(-0.005)}, audio: MuxAudio{Encoder: AudioAAC}, want: fromAudio},
+		// Another encoder's padding isn't known: 1.98s may or may not reach
+		// the target.
+		{name: "encoded to Opus", tracks: []Track{video, audio(-0.005)}, audio: MuxAudio{Encoder: AudioOtherEncoder}, want: nil},
+		// A 2-frame B-frame delay of 80ms muxes the video first.
+		{name: "B-frames delay the video past the audio", tracks: []Track{video, audio(-0.021)}, reorder: 2, frame: 0.04, want: fromKeyframe},
+		// A delay of at least 20ms may or may not reach 21ms.
+		{name: "B-frames may delay the video past the audio", tracks: []Track{video, audio(-0.021)}, reorder: 1, frame: 0.02, want: nil},
+		// The audio's first packet isn't 0 after FFmpeg's shift, and the
+		// muxer would subtract it in another time base.
+		{name: "another track starts first", tracks: []Track{video, audio(-0.021), {Type: 17, Start: -1, HasStart: true}}, want: nil},
+		// 1.98s is 0.2ms past the target from the audio, too close to call.
+		{name: "keyframe on a target from the audio", tracks: []Track{video, audio(-0.0202)}, want: nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			idx := Index{Keyframes: keyframes, Tracks: tc.tracks, VideoReorder: tc.reorder, VideoFrame: tc.frame}
+			got, ok := PlanMuxSegments(idx, 2, tc.audio)
+			if !ok {
+				got = nil
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("PlanMuxSegments = %v (ok %v), want %v", got, ok, tc.want)
+			}
+		})
+	}
+}

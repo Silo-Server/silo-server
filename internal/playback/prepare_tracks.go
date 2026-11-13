@@ -24,6 +24,7 @@ const (
 	audioCodecMP3       = "mp3"
 	audioCodecAC3       = "ac3"
 	audioCodecEAC3      = "eac3"
+	audioCodecOpus      = "opus"
 	audioCodecTrueHD    = "truehd"
 	audioCodecFLAC      = "flac"
 	audioCodecALAC      = "alac"
