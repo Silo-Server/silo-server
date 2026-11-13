@@ -81,10 +81,12 @@ func TestResolverTargets(t *testing.T) {
 		dirs       []string
 		files      []string
 		path       string
+		trigger    string // Resolve's request trigger; "" is an admin request
 		wantMode   string
 		wantPath   string // "" for a library target
 		wantStatus int
 		wantCode   string
+		wantReason Reason
 	}{
 		{name: "library root", call: resolve, folder: models.MediaFolder{ID: 7, Enabled: true},
 			wantMode: ModeLibrary},
@@ -96,6 +98,23 @@ func TestResolverTargets(t *testing.T) {
 			files: []string{"Movie (2024).mkv"}, path: "Movie (2024).mkv", wantMode: ModeFile, wantPath: "Movie (2024).mkv"},
 		{name: "video file in a subdir scans its directory", call: resolve, folder: models.MediaFolder{ID: 10, Type: "movies", Enabled: true},
 			files: []string{"Movie (2024)/Movie (2024).mkv"}, path: "Movie (2024)/Movie (2024).mkv", wantMode: ModeSubtree, wantPath: "Movie (2024)"},
+		// A scan Silo starts on its own skips a file the library walk would
+		// not reach; an admin's request for the exact path still scans it.
+		{name: "monitor event for a root file a .siloignore excludes", call: resolve, folder: models.MediaFolder{ID: 11, Type: "movies", Enabled: true},
+			files: []string{".siloignore", "Movie.sample.mkv"}, path: "Movie.sample.mkv", trigger: "realtime_monitor",
+			wantStatus: http.StatusBadRequest, wantReason: ReasonPathIgnored},
+		{name: "autoscan of a file in a .nomedia root", call: resolve, folder: models.MediaFolder{ID: 12, Type: "movies", Enabled: true},
+			files: []string{".nomedia", "Movie (2024).mkv"}, path: "Movie (2024).mkv", trigger: "jellyfin_autoscan",
+			wantStatus: http.StatusBadRequest, wantReason: ReasonPathIgnored},
+		{name: "autoscan of an ebook in a .nomedia folder", call: resolve, folder: models.MediaFolder{ID: 13, Type: "ebooks", Enabled: true},
+			files: []string{"Drafts/.nomedia", "Drafts/Book.epub"}, path: "Drafts/Book.epub", trigger: "autoscan",
+			wantStatus: http.StatusBadRequest, wantReason: ReasonPathIgnored},
+		{name: "monitor event for a root file no rule excludes", call: resolve, folder: models.MediaFolder{ID: 14, Type: "movies", Enabled: true},
+			files: []string{".siloignore", "Movie (2024).mkv"}, path: "Movie (2024).mkv", trigger: "realtime_monitor",
+			wantMode: ModeFile, wantPath: "Movie (2024).mkv"},
+		{name: "admin request for a root file a .siloignore excludes", call: resolve, folder: models.MediaFolder{ID: 15, Type: "movies", Enabled: true},
+			files: []string{".siloignore", "Movie.sample.mkv"}, path: "Movie.sample.mkv",
+			wantMode: ModeFile, wantPath: "Movie.sample.mkv"},
 		{name: "disabled library", call: resolve, folder: models.MediaFolder{ID: 10, Enabled: false},
 			wantStatus: http.StatusConflict, wantCode: "conflict"},
 		{name: "missing subtree without stat", call: missingSubtree, folder: models.MediaFolder{ID: 18, Enabled: true},
@@ -134,7 +153,11 @@ func TestResolverTargets(t *testing.T) {
 				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
+				content := []byte("test")
+				if filepath.Base(file) == ".siloignore" {
+					content = []byte("*.sample.mkv\n")
+				}
+				if err := os.WriteFile(path, content, 0o644); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -147,7 +170,7 @@ func TestResolverTargets(t *testing.T) {
 			var err error
 			switch tc.call {
 			case resolve:
-				target, err = resolver.Resolve(context.Background(), Request{Path: path})
+				target, err = resolver.Resolve(context.Background(), Request{Path: path, Trigger: tc.trigger})
 			case missingSubtree:
 				target, err = resolver.ResolveMissingSubtree(context.Background(), path, "autoscan")
 			case vanished:
@@ -159,7 +182,7 @@ func TestResolverTargets(t *testing.T) {
 				if !errors.As(err, &reqErr) {
 					t.Fatalf("expected RequestError, got %T: %v", err, err)
 				}
-				if reqErr.Status != tc.wantStatus || (tc.wantCode != "" && reqErr.Code != tc.wantCode) {
+				if reqErr.Status != tc.wantStatus || (tc.wantCode != "" && reqErr.Code != tc.wantCode) || (tc.wantReason != "" && reqErr.Reason != tc.wantReason) {
 					t.Fatalf("unexpected error: %#v", reqErr)
 				}
 				return

@@ -90,6 +90,7 @@ const (
 	ReasonPathAmbiguous         Reason = "path_ambiguous"
 	ReasonNoLibraryMatch        Reason = "no_library_match"
 	ReasonUnsupportedExtension  Reason = "unsupported_extension"
+	ReasonPathIgnored           Reason = "path_ignored"
 )
 
 // Error codes and the messages repeated across more than one rejection site.
@@ -347,6 +348,9 @@ func (r *Resolver) resolve(ctx context.Context, req Request, pathFolders []*mode
 	if err != nil {
 		return nil, err
 	}
+	// An admin who names a path asks for that file explicitly, so only the
+	// scans Silo starts on its own honor the library's ignore files here.
+	explicit := trigger == "manual"
 	if trigger == "manual" {
 		trigger = "path"
 		if req.LibraryID != nil {
@@ -365,8 +369,29 @@ func (r *Resolver) resolve(ctx context.Context, req Request, pathFolders []*mode
 		if err != nil {
 			return nil, err
 		}
+		if mode == ModeFile && !explicit {
+			if err := requireFileNotIgnored(cleanPath, folder.Paths); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return &Target{Folder: folder, Mode: mode, Path: targetPath, Trigger: trigger}, nil
+}
+
+// requireFileNotIgnored rejects a file target that the library walk would
+// skip. A file scan reads no ignore files, so a watcher or autoscan event for
+// such a file (one in a flat library root, or any audiobook, ebook, or manga
+// file) would import what the next library scan retires again. Directory
+// targets need no check: a subtree scan applies the rules itself.
+func requireFileNotIgnored(path string, libraryRoots []string) error {
+	ignored, err := scanner.FileIgnored(path, libraryRoots)
+	switch {
+	case err != nil:
+		return &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: msgPathNotInspectable, Reason: ReasonPathNotInspectable}
+	case ignored:
+		return &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: "Path is excluded by the library's ignore files", Reason: ReasonPathIgnored}
+	}
+	return nil
 }
 
 // mediaFileTarget widens a video file request to a subtree scan of the file's

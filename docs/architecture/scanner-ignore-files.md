@@ -99,9 +99,16 @@ scope is a skipped directory, or lies below one, reads nothing.
   listing and the read is absent. A subtree scan whose configured library root
   has an unreadable ignore file fails. Real-time monitoring keeps watching such
   a directory; the scans its changes trigger record the failure.
-- An explicit single-file scan (`ScanFile`) ignores ignore files: an
-  explicitly requested file is scanned even if a pattern would exclude it.
-  For audiobooks, this rebuilds the containing book as a whole.
+- A single-file scan (`ScanFile`) reads no ignore files. An admin's scan
+  request for a file's exact path scans it even if a pattern would exclude
+  it. For audiobooks, this rebuilds the containing book as a whole.
+- A file change from real-time monitoring or autoscan (an *arr webhook, a
+  plugin source, or the Jellyfin `/Library/Media/Updated` endpoint) that
+  would become a single-file scan is checked against the ignore files from
+  its configured library root down when it is resolved, and dropped when they
+  exclude it, so automation never imports a file that the next library scan
+  retires again. A file change that becomes a subtree scan needs no check;
+  the subtree scan applies the rules.
 - Subtree folder scans inherit markers and patterns from their configured
   library root through the subtree's ancestors. Rules outside the configured
   root do not apply. If an ancestor directory cannot be read, the subtree is

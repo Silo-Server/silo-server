@@ -76,6 +76,16 @@ func scanRootIgnoreRules(path string, libraryRoots []string) ([]ignoreRules, boo
 	return rules, ignoreRulesMatch(rules, path, isDir), nil
 }
 
+// FileIgnored reports whether a library walk skips file: ignore files from
+// its configured library root down exclude it or a directory above it, or one
+// of those directories has a name the walk passes over (SkippedDirName). An
+// error means an ignore file or directory on the way could not be read, which
+// a walk records as a failure there.
+func FileIgnored(file string, libraryRoots []string) (bool, error) {
+	_, ignored, err := scanRootIgnoreRules(file, libraryRoots)
+	return ignored, err
+}
+
 // libraryRootSkipped reports whether root's own ignore files exclude the whole
 // root. It checks only the two marker names instead of listing the root, which
 // can hold many thousands of entries.
