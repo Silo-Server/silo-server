@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"slices"
 	"sync/atomic"
@@ -304,7 +305,7 @@ func TestGetItemVersionsKeepsChapterImagesAndEmptyFiles(t *testing.T) {
 		t.Fatal("versions must still resolve the returned chapter thumbnail")
 	}
 	// thumbnail_path names the served object and is signed as stored.
-	if got, want := versions[0].Chapters[0].ThumbnailURL, "https://images.invalid/chapter-images/7/0/w300.webp"; got != want {
+	if got, want := fileVersion(t, versions, file.ID).Chapters[0].ThumbnailURL, "https://images.invalid/chapter-images/7/0/w300.webp"; got != want {
 		t.Fatalf("chapter thumbnail_url = %q, want %q", got, want)
 	}
 	f.files.files[f.ids["movie"]] = nil
@@ -347,10 +348,10 @@ func TestGetItemVersionsBatchesChapterImages(t *testing.T) {
 			if calls := f.images.calls.Load(); calls != 1 {
 				t.Fatalf("%d chapter images made %d resolver calls; want one batch", count, calls)
 			}
-			if len(versions) != 2 || len(versions[0].Chapters) != count {
+			if len(versions) != 2 || len(fileVersion(t, versions, file.ID).Chapters) != count {
 				t.Fatalf("chapter metadata missing: %+v", versions)
 			}
-			for i, chapter := range versions[0].Chapters {
+			for i, chapter := range fileVersion(t, versions, file.ID).Chapters {
 				input := file.Chapters[i]
 				if chapter.Index != input.Index || chapter.Title != input.Title || chapter.StartSeconds != input.StartSeconds || chapter.EndSeconds != input.EndSeconds || chapter.Source != input.Source || chapter.ThumbnailThumbhash != input.ThumbnailThumbhash || chapter.ThumbnailURL != "https://images.invalid/"+input.ThumbnailPath {
 					t.Fatalf("chapter %d metadata changed: %+v", i, chapter)
@@ -360,31 +361,15 @@ func TestGetItemVersionsBatchesChapterImages(t *testing.T) {
 	}
 }
 
-func BenchmarkGetItemVersions(b *testing.B) {
-	f := newVersionsFixture(b)
-	for _, kind := range []string{"movie", "audiobook", "episode"} {
-		for _, full := range []bool{true, false} {
-			b.Run(fmt.Sprintf("%s/full_detail=%t", kind, full), func(b *testing.B) {
-				filter := AccessFilter{ProfilePreferredLanguage: "fr"}
-				b.ReportAllocs()
-				f.queries.calls.Store(0)
-				f.images.calls.Store(0)
-				for b.Loop() {
-					var err error
-					if full {
-						_, err = f.svc.GetItemDetail(b.Context(), f.ids[kind], filter)
-					} else {
-						_, err = f.svc.GetItemVersions(b.Context(), f.ids[kind], filter)
-					}
-					if err != nil {
-						b.Fatal(err)
-					}
-				}
-				b.ReportMetric(float64(f.queries.calls.Load())/float64(b.N), "SQL/op")
-				b.ReportMetric(float64(f.images.calls.Load())/float64(b.N), "image-calls/op")
-			})
-		}
+// fileVersion finds a version by file ID; versions come best first, not in
+// fixture order.
+func fileVersion(t *testing.T, versions []FileVersion, fileID int) FileVersion {
+	t.Helper()
+	i := slices.IndexFunc(versions, func(v FileVersion) bool { return v.FileID == fileID })
+	if i < 0 {
+		t.Fatalf("file %d missing from versions", fileID)
 	}
+	return versions[i]
 }
 
 type countingUserStores struct {
@@ -399,8 +384,10 @@ func (p *countingUserStores) ForUser(context.Context, int) (userstore.UserStore,
 
 func (*countingUserStores) Close() error { return nil }
 
-// Jellyfin season pages build every episode's detail in one batch; the
-// viewer's preference lookups must not grow with the number of episodes.
+// Jellyfin season pages build every episode's detail in one batch; neither
+// the viewer's preference lookups nor the episode row reads may grow with the
+// number of episodes. With no presentation library and no translated
+// episodes, that leaves the statement count flat.
 func TestGetEpisodeDetailsForSeriesResolvesPreferencesOncePerSeries(t *testing.T) {
 	f := newVersionsFixture(t)
 	store := newDetailTestStore(t)
@@ -429,9 +416,10 @@ func TestGetEpisodeDetailsForSeriesResolvesPreferencesOncePerSeries(t *testing.T
 		episodes = append(episodes, id)
 	}
 
-	lookups := func(ids []string) int {
+	lookups := func(ids []string) (userStores int, statements int64) {
 		t.Helper()
 		users.calls = 0
+		f.queries.calls.Store(0)
 		details, err := f.svc.GetEpisodeDetailsForSeries(t.Context(), f.ids["series"], ids, AccessFilter{UserID: 1, ProfileID: "profile-1"})
 		if err != nil {
 			t.Fatal(err)
@@ -442,79 +430,76 @@ func TestGetEpisodeDetailsForSeriesResolvesPreferencesOncePerSeries(t *testing.T
 				t.Fatalf("episode %s lost the viewer's preferences: %+v", id, detail)
 			}
 		}
-		return users.calls
+		return users.calls, f.queries.calls.Load()
 	}
-	if one, all := lookups(episodes[:1]), lookups(episodes); all != one {
-		t.Fatalf("user store lookups = %d for %d episodes, %d for one", all, len(episodes), one)
+	// Warm anything a first call caches, so the two counts compare like for like.
+	lookups(episodes[:1])
+	oneUsers, oneStatements := lookups(episodes[:1])
+	allUsers, allStatements := lookups(episodes)
+	if allUsers != oneUsers {
+		t.Fatalf("user store lookups = %d for %d episodes, %d for one", allUsers, len(episodes), oneUsers)
+	}
+	if allStatements != oneStatements {
+		t.Fatalf("statements = %d for %d episodes, %d for one", allStatements, len(episodes), oneStatements)
 	}
 }
 
-// A batch shares the series' preference lookups only with that series'
-// episodes; an episode of another series keeps its own series-level subtitle,
-// audio and version choices.
-func TestGetEpisodeDetailsForSeriesKeepsAnotherSeriesPreferences(t *testing.T) {
+// Under a presentation library the batch checks every episode's membership in
+// one query, and still leaves out episodes the library does not hold.
+func TestGetEpisodeDetailsForSeriesChecksLibraryMembershipOnce(t *testing.T) {
 	f := newVersionsFixture(t)
-	store := newDetailTestStore(t)
-	for _, seed := range []struct {
-		scope    settingscontract.Scope
-		seriesID string
-		mode     string
-	}{
-		{settingscontract.ScopeProfile, "", "always"},
-		{settingscontract.ScopeProfileSeries, f.ids["series"] + "-other", "off"},
-	} {
-		encoded, _ := json.Marshal(seed.mode)
-		if _, err := store.UpsertSettingValue(t.Context(), userstore.SettingIdentity{Key: settingskeys.PlaybackSubtitleMode, Scope: seed.scope, ProfileID: "profile-1", SeriesID: seed.seriesID}, encoded); err != nil {
+	addEpisode := func(n int, inLibrary bool) string {
+		t.Helper()
+		id := fmt.Sprintf("%s-%d", f.ids["episode"], n)
+		if _, err := f.pool.Exec(t.Context(), `INSERT INTO episodes (content_id,series_id,season_id,season_number,episode_number,title) VALUES ($1,$2,$3,1,$4,'Episode')`, id, f.ids["series"], f.ids["season"], n); err != nil {
 			t.Fatal(err)
 		}
+		if inLibrary {
+			if _, err := f.pool.Exec(t.Context(), `INSERT INTO episode_libraries (episode_id,media_folder_id) VALUES ($1,$2)`, id, f.library); err != nil {
+				t.Fatal(err)
+			}
+		}
+		f.files.files[id] = f.files.files[f.ids["episode"]]
+		return id
 	}
-	// Audio too: English for the profile, French for the other series.
-	setProfileAudioLanguage(t, store, "en")
-	setScopedAudioLanguage(t, store, settingscontract.ScopeProfileSeries, f.ids["series"]+"-other", 0, "fr")
-	// Version preference: 1080p for the batch series, 2160p for the other.
-	for series, resolution := range map[string]string{f.ids["series"]: "1080p", f.ids["series"] + "-other": "2160p"} {
-		if err := store.SetSeriesPlaybackPreference(t.Context(), userstore.SeriesPlaybackPreference{ProfileID: "profile-1", SeriesID: series, Resolution: resolution}); err != nil {
+	episodes := []string{f.ids["episode"]}
+	for n := 2; n <= 6; n++ {
+		episodes = append(episodes, addEpisode(n, true))
+	}
+	base := AccessFilter{UserID: 1, ProfileID: "profile-1"}
+	scoped := base
+	scoped.PresentationLibraryID = new(f.library)
+
+	statements := func(ids []string) int64 {
+		t.Helper()
+		f.queries.calls.Store(0)
+		details, err := f.svc.GetEpisodeDetailsForSeries(t.Context(), f.ids["series"], ids, scoped)
+		if err != nil {
 			t.Fatal(err)
 		}
+		if len(details) != len(ids) {
+			t.Fatalf("got %d details for %d episodes", len(details), len(ids))
+		}
+		return f.queries.calls.Load()
 	}
-	f.svc.SetUserStoreProvider(&countingUserStores{store: store})
+	statements(episodes[:2]) // warm anything a first call caches
+	if two, all := statements(episodes[:2]), statements(episodes); all != two {
+		t.Errorf("statements = %d for %d episodes, %d for 2", all, len(episodes), two)
+	}
 
-	otherSeries, otherEpisode := f.ids["series"]+"-other", f.ids["episode"]+"-other"
-	if _, err := f.pool.Exec(t.Context(), `INSERT INTO media_items (content_id,type,title,genres) VALUES ($1,'series',$1,'{}')`, otherSeries); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.pool.Exec(t.Context(), `INSERT INTO episodes (content_id,series_id,season_number,episode_number,title) VALUES ($1,$2,1,1,'Episode')`, otherEpisode, otherSeries); err != nil {
-		t.Fatal(err)
-	}
-	f.files.files[otherEpisode] = f.files.files[f.ids["episode"]]
-
-	details, err := f.svc.GetEpisodeDetailsForSeries(t.Context(), f.ids["series"], []string{f.ids["episode"], otherEpisode}, AccessFilter{UserID: 1, ProfileID: "profile-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for id, want := range map[string]struct {
-		mode, resolution string
-		audio            int
-	}{f.ids["episode"]: {"always", "1080p", 0}, otherEpisode: {"off", "2160p", 1}} {
-		if details[id] == nil {
-			t.Fatalf("episode %s missing from the batch", id)
+	// An episode outside the library and an unknown ID are left out, not errors.
+	outside := addEpisode(99, false)
+	ids := []string{episodes[0], outside, f.ids["episode"] + "-unknown"}
+	for _, c := range []struct {
+		filter AccessFilter
+		want   []string
+	}{{base, []string{episodes[0], outside}}, {scoped, []string{episodes[0]}}} {
+		details, err := f.svc.GetEpisodeDetailsForSeries(t.Context(), f.ids["series"], ids, c.filter)
+		if err != nil {
+			t.Fatal(err)
 		}
-		if got := details[id].EffectiveSubtitleMode; got != want.mode {
-			t.Fatalf("episode %s subtitle mode = %q, want %q", id, got, want.mode)
-		}
-		got := details[id].Versions[0].EffectiveAudioTrackIndex
-		if got == nil {
-			t.Fatalf("episode %s has no effective audio track", id)
-		}
-		if *got != want.audio {
-			t.Fatalf("episode %s audio track = %d, want %d", id, *got, want.audio)
-		}
-		res := details[id].EffectiveVersionResolution
-		if res == nil {
-			t.Fatalf("episode %s has no effective version resolution", id)
-		}
-		if *res != want.resolution {
-			t.Fatalf("episode %s version resolution = %s, want %s", id, *res, want.resolution)
+		if got := slices.Sorted(maps.Keys(details)); !slices.Equal(got, c.want) {
+			t.Errorf("presentation library %t: details for %v, want %v", c.filter.PresentationLibraryID != nil, got, c.want)
 		}
 	}
 }

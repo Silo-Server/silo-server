@@ -2,6 +2,7 @@ import { useId } from "react";
 
 import type { PluginAdminFormField } from "@/api/types";
 import { effectiveValue } from "@/components/admin/plugins/schemaFormUtils";
+import { useT } from "@/i18n";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -57,6 +58,7 @@ export function SignInConfigField({
   label,
   description,
 }: SignInConfigFieldProps) {
+  const t = useT();
   const id = `${idPrefix}-${field.key}`;
   const descriptionId = useId();
   const value = effectiveValue(field, values);
@@ -83,7 +85,9 @@ export function SignInConfigField({
         onValueChange={(next) => onChange(next === EMPTY_OPTION_VALUE ? "" : next)}
       >
         <SelectTrigger id={id} className={SETTINGS_CONTROL_WIDTH} aria-describedby={describedBy}>
-          <SelectValue placeholder={field.placeholder || "Select"} />
+          <SelectValue
+            placeholder={field.placeholder || t("web.admin.settings.signIn.configField.select")}
+          />
         </SelectTrigger>
         <SelectContent>
           {options.map((option) => (
@@ -118,7 +122,9 @@ export function SignInConfigField({
         autoComplete={secret ? "new-password" : "off"}
         value={String(value ?? "")}
         placeholder={
-          secret && secretSaved && !clearing ? "Saved. Type to replace." : field.placeholder
+          secret && secretSaved && !clearing
+            ? t("web.admin.settings.signIn.configField.secretSavedPlaceholder")
+            : field.placeholder
         }
         onChange={(event) => onChange(event.target.value)}
         aria-describedby={describedBy}
@@ -138,10 +144,14 @@ export function SignInConfigField({
         secret && secretSaved && onToggleClear && !field.required ? (
           <span className="inline-flex items-center gap-2">
             <SettingFieldStatus tone={clearing ? "warn" : "muted"}>
-              {clearing ? "Will be cleared when you save." : "Saved."}
+              {clearing
+                ? t("web.admin.settings.signIn.configField.willClear")
+                : t("web.admin.settings.signIn.configField.saved")}
             </SettingFieldStatus>
             <Button type="button" size="xs" variant="ghost" onClick={onToggleClear}>
-              {clearing ? "Keep" : "Clear"}
+              {clearing
+                ? t("web.admin.settings.signIn.configField.keep")
+                : t("web.admin.settings.signIn.configField.clear")}
             </Button>
           </span>
         ) : null

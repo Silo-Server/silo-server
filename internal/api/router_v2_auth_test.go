@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -16,16 +17,15 @@ import (
 	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
-// TestRouterAuthDenialEnvelopes checks the shared auth middleware through
-// the complete listener, including the outer middleware and v2 delegation.
-func TestRouterAuthDenialEnvelopes(t *testing.T) {
+// newUnreachableDBServer serves the complete listener with the real
+// repositories configured against an unavailable database, so every lookup
+// fails without requiring one. Request rate limiting is off.
+func newUnreachableDBServer(t *testing.T) *httptest.Server {
+	t.Helper()
 	cfg, err := config.LoadFromDB(map[string]string{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Configure the real repositories against an unavailable target so the
-	// API-key lookup fails without requiring a database. A lookup that fails
-	// judges nothing about the key, so it is a retryable 503, not a 401.
 	pool, err := pgxpool.New(t.Context(), "postgres://nobody:nobody@127.0.0.1:1/none?sslmode=disable&connect_timeout=1")
 	if err != nil {
 		t.Fatal(err)
@@ -45,21 +45,29 @@ func TestRouterAuthDenialEnvelopes(t *testing.T) {
 		PublicURL:        "https://silo.example.test",
 	}))
 	t.Cleanup(server.Close)
+	return server
+}
+
+// TestRouterAuthDenialEnvelopes checks the shared auth middleware through
+// the complete listener, including the outer middleware and v2 delegation.
+func TestRouterAuthDenialEnvelopes(t *testing.T) {
+	// The API-key lookup fails on the unavailable database. A lookup that
+	// fails judges nothing about the key, so it is a retryable 503, not a 401.
+	server := newUnreachableDBServer(t)
 
 	for _, tc := range []struct {
-		name        string
-		header      string
-		legacyError string
-		legacy      string
-		problem     apiv2.ProblemType
+		name    string
+		header  string
+		problem apiv2.ProblemType
 	}{
-		{"missing credential", "", "unauthorized", "Missing or malformed authorization header", apiv2.TypeAuthenticationRequired},
-		{"malformed header", "Basic invalid", "unauthorized", "Missing or malformed authorization header", apiv2.TypeAuthenticationRequired},
-		{"invalid JWT", "Bearer invalid", "unauthorized", "Invalid or expired token", apiv2.TypeInvalidToken},
-		{"failed API key lookup", "Bearer sa_missing", "service_unavailable", "Sign-in could not be checked right now; try again shortly", apiv2.TypeDependencyUnavailable},
+		{"missing credential", "", apiv2.TypeAuthenticationRequired},
+		{"malformed header", "Basic invalid", apiv2.TypeAuthenticationRequired},
+		{"invalid JWT", "Bearer invalid", apiv2.TypeInvalidToken},
+		{"failed API key lookup", "Bearer sa_missing", apiv2.TypeDependencyUnavailable},
 	} {
-		for _, path := range []string{"/api/v1/auth/me", "/api/v2/account/me"} {
-			t.Run(tc.name+path, func(t *testing.T) {
+		{
+			const path = "/api/v2/account/me"
+			t.Run(tc.name, func(t *testing.T) {
 				req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+path, nil)
 				if err != nil {
 					t.Fatal(err)
@@ -85,16 +93,6 @@ func TestRouterAuthDenialEnvelopes(t *testing.T) {
 				if err := json.Unmarshal(body, &fields); err != nil {
 					t.Fatalf("invalid JSON: %v: %s", err, body)
 				}
-				if path == "/api/v1/auth/me" {
-					var legacy struct{ Error, Message string }
-					if err := json.Unmarshal(body, &legacy); err != nil {
-						t.Fatal(err)
-					}
-					if response.Header.Get("Content-Type") != "application/json" || len(fields) != 2 || legacy.Error != tc.legacyError || legacy.Message != tc.legacy {
-						t.Fatalf("legacy denial changed: headers = %v, body = %s", response.Header, body)
-					}
-					return
-				}
 				var problem apiv2.Problem
 				if err := json.Unmarshal(body, &problem); err != nil {
 					t.Fatal(err)
@@ -111,5 +109,38 @@ func TestRouterAuthDenialEnvelopes(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// Password sign-in spends one attempt budget per sign-in name, with request
+// rate limiting off, so once a name has used its ten
+// attempts the next is refused with 429 and Retry-After, while other names
+// keep their own budget. The attempts here fail on the unavailable database;
+// they count all the same.
+func TestRouterLimitsSignInAttemptsPerName(t *testing.T) {
+	server := newUnreachableDBServer(t)
+	signIn := func(path, name string) (status int, retryAfter string) {
+		t.Helper()
+		body := `{"username":"` + name + `","password":"guess"}`
+		response, err := server.Client().Post(server.URL+path, "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = response.Body.Close()
+		return response.StatusCode, response.Header.Get("Retry-After")
+	}
+
+	const budget = 10 // ratelimit.SignInNamePolicy
+	const login = "/api/v2/auth/login"
+	for i := range budget {
+		if status, _ := signIn(login, "alice"); status == http.StatusTooManyRequests {
+			t.Fatalf("attempt %d refused, want %d attempts allowed", i+1, budget)
+		}
+	}
+	if status, retryAfter := signIn(login, "alice"); status != http.StatusTooManyRequests || retryAfter == "" {
+		t.Fatalf("after the budget: status = %d, Retry-After = %q; want 429 with Retry-After", status, retryAfter)
+	}
+	if status, _ := signIn(login, "bob"); status == http.StatusTooManyRequests {
+		t.Fatal("another name was refused")
 	}
 }

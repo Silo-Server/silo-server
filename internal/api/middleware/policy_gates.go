@@ -6,11 +6,12 @@ import (
 	"slices"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/policy"
-	"github.com/go-chi/chi/v5"
 )
 
 const (
@@ -26,12 +27,6 @@ const (
 // gates. *policy.PDP satisfies it.
 type PermissionDecider interface {
 	CheckPermission(context.Context, policy.PermissionInput) (policy.PermissionDecision, policy.Meta, error)
-}
-
-// NewPolicyActingAdminMiddleware enforces the acting-admin gate through the
-// policy PDP while preserving RequireActingAdmin's response contract.
-func NewPolicyActingAdminMiddleware(pdp PermissionDecider, primaryChecker PrimaryProfileChecker, household HouseholdProfileRequirement) func(http.Handler) http.Handler {
-	return RequireActingAdminWith(NewPolicyActingAdminDecider(pdp, primaryChecker, household))
 }
 
 // NewPolicyActingAdminDecider is the acting-admin decision evaluated by the
@@ -132,7 +127,7 @@ func (m *PolicyPermissionMiddleware) RequireMetadataCurationForItem(next http.Ha
 				return
 			}
 			if actingAdmin.Allowed {
-				next.ServeHTTP(w, r)
+				next.ServeHTTP(w, r.WithContext(access.WithMetadataCurationAuthorizer(r.Context(), func(ctx context.Context, _ []int) error { return ctx.Err() })))
 				return
 			}
 		}
@@ -189,7 +184,7 @@ func (m *PolicyPermissionMiddleware) RequireMetadataCurationForItem(next http.Ha
 			return
 		}
 
-		decision, err := m.checkPermission(r, policy.PermissionInput{
+		input := policy.PermissionInput{
 			UserID:                   user.ID,
 			Role:                     user.Role,
 			UserEnabled:              user.Enabled,
@@ -201,7 +196,8 @@ func (m *PolicyPermissionMiddleware) RequireMetadataCurationForItem(next http.Ha
 			TargetLibraryIDs:         slices.Clone(targetLibraries),
 			UserLibraryIDs:           slices.Clone(effective.LibraryIDs),
 			UserLibrariesRestricted:  effective.LibraryIDs != nil,
-		})
+		}
+		decision, err := m.checkPermission(r, input)
 		if err != nil {
 			writePermissionError(w, http.StatusInternalServerError, policyInternalErrorCode, "Failed to verify metadata curation permission")
 			return
@@ -215,7 +211,23 @@ func (m *PolicyPermissionMiddleware) RequireMetadataCurationForItem(next http.Ha
 			return
 		}
 
-		next.ServeHTTP(w, r)
+		input.SchemaVersion = 1
+		input.DeviceID = policyDeviceID(r)
+		input.ClientIP = clientip.FromContext(r.Context())
+		authorize := func(ctx context.Context, libraries []int) error {
+			current := input
+			current.TargetLibraryIDs = slices.Clone(libraries)
+			current.RequestTime = policyRequestTime()
+			decision, _, err := m.pdp.CheckPermission(ctx, current)
+			if err != nil {
+				return err
+			}
+			if !decision.Allowed {
+				return access.ErrMetadataCurationScope
+			}
+			return nil
+		}
+		next.ServeHTTP(w, r.WithContext(access.WithMetadataCurationAuthorizer(r.Context(), authorize)))
 	})
 }
 
@@ -234,9 +246,9 @@ func (m *PolicyPermissionMiddleware) RequireMarkerEdit(next http.Handler) http.H
 			return
 		}
 
-		// marker_edit reads no household fact (its admin grant is not an
-		// acting-admin decision, #1911), so skip that lookup.
-		facts, err := resolveActingAdminFacts(r, claims, m.checkPrimary, nil)
+		// The admin grant for marker_edit is an acting-admin decision (#1911),
+		// so the policy needs the same profile and household facts.
+		facts, err := m.actingAdminFacts(r, claims)
 		if err != nil {
 			writePermissionError(w, http.StatusInternalServerError, policyInternalErrorCode, activeProfileVerificationFailedMsg)
 			return

@@ -5,6 +5,7 @@ import {
 } from "@/api/client";
 import { v2 } from "./request";
 import type { ApplyItemImageRequest, ItemImagesResponse } from "@/api/types";
+import { t } from "@/i18n";
 export async function getAdminItemImages(
   id: string,
   signal?: AbortSignal,
@@ -29,7 +30,7 @@ export async function getAdminItemImages(
     Object.assign(provider_errors, result.provider_errors);
     if (!result.page.has_more) break;
     const next = result.page.next_cursor;
-    if (!next || seen.has(next)) throw new Error("Image choices changed. Reload to try again.");
+    if (!next || seen.has(next)) throw new Error(t("web.admin.errors.imageChoicesChanged"));
     seen.add(next);
     cursor = next;
   }
@@ -40,6 +41,14 @@ export function applyAdminItemImage(id: string, request: ApplyItemImageRequest) 
   return v2("POST /api/v2/admin/items/{id}/images/apply", {
     path: { id },
     body: request,
+    retryAuthentication: false,
+  });
+}
+export type UploadItemImageType = "poster" | "backdrop" | "logo";
+export function uploadAdminItemImage(id: string, type: UploadItemImageType, image: File) {
+  return v2("POST /api/v2/admin/items/{id}/images/upload", {
+    path: { id },
+    form: { type, image },
     retryAuthentication: false,
   });
 }

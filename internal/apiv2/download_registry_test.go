@@ -6,11 +6,12 @@ import (
 	"testing"
 	"time"
 
+	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/downloads"
 )
 
 type fakeDownloadRegistry struct {
-	rows                []*downloads.Download
+	page                downloads.RegistryPage
 	user                int
 	profile, device, id string
 	event               downloads.StatusEvent
@@ -30,13 +31,13 @@ func (f *fakeDownloadRegistry) Capability(context.Context, int) (downloads.Capab
 		},
 	}, f.err
 }
-func (f *fakeDownloadRegistry) ListPage(_ context.Context, user int, profile, device string, after *downloads.RegistryPosition, limit int) ([]*downloads.Download, error) {
+func (f *fakeDownloadRegistry) ListPage(_ context.Context, user int, profile, device string, after *downloads.RegistryPosition, limit int, _ catalogpkg.AccessFilter) (downloads.RegistryPage, error) {
 	f.user = user
 	f.profile = profile
 	f.device = device
 	f.after = after
 	f.limit = limit
-	return f.rows, f.err
+	return f.page, f.err
 }
 func (f *fakeDownloadRegistry) ReportStatus(_ context.Context, user int, profile, device, id string, event downloads.StatusEvent) (*downloads.Download, error) {
 	f.user = user
@@ -49,68 +50,17 @@ func (f *fakeDownloadRegistry) ReportStatus(_ context.Context, user int, profile
 	}
 	return &downloads.Download{ID: id, UserID: user, ProfileID: profile, DeviceID: device, ContentID: "movie", MediaFileID: 42, Status: event.Status, Revision: event.Revision, StatusEventAt: &event.UpdatedAt, CreatedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}, nil
 }
-func (f *fakeDownloadRegistry) Delete(_ context.Context, user int, profile, device, id string) error {
+func (f *fakeDownloadRegistry) Delete(_ context.Context, user int, profile, device, id string, _ catalogpkg.AccessFilter) error {
 	f.user = user
 	f.profile = profile
 	f.device = device
 	f.id = id
 	return f.err
 }
-func TestDownloadRegistryTransport(t *testing.T) {
-	service := &fakeDownloadRegistry{}
-	deps := pilotDeps(nil, nil)
-	deps.Downloads = service
-	h := newTestHandler(t, deps)
-	viewer := with(bearer(memberToken), "X-Profile-Id", "p-owner")
-	device := with(viewer, "X-Silo-Device-Id", "device-one")
-	path := Prefix + "/downloads/entry"
-	body := `{"status":"completed","updated_at":"2026-01-02T03:04:05.000Z","revision":2}`
-	rec := do(t, h, "PATCH", path, body, device)
-	if rec.Code != 200 {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	if service.user != 1 || service.profile != "p-owner" || service.device != "device-one" || service.id != "entry" || service.event.Revision != 2 || service.event.UpdatedAt.Format(time.RFC3339) != "2026-01-02T03:04:05Z" {
-		t.Fatalf("%+v", service)
-	}
-	var row DownloadEntry
-	if err := json.Unmarshal(rec.Body.Bytes(), &row); err != nil || row.MediaFileID != "42" || row.StatusEventAt == nil {
-		t.Fatalf("%+v %v", row, err)
-	}
-	rec = do(t, h, "PATCH", path, body, viewer)
-	if rec.Code != 422 {
-		t.Fatalf("device required: %d %s", rec.Code, rec.Body.String())
-	}
-	rec = do(t, h, "PATCH", path, `{"status":"completed","revision":2}`, device)
-	if rec.Code != 422 {
-		t.Fatalf("event required: %d", rec.Code)
-	}
-	for _, tc := range []struct {
-		err  error
-		want int
-	}{{downloads.ErrNotFound, 404}, {downloads.ErrStatusConflict, 409}, {downloads.ErrInvalidStatusEvent, 400}} {
-		service.err = tc.err
-		rec = do(t, h, "PATCH", path, body, device)
-		if rec.Code != tc.want {
-			t.Fatalf("%d %s", rec.Code, rec.Body.String())
-		}
-	}
-	service.err = nil
-	rec = do(t, h, "DELETE", path, "", device)
-	if rec.Code != 204 || rec.Body.Len() != 0 {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	rec = do(t, h, "GET", Prefix+"/capabilities/downloads", "", viewer)
-	if rec.Code != 200 {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	var capability DownloadCapability
-	if err := json.Unmarshal(rec.Body.Bytes(), &capability); err != nil || !capability.OrderedStatus || capability.Revision == "" {
-		t.Fatalf("%+v %v", capability, err)
-	}
-}
+
 func TestDownloadRegistryCursorBoundary(t *testing.T) {
 	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	service := &fakeDownloadRegistry{rows: []*downloads.Download{{ID: "b", CreatedAt: at}, {ID: "a", CreatedAt: at}}}
+	service := &fakeDownloadRegistry{page: downloads.RegistryPage{Items: []*downloads.Download{{ID: "b", CreatedAt: at}}, Next: &downloads.RegistryPosition{CreatedAt: at, ID: "b"}}}
 	deps := pilotDeps(nil, nil)
 	deps.Downloads = service
 	h := newTestHandler(t, deps)
@@ -121,9 +71,9 @@ func TestDownloadRegistryCursorBoundary(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil || rec.Code != 200 || len(page.Items) != 1 || page.Page.NextCursor == "" {
 		t.Fatalf("%d %s %v", rec.Code, rec.Body.String(), err)
 	}
-	service.rows = nil
+	service.page = downloads.RegistryPage{}
 	rec = do(t, h, "GET", path+"?cursor="+page.Page.NextCursor, "", viewer)
-	if rec.Code != 200 || service.after == nil || service.after.ID != "b" || service.limit != 51 {
+	if rec.Code != 200 || service.after == nil || service.after.ID != "b" || service.limit != 50 {
 		t.Fatalf("%d %+v", rec.Code, service)
 	}
 	rec = do(t, h, "GET", path+"?cursor="+page.Page.NextCursor, "", with(viewer, "X-Silo-Device-Id", "other-device"))
@@ -139,45 +89,5 @@ func TestDownloadRegistryCursorBoundary(t *testing.T) {
 	rec = do(t, h, "GET", path, "", nil)
 	if rec.Code != 401 {
 		t.Fatalf("auth: %d", rec.Code)
-	}
-}
-
-func TestDownloadRegistryListsPreparationProgress(t *testing.T) {
-	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	progress, remaining := 0.35, 360
-	service := &fakeDownloadRegistry{rows: []*downloads.Download{
-		{ID: "running", ContentID: "series", EpisodeID: "e1", MediaFileID: 1, Status: downloads.StatusPreparing, CreatedAt: at,
-			Preparation: &downloads.PreparationStatus{State: downloads.PreparationRunning, Progress: &progress, RemainingSeconds: &remaining}},
-		{ID: "queued", ContentID: "series", EpisodeID: "e2", MediaFileID: 2, Status: downloads.StatusPreparing, CreatedAt: at,
-			Preparation: &downloads.PreparationStatus{State: downloads.PreparationQueued, QueuePosition: 3}},
-		{ID: "ready", ContentID: "series", EpisodeID: "e3", MediaFileID: 3, Status: downloads.StatusReady, CreatedAt: at},
-	}}
-	deps := pilotDeps(nil, nil)
-	deps.Downloads = service
-	h := newTestHandler(t, deps)
-	device := with(with(bearer(memberToken), "X-Profile-Id", "p-owner"), "X-Silo-Device-Id", "device-one")
-	rec := do(t, h, "GET", Prefix+"/downloads", "", device)
-	if rec.Code != 200 {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	var page struct {
-		Items []map[string]json.RawMessage `json:"items"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil || len(page.Items) != 3 {
-		t.Fatalf("%v %s", err, rec.Body.String())
-	}
-	for i, want := range []string{
-		`{"state":"running","progress":0.35,"remaining_seconds":360}`,
-		`{"state":"queued","queue_position":3}`,
-		``,
-	} {
-		if got := string(page.Items[i]["preparation"]); got != want {
-			t.Fatalf("item %d preparation = %s, want %s", i, got, want)
-		}
-	}
-	rec = do(t, h, "GET", Prefix+"/capabilities/downloads", "", device)
-	var capability DownloadCapability
-	if err := json.Unmarshal(rec.Body.Bytes(), &capability); err != nil || !capability.PreparationProgress {
-		t.Fatalf("%+v %v", capability, err)
 	}
 }

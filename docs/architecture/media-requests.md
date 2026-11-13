@@ -5,7 +5,11 @@ A user asks for a movie or series the server does not have, an admin approves it
 to a downstream service such as Sonarr or Radarr, and the request completes when
 the media is in the library. The code lives in `internal/requests`; the reconcile
 pass is the `reconcile_requests` task in `internal/taskmanager/tasks`, and the
-download refresh pass is `refresh_request_downloads` beside it.
+download refresh pass is `refresh_request_downloads` beside it. The Discover
+page people request from follows an admin-defined layout; see
+[Request Discover rows](request-discover-rows.md), whose list rows the
+`refresh_request_discover_lists` task keeps (under snapshot leases, not the
+reconcile locks).
 
 ## State
 
@@ -29,8 +33,8 @@ Creating a request reads the title's TMDB detail once, after the cheap refusals
 (a movie already in the library, a title already requested). The server's copy of the title and
 year replaces the client's, and a snapshot of what routing can match on is
 stored with the request as `routing_facts`: TMDB genre, keyword, network and
-company IDs, original language, origin countries, year, rating, and whether
-it is anime. IDs rather than names, because names follow the configured TMDB
+company IDs, original language, origin countries, year, rating, whether it is
+anime, and a series' status. IDs rather than names, because names follow the configured TMDB
 language.
 
 Anime means Japanese animation (`internal/requests/anime.go`). TMDB's anime
@@ -65,7 +69,8 @@ media type and hold conditions and a destination per tier: a server plus
 overrides for its plugin config (root folder, quality profile, tags, series type,
 minimum availability, ...). Conditions match on the request's routing facts and
 requester: anime, genre, keyword, original language, origin country, year range,
-network, studio, requesting account, and content rating ("at most PG"). Every
+network, studio, requesting account, content rating ("at most PG"), and, for
+series, status. Every
 set condition must hold; a list matches any of its values, and each list has an
 exclude form that matches when the title has none of them ("original language
 is not English"). A title with no rating (US or its own country's) never
@@ -74,6 +79,18 @@ their own minimum ages ("TV-Y7 or lower" does not take TV-PG), and a title TMDB
 had not rated yet is asked about again a day later. The rating is captured with
 the other facts from the detail TMDB already returns; a request captured before
 the rating was gets it at submission, only when a route checks ratings.
+A series' status is stored in the catalog's terms (`internal/metadata/showstatus`:
+returning, in_production, upcoming, ended, cancelled; TMDB's Pilot is
+in_production and Planned is upcoming), never as a continuing/ended pair, so
+regrouping the editor's presets cannot change a saved rule. It is read once,
+with the request: a show that ends later keeps its route, and a series TMDB
+gives no status matches no status list but passes an exclude one. A request
+captured before status was gets it at submission, only when a route checks
+status, without moving the capture time the rating's recheck runs on; a
+series TMDB no longer lists has none. A caller can read facts before taking
+the submission claim (a season request's deliverability check), so the
+capture and the status keep the first value any API server stored, and the
+rating's recheck writes only the rating and its capture time.
 
 Each tier is decided on its own: the first enabled route, in position order,
 whose conditions match and that has a destination for the tier wins, and the
@@ -105,7 +122,12 @@ sent yet, the submission retries with backoff; a later tier that fails that way
 becomes a failed target. Status checks go through the plugin installation that
 owns each target's server, and one plugin failing does not discard the statuses
 another reported. A media type with no routes keeps the plugin's own routing:
-every usable connection is handed over and the plugin picks.
+every usable connection is handed over and the plugin picks. Without
+`force_dual_quality`, the request asks such a plugin for 4K only when one of
+those connections says it takes 4K (a Sonarr/Radarr `is_default_4k`, or the
+Seerr plugin's `supports_4k` switch), so a Seerr without 4K does not leave a
+failed 4K target beside a finished HD copy. A plugin whose connections carry
+none of these keys is still asked for 4K and decides itself.
 
 Admins manage routes through `/api/v2/admin/request-routes` (in the web admin,
 Settings › Requests, which also hides the server switches routing now owns).
@@ -209,6 +231,21 @@ because withdrawing it could leave the downstream service's state diverged from
 Silo's. Retry reopens a `failed` request to `approved` + `active` in one guarded
 write.
 
+Remove (`removeFailedRequest`, `DELETE /api/v2/requests/{id}`) deletes a
+`failed` request for its owner or an admin, with its targets, events and
+follows. It is the only way a requester clears a failure that a retry cannot
+fix, such as a title TMDB removed. The guard is on the `DELETE` itself: the row
+must still be `failed` and must have no `completed` target. A request that
+delivered one quality before failing keeps its failure for an admin to retry,
+as it does for library completion. A retry or library completion that commits
+first makes the delete answer 409.
+Nothing is sent downstream, because a failed request has nothing in flight.
+Removing gives up two things a kept failure would get: library completion of
+recent failures (see [Reconcile](#reconcile)) and handing its follows to the
+title's next request. Followers lose their follow, as they do on decline or
+cancel. It answers 204 with no body. Clients detect it with
+`remove_failed_supported` on `getRequestStatus`.
+
 ## Submission is claimed
 
 Approval commits before anything is sent. The submission itself runs only for
@@ -246,7 +283,8 @@ A series request names the seasons it wants (`seasons`). Season numbers start
 at 1: a request naming season 0 (specials) or a negative number is refused with
 `validation_failed`, never read as naming none. When the requester names none, the server asks for every aired regular season (TMDB's seasons that
 have started airing, specials excluded) that is not complete in the library.
-Requests from before season requests, and every v1 request, have no seasons:
+Requests from before season requests, including every request made through
+the retired `/api/v1` routes, have no seasons:
 they mean the whole series and keep the old rule that any episode in the
 library fulfills them. A series with no aired season yet, and not in the
 library, is requested whole unless the requester names seasons.
@@ -293,14 +331,21 @@ episode of it is present.
 
 A season request is fulfilled, completed by the reconcile pass and notified,
 when every requested season is complete; while only some are, its state is
-`partially_available`. Once the download server reports the request done, a
-season also counts when any episode of it is present: an episode the server
-cannot find would otherwise hold the request and its notification open for
-good. A season with no episode in the library never counts, since it may not
-have aired yet. A library whose metadata provider numbers seasons differently
-from TMDB (absolute or TVDB order) can therefore leave a season request
-waiting; the fulfilled-notification pass stamps each request it checks without
-notifying, so such requests rotate behind newer ones rather than starve them.
+`partially_available`. A router plugin's report that a target is done does not
+complete a season request by itself: a plugin may answer for the whole series
+(Seerr's AVAILABLE does), so the target keeps its status, with the plugin's raw
+status recorded, until every requested season is complete. A series the
+library does not have, or a library that cannot report seasons, keeps it open.
+Once a request is completed, a season also counts when any episode of it is
+present: an episode the server cannot find would otherwise hold its
+notification open for good. A season with no episode in the library never
+counts, since it may not have aired yet. A library whose metadata provider
+numbers seasons differently from TMDB (absolute or TVDB order), or an aired
+episode the download server never finds, therefore keeps a season request in
+progress, and no other request for the title can be made while it is open. A
+completed request can still wait on its seasons for its notification; the
+fulfilled-notification pass stamps each request it checks without notifying,
+so such requests rotate behind newer ones rather than starve them.
 
 The series detail lists each regular season with its availability (`missing`,
 `partial`, `available`) and whether the active request covers it. A title still
@@ -530,7 +575,7 @@ state's `download`, with one targets query for an active request that is queued
 or downloading; search and discovery do not load targets per result. It
 carries no requester identity, so anyone who can see the title's request state
 sees it. `GET /api/v2/requests/status` advertises
-`download_progress_supported`. v1 does not carry progress. Release names,
+`download_progress_supported`. Release names,
 indexers, download clients, paths and queue messages never reach a client.
 Clients poll every 30 seconds while anything they show has `download`, and stop
 polling otherwise. The TMDB client keeps a title's detail for two minutes, so
@@ -561,18 +606,17 @@ written for the admin who fixes the submission: it can name a server or a
 routing rule, or pass on a plugin's own error text. A requester still sees the
 request's state and `outcome_reason`, and each target's quality, status and
 `download`. An admin sees every field, on those operations and on the
-`/api/v2/admin/requests` operations. The frozen `/api/v1` request routes still
-return them to everyone.
+`/api/v2/admin/requests` operations.
 
-On these profile routes, v1 and v2 alike, "admin" means the acting admin
+On these profile routes, "admin" means the acting admin
 (`apimw.ActingAdmin`, see [api-contract.md](api-contract.md)): an admin account
 acting through its primary profile, an admin API key, or an admin login session
 with no profile while no profile on the account has a PIN or an access limit, the
-same decision the admin request queue's gate makes. Only the acting admin reads or cancels another
+same decision the admin request queue's gate makes. Only the acting admin reads, cancels or removes another
 account's request, gets another account's `request_id` in request state, or
-cancels while requests are turned off. Any other profile on an admin's account,
-such as a child profile, is a requester like any other: it reads and cancels
-its own account's requests, including ones its household's other profiles made.
+cancels or removes while requests are turned off. Any other profile on an admin's account,
+such as a child profile, is a requester like any other: it reads, cancels and
+removes its own account's requests, including ones its household's other profiles made.
 
 ## Admin queue
 
@@ -580,8 +624,7 @@ The admin queue groups requests by what an admin does next, from status and
 outcome alone so the database can filter and count them: needs approval
 (pending), in progress (approved, queued or downloading), failed, and done
 (completed, or closed by a decline or cancellation). An admin can retry a
-failed request or close it, which moves it to done (v2 only; the v1 cancel
-still refuses a failed request). A closed request stays closed: a target that
+failed request or close it, which moves it to done. A closed request stays closed: a target that
 reports later updates only itself. A request's
 history is its `media_request_events` rows. Target updates record the
 request's status or outcome only when it changes, so neither a reconcile pass

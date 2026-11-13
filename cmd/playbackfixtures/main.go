@@ -57,6 +57,7 @@ const (
 	audioLayout71     = "7.1"
 	filmFrameRate     = "24000/1001"
 	languageEnglish   = "eng"
+	titleEnglish      = "English"
 	videoRangeSDR     = "SDR"
 	categoryMidSeek   = "mid_seek_replan"
 )
@@ -75,9 +76,15 @@ func main() {
 	write(*out, "replan_request.json", goldenReplanRequest())
 	write(*out, "decision_response.json", goldenDecisionResponse())
 	write(*out, "native-decision_response.json", goldenNativeDecisionResponse())
+	write(*out, "hls-subtitle-rendition-decision_response.json", goldenHLSSubtitleRenditionDecisionResponse())
+	write(*out, "hls-subtitle-renditions-all-decision_response.json", goldenHLSSubtitleRenditionsAllDecisionResponse())
 	write(*out, "capability_response.json", goldenCapabilityResponse())
 	write(*out, "error_response.json", goldenErrorResponse())
 	write(*out, "route_event.json", goldenRouteEvent())
+	write(*out, "buffering-start_request.json", goldenBufferingStartRequest())
+	write(*out, "buffering-replan_request.json", goldenBufferingReplanRequest())
+	write(*out, "learned-limit-decision_response.json", goldenLearnedLimitDecisionResponse())
+	write(*out, "plan-summary-route_event.json", goldenPlanSummaryRouteEvent())
 	write(*out, "subtitle_inventory.json", goldenSubtitleInventory())
 	write(*out, "attempt_keys.json", goldenAttemptKeys())
 	write(*out, "conformance_matrix.json", goldenConformanceMatrix())
@@ -231,7 +238,7 @@ func goldenMediaFile() *models.MediaFile {
 	return &models.MediaFile{
 		ID: goldenMediaFileID,
 		ExternalSubtitles: []models.ExternalSubtitle{
-			{Path: "/library/movie.en.srt", Language: languageEnglish, Format: "srt", Title: "English"},
+			{Path: "/library/movie.en.srt", Language: languageEnglish, Format: "srt", Title: titleEnglish},
 		},
 		SubtitleTracks: []models.SubtitleTrack{
 			{Index: 0, Language: languageEnglish, Codec: "ass", Title: "English (Signs)", Forced: true},
@@ -309,11 +316,15 @@ func goldenNativeDecisionResponse() playback.DecisionResponseV3 {
 }
 
 func goldenDecisionForSource(file *models.MediaFile, request playback.StartRequestV3, additional []playback.SubtitleInventoryEntryV3) playback.DecisionResponseV3 {
+	return goldenDecisionForSourceWith(file, request, additional, nil)
+}
+
+func goldenDecisionForSourceWith(file *models.MediaFile, request playback.StartRequestV3, additional []playback.SubtitleInventoryEntryV3, configure func(*playback.PlannerInputV3)) playback.DecisionResponseV3 {
 	now, err := time.Parse(time.RFC3339, "2029-12-31T23:55:00Z")
 	if err != nil {
 		failf("parse golden planner time: %v", err)
 	}
-	result := playback.PlanPlaybackV3(playback.PlannerInputV3{
+	input := playback.PlannerInputV3{
 		Request:             request,
 		RequestedFile:       file,
 		EffectiveFile:       file,
@@ -322,7 +333,11 @@ func goldenDecisionForSource(file *models.MediaFile, request playback.StartReque
 		Registry:            conformanceRegistry(),
 		Now:                 now,
 		AdditionalSubtitles: additional,
-	})
+	}
+	if configure != nil {
+		configure(&input)
+	}
+	result := playback.PlanPlaybackV3(input)
 	if result.Plan == nil {
 		failf("golden planner returned terminal: %#v", result.Terminal)
 	}
@@ -655,6 +670,22 @@ func goldenConformanceMatrix() playback.ConformanceMatrixV3 {
 	dv7Registry := playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{{Name: playback.TransformationServerDV7HDR10V3, RecipeVersion: playback.TransformationServerDV7HDR10RecipeVersionV3, Available: true}})
 	planner = append(planner, makePlannerScenario("dolby_vision_7_hdr10_fallback", "hdr_dv_matrix", dv7Request, dv7File, nil, settings, dv7Registry))
 
+	dv81File := *dv7File
+	dv81File.VideoTracks = append([]models.VideoTrack(nil), dv7File.VideoTracks...)
+	dv81File.VideoTracks[0].DVConfigPresent = true
+	dv81File.VideoTracks[0].DVRPUPresent = true
+	dv81File.VideoTracks[0].DVELPresent = true
+	dv81File.VideoTracks[0].DVBLPresent = true
+	dv81Request := conformanceHDRRequest()
+	dv81Request.PlaybackAttemptID = "attempt-dv7-to-dv81"
+	dv81Request.Capabilities.HDRDetails.DolbyVisionProfiles = []int{8}
+	dv81Request.ClientPlaybackContext.Output.HDRDetails.DolbyVisionProfiles = []int{8}
+	dv81Registry := playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
+		{Name: playback.TransformationServerDV7DV81V3, RecipeVersion: playback.TransformationServerDV7DV81RecipeVersionV3, Available: true},
+		{Name: playback.TransformationServerDV7HDR10V3, RecipeVersion: playback.TransformationServerDV7HDR10RecipeVersionV3, Available: true},
+	})
+	planner = append(planner, makePlannerScenario("dolby_vision_7_to_dv81", "hdr_dv_matrix", dv81Request, &dv81File, nil, settings, dv81Registry))
+
 	dv7ToneMapFile := *dv7File
 	dv7ToneMapFile.VideoTracks = append([]models.VideoTrack(nil), dv7File.VideoTracks...)
 	dv7ToneMapFile.VideoTracks[0].DVConfigPresent = true
@@ -728,7 +759,7 @@ func goldenConformanceMatrix() playback.ConformanceMatrixV3 {
 	planner = append(planner, makePlannerScenario("embedded_ass_authored_render", "subtitle_matrix", assRequest, assFile, nil, settings, registry))
 
 	dvdFile := conformanceVideoFile()
-	dvdFile.SubtitleTracks = []models.SubtitleTrack{{Index: 4, Language: languageEnglish, Codec: "dvd_subtitle", Title: "English"}}
+	dvdFile.SubtitleTracks = []models.SubtitleTrack{{Index: 4, Language: languageEnglish, Codec: "dvd_subtitle", Title: titleEnglish}}
 	dvdRequest := conformanceStartRequest()
 	dvdRequest.PlaybackAttemptID = "attempt-dvd-burn-in"
 	dvdIndex := 0

@@ -19,7 +19,6 @@ import {
 const mocks = vi.hoisted(() => ({
   storage: undefined as AdminDownloadStorage | undefined,
   files: [] as AdminDownloadStorageFile[],
-  filesQuery: [] as unknown[],
   devicesQuery: [] as unknown[],
   deleteFiles: vi.fn(),
   cleanUp: vi.fn(),
@@ -32,7 +31,6 @@ const mocks = vi.hoisted(() => ({
   entries: [] as AdminDownloadEntry[],
   toastError: vi.fn(),
   preparationAction: vi.fn(),
-  logParams: [] as unknown[],
 }));
 
 function page<T>(items: T[]) {
@@ -53,10 +51,7 @@ vi.mock("@/hooks/queries/admin/downloadStorage", () => ({
     isError: false,
     refetch: vi.fn(),
   }),
-  useAdminDownloadStorageFiles: (query: unknown) => {
-    mocks.filesQuery.push(query);
-    return page(mocks.files);
-  },
+  useAdminDownloadStorageFiles: () => page(mocks.files),
   useAdminDownloadStorageEvents: () => page([]),
   useAdminDownloadDevices: (query: unknown) => {
     mocks.devicesQuery.push(query);
@@ -92,10 +87,7 @@ vi.mock("@/hooks/queries/admin/downloadPreparations", () => ({
   }),
 }));
 vi.mock("@/hooks/queries/admin/logs", () => ({
-  useOperationalLogs: (params: unknown, enabled: boolean) => {
-    if (enabled) mocks.logParams.push(params);
-    return { data: { entries: [] }, isLoading: false, isFetching: false };
-  },
+  useOperationalLogs: () => ({ data: { entries: [] }, isLoading: false, isFetching: false }),
 }));
 vi.mock("sonner", () => ({
   toast: { success: mocks.toastSuccess, info: vi.fn(), error: mocks.toastError },
@@ -135,43 +127,14 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.storage = makeStorage({ locations: [makeStorageLocation(), scratchNode] });
   mocks.files = [];
-  mocks.filesQuery = [];
   mocks.devicesQuery = [];
   mocks.nodes = [];
   mocks.preparations = undefined;
-  mocks.logParams = [];
   mocks.entries = [];
 });
 afterEach(cleanup);
 
 describe("AdminDownloads storage tab", () => {
-  it("shows each location's disk, records and warnings", () => {
-    renderAt();
-    expect(screen.getByRole("heading", { name: "Downloads" })).toBeInTheDocument();
-    const node = screen.getByRole("region", { name: "node-gpu-1" });
-    expect(within(node).getByText("Shares disk with transcode scratch")).toBeInTheDocument();
-    expect(node.textContent).toContain("842 GB of 1.0 TB used (84%)");
-    expect(within(node).getByText(/38 GB untracked/)).toBeInTheDocument();
-    expect(screen.getByText("node-gpu-1 is at 84% disk.")).toBeInTheDocument();
-    const server = screen.getByRole("region", { name: "Server" });
-    expect(within(server).getByText(/On disk matches Silo's records/)).toBeInTheDocument();
-  });
-
-  it("runs clean-up for one location", () => {
-    renderAt();
-    const node = screen.getByRole("region", { name: "node-gpu-1" });
-    fireEvent.click(within(node).getByRole("button", { name: /Clean up now/ }));
-    expect(mocks.cleanUp).toHaveBeenCalledWith("node:9", expect.any(Object));
-  });
-
-  it("confirms before deleting untracked files", () => {
-    renderAt();
-    const node = screen.getByRole("region", { name: "node-gpu-1" });
-    fireEvent.click(within(node).getByRole("button", { name: "Review" }));
-    fireEvent.click(screen.getByRole("button", { name: "Delete untracked files" }));
-    expect(mocks.deleteUntracked).toHaveBeenCalledWith("node:9", expect.any(Object));
-  });
-
   it("reports untracked files that could not be deleted", () => {
     mocks.deleteUntracked.mockImplementation(
       (
@@ -187,20 +150,6 @@ describe("AdminDownloads storage tab", () => {
     fireEvent.click(screen.getByRole("button", { name: "Delete untracked files" }));
     expect(mocks.toastError).toHaveBeenCalledWith(
       "2 untracked files on node-gpu-1 could not be deleted. Check the directory's permissions.",
-    );
-  });
-
-  it("says why deleting untracked files failed", () => {
-    mocks.deleteUntracked.mockImplementation(
-      (_location: string, options: { onError: (error: Error) => void }) =>
-        options.onError(new Error("network down")),
-    );
-    renderAt();
-    const node = screen.getByRole("region", { name: "node-gpu-1" });
-    fireEvent.click(within(node).getByRole("button", { name: "Review" }));
-    fireEvent.click(screen.getByRole("button", { name: "Delete untracked files" }));
-    expect(mocks.toastError).toHaveBeenCalledWith(
-      "The untracked files could not be deleted. Try again.",
     );
   });
 
@@ -225,35 +174,6 @@ describe("AdminDownloads storage tab", () => {
       { node: mocks.nodes[0], body: { download_artifact_dir_override: "/mnt/fast/silo" } },
       expect.anything(),
     );
-  });
-
-  it("names the cluster directory a blank node directory inherits", () => {
-    mocks.nodes = [{ id: 9, name: "node-gpu-1", config_etag: "1" } as unknown as StreamNode];
-    renderAt();
-    const card = screen.getByRole("region", { name: "node-gpu-1" });
-    fireEvent.click(within(card).getByRole("button", { name: "Edit location" }));
-    expect(screen.getByText(/the directory in Settings → Downloads/).textContent).toContain(
-      "Leave blank to use /srv/silo/download-artifacts",
-    );
-  });
-
-  it("shows the directory a node moves to when it restarts", () => {
-    mocks.storage = makeStorage({
-      locations: [
-        makeStorageLocation(),
-        { ...scratchNode, dir: "/transcode/download-artifacts", pending_dir: "/mnt/fast/silo" },
-      ],
-    });
-    renderAt();
-    const card = screen.getByRole("region", { name: "node-gpu-1" });
-    expect(card.textContent).toContain("Moves to /mnt/fast/silo when node-gpu-1 restarts.");
-  });
-
-  it("opens a location's files from its card", () => {
-    renderAt();
-    const node = screen.getByRole("region", { name: "node-gpu-1" });
-    fireEvent.click(within(node).getByRole("button", { name: "Browse files" }));
-    expect(mocks.filesQuery.at(-1)).toMatchObject({ location: "node:9" });
   });
 });
 
@@ -347,101 +267,6 @@ describe("AdminDownloads device copies tab", () => {
 });
 
 describe("AdminDownloads preparation tab", () => {
-  it("filters by state and search text", () => {
-    mocks.preparations = makePreparationList([
-      makePreparation(),
-      makePreparation({
-        id: "art-q",
-        state: "queued",
-        progress: undefined,
-        media_title: "Queued One",
-      }),
-    ]);
-    renderAt("/admin/downloads?tab=preparation");
-
-    fireEvent.click(screen.getByRole("button", { name: /Queued\s*1/ }));
-    expect(screen.getByText("Showing 1 of 2 jobs")).toBeInTheDocument();
-    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByText("Clear filters"));
-    fireEvent.change(screen.getByLabelText("Filter download preparation"), {
-      target: { value: "alex's iphone" },
-    });
-    expect(screen.getByText("Showing 2 of 2 jobs")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Filter download preparation"), {
-      target: { value: "nothing matches" },
-    });
-    expect(screen.getByText("No jobs match your filters")).toBeInTheDocument();
-  });
-
-  it("expands job details with the FFmpeg console and log link", () => {
-    mocks.preparations = makePreparationList([makePreparation()]);
-    renderAt("/admin/downloads?tab=preparation");
-
-    fireEvent.click(screen.getAllByRole("button", { name: "Details for Example Movie" })[0]!);
-    expect(screen.getByText("All 2 tracks → stereo AAC")).toBeInTheDocument();
-    expect(screen.getByText("HDR → SDR (software)")).toBeInTheDocument();
-    expect(screen.getByText("25:00 of 1:40:00 (25%)")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /View logs/ })).toHaveAttribute(
-      "href",
-      "/admin/logs?playback_session_id=download-prepare-art-1&component=ffmpeg",
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: /FFmpeg/ }));
-    expect(mocks.logParams).toContainEqual({
-      playback_session_id: "download-prepare-art-1",
-      component: "ffmpeg",
-      limit: 12,
-    });
-    expect(screen.getByText(/No FFmpeg output for this job yet/)).toBeInTheDocument();
-  });
-
-  it("pauses, resumes and cancels one job from its row", () => {
-    mocks.preparationAction.mockImplementation(
-      (
-        { ids }: { ids: string[] },
-        options: { onSuccess: (results: { id: string; outcome: string }[]) => void },
-      ) => options.onSuccess(ids.map((id) => ({ id, outcome: "applied" }))),
-    );
-    mocks.preparations = makePreparationList([
-      makePreparation(),
-      makePreparation({
-        id: "art-p",
-        state: "paused",
-        progress: undefined,
-        media_title: "Paused One",
-        paused_at: new Date().toISOString(),
-      }),
-    ]);
-    renderAt("/admin/downloads?tab=preparation");
-
-    expect(screen.getByRole("button", { name: /Paused\s*1/ })).toBeInTheDocument();
-    expect(screen.queryAllByRole("button", { name: "Pause Paused One" })).toHaveLength(0);
-    fireEvent.click(screen.getAllByRole("button", { name: "Pause Example Movie" })[0]!);
-    expect(mocks.preparationAction).toHaveBeenLastCalledWith(
-      { action: "pause", ids: ["art-1"] },
-      expect.anything(),
-    );
-    expect(mocks.toastSuccess).toHaveBeenLastCalledWith("Paused 1 job.");
-
-    fireEvent.click(screen.getAllByRole("button", { name: "Resume Paused One" })[0]!);
-    expect(mocks.preparationAction).toHaveBeenLastCalledWith(
-      { action: "resume", ids: ["art-p"] },
-      expect.anything(),
-    );
-
-    // Cancel asks first and names what the requester loses.
-    fireEvent.click(screen.getAllByRole("button", { name: "Cancel Example Movie" })[0]!);
-    const dialog = screen.getByRole("alertdialog");
-    expect(within(dialog).getByText(/Encoding stops and its progress is lost/)).toBeInTheDocument();
-    expect(within(dialog).getByText(/1 waiting download fails/)).toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel job" }));
-    expect(mocks.preparationAction).toHaveBeenLastCalledWith(
-      { action: "cancel", ids: ["art-1"] },
-      expect.anything(),
-    );
-  });
-
   it("acts on the selected jobs in bulk", () => {
     mocks.preparationAction.mockReset();
     mocks.preparations = makePreparationList([

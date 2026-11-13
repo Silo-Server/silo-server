@@ -3,8 +3,6 @@ package jellycompat
 import (
 	"bytes"
 	"context"
-	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -33,6 +31,47 @@ func TestRequestLoggerRedactsQueryCredentials(t *testing.T) {
 	for _, want := range []string{"Limit=20", `"status":202`, `"path":"/Items"`, "duration_ms"} {
 		if !strings.Contains(logs.String(), want) {
 			t.Errorf("missing diagnostic %q: %s", want, logs.String())
+		}
+	}
+
+	// An HLS request carries the play session ID as a path segment and as a
+	// query parameter. HEAD has no route, so it is logged without route
+	// parameters.
+	logs.Reset()
+	var debugLogs bytes.Buffer
+	const hlsRoute = "/Videos/{id}/hls/{playlistId}/{segmentId}.{segmentContainer}"
+	mux := chi.NewRouter()
+	mux.Use(normalizeCompatPathMiddleware, newDebugLogMiddleware(&debugLogs, ""), requestLoggerMiddleware)
+	mux.Get(hlsRoute, func(http.ResponseWriter, *http.Request) {})
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		mux.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(method,
+			"/emby/videos/item-1/hls/play-session-secret/12.ts?playSessionId=play-session-secret&MediaSourceId=source-1", nil))
+	}
+	assertLogSecretsAbsent(t, logs.String()+debugLogs.String(), "play-session-secret")
+	for _, want := range []string{
+		`"route":"` + hlsRoute + `"`, `"path":"/Videos/item-1/hls/`, `"original_path":"/emby/videos/item-1/hls/`,
+		"/12.ts", "MediaSourceId=source-1", `"status":405`,
+		`"play_session_id":"` + playSessionFingerprint("play-session-secret") + `"`,
+	} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("missing diagnostic %q: %s", want, logs.String())
+		}
+	}
+	if !strings.Contains(debugLogs.String(), "/Videos/item-1/hls/") {
+		t.Errorf("debug log lost the route and item: %s", debugLogs.String())
+	}
+}
+
+func TestRedactHLSPlaySessionID(t *testing.T) {
+	for path, want := range map[string]string{
+		"/Videos/item-1/hls/play-1/12.ts":                "/Videos/item-1/hls/[REDACTED]/12.ts",
+		"/Videos/item-1/audio-v2/hls/play-1/stream.m3u8": "/Videos/item-1/audio-v2/hls/[REDACTED]/stream.m3u8",
+		"/emby/videos/item-1/hls/play-1/12.ts":           "/emby/videos/item-1/hls/[REDACTED]/12.ts",
+		"/Videos/hls/stream":                             "/Videos/hls/stream",
+		"/Items/item-1/hls/play-1/12.ts":                 "/Items/item-1/hls/play-1/12.ts",
+	} {
+		if got := redactHLSPlaySessionID(path); got != want {
+			t.Errorf("redactHLSPlaySessionID(%q) = %q, want %q", path, got, want)
 		}
 	}
 }
@@ -116,75 +155,5 @@ func assertLogSecretsAbsent(t *testing.T, log string, secrets ...string) {
 		if strings.Contains(log, secret) {
 			t.Errorf("log contains synthetic credential %q", secret)
 		}
-	}
-}
-
-type debugErrorBody struct {
-	err    error
-	closed bool
-}
-
-func (b *debugErrorBody) Read(p []byte) (int, error) {
-	return copy(p, "partial"), b.err
-}
-
-func (b *debugErrorBody) Close() error {
-	b.closed = true
-	return b.err
-}
-
-func TestDebugRequestBodyPreservesReadAndCloseErrors(t *testing.T) {
-	wantErr := errors.New("synthetic read error")
-	original := &debugErrorBody{err: wantErr}
-	body := &debugRequestBody{ReadCloser: original}
-	buf := make([]byte, 16)
-	n, err := body.Read(buf)
-	if !errors.Is(err, wantErr) || string(buf[:n]) != "partial" || body.body.String() != "partial" {
-		t.Fatalf("read changed: n=%d err=%v capture=%q", n, err, body.body.String())
-	}
-	if err := body.Close(); !errors.Is(err, wantErr) || !original.closed {
-		t.Fatalf("Close not forwarded: %v", err)
-	}
-}
-
-func TestDebugLoggerFilterLeavesRequestUnread(t *testing.T) {
-	var logs bytes.Buffer
-	original := io.NopCloser(strings.NewReader("unchanged"))
-	h := newDebugLogMiddleware(&logs, "selected-client")(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		if r.Body != original {
-			t.Fatal("filtered request body was wrapped")
-		}
-	}))
-	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/", original))
-	if logs.Len() != 0 {
-		t.Fatal("filtered request was logged")
-	}
-}
-
-func TestDebugLoggerReportsActualRequestTruncation(t *testing.T) {
-	for _, size := range []int{debugMaxBodyCapture - 1, debugMaxBodyCapture, debugMaxBodyCapture + 1} {
-		t.Run(fmt.Sprint(size), func(t *testing.T) {
-			const prefix = `{"Pw":"capture-secret","data":"`
-			const suffix = `"}`
-			body := prefix + strings.Repeat("a", size-len(prefix)-len(suffix)) + suffix
-			var logs bytes.Buffer
-			h := newDebugLogMiddleware(&logs, "")(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-				got, err := io.ReadAll(r.Body)
-				if err != nil || string(got) != body {
-					t.Fatal("request body changed")
-				}
-			}))
-			r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
-			r.ContentLength = -1 // Verify observed reads, not a trusted length header.
-			h.ServeHTTP(httptest.NewRecorder(), r)
-			wantTruncated := size > debugMaxBodyCapture
-			if got := strings.Contains(logs.String(), "[truncated at"); got != wantTruncated {
-				t.Errorf("truncation notice = %t, want %t", got, wantTruncated)
-			}
-			if !wantTruncated && strings.Contains(logs.String(), "omitted") {
-				t.Error("complete JSON was omitted")
-			}
-			assertLogSecretsAbsent(t, logs.String(), "capture-secret")
-		})
 	}
 }

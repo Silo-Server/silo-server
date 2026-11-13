@@ -2,6 +2,8 @@ package jellycompat
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -54,6 +56,17 @@ type sessionInfoDTO struct {
 	NowPlayingItem        *baseItemDTO         `json:"NowPlayingItem,omitempty"`
 }
 
+// compatSessionInfoID names a play in the session list with 32 lowercase hex
+// characters, the shape of a Jellyfin SessionInfo.Id. It is derived from the
+// play session ID rather than being it: that ID alone authorizes the play's
+// media requests, and a session list is copied into logs and diagnostics that
+// do not treat an "Id" as a secret. It stays the same for the life of the
+// play and begins with the fingerprint that log lines record for it.
+func compatSessionInfoID(playSessionID string) string {
+	sum := sha256.Sum256([]byte(playSessionID))
+	return hex.EncodeToString(sum[:16])
+}
+
 // HandleSessions lists playback sessions owned by this exact login/API token.
 // Remote control is unavailable, so controllable-session queries return empty.
 func (h *PlaybackHandler) HandleSessions(w http.ResponseWriter, r *http.Request) {
@@ -79,9 +92,7 @@ func (h *PlaybackHandler) HandleSessions(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
-	lister, ok := h.playbackStore.(interface {
-		ListActiveForToken(context.Context, string) ([]PlaybackSession, error)
-	})
+	lister, ok := h.playbackStore.(activePlayLister)
 	if !ok {
 		writeCompatUpstreamError(w, fmt.Errorf("session listing unavailable"))
 		return
@@ -95,7 +106,7 @@ func (h *PlaybackHandler) HandleSessions(w http.ResponseWriter, r *http.Request)
 		if play.UpstreamSessionID == "" || q.Get("deviceId") != "" && q.Get("deviceId") != play.ClientDeviceID {
 			continue
 		}
-		dto := sessionInfoDTO{ID: play.ID, UserID: session.PseudoUserID.String(), UserName: session.Username, DeviceID: play.ClientDeviceID, LastActivityDate: play.UpdatedAt.UTC().Format(time.RFC3339Nano), IsActive: true, PlayableMediaTypes: []string{}, SupportedCommands: []string{}}
+		dto := sessionInfoDTO{ID: compatSessionInfoID(play.ID), UserID: compatUserID(session.PseudoUserID), UserName: session.Username, DeviceID: play.ClientDeviceID, LastActivityDate: play.UpdatedAt.UTC().Format(time.RFC3339Nano), IsActive: true, PlayableMediaTypes: []string{}, SupportedCommands: []string{}}
 		activity := play.UpdatedAt
 		if h.sessionMgr != nil {
 			if native, err := h.sessionMgr.GetSession(play.UpstreamSessionID); err == nil && native != nil && native.UserID == session.StreamAppUserID && native.ProfileID == session.ProfileID {

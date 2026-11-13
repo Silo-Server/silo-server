@@ -94,7 +94,10 @@ type JobRequest struct {
 
 // idempotencyKey derives the dedup key for a job. Two requests for the same
 // source track, target language, and model collapse to one in-flight job.
-func idempotencyKey(mediaFileID int, kind JobKind, sourceIndex int, targetLang, model string) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%d|%s|%d|%s|%s", mediaFileID, kind, sourceIndex, targetLang, model)))
+// source names the track: its index, or a stable identity for translation
+// sources (see Service.translationSource). An index hashes exactly as the
+// integer did before identities existed.
+func idempotencyKey(mediaFileID int, kind JobKind, source string, targetLang, model string) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%d|%s|%s|%s|%s", mediaFileID, kind, source, targetLang, model)))
 	return hex.EncodeToString(sum[:])
 }

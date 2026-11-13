@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 
 import getCurrentUserOk from "../../../../contracts/api/v2/fixtures/get_current_user_ok.json";
 import getSetupStatusOk from "../../../../contracts/api/v2/fixtures/get_setup_status_ok.json";
@@ -6,12 +6,9 @@ import listAdminUsersOk from "../../../../contracts/api/v2/fixtures/list_admin_u
 import listProgressOk from "../../../../contracts/api/v2/fixtures/list_progress_ok.json";
 import updateProfileOk from "../../../../contracts/api/v2/fixtures/update_profile_ok.json";
 import authenticationRequired from "../../../../contracts/api/v2/fixtures/authentication_required.json";
-import notAcceptable from "../../../../contracts/api/v2/fixtures/not_acceptable.json";
-import unsupportedMediaType from "../../../../contracts/api/v2/fixtures/unsupported_media_type.json";
 import validationFailedBody from "../../../../contracts/api/v2/fixtures/validation_failed_body.json";
 import profileVerificationRequired from "../../../../contracts/api/v2/fixtures/profile_verification_required.json";
 
-import type { AdminUser, User } from "../types";
 import {
   onProfileUnverified,
   captureProfileRequestContext,
@@ -20,14 +17,8 @@ import {
   setProfileToken,
   setRefreshToken,
 } from "../client";
-import {
-  V2ProblemError,
-  V2TransportError,
-  problemId,
-  v2,
-  type V2Body,
-  type V2Result,
-} from "./request";
+import { createAppIntl, setAppIntl } from "@/i18n";
+import { V2ProblemError, V2TransportError, problemFieldDetail, problemId, v2 } from "./request";
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
 const PROBLEM_HEADERS = { "Content-Type": "application/problem+json" };
@@ -167,33 +158,6 @@ describe("v2 request boundary", () => {
       location: expect.stringMatching(/^body\./),
       code: expect.any(String),
       detail: expect.any(String),
-    });
-  });
-
-  it("decodes 406 and 415 problems", async () => {
-    setAccessToken("tok-user");
-    let call = 0;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn<typeof fetch>(async () => {
-        call += 1;
-        return call === 1
-          ? json(notAcceptable, 406, PROBLEM_HEADERS)
-          : json(unsupportedMediaType, 415, PROBLEM_HEADERS);
-      }),
-    );
-
-    await expect(v2("GET /api/v2/system/setup")).rejects.toMatchObject({
-      name: "V2ProblemError",
-      status: 406,
-      problemType: "not_acceptable",
-    });
-    await expect(
-      v2("PATCH /api/v2/profiles/{id}", { path: { id: "p-owner" }, body: {} }),
-    ).rejects.toMatchObject({
-      name: "V2ProblemError",
-      status: 415,
-      problemType: "unsupported_media_type",
     });
   });
 
@@ -346,66 +310,6 @@ describe("v2 request boundary", () => {
   });
 });
 
-describe("v2 type separation", () => {
-  it("keeps v1 mirror types out of v2 parameters", () => {
-    type Me = V2Result<"GET /api/v2/account/me">;
-    type AdminUsers = V2Result<"GET /api/v2/admin/users">;
-
-    const v1User: User = {
-      id: 1,
-      username: "laura",
-      email: "laura@example.test",
-      role: "user",
-      permissions: [],
-      download_allowed: true,
-    };
-    const v1UserWithStringId = { ...v1User, id: "1" };
-    const v1AdminUsers: AdminUser[] = [];
-
-    function acceptsMe(_me: Me): void {}
-    function acceptsAdminUsers(_users: AdminUsers): void {}
-
-    // @ts-expect-error a v1 User is not a v2 Account: the id type differs.
-    acceptsMe(v1User);
-    // @ts-expect-error a structural look-alike without the v2 brand is rejected.
-    acceptsMe(v1UserWithStringId);
-    // @ts-expect-error the v1 AdminUser[] is not the branded v2 collection.
-    acceptsAdminUsers({ items: v1AdminUsers });
-
-    expectTypeOf<Me["role"]>().toEqualTypeOf<"admin" | "user">();
-    expectTypeOf<Me>().not.toMatchTypeOf<User>();
-    expectTypeOf(v1User).not.toMatchTypeOf<Me>();
-
-    // Query and body inference: unknown members and v1-only shapes are
-    // rejected. Never called; the compiler is the assertion.
-    function typeOnly() {
-      // @ts-expect-error offset is not a listProgress parameter.
-      void v2("GET /api/v2/progress", { query: { offset: 50 } });
-      // @ts-expect-error allowed_library_ids is string[] on the v2 contract.
-      const v1Ids: V2Body<"PATCH /api/v2/profiles/{id}"> = { allowed_library_ids: [1] };
-      void v1Ids;
-      // @ts-expect-error a path parameter is required.
-      void v2("PATCH /api/v2/profiles/{id}", { body: {} });
-      // @ts-expect-error getSetupStatus takes no body.
-      void v2("GET /api/v2/system/setup", { body: {} });
-      // An optional body may be sent or left out, but it keeps its shape.
-      void v2("POST /api/v2/libraries/{id}/refresh-metadata", {
-        path: { id: "1" },
-        body: { mode: "full" },
-      });
-      void v2("POST /api/v2/libraries/{id}/refresh-metadata", { path: { id: "1" } });
-      void v2("POST /api/v2/libraries/{id}/refresh-metadata", {
-        path: { id: "1" },
-        // @ts-expect-error mode is quick or full.
-        body: { mode: "everything" },
-      });
-      // @ts-expect-error unknown operations do not compile.
-      void v2("GET /api/v2/nope");
-    }
-    expect(typeof typeOnly).toBe("function");
-  });
-});
-
 describe("v2 response validators", () => {
   it("retains ETag metadata after successful decoding", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () =>
@@ -505,28 +409,84 @@ describe("v2 declared request headers", () => {
   });
 });
 
-describe("v2 declared collection request headers", () => {
-  it("checks required validators and rejects undeclared headers at compile time", () => {
-    const runTypeChecks = () => false;
-    if (runTypeChecks()) {
-      // @ts-expect-error If-Match is required for guarded collection updates.
-      void v2("PATCH /api/v2/collections/{id}", { path: { id: "c" }, body: {} });
-      // @ts-expect-error An empty header set cannot satisfy the required validator.
-      void v2("PATCH /api/v2/collections/{id}", { path: { id: "c" }, body: {}, headers: {} });
-      void v2("PATCH /api/v2/collections/{id}", {
-        path: { id: "c" },
-        body: {},
-        // @ts-expect-error Operation headers cannot carry session authority.
-        headers: { "If-Match": '"v1"', Authorization: "other" },
-      });
-      void v2("PATCH /api/v2/collections/{id}", {
-        path: { id: "c" },
-        body: {},
-        // @ts-expect-error Unknown headers are not part of the generated contract.
-        headers: { "If-Match": '"v1"', "X-Unknown": "x" },
-      });
-      // @ts-expect-error Operations without caller-owned headers expose no headers option.
-      void v2("GET /api/v2/account/me", { headers: { "X-Unknown": "x" } });
-    }
+describe("problem text in a translated interface", () => {
+  const spanish = createAppIntl("es", {
+    "error.validation_failed": [{ type: 0, value: "Algunos valores no son válidos." }],
+    "error.field.required": [{ type: 0, value: "Esto es obligatorio." }],
+  });
+  const problem = (type: string, detail: string, code?: string) =>
+    new V2ProblemError("op", {
+      type: `https://siloserver.org/docs/api/v2/problems/${type}`,
+      title: "Title",
+      status: 422,
+      detail,
+      instance: "urn:silo:request:1",
+      ...(code ? { errors: [{ code, detail: "Field detail.", location: "body.name" }] } : {}),
+    });
+
+  afterEach(() => setAppIntl(createAppIntl("en", {})));
+
+  it.each([
+    {
+      name: "English keeps the detail",
+      spanish: false,
+      type: "validation_failed",
+      expected: "See errors.",
+    },
+    {
+      name: "a known type translates",
+      spanish: true,
+      type: "validation_failed",
+      expected: "Algunos valores no son válidos.",
+    },
+    {
+      name: "an unknown type keeps the detail",
+      spanish: true,
+      type: "brand_new",
+      expected: "See errors.",
+    },
+    {
+      name: "English keeps the detail over a field code",
+      spanish: false,
+      type: "validation_failed",
+      code: "required",
+      expected: "See errors.",
+    },
+    {
+      name: "a known field code wins over the type",
+      spanish: true,
+      type: "validation_failed",
+      code: "required",
+      expected: "Esto es obligatorio.",
+    },
+    {
+      name: "an unknown field code falls back to the type",
+      spanish: true,
+      type: "validation_failed",
+      code: "path_rewrite_required",
+      expected: "Algunos valores no son válidos.",
+    },
+  ])("message: $name", ({ spanish: translated, type, code, expected }) => {
+    if (translated) setAppIntl(spanish);
+    const error = problem(type, "See errors.", code);
+    expect(error.message).toBe(expected);
+  });
+
+  it("keeps the text of the language the error arrived in, and clones with it", () => {
+    setAppIntl(spanish);
+    const error = problem("validation_failed", "See errors.");
+    setAppIntl(createAppIntl("en", {}));
+    expect(error.message).toBe("Algunos valores no son válidos.");
+    expect(structuredClone(error).message).toBe("Algunos valores no son válidos.");
+  });
+
+  it.each([
+    { code: "required", expected: "Esto es obligatorio." },
+    { code: "path_rewrite_required", expected: "Rewrite the path first." },
+  ])("field $code", ({ code, expected }) => {
+    setAppIntl(spanish);
+    expect(
+      problemFieldDetail({ code, detail: "Rewrite the path first.", location: "body.x" }),
+    ).toBe(expected);
   });
 });

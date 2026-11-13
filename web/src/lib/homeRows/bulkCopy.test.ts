@@ -68,6 +68,18 @@ describe("copyTargetPages", () => {
       copyTargetPages(recentlyAdded({ media_scope: "movie" }), PAGES, 10).map((page) => page.id),
     ).toEqual([10]);
   });
+
+  it.each([
+    ["both", {}, 8, [7, 8, 9, 10]],
+    ["movies", { filter_type: "movie" }, 8, [7, 8, 9]],
+    ["TV shows", { filter_type: "series" }, 7, [7, 8]],
+  ])(
+    "offers a Trending worldwide row showing %s only pages it can fill",
+    (_name, config, current, want) => {
+      const row = { sectionType: "trending_discover", config: { window: "week", ...config } };
+      expect(copyTargetPages(row, PAGES, current).map((page) => page.id)).toEqual(want);
+    },
+  );
 });
 
 describe("copyTargetPages for rows that show one kind of library", () => {

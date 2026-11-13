@@ -8,13 +8,15 @@ import (
 
 	contracts "github.com/Silo-Server/silo-server/contracts/api/v2"
 	"github.com/Silo-Server/silo-server/internal/buildinfo"
+	"github.com/Silo-Server/silo-server/internal/clientip"
 )
 
 // The system domain: discovery before login or profile selection.
 
-// SystemInfo is the discovery document. It is a small fixed document: no
-// per-request, per-account or deployment-topology detail. `server_version`
-// and `contract_digest` are diagnostic only — for support, cache identity and
+// SystemInfo is the discovery document. It is a small document with no
+// per-account or deployment-topology detail; the one per-request member is
+// `request_origin`, the origin this request reached. `server_version` and
+// `contract_digest` are diagnostic only — for support, cache identity and
 // last-resort compatibility messages — and are never a substitute for the
 // capability documents linked from `links.capabilities`.
 type SystemInfo struct {
@@ -22,6 +24,7 @@ type SystemInfo struct {
 	APIMajor       int             `json:"api_major" doc:"The native API major this server serves at this path" example:"2"`
 	ContractDigest string          `json:"contract_digest" doc:"SHA-256 (hex) of the exact committed OpenAPI artifact served at links.openapi. Diagnostic and cache-identity only: never feature-detect on it." example:"3b8f0c2d9e1a4f6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b"`
 	Links          SystemInfoLinks `json:"links" doc:"Stable links to the contract and to capability documents"`
+	RequestOrigin  string          `json:"request_origin,omitempty" doc:"The origin this request reached, scheme://host[:port]: scheme and host in lower case, the scheme's default port omitted, IPv6 hosts in brackets, no path or trailing slash. It is the transport scheme and Host header, replaced by X-Forwarded-Proto and X-Forwarded-Host only when the request came from a configured trusted proxy, derived the same way as the OAuth iss. A client compares it with its configured server origin before sending credentials, to detect a redirect or a proxy that delivered the request elsewhere. Always present on servers that serve it; absent on older servers." example:"https://silo.example.com"`
 }
 
 // SystemInfoLinks are the discovery links.
@@ -33,11 +36,10 @@ type SystemInfoLinks struct {
 
 // SystemInfoOutput is the getSystemInfo response.
 type SystemInfoOutput struct {
-	// The document is public and identical for every caller of one build;
-	// it may be cached briefly and revalidated. Capability documents are the
-	// separately ratified `private, no-cache` exception; this document is
-	// neither private nor per-caller, so it takes the same no-cache
-	// revalidation posture without the private scope.
+	// The document is public, but request_origin is per-request: a shared
+	// cache keyed without the request's origin could hand one origin's value
+	// to a client of another. It therefore takes the capability documents'
+	// `private, no-cache` posture.
 	CacheControl string `header:"Cache-Control"`
 	Body         SystemInfo
 }
@@ -101,13 +103,18 @@ func (reg *Registry) getSetupStatus(ctx context.Context, _ *struct{}) (*SetupSta
 	return &SetupStatusOutput{Body: status}, nil
 }
 
-func getSystemInfo(_ context.Context, _ *struct{}) (*SystemInfoOutput, error) {
+func getSystemInfo(ctx context.Context, _ *struct{}) (*SystemInfoOutput, error) {
+	origin := ""
+	if r := requestFrom(ctx); r != nil {
+		origin = clientip.RequestOrigin(r)
+	}
 	return &SystemInfoOutput{
-		CacheControl: "no-cache",
+		CacheControl: cachePrivateNoCache,
 		Body: SystemInfo{
 			ServerVersion:  buildinfo.Current().Display,
 			APIMajor:       APIMajor,
 			ContractDigest: contractDigest,
+			RequestOrigin:  origin,
 			Links: SystemInfoLinks{
 				OpenAPI:      Prefix + "/openapi.json",
 				Capabilities: Prefix + "/capabilities",

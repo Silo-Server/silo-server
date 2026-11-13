@@ -2,17 +2,17 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"log/slog"
+	"maps"
 	"net/http"
-	"strconv"
+	"slices"
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
@@ -120,30 +120,12 @@ type historyRemovalTargetRequest struct {
 	Scope     string `json:"scope"`
 }
 
-type removeHistoryRequest struct {
-	Targets []historyRemovalTargetRequest `json:"targets"`
-}
-
 const (
 	historyRemovalScopeItem = "item"
 	historyRemovalScopeShow = "show"
 )
 
 // --- Favorites ---
-
-// HandleListFavorites handles GET /favorites.
-func (h *PersonalDataHandler) HandleListFavorites(w http.ResponseWriter, r *http.Request) {
-	if !rejectInvalidImageSize(w, r) {
-		return
-	}
-	limit, offset := parsePagination(r)
-	favorites, items, err := h.ListFavorites(r.Context(), personalListViewerFromRequest(r), limit, offset)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, itemsListResponse{Items: items, HasMore: len(favorites) == limit})
-}
 
 // PersonalListViewer is the identity a personal-list seam acts as: the
 // account and profile the list belongs to, the viewer access filter that
@@ -153,50 +135,41 @@ type PersonalListViewer struct {
 	ProfileID string
 	Access    catalog.AccessFilter
 	ImageSize imagesize.Size
+	// ImageWidths are per-slot target widths overriding ImageSize; only the
+	// native v2 API carries them.
+	ImageWidths imagesize.Widths
 }
 
-func personalListViewerFromRequest(r *http.Request) PersonalListViewer {
-	return PersonalListViewer{
-		UserID:    apimw.GetUserID(r.Context()),
-		ProfileID: apimw.GetProfileID(r.Context()),
-		Access:    requestAccessFilter(r),
-		ImageSize: requestImageSize(r),
-	}
-}
-
-// ListFavorites answers the store page [offset, offset+limit) of the
-// profile's favorites, newest first, and the cards of those entries in the
-// same order. Entries the catalog no longer has or the viewer may not see
-// have no card, so the raw entries, not the cards, decide whether another
-// page follows.
-func (h *PersonalDataHandler) ListFavorites(ctx context.Context, viewer PersonalListViewer, limit, offset int) ([]userstore.Favorite, []CollectionItemView, error) {
-	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
-	if err != nil {
-		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
-	}
-	favorites, err := store.ListFavorites(ctx, viewer.ProfileID, limit, offset)
-	if err != nil {
-		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list favorites")
-	}
-	items, err := resolveItems(h, ctx, viewer, favorites, func(f userstore.Favorite) string { return f.MediaItemID })
-	if err != nil {
-		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve favorite items")
-	}
-	return favorites, items, nil
+// Artwork is the viewer's artwork preference.
+func (v PersonalListViewer) Artwork() imagesize.Request {
+	return imagesize.Request{Size: v.ImageSize, Widths: v.ImageWidths}
 }
 
 // ListFavoritesPage is the keyset form of ListFavorites the v2 listing
-// uses: at most limit entries ordered by (added_at DESC, media_item_id DESC)
-// strictly after the key (nil = from the newest row), and the cards of those
-// entries in the same order, resolved exactly as ListFavorites resolves them.
+// uses: at most limit of the entries the viewer may see, ordered by
+// (added_at DESC, media_item_id DESC) strictly after the key (nil = from the
+// newest row), and their cards in the same order, resolved exactly as
+// ListFavorites resolves them. See visibleListPage for why hidden entries
+// are skipped rather than returned.
 func (h *PersonalDataHandler) ListFavoritesPage(ctx context.Context, viewer PersonalListViewer, after *userstore.ListKey, limit int) ([]userstore.Favorite, []CollectionItemView, error) {
 	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
 	if err != nil {
 		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
-	favorites, err := store.ListFavoritesPage(ctx, viewer.ProfileID, after, limit)
+	favorites, err := visibleListPage(ctx, h, viewer, after, limit, personalListSource[userstore.Favorite]{
+		list: catalog.PersonalListFavorites, store: store, failure: "Failed to list favorites",
+		read: func(after *userstore.ListKey, n int) ([]userstore.Favorite, error) {
+			return store.ListFavoritesPage(ctx, viewer.ProfileID, after, n)
+		},
+		keyOf: func(f userstore.Favorite) userstore.ListKey {
+			return userstore.ListKey{AddedAt: f.AddedAt, MediaItemID: f.MediaItemID}
+		},
+		fromRow: func(r catalog.PersonalListRow) userstore.Favorite {
+			return userstore.Favorite{ProfileID: r.ProfileID, MediaItemID: r.MediaItemID, AddedAt: r.AddedAt}
+		},
+	})
 	if err != nil {
-		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list favorites")
+		return nil, nil, err
 	}
 	items, err := resolveItems(h, ctx, viewer, favorites, func(f userstore.Favorite) string { return f.MediaItemID })
 	if err != nil {
@@ -214,7 +187,7 @@ func (h *PersonalDataHandler) GetFavorite(ctx context.Context, viewer PersonalLi
 		return userstore.Favorite{}, false, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
 	if err := h.ensureAccessibleItem(ctx, itemID, viewer.Access); err != nil {
-		return userstore.Favorite{}, false, apiError(http.StatusNotFound, "not_found", "Item not found")
+		return userstore.Favorite{}, false, itemLookupError(ctx, itemID, err)
 	}
 	fav, err := store.GetFavorite(ctx, viewer.ProfileID, itemID)
 	if err != nil {
@@ -236,7 +209,7 @@ func (h *PersonalDataHandler) AddFavorite(ctx context.Context, viewer PersonalLi
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
 	if err := h.ensureAccessibleItem(ctx, itemID, viewer.Access); err != nil {
-		return apiError(http.StatusNotFound, "not_found", "Item not found")
+		return itemLookupError(ctx, itemID, err)
 	}
 	added, err := store.AddFavorite(ctx, viewer.ProfileID, itemID)
 	if err != nil {
@@ -266,60 +239,6 @@ func (h *PersonalDataHandler) RemoveFavorite(ctx context.Context, viewer Persona
 		h.notifyListChange(ctx, watchsync.ListKindFavorites, watchsync.ListChangeRemoved, viewer, itemID)
 	}
 	return nil
-}
-
-// HandleCheckFavorite handles GET /favorites/{item_id}.
-// Returns 204 if the item is a favorite, 404 if not.
-func (h *PersonalDataHandler) HandleCheckFavorite(w http.ResponseWriter, r *http.Request) {
-	itemID := chi.URLParam(r, "item_id")
-
-	if itemID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
-		return
-	}
-
-	_, ok, err := h.GetFavorite(r.Context(), personalListViewerFromRequest(r), itemID)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	if !ok {
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleAddFavorite handles PUT /favorites/{item_id}.
-func (h *PersonalDataHandler) HandleAddFavorite(w http.ResponseWriter, r *http.Request) {
-	itemID := chi.URLParam(r, "item_id")
-
-	if itemID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
-		return
-	}
-
-	if err := h.AddFavorite(r.Context(), personalListViewerFromRequest(r), itemID); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleRemoveFavorite handles DELETE /favorites/{item_id}.
-func (h *PersonalDataHandler) HandleRemoveFavorite(w http.ResponseWriter, r *http.Request) {
-	itemID := chi.URLParam(r, "item_id")
-
-	if itemID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
-		return
-	}
-
-	if err := h.RemoveFavorite(r.Context(), personalListViewerFromRequest(r), itemID); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // listChangeNoticeTimeout bounds the notices for one committed favorites or
@@ -374,56 +293,13 @@ func (h *PersonalDataHandler) dispatchLocalListEvent(ctx context.Context, list w
 
 // --- Watchlist ---
 
-// HandleListWatchlist handles GET /watchlist.
-func (h *PersonalDataHandler) HandleListWatchlist(w http.ResponseWriter, r *http.Request) {
-	if !rejectInvalidImageSize(w, r) {
-		return
-	}
-	limit, offset := parsePagination(r)
-	entries, items, err := h.ListWatchlist(r.Context(), personalListViewerFromRequest(r), limit, offset)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	// has_more comes from the raw store page, before hidden-series filtering
-	// shrinks it — a full page that filters down still has more to fetch.
-	writeJSON(w, http.StatusOK, itemsListResponse{Items: items, HasMore: len(entries) == limit})
-}
-
-// ListWatchlist answers the store page [offset, offset+limit) of the
-// profile's watchlist, newest first, and the cards of those entries in the
-// same order. Fully-watched series, entries the catalog no longer has, and
-// entries the viewer may not see have no card, so the raw entries, not the
-// cards, decide whether another page follows.
-func (h *PersonalDataHandler) ListWatchlist(ctx context.Context, viewer PersonalListViewer, limit, offset int) ([]userstore.WatchlistEntry, []CollectionItemView, error) {
-	// Promotion scans the whole profile, so a paged read runs it once, on the
-	// first page, rather than once per page.
-	if offset == 0 {
-		h.promoteWatchlist(ctx, viewer)
-	}
-	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
-	if err != nil {
-		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
-	}
-	entries, err := store.ListWatchlist(ctx, viewer.ProfileID, limit, offset)
-	if err != nil {
-		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list watchlist")
-	}
-	visible, err := h.filterHiddenWatchlistSeries(ctx, store, viewer.ProfileID, append([]userstore.WatchlistEntry(nil), entries...))
-	if err != nil {
-		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to filter watchlist")
-	}
-	items, err := resolveItems(h, ctx, viewer, visible, func(e userstore.WatchlistEntry) string { return e.MediaItemID })
-	if err != nil {
-		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve watchlist items")
-	}
-	return entries, items, nil
-}
-
 // ListWatchlistPage is the keyset form of ListWatchlist the v2 listing
-// uses: at most limit entries ordered by (added_at DESC, media_item_id DESC)
-// strictly after the key (nil = from the newest row), and the cards of the
-// entries the viewer may see (fully-watched series hidden) in the same order.
+// uses: at most limit of the entries the viewer may see, ordered by
+// (added_at DESC, media_item_id DESC) strictly after the key (nil = from the
+// newest row), and their cards (fully-watched series hidden) in the same
+// order. See visibleListPage for why hidden entries are skipped rather than
+// returned. A fully-watched series stays an entry without a card: the
+// profile can see it, so a cursor naming it reveals nothing.
 func (h *PersonalDataHandler) ListWatchlistPage(ctx context.Context, viewer PersonalListViewer, after *userstore.ListKey, limit int) ([]userstore.WatchlistEntry, []CollectionItemView, error) {
 	// Once per traversal, on the first page; see ListWatchlist.
 	if after == nil {
@@ -433,9 +309,20 @@ func (h *PersonalDataHandler) ListWatchlistPage(ctx context.Context, viewer Pers
 	if err != nil {
 		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
-	entries, err := store.ListWatchlistPage(ctx, viewer.ProfileID, after, limit)
+	entries, err := visibleListPage(ctx, h, viewer, after, limit, personalListSource[userstore.WatchlistEntry]{
+		list: catalog.PersonalListWatchlist, store: store, failure: "Failed to list watchlist",
+		read: func(after *userstore.ListKey, n int) ([]userstore.WatchlistEntry, error) {
+			return store.ListWatchlistPage(ctx, viewer.ProfileID, after, n)
+		},
+		keyOf: func(e userstore.WatchlistEntry) userstore.ListKey {
+			return userstore.ListKey{AddedAt: e.AddedAt, MediaItemID: e.MediaItemID}
+		},
+		fromRow: func(r catalog.PersonalListRow) userstore.WatchlistEntry {
+			return userstore.WatchlistEntry{ProfileID: r.ProfileID, MediaItemID: r.MediaItemID, AddedAt: r.AddedAt}
+		},
+	})
 	if err != nil {
-		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list watchlist")
+		return nil, nil, err
 	}
 	visible, err := h.filterHiddenWatchlistSeries(ctx, store, viewer.ProfileID, append([]userstore.WatchlistEntry(nil), entries...))
 	if err != nil {
@@ -446,6 +333,158 @@ func (h *PersonalDataHandler) ListWatchlistPage(ctx context.Context, viewer Pers
 		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve watchlist items")
 	}
 	return entries, items, nil
+}
+
+// listScanBatchMax caps how many store rows visibleListPage reads in one
+// query once it starts reading past hidden entries.
+const listScanBatchMax = 400
+
+// personalListSource is how visibleListPage reads one personal list: its
+// table for the single-query path, and the user store's own keyset read
+// for the fallback.
+type personalListSource[E any] struct {
+	list    catalog.PersonalList
+	store   userstore.UserStore
+	failure string
+	read    func(after *userstore.ListKey, n int) ([]E, error)
+	keyOf   func(E) userstore.ListKey
+	fromRow func(catalog.PersonalListRow) E
+}
+
+// visiblePersonalListReader answers a page of visible list entries in one
+// query. *catalog.ItemRepository implements it.
+type visiblePersonalListReader interface {
+	ListVisiblePersonalPage(ctx context.Context, list catalog.PersonalList, userID int, profileID string, filter catalog.AccessFilter, after *userstore.ListKey, limit int) ([]catalog.PersonalListRow, error)
+}
+
+// visibleListPage answers at most limit entries of a personal list that the
+// viewer may see, after the key, in store order. An entry is kept by the
+// rule the cards use (a catalog item the viewer may see, or an episode of a
+// series the viewer may see), so every entry answered has a card unless a
+// later filter (the watchlist's fully-watched series) drops it.
+//
+// The v2 listings build their next cursor from the last entry of a page and
+// decide has_more from a limit+1 probe. A cursor payload is signed but not
+// encrypted, so a cursor built from a hidden entry would name a title the
+// viewer may not see, and a page of hidden entries would come back empty
+// with has_more true. Skipping hidden entries here closes both.
+//
+// With the PostgreSQL user store the lists sit beside the catalog, and one
+// query applies the access filter (ListVisiblePersonalPage), so a page is a
+// single index-ordered read however many hidden entries come before it.
+// A SQLite user store has no catalog to join, so there the store's keyset
+// pages are read and checked in batches: the first asks for limit rows,
+// each further one is four times larger up to listScanBatchMax, and the
+// total is bounded by the list's length. Either way an empty library
+// allowlist reads nothing. The store's own list queries stay unfiltered
+// because recommendations read the same lists without an access filter.
+func visibleListPage[E any](ctx context.Context, h *PersonalDataHandler, viewer PersonalListViewer, after *userstore.ListKey, limit int, src personalListSource[E]) ([]E, error) {
+	if h.itemRepo == nil {
+		// No catalog to check against: answer the store page as is.
+		rows, err := src.read(after, limit)
+		if err != nil {
+			return nil, apiError(http.StatusInternalServerError, "internal_error", src.failure)
+		}
+		return rows, nil
+	}
+	if viewer.Access.AllowedLibraryIDs != nil && len(viewer.Access.AllowedLibraryIDs) == 0 {
+		return nil, nil
+	}
+	if reader, ok := h.itemRepo.(visiblePersonalListReader); ok && userstore.HasCatalogSQLState(src.store) {
+		rows, err := reader.ListVisiblePersonalPage(ctx, src.list, viewer.UserID, viewer.ProfileID, viewer.Access, after, limit)
+		if err != nil {
+			return nil, apiError(http.StatusInternalServerError, "internal_error", src.failure)
+		}
+		out := make([]E, len(rows))
+		for i, row := range rows {
+			out[i] = src.fromRow(row)
+		}
+		return out, nil
+	}
+	kept := make([]E, 0, limit)
+	batch := limit
+	for len(kept) < limit {
+		rows, err := src.read(after, batch)
+		if err != nil {
+			return nil, apiError(http.StatusInternalServerError, "internal_error", src.failure)
+		}
+		if len(rows) == 0 {
+			break
+		}
+		ids := make([]string, len(rows))
+		for i, row := range rows {
+			ids[i] = src.keyOf(row).MediaItemID
+		}
+		visible, err := h.listEntriesVisible(ctx, ids, viewer.Access)
+		if err != nil {
+			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to check item access")
+		}
+		for _, row := range rows {
+			if len(kept) < limit && visible[src.keyOf(row).MediaItemID] {
+				kept = append(kept, row)
+			}
+		}
+		if len(rows) < batch {
+			break
+		}
+		last := src.keyOf(rows[len(rows)-1])
+		after = &last
+		batch = min(max(batch*4, limit), max(limit, listScanBatchMax))
+	}
+	return kept, nil
+}
+
+// listEntriesVisible reports which of a personal list's item IDs get a card
+// for the viewer, by the rule resolveItemsByIDs applies: a catalog item the
+// access filter admits, or an episode whose parent series it admits.
+// Favorites and the watchlist can hold episodes (jellycompat clients
+// favorite them), and an episode card stands for the episode itself.
+func (h *PersonalDataHandler) listEntriesVisible(ctx context.Context, ids []string, filter catalog.AccessFilter) (map[string]bool, error) {
+	visible, err := h.itemRepo.EnsureAccessibleIDs(ctx, ids, filter)
+	if err != nil {
+		return nil, err
+	}
+	if visible == nil {
+		visible = map[string]bool{}
+	}
+	if h.episodeRepo == nil {
+		return visible, nil
+	}
+	var rest []string
+	for _, id := range ids {
+		if !visible[id] {
+			rest = append(rest, id)
+		}
+	}
+	if len(rest) == 0 {
+		return visible, nil
+	}
+	episodes, err := h.episodeRepo.GetByIDs(ctx, rest)
+	if err != nil {
+		return nil, err
+	}
+	if len(episodes) == 0 {
+		return visible, nil
+	}
+	// Several episodes of one series share its access check.
+	seriesIDs := make([]string, 0, len(episodes))
+	seen := make(map[string]bool, len(episodes))
+	for _, ep := range episodes {
+		if !seen[ep.SeriesID] {
+			seen[ep.SeriesID] = true
+			seriesIDs = append(seriesIDs, ep.SeriesID)
+		}
+	}
+	seriesVisible, err := h.itemRepo.EnsureAccessibleIDs(ctx, seriesIDs, filter)
+	if err != nil {
+		return nil, err
+	}
+	for _, ep := range episodes {
+		if seriesVisible[ep.SeriesID] {
+			visible[ep.ContentID] = true
+		}
+	}
+	return visible, nil
 }
 
 // VisibleItemIDs reports which of the given catalog items the viewer may see.
@@ -505,7 +544,7 @@ func (h *PersonalDataHandler) GetWatchlistEntry(ctx context.Context, viewer Pers
 		return userstore.WatchlistEntry{}, false, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
 	if err := h.ensureAccessibleItem(ctx, itemID, viewer.Access); err != nil {
-		return userstore.WatchlistEntry{}, false, apiError(http.StatusNotFound, "not_found", "Item not found")
+		return userstore.WatchlistEntry{}, false, itemLookupError(ctx, itemID, err)
 	}
 	h.promoteWatchlistItem(ctx, viewer, itemID)
 	e, err := store.GetWatchlistEntry(ctx, viewer.ProfileID, itemID)
@@ -528,7 +567,7 @@ func (h *PersonalDataHandler) AddToWatchlist(ctx context.Context, viewer Persona
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
 	if err := h.ensureAccessibleItem(ctx, itemID, viewer.Access); err != nil {
-		return apiError(http.StatusNotFound, "not_found", "Item not found")
+		return itemLookupError(ctx, itemID, err)
 	}
 	added, err := store.AddToWatchlist(ctx, viewer.ProfileID, itemID)
 	if err != nil {
@@ -560,90 +599,7 @@ func (h *PersonalDataHandler) RemoveFromWatchlist(ctx context.Context, viewer Pe
 	return nil
 }
 
-// HandleCheckWatchlist handles GET /watchlist/{item_id}.
-// Returns 204 if the item is on the watchlist, 404 if not.
-func (h *PersonalDataHandler) HandleCheckWatchlist(w http.ResponseWriter, r *http.Request) {
-	itemID := chi.URLParam(r, "item_id")
-
-	if itemID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
-		return
-	}
-
-	_, ok, err := h.GetWatchlistEntry(r.Context(), personalListViewerFromRequest(r), itemID)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	if !ok {
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleAddToWatchlist handles PUT /watchlist/{item_id}.
-func (h *PersonalDataHandler) HandleAddToWatchlist(w http.ResponseWriter, r *http.Request) {
-	itemID := chi.URLParam(r, "item_id")
-
-	if itemID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
-		return
-	}
-
-	if err := h.AddToWatchlist(r.Context(), personalListViewerFromRequest(r), itemID); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleRemoveFromWatchlist handles DELETE /watchlist/{item_id}.
-func (h *PersonalDataHandler) HandleRemoveFromWatchlist(w http.ResponseWriter, r *http.Request) {
-	itemID := chi.URLParam(r, "item_id")
-
-	if itemID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
-		return
-	}
-
-	if err := h.RemoveFromWatchlist(r.Context(), personalListViewerFromRequest(r), itemID); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
 // --- History ---
-
-// HandleListHistory handles GET /history.
-func (h *PersonalDataHandler) HandleListHistory(w http.ResponseWriter, r *http.Request) {
-	if !rejectInvalidImageSize(w, r) {
-		return
-	}
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-
-	limit, offset := parsePagination(r)
-
-	entries, err := h.HistoryEntries(r.Context(), userID, profileID, limit, offset)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	cards, err := h.HistoryCards(r.Context(), sectionViewerFromRequest(r), entries)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	items := make([]itemListResponse, 0, len(cards))
-	for _, card := range cards {
-		items = append(items, card.Item)
-	}
-
-	writeJSON(w, http.StatusOK, itemsListResponse{Items: items, HasMore: len(entries) == limit})
-}
 
 // History seams: the v1 handlers and the v2 history operations share them.
 // Each returns an *APIError on failure.
@@ -658,20 +614,6 @@ type HistoryRemovalTarget = historyRemovalTargetRequest
 type HistoryCardView struct {
 	Item  CollectionItemView
 	Entry userstore.WatchHistoryEntry
-}
-
-// HistoryEntries pages the profile's visible history rows, most recent
-// watch first.
-func (h *PersonalDataHandler) HistoryEntries(ctx context.Context, userID int, profileID string, limit, offset int) ([]userstore.WatchHistoryEntry, error) {
-	store, err := h.storeProvider.ForUser(ctx, userID)
-	if err != nil {
-		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
-	}
-	entries, err := store.ListHistory(ctx, profileID, limit, offset)
-	if err != nil {
-		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list history")
-	}
-	return entries, nil
 }
 
 // HistoryPage is the keyset form of HistoryEntries: at most limit visible
@@ -689,17 +631,6 @@ func (h *PersonalDataHandler) HistoryPage(ctx context.Context, userID int, profi
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list history")
 	}
 	return entries, nil
-}
-
-// HistoryCards renders the cards of a history page in entry order, one per
-// display item, omitting items the viewer cannot see or that left the
-// catalog.
-func (h *PersonalDataHandler) HistoryCards(ctx context.Context, viewer SectionViewer, entries []userstore.WatchHistoryEntry) ([]HistoryCardView, error) {
-	display, err := catalog.ResolveHistoryDisplayEntries(ctx, entries, h.episodeRepo)
-	if err != nil {
-		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve history items")
-	}
-	return h.historyDisplayCards(ctx, viewer, display)
 }
 
 // HistoryPageCards keeps only the newest visible watch of each display card.
@@ -736,7 +667,7 @@ func (h *PersonalDataHandler) historyDisplayCards(ctx context.Context, viewer Se
 	for _, d := range display {
 		ids = append(ids, d.DisplayID)
 	}
-	items, err := resolveItemsByIDs(h, ctx, PersonalListViewer{UserID: apimw.GetUserID(ctx), ProfileID: apimw.GetProfileID(ctx), Access: viewer.Access, ImageSize: viewer.ImageSize}, ids)
+	items, err := resolveItemsByIDs(h, ctx, PersonalListViewer{UserID: apimw.GetUserID(ctx), ProfileID: apimw.GetProfileID(ctx), Access: viewer.Access, ImageSize: viewer.ImageSize, ImageWidths: viewer.ImageWidths}, ids)
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve history items")
 	}
@@ -813,38 +744,7 @@ func (h *PersonalDataHandler) RemoveHistory(ctx context.Context, userID int, pro
 	return nil
 }
 
-// HandleRemoveHistory handles POST /history/remove.
-func (h *PersonalDataHandler) HandleRemoveHistory(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-
-	var req removeHistoryRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	if len(req.Targets) == 0 {
-		writeError(w, http.StatusBadRequest, "bad_request", "At least one history target is required")
-		return
-	}
-
-	if err := h.RemoveHistory(r.Context(), userID, profileID, requestAccessFilter(r), req.Targets); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
 // --- Helpers ---
-
-// itemsListResponse wraps a list of items for favorites/watchlist responses.
-type itemsListResponse struct {
-	Items []itemListResponse `json:"items"`
-	// HasMore lets clients paginate these personal lists. Computed from the
-	// raw store page size (== limit), not the resolved item count, so
-	// catalog-missing / hidden entries don't make a full page look final.
-	HasMore bool `json:"has_more"`
-}
 
 // resolveItems fetches full media item data for a list of entries.
 // It preserves the order of the input slice and silently omits items not found in the catalog.
@@ -876,9 +776,9 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 	// an unrecognized value. Unset keeps the per-slot defaults below, which are
 	// deliberately asymmetric (a featured poster beside a card backdrop); an
 	// explicit size applies to every image in the response instead.
-	size := viewer.ImageSize
-	posterHint := requestVariantHint("featured", size)
-	cardHint := requestVariantHint("card", size)
+	art := viewer.Artwork()
+	posterHint := requestVariantHint("featured", art.For(imagesize.SlotPoster))
+	cardHint := requestVariantHint("card", art.For(imagesize.SlotBackdrop))
 	itemIDs := make([]string, len(mediaItems))
 	for i, mi := range mediaItems {
 		itemIDs[i] = mi.ContentID
@@ -904,6 +804,9 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 		}
 	}
 
+	// Card images resolve together once every card is built, in one batch per
+	// hint, rather than one lookup each.
+	var images listCardImages
 	for _, mi := range accessibleItems {
 		resp := itemListResponse{
 			ContentID:         mi.ContentID,
@@ -915,13 +818,16 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 			AdvisoryAge:       mi.AdvisoryAge,
 			AdvisorySource:    mi.AdvisorySource,
 			RatingIMDB:        mi.RatingIMDB,
+			ImdbID:            mi.ImdbID,
+			TmdbID:            mi.TmdbID,
+			TvdbID:            mi.TvdbID,
 			Overview:          mi.Overview,
 			PosterThumbhash:   mi.PosterThumbhash,
 			BackdropThumbhash: mi.BackdropThumbhash,
 			UserState:         userStates[mi.ContentID],
 		}
-		resp.PosterURL = h.presignURL(ctx, sizedPosterPath(mi.PosterPath, size), posterHint)
-		resp.BackdropURL = h.presignURL(ctx, sizedCardBackdropPath(mi.BackdropPath, size), cardHint)
+		images.add(&resp.PosterURL, sizedPosterPath(mi.PosterPath, art.For(imagesize.SlotPoster)), posterHint)
+		images.add(&resp.BackdropURL, sizedCardBackdropPath(mi.BackdropPath, art.For(imagesize.SlotBackdrop)), cardHint)
 		byID[mi.ContentID] = &resp
 	}
 	logoPaths := localizedLogoPaths(ctx, h.detailSvc, accessibleItems, filter)
@@ -964,14 +870,14 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 					}
 					// Use episode still as backdrop, fall back to parent series images.
 					if ep.StillPath != "" {
-						resp.BackdropURL = h.presignURL(ctx, sizedCardPath(ep.StillPath, artworkkey.ImageStill, size), cardHint)
+						images.add(&resp.BackdropURL, sizedCardPath(ep.StillPath, artworkkey.ImageStill, art.For(imagesize.SlotBackdrop)), cardHint)
 						resp.BackdropThumbhash = ep.StillThumbhash
 					} else if parent != nil {
-						resp.BackdropURL = h.presignURL(ctx, sizedCardBackdropPath(parent.BackdropPath, size), cardHint)
+						images.add(&resp.BackdropURL, sizedCardBackdropPath(parent.BackdropPath, art.For(imagesize.SlotBackdrop)), cardHint)
 						resp.BackdropThumbhash = parent.BackdropThumbhash
 					}
 					if parent != nil {
-						resp.PosterURL = h.presignURL(ctx, sizedPosterPath(parent.PosterPath, size), posterHint)
+						images.add(&resp.PosterURL, sizedPosterPath(parent.PosterPath, art.For(imagesize.SlotPoster)), posterHint)
 						resp.PosterThumbhash = parent.PosterThumbhash
 						resp.Year = parent.Year
 						resp.Genres = parent.Genres
@@ -986,7 +892,8 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 		}
 	}
 
-	for contentID, url := range signListingLogos(ctx, h.detailSvc, logoPaths, size) {
+	images.resolve(ctx, h.detailSvc)
+	for contentID, url := range signListingLogos(ctx, h.detailSvc, logoPaths, art.For(imagesize.SlotLogo)) {
 		if item, ok := byID[contentID]; ok {
 			item.LogoURL = url
 		}
@@ -1114,6 +1021,11 @@ func (h *PersonalDataHandler) ensureAccessibleItem(ctx context.Context, itemID s
 	if h.itemRepo == nil {
 		return nil
 	}
+	// An ID Postgres refuses as text names no item; querying with it would
+	// fail with an encoding error that reads as a server fault.
+	if !auth.ValidTextKey(itemID) {
+		return catalog.ErrItemNotFound
+	}
 	err := h.itemRepo.EnsureAccessible(ctx, itemID, access)
 	if err == nil {
 		return nil
@@ -1124,37 +1036,66 @@ func (h *PersonalDataHandler) ensureAccessibleItem(ctx context.Context, itemID s
 		if epErr == nil {
 			return h.itemRepo.EnsureAccessible(ctx, ep.SeriesID, access)
 		}
+		if !errors.Is(epErr, catalog.ErrEpisodeNotFound) {
+			return epErr
+		}
 	}
 	return err
 }
 
-// presignURL resolves an image path to a usable URL, delegating to the
-// DetailService which handles plugin-prefixed paths, HTTP pass-through,
-// and legacy S3 presigning.
-func (h *PersonalDataHandler) presignURL(ctx context.Context, path string, variant string) string {
-	if h.detailSvc != nil {
-		return h.detailSvc.PresignURL(ctx, path, variant)
+// itemLookupError answers a failed item lookup or access check: 404 when the
+// item is missing or outside the viewer's scope, 500 when the query itself
+// failed, so a database fault never tells a client a visible item is gone.
+func itemLookupError(ctx context.Context, itemID string, err error) *APIError {
+	if isNotFound(err) {
+		return apiError(http.StatusNotFound, "not_found", "Item not found")
 	}
-	return ""
+	if !errors.Is(err, context.Canceled) {
+		slog.ErrorContext(ctx, "personal list: item lookup failed", "component", "api", "content_id", itemID, "error", err)
+	}
+	return apiError(http.StatusInternalServerError, "internal_error", "Failed to check item access")
 }
 
-// parsePagination extracts limit and offset from query parameters with defaults.
-func parsePagination(r *http.Request) (int, int) {
-	q := r.URL.Query()
+// listCardImages collects a listing's card image fields for batch resolution.
+type listCardImages struct {
+	pending []listCardImage
+}
 
-	limit := 50
-	if v := q.Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			limit = n
-		}
+type listCardImage struct {
+	dst        *string
+	path, hint string
+}
+
+// add queues path to fill *dst, resolved at hint. Empty paths and the "-"
+// placeholder leave *dst empty.
+func (l *listCardImages) add(dst *string, path, hint string) {
+	if path == "" || path == "-" {
+		return
 	}
+	l.pending = append(l.pending, listCardImage{dst: dst, path: path, hint: hint})
+}
 
-	offset := 0
-	if v := q.Get("offset"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			offset = n
-		}
+// resolve fills every queued field, one batch per hint.
+func (l *listCardImages) resolve(ctx context.Context, svc *catalog.DetailService) {
+	if svc == nil || len(l.pending) == 0 {
+		return
 	}
-
-	return limit, offset
+	byHint := make(map[string][]string)
+	type pathAtHint struct{ path, hint string }
+	seen := make(map[pathAtHint]struct{}, len(l.pending))
+	for _, image := range l.pending {
+		key := pathAtHint{path: image.path, hint: image.hint}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		byHint[image.hint] = append(byHint[image.hint], image.path)
+	}
+	resolved := make(map[string]map[string]catalog.ResolvedImageURL, len(byHint))
+	for _, hint := range slices.Sorted(maps.Keys(byHint)) {
+		resolved[hint] = svc.PresignURLsWithExpiry(ctx, byHint[hint], hint)
+	}
+	for _, image := range l.pending {
+		*image.dst = resolved[image.hint][image.path].URL
+	}
 }

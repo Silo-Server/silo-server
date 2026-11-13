@@ -9,8 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/config"
-	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
 )
@@ -96,7 +94,14 @@ func TestTranscodeProxyDoesNotAcknowledgeFailedDownstreamWrite(t *testing.T) {
 	claims := &streamtoken.Claims{SessionID: "public", TranscodeNode: node.URL}
 	req := httptest.NewRequest(http.MethodGet, "/stream/transcode/token/segment/seg_00007.ts", nil)
 	w := &failingCompletionResponseWriter{header: make(http.Header), remaining: 5}
-	server.proxyToTranscodeNode(w, req, claims, "/transcode/remote/segment/seg_00007.ts", "")
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != http.ErrAbortHandler { //nolint:errorlint // sentinel compared by identity, as net/http does
+				t.Fatalf("failed downstream transfer ended with %v, want panic(http.ErrAbortHandler)", recovered)
+			}
+		}()
+		server.proxyToTranscodeNode(w, req, claims, "/transcode/remote/segment/seg_00007.ts", "")
+	}()
 
 	if got := acknowledgements.Load(); got != 0 {
 		t.Fatalf("failed downstream transfer produced %d acknowledgement(s)", got)
@@ -104,11 +109,7 @@ func TestTranscodeProxyDoesNotAcknowledgeFailedDownstreamWrite(t *testing.T) {
 }
 
 func newCompletionTestProxy(client *http.Client) *Server {
-	watcher := nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{})
-	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = "proxy-test-secret"
-	watcher.SetConfigForTest(cfg)
-	server := NewServer(watcher, nil)
+	server := NewServer(testWatcher("proxy-test-secret"), nil)
 	server.httpClient = client
 	return server
 }
@@ -130,4 +131,33 @@ func (w *failingCompletionResponseWriter) Write(p []byte) (int, error) {
 	n := min(len(p), w.remaining)
 	w.remaining -= n
 	return n, io.ErrClosedPipe
+}
+
+// TestTranscodeProxyFailsPromptlyOnHungNode covers proxy egress for issue
+// #2296: a transcode node that stops answering without closing its connections
+// gets a 502 within the liveness bound instead of holding the request until the
+// player gives up, so the player replans onto another node.
+func TestTranscodeProxyFailsPromptlyOnHungNode(t *testing.T) {
+	release := make(chan struct{})
+	node := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer node.Close()
+	defer close(release)
+
+	server := newCompletionTestProxy(transcodeproxy.NodeClient())
+	claims := &streamtoken.Claims{SessionID: "public", TranscodeNode: node.URL}
+	req := httptest.NewRequest(http.MethodGet, "/stream/transcode/token/segment/seg_00007.ts", nil)
+	rr := httptest.NewRecorder()
+	started := time.Now()
+	server.proxyToTranscodeNode(rr, req, claims, "/transcode/remote/segment/seg_00007.ts", "")
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", rr.Code)
+	}
+	if took := time.Since(started); took > 10*time.Second {
+		t.Fatalf("proxy answered after %v, want under 10s", took)
+	}
 }

@@ -1,10 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Check, Settings } from "lucide-react";
-import { resolveActiveQualityOptionId } from "../playback-info";
-import type { EffectiveRecipeV3 } from "../protocol-v3";
+import { useT } from "@/i18n";
+import {
+  buildVersionStatusLabels,
+  plainResolutionLabel,
+  resolveActiveQualityOptionId,
+} from "../playback-info";
 import type { QualityOption } from "../types";
-import { PLAYBACK_SPEEDS, formatPlaybackSpeed } from "../utils/playbackSpeed";
-import { PlaybackSpeedTrack } from "./PlaybackSpeedTrack";
+import { formatPlaybackSpeed } from "../utils/playbackSpeed";
+import { PlaybackSpeedPicker } from "./PlaybackSpeedPicker";
 import { PlayerMenuSurface } from "./PlayerMenuSurface";
 
 export interface VersionInfo {
@@ -17,8 +21,8 @@ export interface VersionInfo {
 interface QualityMenuProps {
   options: QualityOption[];
   activeId: string;
-  /** The plan's effective recipe, which shows when a bitrate cap reduced the source. */
-  deliveredRecipe?: EffectiveRecipeV3;
+  /** The plan's `active_quality`: the entry it delivers, lit unless the preference is Auto. */
+  activeQuality?: string;
   isTranscoding: boolean;
   error: string | null;
   onSelect: (id: string) => void;
@@ -33,7 +37,7 @@ interface QualityMenuProps {
 export function QualityMenu({
   options,
   activeId,
-  deliveredRecipe,
+  activeQuality,
   isTranscoding,
   error,
   onSelect,
@@ -43,6 +47,7 @@ export function QualityMenu({
   playbackSpeed = 1,
   onPlaybackSpeedChange,
 }: QualityMenuProps) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -54,56 +59,11 @@ export function QualityMenu({
     [onSelect],
   );
 
-  // Close on outside click.
+  // Close when focus leaves the menu and its trigger.
   const handleBlur = useCallback((e: React.FocusEvent) => {
     if (!menuRef.current?.contains(e.relatedTarget as Node)) {
       setOpen(false);
     }
-  }, []);
-
-  // Close on Escape.
-  useEffect(() => {
-    if (!open) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open]);
-
-  const menuItemsRef = useRef<(HTMLButtonElement | null)[]>([]);
-
-  const handleMenuKeyDown = useCallback((e: React.KeyboardEvent) => {
-    const items = menuItemsRef.current.filter(Boolean) as HTMLButtonElement[];
-    if (items.length === 0) return;
-    const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
-    let nextIndex: number | null = null;
-
-    switch (e.key) {
-      case "ArrowDown":
-      case "ArrowRight":
-        nextIndex = currentIndex < items.length - 1 ? currentIndex + 1 : 0;
-        break;
-      case "ArrowUp":
-      case "ArrowLeft":
-        nextIndex = currentIndex > 0 ? currentIndex - 1 : items.length - 1;
-        break;
-      case "Home":
-        nextIndex = 0;
-        break;
-      case "End":
-        nextIndex = items.length - 1;
-        break;
-      case "Escape":
-        setOpen(false);
-        return;
-      default:
-        return;
-    }
-    e.preventDefault();
-    items[nextIndex]?.focus();
   }, []);
 
   const showVersions = !versionLocked && versions && versions.length > 1 && onSwitchVersion;
@@ -111,42 +71,58 @@ export function QualityMenu({
   const showSpeed = onPlaybackSpeedChange !== undefined;
   if (!showVersions && !showQuality && !showSpeed) return null;
 
-  let menuLabel = "Version";
-  if (showSpeed) menuLabel = "Playback settings";
-  else if (showQuality) menuLabel = "Quality";
+  let menuLabel = t("web.player.quality.version");
+  if (showSpeed) menuLabel = t("web.player.quality.playbackSettings");
+  else if (showQuality) menuLabel = t("web.player.quality.title");
 
-  const resolvedActiveId = resolveActiveQualityOptionId(options, activeId, deliveredRecipe);
+  const resolvedActiveId = resolveActiveQualityOptionId(options, activeId, activeQuality);
   const activeOption = options.find((option) => option.id === resolvedActiveId);
   let sourceLabel: string | null = null;
-  if (showQuality) sourceLabel = isTranscoding ? "…" : (activeOption?.label ?? "Quality");
-  else if (showVersions) sourceLabel = "Version";
+  if (showQuality) {
+    sourceLabel = isTranscoding
+      ? "…"
+      : (activeOption?.label ?? plainResolutionLabel(activeId) ?? t("web.player.quality.title"));
+  } else if (showVersions) sourceLabel = t("web.player.quality.version");
   // A speed other than 1x stays on the gear in every layout: inline after the
   // quality label, or on the gear's corner where the label is hidden.
   const changedSpeed = showSpeed && playbackSpeed !== 1 ? formatPlaybackSpeed(playbackSpeed) : null;
-  // The speed stops come first in the menu's arrow-key order.
-  let menuItemIndex = showSpeed ? PLAYBACK_SPEEDS.length : 0;
+
+  // The visible value is part of the name, so speech users can say what they see.
+  const valueLabel = sourceLabel !== menuLabel ? sourceLabel : null;
+  let accessibleName = menuLabel;
+  if (valueLabel && changedSpeed) {
+    accessibleName = t("web.player.quality.triggerWithValueAndSpeed", {
+      menu: menuLabel,
+      value: valueLabel,
+      speed: changedSpeed,
+    });
+  } else if (valueLabel) {
+    accessibleName = t("web.player.quality.triggerWithValue", {
+      menu: menuLabel,
+      value: valueLabel,
+    });
+  } else if (changedSpeed) {
+    accessibleName = t("web.player.quality.triggerWithSpeed", {
+      menu: menuLabel,
+      speed: changedSpeed,
+    });
+  }
 
   return (
     <div ref={menuRef} className="relative" onBlur={handleBlur}>
       <button
         type="button"
-        className="player-quality-trigger player-utility-btn sm:w-auto sm:gap-1.5 sm:px-3"
+        className="hud-icon-btn hud-icon-btn--labeled"
         onClick={() => setOpen((v) => !v)}
-        aria-label={changedSpeed ? `${menuLabel}, ${changedSpeed}` : menuLabel}
+        aria-label={accessibleName}
+        title={menuLabel}
         aria-expanded={open}
         aria-haspopup="menu"
       >
-        <Settings className="h-[18px] w-[18px]" />
-        {sourceLabel && (
-          <span className="player-quality-label hidden text-[11px] font-medium tracking-wide sm:inline">
-            {sourceLabel}
-          </span>
-        )}
+        <Settings />
+        {sourceLabel && <span className="player-quality-label">{sourceLabel}</span>}
         {changedSpeed && (
-          <span
-            aria-hidden="true"
-            className="player-speed-badge pointer-events-none absolute top-0.5 left-6 rounded-full bg-white px-1 text-[9px] leading-[13px] font-semibold text-black tabular-nums shadow-[0_0_0_2px_rgba(0,0,0,0.65)] sm:static"
-          >
+          <span aria-hidden="true" className="hud-speed-badge">
             {changedSpeed}
           </span>
         )}
@@ -154,129 +130,99 @@ export function QualityMenu({
 
       {open && (
         <PlayerMenuSurface
+          title={menuLabel}
           anchorRef={menuRef}
-          className="absolute right-0 bottom-full z-30 mb-2 max-h-[calc(100dvh-8rem)] min-w-[224px] overflow-y-auto rounded-lg bg-black/90 py-1 shadow-lg backdrop-blur"
+          className="hud-popover z-30 w-[22rem] max-w-[calc(100vw-2rem)]"
           onClose={() => setOpen(false)}
-          onKeyDown={handleMenuKeyDown}
         >
-          {error && <div className="px-3 py-1 text-xs text-red-400">{error}</div>}
-          {showSpeed && (
-            <>
-              <PlaybackSpeedTrack
-                value={playbackSpeed}
-                onChange={onPlaybackSpeedChange}
-                itemRef={(stop) => (el) => {
-                  menuItemsRef.current[stop] = el;
-                }}
-              />
-              {(showVersions || showQuality) && <div className="my-1 border-t border-white/10" />}
-            </>
-          )}
-          {versionLocked && showQuality && (
-            <p className="max-w-64 px-3 py-2 text-xs text-white/60">
-              Watch Party keeps everyone on the same version. You can adjust your streaming quality
-              below.
-            </p>
-          )}
-          {/* Version switching (multiple file versions) */}
-          {showVersions && (
-            <>
-              <div className="px-3 py-1 text-xs tracking-wider text-white/40 uppercase">
-                Version
-              </div>
-              {versions.map((v) => {
-                const idx = menuItemIndex++;
-                const statusLabels = buildVersionStatusLabels(v);
-                return (
-                  <button
-                    key={v.fileId}
-                    ref={(el) => {
-                      menuItemsRef.current[idx] = el;
-                    }}
-                    role="menuitem"
-                    type="button"
-                    className={`flex w-full px-3 py-2 text-left text-sm hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
-                      v.isCurrentSource ? "text-white" : "text-white/70"
-                    }`}
-                    onClick={() => {
-                      onSwitchVersion(v.fileId);
-                      setOpen(false);
-                    }}
-                  >
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className="truncate">{v.label}</span>
+          <div className="hud-scroll-list">
+            {error && (
+              <p role="alert" className="px-4 pb-1 text-sm text-red-300">
+                {error}
+              </p>
+            )}
+            {showSpeed && (
+              <>
+                <PlaybackSpeedPicker value={playbackSpeed} onChange={onPlaybackSpeedChange} />
+                {(showVersions || showQuality) && <div className="hud-panel-divider" />}
+              </>
+            )}
+            {versionLocked && showQuality && (
+              <p className="px-4 py-1.5 text-xs leading-relaxed text-[var(--hud-ash)]">
+                {t("web.player.quality.watchPartyVersionLocked")}
+              </p>
+            )}
+            {/* Version switching (multiple file versions) */}
+            {showVersions && (
+              <>
+                <div className="hud-panel-section">{t("web.player.quality.sourceFile")}</div>
+                {versions.map((v) => {
+                  const statusLabels = buildVersionStatusLabels(v);
+                  return (
+                    <button
+                      key={v.fileId}
+                      role="menuitem"
+                      type="button"
+                      aria-current={v.isCurrentSource ? "true" : undefined}
+                      className="hud-item"
+                      onClick={() => {
+                        onSwitchVersion(v.fileId);
+                        setOpen(false);
+                      }}
+                    >
+                      <span aria-hidden="true" className="hud-check">
+                        {v.isCurrentSource ? <Check /> : null}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate" title={v.label}>
+                        {v.label}
+                      </span>
                       {statusLabels.length > 0 && (
-                        <span className="flex flex-wrap gap-1">
+                        <span className="flex shrink-0 gap-1">
                           {statusLabels.map((status) => (
-                            <span
-                              key={status}
-                              className="rounded border border-white/15 bg-white/10 px-1.5 py-0.5 text-[10px] leading-none text-white/70"
-                            >
+                            <span key={status} className="hud-chip">
                               {status}
                             </span>
                           ))}
                         </span>
                       )}
-                    </span>
-                  </button>
-                );
-              })}
-            </>
-          )}
-          {showQuality && (
-            <>
-              {showVersions && <div className="my-1 border-t border-white/10" />}
-              <div className="px-3 py-1 text-xs tracking-wider text-white/40 uppercase">
-                Quality
-              </div>
-              {options.map((opt) => {
-                const idx = menuItemIndex++;
-                return (
-                  <button
-                    key={opt.id}
-                    ref={(el) => {
-                      menuItemsRef.current[idx] = el;
-                    }}
-                    role="menuitem"
-                    type="button"
-                    className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
-                      opt.id === resolvedActiveId ? "text-white" : "text-white/70"
-                    }`}
-                    aria-current={opt.id === resolvedActiveId ? "true" : undefined}
-                    onClick={() => handleSelect(opt.id)}
-                  >
-                    <span>{opt.label}</span>
-                    <span className="flex items-center gap-2">
-                      <span className="text-xs text-white/40">{opt.sublabel}</span>
-                      {opt.id === resolvedActiveId && (
-                        <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-white text-black">
-                          <Check className="size-3" strokeWidth={3} aria-hidden="true" />
-                          <span className="sr-only">Selected</span>
-                        </span>
+                    </button>
+                  );
+                })}
+              </>
+            )}
+            {showQuality && (
+              <>
+                {showVersions && <div className="hud-panel-divider" />}
+                <div className="hud-panel-section">{t("web.player.quality.streamingQuality")}</div>
+                {options.map((opt) => {
+                  const selected = opt.id === resolvedActiveId;
+                  return (
+                    <button
+                      key={opt.id}
+                      role="menuitem"
+                      type="button"
+                      className="hud-item"
+                      aria-current={selected ? "true" : undefined}
+                      onClick={() => handleSelect(opt.id)}
+                    >
+                      <span aria-hidden="true" className="hud-check">
+                        {selected ? <Check /> : null}
+                      </span>
+                      <span className="flex-1">{opt.label}</span>
+                      {opt.sublabel ? (
+                        <span className="hud-item-secondary tabular-nums">{opt.sublabel}</span>
+                      ) : null}
+                      {selected && (
+                        <span className="sr-only">{t("web.player.quality.selected")}</span>
                       )}
-                    </span>
-                  </button>
-                );
-              })}
-            </>
-          )}
+                    </button>
+                  );
+                })}
+              </>
+            )}
+          </div>
         </PlayerMenuSurface>
       )}
     </div>
   );
-}
-
-export function buildVersionStatusLabels(version: VersionInfo): string[] {
-  if (version.isCurrentSource && version.isRequestedSource) {
-    return ["Playing"];
-  }
-
-  const labels: string[] = [];
-  if (version.isCurrentSource) {
-    labels.push("Playing");
-  }
-  if (version.isRequestedSource) {
-    labels.push("Requested");
-  }
-  return labels;
 }

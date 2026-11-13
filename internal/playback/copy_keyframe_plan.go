@@ -2,7 +2,6 @@ package playback
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -28,39 +28,26 @@ import (
 // a planned session restarts from the beginning instead (see restart).
 type copySegmentPlan struct {
 	durations []float64
+	// file is the source version the plan was made from, which a mismatch
+	// rejects (checkCopyPlan); zero for a plan rebuilt from its record.
+	file keyframes.Version
 }
 
-// loadKeyframeIndex reads a source's keyframe index, and
-// loadVerifiedKeyframeIndex waits for its full check, stopping when ctx is
-// done; tests replace both.
-var (
-	loadKeyframeIndex         = keyframes.Load
-	loadVerifiedKeyframeIndex = keyframes.LoadVerified
-)
+// loadKeyframeIndex reads a source's keyframe index; tests replace it.
+var loadKeyframeIndex = keyframes.Load
 
 // planCopySegments returns the segment plan for a session, or nil when the
 // session keeps FFmpeg's real playlist: the setting is off, the video isn't
 // copied, the stream doesn't start at the beginning, or the source has no
 // keyframe index.
-func planCopySegments(ctx context.Context, opts TranscodeOpts) *copySegmentPlan {
+func planCopySegments(opts TranscodeOpts) *copySegmentPlan {
 	if !opts.KeyframePlaylist ||
 		!strings.EqualFold(opts.TargetCodecVideo, "copy") ||
 		opts.SeekSeconds > 0 || opts.StartSegmentNumber > 0 ||
 		!CanGenerateSyntheticManifest(opts.TotalDuration, opts.SegmentDuration) {
 		return nil
 	}
-	load := loadKeyframeIndex
-	if opts.Reconstructed {
-		load = func(path string) (keyframes.Index, error) { return loadVerifiedKeyframeIndex(ctx, path) }
-		// A rebuilt session that lost its plan record (a clean shutdown
-		// removes the output directory) may already have served the planned
-		// playlist. The plan follows from the verified index alone, so wait
-		// for the check here rather than fall back to FFmpeg's playlist,
-		// which a player holding the planned one can't follow. Once the
-		// check has run, the index is cached. The check stops if the
-		// rebuild's request goes away (see resolveCopyPlan).
-	}
-	idx, err := load(opts.InputPath)
+	idx, err := loadKeyframeIndex(opts.InputPath)
 	if err != nil {
 		if !errors.Is(err, keyframes.ErrNoIndex) {
 			log.Printf("playback: read keyframe index for %s: %v; using FFmpeg's playlist", opts.SessionID, err)
@@ -83,7 +70,7 @@ func planCopySegments(ctx context.Context, opts TranscodeOpts) *copySegmentPlan 
 		return nil
 	}
 	durations := keyframes.SegmentDurations(starts, idx.VideoEnd)
-	return &copySegmentPlan{durations: durations}
+	return &copySegmentPlan{durations: durations, file: idx.File}
 }
 
 // copyPlanRecordFile keeps a session's planning decision in its output
@@ -98,17 +85,17 @@ type copyPlanRecord struct {
 // resolveCopyPlan returns the plan a session serves. The first start decides
 // and records the decision; a rebuilt session follows the record, so it
 // serves the playlist its player already has. Deciding afresh could differ:
-// a file's index that was still being checked may be verified by then.
+// a playback may have rejected the file's index since (keyframes.Reject).
 //
 // The record lives in the output directory, which a clean shutdown removes.
-// A rebuilt session without one plans again from the verified index (see
-// planCopySegments), which gives the same plan as the first start. If that
-// start had fallen back to FFmpeg's playlist, the rebuilt session now plans:
-// a planned session copies from the beginning, where FFmpeg cuts the same
-// segments, so the player's earlier segments still match.
-func resolveCopyPlan(ctx context.Context, opts TranscodeOpts) *copySegmentPlan {
+// A rebuilt session without one plans again from the index, which gives the
+// same plan as the first start unless the file has been rejected. If that
+// start had fallen back to FFmpeg's playlist, the rebuilt session may now
+// plan: a planned session copies from the beginning, where FFmpeg cuts the
+// same segments, so the player's earlier segments still match.
+func resolveCopyPlan(opts TranscodeOpts) *copySegmentPlan {
 	if !opts.KeyframePlaylist || opts.OutputDir == "" {
-		return planCopySegments(ctx, opts)
+		return planCopySegments(opts)
 	}
 	path := filepath.Join(opts.OutputDir, copyPlanRecordFile)
 	if data, err := os.ReadFile(path); err == nil {
@@ -128,13 +115,7 @@ func resolveCopyPlan(ctx context.Context, opts TranscodeOpts) *copySegmentPlan {
 	// Record the decision whatever the start's fate: StartTranscode launches
 	// FFmpeg even if its caller has gone, and that session serves this
 	// playlist.
-	plan := planCopySegments(ctx, opts)
-	if plan == nil && opts.Reconstructed && ctx.Err() != nil {
-		// The rebuild's request went away during the keyframe check. Its
-		// outcome says nothing about the file, so don't record it:
-		// StartTranscode abandons this rebuild, and the next one plans.
-		return nil
-	}
+	plan := planCopySegments(opts)
 	rec := copyPlanRecord{Planned: plan != nil}
 	if plan != nil {
 		rec.Durations = plan.durations
@@ -168,6 +149,120 @@ func (r copyPlanRecord) plan() *copySegmentPlan {
 	return &copySegmentPlan{durations: r.Durations}
 }
 
+// planSegmentTolerance is how far a segment FFmpeg wrote may differ from its
+// planned duration. The planned last segment isn't compared: FFmpeg measures
+// it from the demuxer's packet durations, which for a file whose frame rate
+// changes need not reach the video's end, and it moves no boundary.
+const planSegmentTolerance = 0.002
+
+// checkCopyPlan compares the segments FFmpeg has written, from its own
+// playlist, with the plan. complete says FFmpeg finished the whole stream
+// (ffmpegFinishedPlan); the playlist must then list every planned segment.
+// Otherwise the last segment listed isn't compared: a run that stopped, for
+// example on a read error, ends its last segment early, which says nothing
+// about the file's Cues. A segment past the plan's end always counts.
+//
+// The plan comes from the file's Cues, which only a few sampled clusters
+// vouch for (#2453). Cues that leave out keyframes elsewhere make FFmpeg cut
+// where the plan doesn't, so the first mismatch rejects the file version the
+// plan came from (keyframes.Reject): later playbacks keep FFmpeg's playlist.
+// A plan rebuilt from its record doesn't know that version and rejects
+// nothing; the next fresh playback of the file checks it again. This session
+// goes on serving the plan, which its player already has.
+func (s *TranscodeSession) checkCopyPlan(entries []manifestSegmentEntry, complete bool) {
+	durations := s.copyPlan.durations
+	s.mu.Lock()
+	if s.copyPlanRejected {
+		s.mu.Unlock()
+		return
+	}
+	var mismatch string
+	seen := make([]bool, len(durations))
+	for i, entry := range entries {
+		if entry.number < 0 {
+			continue
+		}
+		if entry.number >= len(durations) {
+			mismatch = fmt.Sprintf("FFmpeg wrote segment %d, past the keyframe playlist's %d", entry.number, len(durations))
+			break
+		}
+		seen[entry.number] = true
+		if (!complete && i == len(entries)-1) || entry.number == len(durations)-1 {
+			continue
+		}
+		if math.Abs(entry.duration-durations[entry.number]) > planSegmentTolerance {
+			mismatch = fmt.Sprintf("FFmpeg wrote segment %d as %.3fs, the keyframe playlist has %.3fs",
+				entry.number, entry.duration, durations[entry.number])
+			break
+		}
+	}
+	if mismatch == "" && complete {
+		if missing := slices.Index(seen, false); missing >= 0 {
+			mismatch = fmt.Sprintf("FFmpeg finished without segment %d of the keyframe playlist's %d", missing, len(durations))
+		}
+	}
+	if mismatch == "" {
+		s.mu.Unlock()
+		return
+	}
+	s.copyPlanRejected = true
+	opts := s.opts
+	s.mu.Unlock()
+
+	log.Printf("playback: session %s: %s; later playbacks of %s use FFmpeg's playlist", opts.SessionID, mismatch, opts.InputPath)
+	keyframes.Reject(s.copyPlan.file)
+}
+
+// checkCopyPlanOutput runs checkCopyPlan on FFmpeg's playlist as an FFmpeg
+// process exits, having finished, failed (waitErr) or been stopped. Nothing
+// else need read the session's progress (SegmentProgress) for its plan to be
+// checked. A run that finished the whole stream also records how many
+// segments FFmpeg wrote (plannedSegmentRecoveryDecision).
+func (s *TranscodeSession) checkCopyPlanOutput(waitErr error) {
+	if s.copyPlan == nil {
+		return
+	}
+	manifest, err := os.ReadFile(filepath.Join(s.outputDir, "stream.m3u8"))
+	if err != nil {
+		return
+	}
+	timeline, err := parseManifestTimeline(manifest)
+	if err != nil {
+		return
+	}
+	complete := waitErr == nil && ffmpegPlaylistComplete(manifest) && ffmpegFinishedPlan(timeline.entries, s.copyPlan.durations)
+	if complete {
+		written := 0
+		for _, entry := range timeline.entries {
+			written = max(written, entry.number+1)
+		}
+		s.mu.Lock()
+		s.copyPlanWritten = written
+		s.mu.Unlock()
+	}
+	s.checkCopyPlan(timeline.entries, complete)
+}
+
+// ffmpegFinishedPlan reports whether the segments FFmpeg listed reach the
+// planned last segment's start. FFmpeg ends its playlist and exits cleanly
+// when a read error ends the input early, too; that run stops well short.
+func ffmpegFinishedPlan(entries []manifestSegmentEntry, durations []float64) bool {
+	var written, planned float64
+	for _, entry := range entries {
+		written += entry.duration
+	}
+	for _, d := range durations[:len(durations)-1] {
+		planned += d
+	}
+	return written > planned-planSegmentTolerance
+}
+
+// ffmpegPlaylistComplete reports whether FFmpeg finished its playlist. Its
+// HLS muxer ends it only when the stream ends, not when it is killed.
+func ffmpegPlaylistComplete(manifest []byte) bool {
+	return bytes.Contains(manifest, []byte("#EXT-X-ENDLIST"))
+}
+
 // plannedSegmentWait is how long a request for a segment FFmpeg hasn't
 // reached yet waits. A planned stream doesn't seek-restart forward, so a far
 // seek waits for FFmpeg to copy up to it; stream copy runs many times faster
@@ -178,21 +273,27 @@ const plannedSegmentWait = 30 * time.Second
 // session. One FFmpeg hasn't reached is waited for, and recorded as the
 // player's position so the throttler doesn't hold FFmpeg back from it. One
 // that is gone (pruned behind the player) or will never come (FFmpeg stopped)
-// regenerates the stream from the beginning.
+// regenerates the stream from the beginning, unless FFmpeg has already
+// finished the whole stream without it: a plan from Cues that don't match the
+// file can list segments FFmpeg never cuts, and regenerating would copy the
+// file again for nothing.
 func (s *TranscodeSession) plannedSegmentRecoveryDecision(segNum int, decision SegmentRecoveryDecision) SegmentRecoveryDecision {
 	progress := decision.Progress
+	s.mu.Lock()
+	written := s.copyPlanWritten
+	s.mu.Unlock()
 	switch {
+	case written > 0 && segNum >= written:
+		decision.Wait = false
+		decision.RestartOnTimeout = false
+		decision.Reason = "planned_segment_never_written"
 	case progress.Restarting:
 		decision.Wait = true
 		decision.WaitTimeout = activeSegmentWait
 		decision.RestartOnTimeout = false
 		decision.Reason = segmentReasonRestarting
 	case progress.Running && segNum > progress.ProducedHead:
-		s.mu.Lock()
-		if segNum > s.lastRequestedSegment {
-			s.lastRequestedSegment = segNum
-		}
-		s.mu.Unlock()
+		s.notePlannedSegmentRequest(segNum)
 		decision.Wait = true
 		decision.WaitTimeout = plannedSegmentWait
 		decision.RestartOnTimeout = false
@@ -203,6 +304,17 @@ func (s *TranscodeSession) plannedSegmentRecoveryDecision(segNum int, decision S
 		decision.Reason = "planned_segment_regenerate"
 	}
 	return decision
+}
+
+// notePlannedSegmentRequest records a request for planned segment segNum,
+// which FFmpeg hasn't reached, as the player's position, so the throttler
+// lets FFmpeg run on to it rather than hold the request until it times out.
+func (s *TranscodeSession) notePlannedSegmentRequest(segNum int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if segNum > s.lastRequestedSegment {
+		s.lastRequestedSegment = segNum
+	}
 }
 
 // manifest returns the plan as a complete VOD playlist for the session's

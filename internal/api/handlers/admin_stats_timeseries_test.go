@@ -2,30 +2,9 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 )
-
-// stubTimeseriesSource records what the handler asked for so the tests can
-// assert on parameter handling without a database.
-type stubTimeseriesSource struct {
-	series      *AdminTimeseries
-	err         error
-	gotHours    int
-	invalidated int
-	callCount   int
-}
-
-func (s *stubTimeseriesSource) Get(_ context.Context, hours int) (*AdminTimeseries, error) {
-	s.callCount++
-	s.gotHours = hours
-	return s.series, s.err
-}
-
-func (s *stubTimeseriesSource) Invalidate() { s.invalidated++ }
 
 func int64Ptr(value int64) *int64 { return &value }
 
@@ -199,135 +178,6 @@ func TestTimeseriesBucketSeconds(t *testing.T) {
 					tt.hours, points, got, adminTimeseriesMaxPoints)
 			}
 		})
-	}
-}
-
-func TestHandleGetTimeseriesClampsHours(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name  string
-		query string
-		want  int
-	}{
-		{name: "absent uses the default window", query: "", want: adminTimeseriesDefaultHours},
-		{name: "empty uses the default window", query: "?hours=", want: adminTimeseriesDefaultHours},
-		{name: "explicit value passes through", query: "?hours=1", want: 1},
-		{name: "a week passes through", query: "?hours=168", want: 168},
-		{name: "zero clamps up", query: "?hours=0", want: adminTimeseriesMinHours},
-		{name: "negative clamps up", query: "?hours=-3", want: adminTimeseriesMinHours},
-		{name: "the retention window is the ceiling", query: "?hours=744", want: 744},
-		{name: "past retention clamps down", query: "?hours=100000", want: adminTimeseriesMaxHours},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			source := &stubTimeseriesSource{series: &AdminTimeseries{}}
-			handler := &AdminHandler{TimeseriesSource: source}
-			rec := httptest.NewRecorder()
-			handler.HandleGetTimeseries(rec, httptest.NewRequest(http.MethodGet, "/admin/stats/timeseries"+tt.query, nil))
-
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200, body = %s", rec.Code, rec.Body.String())
-			}
-			if source.gotHours != tt.want {
-				t.Fatalf("hours = %d, want %d", source.gotHours, tt.want)
-			}
-		})
-	}
-}
-
-func TestHandleGetTimeseriesRejectsNonNumericHours(t *testing.T) {
-	t.Parallel()
-
-	source := &stubTimeseriesSource{series: &AdminTimeseries{}}
-	handler := &AdminHandler{TimeseriesSource: source}
-	rec := httptest.NewRecorder()
-	handler.HandleGetTimeseries(rec, httptest.NewRequest(http.MethodGet, "/admin/stats/timeseries?hours=lots", nil))
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400, body = %s", rec.Code, rec.Body.String())
-	}
-	if source.callCount != 0 {
-		t.Fatalf("source was queried %d times for an invalid request", source.callCount)
-	}
-}
-
-func TestHandleGetTimeseriesRefreshInvalidates(t *testing.T) {
-	t.Parallel()
-
-	source := &stubTimeseriesSource{series: &AdminTimeseries{}}
-	handler := &AdminHandler{TimeseriesSource: source}
-
-	rec := httptest.NewRecorder()
-	handler.HandleGetTimeseries(rec, httptest.NewRequest(http.MethodGet, "/admin/stats/timeseries", nil))
-	if source.invalidated != 0 {
-		t.Fatalf("invalidated = %d on a plain read, want 0", source.invalidated)
-	}
-
-	rec = httptest.NewRecorder()
-	handler.HandleGetTimeseries(rec, httptest.NewRequest(http.MethodGet, "/admin/stats/timeseries?refresh=1", nil))
-	if source.invalidated != 1 {
-		t.Fatalf("invalidated = %d after refresh=1, want 1", source.invalidated)
-	}
-}
-
-func TestHandleGetTimeseriesWithoutDatabase(t *testing.T) {
-	t.Parallel()
-
-	handler := &AdminHandler{}
-	rec := httptest.NewRecorder()
-	handler.HandleGetTimeseries(rec, httptest.NewRequest(http.MethodGet, "/admin/stats/timeseries", nil))
-
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500, body = %s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestHandleGetTimeseriesFreshInstallSerializesCollectingState(t *testing.T) {
-	t.Parallel()
-
-	source := &stubTimeseriesSource{series: &AdminTimeseries{
-		ResolutionSeconds:   adminTimeseriesResolutionSeconds,
-		EgressBytes:         1,
-		DownloadEgressBytes: 1,
-		Points:              []AdminTimeseriesPoint{},
-	}}
-	handler := &AdminHandler{TimeseriesSource: source}
-	rec := httptest.NewRecorder()
-	handler.HandleGetTimeseries(rec, httptest.NewRequest(http.MethodGet, "/admin/stats/timeseries", nil))
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	var body struct {
-		ResolutionSeconds int               `json:"resolution_seconds"`
-		Points            []json.RawMessage `json:"points"`
-		OldestSampleAt    *string           `json:"oldest_sample_at"`
-		EgressBytes       *int64            `json:"egress_bytes"`
-		DownloadBytes     *int64            `json:"download_egress_bytes"`
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-		t.Fatalf("decode body: %v", err)
-	}
-	if body.Points == nil {
-		t.Fatal("points decoded as null; a server with no samples must send []")
-	}
-	if len(body.Points) != 0 {
-		t.Fatalf("points = %v, want empty", body.Points)
-	}
-	if body.OldestSampleAt != nil {
-		t.Fatalf("oldest_sample_at = %v, want null before the first sample", *body.OldestSampleAt)
-	}
-	if body.ResolutionSeconds != adminTimeseriesResolutionSeconds {
-		t.Fatalf("resolution_seconds = %d, want %d", body.ResolutionSeconds, adminTimeseriesResolutionSeconds)
-	}
-	// /api/v1 is frozen: the window totals are v2-only and must not leak into
-	// the bridge contract.
-	if body.EgressBytes != nil || body.DownloadBytes != nil {
-		t.Fatalf("egress_bytes = %v, download_egress_bytes = %v, want both absent from v1", body.EgressBytes, body.DownloadBytes)
 	}
 }
 

@@ -75,7 +75,7 @@ const (
 // without its slug and state.
 type ServerEndpoint struct {
 	Kind        string `json:"kind" enum:"public,provider" doc:"public is server.public_url; provider is a network access provider's overlay origin on the API host"`
-	URL         string `json:"url,omitempty" doc:"scheme://host[:port] clients reach the API at; absent for a provider that is not connected on the API host"`
+	URL         string `json:"url,omitempty" format:"uri-reference" doc:"scheme://host[:port] clients reach the API at; absent for a provider that is not connected on the API host"`
 	Provider    string `json:"provider,omitempty" doc:"Provider slug (e.g. tailscale) for kind provider"`
 	DisplayName string `json:"display_name,omitempty" doc:"Provider display name from its manifest, for setup help on the receiving device"`
 	State       string `json:"state,omitempty" enum:"disconnected,awaiting_authorization,connecting,connected,error,unavailable" doc:"Provider state on the API host for kind provider; only connected carries a url"`
@@ -84,7 +84,7 @@ type ServerEndpoint struct {
 // ServerEndpointPublic is the configured public URL.
 type ServerEndpointPublic struct {
 	Kind string `json:"kind" enum:"public" doc:"server.public_url as configured"`
-	URL  string `json:"url" doc:"scheme://host[:port] clients reach the API at"`
+	URL  string `json:"url" format:"uri" doc:"scheme://host[:port] clients reach the API at"`
 }
 
 // ServerEndpointProvider is one installed network access provider on the API
@@ -95,7 +95,7 @@ type ServerEndpointProvider struct {
 	Provider    string `json:"provider" doc:"Provider slug (e.g. tailscale)"`
 	DisplayName string `json:"display_name" doc:"Provider display name from its manifest, for setup help on the receiving device"`
 	State       string `json:"state" enum:"disconnected,awaiting_authorization,connecting,connected,error,unavailable" doc:"Provider state on the API host; only connected carries a url"`
-	URL         string `json:"url,omitempty" doc:"scheme://host[:port] clients reach the API at over the overlay; present only while connected"`
+	URL         string `json:"url,omitempty" format:"uri" doc:"scheme://host[:port] clients reach the API at over the overlay; present only while connected"`
 }
 
 func (ServerEndpoint) Schema(r huma.Registry) *huma.Schema {
@@ -137,7 +137,7 @@ func (ServerAccessPath) Schema(r huma.Registry) *huma.Schema {
 // Clients use a local address only over TLS that presents this key.
 type ServerLocalRoute struct {
 	SPKISHA256 string `json:"spki_sha256" doc:"Base64 SHA-256 of the SubjectPublicKeyInfo of the certificate the API listener presents over TLS on its own port. A client accepts a local-network address only when TLS there presents this key, and learns it only over an address it already trusts. Derived from SECRET_KEY, so it changes when that key is rotated." example:"n4bQgYhMfWWaL+qgxVrQFaO/TxsrC4Is0V1sFbDwCgg="`
-	URL        string `json:"url,omitempty" doc:"server.local_url: scheme://host[:port] of the API server on the local network, when an admin set one. Clients connect with https on the same host and port, whatever the scheme says, and require the pinned key. Absent when unset; clients may still find local addresses through LAN discovery." example:"http://192.168.1.20:8080"`
+	URL        string `json:"url,omitempty" format:"uri" doc:"server.local_url: scheme://host[:port] of the API server on the local network, when an admin set one. Clients connect with https on the same host and port, whatever the scheme says, and require the pinned key. Absent when unset; clients may still find local addresses through LAN discovery." example:"http://192.168.1.20:8080"`
 }
 
 // ServerConnectionsDocument is the connections capability document.

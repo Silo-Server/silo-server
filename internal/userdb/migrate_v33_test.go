@@ -12,15 +12,7 @@ import (
 // collection row drops its Trakt marker, and every other override, including
 // one whose config does not parse, is left as it was.
 func TestMigrateToV33RetiresTraktSectionOverrides(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = db.Close() })
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
+	db := newSingleConnSchemaDB(t)
 	if _, err := db.Exec(`
 INSERT INTO profile_section_overrides (id, profile_id, scope, section_id, hidden, config, is_user_added, user_section_type, user_config, created_at, updated_at) VALUES
     ('own-trending', 'p1', 'home', NULL, 0, NULL, 1, 'trending_discover', '{"source":"trakt","window":"day"}', 'now', 'now'),

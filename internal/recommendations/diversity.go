@@ -12,11 +12,16 @@ import (
 //	score = λ × normalizedRelevance - (1-λ) × maxSimilarityToSelected
 //
 // Candidates without an entry in embeddings are scored by relevance alone.
+// Candidates whose score is NaN or infinite cannot be ranked and are left out;
+// pgvector's cosine distance to a zero-norm embedding is NaN.
 //
 // Each remaining candidate keeps its highest similarity to the picks so far,
 // updated against only the newest pick, so a call costs O(n·k) cosines for n
 // candidates and k picks rather than O(n·k²).
 func applyMMR(candidates []ScoredItem, embeddings map[string][]float32, lambda float64, limit int) []ScoredItem {
+	if slices.ContainsFunc(candidates, nonFiniteScore) {
+		candidates = slices.DeleteFunc(slices.Clone(candidates), nonFiniteScore)
+	}
 	if len(candidates) == 0 || limit <= 0 {
 		return nil
 	}
@@ -76,7 +81,9 @@ func applyMMR(candidates []ScoredItem, embeddings map[string][]float32, lambda f
 
 	// Subsequent picks via MMR scoring.
 	for len(selected) < limit && len(remaining) > 0 {
-		bestMMRIdx := -1
+		// remaining[0] stands in when no score beats -Inf, as when dividing
+		// by a tiny maxScore overflows, so every round picks.
+		bestMMRIdx := 0
 		bestMMRScore := math.Inf(-1)
 
 		for i, ri := range remaining {
@@ -100,6 +107,12 @@ func applyMMR(candidates []ScoredItem, embeddings map[string][]float32, lambda f
 	}
 
 	return selected
+}
+
+// nonFiniteScore reports whether item's Score is NaN or infinite. NaN fails
+// every comparison, so MMR can neither scale relevance by it nor pick it.
+func nonFiniteScore(item ScoredItem) bool {
+	return math.IsNaN(item.Score) || math.IsInf(item.Score, 0)
 }
 
 // servedGenreShare is the largest share of the served window one genre may

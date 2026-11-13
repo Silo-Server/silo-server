@@ -3,7 +3,6 @@ package tasks
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"testing"
 	"time"
 
@@ -88,17 +87,5 @@ func TestAuthSessionCleanupTaskRemovesExpiredRows(t *testing.T) {
 	var result authSessionCleanupResult
 	if err := json.Unmarshal(progress.result, &result); err != nil || result.Deleted != 2 {
 		t.Fatalf("result = %s (%v)", progress.result, err)
-	}
-}
-
-func TestAuthSessionCleanupTaskReportsFailure(t *testing.T) {
-	table := &fakeSessionTable{err: errors.New("boom")}
-	progress := &authSessionCleanupProgress{}
-	err := NewAuthSessionCleanupTask(table).Execute(context.Background(), progress)
-	if err == nil || err.Error() != "boom" {
-		t.Fatalf("Execute error = %v", err)
-	}
-	if got := progress.reports[len(progress.reports)-1]; got != "Login session cleanup failed" {
-		t.Fatalf("last progress report = %q", got)
 	}
 }

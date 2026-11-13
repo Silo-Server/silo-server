@@ -9,7 +9,7 @@
 package settingskeys
 
 // Revision is the manifest revision these bindings were generated from.
-const Revision = 19
+const Revision = 28
 
 // Setting keys, one constant per definition.
 const (
@@ -49,6 +49,12 @@ const (
 	PlaybackAutoSkipIntro = "playback.auto_skip_intro"
 	// Auto-skip recaps
 	PlaybackAutoSkipRecap = "playback.auto_skip_recap"
+	// Lower quality when buffering
+	PlaybackBufferingQualityMode = "playback.buffering_quality_mode"
+	// Cellular maximum bitrate
+	PlaybackCellularMaxBitrateKbps = "playback.cellular_max_bitrate_kbps"
+	// Cellular quality
+	PlaybackCellularPreferredQuality = "playback.cellular_preferred_quality"
 	// Skip intros
 	PlaybackIntroSkipMode = "playback.intro_skip_mode"
 	// Maximum bitrate
@@ -59,6 +65,10 @@ const (
 	PlaybackPreferredQuality = "playback.preferred_quality"
 	// Show forced subtitles
 	PlaybackShowForcedSubtitles = "playback.show_forced_subtitles"
+	// Show marker confidence
+	PlaybackShowMarkerConfidence = "playback.show_marker_confidence"
+	// Show marker source
+	PlaybackShowMarkerSource = "playback.show_marker_source"
 	// Subtitle appearance
 	PlaybackSubtitleAppearance = "playback.subtitle_appearance"
 	// Preferred subtitle language
@@ -107,6 +117,8 @@ const (
 	SearchMediaScope = "search.media_scope"
 	// Match device caption settings
 	SubtitleMatchesDevice = "subtitle.matches_device"
+	// App language
+	UiAppLanguage = "ui.app_language"
 	// Poster badges
 	UiCardOverlays = "ui.card_overlays"
 	// Card overlays enabled
@@ -153,6 +165,8 @@ const (
 	UiTimeFormat = "ui.time_format"
 	// Show title art
 	UiTitleArt = "ui.title_art"
+	// Watch Party playback controls
+	WatchPartyGuestControlPolicy = "watch_party.guest_control_policy"
 )
 
 // Remote lists every key the server stores.
@@ -171,11 +185,16 @@ var Remote = []string{
 	PlaybackAutoSkipCredits,
 	PlaybackAutoSkipIntro,
 	PlaybackAutoSkipRecap,
+	PlaybackBufferingQualityMode,
+	PlaybackCellularMaxBitrateKbps,
+	PlaybackCellularPreferredQuality,
 	PlaybackIntroSkipMode,
 	PlaybackMaxBitrateKbps,
 	PlaybackNextUpPromptSeconds,
 	PlaybackPreferredQuality,
 	PlaybackShowForcedSubtitles,
+	PlaybackShowMarkerConfidence,
+	PlaybackShowMarkerSource,
 	PlaybackSubtitleAppearance,
 	PlaybackSubtitleLanguage,
 	PlaybackSubtitleMode,
@@ -196,6 +215,7 @@ var Remote = []string{
 	PlayerVideoSkipForwardSeconds,
 	RequestsWatchlistAutoRequest,
 	SearchMediaScope,
+	UiAppLanguage,
 	UiCardOverlays,
 	UiCardOverlaysEnabled,
 	UiCardPresentation,
@@ -219,6 +239,7 @@ var Remote = []string{
 	UiThemeMusicLoop,
 	UiTimeFormat,
 	UiTitleArt,
+	WatchPartyGuestControlPolicy,
 }
 
 // ClientLocal lists keys the contract defines but the server never stores.

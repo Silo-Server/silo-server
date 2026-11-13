@@ -26,6 +26,17 @@ const (
 	ScopeAdminAccessGroupsRead    = "admin:access-groups:read"
 	ScopeAdminSessionsSummaryRead = "admin:sessions:summary:read"
 	ScopeLibrariesRead            = "libraries:read"
+
+	// ScopeAdminMonitorRead covers read-only server monitoring for an outside
+	// tool: live sessions, playback history, activity stats, accounts and their
+	// devices, downloads, node and host health, and the catalog listing. It
+	// never reaches filesystem paths, node addresses, storage keys, setting
+	// values or credentials; the few monitored operations that carry such
+	// details withhold them from scoped keys.
+	ScopeAdminMonitorRead = "admin:monitor:read"
+	// ScopeAdminSessionsControl covers the administrator playback commands:
+	// pause, resume, stop, message and terminate a live session.
+	ScopeAdminSessionsControl = "admin:sessions:control"
 )
 
 // APIKeyScope is one scope a key may carry, paired with the description
@@ -51,6 +62,16 @@ func APIKeyScopeCatalog() []APIKeyScope {
 			Name:        ScopeAdminAccessGroupsRead,
 			Description: "Read access groups and their policies.",
 		},
+		{
+			Name: ScopeAdminMonitorRead,
+			Description: "Monitor the server read-only: live sessions, playback history, activity stats, " +
+				"accounts, devices, downloads, node and host health, and the catalog listing. Never exposes filesystem paths, " +
+				"node addresses, storage keys, setting values or credentials.",
+		},
+		{
+			Name:        ScopeAdminSessionsControl,
+			Description: "Pause, resume, stop, message and terminate live playback sessions.",
+		},
 	}
 }
 
@@ -63,27 +84,6 @@ type UnknownAPIKeyScopeError struct {
 
 func (e *UnknownAPIKeyScopeError) Error() string {
 	return fmt.Sprintf("unknown api key scope %q", e.Scope)
-}
-
-func V1APIKeyScopeCatalog() []APIKeyScope {
-	return []APIKeyScope{{Name: ScopeAdminUsers, Description: "Manage user accounts: create, list, read, update, and delete users and read their profiles. Cannot create or modify admin accounts."}, {Name: ScopeAdminAccessGroupsRead, Description: "Read access groups and their policies."}}
-}
-func NormalizeV1APIKeyScopes(scopes []string) ([]string, error) {
-	if len(scopes) == 0 {
-		return []string{}, nil
-	}
-	valid := []string{ScopeAdminUsers, ScopeAdminAccessGroupsRead}
-	out := []string{}
-	for _, s := range scopes {
-		if !slices.Contains(valid, s) {
-			return nil, &UnknownAPIKeyScopeError{Scope: s}
-		}
-		if !slices.Contains(out, s) {
-			out = append(out, s)
-		}
-	}
-	slices.Sort(out)
-	return out, nil
 }
 
 // ValidAPIKeyScopes returns every scope a key may carry.

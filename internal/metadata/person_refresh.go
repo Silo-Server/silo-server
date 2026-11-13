@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -65,6 +66,12 @@ type personRefreshRepo interface {
 	ClaimRefreshCandidates(ctx context.Context, limit int) ([]int64, error)
 }
 
+// personProvidersTTL is how long resolved person providers are reused, the
+// same window as the item chain cache (MetadataService.chainCacheTTL). It
+// bounds how long a plugin change takes to reach person lookups on a replica
+// whose InvalidateProviders was not called.
+const personProvidersTTL = 60 * time.Second
+
 type PersonRefreshService struct {
 	pool           *pgxpool.Pool
 	pluginResolver pluginMetadataResolver
@@ -74,6 +81,14 @@ type PersonRefreshService struct {
 	imageResolver  interface {
 		ResolveImageURL(ctx context.Context, path string, variant string) string
 	}
+
+	// providersMu guards the resolved providers every lookup shares. The
+	// generation advances on InvalidateProviders, so a resolution that was
+	// already running when a plugin changed is not stored.
+	providersMu         sync.Mutex
+	providers           []Provider
+	providersExpiresAt  time.Time
+	providersGeneration uint64
 }
 
 func NewPersonRefreshService(
@@ -86,6 +101,16 @@ func NewPersonRefreshService(
 		pluginResolver: pluginResolver,
 		repo:           repo,
 	}
+}
+
+// InvalidateProviders drops the resolved providers, so the next lookup sees a
+// plugin that was just installed, enabled, disabled, updated or removed.
+func (s *PersonRefreshService) InvalidateProviders() {
+	s.providersMu.Lock()
+	defer s.providersMu.Unlock()
+	s.providers = nil
+	s.providersExpiresAt = time.Time{}
+	s.providersGeneration++
 }
 
 func (s *PersonRefreshService) SetImageCacher(cacher ImageCacher) {
@@ -122,14 +147,32 @@ func withoutAnsweredRateLimit(person *models.Person, err error) (*models.Person,
 	return person, err
 }
 
-// resolveProviders returns the enabled providers. Person refresh is a
-// background path; the nil checker falls back to a direct pool query rather
-// than the hot-path installation cache.
+// resolveProviders returns the enabled providers. Every person a sweep looks
+// up asks for the same list, so it is resolved once and reused for
+// personProvidersTTL. A failed resolution is not kept. Resolution reads the
+// database rather than the plugins service's installation cache, which other
+// replicas do not refresh on a plugin change.
 func (s *PersonRefreshService) resolveProviders(ctx context.Context) ([]Provider, error) {
-	providers, err := resolveEnabledProviders(ctx, s.pluginResolver, s.pool, nil)
+	s.providersMu.Lock()
+	if s.providers != nil && time.Now().Before(s.providersExpiresAt) {
+		providers := s.providers
+		s.providersMu.Unlock()
+		return providers, nil
+	}
+	generation := s.providersGeneration
+	s.providersMu.Unlock()
+
+	providers, err := resolveEnabledProviders(ctx, s.pluginResolver, s.pool)
 	if err != nil {
 		return nil, fmt.Errorf("resolve person providers: %w", err)
 	}
+
+	s.providersMu.Lock()
+	if generation == s.providersGeneration {
+		s.providers = providers
+		s.providersExpiresAt = time.Now().Add(personProvidersTTL)
+	}
+	s.providersMu.Unlock()
 	return providers, nil
 }
 

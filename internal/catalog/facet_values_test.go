@@ -165,15 +165,30 @@ func TestFacetValueCacheTTL(t *testing.T) {
 	if calls.Load() != 1 {
 		t.Fatalf("loads within TTL = %d, want 1", calls.Load())
 	}
-	now = now.Add(time.Minute)
+	// "idle" is never asked for again, so only the sweep can drop it.
+	var idleCalls atomic.Int32
+	if _, err := c.get(t.Context(), "idle", staticLoad(listOf(1), &idleCalls)); err != nil {
+		t.Fatal(err)
+	}
+	// "fresh" is stored half a TTL later and must outlive the sweep.
+	now = now.Add(30 * time.Second)
+	var freshCalls atomic.Int32
+	fresh := staticLoad(listOf(1), &freshCalls)
+	if _, err := c.get(t.Context(), "fresh", fresh); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(queryCachePruneInterval - 30*time.Second)
 	if _, err := c.get(t.Context(), "k", load); err != nil {
 		t.Fatal(err)
 	}
 	if calls.Load() != 2 {
 		t.Fatalf("loads after TTL = %d, want 2", calls.Load())
 	}
-	if c.used != 1 || len(c.entries) != 1 {
+	if c.used != 2 || len(c.entries) != 2 {
 		t.Fatalf("expired entry left behind: used=%d entries=%d", c.used, len(c.entries))
+	}
+	if _, err := c.get(t.Context(), "fresh", fresh); err != nil || freshCalls.Load() != 1 {
+		t.Fatalf("sweep dropped a fresh entry: loads=%d err=%v", freshCalls.Load(), err)
 	}
 }
 
@@ -465,38 +480,4 @@ func TestSearchFacetAnswersMatchesAndValues(t *testing.T) {
 	if len(facets.searches) != 0 {
 		t.Fatalf("empty q reached the fetcher: %v", facets.searches)
 	}
-}
-
-// A history facet search without a snapshot must build the same scope
-// arguments on every keystroke, or its cached list is never reused.
-func TestSearchFacetHistoryScopeIsStableAcrossCalls(t *testing.T) {
-	resolver := &CatalogResolver{browseRepo: &BrowseRepository{}}
-	req := CatalogRequest{Source: CatalogSourceHistory}
-	access := AccessFilter{UserID: 7, ProfileID: "p1"}
-	keystrokes := func() (*columnRecordingFetcher, bool) {
-		facets := &columnRecordingFetcher{}
-		resolver.facets = facets
-		for _, q := range []string{"d", "dr"} {
-			if _, err := resolver.SearchFacet(t.Context(), req, access, "genre", q, 10); err != nil {
-				t.Fatal(err)
-			}
-		}
-		a, _ := queryCacheKey(facets.filters[0].contentSourceSQL, facets.filters[0].contentSourceArgs)
-		b, _ := queryCacheKey(facets.filters[1].contentSourceSQL, facets.filters[1].contentSourceArgs)
-		return facets, a == b
-	}
-	// Two keystrokes can straddle a minute boundary; three tries in a row
-	// cannot.
-	for range 3 {
-		facets, same := keystrokes()
-		if !same {
-			continue
-		}
-		snapshot, ok := facets.filters[0].contentSourceArgs[2].(time.Time)
-		if !ok || snapshot.Before(time.Now()) {
-			t.Fatalf("default snapshot = %v, want a time that covers now", facets.filters[0].contentSourceArgs[2])
-		}
-		return
-	}
-	t.Fatal("history scope arguments differ between keystrokes")
 }

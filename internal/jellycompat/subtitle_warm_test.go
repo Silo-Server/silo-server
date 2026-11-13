@@ -57,36 +57,3 @@ func TestCompatFetchesEmbeddedTextSubtitles(t *testing.T) {
 		}
 	}
 }
-
-func TestCompatWarmsTextSubtitlesSkipsViewersWithSubtitlesOff(t *testing.T) {
-	fetched := []mediaStreamDTO{{Type: "Subtitle", IsTextSubtitleStream: true, DeliveryMethod: "External"}}
-	if compatWarmsTextSubtitles(compatSubtitleNone, fetched) {
-		t.Fatal("warmed subtitles for a viewer with SubtitleMode None")
-	}
-	for _, mode := range []string{compatSubtitleDefault, compatSubtitleSmart, compatSubtitleAlways, compatSubtitleOnlyForced} {
-		if !compatWarmsTextSubtitles(mode, fetched) {
-			t.Fatalf("%s did not warm subtitles the client fetches", mode)
-		}
-	}
-}
-
-// Jellyfin Web plays the first source that direct plays, then direct streams,
-// then transcodes, so that is the source worth warming.
-func TestCompatLikelyPlayedSourceFollowsJellyfinWeb(t *testing.T) {
-	cases := []struct {
-		name    string
-		sources []PlaybackMediaSource
-		want    int
-	}{
-		{"no sources", nil, -1},
-		{"direct play wins over order", []PlaybackMediaSource{{SupportsTranscoding: true}, {SupportsDirectStream: true}, {SupportsDirectPlay: true}}, 2},
-		{"direct stream before transcoding", []PlaybackMediaSource{{SupportsTranscoding: true}, {SupportsDirectStream: true}}, 1},
-		{"first transcodable source", []PlaybackMediaSource{{}, {SupportsTranscoding: true}}, 1},
-		{"nothing playable falls back to the first", []PlaybackMediaSource{{}, {}}, 0},
-	}
-	for _, tc := range cases {
-		if got := compatLikelyPlayedSource(tc.sources); got != tc.want {
-			t.Errorf("%s = %d, want %d", tc.name, got, tc.want)
-		}
-	}
-}

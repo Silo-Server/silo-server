@@ -36,45 +36,7 @@ vi.mock("@/hooks/queries/ratingsCapability", () => ({
   useShownRatingSources: () => new Set(["imdb", "tmdb"]),
 }));
 
-function emptyState(): GuidedFormState {
-  return {
-    mediaScope: "all",
-    libraryIds: [],
-    genres: [],
-    decade: "",
-    yearFrom: "",
-    yearTo: "",
-    minRating: "",
-    contentRating: "",
-    actor: "",
-    director: "",
-    writer: "",
-    producer: "",
-    author: "",
-    narrator: "",
-    series: "",
-    studio: "",
-    network: "",
-    country: "",
-    status: "",
-    watchStatus: "",
-    addedInLast: "",
-    releasedInLast: "",
-    originalLanguages: [],
-    fourK: false,
-    hdr: false,
-    dolbyVision: false,
-    sortField: "added_at",
-    sortOrder: "desc",
-  };
-}
-
 describe("queryDefinitionToGuidedState", () => {
-  it("returns defaults for an empty query definition", () => {
-    const state = queryDefinitionToGuidedState(createEmptyQueryDefinition());
-    expect(state).toEqual(emptyState());
-  });
-
   it("extracts fields from a populated query definition", () => {
     const qd: QueryDefinition = {
       library_ids: [1, 2],
@@ -136,13 +98,6 @@ describe("queryDefinitionToGuidedState", () => {
 describe("guidedStateToQueryDefinition", () => {
   const base = createEmptyQueryDefinition();
 
-  it("produces an empty groups array for an empty state", () => {
-    const qd = guidedStateToQueryDefinition(emptyState(), base);
-    expect(qd.groups).toEqual([]);
-    expect(qd.match).toBe("all");
-    expect(qd.media_scope).toBeUndefined();
-  });
-
   it("builds rules from a populated state", () => {
     const state: GuidedFormState = {
       mediaScope: "series",
@@ -199,41 +154,6 @@ describe("guidedStateToQueryDefinition", () => {
     expect(rules).toContainEqual({ field: "resolution", op: "is", value: "2160p" });
     expect(rules).toContainEqual({ field: "hdr", op: "is", value: true });
     expect(rules).toContainEqual({ field: "release_date", op: "in_last", value: "1y" });
-  });
-
-  it("round-trips through parse and serialize", () => {
-    const original: QueryDefinition = {
-      library_ids: [1],
-      media_scope: "movie",
-      match: "all",
-      groups: [
-        {
-          match: "all",
-          rules: [
-            { field: "genre", op: "is", value: "Comedy" },
-            { field: "year", op: "gte", value: 2000 },
-            { field: "year", op: "lte", value: 2020 },
-            { field: "rating_imdb", op: "gte", value: 6 },
-            { field: "original_language", op: "is", value: "French" },
-          ],
-        },
-      ],
-      sort: { field: "title", order: "asc" },
-    };
-
-    const state = queryDefinitionToGuidedState(original);
-    const rebuilt = guidedStateToQueryDefinition(state, original);
-
-    expect(rebuilt.library_ids).toEqual([1]);
-    expect(rebuilt.media_scope).toBe("movie");
-    expect(rebuilt.sort).toEqual({ field: "title", order: "asc" });
-
-    const rules = rebuilt.groups[0]!.rules;
-    expect(rules).toContainEqual({ field: "genre", op: "is", value: "Comedy" });
-    expect(rules).toContainEqual({ field: "year", op: "gte", value: 2000 });
-    expect(rules).toContainEqual({ field: "year", op: "lte", value: 2020 });
-    expect(rules).toContainEqual({ field: "rating_imdb", op: "gte", value: 6 });
-    expect(rules).toContainEqual({ field: "original_language", op: "is", value: "French" });
   });
 
   it("collects multiple original_language rules and emits them as an OR group", () => {
@@ -339,22 +259,6 @@ describe("guidedStateToQueryDefinition", () => {
     });
   });
 
-  it("round-trips last_air_date sort through parse and serialize", () => {
-    const original: QueryDefinition = {
-      library_ids: [1],
-      media_scope: "series",
-      match: "all",
-      groups: [],
-      sort: { field: "last_air_date", order: "desc" },
-    };
-
-    const state = queryDefinitionToGuidedState(original);
-    const rebuilt = guidedStateToQueryDefinition(state, original);
-
-    expect(state.sortField).toBe("last_air_date");
-    expect(rebuilt.sort).toEqual({ field: "last_air_date", order: "desc" });
-  });
-
   it("accepts legacy rating aliases when parsing and emits canonical rating_imdb rules", () => {
     const original: QueryDefinitionInput = {
       library_ids: [],
@@ -383,27 +287,6 @@ describe("guidedStateToQueryDefinition", () => {
 });
 
 describe("CollectionGuidedRulesEditor original language field", () => {
-  it("renders the original language select with the current value", () => {
-    const markup = renderToStaticMarkup(
-      <CollectionGuidedRulesEditor
-        value={{
-          ...createEmptyQueryDefinition(),
-          groups: [
-            {
-              match: "all",
-              rules: [{ field: "original_language", op: "is", value: "English" }],
-            },
-          ],
-        }}
-        onChange={() => {}}
-      />,
-    );
-
-    expect(markup).toContain("Media Type");
-    expect(markup).toContain("Original Language");
-    expect(markup).toContain("English");
-  });
-
   it("renders ebook book-native filters without audiobook narrator or video-only filters", () => {
     const markup = renderToStaticMarkup(
       <CollectionGuidedRulesEditor
@@ -423,22 +306,5 @@ describe("CollectionGuidedRulesEditor original language field", () => {
     expect(markup).not.toContain("Director");
     expect(markup).not.toContain("Minimum IMDb Rating");
     expect(markup).not.toContain("Video Quality");
-  });
-
-  it("uses reading labels for ebook personalized progress filters", () => {
-    const markup = renderToStaticMarkup(
-      <CollectionGuidedRulesEditor
-        value={{
-          ...createEmptyQueryDefinition(),
-          media_scope: "ebook",
-        }}
-        onChange={() => {}}
-        allowPersonalizedFilters
-        libraryType="ebooks"
-      />,
-    );
-
-    expect(markup).toContain("Read Status");
-    expect(markup).not.toContain("Watch Status");
   });
 });

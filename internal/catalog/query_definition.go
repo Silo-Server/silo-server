@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -72,7 +73,8 @@ var queryFieldDefs = map[string]queryFieldDef{
 		validOps:   map[string]bool{"is": true, "is_not": true},
 	},
 
-	querySortTitle: {columnSQL: querySortTitle, executable: true, validOps: textRuleOps},
+	ruleFieldShowTitle: {executable: true, validOps: textRuleOps},
+	querySortTitle:     {columnSQL: querySortTitle, executable: true, validOps: textRuleOps},
 	// decade takes the decade's first year (1990 matches 1990 to 1999).
 	ruleFieldDecade: {executable: true, validOps: map[string]bool{"is": true, "is_not": true}},
 	// runtime holds minutes; 0 means unknown and matches no bound.
@@ -80,22 +82,24 @@ var queryFieldDefs = map[string]queryFieldDef{
 	querySortRatingTMDb:       {columnSQL: querySortRatingTMDb, executable: true, validOps: numberRuleOps},
 	querySortRatingRTCritic:   {columnSQL: querySortRatingRTCritic, executable: true, validOps: numberRuleOps},
 	querySortRatingRTAudience: {columnSQL: querySortRatingRTAudience, executable: true, validOps: numberRuleOps},
-	// A show's newest episode: when its file arrived, and when it aired.
+	// A show's newest episode with a file: when the file arrived, and when
+	// the episode aired.
 	querySortLatestEpisodeAdded: {columnSQL: latestEpisodeAddedColumn, executable: true, validOps: dateRuleOps},
-	querySortLastAirDate:        {columnSQL: lastAirDateColumn, executable: true, validOps: dateRuleOps},
+	querySortLastAirDate:        {columnSQL: latestAvailableAirDateColumn, executable: true, validOps: dateRuleOps},
 }
 
 // Rule operators and fields named in several places, and the columns the
 // newest-episode fields read.
 const (
-	ruleOpInLast             = "in_last"
-	ruleOpNotInLast          = "not_in_last"
-	ruleOpNotContains        = "not_contains"
-	ruleOpBeginsWith         = "begins_with"
-	ruleOpEndsWith           = "ends_with"
-	ruleFieldDecade          = "decade"
-	latestEpisodeAddedColumn = "latest_episode_added_at"
-	lastAirDateColumn        = "last_air_date_at"
+	ruleOpInLast                 = "in_last"
+	ruleOpNotInLast              = "not_in_last"
+	ruleOpNotContains            = "not_contains"
+	ruleOpBeginsWith             = "begins_with"
+	ruleOpEndsWith               = "ends_with"
+	ruleFieldDecade              = "decade"
+	ruleFieldShowTitle           = "show_title"
+	latestEpisodeAddedColumn     = "latest_episode_added_at"
+	latestAvailableAirDateColumn = "latest_available_episode_air_date_at"
 )
 
 // textRuleOps compare a free-text field ignoring case, whole (is, is_not) or
@@ -115,41 +119,6 @@ func (d queryFieldDef) allows(op string) bool {
 	return d.validOps[op] || (op == ruleOpNotInLast && d.validOps[ruleOpInLast])
 }
 
-// v2RuleFields are the rule fields added after /api/v1 froze. A v1 request
-// keeps the frozen vocabulary: these fields and not_in_last are refused there,
-// with the messages v1 gave them before they existed.
-var v2RuleFields = map[string]bool{
-	querySortTitle:              true,
-	ruleFieldDecade:             true,
-	querySortRuntime:            true,
-	querySortRatingTMDb:         true,
-	querySortRatingRTCritic:     true,
-	querySortRatingRTAudience:   true,
-	querySortLatestEpisodeAdded: true,
-	querySortLastAirDate:        true,
-}
-
-// ValidateV1Rules refuses a rule the frozen /api/v1 vocabulary lacks, with
-// the message QueryDefinition validation gave it there. input is anything
-// QueryBuilder.Build takes.
-func ValidateV1Rules(input any) error {
-	def, err := normalizeBuilderInput(input)
-	if err != nil {
-		return err
-	}
-	for i, group := range def.Groups {
-		for j, rule := range group.Rules {
-			if v2RuleFields[rule.Field] {
-				return fmt.Errorf("groups[%d].rules[%d].field %q is not supported", i, j, rule.Field)
-			}
-			if rule.Op == ruleOpNotInLast {
-				return fmt.Errorf("groups[%d].rules[%d].op %q is not supported for field %q", i, j, rule.Op, rule.Field)
-			}
-		}
-	}
-	return nil
-}
-
 // validateRuleValue rejects a value the SQL builder cannot use, so a malformed
 // span or a new field's malformed value fails validation instead of the
 // query that runs it.
@@ -158,12 +127,18 @@ func validateRuleValue(rule QueryRule) error {
 		_, err := ruleInterval(rule)
 		return err
 	}
+	if booleanRuleFields[rule.Field] {
+		if _, ok := ruleBool(rule.Value); !ok {
+			return fmt.Errorf("%s requires true or false", rule.Field)
+		}
+		return nil
+	}
 	switch rule.Field {
-	case querySortTitle:
+	case querySortTitle, ruleFieldShowTitle:
 		// An empty value would make contains, begins_with and ends_with match
 		// every title.
 		if text, ok := rule.Value.(string); !ok || strings.TrimSpace(text) == "" {
-			return fmt.Errorf("title requires a non-empty string")
+			return fmt.Errorf("%s requires a non-empty string", rule.Field)
 		}
 	case ruleFieldDecade:
 		if _, ok := decadeStart(rule.Value); !ok {
@@ -188,6 +163,28 @@ func validateRuleValue(rule QueryRule) error {
 		}
 	}
 	return nil
+}
+
+// booleanRuleFields take true or false.
+var booleanRuleFields = map[string]bool{
+	"watched": true, "in_progress": true, "favorited": true,
+	"in_watchlist": true, "hdr": true, "dolby_vision": true,
+}
+
+// ruleBool reads a boolean rule's value. Released clients (Android TV
+// v1.0.0-beta.27) send the JSON strings "true" and "false", and saved
+// definitions may hold them, so exactly those two strings count as booleans.
+func ruleBool(value any) (bool, bool) {
+	switch v := value.(type) {
+	case bool:
+		return v, true
+	case string:
+		// Exactly "true" or "false": ParseBool alone would also take "1" or "T".
+		if parsed, err := strconv.ParseBool(v); err == nil && strconv.FormatBool(parsed) == v {
+			return parsed, true
+		}
+	}
+	return false, false
 }
 
 // isRuleDate reports whether a date rule's bound is a calendar date
@@ -439,6 +436,45 @@ func EncodeCollectionDefaultSort(qs QuerySort, ok bool) (string, error) {
 	return string(encoded), nil
 }
 
+// HasCompleteRule reports whether the definition holds a rule complete enough
+// to filter: a field, an operator and a filled-in value. With none, the query
+// matches every title, so a smart collection must have one. The web editor's
+// hasCompleteRule applies the same test before it saves.
+func (q QueryDefinition) HasCompleteRule() bool {
+	for _, group := range q.Groups {
+		for _, rule := range group.Rules {
+			if strings.TrimSpace(rule.Field) != "" && strings.TrimSpace(rule.Op) != "" && ruleValueFilled(rule.Value) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ruleValueFilled reports whether a rule's value is filled in: a blank string,
+// a missing value, or a range with an open end filters nothing yet. Numbers and
+// booleans, zero and false included, are values.
+func ruleValueFilled(value any) bool {
+	switch v := value.(type) {
+	case nil:
+		return false
+	case string:
+		return strings.TrimSpace(v) != ""
+	case []any:
+		if len(v) == 0 {
+			return false
+		}
+		for _, entry := range v {
+			if !ruleValueFilled(entry) {
+				return false
+			}
+		}
+		return true
+	default:
+		return true
+	}
+}
+
 func (q QueryDefinition) Normalize() QueryDefinition {
 	normalized := q
 	normalized.MediaScope = strings.ToLower(strings.TrimSpace(normalized.MediaScope))
@@ -461,6 +497,12 @@ func (q QueryDefinition) Normalize() QueryDefinition {
 			}
 			normalized.Groups[i].Rules[j].Field = field
 			normalized.Groups[i].Rules[j].Op = strings.ToLower(strings.TrimSpace(normalized.Groups[i].Rules[j].Op))
+			if booleanRuleFields[field] {
+				// The SQL builder reads only real booleans.
+				if value, ok := ruleBool(normalized.Groups[i].Rules[j].Value); ok {
+					normalized.Groups[i].Rules[j].Value = value
+				}
+			}
 		}
 	}
 

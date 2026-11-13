@@ -1,6 +1,8 @@
 import type { PluginInstallation, PluginPresentation } from "@/api/types";
+import { t } from "@/i18n";
+import { joinCommaList } from "@/lib/pluginCapabilities";
 import { missingRequiredConfig } from "@/lib/pluginConfigReady";
-import { pluginDisplayName } from "@/lib/pluginPresentation";
+import { pendingUpdateVersion, pluginDisplayName } from "@/lib/pluginPresentation";
 import { pluginStatusIndicator } from "@/lib/pluginStatusIndicator";
 
 export interface PluginStatus {
@@ -9,7 +11,10 @@ export interface PluginStatus {
   /** Text color for the label; empty for the neutral states. */
   textClass: string;
   title?: string;
-  /** The plugin needs an admin: it is failing, restarting, or missing required settings. */
+  /**
+   * The plugin needs an admin: it is failing, restarting, missing required
+   * settings, or its last automatic update was refused.
+   */
   attention: boolean;
   /** Sort rank: problems first (most severe first), healthy plugins next, off plugins last. */
   rank: number;
@@ -34,13 +39,18 @@ export function pluginStatus(installation: PluginInstallation): PluginStatus {
   const missing = missingRequiredConfig(installation);
   if (missing.length > 0) {
     return {
-      label: "Needs setup",
+      label: t("web.admin.plugins.status.needsSetup"),
       dotClass: "bg-warning",
       textClass: "text-warning",
-      title: `Missing: ${missing.map((entry) => entry.title || entry.key).join(", ")}`,
+      title: t("web.admin.plugins.status.missing", {
+        settings: joinCommaList(missing.map((entry) => entry.title || entry.key)),
+      }),
       attention: true,
       rank: 2,
     };
+  }
+  if (installation.update_failure) {
+    return { ...indicator, textClass: "", attention: true, rank: 2 };
   }
   return { ...indicator, textClass: "", attention: false, rank: 3 };
 }
@@ -59,7 +69,7 @@ export function matchesInstalledFilter(
     case "attention":
       return pluginStatus(installation).attention;
     case "update":
-      return Boolean(installation.available_version);
+      return Boolean(pendingUpdateVersion(installation));
     case "off":
       return !installation.enabled;
     default:

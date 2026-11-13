@@ -26,13 +26,15 @@ const claimsKey contextKey = "claims"
 
 // SessionValidator checks a login session on every access-token request.
 // ActiveSession reports whether the session is still active (not revoked or
-// expired) and its authority: the current role of the account it belongs to
-// and, for a remote-playback handoff, the profile it is bound to. It is one
-// lookup; auth.SessionRepository implements it. It answers active=false with
-// no error for a missing, revoked or expired session; an error means the
-// session could not be checked, and the caller must not treat it as ended.
+// expired) and owned by userID, the account the token names, and returns its
+// authority: the current role of that account and, for a remote-playback
+// handoff, the profile it is bound to. It is one lookup;
+// auth.SessionRepository implements it. It answers active=false with no
+// error for a missing, revoked or expired session and for another account's
+// session; an error means the session could not be checked, and the caller
+// must not treat it as ended.
 type SessionValidator interface {
-	ActiveSession(ctx context.Context, sessionID string) (authority auth.SessionAuthority, active bool, err error)
+	ActiveSession(ctx context.Context, sessionID string, userID int) (authority auth.SessionAuthority, active bool, err error)
 }
 
 // TokenValidator validates a JWT token string and returns the parsed claims.
@@ -167,7 +169,7 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 				return
 			}
 
-			authority, active, err := am.sessionValidator.ActiveSession(r.Context(), claims.SessionID)
+			authority, active, err := am.sessionValidator.ActiveSession(r.Context(), claims.SessionID, claims.UserID)
 			if err != nil {
 				writeCredentialCheckUnavailable(w, r, err)
 				return
@@ -244,7 +246,7 @@ func (am *AuthMiddleware) sessionClaims(r *http.Request) *auth.Claims {
 		claims.PasswordChangeRequired {
 		return nil
 	}
-	authority, active, err := am.sessionValidator.ActiveSession(r.Context(), claims.SessionID)
+	authority, active, err := am.sessionValidator.ActiveSession(r.Context(), claims.SessionID, claims.UserID)
 	if err != nil || !active {
 		return nil
 	}
@@ -264,34 +266,10 @@ func (am *AuthMiddleware) sessionClaims(r *http.Request) *auth.Claims {
 // sign out. Refreshing the session afterwards is a public route; the refreshed
 // tokens drop the restriction once the account has a new password.
 var passwordChangeRoutes = map[string]bool{
-	"GET /api/v1/auth/me":                     true,
-	"GET /api/v1/auth/account/capability":     true,
-	"POST /api/v1/auth/account/password":      true,
-	"POST /api/v1/auth/logout":                true,
 	"GET /api/v2/account/me":                  true,
 	"GET /api/v2/account/password/capability": true,
 	"POST /api/v2/account/password":           true,
 	"POST /api/v2/auth/logout":                true,
-}
-
-// RequireAdmin is a standalone HTTP middleware that checks if the authenticated
-// user has the "admin" role. It expects RequireAuth to have already placed
-// claims in the request context.
-func RequireAdmin(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		claims := GetClaims(r.Context())
-		if claims == nil {
-			writeUnauthorized(w, "Authentication required", ReasonAuthenticationRequired)
-			return
-		}
-
-		if claims.Role != "admin" {
-			writeForbidden(w, "Admin access required")
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
 }
 
 // PrimaryProfileChecker reports whether profileID belongs to userID and, if
@@ -305,31 +283,17 @@ type PrimaryProfileChecker func(ctx context.Context, userID int, profileID strin
 // request that declares no profile may exercise admin powers.
 type HouseholdProfileRequirement func(ctx context.Context, userID int) (bool, error)
 
-// RequireActingAdmin enforces the admin role plus the household policy that
-// admin powers are only exercised through the account's primary profile.
-// When the request declares an active profile (X-Profile-Id) that belongs to
-// the admin account but is not the primary profile, the request is refused.
-// A request with no declared profile keeps working (clients that haven't
-// selected a profile yet) only while the household has no PIN-protected or
-// access-limited profile; otherwise a device signed into the account could
-// regain admin powers, and mint credentials that skip profile PINs, by
-// omitting the header. API keys keep their profile-less access. A nil
-// checkPrimary disables the declared-profile policy, and a nil
-// requiresProfile the profile-less one; with both nil it behaves exactly
-// like RequireAdmin.
+// RequireActingAdminWith enforces the admin role plus the household policy
+// that admin powers are only exercised through the account's primary profile
+// (see NewActingAdminDecider). It takes a prebuilt decision so the router can
+// hand the same decider to ProvideActingAdmin and the routes outside the admin
+// groups answer exactly as the gate does.
 //
 // Note this enforces the declared profile, not an authenticated one: all
 // profiles on an account share the login session, so this is a policy
 // boundary for well-behaved clients, not a defense against the account
 // holder themselves. The viewer gate that runs before it on the admin route
 // groups verifies a PIN-locked declared profile's X-Profile-Token.
-func RequireActingAdmin(checkPrimary PrimaryProfileChecker, requiresProfile HouseholdProfileRequirement) func(http.Handler) http.Handler {
-	return RequireActingAdminWith(NewActingAdminDecider(checkPrimary, requiresProfile))
-}
-
-// RequireActingAdminWith is RequireActingAdmin over a prebuilt decision, so
-// the router can hand the same decider to ProvideActingAdmin and the routes
-// outside the admin groups answer exactly as the gate does.
 func RequireActingAdminWith(decide ActingAdminDecider) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -413,6 +377,14 @@ func declaredProfileID(r *http.Request) string {
 // middleware chain.
 func SetClaims(ctx context.Context, claims *auth.Claims) context.Context {
 	return context.WithValue(ctx, claimsKey, claims)
+}
+
+// IsScopedAPIKey reports whether a scoped API key authenticated the request.
+// Unscoped keys and login sessions are not constrained: an unscoped key acts
+// with its owner's full authority, and a login session is the owner.
+func IsScopedAPIKey(ctx context.Context) bool {
+	claims := GetClaims(ctx)
+	return claims != nil && len(claims.APIKeyScopes) > 0
 }
 
 // GetClaims retrieves the JWT claims from the context. Returns nil if no

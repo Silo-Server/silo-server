@@ -3,9 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"net/http"
-	"net/url"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -27,10 +24,6 @@ const (
 	wsMaxClientMessageBytes = 64 * 1024
 )
 
-var wsUpgrader = websocket.Upgrader{
-	CheckOrigin: checkWebSocketOrigin,
-}
-
 // wsOverlayOrigins feeds the shared v1 upgrader the overlay origins connected
 // network access providers report. The upgrader is package state, so its
 // source is too; SetWebSocketOverlayOrigins is called once at router build.
@@ -40,39 +33,6 @@ var wsOverlayOrigins atomic.Pointer[OverlayOriginSource]
 // the shared v1 WebSocket upgrader.
 func SetWebSocketOverlayOrigins(source OverlayOriginSource) {
 	wsOverlayOrigins.Store(&source)
-}
-
-func checkWebSocketOrigin(r *http.Request) bool {
-	origin := strings.TrimSpace(r.Header.Get("Origin"))
-	if origin == "" {
-		return true
-	}
-
-	originURL, err := url.Parse(origin)
-	if err != nil || originURL.Host == "" {
-		return false
-	}
-
-	if strings.EqualFold(originURL.Host, r.Host) {
-		return true
-	}
-
-	// Behind a TLS-terminating CDN/proxy, r.Host is the internal origin host
-	// while the public host the browser used arrives as X-Forwarded-Host. The
-	// browser's Origin reflects that public host, so accept it too.
-	if fwd := forwardedHost(r); fwd != "" && strings.EqualFold(originURL.Host, fwd) {
-		return true
-	}
-
-	// A browser reaching Silo through a network access provider's overlay
-	// listener sends the overlay origin; accept the ones connected right now.
-	for _, overlay := range overlayOriginsFrom(wsOverlayOrigins.Load()) {
-		if originMatches(originURL, overlay) {
-			return true
-		}
-	}
-
-	return false
 }
 
 func configureWebSocket(conn *websocket.Conn) {

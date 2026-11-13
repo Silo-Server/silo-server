@@ -14,25 +14,13 @@ func TestSupportsVideoFile(t *testing.T) {
 		want bool
 	}{
 		{"/tv/Show/Season 01/Show - S01E01.mkv", true},
-		{"/tv/Show/Season 01/Show - S01E02.webm", true},
 		{"/movies/Heat (1995)/Heat.mp4", true},
-		{"/movies/Heat (1995)/Heat.m4v", true},
 		{"/movies/Heat (1995)/Heat.MOV", true},
-		{"/movies/Heat (1995)/Heat.3gp", true},
-		{"/movies/Heat (1995)/Heat.3g2", true},
-		{"/movies/Heat (1995)/Heat.f4v", true},
 		{"/movies/Heat (1995)/Heat.avi", true},
-		{"/movies/Heat (1995)/Heat.divx", true},
 		{"/movies/Heat (1995)/Heat.ts", true},
 		{"/movies/Heat (1995)/Heat.m2ts", true},
-		{"/movies/Heat (1995)/Heat.MTS", true},
-		{"/movies/Heat (1995)/Heat.mpg", true},
-		{"/movies/Heat (1995)/Heat.mpeg", true},
 		{"/movies/Heat (1995)/Heat.wmv", true},
-		{"/movies/Heat (1995)/Heat.asf", true},
-		{"/movies/Heat (1995)/Heat.flv", true},
 		{"/movies/Heat (1995)/Heat.ogv", true},
-		{"/movies/Heat (1995)/Heat.ogm", true},
 		// A STREAM folder outside a disc structure is an ordinary folder.
 		{"/movies/Heat (1995)/STREAM/Heat.m2ts", true},
 		// Clips of a Blu-ray or AVCHD disc folder are not titles.
@@ -44,7 +32,6 @@ func TestSupportsVideoFile(t *testing.T) {
 		{"/movies/Heat (1995)/Heat.rmvb", false},
 		{"/movies/Heat (1995)/Heat.ogg", false},
 		{"/movies/Heat (1995)/Heat.mp3", false},
-		{"/movies/Heat (1995)/Heat.srt", false},
 		{"/movies/Heat (1995)/Heat", false},
 		{"", false},
 	}

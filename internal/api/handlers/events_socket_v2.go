@@ -10,21 +10,27 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/gorilla/websocket"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	evt "github.com/Silo-Server/silo-server/internal/events"
-	"github.com/gorilla/websocket"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 const eventsSchemeHTTP = "http"
 const eventsSchemeHTTPS = "https"
 const eventsAdminRole = "admin"
+
+// opaqueOrigin is the Origin a browser sends for a page with no web origin.
+const opaqueOrigin = "null"
 
 const EventsSocketProtocol = "silo.events.v2"
 const eventsTicketProtocolPrefix = "silo.ticket."
@@ -40,10 +46,10 @@ const eventsAccessChanged = "access_changed"
 // connection loop to send the access_changed frame before closing anyway.
 const eventsAccessChangedGrace = 2 * wsWriteTimeout
 
-// errSocketAccessChanged is the validator's answer when the login session
-// still holds but the access a ticket was minted under no longer does: the
-// account role, the effective role, the scope fingerprint, or profile
-// verification changed. It wraps evt.ErrSocketTicket, so callers that only
+// errSocketAccessChanged is the validator's answer when the login session or
+// API key still holds but the access a ticket was minted under no longer does:
+// the account role, the effective role, the scope fingerprint, profile
+// verification, or the key's revision changed. It wraps evt.ErrSocketTicket, so callers that only
 // tell a usable credential from an unusable one treat it as unusable.
 var errSocketAccessChanged = fmt.Errorf("%w: access changed", evt.ErrSocketTicket)
 
@@ -53,6 +59,9 @@ type EventsSocketV2 struct {
 	Events   *EventsHandler
 	Tickets  *evt.SocketTicketStore
 	Validate EventsSocketValidator
+	// APIKeys binds an API-key ticket to the key's revision at mint. Without
+	// it API keys cannot mint.
+	APIKeys SocketAPIKeys
 	// PublicOrigin is the configured external origin, never a forwarded header.
 	PublicOrigin   string
 	publicOrigin   atomic.Pointer[string]
@@ -64,9 +73,23 @@ func (h *EventsSocketV2) Mint(ctx context.Context, identity evt.SocketIdentity) 
 	if h == nil || h.Events == nil || h.Events.hub == nil || h.Tickets == nil || h.Validate == nil {
 		return "", evt.ErrSocketTicket
 	}
+	if identity.APIKeyID != 0 {
+		if h.APIKeys == nil {
+			return "", evt.ErrSocketTicket
+		}
+		key, err := h.APIKeys.GetMetadataByID(ctx, identity.APIKeyID)
+		if err != nil || key == nil {
+			return "", evt.ErrSocketTicket
+		}
+		identity.APIKeyRevision = key.Revision
+	}
 	validated, claims, err := h.Validate(ctx, identity)
 	if err != nil {
 		return "", err
+	}
+	identity.EffectiveRole = claims.Role
+	if identity.APIKeyID != 0 {
+		return h.Tickets.Mint(ctx, identity)
 	}
 	scope, ok := access.GetScope(validated)
 	// A fingerprint of fallback preferences would differ from the profile's
@@ -77,7 +100,6 @@ func (h *EventsSocketV2) Mint(ctx context.Context, identity evt.SocketIdentity) 
 		return "", evt.ErrSocketTicket
 	}
 	identity.AccessFingerprint = eventsScopeFingerprint(scope)
-	identity.EffectiveRole = claims.Role
 	return h.Tickets.Mint(ctx, identity)
 }
 
@@ -122,7 +144,7 @@ func (h *EventsSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "realtime authority expired", http.StatusUnauthorized)
 		return
 	}
-	deadline := time.Now().Add(evt.SocketMaxLifetime)
+	deadline := time.Now().Add(identity.MaxLifetime())
 	if identity.AccessExpiresAt.Before(deadline) {
 		deadline = identity.AccessExpiresAt
 	}
@@ -152,7 +174,7 @@ func (h *EventsSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			cancel()
 		}
 	}()
-	h.Events.serveWebSocket(w, r.WithContext(ctx), claims, identity.ProfileID, websocket.Upgrader{Subprotocols: []string{EventsSocketProtocol}, CheckOrigin: h.validOrigin}, accessChanged)
+	h.Events.serveWebSocket(w, r.WithContext(ctx), claims, identity.ProfileID, websocket.Upgrader{Subprotocols: []string{EventsSocketProtocol}, CheckOrigin: h.validOrigin, EnableCompression: true}, accessChanged)
 }
 
 // awaitAuthorityLoss re-validates the connection's identity every check
@@ -215,11 +237,12 @@ func overlayOriginsFrom(source *OverlayOriginSource) []string {
 	return (*source)()
 }
 
-// socketOriginAllowed accepts a browser Origin that matches the configured
-// public origin, the request's own scheme and host, or one of the overlay
-// origins connected providers report. The request's own origin stays accepted
-// with a public origin configured so a browser on a LAN address or IP:port can
-// open the sockets of the page it loaded. All are exact scheme and host
+// socketOriginAllowed accepts no Origin, an opaque or non-http(s) app Origin,
+// or a browser Origin that matches the configured public origin, the request's
+// own scheme and host, or one of the overlay origins connected providers
+// report. The request's own origin stays accepted with a public origin
+// configured so a browser on a LAN address or IP:port can open the sockets of
+// the page it loaded. All are exact scheme and host
 // matches; forwarded host headers are never consulted here.
 func socketOriginAllowed(r *http.Request, publicOrigin string, overlayOrigins []string) bool {
 	origins := r.Header.Values("Origin")
@@ -229,8 +252,22 @@ func socketOriginAllowed(r *http.Request, publicOrigin string, overlayOrigins []
 	if len(origins) != 1 {
 		return false
 	}
+	// Packaged TV and desktop apps load their pages from the device, so they
+	// send an opaque or non-web origin they cannot change. Like an originless
+	// native client, the ticket still authorizes them.
+	if origins[0] == opaqueOrigin {
+		return true
+	}
 	origin, err := url.Parse(origins[0])
-	if err != nil || origin.User != nil || origin.Host == "" || origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" || (origin.Scheme != eventsSchemeHTTPS && origin.Scheme != eventsSchemeHTTP) {
+	if err != nil {
+		return false
+	}
+	// Requiring "scheme://" keeps a bare host:port, which parses with the host
+	// as its scheme, out of the app-scheme case.
+	if origin.Scheme != eventsSchemeHTTPS && origin.Scheme != eventsSchemeHTTP && strings.HasPrefix(origins[0], origin.Scheme+"://") {
+		return true
+	}
+	if origin.User != nil || origin.Host == "" || origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" || (origin.Scheme != eventsSchemeHTTPS && origin.Scheme != eventsSchemeHTTP) {
 		return false
 	}
 	if publicOrigin != "" && originMatches(origin, publicOrigin) {
@@ -255,14 +292,79 @@ func originMatches(origin *url.URL, expected string) bool {
 }
 
 type eventsSessionValidator interface {
-	ActiveSession(context.Context, string) (auth.SessionAuthority, bool, error)
+	ActiveSession(context.Context, string, int) (auth.SessionAuthority, bool, error)
 }
 
-// NewEventsSocketV2 reuses the current account, session and viewer authorities.
-func NewEventsSocketV2(events *EventsHandler, tickets *evt.SocketTicketStore, sessions eventsSessionValidator, users access.UserRepository, resolver apimw.ViewerResolver, actingAdmin apimw.ActingAdminDecider, publicURL string) *EventsSocketV2 {
-	h := &EventsSocketV2{Events: events, Tickets: tickets, PublicOrigin: publicURL}
-	h.Validate = newSocketAuthorityValidator(sessions, users, resolver, actingAdmin)
+// SocketAPIKeys reads the current configuration of an API key.
+type SocketAPIKeys interface {
+	GetMetadataByID(ctx context.Context, id int64) (*models.APIKeyMetadata, error)
+}
+
+// NewEventsSocketV2 reuses the current account, session and viewer
+// authorities, and with keys accepts tickets an admin:monitor:read API key
+// minted.
+func NewEventsSocketV2(events *EventsHandler, tickets *evt.SocketTicketStore, sessions eventsSessionValidator, users access.UserRepository, resolver apimw.ViewerResolver, actingAdmin apimw.ActingAdminDecider, keys SocketAPIKeys, publicURL string) *EventsSocketV2 {
+	h := &EventsSocketV2{Events: events, Tickets: tickets, APIKeys: keys, PublicOrigin: publicURL}
+	h.Validate = bySocketCredential(newSocketAuthorityValidator(sessions, users, resolver, actingAdmin), newAPIKeySocketValidator(keys, users, actingAdmin))
 	return h
+}
+
+// bySocketCredential sends an API-key identity to keys and any other identity
+// to login. Only the events socket composes it; the sibling sockets use the
+// login validator alone, which refuses API-key identities.
+func bySocketCredential(login, keys EventsSocketValidator) EventsSocketValidator {
+	if login == nil {
+		return nil
+	}
+	return func(ctx context.Context, identity evt.SocketIdentity) (context.Context, *auth.Claims, error) {
+		if identity.APIKeyID == 0 {
+			return login(ctx, identity)
+		}
+		if keys == nil {
+			return ctx, nil, evt.ErrSocketTicket
+		}
+		return keys(ctx, identity)
+	}
+}
+
+// newAPIKeySocketValidator checks an API-key socket identity against the key
+// and its account. The key must keep the configuration revision it had at
+// mint (editing its scopes, tier or label advances it) and the
+// admin:monitor:read scope, and its account must stay an enabled
+// administrator that the acting-admin decision admits with no profile, as it
+// does at the HTTP admin gate. A deleted key or a missing or disabled account
+// ends the credential; the rest are access changes.
+func newAPIKeySocketValidator(keys SocketAPIKeys, users access.UserRepository, actingAdmin apimw.ActingAdminDecider) EventsSocketValidator {
+	if keys == nil || users == nil || actingAdmin == nil {
+		return nil
+	}
+	return func(ctx context.Context, identity evt.SocketIdentity) (context.Context, *auth.Claims, error) {
+		checkCtx, stop := context.WithTimeout(ctx, 2*time.Second)
+		defer stop()
+		if identity.APIKeyID <= 0 || identity.SessionID != "" || identity.ProfileID != "" || !identity.AccessExpiresAt.After(time.Now()) {
+			return ctx, nil, evt.ErrSocketTicket
+		}
+		key, err := keys.GetMetadataByID(checkCtx, identity.APIKeyID)
+		if err != nil || key == nil || key.UserID != identity.UserID {
+			return ctx, nil, evt.ErrSocketTicket
+		}
+		user, err := users.GetByID(checkCtx, identity.UserID)
+		if err != nil || user == nil || !user.Enabled {
+			return ctx, nil, evt.ErrSocketTicket
+		}
+		if key.Revision != identity.APIKeyRevision || !slices.Contains(key.Scopes, auth.ScopeAdminMonitorRead) || user.Role != eventsAdminRole || identity.Role != eventsAdminRole {
+			return ctx, nil, errSocketAccessChanged
+		}
+		claims := &auth.Claims{UserID: identity.UserID, Role: eventsAdminRole, TokenType: auth.TokenTypeAPIKey, APIKeyID: key.ID, APIKeyScopes: key.Scopes}
+		acting, err := actingAdmin(checkCtx, apimw.ActingAdminRequest{Claims: claims, DeviceID: identity.DeviceID})
+		if err != nil {
+			return ctx, nil, evt.ErrSocketTicket
+		}
+		if !acting {
+			return ctx, nil, errSocketAccessChanged
+		}
+		return apimw.SetClaims(ctx, claims), claims, nil
+	}
 }
 
 // refuseRemotePlaybackSocket narrows validate to sessions that are not a
@@ -295,7 +397,7 @@ func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.U
 	return func(ctx context.Context, identity evt.SocketIdentity) (context.Context, *auth.Claims, error) {
 		checkCtx, stop := context.WithTimeout(ctx, 2*time.Second)
 		defer stop()
-		if identity.SessionID == "" || !identity.AccessExpiresAt.After(time.Now()) {
+		if identity.SessionID == "" || identity.APIKeyID != 0 || !identity.AccessExpiresAt.After(time.Now()) {
 			return ctx, nil, evt.ErrSocketTicket
 		}
 		// A revoked or expired session and a missing or disabled account end
@@ -304,7 +406,7 @@ func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.U
 		// refetching and reconnecting.
 		// A remote-playback session's ticket names its bound profile; its
 		// role is "user" whatever the account's role is.
-		authority, valid, err := sessions.ActiveSession(checkCtx, identity.SessionID)
+		authority, valid, err := sessions.ActiveSession(checkCtx, identity.SessionID, identity.UserID)
 		if err != nil || !valid {
 			return ctx, nil, evt.ErrSocketTicket
 		}
@@ -320,7 +422,9 @@ func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.U
 		if authority.Role != identity.Role {
 			return ctx, nil, errSocketAccessChanged
 		}
-		scope, err := resolver.Resolve(checkCtx, access.ResolveInput{UserID: identity.UserID, SessionID: identity.SessionID, ProfileID: identity.ProfileID, ProfileToken: identity.ProfileToken})
+		// The login-session claims the ticket stands for; Role is set below.
+		base := auth.Claims{ImpersonatorUserID: identity.ImpersonatorUserID, UserID: identity.UserID, SessionID: identity.SessionID, TokenType: auth.TokenTypeAccess}
+		scope, err := resolver.Resolve(checkCtx, access.ResolveInput{UserID: identity.UserID, SessionID: identity.SessionID, ProfileID: identity.ProfileID, ProfileToken: identity.ProfileToken, SkipPINVerification: base.SkipsProfilePIN()})
 		if errors.Is(err, access.ErrProfileUnverified) || (err == nil && !scope.ProfileVerified) {
 			return ctx, nil, errSocketAccessChanged
 		}
@@ -334,8 +438,10 @@ func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.U
 		}
 		role := authority.Role
 		if role == eventsAdminRole {
+			admin := base
+			admin.Role = role
 			acting, err := actingAdmin(checkCtx, apimw.ActingAdminRequest{
-				Claims:    &auth.Claims{ImpersonatorUserID: identity.ImpersonatorUserID, UserID: identity.UserID, SessionID: identity.SessionID, Role: role, TokenType: auth.TokenTypeAccess},
+				Claims:    &admin,
 				ProfileID: identity.ProfileID,
 				DeviceID:  identity.DeviceID,
 			})
@@ -349,7 +455,9 @@ func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.U
 		if identity.AccessFingerprint != "" && identity.EffectiveRole != role {
 			return ctx, nil, errSocketAccessChanged
 		}
-		claims := &auth.Claims{ImpersonatorUserID: identity.ImpersonatorUserID, UserID: identity.UserID, SessionID: identity.SessionID, Role: role, TokenType: auth.TokenTypeAccess}
+		final := base
+		final.Role = role
+		claims := &final
 		authority.Narrow(claims)
 		ctx = apimw.SetClaims(ctx, claims)
 		ctx = apimw.SetProfileID(ctx, identity.ProfileID)

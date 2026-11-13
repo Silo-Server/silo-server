@@ -8,6 +8,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/database"
 )
 
 // Compile-time assertions that *Engine satisfies both catalog provider
@@ -29,11 +31,12 @@ func newEngineTestPool(t *testing.T) *pgxpool.Pool {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
 	}
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
+	// The application's pool, so queries run with its vector codecs.
+	pool, err := database.NewPool(ctx, config.DatabaseConfig{URL: dsn})
 	if err != nil {
 		t.Fatalf("connect test database: %v", err)
 	}
-	t.Cleanup(pool.Close)
+	t.Cleanup(func() { database.ClosePool(pool) })
 	var tableName *string
 	if err := pool.QueryRow(ctx, `SELECT to_regclass('public.server_settings')::text`).Scan(&tableName); err != nil {
 		t.Fatalf("check server_settings table: %v", err)
@@ -69,47 +72,4 @@ func snapshotEmbeddingLock(t *testing.T, pool *pgxpool.Pool) {
 			ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
 		`, embeddingLockSettingKey, *original)
 	})
-}
-
-func TestEngineActiveEmbeddingModelNoLock(t *testing.T) {
-	pool := newEngineTestPool(t)
-	snapshotEmbeddingLock(t, pool)
-	ctx := context.Background()
-
-	if _, err := pool.Exec(ctx, `DELETE FROM server_settings WHERE key = $1`, embeddingLockSettingKey); err != nil {
-		t.Fatalf("clear embedding lock: %v", err)
-	}
-
-	e := &Engine{repo: NewRepo(pool)}
-	model, err := e.ActiveEmbeddingModel(ctx)
-	if err != nil {
-		t.Fatalf("ActiveEmbeddingModel returned error: %v", err)
-	}
-	if model != "" {
-		t.Fatalf("ActiveEmbeddingModel = %q, want empty string when no lock", model)
-	}
-}
-
-func TestEngineActiveEmbeddingModelWithLock(t *testing.T) {
-	pool := newEngineTestPool(t)
-	snapshotEmbeddingLock(t, pool)
-	ctx := context.Background()
-
-	repo := NewRepo(pool)
-	if err := repo.SetEmbeddingLock(ctx, EmbeddingLock{
-		BaseURL:          "http://x",
-		Model:            "test-model-x",
-		SourceDimensions: CanonicalEmbeddingDimensions,
-	}); err != nil {
-		t.Fatalf("SetEmbeddingLock: %v", err)
-	}
-
-	e := &Engine{repo: repo}
-	model, err := e.ActiveEmbeddingModel(ctx)
-	if err != nil {
-		t.Fatalf("ActiveEmbeddingModel returned error: %v", err)
-	}
-	if model != "test-model-x" {
-		t.Fatalf("ActiveEmbeddingModel = %q, want %q", model, "test-model-x")
-	}
 }

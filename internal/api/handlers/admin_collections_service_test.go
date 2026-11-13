@@ -5,13 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 func TestAdminCollectionServiceRejectsArtworkInDefinition(t *testing.T) {
@@ -55,26 +53,6 @@ func TestAdminCollectionServiceRejectsUnknownCollectionType(t *testing.T) {
 	_, err = h.CreateAdminCollection(t.Context(), AdminCollectionCreate{LibraryID: 1})
 	if e, ok := errors.AsType[*APIError](err); !ok || e.Field == "collection_type" || e.Code != "bad_request" {
 		t.Fatalf("create without a type: expected the title error, got %v", err)
-	}
-}
-
-// The v1 bridge routes share the service validation and answer it as a 400.
-func TestAdminCollectionV1RoutesRejectUnknownCollectionType(t *testing.T) {
-	h := &LibraryCollectionHandler{}
-	for _, tc := range []struct {
-		method string
-		serve  func(http.ResponseWriter, *http.Request)
-	}{
-		{http.MethodPost, h.HandleCreateAdminCollection},
-		{http.MethodPut, h.HandleUpdateAdminCollection},
-	} {
-		req := accessGroupRequestWithID(tc.method, "/api/v1/admin/collections/c1", strings.NewReader(`{"title":"repro","library_id":1,"collection_type":"bogus"}`), "c1")
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-		tc.serve(rec, req)
-		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "collection_type") {
-			t.Fatalf("%s: got %d %s", tc.method, rec.Code, rec.Body)
-		}
 	}
 }
 
@@ -141,81 +119,106 @@ func TestAdminCollectionSourceUpdateAcceptsFranchiseID(t *testing.T) {
 	}
 }
 
-// A v1 update that switches a collection to Smart activates its stored
-// rules, so it is refused when they use the v2 vocabulary; v2 may switch it.
-func TestAdminCollectionV1SmartSwitchKeepsTheV1RuleVocabularyDB(t *testing.T) {
+// A variant that fails to delete must not leave an admin collection pointing
+// at partly deleted artwork: the reference is cleared first and the failed
+// cleanup only leaves orphans (issue #2419).
+func TestDeleteAdminCollectionArtworkClearsReferenceWhenVariantDeleteFailsDB(t *testing.T) {
 	f := newPagingIntegrationFixture(t)
 	repo := catalog.NewLibraryCollectionRepository(f.pool)
 	h := NewLibraryCollectionHandler(repo, nil, catalog.NewItemRepository(f.pool), nil)
-	created, err := h.CreateAdminCollection(t.Context(), AdminCollectionCreate{
-		LibraryID: f.library, Title: "The films", CollectionType: "manual",
-		QueryDefinition: json.RawMessage(`{"match":"all","groups":[{"match":"all","rules":[{"field":"title","op":"begins_with","value":"the "}]}]}`),
-	})
+	created, err := h.CreateAdminCollection(t.Context(), AdminCollectionCreate{LibraryID: f.library, Title: "Broken artwork", CollectionType: "manual"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		_, _ = f.pool.Exec(context.Background(), `DELETE FROM library_collections WHERE id = $1`, created.ID)
 	})
-	smart := "smart"
-	if _, err := h.updateAdminCollection(t.Context(), created.ID, AdminCollectionUpdate{CollectionType: &smart, V1Rules: true}, func(string, string, string) error { return nil }); err == nil {
-		t.Fatal("v1 switched to Smart with a title rule stored")
-	}
-	if _, err := h.UpdateAdminCollection(t.Context(), created.ID, AdminCollectionUpdate{CollectionType: &smart}); err != nil {
-		t.Fatalf("v2 switch to Smart: %v", err)
+	for _, kind := range []string{collectionImagePoster, adminCollectionBackdrop} {
+		t.Run(kind, func(t *testing.T) {
+			dir := collectionImageDir(adminCollectionImagePrefix, created.ID, kind)
+			path := dir + "/original.0000000000000001.webp"
+			input := catalog.UpdateLibraryCollectionInput{ID: created.ID}
+			if kind == collectionImagePoster {
+				input.PosterURL = new(path)
+			} else {
+				input.BackdropURL = new(path)
+			}
+			if err := repo.Update(t.Context(), input); err != nil {
+				t.Fatal(err)
+			}
+			artwork := &partialDeleteStore{okKeys: 1, stubListDeleteStore: stubListDeleteStore{keys: []string{path, dir + "/w300.0000000000000001.webp"}}}
+			h.ArtworkStore = artwork
+
+			if err := h.DeleteAdminCollectionArtwork(t.Context(), created.ID, kind); err != nil {
+				t.Fatalf("DeleteAdminCollectionArtwork: %v", err)
+			}
+			got, err := h.adminCollectionImagePath(t.Context(), created.ID, kind)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != "" {
+				t.Fatalf("%s reference = %q, want cleared", kind, got)
+			}
+			if len(artwork.deleted) != 1 {
+				t.Fatalf("cleanup did not run after the clear: deleted %#v", artwork.deleted)
+			}
+		})
 	}
 }
 
-func TestAdminCollectionServiceCanonicalGuardAndMembershipDB(t *testing.T) {
-	f := newPagingIntegrationFixture(t)
-	repo := catalog.NewLibraryCollectionRepository(f.pool)
-	h := NewLibraryCollectionHandler(repo, nil, catalog.NewItemRepository(f.pool), nil)
-	created, err := h.CreateAdminCollection(t.Context(), AdminCollectionCreate{LibraryID: f.library, Title: "Admin editor", CollectionType: "manual", PosterURL: "poster/path", BackdropURL: "backdrop/path"})
-	if err != nil {
-		t.Fatal(err)
+// A /api/v2 smart collection needs a complete rule: one with none would match
+// every title. The refusal names query_definition.groups so the editor can
+// point at the rules. Updates that leave the rules alone keep
+// working for collections saved before the check.
+func TestSmartCollectionNeedsACompleteRule(t *testing.T) {
+	const blank = `{"groups":[{"match":"all","rules":[{"field":"genre","op":"is","value":""}]}]}`
+	const comedy = `{"groups":[{"match":"all","rules":[{"field":"genre","op":"is","value":"Comedy"}]}]}`
+	needsRule := func(t *testing.T, err error) {
+		t.Helper()
+		if e, ok := errors.AsType[*APIError](err); !ok || e.Status != 400 || e.Field != "query_definition.groups" {
+			t.Fatalf("expected a query_definition.groups field error, got %v", err)
+		}
 	}
-	before, revision, err := h.GetAdminCollection(t.Context(), created.ID)
-	if err != nil {
-		t.Fatal(err)
+
+	h := &LibraryCollectionHandler{}
+	for _, definition := range []string{"", `{"groups":[]}`, blank} {
+		_, err := h.CreateAdminCollection(t.Context(), AdminCollectionCreate{LibraryID: 1, Title: "Everything", CollectionType: collectionTypeSmart, QueryDefinition: json.RawMessage(definition)})
+		needsRule(t, err)
 	}
-	if before.PosterURL != "" || before.BackdropURL != "" {
-		t.Fatal("canonical editor contains artwork URLs")
+
+	smart, manual := collectionTypeSmart, collectionManagementModeManual
+	for name, tc := range map[string]struct {
+		existingType  string
+		existingRules string
+		req           AdminCollectionUpdate
+		refused       bool
+	}{
+		"smart, rules removed":              {existingType: smart, req: AdminCollectionUpdate{QueryDefinition: json.RawMessage(`{"groups":[]}`)}, refused: true},
+		"smart, only a blank rule":          {existingType: smart, req: AdminCollectionUpdate{QueryDefinition: json.RawMessage(blank)}, refused: true},
+		"smart, a rule":                     {existingType: smart, req: AdminCollectionUpdate{QueryDefinition: json.RawMessage(comedy)}},
+		"saved empty, renamed only":         {existingType: smart, existingRules: `{}`, req: AdminCollectionUpdate{Title: new("Renamed")}},
+		"saved empty, list toggle":          {existingType: smart, existingRules: `{}`, req: AdminCollectionUpdate{CollectionType: &smart, Featured: new(true)}},
+		"switched to smart, no stored rule": {existingType: manual, existingRules: `{}`, req: AdminCollectionUpdate{CollectionType: &smart}, refused: true},
+		"switched to smart, stored rule":    {existingType: manual, existingRules: comedy, req: AdminCollectionUpdate{CollectionType: &smart}},
+		"manual sending empty rules":        {existingType: manual, req: AdminCollectionUpdate{QueryDefinition: json.RawMessage(`{"groups":[]}`)}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := adminSmartRuleCheck(tc.existingType, json.RawMessage(tc.existingRules), tc.req, tc.req.QueryDefinition)
+			if tc.refused {
+				needsRule(t, err)
+			} else if err != nil {
+				t.Fatalf("refused: %v", err)
+			}
+		})
 	}
-	_, err = h.UpdateAdminCollection(WithAdminCollectionExpectedRevision(t.Context(), revision), created.ID, AdminCollectionUpdate{Title: new("Updated")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = h.UpdateAdminCollection(WithAdminCollectionExpectedRevision(t.Context(), revision), created.ID, AdminCollectionUpdate{Title: new("Stale")})
-	if !errors.Is(err, catalog.ErrLibraryCollectionRevisionMismatch) {
-		t.Fatalf("stale update lost conflict: %v", err)
-	}
-	if err = h.AddAdminCollectionItem(t.Context(), created.ID, f.ids[0], 7); err == nil {
-		t.Fatal("added member outside collection libraries")
-	}
-	if err = h.AddAdminCollectionItem(t.Context(), created.ID, f.ids[1], 217); err != nil {
-		t.Fatal(err)
-	}
-	if err = h.AddAdminCollectionItem(t.Context(), created.ID, f.ids[1], 0); err != nil {
-		t.Fatal(err)
-	}
-	items, err := repo.ListItems(t.Context(), created.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(items) != 1 || items[0].Position != 217 {
-		t.Fatalf("duplicate add changed membership: %+v", items)
-	}
-	if err = h.DeleteAdminCollection(WithAdminCollectionExpectedRevision(t.Context(), revision), created.ID); !errors.Is(err, catalog.ErrLibraryCollectionRevisionMismatch) {
-		t.Fatalf("stale delete lost conflict: %v", err)
-	}
-	current, revision, err := h.GetAdminCollection(t.Context(), created.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if current.Title != "Updated" {
-		t.Fatalf("stale mutation changed title: %s", current.Title)
-	}
-	if err = h.DeleteAdminCollection(WithAdminCollectionExpectedRevision(t.Context(), revision), created.ID); err != nil {
-		t.Fatal(err)
+
+	store := &lifecycleStore{collection: userstore.Collection{ID: "c", CreatorProfileID: "owner", CollectionType: smart}}
+	personal := NewCollectionHandler(lifecycleProvider{store: store})
+	_, err := personal.CreatePersonalCollection(t.Context(), PersonalCollectionCreateCommand{UserID: 1, ProfileID: "owner", Request: PersonalCollectionCreateRequest{Name: "Everything", CollectionType: smart, QueryDefinition: json.RawMessage(`{"groups":[]}`)}})
+	needsRule(t, err)
+	_, err = personal.UpdatePersonalCollection(t.Context(), PersonalCollectionUpdateCommand{UserID: 1, ProfileID: "owner", CollectionID: "c", Request: PersonalCollectionUpdateRequest{QueryDefinition: json.RawMessage(blank)}})
+	needsRule(t, err)
+	if store.mutations != 0 {
+		t.Fatalf("refused saves wrote %d times", store.mutations)
 	}
 }

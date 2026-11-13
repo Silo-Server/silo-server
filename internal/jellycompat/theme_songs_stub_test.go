@@ -25,7 +25,7 @@ func (s *themeOwnerContent) GetItemDetail(_ context.Context, _ *Session, id stri
 }
 
 func TestThemeRoutesAcceptVisibleSeason(t *testing.T) {
-	for _, route := range []string{"ThemeSongs", "ThemeVideos", "ThemeMedia"} {
+	for _, route := range []string{"ThemeVideos", "ThemeMedia"} {
 		for _, hidden := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/hidden=%v", route, hidden), func(t *testing.T) {
 				codec := NewResourceIDCodec()

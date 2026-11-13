@@ -262,6 +262,7 @@ const (
 var householdGateExemptOperations = map[string]string{
 	"createPersonalAPIKey":             exemptAccount,
 	"applyAdminItemMatch":              exemptAdminCuration,
+	"getAdminItemMatchHints":           exemptAdminCuration,
 	"cancelAdminMetadataTranslation":   exemptAdminCuration,
 	"listAdminMetadataTranslationJobs": exemptAdminCuration,
 	"refreshAdminItemMetadata":         exemptAdminCuration,
@@ -277,6 +278,7 @@ var householdGateExemptOperations = map[string]string{
 	"createPlexPin":                        exemptAccount,
 	"createPluginLaunch":                   exemptAccount,
 	"createWebhookConnection":              exemptAccount,
+	"deleteAccountIdentity":                exemptAccount,
 	"deleteWebhookConnection":              exemptAccount,
 	"getHistoryImportRun":                  exemptAccount,
 	"getNotificationDiscordPreferences":    exemptAccount,
@@ -285,6 +287,7 @@ var householdGateExemptOperations = map[string]string{
 	"getSettingsContract":                  exemptAccount,
 	"getSubtitleAIQuota":                   exemptAccount,
 	"getWebhookMappings":                   exemptAccount,
+	"listAccountIdentities":                exemptAccount,
 	"listHistoryImportRuns":                exemptAccount,
 	"listHistoryImportSources":             exemptAccount,
 	"listPluginSettings":                   exemptAccount,
@@ -337,6 +340,7 @@ var householdGateExemptOperations = map[string]string{
 	"getNotificationApplePushDisplay": "a display token binds the profile from its claims",
 	"listSectionRecipeCandidates":     "section recipe gallery metadata",
 	"listSectionRecipes":              "section recipe gallery metadata",
+	"listSeasonalThemes":              "static seasonal holiday and vibe catalog",
 }
 
 // TestHouseholdProfileGateCoversProfileOptionalOperations: every operation

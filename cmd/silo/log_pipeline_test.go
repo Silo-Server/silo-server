@@ -121,25 +121,6 @@ func TestLoggedRequestIssuesNoRedisCommands(t *testing.T) {
 	}
 }
 
-// BenchmarkLoggedInfo measures one captured slog.Info through the production
-// operational log wiring, with Redis configured and healthy on loopback.
-func BenchmarkLoggedInfo(b *testing.B) {
-	restoreDefaultLogger(b)
-	ctx, cancel := context.WithCancel(context.Background())
-	b.Cleanup(cancel)
-
-	fake := startFakeRedis(b)
-	hub := logstream.NewHub("node-a", cache.NewEventBus(config.RedisConfig{URL: "redis://" + fake.addr}))
-	b.Cleanup(hub.Close)
-	_, _, stop := configureOperationalLogging(ctx, unreachablePool(b), newMemorySettings(), hub,
-		slog.DiscardHandler, "node-a")
-	b.Cleanup(stop)
-
-	for b.Loop() {
-		slog.InfoContext(ctx, "probe: handled request", "component", "probe", "status", 200)
-	}
-}
-
 // redisOperations sums silo_dependency_operations_total for Redis across
 // commands, roles and outcomes. Every client built by the cache package reports
 // there, including failed attempts.

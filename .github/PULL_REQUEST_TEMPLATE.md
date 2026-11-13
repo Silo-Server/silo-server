@@ -11,11 +11,18 @@ another repository. Delete the line when the PR only partly addresses an issue. 
 Related issue: #NNN
 <!-- An epic, sub-issue, or partly addressed issue this work serves and that should
 stay open, or "N/A". An open issue is not required — the Problem section below must
-stand on its own. -->
+stand on its own — except for a feat PR from someone without triage or write access,
+which must link an issue in this repository labeled `accepted`. -->
 Validation tasks: #NNN C1
 <!-- Until 1.0 ships: v1.0 board tasks and cases this change unblocks or changes,
 e.g. "unblocks #1144 C3; changes #1200 C1". Write "none" when no validation task is
 affected. -->
+
+Other clients: Apple Silo-Server/silo-apple#NNN; Android Silo-Server/silo-android#NNN; Roku N/A (reason)
+<!-- One entry each for Apple, Android, and Roku, and for Web when the web app needs
+the change but this pull request leaves it out: a parity issue or pull request link,
+or "N/A" with the reason. Write "N/A (no client-visible change)" when no client
+shows the change. See "Cross-client parity" in AGENTS.md. -->
 
 A short plain-language summary: what goes wrong, who it affects, and what this
 change does about it. Details come after.
@@ -52,8 +59,10 @@ anything attached here. To keep captures private instead, publish them to
 evidence.siloserver.org, where only you and Silo maintainers can open them, and
 replace the table with
 `Evidence: https://evidence.siloserver.org/r/silo-server/pr-<number>/`. When nothing
-visible changes, replace this section's content with "Evidence: none, no user-visible
-change". -->
+visible changes, replace the table with how you checked the change: the steps you ran,
+the build or commit, and trimmed test or API results. Every pull request needs
+evidence; a contributor's pull request still without it 24 hours after opening is
+closed. -->
 
 ## Risks
 
@@ -64,7 +73,8 @@ identified".
 
 - [ ] I read and can explain the complete diff.
 - [ ] This pull request addresses one concern.
-- [ ] The Evidence section shows every change a user can see, or says there is none.
+- [ ] Each test this pull request adds meets "Decide what to test" in CONTRIBUTING.md.
+- [ ] The Evidence section shows every change a user can see, or how I checked a change nobody sees.
 
 ## AI Disclosure
 

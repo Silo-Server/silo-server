@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 )
@@ -156,6 +157,13 @@ func checkVersion(version int) error {
 }
 
 func encodeSession(value SessionView) ([]byte, error) {
+	return encodeSessionBounded(value, maxSessionEncodedBytes, maxSessionStringBytes)
+}
+
+func encodeSessionBounded(value SessionView, encodedLimit, stringLimit int) ([]byte, error) {
+	if len(value.TokenIssuedAtSources) > maxWireMap || len(value.Outcomes) > maxWireMap || !wireCollectionsFit(len(value.MediaFileIDs), len(value.PlayMethods), len(value.Routes), len(value.ViewerIPs), len(value.DeviceIDs), len(value.ClientVariants), len(value.UserAgents), len(value.TokenIssuedAts), len(value.IdentityConflicts)) {
+		return nil, errRecordBounds
+	}
 	w := wireSession{V: codecVersion, Subject: wireSubject{Kind: value.Subject.Kind, ID: value.Subject.ID}, ProfileID: value.ProfileID,
 		SessionID: value.SessionID, MediaFileID: value.MediaFileID, PlayMethod: value.PlayMethod,
 		MediaFileIDs: value.MediaFileIDs, MediaFileIDsOverflowed: value.MediaFileIDsOverflowed,
@@ -180,10 +188,20 @@ func encodeSession(value SessionView) ([]byte, error) {
 	for _, conflict := range value.IdentityConflicts {
 		w.IdentityConflicts = append(w.IdentityConflicts, wireIdentityConflict{Field: conflict.Field, Existing: conflict.Existing, Offered: conflict.Offered, ObservedAt: timeToUnixNano(conflict.ObservedAt)})
 	}
-	return json.Marshal(w)
+	if err := validateSessionWire(w, stringLimit); err != nil {
+		return nil, err
+	}
+	return marshalBounded(w, encodedLimit)
 }
 
 func decodeSession(data []byte) (SessionView, error) {
+	return decodeSessionBounded(data, maxSessionEncodedBytes, maxSessionStringBytes)
+}
+
+func decodeSessionBounded(data []byte, encodedLimit, stringLimit int) (SessionView, error) {
+	if !validEncoded(data, encodedLimit) {
+		return SessionView{}, errRecordBounds
+	}
 	var w wireSession
 	if err := json.Unmarshal(data, &w); err != nil {
 		return SessionView{}, err
@@ -191,7 +209,7 @@ func decodeSession(data []byte) (SessionView, error) {
 	if err := checkVersion(w.V); err != nil {
 		return SessionView{}, err
 	}
-	if err := validateSessionWire(w); err != nil {
+	if err := validateSessionWire(w, stringLimit); err != nil {
 		return SessionView{}, err
 	}
 	v := SessionView{Subject: Subject{Kind: w.Subject.Kind, ID: w.Subject.ID}, ProfileID: w.ProfileID, SessionID: w.SessionID,
@@ -218,7 +236,10 @@ func decodeSession(data []byte) (SessionView, error) {
 	return v, nil
 }
 
-func validateSessionWire(w wireSession) error {
+func validateSessionWire(w wireSession, stringLimit int) error {
+	if err := validateSessionText(w, stringLimit); err != nil {
+		return err
+	}
 	if w.MediaFileID < 0 || w.BytesAccepted < 0 || w.OpenObservations < 0 || w.RequestCount < 0 {
 		return errors.New("negative session counter")
 	}
@@ -255,14 +276,23 @@ func validateSessionWire(w wireSession) error {
 }
 
 func encodeTransfer(value TransferView) ([]byte, error) {
+	if len(value.Outcomes) > maxWireMap {
+		return nil, errRecordBounds
+	}
 	w := wireTransfer{V: codecVersion, ID: value.ID, Subject: wireSubject{Kind: value.Subject.Kind, ID: value.Subject.ID}, ProfileID: value.ProfileID, MediaFileID: value.MediaFileID,
 		Method: value.Method, Pattern: value.Pattern, Role: value.Role, BytesAccepted: value.BytesAccepted, LastByteAccepted: timeToUnixNano(value.LastByteAccepted), LastObservationEnd: timeToUnixNano(value.LastObservationEnd),
 		OpenObservations: value.OpenObservations, RequestCount: value.RequestCount, ViewerIP: value.ViewerIP, DeviceID: value.DeviceID,
 		Client: wireClientVariant(value.Client), UserAgent: value.UserAgent, Outcomes: value.Outcomes}
-	return json.Marshal(w)
+	if err := validateTransferWire(w); err != nil {
+		return nil, err
+	}
+	return marshalBounded(w, maxTransferEncodedBytes)
 }
 
 func decodeTransfer(data []byte) (TransferView, error) {
+	if !validEncoded(data, maxTransferEncodedBytes) {
+		return TransferView{}, errRecordBounds
+	}
 	var w wireTransfer
 	if err := json.Unmarshal(data, &w); err != nil {
 		return TransferView{}, err
@@ -270,16 +300,8 @@ func decodeTransfer(data []byte) (TransferView, error) {
 	if err := checkVersion(w.V); err != nil {
 		return TransferView{}, err
 	}
-	if w.MediaFileID < 0 || w.BytesAccepted < 0 || w.OpenObservations < 0 || w.RequestCount < 0 {
-		return TransferView{}, errors.New("negative transfer counter")
-	}
-	if len(w.Outcomes) > maxWireMap {
-		return TransferView{}, errors.New("transfer map too large")
-	}
-	for _, value := range w.Outcomes {
-		if value < 0 {
-			return TransferView{}, errors.New("negative outcome counter")
-		}
+	if err := validateTransferWire(w); err != nil {
+		return TransferView{}, err
 	}
 	return TransferView{ID: w.ID, Subject: Subject{Kind: w.Subject.Kind, ID: w.Subject.ID}, ProfileID: w.ProfileID, MediaFileID: w.MediaFileID, Method: w.Method, Pattern: w.Pattern, Role: w.Role,
 		BytesAccepted: w.BytesAccepted, LastByteAccepted: timeFromUnixNano(w.LastByteAccepted), LastObservationEnd: timeFromUnixNano(w.LastObservationEnd), OpenObservations: w.OpenObservations,
@@ -288,10 +310,16 @@ func decodeTransfer(data []byte) (TransferView, error) {
 
 func encodeMeta(value publisherMeta) ([]byte, error) {
 	value.V = codecVersion
-	return json.Marshal(value)
+	if err := validateMeta(value); err != nil {
+		return nil, err
+	}
+	return marshalBounded(value, maxMetaEncodedBytes)
 }
 
 func decodeMeta(data []byte) (publisherMeta, error) {
+	if !validEncoded(data, maxMetaEncodedBytes) {
+		return publisherMeta{}, errRecordBounds
+	}
 	var value publisherMeta
 	if err := json.Unmarshal(data, &value); err != nil {
 		return publisherMeta{}, err
@@ -299,11 +327,63 @@ func decodeMeta(data []byte) (publisherMeta, error) {
 	if err := checkVersion(value.V); err != nil {
 		return publisherMeta{}, err
 	}
-	if value.DroppedObservations < 0 || value.DroppedBytes < 0 || value.UnattributedObservations < 0 || value.UnattributedBytes < 0 || value.SessionCount < 0 || value.TransferCount < 0 {
-		return publisherMeta{}, errors.New("negative publisher metadata counter")
-	}
-	if value.SessionCount > maxWireSlice || value.TransferCount > maxWireSlice {
-		return publisherMeta{}, errors.New("publisher count too large")
+	if err := validateMeta(value); err != nil {
+		return publisherMeta{}, err
 	}
 	return value, nil
+}
+
+func validateTransferWire(w wireTransfer) error {
+	if err := validateTransferText(w, maxTransferStringBytes); err != nil {
+		return err
+	}
+	if w.MediaFileID < 0 || w.BytesAccepted < 0 || w.OpenObservations < 0 || w.RequestCount < 0 {
+		return errors.New("negative transfer counter")
+	}
+	if len(w.Outcomes) > maxWireMap {
+		return errors.New("transfer map too large")
+	}
+	for _, value := range w.Outcomes {
+		if value < 0 {
+			return errors.New("negative outcome counter")
+		}
+	}
+	return nil
+}
+
+func wireCollectionsFit(lengths ...int) bool {
+	for _, length := range lengths {
+		if length > maxWireSlice {
+			return false
+		}
+	}
+	return true
+}
+
+func validEncoded(data []byte, limit int) bool {
+	return len(data) <= limit && utf8.Valid(data)
+}
+
+func marshalBounded(value any, limit int) ([]byte, error) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > limit {
+		return nil, errRecordBounds
+	}
+	return data, nil
+}
+
+func validateMeta(value publisherMeta) error {
+	if !validText(value.PublisherID, maxIdentityBytes) || !validText(value.NodeID, maxIdentityBytes) {
+		return errRecordBounds
+	}
+	if value.DroppedObservations < 0 || value.DroppedBytes < 0 || value.UnattributedObservations < 0 || value.UnattributedBytes < 0 || value.SessionCount < 0 || value.TransferCount < 0 {
+		return errors.New("negative publisher metadata counter")
+	}
+	if value.SessionCount > maxWireSlice || value.TransferCount > maxWireSlice {
+		return errors.New("publisher count too large")
+	}
+	return nil
 }

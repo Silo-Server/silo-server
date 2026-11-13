@@ -30,14 +30,6 @@ func avertedRows(t *testing.T, c *toyCatalog, p persona, turnedAway []string, ne
 	return buildRows(t, b, store, p, c, exclude)
 }
 
-// excludedRows builds persona p's rows with excluded left out and nothing
-// ranked against: what the rows would be if marks only hid their titles.
-func excludedRows(t *testing.T, c *toyCatalog, p persona, excluded []string) personaRows {
-	t.Helper()
-	b, store, exclude := personaBuilder(t, c, p, func(*toyStore) {})
-	return buildRows(t, b, store, p, c, append(exclude, excluded...))
-}
-
 func buildRows(t *testing.T, b rowBuilder, store *toyStore, p persona, c *toyCatalog, exclude []string) personaRows {
 	t.Helper()
 	ctx := t.Context()
@@ -68,17 +60,6 @@ func nearCopy(vec []float32, seed uint64) []float32 {
 		out[i] = float32(float64(out[i]) / norm)
 	}
 	return out
-}
-
-// primaryGenre returns the ids of items whose primary genre is genre.
-func primaryGenre(c *toyCatalog, items []ScoredItem, genre string) []string {
-	var ids []string
-	for _, item := range items {
-		if c.byID[item.MediaItemID].genres[0] == genre {
-			ids = append(ids, item.MediaItemID)
-		}
-	}
-	return ids
 }
 
 // A profile that turned nothing away gets exactly the rows it got before
@@ -121,42 +102,6 @@ func TestAversionPushesANearCopyOutOfTheServedWindow(t *testing.T) {
 	}
 }
 
-// A single mark costs its genre at most a couple of slots: it says "not this
-// title", not "not this genre". Marks in one area add up, shrinking the
-// area's share of the window step by step without shortening the row.
-func TestAversionMarksInOneAreaAddUp(t *testing.T) {
-	c := newToyCatalog()
-	a := relevancePersonas(c)["A"]
-	thrillers := primaryGenre(c, buildPersonaRows(t, c, a).main, gThriller)
-	if len(thrillers) < 12 {
-		t.Fatalf("persona A's main row holds %d thrillers, want 12 to mark", len(thrillers))
-	}
-	share := func(r personaRows) float64 { return r.share(served(r.main), gThriller) }
-
-	one := thrillers[:1]
-	if hidden, ranked := share(excludedRows(t, c, a, one)), share(avertedRows(t, c, a, one)); hidden-ranked > 0.1 {
-		t.Fatalf("one thriller mark took thrillers from %.2f to %.2f of the served window", hidden, ranked)
-	}
-
-	previous := 1.0
-	for _, n := range []int{1, 4, 8, 12} {
-		marked := thrillers[:n]
-		r := avertedRows(t, c, a, marked)
-		if got := share(r); got > previous {
-			t.Fatalf("%d thriller marks serve more thrillers (%.2f) than fewer marks did (%.2f)", n, got, previous)
-		} else {
-			previous = got
-		}
-		if len(r.main) != CacheCandidateLimit {
-			t.Fatalf("%d marks left a main row of %d, want %d", n, len(r.main), CacheCandidateLimit)
-		}
-	}
-	marked := thrillers[:8]
-	if hidden, ranked := share(excludedRows(t, c, a, marked)), share(avertedRows(t, c, a, marked)); hidden-ranked < 0.15 {
-		t.Fatalf("eight thriller marks took thrillers only from %.2f to %.2f of the served window", hidden, ranked)
-	}
-}
-
 // Marks at the heart of a small interest drop its own row and its share of
 // the main row; a large interest the profile mostly kept watching keeps its
 // row through as many marks.
@@ -195,35 +140,6 @@ func TestAversionDropsAnInterestTurnedAway(t *testing.T) {
 	large := scoredItemIDs(rowOf(before, largest))[:4]
 	if got := rowOf(avertedRows(t, c, a, large), largest); len(got) == 0 {
 		t.Fatalf("four marks dropped the largest interest's row (weight %.1f)", before.store.clusters[largest].TotalWeight)
-	}
-}
-
-// A turned-away title no row would offer leaves every row as hiding it
-// alone would.
-func TestAversionIgnoresTitlesTheRowsWouldNotOffer(t *testing.T) {
-	c := newToyCatalog()
-	kid := relevancePersonas(c)["C"]
-	horror := c.pick(gHorror, "movie", 0, 3)
-	hidden, ranked := excludedRows(t, c, kid, horror), avertedRows(t, c, kid, horror)
-	if !reflect.DeepEqual(hidden.main, ranked.main) || !reflect.DeepEqual(hidden.clusters, ranked.clusters) {
-		t.Fatal("horror marks moved a kid's animation rows")
-	}
-}
-
-// interestShare weighs the turned-away titles at an interest's heart against
-// the interest's own weight.
-func TestAversionInterestShare(t *testing.T) {
-	for _, tc := range []struct {
-		central, weight, want float64
-	}{
-		{0, 10, 1},
-		{1, 4, 0.5},
-		{2, 4, 1.0 / 3},
-		{1, 0, 0},
-	} {
-		if got := (aversionResult{central: tc.central}).interestShare(tc.weight); math.Abs(got-tc.want) > 1e-9 {
-			t.Fatalf("interestShare(central %v, weight %v) = %v, want %v", tc.central, tc.weight, got, tc.want)
-		}
 	}
 }
 

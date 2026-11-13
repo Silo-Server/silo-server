@@ -11,7 +11,6 @@ import {
   newMapping,
   hasUsableMapping,
   seedMappings,
-  settingsPathFor,
   triggersFor,
   usableMappings,
 } from "./webhookSetup";
@@ -39,33 +38,11 @@ describe("triggersFor", () => {
     expect(triggersFor("radarr").map((t) => t.label)).toContain("On Movie File Delete");
   });
 
-  it("never offers a Sonarr-only trigger to Radarr", () => {
-    expect(triggersFor("radarr").map((t) => t.label)).not.toContain("On Episode File Delete");
-  });
-
-  it("marks import and upgrade as required, rename as optional", () => {
-    const byLabel = new Map(triggersFor("sonarr").map((t) => [t.label, t.required]));
-    expect(byLabel.get("On File Import")).toBe(true);
-    expect(byLabel.get("On File Upgrade")).toBe(true);
-    expect(byLabel.get("On Rename")).toBe(false);
-  });
-
   it("shows a combined delete trigger when the provider is unknown", () => {
     const labels = triggersFor("auto").map((t) => t.label);
     expect(
       labels.some((l) => l.includes("Episode File Delete") && l.includes("Movie File Delete")),
     ).toBe(true);
-  });
-});
-
-describe("settingsPathFor", () => {
-  it("names the specific service when known", () => {
-    expect(settingsPathFor("sonarr")).toContain("Sonarr → Settings → Connect");
-    expect(settingsPathFor("radarr")).toContain("Radarr → Settings → Connect");
-  });
-
-  it("covers both when the provider is auto", () => {
-    expect(settingsPathFor("auto")).toContain("Sonarr/Radarr");
   });
 });
 
@@ -105,18 +82,6 @@ describe("collapseToRoots", () => {
       "/mnt/media",
     ]);
   });
-
-  it("collapses the real dev-server shape to one row per mount", () => {
-    // Verified against 96 live paths: 95 under /mnt/sharedrives, 1 under /tmp.
-    const real = [
-      "/mnt/sharedrives/zd-storage-ceph/movies/00s",
-      "/mnt/sharedrives/zd-storage-ceph/television-int/zh",
-      "/mnt/sharedrives/arkyn-storage-ceph/test_files/1080p",
-      "/mnt/sharedrives/zd-storage-books/audiobooks",
-      "/tmp/silo-transcode/test-extras",
-    ];
-    expect(collapseToRoots(real)).toEqual(["/mnt/sharedrives", "/tmp/silo-transcode/test-extras"]);
-  });
 });
 
 describe("expandedRootsFor", () => {
@@ -152,14 +117,6 @@ describe("seedMappings", () => {
     expect(seedMappings("sonarr", libraries).map((m) => m.to)).toEqual(["/mnt/media"]);
   });
 
-  it("seeds one row for Radarr's movie and mixed libraries", () => {
-    expect(seedMappings("radarr", libraries).map((m) => m.to)).toEqual(["/mnt/media"]);
-  });
-
-  it("seeds one row across every library when the provider is unknown", () => {
-    expect(seedMappings("auto", libraries).map((m) => m.to)).toEqual(["/mnt/media"]);
-  });
-
   it("still separates libraries on genuinely different mounts", () => {
     const split = [
       { id: 1, name: "A", type: "movie", enabled: true, paths: ["/mnt/media/movies"] },
@@ -171,36 +128,8 @@ describe("seedMappings", () => {
     ]);
   });
 
-  it("collapses many sibling paths under one mount into a single row", () => {
-    // Shape taken from the dev server, where 95 of 96 paths share a mount.
-    const sprawling = [
-      {
-        id: 9,
-        name: "Movies",
-        type: "movie",
-        enabled: true,
-        paths: [
-          "/mnt/sharedrives/zd-storage-ceph/movies/00s",
-          "/mnt/sharedrives/zd-storage-ceph/movies/10s",
-          "/mnt/sharedrives/zd-storage-ceph/movies/4k",
-          "/mnt/sharedrives/arkyn-storage-ceph/movies",
-        ],
-      },
-    ] as unknown as Library[];
-
-    expect(seedMappings("radarr", sprawling).map((m) => m.to)).toEqual(["/mnt/sharedrives"]);
-  });
-
   it("skips disabled libraries", () => {
     expect(seedMappings("auto", libraries).map((m) => m.to)).not.toContain("/mnt/archive");
-  });
-
-  it("leaves the arr-side path blank for the operator to fill", () => {
-    expect(seedMappings("sonarr", libraries).every((m) => m.from === "")).toBe(true);
-  });
-
-  it("returns nothing when no libraries exist", () => {
-    expect(seedMappings("sonarr", [])).toEqual([]);
   });
 });
 

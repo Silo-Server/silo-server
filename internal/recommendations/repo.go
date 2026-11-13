@@ -7,15 +7,17 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/pgvector/pgvector-go"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/embeddingvectors"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/pgvector/pgvector-go"
 )
 
 func ensureCanonicalDimensions(vec []float32) ([]float32, error) {
@@ -24,13 +26,13 @@ func ensureCanonicalDimensions(vec []float32) ([]float32, error) {
 
 const embeddingLockSettingKey = "recommendations.embedding_lock"
 
-const minHNSWEfSearch = 200
-
-// maxHNSWEfSearch is the largest hnsw.ef_search pgvector accepts. A larger
-// value fails set_config, so the candidate scan never runs. With iterative
-// scans the index keeps returning rows past ef_search, so the cap does not
-// stop a larger LIMIT at 1000 candidates.
-const maxHNSWEfSearch = 1000
+// hnswEfSearch is the hnsw.ef_search candidate scans run with, whatever their
+// LIMIT. With iterative scans the index keeps returning rows past ef_search,
+// up to hnsw.max_scan_tuples, so a larger value only widens each step of the
+// search. Raised with the LIMIT, it made the planner price the index above
+// reading every embedding, so large candidate scans ran as exact scans,
+// several times slower, for nearly the same candidates.
+const hnswEfSearch = 200
 
 // watchedActivityCTE unifies video watch progress and ebook reader progress
 // into one activity stream. Episodes roll up to their parent series via
@@ -220,11 +222,7 @@ func NewRepo(pool *pgxpool.Pool) *Repo {
 	return &Repo{pool: pool, titleCounts: newTitleCountCache()}
 }
 
-func hnswEfSearch(candidateLimit int) int {
-	return min(max(candidateLimit, minHNSWEfSearch), maxHNSWEfSearch)
-}
-
-func (r *Repo) withHNSWCandidateScan(ctx context.Context, candidateLimit int, fn func(pgx.Tx) error) error {
+func (r *Repo) withHNSWCandidateScan(ctx context.Context, fn func(pgx.Tx) error) error {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("begin hnsw candidate scan tx: %w", err)
@@ -234,7 +232,7 @@ func (r *Repo) withHNSWCandidateScan(ctx context.Context, candidateLimit int, fn
 	_, err = tx.Exec(ctx, `
 		SELECT set_config('hnsw.iterative_scan', 'relaxed_order', true),
 		       set_config('hnsw.ef_search', $1, true)
-	`, fmt.Sprintf("%d", hnswEfSearch(candidateLimit)))
+	`, strconv.Itoa(hnswEfSearch))
 	if err != nil {
 		return fmt.Errorf("configure hnsw candidate scan: %w", err)
 	}
@@ -358,12 +356,105 @@ func (r *Repo) GetEmbedding(ctx context.Context, itemID string) ([]float32, erro
 		itemID,
 	).Scan(&v)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("get embedding for item %s: %w", itemID, err)
 	}
 	return v.Slice(), nil
+}
+
+// excludeEmbeddingIDsCondition drops the item IDs bound to $2 from an
+// embedding scan.
+const excludeEmbeddingIDsCondition = "e.media_item_id != ALL($2)"
+
+// ThemeMinSeeds is the fewest embedded seeds ThemeNeighbors builds a theme
+// from; one or two titles describe themselves, not a theme.
+const ThemeMinSeeds = 3
+
+// ThemeNeighbors returns movies and series near the theme the seed items
+// share: the average of their embeddings. Results are nearest first and stop
+// at the median seed's distance from that average, so every title returned is
+// at least as close to the theme as a typical seed. Seeds are excluded. It
+// returns nil when fewer than ThemeMinSeeds seeds have embeddings. filter's
+// library and maturity limits apply in the query; limit bounds the scan.
+func (r *Repo) ThemeNeighbors(ctx context.Context, seedIDs []string, limit int, filter catalog.AccessFilter) ([]ScoredItem, error) {
+	if len(seedIDs) == 0 || limit <= 0 {
+		return nil, nil
+	}
+	if filter.AllowedLibraryIDs != nil && len(filter.AllowedLibraryIDs) == 0 {
+		return nil, nil
+	}
+	var (
+		centroid pgvector.HalfVector
+		seeds    int
+		cutoff   *float64
+	)
+	err := r.pool.QueryRow(ctx, `
+		WITH seeds AS (
+			SELECT embedding::halfvec(3072) AS v
+			FROM   media_item_embeddings
+			WHERE  media_item_id = ANY($1)
+		), centroid AS (
+			SELECT avg(embedding)::halfvec(3072) AS v
+			FROM   media_item_embeddings
+			WHERE  media_item_id = ANY($1)
+		)
+		SELECT centroid.v,
+		       (SELECT count(*) FROM seeds),
+		       (SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY seeds.v <=> centroid.v) FROM seeds)
+		FROM   centroid
+		WHERE  centroid.v IS NOT NULL`, seedIDs).Scan(&centroid, &seeds, &cutoff)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("theme centroid: %w", err)
+	}
+	if seeds < ThemeMinSeeds || cutoff == nil {
+		return nil, nil
+	}
+
+	conditions := []string{excludeEmbeddingIDsCondition, "mi.type IN ('movie', 'series')"}
+	args := []any{centroid, seedIDs, limit}
+	argIdx := len(args) + 1
+	catalog.ApplyLibraryAccessFilter("mi.content_id", filter, &conditions, &args, &argIdx)
+	catalog.ApplyMaturityLimits("mi", filter, &conditions, &args, &argIdx)
+	query := fmt.Sprintf(`
+			SELECT e.media_item_id,
+			       e.embedding::halfvec(3072) <=> $1::halfvec(3072) AS distance
+			FROM   media_item_embeddings e
+			JOIN   media_items mi ON mi.content_id = e.media_item_id
+			WHERE  %s
+			ORDER  BY e.embedding::halfvec(3072) <=> $1::halfvec(3072)
+			LIMIT  $3`, strings.Join(conditions, " AND "))
+
+	var items []ScoredItem
+	err = r.withHNSWCandidateScan(ctx, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, query, args...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			var distance float64
+			if err := rows.Scan(&id, &distance); err != nil {
+				return fmt.Errorf("scanning theme neighbor: %w", err)
+			}
+			// Relaxed-order iterative scans can return a farther row before
+			// a nearer one, so filter rather than stop at the first miss.
+			if distance <= *cutoff {
+				items = append(items, ScoredItem{MediaItemID: id, Score: 1 - distance})
+			}
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, fmt.Errorf("theme neighbors: %w", err)
+	}
+	sort.SliceStable(items, func(i, j int) bool { return items[i].Score > items[j].Score })
+	return items, nil
 }
 
 // FindSimilar returns items ordered by cosine similarity to the given embedding,
@@ -374,42 +465,98 @@ func (r *Repo) GetEmbedding(ctx context.Context, itemID string) ([]float32, erro
 // limits apply in the query, as in findTasteProfileCandidates, so a restricted
 // viewer gets limit items it can see; a zero filter applies none.
 func (r *Repo) FindSimilar(ctx context.Context, embedding []float32, excludeIDs []string, mediaType string, limit int, filter catalog.AccessFilter) ([]ScoredItem, error) {
+	candidates, err := r.findSimilar(ctx, embedding, excludeIDs, mediaType, limit, filter, false)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]ScoredItem, len(candidates))
+	for i := range candidates {
+		items[i] = candidates[i].ScoredItem
+	}
+	return items, nil
+}
+
+// CandidateDetails is what the Similar list reads about a candidate: the
+// title, year and genres it validates against the source item, and the
+// embedding MMR compares candidates by. Embedding is nil for an item without
+// one.
+type CandidateDetails struct {
+	Meta      ItemMetadata
+	Embedding []float32
+}
+
+// SimilarCandidate is a FindSimilarCandidates result.
+type SimilarCandidate struct {
+	ScoredItem
+	Details CandidateDetails
+}
+
+// FindSimilarCandidates is FindSimilar returning each item's details, read by
+// the same query, so the Similar list need not read them again.
+func (r *Repo) FindSimilarCandidates(ctx context.Context, embedding []float32, excludeIDs []string, mediaType string, limit int, filter catalog.AccessFilter) ([]SimilarCandidate, error) {
+	return r.findSimilar(ctx, embedding, excludeIDs, mediaType, limit, filter, true)
+}
+
+// findSimilar is FindSimilar, also reading each item's details when
+// withDetails is set.
+func (r *Repo) findSimilar(ctx context.Context, embedding []float32, excludeIDs []string, mediaType string, limit int, filter catalog.AccessFilter, withDetails bool) ([]SimilarCandidate, error) {
 	if filter.AllowedLibraryIDs != nil && len(filter.AllowedLibraryIDs) == 0 {
-		return []ScoredItem{}, nil
+		return []SimilarCandidate{}, nil
 	}
 	if excludeIDs == nil {
 		excludeIDs = []string{}
 	}
 	conditions := []string{
-		"e.media_item_id != ALL($2)",
+		excludeEmbeddingIDsCondition,
 		"($4 = '' OR mi.type = $4)",
 	}
-	args := []any{pgvector.NewVector(embedding), excludeIDs, limit, mediaType}
+	args := []any{pgvector.NewHalfVector(embedding), excludeIDs, limit, mediaType}
 	argIdx := len(args) + 1
 	catalog.ApplyLibraryAccessFilter("mi.content_id", filter, &conditions, &args, &argIdx)
 	catalog.ApplyMaturityLimits("mi", filter, &conditions, &args, &argIdx)
+	details := ""
+	if withDetails {
+		details = `,
+			       e.embedding, mi.title, COALESCE(mi.year, 0), mi.genres`
+	}
+	// The distance is selected exactly as ORDER BY writes it, so a plan that
+	// sorts instead of using the index (small or narrowly filtered catalogs)
+	// computes it once per row and sorts by it. Selecting 1 - distance made
+	// such a plan read and convert every candidate's embedding twice. The
+	// similarity is 1 - distance, computed below.
 	query := fmt.Sprintf(`
 			SELECT e.media_item_id,
-			       1 - (e.embedding::halfvec(3072) <=> $1::halfvec(3072)) AS similarity
+			       e.embedding::halfvec(3072) <=> $1::halfvec(3072) AS distance%s
 			FROM   media_item_embeddings e
 			JOIN   media_items mi ON mi.content_id = e.media_item_id
 			WHERE  %s
 			ORDER  BY e.embedding::halfvec(3072) <=> $1::halfvec(3072)
-			LIMIT  $3`, strings.Join(conditions, " AND "))
+			LIMIT  $3`, details, strings.Join(conditions, " AND "))
 
-	var items []ScoredItem
-	err := r.withHNSWCandidateScan(ctx, limit, func(tx pgx.Tx) error {
+	var items []SimilarCandidate
+	err := r.withHNSWCandidateScan(ctx, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, query, args...)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 
-		items = make([]ScoredItem, 0, limit)
+		items = make([]SimilarCandidate, 0, limit)
 		for rows.Next() {
-			var item ScoredItem
-			if err := rows.Scan(&item.MediaItemID, &item.Score); err != nil {
+			var item SimilarCandidate
+			var distance float64
+			dest := []any{&item.MediaItemID, &distance}
+			var vec pgvector.Vector
+			if withDetails {
+				meta := &item.Details.Meta
+				dest = append(dest, &vec, &meta.Title, &meta.Year, &meta.Genres)
+			}
+			if err := rows.Scan(dest...); err != nil {
 				return fmt.Errorf("scanning similar item: %w", err)
+			}
+			item.Score = 1 - distance
+			if withDetails {
+				item.Details.Embedding = vec.Slice()
 			}
 			items = append(items, item)
 		}
@@ -422,6 +569,39 @@ func (r *Repo) FindSimilar(ctx context.Context, embedding []float32, excludeIDs 
 		return nil, fmt.Errorf("find similar items: %w", err)
 	}
 	return items, nil
+}
+
+// GetCandidateDetails returns the details of each item in itemIDs that
+// exists, keyed by item ID.
+func (r *Repo) GetCandidateDetails(ctx context.Context, itemIDs []string) (map[string]CandidateDetails, error) {
+	if len(itemIDs) == 0 {
+		return map[string]CandidateDetails{}, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT mi.content_id, mi.title, COALESCE(mi.year, 0), mi.genres, e.embedding
+		FROM   media_items mi
+		LEFT   JOIN media_item_embeddings e ON e.media_item_id = mi.content_id
+		WHERE  mi.content_id = ANY($1)`,
+		itemIDs)
+	if err != nil {
+		return nil, fmt.Errorf("get candidate details: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string]CandidateDetails, len(itemIDs))
+	for rows.Next() {
+		var id string
+		var d CandidateDetails
+		var vec *pgvector.Vector
+		if err := rows.Scan(&id, &d.Meta.Title, &d.Meta.Year, &d.Meta.Genres, &vec); err != nil {
+			return nil, fmt.Errorf("scan candidate details: %w", err)
+		}
+		if vec != nil {
+			d.Embedding = vec.Slice()
+		}
+		result[id] = d
+	}
+	return result, rows.Err()
 }
 
 // FindTasteProfileCandidates returns full-library discover candidates for a
@@ -481,9 +661,9 @@ func (r *Repo) findTasteProfileCandidates(
 	conditions := []string{
 		matchedTitleSQL,
 		"mi.type = ANY($3)",
-		"e.media_item_id != ALL($2)",
+		excludeEmbeddingIDsCondition,
 	}
-	args := []any{pgvector.NewVector(embedding), excludeIDs, mediaTypes}
+	args := []any{pgvector.NewHalfVector(embedding), excludeIDs, mediaTypes}
 	argIdx := 4
 	genreMatchCountSQL := "0"
 	annLimit := limit
@@ -542,7 +722,7 @@ func (r *Repo) findTasteProfileCandidates(
 
 	var items []ScoredItem
 	genreMap := make(map[string][]string, limit)
-	err := r.withHNSWCandidateScan(ctx, annLimit, func(tx pgx.Tx) error {
+	err := r.withHNSWCandidateScan(ctx, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, query, args...)
 		if err != nil {
 			return err
@@ -927,7 +1107,7 @@ func (r *Repo) GetTasteProfileMeta(ctx context.Context, userID int, profileID st
 		userID, profileID,
 	).Scan(&countsJSON, &maxContentRating, &updatedAt)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("get taste profile meta for user %d profile %s: %w", userID, profileID, err)
@@ -954,7 +1134,7 @@ func (r *Repo) GetTasteProfile(ctx context.Context, userID int, profileID string
 		userID, profileID,
 	).Scan(&v)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("get taste profile for user %d profile %s: %w", userID, profileID, err)
@@ -975,7 +1155,7 @@ func (r *Repo) FindSimilarUsers(ctx context.Context, userID int, profileID strin
 
 	allowedPeerRatings := compatiblePeerContentRatings(maxContentRating)
 	var users []UserSimilarity
-	err = r.withHNSWCandidateScan(ctx, limit, func(tx pgx.Tx) error {
+	err = r.withHNSWCandidateScan(ctx, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
 			SELECT p.user_id,
 			       p.profile_id,
@@ -986,7 +1166,7 @@ func (r *Repo) FindSimilarUsers(ctx context.Context, userID int, profileID strin
 			  AND  ($3 OR COALESCE(p.max_content_rating, '') = '' OR p.max_content_rating = ANY($4::text[]))
 			ORDER  BY p.embedding::halfvec(3072) <=> $1::halfvec(3072)
 			LIMIT  $5
-		`, pgvector.NewVector(embedding), userID, maxContentRating == "", allowedPeerRatings, limit)
+		`, pgvector.NewHalfVector(embedding), userID, maxContentRating == "", allowedPeerRatings, limit)
 		if err != nil {
 			return err
 		}
@@ -1139,7 +1319,7 @@ func (r *Repo) GetRecommendationCache(ctx context.Context, userID int, profileID
 	query, args := recommendationCacheLookup(userID, profileID, recType, sourceItemID)
 	err := r.pool.QueryRow(ctx, query, args...).Scan(&itemsJSON)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("get recommendation cache: %w", err)
@@ -2557,7 +2737,10 @@ func (r *Repo) GetWatchedItemIDs(ctx context.Context, userID int, profileID stri
 		SELECT DISTINCT item_id
 		FROM   watched_activity
 		WHERE  user_id = $1 AND profile_id = $2`, watchedActivityCTE)
-	rows, err := r.pool.Query(ctx, query, userID, profileID)
+	// An unnamed statement plans each read for its profile. A cached
+	// statement's generic plan assumes the average history, and with a long
+	// one it hash-joins every episode even for a profile with a short one.
+	rows, err := r.pool.Query(ctx, query, pgx.QueryExecModeCacheDescribe, userID, profileID)
 	if err != nil {
 		return nil, fmt.Errorf("get watched item IDs: %w", err)
 	}
@@ -2815,4 +2998,25 @@ func (r *Repo) GetItemMetadata(ctx context.Context, itemID string) (*ItemMetadat
 		return nil, fmt.Errorf("get item metadata %s: %w", itemID, err)
 	}
 	return &m, nil
+}
+
+// GetSimilarSource returns the embedding and metadata of the item a Similar
+// list is anchored on, in one read. It returns nil, nil, nil when the item has
+// no embedding.
+func (r *Repo) GetSimilarSource(ctx context.Context, itemID string) ([]float32, *ItemMetadata, error) {
+	var v pgvector.Vector
+	var m ItemMetadata
+	err := r.pool.QueryRow(ctx, `
+		SELECT e.embedding, mi.title, COALESCE(mi.type, ''), mi.genres, COALESCE(mi.year, 0), mi.studios
+		FROM   media_item_embeddings e
+		JOIN   media_items mi ON mi.content_id = e.media_item_id
+		WHERE  e.media_item_id = $1`, itemID,
+	).Scan(&v, &m.Title, &m.Type, &m.Genres, &m.Year, &m.Studios)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil, nil
+		}
+		return nil, nil, fmt.Errorf("get similar source %s: %w", itemID, err)
+	}
+	return v.Slice(), &m, nil
 }

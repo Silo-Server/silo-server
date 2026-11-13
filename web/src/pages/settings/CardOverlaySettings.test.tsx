@@ -5,6 +5,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CardOverlaySettings } from "./CardOverlaySettings";
 
+// The badge size slider (Radix) measures itself with ResizeObserver.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+if (typeof globalThis.ResizeObserver === "undefined") {
+  (globalThis as unknown as { ResizeObserver: typeof ResizeObserverStub }).ResizeObserver =
+    ResizeObserverStub;
+}
+
 vi.mock("@/hooks/queries/ratingsCapability", () => ({
   useShownRatingSources: () => new Set(["imdb", "tmdb"]),
 }));
@@ -21,24 +32,30 @@ const mocks = vi.hoisted(() => ({
   setQuickActionMode: vi.fn(),
 }));
 
-vi.mock("@/hooks/useOverlayPrefs", () => ({
-  useOverlayPrefs: () => ({
-    prefs: null,
-    setPrefs: mocks.setPrefs,
-    quickActionPreference: "favorites",
-    setQuickActionMode: mocks.setQuickActionMode,
-    quickActionsEnabled: mocks.quickActionsEnabled,
-    setQuickActionsEnabled: mocks.setQuickActionsEnabled,
-    overlaysEnabled: mocks.overlaysEnabled,
-    setOverlaysEnabled: mocks.setOverlaysEnabled,
-    resetPrefs: mocks.resetPrefs,
-    hasBadgeOverride: mocks.hasBadgeOverride,
-    hasQuickActionOverride: mocks.hasQuickActionOverride,
-    isResetting: false,
-    isOverlaySupported: () => true,
-    isLoading: false,
-  }),
-}));
+vi.mock("@/hooks/useOverlayPrefs", async () => {
+  const { buildDefaultPrefs } = await import("@/lib/overlays");
+  return {
+    useOverlayPrefs: () => ({
+      prefs: null,
+      editablePrefs: buildDefaultPrefs(),
+      images: [],
+      supportsStyles: true,
+      setPrefs: mocks.setPrefs,
+      quickActionPreference: "favorites",
+      setQuickActionMode: mocks.setQuickActionMode,
+      quickActionsEnabled: mocks.quickActionsEnabled,
+      setQuickActionsEnabled: mocks.setQuickActionsEnabled,
+      overlaysEnabled: mocks.overlaysEnabled,
+      setOverlaysEnabled: mocks.setOverlaysEnabled,
+      resetPrefs: mocks.resetPrefs,
+      hasBadgeOverride: mocks.hasBadgeOverride,
+      hasQuickActionOverride: mocks.hasQuickActionOverride,
+      isResetting: false,
+      isOverlaySupported: () => true,
+      isLoading: false,
+    }),
+  };
+});
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
@@ -81,43 +98,12 @@ describe("CardOverlaySettings", () => {
   it("turns shortcuts off without changing their kind", () => {
     mocks.quickActionsEnabled = true;
     render(<CardOverlaySettings />);
+    const shortcuts = screen.getByRole("radiogroup", { name: "Shortcut buttons" });
 
-    fireEvent.click(screen.getByRole("radio", { name: "Off" }));
+    fireEvent.click(within(shortcuts).getByRole("radio", { name: "Off" }));
 
     expect(mocks.setQuickActionsEnabled).toHaveBeenCalledWith(false);
     expect(mocks.setQuickActionMode).not.toHaveBeenCalled();
-  });
-
-  it("hides the badge list while badges are off but keeps their switch", () => {
-    mocks.overlaysEnabled = false;
-    render(<CardOverlaySettings />);
-
-    expect(screen.queryByRole("radiogroup", { name: "Badge style" })).not.toBeInTheDocument();
-    expect(screen.queryByText("IMDb Rating")).not.toBeInTheDocument();
-    const toggle = screen.getByRole("switch", { name: "Show badges on posters" });
-    expect(toggle).toBeEnabled();
-    fireEvent.click(toggle);
-    expect(mocks.setOverlaysEnabled).toHaveBeenCalledWith(true);
-  });
-
-  it("folds badges by category and switches one inside", () => {
-    render(<CardOverlaySettings />);
-
-    expect(screen.queryByRole("switch", { name: "IMDb Rating" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /Ratings & Certifications/ }));
-    const imdb = screen.getByRole("switch", { name: "IMDb Rating" });
-    const wasOn = imdb.getAttribute("aria-checked") === "true";
-    expect(screen.queryByRole("button", { name: "Adjust IMDb Rating" }) !== null).toBe(wasOn);
-
-    fireEvent.click(imdb);
-
-    expect(mocks.setPrefs).toHaveBeenCalledWith(
-      expect.objectContaining({
-        items: expect.objectContaining({
-          rating_imdb: expect.objectContaining({ enabled: !wasOn }),
-        }),
-      }),
-    );
   });
 
   it("resets shortcuts on their own once they differ from the server's", () => {

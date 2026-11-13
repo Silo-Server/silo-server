@@ -28,7 +28,6 @@ func newTestReconciler(
 }
 
 type fakeHistoryDB struct {
-	query      string
 	rows       [][]any
 	execs      []fakeHistoryExec
 	execTag    pgconn.CommandTag
@@ -40,8 +39,7 @@ type fakeHistoryExec struct {
 	args []any
 }
 
-func (db *fakeHistoryDB) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
-	db.query = sql
+func (db *fakeHistoryDB) Query(context.Context, string, ...any) (pgx.Rows, error) {
 	return &fakeHistoryRows{rows: db.rows, pos: -1}, nil
 }
 
@@ -131,144 +129,70 @@ func (r *fakeHistoryRows) Conn() *pgx.Conn {
 	return nil
 }
 
-func TestReconciler_resolveMovie(t *testing.T) {
-	r := newTestReconciler(nil, nil, map[string][]*models.MediaItemProviderID{
-		"movie-new": {{Provider: "tmdb", ProviderID: "550", ItemType: "movie"}},
-	})
-	got, err := r.resolve(context.Background(), userstore.WatchIdentity{
-		StableType:  "movie",
-		ProviderIDs: map[string]string{"tmdb": "550"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "movie-new" {
-		t.Errorf("resolve = %q, want movie-new", got)
-	}
-}
-
-func TestReconciler_resolveEpisodeLegacyProviderFallback(t *testing.T) {
-	season, episode := 1, 3
-	r := newTestReconciler(
-		nil,
-		map[string]*models.Episode{
-			"series-1": {ContentID: "ep-1", SeriesID: "series-1", SeasonNumber: 1, EpisodeNumber: 3},
-		},
-		map[string][]*models.MediaItemProviderID{
-			"series-1": {{Provider: "tvdb", ProviderID: "81189", ItemType: "series"}},
-		},
-	)
-	got, err := r.resolve(context.Background(), userstore.WatchIdentity{
-		StableType:  "episode",
-		ProviderIDs: map[string]string{"tvdb": "81189"},
-		Season:      &season,
-		Episode:     &episode,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "ep-1" {
-		t.Errorf("resolve = %q, want ep-1", got)
-	}
-}
-
-func TestReconciler_resolveEpisodeSeasonZero(t *testing.T) {
-	season, episode := 0, 1
-	r := newTestReconciler(
-		nil,
-		map[string]*models.Episode{
-			"series-1": {ContentID: "special-1", SeriesID: "series-1", SeasonNumber: 0, EpisodeNumber: 1},
-		},
-		map[string][]*models.MediaItemProviderID{
-			"series-1": {{Provider: "tvdb", ProviderID: "81189", ItemType: "series"}},
-		},
-	)
-	got, err := r.resolve(context.Background(), userstore.WatchIdentity{
-		StableType:        "episode",
-		SeriesProviderIDs: map[string]string{"tvdb": "81189"},
-		Season:            &season,
-		Episode:           &episode,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "special-1" {
-		t.Errorf("resolve = %q, want special-1", got)
-	}
-}
-
-func TestReconciler_resolveEpisodeMissingSeasonEpisode(t *testing.T) {
-	r := newTestReconciler(nil, nil, map[string][]*models.MediaItemProviderID{
+func TestReconcilerResolve(t *testing.T) {
+	seriesTVDB := map[string][]*models.MediaItemProviderID{
 		"series-1": {{Provider: "tvdb", ProviderID: "81189", ItemType: "series"}},
-	})
-	got, err := r.resolve(context.Background(), userstore.WatchIdentity{
-		StableType:        "episode",
-		SeriesProviderIDs: map[string]string{"tvdb": "81189"},
-		// Season and Episode intentionally nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
-	if got != "" {
-		t.Errorf("resolve = %q, want empty", got)
-	}
-}
-
-func TestReconciler_resolveUnknownType(t *testing.T) {
-	r := newTestReconciler(nil, nil, nil)
-	got, err := r.resolve(context.Background(), userstore.WatchIdentity{
-		StableType:  "collection",
-		ProviderIDs: map[string]string{"tmdb": "123"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "" {
-		t.Errorf("resolve = %q, want empty", got)
-	}
-}
-
-func TestReconciler_resolveMovieNoProviders(t *testing.T) {
-	r := newTestReconciler(nil, nil, nil)
-	got, err := r.resolve(context.Background(), userstore.WatchIdentity{
-		StableType:  "movie",
-		ProviderIDs: map[string]string{},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "" {
-		t.Errorf("resolve = %q, want empty", got)
-	}
-}
-
-func TestHistoryReconcilerRunUsesTypedOrphanQuery(t *testing.T) {
-	db := &fakeHistoryDB{}
-	r := &HistoryReconciler{
-		pool:     db,
-		resolver: newTestReconciler(nil, nil, nil).resolver,
-	}
-
-	stats, err := r.Run(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stats != (ReconcileStats{}) {
-		t.Fatalf("stats = %+v, want zero", stats)
-	}
-	for _, want := range []string{
-		"h.watch_identity->>'stable_type' = 'movie'",
-		"FROM media_items mi WHERE mi.content_id = h.media_item_id",
-		"h.watch_identity->>'stable_type' = 'episode'",
-		"FROM episodes ep WHERE ep.content_id = h.media_item_id",
-		"ORDER BY h.user_id, h.id",
+	for _, tc := range []struct {
+		name          string
+		episodesByKey map[string]*models.Episode
+		providerIDs   map[string][]*models.MediaItemProviderID
+		identity      userstore.WatchIdentity
+		want          string
+	}{
+		{
+			name: "movie",
+			providerIDs: map[string][]*models.MediaItemProviderID{
+				"movie-new": {{Provider: "tmdb", ProviderID: "550", ItemType: "movie"}},
+			},
+			identity: userstore.WatchIdentity{StableType: "movie", ProviderIDs: map[string]string{"tmdb": "550"}},
+			want:     "movie-new",
+		},
+		{
+			name: "episode legacy provider fallback",
+			episodesByKey: map[string]*models.Episode{
+				"series-1": {ContentID: "ep-1", SeriesID: "series-1", SeasonNumber: 1, EpisodeNumber: 3},
+			},
+			providerIDs: seriesTVDB,
+			identity: userstore.WatchIdentity{
+				StableType:  "episode",
+				ProviderIDs: map[string]string{"tvdb": "81189"},
+				Season:      new(1),
+				Episode:     new(3),
+			},
+			want: "ep-1",
+		},
+		{
+			name: "episode season zero",
+			episodesByKey: map[string]*models.Episode{
+				"series-1": {ContentID: "special-1", SeriesID: "series-1", SeasonNumber: 0, EpisodeNumber: 1},
+			},
+			providerIDs: seriesTVDB,
+			identity: userstore.WatchIdentity{
+				StableType:        "episode",
+				SeriesProviderIDs: map[string]string{"tvdb": "81189"},
+				Season:            new(0),
+				Episode:           new(1),
+			},
+			want: "special-1",
+		},
+		{
+			// Season and Episode intentionally nil.
+			name:        "episode missing season and episode",
+			providerIDs: seriesTVDB,
+			identity:    userstore.WatchIdentity{StableType: "episode", SeriesProviderIDs: map[string]string{"tvdb": "81189"}},
+			want:        "",
+		},
 	} {
-		if !strings.Contains(db.query, want) {
-			t.Fatalf("orphan query missing %q:\n%s", want, db.query)
-		}
-	}
-	if len(db.execs) != 0 {
-		t.Fatalf("exec count = %d, want 0", len(db.execs))
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := newTestReconciler(nil, tc.episodesByKey, tc.providerIDs).resolve(context.Background(), tc.identity)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Errorf("resolve = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

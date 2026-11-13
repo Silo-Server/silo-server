@@ -1,4 +1,10 @@
 import { usePlaybackBarHeight } from "@/hooks/usePlaybackBarHeight";
+import {
+  consumeAutomaticStart,
+  expectAutomaticStart,
+  recordAutoAdvance,
+  resetStillWatchingStreak,
+} from "@/player/stillWatching";
 import { useSeekPreferences } from "@/hooks/queries/seekPreferences";
 import {
   lazy,
@@ -30,6 +36,7 @@ import { LocalErrorBoundary } from "@/components/LocalErrorBoundary";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { codeNumber, numberText, useT, type Translate } from "@/i18n";
 import { fetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useContinueWatching } from "@/hooks/queries/progress";
 import {
@@ -43,9 +50,11 @@ import { catalogKeys } from "@/hooks/queries/keys";
 import { applyPlaybackProgressToCache } from "@/hooks/queries/playbackProgressCache";
 import { invalidatePlaybackSurfaceQueries } from "@/hooks/queries/playbackSurfaceRefresh";
 import { useAuth } from "@/hooks/useAuth";
+import { lastBufferingMode, rememberBufferingMode } from "@/player/buffering-mode-memory";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { PlayerConfigProvider, type PlayerConfig } from "@/player/context/PlayerConfigContext";
+import type { BufferingMode } from "@/player/buffering-quality";
 import type {
   EpisodeRef,
   IntroSkipMode,
@@ -77,6 +86,8 @@ import {
 } from "@/pages/watchRouteHelpers";
 import { canEditMarkers as canEditMarkersForUser } from "@/lib/permissions";
 import { markPlaybackIntent } from "@/player/first-frame";
+import { onMeteredConnection } from "@/player/bandwidth-probe";
+import { playbackQualitySettings } from "./playbackQualitySettings";
 
 const WatchPage = lazy(() =>
   import("@/player/components/WatchPage").then((module) => ({ default: module.WatchPage })),
@@ -117,6 +128,7 @@ function normalizeWatchPlaybackRequest(
 }
 
 function buildPlaybackSubtitle(
+  t: Translate,
   request: WatchRouteRequest,
   item?: {
     title: string;
@@ -131,15 +143,21 @@ function buildPlaybackSubtitle(
   }
 
   if (item.series_title && item.season_number != null && item.episode_number != null) {
-    return `S${item.season_number}:E${item.episode_number}${item.title ? ` · ${item.title}` : ""}`;
+    const code = {
+      season: codeNumber(item.season_number),
+      episode: codeNumber(item.episode_number),
+    };
+    return item.title
+      ? t("web.player.episode.codeWithTitle", { ...code, title: item.title })
+      : t("web.player.episode.code", code);
   }
 
   if (item.year) {
-    return String(item.year);
+    return numberText(item.year);
   }
 
   if (request.libraryId != null) {
-    return `Library ${request.libraryId}`;
+    return t("web.player.bar.library", { id: request.libraryId });
   }
 
   return undefined;
@@ -213,7 +231,8 @@ function buildWatchLocationState(request: WatchRouteRequest) {
     request.returnHref == null &&
     request.audioTrackIndex == null &&
     request.prePlaySubtitleMode == null &&
-    request.prePlaySubtitleSelection == null
+    request.prePlaySubtitleSelection == null &&
+    !request.versionPicked
   ) {
     return undefined;
   }
@@ -223,10 +242,12 @@ function buildWatchLocationState(request: WatchRouteRequest) {
     audioTrackIndex: request.audioTrackIndex,
     prePlaySubtitleMode: request.prePlaySubtitleMode,
     prePlaySubtitleSelection: request.prePlaySubtitleSelection ?? null,
+    versionPicked: request.versionPicked,
   };
 }
 
 function PlaybackPreparingScreen() {
+  const t = useT();
   return (
     <div
       className="bg-background fixed inset-0 z-50 flex items-center justify-center px-6"
@@ -236,10 +257,8 @@ function PlaybackPreparingScreen() {
       <div className="surface-panel-subtle animate-in fade-in flex min-w-[260px] flex-col items-center gap-4 rounded-[1.8rem] px-8 py-7 text-center duration-300">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
         <div className="space-y-1">
-          <p className="text-sm font-medium text-white">Preparing playback</p>
-          <p className="text-xs text-white/55">
-            Loading stream details, subtitles, and resume state.
-          </p>
+          <p className="text-sm font-medium text-white">{t("web.player.watch.preparing")}</p>
+          <p className="text-xs text-white/55">{t("web.player.watch.preparingDetail")}</p>
         </div>
       </div>
     </div>
@@ -250,27 +269,30 @@ function PlaybackPreparingScreen() {
  * The server answers the same 404 for a missing title and one the profile may
  * not see, so the copy says neither, as the item page does.
  */
-function playbackUnavailableMessage(error: Error): string {
+function playbackUnavailableMessage(t: Translate, error: Error): string {
   if (isNotFoundProblem(error)) {
-    return "This title isn't available. It may have been removed, or you may not have access to it.";
+    return t("web.player.watch.titleUnavailable");
   }
-  return error.message || "Item not found";
+  return error.message || t("web.player.watch.itemNotFound");
 }
 
 function PlaybackUnavailableScreen({ error, onBack }: { error: Error; onBack: () => void }) {
+  const t = useT();
   return (
     <div className="bg-background fixed inset-0 z-50 flex items-center justify-center px-6">
       <div className="surface-panel-subtle flex max-w-md flex-col items-center gap-4 rounded-[1.8rem] px-8 py-8 text-center">
         <div className="space-y-2">
-          <p className="text-base font-semibold text-white">Playback unavailable</p>
-          <div className="text-sm text-white/60">{playbackUnavailableMessage(error)}</div>
+          <p className="text-base font-semibold text-white">
+            {t("web.player.watch.playbackUnavailable")}
+          </p>
+          <div className="text-sm text-white/60">{playbackUnavailableMessage(t, error)}</div>
         </div>
         <button
           onClick={onBack}
           type="button"
           className="rounded-[0.95rem] bg-white/10 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-white/20"
         >
-          Go Back
+          {t("player.goBack")}
         </button>
       </div>
     </div>
@@ -313,6 +335,12 @@ export function WatchPlaybackProvider({ children }: { children: ReactNode }) {
   }, [profileId, state.request]);
 
   const syncRouteRequest = useCallback((request: WatchRouteRequest) => {
+    // A post-roll start adopts its request before the route syncs, so the
+    // automatic marker is consumed whether or not the request is new.
+    const automatic = consumeAutomaticStart(request.contentId);
+    if (!automatic && stateRef.current.request?.requestKey !== request.requestKey) {
+      resetStillWatchingStreak();
+    }
     dispatch({ type: "SYNC_ROUTE_REQUEST", request });
   }, []);
 
@@ -332,6 +360,8 @@ export function WatchPlaybackProvider({ children }: { children: ReactNode }) {
   const startPlayback = useCallback(
     (input: WatchPlaybackStartInput | WatchRouteRequest, trigger: PlaybackStartTrigger) => {
       const request = normalizeWatchPlaybackRequest(input);
+      if (trigger === "viewer") resetStillWatchingStreak();
+      else expectAutomaticStart(request.contentId);
       // Press-play-to-first-frame starts here, before any navigation or
       // Picture-in-Picture exit the viewer also waits for. The route rebuilds
       // the same request key, so the player's session can claim the mark.
@@ -357,6 +387,10 @@ export function WatchPlaybackProvider({ children }: { children: ReactNode }) {
             request,
             mode: "background-bar",
           });
+          // No route follows a background start, so nothing else would use
+          // up its automatic marker, and a later pick of this title from a
+          // link would keep the count.
+          consumeAutomaticStart(request.contentId);
           return;
         }
 
@@ -578,6 +612,7 @@ function WatchPlaybackHostContent() {
   const location = useLocation();
   const navigate = useViewTransitionNavigate();
   const { profile: currentProfile } = useCurrentProfile();
+  const playbackProfileId = currentProfile?.id ?? null;
   const canEditMarkers = canEditMarkersForUser(user, currentProfile);
   const settingsCapabilities = useSettingsCapabilities({ enabled: signedIn });
   // Three answers, not two: the connected server defines the enum, it provably
@@ -590,6 +625,24 @@ function WatchPlaybackHostContent() {
       settingsCapabilities.data,
       SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE,
     );
+  // A server below revision 20 rejects the whole batch for a key it does not
+  // define, so the cellular pair is read only where the server has it.
+  const supportsCellularQuality =
+    capabilitiesKnown &&
+    settingsCapabilitiesSupportKey(
+      settingsCapabilities.data,
+      SETTING_KEYS.PLAYBACK_CELLULAR_PREFERRED_QUALITY,
+    );
+  // The two marker-provenance keys arrived together, so one gate covers both.
+  // They are read only where the server defines them: an older server rejects
+  // the whole batch for a key it does not know, which would take the skip-mode
+  // read down with it.
+  const supportsMarkerProvenance =
+    capabilitiesKnown &&
+    settingsCapabilitiesSupportKey(
+      settingsCapabilities.data,
+      SETTING_KEYS.PLAYBACK_SHOW_MARKER_CONFIDENCE,
+    );
   // Resolved through the contract, so a device override winning over the
   // profile's own choice is the manifest's resolution order rather than a
   // precedence rule spelled out here.
@@ -599,8 +652,15 @@ function WatchPlaybackHostContent() {
   // consulted, so a recap or preview override an admin (or the user) set on a
   // device silently did nothing. One batched read costs no more than the single
   // key did and makes all three behave as the contract says they do.
+  const supportsBufferingQualityMode =
+    capabilitiesKnown &&
+    settingsCapabilitiesSupportKey(
+      settingsCapabilities.data,
+      SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE,
+    );
   const { data: effectivePlaybackSettings } = useEffectiveSettings({
     keys: [
+      ...(supportsBufferingQualityMode ? [SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE] : []),
       supportsIntroSkipMode
         ? SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE
         : SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
@@ -612,9 +672,29 @@ function WatchPlaybackHostContent() {
       // The bandwidth cap that pairs with it; the player keeps its startup
       // tier under this so the setting does what its label says.
       SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS,
+      // The pair that replaces those two on a metered link, as in the apps.
+      ...(supportsCellularQuality
+        ? [
+            SETTING_KEYS.PLAYBACK_CELLULAR_PREFERRED_QUALITY,
+            SETTING_KEYS.PLAYBACK_CELLULAR_MAX_BITRATE_KBPS,
+          ]
+        : []),
+      // Whether the skip prompt says where the marker came from, and how much
+      // the source trusted it.
+      ...(supportsMarkerProvenance
+        ? [SETTING_KEYS.PLAYBACK_SHOW_MARKER_CONFIDENCE, SETTING_KEYS.PLAYBACK_SHOW_MARKER_SOURCE]
+        : []),
     ],
     enabled: signedIn,
   });
+  const loadedBufferingMode = supportsBufferingQualityMode
+    ? (effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE]?.value as
+        | BufferingMode
+        | undefined)
+    : undefined;
+  useEffect(() => {
+    if (loadedBufferingMode) rememberBufferingMode(playbackProfileId, loadedBufferingMode);
+  }, [loadedBufferingMode, playbackProfileId]);
   const request = state.request;
   const isForegroundMode = request != null && state.mode === "foreground";
   const {
@@ -829,6 +909,7 @@ function WatchPlaybackHostContent() {
         return;
       }
 
+      if (trigger === "automatic") recordAutoAdvance();
       controller.startPlayback(
         {
           contentId: nextContentId,
@@ -843,10 +924,16 @@ function WatchPlaybackHostContent() {
   // -- Shuffle: the server picks what plays next --
   const shuffleId = activeRequest?.shuffleId;
 
+  // A series-owned extra (trailer, featurette, ...) carries the series' id,
+  // but it has no place in the episode order: it plays to its end and goes
+  // back to where it was started, like a movie.
+  const isExtra = activeItem?.type === "extra";
+  const episodeSeriesId = isExtra ? undefined : activeItem?.series_id;
+
   // -- Series episodes for next-episode navigation --
   // A shuffle replaces the series order, so it loads none and the player
   // offers no sequential next or previous episode.
-  const seriesId = shuffleId ? undefined : activeItem?.series_id;
+  const seriesId = shuffleId ? undefined : episodeSeriesId;
   const currentSeason = activeItem?.season_number ?? 0;
   const { episodes: seriesEpisodes } = useSeriesEpisodes(
     seriesId,
@@ -856,7 +943,7 @@ function WatchPlaybackHostContent() {
 
   // Find the next episode from the populated list.
   const nextEpisodeRef = useMemo<EpisodeRef | null>(() => {
-    if (!activeItem?.series_id || !seriesEpisodes.length) return null;
+    if (!activeItem || !episodeSeriesId || !seriesEpisodes.length) return null;
     const idx = seriesEpisodes.findIndex(
       (ep) =>
         ep.seasonNumber === (activeItem.season_number ?? 0) &&
@@ -864,7 +951,7 @@ function WatchPlaybackHostContent() {
     );
     if (idx < 0 || idx >= seriesEpisodes.length - 1) return null;
     return seriesEpisodes[idx + 1] ?? null;
-  }, [activeItem, seriesEpisodes]);
+  }, [activeItem, episodeSeriesId, seriesEpisodes]);
 
   // -- Continue watching for On Deck carousel --
   const isPostRoll = state.mode === "post-roll";
@@ -892,11 +979,11 @@ function WatchPlaybackHostContent() {
   // moves on, so its post-roll waits for the last part.
   const awaitsLaterPartRef = useRef(false);
   useEffect(() => {
-    hasPostRollRef.current = Boolean(activeItem?.series_id || shuffleId);
+    hasPostRollRef.current = Boolean(episodeSeriesId || shuffleId);
     shuffledRef.current = Boolean(shuffleId);
     awaitsLaterPartRef.current =
       Boolean(shuffleId) && hasLaterPart(activeItem ?? undefined, activeRequest?.fileId);
-  }, [activeItem, activeRequest?.fileId, shuffleId]);
+  }, [activeItem, activeRequest?.fileId, episodeSeriesId, shuffleId]);
 
   // Reset post-roll tracking when the playback session changes.
   useEffect(() => {
@@ -926,6 +1013,9 @@ function WatchPlaybackHostContent() {
           {
             contentId: activeRequest.contentId,
             fileId: nextPartFileId,
+            // The next part of a version the viewer picked, before Play or
+            // in the player, is still the viewer's pick.
+            versionPicked: activeRequest.versionPicked || exitState?.versionPinned,
             libraryId: activeRequest.libraryId,
             roomId: activeRequest.roomId,
             roomToken: activeRequest.roomToken,
@@ -946,11 +1036,22 @@ function WatchPlaybackHostContent() {
 
       // Movies (no series_id) exit straight to the detail page — there's no
       // post-roll experience to fall through into — unless a shuffle picks
-      // what plays next.
-      if (!activeItem?.series_id && !activeRequest?.shuffleId) {
+      // what plays next. An extra has no detail page of its own, so it goes
+      // back to the page it was started from, or to its series when opened
+      // from a direct link.
+      if (!episodeSeriesId && !activeRequest?.shuffleId) {
         if (activeRequest) {
           stopPlayback();
-          navigate(buildWatchItemHref(activeRequest), { up: true });
+          const ownerId = isExtra ? activeItem?.series_id : undefined;
+          navigate(
+            isExtra
+              ? (activeRequest.returnHref ??
+                  buildWatchItemHref(
+                    ownerId ? { ...activeRequest, contentId: ownerId } : activeRequest,
+                  ))
+              : buildWatchItemHref(activeRequest),
+            { up: true },
+          );
         }
         return;
       }
@@ -965,6 +1066,8 @@ function WatchPlaybackHostContent() {
       requestKeyValue,
       activeRequest,
       activeItem,
+      episodeSeriesId,
+      isExtra,
       applyExitStateToCache,
       stopPlayback,
       navigate,
@@ -1077,23 +1180,24 @@ function WatchPlaybackHostContent() {
     return <PlaybackPreparingScreen />;
   }
 
-  if (error && isForeground) {
-    return <PlaybackUnavailableScreen error={error} onBack={() => navigate(-1)} />;
-  }
+  // The player has its title's detail from here on, and `error` may still be
+  // set: a refetch of that detail failed (a catalog event landing in a server
+  // restart, say), or, outside the foreground, a newer request's first read
+  // did. Neither ends the title that plays; its stream carries its own
+  // authorization.
 
-  const canonicalQuality = effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY]
-    ?.value as string | undefined;
-  const maxBitrateKbps = effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS]
-    ?.value as number | null | undefined;
+  const { qualityPreference: canonicalQuality, maxBitrateKbps } = playbackQualitySettings(
+    effectivePlaybackSettings,
+    onMeteredConnection(),
+  );
   const watchPageProps = buildWatchPageProps({
     request: activeRequest,
     item: activeItem,
     currentProfile,
     seriesEpisodes,
-    // Passed through verbatim: "original" and "auto" are distinct wire values
-    // (the planner preserves the source for "original", adapts for "auto").
-    // Undefined until the read resolves, which leaves the profile-column
-    // fallback in place rather than blocking playback on a settings fetch.
+    // The session reads a legacy "original" as "auto". Undefined until the
+    // read resolves, which leaves the profile-column fallback in place rather
+    // than blocking playback on a settings fetch.
     qualityPreference: canonicalQuality,
   });
   // The resolved answer already folds in the profile layer, so the props built
@@ -1129,6 +1233,14 @@ function WatchPlaybackHostContent() {
     if (legacy === undefined) return watchPageProps.introSkipMode ?? null;
     return legacy ? "always" : "ask";
   })();
+  // Until the profile's mode loads, or if the read fails, the mode this
+  // browser saw last for the profile applies, and the default only when it
+  // has seen none: the start does not wait, and a `never` profile keeps its
+  // `ignore`. A server without the setting runs the default.
+  const bufferingMode: BufferingMode =
+    capabilitiesKnown && !supportsBufferingQualityMode
+      ? "always"
+      : (loadedBufferingMode ?? lastBufferingMode(playbackProfileId) ?? "always");
   const autoSkipRecap = resolvedBool(
     SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP,
     watchPageProps.autoSkipRecap,
@@ -1137,6 +1249,11 @@ function WatchPlaybackHostContent() {
     SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW,
     watchPageProps.autoPlayNextPreview,
   );
+  // Opt-in, and both default off: an untouched profile's prompt is unchanged.
+  // A server that cannot answer either key leaves them false, which is the same
+  // shape it would show if the viewer had turned them off.
+  const showMarkerConfidence = resolvedBool(SETTING_KEYS.PLAYBACK_SHOW_MARKER_CONFIDENCE, false);
+  const showMarkerSource = resolvedBool(SETTING_KEYS.PLAYBACK_SHOW_MARKER_SOURCE, false);
 
   const playerDisplayMode =
     state.mode === "foreground" ? "foreground" : isPostRoll ? "postroll" : "detached";
@@ -1149,6 +1266,9 @@ function WatchPlaybackHostContent() {
           {...watchPageProps}
           maxBitrateKbps={maxBitrateKbps ?? null}
           introSkipMode={introSkipMode}
+          showMarkerConfidence={showMarkerConfidence}
+          showMarkerSource={showMarkerSource}
+          bufferingMode={bufferingMode}
           autoSkipRecap={autoSkipRecap}
           autoPlayNextPreview={autoPlayNextPreview}
           canEditMarkers={canEditMarkers}
@@ -1203,6 +1323,7 @@ function WatchPlaybackHostContent() {
 }
 
 export function WatchPlaybackBar() {
+  const t = useT();
   const barRef = usePlaybackBarHeight("watch");
   const controller = useContext(WatchPlaybackControllerContext);
   if (!controller) {
@@ -1222,8 +1343,8 @@ export function WatchPlaybackBar() {
     return null;
   }
 
-  const title = item?.series_title ?? item?.title ?? "Preparing playback";
-  const subtitle = buildPlaybackSubtitle(request, item);
+  const title = item?.series_title ?? item?.title ?? t("web.player.watch.preparing");
+  const subtitle = buildPlaybackSubtitle(t, request, item);
   const displayedTime = scrubValue ?? snapshot?.currentTime ?? 0;
 
   return (
@@ -1236,29 +1357,35 @@ export function WatchPlaybackBar() {
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <div className="bg-primary/15 text-primary flex h-10 w-10 shrink-0 items-center justify-center rounded-xl">
+                {/* eslint-disable-next-line silo/no-physical-direction -- centres the play triangle, which doesn't mirror */}
                 <Play className="ml-0.5 h-4 w-4 fill-current" />
               </div>
               <div className="min-w-0">
                 <div className="truncate text-sm font-semibold text-white">{title}</div>
                 <div className="text-xs text-white/60">
-                  {subtitle ?? (snapshot ? "Background playback" : "Preparing playback")}
+                  {subtitle ??
+                    (snapshot
+                      ? t("web.player.bar.backgroundPlayback")
+                      : t("web.player.watch.preparing"))}
                 </div>
               </div>
               {state.pictureInPictureActive && (
                 <div className="hidden shrink-0 items-center gap-1 rounded-full bg-white/8 px-2.5 py-1 text-[11px] font-medium text-white/75 sm:flex">
                   <PictureInPicture2 className="h-3.5 w-3.5" />
-                  PiP
+                  {t("web.player.bar.pip")}
                 </div>
               )}
             </div>
 
-            <div className="mt-3 space-y-1.5">
+            {/* The timeline reads left to right in every language, like the player's. */}
+            <div dir="ltr" className="mt-3 space-y-1.5">
               <Slider
+                dir="ltr"
                 value={[displayedTime]}
                 min={0}
                 max={Math.max(snapshot?.duration ?? 0, 0)}
                 step={1}
-                thumbLabels={["Playback position"]}
+                thumbLabels={[t("web.player.bar.positionLabel")]}
                 onKeyDownCapture={(event) => {
                   // Unmodified arrows skip by the profile's intervals; the
                   // slider keeps its own Shift+Arrow page step and modifier
@@ -1284,19 +1411,19 @@ export function WatchPlaybackBar() {
               />
               <div className="flex items-center justify-between text-[11px] text-white/55 tabular-nums">
                 <span>{formatTime(displayedTime)}</span>
-                <span>{snapshot ? formatTime(snapshot.duration) : "0:00"}</span>
+                <span>{formatTime(snapshot ? snapshot.duration : 0)}</span>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div dir="ltr" className="flex items-center gap-2">
             <Button
               variant="glass"
               size="icon"
               className="h-10 w-10 rounded-full"
               onClick={() => transport?.skipBack()}
               disabled={!transport}
-              title={`Back ${seekPreferences.skipBack} seconds`}
+              title={t("web.player.bar.skipBackTitle", { count: seekPreferences.skipBack })}
             >
               <SkipBack className="h-4 w-4" />
             </Button>
@@ -1306,11 +1433,11 @@ export function WatchPlaybackBar() {
               disabled={!transport}
             >
               {snapshot?.playing ? (
-                <Pause className="mr-2 h-4 w-4" />
+                <Pause className="me-2 h-4 w-4" />
               ) : (
-                <Play className="mr-2 h-4 w-4 fill-current" />
+                <Play className="me-2 h-4 w-4 fill-current" />
               )}
-              {snapshot?.playing ? "Pause" : "Play"}
+              {snapshot?.playing ? t("web.player.bar.pause") : t("web.player.bar.play")}
             </Button>
             <Button
               variant="glass"
@@ -1318,7 +1445,7 @@ export function WatchPlaybackBar() {
               className="h-10 w-10 rounded-full"
               onClick={() => transport?.skipForward()}
               disabled={!transport}
-              title={`Forward ${seekPreferences.skipForward} seconds`}
+              title={t("web.player.bar.skipForwardTitle", { count: seekPreferences.skipForward })}
             >
               <SkipForward className="h-4 w-4" />
             </Button>
@@ -1326,17 +1453,17 @@ export function WatchPlaybackBar() {
               variant="glass"
               className="h-10 rounded-full px-4"
               onClick={returnToWatch}
-              title="Return to player"
+              title={t("web.player.bar.returnTitle")}
             >
-              <Tv className="mr-2 h-4 w-4" />
-              Watch
+              <Tv className="me-2 h-4 w-4" />
+              {t("web.player.bar.watch")}
             </Button>
             <Button
               variant="glass"
               size="icon"
               className="h-10 w-10 rounded-full"
               onClick={stopPlayback}
-              title="Stop playback"
+              title={t("web.player.bar.stopTitle")}
             >
               <X className="h-4 w-4" />
             </Button>

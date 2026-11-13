@@ -256,32 +256,12 @@ func TestResolveOriginalAssertsServedQuality(t *testing.T) {
 	if _, err := resolver.Resolve(ctx, QualityOriginal, user, cfg, compliant, playback.ClientCapabilities{}, true, ""); err != nil {
 		t.Fatalf("Resolve(compliant original) error: %v", err)
 	}
-}
 
-// TestResolveOriginalPopulatesFileQualityFact pins the input contract: the
-// final download check on original-resolution paths carries file_quality.
-func TestResolveOriginalPopulatesFileQualityFact(t *testing.T) {
-	decider := &capturingActionDecider{decision: policyengine.ActionDecision{Allowed: true}}
-	resolver := DownloadQualityResolver{actionDecider: decider}
-	user := &PolicyUser{ID: 9, Policy: access.EffectiveUserPolicy{DownloadAllowed: true, MaxPlaybackQuality: "2160p"}}
-	cfg := config.DownloadConfig{Enabled: true}
-	file := &models.MediaFile{ID: 3, Resolution: "1080p"}
-
-	if _, err := resolver.Resolve(
-		context.Background(), QualityOriginal, user, cfg, file,
-		playback.ClientCapabilities{}, true, "device-9",
-	); err != nil {
-		t.Fatalf("Resolve() error: %v", err)
-	}
-	if len(decider.inputs) != 1 {
-		t.Fatalf("decider calls = %d, want 1", len(decider.inputs))
-	}
-	in := decider.inputs[0]
-	if in.Action != policyengine.ActionDownload ||
-		in.FileQuality != "1080p" ||
-		in.RequestedQuality != QualityOriginal ||
-		in.DeviceID != "device-9" {
-		t.Fatalf("action input = %+v, want download action with file_quality asserted", in)
+	// An older probe recorded an audiobook's cover as 2160p video; the book
+	// serves no video, so the ceiling does not refuse it.
+	staleCover := &models.MediaFile{ID: 5, BaseType: "audiobook", CodecVideo: "mjpeg", CodecAudio: "aac", Container: "mp4", Resolution: "2160p"}
+	if _, err := resolver.Resolve(ctx, QualityOriginal, user, cfg, staleCover, playback.ClientCapabilities{}, true, ""); err != nil {
+		t.Fatalf("Resolve(audiobook with stale cover resolution) error: %v", err)
 	}
 }
 

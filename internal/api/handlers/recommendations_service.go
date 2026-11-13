@@ -48,6 +48,7 @@ func (h *RecommendationsHandler) BecauseWatched(ctx context.Context, userID int,
 	if limit <= 0 {
 		limit = recommendationsDefaultLimit
 	}
+	limit = min(limit, recommendations.MaxRowReadLimit)
 	visible, err := h.anchorVisible(ctx, itemID, filter)
 	if err != nil {
 		return nil, err
@@ -255,6 +256,7 @@ func (h *RecommendationsHandler) renderDiscoverRows(ctx context.Context, userID 
 		slog.WarnContext(ctx, "recommendation cards: item details failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		return nil, recommendationsUnavailable("Failed to fetch item details")
 	}
+	artwork := h.featuredCardArtwork(ctx, enrichment.items, filter.Artwork())
 	out := make([]discoverRowResponse, 0, len(discoverRows))
 	for _, row := range discoverRows {
 		kind, key := discoverRowSectionKey(row.Type, row.Label, row.ClusterIndex)
@@ -263,7 +265,7 @@ func (h *RecommendationsHandler) renderDiscoverRows(ctx context.Context, userID 
 			Label:       row.Label,
 			SectionKind: kind,
 			SectionKey:  key,
-			Items:       h.buildSectionItems(ctx, row.Items, enrichment, row.UpcomingEvents),
+			Items:       h.buildSectionItems(ctx, row.Items, enrichment, row.UpcomingEvents, artwork),
 		}
 		if len(respRow.Items) > 0 {
 			out = append(out, respRow)
@@ -347,8 +349,10 @@ func (h *RecommendationsHandler) ForYouRowCards(ctx context.Context, userID int,
 // titles it marked Not interested; an unavailable engine, and an anchor the
 // viewer cannot see, answer an empty list. The engine leaves out
 // titles the viewer cannot see before it ranks; v1 filters again with
-// keepAccessible and v2 as it renders the cards.
-func (h *RecommendationsHandler) SimilarItems(ctx context.Context, userID int, profileID, itemID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
+// keepAccessible and v2 as it renders the cards. withReasons asks the engine
+// for each item's connection reason, which v1 answers and the v2 cards do not
+// carry.
+func (h *RecommendationsHandler) SimilarItems(ctx context.Context, userID int, profileID, itemID string, limit int, filter catalog.AccessFilter, withReasons bool) ([]recommendations.ScoredItem, error) {
 	if h.engineUnavailable() {
 		return []recommendations.ScoredItem{}, nil
 	}
@@ -362,7 +366,11 @@ func (h *RecommendationsHandler) SimilarItems(ctx context.Context, userID int, p
 	if !visible {
 		return []recommendations.ScoredItem{}, nil
 	}
-	items, err := h.engine.SimilarItems(ctx, userID, profileID, itemID, limit, filter)
+	similar := h.engine.SimilarItems
+	if withReasons {
+		similar = h.engine.SimilarItemsWithReasons
+	}
+	items, err := similar(ctx, userID, profileID, itemID, limit, filter)
 	if err != nil {
 		slog.WarnContext(ctx, "SimilarItems failed", "component", "api", "item_id", itemID, "error", err)
 		return nil, recommendationsUnavailable("Failed to fetch similar items")
@@ -395,7 +403,7 @@ func (h *RecommendationsHandler) SimilarUsersLiked(ctx context.Context, userID i
 
 // SimilarCards is SimilarItems rendered as cards for the acting profile.
 func (h *RecommendationsHandler) SimilarCards(ctx context.Context, userID int, profileID, itemID string, limit int, filter catalog.AccessFilter) ([]SectionItemView, error) {
-	items, err := h.SimilarItems(ctx, userID, profileID, itemID, limit, filter)
+	items, err := h.SimilarItems(ctx, userID, profileID, itemID, limit, filter, false)
 	if err != nil {
 		return nil, err
 	}
@@ -507,13 +515,14 @@ func (h *RecommendationsHandler) TasteSeedItems(ctx context.Context, userID int,
 		itemMap[mi.ContentID] = mi
 	}
 	stateMap := h.resolveTasteSeedUserStates(ctx, userID, profileID, mediaItems)
+	posters := h.tasteSeedPosterURLs(ctx, mediaItems, filter.Artwork())
 	items = make([]SectionItemView, 0, len(candidateIDs))
 	for _, id := range candidateIDs {
 		mi, ok := itemMap[id]
 		if !ok || mi == nil {
 			continue
 		}
-		items = append(items, h.tasteSeedSectionItem(ctx, mi, stateMap))
+		items = append(items, tasteSeedSectionItem(mi, stateMap, posters[mi.ContentID]))
 	}
 	return items, len(candidateIDs), nil
 }

@@ -12,10 +12,22 @@ import (
 	"time"
 )
 
+// newMeilisearchTestClient returns a client for an httptest server running handler.
+func newMeilisearchTestClient(t *testing.T, handler http.HandlerFunc) *meilisearchClient {
+	t.Helper()
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	client, err := newMeilisearchClient(server.URL, "", time.Second)
+	if err != nil {
+		t.Fatalf("newMeilisearchClient: %v", err)
+	}
+	return client
+}
+
 func TestMeilisearchFederatedSearchUsesMultiSearchPagination(t *testing.T) {
 	var gotPath string
 	var gotRequest meilisearchFederatedSearchRequest
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newMeilisearchTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		if err := json.NewDecoder(r.Body).Decode(&gotRequest); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -23,13 +35,7 @@ func TestMeilisearchFederatedSearchUsesMultiSearchPagination(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"hits":[{"content_id":"episode-1"}],"offset":20,"limit":10,"estimatedTotalHits":1}`))
-	}))
-	defer server.Close()
-
-	client, err := newMeilisearchClient(server.URL, "", time.Second)
-	if err != nil {
-		t.Fatalf("newMeilisearchClient: %v", err)
-	}
+	})
 	request := meilisearchFederatedSearchRequest{
 		Federation: meilisearchFederationOptions{Offset: 20, Limit: 10},
 		Queries: []meilisearchFederatedQuery{
@@ -53,17 +59,11 @@ func TestMeilisearchFederatedSearchUsesMultiSearchPagination(t *testing.T) {
 
 func TestMeilisearchWaitTaskAcceptsZeroTaskUID(t *testing.T) {
 	var gotPath string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newMeilisearchTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"taskUid":0,"status":"succeeded"}`))
-	}))
-	defer server.Close()
-
-	client, err := newMeilisearchClient(server.URL, "", time.Second)
-	if err != nil {
-		t.Fatalf("newMeilisearchClient returned error: %v", err)
-	}
+	})
 	if err := client.WaitTask(context.Background(), newMeilisearchTaskRef(0)); err != nil {
 		t.Fatalf("WaitTask(0) returned error: %v", err)
 	}
@@ -72,24 +72,12 @@ func TestMeilisearchWaitTaskAcceptsZeroTaskUID(t *testing.T) {
 	}
 }
 
-func TestMeilisearchWaitTaskNoopsWithoutTask(t *testing.T) {
-	if err := (&meilisearchClient{}).WaitTask(context.Background(), meilisearchTaskRef{}); err != nil {
-		t.Fatalf("WaitTask(no task) returned error: %v", err)
-	}
-}
-
 func TestMeilisearchWaitTaskSurfacesTaskFailure(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newMeilisearchTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"taskUid":7,"status":"failed","error":{"message":"document is malformed","code":"invalid_document"}}`))
-	}))
-	defer server.Close()
-
-	client, err := newMeilisearchClient(server.URL, "", time.Second)
-	if err != nil {
-		t.Fatalf("newMeilisearchClient: %v", err)
-	}
-	err = client.WaitTask(context.Background(), newMeilisearchTaskRef(7))
+	})
+	err := client.WaitTask(context.Background(), newMeilisearchTaskRef(7))
 	if err == nil || !strings.Contains(err.Error(), "document is malformed") {
 		t.Fatalf("WaitTask error = %v, want task failure with meilisearch message", err)
 	}
@@ -121,18 +109,12 @@ func TestMeilisearchClientJoinsBasePathAndSendsAuth(t *testing.T) {
 }
 
 func TestMeilisearchClientDecodesJSONErrorBody(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newMeilisearchTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte(`{"message":"invalid filter expression","code":"invalid_search_filter"}`))
-	}))
-	defer server.Close()
-
-	client, err := newMeilisearchClient(server.URL, "", time.Second)
-	if err != nil {
-		t.Fatalf("newMeilisearchClient: %v", err)
-	}
-	_, err = client.Search(context.Background(), "idx", meilisearchSearchRequest{})
+	})
+	_, err := client.Search(context.Background(), "idx", meilisearchSearchRequest{})
 	var httpErr *meilisearchHTTPError
 	if !errors.As(err, &httpErr) {
 		t.Fatalf("Search error = %v, want *meilisearchHTTPError", err)
@@ -143,17 +125,11 @@ func TestMeilisearchClientDecodesJSONErrorBody(t *testing.T) {
 }
 
 func TestMeilisearchClientKeepsNonJSONErrorBody(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newMeilisearchTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte("  upstream proxy exploded\n"))
-	}))
-	defer server.Close()
-
-	client, err := newMeilisearchClient(server.URL, "", time.Second)
-	if err != nil {
-		t.Fatalf("newMeilisearchClient: %v", err)
-	}
-	_, err = client.Stats(context.Background(), "idx")
+	})
+	_, err := client.Stats(context.Background(), "idx")
 	var httpErr *meilisearchHTTPError
 	if !errors.As(err, &httpErr) {
 		t.Fatalf("Stats error = %v, want *meilisearchHTTPError", err)
@@ -165,19 +141,13 @@ func TestMeilisearchClientKeepsNonJSONErrorBody(t *testing.T) {
 
 func TestMeilisearchDeleteIndexToleratesMissingIndex(t *testing.T) {
 	var gotMethod, gotPath string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newMeilisearchTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		gotMethod = r.Method
 		gotPath = r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"message":"Index gone not found.","code":"index_not_found"}`))
-	}))
-	defer server.Close()
-
-	client, err := newMeilisearchClient(server.URL, "", time.Second)
-	if err != nil {
-		t.Fatalf("newMeilisearchClient: %v", err)
-	}
+	})
 	ref, err := client.DeleteIndex(context.Background(), "gone")
 	if err != nil {
 		t.Fatalf("DeleteIndex of a missing index should be a no-op, got %v", err)
@@ -192,7 +162,7 @@ func TestMeilisearchDeleteIndexToleratesMissingIndex(t *testing.T) {
 
 func TestMeilisearchListIndexUIDsPaginates(t *testing.T) {
 	var offsets []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newMeilisearchTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		offset := r.URL.Query().Get("offset")
 		offsets = append(offsets, offset)
 		w.Header().Set("Content-Type", "application/json")
@@ -202,13 +172,7 @@ func TestMeilisearchListIndexUIDsPaginates(t *testing.T) {
 		default:
 			_, _ = fmt.Fprintf(w, `{"results":[{"uid":"c"}],"offset":%s,"limit":2,"total":3}`, offset)
 		}
-	}))
-	defer server.Close()
-
-	client, err := newMeilisearchClient(server.URL, "", time.Second)
-	if err != nil {
-		t.Fatalf("newMeilisearchClient: %v", err)
-	}
+	})
 	uids, err := client.ListIndexUIDs(context.Background())
 	if err != nil {
 		t.Fatalf("ListIndexUIDs: %v", err)

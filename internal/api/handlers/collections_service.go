@@ -23,12 +23,6 @@ type PersonalCollectionCreateCommand struct {
 	UserID    int
 	ProfileID string
 	Request   PersonalCollectionCreateRequest
-	// PosterFile reads the uploaded poster part; nil when the request
-	// carried no multipart body. It answers http.ErrMissingFile when the
-	// part is absent.
-	PosterFile func() ([]byte, error)
-	// V1Rules: see PersonalCollectionPreviewRequest.
-	V1Rules bool
 }
 
 const (
@@ -123,7 +117,7 @@ func (h *CollectionHandler) CreatePersonalCollection(ctx context.Context, cmd Pe
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
 
-	if cmd.PosterFile != nil || req.PosterSourceURL != "" {
+	if req.PosterSourceURL != "" {
 		if err := collectionFeatureError(store, "artwork"); err != nil {
 			return none, err
 		}
@@ -136,12 +130,15 @@ func (h *CollectionHandler) CreatePersonalCollection(ctx context.Context, cmd Pe
 	queryDefinitionJSON := defaultJSON(req.QueryDefinition)
 	collectionType := firstNonEmptyCollection(req.CollectionType, "manual")
 	if collectionType == collectionTypeSmart {
-		queryDefinitionJSON, err = normalizeSmartCollectionQueryDefinitionJSON(queryDefinitionJSON, true, true, cmd.V1Rules)
+		queryDefinitionJSON, err = normalizeSmartCollectionQueryDefinitionJSON(queryDefinitionJSON, true, true)
 		if err != nil {
 			return none, fieldError("query_definition", "Invalid query_definition")
 		}
+		if err := requireSmartCollectionRule(queryDefinitionJSON); err != nil {
+			return none, err
+		}
 	} else if len(req.QueryDefinition) > 0 {
-		queryDefinitionJSON, err = normalizeQueryDefinitionJSON(queryDefinitionJSON, true, true, cmd.V1Rules)
+		queryDefinitionJSON, err = normalizeQueryDefinitionJSON(queryDefinitionJSON, true, true)
 		if err != nil {
 			return none, fieldError("query_definition", "Invalid query_definition")
 		}
@@ -154,6 +151,13 @@ func (h *CollectionHandler) CreatePersonalCollection(ctx context.Context, cmd Pe
 	displayQueryDefinition, err := catalog.NormalizeDisplayQueryFragment(req.DisplayQueryDefinition)
 	if err != nil {
 		return none, fieldError("display_query_definition", err.Error())
+	}
+	// The poster is read and decoded before the insert: one the server cannot
+	// use, or is too busy to decode, creates nothing, so repeating the request
+	// cannot leave two collections.
+	poster, err := h.prepareCollectionPoster(ctx, nil, req.PosterSourceURL)
+	if err != nil {
+		return none, personalCollectionPosterError(ctx, "", err)
 	}
 	collection, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{
 		CreatorProfileID:           cmd.ProfileID,
@@ -170,11 +174,10 @@ func (h *CollectionHandler) CreatePersonalCollection(ctx context.Context, cmd Pe
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to create collection")
 	}
 
-	posterProvided, err := h.processCollectionPoster(ctx, store, collection.ID, cmd.ProfileID, cmd.PosterFile, req.PosterSourceURL)
-	if err != nil {
-		return none, apiError(http.StatusInternalServerError, "internal_error", err.Error())
-	}
-	if posterProvided {
+	if poster != nil {
+		if err := h.storeCollectionPoster(ctx, store, collection.ID, cmd.ProfileID, poster); err != nil {
+			return none, personalCollectionPosterError(ctx, collection.ID, err)
+		}
 		if refreshed, err := store.GetCollection(ctx, collection.ID); err == nil {
 			collection = refreshed
 		}
@@ -314,8 +317,16 @@ func (h *CollectionHandler) ReorderCollectionGroups(ctx context.Context, userID 
 // item_count set to the members profileID can see: for another profile's
 // collection, only those its owner can access too. On /api/v2 a collection
 // without an uploaded or imported poster shows its collage for that profile,
-// once built. A collection whose owner cannot be resolved is left out.
+// once built. A collection whose owner cannot be resolved is left out. On
+// /api/v2 the counts of hand-picked and imported collections may be
+// remembered from an earlier list read (catalog.PersonalCollectionMemberCounts).
 func (h *CollectionHandler) collectionViews(ctx context.Context, store userstore.UserStore, userID int, profileID string, collections []userstore.Collection) []PersonalCollectionView {
+	return h.collectionViewsCounted(ctx, store, userID, profileID, collections, memberCountsForRead(ctx, h.MemberCounts))
+}
+
+// collectionViewsCounted is collectionViews counting members with
+// memberCounts, or afresh when it is nil.
+func (h *CollectionHandler) collectionViewsCounted(ctx context.Context, store userstore.UserStore, userID int, profileID string, collections []userstore.Collection, memberCounts *catalog.PersonalCollectionMemberCounts) []PersonalCollectionView {
 	var reads ownedCollectionReads
 	if userstore.HasCatalogSQLState(store) {
 		sources := make([]ownedCollectionDefinition, 0, len(collections))
@@ -326,7 +337,7 @@ func (h *CollectionHandler) collectionViews(ctx context.Context, store userstore
 				WantsCollage:                 strings.TrimSpace(c.PosterURL) == "",
 			})
 		}
-		reads = ownerScopedCollectionReads(ctx, h.Executor, h.CollectionOwners, collagesForRead(ctx, h.Collages), userID, profileID, sources, AccessFilterFromContext(ctx, ""))
+		reads = ownerScopedCollectionReads(ctx, h.Executor, memberCounts, h.CollectionOwners, collagesForRead(ctx, h.Collages), userID, profileID, sources, AccessFilterFromContext(ctx, ""))
 	}
 	views := make([]PersonalCollectionView, 0, len(collections))
 	for _, c := range collections {
@@ -341,15 +352,15 @@ func (h *CollectionHandler) collectionViews(ctx context.Context, store userstore
 		if collage, ok := reads.posters[c.ID]; ok {
 			posterPath, resp.PosterThumbhash, resp.PosterIsCollage = collage.Path, collage.Thumbhash, true
 		}
-		resp.PosterURL = h.presignUserCollectionPoster(ctx, posterPath)
+		resp.PosterURL = personalCollectionPosterURL(ctx, h.ArtworkResolver, c.ID, posterPath)
 		views = append(views, resp)
 	}
 	return views
 }
 
 // collagesForRead is the collage service a read of personal collections uses:
-// /api/v2 reads show collages, while the frozen /api/v1 bridge keeps showing
-// only uploaded and imported posters.
+// the list operations marked by WithNativeAPIV2 show collages; other reads
+// show only uploaded and imported posters.
 func collagesForRead(ctx context.Context, collages *catalog.PersonalCollectionCollages) *catalog.PersonalCollectionCollages {
 	if !isNativeAPIV2(ctx) {
 		return nil
@@ -357,10 +368,20 @@ func collagesForRead(ctx context.Context, collages *catalog.PersonalCollectionCo
 	return collages
 }
 
+// memberCountsForRead returns memberCounts for the list operations marked by
+// WithNativeAPIV2 and nil for other reads, which count members afresh.
+func memberCountsForRead(ctx context.Context, memberCounts *catalog.PersonalCollectionMemberCounts) *catalog.PersonalCollectionMemberCounts {
+	if !isNativeAPIV2(ctx) {
+		return nil
+	}
+	return memberCounts
+}
+
 // collectionView renders one stored collection as collectionViews does, and
-// fails when its owner's access cannot be resolved.
+// fails when its owner's access cannot be resolved. Its item_count is always
+// counted afresh: a collection's strong ETag binds its live count.
 func (h *CollectionHandler) collectionView(ctx context.Context, store userstore.UserStore, userID int, profileID string, c userstore.Collection) (PersonalCollectionView, error) {
-	views := h.collectionViews(ctx, store, userID, profileID, []userstore.Collection{c})
+	views := h.collectionViewsCounted(ctx, store, userID, profileID, []userstore.Collection{c}, nil)
 	if len(views) == 0 {
 		return PersonalCollectionView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load collection")
 	}
@@ -375,15 +396,6 @@ func collectionGroupView(g userstore.CollectionGroup) CollectionGroupView {
 		DefaultSortMode: string(g.DefaultSortMode),
 		SortOrder:       g.SortOrder,
 	}
-}
-
-// posterFileReader is the multipart poster part of a v1 request; nil when
-// the request is not multipart.
-func posterFileReader(r *http.Request) func() ([]byte, error) {
-	if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
-		return nil
-	}
-	return func() ([]byte, error) { return readCollectionImageMultipart(r, collectionImagePoster) }
 }
 
 // PersonalCollectionFeatures describes the acting account's storage support.

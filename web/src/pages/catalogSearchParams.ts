@@ -40,14 +40,6 @@ export interface SectionCatalogDestination {
   title?: string;
 }
 
-const SECTION_BROWSE_SUPPORT_TYPES = new Set([
-  "collection",
-  "custom_filter",
-  "genre",
-  "random",
-  "recently_added",
-]);
-
 interface GroupBuilder {
   match?: "all" | "any";
   rules: Map<number, RuleBuilder>;
@@ -363,10 +355,6 @@ export function buildLegacyBrowseCatalogHref(searchParams: URLSearchParams): str
     sectionId,
     title: readString(searchParams.get("title")),
   });
-}
-
-export function isSectionBrowseSupported(sectionType: string): boolean {
-  return SECTION_BROWSE_SUPPORT_TYPES.has(sectionType);
 }
 
 export function buildCatalogApiSearchParams(state: CatalogSearchState): URLSearchParams {

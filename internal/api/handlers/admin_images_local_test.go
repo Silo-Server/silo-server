@@ -4,11 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/metadata"
 )
@@ -28,6 +25,8 @@ type localImageServiceFake struct {
 	applyLocalErr  error
 	plainImages    []metadata.RemoteImage
 	previewCalls   int
+	uploads        []metadata.ApplyUploadedItemImageRequest
+	uploadErr      error
 }
 
 func (f *localImageServiceFake) FetchItemImages(context.Context, map[string]string, string, string, int) ([]metadata.RemoteImage, map[string]string, error) {
@@ -70,6 +69,17 @@ func (f *localImageServiceFake) ApplyItemImage(context.Context, metadata.ApplyIt
 func (f *localImageServiceFake) ApplyLocalItemImage(_ context.Context, req metadata.ApplyLocalItemImageRequest) (*metadata.ApplyItemImageResult, error) {
 	f.applyLocal = append(f.applyLocal, req)
 	return nil, f.applyLocalErr
+}
+
+func (f *localImageServiceFake) ApplyUploadedItemImage(_ context.Context, req metadata.ApplyUploadedItemImageRequest) (*metadata.ApplyUploadedItemImageResult, error) {
+	f.uploads = append(f.uploads, req)
+	if f.uploadErr != nil {
+		return nil, f.uploadErr
+	}
+	return &metadata.ApplyUploadedItemImageResult{
+		ApplyItemImageResult: metadata.ApplyItemImageResult{StoredPath: "local/series/series/ab12cd34/poster/original.webp", Thumbhash: "th-upload"},
+		SourcePath:           "upload://sha256:ab12cd34",
+	}, nil
 }
 
 func newLocalImageHandlerForTest(svc *localImageServiceFake) *AdminImageHandler {
@@ -135,28 +145,29 @@ func TestAdminItemImagesDoesNotPreviewProviderFileURLs(t *testing.T) {
 	}
 }
 
-// Frozen v1 keeps its provider-only list.
-func TestAdminItemImagesV1ListOmitsLocalImages(t *testing.T) {
+// Only movies and series offer local artwork; other item types keep the
+// provider-only list and refuse a local apply.
+func TestAdminLocalImagesAreLimitedToMoviesAndSeries(t *testing.T) {
 	svc := &localImageServiceFake{}
-	router := chi.NewRouter()
-	router.Get("/{id}/images", newLocalImageHandlerForTest(svc).HandleGetItemImages)
+	h := newLocalImageHandlerForTest(svc)
 
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/local-series/images", nil))
-	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "file://") {
-		t.Fatalf("v1 list %d %s", rec.Code, rec.Body)
+	if _, err := h.GetAdminItemImages(context.Background(), "book"); err != nil {
+		t.Fatalf("GetAdminItemImages: %v", err)
 	}
 	if svc.localCalls != 0 || svc.plainCalls != 1 {
 		t.Fatalf("fetch calls local=%d plain=%d, want the plain provider listing", svc.localCalls, svc.plainCalls)
+	}
+	_, err := h.ApplyAdminItemImage(context.Background(), "book", AdminItemImageRequest{OriginalURL: localPosterURL, Type: "poster"})
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusBadRequest || len(svc.applyLocal) != 0 {
+		t.Fatalf("err = %v, local calls %d, want 400 and none", err, len(svc.applyLocal))
 	}
 }
 
 func TestAdminApplyLocalImageValidatesTheTarget(t *testing.T) {
 	t.Run("movie or series uses the local apply", func(t *testing.T) {
 		svc := &localImageServiceFake{applyLocalErr: metadata.ErrLocalImageNotOffered}
-		h := newLocalImageHandlerForTest(svc)
-
-		_, err := h.ApplyAdminItemImage(context.Background(), "local-series", AdminItemImageRequest{OriginalURL: localPosterURL, Type: "poster", ProviderID: "local"})
+		_, err := newLocalImageHandlerForTest(svc).ApplyAdminItemImage(context.Background(), "local-series", AdminItemImageRequest{OriginalURL: localPosterURL, Type: "poster", ProviderID: "local"})
 		var apiErr *APIError
 		if !errors.As(err, &apiErr) || apiErr.Status != http.StatusBadRequest {
 			t.Fatalf("err = %v, want 400 for an image the item does not offer", err)
@@ -190,34 +201,4 @@ func TestAdminApplyLocalImageValidatesTheTarget(t *testing.T) {
 			t.Fatalf("local calls %d, provider calls %d, want none", len(svc.applyLocal), svc.providerCalls)
 		}
 	})
-
-	t.Run("frozen v1 never takes the local path", func(t *testing.T) {
-		svc := &localImageServiceFake{}
-		router := chi.NewRouter()
-		router.Post("/{id}/images/apply", newLocalImageHandlerForTest(svc).HandleApplyItemImage)
-		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/local-series/images/apply", strings.NewReader(`{"original_url":"`+localPosterURL+`","type":"poster"}`)))
-		if len(svc.applyLocal) != 0 || svc.providerCalls != 1 {
-			t.Fatalf("v1 apply %d: local calls %d, provider calls %d", rec.Code, len(svc.applyLocal), svc.providerCalls)
-		}
-	})
-}
-
-// Only movies and series offer local artwork; other item types keep the
-// provider-only list and refuse a local apply.
-func TestAdminLocalImagesAreLimitedToMoviesAndSeries(t *testing.T) {
-	svc := &localImageServiceFake{}
-	h := newLocalImageHandlerForTest(svc)
-
-	if _, err := h.GetAdminItemImages(context.Background(), "book"); err != nil {
-		t.Fatalf("GetAdminItemImages: %v", err)
-	}
-	if svc.localCalls != 0 || svc.plainCalls != 1 {
-		t.Fatalf("fetch calls local=%d plain=%d, want the plain provider listing", svc.localCalls, svc.plainCalls)
-	}
-	_, err := h.ApplyAdminItemImage(context.Background(), "book", AdminItemImageRequest{OriginalURL: localPosterURL, Type: "poster"})
-	var apiErr *APIError
-	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusBadRequest || len(svc.applyLocal) != 0 {
-		t.Fatalf("err = %v, local calls %d, want 400 and none", err, len(svc.applyLocal))
-	}
 }

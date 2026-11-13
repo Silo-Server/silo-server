@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 )
 
@@ -39,7 +40,7 @@ const (
 
 // NotificationSeriesInput is the listNotificationSeries query.
 type NotificationSeriesInput struct {
-	ImageSize string `query:"image_size" enum:"small,medium,large,original" doc:"Artwork variant to presign; absent picks each surface's default" example:"medium"`
+	ArtworkQuery
 	LimitParam
 	Cursor string `query:"cursor" doc:"Opaque cursor from page.next_cursor" example:"eyJ0IjoiYmVhciJ9"`
 	Status string `query:"status" default:"all" enum:"all,active,inactive" doc:"active keeps the series that notify; inactive keeps the ones that do not, because the profile's preferences silence every reason or the profile muted the series"`
@@ -196,7 +197,7 @@ func (reg *Registry) muteNotificationSeries(ctx context.Context, in *Notificatio
 	if reg.deps.PersonalLists == nil {
 		return nil, unavailable("notification series")
 	}
-	viewer, p := personalListViewer(ctx, "")
+	viewer, p := personalListViewer(ctx, imagesize.Request{})
 	if p != nil {
 		return nil, p
 	}
@@ -237,7 +238,7 @@ func (reg *Registry) listNotificationSeries(ctx context.Context, cursors *Cursor
 	if reg.deps.PersonalLists == nil {
 		return nil, unavailable("notification series")
 	}
-	viewer, p := personalListViewer(ctx, in.ImageSize)
+	viewer, p := personalListViewer(ctx, in.Artwork())
 	if p != nil {
 		return nil, p
 	}

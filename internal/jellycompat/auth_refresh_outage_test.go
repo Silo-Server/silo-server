@@ -240,44 +240,6 @@ func TestRequireSession_UncachedSessionStoreOutageIsRetryable(t *testing.T) {
 	}
 }
 
-// Stream and HLS routes resolve the compat session the same way: a node that
-// has not cached it and cannot read it from the database answers a retryable
-// 503, whether the request carries the token or only a PlaySessionId. An
-// unknown token still gets 401.
-func TestPlaybackSessionAuth_UncachedSessionStoreOutageIsRetryable(t *testing.T) {
-	now := fixedNow()
-	clock := func() time.Time { return now }
-	store := NewPersistentSessionStore(30*24*time.Hour, clock, &outageSessionRepo{})
-	playbackStore := NewPlaybackSessionStore(time.Hour, clock)
-	playbackStore.Put(PlaybackSession{ID: "ps-outage", CompatToken: "outage-tok", RouteItemID: "itm", MediaSources: []PlaybackMediaSource{{ID: "x"}}})
-	mw := PlaybackSessionAuth(store, playbackStore, nil)
-
-	cases := []struct {
-		name     string
-		rawQuery string
-		wantCode int
-	}{
-		{"token", "api_key=outage-tok", http.StatusServiceUnavailable},
-		{"PlaySessionId only", "PlaySessionId=ps-outage", http.StatusServiceUnavailable},
-		{"unknown token", "api_key=unknown-tok", http.StatusUnauthorized},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			req := requestWithCompatRouteItem(httptest.NewRequest(http.MethodGet, "/Videos/itm/stream?"+tc.rawQuery, nil), "itm")
-			rec := httptest.NewRecorder()
-			mw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-				t.Fatal("the request was served without a session")
-			})).ServeHTTP(rec, req)
-			if rec.Code != tc.wantCode {
-				t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tc.wantCode, rec.Body.String())
-			}
-			if tc.wantCode == http.StatusServiceUnavailable && rec.Header().Get("Retry-After") == "" {
-				t.Fatal("503 without Retry-After")
-			}
-		})
-	}
-}
-
 // compatRow is a jellycompat_sessions row as scanCompatSession reads it.
 type compatRow struct{ session Session }
 

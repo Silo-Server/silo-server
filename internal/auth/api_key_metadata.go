@@ -3,8 +3,11 @@ package auth
 import (
 	"context"
 	"errors"
+	"net/http"
+	"strconv"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/jackc/pgx/v5"
 )
@@ -40,8 +43,8 @@ type APIKeyPageKey struct {
 	ID        int64
 }
 
-// Prefixes never contain the whole credential, even for malformed legacy rows.
-const apiKeyMetadataColumns = `ak.id,ak.user_id,ak.label,CASE WHEN ak.api_key ~ '^sa_[0-9a-f]{64}$' THEN left(ak.api_key,11) ELSE '' END,ak.rate_tier,COALESCE(ak.scopes,'{}'::text[]),ak.created_at,ak.revision`
+// Neither bearer nor verifier is part of a management projection.
+const apiKeyMetadataColumns = `ak.id,ak.user_id,ak.label,ak.key_prefix,ak.rate_tier,COALESCE(ak.scopes,'{}'::text[]),ak.created_at,ak.revision` //nolint:gosec // SQL column names, not credentials.
 
 func apiKeyMetadataFields(k *models.APIKeyMetadata) []any {
 	return []any{&k.ID, &k.UserID, &k.Label, &k.KeyPrefix, &k.RateTier, &k.Scopes, &k.CreatedAt, &k.Revision}
@@ -82,7 +85,7 @@ func (r *APIKeyRepository) ListByUserAdmin(ctx context.Context, userID int) ([]*
 	return r.ListByUser(ctx, userID)
 }
 func (r *APIKeyRepository) ListAll(ctx context.Context) ([]*models.APIKeyMetadataWithUser, error) {
-	rows, err := r.pool.Query(ctx, `SELECT `+apiKeyMetadataColumns+`,ak.last_used_at,u.username FROM api_keys ak JOIN users u ON u.id=ak.user_id ORDER BY ak.created_at DESC,ak.id DESC`)
+	rows, err := r.pool.Query(ctx, `SELECT `+apiKeyMetadataColumns+`,ak.last_used_at,COALESCE(u.username,'') FROM api_keys ak JOIN users u ON u.id=ak.user_id ORDER BY ak.created_at DESC,ak.id DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +114,7 @@ func (r *APIKeyRepository) ListAllPage(ctx context.Context, after *APIKeyPageKey
 		stamp = &after.CreatedAt
 		id = after.ID
 	}
-	rows, err := r.pool.Query(ctx, `SELECT `+apiKeyMetadataColumns+`,ak.last_used_at,u.username FROM api_keys ak JOIN users u ON u.id=ak.user_id WHERE ($1::timestamptz IS NULL OR (ak.created_at,ak.id)<($1,$2)) ORDER BY ak.created_at DESC,ak.id DESC LIMIT $3`, stamp, id, limit+1)
+	rows, err := r.pool.Query(ctx, `SELECT `+apiKeyMetadataColumns+`,ak.last_used_at,COALESCE(u.username,'') FROM api_keys ak JOIN users u ON u.id=ak.user_id WHERE ($1::timestamptz IS NULL OR (ak.created_at,ak.id)<($1,$2)) ORDER BY ak.created_at DESC,ak.id DESC LIMIT $3`, stamp, id, limit+1)
 	if err != nil {
 		return nil, false, err
 	}
@@ -149,16 +152,25 @@ func (r *APIKeyRepository) UpdateTierConditional(ctx context.Context, id int64, 
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
-	if _, err = lockAPIKeyMetadata(ctx, tx, id, guard); err != nil {
+	if err := auditmutation.LockActors(ctx, tx); err != nil {
+		return nil, err
+	}
+	before, err := lockAPIKeyMetadata(ctx, tx, id, guard)
+	if err != nil {
 		return nil, err
 	}
 	current, err := scanAPIKeyMetadata(tx.QueryRow(ctx, `UPDATE api_keys ak SET rate_tier=$2 WHERE ak.id=$1 RETURNING `+apiKeyMetadataColumns, id, tier))
 	if err != nil {
 		return nil, err
 	}
+	audit, err := recordAPIKeyMutation(ctx, tx, before, current)
+	if err != nil {
+		return nil, err
+	}
 	if err = tx.Commit(ctx); err != nil {
 		return nil, err
 	}
+	auditmutation.CommitMutation(ctx, audit)
 	return current, nil
 }
 func (r *APIKeyRepository) DeleteByAdminConditional(ctx context.Context, id int64, guard APIKeyPrecondition) error {
@@ -170,13 +182,53 @@ func (r *APIKeyRepository) DeleteByAdminConditional(ctx context.Context, id int6
 		return err
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
-	if _, err = lockAPIKeyMetadata(ctx, tx, id, guard); err != nil {
+	if err := auditmutation.LockActors(ctx, tx); err != nil {
+		return err
+	}
+	before, err := lockAPIKeyMetadata(ctx, tx, id, guard)
+	if err != nil {
 		return err
 	}
 	if _, err = tx.Exec(ctx, `DELETE FROM api_keys WHERE id=$1`, id); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	audit, err := recordAPIKeyMutation(ctx, tx, before, nil)
+	if err != nil {
+		return err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return err
+	}
+	auditmutation.CommitMutation(ctx, audit)
+	return nil
+}
+
+// apiKeyAuditValues is the API key audit allowlist: the key's configuration,
+// never the credential, its prefix or its usage.
+func apiKeyAuditValues(key *models.APIKeyMetadata) map[string]any {
+	if key == nil {
+		return nil
+	}
+	scopes := key.Scopes
+	if scopes == nil {
+		scopes = []string{}
+	}
+	return map[string]any{"user_id": key.UserID, "label": key.Label, "rate_tier": key.RateTier, "scopes": scopes}
+}
+
+// recordAPIKeyMutation records an API key creation (nil before), deletion
+// (nil after) or configuration change in the caller's transaction. A write
+// that changed no allowlisted value records nothing.
+func recordAPIKeyMutation(ctx context.Context, tx pgx.Tx, before, after *models.APIKeyMetadata) (*auditmutation.Entry, error) {
+	action, status, target := auditmutation.ActionAPIKeyUpdated, http.StatusOK, before
+	switch {
+	case before == nil:
+		action, status, target = auditmutation.ActionAPIKeyCreated, http.StatusCreated, after
+	case after == nil:
+		action, status = auditmutation.ActionAPIKeyDeleted, http.StatusNoContent
+	}
+	return auditmutation.RecordMutation(ctx, tx, action, auditmutation.TargetAPIKey, strconv.FormatInt(target.ID, 10), status,
+		auditmutation.Changes(apiKeyAuditValues(before), apiKeyAuditValues(after)))
 }
 
 // ListByUserAdminPage is a bounded metadata-only account projection.
@@ -188,7 +240,7 @@ func (r *APIKeyRepository) ListByUserAdminPage(ctx context.Context, userID int, 
 		stamp = &after.CreatedAt
 		id = after.ID
 	}
-	rows, err := r.pool.Query(ctx, `SELECT `+apiKeyMetadataColumns+`,ak.last_used_at,u.username FROM api_keys ak JOIN users u ON u.id=ak.user_id WHERE ak.user_id=$1 AND ($2::timestamptz IS NULL OR (ak.created_at,ak.id)<($2,$3)) ORDER BY ak.created_at DESC,ak.id DESC LIMIT $4`, userID, stamp, id, limit+1)
+	rows, err := r.pool.Query(ctx, `SELECT `+apiKeyMetadataColumns+`,ak.last_used_at,COALESCE(u.username,'') FROM api_keys ak JOIN users u ON u.id=ak.user_id WHERE ak.user_id=$1 AND ($2::timestamptz IS NULL OR (ak.created_at,ak.id)<($2,$3)) ORDER BY ak.created_at DESC,ak.id DESC LIMIT $4`, userID, stamp, id, limit+1)
 	if err != nil {
 		return nil, false, err
 	}

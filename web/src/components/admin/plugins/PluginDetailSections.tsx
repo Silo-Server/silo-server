@@ -16,9 +16,11 @@ import {
   useSavePluginTaskBinding,
   useTestPluginConfig,
 } from "@/hooks/queries/admin/plugins";
+import { useT, type MessageKey } from "@/i18n";
 import { formatDate, formatDateTime } from "@/lib/datetime";
 import {
   configPanelId,
+  installationTier,
   licenseLabel,
   pluginResourceLinks,
   safeExternalURL,
@@ -69,6 +71,7 @@ export function PluginSettingsPanels({
   installation: PluginInstallation;
   missingKeys: Set<string>;
 }) {
+  const t = useT();
   const saveConfig = useSavePluginConfig();
   const testConfig = useTestPluginConfig();
   const saveAuthBinding = useSavePluginAuthBinding();
@@ -88,8 +91,8 @@ export function PluginSettingsPanels({
   ) {
     return (
       <DetailPanel
-        title="Settings"
-        description="This plugin has no settings. It works as soon as it's installed and turned on."
+        title={t("web.admin.plugins.settings.title")}
+        description={t("web.admin.plugins.settings.noneInstalled")}
       />
     );
   }
@@ -107,7 +110,7 @@ export function PluginSettingsPanels({
             badge={
               missingKeys.has(schema.key) ? (
                 <Badge variant="outline" className="border-warning/40 text-warning text-[11px]">
-                  Required
+                  {t("web.admin.plugins.settings.required")}
                 </Badge>
               ) : null
             }
@@ -138,8 +141,8 @@ export function PluginSettingsPanels({
 
       {authCapabilities.length > 0 ? (
         <DetailPanel
-          title="Sign-in"
-          description="Changes apply at once. Test the connection and choose the sign-in options on Settings → Sign-in."
+          title={t("web.admin.plugins.settings.signInTitle")}
+          description={t("web.admin.plugins.settings.signInDescription")}
         >
           <ul className="divide-y rounded-xl border">
             {authCapabilities.map((capability, index) => {
@@ -154,7 +157,7 @@ export function PluginSettingsPanels({
                     ) : null}
                   </div>
                   <Switch
-                    aria-label={`Offer ${label} on the sign-in screen`}
+                    aria-label={t("web.admin.plugins.settings.offerSignIn", { label })}
                     checked={binding?.enabled ?? false}
                     disabled={saveAuthBinding.isPending}
                     onCheckedChange={(checked) =>
@@ -179,8 +182,8 @@ export function PluginSettingsPanels({
 
       {taskCapabilities.length > 0 ? (
         <DetailPanel
-          title="Scheduled tasks"
-          description="Tasks are registered when the server starts, so turning one on or off takes effect after a restart. Once a task exists, change its schedule on its task page."
+          title={t("web.admin.plugins.settings.tasksTitle")}
+          description={t("web.admin.plugins.settings.tasksDescription")}
         >
           <ul className="divide-y rounded-xl border">
             {taskCapabilities.map((capability) => {
@@ -196,19 +199,21 @@ export function PluginSettingsPanels({
                       <p className="text-muted-foreground text-[13px]">{capability.description}</p>
                     ) : null}
                     <p className="text-muted-foreground text-[13px]">
-                      Default schedule: {describeTrigger(trigger)}
+                      {t("web.admin.plugins.settings.defaultSchedule", {
+                        schedule: describeTrigger(trigger),
+                      })}
                     </p>
                     {registered ? (
                       <ViewTransitionLink
                         to={pluginTaskPath(installation.id, capability.id)}
                         className="text-foreground/85 hover:text-foreground text-[13px] underline underline-offset-4"
                       >
-                        Schedule and history
+                        {t("web.admin.plugins.settings.scheduleLink")}
                       </ViewTransitionLink>
                     ) : null}
                   </div>
                   <Switch
-                    aria-label={`Run ${label}`}
+                    aria-label={t("web.admin.plugins.settings.runTask", { label })}
                     checked={binding?.enabled ?? true}
                     disabled={saveTaskBinding.isPending}
                     onCheckedChange={(checked) =>
@@ -234,16 +239,20 @@ export function PluginSettingsPanels({
 
 /** Read-only list of the settings an uninstalled plugin will ask for. */
 export function PluginDeclaredSettings({ schemas }: { schemas: PluginConfigSchema[] }) {
+  const t = useT();
   if (schemas.length === 0) {
     return (
       <DetailPanel
-        title="Settings"
-        description="This plugin has no settings. It works as soon as it's installed."
+        title={t("web.admin.plugins.settings.title")}
+        description={t("web.admin.plugins.settings.nonePreview")}
       />
     );
   }
   return (
-    <DetailPanel title="Settings" description="You can change these after installing.">
+    <DetailPanel
+      title={t("web.admin.plugins.settings.title")}
+      description={t("web.admin.plugins.settings.previewDescription")}
+    >
       <ul className="divide-y">
         {schemas.map((schema) => (
           <li key={schema.key} className="space-y-0.5 py-2.5 first:pt-0 last:pb-0">
@@ -251,7 +260,7 @@ export function PluginDeclaredSettings({ schemas }: { schemas: PluginConfigSchem
               {configTitle(schema)}
               {schema.required ? (
                 <Badge variant="outline" className="text-[11px]">
-                  Required
+                  {t("web.admin.plugins.settings.required")}
                 </Badge>
               ) : null}
             </p>
@@ -283,13 +292,17 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-const RUNTIME_STATE_LABELS: Record<string, string> = {
-  stopped: "Stopped",
-  starting: "Starting",
-  running: "Running",
-  backoff: "Waiting to restart",
-  failed: "Failed",
+const RUNTIME_STATE_LABELS: Record<string, MessageKey> = {
+  stopped: "web.admin.plugins.rail.stateStopped",
+  starting: "web.admin.plugins.rail.stateStarting",
+  running: "web.admin.plugins.rail.stateRunning",
+  backoff: "web.admin.plugins.rail.stateBackoff",
+  failed: "web.admin.plugins.rail.stateFailed",
 };
+
+// Silo manages one repository per these tiers, named like the tier itself, so
+// the Source row already names it.
+const MANAGED_TIERS = new Set<string>(["silo", "approved_community"]);
 
 /** The plugin page's side column: setup notes, description, process status, and details. */
 export function PluginDetailRail({
@@ -303,23 +316,30 @@ export function PluginDetailRail({
   installation?: PluginInstallation;
   catalogEntry?: PluginCatalogEntry;
 }) {
-  const sourceKind = installation?.source_kind ?? catalogEntry?.source_kind ?? "external";
-  const repositoryName = installation?.repository_name || catalogEntry?.repository_name;
-  const repoURL = installation?.repo_url || catalogEntry?.repo_url;
+  const t = useT();
+  const tier = installation
+    ? installationTier(installation)
+    : (catalogEntry?.source_kind ?? "external");
+  // An installation only borrows details from a catalog entry with the same
+  // plugin ID when it came from a catalog; an Unverified one has its own.
+  const catalogFallback = tier === "unverified" ? undefined : catalogEntry;
+  const repositoryName = installation?.repository_name || catalogFallback?.repository_name;
+  const repoURL = installation?.repo_url || catalogFallback?.repo_url;
   const links = pluginResourceLinks(presentation, repoURL);
   const publisher = presentation?.publisher_name?.trim();
   const publisherURL = safeExternalURL(presentation?.publisher_url);
   const runtime = installation?.runtime;
+  const stateLabel = runtime ? RUNTIME_STATE_LABELS[runtime.state] : undefined;
 
   return (
-    <aside className="flex flex-col gap-3.5" aria-label="About this plugin">
+    <aside className="flex flex-col gap-3.5" aria-label={t("web.admin.plugins.rail.label")}>
       {presentation?.setup_markdown?.trim() ? (
-        <RailPanel title="Setup">
+        <RailPanel title={t("web.admin.plugins.rail.setup")}>
           <PluginMarkdown source={presentation.setup_markdown} className="text-foreground/85" />
         </RailPanel>
       ) : null}
       {presentation?.description_markdown?.trim() ? (
-        <RailPanel title="About">
+        <RailPanel title={t("web.admin.plugins.rail.about")}>
           <PluginMarkdown
             source={presentation.description_markdown}
             className="text-foreground/85"
@@ -327,26 +347,32 @@ export function PluginDetailRail({
         </RailPanel>
       ) : null}
       {runtime?.resident ? (
-        <RailPanel title="Process">
+        <RailPanel title={t("web.admin.plugins.rail.process")}>
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-[13.5px]">
-            <Fact label="State">{RUNTIME_STATE_LABELS[runtime.state] ?? runtime.state}</Fact>
-            <Fact label="Restarts">{runtime.restart_count}</Fact>
+            <Fact label={t("web.admin.plugins.rail.state")}>
+              {stateLabel ? t(stateLabel) : runtime.state}
+            </Fact>
+            <Fact label={t("web.admin.plugins.rail.restarts")}>{runtime.restart_count}</Fact>
             {runtime.last_started_at ? (
-              <Fact label="Last started">{formatDateTime(runtime.last_started_at)}</Fact>
+              <Fact label={t("web.admin.plugins.rail.lastStarted")}>
+                {formatDateTime(runtime.last_started_at)}
+              </Fact>
             ) : null}
             {runtime.next_restart_at ? (
-              <Fact label="Next restart">{formatDateTime(runtime.next_restart_at)}</Fact>
+              <Fact label={t("web.admin.plugins.rail.nextRestart")}>
+                {formatDateTime(runtime.next_restart_at)}
+              </Fact>
             ) : null}
           </dl>
         </RailPanel>
       ) : null}
-      <RailPanel title="Details">
+      <RailPanel title={t("web.admin.plugins.rail.details")}>
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-[13.5px]">
-          <Fact label="Plugin ID">
+          <Fact label={t("web.admin.plugins.rail.pluginId")}>
             <span className="font-mono text-[12.5px]">{pluginID}</span>
           </Fact>
           {publisher ? (
-            <Fact label="Publisher">
+            <Fact label={t("web.admin.plugins.rail.publisher")}>
               {publisherURL ? (
                 <a
                   href={publisherURL}
@@ -361,20 +387,25 @@ export function PluginDetailRail({
               )}
             </Fact>
           ) : null}
-          <Fact label="Source">{sourceLabel(sourceKind)}</Fact>
-          {repositoryName && repositoryName !== sourceLabel(sourceKind) ? (
-            <Fact label="Repository">{repositoryName}</Fact>
+          <Fact label={t("web.admin.plugins.rail.source")}>{sourceLabel(tier)}</Fact>
+          {repositoryName && !MANAGED_TIERS.has(tier) ? (
+            <Fact label={t("web.admin.plugins.rail.repository")}>{repositoryName}</Fact>
           ) : null}
-          <Fact label="License">{licenseLabel(presentation?.license_spdx)}</Fact>
+          <Fact label={t("web.admin.plugins.rail.license")}>
+            {licenseLabel(presentation?.license_spdx)}
+          </Fact>
           {installation?.created_at ? (
-            <Fact label="Installed">{formatDate(installation.created_at, "medium")}</Fact>
+            <Fact label={t("web.admin.plugins.rail.installed")}>
+              {formatDate(installation.created_at, "medium")}
+            </Fact>
           ) : null}
         </dl>
         {links.length > 0 ? (
           <div className="mt-3.5 flex flex-wrap gap-x-4 gap-y-1.5 text-[13.5px]">
-            {links.map((link) => (
+            {/* Fixed order (source, changelog, support), so the index is a stable key. */}
+            {links.map((link, index) => (
               <a
-                key={link.label}
+                key={index}
                 href={link.url}
                 target="_blank"
                 rel="noopener noreferrer"

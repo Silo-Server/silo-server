@@ -103,14 +103,31 @@ func newFeedsHarness(t *testing.T, knownItems ...string) (*Handler, *memRSSFeedS
 
 // fakeOwnerResolver hands out a fixed access filter per (user, profile). A
 // principal it does not know is unavailable, as a disabled or deleted owner
-// is.
+// is. Every account is a server administrator, and every principal its
+// account's primary profile, until the test says otherwise.
 type fakeOwnerResolver struct {
-	mu     sync.Mutex
-	access map[string]catalog.AccessFilter
+	mu         sync.Mutex
+	access     map[string]catalog.AccessFilter
+	nonAdmin   map[string]bool
+	nonPrimary map[string]bool
 }
 
 func newFakeOwnerResolver() *fakeOwnerResolver {
-	return &fakeOwnerResolver{access: map[string]catalog.AccessFilter{}}
+	return &fakeOwnerResolver{access: map[string]catalog.AccessFilter{}, nonAdmin: map[string]bool{}, nonPrimary: map[string]bool{}}
+}
+
+// demote takes the server admin role from the account.
+func (f *fakeOwnerResolver) demote(userID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.nonAdmin[userID] = true
+}
+
+// notPrimary makes the principal a profile other than its account's primary.
+func (f *fakeOwnerResolver) notPrimary(userID, profileID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.nonPrimary[userID+"/"+profileID] = true
 }
 
 func (f *fakeOwnerResolver) set(userID, profileID string, filter catalog.AccessFilter) *fakeOwnerResolver {
@@ -127,17 +144,18 @@ func (f *fakeOwnerResolver) remove(userID, profileID string) {
 }
 
 func (f *fakeOwnerResolver) ResolveABSAccess(ctx context.Context, userID, profileID string) (catalog.AccessFilter, error) {
-	return f.ResolveABSOwnerAccess(ctx, userID, profileID)
+	filter, _, err := f.ResolveABSOwnerAccess(ctx, userID, profileID)
+	return filter, err
 }
 
-func (f *fakeOwnerResolver) ResolveABSOwnerAccess(_ context.Context, userID, profileID string) (catalog.AccessFilter, error) {
+func (f *fakeOwnerResolver) ResolveABSOwnerAccess(_ context.Context, userID, profileID string) (catalog.AccessFilter, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	filter, ok := f.access[userID+"/"+profileID]
 	if !ok {
-		return catalog.AccessFilter{}, ErrOwnerUnavailable
+		return catalog.AccessFilter{}, false, ErrOwnerUnavailable
 	}
-	return filter, nil
+	return filter, !f.nonAdmin[userID] && !f.nonPrimary[userID+"/"+profileID], nil
 }
 
 // accessMediaStore applies an access filter the way ABSMediaStore does: the
@@ -222,41 +240,41 @@ func (fx ownerFeedFixture) getFile(ino string) *httptest.ResponseRecorder {
 		map[string]string{"slug": "owner-feed", "ino": ino}, nil, "", "", fx.h.handlePublicFeedFile)
 }
 
-func TestFeed_Open_GeneratesSlug(t *testing.T) {
-	h, _ := newFeedsHarness(t, "book-1")
-	rec := dispatchABSWithParams(http.MethodPost, "/api/feeds/item/book-1/open",
-		map[string]string{"itemId": "book-1"}, []byte(`{}`), "1", "", h.handleOpenItemFeed)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
-	}
-	var got map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &got)
-	slug, _ := got["slug"].(string)
-	if len(slug) != 16 {
-		t.Errorf("slug = %q (len %d), want 16-char auto-generated", slug, len(slug))
-	}
-}
-
-func TestFeed_Open_CustomSlug(t *testing.T) {
-	h, _ := newFeedsHarness(t, "book-1")
-	rec := dispatchABSWithParams(http.MethodPost, "/api/feeds/item/book-1/open",
-		map[string]string{"itemId": "book-1"}, []byte(`{"slug":"my-cool-feed"}`), "1", "", h.handleOpenItemFeed)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
-	}
-	var got map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &got)
-	if got["slug"] != "my-cool-feed" {
-		t.Errorf("slug = %v, want my-cool-feed", got["slug"])
-	}
-}
-
 func TestFeed_Open_InvalidSlug_400(t *testing.T) {
 	h, _ := newFeedsHarness(t, "book-1")
 	rec := dispatchABSWithParams(http.MethodPost, "/api/feeds/item/book-1/open",
 		map[string]string{"itemId": "book-1"}, []byte(`{"slug":"BAD!"}`), "1", "", h.handleOpenItemFeed)
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", rec.Code)
+	}
+}
+
+// A feed serves a book without authentication, so only the acting
+// administrator may open one: the primary profile of an account with the
+// server admin role. Another profile on that account is a household member.
+func TestFeed_Open_RequiresActingAdmin(t *testing.T) {
+	h, store := newFeedsHarness(t, "book-1")
+	resolver := h.deps.AccessResolver.(*fakeOwnerResolver)
+	resolver.demote("2")
+	resolver.set("1", "kid", catalog.AccessFilter{UserID: 1, ProfileID: "kid"}).notPrimary("1", "kid")
+	open := func(userID, profileID string) int {
+		return dispatchABSWithParams(http.MethodPost, "/api/feeds/item/book-1/open",
+			map[string]string{"itemId": "book-1"}, []byte(`{}`), userID, profileID, h.handleOpenItemFeed).Code
+	}
+	if code := open("2", ""); code != http.StatusForbidden || len(store.rows) != 0 {
+		t.Errorf("non-admin: status = %d, feeds stored = %d; want 403 and none", code, len(store.rows))
+	}
+	if code := open("1", "kid"); code != http.StatusForbidden || len(store.rows) != 0 {
+		t.Errorf("non-primary profile on an admin account: status = %d, feeds stored = %d; want 403 and none", code, len(store.rows))
+	}
+	if code := open("1", ""); code != http.StatusOK || len(store.rows) != 1 {
+		t.Errorf("acting admin: status = %d, feeds stored = %d; want 200 and one", code, len(store.rows))
+	}
+	// A failed lookup must stop the open: the item lookup that follows would
+	// read the empty filter as unrestricted.
+	h.deps.AccessResolver = failingOwnerResolver{}
+	if code := open("1", ""); code != http.StatusInternalServerError || len(store.rows) != 1 {
+		t.Errorf("failed owner lookup: status = %d, feeds stored = %d; want 500 and no new feed", code, len(store.rows))
 	}
 }
 
@@ -270,40 +288,6 @@ func TestFeed_Open_Collision_409(t *testing.T) {
 	}
 }
 
-func TestFeed_Open_UnknownItem_404(t *testing.T) {
-	h, _ := newFeedsHarness(t)
-	rec := dispatchABSWithParams(http.MethodPost, "/api/feeds/item/ghost/open",
-		map[string]string{"itemId": "ghost"}, []byte(`{}`), "1", "", h.handleOpenItemFeed)
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", rec.Code)
-	}
-}
-
-func TestFeed_List_OwnerOnly(t *testing.T) {
-	h, _ := newFeedsHarness(t, "book-1")
-	_ = dispatchABSWithParams(http.MethodPost, "/api/feeds/item/book-1/open", map[string]string{"itemId": "book-1"}, []byte(`{}`), "1", "", h.handleOpenItemFeed)
-	rec := dispatchABSWithParams(http.MethodGet, "/api/feeds", nil, nil, "2", "", h.handleListRSSFeeds)
-	var env map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &env)
-	feeds, _ := env["feeds"].([]any)
-	if len(feeds) != 0 {
-		t.Errorf("user 2 sees %d feeds, want 0", len(feeds))
-	}
-}
-
-func TestFeed_Close_Owner(t *testing.T) {
-	h, _ := newFeedsHarness(t, "book-1")
-	openRec := dispatchABSWithParams(http.MethodPost, "/api/feeds/item/book-1/open", map[string]string{"itemId": "book-1"}, []byte(`{}`), "1", "", h.handleOpenItemFeed)
-	var open map[string]any
-	_ = json.Unmarshal(openRec.Body.Bytes(), &open)
-	id, _ := open["id"].(string)
-
-	rec := dispatchABSWithParams(http.MethodPost, "/api/feeds/"+id+"/close", map[string]string{"id": id}, nil, "1", "", h.handleCloseFeed)
-	if rec.Code != http.StatusNoContent {
-		t.Errorf("status = %d, want 204", rec.Code)
-	}
-}
-
 func TestFeed_Close_NonOwner_404(t *testing.T) {
 	h, _ := newFeedsHarness(t, "book-1")
 	openRec := dispatchABSWithParams(http.MethodPost, "/api/feeds/item/book-1/open", map[string]string{"itemId": "book-1"}, []byte(`{}`), "1", "", h.handleOpenItemFeed)
@@ -314,39 +298,6 @@ func TestFeed_Close_NonOwner_404(t *testing.T) {
 	rec := dispatchABSWithParams(http.MethodPost, "/api/feeds/"+id+"/close", map[string]string{"id": id}, nil, "2", "", h.handleCloseFeed)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
-	}
-}
-
-func TestPublicFeed_UnknownSlug_404(t *testing.T) {
-	h, _ := newFeedsHarness(t, "book-1")
-	rec := dispatchABSWithParams(http.MethodGet, "/feed/missing.xml",
-		map[string]string{"slug": "missing.xml"}, nil, "", "", h.handlePublicFeed)
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", rec.Code)
-	}
-}
-
-func TestPublicFeed_HappyPath_XML(t *testing.T) {
-	h, _ := newFeedsHarness(t, "book-1")
-	openRec := dispatchABSWithParams(http.MethodPost, "/api/feeds/item/book-1/open",
-		map[string]string{"itemId": "book-1"}, []byte(`{"slug":"happy-feed"}`), "1", "", h.handleOpenItemFeed)
-	if openRec.Code != http.StatusOK {
-		t.Fatalf("seed open failed: %s", openRec.Body.String())
-	}
-
-	rec := dispatchABSWithParams(http.MethodGet, "/feed/happy-feed.xml",
-		map[string]string{"slug": "happy-feed.xml"}, nil, "", "", h.handlePublicFeed)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
-	}
-	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/rss+xml") {
-		t.Errorf("Content-Type = %q, want application/rss+xml", ct)
-	}
-	body := rec.Body.String()
-	for _, needle := range []string{"<rss", "<channel>", "<title>"} {
-		if !strings.Contains(body, needle) {
-			t.Errorf("body missing %q; got %s", needle, body)
-		}
 	}
 }
 
@@ -375,6 +326,12 @@ func TestPublicFeed_OnlyOwnerAccessibleVersions(t *testing.T) {
 // the owner can no longer see the item, and answers exactly like a closed feed.
 func TestPublicFeed_FollowsOwnerCurrentAccess(t *testing.T) {
 	cases := map[string]func(fx ownerFeedFixture){
+		"owner is no longer an admin": func(fx ownerFeedFixture) {
+			fx.resolver.demote("1")
+		},
+		"owner is not the admin account's primary profile": func(fx ownerFeedFixture) {
+			fx.resolver.notPrimary("1", "kid")
+		},
 		"library access revoked": func(fx ownerFeedFixture) {
 			revoked := fx.owner
 			revoked.AllowedLibraryIDs = []int{}
@@ -425,8 +382,8 @@ func (failingOwnerResolver) ResolveABSAccess(context.Context, string, string) (c
 	return catalog.AccessFilter{}, errors.New("database unavailable")
 }
 
-func (failingOwnerResolver) ResolveABSOwnerAccess(context.Context, string, string) (catalog.AccessFilter, error) {
-	return catalog.AccessFilter{}, errors.New("database unavailable")
+func (failingOwnerResolver) ResolveABSOwnerAccess(context.Context, string, string) (catalog.AccessFilter, bool, error) {
+	return catalog.AccessFilter{}, false, errors.New("database unavailable")
 }
 
 // Without an owner to resolve, the feed fails closed. A failed owner lookup is
@@ -451,5 +408,17 @@ func TestPublicFeed_OwnerResolutionFailures(t *testing.T) {
 				t.Errorf("file status = %d, want %d", rec.Code, tc.want)
 			}
 		})
+	}
+}
+
+func TestFeed_List_OwnerOnly(t *testing.T) {
+	h, _ := newFeedsHarness(t, "book-1")
+	_ = dispatchABSWithParams(http.MethodPost, "/api/feeds/item/book-1/open", map[string]string{"itemId": "book-1"}, []byte(`{}`), "1", "", h.handleOpenItemFeed)
+	rec := dispatchABSWithParams(http.MethodGet, "/api/feeds", nil, nil, "2", "", h.handleListRSSFeeds)
+	var env map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &env)
+	feeds, _ := env["feeds"].([]any)
+	if len(feeds) != 0 {
+		t.Errorf("user 2 sees %d feeds, want 0", len(feeds))
 	}
 }

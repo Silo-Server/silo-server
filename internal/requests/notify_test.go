@@ -6,14 +6,6 @@ import (
 	"testing"
 )
 
-type fakeNotifier struct {
-	requestIDs []string
-	contentIDs []string
-	followers  [][]Follower
-	announced  []string
-	err        error
-}
-
 type recordedApproval struct {
 	requestID string
 	origin    ApprovalOrigin
@@ -35,20 +27,6 @@ func (n *recordingLifecycleNotifier) RequestApproved(_ context.Context, req Requ
 
 func (n *recordingLifecycleNotifier) RequestDeclined(_ context.Context, req Request) {
 	n.declined = append(n.declined, req.ID)
-}
-
-func (f *fakeNotifier) AnnounceFulfilled(_ context.Context, req Request) {
-	f.announced = append(f.announced, req.ID)
-}
-
-func (f *fakeNotifier) NotifyFulfilled(_ context.Context, req Request, contentID string) error {
-	if f.err != nil {
-		return f.err
-	}
-	f.requestIDs = append(f.requestIDs, req.ID)
-	f.contentIDs = append(f.contentIDs, contentID)
-	f.followers = append(f.followers, req.Followers)
-	return nil
 }
 
 func TestCreateRequestAutoApprovalReportsPolicyOrigin(t *testing.T) {
@@ -104,6 +82,28 @@ func TestApproveReportsAdminOrigin(t *testing.T) {
 	if !reflect.DeepEqual(recorder.approved, want) {
 		t.Fatalf("approved notifications = %+v, want %+v", recorder.approved, want)
 	}
+}
+
+type fakeNotifier struct {
+	requestIDs []string
+	contentIDs []string
+	followers  [][]Follower
+	announced  []string
+	err        error
+}
+
+func (f *fakeNotifier) AnnounceFulfilled(_ context.Context, req Request) {
+	f.announced = append(f.announced, req.ID)
+}
+
+func (f *fakeNotifier) NotifyFulfilled(_ context.Context, req Request, contentID string) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.requestIDs = append(f.requestIDs, req.ID)
+	f.contentIDs = append(f.contentIDs, contentID)
+	f.followers = append(f.followers, req.Followers)
+	return nil
 }
 
 func completedRequestFixture(id string, tmdbID int) *Request {

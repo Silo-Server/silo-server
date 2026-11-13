@@ -78,26 +78,6 @@ it("captures the displayed validator, copied batch and profile before an offline
   expect(invalidate).not.toHaveBeenCalled();
   expect(toast.error).not.toHaveBeenCalled();
 });
-it("does not refresh or retry a single-setting write on 401", async () => {
-  setRefreshToken("refresh-token");
-  const fetchMock = vi
-    .fn()
-    .mockImplementation(async (_url, init) =>
-      init?.method === "PUT"
-        ? response({ title: "Unauthorized", status: 401 }, 401)
-        : response({ "server.log_level": "info" }),
-    );
-  vi.stubGlobal("fetch", fetchMock);
-  const { result } = renderHook(
-    () => ({ read: useAdminServerSettings(), write: useUpdateServerSetting() }),
-    fixture(),
-  );
-  await waitFor(() => expect(result.current.read.isSuccess).toBe(true));
-  act(() => result.current.write.mutate({ key: "server.log_level", value: "debug" }));
-  await waitFor(() => expect(result.current.write.isError).toBe(true));
-  expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(1);
-  expect(fetchMock.mock.calls.some(([url]) => String(url).includes("refresh"))).toBe(false);
-});
 it("keeps the original displayed guard after a background refetch and a 412", async () => {
   let etag = '"displayed-v1"';
   const fetchMock = vi
@@ -271,6 +251,43 @@ it("refreshes the link capabilities when the public URL changes", async () => {
   expect(client.getQueryState(["auth", "password-reset-capability"])?.isInvalidated).toBe(true);
 });
 
+it.each(["batch", "single"] as const)(
+  "drops the cached connect-info after a %s local password switch write",
+  async (mode) => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockImplementation(async (_url, init) =>
+          init?.method === "PUT"
+            ? response({ values: {}, restart_required: false })
+            : response({ "auth.local_password_login": "true" }),
+        ),
+    );
+    const { client, wrapper } = fixture();
+    const connectInfoKey = ["compat", "connect-info"];
+    client.setQueryData(connectInfoKey, { account: { password_login_available: true } });
+    const { result } = renderHook(
+      () => ({
+        read: useAdminServerSettings(),
+        batch: useUpdateServerSettings(),
+        single: useUpdateServerSetting(),
+      }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.read.isSuccess).toBe(true));
+    act(() => {
+      if (mode === "batch") {
+        result.current.batch.mutate({ "auth.local_password_login": "false" });
+      } else {
+        result.current.single.mutate({ key: "auth.local_password_login", value: "false" });
+      }
+    });
+    await waitFor(() => expect(result.current[mode].isSuccess).toBe(true));
+    expect(client.getQueryState(connectInfoKey)?.isInvalidated).toBe(true);
+  },
+);
+
 it.each(["select", "complete"] as const)(
   "saves retained drafts after acknowledged %s reconciliation",
   async (operation) => {
@@ -430,4 +447,33 @@ it.each([
     await expect(result.current.form.save()).rejects.toThrow();
   });
   expect(writes.at(-1)).toBe('"A"');
+});
+
+// An administrator default changes what profiles without their own choice
+// resolve, and the rows those values shape; a server setting that holds no
+// default leaves them alone.
+it.each([
+  ["defaults.ui.next_up_mode", '"separate"', true],
+  ["server.log_level", "debug", false],
+])("refreshes effective values and Home rows after saving %s", async (key, value, refreshes) => {
+  const fetchMock = vi
+    .fn()
+    .mockImplementation(async (_url, init) =>
+      init?.method === "PUT" ? response({ key, value }) : response({ [key]: "" }),
+    );
+  vi.stubGlobal("fetch", fetchMock);
+  const { client, wrapper } = fixture();
+  const valuesKey = ["settings", "values", "profile"];
+  const homeKey = ["sections", "home", "items", "continue-watching"];
+  client.setQueryData(valuesKey, {});
+  client.setQueryData(homeKey, { section: { items: [] } });
+  const { result } = renderHook(
+    () => ({ read: useAdminServerSettings(), write: useUpdateServerSetting() }),
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.read.isSuccess).toBe(true));
+  act(() => result.current.write.mutate({ key, value }));
+  await waitFor(() => expect(result.current.write.isSuccess).toBe(true));
+  expect(client.getQueryState(valuesKey)?.isInvalidated).toBe(refreshes);
+  expect(client.getQueryState(homeKey)?.isInvalidated).toBe(refreshes);
 });

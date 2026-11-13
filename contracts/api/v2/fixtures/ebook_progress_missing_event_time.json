@@ -2,8 +2,8 @@
   "type": "https://siloserver.org/docs/api/v2/problems/validation_failed",
   "title": "Validation failed",
   "status": 422,
-  "detail": "The request did not pass validation; see errors.",
-  "instance": "urn:silo:request:00000000000000000000022e",
+  "detail": "expected required property updated_at to be present",
+  "instance": "urn:silo:request:000000000000000000000233",
   "errors": [
     {
       "location": "body.updated_at",

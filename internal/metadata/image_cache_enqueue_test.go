@@ -22,114 +22,57 @@ func (r *recordingImageCacheJobEnqueuer) EnqueueBatch(_ context.Context, inputs 
 	return len(inputs), nil
 }
 
-func TestPreserveCachedArtworkKeepsCachedPathWhenSourceMatches(t *testing.T) {
-	path, thumb, source := preserveCachedArtwork(
-		"tvdb://banners/episodes/1.jpg",
-		"",
-		"tvdb/series/1/seasons/1/episodes/1/still/original.webp",
-		"tvdb://banners/episodes/1.jpg",
-		"thumb", true)
-
-	if path != "tvdb/series/1/seasons/1/episodes/1/still/original.webp" {
-		t.Fatalf("path = %q", path)
-	}
-	if thumb != "thumb" {
-		t.Fatalf("thumb = %q", thumb)
-	}
-	if source != "tvdb://banners/episodes/1.jpg" {
-		t.Fatalf("source = %q", source)
-	}
-}
-
-// With caching off and the artwork unlocked (keepStored false), a provider
-// path replaces a stored copy; with nothing offered the slot keeps it.
-func TestPreserveCachedArtworkReleasesStoredCopyWhenNotKept(t *testing.T) {
+// A slot keeps serving its cached copy while a new source waits for its cache
+// job. A file:// source never lands in the served path. With caching off and
+// the artwork unlocked (keepStored false), a provider path replaces a stored
+// copy; with nothing offered the slot keeps it.
+func TestPreserveCachedArtwork(t *testing.T) {
 	const stored = "tvdb/series/1/seasons/1/episodes/1/still/original.webp"
-	path, thumb, source := preserveCachedArtwork("tvdb://banners/episodes/2.jpg", "new", stored, "tvdb://banners/episodes/1.jpg", "old", false)
-	if path != "tvdb://banners/episodes/2.jpg" || thumb != "new" || source != path {
-		t.Fatalf("got %q/%q/%q, want the provider path served", path, thumb, source)
-	}
-	path, thumb, source = preserveCachedArtwork("", "", stored, "file:///m/thumb.jpg", "old", false)
-	if path != stored || thumb != "old" || source != "file:///m/thumb.jpg" {
-		t.Fatalf("got %q/%q/%q, want the stored copy kept when nothing is offered", path, thumb, source)
-	}
-}
-
-func TestPersistSeasonsAndEpisodesPersistsSourceBeforeEnqueue(t *testing.T) {
-	const seriesID = "series-tvdb-123"
-	service, _, seasonRepo, episodeRepo := newSeasonEpisodeServiceForTest(seriesID)
-	enqueuer := &recordingImageCacheJobEnqueuer{}
-	service.SetAutoCacheImages(true)
-	service.SetImageCacheJobEnqueuer(enqueuer)
-
-	series := &models.MediaItem{
-		ContentID: seriesID,
-		Type:      "series",
-		TvdbID:    "123",
-	}
-	service.persistSeasonsAndEpisodes(
-		context.Background(),
-		series,
-		map[string]string{"tvdb": "123"},
-		"en",
-		"en",
-		[]SeasonResult{{
-			SeasonNumber: 1,
-			Title:        "Season 1",
-			PosterPath:   "tvdb://banners/seasons/1.jpg",
-		}},
-		[]EpisodeResult{{
-			ProviderIDs:    map[string]string{"tvdb": "ep-1"},
-			SeasonNumber:   1,
-			EpisodeNumber:  1,
-			Title:          "Pilot",
-			StillPath:      "tvdb://banners/episodes/1.jpg",
-			StillThumbhash: "provider-thumb",
-		}},
-		MergeFillEmpty,
-	)
-
-	season := seasonRepo.seasons[seasonKey(seriesID, 1)]
-	if season == nil {
-		t.Fatal("season was not persisted")
-	}
-	if season.PosterSourcePath != "tvdb://banners/seasons/1.jpg" {
-		t.Fatalf("season source = %q", season.PosterSourcePath)
-	}
-	episode := episodeRepo.episodes[episodeKey(seriesID, 1, 1)]
-	if episode == nil {
-		t.Fatal("episode was not persisted")
-	}
-	if episode.StillSourcePath != "tvdb://banners/episodes/1.jpg" {
-		t.Fatalf("episode source = %q", episode.StillSourcePath)
-	}
-	if len(enqueuer.inputs) != 2 {
-		t.Fatalf("queued jobs = %d, want 2", len(enqueuer.inputs))
-	}
-	if enqueuer.inputs[0].TargetContentID != season.ContentID {
-		t.Fatalf("season job target = %q, want %q", enqueuer.inputs[0].TargetContentID, season.ContentID)
-	}
-	if enqueuer.inputs[1].TargetContentID != episode.ContentID {
-		t.Fatalf("episode job target = %q, want %q", enqueuer.inputs[1].TargetContentID, episode.ContentID)
-	}
-}
-
-func TestPreserveCachedArtworkRecordsNewProviderSource(t *testing.T) {
-	path, thumb, source := preserveCachedArtwork(
-		"tvdb://banners/episodes/new.jpg",
-		"",
-		"tvdb/series/1/seasons/1/episodes/1/still/original.webp",
-		"tvdb://banners/episodes/old.jpg",
-		"old-thumb", true)
-
-	if path != "tvdb/series/1/seasons/1/episodes/1/still/original.webp" {
-		t.Fatalf("cached path should remain visible until worker succeeds, got %q", path)
-	}
-	if thumb != "old-thumb" {
-		t.Fatalf("thumb = %q", thumb)
-	}
-	if source != "tvdb://banners/episodes/new.jpg" {
-		t.Fatalf("source = %q", source)
+	for _, tc := range []struct {
+		name                                               string
+		path, thumb, storedPath, storedSource, storedThumb string
+		keepStored                                         bool
+		wantPath, wantThumb, wantSource                    string
+	}{
+		{
+			name: "cached path kept when the source matches",
+			path: "tvdb://banners/episodes/1.jpg", storedPath: stored, storedSource: "tvdb://banners/episodes/1.jpg", storedThumb: "thumb", keepStored: true,
+			wantPath: stored, wantThumb: "thumb", wantSource: "tvdb://banners/episodes/1.jpg",
+		},
+		{
+			name: "new provider source recorded, cached path visible until the worker succeeds",
+			path: "tvdb://banners/episodes/new.jpg", storedPath: stored, storedSource: "tvdb://banners/episodes/old.jpg", storedThumb: "old-thumb", keepStored: true,
+			wantPath: stored, wantThumb: "old-thumb", wantSource: "tvdb://banners/episodes/new.jpg",
+		},
+		{
+			name: "provider path replaces a stored copy not kept",
+			path: "tvdb://banners/episodes/2.jpg", thumb: "new", storedPath: stored, storedSource: "tvdb://banners/episodes/1.jpg", storedThumb: "old",
+			wantPath: "tvdb://banners/episodes/2.jpg", wantThumb: "new", wantSource: "tvdb://banners/episodes/2.jpg",
+		},
+		{
+			name:       "stored copy not kept stays when nothing is offered",
+			storedPath: stored, storedSource: "file:///m/thumb.jpg", storedThumb: "old",
+			wantPath: stored, wantThumb: "old", wantSource: "file:///m/thumb.jpg",
+		},
+		{
+			// The pre-cache window keeps the path empty until the cache job completes.
+			name: "local source with no prior cached art",
+			path: "file:///media/movies/Film/poster.jpg", keepStored: true,
+			wantSource: "file:///media/movies/Film/poster.jpg",
+		},
+		{
+			name: "prior cached art keeps serving while a local source waits",
+			path: "file:///media/movies/Film/poster.jpg", storedPath: "tmdb/movies/550/poster/original.webp",
+			storedSource: "https://image.tmdb.org/a.jpg", storedThumb: "th", keepStored: true,
+			wantPath: "tmdb/movies/550/poster/original.webp", wantThumb: "th", wantSource: "file:///media/movies/Film/poster.jpg",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path, thumb, source := preserveCachedArtwork(tc.path, tc.thumb, tc.storedPath, tc.storedSource, tc.storedThumb, tc.keepStored)
+			if path != tc.wantPath || thumb != tc.wantThumb || source != tc.wantSource {
+				t.Fatalf("got %q/%q/%q, want %q/%q/%q", path, thumb, source, tc.wantPath, tc.wantThumb, tc.wantSource)
+			}
+		})
 	}
 }
 
@@ -341,4 +284,68 @@ func TestEnqueueLocalizedArtworkRequeuesOnlyWithoutACachedCopy(t *testing.T) {
 			}
 		}
 	})
+}
+
+// After an identify the item can be a different title, so its cached artwork
+// of another source must not keep standing in for the new title's artwork.
+// Ordinary refreshes, re-applying the same match and locked artwork keep the
+// cached copy.
+func TestPrepareItemImagesForQueueDropsPreviousTitleArtworkOnIdentify(t *testing.T) {
+	const (
+		oldCached = "tmdb/movies/438631/poster/original.old.webp"
+		oldSource = "tmdb://poster/old.jpg"
+		newSource = "tmdb://poster/new.jpg"
+	)
+	existing := func() *models.MediaItem {
+		return &models.MediaItem{PosterPath: oldCached, PosterSourcePath: oldSource, PosterThumbhash: "old-thumb"}
+	}
+	cases := []struct {
+		name       string
+		chosenPath string
+		identify   bool
+		wantPath   string
+		wantSource string
+	}{
+		{"identify to another title", newSource, true, newSource, newSource},
+		{"refresh with a new provider choice", newSource, false, oldCached, newSource},
+		{"identify to the same title", oldSource, true, oldCached, oldSource},
+		{"identify with locked artwork", oldCached, true, oldCached, oldSource},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			item := &models.MediaItem{PosterPath: tc.chosenPath}
+			prepareItemImagesForQueue(item, existing(), true, tc.identify)
+			if item.PosterPath != tc.wantPath || item.PosterSourcePath != tc.wantSource {
+				t.Fatalf("poster path, source = %q, %q; want %q, %q", item.PosterPath, item.PosterSourcePath, tc.wantPath, tc.wantSource)
+			}
+		})
+	}
+}
+
+// An identify in a library whose language is not the item's canonical one
+// writes only the localization row, so that row must not keep serving the
+// previous title's cached artwork either.
+func TestBuildItemLocalizationRecordDropsPreviousTitleArtworkOnIdentify(t *testing.T) {
+	existing := func() *models.MediaItemLocalization {
+		return &models.MediaItemLocalization{
+			ContentID:        "movie-1",
+			Language:         "de",
+			PosterPath:       "tmdb/movies/438631/poster/original.old.webp",
+			PosterSourcePath: "tmdb://poster/old.jpg",
+			PosterThumbhash:  "old-title-hash",
+		}
+	}
+	images := []RemoteImage{{ProviderID: "tmdb", URL: "tmdb://poster/new.jpg", Type: ImagePoster, Language: "de", Rating: 9}}
+
+	loc := buildItemLocalizationRecord(existing(), "movie-1", "de", "movie", &MetadataResult{}, &MetadataResult{}, images, MergeReplaceUnlocked, "de", "", false, true, true)
+	if loc.PosterPath != "tmdb://poster/new.jpg" || loc.PosterSourcePath != "tmdb://poster/new.jpg" {
+		t.Fatalf("identify localization poster = %q (source %q), want the new provider image", loc.PosterPath, loc.PosterSourcePath)
+	}
+	if loc.PosterThumbhash != "" {
+		t.Fatalf("identify localization thumbhash = %q, want the previous title's cleared", loc.PosterThumbhash)
+	}
+	loc = buildItemLocalizationRecord(existing(), "movie-1", "de", "movie", &MetadataResult{}, &MetadataResult{}, images, MergeReplaceUnlocked, "de", "", false, true, false)
+	if loc.PosterPath != "tmdb/movies/438631/poster/original.old.webp" {
+		t.Fatalf("refresh localization poster = %q, want the cached copy kept until the new one lands", loc.PosterPath)
+	}
 }

@@ -118,9 +118,12 @@ func (r *Runner) reaperLoop() {
 	}
 }
 
+// InterruptedMessage is the error message a reaped job is failed with.
+const InterruptedMessage = "interrupted by server restart"
+
 func (r *Runner) reapStaleJobs() {
 	before := time.Now().Add(-StaleJobThreshold)
-	n, err := r.store.ResetStaleJobs(context.WithoutCancel(r.baseCtx), before, "interrupted by server restart")
+	n, err := r.store.ResetStaleJobs(context.WithoutCancel(r.baseCtx), before, InterruptedMessage)
 	if err != nil {
 		r.logger.Warn("failed to reset stale jobs", "jobs", r.label, "error", err)
 		return
@@ -175,12 +178,12 @@ func (r *Runner) Dispatch(id int64, run func(ctx context.Context), onAbort func(
 				<-r.sem
 			}
 		}()
-		runCtx = context.WithValue(runCtx, slotKey{}, jobSlot)
+		jobCtx := context.WithValue(runCtx, slotKey{}, jobSlot)
 
 		// A terminal signal or local cancellation can race semaphore admission.
-		if runCtx.Err() != nil {
+		if jobCtx.Err() != nil {
 			if onAbort != nil {
-				onAbort(context.WithoutCancel(runCtx))
+				onAbort(context.WithoutCancel(jobCtx))
 			}
 			return
 		}
@@ -191,9 +194,9 @@ func (r *Runner) Dispatch(id int64, run func(ctx context.Context), onAbort func(
 		case "metadata translation":
 			workload = "metadata"
 		}
-		runCtx, observation := workmetrics.Start(runCtx, workload, queuedAt)
+		jobCtx, observation := workmetrics.Start(jobCtx, workload, queuedAt)
 		defer observation.Finish("unknown")
-		workmetrics.Do(runCtx, run)
+		workmetrics.Do(jobCtx, run)
 	}()
 }
 

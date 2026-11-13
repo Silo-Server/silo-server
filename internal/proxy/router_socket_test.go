@@ -34,11 +34,7 @@ const socketProxyMedia = "0123456789abcdefghijklmnopqrstuvwxyz"
 // bypass all of it.
 func newSocketProxyServer(t *testing.T, secret string, resolver *clientip.Resolver) *Server {
 	t.Helper()
-	w := nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{})
-	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = secret
-	w.SetConfigForTest(cfg)
-	srv := NewServer(w, nodesessions.NewTracker(nil, "http://proxy", "proxy", "proxy"))
+	srv := NewServer(testWatcher(secret), nodesessions.NewTracker(nil, "http://proxy", "proxy", "proxy"))
 	srv.SetClientIPResolver(resolver)
 	telemetryConfig := streamtelemetry.DefaultConfig("socket-proxy")
 	telemetryConfig.Enabled = true
@@ -48,9 +44,29 @@ func newSocketProxyServer(t *testing.T, secret string, resolver *clientip.Resolv
 	return srv
 }
 
+// testWatcher is a node config watcher whose config holds only the shared
+// secret; a test sets anything else through Config.
+func testWatcher(secret string) *nodeconfig.Watcher {
+	w := nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{})
+	cfg := &config.Config{}
+	cfg.Auth.JWTSecret = secret
+	w.SetConfigForTest(cfg)
+	return w
+}
+
+// signToken signs claims for a test request, failing the test on error.
+func signToken(t *testing.T, claims streamtoken.Claims, secret string, ttl time.Duration) string {
+	t.Helper()
+	token, err := streamtoken.Sign(claims, secret, ttl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
+}
+
 func socketProxyMediaToken(t *testing.T, secret, path string) string {
 	t.Helper()
-	token, err := streamtoken.Sign(streamtoken.Claims{
+	return signToken(t, streamtoken.Claims{
 		SessionID:   "socket-proxy-1",
 		MediaPath:   path,
 		PlayMethod:  "direct",
@@ -58,10 +74,6 @@ func socketProxyMediaToken(t *testing.T, secret, path string) string {
 		ProfileID:   "profile-1",
 		MediaFileID: 42,
 	}, secret, time.Minute)
-	if err != nil {
-		t.Fatalf("sign: %v", err)
-	}
-	return token
 }
 
 func writeSocketProxyMedia(t *testing.T) string {
@@ -183,10 +195,7 @@ func TestMountedProxyRouterAuthorizationAndTransfersOverSocket(t *testing.T) {
 			srv := newSocketProxyServer(t, secret, nil)
 			server := httptest.NewServer(srv.Handler())
 			t.Cleanup(server.Close)
-			token, err := streamtoken.Sign(test.claims, test.signingSecret, time.Minute)
-			if err != nil {
-				t.Fatal(err)
-			}
+			token := signToken(t, test.claims, test.signingSecret, time.Minute)
 			routePrefix := test.routePrefix
 			if routePrefix == "" {
 				routePrefix = "/downloads/file/"
@@ -351,7 +360,7 @@ func TestMountedProxyRouterRelaysToNode(t *testing.T) {
 	}))
 	t.Cleanup(node.Close)
 
-	token, err := streamtoken.Sign(streamtoken.Claims{
+	token := signToken(t, streamtoken.Claims{
 		SessionID:            "socket-relay-1",
 		PlayMethod:           "transcode",
 		TranscodeNode:        node.URL,
@@ -360,9 +369,6 @@ func TestMountedProxyRouterRelaysToNode(t *testing.T) {
 		ProfileID:            "profile-1",
 		MediaFileID:          42,
 	}, secret, time.Minute)
-	if err != nil {
-		t.Fatalf("sign: %v", err)
-	}
 
 	srv := newSocketProxyServer(t, secret, nil)
 	before := srv.egress.RateKbps()
@@ -407,10 +413,7 @@ func TestMountedProxyRouterRelaysProgressiveRemuxToTranscodeNode(t *testing.T) {
 		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
 		RoutingEgress: string(noderouting.EgressProxy), RoutingEgressNodeID: 11,
 	}
-	token, err := streamtoken.Sign(claims, secret, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
+	token := signToken(t, claims, secret, time.Minute)
 	srv := newSocketProxyServer(t, secret, nil)
 	srv.nodeRowID = func() (int, bool) { return 11, true }
 	server := httptest.NewServer(srv.Handler())

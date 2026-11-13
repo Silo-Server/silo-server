@@ -3,7 +3,7 @@ package apiv2
 import "net/http"
 
 func subtitleUploadFixtureCases() []fixtureCase {
-	file := fixtureMultipart("file", "synthetic.en.srt", "application/octet-stream", "synthetic subtitle")
+	file := fixtureMultipart("file", "synthetic.en.srt", "application/octet-stream", "1\r\n00:00:01,000 --> 00:00:02,000\r\nSynthetic line.\r\n")
 	fields := "--silo-fixture-boundary\r\nContent-Disposition: form-data; name=\"media_file_id\"\r\n\r\n42\r\n--silo-fixture-boundary\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\nen\r\n"
 	return []fixtureCase{
 		{name: "subtitle_upload", operationID: "uploadSubtitle", method: http.MethodPost, path: Prefix + "/subtitles/upload", body: fields + file, headers: with(viewerHeaders(), "Content-Type", fixtureMultipartType), schema: "#/components/schemas/SubtitleDownloadResult", scenario: "A bounded subtitle multipart upload returns public stored metadata with string IDs.", status: 200, assertHeaders: []string{"Content-Type", "Cache-Control"}},

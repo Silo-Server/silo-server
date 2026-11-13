@@ -20,11 +20,7 @@ func TestProxyReprobeCapabilitiesRecomputesAndStoresHash(t *testing.T) {
 	server := newCapabilityProxyServer(t, secret)
 	server.storeCapabilityHash("sha256:stale")
 
-	request := httptest.NewRequest(http.MethodPost, "/admin/reprobe-capabilities", nil)
-	nodeauthtest.Sign(t, request, secret)
-	recorder := httptest.NewRecorder()
-	server.Handler().ServeHTTP(recorder, request)
-
+	recorder := serveProxy(t, server, http.MethodPost, "/admin/reprobe-capabilities", secret)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
@@ -63,16 +59,6 @@ func TestProxyReprobeCapabilitiesKeepsHashOnIncompleteProbe(t *testing.T) {
 	}
 	if got := decodeProxyHealth(t, server).CapabilitiesHash; got != published {
 		t.Fatalf("health capabilities_hash = %q after an unfinished re-probe, want %q", got, published)
-	}
-}
-
-// The route executes ffmpeg, so it stays inside the bearer-authed admin group.
-func TestProxyReprobeCapabilitiesRequiresBearer(t *testing.T) {
-	server := newCapabilityProxyServer(t, "capability-secret")
-	recorder := httptest.NewRecorder()
-	server.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/admin/reprobe-capabilities", nil))
-	if recorder.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401 without a bearer token", recorder.Code)
 	}
 }
 

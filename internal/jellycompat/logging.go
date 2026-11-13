@@ -3,6 +3,8 @@ package jellycompat
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 )
@@ -74,6 +77,10 @@ func (w *statusResponseWriter) Unwrap() http.ResponseWriter {
 
 func requestLoggerMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, db := queryattr.StartRequest(r.Context())
+		if db != nil {
+			r = r.WithContext(ctx)
+		}
 		start := time.Now()
 		ww := &statusResponseWriter{ResponseWriter: w}
 
@@ -84,11 +91,13 @@ func requestLoggerMiddleware(next http.Handler) http.Handler {
 			routePattern = routeCtx.RoutePattern()
 		}
 
-		slog.InfoContext(r.Context(), "jellycompat request", "component", "jellycompat",
+		//nolint:goconst // slog keys, spelled out like every other request log line
+		attrs := []any{
+			"component", "jellycompat",
 			"request_id", middleware.GetReqID(r.Context()),
 			"method", r.Method,
-			"path", r.URL.Path,
-			"original_path", firstNonEmpty(originalPathFromContext(r.Context()), r.URL.Path),
+			"path", redactHLSPlaySessionID(r.URL.Path),
+			"original_path", redactHLSPlaySessionID(firstNonEmpty(originalPathFromContext(r.Context()), r.URL.Path)),
 			"query", logredact.SanitizeQuery(r.URL.RawQuery),
 			"route", routePattern,
 			"status", statusOrDefault(ww.status),
@@ -97,8 +106,47 @@ func requestLoggerMiddleware(next http.Handler) http.Handler {
 			"user_agent", r.UserAgent(),
 			"content_length", r.ContentLength,
 			"auth_kind", authKind(r),
-		)
+		}
+		attrs = append(attrs, db.LogAttrs()...)
+		// The path and query no longer name the play, so this is what ties a
+		// request to the other log lines about it.
+		if id := firstNonEmpty(newCaseInsensitiveQuery(r.URL.Query()).Get("PlaySessionId"), chi.URLParam(r, "playlistId")); id != "" {
+			attrs = append(attrs, "play_session_id", playSessionFingerprint(id))
+		}
+		slog.InfoContext(r.Context(), "jellycompat request", attrs...)
 	})
+}
+
+// redactHLSPlaySessionID masks the play session ID that HLS routes carry as
+// their {playlistId} segment: /Videos/{id}/hls/{playlistId}/... and the
+// variants with one more segment before "hls". The ID alone authorizes that
+// play's media requests, so it must not reach a log. Matching the path shape
+// rather than the matched route also covers a request the router refused,
+// such as a HEAD, and the client's own spelling of the path.
+func redactHLSPlaySessionID(path string) string {
+	segments := strings.Split(path, "/")
+	for i := 2; i+1 < len(segments); i++ {
+		if !strings.EqualFold(segments[i], compatHLSPathSegment) {
+			continue
+		}
+		if strings.EqualFold(segments[i-2], "Videos") || i >= 3 && strings.EqualFold(segments[i-3], "Videos") {
+			segments[i+1] = logredact.Placeholder
+			return strings.Join(segments, "/")
+		}
+	}
+	return path
+}
+
+// playSessionFingerprint is what log lines record instead of a play session
+// ID. The same ID always gives the same value, on every API server, so lines
+// about one play can still be matched up, but the value cannot be turned back
+// into the ID or used in its place.
+func playSessionFingerprint(id string) string {
+	if id == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(id))
+	return hex.EncodeToString(sum[:8])
 }
 
 func statusOrDefault(status int) int {
@@ -226,6 +274,10 @@ func newDebugLogMiddleware(logFile io.Writer, userAgentFilter string) func(http.
 
 			reqID := middleware.GetReqID(r.Context())
 			status := statusOrDefault(dw.status)
+			logURL := *r.URL
+			if masked := redactHLSPlaySessionID(logURL.Path); masked != logURL.Path {
+				logURL.Path, logURL.RawPath = masked, ""
+			}
 
 			mu.Lock()
 			defer mu.Unlock()
@@ -233,7 +285,7 @@ func newDebugLogMiddleware(logFile io.Writer, userAgentFilter string) func(http.
 			fmt.Fprintf(logFile, "=== %s %s %s [%s] %dms ===\n",
 				start.Format("2006/01/02 15:04:05"),
 				r.Method,
-				logredact.SanitizeRequestURL(r.URL.String()),
+				logredact.SanitizeRequestURL(logURL.String()),
 				reqID,
 				elapsed.Milliseconds(),
 			)

@@ -1,28 +1,28 @@
 # Authentication API
 
 > **API lifecycle:** this documents the stable `/api/v2` native contract, which locks with Silo
-> 1.0. The frozen alpha `/api/v1` surface carries the same auth routes through the pre-1.0 bridge
-> window, after which Silo answers the whole `/api/v1` namespace with `410 Gone` and the
-> `client_upgrade_required` problem code. See
-> [the native API contract](architecture/api-contract.md).
+> 1.0. See [the native API contract](architecture/api-contract.md).
 
 Commands assume the repository root is the cwd. Unprefixed paths are relative to the
 server's `/api/v2` base URL.
 
-The public v1 bridge routes that decode a JSON body before any credential is checked
-(`POST /api/v1/auth/login`, `/api/v1/auth/setup`, `/api/v1/auth/signup`,
-`/api/v1/auth/refresh`, `/api/v1/auth/device/start`, `/api/v1/auth/device/poll`,
-`/api/v1/auth/oauth/complete` and `/api/v1/invitations/{token}/accept`) read at most 1 MiB,
-the same as the v2 structured-body cap. When decoding the JSON value needs more than that,
-the route answers `413` without processing the request: `too_large` in the v1 error shape,
-or plain text on `/api/v1/auth/oauth/complete`. Only the first JSON value is decoded; data
-after it is ignored, not rejected.
+The public auth operations that decode a JSON body before any credential is checked
+(`login`, `setupServer`, `signup`, `refreshSession`, `startDeviceLogin`, `pollDeviceLogin`,
+`completeOAuthLogin` and `acceptInvitation`) follow the shared v2 body rules: a body over the
+1 MiB structured-body cap answers `413 payload_too_large`, and a non-blank body that is not
+`application/json` (optionally with `charset=utf-8`), including one with no `Content-Type`,
+answers `415 unsupported_media_type` before the operation runs.
+
+For `setupServer` the media-type rule is what stops a cross-site browser form or `no-cors`
+fetch from claiming the first administrator. A cross-origin JSON fetch requires a preflight,
+which the main API does not grant. Same-origin browser and native JSON setup keep the
+database-wide one-winner transaction. This does not add a setup secret or limit which
+networks may complete setup.
 
 ## Login sessions
 
 Login sessions belong to accounts and are separate from household profiles, registered
-devices and playback sessions. All paths below use `/api/v2`; the frozen v1 responses
-remain unchanged.
+devices and playback sessions. All paths below use `/api/v2`.
 
 | Operation | Authorization and behavior |
 | --- | --- |
@@ -48,9 +48,10 @@ device sign-ins, including temporary remote-playback approvals that would mint a
 login session. The same transaction revokes the account's Audiobookshelf-compatible
 sessions and deletes its stored Jellyfin-compatible sessions, as a password reset does;
 when any of it fails, nothing is revoked and the request fails. After commit, every node
-drops the Jellyfin-compatible sessions it holds in memory. A node that has not dropped them
-yet cannot write one back: extending a session or storing its refreshed tokens only updates
-an existing row, and ends the session when the row is gone. The response counts revoked
+drops the Jellyfin-compatible sessions it holds in memory. Each compatibility lookup
+also reads its stored row, so a missed eviction event cannot authorize a deleted session.
+Extending a session or storing its refreshed tokens only updates an existing row and
+ends the session when the row is gone. The response counts revoked
 live login sessions, not withdrawn approvals or
 compatibility sessions. Single-session revocation leaves other sessions and device approvals unchanged.
 Other accounts' own sessions remain usable. API keys are not login sessions and are not
@@ -92,18 +93,24 @@ never change an account password.
 Local passwords are bcrypt hashes. Setup, invited signup, and password changes share the same
 password policy. New passwords must contain at least 8 Unicode characters and be
 no more than 72 UTF-8 bytes, the bcrypt input limit. The caller must prove knowledge of the current
-password. Changing the password does not revoke existing login sessions; users can review and
-revoke those separately through the account sessions API.
+password. By default, changing the password does not revoke existing login sessions; users can
+review and revoke those separately through the account sessions API. The v2 operation can also
+sign the account out everywhere else in the same step; see
+[V2 password management](#v2-password-management).
 
 Accounts whose local password login is disabled keep their credential at the external provider and
 cannot use this flow. An administrator can also make a password temporary or issue a reset link;
 see [temporary passwords](#temporary-passwords) and [password reset links](#password-reset-links).
 
-### `GET /auth/account/capability`
+The next two routes are the frozen `/api/v1` bridge. The v2 operations are under
+[V2 password management](#v2-password-management).
+
+### `GET /api/v1/auth/account/capability` (frozen bridge)
 
 Requires an authenticated access-token session. When the request names an active profile, normal
-profile and PIN verification applies. Clients should read this endpoint rather than infer support
-from a server version.
+profile and PIN verification applies. Clients should read this endpoint, or
+`GET /api/v2/account/password/capability` on v2, rather than infer support from a server
+version.
 
 ```json
 {
@@ -119,7 +126,7 @@ from a server version.
 local password login enabled. The remaining fields describe the server contract even when it is
 false.
 
-### `POST /auth/account/password`
+### `POST /api/v1/auth/account/password` (frozen bridge)
 
 Requires the same authenticated profile authority as the capability endpoint. The request is
 rate-limited separately from login attempts.
@@ -155,7 +162,19 @@ password-policy fields above. It supports ETag revalidation and uses
 and PIN verification, even when the account is an administrator.
 
 `POST /api/v2/account/password` accepts the same password body and returns 204.
-It spends the dedicated `password_change` rate-limit budget used by v1; exhausted
+An optional `sign_out_other_sessions` boolean (default `false`) also signs the
+account out everywhere except the calling session, in the transaction that
+replaces the password: its other login sessions, "View as user" sessions it
+opened or that view it, its Audiobookshelf-compatible sessions, its stored
+Jellyfin-compatible sessions, and the device sign-ins it approved that the
+device has not collected yet. This is what a password reset revokes, minus the
+caller's session. API keys survive. After commit, every node drops the
+Jellyfin-compatible sessions it holds in memory, as for account-wide admin
+revocation. `null` is not a value for it (`422 validation_failed`). The
+capability document's `sign_out_other_sessions` is true on servers that accept
+the member; older servers reject it as an unknown member with `422`, so clients
+send it only when the capability says so.
+It spends the dedicated `password_change` rate-limit budget; exhausted
 requests return `429 rate_limited` with `Retry-After`. Invalid password values
 return `422 validation_failed` naming the member. Disallowed account/profile
 authority returns `403 permission_denied`, and disabled local password login
@@ -177,8 +196,7 @@ Until the account chooses a new password, every session it opens may call only:
 - `POST /account/password`
 - `POST /auth/logout`
 
-Anything else returns `403 password_change_required` (v1: `403` with error code
-`password_change_required`). Refreshing is public and stays available. Such a
+Anything else returns `403 password_change_required`. Refreshing is public and stays available. Such a
 session may change the password without selecting a profile. The current
 (temporary) password is still required, and reusing it as the new password returns
 `422 validation_failed` at `body.new_password`.
@@ -252,8 +270,6 @@ same check (`internal/auth.ValidateEmail`): one bare mailbox, no display name
 or comments, and a domain containing a dot with text on both sides. A bare
 hostname such as `admin@siloserver` is refused with a `422 validation_failed`
 problem at `body.email`. The web client applies the same check before sending.
-The frozen `/api/v1` routes, and the v1-only per-profile notification address,
-keep their previous `net/mail` acceptance.
 
 ## Login sessions on v2
 
@@ -261,23 +277,27 @@ keep their previous `net/mail` acceptance.
 sessions on its other devices. Authentication is required; no active profile is needed.
 Expired and revoked sessions are excluded before pagination.
 
-The response uses the v2 collection envelope: `items` and `page`. Each item contains `id`,
-`device_name`, `ip_address`, `created_at`, and `expires_at`, plus `device_id` and
-`device_platform` when the client reported them. Timestamps use UTC with millisecond
+The response uses the v2 collection envelope, `items` and `page`, plus `current_session`. Each
+item contains `id`, `device_name`, `ip_address`, `created_at`, `expires_at`, `last_seen_at`,
+and `current`, plus `device_id` and `device_platform` when the client reported them.
+Timestamps use UTC with millisecond
 precision. There is no `revoked_at` member because every returned session is active.
 
 A session records the device that opened it. Every sign-in that opens a login session (password
 login, initial setup, signup, invitation acceptance, password-reset completion, OAuth completion,
-network sign-in, and device-code collection, on v1 and v2) reads the request's
+network sign-in, and device-code collection) reads the request's
 `X-Silo-Device-Id`, `X-Silo-Device-Name`, and `X-Silo-Device-Platform` headers, clamped like the
 settings device headers: name to 120 characters, platform to 40. An id longer than 128 characters
 or not made of letters, digits, `.`, `_`, `:` and `-` is dropped, and the sign-in still succeeds.
-On v2, a repeated header or an id with other characters is refused with `422 validation_failed`
-before the sign-in runs, as on every v2 operation; an id that is only too long is dropped. `device_name` is the
+A repeated header or an id with other characters is refused with `422 validation_failed`
+before the sign-in runs, as on every v2 operation, and each of these operations declares the three
+headers, so an id longer than 128 characters is refused with `422 validation_failed` too (an
+`out_of_range` error at `header.X-Silo-Device-Id`, as on the settings operations). Name and
+platform are declared without a limit and clamped, so a long name never refuses a sign-in. `device_name` is the
 reported name, else the `User-Agent`; a device-code sign-in falls back to the name the device
 started the request with, then its `User-Agent`, then `This device`. A name or platform that is
 not valid UTF-8 is dropped. These values are client-reported: they serve display and audit, and
-nothing authorizes on them. The v1 session list does not return the id or platform.
+nothing authorizes on them.
 
 - `limit` defaults to 50 and accepts 1 through 200.
 - Results are ordered by `created_at` descending, then `id` descending.
@@ -292,9 +312,7 @@ nothing authorizes on them. The v1 session list does not return the id or platfo
 
 The login-session step of the `database_maintenance` scheduled task deletes expired
 login-session rows daily at 05:00 by default. Revoked sessions remain stored until their
-expiry passes. The v1
-session-list response shape and query remain unchanged, but expired rows disappear from that
-listing once cleanup deletes them. Jellyfin-compatible clients check their login session on
+expiry passes. Jellyfin-compatible clients check their login session on
 every request too; cleanup removes only sessions that have already expired.
 
 ### Access tokens after a role change
@@ -302,8 +320,7 @@ every request too; cleanup removes only sessions that have already expired.
 An access token carries the account's role, and admin checks trust it. When an
 administrator changes the account's role, the login session stays valid, but every
 request that presents an access token minted before the change is refused with
-`401 token_refresh_required`. The v1 surface answers the same request with `401` and
-error code `unauthorized`, which v1 clients already treat as "refresh and retry".
+`401 token_refresh_required`.
 
 On `token_refresh_required` a client refreshes the session with its refresh token and
 retries the request once with the new access token, which carries the new role. It
@@ -317,8 +334,7 @@ refused; their requests run with the account's current role.
 Requests that pass the shared auth gate, media requests included, look up their login
 session (or API key) in the database. When that lookup fails, because the database is
 unreachable or the query errors, the server has not judged the credential and does not
-answer 401. It answers `503` with `Retry-After`: v2 `dependency_unavailable`, v1 error code
-`service_unavailable`. `POST /auth/refresh` (`refreshSession`) answers the same way when it
+answer 401. It answers `503 dependency_unavailable` with `Retry-After`. `POST /auth/refresh` (`refreshSession`) answers the same way when it
 cannot read the session or account. Whether the session is still valid is unknown, so a
 client keeps its tokens, waits `Retry-After` seconds and retries; it signs out only on a
 401. Viewer access answers the same `503`, with `Retry-After: 1`, when the policy that
@@ -345,11 +361,17 @@ stays signed in and retries.
 
 Operations that name a rate-limit budget (`login`, `setup`, `signup`, `invitation`,
 `password_reset`, the `device_*` budgets and the others above) spend one counter per
-budget wherever they run: v1 and v2, and for `login` and the device budgets the
-Jellyfin-compatible listener too. A budget counts per client IP. That is the address taken
-from `X-Forwarded-For` or `X-Real-IP` when the connection comes from a trusted proxy
-(`clientip.trusted_proxies`, every private range and loopback by default), otherwise the
-connection's own address.
+budget wherever they run: the native API, and for `login` and the device budgets the
+Jellyfin-compatible listener too. A budget counts per client address. That is the address
+taken from `X-Forwarded-For` or `X-Real-IP` when the connection comes from a trusted proxy
+(`clientip.trusted_proxies`; by default the RFC 1918 IPv4 ranges, `127.0.0.0/8` and
+`::1`), otherwise the
+connection's own address. A public IPv6 address counts by its /64, because one home line or
+server usually holds a whole /64; this applies to every per-address budget, including the
+per-address request budget of authenticated routes. Every other address counts on its own:
+IPv4, unique local and link-local IPv6 (which only come from the local network, like
+private IPv4 addresses), and the NAT64 addresses (`64:ff9b::/96` and the local-use `64:ff9b:1::/48`) that stand
+for IPv4 clients.
 
 When the client IP came from those headers, the request also spends a budget keyed on the
 connection's own address: ten times the per-client one, shared by every client behind that
@@ -358,15 +380,180 @@ Direct connections and requests through a network access provider, whose plugin 
 header itself, spend only the per-client budget. An exhausted budget answers 429 with
 `Retry-After`.
 
+### When the server is too busy to check a password
+
+Every bcrypt hash and comparison, for account passwords and profile PINs alike, runs
+under one limit per server process (`internal/auth/passwordhash`). At most half the
+process's processors hash at once (`GOMAXPROCS`, which follows a container CPU limit;
+at least one), and up to four requests per slot wait for a turn, for at most two
+seconds. A request beyond that is refused before its password or PIN is checked, so on
+a server with more than one processor a burst of sign-ins cannot take every core from
+playback and the rest of the API.
+
+The refusal is `503` with `Retry-After: 1`: native `dependency_unavailable`, Jellyfin
+`ServiceUnavailable`, and a plain `503` on the
+Audiobookshelf listener. It never answers as a wrong password, and every sign-in name
+gets the same answer whether or not it has an account. Password sign-in, password
+changes and resets, setup, signup, invitation acceptance, account creation and edits by
+an administrator, credential linking, and setting a profile PIN all answer this way;
+clients retry after the delay. A signup or invitation acceptance whose account was
+already created when its sign-in was refused answers as before (`500`, or
+`sign_in_required` from v2 invitation acceptance), since repeating it cannot succeed. A
+first OAuth sign-in that has to create the account fails with `login_failed`, and the
+person starts it again.
+
+A refused sign-in still spends an attempt of the name's budget, like any other failed
+one ([Sign-in attempts per name](#sign-in-attempts-per-name)).
+
+Profile PIN checks wait in a queue of their own that takes every other turn, so a burst
+of sign-ins does not keep a signed-in household from switching profiles; see
+[Profile PINs](#profile-pins). A Jellyfin or Audiobookshelf sign-in with `password#PIN`
+still checks the password first and can be refused with it.
+
+## Sign-in attempts per name
+
+Every password sign-in also spends a budget kept for the name it signs in with, however
+many addresses the attempts come from: native `login`, Jellyfin
+`POST /Users/AuthenticateByName`, Audiobookshelf `/login` (beta), and
+`linkAccountIdentityWithCredentials`, which spends the budget of the directory username
+it checks. Names are trimmed and compared without regard to case, as sign-in looks up
+accounts, so ` Alice` and `alice` share one budget; a username and the same account's
+email address are two names. A Jellyfin name with a `#`, such as `alice#Kids`, spends the
+budget of the part before the `#`, even when it signs in to an account whose own name
+contains the `#`, so the budget does not depend on which accounts exist. Such an account's
+native sign-ins spend the budget of its whole name, so it has two budgets. A name with no account has a budget like any other and is refused the same way, so
+the budget does not reveal which names exist.
+
+The limit is `ratelimit.SignInNamePolicy`: ten attempts per name. The first attempt
+starts a 15-minute window, and the tenth locks the name for 15 minutes from that attempt.
+While a name is locked every attempt is refused before any password is checked, the
+right password included. A successful sign-in while the name is not locked clears the
+count, and so does the right temporary password on a Jellyfin or Audiobookshelf sign-in,
+which is refused only because those apps cannot change it. Every other failure counts,
+including one caused by an unavailable directory or database, or by a server too busy to
+check the password ([`503`](#when-the-server-is-too-busy-to-check-a-password)). A count that never reaches
+ten expires 15 minutes after its first attempt. A Jellyfin or Audiobookshelf sign-in whose
+password ends in a `#PIN` part counts twice, whether or not the name has a local account,
+because it may check the password both with and without that part.
+Attempts are counted before the password is checked, so concurrent guesses cannot overrun
+the limit.
+
+A locked name answers 429 with `Retry-After` giving the seconds left:
+
+- Native: `rate_limited` problem, on `login` and `linkAccountIdentityWithCredentials`.
+- Jellyfin: `{"Error":"TooManyRequests",...}`, as for its other 429s.
+- Audiobookshelf: a plain-text 429.
+
+The count lives in Redis whenever the server has Redis configured, so every node and
+every listener share it, independent of `ratelimit.backend` and of whether request rate
+limiting is enabled. Only a server without Redis keeps it in process memory. A Redis
+error fails open and is logged; a request whose own context was canceled is refused.
+
+The lock is temporary, but anyone who knows a name can keep it locked by spending the
+budget every 15 minutes. While that lasts, the account's existing sessions keep working
+and refreshing, completing a password reset or an invitation signs in without spending
+the budget, and a signed-in device can approve a new one through device sign-in.
+
+## Authenticated account allowance
+
+Authenticated routes also spend one `account:<user_id>` budget, shared across the
+account's household profiles, login sessions, devices and API keys. Switching
+credentials or forwarding headers does not create a new account allowance. The native
+API and the Jellyfin-compatible listener share the counter. Distinct accounts
+behind one proxy have separate account allowances; existing source and global
+budgets still apply.
+
+The account budget is four times the per-address budget set by
+`ratelimit.ip.requests_per_second`, `ratelimit.ip.requests_per_minute` and
+`ratelimit.ip.burst`: with the defaults (120 per second, 6000 per minute, burst 120)
+an account gets 480 requests per second, 24000 per minute and burst 480. One login
+often spans several networks, and each address is already held to one per-address
+budget, so one busy address or integration can spend at most a quarter of its
+account. The admin UI labels these settings **Per address and account**. IP, API-key and account checks run before the global
+check, so a request rejected by a narrower budget does not consume global capacity.
+All applicable budgets must allow the request. Successful API-key response headers
+describe the key's tier budget; an account denial reports the exhausted account
+budget using the existing 429 response and `Retry-After`.
+
+Requests without an authenticated account do not spend an account allowance.
+Pre-authentication display-token lookup and public sign-in/device operations retain
+their source and global checks. With the memory backend, counters are per process;
+Redis shares them across instances. When Redis is unavailable each process counts
+its checks in its own memory, in the same second and minute windows Redis uses, so
+the limits keep holding per process instead of switching off. A check that fails, or
+gets no answer within a second, is counted locally, and that process then stops
+waiting on Redis: its checks count locally at once, and every five seconds one
+request is also counted in Redis in the background to find out whether Redis answers
+again. The failure that stops the waiting and each failed background count are
+logged. Checks that start before the first failure is noticed, up to a second after
+Redis stops answering, each wait up to a second. A check that fails only because its
+own request ended early does not count as Redis failing. Disabling rate limiting
+disables the account allowance too.
+
+## Session quota
+
+The per-second and per-minute budgets stop bursts, not volume: a client that stays
+just under them can still send hundreds of thousands of requests a day. Each login
+session therefore also spends a token bucket, keyed `session:<session_id>`, that holds
+`ratelimit.session.burst` requests (default 30000) and refills at
+`ratelimit.session.requests_per_hour` (default 10000). The burst must refill from
+empty within a week, so it can be at most 168 times the hourly rate. The admin UI
+labels these **Per sign-in session**.
+
+`ratelimit.session.mode` decides what happens when a bucket is empty:
+
+- `off` counts nothing.
+- `log` (the default) serves the request and logs `sign-in session over its hourly
+  request quota` with the account, session and user agent, once per session every ten
+  minutes.
+- `enforce` refuses the request with the usual 429 and a `Retry-After` for the next
+  token, and logs the same line.
+
+The quota counts native API requests made with a login session's access token. It
+does not count anything under `/api/v1/stream`, `/api/v2/stream`, `/api/v1/playback`
+or `/api/v2/playback`, so a player keeps reporting progress, replanning and stopping
+after its session runs out; the other media transfer routes (downloads, direct
+downloads, theme audio and ebook reads); `GET /api/v2/auth/provider-logout` and `POST /api/v2/auth/logout`, so a
+session that spent its quota can still sign out; API-key requests, which have their own tiers;
+admins; or requests made while impersonating. `ratelimit.QuotaExemptPathPattern`
+defines the exempt routes and must match every route in `internal/api`'s native media
+route list. The Jellyfin-compatible listener has its own sessions and is not counted.
+Buckets share the per-key limiter's backend. Redis keeps one bucket per session for
+every instance, timed by the Redis clock, and shares the window limiter's outage
+pause: while Redis is unavailable each process counts in its own bucket. Settings
+changes keep every bucket's balance; a bucket reads its size and rate on each
+request, and is dropped once even the slowest refill the settings allow would have
+filled it: a week after a drained bucket's last request, seconds after one a client
+barely used.
+
+The defaults come from production traffic. The busiest first-party sessions stayed
+under 20000 requests in any hour and rarely went above 10000, while a polling
+integration ran at about 30000 an hour around the clock. The burst lets a client
+sync a whole library in one sitting; the refill rate caps what it can sustain.
+
+`GET /api/v2/admin/stats/api-clients` lists the sessions with the most requests in a
+window, leaving out what the quota leaves out, with each session's 429 count. The
+hidden `summarize_api_usage` task summarizes the activity log into UTC hours every 15
+minutes and keeps them for 30 days. `GET /api/v2/admin/stats/api-clients/{session_id}/endpoints`
+lists the routes one session called in up to the last 24 hours. Both are admin-only;
+`api_clients` in
+`GET /api/v2/admin/dashboard/capabilities` advertises them.
+
 ## Profile PINs
 
-`POST /api/v2/profiles/{id}/verify-pin` (`verifyProfilePIN`) and v1
-`POST /api/v1/profiles/{id}/verify-pin` check a household profile's PIN. A match
+Profile creation stores a requested PIN hash in the same
+transaction as the profile and its preferences. The first committed profile
+state already requires PIN proof. Creation rejects PINs longer than 72 bytes
+before writing anything (422 `validation_failed`).
+Omitting the PIN still creates an unlocked profile.
+
+`POST /api/v2/profiles/{id}/verify-pin` (`verifyProfilePIN`) checks a household
+profile's PIN. A match
 issues the `X-Profile-Token` that unlocks the profile for the caller's login session; a
 wrong PIN answers 200 with `valid: false`.
 
 Each verification attempt affects the lockout counter. Clients must not
-automatically replay a check after a timeout; v2 declares `verifyProfilePIN` as
+automatically replay a check after a timeout; the contract declares `verifyProfilePIN` as
 `non_retryable` for this reason.
 
 Wrong PINs are limited per profile, not per client address, because anyone guessing
@@ -378,13 +565,12 @@ right PIN included, so the lockout cannot be bypassed by guessing on. A correct 
 while not locked clears the count, and so does setting or removing the profile's PIN.
 A count that never reaches five expires five minutes after its first attempt.
 Attempts are counted before the PIN is compared, so concurrent guesses cannot overrun
-the limit.
+the limit. The check then waits for a hashing turn in its own queue, ahead of
+sign-ins ([when the server is too busy](#when-the-server-is-too-busy-to-check-a-password)).
+When that queue is full or no turn comes within two seconds it answers that `503`, and
+the attempt counts like any other; clients still must not replay a check automatically.
 
-A locked check answers 429 with `Retry-After` giving the seconds left:
-
-- v2: `rate_limited` problem.
-- v1: `{"error":"rate_limited","message":"Too many incorrect PINs. Try again later."}`.
-  This is a v1 change made during the bridge window as a critical security fix.
+A locked check answers 429 `rate_limited` with `Retry-After` giving the seconds left.
 
 Jellyfin sign-ins that use the `password#PIN` convention count against the same
 per-profile budget. A locked profile fails there the way a wrong PIN does (401
@@ -407,7 +593,7 @@ authenticates.
 The count lives in Redis whenever the server has Redis configured, so every node
 shares it, independent of `ratelimit.backend` and of whether request rate limiting
 is enabled. Only a server without Redis keeps it in process memory, which is correct
-for a single node. Like the request limiter, a Redis error fails open and is logged;
+for a single node. A Redis error fails open and is logged;
 a request whose own context was canceled is refused instead, so dropping the
 connection does not buy an uncounted guess. Clients show the lockout from
 `Retry-After`, for example "Too many incorrect PINs. Try again in 5 minutes.",
@@ -421,12 +607,12 @@ it where they are signed in. Rules for codes, links and lifetimes are in
 
 | Operation | Credential | Notes |
 | --- | --- | --- |
-| `POST /auth/device/start` (`startDeviceLogin`) | none | `user_code` is eight digits (`4821-7730`); `verification_uri_complete` is `<base>/activate?code=48217730`, where `<base>` is `server.public_url` when configured; `expires_in` is 900. |
-| `POST /auth/device/poll` (`pollDeviceLogin`) | device code | `opened: true` once an approver has looked a pending request up. A pending answer carries the current `expires_at`, which lookups can move later; the device moves its local deadline there. `approved` carries the token pair exactly once. |
+| `POST /auth/device/start` (`startDeviceLogin`) | none | `user_code` is eight digits (`4821-7730`); `verification_uri_complete` is `<base>/activate?code=48217730`, where `<base>` is `server.public_url` when configured; `expires_in` is 900. Optional `binding` (43 characters of unpadded base64url; anything else, including an empty string, is 422 at `body.binding`) starts a bound request; see [Session binding](architecture/device-login.md#session-binding). |
+| `POST /auth/device/poll` (`pollDeviceLogin`) | device code; for a bound request also `binding_secret` | `opened: true` once an approver has looked a pending request up. A pending answer carries the current `expires_at`, which lookups can move later; the device moves its local deadline there. `approved` carries the token pair exactly once. A bound request polled without its `binding_secret`, or with another, is 403 `device_binding_mismatch` and is left unchanged; `binding_secret` is ignored for an unbound request and is at most 64 characters. |
 | `POST /auth/device/cancel` (`cancelDeviceLogin`) | device code | Withdraws a live pending, or approved but uncollected, request and answers `canceled`; any other request answers its unchanged state (`denied`, `consumed`, `canceled`) or `expired`. Repeating converges. |
-| `GET /auth/device?code=` or `?token=` (`getDeviceLogin`) | none; a login session's bearer token when sent | Adds `requested_at`, `server_name` and, when known, `server_id`. A lookup of a pending request marks it opened and holds its code for at least five more minutes, never past 30 minutes after start. A six-digit Jellyfin Quick Connect code is looked up only with the account's own login session: without a valid token it answers 401 and from an impersonation session 403, for every six-digit code. |
-| `POST /auth/device/approve`, `/approve-handoff`, `/deny` | the account's own login session | A canceled request is refused with 409. An API key, an impersonation session or a remote-playback handoff session is refused with 403 `permission_denied` (v1: 403 `forbidden`), because an approval gives the device a login session. `approve-handoff` approves a remote-playback or Jellyfin Quick Connect request for the verified profile in `X-Profile-Id` (with `X-Profile-Token` for a PIN profile); `approve` refuses both with 409. |
-| `GET /auth/device/capability` | none | `cancel` and `opened_signal` report the two additions; `jellyfin_quick_connect` reports Quick Connect approval. |
+| `GET /auth/device?code=` or `?token=` (`getDeviceLogin`) | none; a login session's bearer token when sent | Adds `requested_at`, `server_name`, `binding` for a bound request and, when known, `server_id`. A lookup of a pending request marks it opened and holds its code for at least five more minutes, never past 30 minutes after start. A six-digit Jellyfin Quick Connect code is looked up only with the account's own login session: without a valid token it answers 401 and from an impersonation session 403, for every six-digit code. |
+| `POST /auth/device/approve`, `/approve-handoff`, `/deny` | the account's own login session | A canceled request is refused with 409, and so is approving a request another account (for `approve-handoff`, another profile) already approved, or denying one another account approved (`conflict`). An API key, an impersonation session or a remote-playback handoff session is refused with 403 `permission_denied`, because an approval gives the device a login session. `approve-handoff` approves a remote-playback or Jellyfin Quick Connect request for the verified profile in `X-Profile-Id` (with `X-Profile-Token` for a PIN profile); `approve` refuses both with 409. |
+| `GET /auth/device/capability` | none | `cancel` and `opened_signal` report the two additions; `jellyfin_quick_connect` reports Quick Connect approval; `session_binding` reports session binding. |
 
 `status` gains `canceled` on lookup and poll. Start, poll and cancel spend the
 device rate-limit buckets; the lookup and all three decisions take a user code
@@ -434,10 +620,7 @@ and share the `device_lookup` bucket. A lookup or decision with a six-digit
 Quick Connect code also spends the account's Quick Connect code budget, 20
 attempts per 15 minutes, and answers 429 `rate_limited` with `Retry-After` once
 it is spent; see
-[device-login.md](architecture/device-login.md#jellyfin-quick-connect). The
-frozen v1 routes never see a Quick Connect request, have no cancel
-operation, report a canceled request as `denied`, keep the 10-minute
-`?token=` start answer, and never mark a request opened.
+[device-login.md](architecture/device-login.md#jellyfin-quick-connect).
 
 ### Remote-playback sessions
 
@@ -458,10 +641,9 @@ has the full rules; what a client sees:
 - The session has the account role `user` on every account, though `GET
   /account/me` still reports the account's own role. It reaches only
   the routes a TV needs to play and browse as that profile (listed in
-  `internal/api/middleware/remote_playback.go`). Every other v2 route, admin
+  `internal/api/middleware/remote_playback.go`). Every other route, admin
   and account or household management included, answers 403
-  `permission_denied`, and every v1 route except refresh answers 403
-  `forbidden`.
+  `permission_denied`.
 - It cannot approve or deny a device request, Quick Connect included.
 
 ## External sign-in
@@ -484,24 +666,24 @@ linking rule whether or not `network_sign_in` is served.
 | --- | --- | --- |
 | `GET /auth/providers` (`listAuthProviders`) | none | Leaves `local` out while `auth.local_password_login` is off. `password_login` says whether any listed provider takes a password; apps and TVs hide the password form when it is false. An `oauth` provider carries `native_start_path`, the native start's path below the server base, while OAuth sign-in is served (a public URL is configured). Apps append `native_start_path` to their own saved server base URL and never open another origin; an `oauth` provider without it offers no native sign-in. A `network` provider is listed only to a request that came through its own overlay from a device it vouches for, with `network_sign_in_path` and `network_identity` (`display_name`, `username`: who owns the device, for a "Continue as" label); it is never `default`. Clients ignore modes they do not know. |
 | `POST /auth/network/{id}/sign-in` (`signInWithNetworkIdentity`) | none; the request must come through the network provider's own overlay listener | Signs in the owner of the requesting device through network provider installation `{id}` (`mode: network`, such as the Tailscale plugin). Body: `{}` with `Content-Type: application/json`. Answers the same token pair as `login`. Refusals: 403 `network_identity_required` (the request did not come through that provider's overlay), 403 `not_permitted` (the provider refuses the device: unknown, tagged, or left out by its policy; or the account's OIDC or LDAP provider refuses the account), 403 `account_required`, 403 `permission_denied` (the account is disabled), 409 `email_in_use` or `identity_linked_elsewhere`, 404 `not_found` (not an enabled network provider), 503 `provider_unavailable`, 415 without a JSON body, 429. Spends the `login` rate-limit budget. |
-| `POST /auth/login` (`login`) | none | Without `provider`, the name is routed: an account with local password sign-in signs in locally (and is refused with `local_login_disabled` while the server switch is off, never sent to the directory), any other name goes to the enabled LDAP plugin. |
-| `GET /account/identities` (`listAccountIdentities`) | signed-in account | The caller's linked identities: provider, username, email, `linked_at`, `last_sign_in_at`, and `last_checked_at` (the provider's latest answer about the identity, from a sign-in or a re-check). |
+| `POST /auth/login` (`login`) | none | Without `provider`, the name is routed: an account with local password sign-in signs in locally (and is refused with `local_login_disabled` while the server switch is off, never sent to the directory), any other name goes to the enabled LDAP plugin. A name that has used its attempt budget, or a client over the `login` rate-limit budget, is 429 `rate_limited` ([Sign-in attempts per name](#sign-in-attempts-per-name)). |
+| `GET /account/identities` (`listAccountIdentities`) | signed-in account; `X-Profile-Id` optional | The caller's linked identities: provider, username, email, `linked_at`, `last_sign_in_at`, and `last_checked_at` (the provider's latest answer about the identity, from a sign-in or a re-check). Every profile on the account may read the list. `can_unlink` says whether `deleteAccountIdentity` would disconnect an identity now for the profile `X-Profile-Id` names, or for a request that names none: it is false for a profile that is not the household manager, and when the identity is the account's last way to sign in. Clients show the disconnect control only while it is true. A named profile passes the usual viewer gate, so a PIN-protected profile without `X-Profile-Token` is 403 `profile_verification_required`. |
 | `POST /account/identities/link-credentials` (`linkAccountIdentityWithCredentials`) | the account's own login session | Links the directory (LDAP) identity. Body, all required and non-null: `installation_id` (the credentials provider from `listAuthProviders`), `password` (the account's local password, 1 to 1024 characters), `username` (directory username, 1 to 256) and `directory_password` (1 to 1024). Answers 201, `Location: /api/v2/account/identities`, and the linked identity as `listAccountIdentities` shows it. Refusals: 422 `validation_failed` at `body.password` (wrong local password) or `body.directory_password` (the directory refused the credentials); 409 `local_password_required`; 403 `not_permitted`, `account_disabled` (the directory account is disabled, locked or expired) or `password_expired`; 403 `permission_denied` (the Silo account is disabled, or an API key or impersonation session); 409 `identity_linked_elsewhere` or `already_linked`; 404 `not_found` (not an enabled credentials provider); 503 `provider_unavailable`; 429. Spends the `login` rate-limit budget. Linking turns local password sign-in off unless the account is break-glass. |
 | `POST /account/identities/link-network` (`linkAccountIdentityWithNetwork`) | the account's own login session, through the network provider's overlay | Links the network identity of the requesting device. Body, required and non-null: `installation_id` (the network provider from `listAuthProviders`) and `password` (the account's local password). Answers 201 like `linkAccountIdentityWithCredentials`. Refusals: 403 `network_identity_required`, 422 `validation_failed` at `body.password`, 409 `local_password_required`, 403 `not_permitted`, 403 `permission_denied`, 409 `identity_linked_elsewhere` or `already_linked`, 404 `not_found`, 503 `provider_unavailable`, 429. Spends the `login` rate-limit budget. Unlike other linking, the account keeps its local password sign-in, which answers 403 `not_permitted` while the provider refuses the person (break-glass accounts excepted). |
-| `DELETE /account/identities/{id}` (`deleteAccountIdentity`) | the account's own login session | Refused with 409 `last_sign_in_method` unless the account can still sign in with its local password or another identity. API keys and impersonation sessions get 403. |
+| `DELETE /account/identities/{id}` (`deleteAccountIdentity`) | the account's own login session, acting as the household manager | How the account signs in belongs to the whole household, and the account cannot always link a disconnected identity again by itself (self-service linking needs the local password), so only the household manager may disconnect one: `X-Profile-Id` names the account's primary profile, with `X-Profile-Token` from `verifyProfilePIN` when that profile has a PIN. A named profile passes the usual viewer gate first: an unknown profile ID gets 404 `not_found`, and a PIN-protected profile without its token, primary or not, gets 403 `profile_verification_required`. A profile that passes the gate and is not the primary one gets 403 `permission_denied`, on an admin account too. A request without `X-Profile-Id` is accepted only from an admin account while no profile on the account has a PIN, a maturity limit, or library restrictions; otherwise it gets 403 `permission_denied`. Refused with 409 `last_sign_in_method` unless the account can still sign in with its local password or another identity. API keys and impersonation sessions get 403 `permission_denied`. |
 | `GET /admin/users/{id}/identities` (`listAdminUserIdentities`) | acting admin | Adds `external_subject`, `issuer` and `last_check_status`: what the provider said at `last_checked_at` about the identity, from a sign-in or a re-check (`active`, `not_found`, `disabled`, `not_permitted`, `unsupported`, `unavailable`, or `none` before the first). |
 | `POST /auth/refresh` (`refreshSession`) | the refresh token | A session opened through the provider is re-checked with it when due (see below). A refused account ends the session (401 `session_expired`). Under the `fail_closed` outage policy, an unreachable provider answers 503 `provider_unavailable`; the session stays valid and the client retries later. A database that cannot be read answers 503 `dependency_unavailable` with `Retry-After` (see [When the server cannot check a session](#when-the-server-cannot-check-a-session)). A provider answer the server received but could not apply, where a retry would not help, is 401 `invalid_token`: a refusal that could not be applied, a role sync that rolled back, or a replacement refresh token that could not be stored (the provider may accept only that token now). A refusal whose revocation rolled back stays on record and ends the session at the next check, and an unapplied active answer stays due. Any other database failure after an active answer is the retryable 503 above. |
 | `POST /admin/users/{id}/identities` (`createAdminUserIdentity`) | acting admin | Links by `installation_id` and the exact `external_subject`. Turns local password sign-in off unless the account is break-glass or the installation is a network identity provider. |
 | `DELETE /admin/users/{id}/identities/{identity_id}` (`deleteAdminUserIdentity`) | acting admin | May leave the account without a sign-in method; setting a password with `updateAdminUser` turns its local password sign-in back on. |
-| `PUT /admin/users/{id}` (`updateAdminUser`) | acting admin | `break_glass` sets or clears the flag: admin accounts only, and only the server Owner may change it (403 `permission_denied`). The Owner has it by default (set at first-run setup and on every ownership move) and may clear it on its own account. A `password` also turns the account's local password sign-in back on, so an admin other than the Owner may not set its own while its local sign-in is off (403 `permission_denied`; the v1 route answers `owner_protected`). Demoting, disabling or clearing the last usable break-glass admin while local sign-in is off is 409 `break_glass_required`; so is deleting it (`deleteAdminUser`) or turning `auth.local_password_login` off without one (`updateAdminSettings`, `updateAdminSetting`). |
+| `PUT /admin/users/{id}` (`updateAdminUser`) | acting admin | `break_glass` sets or clears the flag: admin accounts only, and only the server Owner may change it (403 `permission_denied`). The Owner has it by default (set at first-run setup and on every ownership move) and may clear it on its own account. A `password` also turns the account's local password sign-in back on, so an admin other than the Owner may not set its own while its local sign-in is off (403 `permission_denied`). Demoting, disabling or clearing the last usable break-glass admin while local sign-in is off is 409 `break_glass_required`; so is deleting it (`deleteAdminUser`) or turning `auth.local_password_login` off without one (`updateAdminSettings`, `updateAdminSetting`). |
 | `POST /admin/plugins/installations/{id}/auth-binding/test` (`testAdminPluginAuthBinding`) | acting admin | Sends staged `config` entries (blank secrets keep the stored value) to the plugin's `TestConnection`; answers `ok`, the plugin's `steps` and `callback_url`, the redirect URI to register at an OAuth provider (empty without a public URL). A plugin without a connection test, or a disabled installation, is 409. Not retried automatically. |
 | `PUT /admin/plugins/installations/{id}/auth-binding` (`updateAdminPluginAuthBinding`) | acting admin | Applies without a restart (`X-Silo-Restart-Required: false`). `auto_provision` defaults to true. Enabling a second binding of the same kind is 409 `provider_already_enabled`; one network identity binding may be enabled beside the one OIDC or LDAP binding. |
-| `GET /admin/plugins/installations` (`listAdminPluginInstallations`) | acting admin | Each OAuth auth binding carries `callback_url` (the v2 callback to register at the provider) and `post_logout_redirect_url` (`/login`, to register for provider logout), both on `server.public_url`; empty without a public URL and for a password provider. The other operations that answer an installation carry them too. |
+| `GET /admin/plugins/installations` (`listAdminPluginInstallations`) | acting admin | Each OAuth auth binding carries `callback_url` (the callback to register at the provider) and `post_logout_redirect_url` (`/login`, to register for provider logout), both on `server.public_url`; empty without a public URL and for a password provider. The other operations that answer an installation carry them too. |
 
 Refusals use these problem types: `not_permitted` (403, the provider's
 access rules refused the person), `account_required` (403, the provider
 admitted the person but the server has no account for them and account
-creation is off; v1 answers `not_permitted`), `local_login_disabled`
+creation is off), `local_login_disabled`
 (403), `password_expired` (403), `email_in_use` (409),
 `identity_linked_elsewhere` (409), `provider_already_enabled` (409),
 `break_glass_required` (409), `last_sign_in_method` (409),
@@ -537,7 +719,7 @@ accept `prompt=select_account`). Directory linking needs no handshake, so
 | `GET /auth/oauth/{install_id}/start` (`startOAuthLogin`) | none | The same start as a link. Sets the browser-binding cookie, then 302 to the provider. On another origin it first answers 302 to itself on the public URL, with `bounce=1`. A `link_ticket` is 400: web linking starts with `startAccountIdentityLink`. Bad parameters are 400 text; a provider that cannot start the flow (plugin not loaded, `InitAuthorize` failed) or a missing public URL sends the browser to `/login?error=oauth_failed&reason=provider_unavailable` (`login_failed` for a server error), which does not redirect to the provider again. `initOAuthLogin` does the same once on the public origin. |
 | `GET /auth/oauth/{install_id}/native/start` (`startNativeOAuthLogin`) | none | Apps open it on their saved server base in the system browser with `code_challenge` (S256), `code_challenge_method=S256` and `app_state`, plus `link_ticket` to link. The server records the origin the start arrived on as the flow's start origin. On another origin than the public URL that is not a local one (below) it answers 400 text; on an accepted one it keeps the start on the server and answers 302 to itself on the public URL with only `flow=<ID>` (random, single use, two minutes); an unknown, used, expired or foreign `flow`, or one presented on another origin than the public URL, is 400 text (the latter leaves the start for the public URL). Bad parameters are 400 text. With valid parameters, a provider that cannot start the flow sends the browser to the app redirect with `error=provider_unavailable` (`login_failed` for a server error), `state`, `server` and `iss`. An unknown, used, expired or foreign `link_ticket` sends it to the app redirect with `error=session_expired`, `state`, `server` and `iss`. |
 | `GET /auth/oauth/{install_id}/callback` (`finishOAuthCallback`) | the binding cookie | The provider's redirect back, with `code` or `error`. A web flow's redirect to `/login/oauth-complete?code=` also sets the `silo_oauth_complete` cookie on the complete path of each API version (HttpOnly, SameSite=Lax, two minutes). |
-| `POST /auth/oauth/complete` (`completeOAuthLogin`) | the completion code | Redeems the code for the token pair and `user`. A native code needs `code_verifier`; a web code refuses one and needs the `silo_oauth_complete` cookie of the browser the callback answered, which that browser sends by itself (400 `invalid_grant` otherwise; the code stays redeemable). The frozen v1 `POST /api/v1/auth/oauth/complete` needs the same cookie for a web code and answers 401 without it. The login session opens when the code is redeemed, so a code that is never redeemed leaves none. An unknown, expired or used code is 401 `invalid_token`, and a second redemption revokes the session the first opened. |
+| `POST /auth/oauth/complete` (`completeOAuthLogin`) | the completion code | Redeems the code for the token pair and `user`. A native code needs `code_verifier`; a web code refuses one and needs the `silo_oauth_complete` cookie of the browser the callback answered, which that browser sends by itself (400 `invalid_grant` otherwise; the code stays redeemable). The login session opens when the code is redeemed, so a code that is never redeemed leaves none. An unknown, expired or used code is 401 `invalid_token`, and a second redemption revokes the session the first opened. |
 | `POST /account/identities/link-ticket` (`createAccountIdentityLinkTicket`) | the account's own login session | Body `installation_id` and the current `password`. Answers a single-use `ticket` valid for 5 minutes. A wrong password is 422 at `body.password`; an account without local password sign-in is 409 `local_password_required`; API keys and impersonation sessions are 403; an installation that is not an enabled OAuth provider (an LDAP one included) is 404. Spends the `password_change` rate-limit budget. |
 | `POST /account/identities/link-start` (`startAccountIdentityLink`) | the ticket's account, own login session | Web linking. Body `link_ticket` and optional `next`. Consumes the ticket, sets the flow's browser-binding cookie on this response and answers `authorize_url`, which the same browser then opens; the provider is asked for a fresh sign-in (`prompt=login`). Must be called on the public URL's origin (409 otherwise). An unknown, used, expired or foreign ticket is 404; a provider that cannot start is 503 `provider_unavailable`. |
 | `POST /account/identities/link-complete` (`completeAccountIdentityLink`) | the ticket's account, own login session | Native linking. Body `code` (from the app redirect with `link=1`) and `code_verifier`. Makes the link and answers 204. A verifier that does not fit is 400 `invalid_grant` and the code stays redeemable; an unknown, used or expired code, or another account, is 401 `invalid_token`; the link's own refusals are 409 `identity_linked_elsewhere`, 409 `already_linked`, 403 `not_permitted`, 403 `account_disabled` (the provider's account is disabled, locked or expired), 403 `password_expired`, 403 `permission_denied` (the Silo account is disabled) or 503 `provider_unavailable`. |
@@ -657,24 +839,11 @@ bound. People who sign in through the provider at least that often keep
 their keys. If a revocation fails, nothing is revoked. A refusal is kept and
 applied at the next check without asking the provider again; an
 `UNSUPPORTED` answer is not stored, and the next refresh asks again.
-`getExternalSignInCapabilities` reports `provider_recheck`. The frozen v1
-refresh answers a `fail_closed` outage with its usual 401 `invalid_token`.
+`getExternalSignInCapabilities` reports `provider_recheck`.
 
-The frozen v1 routes share the login policy: v1 login answers the same codes,
-v1 provider discovery still lists `local`, and the v1 auth binding write also
-answers `X-Silo-Restart-Required: false` and 409 `provider_already_enabled`.
-The v1 OAuth init sets the same binding cookie and, on another origin than the
-public URL, answers 307 to itself there with `bounce=1`. It hands the provider
-`<public URL>/api/v1/auth/oauth/<id>/callback` as `redirect_uri`, so a provider
-must also register that v1 callback for sign-ins a v1 client starts. v1 takes no link
-ticket and no `code_verifier`, so it cannot link or redeem a native code; its
-completion also revokes the session of a reused code. The v1 admin user update
-and delete keep the break-glass rule (409 `break_glass_required`), and a v1
-admin password write also turns the account's local password sign-in back on,
-with the same Owner-only rule for an admin's own account.
 While local sign-in is off, sending or resending an invitation and accepting
-one are refused with 403 `local_login_disabled` on both v1 and v2: an
-invitation creates a local-password account, which could not sign in.
+one are refused with 403 `local_login_disabled`: an invitation creates a
+local-password account, which could not sign in.
 
 ## Ordinary v2 authentication
 
@@ -685,6 +854,9 @@ state and must not be automatically replayed after an uncertain response.
 
 Invited signup commits invite consumption and account creation together. With the
 PostgreSQL profile provider, the optional default profile joins that transaction.
+The transaction rechecks public-signup and local-password policy while holding
+the settings mutation lock. If disabling signup commits first, the in-flight
+signup is refused without creating an account or spending the invite.
 SQLite profile storage remains a separate-store boundary; this does not certify
 an atomic cross-store operation or activate backend conversion.
 
@@ -693,9 +865,7 @@ are links to `GET /api/v2/auth/oauth/{install_id}/start` (`startOAuthLogin`);
 `POST /api/v2/auth/oauth/{install_id}/init` (`initOAuthLogin`) remains for
 form posts. The provider returns to
 `GET /api/v2/auth/oauth/{install_id}/callback`. Provider configuration must allow
-that callback URI. The frozen v1 handshake remains available during the bridge;
-both versions redeem the same one-time completion store through their completion
-operation. See [OAuth sign-in flows](#oauth-sign-in-flows).
+that callback URI. See [OAuth sign-in flows](#oauth-sign-in-flows).
 
 The web transport never refreshes a stored session or automatically replays a
 rejected login, setup, signup, OAuth completion, refresh, device-start, or
@@ -711,16 +881,17 @@ exactly as discovery advertises them, including composite plugin identifiers.
 
 `POST /api/v2/auth/plugin-launch` (`createPluginLaunch`) issues the plugin access
 cookie for the current login session and optional validated profile: the same
-five-minute `HttpOnly` `SameSite=Lax` credential v1 issues, `Secure` on HTTPS,
+five-minute `HttpOnly` `SameSite=Lax` credential, `Secure` on HTTPS,
 scoped to the v2 plugin-content parent path `/api/v2/plugin-content` and never
 broadened to `/`. The body is `{"expires_in": 300}`. A credential without a login
 session, such as an API key, is refused with 403 `permission_denied`; an unknown
 declared profile is 404 and a PIN-locked one without its token is 403
 `profile_verification_required`. Repeating the request reissues an equivalent
-cookie. The bundled web client launches pages under
-`/api/v2/plugin-content/plugins/{installation_id}/`. The v2 launch does not expire
-the separate legacy cookie; that cookie expires within five minutes. Compatibility
-of the reissued cookie against a served auth-provider plugin is not yet proven
+cookie. A page request through a cookie past half its lifetime gets a fresh one
+while the login session could still refresh ([plugin content](architecture/plugin-content.md)).
+The bundled web client launches pages under
+`/api/v2/plugin-content/plugins/{installation_id}/`. Compatibility of the reissued
+cookie against a served auth-provider plugin is not yet proven
 and is a follow-up.
 
 Apple and Android adoption must be verified against each client's selected API
@@ -728,7 +899,7 @@ contract. Native clients must distinguish failed credential exchanges from an
 expired bearer on an authenticated read, retain refresh concurrency protection,
 and preserve the selected account and profile during device handoff. The native
 migration inventory and client tests track adoption; server/web validation alone
-does not establish native cutover or permit v1 retirement.
+does not establish native cutover.
 
 
 ## V2 policy discovery
@@ -742,14 +913,13 @@ does not require policy-editor authorization.
 The route requires authentication and preserves the demo restriction. A profile
 is optional; when supplied it must pass viewer verification. The bundled web
 policy query uses this endpoint. There are no Apple or Android callers to migrate.
-The frozen v1 capability route retains its previous unavailable-system response.
 
 ### Public provider icons
 
 Bootstrap generates provider icon URLs as
 `/api/v2/plugin-content/plugins/{installation_id}/assets/...`. A capability
 manifest may still supply the legacy `/api/v1/plugins/{installation_id}/assets/...`
-form; V2 provider discovery projects that onto the versioned mount. Either form is
+form; provider discovery projects that onto the versioned mount. Either form is
 exposed only when the matching provider installation has a public GET route descriptor. Descriptor selection must use the proxy's exact/wildcard precedence;
 prelogin images cannot depend on a launch cookie. Missing public-route proof,
 unavailable content, malformed paths or private routes omit the icon without
@@ -757,5 +927,5 @@ failing provider discovery. Query strings and fragments are retained. While
 the auth plugin's `icon_url_path` setting is unset or empty, the default its
 global config schema declares is the button icon, so a fresh install shows
 the plugin's own icon and clearing the setting returns to it. External
-icons and the frozen v1 provider metadata remain unchanged. This projection does
+icons remain unchanged. This projection does
 not establish compatibility of an actual plugin's pages or assets.

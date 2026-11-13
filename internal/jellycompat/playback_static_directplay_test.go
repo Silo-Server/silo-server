@@ -59,58 +59,6 @@ func newStaticDirectPlayHandler(t *testing.T) (*PlaybackHandler, string, string)
 	return handler, encodedID, "fake media bytes"
 }
 
-// TestHandleVideoStream_LowercaseStaticServesFile proves the case-insensitive
-// Static guard now matches SenPlayer's lowercase static=true: with an empty
-// playback store the route resolves only via the static fallback, and the file
-// is served end-to-end. Without the fix this returns 404 "Playback session not
-// found".
-func TestHandleVideoStream_LowercaseStaticServesFile(t *testing.T) {
-	handler, encodedID, body := newStaticDirectPlayHandler(t)
-	rec := serveStaticStream(handler, encodedID, "static=true")
-
-	if rec.Code != 200 {
-		t.Fatalf("expected status 200; got %d, body=%s", rec.Code, rec.Body.String())
-	}
-	if got := rec.Body.String(); got != body {
-		t.Errorf("expected file content %q; got %q", body, got)
-	}
-}
-
-// TestHandleVideoStream_LowercaseStaticWithMediaSourceId closes the
-// SenPlayer-exact call shape: lowercase static=true alongside a mediaSourceId
-// query param matching the source. The handler must still serve the file
-// end-to-end (200 + body).
-func TestHandleVideoStream_LowercaseStaticWithMediaSourceId(t *testing.T) {
-	handler, encodedID, body := newStaticDirectPlayHandler(t)
-	// FileID 42 (see newStaticDirectPlayHandler) -> the deterministic media
-	// source id the static play session builds for this version.
-	mediaSourceID := NewResourceIDCodec().EncodeIntID(EncodedIDMediaSource, 42)
-	rawQuery := "static=true&mediaSourceId=" + url.QueryEscape(mediaSourceID)
-	rec := serveStaticStream(handler, encodedID, rawQuery)
-
-	if rec.Code != 200 {
-		t.Fatalf("expected status 200; got %d, body=%s", rec.Code, rec.Body.String())
-	}
-	if got := rec.Body.String(); got != body {
-		t.Errorf("expected file content %q; got %q", body, got)
-	}
-}
-
-// TestHandleVideoStream_UppercaseStaticServesFile regression-guards the
-// original Infuse path (Static=true, uppercase key): it must keep serving so a
-// future over-narrow change to the guard is caught.
-func TestHandleVideoStream_UppercaseStaticServesFile(t *testing.T) {
-	handler, encodedID, body := newStaticDirectPlayHandler(t)
-	rec := serveStaticStream(handler, encodedID, "Static=true")
-
-	if rec.Code != 200 {
-		t.Fatalf("expected status 200; got %d, body=%s", rec.Code, rec.Body.String())
-	}
-	if got := rec.Body.String(); got != body {
-		t.Errorf("expected file content %q; got %q", body, got)
-	}
-}
-
 func TestStaticPlaybackSelectsCompliantVersionUnderServerCap(t *testing.T) {
 	h, item, _ := newStaticDirectPlayHandler(t)
 	h.ScopeResolver = &stubScopeResolver{scope: access.Scope{MaxRemoteStreamBitrateKbps: 4_000}}

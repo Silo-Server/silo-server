@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/naming"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/scanner"
+	"github.com/Silo-Server/silo-server/internal/sections"
 )
 
 const (
@@ -30,6 +31,10 @@ type ItemRefreshMode string
 const (
 	ItemRefreshModeQuick    ItemRefreshMode = "quick"
 	ItemRefreshModeComplete ItemRefreshMode = "complete"
+	// ItemRefreshModeReset is a quick refresh that resets the target to its
+	// providers: it clears the target's locks and every value the providers
+	// lack (Reset to Provider in Edit Metadata).
+	ItemRefreshModeReset ItemRefreshMode = "reset"
 )
 
 var ErrScopeHasNoFiles = errors.New("cannot determine scan scope because this item has no indexed files")
@@ -293,10 +298,10 @@ func (r *ItemRefreshResolver) buildRequest(ctx context.Context, folderID int, sc
 	if _, err := r.folderRepo.GetByID(ctx, folderID); err != nil {
 		return nil, err
 	}
-	// The scanner persists canonical file paths after following directory
-	// symlinks, so the derived scan path may not share a literal prefix with the
-	// configured library root. The folder ownership is established by the linked
-	// media file we selected above, not by a raw string-prefix match here.
+	// The scan path derives from the linked media file selected above, whose
+	// stored path keeps the logical form below the library root (walks do not
+	// replace it with a symlink target). Scanner.ScanSubtree refuses a path
+	// outside the folder's roots, so no prefix check is repeated here.
 	cleanPath := filepath.Clean(scanPath)
 	req.ScanFolderID = folderID
 	req.ScanPath = cleanPath
@@ -439,6 +444,15 @@ type ItemRefreshArtworkCacher interface {
 	CacheTargetArtwork(ctx context.Context, targetContentID string) error
 }
 
+// ItemRefreshMetadataRefresher refreshes or resets an item's metadata
+// (metadata.MetadataService).
+type ItemRefreshMetadataRefresher interface {
+	RefreshItem(ctx context.Context, contentID string) error
+	RefreshItemForLibrary(ctx context.Context, contentID string, folderID int) error
+	RefreshTargetForLibrary(ctx context.Context, targetType, contentID string, folderID int) error
+	ResetTargetForLibrary(ctx context.Context, targetType, contentID string, folderID int) error
+}
+
 type ItemRefreshExecutor struct {
 	folderRepo      itemRefreshFolderRepo
 	fileRepo        itemRefreshFileRepo
@@ -449,14 +463,13 @@ type ItemRefreshExecutor struct {
 	episodeRepo     itemRefreshEpisodeRepo
 	ingester        ItemRefreshIngester
 	scanRuns        directScanRunRepository
-	refresher       interface {
-		RefreshItem(ctx context.Context, contentID string) error
-		RefreshItemForLibrary(ctx context.Context, contentID string, folderID int) error
-		RefreshTargetForLibrary(ctx context.Context, targetType, contentID string, folderID int) error
-	}
-	artworkCacher ItemRefreshArtworkCacher
-	eventBus      cache.EventBus
-	realtimeHub   *notifications.Hub
+	refresher       ItemRefreshMetadataRefresher
+	artworkCacher   ItemRefreshArtworkCacher
+	eventBus        cache.EventBus
+	realtimeHub     *notifications.Hub
+	// evictRails drops this node's cached home rails that list the given
+	// content IDs; tests replace it.
+	evictRails func(contentIDs ...string)
 }
 
 func NewItemRefreshExecutor(
@@ -469,11 +482,7 @@ func NewItemRefreshExecutor(
 	episodeRepo itemRefreshEpisodeRepo,
 	ingester ItemRefreshIngester,
 	scanRuns directScanRunRepository,
-	refresher interface {
-		RefreshItem(ctx context.Context, contentID string) error
-		RefreshItemForLibrary(ctx context.Context, contentID string, folderID int) error
-		RefreshTargetForLibrary(ctx context.Context, targetType, contentID string, folderID int) error
-	},
+	refresher ItemRefreshMetadataRefresher,
 	eventBus cache.EventBus,
 	realtimeHub *notifications.Hub,
 ) *ItemRefreshExecutor {
@@ -489,6 +498,7 @@ func NewItemRefreshExecutor(
 		scanRuns:        scanRuns,
 		refresher:       refresher,
 		eventBus:        eventBus,
+		evictRails:      sections.EvictResolvedListItems,
 		realtimeHub:     realtimeHub,
 	}
 }
@@ -579,7 +589,11 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 			refreshTargetType = "item"
 		}
 	}
-	if err := e.refresher.RefreshTargetForLibrary(ctx, refreshTargetType, refreshContentID, req.ScanFolderID); err != nil {
+	refreshTarget := e.refresher.RefreshTargetForLibrary
+	if req.Mode == ItemRefreshModeReset {
+		refreshTarget = e.refresher.ResetTargetForLibrary
+	}
+	if err := refreshTarget(ctx, refreshTargetType, refreshContentID, req.ScanFolderID); err != nil {
 		return nil, fmt.Errorf("refresh metadata: %w", err)
 	}
 	artworkWarning := ""
@@ -606,6 +620,21 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 	// pre-refresh titles/posters and serve them for the whole cache TTL.
 	e.publish(cache.EventScanComplete, strconv.Itoa(req.ScanFolderID))
 	e.publish(cache.EventMetadataUpdated, refreshContentID)
+	// scan_complete only rotates Recently Added. Every other cached home rail
+	// that lists the item would keep its pre-refresh values, for example the
+	// manual edits a Reset to Provider just replaced. Evict this node's rails
+	// directly as well: without Redis the bus is a no-op, and a failed publish
+	// must not leave the node that ran the refresh serving stale rails.
+	changed := []string{refreshContentID}
+	if req.RequestedContentID != "" && req.RequestedContentID != refreshContentID {
+		changed = append(changed, req.RequestedContentID)
+	}
+	if e.evictRails != nil {
+		e.evictRails(changed...)
+	}
+	for _, contentID := range changed {
+		e.publish(cache.EventCatalogItemChanged, contentID)
+	}
 	if e.realtimeHub != nil {
 		if scanResult != nil && (scanResult.New > 0 || scanResult.Updated > 0 || scanResult.Missing > 0 || matched > 0) {
 			_ = e.realtimeHub.PublishCatalogLibraryChanged(ctx, notifications.LibraryChangeEvent{
@@ -705,8 +734,9 @@ func (e *ItemRefreshExecutor) resolveCompleteRefreshTargets(ctx context.Context,
 }
 
 func normalizeItemRefreshMode(mode ItemRefreshMode) ItemRefreshMode {
-	if mode == ItemRefreshModeComplete {
-		return ItemRefreshModeComplete
+	switch mode {
+	case ItemRefreshModeComplete, ItemRefreshModeReset:
+		return mode
 	}
 	return ItemRefreshModeQuick
 }

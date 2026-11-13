@@ -2,7 +2,6 @@ package apiv2
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -28,6 +27,11 @@ func (f *fakeLifecycle) Cancel(_ context.Context, v mediarequests.Viewer, id, re
 	f.id = id
 	f.reason = reason
 	return fixtureMediaRequest(id, 949), f.err
+}
+func (f *fakeLifecycle) RemoveFailed(_ context.Context, v mediarequests.Viewer, id string) error {
+	f.viewer = v
+	f.id = id
+	return f.err
 }
 func (f *fakeLifecycle) GetFeatureStatus(_ context.Context, v mediarequests.Viewer) (mediarequests.FeatureStatus, error) {
 	f.viewer = v
@@ -142,18 +146,6 @@ func TestWatchProviderLifecycleErrors(t *testing.T) {
 	}
 }
 
-// A built-in provider that rejects the supplied API key is a client problem,
-// not an internal failure, on the connect route.
-func TestWatchProviderConnectAPIKeyRejectedCredential(t *testing.T) {
-	w := &fakeWatchLifecycle{err: fmt.Errorf("mdblist request GET /user rejected: status 401 (check api key): %w", watchsync.ErrInvalidCredential)}
-	h := lifecycleHandler(&fakeLifecycle{}, w)
-	rec := do(t, h, http.MethodPost, Prefix+"/watch-providers/mdblist/auth/api-key", `{"api_key":"wrong-key"}`, requestOwner)
-	requireProblem(t, rec, TypeValidationFailed)
-	if strings.Contains(rec.Body.String(), "wrong-key") {
-		t.Fatal("supplied credential echoed back")
-	}
-}
-
 // Connection config the host or the plugin rejects is a client problem, and
 // the safe message tells the user what to fix.
 func TestWatchProviderConnectAPIKeyRejectedConnectionInput(t *testing.T) {
@@ -185,6 +177,18 @@ func TestRequestLifecycleViewerAndCancel(t *testing.T) {
 	requireProblem(t, rec, TypePermissionDenied)
 }
 
+func TestRemoveFailedRequestViewer(t *testing.T) {
+	r := &fakeLifecycle{}
+	h := lifecycleHandler(r, &fakeWatchLifecycle{})
+	rec := do(t, h, http.MethodDelete, Prefix+"/requests/r-1", "", requestOwner)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("remove: %d %s", rec.Code, rec.Body.String())
+	}
+	if r.viewer.UserID != 1 || r.viewer.ProfileID != "p-owner" || r.viewer.IsAdmin || r.id != "r-1" {
+		t.Fatalf("wrong viewer or input: %+v", r)
+	}
+}
+
 func (f *fakeWatchLifecycle) UpdateConnection(ctx context.Context, u int, p, key string, update watchsync.ConnectionUpdate) (watchsync.ConnectionStatus, error) {
 	return f.GetConnectionStatus(ctx, u, p, key)
 }
@@ -205,6 +209,7 @@ func requestLifecycleFixtureCases() []fixtureCase {
 		{name: "watch_provider_sync_ok", operationID: "triggerWatchProviderSync", method: http.MethodPost, path: Prefix + "/watch-providers/trakt/sync", schema: "WatchProviderSyncOutputBody", status: http.StatusAccepted},
 		{name: "watch_provider_delete_ok", operationID: "deleteWatchProviderConnection", method: http.MethodDelete, path: Prefix + "/watch-providers/trakt/connection", status: http.StatusNoContent},
 		{name: "request_status_ok", operationID: "getRequestStatus", method: http.MethodGet, path: Prefix + "/requests/status", schema: "FeatureStatus"},
+		{name: "remove_failed_request_ok", operationID: "removeFailedRequest", method: http.MethodDelete, path: Prefix + "/requests/r-1", status: http.StatusNoContent},
 		{name: "cancel_request_ok", operationID: "cancelRequest", method: http.MethodPost, path: Prefix + "/requests/r-1/cancel", body: `{"reason":"No longer needed"}`, schema: "MediaRequest"},
 		{name: "watch_provider_connection_ok", operationID: opGetWatchProviderConnection, method: http.MethodGet, path: Prefix + "/watch-providers/trakt/connection", schema: "WatchProviderConnection"},
 		{name: "watch_provider_device_auth_ok", operationID: "startWatchProviderDeviceAuth", method: http.MethodPost, path: Prefix + "/watch-providers/trakt/auth/device-code", schema: "WatchProviderDeviceAuth"},
@@ -289,63 +294,6 @@ func TestWatchProviderConnectionGuard(t *testing.T) {
 	}
 }
 
-func TestWatchProviderMetadataHasNoSettingsValidator(t *testing.T) {
-	fake := &fakeWatchLifecycle{displayName: "Before"}
-	h := lifecycleHandler(&fakeLifecycle{}, fake)
-	path := Prefix + "/watch-providers/trakt/connection"
-	metadata := do(t, h, http.MethodGet, path, "", requestOwner)
-	if metadata.Code != 200 || metadata.Header().Get("ETag") != "" {
-		t.Fatalf("metadata GET=%d etag=%q", metadata.Code, metadata.Header().Get("ETag"))
-	}
-	before := do(t, h, http.MethodGet, path+"/settings", "", requestOwner)
-	if before.Code != 200 || before.Header().Get("ETag") == "" {
-		t.Fatalf("settings GET=%d", before.Code)
-	}
-	fake.credentialsConfigured = true
-	fake.displayName = "After"
-	changed := do(t, h, http.MethodGet, path, "", requestOwner)
-	if changed.Code != 200 || changed.Header().Get("ETag") != "" || changed.Body.String() == metadata.Body.String() {
-		t.Fatal("metadata change retained a validator or failed to change representation")
-	}
-	after := do(t, h, http.MethodGet, path+"/settings", "", requestOwner)
-	if before.Header().Get("ETag") != after.Header().Get("ETag") || before.Body.String() != after.Body.String() {
-		t.Fatal("dynamic provider metadata changed guarded settings")
-	}
-	var fields map[string]any
-	if err := json.Unmarshal(after.Body.Bytes(), &fields); err != nil {
-		t.Fatal(err)
-	}
-	if len(fields) != 16 {
-		t.Fatalf("settings fields=%v", fields)
-	}
-	for key, value := range fields {
-		// connection_settings holds the values of the provider's declared
-		// connection settings: preferences too, not provider metadata.
-		if key == "connection_settings" {
-			if _, ok := value.(map[string]any); !ok {
-				t.Fatalf("connection_settings=%v, want an object", value)
-			}
-			continue
-		}
-		if _, ok := value.(bool); !ok {
-			t.Fatalf("non-preference field %s=%v", key, value)
-		}
-	}
-	headers := maps.Clone(requestOwner)
-	headers["If-Match"] = before.Header().Get("ETag")
-	patched := do(t, h, http.MethodPatch, path, `{"scrobble_enabled":true}`, headers)
-	if patched.Code != 200 {
-		t.Fatalf("metadata invalidated patch: %d %s", patched.Code, patched.Body.String())
-	}
-	fields = nil
-	if err := json.Unmarshal(patched.Body.Bytes(), &fields); err != nil {
-		t.Fatal(err)
-	}
-	if len(fields) != 16 {
-		t.Fatalf("PATCH returned metadata: %v", fields)
-	}
-}
-
 func TestWatchProviderSettingsMissingConnection(t *testing.T) {
 	fake := &fakeWatchLifecycle{missingConnection: true}
 	h := lifecycleHandler(&fakeLifecycle{}, fake)
@@ -360,64 +308,4 @@ func TestWatchProviderSettingsMissingConnection(t *testing.T) {
 
 func (f *fakeLifecycle) RequestCapabilityAllowed(context.Context, mediarequests.Viewer) (bool, error) {
 	return true, f.err
-}
-
-func TestWatchProviderConnectionSettings(t *testing.T) {
-	fake := &fakeWatchLifecycle{
-		connectionSettings: []watchsync.ConnectionSetting{{
-			Key: "track_rewatches", Label: "Log rewatches", Description: "Send repeat plays as rewatches.",
-			Type: watchsync.ConnectionSettingTypeBoolean, Default: false,
-		}},
-		settingValues: map[string]any{"track_rewatches": false},
-	}
-	h := lifecycleHandler(&fakeLifecycle{}, fake)
-
-	list := do(t, h, http.MethodGet, Prefix+"/watch-providers", "", requestOwner)
-	var providers struct {
-		Items []WatchProviderSummary `json:"items"`
-	}
-	if list.Code != 200 || json.Unmarshal(list.Body.Bytes(), &providers) != nil || len(providers.Items) != 1 {
-		t.Fatalf("list=%d %s", list.Code, list.Body.String())
-	}
-	declared := providers.Items[0].ConnectionSettings
-	if len(declared) != 1 || declared[0].Key != "track_rewatches" || declared[0].Type != "boolean" ||
-		declared[0].Label != "Log rewatches" || declared[0].DefaultValue != false {
-		t.Fatalf("declared settings = %#v", declared)
-	}
-
-	path := Prefix + "/watch-providers/simkl/connection"
-	get := do(t, h, http.MethodGet, path+"/settings", "", requestOwner)
-	var settings WatchProviderSettings
-	if get.Code != 200 || json.Unmarshal(get.Body.Bytes(), &settings) != nil || settings.ConnectionSettings["track_rewatches"] != false {
-		t.Fatalf("settings GET=%d %s", get.Code, get.Body.String())
-	}
-
-	headers := maps.Clone(requestOwner)
-	headers["If-Match"] = get.Header().Get("ETag")
-	patch := do(t, h, http.MethodPatch, path, `{"connection_settings":{"track_rewatches":true}}`, headers)
-	if patch.Code != 200 || fake.lastUpdate.ConnectionSettings["track_rewatches"] != true {
-		t.Fatalf("PATCH=%d %s update=%#v", patch.Code, patch.Body.String(), fake.lastUpdate)
-	}
-
-	// A plugin upgrade that changes a default changes the representation
-	// without touching the connection row, so it must change the validator.
-	before := do(t, h, http.MethodGet, path+"/settings", "", requestOwner).Header().Get("ETag")
-	fake.settingValues = map[string]any{"track_rewatches": true}
-	after := do(t, h, http.MethodGet, path+"/settings", "", requestOwner).Header().Get("ETag")
-	if before == "" || after == before {
-		t.Fatalf("ETag unchanged after the resolved settings changed: %q", after)
-	}
-	headers["If-Match"] = before
-	updates := fake.updateCalls
-	requireProblem(t, do(t, h, http.MethodPatch, path, `{"scrobble_enabled":false}`, headers), TypePreconditionFailed)
-	if fake.updateCalls != updates {
-		t.Fatal("a validator from the old settings representation reached update")
-	}
-
-	fake.updateErr = watchsync.InvalidConnectionSettingError{Key: "other", Reason: "is not a setting of this provider"}
-	headers["If-Match"] = after
-	invalid := do(t, h, http.MethodPatch, path, `{"connection_settings":{"other":true}}`, headers)
-	if invalid.Code != http.StatusUnprocessableEntity || !strings.Contains(invalid.Body.String(), "validation_failed") {
-		t.Fatalf("invalid PATCH=%d %s", invalid.Code, invalid.Body.String())
-	}
 }

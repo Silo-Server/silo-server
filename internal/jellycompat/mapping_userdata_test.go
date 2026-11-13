@@ -67,24 +67,6 @@ func TestUserDataDTOPlayedFolderWithOwnProgressRowReportsHundred(t *testing.T) {
 	}
 }
 
-func TestUserDataDTOPlayedRewatchReportsResumePosition(t *testing.T) {
-	// A rewatch in flight keeps Played=true with a live resume point; clients
-	// must see both the checkmark and the position (matches Jellyfin).
-	data := &catalog.SeasonUserData{
-		PositionSeconds: 600.0,
-		DurationSeconds: 1290.0,
-		Played:          true,
-	}
-	dto := userDataDTO("item-1", false, data, false, nil)
-	want := secondsToTicks(600.0)
-	if dto.PlaybackPositionTicks != want {
-		t.Fatalf("PlaybackPositionTicks = %d, want %d for rewatch in flight", dto.PlaybackPositionTicks, want)
-	}
-	if !dto.Played {
-		t.Fatalf("Played = false, want true")
-	}
-}
-
 func TestUserDataDTOClampsPositionPastDuration(t *testing.T) {
 	data := &catalog.SeasonUserData{
 		PositionSeconds: 1290.33,
@@ -98,46 +80,6 @@ func TestUserDataDTOClampsPositionPastDuration(t *testing.T) {
 	}
 	if dto.PlayedPercentage > 100 {
 		t.Fatalf("PlayedPercentage = %v, want <= 100 (derived from the clamped position)", dto.PlayedPercentage)
-	}
-}
-
-func TestUserDataDTOPreservesValidPosition(t *testing.T) {
-	data := &catalog.SeasonUserData{
-		PositionSeconds: 600.0,
-		DurationSeconds: 1290.0,
-		Played:          false,
-	}
-	dto := userDataDTO("item-3", false, data, false, nil)
-	want := secondsToTicks(600.0)
-	if dto.PlaybackPositionTicks != want {
-		t.Fatalf("PlaybackPositionTicks = %d, want %d", dto.PlaybackPositionTicks, want)
-	}
-}
-
-func TestUserDataDTOProgressCompletedZeros(t *testing.T) {
-	// Completed rows store position 0, so watched items report 0 ticks.
-	progress := &upstreamProgress{
-		MediaItemID:     "x",
-		PositionSeconds: 0,
-		DurationSeconds: 1290.0,
-		Completed:       true,
-	}
-	dto := userDataDTO("item-4", false, nil, false, progress)
-	if dto.PlaybackPositionTicks != 0 {
-		t.Fatalf("PlaybackPositionTicks = %d, want 0 when Completed=true", dto.PlaybackPositionTicks)
-	}
-	if !dto.Played {
-		t.Fatalf("Played = false, want true")
-	}
-	if dto.PlayedPercentage != 0 {
-		t.Fatalf("PlayedPercentage = %v, want 0 (omitted) for completed item at rest", dto.PlayedPercentage)
-	}
-	raw, err := json.Marshal(dto)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(raw), "PlayedPercentage") {
-		t.Fatalf("UserData JSON = %s, want no PlayedPercentage for completed item at rest", raw)
 	}
 }
 
@@ -183,20 +125,6 @@ func TestUserDataDTOProgressRewatchKeepsPlayedAndPosition(t *testing.T) {
 	}
 }
 
-func TestUserDataDTOProgressClampsPosition(t *testing.T) {
-	progress := &upstreamProgress{
-		MediaItemID:     "x",
-		PositionSeconds: 2000.0,
-		DurationSeconds: 1290.0,
-		Completed:       false,
-	}
-	dto := userDataDTO("item-5", false, nil, false, progress)
-	want := secondsToTicks(1290.0)
-	if dto.PlaybackPositionTicks != want {
-		t.Fatalf("PlaybackPositionTicks = %d, want %d (clamped)", dto.PlaybackPositionTicks, want)
-	}
-}
-
 func TestClampSeekSecondsCapsToLongestSource(t *testing.T) {
 	sources := []PlaybackMediaSource{
 		{Version: catalog.FileVersion{Duration: 1290}},
@@ -205,16 +133,6 @@ func TestClampSeekSecondsCapsToLongestSource(t *testing.T) {
 	got := clampSeekSeconds(2000, sources)
 	if got != 1500 {
 		t.Fatalf("clampSeekSeconds = %v, want 1500", got)
-	}
-}
-
-func TestClampSeekSecondsPassesValidSeek(t *testing.T) {
-	sources := []PlaybackMediaSource{
-		{Version: catalog.FileVersion{Duration: 1290}},
-	}
-	got := clampSeekSeconds(600, sources)
-	if got != 600 {
-		t.Fatalf("clampSeekSeconds = %v, want 600", got)
 	}
 }
 

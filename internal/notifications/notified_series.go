@@ -56,7 +56,7 @@ type SeriesSortFields struct {
 // catalog access; callers filter the series the profile may not open, as
 // fanout does per delivery.
 func (s *System) ListNotifiedSeries(ctx context.Context, userID int, profileID string) ([]NotifiedSeries, error) {
-	prefs, err := s.Preferences.Get(ctx, profileID)
+	prefs, err := s.Preferences.Get(ctx, userID, profileID)
 	if err != nil {
 		return nil, err
 	}

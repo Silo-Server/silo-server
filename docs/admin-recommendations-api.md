@@ -2,7 +2,7 @@
 
 Recommendation administration uses acting-administrator authorization. All six
 routes remain registered when the recommendation worker is absent and return
-`503` until it is available. The frozen v1 handlers remain unchanged.
+`503` until it is available.
 
 | Endpoint | Result |
 | --- | --- |
@@ -39,11 +39,12 @@ rebuilt or failed at least one profile. A profile whose rebuild keeps failing
 stays pending and shows as `failed` in each sweep's `result`.
 
 `lock_conflict` is empty unless the stored embedding lock rejects the
-embedding base URL or model this server runs with, or records a vector size
-Silo cannot store. It is then a sentence for the administrator that never
-quotes a base URL. Embedding settings take effect after a restart, so a saved
-but not yet applied change does not show here; the embedding connection check
-reports it instead. `cache_refreshed_at` is when the newest cached
+embedding endpoint or model this server runs with (including running with no
+embedding provider chosen), or records a vector size Silo cannot store. It is
+then a sentence for the administrator that never quotes a base URL. The
+embedding provider and model take effect after a restart, so a saved but not
+yet applied change does not show here; the embedding connection check reports
+it instead. A new key for the provider applies without a restart. `cache_refreshed_at` is when the newest cached
 recommendation row was written, by the cache job or a profile refresh; it is
 absent when nothing is cached. Profile refreshes keep it recent even while the
 cache job fails, so it does not show job health; `recommendations.last_run`
@@ -83,7 +84,14 @@ genre samplers) and co-watch pairs do not use embeddings and stay.
 The reset runs synchronously while holding the embeddings, taste profile and
 recommendation jobs' claims and the stale profile sweep's lock, so none of
 them runs beside it on any server. It returns `409` while any of them is
-running and `500` when the transaction fails, which leaves every row in place.
+running, while a catalog import with embeddings runs, or while a saved
+embedding model or embedding base URL differs from the one the server runs
+with (a saved change waiting for a server restart; other saved embedding
+settings, such as the auth token, do not block it), and `500` when the reset
+fails. A failure
+before the commit leaves every row in place. A failed commit can also answer
+`500` after PostgreSQL committed the reset, so read the status counts before
+retrying.
 A profile refresh that was already running when the reset committed can still
 write one taste profile from the old embeddings; the profile's next refresh
 after re-embedding replaces it.

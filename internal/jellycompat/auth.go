@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -19,11 +20,17 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 )
 
 type sessionContextKey string
 
-const compatSessionKey sessionContextKey = "jellycompat_session"
+const (
+	compatSessionKey sessionContextKey = "jellycompat_session"
+	// compatPlaybackGrantKey carries the negotiation whose PlaySessionId
+	// authorized a media request, when one did.
+	compatPlaybackGrantKey sessionContextKey = "jellycompat_playback_grant"
+)
 
 var mediaBrowserTokenPattern = regexp.MustCompile(`(?i)token="?([^",\s]+)"?`)
 
@@ -154,7 +161,7 @@ func (a *Authenticator) RequireSession(next http.Handler) http.Handler {
 					"token_prefix", safeTokenPrefix(token),
 					"error", logredact.SanitizeText(err.Error()),
 				)
-				a.sessions.Delete(token)
+				_ = a.sessions.Delete(token)
 				writeError(w, http.StatusUnauthorized, "Unauthorized", "Session expired")
 				return
 			}
@@ -201,8 +208,21 @@ func writeSessionCheckUnavailable(w http.ResponseWriter) {
 func writeSessionLookupFailed(w http.ResponseWriter, r *http.Request, token string, err error) {
 	if r.Context().Err() == nil {
 		slog.WarnContext(r.Context(), "jellycompat auth: session lookup failed; answering 503", "component", "jellycompat",
-			"path", r.URL.Path,
+			"path", redactHLSPlaySessionID(r.URL.Path),
 			"token_prefix", safeTokenPrefix(token),
+			"error", logredact.SanitizeText(err.Error()),
+		)
+	}
+	writeSessionCheckUnavailable(w)
+}
+
+// writePlaySessionLookupFailed answers a PlaySessionId-only request whose play
+// session could not be read from the playback store.
+func writePlaySessionLookupFailed(w http.ResponseWriter, r *http.Request, playSessionID string, err error) {
+	if r.Context().Err() == nil {
+		slog.WarnContext(r.Context(), "jellycompat auth: play session lookup failed; answering 503", "component", "jellycompat",
+			"path", redactHLSPlaySessionID(r.URL.Path),
+			"play_session", playSessionFingerprint(playSessionID),
 			"error", logredact.SanitizeText(err.Error()),
 		)
 	}
@@ -232,8 +252,14 @@ func safeTokenPrefix(token string) string {
 // serveWithSession injects the resolved compat session into the request context
 // and continues the handler chain.
 func serveWithSession(next http.Handler, w http.ResponseWriter, r *http.Request, session *Session) {
+	r = r.WithContext(ratelimit.WithAccount(r.Context(), session.StreamAppUserID))
+	serveWithSessionContext(next, w, r, session)
+}
+
+func serveWithSessionContext(next http.Handler, w http.ResponseWriter, r *http.Request, session *Session) {
 	attributeActivity(r, session)
 	ctx := context.WithValue(r.Context(), compatSessionKey, session)
+	ctx = withRequestScope(ctx, session)
 	ctx = playback.WithClientInfo(ctx, compatPlaybackClientInfo(r))
 	next.ServeHTTP(w, r.WithContext(ctx))
 }
@@ -340,18 +366,11 @@ func PlaybackSessionAuth(sessions *SessionStore, playbackStore CompatPlaybackSto
 			// builds its own direct-play URL with a lowercase "playSessionId"
 			// (and no api_key / auth header), so a case-sensitive match would
 			// miss it and 401 the stream — forcing a needless transcode fallback.
-			if playSessionID := newCaseInsensitiveQuery(r.URL.Query()).Get("PlaySessionId"); playSessionID != "" && playbackStore != nil {
-				if playSession, found := playbackStore.Get(playSessionID); found && playbackGrantMatchesRequest(r, playSession) {
-					session, ok, err := resolveCompatToken(r.Context(), sessions, keyAuth, playSession.CompatToken)
-					if err != nil {
-						writeSessionLookupFailed(w, r, playSession.CompatToken, err)
-						return
-					}
-					if ok {
-						serveWithSession(next, w, r, session)
-						return
-					}
-					writeError(w, http.StatusUnauthorized, "Unauthorized", "Session expired")
+			playSessionID := newCaseInsensitiveQuery(r.URL.Query()).Get("PlaySessionId")
+			var playSessionErr error
+			if playSessionID != "" && playbackStore != nil {
+				var handled bool
+				if handled, playSessionErr = servePlaySessionGrant(next, w, r, sessions, playbackStore, keyAuth, playSessionID); handled {
 					return
 				}
 			}
@@ -375,16 +394,50 @@ func PlaybackSessionAuth(sessions *SessionStore, playbackStore CompatPlaybackSto
 					}
 					if ok {
 						slog.InfoContext(r.Context(), "jellycompat static stream granted without credentials",
-							"play_session", grant.ID, "user_id", grant.UserID, "item_id", itemID, "media_source_id", sourceID, "client_ip", clientIP, "peer", requestPeerHost(r), "negotiated_peer", grant.ClientPeer)
-						serveWithSession(next, w, r, session)
+							"play_session", playSessionFingerprint(grant.ID), "user_id", grant.UserID, "item_id", itemID, "media_source_id", sourceID, "client_ip", clientIP, "peer", requestPeerHost(r), "negotiated_peer", grant.ClientPeer)
+						// This grant infers an owner from a shared address; the
+						// caller supplied no credential. Keep source/global
+						// protection without spending that owner's account budget.
+						serveWithSessionContext(next, w, r, session)
 						return
 					}
 				}
 			}
 
+			if playSessionErr != nil {
+				// The PlaySessionId grant was not judged: answer a retryable
+				// 503, not a 401 that reads as a revoked play session.
+				writePlaySessionLookupFailed(w, r, playSessionID, playSessionErr)
+				return
+			}
 			writeError(w, http.StatusUnauthorized, "Unauthorized", "Missing authentication token")
 		})
 	}
+}
+
+// servePlaySessionGrant answers a request through the play session that
+// playSessionID names when that session grants it. It reports handled=false
+// when the session is absent or does not cover the request, with the store
+// error when the session could not be read.
+func servePlaySessionGrant(
+	next http.Handler, w http.ResponseWriter, r *http.Request,
+	sessions *SessionStore, playbackStore CompatPlaybackStore, keyAuth *AdminAPIKeyAuthenticator,
+	playSessionID string,
+) (bool, error) {
+	playSession, found, err := playbackStore.Lookup(playSessionID)
+	if err != nil || !found || !playbackGrantMatchesRequest(r, playSession) {
+		return false, err
+	}
+	session, ok, err := resolveCompatToken(r.Context(), sessions, keyAuth, playSession.CompatToken)
+	switch {
+	case err != nil:
+		writeSessionLookupFailed(w, r, playSession.CompatToken, err)
+	case ok:
+		serveWithSession(next, w, r.WithContext(context.WithValue(r.Context(), compatPlaybackGrantKey, playSession)), session)
+	default:
+		writeError(w, http.StatusUnauthorized, "Unauthorized", "Session expired")
+	}
+	return true, nil
 }
 
 // staticStreamGrantIdle bounds how long after its last activity (PlaybackInfo,
@@ -449,14 +502,51 @@ func touchStaticStreamGrant(store CompatPlaybackStore, playSession *PlaybackSess
 }
 
 func playbackGrantMatchesRequest(r *http.Request, session *PlaybackSession) bool {
-	if session == nil || session.Terminal || (r.Method != http.MethodGet && r.Method != http.MethodHead) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		return false
 	}
 	itemID := firstNonEmpty(chi.URLParam(r, "id"), chi.URLParam(r, "routeItemId"))
-	if itemID == "" || !mediaSourceIDsEqual(itemID, session.RouteItemID) {
+	sourceID := chi.URLParam(r, "routeMediaSourceId")
+	if sourceID == "" {
+		var ok bool
+		if sourceID, ok = queryMediaSourceID(r.URL.Query()); !ok {
+			return false
+		}
+	}
+	return playbackGrantCovers(session, itemID, sourceID)
+}
+
+// queryMediaSourceID is the MediaSourceId query value in any spelling the
+// handlers read (newCaseInsensitiveQuery also takes "MediaSourceId[]"), and
+// false when spellings carry different sources: the grant check and the
+// handler each read the key case-insensitively, and the lookup would pick one
+// arbitrarily. Empty values name no source.
+func queryMediaSourceID(query url.Values) (string, bool) {
+	sourceID := ""
+	for key, values := range query {
+		if !strings.EqualFold(strings.TrimSuffix(key, "[]"), "MediaSourceId") {
+			continue
+		}
+		for _, value := range values {
+			if value == "" {
+				continue
+			}
+			if sourceID != "" && !mediaSourceIDsEqual(sourceID, value) {
+				return "", false
+			}
+			sourceID = value
+		}
+	}
+	return sourceID, true
+}
+
+// playbackGrantCovers reports whether a live negotiation authorizes media
+// requests for routeItemID, the item as the request path names it, and for
+// sourceID when the request names one.
+func playbackGrantCovers(session *PlaybackSession, routeItemID, sourceID string) bool {
+	if session == nil || session.Terminal || routeItemID == "" || !mediaSourceIDsEqual(routeItemID, session.RouteItemID) {
 		return false
 	}
-	sourceID := firstNonEmpty(chi.URLParam(r, "routeMediaSourceId"), newCaseInsensitiveQuery(r.URL.Query()).Get("MediaSourceId"))
 	if sourceID == "" {
 		return true
 	}
@@ -466,6 +556,13 @@ func playbackGrantMatchesRequest(r *http.Request, session *PlaybackSession) bool
 		}
 	}
 	return false
+}
+
+// playbackGrantFromContext returns the negotiation whose PlaySessionId
+// authorized the request, or nil when a token did.
+func playbackGrantFromContext(ctx context.Context) *PlaybackSession {
+	grant, _ := ctx.Value(compatPlaybackGrantKey).(*PlaybackSession)
+	return grant
 }
 
 // SessionFromContext returns the authenticated compat session, if present.

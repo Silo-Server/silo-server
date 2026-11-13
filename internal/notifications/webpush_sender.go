@@ -99,7 +99,7 @@ func newWebPushSender(
 // or revoked subscriptions (404/410 from the push service) are deleted —
 // that is the protocol's unsubscribe signal, not a failure to retry.
 func (s *webPushSender) processAttempt(ctx context.Context, attempt DeliveryAttempt) {
-	sub, err := s.subscriptions.getByIDUnscoped(ctx, attempt.TargetID)
+	sub, loginLive, err := s.subscriptions.getByIDUnscoped(ctx, attempt.TargetID)
 	if err != nil || sub == nil {
 		if err == nil {
 			_ = s.subscriptions.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeFailed,
@@ -110,6 +110,13 @@ func (s *webPushSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 	if !sub.Enabled || !s.settings.WebPushEnabled(ctx) {
 		_ = s.subscriptions.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeFailed,
 			attempt.AttemptNumber+1, nil, "subscription disabled", nil)
+		return
+	}
+	// The attempt may have been queued while the login was live; retries run for
+	// half an hour after that.
+	if !loginLive {
+		_ = s.subscriptions.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeFailed,
+			attempt.AttemptNumber+1, nil, "login session ended", nil)
 		return
 	}
 	row, err := s.deliveries.GetRowByID(ctx, attempt.NotificationDeliveryID)
@@ -129,9 +136,10 @@ func (s *webPushSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 			attempt.AttemptNumber+1, nil, "delivery row missing", nil)
 		return
 	}
-	if row.ProfileID != sub.ProfileID {
-		// The endpoint was reassigned to a different profile between enqueue
-		// and dispatch; this delivery belongs to the previous owner.
+	if row.UserID != sub.UserID || row.ProfileID != sub.ProfileID {
+		// The endpoint was reassigned to a different profile, possibly one
+		// with the same ID on another account, between enqueue and dispatch;
+		// this delivery belongs to the previous owner.
 		_ = s.subscriptions.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeFailed,
 			attempt.AttemptNumber+1, nil, "subscription reassigned", nil)
 		return

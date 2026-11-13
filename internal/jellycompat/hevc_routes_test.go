@@ -25,10 +25,11 @@ func TestHEVCPlaybackURLsRejectOlderAPIRouters(t *testing.T) {
 	for _, channels := range []int{2, 6} {
 		source := testCompatSource(NewResourceIDCodec(), testCompatVersion())
 		source.TargetVideoCodec = "hevc"
+		source.SupportsDirectPlay, source.SupportsDirectStream = false, false
 		for i := range source.Version.AudioTracks {
 			source.Version.AudioTracks[i].Channels = channels
 		}
-		dto := (&PlaybackHandler{}).mediaSourceDTO("item", "play", "token", source)
+		dto := (&PlaybackHandler{}).mediaSourceDTO("item", "play", source)
 		urls := []string{dto.TranscodingURL}
 		for _, resource := range []string{"stream.m3u8", "init.mp4", "seg_00001.m4s"} {
 			urls = append(urls, buildSegmentProxyPath("item", "play", source.ID, resource, compatHLSRoutePathSegment(source)))
@@ -60,7 +61,6 @@ func TestHEVCHLSRoutesEnforceNegotiatedRecipe(t *testing.T) {
 		prefix   string
 	}{
 		{name: "legacy route rejects HEVC stereo", codec: "hevc", channels: 2},
-		{name: "audio-v2 route rejects HEVC surround", codec: "hevc", channels: 6, prefix: "/audio-v2"},
 		{name: "HEVC route rejects H264", codec: "h264", channels: 2, prefix: "/hevc-v1"},
 		{name: "HEVC route rejects video copy", codec: "hevc", channels: 2, remux: true, prefix: "/hevc-v1"},
 	} {

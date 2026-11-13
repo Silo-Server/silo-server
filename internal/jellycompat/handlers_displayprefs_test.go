@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -22,11 +21,11 @@ func TestDisplayPreferencesPreserveLegacyPrimaryCustomization(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := NewDisplayPreferencesHandler(compatTestUserStoreProvider{store: store})
-	read := func(profileID string) displayPreferencesDTO {
+	readID := func(profileID, id string) displayPreferencesDTO {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodGet, "/DisplayPreferences/usersettings?client=emby", nil)
+		req := httptest.NewRequest(http.MethodGet, "/DisplayPreferences/"+id+"?client=emby", nil)
 		route := chi.NewRouteContext()
-		route.URLParams.Add("displayPreferencesId", "usersettings")
+		route.URLParams.Add("displayPreferencesId", id)
 		ctx := context.WithValue(req.Context(), chi.RouteCtxKey, route)
 		ctx = context.WithValue(ctx, compatSessionKey, &Session{StreamAppUserID: 1, ProfileID: profileID})
 		rec := httptest.NewRecorder()
@@ -40,6 +39,7 @@ func TestDisplayPreferencesPreserveLegacyPrimaryCustomization(t *testing.T) {
 		}
 		return dto
 	}
+	read := func(profileID string) displayPreferencesDTO { return readID(profileID, "usersettings") }
 	if got := read("profile-1"); got.SortBy != "DateCreated" || got.CustomPrefs["homesection0"] != "resume" {
 		t.Fatalf("legacy customization lost: %+v", got)
 	}
@@ -52,77 +52,20 @@ func TestDisplayPreferencesPreserveLegacyPrimaryCustomization(t *testing.T) {
 	if got := read("profile-1"); got.SortBy != "ProductionYear" {
 		t.Fatalf("scoped customization overwritten: %+v", got)
 	}
-}
 
-// TestDisplayPreferencesRoundTripUsesDedicatedTable drives the handlers over a
-// real store: an update persists to jellycompat_displayprefs — not to the
-// user_settings table the blobs used to ride — and a subsequent get serves it
-// back.
-func TestDisplayPreferencesRoundTripUsesDedicatedTable(t *testing.T) {
-	store := newJellycompatUserStore(t)
-	handler := NewDisplayPreferencesHandler(compatTestUserStoreProvider{store: store})
-
-	newRequest := func(method, target, body string) *http.Request {
-		req := httptest.NewRequest(method, target, strings.NewReader(body))
-		routeCtx := chi.NewRouteContext()
-		routeCtx.URLParams.Add("displayPreferencesId", "usersettings")
-		ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
-		ctx = context.WithValue(ctx, compatSessionKey, &Session{StreamAppUserID: 1, ProfileID: "profile-1"})
-		return req.WithContext(ctx)
+	// Older servers stored an ID that reads like a route word under its
+	// rewritten case (#2990); the exact-case document wins once it exists.
+	if err := store.SetJellycompatDisplayPrefs(t.Context(), profilePreferencesID("profile-1", "Items"), "emby", `{"Id":"Items","SortBy":"DateCreated","Client":"emby"}`); err != nil {
+		t.Fatal(err)
 	}
-
-	rec := httptest.NewRecorder()
-	handler.HandleUpdateDisplayPreferences(rec, newRequest(http.MethodPost,
-		"/DisplayPreferences/usersettings?client=emby",
-		`{"SortBy":"DateCreated","SortOrder":"Descending","CustomPrefs":{"homesection0":"resume"}}`))
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("update status = %d body=%s", rec.Code, rec.Body.String())
+	if got := readID("profile-1", "items"); got.SortBy != "DateCreated" || got.ID != "items" {
+		t.Fatalf("rewritten-key customization lost: %+v", got)
 	}
-
-	// The blob lands in the dedicated table under (id, client)...
-	stored, err := store.GetJellycompatDisplayPrefs(t.Context(), profilePreferencesID("profile-1", "usersettings"), "emby")
-	if err != nil || stored == "" {
-		t.Fatalf("dedicated table holds (%q, %v), want the stored blob", stored, err)
+	if err := store.SetJellycompatDisplayPrefs(t.Context(), profilePreferencesID("profile-1", "items"), "emby", `{"SortBy":"Random"}`); err != nil {
+		t.Fatal(err)
 	}
-	// ...and nowhere in the legacy settings table.
-	entries, err := store.ListSettings(context.Background())
-	if err != nil {
-		t.Fatalf("ListSettings: %v", err)
-	}
-	for _, entry := range entries {
-		if strings.HasPrefix(entry.Key, "jellycompat:") {
-			t.Errorf("user_settings still carries %s", entry.Key)
-		}
-	}
-
-	rec = httptest.NewRecorder()
-	handler.HandleGetDisplayPreferences(rec, newRequest(http.MethodGet,
-		"/DisplayPreferences/usersettings?client=emby", ""))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("get status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	var dto displayPreferencesDTO
-	if err := json.NewDecoder(rec.Body).Decode(&dto); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if dto.SortBy != "DateCreated" || dto.SortOrder != "Descending" ||
-		dto.CustomPrefs["homesection0"] != "resume" {
-		t.Fatalf("round-trip lost data: %+v", dto)
-	}
-
-	// A different client for the same id keeps its own document.
-	rec = httptest.NewRecorder()
-	handler.HandleGetDisplayPreferences(rec, newRequest(http.MethodGet,
-		"/DisplayPreferences/usersettings?client=jellyfin-web", ""))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("other-client get status = %d", rec.Code)
-	}
-	var other displayPreferencesDTO
-	if err := json.NewDecoder(rec.Body).Decode(&other); err != nil {
-		t.Fatalf("decode other client: %v", err)
-	}
-	if other.SortBy == "DateCreated" {
-		t.Fatal("another client's read returned the emby document")
+	if got := readID("profile-1", "items"); got.SortBy != "Random" {
+		t.Fatalf("exact-case document not preferred: %+v", got)
 	}
 }
 
@@ -148,53 +91,5 @@ func TestNormalizeSavedCustomPrefsJellyfin12(t *testing.T) {
 	normalizeSavedCustomPrefs(kept)
 	if kept["skipForwardLength"] != "30000" || kept["skipBackLength"] != "5000" {
 		t.Fatalf("explicit skip lengths overwritten: %v", kept)
-	}
-}
-
-// Jellyfin Web posts the whole usersettings document back. Reads must carry
-// Jellyfin's 10 s/30 s skip defaults so an unrelated save keeps them instead
-// of storing the 15 s write fallback.
-func TestDisplayPreferencesReadThenSaveKeepsSkipDefaults(t *testing.T) {
-	store := newJellycompatUserStore(t)
-	handler := NewDisplayPreferencesHandler(compatTestUserStoreProvider{store: store})
-	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
-
-	rec := httptest.NewRecorder()
-	handler.HandleGetDisplayPreferences(rec, viewerRequest("GET", "/?client=emby", "", "displayPreferencesId", "usersettings", session))
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(rec.Body.Bytes(), &fields); err != nil {
-		t.Fatalf("decode display preferences fields: %v", err)
-	}
-	for _, name := range []string{"PrimaryImageHeight", "PrimaryImageWidth"} {
-		if _, ok := fields[name]; !ok {
-			t.Fatalf("%s missing from display preferences JSON", name)
-		}
-	}
-	var dto displayPreferencesDTO
-	if err := json.NewDecoder(rec.Body).Decode(&dto); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if dto.CustomPrefs["skipBackLength"] != "10000" || dto.CustomPrefs["skipForwardLength"] != "30000" {
-		t.Fatalf("read defaults = %v", dto.CustomPrefs)
-	}
-
-	dto.CustomPrefs["appTheme"] = "dark"
-	body, err := json.Marshal(dto)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rec = httptest.NewRecorder()
-	handler.HandleUpdateDisplayPreferences(rec, viewerRequest("POST", "/?client=emby", string(body), "displayPreferencesId", "usersettings", session))
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("update status = %d %s", rec.Code, rec.Body.String())
-	}
-	rec = httptest.NewRecorder()
-	handler.HandleGetDisplayPreferences(rec, viewerRequest("GET", "/?client=emby", "", "displayPreferencesId", "usersettings", session))
-	dto = displayPreferencesDTO{}
-	if err := json.NewDecoder(rec.Body).Decode(&dto); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if dto.CustomPrefs["skipBackLength"] != "10000" || dto.CustomPrefs["skipForwardLength"] != "30000" || dto.CustomPrefs["appTheme"] != "dark" {
-		t.Fatalf("round trip = %v", dto.CustomPrefs)
 	}
 }

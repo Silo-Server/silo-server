@@ -20,24 +20,20 @@ import (
 	"github.com/Silo-Server/silo-server/internal/logstream"
 )
 
-// excludedPrefixes are paths that should not be logged. The admin log
-// endpoints are excluded on both majors because the log viewer polls them:
-// logging a read of the activity log into the activity log feeds itself.
-// Keep the v1 and v2 entries in step — /api/v2/admin/logs covers the app,
-// audit, ws, ws-ticket and ws/capabilities operations under that prefix.
+// excludedPrefixes are paths that should not be logged: the retained
+// operational probes, and the admin log endpoints, which the log viewer
+// polls (logging a read of the activity log into the activity log feeds
+// itself). /api/v2/admin/logs covers the app, audit, ws, ws-ticket and
+// ws/capabilities operations under that prefix.
 var excludedPrefixes = []string{
 	"/api/v1/health",
 	"/api/v1/ready",
-	"/api/v1/admin/logs",
 	"/api/v2/admin/logs",
 }
 
-// streamPrefixes are paths logged only at session-start (not per-chunk).
-// Both majors serve the same segment/manifest/subtitle shapes, so a v2
-// playback session would otherwise write one activity row per chunk.
+// streamPrefixes are paths logged only at session-start (not per-chunk), so
+// a playback session does not write one activity row per chunk.
 var streamPrefixes = []string{
-	"/api/v1/stream/",
-	"/api/v1/playback/transcode/",
 	"/api/v2/stream/",
 	"/api/v2/playback/transcode/",
 }
@@ -154,15 +150,17 @@ func NewFilteredMiddleware(w Writer, nodeID string, skipRoute func(pattern strin
 				Path:               path,
 				PathPattern:        pathPattern,
 				StatusCode:         RecordedStatus(r, wrapped.status, wrapped.wroteHeader),
-				UserAgent:          r.UserAgent(),
+				UserAgent:          auditmutation.BoundUserAgent(r.UserAgent()),
 				DurationMs:         int(time.Since(start).Milliseconds()),
 			}
 
 			// Domain rows already persisted atomically; avoid a second success
-			// row for the same operation. Preserve a later HTTP failure separately.
+			// row for the same operation, but still count it as the account's
+			// activity. Preserve a later HTTP failure separately.
 			for _, committed := range lc.Committed {
 				if committed.StatusCode == wrapped.status {
-					return
+					entry.Persisted = true
+					break
 				}
 			}
 			w.Write(entry)
@@ -187,30 +185,10 @@ func RecordedStatus(r *http.Request, status int, wrote bool) int {
 }
 
 // RedactSecretPathParams strips bearer credentials from a request path before
-// it reaches any log sink. Public webhook endpoints authenticate via a secret
-// path segment (chi route params named "token" or "secret" — autoscan webhook
-// intake, webhook-sync); logging the raw path would persist the credential in
-// app logs and the activity table. Must be called after the handler chain ran
-// so the chi route context is populated.
+// it reaches any log sink (auditmutation.RedactSecretPath). Must be called
+// after the handler chain ran so the chi route context is populated.
 func RedactSecretPathParams(r *http.Request, path string) string {
-	routeCtx := chi.RouteContext(r.Context())
-	if routeCtx == nil {
-		return path
-	}
-	for i, key := range routeCtx.URLParams.Keys {
-		if key != "token" && key != "secret" {
-			continue
-		}
-		if i >= len(routeCtx.URLParams.Values) {
-			continue
-		}
-		value := routeCtx.URLParams.Values[i]
-		if value == "" {
-			continue
-		}
-		path = strings.Replace(path, "/"+value, "/[redacted]", 1)
-	}
-	return path
+	return auditmutation.RedactSecretPath(chi.RouteContext(r.Context()), path)
 }
 
 // isStreamChunk returns true if the path looks like a stream segment/manifest

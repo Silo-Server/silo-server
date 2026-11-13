@@ -19,6 +19,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
 )
 
 // Playback service seams for the v2 adapter (internal/apiv2/playback.go).
@@ -33,6 +34,7 @@ import (
 // of one v2 playback request. InstallationID is the value the client read
 // from capabilities; a mutation from a different installation is refused.
 type PlaybackCaller struct {
+	ConnectionDeviceID                                    string
 	UserID                                                int
 	ProfileID, InstallationID                             string
 	DeviceID, DeviceName, Platform                        string
@@ -53,6 +55,11 @@ type PlaybackCapabilitiesView struct {
 	ProtocolVersions                []int
 	Features                        []string
 	Deliveries                      []playback.DeliveryV3
+	// The connection speed test's schedule, with connection_speed_v1. A zero
+	// target means the server has no bitrates to set one from.
+	BandwidthProbeTargetKbps    int
+	BandwidthProbeAutomatic     bool
+	BandwidthProbeMaxAgeSeconds int
 }
 
 const playbackCapabilityStateAvailable = "available"
@@ -67,13 +74,6 @@ type PlaybackOperationError struct {
 func (e *PlaybackOperationError) Error() string { return e.Message }
 func playbackOperationError(status int, code, message string) *PlaybackOperationError {
 	return &PlaybackOperationError{Status: status, Code: code, Message: message}
-}
-func writePlaybackOperationError(w http.ResponseWriter, err error) {
-	if e, ok := errors.AsType[*PlaybackOperationError](err); ok {
-		writeError(w, e.Status, e.Code, e.Message)
-		return
-	}
-	writeError(w, http.StatusInternalServerError, "internal_error", "Playback operation failed")
 }
 func playbackFileOperationError(err error) error {
 	if errors.Is(err, catalog.ErrItemNotFound) || errors.Is(err, catalog.ErrEpisodeNotFound) {
@@ -185,14 +185,18 @@ func (h *PlaybackHandler) PlaybackCapabilities(ctx context.Context, userID int, 
 		return view, playbackOperationError(http.StatusConflict, "capability_not_configured", "Playback installation identity is not configured")
 	}
 	view.InstallationID = h.InstallationID
-	view.Features = append(playback.NativeServerFeaturesV3(), "sequenced_progress_v1", "fixed_media_file_v1", "marker_segments_v1", "trickplay_v1", "bandwidth_probe_v1")
+	view.Features = append(playback.NativeServerFeaturesV3(), "sequenced_progress_v1", "fixed_media_file_v1", "marker_segments_v1", "trickplay_v1", "bandwidth_probe_v1", playback.FeatureConnectionSpeedV1)
 	if h.WatchTogetherAvailable {
 		view.Features = append(view.Features, "watch_party_source_fallback_v1", "watch_party_coordinator_v1")
 	}
 	view.Deliveries = []playback.DeliveryV3{playback.DeliveryOriginalHTTPV3, playback.DeliveryRemuxProgressiveV3, playback.DeliveryRemuxHLSV3}
-	if h.playbackConfig().TranscodeEnabled {
+	settings := h.playbackConfig()
+	if settings.TranscodeEnabled {
 		view.Deliveries = append(view.Deliveries, playback.DeliveryTranscodeHLSV3)
 	}
+	view.BandwidthProbeAutomatic = !settings.AutomaticBandwidthProbeOff
+	view.BandwidthProbeMaxAgeSeconds = int(settings.BandwidthProbeMaxAge() / time.Second)
+	view.BandwidthProbeTargetKbps = h.bandwidthProbeTargetKbps(ctx)
 	capability, _ := json.Marshal(view) // This view contains only JSON-safe scalar values.
 	digest := sha256.Sum256(capability)
 	view.Revision = hex.EncodeToString(digest[:])
@@ -202,12 +206,17 @@ func (h *PlaybackHandler) PlaybackCapabilities(ctx context.Context, userID int, 
 // The application pipeline still uses private request-based routing helpers.
 // This request contains only caller facts; it is never dispatched to an HTTP
 // handler and never carries credentials, a body stream, or a response writer.
-// nativeAPIV2ContextKey marks a request that arrived through /api/v2.
+// nativeAPIV2ContextKey marks a personal-collection read that renders poster
+// collages.
 type nativeAPIV2ContextKey struct{}
+type playbackConnectionDeviceContextKey struct{}
 
-// WithNativeAPIV2 marks ctx as serving /api/v2. The playback and stream
-// handlers are shared with the frozen /api/v1 routes, and contract additions
-// made after that freeze (subrip_sidecar_v1) apply only under this mark.
+// playbackDeclaredDeviceContextKey carries PlaybackCaller.DeclaredDevice
+// beside the request playbackCallerRequest builds.
+type playbackDeclaredDeviceContextKey struct{}
+
+// WithNativeAPIV2 marks a personal-collection read as one of the list
+// operations that render poster collages (see collagesForRead).
 func WithNativeAPIV2(ctx context.Context) context.Context {
 	return context.WithValue(ctx, nativeAPIV2ContextKey{}, true)
 }
@@ -215,17 +224,6 @@ func WithNativeAPIV2(ctx context.Context) context.Context {
 func isNativeAPIV2(ctx context.Context) bool {
 	native, _ := ctx.Value(nativeAPIV2ContextKey{}).(bool)
 	return native
-}
-
-// serverFeaturesForRequestV3 is the feature list a decision advertises on the
-// surface the request arrived through. The decision is persisted as the
-// attempt's StartResponse, so a /api/v2 decision also records durably that
-// this server offered subrip_sidecar_v1 to the attempt.
-func serverFeaturesForRequestV3(ctx context.Context) []string {
-	if isNativeAPIV2(ctx) {
-		return playback.NativeServerFeaturesV3()
-	}
-	return playback.ServerFeaturesV3()
 }
 
 // attemptNegotiatedSubRipV3 reports whether an attempt negotiated original SRT.
@@ -242,25 +240,16 @@ func attemptNegotiatedSubRipV3(record *playback.AttemptRecordV3) bool {
 		playback.HasFeatureV3(record.StartResponse.ServerFeatures, playback.FeatureSubripSidecarV3)
 }
 
-// requireAttemptAPISurfaceV3 keeps an attempt on the API surface that
-// negotiated its SRT representation. /api/v1 must not continue an attempt that
-// negotiated original SRT: v1 would replay or replan its .srt?original=1 URLs,
-// including ones for tracks that appear later, on a route that serves WebVTT
-// for them. And a start retried through /api/v2 with subrip_sidecar_v1 must
-// not replay an attempt negotiated without it, which would break the feature's
-// promise. requested is the retried start's feature list; replans pass nil
-// because a replan keeps the negotiated representation anyway. The error
-// reuses the existing playback_attempt_reused code so /api/v1 gains no new
-// contract.
-func requireAttemptAPISurfaceV3(ctx context.Context, record *playback.AttemptRecordV3, requested []string) error {
+// requireAttemptAPISurfaceV3 keeps an attempt on the SRT representation it
+// negotiated: a start retried with subrip_sidecar_v1 must not replay an
+// attempt negotiated without it, which would break the feature's promise.
+// requested is the retried start's feature list; replans pass nil because a
+// replan keeps the negotiated representation anyway.
+func requireAttemptAPISurfaceV3(record *playback.AttemptRecordV3, requested []string) error {
 	if record == nil {
 		return nil
 	}
-	negotiated := attemptNegotiatedSubRipV3(record)
-	switch {
-	case !isNativeAPIV2(ctx) && negotiated:
-		return playbackOperationError(http.StatusConflict, "playback_attempt_reused", "The playback attempt belongs to an /api/v2 session")
-	case isNativeAPIV2(ctx) && !negotiated && playback.HasFeatureV3(requested, playback.FeatureSubripSidecarV3):
+	if !attemptNegotiatedSubRipV3(record) && playback.HasFeatureV3(requested, playback.FeatureSubripSidecarV3) {
 		return playbackOperationError(http.StatusConflict, "playback_attempt_reused", "The playback attempt was negotiated without subrip_sidecar_v1")
 	}
 	return nil
@@ -292,6 +281,8 @@ func withNativeServerFeaturesV3(response playback.DecisionResponseV3) playback.D
 
 func playbackCallerRequest(ctx context.Context, caller PlaybackCaller) *http.Request {
 	headers := make(http.Header)
+	ctx = context.WithValue(ctx, playbackConnectionDeviceContextKey{}, caller.ConnectionDeviceID)
+	ctx = context.WithValue(ctx, playbackDeclaredDeviceContextKey{}, caller.DeclaredDevice)
 	headers.Set(deviceIDHeader, caller.DeviceID)
 	headers.Set(deviceNameHeader, caller.DeviceName)
 	headers.Set(devicePlatformHeader, caller.Platform)
@@ -300,7 +291,7 @@ func playbackCallerRequest(ctx context.Context, caller PlaybackCaller) *http.Req
 	headers.Set("X-Silo-Client-Version", caller.ClientVersion)
 	headers.Set("X-Silo-Client-Build", caller.ClientBuild)
 	headers.Set("X-Silo-Client-Channel", caller.ClientChannel)
-	return (&http.Request{Header: headers, RemoteAddr: caller.RemoteAddr, URL: &url.URL{}}).WithContext(WithNativeAPIV2(ctx))
+	return (&http.Request{Header: headers, RemoteAddr: caller.RemoteAddr, URL: &url.URL{}}).WithContext(ctx)
 }
 
 // playbackCallerSessionRequest is playbackCallerRequest with the routed
@@ -368,6 +359,7 @@ func (h *PlaybackHandler) ApplyProgressV2(ctx context.Context, caller PlaybackCa
 	case err != nil:
 		return PlaybackMutationView{}, playbackStoreOperationError()
 	}
+	h.publishSequencedPause(ctx, sessionID, receipt.Lifecycle)
 	view := PlaybackMutationView{Outcome: receipt.Outcome, Accepted: acceptedProgressV2(receipt.Accepted)}
 	// An applied sample persists. A replayed one (the exact latest sample
 	// again) persists too: the client retried because the first reply was
@@ -522,6 +514,11 @@ func (h *PlaybackHandler) StopPlaybackV2(ctx context.Context, caller PlaybackCal
 	if id, err := uuid.Parse(command.StopID); err != nil || id == uuid.Nil || id.String() != command.StopID {
 		return PlaybackMutationView{}, playbackOperationError(http.StatusBadRequest, "bad_request", "A canonical stop_id is required")
 	}
+	if serverStopID(sessionID, command.StopID) {
+		// The server's own stop ids say who ended the attempt; a client
+		// stop must not claim one.
+		return PlaybackMutationView{}, playbackOperationError(http.StatusBadRequest, "bad_request", "The stop_id is reserved")
+	}
 	if command.Sequence < 0 || (command.Position == nil) != (command.Sequence == 0) ||
 		(command.Position != nil && (*command.Position < 0 || math.IsNaN(*command.Position) || math.IsInf(*command.Position, 0))) {
 		return PlaybackMutationView{}, playbackOperationError(http.StatusBadRequest, "bad_request", "Invalid stop identity or final sample")
@@ -603,7 +600,7 @@ func (h *PlaybackHandler) finalizeStopV2(ctx context.Context, store playback.Pro
 			}
 		}
 	}
-	receipt.HistoryID = h.finishStopV2(ctx, record, sessionID, receipt.Accepted)
+	receipt.HistoryID = h.finishStopV2(ctx, record, sessionID, receipt.Accepted, endReasonForStop(sessionID, receipt.StopID))
 	receipt.Finalized = true
 	if err := store.RecordStopReceipt(ctx, sessionID, receipt); err != nil {
 		slog.WarnContext(ctx, "failed to record playback stop receipt", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
@@ -616,7 +613,19 @@ func (h *PlaybackHandler) finalizeStopV2(ctx context.Context, store playback.Pro
 // finalizer runs the history writer), the history writer directly from a
 // session synthesized from the attempt row otherwise. The deny marker is
 // written in both cases. It returns the watch-history id when one was made.
-func (h *PlaybackHandler) finishStopV2(ctx context.Context, record *playback.AttemptRecordV3, sessionID string, accepted *playback.ProgressSampleV3) string {
+// reason is the end reason of the stop that won the row: a replayed stop can
+// finish an administrator's or an expiry's.
+func (h *PlaybackHandler) finishStopV2(ctx context.Context, record *playback.AttemptRecordV3, sessionID string, accepted *playback.ProgressSampleV3, reason PlaybackEndReason) string {
+	historyID, err := h.finishStop(ctx, record, sessionID, accepted, reason)
+	if err != nil {
+		slog.WarnContext(ctx, "failed to stop playback session", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
+	}
+	return historyID
+}
+
+// finishStop is finishStopV2 reporting a failure to stop the live copy here,
+// for callers that answer with it.
+func (h *PlaybackHandler) finishStop(ctx context.Context, record *playback.AttemptRecordV3, sessionID string, accepted *playback.ProgressSampleV3, reason PlaybackEndReason) (string, error) {
 	h.StreamDeny.Deny(ctx, sessionID)
 	position, paused := 0.0, false
 	if accepted != nil {
@@ -628,18 +637,31 @@ func (h *PlaybackHandler) finishStopV2(ctx context.Context, record *playback.Att
 				slog.WarnContext(ctx, "failed to apply final playback position", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
 			}
 		}
-		result, err := h.stopPlaybackSessionWithResult(ctx, session, true)
+		result, err := h.stopPlaybackSessionWithResult(ctx, session, reason)
 		if err == nil {
-			return result.HistoryID
+			return result.HistoryID, nil
 		}
 		if !errors.Is(err, playback.ErrSessionNotFound) {
-			slog.WarnContext(ctx, "failed to stop playback session", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
-			return ""
+			return "", err
 		}
 		// Lost the race with another stop of the live session; fall through to
 		// the row-synthesized writer so the final sample is still recorded.
 	}
-	return h.persistStopAndHistory(ctx, h.attemptSessionV2(ctx, record, position, paused)).HistoryID
+	// No copy here to finalize: the copy on another replica, if any, finds
+	// the attempt stopped and is dropped without history, so the admin log
+	// is written from the attempt row and the live row that copy synced.
+	if accepted == nil {
+		position = playback.PositionUnknown
+	}
+	session := h.attemptSessionV2(ctx, record, position, paused)
+	h.fillDetachedSession(ctx, session, record.CreatedAt)
+	result := h.recordStopHistory(ctx, session, reason)
+	// The copy on another replica is dropped without telling providers, so
+	// the end recorded here does, unless its caller tells them itself.
+	if !leaveProviderNotice(ctx) {
+		h.notifyStoppedSession(ctx, session, result, reason)
+	}
+	return result.HistoryID, nil
 }
 
 // attemptSessionV2 synthesizes the session the v1 writers read when this
@@ -728,8 +750,9 @@ func (h *PlaybackHandler) ReplanPlaybackV2(ctx context.Context, caller PlaybackC
 	return withNativeServerFeaturesV3(response), err
 }
 
-// ReportRouteEventV2 is POST /api/v2/playback/route-events. The event is
-// queued and never waits on the store; event_id dedups a retried report.
+// ReportRouteEventV2 is POST /api/v2/playback/route-events. Only the ownership
+// check waits on the store; the event itself is queued, and event_id dedups a
+// retried report.
 func (h *PlaybackHandler) ReportRouteEventV2(ctx context.Context, caller PlaybackCaller, command PlaybackRouteEventCommand) error {
 	if err := h.validatePlaybackCaller(ctx, caller); err != nil {
 		return err
@@ -763,7 +786,14 @@ func (h *PlaybackHandler) ReportRouteEventV2(ctx context.Context, caller Playbac
 		return playbackOperationError(http.StatusForbidden, "forbidden", "Route event does not belong to this profile")
 	}
 	event.Diagnostics = sanitizeDiagnosticsV3(event.Diagnostics)
-	h.enqueueRouteEventV3(playback.RouteEventRecordV3{RouteEventV3: event, EventID: command.EventID, UserID: caller.UserID, ProfileID: caller.ProfileID, ClientName: caller.ClientName, ClientVersion: caller.ClientVersion, ClientBuild: caller.ClientBuild, ClientChannel: caller.ClientChannel, ClientModel: event.Diagnostics["device_model"]})
+	record := playback.RouteEventRecordV3{RouteEventV3: event, EventID: command.EventID, UserID: caller.UserID, ProfileID: caller.ProfileID, ClientName: caller.ClientName, ClientVersion: caller.ClientVersion, ClientBuild: caller.ClientBuild, ClientChannel: caller.ClientChannel, ClientModel: event.Diagnostics["device_model"]}
+	if event.Event == playback.RouteEventPlanSummaryV3 {
+		record.ConnectionDeviceID = connectionDeviceV3(caller.ConnectionDeviceID)
+		record.ConnectionKey, _ = connectionstore.Key(ctx, h.JWTSecret)
+		record.ReceivedAt = time.Now().UTC()
+		record.SampleLifetime = h.playbackConfig().BandwidthProbeMaxAge()
+	}
+	h.enqueueRouteEventV3(record)
 	return nil
 }
 
@@ -783,21 +813,15 @@ func validatePlaybackSessionID(sessionID string) error {
 }
 
 // expiredStopID is the server-minted stop identity recorded on the attempt
-// row when a session ends without a client stop (expiry, abort).
+// row when the liveness reaper ends a session.
 func expiredStopID(sessionID string) string {
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("silo-expired:"+sessionID)).String()
 }
 
-// markAttemptStoppedServerSide stops the attempt row under the server-minted
-// stop id and writes the deny marker, so a stopped or expired session cannot
-// be replayed from its start attempt or served from a valid token on another
-// replica. Best effort: the local teardown has already happened.
-func (h *PlaybackHandler) markAttemptStoppedServerSide(ctx context.Context, sessionID string) {
-	if h == nil {
-		return
-	}
-	markAttemptStoppedServerSide(ctx, h.PlanStoreV3, h.StreamDeny, sessionID)
-	h.forgetProgressSideEffectLock(sessionID)
+// abortStopID is the server-minted stop id of an attempt the server
+// abandoned: its media went missing, or a replacement transport failed.
+func abortStopID(sessionID string) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("silo-abort:"+sessionID)).String()
 }
 
 // adminStopID is the server-minted stop id of an attempt an administrator
@@ -808,16 +832,26 @@ func adminStopID(sessionID string) string {
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("silo-admin-stop:"+sessionID)).String()
 }
 
-// markAttemptStoppedByAdmin is markAttemptStoppedServerSide for a session an
-// administrator ended: stop, terminate, or the fallback of a command the
-// player never confirmed. An attempt the client already stopped keeps its
-// own receipt.
-func (h *PlaybackHandler) markAttemptStoppedByAdmin(ctx context.Context, sessionID string) {
-	if h == nil {
-		return
+// endReasonForStop is the end reason a winning stop id records: the
+// server-minted ids name who ended the attempt, and any other id is the
+// client's own stop.
+func endReasonForStop(sessionID, stopID string) PlaybackEndReason {
+	switch stopID {
+	case adminStopID(sessionID):
+		return PlaybackEndTerminated
+	case expiredStopID(sessionID):
+		return PlaybackEndExpired
+	case abortStopID(sessionID):
+		return PlaybackEndAborted
+	default:
+		return PlaybackEndStopped
 	}
-	stopAttemptServerSide(ctx, h.PlanStoreV3, h.StreamDeny, sessionID, adminStopID(sessionID))
-	h.forgetProgressSideEffectLock(sessionID)
+}
+
+// serverStopID reports whether stopID is one the server mints for an end it
+// makes itself.
+func serverStopID(sessionID, stopID string) bool {
+	return stopID == adminStopID(sessionID) || stopID == expiredStopID(sessionID) || stopID == abortStopID(sessionID)
 }
 
 func attemptEndedByAdmin(record *playback.AttemptRecordV3) bool {
@@ -839,44 +873,6 @@ func (h *PlaybackHandler) stoppedAttemptError(ctx context.Context, sessionID str
 		return playbackSessionEndedByAdminError()
 	}
 	return playbackSessionNotFoundOperationError()
-}
-
-func markAttemptStoppedServerSide(ctx context.Context, planStore playback.PlanStoreV3, deny *playback.StreamDeny, sessionID string) {
-	stopAttemptServerSide(ctx, planStore, deny, sessionID, expiredStopID(sessionID))
-}
-
-func stopAttemptServerSide(ctx context.Context, planStore playback.PlanStoreV3, deny *playback.StreamDeny, sessionID, stopID string) {
-	if sessionID == "" {
-		return
-	}
-	deny.Deny(ctx, sessionID)
-	store, ok := planStore.(playback.ProgressStoreV3)
-	if !ok {
-		return
-	}
-	receipt, first, err := store.StopAttempt(ctx, sessionID, stopID, nil)
-	if err != nil {
-		if !errors.Is(err, playback.ErrSessionNotFound) {
-			slog.WarnContext(ctx, "failed to stop playback attempt server-side", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
-		}
-		return
-	}
-	if first {
-		// The local teardown already ran; the receipt is complete.
-		receipt.Finalized = true
-		if err := store.RecordStopReceipt(ctx, sessionID, receipt); err != nil {
-			slog.WarnContext(ctx, "failed to record server-side playback stop receipt", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
-		}
-	}
-}
-
-// attemptLive reports whether the attempt row exists and is not stopped.
-func (h *PlaybackHandler) attemptLive(ctx context.Context, sessionID string) bool {
-	if h == nil || h.PlanStoreV3 == nil || sessionID == "" {
-		return false
-	}
-	record, err := h.PlanStoreV3.GetAttempt(ctx, sessionID)
-	return err == nil && record != nil && record.StoppedAt == nil
 }
 
 // attemptStoppedElsewhere reports whether the attempt row is already stopped,

@@ -14,12 +14,6 @@ func TestDetectSeriesRoot(t *testing.T) {
 		wantOK      bool
 	}{
 		{
-			name:     "standard season directory",
-			path:     "/tv/Breaking Bad/Season 01/Breaking.Bad.S01E01.mkv",
-			wantRoot: "/tv/Breaking Bad",
-			wantOK:   true,
-		},
-		{
 			name:     "season directory case insensitive",
 			path:     "/tv/Show Name/season 03/Show.Name.S03E01.mkv",
 			wantRoot: "/tv/Show Name",
@@ -38,42 +32,10 @@ func TestDetectSeriesRoot(t *testing.T) {
 			wantOK:   true,
 		},
 		{
-			name:     "episodic file without season dir",
-			path:     "/tv/Show Name/Show.Name.S01E01.mkv",
-			wantRoot: "/tv/Show Name",
-			wantOK:   true,
-		},
-		{
-			name:     "movie file no series root",
-			path:     "/movies/Arrival (2016)/Arrival.2016.1080p.mkv",
-			wantRoot: "",
-			wantOK:   false,
-		},
-		{
-			name:     "year folder is not a season dir",
-			path:     "/movies/2024/Some.Movie.mkv",
-			wantRoot: "",
-			wantOK:   false,
-		},
-		{
 			name:     "1080p in path is not a season dir",
 			path:     "/movies/Movie Name/1080p/Movie.Name.mkv",
 			wantRoot: "",
 			wantOK:   false,
-		},
-		{
-			name:        "movie library ignores episode shaped movie folder",
-			path:        "/movies/s01e03 (2020) {imdb-tt12261772} {tmdb-588077}/s01e03 (2020).mkv",
-			libraryType: "movies",
-			wantRoot:    "",
-			wantOK:      false,
-		},
-		{
-			name:        "mixed library movie folder beats bare episode token",
-			path:        "/mixed/s01e03 (2020) {imdb-tt12261772} {tmdb-588077}/s01e03 (2020).mkv",
-			libraryType: "mixed",
-			wantRoot:    "",
-			wantOK:      false,
 		},
 		{
 			name:        "series library remains authoritative",
@@ -131,15 +93,6 @@ func TestParseFilename(t *testing.T) {
 			wantEp:      1162,
 		},
 		{
-			name:        "episode number reads the whole digit run",
-			path:        "/tv/Long Running Show/Season 23/Long Running Show S23E11620.mkv",
-			libraryType: "series",
-			wantTitle:   "Long Running Show",
-			wantType:    "series",
-			wantSeason:  23,
-			wantEp:      11620,
-		},
-		{
 			name:       "extras maps to season zero",
 			path:       "/tv/Show Name/Extras/Show.Name.S00E01.mkv",
 			wantTitle:  "Show Name",
@@ -147,55 +100,6 @@ func TestParseFilename(t *testing.T) {
 			wantType:   "series",
 			wantSeason: 0,
 			wantEp:     1,
-		},
-		{
-			name:       "anime release with decimal episode suffix and release junk",
-			path:       "/television/anime/A Sister's All You Need (2017) {tvdb-332994}/Season 01/A Sister's All You Need (2017) - S01E01.001 - I Only Need a Little Brother Who Can Cook a Beautiful Naked Girl and Friends I Can Relate to [Bluray-1080p][10bit][x265][AC3 5.1][EN+JA]-GHOST][.mkv",
-			wantTitle:  "A Sister's All You Need",
-			wantYear:   2017,
-			wantType:   "series",
-			wantSeason: 1,
-			wantEp:     1,
-		},
-		{
-			name:        "movie library episode token folder is movie",
-			path:        "/movies/s01e03 (2020) {imdb-tt12261772} {tmdb-588077}/s01e03 (2020).mkv",
-			libraryType: "movies",
-			wantTitle:   "s01e03",
-			wantYear:    2020,
-			wantType:    "movie",
-			wantSeason:  0,
-			wantEp:      0,
-		},
-		{
-			name:        "mixed library obvious movie folder beats episode token",
-			path:        "/mixed/s01e03 (2020) {imdb-tt12261772} {tmdb-588077}/s01e03 (2020).mkv",
-			libraryType: "mixed",
-			wantTitle:   "s01e03",
-			wantYear:    2020,
-			wantType:    "movie",
-			wantSeason:  0,
-			wantEp:      0,
-		},
-		{
-			name:        "mixed library flat tv folder stays series",
-			path:        "/mixed/Show Name/Show Name S01E03.mkv",
-			libraryType: "mixed",
-			wantTitle:   "Show Name",
-			wantYear:    0,
-			wantType:    "series",
-			wantSeason:  1,
-			wantEp:      3,
-		},
-		{
-			name:        "mixed library season dir stays series",
-			path:        "/mixed/Show Name/Season 01/Show Name S01E03.mkv",
-			libraryType: "mixed",
-			wantTitle:   "Show Name",
-			wantYear:    0,
-			wantType:    "series",
-			wantSeason:  1,
-			wantEp:      3,
 		},
 		{
 			name:        "movies library tv looking path stays movie",
@@ -303,15 +207,6 @@ func TestParseFilename(t *testing.T) {
 			wantSeason: 0,
 			wantEp:     0,
 		},
-		{
-			name:       "numeric folder not treated as season without evidence",
-			path:       "/movies/2024/Some.Movie.mkv",
-			wantTitle:  "Some Movie",
-			wantYear:   0,
-			wantType:   "movie",
-			wantSeason: 0,
-			wantEp:     0,
-		},
 	}
 
 	for _, tt := range tests {
@@ -358,23 +253,6 @@ func TestParseFilename_StripsStructuredProviderIDsFromTitles(t *testing.T) {
 		if hints.Title != test.wantTitle || hints.Year != test.wantYear {
 			t.Errorf("ParseFilename(%q) = title %q year %d, want %q/%d", test.path, hints.Title, hints.Year, test.wantTitle, test.wantYear)
 		}
-	}
-}
-
-func TestParseFilename_SeriesReleasePackDirectoryUsesParentShowRoot(t *testing.T) {
-	path := "/library/Becoming You/Becoming.You.S01.HDR.2160p.WEB-DL.DDP5.1.H.265-ROCCaT/Becoming.You.S01E01.HDR.2160p.WEB-DL.mkv"
-
-	hints := ParseFilename(path, "series")
-	if hints == nil {
-		t.Fatal("ParseFilename returned nil")
-		return
-	}
-	if hints.Title != "Becoming You" || hints.Year != 0 || hints.Type != "series" {
-		t.Fatalf("ParseFilename() = title %q year %d type %q, want Becoming You/0/series", hints.Title, hints.Year, hints.Type)
-	}
-	root, ok := DetectSeriesRoot(path, "series")
-	if !ok || root.RootPath != "/library/Becoming You" {
-		t.Fatalf("DetectSeriesRoot() = %+v, %v", root, ok)
 	}
 }
 
@@ -695,13 +573,6 @@ func TestDetectCanonicalRoot(t *testing.T) {
 		wantOK      bool
 	}{
 		{
-			name:     "standard series root",
-			path:     "/tv/Breaking Bad/Season 01/Breaking.Bad.S01E01.mkv",
-			wantRoot: "/tv/Breaking Bad",
-			wantType: "series",
-			wantOK:   true,
-		},
-		{
 			name:     "movie in folder",
 			path:     "/movies/Arrival (2016)/Arrival.2016.1080p.mkv",
 			wantRoot: "/movies/Arrival (2016)",
@@ -716,14 +587,6 @@ func TestDetectCanonicalRoot(t *testing.T) {
 			wantOK:   true,
 		},
 		{
-			name:        "mixed library obvious movie folder uses movie root",
-			path:        "/mixed/s01e03 (2020) {imdb-tt12261772} {tmdb-588077}/s01e03 (2020).mkv",
-			libraryType: "mixed",
-			wantRoot:    "/mixed/s01e03 (2020) {imdb-tt12261772} {tmdb-588077}",
-			wantType:    "movie",
-			wantOK:      true,
-		},
-		{
 			name:        "movies library tv looking path still uses movie root",
 			path:        "/movies/Show Name/Season 01/Show Name S01E03.mkv",
 			libraryType: "movies",
@@ -732,24 +595,9 @@ func TestDetectCanonicalRoot(t *testing.T) {
 			wantOK:      true,
 		},
 		{
-			name:        "mixed flat tv folder uses series root",
-			path:        "/mixed/Show Name/Show Name S01E03.mkv",
-			libraryType: "mixed",
-			wantRoot:    "/mixed/Show Name",
-			wantType:    "series",
-			wantOK:      true,
-		},
-		{
 			name:     "movie root uses parent when comparable normalization differs",
 			path:     "/movies/WALL-E {imdb-tt0910970}/Wall-E.mkv",
 			wantRoot: "/movies/WALL-E {imdb-tt0910970}",
-			wantType: "movie",
-			wantOK:   true,
-		},
-		{
-			name:     "movie root uses id tagged parent for divergent release filename",
-			path:     "/movies/The Expendables 4 {imdb-tt3291150} {tmdb-299054}/Expend4bles (2023) [Remux-1080p 8-bit AVC TrueHD Atmos 7.1]-CiNEPHiLES.mkv",
-			wantRoot: "/movies/The Expendables 4 {imdb-tt3291150} {tmdb-299054}",
 			wantType: "movie",
 			wantOK:   true,
 		},

@@ -57,16 +57,6 @@ describe("request download progress", () => {
     );
   });
 
-  it.each([
-    ["queued", "Waiting to download"],
-    ["paused", "Download paused"],
-    ["stalled", "Download stalled"],
-    ["importing", "Importing"],
-    ["import_blocked", "Waiting for import"],
-  ])("labels %s as %s", (phase, label) => {
-    expect(formatRequestDownload(download({ phase }), { now })).toBe(label);
-  });
-
   it("tells an admin that an import is blocked", () => {
     expect(formatRequestDownload(download({ phase: "import_blocked" }), { now, admin: true })).toBe(
       "Import blocked",

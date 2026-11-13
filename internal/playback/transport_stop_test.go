@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -178,10 +179,7 @@ func TestServeRemuxAbortInterruptsBlockedClientWrite(t *testing.T) {
 
 func TestWatchTransportStopSignalsOnStopSession(t *testing.T) {
 	sessions := NewSessionManager(0, 0)
-	session, err := sessions.StartSession(1, "profile-1", 100, PlayRemux, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	session := startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayRemux)
 
 	stop, release := sessions.WatchTransportStop(session.ID)
 	defer release()
@@ -211,10 +209,7 @@ func TestWatchTransportStopSignalsOnStopSession(t *testing.T) {
 // response is still draining — and a stop has to end both.
 func TestWatchTransportStopSignalsEveryTransport(t *testing.T) {
 	sessions := NewSessionManager(0, 0)
-	session, err := sessions.StartSession(1, "profile-1", 100, PlayRemux, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	session := startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayRemux)
 
 	first, releaseFirst := sessions.WatchTransportStop(session.ID)
 	defer releaseFirst()
@@ -240,10 +235,7 @@ func TestWatchTransportStopSignalsEveryTransport(t *testing.T) {
 // session that is already gone reports the stop it missed.
 func TestWatchTransportStopAfterStopSessionIsAlreadyClosed(t *testing.T) {
 	sessions := NewSessionManager(0, 0)
-	session, err := sessions.StartSession(1, "profile-1", 100, PlayRemux, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	session := startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayRemux)
 	if err := sessions.BeginTransport(session.ID); err != nil {
 		t.Fatalf("BeginTransport: %v", err)
 	}
@@ -274,10 +266,7 @@ func TestWatchTransportStopAfterStopSessionIsAlreadyClosed(t *testing.T) {
 // the same session ID has nothing to signal and nothing to leak.
 func TestWatchTransportStopReleaseUnregisters(t *testing.T) {
 	sessions := NewSessionManager(0, 0)
-	session, err := sessions.StartSession(1, "profile-1", 100, PlayRemux, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
+	session := startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayRemux)
 
 	stop, release := sessions.WatchTransportStop(session.ID)
 	release()
@@ -295,5 +284,67 @@ func TestWatchTransportStopReleaseUnregisters(t *testing.T) {
 	sessions.mu.RUnlock()
 	if remaining != 0 {
 		t.Fatalf("transportStops holds %d sessions, want 0", remaining)
+	}
+}
+
+// A remux response that ends cleanly tells the player it reached the end of
+// the title, which marks it watched and starts the next one. FFmpeg exits 0
+// when its source stops being readable mid-title, so only a complete output
+// may end the response cleanly; a short one has to break it (#3512).
+func TestServeRemuxBreaksTheResponseWhenTheOutputEndsShort(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(source, []byte("not really a movie"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name       string
+		script     string
+		wantBroken bool
+	}{
+		{name: "complete output", script: "printf remuxed\nexit 0\n"},
+		{
+			name: "recoverable source errors",
+			script: "printf remuxed\n" +
+				"printf '[matroska,webm @ 0x1] Invalid EBML number size tag\\n' >&2\nexit 0\n",
+		},
+		{
+			// What FFmpeg prints when the disk under the source drops out.
+			name: "source read error",
+			script: "printf remuxed\n" +
+				"printf '[in#0/matroska,webm @ 0x1] Error during ' >&2\n" +
+				"printf 'demuxing: Input/output error\\n' >&2\nexit 0\n",
+			wantBroken: true,
+		},
+		{name: "ffmpeg failure", script: "printf remuxed\nexit 1\n", wantBroken: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
+			if err := os.WriteFile(ffmpeg, []byte("#!/bin/sh\n"+tt.script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// The reject-P7 recipe with no seek runs no capability probes,
+				// so the script only ever answers the remux itself.
+				_ = ServeRemuxWithOptions(w, r, source, "mp4", 0, false, 0, 0, RemuxServeOptions{
+					DVMode:     RemuxDVRejectP7V3,
+					FFmpegPath: ffmpeg,
+				})
+			}))
+			defer server.Close()
+
+			resp, err := http.Get(server.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			body, err := io.ReadAll(resp.Body)
+			if resp.StatusCode != http.StatusOK || string(body) != "remuxed" {
+				t.Fatalf("response = %d %q, want 200 with the remuxed bytes", resp.StatusCode, body)
+			}
+			if broken := err != nil; broken != tt.wantBroken {
+				t.Fatalf("body read error = %v, want broken response %v", err, tt.wantBroken)
+			}
+		})
 	}
 }

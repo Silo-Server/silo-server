@@ -1,7 +1,6 @@
 package watchsync
 
 import (
-	"database/sql"
 	"fmt"
 	"testing"
 	"time"
@@ -13,14 +12,7 @@ import (
 func TestServiceExportWatchedConsumesEachRemotePlayOnce(t *testing.T) {
 	for _, remoteCount := range []int{1, 2} {
 		t.Run(fmt.Sprintf("%d remote plays", remoteCount), func(t *testing.T) {
-			db, err := sql.Open("sqlite3", ":memory:")
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = db.Close() })
-			if err := userdb.InitSchema(db); err != nil {
-				t.Fatal(err)
-			}
+			db := openUserDB(t)
 			minute := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
 			for i := range 2 {
 				if err := userdb.AddHistory(db, userstore.WatchHistoryEntry{
@@ -42,7 +34,7 @@ func TestServiceExportWatchedConsumesEachRemotePlayOnce(t *testing.T) {
 			}
 			repo := newServiceFakeRepo()
 			service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{store: userdb.NewSQLiteUserStore(db)})
-			conn := Connection{ID: "conn-1", Provider: "trakt", UserID: 7, ProfileID: "profile-1"}
+			conn := repo.withConnection(Connection{ID: "conn-1", Provider: "trakt", UserID: 7, ProfileID: "profile-1"})
 			result, err := service.ExportWatched(t.Context(), conn, ServerConfig{}, provider)
 			if err != nil {
 				t.Fatal(err)

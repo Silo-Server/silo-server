@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -27,6 +28,28 @@ const (
 	postgresTuneDBSizeAuto       = "auto"
 
 	defaultPostgresTuneMemoryBudgetPercent = 75
+
+	// postgresTuneSharedBuffersMaxBytes is the ceiling on shared_buffers
+	// when the memory budget was detected. A quarter of the memory budget
+	// suits a database that is the only tenant of its host, but a media
+	// catalog's hot set (indexes and recently read rows) is usually far
+	// smaller than a large host's quarter, and the operating system's page
+	// cache still holds whatever falls outside it. The ceiling is fixed, not
+	// sized from the database: shared_buffers changes only at a restart, and
+	// the omnibus image writes it before the database has any content. A
+	// database that outgrows it (intro detection fingerprints alone can pass
+	// 2GB) is given more with POSTGRES_TUNE_MEMORY, which is not bounded.
+	postgresTuneSharedBuffersMaxBytes = 2 * sizeGB
+
+	// maxPostgresTuneDetectedCPUs bounds a detected CPU count. A container
+	// without a CPU limit sees every core of its host, and one worker slot per
+	// core is far more than a catalog database can use: a query runs at most
+	// four parallel workers. POSTGRES_TUNE_CPUS is not bounded.
+	maxPostgresTuneDetectedCPUs = 16
+
+	// maxPostgresTuneAutovacuumWorkMemKB bounds each autovacuum worker, which
+	// would otherwise take up to maintenance_work_mem.
+	maxPostgresTuneAutovacuumWorkMemKB = 256 * sizeMB / sizeKB
 
 	sizeKB = int64(1024)
 	sizeMB = 1024 * sizeKB
@@ -68,12 +91,20 @@ type PostgresTuneOptions struct {
 	DetectedMemoryBytes int64
 	MemorySource        string
 	MemoryBudgetPercent int
-	CPUs                int
-	Connections         int
-	Storage             string
-	DBSize              string
-	OSType              string
-	IOMethod            string
+	// MemoryExplicit reports that POSTGRES_TUNE_MEMORY named the budget. An
+	// explicit budget is the operator's, so shared_buffers takes its full
+	// quarter.
+	MemoryExplicit bool
+	CPUs           int
+	// DetectedCPUs is the machine's CPU count before it was bounded, or zero
+	// when CPUs was set explicitly. work_mem is sized from it, so bounding
+	// the workers does not raise work_mem.
+	DetectedCPUs int
+	Connections  int
+	Storage      string
+	DBSize       string
+	OSType       string
+	IOMethod     string
 }
 
 // PostgresTuneSetting is one recommended PostgreSQL parameter.
@@ -108,6 +139,7 @@ type postgresTuneMemoryBudget struct {
 	DetectedBytes int64
 	Source        string
 	Percent       int
+	Explicit      bool
 }
 
 // LoadPostgresTuneOptionsFromEnv reads the opt-in PostgreSQL tuning environment.
@@ -142,7 +174,7 @@ func LoadPostgresTuneOptionsFromEnv(appMaxConnections int) (PostgresTuneOptions,
 		return PostgresTuneOptions{}, err
 	}
 
-	cpus, err := loadPostgresTuneCPUs()
+	cpus, detectedCPUs, err := loadPostgresTuneCPUs()
 	if err != nil {
 		return PostgresTuneOptions{}, err
 	}
@@ -176,7 +208,9 @@ func LoadPostgresTuneOptionsFromEnv(appMaxConnections int) (PostgresTuneOptions,
 		DetectedMemoryBytes: memory.DetectedBytes,
 		MemorySource:        memory.Source,
 		MemoryBudgetPercent: memory.Percent,
+		MemoryExplicit:      memory.Explicit,
 		CPUs:                cpus,
+		DetectedCPUs:        detectedCPUs,
 		Connections:         connections,
 		Storage:             storage,
 		DBSize:              dbSize,
@@ -185,7 +219,9 @@ func LoadPostgresTuneOptionsFromEnv(appMaxConnections int) (PostgresTuneOptions,
 	}, nil
 }
 
-// RecommendPostgresOLTPSettings returns pgtune-style OLTP recommendations.
+// RecommendPostgresOLTPSettings returns pgtune-style OLTP recommendations,
+// with autovacuum_work_mem, and shared_buffers under a detected memory budget,
+// bounded for a catalog database.
 func RecommendPostgresOLTPSettings(opts PostgresTuneOptions, postgresMajorVersion int) []PostgresTuneSetting {
 	memoryBudgetKB := opts.MemoryBudgetBytes / sizeKB
 	if memoryBudgetKB <= 0 {
@@ -198,7 +234,15 @@ func RecommendPostgresOLTPSettings(opts PostgresTuneOptions, postgresMajorVersio
 	}
 
 	settings := make([]PostgresTuneSetting, 0, 24)
-	sharedBuffers := memoryBudgetKB / 4
+	// work_mem keeps the uncapped quarter and the unbounded CPU count as its
+	// basis, so neither bound raises it.
+	budgetQuarter := memoryBudgetKB / 4
+	sharedBuffers := budgetQuarter
+	if !opts.MemoryExplicit {
+		sharedBuffers = min(sharedBuffers, postgresTuneSharedBuffersMaxBytes/sizeKB)
+	}
+	// A planner hint, not an allocation: the page cache holds what
+	// shared_buffers does not, so it stays sized from the whole budget.
 	effectiveCacheSize := (memoryBudgetKB * 3) / 4
 	maintenanceWorkMem := memoryBudgetKB / 16
 	if maintenanceWorkMem > 8*sizeGB/sizeKB {
@@ -221,7 +265,7 @@ func RecommendPostgresOLTPSettings(opts PostgresTuneOptions, postgresMajorVersio
 	}
 
 	settings = append(settings,
-		PostgresTuneSetting{Name: "work_mem", Value: formatPostgresTuneKB(workMem(memoryBudgetKB, sharedBuffers, connections, opts.CPUs, opts.DBSize))},
+		PostgresTuneSetting{Name: "work_mem", Value: formatPostgresTuneKB(workMem(memoryBudgetKB, budgetQuarter, connections, max(opts.CPUs, opts.DetectedCPUs), opts.DBSize))},
 		PostgresTuneSetting{Name: "huge_pages", Value: hugePages(sharedBuffers, opts.OSType)},
 	)
 
@@ -237,9 +281,10 @@ func RecommendPostgresOLTPSettings(opts PostgresTuneOptions, postgresMajorVersio
 	if autovacuumWorkers := autovacuumMaxWorkers(opts.CPUs); autovacuumWorkers != "" {
 		settings = append(settings, PostgresTuneSetting{Name: "autovacuum_max_workers", Value: autovacuumWorkers})
 	}
-	if maintenanceWorkMem >= 2*sizeGB/sizeKB {
-		settings = append(settings, PostgresTuneSetting{Name: "autovacuum_work_mem", Value: "2GB"})
-	}
+	settings = append(settings, PostgresTuneSetting{
+		Name:  "autovacuum_work_mem",
+		Value: formatPostgresTuneKB(min(maintenanceWorkMem, maxPostgresTuneAutovacuumWorkMemKB)),
+	})
 
 	settings = append(settings,
 		PostgresTuneSetting{Name: "min_wal_size", Value: "2GB"},
@@ -257,6 +302,41 @@ func RecommendPostgresOLTPSettings(opts PostgresTuneOptions, postgresMajorVersio
 	}
 
 	return settings
+}
+
+// RecommendPostgresStartupSettings returns the recommended settings that
+// PostgreSQL applies only when the server starts and that are sized from
+// memory and CPUs alone. Written to a configuration file before a new cluster
+// first starts, they spare it the restart ApplyPostgresTuning would otherwise
+// leave pending: none depends on the database, so ALTER SYSTEM later writes
+// the same values.
+func RecommendPostgresStartupSettings(opts PostgresTuneOptions, postgresMajorVersion int) []PostgresTuneSetting {
+	var settings []PostgresTuneSetting
+	for _, setting := range RecommendPostgresOLTPSettings(opts, postgresMajorVersion) {
+		if postgresStartupTuneSetting(setting.Name, postgresMajorVersion) {
+			setting.RequiresRestart = true
+			settings = append(settings, setting)
+		}
+	}
+	return settings
+}
+
+// postgresStartupTuneSetting reports whether RecommendPostgresStartupSettings
+// returns the named setting. Two settings PostgreSQL reads only at start stay
+// out. max_connections is sized from database.max_connections, which the
+// database holds. io_method comes from the environment unchecked: ALTER SYSTEM
+// refuses a value PostgreSQL rejects and the server keeps running, but the
+// same value in a configuration file stops the server from starting.
+func postgresStartupTuneSetting(name string, postgresMajorVersion int) bool {
+	switch name {
+	case "shared_buffers", "wal_buffers", "huge_pages", "max_worker_processes":
+		return true
+	case "autovacuum_max_workers":
+		// PostgreSQL 18 made it reloadable, within autovacuum_worker_slots.
+		return postgresMajorVersion < 18
+	default:
+		return false
+	}
 }
 
 // ApplyPostgresTuning applies pgtune-style OLTP recommendations with ALTER SYSTEM.
@@ -335,6 +415,13 @@ func ApplyPostgresTuning(ctx context.Context, pool *pgxpool.Pool, opts PostgresT
 		return result, fmt.Errorf("pg_reload_conf returned false")
 	}
 
+	// ALTER SYSTEM rewrites a setting even when the server already runs with
+	// its value, so keep only the restart-only settings PostgreSQL has yet to
+	// apply. A role that cannot read pg_file_settings keeps the full list.
+	if pending, err := postgresSettingsPendingRestart(ctx, pool, result.RestartRequired); err == nil {
+		result.RestartRequired = pending
+	}
+
 	return result, nil
 }
 
@@ -380,6 +467,7 @@ func loadPostgresTuneMemory() (postgresTuneMemoryBudget, error) {
 		DetectedBytes: mem,
 		Source:        "env",
 		Percent:       100,
+		Explicit:      true,
 	}, nil
 }
 
@@ -395,21 +483,25 @@ func loadPostgresTuneMemoryBudgetPercent() (int, error) {
 	return percent, nil
 }
 
-func loadPostgresTuneCPUs() (int, error) {
+// loadPostgresTuneCPUs returns the CPU count to tune for and, when it was
+// detected, the count before bounding.
+func loadPostgresTuneCPUs() (cpus, detected int, err error) {
 	raw := firstNonEmptyEnv("POSTGRES_TUNE_CPUS", "SILO_POSTGRES_TUNE_CPUS")
 	if raw == "" || strings.EqualFold(raw, "auto") {
-		cpus := runtime.NumCPU()
-		if cpus < 1 {
-			cpus = 1
-		}
-		return cpus, nil
+		detected = runtime.NumCPU()
+		return detectedPostgresTuneCPUs(detected), detected, nil
 	}
 
-	cpus, err := strconv.Atoi(raw)
+	cpus, err = strconv.Atoi(raw)
 	if err != nil || cpus < 1 {
-		return 0, fmt.Errorf("invalid POSTGRES_TUNE_CPUS %q", raw)
+		return 0, 0, fmt.Errorf("invalid POSTGRES_TUNE_CPUS %q", raw)
 	}
-	return cpus, nil
+	return cpus, 0, nil
+}
+
+// detectedPostgresTuneCPUs bounds a CPU count read from the machine.
+func detectedPostgresTuneCPUs(detected int) int {
+	return max(1, min(detected, maxPostgresTuneDetectedCPUs))
 }
 
 func loadPostgresTuneConnections(appMaxConnections int) (int, error) {
@@ -731,6 +823,73 @@ func postgresSettingRequiresRestart(ctx context.Context, pool *pgxpool.Pool, nam
 	var requiresRestart bool
 	err := pool.QueryRow(ctx, "SELECT context = 'postmaster' FROM pg_settings WHERE name = $1", name).Scan(&requiresRestart)
 	return requiresRestart, err
+}
+
+// postgresSettingsPendingRestart returns, in order, the names whose configured
+// value differs from the one the server runs with. pg_file_settings re-reads
+// the configuration files and sets error on an entry the server cannot apply
+// without a restart. Only the last entry for a name counts: a restart applies
+// it, and an earlier entry whose name differs only in case is still compared
+// and can carry an error of its own. A setting no file sets any more returns
+// to its built-in default at the restart, so it is pending only while it runs
+// on another value.
+// A setting given on the postgres command line (-c) outranks every file, so a
+// restart keeps its running value and it is never pending.
+func postgresSettingsPendingRestart(ctx context.Context, pool *pgxpool.Pool, names []string) ([]string, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	// A syntax error or an unknown parameter name stops PostgreSQL before it
+	// compares any value, leaving every other entry without an error. Only an
+	// entry for a setting no file sets any more (no name, no file) may carry
+	// one then. A main file PostgreSQL cannot open also leaves an entry with no
+	// name and no file, but then no entry has a name, while ALTER SYSTEM has
+	// just written the tuned ones.
+	var unreadable bool
+	if err := pool.QueryRow(ctx, `
+SELECT NOT EXISTS (SELECT 1 FROM pg_file_settings f WHERE f.name IS NOT NULL)
+  OR EXISTS (
+  SELECT 1 FROM pg_file_settings f
+  WHERE f.error IS NOT NULL
+    AND (f.name IS NULL AND f.sourcefile IS NOT NULL
+      OR f.name IS NOT NULL AND NOT EXISTS (SELECT 1 FROM pg_settings s WHERE lower(s.name) = lower(f.name))))`).Scan(&unreadable); err != nil {
+		return nil, err
+	}
+	if unreadable {
+		return nil, errors.New("postgres configuration files contain errors")
+	}
+	rows, err := pool.Query(ctx, `
+SELECT s.name
+FROM pg_settings s
+WHERE s.name = ANY($1::text[])
+  AND s.source <> 'command line'
+  AND CASE
+        WHEN EXISTS (SELECT 1 FROM pg_file_settings f WHERE lower(f.name) = s.name)
+          THEN (SELECT f.error IS NOT NULL FROM pg_file_settings f WHERE lower(f.name) = s.name ORDER BY f.seqno DESC LIMIT 1)
+        ELSE s.source = 'configuration file' AND s.setting IS DISTINCT FROM s.boot_val
+      END`, names)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	pending := make(map[string]struct{}, len(names))
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		pending[name] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, name := range names {
+		if _, ok := pending[name]; ok {
+			out = append(out, name)
+		}
+	}
+	return out, nil
 }
 
 func postgresSettingExists(ctx context.Context, pool *pgxpool.Pool, name string) (bool, error) {

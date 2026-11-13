@@ -151,8 +151,9 @@ func (s *WebPushService) PublicKey(ctx context.Context) (string, error) {
 
 // Subscribe registers (or reassigns) a browser PushSubscription for the
 // profile. The endpoint must be an HTTPS URL on a public host — it is
-// attacker-controllable input that the server will POST to.
-func (s *WebPushService) Subscribe(ctx context.Context, userID int, profileID, endpoint, p256dh, auth, deviceName string) (*WebPushSubscription, error) {
+// attacker-controllable input that the server will POST to. loginSessionID is
+// the caller's login session, empty for an API key; delivery stops once it ends.
+func (s *WebPushService) Subscribe(ctx context.Context, userID int, profileID, endpoint, p256dh, auth, deviceName, loginSessionID string) (*WebPushSubscription, error) {
 	endpoint = strings.TrimSpace(endpoint)
 	if endpoint == "" || p256dh == "" || auth == "" {
 		return nil, fmt.Errorf("%w: endpoint and keys are required", ErrWebPushInvalid)
@@ -167,27 +168,28 @@ func (s *WebPushService) Subscribe(ctx context.Context, userID int, profileID, e
 		deviceName = deviceName[:128]
 	}
 	return s.repo.Upsert(ctx, WebPushSubscription{
-		ID:         ulid.Make().String(),
-		UserID:     userID,
-		ProfileID:  profileID,
-		Endpoint:   endpoint,
-		P256dh:     p256dh,
-		Auth:       auth,
-		DeviceName: deviceName,
+		ID:             ulid.Make().String(),
+		UserID:         userID,
+		ProfileID:      profileID,
+		Endpoint:       endpoint,
+		P256dh:         p256dh,
+		Auth:           auth,
+		DeviceName:     deviceName,
+		LoginSessionID: loginSessionID,
 	})
 }
 
-// List returns the profile's subscriptions.
-func (s *WebPushService) List(ctx context.Context, profileID string) ([]WebPushSubscription, error) {
-	return s.repo.ListByProfile(ctx, profileID)
+// List returns the account profile's subscriptions.
+func (s *WebPushService) List(ctx context.Context, userID int, profileID string) ([]WebPushSubscription, error) {
+	return s.repo.ListByProfile(ctx, userID, profileID)
 }
 
-// Unsubscribe removes a subscription by id (profile-scoped, settings UI) or
-// by endpoint (user-scoped: the browser owns the endpoint and Subscribe may
-// have reassigned it to a sibling profile). Idempotent.
+// Unsubscribe removes a subscription by id (scoped to the account profile,
+// settings UI) or by endpoint (user-scoped: the browser owns the endpoint and
+// Subscribe may have reassigned it to a sibling profile). Idempotent.
 func (s *WebPushService) Unsubscribe(ctx context.Context, userID int, profileID, id, endpoint string) error {
 	if id != "" {
-		return s.repo.Delete(ctx, profileID, id)
+		return s.repo.Delete(ctx, userID, profileID, id)
 	}
 	if endpoint != "" {
 		return s.repo.DeleteByEndpoint(ctx, userID, endpoint)
@@ -195,6 +197,6 @@ func (s *WebPushService) Unsubscribe(ctx context.Context, userID int, profileID,
 	return fmt.Errorf("%w: an id or endpoint is required", ErrWebPushInvalid)
 }
 
-func (s *WebPushService) ListPage(ctx context.Context, profile string, limit int, after *Cursor) ([]WebPushSubscription, error) {
-	return s.repo.ListPage(ctx, profile, limit, after)
+func (s *WebPushService) ListPage(ctx context.Context, userID int, profile string, limit int, after *Cursor) ([]WebPushSubscription, error) {
+	return s.repo.ListPage(ctx, userID, profile, limit, after)
 }

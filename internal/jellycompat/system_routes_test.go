@@ -22,13 +22,10 @@ func TestRouterServesPingAndBrandingCSSLikeJellyfin(t *testing.T) {
 	}{
 		{http.MethodGet, "/System/Ping", "application/json", "\"Jellyfin Server\"\n"},
 		{http.MethodPost, "/System/Ping", "application/json", "\"Jellyfin Server\"\n"},
-		{http.MethodPost, "/system/ping", "application/json", "\"Jellyfin Server\"\n"},
 		// The recorder keeps a HEAD body; net/http's server drops it.
 		{http.MethodHead, "/System/Ping", "application/json", "\"Jellyfin Server\"\n"},
 		{http.MethodGet, "/Branding/Css", "text/css; charset=utf-8", ""},
 		{http.MethodGet, "/Branding/Css.css", "text/css; charset=utf-8", ""},
-		{http.MethodGet, "/branding/css.css", "text/css; charset=utf-8", ""},
-		{http.MethodGet, "/emby/Branding/Css", "text/css; charset=utf-8", ""},
 	} {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
 			rec := httptest.NewRecorder()

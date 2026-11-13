@@ -65,7 +65,8 @@ func (f *fakeProviderHost) HostNetworkAccessDisconnect(_ context.Context, provid
 	return f.status(), nil
 }
 
-func networkAccessRequest(t *testing.T, server *Server, method, path, secret string) *httptest.ResponseRecorder {
+// serveProxy serves one request, node-signed with secret unless it is empty.
+func serveProxy(t *testing.T, server *Server, method, path, secret string) *httptest.ResponseRecorder {
 	t.Helper()
 	request := httptest.NewRequest(method, path, nil)
 	if secret != "" {
@@ -93,7 +94,7 @@ func TestProxyNetworkAccessRoutesDriveTheProviderHost(t *testing.T) {
 		{http.MethodPost, "/network-access/stub/connect"},
 		{http.MethodPost, "/network-access/stub/disconnect"},
 	} {
-		denied := networkAccessRequest(t, server, route.method, route.path, "")
+		denied := serveProxy(t, server, route.method, route.path, "")
 		if denied.Code != http.StatusUnauthorized || denied.Header().Get("Content-Type") != "text/plain; charset=utf-8" {
 			t.Fatalf("%s %s without bearer: %d %s", route.method, route.path, denied.Code, denied.Body)
 		}
@@ -102,7 +103,7 @@ func TestProxyNetworkAccessRoutesDriveTheProviderHost(t *testing.T) {
 		t.Fatalf("refused requests reached the host: %v", host.calls)
 	}
 
-	status := networkAccessRequest(t, server, http.MethodGet, "/network-access/status", secret)
+	status := serveProxy(t, server, http.MethodGet, "/network-access/status", secret)
 	if status.Code != http.StatusOK || status.Header().Get("Content-Type") != "application/json" || status.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("status: %d %s %q", status.Code, status.Body, status.Header())
 	}
@@ -114,7 +115,7 @@ func TestProxyNetworkAccessRoutesDriveTheProviderHost(t *testing.T) {
 		report.Providers[1].Provider != "down" || report.Providers[1].State != netaccess.StateUnavailable || report.Providers[1].Error == "" {
 		t.Fatalf("status report = %+v", report)
 	}
-	providerStatus := networkAccessRequest(t, server, http.MethodGet, "/network-access/stub/status", secret)
+	providerStatus := serveProxy(t, server, http.MethodGet, "/network-access/stub/status", secret)
 	if providerStatus.Code != http.StatusOK || providerStatus.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("provider status: %d %s", providerStatus.Code, providerStatus.Body)
 	}
@@ -126,7 +127,7 @@ func TestProxyNetworkAccessRoutesDriveTheProviderHost(t *testing.T) {
 		t.Fatalf("provider status = %+v", oneProvider)
 	}
 
-	connect := networkAccessRequest(t, server, http.MethodPost, "/network-access/stub/connect", secret)
+	connect := serveProxy(t, server, http.MethodPost, "/network-access/stub/connect", secret)
 	if connect.Code != http.StatusOK {
 		t.Fatalf("connect: %d %s", connect.Code, connect.Body)
 	}
@@ -138,7 +139,7 @@ func TestProxyNetworkAccessRoutesDriveTheProviderHost(t *testing.T) {
 		t.Fatalf("connect status = %+v", connected)
 	}
 
-	disconnect := networkAccessRequest(t, server, http.MethodPost, "/network-access/stub/disconnect", secret)
+	disconnect := serveProxy(t, server, http.MethodPost, "/network-access/stub/disconnect", secret)
 	if disconnect.Code != http.StatusOK {
 		t.Fatalf("disconnect: %d %s", disconnect.Code, disconnect.Body)
 	}
@@ -150,11 +151,11 @@ func TestProxyNetworkAccessRoutesDriveTheProviderHost(t *testing.T) {
 		t.Fatalf("disconnect status = %+v", disconnected)
 	}
 
-	unknown := networkAccessRequest(t, server, http.MethodPost, "/network-access/netbird/connect", secret)
+	unknown := serveProxy(t, server, http.MethodPost, "/network-access/netbird/connect", secret)
 	if unknown.Code != http.StatusNotFound {
 		t.Fatalf("unknown provider connect: %d %s", unknown.Code, unknown.Body)
 	}
-	unknownStatus := networkAccessRequest(t, server, http.MethodGet, "/network-access/netbird/status", secret)
+	unknownStatus := serveProxy(t, server, http.MethodGet, "/network-access/netbird/status", secret)
 	if unknownStatus.Code != http.StatusNotFound {
 		t.Fatalf("unknown provider status: %d %s", unknownStatus.Code, unknownStatus.Body)
 	}
@@ -181,7 +182,7 @@ func TestProxyNetworkAccessRoutesWithoutAHostAnswer503(t *testing.T) {
 		{http.MethodPost, "/network-access/stub/connect"},
 		{http.MethodPost, "/network-access/stub/disconnect"},
 	} {
-		got := networkAccessRequest(t, server, route.method, route.path, secret)
+		got := serveProxy(t, server, route.method, route.path, secret)
 		if got.Code != http.StatusServiceUnavailable {
 			t.Fatalf("%s %s without a host: %d %s", route.method, route.path, got.Code, got.Body)
 		}

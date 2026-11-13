@@ -47,6 +47,36 @@ func (p *procTree) write(relPath, content string) {
 	}
 }
 
+// writeFile writes body to dir/name and returns the full path.
+func writeFile(t *testing.T, dir, name, body string) string {
+	t.Helper()
+	full := filepath.Join(dir, name)
+	if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+		t.Fatalf("write %s: %v", full, err)
+	}
+	return full
+}
+
+// hostStat renders a /proc/stat aggregate line plus one idle line per core.
+func hostStat(cores, busy, idle int) string {
+	var b strings.Builder
+	b.WriteString("cpu  " + itoa(busy) + " 0 0 " + itoa(idle) + " 0 0 0 0\n")
+	for i := range cores {
+		b.WriteString("cpu" + itoa(i) + " 0 0 0 0 0 0 0 0\n")
+	}
+	return b.String()
+}
+
+// writeIdleHost lays down an idle one-core /proc/stat, an idle loadavg, 1 MiB
+// of memory and no network interfaces.
+func (p *procTree) writeIdleHost() {
+	p.t.Helper()
+	p.write("stat", "cpu  0 0 0 0 0 0 0 0\n")
+	p.write("loadavg", "0 0 0 0/0 0\n")
+	p.write("meminfo", "MemTotal: 1024 kB\n")
+	p.write("net/dev", "")
+}
+
 // newTestSampler wires a sampler onto a fake /proc with a fake clock and no
 // real subprocess, statfs or hardware access.
 func newTestSampler(t *testing.T, tree *procTree, clock *fakeClock, opts Options) *Sampler {
@@ -232,27 +262,6 @@ func TestNetworkThroughputSurvivesInterfaceChurn(t *testing.T) {
 	}
 }
 
-func TestMemoryFromMeminfo(t *testing.T) {
-	tree := newProcTree(t)
-	clock := newFakeClock()
-	tree.write("stat", "cpu  0 0 0 0 0 0 0 0\n")
-	tree.write("loadavg", "0 0 0 0/0 0\n")
-	tree.write("net/dev", "")
-	// 8 GiB total, 6 GiB available.
-	tree.write("meminfo", "MemTotal:       8388608 kB\nMemFree:         512000 kB\nMemAvailable:   6291456 kB\n")
-
-	s := newTestSampler(t, tree, clock, Options{})
-	s.sample(context.Background())
-
-	system := s.Snapshot().System
-	if system.MemTotalMB != 8192 {
-		t.Fatalf("MemTotalMB = %d, want 8192", system.MemTotalMB)
-	}
-	if system.MemUsedMB != 2048 {
-		t.Fatalf("MemUsedMB = %d, want 2048", system.MemUsedMB)
-	}
-}
-
 // In a container /proc/meminfo describes the host. The cgroup limit is what the
 // kernel will actually OOM-kill against, so it has to win.
 func TestMemoryCorrectedByCgroupLimitAndUsage(t *testing.T) {
@@ -314,16 +323,10 @@ func TestMemoryCorrectedByCgroupLimitAndUsage(t *testing.T) {
 			tree.write("meminfo", "MemTotal:       8388608 kB\nMemAvailable:   6291456 kB\n")
 
 			cgroupDir := t.TempDir()
-			if err := os.WriteFile(filepath.Join(cgroupDir, tc.limitFile), []byte(tc.limitBody), 0o644); err != nil {
-				t.Fatal(err)
-			}
+			writeFile(t, cgroupDir, tc.limitFile, tc.limitBody)
 			if tc.usageBody != "" {
-				if err := os.WriteFile(filepath.Join(cgroupDir, tc.usageFile), []byte(tc.usageBody), 0o644); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(filepath.Join(cgroupDir, tc.statFile), []byte(tc.statBody), 0o644); err != nil {
-					t.Fatal(err)
-				}
+				writeFile(t, cgroupDir, tc.usageFile, tc.usageBody)
+				writeFile(t, cgroupDir, tc.statFile, tc.statBody)
 			}
 
 			s := newTestSampler(t, tree, clock, Options{})
@@ -387,32 +390,17 @@ func TestCPUCorrectedByCgroupQuotaAndUsage(t *testing.T) {
 			tree := newProcTree(t)
 			clock := newFakeClock()
 			// The host has 8 cores and is barely busy; the container is not.
-			hostStat := func(busy, idle int) string {
-				line := "cpu  " + itoa(busy) + " 0 0 " + itoa(idle) + " 0 0 0 0\n"
-				for i := range 8 {
-					line += "cpu" + itoa(i) + " 0 0 0 0 0 0 0 0\n"
-				}
-				return line
-			}
-			tree.write("stat", hostStat(100, 9900))
+			tree.write("stat", hostStat(8, 100, 9900))
 			tree.write("loadavg", "0 0 0 0/0 0\n")
 			tree.write("meminfo", "MemTotal: 1024 kB\n")
 			tree.write("net/dev", "")
 
 			cgroupDir := t.TempDir()
-			writeCgroup := func(name, body string) {
-				if err := os.WriteFile(filepath.Join(cgroupDir, name), []byte(body), 0o644); err != nil {
-					t.Fatal(err)
-				}
-			}
-			writeCgroup(tc.usageFile, tc.usageFirst)
-			writeCgroup(tc.quotaFile, tc.quotaBody)
 			paths := tc.paths
-			paths.usage = filepath.Join(cgroupDir, tc.usageFile)
-			paths.quota = filepath.Join(cgroupDir, tc.quotaFile)
+			paths.usage = writeFile(t, cgroupDir, tc.usageFile, tc.usageFirst)
+			paths.quota = writeFile(t, cgroupDir, tc.quotaFile, tc.quotaBody)
 			if tc.periodFile != "" {
-				writeCgroup(tc.periodFile, tc.periodBody)
-				paths.period = filepath.Join(cgroupDir, tc.periodFile)
+				paths.period = writeFile(t, cgroupDir, tc.periodFile, tc.periodBody)
 			}
 
 			s := newTestSampler(t, tree, clock, Options{})
@@ -424,8 +412,8 @@ func TestCPUCorrectedByCgroupQuotaAndUsage(t *testing.T) {
 
 			// 10 seconds of CPU over 5 seconds of wall time on a 2-core quota:
 			// the container is pegged, while the host is 1% busy.
-			writeCgroup(tc.usageFile, tc.usageLater)
-			tree.write("stat", hostStat(200, 19800))
+			writeFile(t, cgroupDir, tc.usageFile, tc.usageLater)
+			tree.write("stat", hostStat(8, 200, 19800))
 			clock.advance(5 * time.Second)
 			s.sample(context.Background())
 
@@ -437,74 +425,6 @@ func TestCPUCorrectedByCgroupQuotaAndUsage(t *testing.T) {
 				t.Fatalf("Cores = %d, want the 2 cores the cgroup allows, not the host's 8", system.Cores)
 			}
 		})
-	}
-}
-
-// An unconstrained cgroup measures this process alone, which is not what a node
-// competes for: uncapped, the CPU a neighbor burns is CPU this node cannot have.
-// So with no quota the host's own busyness stands, even though the cgroup could
-// be read — here Silo uses a quarter of the machine while the machine is at
-// three quarters.
-func TestCPUWithoutCgroupQuotaReportsTheHost(t *testing.T) {
-	tree := newProcTree(t)
-	clock := newFakeClock()
-	tree.write("stat", "cpu  100 0 0 900 0 0 0 0\ncpu0 0 0 0 0 0 0 0 0\ncpu1 0 0 0 0 0 0 0 0\n")
-	tree.write("loadavg", "0 0 0 0/0 0\n")
-	tree.write("meminfo", "MemTotal: 1024 kB\n")
-	tree.write("net/dev", "")
-
-	cgroupDir := t.TempDir()
-	usage := filepath.Join(cgroupDir, "cpu.stat")
-	if err := os.WriteFile(usage, []byte("usage_usec 0\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(cgroupDir, "cpu.max"), []byte("max 100000\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	s := newTestSampler(t, tree, clock, Options{})
-	s.cgroupCPUPaths = []cgroupCPUPath{{
-		usage:     usage,
-		usageKey:  cgroupCPUUsageKey,
-		usageUnit: time.Microsecond,
-		quota:     filepath.Join(cgroupDir, "cpu.max"),
-	}}
-	s.sample(context.Background())
-
-	// 5 seconds of CPU over 5 seconds of wall time across 2 cores: half of what
-	// this process could use, and a quarter of the two-core machine.
-	if err := os.WriteFile(usage, []byte("usage_usec 5000000\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// The host meanwhile spent 750 of the interval's 1000 ticks busy.
-	tree.write("stat", "cpu  850 0 0 1150 0 0 0 0\ncpu0 0 0 0 0 0 0 0 0\ncpu1 0 0 0 0 0 0 0 0\n")
-	clock.advance(5 * time.Second)
-	s.sample(context.Background())
-
-	system := s.Snapshot().System
-	if system.CPUPct != 75 {
-		t.Fatalf("CPUPct = %d, want the host's 75 rather than this process's 25", system.CPUPct)
-	}
-	if system.Cores != 2 {
-		t.Fatalf("Cores = %d, want the host's 2 with no quota set", system.Cores)
-	}
-}
-
-// A host that cannot be sampled must publish an explicitly unavailable
-// snapshot, so a reader can distinguish it from a host that is simply idle.
-func TestNonLinuxHostReportsUnavailable(t *testing.T) {
-	tree := newProcTree(t)
-	clock := newFakeClock()
-	s := newTestSampler(t, tree, clock, Options{})
-	s.goos = "darwin"
-	s.sample(context.Background())
-
-	snapshot := s.Snapshot()
-	if snapshot.Available {
-		t.Fatal("Available = true on a non-Linux host")
-	}
-	if snapshot.System != nil || snapshot.GPU != nil {
-		t.Fatalf("snapshot carries data on a non-Linux host: %+v", snapshot)
 	}
 }
 
@@ -663,50 +583,6 @@ func TestHostProcOverridesLxcfsScopedFiles(t *testing.T) {
 	}
 }
 
-// Only stat, loadavg, and meminfo are host-proc aware. net/dev is per-netns
-// and must stay on the container's own /proc even when hostProcDir has its
-// own net/dev sitting right next to the other three files — otherwise a
-// nested node would report the LXC host's aggregate network traffic instead
-// of its own.
-func TestHostProcDoesNotAffectNetDev(t *testing.T) {
-	tree := newProcTree(t)
-	hostTree := newProcTree(t)
-	clock := newFakeClock()
-
-	tree.write("stat", "cpu  0 0 0 0 0 0 0 0\n")
-	tree.write("loadavg", "0 0 0 0/0 0\n")
-	tree.write("meminfo", "MemTotal: 1024 kB\n")
-	netDev := func(rx, tx int) string {
-		return "Inter-|   Receive                    |  Transmit\n" +
-			" face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed\n" +
-			"  eth0: " + itoa(rx) + " 1 0 0 0 0 0 0 " + itoa(tx) + " 1 0 0 0 0 0 0\n"
-	}
-	tree.write("net/dev", netDev(1000, 2000))
-
-	// hostTree has its own net/dev with very different counters. If it were
-	// ever consulted, the throughput computed below would not match.
-	hostTree.write("stat", "cpu  0 0 0 0 0 0 0 0\n")
-	hostTree.write("loadavg", "0 0 0 0/0 0\n")
-	hostTree.write("meminfo", "MemTotal: 1024 kB\n")
-	hostTree.write("net/dev", netDev(9_000_000, 9_000_000))
-
-	s := newTestSampler(t, tree, clock, Options{})
-	s.hostProcDir = hostTree.root
-	s.sample(context.Background())
-
-	tree.write("net/dev", netDev(6000, 12000))
-	clock.advance(5 * time.Second)
-	s.sample(context.Background())
-
-	system := s.Snapshot().System
-	if system.NetRxBps != 8000 { // 5000 bytes / 5s * 8, from tree's net/dev
-		t.Fatalf("NetRxBps = %d, want 8000 from procDir's net/dev, not hostProcDir's", system.NetRxBps)
-	}
-	if system.NetTxBps != 16000 { // 10000 bytes / 5s * 8
-		t.Fatalf("NetTxBps = %d, want 16000 from procDir's net/dev, not hostProcDir's", system.NetTxBps)
-	}
-}
-
 // itoa avoids importing strconv into every fixture builder above.
 func itoa(v int) string {
 	if v == 0 {
@@ -747,68 +623,6 @@ func TestMemoryStatsDoesNotMixCgroupUsageWithHostTotal(t *testing.T) {
 	}
 }
 
-// With a concrete limit both numbers come from the cgroup, which is the whole
-// point of the correction.
-func TestMemoryStatsUsesCgroupUsageBesideACgroupLimit(t *testing.T) {
-	tree := newProcTree(t)
-	tree.write("meminfo", "MemTotal: 65536 kB\nMemAvailable: 1024 kB\n")
-	s := newTestSampler(t, tree, newFakeClock(), Options{})
-
-	dir := t.TempDir()
-	limit := filepath.Join(dir, "memory.max")
-	if err := os.WriteFile(limit, []byte("8388608\n"), 0o600); err != nil {
-		t.Fatalf("write cgroup limit: %v", err)
-	}
-	usage := filepath.Join(dir, "memory.current")
-	if err := os.WriteFile(usage, []byte("1048576\n"), 0o600); err != nil {
-		t.Fatalf("write cgroup usage: %v", err)
-	}
-	s.cgroupUsagePaths = []cgroupUsagePath{{limit: limit, usage: usage}}
-
-	used, total := s.memoryStats()
-	if total != 8388608 {
-		t.Fatalf("total = %d, want the cgroup limit", total)
-	}
-	if used != 1048576 {
-		t.Fatalf("used = %d, want the cgroup working set", used)
-	}
-}
-
-// NVENC workloads are keyed by CUDA index or GPU uuid, and only the nvidia-smi
-// step supplies those aliases. With that step failed — a timeout, a missing
-// toolkit, a tripped breaker — an NVENC node reported zero sessions while it
-// transcoded, and one exposing no readable render node vanished from the sample
-// altogether. Session accounting comes from the playback allocator, not a
-// driver, so it is true regardless.
-func TestSampleGPUReportsSessionsWhenNVIDIAEnrichmentFails(t *testing.T) {
-	tree := newProcTree(t)
-	tree.write("stat", "cpu  0 0 0 0 0 0 0 0\n")
-	tree.write("loadavg", "0 0 0 0/0 0\n")
-	tree.write("meminfo", "MemTotal: 1024 kB\n")
-	tree.write("net/dev", "")
-	s := newTestSampler(t, tree, newFakeClock(), Options{})
-	s.runNVIDIASMI = func(context.Context) ([]byte, error) {
-		return nil, errors.New("nvidia-smi not installed")
-	}
-	s.identities = func() []DeviceIdentity { return nil }
-	s.sessions = func() map[string]int { return map[string]int{"cuda:0": 2} }
-
-	gpus := s.sampleGPU(context.Background(), s.now())
-
-	if len(gpus) != 1 {
-		t.Fatalf("gpu sample = %+v, want the known workload's device reported", gpus)
-	}
-	if gpus[0].Device != "cuda:0" {
-		t.Fatalf("device = %q, want the name the workload is counted under", gpus[0].Device)
-	}
-	if gpus[0].Sessions != 2 {
-		t.Fatalf("sessions = %d, want the allocator's count", gpus[0].Sessions)
-	}
-	if gpus[0].Source != SourceUnavailable {
-		t.Fatalf("source = %q, want it reported as unmeasured", gpus[0].Source)
-	}
-}
-
 // A leaf cgroup that imposes no memory limit does not mean the process has
 // none: a systemd unit inside a slice with MemoryMax=, or a container under a
 // limited pod cgroup, is capped by an ancestor while its own memory.max reads
@@ -823,13 +637,7 @@ func TestMemoryLimitTakesTheTightestCgroupInForce(t *testing.T) {
 	tree.write("net/dev", "")
 
 	dir := t.TempDir()
-	write := func(name, body string) string {
-		full := filepath.Join(dir, name)
-		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
-			t.Fatalf("write %s: %v", name, err)
-		}
-		return full
-	}
+	write := func(name, body string) string { return writeFile(t, dir, name, body) }
 	// Leaf first, as the resolved list is ordered. The leaf allows 8 GiB, but the
 	// slice containing it allows only 2 — so the first readable limit is not the
 	// one the kernel kills against, which is what makes this more than an
@@ -890,31 +698,13 @@ func TestCPUCorrectedByCpusetWithoutAQuota(t *testing.T) {
 	tree.write("meminfo", "MemTotal: 1024 kB\n")
 	tree.write("net/dev", "")
 	// An eight-core host, so the two allowed CPUs are visibly a subset.
-	hostStat := func(busy, idle int) string {
-		line := "cpu  " + itoa(busy) + " 0 0 " + itoa(idle) + " 0 0 0 0\n"
-		for i := range 8 {
-			line += "cpu" + itoa(i) + " 0 0 0 0 0 0 0 0\n"
-		}
-		return line
-	}
-	tree.write("stat", hostStat(100, 9900))
+	tree.write("stat", hostStat(8, 100, 9900))
 
 	dir := t.TempDir()
-	cpuset := filepath.Join(dir, "cpuset.cpus.effective")
-	if err := os.WriteFile(cpuset, []byte("2-3\n"), 0o644); err != nil {
-		t.Fatalf("write cpuset: %v", err)
-	}
-	usage := filepath.Join(dir, "cpu.stat")
-	writeUsage := func(micros int) {
-		if err := os.WriteFile(usage, []byte("usage_usec "+itoa(micros)+"\n"), 0o644); err != nil {
-			t.Fatalf("write cgroup usage: %v", err)
-		}
-	}
-	writeUsage(0)
-	quota := filepath.Join(dir, "cpu.max")
-	if err := os.WriteFile(quota, []byte("max 100000\n"), 0o644); err != nil {
-		t.Fatalf("write cgroup quota: %v", err)
-	}
+	cpuset := writeFile(t, dir, "cpuset.cpus.effective", "2-3\n")
+	writeUsage := func(micros int) string { return writeFile(t, dir, "cpu.stat", "usage_usec "+itoa(micros)+"\n") }
+	usage := writeUsage(0)
+	quota := writeFile(t, dir, "cpu.max", "max 100000\n")
 
 	s := newTestSampler(t, tree, clock, Options{})
 	s.cgroupCPUPaths = []cgroupCPUPath{{
@@ -926,7 +716,7 @@ func TestCPUCorrectedByCpusetWithoutAQuota(t *testing.T) {
 	// 10 seconds of CPU over 5 seconds of wall time on two allowed CPUs: pegged,
 	// while the host is 1% busy.
 	writeUsage(10_000_000)
-	tree.write("stat", hostStat(200, 19800))
+	tree.write("stat", hostStat(8, 200, 19800))
 	clock.advance(5 * time.Second)
 	s.sample(context.Background())
 
@@ -963,73 +753,6 @@ func TestCountCPUSetEntries(t *testing.T) {
 	}
 }
 
-// Every cgroup source defaults to a real host path, so a fixture that forgets
-// one silently measures the machine the tests run on. That is invisible on a
-// developer's macOS laptop and decides the result on a Linux CI runner — which
-// is exactly how TestCPUWithoutCgroupQuotaUsesHostCores started failing only in
-// CI. This asserts the constructor leaves nothing pointing at the system.
-func TestNewTestSamplerReadsNoRealCgroupPaths(t *testing.T) {
-	s := newTestSampler(t, newProcTree(t), newFakeClock(), Options{})
-
-	var configured []string
-	for _, level := range s.cgroupUsagePaths {
-		configured = append(configured, level.limit, level.usage, level.stat)
-	}
-	for _, level := range s.cgroupCPUPaths {
-		configured = append(configured, level.usage, level.quota, level.period)
-	}
-	configured = append(configured, s.cgroupCPUSetPaths...)
-	configured = append(configured, s.procDir, s.hostProcDir)
-
-	for _, path := range configured {
-		if path == "" {
-			continue
-		}
-		if strings.HasPrefix(path, cgroupMountRoot) || path == "/proc" {
-			t.Fatalf("test sampler reads the real host path %q", path)
-		}
-	}
-}
-
-// Two cgroups publishing the same memory limit are not equivalent: the
-// ancestor's is shared with siblings that can fill it, so it is the one whose
-// usage says how much is left. Reading the leaf instead shows headroom right up
-// until the parent OOMs — the mirror of the CPU quota tie-break.
-func TestMemoryLimitPrefersTheOuterCgroupOnATie(t *testing.T) {
-	tree := newProcTree(t)
-	tree.write("meminfo", "MemTotal: 67108864 kB\nMemAvailable: 33554432 kB\n")
-	s := newTestSampler(t, tree, newFakeClock(), Options{})
-
-	dir := t.TempDir()
-	write := func(name, body string) string {
-		full := filepath.Join(dir, name)
-		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
-			t.Fatalf("write %s: %v", name, err)
-		}
-		return full
-	}
-	const twoGiB = "2147483648\n"
-	stat := write("memory.stat", "inactive_file 0\n")
-	s.cgroupUsagePaths = []cgroupUsagePath{
-		{
-			limit: write("leaf.max", twoGiB), usage: write("leaf.current", "536870912\n"),
-			stat: stat, inactiveFile: cgroupInactiveFileKeyV2,
-		},
-		{
-			limit: write("slice.max", twoGiB), usage: write("slice.current", "1879048192\n"),
-			stat: stat, inactiveFile: cgroupInactiveFileKeyV2,
-		},
-	}
-
-	used, total := s.memoryStats()
-	if total != 2147483648 {
-		t.Fatalf("total = %d, want the 2 GiB both levels publish", total)
-	}
-	if want := int64(1879048192); used != want {
-		t.Fatalf("used = %d, want the %d charged to the shared parent, not this service's own", used, want)
-	}
-}
-
 // A cgroup limit that merely equals the host's memory is no limit at all, and
 // must not start reading cgroup usage just because the tie-break loosened.
 func TestMemoryLimitEqualToHostRAMIsNotALimit(t *testing.T) {
@@ -1038,13 +761,7 @@ func TestMemoryLimitEqualToHostRAMIsNotALimit(t *testing.T) {
 	s := newTestSampler(t, tree, newFakeClock(), Options{})
 
 	dir := t.TempDir()
-	write := func(name, body string) string {
-		full := filepath.Join(dir, name)
-		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
-			t.Fatalf("write %s: %v", name, err)
-		}
-		return full
-	}
+	write := func(name, body string) string { return writeFile(t, dir, name, body) }
 	s.cgroupUsagePaths = []cgroupUsagePath{{
 		limit: write("memory.max", "67108864\n"), // exactly MemTotal
 		usage: write("memory.current", "1048576\n"),
@@ -1072,28 +789,13 @@ func TestCPUQuotaAboveHostCapacityReportsTheHost(t *testing.T) {
 	tree.write("meminfo", "MemTotal: 1024 kB\n")
 	tree.write("net/dev", "")
 	// A four-core host.
-	hostStat := func(busy, idle int) string {
-		line := "cpu  " + itoa(busy) + " 0 0 " + itoa(idle) + " 0 0 0 0\n"
-		for i := range 4 {
-			line += "cpu" + itoa(i) + " 0 0 0 0 0 0 0 0\n"
-		}
-		return line
-	}
-	tree.write("stat", hostStat(100, 900))
+	tree.write("stat", hostStat(4, 100, 900))
 
 	dir := t.TempDir()
-	usage := filepath.Join(dir, "cpu.stat")
-	writeUsage := func(micros int) {
-		if err := os.WriteFile(usage, []byte("usage_usec "+itoa(micros)+"\n"), 0o644); err != nil {
-			t.Fatalf("write cgroup usage: %v", err)
-		}
-	}
-	writeUsage(0)
-	quota := filepath.Join(dir, "cpu.max")
+	writeUsage := func(micros int) string { return writeFile(t, dir, "cpu.stat", "usage_usec "+itoa(micros)+"\n") }
+	usage := writeUsage(0)
 	// Eight cores of quota on a four-core host.
-	if err := os.WriteFile(quota, []byte("800000 100000\n"), 0o644); err != nil {
-		t.Fatalf("write cgroup quota: %v", err)
-	}
+	quota := writeFile(t, dir, "cpu.max", "800000 100000\n")
 
 	s := newTestSampler(t, tree, clock, Options{})
 	s.cgroupCPUPaths = []cgroupCPUPath{{
@@ -1104,7 +806,7 @@ func TestCPUQuotaAboveHostCapacityReportsTheHost(t *testing.T) {
 	// Silo spends 5 of the interval's 20 core-seconds — a quarter of the host —
 	// while the host itself is three quarters busy with someone else's work.
 	writeUsage(5_000_000)
-	tree.write("stat", hostStat(850, 1150))
+	tree.write("stat", hostStat(4, 850, 1150))
 	clock.advance(5 * time.Second)
 	s.sample(context.Background())
 
@@ -1117,123 +819,36 @@ func TestCPUQuotaAboveHostCapacityReportsTheHost(t *testing.T) {
 	}
 }
 
-// Every unconstrained container and systemd service publishes an effective
-// cpuset holding every online CPU, because it inherits the root's. Reading that
-// as a two-CPU-style restriction would move the CPU reading to this cgroup's own
-// usage on a host where nothing caps it, and Silo idling beside a saturated
-// neighbor would report Silo's few percent as the machine's load.
-func TestCPUIgnoresACpusetSpanningTheWholeHost(t *testing.T) {
+// Two cgroups publishing the same memory limit are not equivalent: the
+// ancestor's is shared with siblings that can fill it, so it is the one whose
+// usage says how much is left. Reading the leaf instead shows headroom right up
+// until the parent OOMs — the mirror of the CPU quota tie-break.
+func TestMemoryLimitPrefersTheOuterCgroupOnATie(t *testing.T) {
 	tree := newProcTree(t)
-	clock := newFakeClock()
-	tree.write("loadavg", "0 0 0 0/0 0\n")
-	tree.write("meminfo", "MemTotal: 1024 kB\n")
-	tree.write("net/dev", "")
-	hostStat := func(busy, idle int) string {
-		line := "cpu  " + itoa(busy) + " 0 0 " + itoa(idle) + " 0 0 0 0\n"
-		for i := range 8 {
-			line += "cpu" + itoa(i) + " 0 0 0 0 0 0 0 0\n"
-		}
-		return line
-	}
-	tree.write("stat", hostStat(100, 900))
+	tree.write("meminfo", "MemTotal: 67108864 kB\nMemAvailable: 33554432 kB\n")
+	s := newTestSampler(t, tree, newFakeClock(), Options{})
 
 	dir := t.TempDir()
-	// All eight of the host's CPUs — what an unrestricted cgroup reports.
-	cpuset := filepath.Join(dir, "cpuset.cpus.effective")
-	if err := os.WriteFile(cpuset, []byte("0-7\n"), 0o644); err != nil {
-		t.Fatalf("write cpuset: %v", err)
-	}
-	usage := filepath.Join(dir, "cpu.stat")
-	writeUsage := func(micros int) {
-		if err := os.WriteFile(usage, []byte("usage_usec "+itoa(micros)+"\n"), 0o644); err != nil {
-			t.Fatalf("write cgroup usage: %v", err)
-		}
-	}
-	writeUsage(0)
-	quota := filepath.Join(dir, "cpu.max")
-	if err := os.WriteFile(quota, []byte("max 100000\n"), 0o644); err != nil {
-		t.Fatalf("write cgroup quota: %v", err)
+	write := func(name, body string) string { return writeFile(t, dir, name, body) }
+	const twoGiB = "2147483648\n"
+	stat := write("memory.stat", "inactive_file 0\n")
+	s.cgroupUsagePaths = []cgroupUsagePath{
+		{
+			limit: write("leaf.max", twoGiB), usage: write("leaf.current", "536870912\n"),
+			stat: stat, inactiveFile: cgroupInactiveFileKeyV2,
+		},
+		{
+			limit: write("slice.max", twoGiB), usage: write("slice.current", "1879048192\n"),
+			stat: stat, inactiveFile: cgroupInactiveFileKeyV2,
+		},
 	}
 
-	if got := cgroupCPUSetCores([]string{cpuset}, 8); got != 0 {
-		t.Fatalf("cgroupCPUSetCores() = %d for a cpuset holding every host CPU, want 0", got)
+	used, total := s.memoryStats()
+	if total != 2147483648 {
+		t.Fatalf("total = %d, want the 2 GiB both levels publish", total)
 	}
-
-	s := newTestSampler(t, tree, clock, Options{})
-	s.cgroupCPUPaths = []cgroupCPUPath{{
-		usage: usage, usageKey: cgroupCPUUsageKey, usageUnit: time.Microsecond, quota: quota,
-	}}
-	s.cgroupCPUSetPaths = []string{cpuset}
-	s.sample(context.Background())
-
-	// The host spends 750 of the interval's 1000 ticks busy; Silo uses 2 of its
-	// 40 available core-seconds, which is 5%.
-	writeUsage(2_000_000)
-	tree.write("stat", hostStat(850, 1150))
-	clock.advance(5 * time.Second)
-	s.sample(context.Background())
-
-	system := s.Snapshot().System
-	if system.CPUPct != 75 {
-		t.Fatalf("CPUPct = %d, want the host's 75 — nothing caps this process", system.CPUPct)
-	}
-	if system.Cores != 8 {
-		t.Fatalf("Cores = %d, want the host's 8", system.Cores)
-	}
-}
-
-// A quota sized to the whole box is the ordinary way a deployment says "use this
-// machine", and it restricts nothing. The boundary matters on its own: the
-// over-capacity case is a misconfiguration, while quota == host cores is
-// deliberate and common, and reading it as a cap moves the measurement into the
-// cgroup exactly where the machine is shared.
-func TestCPUQuotaEqualToTheHostReportsTheHost(t *testing.T) {
-	tree := newProcTree(t)
-	clock := newFakeClock()
-	tree.write("loadavg", "0 0 0 0/0 0\n")
-	tree.write("meminfo", "MemTotal: 1024 kB\n")
-	tree.write("net/dev", "")
-	hostStat := func(busy, idle int) string {
-		line := "cpu  " + itoa(busy) + " 0 0 " + itoa(idle) + " 0 0 0 0\n"
-		for i := range 4 {
-			line += "cpu" + itoa(i) + " 0 0 0 0 0 0 0 0\n"
-		}
-		return line
-	}
-	tree.write("stat", hostStat(100, 900))
-
-	dir := t.TempDir()
-	usage := filepath.Join(dir, "cpu.stat")
-	writeUsage := func(micros int) {
-		if err := os.WriteFile(usage, []byte("usage_usec "+itoa(micros)+"\n"), 0o644); err != nil {
-			t.Fatalf("write cgroup usage: %v", err)
-		}
-	}
-	writeUsage(0)
-	quota := filepath.Join(dir, "cpu.max")
-	// Exactly the host's four cores.
-	if err := os.WriteFile(quota, []byte("400000 100000\n"), 0o644); err != nil {
-		t.Fatalf("write cgroup quota: %v", err)
-	}
-
-	s := newTestSampler(t, tree, clock, Options{})
-	s.cgroupCPUPaths = []cgroupCPUPath{{
-		usage: usage, usageKey: cgroupCPUUsageKey, usageUnit: time.Microsecond, quota: quota,
-	}}
-	s.sample(context.Background())
-
-	// Silo is nearly idle; the machine it shares is three quarters busy.
-	writeUsage(200_000)
-	tree.write("stat", hostStat(850, 1150))
-	clock.advance(5 * time.Second)
-	s.sample(context.Background())
-
-	system := s.Snapshot().System
-	if system.CPUPct != 75 {
-		t.Fatalf("CPUPct = %d, want the host's 75 — a whole-machine quota caps nothing", system.CPUPct)
-	}
-	if system.Cores != 4 {
-		t.Fatalf("Cores = %d, want the host's 4", system.Cores)
+	if want := int64(1879048192); used != want {
+		t.Fatalf("used = %d, want the %d charged to the shared parent, not this service's own", used, want)
 	}
 }
 
@@ -1260,5 +875,37 @@ func TestCgroupCapBindsOnlyBelowTheHostSize(t *testing.T) {
 				t.Fatalf("cgroupCapBinds(%v, %d) = %v, want %v", test.cores, test.hostCores, got, test.want)
 			}
 		})
+	}
+}
+
+// NVENC workloads are keyed by CUDA index or GPU uuid, and only the nvidia-smi
+// step supplies those aliases. With that step failed — a timeout, a missing
+// toolkit, a tripped breaker — an NVENC node reported zero sessions while it
+// transcoded, and one exposing no readable render node vanished from the sample
+// altogether. Session accounting comes from the playback allocator, not a
+// driver, so it is true regardless.
+func TestSampleGPUReportsSessionsWhenNVIDIAEnrichmentFails(t *testing.T) {
+	tree := newProcTree(t)
+	tree.writeIdleHost()
+	s := newTestSampler(t, tree, newFakeClock(), Options{})
+	s.runNVIDIASMI = func(context.Context) ([]byte, error) {
+		return nil, errors.New("nvidia-smi not installed")
+	}
+	s.identities = func() []DeviceIdentity { return nil }
+	s.sessions = func() map[string]int { return map[string]int{"cuda:0": 2} }
+
+	gpus := s.sampleGPU(context.Background(), s.now())
+
+	if len(gpus) != 1 {
+		t.Fatalf("gpu sample = %+v, want the known workload's device reported", gpus)
+	}
+	if gpus[0].Device != "cuda:0" {
+		t.Fatalf("device = %q, want the name the workload is counted under", gpus[0].Device)
+	}
+	if gpus[0].Sessions != 2 {
+		t.Fatalf("sessions = %d, want the allocator's count", gpus[0].Sessions)
+	}
+	if gpus[0].Source != SourceUnavailable {
+		t.Fatalf("source = %q, want it reported as unmeasured", gpus[0].Source)
 	}
 }

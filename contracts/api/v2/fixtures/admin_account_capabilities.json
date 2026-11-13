@@ -1,5 +1,5 @@
 {
-  "revision": "c537fe27b1bb7a978c5584e48aa7f4503db9c74bbd825ce421b75ac378bb5f9c",
+  "revision": "2abe3d7a286c970d2cb2d73918fca1583fd349ad6b8849686017077de46f2a71",
   "state": "available",
   "allowed": true,
   "available": true,
@@ -17,5 +17,7 @@
   "account_downloads": true,
   "request_usage": true,
   "policy_defaults": true,
-  "profile_sections": true
+  "profile_avatars": true,
+  "profile_sections": true,
+  "profile_management": true
 }

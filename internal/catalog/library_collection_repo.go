@@ -20,6 +20,9 @@ import (
 var ErrLibraryCollectionNotFound = errors.New("library collection not found")
 
 type CreateLibraryCollectionInput struct {
+	// ID is a preassigned id (a restore writes artwork keyed by it before
+	// the collection exists); empty assigns one.
+	ID                  string
 	LibraryID           int
 	LibraryIDs          []int
 	Slug                string
@@ -113,7 +116,8 @@ const libraryCollectionColumns = `lc.id, lc.library_id, lc.slug, lc.title, lc.de
 	lc.management_mode, lc.management_source, lc.management_key, lc.last_sync_status,
 	lc.last_sync_message, lc.last_sync_at, lc.sync_schedule, lc.next_sync_at,
 	CASE WHEN lc.collection_type = 'smart' THEN lc.item_count_cached
-	     ELSE COALESCE(COUNT(DISTINCT lci.media_item_id), 0) END,
+	     ELSE COALESCE(COUNT(DISTINCT lci.media_item_id) FILTER (WHERE EXISTS (
+	         SELECT 1 FROM media_item_libraries in_library WHERE in_library.content_id = lci.media_item_id)), 0) END,
 	lc.created_at, lc.updated_at,
 	COALESCE(ARRAY_AGG(DISTINCT lcl.library_id) FILTER (WHERE lcl.library_id IS NOT NULL), ARRAY[]::integer[])`
 
@@ -191,6 +195,28 @@ func scanLibraryCollections(rows pgx.Rows) ([]*models.LibraryCollection, error) 
 }
 
 func (r *LibraryCollectionRepository) Create(ctx context.Context, input CreateLibraryCollectionInput) (*models.LibraryCollection, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("beginning library collection create: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	id, err := CreateLibraryCollectionInTx(ctx, tx, input)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("committing library collection create: %w", err)
+	}
+
+	return r.GetByID(ctx, id)
+}
+
+// CreateLibraryCollectionInTx inserts an admin collection with its library
+// scope in the caller's transaction and returns its id.
+//
+//nolint:funlen // Create's transaction body, moved as is so a restore can run it in its own transaction
+func CreateLibraryCollectionInTx(ctx context.Context, tx pgx.Tx, input CreateLibraryCollectionInput) (string, error) {
 	input.LibraryIDs = normalizeCollectionLibraryIDs(input.LibraryID, input.LibraryIDs)
 	if len(input.SourceConfig) == 0 {
 		input.SourceConfig = json.RawMessage(`{}`)
@@ -210,13 +236,6 @@ func (r *LibraryCollectionRepository) Create(ctx context.Context, input CreateLi
 	if input.ManagementMode == "" {
 		input.ManagementMode = "manual"
 	}
-
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("beginning library collection create: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
 	query := `
 		INSERT INTO library_collections (
 			id, library_id, slug, title, description, collection_type, visibility,
@@ -235,9 +254,12 @@ func (r *LibraryCollectionRepository) Create(ctx context.Context, input CreateLi
 		)
 		RETURNING id`
 
-	id, err := idgen.NextID()
-	if err != nil {
-		return nil, fmt.Errorf("generate id: %w", err)
+	id := input.ID
+	if id == "" {
+		var err error
+		if id, err = idgen.NextID(); err != nil {
+			return "", fmt.Errorf("generate id: %w", err)
+		}
 	}
 	legacyLibraryID := input.LibraryID
 	if legacyLibraryID <= 0 && len(input.LibraryIDs) > 0 {
@@ -272,7 +294,7 @@ func (r *LibraryCollectionRepository) Create(ctx context.Context, input CreateLi
 		input.SyncSchedule,
 		computeNextSyncAt(input.SyncSchedule),
 	).Scan(&id); err != nil {
-		return nil, fmt.Errorf("creating library collection: %w", err)
+		return "", fmt.Errorf("creating library collection: %w", err)
 	}
 
 	var groupLibraryID *int
@@ -287,18 +309,18 @@ func (r *LibraryCollectionRepository) Create(ctx context.Context, input CreateLi
 			WHERE id = $1
 		`, *input.GroupID).Scan(&libraryID, &kind); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				return nil, ErrLibraryCollectionGroupNotFound
+				return "", ErrLibraryCollectionGroupNotFound
 			}
-			return nil, fmt.Errorf("loading collection group: %w", err)
+			return "", fmt.Errorf("loading collection group: %w", err)
 		}
 		if kind == models.GroupKindUserCollections {
-			return nil, fmt.Errorf("user-collections group cannot accept admin collections")
+			return "", errors.New("user-collections group cannot accept admin collections")
 		}
 		groupLibraryID = &libraryID
 	}
 
 	if err := lockLibraryCollectionOrderRevisions(ctx, tx, input.LibraryIDs); err != nil {
-		return nil, err
+		return "", err
 	}
 
 	groupMatchedLibrary := input.GroupID == nil
@@ -319,18 +341,14 @@ func (r *LibraryCollectionRepository) Create(ctx context.Context, input CreateLi
 			       ), 0)
 			ON CONFLICT (collection_id, library_id) DO NOTHING
 		`, id, libraryID, membershipGroupID); err != nil {
-			return nil, fmt.Errorf("creating collection library scope: %w", err)
+			return "", fmt.Errorf("creating collection library scope: %w", err)
 		}
 	}
 	if !groupMatchedLibrary {
-		return nil, fmt.Errorf("collection group library is not included in collection scope")
+		return "", errors.New("collection group library is not included in collection scope")
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("committing library collection create: %w", err)
-	}
-
-	return r.GetByID(ctx, id)
+	return id, nil
 }
 
 func (r *LibraryCollectionRepository) GetByID(ctx context.Context, id string) (*models.LibraryCollection, error) {
@@ -345,6 +363,18 @@ func (r *LibraryCollectionRepository) GetByID(ctx context.Context, id string) (*
 	`, libraryCollectionColumns, libraryCollectionScopeFallbackJoin)
 
 	return scanLibraryCollection(r.pool.QueryRow(ctx, query, id))
+}
+
+// Title returns a collection's title alone, without the joins GetByID makes.
+func (r *LibraryCollectionRepository) Title(ctx context.Context, id string) (string, error) {
+	var title string
+	if err := r.pool.QueryRow(ctx, `SELECT title FROM library_collections WHERE id = $1`, id).Scan(&title); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrLibraryCollectionNotFound
+		}
+		return "", err
+	}
+	return title, nil
 }
 
 // GetByManagementKey returns the collection that owns the given management
@@ -475,12 +505,12 @@ func (r *LibraryCollectionRepository) AnyVisibleInLibraries(ctx context.Context,
 	return exists, nil
 }
 
-func (r *LibraryCollectionRepository) Update(ctx context.Context, input UpdateLibraryCollectionInput) error {
-	var (
-		sets []string
-		args []any
-	)
-	argIdx := 1
+// libraryCollectionColumnSets builds the column assignments of an update:
+// every field but the library scope and group, which need their own writes.
+//
+//nolint:funlen // one assignment per column, moved out of Update
+func libraryCollectionColumnSets(input UpdateLibraryCollectionInput) (sets []string, args []any, argIdx int) {
+	argIdx = 1
 
 	if input.Slug != nil {
 		sets = append(sets, fmt.Sprintf("slug = $%d", argIdx))
@@ -608,6 +638,39 @@ func (r *LibraryCollectionRepository) Update(ctx context.Context, input UpdateLi
 		argIdx++
 	}
 
+	return sets, args, argIdx
+}
+
+// UpdateLibraryCollectionColumnsInTx writes an update's column fields in the
+// caller's transaction, after locking the collection as every collection
+// writer does. The library scope and group are not columns: an input that
+// sets them is refused.
+func UpdateLibraryCollectionColumnsInTx(ctx context.Context, tx pgx.Tx, input UpdateLibraryCollectionInput) error {
+	if input.LibraryIDs != nil || input.SetGroupID != nil || input.ExpectedRevision != nil {
+		return errors.New("updating a collection's scope or group needs Update")
+	}
+	sets, args, argIdx := libraryCollectionColumnSets(input)
+	if len(sets) == 0 {
+		return nil
+	}
+	if err := lockLibraryCollectionParent(ctx, tx, input.ID); err != nil {
+		return err
+	}
+	query := fmt.Sprintf("UPDATE library_collections SET %s, updated_at = NOW() WHERE id = $%d", strings.Join(sets, ", "), argIdx)
+	tag, err := tx.Exec(ctx, query, append(args, input.ID)...)
+	if err != nil {
+		return fmt.Errorf("updating library collection: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrLibraryCollectionNotFound
+	}
+	return nil
+}
+
+//nolint:funlen,gocyclo // the scope and group writes of one transaction; its column assignments moved to libraryCollectionColumnSets
+func (r *LibraryCollectionRepository) Update(ctx context.Context, input UpdateLibraryCollectionInput) error {
+	sets, args, argIdx := libraryCollectionColumnSets(input)
+
 	if len(sets) == 0 && input.LibraryIDs == nil && input.SetGroupID == nil && input.ExpectedRevision == nil {
 		_, err := r.GetByID(ctx, input.ID)
 		return err
@@ -667,7 +730,13 @@ func (r *LibraryCollectionRepository) Update(ctx context.Context, input UpdateLi
 			if len(updatedLibraryIDs) > 0 {
 				legacyLibraryID = updatedLibraryIDs[0]
 			}
-			if _, err := tx.Exec(ctx, "UPDATE library_collections SET library_id = $2 WHERE id = $1", input.ID, legacyLibraryID); err != nil {
+			// Keep a legacy library_id that is still in scope: the collection's
+			// slug is unique within it, and another scope library may already
+			// use the same slug.
+			if _, err := tx.Exec(ctx, `
+				UPDATE library_collections
+				SET library_id = CASE WHEN library_id = ANY($3::int[]) THEN library_id ELSE $2 END
+				WHERE id = $1`, input.ID, legacyLibraryID, updatedLibraryIDs); err != nil {
 				return fmt.Errorf("updating legacy library_id: %w", err)
 			}
 		}
@@ -747,7 +816,33 @@ func (r *LibraryCollectionRepository) Delete(ctx context.Context, id string) err
 	return err
 }
 
+// ReplaceItems makes items the collection's membership. It writes only the
+// difference: rows that left are deleted, rows whose position or source rank
+// changed are updated, and new rows are inserted. A title that stays keeps its
+// created_at. An unchanged list writes no item rows and does not touch the
+// collection, so the item triggers leave the collection revision alone. The
+// statement count does not grow with the list size.
 func (r *LibraryCollectionRepository) ReplaceItems(ctx context.Context, collectionID string, items []LibraryCollectionItemInput) error {
+	// Dedupe by media_item_id. Different source entries can resolve to the
+	// same library item (e.g. an IMDb and a TMDB entry pointing at the same
+	// local content_id, or one item present in several of the collection's
+	// bound folders), and library_collection_items has a composite PK
+	// (collection_id, media_item_id). First occurrence wins, preserving rank
+	// order. Position is renumbered over the surviving rows so it stays dense.
+	ids := make([]string, 0, len(items))
+	positions := make([]int, 0, len(items))
+	ranks := make([]int, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		if _, dup := seen[item.MediaItemID]; dup {
+			continue
+		}
+		seen[item.MediaItemID] = struct{}{}
+		positions = append(positions, len(ids))
+		ids = append(ids, item.MediaItemID)
+		ranks = append(ranks, item.SourceRank)
+	}
+
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("beginning collection item replacement: %w", err)
@@ -757,86 +852,63 @@ func (r *LibraryCollectionRepository) ReplaceItems(ctx context.Context, collecti
 	if err := lockLibraryCollectionParent(ctx, tx, collectionID); err != nil {
 		return err
 	}
-
-	if _, err := tx.Exec(ctx, "DELETE FROM library_collection_items WHERE collection_id = $1", collectionID); err != nil {
-		return fmt.Errorf("clearing collection items: %w", err)
+	// Lock the current members before the first write. Each item statement's
+	// trigger then holds the revision row until commit, and a concurrent
+	// media item delete or provider-ID merge locks a member row before it
+	// takes that revision row. Waiting on a member after the DELETE would
+	// close that cycle into a deadlock.
+	if _, err := tx.Exec(ctx, `
+		SELECT 1 FROM library_collection_items
+		WHERE collection_id = $1
+		ORDER BY media_item_id
+		FOR UPDATE
+	`, collectionID); err != nil {
+		return fmt.Errorf("locking collection items: %w", err)
 	}
 
-	// Dedupe by media_item_id before inserting. Different source entries can
-	// resolve to the same library item (e.g. an IMDb and a TMDB entry pointing
-	// at the same local content_id, or one item present in several of the
-	// collection's bound folders), and library_collection_items has a composite
-	// PK (collection_id, media_item_id). Inserting the same media_item_id twice
-	// would raise a duplicate-key violation that fails the whole sync. First
-	// occurrence wins, preserving rank order. Position is renumbered over the
-	// surviving rows so it stays dense.
-	seen := make(map[string]struct{}, len(items))
-	position := 0
-	for _, item := range items {
-		if _, dup := seen[item.MediaItemID]; dup {
-			continue
-		}
-		seen[item.MediaItemID] = struct{}{}
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO library_collection_items (
-				collection_id, media_item_id, position, source_rank
-			) VALUES ($1, $2, $3, $4)
-		`, collectionID, item.MediaItemID, position, item.SourceRank); err != nil {
-			return fmt.Errorf("inserting collection item %s: %w", item.MediaItemID, err)
-		}
-		position++
+	deleted, err := tx.Exec(ctx, `
+		DELETE FROM library_collection_items t
+		WHERE t.collection_id = $1
+		  AND NOT EXISTS (
+		    SELECT 1 FROM unnest($2::text[]) AS desired(media_item_id)
+		    WHERE desired.media_item_id = t.media_item_id
+		  )
+	`, collectionID, ids)
+	if err != nil {
+		return fmt.Errorf("deleting removed collection items: %w", err)
 	}
 
-	if _, err := tx.Exec(ctx, "UPDATE library_collections SET updated_at = NOW() WHERE id = $1", collectionID); err != nil {
-		return fmt.Errorf("touching library collection: %w", err)
+	updated, err := tx.Exec(ctx, `
+		UPDATE library_collection_items t
+		SET position = desired.position, source_rank = desired.source_rank, updated_at = NOW()
+		FROM unnest($2::text[], $3::int[], $4::int[]) AS desired(media_item_id, position, source_rank)
+		WHERE t.collection_id = $1 AND t.media_item_id = desired.media_item_id
+		  AND (t.position, t.source_rank) IS DISTINCT FROM (desired.position, desired.source_rank)
+	`, collectionID, ids, positions, ranks)
+	if err != nil {
+		return fmt.Errorf("repositioning collection items: %w", err)
+	}
+
+	inserted, err := tx.Exec(ctx, `
+		INSERT INTO library_collection_items (collection_id, media_item_id, position, source_rank)
+		SELECT $1, desired.media_item_id, desired.position, desired.source_rank
+		FROM unnest($2::text[], $3::int[], $4::int[]) AS desired(media_item_id, position, source_rank)
+		ON CONFLICT (collection_id, media_item_id) DO NOTHING
+	`, collectionID, ids, positions, ranks)
+	if err != nil {
+		return fmt.Errorf("inserting collection items: %w", err)
+	}
+
+	if deleted.RowsAffected()+updated.RowsAffected()+inserted.RowsAffected() > 0 {
+		if _, err := tx.Exec(ctx, "UPDATE library_collections SET updated_at = NOW() WHERE id = $1", collectionID); err != nil {
+			return fmt.Errorf("touching library collection: %w", err)
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("committing collection item replacement: %w", err)
 	}
 	return nil
-}
-
-// ListItemIDsPage answers one window of a collection's stored item order:
-// the media item IDs at positions [offset, offset+limit) in the same order
-// ListItems uses, and whether stored positions follow the window. It probes
-// one row past the window so a caller never has to count the collection to
-// learn that. A limit of zero or less answers an empty window.
-func (r *LibraryCollectionRepository) ListItemIDsPage(ctx context.Context, collectionID string, limit, offset int) ([]string, bool, error) {
-	if limit <= 0 {
-		return []string{}, false, nil
-	}
-	offset = max(offset, 0)
-
-	rows, err := r.pool.Query(ctx, `
-		SELECT media_item_id
-		FROM library_collection_items
-		WHERE collection_id = $1
-		ORDER BY position ASC, source_rank ASC, media_item_id ASC
-		LIMIT $2 OFFSET $3
-	`, collectionID, limit+1, offset)
-	if err != nil {
-		return nil, false, fmt.Errorf("listing collection item page: %w", err)
-	}
-	defer rows.Close()
-
-	ids := make([]string, 0, limit+1)
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, false, fmt.Errorf("scanning collection item page: %w", err)
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, false, fmt.Errorf("iterating collection item page: %w", err)
-	}
-
-	hasMore := len(ids) > limit
-	if hasMore {
-		ids = ids[:limit]
-	}
-	return ids, hasMore, nil
 }
 
 func (r *LibraryCollectionRepository) ListItems(ctx context.Context, collectionID string) ([]*models.LibraryCollectionItem, error) {
@@ -902,28 +974,80 @@ func (r *LibraryCollectionRepository) AddItem(ctx context.Context, collectionID,
 	return tx.Commit(ctx)
 }
 
-// RemoveItem deletes a single item from a collection.
-func (r *LibraryCollectionRepository) RemoveItem(ctx context.Context, collectionID, mediaItemID string) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("beginning remove collection item: %w", err)
+// AddMissingItemsInTx appends the items a collection lacks, in order, after
+// its last item, in the caller's transaction. Items already in it keep their
+// place, and ids with no catalog item are skipped. It returns the ids added.
+func AddMissingItemsInTx(ctx context.Context, tx pgx.Tx, collectionID string, mediaItemIDs []string) ([]string, error) {
+	if len(mediaItemIDs) == 0 {
+		return nil, nil
 	}
-	defer tx.Rollback(ctx)
-
 	if err := lockLibraryCollectionParent(ctx, tx, collectionID); err != nil {
-		return err
+		return nil, err
 	}
+	rows, err := tx.Query(ctx, `
+		WITH wanted AS (
+			SELECT id, ord FROM unnest($2::text[]) WITH ORDINALITY AS w(id, ord)
+		), base AS (
+			SELECT COALESCE(MAX(position), -1) AS last FROM library_collection_items WHERE collection_id = $1
+		)
+		INSERT INTO library_collection_items (collection_id, media_item_id, position, source_rank)
+		SELECT $1, w.id, base.last + row_number() OVER (ORDER BY w.ord), 0
+		FROM wanted w CROSS JOIN base
+		JOIN media_items m ON m.content_id = w.id
+		WHERE NOT EXISTS (SELECT 1 FROM library_collection_items i WHERE i.collection_id = $1 AND i.media_item_id = w.id)
+		ON CONFLICT (collection_id, media_item_id) DO NOTHING
+		RETURNING media_item_id`, collectionID, mediaItemIDs)
+	if err != nil {
+		return nil, fmt.Errorf("adding collection items: %w", err)
+	}
+	defer rows.Close()
+	var added []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		added = append(added, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("adding collection items: %w", err)
+	}
+	if len(added) > 0 {
+		if _, err := tx.Exec(ctx, "UPDATE library_collections SET updated_at = NOW() WHERE id = $1", collectionID); err != nil {
+			return nil, fmt.Errorf("touching library collection: %w", err)
+		}
+	}
+	return added, nil
+}
 
-	if _, err := tx.Exec(ctx, `
-		DELETE FROM library_collection_items
-		WHERE collection_id = $1 AND media_item_id = $2
-	`, collectionID, mediaItemID); err != nil {
-		return fmt.Errorf("deleting collection item: %w", err)
+// GroupUngroupedMembershipInTx puts a collection's membership in one library
+// into groupID, at the end of that group's order, only while the membership
+// is ungrouped, in the caller's transaction. It reports whether it changed
+// anything; a membership an admin grouped is left alone. It takes the
+// collection-editing locks in their order: the collection parent, then the
+// library's order revision, then the membership row. MoveAndReorder takes
+// the library's parents before anything else, so it waits on the parent
+// here instead of holding the membership row this needs.
+func GroupUngroupedMembershipInTx(ctx context.Context, tx pgx.Tx, collectionID string, libraryID int, groupID string) (bool, error) {
+	if err := lockLibraryCollectionParent(ctx, tx, collectionID); err != nil {
+		return false, err
 	}
-	if _, err := tx.Exec(ctx, "UPDATE library_collections SET updated_at = NOW() WHERE id = $1", collectionID); err != nil {
-		return fmt.Errorf("touching library collection: %w", err)
+	if err := lockLibraryCollectionOrderRevisions(ctx, tx, []int{libraryID}); err != nil {
+		return false, err
 	}
-	return tx.Commit(ctx)
+	tag, err := tx.Exec(ctx, `
+		UPDATE library_collection_libraries
+		SET group_id = $3,
+			sort_order = COALESCE((
+				SELECT MAX(sort_order) + 1 FROM library_collection_libraries
+				WHERE library_id = $2 AND group_id = $3
+			), 0),
+			updated_at = NOW()
+		WHERE collection_id = $1 AND library_id = $2 AND group_id IS NULL`, collectionID, libraryID, groupID)
+	if err != nil {
+		return false, fmt.Errorf("grouping collection membership: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 // ReorderItems sets each item's position to its index in the supplied list.

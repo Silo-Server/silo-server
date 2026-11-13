@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -34,6 +35,12 @@ var (
 	ErrDeviceLoginConflict   = errors.New("device login already approved by another identity")
 	ErrDeviceLoginNoProfile  = errors.New("device login profile not found")
 	ErrDeviceLoginCanceled   = errors.New("device login request canceled by the device")
+	// ErrDeviceLoginBadBinding is a start whose binding is not 43 characters
+	// of unpadded base64url.
+	ErrDeviceLoginBadBinding = errors.New("invalid device login binding")
+	// ErrDeviceLoginBindingMismatch is a poll of a bound request without the
+	// secret its binding was made from. The request is left as it was.
+	ErrDeviceLoginBindingMismatch = errors.New("device login binding secret does not match")
 )
 
 // QuickConnectAttemptsError refuses a Quick Connect code lookup or decision
@@ -93,14 +100,15 @@ var deviceCodeAlphabet = []byte("0123456789")
 // the approving accounts first, as approval and collection do, and commit this
 // update together with session revocation. Already-issued playback grants and
 // requests approved by other accounts are unchanged.
-func withdrawDeviceSignInApprovalsInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int) error {
-	if _, err := tx.Exec(ctx, `
+func withdrawDeviceSignInApprovalsInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int) (int64, error) {
+	tag, err := tx.Exec(ctx, `
 		UPDATE device_login_requests SET status = $2, updated_at = NOW()
 		WHERE approved_by_user_id = ANY($1::int[]) AND status = $3`,
-		userIDs, DeviceLoginStatusDenied, DeviceLoginStatusApproved); err != nil {
-		return fmt.Errorf("withdrawing device sign-in approvals: %w", err)
+		userIDs, DeviceLoginStatusDenied, DeviceLoginStatusApproved)
+	if err != nil {
+		return 0, fmt.Errorf("withdrawing device sign-in approvals: %w", err)
 	}
-	return nil
+	return tag.RowsAffected(), nil
 }
 
 type DeviceLoginStartInput struct {
@@ -115,6 +123,13 @@ type DeviceLoginStartInput struct {
 	// whose link carries the browser code (?token=) rather than the user
 	// code. The user code is digits either way.
 	Legacy bool
+	// Binding is base64url (no padding) of SHA-256 of a secret the device
+	// keeps; empty starts an unbound request. Every poll of a bound request
+	// must present the secret (see "Session binding" in
+	// docs/architecture/device-login.md). Only v2 sets it, and v2 refuses an
+	// explicit empty binding at its schema, so empty here always means the
+	// device sent none.
+	Binding string
 }
 
 type DeviceLoginStartResult struct {
@@ -191,6 +206,8 @@ type DeviceLoginInfo struct {
 	RequestedAt   time.Time
 	ClientPurpose string
 	Temporary     bool
+	// Binding is the request's session binding, empty when it has none.
+	Binding string
 }
 
 type DeviceLoginPollResult struct {
@@ -242,6 +259,9 @@ type deviceLoginRecord struct {
 	// continues.
 	ApprovedIdentityID    *int64
 	ApprovedProviderSince *time.Time
+	// BindingHash is the session binding the device started with; nil for
+	// an unbound request. It never changes after start.
+	BindingHash *string
 }
 
 type DeviceLoginService struct {
@@ -267,7 +287,7 @@ const deviceLoginSelectColumns = `
 		status, approved_by_user_id, approved_profile_id, auth_session_id,
 		client_purpose, temporary, expires_at, approved_at,
 		denied_at, consumed_at, opened_at, canceled_at, created_at, updated_at,
-		approved_identity_id, approved_provider_since
+		approved_identity_id, approved_provider_since, binding_hash
 	FROM device_login_requests
 `
 
@@ -392,6 +412,13 @@ func (s *DeviceLoginService) Start(ctx context.Context, input DeviceLoginStartIn
 	if err != nil {
 		return nil, err
 	}
+	var binding *string
+	if input.Binding != "" {
+		if !validDeviceLoginBinding(input.Binding) {
+			return nil, ErrDeviceLoginBadBinding
+		}
+		binding = &input.Binding
+	}
 	ttl := deviceLoginTTL
 	if input.Legacy {
 		ttl = legacyDeviceLoginTTL
@@ -403,6 +430,7 @@ func (s *DeviceLoginService) Start(ctx context.Context, input DeviceLoginStartIn
 		RequestedUserAgent: trimDeviceField(input.UserAgent, maxUserAgentLen),
 		ClientPurpose:      purpose,
 		Temporary:          temporary,
+		BindingHash:        binding,
 	}, ttl, func() (string, error) { return randomToken(deviceCodeBytes) }, func(string) (string, error) { return s.newUserCode() })
 	if err != nil {
 		return nil, err
@@ -491,7 +519,7 @@ type QuickConnectPersist func(ctx context.Context, tx pgx.Tx, result *DeviceLogi
 // the approved profile. A request in any other state answers with its
 // status and no tokens.
 func (s *DeviceLoginService) CollectQuickConnect(ctx context.Context, secret string, persist QuickConnectPersist) (*DeviceLoginPollResult, error) {
-	return s.poll(ctx, secret, true, persist)
+	return s.poll(ctx, secret, "", true, persist)
 }
 
 func (s *DeviceLoginService) Lookup(ctx context.Context, input DeviceLoginLookupInput) (*DeviceLoginInfo, error) {
@@ -500,29 +528,17 @@ func (s *DeviceLoginService) Lookup(ctx context.Context, input DeviceLoginLookup
 		return nil, err
 	}
 
+	status := record.Status
 	if isDeviceLoginExpired(record) {
-		return &DeviceLoginInfo{
-			Status:         DeviceLoginStatusExpired,
-			UserCode:       userCode,
-			MatchCode:      record.MatchCode,
-			DeviceName:     record.DeviceName,
-			DevicePlatform: record.DevicePlatform,
-			IPAddressHint:  maskDeviceIPAddress(record.IPAddress),
-			ExpiresAt:      record.ExpiresAt,
-			RequestedAt:    record.CreatedAt,
-			ClientPurpose:  record.ClientPurpose,
-			Temporary:      record.Temporary,
-		}, nil
-	}
-
-	if input.MarkOpened && record.Status == DeviceLoginStatusPending {
+		status = DeviceLoginStatusExpired
+	} else if input.MarkOpened && record.Status == DeviceLoginStatusPending {
 		if err := s.markOpened(ctx, record); err != nil {
 			return nil, err
 		}
 	}
 
-	return &DeviceLoginInfo{
-		Status:         record.Status,
+	info := &DeviceLoginInfo{
+		Status:         status,
 		UserCode:       userCode,
 		MatchCode:      record.MatchCode,
 		DeviceName:     record.DeviceName,
@@ -532,7 +548,11 @@ func (s *DeviceLoginService) Lookup(ctx context.Context, input DeviceLoginLookup
 		RequestedAt:    record.CreatedAt,
 		ClientPurpose:  record.ClientPurpose,
 		Temporary:      record.Temporary,
-	}, nil
+	}
+	if record.BindingHash != nil {
+		info.Binding = *record.BindingHash
+	}
+	return info, nil
 }
 
 func (s *DeviceLoginService) Approve(ctx context.Context, input DeviceLoginLookupInput, approverUserID int) error {
@@ -806,7 +826,13 @@ func (s *DeviceLoginService) Cancel(ctx context.Context, deviceCode string) (str
 	return record.Status, nil
 }
 
-func (s *DeviceLoginService) Deny(ctx context.Context, input DeviceLoginLookupInput) error {
+// Deny refuses a pending request, or withdraws an approval that
+// denierUserID made and the device has not collected yet. An approval by
+// another account is refused with ErrDeviceLoginConflict, as Approve refuses
+// it, so a second account cannot cancel a sign-in someone else approved. An
+// approval whose approver was deleted (the foreign keys set it NULL) can no
+// longer be collected, so anyone may deny it.
+func (s *DeviceLoginService) Deny(ctx context.Context, input DeviceLoginLookupInput, denierUserID int) error {
 	record, _, err := s.findByLookup(ctx, input)
 	if err != nil {
 		return err
@@ -823,6 +849,9 @@ func (s *DeviceLoginService) Deny(ctx context.Context, input DeviceLoginLookupIn
 	if record.Status == DeviceLoginStatusDenied {
 		return nil
 	}
+	if record.Status == DeviceLoginStatusApproved && record.ApprovedByUserID != nil && *record.ApprovedByUserID != denierUserID {
+		return ErrDeviceLoginConflict
+	}
 
 	now := time.Now().UTC()
 	tag, err := s.pool.Exec(ctx, `
@@ -836,7 +865,7 @@ func (s *DeviceLoginService) Deny(ctx context.Context, input DeviceLoginLookupIn
 			denied_at = $3,
 			updated_at = $3
 		WHERE id = $1
-			AND status IN ($4, $5)
+			AND (status = $4 OR (status = $5 AND (approved_by_user_id IS NULL OR approved_by_user_id = $6)))
 			AND expires_at > NOW()
 	`,
 		record.ID,
@@ -844,6 +873,7 @@ func (s *DeviceLoginService) Deny(ctx context.Context, input DeviceLoginLookupIn
 		now,
 		DeviceLoginStatusPending,
 		DeviceLoginStatusApproved,
+		denierUserID,
 	)
 	if err != nil {
 		return fmt.Errorf("deny device login: %w", err)
@@ -854,112 +884,26 @@ func (s *DeviceLoginService) Deny(ctx context.Context, input DeviceLoginLookupIn
 	return nil
 }
 
-// deviceLoginPollState answers a request that cannot be collected now.
-// An approved, live request returns nil so Poll can collect under row locks.
-func deviceLoginPollState(record *deviceLoginRecord) (*DeviceLoginPollResult, error) {
-	if isDeviceLoginExpired(record) {
-		return &DeviceLoginPollResult{Status: DeviceLoginStatusExpired, PollAfter: int(deviceLoginPollInterval.Seconds())}, nil
+// withdrawQuickConnectApproval refuses a Quick Connect collection for an
+// account that must replace a temporary password, as Jellyfin password
+// sign-in does: the app cannot run the password change. The approval is
+// withdrawn and committed so the app stops polling instead of retrying until
+// the code expires. It returns ErrPasswordChangeRequired once committed.
+func withdrawQuickConnectApproval(ctx context.Context, tx pgx.Tx, requestID string) error {
+	if _, err := tx.Exec(ctx, `
+		UPDATE device_login_requests SET status = $2, denied_at = NOW(), updated_at = NOW()
+		WHERE id = $1`, requestID, DeviceLoginStatusDenied); err != nil {
+		return fmt.Errorf("withdraw quick connect approval: %w", err)
 	}
-	switch record.Status {
-	case DeviceLoginStatusApproved:
-		return nil, nil
-	case DeviceLoginStatusPending, DeviceLoginStatusCanceled, DeviceLoginStatusDenied, DeviceLoginStatusConsumed:
-		result := &DeviceLoginPollResult{Status: record.Status, PollAfter: int(deviceLoginPollInterval.Seconds())}
-		if record.Status == DeviceLoginStatusPending {
-			result.Opened = record.OpenedAt != nil
-			result.ExpiresAt = record.ExpiresAt
-		}
-		return result, nil
-	default:
-		return nil, fmt.Errorf("unexpected device login status %q", record.Status)
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit quick connect withdrawal: %w", err)
 	}
+	return ErrPasswordChangeRequired
 }
 
-func (s *DeviceLoginService) Poll(ctx context.Context, deviceCode string) (*DeviceLoginPollResult, error) {
-	return s.poll(ctx, deviceCode, false, nil)
-}
-
-// poll advances a request for the device holding its device code. A Jellyfin
-// Quick Connect request is collected only through CollectQuickConnect and
-// every other request only through Poll: a Quick Connect approval grants one
-// profile to a Jellyfin app, not a native session that could pick any.
-func (s *DeviceLoginService) poll(ctx context.Context, deviceCode string, quickConnect bool, persist QuickConnectPersist) (*DeviceLoginPollResult, error) {
-	// The approver is immutable once assigned. Read it before taking the
-	// device lock so collection and revocation both lock user -> device;
-	// inserting a session while holding only the device row would invert
-	// the user foreign-key lock against account-wide revocation.
-	preview, err := scanDeviceLogin(s.pool.QueryRow(ctx, deviceLoginSelectColumns+`
-		WHERE device_code_hash = $1`, hashDeviceLoginSecret(strings.TrimSpace(deviceCode))))
-	if err != nil {
-		return nil, err
-	}
-	if (preview.ClientPurpose == DeviceLoginPurposeQuickConnect) != quickConnect {
-		return nil, ErrDeviceLoginNotFound
-	}
-	if result, err := deviceLoginPollState(preview); result != nil || err != nil {
-		return result, err
-	}
-	if preview.ApprovedByUserID == nil {
-		return nil, ErrDeviceLoginUnapproved
-	}
-
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("begin device login poll: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	user, err := lockUser(ctx, tx, *preview.ApprovedByUserID)
-	if err != nil {
-		return nil, fmt.Errorf("load approved user: %w", err)
-	}
-
-	record, err := s.getByDeviceCodeTx(ctx, tx, deviceCode)
-	if err != nil {
-		return nil, err
-	}
-
-	if result, err := deviceLoginPollState(record); result != nil || err != nil {
-		return result, err
-	}
-	if record.ApprovedByUserID == nil || *record.ApprovedByUserID != user.ID {
-		return nil, ErrDeviceLoginUnapproved
-	}
-
-	if !user.Enabled {
-		return nil, ErrUserDisabled
-	}
-	if quickConnect && user.PasswordChangeRequired {
-		// As for Jellyfin password sign-in: the app cannot run the password
-		// change a temporary password requires. The approval is withdrawn so
-		// the app stops polling instead of retrying until the code expires.
-		if _, err := tx.Exec(ctx, `
-			UPDATE device_login_requests SET status = $2, denied_at = NOW(), updated_at = NOW()
-			WHERE id = $1`, record.ID, DeviceLoginStatusDenied); err != nil {
-			return nil, fmt.Errorf("withdraw quick connect approval: %w", err)
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return nil, fmt.Errorf("commit quick connect withdrawal: %w", err)
-		}
-		return nil, ErrPasswordChangeRequired
-	}
-
-	profileID, profileName := "", ""
-	var profile *userstore.Profile
-	switch record.ClientPurpose {
-	case DeviceLoginPurposeRemote, DeviceLoginPurposeQuickConnect:
-		if record.Temporary != (record.ClientPurpose == DeviceLoginPurposeRemote) ||
-			record.ApprovedProfileID == nil || strings.TrimSpace(*record.ApprovedProfileID) == "" {
-			return nil, ErrDeviceLoginNoProfile
-		}
-		profileID = strings.TrimSpace(*record.ApprovedProfileID)
-		profile, err = s.loadOwnedProfile(ctx, user.ID, profileID)
-		if err != nil {
-			return nil, err
-		}
-		profileName = profile.Name
-	}
-
-	now := time.Now().UTC()
+// deviceLoginSession is the login session, and the claims of its tokens,
+// that collecting record gives the device as user.
+func (s *DeviceLoginService) deviceLoginSession(record *deviceLoginRecord, user *models.User, profileID string, now time.Time) (models.AuthSession, Claims) {
 	sessionID := uuid.New().String()
 	sessionExpiresAt := now.Add(s.jwt.RefreshExpiry())
 	if record.Temporary {
@@ -999,6 +943,157 @@ func (s *DeviceLoginService) poll(ctx context.Context, deviceCode string, quickC
 		session.AbsoluteExpiresAt = &sessionExpiresAt
 		claims = remotePlaybackClaims(claims, &session)
 	}
+	return session, claims
+}
+
+// remotePlaybackProfileToken mints the X-Profile-Token a remote-playback
+// handoff session carries for its bound profile.
+func (s *DeviceLoginService) remotePlaybackProfileToken(user *models.User, sessionID, profileID string, profile *userstore.Profile) (string, error) {
+	if s.profiles == nil {
+		return "", errors.New("profile token service is not configured")
+	}
+	token, _, err := s.profiles.Mint(access.ProfileTokenClaims{
+		UserID:      user.ID,
+		SessionID:   sessionID,
+		ProfileID:   profileID,
+		PINRevision: profile.PINRevision,
+		// Only for nodes running an older release during a rolling deploy.
+		PolicyRevision: user.AccessPolicyRevision,
+	})
+	if err != nil {
+		return "", fmt.Errorf("mint remote playback profile token: %w", err)
+	}
+	return token, nil
+}
+
+// pollPreview reads a request without locks and answers the poll when it
+// cannot be collected now. Otherwise it returns the approving account, which
+// is immutable once assigned: poll locks it before the device row, so
+// collection and revocation both lock user -> device; inserting a session
+// while holding only the device row would invert the user foreign-key lock
+// against account-wide revocation.
+func (s *DeviceLoginService) pollPreview(ctx context.Context, deviceCode, bindingSecret string, quickConnect bool) (int, *DeviceLoginPollResult, error) {
+	preview, err := scanDeviceLogin(s.pool.QueryRow(ctx, deviceLoginSelectColumns+`
+		WHERE device_code_hash = $1`, hashDeviceLoginSecret(strings.TrimSpace(deviceCode))))
+	if err != nil {
+		return 0, nil, err
+	}
+	if (preview.ClientPurpose == DeviceLoginPurposeQuickConnect) != quickConnect {
+		return 0, nil, ErrDeviceLoginNotFound
+	}
+	// The binding is fixed at start, so checking it on this read covers the
+	// locked read that follows. It comes before any state is reported or
+	// changed: a device holding only a copied binding learns nothing and
+	// consumes nothing.
+	if !deviceLoginBindingMatches(preview.BindingHash, bindingSecret) {
+		return 0, nil, ErrDeviceLoginBindingMismatch
+	}
+	if result, err := deviceLoginPollState(preview); result != nil || err != nil {
+		return 0, result, err
+	}
+	if preview.ApprovedByUserID == nil {
+		return 0, nil, ErrDeviceLoginUnapproved
+	}
+	return *preview.ApprovedByUserID, nil, nil
+}
+
+// approvedProfile loads the profile a remote-playback or Quick Connect
+// request was approved for, which must belong to userID. Other requests
+// name no profile and answer nil.
+func (s *DeviceLoginService) approvedProfile(ctx context.Context, record *deviceLoginRecord, userID int) (*userstore.Profile, error) {
+	switch record.ClientPurpose {
+	case DeviceLoginPurposeRemote, DeviceLoginPurposeQuickConnect:
+	default:
+		return nil, nil
+	}
+	if record.Temporary != (record.ClientPurpose == DeviceLoginPurposeRemote) ||
+		record.ApprovedProfileID == nil || strings.TrimSpace(*record.ApprovedProfileID) == "" {
+		return nil, ErrDeviceLoginNoProfile
+	}
+	return s.loadOwnedProfile(ctx, userID, strings.TrimSpace(*record.ApprovedProfileID))
+}
+
+// deviceLoginPollState answers a request that cannot be collected now.
+// An approved, live request returns nil so Poll can collect under row locks.
+func deviceLoginPollState(record *deviceLoginRecord) (*DeviceLoginPollResult, error) {
+	if isDeviceLoginExpired(record) {
+		return &DeviceLoginPollResult{Status: DeviceLoginStatusExpired, PollAfter: int(deviceLoginPollInterval.Seconds())}, nil
+	}
+	switch record.Status {
+	case DeviceLoginStatusApproved:
+		return nil, nil
+	case DeviceLoginStatusPending, DeviceLoginStatusCanceled, DeviceLoginStatusDenied, DeviceLoginStatusConsumed:
+		result := &DeviceLoginPollResult{Status: record.Status, PollAfter: int(deviceLoginPollInterval.Seconds())}
+		if record.Status == DeviceLoginStatusPending {
+			result.Opened = record.OpenedAt != nil
+			result.ExpiresAt = record.ExpiresAt
+		}
+		return result, nil
+	default:
+		return nil, fmt.Errorf("unexpected device login status %q", record.Status)
+	}
+}
+
+// Poll advances a request for the device holding its device code.
+// bindingSecret is the secret a bound request's binding was made from, as
+// unpadded base64url; it is ignored for a request started without a binding.
+// A bound request polled without its secret is ErrDeviceLoginBindingMismatch
+// whatever its state, and is left unchanged.
+func (s *DeviceLoginService) Poll(ctx context.Context, deviceCode, bindingSecret string) (*DeviceLoginPollResult, error) {
+	return s.poll(ctx, deviceCode, bindingSecret, false, nil)
+}
+
+// poll advances a request for the device holding its device code. A Jellyfin
+// Quick Connect request is collected only through CollectQuickConnect and
+// every other request only through Poll: a Quick Connect approval grants one
+// profile to a Jellyfin app, not a native session that could pick any.
+func (s *DeviceLoginService) poll(ctx context.Context, deviceCode, bindingSecret string, quickConnect bool, persist QuickConnectPersist) (*DeviceLoginPollResult, error) {
+	approverID, answer, err := s.pollPreview(ctx, deviceCode, bindingSecret, quickConnect)
+	if answer != nil || err != nil {
+		return answer, err
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin device login poll: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	user, err := lockUser(ctx, tx, approverID)
+	if err != nil {
+		return nil, fmt.Errorf("load approved user: %w", err)
+	}
+
+	record, err := s.getByDeviceCodeTx(ctx, tx, deviceCode)
+	if err != nil {
+		return nil, err
+	}
+
+	if result, err := deviceLoginPollState(record); result != nil || err != nil {
+		return result, err
+	}
+	if record.ApprovedByUserID == nil || *record.ApprovedByUserID != user.ID {
+		return nil, ErrDeviceLoginUnapproved
+	}
+
+	if !user.Enabled {
+		return nil, ErrUserDisabled
+	}
+	if quickConnect && user.PasswordChangeRequired {
+		return nil, withdrawQuickConnectApproval(ctx, tx, record.ID)
+	}
+
+	profile, err := s.approvedProfile(ctx, record, user.ID)
+	if err != nil {
+		return nil, err
+	}
+	profileID, profileName := "", ""
+	if profile != nil {
+		profileID, profileName = strings.TrimSpace(*record.ApprovedProfileID), profile.Name
+	}
+
+	now := time.Now().UTC()
+	session, claims := s.deviceLoginSession(record, user, profileID, now)
+	sessionID, sessionExpiresAt := session.ID, session.ExpiresAt
 	if err := s.sessions.createWithQuerier(ctx, tx, session); err != nil {
 		return nil, err
 	}
@@ -1010,28 +1105,21 @@ func (s *DeviceLoginService) poll(ctx context.Context, deviceCode string, quickC
 
 	profileToken := ""
 	if record.ClientPurpose == DeviceLoginPurposeRemote {
-		if s.profiles == nil {
-			return nil, errors.New("profile token service is not configured")
-		}
-		profileToken, _, err = s.profiles.Mint(access.ProfileTokenClaims{
-			UserID:      user.ID,
-			SessionID:   sessionID,
-			ProfileID:   profileID,
-			PINRevision: profile.PINRevision,
-			// Only for nodes running an older release during a rolling deploy.
-			PolicyRevision: user.AccessPolicyRevision,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("mint remote playback profile token: %w", err)
+		if profileToken, err = s.remotePlaybackProfileToken(user, sessionID, profileID, profile); err != nil {
+			return nil, err
 		}
 	}
 
+	// binding_checked records that this release checked any binding before
+	// collecting; the schema refuses to consume a bound request without it,
+	// so a node from an older release cannot collect one.
 	if _, err := tx.Exec(ctx, `
 		UPDATE device_login_requests
 		SET status = $2,
 			auth_session_id = $3,
 			consumed_at = $4,
-			updated_at = $4
+			updated_at = $4,
+			binding_checked = TRUE
 		WHERE id = $1
 	`,
 		record.ID,
@@ -1087,9 +1175,10 @@ func (s *DeviceLoginService) create(ctx context.Context, record deviceLoginRecor
 		INSERT INTO device_login_requests (
 			id, device_code_hash, browser_code_hash, user_code_hash, match_code,
 			device_name, device_platform, ip_address, requested_user_agent,
-			status, client_purpose, temporary, expires_at, created_at, updated_at
+			status, client_purpose, temporary, expires_at, created_at, updated_at,
+			binding_hash
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, '')::inet, $9, $10, $11, $12, $13, $14, $15)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, '')::inet, $9, $10, $11, $12, $13, $14, $15, $16)
 	`,
 		record.ID,
 		record.DeviceCodeHash,
@@ -1106,6 +1195,7 @@ func (s *DeviceLoginService) create(ctx context.Context, record deviceLoginRecor
 		record.ExpiresAt,
 		record.CreatedAt,
 		record.UpdatedAt,
+		record.BindingHash,
 	)
 	if err != nil {
 		return fmt.Errorf("create device login request: %w", err)
@@ -1344,6 +1434,7 @@ func scanDeviceLogin(row pgx.Row) (*deviceLoginRecord, error) {
 		&record.UpdatedAt,
 		&record.ApprovedIdentityID,
 		&record.ApprovedProviderSince,
+		&record.BindingHash,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrDeviceLoginNotFound
@@ -1396,6 +1487,37 @@ func maskDeviceIPAddress(ip string) string {
 		}
 	}
 	return ""
+}
+
+// deviceLoginBindingLen is the length of an unpadded base64url SHA-256 sum,
+// and of an unpadded base64url 32-byte binding secret.
+const deviceLoginBindingLen = 43
+
+// validDeviceLoginBinding reports whether binding has the form of a session
+// binding: 43 characters of the unpadded base64url alphabet. Exactly those
+// strings decode to a full SHA-256 sum (the decoder skips line breaks, which
+// would leave fewer bytes).
+func validDeviceLoginBinding(binding string) bool {
+	if len(binding) != deviceLoginBindingLen {
+		return false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(binding)
+	return err == nil && len(raw) == sha256.Size
+}
+
+// deviceLoginBindingMatches reports whether a poll may proceed: the request
+// has no binding, or secret is the unpadded base64url secret whose SHA-256,
+// so encoded, is the binding. The comparison is constant-time.
+func deviceLoginBindingMatches(binding *string, secret string) bool {
+	if binding == nil {
+		return true
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(secret)
+	if err != nil || len(raw) == 0 {
+		return false
+	}
+	sum := sha256.Sum256(raw)
+	return subtle.ConstantTimeCompare([]byte(base64.RawURLEncoding.EncodeToString(sum[:])), []byte(*binding)) == 1
 }
 
 func hashDeviceLoginSecret(value string) string {

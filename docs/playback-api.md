@@ -17,7 +17,10 @@ unavailable store is `503`.
 | `stopPlayback` | DELETE `/api/v2/playback/{session_id}` | 200 mutation receipt |
 | `replanPlayback` | POST `/api/v2/playback/{session_id}/replan` | 200 v3 decision |
 | `reportPlaybackRouteEvent` | POST `/api/v2/playback/route-events` | 202 `{event_id, outcome: "accepted"}` |
-| `getPlaybackBandwidthProbe` | GET `/api/v2/playback/bandwidth-probe` | 200 random bytes |
+| `getPlaybackBandwidthProbe` | GET `/api/v2/playback/bandwidth-probe` | 200 random bytes, or 307 to a proxy |
+| `reportPlaybackBandwidthProbe` | POST `/api/v2/playback/bandwidth-probe/results` | 204 |
+| `getPlaybackConnection` | GET `/api/v2/playback/connection` | 200 connection state |
+| `resetPlaybackLearnedLimit` | DELETE `/api/v2/playback/connection/learned-limit` | 204 |
 
 ## Capabilities
 
@@ -27,8 +30,26 @@ and `allowed` is `true`; a server without playback wired answers
 `not_configured` with `allowed: false`. `installation_id` is the persisted
 server instance UUID that diagnostics also report. `protocol_versions` is
 `[3]`. `features` is the v3 server feature set plus `sequenced_progress_v1`,
-`fixed_media_file_v1`, `marker_segments_v1`, `trickplay_v1`, and
-`bandwidth_probe_v1`. When the room service and
+`fixed_media_file_v1`, `marker_segments_v1`, `trickplay_v1`,
+`bandwidth_probe_v1` and `connection_speed_v1`. With `connection_speed_v1` the
+response adds `bandwidth_probe_url`, the media-path probe below, on the origin
+the request arrived on, with `X-Forwarded-Proto` and `X-Forwarded-Host`
+counted only from a trusted proxy. A reverse proxy that rewrites `Host` to a
+bare IP address and names no single client host in `X-Forwarded-Host` as a
+trusted proxy leaves only the address it dialed; then the URL is on
+`server.public_url` when one is configured. When the origin
+is the server's local-network origin (a local route), clients send the probe with the saved server's credentials and trust,
+as they do for any request to that server. The response also adds the speed
+test schedule:
+`bandwidth_probe_automatic` (the `playback.bandwidth_probe_automatic` server
+setting), `bandwidth_probe_max_age_seconds` (from
+`playback.bandwidth_probe_max_age_days`) and, when the server has video
+bitrates to go on, `bandwidth_probe_target_kbps`. The target is
+`max(ceil(P × 5 / 4), 100)`, at most 1,000,000, where `P` is the lower of the
+administrator bitrate cap for the caller's network, when one applies, and the
+99.9th percentile of the video bitrates in the libraries the profile can play.
+The [buffering-quality design](design/2026-10-17-buffering-quality.md#connection-speed-test)
+defines how clients test with them. When the room service and
 authenticated room socket are configured, it also includes
 `watch_party_source_fallback_v1` and `watch_party_coordinator_v1`.
 The coordinator capability covers shared room
@@ -40,46 +61,77 @@ membership, command-aware readiness, and ready/buffering/syncing member status.
 ## Bandwidth probe
 
 `GET /api/v2/playback/bandwidth-probe?size=N` (feature `bandwidth_probe_v1`)
-sends `N` random bytes, 1 to 100,000,000, default 1,000,000, as
+sends `N` random bytes, 1 to 1,000,000,000, default 1,000,000, as
 `application/octet-stream` with `Cache-Control: no-store`. It needs an
-authenticated account but no profile. Each server runs at most 32 probes at
-once. On each server an account may run two of them and draw up to 400 MB per
-10 minutes; bytes a client does not read because it closed the connection early
-are not counted. Beyond any limit the probe gets `429 rate_limited` with
+authenticated account but no profile. Each server runs at most 4 probes at
+once. On each server an account may run two of them and draw up to
+2,000,000,000 bytes per 10 minutes; bytes a client does not read because it
+closed the connection early are not counted. Beyond any limit the probe gets `429 rate_limited` with
 `Retry-After`. The bytes are random so a compressing
 proxy cannot inflate the result. A client times the transfer from its first
 byte, may close the connection once it has timed enough, and sends the result
-as `bandwidth_estimate_kbps` on start and replan. Without a measurement a
+as `bandwidth_estimate_kbps` on start. Replans never carry it. Without a measurement a
 browser has only `navigator.connection.downlink`, which Chromium caps at
-10 Mbps, too low for Auto quality ever to send a 4K source as-is. The probe
-measures the path to the API server; media served from a remote node can take
-a different path. Its bytes count as viewer transfer egress, not playback, and
-are exempt from stream caps, like the Jellyfin-compatible `/Playback/BitrateTest`.
+10 Mbps, too low for Auto quality ever to send a 4K source as-is. Its bytes
+count as viewer transfer egress, not playback, and are exempt from stream caps,
+like the Jellyfin-compatible `/Playback/BitrateTest`.
 
-The web app probes in the background a few seconds after sign-in, skips Data
-Saver and cellular connections and pages that are already playing media,
-cancels the probe when playback starts, and caches the result for 30 minutes,
-measuring again when it expires. Tabs share the cached result, and a Web Lock
-lets only one of them probe at a time. A tab holds a shared lock while its
-media plays or playback starts, and no tab probes while any tab holds it. A
-playback start is also broadcast to the other tabs, so a probe already running
-in one of them stops and discards its measurement. On a metered link (Data Saver or cellular) it
-sends no cached measurement, so the planner's metered limit applies.
+Without `media_path` the probe measures the path to the API server, and media
+served from a remote node can take a different one. `media_path=true`, the form
+`bandwidth_probe_url` advertises, measures the media path instead: the server
+picks the egress that the direct-play routing policy would use for the
+caller's network or provider path. When that is a proxy, the answer is `307` to
+the proxy's `/stream/bandwidth-probe/{token}?size=N` with a two-minute token
+valid only for probes; the proxy applies the same limits. When the API serves
+direct play, it sends the bytes itself. When a proxy-only policy has no proxy
+that serves probes, the answer is `503 dependency_unavailable`, never a
+measurement of the API path.
+
+The web app reads the connection endpoint as soon as a profile is active, when
+a tab hidden for a minute or more is shown again, after the browser reports a
+new connection type, and when it comes back online, so a playback start in the
+first seconds already sends the reading. A start sends a reading the server
+kept only after this page has read it, never one left from an earlier visit. A
+tab back from a shorter switch sends nothing unless the hide stopped a test it
+owed, which it then resumes without reading again. A few seconds later it runs
+the quick test only when no current reading proves the link (any reading does
+when capabilities carry no target). It never runs one while the tab is hidden,
+on Data Saver or cellular, on a phone or tablet whose browser does not report
+the link type, while any media plays (theme music included) or a start loads,
+or within a minute of a playback start; playback starting cancels a running
+test. A `429` from any test holds automatic tests for its `Retry-After` (30
+seconds when missing), across profile switches. **Test speed** runs the
+accurate test, only while nothing plays or loads; it replaces a running
+automatic test, and a second press joins the running one. Tabs share the
+reading, and a Web Lock lets only one of them probe at a time. A tab holds a
+shared lock while its media plays or a start loads, and releases it when the
+player goes away; no tab probes while any tab holds it. A playback start is
+also broadcast to the other tabs, so a probe already running in one of them
+stops and discards its measurement. On a metered link (Data Saver or cellular)
+it sends no cached measurement. Signing out discards the kept readings.
 
 Every mutation body carries the `installation_id` the client read from
 capabilities. A different value is `409 installation_changed`: refresh
 capabilities and start a new attempt. There is no admission step and no
 per-account enrollment.
 
+## Watch library context
+
+On `GET /api/v2/watch/{id}`, `library_id` accepts an episode when either the
+episode or its series belongs to that library. The series must still pass the
+viewer's access checks. The response includes every file the viewer may access,
+even if the selected library has none of that episode's files;
+`catalog.scope_versions_to_library` does not narrow watch responses.
+
 ## Watch artwork
 
 `GET /api/v2/watch/{id}` includes optional `poster_url`, `poster_thumbhash`,
 `backdrop_url`, and `backdrop_thumbhash` for system media controls. Movies
 use their own artwork, episodes use their still as the poster and their
-series' backdrop, and local extras inherit their parent's artwork. URLs use
+series' backdrop, and local extras use their own still as the poster when they
+have one and otherwise inherit their parent's artwork. URLs use
 the same resolver and `image_size` query as catalog item detail. Missing
 artwork is omitted; clients can retain their catalog-detail fallback.
-The frozen v1 watch response does not gain these fields.
 
 ## Marker ranges
 
@@ -113,8 +165,8 @@ validation_failed` at `header.x-profile-id`.
 
 When `playback.allow_hevc_encoding` is enabled, video adaptation may encode
 HEVC for clients that explicitly support HEVC on their HLS delivery route.
-The server advertises `video_to_hevc` through the existing transformation
-capability inventory. The effective recipe and frozen transcode target identify
+The server lists `video_to_hevc` in its validated transformation inventory
+(`getAdminHardwareAcceleration`). The effective recipe and frozen transcode target identify
 HEVC; existing H.264-only clients continue to receive H.264. Disabling the
 setting affects new planning decisions without changing active frozen recipes.
 HEVC direct play and remux remain independent of the encoding setting.
@@ -148,8 +200,7 @@ A start that returns a playable decision registers the device the client
 declares in `X-Silo-Device-Id` (with the optional `X-Silo-Device-Name` and
 `X-Silo-Device-Platform`) for the acting profile and refreshes its
 `last_seen_at`, as described in the
-[device registry](settings-api.md#device-registry). The v1 start route reads the
-same headers. A refused start, or one that returns a terminal decision,
+[device registry](settings-api.md#device-registry). A refused start, or one that returns a terminal decision,
 registers nothing. These headers do not change the playback device that
 `X-Device-ID` names.
 
@@ -167,9 +218,7 @@ rejection only refers to that file: with alternate versions allowed, the server
 tries the item's other versions the viewer may play (library access and
 playback-quality ceiling) before answering `source_unreadable`.
 Season episode listings mark such files with `unreadable: true` (see
-[Catalog API](catalog-api.md#episode-files)). The v1 start route shares the
-planner, so v1 clients can also receive `source_unreadable`; like any unknown
-reason, they show `terminal.message`.
+[Catalog API](catalog-api.md#episode-files)).
 
 The web player retries an interrupted START with the identical body, including
 when response headers arrived but reading the body failed. Its 60-second retry
@@ -179,7 +228,6 @@ the request or backoff. A 4xx refusal ends that start, and a later user Play
 uses the newly selected file and a new attempt ID. The web client does not
 restore pending START requests across page reloads.
 
-The frozen v1 start route ignores `allow_alternate_versions`.
 Servers advertising `fixed_media_file_v1` accept the optional start field
 `allow_alternate_versions`. Setting it to `false` keeps this attempt on the
 requested file through quality, track, output, seek, and recovery replans.
@@ -248,7 +296,7 @@ receipt is `{outcome, accepted?}`, where `accepted` is the latest committed
 | Attempt ended by an administrator | 410 `playback_session_ended` |
 | Attempt already stopped otherwise, or unknown | 404 |
 
-An applied sample is persisted through the same writers v1 uses (resume
+An applied sample is persisted through the shared progress writers (resume
 position, scrobbles), from the live session when this replica holds it and from
 the attempt row otherwise. The writers run after the compare-and-set and the
 resume position is last-write-wins, so after writing, the server re-reads the
@@ -262,7 +310,8 @@ global position through `POST /api/v2/sync/progress`.
 Stop accepts `{installation_id, stop_id}` plus an optional final sample
 `{sequence, position, is_paused}`; `sequence` and `position` appear together or
 not at all. `stop_id` is a canonical UUID the client mints once and keeps on
-every retry. The first stop wins a compare-and-set on `stopped_at`: it applies
+every retry; a `stop_id` the server mints for its own ends (below) is refused
+with `400`. The first stop wins a compare-and-set on `stopped_at`: it applies
 the final sample when it is newer than the last progress, runs the stop and
 history writer, stops the local session and transcode, writes the stream deny
 marker and stores the receipt on the row. The reply is
@@ -278,8 +327,16 @@ stop call allows up to 30 seconds for pending progress, then a separate
 expires. A page reload discards this in-memory retry state.
 
 A session that expires or is aborted server-side is stopped under a
-server-minted `stop_id` (UUID v5 of the session id), so a later client stop
-replays and a start replay reports `session_expired`.
+server-minted `stop_id` (a UUID v5 of the session id, one for each of expiry
+and abort), so a later client stop replays and a start replay reports
+`session_expired`. Every way a session ends, on any API server, stops the row
+and claims the receipt's finalization before it writes watch history, provider
+events or the admin log; an end that loses that race writes none of them and
+only releases what its own server holds. An end that finds the row stopped by
+an end whose server died before finishing it, and whose claim has lapsed,
+finishes it as that end, with its provider events; an expiry of a copy on
+another server does the same. The admin log records the reason of the stop
+that won the row.
 
 A session an administrator ends without the player confirming it (a stop,
 pause or resume the player did not answer before its deadline, or a
@@ -293,8 +350,7 @@ own receipt.
 ## Replan and route events
 
 `replanPlayback` covers failure recovery, seek re-anchor, and track, quality and
-output changes, with the v3 body plus `installation_id`. It runs the same
-application code as the frozen v1 replan route. It is idempotent on `replan_request_id`
+output changes, with the v3 body plus `installation_id`. It is idempotent on `replan_request_id`
 plus the body digest: the same request replays its committed decision; a reused
 id with different input, a superseded plan, or an identical replan still in
 progress is `409`; a session owned by another profile is `403`; a session an
@@ -312,7 +368,7 @@ id); clients never retry automatically and treat `429` as drop.
 | --- | --- |
 | Original bytes | GET/HEAD `/api/v2/stream/{session_id}` |
 | HLS manifest | GET `/api/v2/playback/transcode/{session_id}/master.m3u8` |
-| HLS segment | GET `/api/v2/playback/transcode/{session_id}/segment/{name}` |
+| HLS segment | GET `/api/v2/playback/transcode/{session_id}/segment/{name}`; `sub_NNNNN.vtt` names a subtitle rendition segment, `sub_<track>_NNNNN.vtt` one of an on-demand rendition (`hls_subtitle_renditions_all_v1`) |
 | Subtitle sidecar | GET/HEAD `/api/v2/stream/{session_id}/subtitles/{track}` |
 | Subtitle fonts | GET `/api/v2/stream/{session_id}/subtitles/{track}/fonts`, JSON `{items: [{name, data}]}` |
 
@@ -325,9 +381,23 @@ always required. After a restart the session is rebuilt from the token the
 client re-presents
 ([restart-resilient playback](architecture/restart-resilient-playback.md)).
 Ranges, conditional requests and HEAD keep their HTTP semantics; an
-unsatisfiable range is `416 range_not_satisfiable`. A failure before the first
+unsatisfiable range is `416 range_not_satisfiable`. A `server_remux_progressive`
+stream is the exception: it is one forward-only response from its `seek`
+origin, so it answers `200` from that origin whatever the `Range`. A client that
+lists `progressive_range_refusal_v1` in `deliveries.progressive.features` gets
+`remux_range=refuse` on that URL, and a GET whose range starts past byte 0, or
+is a suffix range such as `bytes=-500`, is then `409` before the remux starts;
+the client reopens the stream at its current position. The API answers it as a
+v2 `conflict` problem and a proxy as plain text, so a client should act on the
+status. A proxy that does not advertise `remux_range_refusal_v1` would ignore
+the parameter, so the plan leaves it off that proxy's URL and the stream keeps
+the `200`. The web video player opts in on Chromium browsers only. The web
+audiobook player, which has no reopen at the current position, Firefox, Safari
+and native players keep the `200`; native players skip the bytes they already
+have. A failure before the first
 byte is a v2 problem; a failure after it ends the stream. A stopped, expired or
-terminated session answers `410 playback_session_ended`.
+terminated session answers `410 playback_session_ended`. A subtitle sidecar the
+node has no room to read yet answers `503` with `Retry-After`; retry it then.
 
 Subtitle inventory URLs in v2 playback responses use the `/api/v2/stream/`
 mount, including relative `/stream/` values produced by the shared inventory
@@ -335,9 +405,16 @@ builder. The web player applies the same mapping to realtime subtitle URLs.
 Absolute delivery URLs from distributed nodes retain their origin and path;
 signed query strings are preserved without decoding or re-encoding.
 
+An external subtitle whose only title is its file name is labeled by that
+name only for a viewer who may see file names (see
+[File paths and names](catalog-api.md#file-paths-and-names)). Everyone else
+gets its embedded title or language as the `label`, numbered like the catalog
+title when several share a language, format and flags. Realtime subtitle
+events never label a sidecar by its file name, for any viewer.
+
 ## Revocation
 
-Stop, session expiry or abort, and admin stop or terminate (v1 and v2) write the
+Stop, session expiry or abort, and admin stop or terminate write the
 Redis key `silo:streamauth:<session_id>` with a TTL equal to the stream token
 lifetime. The API checks it before it serves or reconstructs a session, and the
 proxy and transcode nodes check it on every token-verified serve, so a
@@ -408,25 +485,13 @@ plays every pick from the beginning, ignoring saved progress. While a shuffle
 is set, the post-roll screen shows `next` instead of the next episode, and the
 player offers no sequential next or previous episode.
 
-## v1 bridge
-
-`/api/v1/playback/start`, `/{session_id}/progress`, `DELETE /{session_id}`,
-`/{session_id}/replan`, `/route-events` and `/api/v1/stream/...` keep their
-frozen handlers and bodies: progress is `{position, is_paused}` and answers
-`204`, and stop needs no body and answers `204`. They share the application
-code, the deny marker and the attempt row with v2. Apple and Android use this
-surface until they adopt v2; it is retired with the rest of `/api/v1` under the
-`410 client_upgrade_required` tombstone
-([API contract](architecture/api-contract.md)).
-
-### Marker preview delivery
+## Marker preview delivery
 
 Native v2 playback capabilities also advertise `marker_thumbnails_v1`. The web
 player opts into that feature at playback start to receive `marker_thumbnail_ready`
 updates; negotiation stays fixed for the attempt. Canonical watch reads return
 the same durable optional preview fields on `marker_segments`, so reconnects
 and clients without the realtime feature can refresh through the normal read.
-The frozen v1 listener does not advertise or negotiate this feature.
 
 A marker preview is captured at its start timestamp. It does not replace an
 embedded chapter, change seek boundaries, or enable timeline trickplay. Native
@@ -434,3 +499,57 @@ clients can ignore the optional preview fields while keeping chapter navigation.
 Jellyfin chapter names, ticks and image mappings continue to represent embedded
 chapters; marker images are not projected as invented Jellyfin chapters. Offline
 marker inventories do not include these remotely served preview images.
+
+## Buffering quality (native v2)
+
+`buffering_quality_v1` adds the start and replan fields, learned limits and
+`playback_plan.bandwidth_limit` described in
+[playback protocol v3](architecture/playback-protocol-v3.md#buffering-quality-native-v2).
+These operations read and reset what the server keeps for the calling device.
+They are profile-scoped and identify the device by `X-Silo-Device-Id`; they
+need no installation ID or body. Without a device ID nothing is stored, and the
+reads find nothing.
+
+`GET /api/v2/playback/connection` returns the state for the connection the
+request arrives on: `connection` (`local`, `remote` or `provider:<name>`) and
+nullable `learned_limit: {kbps, observed_at, expires_at}`. With
+`connection_speed_v1` it adds optional
+`probe: {kbps, lower_bound, measured_at, transport}`, the latest test, and
+optional `playback_sample: {kbps, measured_at}`, the best recent playback
+throughput, a lower bound. Both are returned until row retention removes them;
+clients judge them against `bandwidth_probe_max_age_seconds`. It also adds
+`auto_budget_kbps`: 80% of the lower of the reading and the unexpired learned
+limit, then capped by the administrator limit, where the reading is the higher
+of the probe and the sample within their lifetime. Without either observation
+the budget is absent.
+`DELETE /api/v2/playback/connection/learned-limit` clears that connection's
+limit and returns 204. It requires `X-Silo-Device-Id`; a reset without one is
+a `422` validation problem, since it would clear nothing.
+
+`POST /api/v2/playback/bandwidth-probe/results` (`connection_speed_v1`)
+accepts `{kbps, bytes, duration_ms, transport, lower_bound, manual}` and
+returns 204. Bounds are 100–1,000,000 kbps (those of
+`bandwidth_estimate_kbps`), 1–1,000,000,000 bytes and 1–60,000 milliseconds;
+`transport` is `wifi`, `ethernet`, `cellular` or `other`; the optional
+`lower_bound` (default `false`) marks a result that proves only "at least
+`kbps`". The optional `manual` (default `false`) marks a test the viewer
+started with **Test speed**. A manual result clears the connection's
+`playback_sample` in the same write, so the reading becomes the test's result
+rather than an older, higher sample; one above the learned limit for the
+device and connection also clears the limit, as the reset does. An automatic
+result keeps the sample. The server keeps the latest result per device and
+connection.
+
+A `plan_summary` route event may carry the diagnostics key `throughput_kbps`,
+the rate the plan's media requests received data. The server keeps the highest
+per device and connection as `playback_sample`, replacing it with a later one
+that is higher or once it is older than the reading lifetime. A manual probe
+result clears it.
+
+The admin device detail adds optional `connections`. Each entry has `id`, an
+opaque connection identifier, `connection`, nullable `probe` (with
+`lower_bound`), nullable `playback_sample`, nullable `learned_limit` and
+nullable `plan_summary: {plan_id, reported_at, diagnostics}`.
+`DELETE /api/v2/admin/devices/{user_id}/{device_id}/connections/{connection_id}/learned-limit`
+needs acting-admin authority and returns 204. Both resets clear only the
+learned limit and keep the probe and plan summary.

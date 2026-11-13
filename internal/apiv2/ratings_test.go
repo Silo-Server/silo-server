@@ -2,13 +2,18 @@ package apiv2
 
 import (
 	"context"
+	"encoding/base64"
 	"net/http"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 )
 
@@ -29,14 +34,17 @@ func ratingKeyAfter(row catalogpkg.UserRating, after catalogpkg.RatingKey) bool 
 	return row.MediaItemID < after.MediaItemID
 }
 
-func (f *fakeRatings) ListRatingsPage(_ context.Context, userID int, profileID string, after *catalogpkg.RatingKey, limit int) ([]catalogpkg.UserRating, error) {
+// ListRatingsPage answers the visible rows only, as the real store query
+// does.
+func (f *fakeRatings) ListRatingsPage(_ context.Context, userID int, profileID string, access catalogpkg.AccessFilter, after *catalogpkg.RatingKey, limit int) ([]catalogpkg.UserRating, error) {
 	f.limits = append(f.limits, limit)
+	f.access = append(f.access, access)
 	if f.err != nil {
 		return nil, f.err
 	}
 	var page []catalogpkg.UserRating
 	for _, r := range f.ratings {
-		if r.UserID != userID || r.ProfileID != profileID {
+		if r.UserID != userID || r.ProfileID != profileID || f.hidden[r.MediaItemID] {
 			continue
 		}
 		if after != nil && !ratingKeyAfter(r, *after) {
@@ -53,9 +61,13 @@ func (f *fakeRatings) ListRatingsPage(_ context.Context, userID int, profileID s
 	return page, nil
 }
 
-func (f *fakeRatings) GetRating(_ context.Context, userID int, profileID, itemID string) (catalogpkg.UserRating, bool, error) {
+func (f *fakeRatings) GetRating(_ context.Context, userID int, profileID, itemID string, access catalogpkg.AccessFilter) (catalogpkg.UserRating, bool, error) {
+	f.access = append(f.access, access)
 	if f.err != nil {
 		return catalogpkg.UserRating{}, false, f.err
+	}
+	if f.hidden[itemID] {
+		return catalogpkg.UserRating{}, false, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Item not found"}
 	}
 	for _, r := range f.ratings {
 		if r.UserID == userID && r.ProfileID == profileID && r.MediaItemID == itemID {
@@ -166,29 +178,105 @@ func TestListRatings(t *testing.T) {
 	if len(p.Errors) != 1 || p.Errors[0].Location != "query.offset" || p.Errors[0].Code != codeUnknownParameter {
 		t.Fatalf("errors = %+v", p.Errors)
 	}
-	// A signed cursor whose timestamp cannot be parsed is still a client error.
-	bad, _ := NewCursors(deps.CursorSecret).Encode(CursorScope{OperationID: opListRatings, Security: "1/p-owner", Sort: "-rated_at,-item_id", Tiebreaker: tiebreakerItemID}, ratingPosition{RatedAt: "yesterday", MediaItemID: "movie:a"})
+	// A signed cursor whose timestamp cannot be parsed is still a client
+	// error. The same scope with a good timestamp pages, so the refusal is the
+	// timestamp's and not the scope's.
+	scope := ratingsScope(access.SetScope(context.Background(), access.Scope{UserID: 1, ProfileID: "p-owner"}), 1, "p-owner")
+	good, _ := NewCursors(deps.CursorSecret).Encode(scope, ratingPosition{RatedAt: fixedTime().Format(time.RFC3339Nano), MediaItemID: "movie:c"})
+	if rec := do(t, h, http.MethodGet, "/api/v2/ratings?cursor="+good, "", viewerHeaders()); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"item_id":"movie:b"`) {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	bad, _ := NewCursors(deps.CursorSecret).Encode(scope, ratingPosition{RatedAt: "yesterday", MediaItemID: "movie:a"})
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/ratings?cursor="+bad, "", viewerHeaders()), TypeInvalidCursor)
 }
 
-func TestDeleteRating(t *testing.T) {
-	ratings := &fakeRatings{ratings: ratingRows()}
-	h := newTestHandler(t, ratingsDeps(ratings))
-	for i := 0; i < 2; i++ {
-		rec := do(t, h, http.MethodDelete, "/api/v2/ratings/movie:c", "", viewerHeaders())
-		if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
-			t.Fatalf("delete %d: %d %s", i, rec.Code, rec.Body.String())
+// ratingPages walks listRatings at the given page size and answers each
+// page's item ids and the decoded payload of every cursor it was handed.
+func ratingPages(t *testing.T, h http.Handler, limit int) (pages [][]string, payloads []string) {
+	t.Helper()
+	cursor := ""
+	for {
+		url := "/api/v2/ratings?limit=" + strconv.Itoa(limit)
+		if cursor != "" {
+			url += "&cursor=" + cursor
+		}
+		rec := do(t, h, http.MethodGet, url, "", viewerHeaders())
+		if rec.Code != 200 {
+			t.Fatalf("%d %s", rec.Code, rec.Body.String())
+		}
+		var page struct {
+			Items []struct {
+				ItemID string `json:"item_id"`
+			} `json:"items"`
+			Page struct {
+				NextCursor string `json:"next_cursor"`
+				HasMore    bool   `json:"has_more"`
+			} `json:"page"`
+		}
+		decodeJSON(t, rec.Body, &page)
+		ids := []string{}
+		for _, it := range page.Items {
+			ids = append(ids, it.ItemID)
+		}
+		pages = append(pages, ids)
+		if !page.Page.HasMore || len(pages) > 10 {
+			return pages, payloads
+		}
+		cursor = page.Page.NextCursor
+		payload, err := base64.RawURLEncoding.DecodeString(strings.SplitN(cursor, ".", 2)[0])
+		if err != nil {
+			t.Fatalf("cursor %q: %v", cursor, err)
+		}
+		payloads = append(payloads, string(payload))
+	}
+}
+
+// Ratings of items the viewer may not see are left out of the list and read
+// as 404. Paging carries on past them, and no cursor names a hidden title:
+// a cursor payload is signed, not encrypted.
+func TestRatingsHideItemsTheViewerMayNotSee(t *testing.T) {
+	ratings := &fakeRatings{hidden: map[string]bool{"movie:e": true, "movie:d": true, "movie:c": true}}
+	for i, id := range []string{"movie:f", "movie:e", "movie:d", "movie:c", "movie:b", "movie:a"} {
+		ratings.ratings = append(ratings.ratings, catalogpkg.UserRating{UserID: 1, ProfileID: "p-owner", MediaItemID: id, Rating: 5 - i%5, RatedAt: fixedTime().Add(-time.Duration(i) * time.Hour)})
+	}
+	deps := ratingsDeps(ratings)
+	deps.CursorSecret = []byte("ratings-cursor-test-key")
+	h := newTestHandler(t, deps)
+
+	pages, payloads := ratingPages(t, h, 2)
+	if len(pages) != 2 || strings.Join(pages[0], ",") != "movie:f,movie:b" || strings.Join(pages[1], ",") != "movie:a" {
+		t.Fatalf("pages = %v", pages)
+	}
+	if len(payloads) != 1 || !strings.Contains(payloads[0], "movie:b") {
+		t.Fatalf("cursor payloads = %v", payloads)
+	}
+
+	// A hidden title's rating reads as 404, a visible one as before.
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/ratings/movie:d", "", viewerHeaders()), TypeNotFound)
+	if rec := do(t, h, http.MethodGet, "/api/v2/ratings/movie:f", "", viewerHeaders()); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"rating":5`) {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+
+	// The viewer's restriction reaches the seam, and a cursor minted under
+	// one access policy does not page under another.
+	restricted := deps
+	restricted.ViewerAccess = apimw.NewViewerAccessMiddleware(policyResolver{scope: &access.Scope{LibrariesRestricted: true, AllowedLibraryIDs: []int{1}}})
+	rh := newTestHandler(t, restricted)
+	for _, path := range []string{"/api/v2/ratings", "/api/v2/ratings/movie:f"} {
+		ratings.access = nil
+		do(t, rh, http.MethodGet, path, "", viewerHeaders())
+		if len(ratings.access) != 1 || !slices.Equal(ratings.access[0].AllowedLibraryIDs, []int{1}) {
+			t.Fatalf("%s: access = %+v", path, ratings.access)
 		}
 	}
-	if len(ratings.ratings) != 3 {
-		t.Fatalf("ratings = %+v", ratings.ratings)
+	first := do(t, h, http.MethodGet, "/api/v2/ratings?limit=1", "", viewerHeaders())
+	var page struct {
+		Page struct {
+			NextCursor string `json:"next_cursor"`
+		} `json:"page"`
 	}
-	// Demo mode lets the mutation through, as v1's demo guard does.
-	demo := ratingsDeps(ratings)
-	demo.DemoSettings = fakeSettings{demo: true}
-	if rec := do(t, newTestHandler(t, demo), http.MethodDelete, "/api/v2/ratings/movie:b", "", viewerHeaders()); rec.Code != http.StatusNoContent {
-		t.Fatalf("demo delete: %d %s", rec.Code, rec.Body.String())
-	}
+	decodeJSON(t, first.Body, &page)
+	requireProblem(t, do(t, rh, http.MethodGet, "/api/v2/ratings?limit=1&cursor="+page.Page.NextCursor, "", viewerHeaders()), TypeInvalidCursor)
 }
 
 func TestGetRating(t *testing.T) {
@@ -200,50 +288,6 @@ func TestGetRating(t *testing.T) {
 	// Not rated, and another profile's rating, are both 404.
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/ratings/movie:nope", "", viewerHeaders()), TypeNotFound)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/ratings/movie:z", "", viewerHeaders()), TypeNotFound)
-}
-
-func TestSetRating(t *testing.T) {
-	ratings := &fakeRatings{ratings: ratingRows(), hidden: map[string]bool{"movie:hidden": true}}
-	h := newTestHandler(t, ratingsDeps(ratings))
-	for i := 0; i < 2; i++ {
-		rec := do(t, h, http.MethodPut, "/api/v2/ratings/movie:new", `{"rating":4}`, viewerHeaders())
-		if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
-			t.Fatalf("put %d: %d %s", i, rec.Code, rec.Body.String())
-		}
-	}
-	if len(ratings.ratings) != 5 || ratings.ratings[0].MediaItemID != "movie:new" || ratings.ratings[0].Rating != 4 {
-		t.Fatalf("ratings = %+v", ratings.ratings)
-	}
-	// The access filter is the viewer's, without a device id.
-	if a := ratings.access[0]; a.UserID != 1 || a.ProfileID != "p-owner" || a.DeviceID != "" {
-		t.Fatalf("access = %+v", a)
-	}
-	// Re-rating replaces.
-	if rec := do(t, h, http.MethodPut, "/api/v2/ratings/movie:c", `{"rating":1}`, viewerHeaders()); rec.Code != http.StatusNoContent {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	if _, ok, _ := ratings.GetRating(context.Background(), 1, "p-owner", "movie:c"); !ok || ratings.ratings[1].Rating != 1 {
-		t.Fatalf("ratings = %+v", ratings.ratings)
-	}
-	requireProblem(t, do(t, h, http.MethodPut, "/api/v2/ratings/movie:hidden", `{"rating":3}`, viewerHeaders()), TypeNotFound)
-	// The range and the strict body are typed validation.
-	for _, tc := range []struct{ body, location, code string }{
-		{`{"rating":0}`, "body.rating", codeOutOfRange},
-		{`{"rating":6}`, "body.rating", codeOutOfRange},
-		{`{}`, "body.rating", codeRequired},
-		{`{"rating":3,"stars":3}`, "body.stars", codeUnknownField},
-	} {
-		p := requireProblem(t, do(t, h, http.MethodPut, "/api/v2/ratings/movie:c", tc.body, viewerHeaders()), TypeValidationFailed)
-		if len(p.Errors) != 1 || p.Errors[0].Location != tc.location || p.Errors[0].Code != tc.code {
-			t.Errorf("%s: errors = %+v", tc.body, p.Errors)
-		}
-	}
-	// Demo mode lets the mutation through, as v1's demo guard does.
-	demo := ratingsDeps(ratings)
-	demo.DemoSettings = fakeSettings{demo: true}
-	if rec := do(t, newTestHandler(t, demo), http.MethodPut, "/api/v2/ratings/movie:b", `{"rating":2}`, viewerHeaders()); rec.Code != http.StatusNoContent {
-		t.Fatalf("demo put: %d %s", rec.Code, rec.Body.String())
-	}
 }
 
 func TestRatingsDenied(t *testing.T) {

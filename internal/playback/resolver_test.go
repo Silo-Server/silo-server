@@ -24,147 +24,291 @@ func defaultSettings() playback.AdminSettings {
 	}
 }
 
-func TestResolver_DirectPlay(t *testing.T) {
-	file := &models.MediaFile{
-		CodecVideo: "h264", CodecAudio: "aac", Container: "mp4",
-		Resolution: "1080p", HDR: false,
-	}
-	decision := playback.Resolve(file, defaultCaps(), defaultSettings())
+var yes, no = true, false
 
-	if decision.Method != playback.PlayDirect {
-		t.Errorf("method = %q, want direct", decision.Method)
-	}
+var resolverPlayMethodCases = []struct {
+	name string
+	file *models.MediaFile
+	// caps replaces defaultCaps when set; edit then adjusts the defaults.
+	caps      *playback.ClientCapabilities
+	edit      func(*playback.ClientCapabilities, *playback.AdminSettings)
+	want      playback.PlayMethod
+	wantAudio *bool // TranscodeAudio, when the case asserts it
+}{
+	{
+		name: "direct play",
+		file: &models.MediaFile{CodecVideo: "h264", CodecAudio: "aac", Container: "mp4", Resolution: "1080p"},
+		want: playback.PlayDirect,
+	},
+	{
+		// h264+aac in mkv — client supports codecs but not container.
+		name: "remux",
+		file: &models.MediaFile{CodecVideo: "h264", CodecAudio: "aac", Container: "mkv", Resolution: "1080p"},
+		want: playback.PlayRemux,
+	},
+	{
+		// h264 video (supported) + dts audio (unsupported) → remux with audio transcode.
+		name:      "remux with audio transcode",
+		file:      &models.MediaFile{CodecVideo: "h264", CodecAudio: "dts", Container: "mkv", Resolution: "1080p"},
+		want:      playback.PlayRemux,
+		wantAudio: &yes,
+	},
+	{
+		// h264+dts in mkv would normally remux with audio transcode (video copied),
+		// but the source carries conflicting in-band PPS, so the video copy is unsafe
+		// and it must fall through to a full transcode.
+		name: "copy unsafe forces transcode",
+		file: &models.MediaFile{
+			CodecVideo: "h264", CodecAudio: "dts", Container: "mkv", Resolution: "1080p",
+			VideoTracks: []models.VideoTrack{{Codec: "h264", MultiplePPS: &yes}},
+		},
+		want: playback.PlayTranscode,
+	},
+	{
+		// An inconclusive safety scan must not fail open to video stream-copy.
+		name: "unknown copy safety forces transcode",
+		file: &models.MediaFile{
+			CodecVideo: "h264", CodecAudio: "dts", Container: "mkv", Resolution: "1080p",
+			VideoTracks: []models.VideoTrack{{Codec: "h264", VideoCopyUnsafe: true}},
+		},
+		want: playback.PlayTranscode,
+	},
+	{
+		// Client can decode h264 but not eac3; its sink advertises eac3
+		// passthrough (e.g. HDMI AVR). Should direct-play without audio
+		// transcode instead of promoting to remux.
+		name: "audio passthrough skips audio transcode",
+		file: &models.MediaFile{CodecVideo: "h264", CodecAudio: "eac3", Container: "mp4", Resolution: "1080p"},
+		edit: func(c *playback.ClientCapabilities, _ *playback.AdminSettings) {
+			c.AudioPassthroughCodecs = []string{"eac3", "ac3"}
+		},
+		want:      playback.PlayDirect,
+		wantAudio: &no,
+	},
+	{
+		// Passthrough covers eac3 but the container is unsupported → remux
+		// without audio transcode.
+		name: "audio passthrough allows container remux",
+		file: &models.MediaFile{CodecVideo: "h264", CodecAudio: "eac3", Container: "mkv", Resolution: "1080p"},
+		edit: func(c *playback.ClientCapabilities, _ *playback.AdminSettings) {
+			c.AudioPassthroughCodecs = []string{"eac3"}
+		},
+		want:      playback.PlayRemux,
+		wantAudio: &no,
+	},
+	{
+		// hevc is not in client's supported codecs.
+		name: "unsupported video codec transcodes",
+		file: &models.MediaFile{CodecVideo: "hevc", CodecAudio: "aac", Container: "mp4", Resolution: "1080p"},
+		want: playback.PlayTranscode,
+	},
+	{
+		name: "resolution above the client ceiling transcodes",
+		file: &models.MediaFile{CodecVideo: "h264", CodecAudio: "aac", Container: "mp4", Resolution: "2160p"},
+		edit: func(c *playback.ClientCapabilities, _ *playback.AdminSettings) { c.MaxResolution = "1080p" },
+		want: playback.PlayTranscode,
+	},
+	{
+		// HDR should pass through without tone mapping.
+		name: "HDR passes through to remux",
+		file: &models.MediaFile{CodecVideo: "hevc", CodecAudio: "aac", Container: "mkv", Resolution: "1080p", HDR: true},
+		edit: func(c *playback.ClientCapabilities, _ *playback.AdminSettings) {
+			c.CodecsVideo = []string{"h264", "hevc"}
+			c.HDR = false
+		},
+		want: playback.PlayRemux,
+	},
+	{
+		name: "transcode disabled falls to direct",
+		file: &models.MediaFile{CodecVideo: "hevc", CodecAudio: "aac", Container: "mkv", Resolution: "1080p"},
+		edit: func(_ *playback.ClientCapabilities, s *playback.AdminSettings) { s.TranscodeEnabled = false },
+		want: playback.PlayDirect,
+	},
+	{
+		name: "detailed hardware evidence overrides legacy download ceiling",
+		file: &models.MediaFile{
+			CodecVideo: "hevc", CodecAudio: "aac", Container: "mp4",
+			Resolution: "2160p", Bitrate: 60_000,
+			VideoTracks: []models.VideoTrack{{
+				Codec: "hevc", Profile: "Main 10", Width: 3840, Height: 2160,
+				FrameRate: "60/1", Bitrate: 60_000, BitDepth: 10,
+			}},
+		},
+		caps: &playback.ClientCapabilities{
+			VideoEvidence: playback.EvidencePlatformAttestedV3,
+			CodecsVideo:   []string{"hevc"},
+			CodecsAudio:   []string{"aac"},
+			Containers:    []string{"mp4"},
+			// Older servers conservatively stop here. The detailed-aware server
+			// validates the per-decoder 4K hardware bound instead.
+			MaxResolution: "1080p",
+			VideoDecode: []playback.VideoDecodeCapabilityV3{{
+				Codec: "hevc", BitDepths: []int{8, 10}, MaxWidth: 3840,
+				MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 120_000,
+				Hardware: true,
+			}},
+		},
+		want: playback.PlayDirect,
+	},
+	{
+		// Complete probe facts whose decoder entry does not cover the source: a real
+		// mismatch, so the flat-list claim must not rescue it.
+		name: "detailed evidence fails closed on complete metadata mismatch",
+		file: &models.MediaFile{
+			CodecVideo: "av1", CodecAudio: "aac", Container: "mp4",
+			Resolution: "2160p", Bitrate: 55_000,
+			VideoTracks: []models.VideoTrack{{
+				Codec: "av1", Profile: "Main", Width: 3840, Height: 2160, FrameRate: "60/1",
+				Bitrate: 55_000, BitDepth: 10,
+			}},
+		},
+		caps: &playback.ClientCapabilities{
+			VideoEvidence: playback.EvidencePlatformAttestedV3,
+			CodecsVideo:   []string{"av1"},
+			CodecsAudio:   []string{"aac"},
+			Containers:    []string{"mp4"},
+			MaxResolution: "2160p",
+			VideoDecode: []playback.VideoDecodeCapabilityV3{{
+				Codec: "av1", BitDepths: []int{8, 10}, MaxWidth: 1920,
+				MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 40_000,
+				Hardware: true,
+			}},
+		},
+		want: playback.PlayTranscode,
+	},
+	{
+		// Detailed platform_attested caps with a hardware entry bounded to
+		// 1920x1080, but the source's probe metadata is incomplete (zero bitrate)
+		// so the detailed bounds walk cannot run at all. The coarse max_resolution
+		// ceiling must still apply — same outcome as a flat-only payload — rather
+		// than approving an original-quality 2160p download past the device ceiling.
+		name: "detailed caps with sparse metadata fail closed to the coarse ceiling",
+		file: &models.MediaFile{
+			CodecVideo: "hevc", CodecAudio: "aac", Container: "mp4",
+			Resolution: "2160p", Bitrate: 0,
+			VideoTracks: []models.VideoTrack{{
+				Codec: "hevc", Profile: "Main 10", Width: 3840, Height: 2160,
+				FrameRate: "60/1", Bitrate: 0, BitDepth: 10,
+			}},
+		},
+		caps: &playback.ClientCapabilities{
+			VideoEvidence: playback.EvidencePlatformAttestedV3,
+			CodecsVideo:   []string{"hevc"},
+			CodecsAudio:   []string{"aac"},
+			Containers:    []string{"mp4"},
+			MaxResolution: "1080p",
+			VideoDecode: []playback.VideoDecodeCapabilityV3{{
+				Codec: "hevc", BitDepths: []int{8, 10}, MaxWidth: 1920,
+				MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 40_000,
+				Hardware: true,
+			}},
+		},
+		want: playback.PlayTranscode,
+	},
+	{
+		// The download's fallback encode would keep 1080p50, so keeping the
+		// original takes the same frame-rate trade as playback.
+		name: "a download keeps a 1080p50 original on an exact 4K30 decoder",
+		file: &models.MediaFile{
+			CodecVideo: "h264", CodecAudio: "aac", Container: "mp4",
+			Resolution: "1080p", Bitrate: 3_000,
+			VideoTracks: []models.VideoTrack{{
+				Codec: "h264", Profile: "High", Level: 42, Width: 1920, Height: 1080,
+				FrameRate: "50/1", Bitrate: 3_000, BitDepth: 8,
+			}},
+		},
+		caps: &playback.ClientCapabilities{
+			VideoEvidence: playback.EvidenceExactV3,
+			CodecsVideo:   []string{"h264"},
+			CodecsAudio:   []string{"aac"},
+			Containers:    []string{"mp4"},
+			MaxResolution: "2160p",
+			VideoDecode: []playback.VideoDecodeCapabilityV3{{
+				Codec: "h264", Profiles: []string{"high"}, Levels: []int{51}, BitDepths: []int{8},
+				MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 30, MaxBitrateKbps: 300_000,
+				Hardware: true,
+			}},
+		},
+		want: playback.PlayDirect,
+	},
+	{
+		// An audiobook's cover art is not video to decode: AAC in MP4 is
+		// served as it is, never encoded to H.264 for the cover (#3486).
+		name: "audio-only media ignores the video caps",
+		file: &models.MediaFile{
+			BaseType: "audiobook", CodecAudio: "aac", Container: "mp4",
+			AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2}},
+		},
+		caps: &playback.ClientCapabilities{
+			CodecsVideo: []string{"h264"}, CodecsAudio: []string{"aac"},
+			Containers: []string{"mp4", "m4b"}, MaxResolution: "1080p",
+		},
+		want: playback.PlayDirect,
+	},
+	{
+		// Older scans recorded the cover as an MJPEG video track; it still
+		// takes the audio route, here an audio transcode the device can play.
+		name:      "legacy cover-art video on audio-only media remuxes its audio",
+		file:      &models.MediaFile{BaseType: "audiobook", CodecVideo: "mjpeg", CodecAudio: "flac", Container: "flac", Resolution: "2160p"},
+		want:      playback.PlayRemux,
+		wantAudio: &yes,
+	},
+	{
+		// Converting an audiobook's audio is its transcode: with transcoding
+		// off it is served as it is, never queued for a remux.
+		name: "audio-only media needing conversion falls to direct with transcode disabled",
+		file: &models.MediaFile{BaseType: "audiobook", CodecAudio: "mp3", Container: "mp3", AudioTracks: []models.AudioTrack{{Codec: "mp3", Channels: 2}}},
+		edit: func(_ *playback.ClientCapabilities, s *playback.AdminSettings) { s.TranscodeEnabled = false },
+		want: playback.PlayDirect,
+	},
+	{
+		// A container-only remux copies the audio, so it is no transcode and
+		// still goes ahead with transcoding off.
+		name:      "audio-only media needing only a new container remuxes with transcode disabled",
+		file:      &models.MediaFile{BaseType: "audiobook", CodecAudio: "aac", Container: "mkv", AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2}}},
+		edit:      func(_ *playback.ClientCapabilities, s *playback.AdminSettings) { s.TranscodeEnabled = false },
+		want:      playback.PlayRemux,
+		wantAudio: &no,
+	},
+	{
+		// The client decodes FLAC, but MP4 cannot hold it, so a remux would
+		// encode the audio: with transcoding off the book is served as it is.
+		name: "audio-only FLAC the remux would encode falls to direct with transcode disabled",
+		file: &models.MediaFile{BaseType: "audiobook", CodecAudio: "flac", Container: "flac", AudioTracks: []models.AudioTrack{{Codec: "flac", Channels: 2}}},
+		edit: func(c *playback.ClientCapabilities, s *playback.AdminSettings) {
+			c.CodecsAudio = append(c.CodecsAudio, "flac")
+			s.TranscodeEnabled = false
+		},
+		want: playback.PlayDirect,
+	},
+	{
+		// The primary AAC track would copy, but the FLAC second track would
+		// be encoded, so with transcoding off the book is served as it is.
+		name: "audio-only media with a track the remux would encode falls to direct with transcode disabled",
+		file: &models.MediaFile{BaseType: "audiobook", CodecAudio: "aac", Container: "mkv", AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2}, {Codec: "flac", Channels: 2}}},
+		edit: func(_ *playback.ClientCapabilities, s *playback.AdminSettings) { s.TranscodeEnabled = false },
+		want: playback.PlayDirect,
+	},
 }
 
-func TestResolver_Remux(t *testing.T) {
-	// h264+aac in mkv — client supports codecs but not container.
-	file := &models.MediaFile{
-		CodecVideo: "h264", CodecAudio: "aac", Container: "mkv",
-		Resolution: "1080p", HDR: false,
-	}
-	decision := playback.Resolve(file, defaultCaps(), defaultSettings())
-
-	if decision.Method != playback.PlayRemux {
-		t.Errorf("method = %q, want remux", decision.Method)
-	}
-}
-
-func TestResolver_RemuxWithAudioTranscode(t *testing.T) {
-	// h264 video (supported) + dts audio (unsupported) → remux with audio transcode.
-	file := &models.MediaFile{
-		CodecVideo: "h264", CodecAudio: "dts", Container: "mkv",
-		Resolution: "1080p", HDR: false,
-	}
-	decision := playback.Resolve(file, defaultCaps(), defaultSettings())
-
-	if decision.Method != playback.PlayRemux {
-		t.Errorf("method = %q, want remux", decision.Method)
-	}
-	if !decision.TranscodeAudio {
-		t.Error("TranscodeAudio = false, want true")
-	}
-}
-
-func TestResolver_CopyUnsafeForcesTranscode(t *testing.T) {
-	unsafe := true
-	// h264+dts in mkv would normally remux with audio transcode (video copied),
-	// but the source carries conflicting in-band PPS, so the video copy is unsafe
-	// and it must fall through to a full transcode.
-	file := &models.MediaFile{
-		CodecVideo: "h264", CodecAudio: "dts", Container: "mkv",
-		Resolution: "1080p", HDR: false,
-		VideoTracks: []models.VideoTrack{{Codec: "h264", MultiplePPS: &unsafe}},
-	}
-	decision := playback.Resolve(file, defaultCaps(), defaultSettings())
-
-	if decision.Method != playback.PlayTranscode {
-		t.Errorf("method = %q, want transcode", decision.Method)
-	}
-}
-
-func TestResolver_UnknownCopySafetyForcesTranscode(t *testing.T) {
-	// An inconclusive safety scan must not fail open to video stream-copy.
-	file := &models.MediaFile{
-		CodecVideo: "h264", CodecAudio: "dts", Container: "mkv",
-		Resolution: "1080p", HDR: false,
-		VideoTracks: []models.VideoTrack{{
-			Codec:           "h264",
-			VideoCopyUnsafe: true,
-		}},
-	}
-	decision := playback.Resolve(file, defaultCaps(), defaultSettings())
-
-	if decision.Method != playback.PlayTranscode {
-		t.Errorf("method = %q, want transcode", decision.Method)
-	}
-}
-
-func TestResolver_CopySafeStillRemuxes(t *testing.T) {
-	safe := false
-	// The same shape with the copy-safety scan resolved to safe keeps remuxing.
-	file := &models.MediaFile{
-		CodecVideo: "h264", CodecAudio: "dts", Container: "mkv",
-		Resolution: "1080p", HDR: false,
-		VideoTracks: []models.VideoTrack{{Codec: "h264", MultiplePPS: &safe}},
-	}
-	decision := playback.Resolve(file, defaultCaps(), defaultSettings())
-
-	if decision.Method != playback.PlayRemux {
-		t.Errorf("method = %q, want remux", decision.Method)
-	}
-}
-
-func TestResolver_AudioPassthroughSkipsAudioTranscode(t *testing.T) {
-	// Source is h264 + eac3 in mp4. Client can decode h264 but not eac3; its
-	// sink advertises eac3 passthrough (e.g. HDMI AVR). Should direct-play
-	// without audio transcode instead of promoting to remux.
-	file := &models.MediaFile{
-		CodecVideo: "h264", CodecAudio: "eac3", Container: "mp4",
-		Resolution: "1080p", HDR: false,
-	}
-	caps := defaultCaps()
-	caps.AudioPassthroughCodecs = []string{"eac3", "ac3"}
-
-	decision := playback.Resolve(file, caps, defaultSettings())
-
-	if decision.Method != playback.PlayDirect {
-		t.Errorf("method = %q, want direct (passthrough-supported audio)", decision.Method)
-	}
-	if decision.TranscodeAudio {
-		t.Error("TranscodeAudio = true, want false (sink can passthrough)")
-	}
-}
-
-func TestResolver_AudioPassthroughAllowsContainerRemux(t *testing.T) {
-	// Source is h264 + eac3 in mkv. Client passthrough covers eac3 but container
-	// is unsupported → remux without audio transcode.
-	file := &models.MediaFile{
-		CodecVideo: "h264", CodecAudio: "eac3", Container: "mkv",
-		Resolution: "1080p", HDR: false,
-	}
-	caps := defaultCaps()
-	caps.AudioPassthroughCodecs = []string{"eac3"}
-
-	decision := playback.Resolve(file, caps, defaultSettings())
-
-	if decision.Method != playback.PlayRemux {
-		t.Errorf("method = %q, want remux", decision.Method)
-	}
-	if decision.TranscodeAudio {
-		t.Error("TranscodeAudio = true, want false (sink can passthrough)")
-	}
-}
-
-func TestResolver_Transcode_UnsupportedVideoCodec(t *testing.T) {
-	// hevc is not in client's supported codecs.
-	file := &models.MediaFile{
-		CodecVideo: "hevc", CodecAudio: "aac", Container: "mp4",
-		Resolution: "1080p", HDR: false,
-	}
-	decision := playback.Resolve(file, defaultCaps(), defaultSettings())
-
-	if decision.Method != playback.PlayTranscode {
-		t.Errorf("method = %q, want transcode", decision.Method)
+func TestResolverPlayMethod(t *testing.T) {
+	for _, tc := range resolverPlayMethodCases {
+		t.Run(tc.name, func(t *testing.T) {
+			caps, settings := defaultCaps(), defaultSettings()
+			if tc.caps != nil {
+				caps = *tc.caps
+			}
+			if tc.edit != nil {
+				tc.edit(&caps, &settings)
+			}
+			decision := playback.Resolve(tc.file, caps, settings)
+			if decision.Method != tc.want {
+				t.Errorf("method = %q, want %q", decision.Method, tc.want)
+			}
+			if tc.wantAudio != nil && decision.TranscodeAudio != *tc.wantAudio {
+				t.Errorf("TranscodeAudio = %v, want %v", decision.TranscodeAudio, *tc.wantAudio)
+			}
+		})
 	}
 }
 
@@ -209,35 +353,6 @@ func TestResolver_DownloadSoftwareDecodeIsFeatureGatedAndBounded(t *testing.T) {
 	}
 }
 
-func TestResolver_DetailedHardwareEvidenceOverridesLegacyDownloadCeiling(t *testing.T) {
-	file := &models.MediaFile{
-		CodecVideo: "hevc", CodecAudio: "aac", Container: "mp4",
-		Resolution: "2160p", Bitrate: 60_000,
-		VideoTracks: []models.VideoTrack{{
-			Codec: "hevc", Profile: "Main 10", Width: 3840, Height: 2160,
-			FrameRate: "60/1", Bitrate: 60_000, BitDepth: 10,
-		}},
-	}
-	caps := playback.ClientCapabilities{
-		VideoEvidence: playback.EvidencePlatformAttestedV3,
-		CodecsVideo:   []string{"hevc"},
-		CodecsAudio:   []string{"aac"},
-		Containers:    []string{"mp4"},
-		// Older servers conservatively stop here. The detailed-aware server
-		// validates the per-decoder 4K hardware bound instead.
-		MaxResolution: "1080p",
-		VideoDecode: []playback.VideoDecodeCapabilityV3{{
-			Codec: "hevc", BitDepths: []int{8, 10}, MaxWidth: 3840,
-			MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 120_000,
-			Hardware: true,
-		}},
-	}
-
-	if decision := playback.Resolve(file, caps, defaultSettings()); decision.Method != playback.PlayDirect {
-		t.Fatalf("detailed 4K hardware source = %q, want direct", decision.Method)
-	}
-}
-
 func TestResolver_DetailedDownloadEvidenceFallsBackToFlatListsOnSparseProbeFacts(t *testing.T) {
 	// No video tracks: bit depth, dimensions, frame rate and bitrate are all
 	// unknown, so the decoder bounds cannot be evaluated. "Can't tell" must not
@@ -272,35 +387,6 @@ func TestResolver_DetailedDownloadEvidenceFallsBackToFlatListsOnSparseProbeFacts
 	}
 }
 
-func TestResolver_DetailedDownloadEvidenceFailsClosedOnCompleteMetadataMismatch(t *testing.T) {
-	// Complete probe facts whose decoder entry does not cover the source: a real
-	// mismatch, so the flat-list claim must not rescue it.
-	file := &models.MediaFile{
-		CodecVideo: "av1", CodecAudio: "aac", Container: "mp4",
-		Resolution: "2160p", Bitrate: 55_000,
-		VideoTracks: []models.VideoTrack{{
-			Codec: "av1", Profile: "Main", Width: 3840, Height: 2160, FrameRate: "60/1",
-			Bitrate: 55_000, BitDepth: 10,
-		}},
-	}
-	caps := playback.ClientCapabilities{
-		VideoEvidence: playback.EvidencePlatformAttestedV3,
-		CodecsVideo:   []string{"av1"},
-		CodecsAudio:   []string{"aac"},
-		Containers:    []string{"mp4"},
-		MaxResolution: "2160p",
-		VideoDecode: []playback.VideoDecodeCapabilityV3{{
-			Codec: "av1", BitDepths: []int{8, 10}, MaxWidth: 1920,
-			MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 40_000,
-			Hardware: true,
-		}},
-	}
-
-	if decision := playback.Resolve(file, caps, defaultSettings()); decision.Method != playback.PlayTranscode {
-		t.Fatalf("out-of-bounds source with complete metadata = %q, want transcode", decision.Method)
-	}
-}
-
 func TestNormalizeAndValidateVideoDecode(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -314,13 +400,6 @@ func TestNormalizeAndValidateVideoDecode(t *testing.T) {
 				CodecsVideo:   []string{"h264"},
 				CodecsAudio:   []string{"aac"},
 				Containers:    []string{"mp4"},
-			},
-		},
-		{
-			name: "feature token only",
-			caps: playback.ClientCapabilities{
-				ClientFeatures: []string{playback.FeatureSoftwareVideoDecodeV3},
-				CodecsVideo:    []string{"h264"},
 			},
 		},
 		{
@@ -424,83 +503,5 @@ func TestNormalizeAndValidateVideoDecodeLowercasesDetailedEntries(t *testing.T) 
 	}
 	if caps.CodecsVideo[0] != "hevc" || caps.VideoDecode[0].Codec != "hevc" {
 		t.Fatalf("normalization did not apply: %+v", caps)
-	}
-}
-
-func TestResolver_DetailedCapsWithSparseMetadataFailsClosedToCoarseCeiling(t *testing.T) {
-	// Detailed platform_attested caps with a hardware entry bounded to
-	// 1920x1080, but the source's probe metadata is incomplete (zero bitrate)
-	// so the detailed bounds walk cannot run at all. The coarse max_resolution
-	// ceiling must still apply — same outcome as a flat-only payload — rather
-	// than approving an original-quality 2160p download past the device ceiling.
-	file := &models.MediaFile{
-		CodecVideo: "hevc", CodecAudio: "aac", Container: "mp4",
-		Resolution: "2160p", Bitrate: 0,
-		VideoTracks: []models.VideoTrack{{
-			Codec: "hevc", Profile: "Main 10", Width: 3840, Height: 2160,
-			FrameRate: "60/1", Bitrate: 0, BitDepth: 10,
-		}},
-	}
-	caps := playback.ClientCapabilities{
-		VideoEvidence: playback.EvidencePlatformAttestedV3,
-		CodecsVideo:   []string{"hevc"},
-		CodecsAudio:   []string{"aac"},
-		Containers:    []string{"mp4"},
-		MaxResolution: "1080p",
-		VideoDecode: []playback.VideoDecodeCapabilityV3{{
-			Codec: "hevc", BitDepths: []int{8, 10}, MaxWidth: 1920,
-			MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 40_000,
-			Hardware: true,
-		}},
-	}
-
-	if decision := playback.Resolve(file, caps, defaultSettings()); decision.Method != playback.PlayTranscode {
-		t.Fatalf("sparse-metadata source with coarse-ceiling-exceeding detailed caps = %q, want transcode", decision.Method)
-	}
-}
-
-func TestResolver_Transcode_ResolutionExceeds(t *testing.T) {
-	file := &models.MediaFile{
-		CodecVideo: "h264", CodecAudio: "aac", Container: "mp4",
-		Resolution: "2160p", HDR: false,
-	}
-	caps := defaultCaps()
-	caps.MaxResolution = "1080p"
-
-	decision := playback.Resolve(file, caps, defaultSettings())
-
-	if decision.Method != playback.PlayTranscode {
-		t.Errorf("method = %q, want transcode for resolution downscale", decision.Method)
-	}
-}
-
-func TestResolver_HDR_PassthroughToRemux(t *testing.T) {
-	file := &models.MediaFile{
-		CodecVideo: "hevc", CodecAudio: "aac", Container: "mkv",
-		Resolution: "1080p", HDR: true,
-	}
-	caps := defaultCaps()
-	caps.CodecsVideo = []string{"h264", "hevc"}
-	caps.HDR = false
-
-	decision := playback.Resolve(file, caps, defaultSettings())
-
-	if decision.Method != playback.PlayRemux {
-		t.Errorf("method = %q, want remux — HDR should pass through without tone mapping", decision.Method)
-	}
-}
-
-func TestResolver_TranscodeDisabled_FallsToDirect(t *testing.T) {
-	file := &models.MediaFile{
-		CodecVideo: "hevc", CodecAudio: "aac", Container: "mkv",
-		Resolution: "1080p", HDR: false,
-	}
-	settings := defaultSettings()
-	settings.TranscodeEnabled = false
-
-	decision := playback.Resolve(file, defaultCaps(), settings)
-
-	if decision.Method != playback.PlayDirect {
-		t.Errorf("method = %q, want direct (transcode disabled)", decision.Method)
 	}
 }

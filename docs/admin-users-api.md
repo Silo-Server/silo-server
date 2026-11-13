@@ -7,8 +7,7 @@ profile is not a server administrator.
 
 An `admin:users` key cannot create or promote an administrator, or set an
 administrator account's password, recovery email (`email`), role, or break-glass
-flag. These writes return 403 (`insufficient_scope` in v1, `permission_denied`
-in v2), including on the key owner's own account. Email is a recovery credential
+flag. These writes return 403 `permission_denied`, including on the key owner's own account. Email is a recovery credential
 because a reset link permits a full login session. Other account fields remain
 subject to the Owner rules, and ordinary accounts remain editable within the scope.
 
@@ -16,7 +15,9 @@ subject to the Owner rules, and ordinary accounts remain editable within the sco
 configuration, transactional default-profile creation, and access-group support.
 It also reports the account projections below that depend on optional services:
 `account_devices`, `watch_summary`, `account_downloads` (the downloads list, summary
-and series monitors), `request_usage` and `profile_sections` (profile page layouts). A read whose flag is false answers 503.
+and series monitors), `request_usage`, `profile_sections` (profile page layouts) and
+`profile_management` (profile reads and writes, below). A read whose flag is false answers 503.
+`profile_avatars` reports that the profile collection below carries avatars.
 Unsupported services return a capability or dependency Problem Details response.
 The existing paginated account list remains at `GET /api/v2/admin/users`.
 
@@ -48,8 +49,7 @@ still do not.
 
 A role change also keeps the account signed in, but admin checks trust the role
 in the access token, so the token must be replaced. Every request that presents
-an access token minted before the change gets `401 token_refresh_required` (v1:
-`401 unauthorized`). The login session and its refresh token stay valid, and a
+an access token minted before the change gets `401 token_refresh_required`. The login session and its refresh token stay valid, and a
 refresh issues a token with the new role, so a demoted administrator loses admin
 access on its next request. Clients refresh and retry once and never sign out on
 this response. The same transaction ends every impersonation session the account
@@ -58,8 +58,6 @@ only the Owner may view as an administrator. Jellyfin- and
 Audiobookshelf-compatible sessions are kept, because neither carries the role:
 the Jellyfin surface reports every account as a non-administrator and resolves
 access per request.
-
-The same rules apply to the bridge `PUT /api/v1/admin/users/{id}`.
 
 Omitted update fields preserve their values. Nullable policy overrides accept
 `null` to restore inheritance. Explicit empty library and permission arrays,
@@ -77,15 +75,14 @@ as well. `null` inherits the access group's `max_profiles`, and a value of at le
 1 replaces it. An administrator or an account outside every group inherits 5, and
 an access group created without a value gets 5. `effective_policy.max_profiles` is
 the limit that profile creation enforces: an account at its limit gets
-`409 profile_limit_reached`, and profiles it already has above a lowered limit are
-kept. The bridge v1 body has no inherit state for this field, so its
-`max_profiles` reports the limit that applies. A v1 update stores an override,
-except that sending back the inherited limit an account reported leaves it
-inheriting, and an explicit `null` clears an override back to inherit, as with
-the other policy fields. The group's own limit is v2-only: the v1
-access-group body carries no `max_profiles`, so a group limit is set and read
-through the v2 access-group operations. `GET /api/v2/admin/users/capabilities` reports `profile_limits: true`
-when access groups and account overrides take `max_profiles`.
+`409 conflict`, and profiles it already has above a lowered limit are
+kept. An access group's own limit is set and read through the access-group
+operations. `GET /api/v2/admin/users/capabilities` reports `profile_limits: true`
+when access groups and account overrides take `max_profiles`. The account
+itself reads the same limit as `max_profiles` on its own `listProfiles`
+response (omitted when the server could not read it, and on a remote-playback
+handoff), so a client can stop offering a new profile once the household is
+full.
 
 `POST /api/v2/admin/users` returns 201 with `{ "id": "..." }` and `Location`.
 Default-profile creation, when requested, uses the existing transactional
@@ -144,7 +141,7 @@ update turns local password sign-in back on, so `password_login` is true afterwa
 this is how an administrator recovers an account whose provider is gone, and
 clients keep the set-password action for accounts where it is false. Only the server
 Owner may set the password of its own account while `password_login` is false for it
-(403 `permission_denied`; v1 answers `owner_protected`), so an admin cannot turn its own password sign-in back on and
+(403 `permission_denied`), so an admin cannot turn its own password sign-in back on and
 keep its role through provider demotion. A password
 reset link needs `password_login` (see below). `password_change_required` is true
 while the account holds a temporary password.
@@ -200,6 +197,10 @@ It creates a login session and has no replay identity. Clients must not retry an
 uncertain response automatically. The web client checks its captured authority
 before installing returned credentials.
 
+The impersonation session opens a PIN-locked profile without its PIN; managing
+the household still needs the primary profile's PIN (see
+[profile-verification-tokens.md](architecture/profile-verification-tokens.md#credentials-that-need-no-token)).
+
 ## Server Owner
 
 The account created by first-run setup is the server Owner. On a server set up
@@ -221,8 +222,6 @@ they:
 - create an API key for another administrator or the Owner, or change or revoke
   one of their keys.
 
-The v1 account and API key routes answer the same refusals with
-`403 owner_protected`, and the v1 invitation routes with `403 role_not_allowed`.
 No account may change its own role, disable itself, or delete itself through these
 routes, and that includes the Owner; those writes return the same 403. Nobody may impersonate the Owner. Administrators may still impersonate only
 non-administrators, but the Owner may also impersonate other administrators.
@@ -232,7 +231,7 @@ administrator the Owner and returns 204. The caller must be the Owner, signed in
 an API key or an impersonation session receives `403 permission_denied`, and so
 does any caller that is not the Owner. A target that is not another enabled
 administrator returns `422 validation_failed`. The previous Owner stays an
-administrator. The operation has no v1 route and is not retryable; a replay is
+administrator. The operation is not retryable; a replay is
 refused because the caller is no longer the Owner. The capability endpoint reports
 `ownership_transfer`. Moving ownership ends every session in which someone views the
 server as the new Owner and the previous Owner's sessions viewing as other
@@ -242,15 +241,29 @@ administrator invitations, which the new Owner can resend.
 
 Making an account an administrator deletes its API keys and its reset link. Any
 administrator may create those for an ordinary account, so after a promotion they
-would carry administrator authority that only the Owner grants.
+would carry administrator authority that only the Owner grants. Creating an API key
+for another account checks both accounts in the transaction that stores the key:
+the check sees a promotion or ownership transfer that commits first, and a later
+promotion of that account, or transfer of ownership to it, deletes the key with the
+account's other keys.
 
 These rules stop an administrator who deliberately tries to exceed its authority.
-They check the caller's standing when the request arrives; they do not order
-simultaneous requests around an ownership transfer, which a server sees rarely.
+They check the caller's standing when the request arrives; except for API key
+creation, above, they do not order simultaneous requests around an ownership
+transfer, which a server sees rarely.
 
 When the Owner account is lost or locked out, someone with shell access to a node
-and the server's `DATABASE_URL` (no other server secret) recovers it with `silo owner set <username>`, for
-example `docker compose exec silo silo owner set alice`. The command makes that
+and the server's `DATABASE_URL` (no other server secret) recovers it with `silo owner set <username>`.
+In the omnibus image, `DATABASE_URL` lives in the s6 container environment, which
+`docker exec` does not load, and the bundled PostgreSQL admits the `silo` role only
+from the `silo` account, so the command runs as:
+
+```sh
+docker compose exec silo /command/s6-envdir /run/s6/container_environment \
+  /command/s6-setuidgid silo silo owner set alice
+```
+
+`silo auth local-login enable` runs the same way. The command makes that
 account the Owner, enables it, and grants it the administrator role if needed; a
 role or status change signs the account out. The previous Owner stays an
 administrator.
@@ -277,7 +290,7 @@ response replay; after an uncertain result, reload before starting another inten
 
 | Route below `/api/v2/admin` | Response |
 | --- | --- |
-| `GET /users/{id}/profiles` | Complete profile collection with string IDs, names and `last_seen_at` |
+| `GET /users/{id}/profiles` | Complete profile collection with string IDs, names, `has_pin`, `is_primary`, `is_child`, `last_seen_at`, and the `avatar`, `avatar_url` and `avatar_source` that `GET /api/v2/profiles` returns for the same profile |
 | `GET /users/{id}/api-keys` | Bounded metadata-only key collection; no stored credential |
 | `GET /users/{id}/ips` | Bounded IP history for one account, each address with its `location` |
 | `GET /ips?ip=...` | Bounded account history for one valid IP address |
@@ -301,9 +314,11 @@ fixed observation window and deterministic last-seen ties. Newer events do not
 move earlier groups across that cursor. Addresses are returned without CIDR masks.
 Each address carries `location`, `local` or `remote`, classified from the address
 alone: private, loopback and link-local addresses are local, everything else is
-remote. Request logs do not record the network-access route, so a request that
-reached the server through a network-access provider from a private address reads
-as `local` here even though playback treats that path as remote.
+remote. Request logs do not record the network-access route or whether the
+address was a forwarder's, so a request from a private address that reached the
+server through a network-access provider, or through a forwarder outside
+`clientip.trusted_proxies`, reads as `local` here even though playback treats it
+as remote.
 
 A profile's `last_seen_at` is the latest time any device registration reported the
 profile, and null when none has. The device collection lists every device the
@@ -317,7 +332,9 @@ empty when the profile no longer exists.
 The watch summary accepts `days` from 1 to 365 (default 30) and an optional
 `profile_id`. It totals the finalized attempts that ended at or after `since` (now
 minus `days`): `plays`, `completed_plays`, `watched_seconds` and `last_played_at`
-(null when none). Those are the attempts `listAdminPlaybackHistory` lists with the
+(null when none). `watched_seconds` here is watch time: each attempt's measured
+`played_seconds`, or, for an attempt recorded before measurement, its end position
+capped at its wall-clock length. Those are the attempts `listAdminPlaybackHistory` lists with the
 same `user_id`, `profile_id` and `ended_after` set to `since`.
 
 The request usage read reports the account's effective request policy as the
@@ -325,6 +342,31 @@ request service resolves it: `requests_enabled` (the server switch), `allowed`
 (false when the account's switch, group or approval mode blocks it), `unlimited`,
 `used`, `max_requests`, `window_days`, `window_start`, `remaining` and
 `auto_approve`. An unlimited account is not counted, so `used` is 0.
+
+### Profiles and PINs
+
+An administrator can manage any account's household profiles without
+impersonating it. There is no account-level PIN: a PIN belongs to one profile,
+and the primary profile's PIN is the one that guards household management.
+
+| Route below `/api/v2/admin/users/{id}/profiles` | Response |
+| --- | --- |
+| `POST /` | Creates a profile from the `createProfile` body (`createAdminUserProfile`); 201 with the profile |
+| `GET /{profile_id}` | The profile as `listProfiles` reports it (`getAdminUserProfile`) |
+| `PATCH /{profile_id}` | Updates it from the `updateProfile` body (`updateAdminUserProfile`) |
+| `DELETE /{profile_id}` | Deletes it as `deleteProfile` does (`deleteAdminUserProfile`); 204 |
+
+These run the same validation and writes as the household's own `/api/v2/profiles`
+operations. The acting-admin check replaces the household-manager check, so no
+primary profile or `X-Profile-Token` for the target account is needed. That is how
+a forgotten PIN is reset: `PATCH` with `"pin": null` removes it, and a new value
+replaces it. Either change advances the profile's PIN revision, which ends its
+outstanding profile tokens, and clears its wrong-PIN lockout. The account's profile
+limit and the per-account name check still apply (409), and the primary profile
+cannot be deleted (409). The Owner rules apply to every write: only the Owner may
+change the Owner's or another administrator's profiles (403 `permission_denied`
+otherwise), because a primary profile's PIN guards that account's admin access. A profile that is not one of the account's answers 404,
+as does an unknown account. Writes are audited like other admin mutations.
 
 ### Profile page layouts
 

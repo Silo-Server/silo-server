@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback, type RefObject } from "react";
 import { toast } from "sonner";
+import { t, useAppLanguage } from "@/i18n";
 import { useReportMediaProgress } from "@/hooks/queries/progress";
 import { buildPlayerChapters, nextChapterStart, prevChapterStart } from "@/lib/audiobooks/chapters";
 import type { AudiobookFile } from "@/lib/audiobooks/types";
@@ -8,8 +9,8 @@ import {
   buildClientCapabilitiesV3,
   buildClientPlaybackContextV3,
   detectBandwidthEstimateKbpsV3,
-  detectMeteredV3,
 } from "@/player/client-context-v3";
+import { mediaElementReleased } from "@/player/bandwidth-probe";
 import { usePlayerConfig } from "@/player/context/PlayerConfigContext";
 import { replanV2 } from "@/player/lifecycle-v2";
 import { sendSessionProgress, stopSequencedSession } from "@/player/session-mutations";
@@ -237,7 +238,12 @@ export function useAudiobookPlayback({
   const audioRef = useRef<HTMLAudioElement>(null);
   const parts = useMemo(() => buildParts(files), [files]);
   const duration = useMemo(() => totalDuration(parts), [parts]);
-  const chapters = useMemo(() => buildPlayerChapters(files), [files]);
+  const language = useAppLanguage();
+  const chapters = useMemo(
+    () => buildPlayerChapters(files),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- untitled chapters get a translated fallback title
+    [files, language],
+  );
   const [activeFileIndex, setActiveFileIndex] = useState(() => {
     return findPartIndex(parts, initialPositionSeconds);
   });
@@ -374,8 +380,8 @@ export function useAudiobookPlayback({
       if (!plan || !sessionId || !playbackAttemptId || replanInFlightPlanKeyRef.current) return;
       if (failedPlanKeyRef.current === plan.plan_attempt_key) return;
       if (attemptCountRef.current > MAX_ATTEMPT_COUNT_V3) {
-        toast.error("Playback failed", {
-          description: "Audiobook playback failed after repeated recovery attempts.",
+        toast.error(t("web.audiobooks.player.playbackFailed"), {
+          description: t("web.audiobooks.player.playbackFailedDetail"),
         });
         return;
       }
@@ -420,8 +426,7 @@ export function useAudiobookPlayback({
             qualityPreference: QUALITY_ORIGINAL_V3,
             attemptedPlanKeys,
             attemptCount,
-            metered: detectMeteredV3(),
-            bandwidthEstimateKbps: detectBandwidthEstimateKbpsV3(),
+            // Replans never send the speed-test reading; only a start does.
             clientCapabilities,
             clientPlaybackContext,
           }),
@@ -440,8 +445,8 @@ export function useAudiobookPlayback({
           const terminal = decision.terminal
             ? describePlanTerminal(decision.terminal)
             : {
-                title: "Playback unavailable",
-                message: "This server could not recover audiobook playback.",
+                title: t("web.audiobooks.player.playbackUnavailable"),
+                message: t("web.audiobooks.player.recoveryUnavailable"),
               };
           void reportSessionRouteEventV2(
             config,
@@ -473,7 +478,7 @@ export function useAudiobookPlayback({
           failedPlanKeyRef.current = null;
         }
         console.error("audiobook playback recovery failed", err);
-        toast.error(err instanceof Error ? err.message : "Failed to recover audiobook playback");
+        toast.error(err instanceof Error ? err.message : t("web.audiobooks.player.recoveryFailed"));
       } finally {
         if (replanInFlightPlanKeyRef.current === expectedPlanKey) {
           replanInFlightPlanKeyRef.current = null;
@@ -587,7 +592,7 @@ export function useAudiobookPlayback({
     (async () => {
       const profileId = config.getProfileId();
       if (!profileId) {
-        throw new Error("Missing active profile");
+        throw new Error(t("web.audiobooks.player.noActiveProfile"));
       }
       const previousStop = pendingStopRef.current;
       if (previousStop) {
@@ -595,6 +600,7 @@ export function useAudiobookPlayback({
         if (canceled) return;
       }
 
+      const estimate = detectBandwidthEstimateKbpsV3();
       const decision = await startPlaybackV2(
         config,
         buildStartRequestV3({
@@ -610,8 +616,9 @@ export function useAudiobookPlayback({
           // "resume wherever the server last saw us".
           forceStartPosition: true,
           progressPersistence: "client",
-          metered: detectMeteredV3(),
-          bandwidthEstimateKbps: detectBandwidthEstimateKbpsV3() ?? null,
+          // The speed-test reading, labelled as one, as a video start sends it.
+          bandwidthEstimateKbps: estimate ?? null,
+          bandwidthEstimateSource: estimate === undefined ? undefined : "probe",
           clientCapabilities,
           clientPlaybackContext,
         }),
@@ -623,8 +630,8 @@ export function useAudiobookPlayback({
           const failure = decision.terminal
             ? describePlanTerminal(decision.terminal)
             : {
-                title: "Playback unavailable",
-                message: "This server is not accepting playback requests right now.",
+                title: t("web.audiobooks.player.playbackUnavailable"),
+                message: t("web.audiobooks.player.startUnavailable"),
               };
           // No plan means no registered v2 session, so there is nothing to
           // report the terminal against; the toast is the whole signal.
@@ -646,7 +653,7 @@ export function useAudiobookPlayback({
         // The start never produced a session, so the failure has no v2 attempt
         // to hang a route event on.
         console.error("audiobook playback session failed", err);
-        toast.error(err instanceof Error ? err.message : "Failed to start audiobook playback");
+        toast.error(err instanceof Error ? err.message : t("web.audiobooks.player.startFailed"));
         settleFailedStart();
       }
     });
@@ -840,6 +847,8 @@ export function useAudiobookPlayback({
         audio.pause();
         reportRef.current(currentTimeRef.current);
       }
+      // A removed element's media events never reach the document.
+      if (audio) mediaElementReleased(audio);
     };
   }, []);
 
@@ -998,7 +1007,8 @@ export function useAudiobookPlayback({
         }
         case "display_message":
           toast.info(
-            readStringPayload(command.payload, "message") ?? "A server message was received.",
+            readStringPayload(command.payload, "message") ??
+              t("web.audiobooks.player.serverMessage"),
           );
           return;
         case "server_restarting":
@@ -1006,8 +1016,8 @@ export function useAudiobookPlayback({
           toast.warning(
             readStringPayload(command.payload, "message") ??
               (command.name === "server_restarting"
-                ? "Playback may end shortly while the server restarts."
-                : "Playback may end shortly while the server shuts down."),
+                ? t("web.audiobooks.player.serverRestarting")
+                : t("web.audiobooks.player.serverShuttingDown")),
           );
           return;
         case "stop":

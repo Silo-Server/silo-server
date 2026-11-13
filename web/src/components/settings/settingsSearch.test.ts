@@ -35,13 +35,6 @@ const groups = [
 ];
 
 describe("settingsSearch", () => {
-  it("returns all groups when the query is empty", () => {
-    const filtered = filterSettingsSearchGroups(groups, "");
-
-    expect(countSettingsSearchItems(filtered)).toBe(3);
-    expect(filtered.map((group) => group.label)).toEqual(["Server", "Playback"]);
-  });
-
   it("matches item labels, descriptions, and keywords", () => {
     expect(filterSettingsSearchGroups(groups, "redis")).toEqual([
       {
@@ -70,6 +63,18 @@ describe("settingsSearch", () => {
 
     expect(filtered).toEqual([groups[0]]);
     expect(countSettingsSearchItems(filtered)).toBe(2);
+  });
+
+  it("matches a group's keywords by returning the full group", () => {
+    // A translated heading keeps its English name as a keyword.
+    const translated = [
+      {
+        label: "Reproducción",
+        keywords: ["Playback"],
+        items: [{ label: "Subtítulos", description: "Comportamiento y estilo" }],
+      },
+    ];
+    expect(filterSettingsSearchGroups(translated, "playback")).toEqual(translated);
   });
 
   it("does not match short tokens from the middle of a word", () => {

@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import { formatDate } from "@/lib/datetime";
 
 export interface RelativeTimeOptions {
@@ -35,25 +36,27 @@ export function formatRelativeTime(
   const diffMs = Date.now() - date.getTime();
   const diffMinutes = toUnit(diffMs / 60_000);
   if (diffMinutes < 1) {
-    return options?.justNowLabel ?? "just now";
+    return options?.justNowLabel ?? t("web.common.date.justNow");
   }
   if (diffMinutes < 60) {
-    return `${diffMinutes}m ago`;
+    return t("web.common.date.minutesAgo", {
+      count: diffMinutes,
+      count_text: diffMinutes,
+    });
   }
   const diffHours = toUnit(diffMs / 3_600_000);
   if (diffHours < 24) {
-    return `${diffHours}h ago`;
+    return t("web.common.date.hoursAgo", { count: diffHours, count_text: diffHours });
   }
   const diffDays = toUnit(diffMs / 86_400_000);
   if (diffDays < (options?.absoluteAfterDays ?? Number.POSITIVE_INFINITY)) {
-    return `${diffDays}d ago`;
+    return t("web.common.date.daysAgo", { count: diffDays, count_text: diffDays });
   }
   return (options?.absolute ?? formatDate)(date);
 }
 
 export function formatBirthDate(dateStr: string): string {
-  const date = new Date(dateStr + "T00:00:00");
-  return formatDate(date, "medium");
+  return formatDate(dateStr, "medium") || dateStr;
 }
 
 export function computeAge(birthStr: string, deathStr?: string): number {

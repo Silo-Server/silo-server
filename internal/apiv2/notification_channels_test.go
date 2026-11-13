@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/notifications"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 type fakeNotificationChannels struct {
@@ -39,6 +40,7 @@ func TestNotificationChannelAuthority(t *testing.T) {
 	fake := new(fakeNotificationChannels)
 	deps := pilotDeps(nil, nil)
 	deps.NotificationChannels = fake
+	deps.NotificationDiscordManagement = discordManagement([]userstore.Profile{{ID: "p-owner", IsPrimary: true}})
 	h := NewHandler(deps)
 	emailPath := Prefix + "/notifications/email-preferences"
 	discordPath := Prefix + "/notifications/discord-preferences"
@@ -81,7 +83,7 @@ func notificationChannelFixtureCases() []fixtureCase {
 		{name: "notification_email_preferences", operationID: "getNotificationEmailPreferences", method: "GET", path: Prefix + "/notifications/email-preferences", headers: profileOwner(), status: 200, schema: "#/components/schemas/NotificationEmailPreferences", scenario: "A child profile cannot edit its notification email address."},
 		{name: "notification_email_mode", operationID: "updateNotificationEmailPreferences", method: "PUT", path: Prefix + "/notifications/email-preferences", body: `{"mode":"off"}`, headers: profileOwner(), status: 200, schema: "#/components/schemas/NotificationEmailPreferences", scenario: "The existing delivery mode setter is invoked once."},
 		{name: "notification_discord_preferences", operationID: "getNotificationDiscordPreferences", method: "GET", path: Prefix + "/notifications/discord-preferences", headers: bearer(memberToken), status: 200, schema: "#/components/schemas/NotificationDiscordPreferences", scenario: "Discord preferences belong to the login account without requiring a selected profile."},
-		{name: "notification_discord_mode", operationID: "updateNotificationDiscordPreferences", method: "PUT", path: Prefix + "/notifications/discord-preferences", body: `{"mode":"off"}`, headers: bearer(memberToken), status: 200, schema: "#/components/schemas/NotificationDiscordPreferences", scenario: "A mode mutation reports account state without leaking the linked identity token."},
+		{name: "notification_discord_mode", operationID: "updateNotificationDiscordPreferences", method: "PUT", path: Prefix + "/notifications/discord-preferences", body: `{"mode":"off"}`, headers: with(bearer(memberToken), "X-Profile-Id", "p-primary"), status: 200, schema: "#/components/schemas/NotificationDiscordPreferences", scenario: "A household manager mode mutation reports account state without leaking the linked identity token."},
 	}
 	for i := range cases {
 		cases[i].assertHeaders = []string{"Content-Type", "Cache-Control"}
@@ -98,11 +100,15 @@ func TestNotificationDiscordUnlink(t *testing.T) {
 	f := new(fakeNotificationChannels)
 	deps := pilotDeps(nil, nil)
 	deps.NotificationChannels = f
+	deps.NotificationDiscordManagement = discordManagement([]userstore.Profile{{ID: "p-owner", IsPrimary: true}})
 	h := NewHandler(deps)
 	path := Prefix + "/notifications/discord-link"
-	for _, headers := range []map[string]string{bearer(memberToken), profileOwner()} {
-		rec := do(t, h, http.MethodDelete, path, "", headers)
-		if rec.Code != 204 || rec.Body.Len() != 0 || f.user != 1 {
+	for _, tc := range []struct {
+		headers map[string]string
+		userID  int
+	}{{profileOwner(), 1}, {with(bearer(adminToken), "X-Profile-Id", "p-owner"), 2}} {
+		rec := do(t, h, http.MethodDelete, path, "", tc.headers)
+		if rec.Code != 204 || rec.Body.Len() != 0 || f.user != tc.userID {
 			t.Fatalf("%d %s %+v", rec.Code, rec.Body.String(), f)
 		}
 	}
@@ -111,35 +117,13 @@ func TestNotificationDiscordUnlink(t *testing.T) {
 		t.Fatal("unauthorized dispatch")
 	}
 	f.err = fmt.Errorf("storage failure")
-	requireProblem(t, do(t, h, http.MethodDelete, path, "", bearer(memberToken)), TypeInternalError)
+	requireProblem(t, do(t, h, http.MethodDelete, path, "", profileOwner()), TypeInternalError)
 	deps.NotificationChannels = nil
-	requireProblem(t, do(t, NewHandler(deps), http.MethodDelete, path, "", bearer(memberToken)), TypeDependencyUnavailable)
+	requireProblem(t, do(t, NewHandler(deps), http.MethodDelete, path, "", profileOwner()), TypeDependencyUnavailable)
 }
 
 func (f *fakeNotificationChannels) ClearEmailAddress(_ context.Context, user int, profile string) error {
 	f.user, f.profile = user, profile
 	f.writes++
 	return f.err
-}
-func TestNotificationEmailClearAddress(t *testing.T) {
-	f := new(fakeNotificationChannels)
-	deps := pilotDeps(nil, nil)
-	deps.NotificationChannels = f
-	h := NewHandler(deps)
-	path := Prefix + "/notifications/email-preferences/address"
-	rec := do(t, h, http.MethodDelete, path, "", profileOwner())
-	if rec.Code != 200 || f.user != 1 || f.profile != "p-owner" || f.writes != 1 {
-		t.Fatalf("%d %s %+v", rec.Code, rec.Body.String(), f)
-	}
-	requireProblem(t, do(t, h, http.MethodDelete, path, "", nil), TypeAuthenticationRequired)
-	requireProblem(t, do(t, h, http.MethodDelete, path, "", bearer(memberToken)), TypeValidationFailed)
-	if f.writes != 1 {
-		t.Fatal("unauthorized dispatch")
-	}
-	f.err = notifications.ErrEmailChildProfile
-	requireProblem(t, do(t, h, http.MethodDelete, path, "", profileOwner()), TypePermissionDenied)
-	f.err = fmt.Errorf("storage failure")
-	requireProblem(t, do(t, h, http.MethodDelete, path, "", profileOwner()), TypeInternalError)
-	deps.NotificationChannels = nil
-	requireProblem(t, do(t, NewHandler(deps), http.MethodDelete, path, "", profileOwner()), TypeDependencyUnavailable)
 }

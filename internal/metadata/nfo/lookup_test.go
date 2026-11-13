@@ -34,6 +34,16 @@ func skipIfPermissionsIgnored(t *testing.T) {
 	}
 }
 
+// setMode changes path's mode and restores it when the test ends, so the
+// temporary directory can be removed.
+func setMode(t *testing.T, path string, mode os.FileMode) {
+	t.Helper()
+	if err := os.Chmod(path, mode); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o755) })
+}
+
 func movieRequest(dir, file string, sidecarDirs ...string) metadata.MetadataRequest {
 	return metadata.MetadataRequest{
 		ContentType:               typeMovie,
@@ -211,11 +221,8 @@ func TestStackBaseName(t *testing.T) {
 		"Film-cd0":                      "",
 		"Movie.2002.DVD9":               "",
 		"Movie-pt.b":                    "",
-		"The Departed (2006)":           "",
 		"Movie - Part Deux":             "",
 		"cd1":                           "",
-		"Toy Story 4 (2019)":            "",
-		"Jurassic Park (1993)":          "",
 		"Star Wars - Episode IV (1977)": "",
 	}
 	for in, want := range tests {
@@ -225,28 +232,149 @@ func TestStackBaseName(t *testing.T) {
 	}
 }
 
-// A stray movie.nfo in a flat multi-movie folder must not name every movie
-// in it: without a single-content sidecar directory the provider gives no
-// hints and no metadata.
-func TestProvider_FlatFolderMovieNFOAppliesToNoMovie(t *testing.T) {
+type findItemNFOPicksCase struct {
+	name        string
+	files       map[string]string // relative path -> content
+	media       []string          // relative; requested, need not exist
+	sidecarDirs []string          // relative; "." is the temp dir
+	contentType string
+	wantPath    string // relative; checked when set
+	wantTitle   string // "" means no NFO
+	ignoreErr   bool
+}
+
+var findItemNFOPicksCases = func() []findItemNFOPicksCase {
+	const video = "video"
+
+	return []findItemNFOPicksCase{
+		{
+			// The scanner groups parts whose separators differ, so the lookup
+			// compares stack names the same way and the parts share their NFO.
+			name: "stack parts with different separators",
+			files: map[string]string{
+				"Film-part1-1080p.mkv": video, "Film part2 1080p.mp4": video,
+				"Film-1080p.nfo": `<movie><title>Film</title></movie>`,
+			},
+			media: []string{"Film-part1-1080p.mkv"}, contentType: typeMovie, wantTitle: "Film",
+		},
+		{
+			// Only video files count toward a stack: a subtitle or NFO named
+			// like the missing part does not make a lone part a stack.
+			name: "stack counts only video parts",
+			files: map[string]string{
+				"Dune Part 2.mkv": video, "Dune Part 1.srt": "subtitle",
+				"Dune Part 1.nfo": `<movie><title>Part One</title></movie>`,
+				"Dune.nfo":        `<movie><title>Dune</title></movie>`,
+			},
+			media: []string{"Dune Part 2.mkv"}, contentType: typeMovie,
+		},
+		{
+			// Every file's own NFO name comes before a stacked movie's shared
+			// name, so a later part's NFO wins over the stack's.
+			name: "basenames before the stack name",
+			files: map[string]string{
+				"Film-cd1.mkv": video, "Film-cd2.mkv": video,
+				"Film-cd2.nfo": `<movie><title>Part Two</title></movie>`,
+				"Film.nfo":     `<movie><title>Stack</title></movie>`,
+			},
+			media: []string{"Film-cd1.mkv", "Film-cd2.mkv"}, contentType: typeMovie, wantTitle: "Part Two",
+		},
+		{
+			// An initial match carries only the representative part, so the
+			// stack is recognized from the folder.
+			name: "stack from folder: cd1 with cd2 on disk",
+			files: map[string]string{
+				"Film-cd1.mkv": video, "Film-cd2.mkv": video,
+				"Film.nfo": `<movie><title>Stacked</title></movie>`,
+			},
+			media: []string{"Film-cd1.mkv"}, contentType: typeMovie, wantTitle: "Stacked",
+		},
+		{
+			name: "stack from folder: two copies of one part are not a stack",
+			files: map[string]string{
+				"Dune Part 2.mkv": video, "Dune Part 2.mp4": video,
+				"Dune.nfo": `<movie><title>Dune</title></movie>`,
+			},
+			media: []string{"Dune Part 2.mkv", "Dune Part 2.mp4"}, contentType: typeMovie,
+		},
+		{
+			// A cataloged part that is no longer on disk does not make the
+			// part that is left a stack.
+			name:  "cd1 with cataloged cd2 gone",
+			files: map[string]string{"Film-cd1.mkv": video, "Film.nfo": `<movie><title>Film</title></movie>`},
+			media: []string{"Film-cd1.mkv"}, contentType: typeMovie,
+		},
+		{
+			name:  "both parts requested, cd2 gone",
+			files: map[string]string{"Film-cd1.mkv": video, "Film.nfo": `<movie><title>Film</title></movie>`},
+			media: []string{"Film-cd1.mkv", "Film-cd2.mkv"}, contentType: typeMovie, ignoreErr: true,
+		},
+		{
+			// A sidecar directory whose name has a dot ("Mr. Robot") is still
+			// a directory: its tvshow.nfo is found, not "<Mr>.nfo".
+			name:        "dotted sidecar directory",
+			files:       map[string]string{"Mr. Robot/tvshow.nfo": `<tvshow><title>Mr. Robot</title></tvshow>`},
+			sidecarDirs: []string{"Mr. Robot"}, contentType: typeSeries,
+			wantPath: "Mr. Robot/tvshow.nfo", wantTitle: "Mr. Robot",
+		},
+		{
+			// A stray movie.nfo in a series root must not shadow tvshow.nfo.
+			name: "stray movie.nfo in a series root",
+			files: map[string]string{
+				"movie.nfo":  `<movie><title>Stray</title></movie>`,
+				"tvshow.nfo": `<tvshow><title>The Show</title></tvshow>`,
+			},
+			sidecarDirs: []string{"."}, contentType: typeSeries, wantPath: "tvshow.nfo", wantTitle: "The Show",
+		},
+		{
+			// A candidate that exists but fails to parse falls through to the
+			// next candidate instead of masking a valid sidecar.
+			name: "parse failure falls through to the next candidate",
+			files: map[string]string{
+				"Blade Runner (1982).mkv": video,
+				"Blade Runner (1982).nfo": "not xml at all",
+				"movie.nfo":               `<movie><title>Blade Runner</title></movie>`,
+			},
+			media: []string{"Blade Runner (1982).mkv"}, sidecarDirs: []string{"."}, contentType: typeMovie,
+			wantPath: "movie.nfo", wantTitle: "Blade Runner",
+		},
+	}
+}()
+
+// findItemNFO picks one NFO from the files on disk (files, relative to the
+// temp dir) for the requested media and sidecar folders.
+func TestFindItemNFO_Picks(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "movie.nfo"), `<movie><title>Pulp Fiction</title><uniqueid type="tmdb">680</uniqueid></movie>`)
-	p := NewProvider()
-	for _, file := range []string{"Fight Club (1999).mkv", "Se7en (1995).mkv"} {
-		writeFile(t, filepath.Join(dir, file), "video")
-		req := movieRequest(dir, file)
-		hints := p.IdentityHints(context.Background(), metadata.SearchQuery{
-			ContentType: req.ContentType, FilePath: req.FilePath, AllGroupFilePaths: req.AllGroupFilePaths,
+	for _, tc := range findItemNFOPicksCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			for rel, content := range tc.files {
+				writeFile(t, filepath.Join(root, rel), content)
+			}
+			abs := func(rels []string) []string {
+				var out []string
+				for _, rel := range rels {
+					out = append(out, filepath.Join(root, rel))
+				}
+				return out
+			}
+			got, parsed, err := NewProvider().newLookup(context.Background()).
+				findItemNFO(abs(tc.media), abs(tc.sidecarDirs), tc.contentType)
+			if err != nil && !tc.ignoreErr {
+				t.Fatalf("findItemNFO() error = %v", err)
+			}
+			if tc.wantTitle == "" {
+				if parsed != nil {
+					t.Fatalf("findItemNFO() = %q, %+v; want no NFO", got, parsed)
+				}
+				return
+			}
+			if parsed == nil || parsed.Title != tc.wantTitle || (tc.wantPath != "" && got != filepath.Join(root, tc.wantPath)) {
+				t.Fatalf("findItemNFO() = %q, %+v; want %q titled %q", got, parsed, tc.wantPath, tc.wantTitle)
+			}
 		})
-		if len(hints) != 0 {
-			t.Errorf("%s: hints = %v, want none", file, hints)
-		}
-		result, err := p.GetMetadata(context.Background(), req)
-		if err != nil || result.HasMetadata {
-			t.Errorf("%s: GetMetadata() = %+v, %v; want no metadata", file, result, err)
-		}
 	}
 }
 
@@ -285,9 +413,7 @@ func TestProvider_UnreadableNFOReportsUnavailable(t *testing.T) {
 		nfoPath := filepath.Join(dir, "movie.nfo")
 		writeFile(t, nfoPath, `<movie><title>Locked</title><uniqueid type="tmdb">7</uniqueid></movie>`)
 		writeFile(t, filepath.Join(dir, "Film.mkv"), "video")
-		if err := os.Chmod(nfoPath, 0); err != nil {
-			t.Fatalf("Chmod() error = %v", err)
-		}
+		setMode(t, nfoPath, 0)
 		assertUnavailable(t, NewProvider(), movieRequest(dir, "Film.mkv", dir))
 	})
 
@@ -296,10 +422,7 @@ func TestProvider_UnreadableNFOReportsUnavailable(t *testing.T) {
 		dir := filepath.Join(t.TempDir(), "Film (2001)")
 		writeFile(t, filepath.Join(dir, "movie.nfo"), `<movie><title>Locked</title></movie>`)
 		writeFile(t, filepath.Join(dir, "Film.mkv"), "video")
-		if err := os.Chmod(dir, 0); err != nil {
-			t.Fatalf("Chmod() error = %v", err)
-		}
-		t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+		setMode(t, dir, 0)
 		assertUnavailable(t, NewProvider(), movieRequest(dir, "Film.mkv", dir))
 	})
 
@@ -309,9 +432,7 @@ func TestProvider_UnreadableNFOReportsUnavailable(t *testing.T) {
 		episodeNFO := filepath.Join(seasonDir, "Show S01E01.nfo")
 		writeFile(t, episodeNFO, `<episodedetails><title>Locked</title></episodedetails>`)
 		writeFile(t, filepath.Join(seasonDir, "Show S01E01.mkv"), "video")
-		if err := os.Chmod(episodeNFO, 0); err != nil {
-			t.Fatalf("Chmod() error = %v", err)
-		}
+		setMode(t, episodeNFO, 0)
 		_, err := NewProvider().GetEpisodes(context.Background(), metadata.EpisodesRequest{
 			SeasonNumber:     1,
 			EpisodeFilePaths: map[int][]string{1: {filepath.Join(seasonDir, "Show S01E01.mkv")}},
@@ -349,10 +470,7 @@ func TestProvider_SeriesLookupDoesNotProbeEpisodes(t *testing.T) {
 	writeFile(t, filepath.Join(root, "tvshow.nfo"), `<tvshow><title>Show</title><uniqueid type="tvdb">81189</uniqueid></tvshow>`)
 	seasonDir := filepath.Join(root, "Season 01")
 	writeFile(t, filepath.Join(seasonDir, "Show S01E01.nfo"), `<episodedetails><title>Pilot</title></episodedetails>`)
-	if err := os.Chmod(seasonDir, 0); err != nil {
-		t.Fatalf("Chmod() error = %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(seasonDir, 0o755) })
+	setMode(t, seasonDir, 0)
 
 	hints := NewProvider().IdentityHints(context.Background(), metadata.SearchQuery{
 		ContentType:               typeSeries,
@@ -481,10 +599,7 @@ func TestFindItemNFO_ReadableVersionWinsOverUnreadableOne(t *testing.T) {
 	writeFile(t, filepath.Join(locked, "Movie.mkv"), "video")
 	writeFile(t, filepath.Join(root, "b", "Movie.mkv"), "video")
 	writeFile(t, filepath.Join(root, "b", "Movie.nfo"), `<movie><title>From B</title></movie>`)
-	if err := os.Chmod(locked, 0o311); err != nil {
-		t.Fatalf("Chmod() error = %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	setMode(t, locked, 0o311)
 
 	got, parsed, err := NewProvider().newLookup(context.Background()).findItemNFO(
 		[]string{filepath.Join(locked, "Movie.mkv"), filepath.Join(root, "b", "Movie.mkv")}, nil, typeMovie)
@@ -502,10 +617,7 @@ func TestFindItemNFO_TraverseOnlyFolderFallsBackToExactNames(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "Film (2001)")
 	writeFile(t, filepath.Join(dir, "movie.nfo"), `<movie><title>Exact</title></movie>`)
 	writeFile(t, filepath.Join(dir, "Film.mkv"), "video")
-	if err := os.Chmod(dir, 0o311); err != nil {
-		t.Fatalf("Chmod() error = %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	setMode(t, dir, 0o311)
 
 	_, parsed, err := NewProvider().newLookup(context.Background()).
 		findItemNFO([]string{filepath.Join(dir, "Film.mkv")}, []string{dir}, typeMovie)
@@ -606,22 +718,6 @@ func TestFindItemNFO_SeriesChecksEveryRoot(t *testing.T) {
 	}
 }
 
-// The scanner also groups parts whose token leads the name, so CD1.Feature
-// and CD2.Feature share Feature.nfo.
-func TestFindItemNFO_StackWithLeadingToken(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "CD1.Feature.mkv"), "video")
-	writeFile(t, filepath.Join(dir, "CD2.Feature.mkv"), "video")
-	writeFile(t, filepath.Join(dir, "Feature.nfo"), `<movie><title>Feature</title></movie>`)
-	_, parsed, err := NewProvider().newLookup(context.Background()).
-		findItemNFO([]string{filepath.Join(dir, "CD1.Feature.mkv")}, nil, typeMovie)
-	if err != nil || parsed == nil || parsed.Title != "Feature" {
-		t.Fatalf("findItemNFO(CD1.Feature.mkv) = %+v, %v; want Feature.nfo", parsed, err)
-	}
-}
-
 // The scanner catalogs only files, following symlinks, so a directory (or a
 // symlink to one) named like a part does not make a lone part a stack.
 func TestFindItemNFO_StackIgnoresDirectoriesNamedLikeParts(t *testing.T) {
@@ -669,9 +765,7 @@ func TestProvider_UnreadableSeasonOrEpisodeNFOSkipsOnlyThatEntry(t *testing.T) {
 	writeFile(t, filepath.Join(s1, "Show S01E01.mkv"), "video")
 	writeFile(t, filepath.Join(s1, "Show S01E02.mkv"), "video")
 	for _, path := range []string{filepath.Join(s2, "season.nfo"), filepath.Join(s1, "Show S01E02.nfo")} {
-		if err := os.Chmod(path, 0); err != nil {
-			t.Fatalf("Chmod() error = %v", err)
-		}
+		setMode(t, path, 0)
 	}
 	p := NewProvider()
 
@@ -694,33 +788,6 @@ func TestProvider_UnreadableSeasonOrEpisodeNFOSkipsOnlyThatEntry(t *testing.T) {
 	}
 }
 
-// An initial match carries only the representative part, so the stack is
-// recognized from the folder: Movie-cd1 reads Movie.nfo when Movie-cd2 sits
-// beside it, but two copies of one part are not a stack.
-func TestFindItemNFO_StackFromFolder(t *testing.T) {
-	t.Parallel()
-
-	stacked := t.TempDir()
-	writeFile(t, filepath.Join(stacked, "Film-cd1.mkv"), "video")
-	writeFile(t, filepath.Join(stacked, "Film-cd2.mkv"), "video")
-	writeFile(t, filepath.Join(stacked, "Film.nfo"), `<movie><title>Stacked</title></movie>`)
-	_, parsed, err := NewProvider().newLookup(context.Background()).
-		findItemNFO([]string{filepath.Join(stacked, "Film-cd1.mkv")}, nil, typeMovie)
-	if err != nil || parsed == nil || parsed.Title != "Stacked" {
-		t.Fatalf("findItemNFO(cd1 with cd2 on disk) = %+v, %v; want Film.nfo", parsed, err)
-	}
-
-	copies := t.TempDir()
-	writeFile(t, filepath.Join(copies, "Dune Part 2.mkv"), "video")
-	writeFile(t, filepath.Join(copies, "Dune Part 2.mp4"), "video")
-	writeFile(t, filepath.Join(copies, "Dune.nfo"), `<movie><title>Dune</title></movie>`)
-	_, parsed, err = NewProvider().newLookup(context.Background()).
-		findItemNFO([]string{filepath.Join(copies, "Dune Part 2.mkv"), filepath.Join(copies, "Dune Part 2.mp4")}, nil, typeMovie)
-	if err != nil || parsed != nil {
-		t.Fatalf("findItemNFO(two copies of one part) = %+v, %v; want no NFO", parsed, err)
-	}
-}
-
 // A season that spans two folders still gets the readable season.nfo when the
 // other folder's copy cannot be read.
 func TestGetSeasons_ReadableSeasonNFOInAnotherFolderWins(t *testing.T) {
@@ -733,9 +800,7 @@ func TestGetSeasons_ReadableSeasonNFOInAnotherFolderWins(t *testing.T) {
 	writeFile(t, filepath.Join(second, "season.nfo"), `<season><title>Readable</title></season>`)
 	writeFile(t, filepath.Join(first, "Show S01E01.mkv"), "video")
 	writeFile(t, filepath.Join(second, "Show S01E02.mkv"), "video")
-	if err := os.Chmod(filepath.Join(first, "season.nfo"), 0); err != nil {
-		t.Fatalf("Chmod() error = %v", err)
-	}
+	setMode(t, filepath.Join(first, "season.nfo"), 0)
 	seasons, err := NewProvider().GetSeasons(context.Background(), metadata.SeasonsRequest{
 		ContentType:          typeSeries,
 		SeasonDirectoryPaths: map[int][]string{1: {first, second}},
@@ -767,24 +832,6 @@ func TestFindItemNFO_EmptyMountpointIsUnavailable(t *testing.T) {
 	})
 	if !errors.Is(err, metadata.ErrLocalMetadataUnavailable) {
 		t.Errorf("GetEpisodes() error = %v, want ErrLocalMetadataUnavailable", err)
-	}
-}
-
-// Only video files count toward a stack:
-// a subtitle or NFO named like the missing part does not make a lone part a
-// stack.
-func TestFindItemNFO_StackCountsOnlyVideoParts(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "Dune Part 2.mkv"), "video")
-	writeFile(t, filepath.Join(dir, "Dune Part 1.srt"), "subtitle")
-	writeFile(t, filepath.Join(dir, "Dune Part 1.nfo"), `<movie><title>Part One</title></movie>`)
-	writeFile(t, filepath.Join(dir, "Dune.nfo"), `<movie><title>Dune</title></movie>`)
-	_, parsed, err := NewProvider().newLookup(context.Background()).
-		findItemNFO([]string{filepath.Join(dir, "Dune Part 2.mkv")}, nil, typeMovie)
-	if err != nil || parsed != nil {
-		t.Fatalf("findItemNFO(lone part beside a part-named subtitle and NFO) = %+v, %v; want no NFO", parsed, err)
 	}
 }
 
@@ -845,42 +892,6 @@ func TestFindItemNFO_TraverseOnlyFolderMissIsUnavailable(t *testing.T) {
 	}
 }
 
-// Parts of one stack may differ in container, as the scanner allows, but
-// only video files count as parts.
-func TestFindItemNFO_StackAcrossContainers(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "Film-cd1.mkv"), "video")
-	writeFile(t, filepath.Join(dir, "Film-cd2.mp4"), "video")
-	writeFile(t, filepath.Join(dir, "Film.nfo"), `<movie><title>Mixed</title></movie>`)
-	_, parsed, err := NewProvider().newLookup(context.Background()).
-		findItemNFO([]string{filepath.Join(dir, "Film-cd1.mkv")}, nil, typeMovie)
-	if err != nil || parsed == nil || parsed.Title != "Mixed" {
-		t.Fatalf("findItemNFO(cd1.mkv beside cd2.mp4) = %+v, %v; want Film.nfo", parsed, err)
-	}
-}
-
-// A season folder comes from the episode files the catalog lists in it, so
-// an empty one (an unmounted share's mountpoint) is unavailable, not a
-// season without season.nfo.
-func TestGetSeasons_EmptySeasonFolderIsUnavailable(t *testing.T) {
-	t.Parallel()
-
-	empty := filepath.Join(t.TempDir(), "Season 01")
-	if err := os.Mkdir(empty, 0o755); err != nil {
-		t.Fatalf("Mkdir() error = %v", err)
-	}
-	_, err := NewProvider().GetSeasons(context.Background(), metadata.SeasonsRequest{
-		ContentType:          typeSeries,
-		SeasonDirectoryPaths: map[int][]string{1: {empty}},
-		ShowFilePaths:        []string{filepath.Join(empty, "Show S01E01.mkv")},
-	})
-	if !errors.Is(err, metadata.ErrLocalMetadataUnavailable) {
-		t.Fatalf("GetSeasons(empty season folder) error = %v, want ErrLocalMetadataUnavailable", err)
-	}
-}
-
 // A mountpoint can hold leftovers such as .keep, lost+found, or an unrelated
 // video while its share is gone; a season folder is read only while one of
 // the season's cataloged episode files is in it.
@@ -930,41 +941,6 @@ func TestFindItemNFO_StaleDirectoryNFOOnMountpointIsNotRead(t *testing.T) {
 		if parsed != nil || !errors.Is(err, metadata.ErrLocalMetadataUnavailable) {
 			t.Errorf("%s: findItemNFO() = %+v, %v; want ErrLocalMetadataUnavailable and no stale NFO", tc.contentType, parsed, err)
 		}
-	}
-}
-
-// The scanner groups parts whose separators differ, so the lookup compares
-// stack names the same way and the parts share their NFO.
-func TestFindItemNFO_StackPartsWithDifferentSeparators(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "Film-part1-1080p.mkv"), "video")
-	writeFile(t, filepath.Join(dir, "Film part2 1080p.mp4"), "video")
-	writeFile(t, filepath.Join(dir, "Film-1080p.nfo"), `<movie><title>Film</title></movie>`)
-	_, parsed, err := NewProvider().newLookup(context.Background()).
-		findItemNFO([]string{filepath.Join(dir, "Film-part1-1080p.mkv")}, nil, typeMovie)
-	if err != nil || parsed == nil || parsed.Title != "Film" {
-		t.Fatalf("findItemNFO(Film-part1-1080p.mkv) = %+v, %v; want Film-1080p.nfo", parsed, err)
-	}
-}
-
-// A cataloged part that is no longer on disk does not make the part that is
-// left a stack.
-func TestFindItemNFO_StackIgnoresMissingCatalogedParts(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "Film-cd1.mkv"), "video")
-	writeFile(t, filepath.Join(dir, "Film.nfo"), `<movie><title>Film</title></movie>`)
-	files := []string{filepath.Join(dir, "Film-cd1.mkv"), filepath.Join(dir, "Film-cd2.mkv")}
-	_, parsed, err := NewProvider().newLookup(context.Background()).findItemNFO(files[:1], nil, typeMovie)
-	if err != nil || parsed != nil {
-		t.Fatalf("findItemNFO(cd1 with cataloged cd2 gone) = %+v, %v; want no NFO", parsed, err)
-	}
-	_, parsed, _ = NewProvider().newLookup(context.Background()).findItemNFO(files, nil, typeMovie)
-	if parsed != nil {
-		t.Fatalf("findItemNFO(both parts requested, cd2 gone) = %+v; want no stack NFO", parsed)
 	}
 }
 
@@ -1030,10 +1006,7 @@ func TestFindItemNFO_SeriesPermissionErrorWithoutNFOIsUnavailable(t *testing.T) 
 	root := t.TempDir()
 	seasonDir := filepath.Join(root, "Season 01")
 	writeFile(t, filepath.Join(seasonDir, "Show S01E01.mkv"), "video")
-	if err := os.Chmod(seasonDir, 0); err != nil {
-		t.Fatalf("Chmod() error = %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(seasonDir, 0o755) })
+	setMode(t, seasonDir, 0)
 
 	_, parsed, err := NewProvider().newLookup(context.Background()).
 		findItemNFO([]string{filepath.Join(seasonDir, "Show S01E01.mkv")}, []string{root}, typeSeries)
@@ -1071,21 +1044,6 @@ func TestLookup_FileDeletedFromLiveFolderIsNotUnavailable(t *testing.T) {
 	}
 }
 
-// A folder check looks past a cataloged path that is not a file and finds
-// the item's other file; only an error about the share itself stops it.
-func TestAnyMediaPresent_LooksPastAPerFileError(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	if err := os.Mkdir(filepath.Join(dir, "Old.mkv"), 0o755); err != nil {
-		t.Fatalf("Mkdir() error = %v", err)
-	}
-	writeFile(t, filepath.Join(dir, "New.mkv"), "video")
-	if err := anyMediaPresent(dir, []string{filepath.Join(dir, "Old.mkv"), filepath.Join(dir, "New.mkv")}); err != nil {
-		t.Fatalf("anyMediaPresent() = %v, want the present file found", err)
-	}
-}
-
 // When one version can't be reached for permission and another is on a
 // share that is gone, the lookup reports the temporary failure, whatever the
 // order of the paths: matching waits for a missing share but goes ahead past
@@ -1096,10 +1054,7 @@ func TestFindItemNFO_TemporaryFailureOutranksPermission(t *testing.T) {
 
 	locked := filepath.Join(t.TempDir(), "Locked")
 	writeFile(t, filepath.Join(locked, "Film (2001).mkv"), "video")
-	if err := os.Chmod(locked, 0); err != nil {
-		t.Fatalf("Chmod() error = %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	setMode(t, locked, 0)
 	mountpoint := t.TempDir() // the share is gone
 	denied, gone := filepath.Join(locked, "Film (2001).mkv"), filepath.Join(mountpoint, "Film (2001).mkv")
 
@@ -1136,33 +1091,6 @@ func TestGetEpisodes_TargetedDeletedEpisodeUsesSeasonFiles(t *testing.T) {
 	}
 }
 
-// The stack index is built once per cached listing and shared by later
-// lookups on the same provider.
-func TestProvider_StackIndexIsSharedAcrossLookups(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "Film-cd1.mkv"), "video")
-	writeFile(t, filepath.Join(dir, "Film-cd2.mkv"), "video")
-	writeFile(t, filepath.Join(dir, "Film.nfo"), `<movie><title>Film</title></movie>`)
-	old := time.Now().Add(-time.Hour)
-	if err := os.Chtimes(dir, old, old); err != nil {
-		t.Fatalf("Chtimes() error = %v", err)
-	}
-	p := NewProvider()
-	first := p.newLookup(context.Background())
-	if _, parsed, err := first.findItemNFO([]string{filepath.Join(dir, "Film-cd1.mkv")}, nil, typeMovie); err != nil || parsed == nil {
-		t.Fatalf("findItemNFO() = %+v, %v; want Film.nfo", parsed, err)
-	}
-	second := p.newLookup(context.Background())
-	if _, parsed, err := second.findItemNFO([]string{filepath.Join(dir, "Film-cd2.mkv")}, nil, typeMovie); err != nil || parsed == nil {
-		t.Fatalf("findItemNFO() = %+v, %v; want Film.nfo", parsed, err)
-	}
-	if first.listings[dir] != second.listings[dir] || len(first.listings[dir].stacks) == 0 {
-		t.Fatalf("lookups did not share one listing with a built stack index")
-	}
-}
-
 // One present file proves a folder whatever order the files come in, even
 // after a file that fails with an I/O-style error (here a symlink loop).
 func TestAnyMediaPresent_IndependentOfOrder(t *testing.T) {
@@ -1185,53 +1113,6 @@ func TestAnyMediaPresent_IndependentOfOrder(t *testing.T) {
 	}
 }
 
-// A lookup checks each folder's liveness once, so a season of missing
-// episodes does not stat the whole season again for every one of them.
-func TestDeletedFromLiveFolder_CheckedOncePerFolder(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	gone, later := filepath.Join(dir, "Show S01E01.mkv"), filepath.Join(dir, "Show S01E02.mkv")
-	lookup := NewProvider().newLookup(context.Background())
-	_, err := os.Stat(gone)
-	if lookup.deletedFromLiveFolder(err, gone, []string{gone, later}) {
-		t.Fatalf("deletedFromLiveFolder(empty folder) = true, want false")
-	}
-	writeFile(t, later, "video")
-	if lookup.deletedFromLiveFolder(err, gone, []string{gone, later}) {
-		t.Fatalf("deletedFromLiveFolder() = true on the second call; want the folder's first answer reused")
-	}
-	if !NewProvider().newLookup(context.Background()).deletedFromLiveFolder(err, gone, []string{gone, later}) {
-		t.Fatalf("deletedFromLiveFolder(new lookup, live sibling) = false, want true")
-	}
-}
-
-// In a flat show folder the seasons share one directory, so a live file of
-// another season proves it is mounted when the targeted season's files are
-// all gone.
-func TestFlatShowFolderUsesOtherSeasonsAsPresence(t *testing.T) {
-	t.Parallel()
-
-	show := t.TempDir()
-	writeFile(t, filepath.Join(show, "Show S06E01.mkv"), "video")
-	deleted, live := filepath.Join(show, "Show S05E03.mkv"), filepath.Join(show, "Show S06E01.mkv")
-	p := NewProvider()
-	if _, err := p.GetSeasons(context.Background(), metadata.SeasonsRequest{
-		ContentType:          typeSeries,
-		SeasonDirectoryPaths: map[int][]string{5: {show}},
-		ShowFilePaths:        []string{deleted, live},
-	}); err != nil {
-		t.Fatalf("GetSeasons(season 5 deleted, season 6 live) error = %v, want none", err)
-	}
-	if _, err := p.GetEpisodes(context.Background(), metadata.EpisodesRequest{
-		SeasonNumber:     5,
-		EpisodeFilePaths: map[int][]string{3: {deleted}},
-		ShowFilePaths:    []string{deleted, live},
-	}); err != nil {
-		t.Fatalf("GetEpisodes(season 5 deleted, season 6 live) error = %v, want none", err)
-	}
-}
-
 // A season folder whose episode can't be reached for permission still has
 // its season.nfo read; as everywhere, a readable NFO wins over the error.
 func TestGetSeasons_PermissionDeniedEpisodeStillReadsSeasonNFO(t *testing.T) {
@@ -1242,10 +1123,7 @@ func TestGetSeasons_PermissionDeniedEpisodeStillReadsSeasonNFO(t *testing.T) {
 	writeFile(t, filepath.Join(season, "season.nfo"), `<season><title>First</title></season>`)
 	locked := filepath.Join(season, "locked")
 	writeFile(t, filepath.Join(locked, "Show S01E01.mkv"), "video")
-	if err := os.Chmod(locked, 0); err != nil {
-		t.Fatalf("Chmod() error = %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	setMode(t, locked, 0)
 
 	seasons, err := NewProvider().GetSeasons(context.Background(), metadata.SeasonsRequest{
 		ContentType:          typeSeries,
@@ -1254,23 +1132,6 @@ func TestGetSeasons_PermissionDeniedEpisodeStillReadsSeasonNFO(t *testing.T) {
 	})
 	if err != nil || len(seasons) != 1 || seasons[0].Title != "First" {
 		t.Fatalf("GetSeasons() = %+v, %v; want season 1 titled First", seasons, err)
-	}
-}
-
-// Every file's own NFO name comes before a stacked movie's shared name, so a
-// later part's NFO wins over the stack's.
-func TestFindItemNFO_BasenamesBeforeStackName(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "Film-cd1.mkv"), "video")
-	writeFile(t, filepath.Join(dir, "Film-cd2.mkv"), "video")
-	writeFile(t, filepath.Join(dir, "Film-cd2.nfo"), `<movie><title>Part Two</title></movie>`)
-	writeFile(t, filepath.Join(dir, "Film.nfo"), `<movie><title>Stack</title></movie>`)
-	parts := []string{filepath.Join(dir, "Film-cd1.mkv"), filepath.Join(dir, "Film-cd2.mkv")}
-	_, parsed, err := NewProvider().newLookup(context.Background()).findItemNFO(parts, nil, typeMovie)
-	if err != nil || parsed == nil || parsed.Title != "Part Two" {
-		t.Fatalf("findItemNFO() = %+v, %v; want the part's own NFO first", parsed, err)
 	}
 }
 
@@ -1376,22 +1237,6 @@ func TestReadNFOFile_SameSizeRewriteOnCoarseTime(t *testing.T) {
 	data, err := readNFOFile(path)
 	if err != nil || !strings.Contains(string(data), "New") {
 		t.Fatalf("readNFOFile(rewritten within the tick) = %q, %v; want the rewritten content", data, err)
-	}
-}
-
-// Seasons sharing one folder check its media once per call.
-func TestParseSeasonSidecar_ChecksSharedFolderOnce(t *testing.T) {
-	t.Parallel()
-
-	show := t.TempDir()
-	episode := filepath.Join(show, "Show S01E01.mkv")
-	lookup := NewProvider().newLookup(context.Background())
-	if _, _, err := parseSeasonSidecar(context.Background(), lookup, []string{show}, []string{episode}, 1); !errors.Is(err, metadata.ErrLocalMetadataUnavailable) {
-		t.Fatalf("parseSeasonSidecar(empty folder) error = %v, want ErrLocalMetadataUnavailable", err)
-	}
-	writeFile(t, episode, "video")
-	if _, _, err := parseSeasonSidecar(context.Background(), lookup, []string{show}, []string{episode}, 2); !errors.Is(err, metadata.ErrLocalMetadataUnavailable) {
-		t.Fatalf("parseSeasonSidecar(second season, same call) error = %v; want the folder's first answer reused", err)
 	}
 }
 

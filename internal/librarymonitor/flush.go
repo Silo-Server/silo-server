@@ -114,7 +114,7 @@ func (m *Monitor) resolve(ctx context.Context, r Resolver, c change) (*scantrigg
 	case changeFile, changeDir:
 		return r.Resolve(ctx, scantrigger.Request{Path: c.path, Trigger: Trigger, SidecarFolder: true})
 	case changeVanishedFile:
-		return r.ResolveVanishedPath(ctx, c.path, Trigger)
+		return r.ResolveVanishedFile(ctx, c.path, Trigger)
 	case changeVanishedDir:
 		return r.ResolveMissingSubtree(ctx, c.path, Trigger)
 	default:

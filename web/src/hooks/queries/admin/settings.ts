@@ -27,7 +27,10 @@ import type {
   JellyfinCompatWebInstallRequest,
 } from "@/api/types";
 import { adminKeys, compatKeys, settingsKeys, themeKeys } from "../keys";
+import { invalidateAdminDefaultQueries } from "../settingValues";
+import { adminDefaultSettingFor } from "@/lib/settingsAdminDefaults";
 import { toast } from "sonner";
+import { t, type MessageKey } from "@/i18n";
 
 /**
  * server_settings keys surfaced by GET /settings/overlay-config, in the order
@@ -43,6 +46,22 @@ export const OVERLAY_CONFIG_SERVER_KEYS = [
 
 function affectsOverlayConfig(key: string) {
   return (OVERLAY_CONFIG_SERVER_KEYS as readonly string[]).includes(key);
+}
+
+function invalidateAdminDefaults(
+  queryClient: ReturnType<typeof useQueryClient>,
+  serverSettingKeys: string[],
+) {
+  return serverSettingKeys.flatMap((serverSettingKey) => {
+    const key = adminDefaultSettingFor(serverSettingKey);
+    return key ? [invalidateAdminDefaultQueries(queryClient, key)] : [];
+  });
+}
+
+// Connect Apps connect-info reads the compat settings and, for
+// password_login_available, the server-wide local password switch.
+function affectsConnectInfo(key: string) {
+  return key.startsWith("jellyfin_compat.") || key === "auth.local_password_login";
 }
 
 /* eslint-disable react-hooks/refs -- baseline capture must observe authority synchronously. */
@@ -242,10 +261,12 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
       if (keys.some((key) => key.startsWith("jellyfin_compat."))) {
         invalidations.push(
           queryClient.invalidateQueries({ queryKey: adminKeys.jellyfinCompatStatus() }),
-          // The user-facing Connect Apps card reads the same settings and
-          // caches them for minutes, so it has to drop its copy too.
-          queryClient.invalidateQueries({ queryKey: compatKeys.all }),
         );
+      }
+      if (keys.some(affectsConnectInfo)) {
+        // The user-facing Connect Apps card reads the same settings and
+        // caches them for minutes, so it has to drop its copy too.
+        invalidations.push(queryClient.invalidateQueries({ queryKey: compatKeys.all }));
       }
       if (keys.includes("server.public_url")) {
         // Invitation and reset links are built on the public URL, so the
@@ -272,12 +293,15 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
           queryClient.invalidateQueries({ queryKey: settingsKeys.overlayConfig() }),
         );
       }
+      invalidations.push(...invalidateAdminDefaults(queryClient, keys));
       await Promise.all(invalidations);
       if (isCapturedProfileAuthorityActive(profileContext)) retained.reset();
     },
     onError: (err, intent) => {
       if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
-      toast.error(err instanceof Error ? err.message : "Failed to update settings");
+      toast.error(
+        err instanceof Error ? err.message : t("web.admin.settings.hooks.settings.updateFailed"),
+      );
     },
   });
   const capture = (values: SettingsValues) => ({
@@ -300,7 +324,11 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
           },
         });
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Reload settings before saving.");
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : t("web.admin.settings.hooks.settings.reloadBeforeSaving"),
+        );
       }
     },
     mutateAsync: async (values: SettingsValues) => {
@@ -308,7 +336,11 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
       try {
         intent = capture(values);
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Reload settings before saving.");
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : t("web.admin.settings.hooks.settings.reloadBeforeSaving"),
+        );
         throw error;
       }
       const result = await mutation.mutateAsync(intent);
@@ -363,6 +395,9 @@ export function useUpdateServerSetting(displayed?: SettingsValues) {
           queryClient.invalidateQueries({ queryKey: adminKeys.jellyfinCompatStatus() }),
         );
       }
+      if (affectsConnectInfo(variables.key)) {
+        invalidations.push(queryClient.invalidateQueries({ queryKey: compatKeys.all }));
+      }
       if (variables.key.startsWith("catalog.search.")) {
         invalidations.push(
           queryClient.invalidateQueries({ queryKey: adminKeys.catalogSearchStatus() }),
@@ -379,12 +414,15 @@ export function useUpdateServerSetting(displayed?: SettingsValues) {
           queryClient.invalidateQueries({ queryKey: settingsKeys.overlayConfig() }),
         );
       }
+      invalidations.push(...invalidateAdminDefaults(queryClient, [variables.key]));
       await Promise.all(invalidations);
       if (isCapturedProfileAuthorityActive(variables.profileContext)) retained.reset();
     },
     onError: (err, intent) => {
       if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
-      toast.error(err instanceof Error ? err.message : "Failed to update setting");
+      toast.error(
+        err instanceof Error ? err.message : t("web.admin.settings.hooks.settings.updateOneFailed"),
+      );
     },
   });
   const capture = (values: { key: string; value: string }) => ({
@@ -409,7 +447,11 @@ export function useUpdateServerSetting(displayed?: SettingsValues) {
           },
         });
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Reload settings before saving.");
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : t("web.admin.settings.hooks.settings.reloadBeforeSaving"),
+        );
       }
     },
     mutateAsync: async (values: { key: string; value: string }) => {
@@ -505,7 +547,11 @@ export function useUpdateJellyfinCompatSettings() {
     },
     onError: (err, intent) => {
       if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
-      toast.error(err instanceof Error ? err.message : "Failed to update Jellyfin compatibility");
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : t("web.admin.settings.hooks.settings.jellyfinCompat.updateFailed"),
+      );
     },
   });
   const capture = (body: JellyfinCompatSettingsPatch) => ({
@@ -519,7 +565,11 @@ export function useUpdateJellyfinCompatSettings() {
       try {
         mutation.mutate(capture(body));
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Reload settings before saving.");
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : t("web.admin.settings.hooks.settings.reloadBeforeSaving"),
+        );
       }
     },
     mutateAsync: async (body: JellyfinCompatSettingsPatch) => {
@@ -549,7 +599,11 @@ function jellyfinWebIntent(body: JellyfinCompatWebInstallRequest = {}): Jellyfin
 function jellyfinWebAuthorityActive(intent: JellyfinWebIntent): boolean {
   return intent.profileContext !== null && isCapturedProfileAuthorityActive(intent.profileContext);
 }
-function useJellyfinWebCommand(kind: "install" | "remove", started: string, failed: string) {
+function useJellyfinWebCommand(
+  kind: "install" | "remove",
+  started: MessageKey,
+  failed: MessageKey,
+) {
   const queryClient = useQueryClient();
   return useMutation({
     retry: false,
@@ -574,7 +628,7 @@ function useJellyfinWebCommand(kind: "install" | "remove", started: string, fail
     },
     onSuccess: async (_result, intent) => {
       if (!intent.profileContext || !jellyfinWebAuthorityActive(intent)) return;
-      toast.success(started);
+      toast.success(t(started));
       await Promise.all([
         queryClient.invalidateQueries({
           queryKey: jellyfinCompatStatusKey(intent.profileContext),
@@ -586,7 +640,7 @@ function useJellyfinWebCommand(kind: "install" | "remove", started: string, fail
     },
     onError: (err, intent) => {
       if (!jellyfinWebAuthorityActive(intent)) return;
-      toast.error(err instanceof Error ? err.message : failed);
+      toast.error(err instanceof Error ? err.message : t(failed));
     },
   });
 }
@@ -594,8 +648,8 @@ function useJellyfinWebCommand(kind: "install" | "remove", started: string, fail
 export function useInstallJellyfinCompatWeb() {
   const mutation = useJellyfinWebCommand(
     "install",
-    "Jellyfin Web install started",
-    "Failed to install Jellyfin Web assets",
+    "web.admin.settings.hooks.settings.jellyfinWeb.installStarted",
+    "web.admin.settings.hooks.settings.jellyfinWeb.installFailed",
   );
   return {
     ...mutation,
@@ -610,8 +664,8 @@ export function useInstallJellyfinCompatWeb() {
 export function useRemoveJellyfinCompatWeb() {
   const mutation = useJellyfinWebCommand(
     "remove",
-    "Jellyfin Web removal started",
-    "Failed to remove Jellyfin Web assets",
+    "web.admin.settings.hooks.settings.jellyfinWeb.removeStarted",
+    "web.admin.settings.hooks.settings.jellyfinWeb.removeFailed",
   );
   return {
     ...mutation,

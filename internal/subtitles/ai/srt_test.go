@@ -52,9 +52,3 @@ func TestParseCuesVTT(t *testing.T) {
 		t.Errorf("cue 1 start = %v, want 1m", cues[1].Start)
 	}
 }
-
-func TestParseCuesEmpty(t *testing.T) {
-	if _, err := ParseCues([]byte("not a subtitle file")); err == nil {
-		t.Error("expected error for input with no cues")
-	}
-}

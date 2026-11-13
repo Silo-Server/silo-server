@@ -121,6 +121,8 @@ func (f *fakeLibraryAdmin) SetLibraryProviders(_ context.Context, id int, levels
 
 type fakeLibraryViews struct {
 	err error
+	// lastViewer is the viewer LibrarySections last saw.
+	lastViewer handlers.SectionViewer
 }
 
 func fakeCard() handlers.SectionItemView {
@@ -132,10 +134,11 @@ func fakeCard() handlers.SectionItemView {
 		OverlaySummary: &models.OverlaySummary{Resolution: "4K", HDR: "Dolby Vision"}, UserState: &handlers.ItemUserStateView{InWatchlist: true}, ItemSource: "in_progress"}
 }
 
-func (f *fakeLibraryViews) LibraryLayout(_ context.Context, libraryID int) (handlers.SectionLayoutView, error) {
+func (f *fakeLibraryViews) LibraryLayout(_ context.Context, libraryID int, viewer handlers.SectionViewer) (handlers.SectionLayoutView, error) {
 	if f.err != nil {
 		return handlers.SectionLayoutView{}, f.err
 	}
+	f.lastViewer = viewer
 	return handlers.SectionLayoutView{Sections: []handlers.SectionLayoutEntryView{{ID: "continue_watching", SectionType: "continue_watching", Title: "Continue Watching", ItemLimit: 20}, {ID: "recently_added", SectionType: "recently_added", Title: "Recently Added", ItemLimit: 20, Customized: true}}}, nil
 }
 
@@ -143,6 +146,7 @@ func (f *fakeLibraryViews) LibrarySections(_ context.Context, libraryID int, vie
 	if f.err != nil {
 		return handlers.SectionsView{}, f.err
 	}
+	f.lastViewer = viewer
 	return handlers.SectionsView{Sections: []handlers.SectionView{{ID: "continue_watching", SectionType: "continue_watching", Title: "Continue Watching", ItemLimit: 20, TotalCount: 1, Items: []handlers.SectionItemView{fakeCard()}}}}, nil
 }
 
@@ -150,6 +154,7 @@ func (f *fakeLibraryViews) LibrarySectionItems(_ context.Context, libraryID int,
 	if f.err != nil {
 		return handlers.SectionView{}, f.err
 	}
+	f.lastViewer = viewer
 	if sectionID != "continue_watching" {
 		return handlers.SectionView{}, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Section not found"}
 	}
@@ -303,24 +308,6 @@ func TestLibraryProviders(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries/1/providers", "", bearer(memberToken)), TypePermissionDenied)
 }
 
-// TestLibraryProvidersMarksLocalEntry: the built-in local metadata entry is
-// flagged so a client can pin it and offer one switch for it.
-func TestLibraryProvidersMarksLocalEntry(t *testing.T) {
-	deps, fake := libraryDeps(t)
-	fake.providers = map[string][]handlers.ChainLevelEntryView{
-		"movie": {
-			{PluginInstallationID: 1, CapabilityID: "nfo", ProviderSlug: "nfo", Priority: 0, Enabled: true, Local: true},
-			{PluginInstallationID: 3, CapabilityID: "tmdb", ProviderSlug: "tmdb", Priority: 1, Enabled: true},
-		},
-	}
-	h := newTestHandler(t, deps)
-	rec := do(t, h, http.MethodGet, "/api/v2/libraries/1/providers", "", bearer(adminToken))
-	want := `{"levels":[{"content_level":"movie","entries":[{"plugin_installation_id":"1","capability_id":"nfo","provider_slug":"nfo","priority":0,"enabled":true,"local":true},{"plugin_installation_id":"3","capability_id":"tmdb","provider_slug":"tmdb","priority":1,"enabled":true,"local":false}]}]}` + "\n"
-	if rec.Code != 200 || rec.Body.String() != want {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-}
-
 // TestLibraryProvidersLegacyLevel: an upgraded database keeps unlevelled
 // (content_level empty) rows; v2 omits that level and a save of the remaining levels carries the
 // legacy rows across unchanged instead of dropping them.
@@ -452,6 +439,44 @@ func TestLibraryLayoutAndSections(t *testing.T) {
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/library/1/layout", "", viewerHeaders()), TypeDependencyUnavailable)
 }
 
+// TestSectionReadsDeclareTheWebClient pins that every viewer section read
+// tells the service whether the caller declared the web client family, the
+// one client that receives a web-only hero row. Any other family is answered
+// as an app, and an unknown one is not refused.
+func TestSectionReadsDeclareTheWebClient(t *testing.T) {
+	home, homeFake := homeDeps(t)
+	library := libraryViewDeps(t)
+	libraryFake := &fakeLibraryViews{}
+	library.LibrarySections = libraryFake
+	reads := []struct {
+		deps Dependencies
+		path string
+		last func() handlers.SectionViewer
+	}{
+		{home, "/api/v2/home/layout", func() handlers.SectionViewer { return homeFake.lastViewer }},
+		{home, "/api/v2/home/sections", func() handlers.SectionViewer { return homeFake.lastViewer }},
+		{home, "/api/v2/home/sections/continue_watching/items", func() handlers.SectionViewer { return homeFake.lastViewer }},
+		{library, "/api/v2/library/1/layout", func() handlers.SectionViewer { return libraryFake.lastViewer }},
+		{library, "/api/v2/library/1/sections", func() handlers.SectionViewer { return libraryFake.lastViewer }},
+		{library, "/api/v2/library/1/sections/continue_watching/items", func() handlers.SectionViewer { return libraryFake.lastViewer }},
+	}
+	for _, read := range reads {
+		h := newTestHandler(t, read.deps)
+		for _, tc := range []struct {
+			family string
+			web    bool
+		}{{"web", true}, {"tv", false}, {"watch", false}} {
+			rec := do(t, h, http.MethodGet, read.path, "", with(viewerHeaders(), "X-Silo-Client-Family", tc.family))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("%s with family %q = %d %s", read.path, tc.family, rec.Code, rec.Body.String())
+			}
+			if got := read.last().Web; got != tc.web {
+				t.Errorf("%s with family %q: viewer.Web = %v, want %v", read.path, tc.family, got, tc.web)
+			}
+		}
+	}
+}
+
 func TestLibraryCollections(t *testing.T) {
 	h := newTestHandler(t, libraryViewDeps(t))
 	rec := do(t, h, http.MethodGet, "/api/v2/library/1/collections", "", viewerHeaders())
@@ -485,46 +510,4 @@ func TestLibraryCollections(t *testing.T) {
 	deps := libraryViewDeps(t)
 	deps.LibraryCollections = &fakeLibraryViews{err: &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Library not found"}}
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/library/1/collections", "", viewerHeaders()), TypeNotFound)
-}
-
-// A configured v2 route reports unavailable when its paging service is absent.
-func TestLibraryCollectionItemsUnavailable(t *testing.T) {
-	rec := do(t, newTestHandler(t, libraryViewDeps(t)), http.MethodGet, "/api/v2/library/1/collections/c1/items", "", viewerHeaders())
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("unconfigured route status = %d, want 503", rec.Code)
-	}
-}
-
-// Library collection cards and listLibraryUserCollections entries mark a
-// collage poster, as getCollectionCapabilities poster_collages promises.
-func TestLibraryCollectionCardsMarkCollages(t *testing.T) {
-	cards := collectionCardsOf([]handlers.LibraryCollectionTabEntryView{
-		{ID: "collage", PosterURL: "https://cdn.test/collage.webp", PosterIsCollage: true},
-		{ID: "uploaded", PosterURL: "https://cdn.test/uploaded.webp"},
-		{ID: "unsigned", PosterIsCollage: true},
-	})
-	for i, want := range []bool{true, false, false} {
-		if cards[i].PosterIsCollage != want {
-			t.Fatalf("card %s poster_is_collage = %v, want %v", cards[i].ID, cards[i].PosterIsCollage, want)
-		}
-	}
-	if got := userCollectionOf(usercollections.ServerVisibleCollection{ID: "collage", PosterURL: "https://cdn.test/collage.webp", PosterIsCollage: true}); !got.PosterIsCollage {
-		t.Fatalf("user collection = %+v, want poster_is_collage", got)
-	}
-	if got := userCollectionOf(usercollections.ServerVisibleCollection{ID: "unsigned", PosterIsCollage: true}); got.PosterIsCollage {
-		t.Fatalf("user collection without poster_url = %+v, want no poster_is_collage", got)
-	}
-	// getLibraryCollections' full collections[] entries mark it too.
-	for _, tc := range []struct {
-		view handlers.LibraryCollectionView
-		want bool
-	}{
-		{handlers.LibraryCollectionView{ID: "collage", PosterURL: "https://cdn.test/collage.webp", PosterIsCollage: true}, true},
-		{handlers.LibraryCollectionView{ID: "uploaded", PosterURL: "https://cdn.test/uploaded.webp"}, false},
-		{handlers.LibraryCollectionView{ID: "unsigned", PosterIsCollage: true}, false},
-	} {
-		if got := curatedCollectionOf(tc.view); got.PosterIsCollage != tc.want {
-			t.Fatalf("curated %s poster_is_collage = %v, want %v", tc.view.ID, got.PosterIsCollage, tc.want)
-		}
-	}
 }

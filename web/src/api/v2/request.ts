@@ -22,6 +22,7 @@ import {
   type ProfileRequestContextSnapshot,
 } from "../client";
 import { API_READ_TIMEOUT_MS, startRequestDeadline } from "../requestDeadline";
+import { serverText } from "@/i18n";
 import { v2Operations } from "./operations";
 import { problemId } from "./problemId";
 import type { components, paths } from "./schema";
@@ -93,7 +94,12 @@ type QueryOf<Op> =
       : Q
     : never;
 
-type SessionHeader = "authorization" | "x-profile-id" | "x-profile-token" | "x-device-id";
+type SessionHeader =
+  | "authorization"
+  | "x-profile-id"
+  | "x-profile-token"
+  | "x-device-id"
+  | "x-silo-device-id";
 type CallerHeaders<H extends object> = {
   [Key in keyof H as Key extends string
     ? Lowercase<Key> extends SessionHeader
@@ -245,7 +251,23 @@ export type ProblemError = components["schemas"]["ProblemError"];
 
 export { problemId };
 
-/** A documented v2 error: the server answered with a Problem Details body. */
+/**
+ * A field error's text for display: `error.field.<code>` in a translated
+ * interface, else the server's `detail` exactly as sent.
+ */
+export function problemFieldDetail(error: ProblemError): string {
+  return serverText(`error.field.${error.code}`, undefined, error.detail);
+}
+
+/**
+ * A documented v2 error: the server answered with a Problem Details body.
+ * `message` is its text for display. In English it is the server's `detail`
+ * (or `title`). In a translated interface it is the catalog's text for the
+ * first field error's code (`error.field.<code>`), else for the problem type
+ * (`error.<type>`), else that same `detail`. It is fixed in the language of the
+ * moment the error arrived, and stays a plain data property so the error
+ * clones and logs like any other.
+ */
 export class V2ProblemError extends Error {
   readonly operationId: string;
   readonly problem: Problem;
@@ -266,7 +288,7 @@ export class V2ProblemError extends Error {
     currentETag: string | null = null,
     headers: Headers = new Headers(),
   ) {
-    super(problem.detail || problem.title);
+    super(problemText(problem));
     this.name = "V2ProblemError";
     this.operationId = operationId;
     this.problem = problem;
@@ -276,6 +298,27 @@ export class V2ProblemError extends Error {
     this.currentETag = currentETag;
     this.headers = headers;
   }
+}
+
+/** A problem's display text in the current language; see `V2ProblemError`. */
+function problemText(problem: Problem): string {
+  return problemDisplayText(problem, problem.detail || problem.title);
+}
+
+/**
+ * The display text for a problem body parsed outside `v2()` (the player's own
+ * fetches). `english` is what the caller shows today, always kept in English;
+ * a translated interface shows `error.field.<code>` of the first field error,
+ * then `error.<type>`, then `english`.
+ */
+export function problemDisplayText(
+  problem: { type?: unknown; errors?: { code?: unknown }[] },
+  english: string,
+): string {
+  const type = typeof problem.type === "string" ? problemId({ type: problem.type }) : "";
+  const text = type ? serverText(`error.${type}`, undefined, english) : english;
+  const code = problem.errors?.[0]?.code;
+  return typeof code === "string" ? serverText(`error.field.${code}`, undefined, text) : text;
 }
 
 /**

@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
 // MDBListRequestTimeout bounds one MDBList fetch when the base client sets no
@@ -140,6 +142,16 @@ const (
 // MDBListMaxEntries applies. rawURL may be the list page or its /json form and
 // is validated with CanonicalMDBListURL before any request is made.
 func FetchMDBListJSON[T any](ctx context.Context, client *http.Client, rawURL string, maxEntries int) ([]T, error) {
+	return FetchMDBListJSONQuery[T](ctx, client, rawURL, maxEntries, nil)
+}
+
+// MDBListIMDbPopularOrder asks the /json feed for the list in IMDb popularity
+// (MovieMeter) order, most popular first.
+var MDBListIMDbPopularOrder = url.Values{"sort": {"imdbpopular"}, "sortorder": {"asc"}}
+
+// FetchMDBListJSONQuery is FetchMDBListJSON with extra query parameters sent
+// on every page request, such as MDBListIMDbPopularOrder.
+func FetchMDBListJSONQuery[T any](ctx context.Context, client *http.Client, rawURL string, maxEntries int, extra url.Values) ([]T, error) {
 	listURL, err := CanonicalMDBListURL(rawURL)
 	if err != nil {
 		return nil, err
@@ -156,6 +168,9 @@ func FetchMDBListJSON[T any](ctx context.Context, client *http.Client, rawURL st
 	for len(entries) < maxEntries {
 		pageSize := min(mdblistJSONPageSize, maxEntries-len(entries))
 		query := parsed.Query()
+		for key, values := range extra {
+			query[key] = values
+		}
 		query.Set("limit", strconv.Itoa(pageSize))
 		query.Set("offset", strconv.Itoa(len(entries)))
 		parsed.RawQuery = query.Encode()
@@ -194,9 +209,33 @@ func fetchMDBListJSONPage[T any](ctx context.Context, client *http.Client, pageU
 	}
 	var page []T
 	if err := json.Unmarshal(body, &page); err != nil {
+		if msg := mdblistFeedError(body); msg != "" {
+			return nil, fmt.Errorf("mdblist: %s", msg)
+		}
 		return nil, fmt.Errorf("parsing mdblist response: %w", err)
 	}
 	return page, nil
+}
+
+// mdblistFeedErrorMaxRunes bounds the feed's own error text, which is stored
+// and shown as the sync message after secret assignments are masked.
+const mdblistFeedErrorMaxRunes = 200
+
+// mdblistFeedError returns the message of the {"error": "..."} object the
+// /json feed sends with status 200 in place of a list, such as "This List is
+// Private", or "" when body is not one.
+func mdblistFeedError(body []byte) string {
+	var feedErr struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal(body, &feedErr) != nil {
+		return ""
+	}
+	msg := logredact.RedactSecretAssignments(strings.TrimSpace(feedErr.Error))
+	if runes := []rune(msg); len(runes) > mdblistFeedErrorMaxRunes {
+		msg = string(runes[:mdblistFeedErrorMaxRunes])
+	}
+	return msg
 }
 
 // FetchMDBListWithFallback tries each candidate URL in order and returns the

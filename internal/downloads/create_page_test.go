@@ -66,6 +66,7 @@ func TestDownloadCreatePagesPostgres(t *testing.T) {
 	pager.rows = []*models.Episode{{ContentID: "special", SeasonNumber: 0, EpisodeNumber: 2}}
 	pager.more = false
 	files.rows = map[string][]*models.MediaFile{"special": {{ID: 42, ContentID: "series", EpisodeID: "special", FileSize: 10}}}
+	seedSchemaFiles(t, repo, files.rows["special"][0])
 	page, err = svc.CreateSeriesPage(t.Context(), 1, req, new(0), page.Next, 1, catalog.AccessFilter{})
 	if err != nil || len(page.Items) != 1 || page.Items[0].Status != StatusReady || page.Items[0].BatchID != "intent" || pager.after == nil {
 		t.Fatalf("managed %+v %v", page, err)
@@ -94,6 +95,7 @@ func TestDownloadCreatePagesPostgres(t *testing.T) {
 	}
 	// Single ephemeral registration uses the same policy and queued lifecycle.
 	files.single = &models.MediaFile{ID: 43, ContentID: "movie", FileSize: 12, Container: "mp4", CodecVideo: "h264", CodecAudio: "aac"}
+	seedSchemaFiles(t, repo, files.single)
 	single, err := svc.Create(t.Context(), 1, CreateRequest{ContentID: "movie", FileID: 43, StrictIdentity: true}, catalog.AccessFilter{})
 	if err != nil || single.DeviceID != "" || single.Status != StatusQueued || single.MediaFileID != 43 {
 		t.Fatalf("single ephemeral %+v %v", single, err)
@@ -112,5 +114,56 @@ func TestDownloadCreatePagesPostgres(t *testing.T) {
 	files.single = &models.MediaFile{ID: 42, ContentID: "other"}
 	if _, err := svc.Create(t.Context(), 1, CreateRequest{ContentID: "series", FileID: 42, StrictIdentity: true}, catalog.AccessFilter{}); !errors.Is(err, catalog.ErrItemNotFound) {
 		t.Fatal(err)
+	}
+}
+
+func TestSeriesPageFollowsTheVersionTemplatePostgres(t *testing.T) {
+	repo := NewRepository(subscriptionMutationTestRepo(t).pool)
+	pager := &createEpisodePager{rows: []*models.Episode{{ContentID: "ep-1", SeasonNumber: 1, EpisodeNumber: 1}, {ContentID: "ep-2", SeasonNumber: 1, EpisodeNumber: 2}}}
+	uhd := func(id int, ep string) *models.MediaFile {
+		return &models.MediaFile{ID: id, ContentID: "series", EpisodeID: ep, Resolution: "2160p", HDR: true, CodecVideo: "hevc", FileSize: 20}
+	}
+	hd := func(id int, ep string) *models.MediaFile {
+		return &models.MediaFile{ID: id, ContentID: "series", EpisodeID: ep, Resolution: "1080p", CodecVideo: "h264", FileSize: 10}
+	}
+	template := hd(11, "ep-1")
+	files := &createFileResolver{rows: map[string][]*models.MediaFile{"ep-1": {uhd(10, "ep-1"), template}, "ep-2": {uhd(20, "ep-2"), hd(21, "ep-2")}}, single: template}
+	for _, episodeFiles := range files.rows {
+		seedSchemaFiles(t, repo, episodeFiles...)
+	}
+	svc := NewService(repo, nil, nil, files, createItemResolver{}, pager, fakeUserRepo{&models.User{ID: 1, DownloadAllowed: new(true)}}, &syncAccess{}, nil, &config.DownloadConfig{Enabled: true})
+	req := CreateRequest{ContentID: "series", ProfileID: "profile", BatchID: "intent", StrictIdentity: true}
+
+	// Without a template the batch takes the highest resolution.
+	page, err := svc.CreateSeriesPage(t.Context(), 1, req, new(1), nil, 10, catalog.AccessFilter{})
+	if err != nil || len(page.Items) != 2 || page.Items[0].MediaFileID != 10 || page.Items[1].MediaFileID != 20 {
+		t.Fatalf("default %+v %v", page.Items, err)
+	}
+	// With the 1080p SDR file of episode 1 as the template, every episode
+	// takes its own 1080p SDR version.
+	req.BatchID = "templated"
+	req.VersionTemplateFileID = 11
+	page, err = svc.CreateSeriesPage(t.Context(), 1, req, new(1), nil, 10, catalog.AccessFilter{})
+	if err != nil || len(page.Items) != 2 || page.Items[0].MediaFileID != 11 || page.Items[1].MediaFileID != 21 {
+		t.Fatalf("template %+v %v", page.Items, err)
+	}
+}
+
+func TestSeriesPageRejectsAVersionTemplateFromAnotherSeries(t *testing.T) {
+	for name, template := range map[string]*models.MediaFile{
+		"other series":       {ID: 11, ContentID: "other", EpisodeID: "ep-x"},
+		"movie file":         {ID: 11, ContentID: "series"},
+		"unreadable library": {ID: 11, ContentID: "series", EpisodeID: "ep-1", MediaFolderID: 2},
+	} {
+		t.Run(name, func(t *testing.T) {
+			pager := &createEpisodePager{rows: []*models.Episode{{ContentID: "ep-1", SeasonNumber: 1, EpisodeNumber: 1}}}
+			files := &createFileResolver{rows: map[string][]*models.MediaFile{"ep-1": {{ID: 10, ContentID: "series", EpisodeID: "ep-1"}}}, single: template}
+			svc := NewService(nil, nil, nil, files, createItemResolver{}, pager, fakeUserRepo{&models.User{ID: 1, DownloadAllowed: new(true)}}, &syncAccess{}, nil, &config.DownloadConfig{Enabled: true})
+			req := CreateRequest{ContentID: "series", ProfileID: "profile", BatchID: "intent", StrictIdentity: true, VersionTemplateFileID: 11}
+			filter := catalog.AccessFilter{AllowedLibraryIDs: []int{0, 1}}
+			if _, err := svc.CreateSeriesPage(t.Context(), 1, req, new(1), nil, 10, filter); !errors.Is(err, catalog.ErrItemNotFound) {
+				t.Fatalf("err = %v, want ErrItemNotFound", err)
+			}
+		})
 	}
 }

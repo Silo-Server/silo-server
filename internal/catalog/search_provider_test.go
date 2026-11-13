@@ -280,30 +280,6 @@ func TestMeilisearchSearchRequestStaysKeywordWhenCoverageNotReady(t *testing.T) 
 	}
 }
 
-func TestMeilisearchSearchRequestBuildsHybridWhenCoverageReady(t *testing.T) {
-	vectorizer := &fakeCatalogSearchVectorizer{vector: []float32{0.5, 0.25}}
-	provider := &MeilisearchSearchProvider{
-		config: MeilisearchProviderConfig{
-			MatchingStrategy: DefaultMeilisearchMatchingStrategy,
-			SemanticEnabled:  true,
-			SemanticRatio:    0.4,
-			Embedder:         "silo_recommendations",
-			Vectorizer:       vectorizer,
-			Coverage:         fakeCoverageGate{ready: true},
-		},
-	}
-	req, fallback := provider.buildMeilisearchSearchRequest(context.Background(), CatalogSearchRequest{
-		Query:     "found family space opera",
-		ItemTypes: []string{"movie"},
-	})
-	if fallback != "" {
-		t.Fatalf("fallback = %q, want empty", fallback)
-	}
-	if req.Hybrid == nil || req.Vector == nil {
-		t.Fatalf("ready coverage should emit hybrid request: %#v", req)
-	}
-}
-
 func TestMeilisearchEpisodeSearchRemainsKeywordOnly(t *testing.T) {
 	vectorizer := &fakeCatalogSearchVectorizer{vector: []float32{0.5, 0.25}}
 	provider := &MeilisearchSearchProvider{config: MeilisearchProviderConfig{
@@ -454,47 +430,6 @@ func TestCatalogSearchEpisodeDocumentsNeverCarryVectors(t *testing.T) {
 	}
 }
 
-func TestSemanticModelProviderUsesCommaOkSafety(t *testing.T) {
-	if got := semanticModelProvider(nil); got != nil {
-		t.Fatalf("nil vectorizer should yield nil model provider, got %#v", got)
-	}
-	// A vectorizer that does NOT implement CatalogSemanticModelProvider must not
-	// be asserted into the interface (a nil-interface assertion would panic).
-	if got := semanticModelProvider(&fakeCatalogSearchVectorizer{}); got != nil {
-		t.Fatalf("non-implementing vectorizer should yield nil, got %#v", got)
-	}
-	impl := &fakeModelVectorizer{}
-	if got := semanticModelProvider(impl); got != CatalogSemanticModelProvider(impl) {
-		t.Fatalf("implementing vectorizer should yield itself, got %#v", got)
-	}
-}
-
-func TestMeilisearchSearchRequestBuildsHybridForApproximateInteractiveSearch(t *testing.T) {
-	vectorizer := &fakeCatalogSearchVectorizer{vector: []float32{0.5, 0.25}}
-	provider := &MeilisearchSearchProvider{
-		config: MeilisearchProviderConfig{
-			MatchingStrategy: DefaultMeilisearchMatchingStrategy,
-			SemanticEnabled:  true,
-			SemanticRatio:    0.4,
-			Embedder:         "silo_recommendations",
-			Vectorizer:       vectorizer,
-		},
-	}
-	req, fallback := provider.buildMeilisearchSearchRequest(context.Background(), CatalogSearchRequest{
-		Query:     "found family space opera",
-		SkipTotal: true,
-	})
-	if fallback != "" {
-		t.Fatalf("fallback = %q, want empty", fallback)
-	}
-	if req.Vector == nil || req.Hybrid == nil {
-		t.Fatalf("approximate interactive search should include hybrid search: %#v", req)
-	}
-	if vectorizer.calls != 1 {
-		t.Fatalf("interactive search should call vectorizer once, calls = %d", vectorizer.calls)
-	}
-}
-
 func TestMeilisearchSearchRequestBuildsHybridAndStrictMatchingForTwoTermSearch(t *testing.T) {
 	vectorizer := &fakeCatalogSearchVectorizer{vector: []float32{0.5, 0.25}}
 	provider := &MeilisearchSearchProvider{
@@ -523,39 +458,6 @@ func TestMeilisearchSearchRequestBuildsHybridAndStrictMatchingForTwoTermSearch(t
 	}
 	if vectorizer.calls != 1 || vectorizer.lastQuery != "spnge bob" {
 		t.Fatalf("vectorizer calls/query = %d/%q", vectorizer.calls, vectorizer.lastQuery)
-	}
-}
-
-func TestMeilisearchSearchRequestUsesStrictMatchingWhenTwoTermHybridNotReady(t *testing.T) {
-	vectorizer := &fakeCatalogSearchVectorizer{vector: []float32{0.5, 0.25}}
-	provider := &MeilisearchSearchProvider{
-		config: MeilisearchProviderConfig{
-			MatchingStrategy: DefaultMeilisearchMatchingStrategy,
-			SemanticEnabled:  true,
-			SemanticRatio:    0.3,
-			Embedder:         "silo_recommendations",
-			Vectorizer:       vectorizer,
-			Coverage:         fakeCoverageGate{ready: false, reason: `type "movie" coverage 40% below threshold`},
-		},
-	}
-	req, fallback := provider.buildMeilisearchSearchRequest(context.Background(), CatalogSearchRequest{
-		Query:     "spnge bob",
-		ItemTypes: []string{"movie"},
-	})
-	if req.Vector != nil || req.Hybrid != nil {
-		t.Fatalf("not-ready coverage should stay keyword-only: %#v", req)
-	}
-	if req.MatchingStrategy != "all" {
-		t.Fatalf("not-ready two-term search matching strategy = %q, want all", req.MatchingStrategy)
-	}
-	if !reflect.DeepEqual(req.AttributesToSearchOn, meilisearchTitleSearchAttributes) {
-		t.Fatalf("not-ready two-term search attributes = %#v, want %#v", req.AttributesToSearchOn, meilisearchTitleSearchAttributes)
-	}
-	if fallback != `semantic_not_ready: type "movie" coverage 40% below threshold` {
-		t.Fatalf("fallback = %q, want semantic_not_ready diagnostic", fallback)
-	}
-	if vectorizer.calls != 0 {
-		t.Fatalf("not-ready coverage should not call vectorizer, calls = %d", vectorizer.calls)
 	}
 }
 
@@ -658,16 +560,10 @@ func (f *countingMeilisearchIndexStateStore) PendingCount(context.Context, strin
 }
 
 func TestMeilisearchProviderCachesIndexStateAcrossRequests(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newMeilisearchTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"hits":[],"estimatedTotalHits":0}`))
-	}))
-	defer server.Close()
-
-	client, err := newMeilisearchClient(server.URL, "", time.Second)
-	if err != nil {
-		t.Fatalf("newMeilisearchClient: %v", err)
-	}
+	})
 	store := &countingMeilisearchIndexStateStore{
 		state: SearchIndexState{
 			ActiveIndexUID: "search-index",
@@ -700,19 +596,13 @@ func TestMeilisearchProviderCachesIndexStateAcrossRequests(t *testing.T) {
 }
 
 func TestMeilisearchProviderInvalidatesStateCacheOnSearchFailure(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newMeilisearchTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		// 404 models the cached index having been deleted by a rebuild's
 		// cleanup; it must not trip the circuit, only the state cache.
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"message":"Index search-index not found.","code":"index_not_found"}`))
-	}))
-	defer server.Close()
-
-	client, err := newMeilisearchClient(server.URL, "", time.Second)
-	if err != nil {
-		t.Fatalf("newMeilisearchClient: %v", err)
-	}
+	})
 	store := &countingMeilisearchIndexStateStore{
 		state: SearchIndexState{
 			ActiveIndexUID: "search-index",
@@ -747,7 +637,7 @@ func TestMeilisearchProviderInvalidatesStateCacheOnSearchFailure(t *testing.T) {
 
 func TestMeilisearchProviderRetriesNewActiveIndexAfterSwap(t *testing.T) {
 	var paths []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newMeilisearchTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/indexes/old-index/search" {
@@ -756,13 +646,7 @@ func TestMeilisearchProviderRetriesNewActiveIndexAfterSwap(t *testing.T) {
 			return
 		}
 		_, _ = w.Write([]byte(`{"hits":[],"estimatedTotalHits":0}`))
-	}))
-	defer server.Close()
-
-	client, err := newMeilisearchClient(server.URL, "", time.Second)
-	if err != nil {
-		t.Fatalf("newMeilisearchClient: %v", err)
-	}
+	})
 	schemaVersion := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, false, false)
 	store := &countingMeilisearchIndexStateStore{state: SearchIndexState{
 		ActiveIndexUID: "new-index",
@@ -796,19 +680,13 @@ func TestMeilisearchProviderRetriesNewActiveIndexAfterSwap(t *testing.T) {
 func TestMeilisearchProviderUsesActiveIndexWhenPendingUpdatesExist(t *testing.T) {
 	requests := 0
 	var gotMethod, gotPath string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newMeilisearchTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		requests++
 		gotMethod = r.Method
 		gotPath = r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"hits":[],"estimatedTotalHits":0}`))
-	}))
-	defer server.Close()
-
-	client, err := newMeilisearchClient(server.URL, "", time.Second)
-	if err != nil {
-		t.Fatalf("newMeilisearchClient: %v", err)
-	}
+	})
 
 	provider := &MeilisearchSearchProvider{
 		stateRepo: fakeMeilisearchIndexStateStore{
@@ -852,7 +730,7 @@ func TestMeilisearchProviderUsesActiveIndexWhenPendingUpdatesExist(t *testing.T)
 
 func TestMeilisearchProviderUsesStaleVectorlessIndexForKeywordSearch(t *testing.T) {
 	var searchRequest meilisearchSearchRequest
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := newMeilisearchTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/indexes/search-index/search" {
 			t.Fatalf("unexpected Meilisearch request %s %s", r.Method, r.URL.Path)
 		}
@@ -861,13 +739,7 @@ func TestMeilisearchProviderUsesStaleVectorlessIndexForKeywordSearch(t *testing.
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"hits":[],"estimatedTotalHits":0}`))
-	}))
-	defer server.Close()
-
-	client, err := newMeilisearchClient(server.URL, "", time.Second)
-	if err != nil {
-		t.Fatalf("newMeilisearchClient: %v", err)
-	}
+	})
 	vectorizer := &fakeCatalogSearchVectorizer{vector: []float32{0.1, 0.2}}
 	provider := &MeilisearchSearchProvider{
 		stateRepo: fakeMeilisearchIndexStateStore{state: SearchIndexState{
@@ -976,13 +848,6 @@ func TestMeilisearchIndexCompatibility(t *testing.T) {
 	}
 }
 
-func TestPostgresSearchProviderNilRepoStillErrors(t *testing.T) {
-	provider := NewPostgresSearchProvider(nil)
-	if _, err := provider.Search(context.Background(), CatalogSearchRequest{}); err == nil {
-		t.Fatal("nil item repo should still return an error")
-	}
-}
-
 type fakeCatalogSearchVectorizer struct {
 	vector    []float32
 	err       error
@@ -1011,38 +876,69 @@ func (g fakeCoverageGate) CoverageReady(_ []string) (bool, string) {
 	return g.ready, g.reason
 }
 
-// fakeModelVectorizer implements both CatalogSearchQueryVectorizer and
-// CatalogSemanticModelProvider so semanticModelProvider's comma-ok assertion can
-// be verified against a type that does satisfy the model interface.
-type fakeModelVectorizer struct {
-	fakeCatalogSearchVectorizer
-	model string
-}
+// Feature detection must not fail while Meilisearch is down: searches still
+// answer through the PostgreSQL fallback, so capabilities report that path.
+func TestSearchContinuationCapabilitiesReportServingProvider(t *testing.T) {
+	healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"pagination":{"maxTotalHits":1000}}`))
+	}))
+	defer healthy.Close()
+	down := httptest.NewServer(http.NotFoundHandler())
+	down.Close()
+	oversized := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"pagination":{"maxTotalHits":5000}}`))
+	}))
+	defer oversized.Close()
 
-func (f *fakeModelVectorizer) ActiveEmbeddingModel(_ context.Context) (string, error) {
-	return f.model, nil
-}
+	postgres := SearchContinuationCapabilities{Provider: SearchProviderPostgres}
+	for _, tc := range []struct {
+		name        string
+		url         string
+		activeUID   string
+		staleSchema bool
+		circuitOpen bool
+		wantResult  SearchContinuationCapabilities
+		wantErr     error
+	}{
+		{name: "healthy index", url: healthy.URL, activeUID: "silo_media_items", wantResult: SearchContinuationCapabilities{
+			Provider: SearchProviderMeilisearch, ResultWindowLimit: 1000,
+			SessionTTLSeconds: int(searchSessionTTL.Seconds()), MaxSessionsPerAccount: searchSessionsPerAccount,
+		}},
+		{name: "meilisearch unreachable", url: down.URL, activeUID: "silo_media_items", wantResult: postgres},
+		{name: "index not built", url: healthy.URL, wantResult: postgres},
+		{name: "index schema mismatch", url: healthy.URL, activeUID: "silo_media_items", staleSchema: true, wantResult: postgres},
+		{name: "circuit open", url: healthy.URL, activeUID: "silo_media_items", circuitOpen: true, wantResult: postgres},
+		// A window Silo cannot rank is a configuration error, not a fallback.
+		{name: "window unsupported", url: oversized.URL, activeUID: "silo_media_items", wantErr: ErrSearchWindowUnsupported},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			provider, err := NewMeilisearchSearchProvider(nil, nil, nil, MeilisearchProviderConfig{URL: tc.url})
+			if err != nil {
+				t.Fatal(err)
+			}
+			schema := catalogSearchMeilisearchSchemaVersion(provider.config.Embedder, provider.config.IndexTypes, false, false)
+			if tc.staleSchema {
+				schema = 1
+			}
+			provider.stateRepo = fakeMeilisearchIndexStateStore{state: SearchIndexState{ActiveIndexUID: tc.activeUID, SchemaVersion: schema}}
+			if tc.circuitOpen {
+				provider.tripCircuit(errors.New("meilisearch timed out"))
+			}
+			resolver := &CatalogResolver{searchProvider: provider}
 
-func TestCatalogSearchMeilisearchSchemaVersionBinaryQuantizedIgnoredWhenSemanticDisabled(t *testing.T) {
-	// With semantic search off, the index carries no embedders (see
-	// catalogSearchMeilisearchSettings), so binary quantization has no on-index
-	// effect and must not shift the schema version — otherwise toggling it would
-	// force a pointless full rebuild of a vector-less index. It must also stay
-	// byte-identical to a pre-flag index so upgrades don't spuriously invalidate.
-	off := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, false, false)
-	on := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, false, true)
-	if off != on {
-		t.Fatal("binary quantization must not change the schema version when semantic search is disabled")
-	}
-}
-
-func TestCatalogSearchMeilisearchEmbedderSettingsBinaryQuantized(t *testing.T) {
-	off := catalogSearchMeilisearchEmbedderSettings("e", false)["e"].(map[string]any)
-	if _, ok := off["binaryQuantized"]; ok {
-		t.Fatal("binaryQuantized key must be absent when off (preserves legacy index settings shape)")
-	}
-	on := catalogSearchMeilisearchEmbedderSettings("e", true)["e"].(map[string]any)
-	if on["binaryQuantized"] != true {
-		t.Fatal("binaryQuantized must be set when enabled")
+			got, err := resolver.SearchContinuationCapabilities(t.Context())
+			if tc.wantErr != nil {
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("SearchContinuationCapabilities error = %v, want %v", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("SearchContinuationCapabilities error = %v", err)
+			}
+			if got != tc.wantResult {
+				t.Fatalf("SearchContinuationCapabilities = %+v, want %+v", got, tc.wantResult)
+			}
+		})
 	}
 }

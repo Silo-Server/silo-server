@@ -27,6 +27,7 @@ import {
 } from "@/api/adminSections";
 import { V2ProblemError } from "@/api/v2/request";
 import { HomeRowsPage, type SharedRowMenuItems } from "@/components/homeRows/HomeRowsPage";
+import { AdminNextUpDefaultsCard } from "@/components/homeRows/AdminNextUpDefaultsCard";
 import { DeleteRowDialog, DeleteRowsDialog } from "@/components/homeRows/DeleteRowDialog";
 import type { PageMoreMenuItem } from "@/components/calm/PageMoreMenu";
 import { RestoreDialog } from "@/components/homeRows/RestoreDialog";
@@ -35,6 +36,7 @@ import { AddRowDialog } from "@/components/homeRows/addRow/AddRowDialog";
 import { AddToOtherLibrariesDialog } from "@/components/homeRows/AddToOtherLibrariesDialog";
 import { canCopyToLibraries, copyTargetPages } from "@/lib/homeRows/bulkCopy";
 import { collectionKind, type CollectionSummary } from "@/lib/homeRows/describe";
+import { useAppLanguage } from "@/i18n";
 import type { ActionMenuItem } from "@/components/calm/ActionMenu";
 import { useNewRowHighlight } from "@/components/homeRows/useNewRowHighlight";
 import { useRowFocus } from "@/components/homeRows/useRowFocus";
@@ -42,27 +44,63 @@ import { useRowDialog, useRowLinks } from "@/components/homeRows/useRowLinks";
 import { libraryPagesOf, pageLabel, pageParam } from "@/lib/homeRows/pages";
 import type { HomeRow, LibraryPage, PageRef } from "@/lib/homeRows/types";
 import { updateCheckboxSelection } from "@/lib/checkboxSelection";
+import { useT, type Translate } from "@/i18n";
+import { useHomeRowTitle, useSectionTitle } from "@/lib/sectionTitle";
 
-function rowCount(count: number) {
-  return count === 1 ? "1 row" : `${count} rows`;
-}
+type RowTitle = ReturnType<typeof useHomeRowTitle>;
 
-function batchFailureText({ title, reason, message }: BatchFailure) {
-  if (reason === "changed") return `${title} changed since you opened this page.`;
-  return `${title}: ${message}`;
+function batchFailureText(
+  t: Translate,
+  rowTitle: RowTitle,
+  { title: stored, titleKey, reason, message }: BatchFailure,
+) {
+  const title = rowTitle({ title: stored, titleKey });
+  if (reason === "changed") return t("web.admin.homeRows.select.rowChanged", { title });
+  return t("web.admin.homeRows.select.rowFailed", { title, message });
 }
 
 /** Reports a select-mode Turn on / Turn off, naming every row left as it was. */
-function reportShownBatch({ changedIds, failures }: ShownBatchResult, shown: boolean) {
-  const verb = shown ? "Turned on" : "Turned off";
+function reportShownBatch(
+  t: Translate,
+  rowTitle: RowTitle,
+  { changedIds, failures }: ShownBatchResult,
+  shown: boolean,
+) {
   const attempted = changedIds.length + failures.length;
-  const description = failures.map(batchFailureText).join(" ");
-  if (attempted === 0) toast.success(`The selected rows are already ${shown ? "on" : "off"}.`);
-  else if (failures.length === 0) toast.success(`${verb} ${rowCount(changedIds.length)}.`);
+  const description = failures.map((failure) => batchFailureText(t, rowTitle, failure)).join(" ");
+  if (attempted === 0)
+    toast.success(
+      t(shown ? "web.admin.homeRows.select.alreadyOn" : "web.admin.homeRows.select.alreadyOff"),
+    );
+  else if (failures.length === 0)
+    toast.success(
+      t(shown ? "web.admin.homeRows.select.turnedOn" : "web.admin.homeRows.select.turnedOff", {
+        count: changedIds.length,
+      }),
+    );
   else if (changedIds.length > 0)
-    toast.warning(`${verb} ${changedIds.length} of ${rowCount(attempted)}.`, { description });
+    toast.warning(
+      t(
+        shown
+          ? "web.admin.homeRows.select.turnedOnPartial"
+          : "web.admin.homeRows.select.turnedOffPartial",
+        {
+          count: attempted,
+          done_text: changedIds.length,
+        },
+      ),
+      { description },
+    );
   else
-    toast.error(`Could not turn ${shown ? "on" : "off"} ${rowCount(attempted)}.`, { description });
+    toast.error(
+      t(
+        shown
+          ? "web.admin.homeRows.select.turnOnFailed"
+          : "web.admin.homeRows.select.turnOffFailed",
+        { count: attempted },
+      ),
+      { description },
+    );
 }
 
 /**
@@ -71,18 +109,24 @@ function reportShownBatch({ changedIds, failures }: ShownBatchResult, shown: boo
  * with the reason.
  */
 function reportRestore(
+  t: Translate,
   page: PageRef,
   pageLabel: string,
   alsoPages: LibraryPage[],
   failures: LibraryRestoreFailure[],
 ) {
-  const noun = page.kind === "home" ? "library page" : "other library page";
-  const pages = (count: number) => `${count} ${noun}${count === 1 ? "" : "s"}`;
+  // From Home the other pages are all library pages; from a library page, the other ones.
+  const fromHome = page.kind === "home";
   const restored = alsoPages.length - failures.length;
-  const title =
-    restored > 0
-      ? `Restored the default rows on ${pageLabel} and ${pages(restored)}.`
-      : `Restored the default rows on ${pageLabel}.`;
+  let title: string;
+  if (restored === 0) title = t("web.admin.homeRows.restore.done", { page: pageLabel });
+  else
+    title = t(
+      fromHome
+        ? "web.admin.homeRows.restore.doneWithLibraryPages"
+        : "web.admin.homeRows.restore.doneWithOtherLibraryPages",
+      { count: restored, page: pageLabel },
+    );
   if (failures.length === 0) {
     toast.success(title);
     return;
@@ -90,22 +134,46 @@ function reportRestore(
   const failed = failures.filter((failure) => failure.outcome === "failed").length;
   const unknown = failures.length - failed;
   const outcomes = [
-    failed > 0 ? `${pages(failed)} kept ${failed === 1 ? "its" : "their"} rows.` : null,
-    unknown > 0 ? `${pages(unknown)} may have been restored.` : null,
+    failed > 0
+      ? t(
+          fromHome
+            ? "web.admin.homeRows.restore.libraryPagesKept"
+            : "web.admin.homeRows.restore.otherLibraryPagesKept",
+          {
+            count: failed,
+          },
+        )
+      : null,
+    unknown > 0
+      ? t(
+          fromHome
+            ? "web.admin.homeRows.restore.libraryPagesUnknown"
+            : "web.admin.homeRows.restore.otherLibraryPagesUnknown",
+          {
+            count: unknown,
+          },
+        )
+      : null,
   ].filter(Boolean);
   const description = failures
     .map(({ libraryId, error, outcome }) => {
       const label =
-        alsoPages.find((page) => page.id === libraryId)?.label ?? `Library ${libraryId}`;
-      if (outcome === "unknown")
-        return `${label}: it may have been restored, but Silo couldn't confirm it. Reload it to check.`;
-      return `${label}: ${adminSectionMutationMessage(error, "Could not restore the default rows")}`;
+        alsoPages.find((page) => page.id === libraryId)?.label ??
+        t("web.admin.homeRows.restore.libraryFallback", { id: libraryId });
+      if (outcome === "unknown") return t("web.admin.homeRows.restore.pageUnknown", { label });
+      return t("web.admin.homeRows.restore.pageFailed", {
+        label,
+        message: adminSectionMutationMessage(error, t("web.admin.homeRows.restore.failed")),
+      });
     })
     .join(" ");
   toast.warning([title, ...outcomes].join(" "), { description });
 }
 
 export default function AdminHomeRows() {
+  const t = useT();
+  const rowTitle = useHomeRowTitle();
+  const sectionTitle = useSectionTitle();
   const adapter = useAdminHomeRows();
   const { scope, serverCapabilities: capabilities } = adapter;
   const capabilitiesFailed = useAdminSectionCapabilities().isError;
@@ -145,6 +213,8 @@ export default function AdminHomeRows() {
     staleTime: 5 * 60 * 1000,
   });
   // Every library collection, hidden ones included: a row may show one the picker no longer offers.
+  // Each summary's collection type is translated text; rebuild it on a language change.
+  const language = useAppLanguage();
   const collectionSummaries = useMemo(
     () =>
       new Map<string, CollectionSummary>(
@@ -153,7 +223,8 @@ export default function AdminHomeRows() {
           { title: collection.title, kind: collectionKind(collection.collection_type) },
         ]),
       ),
-    [collectionsData],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `language` changes what collectionKind() returns.
+    [collectionsData, language],
   );
   const [confirmDeleteSection, setConfirmDeleteSection] = useState<PageSectionConfig | null>(null);
   const [confirmDeleteSelected, setConfirmDeleteSelected] = useState(false);
@@ -221,9 +292,9 @@ export default function AdminHomeRows() {
     const ids = selectedSections.map((section) => section.id);
     if (ids.length === 0 || ids.length > MAX_SELECTED_ROWS) return;
     try {
-      reportShownBatch(await adapter.setShownMany(ids, shown), shown);
+      reportShownBatch(t, rowTitle, await adapter.setShownMany(ids, shown), shown);
     } catch (error) {
-      toast.error(adminSectionMutationMessage(error, "Could not change these rows"));
+      toast.error(adminSectionMutationMessage(error, t("web.admin.homeRows.select.changeFailed")));
     }
   }
 
@@ -242,7 +313,9 @@ export default function AdminHomeRows() {
     try {
       await action();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not load the current rows");
+      toast.error(
+        error instanceof Error ? error.message : t("web.admin.homeRows.page.loadRowsFailed"),
+      );
     } finally {
       setSnapshotLoading(false);
     }
@@ -310,7 +383,9 @@ export default function AdminHomeRows() {
         },
         onError: (error) => {
           setDeleteConflict(error instanceof V2ProblemError && error.status === 412);
-          toast.error(error instanceof Error ? error.message : "Could not delete this row");
+          toast.error(
+            error instanceof Error ? error.message : t("web.admin.homeRows.delete.failed"),
+          );
         },
       },
     );
@@ -361,14 +436,14 @@ export default function AdminHomeRows() {
       },
       {
         onSuccess: (failures) => {
-          reportRestore(adapter.page, currentPageLabel, alsoPages, failures);
+          reportRestore(t, adapter.page, currentPageLabel, alsoPages, failures);
           setRestorePage(null);
         },
         onError: (error) => {
           const stale = error instanceof V2ProblemError && error.status === 412;
           setRestoreConflict(stale);
           if (!stale)
-            toast.error(adminSectionMutationMessage(error, "Could not restore the default rows"));
+            toast.error(adminSectionMutationMessage(error, t("web.admin.homeRows.restore.failed")));
         },
       },
     );
@@ -383,8 +458,8 @@ export default function AdminHomeRows() {
   const moreItems: PageMoreMenuItem[] = [
     {
       key: "select",
-      label: "Select rows",
-      help: "Turn several rows on or off, or delete them together.",
+      label: t("web.admin.homeRows.more.select"),
+      help: t("web.admin.homeRows.more.selectHelp"),
       icon: SquareCheckBig,
       // Focus moves to Select all once select mode opens.
       returnFocus: false,
@@ -393,8 +468,8 @@ export default function AdminHomeRows() {
     },
     {
       key: "restore",
-      label: "Restore defaults…",
-      help: "Put back the rows Silo starts with on this page.",
+      label: t("web.admin.homeRows.more.restore"),
+      help: t("web.admin.homeRows.more.restoreHelp"),
       icon: RotateCcw,
       // The restore itself is an admin row write, so `pending` covers it.
       disabled: !canManageCurrentScope || snapshotLoading || adapter.pending,
@@ -408,14 +483,16 @@ export default function AdminHomeRows() {
     return [
       {
         key: "edit",
-        label: "Edit row…",
+        label: t("web.admin.homeRows.rowMenu.edit"),
         icon: Pencil,
         disabled: busy,
         onSelect: () => openRow(row),
       },
       {
         key: "hero",
-        label: row.hero ? "Stop using as hero banner" : "Use as hero banner",
+        label: row.hero
+          ? t("web.admin.homeRows.rowMenu.stopUsingAsHero")
+          : t("web.admin.homeRows.rowMenu.useAsHero"),
         icon: row.hero ? StarOff : Star,
         disabled: !canManageCurrentScope,
         onSelect: () => void adapter.setHero(row.id, !row.hero),
@@ -428,7 +505,7 @@ export default function AdminHomeRows() {
         ? [
             {
               key: "copy",
-              label: "Add to other libraries…",
+              label: t("web.admin.homeRows.rowMenu.addToOtherLibraries"),
               icon: Copy,
               disabled: busy || adapter.pending,
               onSelect: () => setCopyRow(row),
@@ -437,7 +514,7 @@ export default function AdminHomeRows() {
         : []),
       {
         key: "delete",
-        label: "Delete row…",
+        label: t("web.admin.homeRows.rowMenu.delete"),
         icon: Trash2,
         destructive: true,
         group: true,
@@ -447,7 +524,10 @@ export default function AdminHomeRows() {
     ];
   }
 
-  const deleteProgressLabel = `Deleting ${deleteSectionsMutation.progress?.completed ?? 0} of ${deleteSectionsMutation.progress?.total ?? deleteTargets.length}…`;
+  const deleteProgressLabel = t("web.admin.homeRows.delete.progress", {
+    done: deleteSectionsMutation.progress?.completed ?? 0,
+    total: deleteSectionsMutation.progress?.total ?? deleteTargets.length,
+  });
   const bulkBusy =
     !canManageCurrentScope ||
     adapter.pending ||
@@ -470,8 +550,8 @@ export default function AdminHomeRows() {
     >
       <HomeRowsPage
         adapter={adapter}
-        title="Sections"
-        subtitle="The sections everyone sees on Home and on library pages. Profiles can still hide, rename or reorder them."
+        title={t("web.admin.homeRows.page.title")}
+        subtitle={t("web.admin.homeRows.page.subtitle")}
         focus={focus}
         collection={(id) =>
           // Unknown until the list loads; after that, a missing id is a deleted collection.
@@ -489,7 +569,7 @@ export default function AdminHomeRows() {
                 onChange: updateSectionSelection,
                 onSelectAll: selectAllRows,
                 onExit: exitSelectMode,
-                label: (row) => `Select ${row.title}`,
+                label: (row) => t("web.admin.homeRows.select.rowLabel", { title: rowTitle(row) }),
                 bar: (
                   <SelectModeBar
                     count={selectedSections.length}
@@ -505,13 +585,14 @@ export default function AdminHomeRows() {
         notices={
           snapshotLoading ? (
             <p role="status" className="text-muted-foreground text-sm">
-              Loading the current rows…
+              {t("web.admin.homeRows.page.loadingRows")}
             </p>
           ) : null
         }
       >
+        <AdminNextUpDefaultsCard />
         <DeleteRowDialog
-          rowTitle={confirmDeleteSection?.title ?? ""}
+          rowTitle={confirmDeleteSection ? sectionTitle(confirmDeleteSection) : ""}
           pageLabel={currentPageLabel}
           open={confirmDeleteSection !== null}
           conflict={deleteConflict}

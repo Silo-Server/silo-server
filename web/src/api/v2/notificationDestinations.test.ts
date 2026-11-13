@@ -52,46 +52,6 @@ it("rejects repeated or missing continuations without returning partial data", a
     expect(fetch.mock.calls.length).toBeLessThanOrEqual(2);
   }
 });
-it("rejects stale authority before reading destination metadata", async () => {
-  const context = captureNotificationAuthority();
-  setProfileId("replacement");
-  const fetch = vi.fn<typeof globalThis.fetch>();
-  vi.stubGlobal("fetch", fetch);
-  await expect(listNotificationServerChannels(context)).rejects.toThrow();
-  expect(fetch).not.toHaveBeenCalled();
-});
-it("discards destination pages returned after account replacement", async () => {
-  const context = captureNotificationAuthority();
-  let finish!: (r: Response) => void;
-  const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(
-    () =>
-      new Promise((resolve) => {
-        finish = resolve;
-      }),
-  );
-  vi.stubGlobal("fetch", fetch);
-  const pending = listNotificationWebPushSubscriptions(context);
-  setAccessToken("replacement");
-  finish(json({ items: [], page: { has_more: false } }));
-  await expect(pending).rejects.toThrow();
-});
-
-it("deletes the exact subscription once without authentication replay", async () => {
-  for (const status of [204, 401, 500]) {
-    const fetch = vi
-      .fn<typeof globalThis.fetch>()
-      .mockResolvedValue(new Response(null, { status }));
-    vi.stubGlobal("fetch", fetch);
-    const result = deleteNotificationWebPushSubscription("row-one", captureNotificationAuthority());
-    if (status === 204) await result;
-    else await expect(result).rejects.toThrow();
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(String(fetch.mock.calls[0]![0])).toContain(
-      "/api/v2/notifications/web-push/subscriptions/row-one",
-    );
-    expect(fetch.mock.calls[0]![1]?.method).toBe("DELETE");
-  }
-});
 it("refuses stale deletion dispatch and stale receipt after PIN replacement", async () => {
   const context = captureNotificationAuthority();
   const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(async () => {

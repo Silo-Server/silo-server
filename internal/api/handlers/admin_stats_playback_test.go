@@ -2,30 +2,9 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 )
-
-// stubPlaybackActivitySource records what the handler asked for so the tests
-// can assert on parameter handling without a database.
-type stubPlaybackActivitySource struct {
-	activity    *AdminPlaybackActivity
-	err         error
-	gotHours    int
-	invalidated int
-	callCount   int
-}
-
-func (s *stubPlaybackActivitySource) Get(_ context.Context, hours int) (*AdminPlaybackActivity, error) {
-	s.callCount++
-	s.gotHours = hours
-	return s.activity, s.err
-}
-
-func (s *stubPlaybackActivitySource) Invalidate() { s.invalidated++ }
 
 func TestAssemblePlaybackBuckets(t *testing.T) {
 	t.Parallel()
@@ -162,130 +141,6 @@ func TestPlaybackActivityBucketSeconds(t *testing.T) {
 				t.Fatalf("playbackActivityTruncField(%d) = %q, want %q", got, trunc, tt.wantTrunc)
 			}
 		})
-	}
-}
-
-func TestHandleGetPlaybackActivityClampsHours(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name  string
-		query string
-		want  int
-	}{
-		{name: "absent uses the default window", query: "", want: adminPlaybackActivityDefaultHours},
-		{name: "empty uses the default window", query: "?hours=", want: adminPlaybackActivityDefaultHours},
-		{name: "explicit value passes through", query: "?hours=6", want: 6},
-		{name: "a week passes through", query: "?hours=168", want: 168},
-		{name: "zero clamps up", query: "?hours=0", want: adminPlaybackActivityMinHours},
-		{name: "negative clamps up", query: "?hours=-12", want: adminPlaybackActivityMinHours},
-		{name: "a month is the ceiling", query: "?hours=744", want: 744},
-		{name: "oversized clamps down", query: "?hours=100000", want: adminPlaybackActivityMaxHours},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			source := &stubPlaybackActivitySource{activity: &AdminPlaybackActivity{}}
-			handler := &AdminHandler{PlaybackActivitySource: source}
-			rec := httptest.NewRecorder()
-			handler.HandleGetPlaybackActivity(rec, httptest.NewRequest(http.MethodGet, "/admin/stats/playback-activity"+tt.query, nil))
-
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200, body = %s", rec.Code, rec.Body.String())
-			}
-			if source.gotHours != tt.want {
-				t.Fatalf("hours = %d, want %d", source.gotHours, tt.want)
-			}
-		})
-	}
-}
-
-func TestHandleGetPlaybackActivityRejectsNonNumericHours(t *testing.T) {
-	t.Parallel()
-
-	source := &stubPlaybackActivitySource{activity: &AdminPlaybackActivity{}}
-	handler := &AdminHandler{PlaybackActivitySource: source}
-	rec := httptest.NewRecorder()
-	handler.HandleGetPlaybackActivity(rec, httptest.NewRequest(http.MethodGet, "/admin/stats/playback-activity?hours=soon", nil))
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400, body = %s", rec.Code, rec.Body.String())
-	}
-	if source.callCount != 0 {
-		t.Fatalf("source was queried %d times for an invalid request", source.callCount)
-	}
-}
-
-func TestHandleGetPlaybackActivityRefreshInvalidates(t *testing.T) {
-	t.Parallel()
-
-	source := &stubPlaybackActivitySource{activity: &AdminPlaybackActivity{}}
-	handler := &AdminHandler{PlaybackActivitySource: source}
-
-	rec := httptest.NewRecorder()
-	handler.HandleGetPlaybackActivity(rec, httptest.NewRequest(http.MethodGet, "/admin/stats/playback-activity", nil))
-	if source.invalidated != 0 {
-		t.Fatalf("invalidated = %d on a plain read, want 0", source.invalidated)
-	}
-
-	rec = httptest.NewRecorder()
-	handler.HandleGetPlaybackActivity(rec, httptest.NewRequest(http.MethodGet, "/admin/stats/playback-activity?refresh=1", nil))
-	if source.invalidated != 1 {
-		t.Fatalf("invalidated = %d after refresh=1, want 1", source.invalidated)
-	}
-}
-
-func TestHandleGetPlaybackActivityWithoutDatabase(t *testing.T) {
-	t.Parallel()
-
-	handler := &AdminHandler{}
-	rec := httptest.NewRecorder()
-	handler.HandleGetPlaybackActivity(rec, httptest.NewRequest(http.MethodGet, "/admin/stats/playback-activity", nil))
-
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500, body = %s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestHandleGetPlaybackActivityEmptyWindowSerializesArrays(t *testing.T) {
-	t.Parallel()
-
-	source := &stubPlaybackActivitySource{activity: &AdminPlaybackActivity{
-		Hours:         24,
-		BucketSeconds: adminPlaybackActivityHourSeconds,
-		Buckets:       []AdminPlaybackActivityBucket{},
-	}}
-	handler := &AdminHandler{PlaybackActivitySource: source}
-	rec := httptest.NewRecorder()
-	handler.HandleGetPlaybackActivity(rec, httptest.NewRequest(http.MethodGet, "/admin/stats/playback-activity", nil))
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	var body struct {
-		Hours         int               `json:"hours"`
-		BucketSeconds int               `json:"bucket_seconds"`
-		Buckets       []json.RawMessage `json:"buckets"`
-		Reliability   struct {
-			CompletionRate float64 `json:"completion_rate"`
-		} `json:"reliability"`
-		ProfilesActive24h int64 `json:"profiles_active_24h"`
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-		t.Fatalf("decode body: %v", err)
-	}
-	if body.Buckets == nil {
-		t.Fatal("buckets decoded as null; a data-free server must send []")
-	}
-	if len(body.Buckets) != 0 || body.ProfilesActive24h != 0 || body.Reliability.CompletionRate != 0 {
-		t.Fatalf("unexpected body: %+v", body)
-	}
-	// The client zero-fills from bucket_seconds, so it has to survive
-	// serialization even on a server with nothing to report.
-	if body.BucketSeconds != adminPlaybackActivityHourSeconds {
-		t.Fatalf("bucket_seconds = %d, want %d", body.BucketSeconds, adminPlaybackActivityHourSeconds)
 	}
 }
 

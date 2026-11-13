@@ -10,41 +10,42 @@ import type {
   RequestSearchMediaType,
   RequestUserState,
 } from "@/api/types";
+import { numberText, t } from "@/i18n";
 import { formatDate } from "@/lib/datetime";
 
 export function formatMediaType(mediaType: RequestMediaType): string {
-  return mediaType === "series" ? "Series" : "Movie";
+  return mediaType === "series" ? t("web.requests.toAdd.series") : t("web.requests.toAdd.movie");
 }
 
 export function formatRequestStatus(status?: MediaRequestStatus): string {
   switch (status) {
     case "pending":
-      return "Pending";
+      return t("web.requests.status.pending");
     case "approved":
-      return "Approved";
+      return t("web.requests.status.approved");
     case "queued":
-      return "Queued";
+      return t("web.requests.status.queued");
     case "downloading":
-      return "Downloading";
+      return t("web.requests.status.downloading");
     case "completed":
-      return "Completed";
+      return t("web.requests.status.completed");
     default:
-      return "Requested";
+      return t("web.requests.status.requested");
   }
 }
 
 export function formatRequestOutcome(outcome?: MediaRequestOutcome): string {
   switch (outcome) {
     case "active":
-      return "Active";
+      return t("web.requests.status.active");
     case "declined":
-      return "Declined";
+      return t("web.requests.status.declined");
     case "cancelled":
-      return "Cancelled";
+      return t("web.requests.status.cancelled");
     case "failed":
-      return "Failed";
+      return t("web.requests.status.failed");
     default:
-      return "Active";
+      return t("web.requests.status.active");
   }
 }
 
@@ -84,11 +85,11 @@ export function formatRequestDisplayState(state: RequestDisplayState): string {
     case "approved":
       return formatRequestStatus(state);
     case "processing":
-      return "Processing";
+      return t("web.requests.status.processing");
     case "partially_available":
-      return "Partially available";
+      return t("web.requests.status.partiallyAvailable");
     case "available":
-      return "Available";
+      return t("web.requests.status.available");
     default:
       return formatRequestOutcome(state);
   }
@@ -116,6 +117,18 @@ export function canCancelOwnRequest(
   request: Pick<MediaRequest, "status" | "outcome" | "targets">,
 ): boolean {
   return canWithdrawRequest(request);
+}
+
+/**
+ * Mirrors the server's rule for removing a failed request: it failed and
+ * delivered nothing. One that delivered a quality before failing stays for an
+ * admin to retry. Callers must already know the viewer owns the request.
+ */
+export function canRemoveOwnRequest(request: Pick<MediaRequest, "outcome" | "targets">): boolean {
+  return (
+    request.outcome === "failed" &&
+    !(request.targets ?? []).some((target) => target.status === "completed")
+  );
 }
 
 /**
@@ -226,17 +239,17 @@ export function requestSuggestions(
 export function formatRequestReason(reason?: string): string {
   switch (reason) {
     case "already_requested":
-      return "Already requested";
+      return t("web.requests.status.reason.alreadyRequested");
     case "already_available":
-      return "Available";
+      return t("web.requests.status.reason.alreadyAvailable");
     case "requests_disabled":
-      return "Requests disabled";
+      return t("web.requests.status.reason.requestsDisabled");
     case "blocked":
-      return "Blocked";
+      return t("web.requests.status.reason.blocked");
     case "quota_exceeded":
-      return "Request limit reached";
+      return t("web.requests.status.reason.quotaExceeded");
     default:
-      return "Unavailable";
+      return t("web.requests.status.reason.unavailable");
   }
 }
 
@@ -247,10 +260,12 @@ export function formatSeasonList(seasons: number[]): string {
   for (let i = 0; i < sorted.length; ) {
     let j = i;
     while (j + 1 < sorted.length && sorted[j + 1] === sorted[j]! + 1) j++;
-    runs.push(j > i ? `${sorted[i]}–${sorted[j]}` : String(sorted[i]));
+    runs.push(
+      j > i ? `${numberText(sorted[i]!)}–${numberText(sorted[j]!)}` : numberText(sorted[i]!),
+    );
     i = j + 1;
   }
-  return `${sorted.length === 1 ? "Season" : "Seasons"} ${runs.join(", ")}`;
+  return t("web.requests.status.seasonList", { count: sorted.length, list: runs.join(", ") });
 }
 
 /**
@@ -314,11 +329,16 @@ export function upcomingRequestSeasons(seasons: RequestMediaSeason[], now = new 
 /** "2022 · 9 episodes", or "Not announced" before TMDB dates or fills the season. */
 export function formatRequestSeasonMeta(season: RequestMediaSeason): string {
   const parts: string[] = [];
-  if (season.air_date) parts.push(season.air_date.slice(0, 4));
+  if (season.air_date) parts.push(numberText(season.air_date.slice(0, 4)));
   if (season.episode_count > 0) {
-    parts.push(`${season.episode_count} ${season.episode_count === 1 ? "episode" : "episodes"}`);
+    parts.push(
+      t("web.requests.status.seasonEpisodes", {
+        count: season.episode_count,
+        count_text: season.episode_count,
+      }),
+    );
   }
-  return parts.join(" · ") || "Not announced";
+  return parts.join(" · ") || t("web.requests.seasons.notAnnounced");
 }
 
 /**
@@ -333,7 +353,11 @@ export function formatSeasonProgress(progress: RequestSeasonProgress[]): string 
     have += Math.min(season.episodes_available, season.episodes_aired);
   }
   if (aired === 0) return "";
-  return `${have} of ${aired} ${aired === 1 ? "episode" : "episodes"} in the library`;
+  return t("web.requests.status.seasonProgress", {
+    aired,
+    have: have,
+    aired_text: aired,
+  });
 }
 
 export function formatRequestDate(request: Pick<MediaRequest, "created_at">): string {

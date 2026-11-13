@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/activitylog"
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/config"
 )
 
@@ -93,19 +94,29 @@ func TestRouter_ActivityLog(t *testing.T) {
 		}
 	})
 
-	for _, path := range []string{
-		"/Items/abc/Images/Primary",
-		"/Items/abc/Images/Backdrop/0",
-		"/Users/abc/Images/Primary",
-		"/UserImage?userId=abc",
-		"/api/v2/artwork/x",
-		"/web/index.html",
-		"/Videos/abc/hls/p1/0.ts",
-		"/videos/abc/hls/p1/stream.m3u8",
-		"/Videos/abc/remux-v1/hls/p1/0.mp4",
+	t.Run("failed request bounds diagnostic user agent without changing headers", func(t *testing.T) {
+		raw := strings.Repeat("agent/", 86)
+		req := httptest.NewRequest(http.MethodGet, "/Sessions", nil)
+		req.Header.Set("User-Agent", raw)
+		router.ServeHTTP(httptest.NewRecorder(), req)
+		entries := capture.take()
+		if len(entries) != 1 || entries[0].StatusCode != http.StatusUnauthorized || entries[0].UserID != nil {
+			t.Fatalf("failed-request audit lost: %+v", entries)
+		}
+		if entries[0].UserAgent != raw[:auditmutation.MaxUserAgentBytes] || req.UserAgent() != raw {
+			t.Fatal("audit prefix or original request header changed unexpectedly")
+		}
+	})
+
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodGet, "/Items/abc/Images/Primary"},
+		{http.MethodGet, "/Videos/abc/hls/p1/0.ts"},
+		// No route answers HEAD here, so the filter sees the path the client
+		// sent, which carries the play session ID.
+		{http.MethodHead, "/emby/videos/abc/hls/p1/0.ts"},
 	} {
-		t.Run("skips "+path, func(t *testing.T) {
-			if entries := serve(http.MethodGet, path, true); len(entries) != 0 {
+		t.Run("skips "+tc.method+" "+tc.path, func(t *testing.T) {
+			if entries := serve(tc.method, tc.path, true); len(entries) != 0 {
 				t.Fatalf("entries = %+v, want none", entries)
 			}
 		})

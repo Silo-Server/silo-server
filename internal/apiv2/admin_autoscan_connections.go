@@ -16,7 +16,7 @@ type AdminAutoscanConnection struct {
 	ID                   string  `json:"id"`
 	Name                 string  `json:"name"`
 	Kind                 string  `json:"kind"`
-	BaseURL              string  `json:"base_url,omitempty"`
+	BaseURL              string  `json:"base_url,omitempty" doc:"Base URL as entered; not validated as a URI"`
 	RequestIntegrationID *string `json:"request_integration_id,omitempty"`
 	HasAPIKey            bool    `json:"has_api_key"`
 }

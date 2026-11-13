@@ -41,7 +41,7 @@ type AdminCatalogImportRequest struct {
 	LocalPath    string                    `json:"local_path,omitempty"`
 	ExportJobID  string                    `json:"export_job_id,omitempty"`
 	ArtifactKey  string                    `json:"artifact_key,omitempty"`
-	RemoteURL    string                    `json:"remote_url,omitempty"`
+	RemoteURL    string                    `json:"remote_url,omitempty" format:"uri-reference"`
 	ConflictMode string                    `json:"conflict_mode" enum:"skip_existing,overwrite_existing"`
 	PathRewrites []catalogseed.PathRewrite `json:"path_rewrites"`
 }
@@ -57,7 +57,7 @@ type AdminCatalogJobAcceptedOutput struct {
 }
 type AdminCatalogPublished struct {
 	JobID     ID       `json:"job_id"`
-	URL       string   `json:"url"`
+	URL       string   `json:"url" format:"uri-reference"`
 	ExpiresAt *Instant `json:"expires_at,omitempty" doc:"Signed URL expiry; the artifact may be removed sooner"`
 }
 type AdminCatalogPublishedOutput struct{ Body AdminCatalogPublished }

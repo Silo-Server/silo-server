@@ -368,7 +368,13 @@ func (h *PlaybackHandler) dispatchCompatScrobbleEventConfirmed(
 	if h == nil || h.WatchScrobbler == nil {
 		return nil
 	}
-	scrobbleCtx, cancel := compatDetachedContext(ctx)
+	timeout := compatSessionSyncTimeout
+	if confirmStop {
+		// A confirmed stop waits for the provider, which needs watch-sync's
+		// whole confirmed-stop budget, not the quick-sync bound.
+		timeout = compatConfirmedStopTimeout
+	}
+	scrobbleCtx, cancel := compatDetachedContextFor(ctx, timeout)
 	defer cancel()
 	var err error
 	switch action {
@@ -408,12 +414,12 @@ func compatScrobbleSource(
 		return nil
 	}
 	if upstreamSession != nil {
-		for _, source := range playSession.MediaSources {
-			if source.FileID == upstreamSession.MediaFileID {
-				copy := source
-				return &copy
-			}
+		if source := mediaSourceByFileID(playSession, upstreamSession.MediaFileID); source != nil {
+			return source
 		}
+	}
+	if source := playedMediaSource(playSession, ""); source != nil {
+		return source
 	}
 	return firstMediaSource(playSession)
 }

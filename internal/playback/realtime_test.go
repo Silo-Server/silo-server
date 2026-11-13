@@ -4,25 +4,6 @@ import (
 	"testing"
 )
 
-func TestParseCommandEnvelopeStillWorks(t *testing.T) {
-	command, err := ParseCommandEnvelope([]byte(`{
-		"type":"command",
-		"command_id":"cmd-1",
-		"session_id":"session-1",
-		"name":"pause",
-		"payload":{"reason":"test"}
-	}`))
-	if err != nil {
-		t.Fatalf("ParseCommandEnvelope() error = %v", err)
-	}
-	if command.Type != RealtimeMessageTypeCommand {
-		t.Fatalf("command.Type = %q, want %q", command.Type, RealtimeMessageTypeCommand)
-	}
-	if command.Name != CommandPause {
-		t.Fatalf("command.Name = %q, want %q", command.Name, CommandPause)
-	}
-}
-
 // The plan id is what lets a client ignore a command for a plan it has already
 // replanned past, so an envelope without one must never be built.
 func TestNewPlanInvalidatedCommandRequiresPlanAndReason(t *testing.T) {

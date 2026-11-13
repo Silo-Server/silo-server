@@ -8,15 +8,12 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
-
-	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
-	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 )
 
 // AuthHandler handles authentication-related HTTP endpoints.
@@ -32,7 +29,7 @@ type AuthHandler struct {
 
 type accountPasswordService interface {
 	PasswordChangeAvailable(ctx context.Context, userID int) (bool, error)
-	ChangePassword(ctx context.Context, userID int, sessionID, currentPassword, newPassword string) error
+	ChangePassword(ctx context.Context, userID int, sessionID, currentPassword, newPassword string, signOutOtherSessions bool) error
 }
 
 // NewAuthHandler creates a new AuthHandler backed by the given auth, JWT,
@@ -71,64 +68,12 @@ func (h *AuthHandler) SetOAuthRoutesAvailable(available bool) {
 
 // --- Request/Response types ---
 
-// loginRequest represents the JSON body of a POST /auth/login request.
-type loginRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Provider string `json:"provider,omitempty"`
-}
-
 // loginResponse represents the JSON body of a successful login response.
 type loginResponse struct {
 	AccessToken  string   `json:"access_token"`
 	RefreshToken string   `json:"refresh_token"`
 	ExpiresIn    int      `json:"expires_in"`
 	User         UserView `json:"user"`
-}
-
-// setupRequest represents the JSON body of a POST /auth/setup request.
-type setupRequest struct {
-	Username             string `json:"username"`
-	Email                string `json:"email"`
-	Password             string `json:"password"`
-	CreateDefaultProfile bool   `json:"create_default_profile"`
-	DefaultProfileName   string `json:"default_profile_name,omitempty"`
-}
-
-// setupStatusResponse represents the JSON body of a GET /auth/setup request.
-type setupStatusResponse struct {
-	NeedsSetup bool `json:"needs_setup"`
-}
-
-// signupRequest represents the JSON body of a POST /auth/signup request.
-type signupRequest struct {
-	Username             string `json:"username"`
-	Email                string `json:"email"`
-	Password             string `json:"password"`
-	InviteCode           string `json:"invite_code"`
-	CreateDefaultProfile bool   `json:"create_default_profile"`
-	DefaultProfileName   string `json:"default_profile_name,omitempty"`
-}
-
-// signupStatusResponse represents the JSON body of a GET /auth/signup request.
-type signupStatusResponse struct {
-	Enabled bool `json:"enabled"`
-}
-
-// refreshRequest represents the JSON body of a POST /auth/refresh request.
-type refreshRequest struct {
-	RefreshToken string `json:"refresh_token"`
-}
-
-// refreshResponse represents the JSON body of a successful refresh response.
-type refreshResponse struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	ExpiresIn    int    `json:"expires_in"`
-}
-
-type pluginLaunchResponse struct {
-	ExpiresIn int `json:"expires_in"`
 }
 
 type ImpersonationView struct {
@@ -148,21 +93,10 @@ type UserView struct {
 	Impersonation   *ImpersonationView `json:"impersonation,omitempty"`
 	// PasswordChangeRequired is v2-only: the frozen v1 body does not carry it.
 	PasswordChangeRequired bool `json:"-"`
-}
-
-// sessionResponse represents a session in JSON responses.
-type sessionResponse struct {
-	ID         string     `json:"id"`
-	DeviceName string     `json:"device_name"`
-	IPAddress  string     `json:"ip_address"`
-	CreatedAt  time.Time  `json:"created_at"`
-	ExpiresAt  time.Time  `json:"expires_at"`
-	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
-}
-
-// sessionsListResponse represents the JSON body of a GET /auth/sessions response.
-type sessionsListResponse struct {
-	Sessions []sessionResponse `json:"sessions"`
+	// PolicyPermissions is v2-only (Account.permissions): the permissions
+	// after the access-group mask, without the admin role grant that the
+	// frozen v1 Permissions list keeps (v1AccountPermissions).
+	PolicyPermissions []string `json:"-"`
 }
 
 // errorResponse represents an error in JSON responses.
@@ -171,40 +105,7 @@ type errorResponse struct {
 	Message string `json:"message"`
 }
 
-type authProviderResponse struct {
-	ID             string `json:"id"`
-	DisplayName    string `json:"display_name"`
-	Mode           string `json:"mode"`
-	Default        bool   `json:"default"`
-	IconURL        string `json:"icon_url,omitempty"`
-	InstallationID int    `json:"installation_id,omitempty"`
-}
-
 // --- Handler methods ---
-
-// HandleLogin handles POST /auth/login.
-func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
-	var req loginRequest
-	if !decodeAuthRequestBody(w, r, &req, false) {
-		return
-	}
-
-	// The session records the device headers, else the User-Agent as its
-	// name, and the client IP.
-	view, err := h.Login(auth.WithClientDevice(r.Context(), r.Header), LoginInput{
-		Provider:   req.Provider,
-		Username:   req.Username,
-		Password:   req.Password,
-		DeviceName: r.UserAgent(),
-		IP:         clientip.FromContext(r.Context()),
-	})
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, loginResponseOf(view))
-}
 
 // LoginInput is a password login as the transport received it.
 type LoginInput struct {
@@ -215,11 +116,6 @@ type LoginInput struct {
 	IP         string
 }
 
-// loginResponseOf renders the shared credential view in the v1 shape.
-func loginResponseOf(v TokenPairView) loginResponse {
-	return loginResponse(v)
-}
-
 // Login authenticates a username and password and opens a login session. v1
 // POST /auth/login and v2 login both call it; a failure is an *APIError.
 func (h *AuthHandler) Login(ctx context.Context, in LoginInput) (TokenPairView, error) {
@@ -228,11 +124,17 @@ func (h *AuthHandler) Login(ctx context.Context, in LoginInput) (TokenPairView, 
 	}
 	pair, user, err := h.service.LoginWithProvider(ctx, in.Provider, in.Username, in.Password, in.DeviceName, in.IP)
 	if err != nil {
+		if throttled, ok := errors.AsType[*auth.SignInThrottledError](err); ok {
+			return TokenPairView{}, signInThrottledError(throttled)
+		}
 		if errors.Is(err, auth.ErrInvalidCredentials) {
 			return TokenPairView{}, apiError(http.StatusUnauthorized, "invalid_credentials", "Invalid username or password")
 		}
 		if errors.Is(err, auth.ErrUserDisabled) {
 			return TokenPairView{}, apiError(http.StatusForbidden, "user_disabled", "User account is disabled")
+		}
+		if apiErr := busyError(err); apiErr != nil {
+			return TokenPairView{}, apiErr
 		}
 		if apiErr := externalSignInError(err); apiErr != nil {
 			return TokenPairView{}, apiErr
@@ -243,7 +145,7 @@ func (h *AuthHandler) Login(ctx context.Context, in LoginInput) (TokenPairView, 
 		AccessToken:  pair.AccessToken,
 		RefreshToken: pair.RefreshToken,
 		ExpiresIn:    pair.ExpiresIn,
-		User:         buildUserResponse(user, effectiveDownloadAllowed(ctx, user, h.accessGroups), nil, nil),
+		User:         buildUserResponse(user, effectiveAccountPolicy(ctx, user, h.accessGroups), nil, nil),
 	}, nil
 }
 
@@ -275,6 +177,9 @@ func (h *AuthHandler) NetworkSignIn(ctx context.Context, in NetworkSignInInput) 
 		case errors.Is(err, auth.ErrUserDisabled):
 			return TokenPairView{}, apiError(http.StatusForbidden, "user_disabled", "User account is disabled")
 		}
+		if apiErr := busyError(err); apiErr != nil {
+			return TokenPairView{}, apiErr
+		}
 		if apiErr := externalSignInError(err); apiErr != nil {
 			return TokenPairView{}, apiErr
 		}
@@ -284,8 +189,17 @@ func (h *AuthHandler) NetworkSignIn(ctx context.Context, in NetworkSignInInput) 
 		AccessToken:  pair.AccessToken,
 		RefreshToken: pair.RefreshToken,
 		ExpiresIn:    pair.ExpiresIn,
-		User:         buildUserResponse(pair.User, effectiveDownloadAllowed(ctx, pair.User, h.accessGroups), nil, nil),
+		User:         buildUserResponse(pair.User, effectiveAccountPolicy(ctx, pair.User, h.accessGroups), nil, nil),
 	}, nil
+}
+
+// signInThrottledError is the 429 for a name that has used its sign-in
+// attempt budget: rate_limited on v1, as for a locked profile PIN, and the
+// rate_limited problem on v2. Both send Retry-After.
+func signInThrottledError(err *auth.SignInThrottledError) *APIError {
+	e := apiError(http.StatusTooManyRequests, "rate_limited", "Too many failed sign-ins for this name. Try again later.")
+	e.RetryAfter = ratelimit.RetryAfterSeconds(err.RetryAfter)
+	return e
 }
 
 // externalSignInError maps the refusals of the local-password policy and of
@@ -338,153 +252,6 @@ func (h *AuthHandler) EndImpersonation(ctx context.Context, claims *auth.Claims)
 	return nil
 }
 
-func (h *AuthHandler) HandleProviders(w http.ResponseWriter, r *http.Request) {
-	providers := h.ListProviders()
-	response := make([]authProviderResponse, 0, len(providers))
-	for _, provider := range providers {
-		response = append(response, authProviderResponse{
-			ID:             provider.ID,
-			DisplayName:    provider.DisplayName,
-			Mode:           provider.Mode,
-			Default:        provider.Default,
-			IconURL:        provider.IconURL,
-			InstallationID: provider.InstallationID,
-		})
-	}
-	writeJSON(w, http.StatusOK, response)
-}
-
-// HandleSetupStatus handles GET /auth/setup.
-func (h *AuthHandler) HandleSetupStatus(w http.ResponseWriter, r *http.Request) {
-	needsSetup, err := h.service.NeedsSetup(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, setupStatusResponse{
-		NeedsSetup: needsSetup,
-	})
-}
-
-// HandleSetup handles POST /auth/setup.
-func (h *AuthHandler) HandleSetup(w http.ResponseWriter, r *http.Request) {
-	var req setupRequest
-	if !decodeAuthRequestBody(w, r, &req, false) {
-		return
-	}
-
-	view, err := h.SetupInitialUser(auth.WithClientDevice(r.Context(), r.Header), RegistrationInput{
-		Username:             req.Username,
-		Email:                req.Email,
-		Password:             req.Password,
-		CreateDefaultProfile: req.CreateDefaultProfile,
-		DefaultProfileName:   req.DefaultProfileName,
-		DeviceName:           r.UserAgent(),
-		IP:                   clientip.FromContext(r.Context()),
-	})
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, loginResponseOf(view))
-}
-
-// HandleLogout handles POST /auth/logout. Requires authentication.
-func (h *AuthHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
-	claims, err := h.extractClaims(r)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Invalid or missing authentication token")
-		return
-	}
-
-	if err := h.Logout(r.Context(), claims); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleEndImpersonation handles POST /auth/impersonation/end. Requires authentication.
-func (h *AuthHandler) HandleEndImpersonation(w http.ResponseWriter, r *http.Request) {
-	claims, err := h.extractClaims(r)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Invalid or missing authentication token")
-		return
-	}
-	if err := h.EndImpersonation(r.Context(), claims); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleRefresh handles POST /auth/refresh.
-func (h *AuthHandler) HandleRefresh(w http.ResponseWriter, r *http.Request) {
-	var req refreshRequest
-	if !decodeAuthRequestBody(w, r, &req, false) {
-		return
-	}
-
-	pair, err := h.Refresh(r.Context(), req.RefreshToken)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, refreshResponse{
-		AccessToken:  pair.AccessToken,
-		RefreshToken: pair.RefreshToken,
-		ExpiresIn:    pair.ExpiresIn,
-	})
-}
-
-func (h *AuthHandler) HandlePluginLaunch(w http.ResponseWriter, r *http.Request) {
-	claims, err := h.extractClaims(r)
-	if err != nil || claims.SessionID == "" {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Invalid or missing authentication token")
-		return
-	}
-
-	const ttl = PluginLaunchTTL
-	token, err := h.PluginLaunchToken(claims, apimw.GetProfileID(r.Context()))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     auth.PluginAccessCookieName,
-		Value:    token,
-		Path:     "/api/v1",
-		MaxAge:   int(ttl.Seconds()),
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		Secure:   isSecureRequest(r),
-	})
-	writeJSON(w, http.StatusOK, pluginLaunchResponse{ExpiresIn: int(ttl.Seconds())})
-}
-
-// HandleMe handles GET /auth/me. Requires authentication.
-func (h *AuthHandler) HandleMe(w http.ResponseWriter, r *http.Request) {
-	claims, err := h.extractClaims(r)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Invalid or missing authentication token")
-		return
-	}
-
-	resp, err := h.CurrentUser(r.Context(), claims)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, resp)
-}
-
 // NeedsSetup reports whether the first administrator still has to be created.
 // v1 GET /auth/setup and v2 getSetupStatus both answer from it.
 func (h *AuthHandler) NeedsSetup(ctx context.Context) (bool, error) {
@@ -509,136 +276,82 @@ func (h *AuthHandler) CurrentUser(ctx context.Context, claims *auth.Claims) (Use
 		return UserView{}, apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
 	}
 
-	return buildUserResponse(user, effectiveDownloadAllowed(ctx, user, h.accessGroups), claims.ImpersonatorUserID, impersonator), nil
+	return buildUserResponse(user, effectiveAccountPolicy(ctx, user, h.accessGroups), claims.ImpersonatorUserID, impersonator), nil
 }
 
 // OAuthUserView projects the account read while redemption opened its login
 // session. Reading that account again could lose an already-redeemed login
 // during a temporary database failure.
 func (h *AuthHandler) OAuthUserView(ctx context.Context, user *models.User) UserView {
-	return buildUserResponse(user, effectiveDownloadAllowed(ctx, user, h.accessGroups), nil, nil)
-}
-
-// HandleListSessions handles GET /auth/sessions. Requires authentication.
-func (h *AuthHandler) HandleListSessions(w http.ResponseWriter, r *http.Request) {
-	claims, err := h.extractClaims(r)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Invalid or missing authentication token")
-		return
-	}
-
-	sessions, err := h.ListSessions(r.Context(), claims.UserID)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	resp := sessionsListResponse{
-		Sessions: make([]sessionResponse, 0, len(sessions)),
-	}
-	for _, s := range sessions {
-		resp.Sessions = append(resp.Sessions, sessionResponse{
-			ID:         s.ID,
-			DeviceName: s.DeviceName,
-			IPAddress:  s.IPAddress,
-			CreatedAt:  s.CreatedAt,
-			ExpiresAt:  s.ExpiresAt,
-			RevokedAt:  s.RevokedAt,
-		})
-	}
-
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// HandleDeleteSession handles DELETE /auth/sessions/{id}. Requires authentication.
-func (h *AuthHandler) HandleDeleteSession(w http.ResponseWriter, r *http.Request) {
-	claims, err := h.extractClaims(r)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Invalid or missing authentication token")
-		return
-	}
-
-	if err := h.RevokeSession(r.Context(), chi.URLParam(r, "id"), claims.UserID); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleSignupStatus handles GET /auth/signup.
-func (h *AuthHandler) HandleSignupStatus(w http.ResponseWriter, r *http.Request) {
-	enabled, err := h.SignupEnabled(r.Context())
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, signupStatusResponse{Enabled: enabled})
-}
-
-// HandleSignup handles POST /auth/signup.
-func (h *AuthHandler) HandleSignup(w http.ResponseWriter, r *http.Request) {
-	var req signupRequest
-	if !decodeAuthRequestBody(w, r, &req, false) {
-		return
-	}
-
-	view, err := h.Signup(auth.WithClientDevice(r.Context(), r.Header), RegistrationInput{
-		Username:             req.Username,
-		Email:                req.Email,
-		Password:             req.Password,
-		InviteCode:           req.InviteCode,
-		CreateDefaultProfile: req.CreateDefaultProfile,
-		DefaultProfileName:   req.DefaultProfileName,
-		DeviceName:           r.UserAgent(),
-		IP:                   clientip.FromContext(r.Context()),
-	})
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, loginResponseOf(view))
+	return buildUserResponse(user, effectiveAccountPolicy(ctx, user, h.accessGroups), nil, nil)
 }
 
 // --- Helper functions ---
 
-func buildLoginResponse(pair *auth.TokenPair, user *models.User, downloadAllowed bool, impersonator *models.User) loginResponse {
+func buildLoginResponse(pair *auth.TokenPair, user *models.User, policy accountPolicy, impersonator *models.User) loginResponse {
 	return loginResponse{
 		AccessToken:  pair.AccessToken,
 		RefreshToken: pair.RefreshToken,
 		ExpiresIn:    pair.ExpiresIn,
-		User:         buildUserResponse(user, downloadAllowed, impersonatorUserID(impersonator), impersonator),
+		User:         buildUserResponse(user, policy, impersonatorUserID(impersonator), impersonator),
 	}
 }
 
-// effectiveDownloadAllowed resolves the account's download gate through the
-// inherit/override policy (user override, else access group, else permissive
-// default). A failed group lookup reports downloads as unavailable rather than
-// falling back to the raw account value, which is not meaningful on its own.
-func effectiveDownloadAllowed(ctx context.Context, user *models.User, groups access.GroupPolicyProvider) bool {
+// accountPolicy is the slice of the effective access policy the account
+// payload reports, so clients show only what the server's gates allow.
+type accountPolicy struct {
+	DownloadAllowed bool
+	Permissions     []string
+}
+
+// effectiveAccountPolicy resolves the account's download gate and permissions
+// through the inherit/override policy (user override, else access group, else
+// permissive default), the same resolution the route gates enforce. A failed
+// group lookup fails closed: no downloads and no permissions, matching the
+// gates, which deny when the policy cannot be resolved.
+func effectiveAccountPolicy(ctx context.Context, user *models.User, groups access.GroupPolicyProvider) accountPolicy {
 	if user == nil {
-		return false
+		return accountPolicy{Permissions: []string{}}
 	}
 	effective, err := access.EffectivePolicyForUser(ctx, user, groups)
 	if err != nil {
-		slog.WarnContext(ctx, "failed to resolve effective download policy", "component", "api", "user_id", user.ID, "error", err)
-		return false
+		slog.WarnContext(ctx, "failed to resolve effective account policy", "component", "api", "user_id", user.ID, "error", err)
+		return accountPolicy{Permissions: []string{}}
 	}
-	return effective.DownloadAllowed
+	policy := accountPolicy{DownloadAllowed: effective.DownloadAllowed, Permissions: []string{}}
+	if user.Enabled {
+		policy.Permissions = auth.PolicyPermissions(effective)
+	}
+	return policy
 }
 
-func buildUserResponse(user *models.User, downloadAllowed bool, impersonatorUserID *int, impersonator *models.User) UserView {
+// v1AccountPermissions keeps the frozen v1 account list: an enabled admin
+// reports every assignable permission from its role, as v1 always has, and
+// every other account reports its policy permissions. No gate reads this list;
+// the role grant itself applies only while an admin acts as administrator.
+func v1AccountPermissions(user *models.User, policyPermissions []string) []string {
+	if user.Enabled && user.Role == models.RoleAdmin {
+		return auth.AssignablePermissions()
+	}
+	return policyPermissions
+}
+
+func buildUserResponse(user *models.User, policy accountPolicy, impersonatorUserID *int, impersonator *models.User) UserView {
 	resp := UserView{
 		ID:              user.ID,
 		Username:        user.Username,
 		Email:           user.Email,
 		Role:            user.Role,
-		Permissions:     auth.EffectivePermissions(user),
-		DownloadAllowed: downloadAllowed,
+		DownloadAllowed: policy.DownloadAllowed,
 		// An impersonating administrator is not restricted (auth.Service.Refresh).
 		PasswordChangeRequired: user.PasswordChangeRequired && impersonatorUserID == nil,
+		PolicyPermissions:      policy.Permissions,
 	}
+	if resp.PolicyPermissions == nil {
+		// Clients iterate permissions; never serialize it as null.
+		resp.PolicyPermissions = []string{}
+	}
+	resp.Permissions = v1AccountPermissions(user, resp.PolicyPermissions)
 	if impersonatorUserID != nil {
 		resp.Impersonation = &ImpersonationView{
 			Active:             true,
@@ -675,21 +388,6 @@ func (h *AuthHandler) loadImpersonator(ctx context.Context, claims *auth.Claims)
 		return nil, nil
 	}
 	return h.service.GetCurrentUser(ctx, &auth.Claims{UserID: *claims.ImpersonatorUserID})
-}
-
-// extractClaims extracts JWT claims from the Authorization header.
-func (h *AuthHandler) extractClaims(r *http.Request) (*auth.Claims, error) {
-	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
-		return nil, auth.ErrInvalidToken
-	}
-
-	parts := strings.SplitN(authHeader, " ", 2)
-	if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
-		return nil, auth.ErrInvalidToken
-	}
-
-	return h.jwt.ValidateToken(parts[1])
 }
 
 // writeJSON marshals the given value as JSON and writes it to the response.

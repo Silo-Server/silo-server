@@ -4,21 +4,30 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/logstream"
 )
 
 // Consumer batch-inserts one node's activity log entries into PostgreSQL and
 // fans them out to the admin live tail.
 type Consumer struct {
-	pool      *pgxpool.Pool
+	pool      consumerDB
 	batchSize int
 	interval  time.Duration
 	streamHub *logstream.Hub
+}
+
+type consumerDB interface {
+	queryer
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 }
 
 // NewConsumer creates a new activity log consumer.
@@ -51,12 +60,66 @@ func (c *Consumer) Run(ctx context.Context, ch <-chan LogEntry) {
 	}.Run(ctx, ch)
 }
 
-// insertBatch performs a bulk INSERT into the activity_log table.
+// recordLastActivity moves each account's user_last_activity row forward to
+// its newest entry in the batch. Accounts are written in id order so batches
+// from different nodes lock the same rows in the same order and cannot
+// deadlock; an older timestamp never overwrites a newer one.
+func recordLastActivity(ctx context.Context, pool consumerDB, entries []LogEntry) error {
+	latest := map[int]time.Time{}
+	for _, e := range entries {
+		if e.UserID == nil {
+			continue
+		}
+		if ts, ok := latest[*e.UserID]; !ok || e.Timestamp.After(ts) {
+			latest[*e.UserID] = e.Timestamp
+		}
+	}
+	if len(latest) == 0 {
+		return nil
+	}
+	ids := slices.Sorted(maps.Keys(latest))
+	times := make([]time.Time, len(ids))
+	for i, id := range ids {
+		times[i] = latest[id]
+	}
+	// The join skips accounts deleted since the request was logged.
+	_, err := pool.Exec(ctx, `
+		INSERT INTO user_last_activity (user_id, last_active_at)
+		SELECT v.user_id, v.ts
+		FROM unnest($1::bigint[], $2::timestamptz[]) WITH ORDINALITY AS v(user_id, ts, n)
+		JOIN users u ON u.id = v.user_id
+		ORDER BY v.n
+		ON CONFLICT (user_id) DO UPDATE SET last_active_at = EXCLUDED.last_active_at
+		WHERE user_last_activity.last_active_at < EXCLUDED.last_active_at`, ids, times)
+	if err != nil {
+		return fmt.Errorf("recording last activity: %w", err)
+	}
+	return nil
+}
+
+// insertBatch stores a batch in activity_log and records its accounts' last
+// activity, including requests whose audited mutation already stored the row.
 func (c *Consumer) insertBatch(ctx context.Context, entries []LogEntry) error {
 	if len(entries) == 0 {
 		return nil
 	}
+	stored := slices.DeleteFunc(slices.Clone(entries), func(e LogEntry) bool { return e.Persisted })
+	if len(stored) > 0 {
+		if err := c.insertRows(ctx, stored); err != nil {
+			return err
+		}
+	}
+	// The rows are stored; a failure here only leaves last activity stale
+	// until the account's next batch, so it must not retry the insert.
+	if err := recordLastActivity(ctx, c.pool, entries); err != nil {
+		slog.WarnContext(ctx, "activitylog: failed to record last activity", "component", "activitylog", "error", err)
+	}
+	return nil
+}
 
+// insertRows performs a bulk INSERT into the activity_log table and publishes
+// the stored rows to the live tail.
+func (c *Consumer) insertRows(ctx context.Context, entries []LogEntry) error {
 	var b strings.Builder
 	b.WriteString("INSERT INTO activity_log (timestamp, client_ip, user_id, impersonator_user_id, session_id, playback_session_id, request_id, node_id, method, path, path_pattern, status_code, user_agent, duration_ms) VALUES ")
 
@@ -72,7 +135,7 @@ func (c *Consumer) insertBatch(ctx context.Context, entries []LogEntry) error {
 		args = append(args, e.Timestamp, logstream.SafeText(e.ClientIP), e.UserID, e.ImpersonatorUserID,
 			logstream.SafeText(e.SessionID), logstream.SafeText(e.PlaybackSessionID), logstream.SafeText(e.RequestID),
 			logstream.SafeText(e.NodeID), logstream.SafeText(e.Method), logstream.SafeText(e.Path),
-			logstream.SafeText(e.PathPattern), e.StatusCode, logstream.SafeText(e.UserAgent), e.DurationMs)
+			logstream.SafeText(e.PathPattern), e.StatusCode, auditmutation.BoundUserAgent(e.UserAgent), e.DurationMs)
 	}
 	b.WriteString(" RETURNING id, timestamp, client_ip::text, user_id, impersonator_user_id, COALESCE(session_id, ''), COALESCE(playback_session_id, ''), COALESCE(request_id, ''), COALESCE(node_id, ''), method, path, COALESCE(path_pattern, ''), COALESCE(status_code, 0), COALESCE(user_agent, ''), COALESCE(duration_ms, 0)")
 
@@ -104,6 +167,7 @@ func (c *Consumer) insertBatch(ctx context.Context, entries []LogEntry) error {
 		); err != nil {
 			return fmt.Errorf("scan inserted activity log row: %w", err)
 		}
+		entry.UserAgent = auditmutation.BoundUserAgent(entry.UserAgent)
 		inserted = append(inserted, entry)
 	}
 	if err := rows.Err(); err != nil {

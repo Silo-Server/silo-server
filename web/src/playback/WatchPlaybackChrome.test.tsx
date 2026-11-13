@@ -6,6 +6,12 @@ import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
 import { createWatchRouteRequest } from "@/pages/watchRouteHelpers";
+import {
+  isStillWatchingGated,
+  recordAutoAdvance,
+  resetStillWatchingStreak,
+  setStillWatchingThreshold,
+} from "@/player/stillWatching";
 import { PlaybackFullscreenRoot } from "./PlaybackFullscreenRoot";
 import { WatchPlaybackBar, WatchPlaybackProvider } from "./WatchPlaybackChrome";
 import {
@@ -245,6 +251,30 @@ describe("WatchPlaybackBar time updates", () => {
     act(() => harness.controller().startPlayback({ contentId: "movie-2", libraryId: 1 }, "viewer"));
     expect(screen.getByText("0:00")).toBeInTheDocument();
     expect(screen.getByText("1:30:00")).toBeInTheDocument();
+  });
+});
+
+describe("still-watching count", () => {
+  afterEach(() => resetStillWatchingStreak());
+
+  it("resets when the viewer opens the title a background start already began", () => {
+    setStillWatchingThreshold(1);
+    const harness = renderPlaybackHarness();
+    const first = createWatchRouteRequest({ contentId: "episode-1", libraryId: 1 });
+    act(() => harness.controller().syncRouteRequest(first));
+    act(() => harness.controller().minimizePlayback());
+
+    // The minimized player advances on its own; no route follows it.
+    recordAutoAdvance();
+    act(() =>
+      harness.controller().startPlayback({ contentId: "episode-2", libraryId: 1 }, "automatic"),
+    );
+    expect(isStillWatchingGated()).toBe(true);
+
+    // Later the viewer opens that episode from a link that names its file.
+    const pick = createWatchRouteRequest({ contentId: "episode-2", fileId: 7, libraryId: 1 });
+    act(() => harness.controller().syncRouteRequest(pick));
+    expect(isStillWatchingGated()).toBe(false);
   });
 });
 

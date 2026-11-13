@@ -69,13 +69,21 @@ type ItemVideo struct {
 
 // MediaExtra is a row in media_extras: a scanner-discovered local extra
 // (featurette, deleted scene, local trailer file, ...) belonging to a parent
-// movie or series. Its ContentID is minted with contentid.ForLocal on the
-// backing file path, making it a playable watch target through
-// GetWatchDetail's fallback chain; access control is the parent's.
+// movie or series. Its ContentID is minted from the backing file path with
+// contentid.ForLocal (see the scanner's extraContentID), making it a playable
+// watch target through GetWatchDetail's fallback chain; access control is the
+// parent's.
 type MediaExtra struct {
 	ContentID string
 	ParentID  string // media_items.content_id of the owning movie/series
 	Kind      ExtraKind
 	Title     string
 	SortOrder int
+	// StillPath is the cached 16:9 card image, empty when the extra has none.
+	// StillSource identifies what produced it: a sidecar's file:// URL with
+	// its size and modification time, which the scanner writes, or a frame
+	// key (catalog.StillSourceFramePrefix) from internal/extrastills.
+	StillPath      string
+	StillSource    string
+	StillThumbhash string
 }

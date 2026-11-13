@@ -21,13 +21,16 @@ import { EnterKeyHint } from "@/components/ui/kbd";
 import ViewTransitionLink from "./ViewTransitionLink";
 import { RequestStatusBadge } from "./RequestStatusBadge";
 import RequestResultsGrid, { RequestResultsPager } from "./RequestResultsGrid";
+import { useT, type Translate } from "@/i18n";
 
 function cardKey(item: Pick<RequestMediaResult, "media_type" | "tmdb_id">): string {
   return `${item.media_type}-${item.tmdb_id}`;
 }
 
-function unavailableReasonLabel(item: RequestMediaResult): string {
-  return item.request.reason ? formatRequestReason(item.request.reason) : "Blocked";
+function unavailableReasonLabel(t: Translate, item: RequestMediaResult): string {
+  return item.request.reason
+    ? formatRequestReason(item.request.reason)
+    : t("web.requests.toAdd.blocked");
 }
 
 const GRID_LIMIT = 20;
@@ -139,10 +142,11 @@ function HeaderCopy({
   libraryResultsKnown: boolean;
   count: number;
 }) {
+  const t = useT();
   if (libraryHadHits) {
     return (
       <div className="text-muted-foreground flex items-center gap-2 px-3 pt-2 pb-1 text-[0.625rem] font-medium tracking-[0.1em] uppercase">
-        <span>Request to Add</span>
+        <span>{t("web.requests.toAdd.headerHits")}</span>
         <span className="bg-muted text-muted-foreground rounded-full px-1.5 text-[0.625rem]">
           {count}
         </span>
@@ -152,12 +156,16 @@ function HeaderCopy({
 
   if (!libraryResultsKnown) {
     return (
-      <div className="text-muted-foreground px-3 pt-3 pb-1 text-[0.75rem]">Discovery matches:</div>
+      <div className="text-muted-foreground px-3 pt-3 pb-1 text-[0.75rem]">
+        {t("web.requests.toAdd.headerUnknown")}
+      </div>
     );
   }
 
   return (
-    <div className="text-muted-foreground px-3 pt-3 pb-1 text-[0.75rem]">Not in your library</div>
+    <div className="text-muted-foreground px-3 pt-3 pb-1 text-[0.75rem]">
+      {t("web.requests.toAdd.headerNoHits")}
+    </div>
   );
 }
 
@@ -172,6 +180,7 @@ function DialogVariant({
   libraryResultsKnown: boolean;
   combobox?: RequestSuggestionCombobox;
 }) {
+  const t = useT();
   return (
     <div className="border-border/60 border-t pt-1">
       <HeaderCopy
@@ -182,7 +191,7 @@ function DialogVariant({
       <div
         id={combobox?.listboxId}
         role="listbox"
-        aria-label="Request suggestions"
+        aria-label={t("web.requests.toAdd.suggestions")}
         className="px-1 py-1"
       >
         {items.map((item, index) => (
@@ -213,13 +222,14 @@ function DialogRow({
   onSelect?: () => void;
   onPick?: (item: RequestMediaResult) => void;
 }) {
+  const t = useT();
   const poster = tmdbImageURL(item.poster_path);
   const Icon = item.media_type === "series" ? Tv : Film;
   const requestable = item.request.requestable;
   const state = item.request.status
     ? requestDisplayState(item.request.status, undefined, item.request.state)
     : undefined;
-  const reasonLabel = !state && !requestable ? unavailableReasonLabel(item) : null;
+  const reasonLabel = !state && !requestable ? unavailableReasonLabel(t, item) : null;
 
   // A plain click goes through the host so it can close the dialog; modified
   // clicks keep the link's own new-tab and new-window behavior.
@@ -250,7 +260,7 @@ function DialogRow({
       tabIndex={-1}
       to={requestDetailHref(item.media_type, item.tmdb_id)}
       onClick={handleClick}
-      className="data-[selected]:bg-accent flex w-full items-center gap-3 rounded-md px-3 py-2 text-left transition-colors"
+      className="data-[selected]:bg-accent flex w-full items-center gap-3 rounded-md px-3 py-2 text-start transition-colors"
     >
       <div
         className={cn(
@@ -269,8 +279,14 @@ function DialogRow({
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium">{item.title}</div>
         <div className="text-muted-foreground text-xs">
-          {item.year ? `${item.year} · ` : ""}
-          {item.media_type === "series" ? "Series" : "Movie"}
+          {[
+            item.year,
+            item.media_type === "series"
+              ? t("web.requests.toAdd.series")
+              : t("web.requests.toAdd.movie"),
+          ]
+            .filter(Boolean)
+            .join(" · ")}
         </div>
       </div>
       {state ? (
@@ -308,6 +324,7 @@ function GridVariant({
   /** Set when this (later) page failed to load. */
   pageError: { onRetry: () => void; isRetrying: boolean } | null;
 }) {
+  const t = useT();
   const sectionRef = useRef<HTMLElement>(null);
 
   function changePage(next: number) {
@@ -321,18 +338,24 @@ function GridVariant({
 
   // Laid out like the People section above it: a plain heading over the results.
   return (
-    <section ref={sectionRef} aria-label="Request to add" className="scroll-mt-4 space-y-3">
+    <section
+      ref={sectionRef}
+      aria-label={t("web.requests.toAdd.heading")}
+      className="scroll-mt-4 space-y-3"
+    >
       <div className="space-y-1">
-        <h2 className="text-lg font-semibold">Request to add</h2>
+        <h2 className="text-lg font-semibold">{t("web.requests.toAdd.heading")}</h2>
         {libraryResultsKnown && !libraryHadHits ? (
           <p className="text-muted-foreground text-sm">
-            Nothing in your library matches &ldquo;{query}&rdquo;.
+            {t("web.requests.toAdd.noLibraryMatch", { query })}
           </p>
         ) : null}
       </div>
       {pageError ? (
         <div role="alert" className="flex flex-wrap items-center gap-x-3 gap-y-2 py-6">
-          <p className="text-muted-foreground text-sm">Couldn&rsquo;t load page {page}.</p>
+          <p className="text-muted-foreground text-sm">
+            {t("web.requests.toAdd.pageFailed", { page: page })}
+          </p>
           <Button
             variant="outline"
             size="sm"
@@ -340,10 +363,10 @@ function GridVariant({
             disabled={pageError.isRetrying}
           >
             <RefreshCw className="size-4" aria-hidden />
-            Retry
+            {t("common.retry")}
           </Button>
           <Button variant="ghost" size="sm" onClick={() => changePage(1)}>
-            Back to page 1
+            {t("web.requests.toAdd.firstPage")}
           </Button>
         </div>
       ) : items.length > 0 ? (
@@ -352,13 +375,15 @@ function GridVariant({
           className={cn("transition-opacity", isChangingPage && "opacity-60")}
         />
       ) : (
-        <p className="text-muted-foreground text-sm">
-          Every title on this page is already in your library.
-        </p>
+        <p className="text-muted-foreground text-sm">{t("web.requests.toAdd.allInLibrary")}</p>
       )}
       <RequestResultsPager
-        label="Request to add pages"
-        position={totalPages > 0 ? `Page ${page} of ${totalPages}` : `Page ${page}`}
+        label={t("web.requests.toAdd.pages")}
+        position={
+          totalPages > 0
+            ? t("web.requests.toAdd.pageOf", { page: page, total: totalPages })
+            : t("web.requests.toAdd.page", { page: page })
+        }
         hasPrevious={page > 1}
         hasNext={page < totalPages}
         onPrevious={() => changePage(page - 1)}

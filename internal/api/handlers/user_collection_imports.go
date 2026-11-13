@@ -8,12 +8,11 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"path"
+	"regexp"
 	"strings"
-	"time"
 
-	"github.com/go-chi/chi/v5"
-
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -59,10 +58,6 @@ func NewUserCollectionImportHandler(
 	}
 }
 
-func (h *UserCollectionImportHandler) HandleListTemplates(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, h.registry.Catalog())
-}
-
 type UserImportSharedFields struct {
 	Title                  string          `json:"title"`
 	Description            string          `json:"description"`
@@ -95,53 +90,6 @@ type UserImportTMDBListRequest struct {
 type UserImportView struct {
 	Collection PersonalCollectionView      `json:"collection"`
 	Sync       *usercollections.SyncResult `json:"sync,omitempty"`
-}
-
-func (h *UserCollectionImportHandler) HandleImportMDBList(w http.ResponseWriter, r *http.Request) {
-	var req UserImportMDBListRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	userID := apimw.GetUserID(r.Context())
-	resp, err := h.ImportMDBList(r.Context(), userID, apimw.GetProfileID(r.Context()), req)
-	if err == nil {
-		err = v1CollectionAudience(r.Context(), h.storeProvider, userID, &resp.Collection)
-	}
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, resp)
-}
-
-func (h *UserCollectionImportHandler) HandleImportTMDB(w http.ResponseWriter, r *http.Request) {
-	var req UserImportTMDBRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	userID := apimw.GetUserID(r.Context())
-	resp, err := h.ImportTMDB(r.Context(), userID, apimw.GetProfileID(r.Context()), req)
-	if err == nil {
-		err = v1CollectionAudience(r.Context(), h.storeProvider, userID, &resp.Collection)
-	}
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, resp)
-}
-
-// HandleImportTrakt answers the frozen v1 profile Trakt import route. Silo no
-// longer supports Trakt, so every well-formed request is refused.
-func (h *UserCollectionImportHandler) HandleImportTrakt(w http.ResponseWriter, r *http.Request) {
-	var req struct{}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	writeAPIError(w, traktImportRetired())
 }
 
 // ImportMDBList creates an MDBList-backed collection for the profile and
@@ -240,6 +188,10 @@ func (h *UserCollectionImportHandler) createImportedCollection(
 	if err := validateOptionalLibraryIDs(cfg.LibraryIDs); err != nil {
 		return none, err
 	}
+	posterURL, err := importedPosterURL(shared.PosterURL)
+	if err != nil {
+		return none, err
+	}
 
 	sourceConfigJSON, err := usercollections.MarshalSourceConfig(cfg)
 	if err != nil {
@@ -267,34 +219,21 @@ func (h *UserCollectionImportHandler) createImportedCollection(
 		SyncSchedule:           schedule,
 		NextSyncAt:             usercollections.InitialNextSyncAt(schedule),
 		DisplayQueryDefinition: displayQueryDefinition,
-		PosterURL:              strings.TrimSpace(shared.PosterURL),
+		PosterURL:              posterURL,
 	})
 	if err != nil {
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to create collection")
 	}
 
-	if err := h.storeBundledTemplatePoster(ctx, store, collection, strings.TrimSpace(shared.PosterURL)); err != nil {
+	if err := h.storeBundledTemplatePoster(ctx, store, collection, posterURL); err != nil {
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to process template poster")
 	}
 
 	syncResult, updated, syncErr := h.sync.RunSync(ctx, userID, store, collection)
 	if syncErr != nil {
-		// Persist failure state inline so the UI shows the error and the user
-		// can retry; the row is intentionally kept around for that retry path.
-		_ = store.UpdateCollectionSyncState(ctx, userstore.UpdateCollectionSyncStateInput{
-			ID:         collection.ID,
-			Status:     "failed",
-			Message:    syncErr.Error(),
-			LastSyncAt: time.Now().UTC(),
-			NextSyncAt: usercollections.InitialNextSyncAt(schedule),
-
-			// The sync started on the schedule and next run the collection was
-			// created with.
-			ScheduleAtStart:   collection.SyncSchedule,
-			NextSyncAtAtStart: collection.NextSyncAt,
-		})
-		// Render what was stored, as a successful sync does; a schedule
-		// edited while the sync ran kept its own next run.
+		// RunSync recorded the failure, and the row is kept so the user can
+		// retry. Render what was stored, as a successful sync does; a
+		// schedule edited while the sync ran kept its own next run.
 		if updated, err = store.GetCollection(ctx, collection.ID); err != nil {
 			updated = collection
 			updated.LastSyncStatus = "failed"
@@ -362,34 +301,8 @@ func (h *UserCollectionImportHandler) artworkBackend() blobstore.Store {
 // collectionView renders a stored collection with its poster presigned.
 func (h *UserCollectionImportHandler) collectionView(ctx context.Context, c userstore.Collection) PersonalCollectionView {
 	resp := toCollectionResponse(c)
-	resp.PosterURL = h.presignCollectionPoster(ctx, c.PosterURL)
+	resp.PosterURL = personalCollectionPosterURL(ctx, h.ArtworkResolver, c.ID, c.PosterURL)
 	return resp
-}
-
-func (h *UserCollectionImportHandler) presignCollectionPoster(ctx context.Context, path string) string {
-	if path == "" {
-		return ""
-	}
-	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		return path
-	}
-	if strings.HasPrefix(path, "/") {
-		return path
-	}
-	if h.ArtworkResolver == nil {
-		return ""
-	}
-	key := cardThumbnailPath(path)
-	return h.ArtworkResolver.ResolveURLs(ctx, []string{key})[key].URL
-}
-
-func (h *UserCollectionImportHandler) HandleSync(w http.ResponseWriter, r *http.Request) {
-	result, err := h.SyncPersonalCollection(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), chi.URLParam(r, "id"))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
 }
 
 type MDBListDiscoveryView struct {
@@ -436,32 +349,39 @@ func (h *UserCollectionImportHandler) TopMDBList(ctx context.Context) (MDBListDi
 	return MDBListDiscoveryView{Configured: true, Lists: lists}, nil
 }
 
-func (h *UserCollectionImportHandler) HandleSearchMDBList(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.SearchMDBList(r.Context(), r.URL.Query().Get("q"))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-func (h *UserCollectionImportHandler) HandleTopMDBList(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.TopMDBList(r.Context())
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
 func validateOptionalLimit(limit *int) error {
 	if limit == nil {
 		return nil
 	}
-	if *limit <= 0 || *limit > collectionutil.MaxExplicitItemLimit {
-		return fieldError("limit", fmt.Sprintf("limit must be between 1 and %d", collectionutil.MaxExplicitItemLimit))
+	if *limit <= 0 {
+		return fieldError("limit", "limit must be at least 1")
 	}
 	return nil
+}
+
+// templatePosterPath matches a path below the bundled template poster
+// directory written in plain file name characters. It leaves out percent
+// escapes, backslashes, queries and fragments, which a browser could resolve
+// to a path outside that directory.
+var templatePosterPath = regexp.MustCompile(`^` + regexp.QuoteMeta(collectionTemplateImageDir) + `[A-Za-z0-9._/-]+$`)
+
+// importedPosterURL returns the poster an import stores for its collection:
+// none, a bundled template poster, or an http(s) image URL. The stored value
+// is shown as the collection's poster, so a storage key is refused: only the
+// server names the objects a collection's poster is read from.
+func importedPosterURL(raw string) (string, error) {
+	poster := strings.TrimSpace(raw)
+	switch {
+	case poster == "":
+		return "", nil
+	case templatePosterPath.MatchString(poster) && poster == path.Clean(poster):
+		return poster, nil
+	case strings.HasPrefix(poster, "http://"), strings.HasPrefix(poster, "https://"):
+		if parsed, err := url.Parse(poster); err == nil && parsed.Host != "" && catalog.ImageURLOrEmpty(poster) != "" {
+			return poster, nil
+		}
+	}
+	return "", fieldError("poster_url", "poster_url must be a collection template poster or an http(s) image URL")
 }
 
 func validateOptionalLibraryIDs(libraryIDs []int) error {
@@ -504,7 +424,10 @@ func (h *UserCollectionImportHandler) SyncPersonalCollection(ctx context.Context
 		if errors.Is(err, usercollections.ErrSyncUnsupported) {
 			return nil, apiError(http.StatusBadRequest, "bad_request", "This collection does not support sync")
 		}
-		return nil, apiError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Sync failed: %v", err))
+		// RunSync recorded the failure on the collection. The frozen v1 route
+		// keeps answering 500; the cause lets v2 answer a source that refused
+		// or did not answer as dependency_unavailable with the reason.
+		return nil, apiError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Sync failed: %v", err)).WithCause(err)
 	}
 	return result, nil
 }

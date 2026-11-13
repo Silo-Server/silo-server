@@ -119,6 +119,13 @@ func (s *MetadataService) LocalImagePreview(ctx context.Context, contentID strin
 	if err != nil {
 		return "", err
 	}
+	// A sidecar may be a HEIC or AVIF under a .jpg name; the image cache
+	// renders those the same way when the image is applied.
+	if imageutil.NeedsRasterizing(data) {
+		if data, err = imageutil.Rasterize(data); err != nil {
+			return "", err
+		}
+	}
 	preview, err := imageutil.EncodeWebPWidth(data, localArtworkPreviewWidth)
 	if err != nil {
 		return "", err
@@ -127,7 +134,7 @@ func (s *MetadataService) LocalImagePreview(ctx context.Context, contentID strin
 }
 
 // readLocalSidecar reads a file:// sidecar source of contentID, without its
-// fingerprint, under the library-root confinement of readConfinedLocalImage.
+// fingerprint, under the library-root confinement of readLocalImageOfTitle.
 func (s *MetadataService) readLocalSidecar(ctx context.Context, contentID, source string) ([]byte, error) {
 	if s.libraryRoots == nil {
 		return nil, errors.New("missing library root resolver for local artwork")
@@ -140,7 +147,7 @@ func (s *MetadataService) readLocalSidecar(ctx context.Context, contentID, sourc
 	if err != nil {
 		return nil, fmt.Errorf("resolving library roots: %w", err)
 	}
-	return readConfinedLocalImage(localPath, roots)
+	return readLocalImageOfTitle(ctx, s.libraryRoots, contentID, localPath, roots)
 }
 
 // ApplyLocalItemImageRequest describes a local sidecar image an admin chose

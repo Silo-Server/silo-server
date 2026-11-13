@@ -2,7 +2,6 @@
 
 The native v2 library administration operations are acting-admin operations. Their
 complete request and response schemas are generated in `contracts/api/v2/openapi.json`.
-The frozen v1 bridge keeps its existing responses.
 
 `GET /api/v2/libraries/roots`, `GET /api/v2/libraries/skipped-roots`,
 `GET /api/v2/libraries/stale-ids`, and `GET /api/v2/libraries/unmatched-items` return
@@ -36,10 +35,10 @@ deletion and metadata-refresh jobs return their canonical job URI in `Location`.
 ## Unmatched items
 
 `GET /api/v2/libraries/unmatched-items` (`listUnmatchedItems`) lists the items still
-`unmatched`, `pending`, or `ambiguous`, in title order. It leaves out items an
-administrator marked as intentionally unmatched; with `ignored=true` it lists only
-those, each with `ignored_at`. The cursor is bound to `q` and `ignored`. The frozen v1
-listing also leaves ignored items out; its response shape is unchanged.
+`unmatched`, `pending`, or `ambiguous`, in title order. It leaves out items in no
+library, such as one whose file was renamed away and that the scanner's file removal
+grace still holds. It also leaves out items an administrator marked as intentionally
+unmatched; with `ignored=true` it lists only those, each with `ignored_at`. The cursor is bound to `q` and `ignored`.
 
 `PUT /api/v2/libraries/unmatched-items/{content_id}/ignore` (`ignoreUnmatchedItem`)
 marks a movie or series as intentionally unmatched, for media no provider lists. It
@@ -51,7 +50,10 @@ queues drop its files, a scan neither retries it nor reports it as still unmatch
 library refresh leaves it out, an item refresh completes without changes, and a season
 or episode refresh stops before any provider search and counts as a failed attempt. The
 item stays in its library and playable with its local metadata. Match Item
-still works, and a successful match clears the mark.
+still works, and a successful match clears the mark. A root override saved for an
+ignored item waits: the matcher applies it only after the item is restored, when it
+matches the item's queued files again. Match Item is the way to give an ignored item a
+provider identity directly.
 
 `DELETE /api/v2/libraries/unmatched-items/{content_id}/ignore`
 (`unignoreUnmatchedItem`) clears the mark and answers `204`; an item without the mark is
@@ -70,8 +72,6 @@ change. It appears on every library read, is optional on `createLibrary`
 `updateLibrary` body (omitted leaves it unchanged). Existing libraries have it
 on. Monitoring takes effect only while the server-wide
 `scanner.realtime_monitoring` setting is on and the library is enabled.
-The frozen `/api/v1` library routes neither return nor accept the member, and a
-v1 update leaves it unchanged.
 
 `GET /api/v2/libraries/realtime-monitoring` (`getLibraryRealtimeMonitoring`,
 administrators only) reports whether monitoring works for each library. The body

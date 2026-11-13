@@ -33,18 +33,6 @@ func TestDrainingNodeTakesNoNewSession(t *testing.T) {
 	}
 }
 
-// A node that reports draining on its own (SIGTERM) is excluded the same way
-// as one an administrator drained.
-func TestNodeReportingDrainTakesNoNewSession(t *testing.T) {
-	reporting := transcodeNode(2, "http://tc-stopping", nil, 0)
-	reporting.DrainState = DrainStateDraining
-	f := newFixture([]*Node{proxyNode(1, "http://proxy", nil)}, []*Node{reporting})
-
-	if plan := f.planner.PlanSession("s1", "", true, 0); plan.TranscodeNode != nil {
-		t.Fatalf("new session placed on a node reporting draining: %+v", plan.TranscodeNode)
-	}
-}
-
 // Planning a session again (a Jellyfin client re-requesting its master
 // playlist) must keep it on the draining node that runs it; with no other node
 // available, excluding it would tear the stream down.

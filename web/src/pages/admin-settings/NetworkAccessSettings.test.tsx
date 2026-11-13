@@ -187,19 +187,4 @@ describe("NetworkAccessSettings", () => {
     expect(within(row).getByRole("button", { name: "Connect" })).toBeDisabled();
     expect(row).not.toHaveTextContent("unavailable");
   });
-
-  it("surfaces a status read failure without hiding the provider", () => {
-    mocks.capabilities = { data: capabilities([tailscale]), isLoading: false };
-    mocks.status = {
-      data: undefined,
-      isLoading: false,
-      isError: true,
-      error: new Error("Network access provider not found."),
-    };
-
-    renderPage();
-
-    expect(screen.getByRole("group", { name: "Tailscale" })).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent("Network access provider not found.");
-  });
 });

@@ -49,7 +49,9 @@ type episodeRepoForBatchLoader interface {
 	ListBySeason(ctx context.Context, seriesID string, seasonNum int) ([]*models.Episode, error)
 	ListBySeries(ctx context.Context, seriesID string) ([]*models.Episode, error)
 	ListBySeriesIDs(ctx context.Context, seriesIDs []string) (map[string][]*models.Episode, error)
-	ListAdjacentInSeries(ctx context.Context, seriesID string, seasonNumber, episodeNumber int) ([]*models.Episode, error)
+	ListIDsBySeriesIDs(ctx context.Context, seriesIDs []string) (map[string][]string, error)
+	ListIDsBySeasonIDs(ctx context.Context, seasonIDs []string) (map[string][]string, error)
+	ListAdjacentInSeriesFor(ctx context.Context, seriesID string, seasonNumber, episodeNumber int, access catalog.AccessFilter) ([]*models.Episode, error)
 }
 
 func (h *ItemsHandler) fetchCompatItemsByContentIDs(ctx context.Context, session *Session, contentIDs []string, libraryID *int) (map[string]upstreamListItem, error) {
@@ -225,10 +227,7 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			si.logo_path,
 			si.status,
 			si.updated_at,
-			EXISTS (
-				SELECT 1 FROM media_files mf
-				WHERE mf.episode_id = e.content_id AND mf.missing_since IS NULL
-			)
+			`+catalog.EpisodeHasServingFileSQL+`
 		FROM %s
 		WHERE %s
 	`, fromClause, strings.Join(conditions, " AND "))

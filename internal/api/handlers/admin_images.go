@@ -2,15 +2,14 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
+	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/logredact"
@@ -28,6 +27,7 @@ type ImageService interface {
 	FetchItemImagesWithLocal(ctx context.Context, providerIDs map[string]string, contentType string, language string, folderID int, contentID string) ([]metadata.RemoteImage, map[string]string, error)
 	LocalImagePreview(ctx context.Context, contentID string, sourceURL string) (string, error)
 	ApplyLocalItemImage(ctx context.Context, req metadata.ApplyLocalItemImageRequest) (*metadata.ApplyItemImageResult, error)
+	ApplyUploadedItemImage(ctx context.Context, req metadata.ApplyUploadedItemImageRequest) (*metadata.ApplyUploadedItemImageResult, error)
 }
 
 // ImageItemLookup loads media items, seasons, and episodes by content ID.
@@ -51,6 +51,13 @@ type ImageURLResolver interface {
 	ResolveImageURLs(ctx context.Context, paths []string, variant string) map[string]string
 }
 
+// artworkPublisher publishes a chosen image and reclaims one that could not
+// be published. *catalog.DetailService implements it.
+type artworkPublisher interface {
+	PublishArtworkSelection(ctx context.Context, selection catalog.ArtworkSelection) error
+	QueueArtworkRevisionGC(ctx context.Context, originalPath, imageType string, notBefore time.Time) error
+}
+
 // AdminImageHandler handles endpoints for browsing and selecting item images.
 type AdminImageHandler struct {
 	items         ImageItemLookup
@@ -59,8 +66,9 @@ type AdminImageHandler struct {
 	folders       MatchFolderLookup
 	imageSvc      ImageService
 	imageResolver ImageURLResolver
-	detailSvc     *catalog.DetailService
+	detailSvc     artworkPublisher
 	EventsHub     *evt.Hub
+	EventBus      cache.EventBus
 }
 
 // NewAdminImageHandler creates a handler for admin image selection endpoints.
@@ -104,6 +112,9 @@ type itemImageEntry struct {
 	Width       int     `json:"width"`
 	Height      int     `json:"height"`
 	Rating      float64 `json:"rating"`
+	// Fallback marks show artwork a season list offers after the season's own
+	// images. It is set only on season lists and is left out of JSON.
+	Fallback bool `json:"-"`
 }
 
 type getItemImagesResponse struct {
@@ -196,24 +207,6 @@ func (h *AdminImageHandler) resolveContentID(ctx context.Context, contentID stri
 	return nil, catalog.ErrItemNotFound
 }
 
-// HandleGetItemImages handles GET /admin/items/{id}/images.
-// It fetches available images from all enabled metadata providers.
-func (h *AdminImageHandler) HandleGetItemImages(w http.ResponseWriter, r *http.Request) {
-	contentID := chi.URLParam(r, "id")
-	if contentID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
-		return
-	}
-
-	// Frozen v1 keeps its provider-only choices.
-	out, err := h.listItemImages(r.Context(), contentID, false)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
 type AdminItemImagesView = getItemImagesResponse
 
 // GetAdminItemImages lists provider choices plus, for a movie or series, the
@@ -222,6 +215,10 @@ func (h *AdminImageHandler) GetAdminItemImages(ctx context.Context, contentID st
 	return h.listItemImages(ctx, contentID, true)
 }
 
+// listItemImages fetches the image choices for a movie, series, season or
+// episode, with display URLs resolved. A season list marks show artwork as a
+// fallback. includeLocal adds sidecar artwork for a movie or series and the
+// uploaded images the item shows.
 func (h *AdminImageHandler) listItemImages(ctx context.Context, contentID string, includeLocal bool) (AdminItemImagesView, error) {
 	resolved, err := h.resolveContentID(ctx, contentID)
 	if err != nil {
@@ -277,13 +274,23 @@ func (h *AdminImageHandler) listItemImages(ctx context.Context, contentID string
 		return AdminItemImagesView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to fetch images")
 	}
 
-	// Batch-resolve plugin-prefixed URLs for display. Local files get an
-	// inline preview below instead.
-	rawPaths := make([]string, 0, len(images))
+	// An image an admin uploaded exists only in artwork storage, so the list
+	// offers it with the local choices while the item shows it.
+	var uploads []itemImageEntry
+	if includeLocal {
+		uploads = shownUploads(resolved)
+	}
+
+	// Batch-resolve plugin-prefixed URLs and uploads' stored paths for
+	// display. Local files get an inline preview below instead.
+	rawPaths := make([]string, 0, len(images)+len(uploads))
 	for _, img := range images {
 		if !withLocal || !metadata.IsLocalImageSource(img.URL) {
 			rawPaths = append(rawPaths, img.URL)
 		}
+	}
+	for _, upload := range uploads {
+		rawPaths = append(rawPaths, upload.URL)
 	}
 	var resolvedURLs map[string]string
 	if h.imageResolver != nil && len(rawPaths) > 0 {
@@ -322,7 +329,15 @@ func (h *AdminImageHandler) listItemImages(ctx context.Context, contentID string
 			Width:       img.Width,
 			Height:      img.Height,
 			Rating:      img.Rating,
+			Fallback:    resolved.season != nil && img.SeasonNumber == nil,
 		})
+	}
+
+	for _, upload := range uploads {
+		if displayURL := resolvedURLs[upload.URL]; displayURL != "" {
+			upload.URL = displayURL
+		}
+		entries = append(entries, upload)
 	}
 
 	// Include current image paths so the frontend can highlight them.
@@ -331,10 +346,12 @@ func (h *AdminImageHandler) listItemImages(ctx context.Context, contentID string
 		BackdropURL: resolved.parentItem.BackdropPath,
 		LogoURL:     resolved.parentItem.LogoPath,
 	}
-	// A season owns its poster independently of the parent series. Preserve an
-	// empty value too so the UI cannot label the series poster as current.
+	// A season owns its poster and backdrop independently of the parent
+	// series. Preserve empty values too so the UI cannot label the series
+	// artwork as current.
 	if resolved.season != nil {
 		current.PosterURL = resolved.season.PosterPath
+		current.BackdropURL = resolved.season.BackdropPath
 	}
 
 	return AdminItemImagesView{
@@ -342,29 +359,6 @@ func (h *AdminImageHandler) listItemImages(ctx context.Context, contentID string
 		Current:        current,
 		ProviderErrors: providerErrors,
 	}, nil
-}
-
-// HandleApplyItemImage handles POST /admin/items/{id}/images/apply.
-// It downloads the selected image, caches it to S3, and updates the item.
-func (h *AdminImageHandler) HandleApplyItemImage(w http.ResponseWriter, r *http.Request) {
-	contentID := chi.URLParam(r, "id")
-	if contentID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
-		return
-	}
-
-	var req applyItemImageRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	// Frozen v1 keeps applying provider images only.
-	out, err := h.applyItemImage(r.Context(), contentID, req, false)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, out)
 }
 
 type AdminItemImageResult = applyItemImageResponse
@@ -403,32 +397,106 @@ func (h *AdminImageHandler) applyItemImage(ctx context.Context, contentID string
 			fmt.Sprintf("%s items do not accept %s images", resolved.contentType, metadata.ImageTypeToString(imageType)))
 	}
 	var result *metadata.ApplyItemImageResult
-	if allowLocal && metadata.IsLocalImageSource(req.OriginalURL) {
+	switch {
+	case allowLocal && metadata.IsLocalImageSource(req.OriginalURL):
 		result, err = h.cacheLocalItemImage(ctx, contentID, resolved, imageType, req.OriginalURL)
-	} else {
+	case allowLocal && metadata.IsUploadedImageSource(req.OriginalURL):
+		result, err = currentUploadedImage(resolved, imageType, req.OriginalURL)
+	default:
 		result, err = h.cacheProviderItemImage(ctx, contentID, resolved, imageType, req)
 	}
 	if err != nil {
 		return AdminItemImageResult{}, err
 	}
+	return h.publishItemImage(ctx, contentID, resolved, imageType, result, req.OriginalURL)
+}
 
-	err = h.detailSvc.PublishArtworkSelection(ctx, catalog.ArtworkSelection{
+// UploadAdminItemImage caches an image an admin uploaded and applies it like
+// a chosen image, with the images lock: a poster, backdrop or logo of a movie
+// or series, or a season's poster or backdrop. It is stored beside the item's local
+// sidecar artwork, and the list offers it as a local choice while the item
+// shows it.
+func (h *AdminImageHandler) UploadAdminItemImage(ctx context.Context, contentID, imageTypeName string, data []byte) (AdminItemImageResult, error) {
+	if len(data) == 0 {
+		return AdminItemImageResult{}, apiError(http.StatusBadRequest, "bad_request", "Choose an image to upload")
+	}
+	if len(data) > metadata.MaxUploadedImageBytes {
+		return AdminItemImageResult{}, apiError(http.StatusBadRequest, "bad_request", "Images can be at most 10 MiB")
+	}
+	resolved, err := h.resolveContentID(ctx, contentID)
+	if err != nil {
+		if errors.Is(err, catalog.ErrItemNotFound) {
+			return AdminItemImageResult{}, apiError(http.StatusNotFound, "not_found", "Item not found")
+		}
+		slog.ErrorContext(ctx, "admin images: resolve content ID failed", "component", "api", "content_id", contentID, "error", err)
+		return AdminItemImageResult{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve item")
+	}
+	if resolved.episode != nil || !offersLocalImages(resolved.parentItem.Type) {
+		return AdminItemImageResult{}, apiError(http.StatusBadRequest, "bad_request", "Images can only be uploaded for movies, series and seasons")
+	}
+	// ImageTypeFromString reads an unknown name as a poster.
+	imageType := metadata.ImageTypeFromString(imageTypeName)
+	if metadata.ImageTypeToString(imageType) != imageTypeName || !slices.Contains(uploadableImageTypes, imageType) {
+		return AdminItemImageResult{}, apiError(http.StatusBadRequest, "unsupported_image_type", "Upload a poster, backdrop or logo")
+	}
+	if err := catalog.ValidateArtworkSelectionTarget(resolved.contentType, metadata.ImageTypeToString(imageType)); err != nil {
+		return AdminItemImageResult{}, apiError(http.StatusBadRequest, "unsupported_image_type",
+			fmt.Sprintf("%s items do not accept %s images", resolved.contentType, metadata.ImageTypeToString(imageType)))
+	}
+	var seasonNumber *int
+	if resolved.season != nil {
+		seasonNumber = new(resolved.season.SeasonNumber)
+	}
+	uploaded, err := h.imageSvc.ApplyUploadedItemImage(ctx, metadata.ApplyUploadedItemImageRequest{
+		ContentID:    resolved.parentItem.ContentID,
+		ContentType:  resolved.parentItem.Type,
+		ImageType:    imageType,
+		SeasonNumber: seasonNumber,
+		Data:         data,
+	})
+	switch {
+	case errors.Is(err, metadata.ErrUnsupportedUploadedImage):
+		return AdminItemImageResult{}, apiError(http.StatusBadRequest, "bad_request", "The file is not a JPEG, PNG or WebP image")
+	case errors.Is(err, metadata.ErrImageUploadUnavailable):
+		return AdminItemImageResult{}, apiError(http.StatusServiceUnavailable, "service_unavailable", "Uploading images needs artwork storage")
+	case err != nil:
+		slog.ErrorContext(ctx, "admin images: upload failed", "component", "api", "content_id", contentID, "error", err)
+		return AdminItemImageResult{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to upload image")
+	}
+	return h.publishItemImage(ctx, contentID, resolved, imageType, &uploaded.ApplyItemImageResult, uploaded.SourcePath)
+}
+
+// uploadableImageTypes are the image types an admin can upload, the slots the
+// picker offers.
+var uploadableImageTypes = []metadata.ImageType{metadata.ImagePoster, metadata.ImageBackdrop, metadata.ImageLogo}
+
+// publishItemImage publishes a cached image as the target's artwork, records
+// its source and sets the images lock.
+func (h *AdminImageHandler) publishItemImage(ctx context.Context, contentID string, resolved *resolvedItem, imageType metadata.ImageType, result *metadata.ApplyItemImageResult, sourcePath string) (AdminItemImageResult, error) {
+	err := h.detailSvc.PublishArtworkSelection(ctx, catalog.ArtworkSelection{
 		TargetType:      resolved.contentType,
 		TargetContentID: contentID,
 		ParentContentID: resolved.parentItem.ContentID,
 		ImageType:       metadata.ImageTypeToString(imageType),
 		StoredPath:      result.StoredPath,
-		SourcePath:      req.OriginalURL,
+		SourcePath:      sourcePath,
 		Thumbhash:       result.Thumbhash,
 		LockField:       int(metadata.FieldImages),
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "admin images: persist failed", "component", "api", "content_id", contentID, "error", err)
-		if cleanupErr := h.detailSvc.QueueArtworkRevisionGC(
-			ctx, result.StoredPath, metadata.ImageTypeToString(imageType), time.Now().Add(time.Hour),
-		); cleanupErr != nil {
-			slog.ErrorContext(ctx, "admin images: failed to queue unpublished artwork cleanup", "component", "api",
-				"content_id", contentID, "stored_path", result.StoredPath, "error", cleanupErr)
+		// Re-applying the image the target shows, or uploading its bytes
+		// again, publishes the revision it already serves: leave that one be.
+		if shownPath, _, _ := shownArtwork(resolved, imageType); result.StoredPath != shownPath {
+			// A request that ends early must not stop the cleanup it caused.
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			defer cancel()
+			if cleanupErr := h.detailSvc.QueueArtworkRevisionGC(
+				cleanupCtx, result.StoredPath, metadata.ImageTypeToString(imageType), time.Now().Add(time.Hour),
+			); cleanupErr != nil {
+				slog.ErrorContext(ctx, "admin images: failed to queue unpublished artwork cleanup", "component", "api",
+					"content_id", contentID, "stored_path", result.StoredPath, "error", cleanupErr)
+			}
 		}
 		switch {
 		case errors.Is(err, catalog.ErrItemNotFound),
@@ -440,6 +508,8 @@ func (h *AdminImageHandler) applyItemImage(ctx context.Context, contentID string
 		}
 	}
 
+	// Evict first: clients refetch Home as soon as the metadata event arrives.
+	publishCatalogItemChanged(ctx, h.EventBus, contentID, resolved.parentItem.ContentID)
 	publishEventMetadataUpdate(ctx, h.EventsHub, 0, contentID)
 	if resolved.parentItem.ContentID != contentID {
 		publishEventMetadataUpdate(ctx, h.EventsHub, 0, resolved.parentItem.ContentID)
@@ -532,6 +602,66 @@ func (h *AdminImageHandler) cacheLocalItemImage(ctx context.Context, contentID s
 	return result, nil
 }
 
+// shownArtwork returns the stored path, source and thumbhash of the image of
+// imageType the target shows. Episodes have none here.
+func shownArtwork(resolved *resolvedItem, imageType metadata.ImageType) (storedPath, sourcePath, thumbhash string) {
+	if resolved.season != nil {
+		switch imageType {
+		case metadata.ImagePoster:
+			return resolved.season.PosterPath, resolved.season.PosterSourcePath, resolved.season.PosterThumbhash
+		case metadata.ImageBackdrop:
+			return resolved.season.BackdropPath, resolved.season.BackdropSourcePath, resolved.season.BackdropThumbhash
+		}
+		return "", "", ""
+	}
+	if resolved.episode != nil {
+		return "", "", ""
+	}
+	item := resolved.parentItem
+	switch imageType {
+	case metadata.ImagePoster:
+		return item.PosterPath, item.PosterSourcePath, item.PosterThumbhash
+	case metadata.ImageBackdrop:
+		return item.BackdropPath, item.BackdropSourcePath, item.BackdropThumbhash
+	case metadata.ImageLogo:
+		return item.LogoPath, item.LogoSourcePath, ""
+	}
+	return "", "", ""
+}
+
+// shownUploads lists the uploaded images a movie, series or season shows, as
+// local choices whose URL is still the stored path.
+func shownUploads(resolved *resolvedItem) []itemImageEntry {
+	if resolved.episode != nil || !offersLocalImages(resolved.parentItem.Type) {
+		return nil
+	}
+	var entries []itemImageEntry
+	for _, imageType := range uploadableImageTypes {
+		storedPath, sourcePath, _ := shownArtwork(resolved, imageType)
+		if storedPath == "" || !metadata.IsUploadedImageSource(sourcePath) {
+			continue
+		}
+		entries = append(entries, itemImageEntry{
+			ProviderID:  metadata.LocalImageProviderID,
+			URL:         storedPath,
+			OriginalURL: sourcePath,
+			Type:        metadata.ImageTypeToString(imageType),
+		})
+	}
+	return entries
+}
+
+// currentUploadedImage re-applies the uploaded image the target shows. An
+// upload is stored nowhere else, so any other upload:// source cannot be
+// applied.
+func currentUploadedImage(resolved *resolvedItem, imageType metadata.ImageType, sourceURL string) (*metadata.ApplyItemImageResult, error) {
+	storedPath, sourcePath, thumbhash := shownArtwork(resolved, imageType)
+	if storedPath == "" || sourcePath != sourceURL {
+		return nil, apiError(http.StatusBadRequest, "bad_request", "The image is not one this item shows; upload it again")
+	}
+	return &metadata.ApplyItemImageResult{StoredPath: storedPath, Thumbhash: thumbhash}, nil
+}
+
 // resolveImageFolderID finds the primary library folder for a content ID.
 func (h *AdminImageHandler) resolveImageFolderID(ctx context.Context, contentID string) (int, error) {
 	if h.folders == nil {
@@ -593,3 +723,13 @@ func findBestContentID(item *models.MediaItem, providerID string) string {
 
 type AdminImageEntryView = itemImageEntry
 type AdminCurrentImagesView = currentImages
+
+// ArtworkRestored announces artwork a backup restore published for
+// contentID (a season's parentContentID is its series), as an upload does.
+func (h *AdminImageHandler) ArtworkRestored(ctx context.Context, contentID, parentContentID string) {
+	publishCatalogItemChanged(ctx, h.EventBus, contentID, parentContentID)
+	publishEventMetadataUpdate(ctx, h.EventsHub, 0, contentID)
+	if parentContentID != "" && parentContentID != contentID {
+		publishEventMetadataUpdate(ctx, h.EventsHub, 0, parentContentID)
+	}
+}

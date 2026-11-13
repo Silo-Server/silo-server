@@ -86,103 +86,104 @@ func TestMerge_ReleaseDatesLockBlocksReplace(t *testing.T) {
 	t.Parallel()
 
 	source := &MetadataResult{
-		HasMetadata:  true,
-		Year:         1982,
-		ReleaseDate:  "1982-06-25",
-		FirstAirDate: "1982-06-25",
-		LastAirDate:  "1983-01-01",
+		HasMetadata:         true,
+		Year:                1982,
+		ReleaseDate:         "1982-06-25",
+		DigitalReleaseDate:  "1999-10-26",
+		PhysicalReleaseDate: "1992-03-11",
+		FirstAirDate:        "1982-06-25",
+		LastAirDate:         "1983-01-01",
 	}
 	target := &MetadataResult{
-		Year:         1990,
-		ReleaseDate:  "1990-01-01",
-		FirstAirDate: "1990-01-01",
-		LastAirDate:  "1991-01-01",
+		Year:                1990,
+		ReleaseDate:         "1990-01-01",
+		DigitalReleaseDate:  "2001-01-01",
+		PhysicalReleaseDate: "1995-01-01",
+		FirstAirDate:        "1990-01-01",
+		LastAirDate:         "1991-01-01",
+	}
+
+	// A scheduled refresh fills only empty fields, but a stored item still
+	// takes the providers' current home release dates unless they are locked.
+	filled := *target
+	MergeMetadata(source, &filled, nil, MergeFillEmpty)
+	refreshHomeReleaseDates(&filled, source, nil)
+	if filled.ReleaseDate != "1990-01-01" || filled.DigitalReleaseDate != "1999-10-26" || filled.PhysicalReleaseDate != "1992-03-11" {
+		t.Errorf("fill-empty refresh: %+v", filled)
+	}
+	locked := *target
+	refreshHomeReleaseDates(&locked, source, []MetadataField{FieldReleaseDates})
+	if locked.DigitalReleaseDate != "2001-01-01" || locked.PhysicalReleaseDate != "1995-01-01" {
+		t.Errorf("locked refresh replaced home release dates: %+v", locked)
+	}
+	// A refresh keeps a date the provider stopped sending.
+	undated := &MetadataResult{HasMetadata: true}
+	refreshed := *target
+	refreshHomeReleaseDates(&refreshed, undated, nil)
+	if refreshed.DigitalReleaseDate != "2001-01-01" || refreshed.PhysicalReleaseDate != "1995-01-01" {
+		t.Errorf("refresh dropped stored home release dates: %+v", refreshed)
 	}
 
 	MergeMetadata(source, target, []MetadataField{FieldReleaseDates}, MergeReplaceUnlocked)
 
-	if target.Year != 1990 || target.ReleaseDate != "1990-01-01" ||
+	if target.Year != 1990 || target.ReleaseDate != "1990-01-01" || target.DigitalReleaseDate != "2001-01-01" || target.PhysicalReleaseDate != "1995-01-01" ||
 		target.FirstAirDate != "1990-01-01" || target.LastAirDate != "1991-01-01" {
 		t.Errorf("locked dates overwritten: %+v", target)
 	}
 
 	// Unlocked, replace mode applies the source values.
 	MergeMetadata(source, target, nil, MergeReplaceUnlocked)
-	if target.Year != 1982 || target.ReleaseDate != "1982-06-25" {
+	if target.Year != 1982 || target.ReleaseDate != "1982-06-25" || target.DigitalReleaseDate != "1999-10-26" || target.PhysicalReleaseDate != "1992-03-11" {
 		t.Errorf("unlocked replace did not apply: %+v", target)
 	}
 }
 
-// Refresh contract, scheduled side: MergeFillEmpty seeds the accumulator from
-// the existing item, so an edited NFO title does NOT propagate on the 6h cycle.
-func TestScheduledRefresh_DoesNotPropagateNFOEdits(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	seedMovieItem(t, h, "movie:tmdb:100", "Original Title", 2018)
-	h.itemRepo.items["movie:tmdb:100"].TmdbID = "100"
-	h.itemRepo.items["movie:tmdb:100"].Overview = "Original overview."
+// Refresh contract: a scheduled refresh (MergeFillEmpty) seeds the accumulator
+// from the existing item, so an edited NFO does NOT propagate on the 6h cycle;
+// a manual refresh (MergeReplaceUnlocked) propagates it ("edit the NFO, then
+// Refresh metadata").
+func TestRefresh_NFOEditPropagation(t *testing.T) {
+	for _, tc := range []struct {
+		name                    string
+		mode                    RefreshMode
+		wantTitle, wantOverview string
+	}{
+		{name: "scheduled refresh", mode: ModeScheduledRefresh, wantTitle: "Original Title", wantOverview: "Original overview."},
+		{name: "manual refresh", mode: ModeManualRefresh, wantTitle: "Edited via NFO", wantOverview: "Edited overview."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTestHarness()
+			ctx := context.Background()
+			seedMovieItem(t, h, "movie:tmdb:100", "Original Title", 2018)
+			h.itemRepo.items["movie:tmdb:100"].TmdbID = "100"
+			h.itemRepo.items["movie:tmdb:100"].Overview = "Original overview."
 
-	nfo := &localHintStubProvider{
-		metadata: &MetadataResult{HasMetadata: true, Title: "Edited via NFO", Overview: "Edited overview."},
-	}
-	remote := &remoteStubProvider{
-		slug:     "tmdb",
-		metadata: &MetadataResult{HasMetadata: true, Title: "Original Title", Year: 2018, ProviderIDs: map[string]string{"tmdb": "100"}},
-	}
+			nfo := &localHintStubProvider{
+				metadata: &MetadataResult{HasMetadata: true, Title: "Edited via NFO", Overview: "Edited overview."},
+			}
+			remote := &remoteStubProvider{
+				slug:     "tmdb",
+				metadata: &MetadataResult{HasMetadata: true, Title: "Original Title", Year: 2018, ProviderIDs: map[string]string{"tmdb": "100"}},
+			}
 
-	_, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
-		ContentID: "movie:tmdb:100",
-		Language:  "en",
-		Mode:      ModeScheduledRefresh,
-	}, []Provider{nfo, remote})
-	if err != nil {
-		t.Fatalf("ProcessWithProviders: %v", err)
-	}
-	item, err := h.itemRepo.GetByID(ctx, "movie:tmdb:100")
-	if err != nil {
-		t.Fatalf("load item: %v", err)
-	}
-	if item.Title != "Original Title" {
-		t.Errorf("scheduled refresh title = %q, want Original Title (NFO edits must not propagate)", item.Title)
-	}
-	if item.Overview != "Original overview." {
-		t.Errorf("scheduled refresh overview = %q, want the original", item.Overview)
-	}
-}
-
-// Refresh contract, manual side: MergeReplaceUnlocked propagates NFO edits
-// ("edit the NFO, then Refresh metadata").
-func TestManualRefresh_PropagatesNFOEdits(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	seedMovieItem(t, h, "movie:tmdb:100", "Original Title", 2018)
-	h.itemRepo.items["movie:tmdb:100"].TmdbID = "100"
-	h.itemRepo.items["movie:tmdb:100"].Overview = "Original overview."
-
-	nfo := &localHintStubProvider{
-		metadata: &MetadataResult{HasMetadata: true, Title: "Edited via NFO", Overview: "Edited overview."},
-	}
-	remote := &remoteStubProvider{
-		slug:     "tmdb",
-		metadata: &MetadataResult{HasMetadata: true, Title: "Original Title", Year: 2018, ProviderIDs: map[string]string{"tmdb": "100"}},
-	}
-
-	_, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
-		ContentID: "movie:tmdb:100",
-		Language:  "en",
-		Mode:      ModeManualRefresh,
-	}, []Provider{nfo, remote})
-	if err != nil {
-		t.Fatalf("ProcessWithProviders: %v", err)
-	}
-	item, err := h.itemRepo.GetByID(ctx, "movie:tmdb:100")
-	if err != nil {
-		t.Fatalf("load item: %v", err)
-	}
-	if item.Title != "Edited via NFO" {
-		t.Errorf("manual refresh title = %q, want Edited via NFO", item.Title)
-	}
-	if item.Overview != "Edited overview." {
-		t.Errorf("manual refresh overview = %q, want the NFO edit", item.Overview)
+			_, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
+				ContentID: "movie:tmdb:100",
+				Language:  "en",
+				Mode:      tc.mode,
+			}, []Provider{nfo, remote})
+			if err != nil {
+				t.Fatalf("ProcessWithProviders: %v", err)
+			}
+			item, err := h.itemRepo.GetByID(ctx, "movie:tmdb:100")
+			if err != nil {
+				t.Fatalf("load item: %v", err)
+			}
+			if item.Title != tc.wantTitle {
+				t.Errorf("%s title = %q, want %q", tc.name, item.Title, tc.wantTitle)
+			}
+			if item.Overview != tc.wantOverview {
+				t.Errorf("%s overview = %q, want %q", tc.name, item.Overview, tc.wantOverview)
+			}
+		})
 	}
 }

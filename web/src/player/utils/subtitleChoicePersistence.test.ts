@@ -37,7 +37,6 @@ describe("buildSubtitleChoiceRequests", () => {
       seriesId: "series-1",
       index: 0,
       tracks: TRACKS,
-      showForcedSubtitles: true,
     });
 
     const canonical = canonicalWrites(requests);
@@ -58,36 +57,33 @@ describe("buildSubtitleChoiceRequests", () => {
     // one. Persisting it at profile_series — the top of the resolution order —
     // would permanently shadow the Subtitles screen's profile-scope toggle for
     // that series, and no web surface can clear a profile_series row for it.
-    for (const showForcedSubtitles of [true, false, undefined]) {
-      const requests = buildSubtitleChoiceRequests({
-        seriesId: "series-1",
-        index: 0,
-        tracks: TRACKS,
-        showForcedSubtitles,
-      });
-      expect(canonicalWrites(requests).map((request) => request.key)).not.toContain(
-        SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES,
-      );
-    }
+    const requests = buildSubtitleChoiceRequests({
+      seriesId: "series-1",
+      index: 0,
+      tracks: TRACKS,
+    });
+    expect(canonicalWrites(requests).map((request) => request.key)).not.toContain(
+      SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES,
+    );
   });
 
-  it("keeps the forced-subtitle value on the legacy composite row", () => {
-    // That row is keyed to a concrete track selection and is not part of the
-    // canonical ladder, so echoing the resolved value there is harmless and
-    // preserves the behavior the route has always had.
+  it("leaves show_forced_subtitles off the legacy composite row", () => {
+    // The server copies a show_forced_subtitles it receives on this route into
+    // the canonical profile_series row (subtitle_prefs.go), so echoing the
+    // resolved value here would pin it on the series just the same. Leaving it
+    // out keeps whatever the series already had.
     const [legacy] = buildSubtitleChoiceRequests({
       seriesId: "series-1",
       index: 0,
       tracks: TRACKS,
-      showForcedSubtitles: false,
     }).filter((request) => request.kind === "subtitle_preference");
 
     expect(legacy?.body).toMatchObject({
       subtitle_language: "ja",
       subtitle_track_index: 0,
       subtitle_mode: "always",
-      show_forced_subtitles: false,
     });
+    expect(legacy?.body).not.toHaveProperty("show_forced_subtitles");
   });
 
   it("turning subtitles off clears the language rather than storing an empty one", () => {
@@ -149,7 +145,6 @@ describe("buildSubtitleChoiceRequests", () => {
         seriesId: "series-1",
         index: 0,
         tracks: TRACKS,
-        showForcedSubtitles: true,
       }),
     );
     const stored: StoredSettingRow[] = requests.map((request) => ({
@@ -196,7 +191,6 @@ describe("sendSubtitleChoiceRequest", () => {
       seriesId: "series/1",
       index: null,
       tracks: TRACKS,
-      showForcedSubtitles: true,
     });
     for (const request of requests) {
       await sendSubtitleChoiceRequest(config, request);
@@ -213,7 +207,6 @@ describe("sendSubtitleChoiceRequest", () => {
       subtitle_language: "",
       subtitle_track_index: -1,
       subtitle_mode: "off",
-      show_forced_subtitles: true,
     });
     for (const [, init] of calls) {
       expect(init.headers).toMatchObject({

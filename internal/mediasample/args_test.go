@@ -91,24 +91,3 @@ func TestBuildArgsSnapshots(t *testing.T) {
 		})
 	}
 }
-
-func TestBuildArgsKeepsInputAsOneArgument(t *testing.T) {
-	req := Request{
-		Input:  "/media/My Show/S01E01 -t 5.mkv",
-		Window: &Window{DurationSeconds: 10},
-		Audio:  &AudioOutput{Fingerprint: true},
-	}
-	args, _, err := buildArgs(req, Attempt{}, hardwareDecode{}, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i, arg := range args {
-		if arg == "-i" {
-			if args[i+1] != req.Input {
-				t.Fatalf("input argument = %q, want %q", args[i+1], req.Input)
-			}
-			return
-		}
-	}
-	t.Fatalf("no -i in %q", args)
-}

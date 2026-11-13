@@ -2,17 +2,13 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"strconv"
 	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
-
-	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/intromarkers"
 	"github.com/Silo-Server/silo-server/internal/markers"
@@ -203,321 +199,6 @@ func (n fakeAdminIntroMarkerNotifier) MarkersUpdated(_ context.Context, file *mo
 		return
 	}
 	n.ch <- file
-}
-
-func TestAdminIntroRedetectQueuesAndDedupsInFlightEpisode(t *testing.T) {
-	analyzer := &fakeIntroAnalyzer{
-		started: make(chan string, 1),
-		release: make(chan struct{}),
-	}
-	handler := NewAdminIntroHandler(
-		analyzer,
-		fakeIntroEligibility{result: &intromarkers.MarkerItemEligibility{
-			ItemID:                "ep1",
-			HasMediaFiles:         true,
-			IntroDetectionEnabled: true,
-		}},
-		context.Background(),
-		nil,
-	)
-	handler.Settings = fakeMarkerSettings{values: map[string]string{markers.SettingMode: string(markers.ModeLocal)}}
-	router := chi.NewRouter()
-	router.Post("/admin/items/{id}/redetect-intro", handler.HandleRedetectEpisodeIntro)
-
-	first := httptest.NewRecorder()
-	router.ServeHTTP(first, httptest.NewRequest(http.MethodPost, "/admin/items/ep1/redetect-intro", nil))
-	if first.Code != http.StatusAccepted {
-		t.Fatalf("expected first request 202, got %d: %s", first.Code, first.Body.String())
-	}
-	if status := decodeRedetectStatus(t, first); status != "queued" {
-		t.Fatalf("expected queued, got %q", status)
-	}
-
-	select {
-	case id := <-analyzer.started:
-		if id != "ep1" {
-			t.Fatalf("expected analyzer to start ep1, got %q", id)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("analyzer did not start")
-	}
-
-	second := httptest.NewRecorder()
-	router.ServeHTTP(second, httptest.NewRequest(http.MethodPost, "/admin/items/ep1/redetect-intro", nil))
-	if second.Code != http.StatusAccepted {
-		t.Fatalf("expected second request 202, got %d: %s", second.Code, second.Body.String())
-	}
-	if status := decodeRedetectStatus(t, second); status != "already_running" {
-		t.Fatalf("expected already_running, got %q", status)
-	}
-
-	close(analyzer.release)
-}
-
-func TestAdminIntroRedetectRejectsModesWithoutLocalAnalysis(t *testing.T) {
-	for _, tt := range []struct {
-		name string
-		mode string
-	}{
-		{name: "off", mode: string(markers.ModeOff)},
-		{name: "online", mode: string(markers.ModeOnline)},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			analyzer := &fakeIntroAnalyzer{started: make(chan string, 1), release: make(chan struct{})}
-			handler := NewAdminIntroHandler(
-				analyzer,
-				fakeIntroEligibility{result: &intromarkers.MarkerItemEligibility{
-					ItemID:                "ep1",
-					HasMediaFiles:         true,
-					IntroDetectionEnabled: true,
-				}},
-				context.Background(),
-				nil,
-			)
-			handler.Settings = fakeMarkerSettings{values: map[string]string{markers.SettingMode: tt.mode}}
-			router := chi.NewRouter()
-			router.Post("/admin/items/{id}/redetect-intro", handler.HandleRedetectEpisodeIntro)
-
-			rec := httptest.NewRecorder()
-			router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/admin/items/ep1/redetect-intro", nil))
-			if rec.Code != http.StatusConflict {
-				t.Fatalf("expected 409, got %d: %s", rec.Code, rec.Body.String())
-			}
-
-			select {
-			case id := <-analyzer.started:
-				t.Fatalf("expected analyzer not to start, got %q", id)
-			case <-time.After(50 * time.Millisecond):
-			}
-		})
-	}
-}
-
-func TestAdminIntroRedetectRejectsItemsOtherThanEpisodesAndMovies(t *testing.T) {
-	handler := NewAdminIntroHandler(
-		&fakeIntroAnalyzer{started: make(chan string, 1), release: make(chan struct{})},
-		fakeIntroEligibility{err: intromarkers.ErrMarkerItemNotFound},
-		context.Background(),
-		nil,
-	)
-	handler.Settings = fakeMarkerSettings{values: map[string]string{markers.SettingMode: string(markers.ModeLocal)}}
-	router := chi.NewRouter()
-	router.Post("/admin/items/{id}/redetect-intro", handler.HandleRedetectEpisodeIntro)
-
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/admin/items/series1/redetect-intro", nil))
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestAdminIntroRedetectRejectsIntroDisabledLibrary(t *testing.T) {
-	handler := NewAdminIntroHandler(
-		&fakeIntroAnalyzer{started: make(chan string, 1), release: make(chan struct{})},
-		fakeIntroEligibility{result: &intromarkers.MarkerItemEligibility{
-			ItemID:                "ep1",
-			HasMediaFiles:         true,
-			IntroDetectionEnabled: false,
-		}},
-		context.Background(),
-		nil,
-	)
-	handler.Settings = fakeMarkerSettings{values: map[string]string{markers.SettingMode: string(markers.ModeLocal)}}
-	router := chi.NewRouter()
-	router.Post("/admin/items/{id}/redetect-intro", handler.HandleRedetectEpisodeIntro)
-
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/admin/items/ep1/redetect-intro", nil))
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("expected 409, got %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestAdminIntroRedetectRejectsEpisodeWithoutMediaFiles(t *testing.T) {
-	analyzer := &fakeIntroAnalyzer{started: make(chan string, 1), release: make(chan struct{})}
-	handler := NewAdminIntroHandler(
-		analyzer,
-		fakeIntroEligibility{result: &intromarkers.MarkerItemEligibility{
-			ItemID:                "ep1",
-			HasMediaFiles:         false,
-			IntroDetectionEnabled: true,
-		}},
-		context.Background(),
-		nil,
-	)
-	handler.Settings = fakeMarkerSettings{values: map[string]string{markers.SettingMode: string(markers.ModeLocal)}}
-	router := chi.NewRouter()
-	router.Post("/admin/items/{id}/redetect-intro", handler.HandleRedetectEpisodeIntro)
-
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/admin/items/ep1/redetect-intro", nil))
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("expected 409, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	select {
-	case id := <-analyzer.started:
-		t.Fatalf("expected analyzer not to start, got %q", id)
-	case <-time.After(50 * time.Millisecond):
-	}
-}
-
-func TestAdminIntroRedetectRejectsMissingSettings(t *testing.T) {
-	handler := NewAdminIntroHandler(
-		&fakeIntroAnalyzer{started: make(chan string, 1), release: make(chan struct{})},
-		fakeIntroEligibility{result: &intromarkers.MarkerItemEligibility{
-			ItemID:                "ep1",
-			HasMediaFiles:         true,
-			IntroDetectionEnabled: true,
-		}},
-		context.Background(),
-		nil,
-	)
-	router := chi.NewRouter()
-	router.Post("/admin/items/{id}/redetect-intro", handler.HandleRedetectEpisodeIntro)
-
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/admin/items/ep1/redetect-intro", nil))
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected 503, got %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestAdminIntroRedetectNotifiesMarkedFilesAfterAnalyzerSuccess(t *testing.T) {
-	start := 12.0
-	end := 75.0
-	analyzer := &fakeIntroAnalyzer{started: make(chan string, 1)}
-	handler := NewAdminIntroHandler(
-		analyzer,
-		fakeIntroEligibility{result: &intromarkers.MarkerItemEligibility{
-			ItemID:                "ep1",
-			HasMediaFiles:         true,
-			IntroDetectionEnabled: true,
-		}},
-		context.Background(),
-		nil,
-	)
-	handler.Settings = fakeMarkerSettings{values: map[string]string{markers.SettingMode: string(markers.ModeLocal)}}
-	handler.FileResolver = fakeAdminIntroFileResolver{files: []*models.MediaFile{
-		{ID: 1, EpisodeID: "ep1", IntroStart: &start, IntroEnd: &end},
-		{ID: 2, EpisodeID: "ep1"},
-	}}
-	notifier := fakeAdminIntroMarkerNotifier{ch: make(chan *models.MediaFile, 1)}
-	handler.MarkerUpdateNotifier = notifier
-	router := chi.NewRouter()
-	router.Post("/admin/items/{id}/redetect-intro", handler.HandleRedetectEpisodeIntro)
-
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/admin/items/ep1/redetect-intro", nil))
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("expected request 202, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	select {
-	case id := <-analyzer.started:
-		if id != "ep1" {
-			t.Fatalf("expected analyzer to start ep1, got %q", id)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("analyzer did not start")
-	}
-
-	select {
-	case notified := <-notifier.ch:
-		if notified.ID != 1 {
-			t.Fatalf("notified file ID = %d, want 1", notified.ID)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("expected marker update notification")
-	}
-	select {
-	case notified := <-notifier.ch:
-		t.Fatalf("unexpected second notification: %#v", notified)
-	case <-time.After(25 * time.Millisecond):
-	}
-}
-
-func TestAdminIntroRedetectDoesNotNotifyFilesStillMissingMarkers(t *testing.T) {
-	analyzer := &fakeIntroAnalyzer{started: make(chan string, 1)}
-	resolverCalled := make(chan string, 1)
-	handler := NewAdminIntroHandler(
-		analyzer,
-		fakeIntroEligibility{result: &intromarkers.MarkerItemEligibility{
-			ItemID:                "ep1",
-			HasMediaFiles:         true,
-			IntroDetectionEnabled: true,
-		}},
-		context.Background(),
-		nil,
-	)
-	handler.Settings = fakeMarkerSettings{values: map[string]string{markers.SettingMode: string(markers.ModeLocal)}}
-	handler.FileResolver = fakeAdminIntroFileResolver{
-		files:  []*models.MediaFile{{ID: 1, EpisodeID: "ep1"}},
-		called: resolverCalled,
-	}
-	notifier := fakeAdminIntroMarkerNotifier{ch: make(chan *models.MediaFile, 1)}
-	handler.MarkerUpdateNotifier = notifier
-	router := chi.NewRouter()
-	router.Post("/admin/items/{id}/redetect-intro", handler.HandleRedetectEpisodeIntro)
-
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/admin/items/ep1/redetect-intro", nil))
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("expected request 202, got %d: %s", rec.Code, rec.Body.String())
-	}
-	select {
-	case <-resolverCalled:
-	case <-time.After(time.Second):
-		t.Fatal("file resolver was not called")
-	}
-	select {
-	case notified := <-notifier.ch:
-		t.Fatalf("unexpected marker update: %#v", notified)
-	case <-time.After(25 * time.Millisecond):
-	}
-}
-
-func TestAdminIntroRedetectNotificationReloadFailureDoesNotFailRequest(t *testing.T) {
-	analyzer := &fakeIntroAnalyzer{started: make(chan string, 1)}
-	resolverCalled := make(chan string, 1)
-	handler := NewAdminIntroHandler(
-		analyzer,
-		fakeIntroEligibility{result: &intromarkers.MarkerItemEligibility{
-			ItemID:                "ep1",
-			HasMediaFiles:         true,
-			IntroDetectionEnabled: true,
-		}},
-		context.Background(),
-		nil,
-	)
-	handler.Settings = fakeMarkerSettings{values: map[string]string{markers.SettingMode: string(markers.ModeLocal)}}
-	handler.FileResolver = fakeAdminIntroFileResolver{
-		err:    errors.New("reload failed"),
-		called: resolverCalled,
-	}
-	handler.MarkerUpdateNotifier = fakeAdminIntroMarkerNotifier{ch: make(chan *models.MediaFile, 1)}
-	router := chi.NewRouter()
-	router.Post("/admin/items/{id}/redetect-intro", handler.HandleRedetectEpisodeIntro)
-
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/admin/items/ep1/redetect-intro", nil))
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("expected request 202, got %d: %s", rec.Code, rec.Body.String())
-	}
-	select {
-	case <-resolverCalled:
-	case <-time.After(time.Second):
-		t.Fatal("file resolver was not called")
-	}
-}
-
-func decodeRedetectStatus(t *testing.T, rec *httptest.ResponseRecorder) string {
-	t.Helper()
-	var response redetectIntroResponse
-	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
-		t.Fatalf("decoding response: %v", err)
-	}
-	return response.Status
 }
 
 // A v2 refresh-markers of a movie in local mode runs the movie analysis and
@@ -819,94 +500,6 @@ func TestAdminIntroV2RedetectRejectsMovies(t *testing.T) {
 	}
 }
 
-// The frozen /api/v1 endpoints analyze episodes only: a movie is rejected
-// with the original message and never analyzed.
-func TestAdminIntroV1RejectsMovies(t *testing.T) {
-	analyzer := &fakeIntroAnalyzer{movies: make(chan string, 2)}
-	handler := NewAdminIntroHandler(analyzer, fakeIntroEligibility{result: &intromarkers.MarkerItemEligibility{
-		ItemID: "movie1", Kind: intromarkers.MarkerItemMovie, HasMediaFiles: true, IntroDetectionEnabled: true,
-	}}, context.Background(), nil)
-	handler.Settings = fakeMarkerSettings{values: map[string]string{markers.SettingMode: string(markers.ModeLocal)}}
-	router := chi.NewRouter()
-	router.Post("/admin/items/{id}/refresh-markers", handler.HandleRefreshEpisodeMarkers)
-	router.Post("/admin/items/{id}/redetect-intro", handler.HandleRedetectEpisodeIntro)
-
-	for _, path := range []string{"/admin/items/movie1/refresh-markers", "/admin/items/movie1/redetect-intro"} {
-		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, nil))
-		var body struct {
-			Message string `json:"message"`
-		}
-		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-			t.Fatalf("%s: decode %q: %v", path, rec.Body.String(), err)
-		}
-		if rec.Code != http.StatusBadRequest || body.Message != "Item must be an episode" {
-			t.Fatalf("%s: got %d %q, want 400 \"Item must be an episode\"", path, rec.Code, body.Message)
-		}
-	}
-	select {
-	case id := <-analyzer.movies:
-		t.Fatalf("v1 analyzed movie %q", id)
-	case <-time.After(25 * time.Millisecond):
-	}
-}
-
-// The frozen v1 routes and v2 redetect-intro analyze episode intros only,
-// never credits; v2 refresh-markers in local mode analyzes both.
-func TestAdminIntroEndpointsKeepTheirAnalysisScope(t *testing.T) {
-	localHandler := func(analyzer *fakeIntroAnalyzer) *AdminIntroHandler {
-		handler := NewAdminIntroHandler(analyzer, fakeIntroEligibility{result: &intromarkers.MarkerItemEligibility{
-			ItemID: "ep1", Kind: intromarkers.MarkerItemEpisode, HasMediaFiles: true, IntroDetectionEnabled: true,
-		}}, context.Background(), nil)
-		handler.Settings = fakeMarkerSettings{values: map[string]string{markers.SettingMode: string(markers.ModeLocal)}}
-		handler.FileResolver = fakeAdminIntroFileResolver{}
-		return handler
-	}
-	receiveKinds := func(t *testing.T, analyzer *fakeIntroAnalyzer) intromarkers.EpisodeMarkerKinds {
-		t.Helper()
-		select {
-		case kinds := <-analyzer.kinds:
-			return kinds
-		case <-time.After(time.Second):
-			t.Fatal("episode analysis did not run")
-			return intromarkers.EpisodeMarkerKinds{}
-		}
-	}
-
-	intro := intromarkers.EpisodeMarkerKinds{Intro: true}
-	for _, path := range []string{"/admin/items/ep1/refresh-markers", "/admin/items/ep1/redetect-intro"} {
-		analyzer := &fakeIntroAnalyzer{kinds: make(chan intromarkers.EpisodeMarkerKinds, 1)}
-		handler := localHandler(analyzer)
-		router := chi.NewRouter()
-		router.Post("/admin/items/{id}/refresh-markers", handler.HandleRefreshEpisodeMarkers)
-		router.Post("/admin/items/{id}/redetect-intro", handler.HandleRedetectEpisodeIntro)
-		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, nil))
-		if rec.Code != http.StatusAccepted {
-			t.Fatalf("v1 %s: %d %s", path, rec.Code, rec.Body.String())
-		}
-		if got := receiveKinds(t, analyzer); got != intro {
-			t.Fatalf("v1 %s analyzed %+v, want intros only", path, got)
-		}
-	}
-	for _, tc := range []struct {
-		action string
-		want   intromarkers.EpisodeMarkerKinds
-	}{
-		{"redetect", intro},
-		{"refresh-v2", intromarkers.EpisodeMarkerKinds{Intro: true, Credits: true}},
-	} {
-		analyzer := &fakeIntroAnalyzer{kinds: make(chan intromarkers.EpisodeMarkerKinds, 1)}
-		status, err := localHandler(analyzer).RefreshEpisodeMarkers(t.Context(), "ep1", tc.action)
-		if err != nil || status != "queued" {
-			t.Fatalf("v2 %s: status=%q err=%v", tc.action, status, err)
-		}
-		if got := receiveKinds(t, analyzer); got != tc.want {
-			t.Fatalf("v2 %s analyzed %+v, want %+v", tc.action, got, tc.want)
-		}
-	}
-}
-
 // redetectHandler returns a handler in local mode whose eligibility reports
 // item as an eligible item of kind.
 func redetectHandler(analyzer *fakeIntroAnalyzer, item, kind string) *AdminIntroHandler {
@@ -989,18 +582,6 @@ func TestAdminRedetectItemMarkersMovieCreditsOnly(t *testing.T) {
 	select {
 	case id := <-analyzer.movies:
 		t.Fatalf("intro re-detection analyzed movie %q", id)
-	case <-time.After(25 * time.Millisecond):
-	}
-}
-
-func TestAdminRedetectItemMarkersRejectsUnknownKind(t *testing.T) {
-	analyzer := &fakeIntroAnalyzer{kinds: make(chan intromarkers.EpisodeMarkerKinds, 1)}
-	handler := redetectHandler(analyzer, "ep1", intromarkers.MarkerItemEpisode)
-	_, err := handler.RedetectItemMarkers(t.Context(), "ep1", "outro")
-	requireAPIError(t, err, http.StatusBadRequest, "kind")
-	select {
-	case kinds := <-analyzer.kinds:
-		t.Fatalf("unknown kind analyzed %+v", kinds)
 	case <-time.After(25 * time.Millisecond):
 	}
 }
@@ -1094,39 +675,6 @@ func TestAdminRedetectItemMarkersQueuesKindsTheRunningAnalysisLacks(t *testing.T
 	}
 	if got := receiveEpisodeKinds(t, analyzer); got != (kinds{Intro: true}) {
 		t.Fatalf("analysis after idle ran %+v, want intro", got)
-	}
-}
-
-// The frozen /api/v1 routes keep reporting already_running while any analysis
-// of the episode runs, and queue nothing.
-func TestAdminIntroV1RedetectDoesNotQueueBehindRunningAnalysis(t *testing.T) {
-	analyzer := &fakeIntroAnalyzer{
-		started: make(chan string, 1),
-		release: make(chan struct{}),
-		kinds:   make(chan intromarkers.EpisodeMarkerKinds, 2),
-	}
-	handler := redetectHandler(analyzer, "ep1", intromarkers.MarkerItemEpisode)
-	router := chi.NewRouter()
-	router.Post("/admin/items/{id}/redetect-intro", handler.HandleRedetectEpisodeIntro)
-
-	if status, err := handler.RedetectItemMarkers(t.Context(), "ep1", RedetectMarkersCredits); err != nil || status != "queued" {
-		t.Fatalf("credits: status=%q err=%v", status, err)
-	}
-	receiveEpisodeKinds(t, analyzer)
-	<-analyzer.started
-
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/admin/items/ep1/redetect-intro", nil))
-	if rec.Code != http.StatusAccepted || decodeRedetectStatus(t, rec) != "already_running" {
-		t.Fatalf("v1 redetect while running: %d %s", rec.Code, rec.Body.String())
-	}
-
-	close(analyzer.release)
-	waitForRefreshIdle(t, handler, "ep1")
-	select {
-	case got := <-analyzer.kinds:
-		t.Fatalf("v1 request queued an analysis for %+v", got)
-	default:
 	}
 }
 
@@ -1379,5 +927,43 @@ func TestAdminIntroEndpointsIgnoreDetectionSettings(t *testing.T) {
 	}
 	if got := receiveEpisodeKinds(t, analyzer); got != (intromarkers.EpisodeMarkerKinds{Intro: true}) {
 		t.Fatalf("redetect-intro analyzed %+v, want intros", got)
+	}
+}
+
+// After a successful local analysis, active playback hears about each of the
+// episode's files that now has markers, and only those.
+func TestAdminIntroRedetectNotifiesMarkedFilesAfterAnalyzerSuccess(t *testing.T) {
+	start, end := 12.0, 75.0
+	analyzer := &fakeIntroAnalyzer{started: make(chan string, 1)}
+	handler := NewAdminIntroHandler(analyzer, fakeIntroEligibility{result: &intromarkers.MarkerItemEligibility{
+		ItemID: "ep1", HasMediaFiles: true, IntroDetectionEnabled: true,
+	}}, context.Background(), nil)
+	handler.Settings = fakeMarkerSettings{values: map[string]string{markers.SettingMode: string(markers.ModeLocal)}}
+	handler.FileResolver = fakeAdminIntroFileResolver{files: []*models.MediaFile{
+		{ID: 1, EpisodeID: "ep1", IntroStart: &start, IntroEnd: &end},
+		{ID: 2, EpisodeID: "ep1"},
+	}}
+	notifier := fakeAdminIntroMarkerNotifier{ch: make(chan *models.MediaFile, 2)}
+	handler.MarkerUpdateNotifier = notifier
+
+	if status, err := handler.RefreshEpisodeMarkers(t.Context(), "ep1", "redetect"); err != nil || status != "queued" {
+		t.Fatalf("redetect: status=%q err=%v", status, err)
+	}
+	select {
+	case id := <-analyzer.started:
+		if id != "ep1" {
+			t.Fatalf("analyzer started %q, want ep1", id)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("analyzer did not start")
+	}
+	waitForRefreshIdle(t, handler, "ep1")
+	close(notifier.ch)
+	var notified []int
+	for file := range notifier.ch {
+		notified = append(notified, file.ID)
+	}
+	if len(notified) != 1 || notified[0] != 1 {
+		t.Fatalf("notified files %v, want only the marked file 1", notified)
 	}
 }

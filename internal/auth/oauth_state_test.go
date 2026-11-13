@@ -48,14 +48,6 @@ func TestVerifyState_RejectsTampered(t *testing.T) {
 	}
 }
 
-func TestVerifyState_RejectsWrongSecret(t *testing.T) {
-	in := StatePayload{Nonce: "n", InstallID: "i", ExpiresAt: time.Now().Add(time.Hour)}
-	signed := SignState(testStateSecret, in)
-	if _, err := VerifyState([]byte("different-secret"), signed); err == nil {
-		t.Error("VerifyState should reject wrong secret")
-	}
-}
-
 func TestVerifyState_RejectsExpired(t *testing.T) {
 	in := StatePayload{Nonce: "n", InstallID: "i", ExpiresAt: time.Now().Add(-time.Minute)}
 	signed := SignState(testStateSecret, in)

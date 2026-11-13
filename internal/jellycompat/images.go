@@ -1,15 +1,11 @@
 package jellycompat
 
 import (
-	"bytes"
+	"bufio"
 	"context"
-	"crypto/sha1"
 	"encoding/binary"
-	"fmt"
-	"image"
-	"image/color"
-	"image/png"
 	"io"
+	"mime"
 	"net/http"
 	"strings"
 
@@ -23,6 +19,9 @@ var compatImageProxyUserAgentSubstrings = []string{
 const compatImageRouteCacheControl = "private, no-store, no-cache, max-age=0, s-maxage=0, must-revalidate"
 const compatImageProxyTagSuffix = "-p"
 const compatImageProxyRoutePrefix = "__jellycompat_image_proxy__:"
+
+// compatImageSniffLen is the most http.DetectContentType reads.
+const compatImageSniffLen = 512
 
 type compatImageProxyRouteContextKey struct{}
 
@@ -195,6 +194,11 @@ func copyConditionalImageRequestHeaders(dst, src http.Header) {
 func proxyImage(w http.ResponseWriter, resp *http.Response) {
 	defer resp.Body.Close()
 
+	// A stored artwork URL can point at any host, so its bytes must never
+	// render as a document on this origin, as on the native artwork route.
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+
 	if resp.StatusCode == http.StatusNotModified {
 		copyImageProxyHeaders(w.Header(), resp.Header)
 		setCompatImageRouteNoStore(w.Header())
@@ -208,10 +212,32 @@ func proxyImage(w http.ResponseWriter, resp *http.Response) {
 		return
 	}
 
+	body := bufio.NewReaderSize(resp.Body, compatImageSniffLen)
+	contentType, ok := proxiedImageContentType(resp.Header.Get("Content-Type"), body)
+	if !ok {
+		setCompatImageRouteNoStore(w.Header())
+		writeError(w, http.StatusBadGateway, "UpstreamError", "Failed to load image")
+		return
+	}
+
 	copyImageProxyHeaders(w.Header(), resp.Header)
+	w.Header().Set("Content-Type", contentType)
 	setCompatImageRouteNoStore(w.Header())
 	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, resp.Body)
+	_, _ = io.Copy(w, body)
+}
+
+// proxiedImageContentType returns the type a proxied body is served as: the
+// upstream's own when it names an image, else the sniffed type when the bytes
+// are an image, since some hosts label images application/octet-stream.
+// Anything else is not served.
+func proxiedImageContentType(declared string, body *bufio.Reader) (string, bool) {
+	if mediaType, _, err := mime.ParseMediaType(declared); err == nil && strings.HasPrefix(mediaType, "image/") {
+		return declared, true
+	}
+	head, _ := body.Peek(compatImageSniffLen)
+	sniffed := http.DetectContentType(head)
+	return sniffed, strings.HasPrefix(sniffed, "image/")
 }
 
 func copyImageProxyHeaders(dst, src http.Header) {
@@ -230,54 +256,4 @@ func setCompatImageRouteNoStore(header http.Header) {
 	header.Set("Surrogate-Control", "no-store")
 	header.Set("X-Accel-Expires", "0")
 	header.Add("Vary", "User-Agent")
-}
-
-// avatarPaletteSize bounds the number of distinct placeholder avatars. The
-// route is anonymous, so per-request PNG generation would be a CPU DoS amplifier
-// (a varying {id} flood defeats Cache-Control). Instead we precompute a small
-// fixed palette once and select by hashing the id — zero per-request generation,
-// bounded memory, while retaining per-id color variety.
-const avatarPaletteSize = 16
-
-// avatarPalette holds the precomputed placeholder PNGs, one per slot. Building
-// it at package init means a panic here (image encode failure) is impossible to
-// miss and never reaches a request.
-var avatarPalette = buildAvatarPalette()
-
-func buildAvatarPalette() [avatarPaletteSize][]byte {
-	var palette [avatarPaletteSize][]byte
-	for i := range palette {
-		// Seed each slot with a distinct value so the colors are spread out;
-		// reuse the same sha1-fill drawing as the original per-id generator.
-		pngBytes, err := renderPlaceholderAvatarPNG(fmt.Sprintf("avatar-slot-%d", i))
-		if err != nil {
-			panic(fmt.Sprintf("jellycompat: build avatar palette slot %d: %v", i, err))
-		}
-		palette[i] = pngBytes
-	}
-	return palette
-}
-
-// avatarPaletteIndex maps an id to a stable palette slot via the first byte of
-// its sha1 digest, so a given id always resolves to the same avatar.
-func avatarPaletteIndex(id string) int {
-	sum := sha1.Sum([]byte(id))
-	return int(sum[0]) % avatarPaletteSize
-}
-
-func renderPlaceholderAvatarPNG(seed string) ([]byte, error) {
-	img := image.NewRGBA(image.Rect(0, 0, 128, 128))
-	sum := sha1.Sum([]byte(seed))
-	fill := color.RGBA{R: sum[0], G: sum[1], B: sum[2], A: 255}
-	for y := range 128 {
-		for x := range 128 {
-			img.Set(x, y, fill)
-		}
-	}
-
-	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
 }

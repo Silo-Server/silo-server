@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Link } from "react-router";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { useAdminTopActivity } from "@/hooks/queries/admin/dashboardInsights";
 import { BarList, BarListSkeleton } from "../charts";
 import type { BarListItem } from "../charts";
@@ -9,7 +9,10 @@ import { SectionError } from "../feedback";
 import { formatWatchTime } from "../format";
 import { rangeDays, rangePhrase, rangeTitle } from "../range";
 import { useWidgetRange } from "../widgetChrome";
+import { WidgetHeader } from "../WidgetHeader";
 import { WidgetRangePicker } from "../WidgetRangePicker";
+import { formatLocale } from "@/lib/appLocale";
+import { useT } from "@/i18n";
 
 const ROW_LIMIT = 8;
 
@@ -20,12 +23,17 @@ const ROW_LIMIT = 8;
  * the label carries both when the account name adds anything.
  */
 export function TopProfilesWidget() {
+  const t = useT();
   const { range } = useWidgetRange();
   const query = useAdminTopActivity(rangeDays(range));
   const items = useMemo<BarListItem[]>(
     () =>
       (query.data?.profiles ?? []).slice(0, ROW_LIMIT).map((profile) => {
-        const account = profile.username || `User #${profile.user_id}`;
+        const account =
+          profile.username ||
+          t("web.admin.dashboard.widgets.topProfiles.userFallback", {
+            id: String(profile.user_id),
+          });
         const name = profile.profile_name || profile.profile_id || account;
         return {
           id: `${profile.user_id}:${profile.profile_id}`,
@@ -37,35 +45,37 @@ export function TopProfilesWidget() {
           }`,
         };
       }),
-    [query.data],
+    [query.data, t],
   );
 
   return (
     <Card className="h-full">
-      <CardHeader className="flex shrink-0 flex-row items-center justify-between gap-2 space-y-0 pb-3">
-        <CardTitle className="text-sm font-bold">
-          {rangeTitle("Most active profiles", range)}
-        </CardTitle>
-        <div className="flex min-w-0 items-center gap-2">
-          <Link
-            to="/admin/history"
-            className="text-muted-foreground hover:text-primary text-[11px] whitespace-nowrap transition-colors"
-          >
-            All history ›
-          </Link>
-          <WidgetRangePicker />
-        </div>
-      </CardHeader>
+      <WidgetHeader title={rangeTitle(t("web.admin.dashboard.widgets.topProfiles.title"), range)}>
+        <Link
+          to="/admin/history"
+          className="text-muted-foreground hover:text-primary text-[11px] whitespace-nowrap transition-colors"
+        >
+          {t("web.admin.dashboard.widgets.topProfiles.allHistory")}
+        </Link>
+        <WidgetRangePicker />
+      </WidgetHeader>
       <CardContent className="min-h-0 flex-1 overflow-y-auto">
         {query.isLoading ? (
           <BarListSkeleton />
         ) : query.error ? (
-          <SectionError message="Failed to load profile activity." />
+          <SectionError message={t("web.admin.dashboard.widgets.topProfiles.loadFailed")} />
         ) : (
           <BarList
             items={items}
-            formatValue={(plays) => `${plays.toLocaleString()} ${plays === 1 ? "play" : "plays"}`}
-            emptyLabel={`No profile activity in ${rangePhrase(range)}`}
+            formatValue={(plays) =>
+              t("web.admin.dashboard.widgets.topProfiles.playCount", {
+                count: plays,
+                count_text: plays.toLocaleString(formatLocale()),
+              })
+            }
+            emptyLabel={t("web.admin.dashboard.widgets.topProfiles.empty", {
+              range: rangePhrase(range),
+            })}
           />
         )}
       </CardContent>

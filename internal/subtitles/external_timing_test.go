@@ -46,36 +46,50 @@ func TestExternalDelivery(t *testing.T) {
 	srt := []byte("1\n00:00:01,000 --> 00:00:02,000\nHello\n")
 	sha := ContentSHA256(srt)
 
-	same, revision, err := ExternalDelivery(ctx, nil, 7, FormatSRT, srt)
+	same, revision, err := ExternalDelivery(ctx, nil, 7, FormatSRT, "", srt)
 	if err != nil || string(same) != string(srt) || revision != sha[:16]+"-0" {
 		t.Fatalf("no lookup: %q %q %v", same, revision, err)
 	}
 
 	lookup := timingLookup{sha: {ID: 1, MediaFileID: 7, ContentSHA256: sha, Timing: Timing{Scale: 1, OffsetMS: 1500}, Revision: 3}}
-	timed, revision, err := ExternalDelivery(ctx, lookup, 7, FormatSRT, srt)
+	timed, revision, err := ExternalDelivery(ctx, lookup, 7, FormatSRT, "", srt)
 	if err != nil || !strings.Contains(string(timed), "00:00:02,500 --> 00:00:03,500") || revision != ContentSHA256(timed)[:16]+"-3" {
 		t.Fatalf("corrected: %q %q %v", timed, revision, err)
 	}
 	// A correction recreated after a media file replacement can reach the
 	// same revision with another timing; the delivered bytes tell them apart.
 	recreated := timingLookup{sha: {ID: 2, MediaFileID: 7, ContentSHA256: sha, Timing: Timing{Scale: 1, OffsetMS: -400}, Revision: 3}}
-	if _, other, err := ExternalDelivery(ctx, recreated, 7, FormatSRT, srt); err != nil || other == revision {
+	if _, other, err := ExternalDelivery(ctx, recreated, 7, FormatSRT, "", srt); err != nil || other == revision {
 		t.Fatalf("recreated correction revision %q, first %q, err %v", other, revision, err)
 	}
 
 	// Other bytes (the sidecar was edited on disk) do not match the row.
 	edited := []byte("1\n00:00:01,000 --> 00:00:02,000\nHello there\n")
-	out, revision, err := ExternalDelivery(ctx, lookup, 7, FormatSRT, edited)
+	out, revision, err := ExternalDelivery(ctx, lookup, 7, FormatSRT, "", edited)
 	if err != nil || string(out) != string(edited) || revision != ContentSHA256(edited)[:16]+"-0" {
 		t.Fatalf("edited sidecar: %q %q %v", out, revision, err)
 	}
 
+	// A legacy code page is delivered as UTF-8. Its correction is stored
+	// under the bytes on disk, which sync jobs hash, and still applies.
+	cp1251 := []byte("1\n00:00:01,000 --> 00:00:02,000\n\xcf\xf0\xe8\xe2\xe5\xf2\n")
+	rawSHA := ContentSHA256(cp1251)
+	plain, revision, err := ExternalDelivery(ctx, nil, 7, FormatSRT, "ru", cp1251)
+	if err != nil || string(plain) != "1\n00:00:01,000 --> 00:00:02,000\nПривет\n" || revision != ContentSHA256(plain)[:16]+"-0" {
+		t.Fatalf("legacy code page: %q %q %v", plain, revision, err)
+	}
+	legacy := timingLookup{rawSHA: {ID: 3, MediaFileID: 7, ContentSHA256: rawSHA, Timing: Timing{Scale: 1, OffsetMS: 1000}, Revision: 2}}
+	timed, revision, err = ExternalDelivery(ctx, legacy, 7, FormatSRT, "ru", cp1251)
+	if err != nil || string(timed) != "1\n00:00:02,000 --> 00:00:03,000\nПривет\n" || revision != ContentSHA256(timed)[:16]+"-2" {
+		t.Fatalf("corrected legacy code page: %q %q %v", timed, revision, err)
+	}
+
 	// A format Retime cannot rewrite is never looked up.
 	micro := []byte("{25}{50}Hello")
-	if out, err := ExternalDeliveryBytes(ctx, timingLookup{"error": nil}, 7, FormatSUB, micro); err != nil || string(out) != string(micro) {
+	if out, err := ExternalDeliveryBytes(ctx, timingLookup{"error": nil}, 7, FormatSUB, "", micro); err != nil || string(out) != string(micro) {
 		t.Fatalf("microdvd: %q %v", out, err)
 	}
-	if _, err := ExternalDeliveryBytes(ctx, timingLookup{"error": nil}, 7, FormatSRT, srt); err == nil {
+	if _, err := ExternalDeliveryBytes(ctx, timingLookup{"error": nil}, 7, FormatSRT, "", srt); err == nil {
 		t.Fatal("lookup failure served uncorrected bytes")
 	}
 }

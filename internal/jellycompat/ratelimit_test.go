@@ -141,25 +141,12 @@ func TestRouterRateLimitsSignInPerClientIP(t *testing.T) {
 	}
 }
 
-// TestRouterWithoutRateLimitLeavesSignInUnlimited pins that a nil limiter,
-// which is what rate_limit.enabled=false wires, keeps today's behavior.
-func TestRouterWithoutRateLimitLeavesSignInUnlimited(t *testing.T) {
-	router := newRateLimitedRouter(t, nil, nil)
-	for i := range 50 {
-		if rec := signInFrom(router, "203.0.113.10", "wrong"); rec.Code != http.StatusUnauthorized {
-			t.Fatalf("attempt %d: status = %d, want 401", i+1, rec.Code)
-		}
-	}
-	if rec := signInFrom(router, "203.0.113.10", "right"); rec.Code != http.StatusOK {
-		t.Fatalf("sign-in: status = %d, want 200", rec.Code)
-	}
-}
-
-// TestRouterRateLimitCoversAuthenticatedAndMediaRoutesOnly pins the route
-// split: anonymous artwork, avatars, web assets, and public server reads never
-// spend the per-IP budget, while authenticated API and media routes do, as on
-// the native API.
-func TestRouterRateLimitCoversAuthenticatedAndMediaRoutesOnly(t *testing.T) {
+// TestRouterRateLimitCoversAuthenticatedMediaAndAvatarRoutes pins the route
+// split: anonymous artwork, web assets, and public server reads never spend
+// the per-IP budget, while authenticated API and media routes do, as on the
+// native API. Anonymous user avatars spend it too, since each reads the
+// session, profile, and blob stores.
+func TestRouterRateLimitCoversAuthenticatedMediaAndAvatarRoutes(t *testing.T) {
 	mw := newTestRateLimit(t, map[string]string{
 		"ratelimit.ip.requests_per_second": "0.01",
 		"ratelimit.ip.requests_per_minute": "1",
@@ -178,8 +165,6 @@ func TestRouterRateLimitCoversAuthenticatedAndMediaRoutesOnly(t *testing.T) {
 		"/QuickConnect/Enabled",
 		"/Items/abc/Images/Primary",
 		"/Items/abc/Images/Backdrop/0",
-		"/Users/abc/Images/Primary",
-		"/UserImage?userId=abc",
 		"/api/v2/artwork/x",
 		"/web/index.html",
 	} {
@@ -192,6 +177,11 @@ func TestRouterRateLimitCoversAuthenticatedAndMediaRoutesOnly(t *testing.T) {
 
 	if rec := serveFrom(router, ip, http.MethodGet, "/SyncPlay/List", "", "compat-token"); rec.Code != http.StatusOK {
 		t.Fatalf("first authenticated request: status = %d, want 200", rec.Code)
+	}
+	for _, target := range []string{"/UserImage?userId=abc", "/Users/abc/Images/Primary"} {
+		if rec := serveFrom(router, ip, http.MethodGet, target, "", ""); rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("GET %s over the per-IP budget: status = %d, want 429", target, rec.Code)
+		}
 	}
 	if rec := serveFrom(router, ip, http.MethodGet, "/SyncPlay/List", "", "compat-token"); rec.Code != http.StatusTooManyRequests {
 		t.Fatalf("authenticated request over the per-IP budget: status = %d, want 429", rec.Code)

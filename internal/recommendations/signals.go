@@ -31,7 +31,8 @@ type signalRepo interface {
 
 // SignalReader centralizes profile-scoped recommendation signals. userstore is
 // the source of truth when configured; repo SQL is retained for deployments
-// without a store provider.
+// without a store provider, and answers the reads one query can when the
+// store keeps its signals in the Postgres tables (see storeIsSeparate).
 type SignalReader struct {
 	repo          signalRepo
 	storeProvider userstore.UserStoreProvider
@@ -46,6 +47,17 @@ func NewSignalReader(repo signalRepo, storeProvider userstore.UserStoreProvider)
 		repo:          repo,
 		storeProvider: storeProvider,
 	}
+}
+
+// WithUserStoreOutsidePostgres records whether the user store keeps watch
+// progress, favorites and watchlist outside Postgres (the SQLite backend), and
+// returns the reader. Signal checks then read the store instead of the
+// Postgres tables.
+func (s *SignalReader) WithUserStoreOutsidePostgres(outside bool) *SignalReader {
+	if s != nil {
+		s.storeOutsidePostgres = outside
+	}
+	return s
 }
 
 func (s *SignalReader) storeForUser(ctx context.Context, userID int) (userstore.UserStore, bool, error) {
@@ -120,10 +132,14 @@ type watchedSetMemoProfile struct {
 
 // WithWatchedSetMemo returns ctx carrying a memo for WatchedItemIDSet: under
 // it, a profile's watched set is read once however many SignalReaders ask,
-// so one request that filters rows and then blends airings walks the
-// profile's history once. A set read through the memo is shared and must not
-// be modified.
+// so one request that filters rows and then blends airings reads it once.
+// A ctx that already carries a memo is returned as it is, so the rows of one
+// Home render share the memo it installed. A set read through the memo is
+// shared and must not be modified.
 func WithWatchedSetMemo(ctx context.Context) context.Context {
+	if _, ok := ctx.Value(watchedSetMemoKey{}).(*watchedSetMemo); ok {
+		return ctx
+	}
 	return context.WithValue(ctx, watchedSetMemoKey{}, &watchedSetMemo{sets: map[watchedSetMemoProfile]map[string]struct{}{}})
 }
 
@@ -150,7 +166,15 @@ func (s *SignalReader) WatchedItemIDSet(ctx context.Context, userID int, profile
 	return set, nil
 }
 
+// readWatchedItemIDSet reads the watched set with one query when the store
+// keeps progress in the Postgres tables, and walks the store page by page
+// only when it lives outside them. On Postgres the walk is quadratic: no
+// index serves ListProgressPage's date_trunc keyset, so every page sorts the
+// profile's whole history again.
 func (s *SignalReader) readWatchedItemIDSet(ctx context.Context, userID int, profileID string) (map[string]struct{}, error) {
+	if !s.storeIsSeparate() {
+		return s.repo.GetWatchedItemIDSet(ctx, userID, profileID)
+	}
 	store, ok, err := s.storeForUser(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -356,6 +380,11 @@ func (s *SignalReader) favoriteItemIDs(ctx context.Context, userID int, profileI
 	}
 }
 
+// WatchProgressForUser returns every progress row of the profile, with its
+// ebook reading progress when it has a user store. When the store keeps
+// progress in the Postgres tables the rows are one query, plus one for the
+// ebooks; only a store outside them is walked page by page, since on
+// Postgres the walk is quadratic (see readWatchedItemIDSet).
 func (s *SignalReader) WatchProgressForUser(ctx context.Context, userID int, profileID string) ([]WatchProgressRow, error) {
 	store, ok, err := s.storeForUser(ctx, userID)
 	if err != nil {
@@ -363,6 +392,22 @@ func (s *SignalReader) WatchProgressForUser(ctx context.Context, userID int, pro
 	}
 	if !ok {
 		return s.repo.GetWatchProgressForUser(ctx, userID, profileID)
+	}
+	if !s.storeIsSeparate() {
+		rows, err := s.repo.GetWatchProgressForUser(ctx, userID, profileID)
+		if err != nil {
+			return nil, err
+		}
+		// The store reports whole seconds; cut the column's microseconds the
+		// same way, so the rows decay and age exactly as the walk's did.
+		for i := range rows {
+			rows[i].UpdatedAt = rows[i].UpdatedAt.UTC().Truncate(time.Second)
+		}
+		ebookProgress, err := s.repo.GetEbookReaderProgressForUser(ctx, userID, profileID)
+		if err != nil {
+			return nil, err
+		}
+		return append(rows, ebookProgress...), nil
 	}
 
 	rows := make([]WatchProgressRow, 0, signalPageSize)

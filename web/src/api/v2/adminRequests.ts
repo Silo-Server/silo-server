@@ -12,9 +12,10 @@ import type {
   RequestSettings,
   RequestUserLimit,
 } from "@/api/types";
-import { v2, type V2Body, type V2Query, V2ProblemError } from "./request";
+import { v2, type V2Body, type V2Query, problemFieldDetail, V2ProblemError } from "./request";
 import { mediaRequestFromV2 } from "./requests";
 import type { components } from "./schema";
+import { t } from "@/i18n";
 
 type Schemas = components["schemas"];
 
@@ -37,7 +38,7 @@ export type RequestRouteTitle = Schemas["AdminRequestRouteTitle"];
 export type RequestRoute = Schemas["AdminRequestRoute"] & { etag: string };
 
 function requireETag(etag?: string) {
-  if (!etag) throw new Error("Reload this editor before saving.");
+  if (!etag) throw new Error(t("web.admin.errors.requestsEditorReload"));
   return etag;
 }
 export const isRequestEditorConflict = (error: unknown) =>
@@ -46,7 +47,8 @@ export function requestValidationErrors(error: unknown) {
   if (!(error instanceof V2ProblemError) || error.problemType !== "validation_failed") return null;
   const fields: Record<string, string> = {};
   for (const field of error.problem.errors ?? []) {
-    if (field.location?.startsWith("body.")) fields[field.location.slice(5)] = field.detail;
+    if (field.location?.startsWith("body."))
+      fields[field.location.slice(5)] = problemFieldDetail(field);
   }
   return { fields, message: error.message };
 }
@@ -88,6 +90,59 @@ export async function putAdminRequestSettingsV2(
   });
   return { ...body, updated_at: "", etag: requireETag(etag) };
 }
+/** The Requests Discover page's layout, with the validator of the read it came from. */
+export type DiscoverLayout = Schemas["AdminDiscoverLayout"] & { etag: string };
+export type DiscoverRow = Schemas["AdminDiscoverRow"];
+/** One row as the editor sends it: a row without its stored list's status. */
+export type DiscoverRowBody = Schemas["AdminDiscoverRowBody"];
+export type DiscoverRowType = DiscoverRowBody["type"];
+export type DiscoverChart = Schemas["AdminDiscoverChart"];
+export type DiscoverFilter = Schemas["AdminDiscoverFilter"];
+export type DiscoverWatchProvider = Schemas["AdminWatchProvider"];
+
+export async function getAdminDiscoverLayoutV2(): Promise<DiscoverLayout> {
+  let etag = "";
+  const body = await v2("GET /api/v2/admin/request-discover/layout", {
+    onResponse: (r) => {
+      etag = r.headers.get("ETag") ?? "";
+    },
+  });
+  return { ...body, etag: requireETag(etag) };
+}
+export async function putAdminDiscoverLayoutV2(
+  rows: DiscoverRowBody[],
+  current: Pick<DiscoverLayout, "etag">,
+): Promise<DiscoverLayout> {
+  let etag = "";
+  const body = await v2("PUT /api/v2/admin/request-discover/layout", {
+    headers: { "If-Match": requireETag(current.etag) },
+    body: { rows },
+    onResponse: (r) => {
+      etag = r.headers.get("ETag") ?? "";
+    },
+  });
+  return { ...body, etag: requireETag(etag) };
+}
+/** Drops the stored layout so the default one applies again. */
+export async function resetAdminDiscoverLayoutV2(
+  current: Pick<DiscoverLayout, "etag">,
+): Promise<void> {
+  await v2("DELETE /api/v2/admin/request-discover/layout", {
+    headers: { "If-Match": requireETag(current.etag) },
+  });
+}
+export function previewAdminDiscoverRowV2(row: DiscoverRowBody) {
+  return v2("POST /api/v2/admin/request-discover/preview", { body: row });
+}
+export function listAdminWatchProvidersV2(
+  mediaType: RequestMediaType,
+  region: string,
+): Promise<DiscoverWatchProvider[]> {
+  return v2("GET /api/v2/admin/request-discover/watch-providers", {
+    query: { media_type: mediaType, region },
+  }).then((c) => c.items);
+}
+
 /** How requests find their server: Standard, or Advanced with the rules. */
 export type RequestRouting = Schemas["AdminRequestRouting"] & { etag: string };
 export type RequestRoutingMode = RequestRouting["mode"];
@@ -271,8 +326,7 @@ export async function listAdminRequestIntegrationsV2(): Promise<RequestIntegrati
     ids.push(...page.items.map((i) => i.id));
     const next = page.page?.has_more ? page.page.next_cursor : undefined;
     if (!page.page?.has_more) break;
-    if (!next || seen.has(next))
-      throw new Error("Incomplete integration page. Reload to try again.");
+    if (!next || seen.has(next)) throw new Error(t("web.admin.errors.integrationPageIncomplete"));
     seen.add(next);
     cursor = next;
   } while (cursor);
@@ -325,7 +379,7 @@ export async function listAdminRequestQueuePageV2(
   });
   if (!isProfileRequestContextCurrent(profileContext)) throw new StaleApiRequestContextError();
   if (page.page?.has_more && !page.page.next_cursor) {
-    throw new Error("Incomplete request page. Reload to try again.");
+    throw new Error(t("web.admin.errors.requestPageIncomplete"));
   }
   return {
     items: page.items.map(mediaRequestFromV2),

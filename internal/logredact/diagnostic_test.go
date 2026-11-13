@@ -8,7 +8,7 @@ import (
 )
 
 func TestSanitizeQueryCredentialAliases(t *testing.T) {
-	for _, key := range []string{"ApiKey", "api_key", "API_KEY", "%41piKey", "Api%5fKey", "AccessToken", "X-Emby-Token", "Pw", "PASSWORD", "Authorization", "Cookie"} {
+	for _, key := range []string{"ApiKey", "api_key", "API_KEY", "%41piKey", "Api%5fKey", "AccessToken", "X-Emby-Token", "Pw", "PASSWORD", "Authorization", "Cookie", "PlaySessionId", "playSessionId"} {
 		t.Run(key, func(t *testing.T) {
 			got := SanitizeQuery(key + "=first-secret&" + key + "=second-secret&Limit=20&Tag=a&Tag=b")
 			if strings.Contains(got, "secret") {
@@ -172,5 +172,21 @@ func TestSanitizeTextKeepsOrdinaryText(t *testing.T) {
 	const text = "ffmpeg: No space left on device (/media/Movies/A: B (2020).mkv)"
 	if got := SanitizeText(text); got != text {
 		t.Fatalf("SanitizeText changed ordinary text: %q", got)
+	}
+}
+
+// TestSanitizeTextMasksURLUserinfo checks that a password holding unescaped
+// @, ? or # is masked in full, and that an @ in the path is not userinfo.
+func TestSanitizeTextMasksURLUserinfo(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"fetch ftp://user:pa@ss@host/file failed", "fetch ftp://" + Placeholder + "@host/file failed"},
+		{"fetch ftp://user:pa#ss@host/file failed", "fetch ftp://" + Placeholder + "@host/file failed"},
+		{"fetch redis://default:pa?ss@cache:6379 failed", "fetch redis://" + Placeholder + "@cache:6379 failed"},
+		{"fetch ftp://user:pw@host/a@example.test failed", "fetch ftp://" + Placeholder + "@host/a@example.test failed"},
+		{"fetch ftp://host/a@example.test failed", "fetch ftp://host/a@example.test failed"},
+	} {
+		if got := SanitizeText(tc.in); got != tc.want {
+			t.Errorf("SanitizeText(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }

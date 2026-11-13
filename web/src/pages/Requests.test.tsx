@@ -1,20 +1,28 @@
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
-import type { MediaRequest, RequestDiscoverySection, RequestMediaResult } from "@/api/types";
+import type {
+  MediaRequest,
+  RequestDiscoverRowRef,
+  RequestDiscoverySection,
+  RequestMediaResult,
+} from "@/api/types";
 
 const mocks = vi.hoisted(() => ({
   mine: [] as MediaRequest[],
   sections: [] as RequestDiscoverySection[],
+  rows: [] as RequestDiscoverRowRef[],
   cancel: vi.fn(),
+  remove: vi.fn(),
   create: vi.fn(),
 }));
 
 vi.mock("@/hooks/queries/useRequests", () => {
   const idle = { data: [], isLoading: false, isError: false, refetch: vi.fn() };
   return {
-    useRequestDiscovery: () => ({ ...idle, data: mocks.sections }),
+    useRequestDiscovery: () => ({ ...idle, data: { rows: mocks.rows, sections: mocks.sections } }),
     useDiscoverStudios: () => idle,
     useDiscoverNetworks: () => idle,
     useDiscoverGenres: () => idle,
@@ -26,13 +34,20 @@ vi.mock("@/hooks/queries/useRequests", () => {
     }),
     useCreateMediaRequest: () => ({ mutateAsync: mocks.create, isPending: false }),
     useCancelMediaRequest: () => ({ mutate: mocks.cancel, isPending: false, variables: undefined }),
+    useRemoveFailedMediaRequest: () => ({
+      mutate: mocks.remove,
+      isPending: false,
+      variables: undefined,
+    }),
   };
 });
 vi.mock("@/hooks/useWatchlistTitleToggle", () => ({
   useWatchlistTitleToggle: () => ({ enabled: false, toggle: vi.fn(), isPending: () => false }),
 }));
 vi.mock("@/hooks/useDocumentTitle", () => ({ useDocumentTitle: () => {} }));
-vi.mock("@/components/BrandCarousel", () => ({ default: () => null }));
+vi.mock("@/components/BrandCarousel", () => ({
+  default: ({ title }: { title: string }) => <section aria-label={title} />,
+}));
 // Embla needs layout APIs jsdom lacks; MediaCarousel.test covers the real row.
 vi.mock("@/components/MediaCarousel", () => ({
   default: ({
@@ -85,13 +100,15 @@ function LocationProbe() {
 
 function renderAt(url: string) {
   render(
-    <MemoryRouter initialEntries={[url]}>
-      <Routes>
-        <Route path="/requests" element={<Requests />} />
-        <Route path="*" element={null} />
-      </Routes>
-      <LocationProbe />
-    </MemoryRouter>,
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter initialEntries={[url]}>
+        <Routes>
+          <Route path="/requests" element={<Requests />} />
+          <Route path="*" element={null} />
+        </Routes>
+        <LocationProbe />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -101,9 +118,11 @@ function currentLocation() {
 
 beforeEach(() => {
   mocks.cancel.mockReset();
+  mocks.remove.mockReset();
   mocks.create.mockReset().mockResolvedValue({});
   mocks.mine = [];
   mocks.sections = [];
+  mocks.rows = [];
 });
 
 describe("Requests hub", () => {
@@ -139,8 +158,24 @@ describe("Requests hub", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Requests" })).toBeInTheDocument();
   });
 
-  it("links each Discover row with more pages to its full grid", () => {
+  it("lays the rows out in the server's order and links each with more pages to its full grid", () => {
+    mocks.rows = [
+      { key: "r_anime", type: "tmdb_discover", title: "Anime" },
+      { key: "networks", type: "networks", title: "On TV" },
+      { key: "trending_movies", type: "tmdb_chart", title: "Trending Movies" },
+      { key: "upcoming_movies", type: "tmdb_chart", title: "Upcoming Movies" },
+      { key: "on_air_series", type: "tmdb_chart", title: "On the Air" },
+      { key: "r_future", type: "something_new", title: "Unknown" },
+    ];
     mocks.sections = [
+      {
+        key: "r_anime",
+        title: "Anime",
+        page: 1,
+        total_pages: 3,
+        total_results: 60,
+        results: [result(3, "Frieren")],
+      },
       {
         key: "trending_movies",
         title: "Trending Movies",
@@ -168,6 +203,13 @@ describe("Requests hub", () => {
     ];
     renderAt("/requests");
 
+    expect(
+      screen.getAllByRole("region").map((region) => region.getAttribute("aria-label")),
+    ).toEqual(["Anime", "On TV", "Trending Movies", "Upcoming Movies"]);
+    expect(screen.getByRole("link", { name: "Explore all Anime" })).toHaveAttribute(
+      "href",
+      "/requests/discover/r_anime",
+    );
     const trending = screen.getByRole("region", { name: "Trending Movies" });
     expect(
       within(trending).getByRole("link", { name: "Explore all Trending Movies" }),
@@ -275,13 +317,34 @@ describe("Requests (Yours list)", () => {
     expect(mocks.cancel).toHaveBeenCalledExactlyOnceWith("r1");
   });
 
-  it("keeps the request when the viewer backs out", () => {
+  it("removes a failed request that delivered nothing, only after the viewer confirms", () => {
+    mocks.mine = [
+      request("r40", "Failed Movie", { outcome: "failed", last_error: "Movie was not found" }),
+      request("r41", "Half Delivered Movie", {
+        outcome: "failed",
+        targets: [
+          { quality: "1080p", status: "completed" },
+          { quality: "2160p", status: "failed" },
+        ] as MediaRequest["targets"],
+      }),
+      request("r42", "Declined Movie", { outcome: "declined" }),
+      request("r43", "Waiting Movie"),
+    ];
     renderYours();
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel request for Waiting Movie" }));
-    fireEvent.click(screen.getByRole("button", { name: "Keep request" }));
+    expect(
+      screen
+        .getAllByRole("button", { name: /^Remove request for / })
+        .map((button) => button.getAttribute("aria-label")),
+    ).toEqual(["Remove request for Failed Movie"]);
 
-    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
-    expect(mocks.cancel).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Remove request for Failed Movie" }));
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog).toHaveTextContent("Remove this request?");
+    expect(mocks.remove).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove request" }));
+
+    expect(mocks.remove).toHaveBeenCalledExactlyOnceWith("r40");
   });
 });

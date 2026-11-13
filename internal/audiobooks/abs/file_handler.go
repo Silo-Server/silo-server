@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -106,7 +107,7 @@ func (h *Handler) handleFileStream(w http.ResponseWriter, r *http.Request) {
 
 	// /download variant: hint the client to save rather than stream.
 	if strings.HasSuffix(r.URL.Path, "/download") {
-		filename := filepath.Base(mediaFile.FilePath)
+		filename := fspath.Display(filepath.Base(mediaFile.FilePath))
 		w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
 	}
 

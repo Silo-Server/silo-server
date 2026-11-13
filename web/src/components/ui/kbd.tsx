@@ -23,7 +23,8 @@ export function Kbd({ className, ...props }: ComponentProps<"kbd">) {
 export function EnterKeyHint({ className }: { className?: string }) {
   return (
     <Kbd aria-hidden className={cn("hidden shrink-0 sm:inline-flex", className)}>
-      ↵
+      {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- the Enter key symbol, hidden from assistive tech */}
+      {"↵"}
     </Kbd>
   );
 }

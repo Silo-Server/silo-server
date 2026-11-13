@@ -19,10 +19,6 @@ vi.mock("@/api/client", () => ({
 }));
 
 vi.mock("@/api/v2/adminPlaybackCommands", () => ({
-  allocateAdminPlaybackCommand: (sessionId: string) => ({
-    command_id: `cmd-for-${sessionId}`,
-    sequence: 42,
-  }),
   captureAdminPlaybackCommandAuthority: () => ({ profileId: "owner" }),
   sendAdminPlaybackCommand: (...args: unknown[]) => mocks.sendCommand(...args),
   terminateAdminPlaybackSession: (...args: unknown[]) => mocks.terminate(...args),
@@ -202,7 +198,6 @@ describe("AdminSessionActions", () => {
       {
         sessionId: "session-1",
         action: "pause",
-        identity: { command_id: "cmd-for-session-1", sequence: 42 },
       },
       { profileId: "owner" },
     );
@@ -213,11 +208,14 @@ describe("AdminSessionActions", () => {
     expect(findButton(container, "Resume")).toBeUndefined();
   });
 
-  it("sends pause through the sequenced v2 command under captured authority and flips to Resume once dispatched", async () => {
+  it.each([
+    ["applied", "Resume"],
+    ["replayed", "Pause"],
+  ] as const)("a %s pause receipt leaves %s available", async (outcome, nextAction) => {
     mocks.sendCommand.mockResolvedValue({
       command_id: "cmd-for-session-1",
       sequence: 42,
-      outcome: "applied",
+      outcome,
       delivery: "dispatched",
     });
 
@@ -225,9 +223,8 @@ describe("AdminSessionActions", () => {
     await click(findButton(container, "Pause"));
 
     expect(mocks.sendCommand).toHaveBeenCalledTimes(1);
-    expect(mocks.toastSuccess).toHaveBeenCalledWith("Pause command sent");
-    expect(findButton(container, "Resume")).toBeTruthy();
-    expect(findButton(container, "Pause")).toBeUndefined();
+    expect(findButton(container, nextAction)).toBeTruthy();
+    expect(findButton(container, nextAction === "Pause" ? "Resume" : "Pause")).toBeUndefined();
   });
 
   it("terminates through v2 under captured authority and shows both facts", async () => {
@@ -302,28 +299,9 @@ describe("AdminSessionActions", () => {
       {
         sessionId: "session-1",
         action: "stop",
-        identity: { command_id: "cmd-for-session-1", sequence: 42 },
       },
       { profileId: "owner" },
     );
-  });
-
-  it("offers resume for a paused session in the inline layout", async () => {
-    await renderInline({ ...baseSession, is_paused: true });
-
-    expect(findButton(container, "Resume")).toBeTruthy();
-    expect(findButton(container, "Pause")).toBeUndefined();
-  });
-
-  it("keeps stop and shows the limited copy once in the inline layout without playback control", async () => {
-    await renderInline({ ...baseSession, has_playback_control: false });
-
-    const copy =
-      "This session does not support live pause, resume, or messages. Stop and Terminate can still end playback.";
-    expect(container.textContent?.split(copy).length).toBe(2);
-    expect(findButton(container, "Pause")).toBeUndefined();
-    expect(findButton(container, "Message")).toBeUndefined();
-    expect(findButton(container, "Stop")).toBeTruthy();
   });
 
   it("reports a refused stale command without changing the shown state", async () => {

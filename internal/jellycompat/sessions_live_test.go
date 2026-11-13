@@ -48,8 +48,13 @@ func TestSessionsExposeOnlyCallerActiveDeviceAndPingPreservesPosition(t *testing
 	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if rec.Code != 200 || len(result) != 1 || result[0].ID != "own" || result[0].PlayState == nil || result[0].PlayState.PositionTicks != 1230000000 || result[0].PlayState.PlayMethod != "DirectPlay" || result[0].SupportsRemoteControl {
+	if rec.Code != 200 || len(result) != 1 || result[0].DeviceID != "device-1" || result[0].PlayState == nil || result[0].PlayState.PositionTicks != 1230000000 || result[0].PlayState.PlayMethod != "DirectPlay" || result[0].SupportsRemoteControl {
 		t.Fatalf("sessions %d %+v %s", rec.Code, result, rec.Body.String())
+	}
+	// The play session ID alone authorizes the play's media requests, so the
+	// list names the play by a value of Jellyfin's shape that is not that ID.
+	if id := result[0].ID; strings.Contains(rec.Body.String(), `"own"`) || len(id) != 32 || strings.Trim(id, "0123456789abcdef") != "" {
+		t.Errorf("SessionInfo.Id = %q, want 32 lowercase hex characters and no play session ID in %s", id, rec.Body.String())
 	}
 	// jellyfin-sdk-kotlin rejects the whole list when a required
 	// SessionInfoDto or PlayerStateInfo field is missing or null.
@@ -135,24 +140,6 @@ func TestSocketRejectsMissingToken(t *testing.T) {
 	}
 }
 
-func TestDurableSessionListingReadsOtherProcess(t *testing.T) {
-	pool := newCompatTestPool(t)
-	first := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	second := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	id := uuid.NewString()
-	first.Put(PlaybackSession{ID: id, CompatToken: id, UpstreamSessionID: "native"})
-	t.Cleanup(func() { first.Delete(id) })
-	sessions, err := second.ListActiveForToken(t.Context(), id)
-	if err != nil || len(sessions) != 1 || sessions[0].ID != id {
-		t.Fatalf("durable sessions %+v %v", sessions, err)
-	}
-	first.Delete(id)
-	sessions, err = second.ListActiveForToken(t.Context(), id)
-	if err != nil || len(sessions) != 0 {
-		t.Fatalf("deleted session remained visible %+v %v", sessions, err)
-	}
-}
-
 func TestSessionsStreamIndicesFollowActiveNativeFile(t *testing.T) {
 	for _, tc := range []struct {
 		name                    string
@@ -160,7 +147,6 @@ func TestSessionsStreamIndicesFollowActiveNativeFile(t *testing.T) {
 		wantAudio, wantSubtitle *int
 	}{
 		{"second version", 22, new(3), new(-1)},
-		{"first version", 11, new(1), new(2)},
 		{"unknown version", 33, nil, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

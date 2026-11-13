@@ -29,6 +29,11 @@ marks.** This reservation is expressly permitted by AGPL-3.0 §7(e).
 - **Referring to Silo truthfully** — "compatible with Silo," "a plugin for
   Silo," "built on Silo," "a fork of Silo." Use the word to refer to *our*
   project, not to brand *yours*.
+- **Showing the Silo logo or icon in a project that works with Silo** — for
+  example, to list Silo as a server type or on a "Connect to Silo" button. You
+  may include the official, unmodified asset files in your project's source
+  code and builds for this. Do not alter the artwork or use it as your own
+  project's logo or app icon.
 - **Redistributing official, unmodified builds** under the Silo name, with all
   notices kept intact.
 - **Running, modifying, and self-hosting** Silo for yourself or your
@@ -107,8 +112,10 @@ identity.**
 
 The Silo logo, wordmark, and icon files are **© 2026 Silo Media L.L.C., all
 rights reserved**, and are **not** licensed under the AGPL or any other
-open-source license. Any redistribution or fork must **remove or replace** them.
-See the `NOTICE` file in the brand-asset directories.
+open-source license. A fork or modified redistribution of Silo must **remove or
+replace** them. Projects that work with Silo may still include the unmodified
+files to refer to Silo, as described under *Uses that are always fine*. See the
+`NOTICE` file in the brand-asset directories.
 
 ## Official sources
 

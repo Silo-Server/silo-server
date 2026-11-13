@@ -19,6 +19,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"go.opentelemetry.io/otel"
@@ -31,7 +32,7 @@ import (
 // logged once, here, with labels that are stable across releases and bounded
 // in cardinality: the operation ID (never the raw path), the method folded
 // into the fixed standard set, the status class, the problem type
-// identifier, the credential class, and a fixed client family. The v1 request logger and metrics middleware skip the /api/v2/
+// identifier, the credential class, and a fixed client family. The listener-wide request logger and metrics middleware skip the /api/v2/
 // subtree so a v2 request is not recorded twice with two label vocabularies.
 //
 // Nothing here logs a URL, a query string, a header value other than the
@@ -88,9 +89,8 @@ var (
 	}, []string{labelOperationID})
 
 	// v1TombstoneRequests counts requests answered by the v1 retirement
-	// tombstone. It is registered now so dashboards and release gates can
-	// reference it before the tombstone exists; RecordV1Tombstone increments
-	// it once the listener serves one.
+	// tombstone (RecordV1Tombstone), so operators can see which clients still
+	// call /api/v1.
 	v1TombstoneRequests = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "streamapp_apiv1_tombstone_requests_total",
 		Help: "Requests answered by the API v1 retirement tombstone, by method.",
@@ -106,6 +106,7 @@ func RecordV1Tombstone(method string) { v1TombstoneRequests.WithLabelValues(meth
 // request moves through the router, and the observe middleware reports once
 // the response is written.
 type observation struct {
+	db          *queryattr.Request
 	operationID string
 	pathPattern string
 	errorCode   string
@@ -135,8 +136,9 @@ func observe(next http.Handler) http.Handler {
 			span.SetAttributes(attribute.String("http.request.method", methodLabel(r.Method)))
 		}
 		defer span.End()
+		ctx, db := queryattr.StartRequest(ctx)
 		r = r.WithContext(ctx)
-		o := &observation{operationID: labelNone, errorCode: labelNone, authClass: authClassAnonymous}
+		o := &observation{db: db, operationID: labelNone, errorCode: labelNone, authClass: authClassAnonymous}
 		o.clientName, o.clientVersion = clientIdentity(r)
 		r = r.WithContext(context.WithValue(r.Context(), observationKey{}, o))
 		sw := &statusRecorder{ResponseWriter: w}
@@ -275,6 +277,7 @@ func report(r *http.Request, o *observation, status int, hijacked bool, bodyByte
 	if o.userID != nil {
 		attrs = append(attrs, "user_id", *o.userID)
 	}
+	attrs = append(attrs, o.db.LogAttrs()...)
 	slog.InfoContext(r.Context(), "apiv2 request", attrs...)
 }
 
@@ -293,8 +296,8 @@ func methodLabel(method string) string {
 }
 
 // statusClass buckets a status for the metric label. A response that was
-// never written (the client left before the buffered body flushed) is
-// "abandoned" rather than a fabricated code.
+// never written, or a server error whose client went away, is "abandoned"
+// rather than a fabricated code.
 func statusClass(status int) string {
 	if status == 0 {
 		return "abandoned"

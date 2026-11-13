@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -136,78 +138,6 @@ func TestHandleStreamLiveAPIRouteOverridesStaleProxyRecipe(t *testing.T) {
 
 	if recorder.Code != http.StatusOK || recorder.Body.String() != "video" {
 		t.Fatalf("response = %d %q, want live API route", recorder.Code, recorder.Body.String())
-	}
-}
-
-func TestHandleStream_PausedSessionResumesWithDelayedRangeRequest(t *testing.T) {
-	const (
-		contentID       = "movie-1"
-		sessionRouteKey = "session_id"
-	)
-	filePath := writePlaybackTestMediaFile(t, "movie.mp4")
-	file := &models.MediaFile{
-		ID:        42,
-		ContentID: contentID,
-		FilePath:  filePath,
-		Duration:  3600,
-	}
-	sessionMgr := playback.NewSessionManager(0, 0)
-	session, err := sessionMgr.StartSession(1, "profile-1", 42, playback.PlayDirect, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	if err := sessionMgr.UpdateProgress(session.ID, 1, true); err != nil {
-		t.Fatalf("UpdateProgress(paused): %v", err)
-	}
-
-	handler := NewStreamHandler(sessionMgr, testPlaybackFileResolver{file: file})
-	request := func(rangeHeader, ifRange string) *httptest.ResponseRecorder {
-		t.Helper()
-		req := playbackTestRequest(
-			http.MethodGet,
-			"/api/v1/stream/"+session.ID,
-			nil,
-			map[string]string{sessionRouteKey: session.ID},
-		)
-		if rangeHeader != "" {
-			req.Header.Set("Range", rangeHeader)
-		}
-		if ifRange != "" {
-			req.Header.Set("If-Range", ifRange)
-		}
-		rr := httptest.NewRecorder()
-		handler.HandleStream(rr, req)
-		return rr
-	}
-
-	initial := request("", "")
-	if initial.Code != http.StatusOK {
-		t.Fatalf("initial status = %d, body = %s", initial.Code, initial.Body.String())
-	}
-	etag := initial.Header().Get("ETag")
-	if etag == "" {
-		t.Fatal("initial response omitted ETag")
-	}
-
-	const (
-		activeGrace = 5 * time.Millisecond
-		pausedGrace = 5 * time.Second
-	)
-	time.Sleep(20 * time.Millisecond)
-	sessionMgr.CleanInactive(activeGrace, pausedGrace)
-	if _, err := sessionMgr.GetSession(session.ID); err != nil {
-		t.Fatalf("paused session expired before ranged resume: %v", err)
-	}
-
-	resumed := request("bytes=2-", etag)
-	if resumed.Code != http.StatusPartialContent {
-		t.Fatalf("resume status = %d, body = %s", resumed.Code, resumed.Body.String())
-	}
-	if got := resumed.Body.String(); got != "deo" {
-		t.Fatalf("resume body = %q, want %q", got, "deo")
-	}
-	if live, err := sessionMgr.GetSession(session.ID); err != nil || live.ID != session.ID {
-		t.Fatalf("ranged request did not preserve session %q: session=%#v err=%v", session.ID, live, err)
 	}
 }
 
@@ -371,6 +301,78 @@ func TestHandleStream_AudioOnlyRemuxServesAudioContentType(t *testing.T) {
 	}
 }
 
+// A progressive remux can only stream from its seek origin. A URL that opted in
+// with remux_range=refuse answers a range past byte 0 with 409 before ffmpeg
+// starts, and leaves the session for the client's reopen. Every other request,
+// and every request without the opt-in, streams from the origin as before.
+func TestHandleStream_RemuxRangeRefusal(t *testing.T) {
+	const optIn = "?" + playback.RemuxRangeQueryParam + "=" + playback.RemuxRangeRefuse
+	for _, tc := range []struct {
+		name, method, query, rangeHeader string
+		v1                               bool
+		wantStatus                       int
+	}{
+		{name: "resumed range", method: http.MethodGet, query: optIn, rangeHeader: "bytes=1048576-", wantStatus: http.StatusConflict},
+		{name: "suffix range", method: http.MethodGet, query: optIn, rangeHeader: "bytes=-500", wantStatus: http.StatusConflict},
+		{name: "range set reaching past the origin", method: http.MethodGet, query: optIn, rangeHeader: "bytes=0-1,5000-", wantStatus: http.StatusConflict},
+		{name: "range from the origin", method: http.MethodGet, query: optIn, rangeHeader: "bytes=0-", wantStatus: http.StatusOK},
+		{name: "byte-range probe", method: http.MethodGet, query: optIn, rangeHeader: "bytes=0-1", wantStatus: http.StatusOK},
+		{name: "no range", method: http.MethodGet, query: optIn, wantStatus: http.StatusOK},
+		{name: "unparseable range", method: http.MethodGet, query: optIn, rangeHeader: "items=5-", wantStatus: http.StatusOK},
+		{name: "head", method: http.MethodHead, query: optIn, rangeHeader: "bytes=1048576-", wantStatus: http.StatusOK},
+		{name: "resumed range without the opt-in", method: http.MethodGet, rangeHeader: "bytes=1048576-", wantStatus: http.StatusOK},
+		{name: "resumed range on the v1 route", v1: true, method: http.MethodGet, query: optIn, rangeHeader: "bytes=1048576-", wantStatus: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file := models.MediaFile{
+				ID: 42, ContentID: "movie-1", CodecVideo: "h264", CodecAudio: "aac",
+				VideoTracks: []models.VideoTrack{{Codec: "h264"}}, Duration: 3600,
+				FilePath: writePlaybackTestMediaFile(t, "source.mkv"),
+			}
+			sessionMgr := playback.NewSessionManager(0, 0)
+			session, err := sessionMgr.StartSession(1, "profile-1", file.ID, playback.PlayRemux, false)
+			if err != nil {
+				t.Fatalf("StartSession: %v", err)
+			}
+			ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
+			if err := os.WriteFile(ffmpeg, []byte("#!/bin/sh\nprintf muxed\n"), 0o755); err != nil {
+				t.Fatalf("write fake ffmpeg: %v", err)
+			}
+			handler := NewStreamHandler(sessionMgr, testPlaybackFileResolver{file: &file})
+			handler.PlaybackConfig = func() config.PlaybackConfig {
+				return config.PlaybackConfig{FFmpegPath: ffmpeg}
+			}
+
+			req := httptest.NewRequest(tc.method, "/api/v2/stream/"+session.ID+tc.query, nil)
+			if tc.rangeHeader != "" {
+				req.Header.Set("Range", tc.rangeHeader)
+			}
+			ctx := newAuthorizedPlaybackContext()
+			if !tc.v1 {
+				ctx = WithNativeAPIV2(ctx)
+			}
+			req = req.WithContext(ctx)
+			req = withPlaybackRouteParam(req, "session_id", session.ID)
+			rr := httptest.NewRecorder()
+			handler.HandleStream(rr, req)
+
+			if rr.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d, body = %s", rr.Code, tc.wantStatus, rr.Body.String())
+			}
+			if tc.wantStatus == http.StatusConflict {
+				if strings.Contains(rr.Body.String(), "muxed") {
+					t.Fatal("a refused range started the remux")
+				}
+				if _, err := sessionMgr.GetSession(session.ID); err != nil {
+					t.Fatalf("a refused range ended the session: %v", err)
+				}
+			} else if tc.method == http.MethodGet && rr.Body.String() != "muxed" {
+				t.Fatalf("body = %q, want the remux from its origin", rr.Body.String())
+			}
+		})
+	}
+}
+
 // TestHandleSubtitle_ListDownloadedSubtitlesErrorReturns500 pins the fix for
 // issue #248: a failure listing downloaded subtitles must surface as a 500 with
 // an "internal_error" code, not be swallowed and reported to the client as a
@@ -452,42 +454,6 @@ func TestHandleSubtitleUsesBoundDownloadedIdentityAfterInventoryReorder(t *testi
 	handler.HandleSubtitle(rr, req)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "selected-71") || strings.Contains(rr.Body.String(), "other-72") {
 		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
-	}
-}
-
-// A downloaded SRT answers the published .srt?original=1 URL with its stored
-// bytes on both GET and HEAD, whether the URL pins the row or uses the ordinal.
-func TestHandleSubtitleServesDownloadedSRTOriginalOnRequest(t *testing.T) {
-	const stored = "1\n00:00:01,000 --> 00:00:02,000\n{\\an8}Top\n"
-	file := &models.MediaFile{ID: 42, ContentID: "movie-1", FilePath: "/tmp/movie.mkv", Duration: 3600}
-	baseMgr := playback.NewSessionManager(0, 0)
-	session, err := baseMgr.StartSession(1, "profile-1", 42, playback.PlayDirect, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	repo := newMockSubtitleRepoForHandler()
-	row := subtitles.DownloadedSubtitle{ID: 71, MediaFileID: 42, Format: subtitles.FormatSRT, S3Key: "ai-71.srt"}
-	repo.subtitles[71] = &row
-	repo.list = []subtitles.DownloadedSubtitle{row}
-	handler := NewStreamHandler(baseMgr, testPlaybackFileResolver{file: file})
-	handler.SubtitleRepo = repo
-	handler.SubtitleBlobs = subtitleContentBlobStore{objects: map[string][]byte{"ai-71.srt": []byte(stored)}}
-
-	for _, query := range []string{"file_id=42&original=1&downloaded_subtitle_id=71", "file_id=42&original=1"} {
-		for _, method := range []string{http.MethodGet, http.MethodHead} {
-			req := httptest.NewRequest(method, "/api/v2/stream/"+session.ID+"/subtitles/0.srt?"+query, nil)
-			req = req.WithContext(WithNativeAPIV2(newAuthorizedPlaybackContext()))
-			routeCtx := chi.NewRouteContext()
-			routeCtx.URLParams.Add("session_id", session.ID)
-			routeCtx.URLParams.Add("track", "0.srt")
-			req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-			rr := httptest.NewRecorder()
-			handler.HandleSubtitle(rr, req)
-			if rr.Code != http.StatusOK || !strings.HasPrefix(rr.Header().Get("Content-Type"), "application/x-subrip") ||
-				(method == http.MethodGet && rr.Body.String() != stored) {
-				t.Fatalf("%s ?%s = %d %q %q", method, query, rr.Code, rr.Header().Get("Content-Type"), rr.Body.String())
-			}
-		}
 	}
 }
 
@@ -638,29 +604,6 @@ func (c subtitleContentBlobStore) Get(_ context.Context, key string) ([]byte, er
 }
 func (subtitleContentBlobStore) Delete(context.Context, string) error { return nil }
 
-func TestHandleSubtitle_NilMediaFileReturns404(t *testing.T) {
-	baseMgr := playback.NewSessionManager(0, 0)
-	session, err := baseMgr.StartSession(1, "profile-1", 42, playback.PlayDirect, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-
-	handler := NewStreamHandler(baseMgr, errStreamFileResolver{})
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/stream/"+session.ID+"/subtitles/0.vtt", nil)
-	req = req.WithContext(newAuthorizedPlaybackContext())
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("session_id", session.ID)
-	routeCtx.URLParams.Add("track", "0.vtt")
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-
-	rr := httptest.NewRecorder()
-	handler.HandleSubtitle(rr, req)
-
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, body = %s; want 404", rr.Code, rr.Body.String())
-	}
-}
-
 // A .vtt request for a bitmap (PGS) embedded track must be rejected up front:
 // PGS passes the burn-in guard because it is deliverable as .sup, but it has
 // no text to convert, so forcing WebVTT would spawn an ffmpeg that always
@@ -706,45 +649,6 @@ func TestHandleSubtitle_BitmapTrackVTTRequestReturns415(t *testing.T) {
 	}
 }
 
-func TestHandleSubtitle_ExternalTextTrackSRTRequestReturnsVTT(t *testing.T) {
-	subtitlePath := filepath.Join(t.TempDir(), "movie.en.srt")
-	if err := os.WriteFile(subtitlePath, []byte("1\n00:00:01,000 --> 00:00:02,000\nHello\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	file := &models.MediaFile{
-		ID:        42,
-		ContentID: "movie-1",
-		FilePath:  "/tmp/movie.mkv",
-		Duration:  3600,
-		ExternalSubtitles: []models.ExternalSubtitle{
-			{Path: subtitlePath, Language: "eng", Format: "srt"},
-		},
-	}
-	baseMgr := playback.NewSessionManager(0, 0)
-	session, err := baseMgr.StartSession(1, "profile-1", 42, playback.PlayDirect, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	handler := NewStreamHandler(baseMgr, testPlaybackFileResolver{file: file})
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/stream/"+session.ID+"/subtitles/0.srt", nil)
-	req = req.WithContext(newAuthorizedPlaybackContext())
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("session_id", session.ID)
-	routeCtx.URLParams.Add("track", "0.srt")
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-	rr := httptest.NewRecorder()
-	handler.HandleSubtitle(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, content-type = %q, body = %s; want 200", rr.Code, rr.Header().Get("Content-Type"), rr.Body.String())
-	}
-	if got := rr.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/vtt") {
-		t.Fatalf("content type = %q, want WebVTT", got)
-	}
-	if body := rr.Body.String(); !strings.HasPrefix(body, "WEBVTT") || !strings.Contains(body, "Hello") {
-		t.Fatalf("body = %q, want converted WebVTT", body)
-	}
-}
-
 func TestHandleSubtitle_ExternalASSTrackASSRequestReturnsRawASS(t *testing.T) {
 	const assBody = "[Script Info]\nTitle: Test\n"
 	subtitlePath := filepath.Join(t.TempDir(), "movie.en.ass")
@@ -777,34 +681,6 @@ func TestHandleSubtitle_ExternalASSTrackASSRequestReturnsRawASS(t *testing.T) {
 	}
 	if got := rr.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/x-ssa") {
 		t.Fatalf("content type = %q, want raw ASS", got)
-	}
-}
-
-func TestHandleSubtitle_ExternalTextHEADDoesNotLoadTheArtifact(t *testing.T) {
-	file := &models.MediaFile{
-		ID:                42,
-		ContentID:         "movie-1",
-		FilePath:          "/missing/movie.mkv",
-		Duration:          3600,
-		ExternalSubtitles: []models.ExternalSubtitle{{Path: "/missing/movie.en.srt", Language: "eng", Format: "srt"}},
-	}
-	baseMgr := playback.NewSessionManager(0, 0)
-	session, err := baseMgr.StartSession(1, "profile-1", file.ID, playback.PlayDirect, false)
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	handler := NewStreamHandler(baseMgr, testPlaybackFileResolver{file: file})
-	req := httptest.NewRequest(http.MethodHead, "/api/v1/stream/"+session.ID+"/subtitles/0.vtt", nil)
-	req = req.WithContext(newAuthorizedPlaybackContext())
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("session_id", session.ID)
-	routeCtx.URLParams.Add("track", "0.vtt")
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-	rr := httptest.NewRecorder()
-	handler.HandleSubtitle(rr, req)
-
-	if rr.Code != http.StatusOK || rr.Body.Len() != 0 || !strings.HasPrefix(rr.Header().Get("Content-Type"), "text/vtt") {
-		t.Fatalf("HEAD status=%d type=%q body=%q", rr.Code, rr.Header().Get("Content-Type"), rr.Body.String())
 	}
 }
 
@@ -973,12 +849,20 @@ func TestSubtitleExplicitWindow(t *testing.T) {
 func TestEmbeddedSubtitleExtractionFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name, script string
-		status       int
-		interrupted  bool
+		// codec is the track's, subrip when empty; busy makes the node
+		// admit no more whole-track reads.
+		codec       string
+		busy        bool
+		status      int
+		interrupted bool
 	}{
-		{"before_output", "exit 1", http.StatusInternalServerError, false},
-		{"after_output", "printf 'WEBVTT\\n\\n00:00:01.000 --> 00:00:02.000\\nPartial\\n\\n'; exit 1", http.StatusOK, true},
-		{"complete", "printf 'WEBVTT\\n\\n00:20:01.000 --> 00:20:02.000\\nComplete\\n\\n'", http.StatusOK, false},
+		{name: "before_output", script: "exit 1", status: http.StatusInternalServerError},
+		{name: "after_output", script: "printf 'WEBVTT\\n\\n00:00:01.000 --> 00:00:02.000\\nPartial\\n\\n'; exit 1", status: http.StatusOK, interrupted: true},
+		{name: "complete", script: "printf 'WEBVTT\\n\\n00:20:01.000 --> 00:20:02.000\\nComplete\\n\\n'", status: http.StatusOK},
+		// A busy node answers before any byte, without a demux (the script
+		// would fail it).
+		{name: "busy_text", script: "exit 1", busy: true, status: http.StatusServiceUnavailable},
+		{name: "busy_sup", script: "exit 1", codec: "hdmv_pgs_subtitle", busy: true, status: http.StatusServiceUnavailable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
@@ -987,8 +871,19 @@ func TestEmbeddedSubtitleExtractionFailures(t *testing.T) {
 			}
 			handler := NewStreamHandler(nil, nil)
 			handler.PlaybackConfig = func() config.PlaybackConfig { return config.PlaybackConfig{FFmpegPath: ffmpeg} }
-			file := &models.MediaFile{ID: 42, FilePath: "/synthetic/media.mkv", SubtitleTracks: []models.SubtitleTrack{{Codec: "subrip"}}}
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { handler.streamEmbeddedSubtitle(w, r, file, 0, "vtt") }))
+			if tc.busy {
+				dir := t.TempDir()
+				handler.SubtitleCache = playback.NewSubtitleCache(func() string { return dir })
+				handler.SubtitleCache.SetEmbeddedSource(busySubtitleSource{})
+			}
+			codec, format := cmp.Or(tc.codec, "subrip"), []string{"vtt"}
+			if playback.IsPGS(codec) {
+				format = nil
+			}
+			file := &models.MediaFile{ID: 42, FilePath: "/synthetic/media.mkv", SubtitleTracks: []models.SubtitleTrack{{Codec: codec, Index: 2}}}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				handler.streamEmbeddedSubtitle(w, r, file, 0, format...)
+			}))
 			defer server.Close()
 			response, err := server.Client().Get(server.URL)
 			if err != nil {
@@ -999,6 +894,9 @@ func TestEmbeddedSubtitleExtractionFailures(t *testing.T) {
 			if response.StatusCode != tc.status {
 				t.Fatalf("status=%d, want %d", response.StatusCode, tc.status)
 			}
+			if retry := response.Header.Get("Retry-After"); tc.busy && retry != strconv.Itoa(playback.SubtitleReadsRetryAfter) {
+				t.Fatalf("Retry-After %q on a busy answer", retry)
+			}
 			if tc.interrupted && err == nil {
 				t.Fatal("failed extraction ended with successful EOF")
 			}
@@ -1007,4 +905,24 @@ func TestEmbeddedSubtitleExtractionFailures(t *testing.T) {
 			}
 		})
 	}
+}
+
+// busySubtitleSource is the embedded subtitle source of a node that admits
+// no more whole-track reads.
+type busySubtitleSource struct{}
+
+func (busySubtitleSource) WholeTrack(context.Context, string, playback.EmbeddedSubtitleRef) (*playback.SubtitlePacketInput, error) {
+	return nil, playback.ErrSubtitleReadsBusy
+}
+
+func (busySubtitleSource) Window(context.Context, string, playback.EmbeddedSubtitleRef, time.Duration, time.Duration) (*playback.SubtitlePacketInput, error) {
+	return nil, playback.ErrSubtitleReadsBusy
+}
+
+func (busySubtitleSource) DemuxCopy(context.Context, string, playback.EmbeddedSubtitleRef) (playback.DemuxCopy, error) {
+	return playback.DemuxCopy{}, playback.ErrSubtitleReadsBusy
+}
+
+func (busySubtitleSource) KeepDemuxed(context.Context, string, playback.EmbeddedSubtitleRef, playback.DemuxCopy, int64, time.Time) error {
+	return playback.ErrSubtitleReadsBusy
 }

@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"slices"
@@ -12,12 +13,13 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogsvc "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/collections/templates"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 )
 
 type PersonalCollectionPosterForm struct {
 	Poster    huma.FormFile `form:"poster" contentType:"image/jpeg,image/png,image/webp" required:"false"`
-	SourceURL string        `form:"source_url" required:"false"`
+	SourceURL string        `form:"source_url" format:"uri-reference" required:"false"`
 }
 
 type PersonalCollectionPosterInput struct {
@@ -36,12 +38,12 @@ type PersonalCollectionUpdate struct {
 	IsShared                   *bool           `json:"is_shared,omitempty" nullable:"false" doc:"Show the collection to every profile on the login"`
 	QueryDefinition            json.RawMessage `json:"query_definition,omitempty"`
 	SortConfig                 json.RawMessage `json:"sort_config,omitempty"`
-	SourceURL                  *string         `json:"source_url,omitempty" nullable:"false"`
+	SourceURL                  *string         `json:"source_url,omitempty" format:"uri-reference" nullable:"false"`
 	MaxItems                   *int            `json:"max_items,omitempty" nullable:"false" minimum:"0"`
 	LibraryIDs                 *[]ID           `json:"library_ids,omitempty" nullable:"false"`
 	DisplayQueryDefinition     json.RawMessage `json:"display_query_definition,omitempty"`
 	IncludeInServerCollections *bool           `json:"include_in_server_collections,omitempty" nullable:"false"`
-	PosterSourceURL            *string         `json:"poster_source_url,omitempty" nullable:"false"`
+	PosterSourceURL            *string         `json:"poster_source_url,omitempty" format:"uri-reference" nullable:"false"`
 	GroupID                    *ID             `json:"group_id,omitempty" nullable:"true" doc:"Omit: personal collection groups are no longer supported, and setting it answers capability_unsupported"`
 	SyncSchedule               *string         `json:"sync_schedule,omitempty" nullable:"false" enum:",daily,weekly,monthly" doc:"A synced list's cadence; empty stops scheduled syncs. Cron expressions are refused. Accepted when getCollectionCapabilities reports sync_schedule_editable" example:"weekly"`
 }
@@ -81,7 +83,7 @@ type PersonalCollectionPreviewItem struct {
 	ContentID ID     `json:"content_id"`
 	Title     string `json:"title"`
 	Type      string `json:"type"`
-	PosterURL string `json:"poster_url,omitempty" doc:"Card-size poster URL; omitted when the item has none"`
+	PosterURL string `json:"poster_url,omitempty" format:"uri-reference" doc:"Card-size poster URL; omitted when the item has none"`
 }
 type PersonalCollectionPreviewOutput struct {
 	Body struct {
@@ -391,12 +393,22 @@ func (reg *Registry) syncPersonalCollection(ctx context.Context, in *PersonalCol
 	}
 	v, e := s.SyncPersonalCollection(ctx, u, profileFrom(ctx), string(in.ID))
 	if e != nil {
-		return nil, collectionProblem(e)
+		return nil, personalSyncProblem(e)
 	}
 	if v == nil {
 		return nil, NewProblem(TypeInternalError, "The sync returned no result.")
 	}
 	return &PersonalCollectionSyncOutput{Body: *collectionSyncResultOf(v)}, nil
+}
+
+// personalSyncProblem answers a sync whose source list refused or did not
+// answer as dependency_unavailable with the reason, which the sync also
+// recorded on the collection. Any other failure is a collection problem.
+func personalSyncProblem(err error) *Problem {
+	if sourceErr, ok := errors.AsType[*usercollections.SourceError](err); ok {
+		return NewProblem(TypeDependencyUnavailable, "Sync failed: "+logredact.SanitizeURLError(sourceErr).Error())
+	}
+	return collectionProblem(err)
 }
 func (reg *Registry) listServerCollections(ctx context.Context, _ *struct{}) (*ServerCollectionsOutput, error) {
 	s, ok := reg.deps.LibraryCollections.(interface {

@@ -30,29 +30,44 @@ const (
 // CPU core; see tasks.imageCacheWorkerCount. Do not raise VIPS_CONCURRENCY
 // in deployments without lowering those pools, or the host oversubscribes.
 
+// libvips operation cache: bimg's package init lets libvips keep up to 500
+// finished operations, trimmed only once libvips' tracked memory passes
+// 100 MB, to answer a repeat of the same operation. A Silo encode can never
+// be one. libvips keys a buffer load on the blob it wraps around the bytes,
+// which is new on every call, so even a second load of the same source (the
+// next rung of an artwork ladder) misses, and every later operation keys on
+// the image that load produced. The cache only kept decoded images alive
+// outside the Go heap, where GOGC and GOMEMLIMIT cannot reclaim them. Turn it
+// off. bimg's init runs before this package's, so these settings win.
+func init() {
+	bimg.VipsCacheSetMax(0)
+	bimg.VipsCacheSetMaxMem(0)
+}
+
 // ErrInvalidImage reports source bytes that libvips cannot read as an image.
 // Failures after the header was read, such as encoding a variant, do not wrap
 // it; see PixelDataUndecodable for damaged pixel data.
 var ErrInvalidImage = errors.New("imageutil: invalid image")
 
-// maxPixelCheckPixels bounds the raster PixelDataUndecodable lets the
-// standard library allocate. A few-kilobyte upload can declare large
-// dimensions, and image.Decode allocates the whole raster before it reads the
-// pixel data. At 4 megapixels that is 32 MB for a 16-bit PNG, and about twice
-// that for an interlaced one, whose passes are decoded into separate images.
-const maxPixelCheckPixels = 4_000_000
+// maxGoDecodePixels bounds the raster this package lets the standard library
+// allocate, in PixelDataUndecodable and the thumbhash fallback. A
+// few-kilobyte file can declare large dimensions, and image.Decode allocates
+// the whole raster before it reads the pixel data. At 4 megapixels that is
+// 32 MB for a 16-bit PNG, and about twice that for an interlaced one, whose
+// passes are decoded into separate images.
+const maxGoDecodePixels = 4_000_000
 
 // PixelDataUndecodable reports whether data is a JPEG or PNG whose header
 // reads but whose pixel data does not decode. libvips reads only the header in
 // Size, so such a file first fails inside Process, where the error looks like
-// an encoder failure. Callers use it after GenerateVariants fails to tell
-// damaged input from a server fault. Other formats, including those other
-// packages register with image, sources above maxPixelCheckPixels, and
+// an encoder failure. Callers reach it through SourceUnusable after
+// processing fails, to tell damaged input from a server fault. Other formats, including those other
+// packages register with image, sources above maxGoDecodePixels, and
 // features the standard library does not support report false.
 func PixelDataUndecodable(data []byte) bool {
 	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil || (format != "jpeg" && format != "png") ||
-		int64(cfg.Width)*int64(cfg.Height) > maxPixelCheckPixels {
+		int64(cfg.Width)*int64(cfg.Height) > maxGoDecodePixels {
 		return false
 	}
 	_, _, err = image.Decode(bytes.NewReader(data))
@@ -61,10 +76,23 @@ func PixelDataUndecodable(data []byte) bool {
 	return err != nil && !errors.As(err, &jpegUnsupported) && !errors.As(err, &pngUnsupported)
 }
 
+// SourceUnusable reports whether err, from processing data, is the source's
+// fault and not the server's: it wraps ErrInvalidImage, or the pixel data
+// does not decode (PixelDataUndecodable). ErrBusy is never the source's
+// fault, and is answered before the pixel data is decoded, so a request the
+// budget turned away does not go on to decode outside it.
+func SourceUnusable(err error, data []byte) bool {
+	if errors.Is(err, ErrInvalidImage) {
+		return true
+	}
+	return !errors.Is(err, ErrBusy) && PixelDataUndecodable(data)
+}
+
 // MaxCachedOriginalDimension caps the longest edge of a cached "original"
-// variant. Provider artwork wider than this is downscaled on ingest, so a
-// client asking for the original size never receives more pixels than this.
-const MaxCachedOriginalDimension = 1920
+// variant at 4K. Provider artwork is rarely larger (TMDB backdrops top out at
+// 3840 wide, posters at 2000x3000), so the original keeps the provider's full
+// resolution; the cap bounds an outlier upload rather than everyday art.
+const MaxCachedOriginalDimension = 3840
 
 // Variant holds a named image variant (e.g. "original", "w500").
 type Variant struct {
@@ -84,13 +112,11 @@ type VariantResult struct {
 // than a target width are re-encoded without upscaling. All resizes operate on
 // the original bytes to avoid compounding quality loss.
 func GenerateVariants(data []byte, widths []int) (*VariantResult, error) {
-	img := bimg.NewImage(data)
-
-	// Validate input by reading size.
-	size, err := img.Size()
+	size, release, err := reserveSource(data)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidImage, err)
+		return nil, err
 	}
+	defer release()
 
 	variants := make([]Variant, 0, len(widths)+1)
 
@@ -142,15 +168,37 @@ func GenerateVariants(data []byte, widths []int) (*VariantResult, error) {
 	return &VariantResult{Variants: variants, Ext: ".webp"}, nil
 }
 
+// CheckImage reports whether data is an image an upload would accept as
+// a source: a header libvips reads, a size this node accepts (decodeBudget),
+// and, for a JPEG or PNG, pixel data that decodes (PixelDataUndecodable). A
+// file failing it wraps ErrInvalidImage.
+func CheckImage(data []byte) error {
+	size, err := bimg.NewImage(data).Size()
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidImage, err)
+	}
+	if err := checkFormat(data); err != nil {
+		return err
+	}
+	if err := decodes().accepts(size); err != nil {
+		return err
+	}
+	if PixelDataUndecodable(data) {
+		return fmt.Errorf("%w: its pixel data does not decode", ErrInvalidImage)
+	}
+	return nil
+}
+
 // EncodeWebPWidth re-encodes the source image as a single WebP no wider than
 // width, with metadata stripped. It is the "w<width>" rung of GenerateVariants
 // for callers that store that one variant and no original. Narrower sources
 // keep their width.
 func EncodeWebPWidth(data []byte, width int) ([]byte, error) {
-	size, err := bimg.NewImage(data).Size()
+	size, release, err := reserveSource(data)
 	if err != nil {
-		return nil, fmt.Errorf("imageutil: invalid image: %w", err)
+		return nil, err
 	}
+	defer release()
 	opts := bimg.Options{
 		Type:          bimg.WEBP,
 		Quality:       webpQuality,
@@ -166,22 +214,55 @@ func EncodeWebPWidth(data []byte, width int) ([]byte, error) {
 	return out, nil
 }
 
+// Rasterize renders an SVG, HEIF or AVIF source to a PNG no larger than
+// MaxCachedOriginalDimension on its longest edge, which the other functions
+// here then accept. They refuse those formats themselves; see checkFormat.
+// Call it only for a source the operator chose, such as a metadata
+// provider's artwork or a cover in a library folder: the budget charges the
+// source for its declared size, which these formats can exceed many times.
+func Rasterize(data []byte) ([]byte, error) {
+	if !NeedsRasterizing(data) {
+		return nil, fmt.Errorf("%w: not an SVG, HEIF or AVIF", ErrInvalidImage)
+	}
+	size, release, err := reserveHeader(data)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	opts := bimg.Options{Type: bimg.PNG, StripMetadata: true}
+	fitWithin(&opts, size, MaxCachedOriginalDimension)
+	out, err := bimg.NewImage(data).Process(opts)
+	if err != nil {
+		return nil, fmt.Errorf("imageutil: rasterize: %w", err)
+	}
+	return out, nil
+}
+
 // EncodePNGWithin re-encodes the source image as a PNG that fits within
 // maxWidth×maxHeight, keeping its aspect ratio and never upscaling, and
 // returns the encoded dimensions. Email uses it: unlike WebP, PNG renders in
 // every mail client.
 func EncodePNGWithin(data []byte, maxWidth, maxHeight int) (out []byte, width, height int, err error) {
-	size, err := bimg.NewImage(data).Size()
+	return encodeWithin(data, bimg.Options{Type: bimg.PNG, StripMetadata: true}, "png", maxWidth, maxHeight)
+}
+
+// EncodeWebPWithin is EncodePNGWithin for WebP, with transparency kept. Card
+// overlay images use it: one small image per badge, with no variants beside
+// it.
+func EncodeWebPWithin(data []byte, maxWidth, maxHeight int) (out []byte, width, height int, err error) {
+	return encodeWithin(data, bimg.Options{Type: bimg.WEBP, Quality: webpQuality, StripMetadata: true}, "webp", maxWidth, maxHeight)
+}
+
+// encodeWithin re-encodes data with opts so it fits within
+// maxWidth×maxHeight, never upscaling, and returns the encoded dimensions. A
+// source libvips cannot read, or of a size the node does not accept, wraps
+// ErrInvalidImage.
+func encodeWithin(data []byte, opts bimg.Options, format string, maxWidth, maxHeight int) (out []byte, width, height int, err error) {
+	size, release, err := reserveSource(data)
 	if err != nil {
-		return nil, 0, 0, fmt.Errorf("imageutil: invalid image: %w", err)
+		return nil, 0, 0, err
 	}
-	if size.Width <= 0 || size.Height <= 0 {
-		return nil, 0, 0, fmt.Errorf("imageutil: invalid image size %dx%d", size.Width, size.Height)
-	}
-	opts := bimg.Options{
-		Type:          bimg.PNG,
-		StripMetadata: true,
-	}
+	defer release()
 	// Constrain only the binding edge so libvips keeps the aspect ratio.
 	if size.Width*maxHeight >= size.Height*maxWidth {
 		if size.Width > maxWidth {
@@ -192,45 +273,30 @@ func EncodePNGWithin(data []byte, maxWidth, maxHeight int) (out []byte, width, h
 	}
 	out, err = bimg.NewImage(data).Process(opts)
 	if err != nil {
-		return nil, 0, 0, fmt.Errorf("imageutil: encode png: %w", err)
+		return nil, 0, 0, fmt.Errorf("imageutil: encode %s: %w", format, err)
 	}
 	outSize, err := bimg.NewImage(out).Size()
 	if err != nil {
-		return nil, 0, 0, fmt.Errorf("imageutil: read png size: %w", err)
+		return nil, 0, 0, fmt.Errorf("imageutil: read %s size: %w", format, err)
 	}
 	return out, outSize.Width, outSize.Height, nil
 }
 
 // GenerateSquareVariants center-crops the source image to a square and returns
-// a square original plus resized square variants, all encoded as WebP.
+// a square original plus resized square variants, all encoded as WebP. The
+// original is capped at MaxCachedOriginalDimension, because libwebp holds the
+// whole picture while it encodes.
 func GenerateSquareVariants(data []byte, sizes []int) (*VariantResult, error) {
-	img := bimg.NewImage(data)
-	size, err := img.Size()
+	size, release, err := reserveSource(data)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidImage, err)
+		return nil, err
 	}
+	defer release()
 
-	squareSize := size.Width
-	if size.Height < squareSize {
-		squareSize = size.Height
-	}
-	if squareSize <= 0 {
-		return nil, fmt.Errorf("imageutil: invalid image size")
-	}
-
-	top := (size.Height - squareSize) / 2
-	left := (size.Width - squareSize) / 2
-	cropped, err := img.Extract(top, left, squareSize, squareSize)
-	if err != nil {
-		return nil, fmt.Errorf("imageutil: crop square: %w", err)
-	}
+	squareSize := min(size.Width, size.Height)
 
 	variants := make([]Variant, 0, len(sizes)+1)
-	original, err := bimg.NewImage(cropped).Process(bimg.Options{
-		Type:          bimg.WEBP,
-		Quality:       webpQuality,
-		StripMetadata: true,
-	})
+	original, err := encodeSquare(data, min(squareSize, MaxCachedOriginalDimension), squareSize)
 	if err != nil {
 		return nil, fmt.Errorf("imageutil: encode square original: %w", err)
 	}
@@ -244,16 +310,7 @@ func GenerateSquareVariants(data []byte, sizes []int) (*VariantResult, error) {
 		if square <= 0 {
 			continue
 		}
-		opts := bimg.Options{
-			Type:          bimg.WEBP,
-			Quality:       webpQuality,
-			StripMetadata: true,
-			Width:         square,
-			Height:        square,
-			Force:         true,
-			Enlarge:       squareSize < square,
-		}
-		out, err := bimg.NewImage(cropped).Process(opts)
+		out, err := encodeSquare(data, square, squareSize)
 		if err != nil {
 			return nil, fmt.Errorf("imageutil: resize square to %d: %w", square, err)
 		}
@@ -261,6 +318,22 @@ func GenerateSquareVariants(data []byte, sizes []int) (*VariantResult, error) {
 	}
 
 	return &VariantResult{Variants: variants, Ext: ".webp"}, nil
+}
+
+// encodeSquare encodes the centered side×side WebP square of data, whose
+// shorter edge is squareSize. libvips scales the source so that edge fills
+// the square, then crops, in one pass: no full-resolution intermediate, and
+// the crop is taken after EXIF auto-rotation.
+func encodeSquare(data []byte, side, squareSize int) ([]byte, error) {
+	return bimg.NewImage(data).Process(bimg.Options{
+		Type:          bimg.WEBP,
+		Quality:       webpQuality,
+		StripMetadata: true,
+		Width:         side,
+		Height:        side,
+		Crop:          true,
+		Enlarge:       squareSize < side,
+	})
 }
 
 // Thumbhash computes a base64-encoded thumbhash from raw image bytes.
@@ -271,7 +344,8 @@ func GenerateSquareVariants(data []byte, sizes []int) (*VariantResult, error) {
 // the heap — well over a hundred MiB for a large poster — per concurrent
 // caller, while vips shrinks it to thumbhashSourceDimension with
 // shrink-on-load and hands Go a raster of a few KiB. The pure-Go decode of
-// the raw bytes remains as the fallback for anything vips cannot parse.
+// the raw bytes remains as the fallback for anything vips cannot parse, for
+// sources up to maxGoDecodePixels.
 //
 // Changing this pipeline changes the emitted hash bytes for a given image.
 // Stored thumbhashes remain valid placeholders, and the one site that
@@ -289,30 +363,53 @@ func Thumbhash(data []byte) (string, error) {
 }
 
 func decodeThumbhashSource(data []byte) (image.Image, error) {
-	if normalized, err := normalizeThumbhashSource(data); err == nil {
+	normalized, normalizeErr := normalizeThumbhashSource(data)
+	if normalizeErr == nil {
 		if img, _, err := image.Decode(bytes.NewReader(normalized)); err == nil {
 			return img, nil
 		}
 	}
-	img, _, err := image.Decode(bytes.NewReader(data))
+	if errors.Is(normalizeErr, ErrBusy) {
+		return nil, normalizeErr
+	}
+	img, err := decodeWithinBudget(data)
 	if err != nil {
+		// Bytes neither libvips nor the standard library can read keep
+		// ErrInvalidImage, as GenerateVariants reports them.
+		if errors.Is(normalizeErr, ErrInvalidImage) {
+			return nil, fmt.Errorf("%w: decode for thumbhash: %w", ErrInvalidImage, err)
+		}
 		return nil, fmt.Errorf("imageutil: decode for thumbhash: %w", err)
 	}
 	return img, nil
 }
 
-func normalizeThumbhashSource(data []byte) ([]byte, error) {
-	img := bimg.NewImage(data)
-	size, err := img.Size()
+// decodeWithinBudget decodes data with the standard library unless its header
+// declares more than maxGoDecodePixels.
+func decodeWithinBudget(data []byte) (image.Image, error) {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidImage, err)
+		return nil, err
 	}
+	if int64(cfg.Width)*int64(cfg.Height) > maxGoDecodePixels {
+		return nil, fmt.Errorf("%dx%d image exceeds %d pixels", cfg.Width, cfg.Height, maxGoDecodePixels)
+	}
+	img, _, err := image.Decode(bytes.NewReader(data))
+	return img, err
+}
+
+func normalizeThumbhashSource(data []byte) ([]byte, error) {
+	size, release, err := reserveSource(data)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	opts := bimg.Options{
 		Type:          bimg.PNG,
 		StripMetadata: true,
 	}
 	fitWithin(&opts, size, thumbhashSourceDimension)
-	out, err := img.Process(opts)
+	out, err := bimg.NewImage(data).Process(opts)
 	if err != nil {
 		return nil, fmt.Errorf("imageutil: normalize thumbhash source: %w", err)
 	}

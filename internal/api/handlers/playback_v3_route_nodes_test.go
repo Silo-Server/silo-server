@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
@@ -202,6 +203,110 @@ type remoteReplanFixtureV3 struct {
 	starts    func() int
 }
 
+func (f remoteReplanFixtureV3) killStartedNode() {
+	f.probe.mu.Lock()
+	f.probe.dead[f.startedOn] = true
+	f.probe.mu.Unlock()
+}
+
+func (f remoteReplanFixtureV3) currentNode(t *testing.T) string {
+	t.Helper()
+	session, err := f.handler.sessionMgr.GetSession(f.started.SessionID)
+	if err != nil {
+		t.Fatalf("replan dropped the session: %v", err)
+	}
+	return session.TranscodeNodeURL
+}
+
+// Planning reads capabilities from every pooled node; a node the replan found
+// unreachable is skipped, so the plan is not built on its stale inventory and
+// the read does not wait on it.
+func TestPlanningCapabilityReadsSkipUnreachableNodes(t *testing.T) {
+	var deadRequests atomic.Int32
+	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		deadRequests.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(dead.Close)
+	live := remoteTranscodeNodeStubV3(t)
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.JWTSecret = "test-secret"
+
+	ctx := withUnreachableRouteNodesV3(context.Background(), map[string]struct{}{dead.URL: {}})
+	capabilities := handler.pooledNodeCapabilitiesV3(ctx, []string{dead.URL, live.URL})
+	if _, ok := capabilities[live.URL]; !ok {
+		t.Fatalf("capabilities = %v, want the live node's inventory", capabilities)
+	}
+	if _, ok := capabilities[dead.URL]; ok {
+		t.Fatal("the unreachable node contributed capabilities")
+	}
+	if n := deadRequests.Load(); n != 0 {
+		t.Fatalf("the unreachable node received %d capability requests", n)
+	}
+}
+
+// A progressive remux under worker-only routing runs only behind a proxy. When
+// the only proxy is one this request found not answering, the remux has no
+// route, so it escalates to HLS on a transcode node rather than failing on
+// route capacity.
+func TestEscalateRefusedProgressiveRemuxV3TreatsAnUnreachableProxyAsAbsent(t *testing.T) {
+	const proxyURL = "http://proxy-1"
+	for _, tt := range []struct {
+		name string
+		mode mediaAuthModeV3
+	}{
+		{name: "signed URLs", mode: mediaAuthModeV3{}},
+		{name: "authorized origins", mode: authorizedOriginsModeV3()},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			handler, input, result := escalationFixtureV3(t, true)
+			handler.JWTSecret = "test-secret"
+			handler.NodePlanner.(*recordingNodePlannerV3).plan.ProxyNode = &nodepool.Node{URL: proxyURL}
+			handler.ProxyGrantStore = &recordingRecipeCardStoreV3{}
+			plannerInput := func() playback.PlannerInputV3 { return input }
+
+			kept, transportErr := handler.escalateRefusedProgressiveRemuxV3(context.Background(), tt.mode, plannerInput, result)
+			if transportErr != nil || kept.Plan == nil || kept.Plan.Delivery != playback.DeliveryRemuxProgressiveV3 {
+				t.Fatalf("with the proxy answering: %s %#v, want the progressive remux kept", playback.ExplainPlannerResultV3(kept), transportErr)
+			}
+
+			ctx := withUnreachableRouteNodesV3(context.Background(), map[string]struct{}{proxyURL: {}})
+			escalated, transportErr := handler.escalateRefusedProgressiveRemuxV3(ctx, tt.mode, plannerInput, result)
+			if transportErr != nil {
+				t.Fatalf("escalation error = %#v", transportErr)
+			}
+			if escalated.Terminal != nil || escalated.Plan == nil || escalated.Plan.Delivery != playback.DeliveryRemuxHLSV3 {
+				t.Fatalf("escalated result = %s, want %q", playback.ExplainPlannerResultV3(escalated), playback.DeliveryRemuxHLSV3)
+			}
+		})
+	}
+}
+
+// TestUnreachableSessionNodesV3FindsHungNode pins that a replan's real probe
+// leaves out a node that accepts connections but answers nothing, as after
+// SIGSTOP, within the probe bound.
+func TestUnreachableSessionNodesV3FindsHungNode(t *testing.T) {
+	release := make(chan struct{})
+	hung := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer hung.Close()
+	defer close(release)
+
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	started := time.Now()
+	unreachable := handler.unreachableSessionNodesV3(context.Background(), &playback.Session{ID: "s1", TranscodeNodeURL: hung.URL})
+	if _, ok := unreachable[hung.URL]; !ok {
+		t.Fatalf("unreachable = %v, want the hung node", unreachable)
+	}
+	if took := time.Since(started); took > routeNodeProbeTimeoutV3+time.Second {
+		t.Fatalf("probe took %v, want within %v", took, routeNodeProbeTimeoutV3)
+	}
+}
+
 func newRemoteReplanFixtureV3(t *testing.T) remoteReplanFixtureV3 {
 	t.Helper()
 	var mu sync.Mutex
@@ -252,12 +357,7 @@ func newRemoteReplanFixtureV3(t *testing.T) remoteReplanFixtureV3 {
 
 	startRequest := v3HandlerStartRequest()
 	startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
-	startRR := httptest.NewRecorder()
-	handler.HandleStartPlayback(startRR, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext()))
-	var started playback.DecisionResponseV3
-	if startRR.Code != http.StatusCreated || json.Unmarshal(startRR.Body.Bytes(), &started) != nil || started.PlaybackPlan == nil {
-		t.Fatalf("start status=%d body=%s", startRR.Code, startRR.Body.String())
-	}
+	started := startPlayableDecisionV2(t, handler, marshalV3StartRequest(t, startRequest))
 	session, err := handler.sessionMgr.GetSession(started.SessionID)
 	if err != nil || session.TranscodeNodeURL == "" {
 		t.Fatalf("start did not place the transcode on a node: %#v", session)
@@ -273,15 +373,9 @@ func newRemoteReplanFixtureV3(t *testing.T) remoteReplanFixtureV3 {
 	}
 }
 
-func (f remoteReplanFixtureV3) killStartedNode() {
-	f.probe.mu.Lock()
-	f.probe.dead[f.startedOn] = true
-	f.probe.mu.Unlock()
-}
-
 func (f remoteReplanFixtureV3) replan(t *testing.T, operation playback.ReplanOperationV3, failure playback.FailureV3, attempted []string) playback.DecisionResponseV3 {
 	t.Helper()
-	return postPlaybackReplanV3(t, f.handler, f.started.SessionID, playback.ReplanRequestV3{
+	return replanPlaybackDecisionV2(t, f.handler, f.started.SessionID, playback.ReplanRequestV3{
 		ProtocolVersion:       playback.ProtocolV3,
 		Operation:             operation,
 		PlaybackAttemptID:     f.start.PlaybackAttemptID,
@@ -299,18 +393,9 @@ func (f remoteReplanFixtureV3) replan(t *testing.T, operation playback.ReplanOpe
 	})
 }
 
-func (f remoteReplanFixtureV3) currentNode(t *testing.T) string {
-	t.Helper()
-	session, err := f.handler.sessionMgr.GetSession(f.started.SessionID)
-	if err != nil {
-		t.Fatalf("replan dropped the session: %v", err)
-	}
-	return session.TranscodeNodeURL
-}
-
 // A replan that changes nothing keeps a working remote transport, and moves
 // one whose node no longer answers.
-func TestHandleReplanPlaybackV3MovesTrackChangeOffAnUnreachableNode(t *testing.T) {
+func TestReplanPlaybackV2MovesTrackChangeOffAnUnreachableNode(t *testing.T) {
 	t.Run("node answers", func(t *testing.T) {
 		f := newRemoteReplanFixtureV3(t)
 		replanned := f.replan(t, playback.ReplanOperationTrackChangeV3, playback.FailureV3{}, nil)
@@ -346,7 +431,7 @@ func TestHandleReplanPlaybackV3MovesTrackChangeOffAnUnreachableNode(t *testing.T
 // A failure recovery from a node that stopped answering keeps the failed
 // recipe: the node failed, not the plan, so the same recipe runs on another
 // node instead of being excluded.
-func TestHandleReplanPlaybackV3FailureRecoveryFromAnUnreachableNodeKeepsTheRecipe(t *testing.T) {
+func TestReplanPlaybackV2FailureRecoveryFromAnUnreachableNodeKeepsTheRecipe(t *testing.T) {
 	f := newRemoteReplanFixtureV3(t)
 	key := f.started.PlaybackPlan.PlanAttemptKey
 	f.killStartedNode()
@@ -370,36 +455,9 @@ func TestHandleReplanPlaybackV3FailureRecoveryFromAnUnreachableNodeKeepsTheRecip
 	}
 }
 
-// Planning reads capabilities from every pooled node; a node the replan found
-// unreachable is skipped, so the plan is not built on its stale inventory and
-// the read does not wait on it.
-func TestPlanningCapabilityReadsSkipUnreachableNodes(t *testing.T) {
-	var deadRequests atomic.Int32
-	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		deadRequests.Add(1)
-		w.WriteHeader(http.StatusServiceUnavailable)
-	}))
-	t.Cleanup(dead.Close)
-	live := remoteTranscodeNodeStubV3(t)
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
-	handler.JWTSecret = "test-secret"
-
-	ctx := withUnreachableRouteNodesV3(context.Background(), map[string]struct{}{dead.URL: {}})
-	capabilities := handler.pooledNodeCapabilitiesV3(ctx, []string{dead.URL, live.URL})
-	if _, ok := capabilities[live.URL]; !ok {
-		t.Fatalf("capabilities = %v, want the live node's inventory", capabilities)
-	}
-	if _, ok := capabilities[dead.URL]; ok {
-		t.Fatal("the unreachable node contributed capabilities")
-	}
-	if n := deadRequests.Load(); n != 0 {
-		t.Fatalf("the unreachable node received %d capability requests", n)
-	}
-}
-
 // Clients echo plan keys opaquely, and planning compares them trimmed, so a
 // padded copy of the failed key must not exclude the recipe either.
-func TestHandleReplanPlaybackV3NodeRecoveryIgnoresPaddedFailedKeys(t *testing.T) {
+func TestReplanPlaybackV2NodeRecoveryIgnoresPaddedFailedKeys(t *testing.T) {
 	f := newRemoteReplanFixtureV3(t)
 	key := f.started.PlaybackPlan.PlanAttemptKey
 	f.killStartedNode()
@@ -409,42 +467,5 @@ func TestHandleReplanPlaybackV3NodeRecoveryIgnoresPaddedFailedKeys(t *testing.T)
 	}
 	if node := f.currentNode(t); node != f.other {
 		t.Fatalf("recovered on %s, want %s", node, f.other)
-	}
-}
-
-// A progressive remux under worker-only routing runs only behind a proxy. When
-// the only proxy is one this request found not answering, the remux has no
-// route, so it escalates to HLS on a transcode node rather than failing on
-// route capacity.
-func TestEscalateRefusedProgressiveRemuxV3TreatsAnUnreachableProxyAsAbsent(t *testing.T) {
-	const proxyURL = "http://proxy-1"
-	for _, tt := range []struct {
-		name string
-		mode mediaAuthModeV3
-	}{
-		{name: "signed URLs", mode: mediaAuthModeV3{}},
-		{name: "authorized origins", mode: authorizedOriginsModeV3()},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			handler, input, result := escalationFixtureV3(t, true)
-			handler.JWTSecret = "test-secret"
-			handler.NodePlanner.(*recordingNodePlannerV3).plan.ProxyNode = &nodepool.Node{URL: proxyURL}
-			handler.ProxyGrantStore = &recordingRecipeCardStoreV3{}
-			plannerInput := func() playback.PlannerInputV3 { return input }
-
-			kept, transportErr := handler.escalateRefusedProgressiveRemuxV3(context.Background(), tt.mode, plannerInput, result)
-			if transportErr != nil || kept.Plan == nil || kept.Plan.Delivery != playback.DeliveryRemuxProgressiveV3 {
-				t.Fatalf("with the proxy answering: %s %#v, want the progressive remux kept", playback.ExplainPlannerResultV3(kept), transportErr)
-			}
-
-			ctx := withUnreachableRouteNodesV3(context.Background(), map[string]struct{}{proxyURL: {}})
-			escalated, transportErr := handler.escalateRefusedProgressiveRemuxV3(ctx, tt.mode, plannerInput, result)
-			if transportErr != nil {
-				t.Fatalf("escalation error = %#v", transportErr)
-			}
-			if escalated.Terminal != nil || escalated.Plan == nil || escalated.Plan.Delivery != playback.DeliveryRemuxHLSV3 {
-				t.Fatalf("escalated result = %s, want %q", playback.ExplainPlannerResultV3(escalated), playback.DeliveryRemuxHLSV3)
-			}
-		})
 	}
 }

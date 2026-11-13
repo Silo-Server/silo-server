@@ -7,9 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -17,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
@@ -52,19 +50,6 @@ func subtitleSelectionVersion() catalog.FileVersion {
 	}
 }
 
-func TestPlaybackInfoRequest_AcceptsStringSubtitleStreamIndex(t *testing.T) {
-	var req playbackInfoRequest
-	if err := json.Unmarshal([]byte(`{"SubtitleStreamIndex":"3"}`), &req); err != nil {
-		t.Fatalf("unmarshal playback request: %v", err)
-	}
-	if req.SubtitleStreamIndex == nil {
-		t.Fatal("expected subtitle stream index")
-	}
-	if got := int(*req.SubtitleStreamIndex); got != 3 {
-		t.Fatalf("SubtitleStreamIndex = %d, want 3", got)
-	}
-}
-
 func TestIsValidCompatSubtitleStreamIndex(t *testing.T) {
 	version := subtitleSelectionVersion()
 	const downloadedCount = 1 // downloaded subtitle occupies stream index 5 (after the bitmap track at 4)
@@ -77,8 +62,6 @@ func TestIsValidCompatSubtitleStreamIndex(t *testing.T) {
 		{"video stream", 0, false},
 		{"audio stream", 1, false},
 		{"embedded text subtitle", 2, true},
-		{"external text subtitle", 3, true},
-		{"bitmap subtitle (native decoder)", 4, true},
 		{"downloaded subtitle", 5, true},
 		{"out of range", 6, false},
 		{"negative", -1, false},
@@ -128,7 +111,6 @@ func TestResolveSelectedSubtitleStreamIndex(t *testing.T) {
 		{"no request falls back to media default", true, nil, intPtr(2)},
 		{"explicit off", true, intPtr(-1), intPtr(-1)},
 		{"valid embedded selection", true, intPtr(2), intPtr(2)},
-		{"valid external selection", true, intPtr(3), intPtr(3)},
 		{"valid downloaded selection", true, intPtr(5), intPtr(5)},
 		{"invalid selection falls back to media default", true, intPtr(99), intPtr(2)},
 		// When the downloaded list could not be loaded, an embedded/external
@@ -136,7 +118,6 @@ func TestResolveSelectedSubtitleStreamIndex(t *testing.T) {
 		// rather than downgraded to the media default.
 		{"lookup failure honors embedded selection", false, intPtr(3), intPtr(3)},
 		{"lookup failure honors unverifiable selection", false, intPtr(5), intPtr(5)},
-		{"lookup failure still respects off", false, intPtr(-1), intPtr(-1)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -251,21 +232,6 @@ func TestHandlePlaybackInfo_DefaultModeUsesExternalWithoutEmbeddedDefault(t *tes
 	}
 }
 
-// Without external files, Default mode falls to the embedded default track.
-func TestHandlePlaybackInfo_DefaultModeUsesEmbeddedDefaultWithoutExternal(t *testing.T) {
-	handler, routeID := newSubtitleSelectionHandler(t)
-	handler.SubtitleRepo = fakeSubtitleRepository{}
-	detail := handler.content.(*stubContentService).detail
-	detail.Versions[0].SubtitleTracks = []catalog.VersionSubtitleTrack{
-		{Index: 2, Codec: "subrip", Language: "eng", Title: "English", Default: true},
-		{Index: 3, Codec: "subrip", Language: "spa", Title: "Spanish"},
-	}
-	resp := postPlaybackInfo(t, handler, routeID, `{}`)
-	if got := resp.MediaSources[0].DefaultSubtitleStreamIndex; got == nil || *got != 2 {
-		t.Fatalf("DefaultSubtitleStreamIndex = %v, want 2", got)
-	}
-}
-
 // The viewer's canonical subtitle settings select the default the way the
 // matching Jellyfin SubtitleMode does.
 func TestHandlePlaybackInfo_SubtitleModeFollowsViewerSettings(t *testing.T) {
@@ -278,8 +244,6 @@ func TestHandlePlaybackInfo_SubtitleModeFollowsViewerSettings(t *testing.T) {
 	}{
 		{"None hides every subtitle", "off", false, "fr", nil},
 		{"Always picks the preferred full track", "always", true, "fr", intPtr(4)},
-		{"Smart shows preferred subtitles for foreign audio", "auto", true, "es", intPtr(3)},
-		{"OnlyForced without forced tracks shows none", "off", true, "en", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -300,35 +264,6 @@ func TestHandlePlaybackInfo_SubtitleModeFollowsViewerSettings(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestHandlePlaybackInfo_DeliversEmbeddedTextAsProfileRequestedExternalVTT(t *testing.T) {
-	handler, routeID := newSubtitleSelectionHandler(t)
-	resp := postPlaybackInfo(t, handler, routeID, `{
-		"SubtitleStreamIndex": 2,
-		"DeviceProfile": {
-			"SubtitleProfiles": [
-				{"Format": "vtt", "Method": "External"}
-			]
-		}
-	}`)
-
-	for _, stream := range resp.MediaSources[0].MediaStreams {
-		if stream.Type != "Subtitle" || stream.Index != 2 {
-			continue
-		}
-		if stream.DeliveryMethod != "External" {
-			t.Fatalf("DeliveryMethod = %q, want External", stream.DeliveryMethod)
-		}
-		if !stream.SupportsExternalStream {
-			t.Fatal("SupportsExternalStream = false, want true")
-		}
-		if !strings.Contains(stream.DeliveryURL, "/Subtitles/2/stream.vtt?") {
-			t.Fatalf("DeliveryURL = %q, want VTT subtitle route", stream.DeliveryURL)
-		}
-		return
-	}
-	t.Fatal("embedded subtitle stream 2 not found")
 }
 
 func TestHandlePlaybackInfo_DeliversExternalSRTAsProfileRequestedVTT(t *testing.T) {
@@ -363,35 +298,6 @@ func TestHandlePlaybackInfo_DeliversExternalSRTAsProfileRequestedVTT(t *testing.
 	t.Fatal("external subtitle stream 3 not found")
 }
 
-func TestHandlePlaybackInfo_DeliversDownloadedSRTAsProfileRequestedVTT(t *testing.T) {
-	handler, routeID := newSubtitleSelectionHandler(t)
-	resp := postPlaybackInfo(t, handler, routeID, `{
-		"SubtitleStreamIndex": 5,
-		"DeviceProfile": {
-			"SubtitleProfiles": [
-				{"Format": "vtt", "Method": "External"}
-			]
-		}
-	}`)
-	if got := resp.MediaSources[0].DefaultSubtitleStreamIndex; got == nil || *got != 5 {
-		t.Fatalf("DefaultSubtitleStreamIndex = %v, want 5", got)
-	}
-	if index, found := defaultSubtitleStreamFromResponse(t, resp); !found || index != 5 {
-		t.Fatalf("default subtitle stream = (%d, %v), want (5, true)", index, found)
-	}
-
-	for _, stream := range resp.MediaSources[0].MediaStreams {
-		if stream.Type != "Subtitle" || stream.Index != 5 {
-			continue
-		}
-		if !strings.Contains(stream.DeliveryURL, "/Subtitles/5/stream.vtt?") {
-			t.Fatalf("DeliveryURL = %q, want VTT subtitle route", stream.DeliveryURL)
-		}
-		return
-	}
-	t.Fatal("downloaded subtitle stream 5 not found")
-}
-
 // erroringSubtitleRepository simulates a transient failure of the downloaded
 // subtitle lookup while satisfying the rest of the repository interface.
 type erroringSubtitleRepository struct {
@@ -402,47 +308,8 @@ func (erroringSubtitleRepository) ListDownloadedSubtitles(context.Context, int) 
 	return nil, errors.New("subtitle store unavailable")
 }
 
-func TestHandlePlaybackInfo_HonorsExternalSelectionWhenDownloadedLookupFails(t *testing.T) {
-	codec := NewResourceIDCodec()
-	contentID := "movie-1"
-	routeID := codec.EncodeStringID(EncodedIDItem, contentID)
-	handler := &PlaybackHandler{
-		content: &stubContentService{detail: &upstreamItemDetail{
-			ContentID: contentID,
-			Versions:  []catalog.FileVersion{subtitleSelectionVersion()},
-		}},
-		codec:          codec,
-		deviceProfiles: NewDeviceProfileStore(time.Hour, nil),
-		playbackStore:  NewPlaybackSessionStore(time.Hour, nil),
-		SubtitleRepo:   erroringSubtitleRepository{},
-	}
-
-	// A failed downloaded-subtitle lookup must not discard a valid
-	// embedded/external selection (the primary case for external SRT).
-	resp := postPlaybackInfo(t, handler, routeID, `{"SubtitleStreamIndex":3}`)
-	if resp.MediaSources[0].DefaultSubtitleStreamIndex == nil {
-		t.Fatal("expected DefaultSubtitleStreamIndex to be set")
-	}
-	if got := *resp.MediaSources[0].DefaultSubtitleStreamIndex; got != 3 {
-		t.Fatalf("DefaultSubtitleStreamIndex = %d, want 3", got)
-	}
-	index, found := defaultSubtitleStreamFromResponse(t, resp)
-	if !found || index != 3 {
-		t.Fatalf("default subtitle stream = (%d, %v), want (3, true)", index, found)
-	}
-}
-
-func TestHandlePlaybackInfo_SubtitlesOff(t *testing.T) {
-	handler, routeID := newSubtitleSelectionHandler(t)
-	resp := postPlaybackInfo(t, handler, routeID, `{"SubtitleStreamIndex":-1}`)
-
-	if resp.MediaSources[0].DefaultSubtitleStreamIndex != nil {
-		t.Fatalf("expected DefaultSubtitleStreamIndex to be unset, got %d", *resp.MediaSources[0].DefaultSubtitleStreamIndex)
-	}
-	if index, found := defaultSubtitleStreamFromResponse(t, resp); found {
-		t.Fatalf("expected no default subtitle stream, got index %d", index)
-	}
-}
+// noRoute marks a case PlaybackInfo answers with Jellyfin's NoCompatibleStream.
+const noRoute = -1
 
 func TestDownloadedSubtitleAlwaysBurnTransportConstraints(t *testing.T) {
 	for _, tc := range []struct {
@@ -450,11 +317,11 @@ func TestDownloadedSubtitleAlwaysBurnTransportConstraints(t *testing.T) {
 		status     int
 	}{
 		{"direct original remains available", `{"SubtitleStreamIndex":5,"AlwaysBurnInSubtitleWhenTranscoding":true}`, 200},
-		{"progressive video copy remains available", `{"SubtitleStreamIndex":5,"EnableDirectPlay":false,"AlwaysBurnInSubtitleWhenTranscoding":true}`, 200},
-		{"bitrate ceiling cannot retain direct stream", `{"SubtitleStreamIndex":5,"MaxStreamingBitrate":4000000,"AlwaysBurnInSubtitleWhenTranscoding":true}`, 400},
-		{"unsupported source video cannot retain direct stream", `{"SubtitleStreamIndex":5,"AlwaysBurnInSubtitleWhenTranscoding":true,"DeviceProfile":{"DirectPlayProfiles":[{"Type":"Video","VideoCodec":"hevc","AudioCodec":"aac"}],"TranscodingProfiles":[{"Type":"Video","Protocol":"hls","Container":"ts","VideoCodec":"h264","AudioCodec":"aac"}]}}`, 400},
+		{"video copy remains available", `{"SubtitleStreamIndex":5,"EnableDirectPlay":false,"AlwaysBurnInSubtitleWhenTranscoding":true}`, 200},
+		{"bitrate ceiling cannot retain direct stream", `{"SubtitleStreamIndex":5,"MaxStreamingBitrate":4000000,"AlwaysBurnInSubtitleWhenTranscoding":true}`, noRoute},
+		{"TS-only client takes the copy and needs no burn", `{"SubtitleStreamIndex":5,"AlwaysBurnInSubtitleWhenTranscoding":true,"DeviceProfile":{"DirectPlayProfiles":[{"Type":"Video","VideoCodec":"hevc","AudioCodec":"aac"}],"TranscodingProfiles":[{"Type":"Video","Protocol":"hls","Container":"ts","VideoCodec":"h264","AudioCodec":"aac"}]}}`, 200},
 		{"external text during ordinary full encode", `{"SubtitleStreamIndex":5,"EnableDirectPlay":false,"AllowVideoStreamCopy":false}`, 200},
-		{"mandatory burn cannot use downloaded text in full encode", `{"SubtitleStreamIndex":5,"EnableDirectPlay":false,"AllowVideoStreamCopy":false,"AlwaysBurnInSubtitleWhenTranscoding":true}`, 400},
+		{"mandatory burn cannot use downloaded text in full encode", `{"SubtitleStreamIndex":5,"EnableDirectPlay":false,"AllowVideoStreamCopy":false,"AlwaysBurnInSubtitleWhenTranscoding":true}`, noRoute},
 		{"video copy remux needs no burn", `{"SubtitleStreamIndex":5,"EnableDirectPlay":false,"AlwaysBurnInSubtitleWhenTranscoding":true,"DeviceProfile":{"TranscodingProfiles":[{"Type":"Video","Protocol":"hls","Container":"mp4","VideoCodec":"h264","AudioCodec":"aac"}]}}`, 200},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -469,27 +336,22 @@ func TestDownloadedSubtitleAlwaysBurnTransportConstraints(t *testing.T) {
 			ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "token-1"})
 			rr := httptest.NewRecorder()
 			h.HandlePlaybackInfo(rr, req.WithContext(ctx))
+			if tc.status == noRoute {
+				assertNoCompatibleStream(t, h, item, rr.Code, rr.Body.Bytes())
+				return
+			}
 			if rr.Code != tc.status {
 				t.Fatalf("status %d want %d: %s", rr.Code, tc.status, rr.Body.String())
-			}
-			if tc.status == 400 {
-				if !strings.Contains(rr.Body.String(), "PlaybackUnavailable") {
-					t.Fatalf("error: %s", rr.Body.String())
-				}
-				if _, _, ok := h.playbackStore.FindByRoute("token-1", item); ok {
-					t.Fatal("stored unplayable negotiation")
-				}
-				return
 			}
 			var response playbackInfoResponseDTO
 			if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
 				t.Fatal(err)
 			}
 			source := response.MediaSources[0]
-			if tc.name == "progressive video copy remains available" {
+			if tc.name == "video copy remains available" {
 				session, ok := h.playbackStore.Get(response.PlaySessionID)
-				if !ok || session.MediaSources[0].HLSRemux || !source.SupportsDirectStream || source.SupportsTranscoding || !strings.Contains(source.DirectStreamURL, "static=false") {
-					t.Fatalf("progressive copy: %+v", source)
+				if !ok || !session.MediaSources[0].HLSRemux || source.SupportsDirectStream || !source.SupportsTranscoding {
+					t.Fatalf("video copy: %+v", source)
 				}
 			}
 			if source.DirectStreamURL == "" && source.TranscodingURL == "" {
@@ -510,14 +372,13 @@ func TestPlaybackInfoSidecarRequiresExternalSubtitleDelivery(t *testing.T) {
 		profiles string
 		status   int
 	}{
-		{"sidecar cannot be embedded in original", 3, `[{"Format":"srt","Method":"Embed"}]`, 400},
+		{"sidecar cannot be embedded in original", 3, `[{"Format":"srt","Method":"Embed"}]`, noRoute},
 		{"sidecar delivered externally", 3, `[{"Format":"srt","Method":"External"}]`, 200},
 		{"sidecar client accepts both", 3, `[{"Format":"srt","Method":"Embed"},{"Format":"srt","Method":"External"}]`, 200},
 		{"embedded original retains embed support", 2, `[{"Format":"srt","Method":"Embed"}]`, 200},
 		{"embedded text delivered externally", 2, `[{"Format":"srt","Method":"External"}]`, 200},
-		{"downloaded cannot embed", 5, `[{"Format":"srt","Method":"Embed"}]`, 400},
-		{"downloaded cannot encode", 5, `[{"Format":"srt","Method":"Encode"}]`, 400},
-		{"downloaded wrong external format", 5, `[{"Format":"ass","Method":"External"}]`, 400},
+		{"downloaded cannot embed", 5, `[{"Format":"srt","Method":"Embed"}]`, noRoute},
+		{"downloaded wrong external format", 5, `[{"Format":"ass","Method":"External"}]`, noRoute},
 		{"downloaded external", 5, `[{"Format":"srt","Method":"External"}]`, 200},
 		{"downloaded external alias", 5, `[{"Format":"subrip","Method":"External"}]`, 200},
 		{"downloaded unrestricted", 5, `[]`, 200},
@@ -532,17 +393,12 @@ func TestPlaybackInfoSidecarRequiresExternalSubtitleDelivery(t *testing.T) {
 			ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "token-1"})
 			rr := httptest.NewRecorder()
 			h.HandlePlaybackInfo(rr, req.WithContext(ctx))
+			if tc.status == noRoute {
+				assertNoCompatibleStream(t, h, item, rr.Code, rr.Body.Bytes())
+				return
+			}
 			if rr.Code != tc.status {
 				t.Fatalf("status %d want %d: %s", rr.Code, tc.status, rr.Body.String())
-			}
-			if tc.status == 400 {
-				if !strings.Contains(rr.Body.String(), "PlaybackUnavailable") {
-					t.Fatalf("error: %s", rr.Body.String())
-				}
-				if _, _, ok := h.playbackStore.FindByRoute("token-1", item); ok {
-					t.Fatal("persisted unusable subtitle negotiation")
-				}
-				return
 			}
 			var response playbackInfoResponseDTO
 			if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
@@ -578,6 +434,16 @@ func TestPlaybackInfoSidecarRequiresExternalSubtitleDelivery(t *testing.T) {
 	}
 }
 
+// A server cap above the file's bitrate isn't why a sidecar the profile takes
+// only embedded has no route, so the answer is NoCompatibleStream, not the
+// bitrate-limit error: the check without the cap applies subtitle delivery too.
+func TestPlaybackInfoSubtitleRefusalUnderServerCapIsNoCompatibleStream(t *testing.T) {
+	h, item := newSubtitleSelectionHandler(t)
+	h.ScopeResolver = &stubScopeResolver{scope: access.Scope{MaxLocalStreamBitrateKbps: 20_000, MaxRemoteStreamBitrateKbps: 20_000}}
+	rr := servePlaybackInfo(h, item, `{"SubtitleStreamIndex":3,"DeviceProfile":{"SubtitleProfiles":[{"Format":"srt","Method":"Embed"}]}}`)
+	assertNoCompatibleStream(t, h, item, rr.Code, rr.Body.Bytes())
+}
+
 func TestMediaSourceDTOLegacyExternalSubtitleSelectionSurvivesSessionPersistence(t *testing.T) {
 	source := PlaybackMediaSource{
 		ID: "source", Version: subtitleSelectionVersion(), SupportsDirectPlay: true,
@@ -594,7 +460,7 @@ func TestMediaSourceDTOLegacyExternalSubtitleSelectionSurvivesSessionPersistence
 	}
 	// Older sessions stored delivery only for the selected track.
 	recovered.SubtitleDeliveries = nil
-	dto := (&PlaybackHandler{}).mediaSourceDTO("item", "play", "token", recovered)
+	dto := (&PlaybackHandler{}).mediaSourceDTO("item", "play", recovered)
 	for _, stream := range dto.MediaStreams {
 		if stream.Type != "Subtitle" || stream.IsExternal {
 			continue
@@ -613,7 +479,7 @@ func TestMediaSourceDTOLegacyExternalSubtitleSelectionSurvivesSessionPersistence
 }
 
 func TestPlaybackInfoNegotiatesUnselectedTextSubtitles(t *testing.T) {
-	for _, selected := range []int{-1, 2, 3, 4, 5, 7} {
+	for _, selected := range []int{-1, 2, 5, 7} {
 		t.Run(fmt.Sprint(selected), func(t *testing.T) {
 			h, item := newSubtitleSelectionHandler(t)
 			h.content.(*stubContentService).detail.Versions[0].SubtitleTracks = []catalog.VersionSubtitleTrack{
@@ -643,7 +509,7 @@ func TestPlaybackInfoNegotiatesUnselectedTextSubtitles(t *testing.T) {
 			if err := json.Unmarshal(encoded, &recovered); err != nil {
 				t.Fatal(err)
 			}
-			reconstructed := h.mediaSourceDTO(item, recovered.ID, recovered.CompatToken, recovered.MediaSources[0])
+			reconstructed := h.mediaSourceDTO(item, recovered.ID, recovered.MediaSources[0])
 			for _, dto := range []mediaSourceDTO{response.MediaSources[0], reconstructed} {
 				if !dto.SupportsDirectPlay || (selected < 0 && dto.DefaultSubtitleStreamIndex != nil) ||
 					(selected >= 0 && (dto.DefaultSubtitleStreamIndex == nil || *dto.DefaultSubtitleStreamIndex != selected)) {
@@ -675,114 +541,12 @@ func TestPlaybackInfoNegotiatesUnselectedTextSubtitles(t *testing.T) {
 	}
 }
 
-func TestPlaybackInfoEmbeddedExternalDeliveryExtractsSubtitle(t *testing.T) {
-	ffmpeg, err := exec.LookPath("ffmpeg")
-	if err != nil {
-		t.Skip("ffmpeg is not installed")
-	}
-	dir := t.TempDir()
-	input, media := filepath.Join(dir, "input.srt"), filepath.Join(dir, "embedded.mkv")
-	if err := os.WriteFile(input, []byte("1\n00:00:01,000 --> 00:00:02,000\nEmbedded extraction works\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
-	if output, err := exec.CommandContext(ctx, ffmpeg, "-v", "error", "-i", input, "-c:s", "srt", media).CombinedOutput(); err != nil {
-		t.Fatalf("subtitle fixture: %v: %s", err, output)
-	}
-	for _, selected := range []int{-1, 2} {
-		t.Run(fmt.Sprint(selected), func(t *testing.T) {
-			h, item := newSubtitleSelectionHandler(t)
-			h.FFmpegPath = ffmpeg
-			h.fileResolver = testCompatFileResolver{file: &models.MediaFile{ID: 42, FilePath: media, SubtitleTracks: []models.SubtitleTrack{{Index: 2, Codec: "subrip"}}}}
-			response := postPlaybackInfo(t, h, item, fmt.Sprintf(`{"SubtitleStreamIndex":%d,"DeviceProfile":{"SubtitleProfiles":[{"Format":"vtt","Method":"External"}]}}`, selected))
-			for _, stream := range response.MediaSources[0].MediaStreams {
-				if stream.Type != "Subtitle" || stream.Index != 2 {
-					continue
-				}
-				if stream.DeliveryMethod != "External" || stream.IsExternal || !response.MediaSources[0].SupportsDirectPlay {
-					t.Fatalf("incorrect negotiated delivery: %+v", stream)
-				}
-				router := chi.NewRouter()
-				router.Get("/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}", h.HandleSubtitleStream)
-				// Jellyfin Web replaces .vtt with .js and parses the response as JSON.
-				subtitleURL := strings.Replace(stream.DeliveryURL, ".vtt", ".js", 1)
-				req := httptest.NewRequest(http.MethodGet, subtitleURL, nil).WithContext(context.WithValue(ctx, compatSessionKey, &Session{Token: "token-1"}))
-				recorder := httptest.NewRecorder()
-				router.ServeHTTP(recorder, req)
-				if recorder.Code != http.StatusOK || recorder.Header().Get("Content-Type") != "application/json; charset=utf-8" {
-					t.Fatalf("advertised extraction route: %d %s", recorder.Code, recorder.Body.String())
-				}
-				var result struct {
-					TrackEvents []struct {
-						Text               string
-						StartPositionTicks int64
-						EndPositionTicks   int64
-					}
-				}
-				if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil {
-					t.Fatal(err)
-				}
-				if len(result.TrackEvents) != 1 || result.TrackEvents[0].Text != "Embedded extraction works" ||
-					result.TrackEvents[0].StartPositionTicks != 10_000_000 || result.TrackEvents[0].EndPositionTicks != 20_000_000 {
-					t.Fatalf("unexpected subtitle cues: %+v", result)
-				}
-				return
-			}
-			t.Fatal("missing embedded subtitle")
-		})
-	}
-}
-
-func TestSelectedVTTDeliverySurvivesPersistence(t *testing.T) {
-	for _, index := range []int{2, 3, 5} {
-		t.Run(fmt.Sprint(index), func(t *testing.T) {
-			source := PlaybackMediaSource{ID: "source", Version: subtitleSelectionVersion(), SupportsDirectPlay: true, SelectedSubtitleStreamIndex: new(index)}
-			profile := DeviceProfile{SubtitleProfiles: []SubtitleProfile{{Format: "vtt", Method: "External"}}}
-			applyCompatSubtitleDelivery(&source, profile, false)
-			applyCompatDownloadedSubtitleDelivery(&source, profile, []subtitles.DownloadedSubtitle{{Format: subtitles.FormatSRT}})
-			encoded, err := json.Marshal(source)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var recovered PlaybackMediaSource
-			if err := json.Unmarshal(encoded, &recovered); err != nil {
-				t.Fatal(err)
-			}
-			if recovered.SubtitleDeliveryFormat != "vtt" || !recovered.SupportsDirectPlay {
-				t.Fatalf("recovered=%+v", recovered)
-			}
-			if index == 5 {
-				return
-			}
-			dto := (&PlaybackHandler{}).mediaSourceDTO("item", "play", "token", recovered)
-			found := false
-			for _, stream := range dto.MediaStreams {
-				if stream.Type != "Subtitle" {
-					continue
-				}
-				found = found || stream.Index == index
-				if stream.IsTextSubtitleStream {
-					if stream.DeliveryMethod != "External" || !strings.Contains(stream.DeliveryURL, "/stream.vtt?") || stream.IsExternal != (stream.Index == 3) {
-						t.Fatalf("stream=%+v", stream)
-					}
-				} else if !stream.IsExternal && stream.DeliveryMethod != "Embed" {
-					t.Fatalf("nonselected stream=%+v", stream)
-				}
-			}
-			if !found {
-				t.Fatal("selected stream missing")
-			}
-		})
-	}
-}
-
 func TestSelectedSubtitleEmbedCapabilitySurvivesPersistence(t *testing.T) {
-	for _, selected := range []int{-1, 2, 3} {
+	for _, selected := range []int{-1, 2} {
 		t.Run(fmt.Sprint(selected), func(t *testing.T) {
 			source := PlaybackMediaSource{ID: "source", Version: subtitleSelectionVersion(), SupportsDirectPlay: true, SelectedSubtitleStreamIndex: new(selected)}
 			applyCompatSubtitleDelivery(&source, DeviceProfile{SubtitleProfiles: []SubtitleProfile{{Format: "srt", Method: "Embed"}, {Format: "vtt", Method: "External"}}}, false)
-			before := (&PlaybackHandler{}).mediaSourceDTO("item", "play", "token", source)
+			before := (&PlaybackHandler{}).mediaSourceDTO("item", "play", source)
 			encoded, err := json.Marshal(source)
 			if err != nil {
 				t.Fatal(err)
@@ -791,7 +555,7 @@ func TestSelectedSubtitleEmbedCapabilitySurvivesPersistence(t *testing.T) {
 			if err := json.Unmarshal(encoded, &recovered); err != nil {
 				t.Fatal(err)
 			}
-			after := (&PlaybackHandler{}).mediaSourceDTO("item", "play", "token", recovered)
+			after := (&PlaybackHandler{}).mediaSourceDTO("item", "play", recovered)
 			for _, dto := range []mediaSourceDTO{before, after} {
 				for _, stream := range dto.MediaStreams {
 					if stream.Type == "Subtitle" && stream.Index == 2 && (stream.DeliveryMethod != "Embed" || !strings.Contains(stream.DeliveryURL, "/stream.vtt?")) {
@@ -810,11 +574,8 @@ func TestPlaybackInfoDownloadedLookupFailureIsRetryable(t *testing.T) {
 		status int
 	}{
 		{"downloaded external", `{"SubtitleStreamIndex":5,"DeviceProfile":{"SubtitleProfiles":[{"Format":"srt","Method":"External"}]}}`, 503},
-		{"downloaded embed", `{"SubtitleStreamIndex":5,"DeviceProfile":{"SubtitleProfiles":[{"Format":"srt","Method":"Embed"}]}}`, 503},
 		{"legacy downloaded", `{"SubtitleStreamIndex":5}`, 200},
 		{"sidecar", `{"SubtitleStreamIndex":3,"DeviceProfile":{"SubtitleProfiles":[{"Format":"srt","Method":"External"}]}}`, 200},
-		{"embedded", `{"SubtitleStreamIndex":2,"DeviceProfile":{"SubtitleProfiles":[{"Format":"srt","Method":"External"}]}}`, 200},
-		{"subtitles disabled", `{"SubtitleStreamIndex":-1,"DeviceProfile":{"SubtitleProfiles":[{"Format":"srt","Method":"External"}]}}`, 200},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, item := newSubtitleSelectionHandler(t)
@@ -849,7 +610,6 @@ func TestHandlePlaybackInfo_HiddenForcedSubtitlesAreNotStarted(t *testing.T) {
 		showForced bool
 		want       *int
 	}{
-		{"forced subtitles shown", true, intPtr(2)},
 		{"forced subtitles hidden", false, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

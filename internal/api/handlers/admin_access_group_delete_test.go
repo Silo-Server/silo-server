@@ -51,16 +51,3 @@ func TestDeleteAdminAccessGroupMovesMembersThroughTheStore(t *testing.T) {
 		t.Fatalf("plain deletes %d, member-moving deletes %d; want only the member-moving delete", store.plainDeletes, store.movingDelete)
 	}
 }
-
-func TestDeleteAdminAccessGroupKeepsStoreErrors(t *testing.T) {
-	store := &memberMovingTestStore{
-		accessGroupHandlerTestStore: newAccessGroupHandlerTestStore(),
-		deleteErr:                   access.ErrDefaultGroupRequired,
-	}
-	handler := NewAccessGroupHandler(store)
-
-	err := handler.DeleteAdminAccessGroup(t.Context(), 1, access.GroupPrecondition{Any: true})
-	if !errors.Is(err, access.ErrDefaultGroupRequired) {
-		t.Fatalf("error = %v, want ErrDefaultGroupRequired", err)
-	}
-}

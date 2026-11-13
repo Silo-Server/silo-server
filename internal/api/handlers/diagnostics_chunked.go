@@ -5,15 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
-	"os"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
-
-	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/diagnostics"
 	"github.com/Silo-Server/silo-server/internal/uploads"
@@ -60,8 +54,6 @@ const (
 	diagnosticsChunkSessionCap = 16
 )
 
-type diagnosticsChunkInitRequest = DiagnosticsChunkInitRequest
-
 type DiagnosticsChunkInitRequest struct {
 	// Manifest is the same part-1 manifest the multipart endpoint takes,
 	// embedded verbatim. Deferring all content validation to Ingest keeps one
@@ -72,8 +64,6 @@ type DiagnosticsChunkInitRequest struct {
 	// bytes are spent.
 	BundleBytes int64 `json:"bundle_bytes"`
 }
-
-type diagnosticsChunkInitResponse = DiagnosticsChunkInitResponse
 
 type DiagnosticsChunkInitResponse struct {
 	UploadID    string `json:"upload_id"`
@@ -224,39 +214,6 @@ func (s *diagnosticsChunkSessions) sweepExpired() {
 	}
 }
 
-// HandleChunkedUploadInit handles POST /diagnostics/reports/uploads.
-func (h *DiagnosticsHandler) HandleChunkedUploadInit(w http.ResponseWriter, r *http.Request) {
-	userID, ok := diagnosticsUserID(w, r)
-	if !ok {
-		return
-	}
-
-	status, ok := h.diagnosticsUploadStatus(w, r, userID)
-	if !ok {
-		return
-	}
-	// Manifest cap plus a small envelope allowance keeps init requests tiny —
-	// they must themselves fit under restrictive proxy body caps.
-	r.Body = http.MaxBytesReader(w, r.Body, diagnostics.MaxManifestBytes+diagnosticsMultipartOverheadBytes)
-	var req diagnosticsChunkInitRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-			h.logRejected(r.Context(), userID, diagnosticsTooLargeCode)
-			writeError(w, http.StatusRequestEntityTooLarge, diagnosticsTooLargeCode, "Diagnostics manifest is too large")
-			return
-		}
-		writeError(w, http.StatusBadRequest, diagnosticsInvalidBundleCode, "Invalid diagnostics upload init")
-		return
-	}
-
-	result, err := h.initDiagnosticChunks(r.Context(), userID, req, status)
-	if err != nil {
-		writeDiagnosticsUploadFailure(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, result)
-}
-
 // InitDiagnosticChunks reserves a process-local upload session. A new init replaces
 // this account's prior session; it is not safe to replay an uncertain init.
 func (h *DiagnosticsHandler) InitDiagnosticChunks(ctx context.Context, userID int, req DiagnosticsChunkInitRequest) (DiagnosticsChunkInitResponse, error) {
@@ -315,6 +272,7 @@ func (h *DiagnosticsHandler) initDiagnosticChunks(ctx context.Context, userID in
 	})
 	if err != nil {
 		h.chunkSessions.unreserve(userID)
+		h.logChunkUploadError(ctx, err)
 		statusCode, message := uploadErrorResponse(err)
 		return DiagnosticsChunkInitResponse{}, &DiagnosticsUploadFailure{Status: statusCode, Code: diagnosticsUploadErrorCode, Message: message}
 	}
@@ -326,35 +284,6 @@ func (h *DiagnosticsHandler) initDiagnosticChunks(ctx context.Context, userID in
 		TotalChunks: session.TotalChunks,
 		ExpiresAt:   session.ExpiresAt.UTC().Format(time.RFC3339),
 	}, nil
-}
-
-// HandleChunkedUploadChunk handles PUT /diagnostics/reports/uploads/{upload_id}/chunks/{chunk_index}.
-func (h *DiagnosticsHandler) HandleChunkedUploadChunk(w http.ResponseWriter, r *http.Request) {
-	// The integrated server's 30s ReadTimeout kills a 768 KiB chunk arriving
-	// below ~26 KiB/s — exactly the slow uplinks the chunked fallback exists
-	// for. The write deadline needs lifting too: the 120s WriteTimeout starts
-	// at request start, so on a sufficiently slow uplink the stored chunk's
-	// JSON acknowledgement would miss it and the client would retry an
-	// already-accepted chunk.
-	h.extendDiagnosticsUploadDeadlines(w, r, true)
-
-	userID, ok := diagnosticsUserID(w, r)
-	if !ok {
-		return
-	}
-	uploadID := chi.URLParam(r, "upload_id")
-	chunkIndex, err := strconv.Atoi(chi.URLParam(r, "chunk_index"))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid chunk index")
-		return
-	}
-
-	result, err := h.PutDiagnosticChunk(w, r, userID, uploadID, chunkIndex)
-	if err != nil {
-		writeDiagnosticsUploadFailure(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
 }
 
 // PutDiagnosticChunk checks account ownership before reading bounded chunk bytes.
@@ -371,6 +300,7 @@ func (h *DiagnosticsHandler) PutDiagnosticChunk(w http.ResponseWriter, r *http.R
 		if errors.Is(err, uploads.ErrNotFound) || errors.Is(err, uploads.ErrExpired) {
 			h.chunkSessions.drop(uploadID)
 		}
+		h.logChunkUploadError(r.Context(), err)
 		statusCode, message := uploadErrorResponse(err)
 		return DiagnosticsChunkStateResponse{}, &DiagnosticsUploadFailure{Status: statusCode, Code: diagnosticsUploadErrorCode, Message: message}
 	}
@@ -378,32 +308,6 @@ func (h *DiagnosticsHandler) PutDiagnosticChunk(w http.ResponseWriter, r *http.R
 		ReceivedChunks: session.ReceivedChunks,
 		TotalChunks:    session.TotalChunks,
 	}, nil
-}
-
-// HandleChunkedUploadComplete handles POST /diagnostics/reports/uploads/{upload_id}/complete.
-func (h *DiagnosticsHandler) HandleChunkedUploadComplete(w http.ResponseWriter, r *http.Request) {
-	// Ingest + object-store write can outlast the server's 120s WriteTimeout;
-	// without the extension the stored report's 201 would be lost and the
-	// client would retry an upload that already succeeded (see the single-shot
-	// handler).
-	h.extendDiagnosticsUploadDeadlines(w, r, true)
-
-	userID, ok := diagnosticsUserID(w, r)
-	if !ok {
-		return
-	}
-	uploadID := chi.URLParam(r, "upload_id")
-	var profileID *string
-	if value := strings.TrimSpace(r.Header.Get("X-Profile-Id")); value != "" {
-		profileID = new(value)
-	}
-
-	result, err := h.CompleteDiagnosticChunks(r.Context(), userID, uploadID, profileID)
-	if err != nil {
-		writeDiagnosticsUploadFailure(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, result)
 }
 
 // CompleteDiagnosticChunks consumes the local session before ingest. A lost
@@ -445,10 +349,17 @@ func (h *DiagnosticsHandler) CompleteDiagnosticChunks(ctx context.Context, userI
 
 	upload, err := h.chunkSessions.manager.Complete(uploadID)
 	if err != nil {
-		if errors.Is(err, uploads.ErrNotFound) || errors.Is(err, uploads.ErrExpired) {
-			h.chunkSessions.drop(uploadID)
-		}
+		h.logChunkUploadError(ctx, err)
 		statusCode, message := uploadErrorResponse(err)
+		switch {
+		case errors.Is(err, uploads.ErrNotFound) || errors.Is(err, uploads.ErrExpired):
+			h.chunkSessions.drop(uploadID)
+		case statusCode == http.StatusInternalServerError:
+			// Complete consumed the session but could not reopen the file it
+			// spooled to.
+			h.chunkSessions.drop(uploadID)
+			return diagnostics.IngestResult{}, &DiagnosticsUploadFailure{Status: http.StatusInternalServerError, Code: diagnosticsInternalCode, Message: diagnosticsUploadFailedMessage}
+		}
 		return diagnostics.IngestResult{}, &DiagnosticsUploadFailure{Status: statusCode, Code: diagnosticsUploadErrorCode, Message: message}
 	}
 	// The manager session is consumed; a failed ingest is retried by the
@@ -456,27 +367,11 @@ func (h *DiagnosticsHandler) CompleteDiagnosticChunks(ctx context.Context, userI
 	defer h.chunkSessions.drop(uploadID)
 	defer upload.Cleanup()
 
-	bundle, err := os.Open(upload.Path)
-	if err != nil {
-		return diagnostics.IngestResult{}, &DiagnosticsUploadFailure{Status: http.StatusInternalServerError, Code: diagnosticsInternalCode, Message: diagnosticsUploadFailedMessage}
-	}
-	defer bundle.Close()
-
-	result, err := h.service.Ingest(ctx, userID, profileID, owner.manifest, io.Reader(bundle))
+	result, err := h.service.Ingest(ctx, userID, profileID, owner.manifest, upload.File)
 	if err != nil {
 		return diagnostics.IngestResult{}, diagnosticsServiceFailure(err)
 	}
 	return result, nil
-}
-
-// HandleChunkedUploadAbort handles DELETE /diagnostics/reports/uploads/{upload_id}.
-func (h *DiagnosticsHandler) HandleChunkedUploadAbort(w http.ResponseWriter, r *http.Request) {
-	userID, ok := diagnosticsUserID(w, r)
-	if !ok {
-		return
-	}
-	h.AbortDiagnosticChunks(userID, chi.URLParam(r, "upload_id"))
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // AbortDiagnosticChunks is an idempotent, account-bound best-effort local abort.
@@ -487,6 +382,14 @@ func (h *DiagnosticsHandler) AbortDiagnosticChunks(userID int, uploadID string) 
 	h.abortChunkedUpload(uploadID)
 }
 
+// logChunkUploadError logs a spool failure the client sees only as a 500, such
+// as an upload root the manager refuses; client errors are not logged.
+func (h *DiagnosticsHandler) logChunkUploadError(ctx context.Context, err error) {
+	if status, _ := uploadErrorResponse(err); status == http.StatusInternalServerError {
+		h.diagnosticsLogger().ErrorContext(ctx, "diagnostics chunked upload failed", "component", "diagnostics", "error", err)
+	}
+}
+
 func (h *DiagnosticsHandler) abortChunkedUpload(uploadID string) {
 	if err := h.chunkSessions.manager.Cancel(uploadID); err != nil && !errors.Is(err, uploads.ErrNotFound) {
 		h.diagnosticsLogger().Warn("diagnostics chunked upload cancel failed",
@@ -495,28 +398,4 @@ func (h *DiagnosticsHandler) abortChunkedUpload(uploadID string) {
 		)
 	}
 	h.chunkSessions.drop(uploadID)
-}
-
-// diagnosticsUploadStatus loads the feature status and writes the
-// disabled/storage-unavailable rejection when uploads cannot proceed,
-// mirroring the single-shot endpoint's gate.
-func (h *DiagnosticsHandler) diagnosticsUploadStatus(w http.ResponseWriter, r *http.Request, userID int) (diagnostics.Status, bool) {
-	status, err := h.service.Status(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, diagnosticsInternalCode, diagnosticsStatusFailureMessage)
-		return diagnostics.Status{}, false
-	}
-	switch status.Status {
-	case diagnostics.StatusDisabled:
-		writeError(w, http.StatusForbidden, diagnosticsDisabledCode, diagnosticsDisabledMessage)
-		return diagnostics.Status{}, false
-	case diagnostics.StatusStorageUnavailable:
-		writeError(w, http.StatusServiceUnavailable, errCodeStorageUnavailable, diagnosticsStorageMessage)
-		return diagnostics.Status{}, false
-	case diagnostics.StatusAvailable:
-		return status, true
-	default:
-		writeError(w, http.StatusServiceUnavailable, errCodeStorageUnavailable, "Diagnostics storage is not available")
-		return diagnostics.Status{}, false
-	}
 }

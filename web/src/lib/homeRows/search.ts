@@ -1,10 +1,11 @@
+import { t } from "@/i18n";
+import { presetLabel } from "@/lib/recipes";
 import type { PickerGroup } from "./catalog";
 import { variantFamily } from "./variants";
 
 /** Words people search for that a card's own text doesn't contain. */
 const ALIASES: Record<string, readonly string[]> = {
   continue_watching: ["resume", "in progress", "audiobook"],
-  next_up: ["next episode", "up next"],
   recently_added: ["new", "latest"],
   recently_released: ["new", "release"],
   new_to_library: ["new", "added"],
@@ -33,8 +34,9 @@ function haystack(card: PickerGroup["cards"][number]): string {
   return [
     card.label,
     card.sentence,
-    ...card.def.presets.map((preset) => preset.display_name),
-    ...(family?.options.flatMap((option) => [option.chip, option.label]) ?? []),
+    // Both the shown name and the English one match, so English searches work in any language.
+    ...card.def.presets.flatMap((preset) => [presetLabel(preset), preset.display_name]),
+    ...(family?.options.flatMap((option) => [t(option.chip), t(option.label)]) ?? []),
     ...(ALIASES[card.type] ?? []),
   ]
     .join("\n")

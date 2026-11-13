@@ -41,7 +41,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
@@ -97,6 +97,7 @@ jobs:
             -o "$package_dir/silo" ./cmd/silo/
 
           cp LICENSE "$package_dir/LICENSE"
+          cp PLATFORM-EXCEPTION.md "$package_dir/PLATFORM-EXCEPTION.md"
           go version -m "$package_dir/silo" > "$package_dir/build-info.txt"
           otool -L "$package_dir/silo" > "$package_dir/linked-libraries.txt"
           tar -czf "dist/$archive" -C dist silo-darwin-arm64

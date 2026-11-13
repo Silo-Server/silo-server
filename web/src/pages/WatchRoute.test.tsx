@@ -1,11 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
-import type { Profile, WatchDetail } from "@/api/types";
+import type { FileVersion, Profile, WatchDetail } from "@/api/types";
+import { createAppIntl, setAppIntl, type Messages } from "@/i18n";
+import pseudo from "@/locales/en-XA.json";
 
 import {
   createWatchRouteRequest,
   buildWatchHref,
-  buildWatchItemHref,
   buildWatchPageProps,
   buildWatchRouteRequest,
 } from "./watchRouteHelpers";
@@ -67,28 +68,6 @@ describe("buildWatchRouteRequest", () => {
     expect(first.requestKey).not.toBe(second.requestKey);
   });
 
-  it("includes pre-play overrides in the request key", () => {
-    const first = createWatchRouteRequest({
-      contentId: "movie-1",
-      fileId: 42,
-      audioTrackIndex: 1,
-      prePlaySubtitleMode: "auto",
-    });
-    const second = createWatchRouteRequest({
-      contentId: "movie-1",
-      fileId: 42,
-      audioTrackIndex: 2,
-      prePlaySubtitleMode: "auto",
-    });
-
-    expect(first.requestKey).not.toBe(second.requestKey);
-  });
-
-  it("builds an item-detail href that preserves the current library when present", () => {
-    expect(buildWatchItemHref(makeRequest("libraryId=7"))).toBe("/item/movie-1?libraryId=7");
-    expect(buildWatchItemHref(makeRequest())).toBe("/item/movie-1");
-  });
-
   it("builds a watch href that preserves the active playback query params", () => {
     expect(buildWatchHref(makeRequest("fileId=42&libraryId=7&restart=1"))).toBe(
       "/watch/movie-1?fileId=42&libraryId=7&restart=1",
@@ -121,7 +100,6 @@ describe("buildWatchPageProps", () => {
       preferredSubtitleLanguage: "en",
       subtitleMode: "always",
       showForcedSubtitles: true,
-      profileLanguage: "en",
     });
   });
 
@@ -151,7 +129,6 @@ describe("buildWatchPageProps", () => {
       preferredSubtitleLanguage: "fr",
       subtitleMode: "off",
       showForcedSubtitles: false,
-      profileLanguage: "en",
       introSkipMode: "ask",
     });
     expect(props.versions[0]?.effective_audio_language).toBe("ja");
@@ -181,7 +158,6 @@ describe("buildWatchPageProps", () => {
       preferredSubtitleLanguage: "",
       subtitleMode: "auto",
       showForcedSubtitles: false,
-      profileLanguage: "en",
     });
   });
 
@@ -265,21 +241,6 @@ describe("buildWatchPageProps", () => {
     expect(props).toMatchObject({
       initialPosition: 0,
       forceInitialPosition: true,
-    });
-  });
-
-  it("forces room-driven playback starts to restart from room state", () => {
-    const props = buildWatchPageProps({
-      request: makeRequest("room_id=room-1&room_token=token-1&restart=1"),
-      item: makeWatchDetail(),
-      currentProfile: profile,
-    });
-
-    expect(props).toMatchObject({
-      watchTogetherRoomId: "room-1",
-      watchTogetherRoomToken: "token-1",
-      forceInitialPosition: true,
-      initialPosition: 0,
     });
   });
 
@@ -380,59 +341,44 @@ describe("buildWatchPageProps", () => {
       expect(props.initialBitmapSubtitleTrackIndexByFileId).toEqual(bitmapIndexes);
     },
   );
+});
 
-  it("passes a selected text subtitle ordinal into the initial playback request", () => {
+describe("initial subtitle track", () => {
+  afterEach(() => setAppIntl(createAppIntl("en", {})));
+
+  it("matches a saved track signature by its stored label in any interface language", () => {
+    // A translated interface: the pseudo-locale changes every message.
+    setAppIntl(createAppIntl("en-XA", pseudo as unknown as Messages));
+    const untitled = { codec: "subrip", external: false };
+    const version = {
+      file_id: 7,
+      resolution: "1080p",
+      codec_video: "h264",
+      codec_audio: "aac",
+      hdr: false,
+      container: "mkv",
+      file_size: 1,
+      duration: 1,
+      bitrate: 1,
+      subtitle_tracks: [untitled, untitled],
+    } satisfies FileVersion;
     const props = buildWatchPageProps({
-      request: createWatchRouteRequest({
-        contentId: "movie-1",
-        fileId: 42,
-        prePlaySubtitleMode: "explicit",
-        prePlaySubtitleSelection: {
-          source: "embedded",
-          language: "en",
-          codec: "subrip",
-          label: "English",
-          track_index: 3,
-        },
-      }),
+      request: makeRequest(),
       item: makeWatchDetail({
-        versions: [
-          {
-            file_id: 42,
-            resolution: "1080p",
-            codec_video: "h264",
-            codec_audio: "aac",
-            hdr: false,
-            container: "mkv",
-            file_size: 1,
-            duration: 120,
-            bitrate: 8_000,
-            effective_audio_track_index: 0,
-            effective_audio_language: "ja",
-            subtitle_tracks: [
-              {
-                index: 3,
-                language: "en",
-                codec: "subrip",
-                title: "English",
-              },
-            ],
-          },
-        ],
-        subtitles: [
-          {
-            source: "embedded",
-            language: "en",
-            codec: "subrip",
-            forced: false,
-            title: "English",
-          },
-        ],
+        versions: [version],
+        effective_subtitle_mode: "always",
+        effective_subtitle_language: "",
+        // Item pages and other clients store this label in English.
+        effective_subtitle_track_signature: {
+          source: "embedded",
+          language: "unknown",
+          codec: "subrip",
+          label: "Subtitle 2",
+        },
       }),
       currentProfile: profile,
     });
 
-    expect(props.initialSubtitleTrackIndexByFileId).toEqual({ 42: 0 });
-    expect(props.initialBitmapSubtitleTrackIndexByFileId).toEqual({});
+    expect(props.initialSubtitleTrackIndexByFileId).toEqual({ 7: 1 });
   });
 });

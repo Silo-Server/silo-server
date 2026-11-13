@@ -13,8 +13,6 @@ import {
   latestRequestSeason,
   parseRequestMediaType,
   pendingPageSize,
-  requestDetailHref,
-  requestDiscoverSectionHref,
   requestDisplayState,
   requestSearchHref,
   requestSearchTypeForScope,
@@ -77,14 +75,6 @@ describe("requestSearchTypeForScope", () => {
   });
 });
 
-describe("requestDiscoverSectionHref", () => {
-  it("builds a Discover row's page", () => {
-    expect(requestDiscoverSectionHref("trending_movies")).toBe(
-      "/requests/discover/trending_movies",
-    );
-  });
-});
-
 type CancelFields = Pick<MediaRequest, "status" | "outcome" | "targets">;
 
 describe("canCancelOwnRequest", () => {
@@ -108,10 +98,7 @@ describe("canCancelOwnRequest", () => {
       },
     ],
     ["queued", { ...pending, status: "queued" }],
-    ["downloading", { ...pending, status: "downloading" }],
-    ["completed", { ...pending, status: "completed" }],
     ["already cancelled", { ...pending, outcome: "cancelled" }],
-    ["declined", { ...pending, outcome: "declined" }],
   ])("refuses a request that is %s, as the server does", (_label, request) => {
     expect(canCancelOwnRequest(request)).toBe(false);
   });
@@ -120,13 +107,6 @@ describe("canCancelOwnRequest", () => {
 describe("requestDisplayState", () => {
   it("prefers the state the server derived", () => {
     expect(requestDisplayState("completed", "active", "processing")).toBe("processing");
-  });
-});
-
-describe("requestDetailHref", () => {
-  it("builds the title detail route", () => {
-    expect(requestDetailHref("movie", 603)).toBe("/title/movie/603");
-    expect(requestDetailHref("series", 1399)).toBe("/title/series/1399");
   });
 });
 

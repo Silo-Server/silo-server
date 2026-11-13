@@ -330,7 +330,7 @@ func (s *Settings) WebhooksMaxPerProfile(ctx context.Context) int {
 	return s.intSetting(ctx, SettingWebhooksMaxPerProfile, 10, 1, 100)
 }
 
-// WebhooksAllowPrivateDestinations disables the private-destination guard.
+// WebhooksAllowPrivateDestinations permits Private, never Blocked destinations.
 // Intended only for development environments.
 func (s *Settings) WebhooksAllowPrivateDestinations(ctx context.Context) bool {
 	return s.boolSetting(ctx, SettingWebhooksAllowPrivate, false)

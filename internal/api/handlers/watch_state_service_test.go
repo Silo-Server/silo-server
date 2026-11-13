@@ -33,7 +33,7 @@ func TestMarkLeafTargetsWatchedIsIdempotentUntilUnmarked(t *testing.T) {
 	targets := []watchedLeafTarget{{ContentID: "movie-1", DurationSeconds: 7200}}
 
 	for i := 0; i < 2; i++ {
-		if err := handler.markLeafTargetsWatched(ctx, 1, "profile-1", targets); err != nil {
+		if err := handler.markLeafTargetsWatched(ctx, 1, "profile-1", targets, false); err != nil {
 			t.Fatalf("mark %d: %v", i+1, err)
 		}
 	}
@@ -51,22 +51,23 @@ func TestMarkLeafTargetsWatchedIsIdempotentUntilUnmarked(t *testing.T) {
 	if err := handler.markLeafTargetsUnwatched(ctx, 1, "profile-1", targets); err != nil {
 		t.Fatalf("unmark: %v", err)
 	}
-	if err := handler.markLeafTargetsWatched(ctx, 1, "profile-1", targets); err != nil {
+	if err := handler.markLeafTargetsWatched(ctx, 1, "profile-1", targets, false); err != nil {
 		t.Fatalf("mark after unmark: %v", err)
 	}
 	history, err = store.ListHistory(ctx, "profile-1", 10, 0)
 	if err != nil {
 		t.Fatalf("ListHistory: %v", err)
 	}
-	if len(history) != 1 {
-		t.Fatalf("visible history after unmark+mark = %d rows, want the one new play", len(history))
+	// Unmark keeps the first play in history and sends providers nothing;
+	// the mark after it records and sends a second play.
+	if len(history) != 2 {
+		t.Fatalf("history after unmark+mark = %d rows, want the first play and the new one", len(history))
 	}
-	if len(dispatcher.events) != 3 ||
-		dispatcher.events[1].Kind != watchsync.LocalWatchEventMarkedUnwatched ||
-		dispatcher.events[2].Kind != watchsync.LocalWatchEventMarkedWatched || len(dispatcher.events[2].Plays) != 1 {
-		t.Fatalf("events = %+v, want watched, unwatched, watched", dispatcher.events)
+	if len(dispatcher.events) != 2 ||
+		dispatcher.events[1].Kind != watchsync.LocalWatchEventMarkedWatched || len(dispatcher.events[1].Plays) != 1 {
+		t.Fatalf("events = %+v, want watched, watched", dispatcher.events)
 	}
-	if dispatcher.events[2].Plays[0].HistoryID == dispatcher.events[0].Plays[0].HistoryID {
+	if dispatcher.events[1].Plays[0].HistoryID == dispatcher.events[0].Plays[0].HistoryID {
 		t.Fatal("the second play reused the first history id")
 	}
 }

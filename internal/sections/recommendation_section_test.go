@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,7 +13,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 )
 
@@ -96,15 +96,6 @@ func TestRecommendationSectionTitle(t *testing.T) {
 				t.Fatalf("title = %q, want %q", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestLimitRecommendationItems(t *testing.T) {
-	items := make([]*models.MediaItem, 30)
-	for _, tc := range []struct{ limit, want int }{{0, 20}, {-3, 20}, {5, 5}, {25, 25}, {40, 30}} {
-		if got := len(limitRecommendationItems(items, tc.limit)); got != tc.want {
-			t.Errorf("limitRecommendationItems(30 items, %d) = %d items, want %d", tc.limit, got, tc.want)
-		}
 	}
 }
 
@@ -192,113 +183,6 @@ func TestRecommendationSectionsFillFromTheWholePoolPostgres(t *testing.T) {
 	}
 }
 
-// A library's For You section the main row leaves short continues with the
-// profile's other personal rows in that library, in the reader's order and
-// without repeating a main-row title. A row the main row fills, a home
-// section and a row every profile is offered read no fill.
-func TestForYouSectionFillsALibraryFromOtherPersonalRowsPostgres(t *testing.T) {
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect test database: %v", err)
-	}
-	t.Cleanup(pool.Close)
-
-	prefix := "recs-fill-" + uuid.NewString()[:8] + "-"
-	var movies, anime int
-	for name, id := range map[string]*int{"movies": &movies, "anime": &anime} {
-		if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ('movies', $1, true) RETURNING id`, prefix+name).Scan(id); err != nil {
-			t.Fatalf("seed library: %v", err)
-		}
-	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id LIKE $1`, prefix+"%")
-		_, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id = ANY($1)`, []int{movies, anime})
-	})
-	seed := func(name string, n, library int) []recommendations.ScoredItem {
-		t.Helper()
-		items := make([]recommendations.ScoredItem, n)
-		for i := range items {
-			id := fmt.Sprintf("%s%s-%02d", prefix, name, i)
-			items[i] = recommendations.ScoredItem{MediaItemID: id, Score: float64(n - i)}
-			if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title, status, genres) VALUES ($1, 'movie', $1, 'matched', '{}'::text[])`, id); err != nil {
-				t.Fatalf("seed item: %v", err)
-			}
-			if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at) VALUES ($1, $2, $3)`, id, library, time.Now()); err != nil {
-				t.Fatalf("seed membership: %v", err)
-			}
-		}
-		return items
-	}
-	// The main row holds 30 titles, all in the movie library. The fill holds
-	// 25 anime titles, 5 more movie titles and 2 main-row titles.
-	main := seed("main", 30, movies)
-	animeFill := seed("anime", 25, anime)
-	movieFill := seed("movie", 5, movies)
-	fill := slices.Concat(animeFill[:10], main[:2], movieFill, animeFill[10:])
-	reader := &poolReader{pool: main, rowType: "cluster", fill: fill}
-	fetcher := NewFetcher(pool)
-	fetcher.RecommendationReader = reader
-
-	fetch := func(itemLimit int, libraryID *int) []string {
-		t.Helper()
-		got, err := fetcher.FetchOne(ctx, ResolvedSection{ID: "recs", SectionType: SectionRecommendedForYou, Title: "Recommended for You", ItemLimit: itemLimit}, libraryID, nil, 7, "p1", catalog.AccessFilter{})
-		if err != nil {
-			t.Fatalf("FetchOne: %v", err)
-		}
-		if got.TotalCount != len(got.Items) {
-			t.Fatalf("total %d for %d items", got.TotalCount, len(got.Items))
-		}
-		if len(got.Items) > 0 && got.Title != "Recommended for You" {
-			t.Fatalf("title = %q, want the section's heading", got.Title)
-		}
-		return contentIDs(got.Items)
-	}
-	ids := func(items ...[]recommendations.ScoredItem) []string {
-		var out []string
-		for _, row := range items {
-			for _, item := range row {
-				out = append(out, item.MediaItemID)
-			}
-		}
-		return out
-	}
-
-	for _, tc := range []struct {
-		name      string
-		itemLimit int
-		libraryID *int
-		want      []string
-		fillReads int
-	}{
-		{"anime library, no main-row title in it", 20, &anime, ids(animeFill[:20]), 1},
-		{"movie library the main row fills", 20, &movies, ids(main[:20]), 0},
-		{"movie library past the main row", 40, &movies, ids(main, movieFill), 1},
-		{"home", 100, nil, ids(main), 0},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			reader.fillReads = 0
-			if got := fetch(tc.itemLimit, tc.libraryID); !slices.Equal(got, tc.want) {
-				t.Fatalf("items = %v, want %v", got, tc.want)
-			}
-			if reader.fillReads != tc.fillReads {
-				t.Fatalf("fill reads = %d, want %d", reader.fillReads, tc.fillReads)
-			}
-		})
-	}
-
-	// A new profile's Popular row is served as it is, titled after itself.
-	reader.rowType, reader.rowLabel, reader.fillReads = recommendations.RecTypePopular, "Popular on This Server", 0
-	got, err := fetcher.FetchOne(ctx, ResolvedSection{ID: "recs", SectionType: SectionRecommendedForYou, Title: "Recommended for You", ItemLimit: 20}, &anime, nil, 7, "p1", catalog.AccessFilter{})
-	if err != nil || len(got.Items) != 0 || reader.fillReads != 0 {
-		t.Fatalf("Popular row in the anime library = %d items, %d fill reads, %v; want an empty row and no fill", len(got.Items), reader.fillReads, err)
-	}
-}
-
 // A failed fill fails the section, like a failed main-row read.
 func TestForYouSectionFillErrorFailsTheSection(t *testing.T) {
 	library := 3
@@ -324,6 +208,52 @@ func TestRecommendationSectionReadErrorFailsTheSection(t *testing.T) {
 	}
 }
 
+// watchedSetReader reads the profile's watched set before answering a For You
+// or Because You Watched row, as the Reader does to filter them.
+type watchedSetReader struct {
+	poolReader
+	signals *recommendations.SignalReader
+}
+
+func (r *watchedSetReader) SectionForYouMain(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) (*recommendations.ForYouRow, error) {
+	if _, err := r.signals.WatchedItemIDSet(ctx, userID, profileID); err != nil {
+		return nil, err
+	}
+	return r.poolReader.SectionForYouMain(ctx, userID, profileID, filter)
+}
+
+func (r *watchedSetReader) SectionBecauseYouWatched(ctx context.Context, userID int, profileID, sourceItemID string, libraryIDs []int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, string, error) {
+	if _, err := r.signals.WatchedItemIDSet(ctx, userID, profileID); err != nil {
+		return nil, "", err
+	}
+	return r.poolReader.SectionBecauseYouWatched(ctx, userID, profileID, sourceItemID, libraryIDs, filter)
+}
+
+// countingWatchedRepo counts watched set reads. No other repo read is reached.
+type countingWatchedRepo struct {
+	*recommendations.Repo
+	reads atomic.Int32
+}
+
+func (r *countingWatchedRepo) GetWatchedItemIDSet(context.Context, int, string) (map[string]struct{}, error) {
+	r.reads.Add(1)
+	return map[string]struct{}{}, nil
+}
+
+// One FetchAll reads the profile's watched set once for its For You and
+// Because You Watched sections, which run in parallel.
+func TestFetchAllReadsTheWatchedSetOnce(t *testing.T) {
+	repo := &countingWatchedRepo{}
+	fetcher := &Fetcher{RecommendationReader: &watchedSetReader{signals: recommendations.NewSignalReader(repo, nil)}}
+	fetcher.FetchAll(t.Context(), []ResolvedSection{
+		{ID: "for-you", SectionType: SectionRecommendedForYou, ItemLimit: 20},
+		{ID: "because", SectionType: SectionBecauseYouWatched, ItemLimit: 20},
+	}, nil, nil, 7, "p1", catalog.AccessFilter{})
+	if got := repo.reads.Load(); got != 1 {
+		t.Fatalf("watched set reads = %d, want 1", got)
+	}
+}
+
 // FetchOne titles a For You or taste-match section after the row it serves
 // when that row is not the profile's own, and keeps an admin's heading; a
 // row filtered empty leaves the heading alone.
@@ -340,9 +270,19 @@ func TestRecommendationSectionsTakeTheServedRowTitlePostgres(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	id := "recs-title-" + uuid.NewString()[:8]
-	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, id) })
+	var library int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ('movies', $1, true) RETURNING id`, id+"-lib").Scan(&library); err != nil {
+		t.Fatalf("seed library: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, id)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id = $1`, library)
+	})
 	if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title, status, genres) VALUES ($1, 'movie', $1, 'matched', '{}'::text[])`, id); err != nil {
 		t.Fatalf("seed item: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at) VALUES ($1, $2, $3)`, id, library, time.Now()); err != nil {
+		t.Fatalf("seed membership: %v", err)
 	}
 	fetcher := NewFetcher(pool)
 	for _, tc := range []struct {
@@ -351,22 +291,31 @@ func TestRecommendationSectionsTakeTheServedRowTitlePostgres(t *testing.T) {
 		title             string
 		rowType, rowLabel string
 		pool              []recommendations.ScoredItem
-		want              string
+		want, wantKey     string
 	}{
-		{"new profile", SectionRecommendedForYou, "Recommended for You", recommendations.RecTypePopular, "Popular on This Server", []recommendations.ScoredItem{{MediaItemID: id}}, "Popular on This Server"},
-		{"warm profile", SectionRecommendedForYou, "Recommended for You", "cluster", recommendations.ForYouLabel, []recommendations.ScoredItem{{MediaItemID: id}}, "Recommended for You"},
-		{"taste match fallback", SectionTasteMatch, "Top Picks Today", "genre_sampler", "Top Drama", []recommendations.ScoredItem{{MediaItemID: id}}, "Top Drama"},
-		{"admin title", SectionRecommendedForYou, "Movie Night", recommendations.RecTypePopular, "Popular on This Server", []recommendations.ScoredItem{{MediaItemID: id}}, "Movie Night"},
-		{"row filtered empty", SectionRecommendedForYou, "Recommended for You", recommendations.RecTypePopular, "Popular on This Server", []recommendations.ScoredItem{{MediaItemID: id + "-missing"}}, "Recommended for You"},
+		{"new profile", SectionRecommendedForYou, "Recommended for You", recommendations.RecTypePopular, "Popular on This Server", []recommendations.ScoredItem{{MediaItemID: id}}, "Popular on This Server", "home.section.popularOnServer"},
+		{"warm profile", SectionRecommendedForYou, "Recommended for You", "cluster", recommendations.ForYouLabel, []recommendations.ScoredItem{{MediaItemID: id}}, "Recommended for You", titleKeyRecommendedForYou},
+		{"taste match fallback", SectionTasteMatch, "Top Picks Today", "genre_sampler", "Top Drama", []recommendations.ScoredItem{{MediaItemID: id}}, "Top Drama", "home.section.topGenre"},
+		{"admin title", SectionRecommendedForYou, "Movie Night", recommendations.RecTypePopular, "Popular on This Server", []recommendations.ScoredItem{{MediaItemID: id}}, "Movie Night", ""},
+		{"row filtered empty", SectionRecommendedForYou, "Recommended for You", recommendations.RecTypePopular, "Popular on This Server", []recommendations.ScoredItem{{MediaItemID: id + "-missing"}}, "Recommended for You", titleKeyRecommendedForYou},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fetcher.RecommendationReader = &poolReader{pool: tc.pool, rowType: tc.rowType, rowLabel: tc.rowLabel}
-			got, err := fetcher.FetchOne(ctx, ResolvedSection{ID: "recs", SectionType: tc.sectionType, Title: tc.title, ItemLimit: 20}, nil, nil, 7, "p1", catalog.AccessFilter{})
+			// A section the server titled carries its key; the admin's
+			// "Movie Night" carries none.
+			section := ResolvedSection{ID: "recs", SectionType: tc.sectionType, Title: tc.title, ItemLimit: 20}
+			if tc.title == "Recommended for You" {
+				section.TitleKey = titleKeyRecommendedForYou
+			}
+			got, err := fetcher.FetchOne(ctx, section, nil, nil, 7, "p1", catalog.AccessFilter{})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got.Title != tc.want {
-				t.Fatalf("title = %q, want %q", got.Title, tc.want)
+			if got.Title != tc.want || got.TitleKey != tc.wantKey {
+				t.Fatalf("title = %q key %q, want %q key %q", got.Title, got.TitleKey, tc.want, tc.wantKey)
+			}
+			if tc.wantKey == "home.section.topGenre" && got.TitleArgs["genre"] != "Drama" {
+				t.Fatalf("title args = %v, want genre Drama", got.TitleArgs)
 			}
 		})
 	}

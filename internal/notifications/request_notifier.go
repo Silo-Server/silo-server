@@ -81,16 +81,15 @@ type RequestFulfillmentNotifier struct {
 // unexported methods keep *System its only production implementation.
 type fulfillmentBackend interface {
 	PostServerChannelRequestEvent(ctx context.Context, event string, info RequestEventInfo)
-	notificationsEnabled(ctx context.Context, profileID string) (bool, error)
+	notificationsEnabled(ctx context.Context, userID int, profileID string) (bool, error)
 	fulfilledDelivered(ctx context.Context, recipient requests.Follower, requestID string) (bool, error)
 	dispatchFulfilled(ctx context.Context, delivery Delivery) error
 }
 
-// notificationsEnabled reads the profile's master toggle. Notification
-// preferences are keyed by profile id alone, so two accounts' legacy
-// "default" profiles share one row, as they do for every notification type.
-func (s *System) notificationsEnabled(ctx context.Context, profileID string) (bool, error) {
-	prefs, err := s.Preferences.Get(ctx, profileID)
+// notificationsEnabled reads the master toggle of the profile on userID's
+// account.
+func (s *System) notificationsEnabled(ctx context.Context, userID int, profileID string) (bool, error) {
+	prefs, err := s.Preferences.Get(ctx, userID, profileID)
 	if err != nil {
 		return false, err
 	}
@@ -175,7 +174,7 @@ func (n *RequestFulfillmentNotifier) notifyFulfilledProfile(ctx context.Context,
 	if err != nil || delivered {
 		return err
 	}
-	enabled, err := n.backend.notificationsEnabled(ctx, recipient.ProfileID)
+	enabled, err := n.backend.notificationsEnabled(ctx, recipient.UserID, recipient.ProfileID)
 	if err != nil {
 		return err
 	}
@@ -289,7 +288,7 @@ func (s *System) dispatchRequestLifecycle(ctx context.Context, req requests.Requ
 	if req.RequestedByProfileID == "" || req.RequestedByUserID <= 0 {
 		return nil // requests without attribution have no recipient
 	}
-	prefs, err := s.Preferences.Get(ctx, req.RequestedByProfileID)
+	prefs, err := s.Preferences.Get(ctx, req.RequestedByUserID, req.RequestedByProfileID)
 	if err != nil {
 		return err
 	}

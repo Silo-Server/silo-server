@@ -3,8 +3,6 @@ package jellycompat
 import (
 	"crypto/sha1"
 	"encoding/hex"
-	"log/slog"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -189,6 +187,7 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 		dto.Studios = m.namePairs(item.Studios, EncodedIDStudio)
 	}
 	if allFields || fields["taglines"] {
+		dto.Taglines = []string{}
 		if item.Tagline != "" {
 			dto.Taglines = []string{item.Tagline}
 		}
@@ -399,15 +398,66 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 		// itemFromList with Jellyfin's Virtual contract.
 		applyPlayableLocation(&dto, false)
 	}
-	slog.Info("jellycompat item detail mapped",
-		"content_id", item.ContentID,
-		"type", item.Type,
-		"is_folder", dto.IsFolder,
-		"media_type", dto.MediaType,
-		"versions", len(item.Versions),
-		"media_sources", len(dto.MediaSources),
-	)
+	// A requested MediaSources on a playable item without a present version
+	// is [], as in Jellyfin; series and seasons have no media sources.
+	if wantField("mediasources") && isPlayableItemType(item.Type) && dto.MediaSources == nil {
+		dto.MediaSources = []mediaSourceDTO{}
+	}
+	if !allFields {
+		dropUnrequestedEmptyLists(&dto, wantField)
+	}
 	return dto
+}
+
+// dropUnrequestedEmptyLists leaves an empty list field out of a list
+// response unless Fields asked for it. The detail mapping fills every list
+// field, and an empty one would otherwise be sent as [], which Jellyfin sends
+// only for requested fields. Non-empty values are left as they were.
+func dropUnrequestedEmptyLists(dto *baseItemDTO, wantField func(string) bool) {
+	if !wantField("genres") {
+		dto.Genres = nilIfEmpty(dto.Genres)
+		dto.GenreItems = nilIfEmpty(dto.GenreItems)
+	}
+	if !wantField("studios") {
+		dto.Studios = nilIfEmpty(dto.Studios)
+	}
+	if !wantField("tags") {
+		dto.Tags = nilIfEmpty(dto.Tags)
+	}
+	if !wantField("taglines") {
+		dto.Taglines = nilIfEmpty(dto.Taglines)
+	}
+	if !wantField("productionlocations") {
+		dto.ProductionLocations = nilIfEmpty(dto.ProductionLocations)
+	}
+	if !wantField("externalurls") {
+		dto.ExternalURLs = nilIfEmpty(dto.ExternalURLs)
+	}
+	if !wantField("remotetrailers") {
+		dto.RemoteTrailers = nilIfEmpty(dto.RemoteTrailers)
+	}
+	if !wantField("settings") {
+		dto.LockedFields = nilIfEmpty(dto.LockedFields)
+	}
+	if !wantField("people") {
+		dto.People = nilIfEmpty(dto.People)
+	}
+	if !wantField("chapters") {
+		dto.Chapters = nilIfEmpty(dto.Chapters)
+	}
+	if !wantField("mediasources") {
+		dto.MediaSources = nilIfEmpty(dto.MediaSources)
+	}
+	if !wantField("mediastreams") {
+		dto.MediaStreams = nilIfEmpty(dto.MediaStreams)
+	}
+}
+
+func nilIfEmpty[T any](values []T) []T {
+	if len(values) == 0 {
+		return nil
+	}
+	return values
 }
 
 func (m *mapper) seasonFromUpstream(season upstreamSeason, seriesID string, isFavorite bool) baseItemDTO {
@@ -922,7 +972,7 @@ func detailMediaSourceDTO(sourceID string, version catalog.FileVersion, streams 
 		Formats:                             []string{strings.ToLower(version.Container)},
 		RequiredHTTPHeaders:                 map[string]string{},
 		MediaAttachments:                    []map[string]any{},
-		TranscodingSubProtocol:              "hls",
+		TranscodingSubProtocol:              compatStreamProtocolHTTP,
 		Bitrate:                             version.Bitrate * 1000,
 		DefaultAudioStreamIndex:             defaultAudioStreamIndex(version),
 		DefaultSubtitleStreamIndex:          defaultSubtitleStreamIndex(version),
@@ -930,31 +980,44 @@ func detailMediaSourceDTO(sourceID string, version catalog.FileVersion, streams 
 	}
 }
 
+// Every compat user is a non-administrator (see userDTO), and only a viewer
+// who may curate metadata sees where a file lives or what it is called. So a
+// media source is named by its edition and quality, and its path is a stand-in
+// that keeps only the container's extension.
+
+// mediaSourceName names a version for a client's version picker: its edition,
+// then its resolution, video codec and dynamic range ("Extended - 2160p HEVC
+// HDR").
 func mediaSourceName(version catalog.FileVersion) string {
-	name := strings.TrimSpace(version.FileName)
-	if name == "" {
-		name = filepath.Base(version.FilePath)
+	var quality []string
+	for _, part := range []string{strings.TrimSpace(version.Resolution), strings.ToUpper(strings.TrimSpace(version.CodecVideo))} {
+		if part != "" {
+			quality = append(quality, part)
+		}
 	}
-	if name == "" {
-		return ""
+	if version.HDR {
+		quality = append(quality, "HDR")
 	}
-	ext := filepath.Ext(name)
-	return strings.TrimSuffix(name, ext)
+	parts := make([]string, 0, 2)
+	if edition := strings.TrimSpace(version.EditionRaw); edition != "" {
+		parts = append(parts, edition)
+	}
+	if len(quality) > 0 {
+		parts = append(parts, strings.Join(quality, " "))
+	}
+	return strings.Join(parts, " - ")
 }
 
+// compatMediaPath is a version's stand-in path, /silo/{file id}.{container}.
 func compatMediaPath(version catalog.FileVersion) string {
-	if strings.TrimSpace(version.FilePath) != "" {
-		return version.FilePath
-	}
-	name := mediaSourceName(version)
-	if name == "" {
+	if version.FileID <= 0 {
 		return ""
 	}
-	ext := strings.ToLower(strings.TrimSpace(version.Container))
-	if ext == "" {
-		return filepath.ToSlash(filepath.Join("/silo", name))
+	name := strconv.Itoa(version.FileID)
+	if ext := strings.ToLower(strings.TrimSpace(version.Container)); ext != "" {
+		name += "." + ext
 	}
-	return filepath.ToSlash(filepath.Join("/silo", name+"."+ext))
+	return "/silo/" + name
 }
 
 func formatCompatTime(value time.Time) string {

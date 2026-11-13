@@ -1,9 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
-import getAccountPasswordCapabilityOk from "../../../../contracts/api/v2/fixtures/get_account_password_capability_ok.json";
 
 import {
   StaleApiRequestContextError,
@@ -12,7 +10,7 @@ import {
   setProfileToken,
   setRefreshToken,
 } from "@/api/client";
-import { useAccountPasswordCapability, useChangeAccountPassword } from "./account";
+import { useChangeAccountPassword } from "./account";
 
 function createHarness() {
   const queryClient = new QueryClient({
@@ -45,29 +43,6 @@ beforeEach(() => {
   setRefreshToken(null);
   setProfileId(null);
   setProfileToken(null);
-});
-
-describe("useAccountPasswordCapability", () => {
-  it("reads the capability from the v2 contract", async () => {
-    const fetchMock = vi.fn<typeof fetch>(
-      async () =>
-        new Response(JSON.stringify(getAccountPasswordCapabilityOk), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    const { result } = renderHook(() => useAccountPasswordCapability(), createHarness());
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-
-    expect(result.current.data).toEqual(getAccountPasswordCapabilityOk);
-    expect(result.current.data?.allowed).toBe(true);
-    const { url, init } = lastRequest(fetchMock);
-    expect(url).toBe("/api/v2/account/password/capability");
-    expect(init.method).toBe("GET");
-    expect(init.headers.Authorization).toBe("Bearer account-token");
-  });
 });
 
 describe("useChangeAccountPassword", () => {

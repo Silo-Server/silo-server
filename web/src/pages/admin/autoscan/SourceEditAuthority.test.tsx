@@ -1,30 +1,19 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { expect, it, vi } from "vitest";
 
-import { setAccessToken, setProfileId, setProfileToken, setRefreshToken } from "@/api/client";
+import { setProfileToken } from "@/api/client";
 import { ARR_POLL_PLUGIN, pollSource, stubAutoscanServer } from "@/test/autoscanServer";
 
 import { SourceDialog } from "./SourceDialog";
+import { setupAutoscanAdmin } from "./autoscanTestSession.test-support";
 
 vi.mock("@/hooks/queries/admin/libraries", () => ({ useAdminLibraries: () => ({ data: [] }) }));
 
 const source = pollSource({ label: "Old", enabled: false, connection_id: null });
 
-beforeEach(() => {
-  localStorage.clear();
-  sessionStorage.clear();
-  setAccessToken("synthetic-admin");
-  setRefreshToken(null);
-  setProfileId("a");
-  setProfileToken("pin-a");
-});
-
-afterEach(() => {
-  cleanup();
-  vi.unstubAllGlobals();
-});
+setupAutoscanAdmin();
 
 function mount() {
   const client = new QueryClient({

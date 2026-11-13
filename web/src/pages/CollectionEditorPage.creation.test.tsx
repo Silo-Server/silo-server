@@ -73,13 +73,15 @@ beforeEach(() => {
   mocks.editSnapshotError = null;
   mocks.adminSnapshotError = null;
 });
-function show(admin = false) {
-  const base = admin ? "/admin/collections" : "/collections";
+/** Opens `entry` on the scope's editor routes, beside its collection list. */
+function show(scope: "server" | "personal", entry: string) {
+  const base = scope === "server" ? "/admin/collections" : "/collections";
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <MemoryRouter initialEntries={[`${base}/collection-1/edit`]}>
+      <MemoryRouter initialEntries={[entry]}>
         <Routes>
-          <Route element={<CollectionEditorPage scope={admin ? "server" : "personal"} />}>
+          <Route path={base} element={<p>Collection list</p>} />
+          <Route element={<CollectionEditorPage scope={scope} />}>
             <Route path={`${base}/new`} />
             <Route path={`${base}/:id/edit`} />
           </Route>
@@ -99,20 +101,7 @@ it.each([
 ] as const)(
   "opens the %s collection list with the type picker for a create link with no type",
   (scope, from, to) => {
-    const base = scope === "server" ? "/admin/collections" : "/collections";
-    render(
-      <QueryClientProvider client={new QueryClient()}>
-        <MemoryRouter initialEntries={[from]}>
-          <Routes>
-            <Route path={base} element={<p>Collection list</p>} />
-            <Route element={<CollectionEditorPage scope={scope} />}>
-              <Route path={`${base}/new`} />
-            </Route>
-          </Routes>
-          <Location />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
+    show(scope, from);
     expect(screen.getByText("Collection list")).toBeInTheDocument();
     expect(screen.getByTestId("location")).toHaveTextContent(to);
     expect(screen.queryByTestId("editor")).toBeNull();
@@ -124,41 +113,13 @@ it.each([
   ["smart", "", ""],
   ["synced", "&source=tmdb_chart", "tmdb_chart"],
 ] as const)("skips the type picker for a %s create link", (kind, source, tab) => {
-  render(
-    <QueryClientProvider client={new QueryClient()}>
-      <MemoryRouter initialEntries={[`/admin/collections/new?type=${kind}${source}&libraryId=7`]}>
-        <Routes>
-          <Route element={<CollectionEditorPage scope="server" />}>
-            <Route path="/admin/collections/new" />
-          </Route>
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
+  show("server", `/admin/collections/new?type=${kind}${source}&libraryId=7`);
   const editor = screen.getByTestId("editor");
   expect(editor).toHaveAttribute("data-source", "library");
   expect(editor).toHaveAttribute("data-kind", kind);
   expect(editor).toHaveAttribute("data-tab", tab);
   expect(editor).toHaveAttribute("data-library", "7");
 });
-
-it.each(["manual", "smart"] as const)("opens a saved %s collection in the editor page", (type) => {
-  mocks.collection = {
-    id: "collection-1",
-    title: "Staff picks",
-    collection_type: type,
-    library_ids: [1],
-  } as LibraryCollection;
-  show(true);
-  const editor = screen.getByTestId("editor");
-  expect(editor).toHaveAttribute("data-source", "library");
-  expect(editor).toHaveAttribute("data-kind", type);
-  expect(editor).toHaveAttribute("data-collection", "collection-1");
-});
-
-function showPersonalEdit() {
-  show(false);
-}
 
 function collectionProblem(status: number) {
   return new V2ProblemError("getPersonalCollection", {
@@ -172,7 +133,7 @@ function collectionProblem(status: number) {
 
 it("points a missing personal collection back to the collection list", () => {
   mocks.editSnapshotError = collectionProblem(404);
-  showPersonalEdit();
+  show("personal", "/collections/collection-1/edit");
   expect(
     screen.getByRole("heading", { level: 1, name: "This collection isn't available" }),
   ).toBeInTheDocument();
@@ -182,31 +143,9 @@ it("points a missing personal collection back to the collection list", () => {
   );
 });
 
-it("offers a retry when a personal collection fails to load", () => {
-  mocks.editSnapshotError = collectionProblem(500);
-  showPersonalEdit();
-  expect(
-    screen.getByRole("heading", { level: 1, name: "Couldn't load this collection" }),
-  ).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
-});
-
-it("points a missing admin collection back to the collection board", () => {
-  mocks.adminSnapshotError = collectionProblem(404);
-  show(true);
-  expect(
-    screen.getByRole("heading", { level: 1, name: "Collection not found" }),
-  ).toBeInTheDocument();
-  expect(document.title).toMatch(/^Not found · /);
-  expect(screen.getByRole("link", { name: "All collections" })).toHaveAttribute(
-    "href",
-    "/admin/collections",
-  );
-});
-
 it("offers a retry when an admin collection fails to load", () => {
   mocks.adminSnapshotError = collectionProblem(500);
-  show(true);
+  show("server", "/admin/collections/collection-1/edit");
   expect(
     screen.getByRole("heading", { level: 1, name: "Couldn't load this collection" }),
   ).toBeInTheDocument();

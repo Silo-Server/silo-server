@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -55,14 +54,11 @@ func TestPlanPlaybackV3HEVCTranscodeSelectionAndFallbacks(t *testing.T) {
 func TestPlanPlaybackV3HEVCOutputKeepsTheSourceBitrateBound(t *testing.T) {
 	input4K := func(allowHEVC bool) PlannerInputV3 {
 		input := hevcTranscodePlannerInputV3(allowHEVC, true, true)
-		file := *input.RequestedFile
-		file.CodecVideo, file.Resolution, file.Bitrate = "hevc", "2160p", 3_000
-		file.VideoTracks = []models.VideoTrack{{Codec: "hevc", Profile: "Main", Width: 3840, Height: 2160, FrameRate: "24/1", Bitrate: 3_000, BitDepth: 8, VideoRange: "SDR"}}
-		input.RequestedFile, input.EffectiveFile = &file, &file
+		setHEVCTestSourceV3(&input, "hevc", 3_000, models.VideoTrack{Codec: "hevc", Profile: "Main", Width: 3840, Height: 2160, FrameRate: "24/1", Bitrate: 3_000, BitDepth: 8, VideoRange: "SDR"})
+		input.RequestedFile.Resolution = "2160p"
 		input.Settings.Allow4KTranscode = true
 		input.Request.QualityPreference = "auto"
-		estimate := 10_000
-		input.Request.BandwidthEstimateKbps = &estimate
+		input.Request.Capabilities.MaxResolution = "1080p"
 		return input
 	}
 	check := func(name string, result PlannerResultV3, wantCodec string, wantBitrate int) {
@@ -96,10 +92,7 @@ func TestPlanPlaybackV3HEVCOutputKeepsTheSourceBitrateBound(t *testing.T) {
 // is not refused over the uncapped one.
 func TestPlanPlaybackV3HEVCCheckedAfterServerCapAudioReserve(t *testing.T) {
 	input := hevcTranscodePlannerInputV3(true, true, true)
-	file := *input.RequestedFile
-	file.CodecVideo, file.Bitrate = "hevc", 5_100
-	file.VideoTracks = []models.VideoTrack{{Codec: "hevc", Profile: "Main", Width: 1920, Height: 1080, FrameRate: "24/1", Bitrate: 4_800, BitDepth: 8, VideoRange: "SDR"}}
-	input.RequestedFile, input.EffectiveFile = &file, &file
+	setHEVCTestSourceV3(&input, "hevc", 5_100, models.VideoTrack{Codec: "hevc", Profile: "Main", Width: 1920, Height: 1080, FrameRate: "24/1", Bitrate: 4_800, BitDepth: 8, VideoRange: "SDR"})
 	input.ServerBitrateCapKbps = 5_000
 	input.Request.QualityPreference = QualityOriginalV3
 	hls := input.Request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
@@ -117,10 +110,7 @@ func TestPlanPlaybackV3HEVCCheckedAfterServerCapAudioReserve(t *testing.T) {
 // client with a 6 Mbps decoder gets a 4.8 Mbps HEVC stream.
 func TestPlanPlaybackV3HEVCConversionAtSourceSizeIsCapped(t *testing.T) {
 	input := hevcTranscodePlannerInputV3(true, true, true)
-	file := *input.RequestedFile
-	file.CodecVideo, file.Bitrate = "h264", 8_200
-	file.VideoTracks = []models.VideoTrack{{Codec: "h264", Profile: "High", Width: 1920, Height: 1080, FrameRate: "24/1", Bitrate: 8_000, BitDepth: 8, VideoRange: "SDR"}}
-	input.RequestedFile, input.EffectiveFile = &file, &file
+	setHEVCTestSourceV3(&input, "h264", 8_200, models.VideoTrack{Codec: "h264", Profile: "High", Width: 1920, Height: 1080, FrameRate: "24/1", Bitrate: 8_000, BitDepth: 8, VideoRange: "SDR"})
 	input.Request.QualityPreference = QualityOriginalV3
 	hls := input.Request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
 	hls.VideoCodecs = []string{"hevc"}
@@ -145,16 +135,13 @@ func TestPlanPlaybackV3H264TargetStaysWithinTheDecoderBitrate(t *testing.T) {
 		{true, "hevc", 4_800},
 	} {
 		input := hevcTranscodePlannerInputV3(tc.allowHEVC, true, true)
-		file := *input.RequestedFile
-		file.CodecVideo, file.Bitrate = "h264", 8_200
-		file.VideoTracks = []models.VideoTrack{{Codec: "h264", Profile: "High", Width: 1920, Height: 1080, FrameRate: "24/1", Bitrate: 8_000, BitDepth: 8, VideoRange: "SDR"}}
-		input.RequestedFile, input.EffectiveFile = &file, &file
+		setHEVCTestSourceV3(&input, "h264", 8_200, models.VideoTrack{Codec: "h264", Profile: "High", Width: 1920, Height: 1080, FrameRate: "24/1", Bitrate: 8_000, BitDepth: 8, VideoRange: "SDR"})
 		input.Request.Capabilities.CodecsVideo = []string{"h264", "hevc"}
 		input.Request.Capabilities.VideoDecode = append(input.Request.Capabilities.VideoDecode,
 			VideoDecodeCapabilityV3{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 5_000, Hardware: true})
 		input.Request.QualityPreference = "auto"
-		estimate := 7_000
-		input.Request.BandwidthEstimateKbps = &estimate
+		capKbps := 7_000
+		input.Request.BandwidthCapKbps = &capKbps
 		result := PlanPlaybackV3(input)
 		if result.Plan == nil || result.TargetVideoCodec != tc.wantCodec || result.TargetBitrateKbps != tc.wantBitrate {
 			t.Fatalf("HEVC %v: %s codec %q bitrate %d, want %s at %d", tc.allowHEVC, ExplainPlannerResultV3(result), result.TargetVideoCodec, result.TargetBitrateKbps, tc.wantCodec, tc.wantBitrate)
@@ -169,16 +156,13 @@ func TestPlanPlaybackV3H264TargetStepsDownToTheDecoderSize(t *testing.T) {
 	decoderWidth, decoderHeight := 1280, 720
 	input := func(allowHEVC bool) PlannerInputV3 {
 		input := hevcTranscodePlannerInputV3(allowHEVC, true, true)
-		file := *input.RequestedFile
-		file.CodecVideo, file.Bitrate = "h264", 8_200
-		file.VideoTracks = []models.VideoTrack{{Codec: "h264", Profile: "High", Width: 1920, Height: 1080, FrameRate: "24/1", Bitrate: 8_000, BitDepth: 8, VideoRange: "SDR"}}
-		input.RequestedFile, input.EffectiveFile = &file, &file
+		setHEVCTestSourceV3(&input, "h264", 8_200, models.VideoTrack{Codec: "h264", Profile: "High", Width: 1920, Height: 1080, FrameRate: "24/1", Bitrate: 8_000, BitDepth: 8, VideoRange: "SDR"})
 		input.Request.Capabilities.CodecsVideo = []string{"h264", "hevc"}
 		input.Request.Capabilities.VideoDecode = append(input.Request.Capabilities.VideoDecode,
 			VideoDecodeCapabilityV3{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: decoderWidth, MaxHeight: decoderHeight, MaxFrameRate: 60, Hardware: true})
 		input.Request.QualityPreference = "auto"
-		estimate := 7_000
-		input.Request.BandwidthEstimateKbps = &estimate
+		capKbps := 7_000
+		input.Request.BandwidthCapKbps = &capKbps
 		return input
 	}
 	check := func(name string, result PlannerResultV3, codec, res string, width, bitrate int) {
@@ -200,37 +184,30 @@ func TestPlanPlaybackV3H264TargetStepsDownToTheDecoderSize(t *testing.T) {
 	check("a 1280x962 decoder", PlanPlaybackV3(input(false)), "h264", "720p", 1280, 2_000)
 
 	// A same-size codec conversion is fitted too: a 5 Mbps 1080p HEVC source
-	// fits the estimate, but an H.264-only client with a 720p decoder needs
+	// fits the cap, but an H.264-only client with a 720p decoder needs
 	// an H.264 encode it can take.
 	decoderWidth, decoderHeight = 1280, 720
 	conversion := input(false)
-	file := *conversion.RequestedFile
-	file.CodecVideo, file.Bitrate = "hevc", 5_200
-	file.VideoTracks = []models.VideoTrack{{Codec: "hevc", Profile: "Main", Width: 1920, Height: 1080, FrameRate: "24/1", Bitrate: 5_000, BitDepth: 8, VideoRange: "SDR"}}
-	conversion.RequestedFile, conversion.EffectiveFile = &file, &file
+	setHEVCTestSourceV3(&conversion, "hevc", 5_200, models.VideoTrack{Codec: "hevc", Profile: "Main", Width: 1920, Height: 1080, FrameRate: "24/1", Bitrate: 5_000, BitDepth: 8, VideoRange: "SDR"})
 	conversion.Request.Capabilities.CodecsVideo = []string{"h264"}
 	conversion.Request.Capabilities.VideoDecode = conversion.Request.Capabilities.VideoDecode[1:]
 	check("a same-size conversion", PlanPlaybackV3(conversion), "h264", "720p", 1280, 2_000)
 
 	// A decoder must also take the source's frame rate, which the encode keeps.
 	fast := input(false)
-	fastFile := *fast.RequestedFile
-	fastFile.VideoTracks = []models.VideoTrack{{Codec: "h264", Profile: "High", Width: 1920, Height: 1080, FrameRate: "60/1", Bitrate: 8_000, BitDepth: 8, VideoRange: "SDR"}}
-	fast.RequestedFile, fast.EffectiveFile = &fastFile, &fastFile
+	setHEVCTestSourceV3(&fast, "", 0, models.VideoTrack{Codec: "h264", Profile: "High", Width: 1920, Height: 1080, FrameRate: "60/1", Bitrate: 8_000, BitDepth: 8, VideoRange: "SDR"})
 	fast.Request.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{
 		{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 30, Hardware: true},
 		{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 1280, MaxHeight: 720, MaxFrameRate: 60, Hardware: true},
 	}
-	estimate := 9_000
-	fast.Request.BandwidthEstimateKbps = &estimate
+	capKbps := 9_000
+	fast.Request.BandwidthCapKbps = &capKbps
 	check("a 60 fps source", PlanPlaybackV3(fast), "h264", "720p", 1280, 2_000)
 
 	// The decoder is checked against the even frame the encoder writes: a
 	// 1917-wide source becomes 1918 wide, past a 1917-wide decoder.
 	odd := input(false)
-	oddFile := *odd.RequestedFile
-	oddFile.VideoTracks = []models.VideoTrack{{Codec: "h264", Profile: "High", Width: 1917, Height: 1080, FrameRate: "24/1", Bitrate: 8_000, BitDepth: 8, VideoRange: "SDR"}}
-	odd.RequestedFile, odd.EffectiveFile = &oddFile, &oddFile
+	setHEVCTestSourceV3(&odd, "", 0, models.VideoTrack{Codec: "h264", Profile: "High", Width: 1917, Height: 1080, FrameRate: "24/1", Bitrate: 8_000, BitDepth: 8, VideoRange: "SDR"})
 	odd.Request.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{
 		{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 1917, MaxHeight: 1080, MaxFrameRate: 60, Hardware: true},
 	}
@@ -248,13 +225,15 @@ func TestPlanPlaybackV3H264TargetStepsDownToTheDecoderSize(t *testing.T) {
 		{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 1_000, Hardware: true},
 		{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 20_000, Hardware: true},
 	}
-	check("a slow 4K decoder beside a fast 1080p one", PlanPlaybackV3(slow), "h264", "1080p", 1920, 5_600)
+	check("a slow 4K decoder beside a fast 1080p one", PlanPlaybackV3(slow), "h264", "1080p", 1920, 6_000)
 
 	// Hardware decoders win only when one takes the source's frame rate; an
 	// opted-in software decoder that does is used instead.
+	// The source sits over the cap, so it is re-encoded at a size the cap's
+	// budget earns for 60 fps.
 	software := input(false)
-	software.RequestedFile, software.EffectiveFile = &fastFile, &fastFile
-	software.Request.BandwidthEstimateKbps = &estimate
+	setHEVCTestSourceV3(&software, "", 0, models.VideoTrack{Codec: "h264", Profile: "High", Width: 1920, Height: 1080, FrameRate: "60/1", Bitrate: 12_000, BitDepth: 8, VideoRange: "SDR"})
+	software.Request.BandwidthCapKbps = &capKbps
 	software.Request.ClientFeatures = append(software.Request.ClientFeatures, FeatureSoftwareVideoDecodeV3)
 	software.Request.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{
 		{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 30, Hardware: true},
@@ -274,16 +253,13 @@ func TestPlanPlaybackV3H264TargetStepsDownToTheDecoderSize(t *testing.T) {
 	// earns (2560x1080 is 1080p), so a decoder whose bitrate limit earns
 	// 1080p takes it at its own size.
 	wide := input(false)
-	wideFile := *wide.RequestedFile
-	wideFile.CodecVideo, wideFile.Bitrate = "hevc", 5_200
-	wideFile.VideoTracks = []models.VideoTrack{{Codec: "hevc", Profile: "Main", Width: 2560, Height: 1080, FrameRate: "24/1", Bitrate: 5_000, BitDepth: 8, VideoRange: "SDR"}}
-	wide.RequestedFile, wide.EffectiveFile = &wideFile, &wideFile
+	setHEVCTestSourceV3(&wide, "hevc", 5_200, models.VideoTrack{Codec: "hevc", Profile: "Main", Width: 2560, Height: 1080, FrameRate: "24/1", Bitrate: 5_000, BitDepth: 8, VideoRange: "SDR"})
 	wide.Request.Capabilities.CodecsVideo = []string{"h264"}
 	wide.Request.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{
 		{Codec: "h264", Profiles: []string{"High"}, BitDepths: []int{8}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 15_000, Hardware: true},
 	}
-	wideEstimate := 10_000
-	wide.Request.BandwidthEstimateKbps = &wideEstimate
+	wideCap := 10_000
+	wide.Request.BandwidthCapKbps = &wideCap
 	check("a 2560x1080 conversion under a 15 Mbps decoder", PlanPlaybackV3(wide), "h264", "1080p", 2560, 5_000)
 }
 
@@ -301,10 +277,7 @@ func TestPlanPlaybackV3OriginalTranscodeStopsAt2160(t *testing.T) {
 		{5760, 5760, "2160p", 2160},
 	} {
 		input := hevcTranscodePlannerInputV3(false, false, true)
-		file := *input.RequestedFile
-		file.CodecVideo, file.Bitrate = "hevc", 60_000
-		file.VideoTracks = []models.VideoTrack{{Codec: "hevc", Profile: "Main", Width: tc.width, Height: tc.height, FrameRate: "30/1", Bitrate: 60_000, BitDepth: 8, VideoRange: "SDR"}}
-		input.RequestedFile, input.EffectiveFile = &file, &file
+		setHEVCTestSourceV3(&input, "hevc", 60_000, models.VideoTrack{Codec: "hevc", Profile: "Main", Width: tc.width, Height: tc.height, FrameRate: "30/1", Bitrate: 60_000, BitDepth: 8, VideoRange: "SDR"})
 		input.Request.QualityPreference = QualityOriginalV3
 		input.Request.Capabilities.CodecsVideo = []string{"h264"}
 		input.Request.Capabilities.VideoEvidence = EvidenceDeclaredV3
@@ -357,11 +330,7 @@ func TestHEVCTranscodeUsesHVC1FMP4(t *testing.T) {
 }
 
 func TestProbeTransformationRegistryV3DoesNotAdvertiseFailedHEVCSmoke(t *testing.T) {
-	ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
-	script := "#!/bin/sh\ncase \"$2\" in\n-bsfs) : ;;\n-encoders) echo ' V....D libx264 H.264'; echo ' V....D libx265 HEVC'; echo ' A....D aac AAC' ;;\nesac\ncase \" $* \" in\n*' -c:v libx265 '*) exit 1 ;;\nesac\n"
-	if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	ffmpeg := writeProbeFFmpegV3(t, "#!/bin/sh\ncase \"$2\" in\n-bsfs) : ;;\n-encoders) echo ' V....D libx264 H.264'; echo ' V....D libx265 HEVC'; echo ' A....D aac AAC' ;;\nesac\ncase \" $* \" in\n*' -c:v libx265 '*) exit 1 ;;\nesac\n")
 	registry := ProbeTransformationRegistryV3(context.Background(), ffmpeg)
 	if registry.Available(TransformationVideoToHEVCV3) {
 		t.Fatal("HEVC transformation advertised despite failed encode smoke")
@@ -372,11 +341,8 @@ func TestProbeTransformationRegistryV3DoesNotAdvertiseFailedHEVCSmoke(t *testing
 }
 
 func TestProbeTransformationRegistryV3HEVCTimeoutKeepsBaselineInventory(t *testing.T) {
-	ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
 	script := "#!/bin/sh\ncase \"$2\" in\n-bsfs) : ;;\n-encoders) echo ' V....D libx264 H.264'; echo ' V....D libx265 HEVC'; echo ' A....D aac AAC' ;;\nesac\ncase \" $* \" in\n*' -c:v libx265 '*) exec sleep 30 ;;\nesac\n"
-	if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	ffmpeg := writeProbeFFmpegV3(t, script)
 	registry, err := ProbeTransformationRegistryWithToneMapV3Result(context.Background(), ffmpeg, nil)
 	if err != nil {
 		t.Fatalf("optional HEVC timeout invalidated baseline inventory: %v", err)
@@ -412,14 +378,10 @@ func TestProbeTransformationRegistryV3HEVCTimeoutKeepsBaselineInventory(t *testi
 }
 
 func TestProbeTransformationRegistryV3HEVCStartupFailureExpires(t *testing.T) {
-	ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
 	// Drop execute permission after the last baseline probe. The optional
 	// HEVC command then fails to start rather than returning an unsupported
 	// encoder result from a running FFmpeg process.
-	script := "#!/bin/sh\ncase \"$2\" in\n-encoders) echo ' V....D libx264 H.264'; echo ' V....D libx265 HEVC'; echo ' A....D aac AAC' ;;\nesac\ncase \" $* \" in\n*'anullsrc=r=8000:cl=5.1'*) chmod -x \"$0\" ;;\nesac\n"
-	if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	ffmpeg := writeProbeFFmpegV3(t, "#!/bin/sh\ncase \"$2\" in\n-encoders) echo ' V....D libx264 H.264'; echo ' V....D libx265 HEVC'; echo ' A....D aac AAC' ;;\nesac\ncase \" $* \" in\n*'anullsrc=r=8000:cl=5.1'*) chmod -x \"$0\" ;;\nesac\n")
 	registry, err := ProbeTransformationRegistryWithToneMapV3Result(context.Background(), ffmpeg, nil)
 	if err != nil || registry.Available(TransformationVideoToHEVCV3) || !registry.NeedsRefresh(time.Now().Add(time.Minute)) {
 		t.Fatalf("optional process startup failure did not expire: %v, %#v", err, registry)
@@ -427,11 +389,7 @@ func TestProbeTransformationRegistryV3HEVCStartupFailureExpires(t *testing.T) {
 }
 
 func TestProbeTransformationRegistryV3MissingHEVCEncoderStaysCached(t *testing.T) {
-	ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
-	script := "#!/bin/sh\ncase \"$2\" in\n-encoders) echo ' V....D libx264 H.264'; echo ' A....D aac AAC' ;;\nesac\n"
-	if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	ffmpeg := writeProbeFFmpegV3(t, "#!/bin/sh\ncase \"$2\" in\n-encoders) echo ' V....D libx264 H.264'; echo ' A....D aac AAC' ;;\nesac\n")
 	registry, err := ProbeTransformationRegistryWithToneMapV3Result(context.Background(), ffmpeg, nil)
 	if err != nil || registry.Available(TransformationVideoToHEVCV3) || registry.NeedsRefresh(time.Now().Add(time.Hour)) {
 		t.Fatalf("missing optional encoder should remain a stable negative result: %v, %#v", err, registry)
@@ -464,4 +422,18 @@ func hevcTranscodePlannerInputV3(allowHEVC, hlsHEVC, hevcAvailable bool) Planner
 		registry = append(registry, TransformationSpecV3{Name: TransformationVideoToHEVCV3, RecipeVersion: TransformationVideoToHEVCRecipeVersionV3, Available: true})
 	}
 	return PlannerInputV3{Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, AllowHEVCEncoding: allowHEVC}, Registry: NewTransformationRegistryV3(registry)}
+}
+
+// setHEVCTestSourceV3 replaces the planner input's source with a copy that
+// has one video track and, when set, a new file codec and bitrate.
+func setHEVCTestSourceV3(input *PlannerInputV3, codec string, bitrateKbps int, track models.VideoTrack) {
+	file := *input.RequestedFile
+	if codec != "" {
+		file.CodecVideo = codec
+	}
+	if bitrateKbps > 0 {
+		file.Bitrate = bitrateKbps
+	}
+	file.VideoTracks = []models.VideoTrack{track}
+	input.RequestedFile, input.EffectiveFile = &file, &file
 }

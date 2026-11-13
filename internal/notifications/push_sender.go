@@ -200,7 +200,7 @@ func newPushSender(devices *PushDeviceRepository, deliveries *DeliveryRepository
 }
 
 func (s *pushSender) processAttempt(ctx context.Context, attempt PushDeliveryAttempt) *PushDeliveryAttempt {
-	device, err := s.devices.getPushDeviceByID(ctx, attempt.PushDeviceID)
+	device, loginLive, err := s.devices.getPushDeviceByID(ctx, attempt.PushDeviceID)
 	if err != nil || device == nil {
 		if err == nil {
 			return s.finalize(ctx, attempt, PushOutcomeFailed, "", "push device deleted", nil, "", nil)
@@ -217,6 +217,11 @@ func (s *pushSender) processAttempt(ctx context.Context, attempt PushDeliveryAtt
 	if !device.Enabled || device.PushMode != PushModePrivatePush || !deliveryEnabled {
 		return s.finalize(ctx, attempt, PushOutcomeFailed, "delivery_disabled", "push delivery disabled", nil, "", nil)
 	}
+	// The attempt may have been queued while the login was live; retries run for
+	// half an hour after that.
+	if !loginLive {
+		return s.finalize(ctx, attempt, PushOutcomeFailed, "login_session_ended", "login session ended", nil, "", nil)
+	}
 	if attempt.NotificationDeliveryID != nil {
 		row, err := s.deliveries.GetRowByID(ctx, *attempt.NotificationDeliveryID)
 		if err != nil {
@@ -231,7 +236,9 @@ func (s *pushSender) processAttempt(ctx context.Context, attempt PushDeliveryAtt
 		if row == nil {
 			return s.finalize(ctx, attempt, PushOutcomeFailed, "delivery_missing", "delivery row missing", nil, "", nil)
 		}
-		if row.ProfileID != device.ProfileID {
+		// A device re-registered under another profile, or under one with the
+		// same ID on another account, no longer gets the old owner's delivery.
+		if row.UserID != device.UserID || row.ProfileID != device.ProfileID {
 			return s.finalize(ctx, attempt, PushOutcomeFailed, "device_reassigned", "push device reassigned", nil, "", nil)
 		}
 	}
@@ -722,15 +729,15 @@ type ApplePushTestResult struct {
 	FailureMessage string
 }
 
-func (s *System) SendApplePushTest(ctx context.Context, profileID, serverDeviceID string) (*ApplePushTestResult, error) {
-	return s.sendPushTest(ctx, PushPlatformApple, profileID, serverDeviceID)
+func (s *System) SendApplePushTest(ctx context.Context, userID int, profileID, serverDeviceID string) (*ApplePushTestResult, error) {
+	return s.sendPushTest(ctx, PushPlatformApple, userID, profileID, serverDeviceID)
 }
 
-func (s *System) SendAndroidPushTest(ctx context.Context, profileID, serverDeviceID string) (*ApplePushTestResult, error) {
-	return s.sendPushTest(ctx, PushPlatformAndroid, profileID, serverDeviceID)
+func (s *System) SendAndroidPushTest(ctx context.Context, userID int, profileID, serverDeviceID string) (*ApplePushTestResult, error) {
+	return s.sendPushTest(ctx, PushPlatformAndroid, userID, profileID, serverDeviceID)
 }
 
-func (s *System) sendPushTest(ctx context.Context, platform, profileID, serverDeviceID string) (*ApplePushTestResult, error) {
+func (s *System) sendPushTest(ctx context.Context, platform string, userID int, profileID, serverDeviceID string) (*ApplePushTestResult, error) {
 	if s == nil || s.pushDeviceRepo == nil || s.pushSender == nil {
 		return nil, ErrPushDeliveryUnavailable
 	}
@@ -743,7 +750,7 @@ func (s *System) sendPushTest(ctx context.Context, platform, profileID, serverDe
 	}
 	// No relay-credential gate here: a test push on a fresh install goes
 	// through the same first-use registration as an ordinary delivery.
-	attempt, device, err := s.pushDeviceRepo.EnqueueTestAttempt(ctx, platform, profileID, serverDeviceID)
+	attempt, device, err := s.pushDeviceRepo.EnqueueTestAttempt(ctx, platform, userID, profileID, serverDeviceID)
 	if err != nil {
 		return nil, err
 	}

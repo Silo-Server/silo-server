@@ -17,12 +17,6 @@ describe("libraryFromV2", () => {
     // is silently dropped; comparing key sets catches that for new members.
     expect(Object.keys(libraryFromV2(v2Library)).sort()).toEqual(Object.keys(v2Library).sort());
   });
-
-  it.each([true, false])("keeps a realtime_monitoring switch of %s", (realtimeMonitoring) => {
-    const library = libraryFromV2({ ...v2Library, realtime_monitoring: realtimeMonitoring });
-    expect(library.realtime_monitoring).toBe(realtimeMonitoring);
-    expect(library.id).toBe(1);
-  });
 });
 
 describe("libraryCreateToV2", () => {

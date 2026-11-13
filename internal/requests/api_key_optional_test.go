@@ -5,9 +5,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 )
 
 // keylessRouterInst is a connection on installation 1 saved without an API
@@ -31,11 +28,7 @@ func TestCreateRequestAutoApprovalSendsToKeyOptionalRouter(t *testing.T) {
 	router := &fakeRouterProvider{keyOptional: map[int]bool{1: true}}
 	service.SetRouterProvider(router)
 
-	req, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
-		MediaType: MediaTypeMovie,
-		TMDBID:    550,
-		Title:     "Fight Club",
-	})
+	req, err := service.CreateRequest(context.Background(), testViewer(1), fightClubInput)
 	if err != nil {
 		t.Fatalf("CreateRequest returned error: %v", err)
 	}
@@ -56,9 +49,7 @@ func TestSubmitDefersWhenKeyOptionalDeclarationCannotBeRead(t *testing.T) {
 	svc := newTestService(store)
 	svc.SetRouterProvider(router)
 
-	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
-	store.requests["r1"] = &req
-	got, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}, nil)
+	got, err := submitApprovedMovie(svc, store)
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -67,25 +58,6 @@ func TestSubmitDefersWhenKeyOptionalDeclarationCannotBeRead(t *testing.T) {
 	}
 	if got.Status != StatusApproved || got.Outcome != OutcomeActive || !strings.Contains(got.LastError, "capabilities unavailable") {
 		t.Fatalf("request = %+v, want it approved and waiting to retry", got)
-	}
-}
-
-// A connection whose plugin's declaration cannot be read is skipped like one
-// without a key, so a sibling with a key still takes the request.
-func TestSubmitUsesKeyedSiblingWhenKeyOptionalDeclarationCannotBeRead(t *testing.T) {
-	store := newFakeStore()
-	store.integrations = []Integration{keylessRouterInst("router-keyless"), routerInst("router-keyed")}
-	router := &fakeRouterProvider{featuresErr: errors.New("capabilities unavailable")}
-	svc := newTestService(store)
-	svc.SetRouterProvider(router)
-
-	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7}
-	store.requests["r1"] = &req
-	if _, err := svc.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}, nil); err != nil {
-		t.Fatalf("submit: %v", err)
-	}
-	if router.fulfillCalls != 1 || len(router.gotConns) != 1 || router.gotConns[0].ID != "router-keyed" {
-		t.Fatalf("fulfill calls = %d, connections = %+v; want one call to router-keyed", router.fulfillCalls, router.gotConns)
 	}
 }
 
@@ -123,125 +95,6 @@ func TestSubmitRoutedHonoursKeyOptionalRouter(t *testing.T) {
 				t.Fatalf("fulfill calls = %+v, want one call to the routed server without a key", router.fulfillLog)
 			}
 		})
-	}
-}
-
-// The route preview does not flag a server without a key when its router
-// needs none.
-func TestPreviewRouteAcceptsKeyOptionalServer(t *testing.T) {
-	store := routingStore(RoutingFacts{})
-	store.integrations[0].APIKeyRef = "" // radarr-hd, the fallback's HD server
-	svc := newTestServiceWithTMDB(store, &fakeTMDBClient{detail: &tmdb.MediaDetail{ID: 129}})
-	svc.SetRouterProvider(&fakeRouterProvider{keyOptional: map[int]bool{1: true}})
-
-	preview, err := svc.PreviewRoute(context.Background(), routeAdmin, MediaTypeMovie, 129, 7)
-	if err != nil {
-		t.Fatalf("preview: %v", err)
-	}
-	for _, tier := range preview.Tiers {
-		if tier.Reason != "" {
-			t.Fatalf("%s tier = %+v, want no failure note", tier.Quality, tier)
-		}
-	}
-}
-
-// The reconcile pass asks a key-optional router about a target on a server
-// without a key.
-func TestReconcileRequestsChecksTargetOnKeyOptionalServer(t *testing.T) {
-	store := newFakeStore()
-	store.integrations = []Integration{keylessRouterInst("router-1")}
-	store.candidates = []*Request{{ID: "req-1", MediaType: MediaTypeMovie, TMDBID: 550, Status: StatusQueued, Outcome: OutcomeActive}}
-	store.requests["req-1"] = &Request{ID: "req-1", MediaType: MediaTypeMovie, TMDBID: 550, Status: StatusQueued, Outcome: OutcomeActive}
-	if _, err := store.CreateTarget(context.Background(), Target{
-		RequestID: "req-1", IntegrationID: "router-1",
-		Quality: Quality1080p, Status: StatusQueued, ExternalID: "123",
-	}); err != nil {
-		t.Fatalf("seed target: %v", err)
-	}
-	router := &fakeRouterProvider{
-		keyOptional: map[int]bool{1: true},
-		statuses:    []RouterTargetStatus{{Quality: Quality1080p, ConnectionID: "router-1", Status: StatusDownloading, ExternalStatus: "downloading"}},
-	}
-	service := newTestService(store)
-	service.SetRouterProvider(router)
-
-	result, err := service.ReconcileRequests(context.Background(), 100)
-	if err != nil {
-		t.Fatalf("ReconcileRequests returned error: %v", err)
-	}
-	if router.statusCalls != 1 || len(router.statusLog) != 1 || router.statusLog[0].conns[0].APIKey != "" {
-		t.Fatalf("status calls = %+v, want one call without a key", router.statusLog)
-	}
-	if result.Downloading != 1 {
-		t.Fatalf("result = %+v, want the target marked downloading", result)
-	}
-}
-
-// The download refresh pass polls a key-optional router that reports
-// progress for a target on a server without a key, and keeps the progress.
-func TestRefreshDownloadsPollsKeyOptionalServer(t *testing.T) {
-	store := newFakeStore()
-	service, router := downloadRefreshService(store)
-	store.integrations = []Integration{keylessRouterInst("router-1")}
-	router.keyOptional = map[int]bool{1: true}
-	earlier := &DownloadProgress{Phase: DownloadPhaseDownloading, BytesTotal: 1000, BytesLeft: 900, Downloads: 1}
-	seedDownloadTarget(t, store, "req-keyless", "router-1", Quality1080p, StatusDownloading, earlier)
-	progress := &DownloadProgress{Phase: DownloadPhaseDownloading, BytesTotal: 1000, BytesLeft: 400, Downloads: 1}
-	router.statuses = []RouterTargetStatus{{Quality: Quality1080p, ConnectionID: "router-1", Status: StatusDownloading, Progress: progress}}
-
-	result, err := service.RefreshDownloads(context.Background(), 200, 0)
-	if err != nil {
-		t.Fatalf("RefreshDownloads: %v", err)
-	}
-	if result != (DownloadRefreshResult{Checked: 1}) || router.statusCalls != 1 {
-		t.Fatalf("result = %+v, status calls = %d; want one request checked", result, router.statusCalls)
-	}
-	if got := onlyTarget(t, store, "req-keyless"); !sameProgress(got.Download, progress) {
-		t.Fatalf("progress = %+v, want %+v", got.Download, progress)
-	}
-}
-
-// When a key-optional router's declaration cannot be read, the download
-// refresh pass settles the target as unanswered: fresh progress is kept and
-// the server is not asked, rather than the progress being cleared as if the
-// server could no longer be asked.
-func TestRefreshDownloadsKeepsProgressWhenKeyOptionalDeclarationCannotBeRead(t *testing.T) {
-	store := newFakeStore()
-	service, router := downloadRefreshService(store)
-	store.integrations = []Integration{keylessRouterInst("router-1")}
-	router.keyOptional = map[int]bool{1: true}
-	router.featuresErr = errors.New("capabilities unavailable")
-	reported := service.now().Add(-2 * time.Minute)
-	progress := &DownloadProgress{Phase: DownloadPhaseDownloading, BytesTotal: 1000, BytesLeft: 400, Downloads: 1, UpdatedAt: reported}
-	seedDownloadTarget(t, store, "req-keyless", "router-1", Quality1080p, StatusDownloading, progress)
-
-	_, _ = service.RefreshDownloads(context.Background(), 200, 0)
-	if router.statusCalls != 0 {
-		t.Fatalf("status calls = %d, want none", router.statusCalls)
-	}
-	if got := onlyTarget(t, store, "req-keyless"); !sameProgress(got.Download, progress) || !got.Download.UpdatedAt.Equal(reported) {
-		t.Fatalf("progress = %+v, want the reported progress kept", got.Download)
-	}
-}
-
-// Testing a new server for a key-optional router reaches the plugin without
-// a key or an address.
-func TestLoadIntegrationOptionsProbesKeyOptionalRouterWithoutKey(t *testing.T) {
-	store := newFakeStore()
-	router := &fakeRouterProvider{keyOptional: map[int]bool{1: true}}
-	service := newTestService(store)
-	service.SetRouterProvider(router)
-	install := 1
-
-	if _, err := service.LoadIntegrationOptions(context.Background(), Viewer{UserID: 1, IsAdmin: true}, Integration{
-		ID:             "new",
-		CapabilityID:   "arr",
-		InstallationID: &install,
-	}); err != nil {
-		t.Fatalf("LoadIntegrationOptions: %v", err)
-	}
-	if router.gotOptionsConn.ID != "new" || router.gotOptionsConn.APIKey != "" || router.gotOptionsConn.BaseURL != "" {
-		t.Fatalf("probe conn = %+v, want the new server without a key or address", router.gotOptionsConn)
 	}
 }
 

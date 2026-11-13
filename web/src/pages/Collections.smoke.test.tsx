@@ -4,9 +4,7 @@
  * buttons (#195 W7), and a single-profile account still sees Server
  * collections (#195 W1).
  */
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import getCollectionOk from "../../../contracts/api/v2/fixtures/get_collection_ok.json";
@@ -14,7 +12,7 @@ import getLibraryCollectionsOk from "../../../contracts/api/v2/fixtures/get_libr
 import listCollectionsOk from "../../../contracts/api/v2/fixtures/list_collections_ok.json";
 import { personalCapabilities } from "@/test/fixtures/collectionAnswers";
 import { installV2Recorder, v2Recorder } from "@/test/v2Recorder";
-import Collections from "./Collections";
+import { renderCollectionsPage } from "./collectionsPage.test-support";
 
 vi.mock("@/api/v2/request", async () => (await import("@/test/v2Recorder")).mockV2Request());
 const account = vi.hoisted(() => ({
@@ -97,21 +95,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function show() {
-  render(
-    <QueryClientProvider
-      client={
-        new QueryClient({
-          defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-        })
-      }
-    >
-      <MemoryRouter>
-        <Collections />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
-}
+const show = () => renderCollectionsPage();
 
 /** Everything the drag-and-drop live region says, in order, from now on. */
 function recordAnnouncements() {
@@ -133,7 +117,7 @@ describe("Your collections", () => {
     rects.set(handle.closest("[data-collection-id]")!, new DOMRect(0, 0, 300, 100));
     rects.set(other.closest("[data-collection-id]")!, new DOMRect(320, 0, 300, 100));
     expect(document.getElementById(handle.getAttribute("aria-describedby")!)).toHaveTextContent(
-      "To pick up a draggable item, press the space bar.",
+      "To move an item, focus its handle and press Space or Enter. Use the arrow keys to move it, Space or Enter to drop it, or Escape to cancel.",
     );
 
     const announcements = recordAnnouncements();
@@ -170,34 +154,6 @@ describe("Your collections", () => {
   });
 });
 
-describe("New collection on a narrow screen", () => {
-  // jsdom lays nothing out: the dock's class is what keeps it above the
-  // audiobook or watch bar that plays in the background, as SaveBar's does.
-  it("docks above the background playback bar", async () => {
-    vi.stubGlobal("matchMedia", (query: string) => ({
-      matches: query === "(max-width: 1023px)",
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-    }));
-    show();
-    const dock = await screen.findByRole("region", { name: "Page actions" });
-    expect(within(dock).getByRole("button", { name: "New collection" })).toBeInTheDocument();
-    expect(dock).toHaveClass("fixed", "bottom-(--playback-bar-clearance,0px)");
-    expect(dock).not.toHaveClass("bottom-0");
-  });
-});
-
-describe("Shared with me", () => {
-  it("shows another profile's shared collection as a card with no buttons", async () => {
-    show();
-    const shared = await screen.findByRole("region", { name: "Shared with me" });
-    expect(within(shared).getByRole("link", { name: "Family night" })).toBeInTheDocument();
-    expect(within(shared).queryAllByRole("button")).toEqual([]);
-  });
-});
-
 describe("Server collections", () => {
   it("shows on a single-profile account", async () => {
     account.profiles = [{ id: "p-owner", name: "Owner" }];
@@ -213,13 +169,12 @@ describe("Server collections", () => {
       ],
     });
     show();
-    // The library's cards under the Server collections heading, once loaded,
-    // with See all leading to its Collections tab.
-    const server = await screen.findByRole("region", { name: "Server collections" });
-    expect(
-      await within(server).findByRole("link", { name: "See all 1 Movies collections" }),
-    ).toHaveAttribute("href", "/library/1?tab=collections");
-    expect(within(server).getByRole("link", { name: /Oscar Winners/ })).toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "Shared with me" })).toBeNull();
+    // The only library's collections on the wall once loaded, without a
+    // library pill to switch to or a Shared one.
+    const wall = await screen.findByRole("region", { name: "All collections" });
+    expect(await within(wall).findByRole("link", { name: /Oscar Winners/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Server/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Movies/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Shared/ })).toBeNull();
   });
 });

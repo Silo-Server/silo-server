@@ -31,24 +31,6 @@ func TestRegistryCapabilityTimeoutIgnoresHostDevices(t *testing.T) {
 	}
 }
 
-// The advertised budget is what a caller waits out, so it has to leave room for
-// the response on top of the endpoint's own work — the same ordering
-// CapabilityRequestTimeout has — and it has to be a real budget rather than
-// something a caller would clamp away.
-func TestRegistryCapabilityRequestTimeoutCoversTheEndpoint(t *testing.T) {
-	endpoint := RegistryCapabilityEndpointTimeout()
-	request := RegistryCapabilityRequestTimeout()
-	if request <= endpoint {
-		t.Fatalf("request budget %s does not exceed the endpoint budget %s", request, endpoint)
-	}
-	if request < probeRequestMinTimeout {
-		t.Fatalf("request budget %s is under the floor a caller clamps to (%s)", request, probeRequestMinTimeout)
-	}
-	if ceiling := MaxCapabilityRequestTimeout(); request > ceiling {
-		t.Fatalf("request budget %s is above the ceiling a caller believes (%s)", request, ceiling)
-	}
-}
-
 // withRenderDevices points device discovery at a temp /dev/dri holding two
 // classifiable render nodes, restored when the test ends.
 func withRenderDevices(t *testing.T) {

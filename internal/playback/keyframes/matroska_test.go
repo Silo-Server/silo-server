@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"io"
 	"math"
 	"runtime"
 	"slices"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/matroska"
 )
 
 // el encodes one EBML element with an 8-byte size, so an element's length
@@ -101,7 +104,6 @@ type layout struct {
 	unknownSize bool    // a live-style segment with no size
 	dropCue     *uint64 // a video keyframe left out of the Cues
 	noPositions bool
-	padding     int // extra duplicate cue points, to grow the Cues
 }
 
 // file builds a Matroska file whose Cues index the fixture's keyframes, plus
@@ -149,16 +151,13 @@ func cuesFor(l layout, posA, posB uint64) []byte {
 		point(2216, videoTrack, posA),
 		point(2216, videoTrack, posA), // duplicate
 	}
-	for range l.padding {
-		points = append(points, point(2216, videoTrack, posA))
-	}
 	return el(idCues, points...)
 }
 
 func ptr[T any](v T) *T { return &v }
 
 func read(f []byte) (Index, error) {
-	return ReadMatroska(bytes.NewReader(f), int64(len(f)))
+	return readPlanIndex(bytes.NewReader(f), int64(len(f)))
 }
 
 func wantIndex(t *testing.T, got Index, err error) {
@@ -326,22 +325,6 @@ func TestReadMatroskaRejectsOversizedCues(t *testing.T) {
 	if _, err := read(f); err == nil || errors.Is(err, ErrNoIndex) {
 		t.Fatalf("err = %v, want a size error", err)
 	}
-
-	// Well-formed Cues just under the limit read; one more point is refused.
-	const header = 12 // a 4-byte ID and an 8-byte size (el)
-	pointLen := len(cuesFor(layout{padding: 1}, 0, 0)) - len(cuesFor(layout{}, 0, 0))
-	under := layout{cuesFirst: true}
-	under.padding = (cuesLimit - (len(cuesFor(under, 0, 0)) - header)) / pointLen
-	got, err := read(file(under))
-	wantIndex(t, got, err)
-	over := under
-	over.padding++
-	if size := len(cuesFor(over, 0, 0)) - header; size <= cuesLimit {
-		t.Fatalf("fixture Cues are %d bytes, want over %d", size, cuesLimit)
-	}
-	if _, err := read(file(over)); err == nil || errors.Is(err, ErrNoIndex) {
-		t.Fatalf("err = %v, want a size error", err)
-	}
 }
 
 // Cues packed with small cue points, each with its own time and cluster
@@ -371,9 +354,9 @@ func TestReadMatroskaCuesCostBoundedMemory(t *testing.T) {
 }
 
 // manyClusters builds a file with ten clusters, each holding two video
-// keyframes, and Cues for all of them except dropTicks. The sampled check
-// reads clusters 0, 3, 6 and 9 and the ones after them; cluster 2 is only
-// read by the full check.
+// keyframes, and Cues for all of them except dropTicks, plus extraCue in its
+// cluster if set. The sampled check reads clusters 0, 3, 6 and 9 and the
+// ones after them, and the tail check cluster 9; nothing reads cluster 2.
 func manyClusters(dropTicks uint64, extraCue uint64) []byte {
 	head := slices.Concat(info, tracks)
 	var clusters [][]byte
@@ -411,30 +394,72 @@ func manyClusters(dropTicks uint64, extraCue uint64) []byte {
 	return slices.Concat(ebmlHeader, el(idSegment, body))
 }
 
-func verify(f []byte) (Index, error) {
-	return VerifyMatroska(bytes.NewReader(f), int64(len(f)))
-}
-
-func TestVerifyMatroskaChecksEveryCluster(t *testing.T) {
-	complete := manyClusters(1<<62, 0)
-	if idx, err := verify(complete); err != nil || len(idx.Keyframes) != 20 {
+// A keyframe left out of the Cues where no check reads is the cost of not
+// reading every cluster (#2453): ReadMatroska accepts the file, and a playback
+// that finds FFmpeg cutting elsewhere rejects it (keyframes.Reject).
+func TestReadMatroskaChecksTheSamplesAndTheTail(t *testing.T) {
+	idx, err := read(manyClusters(1<<62, 0))
+	if err != nil || len(idx.Keyframes) != 20 {
 		t.Fatalf("complete cues: %d keyframes, %v; want 20 and no error", len(idx.Keyframes), err)
 	}
-
-	// A keyframe in cluster 2 without a cue gets past the sampled check but
-	// not the full one.
-	missing := manyClusters(2*4000+2000, 0)
-	if _, err := read(missing); err != nil {
-		t.Fatalf("sampled check: %v, want it to miss cluster 2", err)
-	}
-	if _, err := verify(missing); !errors.Is(err, ErrIncompleteIndex) {
-		t.Fatalf("full check err = %v, want ErrIncompleteIndex", err)
+	// The last frame is at 38s, 1.96s after the one before it.
+	if math.Abs(idx.VideoEnd-39.96) > 1e-9 {
+		t.Fatalf("VideoEnd = %v, want 39.96", idx.VideoEnd)
 	}
 
-	// A cue on a frame that isn't a keyframe would plan a boundary FFmpeg
-	// can't cut at.
-	if _, err := verify(manyClusters(1<<62, 2*4000+40)); !errors.Is(err, ErrIncompleteIndex) {
-		t.Fatalf("cue on a non-keyframe err = %v, want ErrIncompleteIndex", err)
+	if _, err := read(manyClusters(2*4000+2000, 0)); err != nil {
+		t.Fatalf("a cue missing from cluster 2: %v, want it unread", err)
+	}
+	// After the last cue, every keyframe needs one.
+	if _, err := read(manyClusters(9*4000+2000, 0)); !errors.Is(err, ErrIncompleteIndex) {
+		t.Fatalf("the last keyframe uncued: err = %v, want ErrIncompleteIndex", err)
+	}
+	// A last cue on a frame that isn't a keyframe would plan a boundary
+	// FFmpeg can't cut at.
+	if _, err := read(manyClusters(1<<62, 9*4000+2040)); !errors.Is(err, ErrIncompleteIndex) {
+		t.Fatalf("a last cue on no keyframe: err = %v, want ErrIncompleteIndex", err)
+	}
+}
+
+// readCounter counts ReadAt calls.
+type readCounter struct {
+	r     *bytes.Reader
+	reads int
+}
+
+func (c *readCounter) ReadAt(p []byte, off int64) (int, error) {
+	c.reads++
+	return c.r.ReadAt(p, off)
+}
+
+// Cues that stop long before the end leave the tail unindexed; reading on to
+// the end would read the file. The limit is found from element headers alone,
+// before any block is read.
+func TestReadMatroskaRejectsCuesThatStopEarly(t *testing.T) {
+	var clusters [][]byte
+	for c := range maxTailElements + 1 {
+		clusters = append(clusters, cluster(uint64(c)*40, block(videoTrack, 0, c == 0)))
+	}
+	head := slices.Concat(info, tracks)
+	cuesFor := func(pos uint64) []byte {
+		return el(idCues, el(idCuePoint, uintEl(idCueTime, 0),
+			el(idCueTrackPos, uintEl(idCueTrack, videoTrack), uintEl(idCueClusterPosition, pos))))
+	}
+	pos := uint64(len(head) + len(cuesFor(0)))
+	f := slices.Concat(ebmlHeader, el(idSegment, slices.Concat(head, cuesFor(pos), slices.Concat(clusters...))))
+	r := &readCounter{r: bytes.NewReader(f)}
+	if _, err := readPlanIndex(r, int64(len(f))); !errors.Is(err, ErrIncompleteIndex) {
+		t.Fatalf("err = %v, want ErrIncompleteIndex", err)
+	}
+	// The header and metadata, the sampled clusters, and one read per tail
+	// element: not the timestamp and block of each tail cluster too.
+	if r.reads > maxTailElements+25 {
+		t.Fatalf("%d reads, want the tail's element headers and few more", r.reads)
+	}
+	// ReadMatroska, trickplay's keyframe lookup, doesn't need the video's
+	// end, so the tail doesn't cost it the keyframes the Cues give.
+	if idx, err := ReadMatroska(bytes.NewReader(f), int64(len(f))); err != nil || len(idx.Keyframes) != 1 {
+		t.Fatalf("ReadMatroska = %v, %v; want the cued keyframe", idx.Keyframes, err)
 	}
 }
 
@@ -486,7 +511,7 @@ func TestReadBlockGroupDuration(t *testing.T) {
 		el(idBlock, []byte{0x80 | byte(videoTrack)}, ts[:], []byte{0}, bytes.Repeat([]byte{0xBB}, 16)),
 		uintEl(idBlockDuration, 70))
 	r := bytes.NewReader(group)
-	_, size, headerLen, err := readElementHeader(r, 0)
+	_, size, headerLen, err := matroska.ReadElementHeader(r, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -497,8 +522,8 @@ func TestReadBlockGroupDuration(t *testing.T) {
 }
 
 // The fixture's last video frame is at 4.258s, 40ms after the one before.
-func TestVerifyMatroskaVideoEnd(t *testing.T) {
-	idx, err := verify(file(layout{}))
+func TestReadMatroskaVideoEnd(t *testing.T) {
+	idx, err := read(file(layout{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -521,5 +546,130 @@ func TestFirstVideoTrackReportsATrackTimestampScale(t *testing.T) {
 	}
 	if _, _, scaled, found := firstVideoTrack(entry(floatEl(idTrackTimestampScale, 2))); !found || !scaled {
 		t.Fatalf("scale 2: scaled=%v found=%v", scaled, found)
+	}
+}
+
+// cuesLast builds the fixture file with Cues after the clusters, found
+// through the seek head, using infoEl for Info and adding extra cue points.
+func cuesLast(infoEl []byte, extra ...[]byte) []byte {
+	seekHead := func(pos uint64) []byte {
+		return el(idSeekHead, el(idSeek, uintEl(idSeekID, idCues), uintEl(idSeekPosition, pos)))
+	}
+	posA := uint64(len(seekHead(0)) + len(infoEl) + len(tracks))
+	posB := posA + uint64(len(clusterA))
+	payload := cuesFor(layout{}, posA, posB)[12:] // past the Cues ID and its 8-byte size
+	cues := el(idCues, append([][]byte{payload}, extra...)...)
+	segment := el(idSegment, seekHead(posB+uint64(len(clusterB))), infoEl, tracks, clusterA, clusterB, cues)
+	return slices.Concat(ebmlHeader, segment)
+}
+
+// A video cue that depends on other frames, or on decoder state beyond the
+// track's own, can't start a segment, so the Cues can't plan one.
+func TestReadMatroskaRejectsDependentVideoCues(t *testing.T) {
+	for name, dependency := range map[string][]byte{
+		"frame reference": el(idCueReference, uintEl(0x96, 0)),
+		"codec state":     uintEl(idCueCodecState, 100),
+	} {
+		t.Run(name, func(t *testing.T) {
+			// A duplicate of the 2.216s keyframe's cue, so coverage alone
+			// would accept the file.
+			point := el(idCuePoint, uintEl(idCueTime, 2216),
+				el(idCueTrackPos, dependency, uintEl(idCueTrack, videoTrack)))
+			if _, err := read(cuesLast(info, point)); !errors.Is(err, ErrNoIndex) {
+				t.Fatalf("err = %v, want ErrNoIndex", err)
+			}
+		})
+	}
+}
+
+// Dependencies declared for another track, or a codec state of zero (the
+// track's own), don't make a video cue unusable.
+func TestReadMatroskaAllowsUnrelatedCueDependencies(t *testing.T) {
+	point := el(idCuePoint, uintEl(idCueTime, 2216),
+		el(idCueTrackPos, uintEl(idCueTrack, audioTrack), uintEl(idCueCodecState, 100),
+			el(idCueReference, uintEl(0x96, 0))),
+		el(idCueTrackPos, uintEl(idCueTrack, videoTrack), uintEl(idCueCodecState, 0)))
+	got, err := read(cuesLast(info, point))
+	wantIndex(t, got, err)
+}
+
+// Info whose timestamp scale is cut off would scale the cue times by a guess.
+func TestReadMatroskaRejectsMalformedInfo(t *testing.T) {
+	// The scale declares eight payload bytes but only one is there.
+	malformed := el(idInfo, []byte{0x2A, 0xD7, 0xB1, 0x88, 0x00})
+	t.Run("before clusters", func(t *testing.T) {
+		if _, err := read(cuesLast(malformed)); !errors.Is(err, ErrNoIndex) {
+			t.Fatalf("err = %v, want ErrNoIndex", err)
+		}
+	})
+	t.Run("through seek head", func(t *testing.T) {
+		seekHead := func(cuesPos, infoPos uint64) []byte {
+			return el(idSeekHead,
+				el(idSeek, uintEl(idSeekID, idCues), uintEl(idSeekPosition, cuesPos)),
+				el(idSeek, uintEl(idSeekID, idInfo), uintEl(idSeekPosition, infoPos)))
+		}
+		posA := uint64(len(seekHead(0, 0)) + len(tracks))
+		posB := posA + uint64(len(clusterA))
+		cues := cuesFor(layout{}, posA, posB)
+		cuesPos := posB + uint64(len(clusterB))
+		infoPos := cuesPos + uint64(len(cues))
+		segment := el(idSegment, seekHead(cuesPos, infoPos), tracks, clusterA, clusterB, cues, malformed)
+		if _, err := read(slices.Concat(ebmlHeader, segment)); !errors.Is(err, ErrNoIndex) {
+			t.Fatalf("err = %v, want ErrNoIndex", err)
+		}
+	})
+}
+
+// Info without a timestamp scale uses Matroska's default of 1ms per tick.
+func TestReadMatroskaDefaultsAbsentTimestampScale(t *testing.T) {
+	got, err := read(cuesLast(el(idInfo, floatEl(idDuration, 12_500))))
+	wantIndex(t, got, err)
+}
+
+type headerErrorReader struct {
+	io.ReaderAt
+	offset int64
+	bytes  int
+	err    error
+}
+
+func (r headerErrorReader) ReadAt(p []byte, off int64) (int, error) {
+	if off == r.offset {
+		n, _ := r.ReaderAt.ReadAt(p[:r.bytes], off)
+		return n, r.err
+	}
+	return r.ReaderAt.ReadAt(p, off)
+}
+
+// A storage error reading an element header is reported as itself, not as a
+// short read that looks like the end of the file.
+func TestReadMatroskaPreservesHeaderReadErrors(t *testing.T) {
+	segStart := int64(len(ebmlHeader) + 12) // past the segment's 4-byte ID and 8-byte size
+	// A cluster without a cue after the last cued one, which only the
+	// coverage check's look at the cluster after each sample reads.
+	clusterC := cluster(6000, block(videoTrack, 0, false))
+	seekHead := func(pos uint64) []byte {
+		return el(idSeekHead, el(idSeek, uintEl(idSeekID, idCues), uintEl(idSeekPosition, pos)))
+	}
+	posA := uint64(len(seekHead(0)) + len(info) + len(tracks))
+	posB := posA + uint64(len(clusterA))
+	posC := posB + uint64(len(clusterB))
+	uncued := slices.Concat(ebmlHeader, el(idSegment, seekHead(posC+uint64(len(clusterC))),
+		info, tracks, clusterA, clusterB, clusterC, cuesFor(layout{}, posA, posB)))
+
+	failure := errors.New("storage read failed")
+	for name, c := range map[string]struct {
+		data   []byte
+		offset int64
+	}{
+		"segment's first child":           {file(layout{cuesFirst: true}), segStart},
+		"cluster after the last cued one": {uncued, segStart + int64(posC)},
+	} {
+		for _, count := range []int{1, 12} {
+			reader := headerErrorReader{ReaderAt: bytes.NewReader(c.data), offset: c.offset, bytes: count, err: failure}
+			if _, err := ReadMatroska(reader, int64(len(c.data))); !errors.Is(err, failure) {
+				t.Errorf("%s, read %d bytes: err = %v, want storage error", name, count, err)
+			}
+		}
 	}
 }

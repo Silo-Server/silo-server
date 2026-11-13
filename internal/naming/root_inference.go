@@ -1,12 +1,11 @@
 package naming
 
 import (
-	"encoding/json"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -47,179 +46,11 @@ func InferRootAssignments(
 	libraryRoots ...string,
 ) ([]models.ScannedMediaRoot, map[string]RootAssignment) {
 	assignments := make(map[string]RootAssignment, len(filePaths))
-	if len(filePaths) == 0 {
-		return []models.ScannedMediaRoot{}, assignments
-	}
-
-	type aggregate struct {
-		root                 models.ScannedMediaRoot
-		hasFolderIDs         bool
-		wrapperCollapses     int
-		ancestorPromotions   int
-		legacyDisagreements  int
-		seasonEvidenceCount  int
-		episodeEvidenceCount int
-		movieEvidenceCount   int
-		releaseDensityCount  int
-		movieTypeVotes       int
-		seriesTypeVotes      int
-		contradictionCount   int
-	}
-
-	byRoot := make(map[string]*aggregate, len(filePaths))
+	inference := NewRootInference(libraryType, folderID, overrides, libraryRoots...)
 	for _, rawPath := range filePaths {
-		cleanFilePath := filepath.Clean(rawPath)
-		assignment := inferFileRootAssignment(cleanFilePath, libraryType, overrides, libraryRoots...)
-		assignments[cleanFilePath] = assignment
-
-		agg, found := byRoot[assignment.RootPath]
-		if !found {
-			agg = &aggregate{
-				root: models.ScannedMediaRoot{
-					MediaFolderID:     folderID,
-					RootPath:          assignment.RootPath,
-					State:             "resolved",
-					InferredType:      assignment.InferredType,
-					TypeConfidence:    "low",
-					ObservedFileCount: 0,
-					SampleFilePath:    cleanFilePath,
-					OverrideSource:    "none",
-					Title:             assignment.Title,
-					Year:              assignment.Year,
-				},
-			}
-			if ids := ParseFolderIDs(filepath.Base(assignment.RootPath)); ids != nil && assignment.RootPath != assignment.LibraryRootPath {
-				agg.hasFolderIDs = true
-				agg.root.TmdbID = ids.TmdbID
-				agg.root.ImdbID = ids.ImdbID
-				agg.root.TvdbID = ids.TvdbID
-			}
-			byRoot[assignment.RootPath] = agg
-		}
-
-		agg.root.ObservedFileCount++
-		agg.hasFolderIDs = agg.hasFolderIDs || assignment.HasFolderIDs
-		if assignment.WrapperCollapsed {
-			agg.wrapperCollapses++
-		}
-		if assignment.PromotedAncestor {
-			agg.ancestorPromotions++
-		}
-		if assignment.LegacyRootPath != "" && assignment.LegacyRootPath != assignment.RootPath {
-			agg.legacyDisagreements++
-		}
-		if assignment.HasSeasonStructure {
-			agg.seasonEvidenceCount++
-		}
-		if assignment.HasEpisodePattern {
-			agg.episodeEvidenceCount++
-		}
-		if assignment.HasMovieEvidence {
-			agg.movieEvidenceCount++
-		}
-		if assignment.HasStrongContradiction {
-			agg.contradictionCount++
-		}
-		if inferReleaseTokenRe.MatchString(filepath.Base(assignment.RootPath)) {
-			agg.releaseDensityCount++
-		}
-		switch assignment.InferredType {
-		case "series":
-			agg.seriesTypeVotes++
-		default:
-			agg.movieTypeVotes++
-		}
-		if agg.root.Title == "" && assignment.Title != "" {
-			agg.root.Title = assignment.Title
-		}
-		if agg.root.Year == 0 && assignment.Year != 0 {
-			agg.root.Year = assignment.Year
-		}
+		assignments[filepath.Clean(rawPath)] = inference.Add(rawPath)
 	}
-
-	roots := make([]string, 0, len(byRoot))
-	for rootPath := range byRoot {
-		roots = append(roots, rootPath)
-	}
-	sort.Strings(roots)
-
-	snapshots := make([]models.ScannedMediaRoot, 0, len(roots))
-	for _, rootPath := range roots {
-		agg := byRoot[rootPath]
-
-		switch {
-		case agg.seriesTypeVotes > 0 && agg.movieTypeVotes == 0:
-			agg.root.InferredType = "series"
-		case agg.movieTypeVotes > 0 && agg.seriesTypeVotes == 0:
-			agg.root.InferredType = "movie"
-		case agg.seasonEvidenceCount > 0 || agg.episodeEvidenceCount > agg.movieEvidenceCount:
-			agg.root.InferredType = "series"
-		default:
-			agg.root.InferredType = "movie"
-		}
-
-		switch {
-		case agg.hasFolderIDs || agg.seasonEvidenceCount > 0 || agg.movieEvidenceCount > 0:
-			agg.root.TypeConfidence = "high"
-		case agg.root.Title != "" || agg.root.Year != 0 || agg.episodeEvidenceCount > 0 || agg.root.ObservedFileCount > 1:
-			agg.root.TypeConfidence = "medium"
-		default:
-			agg.root.TypeConfidence = "low"
-		}
-
-		conflictingTypeVotes := agg.seriesTypeVotes > 0 && agg.movieTypeVotes > 0 &&
-			(agg.seasonEvidenceCount > 0 || agg.episodeEvidenceCount > 0) &&
-			agg.movieEvidenceCount > 0
-		if conflictingTypeVotes ||
-			(!agg.hasFolderIDs && agg.root.TypeConfidence == "low" && agg.root.Title == "") ||
-			(!agg.hasFolderIDs && agg.root.InferredType == seriesContentType && agg.root.Title == "") ||
-			(agg.contradictionCount > 0 && agg.root.ObservedFileCount == 1) {
-			agg.root.State = "ambiguous"
-		}
-
-		if override, ok := overrides[rootPath]; ok {
-			agg.root.OverrideSource = "manual"
-			agg.root.State = "resolved"
-			if override.ForcedType != "" {
-				agg.root.InferredType = override.ForcedType
-			}
-			if override.ForcedTitle != "" {
-				agg.root.Title = override.ForcedTitle
-			}
-			if override.ForcedYear != 0 {
-				agg.root.Year = override.ForcedYear
-			}
-			if override.ForcedTmdbID != "" {
-				agg.root.TmdbID = override.ForcedTmdbID
-			}
-			if override.ForcedImdbID != "" {
-				agg.root.ImdbID = override.ForcedImdbID
-			}
-			if override.ForcedTvdbID != "" {
-				agg.root.TvdbID = override.ForcedTvdbID
-			}
-		}
-
-		evidence, _ := json.Marshal(map[string]any{
-			"has_folder_ids":         agg.hasFolderIDs,
-			"season_structure_files": agg.seasonEvidenceCount,
-			"episode_pattern_files":  agg.episodeEvidenceCount,
-			"movie_evidence_files":   agg.movieEvidenceCount,
-			"release_density_files":  agg.releaseDensityCount,
-			"wrapper_collapses":      agg.wrapperCollapses,
-			"ancestor_promotions":    agg.ancestorPromotions,
-			"legacy_disagreements":   agg.legacyDisagreements,
-			"movie_type_votes":       agg.movieTypeVotes,
-			"series_type_votes":      agg.seriesTypeVotes,
-			"override_applied":       agg.root.OverrideSource == "manual",
-			"observed_file_count":    agg.root.ObservedFileCount,
-			"contradiction_files":    agg.contradictionCount,
-		})
-		agg.root.EvidenceJSON = evidence
-		snapshots = append(snapshots, agg.root)
-	}
-
-	return snapshots, assignments
+	return inference.Snapshots(), assignments
 }
 
 func inferFileRootAssignment(
@@ -228,7 +59,7 @@ func inferFileRootAssignment(
 	overrides map[string]models.MediaRootOverride,
 	libraryRoots ...string,
 ) RootAssignment {
-	assignment := extractPathEvidence(filePath, libraryType, libraryRoots...)
+	assignment := extractDisplayPathEvidence(filePath, libraryType, libraryRoots...)
 
 	if overrideRoot, ok := deepestOverrideAncestor(filePath, overrides); ok {
 		assignment.RootPath = overrideRoot
@@ -268,8 +99,25 @@ func inferFileRootAssignment(
 	// Recorded for every file: an override can still force the root's final
 	// type, so callers apply the movie-only rule once that type is known.
 	assignment.HasFileIDs = FileNameHasProviderTag(filePath)
+	assignment.Title = fspath.Display(assignment.Title)
 
 	return assignment
+}
+
+// extractDisplayPathEvidence parses names as display text (see
+// fspath.Display), so the inferred type and title do not depend on whether a
+// name was stored in UTF-8; the paths keep the input's encoding.
+func extractDisplayPathEvidence(filePath string, libraryType string, libraryRoots ...string) RootAssignment {
+	paths := newDisplayPaths(filePath, libraryRoots)
+	if paths == nil {
+		return extractPathEvidence(filePath, libraryType, libraryRoots...)
+	}
+	evidence := extractPathEvidence(paths.file, libraryType, paths.roots...)
+	evidence.FilePath = paths.toEncoded(evidence.FilePath)
+	evidence.LibraryRootPath = paths.toEncoded(evidence.LibraryRootPath)
+	evidence.RootPath = paths.toEncoded(evidence.RootPath)
+	evidence.LegacyRootPath = paths.toEncoded(evidence.LegacyRootPath)
+	return evidence
 }
 
 func extractPathEvidence(filePath string, libraryType string, libraryRoots ...string) RootAssignment {
@@ -383,11 +231,6 @@ func normalizeInferLibraryType(value string) string {
 	default:
 		return ""
 	}
-}
-
-func detectInferSeasonStructure(parts []string, allowNumeric bool) bool {
-	found, _ := detectSeasonStructure(parts, "", "", allowNumeric, false)
-	return found
 }
 
 // IsMisplacedSeriesFile reports whether filePath is a TV episode that lives

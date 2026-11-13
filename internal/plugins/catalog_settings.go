@@ -83,10 +83,6 @@ func (s *RepositoryStore) GetCatalogSettings(ctx context.Context) (CatalogSettin
 	}, nil
 }
 
-func (s *RepositoryStore) SetIncludeApprovedCommunity(ctx context.Context, include bool) (CatalogSettings, error) {
-	return s.SetIncludeApprovedCommunityConditional(ctx, include, nil)
-}
-
 var ErrCatalogSettingsChanged = errors.New("plugin catalog settings changed")
 
 type CatalogSettingsConflict struct{ Actual bool }
@@ -153,7 +149,7 @@ func readIncludeApprovedCommunityQuery(ctx context.Context, querier catalogSetti
 	var value string
 	err := querier.QueryRow(ctx, query, IncludeApprovedCommunityPluginsSetting).Scan(&value)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return false, nil
 		}
 		return false, fmt.Errorf("read approved community plugin setting: %w", err)
@@ -168,7 +164,7 @@ func readIntegerSetting(ctx context.Context, querier catalogSettingsQuerier, key
 	var value string
 	err := querier.QueryRow(ctx, `SELECT value FROM server_settings WHERE key = $1`, key).Scan(&value)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, nil
 		}
 		return 0, fmt.Errorf("read plugin setting %q: %w", key, err)

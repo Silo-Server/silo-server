@@ -4,14 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, ChevronDown, ChevronRight, Play, Loader2, RotateCcw } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, Play, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { AdminSettingsConnectionCheckRequest, ConnectionCheckResponse } from "@/api/types";
 import type { components } from "@/api/v2/schema";
 import { ConnectionCheckAction } from "@/components/admin/ConnectionCheckAction";
-import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { formatRelativeTime } from "@/lib/date";
 import {
   useAdminServerSettings,
@@ -33,11 +31,12 @@ import {
   parseRecommendationEmbeddingLock,
   type RecFieldDef,
 } from "@/pages/admin-settings/recommendationsSettings";
-import {
-  RECOMMENDATION_PROVIDER_PRESETS,
-  matchRecommendationProviderPreset,
-  type RecommendationProviderPreset,
-} from "@/lib/recommendation-provider-presets";
+import { useRefreshAIProviders } from "@/hooks/queries/admin/aiProviders";
+import { EmbeddingProviderField } from "@/pages/admin-settings/AIProviders";
+import { ModelField } from "@/pages/admin-settings/AIModelField";
+import { formatLocale } from "@/lib/appLocale";
+import { useT } from "@/i18n";
+import { RecEmbeddingLockCard, RecEmbeddingResetCard } from "./AdminRecommendationsEmbedding";
 
 type RecJobRun = components["schemas"]["AdminRecommendationJobRun"];
 
@@ -46,7 +45,7 @@ interface RecLocalValues {
 }
 
 interface RecCollapsedState {
-  [title: string]: boolean;
+  [sectionId: string]: boolean;
 }
 
 interface RecSettingFieldProps {
@@ -60,16 +59,18 @@ interface RecSettingFieldProps {
   onToggle: (key: string, checked: boolean) => void;
 }
 
-const EMBEDDING_SECTION_TITLE = "Embedding Configuration";
-const EMBEDDING_BASE_URL_KEY = "recommendations.embedding_base_url";
+const EMBEDDING_PROVIDER_KEY = "recommendations.embedding_provider_id";
 const EMBEDDING_MODEL_KEY = "recommendations.embedding_model";
-const EMBEDDING_AUTH_TOKEN_KEY = "recommendations.embedding_auth_token";
 const EMBEDDING_CHECK_KEYS = [
   "recommendations.enabled",
-  EMBEDDING_BASE_URL_KEY,
+  EMBEDDING_PROVIDER_KEY,
   EMBEDDING_MODEL_KEY,
-  EMBEDDING_AUTH_TOKEN_KEY,
 ] as const;
+// Model names; not translated.
+const EMBEDDING_MODEL_EXAMPLES = "text-embedding-3-large, qwen3-embedding:0.6b";
+
+/** Which run a job card line describes: the last full run, or work between full runs. */
+type RecRunKind = "run" | "catchUp" | "staleSweep" | "startupBuild";
 
 function RecSettingField({
   field,
@@ -81,6 +82,7 @@ function RecSettingField({
   onCommit,
   onToggle,
 }: RecSettingFieldProps) {
+  const t = useT();
   const { key, label, type, hint, defaultValue } = field;
   const effectiveServerValue = serverValue || defaultValue || "";
   const [confirmClear, setConfirmClear] = useState(false);
@@ -108,7 +110,9 @@ function RecSettingField({
   if (type === "password") {
     const isConfigured = sensitiveConfigured.includes(key);
     const localVal = localValues[key] ?? "";
-    const placeholder = isConfigured ? "configured" : (hint ?? "Not configured");
+    const placeholder = isConfigured
+      ? t("web.admin.recommendations.settings.configured")
+      : (hint ?? t("web.admin.recommendations.settings.notConfigured"));
     return (
       <div className="space-y-1 py-2">
         <Label htmlFor={key} className="text-sm font-medium">
@@ -136,13 +140,13 @@ function RecSettingField({
             onClick={() => setConfirmClear(true)}
             disabled={isPending}
           >
-            Clear credential
+            {t("web.admin.recommendations.settings.clearCredential")}
           </Button>
         )}
         {confirmClear && (
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-muted-foreground text-xs">
-              Remove this credential from the server?
+              {t("web.admin.recommendations.settings.clearQuestion")}
             </span>
             <Button
               type="button"
@@ -155,7 +159,7 @@ function RecSettingField({
               }}
               disabled={isPending}
             >
-              Confirm clear
+              {t("web.admin.recommendations.settings.confirmClear")}
             </Button>
             <Button
               type="button"
@@ -164,7 +168,7 @@ function RecSettingField({
               onClick={() => setConfirmClear(false)}
               disabled={isPending}
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
           </div>
         )}
@@ -223,16 +227,19 @@ function RecSettingField({
   );
 }
 
-function RecJobLastRun({ run, label = "Last run" }: { run?: RecJobRun; label?: string }) {
+function RecJobLastRun({ run, kind = "run" }: { run?: RecJobRun; kind?: RecRunKind }) {
+  const t = useT();
   if (!run) {
-    return <p className="text-muted-foreground text-xs">No finished run recorded</p>;
+    return (
+      <p className="text-muted-foreground text-xs">{t("web.admin.recommendations.jobs.noRun")}</p>
+    );
   }
   const when = formatRelativeTime(run.completed_at) ?? run.completed_at;
   if (run.status === "failed") {
     return (
       <div className="space-y-0.5">
         <p className="text-destructive text-xs font-medium">
-          {label} failed {when}
+          {t("web.admin.recommendations.jobs.runFailed", { kind, when })}
         </p>
         {run.error && (
           <p className="text-muted-foreground line-clamp-3 text-xs break-words" title={run.error}>
@@ -244,7 +251,7 @@ function RecJobLastRun({ run, label = "Last run" }: { run?: RecJobRun; label?: s
   }
   return (
     <p className="text-muted-foreground text-xs">
-      {label} completed {when}
+      {t("web.admin.recommendations.jobs.runCompleted", { kind, when })}
     </p>
   );
 }
@@ -256,7 +263,7 @@ function RecJobStatusCard({
   running,
   lastRun,
   secondaryRun,
-  secondaryRunLabel,
+  secondaryRunKind,
   note,
   onTrigger,
   triggerPending,
@@ -268,11 +275,12 @@ function RecJobStatusCard({
   lastRun?: RecJobRun;
   /** Work that runs between full runs (a catch-up pass, the stale sweep), shown beside the last full run. */
   secondaryRun?: RecJobRun;
-  secondaryRunLabel?: string;
+  secondaryRunKind?: RecRunKind;
   note?: string;
   onTrigger: () => void;
   triggerPending: boolean;
 }) {
+  const t = useT();
   const hasProgress = total !== undefined && total > 0;
   const pct = hasProgress ? Math.round((count / total) * 100) : 0;
   const isDisabled = running || triggerPending;
@@ -284,12 +292,19 @@ function RecJobStatusCard({
           <span className="text-sm font-semibold">{title}</span>
           <p className="text-muted-foreground text-xs">
             {hasProgress
-              ? `${count.toLocaleString()} / ${total.toLocaleString()} items`
-              : `${count.toLocaleString()} ${count === 1 ? "entry" : "entries"}`}
+              ? t("web.admin.recommendations.jobs.itemsProgress", {
+                  count: total,
+                  done_text: count.toLocaleString(formatLocale()),
+                  count_text: total.toLocaleString(formatLocale()),
+                })
+              : t("web.admin.recommendations.jobs.entries", {
+                  count,
+                  count_text: count.toLocaleString(formatLocale()),
+                })}
           </p>
           {note && <p className="text-muted-foreground text-xs">{note}</p>}
           <RecJobLastRun run={lastRun} />
-          {secondaryRun && <RecJobLastRun run={secondaryRun} label={secondaryRunLabel} />}
+          {secondaryRun && <RecJobLastRun run={secondaryRun} kind={secondaryRunKind} />}
         </div>
         <Button
           size="sm"
@@ -301,12 +316,12 @@ function RecJobStatusCard({
           {running ? (
             <>
               <Loader2 className="size-3.5 animate-spin" />
-              Running...
+              {t("web.admin.recommendations.jobs.running")}
             </>
           ) : (
             <>
               <Play className="size-3.5" />
-              Run
+              {t("web.admin.recommendations.jobs.run")}
             </>
           )}
         </Button>
@@ -320,125 +335,17 @@ function RecJobStatusCard({
               style={{ width: `${pct}%` }}
             />
           </div>
-          <p className="text-muted-foreground mt-1 text-right text-xs">{pct}%</p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function RecEmbeddingLockCard({
-  lock,
-}: {
-  lock: ReturnType<typeof parseRecommendationEmbeddingLock>;
-}) {
-  if (!lock) {
-    return null;
-  }
-
-  return (
-    <div className="surface-panel max-w-3xl rounded-2xl border-0 px-5 py-4">
-      <div className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <h2 className="text-sm font-semibold">Embedding Lock</h2>
-          <p className="text-muted-foreground text-sm">
-            This installation is locked to the embedding space of its first stored embedding.
+          <p className="text-muted-foreground mt-1 text-end text-xs">
+            {t("web.admin.recommendations.jobs.percent", { percent: pct })}
           </p>
         </div>
-        <Badge variant="outline" className="shrink-0">
-          Locked
-        </Badge>
-      </div>
-
-      <dl className="mt-4 grid gap-4 sm:grid-cols-3">
-        <div className="space-y-1">
-          <dt className="text-muted-foreground text-xs tracking-wide uppercase">Model</dt>
-          <dd className="text-sm font-medium">{lock.model}</dd>
-        </div>
-        <div className="space-y-1">
-          <dt className="text-muted-foreground text-xs tracking-wide uppercase">
-            Source dimensions
-          </dt>
-          <dd className="text-sm font-medium">{lock.sourceDimensions}</dd>
-        </div>
-        <div className="space-y-1">
-          <dt className="text-muted-foreground text-xs tracking-wide uppercase">
-            Storage dimensions
-          </dt>
-          <dd className="text-sm font-medium">{lock.storageDimensions}</dd>
-        </div>
-      </dl>
-
-      <p className="text-muted-foreground mt-4 text-xs">{lock.note}</p>
-    </div>
-  );
-}
-
-function RecEmbeddingResetCard({
-  lockConflict,
-  disabled,
-  isPending,
-  onReset,
-}: {
-  lockConflict: string;
-  disabled: boolean;
-  isPending: boolean;
-  onReset: () => void;
-}) {
-  const [confirming, setConfirming] = useState(false);
-  return (
-    <div className="surface-panel max-w-3xl space-y-3 rounded-2xl border-0 px-5 py-4">
-      {lockConflict && (
-        <div
-          role="alert"
-          className="border-warning/30 bg-warning/10 text-warning flex items-start gap-3 rounded-xl border px-4 py-3 text-sm"
-        >
-          <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
-          <span>{lockConflict}</span>
-        </div>
       )}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="space-y-1">
-          <h2 className="text-sm font-semibold">Reset Embeddings</h2>
-          <p className="text-muted-foreground text-sm">
-            Deletes the embedding lock, every item embedding and personal recommendation rows, and
-            clears taste profiles, so you can switch embedding models. Run the embedding job
-            afterwards; taste profiles rebuild as their titles are embedded again.
-          </p>
-        </div>
-        <Button
-          size="sm"
-          variant="outline"
-          className="text-destructive shrink-0"
-          onClick={() => setConfirming(true)}
-          disabled={disabled || isPending}
-        >
-          {isPending ? (
-            <Loader2 className="size-3.5 animate-spin" />
-          ) : (
-            <RotateCcw className="size-3.5" />
-          )}
-          Reset embeddings
-        </Button>
-      </div>
-      <ConfirmDialog
-        open={confirming}
-        onOpenChange={setConfirming}
-        title="Reset embeddings?"
-        description="Every item embedding and personal recommendation row is deleted, and taste profiles are cleared. Personal recommendations and semantic search stay unavailable until the embedding job has run again."
-        confirmLabel="Reset embeddings"
-        variant="destructive"
-        isPending={isPending}
-        onConfirm={() => {
-          setConfirming(false);
-          onReset();
-        }}
-      />
     </div>
   );
 }
 
 export default function AdminRecommendations() {
+  const t = useT();
   const { data: settings, isLoading } = useAdminServerSettings();
   const { data: sensitiveData } = useAdminSensitiveStatus();
   const updateSettings = useUpdateServerSettings();
@@ -450,6 +357,7 @@ export default function AdminRecommendations() {
   const triggerCowatch = useTriggerCowatch();
   const triggerRecommendations = useTriggerRecommendations();
   const resetEmbeddings = useResetEmbeddings();
+  const refreshProviders = useRefreshAIProviders();
 
   const [localValues, setLocalValues] = useState<RecLocalValues>({});
   const [dirtyKeys, setDirtyKeys] = useState<Set<string>>(new Set());
@@ -485,7 +393,8 @@ export default function AdminRecommendations() {
     setLocalValues((prev) => ({ ...prev, [key]: value }));
   }
 
-  async function handleCommit(key: string, value: string) {
+  /** Saves one setting and reports whether the server accepted it. */
+  async function handleCommit(key: string, value: string): Promise<boolean> {
     setLocalValues((prev) => ({ ...prev, [key]: value }));
     try {
       const result = await updateSettings.mutateAsync({ [key]: value });
@@ -500,8 +409,10 @@ export default function AdminRecommendations() {
         return next;
       });
       setRestartRequired((current) => current || result.restart_required);
+      return true;
     } catch {
       // useUpdateServerSettings already reports failures.
+      return false;
     }
   }
 
@@ -518,44 +429,30 @@ export default function AdminRecommendations() {
     );
   }
 
-  async function applyEmbeddingPreset(preset: RecommendationProviderPreset) {
-    try {
-      const result = await updateSettings.mutateAsync({
-        [EMBEDDING_BASE_URL_KEY]: preset.baseUrl,
-        [EMBEDDING_MODEL_KEY]: preset.model,
-      });
-      setLocalValues((prev) => ({
-        ...prev,
-        [EMBEDDING_BASE_URL_KEY]: result.values[EMBEDDING_BASE_URL_KEY] ?? preset.baseUrl,
-        [EMBEDDING_MODEL_KEY]: result.values[EMBEDDING_MODEL_KEY] ?? preset.model,
-      }));
-      setDirtyKeys((prev) => {
-        const next = new Set(prev);
-        next.delete(EMBEDDING_BASE_URL_KEY);
-        next.delete(EMBEDDING_MODEL_KEY);
-        return next;
-      });
-
-      setRestartRequired((current) => current || result.restart_required);
-      setConnectionResult(null);
-    } catch {
-      // useUpdateServerSettings already reports failures.
-    }
-  }
-
   async function handleResetEmbeddings() {
     try {
       const deleted = await resetEmbeddings.mutateAsync();
       toast.success(
-        `Embeddings reset: deleted ${deleted.embeddings.toLocaleString()} embeddings and cleared ${deleted.taste_profiles.toLocaleString()} taste profiles.`,
+        t("web.admin.recommendations.reset.done", {
+          embeddings: t("web.admin.recommendations.reset.embeddingCount", {
+            count: deleted.embeddings,
+            count_text: deleted.embeddings.toLocaleString(formatLocale()),
+          }),
+          profiles: t("web.admin.recommendations.reset.tasteProfileCount", {
+            count: deleted.taste_profiles,
+            count_text: deleted.taste_profiles.toLocaleString(formatLocale()),
+          }),
+        }),
       );
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to reset embeddings");
+      toast.error(
+        error instanceof Error ? error.message : t("web.admin.recommendations.reset.failed"),
+      );
     }
   }
 
-  function toggleSection(title: string) {
-    setCollapsed((prev) => ({ ...prev, [title]: !prev[title] }));
+  function toggleSection(id: string) {
+    setCollapsed((prev) => ({ ...prev, [id]: !prev[id] }));
   }
 
   function buildEmbeddingCheckRequest(
@@ -580,7 +477,10 @@ export default function AdminRecommendations() {
     } catch (error) {
       setConnectionResult({
         success: false,
-        message: error instanceof Error ? error.message : "Connection check failed.",
+        message:
+          error instanceof Error
+            ? error.message
+            : t("web.admin.recommendations.embedding.checkFailed"),
       });
     }
   }
@@ -604,60 +504,62 @@ export default function AdminRecommendations() {
   const embeddingLock = parseRecommendationEmbeddingLock(
     serverSettings["recommendations.embedding_lock"],
   );
-  const selectedEmbeddingPreset = matchRecommendationProviderPreset(
-    localValues[EMBEDDING_BASE_URL_KEY] ?? serverSettings[EMBEDDING_BASE_URL_KEY],
-    localValues[EMBEDDING_MODEL_KEY] ?? serverSettings[EMBEDDING_MODEL_KEY],
-  );
+  const embeddingProviderID =
+    localValues[EMBEDDING_PROVIDER_KEY] ?? serverSettings[EMBEDDING_PROVIDER_KEY] ?? "";
+  const embeddingModel =
+    localValues[EMBEDDING_MODEL_KEY] ?? serverSettings[EMBEDDING_MODEL_KEY] ?? "";
 
   return (
     <div className="space-y-6 pb-4 sm:pb-6">
       <PageHeader
-        title="Recommendations"
-        subtitle="Configure the AI-powered recommendation engine. Requires pgvector and an OpenAI-compatible embedding endpoint."
+        title={t("web.admin.recommendations.page.title")}
+        subtitle={t("web.admin.recommendations.page.subtitle")}
       />
 
       {restartRequired && (
         <div className="border-warning/30 bg-warning/10 text-warning flex max-w-3xl items-center gap-3 rounded-xl border px-4 py-3 text-sm">
           <AlertTriangle className="h-4 w-4 flex-shrink-0" />
-          <span>
-            One or more settings were changed. A server restart is required for changes to take
-            effect.
-          </span>
+          <span>{t("web.admin.recommendations.page.restartRequired")}</span>
         </div>
       )}
 
       {status && (
         <div className="space-y-3">
-          <h2 className="text-lg font-medium tracking-tight">Job status</h2>
+          <h2 className="text-lg font-medium tracking-tight">
+            {t("web.admin.recommendations.jobs.title")}
+          </h2>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <RecJobStatusCard
-              title="Embeddings"
+              title={t("web.admin.recommendations.jobs.embeddings")}
               count={status.embeddings.count}
               total={status.embeddings.total}
               running={status.embeddings.running}
               lastRun={status.embeddings.last_run}
               secondaryRun={status.embeddings.last_partial_run}
-              secondaryRunLabel="Last catch-up"
+              secondaryRunKind="catchUp"
               onTrigger={() => triggerEmbeddings.mutate()}
               triggerPending={triggerEmbeddings.isPending}
             />
             <RecJobStatusCard
-              title="Taste Profiles"
+              title={t("web.admin.recommendations.jobs.tasteProfiles")}
               count={status.taste_profiles.count}
               running={status.taste_profiles.running}
               lastRun={status.taste_profiles.last_run}
               secondaryRun={status.stale_sweep.last_run}
-              secondaryRunLabel="Last stale sweep"
+              secondaryRunKind="staleSweep"
               note={
                 status.stale_sweep.pending > 0
-                  ? `${status.stale_sweep.pending.toLocaleString()} ${status.stale_sweep.pending === 1 ? "profile waits" : "profiles wait"} for a rebuild`
+                  ? t("web.admin.recommendations.jobs.profilesWaiting", {
+                      count: status.stale_sweep.pending,
+                      count_text: status.stale_sweep.pending.toLocaleString(formatLocale()),
+                    })
                   : undefined
               }
               onTrigger={() => triggerTasteProfiles.mutate()}
               triggerPending={triggerTasteProfiles.isPending}
             />
             <RecJobStatusCard
-              title="Co-Watch Matrix"
+              title={t("web.admin.recommendations.jobs.cowatch")}
               count={status.cowatch.count}
               running={status.cowatch.running}
               lastRun={status.cowatch.last_run}
@@ -665,17 +567,20 @@ export default function AdminRecommendations() {
               triggerPending={triggerCowatch.isPending}
             />
             <RecJobStatusCard
-              title="Recommendations"
+              title={t("web.admin.recommendations.jobs.recommendations")}
               count={status.recommendations.count}
               running={status.recommendations.running}
               lastRun={status.recommendations.last_run}
               secondaryRun={status.recommendations.last_partial_run}
-              secondaryRunLabel="Last startup build"
+              secondaryRunKind="startupBuild"
               // Profile refreshes also write rows, so this is not job health;
               // the last run above is.
               note={
                 status.cache_refreshed_at
-                  ? `Newest cached row written ${formatRelativeTime(status.cache_refreshed_at) ?? status.cache_refreshed_at}`
+                  ? t("web.admin.recommendations.jobs.cacheRefreshed", {
+                      when:
+                        formatRelativeTime(status.cache_refreshed_at) ?? status.cache_refreshed_at,
+                    })
                   : undefined
               }
               onTrigger={() => triggerRecommendations.mutate()}
@@ -701,13 +606,17 @@ export default function AdminRecommendations() {
         )}
 
         {buildRecommendationSections().map((section) => {
-          const isOpen = !collapsed[section.title];
+          const isOpen = !collapsed[section.id];
+          // The embedding section holds the model; its provider and check render with it.
+          const isEmbeddingSection = section.fields.some(
+            (field) => field.key === EMBEDDING_MODEL_KEY,
+          );
           return (
-            <div key={section.title} className="surface-panel max-w-3xl rounded-2xl border-0">
+            <div key={section.id} className="surface-panel max-w-3xl rounded-2xl border-0">
               <button
                 type="button"
-                onClick={() => toggleSection(section.title)}
-                className="hover:bg-accent/40 flex w-full items-center justify-between rounded-2xl px-5 py-4 text-left transition-colors"
+                onClick={() => toggleSection(section.id)}
+                className="hover:bg-accent/40 flex w-full items-center justify-between rounded-2xl px-5 py-4 text-start transition-colors"
               >
                 <span className="text-sm font-semibold">{section.title}</span>
                 {isOpen ? (
@@ -719,61 +628,60 @@ export default function AdminRecommendations() {
 
               {isOpen && (
                 <div className="border-border divide-border divide-y border-t px-5 pb-4">
-                  {section.title === EMBEDDING_SECTION_TITLE && (
-                    <div className="space-y-3 py-3">
-                      <div className="space-y-0.5">
-                        <Label className="text-sm font-medium">Provider Presets</Label>
-                        <p className="text-muted-foreground text-xs">
-                          Choose a provider to fill the base URL and model.
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {RECOMMENDATION_PROVIDER_PRESETS.map((preset) => {
-                          const selected = selectedEmbeddingPreset?.id === preset.id;
-                          return (
-                            <button
-                              key={preset.id}
-                              type="button"
-                              aria-pressed={selected}
-                              onClick={() => void applyEmbeddingPreset(preset)}
-                              disabled={updateSettings.isPending}
-                              className={`min-w-[8.5rem] rounded-md border px-3 py-2 text-left transition-colors ${
-                                selected
-                                  ? "border-foreground/20 bg-foreground/10 text-foreground"
-                                  : "border-border bg-background hover:bg-accent/30 text-foreground"
-                              }`}
-                            >
-                              <div className="text-sm font-medium">{preset.label}</div>
-                              {preset.tag && (
-                                <div className="text-muted-foreground mt-0.5 text-xs">
-                                  {preset.tag}
-                                </div>
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      {selectedEmbeddingPreset && (
-                        <p className="text-muted-foreground text-xs">
-                          {selectedEmbeddingPreset.description}
-                        </p>
-                      )}
+                  {isEmbeddingSection && (
+                    <div>
+                      <EmbeddingProviderField
+                        value={embeddingProviderID}
+                        disabled={updateSettings.isPending}
+                        onChange={(id) => {
+                          setConnectionResult(null);
+                          void handleCommit(EMBEDDING_PROVIDER_KEY, id).then((saved) => {
+                            // A refused choice must not stay on screen as if saved.
+                            if (!saved) {
+                              setLocalValues((prev) => ({
+                                ...prev,
+                                [EMBEDDING_PROVIDER_KEY]:
+                                  serverSettings[EMBEDDING_PROVIDER_KEY] ?? "",
+                              }));
+                              return;
+                            }
+                            // It changes which provider AI Services reports in use.
+                            void refreshProviders();
+                          });
+                        }}
+                      />
+                      <ModelField
+                        label={t("web.admin.recommendations.embedding.model")}
+                        providerID={embeddingProviderID}
+                        kind="embeddings"
+                        value={embeddingModel}
+                        placeholder={EMBEDDING_MODEL_EXAMPLES}
+                        onChange={(next) => handleLocalChange(EMBEDDING_MODEL_KEY, next)}
+                        onCommit={(next) => {
+                          if (next !== (serverSettings[EMBEDDING_MODEL_KEY] ?? "")) {
+                            void handleCommit(EMBEDDING_MODEL_KEY, next);
+                          }
+                        }}
+                      />
                     </div>
                   )}
-                  {section.fields.map((field) => (
-                    <RecSettingField
-                      key={field.key}
-                      field={field}
-                      serverValue={serverSettings[field.key] ?? ""}
-                      localValues={localValues}
-                      sensitiveConfigured={sensitiveConfigured}
-                      isPending={updateSettings.isPending}
-                      onLocalChange={handleLocalChange}
-                      onCommit={(key, value) => void handleCommit(key, value)}
-                      onToggle={handleToggle}
-                    />
-                  ))}
-                  {section.title === EMBEDDING_SECTION_TITLE ? (
+                  {section.fields.map((field) =>
+                    // The embedding model renders above, with the provider's suggestions.
+                    field.key === EMBEDDING_MODEL_KEY ? null : (
+                      <RecSettingField
+                        key={field.key}
+                        field={field}
+                        serverValue={serverSettings[field.key] ?? ""}
+                        localValues={localValues}
+                        sensitiveConfigured={sensitiveConfigured}
+                        isPending={updateSettings.isPending}
+                        onLocalChange={handleLocalChange}
+                        onCommit={(key, value) => void handleCommit(key, value)}
+                        onToggle={handleToggle}
+                      />
+                    ),
+                  )}
+                  {isEmbeddingSection ? (
                     // ConnectionCheckAction brings its own row padding.
                     <div>
                       <ConnectionCheckAction

@@ -55,7 +55,9 @@ const baseCandidateSelect = baseCandidateSelectFrom + baseCandidateWhere
 const baseCandidateSelectFrom = `
 	SELECT mf.id,
 	       mf.episode_id,
-	       e.season_id,` + candidateFileColumns + `
+	       e.season_id,` + candidateFileColumns + baseCandidateFrom
+
+const baseCandidateFrom = `
 	FROM media_files mf
 	JOIN media_folders folders ON folders.id = mf.media_folder_id
 	JOIN episodes e ON e.content_id = mf.episode_id`
@@ -91,6 +93,7 @@ const candidateFileColumns = `
 	       COALESCE(mf.season_number, 0),
 	       COALESCE(mf.episode_number, 0),
 	       mf.file_modified_at,
+	       mf.markers_invalidated_at,
 	       COALESCE(mf.codec_video, ''),
 	       COALESCE(mf.codec_audio, ''),
 	       mf.video_tracks->0`
@@ -107,13 +110,68 @@ const baseCandidateWhere = `
 	  AND COALESCE(mf.multi_episode_end, 0) = 0
 	  AND COALESCE(mf.presentation_part_total, 1) <= 1`
 
-func (r *Repository) ListEligibleCandidates(ctx context.Context) ([]Candidate, error) {
-	rows, err := r.pool.Query(ctx, baseCandidateSelect+`
-		ORDER BY mf.media_folder_id, e.season_id, mf.episode_id, mf.id`)
-	if err != nil {
-		return nil, fmt.Errorf("listing intro marker candidates: %w", err)
+// CountEligibleCandidates counts the episode files the library-wide run
+// checks.
+func (r *Repository) CountEligibleCandidates(ctx context.Context) (int, error) {
+	var count int
+	if err := r.pool.QueryRow(ctx, `SELECT COUNT(*)`+baseCandidateFrom+baseCandidateWhere).Scan(&count); err != nil {
+		return 0, fmt.Errorf("counting intro marker candidates: %w", err)
 	}
-	return scanCandidates(rows)
+	return count, nil
+}
+
+// episodeCandidateCursor is the last season a page of
+// ListEligibleCandidatePage covered.
+type episodeCandidateCursor struct {
+	seasonID string
+}
+
+// ListEligibleCandidatePage returns the eligible episode files of the next
+// seasons, up to seasons of them, after the season at after (nil for the first
+// page). A page holds every eligible file of each season it covers, in every
+// library, so a season group and all versions of an episode always land in one
+// page. A season with no eligible file still counts toward seasons. The
+// returned cursor is nil once no seasons remain.
+//
+// The seasons are listed first, from the episodes index, so each page reads
+// only its own seasons' files instead of sorting the whole candidate set.
+func (r *Repository) ListEligibleCandidatePage(ctx context.Context, after *episodeCandidateCursor, seasons int) ([]Candidate, *episodeCandidateCursor, error) {
+	from := ""
+	if after != nil {
+		from = after.seasonID
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT season_id
+		FROM episodes
+		WHERE season_id > $1
+		GROUP BY season_id
+		ORDER BY season_id
+		LIMIT $2`, from, seasons)
+	if err != nil {
+		return nil, nil, fmt.Errorf("listing intro marker candidate seasons: %w", err)
+	}
+	seasonIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, nil, fmt.Errorf("listing intro marker candidate seasons: %w", err)
+	}
+	if len(seasonIDs) == 0 {
+		return nil, nil, nil
+	}
+	rows, err = r.pool.Query(ctx, baseCandidateSelect+`
+		  AND e.season_id = ANY($1::text[])
+		ORDER BY e.season_id, mf.media_folder_id, mf.episode_id, mf.id`, seasonIDs)
+	if err != nil {
+		return nil, nil, fmt.Errorf("listing intro marker candidates: %w", err)
+	}
+	candidates, err := scanCandidates(rows)
+	if err != nil {
+		return nil, nil, err
+	}
+	var next *episodeCandidateCursor
+	if len(seasonIDs) == seasons {
+		next = &episodeCandidateCursor{seasonID: seasonIDs[len(seasonIDs)-1]}
+	}
+	return candidates, next, nil
 }
 
 func (r *Repository) ListCandidatesForEpisode(ctx context.Context, episodeID string) ([]Candidate, error) {
@@ -436,6 +494,7 @@ func scanCandidates(rows pgx.Rows, extra ...any) ([]Candidate, error) {
 			&c.SeasonNumber,
 			&c.EpisodeNumber,
 			&c.FileModifiedAt,
+			&c.MarkersInvalidatedAt,
 			&c.CodecVideo,
 			&c.CodecAudio,
 			&videoTrackJSON,
@@ -756,17 +815,27 @@ func effectiveAudioLanguage(tracks []models.AudioTrack) string {
 	return ""
 }
 
+// InputSignature identifies what a season group's analysis read. It also
+// covers when the database last invalidated each file's markers: a rematch or
+// a new modification time clears the markers the analysis wrote without
+// changing anything it reads, and must send the group back to analysis. A file
+// that was never invalidated adds nothing, so its signature is the one stored
+// before invalidation times existed.
 func InputSignature(candidates []Candidate) string {
 	parts := make([]string, 0, len(candidates))
 	for _, c := range candidates {
-		parts = append(parts, fmt.Sprintf("%d:%s:%d:%.3f:%s:%s",
+		part := fmt.Sprintf("%d:%s:%d:%.3f:%s:%s",
 			c.FileID,
 			c.FileHash,
 			c.FileSize,
 			c.DurationSeconds,
 			c.EpisodeID,
 			subtitleInventorySignature(c),
-		))
+		)
+		if c.MarkersInvalidatedAt != nil {
+			part += fmt.Sprintf(":invalidated=%d", c.MarkersInvalidatedAt.UnixMicro())
+		}
+		parts = append(parts, part)
 	}
 	sort.Strings(parts)
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\n")))

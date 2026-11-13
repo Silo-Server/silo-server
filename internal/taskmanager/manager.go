@@ -2,10 +2,12 @@ package taskmanager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
 	"sync"
+	"time"
 )
 
 // TriggerFactory is a function that creates a live Trigger from a TriggerConfig.
@@ -121,7 +123,9 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 			}
 		}
 
-		merged := make(chan struct{}, 1)
+		// merged carries the firing trigger's config so the run gets its max
+		// runtime, or nil when the schedule changed.
+		merged := make(chan *TriggerConfig, 1)
 		done := make(chan struct{})
 
 		for _, tr := range trigs {
@@ -132,8 +136,9 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 					return
 				case _, ok := <-tr.C():
 					if ok {
+						cfg := tr.Config()
 						select {
-						case merged <- struct{}{}:
+						case merged <- &cfg:
 						default:
 						}
 					}
@@ -147,21 +152,25 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 				return
 			case <-w.triggerUpdate:
 				select {
-				case merged <- struct{}{}:
+				case merged <- nil:
 				default:
 				}
 			}
 		}()
 
+		var fired *TriggerConfig
 		select {
 		case <-ctx.Done():
 			close(done)
 			return
-		case <-merged:
+		case fired = <-merged:
 			close(done)
 		}
 
-		if w.triggerChanged.CompareAndSwap(true, false) {
+		// A schedule change only rebuilds the triggers. Checking fired too keeps
+		// a stale update signal, whose flag an earlier wake already cleared,
+		// from starting a run that no trigger asked for.
+		if changed := w.triggerChanged.CompareAndSwap(true, false); changed || fired == nil {
 			continue
 		}
 
@@ -182,12 +191,12 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 			continue
 		}
 
-		result, err := w.run(ctx)
+		result, err := w.run(ctx, fired.MaxRuntime())
 		if err != nil {
 			// If the task is already running (e.g. via manual RunTask), don't
 			// rearm — the concurrent runner will rearm when it finishes.
 			// For other errors, rearm so the trigger fires again later.
-			if err != ErrTaskAlreadyRunning {
+			if !errors.Is(err, ErrTaskAlreadyRunning) {
 				m.rearmTriggers(w)
 			}
 			continue
@@ -260,7 +269,7 @@ func (m *TaskManager) RunTask(ctx context.Context, key string) error {
 		return err
 	}
 
-	result, err := w.run(ctx)
+	result, err := w.run(ctx, 0)
 	if err != nil {
 		return err
 	}
@@ -296,7 +305,7 @@ func (m *TaskManager) StartTask(key string) (TaskInfo, error) {
 	if err != nil {
 		return TaskInfo{}, err
 	}
-	ctx, cancel, err := w.reserve(context.WithValue(context.Background(), manualStartKey{}, true))
+	ctx, cancel, err := w.reserve(context.WithValue(context.Background(), manualStartKey{}, true), 0)
 	if err != nil {
 		return TaskInfo{}, err
 	}
@@ -374,6 +383,14 @@ func (m *TaskManager) listTasks(include func(*taskWorker) bool) []TaskInfo {
 func isManualOnly(task Task) bool {
 	manual, ok := task.(ManualOnlyTask)
 	return ok && manual.ManualOnly()
+}
+
+func startSpread(task Task) time.Duration {
+	spreader, ok := task.(StartSpreader)
+	if !ok {
+		return 0
+	}
+	return spreader.StartSpread()
 }
 
 func servesAnyLibrary(task Task, libraryTypes []string) bool {

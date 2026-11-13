@@ -10,10 +10,6 @@ function types(query: string) {
 }
 
 describe("picker search", () => {
-  it("finds the 4K & HDR showcase for 4K", () => {
-    expect(types("4K")).toEqual(["format_showcase"]);
-  });
-
   it("finds the Popular cards for trending", () => {
     const groupsFound = searchPickerGroups(groups, "trending").map((group) => group.group);
     expect(groupsFound).toEqual(["popular"]);

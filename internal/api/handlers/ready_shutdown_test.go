@@ -39,17 +39,6 @@ func TestReadinessFailsWhileShuttingDown(t *testing.T) {
 	}
 }
 
-// Without a shutdown signal wired, readiness behaves as before.
-func TestReadinessWithoutShutdownSignal(t *testing.T) {
-	h := NewReadyHandler(pingerFunc(func(context.Context) error { return nil }), nil)
-	h.SetShuttingDown(nil)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/ready", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d", rec.Code)
-	}
-}
-
 // A shutting-down answer reports the last probe instead of waiting on a new
 // one, so a hung dependency cannot hold back the 503. With no earlier probe it
 // probes once.

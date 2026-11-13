@@ -10,6 +10,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/oklog/ulid/v2"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
 // collectionBody is the JSON body for POST and PATCH /collections[/{id}].
@@ -32,6 +34,10 @@ func (h *Handler) handleCreateCollection(w http.ResponseWriter, r *http.Request)
 	}
 	if h.deps.CollectionStore == nil {
 		http.Error(w, "collection store unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	access, ok := h.requireAccess(w, r, a)
+	if !ok {
 		return
 	}
 
@@ -76,14 +82,14 @@ func (h *Handler) handleCreateCollection(w http.ResponseWriter, r *http.Request)
 		slog.WarnContext(r.Context(), "abs collection get-after-create failed", "component", "audiobooks", "err", err, "id", c.ID)
 		persisted = c
 	}
-	writeJSON(w, http.StatusOK, h.collectionFullShape(r, persisted))
+	writeJSON(w, http.StatusOK, h.collectionFullShape(r, persisted, access))
 }
 
 // collectionFullShape renders a Collection in full-shape, hydrating
 // books[] via MediaStore. Errors during hydration degrade to bare
 // {id, libraryId} entries so the response always reflects DB truth.
-func (h *Handler) collectionFullShape(r *http.Request, c Collection) map[string]any {
-	books := h.collectionBooks(r, c.ID)
+func (h *Handler) collectionFullShape(r *http.Request, c Collection, access catalog.AccessFilter) map[string]any {
+	books := h.collectionBooks(r, c.ID, access)
 	return collectionToABS(c, books)
 }
 
@@ -93,7 +99,7 @@ func (h *Handler) collectionFullShape(r *http.Request, c Collection) map[string]
 // cover stack via CollectionCover, which reads book.media.coverPath
 // through the globals/getLibraryItemCoverSrc getter. Bare {id, title}
 // entries make the cover stack empty.
-func (h *Handler) collectionBooks(r *http.Request, collectionID string) []map[string]any {
+func (h *Handler) collectionBooks(r *http.Request, collectionID string, access catalog.AccessFilter) []map[string]any {
 	if h.deps.CollectionStore == nil {
 		return []map[string]any{}
 	}
@@ -102,9 +108,8 @@ func (h *Handler) collectionBooks(r *http.Request, collectionID string) []map[st
 		slog.WarnContext(r.Context(), "abs collection list-items failed", "component", "audiobooks", "err", err, "collection", collectionID)
 		return []map[string]any{}
 	}
-	lib := h.resolveDefaultLibrary(r.Context())
+	lib := h.resolveDefaultLibrary(r.Context(), access)
 	baseURL := h.absBaseURL(r)
-	access, _, _ := h.accessFilterFromRequest(r)
 	out := make([]map[string]any, 0, len(rows))
 	for _, it := range rows {
 		item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID, access)
@@ -157,6 +162,10 @@ func (h *Handler) handleListLibraryCollections(w http.ResponseWriter, r *http.Re
 		writeJSON(w, http.StatusOK, pagedEnvelope([]map[string]any{}, 0, limit, page, "name", false, "", false, ""))
 		return
 	}
+	access, ok := h.requireAccess(w, r, a)
+	if !ok {
+		return
+	}
 	rows, err := h.deps.CollectionStore.ListUserCollections(r.Context(), a.UserID, a.ProfileID)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "abs library collection list failed", "component", "audiobooks", "err", err, "user", a.UserID)
@@ -180,7 +189,7 @@ func (h *Handler) handleListLibraryCollections(w http.ResponseWriter, r *http.Re
 	}
 	out := make([]map[string]any, 0, len(pageRows))
 	for _, c := range pageRows {
-		out = append(out, h.collectionFullShape(r, c))
+		out = append(out, h.collectionFullShape(r, c, access))
 	}
 	writeJSON(w, http.StatusOK, pagedEnvelope(out, total, limit, page, "name", false, "", false, ""))
 }
@@ -229,6 +238,10 @@ func (h *Handler) handleGetCollection(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "collection not found", http.StatusNotFound)
 		return
 	}
+	access, ok := h.requireAccess(w, r, a)
+	if !ok {
+		return
+	}
 	c, err := h.deps.CollectionStore.GetCollection(r.Context(), chiURLID(r))
 	if errors.Is(err, ErrNotFound) || (err == nil && !sameABSPrincipal(a, c.UserID, c.ProfileID) && !c.IsPublic) {
 		http.Error(w, "collection not found", http.StatusNotFound)
@@ -239,7 +252,7 @@ func (h *Handler) handleGetCollection(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "collection get failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, h.collectionFullShape(r, c))
+	writeJSON(w, http.StatusOK, h.collectionFullShape(r, c, access))
 }
 
 // handleUpdateCollection — PATCH /collections/{id}.
@@ -253,6 +266,10 @@ func (h *Handler) handleUpdateCollection(w http.ResponseWriter, r *http.Request)
 	}
 	if h.deps.CollectionStore == nil {
 		http.Error(w, "collection not found", http.StatusNotFound)
+		return
+	}
+	access, ok := h.requireAccess(w, r, a)
+	if !ok {
 		return
 	}
 	id := chiURLID(r)
@@ -297,7 +314,7 @@ func (h *Handler) handleUpdateCollection(w http.ResponseWriter, r *http.Request)
 		slog.WarnContext(r.Context(), "abs collection get-after-update failed", "component", "audiobooks", "err", err, "id", id)
 		persisted = c
 	}
-	writeJSON(w, http.StatusOK, h.collectionFullShape(r, persisted))
+	writeJSON(w, http.StatusOK, h.collectionFullShape(r, persisted, access))
 }
 
 // handleAddCollectionBook — POST /collections/{id}/book/{bookId}.
@@ -312,6 +329,10 @@ func (h *Handler) handleAddCollectionBook(w http.ResponseWriter, r *http.Request
 	}
 	if h.deps.CollectionStore == nil {
 		http.Error(w, "collection not found", http.StatusNotFound)
+		return
+	}
+	access, ok := h.requireAccess(w, r, a)
+	if !ok {
 		return
 	}
 	id := chiURLID(r)
@@ -333,11 +354,6 @@ func (h *Handler) handleAddCollectionBook(w http.ResponseWriter, r *http.Request
 	}
 
 	// Item validation — avoid orphan refs.
-	access, err := h.accessFilterForAuth(r.Context(), a)
-	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
-		return
-	}
 	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), bookID, access)
 	if err != nil || item == nil {
 		http.Error(w, "item not found", http.StatusNotFound)
@@ -355,7 +371,7 @@ func (h *Handler) handleAddCollectionBook(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		persisted = c
 	}
-	writeJSON(w, http.StatusOK, h.collectionFullShape(r, persisted))
+	writeJSON(w, http.StatusOK, h.collectionFullShape(r, persisted, access))
 }
 
 // handleRemoveCollectionBook — DELETE /collections/{id}/book/{bookId}.
@@ -369,6 +385,10 @@ func (h *Handler) handleRemoveCollectionBook(w http.ResponseWriter, r *http.Requ
 	}
 	if h.deps.CollectionStore == nil {
 		http.Error(w, "collection not found", http.StatusNotFound)
+		return
+	}
+	access, ok := h.requireAccess(w, r, a)
+	if !ok {
 		return
 	}
 	id := chiURLID(r)
@@ -399,7 +419,7 @@ func (h *Handler) handleRemoveCollectionBook(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		persisted = c
 	}
-	writeJSON(w, http.StatusOK, h.collectionFullShape(r, persisted))
+	writeJSON(w, http.StatusOK, h.collectionFullShape(r, persisted, access))
 }
 
 // handleDeleteCollection — DELETE /collections/{id}.

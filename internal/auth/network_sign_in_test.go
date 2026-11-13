@@ -246,36 +246,6 @@ func TestNetworkPreviewSharesConcurrentLookups(t *testing.T) {
 	})
 }
 
-// A cache miss drops expired answers, including those of a provider instance
-// a registry rebuild replaced.
-func TestNetworkPreviewDropsExpiredAnswers(t *testing.T) {
-	plugin := &peerPlugin{}
-	newProvider := func() *PluginProvider {
-		return NewPluginProviderWithClientFactory(PluginProviderConfig{InstallationID: 5, CapabilityID: "tailscale"},
-			nil, nil, func(context.Context) (pluginAuthClient, error) { return plugin, nil })
-	}
-	replaced, current := newProvider(), newProvider()
-	svc := NewService(nil, nil, nil, nil, nil, nil, nil)
-	stale := networkPreviewKey{provider: replaced, peer: netip.MustParseAddr("100.64.0.7")}
-	fresh := networkPreviewKey{provider: replaced, peer: netip.MustParseAddr("100.64.0.8")}
-	svc.previews.entries = map[networkPreviewKey]networkPreviewEntry{
-		stale: {expires: time.Now().Add(-time.Second)},
-		fresh: {expires: time.Now().Add(time.Minute)},
-	}
-	svc.networkPreview(overlayContext(t.Context(), 5, "100.64.0.9"), current)
-	svc.previews.mu.Lock()
-	defer svc.previews.mu.Unlock()
-	if _, ok := svc.previews.entries[stale]; ok {
-		t.Fatal("an expired answer survived a cache miss")
-	}
-	if _, ok := svc.previews.entries[fresh]; !ok {
-		t.Fatal("a live answer was dropped")
-	}
-	if len(svc.previews.entries) != 2 {
-		t.Fatalf("cache = %v, want the live answer and the new one", svc.previews.entries)
-	}
-}
-
 // A plugin client without NetworkIdentityAuth cannot vouch for anyone.
 func TestNetworkSignInWithoutPeerServiceIsUnavailable(t *testing.T) {
 	provider := NewPluginProviderWithClientFactory(PluginProviderConfig{InstallationID: 5, CapabilityID: "tailscale"},

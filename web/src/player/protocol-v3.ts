@@ -105,6 +105,7 @@ export type TransformationExecutorV3 = "client" | "server";
 
 /** Route-event names the server accepts as playback diagnostics. */
 export type RouteEventNameV3 =
+  | "plan_summary"
   | "plan_selected"
   | "plan_invalidated"
   | "plan_failed"
@@ -138,6 +139,14 @@ export const FEATURE_OUTPUT_CHANGE_V3 = "output_change_v1";
 export const FEATURE_PLAN_INVALIDATED_V3 = "plan_invalidated_v1";
 
 /**
+ * `progressive` delivery feature: the client reopens a progressive remux at its
+ * current position when the stream refuses a mid-stream range. The server then
+ * answers such a range 409 instead of streaming from the origin again, which
+ * the media element would read again from byte zero.
+ */
+export const FEATURE_PROGRESSIVE_RANGE_REFUSAL_V3 = "progressive_range_refusal_v1";
+
+/**
  * `original_http` validated claim: the client maps `selected_tracks.audio.index`
  * onto the file's own audio tracks, so a non-default track needs no remux.
  */
@@ -149,8 +158,32 @@ export const CLAIM_CLIENT_SELECTED_AUDIO_TRACK_V3 = "client_selected_audio_track
  */
 export const CLAIM_CLIENT_MANAGED_DYNAMIC_RANGE_V3 = "client_managed_dynamic_range_v1";
 
-/** The `original` rung label, which always preserves the source. */
+/**
+ * The legacy source-preserving quality label. Servers before the v2 menu
+ * change still publish it as an `available_qualities` entry; as a preference
+ * it is an alias of `auto`, which already plays the source whenever the
+ * device and connection can carry it.
+ */
 export const QUALITY_ORIGINAL_V3 = "original";
+
+/**
+ * A stored or chosen quality preference in the form the client works with.
+ * Empty and the legacy source labels ("original", "source", "max") read as
+ * `auto`, as the server reads them; anything else passes through trimmed.
+ */
+export function normalizeQualityPreferenceV3(value: string | null | undefined): string {
+  const trimmed = value?.trim() ?? "";
+  switch (trimmed.toLowerCase()) {
+    case "":
+    case "auto":
+    case QUALITY_ORIGINAL_V3:
+    case "source":
+    case "max":
+      return "auto";
+    default:
+      return trimmed;
+  }
+}
 
 /** Server-executed transformation names a plan can list. */
 export const TRANSFORMATION_AUDIO_TO_AAC_V3 = "audio_to_aac";
@@ -318,8 +351,11 @@ export interface StartRequestV3 {
   audio_track_index?: number;
   subtitle_track_id?: string;
   subtitle_track_index?: number;
-  metered: boolean;
   bandwidth_estimate_kbps?: number;
+  bandwidth_estimate_source?: "probe" | "observed_rebuffer";
+  /** The current plan's measured throughput; only with an `observed_rebuffer` estimate. */
+  observed_throughput_kbps?: number;
+  learned_limit?: "ignore" | "clear";
   bandwidth_cap_kbps?: number;
   client_capabilities: ClientCodecCapabilitiesV3;
   client_playback_context: ClientPlaybackContextV3;
@@ -355,8 +391,11 @@ export interface ReplanRequestV3 {
   attempt_count: number;
   quality_preference: string;
   position_seconds: number;
-  metered: boolean;
   bandwidth_estimate_kbps?: number;
+  bandwidth_estimate_source?: "probe" | "observed_rebuffer";
+  /** The current plan's measured throughput; only with an `observed_rebuffer` estimate. */
+  observed_throughput_kbps?: number;
+  learned_limit?: "ignore" | "clear";
   bandwidth_cap_kbps?: number;
   selected_tracks: SelectedTracksV3;
   failure?: FailureV3;
@@ -513,6 +552,8 @@ export interface SubtitleInventoryItemV3 {
    * downloaded tracks whose timing the server can correct.
    */
   sync_key?: string;
+  /** Stored row identity, independent of timing support and delivery. */
+  stored_subtitle_id?: number;
 }
 
 export interface SubtitleDecisionV3 {
@@ -555,6 +596,7 @@ export interface AvailableQualityV3 {
 }
 
 export interface PlanV3 {
+  bandwidth_limit?: { kbps: number; source: "observed_rebuffer"; expires_at: string };
   protocol_version: number;
   plan_id: string;
   plan_attempt_key: string;
@@ -571,6 +613,12 @@ export interface PlanV3 {
   applied_quirks: AppliedQuirkV3[];
   runtime_corrections: string[];
   available_qualities: AvailableQualityV3[];
+  /**
+   * The `available_qualities` label this plan delivers, which the quality
+   * menu marks. Absent when the plan delivers no listed entry, such as the
+   * source played unchanged or an encode between two rungs.
+   */
+  active_quality?: string;
   degradation_warnings: DegradationWarningV3[];
   decision_reason: string;
   requested_media_file_id: number;

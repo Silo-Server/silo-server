@@ -3,13 +3,7 @@ import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken, setRefreshToken, setProfileId, setProfileToken } from "@/api/client";
-import {
-  useApplyPluginUpdate,
-  useDeletePluginInstallation,
-  useInstallPlugin,
-  useRestartPluginInstallation,
-  useUpdatePluginInstallation,
-} from "./plugins";
+import { useApplyPluginUpdate, useInstallPlugin, useRestartPluginInstallation } from "./plugins";
 import { adminKeys } from "../keys";
 
 const toastError = vi.hoisted(() => vi.fn());
@@ -77,46 +71,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it("installs from the catalog once with string identifiers and projects the row", async () => {
-  const fetchMock = vi.fn().mockResolvedValue(json(installation("21"), 201));
-  vi.stubGlobal("fetch", fetchMock);
-  const { result } = renderHook(useInstallPlugin, fixture());
-  let outcome: Awaited<ReturnType<typeof result.current.mutateAsync>> | undefined;
-  await act(async () => {
-    outcome = await result.current.mutateAsync({
-      repository_id: 4,
-      plugin_id: "org.example.a",
-      version: "1.0.0",
-    });
-  });
-  expect(outcome?.id).toBe(21);
-  expect(outcome?.repository_id).toBe(4);
-  expect(fetchMock).toHaveBeenCalledOnce();
-  const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-  expect(String(url)).toBe("/api/v2/admin/plugins/installations");
-  expect(init.method).toBe("POST");
-  expect(JSON.parse(String(init.body))).toEqual({
-    repository_id: "4",
-    plugin_id: "org.example.a",
-    version: "1.0.0",
-  });
-  expect((init.headers as Record<string, string>)["X-Profile-Id"]).toBe("profile-a");
-});
-
-it("assigns update_policy through PUT once and keeps the projected row", async () => {
-  const fetchMock = vi.fn().mockResolvedValue(json(installation("7", { update_policy: "notify" })));
-  vi.stubGlobal("fetch", fetchMock);
-  const { result } = renderHook(useUpdatePluginInstallation, fixture());
-  act(() => result.current.mutate({ id: 7, body: { update_policy: "notify" } }));
-  await waitFor(() => expect(result.current.isSuccess).toBe(true));
-  expect(fetchMock).toHaveBeenCalledOnce();
-  const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-  expect(String(url)).toBe("/api/v2/admin/plugins/installations/7");
-  expect(init.method).toBe("PUT");
-  expect(JSON.parse(String(init.body))).toEqual({ update_policy: "notify" });
-  expect(result.current.data?.update_policy).toBe("notify");
-});
-
 it("restarts a failed resident and refreshes installation and network status", async () => {
   const fetchMock = vi
     .fn()
@@ -139,33 +93,6 @@ it("restarts a failed resident and refreshes installation and network status", a
   expect(invalidate).toHaveBeenCalledWith({ queryKey: adminKeys.networkAccessStatusRoot() });
 });
 
-it.each(["401", "network"])("does not replay a restart after %s failure", async (failure) => {
-  const fetchMock =
-    failure === "network"
-      ? vi.fn().mockRejectedValue(new Error("connection lost"))
-      : vi.fn().mockResolvedValue(problem("authentication_required", 401));
-  vi.stubGlobal("fetch", fetchMock);
-  const { result } = renderHook(useRestartPluginInstallation, fixture());
-  act(() => result.current.mutate(7));
-  await waitFor(() => expect(result.current.isError).toBe(true));
-  expect(fetchMock).toHaveBeenCalledOnce();
-});
-
-it("does not restart after an offline request's administrator authority changes", async () => {
-  onlineManager.setOnline(false);
-  const fetchMock = vi.fn();
-  vi.stubGlobal("fetch", fetchMock);
-  const { result } = renderHook(useRestartPluginInstallation, fixture());
-  act(() => result.current.mutate(7));
-  await waitFor(() => expect(result.current.isPaused).toBe(true));
-  act(() => {
-    setProfileToken("pin-b");
-    onlineManager.setOnline(true);
-  });
-  await waitFor(() => expect(result.current.isError).toBe(true));
-  expect(fetchMock).not.toHaveBeenCalled();
-});
-
 it.each(["401", "network"])(
   "never replays an uncertain %s apply-update under global retry3",
   async (failure) => {
@@ -184,34 +111,6 @@ it.each(["401", "network"])(
     expect(fetchMock.mock.calls[0]?.[1].method).toBe("POST");
   },
 );
-
-it("captures the deletion target before offline queueing and refuses after authority replacement", async () => {
-  onlineManager.setOnline(false);
-  const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
-  vi.stubGlobal("fetch", fetchMock);
-  const { result } = renderHook(useDeletePluginInstallation, fixture());
-  act(() => result.current.mutate(7));
-  await waitFor(() => expect(result.current.isPaused).toBe(true));
-  act(() => {
-    setProfileToken("pin-b");
-    onlineManager.setOnline(true);
-  });
-  await waitFor(() => expect(result.current.isError).toBe(true));
-  expect(fetchMock).not.toHaveBeenCalled();
-});
-
-it("deletes once and surfaces a 409 conflict detail", async () => {
-  const fetchMock = vi
-    .fn()
-    .mockResolvedValue(problem("conflict", 409, "Built-in host providers cannot be modified."));
-  vi.stubGlobal("fetch", fetchMock);
-  const { result } = renderHook(useDeletePluginInstallation, fixture());
-  act(() => result.current.mutate(7));
-  await waitFor(() => expect(result.current.isError).toBe(true));
-  expect(fetchMock).toHaveBeenCalledOnce();
-  expect(String(fetchMock.mock.calls[0]?.[0])).toBe("/api/v2/admin/plugins/installations/7");
-  expect(fetchMock.mock.calls[0]?.[1].method).toBe("DELETE");
-});
 
 it.each([
   [

@@ -31,12 +31,24 @@ const (
 	// events.
 	ChannelPlayback = "silo:playback"
 
+	// ChannelTranscodeMove carries only transcode move requests from proxy
+	// nodes to the API server that owns the session. It is separate from
+	// ChannelPlayback so plugin event dispatch and admin stats invalidation,
+	// which react to every ChannelPlayback message, never see them.
+	ChannelTranscodeMove = "silo:transcode-move"
+
 	// ChannelLogs is the pub/sub channel for persisted operational/audit log
 	// entries that should be fanned out to admin WebSocket subscribers.
 	ChannelLogs = "silo:logs"
 
 	// ChannelEvents is the pub/sub channel for passive websocket events.
 	ChannelEvents = "silo:events"
+
+	// ChannelPlaybackControl carries playback control requests between API
+	// replicas and their replies (playback.ControlRelay). It is separate from
+	// ChannelPlayback so plugin event consumers and cache invalidators never
+	// see administrator commands.
+	ChannelPlaybackControl = "silo:playback:control"
 )
 
 // ---------------------------------------------------------------------------
@@ -50,6 +62,7 @@ const (
 	EventPlaybackSessionsChanged     = "playback_sessions_changed"
 	EventMarkersUpdated              = "markers_updated"
 	EventMarkerThumbnailReady        = "marker_thumbnail_ready"
+	EventSubtitleReady               = "subtitle_ready"
 	EventSubtitleTimingChanged       = "subtitle_timing_changed"
 	EventSubtitleSyncUpdated         = "subtitle_sync_updated"
 	EventUserDisabled                = "user_disabled"
@@ -61,12 +74,18 @@ const (
 	EventOperationalLogAppended      = "operational_log_appended"
 	EventAuditLogAppended            = "audit_log_appended"
 	EventEventsNotification          = "events_notification"
+	EventPlaybackControlRelay        = "playback_control_relay"
 	// EventPluginsChanged is published on ChannelAdmin by the API server after
 	// every plugin lifecycle change (install, enable, disable, config save,
 	// auto-update, uninstall) so proxy nodes running resident plugins from the
 	// same installations reconcile at once instead of on their next poll, and
 	// every API replica's plugin event dispatcher rebuilds its subscriber index.
 	EventPluginsChanged = "plugins_changed"
+	// EventCatalogItemChanged is published on ChannelCatalog after an admin
+	// changes one catalog item's identity, fields or artwork outside a scan.
+	// The payload is the content ID; every API node evicts the cached home
+	// rails that list it.
+	EventCatalogItemChanged = "catalog_item_changed"
 )
 
 // EventNodeUnreachable is published on ChannelAdmin when an API server could
@@ -85,6 +104,12 @@ const EventAuthProvidersChanged = "auth_providers_changed"
 // login sessions were revoked, so every API replica drops that account's
 // in-memory Jellyfin-compatible sessions.
 const EventUserSessionsRevoked = "user_sessions_revoked"
+
+// EventTranscodeMoveRequested is published on ChannelTranscodeMove by a proxy
+// node that cannot reach the transcode node serving a transport whose recipe
+// lives in the shared node recipe store. The API server that owns the session moves
+// the transcode to another node; the payload is a noderecipe.MoveRequest.
+const EventTranscodeMoveRequested = "transcode_move_requested"
 
 // EventNodeDrainChanged is published on ChannelAdmin by a transcode node when
 // it starts or stops draining, with its stream_nodes id as the payload, so
@@ -273,7 +298,7 @@ func redisChannel(channel string, db int) string {
 // eventBusChannels are the channels a starting server subscribes to. Redis
 // refuses a subscription that the user's ACL does not grant, and a refused
 // subscription stops the start.
-var eventBusChannels = []string{ChannelCatalog, ChannelAdmin, ChannelPlayback, ChannelLogs, ChannelEvents}
+var eventBusChannels = []string{ChannelCatalog, ChannelAdmin, ChannelPlayback, ChannelTranscodeMove, ChannelPlaybackControl, ChannelLogs, ChannelEvents}
 
 // CheckEventBusChannels subscribes client to every event bus channel on its
 // database number, as a starting server does, and returns the error Redis
@@ -311,6 +336,14 @@ func (r *RedisEventBus) Publish(ctx context.Context, channel string, event Event
 	return r.client.Publish(ctx, redisChannel(channel, r.db), data).Err()
 }
 
+// PublishEvent publishes event on channel through client, the way the event
+// bus does, for a caller that needs its own client: one whose sockets honor
+// ctx's deadline (NewDeadlineRedisClientForRole).
+func PublishEvent(ctx context.Context, client *redis.Client, channel string, event Event) error {
+	data, _ := json.Marshal(event) // Event holds only strings.
+	return client.Publish(ctx, redisChannel(channel, client.Options().DB), data).Err()
+}
+
 // Subscribe creates a Redis pub/sub subscription on the given channel,
 // scoped to the bus's database number, and spawns a goroutine that delivers
 // incoming messages to the handler.
@@ -321,6 +354,7 @@ func (r *RedisEventBus) Subscribe(ctx context.Context, channel string, handler E
 	// Wait for the subscription to be confirmed.
 	if _, err := pubsub.Receive(subCtx); err != nil {
 		cancel()
+		_ = pubsub.Close()
 		return err
 	}
 

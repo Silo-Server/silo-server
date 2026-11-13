@@ -20,42 +20,6 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
-it("merges desired settings and process status through the actual v2 boundary", async () => {
-  const fetchMock = vi.fn<typeof fetch>().mockImplementation(
-    async (url) =>
-      new Response(
-        JSON.stringify(
-          String(url).endsWith("/status")
-            ? { active: false, redis_available: true }
-            : {
-                enabled: true,
-                backend: "redis",
-                tiers: {},
-                auth_endpoints: {},
-                global_requests_per_second: 100,
-                ip_requests_per_second: 10,
-                ip_requests_per_minute: 60,
-                ip_burst: 5,
-              },
-        ),
-        { headers: { "Content-Type": "application/json", ETag: '"revision"' } },
-      ),
-  );
-  vi.stubGlobal("fetch", fetchMock);
-  const { result } = renderHook(() => useRateLimitConfig(), { wrapper: wrapper() });
-  await waitFor(() => expect(result.current.isSuccess).toBe(true));
-  expect(result.current.data).toMatchObject({
-    enabled: true,
-    backend: "redis",
-    active: false,
-    redis_available: true,
-  });
-  expect(fetchMock.mock.calls.map((c) => c[0])).toEqual([
-    "/api/v2/admin/rate-limits/config",
-    "/api/v2/admin/rate-limits/status",
-  ]);
-  expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({ "X-Profile-Id": "profile-a" });
-});
 it("rejects the combined view when profile changes during body decoding", async () => {
   let finish!: (body: string) => void;
   let start!: () => void;

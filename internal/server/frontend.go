@@ -36,6 +36,14 @@ var Branding *branding.Service
 // the API. Do not add 'unsafe-inline', 'unsafe-eval', blob:, or data: to
 // script-src without revisiting that threat model.
 //
+// 'self' still lets a book name a script by URL on this origin, and API
+// routes return bytes users and libraries supply. Those do not run because
+// every API response carries X-Content-Type-Options: nosniff
+// (httpstream.NoSniff on the native router), so a browser refuses one as a
+// script unless it is typed as one. No API route may answer with a script
+// type for bytes a user, a library or a remote host supplied. Plugin routes
+// choose their own response types and are trusted as the plugin is.
+//
 // Allowances beyond 'self' exist for concrete app needs:
 //   - script-src 'wasm-unsafe-eval': JASSUB (libass) subtitle rendering and
 //     node-unrar-js CBR extraction compile WebAssembly.
@@ -403,9 +411,14 @@ func contentETag(b []byte) string {
 func serveDynamicManifest(w http.ResponseWriter, r *http.Request) {
 	body := branding.RenderManifest(Branding.Load(r.Context()))
 	w.Header().Set("Content-Type", "application/manifest+json")
-	w.Header().Set("Cache-Control", "public, max-age=300")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(body)
+	// Stable path whose content follows the branding, so it revalidates like
+	// the shell: a max-age would keep a renamed server's old name and
+	// theme_color in browsers until it expired. The content ETag makes an
+	// unchanged manifest a 304, and ServeContent applies RFC 9110 conditional
+	// semantics.
+	w.Header().Set("ETag", contentETag(body))
+	w.Header().Set("Cache-Control", "no-cache")
+	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(body))
 }
 
 // serveCustomFavicon serves the admin-uploaded favicon at /favicon.ico when one
@@ -423,11 +436,12 @@ func serveCustomFavicon(w http.ResponseWriter, r *http.Request) bool {
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Security-Policy", branding.AssetContentSecurityPolicy)
 	w.Header().Set("ETag", `"`+ref+`"`)
-	// Stable path (no content hash in the URL), so revalidate rather than cache
-	// long-lived; the ETag lets browsers skip the body when unchanged.
-	// ServeContent handles If-None-Match with RFC 9110 semantics (weak
-	// comparison, ETag lists) rather than a naive string compare.
-	w.Header().Set("Cache-Control", "public, max-age=300")
+	// Stable path (no content hash in the URL), so revalidate on every use: a
+	// max-age would keep serving a replaced favicon until it expired. The ETag
+	// lets browsers skip the body when unchanged. ServeContent handles
+	// If-None-Match with RFC 9110 semantics (weak comparison, ETag lists)
+	// rather than a naive string compare.
+	w.Header().Set("Cache-Control", "no-cache")
 	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(data))
 	return true
 }

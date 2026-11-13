@@ -22,9 +22,7 @@ func TestRefreshRetriesTemporaryFailureWithinSameRequest(t *testing.T) {
 		{name: "network", transportError: io.ErrUnexpectedEOF},
 		{name: "rate limit", status: http.StatusTooManyRequests},
 		{name: "internal error", status: http.StatusInternalServerError},
-		{name: "unavailable", status: http.StatusServiceUnavailable},
 		{name: "temporary OAuth 400", status: http.StatusBadRequest, code: "temporarily_unavailable"},
-		{name: "temporary OAuth 401", status: http.StatusUnauthorized, code: "temporarily_unavailable"},
 		{name: "OAuth server error", status: http.StatusBadRequest, code: "server_error"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

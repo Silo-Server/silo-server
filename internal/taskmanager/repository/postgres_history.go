@@ -55,7 +55,7 @@ func (r *PgExecutionRepository) GetLatest(ctx context.Context, taskKey string) (
 		&result.Status, &result.ErrorMessage, &result.ResultData, &result.DurationMs,
 	)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("getting latest task execution: %w", err)

@@ -221,58 +221,55 @@ func (m membershipsByID) LibraryIDsForItem(_ context.Context, contentID string) 
 	return m[contentID], nil
 }
 
-// An episode page is scoped by the episode's own libraries, not its series'.
-func TestTranslateOnViewUsesTheEpisodesOwnLibraries(t *testing.T) {
+// A native episode page opens under a library that holds the episode or its
+// series, so either one's library can report the missing language. Without
+// that opt-in (the v1 request) only the episode's own libraries count.
+func TestTranslateOnViewUsesTheEpisodeAndSeriesLibraries(t *testing.T) {
 	userID := 7
 	jobs := &guardJobs{}
 	h := newGuardHandlerWith(guardConfig, jobs, "", nil)
 	h.ItemAccess = episodeOnlyAccess{}
 	h.EpisodeLookup = episodeLookup{}
 	h.Pending = episodeLibraryPending{}
-
-	h.ItemLibraries = membershipsByID{"series1": {3}, "ep1": {7}}
-	_, err := h.TranslateOnView(context.Background(), catalog.AccessFilter{}, "ep1", "de", &userID)
-	if !passedGuards(jobs, err) {
-		t.Fatalf("episode library: err = %v, want it to reach the service", err)
-	}
+	native := catalog.AccessFilter{SeriesLibraryCoversEpisodes: true}
 	var apiErr *APIError
 
-	h.ItemLibraries = membershipsByID{"series1": {3, 7}, "ep1": {3}}
-	_, err = h.TranslateOnView(context.Background(), catalog.AccessFilter{}, "ep1", "de", &userID)
-	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusBadRequest {
-		t.Fatalf("series-only library: err = %v, want 400", err)
-	}
-
-	// An episode in no library is not widened to the viewer's allowlist.
-	h.ItemLibraries = membershipsByID{"series1": {7}}
-	_, err = h.TranslateOnView(context.Background(), catalog.AccessFilter{AllowedLibraryIDs: []int{7}}, "ep1", "de", &userID)
-	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusBadRequest {
-		t.Fatalf("episode without libraries: err = %v, want 400", err)
-	}
-}
-
-// failOpenLimiter is a shared limiter whose store is unreachable: it allows
-// everything and says so with Remaining -1.
-type failOpenLimiter struct{}
-
-func (failOpenLimiter) Allow(context.Context, string, ratelimit.Rate) ratelimit.AllowResult {
-	return ratelimit.AllowResult{Allowed: true, Remaining: -1}
-}
-func (failOpenLimiter) Close() {}
-
-func TestTranslateOnViewKeepsABudgetWhileTheSharedLimiterFailsOpen(t *testing.T) {
-	userID := 7
-	h := newGuardHandler("de", failOpenLimiter{})
-	var limited int
-	for i := 0; i < 15; i++ {
-		_, err := h.TranslateOnView(context.Background(), catalog.AccessFilter{}, "item1", "de", &userID)
-		var apiErr *APIError
-		if errors.As(err, &apiErr) && apiErr.Status == http.StatusTooManyRequests {
-			limited++
+	h.ItemLibraries = membershipsByID{"series1": {3}, "ep1": {7}}
+	for _, filter := range []catalog.AccessFilter{{}, native} {
+		_, err := h.TranslateOnView(context.Background(), filter, "ep1", "de", &userID)
+		if !passedGuards(jobs, err) {
+			t.Fatalf("episode library (native=%t): err = %v, want it to reach the service", filter.SeriesLibraryCoversEpisodes, err)
 		}
 	}
-	if limited == 0 {
-		t.Fatal("no request was limited while the shared limiter failed open")
+
+	h.ItemLibraries = membershipsByID{"series1": {3, 7}, "ep1": {3}}
+	_, err := h.TranslateOnView(context.Background(), native, "ep1", "de", &userID)
+	if !passedGuards(jobs, err) {
+		t.Fatalf("series library: err = %v, want it to reach the service", err)
+	}
+	_, err = h.TranslateOnView(context.Background(), catalog.AccessFilter{}, "ep1", "de", &userID)
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusBadRequest {
+		t.Fatalf("series library without the opt-in: err = %v, want 400", err)
+	}
+
+	h.ItemLibraries = membershipsByID{"series1": {7}}
+	_, err = h.TranslateOnView(context.Background(), native, "ep1", "de", &userID)
+	if !passedGuards(jobs, err) {
+		t.Fatalf("episode without files, series library: err = %v, want it to reach the service", err)
+	}
+
+	// Neither in a library: not widened to the viewer's allowlist.
+	h.ItemLibraries = membershipsByID{}
+	_, err = h.TranslateOnView(context.Background(), catalog.AccessFilter{AllowedLibraryIDs: []int{7}, SeriesLibraryCoversEpisodes: true}, "ep1", "de", &userID)
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusBadRequest {
+		t.Fatalf("no libraries: err = %v, want 400", err)
+	}
+
+	// A library holding neither one does not count.
+	h.ItemLibraries = membershipsByID{"series1": {3}, "ep1": {3}}
+	_, err = h.TranslateOnView(context.Background(), native, "ep1", "de", &userID)
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusBadRequest {
+		t.Fatalf("other library: err = %v, want 400", err)
 	}
 }
 

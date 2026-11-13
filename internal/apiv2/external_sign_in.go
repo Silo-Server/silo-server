@@ -7,9 +7,12 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/plugins"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // The external sign-in domain (docs/architecture/external-sign-in.md): the
@@ -23,6 +26,9 @@ type ExternalSignInService interface {
 	ConnectionTestAvailable() bool
 	ListIdentities(ctx context.Context, userID int) ([]handlers.ExternalIdentityView, error)
 	CanUnlinkAccountIdentity(ctx context.Context, userID int) (bool, error)
+	// MayUnlinkAccountIdentity applies the household-manager rule to
+	// disconnecting an identity: (account, acting profile, PIN verifier).
+	MayUnlinkAccountIdentity(ctx context.Context, userID int, activeProfileID string, verify func(*userstore.Profile) error) (bool, error)
 	UnlinkAccountIdentity(ctx context.Context, userID int, identityID int64) error
 	LinkAdminUserIdentity(ctx context.Context, userID int, in handlers.AdminIdentityLinkInput) (handlers.ExternalIdentityView, error)
 	UnlinkAdminUserIdentity(ctx context.Context, userID int, identityID int64) error
@@ -88,7 +94,7 @@ type AccountIdentity struct {
 // AccountIdentityCollection is the listAccountIdentities response body.
 type AccountIdentityCollection struct {
 	Collection[AccountIdentity]
-	CanUnlink bool `json:"can_unlink" doc:"Whether deleteAccountIdentity would disconnect an identity now: the account has another identity, or its local password still signs in (the account's password sign-in is on, and local password sign-in is on for the server or the account is break-glass). False with no identity" example:"true"`
+	CanUnlink bool `json:"can_unlink" doc:"Whether deleteAccountIdentity would disconnect an identity now for the profile asking: that profile is the account's household manager (deleteAccountIdentity describes who is), and the account has another identity, or its local password still signs in (the account's password sign-in is on, and local password sign-in is on for the server or the account is break-glass). False with no identity" example:"true"`
 }
 
 // AccountIdentityCollectionOutput is the listAccountIdentities response.
@@ -100,7 +106,7 @@ type AccountIdentityCollectionOutput struct {
 type AdminUserIdentity struct {
 	AccountIdentity
 	ExternalSubject string `json:"external_subject" doc:"The provider's exact subject (OIDC issuer|sub, LDAP unique id)" example:"https://id.example.test/realms/silo|8f14e45f"`
-	Issuer          string `json:"issuer" doc:"Who asserted the subject, as the provider last said; may be empty" example:"https://id.example.test"`
+	Issuer          string `json:"issuer" doc:"Who asserted the subject, as the provider last said; may be empty; not validated as a URI" example:"https://id.example.test"`
 	LastCheckStatus string `json:"last_check_status" enum:"none,active,not_found,disabled,not_permitted,unsupported,unavailable" doc:"That answer: active; not_found, disabled or not_permitted (the account's sessions were revoked); unsupported (the provider cannot re-check this identity, so its sessions end an absolute age after sign-in, and the account's API keys and Audiobookshelf sessions are revoked once the person has not signed in through the provider for that long); unavailable (the provider could not be reached; retried at the next refresh or scheduled pass); none before the first" example:"active"`
 }
 
@@ -207,7 +213,7 @@ type AuthConnectionTestResult struct {
 	Steps []AuthConnectionTestStep `json:"steps" doc:"Checks in the order they ran"`
 	// CallbackURL is the redirect URI an OAuth provider must have
 	// registered for this installation.
-	CallbackURL string `json:"callback_url" doc:"Redirect URI to register at an OAuth (OIDC) provider for this installation, on the public URL; empty when no public URL is configured. Password (LDAP) providers do not use it" example:"https://silo.example.test/api/v2/auth/oauth/3/callback"`
+	CallbackURL string `json:"callback_url" format:"uri-reference" doc:"Redirect URI to register at an OAuth (OIDC) provider for this installation, on the public URL; empty when no public URL is configured. Password (LDAP) providers do not use it" example:"https://silo.example.test/api/v2/auth/oauth/3/callback"`
 }
 
 // AuthConnectionTestOutput is the testAdminPluginAuthBinding response.
@@ -251,6 +257,10 @@ func adminUserIdentityOf(v handlers.ExternalIdentityView) AdminUserIdentity {
 // each refusal has its own, shared with the other linking operations
 // (linkingRefusalProblem).
 func credentialsLinkProblem(err error) error {
+	if throttled, ok := errors.AsType[*auth.SignInThrottledError](err); ok {
+		return NewProblem(TypeRateLimited, "Too many failed sign-ins for this directory username. Try again later.").
+			WithRetryAfter(ratelimit.RetryAfterSeconds(throttled.RetryAfter))
+	}
 	switch {
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		return validationProblem(locationBody+".directory_password", codeInvalid, "The directory username or password is incorrect.")
@@ -344,8 +354,14 @@ func registerExternalSignIn(reg *Registry) {
 			return out, nil
 		})
 
-	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/account/identities", "listAccountIdentities", "account",
-		"List the external sign-in identities linked to the caller's account."), Class: ClassAuthenticated, ServiceBacked: true},
+	// Both identity operations are profile scoped, profile optional, like
+	// createPersonalAPIKey: disconnecting is held to the household manager,
+	// and the list answers can_unlink for the profile asking, so the viewer
+	// gate must resolve that profile first.
+	list := humaOp(http.MethodGet, Prefix+"/account/identities", "listAccountIdentities", "account",
+		"List the external sign-in identities linked to the caller's account.")
+	list.Description = "Every profile on the account may read the list. can_unlink answers for the profile X-Profile-Id names, or for a request that names none, by deleteAccountIdentity's rule: a profile other than the account's primary one reads false."
+	Register(reg, Operation{Operation: list, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true},
 		func(ctx context.Context, _ *struct{}) (*AccountIdentityCollectionOutput, error) {
 			svc, p := reg.externalSignIn()
 			if p != nil {
@@ -369,15 +385,25 @@ func registerExternalSignIn(reg *Registry) {
 					return nil, serviceProblem(err)
 				}
 			}
+			if canUnlink {
+				// The viewer gate already turned away a PIN-locked profile that
+				// sent no proof. What can still arrive unverified is an API key,
+				// which skips the PIN, or a request the primary profile's PIN
+				// changed under: either reads false rather than failing the list.
+				canUnlink, err = svc.MayUnlinkAccountIdentity(ctx, claims.UserID, profileFrom(ctx), verifyHouseholdProfile(ctx))
+				if err != nil && !errors.Is(err, access.ErrProfileUnverified) {
+					return nil, serviceProblem(err)
+				}
+			}
 			return &AccountIdentityCollectionOutput{Body: AccountIdentityCollection{Collection: NewCollection(items), CanUnlink: canUnlink}}, nil
 		})
 
 	unlink := humaOp(http.MethodDelete, Prefix+"/account/identities/{id}", "deleteAccountIdentity", "account",
 		"Disconnect an external sign-in identity from the caller's account.")
-	unlink.Description = "Allowed only while the account can still sign in another way: its local password (with local password sign-in on, or as a break-glass account) or another identity; otherwise 409 last_sign_in_method. An API key or an impersonation session is refused with 403."
+	unlink.Description = "How the account signs in belongs to the whole household, so only the account's household manager may disconnect an identity. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied. Allowed only while the account can still sign in another way: its local password (with local password sign-in on, or as a break-glass account) or another identity; otherwise 409 last_sign_in_method. An API key or an impersonation session is refused with 403 permission_denied."
 	unlink.DefaultStatus = http.StatusNoContent
 	unlink.Errors = []int{http.StatusForbidden, http.StatusNotFound, http.StatusConflict}
-	Register(reg, Operation{Operation: unlink, Class: ClassAuthenticated, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent},
+	Register(reg, Operation{Operation: unlink, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent},
 		func(ctx context.Context, in *AccountIdentityInput) (*struct{}, error) {
 			svc, p := reg.externalSignIn()
 			if p != nil {
@@ -389,6 +415,16 @@ func registerExternalSignIn(reg *Registry) {
 			}
 			if !claims.IsOwnLoginSession() {
 				return nil, NewProblem(TypePermissionDenied, "Only the account's own signed-in session can disconnect a sign-in.")
+			}
+			allowed, err := svc.MayUnlinkAccountIdentity(ctx, claims.UserID, profileFrom(ctx), verifyHouseholdProfile(ctx))
+			if errors.Is(err, access.ErrProfileUnverified) {
+				return nil, NewProblem(TypeProfileVerificationRequired, "Disconnecting a sign-in requires verifying the primary profile PIN.")
+			}
+			if err != nil {
+				return nil, serviceProblem(err)
+			}
+			if !allowed {
+				return nil, NewProblem(TypePermissionDenied, "Disconnecting a sign-in requires the account's primary profile.")
 			}
 			identityID, p := in.ID.positive64("path.id")
 			if p != nil {
@@ -402,7 +438,7 @@ func registerExternalSignIn(reg *Registry) {
 
 	credentials := humaOp(http.MethodPost, Prefix+"/account/identities/link-credentials", "linkAccountIdentityWithCredentials", "account",
 		"Link a directory (LDAP) identity to the caller's account with the directory username and password.")
-	credentials.Description = "The account re-enters its local password; the credentials plugin then checks the directory username and password, and the identity it answers for is linked to this account with the same rules as other linking: linking turns local password sign-in off unless the account is break-glass, and is audited. Answers 201 with the linked identity as listAccountIdentities shows it. Refusals, by problem type: 422 validation_failed at body.password (wrong local password) or at body.directory_password (the directory refused the credentials); 409 local_password_required (the account has no local password sign-in); 403 not_permitted (the directory's group rules); 403 account_disabled (the directory account is disabled, locked or expired); 403 password_expired (the directory password expired); 403 permission_denied (the Silo account is disabled, or the caller is an API key or impersonation session); 409 identity_linked_elsewhere; 409 already_linked (this account already has an identity at the installation); 404 not_found (not an enabled credentials provider, an OAuth one included); 503 provider_unavailable. Spends the login rate-limit budget. getExternalSignInCapabilities reports credentials_linking."
+	credentials.Description = "The account re-enters its local password; the credentials plugin then checks the directory username and password, and the identity it answers for is linked to this account with the same rules as other linking: linking turns local password sign-in off unless the account is break-glass, and is audited. Answers 201 with the linked identity as listAccountIdentities shows it. Refusals, by problem type: 422 validation_failed at body.password (wrong local password) or at body.directory_password (the directory refused the credentials); 409 local_password_required (the account has no local password sign-in); 403 not_permitted (the directory's group rules); 403 account_disabled (the directory account is disabled, locked or expired); 403 password_expired (the directory password expired); 403 permission_denied (the Silo account is disabled, or the caller is an API key or impersonation session); 409 identity_linked_elsewhere; 409 already_linked (this account already has an identity at the installation); 404 not_found (not an enabled credentials provider, an OAuth one included); 429 rate_limited with Retry-After (the directory username has used its sign-in attempt budget); 503 provider_unavailable. Spends the login rate-limit budget. getExternalSignInCapabilities reports credentials_linking."
 	credentials.DefaultStatus = http.StatusCreated
 	credentials.Errors = []int{http.StatusForbidden, http.StatusNotFound, http.StatusConflict, http.StatusServiceUnavailable}
 	Register(reg, Operation{Operation: credentials, Class: ClassAuthenticated, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable, RateLimitBucket: loginDomain},

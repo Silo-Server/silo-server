@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/select";
 import { getCollectionSortOptions } from "@/components/collections/collectionBuilderFields";
 import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
+import { numberText, useT, type MessageKey } from "@/i18n";
 import {
   getDefaultQuerySortOrder,
   getQuerySortOptions,
@@ -38,15 +39,15 @@ interface CatalogFilterBarProps {
 export const CATALOG_SOURCE_ORDER_SORT_FIELD = "__source_order";
 
 const CATALOG_MEDIA_SCOPE_OPTIONS = [
-  { value: "all", label: "All Media" },
-  { value: "video", label: "Movies & Series" },
-  { value: "movie", label: "Movies" },
-  { value: "series", label: "Series" },
-  { value: "episode", label: "Episodes" },
-  { value: "audiobook", label: "Audiobooks" },
-  { value: "ebook", label: "Ebooks" },
-  { value: "manga", label: "Manga" },
-] as const;
+  { value: "all", label: "web.catalog.mediaType.allMedia" },
+  { value: "video", label: "web.catalog.mediaType.moviesAndSeries" },
+  { value: "movie", label: "web.catalog.mediaType.movies" },
+  { value: "series", label: "web.catalog.mediaType.series" },
+  { value: "episode", label: "web.catalog.mediaType.episodes" },
+  { value: "audiobook", label: "web.catalog.mediaType.audiobooks" },
+  { value: "ebook", label: "web.catalog.mediaType.ebooks" },
+  { value: "manga", label: "web.catalog.mediaType.manga" },
+] as const satisfies ReadonlyArray<{ value: string; label: MessageKey }>;
 
 export default function CatalogFilterBar({
   state,
@@ -61,6 +62,7 @@ export default function CatalogFilterBar({
   sourceOrderLabel,
   allowEpisodeMediaScope = true,
 }: CatalogFilterBarProps) {
+  const t = useT();
   const shownRatingSources = useShownRatingSources();
   const sortOptions = getCollectionSortOptions(
     allowPersonalizedSorts,
@@ -114,7 +116,7 @@ export default function CatalogFilterBar({
           <SelectContent>
             {mediaScopeOptions.map((option) => (
               <SelectItem key={option.value} value={option.value}>
-                {option.label}
+                {t(option.label)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -188,8 +190,8 @@ export default function CatalogFilterBar({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="desc">Descending</SelectItem>
-            <SelectItem value="asc">Ascending</SelectItem>
+            <SelectItem value="desc">{t("web.catalog.sort.descending")}</SelectItem>
+            <SelectItem value="asc">{t("web.catalog.sort.ascending")}</SelectItem>
           </SelectContent>
         </Select>
       )}
@@ -197,17 +199,17 @@ export default function CatalogFilterBar({
       {/* Filters button */}
       <Button variant="outline" size="sm" onClick={onOpenFilters} className="gap-2">
         <SlidersHorizontal className="h-4 w-4" />
-        Filters
+        {t("web.catalog.filters.open")}
         {activeFilterCount > 0 && (
-          <Badge variant="default" className="ml-1 px-1.5 py-0 text-[0.625rem]">
-            {activeFilterCount}
+          <Badge variant="default" className="ms-1 px-1.5 py-0 text-[0.625rem]">
+            {numberText(activeFilterCount)}
           </Badge>
         )}
       </Button>
       {resultCountLoading ? (
         <Loader2
           className="text-muted-foreground size-4 animate-spin"
-          aria-label="Loading item count"
+          aria-label={t("web.catalog.filters.loadingCount")}
         />
       ) : resultCountLabel ? (
         <span className="text-muted-foreground text-sm tabular-nums" aria-live="polite">

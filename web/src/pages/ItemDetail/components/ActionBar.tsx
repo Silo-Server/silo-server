@@ -1,6 +1,10 @@
 import {
   type ComponentProps,
+  Fragment,
+  type FocusEvent as ReactFocusEvent,
   type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useId,
@@ -16,7 +20,7 @@ import {
   Heart,
   Plus,
   Check,
-  Captions,
+  ChevronRight,
   Download,
   ExternalLink,
   FolderPlus,
@@ -30,14 +34,17 @@ import {
   Scissors,
   RotateCcw,
   Shuffle,
+  ShieldCheck,
   Tags,
-  TimerReset,
+  Eye,
   ThumbsDown,
   UsersRound,
   Hand,
+  Wrench,
   Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { numberText, type Translate, useT } from "@/i18n";
 import AddToCollectionDialog from "@/components/AddToCollectionDialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -62,10 +69,10 @@ import StarRating from "@/components/StarRating";
 import { MediaActionIcon } from "@/components/mediaActionIcons";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { parseWatchHref } from "@/pages/watchRouteHelpers";
-import type { TitleLink } from "@/lib/titleLinks";
 import VersionDropdown from "./VersionDropdown";
 import AudioTracksPopover from "./AudioTracksPopover";
 import SubtitlesPopover from "./SubtitlesPopover";
+import { isRightToLeft, readingArrowKey } from "@/lib/direction";
 
 // Keep hover feedback on the compositor. Repainting these controls while the detail backdrop is
 // animating can stall the main thread on image-heavy movie and series pages.
@@ -73,6 +80,8 @@ const responsivePrimaryActionClass =
   "transform-gpu transition-transform duration-150 motion-safe:hover:scale-[1.02] motion-safe:active:scale-[0.98]";
 const responsivePlayActionClass = `${responsivePrimaryActionClass} hover:bg-primary motion-reduce:hover:bg-primary/90`;
 const staticGlassActionClass = "transition-none";
+const overflowMenuClass =
+  "detail-overflow-menu border-border bg-popover text-popover-foreground fixed z-50 max-h-[calc(100vh-1rem)] w-max max-w-[calc(100vw-2rem)] min-w-0 overflow-y-auto rounded-md border p-1 shadow-md";
 
 function visibleOverflowItems(menu: HTMLElement | null): HTMLButtonElement[] {
   if (!menu) return [];
@@ -85,13 +94,31 @@ function visibleOverflowItems(menu: HTMLElement | null): HTMLButtonElement[] {
   );
 }
 
+function DetailOverflowSeparator() {
+  return <div role="separator" className="bg-border -mx-1 my-1 h-px" />;
+}
+
+/** Renders the non-empty groups with a separator between each. */
+function DetailOverflowGroups({ groups }: { groups: ReactNode[][] }) {
+  return groups
+    .map((group) => group.filter(Boolean))
+    .filter((group) => group.length > 0)
+    .map((group, index) => (
+      <Fragment key={index}>
+        {index > 0 && <DetailOverflowSeparator />}
+        {group}
+      </Fragment>
+    ));
+}
+
 function DetailOverflowMenuItem({
   className,
   closeMenu,
   onAction,
   ...props
 }: Omit<ComponentProps<"button">, "onClick"> & {
-  closeMenu: () => void;
+  /** Omitted by items that keep the menu open, such as Manage. */
+  closeMenu?: () => void;
   onAction?: () => void;
 }) {
   return (
@@ -99,9 +126,9 @@ function DetailOverflowMenuItem({
       {...props}
       type="button"
       role="menuitem"
-      className={`focus:bg-accent focus:text-accent-foreground hover:bg-accent hover:text-accent-foreground [&_svg:not([class*='text-'])]:text-muted-foreground relative flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-hidden select-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 ${className ?? ""}`}
+      className={`focus:bg-accent focus:text-accent-foreground hover:bg-accent hover:text-accent-foreground [&_svg:not([class*='text-'])]:text-muted-foreground relative flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-start text-sm outline-hidden select-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 ${className ?? ""}`}
       onClick={() => {
-        closeMenu();
+        closeMenu?.();
         onAction?.();
       }}
     />
@@ -171,6 +198,12 @@ export interface ActionBarSecondaryAction {
   pressed?: boolean;
 }
 
+/** An external page for the title, such as IMDb or TMDB. */
+export interface ActionBarLink {
+  label: string;
+  href: string;
+}
+
 export interface ActionBarProps {
   compactMobile?: boolean;
   contentId?: string;
@@ -181,14 +214,13 @@ export interface ActionBarProps {
   /** Replaces the Play action. */
   primaryAction?: ActionBarPrimaryAction;
   secondaryActions?: ActionBarSecondaryAction[];
-  /** The title's pages elsewhere, such as IMDb or TMDB. */
-  links?: TitleLink[];
+  links?: ActionBarLink[];
   playHref?: string;
   playLabel?: string;
   playProgress?: number;
   restartHref?: string;
-  /** Clears the resume position without marking the item watched. */
-  onResetProgress?: () => void;
+  /** Mark Unwatched in the More menu for a partly watched movie or episode. */
+  onMarkUnwatched?: () => void;
   resumePositionSeconds?: number;
   resumeDurationSeconds?: number;
   resumeResolution?: string;
@@ -206,6 +238,10 @@ export interface ActionBarProps {
   /** Marks or clears Not interested; movies and series only. */
   onToggleNotInterested?: () => void;
   notInterested?: boolean;
+  /** Opens "Allow for…" for the household's limited profiles; primary profile only. */
+  onAllowForProfiles?: () => void;
+  /** The menu label for onAllowForProfiles, e.g. "Allowed for Emma". */
+  allowForLabel?: string;
   onRefresh?: (mode: RefreshItemMetadataMode) => void;
   isRefreshing?: boolean;
   /** Re-detects local markers; without redetectKind the admin picks intro, credits, or both. */
@@ -229,7 +265,12 @@ export interface ActionBarProps {
   versions?: FileVersion[];
   playbackVariants?: PlaybackVariant[];
   selectedVersion?: FileVersion | null;
-  onSelectVersion?: (version: FileVersion) => void;
+  /** The file Start Over plays: the first part of selectedVersion's presentation. */
+  restartVersion?: FileVersion | null;
+  /** The viewer chose selectedVersion rather than playing the default version. */
+  versionPicked?: boolean;
+  onSelectVersion?: (version: FileVersion | null) => void;
+  onSelectEdition?: (key: string) => void;
   onDownload?: () => void;
   onSearchSubtitles?: () => void;
   /** Opens the season picker to request seasons the library is missing. */
@@ -252,7 +293,29 @@ export interface ActionBarProps {
   preferredSubtitleTrackSignature?: PlayerSubtitleTrackSignature | null;
   subtitleMode?: SubtitleMode;
   showForcedSubtitles?: boolean;
-  profileLanguage?: string | null;
+}
+
+/**
+ * Start Over can play another file than the one the pickers describe (part 1
+ * of a later part's presentation). Audio indexes belong to the picked file, so
+ * the server resolves the saved audio preference instead. A manual subtitle
+ * pick still matches by language, source and flags, but loses the picked
+ * file's track index, sidecar path and downloaded subtitle.
+ */
+function withoutFileSpecificPicks<
+  T extends { audioTrackIndex?: number; prePlaySubtitleSelection: PrePlaySubtitleSelection | null },
+>(input: T): T {
+  const selection = input.prePlaySubtitleSelection;
+  return {
+    ...input,
+    audioTrackIndex: undefined,
+    prePlaySubtitleSelection: selection && {
+      ...selection,
+      track_index: undefined,
+      external_subtitle_path: undefined,
+      downloaded_subtitle_id: undefined,
+    },
+  };
 }
 
 export default function ActionBar({
@@ -265,10 +328,10 @@ export default function ActionBar({
   secondaryActions,
   links,
   playHref,
-  playLabel = "Play",
+  playLabel: playLabelProp,
   playProgress,
   restartHref,
-  onResetProgress,
+  onMarkUnwatched,
   resumePositionSeconds,
   resumeDurationSeconds,
   watchedLabel,
@@ -281,6 +344,8 @@ export default function ActionBar({
   inWatchlist = false,
   onToggleNotInterested,
   notInterested = false,
+  onAllowForProfiles,
+  allowForLabel: allowForLabelProp,
   onRefresh,
   isRefreshing = false,
   onRedetectMarkers,
@@ -297,7 +362,10 @@ export default function ActionBar({
   versions,
   playbackVariants,
   selectedVersion,
+  restartVersion,
+  versionPicked = false,
   onSelectVersion,
+  onSelectEdition,
   onDownload,
   onSearchSubtitles,
   onRequestSeasons,
@@ -317,13 +385,23 @@ export default function ActionBar({
   preferredSubtitleTrackSignature,
   subtitleMode,
   showForcedSubtitles,
-  profileLanguage,
 }: ActionBarProps) {
+  const t = useT();
+  const resumeLabel = t("web.detail.actions.resume");
+  const playLabel = playLabelProp ?? t("web.detail.actions.play");
+  const allowForLabel = allowForLabelProp ?? t("web.detail.actions.allowFor");
   const navigate = useNavigate();
   const location = useLocation();
   const playbackController = useWatchPlaybackController();
   const [playChoiceOpen, setPlayChoiceOpen] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
+  // The admin and curation actions open in a second menu beside this one.
+  const [manageOpen, setManageOpen] = useState(false);
+  const [managePosition, setManagePosition] = useState<{ left: number; top: number } | null>(null);
+  const manageMenuId = useId();
+  const manageTriggerRef = useRef<HTMLButtonElement>(null);
+  const manageMenuRef = useRef<HTMLDivElement>(null);
+  const focusManageOnOpenRef = useRef(false);
   const overflowMenuId = useId();
   const [overflowPosition, setOverflowPosition] = useState<{ left: number; top: number } | null>(
     null,
@@ -341,13 +419,13 @@ export default function ActionBar({
   const showMarkerEditor = canEditMarkers && !!contentId;
   const hasMultipleVersions = (playbackVariants?.length ?? 0) > 1 || (versions?.length ?? 0) > 1;
   const showPlayChoiceDialog =
-    !hasMultipleVersions && playLabel === "Resume" && !!playHref && !!restartHref;
-  const displayedPlayLabel = showPlayChoiceDialog ? "Play" : playLabel;
+    !hasMultipleVersions && playLabel === resumeLabel && !!playHref && !!restartHref;
+  const displayedPlayLabel = showPlayChoiceDialog ? t("web.detail.actions.play") : playLabel;
   const playText = compactMobile ? (
     <>
       <span className="detail-full-label">{displayedPlayLabel}</span>
       <span className="detail-short-label">
-        {displayedPlayLabel === "Resume" ? "Resume" : "Play"}
+        {displayedPlayLabel === resumeLabel ? resumeLabel : t("web.detail.actions.play")}
       </span>
     </>
   ) : (
@@ -357,7 +435,7 @@ export default function ActionBar({
   const progressOverlay =
     playProgress != null && playProgress > 0 && playProgress < 100 ? (
       <span
-        className="border-primary-foreground/40 bg-primary-foreground/20 pointer-events-none absolute inset-y-0 left-0 border-r-2"
+        className="border-primary-foreground/40 bg-primary-foreground/20 pointer-events-none absolute inset-y-0 start-0 border-e-2"
         style={{ width: `${playProgress}%` }}
       />
     ) : null;
@@ -385,8 +463,15 @@ export default function ActionBar({
       prePlaySubtitleMode,
       prePlaySubtitleSelection:
         prePlaySubtitleMode === "explicit" ? explicitSubtitleSelection : null,
+      versionPicked,
     }),
-    [audioSelectionMode, explicitAudioTrackIndex, explicitSubtitleSelection, prePlaySubtitleMode],
+    [
+      audioSelectionMode,
+      explicitAudioTrackIndex,
+      explicitSubtitleSelection,
+      prePlaySubtitleMode,
+      versionPicked,
+    ],
   );
   const startPlaybackFromHref = useCallback(
     (href: string, restartOverride?: boolean) => {
@@ -396,18 +481,28 @@ export default function ActionBar({
         return;
       }
 
+      const restart = restartOverride ?? parsed.restart;
+      const file = restart ? (restartVersion ?? selectedVersion) : selectedVersion;
+      const input = buildPrePlayStartInput({
+        contentId: parsed.contentId,
+        fileId: file?.file_id ?? parsed.fileId,
+        libraryId: parsed.libraryId,
+        restart,
+        returnHref: currentHref,
+      });
       playbackController.startPlayback(
-        buildPrePlayStartInput({
-          contentId: parsed.contentId,
-          fileId: selectedVersion?.file_id ?? parsed.fileId,
-          libraryId: parsed.libraryId,
-          restart: restartOverride ?? parsed.restart,
-          returnHref: currentHref,
-        }),
+        file && file.file_id !== selectedVersion?.file_id ? withoutFileSpecificPicks(input) : input,
         "viewer",
       );
     },
-    [buildPrePlayStartInput, currentHref, navigate, playbackController, selectedVersion?.file_id],
+    [
+      buildPrePlayStartInput,
+      currentHref,
+      navigate,
+      playbackController,
+      restartVersion,
+      selectedVersion,
+    ],
   );
   const handleResumePlayback = () => {
     if (!playHref) return;
@@ -430,7 +525,27 @@ export default function ActionBar({
   const closeOverflowMenu = useCallback(() => setOverflowOpen(false), []);
   const toggleOverflowMenu = useCallback(() => {
     setOverflowPosition(null);
+    setManageOpen(false);
     setOverflowOpen((open) => !open);
+  }, []);
+  /** Pointer hover opens Manage in place; the keyboard and clicks also move focus into it. */
+  const openManageMenu = useCallback(
+    (focusFirst: boolean) => {
+      if (manageOpen) {
+        if (focusFirst) {
+          visibleOverflowItems(manageMenuRef.current)[0]?.focus({ preventScroll: true });
+        }
+        return;
+      }
+      focusManageOnOpenRef.current = focusFirst;
+      setManagePosition(null);
+      setManageOpen(true);
+    },
+    [manageOpen],
+  );
+  const closeManageMenu = useCallback((returnFocus: boolean) => {
+    setManageOpen(false);
+    if (returnFocus) manageTriggerRef.current?.focus({ preventScroll: true });
   }, []);
   const positionOverflowMenu = useCallback(() => {
     const trigger = overflowTriggerRef.current;
@@ -451,6 +566,50 @@ export default function ActionBar({
       Math.max(viewportPadding, triggerRect.right - menuRect.width),
     );
     setOverflowPosition({ left, top });
+  }, []);
+  const positionManageMenu = useCallback(() => {
+    const main = overflowMenuRef.current;
+    const trigger = manageTriggerRef.current;
+    const menu = manageMenuRef.current;
+    if (!main || !trigger || !menu) return;
+
+    const viewportPadding = 8;
+    const gap = 4;
+    const mainRect = main.getBoundingClientRect();
+    const triggerRect = trigger.getBoundingClientRect();
+    const menuRect = menu.getBoundingClientRect();
+    const clampTop = (top: number) =>
+      Math.min(
+        window.innerHeight - menuRect.height - viewportPadding,
+        Math.max(viewportPadding, top),
+      );
+    // Line the first item up with Manage: the menu's border and padding sit above it.
+    const besideTop = clampTop(triggerRect.top - 5);
+    // Beside the main menu on its end side (right, or left in a right-to-left
+    // layout), else the other side.
+    const rtl = isRightToLeft(main);
+    const right = mainRect.right + gap;
+    const left = mainRect.left - gap - menuRect.width;
+    const sides = [
+      { left: right, fits: right + menuRect.width <= window.innerWidth - viewportPadding },
+      { left, fits: left >= viewportPadding },
+    ];
+    if (rtl) sides.reverse();
+    const beside = sides.find((side) => side.fits);
+    if (beside) {
+      setManagePosition({ left: beside.left, top: besideTop });
+    } else {
+      // No room beside it on a narrow screen: cascade over the main menu, under
+      // Manage, stepped in from its start edge.
+      const cascade = rtl ? mainRect.right - 24 - menuRect.width : mainRect.left + 24;
+      setManagePosition({
+        left: Math.min(
+          window.innerWidth - menuRect.width - viewportPadding,
+          Math.max(viewportPadding, cascade),
+        ),
+        top: clampTop(triggerRect.bottom),
+      });
+    }
   }, []);
 
   useLayoutEffect(() => {
@@ -479,38 +638,52 @@ export default function ActionBar({
     visibleOverflowItems(overflowMenuRef.current)[0]?.focus({ preventScroll: true });
   }, [overflowOpen, overflowPositioned]);
 
+  // Manage follows the main menu as it is placed, resized, or scrolled.
+  useLayoutEffect(() => {
+    if (overflowOpen && manageOpen) positionManageMenu();
+  }, [manageOpen, overflowOpen, overflowPosition, positionManageMenu]);
+  const managePositioned = managePosition !== null;
+  useLayoutEffect(() => {
+    if (!manageOpen || !managePositioned || !focusManageOnOpenRef.current) return;
+    focusManageOnOpenRef.current = false;
+    visibleOverflowItems(manageMenuRef.current)[0]?.focus({ preventScroll: true });
+  }, [manageOpen, managePositioned]);
+
   useEffect(() => {
     if (!overflowOpen) return;
 
+    const isInsideMenus = (target: Node) =>
+      Boolean(
+        overflowMenuRef.current?.contains(target) ||
+        manageMenuRef.current?.contains(target) ||
+        overflowTriggerRef.current?.contains(target),
+      );
     const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target as Node;
-      if (
-        !overflowMenuRef.current?.contains(target) &&
-        !overflowTriggerRef.current?.contains(target)
-      ) {
-        closeOverflowMenu();
-      }
+      if (!isInsideMenus(event.target as Node)) closeOverflowMenu();
     };
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
+      if (manageOpen) {
+        closeManageMenu(true);
+        return;
+      }
       closeOverflowMenu();
       overflowTriggerRef.current?.focus({ preventScroll: true });
     };
     const handleFocusIn = (event: FocusEvent) => {
-      const target = event.target as Node;
-      if (
-        !overflowMenuRef.current?.contains(target) &&
-        !overflowTriggerRef.current?.contains(target)
-      ) {
-        closeOverflowMenu();
-      }
+      if (!isInsideMenus(event.target as Node)) closeOverflowMenu();
     };
     // Stay anchored to the trigger while the page scrolls rather than
     // dismissing on every wheel nudge. One measurement per frame at most.
     const handleScroll = (event: Event) => {
       const target = event.target;
-      if (target instanceof Node && overflowMenuRef.current?.contains(target)) return;
+      if (target instanceof Node && isInsideMenus(target)) {
+        // Scrolling the main menu moves Manage's trigger. Placing the main menu
+        // again places Manage after it.
+        const movesManageTrigger = manageOpen && overflowMenuRef.current?.contains(target);
+        if (!movesManageTrigger) return;
+      }
       if (scrollFrameRef.current !== null) return;
       scrollFrameRef.current = requestAnimationFrame(() => {
         scrollFrameRef.current = null;
@@ -532,8 +705,20 @@ export default function ActionBar({
         scrollFrameRef.current = null;
       }
     };
-  }, [closeOverflowMenu, overflowOpen, positionOverflowMenu]);
+  }, [closeManageMenu, closeOverflowMenu, manageOpen, overflowOpen, positionOverflowMenu]);
   const handleOverflowKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    // The submenu opens toward the end side, so its keys follow the direction.
+    const key = readingArrowKey(event);
+    if (key === "ArrowRight" && event.target === manageTriggerRef.current) {
+      event.preventDefault();
+      openManageMenu(true);
+      return;
+    }
+    if (key === "ArrowLeft" && event.currentTarget === manageMenuRef.current) {
+      event.preventDefault();
+      closeManageMenu(true);
+      return;
+    }
     const isNavigationKey = ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key);
     // Printable single characters jump to the next item whose label starts with
     // what has been typed, the way the menu behaved before.
@@ -579,28 +764,271 @@ export default function ActionBar({
     }
     items[nextIndex]?.focus({ preventScroll: true });
   };
-  const hasOverflowActions = Boolean(
-    restartHref ||
-    onResetProgress ||
-    onShuffle ||
-    onToggleWatchlist ||
-    onToggleNotInterested ||
-    onDownload ||
-    onSearchSubtitles ||
-    onRequestSeasons,
-  );
-  const hasAdminActions = Boolean(isAdmin && (contentId || onRedetectMarkers));
-  const hasMetadataActions = Boolean(
-    (canCurateMetadata && (onRefresh || onEditMetadata || onMatchItem || onShowMediaInfo)) ||
-    showMarkerEditor,
-  );
+  // With one version, Play already asks whether to resume or start over.
+  const showRestartInMenu = Boolean(restartHref) && !showPlayChoiceDialog;
+  const playbackItems = [
+    onShuffle && (
+      <DetailOverflowMenuItem key="shuffle" closeMenu={closeOverflowMenu} onAction={onShuffle}>
+        <Shuffle className="size-4" />
+        {t("web.detail.actions.shuffle")}
+      </DetailOverflowMenuItem>
+    ),
+    showRestartInMenu && (
+      <DetailOverflowMenuItem
+        key="restart"
+        closeMenu={closeOverflowMenu}
+        onAction={handleRestartPlayback}
+      >
+        <RotateCcw className="size-4" />
+        {t("web.detail.actions.playFromBeginning")}
+      </DetailOverflowMenuItem>
+    ),
+    onMarkUnwatched && (
+      <DetailOverflowMenuItem
+        key="markUnwatched"
+        closeMenu={closeOverflowMenu}
+        onAction={onMarkUnwatched}
+      >
+        <Eye className="size-4" />
+        {t("web.detail.actions.markUnwatched")}
+      </DetailOverflowMenuItem>
+    ),
+  ];
+  const libraryItems = [
+    onToggleWatchlist && (
+      <DetailOverflowMenuItem
+        key="watchlist"
+        closeMenu={closeOverflowMenu}
+        onAction={onToggleWatchlist}
+      >
+        {inWatchlist ? <Check className="size-4" /> : <Plus className="size-4" />}
+        {inWatchlist
+          ? t("web.detail.actions.removeFromWatchlist")
+          : t("web.detail.actions.addToWatchlist")}
+      </DetailOverflowMenuItem>
+    ),
+    contentId && canAddToCollection && (
+      <DetailOverflowMenuItem
+        key="collection"
+        closeMenu={closeOverflowMenu}
+        onAction={() => setAddToCollectionOpen(true)}
+      >
+        <FolderPlus className="size-4" />
+        {t("web.detail.actions.addToCollection")}
+      </DetailOverflowMenuItem>
+    ),
+    onDownload && (
+      <DetailOverflowMenuItem key="download" closeMenu={closeOverflowMenu} onAction={onDownload}>
+        <Download className="size-4" />
+        {t("web.detail.actions.download")}
+      </DetailOverflowMenuItem>
+    ),
+    onRequestSeasons && (
+      <DetailOverflowMenuItem
+        key="request-seasons"
+        closeMenu={closeOverflowMenu}
+        onAction={onRequestSeasons}
+      >
+        <Inbox className="size-4" />
+        {t("web.detail.actions.requestSeasons")}
+      </DetailOverflowMenuItem>
+    ),
+    onToggleNotInterested && (
+      <DetailOverflowMenuItem
+        key="not-interested"
+        closeMenu={closeOverflowMenu}
+        onAction={onToggleNotInterested}
+      >
+        <ThumbsDown className={cn("size-4", notInterested && "fill-current")} />
+        {notInterested
+          ? t("web.detail.actions.showInRecommendations")
+          : t("web.detail.actions.notInterested")}
+      </DetailOverflowMenuItem>
+    ),
+    onAllowForProfiles && (
+      <DetailOverflowMenuItem
+        key="allow-for-profiles"
+        closeMenu={closeOverflowMenu}
+        onAction={onAllowForProfiles}
+      >
+        <ShieldCheck className="size-4" />
+        {allowForLabel}
+      </DetailOverflowMenuItem>
+    ),
+  ];
+  const partyItems = watchTogether
+    ? [
+        <DetailOverflowMenuItem
+          key="start-party"
+          closeMenu={closeOverflowMenu}
+          onAction={watchTogether.onStartParty}
+        >
+          <UsersRound className="size-4" />
+          {t("web.detail.actions.startWatchParty")}
+        </DetailOverflowMenuItem>,
+        watchTogether.liveRoom && (
+          <DetailOverflowMenuItem
+            key="suggest-party"
+            closeMenu={closeOverflowMenu}
+            onAction={watchTogether.liveRoom.onSuggest}
+          >
+            <Hand className="size-4" />
+            {t("web.detail.actions.suggestToRoom", { code: watchTogether.liveRoom.code })}
+          </DetailOverflowMenuItem>
+        ),
+        watchTogether.liveRoom?.onPlay && (
+          <DetailOverflowMenuItem
+            key="play-party"
+            closeMenu={closeOverflowMenu}
+            onAction={watchTogether.liveRoom.onPlay}
+          >
+            <Zap className="size-4" />
+            {t("web.detail.actions.playInRoom", { code: watchTogether.liveRoom.code })}
+          </DetailOverflowMenuItem>
+        ),
+      ]
+    : [];
+  const manageGroups = [
+    [
+      canCurateMetadata && onEditMetadata && (
+        <DetailOverflowMenuItem
+          key="edit-metadata"
+          closeMenu={closeOverflowMenu}
+          onAction={onEditMetadata}
+        >
+          <MediaActionIcon action="editMetadata" />
+          {t("web.detail.actions.editMetadata")}
+        </DetailOverflowMenuItem>
+      ),
+      canCurateMetadata && onMatchItem && (
+        <DetailOverflowMenuItem key="match" closeMenu={closeOverflowMenu} onAction={onMatchItem}>
+          <MediaActionIcon action="matchItem" />
+          {t("web.detail.actions.matchItem")}
+        </DetailOverflowMenuItem>
+      ),
+      canCurateMetadata && onRefresh && (
+        <DetailOverflowMenuItem
+          key="refresh"
+          closeMenu={closeOverflowMenu}
+          disabled={isRefreshing}
+          onAction={() => setRefreshDialogOpen(true)}
+        >
+          <MediaActionIcon action="refreshMetadata" isPending={isRefreshing} />
+          {t("web.detail.actions.refreshMetadata")}
+        </DetailOverflowMenuItem>
+      ),
+    ],
+    [
+      showMarkerEditor && (
+        <DetailOverflowMenuItem
+          key="edit-markers"
+          closeMenu={closeOverflowMenu}
+          onAction={() => setMarkerEditorOpen(true)}
+        >
+          <Tags className="size-4" />
+          {t("web.detail.actions.editMarkers")}
+        </DetailOverflowMenuItem>
+      ),
+      isAdmin && onRedetectMarkers && (
+        <DetailOverflowMenuItem
+          key="redetect"
+          closeMenu={closeOverflowMenu}
+          disabled={isRedetectingMarkers}
+          onAction={() =>
+            redetectKind ? onRedetectMarkers(redetectKind) : setRedetectDialogOpen(true)
+          }
+        >
+          <RefreshCw className={`size-4 ${isRedetectingMarkers ? "animate-spin" : ""}`} />
+          {redetectKind === "credits"
+            ? t("web.detail.actions.redetectCredits")
+            : redetectKind === "intro"
+              ? t("web.detail.actions.redetectIntro")
+              : t("web.detail.actions.redetectMarkers")}
+        </DetailOverflowMenuItem>
+      ),
+      showTrickplay && (
+        <DetailOverflowMenuItem
+          key="trickplay"
+          closeMenu={closeOverflowMenu}
+          onAction={() => setTrickplayOpen(true)}
+        >
+          <GalleryHorizontal className="size-4" />
+          {t("web.detail.actions.seekPreviews")}
+        </DetailOverflowMenuItem>
+      ),
+      canCurateMetadata && onSplitItem && (
+        <DetailOverflowMenuItem key="split" closeMenu={closeOverflowMenu} onAction={onSplitItem}>
+          <Scissors className="size-4" />
+          {t("web.detail.actions.splitVersions")}
+        </DetailOverflowMenuItem>
+      ),
+    ],
+    [
+      isAdmin && contentId && (
+        <DetailOverflowMenuItem
+          key="play-history"
+          closeMenu={closeOverflowMenu}
+          onAction={() => navigate(`/admin/history?media_item_id=${encodeURIComponent(contentId)}`)}
+        >
+          <MediaActionIcon action="viewPlayHistory" />
+          {t("web.detail.actions.viewPlayHistory")}
+        </DetailOverflowMenuItem>
+      ),
+    ],
+  ];
+  const infoItems = [
+    onShowMediaInfo && (
+      <DetailOverflowMenuItem
+        key="media-info"
+        closeMenu={closeOverflowMenu}
+        onAction={onShowMediaInfo}
+      >
+        <Info className="size-4" />
+        {t("web.detail.mediaInfo.title")}
+      </DetailOverflowMenuItem>
+    ),
+  ];
+  const manageItems = manageGroups.flat().filter(Boolean);
+  // A single management action sits at the end of the menu instead of behind Manage.
+  const hasManagePanel = manageItems.length > 1;
+  const mainGroups = [
+    playbackItems,
+    libraryItems,
+    partyItems,
+    infoItems,
+    hasManagePanel
+      ? [
+          <DetailOverflowMenuItem
+            key="manage"
+            ref={manageTriggerRef}
+            aria-haspopup="menu"
+            aria-expanded={manageOpen}
+            aria-controls={manageOpen ? manageMenuId : undefined}
+            className="aria-expanded:bg-accent aria-expanded:text-accent-foreground"
+            onAction={() => openManageMenu(true)}
+          >
+            <Wrench className="size-4" />
+            {t("web.detail.actions.manage")}
+            <ChevronRight className="ms-auto size-4" />
+          </DetailOverflowMenuItem>,
+        ]
+      : manageItems,
+  ];
+  const hasMainMenuItems = mainGroups.some((group) => group.some(Boolean));
   const hasOverflowMenuItems =
-    hasOverflowActions ||
-    hasAdminActions ||
-    hasMetadataActions ||
-    Boolean(contentId && canAddToCollection) ||
-    (compactMobile && Boolean(onToggleFavorite || onRatingChange)) ||
-    Boolean(watchTogether);
+    hasMainMenuItems || (compactMobile && Boolean(onToggleFavorite || onRatingChange));
+  // Hovering another item, or moving focus to one, closes Manage again.
+  const handleMainMenuPointerOver = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== "mouse" || !hasManagePanel) return;
+    const item = (event.target as Element).closest('[role="menuitem"]');
+    if (item === manageTriggerRef.current) openManageMenu(false);
+    else if (item && manageOpen) closeManageMenu(false);
+  };
+  const handleMainMenuFocus = (event: ReactFocusEvent<HTMLDivElement>) => {
+    if (manageOpen && (event.target as Element) !== manageTriggerRef.current) {
+      closeManageMenu(false);
+    }
+  };
 
   const formattedResumeTime = formatPlaybackTime(resumePositionSeconds ?? 0);
   const percentComplete =
@@ -610,7 +1038,7 @@ export default function ActionBar({
         ? Math.round((resumePositionSeconds / resumeDurationSeconds) * 100)
         : null;
   const dialogDescription = showPlayChoiceDialog
-    ? buildPlayChoiceDescription(formattedResumeTime, percentComplete)
+    ? buildPlayChoiceDescription(t, formattedResumeTime, percentComplete)
     : "";
 
   // When a version is explicitly selected (multi-version), play it directly.
@@ -703,6 +1131,20 @@ export default function ActionBar({
           );
         })}
 
+        {links?.map((link) => (
+          <Button
+            key={link.href}
+            asChild
+            variant="glass"
+            className={`${staticGlassActionClass} h-11 cursor-pointer rounded-full px-4 text-[0.8125rem] font-semibold tracking-wide`}
+          >
+            <a href={link.href} target="_blank" rel="noreferrer">
+              {link.label}
+              <ExternalLink aria-hidden="true" className="size-3.5 opacity-60" />
+            </a>
+          </Button>
+        ))}
+
         {/* ── Watched toggle ─────────────────────────────────── */}
         {watchedLabel && onToggleWatched && (
           <Button
@@ -716,7 +1158,9 @@ export default function ActionBar({
               <>
                 <span className="detail-full-label">{watchedLabel}</span>
                 <span className="detail-short-label">
-                  {isWatched ? "Mark Unwatched" : "Mark Watched"}
+                  {isWatched
+                    ? t("web.detail.actions.markUnwatched")
+                    : t("web.detail.actions.markWatched")}
                 </span>
               </>
             ) : (
@@ -731,8 +1175,14 @@ export default function ActionBar({
             variant="glass"
             size="icon-lg"
             onClick={onToggleFavorite}
-            title={isFavorite ? "Unfavorite" : "Favorite"}
-            aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
+            title={
+              isFavorite ? t("web.detail.actions.unfavorite") : t("web.detail.actions.favorite")
+            }
+            aria-label={
+              isFavorite
+                ? t("web.detail.actions.removeFromFavorites")
+                : t("web.detail.actions.addToFavorites")
+            }
             className={`${staticGlassActionClass} detail-secondary-action size-11 cursor-pointer rounded-full`}
           >
             <Heart
@@ -752,8 +1202,8 @@ export default function ActionBar({
             ref={overflowTriggerRef}
             variant="glass"
             size="icon-lg"
-            title="More"
-            aria-label="More actions"
+            title={t("web.detail.actions.more")}
+            aria-label={t("web.detail.actions.moreActions")}
             aria-haspopup="menu"
             aria-expanded={overflowOpen}
             aria-controls={overflowOpen ? overflowMenuId : undefined}
@@ -774,9 +1224,11 @@ export default function ActionBar({
                 top: overflowPosition?.top ?? 0,
                 visibility: overflowPosition ? "visible" : "hidden",
               }}
-              className="detail-overflow-menu border-border bg-popover text-popover-foreground fixed z-50 max-h-[calc(100vh-1rem)] w-max max-w-[calc(100vw-2rem)] min-w-0 overflow-y-auto rounded-md border p-1 shadow-md"
+              className={overflowMenuClass}
               role="menu"
               onKeyDown={handleOverflowKeyDown}
+              onPointerOver={handleMainMenuPointerOver}
+              onFocus={handleMainMenuFocus}
             >
               {compactMobile && (
                 <div className="detail-mobile-menu-actions">
@@ -786,14 +1238,22 @@ export default function ActionBar({
                       onAction={onToggleFavorite}
                     >
                       <Heart className="size-4" />
-                      {isFavorite ? "Remove from favorites" : "Add to favorites"}
+                      {isFavorite
+                        ? t("web.detail.actions.removeFromFavorites")
+                        : t("web.detail.actions.addToFavorites")}
                     </DetailOverflowMenuItem>
                   )}
                   {onRatingChange && (
-                    <div className="px-2 py-2" role="group" aria-label="Your rating">
-                      <span className="mb-2 block text-sm">Your rating</span>
+                    <div
+                      className="px-2 py-2"
+                      role="group"
+                      aria-label={t("web.detail.actions.yourRating")}
+                    >
+                      <span className="mb-2 block text-sm">
+                        {t("web.detail.actions.yourRating")}
+                      </span>
                       {/* ArrowUp/ArrowDown keep moving through the menu; only
-                          ArrowLeft/ArrowRight change the rating here. */}
+                              ArrowLeft/ArrowRight change the rating here. */}
                       <StarRating
                         value={rating ?? null}
                         onChange={onRatingChange}
@@ -802,204 +1262,32 @@ export default function ActionBar({
                       />
                     </div>
                   )}
+                  {hasMainMenuItems && <DetailOverflowSeparator />}
                 </div>
               )}
-              {onShuffle && (
-                <DetailOverflowMenuItem closeMenu={closeOverflowMenu} onAction={onShuffle}>
-                  <Shuffle className="size-4" />
-                  Shuffle
-                </DetailOverflowMenuItem>
-              )}
-              {restartHref && (
-                <DetailOverflowMenuItem
-                  closeMenu={closeOverflowMenu}
-                  onAction={handleRestartPlayback}
-                >
-                  <RotateCcw className="size-4" />
-                  Play from Beginning
-                </DetailOverflowMenuItem>
-              )}
-              {onResetProgress && (
-                <DetailOverflowMenuItem closeMenu={closeOverflowMenu} onAction={onResetProgress}>
-                  <TimerReset className="size-4" />
-                  Reset Progress
-                </DetailOverflowMenuItem>
-              )}
-              {onToggleWatchlist && (
-                <DetailOverflowMenuItem closeMenu={closeOverflowMenu} onAction={onToggleWatchlist}>
-                  {inWatchlist ? <Check className="size-4" /> : <Plus className="size-4" />}
-                  {inWatchlist ? "Remove from Watchlist" : "Add to Watchlist"}
-                </DetailOverflowMenuItem>
-              )}
-              {onToggleNotInterested && (
-                <DetailOverflowMenuItem
-                  closeMenu={closeOverflowMenu}
-                  onAction={onToggleNotInterested}
-                >
-                  <ThumbsDown className={cn("size-4", notInterested && "fill-current")} />
-                  {notInterested ? "Show in Recommendations" : "Not Interested"}
-                </DetailOverflowMenuItem>
-              )}
-              {contentId && canAddToCollection && (
-                <DetailOverflowMenuItem
-                  closeMenu={closeOverflowMenu}
-                  onAction={() => setAddToCollectionOpen(true)}
-                >
-                  <FolderPlus className="size-4" />
-                  Add to Collection
-                </DetailOverflowMenuItem>
-              )}
-              {onDownload && (
-                <DetailOverflowMenuItem closeMenu={closeOverflowMenu} onAction={onDownload}>
-                  <Download className="size-4" />
-                  Download
-                </DetailOverflowMenuItem>
-              )}
-              {onSearchSubtitles && (
-                <DetailOverflowMenuItem closeMenu={closeOverflowMenu} onAction={onSearchSubtitles}>
-                  <Captions className="size-4" />
-                  Add Subtitles
-                </DetailOverflowMenuItem>
-              )}
-              {onRequestSeasons && (
-                <DetailOverflowMenuItem closeMenu={closeOverflowMenu} onAction={onRequestSeasons}>
-                  <Inbox className="size-4" />
-                  Request Seasons
-                </DetailOverflowMenuItem>
-              )}
-              {watchTogether && (
-                <>
-                  <div role="separator" className="bg-border -mx-1 my-1 h-px" />
-                  <div
-                    role="presentation"
-                    className="text-muted-foreground flex items-center gap-1.5 px-2 pt-1 pb-0.5 text-[0.625rem] font-semibold tracking-[0.16em] uppercase"
-                  >
-                    {watchTogether.liveRoom ? (
-                      <span aria-hidden="true" className="size-1.5 rounded-full bg-emerald-400" />
-                    ) : null}
-                    Watch Together
-                    {watchTogether.liveRoom ? ` · ${watchTogether.liveRoom.code} is live` : ""}
-                  </div>
-                  <DetailOverflowMenuItem
-                    closeMenu={closeOverflowMenu}
-                    onAction={watchTogether.onStartParty}
-                  >
-                    <UsersRound className="size-4" />
-                    Start a party with this
-                  </DetailOverflowMenuItem>
-                  {watchTogether.liveRoom && (
-                    <DetailOverflowMenuItem
-                      closeMenu={closeOverflowMenu}
-                      onAction={watchTogether.liveRoom.onSuggest}
-                    >
-                      <Hand className="size-4" />
-                      Suggest to {watchTogether.liveRoom.code}
-                    </DetailOverflowMenuItem>
-                  )}
-                  {watchTogether.liveRoom?.onPlay && (
-                    <DetailOverflowMenuItem
-                      closeMenu={closeOverflowMenu}
-                      onAction={watchTogether.liveRoom.onPlay}
-                    >
-                      <Zap className="size-4" />
-                      Play in {watchTogether.liveRoom.code}
-                    </DetailOverflowMenuItem>
-                  )}
-                </>
-              )}
-              {(hasAdminActions || hasMetadataActions) && (
-                <>
-                  {hasOverflowActions && (
-                    <div role="separator" className="bg-border -mx-1 my-1 h-px" />
-                  )}
-                  {canCurateMetadata && onShowMediaInfo && (
-                    <DetailOverflowMenuItem
-                      closeMenu={closeOverflowMenu}
-                      onAction={onShowMediaInfo}
-                    >
-                      <Info className="size-4" />
-                      Media Info
-                    </DetailOverflowMenuItem>
-                  )}
-                  {isAdmin && contentId && (
-                    <DetailOverflowMenuItem
-                      closeMenu={closeOverflowMenu}
-                      onAction={() =>
-                        navigate(`/admin/history?media_item_id=${encodeURIComponent(contentId)}`)
-                      }
-                    >
-                      <MediaActionIcon action="viewPlayHistory" />
-                      View Play History
-                    </DetailOverflowMenuItem>
-                  )}
-                  {canCurateMetadata && onRefresh && (
-                    <DetailOverflowMenuItem
-                      closeMenu={closeOverflowMenu}
-                      disabled={isRefreshing}
-                      onAction={() => {
-                        setRefreshDialogOpen(true);
-                      }}
-                    >
-                      <MediaActionIcon action="refreshMetadata" isPending={isRefreshing} />
-                      Refresh Metadata
-                    </DetailOverflowMenuItem>
-                  )}
-                  {isAdmin && onRedetectMarkers && (
-                    <DetailOverflowMenuItem
-                      closeMenu={closeOverflowMenu}
-                      disabled={isRedetectingMarkers}
-                      onAction={() =>
-                        redetectKind ? onRedetectMarkers(redetectKind) : setRedetectDialogOpen(true)
-                      }
-                    >
-                      <RefreshCw
-                        className={`size-4 ${isRedetectingMarkers ? "animate-spin" : ""}`}
-                      />
-                      {redetectKind === "credits"
-                        ? "Re-detect Credits"
-                        : redetectKind === "intro"
-                          ? "Re-detect Intro Markers"
-                          : "Re-detect Markers"}
-                    </DetailOverflowMenuItem>
-                  )}
-                  {showTrickplay && (
-                    <DetailOverflowMenuItem
-                      closeMenu={closeOverflowMenu}
-                      onAction={() => setTrickplayOpen(true)}
-                    >
-                      <GalleryHorizontal className="size-4" />
-                      Seek Previews
-                    </DetailOverflowMenuItem>
-                  )}
-                  {canCurateMetadata && onEditMetadata && (
-                    <DetailOverflowMenuItem closeMenu={closeOverflowMenu} onAction={onEditMetadata}>
-                      <MediaActionIcon action="editMetadata" />
-                      Edit Metadata
-                    </DetailOverflowMenuItem>
-                  )}
-                  {showMarkerEditor && (
-                    <DetailOverflowMenuItem
-                      closeMenu={closeOverflowMenu}
-                      onAction={() => setMarkerEditorOpen(true)}
-                    >
-                      <Tags className="size-4" />
-                      Edit Markers
-                    </DetailOverflowMenuItem>
-                  )}
-                  {canCurateMetadata && onMatchItem && (
-                    <DetailOverflowMenuItem closeMenu={closeOverflowMenu} onAction={onMatchItem}>
-                      <MediaActionIcon action="matchItem" />
-                      Match Item
-                    </DetailOverflowMenuItem>
-                  )}
-                  {canCurateMetadata && onSplitItem && (
-                    <DetailOverflowMenuItem closeMenu={closeOverflowMenu} onAction={onSplitItem}>
-                      <Scissors className="size-4" />
-                      Split Versions
-                    </DetailOverflowMenuItem>
-                  )}
-                </>
-              )}
+              <DetailOverflowGroups groups={mainGroups} />
+            </div>,
+            document.body,
+          )}
+        {hasOverflowMenuItems &&
+          overflowOpen &&
+          hasManagePanel &&
+          manageOpen &&
+          createPortal(
+            <div
+              id={manageMenuId}
+              ref={manageMenuRef}
+              style={{
+                left: managePosition?.left ?? 0,
+                top: managePosition?.top ?? 0,
+                visibility: managePosition ? "visible" : "hidden",
+              }}
+              className={overflowMenuClass}
+              role="menu"
+              aria-label={t("web.detail.actions.manage")}
+              onKeyDown={handleOverflowKeyDown}
+            >
+              <DetailOverflowGroups groups={manageGroups} />
             </div>,
             document.body,
           )}
@@ -1007,7 +1295,9 @@ export default function ActionBar({
           <Dialog open={playChoiceOpen} onOpenChange={setPlayChoiceOpen}>
             <DialogContent className="max-w-xs gap-3 p-5">
               <DialogHeader className="gap-1.5">
-                <DialogTitle className="text-base">Resume Playback?</DialogTitle>
+                <DialogTitle className="text-base">
+                  {t("web.detail.actions.resumeDialogTitle")}
+                </DialogTitle>
                 <DialogDescription className="text-xs">{dialogDescription}</DialogDescription>
               </DialogHeader>
               <div className="grid gap-2">
@@ -1016,7 +1306,7 @@ export default function ActionBar({
                   className="h-9 justify-start gap-2.5 px-3 text-sm"
                 >
                   <Play className="size-3.5 fill-current" />
-                  Resume at {formattedResumeTime}
+                  {t("web.detail.actions.resumeAt", { time: formattedResumeTime })}
                 </Button>
                 <Button
                   variant="outline"
@@ -1024,7 +1314,7 @@ export default function ActionBar({
                   className="h-9 justify-start gap-2.5 px-3 text-sm"
                 >
                   <RotateCcw className="size-3.5" />
-                  Play from Beginning
+                  {t("web.detail.actions.playFromBeginning")}
                 </Button>
               </div>
             </DialogContent>
@@ -1081,6 +1371,8 @@ export default function ActionBar({
               playbackVariants={playbackVariants}
               selectedVersion={selectedVersion}
               onSelectVersion={onSelectVersion}
+              onSelectEdition={onSelectEdition}
+              versionPicked={versionPicked}
             />
           )}
           {selectedVersion && (selectedVersion.audio_tracks?.length ?? 0) > 0 && (
@@ -1101,39 +1393,16 @@ export default function ActionBar({
               preferredSubtitleTrackSignature={preferredSubtitleTrackSignature}
               subtitleMode={subtitleMode}
               showForcedSubtitles={showForcedSubtitles}
-              profileLanguage={profileLanguage}
               activeAudioTrackIndex={
                 audioSelectionMode === "explicit" ? explicitAudioTrackIndex : null
               }
               onSelectSubtitle={onSelectSubtitle}
               onSelectSubtitleOff={onSelectSubtitleOff}
               onResetSelection={onResetSubtitleSelection}
+              onSearchSubtitles={onSearchSubtitles}
             />
           )}
         </div>
-      )}
-
-      {/* ── The title on IMDb, TMDB and TVDB ─────────────────── */}
-      {/* A row of its own, so the links never push the library actions
-          (watched, favorite, rating, more) onto another line. */}
-      {links && links.length > 0 && (
-        <ul aria-label="External links" className="detail-external-links flex flex-wrap gap-2">
-          {links.map((link) => (
-            <li key={link.href}>
-              <Button
-                asChild
-                variant="glass"
-                size="sm"
-                className={`${staticGlassActionClass} cursor-pointer rounded-full text-xs font-semibold tracking-wide`}
-              >
-                <a href={link.href} target="_blank" rel="noopener noreferrer">
-                  {link.label} <span className="sr-only">(opens in a new tab)</span>
-                  <ExternalLink aria-hidden="true" className="size-3 opacity-60" />
-                </a>
-              </Button>
-            </li>
-          ))}
-        </ul>
       )}
     </div>
   );
@@ -1146,19 +1415,25 @@ function formatPlaybackTime(totalSeconds: number): string {
   const remainingSeconds = seconds % 60;
 
   if (hours > 0) {
-    return `${hours}:${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+    return numberText(
+      `${hours}:${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`,
+    );
   }
 
-  return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
+  return numberText(`${minutes}:${String(remainingSeconds).padStart(2, "0")}`);
 }
 
 function buildPlayChoiceDescription(
+  t: Translate,
   formattedResumeTime: string,
   percentComplete: number | null,
 ): string {
   if (percentComplete != null && percentComplete > 0) {
-    return `You're ${formattedResumeTime} in, about ${percentComplete}% through.`;
+    return t("web.detail.actions.resumeDescriptionPercent", {
+      time: formattedResumeTime,
+      percent: percentComplete,
+    });
   }
 
-  return `You're ${formattedResumeTime} in. Resume where you left off or start over.`;
+  return t("web.detail.actions.resumeDescription", { time: formattedResumeTime });
 }

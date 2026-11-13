@@ -7,11 +7,12 @@ pre-submission gate are in [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Prerequisites
 
 - Git, Make, and OpenSSL
-- Docker Engine or Docker Desktop with Docker Compose 2.24+ (local services and testcontainers)
+- Docker Engine or Docker Desktop with Docker Compose 2.24+ (local services and `make verify-prometheus-rules`)
 - Go 1.26.4+
-- Node.js 22+ with pnpm 10.32.1. The managed Jellyfin Web installer (`make jellyfin-web`,
-  `silo compat-web install`, or the admin settings) needs Node.js 24+ for Jellyfin Web 12.x.
-- PostgreSQL 18 with pgvector
+- Node.js 24+ with pnpm 10.32.1. The managed Jellyfin Web installer (`make jellyfin-web`,
+  `silo compat-web install`, or the admin settings) also needs Node.js 24+ for Jellyfin Web 12.x.
+- PostgreSQL 18 with pgvector, and the PostgreSQL 18 client tools (`pg_dump`, `pg_restore`)
+  for backups, including the one taken before startup migrations
 - Redis
 - FFmpeg (transcoding). On macOS, install Homebrew's keg-only full build so
   text-subtitle burn-in and the complete filter set are available alongside
@@ -23,8 +24,9 @@ pre-submission gate are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Local development
 
-Source builds use [docker-compose.yml](docker-compose.yml) only for PostgreSQL
-and Redis; the deploy-oriented stack in the README is separate.
+Source builds use only the PostgreSQL and Redis services of
+[dev/compose.yml](dev/compose.yml); the README's `docker-compose.yml`
+runs the published omnibus image instead.
 
 ```sh
 # Create the local bootstrap configuration
@@ -36,7 +38,7 @@ printf '\nSECRET_KEY=%s\nDATABASE_URL=%s\nREDIS_URL=%s\n' \
   'redis://localhost:6379' >> .env
 
 # Start local PostgreSQL and Redis
-docker compose up -d postgres redis
+docker compose -f dev/compose.yml up -d postgres redis
 
 # Install frontend dependencies and create the embedded-frontend test stub
 cd web
@@ -45,11 +47,25 @@ cd ..
 make embed-stub
 ```
 
+`dev/compose.yml` runs as the `silo-dev` Compose project with named
+volumes, so it does not reuse a development database that the earlier
+`docker compose up -d postgres redis` kept under `SILO_DATA_ROOT/postgres`.
+Stop those containers first (`docker compose down` with the earlier file), since
+they hold ports 5432 and 6379, and restore a `pg_dump` of the old database into
+the new one if you need its data.
+
 Run the backend and frontend in separate terminals, backend first:
 
 ```sh
 make dev-backend
 ```
+
+When a migration is pending, the backend backs up the database before applying
+it and refuses to start if it cannot, for example when `pg_dump` 18 is not
+installed (the dev Compose file runs PostgreSQL in a container, so the host may
+have no client). For local development, add `SILO_SKIP_BACKUP_BEFORE_MIGRATE=true`
+to `.env`, or turn off backups (`backup.enabled=false`) on the Backups page. See
+[backups](docs/architecture/backups.md#before-upgrades).
 
 The source-built backend listens on `:8080`, while the Vite proxy defaults to
 the Compose port `8090`. Point it at the source backend in `web/.env.local`:
@@ -166,7 +182,7 @@ that can hold millions of rows. Keep locks on existing tables short:
 While iterating:
 
 ```sh
-go test ./internal/<package>/...                 # needs Docker for testcontainers
+go test ./internal/<package>/...                 # DB-backed tests skip without a test database URL
 cd web && pnpm exec vitest run path/to/test.tsx
 ```
 
@@ -182,7 +198,7 @@ internal/
   api/               HTTP router, handlers, middleware
   auth/              JWT authentication and sessions
   catalog/           Media item, episode, season repositories
-  config/            YAML + env var configuration
+  config/            .env and env var bootstrap, database-backed server settings
   jellycompat/       Jellyfin/Emby protocol compatibility
   metadata/          Plugin-driven metadata matching and enrichment
   playback/          Direct play, remux, transcode session management

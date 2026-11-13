@@ -4,14 +4,13 @@ import (
 	"context"
 	"log/slog"
 	"maps"
-	"net/http"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 )
@@ -26,6 +25,8 @@ type swipeCardCastMember struct {
 	Name      string `json:"name"`
 	Character string `json:"character,omitempty"`
 	PhotoURL  string `json:"photo_url,omitempty"`
+	// photoPath is the stored headshot WatchTonightCards resolves into PhotoURL.
+	photoPath string
 }
 
 // swipeCardResponse extends sectionItemResponse with cast and runtime for the card back.
@@ -85,39 +86,63 @@ var knownGenres = map[string]struct{}{
 	"War": {}, "Western": {},
 }
 
-// HandleWatchTonightCards handles GET /recommendations/watch-tonight/cards.
-// It returns paginated, genre-filterable swipe cards with cast data for the
-// gamified Watch Tonight experience.
-func (h *RecommendationsHandler) HandleWatchTonightCards(w http.ResponseWriter, r *http.Request) {
-	mode := r.URL.Query().Get("mode")
-	if mode != "continue" && mode != "discover" {
-		writeError(w, http.StatusBadRequest, "invalid_mode", `mode must be "continue" or "discover"`)
-		return
-	}
-
-	genres := parseGenreParams(r.URL.Query()["genres[]"])
-	excludeIDs := parseExcludeIDs(r.URL.Query()["exclude_ids[]"])
-	limit := swipeDefaultLimit
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= swipeMaxLimit {
-			limit = n
-		}
-	}
-	resp, err := h.watchTonightCards(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), requestAccessFilter(r), mode, genres, excludeIDs, limit, true)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
 // WatchTonightCards is the swipe-card seam. mode is "continue" or
 // "discover", genres are already validated against KnownWatchTonightGenres,
 // excludeIDs is already bounded, and limit is within 1..swipeMaxLimit. A
 // candidate source that fails degrades to a shorter page; a failed item
 // lookup is an error, since the page would look empty.
+//
+// Cast members carry their headshot, which the frozen v1 route never has.
 func (h *RecommendationsHandler) WatchTonightCards(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter, mode string, genres []string, excludeIDs map[string]struct{}, limit int) (WatchTonightCardsView, error) {
-	return h.watchTonightCards(ctx, userID, profileID, filter, mode, genres, excludeIDs, limit, false)
+	view, err := h.watchTonightCards(ctx, userID, profileID, filter, mode, genres, excludeIDs, limit, false)
+	if err == nil {
+		h.resolveCastPhotos(ctx, view.Cards, filter.ImageSizeFor(imagesize.SlotPhoto))
+	}
+	return view, err
+}
+
+// resolveCastPhotos fills every card's cast headshots in one batch on the
+// profile ladder at size: unsized, the w500 item detail serves for the same
+// people. A photo stored as an http(s) URL passes through.
+func (h *RecommendationsHandler) resolveCastPhotos(ctx context.Context, cards []swipeCardResponse, size imagesize.Size) {
+	if h.DetailSvc == nil {
+		return
+	}
+	sizedPath := func(path string) string {
+		if strings.Contains(path, "://") {
+			return path // plugin-hosted: its hint picks the size
+		}
+		medium := artworkkey.Variant(path, imagesize.Variant(artworkkey.ImageProfile, imagesize.Medium))
+		return sizedImagePath(path, artworkkey.ImageProfile, size, medium)
+	}
+	var paths []string
+	seen := make(map[string]struct{})
+	for _, card := range cards {
+		for _, member := range card.Cast {
+			if member.photoPath == "" || member.photoPath == "-" || isHTTPImageURL(member.photoPath) {
+				continue
+			}
+			path := sizedPath(member.photoPath)
+			if _, ok := seen[path]; !ok {
+				seen[path] = struct{}{}
+				paths = append(paths, path)
+			}
+		}
+	}
+	resolved := h.DetailSvc.PresignURLsWithExpiry(ctx, paths, imagesize.PhotoPluginVariant(size))
+	for _, card := range cards {
+		cast := card.Cast
+		for j := range cast {
+			member := &cast[j]
+			switch {
+			case member.photoPath == "" || member.photoPath == "-":
+			case isHTTPImageURL(member.photoPath):
+				member.PhotoURL = catalog.ImageURLOrEmpty(member.photoPath)
+			default:
+				member.PhotoURL = resolved[sizedPath(member.photoPath)].URL
+			}
+		}
+	}
 }
 
 // watchTonightCards is WatchTonightCards. With emptyOnFetchError, a failed
@@ -173,7 +198,7 @@ func (h *RecommendationsHandler) watchTonightCards(ctx context.Context, userID i
 	}
 
 	var moreHydrated bool
-	resp.Cards, moreHydrated = h.swipeCards(ctx, window, enriched, limit)
+	resp.Cards, moreHydrated = h.swipeCards(ctx, window, enriched, limit, filter.Artwork())
 	// More cards exist when a hydrated candidate was left over, or when this
 	// page showed cards and candidates past the enrichment window remain: the
 	// client excludes the cards it was shown, so the next page moves on. A
@@ -185,7 +210,7 @@ func (h *RecommendationsHandler) watchTonightCards(ctx context.Context, userID i
 // swipeCards builds up to limit cards, in order, from the candidates whose
 // items were hydrated, and reports whether a further hydrated candidate was
 // left over.
-func (h *RecommendationsHandler) swipeCards(ctx context.Context, candidates []mergedItem, enriched watchTonightEnrichment, limit int) ([]swipeCardResponse, bool) {
+func (h *RecommendationsHandler) swipeCards(ctx context.Context, candidates []mergedItem, enriched watchTonightEnrichment, limit int, art imagesize.Request) ([]swipeCardResponse, bool) {
 	// First pass: build enriched items and collect cast lookup IDs.
 	type enrichedCard struct {
 		item    sectionItemResponse
@@ -199,6 +224,18 @@ func (h *RecommendationsHandler) swipeCards(ctx context.Context, candidates []me
 	castLookupIDs := make([]string, 0, limit)
 	castLookupSeen := make(map[string]struct{}, limit)
 	more := false
+	// Artwork is resolved only for the cards this page returns; the rest of
+	// the hydration window only decides whether more remain.
+	shown := make(map[string]*models.MediaItem, limit)
+	for _, m := range candidates {
+		if len(shown) == limit {
+			break
+		}
+		if mi := enriched.items[m.scored.MediaItemID]; mi != nil {
+			shown[mi.ContentID] = mi
+		}
+	}
+	artwork := h.featuredCardArtwork(ctx, shown, art)
 
 	for _, m := range candidates {
 		mi, ok := enriched.items[m.scored.MediaItemID]
@@ -210,7 +247,7 @@ func (h *RecommendationsHandler) swipeCards(ctx context.Context, candidates []me
 			break
 		}
 
-		item := h.buildSectionItem(ctx, mi, enriched.overlays, enriched.states)
+		item := h.buildSectionItem(mi, enriched.overlays, enriched.states, artwork[mi.ContentID])
 		item.ItemSource = m.source
 
 		// Apply CW/Next-Up metadata.
@@ -245,6 +282,7 @@ func (h *RecommendationsHandler) swipeCards(ctx context.Context, candidates []me
 			if epMeta.EpisodeNumber != nil && item.EpisodeNumber == nil {
 				item.EpisodeNumber = epMeta.EpisodeNumber
 			}
+			item.applyEpisodeCardMeta(&epMeta)
 		}
 
 		// Resolve cast lookup ID: use series ID for episodes.
@@ -537,33 +575,13 @@ func buildCastSlice(castMap map[string][]models.ItemPerson, lookupID string) []s
 		cast = append(cast, swipeCardCastMember{
 			Name:      p.Name,
 			Character: p.Character,
+			photoPath: p.PhotoPath,
 		})
 		if len(cast) >= maxCastPerCard {
 			break
 		}
 	}
 	return cast
-}
-
-// parseGenreParams validates and deduplicates genre query params.
-func parseGenreParams(raw []string) []string {
-	if len(raw) == 0 {
-		return nil
-	}
-	seen := make(map[string]struct{}, len(raw))
-	genres := make([]string, 0, len(raw))
-	for _, g := range raw {
-		g = strings.TrimSpace(g)
-		if _, valid := knownGenres[g]; !valid {
-			continue
-		}
-		if _, dup := seen[g]; dup {
-			continue
-		}
-		seen[g] = struct{}{}
-		genres = append(genres, g)
-	}
-	return genres
 }
 
 func discoverCandidatePoolSize(limit int, genreCount int) int {
@@ -594,25 +612,6 @@ func mapKeys(values map[string]struct{}) []string {
 	return keys
 }
 
-// parseExcludeIDs extracts and caps the exclude_ids query params.
-func parseExcludeIDs(raw []string) map[string]struct{} {
-	if len(raw) == 0 {
-		return nil
-	}
-	ids := make(map[string]struct{}, len(raw))
-	for _, id := range raw {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
-		}
-		ids[id] = struct{}{}
-		if len(ids) >= maxExcludeIDs {
-			break
-		}
-	}
-	return ids
-}
-
 // Card is the section card the swipe card wraps. The v1 body carries runtime
 // on the swipe card itself, not on the embedded section item, so the card
 // view surfaces that outer member.
@@ -626,8 +625,11 @@ func (c swipeCardResponse) Card() SectionItemView {
 
 // NewWatchTonightCardView wraps a card with its source, runtime, and cast; the
 // v2 tests build views with it since the embedded card is unexported. Runtime
-// is taken separately because production sets it on the swipe card, not on
-// the embedded section item.
+// is the swipe card's own member, which Card prefers over the embedded card's.
 func NewWatchTonightCardView(card SectionItemView, source string, runtime int, cast []WatchTonightCastMemberView) WatchTonightCardView {
 	return swipeCardResponse{sectionItemResponse: card, WatchTonightSource: source, Runtime: runtime, Cast: cast}
+}
+
+func isHTTPImageURL(path string) bool {
+	return strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://")
 }

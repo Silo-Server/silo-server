@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -15,8 +16,9 @@ import (
 
 // TestFindTasteProfileCandidatesWithGenresAboveEfSearchMaximumDB covers the
 // Watch Tonight discover path: a genre filter multiplies the candidate pool by
-// five, so a pool of 240 asks pgvector for 1200 ANN candidates, above the
-// largest hnsw.ef_search it accepts.
+// five, so a pool of 240 asks pgvector for 1200 ANN candidates, more than the
+// largest hnsw.ef_search it accepts. The scan runs with a fixed
+// hnsw.ef_search and iterative scans, whatever its LIMIT.
 func TestFindTasteProfileCandidatesWithGenresAboveEfSearchMaximumDB(t *testing.T) {
 	newEngineTestPool(t) // skips without a migrated database
 	ctx := t.Context()
@@ -60,7 +62,20 @@ func TestFindTasteProfileCandidatesWithGenresAboveEfSearchMaximumDB(t *testing.T
 		embedding[i] = float32(i%2 + 1)
 	}
 	const watchTonightGenrePool = 240
-	items, genres, err := NewRepo(pool).FindTasteProfileCandidates(ctx, embedding, nil, []string{"Drama"}, watchTonightGenrePool, catalog.AccessFilter{})
+	repo := NewRepo(pool)
+	if err := repo.withHNSWCandidateScan(ctx, func(tx pgx.Tx) error {
+		var efSearch, iterativeScan string
+		if err := tx.QueryRow(ctx, `SELECT current_setting('hnsw.ef_search'), current_setting('hnsw.iterative_scan')`).Scan(&efSearch, &iterativeScan); err != nil {
+			return err
+		}
+		if efSearch != strconv.Itoa(hnswEfSearch) || iterativeScan != "relaxed_order" {
+			t.Errorf("candidate scan runs with ef_search=%s iterative_scan=%s", efSearch, iterativeScan)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	items, genres, err := repo.FindTasteProfileCandidates(ctx, embedding, nil, []string{"Drama"}, watchTonightGenrePool, catalog.AccessFilter{})
 	if err != nil {
 		t.Fatalf("FindTasteProfileCandidates with genres and limit %d: %v", watchTonightGenrePool, err)
 	}

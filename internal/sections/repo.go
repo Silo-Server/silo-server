@@ -33,13 +33,13 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 }
 
 const sectionColumns = `id, scope, library_id, position, section_type, title, featured,
-	item_limit, config, enabled, created_at, updated_at`
+	item_limit, config, enabled, web_only, title_key, title_args, created_at, updated_at`
 
 func scanSection(row pgx.Row) (*PageSection, error) {
 	var s PageSection
 	err := row.Scan(
 		&s.ID, &s.Scope, &s.LibraryID, &s.Position, &s.SectionType, &s.Title,
-		&s.Featured, &s.ItemLimit, &s.Config, &s.Enabled, &s.CreatedAt, &s.UpdatedAt,
+		&s.Featured, &s.ItemLimit, &s.Config, &s.Enabled, &s.WebOnly, &s.TitleKey, &s.TitleArgs, &s.CreatedAt, &s.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -56,7 +56,7 @@ func scanSections(rows pgx.Rows) ([]*PageSection, error) {
 		var s PageSection
 		err := rows.Scan(
 			&s.ID, &s.Scope, &s.LibraryID, &s.Position, &s.SectionType, &s.Title,
-			&s.Featured, &s.ItemLimit, &s.Config, &s.Enabled, &s.CreatedAt, &s.UpdatedAt,
+			&s.Featured, &s.ItemLimit, &s.Config, &s.Enabled, &s.WebOnly, &s.TitleKey, &s.TitleArgs, &s.CreatedAt, &s.UpdatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning section row: %w", err)
@@ -77,12 +77,12 @@ func (r *Repository) create(ctx context.Context, s *PageSection) (*PageSection, 
 		s.Config = json.RawMessage(`{}`)
 	}
 
-	query := fmt.Sprintf(`INSERT INTO page_sections (%s) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW(),NOW())
+	query := fmt.Sprintf(`INSERT INTO page_sections (%s) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW(),NOW())
 		RETURNING %s`, sectionColumns, sectionColumns)
 
 	return scanSection(r.query(ctx).QueryRow(ctx, query,
 		s.ID, s.Scope, s.LibraryID, s.Position, s.SectionType, s.Title,
-		s.Featured, s.ItemLimit, s.Config, s.Enabled,
+		s.Featured, s.ItemLimit, s.Config, s.Enabled, s.WebOnly, s.TitleKey, s.TitleArgs,
 	))
 }
 
@@ -160,14 +160,14 @@ func (r *Repository) ListTrendingDiscoverConfigs(ctx context.Context) ([]json.Ra
 	return out, rows.Err()
 }
 
-// ListTrendingDiscoverSections returns enabled trending sections with their
-// identities so profile overrides can contribute their effective configs.
-func (r *Repository) ListTrendingDiscoverSections(ctx context.Context) ([]*PageSection, error) {
+// ListEnabledSections returns the enabled sections of one type with their
+// identities, so profile overrides can contribute their effective configs.
+func (r *Repository) ListEnabledSections(ctx context.Context, sectionType SectionType) ([]*PageSection, error) {
 	rows, err := r.query(ctx).Query(ctx, fmt.Sprintf(`
 		SELECT %s FROM page_sections
-		WHERE section_type = 'trending_discover' AND enabled = true`, sectionColumns))
+		WHERE section_type = $1 AND enabled = true`, sectionColumns), string(sectionType))
 	if err != nil {
-		return nil, fmt.Errorf("listing trending_discover sections: %w", err)
+		return nil, fmt.Errorf("listing %s sections: %w", sectionType, err)
 	}
 	defer rows.Close()
 	return scanSections(rows)
@@ -177,12 +177,12 @@ func (r *Repository) ListTrendingDiscoverSections(ctx context.Context) ([]*PageS
 func (r *Repository) update(ctx context.Context, s *PageSection) error {
 	query := `UPDATE page_sections SET
 		position = $2, section_type = $3, title = $4, featured = $5,
-		item_limit = $6, config = $7, enabled = $8, updated_at = NOW()
+		item_limit = $6, config = $7, enabled = $8, web_only = $9, updated_at = NOW()
 		WHERE id = $1`
 
 	tag, err := r.query(ctx).Exec(ctx, query,
 		s.ID, s.Position, s.SectionType, s.Title, s.Featured,
-		s.ItemLimit, s.Config, s.Enabled,
+		s.ItemLimit, s.Config, s.Enabled, s.WebOnly,
 	)
 	if err != nil {
 		return fmt.Errorf("updating section: %w", err)
@@ -195,6 +195,8 @@ func (r *Repository) update(ctx context.Context, s *PageSection) error {
 
 // ClearFeaturedForSurface unsets featured on every other section in the same
 // home or library surface. This keeps the hero invariant owned by the backend.
+// web_only goes with featured, so a row that stops being the hero goes back
+// to every client.
 func (r *Repository) clearFeaturedForSurface(ctx context.Context, scope string, libraryID *int, exceptID string) error {
 	var libraryArg any
 	if libraryID != nil {
@@ -202,7 +204,7 @@ func (r *Repository) clearFeaturedForSurface(ctx context.Context, scope string, 
 	}
 	_, err := r.query(ctx).Exec(ctx, `
 		UPDATE page_sections
-		SET featured = false, updated_at = NOW()
+		SET featured = false, web_only = false, updated_at = NOW()
 		WHERE scope = $1
 		  AND library_id IS NOT DISTINCT FROM $2
 		  AND featured = true
@@ -320,7 +322,7 @@ type LibraryCollectionReferenceCount struct {
 func (r *Repository) ListLibraryCollectionReferences(ctx context.Context, collectionID string) ([]LibraryCollectionReference, error) {
 	rows, err := r.query(ctx).Query(ctx, `
 		SELECT s.id, s.scope, s.library_id, s.position, s.section_type, s.title, s.featured,
-			s.item_limit, s.config, s.enabled, s.created_at, s.updated_at,
+			s.item_limit, s.config, s.enabled, s.web_only, s.created_at, s.updated_at,
 			(SELECT COUNT(*) FROM page_sections p
 			 WHERE p.scope = s.scope AND p.library_id IS NOT DISTINCT FROM s.library_id)
 		FROM page_sections s
@@ -336,7 +338,7 @@ func (r *Repository) ListLibraryCollectionReferences(ctx context.Context, collec
 		s := &ref.PageSection
 		if err := rows.Scan(
 			&s.ID, &s.Scope, &s.LibraryID, &s.Position, &s.SectionType, &s.Title,
-			&s.Featured, &s.ItemLimit, &s.Config, &s.Enabled, &s.CreatedAt, &s.UpdatedAt,
+			&s.Featured, &s.ItemLimit, &s.Config, &s.Enabled, &s.WebOnly, &s.CreatedAt, &s.UpdatedAt,
 			&ref.PageRowCount,
 		); err != nil {
 			return nil, fmt.Errorf("scanning library collection section reference: %w", err)
@@ -439,11 +441,11 @@ func (r *Repository) restoreDefaults(ctx context.Context, scope string, libraryI
 		if cfg == nil {
 			cfg = json.RawMessage(`{}`)
 		}
-		query := fmt.Sprintf(`INSERT INTO page_sections (%s) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW(),NOW())
+		query := fmt.Sprintf(`INSERT INTO page_sections (%s) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW(),NOW())
 			RETURNING %s`, sectionColumns, sectionColumns)
 		s, err := scanSection(tx.QueryRow(ctx, query,
 			id, d.Scope, d.LibraryID, d.Position, d.SectionType, d.Title,
-			d.Featured, d.ItemLimit, cfg, d.Enabled,
+			d.Featured, d.ItemLimit, cfg, d.Enabled, d.WebOnly, d.TitleKey, d.TitleArgs,
 		))
 		if err != nil {
 			return nil, fmt.Errorf("inserting default section %q: %w", d.Title, err)
@@ -594,14 +596,15 @@ func (r *Repository) ensureHomeContinueListeningSection(ctx context.Context) (*P
 	if err != nil {
 		return nil, fmt.Errorf("generate section id: %w", err)
 	}
-	query := fmt.Sprintf(`INSERT INTO page_sections (%s) VALUES ($1,'home',NULL,$2,$3,$4,false,20,$5,true,NOW(),NOW())
+	query := fmt.Sprintf(`INSERT INTO page_sections (%s) VALUES ($1,'home',NULL,$2,$3,$4,false,20,$5,true,false,$6,NULL,NOW(),NOW())
 		RETURNING %s`, sectionColumns, sectionColumns)
 	created, err := scanSection(tx.QueryRow(ctx, query,
 		id,
 		insertPosition,
 		SectionContinueWatching,
-		"Continue Listening",
+		titleContinueListening,
 		ContinueTypeConfig(ContinueTypeListening),
+		defaultTitleKeys[titleContinueListening],
 	))
 	if err != nil {
 		return nil, fmt.Errorf("creating home continue listening section: %w", err)
@@ -664,13 +667,39 @@ func (r *Repository) syncGeneratedHomeLibraryRecentTitles(ctx context.Context, l
 		return fmt.Errorf("listing generated home sections: %w", err)
 	}
 
+	// A row keyed as a generated library row still holds the server's
+	// title, whatever English wrote it, so it takes the library's current
+	// name. Reading that name here, rather than trusting this rename's,
+	// keeps a rename that lost a race from undoing a newer one, and lets
+	// the next rename repair a row an earlier sync missed. Other rows keep
+	// the text check against the old name.
+	var currentName string
+	if err := r.query(ctx).QueryRow(ctx, `SELECT name FROM media_folders WHERE id = $1`, libraryID).Scan(&currentName); err != nil {
+		return fmt.Errorf("reading library %d name: %w", libraryID, err)
+	}
 	for _, section := range sections {
-		if !ShouldSyncGeneratedHomeLibraryRecentTitle(section, oldLibraryName) {
+		keyed := section.TitleKey != "" && section.TitleKey == generatedHomeLibraryRecentTitleKey(section)
+		name := newLibraryName
+		switch {
+		case keyed && section.TitleArgs[titleArgLibrary] == currentName:
+			continue
+		case keyed:
+			name = currentName
+		case !ShouldSyncGeneratedHomeLibraryRecentTitle(section, oldLibraryName):
 			continue
 		}
-		section.Title = GeneratedHomeLibraryRecentSyncedTitle(section, newLibraryName)
+		section.Title = GeneratedHomeLibraryRecentSyncedTitle(section, name)
 		if err := r.Update(ctx, section); err != nil {
 			return fmt.Errorf("updating generated home section %s: %w", section.ID, err)
+		}
+		if !keyed {
+			continue
+		}
+		// The update changed the title, so the table's trigger cleared the
+		// key; the new title is still the server's, with the new name.
+		if _, err := r.query(ctx).Exec(ctx, `UPDATE page_sections SET title_key = $2, title_args = $3 WHERE id = $1`,
+			section.ID, section.TitleKey, map[string]string{titleArgLibrary: name}); err != nil {
+			return fmt.Errorf("keying generated home section %s: %w", section.ID, err)
 		}
 	}
 

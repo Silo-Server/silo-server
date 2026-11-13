@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { v2, V2ProblemError } from "@/api/v2/request";
 import AdminApiKeys from "./AdminApiKeys";
@@ -10,7 +11,11 @@ const state = vi.hoisted(() => ({
   users: [{ id: 2, username: "Admin", is_owner: false }],
   usersPending: false,
   usersFailed: false,
+  copyTextToClipboard: vi.fn(),
+  toastSuccess: vi.fn(),
 }));
+vi.mock("@/lib/clipboard", () => ({ copyTextToClipboard: state.copyTextToClipboard }));
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: state.toastSuccess } }));
 vi.mock("@/api/v2/request", async (original) => ({
   ...(await original<typeof import("@/api/v2/request")>()),
   v2: vi.fn(),
@@ -56,7 +61,10 @@ function baseline(op: string, options: unknown) {
     return reply(options, {
       available: true,
       guarded_configuration: true,
-      scopes: [],
+      scopes: [
+        { name: "admin:monitor:read", description: "Monitor the server read-only." },
+        { name: "libraries:read", description: "Discover libraries." },
+      ],
       rate_tiers: ["standard", "elevated"],
     });
   if (op === "GET /api/v2/admin/api-keys")
@@ -76,17 +84,25 @@ function mount() {
   const view = render(tree());
   return { client, ...view, refresh: () => view.rerender(tree()) };
 }
+class MockResizeObserver implements ResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
 beforeEach(() => {
   HTMLElement.prototype.scrollIntoView = vi.fn();
+  vi.stubGlobal("ResizeObserver", MockResizeObserver);
   state.profile = "owner";
   state.viewer = 2;
   state.users = [{ id: 2, username: "Admin", is_owner: false }];
   state.usersPending = false;
   state.usersFailed = false;
   vi.mocked(v2).mockImplementation(baseline);
+  state.copyTextToClipboard.mockReset().mockResolvedValue(undefined);
 });
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
 it("clears creation-only secret and mutation data on close", async () => {
@@ -230,4 +246,65 @@ it.each([
   await screen.findByText("Automation");
   expect(screen.queryByRole("button", { name: "Edit rate limit for Automation" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Revoke API key Automation" })).toBeNull();
+});
+
+const CREATED_KEY = "silo_created_key_9876543210";
+
+async function createKey() {
+  vi.mocked(v2).mockImplementation((op, options) =>
+    op === "POST /api/v2/admin/api-keys"
+      ? reply(options, { ...row, key: CREATED_KEY }, { Location: "/api/v2/admin/api-keys/7" })
+      : baseline(op, options),
+  );
+  mount();
+  await userEvent.click(await screen.findByRole("button", { name: /Create Key/ }));
+  await userEvent.type(screen.getByLabelText("Label"), "Deploy bot");
+  await userEvent.click(screen.getByRole("button", { name: "Create" }));
+  await screen.findByText(CREATED_KEY);
+}
+
+it("closes the create dialog once the new key is copied", async () => {
+  await createKey();
+
+  await userEvent.click(screen.getByRole("button", { name: /Copy & Close/ }));
+
+  await waitFor(() => expect(state.copyTextToClipboard).toHaveBeenCalledWith(CREATED_KEY));
+  expect(state.toastSuccess).toHaveBeenCalledWith("Copied to clipboard");
+  await waitFor(() => expect(screen.queryByText(CREATED_KEY)).not.toBeInTheDocument());
+});
+
+it("keeps the new key on screen when the copy fails", async () => {
+  // The key is only ever shown once, so a failed copy must not close the dialog.
+  state.copyTextToClipboard.mockRejectedValue(new Error("clipboard blocked"));
+  await createKey();
+
+  await userEvent.click(screen.getByRole("button", { name: /Copy & Close/ }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Couldn't copy — select the key and copy it manually",
+  );
+  expect(state.toastSuccess).not.toHaveBeenCalled();
+  expect(screen.getByText(CREATED_KEY)).toBeInTheDocument();
+});
+
+it("sends only the chosen scopes and never an empty scoped key", async () => {
+  vi.mocked(v2).mockImplementation((op, options) =>
+    op === "POST /api/v2/admin/api-keys"
+      ? reply(options, { ...row, key: CREATED_KEY }, { Location: "/api/v2/admin/api-keys/7" })
+      : baseline(op, options),
+  );
+  mount();
+  await userEvent.click(await screen.findByRole("button", { name: /Create Key/ }));
+  await userEvent.type(screen.getByLabelText("Label"), "Monitor");
+  await userEvent.click(screen.getByRole("radio", { name: /Selected scopes/ }));
+  // An empty scope list is a full-access key on the server.
+  expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+  await userEvent.click(screen.getByRole("checkbox", { name: "admin:monitor:read" }));
+  await userEvent.click(screen.getByRole("button", { name: "Create" }));
+  await screen.findByText(CREATED_KEY);
+  const posts = vi.mocked(v2).mock.calls.filter(([op]) => op === "POST /api/v2/admin/api-keys");
+  expect(posts).toHaveLength(1);
+  expect(posts[0]![1]).toMatchObject({
+    body: { label: "Monitor", scopes: ["admin:monitor:read"] },
+  });
 });

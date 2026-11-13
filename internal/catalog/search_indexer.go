@@ -11,11 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/database/pglock"
-	"github.com/Silo-Server/silo-server/internal/embeddingvectors"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pgvector/pgvector-go"
+
+	"github.com/Silo-Server/silo-server/internal/database/pglock"
+	"github.com/Silo-Server/silo-server/internal/embeddingvectors"
 )
 
 type SearchIndexProgressReporter interface {
@@ -763,7 +764,7 @@ func (i *CatalogSearchIndexer) CheckConnection(ctx context.Context, settings Cat
 	if err != nil {
 		return err
 	}
-	return client.Health(ctx)
+	return client.checkConnection(ctx, settings.MeilisearchIndex)
 }
 
 func catalogSearchMeilisearchSettings(embedder string, semanticEnabled, binaryQuantized bool) map[string]any {

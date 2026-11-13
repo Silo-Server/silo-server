@@ -33,6 +33,18 @@ type pendingCompatPlaybackUpdate struct {
 	apply       func(*PlaybackSession) error
 }
 
+// compatUpdateRejectedError reports that an Update callback rejected the
+// DB-authoritative row, typically because another replica committed first. It
+// carries that row, with this process's still-pending updates applied, so the
+// cache can be brought back in line with it.
+type compatUpdateRejectedError struct {
+	current *PlaybackSession
+	err     error
+}
+
+func (e *compatUpdateRejectedError) Error() string { return e.err.Error() }
+func (e *compatUpdateRejectedError) Unwrap() error { return e.err }
+
 type compatCacheGeneration struct {
 	epoch uint64
 	value uint64
@@ -168,13 +180,13 @@ func NewDurableCompatPlaybackStore(pool *pgxpool.Pool, ttl time.Duration, now fu
 	if now == nil {
 		now = time.Now
 	}
-	if ttl <= 0 {
-		ttl = 6 * time.Hour
-	}
+	mem := NewPlaybackSessionStore(ttl, now)
 	return &DurableCompatPlaybackStore{
-		mem:              NewPlaybackSessionStore(ttl, now),
-		pool:             pool,
-		ttl:              ttl,
+		mem:  mem,
+		pool: pool,
+		// Rows expire with the lifetime the cache resolved, including its
+		// default for a non-positive ttl.
+		ttl:              mem.ttl,
 		now:              now,
 		validatedIDs:     make(map[string]time.Time),
 		validatedTokens:  make(map[string]time.Time),
@@ -219,37 +231,48 @@ func (d *DurableCompatPlaybackStore) Put(session PlaybackSession) {
 // unstarted negotiations for the same compat token, client device, and item.
 // The advisory transaction lock makes the replacement atomic across Silo
 // processes; the in-memory mutation is likewise atomic for the local process.
-func (d *DurableCompatPlaybackStore) PutNegotiated(session PlaybackSession) {
+//
+// Unlike Put, a failed write is returned and the negotiation is dropped from
+// the cache: nothing has used its PlaySessionId yet, and an ID only this
+// process could resolve would fail on every other replica. The cached
+// negotiations it displaced are restored.
+func (d *DurableCompatPlaybackStore) PutNegotiated(session PlaybackSession) error {
 	if d.pool == nil {
-		d.mem.PutNegotiated(session)
-		return
+		return d.mem.PutNegotiated(session)
 	}
 
 	scope := negotiatedPlaybackScope(session.CompatToken, session.ClientDeviceID, session.RouteItemID)
 	unlockSession := d.lockSessionMutation(scope)
 	defer unlockSession()
 	d.cacheMutationMu.RLock()
-	stored, locallyRemoved := d.mem.putNegotiatedNormalized(session)
+	stored, displaced := d.mem.putNegotiatedNormalized(session)
 	defer d.finishCacheMutation(stored.ID, stored.CompatToken)
 	d.markIDValidated(stored.ID)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	durablyRemoved, err := d.replaceUnstartedNegotiation(ctx, stored)
+	d.clearUnpersisted(stored.ID)
 	if err != nil {
-		d.markUnpersisted(stored.ID)
 		slog.WarnContext(ctx, "persist negotiated compat playback session failed",
 			"component", "jellycompat",
 			"error", err,
-			"play_session_id", stored.ID,
+			"play_session_id", playSessionFingerprint(stored.ID),
 		)
-	} else {
-		d.clearUnpersisted(stored.ID)
+		// The transaction rolled back, so the displaced negotiations are still
+		// durable and the client may hold their URLs: put them back in the
+		// cache with their bookkeeping untouched.
+		d.mem.undoNegotiated(stored.ID, displaced)
+		for _, s := range displaced {
+			d.bumpCacheGenerations(s.ID, "")
+		}
+		d.invalidateValidation("", stored.CompatToken)
+		return err
 	}
 
-	removed := make(map[string]struct{}, len(locallyRemoved)+len(durablyRemoved))
-	for _, id := range locallyRemoved {
-		removed[id] = struct{}{}
+	removed := make(map[string]struct{}, len(displaced)+len(durablyRemoved))
+	for _, s := range displaced {
+		removed[s.ID] = struct{}{}
 	}
 	for _, id := range durablyRemoved {
 		removed[id] = struct{}{}
@@ -261,6 +284,7 @@ func (d *DurableCompatPlaybackStore) PutNegotiated(session PlaybackSession) {
 		d.bumpCacheGenerations(id, "")
 	}
 	d.invalidateValidation("", stored.CompatToken)
+	return nil
 }
 
 func (d *DurableCompatPlaybackStore) replaceUnstartedNegotiation(
@@ -346,12 +370,20 @@ func negotiatedPlaybackScope(compatToken, clientDeviceID, routeItemID string) st
 // session. Query failures preserve a still-valid cache entry: a temporary DB
 // outage must not interrupt an already-playing stream.
 func (d *DurableCompatPlaybackStore) Get(id string) (*PlaybackSession, bool) {
+	session, ok, _ := d.Lookup(id)
+	return session, ok
+}
+
+// Lookup is Get that reports a failed durable read when no cached copy can
+// stand in for the row, so a PlaySessionId grant can answer a retryable error
+// instead of treating an unreadable session as absent.
+func (d *DurableCompatPlaybackStore) Lookup(id string) (*PlaybackSession, bool, error) {
 	if d.pool == nil {
-		return d.mem.Get(id)
+		return d.mem.Lookup(id)
 	}
 	cached, cachedOK := d.mem.Get(id)
 	if cachedOK && cached.UpstreamSessionID != "" && !d.shouldRevalidateID(id) {
-		return cached, cachedOK
+		return cached, cachedOK, nil
 	}
 	if !cachedOK {
 		// Cold callers must load (or share a future single-flight); another
@@ -361,30 +393,33 @@ func (d *DurableCompatPlaybackStore) Get(id string) (*PlaybackSession, bool) {
 	generation := d.idGenerationSnapshot(id)
 	s, ok, err := d.load(id)
 	if err != nil {
-		return cached, cachedOK
+		if cachedOK {
+			return cached, true, nil
+		}
+		return nil, false, err
 	}
 	d.cacheMutationMu.Lock()
 	defer d.cacheMutationMu.Unlock()
 	if generation != d.idGenerationSnapshot(id) {
 		d.invalidateValidation(id, "")
-		return d.mem.Get(id)
+		return d.mem.Lookup(id)
 	}
 	if ok && s.Terminal {
 		d.clearPendingUpdates(id)
 	} else if ok && d.hasPendingUpdates(id) {
 		if current, currentOK := d.mem.Get(id); currentOK {
-			return current, true
+			return current, true, nil
 		}
 	}
 	if ok && !s.Terminal {
 		if local, localOK := d.mem.GetFinalizable(id, s.CompatToken); localOK && local.Terminal {
-			return nil, false
+			return nil, false, nil
 		}
 	}
 	if !ok {
 		compatToken := d.mem.compatTokenForID(id)
 		if current, currentOK := d.mem.GetFinalizable(id, compatToken); currentOK && d.repairUnpersisted(current) {
-			return d.mem.Get(id)
+			return d.mem.Lookup(id)
 		}
 		d.clearUnpersisted(id)
 		d.clearPendingUpdates(id)
@@ -392,12 +427,12 @@ func (d *DurableCompatPlaybackStore) Get(id string) (*PlaybackSession, bool) {
 		if cachedOK || compatToken != "" {
 			d.bumpCacheGenerations(id, "")
 		}
-		return nil, false
+		return nil, false, nil
 	}
 	d.clearUnpersisted(id)
 	d.mem.Put(*s)
 	d.bumpCacheGenerations(id, s.CompatToken)
-	return d.mem.Get(id)
+	return d.mem.Lookup(id)
 }
 
 // Delete removes the session from both the cache and Postgres.
@@ -418,7 +453,7 @@ func (d *DurableCompatPlaybackStore) Delete(id string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if _, err := d.pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE id = $1`, id); err != nil {
-		slog.Warn("delete compat playback session failed", "error", err, "play_session_id", id)
+		slog.Warn("delete compat playback session failed", "error", err, "play_session_id", playSessionFingerprint(id))
 	}
 }
 
@@ -469,6 +504,205 @@ func (d *DurableCompatPlaybackStore) HideFromRouting(id, compatToken string) err
 	return nil
 }
 
+// RetireUpstreamSession lets the row decide. One statement (retireUpstreamRows)
+// retires it only while it still names this upstream session and a stream
+// the server produces, and nothing else here writes a row as retired. A play
+// another server has moved to direct play or to a new upstream session is
+// therefore left alone, whatever this process's cached copy says. A server
+// that still routes the play reads the terminal row at its next revalidation
+// that succeeds; it tries one every compatCacheRevalidationInterval.
+//
+// This process's cached copy is used in three cases:
+//   - The statement matched nothing and the copy owes the row earlier writes,
+//     which may include this upstream session. They go through Update, which
+//     replays the ones that still apply and leaves the copy holding the row's
+//     state, and the statement runs once more. Between the two the row can
+//     be routable under this upstream session. A replay that fails counts
+//     as a failed statement.
+//   - The play never reached Postgres, so there is no row to ask or to write.
+//     The copy is hidden here; a hidden copy is never persisted as routable.
+//   - The statement failed. The copy is hidden here without a row write and
+//     keeps the writes it owes the row, and the error has the caller retry.
+//     The retry runs the statement again. If that matches nothing and the
+//     hidden copy still owes writes, retireHiddenCopy replays them and
+//     retires the row in one transaction, when the row then names this
+//     upstream session. The copy stays hidden even if the row turns out to
+//     have moved.
+func (d *DurableCompatPlaybackStore) RetireUpstreamSession(upstreamSessionID string) (bool, error) {
+	// An empty id would match every play that has not started yet.
+	if upstreamSessionID == "" {
+		return false, nil
+	}
+	if d.pool == nil {
+		return d.mem.RetireUpstreamSession(upstreamSessionID)
+	}
+	rows, err := d.retireUpstreamRows(upstreamSessionID)
+	if err == nil && len(rows) == 0 {
+		if retired, hiddenErr := d.retireHiddenCopy(upstreamSessionID); retired || hiddenErr != nil {
+			return retired, hiddenErr
+		}
+		var replayed bool
+		if replayed, err = d.replayOwedWrites(upstreamSessionID); replayed && err == nil {
+			rows, err = d.retireUpstreamRows(upstreamSessionID)
+		}
+	}
+	for _, row := range rows {
+		// Hide a copy this process caches now; read any other from the row.
+		d.invalidateValidation(row[0], row[1])
+		_ = d.hideCachedCopy(row[0], row[1])
+	}
+	if len(rows) > 0 {
+		return true, nil
+	}
+	play, ok := d.cachedRetirablePlay(upstreamSessionID)
+	if !ok {
+		return false, err
+	}
+	if err == nil && !d.isUnpersisted(play.ID) {
+		// The row answered, and this copy is behind it: read it again
+		// before routing the play from the copy.
+		d.invalidateValidation(play.ID, play.CompatToken)
+		return false, nil
+	}
+	// A failed statement keeps the writes the copy owes the row: the retry
+	// needs them to find and retire the row (retireHiddenCopy).
+	return d.hideCopyStillOnUpstream(play.ID, play.CompatToken, upstreamSessionID, err != nil), err
+}
+
+// replayOwedWrites sends the writes that this process's routable copy on an
+// upstream session owes its row through Update, and reports whether there
+// were any. A replay that fails is a failed retirement, not an answer from
+// the row: the copy still routes the upstream session and the row has not
+// heard of it, so the error goes back to the caller.
+func (d *DurableCompatPlaybackStore) replayOwedWrites(upstreamSessionID string) (bool, error) {
+	play, ok := d.cachedRetirablePlay(upstreamSessionID)
+	if !ok || d.isUnpersisted(play.ID) || !d.hasPendingUpdates(play.ID) {
+		return false, nil
+	}
+	err := d.Update(play.ID, func(*PlaybackSession) error { return nil })
+	if errors.Is(err, ErrSessionNotFound) {
+		// The copy went away meanwhile; the row answers on its own.
+		err = nil
+	}
+	return true, err
+}
+
+// hideCopyStillOnUpstream hides this process's copy of a play, and writes no
+// row, only while the copy still names the upstream session with a retired
+// play method: a switch that landed after the caller looked the copy up
+// leaves the play it attached alone.
+func (d *DurableCompatPlaybackStore) hideCopyStillOnUpstream(id, compatToken, upstreamSessionID string, keepOwedWrites bool) bool {
+	unlockSession := d.lockSessionMutation(id)
+	defer unlockSession()
+	d.cacheMutationMu.RLock()
+	defer d.finishCacheMutation(id, compatToken)
+	if !d.mem.retireIfOnUpstream(id, upstreamSessionID) {
+		return false
+	}
+	if !keepOwedWrites {
+		d.clearPendingUpdates(id)
+	}
+	return true
+}
+
+// retireHiddenCopy finishes a retirement that a failed statement left half
+// done: this process hid its copy and kept the writes it owed the row, which
+// may include the upstream session itself. One transaction replays those
+// writes onto the row and retires it if it then names the upstream session
+// with a retired play method, so this step does not leave the row routable
+// under that session, and the copy stays hidden. A row that names anything
+// else is left as it is, and the owed writes are dropped with the hidden
+// copy.
+//
+// Until this runs, an Update by play id on the hidden copy would load the
+// row over it and commit the owed writes, leaving the row routable under the
+// ended session until the next retry retires it. Only a request that was
+// already past its lookup when the copy was hidden makes such an Update.
+func (d *DurableCompatPlaybackStore) retireHiddenCopy(upstreamSessionID string) (bool, error) {
+	play, ok := d.mem.findOnUpstream(upstreamSessionID, true)
+	if !ok || !adminEndRetiresPlay(play.UpstreamPlayMethod) || !d.hasPendingUpdates(play.ID) {
+		return false, nil
+	}
+	unlockSession := d.lockSessionMutation(play.ID)
+	defer unlockSession()
+	committed, err := d.updateDB(play.ID, d.pendingUpdatesSnapshot(play.ID), func(row *PlaybackSession) error {
+		if row.UpstreamSessionID != upstreamSessionID || !adminEndRetiresPlay(row.UpstreamPlayMethod) {
+			return errUpstreamReplaced
+		}
+		row.Terminal = true
+		return nil
+	})
+	var rejected *compatUpdateRejectedError
+	if err != nil && !errors.As(err, &rejected) {
+		// The owed writes stay for the next retry.
+		return false, err
+	}
+	d.clearPendingUpdates(play.ID)
+	d.invalidateValidation(play.ID, play.CompatToken)
+	return committed != nil, nil
+}
+
+// cachedRetirablePlay returns this process's routable copy of the play on an
+// upstream session, when an administrator's end retires its play method.
+func (d *DurableCompatPlaybackStore) cachedRetirablePlay(upstreamSessionID string) (*PlaybackSession, bool) {
+	play, ok := d.mem.FindByUpstreamSessionID(upstreamSessionID)
+	if !ok || !adminEndRetiresPlay(play.UpstreamPlayMethod) {
+		return nil, false
+	}
+	return play, true
+}
+
+// hideCachedCopy is the cache half of HideFromRouting: it hides this
+// process's copy of a play and writes no row. A write by play id could
+// retire a play that another server has since moved.
+func (d *DurableCompatPlaybackStore) hideCachedCopy(id, compatToken string) error {
+	unlockSession := d.lockSessionMutation(id)
+	defer unlockSession()
+	d.cacheMutationMu.RLock()
+	defer d.finishCacheMutation(id, compatToken)
+	if err := d.mem.HideFromRouting(id, compatToken); err != nil {
+		return err
+	}
+	d.clearPendingUpdates(id)
+	return nil
+}
+
+// retireUpstreamRows marks the rows of a server-produced play on an upstream
+// session terminal and returns their id and compat token. It does not take
+// the caller's context: the retirement must finish after the administrator's
+// request is canceled, and the stop fallback has no request.
+func (d *DurableCompatPlaybackStore) retireUpstreamRows(upstreamSessionID string) ([][2]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	rows, err := d.pool.Query(ctx, `
+		UPDATE jellycompat_playback_sessions
+		SET data = jsonb_set(data, '{Terminal}', 'true'::jsonb, true)
+		WHERE data->>'UpstreamSessionID' = $1 AND expires_at > $2
+			AND COALESCE((data->>'Terminal')::boolean, false) = false
+			AND data->>'UpstreamPlayMethod' = ANY($3)
+		RETURNING id, compat_token
+	`, upstreamSessionID, d.now(), adminEndRetiredMethods)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var retired [][2]string
+	for rows.Next() {
+		var id, compatToken string
+		if err := rows.Scan(&id, &compatToken); err != nil {
+			return nil, err
+		}
+		retired = append(retired, [2]string{id, compatToken})
+	}
+	// A result that fails partway does not say whether the statement
+	// committed. Report it as a failed statement, with no rows, so the
+	// caller hides its own copy and retries.
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return retired, nil
+}
+
 // StageTerminal hides a session and persists the provider event under a row
 // lock. This merge keeps an authoritative Stopped event from being overwritten
 // by a later ActiveEncodings fallback on another server process.
@@ -508,7 +742,7 @@ func (d *DurableCompatPlaybackStore) StageTerminal(
 
 	committed, err := d.stageTerminalDB(id, compatToken, event, authoritative)
 	if err != nil {
-		slog.Warn("stage durable compat terminal event failed", "error", err, "play_session_id", id)
+		slog.Warn("stage durable compat terminal event failed", "error", err, "play_session_id", playSessionFingerprint(id))
 		return nil, err
 	}
 	if committed == nil {
@@ -638,13 +872,13 @@ func (d *DurableCompatPlaybackStore) ClaimTerminal(id, compatToken string, claim
 		return nil, ErrSessionNotFound
 	}
 	if err != nil {
-		slog.Warn("claim compat terminal event failed", "error", err, "play_session_id", id)
+		slog.Warn("claim compat terminal event failed", "error", err, "play_session_id", playSessionFingerprint(id))
 		return nil, err
 	}
 
 	var session PlaybackSession
 	if err := json.Unmarshal(raw, &session); err != nil {
-		slog.Warn("unmarshal claimed compat terminal event failed", "error", err, "play_session_id", id)
+		slog.Warn("unmarshal claimed compat terminal event failed", "error", err, "play_session_id", playSessionFingerprint(id))
 		return nil, err
 	}
 	d.mem.Delete(id)
@@ -688,7 +922,7 @@ func (d *DurableCompatPlaybackStore) ReleaseTerminalClaim(
 	`, id, compatToken, claimUntil, claimVersion, fallbackSent).Scan(&raw)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
-			slog.Warn("release compat terminal event claim failed", "error", err, "play_session_id", id)
+			slog.Warn("release compat terminal event claim failed", "error", err, "play_session_id", playSessionFingerprint(id))
 		}
 		d.mem.ReleaseTerminalClaim(id, compatToken, claimUntil, claimVersion, fallbackSent)
 		return
@@ -730,7 +964,7 @@ func (d *DurableCompatPlaybackStore) CompleteTerminal(
 			AND COALESCE((data->>'TerminalEventVersion')::bigint, 0) = $4
 	`, id, compatToken, claimUntil, claimVersion)
 	if err != nil {
-		slog.Warn("complete compat terminal event failed", "error", err, "play_session_id", id)
+		slog.Warn("complete compat terminal event failed", "error", err, "play_session_id", playSessionFingerprint(id))
 		return
 	}
 	if tag.RowsAffected() > 0 {
@@ -802,9 +1036,12 @@ func (d *DurableCompatPlaybackStore) GetFinalizable(id, compatToken string) (*Pl
 // fn to that row, and upserts the result before committing. This stops two
 // processes (or a cache-evicted writer racing another) from clobbering each
 // other's JSON with a blind whole-document upsert — e.g. a transcode-recipe
-// write being lost to a concurrent upstream-session write. The DB step is still
-// best-effort for availability: a DB failure is logged and the in-memory mutation
-// stands, but a successful DB read-modify-write is never silently lost.
+// write being lost to a concurrent upstream-session write. When fn rejects that
+// row, Update returns fn's error and refreshes the cache from the row, so a
+// compare-and-swap that won against a stale cache still loses to another
+// replica's commit. The DB step is still best-effort for availability: a DB
+// failure is logged and the in-memory mutation stands, but a successful DB
+// read-modify-write is never silently lost.
 func (d *DurableCompatPlaybackStore) Update(id string, fn func(*PlaybackSession) error) error {
 	if d.pool == nil {
 		return d.mem.Update(id, fn)
@@ -825,14 +1062,17 @@ func (d *DurableCompatPlaybackStore) Update(id string, fn func(*PlaybackSession)
 		return err
 	}
 	pending := d.pendingUpdatesSnapshot(id)
-	committed, err := d.updateDB(id, func(session *PlaybackSession) error {
-		for _, update := range pending {
-			if err := update.apply(session); err != nil {
-				return err
-			}
-		}
-		return fn(session)
-	})
+	committed, err := d.updateDB(id, pending, fn)
+	var rejected *compatUpdateRejectedError
+	if errors.As(err, &rejected) {
+		// Another writer (usually another replica) changed the row so fn no
+		// longer applies, though it passed against this cache. The row wins:
+		// replace the cache copy fn already mutated and return fn's error, as the
+		// in-memory store would, so compare-and-swap callers learn they lost.
+		d.mem.Put(*rejected.current)
+		d.markIDValidated(id)
+		return rejected.err
+	}
 	if committed != nil {
 		// Refresh the cache from the DB-authoritative committed row so the cache
 		// reflects any concurrent writer's fields that fn merged on top of.
@@ -851,21 +1091,26 @@ func (d *DurableCompatPlaybackStore) Update(id string, fn func(*PlaybackSession)
 		// restart would reload a stale row or 404. A genuinely absent/expired row
 		// and a nil pool are not durability failures and return nil (best-effort,
 		// unchanged) — only real DB round-trip errors propagate.
-		return fmt.Errorf("durably persist compat playback session %s: %w", id, err)
+		return fmt.Errorf("durably persist compat playback session %s: %w", playSessionFingerprint(id), err)
 	}
 	return nil
 }
 
-// updateDB applies fn to the DB-authoritative row inside a transaction using
-// SELECT ... FOR UPDATE, then upserts and commits. It returns the committed
-// session when the round-trip succeeded. A nil pool or a genuinely
-// missing/expired row returns (nil, nil): there is no durable row to update, so
-// this is treated as best-effort (the caller keeps the in-memory mutation), not a
-// durability failure. A real DB round-trip error returns (nil, err) so the caller
-// can learn the session was not durably persisted. fn is expected to be
-// idempotent — it is applied to the cache copy and again to the DB-authoritative
-// copy.
-func (d *DurableCompatPlaybackStore) updateDB(id string, fn func(*PlaybackSession) error) (*PlaybackSession, error) {
+// updateDB replays pending, then applies fn, to the DB-authoritative row inside
+// a transaction using SELECT ... FOR UPDATE, then upserts and commits. It
+// returns the committed session when the round-trip succeeded. A nil pool or a
+// genuinely missing/expired row returns (nil, nil): there is no durable row to
+// update, so this is treated as best-effort (the caller keeps the in-memory
+// mutation), not a durability failure. When fn rejects the row it returns a
+// *compatUpdateRejectedError and writes nothing. A real DB round-trip error
+// returns (nil, err) so the caller can learn the session was not durably
+// persisted. fn is expected to be idempotent — it is applied to the cache copy
+// and again to the DB-authoritative copy.
+func (d *DurableCompatPlaybackStore) updateDB(
+	id string,
+	pending []pendingCompatPlaybackUpdate,
+	fn func(*PlaybackSession) error,
+) (*PlaybackSession, error) {
 	if d.pool == nil {
 		return nil, nil
 	}
@@ -874,7 +1119,7 @@ func (d *DurableCompatPlaybackStore) updateDB(id string, fn func(*PlaybackSessio
 
 	tx, err := d.pool.Begin(ctx)
 	if err != nil {
-		slog.Warn("begin compat playback session update tx failed", "error", err, "play_session_id", id)
+		slog.Warn("begin compat playback session update tx failed", "error", err, "play_session_id", playSessionFingerprint(id))
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
@@ -890,27 +1135,38 @@ func (d *DurableCompatPlaybackStore) updateDB(id string, fn func(*PlaybackSessio
 			// durability failure — best-effort, the in-memory mutation stands.
 			return nil, nil
 		}
-		slog.Warn("load compat playback session for update failed", "error", err, "play_session_id", id)
+		slog.Warn("load compat playback session for update failed", "error", err, "play_session_id", playSessionFingerprint(id))
 		return nil, err
 	}
 
 	var session PlaybackSession
 	if err := json.Unmarshal(raw, &session); err != nil {
-		slog.Warn("unmarshal compat playback session for update failed", "error", err, "play_session_id", id)
+		slog.Warn("unmarshal compat playback session for update failed", "error", err, "play_session_id", playSessionFingerprint(id))
 		return nil, err
 	}
-	if err := fn(&session); err != nil {
-		// The mutation itself rejected the authoritative row; the cache mutation
-		// (already applied) stands. This is a fn/data condition, not an
-		// infrastructure failure, so it is not surfaced as a durability error.
-		slog.Warn("apply compat playback session update failed", "error", err, "play_session_id", id)
-		return nil, nil
+	for _, update := range pending {
+		candidate := session
+		if err := update.apply(&candidate); err != nil {
+			// A write queued after an earlier DB failure no longer applies to the
+			// row, e.g. its compare-and-swap lost to another replica meanwhile.
+			// Drop it; committing consumes it with the rest of the queue.
+			slog.Warn("drop pending compat playback session update", "error", err, "play_session_id", playSessionFingerprint(id))
+			continue
+		}
+		session = candidate
 	}
+	// Like the in-memory store, fn mutates a copy so a rejection leaves session
+	// as the row the caller must adopt.
+	candidate := session
+	if err := fn(&candidate); err != nil {
+		return nil, &compatUpdateRejectedError{current: &session, err: err}
+	}
+	session = candidate
 	session.UpdatedAt = d.now()
 
 	data, err := marshalPlaybackSession(session)
 	if err != nil {
-		slog.Warn("marshal compat playback session for update failed", "error", err, "play_session_id", id)
+		slog.Warn("marshal compat playback session for update failed", "error", err, "play_session_id", playSessionFingerprint(id))
 		return nil, err
 	}
 	expiresAt := session.ExpiresAt
@@ -918,11 +1174,11 @@ func (d *DurableCompatPlaybackStore) updateDB(id string, fn func(*PlaybackSessio
 		expiresAt = d.now().Add(d.ttl)
 	}
 	if _, err := tx.Exec(ctx, upsertSessionQuery, session.ID, session.CompatToken, session.UserID, data, expiresAt); err != nil {
-		slog.Warn("persist compat playback session update failed", "error", err, "play_session_id", id)
+		slog.Warn("persist compat playback session update failed", "error", err, "play_session_id", playSessionFingerprint(id))
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		slog.Warn("commit compat playback session update failed", "error", err, "play_session_id", id)
+		slog.Warn("commit compat playback session update failed", "error", err, "play_session_id", playSessionFingerprint(id))
 		return nil, err
 	}
 	return &session, nil
@@ -1172,7 +1428,7 @@ func (d *DurableCompatPlaybackStore) upsert(ctx context.Context, session Playbac
 	}
 	data, err := marshalPlaybackSession(session)
 	if err != nil {
-		slog.WarnContext(ctx, "marshal compat playback session failed", "component", "jellycompat", "error", err, "play_session_id", session.ID)
+		slog.WarnContext(ctx, "marshal compat playback session failed", "component", "jellycompat", "error", err, "play_session_id", playSessionFingerprint(session.ID))
 		return err
 	}
 	expiresAt := session.ExpiresAt
@@ -1180,7 +1436,7 @@ func (d *DurableCompatPlaybackStore) upsert(ctx context.Context, session Playbac
 		expiresAt = d.now().Add(d.ttl)
 	}
 	if _, err := d.pool.Exec(ctx, upsertSessionQuery, session.ID, session.CompatToken, session.UserID, data, expiresAt); err != nil {
-		slog.WarnContext(ctx, "persist compat playback session failed", "component", "jellycompat", "error", err, "play_session_id", session.ID)
+		slog.WarnContext(ctx, "persist compat playback session failed", "component", "jellycompat", "error", err, "play_session_id", playSessionFingerprint(session.ID))
 		return err
 	}
 	return nil
@@ -1205,7 +1461,7 @@ func (d *DurableCompatPlaybackStore) insertIfAbsent(session *PlaybackSession) (b
 		ON CONFLICT (id) DO NOTHING
 	`, session.ID, session.CompatToken, session.UserID, data, expiresAt)
 	if err != nil {
-		slog.Warn("repair unpersisted compat playback session failed", "error", err, "play_session_id", session.ID)
+		slog.Warn("repair unpersisted compat playback session failed", "error", err, "play_session_id", playSessionFingerprint(session.ID))
 		return false, err
 	}
 	return tag.RowsAffected() > 0, nil
@@ -1260,12 +1516,12 @@ func (d *DurableCompatPlaybackStore) load(id string) (*PlaybackSession, bool, er
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, false, nil
 		}
-		slog.Warn("load compat playback session failed", "error", err, "play_session_id", id)
+		slog.Warn("load compat playback session failed", "error", err, "play_session_id", playSessionFingerprint(id))
 		return nil, false, err
 	}
 	var session PlaybackSession
 	if err := json.Unmarshal(raw, &session); err != nil {
-		slog.Warn("unmarshal compat playback session failed", "error", err, "play_session_id", id)
+		slog.Warn("unmarshal compat playback session failed", "error", err, "play_session_id", playSessionFingerprint(id))
 		return nil, false, err
 	}
 	return &session, true, nil

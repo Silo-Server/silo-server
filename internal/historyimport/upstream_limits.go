@@ -19,26 +19,27 @@ const (
 	// batch of full movie metadata, a few MiB at most; Jellyfin and Emby pages
 	// request only a handful of fields.
 	maxUpstreamResponseBytes int64 = 16 << 20
-	// maxListingBytes caps the bytes one paged listing reads in total.
-	maxListingBytes int64 = 512 << 20
-	// maxListingItems and maxListingPages cap one paged listing. A very large
-	// library or a decade of Plex plays is well under these; a server that
-	// keeps reporting more rows than it ever delivers is not.
-	maxListingItems = 500_000
-	maxListingPages = 5_000
+	// maxListingBytes, maxListingItems and maxListingPages stop a runaway
+	// source: one that keeps reporting more rows than it ever delivers. They
+	// do not protect memory, since a listing is applied page by page and the
+	// response limits below bound what one page can cost.
+	maxListingBytes int64 = 32 << 30
+	maxListingItems       = 5_000_000
+	maxListingPages       = 200_000
 	// maxUpstreamResponseValues caps the JSON values (objects, arrays, and
 	// members or elements after the first) one response may open. Bytes alone
 	// do not bound decoding: 16 MiB of "{}," decodes into millions of structs.
 	// A full Plex page or metadata batch, cast lists included, is a few tens
 	// of thousands.
 	maxUpstreamResponseValues = 250_000
-	// maxRunBytes caps what one import run reads across every listing and
-	// lookup, so a source cannot multiply the listing limit by naming many
+	// maxRunBytes stops a runaway source across every listing and lookup of
+	// one run, so it cannot multiply the listing limit by naming many
 	// sections or series.
-	maxRunBytes int64 = 2 << 30
-	// maxRunRetainedBytes caps the estimated memory of the items one import
-	// run keeps until it finishes: roughly 500,000 items with their ids.
-	maxRunRetainedBytes int64 = 256 << 20
+	maxRunBytes int64 = 64 << 30
+	// maxRunRetainedBytes caps what one run holds across pages, which is only
+	// the in-progress lists and the Plex watchlist: roughly 100,000 items with their ids. Watched
+	// history is never held, however long it is.
+	maxRunRetainedBytes int64 = 64 << 20
 	// upstreamErrorBodyBytes caps how much of a non-2xx body is kept for
 	// diagnostics.
 	upstreamErrorBodyBytes = 2048
@@ -48,6 +49,30 @@ const (
 // paged listing, is larger than an import accepts. The run fails with
 // RunErrorSourceTooLarge instead of importing a truncated listing.
 var ErrUpstreamResponseTooLarge = errors.New("history import source response exceeds the import size limit")
+
+// upstreamLimitError names the limit a source exceeded, for the operator log.
+type upstreamLimitError struct {
+	limit  string
+	detail string
+}
+
+func (e *upstreamLimitError) Error() string {
+	return ErrUpstreamResponseTooLarge.Error() + ": " + e.detail
+}
+func (e *upstreamLimitError) Unwrap() error { return ErrUpstreamResponseTooLarge }
+
+func limitErrorf(limit, format string, args ...any) error {
+	return &upstreamLimitError{limit: limit, detail: fmt.Sprintf(format, args...)}
+}
+
+// exceededLimit returns the name of the limit err reports, or "".
+func exceededLimit(err error) string {
+	var limit *upstreamLimitError
+	if errors.As(err, &limit) {
+		return limit.limit
+	}
+	return ""
+}
 
 // listingBudget tracks one paged listing against the listing limits. A nil
 // budget applies only the per-response limit.
@@ -61,7 +86,7 @@ type listingBudget struct {
 // page allowance.
 func (b *listingBudget) startPage() error {
 	if b.pages >= maxListingPages {
-		return fmt.Errorf("%w: listing exceeds %d pages", ErrUpstreamResponseTooLarge, maxListingPages)
+		return limitErrorf("listing_pages", "listing exceeds %d pages", maxListingPages)
 	}
 	b.pages++
 	return nil
@@ -71,7 +96,7 @@ func (b *listingBudget) startPage() error {
 func (b *listingBudget) addItems(n int) error {
 	b.items += n
 	if b.items > maxListingItems {
-		return fmt.Errorf("%w: listing exceeds %d items", ErrUpstreamResponseTooLarge, maxListingItems)
+		return limitErrorf("listing_items", "listing exceeds %d items", maxListingItems)
 	}
 	return nil
 }
@@ -129,9 +154,25 @@ func retainItems[T retainedSizer](ctx context.Context, items []T) error {
 	defer budget.mu.Unlock()
 	budget.retained += size
 	if budget.retained > maxRunRetainedBytes {
-		return fmt.Errorf("%w: import keeps more than %d bytes of source items", ErrUpstreamResponseTooLarge, maxRunRetainedBytes)
+		return limitErrorf("run_retained_bytes", "import keeps more than %d bytes of source items", maxRunRetainedBytes)
 	}
 	return nil
+}
+
+// releaseItems returns the retained-memory charge for items the run charged
+// with retainItems and has since dropped.
+func releaseItems[T retainedSizer](ctx context.Context, items []T) {
+	budget := runBudgetFrom(ctx)
+	if budget == nil {
+		return
+	}
+	var size int64
+	for i := range items {
+		size += items[i].retainedSize()
+	}
+	budget.mu.Lock()
+	budget.retained -= size
+	budget.mu.Unlock()
 }
 
 // mapEntryOverhead approximates a map entry's storage beyond its key and
@@ -183,7 +224,7 @@ func decodeUpstreamJSON(ctx context.Context, body io.Reader, out any, listing *l
 		run.addBytes(read)
 	}
 	if errors.Is(err, errUpstreamBytesLimit) {
-		return fmt.Errorf("%w: %s exceeds %d bytes", ErrUpstreamResponseTooLarge, scope, scopeLimit)
+		return limitErrorf(scope+"_bytes", "%s exceeds %d bytes", scope, scopeLimit)
 	}
 	return err
 }
@@ -235,7 +276,7 @@ func (c *jsonValueCounter) Read(p []byte) (int, error) {
 		}
 	}
 	if c.values > c.limit {
-		return 0, fmt.Errorf("%w: response exceeds %d JSON values", ErrUpstreamResponseTooLarge, c.limit)
+		return 0, limitErrorf("response_values", "response exceeds %d JSON values", c.limit)
 	}
 	return n, err
 }

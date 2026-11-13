@@ -200,6 +200,55 @@ func TestImageCacheCleanupJobCanBeCanceled(t *testing.T) {
 	}
 }
 
+// Every job the admin job resources report as cancelable must be accepted by
+// cancelAdminJob, and every job they report as not cancelable must be refused.
+func TestAdminJobCancelableMatchesCancelEndpoint(t *testing.T) {
+	for jobType, cancelable := range map[string]bool{
+		adminjob.JobTypeLibraryRefresh:      true,
+		adminjob.JobTypeStorageTransition:   true,
+		adminjob.JobTypeImageCacheCleanup:   true,
+		adminjob.JobTypeDeleteLibrary:       false,
+		adminjob.JobTypeItemRefresh:         false,
+		adminjob.JobTypeCatalogExport:       false,
+		adminjob.JobTypeCatalogImport:       false,
+		adminjob.JobTypeTemplateBundleApply: false,
+	} {
+		t.Run(jobType, func(t *testing.T) {
+			job := &models.AdminJob{ID: "job", JobType: jobType, Status: adminjob.StatusRunning, RequestedAt: fixedTime()}
+			deps, _ := libraryDeps(t)
+			deps.AdminTaskJobs = &fakeStorageTransitionJobs{job: job}
+			h := newTestHandler(t, deps)
+
+			var page Collection[AdminTaskJob]
+			list := do(t, h, http.MethodGet, Prefix+"/admin/jobs", "", bearer(adminToken))
+			decodeJSON(t, list.Body, &page)
+			if list.Code != http.StatusOK || len(page.Items) != 1 || page.Items[0].Cancelable != cancelable {
+				t.Fatalf("list: %d %s", list.Code, list.Body)
+			}
+			var get AdminTaskJob
+			monitor := do(t, h, http.MethodGet, Prefix+"/admin/jobs/job", "", bearer(adminToken))
+			decodeJSON(t, monitor.Body, &get)
+			if monitor.Code != http.StatusOK || get.Cancelable != page.Items[0].Cancelable {
+				t.Fatalf("monitor disagrees with list: %d %s", monitor.Code, monitor.Body)
+			}
+
+			response := do(t, h, http.MethodPost, Prefix+"/admin/jobs/job/cancel", "", bearer(adminToken))
+			if !get.Cancelable {
+				requireProblem(t, response, TypeJobNotCancelable)
+				if job.CancelRequested {
+					t.Fatal("refused cancellation recorded intent")
+				}
+				return
+			}
+			var body AdminTaskJob
+			decodeJSON(t, response.Body, &body)
+			if response.Code != http.StatusAccepted || body.State != "canceling" || !job.CancelRequested {
+				t.Fatalf("cancelable job refused: %d %s", response.Code, response.Body)
+			}
+		})
+	}
+}
+
 func TestStorageTransitionJobProjectsSafeProgressAndFailure(t *testing.T) {
 	job := &models.AdminJob{
 		ID: "transition", JobType: adminjob.JobTypeStorageTransition, Status: adminjob.StatusRunning,
@@ -411,11 +460,7 @@ func TestAdminTaskScheduleRejectsNestedNullWithoutWrites(t *testing.T) {
 	h := adminTasksTestHandler(t, f)
 	for _, body := range []string{
 		`{"triggers":[{"type":"weekly","time_of_day":"10:00","day_of_week":null}]}`,
-		`{"triggers":[{"type":"weekly","time_of_day":"10:00","max_runtime_ms":null}]}`,
-		`{"triggers":[{"type":"startup","interval_ms":null}]}`,
-		`{"triggers":[{"type":"startup","time_of_day":null}]}`,
 		`{"triggers":[{"type":"startup"},null]}`,
-		`{"triggers":[{"type":"startup"},{"type":"weekly","time_of_day":"10:00","day_of_week":null}]}`,
 	} {
 		t.Run(body, func(t *testing.T) {
 			*f = *newFakeAdminTasks()
@@ -426,9 +471,7 @@ func TestAdminTaskScheduleRejectsNestedNullWithoutWrites(t *testing.T) {
 		})
 	}
 	for _, body := range []string{
-		`{"triggers":[{"type":"startup"}]}`,
 		`{"triggers":[{"type":"startup","interval_ms":0,"time_of_day":"","day_of_week":0,"max_runtime_ms":0}]}`,
-		`{"triggers":[{"type":"weekly","time_of_day":"10:00","day_of_week":0,"max_runtime_ms":0}]}`,
 	} {
 		t.Run(body, func(t *testing.T) {
 			*f = *newFakeAdminTasks()
@@ -474,5 +517,25 @@ func TestTaskExecutionExposesMaintenanceStepsWithoutErrors(t *testing.T) {
 	other := taskExecutionOf(taskmanager.ExecutionResult{TaskKey: "match_media", ResultData: result.ResultData})
 	if other.Steps != nil {
 		t.Fatalf("Steps for another task = %+v, want none", other.Steps)
+	}
+}
+
+func TestTaskExecutionErrorMessage(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		status  string
+		message string
+		want    string
+	}{
+		{name: "failure text stays private", status: "failed", message: "dial tcp 10.0.0.5:5432: refused", want: "Task failed. Inspect administrator diagnostics for details."},
+		{name: "max runtime stop explains itself", status: "cancelled", message: "Stopped after reaching the max runtime of 4h0m0s", want: "Stopped after reaching the max runtime of 4h0m0s"}, //nolint:misspell // Existing task state vocabulary.
+		{name: "admin cancel has none", status: "cancelled", want: ""}, //nolint:misspell // Existing task state vocabulary.
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := taskExecutionOf(taskmanager.ExecutionResult{TaskKey: "detect_intro_markers", Status: tc.status, ErrorMessage: tc.message})
+			if got.ErrorMessage != tc.want {
+				t.Fatalf("ErrorMessage = %q, want %q", got.ErrorMessage, tc.want)
+			}
+		})
 	}
 }

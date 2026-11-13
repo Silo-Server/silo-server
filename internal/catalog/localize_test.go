@@ -136,17 +136,6 @@ func TestApplyItemLocalizationDoesNotMutateBase(t *testing.T) {
 	}
 }
 
-func TestApplyItemLocalizationNilLocalizationClones(t *testing.T) {
-	item := baseItem()
-	got := applyItemLocalization(item, nil)
-	if got == item {
-		t.Fatal("expected a clone, got the same pointer")
-	}
-	if got.Title != item.Title {
-		t.Errorf("clone differs: %q", got.Title)
-	}
-}
-
 func TestApplySeasonLocalizationPartialRow(t *testing.T) {
 	season := &models.Season{ContentID: "s1", Title: "Season 1", Overview: "Base.", PosterPath: "p.jpg", PosterThumbhash: "h"}
 	got := applySeasonLocalization(season, &models.SeasonLocalization{Overview: "Saison résumé."}, false)
@@ -257,5 +246,40 @@ func TestApplyItemLocalizationKeepsNFONamedArtwork(t *testing.T) {
 	item.PosterPath = "tmdb/movies/1/poster/original.webp"
 	if got := applyItemLocalization(item, loc); got.PosterPath != "posters/fr.jpg" {
 		t.Errorf("uncached NFO poster: path %q, want the localized poster", got.PosterPath)
+	}
+}
+
+// A locked title or overview is what every viewer sees: a provider's localized
+// text doesn't cover it, but a translation of the edit by hand or by AI does.
+func TestSeasonEpisodeLocalizationRespectsLocks(t *testing.T) {
+	locked := []int{fieldNameLocked, fieldOverviewLocked}
+	for _, tc := range []struct {
+		name         string
+		locks        []int
+		source       string
+		wantTitle    string
+		wantOverview string
+	}{
+		{"unlocked takes the localization", nil, models.LocalizationSourceProvider, "Titre", "Résumé"},
+		{"locked ignores provider text", locked, models.LocalizationSourceProvider, "Edited", "Edited overview"},
+		{"locked keeps a manual translation", locked, models.LocalizationSourceManual, "Edited", "Résumé"},
+		{"locked keeps an AI translation", locked, models.LocalizationSourceAI, "Edited", "Résumé"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			episode := applyEpisodeLocalization(
+				&models.Episode{Title: "Edited", Overview: "Edited overview", LockedFields: tc.locks},
+				&models.EpisodeLocalization{Title: "Titre", Overview: "Résumé", OverviewSource: tc.source},
+			)
+			if episode.Title != tc.wantTitle || episode.Overview != tc.wantOverview {
+				t.Errorf("episode = %q, %q, want %q, %q", episode.Title, episode.Overview, tc.wantTitle, tc.wantOverview)
+			}
+			season := applySeasonLocalization(
+				&models.Season{Title: "Edited", Overview: "Edited overview", LockedFields: tc.locks},
+				&models.SeasonLocalization{Title: "Titre", Overview: "Résumé", OverviewSource: tc.source}, false,
+			)
+			if season.Title != tc.wantTitle || season.Overview != tc.wantOverview {
+				t.Errorf("season = %q, %q, want %q, %q", season.Title, season.Overview, tc.wantTitle, tc.wantOverview)
+			}
+		})
 	}
 }

@@ -17,7 +17,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/diagnostics"
 )
 
@@ -231,6 +230,98 @@ func TestDiagnosticsIngressRejectsBeforeReadingAndPreservesFailures(t *testing.T
 			}
 		})
 	}
+
+	t.Run("wrong_first_part_not_drained", func(t *testing.T) {
+		// A large, wrongly ordered first part is refused without streaming its
+		// payload, so an invalid upload cannot hold the ingest slot.
+		*f = *availableIngress()
+		body, ct := ingressBody(t, true, 1<<20)
+		counter := &ingressCountingBody{r: body}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, ingressRequest(counter, ct, memberToken))
+		requireProblem(t, rec, TypeMalformedRequest)
+		if counter.n > 128<<10 {
+			t.Fatalf("read %d bytes, want the wrong first part rejected without draining it", counter.n)
+		}
+	})
+	t.Run("manifest_too_large", func(t *testing.T) {
+		*f = *availableIngress()
+		ingested := false
+		f.ingest = func(context.Context, int, *string, []byte, io.Reader) (diagnostics.IngestResult, error) {
+			ingested = true
+			return diagnostics.IngestResult{}, nil
+		}
+		var buf bytes.Buffer
+		w := multipart.NewWriter(&buf)
+		for _, part := range []struct {
+			name, contentType string
+			body              []byte
+		}{
+			{"manifest", "application/json", bytes.Repeat([]byte("x"), int(diagnostics.MaxManifestBytes)+1)},
+			{"bundle", diagnostics.BundleContentType, []byte("bundle")},
+		} {
+			pw, err := ingressPart(w, part.name, part.contentType)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := pw.Write(part.body); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, ingressRequest(&buf, w.FormDataContentType(), memberToken))
+		requireProblem(t, rec, TypePayloadTooLarge)
+		if ingested {
+			t.Fatal("oversized manifest reached ingest")
+		}
+	})
+	t.Run("busy", func(t *testing.T) {
+		// A second upload from the same account while one is ingesting is
+		// refused as transient capacity, with a retry hint.
+		*f = *availableIngress()
+		started, release := make(chan struct{}), make(chan struct{})
+		f.ingest = func(_ context.Context, _ int, _ *string, _ []byte, bundle io.Reader) (diagnostics.IngestResult, error) {
+			close(started)
+			<-release
+			_, err := io.Copy(io.Discard, bundle)
+			return diagnostics.IngestResult{ReportID: "synthetic-report", ShortID: "SILO-TEST"}, err
+		}
+		firstBody, firstCT := ingressBody(t, false, 1)
+		first := make(chan *httptest.ResponseRecorder, 1)
+		go func() {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, ingressRequest(firstBody, firstCT, memberToken))
+			first <- rec
+		}()
+		<-started
+
+		body, ct := ingressBody(t, false, 1)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, ingressRequest(body, ct, memberToken))
+		close(release)
+		if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") == "" {
+			t.Fatalf("concurrent upload = %d Retry-After %q, want 503 with a retry hint; body=%s",
+				rec.Code, rec.Header().Get("Retry-After"), rec.Body.String())
+		}
+		requireProblem(t, rec, TypeForStatus(http.StatusServiceUnavailable))
+		if done := <-first; done.Code != http.StatusCreated {
+			t.Fatalf("first upload = %d, want 201; body=%s", done.Code, done.Body.String())
+		}
+	})
+}
+
+type ingressCountingBody struct {
+	r io.Reader
+	n int64
+}
+
+func (c *ingressCountingBody) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
 }
 
 type ingressUnreadBody struct{ read bool }
@@ -238,54 +329,4 @@ type ingressUnreadBody struct{ read bool }
 func (b *ingressUnreadBody) Read([]byte) (int, error) {
 	b.read = true
 	return 0, errors.New("unexpected read")
-}
-
-func TestDiagnosticsIngressSharesBridgeAdmission(t *testing.T) {
-	f := availableIngress()
-	entered, release := make(chan struct{}), make(chan struct{})
-	f.ingest = func(context.Context, int, *string, []byte, io.Reader) (diagnostics.IngestResult, error) {
-		close(entered)
-		<-release
-		return diagnostics.IngestResult{ReportID: "synthetic-report", ShortID: "SILO-TEST"}, nil
-	}
-	service := handlers.NewDiagnosticsHandler(f)
-	deps := parityDeps(false)
-	deps.DiagnosticsIngress = service
-	h := NewHandler(deps)
-	body, ct := ingressBody(t, false, 1)
-	done := make(chan *httptest.ResponseRecorder, 1)
-	go func() {
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, ingressRequest(body, ct, memberToken))
-		done <- rec
-	}()
-	defer close(release)
-	select {
-	case <-entered:
-	case <-time.After(3 * time.Second):
-		t.Fatal("ingest did not acquire admission")
-	}
-	unread := &ingressUnreadBody{}
-	request := ingressRequest(unread, "multipart/form-data; boundary=synthetic", memberToken)
-	request = request.WithContext(apimw.SetClaims(request.Context(), &auth.Claims{UserID: 1, TokenType: auth.TokenTypeAccess}))
-	rejected := httptest.NewRecorder()
-	service.HandleUpload(rejected, request)
-	if rejected.Code != 503 || rejected.Header().Get("Retry-After") != "5" || unread.read {
-		t.Fatal(rejected.Code, rejected.Header(), unread.read)
-	}
-	// Also prove the same admission rejection is surfaced as a v2 problem.
-	rejected = httptest.NewRecorder()
-	h.ServeHTTP(rejected, ingressRequest(&ingressUnreadBody{}, "multipart/form-data; boundary=synthetic", memberToken))
-	requireProblem(t, rejected, TypeDependencyUnavailable)
-	if rejected.Header().Get("Retry-After") != "5" {
-		t.Fatal(rejected.Header())
-	}
-	// Closing release is deferred so any assertion failure still frees the request.
-	t.Cleanup(func() {
-		select {
-		case <-done:
-		case <-time.After(3 * time.Second):
-			t.Error("admitted upload did not finish")
-		}
-	})
 }

@@ -6,10 +6,10 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/subtitles/subsync"
@@ -24,6 +24,9 @@ type SubtitleSyncState struct {
 	Stored *subtitles.DownloadedSubtitle
 	// External is the sidecar's catalog entry; nil for a stored subtitle.
 	External *models.ExternalSubtitle
+	// ExternalLabel names the sidecar to the caller: its file name when the
+	// caller may see file names, else its label from sidecarLabels.
+	ExternalLabel string
 	// ContentSHA256 identifies a sidecar's bytes on disk.
 	ContentSHA256 string
 	Timing        subtitles.Timing
@@ -223,7 +226,8 @@ func (h *SubtitleSearchHandler) subtitleSyncTarget(ctx context.Context, access c
 		if subtitles.ExternalPathKey(sidecar.Path) != pathKey {
 			continue
 		}
-		state, err := h.externalSyncState(ctx, file.ID, sidecar, nil)
+		label := sidecarLabels(file.ExternalSubtitles, h.fileNamesVisible(ctx))[i]
+		state, err := h.externalSyncState(ctx, file.ID, sidecar, nil, label)
 		if err != nil {
 			return nil, err
 		}
@@ -251,8 +255,9 @@ func (h *SubtitleSearchHandler) externalSyncStates(ctx context.Context, file *mo
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Unable to read subtitle timing")
 	}
 	var out []SubtitleSyncState
+	labels := sidecarLabels(file.ExternalSubtitles, h.fileNamesVisible(ctx))
 	for i := range file.ExternalSubtitles {
-		state, err := h.externalSyncState(ctx, file.ID, &file.ExternalSubtitles[i], timings)
+		state, err := h.externalSyncState(ctx, file.ID, &file.ExternalSubtitles[i], timings, labels[i])
 		if errors.Is(err, errSidecarUnreadable) {
 			continue
 		}
@@ -266,13 +271,42 @@ func (h *SubtitleSearchHandler) externalSyncStates(ctx context.Context, file *mo
 	return out, nil
 }
 
+// fileNamesVisible reports whether the caller may see file names. It can
+// read the account, so callers ask once per request.
+func (h *SubtitleSearchHandler) fileNamesVisible(ctx context.Context) bool {
+	return h.FileNamesVisible != nil && h.FileNamesVisible(ctx)
+}
+
+// sidecarLabels is each sidecar's ExternalLabel, in file order: its file name
+// when showNames, else what the catalog and the playback inventory label it
+// (its own title, its embedded title, or its numbered language). Every sidecar
+// counts toward the numbering, readable or not, as it does there.
+func sidecarLabels(sidecars []models.ExternalSubtitle, showNames bool) []string {
+	labels := make([]string, len(sidecars))
+	numbered := models.SidecarLabels{}
+	for i := range sidecars {
+		sidecar := &sidecars[i]
+		switch {
+		case showNames:
+			labels[i] = sidecar.FileName()
+		case !sidecar.TitleIsFileName():
+			labels[i] = sidecar.Title
+		case strings.TrimSpace(sidecar.EmbeddedTitle) != "":
+			labels[i] = sidecar.EmbeddedTitle
+		default:
+			labels[i] = numbered.Next(sidecar.Language, sidecar.Format, sidecar.Forced, sidecar.HearingImpaired)
+		}
+	}
+	return labels
+}
+
 // externalSyncState reads a sidecar and finds its correction, in timings when
 // given. It is nil for a sidecar that cannot be retimed or is gone from disk.
-func (h *SubtitleSearchHandler) externalSyncState(ctx context.Context, fileID int, sidecar *models.ExternalSubtitle, timings map[string]*subtitles.ExternalTiming) (*SubtitleSyncState, error) {
+func (h *SubtitleSearchHandler) externalSyncState(ctx context.Context, fileID int, sidecar *models.ExternalSubtitle, timings map[string]*subtitles.ExternalTiming, label string) (*SubtitleSyncState, error) {
 	if h.external == nil || !subtitles.SupportsRetime(subtitles.SubtitleFormat(sidecar.Format)) {
 		return nil, nil
 	}
-	data, err := os.ReadFile(sidecar.Path)
+	data, err := fspath.ReadFile(sidecar.Path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
@@ -281,7 +315,7 @@ func (h *SubtitleSearchHandler) externalSyncState(ctx context.Context, fileID in
 		return nil, errSidecarUnreadable
 	}
 	state := &SubtitleSyncState{Key: subtitles.ExternalSyncKey(sidecar.Path), MediaFileID: fileID, External: sidecar,
-		ContentSHA256: subtitles.ContentSHA256(data), Timing: subtitles.Timing{Scale: 1}}
+		ExternalLabel: label, ContentSHA256: subtitles.ContentSHA256(data), Timing: subtitles.Timing{Scale: 1}}
 	var row *subtitles.ExternalTiming
 	if timings != nil {
 		row = timings[state.ContentSHA256]

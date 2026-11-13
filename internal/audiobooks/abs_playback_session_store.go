@@ -56,13 +56,13 @@ func (s *ABSPlaybackSessionStore) GetPlaybackSession(ctx context.Context, id str
 	row := s.Pool.QueryRow(ctx, `
 		SELECT id, user_id, profile_id, content_id,
 		       time_listening_seconds, current_position_seconds,
-		       started_at, last_sync_at, closed_at
+		       started_at, last_sync_at, closed_at, media_file_id
 		FROM abs_playback_sessions
 		WHERE id = $1`, id)
 	err := row.Scan(
 		&sess.ID, &uid, &profileID, &sess.ContentID,
 		&sess.TimeListeningSeconds, &sess.CurrentPositionSeconds,
-		&sess.StartedAt, &sess.LastSyncAt, &closedAt,
+		&sess.StartedAt, &sess.LastSyncAt, &closedAt, &sess.MediaFileID,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return abs.ABSPlaybackSession{}, abs.ErrNotFound
@@ -167,6 +167,9 @@ func (s *ABSPlaybackSessionStore) AggregateStats(ctx context.Context, userID, pr
 		out.Days = append(out.Days, d)
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		return abs.Stats{}, fmt.Errorf("abs_playback_session_store: stats days: %w", err)
+	}
 
 	dowRows, err := s.Pool.Query(ctx, `
 		SELECT EXTRACT(DOW FROM started_at)::int,
@@ -190,6 +193,9 @@ func (s *ABSPlaybackSessionStore) AggregateStats(ctx context.Context, userID, pr
 		}
 	}
 	dowRows.Close()
+	if err := dowRows.Err(); err != nil {
+		return abs.Stats{}, fmt.Errorf("abs_playback_session_store: stats dow: %w", err)
+	}
 
 	mRows, err := s.Pool.Query(ctx, `
 		SELECT TO_CHAR(date_trunc('month', started_at), 'YYYY-MM'),
@@ -213,6 +219,9 @@ func (s *ABSPlaybackSessionStore) AggregateStats(ctx context.Context, userID, pr
 		out.Monthly = append(out.Monthly, m)
 	}
 	mRows.Close()
+	if err := mRows.Err(); err != nil {
+		return abs.Stats{}, fmt.Errorf("abs_playback_session_store: stats months: %w", err)
+	}
 	return out, nil
 }
 

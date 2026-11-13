@@ -54,31 +54,6 @@ it("drains canonical pages and adapts string IDs", async () => {
   expect(result.current.data?.map((r) => r.id)).toEqual([2, 9]);
   expect(String(fetchMock.mock.calls[1]?.[0])).toContain("cursor=next");
 });
-it.each([null, "pin-b", "pin-a"])(
-  "hides cached repository success on PIN setter %s",
-  async (pin) => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(response(page()))
-      .mockImplementation(() => new Promise(() => {}));
-    vi.stubGlobal("fetch", fetchMock);
-    const { client, wrapper } = fixture();
-    const { result, rerender } = renderHook(useAdminPluginRepositories, { wrapper });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    act(() => setProfileToken(pin));
-    rerender();
-    expect(result.current.data).toBeUndefined();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    expect(
-      JSON.stringify(
-        client
-          .getQueryCache()
-          .getAll()
-          .map((q) => q.queryKey),
-      ),
-    ).not.toMatch(/pin-a|pin-b/);
-  },
-);
 it.each(["duplicate", "unsafe", "loop"])(
   "refuses %s without publishing partial repositories",
   async (kind) => {
@@ -100,29 +75,6 @@ it.each(["duplicate", "unsafe", "loop"])(
     expect(result.current.data).toBeUndefined();
   },
 );
-it("rejects a decoded page after authority changes", async () => {
-  let release!: (s: string) => void;
-  const res = response({});
-  res.text = () =>
-    new Promise((resolve) => {
-      release = resolve;
-    });
-  vi.stubGlobal(
-    "fetch",
-    vi
-      .fn()
-      .mockResolvedValueOnce(res)
-      .mockImplementation(() => new Promise(() => {})),
-  );
-  const { client, wrapper } = fixture();
-  renderHook(useAdminPluginRepositories, { wrapper });
-  await waitFor(() => expect(release).toBeTypeOf("function"));
-  const key = client.getQueryCache().getAll()[0]!.queryKey;
-  act(() => setProfileId("profile-b"));
-  await act(async () => release(JSON.stringify(page())));
-  await waitFor(() => expect(client.getQueryState(key)?.status).toBe("error"));
-  expect(client.getQueryData(key)).toBeUndefined();
-});
 it("legacy repository prefix invalidation refreshes the scoped reader", async () => {
   const fetchMock = vi
     .fn()

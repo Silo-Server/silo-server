@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/abadojack/whatlanggo"
 
@@ -126,7 +127,8 @@ func ResolveUploadLanguage(filename string, format SubtitleFormat, data []byte, 
 		return LanguageDetection{}, fmt.Errorf("invalid subtitle language")
 	}
 
-	if detected := DetectSubtitleLanguage(filename, format, data); detected.Language != "" {
+	// Upload stores UTF-16 as UTF-8, so the detect preview reads it the same way.
+	if detected := DetectSubtitleLanguage(filename, format, decodeUTF16WithBOM(data)); detected.Language != "" {
 		return detected, nil
 	}
 	if manual := canonicalLanguageToken(userLanguage); manual != "" {
@@ -203,26 +205,50 @@ func languageFromMetadata(format SubtitleFormat, data []byte) (string, bool) {
 	}
 }
 
+// maxMetadataLanguageFields bounds how many Language fields a metadata scan
+// parses, so a file of repeated unrecognized fields stays cheap to read.
+const maxMetadataLanguageFields = 16
+
+// languageFromASSMetadata returns the first recognized Language or Lang field.
+// It reads the whole file, since attached fonts or graphics can come before a
+// script info section, but visits only lines that hold a colon and parses only
+// those that start with "lang".
 func languageFromASSMetadata(data []byte) (string, bool) {
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
+	for pos, parsed := 0, 0; parsed < maxMetadataLanguageFields; {
+		colon := bytes.IndexByte(data[pos:], ':')
+		if colon < 0 {
+			break
+		}
+		start := pos + bytes.LastIndexByte(data[pos:pos+colon], '\n') + 1
+		end := len(data)
+		if nl := bytes.IndexByte(data[pos+colon:], '\n'); nl >= 0 {
+			end = pos + colon + nl + 1
+		}
+		line := bytes.TrimSpace(data[start:end])
+		pos = end
+		if len(line) < 4 || !bytes.EqualFold(line[:4], []byte("lang")) {
 			continue
 		}
-		if strings.HasPrefix(strings.ToLower(line), "[") {
+		matches := metadataLanguageLine.FindSubmatch(line)
+		if len(matches) != 2 {
 			continue
 		}
-		if matches := metadataLanguageLine.FindStringSubmatch(line); len(matches) == 2 {
-			if language, ok := languageFromMetadataValue(matches[1]); ok {
-				return language, true
-			}
+		parsed++
+		if language, ok := languageFromMetadataValue(string(matches[1])); ok {
+			return language, true
 		}
 	}
 	return "", false
 }
 
+// languageFromVTTMetadata reads the WebVTT header, which ends at the first
+// cue. Only the start of the file is read, so a header with no cue after it
+// does not make the scan cost grow with file size.
 func languageFromVTTMetadata(data []byte) (string, bool) {
+	if len(data) > contentSampleBytes {
+		head := data[:contentSampleBytes]
+		data = head[:bytes.LastIndexByte(head, '\n')+1]
+	}
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -241,9 +267,18 @@ func languageFromVTTMetadata(data []byte) (string, bool) {
 	return "", false
 }
 
+// Content detection reads at most contentSampleBytes of a subtitle file.
+// Language identification needs far less text than a full subtitle holds, and
+// the detector's cost grows with its input, so a larger file is sampled: its
+// text-bearing lines are read as contentSampleWindows evenly spaced runs.
+const (
+	contentSampleBytes   = 128 << 10
+	contentSampleWindows = 8
+)
+
 func languageFromContent(data []byte, format SubtitleFormat) (string, bool) {
-	text := extractSubtitleDialogue(data, format)
-	if len([]rune(text)) < 40 {
+	text := contentDetectionText(data, format)
+	if utf8.RuneCountInString(text) < 40 {
 		return "", false
 	}
 
@@ -260,6 +295,157 @@ func languageFromContent(data []byte, format SubtitleFormat) (string, bool) {
 		return language, true
 	}
 	return "", false
+}
+
+// contentDetectionText returns the subtitle text handed to the language
+// detector, at most contentSampleBytes long. Extraction can lengthen its input,
+// since it turns each invalid UTF-8 byte into a three-byte replacement rune, so
+// the text is cut back to the limit at a rune boundary.
+func contentDetectionText(data []byte, format SubtitleFormat) string {
+	text := extractSubtitleDialogue(sampleSubtitleContent(data, format), format)
+	if len(text) <= contentSampleBytes {
+		return text
+	}
+	cut := contentSampleBytes
+	for !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return text[:cut]
+}
+
+// sampleSubtitleContent returns data unchanged when it fits the content
+// sample. A larger file is read as evenly spaced windows of whole lines. ASS,
+// SSA and WebVTT windows span only the lines that can carry subtitle text, so
+// embedded fonts, graphics, or styles are not sampled in place of speech.
+func sampleSubtitleContent(data []byte, format SubtitleFormat) []byte {
+	if len(data) <= contentSampleBytes {
+		return data
+	}
+	switch format {
+	case FormatASS, FormatSSA, FormatVTT:
+		return sampleTextLines(data, format)
+	default:
+		return sampleLineWindows(data)
+	}
+}
+
+const contentSampleWindow = contentSampleBytes/contentSampleWindows - 1
+
+// sampleLineWindows samples a format in which every line can carry text. A
+// blank line follows each window so cue parsing restarts cleanly.
+func sampleLineWindows(data []byte) []byte {
+	step := (len(data) - contentSampleWindow) / (contentSampleWindows - 1)
+	sample := make([]byte, 0, contentSampleBytes)
+	read := 0 // end of the last chunk taken
+	for i := range contentSampleWindows {
+		start, end := i*step, i*step+contentSampleWindow
+		if i > 0 {
+			start, end = lineAlignedWindow(data, start, end)
+			if start < read { // unreadable, or taken by the last window
+				continue
+			}
+		}
+		chunk := data[start:end]
+		if nl := bytes.LastIndexByte(chunk, '\n'); nl >= 0 {
+			chunk = chunk[:nl+1]
+		}
+		read = start + len(chunk)
+		sample = append(sample, chunk...)
+		sample = append(sample, '\n')
+	}
+	return sample
+}
+
+// lineAlignedWindow moves the window [start, end) to the first line that
+// begins inside it. When one line covers the whole window, the window moves to
+// the start of that line instead, or start is -1 when the line began more than
+// bufio.MaxScanTokenSize bytes earlier: the text extractors cannot read a line
+// that long, so it carries no sample text.
+func lineAlignedWindow(data []byte, start, end int) (int, int) {
+	if nl := bytes.IndexByte(data[start:end], '\n'); nl >= 0 {
+		return start + nl + 1, end
+	}
+	from := max(0, start-bufio.MaxScanTokenSize)
+	nl := bytes.LastIndexByte(data[from:start], '\n')
+	if nl < 0 && from > 0 {
+		return -1, -1
+	}
+	start = from + nl + 1
+	return start, min(start+contentSampleWindow, len(data))
+}
+
+// sampleTextLines keeps every text line when they fit the sample, and
+// otherwise windows over the text lines alone. A window takes each line that
+// reaches into it, cut short where the window's byte budget runs out. Windows
+// are joined without a blank line, which would end a WebVTT cue: a window that
+// starts inside a cue reads on as part of the previous window's cue.
+func sampleTextLines(data []byte, format SubtitleFormat) []byte {
+	total := 0
+	forEachTextLine(data, format, func(line []byte) { total += len(line) })
+	sample := make([]byte, 0, min(total, contentSampleBytes))
+	if total <= contentSampleBytes {
+		forEachTextLine(data, format, func(line []byte) { sample = append(sample, line...) })
+		return sample
+	}
+	step := (total - contentSampleWindow) / (contentSampleWindows - 1)
+	w, used, offset := 0, 0, 0
+	forEachTextLine(data, format, func(line []byte) {
+		start := offset
+		offset += len(line)
+		for w < contentSampleWindows && start >= w*step+contentSampleWindow {
+			w, used = w+1, 0
+		}
+		if w == contentSampleWindows || offset <= w*step {
+			return
+		}
+		room := contentSampleWindow - used
+		switch {
+		case len(line) <= room:
+			sample = append(sample, line...)
+			used += len(line)
+		case room > 1:
+			// Cut the line short, keeping the newline that ends it.
+			sample = append(sample, line[:room-1]...)
+			sample = append(sample, '\n')
+			used = contentSampleWindow
+		}
+	})
+	return sample
+}
+
+// forEachTextLine calls fn with each line of data, including its newline,
+// that the format's text extractor may read: ASS and SSA dialog events and
+// WebVTT cue timings and payloads.
+func forEachTextLine(data []byte, format SubtitleFormat, fn func(line []byte)) {
+	inCue := false
+	for len(data) > 0 {
+		end := bytes.IndexByte(data, '\n') + 1
+		if end == 0 {
+			end = len(data)
+		}
+		line := data[:end]
+		data = data[end:]
+		switch format {
+		case FormatASS, FormatSSA:
+			const prefix = "dialogue:" //nolint:misspell // ASS event keyword
+			trimmed := bytes.TrimSpace(line)
+			if len(trimmed) < len(prefix) || !bytes.EqualFold(trimmed[:len(prefix)], []byte(prefix)) {
+				continue
+			}
+		case FormatVTT:
+			trimmed := bytes.TrimSpace(line)
+			switch {
+			case len(trimmed) == 0:
+				inCue = false
+				continue
+			case bytes.Contains(trimmed, []byte("-->")):
+				inCue = true
+			case !inCue:
+				continue
+			}
+		}
+		fn(line)
+	}
 }
 
 func extractSubtitleDialogue(data []byte, format SubtitleFormat) string {

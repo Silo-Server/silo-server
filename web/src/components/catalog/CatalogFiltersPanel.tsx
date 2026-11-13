@@ -14,6 +14,7 @@ import {
 } from "@/components/collections/CollectionGuidedRulesEditor";
 import { isGuidedRepresentable } from "@/components/collections/guidedRepresentable";
 import { useCatalogFilters } from "@/hooks/queries/catalog";
+import { useAppLanguage, useT } from "@/i18n";
 import { querySortToSelectValue } from "@/lib/collectionSortConfig";
 import type { QuerySortRelevanceScope } from "@/lib/querySortOptions";
 import {
@@ -53,6 +54,9 @@ export default function CatalogFiltersPanel({
   resultCountLoading = false,
   libraryType,
 }: CatalogFiltersPanelProps) {
+  const t = useT();
+  // Badge labels come from a plain helper; recompute them on a language change.
+  const language = useAppLanguage();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editorMode, setEditorMode] = useState<"guided" | "advanced">("guided");
 
@@ -82,7 +86,8 @@ export default function CatalogFiltersPanel({
   // without them, so the count comes from the rules and no badges show.
   const badges = useMemo(
     () => (guidedAvailable ? getActiveFilterBadges(guidedState, { isAudiobookLibrary }) : []),
-    [guidedAvailable, guidedState, isAudiobookLibrary],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- language: the labels' language
+    [guidedAvailable, guidedState, isAudiobookLibrary, language],
   );
   const activeCount = guidedAvailable
     ? badges.length
@@ -92,14 +97,18 @@ export default function CatalogFiltersPanel({
   if (isLocked) {
     return (
       <section className="bg-card space-y-2 rounded-lg border p-4">
-        <h2 className="text-sm font-medium">Filters</h2>
-        <p className="text-muted-foreground text-sm">Filters are locked to this source.</p>
+        <h2 className="text-sm font-medium">{t("web.catalog.filters.heading")}</h2>
+        <p className="text-muted-foreground text-sm">{t("web.catalog.filters.locked")}</p>
       </section>
     );
   }
 
   const libraryOptions =
-    libraries ?? state.query_definition.library_ids.map((id) => ({ id, name: `Library ${id}` }));
+    libraries ??
+    state.query_definition.library_ids.map((id) => ({
+      id,
+      name: t("web.catalog.filters.libraryFallback", { id: id }),
+    }));
 
   // The toolbar sets only the media type and sort, so it patches those onto
   // the definition and leaves the rules as they are. The one exception is
@@ -163,11 +172,11 @@ export default function CatalogFiltersPanel({
         resultCountLoading={resultCountLoading}
         sourceOrderLabel={
           isCollectionSource
-            ? "Collection Order"
+            ? t("web.catalog.sort.collectionOrder")
             : state.source === "history"
-              ? "Watch History"
+              ? t("web.catalog.sort.watchHistory")
               : supportsSourceOrder
-                ? "List Order"
+                ? t("web.catalog.sort.listOrder")
                 : undefined
         }
         allowEpisodeMediaScope={!isCollectionSource}

@@ -4,6 +4,7 @@
  * adapter hook, so nothing under components/homeRows reads an account role or
  * an API type.
  */
+import { t } from "@/i18n";
 import type { CollectionOption } from "@/hooks/queries/useAllUserCollections";
 import type { PeekRequest } from "@/components/calm/usePeekLimiter";
 import type { RowDraft } from "./rowDraft";
@@ -31,14 +32,28 @@ export interface HomeRow {
   title: string;
   sectionType: string;
   config: Record<string, unknown>;
+  /** 0 for a row that holds no titles, such as Discover's studio cards. */
   itemLimit: number;
   hero: boolean;
+  /**
+   * Admin: the hero banner is kept off the apps, so only the web shows the
+   * row. Absent when the server doesn't answer it.
+   */
+  webOnly?: boolean;
   /** Admin: the row is enabled. Profile: the row is not hidden. */
   shown: boolean;
   /** A row the profile added itself ("Yours"). Always false on the admin surface. */
   own: boolean;
   /** Profile: the server's own name for a row this profile renamed. */
   renamedFrom?: string;
+  /** The catalog key of `renamedFrom` when the server wrote that name itself. */
+  renamedFromKey?: { key: string; args?: Record<string, string> };
+  /**
+   * The catalog key of a title the server wrote itself, with the `title` it
+   * came with. It translates `title` only while the row still has that title,
+   * so an unsaved rename shows as typed.
+   */
+  titleKey?: { title: string; key: string; args?: Record<string, string> };
 }
 
 /** An open Edit row: the row as it was read, plus whatever the surface needs to save over it. */
@@ -53,7 +68,7 @@ export interface EditSession {
 /** Thrown by `save` when the row changed since the edit session was read. */
 export class RowChangedError extends Error {
   constructor() {
-    super("This row changed since you opened it.");
+    super(t("web.home.rows.draft.rowChanged"));
     this.name = "RowChangedError";
   }
 }
@@ -63,6 +78,8 @@ export interface HomeRowsCapabilities {
   draftPreview: boolean;
   /** A row may be added to several library pages at once (library pages only). */
   libraryCopies: boolean;
+  /** A hero row may be kept off the apps (admin, on a server that supports it). */
+  webOnlyHero?: boolean;
 }
 
 /** The collections a collection row may show on this surface. */
@@ -78,7 +95,12 @@ export interface RowCollections {
 
 export type HomeRowsConflict = null | { scope: "page" | "row"; rowId?: string };
 
-export interface HomeRowsAdapter {
+/**
+ * What the rows page shell (HomeRowsPage) reads: the rows of one page, and the
+ * writes the list makes itself. Requests > Discover Page lays out its rows
+ * through this alone.
+ */
+export interface HomeRowsListAdapter {
   surface: Surface;
   page: PageRef;
   pages: HomeRowsPageOption[];
@@ -105,6 +127,11 @@ export interface HomeRowsAdapter {
   /** `movedId` names the one row the user moved, when it was a single move. */
   reorder(orderedIds: string[], orderToken?: unknown, movedId?: string): Promise<void>;
   setShown(id: string, shown: boolean): Promise<void>;
+  /** Where a shown row's poster peek comes from; null (or absent) keeps the row's icon. */
+  peek?(row: HomeRow): PeekRequest | null;
+}
+
+export interface HomeRowsAdapter extends HomeRowsListAdapter {
   setHero(id: string, hero: boolean): Promise<void>;
   capabilities: HomeRowsCapabilities;
   /** Adds a row at the bottom of the page. Rejects when the server refuses it. */
@@ -115,8 +142,6 @@ export interface HomeRowsAdapter {
   reloadEdit(session: EditSession): Promise<EditSession>;
   /** Saves over the session's version; rejects with RowChangedError when it moved on. */
   save(session: EditSession, draft: RowDraft): Promise<void>;
-  /** Where a shown row's poster peek comes from; null (or absent) keeps the row's icon. */
-  peek?(row: HomeRow): PeekRequest | null;
   /** What the collection picker offers; without it the picker has nothing to offer. */
   collections?: RowCollections;
 }

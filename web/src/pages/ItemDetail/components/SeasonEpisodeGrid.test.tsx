@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import SeasonEpisodeGrid from "./SeasonEpisodeGrid";
@@ -13,6 +13,12 @@ vi.mock("@/components/MediaItemMenu", () => ({
   },
 }));
 
+vi.mock("@/components/CardPlayOverlay", () => ({
+  default: ({ contentId, title }: { contentId: string; title: string }) => (
+    <a href={`/watch/${contentId}`}>Play {title}</a>
+  ),
+}));
+
 vi.mock("@/hooks/useOverlayPrefs", () => ({
   useOverlayPrefs: () => ({ prefs: null, quickActionMode: "watched" }),
 }));
@@ -21,13 +27,21 @@ vi.mock("@/hooks/useEpisodeSpoilerPrefs", () => ({
   useEpisodeSpoilerPrefs: () => spoilerPrefs,
 }));
 
+const prefetchLibraries: (number | undefined)[] = [];
+const prefetchCalls: [number | undefined, string][] = [];
+
 vi.mock("@/hooks/queries/catalogRead", () => ({
-  usePrefetchCatalogItemDetail: () => vi.fn(),
+  usePrefetchCatalogItemDetail: (libraryId?: number) => {
+    prefetchLibraries.push(libraryId);
+    return (id: string) => prefetchCalls.push([libraryId, id]);
+  },
 }));
 
 describe("SeasonEpisodeGrid", () => {
   beforeEach(() => {
     capturedMenuProps.length = 0;
+    prefetchLibraries.length = 0;
+    prefetchCalls.length = 0;
     spoilerPrefs.hideImages = false;
     spoilerPrefs.hideOverviews = false;
   });
@@ -72,7 +86,7 @@ describe("SeasonEpisodeGrid", () => {
     }
   });
 
-  it("marks an episode only when none of its files can be read", () => {
+  it("marks an episode and drops its play button only when none of its files can be read", () => {
     const file = {
       resolution: "",
       codec_video: "",
@@ -104,6 +118,7 @@ describe("SeasonEpisodeGrid", () => {
               { ...file, file_id: 5, resolution: "1080p" },
             ]),
             episode("ep-5", 5, [{ ...file, file_id: 6, resolution: "1080p" }]),
+            episode("ep-6", 6, []),
           ]}
         />
       </MemoryRouter>,
@@ -126,63 +141,73 @@ describe("SeasonEpisodeGrid", () => {
     // Only episode 3 has no readable version; episode 4 still plays its
     // second file.
     expect(screen.getAllByText("Damaged file")).toHaveLength(1);
-    const card = screen.getByText("Episode title 3").closest(".media-card");
+    const card = screen.getByText("S01E03 · Episode title 3").closest(".media-card");
     expect(card).not.toBeNull();
     expect(card).toHaveTextContent("Damaged file");
+
+    // Quick play needs a readable file; an episode without files has nothing
+    // to play either.
+    expect(screen.getAllByRole("link", { name: /^Play / }).map((link) => link.textContent)).toEqual(
+      ["Play Episode title 4", "Play Episode title 5"],
+    );
   });
 
-  it("marks episodes whose overview was machine-translated", () => {
-    const episode = (id: string, number: number, fields?: string[]) => ({
-      content_id: id,
+  it("keeps the page's library on episodes with a file in the list", () => {
+    const episode = (n: number, files: object[]) => ({
+      content_id: `ep-${n}`,
       season_number: 1,
-      episode_number: number,
-      title: `Episode title ${number}`,
-      overview: `Overview ${number}`,
+      episode_number: n,
+      title: `Episode title ${n}`,
+      overview: "",
       air_date: null,
-      runtime: 0,
+      runtime: 42,
       still_url: "",
       still_thumbhash: "",
-      files: [],
-      machine_translated_fields: fields,
+      files: files as never,
     });
     render(
       <MemoryRouter>
         <SeasonEpisodeGrid
           isLoading={false}
-          episodes={[episode("ep-1", 1, ["overview"]), episode("ep-2", 2)]}
+          libraryId={4}
+          episodes={[
+            episode(1, [{ file_id: 1, resolution: "720p" }]),
+            // No file in this library's list: opens with every version.
+            episode(3, []),
+          ]}
         />
       </MemoryRouter>,
     );
-    expect(screen.getAllByText("Translated by AI")).toHaveLength(1);
-  });
 
-  it("drops the translation label with a spoiler-hidden overview", () => {
-    spoilerPrefs.hideOverviews = true;
-    const episode = (id: string, number: number, userData?: Record<string, unknown>) => ({
-      content_id: id,
-      season_number: 1,
-      episode_number: number,
-      title: `Episode title ${number}`,
-      overview: `Overview ${number}`,
-      air_date: null,
-      runtime: 0,
-      still_url: "",
-      still_thumbhash: "",
-      files: [],
-      machine_translated_fields: ["overview"],
-      user_data: userData as never,
-    });
-    render(
-      <MemoryRouter>
-        <SeasonEpisodeGrid
-          isLoading={false}
-          episodes={[episode("ep-1", 1, { played: true }), episode("ep-2", 2)]}
-        />
-      </MemoryRouter>,
-    );
-    // Only the watched episode shows its overview, so only it carries the label.
-    expect(screen.getAllByText("Translated by AI")).toHaveLength(1);
-    const hiddenCard = screen.getByText("Episode title 2").closest("a");
-    expect(hiddenCard).not.toHaveTextContent("Translated by AI");
+    const hrefs = screen
+      .getAllByRole("link")
+      .map((link) => link.getAttribute("href"))
+      .filter((href) => href?.startsWith("/item/"));
+    expect(hrefs).toEqual([
+      "/item/ep-1?libraryId=4",
+      "/item/ep-1?libraryId=4",
+      "/item/ep-3",
+      "/item/ep-3",
+    ]);
+    expect(new Set(prefetchLibraries)).toEqual(new Set([4, undefined]));
+
+    // Each card prefetches the detail its link opens.
+    vi.useFakeTimers();
+    try {
+      for (const title of ["S01E01 · Episode title 1", "S01E03 · Episode title 3"]) {
+        const card = screen.getByText(title).closest(".media-card")!;
+        fireEvent.mouseEnter(card);
+        act(() => vi.advanceTimersByTime(140));
+        fireEvent.mouseLeave(card);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(prefetchCalls).toEqual([
+      [4, "ep-1"],
+      [undefined, "ep-3"],
+    ]);
+    // The card menu builds Play links, and playback stays unscoped.
+    expect(capturedMenuProps[0]).not.toHaveProperty("libraryId");
   });
 });

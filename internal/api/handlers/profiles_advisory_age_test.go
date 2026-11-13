@@ -1,11 +1,9 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
@@ -23,7 +21,7 @@ func profileServiceContext(activeProfileID string) context.Context {
 	return ctx
 }
 
-func noProfileVerification(string) error { return nil }
+func noProfileVerification(*userstore.Profile) error { return nil }
 
 func requireAPIStatus(t *testing.T, err error, status int) *APIError {
 	t.Helper()
@@ -122,35 +120,6 @@ func firstProfileID(t *testing.T, store userstore.UserStore) string {
 	return profiles[0].ID
 }
 
-// /api/v1 is frozen: advisory-age controls stay out of its request and response.
-func TestAdvisoryAgeLimitStaysOffTheV1Wire(t *testing.T) {
-	store := newProfileTestStore(t)
-	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "profile-2", Name: "Kids", MaxAdvisoryAge: 10}); err != nil {
-		t.Fatalf("create profile: %v", err)
-	}
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-
-	req := newAuthorizedProfileRequestWithRole(http.MethodPut, "/profiles/profile-2", `{"max_advisory_age":3,"require_advisory_age":true,"name":"Kids"}`, "user", "profile-1")
-	rr := httptest.NewRecorder()
-	handler.HandleUpdateProfile(rr, withProfileRouteParam(req, "id", "profile-2"))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	if bytes.Contains(rr.Body.Bytes(), []byte("advisory")) || bytes.Contains(rr.Body.Bytes(), []byte("AdvisoryAge")) || bytes.Contains(rr.Body.Bytes(), []byte("require_advisory")) {
-		t.Fatalf("v1 response leaked the advisory-age limit: %s", rr.Body.String())
-	}
-	stored, err := store.GetProfile(context.Background(), "profile-2")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stored.MaxAdvisoryAge != 10 {
-		t.Fatalf("a v1 body changed the limit to %d", stored.MaxAdvisoryAge)
-	}
-	if stored.RequireAdvisoryAge {
-		t.Fatal("a v1 body set RequireAdvisoryAge")
-	}
-}
-
 // Requiring an advisory age tightens a parental control, so it follows the
 // limit's rules: the household manager sets and clears it, and the profile it
 // restricts cannot lift it.
@@ -204,4 +173,61 @@ func TestCreateProfile_RequireAdvisoryAgeNeedsAManager(t *testing.T) {
 		VerifyProfile: noProfileVerification,
 	})
 	requireAPIStatus(t, err, http.StatusForbidden)
+}
+
+// The primary profile inherits its account's libraries, so neither the
+// household manager nor an administrator can limit it to some of them. Turning
+// the limit off still saves, and the other profiles can still be limited.
+func TestUpdateProfile_PrimaryLibraryLimit(t *testing.T) {
+	store := newProfileTestStore(t) // profile-1 is the household primary
+	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "profile-2", Name: "Kids"}); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+	handler := NewProfileHandler(testUserStoreProvider{store: store})
+	update := func(profileID string, enabled bool, allowed []int) error {
+		_, err := handler.UpdateProfile(profileServiceContext("profile-1"), ProfileUpdateCommand{
+			UserID: 1, ProfileID: profileID, ActiveProfileID: "profile-1",
+			Request:       ProfileUpdateRequest{LibraryRestrictionsEnabled: &enabled, AllowedLibraryIDs: &allowed},
+			VerifyProfile: noProfileVerification,
+		})
+		return err
+	}
+
+	for _, tc := range []struct {
+		enabled bool
+		allowed []int
+		field   string
+	}{
+		{enabled: true, allowed: []int{2}, field: "library_restrictions_enabled"},
+		{enabled: false, allowed: []int{2}, field: "allowed_library_ids"},
+	} {
+		err := update("profile-1", tc.enabled, tc.allowed)
+		if apiErr := requireAPIStatus(t, err, http.StatusBadRequest); apiErr.Field != tc.field {
+			t.Fatalf("primary %+v: field = %q, want %q", tc, apiErr.Field, tc.field)
+		}
+	}
+	if err := update("profile-1", false, []int{}); err != nil {
+		t.Fatalf("primary without a limit: %v", err)
+	}
+	if err := update("profile-2", true, []int{2}); err != nil {
+		t.Fatalf("limit a secondary profile: %v", err)
+	}
+	if stored, _ := store.GetProfile(context.Background(), "profile-1"); stored.LibraryRestrictionsEnabled {
+		t.Fatal("the primary profile was stored with a library limit")
+	}
+
+	// A limit an older server stored on the primary is not reported.
+	yes, two := true, []int{2}
+	if err := store.UpdateProfile(context.Background(), "profile-1", userstore.UpdateProfileInput{
+		LibraryRestrictionsEnabled: &yes, AllowedLibraryIDs: &two,
+	}); err != nil {
+		t.Fatalf("store a legacy limit: %v", err)
+	}
+	view, err := handler.GetProfile(context.Background(), 1, "profile-1")
+	if err != nil {
+		t.Fatalf("get primary: %v", err)
+	}
+	if view.LibraryRestrictionsEnabled || len(view.AllowedLibraryIDs) != 0 {
+		t.Fatalf("primary view reports a library limit: %v %v", view.LibraryRestrictionsEnabled, view.AllowedLibraryIDs)
+	}
 }

@@ -2,8 +2,8 @@
   "type": "https://siloserver.org/docs/api/v2/problems/validation_failed",
   "title": "Validation failed",
   "status": 422,
-  "detail": "The request did not pass validation; see errors.",
-  "instance": "urn:silo:request:000000000000000000000293",
+  "detail": "Unknown network access host.",
+  "instance": "urn:silo:request:000000000000000000000299",
   "errors": [
     {
       "location": "body.hosts",

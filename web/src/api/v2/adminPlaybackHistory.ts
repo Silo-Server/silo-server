@@ -6,6 +6,7 @@ import {
 } from "@/api/client";
 import type { AdminPlaybackHistoryItem } from "@/api/types";
 import { v2, type V2Query, type V2Result } from "./request";
+import { t } from "@/i18n";
 
 export type AdminPlaybackHistoryQuery = V2Query<"GET /api/v2/admin/playback-history">;
 export type AdminPlaybackHistoryEntry =
@@ -56,7 +57,8 @@ function isEntry(value: unknown): value is AdminPlaybackHistoryEntry {
     typeof entry.ended_at === "string" &&
     typeof entry.watched_seconds === "number" &&
     (entry.duration_seconds === null || typeof entry.duration_seconds === "number") &&
-    typeof entry.completed === "boolean"
+    typeof entry.completed === "boolean" &&
+    (entry.played_seconds === null || typeof entry.played_seconds === "number")
   );
 }
 
@@ -80,6 +82,10 @@ export function adminPlaybackHistoryItemFromV2(
     watched_seconds: entry.watched_seconds,
     duration_seconds: entry.duration_seconds,
     completed: entry.completed,
+    played_seconds: entry.played_seconds,
+    series_title: entry.series_title,
+    season_number: entry.season_number,
+    episode_number: entry.episode_number,
   };
 }
 
@@ -111,7 +117,7 @@ export async function listAdminPlaybackHistory(
     (!body.page.has_more && !!body.page.next_cursor) ||
     !body.items.every(isEntry)
   )
-    throw new Error("Invalid playback history page. Reload the page.");
+    throw new Error(t("web.admin.errors.playbackHistoryInvalid"));
   return {
     items: body.items.map(adminPlaybackHistoryItemFromV2),
     hasMore: body.page.has_more,

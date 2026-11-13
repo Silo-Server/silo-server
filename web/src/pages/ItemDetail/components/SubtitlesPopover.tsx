@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { Captions, Check, ChevronDown, Loader2 } from "lucide-react";
+import { Captions, Check, ChevronDown, Loader2, Search } from "lucide-react";
 
 import type { FileVersion } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useDownloadedSubtitles } from "@/hooks/queries/subtitles";
+import { useT, type Translate } from "@/i18n";
 import type {
   PlayerSubtitleTrackSignature,
   PrePlaySubtitleSelection,
@@ -32,11 +33,12 @@ interface SubtitlesPopoverProps {
   preferredSubtitleTrackSignature?: PlayerSubtitleTrackSignature | null;
   subtitleMode?: SubtitleMode;
   showForcedSubtitles?: boolean;
-  profileLanguage?: string | null;
   activeAudioTrackIndex?: number | null;
   onSelectSubtitle?: (selection: PrePlaySubtitleSelection) => void;
   onSelectSubtitleOff?: () => void;
   onResetSelection?: () => void;
+  /** Opens the subtitle provider search for this version. */
+  onSearchSubtitles?: () => void;
 }
 
 function SubtitleFlagBadges({
@@ -48,21 +50,22 @@ function SubtitleFlagBadges({
   hearingImpaired?: boolean;
   isDefault?: boolean;
 }) {
+  const t = useT();
   return (
     <>
       {forced && (
         <Badge variant="outline" className="px-1.5 py-0 text-[0.625rem] uppercase">
-          Forced
+          {t("web.detail.mediaInfo.forced")}
         </Badge>
       )}
       {hearingImpaired && (
         <Badge variant="outline" className="px-1.5 py-0 text-[0.625rem] uppercase">
-          HI
+          {t("web.detail.mediaInfo.hearingImpairedShort")}
         </Badge>
       )}
       {isDefault && (
         <Badge variant="outline" className="px-1.5 py-0 text-[0.625rem] uppercase">
-          Default
+          {t("web.detail.mediaInfo.defaultBadge")}
         </Badge>
       )}
     </>
@@ -105,7 +108,7 @@ function SelectionRow({
     <button
       type="button"
       onClick={onSelect}
-      className={`flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
+      className={`flex w-full items-start gap-3 rounded-lg px-3 py-2 text-start transition-colors ${
         active ? "bg-accent/50" : "hover:bg-accent/30"
       }`}
     >
@@ -168,12 +171,16 @@ function SubtitleSection({
 }
 
 function formatExplicitSelectionSummary(
+  t: Translate,
   selection: PrePlaySubtitleSelection | null | undefined,
 ): string {
-  if (!selection) return "Off";
+  if (!selection) return t("web.detail.subtitles.off");
   return formatSubtitlePillSummary({
     label: selection.label,
-    languageLabel: getLanguageName(selection.language ?? "") || selection.language || "Unknown",
+    languageLabel:
+      getLanguageName(selection.language ?? "") ||
+      selection.language ||
+      t("web.detail.subtitles.unknown"),
     codec: selection.codec,
     forced: selection.forced,
     hearingImpaired: selection.hearing_impaired,
@@ -198,12 +205,13 @@ export default function SubtitlesPopover({
   preferredSubtitleTrackSignature,
   subtitleMode,
   showForcedSubtitles = true,
-  profileLanguage,
   activeAudioTrackIndex = null,
   onSelectSubtitle,
   onSelectSubtitleOff,
   onResetSelection,
+  onSearchSubtitles,
 }: SubtitlesPopoverProps) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   // Downloaded subtitles normally load lazily on open, but when the saved
   // preference points at one, the closed trigger's Auto summary needs them
@@ -229,14 +237,12 @@ export default function SubtitlesPopover({
         subtitleMode,
         showForcedSubtitles,
         audioLanguage: activeAudioLanguage,
-        profileLanguage,
       }),
     [
       activeAudioLanguage,
       candidates.all,
       preferredSubtitleLanguage,
       preferredSubtitleTrackSignature,
-      profileLanguage,
       showForcedSubtitles,
       subtitleMode,
     ],
@@ -253,10 +259,14 @@ export default function SubtitlesPopover({
     selectionMode === "auto"
       ? overrideCandidate
         ? formatCandidatePillSummary(overrideCandidate)
-        : `Auto: ${autoCandidate ? formatCandidatePillSummary(autoCandidate) : "Off"}`
+        : t("web.detail.tracks.autoSummary", {
+            summary: autoCandidate
+              ? formatCandidatePillSummary(autoCandidate)
+              : t("web.detail.subtitles.off"),
+          })
       : selectionMode === "off"
-        ? "Off"
-        : formatExplicitSelectionSummary(explicitSelection);
+        ? t("web.detail.subtitles.off")
+        : formatExplicitSelectionSummary(t, explicitSelection);
 
   const activeListSelection =
     !isInteractive || selectionMode === "off"
@@ -277,7 +287,7 @@ export default function SubtitlesPopover({
           className="h-8 max-w-full min-w-0 shrink gap-1.5 rounded-full px-3 text-xs font-medium"
         >
           <Captions className="size-3.5" />
-          Subs
+          {t("web.detail.subtitles.button")}
           <span className="text-muted-foreground max-w-44 truncate text-[0.6875rem] font-normal sm:max-w-64">
             {isInteractive ? activeSummary : candidates.all.length}
           </span>
@@ -290,27 +300,29 @@ export default function SubtitlesPopover({
           <>
             <SelectionRow
               active={selectionMode === "auto" && !overrideCandidate}
-              title="Auto"
+              title={t("web.detail.tracks.auto")}
               description={
-                overrideCandidate ? "Reset to profile defaults" : (autoCandidate?.summary ?? "Off")
+                overrideCandidate
+                  ? t("web.detail.subtitles.resetToDefaults")
+                  : (autoCandidate?.summary ?? t("web.detail.subtitles.off"))
               }
               onSelect={onResetSelection}
             />
             <SelectionRow
               active={selectionMode === "off"}
-              title="Off"
+              title={t("web.detail.subtitles.off")}
               onSelect={onSelectSubtitleOff}
             />
           </>
         )}
         <SubtitleSection
-          title="Embedded"
+          title={t("web.detail.mediaInfo.embedded")}
           rows={candidates.embedded}
           activeSelection={activeListSelection}
           onSelectSubtitle={onSelectSubtitle}
         />
         <SubtitleSection
-          title="External"
+          title={t("web.detail.mediaInfo.external")}
           rows={candidates.external}
           activeSelection={activeListSelection}
           onSelectSubtitle={onSelectSubtitle}
@@ -318,18 +330,35 @@ export default function SubtitlesPopover({
         {downloadedQuery.isLoading ? (
           <div className="text-muted-foreground flex items-center gap-2 px-3 py-2 text-xs">
             <Loader2 className="size-3 animate-spin" />
-            Loading downloaded...
+            {t("web.detail.subtitles.loadingDownloaded")}
           </div>
         ) : (
           <SubtitleSection
-            title="Downloaded"
+            title={t("web.detail.subtitles.downloaded")}
             rows={candidates.downloaded}
             activeSelection={activeListSelection}
             onSelectSubtitle={onSelectSubtitle}
           />
         )}
         {candidates.all.length === 0 && !downloadedQuery.isLoading && (
-          <div className="text-muted-foreground px-3 py-2 text-sm">No subtitles available.</div>
+          <div className="text-muted-foreground px-3 py-2 text-sm">
+            {t("web.detail.subtitles.noneAvailable")}
+          </div>
+        )}
+        {onSearchSubtitles && (
+          <div className="border-border bg-popover sticky -bottom-1.5 -mx-1.5 border-t px-1.5 pt-1.5 pb-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onSearchSubtitles();
+              }}
+              className="hover:bg-accent/30 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm font-medium transition-colors"
+            >
+              <Search className="text-muted-foreground size-4" />
+              {t("web.detail.subtitles.search")}
+            </button>
+          </div>
         )}
       </div>
     </DetailPopover>

@@ -9,11 +9,8 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
 func TestNormalizePlexWatchlistItem(t *testing.T) {
@@ -256,81 +253,12 @@ func TestFetchWatchlistStopsOnEmptyPage(t *testing.T) {
 	}
 }
 
-func TestPlexWatchlistImportCountsOnlyInsertedRows(t *testing.T) {
-	ctx := trustLoopback(context.Background())
-	pool := newPlexWatchlistImportTestPool(t)
-	repo := NewRepository(pool, nil)
-	service := &Service{
-		repo:         repo,
-		matcher:      NewMatcher(repo),
-		stores:       pgstore.NewPostgresProvider(pool),
-		bgContext:    ctx,
-		runSemaphore: make(chan struct{}, maxConcurrentRuns),
-		runCancels:   make(map[string]context.CancelFunc),
-	}
-
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO media_items (content_id, type, title, year, tmdb_id, status)
-		VALUES ($1, $2, $3, $4, $5, $6)`,
-		"movie-693134", KindMovie, "Dune: Part Two", 2024, "693134", "matched",
-	); err != nil {
-		t.Fatalf("seed media item: %v", err)
-	}
-	run, err := repo.CreateRun(ctx, Run{
-		ID:               "plex-watchlist-duplicate-run",
-		UserID:           42,
-		ProfileID:        "profile-1",
-		SourceType:       SourceTypePlex,
-		ConnectionMode:   ConnectionModePlexOAuth,
-		Status:           RunStatusQueued,
-		Warnings:         []string{},
-		UnmatchedSamples: []UnmatchedSample{},
-	})
-	if err != nil {
-		t.Fatalf("CreateRun: %v", err)
-	}
-
-	updatedAt := time.Date(2026, time.July, 2, 12, 0, 0, 0, time.UTC)
-	record := Record{
-		Kind:        KindMovie,
-		Title:       "Dune: Part Two",
-		Year:        2024,
-		TMDBID:      "693134",
-		Watchlisted: true,
-		UpdatedAt:   updatedAt,
-	}
-	service.executeRun(run, staticWatchlistProvider{records: []Record{record, record}})
-
-	completed, err := repo.GetRunForUser(ctx, 42, run.ID)
-	if err != nil {
-		t.Fatalf("GetRunForUser: %v", err)
-	}
-	if completed.Status != RunStatusCompleted {
-		t.Fatalf("run status = %q, want %q; warnings=%v", completed.Status, RunStatusCompleted, completed.Warnings)
-	}
-	if completed.WatchlistAdded != 1 {
-		t.Fatalf("WatchlistAdded = %d, want 1", completed.WatchlistAdded)
-	}
-	var rows int
-	if err := pool.QueryRow(ctx, `
-		SELECT COUNT(*)
-		FROM user_watchlist
-		WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`,
-		42, "profile-1", "movie-693134",
-	).Scan(&rows); err != nil {
-		t.Fatalf("count watchlist rows: %v", err)
-	}
-	if rows != 1 {
-		t.Fatalf("watchlist rows = %d, want 1", rows)
-	}
-}
-
 type staticWatchlistProvider struct {
 	records []Record
 }
 
-func (p staticWatchlistProvider) Fetch(context.Context) ([]Record, []string, error) {
-	return p.records, nil, nil
+func (p staticWatchlistProvider) Stream(_ context.Context, _ *StreamPosition, sink RecordSink) error {
+	return sink(RecordBatch{Records: p.records})
 }
 
 func newPlexWatchlistImportTestPool(t *testing.T) *pgxpool.Pool {
@@ -392,7 +320,7 @@ func newPlexWatchlistImportTestPool(t *testing.T) *pgxpool.Pool {
 			created_at timestamptz NOT NULL DEFAULT now(),
 			started_at timestamptz,
 			completed_at timestamptz,
-			last_heartbeat_at timestamptz,
+			last_heartbeat_at timestamptz, checkpoint jsonb,
  claim_generation bigint NOT NULL DEFAULT 0, dispatch_version integer, dispatch_kind text NOT NULL DEFAULT 'admin', cancel_requested_at timestamptz,
  dispatch_source_id integer,dispatch_source_revision bigint,dispatch_mapping_id integer,dispatch_mapping_revision bigint,dispatch_external_user_id text
 		) ON COMMIT PRESERVE ROWS`,

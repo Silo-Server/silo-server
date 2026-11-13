@@ -16,7 +16,6 @@ import (
 	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
-	"github.com/go-chi/chi/v5"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/Silo-Server/silo-server/internal/clientip"
@@ -220,9 +219,9 @@ func writeHandshakeError(w http.ResponseWriter, err error) {
 	http.Error(w, "internal error", http.StatusInternalServerError)
 }
 
-// CallbackURL is the absolute redirect URI of the callback under one API
-// prefix ("/api/v1" or "/api/v2"). The provider must have the URI it is
-// handed registered, so the init and callback of one flow share a prefix.
+// CallbackURL is the absolute redirect URI of the callback under an API
+// prefix. The provider must have the URI it is handed registered, so the init
+// and callback of one flow share a prefix.
 func (h *OAuthHandler) CallbackURL(prefix string, installID int) string {
 	return h.currentHostBaseURL() + prefix + "/auth/oauth/" + strconv.Itoa(installID) + "/callback"
 }
@@ -267,8 +266,7 @@ func (h *OAuthHandler) OnPublicOrigin(r *http.Request) bool {
 // OAuthStartRequest is one flow start as a transport received it.
 type OAuthStartRequest struct {
 	InstallID int
-	// Prefix is the API prefix of the flow's callback ("/api/v1" or
-	// "/api/v2").
+	// Prefix is the API prefix of the flow's callback.
 	Prefix string
 	Next   string
 	// LinkTicket makes a native flow a linking flow for the account that
@@ -318,7 +316,7 @@ func (h *OAuthHandler) ServeStart(w http.ResponseWriter, r *http.Request, req OA
 	ctx := r.Context()
 	onPublicOrigin := h.OnPublicOrigin(r)
 	if req.Native {
-		req.startOrigin = requestOrigin(r)
+		req.startOrigin = clientip.RequestOrigin(r)
 	}
 	// An unknown start origin is refused before checkStart: a start failure
 	// redirects to the app with that origin as iss, which only a known
@@ -415,7 +413,7 @@ func (h *OAuthHandler) resumeNativeStart(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	if !h.OnPublicOrigin(r) {
-		slog.InfoContext(ctx, "oauth parked native start presented on another origin than the public URL", "component", "auth", "installation_id", req.InstallID, "origin", requestOrigin(r), "public_url", h.currentHostBaseURL())
+		slog.InfoContext(ctx, "oauth parked native start presented on another origin than the public URL", "component", "auth", "installation_id", req.InstallID, "origin", clientip.RequestOrigin(r), "public_url", h.currentHostBaseURL())
 		http.Error(w, nativeStartUnknownMessage, http.StatusBadRequest)
 		return
 	}
@@ -444,16 +442,15 @@ func (h *OAuthHandler) resumeNativeStart(w http.ResponseWriter, r *http.Request,
 }
 
 // writeStartFailure answers a start that cannot open its flow. Malformed
-// parameters stay plain-text 400s. A v2 start that failed on the provider
-// or the server (no public URL, plugin unavailable, InitAuthorize failed)
-// sends the browser somewhere it can recover from instead of a raw text
-// page: a web start to the login page with provider_unavailable (which
-// does not redirect to the provider again while it shows an error), a
-// native start with a valid code_challenge and app_state to the app
-// redirect. The frozen v1 init keeps its plain-text answers.
+// parameters stay plain-text 400s. A start that failed on the provider or
+// the server (no public URL, plugin unavailable, InitAuthorize failed) sends
+// the browser somewhere it can recover from instead of a raw text page: a web
+// start to the login page with provider_unavailable (which does not redirect
+// to the provider again while it shows an error), a native start with a
+// valid code_challenge and app_state to the app redirect.
 func (h *OAuthHandler) writeStartFailure(w http.ResponseWriter, r *http.Request, req OAuthStartRequest, err error) {
 	var he *OAuthHandshakeError
-	if req.Prefix == oauthV1Prefix || !errors.As(err, &he) || he.Status == http.StatusBadRequest {
+	if !errors.As(err, &he) || he.Status == http.StatusBadRequest {
 		writeHandshakeError(w, err)
 		return
 	}
@@ -471,10 +468,6 @@ func (h *OAuthHandler) writeStartFailure(w http.ResponseWriter, r *http.Request,
 	}
 	http.Redirect(w, r, webFailureLocation(reason), http.StatusFound)
 }
-
-// oauthV1Prefix is the frozen v1 API prefix, whose init answers stay as
-// they were.
-const oauthV1Prefix = "/api/v1"
 
 // oauthV2Prefix is the v2 API prefix.
 const oauthV2Prefix = "/api/v2"
@@ -628,39 +621,11 @@ type OAuthCallbackInput struct {
 	IP               string
 }
 
-// HandleInit serves POST /api/v1/auth/oauth/{install_id}/init. A browser on
-// another origin than the public URL is sent there first (307 keeps the
-// POST), so the binding cookie lands where the callback will read it.
-func (h *OAuthHandler) HandleInit(w http.ResponseWriter, r *http.Request) {
-	installID, err := strconv.Atoi(chi.URLParam(r, "install_id"))
-	if err != nil || installID <= 0 {
-		http.Error(w, "invalid install_id", http.StatusBadRequest)
-		return
-	}
-	query := url.Values{}
-	if next := r.URL.Query().Get("next"); next != "" {
-		query.Set("next", next)
-	}
-	query.Set(OAuthBounceParameter, "1")
-	bounce := h.PublicURL("/api/v1/auth/oauth/"+strconv.Itoa(installID)+"/init", query)
-	h.ServeStart(w, r, OAuthStartRequest{InstallID: installID, Prefix: "/api/v1", Next: r.URL.Query().Get("next")}, bounce, http.StatusTemporaryRedirect)
-}
-
-// HandleCallback serves GET /api/v1/auth/oauth/{install_id}/callback.
-func (h *OAuthHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
-	installID, err := strconv.Atoi(chi.URLParam(r, "install_id"))
-	if err != nil || installID <= 0 {
-		http.Error(w, "invalid install_id", http.StatusBadRequest)
-		return
-	}
-	h.ServeCallback(w, r, "/api/v1", installID)
-}
-
 // ServeCallback answers the provider's redirect back under one API prefix:
 // it reads the flow's binding cookie, finishes the flow, clears the cookie
 // and redirects the browser on. A flow that ends in a web completion code
-// also gets the completion cookie, on the complete path of each API
-// version, so only this browser can redeem the code.
+// also gets the completion cookie, on the complete path, so only this
+// browser can redeem the code.
 func (h *OAuthHandler) ServeCallback(w http.ResponseWriter, r *http.Request, prefix string, installID int) {
 	query := r.URL.Query()
 	state, code, providerError := query.Get("state"), query.Get("code"), query.Get("error")
@@ -683,9 +648,7 @@ func (h *OAuthHandler) ServeCallback(w http.ResponseWriter, r *http.Request, pre
 		Binder: binder, CompletionBinder: completionBinder, UserAgent: r.UserAgent(), IP: clientIP(r),
 	})
 	if strings.HasPrefix(location, h.webCompletionURL()+"?") {
-		for _, apiPrefix := range []string{oauthV1Prefix, oauthV2Prefix} {
-			http.SetCookie(w, oauthCompletionCookie(completionBinder, h.PublicURL(apiPrefix+oauthCompletePath, nil)))
-		}
+		http.SetCookie(w, oauthCompletionCookie(completionBinder, h.PublicURL(oauthV2Prefix+oauthCompletePath, nil)))
 	}
 	http.Redirect(w, r, location, http.StatusFound)
 }
@@ -747,24 +710,6 @@ func (h *OAuthHandler) appRedirect(ctx context.Context, issuer string, q url.Val
 // hold, so the residual relay needs a hostile server on a local address.
 const oauthIssuerParameter = "iss"
 
-// requestOrigin is the origin r arrived on, serialized like an iss and
-// derived like OnPublicOrigin: the host a trusted proxy names in
-// X-Forwarded-Host or the Host header, and the scheme of the connection or
-// the one a trusted proxy names. On the public origin it is the public
-// origin.
-func requestOrigin(r *http.Request) string {
-	scheme := clientip.RequestScheme(r)
-	if scheme == "" {
-		// Ambiguous proxy metadata: name the transport's scheme. A wrong
-		// guess makes the app refuse the redirect, never accept a relay.
-		scheme = schemeHTTP
-		if r.TLS != nil {
-			scheme = schemeHTTPS
-		}
-	}
-	return serializeOrigin(scheme, clientip.RequestHost(r))
-}
-
 // cgnatRange is the shared address space of RFC 6598, which carrier NAT and
 // overlay networks such as Tailscale use.
 var cgnatRange = &net.IPNet{IP: net.IPv4(100, 64, 0, 0).To4(), Mask: net.CIDRMask(10, 32)}
@@ -790,7 +735,7 @@ func (h *OAuthHandler) knownStartOrigin(origin string) bool {
 	if h.deps.KnownOrigins != nil {
 		for _, raw := range h.deps.KnownOrigins() {
 			known, err := url.Parse(raw)
-			if err == nil && known.Host != "" && serializeOrigin(known.Scheme, known.Host) == origin {
+			if err == nil && known.Host != "" && clientip.SerializeOrigin(known.Scheme, known.Host) == origin {
 				return true
 			}
 		}
@@ -811,25 +756,6 @@ func (h *OAuthHandler) knownStartOrigin(origin string) bool {
 		}
 	}
 	return false
-}
-
-// serializeOrigin is scheme://host[:port] with the scheme and host in lower
-// case, the default port of the scheme left out, and no path or trailing
-// slash.
-func serializeOrigin(scheme, host string) string {
-	scheme = strings.ToLower(strings.TrimSpace(scheme))
-	hostURL := url.URL{Host: strings.TrimSpace(host)}
-	name, port := strings.ToLower(hostURL.Hostname()), hostURL.Port()
-	if (scheme == schemeHTTPS && port == "443") || (scheme == schemeHTTP && port == "80") {
-		port = ""
-	}
-	if strings.Contains(name, ":") {
-		name = "[" + name + "]"
-	}
-	if port != "" {
-		name += ":" + port
-	}
-	return scheme + "://" + name
 }
 
 // addServerID adds this server's identity to an app redirect.
@@ -1061,52 +987,6 @@ type OAuthCompleteResponse struct {
 	RefreshToken string `json:"refresh_token"`
 	ExpiresIn    int    `json:"expires_in"`
 	NextURL      string `json:"next"`
-}
-
-// maxOAuthCompleteBodyBytes bounds the public v1 POST /auth/oauth/complete
-// body, which is decoded before the completion code is checked. It matches
-// the v2 default structured-body cap.
-const maxOAuthCompleteBodyBytes = 1 << 20
-
-// HandleComplete serves v1 POST /auth/oauth/complete. v1 takes no
-// code_verifier, so it redeems web codes only, with the browser's
-// completion cookie.
-func (h *OAuthHandler) HandleComplete(w http.ResponseWriter, r *http.Request) {
-	if h.deps.CompletionStore == nil {
-		http.Error(w, "oauth completion unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	var req OAuthCompleteRequest
-	r.Body = http.MaxBytesReader(w, r.Body, maxOAuthCompleteBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
-			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
-			return
-		}
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-	browser := ""
-	if cookie, err := r.Cookie(OAuthCompletionCookieName); err == nil {
-		browser = cookie.Value
-	}
-	completion, err := h.Complete(WithClientDevice(r.Context(), r.Header), req.Code, "", browser)
-	if err != nil {
-		if errors.Is(err, ErrOAuthCodeRequired) {
-			http.Error(w, "code required", http.StatusBadRequest)
-			return
-		}
-		http.Error(w, "invalid or expired completion code", http.StatusUnauthorized)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(OAuthCompleteResponse{
-		AccessToken:  completion.AccessToken,
-		RefreshToken: completion.RefreshToken,
-		ExpiresIn:    completion.ExpiresIn,
-		NextURL:      completion.NextURL,
-	})
 }
 
 // Errors Complete reports; each transport renders them in its own shape.

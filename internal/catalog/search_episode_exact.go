@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// An exact episode title fixes all six relevance scores when no year/phrase
+// An exact episode title fixes all seven relevance scores when no year/phrase
 // hint is present. Within one library identity is unique, so the composite
 // index can select the best remaining title/ID ties before scoring. A partial
 // exact tier always falls back to the general query in the same snapshot.
@@ -42,8 +42,8 @@ func buildEpisodeExactTierSQL(parsed parsedSearchQuery, filter AccessFilter, cur
 		if len(after.Keys) != len(searchFTSTerms()) {
 			return "", nil
 		}
-		for index, want := range [...]float64{1, 1, 0, 0, 0, 0} {
-			if index == 4 {
+		for index, want := range [...]float64{0, 1, 2, 0, 0, 0, 0} {
+			if index == 5 {
 				continue
 			}
 			key := after.Keys[index]
@@ -55,15 +55,17 @@ func buildEpisodeExactTierSQL(parsed parsedSearchQuery, filter AccessFilter, cur
 				return "", nil
 			}
 		}
-		if after.Keys[4].Value == nil || after.Keys[6].Value == nil || after.Keys[7].Value == nil {
+		if after.Keys[5].Value == nil || after.Keys[7].Value == nil || after.Keys[8].Value == nil {
 			return "", nil
 		}
 		index := len(args) + 1
-		args = append(args, after.Keys[4].Value, after.Keys[6].Value, after.Keys[7].Value)
-		// Compare the constant prefix score in PostgreSQL's real type, matching
+		args = append(args, after.Keys[5].Value, after.Keys[7].Value, after.Keys[8].Value)
+		// Compare the constant prefix score in PostgreSQL's float8 type, matching
 		// the rank and cursor text representation without a Go approximation.
 		conditions = append(conditions,
-			fmt.Sprintf("ts_rank_cd(setweight(to_tsvector('simple', $%d::text), 'A'), to_tsquery('simple', $2)) = $%d::real", exactIdx, index),
+			fmt.Sprintf("%s = $%d::float8", titlePrefixRankSQL(
+				titleWordsSQL([]string{fmt.Sprintf("$%d::text", exactIdx)}, exactIdx),
+				titleRankSQL(fmt.Sprintf("setweight(to_tsvector('simple', $%d::text), 'A')", exactIdx), titlePrefixQuery)), index),
 			fmt.Sprintf("(LOWER(ece.title), ece.episode_id) > ($%d::text, $%d::text)", index+1, index+2),
 		)
 	}

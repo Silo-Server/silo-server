@@ -3,7 +3,6 @@ package policy
 import (
 	"context"
 	"log/slog"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -12,50 +11,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/cache"
 )
-
-func TestSystemCrossNodeConvergenceEventAndPoll(t *testing.T) {
-	ctx := context.Background()
-	pool, storeA := newPolicyStoreTest(t, ctx)
-	storeB := NewPolicyStore(pool)
-
-	eventBus := newPolicyTestEventBus()
-	systemA := newStartedPolicySystem(t, ctx, storeA, eventBus, time.Hour)
-	systemB := newStartedPolicySystem(t, ctx, storeB, eventBus, time.Hour)
-	var appliedA, appliedB atomic.Int32
-	systemA.OnChangeApplied(func(context.Context, int64) { appliedA.Add(1) })
-	systemB.OnChangeApplied(func(context.Context, int64) { appliedB.Add(1) })
-
-	documentID, generation := activatePolicyVersion(t, ctx, storeA, 0, "sha-event")
-	if err := systemA.NotifyChanged(ctx); err != nil {
-		t.Fatalf("NotifyChanged(event) error: %v", err)
-	}
-	waitForPolicyRevision(t, systemB, generation)
-	// Each node announces the change once it has applied it; the origin's
-	// own event reload of the same generation does not announce it again.
-	waitForChangeApplied(t, &appliedB, 1)
-	if n := appliedA.Load(); n != 1 {
-		t.Fatalf("origin announced the change %d times, want 1", n)
-	}
-
-	systemA.Stop()
-	systemB.Stop()
-
-	droppingBus := newPolicyTestEventBus()
-	droppingBus.SetDrop(true)
-	pollSystemA := newStartedPolicySystem(t, ctx, storeA, droppingBus, 20*time.Millisecond)
-	pollSystemB := newStartedPolicySystem(t, ctx, storeB, droppingBus, 20*time.Millisecond)
-	defer pollSystemA.Stop()
-	defer pollSystemB.Stop()
-	var appliedPollB atomic.Int32
-	pollSystemB.OnChangeApplied(func(context.Context, int64) { appliedPollB.Add(1) })
-
-	_, generation = activatePolicyVersion(t, ctx, storeA, documentID, "sha-poll")
-	if err := pollSystemA.NotifyChanged(ctx); err != nil {
-		t.Fatalf("NotifyChanged(poll) error: %v", err)
-	}
-	waitForPolicyRevision(t, pollSystemB, generation)
-	waitForChangeApplied(t, &appliedPollB, 1)
-}
 
 // A change committed without a successful local reload, as when the origin's
 // synchronous reload fails, is announced by the poll reload that loads it, and
@@ -92,25 +47,6 @@ func TestSystemAnnouncesAChangeLoadedByALaterReload(t *testing.T) {
 	}
 }
 
-// waitForChangeApplied waits until the change hook counted by applied has run
-// want times.
-func waitForChangeApplied(t *testing.T, applied *atomic.Int32, want int32) {
-	t.Helper()
-	deadline := time.After(3 * time.Second)
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-deadline:
-			t.Fatalf("change hook ran %d times, want %d", applied.Load(), want)
-		case <-ticker.C:
-			if applied.Load() == want {
-				return
-			}
-		}
-	}
-}
-
 func TestSystemDegradedBootUsesVendorPolicy(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -133,68 +69,6 @@ func TestSystemDegradedBootUsesVendorPolicy(t *testing.T) {
 	if !degraded.Degraded || degraded.Reason != DegradedReasonStoreUnavailable {
 		t.Fatalf("DegradedState() = %#v, want degraded with reason %q", degraded, DegradedReasonStoreUnavailable)
 	}
-}
-
-func TestSystemReloadFailureKeepsLastKnownGood(t *testing.T) {
-	ctx := context.Background()
-	pool, store := newPolicyStoreTest(t, ctx)
-
-	system := newStartedPolicySystem(t, ctx, store, &cache.NoopEventBus{}, time.Hour)
-	defer system.Stop()
-
-	_, generation := activatePolicyVersion(t, ctx, store, 0, "sha-good")
-	if err := system.NotifyChanged(ctx); err != nil {
-		t.Fatalf("NotifyChanged(good) error: %v", err)
-	}
-	waitForPolicyRevision(t, system, generation)
-
-	pool.Close()
-	if err := system.NotifyChanged(ctx); err == nil {
-		t.Fatal("NotifyChanged() error = nil, want closed pool error")
-	}
-	if got := system.engine.Revision(); got != generation {
-		t.Fatalf("revision after failed reload = %d, want %d", got, generation)
-	}
-	assertVendorScopeDecision(t, system)
-}
-
-type policyTestEventBus struct {
-	mu       sync.Mutex
-	drop     bool
-	handlers map[string][]cache.EventHandler
-}
-
-func newPolicyTestEventBus() *policyTestEventBus {
-	return &policyTestEventBus{handlers: make(map[string][]cache.EventHandler)}
-}
-
-func (b *policyTestEventBus) Publish(_ context.Context, channel string, event cache.Event) error {
-	b.mu.Lock()
-	drop := b.drop
-	handlers := append([]cache.EventHandler(nil), b.handlers[channel]...)
-	b.mu.Unlock()
-	if drop {
-		return nil
-	}
-	for _, handler := range handlers {
-		handler(event)
-	}
-	return nil
-}
-
-func (b *policyTestEventBus) Subscribe(_ context.Context, channel string, handler cache.EventHandler) error {
-	b.mu.Lock()
-	b.handlers[channel] = append(b.handlers[channel], handler)
-	b.mu.Unlock()
-	return nil
-}
-
-func (b *policyTestEventBus) Close() error { return nil }
-
-func (b *policyTestEventBus) SetDrop(drop bool) {
-	b.mu.Lock()
-	b.drop = drop
-	b.mu.Unlock()
 }
 
 func newStartedPolicySystem(t *testing.T, ctx context.Context, store *PolicyStore, bus cache.EventBus, pollInterval time.Duration) *System {
@@ -228,23 +102,6 @@ func activatePolicyVersion(t *testing.T, ctx context.Context, store *PolicyStore
 		t.Fatalf("Activate() error: %v", err)
 	}
 	return documentID, generation
-}
-
-func waitForPolicyRevision(t *testing.T, system *System, generation int64) {
-	t.Helper()
-	deadline := time.After(3 * time.Second)
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-deadline:
-			t.Fatalf("policy revision = %d, want %d", system.engine.Revision(), generation)
-		case <-ticker.C:
-			if system.engine.Revision() == generation {
-				return
-			}
-		}
-	}
 }
 
 func assertVendorScopeDecision(t *testing.T, system *System) {

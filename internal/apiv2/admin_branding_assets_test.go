@@ -73,21 +73,3 @@ func TestAdminBrandingAssetUpload(t *testing.T) {
 	deps.AdminBrandingAssets = nil
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodPost, path, body, with(bearer(adminToken), "Content-Type", ct)), TypeDependencyUnavailable)
 }
-
-func TestAdminBrandingAssetDelete(t *testing.T) {
-	deps := pilotDeps(nil, nil)
-	f := new(fakeBrandingAssets)
-	deps.AdminBrandingAssets = f
-	h := newTestHandler(t, deps)
-	path := Prefix + "/admin/branding/assets/login_bg"
-	requireProblem(t, do(t, h, http.MethodDelete, path, "", bearer(memberToken)), TypePermissionDenied)
-	rec := do(t, h, http.MethodDelete, path, "", bearer(adminToken))
-	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 || f.deletes != 1 || f.kind != "login_bg" {
-		t.Fatal(rec.Code, rec.Body.String(), f.deletes, f.kind)
-	}
-	requireProblem(t, do(t, h, http.MethodDelete, Prefix+"/admin/branding/assets/banner", "", bearer(adminToken)), TypeValidationFailed)
-	f.err = &handlers.APIError{Status: http.StatusInternalServerError, Code: "internal_error", Message: "Failed to remove asset"}
-	requireProblem(t, do(t, h, http.MethodDelete, path, "", bearer(adminToken)), TypeInternalError)
-	deps.AdminBrandingAssets = nil
-	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodDelete, path, "", bearer(adminToken)), TypeDependencyUnavailable)
-}

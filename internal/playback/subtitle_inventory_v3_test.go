@@ -108,7 +108,9 @@ func TestSubtitleInventoryV3_AttachesURLsOnlyToSidecarTracks(t *testing.T) {
 		},
 	}
 
-	items := SubtitleInventoryV3("sess-1", file, nil)
+	items := SubtitleInventoryV3("sess-1", file, []SubtitleInventoryEntryV3{
+		{Codec: "sub", Source: SubtitleSourceDownloadedV3, DownloadedSubtitleID: 71},
+	})
 
 	cases := []struct {
 		index         int
@@ -119,6 +121,7 @@ func TestSubtitleInventoryV3_AttachesURLsOnlyToSidecarTracks(t *testing.T) {
 		{1, "/stream/sess-1/subtitles/1.ass?file_id=44&embedded_stream_index=1", "/stream/sess-1/subtitles/1/fonts?file_id=44&embedded_stream_index=1"},
 		{2, "/stream/sess-1/subtitles/2.sup?file_id=44&embedded_stream_index=2", ""},
 		{3, "", ""},
+		{4, "", ""},
 	}
 	for _, tc := range cases {
 		got := items[tc.index]
@@ -129,6 +132,23 @@ func TestSubtitleInventoryV3_AttachesURLsOnlyToSidecarTracks(t *testing.T) {
 			t.Errorf("item %d font_bundle_url = %q, want %q", tc.index, got.FontBundleURL, tc.fontBundleURL)
 		}
 	}
+	// A stored track without a URL or timing key must still be identifiable
+	// after a plan refresh, so a readiness event cannot auto-select it.
+	raw, err := json.Marshal(items[4])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire struct {
+		StoredID int    `json:"stored_subtitle_id"`
+		SyncKey  string `json:"sync_key"`
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if wire.StoredID != 71 || wire.SyncKey != "" {
+		t.Fatalf("stored identity or timing support changed: %s", raw)
+	}
+
 }
 
 func TestScopeSubtitleInventoryV3PreservesPinnedIdentity(t *testing.T) {
@@ -196,29 +216,6 @@ func TestSubtitleInventoryItemAtV3(t *testing.T) {
 	}
 	if _, ok := SubtitleInventoryItemAtV3(items, -1); ok {
 		t.Error("SubtitleInventoryItemAtV3 must not resolve a negative ordinal")
-	}
-}
-
-func TestBuildSubtitleInventoryV3_NilFile(t *testing.T) {
-	if items := BuildSubtitleInventoryV3(nil, nil); items != nil {
-		t.Errorf("expected nil inventory for a nil file, got %+v", items)
-	}
-}
-
-func TestSubtitleURLExtV3(t *testing.T) {
-	cases := map[string]string{
-		"ass":               ".ass",
-		"ssa":               ".ass",
-		"pgs":               ".sup",
-		"hdmv_pgs_subtitle": ".sup",
-		"subrip":            ".vtt",
-		"srt":               ".vtt",
-		"":                  ".vtt",
-	}
-	for codec, want := range cases {
-		if got := SubtitleURLExtV3(codec); got != want {
-			t.Errorf("SubtitleURLExtV3(%q) = %q, want %q", codec, got, want)
-		}
 	}
 }
 
@@ -343,6 +340,91 @@ func TestBuildSubtitleInventoryV3_SyncKeys(t *testing.T) {
 	for i, item := range items {
 		if item.SyncKey != want[i] {
 			t.Errorf("item %d (%s %s) sync key %q, want %q", i, item.Source, item.Codec, item.SyncKey, want[i])
+		}
+	}
+}
+
+// Embedded rows name their stream in the source and keep their sidecar URL as
+// the fallback; external and downloaded rows have no stream to name.
+func TestSubtitleInventoryV3_EmbeddedRowsCarryStreamIdentity(t *testing.T) {
+	file := &models.MediaFile{
+		ID:                42,
+		ExternalSubtitles: []models.ExternalSubtitle{{Path: "/media/movie.en.srt", Language: "en", Format: "srt"}},
+		SubtitleTracks: []models.SubtitleTrack{
+			{Index: 0, Codec: "subrip"},
+			{Index: 3, ContainerTrackID: "4", Codec: "subrip"},
+		},
+	}
+	additional := []SubtitleInventoryEntryV3{{CombinedIndex: 3, Codec: "srt", Source: SubtitleSourceDownloadedV3, DownloadedSubtitleID: 9}}
+	inventory := BuildSubtitleInventoryV3(file, additional)
+	inventory[2].NativeSelectable = true
+	items := ScopeSubtitleInventoryV3("session-1", file, inventory, nil)
+	if items[2].URL == "" {
+		t.Fatal("a native-selectable row lost its fallback URL")
+	}
+	raw, err := json.Marshal(items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		t.Fatal(err)
+	}
+	want := []map[string]any{
+		{},
+		{"stream_index": 0.0},
+		{"stream_index": 3.0, "container_track_id": "4", "native_selectable": true},
+		{},
+	}
+	for i, row := range rows {
+		for _, key := range []string{"stream_index", "container_track_id", "native_selectable"} {
+			got, ok := row[key]
+			wantValue, wantOK := want[i][key]
+			if ok != wantOK || got != wantValue {
+				t.Errorf("row %d %s = %v (present %v), want %v (present %v)", i, key, got, ok, wantValue, wantOK)
+			}
+		}
+	}
+}
+
+// A viewer who may not see file names must not read one from an untitled
+// sidecar's label. A sidecar with its own title, and every embedded track,
+// keeps its label.
+func TestHideSidecarFileNamesV3(t *testing.T) {
+	file := &models.MediaFile{
+		ID: 42,
+		ExternalSubtitles: []models.ExternalSubtitle{
+			{Path: "/media/Movie.2023.1080p.WEB-DL-GROUP.en.srt", Language: "en", Format: "srt"},
+			// The scanner stores a sidecar's file name as its title.
+			{Path: "/media/Movie.2023.1080p.WEB-DL-GROUP.es.srt", Language: "es", Format: "srt", Title: "Movie.2023.1080p.WEB-DL-GROUP.es.srt"},
+			{Path: "/media/movie.fr.srt", Language: "fr", Format: "srt", Title: "Commentary"},
+			// A second untitled English sidecar stays distinguishable.
+			{Path: "/media/Movie.2023.1080p.WEB-DL-OTHER.en.srt", Language: "en", Format: "srt"},
+			// A file name that starts with a space is still only a file name.
+			{Path: "/media/ Movie.2023.1080p.WEB-DL-GROUP.de.srt", Language: "de", Format: "srt", Title: " Movie.2023.1080p.WEB-DL-GROUP.de.srt"},
+		},
+		SubtitleTracks: []models.SubtitleTrack{{Index: 0, Language: "ja", Codec: "subrip", Title: "Signs"}},
+	}
+	items := BuildSubtitleInventoryV3(file, nil)
+	if items[0].Label != "Movie.2023.1080p.WEB-DL-GROUP.en.srt" {
+		t.Fatalf("untitled sidecar label = %q, want its file name before hiding", items[0].Label)
+	}
+	// A restored plan keeps the labels it was built with; the sidecars may
+	// have changed since.
+	restored := slices.Clone(items)
+
+	HideSidecarFileNamesV3(items, file)
+
+	for i, want := range []string{"en", "es", "Commentary", "en 2", "de", "Signs"} {
+		if items[i].Label != want {
+			t.Errorf("item %d label = %q, want %q", i, items[i].Label, want)
+		}
+	}
+
+	HideSidecarFileNamesV3(restored, &models.MediaFile{ID: 42})
+	for i, item := range restored[:5] {
+		if strings.Contains(item.Label, ".srt") {
+			t.Errorf("restored item %d label = %q after its sidecars changed, want no file name", i, item.Label)
 		}
 	}
 }

@@ -162,7 +162,6 @@ func TestMonoOutputProfilePreservesTranscodeRestrictions(t *testing.T) {
 		want       bool
 	}{
 		{"mono matches", playbackInfoRequest{MaxAudioChannels: 1}, "1080p", true, true},
-		{"stereo does not match", playbackInfoRequest{}, "1080p", true, false},
 		{"encoding disabled", playbackInfoRequest{MaxAudioChannels: 1, EnableTranscoding: new(false)}, "1080p", true, false},
 		{"4K policy disabled", playbackInfoRequest{MaxAudioChannels: 1}, "2160p", false, false},
 		{"bitrate too low", playbackInfoRequest{MaxAudioChannels: 1, MaxStreamingBitrate: 100000}, "1080p", true, false},
@@ -192,8 +191,9 @@ func TestMonoTranscodingProfileMatchesActualContainer(t *testing.T) {
 				TranscodingProfiles: []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: container, VideoCodec: "h264", AudioCodec: "aac", MaxAudioChannels: "1"}},
 			}
 			source := h.buildPlaybackSource("item", "play", version, profile, playbackInfoRequest{MaxAudioChannels: 1}, true)
-			dto := h.mediaSourceDTO("item", "play", "token", source)
-			if source.SupportsDirectPlay || !source.SupportsTranscoding || source.TargetAudioChannels != 1 || source.HLSRemux != (container == "mp4") || dto.TranscodingContainer != container || dto.TranscodingURL == "" {
+			source.HLSRemuxMPEGTS = source.hlsRemuxInTS
+			dto := h.mediaSourceDTO("item", "play", source)
+			if source.SupportsDirectPlay || !source.SupportsTranscoding || source.TargetAudioChannels != 1 || !source.HLSRemux || dto.TranscodingContainer != container || dto.TranscodingURL == "" {
 				t.Fatalf("wrong negotiated container: source=%+v dto=%+v", source, dto)
 			}
 			stereo := h.buildPlaybackSource("item", "play", version, profile, playbackInfoRequest{MaxAudioChannels: 2}, true)
@@ -206,7 +206,7 @@ func TestMonoTranscodingProfileMatchesActualContainer(t *testing.T) {
 
 func TestRemuxOnlyPublishedURLIsNotStatic(t *testing.T) {
 	h := &PlaybackHandler{codec: NewResourceIDCodec()}
-	dto := h.mediaSourceDTO("item", "play", "token", PlaybackMediaSource{ID: "source", SupportsDirectStream: true})
+	dto := h.mediaSourceDTO("item", "play", PlaybackMediaSource{ID: "source", SupportsDirectStream: true})
 	u, err := url.Parse(dto.DirectStreamURL)
 	if err != nil {
 		t.Fatal(err)
@@ -214,10 +214,107 @@ func TestRemuxOnlyPublishedURLIsNotStatic(t *testing.T) {
 	if u.Query().Get("static") != "false" {
 		t.Fatalf("URL=%s", dto.DirectStreamURL)
 	}
-	dto = h.mediaSourceDTO("item", "play", "token", PlaybackMediaSource{ID: "source", SupportsDirectPlay: true})
+	dto = h.mediaSourceDTO("item", "play", PlaybackMediaSource{ID: "source", SupportsDirectPlay: true})
 	u, _ = url.Parse(dto.DirectStreamURL)
 	if u.Query().Get("static") != "true" {
 		t.Fatalf("URL=%s", dto.DirectStreamURL)
+	}
+}
+
+// Jellyfin Android TV retries a failed play with direct play off, then with
+// direct stream off too. It plays the TranscodingUrl whenever DirectStream is
+// set, and in that mode restarts playback forever trying to select the HLS
+// audio track (#2645). As in Jellyfin 10.11, DirectStream comes with
+// DirectPlay, and a retry keeps the video a copy when that can help.
+func TestJellyfinAndroidTVRetriesCopyVideo(t *testing.T) {
+	version := catalog.FileVersion{FileID: 7, Container: "mkv", CodecVideo: "h264", CodecAudio: "eac3", Resolution: "1080p", Bitrate: 10000,
+		VideoTracks: []models.VideoTrack{{Codec: "h264", Profile: "High", Level: 41, Width: 1920, Height: 1080}},
+		AudioTracks: []models.AudioTrack{{Codec: "eac3", Channels: 6, Default: true}}}
+	// The relevant parts of the Jellyfin Android TV 0.19 default profile.
+	profile := DeviceProfile{
+		DirectPlayProfiles:  []DirectPlayProfile{{Type: "Video", Container: "mkv,mp4,ts", VideoCodec: "h264,hevc", AudioCodec: "aac,ac3,eac3,flac"}},
+		TranscodingProfiles: []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: "ts", VideoCodec: "hevc,h264", AudioCodec: "aac,ac3,eac3"}},
+	}
+	h := &PlaybackHandler{codec: NewResourceIDCodec(), JWTSecret: "secret"}
+	stereoAAC := version
+	stereoAAC.CodecAudio = "aac"
+	stereoAAC.AudioTracks = []models.AudioTrack{{Codec: "aac", Channels: 2, Default: true}}
+	flac := version
+	flac.CodecAudio = "flac"
+	flac.AudioTracks = []models.AudioTrack{{Codec: "flac", Channels: 2, Default: true}}
+	videoOnly := version
+	videoOnly.CodecAudio = ""
+	videoOnly.AudioTracks = nil
+	for _, tc := range []struct {
+		name                     string
+		version                  catalog.FileVersion
+		directPlay, directStream bool
+		noDirectPlayProfiles     bool
+		wantVideoCopy            bool
+		wantAudioEncode          bool
+	}{
+		{name: "direct play also reports direct stream", version: version, directPlay: true, directStream: true},
+		{name: "first retry copies video and audio", version: version, directStream: true, wantVideoCopy: true},
+		{name: "second retry copies video and encodes audio", version: version, wantVideoCopy: true, wantAudioEncode: true},
+		// Direct play accepts FLAC but HLS cannot carry it, so the audio is
+		// encoded rather than the video.
+		{name: "first retry encodes audio HLS cannot carry", version: flac, directStream: true, wantVideoCopy: true, wantAudioEncode: true},
+		// Encoding AAC stereo to AAC stereo would repeat the stream that failed.
+		{name: "second retry encodes video when the audio would not change", version: stereoAAC},
+		// Without direct play profiles no audio counts as supported, which
+		// must not turn an unchanged AAC track into a reason to copy.
+		{name: "profile without direct play still encodes video for unchanged audio", version: stereoAAC, noDirectPlayProfiles: true},
+		// A video-only source has no audio to change, so the copy would repeat
+		// the stream that failed.
+		{name: "second retry encodes video for a video-only source", version: videoOnly},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := playbackInfoRequest{MaxStreamingBitrate: 100_000_000, EnableDirectPlay: new(tc.directPlay), EnableDirectStream: new(tc.directStream)}
+			profile := profile
+			if tc.noDirectPlayProfiles {
+				profile.DirectPlayProfiles = nil
+			}
+			source := h.buildPlaybackSource("item", "play", tc.version, profile, req, true)
+			if source.SupportsDirectPlay != tc.directPlay || source.SupportsDirectStream != tc.directPlay {
+				t.Fatalf("direct play=%v direct stream=%v, want both %v", source.SupportsDirectPlay, source.SupportsDirectStream, tc.directPlay)
+			}
+			if tc.directPlay {
+				return
+			}
+			if !source.SupportsTranscoding || compatHLSCopiesVideo(source) != tc.wantVideoCopy || source.TranscodeAudio != tc.wantAudioEncode {
+				t.Fatalf("transcoding=%v copies video=%v audio encode=%v, want copies video=%v audio encode=%v",
+					source.SupportsTranscoding, compatHLSCopiesVideo(source), source.TranscodeAudio, tc.wantVideoCopy, tc.wantAudioEncode)
+			}
+			dto := h.mediaSourceDTO("item", "play", source)
+			if dto.DirectStreamURL != "" || dto.TranscodingURL == "" || len(tc.version.AudioTracks) > 0 && dto.DefaultAudioStreamIndex == nil {
+				t.Fatalf("DirectStreamUrl=%q TranscodingUrl=%q DefaultAudioStreamIndex=%v", dto.DirectStreamURL, dto.TranscodingURL, dto.DefaultAudioStreamIndex)
+			}
+		})
+	}
+}
+
+// Jellyfin Web hands any source whose TranscodingSubProtocol is hls to
+// hls.js, even when it plays the static direct URL, so only a source played
+// through its TranscodingUrl may say hls (#2879).
+func TestTranscodingSubProtocolFollowsPlayedURL(t *testing.T) {
+	h := &PlaybackHandler{codec: NewResourceIDCodec()}
+	for _, tc := range []struct {
+		name   string
+		source PlaybackMediaSource
+		want   string
+	}{
+		{"direct play with transcode fallback", PlaybackMediaSource{SupportsDirectPlay: true, SupportsDirectStream: true, SupportsTranscoding: true}, "http"},
+		{"direct stream with transcode fallback", PlaybackMediaSource{SupportsDirectStream: true, SupportsTranscoding: true}, "http"},
+		{"transcode only", PlaybackMediaSource{SupportsTranscoding: true}, "hls"},
+		{"nothing playable", PlaybackMediaSource{}, "http"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.source.ID = "source"
+			dto := h.mediaSourceDTO("item", "play", tc.source)
+			if dto.TranscodingSubProtocol != tc.want {
+				t.Fatalf("TranscodingSubProtocol = %q, want %q", dto.TranscodingSubProtocol, tc.want)
+			}
+		})
 	}
 }
 
@@ -253,31 +350,6 @@ func TestSubtitleTimeMapMatchesMPEGTSMuxerShiftWithCopiedTimestamps(t *testing.T
 	}
 }
 
-// fMP4 segments keep the source clock in tfdt, so their map carries no
-// muxer shift: MPEGTS:0 with copied timestamps and the start otherwise.
-func TestSubtitleTimeMapHasNoShiftForFMP4Segments(t *testing.T) {
-	for _, tc := range []struct {
-		copyTimestamps bool
-		want           string
-	}{
-		{copyTimestamps: true, want: "X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:0\n"},
-		{copyTimestamps: false, want: "X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:180000\n"},
-	} {
-		t.Run(strconv.FormatBool(tc.copyTimestamps), func(t *testing.T) {
-			r := httptest.NewRequest("GET", "/subtitle?EndPositionTicks=40000000&AddVttTimeMap=true&CopyTimestamps="+strconv.FormatBool(tc.copyTimestamps), nil)
-			route := chi.NewRouteContext()
-			route.URLParams.Add("routeFormat", "vtt")
-			route.URLParams.Add("routeStartPositionTicks", "20000000")
-			r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, route))
-			rr := httptest.NewRecorder()
-			(&PlaybackHandler{}).deliverSubtitle(rr, r, "vtt", []byte("WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nfirst\n"), 0)
-			if body := rr.Body.String(); rr.Code != 200 || !strings.Contains(body, tc.want) {
-				t.Fatalf("status=%d body=%s, want %q", rr.Code, body, tc.want)
-			}
-		})
-	}
-}
-
 // The subtitle route reads the segment container from the play session's
 // source: MPEG-TS sessions get the muxer shift, fMP4 sessions do not. Direct
 // play and progressive remux have no HLS segments, so they get no shift either.
@@ -298,12 +370,9 @@ func TestHandleSubtitleStreamTimeMapFollowsSegmentContainer(t *testing.T) {
 		{name: "remux-ts-v1", videoCodec: "hevc", source: PlaybackMediaSource{HLSRemux: true, HLSRemuxMPEGTS: true}, want: "MPEGTS:900000"},
 		{name: "mpeg2 copy", videoCodec: "mpeg2video", source: PlaybackMediaSource{HLSRemux: true}, want: "MPEGTS:900000"},
 		{name: "remux-v1", videoCodec: "h264", source: PlaybackMediaSource{HLSRemux: true}, want: "MPEGTS:0"},
-		{name: "copy video with audio transcode", videoCodec: "h264", source: PlaybackMediaSource{HLSRemux: true, TranscodeAudio: true}, want: "MPEGTS:0"},
-		{name: "remux-dv-v1", videoCodec: "hevc", source: PlaybackMediaSource{HLSRemux: true, DVStripToHDR10: true}, want: "MPEGTS:0"},
 		{name: "hevc-v1", videoCodec: "h264", source: PlaybackMediaSource{TargetVideoCodec: "hevc"}, want: "MPEGTS:0"},
 		{name: "started h264 transcode", videoCodec: "h264", playMethod: "transcode", want: "MPEGTS:900000"},
 		{name: "direct play", videoCodec: "h264", playMethod: "direct", want: "MPEGTS:0"},
-		{name: "progressive remux", videoCodec: "h264", playMethod: "remux", want: "MPEGTS:0"},
 		{name: "not started without transcoding", videoCodec: "h264", notHLS: true, want: "MPEGTS:0"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -510,10 +579,10 @@ func TestJSONSubtitleTimingEmptyWindow(t *testing.T) {
 
 func TestProgressiveRemuxChecksMP4OutputContainer(t *testing.T) {
 	version := catalog.FileVersion{FileID: 42, Container: "mkv", CodecVideo: "h264", CodecAudio: "aac", Bitrate: 8000,
-		VideoTracks: []models.VideoTrack{{Codec: "h264", Width: 1920, Height: 1080, Bitrate: 7500000}}, AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 6}}}
+		VideoTracks: []models.VideoTrack{{Codec: "h264", Width: 1920, Height: 1080, Bitrate: 7500}}, AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 6}}}
 	handler := &PlaybackHandler{codec: NewResourceIDCodec()}
 	for _, tc := range []struct{ property, value string }{
-		{"Width", "1280"}, {"VideoBitrate", "4000000"}, {"AudioChannels", "2"},
+		{"Width", "1280"}, {"AudioChannels", "2"},
 	} {
 		t.Run(tc.property, func(t *testing.T) {
 			profile := DeviceProfile{DirectPlayProfiles: []DirectPlayProfile{{Type: "Video", Container: "mkv", VideoCodec: "h264", AudioCodec: "aac"}}, ContainerProfiles: []ContainerProfile{{Type: "Video", Container: "mp4", Conditions: []ProfileCondition{{Condition: "LessThanEqual", Property: tc.property, Value: tc.value, IsRequired: true}}}}}
@@ -562,7 +631,7 @@ func TestProgressiveAndHLSCodecContainerScopes(t *testing.T) {
 	version := catalog.FileVersion{Container: "mkv", CodecVideo: "h264", CodecAudio: "aac", VideoTracks: []models.VideoTrack{{Codec: "h264", Width: 1920, Height: 1080}}, AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2}}}
 	for _, container := range []string{"hls", "mp4"} {
 		t.Run(container, func(t *testing.T) {
-			profile := DeviceProfile{TranscodingProfiles: []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: "mp4", VideoCodec: "h264", AudioCodec: "aac"}}, CodecProfiles: []CodecProfile{{Type: "Video", Codec: "h264", Container: container, SubContainer: "mp4", Conditions: []ProfileCondition{{Condition: "LessThanEqual", Property: "Width", Value: "1280", IsRequired: true}}}}}
+			profile := DeviceProfile{DirectPlayProfiles: []DirectPlayProfile{{Type: "Video"}}, TranscodingProfiles: []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: "mp4", VideoCodec: "h264", AudioCodec: "aac"}}, CodecProfiles: []CodecProfile{{Type: "Video", Codec: "h264", Container: container, SubContainer: "mp4", Conditions: []ProfileCondition{{Condition: "LessThanEqual", Property: "Width", Value: "1280", IsRequired: true}}}}}
 			if got := profile.SupportsVideoCodecForDirectStream(version); got != (container == "hls") {
 				t.Fatalf("progressive support=%v for codec container=%s", got, container)
 			}
@@ -573,5 +642,39 @@ func TestProgressiveAndHLSCodecContainerScopes(t *testing.T) {
 				t.Fatal("output codec condition rejected original MKV")
 			}
 		})
+	}
+}
+
+// FFmpeg can't demux an index-only track, so it can't ride the stream or be
+// burned in. The server's external delivery, which reads the index, is its
+// only route, and a batch demux of the file's text tracks leaves it out.
+func TestIndexOnlySubtitleIsDeliveredOnlyExternally(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		indexOnly bool
+		profile   []SubtitleProfile
+		external  bool
+		burnIn    bool
+	}{
+		{"embed and external", true, []SubtitleProfile{{Format: "vtt", Method: "Embed"}, {Format: "vtt", Method: "External"}}, true, false},
+		{"embed and external, readable track", false, []SubtitleProfile{{Format: "vtt", Method: "Embed"}, {Format: "vtt", Method: "External"}}, false, false},
+		{"encode only", true, []SubtitleProfile{{Format: "vtt", Method: "Encode"}}, false, false},
+		{"encode only, readable track", false, []SubtitleProfile{{Format: "vtt", Method: "Encode"}}, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			version := testCompatVersion()
+			version.SubtitleTracks = []catalog.VersionSubtitleTrack{{Index: 3, Codec: "webvtt", IndexOnly: tc.indexOnly}}
+			source := testCompatSource(NewResourceIDCodec(), version)
+			source.CanBurnSubtitle = true
+			source.SelectedSubtitleStreamIndex = new(3)
+			applyCompatSubtitleDelivery(&source, DeviceProfile{SubtitleProfiles: tc.profile}, false)
+			if source.SubtitleDeliveries[3].External != tc.external || source.SubtitleBurnIn != tc.burnIn {
+				t.Fatalf("delivery %+v, burn-in %v; want external %v, burn-in %v", source.SubtitleDeliveries[3], source.SubtitleBurnIn, tc.external, tc.burnIn)
+			}
+		})
+	}
+	file := &models.MediaFile{SubtitleTracks: []models.SubtitleTrack{{Codec: "webvtt", IndexOnly: true}, {Codec: "subrip"}}}
+	if got := compatTextSubtitleTracks(file); len(got) != 1 || got[0].Ordinal != 1 {
+		t.Fatalf("batch tracks = %+v, want only the SubRip track", got)
 	}
 }

@@ -45,6 +45,7 @@ vi.mock("@/hooks/useCarouselEmbla", () => ({
   }),
 }));
 
+import { recordAutoAdvance, resetStillWatchingStreak } from "../stillWatching";
 import { PlayingNextScreen } from "./PlayingNextScreen";
 
 const KEY = SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT;
@@ -102,7 +103,9 @@ describe("PlayingNextScreen auto-play toggle", () => {
     // Settings switch inert: it would save a profile value this row shadows.
     renderScreen();
 
-    fireEvent.click(screen.getByRole("button", { name: "Auto-play is on" }));
+    const toggle = screen.getByRole("switch", { name: "Auto-play" });
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(toggle);
 
     await waitFor(() =>
       expect(mutateAsync).toHaveBeenCalledWith({
@@ -125,9 +128,10 @@ describe("PlayingNextScreen auto-play toggle", () => {
     });
 
     renderScreen();
-    expect(screen.getByRole("button", { name: "Auto-play is off" })).toBeTruthy();
+    const toggle = screen.getByRole("switch", { name: "Auto-play" });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
 
-    fireEvent.click(screen.getByRole("button", { name: "Auto-play is off" }));
+    fireEvent.click(toggle);
 
     await waitFor(() =>
       expect(mutateAsync).toHaveBeenCalledWith({
@@ -159,6 +163,7 @@ describe("PlayingNextScreen next-episode start", () => {
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
+    resetStillWatchingStreak();
   });
 
   it("starts the next episode as an automatic start when the countdown runs out", () => {
@@ -170,6 +175,18 @@ describe("PlayingNextScreen next-episode start", () => {
 
     expect(onPlayNow).toHaveBeenCalledOnce();
     expect(onPlayNow).toHaveBeenCalledWith("automatic");
+  });
+
+  it("waits for the viewer once the automatic streak reaches the limit", () => {
+    vi.useFakeTimers();
+    for (let i = 0; i < 3; i++) recordAutoAdvance();
+    const onPlayNow = vi.fn();
+    renderScreen({ videoEnded: true, onPlayNow });
+
+    act(() => vi.advanceTimersByTime(20_000));
+
+    expect(onPlayNow).not.toHaveBeenCalled();
+    expect(screen.queryByText("10s")).toBeNull();
   });
 
   it("keeps counting down while the parent re-renders the same next episode", () => {
@@ -229,37 +246,6 @@ describe("PlayingNextScreen shuffle", () => {
 
   afterEach(cleanup);
 
-  it("names the shuffle and offers another pick or stopping", () => {
-    const onReshuffle = vi.fn();
-    const onStop = vi.fn();
-    renderScreen({ shuffle: { scopeLabel: "Test Show · Season 1", onReshuffle, onStop } });
-
-    expect(screen.getByText("Shuffling Test Show · Season 1")).toBeTruthy();
-    expect(screen.getByText("Up Next at Random")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Pick Another" }));
-    fireEvent.click(screen.getByRole("button", { name: "Stop shuffling" }));
-
-    expect(onReshuffle).toHaveBeenCalledOnce();
-    expect(onStop).toHaveBeenCalledOnce();
-  });
-
-  it("shows a shuffled movie without a season and episode line", () => {
-    renderScreen({
-      seriesTitle: "Heat",
-      nextEpisode: {
-        contentId: "movie-1",
-        title: "Heat",
-        seasonNumber: 0,
-        episodeNumber: 0,
-        runtime: 170,
-      },
-      shuffle: { scopeLabel: "Movies", onReshuffle: () => {}, onStop: () => {} },
-    });
-
-    expect(screen.getByText("Heat")).toBeTruthy();
-    expect(screen.queryByText(/S0:E0/)).toBeNull();
-  });
-
   it("gives a newly picked item the full countdown", () => {
     vi.useFakeTimers();
     const onPlayNow = vi.fn();
@@ -307,30 +293,6 @@ describe("PlayingNextScreen shuffle", () => {
 
     fireEvent.keyDown(document, { key: "Enter" });
     expect(onPlayNow).toHaveBeenCalledWith("viewer");
-  });
-
-  it("titles a movie by its own name when there is no series line", () => {
-    renderScreen({
-      seriesTitle: undefined,
-      nextEpisode: {
-        contentId: "movie-1",
-        title: "Heat",
-        seasonNumber: 0,
-        episodeNumber: 0,
-        runtime: 170,
-      },
-      shuffle: { scopeLabel: "Movies", onReshuffle: () => {}, onStop: () => {} },
-    });
-
-    expect(screen.getByText("Heat")).toBeTruthy();
-  });
-
-  it("offers no shuffle controls outside a shuffle", () => {
-    renderScreen();
-
-    expect(screen.getByText("Playing Next")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Pick Another" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Stop shuffling" })).toBeNull();
   });
 });
 

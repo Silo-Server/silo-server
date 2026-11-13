@@ -30,6 +30,15 @@ type Config struct {
 	// ExitCheckInterval is how often the exit watcher polls the plugin
 	// process for an exit. Zero takes DefaultExitCheckInterval.
 	ExitCheckInterval time.Duration
+	// IdleStopAfter is how long a process started with StopWhenIdle may go
+	// unused before the host stops it. Zero never stops an idle process.
+	IdleStopAfter time.Duration
+	// IdleCheckInterval is how often such a process is checked. Zero takes
+	// DefaultIdleCheckInterval.
+	IdleCheckInterval time.Duration
+	// IdleStopTimeout is how long an idle stop waits for the plugin to shut
+	// down before killing its process. Zero takes DefaultIdleStopTimeout.
+	IdleStopTimeout time.Duration
 
 	// EventPublisher receives events that plugins publish via RuntimeHost.
 	// Typically silo's *events.Hub. When nil, plugins that try to
@@ -65,6 +74,11 @@ type StartRequest struct {
 	BinaryPath     string
 	Manifest       *pluginv1.PluginManifest
 	Config         []*pluginv1.ConfigEntry
+	// StopWhenIdle lets the host stop the process after Config.IdleStopAfter
+	// without use. Only set it for a plugin whose callers go back through
+	// Client or Start before every call, so the next one starts it again.
+	// It is ignored for config test runs (negative installation ids).
+	StopWhenIdle bool
 }
 
 type Host struct {
@@ -72,6 +86,11 @@ type Host struct {
 	healthCheckInterval time.Duration
 	healthFailureLimit  int
 	exitCheckInterval   time.Duration
+	idleStopAfter       time.Duration
+	idleCheckInterval   time.Duration
+	idleStopTimeout     time.Duration
+	// now is a test seam for the idle clock.
+	now func() time.Time
 
 	// exitHandler is told the installation id of a plugin whose process went
 	// away on its own (exit or failed health), never one the host stopped on
@@ -93,7 +112,11 @@ type Host struct {
 	mu        sync.RWMutex
 	instances map[int]*instance
 	starting  map[int]chan struct{}
-	startSeq  atomic.Uint64
+	// idleStopping holds, per installation, a channel closed once the idle
+	// watcher has finished stopping a process it already removed from
+	// instances.
+	idleStopping map[int]chan struct{}
+	startSeq     atomic.Uint64
 }
 
 type instance struct {
@@ -102,6 +125,7 @@ type instance struct {
 	usageOnce sync.Once
 	protocol  plugin.ClientProtocol
 	client    *Client
+	activity  *activity
 	// installationID lets stopInstance revoke the ingress token of a network
 	// access provider without a map lookup.
 	installationID int
@@ -133,8 +157,20 @@ func NewHost(cfg Config) *Host {
 	if exitInterval <= 0 {
 		exitInterval = DefaultExitCheckInterval
 	}
+	idleInterval := cfg.IdleCheckInterval
+	if idleInterval <= 0 {
+		idleInterval = DefaultIdleCheckInterval
+	}
+	idleStopTimeout := cfg.IdleStopTimeout
+	if idleStopTimeout <= 0 {
+		idleStopTimeout = DefaultIdleStopTimeout
+	}
 
 	return &Host{
+		idleStopAfter:       max(cfg.IdleStopAfter, 0),
+		idleCheckInterval:   idleInterval,
+		idleStopTimeout:     idleStopTimeout,
+		now:                 time.Now,
 		logger:              logger,
 		healthCheckInterval: interval,
 		healthFailureLimit:  failureLimit,
@@ -150,6 +186,7 @@ func NewHost(cfg Config) *Host {
 		networkAccess:       cfg.NetworkAccess,
 		instances:           make(map[int]*instance),
 		starting:            make(map[int]chan struct{}),
+		idleStopping:        make(map[int]chan struct{}),
 	}
 }
 
@@ -206,19 +243,30 @@ func (h *Host) Start(ctx context.Context, req StartRequest) (*Client, error) {
 		ingressToken = token
 	}
 
+	used := newActivity(h.now)
 	command := exec.Command(req.BinaryPath)
+	command.Env = ProcessEnv()
+	if !isProvider {
+		command.Env = withPluginMaxProcs(command.Env)
+	}
 	process := plugin.NewClient(&plugin.ClientConfig{
 		HandshakeConfig: HandshakeConfig(),
-		GRPCDialOptions: []grpc.DialOption{grpc.WithChainUnaryInterceptor(observePluginRPC)},
+		GRPCDialOptions: []grpc.DialOption{
+			grpc.WithChainUnaryInterceptor(used.unaryClient, observePluginRPC),
+			grpc.WithChainStreamInterceptor(used.streamClient),
+		},
 		AllowedProtocols: []plugin.Protocol{
 			plugin.ProtocolGRPC,
 		},
-		Cmd:        command,
-		Plugins:    sdkruntime.DefaultPluginSet(sdkruntime.CapabilityServers{}),
-		Logger:     h.logger,
-		Stderr:     os.Stderr,
-		SyncStdout: os.Stdout,
-		SyncStderr: os.Stderr,
+		Cmd: command,
+		// go-plugin appends the server's whole environment to Cmd.Env
+		// unless told not to.
+		SkipHostEnv: true,
+		Plugins:     sdkruntime.DefaultPluginSet(sdkruntime.CapabilityServers{}),
+		Logger:      h.logger,
+		Stderr:      os.Stderr,
+		SyncStdout:  os.Stdout,
+		SyncStderr:  os.Stderr,
 	})
 	retained := false
 	defer func() {
@@ -253,7 +301,7 @@ func (h *Host) Start(ctx context.Context, req StartRequest) (*Client, error) {
 		return nil, fmt.Errorf("unexpected plugin runtime client type %T", rawClient)
 	}
 
-	if err := h.bindRuntimeHost(ctx, rpcClient, req.Manifest.GetPluginId(), req.InstallationID, provider, ingressToken, hostInfo, instanceState); err != nil {
+	if err := h.bindRuntimeHost(ctx, rpcClient, used, req.Manifest.GetPluginId(), req.InstallationID, provider, ingressToken, hostInfo, instanceState); err != nil {
 		_ = protocol.Close()
 		process.Kill()
 		return nil, fmt.Errorf("bind runtime host: %w", err)
@@ -273,7 +321,11 @@ func (h *Host) Start(ctx context.Context, req StartRequest) (*Client, error) {
 		process.Kill()
 		return nil, fmt.Errorf("plugin runtime returned an empty manifest")
 	}
-	if !proto.Equal(req.Manifest, liveManifestResponse.GetManifest()) {
+	// Fields and enum values from a newer SDK don't count as a mismatch: both
+	// copies are compared without them, and the client keeps the live copy
+	// that way.
+	liveManifest := KnownManifest(liveManifestResponse.GetManifest())
+	if !proto.Equal(KnownManifest(req.Manifest), liveManifest) {
 		_ = protocol.Close()
 		process.Kill()
 		return nil, fmt.Errorf("plugin runtime manifest does not match installed manifest")
@@ -290,7 +342,7 @@ func (h *Host) Start(ctx context.Context, req StartRequest) (*Client, error) {
 		return nil, fmt.Errorf("configure plugin runtime: %w", err)
 	}
 
-	client := newClient(req.InstallationID, rpcClient, liveManifestResponse.GetManifest(), startSeq)
+	client := newClient(req.InstallationID, rpcClient, liveManifest, startSeq)
 	client.ingressToken = ingressToken
 
 	monitorCtx, monitorCancel := context.WithCancel(context.Background())
@@ -299,6 +351,7 @@ func (h *Host) Start(ctx context.Context, req StartRequest) (*Client, error) {
 		command:        command,
 		protocol:       protocol,
 		client:         client,
+		activity:       used,
 		installationID: req.InstallationID,
 		provider:       provider,
 		ingressToken:   ingressToken,
@@ -312,6 +365,9 @@ func (h *Host) Start(ctx context.Context, req StartRequest) (*Client, error) {
 
 	go h.monitorHealth(monitorCtx, req.InstallationID, instance)
 	go h.watchExit(monitorCtx, req.InstallationID, instance)
+	if req.StopWhenIdle && req.InstallationID > 0 && h.idleStopAfter > 0 {
+		go h.watchIdle(monitorCtx, req.InstallationID, instance)
+	}
 
 	return client, nil
 }
@@ -354,9 +410,15 @@ func (h *Host) SetExitHandler(handler func(installationID int)) {
 	h.exitMu.Unlock()
 }
 
+// Client returns the running client for a caller about to use it, which
+// counts as a use: the idle watcher takes the write side of h.mu to remove an
+// instance, so one returned here is not stopped for another idle period.
 func (h *Host) Client(installationID int) (*Client, error) {
 	h.mu.RLock()
 	instance, ok := h.instances[installationID]
+	if ok && instance.activity != nil {
+		instance.activity.touch()
+	}
 	h.mu.RUnlock()
 	if !ok {
 		return nil, ErrClientNotFound
@@ -372,6 +434,20 @@ func (h *Host) Client(installationID int) (*Client, error) {
 	return instance.client, nil
 }
 
+// Running reports whether a healthy process is up for the installation
+// without counting as a use of it, for status reads.
+func (h *Host) Running(installationID int) bool {
+	h.mu.RLock()
+	instance, ok := h.instances[installationID]
+	h.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	instance.client.mu.RLock()
+	defer instance.client.mu.RUnlock()
+	return !instance.client.unhealthy
+}
+
 func (h *Host) NextStartSeq() uint64 { return h.startSeq.Load() }
 
 func (h *Host) Stop(installationID int) error {
@@ -380,9 +456,15 @@ func (h *Host) Stop(installationID int) error {
 	if ok {
 		delete(h.instances, installationID)
 	}
+	idleStop := h.idleStopping[installationID]
 	h.mu.Unlock()
 
 	if !ok {
+		// The process may still be exiting after an idle stop. Callers treat
+		// a return from Stop as the process being gone.
+		if idleStop != nil {
+			<-idleStop
+		}
 		return ErrClientNotFound
 	}
 	h.stopInstance(instance)
@@ -398,10 +480,17 @@ func (h *Host) Shutdown(ctx context.Context) error {
 			delete(h.instances, installationID)
 			instances = append(instances, instance)
 		}
+		idleStops := make([]chan struct{}, 0, len(h.idleStopping))
+		for _, idleStop := range h.idleStopping {
+			idleStops = append(idleStops, idleStop)
+		}
 		h.mu.Unlock()
 
 		for _, instance := range instances {
 			h.stopInstance(instance)
+		}
+		for _, idleStop := range idleStops {
+			<-idleStop
 		}
 		close(done)
 	}()
@@ -501,13 +590,21 @@ func (h *Host) retireInstance(ctx context.Context, installationID int, instance 
 }
 
 func (h *Host) stopInstance(instance *instance) {
+	h.teardown(instance, false)
+}
+
+// teardown stops an instance already removed from the host. A graceful one
+// leaves closing the connection to Kill, which then asks the plugin to shut
+// down and waits briefly for it to exit by itself, so a routine idle stop is
+// not logged and counted as a killed process.
+func (h *Host) teardown(instance *instance, graceful bool) {
 	if instance == nil {
 		return
 	}
 	if instance.cancelMonitors != nil {
 		instance.cancelMonitors()
 	}
-	if instance.protocol != nil {
+	if instance.protocol != nil && !graceful {
 		_ = instance.protocol.Close()
 	}
 	if instance.process != nil {
@@ -531,7 +628,7 @@ func (h *Host) stopInstance(instance *instance) {
 // tears it down.
 //
 // Skipped when no RuntimeHost services are configured.
-func (h *Host) bindRuntimeHost(ctx context.Context, sdkClient *sdkruntime.Client, pluginID string, installationID int, provider, ingressToken string, hostInfo HostInfoFunc, instanceState InstanceStateStore) error {
+func (h *Host) bindRuntimeHost(ctx context.Context, sdkClient *sdkruntime.Client, used *activity, pluginID string, installationID int, provider, ingressToken string, hostInfo HostInfoFunc, instanceState InstanceStateStore) error {
 	if h.eventPublisher == nil && h.libraryLister == nil && h.catalogPresence == nil && h.installedPlugins == nil && h.globalConfigSetter == nil &&
 		hostInfo == nil && instanceState == nil && h.networkAccess == nil {
 		return nil
@@ -546,7 +643,7 @@ func (h *Host) bindRuntimeHost(ctx context.Context, sdkClient *sdkruntime.Client
 
 	streamID := broker.NextId()
 	go broker.AcceptAndServe(streamID, func(opts []grpc.ServerOption) *grpc.Server {
-		s := grpc.NewServer(append(opts, grpc.ChainUnaryInterceptor(observePluginCallback))...)
+		s := grpc.NewServer(append(opts, grpc.ChainUnaryInterceptor(used.unaryServer, observePluginCallback))...)
 		srv := NewRuntimeHostServerWithOptions(RuntimeHostOptions{
 			Publisher:             h.eventPublisher,
 			Libraries:             h.libraryLister,

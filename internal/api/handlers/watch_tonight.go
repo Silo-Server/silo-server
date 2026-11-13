@@ -4,12 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"sort"
-	"strconv"
 	"sync"
 
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
@@ -49,24 +46,6 @@ const (
 	baseNextUpScore   = 1.50 // next-up items — rank above recommendations but below in-progress
 	watchTonightLimit = 5
 )
-
-// HandleWatchTonight handles GET /recommendations/watch-tonight.
-// It merges live Continue Watching / Next Up items with recommendation-engine
-// candidates, applies taste-profile boosts, enriches, and returns a unified list.
-func (h *RecommendationsHandler) HandleWatchTonight(w http.ResponseWriter, r *http.Request) {
-	limit := watchTonightLimit
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 20 {
-			limit = n
-		}
-	}
-	resp, err := h.watchTonight(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), requestAccessFilter(r), limit, true)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
 
 // WatchTonight is the Watch Tonight seam: the merged, boosted and enriched
 // list the v1 and v2 handlers both answer. limit must already be validated.
@@ -224,13 +203,14 @@ func (h *RecommendationsHandler) watchTonight(ctx context.Context, userID int, p
 		return WatchTonightView{}, recommendationsUnavailable("Failed to fetch item details")
 	}
 
+	artwork := h.featuredCardArtwork(ctx, enriched.items, filter.Artwork())
 	for _, m := range merged {
 		mi, ok := enriched.items[m.scored.MediaItemID]
 		if !ok || mi == nil {
 			continue
 		}
 
-		item := h.buildSectionItem(ctx, mi, enriched.overlays, enriched.states)
+		item := h.buildSectionItem(mi, enriched.overlays, enriched.states, artwork[mi.ContentID])
 		item.ItemSource = m.source
 
 		// Apply CW/Next-Up metadata (position, duration, progress).
@@ -267,6 +247,7 @@ func (h *RecommendationsHandler) watchTonight(ctx context.Context, userID int, p
 			if epMeta.EpisodeNumber != nil && item.EpisodeNumber == nil {
 				item.EpisodeNumber = epMeta.EpisodeNumber
 			}
+			item.applyEpisodeCardMeta(&epMeta)
 		}
 
 		resp.Items = append(resp.Items, watchTonightItemResponse{
@@ -464,35 +445,12 @@ func (h *RecommendationsHandler) enrichItems(ctx context.Context, userID int, pr
 	return out, nil
 }
 
-// buildSectionItem constructs a sectionItemResponse from a MediaItem,
-// applying presigning and overlay/state lookups.
-func (h *RecommendationsHandler) buildSectionItem(ctx context.Context, mi *models.MediaItem, overlayMap map[string]*models.OverlaySummary, stateMap map[string]*itemUserStateResponse) sectionItemResponse {
-	item := sectionItemResponse{
-		ContentID:              mi.ContentID,
-		Type:                   mi.Type,
-		Title:                  mi.Title,
-		Year:                   mi.Year,
-		Genres:                 mi.Genres,
-		Status:                 mi.Status,
-		RatingIMDB:             mi.RatingIMDB,
-		RatingTMDB:             mi.RatingTMDB,
-		RatingRTCritic:         mi.RatingRTCritic,
-		RatingRTAudience:       mi.RatingRTAudience,
-		OriginalLanguage:       mi.OriginalLanguage,
-		Overview:               mi.Overview,
-		PosterThumbhash:        mi.PosterThumbhash,
-		BackdropThumbhash:      mi.BackdropThumbhash,
-		PosterIsEpisodeStill:   mi.PosterIsEpisodeStill,
-		BackdropIsEpisodeStill: mi.BackdropIsEpisodeStill,
-	}
-	if item.Genres == nil {
-		item.Genres = []string{}
-	}
-	if h.DetailSvc != nil {
-		item.PosterURL = h.DetailSvc.PresignURL(ctx, featuredPosterPath(mi.PosterPath), "featured")
-		item.BackdropURL = h.DetailSvc.PresignURL(ctx, featuredBackdropPath(mi.BackdropPath), "featured")
-		item.LogoURL = h.DetailSvc.PresignURL(ctx, mi.LogoPath, "featured")
-	}
+// buildSectionItem constructs a sectionItemResponse from a MediaItem with its
+// resolved artwork (see featuredCardArtwork) and overlay/state lookups.
+func (h *RecommendationsHandler) buildSectionItem(mi *models.MediaItem, overlayMap map[string]*models.OverlaySummary, stateMap map[string]*itemUserStateResponse, urls sectionItemImageURLs) sectionItemResponse {
+	item := sectionItemFromMediaItem(mi)
+	item.PosterURL, item.BackdropURL, item.LogoURL = urls.posterURL, urls.backdropURL, urls.logoURL
+	item.ParentArtwork = episodeParentArtworkView(mi.ParentArtwork, urls.parents)
 	if overlayMap != nil {
 		item.OverlaySummary = overlayMap[mi.ContentID]
 	}

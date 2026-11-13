@@ -41,54 +41,17 @@ describe("SeasonCarousel", () => {
     expect(markup).toContain('aria-label="Play Season 1"');
   });
 
-  it("pluralizes episode counts on season cards", () => {
+  it("keeps the series page's library on season links but not on Play", () => {
     const markup = renderToStaticMarkup(
       <QueryClientProvider client={new QueryClient()}>
         <MemoryRouter>
-          <SeasonCarousel
-            seasons={[
-              makeSeason({
-                content_id: "season-0",
-                season_number: 0,
-                is_specials: true,
-                title: "Specials",
-                episode_count: 1,
-              }),
-              makeSeason({ episode_count: 8 }),
-              makeSeason({
-                content_id: "season-2",
-                season_number: 2,
-                title: "Season 2",
-                episode_count: 1,
-                user_data: {
-                  watched_count: 1,
-                  unplayed_count: 0,
-                  in_progress_count: 0,
-                  played: false,
-                },
-              }),
-              makeSeason({
-                content_id: "season-3",
-                season_number: 3,
-                title: "Season 3",
-                episode_count: 4,
-                user_data: {
-                  watched_count: 1,
-                  unplayed_count: 3,
-                  in_progress_count: 0,
-                  played: false,
-                },
-              }),
-            ]}
-          />
+          <SeasonCarousel seasons={[makeSeason({ play_content_id: "episode-2" })]} libraryId={4} />
         </MemoryRouter>
       </QueryClientProvider>,
     );
 
-    expect(markup).toContain(">1 episode<");
-    expect(markup).toContain(">8 episodes<");
-    expect(markup).toContain(">1 of 1 episode<");
-    expect(markup).toContain(">1 of 4 episodes<");
-    expect(markup).not.toContain("1 episodes");
+    expect(markup).toContain('href="/item/season-1?libraryId=4"');
+    expect(markup).not.toContain('href="/item/season-1"');
+    expect(markup).toContain('href="/watch/episode-2"');
   });
 });

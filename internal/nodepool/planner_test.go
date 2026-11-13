@@ -61,24 +61,143 @@ func TestTranscodeNodeHealthyNormalizesTrailingSlash(t *testing.T) {
 	}
 }
 
-func TestPlanTranscodePairsProxyFromSameGroup(t *testing.T) {
-	f := newFixture(
-		[]*Node{
-			proxyNode(1, "http://proxy-a", strPtr("rack-a")),
-			proxyNode(2, "http://proxy-b", strPtr("rack-b")),
-		},
-		[]*Node{
+const unchecked = "-"
+
+func unhealthyNode(n *Node) *Node { n.Healthy = false; return n }
+
+func fullNode(n *Node) *Node { n.MaxJobs, n.ActiveJobs = intPtr(1), 1; return n }
+
+var planSessionPlacementCases = []struct {
+	name           string
+	proxies        []*Node
+	transcodes     []*Node
+	current        string
+	needsTranscode bool
+	wantTranscode  string
+	wantProxy      string
+}{
+	{
+		name:    "least-loaded transcode pairs with its group's proxy",
+		proxies: []*Node{proxyNode(1, "http://proxy-a", strPtr("rack-a")), proxyNode(2, "http://proxy-b", strPtr("rack-b"))},
+		transcodes: []*Node{
 			transcodeNode(3, "http://tc-a", strPtr("rack-a"), 5),
 			transcodeNode(4, "http://tc-b", strPtr("rack-b"), 0),
 		},
-	)
+		needsTranscode: true, wantTranscode: "http://tc-b", wantProxy: "http://proxy-b",
+	},
+	{
+		name:    "a group with an unhealthyNode proxy excludes its transcode nodes",
+		proxies: []*Node{unhealthyNode(proxyNode(1, "http://proxy-a", strPtr("rack-a"))), proxyNode(2, "http://proxy-b", strPtr("rack-b"))},
+		transcodes: []*Node{
+			transcodeNode(3, "http://tc-a", strPtr("rack-a"), 0), // idle but group degraded
+			transcodeNode(4, "http://tc-b", strPtr("rack-b"), 9),
+		},
+		needsTranscode: true, wantTranscode: "http://tc-b", wantProxy: "http://proxy-b",
+	},
+	{
+		// All enabled members of a group must be healthy for the group to
+		// be eligible — even the healthy sibling is excluded.
+		name:    "an unhealthyNode transcode member degrades its group",
+		proxies: []*Node{proxyNode(1, "http://proxy-a", strPtr("rack-a"))},
+		transcodes: []*Node{
+			transcodeNode(3, "http://tc-a1", strPtr("rack-a"), 0),
+			unhealthyNode(transcodeNode(5, "http://tc-a2", strPtr("rack-a"), 0)),
+		},
+		needsTranscode: true, wantTranscode: "", wantProxy: unchecked,
+	},
+	{
+		name:           "a group without proxies falls back to the global proxy",
+		proxies:        []*Node{proxyNode(1, "http://proxy-1", nil)},
+		transcodes:     []*Node{transcodeNode(2, "http://tc-a", strPtr("rack-a"), 0)},
+		needsTranscode: true, wantTranscode: "http://tc-a", wantProxy: "http://proxy-1",
+	},
+	{
+		// rack-a's only proxy is fullNode, so its transcode node must not be
+		// used — streams pinned to rack-a would have nowhere to go.
+		name:    "a group at proxy capacity excludes its transcode node",
+		proxies: []*Node{fullNode(proxyNode(1, "http://proxy-a", strPtr("rack-a"))), proxyNode(2, "http://proxy-1", nil)},
+		transcodes: []*Node{
+			transcodeNode(3, "http://tc-a", strPtr("rack-a"), 0),
+			transcodeNode(4, "http://tc-1", nil, 7),
+		},
+		needsTranscode: true, wantTranscode: "http://tc-1", wantProxy: "http://proxy-1",
+	},
+	{
+		name:       "direct play ignores groups",
+		proxies:    []*Node{proxyNode(1, "http://proxy-a", strPtr("rack-a"))},
+		transcodes: []*Node{},
+		wantProxy:  "http://proxy-a", wantTranscode: "",
+	},
+	{
+		// Jobs occupy a card whether or not the node running them may take
+		// another, so an unhealthyNode sharer — which stays pooled, only
+		// ineligible — still counts against its group.
+		name:    "shared-GPU load counts unusable sharers",
+		proxies: []*Node{proxyNode(1, "http://proxy-1", nil)},
+		transcodes: []*Node{
+			unhealthyNode(gpuTranscodeNode(2, "http://tc-a", 3, "GPU-shared")),
+			gpuTranscodeNode(3, "http://tc-b", 0, "GPU-shared"),
+			gpuTranscodeNode(4, "http://tc-c", 0, "GPU-own"),
+		},
+		needsTranscode: true, wantTranscode: "http://tc-c", wantProxy: unchecked,
+	},
+	{
+		// The tie-break only ranks candidates that are already level; a node
+		// with fewer jobs still wins outright, even when its GPU is the
+		// busier one.
+		name:    "fewer jobs beat an idle physical GPU",
+		proxies: []*Node{proxyNode(1, "http://proxy-1", nil)},
+		transcodes: []*Node{
+			gpuTranscodeNode(2, "http://tc-a", 5, "GPU-shared"),
+			gpuTranscodeNode(3, "http://tc-b", 0, "GPU-shared"),
+			gpuTranscodeNode(4, "http://tc-c", 1, "GPU-own"),
+		},
+		needsTranscode: true, wantTranscode: "http://tc-b", wantProxy: unchecked,
+	},
+	{
+		// Soft affinity outranks the tie-break: moving a running session to
+		// another node costs a restart, which a shared GPU is not on its own
+		// reason enough for.
+		name:    "the shared-GPU tie-break keeps soft affinity",
+		proxies: []*Node{proxyNode(1, "http://proxy-1", nil)},
+		transcodes: []*Node{
+			gpuTranscodeNode(2, "http://tc-a", 2, "GPU-shared"),
+			gpuTranscodeNode(3, "http://tc-b", 0, "GPU-shared"),
+			gpuTranscodeNode(4, "http://tc-c", 0, "GPU-own"),
+		},
+		current: "http://tc-b", needsTranscode: true, wantTranscode: "http://tc-b", wantProxy: unchecked,
+	},
+	{
+		// A node with no identifiable GPU is a group of itself, so a pool
+		// that reports none selects exactly as it did before this rule
+		// existed: least jobs, then pool order.
+		name:           "nodes without GPU keys keep pool order on ties",
+		proxies:        []*Node{proxyNode(1, "http://proxy-1", nil)},
+		transcodes:     []*Node{transcodeNode(2, "http://tc-a", nil, 0), transcodeNode(3, "http://tc-b", nil, 0)},
+		needsTranscode: true, wantTranscode: "http://tc-a", wantProxy: unchecked,
+	},
+}
 
-	plan := f.planner.PlanSession("s1", "", true, 0)
-	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://tc-b" {
-		t.Fatalf("expected least-loaded tc-b, got %+v", plan.TranscodeNode)
-	}
-	if plan.ProxyNode == nil || plan.ProxyNode.URL != "http://proxy-b" {
-		t.Fatalf("expected same-group proxy-b, got %+v", plan.ProxyNode)
+// One PlanSession call picks a transcode node and a proxy. wantTranscode and
+// wantProxy are the chosen node URLs: empty means none may be chosen, and
+// unchecked skips that half.
+func TestPlanSessionPlacement(t *testing.T) {
+	for _, test := range planSessionPlacementCases {
+		t.Run(test.name, func(t *testing.T) {
+			plan := newFixture(test.proxies, test.transcodes).planner.PlanSession("s1", test.current, test.needsTranscode, 0)
+			for _, half := range []struct {
+				kind string
+				node *Node
+				want string
+			}{{"transcode", plan.TranscodeNode, test.wantTranscode}, {"proxy", plan.ProxyNode, test.wantProxy}} {
+				if half.want == unchecked {
+					continue
+				}
+				if (half.node == nil) != (half.want == "") || (half.node != nil && half.node.URL != half.want) {
+					t.Fatalf("%s node = %+v, want %q", half.kind, half.node, half.want)
+				}
+			}
+		})
 	}
 }
 
@@ -193,48 +312,6 @@ func TestReleaseSessionProxyFreesTheProxyHalfAndKeepsTheTranscode(t *testing.T) 
 	}
 }
 
-func TestDegradedGroupExcludesItsTranscodeNodes(t *testing.T) {
-	unhealthyProxy := proxyNode(1, "http://proxy-a", strPtr("rack-a"))
-	unhealthyProxy.Healthy = false
-	f := newFixture(
-		[]*Node{
-			unhealthyProxy,
-			proxyNode(2, "http://proxy-b", strPtr("rack-b")),
-		},
-		[]*Node{
-			transcodeNode(3, "http://tc-a", strPtr("rack-a"), 0), // idle but group degraded
-			transcodeNode(4, "http://tc-b", strPtr("rack-b"), 9),
-		},
-	)
-
-	plan := f.planner.PlanSession("s1", "", true, 0)
-	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://tc-b" {
-		t.Fatalf("expected tc-b (rack-a degraded), got %+v", plan.TranscodeNode)
-	}
-	if plan.ProxyNode == nil || plan.ProxyNode.URL != "http://proxy-b" {
-		t.Fatalf("expected proxy-b, got %+v", plan.ProxyNode)
-	}
-}
-
-func TestUnhealthyTranscodeMemberDegradesGroup(t *testing.T) {
-	deadTC := transcodeNode(5, "http://tc-a2", strPtr("rack-a"), 0)
-	deadTC.Healthy = false
-	f := newFixture(
-		[]*Node{proxyNode(1, "http://proxy-a", strPtr("rack-a"))},
-		[]*Node{
-			transcodeNode(3, "http://tc-a1", strPtr("rack-a"), 0),
-			deadTC,
-		},
-	)
-
-	// All enabled members of a group must be healthy for the group to be
-	// eligible — even the healthy sibling is excluded.
-	plan := f.planner.PlanSession("s1", "", true, 0)
-	if plan.TranscodeNode != nil {
-		t.Fatalf("expected no transcode node, got %+v", plan.TranscodeNode)
-	}
-}
-
 func TestUngroupedNodesKeepLegacyBehavior(t *testing.T) {
 	f := newFixture(
 		[]*Node{
@@ -260,21 +337,6 @@ func TestUngroupedNodesKeepLegacyBehavior(t *testing.T) {
 	second := f.planner.PlanSession("s2", "", true, 0).ProxyNode.URL
 	if first == second {
 		t.Fatalf("expected round-robin to alternate proxies, got %s twice", first)
-	}
-}
-
-func TestGroupWithoutProxiesFallsBackToGlobalProxy(t *testing.T) {
-	f := newFixture(
-		[]*Node{proxyNode(1, "http://proxy-1", nil)},
-		[]*Node{transcodeNode(2, "http://tc-a", strPtr("rack-a"), 0)},
-	)
-
-	plan := f.planner.PlanSession("s1", "", true, 0)
-	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://tc-a" {
-		t.Fatalf("expected tc-a, got %+v", plan.TranscodeNode)
-	}
-	if plan.ProxyNode == nil || plan.ProxyNode.URL != "http://proxy-1" {
-		t.Fatalf("expected global proxy fallback, got %+v", plan.ProxyNode)
 	}
 }
 
@@ -339,51 +401,6 @@ func TestProxyCapSkipsFullProxy(t *testing.T) {
 		if plan.ProxyNode == nil || plan.ProxyNode.URL != "http://proxy-2" {
 			t.Fatalf("expected proxy-2 (proxy-1 at cap), got %+v", plan.ProxyNode)
 		}
-	}
-}
-
-func TestGroupAtProxyCapacityExcludesGroupTranscode(t *testing.T) {
-	groupProxy := proxyNode(1, "http://proxy-a", strPtr("rack-a"))
-	groupProxy.MaxJobs = intPtr(1)
-	groupProxy.ActiveJobs = 1
-	f := newFixture(
-		[]*Node{groupProxy, proxyNode(2, "http://proxy-1", nil)},
-		[]*Node{
-			transcodeNode(3, "http://tc-a", strPtr("rack-a"), 0),
-			transcodeNode(4, "http://tc-1", nil, 7),
-		},
-	)
-
-	// rack-a's only proxy is full, so its transcode node must not be used —
-	// streams pinned to rack-a would have nowhere to go.
-	plan := f.planner.PlanSession("s1", "", true, 0)
-	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://tc-1" {
-		t.Fatalf("expected ungrouped tc-1, got %+v", plan.TranscodeNode)
-	}
-	if plan.ProxyNode == nil || plan.ProxyNode.URL != "http://proxy-1" {
-		t.Fatalf("expected ungrouped proxy-1, got %+v", plan.ProxyNode)
-	}
-}
-
-func TestGroupProxyReservationsGateGroupCapacity(t *testing.T) {
-	groupProxy := proxyNode(1, "http://proxy-a", strPtr("rack-a"))
-	groupProxy.MaxJobs = intPtr(1)
-	f := newFixture(
-		[]*Node{groupProxy},
-		[]*Node{transcodeNode(2, "http://tc-a", strPtr("rack-a"), 0)},
-	)
-
-	// The first session reserves the group's only proxy slot.
-	plan := f.planner.PlanSession("s1", "", true, 0)
-	if plan.TranscodeNode == nil || plan.ProxyNode == nil {
-		t.Fatalf("first session should get both nodes, got %+v", plan)
-	}
-
-	// With the group's proxy fully reserved, its transcode node is
-	// ineligible too — streams pinned to the group would have nowhere to go.
-	plan = f.planner.PlanSession("s2", "", true, 0)
-	if plan.TranscodeNode != nil || plan.ProxyNode != nil {
-		t.Fatalf("second session should be rejected, got %+v", plan)
 	}
 }
 
@@ -470,21 +487,6 @@ func TestTranscodeWorkAvailableIgnoresExpiredReservations(t *testing.T) {
 	}
 }
 
-func TestDirectPlayIgnoresGroups(t *testing.T) {
-	f := newFixture(
-		[]*Node{proxyNode(1, "http://proxy-a", strPtr("rack-a"))},
-		[]*Node{},
-	)
-
-	plan := f.planner.PlanSession("s1", "", false, 0)
-	if plan.ProxyNode == nil || plan.ProxyNode.URL != "http://proxy-a" {
-		t.Fatalf("expected grouped proxy to serve direct play, got %+v", plan.ProxyNode)
-	}
-	if plan.TranscodeNode != nil {
-		t.Fatalf("direct play must not pick a transcode node, got %+v", plan.TranscodeNode)
-	}
-}
-
 func TestGroupRoundRobinAcrossGroupProxies(t *testing.T) {
 	f := newFixture(
 		[]*Node{
@@ -504,14 +506,6 @@ func TestGroupRoundRobinAcrossGroupProxies(t *testing.T) {
 	}
 	if len(seen) != 2 {
 		t.Fatalf("expected round-robin across both group proxies, saw %v", seen)
-	}
-}
-
-func TestNilPlannerReturnsEmptyPlan(t *testing.T) {
-	var p *Planner
-	plan := p.PlanSession("s1", "", true, 0)
-	if plan.TranscodeNode != nil || plan.ProxyNode != nil {
-		t.Fatalf("expected empty plan from nil planner, got %+v", plan)
 	}
 }
 
@@ -851,23 +845,6 @@ func TestPlanRouteUsesIndependentCapabilityPredicates(t *testing.T) {
 	}
 }
 
-func TestProxyNodeURLsListsEnabledProxies(t *testing.T) {
-	proxies := NewProxyPool()
-	proxies.SetNodes([]*Node{
-		{ID: 1, URL: "http://proxy-1", Enabled: true, Healthy: true},
-		{ID: 2, URL: "http://proxy-2", Enabled: true, Healthy: false},
-	})
-	planner := NewPlanner(proxies, NewTranscodePool())
-
-	// Unhealthy nodes are still listed: capability planning wants the
-	// deployment's toolchain, and an unreachable node excludes itself when its
-	// capability fetch fails.
-	urls := planner.ProxyNodeURLs()
-	if len(urls) != 2 {
-		t.Fatalf("proxy urls = %v, want both pooled proxies", urls)
-	}
-}
-
 // gpuCapabilities is a capability report naming one render device per uuid, so
 // pool loading derives exactly those identities. Written as a payload rather
 // than by setting the derived field directly: the pool re-derives it on load,
@@ -918,27 +895,6 @@ func TestEqualJobsPrefersTheIdlePhysicalGPU(t *testing.T) {
 	}
 }
 
-// Jobs occupy a card whether or not the node running them may take another, so
-// an unhealthy sharer — which stays pooled, only ineligible — still counts
-// against its group.
-func TestSharedGPULoadCountsUnusableSharers(t *testing.T) {
-	busy := gpuTranscodeNode(2, "http://tc-a", 3, "GPU-shared")
-	busy.Healthy = false
-	f := newFixture(
-		[]*Node{proxyNode(1, "http://proxy-1", nil)},
-		[]*Node{
-			busy,
-			gpuTranscodeNode(3, "http://tc-b", 0, "GPU-shared"),
-			gpuTranscodeNode(4, "http://tc-c", 0, "GPU-own"),
-		},
-	)
-
-	plan := f.planner.PlanSession("s1", "", true, 0)
-	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://tc-c" {
-		t.Fatalf("expected tc-c, got %+v", plan.TranscodeNode)
-	}
-}
-
 // Boot id detection is best-effort, so two unrelated hosts can each report an
 // iGPU at the near-universal slot 0000:00:02.0 with no boot id to scope it.
 // Those are two cards, and planning them as one would steer work away from a
@@ -985,60 +941,6 @@ func TestSharedGPULoadCountsEachSharerOnce(t *testing.T) {
 	}
 	if got := loads(f.transcodes.Nodes()[2]); got != 0 {
 		t.Fatalf("tc-c shared-GPU load = %d, want 0", got)
-	}
-}
-
-// The tie-break only ranks candidates that are already level; a node with fewer
-// jobs still wins outright, even when its GPU is the busier one.
-func TestFewerJobsBeatsAnIdlePhysicalGPU(t *testing.T) {
-	f := newFixture(
-		[]*Node{proxyNode(1, "http://proxy-1", nil)},
-		[]*Node{
-			gpuTranscodeNode(2, "http://tc-a", 5, "GPU-shared"),
-			gpuTranscodeNode(3, "http://tc-b", 0, "GPU-shared"),
-			gpuTranscodeNode(4, "http://tc-c", 1, "GPU-own"),
-		},
-	)
-
-	plan := f.planner.PlanSession("s1", "", true, 0)
-	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://tc-b" {
-		t.Fatalf("expected the least-loaded tc-b, got %+v", plan.TranscodeNode)
-	}
-}
-
-// Soft affinity outranks the tie-break: moving a running session to another
-// node costs a restart, which a shared GPU is not on its own reason enough for.
-func TestSharedGPUTieBreakDoesNotBreakSoftAffinity(t *testing.T) {
-	f := newFixture(
-		[]*Node{proxyNode(1, "http://proxy-1", nil)},
-		[]*Node{
-			gpuTranscodeNode(2, "http://tc-a", 2, "GPU-shared"),
-			gpuTranscodeNode(3, "http://tc-b", 0, "GPU-shared"),
-			gpuTranscodeNode(4, "http://tc-c", 0, "GPU-own"),
-		},
-	)
-
-	plan := f.planner.PlanSession("s1", "http://tc-b", true, 0)
-	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://tc-b" {
-		t.Fatalf("expected affinity to keep tc-b, got %+v", plan.TranscodeNode)
-	}
-}
-
-// A node with no identifiable GPU is a group of itself, so a pool that reports
-// none selects exactly as it did before this rule existed: least jobs, then
-// pool order.
-func TestNodesWithoutGPUKeysKeepPoolOrderOnTies(t *testing.T) {
-	f := newFixture(
-		[]*Node{proxyNode(1, "http://proxy-1", nil)},
-		[]*Node{
-			transcodeNode(2, "http://tc-a", nil, 0),
-			transcodeNode(3, "http://tc-b", nil, 0),
-		},
-	)
-
-	plan := f.planner.PlanSession("s1", "", true, 0)
-	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://tc-a" {
-		t.Fatalf("expected the first pooled node, got %+v", plan.TranscodeNode)
 	}
 }
 

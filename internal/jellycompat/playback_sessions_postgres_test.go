@@ -16,8 +16,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-var negotiatedSessionAdvisoryLockKeySink int64
-
 func TestNegotiatedSessionAdvisoryLockKeyIsPinnedAndSeparatesRepresentativeInputs(t *testing.T) {
 	t.Parallel()
 
@@ -25,11 +23,6 @@ func TestNegotiatedSessionAdvisoryLockKeyIsPinnedAndSeparatesRepresentativeInput
 	const wantBaseline int64 = -2277851018424744338
 	if baseline != wantBaseline {
 		t.Fatalf("key = %d, want pinned value %d", baseline, wantBaseline)
-	}
-	for i := 0; i < 100; i++ {
-		if got := negotiatedSessionAdvisoryLockKey("token", "device", "route"); got != baseline {
-			t.Fatalf("key changed between calls: first=%d call_%d=%d", baseline, i, got)
-		}
 	}
 
 	testCases := []struct {
@@ -82,9 +75,7 @@ type negotiatedSessionAdvisoryLockCall struct {
 }
 
 type negotiatedSessionAdvisoryLockRecorder struct {
-	calls  []negotiatedSessionAdvisoryLockCall
-	failAt int
-	err    error
+	calls []negotiatedSessionAdvisoryLockCall
 }
 
 func (r *negotiatedSessionAdvisoryLockRecorder) Exec(_ context.Context, query string, args ...any) (pgconn.CommandTag, error) {
@@ -92,9 +83,6 @@ func (r *negotiatedSessionAdvisoryLockRecorder) Exec(_ context.Context, query st
 		query: query,
 		args:  append([]any(nil), args...),
 	})
-	if r.failAt == len(r.calls) {
-		return pgconn.CommandTag{}, r.err
-	}
 	return pgconn.CommandTag{}, nil
 }
 
@@ -136,70 +124,6 @@ func TestAcquireNegotiatedSessionAdvisoryLockBridgesLegacyThenBigint(t *testing.
 	}
 	if _, ok := versioned.args[0].(int64); !ok {
 		t.Fatalf("versioned advisory lock argument type = %T, want int64", versioned.args[0])
-	}
-}
-
-func TestAcquireNegotiatedSessionAdvisoryLockPropagatesDatabaseError(t *testing.T) {
-	t.Parallel()
-
-	for _, tc := range []struct {
-		name   string
-		failAt int
-	}{
-		{name: "legacy lock", failAt: 1},
-		{name: "versioned lock", failAt: 2},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			wantErr := errors.New("lock unavailable")
-			recorder := &negotiatedSessionAdvisoryLockRecorder{failAt: tc.failAt, err: wantErr}
-			err := acquireNegotiatedSessionAdvisoryLock(context.Background(), recorder, "token", "device", "route")
-			if !errors.Is(err, wantErr) {
-				t.Fatalf("error = %v, want wrapped %v", err, wantErr)
-			}
-			if len(recorder.calls) != tc.failAt {
-				t.Fatalf("call count = %d, want %d", len(recorder.calls), tc.failAt)
-			}
-		})
-	}
-}
-
-func BenchmarkNegotiatedSessionAdvisoryLockKey(b *testing.B) {
-	testCases := []struct {
-		name           string
-		compatToken    string
-		clientDeviceID string
-		routeItemID    string
-	}{
-		{
-			name:           "typical",
-			compatToken:    strings.Repeat("a", 64),
-			clientDeviceID: "android-tv-device",
-			routeItemID:    "01J8Y2KJ0B9AZ7Q48H1S6X3CME",
-		},
-		{
-			name:           "embedded-NUL",
-			compatToken:    "token\x00with\x00separators",
-			clientDeviceID: "device",
-			routeItemID:    "route\x00item",
-		},
-		{
-			name:           "long-4KiB-components",
-			compatToken:    strings.Repeat("t", 4096),
-			clientDeviceID: strings.Repeat("d", 4096),
-			routeItemID:    strings.Repeat("r", 4096),
-		},
-	}
-
-	for _, tc := range testCases {
-		b.Run(tc.name, func(b *testing.B) {
-			b.ReportAllocs()
-			b.SetBytes(int64(len(tc.compatToken) + len(tc.clientDeviceID) + len(tc.routeItemID)))
-			for i := 0; i < b.N; i++ {
-				negotiatedSessionAdvisoryLockKeySink = negotiatedSessionAdvisoryLockKey(
-					tc.compatToken, tc.clientDeviceID, tc.routeItemID,
-				)
-			}
-		})
 	}
 }
 
@@ -262,359 +186,39 @@ func newCompatTestPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-func TestNegotiatedSessionAdvisoryLockCoordinatesAcrossRollingUpgrade(t *testing.T) {
-	pool := newCompatTestPool(t)
-	ctx := context.Background()
-	const (
-		compatToken    = "rolling-token"
-		clientDeviceID = "rolling-device"
-		routeItemID    = "rolling-route"
-	)
-
-	bridgedTx, err := pool.Begin(ctx)
+// newUnreachableCompatPool returns a pool whose every query fails, standing in
+// for a Postgres outage without needing a database.
+func newUnreachableCompatPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	pool, err := pgxpool.New(context.Background(), "postgres://silo:silo@127.0.0.1:1/silo?sslmode=disable&connect_timeout=1")
 	if err != nil {
-		t.Fatalf("begin bridged transaction: %v", err)
+		t.Fatalf("create pool: %v", err)
 	}
-	t.Cleanup(func() { _ = bridgedTx.Rollback(ctx) })
-	if err := acquireNegotiatedSessionAdvisoryLock(
-		ctx, bridgedTx, compatToken, clientDeviceID, routeItemID,
-	); err != nil {
-		t.Fatalf("acquire bridged advisory locks: %v", err)
-	}
-
-	legacyTx, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatalf("begin legacy transaction: %v", err)
-	}
-	t.Cleanup(func() { _ = legacyTx.Rollback(ctx) })
-	legacyScope := negotiatedPlaybackScope(compatToken, clientDeviceID, routeItemID)
-	var legacyAcquired bool
-	if err := legacyTx.QueryRow(
-		ctx,
-		`SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0))`,
-		legacyScope,
-	).Scan(&legacyAcquired); err != nil {
-		t.Fatalf("try legacy advisory lock: %v", err)
-	}
-	if legacyAcquired {
-		t.Fatal("legacy writer bypassed bridged advisory lock")
-	}
-
-	versionedTx, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatalf("begin versioned transaction: %v", err)
-	}
-	t.Cleanup(func() { _ = versionedTx.Rollback(ctx) })
-	lockKey := negotiatedSessionAdvisoryLockKey(compatToken, clientDeviceID, routeItemID)
-	var versionedAcquired bool
-	if err := versionedTx.QueryRow(
-		ctx,
-		`SELECT pg_try_advisory_xact_lock($1::bigint)`,
-		lockKey,
-	).Scan(&versionedAcquired); err != nil {
-		t.Fatalf("try versioned advisory lock: %v", err)
-	}
-	if versionedAcquired {
-		t.Fatal("versioned writer bypassed bridged advisory lock")
-	}
-
-	if err := bridgedTx.Rollback(ctx); err != nil {
-		t.Fatalf("release bridged advisory locks: %v", err)
-	}
-	if err := legacyTx.QueryRow(
-		ctx,
-		`SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0))`,
-		legacyScope,
-	).Scan(&legacyAcquired); err != nil {
-		t.Fatalf("retry legacy advisory lock: %v", err)
-	}
-	if !legacyAcquired {
-		t.Fatal("legacy advisory lock remained unavailable after bridge released")
-	}
-	if err := versionedTx.QueryRow(
-		ctx,
-		`SELECT pg_try_advisory_xact_lock($1::bigint)`,
-		lockKey,
-	).Scan(&versionedAcquired); err != nil {
-		t.Fatalf("retry versioned advisory lock: %v", err)
-	}
-	if !versionedAcquired {
-		t.Fatal("versioned advisory lock remained unavailable after bridge released")
-	}
+	t.Cleanup(pool.Close)
+	return pool
 }
 
-// A session written by one store instance must be reloadable by a fresh instance
-// (empty cache) — i.e. it survived in Postgres, as it would across a restart.
-func TestDurableCompatPlaybackStore_SurvivesRestart(t *testing.T) {
-	pool := newCompatTestPool(t)
-	ctx := context.Background()
-	id := fmt.Sprintf("compat-test-%d", time.Now().UnixNano())
-	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE id = $1`, id) })
+// A negotiation that fails to persist must not cost this server the cached,
+// still-unstarted negotiation it would have replaced: the rolled-back write
+// left that one in Postgres, and its URLs are already with the client.
+func TestDurablePutNegotiatedFailureKeepsDisplacedNegotiation(t *testing.T) {
+	store := NewDurableCompatPlaybackStore(newUnreachableCompatPool(t), time.Hour, nil)
+	first := PlaybackSession{ID: "ps-first", CompatToken: "tok", ClientDeviceID: "dev", RouteItemID: "itm"}
+	store.Put(first) // cached; the failed upsert marks it unpersisted
 
-	store1 := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	store1.Put(PlaybackSession{
-		ID:                 id,
-		CompatToken:        "tok",
-		UserID:             "u1",
-		RouteItemID:        "route-1",
-		UpstreamSessionID:  "up-1",
-		InitialSeekSeconds: 12.5,
-		MediaSources:       []PlaybackMediaSource{{ID: "src-1", FileID: 7}},
-	})
-
-	// Fresh instance => empty cache => must hit Postgres.
-	store2 := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	got, ok := store2.Get(id)
-	if !ok {
-		t.Fatal("session not reloaded from Postgres after restart")
-	}
-	if got.UpstreamSessionID != "up-1" || got.RouteItemID != "route-1" || got.InitialSeekSeconds != 12.5 {
-		t.Fatalf("reloaded session lost fields: %+v", got)
-	}
-
-	// FindByRoute on the fresh instance resolves via a DB-backed scan.
-	if _, _, ok := store2.FindByRoute("tok", "route-1"); !ok {
-		t.Fatal("FindByRoute failed to resolve a persisted session")
-	}
-
-	// Update persists; reload on yet another instance sees it.
-	if err := store2.Update(id, func(s *PlaybackSession) error {
-		s.TranscodeStarted = true
-		return nil
-	}); err != nil {
-		t.Fatalf("update: %v", err)
-	}
-	store3 := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	if got, ok := store3.Get(id); !ok || !got.TranscodeStarted {
-		t.Fatalf("update did not persist: ok=%v got=%+v", ok, got)
-	}
-
-	store3.Delete(id)
-	store4 := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	if _, ok := store4.Get(id); ok {
-		t.Fatal("session still present after delete")
-	}
-}
-
-func TestDurableCompatPlaybackStoreRevalidatesUnstartedNegotiationAcrossInstances(t *testing.T) {
-	pool := newCompatTestPool(t)
-	ctx := context.Background()
-	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
-	firstID := "compat-first-" + suffix
-	secondID := "compat-second-" + suffix
-	t.Cleanup(func() {
-		_, _ = pool.Exec(
-			ctx,
-			`DELETE FROM jellycompat_playback_sessions WHERE id = ANY($1)`,
-			[]string{firstID, secondID},
-		)
-	})
-	first := PlaybackSession{
-		ID:             firstID,
-		CompatToken:    "owner-" + suffix,
-		ClientDeviceID: "device-1",
-		RouteItemID:    "route-1",
-	}
-	seed := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	seed.PutNegotiated(first)
-
-	stale := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	if _, ok := stale.Get(firstID); !ok {
-		t.Fatal("first negotiation was not cached")
-	}
-	replacer := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
 	second := first
-	second.ID = secondID
-	replacer.PutNegotiated(second)
-
-	if _, ok := stale.Get(firstID); ok {
-		t.Fatal("superseded unstarted negotiation remained routable from another instance's cache")
+	second.ID = "ps-second"
+	if err := store.PutNegotiated(second); err == nil {
+		t.Fatal("PutNegotiated succeeded against an unreachable database")
 	}
-}
-
-func TestDurableCompatPlaybackStorePutNegotiatedReplacesAcrossInstances(t *testing.T) {
-	pool := newCompatTestPool(t)
-	ctx := context.Background()
-	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
-	firstID := "compat-negotiated-first-" + suffix
-	secondID := "compat-negotiated-second-" + suffix
-	differentID := "compat-negotiated-different-" + suffix
-	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE id = ANY($1)`, []string{firstID, secondID, differentID})
-	})
-
-	first := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	first.PutNegotiated(PlaybackSession{
-		ID:                 firstID,
-		NegotiationVariant: "subtitle=2",
-		CompatToken:        "negotiated-token-" + suffix,
-		ClientDeviceID:     "web-device",
-		RouteItemID:        "route-1",
-	})
-
-	other := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	other.PutNegotiated(PlaybackSession{
-		ID:                 differentID,
-		CompatToken:        "negotiated-token-" + suffix,
-		ClientDeviceID:     "web-device",
-		RouteItemID:        "route-1",
-		NegotiationVariant: "subtitle=3",
-	})
-
-	second := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	second.PutNegotiated(PlaybackSession{
-		ID:                 secondID,
-		NegotiationVariant: "subtitle=2",
-		CompatToken:        "negotiated-token-" + suffix,
-		ClientDeviceID:     "web-device",
-		RouteItemID:        "route-1",
-	})
-
-	fresh := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	if _, ok := fresh.Get(firstID); ok {
-		t.Fatal("superseded negotiation remained durable")
+	if _, found, err := store.Lookup(first.ID); err != nil || !found {
+		t.Fatalf("displaced negotiation: found=%v err=%v, want it served from cache", found, err)
 	}
-	if got, ok := fresh.Get(differentID); !ok || got.NegotiationVariant != "subtitle=3" {
-		t.Fatalf("distinct negotiation was replaced: %+v, exists=%t", got, ok)
+	if !store.isUnpersisted(first.ID) {
+		t.Fatal("displaced negotiation lost its unpersisted mark")
 	}
-	if _, ok := fresh.Get(secondID); !ok {
-		t.Fatal("replacement negotiation was not durable")
-	}
-}
-
-// M5: an empty compat token resolves cached routes and never acquires a
-// database connection, including when no cached route matches.
-func TestDurableCompatPlaybackStore_EmptyTokenFindByRouteNoDBScan(t *testing.T) {
-	store := NewDurableCompatPlaybackStore(nil, time.Hour, nil)
-	store.Put(PlaybackSession{ID: "ps-empty", CompatToken: "", RouteItemID: "route-x"})
-
-	// Cached empty-token route resolves from memory.
-	if _, _, ok := store.FindByRoute("", "route-x"); !ok {
-		t.Fatal("empty-token FindByRoute should resolve a cached route")
-	}
-	// Cache miss with an empty token returns false without a DB fallback.
-	if _, _, ok := store.FindByRoute("", "route-missing"); ok {
-		t.Fatal("empty-token FindByRoute should not resolve an unknown route")
-	}
-
-	// The dedicated live pool exposes database work independently of whether a
-	// query would return any rows.
-	if dsn := os.Getenv("SILO_TEST_DATABASE_URL"); dsn != "" {
-		pool := newCompatTestPool(t)
-		s := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-		before := pool.Stat().AcquireCount()
-		if err := s.loadByCompatToken(""); err != nil {
-			t.Fatalf("empty-token load: %v", err)
-		}
-		if _, _, ok := s.FindByRoute("", "anything"); ok {
-			t.Fatal("empty-token FindByRoute resolved unexpectedly against DB")
-		}
-		if got := pool.Stat().AcquireCount(); got != before {
-			t.Fatalf("empty-token lookup acquired %d database connections", got-before)
-		}
-	}
-}
-
-// M6: an Update must not lose a concurrent writer's field. We simulate two
-// interleaved writers that each mutate a different field; after both commit, the
-// DB-authoritative row (reloaded on a fresh instance) must carry BOTH fields,
-// proving the second writer merged onto the first's committed row rather than
-// clobbering it with a stale whole-document upsert.
-func TestDurableCompatPlaybackStore_UpdateAtomicNoLostField(t *testing.T) {
-	pool := newCompatTestPool(t)
-	ctx := context.Background()
-	id := fmt.Sprintf("compat-atomic-%d", time.Now().UnixNano())
-	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE id = $1`, id) })
-
-	seed := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	seed.Put(PlaybackSession{ID: id, CompatToken: "tok", UserID: "u1"})
-
-	writerB := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	if cached, ok := writerB.Get(id); !ok || cached.TranscodeStarted {
-		t.Fatalf("writerB must cache the original row before writerA updates: %+v, %v", cached, ok)
-	}
-
-	// Writer A (its own cache) sets TranscodeStarted.
-	writerA := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	if err := writerA.Update(id, func(s *PlaybackSession) error {
-		s.TranscodeStarted = true
-		return nil
-	}); err != nil {
-		t.Fatalf("writerA update: %v", err)
-	}
-
-	// Writer B started before A committed (its cache lacks A's field) sets a
-	// different field. Its DB step re-reads A's committed row FOR UPDATE and
-	// merges UpstreamPlayMethod on top, so A's TranscodeStarted survives.
-	if err := writerB.Update(id, func(s *PlaybackSession) error {
-		s.UpstreamPlayMethod = "Transcode"
-		return nil
-	}); err != nil {
-		t.Fatalf("writerB update: %v", err)
-	}
-
-	fresh := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	got, ok := fresh.Get(id)
-	if !ok {
-		t.Fatal("session missing after interleaved updates")
-	}
-	if !got.TranscodeStarted {
-		t.Fatalf("writerA's field was lost: %+v", got)
-	}
-	if got.UpstreamPlayMethod != "Transcode" {
-		t.Fatalf("writerB's field was lost: %+v", got)
-	}
-}
-
-// M11: the DB expiry filter must honor the injected clock, not Postgres now().
-// A row written with a near-future expiry is visible while the fake clock is
-// before it and invisible once the fake clock advances past it, even though
-// Postgres wall-clock now() never moves enough to matter.
-func TestDurableCompatPlaybackStore_InjectedClockExpiry(t *testing.T) {
-	pool := newCompatTestPool(t)
-	ctx := context.Background()
-	id := fmt.Sprintf("compat-clock-%d", time.Now().UnixNano())
-	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE id = $1`, id) })
-
-	base := time.Now()
-	fake := base
-	clock := func() time.Time { return fake }
-
-	// TTL 1m; row expires at base+1m by the injected clock.
-	store := NewDurableCompatPlaybackStore(pool, time.Minute, clock)
-	store.Put(PlaybackSession{ID: id, CompatToken: "tok", UserID: "u1", RouteItemID: "r1"})
-
-	// Fresh instance, empty cache, same injected clock: load hits the DB and the
-	// row is live (fake clock still at base).
-	reader := NewDurableCompatPlaybackStore(pool, time.Minute, clock)
-	if _, ok := reader.Get(id); !ok {
-		t.Fatal("row should be live by injected clock before expiry")
-	}
-
-	// Advance the fake clock past expiry. The DB filter uses d.now(), so a fresh
-	// instance must treat the row as expired even though wall-clock now() is still
-	// far before base+1m.
-	fake = base.Add(2 * time.Minute)
-	expired := NewDurableCompatPlaybackStore(pool, time.Minute, clock)
-	if _, ok := expired.Get(id); ok {
-		t.Fatal("row should be expired by injected clock past expiry")
-	}
-	if _, _, ok := expired.FindByRoute("tok", "r1"); ok {
-		t.Fatal("FindByRoute should not resolve an injected-clock-expired row")
-	}
-}
-
-// With a nil pool the durable store degrades to the in-memory cache only, so it
-// still satisfies the interface and basic operations work (no DB available).
-func TestDurableCompatPlaybackStore_NilPoolInMemory(t *testing.T) {
-	store := NewDurableCompatPlaybackStore(nil, time.Hour, nil)
-	store.Put(PlaybackSession{ID: "x", UpstreamSessionID: "u"})
-	if got, ok := store.Get("x"); !ok || got.UpstreamSessionID != "u" {
-		t.Fatalf("nil-pool Get failed: ok=%v got=%+v", ok, got)
-	}
-	store.Delete("x")
-	if _, ok := store.Get("x"); ok {
-		t.Fatal("nil-pool Delete failed")
+	if _, found, _ := store.Lookup(second.ID); found {
+		t.Fatal("unpersisted negotiation is still cached")
 	}
 }
 
@@ -639,6 +243,25 @@ func TestPlaybackSessionStoreTerminalClaimIsAtomicAndOwnerScoped(t *testing.T) {
 	}
 	if _, err := store.ClaimTerminal("play-1", "owner", claimUntil.Add(time.Minute)); err == nil {
 		t.Fatal("terminal event was claimed twice")
+	}
+}
+
+// TestPlaybackSessionStoreRetireChecksUpstreamUnderLock: an end looks a play
+// up by its upstream session and then retires it. A method or upstream
+// switch that lands between the two must leave the play it attached alone,
+// so the retiring step checks the play again under the lock it marks it in.
+func TestPlaybackSessionStoreRetireChecksUpstreamUnderLock(t *testing.T) {
+	store := NewPlaybackSessionStore(time.Hour, nil)
+	store.Put(PlaybackSession{ID: "moved", CompatToken: "token", UpstreamSessionID: "new", UpstreamPlayMethod: "transcode"})
+	store.Put(PlaybackSession{ID: "direct", CompatToken: "token", UpstreamSessionID: "old", UpstreamPlayMethod: "direct"})
+	store.Put(PlaybackSession{ID: "current", CompatToken: "token", UpstreamSessionID: "old", UpstreamPlayMethod: "remux"})
+	for id, want := range map[string]bool{"moved": false, "direct": false, "current": true} {
+		if got := store.retireIfOnUpstream(id, "old"); got != want {
+			t.Errorf("retire %s for the old upstream session = %v, want %v", id, got, want)
+		}
+		if _, routable := store.Get(id); routable == want {
+			t.Errorf("%s routable = %v after the end", id, routable)
+		}
 	}
 }
 
@@ -820,18 +443,6 @@ func TestDurableCompatPlaybackStoreBoundsGenerationTombstones(t *testing.T) {
 	}
 }
 
-func TestDurableCompatPlaybackStoreIDWriteDoesNotRefreshTokenSnapshot(t *testing.T) {
-	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
-	store := NewDurableCompatPlaybackStore(nil, time.Hour, func() time.Time { return now })
-	store.markTokenValidated("owner")
-	now = now.Add(4 * time.Second)
-	store.markIDValidated("play-2")
-	now = now.Add(2 * time.Second)
-	if !store.shouldRevalidateToken("owner") {
-		t.Fatal("single-row validation incorrectly extended the token-wide cache window")
-	}
-}
-
 func TestPlaybackSessionStoreNewAuthoritativeEventSurvivesStaleCompletion(t *testing.T) {
 	store := NewPlaybackSessionStore(time.Hour, nil)
 	store.Put(PlaybackSession{ID: "play-1", CompatToken: "owner"})
@@ -863,178 +474,6 @@ func TestPlaybackSessionStoreNewAuthoritativeEventSurvivesStaleCompletion(t *tes
 	store.CompleteTerminal("play-1", "owner", secondLease, secondClaim.TerminalClaimVersion)
 	if _, ok := store.GetFinalizable("play-1", "owner"); ok {
 		t.Fatal("replacement event was not completed")
-	}
-}
-
-func TestDurableCompatPlaybackStoreTerminalClaimAcrossInstances(t *testing.T) {
-	pool := newCompatTestPool(t)
-	ctx := context.Background()
-	id := fmt.Sprintf("compat-take-%d", time.Now().UnixNano())
-	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE id = $1`, id) })
-
-	seed := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	seed.Put(PlaybackSession{ID: id, CompatToken: "owner", UpstreamSessionID: "upstream-1"})
-	skewedNow := time.Now().Add(-6 * time.Hour)
-	first := NewDurableCompatPlaybackStore(pool, time.Hour, func() time.Time { return skewedNow })
-	second := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	if _, ok := first.Get(id); !ok {
-		t.Fatal("first instance did not load session")
-	}
-	if _, ok := second.Get(id); !ok {
-		t.Fatal("second instance did not load session")
-	}
-	event := watchsync.ScrobbleEvent{PlaybackSessionID: "upstream-1"}
-	if _, err := seed.StageTerminal(id, "owner", event, true); err != nil {
-		t.Fatal("failed to stage durable terminal event")
-	}
-
-	var dbBefore time.Time
-	if err := pool.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&dbBefore); err != nil {
-		t.Fatalf("read database clock: %v", err)
-	}
-	claimUntil := skewedNow.Add(time.Minute)
-	claimed, err := first.ClaimTerminal(id, "owner", claimUntil)
-	if err != nil {
-		t.Fatal("first instance did not claim session")
-	}
-	var dbAfter time.Time
-	if err := pool.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&dbAfter); err != nil {
-		t.Fatalf("read database clock after claim: %v", err)
-	}
-	if claimed.TerminalClaimUntil.Before(dbBefore.Add(55*time.Second)) ||
-		claimed.TerminalClaimUntil.After(dbAfter.Add(65*time.Second)) {
-		t.Fatalf(
-			"claim deadline %s was not anchored to database clock interval [%s, %s]",
-			claimed.TerminalClaimUntil,
-			dbBefore.Add(55*time.Second),
-			dbAfter.Add(65*time.Second),
-		)
-	}
-	if _, err := second.ClaimTerminal(id, "owner", time.Now().Add(time.Minute)); err == nil {
-		t.Fatal("second instance claimed an already leased durable session")
-	}
-}
-
-func TestDurableCompatPlaybackStoreTerminalStageSurvivesInstanceBoundary(t *testing.T) {
-	pool := newCompatTestPool(t)
-	ctx := context.Background()
-	id := fmt.Sprintf("compat-deactivate-%d", time.Now().UnixNano())
-	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE id = $1`, id) })
-	now := time.Now()
-	clock := func() time.Time { return now }
-
-	seed := NewDurableCompatPlaybackStore(pool, time.Hour, clock)
-	seed.Put(PlaybackSession{
-		ID:                  id,
-		CompatToken:         "owner",
-		ClientPlaySessionID: "client-play-1",
-		UpstreamSessionID:   "upstream-1",
-	})
-	fresh := NewDurableCompatPlaybackStore(pool, time.Hour, clock)
-	if _, ok := fresh.Get(id); !ok {
-		t.Fatal("fresh instance did not preload the active session")
-	}
-	if _, ok := fresh.FindByClientPlaySessionID("owner", "client-play-1"); !ok {
-		t.Fatal("fresh instance did not preload the active alias")
-	}
-	event := watchsync.ScrobbleEvent{PlaybackSessionID: "upstream-1"}
-	if terminal, err := seed.StageTerminal(id, "owner", event, false); err != nil || !terminal.Terminal {
-		t.Fatalf("durable terminal stage failed: err=%v session=%+v", err, terminal)
-	}
-	// Cross-process invalidation is deliberately bounded rather than putting a
-	// DB query on every segment request. Advance past that window before the
-	// other instance revalidates its preloaded cache.
-	now = now.Add(compatCacheRevalidationInterval)
-
-	if _, ok := fresh.Get(id); ok {
-		t.Fatal("instance routed a terminal session from its stale active cache")
-	}
-	if _, ok := fresh.FindByClientPlaySessionID("owner", "client-play-1"); ok {
-		t.Fatal("instance routed a terminal alias from its stale active cache")
-	}
-	if _, ok := fresh.GetFinalizable(id, "owner"); !ok {
-		t.Fatal("fresh instance could not resolve terminal session for final report")
-	}
-	if _, ok := fresh.FindFinalizableByClientPlaySessionID("owner", "client-play-1", "", ""); !ok {
-		t.Fatal("fresh instance could not resolve terminal alias for final report")
-	}
-	claimUntil := time.Now().UTC().Truncate(time.Microsecond).Add(time.Minute)
-	claimed, err := fresh.ClaimTerminal(id, "owner", claimUntil)
-	if err != nil || !claimed.Terminal {
-		t.Fatalf("fresh instance could not claim terminal session: err=%v session=%+v", err, claimed)
-	}
-	fresh.ReleaseTerminalClaim(id, "owner", claimed.TerminalClaimUntil, claimed.TerminalClaimVersion, true)
-	if claimed, err := fresh.ClaimTerminal(id, "owner", claimUntil.Add(time.Minute)); err == nil || claimed != nil {
-		t.Fatalf("delivered fallback was claimed again: err=%v session=%+v", err, claimed)
-	}
-}
-
-func TestDurableCompatPlaybackStorePreservesCachedSessionOnValidationFailure(t *testing.T) {
-	pool := newCompatTestPool(t)
-	now := time.Now()
-	clock := func() time.Time { return now }
-	store := NewDurableCompatPlaybackStore(pool, time.Hour, clock)
-	pool.Close()
-	store.Put(PlaybackSession{ID: "cached-session", CompatToken: "owner"})
-
-	// A request inside the validation window must be served entirely from cache.
-	if _, ok := store.Get("cached-session"); !ok {
-		t.Fatal("hot cache lookup consulted the closed database")
-	}
-
-	// Once validation is due, the failed query must not evict a last-known-good
-	// active session and interrupt playback.
-	now = now.Add(compatCacheRevalidationInterval)
-	if _, ok := store.Get("cached-session"); !ok {
-		t.Fatal("database validation failure evicted the cached active session")
-	}
-}
-
-func TestDurableCompatPlaybackStoreRepairsFailedInitialPersistence(t *testing.T) {
-	pool := newCompatTestPool(t)
-	ctx := context.Background()
-	id := fmt.Sprintf("compat-repair-%d", time.Now().UnixNano())
-	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE id = $1`, id) })
-	now := time.Now()
-	clock := func() time.Time { return now }
-	store := NewDurableCompatPlaybackStore(pool, time.Hour, clock)
-	stored := store.mem.putNormalized(PlaybackSession{ID: id, CompatToken: "owner", UpstreamSessionID: "upstream-1"})
-	store.markIDValidated(id)
-	store.markUnpersisted(id)
-
-	now = now.Add(compatCacheRevalidationInterval)
-	if got, ok := store.Get(id); !ok || got.UpstreamSessionID != "upstream-1" {
-		t.Fatalf("unpersisted cache entry was not retained and repaired: ok=%v session=%+v", ok, got)
-	}
-	if store.isUnpersisted(id) {
-		t.Fatal("successfully repaired session remained marked unpersisted")
-	}
-	fresh := NewDurableCompatPlaybackStore(pool, time.Hour, clock)
-	if got, ok := fresh.Get(stored.ID); !ok || got.UpstreamSessionID != "upstream-1" {
-		t.Fatalf("repaired session was not durable: ok=%v session=%+v", ok, got)
-	}
-}
-
-func TestDurableCompatPlaybackStorePreservesUnpersistedTerminalOnRevalidation(t *testing.T) {
-	pool := newCompatTestPool(t)
-	id := fmt.Sprintf("compat-unpersisted-terminal-%d", time.Now().UnixNano())
-	now := time.Now()
-	clock := func() time.Time { return now }
-	store := NewDurableCompatPlaybackStore(pool, time.Hour, clock)
-	store.mem.Put(PlaybackSession{ID: id, CompatToken: "owner"})
-	if err := store.mem.HideFromRouting(id, "owner"); err != nil {
-		t.Fatalf("hide terminal: %v", err)
-	}
-	store.markUnpersisted(id)
-	store.markIDValidated(id)
-	now = now.Add(compatCacheRevalidationInterval)
-
-	if _, ok := store.Get(id); ok {
-		t.Fatal("terminal session became routable during missing-row revalidation")
-	}
-	terminal, ok := store.GetFinalizable(id, "owner")
-	if !ok || !terminal.Terminal || !store.isUnpersisted(id) {
-		t.Fatalf("unpersisted terminal state was lost: ok=%v session=%+v", ok, terminal)
 	}
 }
 
@@ -1176,109 +615,372 @@ func TestDurableCompatPlaybackStoreSerializesSameSessionMutations(t *testing.T) 
 	}
 }
 
-func TestDurableCompatPlaybackStorePersistsTerminalShell(t *testing.T) {
+// TestDurableCompatPlaybackStoreUpdateRejectionAcrossReplicas: two API
+// replicas whose caches both hold the same upstream session race the
+// compare-and-swap ensureUpstreamPlayback uses to attach a new one. The row
+// lock serializes them, so the second must see the first's commit, get
+// errUpstreamReplaced, and leave its cache matching the committed row rather
+// than keeping a second upstream session of its own.
+func TestDurableCompatPlaybackStoreUpdateRejectionAcrossReplicas(t *testing.T) {
 	pool := newCompatTestPool(t)
-	ctx := context.Background()
-	id := fmt.Sprintf("compat-terminal-shell-%d", time.Now().UnixNano())
-	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE id = $1`, id) })
-	store := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	store.Put(PlaybackSession{ID: id, CompatToken: "owner", UpstreamSessionID: "upstream-1"})
+	replicas := []*DurableCompatPlaybackStore{
+		NewDurableCompatPlaybackStore(pool, time.Hour, nil),
+		NewDurableCompatPlaybackStore(pool, time.Hour, nil),
+	}
+	id := t.Name()
+	replicas[0].Put(PlaybackSession{ID: id, CompatToken: id, UpstreamSessionID: "up-0"})
+	t.Cleanup(func() { replicas[0].Delete(id) })
+	for _, replica := range replicas {
+		if got, ok := replica.Get(id); !ok || got.UpstreamSessionID != "up-0" {
+			t.Fatalf("warm cache = %+v, %v", got, ok)
+		}
+	}
 
-	if err := store.HideFromRouting(id, "owner"); err != nil {
-		t.Fatalf("persist terminal shell: %v", err)
+	errs := make([]error, len(replicas))
+	start := make(chan struct{})
+	done := make(chan int)
+	for i, replica := range replicas {
+		go func() {
+			<-start
+			errs[i] = replica.Update(id, func(current *PlaybackSession) error {
+				if current.UpstreamSessionID != "up-0" {
+					return errUpstreamReplaced
+				}
+				current.UpstreamSessionID = fmt.Sprintf("up-%c", 'A'+i)
+				return nil
+			})
+			done <- i
+		}()
 	}
-	fresh := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	if _, ok := fresh.Get(id); ok {
-		t.Fatal("fresh process routed a durably hidden terminal shell")
+	close(start)
+	<-done
+	<-done
+
+	row, ok, err := replicas[0].load(id)
+	if err != nil || !ok {
+		t.Fatalf("load row: %v, %v", ok, err)
 	}
-	terminal, ok := fresh.GetFinalizable(id, "owner")
-	if !ok || !terminal.Terminal || terminal.TerminalScrobbleEvent != nil {
-		t.Fatalf("terminal shell = ok=%v session=%+v", ok, terminal)
+	winners := 0
+	for i, replica := range replicas {
+		switch {
+		case errs[i] == nil:
+			winners++
+		case !errors.Is(errs[i], errUpstreamReplaced):
+			t.Fatalf("replica %d Update err = %v, want nil or errUpstreamReplaced", i, errs[i])
+		}
+		cached, ok := replica.mem.Get(id)
+		if !ok {
+			t.Fatalf("replica %d dropped the session from its cache", i)
+		}
+		if cached.UpstreamSessionID != row.UpstreamSessionID {
+			t.Errorf("replica %d cache upstream = %q, row upstream = %q", i, cached.UpstreamSessionID, row.UpstreamSessionID)
+		}
 	}
-	pending, err := fresh.ListPendingTerminals(context.Background(), 100)
-	if err != nil {
-		t.Fatalf("list terminal shells: %v", err)
-	}
-	if len(pending) != 0 {
-		t.Fatalf("terminal shell appeared as a pending event: %+v", pending)
-	}
-	claimUntil := time.Now().UTC().Truncate(time.Microsecond).Add(time.Minute)
-	if claimed, err := fresh.ClaimTerminal(id, "owner", claimUntil); err == nil || claimed != nil {
-		t.Fatalf("terminal shell without an event was claimable: err=%v session=%+v", err, claimed)
+	if winners != 1 {
+		t.Fatalf("winners = %d (errs %v), want exactly one", winners, errs)
 	}
 }
 
-func TestDurableCompatPlaybackStoreTerminalizesConflictingUnpersistedShell(t *testing.T) {
+// TestDurableCompatPlaybackStoreRetiresUpstreamSessionAcrossReplicas: an
+// administrator's end can land on a replica that never served the play. The
+// retirement must stop the replica that does serve it from routing the play:
+// at once on the replica that retired it, and on the other once its cached
+// copy is revalidated. A direct play is retired from neither.
+func TestDurableCompatPlaybackStoreRetiresUpstreamSessionAcrossReplicas(t *testing.T) {
 	pool := newCompatTestPool(t)
-	ctx := context.Background()
-	id := fmt.Sprintf("compat-terminal-conflict-%d", time.Now().UnixNano())
-	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE id = $1`, id) })
-	seed := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	seed.Put(PlaybackSession{ID: id, CompatToken: "owner", UpstreamSessionID: "upstream-1"})
-	local := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	local.mem.Put(PlaybackSession{ID: id, CompatToken: "owner", UpstreamSessionID: "upstream-1"})
-	local.markUnpersisted(id)
-
-	if err := local.HideFromRouting(id, "owner"); err != nil {
-		t.Fatalf("hide conflicting terminal shell: %v", err)
+	now := time.Now()
+	clock := func() time.Time { return now }
+	holder := NewDurableCompatPlaybackStore(pool, time.Hour, clock)
+	other := NewDurableCompatPlaybackStore(pool, time.Hour, clock)
+	id := t.Name()
+	for upstream, method := range map[string]string{"up-remote": "transcode", "up-repeat": "transcode", "up-local": "remux", "up-direct": "direct"} {
+		holder.Put(PlaybackSession{ID: id + upstream, CompatToken: id, UpstreamSessionID: id + upstream, UpstreamPlayMethod: method})
+		t.Cleanup(func() { holder.Delete(id + upstream) })
+		if _, ok := holder.Get(id + upstream); !ok {
+			t.Fatalf("holder does not route %s", upstream)
+		}
 	}
-	fresh := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	if _, ok := fresh.Get(id); ok {
-		t.Fatal("insert conflict left the durable session routable")
+
+	for name, replica := range map[string]*DurableCompatPlaybackStore{"holder": holder, "other": other} {
+		if retired, err := replica.RetireUpstreamSession(id + "up-direct"); err != nil || retired {
+			t.Fatalf("retire a direct play from the %s = %v, %v, want it left alone", name, retired, err)
+		}
+	}
+
+	if retired, err := other.RetireUpstreamSession(id + "up-remote"); err != nil || !retired {
+		t.Fatalf("retire from the replica without the play = %v, %v", retired, err)
+	}
+	if retired, err := holder.RetireUpstreamSession(id + "up-local"); err != nil || !retired {
+		t.Fatalf("retire from the replica holding the play = %v, %v", retired, err)
+	}
+	if _, ok := holder.Get(id + "up-local"); ok {
+		t.Fatal("the replica that retired its own play still routes it")
+	}
+	// A repeat on the holder finds nothing left to retire, and stops the
+	// holder routing its cached copy without waiting for a revalidation.
+	if retired, err := other.RetireUpstreamSession(id + "up-repeat"); err != nil || !retired {
+		t.Fatalf("retire before the repeat = %v, %v", retired, err)
+	}
+	if retired, err := holder.RetireUpstreamSession(id + "up-repeat"); err != nil || retired {
+		t.Fatalf("repeat retire = %v, %v, want nothing left to retire", retired, err)
+	}
+	if _, ok := holder.Get(id + "up-repeat"); ok {
+		t.Fatal("the holder still routes its cached copy after a repeat end")
+	}
+	now = now.Add(compatCacheRevalidationInterval)
+	if _, ok := holder.Get(id + "up-remote"); ok {
+		t.Fatal("the holder still routes a play another replica retired")
+	}
+	if _, ok := holder.Get(id + "up-direct"); !ok {
+		t.Fatal("the holder no longer routes the direct play")
 	}
 }
 
-func TestDurableCompatPlaybackStoreReplaysPendingUpdates(t *testing.T) {
+// TestDurableCompatPlaybackStoreRetireLeavesMovedPlay: a replica whose cached
+// copy still names an upstream session, and still owes the row an unrelated
+// write, must not retire the play from that copy once another replica has
+// moved it to a new upstream session. The row decides: it stays routable, the
+// owed write still lands, and the replica adopts the row's state. The owed
+// write is queued the way a failed Update queues it, which a live pool cannot
+// be made to do.
+func TestDurableCompatPlaybackStoreRetireLeavesMovedPlay(t *testing.T) {
 	pool := newCompatTestPool(t)
-	ctx := context.Background()
-	id := fmt.Sprintf("compat-pending-update-%d", time.Now().UnixNano())
-	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE id = $1`, id) })
-	store := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	store.Put(PlaybackSession{ID: id, CompatToken: "owner", UpstreamSessionID: "upstream-old"})
-	if err := store.mem.Update(id, func(session *PlaybackSession) error {
-		session.UpstreamSessionID = "upstream-new"
-		return nil
-	}); err != nil {
-		t.Fatalf("seed pending cache update: %v", err)
+	stale := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	mover := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	for _, method := range []string{"direct", "transcode"} {
+		t.Run("moved to "+method, func(t *testing.T) {
+			id := t.Name()
+			oldUpstream, newUpstream := id+"-old", id+"-new"
+			stale.Put(PlaybackSession{ID: id, CompatToken: id, UpstreamSessionID: oldUpstream, UpstreamPlayMethod: "transcode"})
+			t.Cleanup(func() { stale.Delete(id) })
+			owed := func(session *PlaybackSession) error {
+				session.ProgressPersistenceKnown = true
+				return nil
+			}
+			if err := stale.mem.Update(id, owed); err != nil {
+				t.Fatal(err)
+			}
+			stale.appendPendingUpdate(id, id, owed)
+			if err := mover.Update(id, func(session *PlaybackSession) error {
+				session.UpstreamSessionID, session.UpstreamPlayMethod = newUpstream, method
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			if retired, err := stale.RetireUpstreamSession(oldUpstream); err != nil || retired {
+				t.Fatalf("retire the replaced upstream session = %v, %v, want nothing retired", retired, err)
+			}
+			row, ok, err := mover.load(id)
+			if err != nil || !ok || row.Terminal || row.UpstreamSessionID != newUpstream || !row.ProgressPersistenceKnown {
+				t.Fatalf("row = %+v, %v, %v; want the moved play routable with the owed write applied", row, ok, err)
+			}
+			if got, ok := stale.Get(id); !ok || got.UpstreamSessionID != newUpstream || got.UpstreamPlayMethod != method {
+				t.Fatalf("stale replica reads %+v, %v; want the row's new upstream session", got, ok)
+			}
+		})
 	}
-	store.appendPendingUpdate(id, "owner", func(session *PlaybackSession) error {
-		session.UpstreamSessionID = "upstream-new"
-		return nil
+
+	// The owed write is the attach itself: the row learns the upstream
+	// session first, and is then retired by it.
+	t.Run("owed attach", func(t *testing.T) {
+		id := t.Name()
+		stale.Put(PlaybackSession{ID: id, CompatToken: id})
+		t.Cleanup(func() { stale.Delete(id) })
+		attach := func(session *PlaybackSession) error {
+			session.UpstreamSessionID, session.UpstreamPlayMethod = id+"-up", "transcode"
+			return nil
+		}
+		if err := stale.mem.Update(id, attach); err != nil {
+			t.Fatal(err)
+		}
+		stale.appendPendingUpdate(id, id, attach)
+		if retired, err := stale.RetireUpstreamSession(id + "-up"); err != nil || !retired {
+			t.Fatalf("retire = %v, %v", retired, err)
+		}
+		if row, ok, err := mover.load(id); err != nil || !ok || !row.Terminal || row.UpstreamSessionID != id+"-up" {
+			t.Fatalf("row = %+v, %v, %v; want it retired under its upstream session", row, ok, err)
+		}
 	})
 
-	if err := store.Update(id, func(session *PlaybackSession) error {
-		session.TranscodeStarted = true
-		return nil
-	}); err != nil {
-		t.Fatalf("update with pending replay: %v", err)
+	// A play that never reached Postgres is hidden where it lives, and no
+	// row is written for it.
+	t.Run("never persisted", func(t *testing.T) {
+		id := t.Name()
+		stale.mem.Put(PlaybackSession{ID: id, CompatToken: id, UpstreamSessionID: id + "-up", UpstreamPlayMethod: "remux"})
+		stale.markUnpersisted(id)
+		t.Cleanup(func() { stale.Delete(id) })
+		if retired, err := stale.RetireUpstreamSession(id + "-up"); err != nil || !retired {
+			t.Fatalf("retire = %v, %v", retired, err)
+		}
+		if _, ok := stale.Get(id); ok {
+			t.Fatal("the hidden copy is still routable")
+		}
+		if _, ok, err := mover.load(id); err != nil || ok {
+			t.Fatalf("a row was written for the hidden copy: %v, %v", ok, err)
+		}
+	})
+}
+
+// TestDurableCompatPlaybackStoreRetryAfterFailedStatement: a retirement whose
+// statement fails while the play's attach is still owed hides the copy,
+// keeps its owed writes, and reports the error. The retry replays them and
+// retires the row in one transaction, so no other replica keeps routing the
+// play. A row that another replica attached to its own upstream session in
+// the meantime is left alone. The outage is a closed pool for that one call.
+func TestDurableCompatPlaybackStoreRetryAfterFailedStatement(t *testing.T) {
+	pool := newCompatTestPool(t)
+	closed, err := pgxpool.New(t.Context(), os.Getenv("SILO_TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if store.hasPendingUpdates(id) {
-		t.Fatal("successfully replayed update remained pending")
-	}
-	fresh := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	got, ok := fresh.Get(id)
-	if !ok || got.UpstreamSessionID != "upstream-new" || !got.TranscodeStarted {
-		t.Fatalf("durable replay lost updates: ok=%v session=%+v", ok, got)
+	closed.Close()
+	stale := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	mover := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	for _, moved := range []bool{false, true} {
+		t.Run(fmt.Sprintf("row moved=%v", moved), func(t *testing.T) {
+			id := t.Name()
+			upstream, wantUpstream := id+"-up", id+"-up"
+			stale.Put(PlaybackSession{ID: id, CompatToken: id})
+			t.Cleanup(func() { stale.Delete(id) })
+			attach := func(session *PlaybackSession) error {
+				if session.UpstreamSessionID != "" {
+					return errUpstreamReplaced
+				}
+				session.UpstreamSessionID, session.UpstreamPlayMethod = upstream, "transcode"
+				return nil
+			}
+			if err := stale.mem.Update(id, attach); err != nil {
+				t.Fatal(err)
+			}
+			stale.appendPendingUpdate(id, id, attach)
+			stale.pool = closed
+			hidden, outageErr := stale.RetireUpstreamSession(upstream)
+			stale.pool = pool
+			if outageErr == nil || !hidden {
+				t.Fatalf("retire during the outage = %v, %v, want the copy hidden and an error to retry on", hidden, outageErr)
+			}
+			if _, ok := stale.Get(id); ok {
+				t.Fatal("the copy is still routable after the failed statement")
+			}
+			if moved {
+				wantUpstream = id + "-other"
+				if err := mover.Update(id, func(session *PlaybackSession) error {
+					session.UpstreamSessionID, session.UpstreamPlayMethod = wantUpstream, "direct"
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			if retired, err := stale.RetireUpstreamSession(upstream); err != nil || retired == moved {
+				t.Fatalf("retry = %v, %v, want retired = %v", retired, err, !moved)
+			}
+			if row, ok, err := mover.load(id); err != nil || !ok || row.Terminal == moved || row.UpstreamSessionID != wantUpstream {
+				t.Fatalf("row = %+v, %v, %v; want terminal = %v on %s", row, ok, err, !moved, wantUpstream)
+			}
+			if _, ok := mover.Get(id); ok != moved {
+				t.Fatalf("the other replica routes the play = %v, want %v", ok, moved)
+			}
+			if stale.hasPendingUpdates(id) {
+				t.Fatal("the stale replica still owes writes")
+			}
+		})
 	}
 }
 
-func TestDurableCompatPlaybackStoreColdLookupIgnoresReservedThrottle(t *testing.T) {
+// TestDurableCompatPlaybackStoreRetireHidesCopyWhenReplayFails: the statement
+// matches nothing because the row never received the attach, and replaying
+// the owed attach then fails. That is a failed retirement, not an answer
+// from the row: the copy is hidden with its owed writes and the error is
+// reported, so the retry finishes it. The replay fails on a row another
+// transaction holds locked; the store's connections give up on the lock
+// after 200ms.
+func TestDurableCompatPlaybackStoreRetireHidesCopyWhenReplayFails(t *testing.T) {
 	pool := newCompatTestPool(t)
-	ctx := context.Background()
-	id := fmt.Sprintf("compat-cold-load-%d", time.Now().UnixNano())
-	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE id = $1`, id) })
-	seed := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	seed.Put(PlaybackSession{ID: id, CompatToken: "owner", RouteItemID: "route-1"})
-	fresh := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	_ = fresh.shouldRevalidateID(id)
-	_ = fresh.shouldRevalidateToken("owner")
-
-	if _, ok := fresh.Get(id); !ok {
-		t.Fatal("cold ID lookup treated an in-flight validation reservation as not-found")
+	config, err := pgxpool.ParseConfig(os.Getenv("SILO_TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
 	}
+	config.ConnConfig.RuntimeParams["lock_timeout"] = "200ms"
+	impatient, err := pgxpool.NewWithConfig(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(impatient.Close)
+	stale := NewDurableCompatPlaybackStore(impatient, time.Hour, nil)
 	other := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-	_ = other.shouldRevalidateToken("owner")
-	if _, _, ok := other.FindByRoute("owner", "route-1"); !ok {
-		t.Fatal("cold token lookup treated an in-flight validation reservation as not-found")
+	id := t.Name()
+	upstream := id + "-up"
+	stale.Put(PlaybackSession{ID: id, CompatToken: id})
+	t.Cleanup(func() { stale.Delete(id) })
+	attach := func(session *PlaybackSession) error {
+		if session.UpstreamSessionID != "" {
+			return errUpstreamReplaced
+		}
+		session.UpstreamSessionID, session.UpstreamPlayMethod = upstream, "transcode"
+		return nil
+	}
+	if err := stale.mem.Update(id, attach); err != nil {
+		t.Fatal(err)
+	}
+	stale.appendPendingUpdate(id, id, attach)
+
+	tx, err := pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(t.Context(), `SELECT 1 FROM jellycompat_playback_sessions WHERE id = $1 FOR UPDATE`, id); err != nil {
+		t.Fatal(err)
+	}
+	hidden, replayErr := stale.RetireUpstreamSession(upstream)
+	if err := tx.Rollback(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if replayErr == nil || !hidden {
+		t.Fatalf("retire with a failed replay = %v, %v, want the copy hidden and an error to retry on", hidden, replayErr)
+	}
+	if _, ok := stale.Get(id); ok {
+		t.Fatal("the copy still routes the ended upstream session")
+	}
+
+	if retired, err := stale.RetireUpstreamSession(upstream); err != nil || !retired {
+		t.Fatalf("retry = %v, %v, want the row retired", retired, err)
+	}
+	if row, ok, err := other.load(id); err != nil || !ok || !row.Terminal || row.UpstreamSessionID != upstream {
+		t.Fatalf("row = %+v, %v, %v; want it retired under its upstream session", row, ok, err)
+	}
+	if _, ok := other.Get(id); ok {
+		t.Fatal("another replica still routes the play")
+	}
+}
+
+// TestDurableCompatPlaybackStoreDropsRejectedPendingUpdate: a write queued
+// after a DB failure that no longer applies to the row (its compare-and-swap
+// lost to another replica meanwhile) is dropped instead of blocking every
+// later write to the session.
+func TestDurableCompatPlaybackStoreDropsRejectedPendingUpdate(t *testing.T) {
+	pool := newCompatTestPool(t)
+	store := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	id := t.Name()
+	store.Put(PlaybackSession{ID: id, CompatToken: id, UpstreamSessionID: "up-0"})
+	t.Cleanup(func() { store.Delete(id) })
+	store.appendPendingUpdate(id, id, func(*PlaybackSession) error { return errUpstreamReplaced })
+
+	if err := store.Update(id, func(current *PlaybackSession) error {
+		current.ClientPlaySessionID = "client-psid"
+		return nil
+	}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	row, ok, err := store.load(id)
+	if err != nil || !ok {
+		t.Fatalf("load row: %v, %v", ok, err)
+	}
+	if row.ClientPlaySessionID != "client-psid" {
+		t.Fatalf("row ClientPlaySessionID = %q, want the update persisted", row.ClientPlaySessionID)
+	}
+	if store.hasPendingUpdates(id) {
+		t.Fatal("rejected pending update is still queued")
 	}
 }

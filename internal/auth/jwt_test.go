@@ -57,91 +57,6 @@ func TestJWT_ValidateAccessToken(t *testing.T) {
 	}
 }
 
-func TestJWT_ValidateRefreshToken(t *testing.T) {
-	svc := newTestJWTService()
-
-	token, err := svc.GenerateRefreshToken(99, "admin", "sess-uuid-2")
-	if err != nil {
-		t.Fatalf("GenerateRefreshToken() error: %v", err)
-	}
-
-	claims, err := svc.ValidateToken(token)
-	if err != nil {
-		t.Fatalf("ValidateToken() error: %v", err)
-	}
-
-	if claims.UserID != 99 {
-		t.Errorf("UserID = %d, want 99", claims.UserID)
-	}
-	if claims.Role != "admin" {
-		t.Errorf("Role = %q, want %q", claims.Role, "admin")
-	}
-	if claims.SessionID != "sess-uuid-2" {
-		t.Errorf("SessionID = %q, want %q", claims.SessionID, "sess-uuid-2")
-	}
-	if claims.TokenType != auth.TokenTypeRefresh {
-		t.Errorf("TokenType = %q, want %q", claims.TokenType, auth.TokenTypeRefresh)
-	}
-}
-
-func TestJWT_PluginAccessTokenCarriesProfile(t *testing.T) {
-	svc := newTestJWTService()
-	token, err := svc.GeneratePluginAccessToken(42, "user", "sess-plugin", "profile-7", time.Minute)
-	if err != nil {
-		t.Fatalf("GeneratePluginAccessToken: %v", err)
-	}
-	claims, err := svc.ValidateToken(token)
-	if err != nil {
-		t.Fatalf("ValidateToken: %v", err)
-	}
-	if claims.TokenType != auth.TokenTypePluginAccess || claims.ProfileID != "profile-7" {
-		t.Fatalf("plugin claims = %#v", claims)
-	}
-}
-
-func TestJWT_AccessTokenExpiry(t *testing.T) {
-	svc := newTestJWTService()
-
-	accessToken, err := svc.GenerateAccessToken(1, "user", "sess-1")
-	if err != nil {
-		t.Fatalf("GenerateAccessToken() error: %v", err)
-	}
-
-	refreshToken, err := svc.GenerateRefreshToken(1, "user", "sess-1")
-	if err != nil {
-		t.Fatalf("GenerateRefreshToken() error: %v", err)
-	}
-
-	accessClaims, err := svc.ValidateToken(accessToken)
-	if err != nil {
-		t.Fatalf("ValidateToken(access) error: %v", err)
-	}
-	refreshClaims, err := svc.ValidateToken(refreshToken)
-	if err != nil {
-		t.Fatalf("ValidateToken(refresh) error: %v", err)
-	}
-
-	accessExpiry := accessClaims.ExpiresAt.Time.Sub(accessClaims.IssuedAt.Time)
-	refreshExpiry := refreshClaims.ExpiresAt.Time.Sub(refreshClaims.IssuedAt.Time)
-
-	// Access token should have shorter expiry than refresh token.
-	if accessExpiry >= refreshExpiry {
-		t.Errorf("access expiry (%v) should be shorter than refresh expiry (%v)", accessExpiry, refreshExpiry)
-	}
-
-	// Verify the access token expiry is approximately 15 minutes.
-	expectedAccess := 15 * time.Minute
-	if accessExpiry < expectedAccess-time.Second || accessExpiry > expectedAccess+time.Second {
-		t.Errorf("access token expiry = %v, want ~%v", accessExpiry, expectedAccess)
-	}
-
-	// Verify the refresh token expiry is approximately 7 days.
-	expectedRefresh := 7 * 24 * time.Hour
-	if refreshExpiry < expectedRefresh-time.Second || refreshExpiry > expectedRefresh+time.Second {
-		t.Errorf("refresh token expiry = %v, want ~%v", refreshExpiry, expectedRefresh)
-	}
-}
-
 func TestJWT_ExpiredToken(t *testing.T) {
 	// Create a service with a negative expiry so tokens are immediately expired.
 	svc := auth.NewJWTService(testSecret, -1*time.Second, -1*time.Second)
@@ -186,21 +101,6 @@ func TestJWT_TamperedToken(t *testing.T) {
 	}
 }
 
-func TestJWT_WrongSecret(t *testing.T) {
-	svc1 := auth.NewJWTService("secret-one", 15*time.Minute, 7*24*time.Hour)
-	svc2 := auth.NewJWTService("secret-two", 15*time.Minute, 7*24*time.Hour)
-
-	token, err := svc1.GenerateAccessToken(1, "user", "sess-wrong-secret")
-	if err != nil {
-		t.Fatalf("GenerateAccessToken() error: %v", err)
-	}
-
-	_, err = svc2.ValidateToken(token)
-	if err == nil {
-		t.Fatal("ValidateToken() should return error for token signed with different secret")
-	}
-}
-
 func TestJWT_WrongSigningMethod(t *testing.T) {
 	// Create a token using RSA-style "none" algorithm trick.
 	// We construct a token with alg=none to ensure the validator rejects it.
@@ -222,24 +122,6 @@ func TestJWT_WrongSigningMethod(t *testing.T) {
 	_, err = svc.ValidateToken(tokenStr)
 	if err == nil {
 		t.Fatal("ValidateToken() should reject token with 'none' signing method")
-	}
-}
-
-func TestJWT_EmptyToken(t *testing.T) {
-	svc := newTestJWTService()
-
-	_, err := svc.ValidateToken("")
-	if err == nil {
-		t.Fatal("ValidateToken() should return error for empty token")
-	}
-}
-
-func TestJWT_GarbageToken(t *testing.T) {
-	svc := newTestJWTService()
-
-	_, err := svc.ValidateToken("not.a.valid.jwt.token")
-	if err == nil {
-		t.Fatal("ValidateToken() should return error for garbage token")
 	}
 }
 

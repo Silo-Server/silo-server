@@ -1,13 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import type { ReactNode } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
-
-import { v2Problem } from "@/api/v2/problems.test-support";
 import { DEFAULT_SUBTITLE_APPEARANCE } from "@/lib/subtitleAppearance";
 import { SETTING_KEYS } from "@/lib/settingsContract";
-import { resolveSettingValues, type StoredSettingRow } from "@/lib/settingsResolve";
+import { type StoredSettingRow } from "@/lib/settingsResolve";
 import { useSubtitleAppearanceSetting } from "./subtitleAppearance";
+import { createHarness, fakeSettingsServer as fakeServer } from "./settingsServer.test-support";
 
 const v2Mock = vi.hoisted(() => vi.fn());
 vi.mock("@/api/v2/request", async () => {
@@ -17,84 +14,13 @@ vi.mock("@/api/v2/request", async () => {
 
 const KEY = SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE;
 
-function createHarness() {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  );
-  return { queryClient, wrapper };
-}
-
-/**
- * A server stand-in that resolves through the shared client resolver, which
- * mirrors internal/settingsresolve, so a profile_device row really does
- * outrank a profile row here.
- */
-function fakeSettingsServer(initial: StoredSettingRow[] = []) {
-  const rows = [...initial];
-  v2Mock.mockImplementation(
-    (
-      operation: string,
-      options?: { path?: { key: string }; query?: { scope: string }; body?: { value: unknown } },
-    ) => {
-      if (operation === "GET /api/v2/settings/values/effective") {
-        const resolved = resolveSettingValues([KEY], rows, {
-          profileId: "profile-1",
-          deviceId: "device-1",
-        })[0]!;
-        return Promise.resolve({
-          revision: 1,
-          items: [
-            { key: KEY, value: resolved.value, source: resolved.source, definition_revision: 1 },
-          ],
-        });
-      }
-      const key = options?.path?.key;
-      const scope = options?.query?.scope;
-      if (!key || !scope) return Promise.resolve(undefined);
-      const index = rows.findIndex((row) => row.key === key && row.scope === scope);
-      if (operation.startsWith("DELETE ")) {
-        if (index < 0) {
-          return Promise.reject(v2Problem(404, "not_found", "No value is set at this scope"));
-        }
-        rows.splice(index, 1);
-        return Promise.resolve(undefined);
-      }
-      const row: StoredSettingRow = {
-        key,
-        scope: scope as StoredSettingRow["scope"],
-        profileId: "profile-1",
-        deviceId: scope === "profile_device" ? "device-1" : undefined,
-        value: options?.body?.value,
-      };
-      if (index < 0) rows.push(row);
-      else rows[index] = row;
-      return Promise.resolve(undefined);
-    },
-  );
-  return rows;
-}
+const fakeSettingsServer = (initial?: StoredSettingRow[]) => fakeServer(v2Mock, KEY, initial);
 
 const XLARGE = { ...DEFAULT_SUBTITLE_APPEARANCE, fontSize: "xlarge" as const };
 
 describe("useSubtitleAppearanceSetting", () => {
   beforeEach(() => {
     v2Mock.mockReset();
-  });
-
-  it("saves at profile scope so the appearance follows the profile to every device", async () => {
-    const rows = fakeSettingsServer();
-    const { wrapper } = createHarness();
-    const { result } = renderHook(() => useSubtitleAppearanceSetting(), { wrapper });
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
-
-    await result.current.save(XLARGE);
-
-    // The contract types this value as an object, so the body carries the
-    // object itself rather than a JSON-encoded string.
-    expect(rows).toEqual([expect.objectContaining({ key: KEY, scope: "profile", value: XLARGE })]);
   });
 
   it("clears this browser's row so a save from an older per-device build stops winning", async () => {

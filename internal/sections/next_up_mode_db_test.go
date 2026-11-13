@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -49,7 +50,8 @@ func (c *nextUpStatementTracer) take() []string {
 // times (maybeInjectNextUp, then the Continue Watching and Next Up fetchers),
 // so the per-call cost multiplies across the whole Home fan-out. Inside a
 // request that passed viewer access, the mode arrives with the scope and the
-// calls cost nothing.
+// calls cost nothing. The Home hide-watched preference, read up to three
+// times per Home layout, arrives the same way.
 func TestNextUpModeStatementBudgetPostgres(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -83,7 +85,7 @@ func TestNextUpModeStatementBudgetPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ForUser: %v", err)
 	}
-	for _, profileID := range []string{"profile-default", "profile-separate"} {
+	for _, profileID := range []string{"profile-default", "profile-separate", "profile-hide"} {
 		if err := store.CreateProfile(ctx, userstore.Profile{ID: profileID, Name: profileID}); err != nil {
 			t.Fatalf("CreateProfile: %v", err)
 		}
@@ -93,6 +95,11 @@ func TestNextUpModeStatementBudgetPostgres(t *testing.T) {
 	}, json.RawMessage(`"separate"`)); err != nil {
 		t.Fatalf("store next-up mode: %v", err)
 	}
+	if _, err := store.UpsertSettingValue(ctx, userstore.SettingIdentity{
+		Key: settingskeys.HomeHideWatchedItems, Scope: settingscontract.ScopeProfile, ProfileID: "profile-hide",
+	}, json.RawMessage(`true`)); err != nil {
+		t.Fatalf("store hide-watched: %v", err)
+	}
 
 	engine, err := policy.NewEngine(ctx)
 	if err != nil {
@@ -101,18 +108,26 @@ func TestNextUpModeStatementBudgetPostgres(t *testing.T) {
 	resolver := policy.NewViewerResolver(auth.NewUserRepository(pool), provider,
 		access.NewProfileTokenService("next-up-budget-profile-secret", 0), policy.NewPDP(engine), access.NewGroupStore(pool))
 
+	nextUpMode := func(ctx context.Context, profileID string) string { return NextUpMode(ctx, store, nil, profileID) }
+	hideWatched := func(ctx context.Context, profileID string) string {
+		return strconv.FormatBool(HideWatchedItemsFromHome(ctx, store, profileID))
+	}
 	tests := []struct {
 		name      string
 		profileID string
 		// withScope resolves the scope through the production viewer
 		// resolver first, as RequireViewerAccess does for a Home request.
 		withScope bool
+		read      func(context.Context, string) string
 		want      string
 		budget    int
 	}{
-		{name: "no request scope", profileID: "profile-default", want: NextUpModeCombined, budget: 1},
-		{name: "request scope, default", profileID: "profile-default", withScope: true, want: NextUpModeCombined, budget: 0},
-		{name: "request scope, stored row", profileID: "profile-separate", withScope: true, want: NextUpModeSeparate, budget: 0},
+		{name: "no request scope", profileID: "profile-default", read: nextUpMode, want: NextUpModeCombined, budget: 1},
+		{name: "request scope, default", profileID: "profile-default", withScope: true, read: nextUpMode, want: NextUpModeCombined, budget: 0},
+		{name: "request scope, stored row", profileID: "profile-separate", withScope: true, read: nextUpMode, want: NextUpModeSeparate, budget: 0},
+		{name: "hide watched, no request scope", profileID: "profile-hide", read: hideWatched, want: "true", budget: 1},
+		{name: "hide watched, request scope, default", profileID: "profile-default", withScope: true, read: hideWatched, want: "false", budget: 0},
+		{name: "hide watched, request scope, stored row", profileID: "profile-hide", withScope: true, read: hideWatched, want: "true", budget: 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -128,14 +143,14 @@ func TestNextUpModeStatementBudgetPostgres(t *testing.T) {
 			}
 
 			tracer.take()
-			if got := NextUpMode(callCtx, store, tt.profileID); got != tt.want {
-				t.Fatalf("NextUpMode = %q, want %q", got, tt.want)
+			if got := tt.read(callCtx, tt.profileID); got != tt.want {
+				t.Fatalf("read = %q, want %q", got, tt.want)
 			}
 			issued := tracer.take()
 			if len(issued) != tt.budget {
-				t.Fatalf("NextUpMode issued %d statements, budget %d:\n%s", len(issued), tt.budget, strings.Join(issued, "\n"))
+				t.Fatalf("read issued %d statements, budget %d:\n%s", len(issued), tt.budget, strings.Join(issued, "\n"))
 			}
-			t.Logf("NextUpMode statements: %d", len(issued))
+			t.Logf("statements: %d", len(issued))
 		})
 	}
 }

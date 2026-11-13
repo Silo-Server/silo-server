@@ -142,10 +142,12 @@ describe("row names", () => {
     expect(savedTitle({ ...blank, config: { window: "90d" } }, recipeCatalogFixture)).toBe(
       "Trending on this server",
     );
-    expect(savedTitle({ ...blank, sectionType: "next_up", config: {} }, recipeCatalogFixture)).toBe(
-      "On Deck",
+    expect(
+      savedTitle({ ...blank, sectionType: "next_in_series", config: {} }, recipeCatalogFixture),
+    ).toBe("Next in Series");
+    expect(savedTitle({ ...blank, sectionType: "next_in_series", config: {} }, undefined)).toBe(
+      "Next in series",
     );
-    expect(savedTitle({ ...blank, sectionType: "next_up", config: {} }, undefined)).toBe("On deck");
   });
 });
 
@@ -213,6 +215,62 @@ describe("reloading after a conflict", () => {
     const { draft, changedUpstream } = mergeReloadedDraft(original, original, upstream);
     expect(draft.config).toEqual({ window: "30d" });
     expect(changedUpstream).toEqual(["shows"]);
+  });
+});
+
+describe("a hero banner kept off the apps", () => {
+  const hero = draftFromRow(row({ hero: true, webOnly: false }), recipeCatalogFixture);
+  const update = (draft: RowDraft, saved: Partial<PageSectionConfig> = {}) =>
+    sentBody(() =>
+      updateAdminSection({
+        ...buildRowUpdateRequest(stored(draft, saved), draft, draft.title),
+        id: "row-1",
+        etag: '"1"',
+      }),
+    );
+
+  // A server that predates web_only refuses the member, so only a change to a
+  // hero row's choice sends it.
+  it("sends web_only only when a hero row's choice changes", async () => {
+    expect(
+      await update(draftFromRow(row({ hero: true }), recipeCatalogFixture)),
+    ).not.toHaveProperty("web_only");
+    expect(await update(hero)).not.toHaveProperty("web_only");
+    expect(await update({ ...hero, webOnly: true })).toMatchObject({
+      featured: true,
+      web_only: true,
+    });
+    expect(await update(hero, { web_only: true })).toMatchObject({ web_only: false });
+    // Turning the hero banner off is enough: the server clears web_only.
+    const off = await update(
+      { ...hero, hero: false, webOnly: true },
+      { featured: true, web_only: true },
+    );
+    expect(off).toMatchObject({ featured: false });
+    expect(off).not.toHaveProperty("web_only");
+    const page: PageRef = { kind: "home" };
+    const created = (draft: RowDraft) =>
+      sentBody(() => createAdminSection(buildRowCreateRequest(draft, draft.title, page, 1)));
+    const preset = {
+      ...draftForPreset(findRecipe(recipeCatalogFixture, "trending_on_server")!, undefined),
+      hero: true,
+    };
+    expect(await created(preset)).not.toHaveProperty("web_only");
+    expect(await created({ ...preset, webOnly: true })).toMatchObject({
+      featured: true,
+      web_only: true,
+    });
+  });
+
+  it("reloads the apps choice together with the hero banner", () => {
+    const edited = { ...hero, webOnly: true };
+    const upstream = { ...hero, hero: false };
+    const kept = mergeReloadedDraft(hero, edited, upstream);
+    expect(kept.draft).toMatchObject({ hero: true, webOnly: true });
+    expect(kept.changedUpstream).toEqual(["hero"]);
+    const taken = mergeReloadedDraft(hero, hero, edited);
+    expect(taken.draft.webOnly).toBe(true);
+    expect(taken.changedUpstream).toEqual(["hero"]);
   });
 });
 

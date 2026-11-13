@@ -28,6 +28,16 @@ type SearchRequest struct {
 	MediaInfo *MediaMatchInfo
 }
 
+// DownloadTarget is the episode a subtitle download is for, so a season-pack
+// archive yields that episode's entry. Episode 0 means a movie or a file not
+// linked to an episode. EndEpisode is the last episode a multi-episode file
+// covers; 0 means the file covers Episode alone.
+type DownloadTarget struct {
+	Season     int
+	Episode    int
+	EndEpisode int
+}
+
 // MediaMatchInfo holds metadata about the media file for scoring subtitle matches.
 type MediaMatchInfo struct {
 	ReleaseGroup string
@@ -48,12 +58,7 @@ type SubtitleResult struct {
 	Downloads       int            `json:"downloads"`
 	HearingImpaired bool           `json:"hearing_impaired"`
 	UploadDate      time.Time      `json:"upload_date,omitempty"`
-	rawLanguage     string
 }
-
-// SetRawLanguageForBridge records the provider spelling for the frozen v1
-// bridge. It is intentionally excluded from JSON and unavailable to clients.
-func (r *SubtitleResult) SetRawLanguageForBridge(value string) { r.rawLanguage = value }
 
 // DownloadedSubtitle represents a subtitle that has been downloaded and stored.
 type DownloadedSubtitle struct {

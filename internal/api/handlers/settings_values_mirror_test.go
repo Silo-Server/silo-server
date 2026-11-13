@@ -5,10 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"testing"
-
-	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
@@ -61,190 +58,6 @@ func requireStored(
 	}
 }
 
-// TestWritingTheDeprecatedBooleanMirrorsTheEnum: an unmigrated client saves the
-// switch and a current client must read the mode the household actually chose,
-// not the contract default.
-func TestWritingTheDeprecatedBooleanMirrorsTheEnum(t *testing.T) {
-	for name, tc := range map[string]struct{ body, wantMode string }{
-		"on":  {`{"value":true}`, `"always"`},
-		"off": {`{"value":false}`, `"ask"`},
-	} {
-		t.Run(name, func(t *testing.T) {
-			handler, store := newValuesTestHandler(t)
-
-			rec := routeValues(t, handler, http.MethodPut,
-				settingskeys.PlaybackAutoSkipIntro, "scope=profile", []byte(tc.body))
-			if rec.Code != http.StatusOK {
-				t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
-			}
-
-			requireStored(t, store, profileIdentity(settingskeys.PlaybackIntroSkipMode), tc.wantMode)
-
-			// The response is the key the caller addressed, unchanged: the
-			// mirror is a side effect, not a redirect.
-			var response settingValueResponse
-			if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
-				t.Fatalf("decoding response: %v; body=%s", err, rec.Body.String())
-			}
-			if response.Key != settingskeys.PlaybackAutoSkipIntro {
-				t.Errorf("response key = %s, want the key that was written", response.Key)
-			}
-		})
-	}
-}
-
-// TestWritingTheEnumMirrorsTheDeprecatedBoolean covers all three modes,
-// including the one the boolean cannot express.
-func TestWritingTheEnumMirrorsTheDeprecatedBoolean(t *testing.T) {
-	for _, tc := range []struct{ mode, wantBool string }{
-		{"never", `false`},
-		{"ask", `false`},
-		{"always", `true`},
-	} {
-		t.Run(tc.mode, func(t *testing.T) {
-			handler, store := newValuesTestHandler(t)
-			if err := store.UpdateProfile(t.Context(), "profile-1", userstore.UpdateProfileInput{AutoSkipIntro: boolPtr(tc.wantBool != "true")}); err != nil {
-				t.Fatal(err)
-			}
-
-			rec := routeValues(t, handler, http.MethodPut,
-				settingskeys.PlaybackIntroSkipMode, "scope=profile",
-				[]byte(`{"value":"`+tc.mode+`"}`))
-			if rec.Code != http.StatusOK {
-				t.Fatalf("PUT %q = %d: %s", tc.mode, rec.Code, rec.Body.String())
-			}
-
-			requireStored(t, store, profileIdentity(settingskeys.PlaybackIntroSkipMode),
-				`"`+tc.mode+`"`)
-			requireStored(t, store, profileIdentity(settingskeys.PlaybackAutoSkipIntro), tc.wantBool)
-			requireColumn(t, store, tc.wantBool == "true", "after the enum write")
-		})
-	}
-}
-
-// TestTheMirrorFollowsTheIdentity, not just the key: a device override must not
-// silently become a profile-wide one.
-func TestTheMirrorFollowsTheIdentity(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-
-	rec := routeValues(t, handler, http.MethodPut,
-		settingskeys.PlaybackIntroSkipMode, "scope=profile_device", []byte(`{"value":"always"}`))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("device PUT = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	requireStored(t, store, deviceIdentity(settingskeys.PlaybackAutoSkipIntro), `true`)
-	if value := storedValueAt(t, store, profileIdentity(settingskeys.PlaybackAutoSkipIntro)); value != nil {
-		t.Errorf("a device write left a profile-scope mirror row: %s", value.Value)
-	}
-	requireColumn(t, store, false, "after a device-scope write")
-}
-
-// TestDeletingEitherHalfClearsBoth. A row left behind would go on resolving as
-// an explicit choice at the very scope the caller asked to inherit at.
-func TestDeletingEitherHalfClearsBoth(t *testing.T) {
-	for _, deleted := range []string{
-		settingskeys.PlaybackIntroSkipMode,
-		settingskeys.PlaybackAutoSkipIntro,
-	} {
-		t.Run(deleted, func(t *testing.T) {
-			handler, store := newValuesTestHandler(t)
-
-			if rec := routeValues(t, handler, http.MethodPut,
-				settingskeys.PlaybackIntroSkipMode, "scope=profile",
-				[]byte(`{"value":"always"}`)); rec.Code != http.StatusOK {
-				t.Fatalf("seed PUT = %d: %s", rec.Code, rec.Body.String())
-			}
-
-			requireColumn(t, store, true, "after the seeding write")
-
-			rec := routeValues(t, handler, http.MethodDelete, deleted, "scope=profile", nil)
-			if rec.Code != http.StatusNoContent {
-				t.Fatalf("DELETE %s = %d: %s", deleted, rec.Code, rec.Body.String())
-			}
-
-			for _, key := range []string{
-				settingskeys.PlaybackIntroSkipMode,
-				settingskeys.PlaybackAutoSkipIntro,
-			} {
-				if value := storedValueAt(t, store, profileIdentity(key)); value != nil {
-					t.Errorf("%s survived a DELETE of %s: %s", key, deleted, value.Value)
-				}
-			}
-			requireColumn(t, store, false, "after the profile-scope value was cleared")
-		})
-	}
-}
-
-// TestDeletingAnAbsentValueTouchesNeitherHalf: the 404 for "nothing set here"
-// still has to mean nothing was written, mirror included.
-func TestDeletingAnAbsentValueTouchesNeitherHalf(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-
-	if rec := routeValues(t, handler, http.MethodPut,
-		settingskeys.PlaybackAutoSkipIntro, "scope=profile",
-		[]byte(`{"value":true}`)); rec.Code != http.StatusOK {
-		t.Fatalf("seed PUT = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	// Nothing was ever written at device scope, so this clears nothing —
-	// including the profile-scope pair, which belongs to another identity.
-	rec := routeValues(t, handler, http.MethodDelete,
-		settingskeys.PlaybackIntroSkipMode, "scope=profile_device", nil)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("DELETE of an unset device value = %d, want 404: %s", rec.Code, rec.Body.String())
-	}
-
-	requireStored(t, store, profileIdentity(settingskeys.PlaybackAutoSkipIntro), `true`)
-	requireStored(t, store, profileIdentity(settingskeys.PlaybackIntroSkipMode), `"always"`)
-}
-
-// TestMirroredWritesReplayInsteadOfDoubleApplying. The mirror rides inside the
-// mutation's transaction, so a retried write must re-serve the receipt and
-// leave both rows at the revision the first write produced.
-func TestMirroredWritesReplayInsteadOfDoubleApplying(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-
-	send := func(mutationID, value string) *httptest.ResponseRecorder {
-		req := valuesRequest(http.MethodPut,
-			"/settings/values/"+settingskeys.PlaybackIntroSkipMode+"?scope=profile",
-			[]byte(`{"value":`+value+`}`))
-		req.Header.Set(mutationIDHeader, mutationID)
-		routeCtx := chi.NewRouteContext()
-		routeCtx.URLParams.Add("key", settingskeys.PlaybackIntroSkipMode)
-		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-		rec := httptest.NewRecorder()
-		handler.HandleSetValue(rec, req)
-		return rec
-	}
-
-	if rec := send("mut-intro", `"always"`); rec.Code != http.StatusOK {
-		t.Fatalf("first write = %d: %s", rec.Code, rec.Body.String())
-	}
-	mirrored := storedValueAt(t, store, profileIdentity(settingskeys.PlaybackAutoSkipIntro))
-	if mirrored == nil {
-		t.Fatal("the first write stored no mirror row")
-	}
-
-	replay := send("mut-intro", `"always"`)
-	if replay.Code != http.StatusOK || replay.Header().Get("X-Silo-Idempotent-Replay") != "true" {
-		t.Fatalf("replay = %d header %q: %s",
-			replay.Code, replay.Header().Get("X-Silo-Idempotent-Replay"), replay.Body.String())
-	}
-
-	after := storedValueAt(t, store, profileIdentity(settingskeys.PlaybackAutoSkipIntro))
-	if after == nil {
-		t.Fatal("the replay removed the mirror row")
-	}
-	if after.Revision != mirrored.Revision {
-		t.Errorf("mirror revision moved from %d to %d on replay; the replay wrote again",
-			mirrored.Revision, after.Revision)
-	}
-	if string(after.Value) != `true` {
-		t.Errorf("mirror value = %s after replay, want true", after.Value)
-	}
-}
-
 // requireColumn asserts what user_profiles.auto_skip_intro holds, which is
 // still what GET /profiles serves and what the web player reads.
 func requireColumn(t *testing.T, store userstore.UserStore, want bool, when string) {
@@ -257,53 +70,6 @@ func requireColumn(t *testing.T, store userstore.UserStore, want bool, when stri
 		t.Errorf("user_profiles.auto_skip_intro = %v %s, want %v",
 			profile.AutoSkipIntro, when, want)
 	}
-}
-
-// TestABooleanWriteCorrectsAColumnTheEnumMoved. The column has to be movable
-// from both halves of the pair, or the first enum write pins it: an old client
-// that then saves the switch stores its value in the canonical rows and reads
-// the opposite back out of the profile DTO.
-func TestABooleanWriteCorrectsAColumnTheEnumMoved(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-
-	if rec := routeValues(t, handler, http.MethodPut,
-		settingskeys.PlaybackIntroSkipMode, "scope=profile",
-		[]byte(`{"value":"always"}`)); rec.Code != http.StatusOK {
-		t.Fatalf("enum PUT = %d: %s", rec.Code, rec.Body.String())
-	}
-	requireColumn(t, store, true, "after intro_skip_mode was set to always")
-
-	if rec := routeValues(t, handler, http.MethodPut,
-		settingskeys.PlaybackAutoSkipIntro, "scope=profile",
-		[]byte(`{"value":false}`)); rec.Code != http.StatusOK {
-		t.Fatalf("boolean PUT = %d: %s", rec.Code, rec.Body.String())
-	}
-	requireStored(t, store, profileIdentity(settingskeys.PlaybackAutoSkipIntro), `false`)
-	requireStored(t, store, profileIdentity(settingskeys.PlaybackIntroSkipMode), `"ask"`)
-	requireColumn(t, store, false, "after the switch was turned off")
-}
-
-// TestClearingADeviceOverrideLeavesTheProfileColumnAlone: the column follows the
-// profile-wide choice, and giving up one television's override does not revoke
-// it.
-func TestClearingADeviceOverrideLeavesTheProfileColumnAlone(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-
-	for _, scope := range []string{"scope=profile", "scope=profile_device"} {
-		if rec := routeValues(t, handler, http.MethodPut,
-			settingskeys.PlaybackIntroSkipMode, scope,
-			[]byte(`{"value":"always"}`)); rec.Code != http.StatusOK {
-			t.Fatalf("seed PUT at %s = %d: %s", scope, rec.Code, rec.Body.String())
-		}
-	}
-	requireColumn(t, store, true, "after the profile-scope write")
-
-	if rec := routeValues(t, handler, http.MethodDelete,
-		settingskeys.PlaybackIntroSkipMode, "scope=profile_device", nil); rec.Code != http.StatusNoContent {
-		t.Fatalf("device DELETE = %d: %s", rec.Code, rec.Body.String())
-	}
-	requireColumn(t, store, true, "after a device override was cleared")
-	requireStored(t, store, profileIdentity(settingskeys.PlaybackIntroSkipMode), `"always"`)
 }
 
 // --- Atomicity ---
@@ -375,9 +141,117 @@ func handlerOverStore(t *testing.T, store userstore.UserStore) *SettingValuesHan
 	return NewSettingValuesHandler(testUserStoreProvider{store: store}, contract)
 }
 
-// TestAFailedHalfRollsBackTheWholeMirroredWrite covers the path with no
-// idempotency key, which is the one shipped clients take: without a receipt to
-// replay, a half-applied write is not repaired by any retry the client makes.
+// TestWritingTheEnumMirrorsTheDeprecatedBoolean covers all three modes,
+// including the one the boolean cannot express.
+func TestWritingTheEnumMirrorsTheDeprecatedBoolean(t *testing.T) {
+	for _, tc := range []struct{ mode, wantBool string }{
+		{"never", `false`},
+		{"ask", `false`},
+		{"always", `true`},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			handler, store := newValuesTestHandler(t)
+			if err := store.UpdateProfile(t.Context(), "profile-1", userstore.UpdateProfileInput{AutoSkipIntro: boolPtr(tc.wantBool != "true")}); err != nil {
+				t.Fatal(err)
+			}
+
+			seamSet(t, seamCtx(t, "profile-1"), handler,
+				seamReq(settingskeys.PlaybackIntroSkipMode, settingscontract.ScopeProfile), `"`+tc.mode+`"`)
+
+			requireStored(t, store, profileIdentity(settingskeys.PlaybackIntroSkipMode), `"`+tc.mode+`"`)
+			requireStored(t, store, profileIdentity(settingskeys.PlaybackAutoSkipIntro), tc.wantBool)
+			requireColumn(t, store, tc.wantBool == "true", "after the enum write")
+		})
+	}
+}
+
+// TestTheMirrorFollowsTheIdentity, not just the key: a device override must not
+// silently become a profile-wide one.
+func TestTheMirrorFollowsTheIdentity(t *testing.T) {
+	handler, store := newValuesTestHandler(t)
+
+	seamSet(t, seamCtx(t, "profile-1"), handler,
+		seamReq(settingskeys.PlaybackIntroSkipMode, settingscontract.ScopeProfileDevice), `"always"`)
+
+	requireStored(t, store, deviceIdentity(settingskeys.PlaybackAutoSkipIntro), `true`)
+	if value := storedValueAt(t, store, profileIdentity(settingskeys.PlaybackAutoSkipIntro)); value != nil {
+		t.Errorf("a device write left a profile-scope mirror row: %s", value.Value)
+	}
+	requireColumn(t, store, false, "after a device-scope write")
+}
+
+// TestDeletingEitherHalfClearsBoth. A row left behind would go on resolving as
+// an explicit choice at the very scope the caller asked to inherit at.
+func TestDeletingEitherHalfClearsBoth(t *testing.T) {
+	for _, deleted := range []string{
+		settingskeys.PlaybackIntroSkipMode,
+		settingskeys.PlaybackAutoSkipIntro,
+	} {
+		t.Run(deleted, func(t *testing.T) {
+			handler, store := newValuesTestHandler(t)
+			ctx := seamCtx(t, "profile-1")
+
+			seamSet(t, ctx, handler,
+				seamReq(settingskeys.PlaybackIntroSkipMode, settingscontract.ScopeProfile), `"always"`)
+			requireColumn(t, store, true, "after the seeding write")
+
+			if err := handler.DeleteSettingValue(ctx, seamUserID, seamReq(deleted, settingscontract.ScopeProfile)); err != nil {
+				t.Fatalf("delete %s: %v", deleted, err)
+			}
+			for _, key := range []string{
+				settingskeys.PlaybackIntroSkipMode,
+				settingskeys.PlaybackAutoSkipIntro,
+			} {
+				if value := storedValueAt(t, store, profileIdentity(key)); value != nil {
+					t.Errorf("%s survived a delete of %s: %s", key, deleted, value.Value)
+				}
+			}
+			requireColumn(t, store, false, "after the profile-scope value was cleared")
+		})
+	}
+}
+
+// TestABooleanWriteCorrectsAColumnTheEnumMoved. The column has to be movable
+// from both halves of the pair, or the first enum write pins it: an old client
+// that then saves the switch stores its value in the canonical rows and reads
+// the opposite back out of the profile DTO.
+func TestABooleanWriteCorrectsAColumnTheEnumMoved(t *testing.T) {
+	handler, store := newValuesTestHandler(t)
+	ctx := seamCtx(t, "profile-1")
+
+	seamSet(t, ctx, handler, seamReq(settingskeys.PlaybackIntroSkipMode, settingscontract.ScopeProfile), `"always"`)
+	requireColumn(t, store, true, "after intro_skip_mode was set to always")
+
+	seamSet(t, ctx, handler, seamReq(settingskeys.PlaybackAutoSkipIntro, settingscontract.ScopeProfile), `false`)
+	requireStored(t, store, profileIdentity(settingskeys.PlaybackAutoSkipIntro), `false`)
+	requireStored(t, store, profileIdentity(settingskeys.PlaybackIntroSkipMode), `"ask"`)
+	requireColumn(t, store, false, "after the switch was turned off")
+}
+
+// TestClearingADeviceOverrideLeavesTheProfileColumnAlone: the column follows the
+// profile-wide choice, and giving up one television's override does not revoke
+// it.
+func TestClearingADeviceOverrideLeavesTheProfileColumnAlone(t *testing.T) {
+	handler, store := newValuesTestHandler(t)
+	ctx := seamCtx(t, "profile-1")
+
+	for _, scope := range []settingscontract.Scope{settingscontract.ScopeProfile, settingscontract.ScopeProfileDevice} {
+		seamSet(t, ctx, handler, seamReq(settingskeys.PlaybackIntroSkipMode, scope), `"always"`)
+	}
+	requireColumn(t, store, true, "after the profile-scope write")
+
+	if err := handler.DeleteSettingValue(ctx, seamUserID,
+		seamReq(settingskeys.PlaybackIntroSkipMode, settingscontract.ScopeProfileDevice)); err != nil {
+		t.Fatalf("device delete: %v", err)
+	}
+	requireColumn(t, store, true, "after a device override was cleared")
+	requireStored(t, store, profileIdentity(settingskeys.PlaybackIntroSkipMode), `"always"`)
+}
+
+// TestAFailedHalfRollsBackTheWholeMirroredWrite: a mirrored write is the
+// addressed row, its companion and (at profile scope) the legacy column.
+// Landing some of them is worse than landing none, and a write without a
+// mutation id leaves no receipt a retry could repair the half-applied state from.
 func TestAFailedHalfRollsBackTheWholeMirroredWrite(t *testing.T) {
 	for name, failure := range map[string]failingMirrorStore{
 		// The pair is written in key order, so failing the enum fails the
@@ -396,11 +270,9 @@ func TestAFailedHalfRollsBackTheWholeMirroredWrite(t *testing.T) {
 			failure.UserStore = store
 			handler := handlerOverStore(t, failure)
 
-			rec := routeValues(t, handler, http.MethodPut,
-				settingskeys.PlaybackIntroSkipMode, "scope=profile", []byte(`{"value":"always"}`))
-			if rec.Code != http.StatusInternalServerError {
-				t.Fatalf("PUT = %d, want 500: %s", rec.Code, rec.Body.String())
-			}
+			_, err := handler.SetSettingValue(seamCtx(t, "profile-1"), seamUserID,
+				seamReq(settingskeys.PlaybackIntroSkipMode, settingscontract.ScopeProfile), json.RawMessage(`"always"`))
+			requireSettingStatus(t, err, http.StatusInternalServerError, "failed mirrored write")
 
 			for _, key := range []string{
 				settingskeys.PlaybackIntroSkipMode,
@@ -415,58 +287,11 @@ func TestAFailedHalfRollsBackTheWholeMirroredWrite(t *testing.T) {
 	}
 }
 
-// TestAFailedHalfRollsBackAnIdempotentMirroredWrite. The receipt has to roll
-// back with the rows it describes: a recorded receipt for a write that did not
-// land turns the client's retry into a replay of a success that never happened.
-func TestAFailedHalfRollsBackAnIdempotentMirroredWrite(t *testing.T) {
-	_, store := newValuesTestHandler(t)
-	handler := handlerOverStore(t, failingMirrorStore{
-		UserStore: store, failUpsertKey: settingskeys.PlaybackIntroSkipMode,
-	})
-
-	send := func(h *SettingValuesHandler) *httptest.ResponseRecorder {
-		req := valuesRequest(http.MethodPut,
-			"/settings/values/"+settingskeys.PlaybackIntroSkipMode+"?scope=profile",
-			[]byte(`{"value":"always"}`))
-		req.Header.Set(mutationIDHeader, "mut-partial")
-		routeCtx := chi.NewRouteContext()
-		routeCtx.URLParams.Add("key", settingskeys.PlaybackIntroSkipMode)
-		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-		rec := httptest.NewRecorder()
-		h.HandleSetValue(rec, req)
-		return rec
-	}
-	rec := send(handler)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("PUT = %d, want 500: %s", rec.Code, rec.Body.String())
-	}
-
-	receipt, err := store.GetSettingMutation(context.Background(), "mut-partial")
-	if err != nil {
-		t.Fatalf("reading the mutation receipt: %v", err)
-	}
-	if receipt != nil {
-		t.Fatalf("a receipt survived the rolled-back write: %s", receipt.Result)
-	}
-
-	// The same mutation id must now apply for real rather than replay.
-	rec = send(handlerOverStore(t, store))
-	if rec.Code != http.StatusOK || rec.Header().Get("X-Silo-Idempotent-Replay") != "" {
-		t.Fatalf("retry = %d replay %q: %s", rec.Code, rec.Header().Get("X-Silo-Idempotent-Replay"), rec.Body.String())
-	}
-	requireStored(t, store, profileIdentity(settingskeys.PlaybackAutoSkipIntro), `true`)
-	receipt, err = store.GetSettingMutation(t.Context(), "mut-partial")
-	if err != nil || receipt == nil {
-		t.Fatalf("successful retry receipt = %+v, %v", receipt, err)
-	}
-}
-
 // TestClearingSweepsUpAStrayCompanion. A companion with no addressed row beside
 // it is only reachable through a partial failure from before this path was
-// transactional. Leaving it standing makes that state permanent: every retry
-// answers 404 for the row the caller named without ever touching the one that
-// is still resolving. The 404 stays — the caller asked about a row that is not
-// there — but the stray goes.
+// transactional, and leaving it standing makes that state permanent. The
+// not-found answer stays, since the caller named a row that is not there, but
+// the stray goes.
 func TestClearingSweepsUpAStrayCompanion(t *testing.T) {
 	handler, store := newValuesTestHandler(t)
 
@@ -475,11 +300,9 @@ func TestClearingSweepsUpAStrayCompanion(t *testing.T) {
 		t.Fatalf("seeding the stray companion: %v", err)
 	}
 
-	rec := routeValues(t, handler, http.MethodDelete,
-		settingskeys.PlaybackIntroSkipMode, "scope=profile", nil)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("DELETE = %d, want 404: %s", rec.Code, rec.Body.String())
-	}
+	err := handler.DeleteSettingValue(seamCtx(t, "profile-1"), seamUserID,
+		seamReq(settingskeys.PlaybackIntroSkipMode, settingscontract.ScopeProfile))
+	requireSettingStatus(t, err, http.StatusNotFound, "delete of the absent addressed row")
 	if value := storedValueAt(t, store, profileIdentity(settingskeys.PlaybackAutoSkipIntro)); value != nil {
 		t.Errorf("the stray companion survived: %s", value.Value)
 	}

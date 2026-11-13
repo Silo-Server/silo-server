@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	sectionspkg "github.com/Silo-Server/silo-server/internal/sections"
@@ -79,39 +82,6 @@ func TestProfileOverrideSaveStopsOnBaseSectionReadFailure(t *testing.T) {
 	}
 	if len(store.overrides) != 1 || store.overrides[0].ID != "existing" || !store.overrides[0].Hidden {
 		t.Fatalf("failed lookup mutated overrides: %+v", store.overrides)
-	}
-}
-
-func TestProfileTMDBTrendingUnchangedSaveDoesNotRefreshAgain(t *testing.T) {
-	store := &sourcePolicyStore{}
-	refresher := sourcePolicyRefresher{configs: make(chan json.RawMessage, 2)}
-	h := &SectionHandler{
-		StoreProvider:     sourcePolicyProvider{store: store},
-		TrendingRefresher: refresher,
-	}
-	write := SectionOverrideWrite{
-		ID: "new", IsUserAdded: true, UserSectionType: "trending_discover",
-		UserConfig: json.RawMessage(`{"source":"tmdb","window":"day"}`),
-	}
-	query := SectionOverridesQuery{UserID: 1, ProfileID: "p1", Scope: "home"}
-	if err := h.SaveProfileOverrides(t.Context(), query, []SectionOverrideWrite{write}); err != nil {
-		t.Fatalf("first SaveProfileOverrides: %v", err)
-	}
-	select {
-	case config := <-refresher.configs:
-		if string(config) != string(write.UserConfig) {
-			t.Fatalf("refresh config = %s, want %s", config, write.UserConfig)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("first save did not request an immediate refresh")
-	}
-	if err := h.SaveProfileOverrides(t.Context(), query, []SectionOverrideWrite{write}); err != nil {
-		t.Fatalf("second SaveProfileOverrides: %v", err)
-	}
-	select {
-	case config := <-refresher.configs:
-		t.Fatalf("unchanged save unexpectedly refreshed %s", config)
-	case <-time.After(100 * time.Millisecond):
 	}
 }
 
@@ -209,6 +179,16 @@ func TestProfileRuleRowsAndKeptEditorsPicks(t *testing.T) {
 	profile := apimw.SetClaims(t.Context(), &auth.Claims{Role: "user", UserID: 1})
 	admin := apimw.SetActingAdminDecider(apimw.SetClaims(t.Context(), &auth.Claims{Role: "admin", UserID: 1}),
 		func(context.Context, apimw.ActingAdminRequest) (bool, error) { return true, nil })
+	// A child profile on an admin's account is not the admin an admin-only
+	// recipe asks for.
+	childOfAdmin := apimw.SetProfileID(apimw.SetClaims(t.Context(), &auth.Claims{Role: "admin", UserID: 1}), "kid")
+	childOfAdmin = access.SetScope(childOfAdmin, access.Scope{UserID: 1, ProfileID: "kid", ProfileVerified: true})
+	childOfAdmin = apimw.SetActingAdminDecider(childOfAdmin, func(_ context.Context, in apimw.ActingAdminRequest) (bool, error) {
+		return in.ProfileID == "parent", nil
+	})
+	// The resolver treats a row without section_id as user-added whatever
+	// is_user_added says, so the legacy section_type/config shape is gated too.
+	legacyPicks := SectionOverrideWrite{SectionType: "admin_curated_list", Config: json.RawMessage(`{"item_ids":["a"]}`)}
 
 	cases := []struct {
 		name   string
@@ -217,6 +197,8 @@ func TestProfileRuleRowsAndKeptEditorsPicks(t *testing.T) {
 		writes []SectionOverrideWrite
 		refuse bool
 	}{
+		{"new Editor's picks from an admin account's child profile", childOfAdmin, nil, []SectionOverrideWrite{picks}, true},
+		{"new Editor's picks in the legacy shape", profile, nil, []SectionOverrideWrite{legacyPicks}, true},
 		{"rule row with nothing saved", profile, nil, []SectionOverrideWrite{rules}, false},
 		{"kept and changed Editor's picks beside a new rule row", profile, stored, []SectionOverrideWrite{picks, rules}, false},
 		{"new Editor's picks", profile, nil, []SectionOverrideWrite{picks}, true},
@@ -241,6 +223,49 @@ func TestProfileRuleRowsAndKeptEditorsPicks(t *testing.T) {
 			apiErr, ok := errors.AsType[*APIError](err)
 			if !ok || apiErr.Status != 403 || apiErr.Code != "custom_disabled" {
 				t.Fatalf("error = %#v, want 403 custom_disabled", err)
+			}
+			if len(store.overrides) != len(tc.stored) {
+				t.Fatalf("refused save changed the store: %+v", store.overrides)
+			}
+		})
+	}
+}
+
+// No profile adds a Next Up row: the server inserts the only one when the
+// profile's ui.next_up_mode is separate. A profile keeps one it saved before.
+func TestProfileCannotAddNextUpRow(t *testing.T) {
+	query := SectionOverridesQuery{UserID: 1, ProfileID: "p1", Scope: "home"}
+	nextUp := SectionOverrideWrite{ID: "deck", IsUserAdded: true, UserSectionType: "next_up", UserTitle: "On deck"}
+	stored := []userstore.SectionOverride{{ID: "deck", IsUserAdded: true, UserSectionType: "next_up"}}
+	admin := apimw.SetActingAdminDecider(apimw.SetClaims(t.Context(), &auth.Claims{Role: "admin", UserID: 1}),
+		func(context.Context, apimw.ActingAdminRequest) (bool, error) { return true, nil })
+
+	cases := []struct {
+		name   string
+		stored []userstore.SectionOverride
+		write  SectionOverrideWrite
+		refuse bool
+	}{
+		{"new row", nil, nextUp, true},
+		{"new row without an ID", nil, SectionOverrideWrite{IsUserAdded: true, UserSectionType: "next_up"}, true},
+		{"new row by the legacy section_type", nil, SectionOverrideWrite{ID: "deck", IsUserAdded: true, SectionType: "next_up"}, true},
+		{"over another row's ID", []userstore.SectionOverride{{ID: "deck", IsUserAdded: true, UserSectionType: "hidden_gems"}}, nextUp, true},
+		{"kept row", stored, nextUp, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &sourcePolicyStore{overrides: tc.stored}
+			h := &SectionHandler{StoreProvider: sourcePolicyProvider{store: store}}
+			err := h.SaveProfileOverrides(admin, query, []SectionOverrideWrite{tc.write})
+			if !tc.refuse {
+				if err != nil {
+					t.Fatalf("SaveProfileOverrides: %v", err)
+				}
+				return
+			}
+			apiErr, ok := errors.AsType[*APIError](err)
+			if !ok || apiErr.Status != http.StatusBadRequest || !strings.Contains(apiErr.Message, "next_up") {
+				t.Fatalf("error = %#v, want a 400 naming next_up", err)
 			}
 			if len(store.overrides) != len(tc.stored) {
 				t.Fatalf("refused save changed the store: %+v", store.overrides)

@@ -2,6 +2,7 @@ package pgstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -57,36 +58,88 @@ func (s *PostgresUserStore) GetAudioPreference(ctx context.Context, profileID, s
 	return getAudioPreference(ctx, s.pool, s.userID, profileID, seriesID)
 }
 
+const audioPreferenceColumns = `profile_id, series_id, audio_track_index,
+		       audio_language, audio_track_signature, updated_at`
+
 func getAudioPreference(ctx context.Context, exec preferenceSettingsExecutor, userID int, profileID, seriesID string) (*userstore.AudioPreference, error) {
+	pref, err := scanOptionalAudioPreference(exec.QueryRow(ctx, audioPreferenceSQL, userID, profileID, seriesID))
+	if err != nil {
+		return nil, fmt.Errorf("getting audio preference for profile %q series %q: %w",
+			profileID, seriesID, err)
+	}
+	return pref, nil
+}
+
+// audioPreferenceSQL reads one preference row: $1 user, $2 profile, $3
+// series or movie.
+const audioPreferenceSQL = `
+		SELECT ` + audioPreferenceColumns + `
+		FROM user_audio_preferences
+		WHERE user_id = $1 AND profile_id = $2 AND series_id = $3`
+
+// scanOptionalAudioPreference is scanAudioPreference returning nil when the
+// row does not exist.
+func scanOptionalAudioPreference(row pgx.Row) (*userstore.AudioPreference, error) {
+	pref, err := scanAudioPreference(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return pref, err
+}
+
+// ListAudioPreferences reads the profile's stored audio preferences for
+// several series (or movies) in one query, each identical to what
+// GetAudioPreference returns for it. Ids with no stored preference are absent
+// from the result.
+func (s *PostgresUserStore) ListAudioPreferences(ctx context.Context, profileID string, seriesIDs []string) (map[string]*userstore.AudioPreference, error) {
+	prefs := make(map[string]*userstore.AudioPreference, len(seriesIDs))
+	if len(seriesIDs) == 0 {
+		return prefs, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT `+audioPreferenceColumns+`
+		FROM user_audio_preferences
+		WHERE user_id = $1 AND profile_id = $2 AND series_id = ANY($3)`,
+		s.userID, profileID, seriesIDs,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("listing audio preferences for profile %q: %w", profileID, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		pref, err := scanAudioPreference(rows)
+		if err != nil {
+			return nil, fmt.Errorf("listing audio preferences for profile %q: %w", profileID, err)
+		}
+		prefs[pref.SeriesID] = pref
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("listing audio preferences for profile %q: %w", profileID, err)
+	}
+	return prefs, nil
+}
+
+// scanAudioPreference reads one row selected with audioPreferenceColumns.
+func scanAudioPreference(row pgx.Row) (*userstore.AudioPreference, error) {
 	var pref userstore.AudioPreference
 	var updatedAt time.Time
 	var signatureJSON []byte
-	err := exec.QueryRow(ctx, `
-		SELECT profile_id, series_id, audio_track_index,
-		       audio_language, audio_track_signature, updated_at
-		FROM user_audio_preferences
-		WHERE user_id = $1 AND profile_id = $2 AND series_id = $3`,
-		userID, profileID, seriesID,
-	).Scan(
+	if err := row.Scan(
 		&pref.ProfileID,
 		&pref.SeriesID,
 		&pref.AudioTrackIndex,
 		&pref.AudioLanguage,
 		&signatureJSON,
 		&updatedAt,
-	)
-	if err == pgx.ErrNoRows {
-		return nil, nil
+	); err != nil {
+		return nil, err
 	}
-	if err != nil {
-		return nil, fmt.Errorf("getting audio preference for profile %q series %q: %w",
-			profileID, seriesID, err)
-	}
-	pref.TrackSignature, err = userstore.UnmarshalAudioTrackSignature(signatureJSON)
+	signature, err := userstore.UnmarshalAudioTrackSignature(signatureJSON)
 	if err != nil {
 		return nil, fmt.Errorf("decoding audio track signature for profile %q series %q: %w",
-			profileID, seriesID, err)
+			pref.ProfileID, pref.SeriesID, err)
 	}
+	pref.TrackSignature = signature
 	pref.UpdatedAt = timeToString(updatedAt)
 	return &pref, nil
 }

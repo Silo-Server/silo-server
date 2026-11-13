@@ -1,13 +1,10 @@
 package events
 
 import (
-	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/redis/go-redis/v9"
 )
 
 func socketIdentity() SocketIdentity {
@@ -40,7 +37,7 @@ func testSocketTicketSingleUse(t *testing.T, mint, consume *SocketTicketStore) {
 	}
 }
 func TestSocketTicketMemorySingleUseAndExpiry(t *testing.T) {
-	store := NewSocketTicketStore(nil)
+	store := NewSocketTicketStore(nil, SocketAudienceEvents)
 	testSocketTicketSingleUse(t, store, store)
 	ticket, err := store.Mint(t.Context(), socketIdentity())
 	if err != nil {
@@ -59,18 +56,42 @@ func TestSocketTicketMemorySingleUseAndExpiry(t *testing.T) {
 	if _, err := store.Mint(t.Context(), invalid); err == nil {
 		t.Fatal("sessionless proof minted")
 	}
-}
-func TestSocketTicketRedisCrossNodeSingleUse(t *testing.T) {
-	endpoint := os.Getenv("SILO_TEST_REDIS_URL")
-	if endpoint == "" {
-		t.Skip("requires synthetic Redis URL")
+	// An API-key proof names the key at a revision and nothing else.
+	key := SocketIdentity{UserID: 7, Role: "admin", APIKeyID: 3, APIKeyRevision: 9, AccessExpiresAt: time.Now().Add(time.Minute)}
+	if _, err := store.Mint(t.Context(), key); err != nil {
+		t.Fatal(err)
 	}
-	opts, err := redis.ParseURL(endpoint)
+	for name, change := range map[string]func(*SocketIdentity){
+		"key with a session":   func(i *SocketIdentity) { i.SessionID = "session" },
+		"key with a profile":   func(i *SocketIdentity) { i.ProfileID = "profile" },
+		"key with no revision": func(i *SocketIdentity) { i.APIKeyRevision = 0 },
+	} {
+		invalid := key
+		change(&invalid)
+		if _, err := store.Mint(t.Context(), invalid); err == nil {
+			t.Fatal(name, "minted")
+		}
+	}
+}
+
+// Deployments hold every audience's tickets under one Redis prefix; sharing
+// the memory map stands in for it.
+func TestSocketTicketRefusedOutsideItsAudience(t *testing.T) {
+	events := NewSocketTicketStore(nil, SocketAudienceEvents)
+	logs := NewSocketTicketStore(nil, SocketAudienceAdminLogs)
+	logs.tickets = events.tickets
+	ticket, err := events.Mint(t.Context(), socketIdentity())
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, b := redis.NewClient(opts), redis.NewClient(opts)
-	defer func() { _ = a.Close() }()
-	defer func() { _ = b.Close() }()
-	testSocketTicketSingleUse(t, NewSocketTicketStore(a), NewSocketTicketStore(b))
+	if _, err := logs.Consume(t.Context(), ticket); err == nil {
+		t.Fatal("events ticket opened the log stream")
+	}
+	ticket, err = logs.Mint(t.Context(), socketIdentity())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := logs.Consume(t.Context(), ticket); err != nil || got.Audience != SocketAudienceAdminLogs {
+		t.Fatalf("own audience: %+v %v", got, err)
+	}
 }

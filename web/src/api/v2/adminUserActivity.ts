@@ -33,6 +33,12 @@ export interface AdminUserDeviceRow {
 export interface AdminUserProfileActivity {
   id: string;
   name: string;
+  /** Where to fetch the profile's avatar; empty when there is none to fetch. */
+  avatar_url: string;
+  /** Profile flags; false on a server that predates profile_management. */
+  has_pin: boolean;
+  is_primary: boolean;
+  is_child: boolean;
   last_seen_at: string | null;
 }
 export interface AdminUserWatchSummary {
@@ -233,6 +239,10 @@ function profileActivityOf(value: unknown): AdminUserProfileActivity {
   return {
     id: id(row, "id", what),
     name: text(row, "name", what),
+    avatar_url: optionalText(row, "avatar_url", what),
+    has_pin: row.has_pin === true,
+    is_primary: row.is_primary === true,
+    is_child: row.is_child === true,
     last_seen_at: nullableText(row, "last_seen_at", what),
   };
 }

@@ -3,7 +3,6 @@ package handlers
 import (
 	"cmp"
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -13,7 +12,7 @@ import (
 )
 
 // AdminMarkerProvidersHandler serves the per-provider marker config + key
-// validation API under the RequireAdmin group.
+// validation API for acting administrators.
 type AdminMarkerProvidersHandler struct {
 	Registry *markers.Registry
 	Config   *markers.ProviderConfigStore
@@ -42,6 +41,10 @@ type providerConfigResponse struct {
 	ContributeEnabled       bool    `json:"contribute_enabled"`
 	ContributeAutoLocal     bool    `json:"contribute_auto_local"`
 	ContributeMinConfidence float64 `json:"contribute_min_confidence"`
+	// FetchMinConfidence and DefaultContributeEnabled are newer than the
+	// frozen v1 response, so only v2 emits them (json:"-").
+	FetchMinConfidence       float64 `json:"-"`
+	DefaultContributeEnabled bool    `json:"-"`
 }
 
 type markerUserStatsResponse struct {
@@ -85,16 +88,6 @@ func (h *AdminMarkerProvidersHandler) providerDescriptions() map[string]markers.
 	return out
 }
 
-// HandleListProviders lists registered providers with their config + capability.
-func (h *AdminMarkerProvidersHandler) HandleListProviders(w http.ResponseWriter, r *http.Request) {
-	out, err := h.ListMarkerProviders(r.Context())
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"providers": out})
-}
-
 type MarkerProviderConfigView = providerConfigResponse
 type MarkerUserStatsView = markerUserStatsResponse
 
@@ -102,19 +95,26 @@ func (h *AdminMarkerProvidersHandler) ListMarkerProviders(ctx context.Context) (
 	if h == nil || h.Config == nil {
 		return nil, apiError(http.StatusServiceUnavailable, "unavailable", "Marker providers are not configured")
 	}
+	// The stored rows, not this node's cache: a node that missed a sharing
+	// opt-out must not show the admin sharing still on.
+	configs, err := h.Config.Load(ctx)
+	if err != nil {
+		h.logger.ErrorContext(ctx, "admin markers: load provider config failed", "error", err)
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to load marker providers")
+	}
 	submitters := h.submitterIDs()
 	descriptions := h.providerDescriptions()
 	out := []providerConfigResponse{}
 	if h.Registry != nil {
 		for _, provider := range h.Registry.Providers() {
-			c, ok := h.Config.Get(provider.ID())
+			c, ok := configs[provider.ID()]
 			if !ok {
 				continue
 			}
 			out = append(out, toProviderConfigResponse(c, submitters[c.Provider], descriptions[c.Provider]))
 		}
 	} else {
-		for _, c := range h.Config.List() {
+		for _, c := range configs {
 			out = append(out, toProviderConfigResponse(c, submitters[c.Provider], descriptions[c.Provider]))
 		}
 	}
@@ -127,72 +127,22 @@ func (h *AdminMarkerProvidersHandler) ListMarkerProviders(ctx context.Context) (
 	return out, nil
 }
 
-// HandleUpdateProvider updates a provider's config row.
-func (h *AdminMarkerProvidersHandler) HandleUpdateProvider(w http.ResponseWriter, r *http.Request) {
-	if h == nil || h.Config == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Marker providers are not configured")
-		return
-	}
-	provider, err := decodedURLParam(r, "provider")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid provider ID")
-		return
-	}
-	existing, ok := h.Config.Get(provider)
-	if !ok {
-		writeError(w, http.StatusNotFound, "not_found", "Unknown marker provider")
-		return
-	}
-	var body MarkerProviderUpdate
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	out, err := h.updateMarkerProvider(r.Context(), provider, existing, body)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-// HandleValidateProvider validates the provider's configured key and returns stats.
-func (h *AdminMarkerProvidersHandler) HandleValidateProvider(w http.ResponseWriter, r *http.Request) {
-	if h == nil || h.Registry == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Marker providers are not configured")
-		return
-	}
-	provider, err := decodedURLParam(r, "provider")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid provider ID")
-		return
-	}
-	out, err := h.ValidateMarkerProvider(r.Context(), provider)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	if !out.Valid {
-		writeJSON(w, http.StatusOK, map[string]any{"valid": false, "error": out.Error})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"valid": true, "stats": out.Stats})
-}
-
 func toProviderConfigResponse(c markers.ProviderConfig, isSubmitter bool, desc markers.ProviderDescriptor) providerConfigResponse {
 	return providerConfigResponse{
-		Provider:                c.Provider,
-		DisplayName:             desc.DisplayName,
-		SourceType:              desc.SourceType,
-		PluginID:                desc.PluginID,
-		PluginInstallationID:    desc.PluginInstallationID,
-		CapabilityID:            desc.CapabilityID,
-		IsSubmitter:             isSubmitter,
-		FetchEnabled:            c.FetchEnabled,
-		FetchPriority:           c.FetchPriority,
-		ContributeEnabled:       c.ContributeEnabled,
-		ContributeAutoLocal:     c.ContributeAutoLocal,
-		ContributeMinConfidence: c.ContributeMinConfidence,
+		Provider:                 c.Provider,
+		DisplayName:              desc.DisplayName,
+		SourceType:               desc.SourceType,
+		PluginID:                 desc.PluginID,
+		PluginInstallationID:     desc.PluginInstallationID,
+		CapabilityID:             desc.CapabilityID,
+		IsSubmitter:              isSubmitter,
+		FetchEnabled:             c.FetchEnabled,
+		FetchPriority:            c.FetchPriority,
+		ContributeEnabled:        c.ContributeEnabled,
+		ContributeAutoLocal:      c.ContributeAutoLocal,
+		ContributeMinConfidence:  c.ContributeMinConfidence,
+		FetchMinConfidence:       c.FetchMinConfidence,
+		DefaultContributeEnabled: desc.DefaultContributeEnabled,
 	}
 }
 
@@ -214,41 +164,49 @@ type MarkerProviderUpdate struct {
 	ContributeEnabled       *bool    `json:"contribute_enabled"`
 	ContributeAutoLocal     *bool    `json:"contribute_auto_local"`
 	ContributeMinConfidence *float64 `json:"contribute_min_confidence"`
+	// FetchMinConfidence is set through v2 only; the frozen v1 body cannot
+	// carry it (json:"-").
+	FetchMinConfidence *float64 `json:"-"`
 }
 
 func (h *AdminMarkerProvidersHandler) UpdateMarkerProvider(ctx context.Context, provider string, body MarkerProviderUpdate) (MarkerProviderConfigView, error) {
 	if h == nil || h.Config == nil {
 		return MarkerProviderConfigView{}, apiError(http.StatusServiceUnavailable, "unavailable", "Marker providers are not configured")
 	}
-	existing, ok := h.Config.Get(provider)
-	if !ok {
-		return MarkerProviderConfigView{}, apiError(http.StatusNotFound, "not_found", "Unknown marker provider")
+	if _, ok := h.Config.Get(provider); !ok {
+		return MarkerProviderConfigView{}, errUnknownMarkerProvider()
 	}
-	return h.updateMarkerProvider(ctx, provider, existing, body)
+	return h.updateMarkerProvider(ctx, provider, body)
 }
-func (h *AdminMarkerProvidersHandler) updateMarkerProvider(ctx context.Context, provider string, existing markers.ProviderConfig, body MarkerProviderUpdate) (MarkerProviderConfigView, error) {
-	if body.FetchEnabled != nil {
-		existing.FetchEnabled = *body.FetchEnabled
+
+func errUnknownMarkerProvider() error {
+	return apiError(http.StatusNotFound, "not_found", "Unknown marker provider")
+}
+
+// updateMarkerProvider writes only the fields the body sets. The stored row,
+// not this node's cache, supplies the rest, so a partial edit cannot undo a
+// sharing opt-out this node has not seen yet.
+func (h *AdminMarkerProvidersHandler) updateMarkerProvider(ctx context.Context, provider string, body MarkerProviderUpdate) (MarkerProviderConfigView, error) {
+	if v := body.FetchMinConfidence; v != nil && (*v < 0 || *v > 1) {
+		return MarkerProviderConfigView{}, apiError(http.StatusBadRequest, "bad_request", "fetch_min_confidence must be between 0 and 1")
 	}
-	if body.FetchPriority != nil {
-		existing.FetchPriority = *body.FetchPriority
+	if v := body.ContributeMinConfidence; v != nil && (*v < 0 || *v > 1) {
+		return MarkerProviderConfigView{}, apiError(http.StatusBadRequest, "bad_request", "contribute_min_confidence must be between 0 and 1")
 	}
-	if body.ContributeEnabled != nil {
-		existing.ContributeEnabled = *body.ContributeEnabled
-	}
-	if body.ContributeAutoLocal != nil {
-		existing.ContributeAutoLocal = *body.ContributeAutoLocal
-	}
-	if body.ContributeMinConfidence != nil {
-		v := *body.ContributeMinConfidence
-		if v < 0 || v > 1 {
-			return MarkerProviderConfigView{}, apiError(http.StatusBadRequest, "bad_request", "contribute_min_confidence must be between 0 and 1")
-		}
-		existing.ContributeMinConfidence = v
-	}
-	if err := h.Config.Update(ctx, existing); err != nil {
+	updated, ok, err := h.Config.Patch(ctx, provider, markers.ProviderConfigPatch{
+		FetchEnabled:            body.FetchEnabled,
+		FetchPriority:           body.FetchPriority,
+		FetchMinConfidence:      body.FetchMinConfidence,
+		ContributeEnabled:       body.ContributeEnabled,
+		ContributeAutoLocal:     body.ContributeAutoLocal,
+		ContributeMinConfidence: body.ContributeMinConfidence,
+	})
+	if err != nil {
 		h.logger.ErrorContext(ctx, "admin markers: update provider config failed", "provider", provider, "error", err)
 		return MarkerProviderConfigView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to update provider")
+	}
+	if !ok {
+		return MarkerProviderConfigView{}, errUnknownMarkerProvider()
 	}
 	if h.EventBus != nil {
 		_ = h.EventBus.Publish(ctx, cache.ChannelAdmin, cache.Event{
@@ -256,7 +214,7 @@ func (h *AdminMarkerProvidersHandler) updateMarkerProvider(ctx context.Context, 
 			Payload: provider,
 		})
 	}
-	return toProviderConfigResponse(existing, h.submitterIDs()[provider], h.providerDescriptions()[provider]), nil
+	return toProviderConfigResponse(updated, h.submitterIDs()[provider], h.providerDescriptions()[provider]), nil
 }
 
 type MarkerProviderValidationView struct {

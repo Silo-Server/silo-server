@@ -2,78 +2,12 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
-	"io"
-	"net/http"
-	"net/http/httptest"
+	"slices"
 	"sort"
-	"strings"
-	"testing"
 	"time"
-
-	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 )
-
-func TestAccessGroupHandlerIsDefaultRoundTrips(t *testing.T) {
-	store := newAccessGroupHandlerTestStore()
-	handler := NewAccessGroupHandler(store)
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/access-groups", strings.NewReader(`{
-		"name": "Users",
-		"is_default": true
-	}`))
-	handler.HandleCreate(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("HandleCreate status = %d, body %s", rec.Code, rec.Body.String())
-	}
-	created := decodeAccessGroupResponse(t, rec)
-	if !created.IsDefault {
-		t.Fatalf("created is_default = false, want true")
-	}
-
-	rec = httptest.NewRecorder()
-	req = accessGroupRequestWithID(http.MethodGet, "/api/v1/admin/access-groups/1", nil, "1")
-	handler.HandleGet(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("HandleGet status = %d, body %s", rec.Code, rec.Body.String())
-	}
-	got := decodeAccessGroupResponse(t, rec)
-	if !got.IsDefault {
-		t.Fatalf("get is_default = false, want true")
-	}
-}
-
-func TestAccessGroupHandlerDefaultGroupGuards(t *testing.T) {
-	store := newAccessGroupHandlerTestStore()
-	store.groups[1] = access.Group{ID: 1, Name: "Default", DownloadAllowed: true, RequestsAllowed: true, IsDefault: true}
-	store.nextID = 2
-	handler := NewAccessGroupHandler(store)
-
-	rec := httptest.NewRecorder()
-	req := accessGroupRequestWithID(http.MethodDelete, "/api/v1/admin/access-groups/1", nil, "1")
-	handler.HandleDelete(rec, req)
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("HandleDelete(default) status = %d, want %d, body %s", rec.Code, http.StatusConflict, rec.Body.String())
-	}
-	if _, ok := store.groups[1]; !ok {
-		t.Fatalf("default group removed despite conflict response")
-	}
-
-	rec = httptest.NewRecorder()
-	req = accessGroupRequestWithID(http.MethodPut, "/api/v1/admin/access-groups/1", strings.NewReader(`{
-		"is_default": false
-	}`), "1")
-	handler.HandleUpdate(rec, req)
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("HandleUpdate(demote default) status = %d, want %d, body %s", rec.Code, http.StatusConflict, rec.Body.String())
-	}
-	if !store.groups[1].IsDefault {
-		t.Fatalf("default group demoted despite conflict response")
-	}
-}
 
 type accessGroupHandlerTestStore struct {
 	nextID int64
@@ -112,13 +46,13 @@ func (s *accessGroupHandlerTestStore) Create(_ context.Context, input access.Cre
 		ID:                       s.nextID,
 		Name:                     input.Name,
 		Description:              input.Description,
-		LibraryIDs:               append([]int(nil), input.LibraryIDs...),
+		LibraryIDs:               slices.Clone(input.LibraryIDs),
 		MaxPlaybackQuality:       input.MaxPlaybackQuality,
 		DownloadAllowed:          input.DownloadAllowed,
 		DownloadTranscodeAllowed: input.DownloadTranscodeAllowed,
 		MaxStreams:               input.MaxStreams,
 		MaxTranscodes:            input.MaxTranscodes,
-		AllowedPermissions:       append([]string(nil), input.AllowedPermissions...),
+		AllowedPermissions:       slices.Clone(input.AllowedPermissions),
 		RequestsAllowed:          input.RequestsAllowed,
 		IsDefault:                input.IsDefault,
 		CreatedAt:                now,
@@ -144,7 +78,7 @@ func (s *accessGroupHandlerTestStore) Update(_ context.Context, id int64, input 
 		group.Description = *input.Description
 	}
 	if input.LibraryIDs != nil {
-		group.LibraryIDs = append([]int(nil), (*input.LibraryIDs)...)
+		group.LibraryIDs = slices.Clone(*input.LibraryIDs)
 	}
 	if input.MaxPlaybackQuality != nil {
 		group.MaxPlaybackQuality = *input.MaxPlaybackQuality
@@ -162,7 +96,7 @@ func (s *accessGroupHandlerTestStore) Update(_ context.Context, id int64, input 
 		group.MaxTranscodes = *input.MaxTranscodes
 	}
 	if input.AllowedPermissions != nil {
-		group.AllowedPermissions = append([]string(nil), (*input.AllowedPermissions)...)
+		group.AllowedPermissions = slices.Clone(*input.AllowedPermissions)
 	}
 	if input.RequestsAllowed != nil {
 		group.RequestsAllowed = *input.RequestsAllowed
@@ -197,24 +131,4 @@ func (s *accessGroupHandlerTestStore) clearDefault() {
 		group.IsDefault = false
 		s.groups[id] = group
 	}
-}
-
-func accessGroupRequestWithID(method, path string, body *strings.Reader, id string) *http.Request {
-	var reader io.Reader
-	if body != nil {
-		reader = body
-	}
-	req := httptest.NewRequest(method, path, reader)
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("id", id)
-	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-}
-
-func decodeAccessGroupResponse(t *testing.T, rec *httptest.ResponseRecorder) accessGroupResponse {
-	t.Helper()
-	var response accessGroupResponse
-	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	return response
 }

@@ -111,6 +111,25 @@ func TestEmbyProviderParseWebhookMultipart(t *testing.T) {
 	}
 }
 
+// NextPart reports a body that stops before its closing boundary with a
+// wrapped io.EOF, so a truncated delivery must not decode the part it read
+// as if the body were complete.
+func TestDecodeEmbyMultipartRejectsMissingClosingBoundary(t *testing.T) {
+	t.Parallel()
+
+	const part = "--B\r\nContent-Disposition: form-data; name=\"note\"\r\n\r\n{\"Event\":\"playback.stop\"}\r\n"
+	var payload embyWebhookPayload
+	if err := decodeEmbyMultipart([]byte(part+"--B--\r\n"), "B", &payload); err != nil {
+		t.Fatalf("complete body: %v", err)
+	}
+	if payload.Event != "playback.stop" {
+		t.Fatalf("complete body Event = %q, want playback.stop", payload.Event)
+	}
+	if err := decodeEmbyMultipart([]byte(part+"--B"), "B", &embyWebhookPayload{}); err == nil {
+		t.Fatal("truncated body decoded; want an error")
+	}
+}
+
 func TestEmbyProviderParseWebhookMarkUnplayed(t *testing.T) {
 	t.Parallel()
 
@@ -140,54 +159,6 @@ func TestEmbyProviderParseWebhookMarkUnplayed(t *testing.T) {
 	}
 	if event.Completed {
 		t.Fatalf("mark unplayed should not be completed")
-	}
-}
-
-func TestEmbyProviderParseWebhookFavorites(t *testing.T) {
-	t.Parallel()
-
-	provider := NewEmbyProvider()
-	tests := []struct {
-		name      string
-		eventName string
-		want      string
-	}{
-		{name: "add", eventName: "item.favorited", want: ActionAddFavorite},
-		{name: "remove", eventName: "item.unfavorite", want: ActionRemoveFavorite},
-	}
-
-	for _, tc := range tests {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			req := httptest.NewRequest("POST", "/webhook", strings.NewReader(`{
-				"Event": "`+tc.eventName+`",
-				"Date": "2026-04-07T12:00:00Z",
-				"User": { "Id": "user-1", "Name": "Alice" },
-				"Item": {
-					"Id": "item-1",
-					"Name": "Movie",
-					"Type": "Movie",
-					"ProductionYear": 2024,
-					"ProviderIds": { "Imdb": "tt123" }
-				}
-			}`))
-
-			event, err := provider.ParseWebhook(context.Background(), &Connection{ServerName: "Emby"}, req)
-			if err != nil {
-				t.Fatalf("ParseWebhook() error = %v", err)
-			}
-			if event == nil || !event.Apply {
-				t.Fatalf("expected event to apply")
-			}
-			if event.Action != tc.want {
-				t.Fatalf("unexpected action: %q", event.Action)
-			}
-			if event.Record.IMDbID != "tt123" {
-				t.Fatalf("unexpected record: %#v", event.Record)
-			}
-		})
 	}
 }
 
@@ -333,6 +304,8 @@ func TestEmbyWebhookAction(t *testing.T) {
 		{eventName: "item.rate", want: ActionToggleFavorite, ok: true},
 		{eventName: "item.addedtofavorites", want: ActionAddFavorite, ok: true},
 		{eventName: "item.removedfromfavorites", want: ActionRemoveFavorite, ok: true},
+		{eventName: "item.favorited", want: ActionAddFavorite, ok: true},
+		{eventName: "item.unfavorite", want: ActionRemoveFavorite, ok: true},
 		{eventName: "user.created", ok: false},
 		{eventName: "system.notificationtest", ok: false},
 	}

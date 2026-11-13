@@ -13,6 +13,7 @@ import { Link } from "react-router";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
+import { useT } from "@/i18n";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { carouselIntrinsicHeight } from "@/lib/uiCustomization";
 import {
@@ -20,6 +21,7 @@ import {
   CAROUSEL_WINDOW_IDLE_BATCH,
   scheduleCarouselIdleTask,
 } from "@/lib/carouselWindow";
+import { readingArrowKey } from "@/lib/direction";
 
 /**
  * Mounts only the first `initialCount` slides in the first commit. The rest
@@ -49,6 +51,11 @@ interface MediaCarouselProps {
   onViewAll?: () => void;
   /** Renders "Explore all" as a link to this page. Takes precedence over onViewAll. */
   viewAllHref?: string;
+  /**
+   * The slide to show, such as the item the page is about. The carousel jumps
+   * to it again whenever it changes, as when the page moves to another item.
+   */
+  startSlide?: number;
   /** Optional actions rendered next to the title (e.g. pin button) */
   headerActions?: ReactNode;
   /**
@@ -65,6 +72,11 @@ interface MediaCarouselProps {
    */
   compact?: boolean;
   windowing?: MediaCarouselWindowing;
+  /**
+   * Called when the last slide comes within one viewport width of view, for a
+   * row that loads more of itself; it may fire again as the row scrolls.
+   */
+  onNearEnd?: () => void;
 }
 
 /**
@@ -91,11 +103,13 @@ const CarouselSlideList = memo(function CarouselSlideList({
   className,
   windowInitialCount,
   windowPlaceholderClassName,
+  onNearEnd,
 }: {
   slides: CarouselSlide[];
   className: string;
   windowInitialCount?: number;
   windowPlaceholderClassName?: string;
+  onNearEnd?: () => void;
 }) {
   const windowed = windowInitialCount !== undefined && windowPlaceholderClassName !== undefined;
   const [mountedCount, setMountedCount] = useState(() =>
@@ -153,6 +167,24 @@ const CarouselSlideList = memo(function CarouselSlideList({
     };
   }, [filling, total]);
 
+  useEffect(() => {
+    const list = listRef.current;
+    const viewport = list?.parentElement;
+    const last = list?.lastElementChild;
+    if (!onNearEnd || !viewport || !last || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) onNearEnd();
+      },
+      // A whole row ahead: the rest of the row is a network read.
+      { root: viewport, rootMargin: "0px 100%" },
+    );
+    observer.observe(last);
+    return () => observer.disconnect();
+    // slides, not only total: a row reread at the same size (a cancelled
+    // completion) re-arms the observer, which reports again if still near.
+  }, [onNearEnd, slides]);
+
   return (
     <ul ref={listRef} role="list" className={className}>
       {slides.map((slide, index) =>
@@ -184,20 +216,32 @@ export default function MediaCarousel({
   skeletonAspect = "aspect-[2/3]",
   onViewAll,
   viewAllHref,
+  startSlide,
   headerActions,
   edgePadding = true,
   compact = false,
   windowing,
+  onNearEnd,
 }: MediaCarouselProps) {
+  const t = useT();
   const viewAllClass =
     "text-muted-foreground hover:text-primary text-[0.75rem] font-semibold tracking-[0.16em] uppercase transition-all active:scale-[0.98]";
-  const { emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } = useCarouselEmbla();
+  const { emblaApi, emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } =
+    useCarouselEmbla();
+  useEffect(() => {
+    if (!emblaApi || startSlide === undefined) return;
+    // Slides scroll in groups, so jump to the snap whose group holds the slide.
+    const snap = emblaApi
+      .internalEngine()
+      .slideRegistry.findIndex((slides) => slides.includes(startSlide));
+    if (snap >= 0) emblaApi.scrollTo(snap, true);
+  }, [emblaApi, startSlide]);
   const { cardPresentation } = useUICustomization();
   // Page-edge padding is opt-out so the carousel can also be embedded in an
   // already-padded container without double-padding the header and cards.
   const headerPadX = edgePadding ? " px-4 sm:px-6 lg:px-10 xl:px-12" : "";
-  const viewportPadX = edgePadding ? " pr-4 sm:pr-6 lg:pr-10 xl:pr-12" : "";
-  const containerPadX = edgePadding ? " pl-4 sm:pl-6 lg:pl-10 xl:pl-12" : "";
+  const viewportPadX = edgePadding ? " pe-4 sm:pe-6 lg:pe-10 xl:pe-12" : "";
+  const containerPadX = edgePadding ? " ps-4 sm:ps-6 lg:ps-10 xl:ps-12" : "";
   const titleClass = compact
     ? "text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.18em] uppercase"
     : "text-foreground text-xl font-semibold tracking-tight";
@@ -233,14 +277,17 @@ export default function MediaCarousel({
       }
     >
       <div className={`${headerGap} flex items-end justify-between gap-4${headerPadX}`}>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           {titleHref ? (
             <Link to={titleHref} className="group/title hover:text-primary transition-colors">
               <h2 className={titleClass}>
                 {title}
-                <span className="text-muted-foreground group-hover/title:text-primary ml-2 text-sm transition-colors">
-                  View
-                </span>
+                {/* "Explore all" already names the destination. */}
+                {viewAllHref || onViewAll ? null : (
+                  <span className="text-muted-foreground group-hover/title:text-primary ms-2 text-sm transition-colors">
+                    {t("web.catalog.carousel.view")}
+                  </span>
+                )}
               </h2>
             </Link>
           ) : (
@@ -251,31 +298,31 @@ export default function MediaCarousel({
         {viewAllHref ? (
           <Link
             to={viewAllHref}
-            aria-label={`Explore all ${title}`}
+            aria-label={t("web.catalog.carousel.exploreAllLabel", { title })}
             className={`${viewAllClass} shrink-0`}
           >
-            Explore all
+            {t("web.catalog.carousel.exploreAll")}
           </Link>
         ) : onViewAll ? (
           <button onClick={onViewAll} className={viewAllClass}>
-            Explore all
+            {t("web.catalog.carousel.exploreAll")}
           </button>
         ) : null}
       </div>
 
       <div className="relative">
-        {/* Left edge gradient */}
+        {/* Start edge gradient */}
         {canScrollPrev && (
-          <div className="from-background/80 pointer-events-none absolute top-0 bottom-0 left-0 z-[5] w-10 bg-gradient-to-r to-transparent" />
+          <div className="from-background/80 pointer-events-none absolute start-0 top-0 bottom-0 z-[5] w-10 bg-gradient-to-r to-transparent rtl:bg-gradient-to-l" />
         )}
 
-        {/* Left arrow */}
+        {/* Previous arrow */}
         {canScrollPrev && (
           <button
             type="button"
             onClick={scrollPrev}
-            className="from-background/80 absolute top-0 bottom-0 left-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-r to-transparent opacity-0 transition-opacity duration-(--duration-fast) group-hover/carousel:opacity-100 focus-visible:opacity-100"
-            aria-label="Scroll left"
+            className="from-background/80 absolute start-0 top-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-r to-transparent opacity-0 transition-opacity duration-(--duration-fast) group-hover/carousel:opacity-100 focus-visible:opacity-100 rtl:bg-gradient-to-l"
+            aria-label={t("web.catalog.carousel.scrollLeft")}
           >
             <ChevronLeft className="text-foreground h-6 w-6" />
           </button>
@@ -285,11 +332,12 @@ export default function MediaCarousel({
           ref={emblaRef}
           className={`embla__viewport -mt-1 overflow-hidden pt-1${viewportPadX}`}
           tabIndex={0}
-          aria-label="Media carousel"
+          aria-label={t("web.catalog.carousel.label")}
           onKeyDown={(e) => {
-            if (e.key === "ArrowLeft") {
+            const key = readingArrowKey(e);
+            if (key === "ArrowLeft") {
               scrollPrev();
-            } else if (e.key === "ArrowRight") {
+            } else if (key === "ArrowRight") {
               scrollNext();
             }
           }}
@@ -299,16 +347,17 @@ export default function MediaCarousel({
             className={listClassName}
             windowInitialCount={windowing?.initialCount}
             windowPlaceholderClassName={windowing?.placeholderClassName}
+            onNearEnd={onNearEnd}
           />
         </div>
 
-        {/* Right arrow */}
+        {/* Next arrow */}
         {canScrollNext && (
           <button
             type="button"
             onClick={scrollNext}
-            className="from-background/80 absolute top-0 right-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-l to-transparent opacity-0 transition-opacity duration-(--duration-fast) group-hover/carousel:opacity-100 focus-visible:opacity-100"
-            aria-label="Scroll right"
+            className="from-background/80 absolute end-0 top-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-l to-transparent opacity-0 transition-opacity duration-(--duration-fast) group-hover/carousel:opacity-100 focus-visible:opacity-100 rtl:bg-gradient-to-r"
+            aria-label={t("web.catalog.carousel.scrollRight")}
           >
             <ChevronRight className="text-foreground h-6 w-6" />
           </button>

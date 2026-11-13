@@ -4,145 +4,78 @@ import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 import { catalogKeys, ebookKeys, episodeKeys, itemKeys, progressKeys } from "@/hooks/queries/keys";
 import type { ItemDetail } from "@/api/types";
+import { makeItemDetail } from "./itemDetail.test-support";
 import { getCachedWatchedInvalidationKeys, getWatchedInvalidationKeys } from "./watchedState";
 
-function makeItem(overrides: Partial<ItemDetail> = {}): ItemDetail {
-  return {
-    content_id: overrides.content_id ?? "item-1",
-    type: overrides.type ?? "movie",
-    title: overrides.title ?? "Title",
-    original_title: overrides.original_title ?? "",
-    year: overrides.year ?? 2024,
-    overview: overrides.overview ?? "",
-    tagline: overrides.tagline ?? "",
-    runtime: overrides.runtime ?? 120,
-    content_rating: overrides.content_rating ?? "",
-    genres: overrides.genres ?? [],
-    rating_imdb: overrides.rating_imdb ?? null,
-    rating_tmdb: overrides.rating_tmdb ?? null,
-    rating_rt_critic: overrides.rating_rt_critic ?? null,
-    rating_rt_audience: overrides.rating_rt_audience ?? null,
-    ratings: [],
-    imdb_id: overrides.imdb_id ?? "",
-    tmdb_id: overrides.tmdb_id ?? "",
-    tvdb_id: overrides.tvdb_id ?? "",
-    cast: overrides.cast ?? [],
-    crew: overrides.crew ?? [],
-    studios: overrides.studios ?? [],
-    networks: overrides.networks ?? [],
-    countries: overrides.countries ?? [],
-    first_air_date: overrides.first_air_date ?? null,
-    last_air_date: overrides.last_air_date ?? null,
-    poster_url: overrides.poster_url ?? "",
-    poster_thumbhash: overrides.poster_thumbhash ?? "",
-    backdrop_url: overrides.backdrop_url ?? "",
-    backdrop_thumbhash: overrides.backdrop_thumbhash ?? "",
-    logo_url: overrides.logo_url ?? "",
-    release_date: overrides.release_date ?? null,
-    season_count: overrides.season_count ?? null,
-    series_id: overrides.series_id,
-    series_title: overrides.series_title,
-    season_number: overrides.season_number,
-    episode_number: overrides.episode_number,
-    episode_count: overrides.episode_count ?? null,
-    air_date: overrides.air_date ?? null,
-    is_specials: overrides.is_specials ?? false,
-    user_data: overrides.user_data,
-    versions: overrides.versions ?? [],
-    subtitles: overrides.subtitles ?? [],
-    intro: overrides.intro ?? null,
-    credits: overrides.credits ?? null,
-  };
+function makeItem({ type = "movie", ...overrides }: Partial<ItemDetail>) {
+  return makeItemDetail(type, { content_id: "item-1", title: "Title", runtime: 120, ...overrides });
 }
 
 describe("getWatchedInvalidationKeys", () => {
-  it("returns the expected related queries for an episode target", () => {
-    expect(
-      getWatchedInvalidationKeys(
-        makeItem({
-          content_id: "episode-4",
-          type: "episode",
-          series_id: "series-1",
-          season_number: 2,
-        }),
-      ),
-    ).toEqual([
-      catalogKeys.itemDetail("episode-4"),
-      itemKeys.detail("episode-4"),
-      progressKeys.all,
-      catalogKeys.itemDetail("series-1"),
-      itemKeys.detail("series-1"),
-      catalogKeys.seasonDetail("series-1", 2),
-      catalogKeys.seasonEpisodes("series-1", 2),
-      episodeKeys.seasonDetail("series-1", 2),
-      episodeKeys.bySeason("series-1", 2),
-      itemKeys.details(),
-      episodeKeys.all,
-    ]);
-  });
-
-  it("returns the expected related queries for a season target", () => {
-    expect(
-      getWatchedInvalidationKeys(
-        makeItem({
-          content_id: "season-2",
-          type: "season",
-          series_id: "series-1",
-          season_number: 2,
-        }),
-      ),
-    ).toEqual([
-      catalogKeys.itemDetail("season-2"),
-      itemKeys.detail("season-2"),
-      progressKeys.all,
-      catalogKeys.itemDetail("series-1"),
-      itemKeys.detail("series-1"),
-      catalogKeys.seriesSeasons("series-1"),
-      episodeKeys.seasons("series-1"),
-      catalogKeys.seasonDetail("series-1", 2),
-      catalogKeys.seasonEpisodes("series-1", 2),
-      episodeKeys.seasonDetail("series-1", 2),
-      episodeKeys.bySeason("series-1", 2),
-      itemKeys.details(),
-      episodeKeys.all,
-      catalogKeys.itemEpisodes("season-2"),
-      episodeKeys.byItem("season-2"),
-    ]);
-  });
-
-  it("includes the ebook reader progress query for an ebook target", () => {
-    expect(
-      getWatchedInvalidationKeys(
-        makeItem({
-          content_id: "ebook-1",
-          type: "ebook",
-        }),
-      ),
-    ).toEqual([
-      catalogKeys.itemDetail("ebook-1"),
-      itemKeys.detail("ebook-1"),
-      progressKeys.all,
-      ebookKeys.readerProgress("ebook-1"),
-    ]);
-  });
-
-  it("returns the expected related queries for a series target", () => {
-    expect(
-      getWatchedInvalidationKeys(
-        makeItem({
-          content_id: "series-1",
-          type: "series",
-        }),
-      ),
-    ).toEqual([
-      catalogKeys.itemDetail("series-1"),
-      itemKeys.detail("series-1"),
-      progressKeys.all,
-      catalogKeys.seriesSeasons("series-1"),
-      episodeKeys.seasons("series-1"),
-      itemKeys.details(),
-      episodeKeys.all,
-    ]);
+  it.each([
+    [
+      "returns the expected related queries for an episode target",
+      { content_id: "episode-4", type: "episode", series_id: "series-1", season_number: 2 },
+      [
+        catalogKeys.itemDetail("episode-4"),
+        itemKeys.detail("episode-4"),
+        progressKeys.all,
+        catalogKeys.itemDetail("series-1"),
+        itemKeys.detail("series-1"),
+        catalogKeys.seasonDetail("series-1", 2),
+        catalogKeys.seasonEpisodes("series-1", 2),
+        episodeKeys.seasonDetail("series-1", 2),
+        episodeKeys.bySeason("series-1", 2),
+        itemKeys.details(),
+        episodeKeys.all,
+      ],
+    ],
+    [
+      "returns the expected related queries for a season target",
+      { content_id: "season-2", type: "season", series_id: "series-1", season_number: 2 },
+      [
+        catalogKeys.itemDetail("season-2"),
+        itemKeys.detail("season-2"),
+        progressKeys.all,
+        catalogKeys.itemDetail("series-1"),
+        itemKeys.detail("series-1"),
+        catalogKeys.seriesSeasons("series-1"),
+        episodeKeys.seasons("series-1"),
+        catalogKeys.seasonDetail("series-1", 2),
+        catalogKeys.seasonEpisodes("series-1", 2),
+        episodeKeys.seasonDetail("series-1", 2),
+        episodeKeys.bySeason("series-1", 2),
+        itemKeys.details(),
+        episodeKeys.all,
+        catalogKeys.itemEpisodes("season-2"),
+        episodeKeys.byItem("season-2"),
+      ],
+    ],
+    [
+      "includes the ebook reader progress query for an ebook target",
+      { content_id: "ebook-1", type: "ebook" },
+      [
+        catalogKeys.itemDetail("ebook-1"),
+        itemKeys.detail("ebook-1"),
+        progressKeys.all,
+        ebookKeys.readerProgress("ebook-1"),
+      ],
+    ],
+    [
+      "returns the expected related queries for a series target",
+      { content_id: "series-1", type: "series" },
+      [
+        catalogKeys.itemDetail("series-1"),
+        itemKeys.detail("series-1"),
+        progressKeys.all,
+        catalogKeys.seriesSeasons("series-1"),
+        episodeKeys.seasons("series-1"),
+        itemKeys.details(),
+        episodeKeys.all,
+      ],
+    ],
+  ] satisfies Array<[string, Partial<ItemDetail>, unknown[]]>)("%s", (_name, item, keys) => {
+    expect(getWatchedInvalidationKeys(makeItem(item))).toEqual(keys);
   });
 });
 
@@ -204,5 +137,62 @@ describe("getCachedWatchedInvalidationKeys", () => {
         itemKeys.detail("episode-1"),
       ]),
     );
+  });
+
+  it("finds the season and episode lists a series page cached under its library", () => {
+    const queryClient = new QueryClient();
+    const libraryId = 4;
+
+    queryClient.setQueryData(catalogKeys.seriesSeasons("series-1", libraryId), {
+      seasons: [
+        {
+          content_id: "season-1",
+          season_number: 1,
+          is_specials: false,
+          title: "Season 1",
+          overview: "",
+          air_date: null,
+          episode_count: 1,
+          poster_url: "",
+          poster_thumbhash: "",
+        },
+      ],
+    });
+    queryClient.setQueryData(catalogKeys.seasonEpisodes("series-1", 1, libraryId), {
+      episodes: [
+        {
+          content_id: "episode-1",
+          season_number: 1,
+          episode_number: 1,
+          title: "Episode 1",
+          overview: "",
+          air_date: null,
+          runtime: 42,
+          still_url: "",
+          still_thumbhash: "",
+          files: [],
+        },
+      ],
+    });
+    // A season detail under the same series prefix is not a season list.
+    queryClient.setQueryData(catalogKeys.seasonDetail("series-1", 1, libraryId), {
+      season: { content_id: "season-1" },
+    });
+
+    const keys = getCachedWatchedInvalidationKeys(
+      queryClient,
+      makeItem({ content_id: "series-1", type: "series" }),
+    );
+
+    expect(keys).toEqual(
+      expect.arrayContaining([
+        catalogKeys.itemDetail("season-1"),
+        catalogKeys.itemEpisodes("season-1"),
+        catalogKeys.seasonEpisodes("series-1", 1),
+        catalogKeys.itemDetail("episode-1"),
+        itemKeys.detail("episode-1"),
+      ]),
+    );
+    expect(keys.filter((key) => key[2] === "episode-1" && key[3] === "detail")).toHaveLength(1);
   });
 });

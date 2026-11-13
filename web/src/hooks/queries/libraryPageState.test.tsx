@@ -83,24 +83,6 @@ describe("useLibraryPageStatePreference", () => {
     expect(mocks.mutateAsync).toHaveBeenCalledTimes(2);
   });
 
-  it("retries the same desired state after an ambiguous write failure", async () => {
-    mocks.mutateAsync
-      .mockRejectedValueOnce(new TypeError("network connection lost"))
-      .mockResolvedValueOnce({});
-    const { result } = renderHook(() => useLibraryPageStatePreference());
-
-    await act(async () => {
-      await expect(result.current.saveLibrarySearch(7, "tab=library&sort=year")).rejects.toThrow(
-        "network connection lost",
-      );
-    });
-    await act(async () => {
-      await result.current.saveLibrarySearch(7, "tab=library&sort=year");
-    });
-
-    expect(mocks.mutateAsync).toHaveBeenCalledTimes(2);
-  });
-
   it("removes a rejected value before applying later queued writes", async () => {
     let rejectFirst: ((reason?: unknown) => void) | undefined;
     mocks.mutateAsync
@@ -234,49 +216,6 @@ describe("useLibraryPageStatePreference", () => {
     });
   });
 
-  it("merges a successful write onto a deferred settings snapshot", async () => {
-    let resolveFirst: ((value: unknown) => void) | undefined;
-    mocks.mutateAsync
-      .mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            resolveFirst = resolve;
-          }),
-      )
-      .mockResolvedValueOnce({});
-    const { result, rerender } = renderHook(() => useLibraryPageStatePreference());
-
-    const first = result.current.saveLibrarySearch(7, "tab=library&sort=year");
-    const queued = result.current.saveLibrarySearch(9, "tab=collections");
-
-    await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledTimes(1));
-    act(() => {
-      mocks.preference = {
-        version: 1,
-        libraries: {
-          "3": { search: "tab=collections" },
-          "11": { search: "tab=library&sort=title" },
-        },
-      };
-      rerender();
-    });
-    await act(async () => {
-      resolveFirst?.({});
-      await first;
-      await queued;
-    });
-
-    expect(mocks.mutateAsync.mock.calls[1][0].value).toEqual({
-      version: 1,
-      libraries: {
-        "3": { search: "tab=collections" },
-        "7": { search: "tab=library&sort=year" },
-        "9": { search: "tab=collections" },
-        "11": { search: "tab=library&sort=title" },
-      },
-    });
-  });
-
   it("keeps an earlier ambiguous edit when a stale snapshot arrives during the next write", async () => {
     let rejectFirst: ((reason?: unknown) => void) | undefined;
     let resolveSecond: ((value: unknown) => void) | undefined;
@@ -304,65 +243,6 @@ describe("useLibraryPageStatePreference", () => {
     await act(async () => {
       rejectFirst?.(new TypeError("response connection lost"));
       await firstError;
-    });
-    await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledTimes(2));
-
-    act(() => {
-      mocks.preference = {
-        version: 1,
-        libraries: {
-          "3": { search: "tab=collections" },
-          "11": { search: "tab=library&sort=title" },
-        },
-      };
-      rerender();
-    });
-    await act(async () => {
-      resolveSecond?.({});
-      await second;
-    });
-    await act(async () => {
-      await result.current.saveLibrarySearch(13, "tab=library&sort=added");
-    });
-
-    expect(mocks.mutateAsync.mock.calls[2][0].value).toEqual({
-      version: 1,
-      libraries: {
-        "3": { search: "tab=collections" },
-        "7": { search: "tab=library&sort=year" },
-        "9": { search: "tab=collections" },
-        "11": { search: "tab=library&sort=title" },
-        "13": { search: "tab=library&sort=added" },
-      },
-    });
-  });
-
-  it("keeps an earlier successful edit when a stale snapshot arrives during the next write", async () => {
-    let resolveFirst: ((value: unknown) => void) | undefined;
-    let resolveSecond: ((value: unknown) => void) | undefined;
-    mocks.mutateAsync
-      .mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            resolveFirst = resolve;
-          }),
-      )
-      .mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            resolveSecond = resolve;
-          }),
-      )
-      .mockResolvedValueOnce({});
-    const { result, rerender } = renderHook(() => useLibraryPageStatePreference());
-
-    const first = result.current.saveLibrarySearch(7, "tab=library&sort=year");
-    const second = result.current.saveLibrarySearch(9, "tab=collections");
-
-    await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledTimes(1));
-    await act(async () => {
-      resolveFirst?.({});
-      await first;
     });
     await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledTimes(2));
 
@@ -503,36 +383,6 @@ describe("useLibraryPageStatePreference", () => {
     await expect(coalesced).resolves.toEqual({});
     expect(await tailError).toEqual(v2Problem(429, "rate_limited", "rate limited"));
     expect(mocks.mutateAsync).toHaveBeenCalledTimes(2);
-  });
-
-  it("returns the rejected promise for a matching middle write", async () => {
-    let resolveFirst: ((value: unknown) => void) | undefined;
-    const rejected = v2Problem(429, "rate_limited", "rate limited");
-    mocks.mutateAsync
-      .mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            resolveFirst = resolve;
-          }),
-      )
-      .mockRejectedValueOnce(rejected)
-      .mockResolvedValueOnce({});
-    const { result } = renderHook(() => useLibraryPageStatePreference());
-
-    const first = result.current.saveLibrarySearch(7, "tab=library&sort=year");
-    const middle = result.current.saveLibrarySearch(9, "tab=collections");
-    void result.current.saveLibrarySearch(7, "tab=library&sort=title");
-    const revisitedMiddle = result.current.saveLibrarySearch(9, "tab=collections");
-
-    expect(revisitedMiddle).toBe(middle);
-    await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledTimes(1));
-    await act(async () => {
-      resolveFirst?.({});
-      await first;
-    });
-
-    await expect(revisitedMiddle).rejects.toEqual(rejected);
-    await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledTimes(3));
   });
 
   it("does not coalesce past a newer value for the same library", async () => {

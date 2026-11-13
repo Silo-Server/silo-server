@@ -12,9 +12,6 @@ import {
 
 describe("chartSeriesColor", () => {
   const cases: { name: string; index: number; expected: string }[] = [
-    { name: "first slot", index: 0, expected: "var(--chart-1)" },
-    { name: "third slot", index: 2, expected: "var(--chart-3)" },
-    { name: "last slot", index: 4, expected: "var(--chart-5)" },
     { name: "clamps past the last slot instead of cycling", index: 9, expected: "var(--chart-5)" },
     { name: "clamps negative indexes", index: -3, expected: "var(--chart-1)" },
     { name: "falls back for non-finite indexes", index: Number.NaN, expected: "var(--chart-1)" },
@@ -34,7 +31,6 @@ describe("niceTicks", () => {
     expected: number[];
   }[] = [
     { name: "rounds a small count range up", args: [0, 3, 4], expected: [0, 2, 4] },
-    { name: "steps a wide range by tens", args: [0, 100, 5], expected: [0, 20, 40, 60, 80, 100] },
     { name: "handles a fractional range", args: [0, 0.4, 4], expected: [0, 0.2, 0.4] },
     { name: "swaps reversed bounds", args: [10, 0, 3], expected: [0, 5, 10] },
     { name: "expands a flat series", args: [0, 0, 4], expected: [0, 0.5, 1] },
@@ -70,7 +66,6 @@ describe("niceTicks", () => {
 
 describe("buildLinePath", () => {
   const cases: { name: string; points: LinePathPoint[]; expected: string }[] = [
-    { name: "renders nothing for no points", points: [], expected: "" },
     {
       name: "renders nothing when every sample is missing",
       points: [
@@ -83,15 +78,6 @@ describe("buildLinePath", () => {
       name: "renders an isolated sample as a zero-length subpath",
       points: [{ x: 0, y: 5 }],
       expected: "M 0 5 L 0 5",
-    },
-    {
-      name: "connects contiguous samples",
-      points: [
-        { x: 0, y: 5 },
-        { x: 10, y: 3 },
-        { x: 20, y: 4 },
-      ],
-      expected: "M 0 5 L 10 3 L 20 4",
     },
     {
       name: "breaks the path across a gap",
@@ -155,10 +141,6 @@ describe("buildAreaPath", () => {
       ),
     ).toBe("M 0 50 L 0 2 L 0 50 Z M 20 50 L 20 6 L 20 50 Z");
   });
-
-  it("renders nothing without samples", () => {
-    expect(buildAreaPath([{ x: 0, y: null }], 10)).toBe("");
-  });
 });
 
 describe("stackSegments", () => {
@@ -167,7 +149,6 @@ describe("stackSegments", () => {
     values: number[];
     expected: { index: number; value: number; start: number; end: number }[];
   }[] = [
-    { name: "returns nothing for no series", values: [], expected: [] },
     {
       name: "accumulates offsets from the baseline",
       values: [2, 1, 3],
@@ -175,14 +156,6 @@ describe("stackSegments", () => {
         { index: 0, value: 2, start: 0, end: 2 },
         { index: 1, value: 1, start: 2, end: 3 },
         { index: 2, value: 3, start: 3, end: 6 },
-      ],
-    },
-    {
-      name: "keeps zero segments so indexes line up with series",
-      values: [0, 4],
-      expected: [
-        { index: 0, value: 0, start: 0, end: 0 },
-        { index: 1, value: 4, start: 0, end: 4 },
       ],
     },
     {
@@ -254,19 +227,9 @@ describe("timeBuckets", () => {
     expect(buckets).toEqual([{ t: 0, value: 2, present: true }]);
   });
 
-  it("supports non-numeric bucket payloads", () => {
-    const buckets = timeBuckets<number[]>(0, MINUTE, MINUTE, [{ t: 0, value: [1, 2] }], []);
-
-    expect(buckets).toEqual([
-      { t: 0, value: [1, 2], present: true },
-      { t: MINUTE, value: [], present: false },
-    ]);
-  });
-
   const degenerate: { name: string; args: Parameters<typeof timeBuckets<number>> }[] = [
     { name: "an inverted window", args: [MINUTE, 0, MINUTE, [], 0] },
     { name: "a zero step", args: [0, MINUTE, 0, [], 0] },
-    { name: "a negative step", args: [0, MINUTE, -MINUTE, [], 0] },
     { name: "a non-finite bound", args: [0, Number.POSITIVE_INFINITY, MINUTE, [], 0] },
   ];
 

@@ -247,7 +247,7 @@ func (s *MetadataService) reapplyLocalSeriesChildren(
 			}
 			for _, season := range seasons {
 				if _, ok := seasonDirs[season.SeasonNumber]; ok {
-					accumulateSeasonResults(seasonResults, []SeasonResult{season})
+					accumulateSeasonResults(seasonResults, []SeasonResult{season}, "")
 				}
 			}
 		}
@@ -280,9 +280,10 @@ func (s *MetadataService) reapplyLocalSeriesChildren(
 			if !s.localArtworkUsable() {
 				dropLocalEpisodeArtwork(episodes)
 			}
+			markLocalEpisodeTitles(episodes)
 			for _, episode := range episodes {
 				if _, ok := episodeFiles[episode.EpisodeNumber]; ok && episode.SeasonNumber == seasonNumber {
-					accumulateEpisodeResults(episodeResults, []EpisodeResult{episode})
+					accumulateEpisodeResults(episodeResults, []EpisodeResult{episode}, "")
 				}
 			}
 		}

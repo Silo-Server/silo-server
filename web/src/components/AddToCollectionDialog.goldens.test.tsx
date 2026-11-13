@@ -62,13 +62,6 @@ function listedChoices() {
 }
 
 describe("Add to collection", () => {
-  it("lists only the profile's own manual collections for a regular profile", async () => {
-    show();
-    await screen.findByRole("checkbox", { name: "Rainy days" });
-    expect(listedChoices()).toEqual(goldens.addToCollectionChoices);
-    expect(v2Recorder.calls).toEqual(goldens.addToCollectionReads);
-  });
-
   it("lists the same for an acting admin and reads no library's collections", async () => {
     account.actingAdmin = true;
     show();

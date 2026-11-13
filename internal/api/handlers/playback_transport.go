@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
-	"github.com/Silo-Server/silo-server/internal/telemetry"
 
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
@@ -50,7 +49,7 @@ func (h *PlaybackHandler) startRemotePlaybackTransport(ctx context.Context, node
 	if err := nodeauth.Sign(httpRequest, nodeURL, h.JWTSecret); err != nil {
 		return transcodenode.TranscodeStartResponse{}, 0, err
 	}
-	response, err := telemetry.DoTrustedNode(transcodeproxy.NodeClient(), httpRequest, "transcode_start")
+	response, err := transcodeproxy.DoNode(transcodeproxy.NodeClient(), httpRequest, nodeURL, "transcode_start")
 	if err != nil {
 		nodepool.ReportConnectFailure(h.NodePlanner, nodeURL, err)
 		return transcodenode.TranscodeStartResponse{}, 0, logredact.SanitizeURLError(err)

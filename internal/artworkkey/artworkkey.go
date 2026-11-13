@@ -43,13 +43,33 @@ const (
 	ImageDisc     = "disc"
 )
 
+// ImageTypeOf returns the image type a cached key was generated under: its
+// image-type directory segment (".../{imageType}/{variant}.{ext}") when that
+// names one of the types above, else fallback. The segment is authoritative
+// because the cacher generates the ladder for the same type it writes there,
+// so a slot that carries another type's art (an episode still in a backdrop or
+// poster slot) still resolves to rungs that exist.
+func ImageTypeOf(objectPath, fallback string) string {
+	dir := Directory(objectPath)
+	if dir == "" {
+		return fallback
+	}
+	switch segment := path.Base(dir); segment {
+	case ImagePoster, ImageBackdrop, ImageStill, ImageLogo, ImageProfile,
+		ImageBanner, ImageThumb, ImageClearArt, ImageDisc:
+		return segment
+	default:
+		return fallback
+	}
+}
+
 // LadderVersion identifies the current shape of the variant ladder returned by
 // VariantWidths. It MUST be bumped whenever an existing type's widths change so
 // the one-shot ladder backfill re-enqueues already-cached artwork and generates
 // the newly-added rungs. Adding a type does not need a bump. Existing deployments compare their recorded
 // backfilled_version against this value; leaving it stale means clients asking
 // for a new rung keep falling back to the next lower one forever.
-const LadderVersion = 2
+const LadderVersion = 3
 
 // Build returns an object key for a variant under basePath.
 func Build(basePath, variant, revision, ext string) string {
@@ -145,7 +165,12 @@ func OriginalOf(objectPath string) string {
 func VariantWidths(imageType string) []int {
 	switch strings.ToLower(strings.TrimSpace(imageType)) {
 	case ImageBackdrop:
-		return []int{1920, 1280, 300}
+		// w2560 serves 1440p and high-density laptop and tablet heroes without
+		// sending the 4K original.
+		return []int{2560, 1920, 1280, 300}
+	case ImageStill:
+		// Episode stills are 16:9 like backdrops; w1280 is a TV-sized hero.
+		return []int{1280, 500, 300}
 	case ImageThumb:
 		// Landscape thumbs are 16:9 cards, shown smaller than backdrops.
 		return []int{1280, 500, 300}
@@ -160,8 +185,8 @@ func VariantWidths(imageType string) []int {
 		// Cast/crew headshots are only ever rendered at card size; they do not
 		// get the wide rung posters and stills carry.
 		return []int{500, 300}
-	default: // poster, still
-		return []int{780, 500, 300}
+	default: // poster
+		return []int{1000, 500, 300}
 	}
 }
 

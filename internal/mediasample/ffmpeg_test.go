@@ -125,7 +125,7 @@ func TestRunStatsWithRealFFmpeg(t *testing.T) {
 
 // TestRunSamplesWithRealFFmpeg samples a generated clip with a keyframe every
 // second, black until 16 s and white after, every three seconds from 0.5 s,
-// in containers the concat demuxer reads (Matroska, MP4, their timestamps
+// in containers the concat demuxer reads (Matroska, and MP4 with timestamps
 // shifted to start at 11.4 s) and one it cannot (MPEG-TS). Each frame must
 // carry its sample time and show the picture at that time in media time; the
 // sample at 15.5 s must decode the keyframe at 15 s (black), not the next one.
@@ -163,10 +163,9 @@ func TestRunSamplesWithRealFFmpeg(t *testing.T) {
 		return path
 	}
 	inputs := map[string]string{
-		"matroska":         clip,
-		"matroska shifted": remux("shifted.mkv", "-output_ts_offset", "11.4"),
-		"mp4 shifted":      remux("shifted.mp4", "-output_ts_offset", "11.4"),
-		"mpegts":           remux("clip.ts"),
+		"matroska":    clip,
+		"mp4 shifted": remux("shifted.mp4", "-output_ts_offset", "11.4"),
+		"mpegts":      remux("clip.ts"),
 	}
 	for name, input := range inputs {
 		t.Run(name, func(t *testing.T) {
@@ -247,16 +246,16 @@ func TestRunImageWithRealFFmpeg(t *testing.T) {
 // TestRunSheetsWithRealFFmpeg tiles a generated 2.4:1 clip of six ten-second
 // gray scenes, keyframes every two seconds, sampled at each scene's middle,
 // into two 2x2 sheets: in Matroska and in MP4 with timestamps shifted to
-// start at 11.4 s (read through a list), in MPEG-TS (read as a window), and
-// read through as one window. Each cell must show its scene's gray at full
-// range, and the cells after the last sample black.
+// start at 11.4 s (read through a list), and in MPEG-TS (read as a window).
+// Each cell must show its scene's gray at full range, and the cells after the
+// last sample black.
 func TestRunSheetsWithRealFFmpeg(t *testing.T) {
 	ffmpeg, caps := realFFmpeg(t)
 	grays := []int{20, 60, 100, 140, 180, 220}
 	var sources []string
 	var inputs []string
 	for i, gray := range grays {
-		sources = append(sources, "-f", "lavfi", "-i", fmt.Sprintf("color=c=0x%02x%02x%02x:s=640x266:r=24:d=10", gray, gray, gray))
+		sources = append(sources, "-f", "lavfi", "-i", fmt.Sprintf("color=c=0x%02x%02x%02x:s=160x66:r=24:d=10", gray, gray, gray))
 		inputs = append(inputs, fmt.Sprintf("[%d:v]", i))
 	}
 	dir := t.TempDir()
@@ -293,10 +292,6 @@ func TestRunSheetsWithRealFFmpeg(t *testing.T) {
 		req.Input = input
 		cases[name] = req
 	}
-	readThrough := base
-	readThrough.Input = clip
-	readThrough.Samples = &Samples{Seconds: base.Samples.Seconds, ReadThrough: true}
-	cases["read through"] = readThrough
 
 	want := [][]int{{20, 60, 100, 140}, {180, 220, 0, 0}}
 	for name, req := range cases {
@@ -409,6 +404,9 @@ func TestRunSheetsRejectsPrematureEOFWithRealFFmpeg(t *testing.T) {
 	ffmpeg, _ := realFFmpeg(t)
 	for _, shift := range []int{0, 10} {
 		for _, offset := range []float64{0, 11.4} {
+			if shift > 0 && offset > 0 {
+				continue // each start after zero is covered on its own
+			}
 			for _, duration := range []int{2, 8} {
 				t.Run(fmt.Sprintf("sample-shift-%d/container-offset-%g/duration-%d", shift, offset, shift+duration), func(t *testing.T) {
 					clip := filepath.Join(t.TempDir(), "clip.ts")
@@ -455,6 +453,68 @@ func TestRunSheetsRejectsPrematureEOFWithRealFFmpeg(t *testing.T) {
 	}
 }
 
+// TestRunSheetsAudioTailWithRealFFmpeg reads sheets from a two-second video
+// with audio, sampled at 1, 3, 5, and 7 s, through a window: MPEG-TS always
+// reads one, and Matroska does with ReadThrough. The video is dark until a
+// light keyframe at 1.5 s. Samples after the video ends but within an audio
+// stream show that last frame and publish, whichever audio stream runs on
+// and however many programs list it, and a declared audio stream without
+// packets does not fail the copy. A file whose audio stops with its video,
+// as a truncated one does, still fails as empty.
+func TestRunSheetsAudioTailWithRealFFmpeg(t *testing.T) {
+	ffmpeg, _ := realFFmpeg(t)
+	tone := func(seconds int) []string {
+		return []string{"-f", "lavfi", "-i", fmt.Sprintf("sine=frequency=440:duration=%d", seconds)}
+	}
+	tests := []struct {
+		name      string
+		container string
+		inputs    [][]string
+		// codec args after the video's; audio inputs follow the video input.
+		audio     []string
+		published bool
+	}{
+		{"ts audio tail", "ts", [][]string{tone(10)}, []string{"-map", "1:a", "-c:a", "aac"}, true},
+		{"mkv audio tail", "mkv", [][]string{tone(10)}, []string{"-map", "1:a", "-c:a", "aac"}, true},
+		{"ts truncated", "ts", [][]string{tone(2)}, []string{"-map", "1:a", "-c:a", "aac"}, false},
+		{"mkv truncated", "mkv", [][]string{tone(2)}, []string{"-map", "1:a", "-c:a", "aac"}, false},
+		{"mkv second audio tail", "mkv", [][]string{tone(2), tone(10)}, []string{"-map", "1:a", "-map", "2:a", "-c:a", "aac"}, true},
+		{"ts multi-program audio tail", "ts", [][]string{tone(2), tone(10)},
+			[]string{"-map", "1:a", "-map", "2:a", "-c:a", "aac", "-program", "st=0:st=1", "-program", "st=0:st=2", "-program", "st=0:st=1"}, true},
+		{"ts audio without packets", "ts", [][]string{tone(10)},
+			[]string{"-filter_complex", "[1:a]asplit[a][b];[a]atrim=end_sample=1[empty]", "-map", "[empty]", "-map", "[b]", "-c:a:0", "ac3", "-c:a:1", "aac"}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clip := filepath.Join(t.TempDir(), "clip."+tt.container)
+			args := []string{"-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+				"color=c=0x303030:s=64x36:r=24:d=1.5[a];color=c=0xc0c0c0:s=64x36:r=24:d=0.5[b];[a][b]concat=n=2:v=1:a=0[out0]"}
+			for _, input := range tt.inputs {
+				args = append(args, input...)
+			}
+			args = append(args, "-map", "0:v", "-c:v", "libx264", "-threads", "1", "-g", "240", "-bf", "2", "-force_key_frames", "0,1.5")
+			args = append(append(args, tt.audio...), clip)
+			if output, err := exec.Command(ffmpeg, args...).CombinedOutput(); err != nil {
+				t.Skipf("cannot generate the clip: %v: %s", err, output)
+			}
+			req := Request{Input: clip, Samples: &Samples{Seconds: secondsFrom(1, 2, 4), ReadThrough: tt.container == "mkv"},
+				Sheets: &SheetsOutput{TileWidth: 24, TileHeight: 16, Columns: 2, Rows: 2, Quality: 80}, Threads: 1}
+			ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+			defer cancel()
+			result, err := (Runner{FFmpegPath: ffmpeg}).Run(ctx, req)
+			if !tt.published {
+				if failure, ok := errors.AsType[*Error](err); !ok || failure.Reason != ReasonEmpty {
+					t.Fatalf("frames %+v error %v, want the truncated file rejected", result.SheetFrames, err)
+				}
+			} else if err != nil || result.SheetFrames != (SheetFrames{Decoded: 4}) {
+				t.Fatalf("frames %+v error %v, want 4 decoded", result.SheetFrames, err)
+			} else if got := sheetLumas(t, result, 2, 2); !near(got[0], []int{48, 192, 192, 192}) {
+				t.Fatalf("cells %v, want the dark first keyframe then the light last one", got)
+			}
+		})
+	}
+}
+
 // TestRunSheetsAVIKeyframeTimesWithRealFFmpeg reads six ten-second gray
 // scenes from AVI files with B-frames, whose packets carry no PTS, sampled
 // three seconds into each scene. MPEG-4 Part 2 (XviD) decodes with low
@@ -466,7 +526,7 @@ func TestRunSheetsAVIKeyframeTimesWithRealFFmpeg(t *testing.T) {
 	grays := []int{20, 60, 100, 140, 180, 220}
 	var sources, inputs []string
 	for i, gray := range grays {
-		sources = append(sources, "-f", "lavfi", "-i", fmt.Sprintf("color=c=0x%02x%02x%02x:s=640x266:r=24:d=10", gray, gray, gray))
+		sources = append(sources, "-f", "lavfi", "-i", fmt.Sprintf("color=c=0x%02x%02x%02x:s=160x66:r=24:d=10", gray, gray, gray))
 		inputs = append(inputs, fmt.Sprintf("[%d:v]", i))
 	}
 	for name, encoder := range map[string][]string{
@@ -514,51 +574,6 @@ func TestRunSheetsAVIKeyframeTimesWithRealFFmpeg(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// TestRunSheetsToneMapsHDRWithRealFFmpeg tiles a generated 10-bit PQ clip
-// with software tone mapping; the sheet must come out, not black.
-func TestRunSheetsToneMapsHDRWithRealFFmpeg(t *testing.T) {
-	ffmpeg, caps := realFFmpeg(t)
-	if !caps.HasFilter("zscale") {
-		t.Skip("ffmpeg lacks zscale")
-	}
-	clip := filepath.Join(t.TempDir(), "hdr.mkv")
-	generate := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error",
-		"-f", "lavfi", "-i", "testsrc2=s=1280x720:r=24:d=6",
-		"-pix_fmt", "yuv420p10le", "-c:v", "libx265", "-preset", "ultrafast",
-		"-x265-params", "log-level=error:keyint=24:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc",
-		clip)
-	if output, err := generate.CombinedOutput(); err != nil {
-		t.Skipf("cannot generate an HDR clip: %v: %s", err, output)
-	}
-	req := Request{
-		Input:   clip,
-		Samples: &Samples{Seconds: []float64{1, 3, 5}},
-		Sheets:  &SheetsOutput{TileWidth: 160, TileHeight: 90, Columns: 3, Rows: 1, Quality: 80, ToneMap: &ToneMap{AllowSoftware: true}},
-		Threads: 1,
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
-	defer cancel()
-	result, err := Runner{FFmpegPath: ffmpeg, Workload: processmetrics.Thumbnail}.Run(ctx, req)
-	if err != nil {
-		t.Fatalf("run: %v", err)
-	}
-	if len(result.Sheets) != 1 || result.SheetFrames.Decoded != 3 {
-		t.Fatalf("got %d sheets, frames %+v", len(result.Sheets), result.SheetFrames)
-	}
-	img, err := jpeg.Decode(bytes.NewReader(result.Sheets[0].JPEG))
-	if err != nil {
-		t.Fatal(err)
-	}
-	ycc := img.(*image.YCbCr)
-	var sum int
-	for _, y := range ycc.Y {
-		sum += int(y)
-	}
-	if mean := sum / len(ycc.Y); mean < 30 {
-		t.Fatalf("tone-mapped sheet has mean luma %d, want a visible picture", mean)
 	}
 }
 

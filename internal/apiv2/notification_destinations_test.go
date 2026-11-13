@@ -15,20 +15,23 @@ import (
 type fakeNotificationDestinations struct {
 	deleted string
 	calls   int
+	user    int
 	profile string
 	limit   int
+	// loginSession is the login session the last subscribe recorded.
+	loginSession string
 }
 
-func (f *fakeNotificationDestinations) ListNotificationWebPushPage(_ context.Context, profile string, limit int, after *notifications.Cursor) ([]notifications.WebPushSubscription, error) {
-	f.profile, f.limit = profile, limit
+func (f *fakeNotificationDestinations) ListNotificationWebPushPage(_ context.Context, user int, profile string, limit int, after *notifications.Cursor) ([]notifications.WebPushSubscription, error) {
+	f.user, f.profile, f.limit = user, profile, limit
 	rows := []notifications.WebPushSubscription{{ID: "01", Endpoint: "https://push.example.test/1", P256dh: "sensitive-p256dh", Auth: "sensitive-auth", CreatedAt: fixedTime()}, {ID: "02", Endpoint: "https://push.example.test/2", CreatedAt: fixedTime()}}
 	if after != nil {
 		rows = rows[1:]
 	}
 	return rows, nil
 }
-func (f *fakeNotificationDestinations) ListNotificationWebhookPage(_ context.Context, profile string, limit int, after *notifications.Cursor) ([]notifications.Webhook, error) {
-	f.profile, f.limit = profile, limit
+func (f *fakeNotificationDestinations) ListNotificationWebhookPage(_ context.Context, user int, profile string, limit int, after *notifications.Cursor) ([]notifications.Webhook, error) {
+	f.user, f.profile, f.limit = user, profile, limit
 	rows := []notifications.Webhook{{ID: "01", ProfileID: profile, Revision: 7, Name: "Example", Type: "generic", URLHost: "example.test", URLCiphertext: "sensitive-url", SigningSecretCiphertext: new("sensitive-secret"), CreatedAt: fixedTime()}, {ID: "02", ProfileID: profile, Revision: 7, Name: "Other", Type: "generic", URLHost: "example.test", CreatedAt: fixedTime()}}
 	if after != nil {
 		rows = rows[1:]
@@ -59,6 +62,7 @@ func TestNotificationDestinationCursors(t *testing.T) {
 		{Prefix + "/admin/notifications/server-channels", bearer(adminToken), ""},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
+			fake.user = 0
 			rec := do(t, h, http.MethodGet, tc.path+"?limit=1", "", tc.headers)
 			if rec.Code != 200 || fake.limit != 2 {
 				t.Fatalf("%d %s", rec.Code, rec.Body.String())
@@ -90,6 +94,9 @@ func TestNotificationDestinationCursors(t *testing.T) {
 				t.Fatalf("%+v", page)
 			}
 			requireProblem(t, do(t, h, http.MethodGet, tc.path+strings.Replace(query, "limit=1", "limit=2", 1), "", tc.headers), TypeInvalidCursor)
+			if tc.profile != "" && (fake.user != 1 || fake.profile != tc.profile) {
+				t.Fatalf("listed for user %d profile %q, want the acting account's profile", fake.user, fake.profile)
+			}
 			if tc.profile != "" {
 				requireProblem(t, do(t, h, http.MethodGet, tc.path+query, "", with(bearer(memberToken), "X-Profile-Id", "p-primary")), TypeInvalidCursor)
 			}
@@ -113,9 +120,9 @@ func notificationDestinationFixtureCases() []fixtureCase {
 	return cases
 }
 
-func (f *fakeNotificationDestinations) DeleteNotificationWebPushSubscription(_ context.Context, _ int, profile, id string) error {
+func (f *fakeNotificationDestinations) DeleteNotificationWebPushSubscription(_ context.Context, user int, profile, id string) error {
 	f.calls++
-	f.profile, f.deleted = profile, id
+	f.user, f.profile, f.deleted = user, profile, id
 	return nil
 }
 func TestNotificationWebPushDelete(t *testing.T) {
@@ -130,7 +137,7 @@ func TestNotificationWebPushDelete(t *testing.T) {
 			t.Fatalf("%d %s", rec.Code, rec.Body.String())
 		}
 	}
-	if f.calls != 2 || f.profile != "p-owner" || f.deleted != "row-one" {
+	if f.calls != 2 || f.user != 1 || f.profile != "p-owner" || f.deleted != "row-one" {
 		t.Fatalf("%+v", f)
 	}
 	requireProblem(t, do(t, h, http.MethodDelete, path, "", nil), TypeAuthenticationRequired)
@@ -165,7 +172,8 @@ func TestNotificationWebPushUnsubscribe(t *testing.T) {
 	requireProblem(t, do(t, NewHandler(deps), http.MethodPost, path, `{"endpoint":"opaque"}`, profileOwner()), TypeDependencyUnavailable)
 }
 
-func (f *fakeNotificationDestinations) SubscribeNotificationWebPush(_ context.Context, _ int, profile, endpoint, p256dh, auth, _ string) (*notifications.WebPushSubscription, error) {
+func (f *fakeNotificationDestinations) SubscribeNotificationWebPush(_ context.Context, _ int, profile, endpoint, p256dh, auth, _, loginSessionID string) (*notifications.WebPushSubscription, error) {
+	f.loginSession = loginSessionID
 	f.calls++
 	f.profile, f.deleted = profile, endpoint
 	if endpoint == "invalid" {
@@ -181,7 +189,7 @@ func TestNotificationWebPushSubscribe(t *testing.T) {
 	path := Prefix + "/notifications/web-push/subscriptions"
 	body := `{"endpoint":"https://push.example.test/opaque","keys":{"p256dh":"secret-key","auth":"secret-auth"}}`
 	rec := do(t, h, http.MethodPost, path, body, profileOwner())
-	if rec.Code != 201 || f.calls != 1 || f.profile != "p-owner" || f.deleted != "https://push.example.test/opaque" {
+	if rec.Code != 201 || f.calls != 1 || f.profile != "p-owner" || f.deleted != "https://push.example.test/opaque" || f.loginSession != "s1" {
 		t.Fatalf("%d %s %+v", rec.Code, rec.Body.String(), f)
 	}
 	if strings.Contains(rec.Body.String(), "secret-") {
@@ -197,12 +205,12 @@ func TestNotificationWebPushSubscribe(t *testing.T) {
 	requireProblem(t, do(t, NewHandler(deps), http.MethodPost, path, body, profileOwner()), TypeDependencyUnavailable)
 }
 
-func (f *fakeNotificationDestinations) DeleteNotificationWebhook(_ context.Context, profile, id string, check func(int64) error) error {
+func (f *fakeNotificationDestinations) DeleteNotificationWebhook(_ context.Context, user int, profile, id string, check func(int64) error) error {
 	if err := check(7); err != nil {
 		return err
 	}
 	f.calls++
-	f.profile, f.deleted = profile, id
+	f.user, f.profile, f.deleted = user, profile, id
 	return nil
 }
 func TestNotificationWebhookDelete(t *testing.T) {
@@ -226,7 +234,7 @@ func TestNotificationWebhookDelete(t *testing.T) {
 			t.Fatalf("%d %s", rec.Code, rec.Body.String())
 		}
 	}
-	if f.calls != 2 || f.profile != "p-owner" || f.deleted != "01" {
+	if f.calls != 2 || f.user != 1 || f.profile != "p-owner" || f.deleted != "01" {
 		t.Fatalf("%+v", f)
 	}
 	requireProblem(t, do(t, h, http.MethodDelete, path, "", nil), TypeAuthenticationRequired)
@@ -273,9 +281,9 @@ func TestNotificationServerChannelDelete(t *testing.T) {
 	requireProblem(t, do(t, NewHandler(deps), http.MethodDelete, path, "", bearer(adminToken)), TypeDependencyUnavailable)
 }
 
-func (f *fakeNotificationDestinations) RotateNotificationWebhookSecret(_ context.Context, profile, id string) (string, error) {
+func (f *fakeNotificationDestinations) RotateNotificationWebhookSecret(_ context.Context, user int, profile, id string) (string, error) {
 	f.calls++
-	f.profile, f.deleted = profile, id
+	f.user, f.profile, f.deleted = user, profile, id
 	if id == "discord" {
 		return "", notifications.ErrWebhookInvalid
 	}
@@ -291,7 +299,7 @@ func TestNotificationWebhookRotate(t *testing.T) {
 	h := NewHandler(deps)
 	path := Prefix + "/notifications/webhooks/row-one/rotate-secret"
 	rec := do(t, h, http.MethodPost, path, "", profileOwner())
-	if rec.Code != 200 || rec.Header().Get("Cache-Control") != "no-store" || !strings.Contains(rec.Body.String(), `"signing_secret":"synthetic-secret"`) || f.calls != 1 || f.profile != "p-owner" {
+	if rec.Code != 200 || rec.Header().Get("Cache-Control") != "no-store" || !strings.Contains(rec.Body.String(), `"signing_secret":"synthetic-secret"`) || f.calls != 1 || f.user != 1 || f.profile != "p-owner" {
 		t.Fatalf("%d %s %+v", rec.Code, rec.Body.String(), f)
 	}
 	requireProblem(t, do(t, h, http.MethodPost, path, "", nil), TypeAuthenticationRequired)
@@ -304,8 +312,9 @@ func TestNotificationWebhookRotate(t *testing.T) {
 	requireProblem(t, do(t, NewHandler(deps), http.MethodPost, path, "", profileOwner()), TypeDependencyUnavailable)
 }
 
-func (f *fakeNotificationDestinations) UpdateNotificationWebhook(_ context.Context, profile, id string, input notifications.WebhookInput, check func(int64) error) (*notifications.Webhook, error) {
+func (f *fakeNotificationDestinations) UpdateNotificationWebhook(_ context.Context, user int, profile, id string, input notifications.WebhookInput, check func(int64) error) (*notifications.Webhook, error) {
 	f.calls++
+	f.user, f.profile = user, profile
 	if id == "missing" {
 		return nil, notifications.ErrWebhookNotFound
 	}
@@ -328,8 +337,8 @@ func TestNotificationWebhookUpdate(t *testing.T) {
 	headers := profileOwner()
 	headers["If-Match"] = tag
 	rec := do(t, h, http.MethodPut, path, `{"name":"updated","enabled":false}`, headers)
-	if rec.Code != 200 || rec.Header().Get("ETag") != notificationWebhookTag("p-owner", "row-one", 8).String() || !strings.Contains(rec.Body.String(), `"name":"updated"`) {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	if rec.Code != 200 || rec.Header().Get("ETag") != notificationWebhookTag("p-owner", "row-one", 8).String() || !strings.Contains(rec.Body.String(), `"name":"updated"`) || f.user != 1 || f.profile != "p-owner" {
+		t.Fatalf("%d %s %+v", rec.Code, rec.Body.String(), f)
 	}
 	requireProblem(t, do(t, h, http.MethodPut, path, `{}`, profileOwner()), TypePreconditionRequired)
 	headers["If-Match"] = notificationWebhookTag("p-owner", "row-one", 6).String()

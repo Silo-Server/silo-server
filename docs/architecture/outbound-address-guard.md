@@ -2,7 +2,9 @@
 
 Some features make Silo send HTTP requests to an address a user typed or a
 third party supplied: history import, webhook sync, notification webhooks,
-collection posters set from a URL, and artwork URLs from metadata providers.
+collection posters set from a URL, artwork URLs from metadata providers,
+subtitle file links from OpenSubtitles, catalog seed imports from a URL, and
+plugin repository catalogs and packages.
 The server sits on a network the user may not: a household LAN, or a cluster
 with its database, cache, transcode nodes, and a cloud metadata endpoint. An
 unchecked address lets anyone who can sign in probe that network from the
@@ -62,7 +64,8 @@ History import and webhook sync share one policy,
   server addresses Emby Connect or plex.tv list for the user's account, since
   the user's own server reports those. It is trusted only when the account is
   an enabled admin, or when an admin turned on
-  `media_servers.allow_private_destinations` (Security & Access > Network).
+  `media_servers.allow_private_destinations` (Sign-in & Security > Security >
+  Local network).
 - The setting is off by default, so a server with only an admin account works
   as before. Turning it on lets every account reach the server's local
   network; the admin page says so.
@@ -81,7 +84,7 @@ that list rather than trusting the queued credential. The Plex client removes
 `X-Plex-Token` from any redirect that leaves the first request's host or
 downgrades from HTTPS to HTTP, which `net/http` does not do for custom headers.
 
-Run monitors, v1 run responses, and realtime history-import events carry only
+Run monitors, run responses, and realtime history-import events carry only
 the fixed summaries from `historyimport.PublicRun`; stored diagnostics can hold
 an upstream response body and stay on the server.
 
@@ -89,8 +92,11 @@ an upstream response body and stay on the server.
 
 Webhook destinations use the same classes with a stricter rule: Public only,
 HTTPS only, checked at registration and at every connection. The admin-only
-`notifications.webhooks.allow_private_destinations` development switch lifts
-it. See [Notifications](notifications.md#trust-model-and-ssrf-guard).
+`notifications.webhooks.allow_private_destinations` development switch also
+permits Private addresses; Blocked addresses stay refused at registration and
+on every connection, including redirects. Registration requires resolution to
+allowed addresses in both modes, with a two-second lookup deadline. See
+[Notifications](notifications.md#trust-model-and-ssrf-guard).
 
 ## Artwork downloads
 
@@ -98,14 +104,24 @@ Artwork Silo downloads on its own (metadata refresh, image-cache jobs, person
 images) comes from Public addresses only (`imagecache`). Provider artwork URLs
 are untrusted, so these downloads use the netguard transport too, checked on
 every dial and redirect; the cache keeps no address list of its own. An image
-an admin applies through `POST /api/v2/admin/items/{id}/images/apply` (and its v1
-counterpart) is trusted with the local network, like the import sources an
-admin configures. That covers a URL the admin typed and one picked from the
+an admin applies through `POST /api/v2/admin/items/{id}/images/apply` is
+trusted with the local network, like the import sources an admin configures. That covers a URL the admin typed and one picked from the
 provider list, since the server cannot tell them apart. The handler marks the
 request with `netguard.WithPrivateAccess`, and the download uses the netguard
 transport, which still refuses Blocked addresses on every dial and redirect.
 Only acting admins reach that route, so this does not widen what any other
 account can make the server request.
+
+## Subtitle downloads
+
+An OpenSubtitles download answers with a link to the subtitle file, and the
+provider chooses that address. The file is fetched from Public addresses only,
+through the netguard transport, checked on every dial and redirect; a refused
+link fails the download and stores nothing. The provider's own API calls go to
+its fixed host and are not guarded. Because the guarded transport ignores proxy
+environment variables, a server whose only route to the internet is a proxy can
+search OpenSubtitles but not download from it. SubDL fetches files only from its
+download host and refuses redirects to another host.
 
 ## Serving catalog artwork
 
@@ -137,9 +153,8 @@ Collection artwork downloads use the netguard transport with no fallback
 client (`newCollectionImageClient` in `internal/api/handlers`):
 
 - **Personal collection posters.** Any profile, including a child's, can set
-  one from a URL: `poster_source_url` on the v1 create and update and the v2
-  `createCollection`, and `source_url` on v2 `uploadCollectionPoster`. These
-  are Public only. Every refused address fails with the same error
+  one from a URL: `poster_source_url` on `createCollection`, and `source_url`
+  on `uploadCollectionPoster`. These are Public only. Every refused address fails with the same error
   (`errCollectionImageSourceNotAllowed`), whether something listens there or
   not, so the answer cannot be used to map the server's network.
 - **Library collection artwork.** The poster and backdrop source URLs on the
@@ -152,6 +167,35 @@ client (`newCollectionImageClient` in `internal/api/handlers`):
 
 Blocked addresses stay refused in all three cases, on every dial and redirect.
 
+## Catalog seed imports
+
+An admin can import a catalog seed from a remote `.json.gz` URL, either
+directly or as a queued import job, which checks the URL by downloading it and
+then downloads it again when the job runs. Both downloads go through
+`catalogseed.DownloadRemoteBundle`: a netguard transport, with the request
+trusted with the local network (`netguard.WithPrivateAccess`), since only
+admins reach these routes and a seed is often published by another server on
+the same LAN. Blocked addresses stay refused on every dial and redirect; the
+API answers a refused address with the same 400 as any source it cannot load,
+and a failed import job records the refusal in its error. The download is
+capped at `catalogseed.MaxRemoteBundleBytes` (2 GiB compressed) and keeps its
+ten-minute timeout. A body is refused as soon as it passes the limit, or up
+front when its declared length does, with a message that names the limit, so
+a body without end cannot exhaust the server's memory.
+
+## Plugin repositories
+
+Repository catalog indexes, checksum files and plugin packages are all fetched
+by `fetchPackageResource` in `internal/plugins`, through the client from
+`newPackageFetchClient`. An admin adds the repository, but the catalog JSON is
+published by a third party and chooses the package and checksum addresses.
+The client uses a netguard transport, keeping its per-phase timeouts (dial,
+TLS handshake, response headers, and the body read-idle timeout) and no
+whole-request deadline. Requests are trusted with the local network so
+LAN-hosted repositories keep working. A blocked address, reached directly or by
+redirect, fails as a permanent `PackageError`, not a transient one, because a
+retry cannot change it.
+
 ## Limits
 
 The guard cannot tell a friendly public host from a hostile one: any account
@@ -161,8 +205,12 @@ networking the server cannot see the host's public address, so a request to
 it is not recognized as the server's own. Run the container behind a firewall
 that also applies to traffic from the container if that matters.
 
+Because guarded transports ignore proxy environment variables, a server whose
+only route to the internet is an HTTP proxy cannot download remote catalog
+seeds, plugin repository catalogs, or plugin packages.
+
 A resolver that answers public names with addresses netguard classes as
 Private makes those hosts unreachable for untrusted requests, provider artwork
-downloads included. Two setups do this: proxy routers in fake-IP DNS mode,
-which answer from `198.18.0.0/15`, and DNS64 on an IPv6-only network, which
-answers IPv4-only hosts with `64:ff9b::/96` addresses.
+and OpenSubtitles file downloads included. Two setups do this: proxy routers in
+fake-IP DNS mode, which answer from `198.18.0.0/15`, and DNS64 on an IPv6-only
+network, which answers IPv4-only hosts with `64:ff9b::/96` addresses.

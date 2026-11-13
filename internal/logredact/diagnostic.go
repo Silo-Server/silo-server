@@ -36,6 +36,7 @@ func SanitizeRequestURL(raw string) string {
 	u.RawQuery = SanitizeQuery(u.RawQuery)
 	u.Fragment = ""
 	u.RawFragment = ""
+	redactURLPath(u)
 	return u.String()
 }
 
@@ -66,11 +67,13 @@ func SanitizeJSON(body []byte) []byte {
 }
 
 func diagnosticSecretKey(key string) bool {
-	// Pw is the Jellyfin login alias. Normalisation covers the casing and
-	// separators used by compatibility clients without changing auth parsing.
+	// Pw is the Jellyfin login alias. PlaySessionId is the Jellyfin play
+	// session ID, which on its own authorizes that play's media requests.
+	// Normalisation covers the casing and separators used by compatibility
+	// clients without changing auth parsing.
 	key = strings.ToLower(strings.TrimSpace(key))
 	key = strings.ReplaceAll(strings.ReplaceAll(key, "_", ""), "-", "")
-	return key == "pw" || SecretKey(key)
+	return key == "pw" || key == "playsessionid" || SecretKey(key)
 }
 
 func sanitizeDiagnosticValue(value any) any {
@@ -90,10 +93,9 @@ func sanitizeDiagnosticValue(value any) any {
 	case string:
 		// Playback responses contain token-bearing relative and absolute URLs
 		// under ordinary keys such as DirectStreamUrl and MediaSources[].Path.
-		// Credentials can only sit in a query, fragment or userinfo; without
-		// those, keep the value verbatim so on-disk file paths are not
-		// re-encoded as URLs.
-		if looksLikeDiagnosticURL(v) && strings.ContainsAny(v, "?#@") {
+		// A value with no part that can hold a credential is kept verbatim
+		// so on-disk file paths are not re-encoded as URLs.
+		if looksLikeDiagnosticURL(v) && URLMayHoldCredential(v) {
 			return SanitizeRequestURL(v)
 		}
 	}
@@ -181,8 +183,10 @@ func assignmentValue(text string, i int) (start, end int) {
 // non-secret outer assignment (desc = api_key=SECRET) cannot hide a nested one.
 var secretAssignmentPattern = regexp.MustCompile(`(?i)([\w.-]*(?:password|passwd|secret|token|api[_-]?key|authorization|cookie)[\w.-]*"?\s*[:=]\s*)(?:(?:bearer|basic)\s+)?(?:"[^"]*"|[^\s"&,;]+)`)
 
-// urlUserinfoPattern matches the userinfo of a URL embedded in free text.
-var urlUserinfoPattern = regexp.MustCompile(`://[^/\s@]+@`)
+// urlUserinfoPattern matches through the last @ before the URL's path, since
+// a password in free text may hold unescaped @, ? or # characters. It fails
+// closed: in a URL with no path, an @ in the query or fragment masks the host.
+var urlUserinfoPattern = regexp.MustCompile(`://[^/\s]+@`)
 
 // SanitizeText masks credential assignments and URL userinfo in free-form
 // diagnostic text, such as a stored error message, and keeps everything else.

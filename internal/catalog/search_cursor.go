@@ -3,7 +3,6 @@ package catalog
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -59,7 +58,7 @@ type searchCursorSQL struct {
 
 func searchFTSTerms() []queryCursorTerm {
 	terms := []queryCursorTerm{}
-	for _, expression := range []string{"exact_title_match", "contiguous_title_match", "year_match", "phrase_rank", "title_prefix_rank", "overview_rank"} {
+	for _, expression := range []string{"media_rank", "exact_title_match", "contiguous_title_match", "year_match", "phrase_rank", "title_prefix_rank", "overview_rank"} {
 		terms = append(terms, queryCursorTerm{expression: expression, kind: cursorKindNumber, descending: true, nullsLast: false})
 	}
 	return append(terms, queryCursorTerm{expression: searchLowerTitleExpression, kind: cursorKindText, nullsLast: true}, queryCursorTerm{expression: cursorContentIDColumn, kind: cursorKindText, nullsLast: true})
@@ -136,17 +135,24 @@ func (r *ItemRepository) searchFTSCursorRows(ctx context.Context, parsed parsedS
 	if sql == "" {
 		return []*models.MediaItem{}, nil, 0, nil
 	}
-	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
-	if err != nil {
-		return nil, nil, 0, err
+	// A lone statement already reads one snapshot. The count and the general
+	// query after a partial exact tier need a transaction to share one.
+	var q rowQuerier = r.pool
+	var tx pgx.Tx
+	if includeTotal || options.exactSQL != "" {
+		var err error
+		if tx, err = r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}); err != nil {
+			return nil, nil, 0, err
+		}
+		defer func() {
+			rollbackCtx, cancel := context.WithTimeout(context.Background(), postgresSearchRollbackTimeout)
+			defer cancel()
+			_ = tx.Rollback(rollbackCtx)
+		}()
+		q = tx
 	}
-	defer func() {
-		rollbackCtx, cancel := context.WithTimeout(context.Background(), postgresSearchRollbackTimeout)
-		defer cancel()
-		_ = tx.Rollback(rollbackCtx)
-	}()
 	if !includeTotal && options.exactSQL != "" {
-		rows, err := tx.Query(ctx, options.exactSQL, searchPlanArgs(options.exactArgs)...)
+		rows, err := tx.Query(ctx, options.exactSQL, searchPlanArgs(options.exactArgs)...) //nolint:rowserrcheck // scanItems checks Err through the cursorRows wrapper
 		if err != nil {
 			return nil, nil, 0, err
 		}
@@ -163,7 +169,7 @@ func (r *ItemRepository) searchFTSCursorRows(ctx context.Context, parsed parsedS
 			return items, wrapped.keys, 0, nil
 		}
 	}
-	rows, err := tx.Query(ctx, sql, searchPlanArgs(args)...)
+	rows, err := q.Query(ctx, sql, searchPlanArgs(args)...) //nolint:rowserrcheck // scanItems checks Err through the cursorRows wrapper
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -179,8 +185,10 @@ func (r *ItemRepository) searchFTSCursorRows(ctx context.Context, parsed parsedS
 			return nil, nil, 0, err
 		}
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, nil, 0, err
+	if tx != nil {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, nil, 0, err
+		}
 	}
 	return items, wrapped.keys, total, nil
 }
@@ -306,7 +314,7 @@ func (r *ItemRepository) combinedSearchCandidatesWithFTS(ctx context.Context, pa
 		floor = fuzzyAugmentSimilarityFloor
 	}
 	options := &searchCursorSQL{request: searchOptions(request)}
-	sql, _, args := r.buildFuzzySearchCursorSQL(parsed, itemTypes, fuzzyMaxResults+1, 0, filter, false, contentIDsFromMediaItems(fts), floor, options)
+	sql, _, args := r.buildFuzzySearchCursorSQL(parsed, itemTypes, fuzzyCandidatePool+1, 0, filter, false, contentIDsFromMediaItems(fts), floor, options)
 	if options.err != nil {
 		return nil, false, options.err
 	}
@@ -325,7 +333,7 @@ func (r *ItemRepository) combinedSearchCandidatesWithFTS(ctx context.Context, pa
 	if _, err := tx.Exec(ctx, fmt.Sprintf("SET LOCAL pg_trgm.strict_word_similarity_threshold = %g", trgmWordSimilarityThreshold)); err != nil {
 		return nil, false, err
 	}
-	rows, err := tx.Query(ctx, sql, searchPlanArgs(args)...)
+	rows, err := tx.Query(ctx, sql, searchPlanArgs(args)...) //nolint:rowserrcheck // scanItems checks Err through the cursorRows wrapper
 	if err != nil {
 		return nil, false, err
 	}
@@ -335,9 +343,9 @@ func (r *ItemRepository) combinedSearchCandidatesWithFTS(ctx context.Context, pa
 	if err != nil {
 		return nil, false, err
 	}
-	truncated := len(fuzzy) > fuzzyMaxResults
+	truncated := len(fuzzy) > fuzzyCandidatePool
 	if truncated {
-		fuzzy = fuzzy[:fuzzyMaxResults]
+		fuzzy = fuzzy[:fuzzyCandidatePool]
 	}
 	aliases, err := loadFuzzyRerankAliases(ctx, tx, searchTextFromParsed(parsed), fuzzy)
 	if err != nil {
@@ -346,43 +354,23 @@ func (r *ItemRepository) combinedSearchCandidatesWithFTS(ctx context.Context, pa
 	if err := tx.Commit(ctx); err != nil {
 		return nil, false, err
 	}
-	query := normalizeTitleForComparison(searchTextFromParsed(parsed))
-	tokens, validTokens := boundedFuzzyTokens(query, fuzzyRerankMaxQueryTokens)
-	ranks := make([]fuzzyRankedItem, len(fuzzy))
-	keysByID := map[string][]QueryCursorValue{}
-	for i, item := range fuzzy {
-		if err := ctx.Err(); err != nil {
-			return nil, false, err
-		}
-		score := fuzzyTitleScore{}
-		if validTokens && len(tokens) > 0 {
-			score = fuzzyTitleScore{editDistance: int(^uint(0) >> 1), extraTokens: int(^uint(0) >> 1)}
-			variants := append([]string(nil), aliases[item.ContentID]...)
-			if len(item.Title) <= fuzzyRerankMaxTitleBytes {
-				variants = append(variants, item.Title)
-			}
-			for _, variant := range variants {
-				candidate := scoreFuzzyTitleVariant(query, tokens, variant)
-				if fuzzyTitleScoreBetter(candidate, score) {
-					score = candidate
-				}
-			}
-		}
-		ranks[i] = fuzzyRankedItem{item: item, score: score, order: i}
-		keys := []QueryCursorValue{boolCursorValue(score.exact), numberCursorValue(score.matchedTokens), boolCursorValue(score.contiguous), numberCursorValue(score.editDistance), numberCursorValue(score.extraTokens)}
-		keysByID[item.ContentID] = append(keys, wrapped.keys[i].Keys...)
+	ranks, required, err := rankFuzzyItems(ctx, searchTextFromParsed(parsed), fuzzy, aliases)
+	if err != nil {
+		return nil, false, err
 	}
-	slices.SortStableFunc(ranks, func(a, b fuzzyRankedItem) int {
-		if fuzzyTitleScoreBetter(a.score, b.score) {
-			return -1
-		}
-		if fuzzyTitleScoreBetter(b.score, a.score) {
-			return 1
-		}
-		return 0
-	})
+	if required > 0 {
+		ranks = admitFuzzyRanks(ranks, required, len(fts) > 0)
+	}
+	if len(ranks) > fuzzyMaxResults {
+		ranks, truncated = ranks[:fuzzyMaxResults], true
+	}
+	// Admitted ranks share one missingWords value, so these keys order them
+	// exactly as fuzzyTitleScoreBetter does.
 	for _, rank := range ranks {
-		candidates = append(candidates, searchCandidate{item: rank.item, cursor: &SearchCursor{Mode: searchCursorCombined, Phase: searchCursorFuzzy, Keys: keysByID[rank.item.ContentID]}})
+		score := rank.score
+		keys := []QueryCursorValue{boolCursorValue(score.exact), numberCursorValue(score.matchedTokens), boolCursorValue(score.contiguous), numberCursorValue(score.editDistance), numberCursorValue(score.extraTokens)}
+		keys = append(keys, wrapped.keys[rank.order].Keys...)
+		candidates = append(candidates, searchCandidate{item: rank.item, cursor: &SearchCursor{Mode: searchCursorCombined, Phase: searchCursorFuzzy, Keys: keys}})
 	}
 	candidates, err = r.groupSearchCandidates(ctx, candidates, searchOptions(request).GroupByWork, searchOptions(request).Definition.Limit)
 	return candidates, truncated, err
@@ -622,7 +610,7 @@ func (r *ItemRepository) searchCandidatesExecutor(def QueryDefinition, access Ac
 		if episode {
 			relation = episodeCatalogBaseRelation
 		}
-		branches = append(branches, "SELECT "+qualifiedItemColumns("mi")+", mi.last_air_date_at, mi.content_rating_age FROM "+relation+" WHERE "+condition)
+		branches = append(branches, "SELECT "+qualifiedItemColumns("mi")+", mi.last_air_date_at, mi."+latestAvailableAirDateColumn+", mi.content_rating_age FROM "+relation+" WHERE "+condition)
 	}
 	executor := &QueryExecutor{Pool: r.pool, BaseRelationSQL: "(" + strings.Join(branches, " UNION ALL ") + ") mi"}
 	// The full access/definition predicate has already been applied in the

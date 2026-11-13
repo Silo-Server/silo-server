@@ -41,12 +41,12 @@ func TestGetLeafUserDataUsesEbookReaderProgress(t *testing.T) {
 	ctx = apimw.SetProfileID(ctx, "profile-1")
 	req = req.WithContext(ctx)
 
-	progress := handler.getLeafUserData(req.Context(), handler.viewerOrDeny(req), "ebook-progress", "ebook")
+	progress := handler.getLeafUserData(req.Context(), testItemViewer(t, handler, req), "ebook-progress", "ebook")
 	if progress == nil || progress.Played || !progress.IsInProgress || progress.PositionSeconds != 0.42 || progress.DurationSeconds != 1 {
 		t.Fatalf("partial ebook user data = %#v", progress)
 	}
 
-	complete := handler.getLeafUserData(req.Context(), handler.viewerOrDeny(req), "ebook-complete", "ebook")
+	complete := handler.getLeafUserData(req.Context(), testItemViewer(t, handler, req), "ebook-complete", "ebook")
 	if complete == nil || !complete.Played || complete.IsInProgress {
 		t.Fatalf("completed ebook user data = %#v", complete)
 	}
@@ -67,7 +67,7 @@ func TestGetLeafUserDataReturnsAudiobookProgress(t *testing.T) {
 	ctx = apimw.SetProfileID(ctx, "profile-1")
 	req = req.WithContext(ctx)
 
-	progress := handler.getLeafUserData(req.Context(), handler.viewerOrDeny(req), "audiobook-1", "audiobook")
+	progress := handler.getLeafUserData(req.Context(), testItemViewer(t, handler, req), "audiobook-1", "audiobook")
 	if progress == nil {
 		t.Fatal("audiobook user data = nil, want saved progress")
 	}
@@ -82,7 +82,7 @@ func TestGetLeafUserDataUsesCompletedHistoryWhenProgressMissing(t *testing.T) {
 	handler := &ItemsHandler{storeProvider: testUserStoreProvider{store: store}}
 	req := authorizedUserDataRequest()
 
-	userData := handler.getLeafUserData(req.Context(), handler.viewerOrDeny(req), "movie-history-only", "movie")
+	userData := handler.getLeafUserData(req.Context(), testItemViewer(t, handler, req), "movie-history-only", "movie")
 	if userData == nil {
 		t.Fatal("movie user data = nil, want history-backed watched state")
 	}
@@ -111,7 +111,7 @@ func TestGetLeafUserDataPreservesResumeWhenCompletedHistoryExists(t *testing.T) 
 	handler := &ItemsHandler{storeProvider: testUserStoreProvider{store: store}}
 	req := authorizedUserDataRequest()
 
-	userData := handler.getLeafUserData(req.Context(), handler.viewerOrDeny(req), "movie-rewatch", "movie")
+	userData := handler.getLeafUserData(req.Context(), testItemViewer(t, handler, req), "movie-rewatch", "movie")
 	if userData == nil {
 		t.Fatal("movie user data = nil, want progress-backed user data")
 	}
@@ -137,7 +137,7 @@ func TestGetAggregateUserDataReturnsNilWhenProgressBatchFails(t *testing.T) {
 		episodes[i] = &models.Episode{ContentID: "episode-" + strconv.Itoa(i+1)}
 	}
 
-	if userData := handler.getAggregateUserData(req.Context(), handler.viewerOrDeny(req), episodes); userData != nil {
+	if userData := handler.getAggregateUserData(req.Context(), testItemViewer(t, handler, req), episodes); userData != nil {
 		t.Fatalf("getAggregateUserData() = %#v, want nil after batch failure", userData)
 	}
 	if store.calls != 2 {
@@ -162,7 +162,7 @@ func TestGetAggregateUserDataCountsCompletedHistory(t *testing.T) {
 	handler := &ItemsHandler{storeProvider: testUserStoreProvider{store: store}}
 	req := authorizedUserDataRequest()
 
-	userData := handler.getAggregateUserData(req.Context(), handler.viewerOrDeny(req), []*models.Episode{
+	userData := handler.getAggregateUserData(req.Context(), testItemViewer(t, handler, req), []*models.Episode{
 		{ContentID: "episode-progress-complete"},
 		{ContentID: "episode-history-complete"},
 		{ContentID: "episode-unplayed"},
@@ -215,4 +215,63 @@ func addCompletedHistoryForUserDataTest(t *testing.T, store userstore.UserStore,
 	}); err != nil {
 		t.Fatalf("seed completed history: %v", err)
 	}
+}
+
+// A movie's stored version choice is the version user_data reports, even when
+// the progress row was touched later (marking watched or clearing the resume
+// point moves its timestamp but plays no version). Without a stored file the
+// progress row's hint stands.
+func TestApplyVersionChoice(t *testing.T) {
+	fileOf := func(id int) *int { return &id }
+	choice := &userstore.SeriesPlaybackPreference{
+		FileID: 1080, Resolution: "1080p", EditionKey: "theatrical", UpdatedAt: "2026-10-23T00:11:58Z",
+	}
+	tests := []struct {
+		name       string
+		progress   *userstore.WatchProgress
+		choice     *userstore.SeriesPlaybackPreference
+		wantFileID *int
+	}{
+		{name: "no progress row", choice: choice, wantFileID: fileOf(1080)},
+		{
+			name:       "progress row updated after the choice",
+			progress:   &userstore.WatchProgress{LastFileID: fileOf(2160), UpdatedAt: "2026-10-24T00:00:00Z"},
+			choice:     choice,
+			wantFileID: fileOf(1080),
+		},
+		{
+			name:       "choice without a file",
+			progress:   &userstore.WatchProgress{LastFileID: fileOf(2160), UpdatedAt: "2026-10-01T00:00:00Z"},
+			choice:     &userstore.SeriesPlaybackPreference{Resolution: "1080p", UpdatedAt: "2026-10-23T00:11:58Z"},
+			wantFileID: fileOf(2160),
+		},
+		{name: "nothing stored"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := applyVersionChoice(leafUserDataFromProgress(tt.progress), tt.choice)
+			if tt.wantFileID == nil {
+				if got != nil {
+					t.Fatalf("user data = %+v, want nil", got)
+				}
+				return
+			}
+			if got == nil || got.LastFileID == nil || *got.LastFileID != *tt.wantFileID {
+				t.Fatalf("LastFileID = %v, want %d", got, *tt.wantFileID)
+			}
+			if *tt.wantFileID == choice.FileID && (got.LastEditionKey == nil || *got.LastEditionKey != "theatrical") {
+				t.Fatalf("LastEditionKey = %v, want theatrical", got.LastEditionKey)
+			}
+		})
+	}
+}
+
+// testItemViewer is the viewer a request's claims and profile resolve to.
+func testItemViewer(t *testing.T, h *ItemsHandler, r *http.Request) ItemViewer {
+	t.Helper()
+	filter, err := h.ContextAccessFilter(r.Context(), AccessFilterOptions{})
+	if err != nil {
+		t.Fatalf("access filter: %v", err)
+	}
+	return ItemViewer{Access: filter, ProfileID: apimw.GetProfileID(r.Context())}
 }

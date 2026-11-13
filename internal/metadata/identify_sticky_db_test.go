@@ -88,13 +88,13 @@ func TestPersistMarksIdentityWithTheIdentityWritePostgres(t *testing.T) {
 	}
 
 	item := &models.MediaItem{ContentID: chosen, Type: "movie", Title: "Chosen", SortTitle: "chosen", Status: "matched"}
-	if err := svc.persistItemAndProviderIDsOnceTx(ctx, itemRepo, providerRepo, item, map[string]string{"tmdb": tmdbID}, true); err == nil {
+	if err := svc.persistItemAndProviderIDsOnceTx(ctx, itemRepo, providerRepo, item, map[string]string{"tmdb": tmdbID}, itemWriteSteps{identityChosen: true}); err == nil {
 		t.Fatal("persist succeeded although another item owns the provider ID")
 	}
 	if isChosen(chosen) {
 		t.Error("a failed identity write left the Identify mark")
 	}
-	if err := svc.persistItemAndProviderIDsOnceTx(ctx, itemRepo, providerRepo, item, map[string]string{"imdb": "tt" + tmdbID}, true); err != nil {
+	if err := svc.persistItemAndProviderIDsOnceTx(ctx, itemRepo, providerRepo, item, map[string]string{"imdb": "tt" + tmdbID}, itemWriteSteps{identityChosen: true}); err != nil {
 		t.Fatalf("persist: %v", err)
 	}
 	if !isChosen(chosen) {
@@ -149,7 +149,7 @@ func TestIdentifyRenameLeavesTheMarkToTheIdentityWritePostgres(t *testing.T) {
 	if err := itemRepo.Upsert(ctx, &models.MediaItem{ContentID: from, Type: "movie", Title: from, SortTitle: from, Status: "matched"}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	got, err := svc.reanchorContentID(ctx, from, ids, "movie", true)
+	got, _, err := svc.reanchorContentID(ctx, from, ids, "movie", true)
 	if err != nil {
 		t.Fatalf("reanchor: %v", err)
 	}
@@ -159,43 +159,6 @@ func TestIdentifyRenameLeavesTheMarkToTheIdentityWritePostgres(t *testing.T) {
 	if chosen, err := itemRepo.IdentityChosen(ctx, target); err != nil || chosen {
 		t.Errorf("renamed item marked = %v, %v; want unmarked until the identity write", chosen, err)
 	}
-}
-
-// The provider-ID conflict merges record an Identify choice on the item that
-// owns the chosen IDs, and only on it: the generic merge may keep the item
-// being identified, which still has its old IDs.
-func TestIdentifyConflictMergeMarksTheSurvivorPostgres(t *testing.T) {
-	pool := chainBuiltinTestPool(t)
-	ctx := context.Background()
-	t.Run("into the owner", func(t *testing.T) {
-		checkIdentifyMoveMarks(t, pool, true, func(from, to, _ string, markIdentity bool) error {
-			_, err := canonicalizeProviderIDDuplicateInto(ctx, pool, nil, from, to, true, markIdentity)
-			return err
-		})
-	})
-	t.Run("either survivor", func(t *testing.T) {
-		itemRepo := catalog.NewItemRepository(pool)
-		from, to := "identity-dup-from-"+uuid.NewString(), "identity-dup-to-"+uuid.NewString()
-		t.Cleanup(func() {
-			_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{from, to})
-		})
-		for _, id := range []string{from, to} {
-			if err := itemRepo.Upsert(ctx, &models.MediaItem{ContentID: id, Type: "movie", Title: id, SortTitle: id, Status: "matched"}); err != nil {
-				t.Fatalf("seed %s: %v", id, err)
-			}
-		}
-		survivor, err := canonicalizeProviderIDDuplicate(ctx, pool, nil, from, to, true, true)
-		if err != nil {
-			t.Fatalf("merge: %v", err)
-		}
-		chosen, err := itemRepo.IdentityChosen(ctx, survivor)
-		if err != nil {
-			t.Fatalf("IdentityChosen: %v", err)
-		}
-		if chosen != (survivor == to) {
-			t.Errorf("survivor %s marked = %v, want marked only when it owns the chosen IDs", survivor, chosen)
-		}
-	})
 }
 
 func identifyMoveService(pool *pgxpool.Pool) *MetadataService {

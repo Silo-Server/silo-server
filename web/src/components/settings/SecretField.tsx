@@ -2,8 +2,12 @@ import { useId, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { SETTINGS_CONTROL_WIDTH, SettingFieldRow } from "@/pages/admin-settings/SettingField";
+
+/** Placeholder standing in for a saved secret. */
+const SAVED_SECRET_MASK = "••••••••••••";
 
 export interface SecretFieldProps {
   label: string;
@@ -39,9 +43,6 @@ export interface SecretFieldProps {
   restartRequired?: boolean;
 }
 
-/** Description shown while a clear is staged, in place of `hint`. */
-const CLEARED_DESCRIPTION = "Save clears the stored value; type to set a new one instead.";
-
 /**
  * The single credential control for admin settings: one always-editable
  * password input. A saved secret shows as a masked placeholder, typing stages
@@ -67,6 +68,7 @@ export function SecretField({
   disabled = false,
   restartRequired = false,
 }: SecretFieldProps) {
+  const t = useT();
   const controlId = useId();
   const hintId = useId();
 
@@ -75,10 +77,10 @@ export function SecretField({
   const clearStaged = cleared && value === "";
   const showAction = onClear != null && configured && !disabled && value === "";
 
+  // While a clear is staged its description replaces `hint`.
   const description = clearStaged
-    ? CLEARED_DESCRIPTION
-    : (hint ??
-      (configured ? "Type to replace the saved value; leave blank to keep it." : undefined));
+    ? t("web.settings.secretField.clearedDescription")
+    : (hint ?? (configured ? t("web.settings.secretField.configuredDescription") : undefined));
 
   function keepSaved() {
     if (onKeep) onKeep();
@@ -117,14 +119,18 @@ export function SecretField({
             variant="outline"
             onClick={clearStaged ? keepSaved : onClear}
           >
-            {clearStaged ? "Keep saved value" : "Clear saved value"}
+            {clearStaged ? t("web.settings.secretField.keep") : t("web.settings.secretField.clear")}
           </Button>
         ) : null}
         <Input
           id={controlId}
           type="password"
           placeholder={
-            clearStaged ? "Will be cleared on save" : configured ? "••••••••••••" : "Not configured"
+            clearStaged
+              ? t("web.settings.secretField.willClear")
+              : configured
+                ? SAVED_SECRET_MASK
+                : t("web.settings.secretField.notConfigured")
           }
           value={value}
           onChange={(e) => handleChange(e.target.value)}

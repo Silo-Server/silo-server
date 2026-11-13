@@ -102,16 +102,6 @@ func TestPromotingSomethingOtherThanTheWinnerIsRefused(t *testing.T) {
 	}
 }
 
-func TestPromotingBeforeAnyoneVotesIsRefused(t *testing.T) {
-	unvoted := []Suggestion{{ID: "a", RoomID: "room-1", ContentID: "movie-a", VoteCount: 0}}
-	service, _ := newVoteRoomService(t, RoomSelectionModeVote, unvoted)
-
-	_, err := service.PromoteSuggestion(context.Background(), "room-1", "a", 7, "host")
-	if !errors.Is(err, ErrNoVotesCast) {
-		t.Fatalf("PromoteSuggestion() error = %v, want ErrNoVotesCast", err)
-	}
-}
-
 // VoteWinner still reports the leader (and refuses to name one with no votes)
 // for v1 promotion and clients that show who is ahead.
 func TestVoteWinnerStillReportsTheLeader(t *testing.T) {

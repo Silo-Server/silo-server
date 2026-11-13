@@ -47,7 +47,26 @@ const orphanedHistoryRowsQuery = `
 		ORDER BY h.user_id, h.id
 	`
 
+// updateHistoryMediaItemQuery moves one row and copies the profile's
+// watched-state cutoff for the old item onto the new one. A mark unwatched
+// keeps plays in history, so a moved play from before it must not count as
+// watched there. The listing cutoff stays the new item's: a history removal
+// already deleted the plays behind it. The command tag is the UPDATE's.
 const updateHistoryMediaItemQuery = `
+		WITH carried AS (
+			INSERT INTO user_history_hidden_items (user_id, profile_id, media_item_id, hidden_before, removed_before, updated_at)
+			SELECT hhi.user_id, hhi.profile_id, $1, hhi.hidden_before, '-infinity', hhi.updated_at
+			FROM user_watch_history h
+			JOIN user_history_hidden_items hhi
+			  ON hhi.user_id = h.user_id AND hhi.profile_id = h.profile_id AND hhi.media_item_id = h.media_item_id
+			WHERE h.user_id = $2
+			  AND h.id = $3
+			  AND h.media_item_id = $4
+			ON CONFLICT (user_id, profile_id, media_item_id) DO UPDATE
+			SET hidden_before = GREATEST(user_history_hidden_items.hidden_before, EXCLUDED.hidden_before),
+			    removed_before = COALESCE(user_history_hidden_items.removed_before, user_history_hidden_items.hidden_before),
+			    updated_at = GREATEST(user_history_hidden_items.updated_at, EXCLUDED.updated_at)
+		)
 		UPDATE user_watch_history
 		SET media_item_id = $1
 		WHERE user_id = $2

@@ -5,6 +5,8 @@ import {
 } from "@/lib/settingsContract";
 import { formatBitrateKbps } from "@/lib/bitrateOptions";
 import { languageOptionsFor, type SettingOption } from "@/lib/languageOptions";
+import { t } from "@/i18n";
+import { settingOptionLabel, settingUnsetLabel } from "@/lib/settingsText";
 
 /**
  * Display helpers over the generated settings contract.
@@ -59,21 +61,24 @@ export function isStructuredSetting(definition: SettingDisplay | null): boolean 
  * The option list for a select, in manifest order.
  *
  * Enum members come straight from the contract. Open language tags use the
- * definition's generated advisory option set. A nullable definition gains a
- * leading, context-specific unset entry so a control can express clearing it.
+ * definition's generated advisory option set, plus `currentValue` when the set
+ * lacks it, so a stored tag such as `pt-PT` stays selected instead of blank.
+ * A nullable definition gains a leading, context-specific unset entry so a
+ * control can express clearing it. Deprecated members stay valid stored values
+ * but are not offered.
  */
-export function optionsFor(definition: SettingDisplay): SettingOption[] {
+export function optionsFor(definition: SettingDisplay, currentValue?: string): SettingOption[] {
   if (definition.type === "language_tag") {
-    return languageOptionsFor(definition.key);
+    return languageOptionsFor(definition.key, currentValue);
   }
-  const members = (definition.values ?? []).map((member) => ({
-    value: String(member.value),
-    // The manifest leaves a label empty when the member is its own label
-    // (the date formats spell themselves).
-    label: member.label || String(member.value),
-  }));
+  const members = (definition.values ?? [])
+    .filter((member) => !member.deprecated)
+    .map((member) => ({
+      value: String(member.value),
+      label: settingOptionLabel(definition, member),
+    }));
   if (definition.nullable) {
-    return [{ value: "", label: "Unset" }, ...members];
+    return [{ value: "", label: t("web.settings.value.unset") }, ...members];
   }
   return members;
 }
@@ -86,35 +91,53 @@ export function optionsFor(definition: SettingDisplay): SettingOption[] {
 export function formatSettingValue(key: string, value: string | null | undefined): string {
   const definition = getSettingDefinition(key);
   if (!definition) {
-    return value ?? "Unset";
+    return value ?? t("web.settings.value.unset");
   }
   if (controlKindFor(definition) === "switch") {
-    return value === "true" ? "Enabled" : "Disabled";
+    return value === "true" ? t("web.settings.value.enabled") : t("web.settings.value.disabled");
   }
   if (definition.type === "language_tag") {
     const match = languageOptionsFor(definition.key, value).find(
       (option) => option.value === (value ?? ""),
     );
-    return match?.label ?? value ?? definition.unsetLabel ?? "Unset";
+    return match?.label ?? value ?? settingUnsetLabel(definition);
   }
   if (definition.values?.length) {
     const fallback = value ?? defaultValueToString(definition);
     const match = definition.values.find((member) => String(member.value) === fallback);
-    return match ? match.label || String(match.value) : fallback || "Unset";
+    return match
+      ? settingOptionLabel(definition, match)
+      : fallback || t("web.settings.value.unset");
   }
   if (definition.unit === "kbps") {
     // A bandwidth cap reads in Mbps like its select; no value means no cap.
-    const raw = value || defaultValueToString(definition);
+    // A stored null is "No limit" even where the default is a cap.
+    const raw = value === null ? "" : value || defaultValueToString(definition);
     const kbps = Number(raw);
-    return raw && Number.isFinite(kbps) ? formatBitrateKbps(kbps) : "No limit";
+    return raw && Number.isFinite(kbps) ? formatBitrateKbps(kbps) : t("web.settings.value.noLimit");
   }
   if (definition.unit) {
-    return `${value ?? defaultValueToString(definition) ?? "0"} ${definition.unit}`;
+    return formatWithUnit(value ?? defaultValueToString(definition) ?? "0", definition.unit);
   }
   if (definition.type === "object") {
-    return value ? "Custom" : "Using fallback";
+    return value ? t("web.settings.value.custom") : t("web.settings.value.usingFallback");
   }
-  return value || defaultValueToString(definition) || "Unset";
+  return value || defaultValueToString(definition) || t("web.settings.value.unset");
+}
+
+const UNIT_MESSAGES = {
+  milliseconds: "web.settings.value.milliseconds",
+  seconds: "web.settings.value.seconds",
+  minutes: "web.settings.value.minutes",
+  episodes: "web.settings.value.episodes",
+} as const;
+
+/** "30 seconds": a whole number with the manifest's unit, in the interface language. */
+export function formatWithUnit(value: string, unit: string): string {
+  const key = UNIT_MESSAGES[unit as keyof typeof UNIT_MESSAGES];
+  const count = Number(value);
+  if (!key || value === "" || !Number.isInteger(count)) return `${value} ${unit}`;
+  return t(key, { count, value });
 }
 
 /** The definition's default in the string form the admin controls compare against. */

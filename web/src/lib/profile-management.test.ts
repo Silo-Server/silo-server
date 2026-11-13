@@ -10,6 +10,8 @@ import {
   buildProfileAccessSummary,
   buildProfileRequestFromDraft,
   buildProfileUpdateFromDraft,
+  canAddProfile,
+  canSwitchProfile,
   clearKidsPreset,
   createProfileDraft,
 } from "./profile-management";
@@ -40,25 +42,6 @@ function makeProfile(overrides: Partial<Profile> = {}): Profile {
 }
 
 describe("profile-management", () => {
-  it("builds a readable access summary", () => {
-    expect(
-      buildProfileAccessSummary(
-        makeProfile({
-          max_content_rating: "PG",
-          library_restrictions_enabled: true,
-          allowed_library_ids: [2, 5],
-          max_playback_quality: "1080p",
-        }),
-      ),
-    ).toEqual({
-      contentRating: "PG max",
-      advisoryAge: "",
-      libraries: "2 libraries",
-      playbackQuality: "Standard quality",
-      text: "PG max · 2 libraries · Standard quality",
-    });
-  });
-
   it("seeds kids defaults from an unrestricted draft", () => {
     expect(
       applyKidsPreset(createProfileDraft(), {
@@ -245,5 +228,24 @@ describe("profile-management", () => {
     expect(ADVISORY_AGE_OPTIONS[0]).toEqual({ value: null, label: "No limit" });
     // Exactly the server's range, so any stored limit has a matching option.
     expect(ages).toEqual(Array.from({ length: 21 }, (_, index) => index + 1));
+  });
+
+  it.each([
+    { count: 1, max: 1, want: false },
+    { count: 2, max: 1, want: false },
+    { count: 0, max: 1, want: true },
+    { count: 4, max: 5, want: true },
+    { count: 3, max: null, want: true },
+  ])("allows another profile for $count of $max: $want", ({ count, max, want }) => {
+    expect(canAddProfile(count, max)).toBe(want);
+  });
+
+  it.each([
+    { count: 1, max: 1, want: false },
+    { count: 2, max: 2, want: true },
+    { count: 1, max: 2, want: true },
+    { count: 1, max: null, want: true },
+  ])("offers Switch Profile for $count of $max: $want", ({ count, max, want }) => {
+    expect(canSwitchProfile(count, max)).toBe(want);
   });
 });

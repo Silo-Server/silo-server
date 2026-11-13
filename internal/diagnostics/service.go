@@ -66,6 +66,11 @@ type Status struct {
 	// upload is rejected by a reverse proxy's request-body cap. Absent/zero on
 	// older servers, which clients must treat as "chunking unsupported".
 	UploadChunkBytes int64 `json:"upload_chunk_bytes"`
+	// AcceptedCrashSources lists the crash.source values the manifest
+	// validator accepts. Absent on older servers, which accept only
+	// ueh, exit_info, metrickit and exit_sentinel; a client must not send
+	// any other source to them.
+	AcceptedCrashSources []string `json:"accepted_crash_sources"`
 }
 
 type IngestResult struct {
@@ -173,7 +178,7 @@ func (s *Service) Ingest(ctx context.Context, userID int, profileID *string, man
 	manifest, err := contract.ValidateManifest(manifestJSON)
 	if err != nil {
 		s.logRejected(ctx, "", userID, "", "", int64(len(manifestJSON)), "invalid_manifest")
-		return IngestResult{}, fmt.Errorf("%w: invalid manifest: %v", ErrInvalidBundle, err)
+		return IngestResult{}, fmt.Errorf("%w: invalid manifest: %v", ErrInvalidBundle, err) //nolint:errorlint // the sentinel is the verdict on client input; the validation error is only reported
 	}
 	if manifest.Archive.Bytes > settings.MaxBundleBytes {
 		s.logRejected(ctx, "", userID, manifest.Report.Platform, manifest.Report.Type, manifest.Archive.Bytes, "too_large")
@@ -319,6 +324,7 @@ func (s *Service) statusFromSettings(settings Settings) Status {
 		RetentionDays:          settings.RetentionDays,
 		ConsentNoticeVersion:   settings.ConsentNoticeVersion,
 		UploadChunkBytes:       UploadChunkBytes,
+		AcceptedCrashSources:   contract.CrashSources(),
 	}
 }
 
@@ -441,7 +447,7 @@ func classifyBundleUploadError(err error) error {
 	case errors.Is(err, ErrInvalidBundle),
 		errors.Is(err, ErrTooManyEntries),
 		errors.Is(err, ErrCompressionRatio):
-		return fmt.Errorf("%w: %v", ErrInvalidBundle, err)
+		return fmt.Errorf("%w: %v", ErrInvalidBundle, err) //nolint:errorlint // deliberately collapses entry-count and ratio errors into the invalid-bundle verdict
 	default:
 		return err
 	}

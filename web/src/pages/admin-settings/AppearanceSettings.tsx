@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { AlertTriangle, Check, RotateCcw } from "lucide-react";
+import { AlertTriangle, Check, ImageIcon, RotateCcw } from "lucide-react";
 
 import { BrandingAssetField } from "@/components/admin/BrandingAssetField";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -8,6 +8,11 @@ import {
   type OverlayPreviewVariant,
 } from "@/components/overlays/OverlayPreviewCard";
 import { OverlayPreviewVariantToggle } from "@/components/overlays/OverlayPreviewVariantToggle";
+import { BadgeImagesControl } from "@/components/overlays/settings/BadgeImagesControl";
+import { OverlayImageLibrary } from "@/components/overlays/settings/OverlayImageLibrary";
+import { OverlayLookControls } from "@/components/overlays/settings/OverlayLookControls";
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { SettingsSubheading } from "@/components/settings/SettingsSubheading";
 import {
@@ -19,29 +24,33 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { useBranding } from "@/hooks/useBranding";
+import { useT } from "@/i18n";
 import { useRestartKeys } from "@/hooks/useRestartKeys";
 import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
+import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
+import { useEffectiveSettings } from "@/hooks/queries/settingValues";
 import {
   buildDefaultPrefs,
   CATEGORY_META,
   OVERLAY_CATEGORIES,
-  OVERLAY_PRESETS,
   OVERLAY_REGISTRY,
   isOverlayOffered,
   POSITION_OPTIONS,
-  PRESET_IDS,
   parseOverlayPrefs,
   serializeOverlayPrefs,
   type CardOverlayPrefs,
   type OverlayId,
   type OverlayPosition,
-  type PresetId,
 } from "@/lib/overlays";
+import { adminDefaultServerKey } from "@/lib/settingsAdminDefaults";
+import { SETTING_DEFINITIONS, SETTING_KEYS } from "@/lib/settingsContract";
+import { settingLabel } from "@/lib/settingsText";
+import { parseCardPresentation } from "@/lib/uiCustomization";
 import { cn } from "@/lib/utils";
 import { FieldGroup } from "./FieldGroup";
 import { SaveBar } from "@/components/SaveBar";
-import { SETTINGS_CONTROL_WIDTH, SettingField, SettingFieldRow } from "./SettingField";
+import { SettingField, SettingFieldRow } from "./SettingField";
 
 const IMAGE_ACCEPT = "image/png,image/jpeg,image/webp";
 const FAVICON_ACCEPT =
@@ -61,6 +70,13 @@ const ACCENT_PRESETS = [
 const ACCENT_KEY = "branding.accent_color";
 const OVERLAYS_ENABLED_KEY = "overlays.enabled";
 const OVERLAY_DEFAULTS_KEY = "defaults.card_overlays";
+/**
+ * The server-wide default for ui.title_art, which its manifest definition marks
+ * admin_default. Unset means the contract default; viewers who chose their own
+ * keep it.
+ */
+const TITLE_ART_DEFAULT_KEY = adminDefaultServerKey(SETTING_KEYS.UI_TITLE_ART);
+const TITLE_ART = SETTING_DEFINITIONS[SETTING_KEYS.UI_TITLE_ART];
 
 /**
  * Every appearance key the page stages, saved as one batch by the shared
@@ -71,7 +87,8 @@ const OVERLAY_DEFAULTS_KEY = "defaults.card_overlays";
  * server identity, not look and feel.
  */
 const OVERLAY_KEYS = [OVERLAYS_ENABLED_KEY, OVERLAY_DEFAULTS_KEY];
-const KEYS = [ACCENT_KEY, ...OVERLAY_KEYS];
+const TITLE_ART_KEYS = [TITLE_ART_DEFAULT_KEY];
+const KEYS = [ACCENT_KEY, ...OVERLAY_KEYS, ...TITLE_ART_KEYS];
 
 /**
  * Silo's built-in overlay configuration, derived from the registry's own
@@ -81,10 +98,19 @@ const KEYS = [ACCENT_KEY, ...OVERLAY_KEYS];
 const BUILT_IN_OVERLAY_DEFAULTS = serializeOverlayPrefs(buildDefaultPrefs());
 
 export default function AppearanceSettings() {
+  const t = useT();
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
   const branding = useBranding();
   const restartKeys = useRestartKeys();
   const shownRatingSources = useShownRatingSources();
+  const { images, imageUploadsAvailable, supportsStyles } = useOverlayPrefs();
+  // Poster size is each profile's own choice with no server default, so the
+  // preview draws at the administrator's. Admin pages sit outside the
+  // provider that resolves it for the app, so it is read here.
+  const presentationQuery = useEffectiveSettings({ keys: [SETTING_KEYS.UI_CARD_PRESENTATION] });
+  const { poster_size: posterSize } = parseCardPresentation(
+    presentationQuery.data?.[SETTING_KEYS.UI_CARD_PRESENTATION]?.value,
+  );
 
   const [confirmRestoreOverlaysOpen, setConfirmRestoreOverlaysOpen] = useState(false);
   // Which sample the badge preview stands in for. View state only — show-only
@@ -131,34 +157,31 @@ export default function AppearanceSettings() {
 
   const allRestart = (keys: string[]) => keys.every((key) => restartKeys.has(key));
 
-  if (form.isLoading) return <div>Loading...</div>;
+  if (form.isLoading) return <div>{t("web.admin.settings.appearance.loading")}</div>;
 
   return (
     <div className="flex h-full flex-col">
-      <SettingsPageHeader title="Appearance" />
+      <SettingsPageHeader title={t("web.admin.settings.appearance.title")} />
 
       <div className="flex-1 space-y-5">
-        <FieldGroup label="Logos and icons">
+        <FieldGroup label={t("web.admin.settings.appearance.logos.group")}>
           {!assetStorageAvailable && (
             <div className="mt-3 flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
               <p className="text-muted-foreground text-[13px] leading-relaxed">
-                {s3Configured ? (
-                  <>Restart the server to finish enabling image uploads.</>
-                ) : (
-                  <>
-                    Image uploads need artwork storage (local disk or S3), set in{" "}
-                    <span className="text-foreground font-medium">Storage</span> settings.
-                  </>
-                )}
+                {s3Configured
+                  ? t("web.admin.settings.appearance.logos.restartForUploads")
+                  : t("web.admin.settings.appearance.logos.storageNeeded", {
+                      b: (chunks) => <span className="text-foreground font-medium">{chunks}</span>,
+                    })}
               </p>
             </div>
           )}
 
           <div className="space-y-2 py-3.5">
             <BrandingAssetField
-              label="Logo (wordmark)"
-              description="Shown in the expanded sidebar."
+              label={t("web.admin.settings.appearance.logos.wordmark.label")}
+              description={t("web.admin.settings.appearance.logos.wordmark.description")}
               kind="wordmark"
               currentUrl={branding.wordmarkUrl}
               accept={IMAGE_ACCEPT}
@@ -166,8 +189,8 @@ export default function AppearanceSettings() {
               preview="wide"
             />
             <BrandingAssetField
-              label="Logo (icon)"
-              description="Shown in the collapsed sidebar and the installed app."
+              label={t("web.admin.settings.appearance.logos.mark.label")}
+              description={t("web.admin.settings.appearance.logos.mark.description")}
               kind="mark"
               currentUrl={branding.markUrl}
               accept={IMAGE_ACCEPT}
@@ -175,8 +198,8 @@ export default function AppearanceSettings() {
               preview="square"
             />
             <BrandingAssetField
-              label="Favicon"
-              description="Shown in the browser tab."
+              label={t("web.admin.settings.appearance.logos.favicon.label")}
+              description={t("web.admin.settings.appearance.logos.favicon.description")}
               kind="favicon"
               currentUrl={branding.faviconUrl}
               accept={FAVICON_ACCEPT}
@@ -184,8 +207,8 @@ export default function AppearanceSettings() {
               preview="square"
             />
             <BrandingAssetField
-              label="Login background"
-              description="Shown on the login and signup pages."
+              label={t("web.admin.settings.appearance.logos.loginBackground.label")}
+              description={t("web.admin.settings.appearance.logos.loginBackground.description")}
               kind="login_bg"
               currentUrl={branding.loginBgUrl}
               accept={IMAGE_ACCEPT}
@@ -195,10 +218,13 @@ export default function AppearanceSettings() {
           </div>
         </FieldGroup>
 
-        <FieldGroup label="Colors" restartAll={restartKeys.has(ACCENT_KEY)}>
+        <FieldGroup
+          label={t("web.admin.settings.appearance.colors.group")}
+          restartAll={restartKeys.has(ACCENT_KEY)}
+        >
           <SettingFieldRow
-            label="Accent color"
-            description="Recolors buttons, focus outlines, and the sidebar."
+            label={t("web.admin.settings.appearance.colors.accent.label")}
+            description={t("web.admin.settings.appearance.colors.accent.description")}
           >
             <div className="flex flex-wrap items-center justify-end gap-2 sm:max-w-[300px]">
               {/* Exactly one control in this row is always marked selected:
@@ -208,9 +234,9 @@ export default function AppearanceSettings() {
               <button
                 type="button"
                 onClick={() => form.setValue(ACCENT_KEY, "")}
-                aria-label="Use theme default accent"
+                aria-label={t("web.admin.settings.appearance.colors.accent.useDefault")}
                 aria-pressed={!accentColor}
-                title="Theme default"
+                title={t("web.admin.settings.appearance.colors.accent.themeDefault")}
                 className={cn(
                   "bg-muted text-muted-foreground relative grid h-8 w-8 place-items-center rounded-full border transition-transform hover:scale-110",
                   !accentColor
@@ -227,7 +253,7 @@ export default function AppearanceSettings() {
                     key={hex}
                     type="button"
                     onClick={() => form.setValue(ACCENT_KEY, hex)}
-                    aria-label={`Use accent ${hex}`}
+                    aria-label={t("web.admin.settings.appearance.colors.accent.usePreset", { hex })}
                     aria-pressed={selected}
                     className={cn(
                       "relative h-8 w-8 rounded-full border transition-transform hover:scale-110",
@@ -253,12 +279,12 @@ export default function AppearanceSettings() {
               >
                 <input
                   type="color"
-                  aria-label="Custom accent color"
+                  aria-label={t("web.admin.settings.appearance.colors.accent.customLabel")}
                   value={accentColor || "#4f46e5"}
                   onChange={(e) => form.setValue(ACCENT_KEY, e.target.value)}
                   className="h-5 w-5 cursor-pointer border-0 bg-transparent p-0"
                 />
-                Custom
+                {t("web.admin.settings.appearance.colors.accent.custom")}
                 {customAccentActive && <Check className="h-3.5 w-3.5" />}
               </label>
             </div>
@@ -266,7 +292,7 @@ export default function AppearanceSettings() {
         </FieldGroup>
 
         <FieldGroup
-          label="Card overlays"
+          label={t("web.admin.settings.appearance.overlays.group")}
           restartAll={allRestart(OVERLAY_KEYS)}
           actions={
             <button
@@ -276,13 +302,13 @@ export default function AppearanceSettings() {
               className="text-muted-foreground hover:text-destructive inline-flex items-center gap-1.5 text-xs font-medium transition-colors disabled:pointer-events-none disabled:opacity-40"
             >
               <RotateCcw className="h-3 w-3" aria-hidden="true" />
-              Restore defaults
+              {t("web.admin.settings.appearance.overlays.restoreDefaults")}
             </button>
           }
         >
           <SettingField
-            label="Show badges on poster art"
-            description="The default for every profile. A profile that turns badges on or off for itself keeps its own choice."
+            label={t("web.admin.settings.appearance.overlays.enabled.label")}
+            description={t("web.admin.settings.appearance.overlays.enabled.description")}
             type="toggle"
             value={form.getValue(OVERLAYS_ENABLED_KEY) || "true"}
             onChange={(v) => form.setValue(OVERLAYS_ENABLED_KEY, v)}
@@ -296,35 +322,32 @@ export default function AppearanceSettings() {
             inert={!overlaysEnabled}
             className={overlaysEnabled ? undefined : "pointer-events-none opacity-50"}
           >
-            <SettingFieldRow
-              label="Badge style"
-              description="Default for people who have not chosen their own."
-            >
-              <Select
-                value={overlayPrefs.preset}
-                onValueChange={(v) => setOverlayPrefs({ ...overlayPrefs, preset: v as PresetId })}
-              >
-                <SelectTrigger className={SETTINGS_CONTROL_WIDTH} aria-label="Badge style">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PRESET_IDS.map((id) => (
-                    <SelectItem key={id} value={id}>
-                      {OVERLAY_PRESETS[id].label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </SettingFieldRow>
+            <div className="space-y-2 py-4">
+              <p className="text-sm font-medium">
+                {t("web.admin.settings.appearance.overlays.style.label")}
+              </p>
+              <p className="text-muted-foreground text-[13px] leading-relaxed">
+                {t("web.admin.settings.appearance.overlays.style.description")}
+              </p>
+              <OverlayLookControls
+                prefs={overlayPrefs}
+                onChange={setOverlayPrefs}
+                supportsStyles={supportsStyles}
+              />
+            </div>
             <div className="border-border/70 bg-foreground/[0.02] mb-4 rounded-xl border p-3">
               <div className="flex items-center justify-between gap-3 px-1">
                 <span className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-                  Preview
+                  {t("web.admin.settings.appearance.overlays.preview")}
                 </span>
                 <OverlayPreviewVariantToggle value={previewVariant} onChange={setPreviewVariant} />
               </div>
               <div className="mt-3 flex justify-center pb-1">
-                <OverlayPreviewCard prefs={overlayPrefs} size="sm" variant={previewVariant} />
+                <OverlayPreviewCard
+                  prefs={overlayPrefs}
+                  posterSize={posterSize}
+                  variant={previewVariant}
+                />
               </div>
             </div>
           </div>
@@ -357,7 +380,12 @@ export default function AppearanceSettings() {
                               updateOverlayItem(def.id, { position: pos as OverlayPosition })
                             }
                           >
-                            <SelectTrigger className="w-[130px]" aria-label={`${def.label} corner`}>
+                            <SelectTrigger
+                              className="w-[140px]"
+                              aria-label={t("web.admin.settings.appearance.overlays.position", {
+                                label: def.label,
+                              })}
+                            >
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -368,9 +396,40 @@ export default function AppearanceSettings() {
                               ))}
                             </SelectContent>
                           </Select>
+                          {supportsStyles &&
+                          (images.length > 0 || config.image || config.valueImages) ? (
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  disabled={!config.enabled}
+                                  aria-label={t("web.admin.settings.appearance.overlays.images", {
+                                    label: def.label,
+                                  })}
+                                  className={cn(
+                                    (config.image || config.valueImages) && "text-primary",
+                                  )}
+                                >
+                                  <ImageIcon className="h-4 w-4" aria-hidden="true" />
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent align="end" className="w-80 p-4">
+                                <BadgeImagesControl
+                                  def={def}
+                                  config={config}
+                                  images={images}
+                                  onChange={(patch) => updateOverlayItem(def.id, patch)}
+                                />
+                              </PopoverContent>
+                            </Popover>
+                          ) : null}
                           <Switch
                             checked={config.enabled}
-                            aria-label={`Show ${def.label}`}
+                            aria-label={t("web.admin.settings.appearance.overlays.show", {
+                              label: def.label,
+                            })}
                             onCheckedChange={(checked) =>
                               updateOverlayItem(def.id, { enabled: checked })
                             }
@@ -384,14 +443,34 @@ export default function AppearanceSettings() {
             })}
           </div>
         </FieldGroup>
+
+        {supportsStyles ? (
+          <FieldGroup label={t("web.admin.settings.appearance.badgeImages.group")}>
+            <OverlayImageLibrary images={images} uploadsAvailable={imageUploadsAvailable} />
+          </FieldGroup>
+        ) : null}
+
+        <FieldGroup
+          label={t("web.admin.settings.appearance.titlePages.group")}
+          restartAll={allRestart(TITLE_ART_KEYS)}
+        >
+          <SettingField
+            label={settingLabel(TITLE_ART)}
+            description={t("web.admin.settings.appearance.titlePages.titleArt.description")}
+            type="toggle"
+            value={form.getValue(TITLE_ART_DEFAULT_KEY) || String(TITLE_ART.defaultValue)}
+            onChange={(v) => form.setValue(TITLE_ART_DEFAULT_KEY, v)}
+            restartRequired={restartKeys.has(TITLE_ART_DEFAULT_KEY)}
+          />
+        </FieldGroup>
       </div>
 
       <ConfirmDialog
         open={confirmRestoreOverlaysOpen}
         onOpenChange={setConfirmRestoreOverlaysOpen}
-        title="Restore badge defaults"
-        description="Replace the server-wide badge defaults with Silo's built-in configuration. The badge on/off switch is left alone, and nothing is written until you save."
-        confirmLabel="Restore"
+        title={t("web.admin.settings.appearance.restoreDialog.title")}
+        description={t("web.admin.settings.appearance.restoreDialog.description")}
+        confirmLabel={t("web.admin.settings.appearance.restoreDialog.confirm")}
         variant="destructive"
         onConfirm={restoreOverlayDefaults}
       />

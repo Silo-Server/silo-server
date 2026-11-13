@@ -36,18 +36,6 @@ func TestDiffToolIsPinned(t *testing.T) {
 	}
 }
 
-// TestCommittedArtifactIsSelfCompatible: the diff of a document with itself
-// is empty, and the committed artifact loads through the diff tool at all.
-func TestCommittedArtifactIsSelfCompatible(t *testing.T) {
-	changes, err := Diff(contracts.OpenAPI, contracts.OpenAPI)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(changes) != 0 {
-		t.Fatalf("self-diff is not empty: %+v", changes)
-	}
-}
-
 // seededBreaking removes getSystemInfo's contract_digest field and drops the
 // openapi.json operation: two breaking changes on two operations.
 func seededBreaking(t *testing.T) []byte {

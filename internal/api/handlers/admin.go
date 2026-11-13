@@ -1,9 +1,7 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,12 +10,12 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
@@ -43,6 +41,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/settingsmigrate"
 	subtitleai "github.com/Silo-Server/silo-server/internal/subtitles/ai"
 	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
 // AdminMetadataRefresher can refresh metadata for individual items.
@@ -89,6 +88,26 @@ func updateServerSettingsAtomically(
 	return updateServerSettingsInTransaction(ctx, store, func(current map[string]string, _ pgx.Tx) (map[string]string, error) {
 		return update(current)
 	})
+}
+
+// updateServerSettingsWithTx runs update in tx when it is set, under the
+// settings lock taken there, and in a transaction of its own otherwise.
+func updateServerSettingsWithTx(
+	ctx context.Context,
+	store ServerSettingsStore,
+	tx pgx.Tx,
+	update func(current map[string]string, tx pgx.Tx) (map[string]string, error),
+) error {
+	if tx == nil {
+		return updateServerSettingsInTransaction(ctx, store, update)
+	}
+	updater, ok := store.(interface {
+		UpdateAtomicWithTx(context.Context, pgx.Tx, func(map[string]string, pgx.Tx) (map[string]string, error)) error
+	})
+	if !ok {
+		return errors.New("settings store does not support caller transactions")
+	}
+	return updater.UpdateAtomicWithTx(ctx, tx, update)
 }
 
 func updateServerSettingsInTransaction(
@@ -156,7 +175,8 @@ type AdminHandler struct {
 	DownloadsStatsSource         AdminDownloadsStatsSource
 	RedisClient                  *redis.Client // health reporting only; nil means this deployment runs without Redis
 	Config                       *config.Config
-	ArtworkBackend               string // resolved artwork backend for the settings status; empty when unopened
+	ArtworkBackend               string          // resolved artwork backend for the settings status; empty when unopened
+	ArtworkStore                 blobstore.Store // personal collection artwork, removed with a deleted account's collections
 	EventBus                     cache.EventBus
 	EventsHub                    *evt.Hub
 	SettingsRepo                 ServerSettingsStore
@@ -173,6 +193,14 @@ type AdminHandler struct {
 	OnServerSettingUpdated       func(ctx context.Context, key, value string)
 	RestartStatus                *ServerRestartStatusTracker
 	CatalogSearchStatus          catalog.CatalogSearchStatusProvider
+	// BeforeServerSettingCommit runs inside the settings transaction for each
+	// setting whose effective value changes. An error rolls the save back. tx
+	// is nil when the settings store has no transactional update.
+	BeforeServerSettingCommit func(ctx context.Context, tx pgx.Tx, key, value string) error
+	// BackupKeyCheck is this server's SECRET_KEY check value. A save that
+	// switches backup.destination to s3 needs backup.s3.key_acknowledged to
+	// hold it; empty refuses that switch.
+	BackupKeyCheck string
 	// WatchlistTitlesSweeper deletes watchlist titles no entry references.
 	// Deleting an account drops its entries through the users foreign key,
 	// which can leave such titles behind. Nil skips the sweep.
@@ -182,6 +210,11 @@ type AdminHandler struct {
 	// RecWorker is told when an account update changes its profiles' access
 	// scope, so their recommendations are rebuilt. Optional.
 	RecWorker AccountsScopeNotifier
+	// ProfileAvatars resolves the avatar on admin profile listings the way
+	// the profile endpoints do. Nil leaves uploaded avatars without a URL.
+	ProfileAvatars interface {
+		ResolveAvatar(ctx context.Context, ref string) (source, url string)
+	}
 	// logLevelCounts caches the 24h error/warning tallies served on
 	// /admin/server/status. The dashboard polls that route every 15s, and the
 	// counts are only ever read as a rough signal, so re-counting per request
@@ -211,124 +244,6 @@ func NewAdminHandler(
 }
 
 // --- Request/Response types ---
-
-// createUserRequest represents the JSON body for POST /admin/users.
-type createUserRequest struct {
-	Username                 string                 `json:"username"`
-	Email                    string                 `json:"email"`
-	Password                 string                 `json:"password"`
-	Role                     string                 `json:"role"`
-	Permissions              createStringSliceField `json:"permissions"`
-	CreateDefaultProfile     bool                   `json:"create_default_profile"`
-	DefaultProfileName       string                 `json:"default_profile_name,omitempty"`
-	LibraryIDs               []int                  `json:"library_ids"`
-	MaxPlaybackQuality       *string                `json:"max_playback_quality,omitempty"`
-	MaxStreams               *int                   `json:"max_streams,omitempty"`
-	MaxTranscodes            *int                   `json:"max_transcodes,omitempty"`
-	TranscodeAllowed         *bool                  `json:"transcode_allowed,omitempty"`
-	AudioTranscodeAllowed    *bool                  `json:"audio_transcode_allowed,omitempty"`
-	MaxProfiles              *int                   `json:"max_profiles,omitempty"`
-	DownloadAllowed          *bool                  `json:"download_allowed,omitempty"`
-	DownloadTranscodeAllowed *bool                  `json:"download_transcode_allowed,omitempty"`
-	RequestsAllowed          *bool                  `json:"requests_allowed,omitempty"`
-	AccessGroupID            *int64                 `json:"access_group_id,omitempty"`
-}
-
-// optionalField is a tri-state JSON field for nullable policy columns: absent
-// leaves the column alone, explicit null clears it back to "inherit from the
-// access group", and a value stores an explicit override.
-type optionalField[T any] struct {
-	Set   bool
-	Value *T
-}
-
-func (f *optionalField[T]) UnmarshalJSON(data []byte) error {
-	f.Set = true
-	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
-		f.Value = nil
-		return nil
-	}
-	var value T
-	if err := json.Unmarshal(data, &value); err != nil {
-		return err
-	}
-	f.Value = &value
-	return nil
-}
-
-func (f optionalField[T]) Optional() models.Optional[T] {
-	return models.Optional[T]{Set: f.Set, Value: f.Value}
-}
-
-type createStringSliceField struct {
-	Set   bool
-	Value []string
-}
-
-func (f *createStringSliceField) UnmarshalJSON(data []byte) error {
-	f.Set = true
-	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
-		f.Value = []string{}
-		return nil
-	}
-	return json.Unmarshal(data, &f.Value)
-}
-
-type updateStringSliceField struct {
-	Set   bool
-	Value []string
-}
-
-func (f *updateStringSliceField) UnmarshalJSON(data []byte) error {
-	f.Set = true
-	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
-		f.Value = []string{}
-		return nil
-	}
-	return json.Unmarshal(data, &f.Value)
-}
-
-func (f updateStringSliceField) Ptr() *[]string {
-	if !f.Set {
-		return nil
-	}
-	value := append([]string(nil), f.Value...)
-	return &value
-}
-
-// updateUserRequest represents the JSON body for PUT /admin/users/{id}.
-type updateUserRequest struct {
-	Username                 *string                `json:"username,omitempty"`
-	Email                    *string                `json:"email,omitempty"`
-	Password                 *string                `json:"password,omitempty"`
-	Role                     *string                `json:"role,omitempty"`
-	Permissions              updateStringSliceField `json:"permissions,omitempty"`
-	Enabled                  *bool                  `json:"enabled,omitempty"`
-	LibraryIDs               optionalField[[]int]   `json:"library_ids,omitempty"`
-	MaxPlaybackQuality       optionalField[string]  `json:"max_playback_quality,omitempty"`
-	MaxStreams               optionalField[int]     `json:"max_streams,omitempty"`
-	MaxTranscodes            optionalField[int]     `json:"max_transcodes,omitempty"`
-	TranscodeAllowed         optionalField[bool]    `json:"transcode_allowed,omitempty"`
-	AudioTranscodeAllowed    optionalField[bool]    `json:"audio_transcode_allowed,omitempty"`
-	MaxProfiles              optionalField[int]     `json:"max_profiles,omitempty"`
-	DownloadAllowed          optionalField[bool]    `json:"download_allowed,omitempty"`
-	DownloadTranscodeAllowed optionalField[bool]    `json:"download_transcode_allowed,omitempty"`
-	RequestsAllowed          optionalField[bool]    `json:"requests_allowed,omitempty"`
-	AccessGroupID            optionalField[int64]   `json:"access_group_id,omitempty"`
-}
-
-// libraryIDsOptional maps library_ids to the repository tri-state: null (or
-// absent) clears the override so the account inherits the group's libraries;
-// an array — including an empty one — is an explicit override. The slice is
-// copied so the stored override never aliases the decoded request body.
-func (r *updateUserRequest) libraryIDsOptional() models.Optional[[]int] {
-	optional := r.LibraryIDs.Optional()
-	if optional.Value != nil {
-		value := append([]int{}, *optional.Value...)
-		optional.Value = &value
-	}
-	return optional
-}
 
 // AdminUserView represents a user in admin JSON responses.
 //
@@ -390,29 +305,6 @@ type EffectivePolicyView struct {
 	Permissions                []string `json:"permissions"`
 }
 
-type adminPlaybackHistoryRow struct {
-	SessionID       string    `json:"session_id"`
-	UserID          int       `json:"user_id"`
-	Username        string    `json:"username"`
-	ProfileID       string    `json:"profile_id"`
-	ProfileName     string    `json:"profile_name"`
-	MediaItemID     string    `json:"media_item_id"`
-	MediaFileID     int       `json:"media_file_id"`
-	MediaTitle      string    `json:"media_title"`
-	MediaType       string    `json:"media_type"`
-	PlayMethod      string    `json:"play_method"`
-	StartedAt       time.Time `json:"started_at"`
-	EndedAt         time.Time `json:"ended_at"`
-	WatchedSeconds  float64   `json:"watched_seconds"`
-	DurationSeconds *float64  `json:"duration_seconds"`
-	Completed       bool      `json:"completed"`
-}
-
-type adminUserProfileRow struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-}
-
 // unmatchedFileRow represents a media file with no content_id.
 type unmatchedFileRow struct {
 	ID            int    `json:"id"`
@@ -423,15 +315,6 @@ type unmatchedFileRow struct {
 }
 
 // --- Helper ---
-
-// presignPosterURL generates a presigned poster URL for admin sessions.
-// Returns empty string if no detail service is configured or the path is empty.
-func (h *AdminHandler) presignPosterURL(r *http.Request, path string) string {
-	if h.DetailSvc != nil {
-		return h.DetailSvc.PresignURL(r.Context(), cardThumbnailPath(path), "card")
-	}
-	return ""
-}
 
 // toAdminUserResponse converts a User model to an admin API response. group
 // is the user's access-group policy (nil when ungrouped or unknown).
@@ -475,7 +358,7 @@ func toAdminUserResponse(u *models.User, group *access.GroupPolicy) AdminUserVie
 			DownloadAllowed:            effective.DownloadAllowed,
 			DownloadTranscodeAllowed:   effective.DownloadTranscodeAllowed,
 			RequestsAllowed:            effective.RequestsAllowed,
-			Permissions:                append([]string{}, effective.Permissions...),
+			Permissions:                auth.PolicyPermissions(effective),
 		},
 		CreatedAt: u.CreatedAt,
 		UpdatedAt: u.UpdatedAt,
@@ -515,34 +398,12 @@ func validateStreamLimits(maxStreams, maxTranscodes *int) error {
 	return nil
 }
 
-// actorIsScopedAPIKey reports whether the request is authenticated by an API
-// key that carries scopes. Unscoped keys and JWT sessions are not constrained:
-// an unscoped key already acts with its owner's full authority, and a JWT
-// actor is the admin themselves.
-func actorIsScopedAPIKey(ctx context.Context) bool {
-	claims := apimw.GetClaims(ctx)
-	return claims != nil && len(claims.APIKeyScopes) > 0
-}
-
-// rejectScopedAPIKeyCreate stops a scoped API key from minting an admin
-// account, which it could then log into for an unscoped session. Provisioning
-// ordinary accounts — password included — stays in scope. It reports whether
-// it wrote a response.
-func rejectScopedAPIKeyCreate(w http.ResponseWriter, r *http.Request, role string) bool {
-	if !actorIsScopedAPIKey(r.Context()) || role != roleAdmin {
-		return false
-	}
-	writeError(w, http.StatusForbidden, "insufficient_scope",
-		"A scoped API key may not create an admin account")
-	return true
-}
-
 // checkScopedAPIKeyUpdate is the mutation policy shared by both API versions.
 // Recovery email is a credential: replacing it lets the key's holder reset
 // the administrator's password and obtain an unrestricted login session.
 // Callers check the account locked by the mutation transaction.
 func checkScopedAPIKeyUpdate(ctx context.Context, target *models.User, input models.UpdateUserInput) error {
-	if !actorIsScopedAPIKey(ctx) {
+	if !apimw.IsScopedAPIKey(ctx) {
 		return nil
 	}
 	grantsAdmin := input.Role != nil && *input.Role == roleAdmin
@@ -552,85 +413,6 @@ func checkScopedAPIKeyUpdate(ctx context.Context, target *models.User, input mod
 		return apiError(http.StatusForbidden, "insufficient_scope", "A scoped API key may not change admin credentials or grant admin")
 	}
 	return nil
-}
-
-// rejectScopedAPIKeyUpdate applies the shared policy before v1 validation.
-//
-// It returns the target account when it had to load one, so rejectGroupedAdmin
-// can reuse it instead of reading the row twice, and reports whether it wrote
-// a response.
-func (h *AdminHandler) rejectScopedAPIKeyUpdate(
-	w http.ResponseWriter,
-	r *http.Request,
-	id int,
-	req *updateUserRequest,
-) (*models.User, bool) {
-	if !actorIsScopedAPIKey(r.Context()) {
-		return nil, false
-	}
-	target, blocked := h.loadTargetUser(w, r, id)
-	if blocked {
-		return nil, true
-	}
-	input := models.UpdateUserInput{Password: req.Password, Email: req.Email, Role: req.Role}
-	if err := checkScopedAPIKeyUpdate(r.Context(), target, input); err != nil {
-		writeAPIError(w, err)
-		return nil, true
-	}
-	return target, false
-}
-
-// loadTargetUser reads the account an admin write targets, writing 404/500 on
-// failure. It reports whether it wrote a response.
-func (h *AdminHandler) loadTargetUser(w http.ResponseWriter, r *http.Request, id int) (*models.User, bool) {
-	target, err := h.userRepo.GetByID(r.Context(), id)
-	if err != nil {
-		if auth.IsNotFound(err) {
-			writeError(w, http.StatusNotFound, "not_found", "User not found")
-			return nil, true
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch user")
-		return nil, true
-	}
-	return target, false
-}
-
-// rejectGroupedAdmin refuses an update that would leave an admin account in
-// an access group: a group named in the request together with the admin role,
-// or for an account that already holds it. Writes that only change the role
-// are not its concern — the repository clears the group on promote and falls
-// back to the default group on demote. It loads the target when neither the
-// request nor current carries the role, and reports whether it wrote a
-// response.
-func (h *AdminHandler) rejectGroupedAdmin(
-	w http.ResponseWriter,
-	r *http.Request,
-	id int,
-	req *updateUserRequest,
-	current *models.User,
-) bool {
-	if !req.AccessGroupID.Set || req.AccessGroupID.Value == nil {
-		return false
-	}
-	var role string
-	switch {
-	case req.Role != nil:
-		role = *req.Role
-	case current != nil:
-		role = current.Role
-	default:
-		target, blocked := h.loadTargetUser(w, r, id)
-		if blocked {
-			return true
-		}
-		role = target.Role
-	}
-	if role == roleAdmin {
-		writeError(w, http.StatusUnprocessableEntity, "unprocessable_entity",
-			"Admin accounts cannot belong to an access group")
-		return true
-	}
-	return false
 }
 
 // clonePtr copies a policy override pointer so a response never aliases the
@@ -671,24 +453,6 @@ func (h *AdminHandler) groupPolicies(ctx context.Context) (map[int64]access.Grou
 	return policies, nil
 }
 
-// groupPolicyFor returns the user's group policy, or nil when the user is
-// ungrouped (or the group row is gone — the FK clears membership on delete,
-// so a residual not-found is treated as ungrouped, not an error).
-func (h *AdminHandler) groupPolicyFor(ctx context.Context, u *models.User) (*access.GroupPolicy, error) {
-	if !access.GroupApplies(u) || h == nil || h.AccessGroups == nil {
-		return nil, nil
-	}
-	group, err := h.AccessGroups.Get(ctx, *u.AccessGroupID)
-	if err != nil {
-		if errors.Is(err, access.ErrGroupNotFound) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("loading access group for effective policy: %w", err)
-	}
-	policy := group.Policy()
-	return &policy, nil
-}
-
 func lookupGroupPolicy(policies map[int64]access.GroupPolicy, u *models.User) *access.GroupPolicy {
 	if !access.GroupApplies(u) {
 		return nil
@@ -707,10 +471,9 @@ func (h *AdminHandler) loadUserLastActiveAt(ctx context.Context, userIDs []int) 
 	}
 
 	rows, err := h.pool.Query(ctx, `
-		SELECT user_id, MAX("timestamp") AS last_active_at
-		FROM activity_log
-		WHERE user_id = ANY($1::bigint[])
-		GROUP BY user_id`, userIDs)
+		SELECT user_id, last_active_at
+		FROM user_last_activity
+		WHERE user_id = ANY($1::bigint[])`, userIDs)
 	if err != nil {
 		return lastActive, fmt.Errorf("loading user last activity: %w", err)
 	}
@@ -741,27 +504,6 @@ func applyLastActiveAt(resp *AdminUserView, lastActive map[int]time.Time) {
 }
 
 // --- Handler methods ---
-
-// HandleListUsers handles GET /admin/users.
-func (h *AdminHandler) HandleListUsers(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.ListAdminUsers(r.Context())
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// ListAdminUsers builds the administrator's view of every account. v1 GET
-// /admin/users calls it; a failure is an *APIError.
-func (h *AdminHandler) ListAdminUsers(ctx context.Context) ([]AdminUserView, error) {
-	users, err := h.userRepo.List(ctx)
-	if err != nil {
-		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list users")
-	}
-	return h.adminUserViews(ctx, users)
-}
 
 // ListAdminUsersPage is the keyset page v2 listAdminUsers uses: up to limit
 // accounts with id above afterID, in id order, enriched the same way as
@@ -805,409 +547,15 @@ func (h *AdminHandler) adminUserViews(ctx context.Context, users []*models.User)
 	return resp, nil
 }
 
-// HandleGetUser handles GET /admin/users/{id}.
-func (h *AdminHandler) HandleGetUser(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	id, err := strconv.Atoi(idStr)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid user ID")
-		return
+// deletedAccountCollections lists, in the delete's transaction, the personal
+// collections the account delete removes through the users foreign key. A
+// handler without an artwork store, or a test repository without a
+// transaction, has nothing to clean up.
+func (h *AdminHandler) deletedAccountCollections(ctx context.Context, tx pgx.Tx, userID int) ([]string, error) {
+	if h.ArtworkStore == nil || tx == nil {
+		return nil, nil
 	}
-
-	user, err := h.userRepo.GetByID(r.Context(), id)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "User not found")
-		return
-	}
-
-	groupPolicy, err := h.groupPolicyFor(r.Context(), user)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve effective policy")
-		return
-	}
-	resp := toAdminUserResponse(user, groupPolicy)
-	lastActive, err := h.loadUserLastActiveAt(r.Context(), []int{user.ID})
-	if err != nil {
-		slog.WarnContext(r.Context(), "failed to load admin user last activity", "component", "api", "user_id", user.ID, "error", err)
-	}
-	applyLastActiveAt(&resp, lastActive)
-
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// HandleCreateUser handles POST /admin/users.
-func (h *AdminHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) {
-	var req createUserRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	req.Username = auth.NormalizeUsername(req.Username)
-	req.Email = auth.NormalizeEmail(req.Email)
-
-	if rejectScopedAPIKeyCreate(w, r, req.Role) {
-		return
-	}
-	if req.Role == roleAdmin {
-		actor, err := requestOwnerActor(r.Context(), h.userRepo)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch user")
-			return
-		}
-		if err := auth.CheckGrantAdmin(actor, req.Role); err != nil {
-			writeAPIError(w, ownerError(err))
-			return
-		}
-	}
-
-	if req.Username == "" || req.Email == "" || req.Password == "" || req.Role == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Username, email, password, and role are required")
-		return
-	}
-	if req.Role == roleAdmin && req.AccessGroupID != nil {
-		writeError(w, http.StatusUnprocessableEntity, "unprocessable_entity",
-			"Admin accounts cannot belong to an access group")
-		return
-	}
-
-	var maxPlaybackQuality *string
-	if req.MaxPlaybackQuality != nil {
-		normalized, ok := access.ParsePlaybackQualityPreset(*req.MaxPlaybackQuality)
-		if !ok {
-			writeError(w, http.StatusBadRequest, "bad_request", "Invalid max_playback_quality")
-			return
-		}
-		maxPlaybackQuality = &normalized
-	}
-	if req.MaxProfiles != nil && *req.MaxProfiles < 1 {
-		writeError(w, http.StatusBadRequest, "bad_request", "max_profiles must be at least 1")
-		return
-	}
-	if err := validateStreamLimits(req.MaxStreams, req.MaxTranscodes); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-	permissions := auth.DefaultUserPermissions()
-	if req.Permissions.Set {
-		permissions = req.Permissions.Value
-	}
-	permissions, err := auth.NormalizePermissions(permissions)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-	if req.AccessGroupID != nil {
-		if h.AccessGroups == nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Access groups are not configured")
-			return
-		}
-		if _, err := h.AccessGroups.Get(r.Context(), *req.AccessGroupID); err != nil {
-			if errors.Is(err, access.ErrGroupNotFound) {
-				writeError(w, http.StatusUnprocessableEntity, "unprocessable_entity", "Invalid access_group_id")
-				return
-			}
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to validate access group")
-			return
-		}
-	}
-
-	user, err := h.accountProvisioner.CreateAccount(r.Context(), auth.CreateAccountInput{
-		User: models.CreateUserInput{
-			Username:                 req.Username,
-			Email:                    req.Email,
-			Password:                 req.Password,
-			Role:                     req.Role,
-			Permissions:              permissions,
-			AccessGroupID:            req.AccessGroupID,
-			LibraryIDs:               req.LibraryIDs,
-			MaxPlaybackQuality:       maxPlaybackQuality,
-			MaxStreams:               req.MaxStreams,
-			MaxTranscodes:            req.MaxTranscodes,
-			TranscodeAllowed:         req.TranscodeAllowed,
-			AudioTranscodeAllowed:    req.AudioTranscodeAllowed,
-			MaxProfiles:              req.MaxProfiles,
-			DownloadAllowed:          req.DownloadAllowed,
-			DownloadTranscodeAllowed: req.DownloadTranscodeAllowed,
-			RequestsAllowed:          req.RequestsAllowed,
-		},
-		DefaultProfile: auth.DefaultProfileOptions{
-			Enabled: req.CreateDefaultProfile,
-			Name:    req.DefaultProfileName,
-		},
-	})
-	if err != nil {
-		if auth.IsDuplicate(err) {
-			writeError(w, http.StatusConflict, "duplicate", "A user with that username or email already exists")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create user")
-		return
-	}
-	h.invalidateStats(r.Context(), cache.ChannelAdmin, cache.EventAdminStatsInvalidated, strconv.Itoa(user.ID))
-
-	createdGroupPolicy, err := h.groupPolicyFor(r.Context(), user)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve effective policy")
-		return
-	}
-	writeJSON(w, http.StatusCreated, toAdminUserResponse(user, createdGroupPolicy))
-}
-
-// HandleUpdateUser handles PUT /admin/users/{id}.
-func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	id, err := strconv.Atoi(idStr)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid user ID")
-		return
-	}
-
-	var req updateUserRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	currentUser, blocked := h.rejectScopedAPIKeyUpdate(w, r, id, &req)
-	if blocked {
-		return
-	}
-
-	maxPlaybackQuality := req.MaxPlaybackQuality.Optional()
-	if maxPlaybackQuality.Value != nil {
-		normalized, ok := access.ParsePlaybackQualityPreset(*maxPlaybackQuality.Value)
-		if !ok {
-			writeError(w, http.StatusBadRequest, "bad_request", "Invalid max_playback_quality")
-			return
-		}
-		maxPlaybackQuality.Value = &normalized
-	}
-	if req.MaxProfiles.Value != nil && *req.MaxProfiles.Value < 1 {
-		writeError(w, http.StatusBadRequest, "bad_request", "max_profiles must be at least 1")
-		return
-	}
-	if err := validateStreamLimits(req.MaxStreams.Value, req.MaxTranscodes.Value); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-	if req.AccessGroupID.Set {
-		if req.AccessGroupID.Value != nil && *req.AccessGroupID.Value <= 0 {
-			writeError(w, http.StatusUnprocessableEntity, "unprocessable_entity", "Invalid access_group_id")
-			return
-		}
-		if h.rejectGroupedAdmin(w, r, id, &req, currentUser) {
-			return
-		}
-		if req.AccessGroupID.Value != nil {
-			if h.AccessGroups == nil {
-				writeError(w, http.StatusInternalServerError, "internal_error", "Access groups are not configured")
-				return
-			}
-			if _, err := h.AccessGroups.Get(r.Context(), *req.AccessGroupID.Value); err != nil {
-				if errors.Is(err, access.ErrGroupNotFound) {
-					writeError(w, http.StatusUnprocessableEntity, "unprocessable_entity", "Invalid access_group_id")
-					return
-				}
-				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to validate access group")
-				return
-			}
-		}
-	}
-	var permissions *[]string
-	if req.Permissions.Set {
-		normalized, err := auth.NormalizePermissions(req.Permissions.Value)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-			return
-		}
-		permissions = &normalized
-	}
-
-	updateInput := models.UpdateUserInput{
-		Username:                 req.Username,
-		Email:                    req.Email,
-		Password:                 req.Password,
-		Role:                     req.Role,
-		Permissions:              permissions,
-		Enabled:                  req.Enabled,
-		LibraryIDs:               req.libraryIDsOptional(),
-		MaxPlaybackQuality:       maxPlaybackQuality,
-		MaxStreams:               req.MaxStreams.Optional(),
-		MaxTranscodes:            req.MaxTranscodes.Optional(),
-		TranscodeAllowed:         req.TranscodeAllowed.Optional(),
-		AudioTranscodeAllowed:    req.AudioTranscodeAllowed.Optional(),
-		MaxProfiles:              req.MaxProfiles.Optional(),
-		DownloadAllowed:          req.DownloadAllowed.Optional(),
-		DownloadTranscodeAllowed: req.DownloadTranscodeAllowed.Optional(),
-		RequestsAllowed:          req.RequestsAllowed.Optional(),
-		AccessGroupID:            req.AccessGroupID.Optional(),
-	}
-
-	enableLocalLoginWithPassword(&updateInput)
-
-	// As in v2, the Owner rules run against the target account locked in the
-	// transaction that updates it and revokes its sign-ins.
-	repo, ok := h.userRepo.(adminAccountRepository)
-	if !ok {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update user")
-		return
-	}
-	actor, err := requestOwnerActor(r.Context(), h.userRepo)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch user")
-		return
-	}
-	revoked := false
-	_, err = repo.MutateAdminAccount(r.Context(), id, -1, &updateInput, func(current *models.User, tx pgx.Tx) (bool, error) {
-		if err := h.keepInheritedProfileLimit(r.Context(), tx, current, &updateInput); err != nil {
-			return false, err
-		}
-		if err := auth.CheckOwnerUpdate(actor, current, updateInput); err != nil {
-			return false, ownerError(err)
-		}
-		// Recheck the scoped-key limits against the locked account: the
-		// target may have been promoted since rejectScopedAPIKeyUpdate read it.
-		if err := checkScopedAPIKeyUpdate(r.Context(), current, updateInput); err != nil {
-			return false, err
-		}
-		// The frozen v1 route keeps the break-glass invariant v2 enforces:
-		// with local password sign-in off, the last usable break-glass admin
-		// cannot be demoted or disabled.
-		if err := auth.EnsureBreakGlassAfterAdminChange(r.Context(), tx, current, &updateInput); err != nil {
-			return false, breakGlassError(err)
-		}
-		revoked = updateRequiresSessionRevocation(current, updateInput)
-		return revoked, nil
-	})
-	if err != nil {
-		var apiErr *APIError
-		switch {
-		case errors.As(err, &apiErr):
-			writeAPIError(w, apiErr)
-		case auth.IsNotFound(err):
-			writeError(w, http.StatusNotFound, "not_found", "User not found")
-		case auth.IsDuplicate(err):
-			writeError(w, http.StatusConflict, "duplicate", "A user with that username or email already exists")
-		default:
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update user")
-		}
-		return
-	}
-	if revoked && h.OnUserSessionsRevoked != nil {
-		h.OnUserSessionsRevoked(r.Context(), id)
-	}
-	if accountScopeChanged(updateInput) {
-		notifyAccountsScopeChanged(r.Context(), h.RecWorker, id)
-	}
-
-	user, err := h.userRepo.GetByID(r.Context(), id)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch updated user")
-		return
-	}
-
-	updatedGroupPolicy, err := h.groupPolicyFor(r.Context(), user)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve effective policy")
-		return
-	}
-	writeJSON(w, http.StatusOK, toAdminUserResponse(user, updatedGroupPolicy))
-}
-
-// keepInheritedProfileLimit drops a v1 max_profiles equal to the limit that
-// applies to an account that inherits it. The frozen v1 body reports that
-// limit rather than an inherit state, so a client that sends back what it read
-// would otherwise pin the inherited limit as an override and, for an admin
-// editing its own account, be refused for changing its access policy. The
-// reported limit belongs to the role and group the account had when the
-// client read it, so a request that moves either in the same call is sending
-// an explicit override for the new context, not an echo. The group is read
-// through tx, the transaction that updates the account: a pool read here
-// would take a second connection while that transaction holds its own. A nil
-// tx (test fakes) falls back to the pool.
-func (h *AdminHandler) keepInheritedProfileLimit(ctx context.Context, tx pgx.Tx, current *models.User, input *models.UpdateUserInput) error {
-	if !input.MaxProfiles.Set || input.MaxProfiles.Value == nil || current.MaxProfiles != nil {
-		return nil
-	}
-	if profileLimitContextChanges(current, input) {
-		return nil
-	}
-	var group *access.GroupPolicy
-	var err error
-	if tx != nil {
-		group, err = access.GroupPolicyInTransaction(ctx, tx, current.ID)
-	} else {
-		group, err = h.groupPolicyFor(ctx, current)
-	}
-	if err != nil {
-		return err
-	}
-	if *input.MaxProfiles.Value == access.ApplyGroupPolicy(current, group).MaxProfiles {
-		input.MaxProfiles = models.Optional[int]{}
-	}
-	return nil
-}
-
-func profileLimitContextChanges(current *models.User, input *models.UpdateUserInput) bool {
-	if input.Role != nil && *input.Role != current.Role {
-		return true
-	}
-	if !input.AccessGroupID.Set {
-		return false
-	}
-	next, now := input.AccessGroupID.Value, current.AccessGroupID
-	return (next == nil) != (now == nil) || (next != nil && now != nil && *next != *now)
-}
-
-// HandleDeleteUser handles DELETE /admin/users/{id}.
-func (h *AdminHandler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	id, err := strconv.Atoi(idStr)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid user ID")
-		return
-	}
-	repo, ok := h.userRepo.(adminAccountRepository)
-	if !ok {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete user")
-		return
-	}
-	actor, err := requestOwnerActor(r.Context(), h.userRepo)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch user")
-		return
-	}
-	// As for updates, the Owner rules run against the target account locked
-	// in the transaction that deletes it and revokes its sign-ins.
-	_, err = repo.MutateAdminAccount(r.Context(), id, -1, nil, func(current *models.User, tx pgx.Tx) (bool, error) {
-		if err := auth.CheckOwnerDelete(actor, current); err != nil {
-			return false, ownerError(err)
-		}
-		if err := auth.EnsureBreakGlassAfterAdminChange(r.Context(), tx, current, nil); err != nil {
-			return false, breakGlassError(err)
-		}
-		return true, nil
-	})
-	if err != nil {
-		var apiErr *APIError
-		switch {
-		case errors.As(err, &apiErr):
-			writeAPIError(w, apiErr)
-		case auth.IsNotFound(err):
-			writeError(w, http.StatusNotFound, "not_found", "User not found")
-		default:
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete user")
-		}
-		return
-	}
-	if h.OnUserSessionsRevoked != nil {
-		h.OnUserSessionsRevoked(r.Context(), id)
-	}
-	h.sweepWatchlistTitles(r.Context(), id)
-	h.invalidateStats(r.Context(), cache.ChannelAdmin, cache.EventAdminStatsInvalidated, strconv.Itoa(id))
-
-	w.WriteHeader(http.StatusNoContent)
+	return pgstore.AccountCollectionIDs(ctx, tx, userID)
 }
 
 // sweepWatchlistTitles removes the watchlist titles a deleted account's
@@ -1224,237 +572,12 @@ func (h *AdminHandler) sweepWatchlistTitles(ctx context.Context, userID int) {
 	}
 }
 
-// HandleImpersonateUser handles POST /admin/users/{id}/impersonate.
-func (h *AdminHandler) HandleImpersonateUser(w http.ResponseWriter, r *http.Request) {
-	if h.ImpersonationService == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Impersonation service unavailable")
-		return
-	}
-
-	claims := apimw.GetClaims(r.Context())
-	if claims == nil {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-	if claims.TokenType == auth.TokenTypeAPIKey || claims.SessionID == "" {
-		writeError(w, http.StatusForbidden, "impersonation_not_allowed", "Impersonation is not allowed")
-		return
-	}
-
-	targetID, err := strconv.Atoi(chi.URLParam(r, "id"))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid user ID")
-		return
-	}
-
-	pair, impersonator, effectiveUser, err := h.ImpersonationService.StartImpersonation(
-		auth.WithClaims(r.Context(), claims),
-		claims.UserID,
-		targetID,
-		r.UserAgent(),
-		clientip.FromContext(r.Context()),
-	)
-	if err != nil {
-		if auth.IsNotFound(err) {
-			writeError(w, http.StatusNotFound, "not_found", "User not found")
-			return
-		}
-		if errors.Is(err, auth.ErrAlreadyImpersonating) {
-			writeError(w, http.StatusConflict, "already_impersonating", "An impersonation session is already active")
-			return
-		}
-		if errors.Is(err, auth.ErrSessionRevoked) {
-			writeError(w, http.StatusUnauthorized, "unauthorized", "Login session is no longer valid")
-			return
-		}
-		if errors.Is(err, auth.ErrImpersonationNotAllowed) {
-			writeError(w, http.StatusForbidden, "impersonation_not_allowed", "Impersonation is not allowed")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to start impersonation")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, buildLoginResponse(pair, effectiveUser, effectiveDownloadAllowed(r.Context(), effectiveUser, h.groupPolicyProvider()), impersonator))
-}
-
-// HandleListSessions handles GET /admin/sessions.
-// Lists active playback sessions enriched with user and media information.
-func (h *AdminHandler) HandleListSessions(w http.ResponseWriter, r *http.Request) {
-	sessions, err := h.loadPlaybackSessions(r.Context(), r)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list sessions")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, sessions)
-}
-
 func (h *AdminHandler) loadPlaybackSessions(ctx context.Context, r *http.Request) ([]playbackSessionRow, error) {
 	loader, err := resolvePlaybackSessionsLoader(h.SessionsLoader, h.pool, h.storeProv, h.DetailSvc)
 	if err != nil {
 		return nil, err
 	}
 	return loader.Load(ctx, PlaybackSessionsQuery{})
-}
-
-// HandleListPlaybackHistory handles GET /admin/playback-history.
-func (h *AdminHandler) HandleListPlaybackHistory(w http.ResponseWriter, r *http.Request) {
-	if h.pool == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Database not configured")
-		return
-	}
-
-	limit, offset := parsePagination(r)
-	q := r.URL.Query()
-
-	var (
-		args       []any
-		conditions []string
-		argIndex   = 1
-	)
-
-	if userIDStr := strings.TrimSpace(q.Get("user_id")); userIDStr != "" {
-		userID, err := strconv.Atoi(userIDStr)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", "Invalid user_id")
-			return
-		}
-		conditions = append(conditions, "h.user_id = $"+strconv.Itoa(argIndex))
-		args = append(args, userID)
-		argIndex++
-	}
-
-	if profileID := strings.TrimSpace(q.Get("profile_id")); profileID != "" {
-		conditions = append(conditions, "h.profile_id = $"+strconv.Itoa(argIndex))
-		args = append(args, profileID)
-		argIndex++
-	}
-
-	if mediaItemID := strings.TrimSpace(q.Get("media_item_id")); mediaItemID != "" {
-		conditions = append(conditions, "h.media_item_id = $"+strconv.Itoa(argIndex))
-		args = append(args, mediaItemID)
-		argIndex++
-	}
-
-	switch strings.TrimSpace(q.Get("completed")) {
-	case "", "all":
-	case "true":
-		conditions = append(conditions, "h.completed = TRUE")
-	case "false":
-		conditions = append(conditions, "h.completed = FALSE")
-	default:
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid completed filter")
-		return
-	}
-
-	query := `
-		SELECT
-			h.session_id,
-			h.user_id,
-			COALESCE(u.username, ''),
-			h.profile_id,
-			COALESCE(NULLIF(h.profile_name, ''), h.profile_id),
-			h.media_item_id,
-			h.media_file_id,
-			COALESCE(ep.title, mi.title, ''),
-			COALESCE(CASE WHEN ep.content_id IS NOT NULL THEN 'episode' ELSE mi.type END, ''),
-			h.play_method,
-			h.started_at,
-			h.ended_at,
-			h.watched_seconds,
-			h.duration_seconds,
-			h.completed
-		FROM admin_playback_history h
-		LEFT JOIN users u ON u.id = h.user_id
-		LEFT JOIN media_items mi ON mi.content_id = h.media_item_id
-		LEFT JOIN episodes ep ON ep.content_id = h.media_item_id
-	`
-	if len(conditions) > 0 {
-		query += " WHERE " + strings.Join(conditions, " AND ")
-	}
-	query += " ORDER BY h.ended_at DESC"
-	query += " LIMIT $" + strconv.Itoa(argIndex)
-	args = append(args, limit)
-	argIndex++
-	query += " OFFSET $" + strconv.Itoa(argIndex)
-	args = append(args, offset)
-
-	rows, err := h.pool.Query(r.Context(), query, args...)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list playback history")
-		return
-	}
-	defer rows.Close()
-
-	history := make([]adminPlaybackHistoryRow, 0)
-	for rows.Next() {
-		var row adminPlaybackHistoryRow
-		if err := rows.Scan(
-			&row.SessionID,
-			&row.UserID,
-			&row.Username,
-			&row.ProfileID,
-			&row.ProfileName,
-			&row.MediaItemID,
-			&row.MediaFileID,
-			&row.MediaTitle,
-			&row.MediaType,
-			&row.PlayMethod,
-			&row.StartedAt,
-			&row.EndedAt,
-			&row.WatchedSeconds,
-			&row.DurationSeconds,
-			&row.Completed,
-		); err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to scan playback history row")
-			return
-		}
-		history = append(history, row)
-	}
-	if err := rows.Err(); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to iterate playback history")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, history)
-}
-
-// HandleListUserProfiles handles GET /admin/users/{id}/profiles.
-func (h *AdminHandler) HandleListUserProfiles(w http.ResponseWriter, r *http.Request) {
-	if h.storeProv == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "User store not configured")
-		return
-	}
-
-	idStr := chi.URLParam(r, "id")
-	userID, err := strconv.Atoi(idStr)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid user ID")
-		return
-	}
-
-	store, ok := h.adminUserStore(w, r, userID)
-	if !ok {
-		return
-	}
-	if store == nil {
-		writeError(w, http.StatusNotFound, "not_found", "User store not found")
-		return
-	}
-
-	profiles, err := store.ListProfiles(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list profiles")
-		return
-	}
-
-	resp := make([]adminUserProfileRow, 0, len(profiles))
-	for _, profile := range profiles {
-		resp = append(resp, adminUserProfileRow{ID: profile.ID, Name: profile.Name})
-	}
-
-	writeJSON(w, http.StatusOK, resp)
 }
 
 // updateMayRequireSessionRevocation is updateRequiresSessionRevocation without
@@ -1486,36 +609,6 @@ func updateRequiresSessionRevocation(current *models.User, input models.UpdateUs
 		return true
 	}
 	return false
-}
-
-// HandleListUnmatched handles GET /admin/unmatched.
-// Lists media files that have not been matched to content (content_id IS NULL).
-func (h *AdminHandler) HandleListUnmatched(w http.ResponseWriter, r *http.Request) {
-	if h.pool == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Database not configured")
-		return
-	}
-
-	q := r.URL.Query()
-	limit := 100
-	if v := q.Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 500 {
-			limit = n
-		}
-	}
-	offset := 0
-	if v := q.Get("offset"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			offset = n
-		}
-	}
-
-	files, err := h.listUnmatchedFiles(r.Context(), limit, offset, nil)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, files)
 }
 
 type AdminUnmatchedFileView = unmatchedFileRow
@@ -1568,21 +661,6 @@ var (
 	errAdminStatsCountUsers = errors.New("failed to count users")
 )
 
-// HandleGetStats handles GET /admin/stats.
-// Returns system statistics for the admin dashboard.
-func (h *AdminHandler) HandleGetStats(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.ReadAdminStats(r.Context(), isTruthyQuery(r.URL.Query().Get("refresh")))
-	if err != nil {
-		message := "Failed to get stats"
-		if errors.Is(err, errAdminStatsCountUsers) {
-			message = "Failed to count users"
-		}
-		writeError(w, http.StatusInternalServerError, "internal_error", message)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
 // ReadAdminStats shares the existing cache, PostgreSQL and account-repository fallback.
 func (h *AdminHandler) ReadAdminStats(ctx context.Context, refresh bool) (AdminStats, error) {
 	if h.StatsSource != nil {
@@ -1612,15 +690,6 @@ func (h *AdminHandler) ReadAdminStats(ctx context.Context, refresh bool) (AdminS
 	return AdminStats{TotalUsers: len(users)}, nil
 }
 
-func isTruthyQuery(value string) bool {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
-}
-
 func (h *AdminHandler) invalidateStats(ctx context.Context, channel, eventType, payload string) {
 	if h.StatsSource != nil {
 		h.StatsSource.Invalidate()
@@ -1639,53 +708,6 @@ func (h *AdminHandler) publishStatsEvent(ctx context.Context, channel, eventType
 			"error", err,
 		)
 	}
-}
-
-type refreshItemMetadataRequest struct {
-	Mode string `json:"mode"`
-}
-
-// HandleRefreshItemMetadata handles POST /admin/items/{id}/refresh-metadata.
-func (h *AdminHandler) HandleRefreshItemMetadata(w http.ResponseWriter, r *http.Request) {
-	if h.JobRepo == nil || h.ItemRefreshResolver == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Item refresh jobs are not configured")
-		return
-	}
-
-	contentID := chi.URLParam(r, "id")
-	if contentID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
-		return
-	}
-
-	mode := adminjob.ItemRefreshModeQuick
-	if r.Body != nil {
-		var req refreshItemMetadataRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
-			writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-			return
-		}
-		if req.Mode != "" {
-			switch adminjob.ItemRefreshMode(req.Mode) {
-			case adminjob.ItemRefreshModeQuick, adminjob.ItemRefreshModeComplete:
-				mode = adminjob.ItemRefreshMode(req.Mode)
-			default:
-				writeError(w, http.StatusBadRequest, "bad_request", "Invalid refresh mode")
-				return
-			}
-		}
-	}
-
-	job, err := h.CreateItemMetadataRefresh(r.Context(), contentID, mode, currentAdminUserID(r))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	// The job already exists; a failed acting-admin lookup only narrows what
-	// the response shows.
-	actingAdmin, _ := apimw.ActingAdmin(r.Context())
-	writeJSON(w, http.StatusAccepted, adminJobToResponseFor(r, job, nil, actingAdmin))
 }
 
 // UpdateItemMetadataRequest contains the fields that can be updated via
@@ -1722,29 +744,6 @@ type UpdateItemMetadataRequest struct {
 	LockedFields     *[]int    `json:"locked_fields"`
 }
 
-// HandleUpdateItemMetadata handles PATCH /admin/items/{id}/metadata.
-func (h *AdminHandler) HandleUpdateItemMetadata(w http.ResponseWriter, r *http.Request) {
-	contentID := chi.URLParam(r, "id")
-	if contentID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
-		return
-	}
-
-	var req UpdateItemMetadataRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	// The frozen v1 contract treats null like omission, so v1 clears nothing.
-	detail, err := h.UpdateCatalogItemMetadata(r.Context(), contentID, req, nil)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, detail)
-}
-
 // --- Server Settings endpoints ---
 
 // sensitiveSettingKeys is the audited allowlist of secret-bearing settings
@@ -1754,8 +753,13 @@ var sensitiveSettingKeys = catalog.SensitiveSettingKeys
 
 // machineManagedSettingKeys contains durable internal state that shares the
 // server_settings store but is not part of the administrator settings API.
+// The server generates the signing keys itself. An administrator who could set
+// one could mint tokens for any account, the Owner included, after a restart.
 var machineManagedSettingKeys = map[string]bool{
+	"auth.jwt_secret":                           true,
+	"audiobooks.abs.jwt_secret":                 true,
 	chatgpt.CredentialsKey:                      true,
+	config.AIProvidersSettingKey:                true,
 	config.ArtworkStorageReconcileCheckpointKey: true,
 	config.ArtworkStorageSweepCheckpointKey:     true,
 	config.MediaImageSweepCheckpointKey:         true,
@@ -1763,6 +767,9 @@ var machineManagedSettingKeys = map[string]bool{
 	blobstore.IdentitySettingKey:                true,
 	blobstore.OperationalIdentitySettingKey:     true,
 	config.StorageTransitionTargetKey:           true,
+	// Written only by POST /api/v2/admin/backups/s3/acknowledge-key, which
+	// records this server's check value.
+	config.BackupS3KeyAcknowledgedSettingKey: true,
 }
 
 // Setting keys that decide where artwork lives. The s3 keys are the canonical
@@ -1875,79 +882,6 @@ func redactAdminSettings(values map[string]string) {
 	}
 }
 
-// HandleGetSettings handles GET /admin/settings.
-func (h *AdminHandler) HandleGetSettings(w http.ResponseWriter, r *http.Request) {
-	if h.SettingsRepo == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Settings store not configured")
-		return
-	}
-	all, err := h.SettingsRepo.GetAll(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load settings")
-		return
-	}
-	redactAdminSettings(all)
-	writeJSON(w, http.StatusOK, all)
-}
-
-// HandleGetEffectiveSettings handles GET /admin/settings/effective. Unlike the
-// legacy raw endpoint, missing rows are populated with the exact defaults used
-// by runtime readers so an untouched form always describes active behavior.
-func (h *AdminHandler) HandleGetEffectiveSettings(w http.ResponseWriter, r *http.Request) {
-	if h.SettingsRepo == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Settings store not configured")
-		return
-	}
-	all, err := h.SettingsRepo.GetAll(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load settings")
-		return
-	}
-	effective := h.effectiveAdminSettings(all)
-	redactAdminSettings(effective)
-	writeJSON(w, http.StatusOK, effective)
-}
-
-type restartKeysResponse struct {
-	Keys     []string `json:"keys"`
-	Prefixes []string `json:"prefixes"`
-}
-
-// HandleGetRestartKeys handles GET /admin/settings/restart-keys. The registry
-// is compiled into the binary (internal/config), so the response only changes
-// across deploys; the admin UI caches it and uses it to badge the fields whose
-// saved value waits on a restart.
-func (h *AdminHandler) HandleGetRestartKeys(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, restartKeysResponse{
-		Keys:     config.RestartRequiredKeys(),
-		Prefixes: config.RestartRequiredPrefixes(),
-	})
-}
-
-type sensitiveStatusResponse struct {
-	Configured   []string `json:"configured"`
-	ManagedByEnv []string `json:"managed_by_env,omitempty"`
-}
-
-// HandleGetSensitiveStatus handles GET /admin/settings/sensitive-status.
-// Returns which sensitive keys are configured and which are managed by env.
-func (h *AdminHandler) HandleGetSensitiveStatus(w http.ResponseWriter, r *http.Request) {
-	if h.SettingsRepo == nil {
-		writeError(w, http.StatusInternalServerError, "settings_error", "settings not configured")
-		return
-	}
-	all, err := h.SettingsRepo.GetAll(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "settings_error", err.Error())
-		return
-	}
-	status := h.adminSensitiveSettingsStatus(all)
-	writeJSON(w, http.StatusOK, sensitiveStatusResponse{
-		Configured:   status.Configured,
-		ManagedByEnv: status.ManagedByEnv,
-	})
-}
-
 type adminSettingResponse = AdminSettingValue
 
 type AdminSettingValue struct {
@@ -1998,12 +932,6 @@ type AdminDeviceSummaryView struct {
 	LastUpdated    string                      `json:"last_updated"`
 }
 
-type adminDevicesListResponse struct {
-	Devices []adminDeviceSummaryResponse `json:"devices"`
-}
-
-type adminDeviceDetailResponse = AdminDeviceDetailView
-
 type AdminDeviceDetailView struct {
 	UserID         int                          `json:"user_id"`
 	Username       string                       `json:"username"`
@@ -2016,26 +944,6 @@ type AdminDeviceDetailView struct {
 	Profiles       []adminDeviceProfileSummary  `json:"profiles"`
 	LastUpdated    string                       `json:"last_updated"`
 	Settings       []adminDeviceSettingResponse `json:"settings"`
-}
-
-// HandleListDevices preserves the frozen administrator device list.
-func (h *AdminHandler) HandleListDevices(w http.ResponseWriter, r *http.Request) {
-	views, err := h.ReadAdminDevices(r.Context())
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, adminDevicesListResponse{Devices: views})
-}
-
-// HandleGetDevice preserves the bridge's legacy settings array.
-func (h *AdminHandler) HandleGetDevice(w http.ResponseWriter, r *http.Request) {
-	view, err := h.ReadAdminDevice(r.Context(), chi.URLParam(r, "user_id"), chi.URLParam(r, "device_id"))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, view)
 }
 
 func listRegisteredDevices(ctx context.Context, store userstore.UserStore) ([]userstore.DeviceEntry, error) {
@@ -2262,56 +1170,6 @@ func listProfileNamesByID(ctx context.Context, store userstore.UserStore) (map[s
 	return profileNames, nil
 }
 
-func adminProfileExists(w http.ResponseWriter, r *http.Request, store userstore.UserStore, profileID string) bool {
-	profile, err := store.GetProfile(r.Context(), profileID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load profile")
-		return false
-	}
-	if profile == nil {
-		writeError(w, http.StatusNotFound, "not_found", "Profile not found")
-		return false
-	}
-	return true
-}
-
-func (h *AdminHandler) adminUserStore(w http.ResponseWriter, r *http.Request, userID int) (userstore.UserStore, bool) {
-	if h.storeProv == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "User store not configured")
-		return nil, false
-	}
-	store, err := h.storeProv.ForUser(r.Context(), userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
-		return nil, false
-	}
-	if store == nil {
-		writeError(w, http.StatusNotFound, "not_found", "User store not found")
-		return nil, false
-	}
-	return store, true
-}
-
-func parseAdminUserIDParam(w http.ResponseWriter, r *http.Request) (int, bool) {
-	raw := chi.URLParam(r, "id")
-	userID, err := strconv.Atoi(raw)
-	if err != nil || userID <= 0 {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid user id")
-		return 0, false
-	}
-	return userID, true
-}
-
-// HandleGetSetting handles GET /admin/settings/{key}.
-func (h *AdminHandler) HandleGetSetting(w http.ResponseWriter, r *http.Request) {
-	value, err := h.ReadAdminSetting(r.Context(), chi.URLParam(r, "key"))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, value)
-}
-
 type updateSettingRequest struct {
 	Value string `json:"value"`
 }
@@ -2345,7 +1203,7 @@ func (h *AdminHandler) normalizeBatchSetting(
 
 	switch key {
 	case markers.SettingMode, markers.SettingLazyPlayback, markers.SettingOnlineStorage,
-		markers.SettingDetectIntros, markers.SettingDetectCredits:
+		markers.SettingDetectIntros, markers.SettingDetectCredits, markers.SettingShareByDefault:
 		normalized, err = markers.NormalizeSetting(key, normalized)
 	case clientip.SettingTrustedProxies:
 		normalized, err = clientip.NormalizeCIDRList(normalized)
@@ -2433,6 +1291,8 @@ var adminSettingDependencyGroups = [][]string{
 	{"matcher.enable_tv_series_root_queue", "matcher.enable_tv_series_group_queue"},
 	{"ai.max_concurrent_jobs", "subtitle_ai.max_concurrent_jobs"},
 	{"ai.chat_model", "subtitle_ai.chat_model", "ai.reasoning_effort"}, //nolint:goconst // Keep the complete setting dependency explicit.
+	// A provider binding is checked against the registry it names.
+	append([]string{config.AIProvidersSettingKey}, config.AIProviderBindingKeys()...),
 	{
 		diagnostics.KeyMaxBundleBytes,
 		diagnostics.KeyMaxUncompressedBytes,
@@ -2618,63 +1478,111 @@ func (h *AdminHandler) checkLocalLoginSetting(ctx context.Context, tx pgx.Tx, be
 	return breakGlassError(auth.CheckLocalLoginSettingChange(ctx, h.pool, before[key], after[key]))
 }
 
-// HandleUpdateSettings handles PUT /admin/settings. Every requested value is
-// normalized and validated with the prospective values it depends on before
-// SetMany performs one transaction, so a multi-field save is all-or-nothing.
-func (h *AdminHandler) HandleUpdateSettings(w http.ResponseWriter, r *http.Request) {
-	if h.SettingsRepo == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Settings store not configured")
-		return
-	}
+// errBackupKeyNotConfirmed refuses switching backups to S3 before the admin
+// confirmed keeping a copy of this server's SECRET_KEY.
+var errBackupKeyNotConfirmed = &APIError{
+	Status:  http.StatusConflict,
+	Code:    "backup_key_not_confirmed",
+	Message: "Confirm that you keep a copy of this server's SECRET_KEY before keeping backups in S3 (POST /api/v2/admin/backups/s3/acknowledge-key)",
+}
 
-	var req updateSettingsRequest
-	decoder := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
+// checkBackupDestination refuses a save that switches backup.destination to
+// s3 unless the confirmed key check value is this server's, and one that
+// leaves the S3 destination without a bucket. A destination already on s3
+// stays saveable after SECRET_KEY changes; the backups pause instead.
+func (h *AdminHandler) checkBackupDestination(changed, before, after map[string]string) error {
+	if after[config.BackupDestinationSettingKey] != config.BackupDestinationS3 {
+		return nil
 	}
-	result, err := h.UpdateAdminSettings(r.Context(), req.Values, nil)
-	if err != nil {
-		writeAdminSettingsServiceError(w, err)
-		return
+	_, destination := changed[config.BackupDestinationSettingKey]
+	_, bucket := changed[config.BackupS3BucketSettingKey]
+	_, endpoint := changed[config.BackupS3EndpointSettingKey]
+	if (destination || bucket || endpoint) &&
+		(strings.TrimSpace(after[config.BackupS3BucketSettingKey]) == "" || strings.TrimSpace(after[config.BackupS3EndpointSettingKey]) == "") {
+		return &APIError{Status: http.StatusBadRequest, Code: adminInvalidSettingsCode, Message: "backups in S3 need backup.s3.endpoint and backup.s3.bucket"}
 	}
-	writeJSON(w, http.StatusOK, result)
+	if before[config.BackupDestinationSettingKey] == config.BackupDestinationS3 {
+		return nil
+	}
+	if h.BackupKeyCheck == "" || strings.TrimSpace(after[config.BackupS3KeyAcknowledgedSettingKey]) != h.BackupKeyCheck {
+		return errBackupKeyNotConfirmed
+	}
+	return nil
+}
+
+func (h *AdminHandler) beforeServerSettingCommit(ctx context.Context, tx pgx.Tx, key, value string) error {
+	if h.BeforeServerSettingCommit == nil {
+		return nil
+	}
+	return h.BeforeServerSettingCommit(ctx, tx, key, value)
 }
 
 func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[string]string, guard func(AdminSettingsSnapshot) error) (AdminSettingsUpdateResult, error) {
+	result, publish, err := h.updateAdminSettings(ctx, nil, values, guard)
+	if err != nil {
+		return AdminSettingsUpdateResult{}, err
+	}
+	publish(ctx)
+	return result, nil
+}
+
+// codeInternalError is the API error code of a server-side failure.
+const codeInternalError = "internal_error"
+
+// ApplyAdminSettingsInTx writes values through the admin settings write path
+// (the same normalization, validation, and settings lock) inside the caller's
+// transaction. Nothing is published until the caller runs publish after its
+// transaction commits; a rollback leaves nothing to announce. A non-nil
+// guard runs only under the settings lock, with the stored values read
+// there: a read outside the caller's transaction could wait on it.
+func (h *AdminHandler) ApplyAdminSettingsInTx(ctx context.Context, tx pgx.Tx, values map[string]string, guard func(AdminSettingsSnapshot) error) (AdminSettingsUpdateResult, func(context.Context), error) {
+	if tx == nil {
+		return AdminSettingsUpdateResult{}, nil, errors.New("a transaction is required")
+	}
+	return h.updateAdminSettings(ctx, tx, values, guard)
+}
+
+// updateAdminSettings validates and writes values, in tx when it is set and
+// in a transaction of its own otherwise. publish announces the committed
+// changes: events, the settings hook, and restart flags.
+//
+//nolint:funlen,gocyclo // UpdateAdminSettings' body, moved as is behind the caller-transaction entry points
+func (h *AdminHandler) updateAdminSettings(ctx context.Context, tx pgx.Tx, values map[string]string, guard func(AdminSettingsSnapshot) error) (AdminSettingsUpdateResult, func(context.Context), error) {
+	fail := func(err error) (AdminSettingsUpdateResult, func(context.Context), error) {
+		return AdminSettingsUpdateResult{}, nil, err
+	}
 	if h.SettingsRepo == nil {
-		return AdminSettingsUpdateResult{}, &APIError{Status: 500, Code: "internal_error", Message: "Settings store not configured"}
+		return fail(&APIError{Status: 500, Code: codeInternalError, Message: "Settings store not configured"})
 	}
 	req := updateSettingsRequest{Values: values}
 
 	if len(req.Values) == 0 {
-		return AdminSettingsUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "At least one setting is required"}
+		return fail(&APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "At least one setting is required"})
 	}
 	if len(req.Values) > 250 {
-		return AdminSettingsUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "A settings update may contain at most 250 values"}
+		return fail(&APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "A settings update may contain at most 250 values"})
 	}
 
-	if guard != nil {
+	if guard != nil && tx == nil {
 		stored, err := h.SettingsRepo.GetAll(ctx)
 		if err != nil {
-			return AdminSettingsUpdateResult{}, err
+			return fail(err)
 		}
 		if err := guard(h.adminSettingsSnapshot(stored)); err != nil {
-			return AdminSettingsUpdateResult{}, err
+			return fail(err)
 		}
 	}
 
 	keys := make([]string, 0, len(req.Values))
 	for key := range req.Values {
 		if strings.TrimSpace(key) == "" {
-			return AdminSettingsUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Setting key is required"}
+			return fail(&APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Setting key is required"})
 		}
 		if machineManagedSettingKeys[key] {
-			return AdminSettingsUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: key + " is managed internally"}
+			return fail(&APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: key + " is managed internally"})
 		}
 		if h.environmentRefusesSave(key, req.Values[key]) {
-			return AdminSettingsUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: "managed_by_environment", Message: key + " is managed by an environment variable"}
+			return fail(&APIError{Status: http.StatusBadRequest, Code: "managed_by_environment", Message: key + " is managed by an environment variable"})
 		}
 		keys = append(keys, key)
 	}
@@ -2684,18 +1592,18 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 	for _, key := range keys {
 		value, code, err := h.normalizeBatchSetting(ctx, key, req.Values[key])
 		if err != nil {
-			return AdminSettingsUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: code, Message: err.Error()}
+			return fail(&APIError{Status: http.StatusBadRequest, Code: code, Message: err.Error()})
 		}
 		normalized[key] = value
 	}
 	checkedRedis, err := h.checkRedisSave(ctx, normalized)
 	if err != nil {
-		return AdminSettingsUpdateResult{}, err
+		return fail(err)
 	}
 
 	modelValidation, err := h.prepareAIModelValidation(ctx, normalized)
 	if err != nil {
-		return AdminSettingsUpdateResult{}, err
+		return fail(err)
 	}
 
 	var (
@@ -2706,7 +1614,7 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 	)
 	var preconditionErr error
 	var committedSnapshot *AdminSettingsSnapshot
-	err = updateServerSettingsInTransaction(ctx, h.SettingsRepo,
+	err = updateServerSettingsWithTx(ctx, h.SettingsRepo, tx,
 		func(stored map[string]string, tx pgx.Tx) (map[string]string, error) {
 			if guard != nil {
 				if err := guard(h.adminSettingsSnapshot(stored)); err != nil {
@@ -2739,6 +1647,10 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 				preconditionErr = err
 				return nil, err
 			}
+			if err := h.checkBackupDestination(normalized, before, after); err != nil {
+				preconditionErr = err
+				return nil, err
+			}
 			// Cross-field checks run against the complete prospective state, so a
 			// value the batch clears is gone even when the store still has it and
 			// the current process is still running on it.
@@ -2762,6 +1674,14 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 					effectiveChanges[key] = true
 				}
 			}
+			for _, key := range keys {
+				if !effectiveChanges[key] {
+					continue
+				}
+				if err := h.beforeServerSettingCommit(ctx, tx, key, after[key]); err != nil {
+					return nil, err
+				}
+			}
 			if guard != nil {
 				committed := maps.Clone(stored)
 				maps.Copy(committed, writes)
@@ -2770,17 +1690,18 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 			return writes, nil
 		})
 	if preconditionErr != nil {
-		return AdminSettingsUpdateResult{}, preconditionErr
+		return fail(preconditionErr)
 	}
 	if validationErr != nil {
-		return AdminSettingsUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: validationCode, Message: validationErr.Error()}
+		return fail(&APIError{Status: http.StatusBadRequest, Code: validationCode, Message: validationErr.Error()})
 	}
 	if err != nil {
-		return AdminSettingsUpdateResult{}, &APIError{Status: http.StatusInternalServerError, Code: "internal_error", Message: "Failed to update settings"}
+		return fail(&APIError{Status: http.StatusInternalServerError, Code: codeInternalError, Message: "Failed to update settings"})
 	}
 
 	responseValues := make(map[string]string, len(normalized))
 	restartKeys := make([]string, 0, len(normalized))
+	var changed []string
 	for _, key := range keys {
 		if !sensitiveSettingKeys[key] {
 			responseValues[key] = after[key]
@@ -2788,69 +1709,35 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 		if !effectiveChanges[key] {
 			continue
 		}
-		if h.EventBus != nil {
-			_ = h.EventBus.Publish(ctx, cache.ChannelAdmin,
-				cache.Event{Type: cache.EventSettingsChanged, Payload: key})
-		}
-		if h.OnServerSettingUpdated != nil {
-			h.OnServerSettingUpdated(ctx, key, after[key])
-		}
+		changed = append(changed, key)
 		if config.RestartRequired(key) {
 			restartKeys = append(restartKeys, key)
 		}
 	}
-	// Per-key reasons ("setting:<key>") so the admin UI can scope a pending
-	// restart to the subsystem the key belongs to instead of warning on every
-	// tile for any settings save.
-	for _, restartKey := range restartKeys {
-		h.markServerRestartRequired("setting:" + restartKey)
+	publish := func(ctx context.Context) {
+		for _, key := range changed {
+			if h.EventBus != nil {
+				_ = h.EventBus.Publish(ctx, cache.ChannelAdmin,
+					cache.Event{Type: cache.EventSettingsChanged, Payload: key})
+			}
+			if h.OnServerSettingUpdated != nil {
+				h.OnServerSettingUpdated(ctx, key, after[key])
+			}
+			publishAdminDefaultEvent(ctx, h.EventsHub, key)
+		}
+		// Per-key reasons ("setting:<key>") so the admin UI can scope a
+		// pending restart to the subsystem the key belongs to instead of
+		// warning on every tile for any settings save.
+		for _, restartKey := range restartKeys {
+			h.markServerRestartRequired("setting:" + restartKey)
+		}
 	}
 	return updateSettingsResponse{
 		CommittedSnapshot:   committedSnapshot,
 		Values:              responseValues,
 		RestartRequired:     len(restartKeys) > 0,
 		RestartRequiredKeys: restartKeys,
-	}, nil
-}
-
-// HandleUpdateSetting handles PUT /admin/settings/{key}.
-func (h *AdminHandler) HandleUpdateSetting(w http.ResponseWriter, r *http.Request) {
-	if h.SettingsRepo == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Settings store not configured")
-		return
-	}
-
-	key := chi.URLParam(r, "key")
-	if key == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Setting key is required")
-		return
-	}
-	if machineManagedSettingKeys[key] {
-		writeError(w, http.StatusBadRequest, "bad_request", key+" is managed internally")
-		return
-	}
-	// Whether the environment refuses redis.db depends on the value, which
-	// UpdateAdminSetting checks once the body is read.
-	if key != config.RedisDBSettingKey && h.BootstrapSensitiveConfigured[key] {
-		writeError(w, http.StatusBadRequest, "managed_by_environment", key+" is managed by an environment variable")
-		return
-	}
-	if strings.HasPrefix(key, "ratelimit.") {
-		writeError(w, http.StatusBadRequest, "bad_request", key+" is managed by /admin/rate-limits/config")
-		return
-	}
-
-	var req updateSettingRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	result, err := h.UpdateAdminSetting(r.Context(), key, req.Value, nil)
-	if err != nil {
-		writeAdminSettingsServiceError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
+	}, publish, nil
 }
 
 func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string, guard func(AdminSettingsSnapshot) error) (AdminSettingUpdateResult, error) {
@@ -2891,7 +1778,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 
 	switch key {
 	case markers.SettingMode, markers.SettingLazyPlayback, markers.SettingOnlineStorage,
-		markers.SettingDetectIntros, markers.SettingDetectCredits:
+		markers.SettingDetectIntros, markers.SettingDetectCredits, markers.SettingShareByDefault:
 		if normalized, err := markers.NormalizeSetting(key, req.Value); err != nil {
 			return AdminSettingUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: err.Error()}
 		} else {
@@ -3120,7 +2007,10 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 					return nil, err
 				}
 			}
-			if isPlaybackRoutingPairSetting(key) || key == adminAIChatModelKey || key == adminAILegacyChatModelKey || key == adminAIReasoningEffortKey {
+			// A provider binding is checked against the registry the dependency
+			// group pulls in, as the batch write does.
+			if isPlaybackRoutingPairSetting(key) || key == adminAIChatModelKey || key == adminAILegacyChatModelKey || key == adminAIReasoningEffortKey ||
+				slices.Contains(config.AIProviderBindingKeys(), key) {
 				changed := map[string]string{key: req.Value}
 				validationSnapshot := adminSettingsValidationSnapshot(h.activeAdminSettings(prospective), changed)
 				if err := validateProspectiveAdminSettings(validationSnapshot, h.RedisBootstrapAvailable); err != nil {
@@ -3161,7 +2051,16 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 				preconditionErr = err
 				return nil, err
 			}
+			if err := h.checkBackupDestination(change, before, after); err != nil {
+				preconditionErr = err
+				return nil, err
+			}
 			effectiveChanged = before[key] != after[key]
+			if effectiveChanged {
+				if err := h.beforeServerSettingCommit(ctx, tx, key, after[key]); err != nil {
+					return nil, err
+				}
+			}
 			if shouldPersistAdminSetting(stored, key, row, effectiveChanged) {
 				return map[string]string{key: row}, nil
 			}
@@ -3184,6 +2083,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 		if h.OnServerSettingUpdated != nil {
 			h.OnServerSettingUpdated(ctx, key, after[key])
 		}
+		publishAdminDefaultEvent(ctx, h.EventsHub, key)
 	}
 	restartRequired := effectiveChanged && config.RestartRequired(key)
 	if restartRequired {
@@ -3368,11 +2268,3 @@ func validateProspectiveDiagnosticsSettings(values map[string]string) error {
 // These aliases expose the established receipts without changing bridge JSON.
 type AdminSettingsUpdateResult = updateSettingsResponse
 type AdminSettingUpdateResult = adminSettingResponse
-
-func writeAdminSettingsServiceError(w http.ResponseWriter, err error) {
-	if apiErr, ok := errors.AsType[*APIError](err); ok {
-		writeError(w, apiErr.Status, apiErr.Code, apiErr.Message)
-		return
-	}
-	writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update settings")
-}

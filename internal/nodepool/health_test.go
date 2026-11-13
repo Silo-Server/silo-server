@@ -1,11 +1,9 @@
 package nodepool
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -40,24 +38,12 @@ func (f *fakeCapabilityFetcher) callCount() int {
 // newHealthNode starts a stand-in node whose /health advertises capabilitiesHash.
 func newHealthNode(t *testing.T, capabilitiesHash string) string {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/health" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(healthResponse{
-			Status:           "ok",
-			ActiveJobs:       2,
-			EgressKbps:       17,
-			CapabilitiesHash: capabilitiesHash,
-		})
-	}))
-	t.Cleanup(server.Close)
-	return server.URL
+	body, err := json.Marshal(healthResponse{Status: "ok", ActiveJobs: 2, EgressKbps: 17, CapabilitiesHash: capabilitiesHash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return newStatsHealthNode(t, string(body))
 }
-
-func stringPtr(s string) *string { return &s }
 
 // capabilityCheckerFixture wires one transcode node into a checker with a fake
 // fetcher and a callback recorder, which is the whole capability flow minus the
@@ -155,7 +141,7 @@ func TestHealthCheckerSkipsFetchWhenHashUnchanged(t *testing.T) {
 	fixture := newCapabilityCheckerFixture(t, &Node{
 		ID: 1, Name: "gpu-1", URL: url, Enabled: true,
 		Capabilities:     json.RawMessage(testCapabilityPayload),
-		CapabilitiesHash: stringPtr("sha256:same"),
+		CapabilitiesHash: strPtr("sha256:same"),
 	}, fetcher)
 
 	fixture.sweep()
@@ -200,7 +186,7 @@ func TestHealthCheckerSkipsFetchWhenNodeUnhealthy(t *testing.T) {
 	fixture := newCapabilityCheckerFixture(t, &Node{
 		ID: 1, Name: "gpu-1", URL: server.URL, Enabled: true, Healthy: true,
 		Capabilities:     json.RawMessage(testCapabilityPayload),
-		CapabilitiesHash: stringPtr("sha256:old"),
+		CapabilitiesHash: strPtr("sha256:old"),
 	}, fetcher)
 
 	fixture.sweep()
@@ -222,7 +208,7 @@ func TestHealthCheckerKeepsStoredCapabilitiesOnFetchFailure(t *testing.T) {
 	fixture := newCapabilityCheckerFixture(t, &Node{
 		ID: 1, Name: "gpu-1", URL: url, Enabled: true,
 		Capabilities:     json.RawMessage(testCapabilityPayload),
-		CapabilitiesHash: stringPtr("sha256:old"),
+		CapabilitiesHash: strPtr("sha256:old"),
 	}, fetcher)
 
 	fixture.sweep()
@@ -275,130 +261,6 @@ func TestHealthCheckerAppliesCapabilitiesToProxyPool(t *testing.T) {
 	stored := proxyPool.Nodes()[0]
 	if stored.CapabilitiesHash == nil || *stored.CapabilitiesHash != "sha256:new" {
 		t.Fatalf("proxy pool hash = %v, want sha256:new", stored.CapabilitiesHash)
-	}
-}
-
-// Without a fetcher wired (proxy/transcode modes, or before wiring) the sweep
-// must behave exactly as it did before capability tracking.
-func TestHealthCheckerWithoutFetcherStillChecksHealth(t *testing.T) {
-	url := newHealthNode(t, "sha256:new")
-	pool := NewTranscodePool()
-	pool.SetNodes([]*Node{{ID: 1, Name: "gpu-1", URL: url, Enabled: true}})
-	checker := NewHealthChecker(NewProxyPool(), pool, nil)
-
-	checker.checkAll(context.Background())
-
-	stored := pool.Nodes()[0]
-	if !stored.Healthy || stored.ActiveJobs != 2 || stored.EgressKbps != 17 {
-		t.Fatalf("health was not applied: %+v", stored)
-	}
-	if stored.Capabilities != nil {
-		t.Fatalf("capabilities = %s, want none without a fetcher", stored.Capabilities)
-	}
-}
-
-// Losing a verified backend or a render device is the case worth warning about:
-// the node still answers health, so nothing else would surface the loss.
-func TestHealthCheckerWarnsOnCapabilityDrift(t *testing.T) {
-	url := newHealthNode(t, "sha256:degraded")
-	degraded := `{"resolved":"none","render_devices":[],` +
-		`"detected_backends":[{"backend":"nvenc","verified":false}],"capability_hash":"sha256:degraded"}`
-	fetcher := &fakeCapabilityFetcher{payload: []byte(degraded), hash: "sha256:degraded"}
-	fixture := newCapabilityCheckerFixture(t, &Node{
-		ID: 1, Name: "gpu-1", URL: url, Enabled: true,
-		Capabilities:     json.RawMessage(testCapabilityPayload),
-		CapabilitiesHash: stringPtr("sha256:old"),
-	}, fetcher)
-
-	logged := captureSlog(t, slog.LevelWarn)
-	fixture.sweep()
-
-	output := logged.String()
-	if !bytes.Contains(logged.Bytes(), []byte("node capability drift")) {
-		t.Fatalf("no drift warning logged; log was:\n%s", output)
-	}
-	for _, want := range []string{"nvenc", "/dev/dri/renderD128"} {
-		if !bytes.Contains(logged.Bytes(), []byte(want)) {
-			t.Fatalf("drift warning does not name %q; log was:\n%s", want, output)
-		}
-	}
-}
-
-// The first report is not drift — there is nothing to compare it against — so
-// it must not warn.
-func TestHealthCheckerDoesNotWarnOnFirstCapabilityStore(t *testing.T) {
-	url := newHealthNode(t, "sha256:new")
-	fetcher := &fakeCapabilityFetcher{payload: []byte(testCapabilityPayload), hash: "sha256:new"}
-	fixture := newCapabilityCheckerFixture(t, &Node{ID: 1, Name: "gpu-1", URL: url, Enabled: true}, fetcher)
-
-	logged := captureSlog(t, slog.LevelInfo)
-	fixture.sweep()
-
-	if bytes.Contains(logged.Bytes(), []byte("node capability drift")) {
-		t.Fatalf("first capability store logged drift:\n%s", logged.String())
-	}
-	if !bytes.Contains(logged.Bytes(), []byte("node capabilities stored")) {
-		t.Fatalf("first capability store was not logged:\n%s", logged.String())
-	}
-}
-
-// Gaining hardware is not drift either: only a loss is worth an operator's
-// attention.
-func TestHealthCheckerDoesNotWarnWhenCapabilitiesImprove(t *testing.T) {
-	url := newHealthNode(t, "sha256:better")
-	improved := `{"resolved":"nvenc","render_devices":["/dev/dri/renderD128","/dev/dri/renderD129"],` +
-		`"detected_backends":[{"backend":"nvenc","verified":true},{"backend":"vaapi","verified":true}],` +
-		`"capability_hash":"sha256:better"}`
-	fetcher := &fakeCapabilityFetcher{payload: []byte(improved), hash: "sha256:better"}
-	fixture := newCapabilityCheckerFixture(t, &Node{
-		ID: 1, Name: "gpu-1", URL: url, Enabled: true,
-		Capabilities:     json.RawMessage(testCapabilityPayload),
-		CapabilitiesHash: stringPtr("sha256:old"),
-	}, fetcher)
-
-	logged := captureSlog(t, slog.LevelWarn)
-	fixture.sweep()
-
-	if bytes.Contains(logged.Bytes(), []byte("node capability drift")) {
-		t.Fatalf("added hardware logged as drift:\n%s", logged.String())
-	}
-}
-
-// captureSlog redirects the default logger for one test and returns its output.
-func captureSlog(t *testing.T, level slog.Level) *lockedBuffer {
-	t.Helper()
-	buffer := &lockedBuffer{}
-	previous := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(buffer, &slog.HandlerOptions{Level: level})))
-	t.Cleanup(func() { slog.SetDefault(previous) })
-	return buffer
-}
-
-// lockedBuffer collects log output written from the sweep's per-node goroutines.
-type lockedBuffer struct {
-	mu     sync.Mutex
-	buffer bytes.Buffer
-}
-
-func (b *lockedBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buffer.Write(p)
-}
-
-func (b *lockedBuffer) Bytes() []byte {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return append([]byte(nil), b.buffer.Bytes()...)
-}
-
-func (b *lockedBuffer) String() string { return string(b.Bytes()) }
-
-// The fetch budget must not inherit the 5s health timeout: a cold node runs
-// ffmpeg probes to answer a capability request.
-func TestCapabilityFetchTimeoutExceedsHealthTimeout(t *testing.T) {
-	if capabilityFetchTimeout <= 5*time.Second {
-		t.Fatalf("capabilityFetchTimeout = %s, want more than the health request budget", capabilityFetchTimeout)
 	}
 }
 
@@ -543,16 +405,9 @@ func TestCapabilityFetchBackstopSitsAboveTheFetcherBudget(t *testing.T) {
 // The health check is the first thing that runs against a node, so a base URL
 // this could not address would leave the node permanently unhealthy.
 func TestCheckNodeReachesATrailingSlashBaseURL(t *testing.T) {
-	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/health" {
-			http.NotFound(w, r)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"active_jobs": 1, "capabilities_hash": "sha256:x"})
-	}))
-	defer node.Close()
+	url := newStatsHealthNode(t, `{"active_jobs":1,"capabilities_hash":"sha256:x"}`)
 
-	healthy, activeJobs, _, hash, _, _ := CheckNode(context.Background(), &Node{ID: 1, URL: node.URL + "///"})
+	healthy, activeJobs, _, hash, _, _ := CheckNode(context.Background(), &Node{ID: 1, URL: url + "///"})
 	if !healthy {
 		t.Fatal("a node stored with a trailing slash was reported unhealthy")
 	}

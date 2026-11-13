@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/collections/templates"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -81,15 +82,6 @@ func TestBuildTMDBCollectionSourceConfig_PlaceholderOmitsCollectionID(t *testing
 	}
 	if _, ok := got["limit"]; ok {
 		t.Errorf("limit should be omitted when nil, got %v", got["limit"])
-	}
-}
-
-func TestBuildTMDBCollectionSourceURL(t *testing.T) {
-	if url := buildTMDBCollectionSourceURL(86311); url != "tmdb://collection/86311" {
-		t.Fatalf("source url = %q", url)
-	}
-	if url := buildTMDBCollectionSourceURL(0); url != "tmdb://collection/0" {
-		t.Fatalf("placeholder source url = %q", url)
 	}
 }
 
@@ -212,35 +204,6 @@ func TestBuildTMDBDiscoverSourceConfigRoundTrips(t *testing.T) {
 	}
 }
 
-func TestBuildTMDBDiscoverSourceConfigMinimal(t *testing.T) {
-	raw, err := buildTMDBDiscoverSourceConfig("tv", importTMDBDiscoverSpecBody{
-		SortBy: "vote_average.desc",
-	}, nil)
-	if err != nil {
-		t.Fatalf("buildTMDBDiscoverSourceConfig: %v", err)
-	}
-	var got map[string]any
-	if err := json.Unmarshal(raw, &got); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if got["mode"] != "tmdb_discover" || got["media_type"] != "tv" {
-		t.Errorf("mode/media_type = %v / %v", got["mode"], got["media_type"])
-	}
-	if _, ok := got["limit"]; ok {
-		t.Errorf("limit should be omitted when nil, got = %#v", got["limit"])
-	}
-	discover, ok := got["discover"].(map[string]any)
-	if !ok {
-		t.Fatalf("discover missing: %#v", got["discover"])
-	}
-	if discover["sort_by"] != "vote_average.desc" {
-		t.Errorf("discover.sort_by = %v", discover["sort_by"])
-	}
-	if _, ok := discover["with_genres"]; ok {
-		t.Errorf("with_genres should be omitted when empty")
-	}
-}
-
 func TestValidateTMDBDiscoverRequest(t *testing.T) {
 	good := importTMDBDiscoverRequest{
 		LibraryID: 1,
@@ -327,14 +290,6 @@ func TestTemplateBundleEligibilityByLibraryType(t *testing.T) {
 	}
 }
 
-func TestTemplateBundleManagementKeyIsStable(t *testing.T) {
-	got := templateBundleManagementKey("core_defaults", "tmdb_popular_movies", 42)
-	want := "core_defaults:tmdb_popular_movies:library:42"
-	if got != want {
-		t.Fatalf("got %q, want %q", got, want)
-	}
-}
-
 func TestTemplateBundleFeaturedDryRun(t *testing.T) {
 	bundle, ok := templates.GetBundle("core_defaults")
 	if !ok {
@@ -413,36 +368,37 @@ func TestAllCollectionLibrariesSelected(t *testing.T) {
 	}
 }
 
-func TestLibraryCollectionGroupResponseUsesAPIFieldNames(t *testing.T) {
-	body, err := json.Marshal(listGroupsResponse{
-		Groups: toLibraryCollectionGroupResponses([]models.LibraryCollectionGroup{{
-			ID:              "lcg_movies",
-			LibraryID:       1,
-			Name:            "Movies",
-			Slug:            "movies",
-			Kind:            models.GroupKindRegular,
-			DefaultSortMode: models.GroupSortManual,
-			SortOrder:       2,
-		}}),
-		UngroupedSortOrder: 9999,
-	})
-	if err != nil {
-		t.Fatalf("marshal group response: %v", err)
-	}
+// keyEchoResolver resolves each artwork key to itself, so a test reads which
+// variant was asked for.
+type keyEchoResolver struct{}
 
-	var got map[string]any
-	if err := json.Unmarshal(body, &got); err != nil {
-		t.Fatalf("unmarshal group response: %v", err)
+func (keyEchoResolver) ResolveURLs(_ context.Context, keys []string) map[string]catalog.ResolvedImageURL {
+	out := make(map[string]catalog.ResolvedImageURL, len(keys))
+	for _, key := range keys {
+		out[key] = catalog.ResolvedImageURL{URL: "resolved:" + key}
 	}
-	groups := got["groups"].([]any)
-	group := groups[0].(map[string]any)
-	if group["id"] != "lcg_movies" ||
-		group["name"] != "Movies" ||
-		group["default_sort_mode"] != "manual" ||
-		group["sort_order"].(float64) != 2 {
-		t.Fatalf("unexpected group JSON: %#v", group)
-	}
-	if _, ok := group["ID"]; ok {
-		t.Fatalf("group response leaked Go field names: %#v", group)
+	return out
+}
+
+// A collection page draws the backdrop across the page, so it gets the widest
+// variant an upload stores while the poster stays a card thumbnail. A backdrop
+// set to another stored key, whose ladder may lack that width, keeps the card
+// thumbnail.
+func TestLibraryCollectionResponseArtworkWidths(t *testing.T) {
+	h := &LibraryCollectionHandler{ArtworkResolver: keyEchoResolver{}}
+	for _, tc := range []struct{ backdrop, want string }{
+		{"collection-images/c1/backdrop/original.r2.webp", "resolved:collection-images/c1/backdrop/w1280.r2.webp"},
+		{"collection-images/c1/poster/original.r1.webp", "resolved:collection-images/c1/poster/w300.r1.webp"},
+	} {
+		got := h.libraryCollectionResponseOf(t.Context(), &models.LibraryCollection{
+			PosterURL:   "collection-images/c1/poster/original.r1.webp",
+			BackdropURL: tc.backdrop,
+		})
+		if want := "resolved:collection-images/c1/poster/w300.r1.webp"; got.PosterURL != want {
+			t.Errorf("poster = %q, want %q", got.PosterURL, want)
+		}
+		if got.BackdropURL != tc.want {
+			t.Errorf("backdrop %q = %q, want %q", tc.backdrop, got.BackdropURL, tc.want)
+		}
 	}
 }

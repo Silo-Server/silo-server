@@ -12,11 +12,7 @@ import {
   StaleApiRequestContextError,
 } from "@/api/client";
 import { V2ProblemError } from "@/api/v2/request";
-import {
-  adminPlaybackHistoryItemFromV2,
-  adminPlaybackHistoryScope,
-  listAdminPlaybackHistory,
-} from "@/api/v2/adminPlaybackHistory";
+import { adminPlaybackHistoryScope, listAdminPlaybackHistory } from "@/api/v2/adminPlaybackHistory";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
 import { buildAdminPlaybackHistoryQuery, useAdminPlaybackHistory } from "./history";
 
@@ -36,6 +32,7 @@ const entry = {
   watched_seconds: 3600,
   duration_seconds: null,
   completed: true,
+  played_seconds: 120,
 };
 
 function page(items: unknown[], next?: string) {
@@ -89,30 +86,6 @@ describe("buildAdminPlaybackHistoryQuery", () => {
 });
 
 describe("listAdminPlaybackHistory", () => {
-  it("sends the captured authority and projects string IDs onto the view rows", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(page([entry])));
-    vi.stubGlobal("fetch", fetchMock);
-    const result = await listAdminPlaybackHistory(
-      { limit: 100, user_id: "7", completed: "true" },
-      adminPlaybackHistoryScope(),
-    );
-    const { url, headers } = requestOf(fetchMock);
-    expect(url).toBe("/api/v2/admin/playback-history?limit=100&user_id=7&completed=true");
-    expect(headers.get("Authorization")).toBe("Bearer synthetic-access");
-    expect(headers.get("X-Profile-Id")).toBe("p-primary");
-    expect(headers.get("X-Profile-Token")).toBe("pin-proof");
-    expect(result).toEqual({
-      items: [adminPlaybackHistoryItemFromV2(entry as never)],
-      hasMore: false,
-      nextCursor: null,
-    });
-    expect(result.items[0]).toMatchObject({
-      user_id: 7,
-      media_file_id: 42,
-      duration_seconds: null,
-    });
-  });
-
   it("refuses a page whose authority changed while it was in flight", async () => {
     const scope = adminPlaybackHistoryScope();
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => {
@@ -174,19 +147,6 @@ describe("listAdminPlaybackHistory", () => {
 });
 
 describe("useAdminPlaybackHistory", () => {
-  it("reads the first page through v2 and keys the cache by authority generation", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(page([entry], "c-2")));
-    vi.stubGlobal("fetch", fetchMock);
-    const { result } = renderHook(
-      () => useAdminPlaybackHistory({ userId: 7, completed: "all", limit: 50 }),
-      { wrapper: wrapper() },
-    );
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toHaveLength(1);
-    expect(result.current.data?.[0]?.session_id).toBe("sess-1");
-    expect(requestOf(fetchMock).url).toBe("/api/v2/admin/playback-history?limit=50&user_id=7");
-  });
-
   it("does not deliver a page fetched under a replaced profile", async () => {
     const releases: Array<(value: Response) => void> = [];
     const fetchMock = vi

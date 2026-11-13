@@ -59,3 +59,24 @@ func TestEffectiveMemoryLimitBytesFindsTheBindingAncestor(t *testing.T) {
 		t.Fatalf("effective limit = %d, want 0 for no limit", got)
 	}
 }
+
+// Conflicting memory bounds resolve to the smallest positive one: GOMEMLIMIT
+// can be set looser than the cgroup limit and the cgroup limit can sit above
+// host memory, so no single source can be preferred outright.
+func TestTightestMemoryLimit(t *testing.T) {
+	const gib = int64(1) << 30
+	cases := []struct {
+		limits []int64
+		want   int64
+	}{
+		{limits: []int64{4 * gib, 2 * gib, 8 * gib}, want: 2 * gib}, // smallest wins
+		{limits: []int64{0, 2 * gib, 0}, want: 2 * gib},             // zeros mean "no bound", not zero bytes
+		{limits: []int64{0, 0, 0}, want: 0},                         // nothing detectable
+		{limits: []int64{6 * gib}, want: 6 * gib},
+	}
+	for _, tc := range cases {
+		if got := tightestMemoryLimit(tc.limits...); got != tc.want {
+			t.Errorf("tightestMemoryLimit(%v) = %d, want %d", tc.limits, got, tc.want)
+		}
+	}
+}

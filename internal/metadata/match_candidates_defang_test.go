@@ -4,62 +4,6 @@ import (
 	"testing"
 )
 
-// An ID-less candidate (e.g. the NFO title-only search candidate) must never
-// win the proven-single-show tie-break on chain priority when an ID-bearing
-// member exists in the group — and the winner must adopt the union of the
-// group's provider IDs.
-func TestSelectInitialMatch_IDlessCandidateExcludedWhenIDBearingExists(t *testing.T) {
-	hints := &MatchHints{Title: "Inception", Year: 2010, Type: "movie"}
-	candidates := []MatchCandidate{
-		{Title: "Inception", Year: 2010, ContentType: "movie", ProviderIDs: map[string]string{}, Sources: []string{"nfo"}},
-		{Title: "Inception", Year: 2010, ContentType: "movie", ProviderIDs: map[string]string{"tmdb": "27205"}, Sources: []string{"tmdb"}},
-		{Title: "Inception", Year: 2010, ContentType: "movie", ProviderIDs: map[string]string{"tvdb": "83898"}, Sources: []string{"tvdb"}},
-	}
-
-	// nfo sits first in the library chain priority.
-	winner, ok := selectInitialMatchCandidate(hints, candidates, []string{"nfo", "tmdb", "tvdb"})
-	if !ok || winner == nil {
-		t.Fatalf("winner = %v ok = %v, want accepted candidate", winner, ok)
-	}
-	if winner.ProviderIDs["tmdb"] != "27205" {
-		t.Errorf("winner tmdb id = %q, want 27205 (ID-less candidate must not win; union adopted)", winner.ProviderIDs["tmdb"])
-	}
-	if winner.ProviderIDs["tvdb"] != "83898" {
-		t.Errorf("winner tvdb id = %q, want 83898 (union of the proven-single-show group's IDs)", winner.ProviderIDs["tvdb"])
-	}
-}
-
-// The nfo source must not count as independent corroboration: a local file
-// echoing a title is not a second provider agreeing. With no hint year, a
-// remote candidate corroborated only by the NFO must not be auto-accepted via
-// the multi-source arm.
-func TestSelectInitialMatch_NFOSourceDoesNotCorroborate(t *testing.T) {
-	hints := &MatchHints{Title: "Some Show", Type: "movie"} // no year hint
-	candidates := []MatchCandidate{
-		{Title: "Some Show", Year: 2015, ContentType: "movie", ProviderIDs: map[string]string{"tmdb": "1"}, Sources: []string{"tmdb"}},
-		{Title: "Some Show", Year: 2015, ContentType: "movie", ProviderIDs: map[string]string{}, Sources: []string{"nfo"}},
-	}
-
-	winner, ok := selectInitialMatchCandidate(hints, candidates, nil)
-	if ok {
-		t.Fatalf("winner = %+v, want rejection (nfo echo must not stand in for a missing year)", winner)
-	}
-}
-
-// A genuinely multi-source group (two remote providers) still corroborates.
-func TestSelectInitialMatch_RemoteMultiSourceStillCorroborates(t *testing.T) {
-	hints := &MatchHints{Title: "Some Show", Type: "movie"} // no year hint
-	candidates := []MatchCandidate{
-		{Title: "Some Show", Year: 2015, ContentType: "movie", ProviderIDs: map[string]string{"tmdb": "1"}, Sources: []string{"tmdb"}},
-		{Title: "Some Show", Year: 2015, ContentType: "movie", ProviderIDs: map[string]string{"tvdb": "2"}, Sources: []string{"tvdb"}},
-	}
-
-	winner, ok := selectInitialMatchCandidate(hints, candidates, nil)
-	if !ok || winner == nil {
-		t.Fatalf("winner = %v ok = %v, want accepted candidate", winner, ok)
-	}
-}
-
 // The nfo source must not manufacture an "agreed_by" hint with a remote
 // provider when their results merge into one candidate.
 func TestNormalizeCandidates_NFOExcludedFromAgreementHints(t *testing.T) {

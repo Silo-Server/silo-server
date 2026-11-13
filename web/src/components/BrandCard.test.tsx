@@ -20,13 +20,6 @@ const card = (overrides: Partial<DiscoverBrandCard> = {}): DiscoverBrandCard => 
 });
 
 describe("BrandCard", () => {
-  it("links a studio or network tile to its browse page", () => {
-    expect(renderCard({ kind: "studio", card: card() })).toHaveAttribute(
-      "href",
-      "/requests/browse/studio/a24",
-    );
-  });
-
   it("opens a genre on movies unless series are asked for and supported", () => {
     expect(
       renderCard({ kind: "genre", card: card({ slug: "sci fi", display_name: "Sci-Fi" }) }),

@@ -1,9 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
@@ -11,18 +8,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/imageutil"
 )
 
-func TestHandleImagesCapability(t *testing.T) {
-	rec := httptest.NewRecorder()
-	HandleImagesCapability(rec, httptest.NewRequest(http.MethodGet, "/api/v1/images/capability", nil))
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-
-	var got ImagesCapabilityResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode body: %v", err)
-	}
+func TestGetImagesCapability(t *testing.T) {
+	got := GetImagesCapability()
 
 	if got.SchemaVersion != 1 {
 		t.Errorf("schema_version = %d, want 1", got.SchemaVersion)
@@ -67,8 +54,14 @@ func TestHandleImagesCapability(t *testing.T) {
 		}
 	}
 
-	if got.Widths["poster"].Large != 780 {
-		t.Errorf("poster large width = %d, want 780", got.Widths["poster"].Large)
+	if got.Widths["poster"].Large != 1000 {
+		t.Errorf("poster large width = %d, want 1000", got.Widths["poster"].Large)
+	}
+	if got.Widths["still"].Large != 1280 {
+		t.Errorf("still large width = %d, want 1280", got.Widths["still"].Large)
+	}
+	if got.Widths["backdrop"].Large != 2560 {
+		t.Errorf("backdrop large width = %d, want 2560", got.Widths["backdrop"].Large)
 	}
 	if got.Widths["logo"].Large != 1280 {
 		t.Errorf("logo large width = %d, want 1280", got.Widths["logo"].Large)

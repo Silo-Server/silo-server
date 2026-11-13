@@ -7,9 +7,11 @@ import (
 	"strings"
 	"time"
 
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/plugins"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // ExternalIdentityView is one external identity linked to an account, as
@@ -59,6 +61,9 @@ type ExternalSignInHandler struct {
 	// network links the network identity of the request's overlay peer;
 	// nil when the providers source cannot.
 	network networkLinker
+	// Stores holds disconnecting an identity to the household manager
+	// (canManageHouseholdAs). Without it the check fails closed.
+	Stores userstore.UserStoreProvider
 }
 
 // networkLinker is the network identity linking of *auth.Service.
@@ -162,8 +167,20 @@ func (h *ExternalSignInHandler) CanUnlinkAccountIdentity(ctx context.Context, us
 	return allowed, nil
 }
 
+// MayUnlinkAccountIdentity reports whether the caller acting as
+// activeProfileID may disconnect one of the account's identities. How the
+// account signs in belongs to the whole household, and the account cannot
+// always link a disconnected identity again by itself (self-service linking
+// needs its local password), so only the household manager may. verify
+// confirms a PIN-locked primary profile and returns
+// access.ErrProfileUnverified when it is not.
+func (h *ExternalSignInHandler) MayUnlinkAccountIdentity(ctx context.Context, userID int, activeProfileID string, verify func(profile *userstore.Profile) error) (bool, error) {
+	return mayManageHouseholdOf(ctx, h.Stores, userID, activeProfileID, verify)
+}
+
 // UnlinkAccountIdentity removes one of the caller's identities while the
-// account can still sign in another way.
+// account can still sign in another way. The caller checks
+// MayUnlinkAccountIdentity first.
 func (h *ExternalSignInHandler) UnlinkAccountIdentity(ctx context.Context, userID int, identityID int64) error {
 	return identityError(h.identities.UnlinkOwn(ctx, userID, identityID))
 }
@@ -223,7 +240,7 @@ func (h *ExternalSignInHandler) adminIdentityTarget(ctx context.Context, userID 
 	if err != nil {
 		return identityError(err)
 	}
-	if actorIsScopedAPIKey(ctx) && target.Role == models.RoleAdmin {
+	if apimw.IsScopedAPIKey(ctx) && target.Role == models.RoleAdmin {
 		return apiError(http.StatusForbidden, "insufficient_scope", "A scoped API key may not change an admin account's sign-in")
 	}
 	actor, err := requestOwnerActor(ctx, h.users)
@@ -243,7 +260,7 @@ func (h *ExternalSignInHandler) LinkAdminUserIdentity(ctx context.Context, userI
 	}
 	linked, err := h.identities.AdminLink(ctx, auth.AdminLinkInput{
 		UserID: userID, InstallationID: in.InstallationID, ActorID: actorUserID(ctx),
-		ScopedAPIKey: actorIsScopedAPIKey(ctx),
+		ScopedAPIKey: apimw.IsScopedAPIKey(ctx),
 		Identity: auth.ExternalIdentity{
 			Subject: in.ExternalSubject, Username: strings.TrimSpace(in.Username),
 			Email: strings.TrimSpace(in.Email), DisplayName: strings.TrimSpace(in.DisplayName),
@@ -260,7 +277,7 @@ func (h *ExternalSignInHandler) UnlinkAdminUserIdentity(ctx context.Context, use
 	if err := h.adminIdentityTarget(ctx, userID); err != nil {
 		return err
 	}
-	return identityError(h.identities.AdminUnlink(ctx, userID, identityID, actorUserID(ctx), actorIsScopedAPIKey(ctx)))
+	return identityError(h.identities.AdminUnlink(ctx, userID, identityID, actorUserID(ctx), apimw.IsScopedAPIKey(ctx)))
 }
 
 // TestAuthBinding runs the auth plugin's connection test on staged

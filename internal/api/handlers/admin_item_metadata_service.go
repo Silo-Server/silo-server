@@ -23,7 +23,9 @@ func (h *AdminHandler) CreateItemMetadataRefresh(ctx context.Context, contentID 
 	if mode == "" {
 		mode = adminjob.ItemRefreshModeQuick
 	}
-	if mode != adminjob.ItemRefreshModeQuick && mode != adminjob.ItemRefreshModeComplete {
+	switch mode {
+	case adminjob.ItemRefreshModeQuick, adminjob.ItemRefreshModeComplete, adminjob.ItemRefreshModeReset:
+	default:
 		return nil, apiError(http.StatusBadRequest, "bad_request", "Invalid refresh mode")
 	}
 	payload, err := h.ItemRefreshResolver.ResolveWithMode(ctx, contentID, mode)
@@ -116,6 +118,7 @@ func (h *AdminHandler) UpdateCatalogItemMetadata(ctx context.Context, contentID 
 		_ = h.EventBus.Publish(ctx, cache.ChannelAdmin,
 			cache.Event{Type: "item:updated", Payload: contentID})
 	}
+	publishCatalogItemChanged(ctx, h.EventBus, contentID)
 	if h.RealtimeHub != nil {
 		publishEventMetadataUpdate(ctx, h.RealtimeHub.EventsHub(), 0, contentID)
 	}

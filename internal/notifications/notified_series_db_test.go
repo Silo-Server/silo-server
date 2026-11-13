@@ -37,8 +37,8 @@ func TestListNotifiedSeriesMergesLibrariesAndAppliesPreferences(t *testing.T) {
 			(1, 'p1', 1, 'series:inert', false, false, false, $1),
 			(1, 'p1', 1, 'series:gone', true, false, false, NULL),
 			(1, 'p2', 1, 'series:andor', true, false, false, NULL)`, []any{nextUp, laterNextUp}},
-		{`INSERT INTO notification_preferences (profile_id, enabled, notify_favorites, notify_watchlist, notify_continue_watching, notify_next_up)
-			VALUES ('p1', true, true, false, true, true)`, nil},
+		{`INSERT INTO notification_preferences (user_id, profile_id, enabled, notify_favorites, notify_watchlist, notify_continue_watching, notify_next_up)
+			VALUES (1, 'p1', true, true, false, true, true)`, nil},
 	} {
 		if _, err := pool.Exec(ctx, stmt.sql, stmt.args...); err != nil {
 			t.Fatalf("seed: %v", err)

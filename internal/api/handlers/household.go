@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"fmt"
-	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
@@ -11,88 +10,104 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
-// canManageHousehold reports whether the caller may act for the whole household
-// — every profile on their own account — rather than only for themselves.
+// canManageHouseholdAs reports whether the caller, acting as activeProfileID,
+// may act for the whole household (every profile on their own account) rather
+// than only for themselves. verify checks a PIN-locked primary profile against
+// the viewer scope the gate resolved.
 //
 // The caller's active profile must be the one flagged is_primary, which is the
 // household parent and is deliberately *not* the server-wide admin role: a
 // household parent manages their family, an admin manages the server. The
 // admin role does not widen this. A non-primary profile on an admin account is
-// a household member like any other, exactly as RequireActingAdmin refuses it
-// admin powers; otherwise a child profile on the admin's account could lift
+// a household member like any other, exactly as the acting-admin gate refuses
+// it admin powers; otherwise a child profile on the admin's account could lift
 // its own limits or clear the parent's PIN.
 //
-// When that primary profile has a PIN, management additionally requires a valid
-// X-Profile-Token from /profiles/{id}/verify-pin. Without that, a client could
-// walk past a profile lock by sending only X-Profile-Id.
-//
-// A request that names no profile manages the household only when it is an
+// A caller that names no profile manages the household only when it is an
 // admin API key, or comes from an admin account whose household has no limited
-// profile (see
-// access.HouseholdRequiresProfile): first-run and admin tooling keep working,
-// but a device signed into the account cannot drop X-Profile-Id to get past a
-// child's limits or the parent's PIN.
+// profile (see access.HouseholdRequiresProfile): first-run and admin tooling
+// keep working, but a device signed into the account cannot drop its profile
+// to get past a child's limits or the parent's PIN.
 //
 // This is a policy boundary for well-behaved clients rather than a defense
 // against the account holder: every profile on an account shares one login
-// session, so X-Profile-Id is self-asserted (see the note in
-// internal/api/middleware/auth.go). It is the same boundary profile management
-// has always used, and it is applied here so household settings management is
-// guarded and auditable rather than implicit.
-func canManageHousehold(
-	r *http.Request,
-	store userstore.UserStore,
-	tokens *access.ProfileTokenService,
-) (bool, error) {
-	return canManageHouseholdAs(r.Context(), store, activeProfileIDOf(r), func(profileID string) error {
-		return verifyProfileTokenIn(r, store, tokens, profileID)
-	})
-}
-
-// activeProfileIDOf is the profile the request acts as: the one the profile
-// gate resolved, else the declared header.
-func activeProfileIDOf(r *http.Request) string {
-	if id := apimw.GetProfileID(r.Context()); id != "" {
-		return id
-	}
-	return r.Header.Get("X-Profile-Id")
-}
-
-// canManageHouseholdAs is canManageHousehold with the request already reduced
-// to the acting profile and a verifier for a PIN-locked primary profile: the
-// v1 verifier checks X-Profile-Token, the v2 one the viewer scope the gate
-// resolved.
+// session, so the declared profile is self-asserted (see the note in
+// internal/api/middleware/auth.go).
 func canManageHouseholdAs(
 	ctx context.Context,
 	store userstore.UserStore,
 	activeProfileID string,
-	verify func(profileID string) error,
+	verify func(profile *userstore.Profile) error,
 ) (bool, error) {
+	allowed, _, err := householdManagerAs(ctx, store, activeProfileID, verify)
+	return allowed, err
+}
+
+// householdManagerAs also returns the authorized acting row, so profile writes
+// can check its revision under the transaction lock without repeating policy.
+// A profile-less admin has no PIN proof to bind and returns a nil row.
+func householdManagerAs(
+	ctx context.Context,
+	store userstore.UserStore,
+	activeProfileID string,
+	verify func(*userstore.Profile) error,
+) (bool, *userstore.Profile, error) {
 	// A remote-playback handoff never manages the household, even when it is
 	// bound to the primary profile.
 	if apimw.GetClaims(ctx).IsRemotePlayback() {
-		return false, nil
+		return false, nil, nil
 	}
 	if activeProfileID == "" {
-		return profileLessAdminMayManage(ctx, store)
+		allowed, err := profileLessAdminMayManage(ctx, store)
+		return allowed, nil, err
 	}
 	active, err := store.GetProfile(ctx, activeProfileID)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	if active == nil {
-		return false, nil
+		return false, nil, nil
 	}
 	if !active.IsPrimary {
-		return false, nil
+		return false, nil, nil
 	}
 	if active.PINHash == "" {
-		return true, nil
+		return true, active, nil
 	}
-	if err := verify(active.ID); err != nil {
-		return false, err
+	if verify == nil {
+		return false, nil, access.ErrProfileUnverified
 	}
-	return true, nil
+	if err := verify(active); err != nil {
+		return false, nil, err
+	}
+	return true, active, nil
+}
+
+// mayManageHouseholdOf is canManageHouseholdAs for a caller that holds only
+// the account ID: it opens that account's store first. It fails closed when
+// the stores are not wired or the account has no store, and a nil verify
+// treats a PIN-locked primary profile as unverified.
+func mayManageHouseholdOf(
+	ctx context.Context,
+	stores userstore.UserStoreProvider,
+	userID int,
+	activeProfileID string,
+	verify func(profile *userstore.Profile) error,
+) (bool, error) {
+	if stores == nil {
+		return false, nil
+	}
+	store, err := stores.ForUser(ctx, userID)
+	if err != nil {
+		return false, fmt.Errorf("opening user store: %w", err)
+	}
+	if store == nil {
+		return false, nil
+	}
+	if verify == nil {
+		verify = func(*userstore.Profile) error { return access.ErrProfileUnverified }
+	}
+	return canManageHouseholdAs(ctx, store, activeProfileID, verify)
 }
 
 // profileLessAdminMayManage is the household rule for a request that names no
@@ -117,60 +132,18 @@ func profileLessAdminMayManage(ctx context.Context, store userstore.UserStore) (
 	return !access.HouseholdRequiresProfile(profiles), nil
 }
 
-// verifyProfileToken checks the X-Profile-Token a PIN-locked profile must
-// present, reading the profile from the caller's own store. Missing
-// dependencies fail closed: a handler wired without a token service cannot
-// verify a PIN, and "cannot verify" is not "verified".
-func verifyProfileToken(
-	r *http.Request,
-	stores userstore.UserStoreProvider,
-	tokens *access.ProfileTokenService,
-	profileID string,
-) error {
-	if stores == nil || tokens == nil {
-		return access.ErrProfileUnverified
+// checkHouseholdPINRevision runs after the existing account transaction lock.
+// The row lock also serializes PIN writers that do not take the account lock.
+func checkHouseholdPINRevision(ctx context.Context, tx userstore.PreferenceSettingsWriter, active *userstore.Profile) error {
+	if active == nil {
+		return nil
 	}
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		return access.ErrProfileUnverified
-	}
-	store, err := stores.ForUser(r.Context(), userID)
+	matches, err := tx.CheckProfilePINRevision(ctx, active.ID, active.PINRevision)
 	if err != nil {
-		return fmt.Errorf("opening user store: %w", err)
+		return err
 	}
-	return verifyProfileTokenIn(r, store, tokens, profileID)
-}
-
-// verifyProfileTokenIn is verifyProfileToken against an already opened store
-// for the calling account. The token must match the profile's current PIN
-// revision (see access.CheckProfileToken).
-func verifyProfileTokenIn(
-	r *http.Request,
-	store userstore.UserStore,
-	tokens *access.ProfileTokenService,
-	profileID string,
-) error {
-	if store == nil || tokens == nil {
+	if !matches {
 		return access.ErrProfileUnverified
 	}
-
-	claims := apimw.GetClaims(r.Context())
-	if claims == nil || claims.SessionID == "" {
-		return access.ErrProfileUnverified
-	}
-
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		return access.ErrProfileUnverified
-	}
-
-	profile, err := store.GetProfile(r.Context(), profileID)
-	if err != nil {
-		return fmt.Errorf("loading profile: %w", err)
-	}
-	if profile == nil {
-		return access.ErrProfileUnverified
-	}
-
-	return access.CheckProfileToken(tokens, r.Header.Get("X-Profile-Token"), userID, claims.SessionID, profile)
+	return nil
 }

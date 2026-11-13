@@ -3,7 +3,6 @@ package scanner
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -25,16 +24,8 @@ type variantContractMovie struct {
 
 func seedVariantContractMovie(t *testing.T, name string) variantContractMovie {
 	t.Helper()
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect test database: %v", err)
-	}
-	t.Cleanup(pool.Close)
+	pool := newScannerTestPool(t)
 
 	suffix := time.Now().UnixNano()
 	fx := variantContractMovie{
@@ -100,7 +91,7 @@ func TestFinalizeVariantsKeepsMatchSuppressionDB(t *testing.T) {
 	if suppressed, err := repo.SuppressUnmatchedMatchBacklogByFolder(ctx, folderID, RawMatchBacklogGeneric); err != nil || suppressed != 1 {
 		t.Fatalf("suppress unmatched backlog = %d, %v; want 1", suppressed, err)
 	}
-	if err := repo.UpdateContentID(ctx, cutID, movieID); err != nil {
+	if err := repo.UpdateContentID(ctx, cutID, cutPath, movieID); err != nil {
 		t.Fatalf("link cut: %v", err)
 	}
 

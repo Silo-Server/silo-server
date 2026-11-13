@@ -4,7 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { formatDateTime } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
-import { loginSessionDevice, sessionLastSeen } from "@/lib/loginSessionDevice";
+import { useT } from "@/i18n";
+import { loginSessionDevice, sessionActive, sessionLastSeen } from "@/lib/loginSessionDevice";
 import type { LoginSession } from "@/hooks/queries/loginSessions";
 
 export function LoginSessionRow({
@@ -14,6 +15,7 @@ export function LoginSessionRow({
   session: LoginSession;
   onSignOut?: (session: LoginSession) => void;
 }) {
+  const t = useT();
   const [expanded, setExpanded] = useState(false);
   const detailsId = useId();
   const device = loginSessionDevice(session);
@@ -34,31 +36,46 @@ export function LoginSessionRow({
         </span>
         <div className="min-w-0 flex-1 basis-36">
           <div className="flex flex-wrap items-center gap-2 text-sm font-medium">
-            <span>{device.name}</span>
-            {session.current && <Badge variant="outline">This browser</Badge>}
+            <span className="max-w-full min-w-0 wrap-anywhere">{device.name}</span>
+            {session.current && (
+              <Badge variant="outline">{t("web.settings.sessions.row.thisBrowser")}</Badge>
+            )}
           </div>
           <p className="text-muted-foreground mt-1 text-xs">
-            <span
-              className={
-                lastSeen === "Active now" ? "text-emerald-600 dark:text-emerald-400" : undefined
-              }
-            >
-              {lastSeen}
-            </span>{" "}
-            · Signed in {formatDateTime(session.created_at, { seconds: false })}
+            {t("web.settings.sessions.row.summary", {
+              last_seen: lastSeen,
+              signed_in: formatDateTime(session.created_at, { seconds: false }),
+              status: (chunks) => (
+                <span
+                  className={
+                    sessionActive(session.last_seen_at)
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : undefined
+                  }
+                >
+                  {chunks}
+                </span>
+              ),
+            })}
           </p>
         </div>
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ms-auto flex items-center gap-1">
           {onSignOut && (
             <Button
               type="button"
               size="sm"
               variant="outline"
-              aria-label={session.current ? "Sign out this browser" : `Sign out ${device.name}`}
+              aria-label={
+                session.current
+                  ? t("web.settings.sessions.row.signOutThisBrowser")
+                  : t("web.settings.sessions.row.signOutDevice", { device: device.name })
+              }
               onClick={() => onSignOut(session)}
             >
               {session.current && <LogOut aria-hidden="true" />}
-              {session.current ? "Sign out this browser" : "Sign out"}
+              {session.current
+                ? t("web.settings.sessions.row.signOutThisBrowser")
+                : t("common.signOut")}
             </Button>
           )}
           <Button
@@ -66,12 +83,12 @@ export function LoginSessionRow({
             size="sm"
             variant="ghost"
             className="text-muted-foreground hover:text-foreground"
-            aria-label={`Details for ${device.name}`}
+            aria-label={t("web.settings.sessions.row.detailsFor", { device: device.name })}
             aria-expanded={expanded}
             aria-controls={detailsId}
             onClick={() => setExpanded(!expanded)}
           >
-            Details
+            {t("web.settings.sessions.row.details")}
             <ChevronDown
               className={cn("transition-transform", expanded && "rotate-180")}
               aria-hidden="true"
@@ -82,16 +99,21 @@ export function LoginSessionRow({
       {expanded && (
         <dl
           id={detailsId}
-          className="border-border mt-3 grid grid-cols-1 gap-3 border-t pt-3 text-xs sm:grid-cols-2 sm:pl-12"
+          className="border-border mt-3 grid grid-cols-1 gap-3 border-t pt-3 text-xs sm:grid-cols-2 sm:ps-12"
         >
           {[
             [
-              "Last seen",
-              session.last_seen_at ? formatDateTime(session.last_seen_at) : "Not recorded yet",
+              t("web.settings.sessions.row.lastSeen"),
+              session.last_seen_at
+                ? formatDateTime(session.last_seen_at)
+                : t("web.settings.sessions.row.notRecorded"),
             ],
-            ["Signed in", formatDateTime(session.created_at)],
-            ["IP address at sign-in", session.ip_address || "Unknown"],
-            ["Expires", formatDateTime(session.expires_at)],
+            [t("web.settings.sessions.row.signedIn"), formatDateTime(session.created_at)],
+            [
+              t("web.settings.sessions.row.ipAddress"),
+              session.ip_address || t("web.settings.sessions.row.unknown"),
+            ],
+            [t("web.settings.sessions.row.expires"), formatDateTime(session.expires_at)],
           ].map(([label, value]) => (
             <div key={label}>
               <dt className="text-muted-foreground">{label}</dt>
@@ -99,8 +121,10 @@ export function LoginSessionRow({
             </div>
           ))}
           <div className="sm:col-span-2">
-            <dt className="text-muted-foreground">User-Agent</dt>
-            <dd className="mt-1 font-mono break-all">{session.device_name || "Not sent"}</dd>
+            <dt className="text-muted-foreground">{t("web.settings.sessions.row.userAgent")}</dt>
+            <dd className="mt-1 font-mono break-all">
+              {session.device_name || t("web.settings.sessions.row.notSent")}
+            </dd>
           </div>
         </dl>
       )}

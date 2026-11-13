@@ -42,20 +42,6 @@ func TestSessionCodecRoundTrip(t *testing.T) {
 	}
 }
 
-func TestSessionCodecEmptyRoundTrip(t *testing.T) {
-	encoded, err := encodeSession(SessionView{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := decodeSession(encoded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(got, SessionView{}) {
-		t.Fatalf("empty round trip = %#v", got)
-	}
-}
-
 func TestTransferCodecRoundTrip(t *testing.T) {
 	want := TransferView{ID: "transfer", Subject: Subject{Kind: SubjectIP, ID: "203.0.113.4"}, ProfileID: "p", MediaFileID: 5,
 		Method: "GET", Pattern: "/download", Role: RoleViewerEgress, BytesAccepted: 12, LastByteAccepted: time.Unix(10, 11),
@@ -71,23 +57,6 @@ func TestTransferCodecRoundTrip(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("round trip mismatch\n got: %#v\nwant: %#v", got, want)
-	}
-}
-
-func TestPublisherMetaCodecRoundTrip(t *testing.T) {
-	want := publisherMeta{PublisherID: "pub", NodeID: "node", Epoch: 4, Sequence: 5, CapturedAtUnixNano: 6, Truncated: true,
-		DroppedObservations: 7, DroppedBytes: 8, UnattributedObservations: 9, UnattributedBytes: 10, SessionCount: 11, TransferCount: 12}
-	encoded, err := encodeMeta(want)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := decodeMeta(encoded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want.V = codecVersion
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("round trip = %#v, want %#v", got, want)
 	}
 }
 

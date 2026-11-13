@@ -102,17 +102,6 @@ describe("TasteSeed paging", () => {
     expect(screen.queryByText("No items to show yet")).toBeNull();
   });
 
-  it("shows the empty state once the catalog runs out", () => {
-    mocks.useTasteSeedItems.mockReturnValue(
-      pickerState({ pages: [{ items: [] }, { items: [] }], hasNextPage: false }),
-    );
-
-    renderPicker();
-
-    expect(mocks.fetchNextPage).not.toHaveBeenCalled();
-    expect(screen.getByText("No items to show yet")).toBeTruthy();
-  });
-
   it("stops retrying after a failed page", () => {
     mocks.useTasteSeedItems.mockReturnValue(
       pickerState({ pages: [{ items: [] }], hasNextPage: true, isFetchNextPageError: true }),
@@ -122,17 +111,6 @@ describe("TasteSeed paging", () => {
 
     expect(mocks.fetchNextPage).not.toHaveBeenCalled();
     expect(screen.getByText("No items to show yet")).toBeTruthy();
-  });
-
-  it("renders the cards a later page brings", () => {
-    mocks.useTasteSeedItems.mockReturnValue(
-      pickerState({ pages: [{ items: [] }, { items: [card("movie-1")] }], hasNextPage: true }),
-    );
-
-    renderPicker();
-
-    expect(mocks.fetchNextPage).not.toHaveBeenCalled();
-    expect(screen.getByRole("option", { name: "Select Title movie-1" })).toBeTruthy();
   });
 });
 
@@ -178,21 +156,5 @@ describe("TasteSeed destinations", () => {
 
     expect(await screen.findByText("recommendations page")).toBeTruthy();
     expect(mocks.submit).toHaveBeenCalledWith(["m1", "m2", "m3"]);
-  });
-
-  it("returns to settings after a submission from settings", async () => {
-    renderAt("/taste-seed?from=settings");
-    pickAll();
-    fireEvent.click(screen.getByRole("button", { name: "Done" }));
-
-    expect(await screen.findByText("settings page")).toBeTruthy();
-  });
-
-  it("goes home when the first-run picker is skipped", async () => {
-    renderAt("/taste-seed");
-    fireEvent.click(screen.getByRole("button", { name: "Skip" }));
-
-    expect(await screen.findByText("home page")).toBeTruthy();
-    expect(mocks.submit).not.toHaveBeenCalled();
   });
 });

@@ -94,27 +94,34 @@ func TestRunAnalyzesGroupsInParallelWithinFFmpegLimit(t *testing.T) {
 	}
 }
 
-func TestAnalyzeGroupMarksFailedExtractionsPartial(t *testing.T) {
-	candidates := []Candidate{
-		{FileID: 1, EpisodeID: "e1", SeasonID: "s1", MediaFolderID: 1, DurationSeconds: 1800},
-		{FileID: 2, EpisodeID: "e2", SeasonID: "s1", MediaFolderID: 1, DurationSeconds: 1800},
-		{FileID: 3, EpisodeID: "e3", SeasonID: "s1", MediaFolderID: 1, DurationSeconds: 1800},
+// A run loads its episodes a page of seasons at a time; every page's groups
+// must still reach the workers.
+func TestRunAnalyzesEverySeasonPage(t *testing.T) {
+	var candidates []Candidate
+	for season := 1; season <= 3; season++ {
+		for episode := 1; episode <= 2; episode++ {
+			candidates = append(candidates, Candidate{
+				FileID:          season*10 + episode,
+				EpisodeID:       fmt.Sprintf("s%de%d", season, episode),
+				SeasonID:        fmt.Sprintf("season-%d", season),
+				MediaFolderID:   1,
+				DurationSeconds: 1800,
+			})
+		}
 	}
-	repo := &fakeIntroRepository{}
-	extractor := failingExtractor{errFor: map[int]error{2: errors.New("read failed")}}
-	analyzer := &Analyzer{repo: repo, extractor: extractor, config: DefaultConfig("ffmpeg"), logger: slog.New(slog.DiscardHandler)}
+	repo := &fakeIntroRepository{enabledLibraries: 1, eligibleCandidates: candidates}
+	analyzer := &Analyzer{
+		repo: repo, extractor: failingExtractor{}, config: DefaultConfig("ffmpeg"),
+		logger: slog.New(slog.DiscardHandler), ffmpegSlots: mediasample.NewLimiter(2),
+		episodeSeasonsPerPage: 1,
+	}
 
-	summary, err := analyzer.analyzeGroup(context.Background(), candidateGroup{
-		SeasonID: "s1", MediaFolderID: 1, AnalysisGroupKey: candidates[0].AnalysisGroupKey(), Candidates: candidates,
-	}, analyzeGroupOptions{persistState: true})
+	summary, err := analyzer.Run(context.Background(), EpisodeMarkerKinds{Intro: true}, nil)
 	if err != nil {
-		t.Fatalf("analyzeGroup: %v", err)
+		t.Fatalf("Run: %v", err)
 	}
-	if summary.FingerprintExtractionErrors != 1 {
-		t.Fatalf("extraction errors = %d, want 1", summary.FingerprintExtractionErrors)
-	}
-	if len(repo.upsertedStates) != 1 || repo.upsertedStates[0].Status != seasonStatusPartial {
-		t.Fatalf("stored states = %+v, want one partial state", repo.upsertedStates)
+	if summary.FilesConsidered != 6 || summary.GroupsNotFound != 3 {
+		t.Fatalf("files = %d, groups not found = %d; want all 6 files and 3 groups across the pages", summary.FilesConsidered, summary.GroupsNotFound)
 	}
 }
 
@@ -134,12 +141,6 @@ func TestSeasonStateSettled(t *testing.T) {
 		if got := tc.state.settled(now); got != tc.want {
 			t.Errorf("settled(%+v) = %v, want %v", tc.state, got, tc.want)
 		}
-	}
-}
-
-func TestDetectionRunsOneWorkerByDefault(t *testing.T) {
-	if got := DefaultConfig("ffmpeg").MaxParallelFFmpeg; got != 1 {
-		t.Fatalf("default MaxParallelFFmpeg = %d, want 1", got)
 	}
 }
 
@@ -172,25 +173,6 @@ func TestSilenceRefinementSkipsFileWhenDeadlinePassesWhileWaiting(t *testing.T) 
 	if refined || refiner.calls != 0 || summary.SilenceRefinementsAttempted != 0 {
 		t.Fatalf("refined=%v calls=%d attempted=%d, want the file skipped without running ffmpeg",
 			refined, refiner.calls, summary.SilenceRefinementsAttempted)
-	}
-}
-
-func TestAnalyzeEpisodeReportsExtractionFailures(t *testing.T) {
-	target := Candidate{FileID: 1, EpisodeID: "e1", SeasonID: "s1", MediaFolderID: 1, DurationSeconds: 1800}
-	sibling := Candidate{FileID: 2, EpisodeID: "e2", SeasonID: "s1", MediaFolderID: 1, DurationSeconds: 1800}
-	repo := &fakeIntroRepository{
-		episodeCandidates: map[string][]Candidate{"e1": {target}},
-		groupCandidates:   map[string][]Candidate{groupKey(1, "s1", target.AnalysisGroupKey()): {target, sibling}},
-	}
-	analyzer := &Analyzer{repo: repo, extractor: failingExtractor{errFor: map[int]error{2: errors.New("read failed")}},
-		config: DefaultConfig("ffmpeg"), logger: slog.New(slog.DiscardHandler)}
-
-	summary, err := analyzer.AnalyzeEpisode(context.Background(), "e1")
-	if err != nil {
-		t.Fatalf("AnalyzeEpisode: %v", err)
-	}
-	if summary.FingerprintExtractionErrors != 1 {
-		t.Fatalf("extraction errors = %d, want 1", summary.FingerprintExtractionErrors)
 	}
 }
 

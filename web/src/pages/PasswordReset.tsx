@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { PasswordInput } from "@/components/PasswordInput";
 import { Label } from "@/components/ui/label";
 import { AuthCard, SignInHint } from "@/components/auth/AuthCard";
+import { useT } from "@/i18n";
 
 export default function PasswordReset() {
   const { token = "" } = useParams();
@@ -49,7 +50,8 @@ function ResetForm({ token }: { token: string }) {
   const { available: canRequestLink } = usePasswordResetAvailable(lookup.unavailable === true);
   const busy = useRef(false);
   const lifetime = useRef<AbortController | null>(null);
-  useDocumentTitle("Reset Password");
+  const t = useT();
+  useDocumentTitle(t("web.auth.passwordReset.documentTitle"));
 
   useEffect(() => {
     const controller = new AbortController();
@@ -86,12 +88,12 @@ function ResetForm({ token }: { token: string }) {
   // their session with the reset account's, so they sign out first.
   if (!loading && user && !completed) {
     return (
-      <AuthCard title="Reset password">
+      <AuthCard title={t("web.auth.passwordRules.resetPasswordTitle")}>
         <p className="mb-4 text-sm">
-          You&apos;re signed in as {user.username}. Sign out to use this reset link.
+          {t("web.auth.passwordReset.signedIn", { username: user.username })}
         </p>
         <Button className="w-full" onClick={logout}>
-          Sign out
+          {t("common.signOut")}
         </Button>
       </AuthCard>
     );
@@ -105,12 +107,12 @@ function ResetForm({ token }: { token: string }) {
   }
   if (signInAs) {
     return (
-      <AuthCard title="Password changed">
+      <AuthCard title={t("web.auth.passwordRules.passwordChanged")}>
         <p role="status" className="mb-4 text-sm">
-          Sign in as {signInAs} with your new password.
+          {t("web.auth.passwordReset.signInAs", { username: signInAs })}
         </p>
         <Button asChild className="w-full">
-          <Link to="/login">Sign in</Link>
+          <Link to="/login">{t("web.auth.signIn")}</Link>
         </Button>
       </AuthCard>
     );
@@ -118,23 +120,27 @@ function ResetForm({ token }: { token: string }) {
   if (!lookup.data) {
     return (
       <AuthCard
-        title={lookup.unavailable ? "Link unavailable" : "Could not load link"}
+        title={
+          lookup.unavailable
+            ? t("web.auth.passwordReset.unavailableTitle")
+            : t("web.auth.passwordReset.loadFailedTitle")
+        }
         description={
           lookup.unavailable
             ? canRequestLink
-              ? "This link was already used, replaced by a newer one, or expired. Request a new link, or ask your admin for one."
-              : "This link was already used, replaced by a newer one, or expired. Ask your admin for a new link."
-            : "The server could not confirm this link. Try loading it again."
+              ? t("web.auth.passwordReset.unavailableRequestNew")
+              : t("web.auth.passwordReset.unavailableAskAdmin")
+            : t("web.auth.passwordReset.loadFailed")
         }
       >
         {!lookup.unavailable && (
           <Button className="mb-4 w-full" onClick={reloadLookup}>
-            Reload link
+            {t("web.auth.passwordReset.reloadLink")}
           </Button>
         )}
         {lookup.unavailable && canRequestLink && (
           <Button asChild className="mb-4 w-full">
-            <Link to="/forgot-password">Request a new link</Link>
+            <Link to="/forgot-password">{t("web.auth.passwordReset.requestNewLink")}</Link>
           </Button>
         )}
         <SignInHint />
@@ -175,7 +181,7 @@ function ResetForm({ token }: { token: string }) {
       // A rejected password leaves the link unspent; anything else may have
       // committed, so the link is reloaded before another attempt.
       if (err instanceof V2ProblemError && err.problemType === "validation_failed") {
-        setError(passwordErrorMessage(err, "Could not set the password."));
+        setError(passwordErrorMessage(err, t("web.auth.passwordReset.setFailed")));
       } else if (err instanceof V2ProblemError && err.status === 404) {
         setLookup({ pending: false, unavailable: true });
       } else {
@@ -190,8 +196,11 @@ function ResetForm({ token }: { token: string }) {
   return (
     <AuthCard
       eyebrow={reset.server_name}
-      title="Choose a new password"
-      description={`For ${reset.username}. The link expires ${formatDateTime(reset.expires_at)}. Saving signs this account out on every device.`}
+      title={t("web.auth.passwordRules.chooseNewPassword")}
+      description={t("web.auth.passwordReset.description", {
+        username: reset.username,
+        expires: formatDateTime(reset.expires_at),
+      })}
     >
       {error && (
         <p role="alert" className="text-destructive mb-4 text-sm">
@@ -200,19 +209,16 @@ function ResetForm({ token }: { token: string }) {
       )}
       {recovery && (
         <div role="alert" className="mb-4 space-y-3 text-sm">
-          <p>
-            We could not confirm the result. Your password may have changed. Try signing in with the
-            new password, or reload this link before trying again.
-          </p>
+          <p>{t("web.auth.passwordReset.recovery")}</p>
           <Button type="button" variant="outline" onClick={reloadLookup}>
-            Reload link
+            {t("web.auth.passwordReset.reloadLink")}
           </Button>
         </div>
       )}
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="reset-password">New password</Label>
-          <p className="text-muted-foreground text-xs">At least 8 characters</p>
+          <Label htmlFor="reset-password">{t("web.auth.passwordRules.newPassword")}</Label>
+          <p className="text-muted-foreground text-xs">{t("web.auth.passwordRules.minLength")}</p>
           <PasswordInput
             id="reset-password"
             value={password}
@@ -224,7 +230,9 @@ function ResetForm({ token }: { token: string }) {
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="reset-confirm-password">Confirm new password</Label>
+          <Label htmlFor="reset-confirm-password">
+            {t("web.auth.passwordRules.confirmNewPassword")}
+          </Label>
           <PasswordInput
             id="reset-confirm-password"
             value={confirmation}
@@ -235,7 +243,7 @@ function ResetForm({ token }: { token: string }) {
           />
         </div>
         <Button type="submit" className="w-full" disabled={submitting || recovery}>
-          {submitting ? "Saving..." : "Save password"}
+          {submitting ? t("web.ui.saving") : t("web.auth.passwordRules.savePassword")}
         </Button>
       </form>
       <SignInHint />

@@ -45,6 +45,7 @@ import type {
 import { normalizeQueryDefinition } from "@/api/types";
 import { requiredETag } from "@/api/v2/etag";
 import { v2, V2ProblemError } from "@/api/v2/request";
+import { t } from "@/i18n";
 import { normalizeSmartCollectionLimit } from "@/components/collections/smartCollectionLimits";
 import {
   invalidateAdminCollectionQueries,
@@ -108,7 +109,11 @@ export interface CollectionDraft {
   kind: CollectionKind;
   name: string;
   description: string;
-  /** Server: the libraries the collection belongs to. Personal smart: the libraries it matches; [] = all. */
+  /**
+   * Server: the libraries whose Collections tabs show it (a Smart collection's
+   * rules name the libraries it draws from). Personal smart: the libraries it
+   * matches; [] = all.
+   */
   libraryIds: number[];
   /** Smart only. A "no limit" limit is already cleared. */
   rules?: QueryDefinition;
@@ -191,6 +196,20 @@ export interface SyncOutcome {
   itemsUnmatched: number;
 }
 
+// The path builders annotate their destructured options: tsrs 0.18 does not
+// contextually type a destructured parameter that has a default.
+type ListPathOptions = { libraryId?: number | null; view?: "list" | "arrange" };
+type CreatePathOptions = {
+  type?: CollectionKind;
+  source?: SyncedSource;
+  libraryId?: number | null;
+};
+type EditPathOptions = {
+  libraryId?: number | null;
+  view?: "list" | "arrange";
+  focus?: "titles";
+};
+
 export interface CollectionScope<Raw extends WireCollection = WireCollection> {
   readonly kind: ScopeKind;
   /** The value the item hooks take to pick the admin or personal item routes. */
@@ -205,16 +224,9 @@ export interface CollectionScope<Raw extends WireCollection = WireCollection> {
   readonly allowPersonalizedRules: boolean;
 
   paths: {
-    list(options?: { libraryId?: number | null; view?: "list" | "arrange" }): string;
-    create(options?: {
-      type?: CollectionKind;
-      source?: SyncedSource;
-      libraryId?: number | null;
-    }): string;
-    edit(
-      id: string,
-      options?: { libraryId?: number | null; view?: "list" | "arrange"; focus?: "titles" },
-    ): string;
+    list(options?: ListPathOptions): string;
+    create(options?: CreatePathOptions): string;
+    edit(id: string, options?: EditPathOptions): string;
     browse(view: CollectionView<Raw>): string;
   };
 
@@ -272,7 +284,7 @@ function rulesFor(kind: CollectionKind, query: QueryDefinitionInput) {
     : undefined;
 }
 
-/** Smart rules match the draft's libraries; the draft's list is the one the editor shows. */
+/** A Smart draft's rules, with the libraries they draw from. */
 function smartRules(draft: ManualOrSmartDraft): QueryDefinition | undefined {
   return draft.kind === "smart" ? draftRules(draft) : undefined;
 }
@@ -349,7 +361,7 @@ function isStaged(slot: ArtworkSlotDraft | undefined) {
 
 function followedList(draft: SyncedCreateDraft) {
   const { list } = draft.synced;
-  if (!list) throw new Error("Pick a list first.");
+  if (!list) throw new Error(t("web.collections.scope.pickAListFirst"));
   return list;
 }
 
@@ -433,7 +445,9 @@ async function hideFromTabs(id: string): Promise<string | undefined> {
     return undefined;
   } catch (error) {
     // The list exists either way; say that it still shows.
-    return `It still shows on Collections tabs: ${adminMutationMessage(error, "hiding it failed")}`;
+    return t("web.collections.scope.stillShowsOnTabs", {
+      reason: adminMutationMessage(error, t("web.collections.scope.hidingFailed")),
+    });
   }
 }
 
@@ -484,7 +498,7 @@ async function createPersonalSynced(draft: SyncedCreateDraft) {
       });
     } catch (error) {
       outcome.warnings.push(
-        personalMutationMessage(error, "Couldn't show it on the Collections tab"),
+        personalMutationMessage(error, t("web.collections.scope.showOnTabFailed")),
       );
     }
   }
@@ -642,7 +656,7 @@ function personalFields(draft: ManualOrSmartDraft) {
 
 function personalMutationMessage(error: unknown, fallback: string) {
   if (error instanceof V2ProblemError && error.status === 412) {
-    return "This collection changed while you were editing. Reload it and review your changes before saving again.";
+    return t("web.collections.scope.changedWhileEditing");
   }
   return error instanceof Error ? error.message : fallback;
 }
@@ -690,11 +704,11 @@ export const SERVER_SCOPE: CollectionScope<LibraryCollection> = {
   paths: {
     // A bare `?libraryId=N` opens that library's Arrange (older links), so a
     // library's List names its view.
-    list: ({ libraryId, view = libraryId ? "list" : undefined } = {}) =>
+    list: ({ libraryId, view = libraryId ? "list" : undefined }: ListPathOptions = {}) =>
       withQuery("/admin/collections", { libraryId, view }),
-    create: ({ type, source, libraryId } = {}) =>
+    create: ({ type, source, libraryId }: CreatePathOptions = {}) =>
       withQuery("/admin/collections/new", { type, source, libraryId }),
-    edit: (id, { libraryId, view, focus } = {}) =>
+    edit: (id, { libraryId, view, focus }: EditPathOptions = {}) =>
       withQuery(`/admin/collections/${encodeURIComponent(id)}/edit`, { libraryId, view, focus }),
     browse: (view) => buildLibraryCollectionCatalogHref(view.id, view.name),
   },
@@ -738,7 +752,8 @@ export const SERVER_SCOPE: CollectionScope<LibraryCollection> = {
       name: view?.name ?? "",
       description: view?.description ?? "",
       libraryIds,
-      rules: rulesFor(draftKind, { ...view?.raw.query_definition, library_ids: libraryIds }),
+      // The rules name their own libraries. Opened from a library, a new one starts there.
+      rules: rulesFor(draftKind, view ? view.raw.query_definition : { library_ids: libraryIds }),
       rawSortConfig: view?.raw.sort_config ?? {},
       artwork: {},
       server: { visibility: view?.server?.visibility ?? "visible" },
@@ -822,8 +837,9 @@ export const PERSONAL_SCOPE: CollectionScope<Collection> = {
 
   paths: {
     list: () => "/collections",
-    create: ({ type, source } = {}) => withQuery("/collections/new", { type, source }),
-    edit: (id, { focus } = {}) =>
+    create: ({ type, source }: CreatePathOptions = {}) =>
+      withQuery("/collections/new", { type, source }),
+    edit: (id, { focus }: EditPathOptions = {}) =>
       withQuery(`/collections/${encodeURIComponent(id)}/edit`, { focus }),
     browse: (view) => buildUserCollectionCatalogHref(view.id, view.name),
   },

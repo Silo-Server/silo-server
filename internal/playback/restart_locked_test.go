@@ -31,29 +31,35 @@ func newFakeFFmpegSession(t *testing.T) *TranscodeSession {
 	}
 }
 
+// A copy-mode restart at a missing segment resumes on the manifest's own
+// timeline: seek to the segment's listed start, keep the stream origin, and
+// number from the playlist's first segment. The MPEG-TS row covers the
+// playlist with no init map and .ts names.
 func TestRestartSegmentLocked_UsesResolvedCopyAnchorAndManifestNumber(t *testing.T) {
-	dir := t.TempDir()
-	manifest := strings.Join([]string{
-		"#EXTM3U",
-		"#EXT-X-VERSION:7",
-		"#EXT-X-TARGETDURATION:3",
-		"#EXT-X-MEDIA-SEQUENCE:9",
-		"#EXT-X-MAP:URI=\"init.mp4\"",
-		"#EXTINF:2.669000,",
-		"seg_00009.m4s",
-		"#EXTINF:1.669000,",
-		"seg_00010.m4s",
-		"#EXTINF:1.668000,",
-		"seg_00011.m4s",
-		"",
-	}, "\n")
-	if err := os.WriteFile(filepath.Join(dir, "stream.m3u8"), []byte(manifest), 0o644); err != nil {
-		t.Fatalf("write manifest: %v", err)
-	}
+	for _, tc := range []struct {
+		name   string
+		mpegts bool
+		header []string
+		ext    string
+	}{
+		{name: "fMP4", header: []string{"#EXT-X-VERSION:7", "#EXT-X-TARGETDURATION:3", "#EXT-X-MEDIA-SEQUENCE:9", "#EXT-X-MAP:URI=\"init.mp4\""}, ext: ".m4s"},
+		{name: "MPEG-TS", mpegts: true, header: []string{"#EXT-X-VERSION:3", "#EXT-X-TARGETDURATION:3", "#EXT-X-MEDIA-SEQUENCE:9"}, ext: ".ts"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			lines := append([]string{"#EXTM3U"}, tc.header...)
+			lines = append(lines,
+				"#EXTINF:2.669000,", "seg_00009"+tc.ext,
+				"#EXTINF:1.669000,", "seg_00010"+tc.ext,
+				"#EXTINF:1.668000,", "seg_00011"+tc.ext,
+				"")
+			if err := os.WriteFile(filepath.Join(dir, "stream.m3u8"), []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+				t.Fatalf("write manifest: %v", err)
+			}
 
-	argsPath := filepath.Join(dir, "restart-args")
-	ffmpegPath := filepath.Join(dir, "ffmpeg")
-	ffmpeg := `#!/bin/sh
+			argsPath := filepath.Join(dir, "restart-args")
+			ffmpegPath := filepath.Join(dir, "ffmpeg")
+			ffmpeg := `#!/bin/sh
 for arg in "$@"; do
   if [ "$arg" = "framecrc" ]; then
     printf '%s\n' '#tb 0: 1/1000'
@@ -64,61 +70,64 @@ done
 printf '%s\n' "$@" > "` + argsPath + `"
 exec sleep 30
 `
-	if err := os.WriteFile(ffmpegPath, []byte(ffmpeg), 0o755); err != nil {
-		t.Fatalf("write fake ffmpeg: %v", err)
-	}
-
-	s := &TranscodeSession{
-		outputDir: dir,
-		opts: TranscodeOpts{
-			SessionID:              "sess-copy",
-			InputPath:              "/media/movie.mkv",
-			OutputDir:              dir,
-			FFmpegPath:             ffmpegPath,
-			SeekSeconds:            18.261,
-			StreamOriginSeconds:    18,
-			CopySeekAnchorResolved: true,
-			TargetCodecVideo:       "copy",
-			TargetCodecAudio:       "copy",
-			SegmentDuration:        2,
-			StartSegmentNumber:     9,
-		},
-	}
-	m := NewTranscodeManager()
-	m.RegisterTranscodeSession("sess-copy", s)
-	t.Cleanup(func() { _ = s.Close() })
-
-	target, ok, err := m.RestartSegmentLocked(context.Background(), "sess-copy", s, 10)
-	if err != nil {
-		t.Fatalf("RestartSegmentLocked: %v", err)
-	}
-	if !ok {
-		t.Fatal("RestartSegmentLocked returned ok=false")
-	}
-	if math.Abs(target.SeekSeconds-20.669) > 0.0001 || math.Abs(target.StreamOriginSeconds-18) > 0.0001 ||
-		target.StartSegmentNumber != 9 || !target.CopySeekAnchorResolved {
-		t.Fatalf("restart target = %+v, want seek=20.669 origin=18 start=9 resolved=true", target)
-	}
-
-	opts := s.Opts()
-	if math.Abs(opts.SeekSeconds-20.669) > 0.0001 || math.Abs(opts.StreamOriginSeconds-18) > 0.0001 ||
-		opts.StartSegmentNumber != 9 || !opts.CopySeekAnchorResolved {
-		t.Fatalf("live restart opts = %+v, want resolved copy timeline", opts)
-	}
-	deadline := time.Now().Add(2 * time.Second)
-	var args []byte
-	for {
-		args, err = os.ReadFile(argsPath)
-		if err == nil && strings.Contains(string(args), "-ss\n20.669\n") && strings.Contains(string(args), "-start_number\n9\n") {
-			break
-		}
-		if time.Now().After(deadline) {
-			if err != nil {
-				t.Fatalf("read restart args: %v", err)
+			if err := os.WriteFile(ffmpegPath, []byte(ffmpeg), 0o755); err != nil {
+				t.Fatalf("write fake ffmpeg: %v", err)
 			}
-			t.Fatalf("restart args do not preserve resolved timeline:\n%s", args)
-		}
-		time.Sleep(time.Millisecond)
+
+			s := &TranscodeSession{
+				outputDir: dir,
+				opts: TranscodeOpts{
+					SessionID:              "sess-copy",
+					InputPath:              "/media/movie.mkv",
+					OutputDir:              dir,
+					FFmpegPath:             ffmpegPath,
+					SeekSeconds:            18.261,
+					StreamOriginSeconds:    18,
+					CopySeekAnchorResolved: true,
+					TargetCodecVideo:       "copy",
+					TargetCodecAudio:       "copy",
+					CopyVideoMPEGTS:        tc.mpegts,
+					SegmentDuration:        2,
+					StartSegmentNumber:     9,
+				},
+			}
+			m := NewTranscodeManager()
+			m.RegisterTranscodeSession("sess-copy", s)
+			t.Cleanup(func() { _ = s.Close() })
+
+			target, ok, err := m.RestartSegmentLocked(context.Background(), "sess-copy", s, 10)
+			if err != nil {
+				t.Fatalf("RestartSegmentLocked: %v", err)
+			}
+			if !ok {
+				t.Fatal("RestartSegmentLocked returned ok=false")
+			}
+			if math.Abs(target.SeekSeconds-20.669) > 0.0001 || math.Abs(target.StreamOriginSeconds-18) > 0.0001 ||
+				target.StartSegmentNumber != 9 || !target.CopySeekAnchorResolved {
+				t.Fatalf("restart target = %+v, want seek=20.669 origin=18 start=9 resolved=true", target)
+			}
+
+			opts := s.Opts()
+			if math.Abs(opts.SeekSeconds-20.669) > 0.0001 || math.Abs(opts.StreamOriginSeconds-18) > 0.0001 ||
+				opts.StartSegmentNumber != 9 || !opts.CopySeekAnchorResolved || opts.CopyVideoMPEGTS != tc.mpegts {
+				t.Fatalf("live restart opts = %+v, want resolved copy timeline", opts)
+			}
+			deadline := time.Now().Add(2 * time.Second)
+			var args []byte
+			for {
+				args, err = os.ReadFile(argsPath)
+				if err == nil && strings.Contains(string(args), "-ss\n20.669\n") && strings.Contains(string(args), "-start_number\n9\n") {
+					break
+				}
+				if time.Now().After(deadline) {
+					if err != nil {
+						t.Fatalf("read restart args: %v", err)
+					}
+					t.Fatalf("restart args do not preserve resolved timeline:\n%s", args)
+				}
+				time.Sleep(time.Millisecond) //nolint:forbidigo // Polls observable state: the fake FFmpeg writes its arguments from its own process.
+			}
+		})
 	}
 }
 
@@ -199,6 +208,26 @@ func TestRestartSessionLocked_ConcurrentRestartsSerialize(t *testing.T) {
 	}
 	if !s.IsRunning() {
 		t.Fatal("expected exactly one live ffmpeg after concurrent restarts settle")
+	}
+}
+
+// A segment request can wait on the lifecycle lock behind another restart and
+// be abandoned there when the player seeks again. Once it gets the lock it must
+// not restart FFmpeg for a position nobody is waiting on.
+func TestRestartSegmentLocked_SkipsRequestThatEnded(t *testing.T) {
+	m := NewTranscodeManager()
+	s := newFakeFFmpegSession(t)
+	const sid = "sess-x"
+	m.RegisterTranscodeSession(sid, s)
+	t.Cleanup(func() { _ = s.Close() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := m.RestartSegmentLocked(ctx, sid, s, 40); !errors.Is(err, context.Canceled) {
+		t.Fatalf("RestartSegmentLocked error = %v, want context.Canceled", err)
+	}
+	if s.IsRunning() {
+		t.Fatal("restarted FFmpeg for a request that had ended")
 	}
 }
 

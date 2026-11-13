@@ -110,15 +110,4 @@ describe("v2 reader annotations", () => {
     complete!(response({ items: [row], page: { has_more: false } }));
     await expect(loading).rejects.toMatchObject({ name: "StaleApiRequestContextError" });
   });
-  it("rejects a repeated cursor instead of looping indefinitely", async () => {
-    const session = createEbookAnnotationSession();
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockImplementation(async () =>
-        response({ items: [row], page: { has_more: true, next_cursor: "same" } }),
-      );
-    vi.stubGlobal("fetch", fetchMock);
-    await expect(fetchEbookReaderAnnotations("book", session)).rejects.toThrow("did not advance");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
 });

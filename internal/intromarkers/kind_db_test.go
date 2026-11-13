@@ -1,7 +1,10 @@
 package intromarkers
 
 import (
+	"context"
+	"fmt"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -9,77 +12,8 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/database"
 	"github.com/Silo-Server/silo-server/internal/mediaartifact"
-	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/migrations"
 )
-
-// TestPatchMarkerCreditsPostgres writes a credits marker through PatchMarker
-// and reads it back on the candidate, leaving the file's intro untouched.
-func TestPatchMarkerCreditsPostgres(t *testing.T) {
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
-	ctx := t.Context()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(pool.Close)
-	if err := database.RunMigrations(ctx, pool, migrations.FS, "sql"); err != nil {
-		t.Fatalf("migrate test database: %v", err)
-	}
-	fileID := seedSilenceBackfillFixture(t, pool)[0]
-	var episodeID string
-	if err := pool.QueryRow(ctx, `SELECT episode_id FROM media_files WHERE id = $1`, fileID).Scan(&episodeID); err != nil {
-		t.Fatal(err)
-	}
-
-	repo := NewRepository(pool)
-	load := func() Candidate {
-		t.Helper()
-		candidates, err := repo.ListCandidatesForEpisode(ctx, episodeID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(candidates) != 1 {
-			t.Fatalf("episode candidates = %d, want 1", len(candidates))
-		}
-		return candidates[0]
-	}
-	before := load()
-	if before.marker(kindCredits).present() || !before.ownsMarker(kindCredits) {
-		t.Fatalf("fixture credits = %+v, want none", before.marker(kindCredits))
-	}
-
-	applied, err := repo.PatchMarker(ctx, MarkerPatch{
-		Kind:         kindCredits,
-		ExpectedFile: before.expectedFile(),
-		FileID:       fileID,
-		Start:        1380,
-		End:          1490,
-		Source:       models.MarkerSourceScanner,
-		Confidence:   0.9,
-		Algorithm:    "credits-test:v1",
-		DetectedAt:   time.Now().UTC(),
-	})
-	if err != nil || !applied {
-		t.Fatalf("PatchMarker(credits) = %t, %v; want applied", applied, err)
-	}
-
-	after := load()
-	credits := after.marker(kindCredits)
-	if !credits.present() || *credits.Start != 1380 || *credits.End != 1490 ||
-		after.effectiveSource(kindCredits) != models.MarkerSourceScanner ||
-		credits.Algorithm == nil || *credits.Algorithm != "credits-test:v1" ||
-		credits.Confidence == nil || *credits.Confidence != 0.9 {
-		t.Fatalf("credits after patch = %+v", credits)
-	}
-	intro := after.marker(kindIntro)
-	if *intro.Start != 60 || *intro.End != 120 || *intro.Algorithm != ChapterAlgorithm {
-		t.Fatalf("intro after credits patch = %+v, want the fixture's chapter intro", intro)
-	}
-}
 
 // TestSeasonStateIsKeyedByAnalysisHashPostgres stores two kinds' season state
 // for one group side by side.
@@ -138,5 +72,91 @@ func TestSeasonStateIsKeyedByAnalysisHashPostgres(t *testing.T) {
 				t.Fatalf("partial state should hold for the retry interval and lapse after it: %+v", loaded)
 			}
 		}
+	}
+}
+
+// TestEligibleCandidatePagesHoldWholeSeasonsPostgres pages the library-wide
+// episode candidates one season at a time: a season's files in two libraries
+// share a page, and a season with no eligible file still advances the cursor.
+func TestEligibleCandidatePagesHoldWholeSeasonsPostgres(t *testing.T) {
+	pool := movieTestPool(t)
+	ctx := t.Context()
+	prefix := fmt.Sprintf("episode-page-%d-", time.Now().UnixNano())
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seriesID := prefix + "series"
+	var folderIDs []int
+	t.Cleanup(func() {
+		cleanup := context.Background()
+		for _, folderID := range folderIDs {
+			for _, stmt := range []string{
+				`DELETE FROM media_files WHERE media_folder_id = $1`,
+				`DELETE FROM media_folders WHERE id = $1`,
+			} {
+				if _, err := pool.Exec(cleanup, stmt, folderID); err != nil {
+					t.Errorf("clean episode page fixture: %v", err)
+				}
+			}
+		}
+		if _, err := pool.Exec(cleanup, `DELETE FROM media_items WHERE content_id = $1`, seriesID); err != nil {
+			t.Errorf("clean episode page fixture: %v", err)
+		}
+	})
+	folder := func(name string, detection bool) int {
+		t.Helper()
+		var id int
+		if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled, intro_detection_enabled) VALUES ('series', $1, true, $2) RETURNING id`, prefix+name, detection).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		folderIDs = append(folderIDs, id)
+		return id
+	}
+	first, second, off := folder("first", true), folder("second", true), folder("off", false)
+
+	exec(`INSERT INTO media_items (content_id, type, title) VALUES ($1, 'series', 'Episode pages')`, seriesID)
+	file := func(folderID int, season, episode int) int {
+		t.Helper()
+		seasonID := fmt.Sprintf("%ss%d", prefix, season)
+		episodeID := fmt.Sprintf("%ss%de%d", prefix, season, episode)
+		exec(`INSERT INTO seasons (content_id, series_id, season_number) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, seasonID, seriesID, season)
+		exec(`INSERT INTO episodes (content_id, series_id, season_id, season_number, episode_number) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`, episodeID, seriesID, seasonID, season, episode)
+		var id int
+		if err := pool.QueryRow(ctx, `
+			INSERT INTO media_files (media_folder_id, file_path, episode_id, season_number, episode_number, file_size, duration)
+			VALUES ($1, $2, $3, $4, $5, 1000000, 1500)
+			RETURNING id`,
+			folderID, fmt.Sprintf("/%s/%d/%s.mkv", prefix, folderID, episodeID), episodeID, season, episode,
+		).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	// Season 1 has an episode in both libraries; season 2 only in a library
+	// without marker detection.
+	seasonOne := []int{file(first, 1, 1), file(second, 1, 1), file(first, 1, 2)}
+	file(off, 2, 1)
+	seasonThree := []int{file(first, 3, 1)}
+
+	repo := NewRepository(pool)
+	after := &episodeCandidateCursor{seasonID: prefix}
+	for i, want := range [][]int{seasonOne, nil, seasonThree} {
+		candidates, next, err := repo.ListEligibleCandidatePage(ctx, after, 1)
+		if err != nil {
+			t.Fatalf("page %d: %v", i+1, err)
+		}
+		got := candidateIDs(candidates)
+		slices.Sort(got)
+		slices.Sort(want)
+		if !slices.Equal(got, want) {
+			t.Fatalf("page %d files = %v, want %v", i+1, got, want)
+		}
+		if next == nil {
+			t.Fatalf("page %d: cursor ended with seasons left", i+1)
+		}
+		after = next
 	}
 }

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
-	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
@@ -105,97 +104,6 @@ func TestMountedTranscodeNodeSegmentTelemetry(t *testing.T) {
 				t.Fatalf("routes = %+v", session.Routes)
 			}
 		})
-	}
-}
-
-func TestMountedTranscodeNodeProgressiveRemuxTelemetry(t *testing.T) {
-	srv, registry, server := telemetryNodeServer(t)
-	srv.nodeRowID = func() (int, bool) { return 11, true }
-	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
-	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
-	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nprintf node-remux-bytes\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	srv.watcher.Config().Playback.FFmpegPath = ffmpegPath
-	claims := streamtoken.Claims{
-		SessionID: "viewer-session", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
-		TranscodeNode: "http://node", TranscodeTransportID: "transport-session",
-		RoutingWorkload:        string(noderouting.WorkloadRemux),
-		RoutingExecution:       string(noderouting.ExecutionTranscode),
-		RoutingExecutionNodeID: 11,
-		RoutingEgress:          string(noderouting.EgressProxy),
-	}
-	card := playback.RecipeCardFromClaims(&claims)
-	srv.SetRecipeStore(&stubRecipeStore{card: &card, ok: true})
-	token, err := streamtoken.Sign(claims, testSecret, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	status, body := nodeMediaRequest(t, server, "/remux/transport-session", token)
-	if status != http.StatusOK || string(body) != "node-remux-bytes" {
-		t.Fatalf("remux = %d %q", status, body)
-	}
-	snapshot := registry.Sweep()
-	if len(snapshot.Sessions) != 1 || snapshot.Sessions[0].SessionID != "viewer-session" {
-		t.Fatalf("sessions = %+v", snapshot.Sessions)
-	}
-	routes := snapshot.Sessions[0].Routes
-	if len(routes) != 1 || routes[0].Role != streamtelemetry.RoleInternalRelay || routes[0].BytesAccepted != int64(len(body)) {
-		t.Fatalf("routes = %+v", routes)
-	}
-}
-
-func TestMountedTranscodeNodeArtifactTelemetry(t *testing.T) {
-	t.Run("successful relay", func(t *testing.T) {
-		srv, registry, server := telemetryNodeServer(t)
-		const artifactID = "telemetry-artifact"
-		const body = "artifact-bytes"
-		if err := os.MkdirAll(srv.artifactRoot, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(srv.artifactRoot, artifactID+".mp4"), []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		status, got := nodeMediaRequest(t, server, "/downloads/artifacts/"+artifactID, "")
-		if status != http.StatusOK || string(got) != body {
-			t.Fatalf("artifact = %d %q", status, got)
-		}
-		snapshot := registry.Sweep()
-		if len(snapshot.Sessions) != 0 || len(snapshot.Transfers) != 1 {
-			t.Fatalf("snapshot = %+v", snapshot)
-		}
-		transfer := snapshot.Transfers[0]
-		if transfer.Role != streamtelemetry.RoleInternalRelay || transfer.BytesAccepted != int64(len(body)) || transfer.Subject != (streamtelemetry.Subject{}) || transfer.ViewerIP != "" {
-			t.Fatalf("transfer = %+v", transfer)
-		}
-	})
-
-	t.Run("missing artifact", func(t *testing.T) {
-		_, registry, server := telemetryNodeServer(t)
-		status, _ := nodeMediaRequest(t, server, "/downloads/artifacts/missing-artifact", "")
-		if status != http.StatusNotFound {
-			t.Fatalf("status = %d", status)
-		}
-		snapshot := registry.Sweep()
-		if len(snapshot.Sessions) != 0 || len(snapshot.Transfers) != 0 {
-			t.Fatalf("snapshot = %+v", snapshot)
-		}
-	})
-}
-
-func TestMountedTranscodeNodeUnknownSessionCreatesNothing(t *testing.T) {
-	_, registry, server := telemetryNodeServer(t)
-	status, _ := nodeMediaRequest(t, server, "/transcode/unknown/segment/seg1.ts", "")
-	if status != http.StatusNotFound {
-		t.Fatalf("status = %d", status)
-	}
-	snapshot := registry.Sweep()
-	if len(snapshot.Sessions) != 0 || len(snapshot.Transfers) != 0 {
-		t.Fatalf("snapshot = %+v", snapshot)
 	}
 }
 

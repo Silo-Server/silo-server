@@ -1,3 +1,4 @@
+import { codeNumber, t } from "@/i18n";
 import { formatTime, preferredDateLocale } from "@/lib/datetime";
 
 interface UpcomingPresentationEvent {
@@ -12,14 +13,20 @@ interface UpcomingPresentationEvent {
   badges: string[];
 }
 
+// Every client shows these labels in capitals: PREMIERE, NEW SEASON, FINALE,
+// DIGITAL, PHYSICAL.
 export function upcomingBadgeLabel(badge: string): string {
   switch (badge) {
     case "series_premiere":
-      return "Series Premiere";
+      return t("web.calendar.event.badge.seriesPremiere");
     case "season_premiere":
-      return "Season Premiere";
+      return t("web.calendar.event.badge.seasonPremiere");
     case "finale":
-      return "Finale";
+      return t("web.calendar.event.badge.finale");
+    case "digital":
+      return t("web.calendar.event.badge.digital");
+    case "physical":
+      return t("web.calendar.event.badge.physical");
     default:
       return badge;
   }
@@ -32,6 +39,10 @@ export function upcomingBadgeClass(badge: string): string {
       return "border-primary/40 bg-primary/20 text-primary";
     case "finale":
       return "border-orange-800/55 bg-orange-950/90 text-orange-50 shadow-sm backdrop-blur-none";
+    case "digital":
+      return "border-sky-800/55 bg-sky-950/90 text-sky-50 shadow-sm backdrop-blur-none";
+    case "physical":
+      return "border-emerald-800/55 bg-emerald-950/90 text-emerald-50 shadow-sm backdrop-blur-none";
     default:
       return "border-border/50 bg-surface";
   }
@@ -42,16 +53,21 @@ export function formatUpcomingSubtitle(event: UpcomingPresentationEvent): string
     (event.type === "episode" || event.type === "season_premiere") &&
     event.season_number != null
   ) {
+    const season = event.season_number;
+    const title = event.episode_title;
     if (event.episode_number != null) {
-      return `S${event.season_number} · E${event.episode_number}${
-        event.episode_title ? ` - ${event.episode_title}` : ""
-      }`;
+      const code = { season: codeNumber(season), episode: codeNumber(event.episode_number) };
+      return title
+        ? t("web.calendar.event.episodeTitled", { ...code, title })
+        : t("web.calendar.event.episode", code);
     }
-    return `Season ${event.season_number}${event.episode_title ? ` · ${event.episode_title}` : ""}`;
+    return title
+      ? t("web.calendar.event.seasonTitled", { season, title })
+      : t("web.calendar.event.season", { season });
   }
 
   if (event.type === "movie") {
-    return "Movie";
+    return t("web.calendar.event.movie");
   }
 
   return "";

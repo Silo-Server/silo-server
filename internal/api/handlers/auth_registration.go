@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
@@ -111,16 +112,6 @@ func (h *AuthHandler) Refresh(ctx context.Context, refreshToken string) (Refresh
 	return RefreshedTokensView{AccessToken: pair.AccessToken, RefreshToken: pair.RefreshToken, ExpiresIn: pair.ExpiresIn}, nil
 }
 
-// ListSessions lists every retained login session of the caller, active,
-// revoked and expired alike. v1 GET /auth/sessions calls it.
-func (h *AuthHandler) ListSessions(ctx context.Context, userID int) ([]*models.AuthSession, error) {
-	sessions, err := h.service.GetSessions(ctx, userID)
-	if err != nil {
-		return nil, apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
-	}
-	return sessions, nil
-}
-
 // ListSessionsPage is the keyset listing v2 listSessions serves: up to limit
 // of the caller's live sessions (not expired, not revoked), newest first by
 // (created_at DESC, id DESC) and strictly after the key; the bool reports
@@ -195,6 +186,9 @@ func (h *AuthHandler) SetupInitialUser(ctx context.Context, in RegistrationInput
 		if errors.Is(err, auth.ErrSetupAlreadyComplete) {
 			return TokenPairView{}, apiError(http.StatusUnauthorized, "setup_complete", "Initial setup has already been completed")
 		}
+		if apiErr := busyError(err); apiErr != nil {
+			return TokenPairView{}, apiErr
+		}
 		return TokenPairView{}, apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
 	}
 	return h.tokenPairView(ctx, pair, user), nil
@@ -236,6 +230,11 @@ func (h *AuthHandler) Signup(ctx context.Context, in RegistrationInput) (TokenPa
 		case auth.IsDuplicate(err):
 			return TokenPairView{}, apiError(http.StatusBadRequest, "duplicate", "Username or email already taken")
 		}
+		// A busy sign-in after the account was created must not invite a
+		// retry, which could only fail as a duplicate.
+		if apiErr := busyError(err); apiErr != nil && !errors.Is(err, auth.ErrSignupSessionStart) {
+			return TokenPairView{}, apiErr
+		}
 		if apiErr := externalSignInError(err); apiErr != nil {
 			return TokenPairView{}, apiErr
 		}
@@ -249,7 +248,7 @@ func (h *AuthHandler) tokenPairView(ctx context.Context, pair *auth.TokenPair, u
 		AccessToken:  pair.AccessToken,
 		RefreshToken: pair.RefreshToken,
 		ExpiresIn:    pair.ExpiresIn,
-		User:         buildUserResponse(user, effectiveDownloadAllowed(ctx, user, h.accessGroups), nil, nil),
+		User:         buildUserResponse(user, effectiveAccountPolicy(ctx, user, h.accessGroups), nil, nil),
 	}
 }
 
@@ -258,12 +257,20 @@ const PluginLaunchTTL = 5 * time.Minute
 
 // PluginLaunchToken mints the short-lived plugin access token the launch
 // cookie carries. v1 POST /auth/plugin-launch and v2 launchPlugin both call
-// it; the caller sets the cookie on its own path.
-func (h *AuthHandler) PluginLaunchToken(claims *auth.Claims, profileID string) (string, error) {
+// it; the caller sets the cookie on its own path. A profile the viewer gate
+// verified in ctx is bound with its PIN revision, so renewing the cookie
+// stops once that PIN changes.
+func (h *AuthHandler) PluginLaunchToken(ctx context.Context, claims *auth.Claims, profileID string) (string, error) {
 	if claims == nil || claims.SessionID == "" {
 		return "", apiError(http.StatusUnauthorized, "unauthorized", "Invalid or missing authentication token")
 	}
-	token, err := h.jwt.GeneratePluginAccessToken(claims.UserID, claims.Role, claims.SessionID, strings.TrimSpace(profileID), PluginLaunchTTL)
+	profileID = strings.TrimSpace(profileID)
+	var pinRevision *int64
+	if scope, ok := access.GetScope(ctx); ok && profileID != "" && scope.ProfileID == profileID && scope.ProfileVerified {
+		revision := scope.ProfilePINRevision
+		pinRevision = &revision
+	}
+	token, err := h.jwt.GeneratePluginAccessToken(claims.UserID, claims.Role, claims.SessionID, profileID, pinRevision, PluginLaunchTTL)
 	if err != nil {
 		return "", apiError(http.StatusInternalServerError, "internal_error", "Failed to prepare plugin access")
 	}

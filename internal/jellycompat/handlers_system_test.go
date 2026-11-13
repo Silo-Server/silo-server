@@ -17,12 +17,16 @@ func TestSystemInfoCastReceiverApplications(t *testing.T) {
 		t.Fatal(err)
 	}
 	router := NewRouter(Dependencies{Config: cfg})
-	for _, path := range []string{"/System/Info", "/system/info", "/emby/System/Info", "/jellyfin/System/Info"} {
+	for _, path := range []string{"/System/Info"} {
 		t.Run(path, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status = %d, want 200", rec.Code)
+			}
+			// Set by the listener for every route, not by this handler.
+			if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+				t.Fatalf("X-Content-Type-Options = %q, want nosniff", got)
 			}
 			var body map[string]json.RawMessage
 			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {

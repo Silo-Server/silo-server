@@ -16,7 +16,7 @@ import (
 // on the (media_folder_id, file_path text_pattern_ops) index.
 func TestFolderPathPrefixQueryUsesPathRangeUnderGenericPlanDB(t *testing.T) {
 	ctx := t.Context()
-	pool := newDeadRootTestPool(t)
+	pool := newScannerTestPool(t)
 	folderID := seedDeadRootTestFolder(t, pool, "series", "Path prefix generic plan")
 	base := fmt.Sprintf("/prefix-plan-%d", time.Now().UnixNano())
 	if _, err := pool.Exec(ctx, `

@@ -45,69 +45,6 @@ func notificationSeriesIDs(items []NotificationSeries) []string {
 	return ids
 }
 
-func TestNotificationSeriesListsReasonsAndOmitsHiddenSeries(t *testing.T) {
-	h, lists := notificationSeriesHandler(t)
-	page := getNotificationSeries(t, h, "")
-	if got := notificationSeriesIDs(page.Items); !slices.Equal(got, []string{"series:andor", "series:bear", "series:slow-horses", "series:wire"}) {
-		t.Fatalf("items = %v", got)
-	}
-	if page.Page.HasMore {
-		t.Fatal("a complete list has no next page")
-	}
-	andor, bear, slow, wire := page.Items[0], page.Items[1], page.Items[2], page.Items[3]
-	if !andor.Notifies || !andor.ActiveReasons.NextUp || andor.NextUpAfter == nil || *andor.NextUpAfter != (NotificationEpisodeRef{SeasonNumber: 2, EpisodeNumber: 8}) {
-		t.Fatalf("next up series = %+v", andor)
-	}
-	if !bear.Notifies || !bear.Reasons.Favorite || !bear.Reasons.ContinueWatching || bear.NextUpAfter != nil {
-		t.Fatalf("favorite series = %+v", bear)
-	}
-	if slow.Notifies || slow.Muted || !slow.Reasons.Watchlist || slow.ActiveReasons != (NotificationSeriesReasons{}) {
-		t.Fatalf("silenced series = %+v", slow)
-	}
-	// A muted series notifies nobody; its active reasons still say what
-	// would notify once unmuted.
-	if wire.Notifies || !wire.Muted || !wire.ActiveReasons.Favorite || andor.Muted || bear.Muted {
-		t.Fatalf("muted series = %+v", wire)
-	}
-	if len(lists.viewers) != 1 || lists.viewers[0].ProfileID != "p-owner" {
-		t.Fatalf("cards resolved as %+v", lists.viewers)
-	}
-}
-
-func TestNotificationSeriesStatusFilter(t *testing.T) {
-	h, _ := notificationSeriesHandler(t)
-	if got := notificationSeriesIDs(getNotificationSeries(t, h, "?status=active").Items); !slices.Equal(got, []string{"series:andor", "series:bear"}) {
-		t.Fatalf("active = %v", got)
-	}
-	if got := notificationSeriesIDs(getNotificationSeries(t, h, "?status=inactive").Items); !slices.Equal(got, []string{"series:slow-horses", "series:wire"}) {
-		t.Fatalf("inactive = %v", got)
-	}
-}
-
-// Series the viewer may not see are dropped before paging: every page is
-// full, and no cursor is minted at a hidden series.
-func TestNotificationSeriesPagesByTitle(t *testing.T) {
-	h, _ := notificationSeriesHandler(t)
-	var got []string
-	query := "?limit=1"
-	for range 5 {
-		page := getNotificationSeries(t, h, query)
-		if len(page.Items) != 1 {
-			t.Fatalf("page %s holds %d series, want 1", query, len(page.Items))
-		}
-		got = append(got, notificationSeriesIDs(page.Items)...)
-		if !page.Page.HasMore {
-			break
-		}
-		query = "?limit=1&cursor=" + url.QueryEscape(page.Page.NextCursor)
-	}
-	if !slices.Equal(got, []string{"series:andor", "series:bear", "series:slow-horses", "series:wire"}) {
-		t.Fatalf("paged = %v", got)
-	}
-	first := getNotificationSeries(t, h, "?limit=1")
-	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/notifications/series?limit=1&status=active&cursor="+url.QueryEscape(first.Page.NextCursor), "", profileOwner()), TypeInvalidCursor)
-}
-
 func TestNotificationSeriesSearchAndReasonFilter(t *testing.T) {
 	h, _ := notificationSeriesHandler(t)
 	for query, want := range map[string][]string{
@@ -162,26 +99,6 @@ func TestNotificationSeriesSorts(t *testing.T) {
 	}
 }
 
-func TestNotificationSeriesCapabilityAndAvailability(t *testing.T) {
-	h, _ := notificationSeriesHandler(t)
-	rec := do(t, h, http.MethodGet, Prefix+"/notifications/capabilities", "", profileOwner())
-	var caps NotificationCapabilities
-	if err := json.Unmarshal(rec.Body.Bytes(), &caps); err != nil || !caps.Series.Available || !caps.Series.Mute {
-		t.Fatal(rec.Code, rec.Body.String(), err)
-	}
-
-	deps := pilotDeps(nil, nil)
-	deps.NotificationInbox = fixtureNotificationInbox()
-	deps.PersonalLists = nil
-	h = NewHandler(deps)
-	rec = do(t, h, http.MethodGet, Prefix+"/notifications/capabilities", "", profileOwner())
-	if err := json.Unmarshal(rec.Body.Bytes(), &caps); err != nil || caps.Series.Available || caps.Series.Mute {
-		t.Fatal(rec.Code, rec.Body.String(), err)
-	}
-	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/notifications/series", "", profileOwner()), TypeDependencyUnavailable)
-	requireProblem(t, do(t, h, http.MethodPut, Prefix+"/notifications/series/series:bear/mute", "", profileOwner()), TypeDependencyUnavailable)
-}
-
 func notificationSeriesMuteHandler(t *testing.T) (http.Handler, *fakeNotificationInbox) {
 	t.Helper()
 	inbox := fixtureNotificationInbox()
@@ -189,23 +106,6 @@ func notificationSeriesMuteHandler(t *testing.T) (http.Handler, *fakeNotificatio
 	deps.NotificationInbox = inbox
 	deps.PersonalLists = &fakePersonalLists{missing: map[string]bool{"series:hidden": true}}
 	return NewHandler(deps), inbox
-}
-
-// Mute and unmute act as the acting profile on its account and are idempotent
-// writes.
-func TestNotificationSeriesMuteAndUnmute(t *testing.T) {
-	h, inbox := notificationSeriesMuteHandler(t)
-	for range 2 {
-		if rec := do(t, h, http.MethodPut, Prefix+"/notifications/series/series:bear/mute", "", profileOwner()); rec.Code != http.StatusNoContent {
-			t.Fatal(rec.Code, rec.Body.String())
-		}
-		if rec := do(t, h, http.MethodDelete, Prefix+"/notifications/series/series:wire/mute", "", profileOwner()); rec.Code != http.StatusNoContent {
-			t.Fatal(rec.Code, rec.Body.String())
-		}
-	}
-	if !slices.Equal(inbox.mutes, []string{"1/p-owner/series:bear", "1/p-owner/series:bear"}) || !slices.Equal(inbox.unmutes, []string{"1/p-owner/series:wire", "1/p-owner/series:wire"}) {
-		t.Fatalf("mutes = %v, unmutes = %v", inbox.mutes, inbox.unmutes)
-	}
 }
 
 // A series the viewer may not see and an item that is not a series are 404

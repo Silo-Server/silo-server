@@ -8,12 +8,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/gorilla/websocket"
+
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/watchtogether"
-	"github.com/go-chi/chi/v5"
-	"github.com/gorilla/websocket"
 )
 
 type roomSocketTickets interface {
@@ -127,7 +128,7 @@ func (h *WatchTogetherSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}
 	ctx, cancel := context.WithDeadline(validated, deadline)
 	defer cancel()
-	upgrader := websocket.Upgrader{Subprotocols: []string{watchtogether.RoomSocketProtocol}, CheckOrigin: func(r *http.Request) bool {
+	upgrader := websocket.Upgrader{Subprotocols: []string{watchtogether.RoomSocketProtocol}, EnableCompression: true, CheckOrigin: func(r *http.Request) bool {
 		return socketOriginAllowed(r, h.currentPublicOrigin(), overlayOriginsFrom(h.overlayOrigins.Load()))
 	}}
 	conn, err := upgrader.Upgrade(w, r, nil)
