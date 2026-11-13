@@ -414,8 +414,9 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 		if err != nil {
 			_ = os.Remove(partPath)
 			logs.event("ffmpeg process exit error", formatWaitError(err))
-			if tail := truncateStderr(stderr.String()); tail != "" {
-				return fmt.Errorf("%w: %w (stderr: %s)", ErrTranscodeFailed, err, tail)
+			retained := stderr.String()
+			if tail := truncateStderr(retained); tail != "" {
+				return classifyFFmpegFailure(fmt.Errorf("%w: %w (stderr: %s)", ErrTranscodeFailed, err, tail), retained)
 			}
 			return fmt.Errorf("%w: %w", ErrTranscodeFailed, err)
 		}
@@ -437,16 +438,20 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 			retryOpts := opts
 			retryOpts.HWAccel = retryAccel
 			err = runOnce(retryOpts)
-		} else if NewSoftwareDecodeRetryPipeline(opts, err).Enabled() {
+		} else if decodeRetry := NewSoftwareDecodeRetryPipeline(opts, err); decodeRetry.Enabled() {
 			// The hardware decoder rejected the source, so the same command
-			// fails again. Decode on the CPU; an explicit NVENC setting then
-			// encodes with libx264, which suits an offline artifact.
+			// fails again. Decode on the CPU with the hardware encoder, then
+			// fall back to software, as a playback start does.
 			slog.WarnContext(ctx, "prepared encode failed in the hardware decoder; retrying with CPU decoding",
 				"hw_accel", opts.HWAccel, "output", outputPath, "error", err)
 			logs.event("retrying with CPU decoding", "")
-			retryOpts := opts
-			retryOpts.SoftwareVideoDecode = true
-			err = runOnce(retryOpts)
+			for {
+				err = runOnce(decodeRetry.Current())
+				if err == nil || ctx.Err() != nil || !decodeRetry.AdvanceAfterFailure("") {
+					break
+				}
+				logs.event("retrying with software encoding", "")
+			}
 		}
 	}
 	if err != nil {
