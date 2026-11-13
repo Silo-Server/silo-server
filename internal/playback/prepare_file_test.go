@@ -166,9 +166,17 @@ func TestPrepareFileResolvesOneDeviceAndReleasesAfterExit(t *testing.T) {
 	}
 }
 
+// prepareGPUCountSink records the NVENC workload count at each progress
+// reading, which arrives while FFmpeg is still running.
+type prepareGPUCountSink struct{ counts []int }
+
+func (s *prepareGPUCountSink) PrepareProgress(PrepareProgress) {
+	s.counts = append(s.counts, hwDeviceActiveCount(DefaultNVENCDevice))
+}
+
 // A download under explicit NVENC whose NVDEC rejects the source decodes on
 // the CPU with NVENC, and moves on to software only when that attempt failed
-// before writing any output.
+// before writing any output. The software stage holds no GPU reservation.
 func TestPrepareFileRetriesRejectedDecodeOnCPU(t *testing.T) {
 	for _, tt := range []struct {
 		name         string
@@ -180,6 +188,7 @@ func TestPrepareFileRetriesRejectedDecodeOnCPU(t *testing.T) {
 		{name: "mixed attempt fails after writing output", mixedWrites: true, wantErr: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			resetDeviceLoad(t)
 			dir := t.TempDir()
 			logPath := filepath.Join(dir, "invocations.log")
 			mixed := "exit 1"
@@ -193,22 +202,24 @@ func TestPrepareFileRetriesRejectedDecodeOnCPU(t *testing.T) {
 				"case \"$*\" in\n" +
 				"  *'-hwaccel cuda'*) echo '[hevc @ 0x1] Hardware is lacking required capabilities' >&2; exit 1 ;;\n" +
 				"  *h264_nvenc*) " + mixed + " ;;\n" +
-				"  *) printf x > \"$last\"; exit 0 ;;\n" +
+				"  *) printf 'progress=continue\\n'; printf x > \"$last\"; exit 0 ;;\n" +
 				"esac\n"
 			if err := os.WriteFile(script, []byte(fake), 0o755); err != nil {
 				t.Fatalf("write fake ffmpeg: %v", err)
 			}
 
+			sink := &prepareGPUCountSink{}
 			err := PrepareFile(context.Background(), TranscodeOpts{
-				InputPath:         "/media/movie.mkv",
-				FFmpegPath:        script,
-				SourceVideoCodec:  "hevc",
-				TargetCodecVideo:  "h264",
-				TargetCodecAudio:  "aac",
-				TargetResolution:  "720p",
-				TargetBitrateKbps: 2000,
-				HWAccel:           transcodeHWNVENC,
-				AudioTrackIndex:   -1,
+				InputPath:           "/media/movie.mkv",
+				FFmpegPath:          script,
+				PrepareProgressSink: sink,
+				SourceVideoCodec:    "hevc",
+				TargetCodecVideo:    "h264",
+				TargetCodecAudio:    "aac",
+				TargetResolution:    "720p",
+				TargetBitrateKbps:   2000,
+				HWAccel:             transcodeHWNVENC,
+				AudioTrackIndex:     -1,
 			}, filepath.Join(dir, "artifact.mp4"))
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("PrepareFile() error = %v, want error %v", err, tt.wantErr)
@@ -227,6 +238,9 @@ func TestPrepareFileRetriesRejectedDecodeOnCPU(t *testing.T) {
 			}
 			if tt.wantSoftware && !strings.Contains(attempts[2], "libx264") {
 				t.Fatalf("third attempt = %q, want libx264", attempts[2])
+			}
+			if tt.wantSoftware && (len(sink.counts) != 1 || sink.counts[0] != 0) {
+				t.Fatalf("NVENC workloads during the software encode = %v, want [0]", sink.counts)
 			}
 		})
 	}

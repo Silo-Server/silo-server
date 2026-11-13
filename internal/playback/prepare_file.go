@@ -460,6 +460,11 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 				if err == nil || ctx.Err() != nil || wroteOutput || !decodeRetry.AdvanceAfterFailure("") {
 					break
 				}
+				if decodeRetry.Current().HWAccel == transcodeHWNone {
+					// A software encode occupies no GPU; don't count it
+					// against the device for the rest of the encode.
+					releaseHWDevice()
+				}
 				logs.event("retrying with software encoding", "")
 			}
 		}
