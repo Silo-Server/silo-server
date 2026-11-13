@@ -450,15 +450,19 @@ func TestRunPagesMovies(t *testing.T) {
 
 // stallingEpisodes is a repository whose episode count, the episode pass's
 // first read, waits for its context to end, like an episode pass on a library
-// too large to finish. It then returns err, or the context's error when err
-// is nil.
+// too large to finish. It then calls afterStall, if set, and returns err, or
+// the context's error when err is nil.
 type stallingEpisodes struct {
 	*fakeIntroRepository
-	err error
+	err        error
+	afterStall func()
 }
 
 func (s stallingEpisodes) CountEligibleCandidates(ctx context.Context) (int, error) {
 	<-ctx.Done()
+	if s.afterStall != nil {
+		s.afterStall()
+	}
 	if s.err != nil {
 		return 0, s.err
 	}
@@ -476,18 +480,21 @@ func TestRunLeavesMoviesTheirShareOfTheDeadline(t *testing.T) {
 		return a.RunEpisodes(ctx, allMarkerKinds, nil)
 	}
 	for _, tc := range []struct {
-		name        string
-		run         func(*Analyzer, context.Context) (RunSummary, error)
-		cancelAt    time.Duration
-		episodesErr error
-		wantErr     error
-		wantMovies  int
-		wantSpent   bool
+		name     string
+		run      func(*Analyzer, context.Context) (RunSummary, error)
+		cancelAt time.Duration
+		// cancelAsShareEnds cancels the run as the episodes' share ends.
+		cancelAsShareEnds bool
+		episodesErr       error
+		wantErr           error
+		wantMovies        int
+		wantSpent         bool
 	}{
 		{name: "episode share spent", run: run, wantMovies: 1, wantSpent: true},
 		{name: "episode pass alone leaves the movie share", run: runEpisodes, wantSpent: true},
 		{name: "repository error at the end of the share", run: run, episodesErr: errDatabase, wantErr: errDatabase},
 		{name: "canceled during episodes", run: run, cancelAt: 50 * time.Millisecond, wantErr: context.Canceled},
+		{name: "episode pass alone canceled as its share ends", run: runEpisodes, cancelAsShareEnds: true, wantErr: context.Canceled, wantSpent: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -503,6 +510,9 @@ func TestRunLeavesMoviesTheirShareOfTheDeadline(t *testing.T) {
 			if tc.cancelAt > 0 {
 				stop := time.AfterFunc(tc.cancelAt, cancel)
 				defer stop.Stop()
+			}
+			if tc.cancelAsShareEnds {
+				analyzer.repo = stallingEpisodes{fakeIntroRepository: repo, err: tc.episodesErr, afterStall: cancel}
 			}
 
 			summary, err := tc.run(analyzer, ctx)

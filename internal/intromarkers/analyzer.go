@@ -348,6 +348,11 @@ func (a *Analyzer) run(ctx context.Context, kinds EpisodeMarkerKinds, progress P
 		if err := a.runEpisodeShare(episodeCtx, kinds, report, &summary); err != nil {
 			return summary, err
 		}
+		// The episodes' share ending is not an error, but the run's own end
+		// still is, when it comes at the same time.
+		if err := ctx.Err(); err != nil {
+			return summary, err
+		}
 		if passes.movies {
 			report(100, "Intro detection completed; credits detection is turned off")
 		}
