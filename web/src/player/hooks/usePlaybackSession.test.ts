@@ -3259,6 +3259,11 @@ describe("usePlaybackSession announced subtitle tracks", () => {
       next: "deleted",
       trackless: false,
     },
+    {
+      name: "turns subtitles off for a queued pick the refetch no longer lists",
+      next: "gone",
+      trackless: false,
+    },
     // An announcement the server could not resolve carries no track, and the
     // player refetches without knowing which ordinals moved.
     { name: "replays the pick after a trackless announcement", next: "none", trackless: true },
@@ -3297,7 +3302,8 @@ describe("usePlaybackSession announced subtitle tracks", () => {
 
     act(() => result.current.changeQuality("1080p", 30));
     await waitFor(() => expect(replanBodies).toHaveLength(1));
-    act(() => result.current.changeSubtitleTrack(1, 31));
+    // es, or en (stored 1), which the refetch shows was deleted.
+    act(() => result.current.changeSubtitleTrack(next === "gone" ? 0 : 1, 31));
     act(() => {
       if (trackless) result.current.refreshSubtitles(31);
       else result.current.applySubtitleTrack(stored(2, 3, "fr"));
@@ -3332,7 +3338,7 @@ describe("usePlaybackSession announced subtitle tracks", () => {
 
     await waitFor(() => expect(replanBodies).toHaveLength(3));
     expect(replanBodies[2]).toMatchObject({ operation: "track_change" });
-    if (next === "deleted") {
+    if (next === "deleted" || next === "gone") {
       expect(replanBodies[2]?.selected_tracks).not.toHaveProperty("subtitle.index");
     } else {
       expect(replanBodies[2]).toMatchObject({

@@ -2088,13 +2088,16 @@ export function usePlaybackSession(
               pending.subtitleInventory,
               fresh,
             );
-            if (pickedOrdinal === null) return;
+            // On another file the pick names no track there; the queue
+            // drops such a pick too.
+            if (planRef.current?.effective_media_file_id !== pending.mediaFileId) return;
             void replan(
               {
                 ...pick,
                 // A queued seek is replaced, so its target goes out with the pick.
                 positionSeconds: queued?.positionSeconds ?? playbackPositionRef.current,
-                subtitle: { id: "", index: pickedOrdinal },
+                // A pick the refetch shows was deleted turns subtitles off.
+                subtitle: pickedOrdinal === null ? null : { id: "", index: pickedOrdinal },
               },
               pending.retireSessionOnRefusal,
               false,
