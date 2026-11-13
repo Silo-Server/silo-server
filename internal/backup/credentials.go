@@ -781,19 +781,24 @@ func (t secretTable) carryInto(ctx context.Context, tx pgx.Tx, live string, resu
 		return err
 	}
 	result.Kept[t.name] += int(tag.RowsAffected())
-	// An identity sequence restored from the backup can be behind the live
-	// ids just written; the next credential must not collide with them. A
-	// table keyed by several columns has none.
-	if len(keyColumns) > 1 {
-		return nil
+	// A sequence restored from the backup can be behind the live values just
+	// written. The next credential must not collide with a carried id, and a
+	// carried sign-in link's answer_seq must stay behind every value taken
+	// from now on, or its sign-ins would be refused as stale.
+	for _, col := range columns {
+		var seq *string
+		if err := tx.QueryRow(ctx, `SELECT pg_get_serial_sequence($1, $2)`, t.name, col).Scan(&seq); err != nil {
+			return err
+		}
+		if seq == nil {
+			continue
+		}
+		if _, err := tx.Exec(ctx, fmt.Sprintf(`SELECT setval($1::regclass, GREATEST(
+			coalesce(pg_sequence_last_value($1::regclass), 0), (SELECT coalesce(max(%s), 0) FROM %s), 1))`, col, t.name), *seq); err != nil {
+			return err
+		}
 	}
-	var seq *string
-	if err := tx.QueryRow(ctx, `SELECT pg_get_serial_sequence($1, $2)`, t.name, key).Scan(&seq); err != nil || seq == nil {
-		return err
-	}
-	_, err = tx.Exec(ctx, fmt.Sprintf(`SELECT setval($1::regclass, GREATEST(
-		coalesce(pg_sequence_last_value($1::regclass), 0), (SELECT coalesce(max(%s), 0) FROM %s), 1))`, key, t.name), *seq)
-	return err
+	return nil
 }
 
 // primaryKeyColumns lists the columns of table's primary key, in key order;
