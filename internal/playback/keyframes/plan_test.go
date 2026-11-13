@@ -83,6 +83,12 @@ func TestPlanMuxSegments(t *testing.T) {
 		{name: "B-frames delay the video past the audio", tracks: []Track{video, audio(-0.021)}, reorder: 2, frame: 0.04, want: fromKeyframe},
 		// A delay of at least 20ms may or may not reach 21ms.
 		{name: "B-frames may delay the video past the audio", tracks: []Track{video, audio(-0.021)}, reorder: 1, frame: 0.02, want: nil},
+		// Too few video frames in the first cluster to tell: B-frames may
+		// still mux the video first.
+		{name: "reordering unknown", tracks: []Track{video, audio(-0.021)}, reorder: ReorderUnknown, frame: 0.04, want: nil},
+		// Encoded to AAC at an unknown rate, FFmpeg's priming may lead the
+		// video by more than another encoder's.
+		{name: "encoded to AAC at an unknown rate", tracks: []Track{video, {Type: 2, Start: 0.06, HasStart: true}}, audio: MuxAudio{Encoder: AudioAAC}, want: nil},
 		// The audio's first packet isn't 0 after FFmpeg's shift, and the
 		// muxer would subtract it in another time base.
 		{name: "another track starts first", tracks: []Track{video, audio(-0.021), {Type: 17, Start: -1, HasStart: true}}, want: nil},

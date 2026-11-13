@@ -112,14 +112,17 @@ func muxOrigins(idx Index, audio MuxAudio) ([]float64, bool) {
 		// No audio, or none in the first cluster: it starts after the video.
 		return []float64{k0}, true
 	}
-	lo, hi := audioMuxStart(track, audio.Encoder)
+	lo, hi, ok := audioMuxStart(track, audio.Encoder)
+	if !ok {
+		return nil, false
+	}
 
 	// The video's first decode time is the first keyframe less its B-frame
-	// delay: at least the reordering the first cluster shows, and without
-	// reordering, none.
-	videoLatest := k0 - float64(idx.VideoReorder)*idx.VideoFrame
+	// delay: at least the reordering the first cluster shows, and none when
+	// it shows enough frames without reordering.
+	videoLatest := k0 - float64(max(idx.VideoReorder, 0))*idx.VideoFrame
 	videoEarliest := k0
-	if idx.VideoReorder > 0 {
+	if idx.VideoReorder != 0 {
 		videoEarliest = math.Inf(-1)
 	}
 	if videoLatest < lo-muxTie {
@@ -161,19 +164,25 @@ func mappedAudioTrack(tracks []Track, audio MuxAudio) (Track, bool) {
 }
 
 // audioMuxStart returns the earliest and latest time the audio's first
-// muxed packet can have, copied or encoded by encoder.
-func audioMuxStart(track Track, encoder AudioEncoder) (lo, hi float64) {
+// muxed packet can have, copied or encoded by encoder, or false when the
+// AAC encoder's priming isn't known.
+func audioMuxStart(track Track, encoder AudioEncoder) (lo, hi float64, ok bool) {
 	if encoder == AudioCopied {
-		return track.Start, track.Start
+		return track.Start, track.Start, true
 	}
 	// A decoder drops a CodecDelay's samples, which moves the first
 	// decoded frame up to that much later.
 	lo, hi = track.Start, track.Start+track.CodecDelay
-	if encoder == AudioAAC && validAACRate(track.SampleRate) {
-		priming := aacPriming / track.SampleRate
-		return lo - priming, hi - priming
+	if encoder != AudioAAC {
+		return lo - maxEncoderPriming, hi, true
 	}
-	return lo - maxEncoderPriming, hi
+	if !validAACRate(track.SampleRate) {
+		// The rate is unknown, or FFmpeg resamples to one it doesn't say:
+		// at 8kHz the priming is 128ms.
+		return 0, 0, false
+	}
+	priming := aacPriming / track.SampleRate
+	return lo - priming, hi - priming, true
 }
 
 // validAACRate reports whether FFmpeg's AAC encoder takes audio at rate as
@@ -212,6 +221,13 @@ func trackEntries(tracks []byte) []matroska.TrackEntry {
 // readTrackStarts reads the block headers of the cluster at off, the
 // file's first, and sets m's Tracks, VideoReorder and VideoFrame from them.
 func readTrackStarts(r io.ReaderAt, off int64, m *matroskaIndex) error {
+	for _, e := range m.entries {
+		if e.TimestampScale != 1 {
+			// FFmpeg scales the track's block timestamps again, which the
+			// starts here don't; don't plan from them.
+			return ErrNoIndex
+		}
+	}
 	starts, video, err := clusterBlocks(r, off, m.segEnd, m.video)
 	if err != nil {
 		return fmt.Errorf("keyframes: read the first cluster at %d: %w", off, err)
@@ -229,6 +245,9 @@ func readTrackStarts(r io.ReaderAt, off int64, m *matroskaIndex) error {
 		m.Tracks[i] = t
 	}
 	m.VideoReorder = reorderDepth(video)
+	if len(video) < 3 {
+		m.VideoReorder = ReorderUnknown
+	}
 	m.VideoFrame = m.frameSeconds
 	if m.VideoFrame <= 0 {
 		sorted := slices.Clone(video)
