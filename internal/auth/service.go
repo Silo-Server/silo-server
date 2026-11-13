@@ -375,31 +375,7 @@ func (s *Service) PasswordSignInFor(ctx context.Context, userID int) (PasswordSi
 		directoryID = directory.Info.ID
 	}
 	if passwordRoute(user, directoryID) != LocalProviderID {
-		identities, err := listIdentitiesForUser(ctx, s.users.pool, user.ID)
-		if err != nil {
-			return PasswordSignIn{}, err
-		}
-		// The directory answers for the account through an identity linked
-		// there. Account resolution never matches a directory person to an
-		// account by name, so without one (an OIDC account, say) there is
-		// no directory username known to sign in with.
-		for _, identity := range identities {
-			if identity.InstallationID != directory.Info.InstallationID {
-				continue
-			}
-			// The sign-in routes the typed name, which is the directory
-			// username: another account holding that name with a local
-			// password takes it.
-			route, err := s.routePasswordLogin(ctx, identity.Username)
-			if err != nil {
-				return PasswordSignIn{}, err
-			}
-			if route != directory.Info.ID {
-				return PasswordSignIn{}, nil
-			}
-			return PasswordSignIn{Directory: true, DirectoryUsername: identity.Username}, nil
-		}
-		return PasswordSignIn{}, nil
+		return s.directorySignIn(ctx, user.ID, directory)
 	}
 	if !user.LocalPasswordLoginEnabled || user.PasswordHash == "" {
 		return PasswordSignIn{}, nil
@@ -412,6 +388,35 @@ func (s *Service) PasswordSignInFor(ctx context.Context, userID int) (PasswordSi
 		return PasswordSignIn{}, err
 	}
 	return PasswordSignIn{Local: true}, nil
+}
+
+// directorySignIn is PasswordSignInFor for an account whose name goes to
+// directory. The directory answers for the account through an identity
+// linked there. Account resolution never matches a directory person to an
+// account by name, so without one (an OIDC account, say) there is no
+// directory username known to sign in with.
+func (s *Service) directorySignIn(ctx context.Context, userID int, directory RegisteredProvider) (PasswordSignIn, error) {
+	identities, err := listIdentitiesForUser(ctx, s.users.pool, userID)
+	if err != nil {
+		return PasswordSignIn{}, err
+	}
+	for _, identity := range identities {
+		if identity.InstallationID != directory.Info.InstallationID {
+			continue
+		}
+		// The sign-in routes the typed name, which is the directory
+		// username: another account holding that name with a local password
+		// takes it.
+		route, err := s.routePasswordLogin(ctx, identity.Username)
+		if err != nil {
+			return PasswordSignIn{}, err
+		}
+		if route != directory.Info.ID {
+			return PasswordSignIn{}, nil
+		}
+		return PasswordSignIn{Directory: true, DirectoryUsername: identity.Username}, nil
+	}
+	return PasswordSignIn{}, nil
 }
 
 // HasLoginName reports whether a password sign-in with name would find an
