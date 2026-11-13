@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
@@ -198,4 +199,83 @@ func TestExternalSignInCredentialsSessionLocksAccountDB(t *testing.T) {
 	if n := liveSessions(user.ID); n != 0 {
 		t.Fatalf("a disabled account kept %d live sessions", n)
 	}
+}
+
+// TestPasswordSignInForDB: what PasswordSignInFor says about an account's
+// password sign-in without a provider is what CompatLogin then does: the
+// local password works, or the directory answers for an account linked to
+// it (under the directory username), or neither, as while a network
+// provider refuses the person.
+func TestPasswordSignInForDB(t *testing.T) {
+	env := newExternalSignInEnv(t)
+	ctx := t.Context()
+	users := NewUserRepository(env.pool)
+	sessions := NewSessionRepository(env.pool)
+	newService := func() *Service {
+		return NewService(NewLocalProvider(users, sessions), NewJWTService("synthetic-jwt-secret-synthetic-jwt-secret", time.Minute, time.Hour), sessions, users, nil, nil, nil)
+	}
+	svc := newService()
+	directory := &directoryPlugin{users: map[string]*pluginv1.AuthenticateResponse{}}
+	alice := env.identity("alice")
+	directory.users[alice.Username+"\x00dir-pass"] = &pluginv1.AuthenticateResponse{ExternalSubject: alice.Subject, Issuer: "ldaps://ldap.example.test",
+		Username: alice.Username, Email: alice.Email, DisplayName: alice.DisplayName}
+	provider := NewPluginProviderWithClientFactory(PluginProviderConfig{InstallationID: env.installationID, CapabilityID: "ldap", DisplayName: "Directory"},
+		sessions, env.resolver, func(context.Context) (pluginAuthClient, error) { return directory, nil })
+	svc.SetPluginProviderSource(staticProviderSource{{
+		Info:     LoginProviderInfo{ID: PluginProviderID(env.installationID, "ldap"), DisplayName: "Directory", Mode: ProviderModeCredentials, InstallationID: env.installationID},
+		Provider: provider,
+	}})
+	check := func(svc *Service, user *models.User, want PasswordSignIn) {
+		t.Helper()
+		got, err := svc.PasswordSignInFor(ctx, user.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("%s: PasswordSignInFor = %+v, want %+v", user.Username, got, want)
+		}
+	}
+
+	member := env.localAccount(t, "member", models.RoleUser)
+	check(svc, member, PasswordSignIn{Local: true})
+
+	// Linked to the directory, the account's own password is off and a
+	// Jellyfin client's sign-in goes to the directory under its name there.
+	if _, err := svc.LinkCredentialsIdentity(ctx, CredentialsLinkInput{UserID: member.ID, InstallationID: env.installationID,
+		Password: "correct horse battery", DirectoryUsername: alice.Username, DirectoryPassword: "dir-pass"}); err != nil {
+		t.Fatal(err)
+	}
+	check(svc, member, PasswordSignIn{Directory: true, DirectoryUsername: alice.Username})
+	if _, user, err := svc.CompatLogin(ctx, alice.Username, "dir-pass", "Jellyfin Web", ""); err != nil || user.ID != member.ID {
+		t.Fatalf("compat sign-in with the directory credentials = %+v, %v", user, err)
+	}
+	// The server-wide local switch does not reach the directory.
+	env.setSetting(t, config.AuthLocalPasswordLoginSettingKey, "false")
+	check(svc, member, PasswordSignIn{Directory: true, DirectoryUsername: alice.Username})
+	env.setSetting(t, config.AuthLocalPasswordLoginSettingKey, "true")
+	// Without the directory provider nothing signs the account in.
+	check(newService(), member, PasswordSignIn{})
+
+	// A network provider refusing the person refuses the password too.
+	viewer := env.localAccount(t, "viewer", models.RoleUser)
+	network := env.networkInstallation(t, "network")
+	if _, err := env.pool.Exec(ctx, `INSERT INTO plugin_auth_identities (plugin_installation_id, external_subject, user_id, last_check_status)
+		VALUES ($1, 'node-viewer', $2, 'not_permitted')`, network, viewer.ID); err != nil {
+		t.Fatal(err)
+	}
+	check(svc, viewer, PasswordSignIn{})
+	if _, _, err := svc.CompatLogin(ctx, viewer.Username, "correct horse battery", "Jellyfin Web", ""); !errors.Is(err, ErrNotPermitted) {
+		t.Fatalf("compat sign-in while refused = %v, want ErrNotPermitted", err)
+	}
+
+	// The server-wide switch off leaves only a break-glass password.
+	env.setSetting(t, config.AuthLocalPasswordLoginSettingKey, "false")
+	plain := env.localAccount(t, "plain", models.RoleUser)
+	check(svc, plain, PasswordSignIn{})
+	admin := env.localAccount(t, "glass-admin", models.RoleAdmin)
+	glass := true
+	if err := users.Update(ctx, admin.ID, models.UpdateUserInput{BreakGlass: &glass}); err != nil {
+		t.Fatal(err)
+	}
+	check(svc, admin, PasswordSignIn{Local: true})
 }

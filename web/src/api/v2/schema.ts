@@ -25424,6 +25424,14 @@ export interface components {
       page?: components["schemas"]["PageInfo"];
     };
     CompatConnectAccountInfo: {
+      /** @description True when a password sign-in without a provider, such as a Jellyfin client's, goes to the server's directory (LDAP) for this account, so the directory username and password sign in */
+      directory_login_available: boolean;
+      /**
+       * @description The account's username at that directory; omitted when no directory identity is linked
+       * @example alice
+       */
+      directory_username?: string;
+      /** @description True when the account's own Silo password signs in */
       password_login_available: boolean;
     };
     CompatConnectInfoResponse: {

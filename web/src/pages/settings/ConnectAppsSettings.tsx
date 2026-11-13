@@ -308,6 +308,13 @@ export default function ConnectAppsSettings() {
   const compatURLIsLoopback = compatURL !== null && isLoopbackURL(compatURL);
   // Absent field (older server) means the account can use a password.
   const passwordLoginAvailable = connectInfo?.account?.password_login_available ?? true;
+  // A directory account's Jellyfin sign-in goes to the directory, under its
+  // name there.
+  const directoryLoginAvailable = connectInfo?.account?.directory_login_available ?? false;
+  const jellyfinSignInAvailable = passwordLoginAvailable || directoryLoginAvailable;
+  const jellyfinAccountName =
+    (directoryLoginAvailable && connectInfo?.account?.directory_username?.trim()) ||
+    accountUsername;
   const passwordFormShown = authProviders?.password_login ?? true;
   // Discovery lists the local provider only while the server allows password
   // sign-in, which tells a switched-off server apart from a provider account.
@@ -345,10 +352,10 @@ export default function ConnectAppsSettings() {
   // Everything below the credential panel is only meaningful when we actually
   // showed credentials above it.
   const showCompatCredentials =
-    isJellyfin && !isLoading && !loadFailed && compatEnabled && passwordLoginAvailable;
+    isJellyfin && !isLoading && !loadFailed && compatEnabled && jellyfinSignInAvailable;
 
   const jellyfinUsername = selectedProfile
-    ? buildJellyfinUsername(accountUsername, selectedProfile.name)
+    ? buildJellyfinUsername(jellyfinAccountName, selectedProfile.name)
     : "";
   const usernameIssue = selectedProfile ? jellyfinUsernameIssue(selectedProfile.name) : null;
   // A directory account signs in with its directory username, which can
@@ -430,7 +437,7 @@ export default function ConnectAppsSettings() {
               {t("web.settings.connectApps.loadFailed.body")}
             </p>
           </div>
-        ) : isJellyfin && !passwordLoginAvailable ? (
+        ) : isJellyfin && !jellyfinSignInAvailable ? (
           <div className="border-border rounded-md border border-dashed px-3.5 py-4">
             <p className="text-sm font-medium">
               {t("web.settings.connectApps.noJellyfinSignIn.title")}
@@ -612,7 +619,7 @@ export default function ConnectAppsSettings() {
                   isJellyfin
                     ? (usernameIssue ??
                       t("web.settings.connectApps.username.jellyfinHint", {
-                        username: accountUsername,
+                        username: jellyfinAccountName,
                       }))
                     : siloSignIn.kind === "directory"
                       ? t("web.settings.connectApps.username.directoryHint", {
@@ -622,9 +629,11 @@ export default function ConnectAppsSettings() {
                 }
               >
                 {isJellyfin && selectedProfile ? (
-                  <HashString before={accountUsername} after={selectedProfile.name} />
+                  <HashString before={jellyfinAccountName} after={selectedProfile.name} />
                 ) : (
-                  <code className="font-mono">{siloUsername}</code>
+                  <code className="font-mono">
+                    {isJellyfin ? jellyfinAccountName : siloUsername}
+                  </code>
                 )}
               </FieldRow>
 
@@ -672,7 +681,7 @@ export default function ConnectAppsSettings() {
       </section>
 
       {showCompatCredentials ? (
-        <TroubleshootingPanel accountUsername={accountUsername} compatURL={compatURL} />
+        <TroubleshootingPanel accountUsername={jellyfinAccountName} compatURL={compatURL} />
       ) : null}
 
       {showCompatCredentials && profiles.length > 1 ? (
@@ -696,7 +705,7 @@ export default function ConnectAppsSettings() {
                     </>
                   ) : (
                     <>
-                      <HashString before={accountUsername} after={profile.name} />
+                      <HashString before={jellyfinAccountName} after={profile.name} />
                       {profile.has_pin ? (
                         <Badge variant="outline" className="text-muted-foreground">
                           {t("web.settings.connectApps.glance.needsPin")}

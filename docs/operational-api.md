@@ -2,15 +2,28 @@
 
 `GET /api/v2/compat/connect-info` is an authenticated account read. It requires
 no acting profile. `jellyfin` reports `enabled`, `pending_restart`, `public_url`,
-and `server_name`; `account.password_login_available` reports whether the account
-can use a local password to sign into a compatible client: it has a password,
-its own password sign-in is on, and `auth.local_password_login` is on or the
-account is break-glass. The enabled flag reflects the running listener, while pending
+and `server_name`. The enabled flag reflects the running listener, while pending
 restart compares its state with stored settings. Only the three compatibility
-settings needed for this view and `auth.local_password_login` are read. Missing
-settings fall back to boot configuration, and an account or server
-switch that cannot be read reports `password_login_available: true`. The web Connect Apps page
-uses this v2 operation.
+settings needed for this view are read from settings; missing ones fall back to
+boot configuration.
+
+`account` says how a password sign-in that names no provider, as a Jellyfin
+client's does, goes for the account. The server answers it with the routing and
+local-password checks that sign-in runs (`auth.Service.PasswordSignInFor`):
+
+- `password_login_available`: the account's own Silo password signs in. It has
+  a password, its own password sign-in is on, `auth.local_password_login` is on
+  or the account is break-glass, and no network identity provider refuses the
+  person.
+- `directory_login_available`: the sign-in goes to the enabled directory (LDAP)
+  provider, which answers for the account, so the directory username and
+  password sign in. A PIN appended to the password never reaches the directory.
+- `directory_username`: the account's username at that directory, omitted when
+  no directory identity is linked.
+
+At most one of the two flags is true. When the account's sign-in cannot be read,
+the answer is `password_login_available: true`. The web Connect Apps page uses
+this v2 operation.
 
 `GET /api/v2/images/capabilities` reports capability `revision` and `state`, the
 query parameter `param`, ordered `sizes`, per-artwork-type `widths`, and

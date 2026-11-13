@@ -90,13 +90,17 @@ func registerOperationalDiscovery(reg *Registry) {
 
 // CompatConnectAccountInfo is the native transport projection, independent of handler views.
 type CompatConnectAccountInfo struct {
-	// PasswordLoginAvailable reports whether this account can authenticate
-	// with its local password at all: it has a password, its own password
-	// sign-in is on, and the server's switch is on or the account is
-	// break-glass. Compat login is hardwired to the local provider, so
-	// SSO/plugin-provisioned accounts cannot sign in to a Jellyfin client no
-	// matter what they type.
-	PasswordLoginAvailable bool `json:"password_login_available"`
+	// PasswordLoginAvailable reports whether this account's own Silo
+	// password signs in: it has one, its own password sign-in is on, the
+	// server's switch is on or the account is break-glass, and no network
+	// provider refuses the person.
+	PasswordLoginAvailable bool `json:"password_login_available" doc:"True when the account's own Silo password signs in"`
+	// DirectoryLoginAvailable reports whether a password sign-in that names
+	// no provider, as a Jellyfin client's does, goes to the server's
+	// directory (LDAP) for this account.
+	DirectoryLoginAvailable bool `json:"directory_login_available" doc:"True when a password sign-in without a provider, such as a Jellyfin client's, goes to the server's directory (LDAP) for this account, so the directory username and password sign in"`
+	// DirectoryUsername is the account's username at that directory.
+	DirectoryUsername string `json:"directory_username,omitempty" doc:"The account's username at that directory; omitted when no directory identity is linked" example:"alice"`
 }
 
 // CompatConnectInfoResponse is the native transport projection, independent of handler views.

@@ -288,6 +288,28 @@ describe("ConnectAppsSettings", () => {
     expect(container.textContent).not.toContain("johndoe#Doe Household");
   });
 
+  // A directory account signs in to a Jellyfin app with its directory
+  // credentials, which the server routes to the directory (#2871).
+  it("gives a directory account its directory username for Jellyfin apps", () => {
+    mocks.useCompatConnectInfo.mockReturnValue({
+      data: makeConnectInfo(
+        {},
+        {
+          password_login_available: false,
+          directory_login_available: true,
+          directory_username: "j.doe",
+        },
+      ),
+      isLoading: false,
+    });
+
+    render();
+
+    expect(container.textContent).not.toContain("This account can't sign in to a Jellyfin app");
+    expect(container.textContent).toContain("j.doe#Doe Household");
+    expect(container.textContent).not.toContain("johndoe#");
+  });
+
   it("flags a loopback compat address rather than offering it for copying", () => {
     mocks.useCompatConnectInfo.mockReturnValue({
       data: makeConnectInfo({ public_url: "http://127.0.0.1:8096" }),
