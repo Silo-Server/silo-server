@@ -476,7 +476,13 @@ func (s *Service) ResolveOAuthLogin(ctx context.Context, in OAuthLoginInput) (*m
 	}
 	// A linking flow (LinkingUserID > 0) links the identity to that account
 	// or refuses one linked elsewhere; see AccountResolver.
-	return provider.CompleteOAuth(ctx, in.Response, in.LinkingUserID)
+	return provider.CompleteOAuth(ctx, in.Response, in.LinkingUserID, in.AnswerFence)
+}
+
+// ProviderAnswerFence takes the answer fence of an OAuth sign-in, which the
+// handler passes back in OAuthLoginInput.AnswerFence (takeAnswerFence).
+func (s *Service) ProviderAnswerFence(ctx context.Context) (int64, error) {
+	return takeAnswerFence(ctx, s.sessions.pool)
 }
 
 // OpenOAuthSession opens the login session of a completion code being
@@ -623,7 +629,7 @@ func (s *Service) LinkOAuthIdentity(ctx context.Context, in OAuthLoginInput) (*m
 	if provider == nil {
 		return nil, ErrProviderUnavailable
 	}
-	user, _, err := provider.CompleteOAuth(ctx, in.Response, in.LinkingUserID)
+	user, _, err := provider.CompleteOAuth(ctx, in.Response, in.LinkingUserID, 0)
 	return user, err
 }
 

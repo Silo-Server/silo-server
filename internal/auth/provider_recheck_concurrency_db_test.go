@@ -281,3 +281,87 @@ func TestProviderRecheckActiveRoleFailureAfterUnavailableRetriesDB(t *testing.T)
 		t.Fatalf("retried role sync did not demote and revoke the session: user = %+v, err = %v", user, err)
 	}
 }
+
+// heldDirectory is a credentials plugin whose Authenticate has its answer
+// ready and delivers it only once release is closed.
+type heldDirectory struct {
+	directoryPlugin
+	answer           *pluginv1.AuthenticateResponse
+	entered, release chan struct{}
+}
+
+func (d *heldDirectory) Authenticate(ctx context.Context, _ *pluginv1.AuthenticateRequest) (*pluginv1.AuthenticateResponse, error) {
+	close(d.entered)
+	select {
+	case <-d.release:
+		return d.answer, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// TestProviderRecheckOutlastsOverlappingSignInDB: the directory answers a
+// sign-in while the person is still an admin, then a re-check that asks
+// afterwards demotes the account. The sign-in's older answer must not promote
+// the account again or open a session.
+func TestProviderRecheckOutlastsOverlappingSignInDB(t *testing.T) {
+	env := newRecheckEnv(t, "overlapping_sign_in", "")
+	ctx := t.Context()
+	env.localAccount(t, "other-admin", models.RoleAdmin) // so the demotion is not the last admin's
+	admin := env.identity("overlapping_sign_in")
+	admin.ManagedRole = pluginv1.AuthManagedRole_AUTH_MANAGED_ROLE_ADMIN
+	if _, _, err := env.resolver.Resolve(ctx, ResolveInput{InstallationID: env.installationID, Identity: admin}); err != nil {
+		t.Fatal(err)
+	}
+	directory := &heldDirectory{
+		answer: &pluginv1.AuthenticateResponse{ExternalSubject: admin.Subject, Issuer: admin.Issuer, Username: admin.Username,
+			Email: admin.Email, ManagedRole: pluginv1.AuthManagedRole_AUTH_MANAGED_ROLE_ADMIN},
+		entered: make(chan struct{}), release: make(chan struct{}),
+	}
+	providerID := PluginProviderID(env.installationID, "ldap")
+	env.svc.SetPluginProviderSource(staticProviderSource{{
+		Info: LoginProviderInfo{ID: providerID, Mode: ProviderModeCredentials, InstallationID: env.installationID},
+		Provider: NewPluginProviderWithClientFactory(PluginProviderConfig{InstallationID: env.installationID, CapabilityID: "ldap"},
+			env.svc.sessions, env.resolver, func(context.Context) (pluginAuthClient, error) { return directory, nil }),
+	}})
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := env.svc.LoginWithProvider(ctx, providerID, admin.Username, "dir-pass", "overlap-test", "")
+		done <- err
+	}()
+	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	select {
+	case <-directory.entered:
+	case <-waitCtx.Done():
+		t.Fatal("the sign-in never reached the directory")
+	}
+
+	env.checker.respond = func(context.Context, *pluginv1.CheckAccountRequest) (*pluginv1.CheckAccountResponse, error) {
+		return &pluginv1.CheckAccountResponse{
+			Status:  pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_ACTIVE,
+			Account: &pluginv1.AuthenticateResponse{ManagedRole: pluginv1.AuthManagedRole_AUTH_MANAGED_ROLE_USER},
+		}, nil
+	}
+	if checkStatus, _, err := env.recheck.recheck(ctx, env.identityState(t), 0, false); err != nil || checkStatus != CheckStatusActive {
+		t.Fatalf("re-check = %q, %v", checkStatus, err)
+	}
+	close(directory.release)
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrProviderUnavailable) {
+			t.Fatalf("sign-in with the older directory answer = %v, want ErrProviderUnavailable", err)
+		}
+	case <-waitCtx.Done():
+		t.Fatal("the sign-in did not finish")
+	}
+	var role string
+	var sessions int
+	if err := env.pool.QueryRow(ctx, `SELECT u.role, (SELECT COUNT(*) FROM auth_sessions s WHERE s.user_id = u.id AND s.revoked_at IS NULL)
+		FROM users u WHERE u.id = $1`, env.user.ID).Scan(&role, &sessions); err != nil {
+		t.Fatal(err)
+	}
+	if role != models.RoleUser || sessions != 0 {
+		t.Fatalf("after the overlap: role %q with %d live sessions, want the re-check's demotion to stand", role, sessions)
+	}
+}

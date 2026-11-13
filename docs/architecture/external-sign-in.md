@@ -105,6 +105,26 @@ change revokes the account's login sessions, like an administrator role
 change. The Owner, break-glass accounts that can use their local password,
 and the last enabled admin are never demoted; the skip is logged.
 
+A sign-in's answer is not applied over a later re-check answer. A sign-in
+asks the provider before it knows which account answers, so a re-check of
+that account can ask afterwards and commit first, demoting or refusing it.
+Applying the sign-in's older answer would undo that, so every sign-in
+(directory, network, OAuth) takes a fence before it asks its provider: the
+next value of the sequence `plugin_auth_identity_answer_seq`. A re-check
+that records an `ACTIVE` answer or a refusal, a pending refusal included,
+takes a value as it records it and stores it on the identity
+(`plugin_auth_identities.answer_seq`); an answer that decides nothing takes
+none. A link an administrator makes starts with a value, and a link a
+sign-in makes with 0. Account resolution, holding the lock on (installation, subject) that the
+re-check holds from before its call until its commit, refuses a sign-in
+whose fence is older than the identity's `answer_seq` with
+`provider_unavailable`, before it writes anything. The person signs in
+again and the provider answers afresh. The order comes from a sequence
+because a clock can step back; a restore moves the sequence past the links
+it carries over. Linking flows take no fence: they never apply an answer to
+an identity that is already linked. Two sign-ins of one account are not
+ordered against each other.
+
 ## Local-password policy
 
 - `auth.local_password_login` (default on) is the server-wide switch. Off,
@@ -736,7 +756,8 @@ refreshing. The host therefore asks the provider again.
   token with a state that keeps only the ID token and `sub`, which is
   committed before the answer transaction), and could then only answer
   `UNSUPPORTED`.
-  A sign-in through the provider, or any recorded answer, clears it. For
+  A sign-in the provider answered after the refusal (Role sync), or any
+  recorded answer, clears it. For
   any other answer, the answer is written before the savepoint too, so a
   failed role sync cannot lose it. An `ACTIVE` answer whose role sync fails
   clears `last_checked_at` to keep the check due, including after a short

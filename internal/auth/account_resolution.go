@@ -68,6 +68,33 @@ type ResolveInput struct {
 	// LinkingUserID is the signed-in account a linking flow links to; 0 for
 	// an ordinary sign-in.
 	LinkingUserID int
+	// AnswerFence is the value takeAnswerFence answered before the provider
+	// was asked. The answer is not applied to a linked identity that holds a
+	// later answer (errStaleProviderAnswer). 0 skips the check, for callers
+	// that hold no answer a re-check could be newer than.
+	AnswerFence int64
+}
+
+// errStaleProviderAnswer refuses a sign-in whose provider answer may be older
+// than an answer already recorded for the identity: a re-check that asked
+// after the sign-in did, and demoted or refused the account, must not be
+// undone by it. The person signs in again and the provider answers afresh.
+var errStaleProviderAnswer = fmt.Errorf("%w: a newer answer about the identity was recorded while the provider answered this sign-in", ErrProviderUnavailable)
+
+// answerSeq is the one global sequence that orders provider answers about
+// identities across API servers (plugin_auth_identities.answer_seq).
+const answerSeq = `nextval('plugin_auth_identity_answer_seq')`
+
+// takeAnswerFence takes the next answer sequence value, before a sign-in asks
+// its provider. Every re-check answer recorded for an identity afterwards
+// holds a later value, so resolution can tell that the sign-in's answer may
+// be the older one.
+func takeAnswerFence(ctx context.Context, db rowQuerier) (int64, error) {
+	var fence int64
+	if err := db.QueryRow(ctx, `SELECT `+answerSeq).Scan(&fence); err != nil {
+		return 0, fmt.Errorf("taking the provider answer fence: %w", err)
+	}
+	return fence, nil
 }
 
 // resolution collects what one transaction did, reported after commit.
@@ -133,6 +160,20 @@ func (r *AccountResolver) resolve(ctx context.Context, tx pgx.Tx, in ResolveInpu
 			}
 			// A linking flow for the identity the account already holds.
 			return ErrAccountAlreadyLinked
+		}
+		if in.AnswerFence != 0 {
+			// The subject lock is held, so a re-check that asked the provider
+			// has committed its answer or has not asked yet.
+			var stale bool
+			if err := tx.QueryRow(ctx, `SELECT answer_seq > $2 FROM plugin_auth_identities WHERE id = $1`,
+				linked.ID, in.AnswerFence).Scan(&stale); err != nil {
+				return fmt.Errorf("reading the identity's latest provider answer: %w", err)
+			}
+			if stale {
+				slog.WarnContext(ctx, "sign-in refused: a newer provider answer about the identity was recorded while the provider answered it",
+					"component", "auth", auditInstallationID, in.InstallationID, auditUserID, linked.UserID)
+				return errStaleProviderAnswer
+			}
 		}
 		user, err := lockUser(ctx, tx, linked.UserID)
 		if err != nil {

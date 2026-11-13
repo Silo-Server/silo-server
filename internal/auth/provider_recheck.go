@@ -607,7 +607,7 @@ func (r *ProviderRecheck) applyInSavepoint(ctx context.Context, tx pgx.Tx, ident
 
 func recordPendingRefusal(ctx context.Context, db dbQuerier, identityID int64, checkStatus string) error {
 	if _, err := db.Exec(ctx, `UPDATE plugin_auth_identities SET pending_refusal = $2,
-		check_outcome_unknown = FALSE, updated_at = NOW() WHERE id = $1`, identityID, checkStatus); err != nil {
+		check_outcome_unknown = FALSE, answer_seq = `+answerSeq+`, updated_at = NOW() WHERE id = $1`, identityID, checkStatus); err != nil {
 		return fmt.Errorf("recording the provider refusal: %w", err)
 	}
 	return nil
@@ -1001,6 +1001,11 @@ func checkStatusOf(value pluginv1.CheckAccountStatus) string {
 // An active answer also counts as a provider authentication
 // (last_authenticated_at) and refreshes what the provider says about the
 // person, keeping stored values the provider left empty.
+// An answer about the account (active or a refusal) takes the next answer
+// sequence value as it is recorded, which is after the provider gave it: a
+// sign-in that asked the provider before that holds an earlier fence and is
+// not applied over it (ResolveInput.AnswerFence). An answer that decides
+// nothing takes none, so it refuses no sign-in.
 func recordIdentityCheck(ctx context.Context, db dbQuerier, id int64, checkStatus string, account *pluginv1.AuthenticateResponse) error {
 	if checkStatus != CheckStatusActive || account == nil {
 		account = &pluginv1.AuthenticateResponse{}
@@ -1016,6 +1021,7 @@ func recordIdentityCheck(ctx context.Context, db dbQuerier, id int64, checkStatu
 			email = COALESCE(NULLIF($5, ''), email),
 			display_name = COALESCE(NULLIF($6, ''), display_name),
 			pending_refusal = CASE WHEN $2 IN ('unavailable', 'unsupported') THEN pending_refusal ELSE '' END,
+			answer_seq = CASE WHEN $2 IN ('unavailable', 'unsupported') THEN answer_seq ELSE `+answerSeq+` END,
 			updated_at = NOW()
 		WHERE id = $1`,
 		id, checkStatus, strings.TrimSpace(account.GetIssuer()), strings.TrimSpace(account.GetUsername()),
