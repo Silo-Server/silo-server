@@ -2023,11 +2023,87 @@ export function usePlaybackSession(
    *
    * A track, quality or output change queued behind the replan in flight
    * returns a fresh plan too, so the refresh leaves it queued rather than
-   * replacing the viewer's choice with an echo of the current tracks.
+   * replacing the viewer's choice with an echo of the current tracks. A
+   * queued pick of a stored subtitle is the exception, below.
    */
   const refreshSubtitles = useCallback(
     (currentPosition: number) => {
-      if (!planRef.current) return;
+      const plan = planRef.current;
+      if (!plan) return;
+      // A queued pick of a stored subtitle names its ordinal in the inventory
+      // it was made on, which a refresh is about to replace, so it could land
+      // on another track. The plan is refetched first, and the pick follows at
+      // that stored subtitle's new ordinal.
+      const pending = pendingReplanRef.current;
+      const pick = pending?.options;
+      const pickedIndex =
+        pending?.mediaFileId === plan.effective_media_file_id && pick?.operation === "track_change"
+          ? pick.subtitle?.index
+          : undefined;
+      const pickedStoredId =
+        pickedIndex === undefined
+          ? undefined
+          : pending?.subtitleInventory.find((item) => item.combined_index === pickedIndex)
+              ?.stored_subtitle_id;
+      if (pending && pick && pickedIndex !== undefined && pickedStoredId !== undefined) {
+        const pickedAt = pickedIndex;
+        void replan(
+          { operation: "track_change", positionSeconds: currentPosition },
+          false,
+          false,
+          () => {
+            const fresh = planRef.current?.subtitle.inventory ?? [];
+            // A choice made while the refetch ran is newer than this pick; a
+            // queued seek or refresh is not, and the pick replaces it.
+            const newer = pendingReplanRef.current;
+            const queued = newer?.options;
+            if (
+              newer &&
+              (queued?.operation === "quality_change" ||
+                queued?.operation === "output_change" ||
+                (queued?.operation === "track_change" &&
+                  (queued.subtitle !== undefined || queued.audio !== undefined)))
+            ) {
+              // The menu still listed the stale inventory, so a subtitle
+              // picked from it moves to its stored subtitle's new ordinal.
+              const index =
+                queued.operation === "track_change" ? queued.subtitle?.index : undefined;
+              if (
+                index !== undefined &&
+                newer.mediaFileId === planRef.current?.effective_media_file_id
+              ) {
+                const moved = storedSubtitleOrdinalIn(index, newer.subtitleInventory, fresh);
+                pendingReplanRef.current = {
+                  ...newer,
+                  options: {
+                    ...queued,
+                    subtitle: moved === null ? null : { id: "", index: moved },
+                  },
+                };
+              }
+              return;
+            }
+            const pickedOrdinal = storedSubtitleOrdinalIn(
+              pickedAt,
+              pending.subtitleInventory,
+              fresh,
+            );
+            if (pickedOrdinal === null) return;
+            void replan(
+              {
+                ...pick,
+                // A queued seek is replaced, so its target goes out with the pick.
+                positionSeconds: queued?.positionSeconds ?? playbackPositionRef.current,
+                subtitle: { id: "", index: pickedOrdinal },
+              },
+              pending.retireSessionOnRefusal,
+              false,
+              pending.onAdopt,
+            );
+          },
+        );
+        return;
+      }
       const queued = pendingReplanRef.current?.options.operation;
       if (queued === "track_change" || queued === "quality_change" || queued === "output_change") {
         return;
@@ -2054,78 +2130,6 @@ export function usePlaybackSession(
       const plan = planRef.current;
       if (!plan) return;
       if (!canFoldAnnouncedSubtitleTrack(plan.subtitle.inventory, track)) {
-        // A queued pick of a stored subtitle names its ordinal in this stale
-        // inventory, so it could land on another track. The plan is refetched
-        // first, and the pick follows at that stored subtitle's new ordinal.
-        const pending = pendingReplanRef.current;
-        const pick = pending?.options;
-        const pickedIndex =
-          pending?.planId === plan.plan_id && pick?.operation === "track_change"
-            ? pick.subtitle?.index
-            : undefined;
-        const pickedStoredId =
-          pickedIndex === undefined
-            ? undefined
-            : plan.subtitle.inventory.find((item) => item.combined_index === pickedIndex)
-                ?.stored_subtitle_id;
-        if (pending && pick && pickedStoredId !== undefined) {
-          void replan(
-            { operation: "track_change", positionSeconds: playbackPositionRef.current },
-            false,
-            false,
-            () => {
-              const fresh = planRef.current?.subtitle.inventory ?? [];
-              // A choice made while the refetch ran is newer than this pick; a
-              // queued seek or refresh is not, and the pick replaces it.
-              const newer = pendingReplanRef.current;
-              const queued = newer?.options;
-              if (
-                newer &&
-                (queued?.operation === "quality_change" ||
-                  queued?.operation === "output_change" ||
-                  (queued?.operation === "track_change" &&
-                    (queued.subtitle !== undefined || queued.audio !== undefined)))
-              ) {
-                // The menu still listed the stale inventory, so a subtitle
-                // picked from it moves to its stored subtitle's new ordinal.
-                const index =
-                  queued.operation === "track_change" ? queued.subtitle?.index : undefined;
-                if (
-                  index !== undefined &&
-                  newer.mediaFileId === planRef.current?.effective_media_file_id
-                ) {
-                  const moved = storedSubtitleOrdinalIn(index, newer.subtitleInventory, fresh);
-                  pendingReplanRef.current = {
-                    ...newer,
-                    options: {
-                      ...queued,
-                      subtitle: moved === null ? null : { id: "", index: moved },
-                    },
-                  };
-                }
-                return;
-              }
-              const pickedOrdinal = storedSubtitleOrdinalIn(
-                pickedIndex,
-                plan.subtitle.inventory,
-                fresh,
-              );
-              if (pickedOrdinal === null) return;
-              void replan(
-                {
-                  ...pick,
-                  // A queued seek is replaced, so its target goes out with the pick.
-                  positionSeconds: queued?.positionSeconds ?? playbackPositionRef.current,
-                  subtitle: { id: "", index: pickedOrdinal },
-                },
-                pending.retireSessionOnRefusal,
-                false,
-                pending.onAdopt,
-              );
-            },
-          );
-          return;
-        }
         refreshSubtitles(playbackPositionRef.current);
         return;
       }
@@ -2141,7 +2145,7 @@ export function usePlaybackSession(
         subtitleUrls: mapSubtitleInventory(inventory, nextPlan.effective_media_file_id, config),
       }));
     },
-    [config, refreshSubtitles, replan],
+    [config, refreshSubtitles],
   );
 
   const updatePlaybackState = useCallback((positionSeconds: number, playing: boolean) => {

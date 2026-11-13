@@ -214,7 +214,8 @@ ordinal is the next free one in the plan's inventory or holds the same
 `stored_subtitle_id`; otherwise it refetches the plan with a `track_change`
 replan that carries its current selection over. The server keeps that
 selection on the same stored subtitle at its new ordinal, or turns subtitles
-off when that stored subtitle was deleted.
+off when that stored subtitle was deleted and reports it with the
+`subtitle_track_unavailable` degradation warning.
 
 This operation does not change Jellyfin subtitle delivery. Multipart uploads
 and AI job creation and cancellation have their own v2 operations, described

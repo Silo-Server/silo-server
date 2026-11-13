@@ -5962,6 +5962,11 @@ func TestReplanPlaybackV2KeepsDownloadedSubtitleWhenEarlierOneIsDeleted(t *testi
 				if plan.SelectedTracks.Subtitle != nil {
 					t.Fatalf("refreshed plan selected subtitle %+v, want none", plan.SelectedTracks.Subtitle)
 				}
+				if !slices.ContainsFunc(plan.DegradationWarnings, func(warning playback.DegradationWarningV3) bool {
+					return warning.Code == playback.DegradationWarningSubtitleTrackUnavailableV3
+				}) {
+					t.Fatalf("dropped subtitle not reported: %#v", plan.DegradationWarnings)
+				}
 				return
 			}
 			if got, want := selectedTrackIDV3(plan.SelectedTracks.Subtitle), playback.TrackIDV3(f.source.ID, "subtitle", base); got != want {

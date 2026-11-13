@@ -3239,11 +3239,30 @@ describe("usePlaybackSession announced subtitle tracks", () => {
   // conflicting announcement shows the pick's ordinal is stale: the plan is
   // refetched first, and the pick then goes out at es's new ordinal.
   it.each([
-    { name: "replays a queued stored-subtitle pick at its ordinal after a refetch", next: "none" },
-    { name: "replays the pick over a seek made while the refetch runs", next: "seek" },
-    { name: "keeps a newer pick made while the refetch runs, at its ordinal", next: "pick" },
-    { name: "turns subtitles off for a newer pick the refetch no longer lists", next: "deleted" },
-  ] as const)("$name", async ({ next }) => {
+    {
+      name: "replays a queued stored-subtitle pick at its ordinal after a refetch",
+      next: "none",
+      trackless: false,
+    },
+    {
+      name: "replays the pick over a seek made while the refetch runs",
+      next: "seek",
+      trackless: false,
+    },
+    {
+      name: "keeps a newer pick made while the refetch runs, at its ordinal",
+      next: "pick",
+      trackless: false,
+    },
+    {
+      name: "turns subtitles off for a newer pick the refetch no longer lists",
+      next: "deleted",
+      trackless: false,
+    },
+    // An announcement the server could not resolve carries no track, and the
+    // player refetches without knowing which ordinals moved.
+    { name: "replays the pick after a trackless announcement", next: "none", trackless: true },
+  ] as const)("$name", async ({ next, trackless }) => {
     // de (stored 4) sits at 2 in this plan and moves to 1 once en is deleted.
     const initial = [stored(0, 1, "en"), stored(1, 2, "es"), stored(2, 4, "de")];
     const plan = fixturePlanV3({ subtitle: { mode: "render", inventory: initial } });
@@ -3279,7 +3298,10 @@ describe("usePlaybackSession announced subtitle tracks", () => {
     act(() => result.current.changeQuality("1080p", 30));
     await waitFor(() => expect(replanBodies).toHaveLength(1));
     act(() => result.current.changeSubtitleTrack(1, 31));
-    act(() => result.current.applySubtitleTrack(stored(2, 3, "fr")));
+    act(() => {
+      if (trackless) result.current.refreshSubtitles(31);
+      else result.current.applySubtitleTrack(stored(2, 3, "fr"));
+    });
     await act(async () => {
       // The quality change's plan still lists the stale inventory.
       resolveQualityReplan?.(
