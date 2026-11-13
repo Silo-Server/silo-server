@@ -21,6 +21,7 @@ import { useWatchTogetherRoomConnection } from "../hooks/useWatchTogetherRoomCon
 import { useTrackChoicePersistence } from "../hooks/useTrackChoicePersistence";
 import { toast } from "sonner";
 import { useT } from "@/i18n";
+import type { WatchDetail } from "@/api/types";
 
 function patchChapterThumbnail(
   versions: PlayerFileVersion[],
@@ -208,9 +209,36 @@ function WatchPagePlayer({
     roomToken: watchTogetherRoomToken,
   });
 
+  // Counts the marker changes this player applied itself: an in-player save or
+  // a markers_updated event. A watch-detail read that began before one is older
+  // than it and must not replace it.
+  const markerRevisionRef = useRef(0);
+
   useEffect(() => {
     setPlaybackVersions(versions);
   }, [versions]);
+
+  const applyMarkerChange = useCallback(
+    (change: (current: PlayerFileVersion[]) => PlayerFileVersion[]) => {
+      markerRevisionRef.current += 1;
+      const pageKey = itemKeys.watchDetail(contentId, fileId, libraryId);
+      // A page read still in flight began before this change. Start it over,
+      // so what it brings in is newer than the change.
+      void queryClient.refetchQueries({ queryKey: pageKey, exact: true, fetchStatus: "fetching" });
+      // A read that finished before this change can still be on its way to the
+      // versions prop. Put the change on top of it there, or the copy above
+      // would bring it in without the change.
+      const landed = queryClient.getQueryData<WatchDetail>(pageKey);
+      if (landed && landed.versions !== versions) {
+        queryClient.setQueryData<WatchDetail>(pageKey, {
+          ...landed,
+          versions: change(landed.versions),
+        });
+      }
+      setPlaybackVersions(change);
+    },
+    [contentId, fileId, libraryId, queryClient, versions],
+  );
 
   const session = usePlaybackSession(
     playbackRequestKey ??
@@ -474,11 +502,17 @@ function WatchPagePlayer({
     }
     chapterRefreshAttemptsRef.current.add(session.mediaFileId);
 
-    void queryClient.fetchQuery({
-      queryKey: itemKeys.watchDetail(contentId, fileId, libraryId),
-      queryFn: () => fetchWatchDetail(contentId, fileId, libraryId),
-      staleTime: 0,
-    });
+    void queryClient
+      .fetchQuery({
+        queryKey: itemKeys.watchDetail(contentId, fileId, libraryId),
+        queryFn: () => fetchWatchDetail(contentId, fileId, libraryId),
+        staleTime: 0,
+      })
+      .catch(() => {
+        // The result arrives through the versions prop. A failed read leaves
+        // the chapters as they are. A read that a marker change restarted
+        // rejects here only if this call joined it; its replacement still runs.
+      });
   }, [
     contentId,
     fileId,
@@ -504,20 +538,36 @@ function WatchPagePlayer({
 
     const activeFileId = session.mediaFileId;
     let cancelled = false;
-    void queryClient
-      .fetchQuery({
-        queryKey: itemKeys.watchDetail(contentId, activeFileId, libraryId),
-        queryFn: () => fetchWatchDetail(contentId, activeFileId, libraryId),
-        staleTime: 0,
-      })
-      .then((detail) => {
-        if (!cancelled) {
-          setPlaybackVersions(detail.versions);
-        }
-      })
-      .catch(() => {
-        // Reconcile again on the next connection; keep the current markers meanwhile.
-      });
+    const queryKey = itemKeys.watchDetail(contentId, activeFileId, libraryId);
+    const reconcile = () => {
+      const markerRevision = markerRevisionRef.current;
+      // A read already running began at an unknown time, maybe before a marker
+      // change, and fetchQuery would join it.
+      const joined = queryClient.getQueryState(queryKey)?.fetchStatus === "fetching";
+      void queryClient
+        .fetchQuery({
+          queryKey,
+          queryFn: () => fetchWatchDetail(contentId, activeFileId, libraryId),
+          staleTime: 0,
+        })
+        .then(
+          (detail) => detail.versions,
+          () => null,
+        )
+        .then((readVersions) => {
+          if (cancelled) return;
+          // A joined read, or one a marker change overtook, may be older than
+          // the markers the player holds: read again.
+          if (joined || markerRevisionRef.current !== markerRevision) {
+            reconcile();
+            return;
+          }
+          // After a failed read, reconcile again on the next connection and
+          // keep the current markers meanwhile.
+          if (readVersions) setPlaybackVersions(readVersions);
+        });
+    };
+    reconcile();
 
     return () => {
       cancelled = true;
@@ -595,7 +645,7 @@ function WatchPagePlayer({
         return;
       }
 
-      setPlaybackVersions((current) =>
+      applyMarkerChange((current) =>
         patchVersionMarkers(
           current,
           file_id,
@@ -607,7 +657,7 @@ function WatchPagePlayer({
         ),
       );
     },
-    [session.mediaFileId, session.sessionId],
+    [applyMarkerChange, session.mediaFileId, session.sessionId],
   );
 
   // The plan is the player's contract: without one there is no transport, no
@@ -745,11 +795,11 @@ function WatchPagePlayer({
       markerSegments={selectedVersion?.marker_segments}
       autoPlayNextPreview={autoPlayNextPreview}
       canEditMarkers={canEditMarkers}
-      onMarkersEdited={(fileId, markers) =>
-        setPlaybackVersions((current) =>
+      onMarkersEdited={(editedFileId, markers) =>
+        applyMarkerChange((current) =>
           patchVersionMarkers(
             current,
-            fileId,
+            editedFileId,
             markers.intro,
             markers.credits,
             markers.recap,
