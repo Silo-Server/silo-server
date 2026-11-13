@@ -305,7 +305,7 @@ func TestGetItemVersionsKeepsChapterImagesAndEmptyFiles(t *testing.T) {
 		t.Fatal("versions must still resolve the returned chapter thumbnail")
 	}
 	// thumbnail_path names the served object and is signed as stored.
-	if got, want := versions[0].Chapters[0].ThumbnailURL, "https://images.invalid/chapter-images/7/0/w300.webp"; got != want {
+	if got, want := fileVersion(t, versions, file.ID).Chapters[0].ThumbnailURL, "https://images.invalid/chapter-images/7/0/w300.webp"; got != want {
 		t.Fatalf("chapter thumbnail_url = %q, want %q", got, want)
 	}
 	f.files.files[f.ids["movie"]] = nil
@@ -348,10 +348,10 @@ func TestGetItemVersionsBatchesChapterImages(t *testing.T) {
 			if calls := f.images.calls.Load(); calls != 1 {
 				t.Fatalf("%d chapter images made %d resolver calls; want one batch", count, calls)
 			}
-			if len(versions) != 2 || len(versions[0].Chapters) != count {
+			if len(versions) != 2 || len(fileVersion(t, versions, file.ID).Chapters) != count {
 				t.Fatalf("chapter metadata missing: %+v", versions)
 			}
-			for i, chapter := range versions[0].Chapters {
+			for i, chapter := range fileVersion(t, versions, file.ID).Chapters {
 				input := file.Chapters[i]
 				if chapter.Index != input.Index || chapter.Title != input.Title || chapter.StartSeconds != input.StartSeconds || chapter.EndSeconds != input.EndSeconds || chapter.Source != input.Source || chapter.ThumbnailThumbhash != input.ThumbnailThumbhash || chapter.ThumbnailURL != "https://images.invalid/"+input.ThumbnailPath {
 					t.Fatalf("chapter %d metadata changed: %+v", i, chapter)
@@ -359,6 +359,17 @@ func TestGetItemVersionsBatchesChapterImages(t *testing.T) {
 			}
 		})
 	}
+}
+
+// fileVersion finds a version by file ID; versions come best first, not in
+// fixture order.
+func fileVersion(t *testing.T, versions []FileVersion, fileID int) FileVersion {
+	t.Helper()
+	i := slices.IndexFunc(versions, func(v FileVersion) bool { return v.FileID == fileID })
+	if i < 0 {
+		t.Fatalf("file %d missing from versions", fileID)
+	}
+	return versions[i]
 }
 
 type countingUserStores struct {

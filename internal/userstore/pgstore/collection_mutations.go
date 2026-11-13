@@ -38,6 +38,22 @@ func (s *PostgresUserStore) lockCollectionRow(ctx context.Context, tx pgx.Tx, id
 	return nil
 }
 
+// lockExistingCollectionRow is lockCollectionRow for a writer that must not
+// write under a collection that is gone. It answers
+// userstore.ErrCollectionNotFound when no row matches, also when the row was
+// deleted by a transaction the lock waited for (#2844).
+func (s *PostgresUserStore) lockExistingCollectionRow(ctx context.Context, tx pgx.Tx, id string) error {
+	var found int
+	err := tx.QueryRow(ctx, `SELECT 1 FROM user_personal_collections WHERE user_id = $1 AND id = $2 FOR UPDATE`, s.userID, id).Scan(&found)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return userstore.ErrCollectionNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("locking collection %s: %w", id, err)
+	}
+	return nil
+}
+
 func (s *PostgresUserStore) checkCollectionRevision(ctx context.Context, tx pgx.Tx, id string, expected *int64) error {
 	if expected == nil {
 		return nil

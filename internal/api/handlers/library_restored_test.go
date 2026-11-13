@@ -232,6 +232,7 @@ func TestRestoredEntriesMeetTheEditorChecks(t *testing.T) {
 		"manual collection":       {in: catalog.CreateLibraryCollectionInput{Title: "Favorites", SyncSchedule: &schedule}, ok: true},
 		"no title":                {in: catalog.CreateLibraryCollectionInput{Title: "  "}},
 		"unknown visibility":      {in: catalog.CreateLibraryCollectionInput{Title: "Favorites", Visibility: "public"}},
+		"retired collection type": {in: catalog.CreateLibraryCollectionInput{Title: "Favorites", CollectionType: "trakt"}},
 		"rules that do not parse": {in: catalog.CreateLibraryCollectionInput{Title: "Smart", CollectionType: collectionTypeSmart, QueryDefinition: []byte(`[1]`)}},
 		"invalid sync schedule":   {in: catalog.CreateLibraryCollectionInput{Title: "Favorites", SyncSchedule: &badSchedule}},
 		"managed with no key":     {in: catalog.CreateLibraryCollectionInput{Title: "Favorites", ManagementMode: collectionManagementModeSection}},

@@ -7,22 +7,24 @@ import { Button } from "@/components/ui/button";
 import { videoRangeLabel } from "@/lib/videoRange";
 import { useT, type Translate } from "@/i18n";
 import DetailPopover from "./DetailPopover";
-import { sortPlaybackVariantsByEditionPreference } from "./versionRankingUtils";
+import { playbackEditions } from "./versionRankingUtils";
 import { buildDetailLine, buildQualitySummary, sortByResolution } from "./VersionFlyout";
 
 interface VersionDropdownProps {
   versions: FileVersion[];
   playbackVariants?: PlaybackVariant[];
   selectedVersion: FileVersion | null;
-  onSelectVersion: (version: FileVersion) => void;
+  onSelectVersion: (version: FileVersion | null) => void;
+  onSelectEdition?: (key: string) => void;
+  versionPicked?: boolean;
 }
 
 interface EditionOption {
   id: string;
   label: string;
-  variant: PlaybackVariant;
   defaultVersion: FileVersion;
   versions: FileVersion[];
+  allVersions: FileVersion[];
 }
 
 function VersionDropdown({
@@ -30,6 +32,8 @@ function VersionDropdown({
   playbackVariants,
   selectedVersion,
   onSelectVersion,
+  onSelectEdition,
+  versionPicked = false,
 }: VersionDropdownProps) {
   const t = useT();
   const [editionOpen, setEditionOpen] = useState(false);
@@ -41,15 +45,9 @@ function VersionDropdown({
     [t, playbackVariants, versions],
   );
 
-  const hasNamedEditions = editionOptions.some((option) => option.variant.edition_key);
-  const showEditionDropdown =
-    editionOptions.length > 1 &&
-    new Set(editionOptions.map((option) => option.label.toLowerCase())).size > 1 &&
-    hasNamedEditions;
+  const showEditionDropdown = editionOptions.length > 1;
 
-  const selectedEdition = showEditionDropdown
-    ? resolveSelectedEditionOption(editionOptions, selectedVersion)
-    : null;
+  const selectedEdition = resolveSelectedEditionOption(editionOptions, selectedVersion);
   const activeVersions = selectedEdition?.versions ?? sorted;
   const activeVersion =
     selectedVersion ?? selectedEdition?.defaultVersion ?? activeVersions[0] ?? null;
@@ -90,7 +88,7 @@ function VersionDropdown({
                   key={option.id}
                   type="button"
                   onClick={() => {
-                    onSelectVersion(option.defaultVersion);
+                    onSelectEdition?.(option.id);
                     setEditionOpen(false);
                     setVersionOpen(false);
                   }}
@@ -125,15 +123,26 @@ function VersionDropdown({
               <Disc3 className="size-3.5" />
               {t("web.detail.versions.versionButton")}
               <span className="text-muted-foreground max-w-44 truncate text-[0.6875rem] font-normal sm:max-w-64">
-                {activeVersion ? buildVersionTriggerSummary(t, activeVersion) : ""}
+                {activeVersion ? buildVersionTriggerSummary(t, activeVersion, versionPicked) : ""}
               </span>
               <ChevronDown className="text-muted-foreground size-3" />
             </Button>
           }
         >
           <div className="space-y-0.5">
+            <button
+              type="button"
+              onClick={() => {
+                onSelectVersion(null);
+                setVersionOpen(false);
+              }}
+              className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm ${!versionPicked ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"}`}
+            >
+              {t("web.player.quality.auto")}
+              {!versionPicked && <Check className="text-primary size-4 shrink-0" />}
+            </button>
             {activeVersions.map((version) => {
-              const isSelected = version.file_id === activeVersion?.file_id;
+              const isSelected = versionPicked && version.file_id === activeVersion?.file_id;
               const summary = buildQualitySummary(version);
               const detail = buildDetailLine(version);
               const rangeLabel = videoRangeLabel(version);
@@ -182,12 +191,12 @@ function VersionDropdown({
 
 export default memo(VersionDropdown);
 
-function buildVersionTriggerSummary(t: Translate, version: FileVersion): string {
-  return (
+function buildVersionTriggerSummary(t: Translate, version: FileVersion, picked: boolean): string {
+  const summary =
     buildQualitySummary(version) ||
     buildDetailLine(version) ||
-    t("web.detail.versions.fileIdFallback", { id: version.file_id })
-  );
+    t("web.detail.versions.fileIdFallback", { id: version.file_id });
+  return picked ? summary : [t("web.player.quality.auto"), summary].join(" · ");
 }
 
 function buildEditionOptions(
@@ -195,76 +204,43 @@ function buildEditionOptions(
   playbackVariants: PlaybackVariant[] | undefined,
   versions: FileVersion[],
 ): EditionOption[] {
-  if (!playbackVariants || playbackVariants.length === 0) {
-    return [];
-  }
-
-  const orderedVariants = sortPlaybackVariantsByEditionPreference(playbackVariants);
-  const hasNamedEditions = orderedVariants.some((variant) => variant.edition_key);
-
-  return orderedVariants
-    .map((variant) => {
-      const firstPart = [...(variant.parts ?? [])].sort((a, b) => a.part_index - b.part_index)[0];
-      if (!firstPart) {
-        return null;
-      }
-
-      const partVersions = sortByResolution([...(firstPart.versions ?? [])]);
-      const defaultVersion =
-        (firstPart.default_file_id != null
-          ? versions.find((version) => version.file_id === firstPart.default_file_id)
-          : undefined) ?? partVersions[0];
-      if (!defaultVersion) {
-        return null;
-      }
-
-      return {
-        id: variant.variant_id,
-        label: buildEditionLabel(t, variant, hasNamedEditions),
-        variant,
+  const editions = playbackEditions(versions, playbackVariants);
+  const hasNamedEditions = editions.some((edition) => edition.key);
+  return editions.flatMap((edition) => {
+    const sorted = sortByResolution(edition.versions);
+    const defaultVersion = sorted[0];
+    if (!defaultVersion) return [];
+    return [
+      {
+        id: edition.key,
+        label:
+          edition.raw?.trim() ||
+          (edition.key
+            ? humanizeEditionKey(edition.key)
+            : t(
+                hasNamedEditions
+                  ? "web.detail.versions.standardEdition"
+                  : "web.detail.versions.editionFallback",
+              )),
         defaultVersion,
-        versions: partVersions,
-      };
-    })
-    .filter((entry): entry is EditionOption => !!entry);
+        versions: sorted,
+        allVersions: edition.allVersions,
+      },
+    ];
+  });
 }
 
 function resolveSelectedEditionOption(
   editionOptions: EditionOption[],
   selectedVersion: FileVersion | null,
 ): EditionOption | null {
-  if (editionOptions.length === 0) {
-    return null;
-  }
-
-  if (selectedVersion) {
-    const matching = editionOptions.find((option) =>
-      option.variant.parts.some((part) =>
-        part.versions.some((candidate) => candidate.file_id === selectedVersion.file_id),
-      ),
-    );
-    if (matching) {
-      return matching;
-    }
-  }
-
-  return editionOptions[0] ?? null;
-}
-
-function buildEditionLabel(
-  t: Translate,
-  variant: PlaybackVariant,
-  hasNamedEditions: boolean,
-): string {
-  if (variant.edition_raw?.trim()) {
-    return variant.edition_raw.trim();
-  }
-  if (variant.edition_key?.trim()) {
-    return humanizeEditionKey(variant.edition_key);
-  }
-  return hasNamedEditions
-    ? t("web.detail.versions.standardEdition")
-    : t("web.detail.versions.editionFallback");
+  return (
+    editionOptions.find((option) =>
+      option.allVersions.some((v) => v.file_id === selectedVersion?.file_id),
+    ) ??
+    editionOptions[0] ??
+    null
+  );
 }
 
 function humanizeEditionKey(value: string): string {
