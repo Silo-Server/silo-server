@@ -3626,12 +3626,16 @@ func (s *TranscodeSession) gpuDecodeFailedFilterSetupLocked() bool {
 	return strings.Contains(s.stderr.String(), ffmpegFilterSetupFailure)
 }
 
-// restartDecodesOnCPU reports whether the session's next restart would move it
+// crashState reports, in one read, whether FFmpeg exited with an error and has
+// not been restarted, and whether the next restart would then move the session
 // from GPU to CPU decode (see gpuDecodeFailedFilterSetupLocked).
-func (s *TranscodeSession) restartDecodesOnCPU() bool {
+func (s *TranscodeSession) crashState() (crashed, restartsOnCPU bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.gpuDecodeFailedFilterSetupLocked()
+	if s.running || s.waitErr == nil {
+		return false, false
+	}
+	return true, s.gpuDecodeFailedFilterSetupLocked()
 }
 
 // restartToneMapValidationTimeout bounds the tone-map source recheck on a

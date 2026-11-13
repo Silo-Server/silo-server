@@ -1130,19 +1130,19 @@ func (m *TranscodeManager) MonitorLocalTranscodeExit(sessionID string, session *
 		if current != session {
 			return
 		}
-		if session.IsRunning() {
-			return
-		}
-
 		// When ffmpeg exits cleanly (no error), the segments are fully written and
 		// should remain servable until the client stops the session. This is
 		// critical for copy-mode where ffmpeg finishes writing all content much
 		// faster than real-time playback. Only tear down the session on error exits.
-		if session.WaitError() == nil {
+		//
+		// Both facts come from one read: a segment request can restart the
+		// session between separate reads, and its replacement must not be torn
+		// down for the crash it recovered from.
+		crashed, restartsOnCPU := session.crashState()
+		if !crashed {
 			return
 		}
-
-		if session.restartDecodesOnCPU() && m.restartCrashedOnCPUDecode(sessionID, session) {
+		if restartsOnCPU && m.restartCrashedOnCPUDecode(sessionID, session) {
 			return
 		}
 
@@ -1165,10 +1165,11 @@ func (m *TranscodeManager) restartCrashedOnCPUDecode(sessionID string, session *
 	ctx := context.Background()
 	keep := true
 	err := m.restartSessionLocked(sessionID, session, func() error {
-		if !session.restartDecodesOnCPU() {
+		crashed, restartsOnCPU := session.crashState()
+		if !restartsOnCPU {
 			// A segment request restarted it while this waited for the lock.
 			// Keep it unless that restart failed as well.
-			keep = session.IsRunning() || session.WaitError() == nil
+			keep = !crashed
 			return nil
 		}
 		// Resume at the client's position, as a segment request would, so the
