@@ -975,6 +975,10 @@ func (s *Service) resolveAndClaim(ctx context.Context, changes []Change, records
 		case ChangeScopeFile, ChangeScopeSubtree:
 			target, ok := s.resolveChange(ctx, change, &stats, rec)
 			if !ok {
+				if rec.Reason == string(scantrigger.ReasonPathIgnored) {
+					// The path is in a library; its ignore files exclude it.
+					resolvedAny = true
+				}
 				continue
 			}
 			resolvedAny = true

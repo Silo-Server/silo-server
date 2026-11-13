@@ -74,6 +74,11 @@ func TestChangeLogRecordsIgnoredFileAsIgnored(t *testing.T) {
 	if got.Outcome != ChangeOutcomeIgnored || got.Reason != string(scantrigger.ReasonPathIgnored) || got.Detail != "Path is excluded by the library's ignore files" {
 		t.Fatalf("change = %+v", got)
 	}
+	// The path is in a library, so the event is not reported as one whose
+	// paths matched no library folder.
+	if event.Status == EventStatusUnresolved {
+		t.Fatalf("event status = %q, message %q", event.Status, event.ErrorMessage)
+	}
 }
 
 func TestChangeLogRecordsRewriteTargetAndRunIDs(t *testing.T) {
