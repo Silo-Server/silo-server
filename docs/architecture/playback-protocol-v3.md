@@ -162,7 +162,7 @@ their own advertisements. `hdr_to_sdr_tonemap` additionally requires an
 administrator-enabled hardware or software policy and a successful device-level
 smoke probe for the applicable PQ, HLG, or SDR fallback-base source kind, or,
 for Dolby Vision Profile 5 and compatibility ID `0`, the `dolby_vision` kind,
-which only RPU-applying executors smoke, or, for PQ tagged full range, the
+which only RPU-applying executors smoke, or, for PQ whose decoded range is full, the
 `pq_full_range` kind, which only the software executor smokes. A client must
 not assume a transformation exists because this document names it.
 
@@ -615,16 +615,16 @@ within its budget and keeps a recorded status only when the reprobed stream
 is unchanged. A failed read is never recorded as "not HDR10+", so a
 misbehaving ffprobe cannot mark the library that way. The
 `backfill_hdr10_plus` task, at startup and daily, reads the first frame of the
-unchecked files and sets only `hdr10_plus` and, for an HDR10+ file,
-`video_range_type`, writing only while the file and the track still match the
-row it read.
+unchecked files and sets `hdr10_plus`, for an HDR10+ file `video_range_type`,
+and `frame_color_range` (below), writing only while the file and the track
+still match the row it read.
 
 The same read records the frame's color range as `frame_color_range`
 (`unknown` when the frame carries none). The decoder takes the range from the
 bitstream before the container's tag, so the two can disagree; `color_range`
-keeps the tag, which the live stream probe at transcode start compares. The
-backfill task also adds `frame_color_range` to PQ tracks checked for HDR10+
-before it was recorded, keeping their `hdr10_plus`.
+keeps the tag, which the live stream probe at transcode start compares. A PQ
+track checked for HDR10+ before the range was recorded is read once more by
+the same task, which adds only `frame_color_range`.
 
 A client may additionally report the raw display probe in `output.display`
 with an evidence tier:

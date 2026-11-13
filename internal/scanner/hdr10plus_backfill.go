@@ -60,6 +60,9 @@ type HDR10PlusBackfillResult struct {
 	HDR10Plus int `json:"hdr10_plus"`
 	// NotHDR10Plus files have a first frame without HDR10+ metadata.
 	NotHDR10Plus int `json:"not_hdr10_plus"`
+	// FrameRangeOnly files were already checked for HDR10+ and gained only
+	// their first frame's color range.
+	FrameRangeOnly int `json:"frame_range_only"`
 	// Changed files differ on disk from their row, or their row was rewritten
 	// during the pass. The next scan or pass settles them.
 	Changed int `json:"changed"`
@@ -137,6 +140,7 @@ const (
 	hdr10PlusOutcomeChanged
 	hdr10PlusOutcomeUnreadable
 	hdr10PlusOutcomeTimedOut
+	hdr10PlusOutcomeFrameRangeOnly
 )
 
 // Run makes one pass over every candidate file. progress, when non-nil, is
@@ -185,6 +189,8 @@ func (b *HDR10PlusBackfiller) Run(ctx context.Context, progress func(HDR10PlusBa
 				switch outcome {
 				case hdr10PlusOutcomeHDR10Plus:
 					result.HDR10Plus++
+				case hdr10PlusOutcomeFrameRangeOnly:
+					result.FrameRangeOnly++
 				case hdr10PlusOutcomeNotHDR10Plus:
 					result.NotHDR10Plus++
 				case hdr10PlusOutcomeChanged:
@@ -306,13 +312,12 @@ func (b *HDR10PlusBackfiller) backfillFile(ctx context.Context, c hdr10PlusCandi
 		return hdr10PlusOutcomeChanged, nil
 	}
 	hdr10Plus := mediaprobe.HasHDR10Plus(frame.SideData)
-	// A track already checked keeps its status: only its frame range is new.
-	recorded := hdr10Plus
-	if !c.track.HDR10PlusUnchecked {
-		recorded = c.track.HDR10Plus
-	}
 	outcome := hdr10PlusOutcomeNotHDR10Plus
-	if recorded {
+	switch {
+	case !c.track.HDR10PlusUnchecked:
+		// A track already checked keeps its status: only its frame range is new.
+		outcome = hdr10PlusOutcomeFrameRangeOnly
+	case hdr10Plus:
 		outcome = hdr10PlusOutcomeHDR10Plus
 	}
 	// Set only frame_color_range and, on a track not yet checked for HDR10+,
