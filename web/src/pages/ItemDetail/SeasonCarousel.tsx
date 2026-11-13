@@ -8,6 +8,7 @@ import { formatSeasonMeta, formatSeasonProgress, getSeasonDisplayTitle } from ".
 import CardPlayOverlay from "@/components/CardPlayOverlay";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { useAppLanguage, useT } from "@/i18n";
+import WatchProgressBar from "@/components/WatchProgressBar";
 
 interface SeasonCarouselProps {
   seasons: Season[];
@@ -74,18 +75,12 @@ export default function SeasonCarousel({ seasons, libraryId }: SeasonCarouselPro
                     </div>
                   )}
 
-                  {/* Progress bar — inset pill so a full bar doesn't read
-                      as a stray edge along the artwork */}
                   {(isCompleted || hasProgress) && (
-                    <div className="absolute inset-x-2.5 bottom-2 h-[3px] overflow-hidden rounded-full bg-black/40">
-                      <div
-                        className="h-full rounded-full transition-all duration-300"
-                        style={{
-                          width: isCompleted ? "100%" : `${progressPercent}%`,
-                          background: isCompleted ? "#4caf50" : "var(--primary)",
-                        }}
-                      />
-                    </div>
+                    <WatchProgressBar
+                      percent={isCompleted ? 100 : progressPercent}
+                      fillColor={isCompleted ? "#4caf50" : undefined}
+                      animate
+                    />
                   )}
                 </ViewTransitionLink>
                 {season.play_content_id ? (

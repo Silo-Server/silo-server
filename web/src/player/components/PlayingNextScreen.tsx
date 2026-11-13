@@ -11,6 +11,7 @@ import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/e
 import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { codeNumber, useT } from "@/i18n";
 import { cn } from "@/lib/utils";
+import WatchProgressBar from "@/components/WatchProgressBar";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
 import { parseCalendarDate, preferredDateLocale } from "@/lib/datetime";
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
@@ -548,14 +549,7 @@ function OnDeckCarousel({
                       </div>
                     </div>
                     {/* Progress bar */}
-                    {progressPercent > 0 && (
-                      <div className="absolute inset-x-0 bottom-0 h-[3px] bg-white/10">
-                        <div
-                          className="h-full bg-[var(--hud-lamp)]"
-                          style={{ width: `${Math.min(progressPercent, 100)}%` }}
-                        />
-                      </div>
-                    )}
+                    {progressPercent > 0 && <WatchProgressBar percent={progressPercent} />}
                   </div>
                   <div className="mt-1.5 space-y-0.5">
                     <div className="truncate text-sm font-semibold" title={title}>

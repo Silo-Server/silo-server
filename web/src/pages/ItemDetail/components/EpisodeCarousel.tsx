@@ -19,6 +19,7 @@ import type { ScrollPreservingState } from "@/hooks/useScrollRestoration";
 import { buildItemHref } from "@/lib/mediaNavigation";
 import { useT } from "@/i18n";
 import EpisodeCardCaption from "./EpisodeCardCaption";
+import WatchProgressBar from "@/components/WatchProgressBar";
 
 interface EpisodeCarouselProps {
   episodes: EpisodeListItem[];
@@ -207,14 +208,7 @@ function EpisodeCarouselCard({
                   {t("web.detail.episodes.nowViewing")}
                 </div>
               )}
-              {progress != null && (
-                <div className="absolute inset-x-2 bottom-1.5 h-[3px] overflow-hidden rounded-full bg-black/40">
-                  <div
-                    className="h-full rounded-full"
-                    style={{ width: `${progress}%`, background: "var(--primary)" }}
-                  />
-                </div>
-              )}
+              {progress != null && <WatchProgressBar percent={progress} />}
             </div>
           </ViewTransitionLink>
           <MediaItemMenu
