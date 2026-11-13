@@ -389,6 +389,10 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 	}
 
 	logs := newPrepareLogWriter(ctx, opts)
+	// wroteOutput records whether the last failed attempt had written any of
+	// the artifact. FFmpeg writes the container header only once every encoder
+	// has opened, so an attempt that wrote nothing died while starting.
+	wroteOutput := false
 	runOnce := func(runOpts TranscodeOpts) error {
 		args := buildPrepareFileArgs(runOpts, partPath)
 		bin := runOpts.FFmpegPath
@@ -412,6 +416,8 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 		err := cmd.Run()
 		logs.flush()
 		if err != nil {
+			info, statErr := os.Stat(partPath)
+			wroteOutput = statErr == nil && info.Size() > 0
 			_ = os.Remove(partPath)
 			logs.event("ffmpeg process exit error", formatWaitError(err))
 			retained := stderr.String()
@@ -446,13 +452,12 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 				"hw_accel", opts.HWAccel, "output", outputPath, "error", err)
 			logs.event("retrying with CPU decoding", "")
 			for {
-				started := time.Now()
 				err = runOnce(decodeRetry.Current())
 				// Only an attempt that died while starting says the hardware
-				// path is unusable. One that failed after encoding for a while
-				// (a full disk, say) would fail a software encode too.
-				if err == nil || ctx.Err() != nil || time.Since(started) > ManifestStartupTimeout ||
-					!decodeRetry.AdvanceAfterFailure("") {
+				// path is unusable. One that had written output got past
+				// encoder startup, and its failure (a full disk, say) would
+				// fail a software encode too.
+				if err == nil || ctx.Err() != nil || wroteOutput || !decodeRetry.AdvanceAfterFailure("") {
 					break
 				}
 				logs.event("retrying with software encoding", "")
