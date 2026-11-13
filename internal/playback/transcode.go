@@ -1062,9 +1062,10 @@ func resolveEffectiveTranscodeHWAccelContext(ctx context.Context, opts Transcode
 	}
 	// An explicit NVENC setting keeps the established libx264 fallback for a
 	// source the CUDA decoder must not receive. Intel QSV/VAAPI have the
-	// explicit upload paths below and retain hardware encoding. Only the
-	// automatic pipeline's mixed stage, which falls back to software itself if
-	// the CUDA upload fails, keeps NVENC encoding after a CPU decode.
+	// explicit upload paths below and retain hardware encoding. Only an
+	// AutoTranscodePipeline's mixed stage (hw_accel=auto, or the
+	// NewSoftwareDecodeRetryPipeline fallback), which falls back to software
+	// itself if the CUDA upload fails, keeps NVENC encoding after a CPU decode.
 	if opts.SoftwareVideoDecode && hwAccel == transcodeHWNVENC &&
 		(!opts.nvencSoftwareDecode || opts.ToneMapMode != "") {
 		return HWAccelNone

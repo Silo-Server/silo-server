@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 )
 
@@ -14,6 +15,8 @@ type TranscodeStartFunc func(context.Context, TranscodeOpts) (*TranscodeSession,
 // TranscodeStartupRetry selects the single legacy retry a startup takes when
 // its automatic pipeline is not enabled and FFmpeg exits before its first
 // manifest. An enabled pipeline never takes it: its last stage is software.
+// When the hardware decoder rejected the source, every policy except
+// TranscodeStartupRetryNone walks NewSoftwareDecodeRetryPipeline instead.
 type TranscodeStartupRetry uint8
 
 const (
@@ -153,6 +156,13 @@ func runTranscodeStartup(ctx context.Context, pipeline *AutoTranscodePipeline, s
 			if pipeline.AdvanceAfterFailure(failedDevice) {
 				attempt = pipeline.Current()
 				next = true
+			} else if decodeRetry := legacyDecodeRetryPipeline(startup.LegacyRetry, pipeline, legacyRetryUsed, attempt, err); decodeRetry.Enabled() {
+				// The decoder rejected the source; the same command fails
+				// on every device. Walk CPU decode instead, as auto would.
+				pipeline = decodeRetry
+				attempt = pipeline.Current()
+				legacyRetryUsed = true
+				next = true
 			} else if !pipeline.Enabled() && !legacyRetryUsed {
 				attempt, next = legacyStartupRetry(startup.LegacyRetry, attempt, failedDevice)
 				legacyRetryUsed = next
@@ -177,6 +187,66 @@ func runTranscodeStartup(ctx context.Context, pipeline *AutoTranscodePipeline, s
 			"error", err,
 		)
 	}
+}
+
+// hardwareDecodeUnsupportedMarkers are FFmpeg startup errors that mean the
+// GPU's decoder cannot take this source at all, so running the same command
+// again or on another render device fails the same way. NVDEC prints the
+// first one when the card has no decoder for the codec, profile or bit depth
+// (HEVC on a Maxwell GM204, for example) even though NVENC encodes fine.
+var hardwareDecodeUnsupportedMarkers = []string{
+	"Hardware is lacking required capabilities",
+}
+
+// IsHardwareDecodeUnsupported reports whether a startup error says the
+// hardware decoder cannot decode this source.
+func IsHardwareDecodeUnsupported(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	for _, marker := range hardwareDecodeUnsupportedMarkers {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// NewSoftwareDecodeRetryPipeline returns the fallback for a startup whose
+// hardware decoder rejected the source (see IsHardwareDecodeUnsupported): CPU
+// decode with the configured hardware encoder, then CPU decode and encode.
+// It is the same order hw_accel=auto walks after its first stage, so an
+// explicit acceleration keeps its GPU encoder when the upload works and still
+// reaches software when it does not. The pipeline keeps its own cache, so an
+// explicit setting never changes what hw_accel=auto prefers.
+//
+// The returned pipeline is disabled (Enabled reports false) when the cause is
+// any other failure, the attempt already decoded on the CPU, it carries a
+// tone-map recipe (whose filter graph names its executor), it copies video,
+// or it did not use a hardware backend.
+func NewSoftwareDecodeRetryPipeline(failed TranscodeOpts, cause error) *AutoTranscodePipeline {
+	if !IsHardwareDecodeUnsupported(cause) ||
+		failed.SoftwareVideoDecode ||
+		failed.ToneMapMode != "" ||
+		strings.EqualFold(failed.TargetCodecVideo, "copy") ||
+		!isHardwareTranscodeBackend(failed.HWAccel) {
+		return &AutoTranscodePipeline{base: failed}
+	}
+	retry := failed
+	retry.SoftwareVideoDecode = true
+	return newResolvedAutoTranscodePipeline(retry, newAutoTranscodePipelineCache())
+}
+
+// legacyDecodeRetryPipeline returns the CPU-decode fallback a startup outside
+// the automatic pipeline takes in place of its legacy retry, or a disabled
+// pipeline when policy allows no retry, the retry was taken, or cause is not a
+// hardware decoder rejection.
+func legacyDecodeRetryPipeline(policy TranscodeStartupRetry, pipeline *AutoTranscodePipeline, legacyRetryUsed bool, failed TranscodeOpts, cause error) *AutoTranscodePipeline {
+	if policy == TranscodeStartupRetryNone || pipeline.Enabled() || legacyRetryUsed {
+		return &AutoTranscodePipeline{base: failed}
+	}
+	return NewSoftwareDecodeRetryPipeline(failed, cause)
 }
 
 // legacyStartupRetry returns the single retry main takes outside the

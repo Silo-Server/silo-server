@@ -437,6 +437,16 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 			retryOpts := opts
 			retryOpts.HWAccel = retryAccel
 			err = runOnce(retryOpts)
+		} else if NewSoftwareDecodeRetryPipeline(opts, err).Enabled() {
+			// The hardware decoder rejected the source, so the same command
+			// fails again. Decode on the CPU; an explicit NVENC setting then
+			// encodes with libx264, which suits an offline artifact.
+			slog.WarnContext(ctx, "prepared encode failed in the hardware decoder; retrying with CPU decoding",
+				"hw_accel", opts.HWAccel, "output", outputPath, "error", err)
+			logs.event("retrying with CPU decoding", "")
+			retryOpts := opts
+			retryOpts.SoftwareVideoDecode = true
+			err = runOnce(retryOpts)
 		}
 	}
 	if err != nil {
