@@ -158,6 +158,7 @@ function makeInstallation(overrides: Partial<PluginInstallation> = {}): PluginIn
     auth_bindings: [],
     task_bindings: [],
     update_policy: "auto",
+    signature: { state: "unknown" },
     created_at: "2026-09-14T10:00:00Z",
     ...overrides,
   };
