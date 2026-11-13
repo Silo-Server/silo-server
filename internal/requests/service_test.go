@@ -781,11 +781,10 @@ func seedStalledPresenceRequest(t *testing.T, status Status, age time.Duration) 
 // on. A router that never reports completion would otherwise pin the request
 // open forever, because the presence shortcut stays disabled while a target
 // is live. Inside the horizon the router still owns the target: presence must
-// not short-circuit a submission that may simply be young. The presence check
-// is quality-agnostic, so a 2160p target still downloading against an
-// already-present 1080p copy must never be retired out from under the
-// in-flight download.
-func TestReconcileRequestsPresenceRetiresOnlyStalledQueuedTargets(t *testing.T) {
+// not short-circuit a submission that may simply be young. A downloading
+// target gets a longer horizon (see
+// TestReconcileRequestsPresenceRetiresStalledDownloadingTargets).
+func TestReconcileRequestsPresenceRetiresOnlyStalledTargets(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
 		status        Status
@@ -795,7 +794,8 @@ func TestReconcileRequestsPresenceRetiresOnlyStalledQueuedTargets(t *testing.T) 
 	}{
 		{"stalled queued", StatusQueued, 48 * time.Hour, 1, StatusCompleted},
 		{"recent queued", StatusQueued, time.Hour, 0, StatusQueued},
-		{"downloading", StatusDownloading, 30 * 24 * time.Hour, 0, StatusDownloading},
+		{"stalled downloading", StatusDownloading, 30 * 24 * time.Hour, 1, StatusCompleted},
+		{"recent downloading", StatusDownloading, 48 * time.Hour, 0, StatusDownloading},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, service, _ := seedStalledPresenceRequest(t, tc.status, tc.age)
@@ -819,6 +819,88 @@ func TestReconcileRequestsPresenceRetiresOnlyStalledQueuedTargets(t *testing.T) 
 			}
 			if store.requests["req-1"].Status != StatusCompleted {
 				t.Fatalf("request status = %q, want completed", store.requests["req-1"].Status)
+			}
+		})
+	}
+}
+
+// A router can report downloading for good: Seerr leaves a movie in
+// PROCESSING when its own availability check never runs, even once the file
+// is imported (#3478). Presence closes out such a target, but a downloading
+// target may also be a real download, and presence only knows the title is in
+// the library: not at which quality, and for a whole series, not which
+// episodes. So a target with download progress, a whole-series request, a
+// season request whose seasons are not all complete, and a request that asked
+// for another quality as well all keep their downloading target.
+func TestReconcileRequestsPresenceRetiresStalledDownloadingTargets(t *testing.T) {
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	stale := now.Add(-30 * 24 * time.Hour)
+	const seriesID = 1399
+	movie := Request{ID: "req-1", MediaType: MediaTypeMovie, TMDBID: 550}
+	wholeSeries := Request{ID: "req-1", MediaType: MediaTypeSeries, TMDBID: seriesID}
+	seasons := Request{ID: "req-1", MediaType: MediaTypeSeries, TMDBID: seriesID, Seasons: []int{1, 2}}
+	complete := map[int]SeasonCounts{1: {Aired: 8, Have: 8}, 2: {Aired: 10, Have: 10}}
+	partial := map[int]SeasonCounts{1: {Aired: 8, Have: 8}, 2: {Aired: 10, Have: 4}}
+	downloading := Target{Quality: Quality1080p, Status: StatusDownloading, ExternalStatus: "3", UpdatedAt: stale}
+	withProgress := downloading
+	withProgress.Download = &DownloadProgress{Phase: DownloadPhaseStalled, BytesTotal: 100, BytesLeft: 60, UpdatedAt: now.Add(-time.Minute)}
+	uhd := downloading
+	uhd.Quality = Quality2160p
+	hdDone := Target{Quality: Quality1080p, Status: StatusCompleted, ExternalStatus: "5", UpdatedAt: stale}
+
+	for _, tc := range []struct {
+		name    string
+		req     Request
+		seasons map[int]SeasonCounts
+		targets []Target
+		retired bool
+	}{
+		{"movie", movie, nil, []Target{downloading}, true},
+		{"movie with download progress", movie, nil, []Target{withProgress}, false},
+		{"2160p beside a completed 1080p target", movie, nil, []Target{hdDone, uhd}, false},
+		{"2160p alone", movie, nil, []Target{uhd}, true},
+		{"whole series", wholeSeries, nil, []Target{downloading}, false},
+		{"seasons all complete", seasons, complete, []Target{downloading}, true},
+		{"a season incomplete", seasons, partial, []Target{downloading}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newFakeStore()
+			req := tc.req
+			req.Status, req.Outcome = StatusDownloading, OutcomeActive
+			store.candidates = []*Request{&req}
+			store.requests[req.ID] = &req
+			for _, target := range tc.targets {
+				target.RequestID = req.ID
+				target.IntegrationID, target.IntegrationKind, target.ExternalID = "router-1", "seerr", "123"
+				if _, err := store.CreateTarget(context.Background(), target); err != nil {
+					t.Fatalf("seed target: %v", err)
+				}
+			}
+			presence := &fakePresence{available: map[MediaType]map[int]bool{req.MediaType: {req.TMDBID: true}}}
+			if tc.seasons != nil {
+				presence.seasons = map[string]map[int]SeasonCounts{fakePresenceContentID(req.MediaType, req.TMDBID): tc.seasons}
+			}
+			service := NewService(store, &fakeTMDBClient{}, presence)
+			service.Now = func() time.Time { return now }
+
+			result, err := service.ReconcileRequests(context.Background(), 100)
+			if err != nil {
+				t.Fatalf("ReconcileRequests returned error: %v", err)
+			}
+			targets, _ := store.ListTargets(context.Background(), req.ID)
+			last := targets[len(targets)-1]
+			if !tc.retired {
+				if result.Completed != 0 || last.Status != StatusDownloading || store.requests[req.ID].Status != StatusDownloading {
+					t.Fatalf("result = %+v target = %+v request status = %q, want the target and request left downloading",
+						result, last, store.requests[req.ID].Status)
+				}
+				return
+			}
+			if result.Completed != 1 || last.Status != StatusCompleted || last.ExternalStatus != ExternalStatusPresenceConfirmed {
+				t.Fatalf("result = %+v target = %+v, want the target completed as %s", result, last, ExternalStatusPresenceConfirmed)
+			}
+			if store.requests[req.ID].Status != StatusCompleted {
+				t.Fatalf("request status = %q, want completed", store.requests[req.ID].Status)
 			}
 		})
 	}

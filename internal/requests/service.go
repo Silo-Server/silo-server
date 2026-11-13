@@ -3158,6 +3158,14 @@ func (s *Service) liveTargets(ctx context.Context, requestID string) ([]Target, 
 // and has not.
 const stalledTargetHorizon = 24 * time.Hour
 
+// stalledDownloadHorizon is the same horizon for a downloading target. A
+// router that says a download is under way is a stronger sign of work in
+// flight than one that says queued, so presence waits longer before it
+// overrules it. A router can still report downloading for good: Seerr keeps a
+// movie in PROCESSING when its own availability check never runs, even after
+// the file is imported.
+const stalledDownloadHorizon = 72 * time.Hour
+
 // ExternalStatusPresenceConfirmed marks a target closed out by the presence
 // backstop rather than by a router-reported completion. Exported so clients can
 // distinguish "the arr said it finished" from "we found the media ourselves".
@@ -3170,17 +3178,43 @@ const ExternalStatusPresenceConfirmed = "presence_confirmed"
 // item — pins the request open permanently even though the media is sitting in
 // the library.
 //
-// Targets that are actively downloading are never retired: those are exactly
-// the in-flight downloads the quality-agnostic presence check must not orphan.
-// Only targets stuck in queued past the horizon are closed out, and the request
-// status follows from the usual target aggregate. It returns the request as of
-// the last retirement, if any.
+// A queued target is closed out once it has gone stalledTargetHorizon without
+// a status change. A downloading target can be stuck the same way (see
+// stalledDownloadHorizon), but it may also be a real download that the
+// quality-agnostic presence check must not orphan, so it is closed out only
+// when all of these hold (see downloadRetirable):
+//   - it has gone stalledDownloadHorizon without a status change;
+//   - its plugin reports no download progress for it;
+//   - the request is for a movie or for named seasons, never a whole series,
+//     whose presence any one episode satisfies (present already requires every
+//     requested season to be complete);
+//   - every target of the request is at its quality, since presence cannot
+//     tell a 1080p copy from a 2160p one.
+//
+// The request status follows from the usual target aggregate. It returns the
+// request as of the last retirement, if any.
 func (s *Service) retireStalledTargets(ctx context.Context, req Request, live []Target) (*Request, bool, error) {
-	cutoff := s.now().Add(-stalledTargetHorizon)
+	now := s.now()
 	var updated *Request
 	retired := false
+	var all []Target
 	for _, t := range live {
-		if t.Status != StatusQueued || t.UpdatedAt.After(cutoff) {
+		switch t.Status {
+		case StatusQueued:
+			if t.UpdatedAt.After(now.Add(-stalledTargetHorizon)) {
+				continue
+			}
+		case StatusDownloading:
+			if all == nil {
+				var err error
+				if all, err = s.store.ListTargets(ctx, req.ID); err != nil {
+					return updated, retired, err
+				}
+			}
+			if !downloadRetirable(req, t, all, now) {
+				continue
+			}
+		default:
 			continue
 		}
 		next, err := s.store.UpdateTargetStatus(ctx, t.ID, StatusCompleted, "", ExternalStatusPresenceConfirmed, "", Viewer{})
@@ -3197,10 +3231,28 @@ func (s *Service) retireStalledTargets(ctx context.Context, req Request, live []
 			"integration_kind", t.IntegrationKind,
 			"external_id", t.ExternalID,
 			"external_status", t.ExternalStatus,
+			"target_status", t.Status,
 			"target_updated_at", t.UpdatedAt,
 		)
 	}
 	return updated, retired, nil
+}
+
+// downloadRetirable reports whether presence may close out a downloading
+// target t of req, whose targets are all; see retireStalledTargets.
+func downloadRetirable(req Request, t Target, all []Target, now time.Time) bool {
+	if t.UpdatedAt.After(now.Add(-stalledDownloadHorizon)) || t.Download != nil {
+		return false
+	}
+	if req.MediaType != MediaTypeMovie && !isSeasonRequest(req) {
+		return false
+	}
+	for _, other := range all {
+		if other.Quality != t.Quality {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Service) now() time.Time {
