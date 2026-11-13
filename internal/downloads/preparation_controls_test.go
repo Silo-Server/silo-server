@@ -521,6 +521,36 @@ func TestDeletingTheLastDownloadStopsItsPreparationDB(t *testing.T) {
 		t.Fatalf("late link = requeued %v, download %q, job %q; want the job queued again for a preparing download",
 			requeued, confirmed.Status, status(queued))
 	}
+
+	// Asking for the stopped encode's file again queues it, but no worker
+	// starts it while the stopped worker may still write its output path.
+	if err := repo.Requeue(ctx, running); err != nil {
+		t.Fatal(err)
+	}
+	if claimRunnable(t, repo, pool)[running] {
+		t.Fatal("a requeued job was claimed while its stopped worker could still be running")
+	}
+}
+
+// claimRunnable claims every job a worker could start now, failing each one
+// so the next claim moves on, and reports which were claimed.
+func claimRunnable(t *testing.T, repo *ArtifactRepository, pool *pgxpool.Pool) map[string]bool {
+	t.Helper()
+	ctx := context.Background()
+	claimed := map[string]bool{}
+	for {
+		claim, err := repo.ClaimNext(ctx, "worker-drain", time.Minute)
+		if errors.Is(err, ErrNoArtifactJob) {
+			return claimed
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		claimed[claim.ID] = true
+		if _, err := pool.Exec(ctx, `UPDATE download_artifacts SET status = 'failed', lease_owner = NULL WHERE id = $1`, claim.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func TestStaleAbandonedPreparationsAreRetiredNotClaimedDB(t *testing.T) {
@@ -560,20 +590,7 @@ func TestStaleAbandonedPreparationsAreRetiredNotClaimedDB(t *testing.T) {
 	}
 
 	// No worker starts an abandoned job.
-	claimed := map[string]bool{}
-	for {
-		claim, err := repo.ClaimNext(ctx, "worker-drain", time.Minute)
-		if errors.Is(err, ErrNoArtifactJob) {
-			break
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		claimed[claim.ID] = true
-		if _, err := pool.Exec(ctx, `UPDATE download_artifacts SET status = 'failed', lease_owner = NULL WHERE id = $1`, claim.ID); err != nil {
-			t.Fatal(err)
-		}
-	}
+	claimed := claimRunnable(t, repo, pool)
 	if claimed[orphanQueued] || claimed[orphanRunning] || !claimed[needed] || !claimed[fresh.ID] {
 		t.Fatalf("claimed %v; want the needed and the fresh job, not the abandoned ones", claimed)
 	}

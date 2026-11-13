@@ -712,14 +712,7 @@ func (r *Repository) ConfirmArtifactLink(ctx context.Context, d *Download) (*Dow
 		// The job was retired as abandoned after the create read it. This
 		// download needs it, so prepare it again.
 		tag, err := tx.Exec(ctx,
-			`UPDATE download_artifacts a
-			 SET status = CASE
-			                  WHEN track_recipe_version <> '' THEN 'tracks_v1_queued'
-			                  WHEN audio_recipe_version <> '' THEN 'audio_v2_queued'
-			                  WHEN tone_map_mode <> '' THEN 'tone_map_queued'
-			                  ELSE 'queued'
-			              END,
-			     attempts = 0, error_message = '', next_retry_at = NULL, completed_at = NULL, last_used_at = now()
+			`UPDATE download_artifacts a SET `+requeueArtifactAssignment+`, last_used_at = now()
 			 WHERE a.id = $2 AND a.status = 'expired'
 			   AND EXISTS (SELECT 1 FROM downloads d WHERE d.id = $1 AND d.artifact_id = a.id AND d.status = 'preparing')`,
 			d.ID, d.ArtifactID,

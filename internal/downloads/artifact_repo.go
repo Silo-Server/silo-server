@@ -150,7 +150,8 @@ func (r *ArtifactRepository) GetByKey(ctx context.Context, mediaFileID int, form
 // ClaimNext atomically claims one runnable job: a queued, unpaused row whose
 // backoff has elapsed, or a running row whose lease has expired (lease
 // stealing). A job no in-flight download needs is skipped once it is older
-// than abandonedPreparationGrace; the preparation run retires it. A queued row can carry an unowned lease_expires_at after a pause
+// than abandonedPreparationGrace; the preparation run retires it. A queued
+// row can carry an unowned lease_expires_at after a pause or a retirement
 // took it from a worker that may still be running; it waits that out. FOR UPDATE
 // SKIP LOCKED makes concurrent workers (and nodes) safe without double-encoding.
 // Returns ErrNoArtifactJob when nothing is claimable.
@@ -395,7 +396,9 @@ func (r *ArtifactRepository) ReclaimExpiredLeases(ctx context.Context) ([]reclai
 }
 
 // Requeue sends a failed or expired artifact back to queued for a fresh
-// attempt. The deterministic output_path is preserved. Returns ErrNotFound
+// attempt. The deterministic output_path is preserved, and so is an unowned
+// lease window a stopped worker left: ClaimNext waits it out, so the new
+// attempt never shares the output path with an encode still shutting down. Returns ErrNotFound
 // when the row no longer exists (a concurrent sweep deleted it) or is no
 // longer failed or expired (another request requeued it first), so a caller
 // never resets a job that is running or ready.
@@ -409,7 +412,8 @@ func (r *ArtifactRepository) Requeue(ctx context.Context, id string) error {
 		                  ELSE 'queued'
 		              END,
 		     attempts = 0, error_message = '', next_retry_at = NULL,
-		     lease_owner = NULL, lease_expires_at = NULL, completed_at = NULL,
+		     lease_owner = NULL, completed_at = NULL,
+		     lease_expires_at = CASE WHEN lease_owner IS NULL AND lease_expires_at > now() THEN lease_expires_at END,
 		     origin_node_id = 0, origin_node_url = '', origin_node_group = '', origin_artifact_id = ''
 		 WHERE id = $1 AND status IN ('failed', 'expired')`,
 		id,
@@ -464,9 +468,23 @@ const unusedReadyArtifactPredicate = `a.status IN ('ready', 'tone_map_ready', 'a
 // manifest and a re-download can prepare the same file again. The locator is
 // cleared so remote cleanup never mistakes the old node file for a live one;
 // expired_from_node_id keeps where the file was, for the inventory.
-const expireArtifactAssignment = `status = 'expired', expired_from_node_id = NULLIF(origin_node_id, 0),
+const expireArtifactAssignment = expireLocatorAssignment + `, lease_expires_at = NULL`
+
+// expireLocatorAssignment is expireArtifactAssignment without the lease
+// expiry, for a caller that must keep a stopped worker's lease window.
+const expireLocatorAssignment = `status = 'expired', expired_from_node_id = NULLIF(origin_node_id, 0),
 	origin_node_id = 0, origin_node_url = '', origin_node_group = '',
-	origin_artifact_id = '', lease_owner = NULL, lease_expires_at = NULL, next_retry_at = NULL`
+	origin_artifact_id = '', lease_owner = NULL, next_retry_at = NULL`
+
+// requeueArtifactAssignment returns a row to the queued status its recipe
+// uses, for a fresh run of attempts.
+const requeueArtifactAssignment = `status = CASE
+	                  WHEN track_recipe_version <> '' THEN 'tracks_v1_queued'
+	                  WHEN audio_recipe_version <> '' THEN 'audio_v2_queued'
+	                  WHEN tone_map_mode <> '' THEN 'tone_map_queued'
+	                  ELSE 'queued'
+	              END,
+	     attempts = 0, error_message = '', next_retry_at = NULL, completed_at = NULL`
 
 // RecoverMissing resolves a ready local artifact whose output file vanished.
 // It expires the row when no in-flight download needs it, so lost output is

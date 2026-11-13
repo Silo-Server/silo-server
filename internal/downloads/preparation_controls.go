@@ -148,7 +148,10 @@ const abandonedPreparationPredicate = `a.status IN ('queued', 'tone_map_queued',
 // RetireAbandonedPreparations expires every listed queued or running job that
 // no in-flight download needs any more, so nothing encodes for nobody. The
 // row keeps its recipe: a create that read the job before this committed
-// links to an expired row, which ConfirmArtifactLink queues again. The check
+// links to an expired row, which ConfirmArtifactLink queues again. The row
+// also keeps its id and output path, so a running job keeps an unowned lease
+// for pauseClaimGrace, as a pause does: the stopped worker may run until its
+// next heartbeat, and a job queued again meanwhile waits that out. The check
 // runs in the statement that expires the job, so a download committed since
 // the caller looked keeps it preparing.
 func (r *ArtifactRepository) RetireAbandonedPreparations(ctx context.Context, ids []string) ([]stoppedArtifact, error) {
@@ -171,10 +174,12 @@ func (r *ArtifactRepository) retireAbandonedPreparations(ctx context.Context, fi
 		     WHERE `+filter+` AND `+abandonedPreparationPredicate+`
 		     FOR UPDATE
 		 )
-		 UPDATE download_artifacts a SET `+expireArtifactAssignment+`, paused_at = NULL
+		 UPDATE download_artifacts a SET `+expireLocatorAssignment+`, paused_at = NULL,
+		     lease_expires_at = CASE WHEN t.running THEN now() + make_interval(secs => $2)
+		                             WHEN a.lease_expires_at > now() THEN a.lease_expires_at END
 		 FROM target t
 		 WHERE a.id = t.id
-		 RETURNING a.id, t.running`, arg)
+		 RETURNING a.id, t.running`, arg, pauseClaimGrace.Seconds())
 	if err != nil {
 		return nil, fmt.Errorf("retiring abandoned preparations: %w", err)
 	}
