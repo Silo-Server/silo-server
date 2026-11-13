@@ -299,6 +299,21 @@ function canFoldAnnouncedSubtitleTrack(
 }
 
 /**
+ * The ordinal the stored subtitle at `index` in `from` holds in `to`. It is
+ * `index` itself when that names no stored subtitle, whose ordinals a
+ * deletion does not move, and null when the stored subtitle is gone.
+ */
+function storedSubtitleOrdinalIn(
+  index: number,
+  from: readonly SubtitleInventoryItemV3[],
+  to: readonly SubtitleInventoryItemV3[],
+): number | null {
+  const storedId = from.find((item) => item.combined_index === index)?.stored_subtitle_id;
+  if (storedId === undefined) return index;
+  return to.find((item) => item.stored_subtitle_id === storedId)?.combined_index ?? null;
+}
+
+/**
  * Maps the plan's subtitle inventory onto the player's track shape.
  *
  * `index` is the server's combined ordinal, copied verbatim: it is the identity
@@ -616,6 +631,8 @@ export function usePlaybackSession(
     planId: string;
     /** The file the queued request's track ordinals index into. */
     mediaFileId: number;
+    /** The subtitle inventory the queued request's subtitle ordinal indexes. */
+    subtitleInventory: readonly SubtitleInventoryItemV3[];
     onAdopt?: (planRevision: number) => void;
   } | null>(null);
   const issueReplanRef = useRef<
@@ -1371,6 +1388,7 @@ export function usePlaybackSession(
               resolve,
               planId: plan.plan_id,
               mediaFileId: plan.effective_media_file_id,
+              subtitleInventory: plan.subtitle.inventory,
               onAdopt,
             };
           });
@@ -2056,27 +2074,49 @@ export function usePlaybackSession(
             false,
             false,
             () => {
+              const fresh = planRef.current?.subtitle.inventory ?? [];
               // A choice made while the refetch ran is newer than this pick; a
               // queued seek or refresh is not, and the pick replaces it.
-              const queued = pendingReplanRef.current?.options;
+              const newer = pendingReplanRef.current;
+              const queued = newer?.options;
               if (
-                queued?.operation === "quality_change" ||
-                queued?.operation === "output_change" ||
-                (queued?.operation === "track_change" &&
-                  (queued.subtitle !== undefined || queued.audio !== undefined))
+                newer &&
+                (queued?.operation === "quality_change" ||
+                  queued?.operation === "output_change" ||
+                  (queued?.operation === "track_change" &&
+                    (queued.subtitle !== undefined || queued.audio !== undefined)))
               ) {
+                // The menu still listed the stale inventory, so a subtitle
+                // picked from it moves to its stored subtitle's new ordinal.
+                const index =
+                  queued.operation === "track_change" ? queued.subtitle?.index : undefined;
+                if (
+                  index !== undefined &&
+                  newer.mediaFileId === planRef.current?.effective_media_file_id
+                ) {
+                  const moved = storedSubtitleOrdinalIn(index, newer.subtitleInventory, fresh);
+                  pendingReplanRef.current = {
+                    ...newer,
+                    options: {
+                      ...queued,
+                      subtitle: moved === null ? null : { id: "", index: moved },
+                    },
+                  };
+                }
                 return;
               }
-              const picked = planRef.current?.subtitle.inventory.find(
-                (item) => item.stored_subtitle_id === pickedStoredId,
+              const pickedOrdinal = storedSubtitleOrdinalIn(
+                pickedIndex,
+                plan.subtitle.inventory,
+                fresh,
               );
-              if (!picked) return;
+              if (pickedOrdinal === null) return;
               void replan(
                 {
                   ...pick,
                   // A queued seek is replaced, so its target goes out with the pick.
                   positionSeconds: queued?.positionSeconds ?? playbackPositionRef.current,
-                  subtitle: { id: "", index: picked.combined_index },
+                  subtitle: { id: "", index: pickedOrdinal },
                 },
                 pending.retireSessionOnRefusal,
                 false,
