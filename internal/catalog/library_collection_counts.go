@@ -110,15 +110,15 @@ func (r *LibraryCollectionRepository) ViewerCollectionCounts(ctx context.Context
 }
 
 // countSmartCollections counts the members each smart collection lists under
-// access, as its catalog page resolves them: its rules narrowed to its
-// libraries and access's, with its item limit. A collection whose count could
+// access, as its catalog page resolves them: its rules over their own
+// libraries narrowed to access's, with its item limit. A collection whose count could
 // not be read is absent from the result.
 func (r *LibraryCollectionRepository) countSmartCollections(ctx context.Context, collections []*models.LibraryCollection, access AccessFilter) (map[string]int, error) {
 	counts := make(map[string]int, len(collections))
 	var queries []collectionCountStatement
 	var failures []error
 	for _, c := range collections {
-		membership, err := ResolveLibraryCollectionMembership(c, access.AllowedLibraryIDs)
+		membership, err := ResolveLibraryCollectionMembership(c, access)
 		if err != nil {
 			failures = append(failures, fmt.Errorf("collection %s: %w", c.ID, err))
 			continue
@@ -197,7 +197,7 @@ func buildCountVisibleStoredMembersSQL(collectionIDs []string, access AccessFilt
             FROM library_collection_items lci
             JOIN media_items mi ON mi.content_id = lci.media_item_id
             WHERE lci.collection_id = ANY($1)`)
-	for _, c := range itemAccessConditions(access, &args, &argIdx) {
+	for _, c := range listedItemAccessConditions(access, &args, &argIdx) {
 		sql.WriteString("\n            AND " + c)
 	}
 	// The catalog page a collection card opens never lists manga chapters.

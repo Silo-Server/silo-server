@@ -39,7 +39,7 @@ const episodeColumns = `content_id, series_id, season_id, season_number, episode
 	imdb_id, tmdb_id, tvdb_id,
 	still_path, still_source_path, still_thumbhash,
 	metadata_s3_path, metadata_etag, metadata_source,
-	created_at, updated_at`
+	created_at, updated_at, locked_fields`
 
 // refreshSeriesAirDatesSQL maintains the denormalized media_items columns
 // last_air_date_at (newest episode aired on or before today) and
@@ -230,6 +230,7 @@ func scanEpisode(row pgx.Row) (*models.Episode, error) {
 		&ep.MetadataSource,
 		&ep.CreatedAt,
 		&ep.UpdatedAt,
+		&ep.LockedFields,
 	)
 	if seasonID != nil {
 		ep.SeasonID = *seasonID
@@ -313,6 +314,7 @@ func scanEpisodes(rows pgx.Rows) ([]*models.Episode, error) {
 			&ep.MetadataSource,
 			&ep.CreatedAt,
 			&ep.UpdatedAt,
+			&ep.LockedFields,
 		)
 		if seasonID != nil {
 			ep.SeasonID = *seasonID
@@ -367,6 +369,32 @@ var episodeArtworkAssignments = lockedArtworkAssignments("episodes", seriesImage
 // (series_id, season_number, episode_number) natural key already exists. The
 // stored content ID is preserved on update and written back to ep.ContentID.
 func (r *EpisodeRepository) Upsert(ctx context.Context, ep *models.Episode) error {
+	return upsertEpisode(ctx, r.pool, ep, func(attempt func(pgx.Tx) error) error {
+		return pgx.BeginTxFunc(ctx, r.pool, artworkUpsertTxOptions, attempt)
+	})
+}
+
+// UpsertTx is Upsert within the caller's transaction, which must run at READ
+// COMMITTED, as pool transactions do by default, so the upsert statement takes
+// its snapshot after the artwork row lock. Each attempt runs in a savepoint, so
+// a retried attempt leaves nothing behind.
+func (r *EpisodeRepository) UpsertTx(ctx context.Context, tx pgx.Tx, ep *models.Episode) error {
+	return upsertEpisode(ctx, tx, ep, func(attempt func(pgx.Tx) error) error {
+		return pgx.BeginFunc(ctx, tx, attempt)
+	})
+}
+
+// episodeUpsertDB is a pool or a transaction.
+type episodeUpsertDB interface {
+	itemExecer
+	Begin(ctx context.Context) (pgx.Tx, error)
+}
+
+// upsertEpisode runs Upsert on db. inAttempt runs each artwork-locked upsert
+// attempt in a transaction of its own, or a savepoint of db's.
+//
+//nolint:funlen // Upsert's body, moved as is so UpsertTx can share it
+func upsertEpisode(ctx context.Context, db episodeUpsertDB, ep *models.Episode, inAttempt func(func(pgx.Tx) error) error) error {
 	var seasonID *string
 	if ep.SeasonID != "" {
 		seasonID = &ep.SeasonID
@@ -384,7 +412,7 @@ func (r *EpisodeRepository) Upsert(ctx context.Context, ep *models.Episode) erro
 		WHERE series_id = $1
 		  AND (season_number, episode_number) <> ($5, $6)
 		  AND (($2 <> '' AND imdb_id = $2) OR ($3 <> '' AND tmdb_id = $3) OR ($4 <> '' AND tvdb_id = $4))`
-	if _, err := r.pool.Exec(ctx, clearQuery,
+	if _, err := db.Exec(ctx, clearQuery,
 		ep.SeriesID,
 		ep.ImdbID,
 		ep.TmdbID,
@@ -413,11 +441,8 @@ func (r *EpisodeRepository) Upsert(ctx context.Context, ep *models.Episode) erro
 		)
 		ON CONFLICT (series_id, season_number, episode_number) DO UPDATE SET
 			season_id = COALESCE(EXCLUDED.season_id, episodes.season_id),
-			title = EXCLUDED.title,
+			` + episodeLockableAssignments + `,
 			default_metadata_language = COALESCE(NULLIF(EXCLUDED.default_metadata_language, ''), episodes.default_metadata_language),
-			overview = EXCLUDED.overview,
-			air_date = EXCLUDED.air_date,
-			runtime = EXCLUDED.runtime,
 			rating_imdb = EXCLUDED.rating_imdb,
 			rating_tmdb = EXCLUDED.rating_tmdb,
 			imdb_id = COALESCE(NULLIF(EXCLUDED.imdb_id, ''), episodes.imdb_id),
@@ -432,7 +457,7 @@ func (r *EpisodeRepository) Upsert(ctx context.Context, ep *models.Episode) erro
 
 	var storedContentID string
 	err := retryArtworkUpsert(func() error {
-		return pgx.BeginTxFunc(ctx, r.pool, artworkUpsertTxOptions, func(tx pgx.Tx) error {
+		return inAttempt(func(tx pgx.Tx) error {
 			locked, err := lockArtworkRowsForUpsert(ctx, tx, `
 			SELECT content_id FROM episodes
 			WHERE series_id = $1 AND season_number = $2 AND episode_number = $3
@@ -476,7 +501,7 @@ func (r *EpisodeRepository) Upsert(ctx context.Context, ep *models.Episode) erro
 
 	// Maintain the denormalized media_items air-date columns for the parent
 	// series (audit 2026-05-01 §2.1 hot path #1).
-	if err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+	if err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
 		return refreshSeriesAirDates(ctx, tx, []string{ep.SeriesID})
 	}); err != nil {
 		return fmt.Errorf("update series air dates: %w", err)
@@ -642,11 +667,8 @@ func (r *EpisodeRepository) bulkUpsertOnce(ctx context.Context, seriesID string,
 	)
 	ON CONFLICT (series_id, season_number, episode_number) DO UPDATE SET
 		season_id = COALESCE(EXCLUDED.season_id, episodes.season_id),
-		title = EXCLUDED.title,
+		` + episodeLockableAssignments + `,
 		default_metadata_language = COALESCE(NULLIF(EXCLUDED.default_metadata_language, ''), episodes.default_metadata_language),
-		overview = EXCLUDED.overview,
-		air_date = EXCLUDED.air_date,
-		runtime = EXCLUDED.runtime,
 		rating_imdb = EXCLUDED.rating_imdb,
 		rating_tmdb = EXCLUDED.rating_tmdb,
 		imdb_id = COALESCE(NULLIF(EXCLUDED.imdb_id, ''), episodes.imdb_id),
@@ -1147,6 +1169,22 @@ func (r *EpisodeRepository) ListBySeason(ctx context.Context, seriesID string, s
 // UNIQUE index (series_id, season_number, episode_number). Neighbors are
 // resolved across season boundaries, so the result is at most three rows.
 func (r *EpisodeRepository) ListAdjacentInSeries(ctx context.Context, seriesID string, seasonNumber, episodeNumber int) ([]*models.Episode, error) {
+	return r.ListAdjacentInSeriesFor(ctx, seriesID, seasonNumber, episodeNumber, AccessFilter{})
+}
+
+// ListAdjacentInSeriesFor is ListAdjacentInSeries for a viewer. Under a
+// playback-quality ceiling it drops a selected episode with no version the
+// viewer may play, without reaching past it to a later neighbor, as Next Up
+// waits rather than skipping ahead.
+func (r *EpisodeRepository) ListAdjacentInSeriesFor(ctx context.Context, seriesID string, seasonNumber, episodeNumber int, access AccessFilter) ([]*models.Episode, error) {
+	args := []any{seriesID, seasonNumber, episodeNumber}
+	where := ""
+	if playable := EpisodePlayableUnderCeilingSQL("adjacent.content_id", access, func(value any) int {
+		args = append(args, value)
+		return len(args)
+	}); playable != "" {
+		where = "\n\tWHERE " + playable
+	}
 	query := `SELECT ` + episodeColumns + ` FROM (
 		(SELECT ` + episodeColumns + `
 			FROM episodes
@@ -1170,10 +1208,10 @@ func (r *EpisodeRepository) ListAdjacentInSeries(ctx context.Context, seriesID s
 			  AND ` + episodeAvailabilityPredicate + `
 			ORDER BY season_number ASC, episode_number ASC
 			LIMIT 1)
-	) AS adjacent
+	) AS adjacent` + where + `
 	ORDER BY season_number ASC, episode_number ASC`
 
-	rows, err := r.pool.Query(ctx, query, seriesID, seasonNumber, episodeNumber)
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing adjacent episodes in series: %w", err)
 	}
@@ -1261,6 +1299,11 @@ func (r *EpisodeRepository) UpdateMetadata(ctx context.Context, contentID string
 
 	addString("title", upd.Title)
 	addString("overview", upd.Overview)
+	if upd.LockedFields != nil {
+		setClauses = append(setClauses, fmt.Sprintf("locked_fields = $%d", argIdx))
+		args = append(args, lockableFields(*upd.LockedFields, episodeLockedColumns))
+		argIdx++
+	}
 	addInt("episode_number", upd.EpisodeNumber)
 	addInt("season_number", upd.SeasonNumber)
 	addString("air_date", upd.AirDate)
@@ -1334,7 +1377,7 @@ func (r *EpisodeRepository) ListUpcoming(ctx context.Context, since time.Time, s
 	conditions := []string{"mi.content_id = episodes.series_id", "mi.type = 'series'"}
 	args := []any{since}
 	index := 2
-	appendLibraryAccessConditions("mi.content_id", filter, &conditions, &args, &index)
+	appendListedLibraryAccessConditions("mi.content_id", filter, &conditions, &args, &index)
 	applyAccessFilter("mi", filter, &conditions, &args, &index)
 	if libraryID > 0 {
 		conditions = append(conditions, fmt.Sprintf("EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id AND mil.media_folder_id = $%d)", index))
@@ -1388,6 +1431,13 @@ func (r *EpisodeRepository) BrowseEpisodes(ctx context.Context, seriesID, season
 		index++
 	} else {
 		conditions = append(conditions, "EXISTS (SELECT 1 FROM episode_libraries el WHERE el.episode_id=e.content_id)")
+	}
+	if playable := EpisodePlayableUnderCeilingSQL("e.content_id", access, func(value any) int {
+		args = append(args, value)
+		index = len(args) + 1
+		return len(args)
+	}); playable != "" {
+		conditions = append(conditions, playable)
 	}
 	appendLibraryAccessConditions("s.content_id", access, &conditions, &args, &index)
 	applyAccessFilter("s", access, &conditions, &args, &index)

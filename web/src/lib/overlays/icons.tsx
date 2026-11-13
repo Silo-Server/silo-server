@@ -48,6 +48,12 @@ const LUCIDE_ICONS: Partial<Record<OverlayIconId, LucideIcon>> = {
   alert: TriangleAlert,
 };
 
+// The marks' text: format and brand names, the same in every language.
+const HDR_MARK = "HDR";
+const HDR10_MARK = "HDR10";
+const ATMOS_MARK = "ATMOS";
+const AV1_MARK = "AV1";
+
 // Inline brand marks. Each is a tiny SVG component that fills currentColor so
 // it inherits the badge's text color (the accent color in vibrant mode, white
 // otherwise). The visual style is text-as-mark — close enough to evoke the
@@ -64,7 +70,7 @@ function HDRMark(props: SVGProps<SVGSVGElement>) {
         textAnchor="middle"
         fontFamily="system-ui, sans-serif"
       >
-        HDR
+        {HDR_MARK}
       </text>
     </svg>
   );
@@ -81,7 +87,7 @@ function HDR10Mark(props: SVGProps<SVGSVGElement>) {
         textAnchor="middle"
         fontFamily="system-ui, sans-serif"
       >
-        HDR10
+        {HDR10_MARK}
       </text>
     </svg>
   );
@@ -107,7 +113,7 @@ function AtmosMark(props: SVGProps<SVGSVGElement>) {
         fontFamily="system-ui, sans-serif"
         letterSpacing="0.5"
       >
-        ATMOS
+        {ATMOS_MARK}
       </text>
     </svg>
   );
@@ -124,7 +130,7 @@ function AV1Mark(props: SVGProps<SVGSVGElement>) {
         textAnchor="middle"
         fontFamily="system-ui, sans-serif"
       >
-        AV1
+        {AV1_MARK}
       </text>
     </svg>
   );

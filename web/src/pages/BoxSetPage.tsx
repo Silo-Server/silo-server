@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useBoxSet } from "@/hooks/queries/boxSets";
 import { boxSetFilmCount, boxSetNextMovie, boxSetYears } from "@/lib/boxSets";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { useAppLanguage, useT } from "@/i18n";
 import { buildMediaPlayHref } from "@/lib/mediaNavigation";
 import DetailHero from "@/pages/ItemDetail/DetailHero";
 import DetailLayout, { DetailSection } from "@/pages/ItemDetail/DetailLayout";
@@ -21,6 +22,9 @@ import DetailLayout, { DetailSection } from "@/pages/ItemDetail/DetailLayout";
  */
 export default function BoxSetPage() {
   const { id } = useParams<{ id: string }>();
+  const t = useT();
+  // The film count comes from a plain helper; follow language changes.
+  useAppLanguage();
   const [searchParams] = useSearchParams();
   const libraryId = searchParams.get("library_id") ?? undefined;
   const { data: boxSet, isLoading, error, refetch, isFetching } = useBoxSet(id, libraryId);
@@ -33,8 +37,8 @@ export default function BoxSetPage() {
     if (error && !isNotFoundProblem(error)) {
       return (
         <PageUnavailable
-          title="Couldn't load this box set"
-          description="Something went wrong while loading it. Try again in a moment."
+          title={t("web.detail.boxSet.loadFailedTitle")}
+          description={t("web.detail.boxSet.loadFailedBody")}
           onRetry={() => void refetch()}
           retrying={isFetching}
         />
@@ -42,8 +46,8 @@ export default function BoxSetPage() {
     }
     return (
       <PageUnavailable
-        title="This box set isn't available"
-        description="Box sets may be turned off for this library, or too few of its movies are here."
+        title={t("web.detail.boxSet.unavailableTitle")}
+        description={t("web.detail.boxSet.unavailableBody")}
       />
     );
   }
@@ -59,7 +63,7 @@ export default function BoxSetPage() {
         <DetailHero
           title={boxSet.title}
           topNav={<PageBack />}
-          context="Box set"
+          context={t("web.detail.boxSet.label")}
           shortHero
           backdropUrl={boxSet.backdrop_url}
           backdropThumbhash={boxSet.backdrop_thumbhash}
@@ -71,7 +75,10 @@ export default function BoxSetPage() {
               {years ? <span className="metadata-badge">{years}</span> : null}
               {boxSet.played_count > 0 ? (
                 <span className="metadata-badge">
-                  {boxSet.played_count} of {boxSet.movie_count} watched
+                  {t("web.detail.boxSet.watchedOf", {
+                    played: boxSet.played_count,
+                    total: boxSet.movie_count,
+                  })}
                 </span>
               ) : null}
             </div>
@@ -95,7 +102,10 @@ export default function BoxSetPage() {
                     {/* A film title can be wider than a phone; the label
                         truncates rather than widen the hero past the screen. */}
                     <span className="min-w-0 truncate">
-                      {started ? `Continue · ${next.title}` : `Play ${next.title}`}
+                      {t(
+                        started ? "web.detail.boxSet.continueTitle" : "web.detail.boxSet.playTitle",
+                        { title: next.title },
+                      )}
                     </span>
                   </ViewTransitionLink>
                 </Button>
@@ -105,7 +115,7 @@ export default function BoxSetPage() {
         />
       }
     >
-      <DetailSection title="Movies">
+      <DetailSection title={t("web.detail.boxSet.movies")}>
         <ItemGrid items={boxSet.items} libraryId={numericLibraryId} />
       </DetailSection>
     </DetailLayout>

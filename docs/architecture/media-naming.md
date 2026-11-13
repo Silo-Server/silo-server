@@ -115,6 +115,21 @@ Air-date names link through `selectAirDateEpisodeCandidate` in the same file: on
 links; several are narrowed by the series' TVDB, then TMDB, then IMDb ID; a date that stays
 ambiguous is skipped with a warning.
 
+A by-date file has no episode number, so it never gets a `scanner_fallback` placeholder. Instead,
+the series completeness sweep (`refreshSeriesEpisodeMetadataState`) checks for an unlinked by-date
+file in a matched series that aired after the newest episode the series has in a library and
+matches no stored episode. Such a file shows the stored episode list is behind, so the sweep
+marks the series episode-incomplete and queues episode-incomplete debt on the series item. An
+unknown date inside that range does not count, and neither does a date after tomorrow (UTC),
+which has not aired anywhere yet. Existing episode-incomplete debt keeps its backoff. Debt that
+has used up its attempts, on the episode reason or any other, restarts with no attempts only for a
+file that aired on or after the day of the debt's last attempt. The restart updates the row in
+place, so its other reasons stay queued and restart their backoff with it, and it skips a row that
+is due or leased. A rejected reset still records the episode reason without changing the
+schedule, attempts or lease, so settling a core-metadata refresh keeps the episode retry.
+`TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes`,
+`TestRestartTerminalEpisodeDebtDB` and `TestByDateEpisodeDebtSurvivesCoreRefreshDB` cover these rules.
+
 ## A changed root waits for a rescan
 
 Before matching a queued series root, `MatchWorker.processSeriesRoot`
@@ -191,9 +206,8 @@ override typed as a series (or untyped). Tests: `TestStaleFlatSeriesQueueDoesNot
   scans keep it. Both match-queue fingerprints include a group override's forced values
   (`matchQueueGroupOverrideHashSQL`, `internal/metadata/match_queue_policy.go`), so the queue sync at
   the end of that scan wakes a match that was parked or backed off without the override.
-  Tests: `TestApplyGroupOverrides_ForcesResolvedIdentity`,
-  `TestInferGroupAssignments_FileOverrideBeatsRootOverride`, and
-  `TestInferGroupAssignments_OverridesConvergeAcrossRescans` (`internal/scanner/group_inference_test.go`);
+  Tests: `TestApplyGroupOverrides_ForcesResolvedIdentity` and
+  `TestInferGroupAssignments_FileOverrideBeatsRootOverride` (`internal/scanner/group_inference_test.go`);
   `TestQueuedIdentityAppliesGroupOverrideToLinkedProvisionalItem`
   (`internal/metadata/queued_identity_parity_test.go`),
   `TestSeriesQueuePassesGroupOverrideForLinkedProvisionalRoot`

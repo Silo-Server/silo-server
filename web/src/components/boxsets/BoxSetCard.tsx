@@ -7,27 +7,25 @@ import MediaCardArtwork, {
 import type { BoxSetSummary } from "@/api/types";
 import { boxSetFilmCount, boxSetYears } from "@/lib/boxSets";
 import { buildBoxSetHref } from "@/lib/mediaNavigation";
+import { useAppLanguage, useT } from "@/i18n";
 
 /**
  * The card of a movie box set: one poster for the movies TMDB lists in one
  * collection. The stacked edge above the poster and the BOX SET pill set it
  * apart from a single movie and from curated collections.
  */
-export default function BoxSetCard({
-  boxSet,
-  posterUrl,
-  posterThumbhash,
-}: {
-  boxSet: BoxSetSummary;
-  /** The card's poster; the box set's own, or a member's when it has none. */
-  posterUrl?: string;
-  posterThumbhash?: string;
-}) {
+export default function BoxSetCard({ boxSet }: { boxSet: BoxSetSummary }) {
+  const t = useT();
+  // The film count comes from a plain helper; follow language changes.
+  useAppLanguage();
   const href = buildBoxSetHref({ id: boxSet.id, libraryId: boxSet.library_id });
   const progress = boxSet.movie_count > 0 ? boxSet.played_count / boxSet.movie_count : 0;
   const meta =
     boxSet.played_count > 0
-      ? `${boxSet.played_count} / ${boxSet.movie_count} watched`
+      ? t("web.detail.boxSet.watchedFraction", {
+          played: boxSet.played_count,
+          total: boxSet.movie_count,
+        })
       : boxSetYears(boxSet) || boxSetFilmCount(boxSet.movie_count);
 
   return (
@@ -44,26 +42,31 @@ export default function BoxSetCard({
         />
         <ViewTransitionLink
           to={href}
-          aria-label={`${boxSet.title}, box set of ${boxSetFilmCount(boxSet.movie_count)}`}
+          aria-label={t("web.detail.boxSet.cardLabel", {
+            title: boxSet.title,
+            films: boxSetFilmCount(boxSet.movie_count),
+          })}
           className="relative block overflow-hidden rounded-xl"
         >
           <MediaCardArtwork
-            src={posterUrl ?? boxSet.poster_url}
+            src={boxSet.poster_url}
             alt={boxSet.title}
             mediaType="movie"
-            thumbhash={posterThumbhash}
+            thumbhash={boxSet.poster_thumbhash}
             scrim="background"
           >
+            {/* eslint-disable-next-line silo/no-physical-direction -- on the poster artwork, which doesn't mirror; matches CardOverlays and CardWatchStatus */}
             <span className="glass-subtle text-foreground absolute top-2.5 left-2.5 rounded-full border border-white/15 px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] uppercase">
-              Box set
+              {t("web.detail.boxSet.label")}
             </span>
+            {/* eslint-disable-next-line silo/no-physical-direction -- on the poster artwork, which doesn't mirror; matches CardOverlays and CardWatchStatus */}
             <span className="bg-background/60 text-foreground absolute right-2 bottom-2.5 rounded-md px-2 py-0.5 text-[0.6875rem] font-bold backdrop-blur-sm">
               {boxSetFilmCount(boxSet.movie_count)}
             </span>
             {progress > 0 ? (
               <div
                 role="progressbar"
-                aria-label="Films watched"
+                aria-label={t("web.detail.boxSet.filmsWatched")}
                 aria-valuemin={0}
                 aria-valuemax={boxSet.movie_count}
                 aria-valuenow={boxSet.played_count}

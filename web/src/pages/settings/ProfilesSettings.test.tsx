@@ -8,11 +8,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Profile, UserLibrary } from "@/api/types";
 
 const mocks = vi.hoisted(() => ({
+  householdSessionsMounts: 0,
   useProfiles: vi.fn(),
   useAvailableUserLibraries: vi.fn(),
   useAuth: vi.fn(),
   deleteMutate: vi.fn(),
   getProfileToken: vi.fn(),
+  navigate: vi.fn(),
 }));
 
 vi.mock("@/hooks/queries/profiles", () => ({
@@ -21,7 +23,14 @@ vi.mock("@/hooks/queries/profiles", () => ({
     isPending: false,
     mutate: (...args: unknown[]) => mocks.deleteMutate(...args),
   }),
-  useHouseholdSessions: () => ({ data: [], isLoading: false, isFetching: false }),
+  useHouseholdSessions: () => {
+    mocks.householdSessionsMounts += 1;
+    return { data: [], isLoading: false, isFetching: false };
+  },
+}));
+
+vi.mock("react-router", () => ({
+  useNavigate: () => mocks.navigate,
 }));
 
 vi.mock("@/hooks/queries/libraries", () => ({
@@ -182,10 +191,13 @@ describe("ProfilesSettings", () => {
     mocks.useAuth.mockReset();
     mocks.deleteMutate.mockReset();
     mocks.getProfileToken.mockReset();
+    mocks.navigate.mockReset();
+    mocks.householdSessionsMounts = 0;
 
     mocks.useProfiles.mockReturnValue({
       data: [makeProfile()],
       isLoading: false,
+      maxProfiles: null,
     });
     mocks.useAvailableUserLibraries.mockReturnValue({
       data: libraries,
@@ -249,6 +261,7 @@ describe("ProfilesSettings", () => {
     mocks.useProfiles.mockReturnValue({
       data: [makeProfile(), makeProfile({ id: "profile-2", name: "Guest" })],
       isLoading: false,
+      maxProfiles: null,
     });
 
     await render(<ProfilesSettings />);
@@ -270,6 +283,7 @@ describe("ProfilesSettings", () => {
     mocks.useProfiles.mockReturnValue({
       data: [makeProfile(), lockedProfile],
       isLoading: false,
+      maxProfiles: null,
     });
 
     await render(<ProfilesSettings />);
@@ -278,5 +292,45 @@ describe("ProfilesSettings", () => {
     await click(findButton(container, "confirm-pin"));
 
     expect(selectProfile).toHaveBeenCalledWith(lockedProfile, "verified-token");
+  });
+
+  it("switches to a locked profile without its PIN while an administrator views as the account", async () => {
+    const lockedProfile = makeProfile({ id: "profile-2", name: "Kids", has_pin: true });
+    mocks.useProfiles.mockReturnValue({
+      data: [makeProfile(), lockedProfile],
+      isLoading: false,
+      maxProfiles: null,
+    });
+    mocks.useAuth.mockReturnValue({
+      profile: makeProfile(),
+      selectProfile,
+      verifyProfilePin,
+      isImpersonating: true,
+    });
+
+    await render(<ProfilesSettings />);
+
+    await click(findButton(container, "Use"));
+
+    expect(container.textContent).not.toContain("confirm-pin");
+    expect(verifyProfilePin).not.toHaveBeenCalled();
+    expect(selectProfile).toHaveBeenCalledWith(lockedProfile);
+  });
+
+  it("asks for the primary PIN before managing profiles while viewing as a locked profile", async () => {
+    const primary = makeProfile({ has_pin: true, is_primary: true });
+    mocks.useProfiles.mockReturnValue({ data: [primary], isLoading: false, maxProfiles: null });
+    mocks.useAuth.mockReturnValue({
+      profile: primary,
+      selectProfile,
+      verifyProfilePin,
+      isImpersonating: true,
+    });
+
+    await render(<ProfilesSettings />);
+
+    expect(mocks.householdSessionsMounts).toBe(0);
+    await click(findButton(container, "confirm-pin"));
+    expect(selectProfile).toHaveBeenCalledWith(primary, "verified-token");
   });
 });

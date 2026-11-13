@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useT } from "@/i18n";
 import { invalidateItemDetails } from "@/hooks/queries/trackPreferences";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
 import type { SubtitleInventoryItemV3 } from "../protocol-v3";
@@ -32,6 +33,7 @@ export function useTrackChoicePersistence({
 }) {
   const config = usePlayerConfig();
   const queryClient = useQueryClient();
+  const t = useT();
 
   const saveAudioChoice = useCallback(
     (index: number) => {
@@ -42,11 +44,11 @@ export function useTrackChoicePersistence({
         (err: unknown) => {
           // The viewer switched profile before it went out; it isn't theirs.
           if (err instanceof StaleTrackPreferenceWriteError) return;
-          toast.error(err instanceof Error ? err.message : "Failed to save audio preference");
+          toast.error(err instanceof Error ? err.message : t("web.player.tracks.saveAudioFailed"));
         },
       );
     },
-    [audioTracks, config, queryClient, seriesId],
+    [audioTracks, config, queryClient, seriesId, t],
   );
 
   /**

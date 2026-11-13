@@ -40,7 +40,11 @@ func (f *Fetcher) fetchBecauseWatchedWithTitle(ctx context.Context, section Reso
 				slog.WarnContext(ctx, "because-you-watched: source title lookup failed", "component", "sections", "section_id", section.ID, "error", lookupErr)
 			}
 		}
-		result.Title = becauseWatchedTitle(section.Title, sourceID, sources)
+		var anchor string
+		result.Title, anchor = becauseWatchedTitle(section.Title, sourceID, sources)
+		if anchor != "" {
+			result.TitleKey, result.TitleArgs = titleKeyBecauseYouWatchedTitle, map[string]string{titleArgTitle: anchor}
+		}
 	}
 	return result, nil
 }
@@ -53,18 +57,20 @@ func hasDefaultBecauseWatchedTitle(title string) bool {
 }
 
 // becauseWatchedTitle names the anchor only when the section still has the
-// default heading, so a title an admin chose is never replaced.
-func becauseWatchedTitle(fallback, sourceID string, sources []*models.MediaItem) string {
+// default heading, so a title an admin chose is never replaced. It also
+// returns the anchor's title when the heading names it, else "".
+func becauseWatchedTitle(fallback, sourceID string, sources []*models.MediaItem) (title, anchor string) {
 	if !hasDefaultBecauseWatchedTitle(fallback) {
-		return fallback
+		return fallback, ""
 	}
 	for _, item := range sources {
 		if item != nil && item.ContentID == sourceID && strings.TrimSpace(item.Title) != "" {
-			return defaultBecauseWatchedTitle + " " + strings.TrimSpace(item.Title)
+			anchor = strings.TrimSpace(item.Title)
+			return defaultBecauseWatchedTitle + " " + anchor, anchor
 		}
 	}
 	if strings.TrimSpace(fallback) == "" {
-		return defaultBecauseWatchedTitle
+		return defaultBecauseWatchedTitle, ""
 	}
-	return fallback
+	return fallback, ""
 }

@@ -1,5 +1,7 @@
 import { useMemo } from "react";
 
+import { t, useAppLanguage, type MessageKey } from "@/i18n";
+
 import type { AdminServerStatus } from "@/api/types";
 import { emailReady } from "@/lib/emailReadiness";
 import { useBranding } from "@/hooks/useBranding";
@@ -94,17 +96,23 @@ function sentenceCase(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-const HW_ACCEL_LABELS: Record<string, string> = {
-  auto: "Auto",
+/** Hardware encoders by product name; the two modes that are not one are translated. */
+const HW_ACCEL_PRODUCTS: Record<string, string> = {
   qsv: "Quick Sync",
   vaapi: "VA-API",
   nvenc: "NVENC",
   videotoolbox: "VideoToolbox",
-  none: "Software",
+};
+
+const HW_ACCEL_MODES: Record<string, MessageKey> = {
+  auto: "web.admin.settings.health.hwAccel.auto",
+  none: "web.admin.settings.health.hwAccel.software",
 };
 
 function hwAccelLabel(value: string): string {
-  return HW_ACCEL_LABELS[value] ?? value.toUpperCase();
+  const mode = HW_ACCEL_MODES[value];
+  if (mode) return t(mode);
+  return HW_ACCEL_PRODUCTS[value] ?? value.toUpperCase();
 }
 
 /** The configured transcoding mode, in one word. */
@@ -112,8 +120,11 @@ function transcodeModeLabel(configured: string): string {
   return hwAccelLabel(configured || "auto");
 }
 
+const POSTGRES = "Postgres";
+const REDIS = "Redis";
+
 const SEARCH_PROVIDER_LABELS: Record<string, string> = {
-  postgres: "Postgres",
+  postgres: POSTGRES,
   meilisearch: "Meilisearch",
 };
 
@@ -173,8 +184,8 @@ function tileAction(
   state: SettingsHealthState,
   page: AdminSettingsPageID,
 ): SettingsHealthAction | undefined {
-  if (state === "warn") return { label: "Fix", page };
-  if (state === "off") return { label: "Set up", page };
+  if (state === "warn") return { label: t("web.admin.settings.health.action.fix"), page };
+  if (state === "off") return { label: t("web.admin.settings.health.action.setUp"), page };
   return undefined;
 }
 
@@ -187,10 +198,10 @@ export function buildSettingsHealth(input: SettingsHealthInput): SettingsHealthI
   const privateBucket = readText(settings, "s3.private_bucket");
   const storageReady = input.storageAvailable === true;
   const bucketDetail = privateBucket
-    ? "S3 · public + private"
+    ? t("web.admin.settings.health.storage.publicAndPrivate")
     : publicBucket
-      ? `S3 · ${publicBucket}`
-      : "No bucket configured";
+      ? t("web.admin.settings.health.storage.publicBucket", { bucket: publicBucket })
+      : t("web.admin.settings.health.storage.noBucket");
   // `storage_available` is decided when the S3 client is built at boot, so the
   // save that first configures a bucket cannot flip it — only the restart that
   // save already asked for can. Reporting "Not set up" in that window tells an
@@ -248,76 +259,91 @@ export function buildSettingsHealth(input: SettingsHealthInput): SettingsHealthI
   return [
     {
       id: "storage",
-      label: "Storage",
+      label: t("web.admin.settings.health.storage.label"),
       state: storageState,
       stateText: storageReady
-        ? "Healthy"
+        ? t("web.admin.settings.health.state.healthy")
         : storageRestartPending
-          ? "Restart pending"
-          : "Not set up",
+          ? t("web.admin.settings.health.state.restartPending")
+          : t("web.admin.settings.health.state.notSetUp"),
       detail: storageReady
         ? bucketDetail
         : storageRestartPending
-          ? `${bucketDetail} · applies after a restart`
-          : "Artwork and uploads have nowhere to go",
+          ? t("web.admin.settings.health.storage.appliesAfterRestart", { bucket: bucketDetail })
+          : t("web.admin.settings.health.storage.notSetUp"),
       action: tileAction(storageState, "storage"),
     },
     {
       id: "database",
-      label: "Database",
+      label: t("web.admin.settings.health.database.label"),
       state: "ok",
-      stateText: "Healthy",
+      stateText: t("web.admin.settings.health.state.healthy"),
       detail: join([
-        "Postgres",
-        maxConnections ? `max ${maxConnections} connections` : null,
-        redisConfigured ? "Redis" : null,
+        POSTGRES,
+        maxConnections
+          ? t("web.admin.settings.health.database.maxConnections", {
+              count: maxConnections,
+              count_text: maxConnections,
+            })
+          : null,
+        redisConfigured ? REDIS : null,
       ]),
     },
     {
       id: "transcoding",
-      label: "Transcoding",
+      label: t("web.admin.settings.health.transcoding.label"),
       state: transcodeState,
-      stateText: playbackRestartPending ? "Restart pending" : transcodeEnabled ? "Ready" : "Off",
+      stateText: playbackRestartPending
+        ? t("web.admin.settings.health.state.restartPending")
+        : transcodeEnabled
+          ? t("web.admin.settings.health.state.ready")
+          : t("web.admin.settings.health.state.off"),
       detail: playbackRestartPending
-        ? "Saved changes apply after a restart"
+        ? t("web.admin.settings.health.transcoding.appliesAfterRestart")
         : transcodeEnabled
           ? transcodeMode
-          : "Video plays as-is; remux and audio conversion still run",
+          : t("web.admin.settings.health.transcoding.off"),
       action: tileAction(transcodeState, "playback"),
     },
     {
       id: "search",
-      label: "Search",
+      label: t("web.admin.settings.health.search.label"),
       state: searchState,
       stateText: searchProviderLabel(activeSearch),
       detail:
         activeSearch === "meilisearch"
           ? !searchStatusResolved
-            ? "Checking connection"
+            ? t("web.admin.settings.health.search.checking")
             : searchDegraded
-              ? (input.search?.degraded_reason ?? "Search is running in a degraded mode")
+              ? (input.search?.degraded_reason ?? t("web.admin.settings.health.search.degraded"))
               : meiliHealthy
-                ? "Meilisearch connected"
-                : "Meilisearch not reachable"
+                ? t("web.admin.settings.health.search.meiliConnected")
+                : t("web.admin.settings.health.search.meiliUnreachable")
           : meiliConfigured
-            ? "Meilisearch configured but not active"
-            : "Meilisearch not connected",
+            ? t("web.admin.settings.health.search.meiliInactive")
+            : t("web.admin.settings.health.search.meiliNotConnected"),
       action: tileAction(searchState, "search"),
     },
     {
       id: "public-url",
-      label: "Public URL",
+      label: t("web.admin.settings.health.publicUrl.label"),
       state: publicUrlState,
-      stateText: publicUrl ? "Set" : "Not set",
-      detail: publicUrl || "Invitation and reset links, and sign-in providers, need it",
+      stateText: publicUrl
+        ? t("web.admin.settings.health.state.set")
+        : t("web.admin.settings.health.state.notSet"),
+      detail: publicUrl || t("web.admin.settings.health.publicUrl.notSet"),
       action: tileAction(publicUrlState, "general"),
     },
     {
       id: "email",
-      label: "Email",
+      label: t("web.admin.settings.health.email.label"),
       state: emailState,
-      stateText: mailReady ? "Ready" : "Not set up",
-      detail: mailReady ? `SMTP · ${emailHost}` : "Invites and resets can't send",
+      stateText: mailReady
+        ? t("web.admin.settings.health.state.ready")
+        : t("web.admin.settings.health.state.notSetUp"),
+      detail: mailReady
+        ? t("web.admin.settings.health.email.ready", { host: emailHost })
+        : t("web.admin.settings.health.email.notSetUp"),
       action: tileAction(emailState, "email"),
     },
   ];
@@ -351,6 +377,8 @@ export function useSettingsAttention(): SettingsHealthItem[] {
 
 /** {@link useSettingsAttention}, plus whether its inputs have all arrived. */
 export function useSettingsAttentionState(): SettingsAttentionState {
+  // The items' text is built in the current language; rebuild it on a change.
+  const language = useAppLanguage();
   const { data: settings } = useAdminServerSettings();
   const { data: sensitive } = useAdminSensitiveStatus();
   const { data: serverStatus } = useAdminServerStatus();
@@ -382,7 +410,9 @@ export function useSettingsAttentionState(): SettingsAttentionState {
     return branding.loaded
       ? { items, loaded: serverStatus != null }
       : { items: items.filter((item) => item.id !== "storage"), loaded: false };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- language re-runs the item text
   }, [
+    language,
     branding.loaded,
     branding.storageAvailable,
     search,

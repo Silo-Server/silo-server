@@ -1,5 +1,7 @@
 /* eslint-disable react-hooks/set-state-in-effect -- section state resets when the layout or cache changes, and the reveal gates follow sidebar transitions */
 import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSectionTitle } from "@/lib/sectionTitle";
+import { useT, type Translate } from "@/i18n";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { LayoutDashboard } from "lucide-react";
@@ -47,11 +49,13 @@ export default function Home() {
   const { data, isLoading, isError, refetch } = useHomeLayout();
   const { data: homeRefreshSignal = 0 } = useSectionRefreshSignal();
   const { cardPresentation } = useUICustomization();
+  const sectionTitle = useSectionTitle();
+  const t = useT();
   const [rowRestorationReady, setRowRestorationReady] = useState(
     () => !shouldWaitForSidebarReturn(),
   );
 
-  useDocumentTitle("Home");
+  useDocumentTitle(t("web.home.page.title"));
 
   const layout = useMemo(() => data?.sections ?? [], [data?.sections]);
   const layoutResetKey = layout
@@ -336,7 +340,7 @@ export default function Home() {
       return next;
     });
   };
-  const heroSlot = renderHeroSlot(viewModel.hero, retrySection, refreshSection);
+  const heroSlot = renderHeroSlot(viewModel.hero, retrySection, refreshSection, sectionTitle, t);
   const hasHeroSlot = heroSlot !== null;
   const rowPlaceholderHeight = carouselIntrinsicHeight(cardPresentation.poster_size);
   // Rows count toward the eager budget by layout position: a loading or
@@ -352,16 +356,14 @@ export default function Home() {
     return (
       <div className="page-shell flex min-h-[50vh] items-center justify-center py-12">
         <div className="surface-panel max-w-md rounded-[1.8rem] border-0 p-6 text-center shadow-none">
-          <p className="text-lg font-semibold">Unable to load the homepage</p>
-          <p className="text-muted-foreground mt-2 text-sm">
-            We couldn&apos;t load your section layout right now.
-          </p>
+          <p className="text-lg font-semibold">{t("web.home.page.loadFailedTitle")}</p>
+          <p className="text-muted-foreground mt-2 text-sm">{t("web.home.page.loadFailedBody")}</p>
           <button
             type="button"
             onClick={() => void refetch()}
             className="border-border hover:bg-muted/40 mt-4 rounded-lg border px-4 py-2 text-sm font-medium"
           >
-            Retry
+            {t("common.retry")}
           </button>
         </div>
       </div>
@@ -370,7 +372,7 @@ export default function Home() {
 
   return (
     <>
-      <h1 className="sr-only">Home</h1>
+      <h1 className="sr-only">{t("web.home.page.title")}</h1>
       <div className={`space-y-10 ${hasHeroSlot ? "pb-2" : "pt-6 pb-2"}`}>
         {heroSlot}
         <TasteSeedBanner />
@@ -403,25 +405,23 @@ export default function Home() {
             return (
               <SectionErrorRow
                 key={slot.layout.id}
-                title={slot.layout.title}
+                title={sectionTitle(slot.layout)}
                 onRetry={() => retrySection(slot.layout.id)}
               />
             );
           }
-          return <SectionLoadingRow key={slot.layout.id} title={slot.layout.title} />;
+          return <SectionLoadingRow key={slot.layout.id} title={sectionTitle(slot.layout)} />;
         })}
 
         {layout.length === 0 && !isLoading && (
           <div className="surface-panel flex h-64 flex-col items-center justify-center gap-3 rounded-[1.8rem] border-0 px-6 text-center">
             <LayoutDashboard className="text-muted-foreground h-10 w-10" />
-            <p className="text-muted-foreground text-sm">
-              Your home screen is empty. Customize it by adding sections to display your media.
-            </p>
+            <p className="text-muted-foreground text-sm">{t("web.home.page.emptyLayout")}</p>
             <Link
               to="/settings/home-screen"
               className="text-primary text-sm font-medium hover:underline"
             >
-              Customize Home Screen
+              {t("web.home.page.customize")}
             </Link>
           </div>
         )}
@@ -611,6 +611,8 @@ function renderHeroSlot(
   hero: HomeSectionSlot | null,
   retrySection: (sectionId: string) => void,
   refreshSection: (sectionId: string) => void,
+  sectionTitle: (section: ResolvedSectionLayout) => string,
+  t: Translate,
 ) {
   if (!hero) return null;
 
@@ -627,21 +629,19 @@ function renderHeroSlot(
   if (hero.state === "error") {
     return (
       <div
-        className={`bg-muted relative ${HERO_BANNER_SIZE} w-full overflow-hidden rounded-[1.8rem]`}
+        className={`bg-muted relative flex flex-col ${HERO_BANNER_SIZE} w-full overflow-hidden rounded-[1.8rem]`}
       >
         <div className="from-background via-background/70 absolute inset-0 bg-gradient-to-t to-transparent" />
-        <div className="relative flex h-full items-end px-4 pb-10 sm:px-6 sm:pb-12 lg:px-12 lg:pb-16">
+        <div className="relative flex flex-1 items-end px-4 pb-10 sm:px-6 sm:pb-12 lg:px-12 lg:pb-16">
           <div className="max-w-xl space-y-3">
-            <p className="text-3xl font-bold">{hero.layout.title}</p>
-            <p className="text-muted-foreground text-sm">
-              This featured section could not be loaded right now.
-            </p>
+            <p className="text-3xl font-bold">{sectionTitle(hero.layout)}</p>
+            <p className="text-muted-foreground text-sm">{t("web.home.page.heroFailed")}</p>
             <button
               type="button"
               onClick={() => retrySection(hero.layout.id)}
               className="border-border hover:bg-muted/40 rounded-lg border px-4 py-2 text-sm font-medium"
             >
-              Retry section
+              {t("web.home.page.retrySection")}
             </button>
           </div>
         </div>
@@ -694,17 +694,18 @@ function SectionLoadingRow({ title }: { title: string }) {
 }
 
 function SectionErrorRow({ title, onRetry }: { title: string; onRetry: () => void }) {
+  const t = useT();
   return (
     <section className="space-y-3 px-4 sm:px-6 lg:px-12">
       <h2 className="text-foreground h-6 text-sm font-semibold">{title}</h2>
       <div className="surface-panel flex items-center justify-between rounded-[1.4rem] border-0 px-5 py-4">
-        <p className="text-muted-foreground text-sm">This section could not be loaded right now.</p>
+        <p className="text-muted-foreground text-sm">{t("web.home.page.sectionFailed")}</p>
         <button
           type="button"
           onClick={onRetry}
           className="border-border hover:bg-muted/40 rounded-lg border px-4 py-2 text-sm font-medium"
         >
-          Retry
+          {t("common.retry")}
         </button>
       </div>
     </section>

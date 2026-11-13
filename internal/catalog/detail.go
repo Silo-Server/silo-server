@@ -296,11 +296,19 @@ type ItemDetail struct {
 
 	// Series-specific.
 	SeasonCount *int `json:"season_count,omitempty"`
+	// EpisodeMetadataIncomplete is the series row's flag that some episodes
+	// still lack metadata, so item detail can request a refresh without
+	// reading the row again. Not part of any JSON contract.
+	EpisodeMetadataIncomplete bool `json:"-"`
 
 	// Season-specific.
-	SeriesID       string          `json:"series_id,omitempty"`
-	SeriesTitle    string          `json:"series_title,omitempty"`
-	SeasonNumber   *int            `json:"season_number,omitempty"`
+	SeriesID     string `json:"series_id,omitempty"`
+	SeriesTitle  string `json:"series_title,omitempty"`
+	SeasonNumber *int   `json:"season_number,omitempty"`
+	// SeasonID is an episode's stored season, empty when its season is
+	// synthetic. Not part of any JSON contract; apiv2 finds the themes an
+	// episode inherits with it.
+	SeasonID       string          `json:"-"`
 	EpisodeNumber  *int            `json:"episode_number,omitempty"`
 	EpisodeCount   *int            `json:"episode_count,omitempty"`
 	AirDate        *string         `json:"air_date,omitempty"`
@@ -667,7 +675,7 @@ type VersionSubtitleTrack struct {
 	Default         bool   `json:"default"`
 	HearingImpaired bool   `json:"hearing_impaired"`
 	External        bool   `json:"external"`
-	FileName        string `json:"file_name,omitempty"`
+	FileName        string `json:"file_name,omitempty" doc:"An external track's file name; absent for viewers without file-path visibility, except on audiobooks and ebooks"`
 	// IndexOnly is models.SubtitleTrack.IndexOnly, for planners that read
 	// this projection.
 	IndexOnly bool `json:"-"`
@@ -1372,18 +1380,33 @@ func (s *DetailService) pendingPresentationLanguage(ctx context.Context, filter 
 	return language, err
 }
 
-func (s *DetailService) validatePresentationItemAccess(ctx context.Context, filter AccessFilter, contentID string) error {
+// validatePresentationItemAccess checks that the presentation library holds
+// at least one of contentIDs.
+func (s *DetailService) validatePresentationItemAccess(ctx context.Context, filter AccessFilter, contentIDs ...string) error {
 	if filter.PresentationLibraryID == nil {
 		return nil
 	}
-	membership, err := s.itemRepo.GetItemsInLibrary(ctx, []string{contentID}, *filter.PresentationLibraryID)
+	membership, err := s.itemRepo.GetItemsInLibrary(ctx, contentIDs, *filter.PresentationLibraryID)
 	if err != nil {
 		return err
 	}
-	if !membership[contentID] {
-		return ErrItemNotFound
+	for _, contentID := range contentIDs {
+		if membership[contentID] {
+			return nil
+		}
 	}
-	return nil
+	return ErrItemNotFound
+}
+
+// validatePresentationEpisodeAccess accepts the series' library for opted-in
+// native reads, matching the series' episode lists. File access is checked
+// separately; this does not grant access to files in another library.
+func (s *DetailService) validatePresentationEpisodeAccess(ctx context.Context, filter AccessFilter, episode *models.Episode) error {
+	memberIDs := []string{episode.ContentID}
+	if filter.SeriesLibraryCoversEpisodes {
+		memberIDs = append(memberIDs, episode.SeriesID)
+	}
+	return s.validatePresentationItemAccess(ctx, filter, memberIDs...)
 }
 
 func sameMetadataLanguage(a, b string) bool {
@@ -1712,13 +1735,37 @@ func (s *DetailService) LocalizeEpisodeModels(ctx context.Context, episodes []*m
 
 // GetItemDetail retrieves a full item detail with presigned URLs and file versions.
 func (s *DetailService) GetItemDetail(ctx context.Context, contentID string, filter AccessFilter) (*ItemDetail, error) {
+	return s.GetItemDetailWithOptions(ctx, contentID, filter, ItemDetailOptions{})
+}
+
+// ItemDetailOptions leaves out the parts of one item's detail that a caller
+// never reads. The zero value builds the full detail, and every part that is
+// not skipped is identical to what GetItemDetail returns.
+type ItemDetailOptions struct {
+	// SkipPlaybackPreviews leaves each version's Trickplay and MarkerPreviews
+	// unset. Only the watch and Jellyfin views carry them; resolving them
+	// costs a trickplay query and signing every marker thumbnail.
+	SkipPlaybackPreviews bool
+	// SkipFolderPaths leaves a series' FolderPaths empty, as
+	// ItemDetailBatchOptions.SkipFolderPaths does.
+	SkipFolderPaths bool
+}
+
+// GetItemDetailWithOptions is GetItemDetail without the parts opts skips.
+func (s *DetailService) GetItemDetailWithOptions(ctx context.Context, contentID string, filter AccessFilter, opts ItemDetailOptions) (*ItemDetail, error) {
 	target, err := s.resolveDetailTarget(ctx, contentID, filter)
 	if err != nil {
 		return nil, err
 	}
+	trickplay := s.trickplay
+	if opts.SkipPlaybackPreviews {
+		trickplay = nil
+	}
 	switch {
 	case target.item != nil:
-		detail, err := s.buildMediaItemDetail(ctx, target.item, contentID, filter, nil)
+		// Nothing is prefetched for one item: pf only carries what opts skips.
+		pf := &itemDetailPrefetch{trickplay: trickplay, skipFolderPaths: opts.SkipFolderPaths, skipMarkerPreviews: opts.SkipPlaybackPreviews}
+		detail, err := s.buildMediaItemDetail(ctx, target.item, contentID, filter, pf)
 		if err != nil {
 			return nil, err
 		}
@@ -1731,18 +1778,34 @@ func (s *DetailService) GetItemDetail(ctx context.Context, contentID string, fil
 		if err != nil {
 			return nil, err
 		}
+		seriesCtx.trickplay, seriesCtx.skipMarkerPreviews = trickplay, opts.SkipPlaybackPreviews
 		return s.buildEpisodeDetail(ctx, target.episode, seriesCtx, filter)
 	default:
-		return s.buildExtraItemDetail(ctx, target.extra, filter)
+		return s.buildExtraItemDetail(ctx, target.extra, filter, trickplay, !opts.SkipPlaybackPreviews)
 	}
 }
 
-const detailTypeAudiobook = "audiobook"
+const (
+	detailTypeAudiobook = "audiobook"
+	detailTypeEbook     = "ebook"
+)
 
 // GetItemVersions builds the browse version selector without loading unrelated
 // presentation data. It shares detail authorization and playback metadata, but
 // does not require localization, credits, artwork, or recommendations to succeed.
 func (s *DetailService) GetItemVersions(ctx context.Context, contentID string, filter AccessFilter) ([]FileVersion, error) {
+	return s.GetItemVersionsWithOptions(ctx, contentID, filter, ItemVersionsOptions{})
+}
+
+// ItemVersionsOptions shapes what GetItemVersionsWithOptions answers.
+type ItemVersionsOptions struct {
+	// HideFileIdentity strips file identity for a viewer who may not see it
+	// (see HideFileIdentity).
+	HideFileIdentity bool
+}
+
+// GetItemVersionsWithOptions is GetItemVersions shaped by opts.
+func (s *DetailService) GetItemVersionsWithOptions(ctx context.Context, contentID string, filter AccessFilter, opts ItemVersionsOptions) ([]FileVersion, error) {
 	target, err := s.resolveDetailTarget(ctx, contentID, filter)
 	if err != nil {
 		return nil, err
@@ -1773,6 +1836,13 @@ func (s *DetailService) GetItemVersions(ctx context.Context, contentID string, f
 	}
 	files = s.prepareBrowseFiles(ctx, files)
 	versions, _, _, _, _, _, _ := s.buildPlaybackInfo(ctx, files, filter, audioPreferenceContentID)
+	if opts.HideFileIdentity {
+		itemType := ""
+		if target.item != nil {
+			itemType = target.item.Type
+		}
+		HideFileIdentity(versions, itemType)
+	}
 	return versions, nil
 }
 
@@ -1847,7 +1917,7 @@ func (s *DetailService) resolveDetailTarget(ctx context.Context, contentID strin
 	if err := s.itemRepo.EnsureAccessible(ctx, episode.SeriesID, filter); err != nil {
 		return nil, err
 	}
-	if err := s.validatePresentationItemAccess(ctx, filter, episode.ContentID); err != nil {
+	if err := s.validatePresentationEpisodeAccess(ctx, filter, episode); err != nil {
 		return nil, err
 	}
 	return &detailTarget{episode: episode}, nil
@@ -1855,8 +1925,9 @@ func (s *DetailService) resolveDetailTarget(ctx context.Context, contentID strin
 
 // buildExtraItemDetail resolves a local extra as a minimal ItemDetail:
 // title/kind plus the ordinary playback surface (versions, subtitles) built
-// from its backing files. Access control is the parent item's.
-func (s *DetailService) buildExtraItemDetail(ctx context.Context, extra *models.MediaExtra, filter AccessFilter) (*ItemDetail, error) {
+// from its backing files. Access control is the parent item's. A nil
+// trickplay and markerPreviews false leave the versions' previews unset.
+func (s *DetailService) buildExtraItemDetail(ctx context.Context, extra *models.MediaExtra, filter AccessFilter, trickplay TrickplayAvailability, markerPreviews bool) (*ItemDetail, error) {
 	fetcher, ok := s.fileFetcher.(extraFileFetcher)
 	if !ok {
 		return nil, ErrItemNotFound
@@ -1878,11 +1949,13 @@ func (s *DetailService) buildExtraItemDetail(ctx context.Context, extra *models.
 		Studios:   []string{},
 		Networks:  []string{},
 	}
-	detail.Versions, detail.PlaybackVariants, detail.Subtitles, detail.Intro, detail.Credits, detail.Recap, detail.Preview = s.buildPlaybackInfo(
+	detail.Versions, detail.PlaybackVariants, detail.Subtitles, detail.Intro, detail.Credits, detail.Recap, detail.Preview = s.buildPlaybackInfoWith(
 		ctx,
 		files,
 		filter,
-		extra.ContentID,
+		s.newAudioPrefResolver(ctx, filter, extra.ContentID),
+		trickplay,
+		markerPreviews,
 	)
 	if parent, parentErr := s.itemRepo.GetByID(ctx, extra.ParentID); parentErr == nil {
 		if localized, locErr := s.LocalizeItemModel(ctx, parent, filter); locErr == nil {
@@ -1924,6 +1997,9 @@ type seriesDetailContext struct {
 	subtitleDefaults map[int]subtitleDefaults
 	filesByEpisode   map[string][]*models.MediaFile
 	trickplay        TrickplayAvailability
+	// skipMarkerPreviews leaves each version's MarkerPreviews unset for a
+	// caller that never reads them (see ItemDetailOptions).
+	skipMarkerPreviews bool
 }
 
 // buildSeriesDetailContext loads the parent series row, localizes it, fetches
@@ -2017,19 +2093,33 @@ func (s *DetailService) GetEpisodeDetailsForSeries(
 		// A failed optional batch leaves the per-episode reads in place. Their
 		// existing error handling skips only the detail that could not be built.
 	}
-	for _, contentID := range episodeContentIDs {
-		episode, err := s.episodeRepo.GetByID(ctx, contentID)
+	// One read for the whole page, rather than one per episode.
+	episodes, err := s.episodeRepo.GetByIDs(ctx, episodeContentIDs)
+	if err != nil {
+		return nil, err
+	}
+	episodesByID := make(map[string]*models.Episode, len(episodes))
+	for _, episode := range episodes {
+		if episode != nil {
+			episodesByID[episode.ContentID] = episode
+		}
+	}
+	// One membership read for the page. Each episode must itself be in the
+	// presentation library, as validatePresentationItemAccess requires of one ID.
+	var inLibrary map[string]bool
+	if filter.PresentationLibraryID != nil {
+		inLibrary, err = s.itemRepo.GetItemsInLibrary(ctx, episodeContentIDs, *filter.PresentationLibraryID)
 		if err != nil {
-			if errors.Is(err, ErrEpisodeNotFound) {
-				continue
-			}
 			return nil, err
 		}
-		if err := s.validatePresentationItemAccess(ctx, filter, contentID); err != nil {
-			if errors.Is(err, ErrItemNotFound) {
-				continue
-			}
-			return nil, err
+	}
+	for _, contentID := range episodeContentIDs {
+		episode := episodesByID[contentID]
+		if episode == nil {
+			continue
+		}
+		if filter.PresentationLibraryID != nil && !inLibrary[contentID] {
+			continue
 		}
 		detail, err := s.buildEpisodeDetail(ctx, episode, seriesCtx, filter)
 		if err != nil {
@@ -2104,10 +2194,14 @@ func (s *DetailService) GetItemDetailsByIDsWithOptions(ctx context.Context, cont
 	}
 	visibleIDs := make([]string, 0, len(visible))
 	nonSeriesIDs := make([]string, 0, len(visible))
+	var workIDs []string
 	for _, item := range visible {
 		visibleIDs = append(visibleIDs, item.ContentID)
 		if item.Type != "series" {
 			nonSeriesIDs = append(nonSeriesIDs, item.ContentID)
+		}
+		if typeHasLiteraryWork(item.Type) {
+			workIDs = append(workIDs, item.ContentID)
 		}
 	}
 
@@ -2155,11 +2249,11 @@ func (s *DetailService) GetItemDetailsByIDsWithOptions(ctx context.Context, cont
 
 	// Work summaries for the whole page in one query, when the provider supports
 	// batching (ListSummariesForContentIDs is the documented batch equivalent of
-	// GetSummaryForContentID).
+	// GetSummaryForContentID). Only book items can have one.
 	var workSummaries map[string]*WorkSummary
 	batchSummary, haveWorkSummaryBatch := s.workSummary.(WorkSummaryBatchProvider)
-	if haveWorkSummaryBatch {
-		workSummaries, err = batchSummary.ListSummariesForContentIDs(ctx, visibleIDs, filter)
+	if haveWorkSummaryBatch && len(workIDs) > 0 {
+		workSummaries, err = batchSummary.ListSummariesForContentIDs(ctx, workIDs, filter)
 		if err != nil {
 			return nil, err
 		}
@@ -2441,10 +2535,12 @@ type itemDetailPrefetch struct {
 	ratingSources      []models.ItemRatingSource
 	haveExtras         bool
 	extras             []ExtraWithFile
-	// skipFolderPaths and skipSubtitleDefaults leave those parts unresolved
-	// for a caller that never reads them (see ItemDetailBatchOptions).
+	// skipFolderPaths, skipSubtitleDefaults, and skipMarkerPreviews leave
+	// those parts unresolved for a caller that never reads them (see
+	// ItemDetailBatchOptions and ItemDetailOptions).
 	skipFolderPaths      bool
 	skipSubtitleDefaults bool
+	skipMarkerPreviews   bool
 	// audioResolver, when set, carries the item's audio-preference lookups
 	// already resolved for the page (see prefetchAudioResolvers).
 	audioResolver *audioPrefResolver
@@ -2523,6 +2619,7 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		PosterThumbhash:            item.PosterThumbhash,
 		BackdropThumbhash:          item.BackdropThumbhash,
 		SeasonCount:                item.SeasonCount,
+		EpisodeMetadataIncomplete:  item.EpisodeMetadataIncomplete,
 		Versions:                   []FileVersion{},
 		PlaybackVariants:           []PlaybackVariant{},
 		Subtitles:                  []SubtitleInfo{},
@@ -2563,24 +2660,33 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		if pf != nil {
 			availability = pf.trickplay
 		}
+		// Movie pre-play selectors need the same effective subtitle defaults
+		// the watch payload resolves — including any per-item override saved
+		// from a previous play — so the item detail can't omit them. Scoped to
+		// movies: episodes resolve theirs in buildEpisodeDetail, and other
+		// types have no subtitle selector to feed.
+		withSubtitleDefaults := item.Type == playableTypeMovie && (pf == nil || !pf.skipSubtitleDefaults)
+		var subtitles subtitleDefaults
+		subtitlesResolved := false
 		var audioResolver *audioPrefResolver
 		if pf != nil {
 			audioResolver = pf.audioResolver
 		}
 		if audioResolver == nil {
 			audioResolver = s.newAudioPrefResolver(ctx, filter, item.ContentID)
+			if withSubtitleDefaults {
+				subtitles, subtitlesResolved = s.prefetchMoviePlaybackDefaults(ctx, filter, item, files, audioResolver)
+			}
 		}
 		detail.Versions, detail.PlaybackVariants, detail.Subtitles, detail.Intro, detail.Credits, detail.Recap, detail.Preview = s.buildPlaybackInfoWith(
-			ctx, files, filter, audioResolver, availability,
+			ctx, files, filter, audioResolver, availability, pf == nil || !pf.skipMarkerPreviews,
 		)
 		detail.OverlaySummary = overlays.BuildSummary(files)
-		// Movie pre-play selectors need the same effective subtitle defaults
-		// the watch payload resolves — including any per-item override saved
-		// from a previous play — so the item detail can't omit them. Scoped to
-		// movies: episodes resolve theirs in buildEpisodeDetail, and other
-		// types have no subtitle selector to feed.
-		if item.Type == playableTypeMovie && (pf == nil || !pf.skipSubtitleDefaults) {
-			s.effectiveSubtitleDefaults(ctx, filter, item.ContentID, files).applyToItemDetail(detail)
+		if withSubtitleDefaults {
+			if !subtitlesResolved {
+				subtitles = s.effectiveSubtitleDefaults(ctx, filter, item.ContentID, files)
+			}
+			subtitles.applyToItemDetail(detail)
 		}
 	}
 
@@ -2671,8 +2777,19 @@ func (s *DetailService) claimedSeriesFolderPaths(ctx context.Context, contentID 
 	return paths
 }
 
+// typeHasLiteraryWork reports whether items of itemType can belong to a
+// literary work. A work links an item under its own type, and the
+// literary_work_items format_type CHECK admits only these.
+func typeHasLiteraryWork(itemType string) bool {
+	switch itemType {
+	case detailTypeAudiobook, "ebook", "comic", "manga":
+		return true
+	}
+	return false
+}
+
 func applyWorkSummary(ctx context.Context, detail *ItemDetail, provider WorkSummaryProvider, filter AccessFilter) {
-	if detail == nil || provider == nil || detail.ContentID == "" {
+	if detail == nil || provider == nil || detail.ContentID == "" || !typeHasLiteraryWork(detail.Type) {
 		return
 	}
 	summary, err := provider.GetSummaryForContentID(ctx, detail.ContentID, filter)
@@ -3011,15 +3128,10 @@ func appendAudiobookItemAccessConditions(
 			)`, alias, *argIdx))
 		*args = append(*args, filter.AllowedLibraryIDs)
 		*argIdx = *argIdx + 1
+	} else {
+		*conditions = append(*conditions, InSomeLibraryWhere(alias+".content_id"))
 	}
 	if len(filter.DisabledLibraryIDs) > 0 {
-		if filter.AllowedLibraryIDs == nil {
-			*conditions = append(*conditions, fmt.Sprintf(`
-				EXISTS (
-					SELECT 1 FROM media_item_libraries mil_visible
-					WHERE mil_visible.content_id = %s.content_id
-				)`, alias))
-		}
 		*conditions = append(*conditions, fmt.Sprintf(`
 			NOT EXISTS (
 				SELECT 1 FROM media_item_libraries mil_disabled
@@ -3413,6 +3525,7 @@ func (s *DetailService) buildSeasonDetail(ctx context.Context, season *models.Se
 		SeasonNumber:               &seasonNumber,
 		EpisodeCount:               &episodeCount,
 		IsSpecials:                 season.SeasonNumber == 0,
+		LockedFields:               season.LockedFields,
 		Cast:                       castCredits,
 		Crew:                       crewCredits,
 		Versions:                   []FileVersion{},
@@ -3545,7 +3658,9 @@ func (s *DetailService) buildEpisodeDetail(ctx context.Context, episode *models.
 		SeriesID:                   episode.SeriesID,
 		SeriesTitle:                series.Title,
 		SeasonNumber:               &seasonNumber,
+		SeasonID:                   episode.SeasonID,
 		EpisodeNumber:              &episodeNumber,
+		LockedFields:               episode.LockedFields,
 		Cast:                       seriesCtx.castCredits,
 		Crew:                       seriesCtx.crewCredits,
 		Versions:                   []FileVersion{},
@@ -3583,6 +3698,7 @@ func (s *DetailService) buildEpisodeDetail(ctx context.Context, episode *models.
 		filter,
 		s.episodeAudioResolver(ctx, seriesCtx, filter, episode.SeriesID),
 		seriesCtx.trickplay,
+		!seriesCtx.skipMarkerPreviews,
 	)
 	detail.OverlaySummary = overlays.BuildSummary(files)
 	s.episodeSubtitleDefaults(ctx, seriesCtx, filter, episode.SeriesID, files).applyToItemDetail(detail)
@@ -3670,7 +3786,7 @@ func (s *DetailService) GetWatchDetail(ctx context.Context, contentID string, fi
 	if err := s.itemRepo.EnsureAccessible(ctx, episode.SeriesID, filter); err != nil {
 		return nil, err
 	}
-	if err := s.validatePresentationItemAccess(ctx, filter, episode.ContentID); err != nil {
+	if err := s.validatePresentationEpisodeAccess(ctx, filter, episode); err != nil {
 		return nil, err
 	}
 	// Seasons and episodes inherit original_language from the parent series.
@@ -3870,6 +3986,31 @@ func (s *DetailService) effectiveSubtitleDefaults(
 		return defaults
 	}
 
+	resolved, err := s.settingsResolver().Resolve(ctx, store, subtitleSettingsContext(filter, seriesID, files), subtitleSettingKeys, nil)
+	if err == nil {
+		defaults.applySettings(resolved)
+	}
+
+	if seriesID != "" {
+		if pref, err := store.GetSubtitlePreference(ctx, filter.ProfileID, seriesID); err == nil {
+			defaults.applyPreference(pref)
+		}
+	}
+
+	return defaults
+}
+
+// subtitleSettingKeys are the settings effectiveSubtitleDefaults resolves.
+var subtitleSettingKeys = []string{
+	settingskeys.PlaybackSubtitleLanguage,
+	settingskeys.PlaybackSubtitleMode,
+	settingskeys.PlaybackShowForcedSubtitles,
+}
+
+// subtitleSettingsContext is the context effectiveSubtitleDefaults resolves
+// subtitleSettingKeys in: the library of the file playback would pick, and
+// the series (or movie) the preference rows are stored under.
+func subtitleSettingsContext(filter AccessFilter, seriesID string, files []*models.MediaFile) settingsresolve.Context {
 	rc := settingsresolve.Context{ProfileID: filter.ProfileID, DeviceID: filter.DeviceID}
 	if libraryID := preferredPlayableLibraryID(files, filter.SelectedFileID); libraryID > 0 {
 		rc.LibraryIDs = []int{libraryID}
@@ -3877,50 +4018,46 @@ func (s *DetailService) effectiveSubtitleDefaults(
 	if seriesID != "" {
 		rc.SeriesIDs = []string{seriesID}
 	}
+	return rc
+}
 
-	resolved, err := s.settingsResolver().Resolve(ctx, store, rc, []string{
-		settingskeys.PlaybackSubtitleLanguage,
-		settingskeys.PlaybackSubtitleMode,
-		settingskeys.PlaybackShowForcedSubtitles,
-	}, nil)
-	if err == nil {
-		for _, eff := range resolved {
-			// A value that resolved to the contract default is not a stored
-			// preference, and the callers distinguish the two through the Has*
-			// flags: an unset language must not read as "the user chose empty".
-			stored := eff.Source != settingscontract.ScopeDefault
-			switch eff.Key {
-			case settingskeys.PlaybackSubtitleLanguage:
-				var language string
-				if json.Unmarshal(eff.Value, &language) == nil && stored {
-					defaults.Language = language
-					defaults.HasLanguage = true
-				}
-			case settingskeys.PlaybackSubtitleMode:
-				var mode string
-				if json.Unmarshal(eff.Value, &mode) == nil && stored {
-					defaults.Mode = mode
-					defaults.HasMode = true
-				}
-			case settingskeys.PlaybackShowForcedSubtitles:
-				var forced bool
-				if json.Unmarshal(eff.Value, &forced) == nil && stored {
-					defaults.ShowForced = forced
-					defaults.HasShowForced = true
-				}
+// applySettings takes the stored subtitle settings from a resolution that
+// includes subtitleSettingKeys; other keys are ignored.
+func (d *subtitleDefaults) applySettings(resolved []settingsresolve.Effective) {
+	for _, eff := range resolved {
+		// A value that resolved to the contract default is not a stored
+		// preference, and the callers distinguish the two through the Has*
+		// flags: an unset language must not read as "the user chose empty".
+		stored := eff.Source != settingscontract.ScopeDefault
+		switch eff.Key {
+		case settingskeys.PlaybackSubtitleLanguage:
+			var language string
+			if json.Unmarshal(eff.Value, &language) == nil && stored {
+				d.Language = language
+				d.HasLanguage = true
+			}
+		case settingskeys.PlaybackSubtitleMode:
+			var mode string
+			if json.Unmarshal(eff.Value, &mode) == nil && stored {
+				d.Mode = mode
+				d.HasMode = true
+			}
+		case settingskeys.PlaybackShowForcedSubtitles:
+			var forced bool
+			if json.Unmarshal(eff.Value, &forced) == nil && stored {
+				d.ShowForced = forced
+				d.HasShowForced = true
 			}
 		}
 	}
+}
 
-	if seriesID != "" {
-		if pref, err := store.GetSubtitlePreference(ctx, filter.ProfileID, seriesID); err == nil && pref != nil {
-			if pref.TrackSignature != nil && !pref.TrackSignature.IsZero() {
-				defaults.TrackSignature = pref.TrackSignature
-			}
-		}
+// applyPreference takes the track signature from the stored subtitle
+// preference row, which may be nil.
+func (d *subtitleDefaults) applyPreference(pref *userstore.SubtitlePreference) {
+	if pref != nil && pref.TrackSignature != nil && !pref.TrackSignature.IsZero() {
+		d.TrackSignature = pref.TrackSignature
 	}
-
-	return defaults
 }
 
 // settingsResolver lazily builds the resolver over the embedded contract.
@@ -4095,6 +4232,14 @@ func (r *audioPrefResolver) audioLanguage(ctx context.Context, libraryID int) st
 	if lang, ok := r.resolvedLang[libraryID]; ok {
 		return lang
 	}
+	lang := r.svc.resolvedAudioLanguage(ctx, r.store, r.audioLanguageContext(libraryID))
+	r.resolvedLang[libraryID] = lang
+	return lang
+}
+
+// audioLanguageContext is the context audioLanguage resolves one library's
+// audio language in.
+func (r *audioPrefResolver) audioLanguageContext(libraryID int) settingsresolve.Context {
 	rc := settingsresolve.Context{
 		ProfileID:  r.profileID,
 		DeviceID:   r.deviceID,
@@ -4103,9 +4248,7 @@ func (r *audioPrefResolver) audioLanguage(ctx context.Context, libraryID int) st
 	if strings.TrimSpace(r.contentID) != "" {
 		rc.SeriesIDs = []string{r.contentID}
 	}
-	lang := r.svc.resolvedAudioLanguage(ctx, r.store, rc)
-	r.resolvedLang[libraryID] = lang
-	return lang
+	return rc
 }
 
 // resolvedAudioLanguage returns the effective playback.audio_language for one
@@ -4363,17 +4506,20 @@ func (s *DetailService) buildPlaybackInfo(
 ) ([]FileVersion, []PlaybackVariant, []SubtitleInfo, *Marker, *Marker, *Marker, *Marker) {
 	// Resolve the request-invariant audio preferences once; a multi-track item
 	// would otherwise re-query the profile/preference rows for every file.
-	return s.buildPlaybackInfoWith(ctx, files, filter, s.newAudioPrefResolver(ctx, filter, audioPreferenceContentID), s.trickplay)
+	return s.buildPlaybackInfoWith(ctx, files, filter, s.newAudioPrefResolver(ctx, filter, audioPreferenceContentID), s.trickplay, true)
 }
 
 // buildPlaybackInfoWith is buildPlaybackInfo with a caller-owned audio
-// resolver, so a batch over one series can share it across episodes.
+// resolver, so a batch over one series can share it across episodes. A nil
+// availability leaves Trickplay unset, and markerPreviews false leaves
+// MarkerPreviews unset, for a view that shows neither.
 func (s *DetailService) buildPlaybackInfoWith(
 	ctx context.Context,
 	files []*models.MediaFile,
 	filter AccessFilter,
 	audioResolver *audioPrefResolver,
 	availability TrickplayAvailability,
+	markerPreviews bool,
 ) ([]FileVersion, []PlaybackVariant, []SubtitleInfo, *Marker, *Marker, *Marker, *Marker) {
 	versions := make([]FileVersion, 0, len(files))
 	subtitleSet := make(map[string]SubtitleInfo)
@@ -4401,6 +4547,12 @@ func (s *DetailService) buildPlaybackInfoWith(
 			firstPreview = versionPreview
 		}
 
+		var previews []VersionMarkerPreview
+		if markerPreviews {
+			previews = BuildMarkerPreviews(ctx, f, func(ctx context.Context, paths []string) map[string]ResolvedImageURL {
+				return s.PresignURLsWithExpiry(ctx, paths, "card")
+			})
+		}
 		versions = append(versions, FileVersion{
 			FileID:                   f.ID,
 			FileName:                 fspath.Display(filepath.Base(f.FilePath)),
@@ -4433,10 +4585,8 @@ func (s *DetailService) buildPlaybackInfoWith(
 			Recap:                    versionRecap,
 			Preview:                  versionPreview,
 			MarkerSegments:           models.EffectiveMarkerSegments(f),
-			MarkerPreviews: BuildMarkerPreviews(ctx, f, func(ctx context.Context, paths []string) map[string]ResolvedImageURL {
-				return s.PresignURLsWithExpiry(ctx, paths, "card")
-			}),
-			Unreadable: f.ProbeRejected(),
+			MarkerPreviews:           previews,
+			Unreadable:               f.ProbeRejected(),
 		})
 
 		for _, sub := range f.SubtitleTracks {
@@ -4457,7 +4607,7 @@ func (s *DetailService) buildPlaybackInfoWith(
 			key := fmt.Sprintf("external:%s:%s:%v:%v", sub.Language, sub.Format, sub.Forced, sub.HearingImpaired)
 			if _, exists := subtitleSet[key]; !exists {
 				subtitleSet[key] = SubtitleInfo{
-					Source:          "external",
+					Source:          subtitleSourceExternal,
 					Language:        sub.Language,
 					Codec:           sub.Format,
 					Forced:          sub.Forced,
@@ -4835,7 +4985,7 @@ func buildVersionSubtitleTracks(file *models.MediaFile) []VersionSubtitleTrack {
 			Index:           nextExternalIndex + i,
 			Language:        sub.Language,
 			Codec:           sub.Format,
-			Title:           firstNonEmpty(sub.Title, fspath.Display(filepath.Base(sub.Path))),
+			Title:           firstNonEmpty(sub.Title, sub.FileName()),
 			TitleIsFallback: strings.TrimSpace(sub.Title) == "",
 			EmbeddedTitle:   sub.EmbeddedTitle,
 			Resolution:      sub.Resolution,
@@ -4843,7 +4993,7 @@ func buildVersionSubtitleTracks(file *models.MediaFile) []VersionSubtitleTrack {
 			Default:         sub.Default,
 			HearingImpaired: sub.HearingImpaired,
 			External:        true,
-			FileName:        fspath.Display(filepath.Base(sub.Path)),
+			FileName:        sub.FileName(),
 		})
 	}
 	return tracks

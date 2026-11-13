@@ -1463,7 +1463,7 @@ func fixtureCases() []fixtureCase {
 		fixtureCase{name: "admin_section_restore_precondition_required", operationID: "restoreAdminSections", scenario: "Replacing defaults requires the captured scope validator even when profile reset is not selected.", method: http.MethodPut, path: Prefix + "/admin/sections/defaults?scope=home", headers: bearer(adminToken), body: `{"reset_profiles":false}`, status: 428, assertHeaders: []string{"Content-Type"}, schema: problem},
 		fixtureCase{name: "admin_section_explicit_null_invalid", operationID: "createAdminSection", scenario: "Optional section definition fields must be omitted rather than explicitly null.", method: http.MethodPost, path: Prefix + "/admin/sections", headers: bearer(adminToken), body: `{"title":"Section","section_type":"recently_added","enabled":null}`, status: 422, assertHeaders: []string{"Content-Type"}, schema: problem},
 	)
-	cases = append(cases, fixtureCase{name: "list_webhook_connections_ok", operationID: "listWebhookConnections", scenario: "Account webhook management exposes receiver URLs without access tokens.", method: http.MethodGet, path: Prefix + "/webhook-sync/connections", headers: bearer(memberToken), status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/WebhookConnectionCollection"})
+	cases = append(cases, fixtureCase{name: "list_webhook_connections_ok", operationID: "listWebhookConnections", scenario: "Account webhook management exposes receiver URLs without access tokens.", method: http.MethodGet, path: Prefix + "/webhook-sync/connections", headers: webhookManager(), status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/WebhookConnectionCollection"})
 	cases = append(cases, personalHistoryImportFixtureCases()...)
 	cases = append(cases, []fixtureCase{
 		{name: "get_device_login_capability_ok", operationID: "getDeviceLoginCapability",
@@ -1767,7 +1767,25 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, seasonalThemeFixtureCases()...)
 	cases = append(cases, personalListMembershipFixtureCases()...)
 	cases = append(cases, sectionItemLimitFixtureCases()...)
-	return append(cases, adminCatalogItemsFixtureCases()...)
+	cases = append(cases, adminCatalogItemsFixtureCases()...)
+	cases = append(cases, adminCatalogMatchHintsFixtureCases()...)
+	cases = append(cases, deviceLoginBindingFixtureCases()...)
+	return append(cases, adminDashboardLayoutFixtureCases()...)
+}
+
+// deviceLoginBindingFixtureCases pin the session binding a device-login
+// lookup reports and the poll refusal of a bound request without its secret.
+func deviceLoginBindingFixtureCases() []fixtureCase {
+	return []fixtureCase{
+		{name: "get_device_login_bound", operationID: "getDeviceLogin",
+			scenario: "The lookup of a request started with a session binding carries the binding, which a sender compares with the binding of the request whose code the person compared.",
+			method:   http.MethodGet, path: "/api/v2/auth/device?code=1357-2468",
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/DeviceLogin"},
+		{name: "poll_device_login_binding_mismatch", operationID: "pollDeviceLogin",
+			scenario: "A poll of a bound request without the secret its binding was made from: 403 under the domain's own type, and the request is left as it was.",
+			method:   http.MethodPost, path: "/api/v2/auth/device/poll", body: `{"device_code":"dev-bound"}`,
+			status: http.StatusForbidden, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/Problem"},
+	}
 }
 
 // sectionItemLimitFixtureCases pin the item_limit bound of the aggregate
@@ -2085,6 +2103,7 @@ func fixtureDeps() Dependencies {
 	deps := pilotDeps(&fakeProgress{entries: progressRows()}, nil)
 	deps.NetworkAccess = newFakeNetworkAccess()
 	deps.ServerIdentity = fakeServerIdentity{id: fixtureServerID}
+	deps.AdminDashboardLayout = new(fakeDashboardLayout)
 	deps.OrderedApplePush = new(fakeOrderedApple)
 	deps.OrderedAndroidPush = new(fakeOrderedPush)
 	fixtureProviders := netaccess.NewStatusCache()
@@ -2217,6 +2236,7 @@ func fixtureDeps() Dependencies {
 	deps = withAdminAccountInsights(deps)
 	deps.HistoryImports = fixtureHistoryImports()
 	deps.WebhookSync = &fakeWebhookManagement{}
+	deps.WebhookSyncManagement = webhookManagement([]userstore.Profile{{ID: "p-primary", IsPrimary: true}})
 	deps.Markers = &fakeMarkers{}
 	deps.SubtitleDownloads = &fakeSubtitleDownloads{}
 	deps.SubtitleUploads = &fakeSubtitleUploads{}

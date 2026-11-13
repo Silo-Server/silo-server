@@ -727,6 +727,8 @@ type MediaItem struct {
 	Keywords                     []string
 	OriginalLanguage             string
 	ReleaseDate                  *string // ISO date, nullable
+	DigitalReleaseDate           *string // ISO date (movies only): earliest digital release in any country, nullable
+	PhysicalReleaseDate          *string // ISO date (movies only): earliest physical (disc) release in any country, nullable
 	FirstAirDate                 *string // ISO date (series only), nullable
 	LastAirDate                  *string // ISO date (series only), nullable
 	AirTime                      *string // Series broadcast time (e.g. "20:00"), nullable
@@ -844,6 +846,8 @@ type Season struct {
 	// BackdropFillOnly, with WriteBackdrop, writes only while the stored
 	// backdrop is still empty when the upsert holds the row.
 	BackdropFillOnly bool `json:"-"`
+	// LockedFields lists the fields a refresh keeps; see catalog.childLockedColumn.
+	LockedFields []int
 }
 
 // Episode represents a row in the episodes table.
@@ -877,6 +881,8 @@ type Episode struct {
 	// batch localization: the viewer's language this episode's description is
 	// missing, so an episode list can start on-view translation.
 	PendingTranslationLanguage string `json:"-"`
+	// LockedFields lists the fields a refresh keeps; see catalog.childLockedColumn.
+	LockedFields []int
 }
 
 // MediaItemRoot represents a row in the media_item_roots table.

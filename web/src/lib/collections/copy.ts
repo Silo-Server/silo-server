@@ -1,115 +1,178 @@
-import type { DraftField } from "./draft";
-import type { ArtworkSlot, ScopeKind } from "./scope";
-import { COLLECTION_KIND_LABEL, type CollectionKind } from "./types";
+import type { ScopeKind } from "./scope";
+import type { CollectionKind } from "./types";
+import { t, type MessageKey } from "@/i18n";
+import { appLanguage } from "@/lib/appLocale";
+import { titlesAlreadySaved } from "./copyEditor";
+
+export * from "./copyEditor";
+export * from "./copyArrange";
 
 /**
  * Words every collections surface shares, so the editor, lists and dialogs
  * say the same thing. "Collections tab" is where a library's collections are
  * browsed; "library page" is the rows above a library's grid.
+ *
+ * Everything here is a function: it reads the interface language when called,
+ * so call it while rendering, never at module scope.
  */
 
-/** "Movies", "Movies and Kids", "Movies, Kids and 4K Movies". */
+/** "Movies", "Movies and Kids", "Movies, Kids and 4K Movies", in the interface language. */
 export function joinNames(names: readonly string[]): string {
   if (names.length <= 1) return names[0] ?? "";
-  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  const language = appLanguage();
+  let format = listFormats.get(language);
+  if (!format) {
+    // English keeps its list without the serial comma, as en-GB writes it.
+    format = new Intl.ListFormat(language === "en" ? "en-GB" : language, {
+      style: "long",
+      type: "conjunction",
+    });
+    listFormats.set(language, format);
+  }
+  return format.format(names);
 }
 
-function plural(count: number, word: string) {
-  return `${count} ${word}${count === 1 ? "" : "s"}`;
+const listFormats = new Map<string, Intl.ListFormat>();
+
+/** "Movies › Collections": a library's Collections tab. */
+function collectionsTabOf(libraryName: string): string {
+  return t("web.collections.copy.collectionsTabOf", { library: libraryName });
 }
 
 // --- New collection ---------------------------------------------------------
 
-export const NEW_COLLECTION = "New collection";
+export function newCollection() {
+  return t("web.collections.copy.newCollection");
+}
 
 /** The type picker's subtitle: what the type decides, and what the editor asks next. */
-export const NEW_COLLECTION_HELP: Readonly<Record<ScopeKind, string>> = {
-  server: "What decides what's in it? Next you'll name it, fill it and choose where it shows.",
-  personal:
-    "What decides what's in it? Only you can change it. Next you'll name it, fill it and choose who sees it.",
-};
+export function newCollectionHelp(scope: ScopeKind): string {
+  return scope === "server"
+    ? t("web.collections.copy.newCollectionHelpServer")
+    : t("web.collections.copy.newCollectionHelpPersonal");
+}
 
-export const NEW_COLLECTION_NEXT = "Next: name it and fill it in, on its own page.";
-export const STARTER_PACK_PROMPT = "Want a whole set at once?";
-export const ADD_A_STARTER_PACK = "Add a starter pack";
+export function newCollectionNext() {
+  return t("web.collections.copy.newCollectionNext");
+}
+export function starterPackPrompt() {
+  return t("web.collections.copy.starterPackPrompt");
+}
+export function addAStarterPack() {
+  return t("web.collections.copy.addAStarterPack");
+}
+
+const KIND_SENTENCE: Readonly<Record<CollectionKind, MessageKey>> = {
+  manual: "web.collections.copy.kindSentenceManual",
+  smart: "web.collections.copy.kindSentenceSmart",
+  synced: "web.collections.copy.kindSentenceSynced",
+};
 
 /** What each type does, under its name on the type picker. */
-export const KIND_SENTENCE: Readonly<Record<CollectionKind, string>> = {
-  manual: "You pick the titles and put them in order.",
-  smart: "Titles that match your rules. It fills itself and keeps up as titles are added.",
-  synced: "Follows a list from MDBList or TMDB and updates on a schedule.",
-};
+export function kindSentence(kind: CollectionKind): string {
+  return t(KIND_SENTENCE[kind]);
+}
 
 /** Examples for each type on the type picker; a profile has no staff. */
-export const KIND_GOOD_FOR: Readonly<Record<ScopeKind, Readonly<Record<CollectionKind, string>>>> =
-  {
-    server: {
-      manual: "staff picks, a director's best, movie night.",
-      smart: "90s comedies, unwatched 4K, Christmas movies.",
-      synced: "IMDb Top 250, Netflix Originals, trending this week.",
-    },
-    personal: {
-      manual: "a director's best, movie night, a watch order.",
-      smart: "90s comedies, unwatched 4K, Christmas movies.",
-      synced: "IMDb Top 250, Netflix Originals, trending this week.",
-    },
-  };
+export function kindGoodFor(scope: ScopeKind, kind: CollectionKind): string {
+  switch (kind) {
+    case "manual":
+      return scope === "server"
+        ? t("web.collections.copy.goodForManualServer")
+        : t("web.collections.copy.goodForManualPersonal");
+    case "smart":
+      return t("web.collections.copy.goodForSmart");
+    case "synced":
+      return t("web.collections.copy.goodForSynced");
+  }
+}
 
-export const SYNCED_CHECKING = "Checking Synced lists…";
-export const SYNCED_CHECK_FAILED = "Couldn't check whether Synced lists are on.";
+export function syncedChecking() {
+  return t("web.collections.copy.syncedChecking");
+}
+export function syncedCheckFailed() {
+  return t("web.collections.copy.syncedCheckFailed");
+}
 
 // --- Where it shows ---------------------------------------------------------
 
-export const SHOW_ON_TAB_LABEL = "Show on the Collections tab";
+export function showOnTabLabel() {
+  return t("web.collections.copy.showOnTabLabel");
+}
 
 /** The server switch's help: where viewers find the collection. */
 export function serverTabHelp(libraryNames: readonly string[]): string {
-  if (libraryNames.length === 0) return "Viewers find it on its libraries' Collections tabs.";
-  return `Viewers find it under ${joinNames(libraryNames.map((name) => `${name} › Collections`))}.`;
+  if (libraryNames.length === 0) return t("web.collections.copy.serverTabHelpNone");
+  return t("web.collections.copy.serverTabHelp", {
+    places: joinNames(libraryNames.map(collectionsTabOf)),
+  });
 }
 
 /**
  * The personal switch's help. Profiles the collection is shared with see it
  * on their Collections tabs too, so the label can't say "my".
  */
-export const PERSONAL_TAB_HELP = "For you and anyone you share it with";
+export function personalTabHelp() {
+  return t("web.collections.copy.personalTabHelp");
+}
 
-export const SHOW_TO_OTHER_PROFILES_LABEL = "Show to other profiles";
-export const SHOW_TO_OTHER_PROFILES_HELP =
-  "Every profile on this account sees it, minus titles it can't access. Nobody else on the server can see it.";
+export function showToOtherProfilesLabel() {
+  return t("web.collections.copy.showToOtherProfilesLabel");
+}
+export function showToOtherProfilesHelp() {
+  return t("web.collections.copy.showToOtherProfilesHelp");
+}
 
 /** What turning sharing off costs: "Maya and Leo lose it, including rows they made from it." */
 export function unshareConsequence(profileNames: readonly string[]): string {
-  const who = profileNames.length > 0 ? joinNames(profileNames) : "Other profiles";
-  const verb = profileNames.length === 1 ? "loses" : "lose";
-  return `${who} ${verb} it, including rows they made from it.`;
+  if (profileNames.length === 0) return t("web.collections.copy.unshareConsequenceOthers");
+  return t("web.collections.copy.unshareConsequence", {
+    count: profileNames.length,
+    names: joinNames(profileNames),
+  });
 }
 
 /** Shown when sharing is turned off on a saved collection. */
 export function unshareWarning(profileNames: readonly string[]): string {
-  return `When you save, ${unshareConsequence(profileNames)}`;
+  return t("web.collections.copy.unshareWarning", {
+    consequence: unshareConsequence(profileNames),
+  });
 }
 
 /** The ⋯ switch's help on a card: the menu has room for one short line. */
-export const SHOW_TO_OTHER_PROFILES_SHORT_HELP = "Every profile on this account sees it";
+export function showToOtherProfilesShortHelp() {
+  return t("web.collections.copy.showToOtherProfilesShortHelp");
+}
 
 /** The Libraries row while a server collection has none ticked. */
-export const LIBRARIES_NOT_PICKED = "Not picked yet";
+export function librariesNotPicked() {
+  return t("web.collections.copy.librariesNotPicked");
+}
+/** A server Smart collection's Libraries row: where it shows, not where its titles come from. */
+export function smartLibrariesHelp() {
+  return t("web.collections.copy.smartLibrariesHelp");
+}
 /** The Shelf row of a collection that isn't created yet, after "No heading". */
-export const SHELF_AFTER_CREATE = "Move it in Arrange once it's created";
+export function shelfAfterCreate() {
+  return t("web.collections.copy.shelfAfterCreate");
+}
 
 // --- Server list ------------------------------------------------------------
 
-export const ON_HOME = "On Home";
-export const HIDDEN_FROM_TAB = "Hidden from Collections tab";
+export function onHome() {
+  return t("web.collections.copy.onHome");
+}
+export function hiddenFromTab() {
+  return t("web.collections.copy.hiddenFromTab");
+}
 
 /** "Movies › Collections and Kids › Collections". */
 function collectionsTabs(libraryNames: readonly string[]): string {
-  return joinNames(libraryNames.map((name) => `${name} › Collections`));
+  return joinNames(libraryNames.map(collectionsTabOf));
 }
 
 export function hideCollectionTitle(name: string): string {
-  return `Hide ${name} from Collections tabs?`;
+  return t("web.collections.copy.hideCollectionTitle", { name });
 }
 
 /**
@@ -121,61 +184,111 @@ export function hideCollectionDescription(
   rowCount: number,
   places?: string | null,
 ): string {
-  const leaves = libraryNames.length > 0 ? `It leaves ${collectionsTabs(libraryNames)}. ` : "";
-  const on = places ? ` on ${places}` : "";
-  if (rowCount !== 1)
-    return `${leaves}${rowCount} rows${on} still show it, but their See all won't open while it's hidden.`;
-  if (places)
-    return `${leaves}1 row${on} still shows it, but that row's See all won't open while it's hidden.`;
-  return `${leaves}1 row still shows it, but its See all won't open while it's hidden.`;
+  const rows = places
+    ? t("web.collections.copy.hideCollectionRowsOn", {
+        count: rowCount,
+        count_text: rowCount,
+        places,
+      })
+    : t("web.collections.copy.hideCollectionRows", {
+        count: rowCount,
+        count_text: rowCount,
+      });
+  if (libraryNames.length === 0) return rows;
+  return `${t("web.collections.copy.hideCollectionLeaves", { tabs: collectionsTabs(libraryNames) })} ${rows}`;
 }
 
 /** A delete the server refused because Home or library page rows still show the collection. */
-export const COLLECTION_IN_USE = "Rows still use it. Remove them first.";
+export function collectionInUse() {
+  return t("web.collections.copy.collectionInUse");
+}
 
 // --- Where it shows: rows ---------------------------------------------------
 
-export const ROWS_THAT_SHOW_IT = "Rows that show it";
-export const ROWS_NOT_LISTED = "Rows profiles add to their own Home aren't listed.";
-export const NO_ROWS_YET = "No Home or library page row shows it yet.";
-export const ROWS_FAILED = "Couldn't load the rows that show it.";
-export const ADD_AS_A_ROW = "Add as a row";
-export const OTHER_LIBRARIES = "Other libraries";
+export function rowsThatShowIt() {
+  return t("web.collections.copy.rowsThatShowIt");
+}
+export function rowsNotListed() {
+  return t("web.collections.copy.rowsNotListed");
+}
+export function noRowsYet() {
+  return t("web.collections.copy.noRowsYet");
+}
+export function rowsFailed() {
+  return t("web.collections.copy.rowsFailed");
+}
+export function addAsARow() {
+  return t("web.collections.copy.addAsARow");
+}
+export function otherLibraries() {
+  return t("web.collections.copy.otherLibraries");
+}
 /** The Rows that show it row of a collection that isn't created yet. */
-export const ROWS_ONCE_CREATED = "None yet. Add it to Home or a library page once it's created.";
-export const SHOW_IT_FIRST = "Show it on the Collections tab first. Viewers couldn't open See all.";
-export const DISCARD_KEEPS_IT_HIDDEN =
-  "It's saved as hidden from the Collections tab, so save to show it before adding it as a row.";
-export const ADD_TO_HOME = "Add to Home…";
-export const ADD_TO_HOME_HELP = "A row on everyone's Home";
-export const ADD_TO_LIBRARY_PAGE = "Add to a library page…";
-export const ADD_TO_LIBRARY_PAGE_HELP = "A row above a library's grid";
-export const OPEN_ROW = "Open row";
+export function rowsOnceCreated() {
+  return t("web.collections.copy.rowsOnceCreated");
+}
+export function showItFirst() {
+  return t("web.collections.copy.showItFirst");
+}
+export function discardKeepsItHidden() {
+  return t("web.collections.copy.discardKeepsItHidden");
+}
+export function addToHome() {
+  return t("web.collections.copy.addToHome");
+}
+export function addToHomeHelp() {
+  return t("web.collections.copy.addToHomeHelp");
+}
+export function addToLibraryPage() {
+  return t("web.collections.copy.addToLibraryPage");
+}
+export function addToLibraryPageHelp() {
+  return t("web.collections.copy.addToLibraryPageHelp");
+}
+export function openRow() {
+  return t("web.collections.copy.openRow");
+}
 
 // Personal collections: rows on the viewer's own Home and library pages.
-export const NO_MY_ROWS_YET = "None of your Home or library page rows show it yet.";
-export const MY_ROWS_ONCE_CREATED =
-  "None yet. Add it to your Home or a library page once it's created.";
-export const ADD_TO_MY_HOME = "Add to my Home";
-export const ADD_TO_MY_HOME_ITEM = "Add to my Home…";
-export const ADD_TO_MY_HOME_HELP = "A row on your Home";
-export const ADD_TO_MY_LIBRARY_PAGE = "Add to my library page";
+export function noMyRowsYet() {
+  return t("web.collections.copy.noMyRowsYet");
+}
+export function myRowsOnceCreated() {
+  return t("web.collections.copy.myRowsOnceCreated");
+}
+export function addToMyHome() {
+  return t("web.collections.copy.addToMyHome");
+}
+export function addToMyHomeItem() {
+  return t("web.collections.copy.addToMyHomeItem");
+}
+export function addToMyHomeHelp() {
+  return t("web.collections.copy.addToMyHomeHelp");
+}
+export function addToMyLibraryPage() {
+  return t("web.collections.copy.addToMyLibraryPage");
+}
 
 export function rowCountLabel(count: number): string {
-  return plural(count, "row");
+  return t("web.collections.copy.rowCount", { count, count_text: count });
 }
 
 /** "Kids page": the rows above a library's grid. */
 export function libraryPageLabel(libraryName: string): string {
-  return `${libraryName} page`;
+  return t("web.collections.copy.libraryPage", { library: libraryName });
 }
 
-export const SAVE_FIRST_TITLE = "Save changes first?";
+export function saveFirstTitle() {
+  return t("web.collections.copy.saveFirstTitle");
+}
 /** Save and continue waits, like Save, for a choice on each field changed in both places. */
-export const SAVE_AFTER_CONFLICTS =
-  "Some fields changed here and elsewhere. Choose Keep mine or Use theirs for each, then save.";
+export function saveAfterConflicts() {
+  return t("web.collections.copy.saveAfterConflicts");
+}
 /** Save and continue waits, like Save, for changes that can be saved. */
-export const SAVE_NOT_READY = "These changes can't be saved yet. The save bar says what's missing.";
+export function saveNotReady() {
+  return t("web.collections.copy.saveNotReady");
+}
 
 /** "You're about to add Studio Ghibli as a row on Home. Name not saved yet." */
 export function saveFirstDescription(
@@ -184,8 +297,11 @@ export function saveFirstDescription(
   fieldLabels: readonly string[],
   titlesSaved: boolean,
 ): string {
-  const pending = fieldLabels.length > 0 ? ` ${notSavedMessage(fieldLabels)} yet.` : "";
-  return `You're about to add ${name} as a row on ${where}.${pending}${titlesSaved ? ` ${TITLES_ALREADY_SAVED}` : ""}`;
+  const parts = [t("web.collections.copy.saveFirstDescription", { name, where })];
+  if (fieldLabels.length > 0)
+    parts.push(t("web.collections.copy.notSavedYet", { fields: lowerNames(fieldLabels) }));
+  if (titlesSaved) parts.push(titlesAlreadySaved());
+  return parts.join(" ");
 }
 
 /** Deleting a server collection rows show: the rows go first. */
@@ -195,79 +311,79 @@ export function deleteWithRowsDescription(
 ): string {
   const removed =
     libraryNames.length > 0
-      ? `It's removed from ${joinNames(libraryNames)} for everyone.`
-      : "It's removed for everyone.";
-  return `${removed} ${rowCount === 1 ? "1 row shows it" : `${rowCount} rows show it`}:`;
+      ? t("web.collections.copy.removedFromForEveryone", { libraries: joinNames(libraryNames) })
+      : t("web.collections.copy.removedForEveryone");
+  return `${removed} ${t("web.collections.copy.rowsShowIt", { count: rowCount, count_text: rowCount })}`;
 }
 
-export const KEEP_ROWS_HINT =
-  "To keep the rows, open each one and point it at another collection, then come back.";
-export const TITLES_STAY = "Titles stay in your libraries.";
-export const CHECKING_ROWS = "Checking which rows show it…";
+export function keepRowsHint() {
+  return t("web.collections.copy.keepRowsHint");
+}
+export function titlesStay() {
+  return t("web.collections.copy.titlesStay");
+}
+export function checkingRows() {
+  return t("web.collections.copy.checkingRows");
+}
 
 export function deleteWithRowsLabel(rowCount: number): string {
-  return `Delete it and its ${rowCountLabel(rowCount)}`;
+  return t("web.collections.copy.deleteWithRowsLabel", {
+    count: rowCount,
+    count_text: rowCount,
+  });
 }
 
 /** A delete with rows found the collection changed since the editor read it: nothing went. */
-export const CHANGED_BEFORE_DELETE =
-  "This collection changed since you opened it, so nothing was deleted. Check it, then delete again.";
+export function changedBeforeDelete() {
+  return t("web.collections.copy.changedBeforeDelete");
+}
 /** A delete with rows couldn't read the collection first: nothing went. */
-export const CHECK_BEFORE_DELETE_FAILED =
-  "Couldn't check the collection before deleting its rows, so nothing was deleted. Try again.";
+export function checkBeforeDeleteFailed() {
+  return t("web.collections.copy.checkBeforeDeleteFailed");
+}
 
 /** A delete with rows that stopped part way: the collection stays. */
 export function rowsLeftMessage(rows: readonly string[]): string {
-  return `Couldn't delete every row, so the collection was kept. Still showing it: ${joinNames(rows)}.`;
+  return t("web.collections.copy.rowsLeft", { rows: joinNames(rows) });
 }
 
 // --- Select mode and Delete all ---------------------------------------------
 
 /** Rows use every collection a delete was asked for, so nothing goes. */
-export const COLLECTIONS_IN_USE = "Rows still use them. Remove the rows first.";
+export function collectionsInUse() {
+  return t("web.collections.copy.collectionsInUse");
+}
 
 /** A starter pack being added would race a delete of the collections it makes. */
-export const STARTER_PACK_BLOCKS_DELETE = "A starter pack is being added. Delete once it finishes.";
-
-const KIND_NOUN: Readonly<Record<CollectionKind | "mixed", readonly [string, string]>> = {
-  manual: ["manual collection", "manual collections"],
-  smart: ["smart collection", "smart collections"],
-  synced: ["synced list", "synced lists"],
-  mixed: ["collection", "collections"],
-};
-
-/** "1 synced list", "7 collections": `kind` null when the collections are of several types. */
-function kindCount(count: number, kind: CollectionKind | null): string {
-  const [one, many] = KIND_NOUN[kind ?? "mixed"];
-  return `${count} ${count === 1 ? one : many}`;
+export function starterPackBlocksDelete() {
+  return t("web.collections.copy.starterPackBlocksDelete");
 }
 
 /** Up to five names, then how many more. */
 function someNames(names: readonly string[]): string {
-  const shown = names.length > 5 ? [...names.slice(0, 4), `${names.length - 4} more`] : names;
+  const more = names.length - 4;
+  const shown =
+    names.length > 5
+      ? [
+          ...names.slice(0, 4),
+          t("web.collections.copy.moreNames", { count: more, count_text: more }),
+        ]
+      : names;
   return joinNames(shown);
 }
 
 export function syncListsLabel(count: number): string {
-  return `Sync ${plural(count, "list")}`;
+  return t("web.collections.copy.syncLists", { count, count_text: count });
 }
 
 /** Sync works on synced lists only; says how many picked collections it passes over. */
 export function syncSkipNote(smart: number, manual: number): string | null {
   if (smart + manual === 0) return null;
-  const kinds = smart && manual ? "smart and manual" : smart ? "smart" : "manual";
-  return `Sync skips ${kinds} collections (${smart + manual} here).`;
+  const kinds = smart && manual ? "both" : smart ? "smart" : "manual";
+  return t("web.collections.copy.syncSkipNote", { kinds, count: smart + manual });
 }
 
 export type BatchAction = "sync" | "show" | "hide";
-
-const BATCH_WORDS: Readonly<
-  Record<BatchAction, { done: string; verb: string; noun: string; where: string }>
-> = {
-  sync: { done: "Synced", verb: "sync", noun: "list", where: "" },
-  show: { done: "Showed", verb: "show", noun: "collection", where: " on Collections tabs" },
-  hide: { done: "Hid", verb: "hide", noun: "collection", where: " from Collections tabs" },
-};
 
 /**
  * The toast after a select-mode action: all done, some done, or none.
@@ -279,36 +395,65 @@ export function batchResult(
   total: number,
   warned = 0,
 ): { tone: "success" | "warning" | "error"; message: string } {
-  const words = BATCH_WORDS[action];
-  const warnings = warned > 0 ? `, ${warned} with warnings` : "";
+  const warnings = warned;
   if (done === total)
     return {
       tone: warned > 0 ? "warning" : "success",
-      message: `${words.done} ${plural(done, words.noun)}${words.where}${warnings}.`,
+      message:
+        warned > 0
+          ? t("web.collections.copy.batchAllWarned", {
+              action,
+              count: done,
+              count_text: done,
+              warned: warnings,
+            })
+          : t("web.collections.copy.batchAll", { action, count: done, count_text: done }),
     };
   if (done > 0)
     return {
       tone: "warning",
-      message: `${words.done} ${done} of ${plural(total, words.noun)}${warnings}.`,
+      message:
+        warned > 0
+          ? t("web.collections.copy.batchSomeWarned", {
+              action,
+              done: done,
+              count: total,
+              count_text: total,
+              warned: warnings,
+            })
+          : t("web.collections.copy.batchSome", {
+              action,
+              done: done,
+              count: total,
+              count_text: total,
+            }),
     };
-  return { tone: "error", message: `Couldn't ${words.verb} ${plural(total, words.noun)}.` };
+  return {
+    tone: "error",
+    message: t("web.collections.copy.batchNone", {
+      action,
+      count: total,
+      count_text: total,
+    }),
+  };
 }
 
 export function alreadyShown(shown: boolean): string {
   return shown
-    ? "The selected collections are already on Collections tabs."
-    : "The selected collections are already hidden.";
+    ? t("web.collections.copy.alreadyShownOnTabs")
+    : t("web.collections.copy.alreadyHidden");
 }
 
 export function hideCollectionsTitle(count: number): string {
-  return `Hide ${count} collections from Collections tabs?`;
+  return t("web.collections.copy.hideCollectionsTitle", { count, count_text: count });
 }
 
 /** Hiding several collections rows show: `rowCount` is the rows' total. */
 export function hideCollectionsDescription(rowCount: number): string {
-  return rowCount === 1
-    ? "1 row still shows one of them, but its See all won't open while it's hidden."
-    : `${rowCount} rows still show them, but those rows' See all won't open while they're hidden.`;
+  return t("web.collections.copy.hideCollectionsDescription", {
+    count: rowCount,
+    count_text: rowCount,
+  });
 }
 
 /** "Delete 7 synced lists in Movies?" `where` is a library name or "this view". */
@@ -317,13 +462,14 @@ export function deleteCollectionsTitle(
   kind: CollectionKind | null,
   where: string | null,
 ): string {
-  return `Delete ${kindCount(count, kind)}${where ? ` in ${where}` : ""}?`;
+  const values = { kind: kind ?? "mixed", count, count_text: count };
+  return where
+    ? t("web.collections.copy.deleteCollectionsTitleIn", { ...values, where })
+    : t("web.collections.copy.deleteCollectionsTitle", values);
 }
 
 export function deleteCollectionsDescription(count: number): string {
-  return count === 1
-    ? "It's removed for everyone. Its titles stay in your libraries."
-    : "They're removed for everyone. Their titles stay in your libraries.";
+  return t("web.collections.copy.deleteCollectionsDescription", { count });
 }
 
 /** A collection is one thing in every library it's in, so deleting it there removes it everywhere. */
@@ -331,134 +477,151 @@ export function alsoDeletedElsewhere(
   entries: ReadonlyArray<{ title: string; libraryNames: readonly string[] }>,
   kind: CollectionKind | null,
 ): string {
-  const [one, many] = KIND_NOUN[kind ?? "mixed"];
   const names = someNames(
-    entries.map((entry) => `${entry.title} (${joinNames(entry.libraryNames)})`),
+    entries.map((entry) => nameWithPlace(entry.title, joinNames(entry.libraryNames))),
   );
-  return entries.length === 1
-    ? `A ${one} that's also in another library goes there too: ${names}.`
-    : `${many.charAt(0).toUpperCase()}${many.slice(1)} that are also in other libraries go there too: ${names}.`;
+  return t("web.collections.copy.alsoDeletedElsewhere", {
+    kind: kind ?? "mixed",
+    count: entries.length,
+    names,
+  });
+}
+
+/** "Studio Ghibli (Home)": a name and where it is, for naming things in a message. */
+export function nameWithPlace(name: string, place: string): string {
+  return t("web.collections.copy.nameWithPlace", { name, place });
 }
 
 /** The collections a delete leaves alone because Home or library page rows show them. */
 export function keptForRows(titles: readonly string[]): string {
-  return titles.length === 1
-    ? `1 is kept because rows use it: ${titles[0]}.`
-    : `${titles.length} are kept because rows use them: ${someNames(titles)}.`;
+  return t("web.collections.copy.keptForRows", {
+    count: titles.length,
+    count_text: titles.length,
+    names: someNames(titles),
+  });
 }
 
 // --- Titles -----------------------------------------------------------------
 
-export const TITLES_CAPTION = {
-  server: "In the order viewers see them. Titles save as you add, remove or drag them.",
-  personal: "In the order you see them. Titles save as you add, remove or drag them.",
-  create: "Pick titles now. They're added when you press Create collection.",
-} as const;
-export const TITLES_SAVED = "Saved";
-export const TITLES_EMPTY = "No titles yet. Search above to add the first.";
-export const IN_THIS_COLLECTION = "In this collection";
-export const ALL_YOUR_LIBRARIES = "All your libraries";
-export const MANUAL_ORDER_LINE = "Your order. Drag titles to change it.";
+const TITLES_CAPTION: Readonly<Record<ScopeKind | "create", MessageKey>> = {
+  server: "web.collections.copy.titlesCaptionServer",
+  personal: "web.collections.copy.titlesCaptionPersonal",
+  create: "web.collections.copy.titlesCaptionCreate",
+};
+
+export function titlesCaption(kind: ScopeKind | "create"): string {
+  return t(TITLES_CAPTION[kind]);
+}
+export function titlesSavedLabel() {
+  return t("web.collections.copy.titlesSaved");
+}
+export function titlesEmpty() {
+  return t("web.collections.copy.titlesEmpty");
+}
+export function inThisCollection() {
+  return t("web.collections.copy.inThisCollection");
+}
+export function allYourLibraries() {
+  return t("web.collections.copy.allYourLibraries");
+}
+export function manualOrderLine() {
+  return t("web.collections.copy.manualOrderLine");
+}
 
 export function removedTitle(title: string): string {
-  return `Removed ${title}`;
+  return t("web.collections.copy.removedTitle", { title });
 }
 
 export function createdButNotAdded(count: number): string {
-  return `Created, but couldn't add ${plural(count, "title")}`;
+  return t("web.collections.copy.createdButNotAdded", { count, count_text: count });
 }
 
 // --- Add to collection -----------------------------------------------------
 
-export const ADD_TO_COLLECTION_FOOTNOTE =
-  "Only manual collections take titles by hand. Ticking saves right away.";
+export function addToCollectionFootnote() {
+  return t("web.collections.copy.addToCollectionFootnote");
+}
 
 /** "Manual · 15 titles": a manual collection's line in a picker. */
 export function manualTitleCount(count: number): string {
-  return `${COLLECTION_KIND_LABEL.manual} · ${plural(count, "title")}`;
+  return t("web.collections.copy.manualTitleCount", { count, count_text: count });
 }
 
 /** The Add to collection footer: how many of the profile's collections hold the title. */
 export function inCollections(count: number): string {
-  return count === 0 ? "Not in a collection yet" : `In ${plural(count, "collection")}`;
+  return t("web.collections.copy.inCollections", { count, count_text: count });
 }
 
 /** The new collection was kept, but the title it was made for didn't go in. */
 export function madeButNotAdded(collection: string, title: string): string {
-  return `Made ${collection}, but couldn't add ${title}`;
-}
-
-// --- Rules (Smart) ----------------------------------------------------------
-
-export const RULES_CAPTION =
-  "Titles that match are in the collection. New matches join on their own.";
-/** Under a personal Smart collection's rules. */
-export const PERSONAL_RULES_NOTE =
-  "“All my libraries” follows the libraries this profile can see. Rules about you, like Watched, are offered only here.";
-export const ALL_MY_LIBRARIES = "all my libraries";
-/** A personal list's libraries when none is ticked, as the library menu reads. */
-export const ALL_MY_LIBRARIES_LABEL = "All my libraries";
-/** The meta line's last part on a Smart collection. */
-export const SMART_UPDATES_ITSELF = "Updates itself as titles are added";
-/** After "Rules not saved" in the save bar. */
-export const PREVIEW_SHOWS_UNSAVED = "The preview already shows them.";
-
-export const PREVIEW_LIVE = "Live preview";
-/** Beside the preview count while a server collection has no library picked yet. */
-export const PREVIEW_EVERY_LIBRARY = "From every library until you pick some";
-export const PREVIEW_EMPTY = "No titles match yet";
-export const PREVIEW_EMPTY_HELP = "You can still save. Titles that match later join on their own.";
-export const PREVIEW_FAILED = "The preview didn't load. You can still save.";
-
-export function previewMatches(total: number): string {
-  return total === 1 ? "1 title matches" : `${total.toLocaleString()} titles match`;
-}
-
-/** The save bar's hint on a new Smart collection, once the preview has answered. */
-export function smartCreateHint(total: number): string {
-  if (total === 0) return "Nothing matches yet. Titles that match later join on their own.";
-  return `${previewMatches(total)} now. New ones join on their own.`;
-}
-
-// --- Order ------------------------------------------------------------------
-
-export const ORDER_HELP = "A profile that picks its own sort while browsing keeps that choice.";
-export const NO_LIMIT = "No limit";
-
-/** A smart collection's stored default sort, which wins over Order until cleared. */
-export function storedSortLine(sortLabel: string): string {
-  return `A saved default sort, ${sortLabel}, wins over this Order.`;
+  return t("web.collections.copy.madeButNotAdded", { collection, title });
 }
 
 // --- Synced list ------------------------------------------------------------
 
-export const SYNCED_HEADING = "The list it follows";
-export const SYNCED_CAPTION = "Titles come from this list and update on its schedule.";
-export const SYNCED_CREATE_SUBTITLE =
-  "Pick the list, check the details, then press Create collection.";
-export const SYNCED_OFF = "Synced lists are off on this server.";
-export const POPULAR_PICKS = "Popular picks";
-export const POPULAR_PICKS_HELP = "Ready-made lists that work well here";
-export const FROM_MDBLIST = "From MDBList";
-export const FROM_MDBLIST_HELP = "Public lists by other people";
-export const PASTE_MDBLIST_LINK = "Or paste any MDBList link";
-export const MDBLIST_LINK_INVALID =
-  "Paste the link to a list on mdblist.com, like https://mdblist.com/lists/…";
-export const MDBLIST_SEARCH_OFF_PROFILE =
-  "Searching MDBList is off on this server. Popular picks and pasted links still work.";
-export const PASTE_TMDB_LIST_LINK = "Paste a TMDB list link";
-export const TMDB_LIST_HELP = "Public lists only. Its titles arrive with the first sync.";
-export const CHART_RULES_NOTE = "“Trending over” and “Both” appear only for Trending.";
-export const NAME_FILLED_HELP =
-  "Filled in from the list. Picking another list keeps anything you typed.";
-export const SYNCS_ON_CREATE = "It syncs for the first time when you create it.";
-export const PICK_A_LIST_FIRST = "Pick a list, then create it.";
-export const SYNCED_ORDER_HELP =
-  "Blank takes the whole list: up to 10,000 titles from MDBList, or the first 20 of a TMDB chart.";
+export function syncedHeading() {
+  return t("web.collections.copy.syncedHeading");
+}
+export function syncedCaption() {
+  return t("web.collections.copy.syncedCaption");
+}
+export function syncedCreateSubtitle() {
+  return t("web.collections.copy.syncedCreateSubtitle");
+}
+export function syncedOff() {
+  return t("web.collections.copy.syncedOff");
+}
+export function popularPicks() {
+  return t("web.collections.copy.popularPicks");
+}
+export function popularPicksHelp() {
+  return t("web.collections.copy.popularPicksHelp");
+}
+export function fromMdblist() {
+  return t("web.collections.copy.fromMdblist");
+}
+export function fromMdblistHelp() {
+  return t("web.collections.copy.fromMdblistHelp");
+}
+export function pasteMdblistLink() {
+  return t("web.collections.copy.pasteMdblistLink");
+}
+export function mdblistLinkInvalid() {
+  return t("web.collections.copy.mdblistLinkInvalid");
+}
+export function mdblistSearchOffProfile() {
+  return t("web.collections.copy.mdblistSearchOffProfile");
+}
+export function pasteTmdbListLink() {
+  return t("web.collections.copy.pasteTmdbListLink");
+}
+export function tmdbListHelp() {
+  return t("web.collections.copy.tmdbListHelp");
+}
+export function chartRulesNote() {
+  return t("web.collections.copy.chartRulesNote");
+}
+export function nameFilledHelp() {
+  return t("web.collections.copy.nameFilledHelp");
+}
+export function syncsOnCreate() {
+  return t("web.collections.copy.syncsOnCreate");
+}
+export function pickAListFirst() {
+  return t("web.collections.copy.pickAListFirst");
+}
+export function syncedOrderHelp() {
+  return t("web.collections.copy.syncedOrderHelp");
+}
 
 /** "Kept your name", "Kept your name and description": what a new pick left alone. */
 export function keptMessage(fields: readonly ("name" | "description")[]): string | null {
-  return fields.length > 0 ? `Kept your ${joinNames([...fields])}` : null;
+  const name = fields.includes("name");
+  const description = fields.includes("description");
+  if (name && description) return t("web.collections.copy.keptNameAndDescription");
+  if (name) return t("web.collections.copy.keptName");
+  if (description) return t("web.collections.copy.keptDescription");
+  return null;
 }
 
 /** "This list only has movies, so TV Shows isn't offered." */
@@ -466,113 +629,77 @@ export function ineligibleLibrariesLine(
   mediaKind: "movie" | "tv",
   libraryNames: readonly string[],
 ): string {
-  const only = mediaKind === "movie" ? "movies" : "TV shows";
-  const verb = libraryNames.length === 1 ? "isn't" : "aren't";
-  return `This list only has ${only}, so ${joinNames(libraryNames)} ${verb} offered.`;
+  return t("web.collections.copy.ineligibleLibraries", {
+    count: libraryNames.length,
+    kind: mediaKind,
+    libraries: joinNames(libraryNames),
+  });
 }
 
 /** "Server time (UTC−5)", with the zone's name when the server reports one. */
 export function serverTimeLabel(zone?: { utc_offset: string; name?: string }): string {
-  if (!zone) return "Server time";
+  if (!zone) return t("web.collections.copy.serverTime");
   const match = /^([+-])(\d{2}):(\d{2})$/.exec(zone.utc_offset);
   let offset = "UTC";
   if (match && (match[2] !== "00" || match[3] !== "00")) {
     const hours = String(Number(match[2]));
     offset = `UTC${match[1] === "-" ? "−" : "+"}${hours}${match[3] === "00" ? "" : `:${match[3]}`}`;
   }
-  return `Server time (${zone.name ? `${offset}, ${zone.name}` : offset})`;
+  return zone.name
+    ? t("web.collections.copy.serverTimeNamed", { offset, zone: zone.name })
+    : t("web.collections.copy.serverTimeOffset", { offset });
 }
 
 /** The toast after a synced list is created: how its first sync went. */
 export function firstSyncMessage(sync?: { status: string; message: string; itemsMatched: number }) {
-  if (!sync) return { tone: "success" as const, text: "Created. It syncs on its schedule." };
-  const titles = `${sync.itemsMatched} title${sync.itemsMatched === 1 ? "" : "s"}`;
+  if (!sync)
+    return { tone: "success" as const, text: t("web.collections.copy.firstSyncScheduled") };
   if (sync.status === "failed") {
     return {
       tone: "warning" as const,
-      text: `Created, but the first sync failed. ${sync.message}`.trim(),
+      text: t("web.collections.copy.firstSyncFailed", { message: sync.message }).trim(),
     };
   }
   if (sync.status === "warning") {
     return {
       tone: "warning" as const,
-      text: `Created. The first sync found ${titles}, with warnings.`,
+      text: t("web.collections.copy.firstSyncWarned", {
+        count: sync.itemsMatched,
+        count_text: sync.itemsMatched,
+      }),
     };
   }
-  return { tone: "success" as const, text: `Created. The first sync found ${titles}.` };
-}
-
-// --- A saved Synced list ----------------------------------------------------
-
-export const SYNC_NOW = "Sync now";
-export const SYNCING_NOW = "Syncing now…";
-/** Why Sync now waits: it runs the saved list, not unsaved changes to it. */
-export const SAVE_BEFORE_SYNC = "Save your changes first; a sync runs the saved list.";
-export const LAST_SYNC = "Last sync";
-export const NEXT_SYNC = "Next sync";
-export const NOT_IN_YOUR_LIBRARIES = "Not in your libraries";
-export const NOT_SYNCED_YET = "Not yet";
-export const NOT_SCHEDULED = "Not scheduled";
-export const NOT_COUNTED_YET = "Not counted yet";
-export const WHY_SKIPPED = "Why titles are skipped";
-export const CHANGE_LINK = "Change link";
-export const MDBLIST_LINK = "MDBList link";
-export const TMDB_LIST_LINK = "TMDB list link";
-export const LINK_CHANGES_AT_NEXT_SYNC = "Public lists only. Titles change at the next sync.";
-export const TMDB_LIST_INVALID =
-  "Paste the link to a public list on themoviedb.org, like https://www.themoviedb.org/list/310.";
-export const PICK_A_CHART = "Pick a chart.";
-export const CHART_SET_WHEN_MADE = "set when it was made";
-export const FRANCHISE_ID_LABEL = "TMDB collection ID";
-export const FIND_FRANCHISE_ID = "Find the ID on themoviedb.org";
-export const FRANCHISE_ID_HELP =
-  "The number in the collection's link, for example themoviedb.org/collection/119. Titles change at the next sync.";
-export const FRANCHISE_ID_MISSING =
-  "This list doesn't follow a TMDB collection yet. Add its ID so it can sync.";
-export const FRANCHISE_ID_INVALID = "Use the number from the collection's link, like 119.";
-export const DISCOVER_LOCKED = "Made by a starter pack. Its rules can't be changed here.";
-export const DISCOVER_STILL_EDITABLE =
-  "You can still change its name, artwork, max titles, schedule and where it shows.";
-export const PERSONAL_SCHEDULE_LOCKED =
-  "This server doesn't let profiles change a list's schedule.";
-export const LIST_DECIDES = "The list decides";
-export const LIST_DECIDES_ITEMS = [
-  "Which titles are in it",
-  "Their order, while the sort is “List order”",
-] as const;
-export const YOU_DECIDE = "You decide";
-
-/** What the editor still controls on a list-backed collection. */
-export function youDecideItems(scheduleEditable: boolean): string[] {
-  return [
-    "Name, description and artwork",
-    scheduleEditable ? "Order, max titles and the schedule" : "Order and max titles",
-    "Where it shows",
-  ];
+  return {
+    tone: "success" as const,
+    text: t("web.collections.copy.firstSyncFound", {
+      count: sync.itemsMatched,
+      count_text: sync.itemsMatched,
+    }),
+  };
 }
 
 /** "3 hours ago": how long ago a sync ran. */
 export function syncedAgo(iso: string, now = Date.now()): string {
   const seconds = Math.round((now - Date.parse(iso)) / 1000);
-  if (Number.isNaN(seconds)) return "recently";
-  if (seconds < 60) return "just now";
-  const steps: Array<[number, string]> = [
-    [60, "minute"],
-    [24, "hour"],
-    [30, "day"],
-    [12, "month"],
+  if (Number.isNaN(seconds)) return t("web.collections.copy.agoRecently");
+  if (seconds < 60) return t("web.collections.copy.agoJustNow");
+  const steps: Array<[number, MessageKey]> = [
+    [60, "web.collections.copy.agoMinutes"],
+    [24, "web.collections.copy.agoHours"],
+    [30, "web.collections.copy.agoDays"],
+    [12, "web.collections.copy.agoMonths"],
   ];
   let value = Math.round(seconds / 60);
   for (const [size, unit] of steps) {
-    if (value < size) return `${plural(value, unit)} ago`;
+    if (value < size) return t(unit, { count: value, count_text: value });
     value = Math.round(value / size);
   }
-  return `${plural(value, "year")} ago`;
+  return t("web.collections.copy.agoYears", { count: value, count_text: value });
 }
 
 /** "41 titles skipped". */
 export function titlesSkipped(count: number): string {
-  return `${plural(count, "title")} skipped`;
+  return t("web.collections.copy.titlesSkipped", { count, count_text: count });
 }
 
 /** Why a synced list skips titles, and what brings them in. */
@@ -581,206 +708,72 @@ export function skippedExplanation(
   libraryNames: readonly string[],
   canSync = true,
 ) {
-  const where = libraryNames.length > 0 ? joinNames(libraryNames) : "your libraries";
+  const where =
+    libraryNames.length > 0 ? joinNames(libraryNames) : t("web.collections.copy.yourLibraries");
   if (count === undefined) {
-    const skipped = `Titles on the list that aren't in ${where} are skipped.`;
-    return canSync ? `${skipped} Sync now to count them.` : skipped;
+    return canSync
+      ? t("web.collections.copy.skippedUncountedSync", { where })
+      : t("web.collections.copy.skippedUncounted", { where });
   }
-  const verb = count === 1 ? "isn't" : "aren't";
-  return `${plural(count, "title")} on the list ${verb} in ${where}, so they're skipped. Add them to one of those libraries and they join at the next sync.`;
+  return t("web.collections.copy.skippedCounted", { count, count_text: count, where });
 }
 
 /** The red callout at the top of a list whose last sync failed. */
 export function syncFailedLead(lastAt: string | undefined): string {
-  return lastAt ? `The last sync failed ${syncedAgo(lastAt)}.` : "The last sync failed.";
+  return lastAt
+    ? t("web.collections.copy.syncFailedAgo", { ago: syncedAgo(lastAt) })
+    : t("web.collections.copy.syncFailed");
 }
 
 export function keepsTitles(count: number): string {
-  return `The collection keeps its ${plural(count, "title")}.`;
+  return t("web.collections.copy.keepsTitles", { count, count_text: count });
 }
-
-// --- Save bar ---------------------------------------------------------------
-
-/** How the save bar and the conflict banner name a draft field. */
-export const DRAFT_FIELD_LABEL: Readonly<Record<DraftField, string>> = {
-  name: "Name",
-  description: "Description",
-  libraryIds: "Libraries",
-  rules: "Rules",
-  rawSortConfig: "Order",
-  showOnly: "Show only",
-  visibility: SHOW_ON_TAB_LABEL,
-  shared: SHOW_TO_OTHER_PROFILES_LABEL,
-  inLibraryTabs: SHOW_ON_TAB_LABEL,
-  list: "List",
-  limit: "Max titles",
-  schedule: "Sync schedule",
-};
-
-export const ARTWORK_SLOT_LABEL: Readonly<Record<ArtworkSlot, string>> = {
-  poster: "Poster",
-  backdrop: "Backdrop",
-};
-
-// --- Look (artwork) ---------------------------------------------------------
-
-/**
- * What a slot will show after Save: a chosen image not saved yet, the saved
- * one, the collage the server made of the collection's titles, no collage yet
- * (none of its titles has a poster, or the collage is still being made), or
- * nothing at all (a backdrop, or a server Smart collection's poster).
- */
-export type ArtworkState = "none" | "awaiting-collage" | "collage" | "new" | "saved";
-
-const ARTWORK_STATE_TEXT: Readonly<Record<ArtworkSlot, Record<ArtworkState, string>>> = {
-  poster: {
-    none: "none",
-    "awaiting-collage": "a collage once its titles have posters",
-    collage: "a collage of its titles",
-    new: "a new image",
-    saved: "an image",
-  },
-  backdrop: {
-    none: "none",
-    "awaiting-collage": "none",
-    collage: "none",
-    new: "a new image",
-    saved: "an image",
-  },
-};
-
-/** "Poster: a collage of its titles · Backdrop: none", for the closed Look card. */
-export function lookSummary(slots: ReadonlyArray<[ArtworkSlot, ArtworkState]>): string {
-  return slots
-    .map(([slot, state]) => `${ARTWORK_SLOT_LABEL[slot]}: ${ARTWORK_STATE_TEXT[slot][state]}`)
-    .join(" · ");
-}
-
-/** Under the poster tile while it shows the collage. */
-export const POSTER_IS_COLLAGE = "Collage of its titles";
-/** Under the poster tile while there's no image and no collage yet. */
-export const POSTER_AWAITS_COLLAGE = "A collage once its titles have posters";
-/** Under the poster tile of a collection that never gets a collage. */
-export const NO_POSTER = "No poster";
-/** Under the backdrop tile: what the image is for. */
-export const BACKDROP_CAPTION = "Fills the top of its page";
-
-export const NOT_CREATED_YET = "Not created yet";
-export const TITLES_ALREADY_SAVED = "Titles are already saved.";
-export const SAVE_FAILED = "Couldn't save";
-
-/** Why Create waits on a server collection with no library yet. */
-export const PICK_LIBRARIES_FIRST = "Pick its libraries, then create it.";
-
-/** Why Save waits on a saved server collection with every library unticked. */
-export const PICK_A_LIBRARY = "Pick at least one library.";
-
-export const NAME_IT_THEN_CREATE = "Name it, then create it.";
 
 export function titlesReadyToAdd(count: number): string {
-  return `${plural(count, "title")} ready to add`;
+  return t("web.collections.copy.titlesReadyToAdd", { count, count_text: count });
 }
 
-/** "Name and description not saved": the first field as labelled, the rest in lower case. */
-export function notSavedMessage(fieldLabels: readonly string[]): string {
+/** "Name and description": the first field as labelled, the rest in lower case. */
+function lowerNames(fieldLabels: readonly string[]): string {
   const [first, ...rest] = fieldLabels;
   if (!first) return "";
-  const names = [first, ...rest.map((label) => label.charAt(0).toLowerCase() + label.slice(1))];
-  return `${joinNames(names)} not saved`;
+  // Lower-casing a label inside a sentence is English casing; other languages
+  // keep their labels as written (German nouns stay capitalized).
+  if (appLanguage() !== "en") return joinNames(fieldLabels);
+  return joinNames([first, ...rest.map((label) => label.charAt(0).toLowerCase() + label.slice(1))]);
+}
+
+/** "Name and description not saved". */
+export function notSavedMessage(fieldLabels: readonly string[]): string {
+  if (fieldLabels.length === 0) return "";
+  return t("web.collections.copy.notSaved", { fields: lowerNames(fieldLabels) });
 }
 
 // --- Conflicts and deletes --------------------------------------------------
 
-export const CONFLICT_TITLE = "This collection changed since you opened it.";
+export function conflictTitle() {
+  return t("web.collections.copy.conflictTitle");
+}
 
 export function serverDeleteDescription(libraryNames: readonly string[]): string {
-  if (libraryNames.length === 0) return "It's removed for everyone. This can't be undone.";
-  return `It's removed from ${joinNames(libraryNames)} for everyone. This can't be undone.`;
+  if (libraryNames.length === 0) return t("web.collections.copy.serverDeleteDescriptionNone");
+  return t("web.collections.copy.serverDeleteDescription", {
+    libraries: joinNames(libraryNames),
+  });
 }
 
 export function personalDeleteDescription(shared: boolean): string {
   return shared
-    ? "It's removed for you and every profile you share it with. This can't be undone."
-    : "This can't be undone.";
-}
-
-// --- Arrange ----------------------------------------------------------------
-
-export function arrangeHeading(libraryName: string): string {
-  return `Shelves on ${libraryName} › Collections`;
-}
-export const ARRANGE_SUBTITLE =
-  "Shelves are set separately for each library. Top to bottom, the way viewers see them.";
-export const ARRANGE_HINT =
-  "Drag shelves and collections, or focus a handle and press Space, then the arrow keys. ⋯ has Move to shelf. Changes save right away.";
-
-export const NO_HEADING = "No heading";
-export const NO_HEADING_HELP = "Collections not on a shelf, shown without a title";
-export const MY_COLLECTIONS_TAG = "Different for each viewer";
-export const MY_COLLECTIONS_NOTE = `Each viewer's own collections land here when they turn on “${SHOW_ON_TAB_LABEL}”. You can rename or move this shelf.`;
-/** Shown on My collections while a server collection is dragged. */
-export const MY_COLLECTIONS_NO_DROP = "Viewers' own collections only";
-export const HIDDEN_TAG = "Hidden";
-export const MOVE_FAILED = "Couldn't move it";
-/** A move found the order changed by someone else since Arrange read it; nothing was saved. */
-export const ORDER_CHANGED =
-  "Someone else changed this order, so nothing moved. Arrange now shows their order; move it again.";
-
-export const VIEWER_PREVIEW_LABEL = "What viewers see";
-export const VIEWER_PREVIEW_MINE = "Each viewer's own";
-export const VIEWER_PREVIEW_NOTE =
-  "The pin marks a collection kept at the start of its shelf. Hidden collections don't appear.";
-
-// --- Pin (`featured`) ---------------------------------------------------------
-
-export const PIN_LABEL = "Pin to the start of its shelf";
-export const UNPIN_LABEL = "Unpin";
-export const PINNED = "Pinned";
-export const PINNED_BAND = "Pinned to the start";
-
-/** Pin is set on the collection, not per library, so it reaches every library the collection is in. */
-const PIN_EVERY_LIBRARY = " This applies in every library it's in.";
-
-/**
- * What Pin does, given what the shelf sorts by (null for Your order) and
- * whether the collection is in more than one library. Pinned collections also
- * lead their library's collections in the Server collections list on every
- * profile's Collections page, which is all Pin does on a shelf that sorts
- * itself.
- */
-export function pinHelp(shelfSortedBy: string | null, inSeveralLibraries = false): string {
-  const help =
-    shelfSortedBy === null
-      ? "Shows first on this shelf and in Server collections on the Collections page."
-      : `Shows first in Server collections on the Collections page; this shelf sorts by ${shelfSortedBy}.`;
-  return inSeveralLibraries ? help + PIN_EVERY_LIBRARY : help;
-}
-
-export function unpinHelp(shelfSortedBy: string | null, inSeveralLibraries = false): string {
-  const help =
-    shelfSortedBy === null
-      ? "Stops showing first on this shelf and in Server collections on the Collections page."
-      : "Stops showing first in Server collections on the Collections page.";
-  return inSeveralLibraries ? help + PIN_EVERY_LIBRARY : help;
-}
-
-/**
- * The phone sheet's Pin switch, which names the collection and its shelf
- * (null for No heading, which viewers never see as a name).
- */
-export function pinSwitchLabel(name: string, shelfName: string | null): string {
-  return `Pin ${name} to the start of ${shelfName ?? "the collections with no heading"}`;
-}
-
-export function deleteShelfTitle(name: string): string {
-  return `Delete the ${name} shelf?`;
+    ? t("web.collections.copy.personalDeleteDescriptionShared")
+    : t("web.collections.copy.cantBeUndone");
 }
 
 /** Deleting a shelf never deletes its collections, and touches one library only. */
 export function deleteShelfDescription(collectionCount: number, libraryName: string): string {
-  const members =
-    collectionCount === 0
-      ? "It has no collections."
-      : `${collectionCount === 1 ? "Its 1 collection moves" : `Its ${collectionCount} collections move`} to ${NO_HEADING} on ${libraryName} › Collections. ${collectionCount === 1 ? "It isn't" : "They aren't"} deleted.`;
-  return `${members} Only ${libraryName} changes; shelves in other libraries stay as they are. You can make the shelf again later.`;
+  const members = t("web.collections.copy.deleteShelfMembers", {
+    count: collectionCount,
+    count_text: collectionCount,
+    library: libraryName,
+  });
+  return `${members} ${t("web.collections.copy.deleteShelfOnly", { library: libraryName })}`;
 }

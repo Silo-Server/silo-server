@@ -197,15 +197,26 @@ type AdminPluginCatalogEntry struct {
 // with exponential backoff, and parked as failed after repeated failures
 // until an administrator restarts or reconfigures it. Other plugins start on
 // first use and report running, stopped, or failed when their last launch on
-// this server failed (with last_error); a later successful launch, an
-// administrator restart, an update or a configuration change clears the failure.
+// this server failed or this server can't restore their files from a stored
+// archive that won't read (with last_error); a later successful launch, an
+// administrator restart, an update or a configuration change clears a launch
+// failure.
 type AdminPluginRuntime struct {
 	Resident      bool     `json:"resident" doc:"True when the server supervises this plugin's process"`
-	State         string   `json:"state" enum:"stopped,starting,running,backoff,failed" doc:"Process state; starting and backoff occur only for resident plugins, failed also marks a non-resident plugin whose last launch failed"`
+	State         string   `json:"state" enum:"stopped,starting,running,backoff,failed" doc:"Process state; starting and backoff occur only for resident plugins, failed also marks a non-resident plugin whose last launch failed, or whose files can't be restored from its stored archive, on the answering server"`
 	RestartCount  int      `json:"restart_count" doc:"Automatic restarts since the plugin last ran stably or was restarted by an administrator"`
 	LastError     string   `json:"last_error,omitempty" doc:"Why the process last stopped or failed to start"`
 	LastStartedAt *Instant `json:"last_started_at,omitempty"`
 	NextRestartAt *Instant `json:"next_restart_at,omitempty" doc:"Scheduled automatic restart while in backoff"`
+}
+
+// AdminPluginUpdateFailure is the last automatic update Silo refused to
+// install. It is cleared when the installed version changes or a later
+// update check no longer fails.
+type AdminPluginUpdateFailure struct {
+	Version  string  `json:"version" doc:"The version Silo tried and failed to install"`
+	Reason   string  `json:"reason" doc:"Why the update was refused, written for the administrator; it names no URL or checksum"`
+	FailedAt Instant `json:"failed_at"`
 }
 
 // AdminPluginInstallation is one manageable installation with its redacted
@@ -225,6 +236,7 @@ type AdminPluginInstallation struct {
 	RepoURL            string                    `json:"repo_url,omitempty" format:"uri-reference"`
 	Presentation       *AdminPluginPresentation  `json:"presentation,omitempty"`
 	UpdatesPaused      bool                      `json:"updates_paused" doc:"True while the installation's repository is disabled. Silo does not check it for new versions or install from it, so available_version cannot be applied until the repository is enabled again."`
+	UpdateFailure      *AdminPluginUpdateFailure `json:"update_failure,omitempty" doc:"The last automatic update that failed, such as a download that did not match its catalog checksum. Absent when the last check did not fail for this plugin."`
 	Capabilities       []AdminPluginCapability   `json:"capabilities"`
 	GlobalConfigSchema []AdminPluginConfigSchema `json:"global_config_schema"`
 	UserConfigSchema   []AdminPluginConfigSchema `json:"user_config_schema"`
@@ -393,6 +405,9 @@ func (reg *Registry) adminPluginInstallationOf(v handlers.PluginInstallationView
 	}
 	if v.AvailableVersion != nil {
 		out.AvailableVersion = *v.AvailableVersion
+	}
+	if f := v.UpdateFailure; f != nil {
+		out.UpdateFailure = &AdminPluginUpdateFailure{Version: f.Version, Reason: f.Reason, FailedAt: NewInstant(f.FailedAt)}
 	}
 	for _, c := range v.GlobalConfigs {
 		out.GlobalConfigs = append(out.GlobalConfigs, AdminPluginConfigValue{Key: c.Key, Value: NonNilMap(PluginJSONValue(c.Value)), ConfiguredSecrets: NonNil(c.ConfiguredSecrets)})

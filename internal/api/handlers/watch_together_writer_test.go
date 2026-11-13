@@ -94,7 +94,7 @@ func TestWatchTogetherMemberStatusIsV2Only(t *testing.T) {
 		{UserID: 8, ProfileID: "guest", Connected: true},
 	}}
 	frame := map[string]any{"type": "snapshot", "room": snapshot}
-	assertStatus := func(t *testing.T, data []byte, wantStatus bool) {
+	assertStatus := func(t *testing.T, data []byte) {
 		t.Helper()
 		var payload struct {
 			Room struct {
@@ -110,31 +110,17 @@ func TestWatchTogetherMemberStatusIsV2Only(t *testing.T) {
 		}
 		for _, key := range []string{"is_ready", "is_buffering", "is_syncing"} {
 			value, present := payload.Room.Members[0][key]
-			if present != wantStatus || (present && value != true) {
-				t.Fatalf("%s = %v, present %v; want status %v", key, value, present, wantStatus)
+			if !present || value != true {
+				t.Fatalf("%s = %v, present %v; want true", key, value, present)
 			}
 		}
 		for i, member := range payload.Room.Members {
 			value, present := member["lobby_ready"]
-			if present != wantStatus || (present && value != snapshot.Members[i].LobbyReady) {
-				t.Fatalf("member %d lobby_ready = %v, present %v; want status %v", i, value, present, wantStatus)
-			}
-			if !wantStatus && len(member) != 6 {
-				t.Fatalf("v1 member fields changed: %s", data)
+			if !present || value != snapshot.Members[i].LobbyReady {
+				t.Fatalf("member %d lobby_ready = %v, present %v", i, value, present)
 			}
 		}
 	}
-	t.Run("v1 HTTP", func(t *testing.T) {
-		response, err := new(WatchTogetherHandler).buildRoomResponse(ctx, snapshot, 7, "host")
-		if err != nil {
-			t.Fatal(err)
-		}
-		data, err := json.Marshal(response)
-		if err != nil {
-			t.Fatal(err)
-		}
-		assertStatus(t, data, false)
-	})
 	t.Run("v2 adapter snapshot", func(t *testing.T) {
 		response, err := new(WatchTogetherHandler).buildRoomResponse(ctx, snapshot, 7, "host")
 		if err != nil {
@@ -144,35 +130,28 @@ func TestWatchTogetherMemberStatusIsV2Only(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assertStatus(t, data, true)
+		assertStatus(t, data)
 	})
-	for _, version := range []string{"v1", "v2"} {
-		t.Run(version+" socket", func(t *testing.T) {
-			socket := newRoomWriterSocket(false)
-			conn := newWatchTogetherRoomConn(socket)
-			conn.includeMemberStatus = version == "v2"
-			t.Cleanup(func() { _ = conn.Close() })
-			if err := conn.WriteJSON(frame); err != nil {
-				t.Fatal(err)
-			}
-			select {
-			case data := <-socket.frames:
-				assertStatus(t, []byte(data), version == "v2")
-			case <-ctx.Done():
-				t.Fatal(ctx.Err())
-			}
-		})
-	}
-	if member := frame["room"].(watchtogether.Snapshot).Members[0]; !member.IsReady || !member.IsBuffering || !member.IsSyncing || !member.LobbyReady {
-		t.Fatal("v1 projection mutated the snapshot shared with v2 viewers")
-	}
+	t.Run("socket", func(t *testing.T) {
+		socket := newRoomWriterSocket(false)
+		conn := newWatchTogetherRoomConn(socket)
+		t.Cleanup(func() { _ = conn.Close() })
+		if err := conn.WriteJSON(frame); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case data := <-socket.frames:
+			assertStatus(t, []byte(data))
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	})
 }
 
 func TestWatchTogetherReplacementClosesBlockedWriter(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		socket := newRoomWriterSocket(true)
 		conn := newWatchTogetherRoomConn(socket)
-		conn.includeMemberStatus = true
 		t.Cleanup(func() { _ = conn.Close() })
 		if err := conn.WriteJSON(map[string]string{"type": "snapshot"}); err != nil {
 			t.Fatal(err)

@@ -341,7 +341,7 @@ func (r *UserRepository) SetOwner(ctx context.Context, username string) (*models
 	// Lock the named account and the current Owner in one statement, in id
 	// order, so concurrent recoveries serialize instead of deadlocking.
 	rows, err := tx.Query(ctx, `
-		SELECT id, username = $1, is_owner, role, enabled FROM users
+		SELECT id, COALESCE(username = $1, false), is_owner, role, enabled FROM users
 		WHERE username = $1 OR is_owner ORDER BY id FOR UPDATE`, NormalizeUsername(strings.TrimSpace(username)))
 	if err != nil {
 		return nil, 0, err

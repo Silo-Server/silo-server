@@ -797,6 +797,12 @@ export interface MediaItemUserState {
   in_watchlist: boolean;
   /** The profile marked the movie or series Not interested. */
   not_interested?: boolean;
+  /**
+   * Episodes watched and episodes left, on a series or season the profile
+   * has not finished. Absent on everything else.
+   */
+  watched_count?: number;
+  unplayed_count?: number;
 }
 
 export interface BrowseItemSortMetrics {
@@ -834,8 +840,11 @@ export interface BoxSetSummary {
 export interface BrowseItem {
   content_id: string;
   play_content_id?: string;
-  type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "manga" | "box_set";
+  type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "manga";
   title: string;
+  /** On a Continue Watching or Next Up row's card: in_progress or next_up. */
+  item_source?: string;
+  progress_updated_at?: string;
   series_id?: string;
   series_title?: string;
   season_number?: number | null;
@@ -875,8 +884,6 @@ export interface BrowseItem {
   // distinct volumes ("12 Volumes · 3 Chapters").
   manga_chapter_count?: number;
   manga_volume_count?: number;
-  /** Set on a box set card (type box_set) of a group=box_set browse. */
-  box_set?: BoxSetSummary;
 }
 
 export interface BrowseResponse {
@@ -1339,6 +1346,9 @@ export interface WatchDetail {
   effective_version_hdr?: boolean;
   effective_version_codec_video?: string;
   effective_version_edition_key?: string;
+  /** The item's backdrop (an episode's series backdrop), for loading screens. */
+  backdrop_url?: string;
+  backdrop_thumbhash?: string;
 }
 
 // Episodes
@@ -2022,7 +2032,7 @@ export interface RequestSeasonProgress {
   episodes_available: number;
 }
 
-export interface RequestDiscoverySection extends RequestMediaPage {
+export interface RequestDiscoverySection extends RequestMediaPage, SectionTitleKey {
   key: string;
   title: string;
   /**
@@ -2034,7 +2044,7 @@ export interface RequestDiscoverySection extends RequestMediaPage {
 }
 
 /** One row of the Discover layout, in page order. */
-export interface RequestDiscoverRowRef {
+export interface RequestDiscoverRowRef extends SectionTitleKey {
   key: string;
   /**
    * tmdb_chart, tmdb_discover, tmdb_list or mdblist for a row of titles;
@@ -2922,6 +2932,7 @@ export interface ClientDiagnosticManifest {
     platform: DiagnosticPlatform;
     os_version: string;
     profile_id?: string;
+    occurrence_count?: number;
     [key: string]: unknown;
   };
   destination: {
@@ -2938,7 +2949,7 @@ export interface ClientDiagnosticManifest {
     stack_excerpt?: string;
     thread?: string;
     foreground?: boolean;
-    source: "ueh" | "exit_info" | "metrickit" | "exit_sentinel";
+    source: "ueh" | "exit_info" | "metrickit" | "exit_sentinel" | "watchdog";
     provenance: "pre_failure" | "post_restart" | "metric_reporting_period";
     occurred_at: string;
     [key: string]: unknown;
@@ -3469,7 +3480,7 @@ export interface Library {
   trickplay_enabled?: boolean;
   /** The server can generate seek-bar previews (public asset storage is configured). Absent from servers without seek previews. */
   trickplay_supported?: boolean;
-  /** Browse movies of one TMDB collection as a box set. Absent from servers without box sets. */
+  /** Gather movies of one TMDB collection into a box set for movie pages and search. Absent from servers without box sets. */
   box_sets_enabled?: boolean;
   /** The fewest of a collection's movies that form a box set. */
   box_set_min_movies?: number;
@@ -3531,6 +3542,10 @@ export interface LibraryMetadataMatchFailureDetail {
     outcome: string;
     candidate_count: number;
     threshold: number;
+    /** The rule behind a candidate_rejected outcome, such as "lone_candidate". */
+    rejection?: string;
+    /** The score that rule required, when the rule is a score bar. */
+    required_score?: number;
     top_candidates?: Array<{
       title: string;
       matched_title?: string;
@@ -4052,6 +4067,13 @@ export interface PluginRuntime {
   next_restart_at?: string;
 }
 
+/** The last automatic update Silo refused to install, and why. */
+export interface PluginUpdateFailure {
+  version: string;
+  reason: string;
+  failed_at: string;
+}
+
 export interface PluginInstallation {
   id: number;
   repository_id?: number | null;
@@ -4076,6 +4098,8 @@ export interface PluginInstallation {
   repo_url?: string;
   presentation?: PluginPresentation;
   updates_paused: boolean;
+  /** The last automatic update that failed; absent when the last check did not fail. */
+  update_failure?: PluginUpdateFailure | null;
   legacy_metadata_import_types?: string[];
   created_at?: string;
   updated_at?: string;
@@ -4486,7 +4510,7 @@ export interface UserLibrary {
   type: string;
   sort_order: number;
   poster_url?: string;
-  /** The library browses a TMDB collection's movies as one box set; browse it with group=box_set. */
+  /** The library gathers a TMDB collection's movies into a box set for movie pages and search. */
   box_sets_enabled?: boolean;
 }
 
@@ -4551,7 +4575,18 @@ export interface SectionItem {
   machine_translated_fields?: string[];
 }
 
-export interface ResolvedSection {
+/**
+ * A section title the server wrote itself carries its key in the shared
+ * catalog, so a client can translate it (docs/catalog-api.md, "Section
+ * titles"). Absent on titles an administrator or profile typed; see
+ * `useSectionTitle`.
+ */
+export interface SectionTitleKey {
+  title_key?: string;
+  title_args?: Record<string, string>;
+}
+
+export interface ResolvedSection extends SectionTitleKey {
   id: string;
   section_type: string;
   title: string;
@@ -4567,7 +4602,7 @@ export interface SectionsResponse {
   sections: ResolvedSection[];
 }
 
-export interface ResolvedSectionLayout {
+export interface ResolvedSectionLayout extends SectionTitleKey {
   id: string;
   section_type: string;
   title: string;
@@ -4615,7 +4650,7 @@ export function isFilterSectionConfig(
   return config != null && "match" in config && "groups" in config;
 }
 
-export interface PageSectionConfig {
+export interface PageSectionConfig extends SectionTitleKey {
   id: string;
   scope: string;
   library_id: number | null;
@@ -4626,6 +4661,8 @@ export interface PageSectionConfig {
   item_limit: number;
   config: Record<string, unknown>;
   enabled: boolean;
+  /** The hero banner is kept off the apps. Absent from a server that predates it. */
+  web_only?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -4785,12 +4822,15 @@ export interface SectionOverride {
   removed?: boolean;
 }
 
-export interface SettingsSectionEntry {
+export interface SettingsSectionEntry extends SectionTitleKey {
   id: string;
   section_type: string;
   title: string;
   /** The admin row's own title; empty for a profile-built row. Absent on entries built locally. */
   default_title?: string;
+  /** The catalog key of `default_title` while it is the server's own title (see `SectionTitleKey`). */
+  default_title_key?: string;
+  default_title_args?: Record<string, string>;
   featured: boolean;
   item_limit: number;
   hidden: boolean;

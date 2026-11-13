@@ -73,7 +73,7 @@ func TestCreateProfilePINProtectedAtFirstCommit(t *testing.T) {
 				if profile.ID == "profile-1" {
 					continue
 				}
-				verified, err := access.VerifyProfileForRequest(&profile, access.ResolveInput{ProfileID: profile.ID}, 1, nil)
+				verified, _, err := access.VerifyProfileForRequest(&profile, access.ResolveInput{ProfileID: profile.ID}, 1, nil)
 				if value := storedProfileSetting(t, base, settingskeys.PlaybackAudioLanguage, profile.ID); value == nil {
 					t.Error("profile preferences missing at first commit")
 				}

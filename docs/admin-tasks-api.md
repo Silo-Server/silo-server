@@ -3,7 +3,7 @@
 The v2 administrator task surface uses generated web bindings. Apple and Android
 have no task or administrator-job HTTP calls in their checked source trees; the
 migration inventory also records only web consumers. Jellyfin compatibility has
-no equivalent management surface. Legacy routes remain available during migration.
+no equivalent management surface.
 
 ## Execution and schedules
 
@@ -12,8 +12,7 @@ By default it omits hidden tasks: queue workers, pollers, and repairs that run
 without an administrator, such as `match_media` or `cache_metadata_images`. It
 also omits tasks that serve one library kind, such as `sync_ebook_metadata`,
 while no library of that kind exists. `include_hidden=true` returns every
-registered task. The frozen v1 list applies the hidden flags only, not library
-scoping. `GET /api/v2/admin/tasks/{key}` reads runtime state on the
+registered task. `GET /api/v2/admin/tasks/{key}` reads runtime state on the
 responding process for any registered task, hidden or not. Both require
 acting-administrator access, as do task mutations and history.
 
@@ -35,9 +34,15 @@ it. A library with a refresh job queued or running, or another refresh holding
 its per-library lock, is skipped. A PostgreSQL advisory lock allows one run
 across all servers; a run that finds it held fails without refreshing anything.
 
+`backup` backs up the server daily at `backup.time` and on "Back up now"; its
+schedule follows that setting, so editing the task's triggers does not stick.
+A cluster-wide lock lets one server back up; the others record a skip. See
+[backups-api.md](backups-api.md#the-backup-task).
+
 `database_maintenance` runs the routine retention sweeps in turn, daily at 05:00
 by default: processed search index events, activity log, task history, autoscan
-events, expired login sessions, policy decision log, and notifications. The log steps also
+events, expired login sessions, device sign-in requests, OAuth sign-in flows, policy
+decision log, and notifications. The log steps also
 create upcoming partitions, which startup creates as well. Every server fires
 the same trigger, so a PostgreSQL advisory lock lets one server run the steps;
 the others record a completed run that did nothing. Each step keeps its
@@ -67,8 +72,8 @@ ignored at startup. The web page lists them in a separate "On demand" group.
 `GET /api/v2/admin/tasks/{key}/triggers` reads persisted schedule configuration
 and a strong caller-bound ETag. `PUT` on that resource requires `If-Match` and a
 `triggers` array, including an empty array to disable scheduling. The database
-compares the original revision under the schedule parent lock. Legacy writers
-use that same lock and advance the revision. A mismatch returns 412 with the
+compares the original revision under the schedule parent lock, and every
+schedule writer advances the revision. A mismatch returns 412 with the
 observed validator, without rereading or retrying the write. An empty schedule
 remains configured across restarts rather than restoring task defaults.
 
@@ -77,9 +82,16 @@ the persisted configuration when they restart. Runtime state and persisted
 schedule state are separate reads. The web editor captures the persisted schedule
 when editing begins, keeps the draft and original validator after conflicts, and
 requires explicit review and revision adoption before another submission. It
-disables both mutation retries and authentication-refresh replay. The inherited
-`max_runtime_ms` setting is stored but is not enforced by the task runner; the
-editor labels that limitation rather than promising a timeout.
+disables both mutation retries and authentication-refresh replay.
+
+A trigger's `max_runtime_ms` bounds each run that trigger starts. When it
+elapses, the task runner cancels the run's context, the same signal a cancel
+request sends, so a task stops wherever it stops on cancel and keeps the
+progress it saved. Unlike a cancel request, the task stays `running` until it
+returns. The run is then recorded as `cancelled` with an `error_message` naming
+the limit, including when an administrator cancelled it after the limit passed.
+Runs that no trigger started, such as manual runs, are not bounded, and a value
+too large to represent as a duration counts as no limit.
 
 A task can spread its scheduled starts so servers sharing a remote service do
 not start together. Each daily or weekly run of such a task starts at a random
@@ -130,14 +142,22 @@ objects whose destination content was checked in the current copy pass, and
 bucket names, object keys, or local paths. The count can restart when an
 interrupted pass resumes. A completed copy reports `restart_pending` until the
 new storage is active after restart. The job's raw message and error remain
-available only to internal diagnostics. Legacy administrator-job responses and
+available only to internal diagnostics. Administrator-job responses and
 the jobs realtime channel use the same safe storage-transition receipt,
 including the websocket snapshot; they omit the raw request and result
 documents for this job type.
 
+Backup restore jobs (`backup_restore`) include `backup_restore_result`, the
+restore report described in [backups-api.md](backups-api.md#restore): each
+chosen item restored, unchanged, left out with a reason, or failed with its
+error, kept when the job is canceled or interrupted. A restore is never
+requeued: a worker that stops heartbeating leaves the job failed with
+`interrupted: true` in its report.
+
 The existing `POST /api/v2/library-jobs/{job_id}/cancel` contract remains intact.
 `POST /api/v2/admin/jobs/{id}/cancel` (`cancelAdminJob`) requests cancellation
-for library refresh, storage-transition, and image cache cleanup jobs. A job's
+for library refresh, storage-transition, image cache cleanup, and backup
+restore jobs. A restore stops between items and keeps what committed. A job's
 `cancelable` field is true exactly when it is one of these types and not
 terminal, and every job resource that reports `cancelable: true` accepts the
 cancellation through its own cancel operation. A library refresh can therefore

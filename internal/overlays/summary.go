@@ -1,6 +1,8 @@
 package overlays
 
 import (
+	"encoding/json"
+	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -19,7 +21,95 @@ func BuildSummary(files []*models.MediaFile) *Summary {
 	if best == nil {
 		return nil
 	}
+	return summarize(best, detectMultiSub(best))
+}
 
+// StoredFile is one file's overlay inputs as stored in media_files. Its track
+// columns stay encoded so BuildStoredSummary decodes only the fields this
+// package reads, and its subtitle columns reduce to whether any track exists.
+type StoredFile struct {
+	FilePath      string
+	Resolution    string
+	HDR           bool
+	CodecVideo    string
+	CodecAudio    string
+	AudioChannels int
+	Container     string
+	EditionKey    string
+	VideoTracks   []byte // video_tracks JSON
+	AudioTracks   []byte // audio_tracks JSON
+	HasSubtitles  bool   // any embedded or external subtitle track
+}
+
+// storedVideoTrack and storedAudioTrack hold the track fields this package
+// reads, under their models JSON names. Decoding the full models types was a
+// card list's largest CPU cost: models.VideoTrack decodes every probe field
+// twice to record which keys were present.
+type storedVideoTrack struct {
+	Codec          string `json:"codec"`
+	DolbyVision    string `json:"dolby_vision"`
+	DVProfile      int    `json:"dv_profile"`
+	HDR10Plus      bool   `json:"hdr10_plus"`
+	Width          int    `json:"width"`
+	Height         int    `json:"height"`
+	AspectRatio    string `json:"aspect_ratio"`
+	VideoRangeType string `json:"video_range_type"`
+	ColorTransfer  string `json:"color_transfer"`
+}
+
+type storedAudioTrack struct {
+	Title         string `json:"title"`
+	EmbeddedTitle string `json:"embedded_title"`
+	Language      string `json:"language"`
+	Codec         string `json:"codec"`
+	Profile       string `json:"profile"`
+	Channels      int    `json:"channels"`
+	Default       bool   `json:"default"`
+}
+
+// BuildStoredSummary is BuildSummary for a single stored file.
+func BuildStoredSummary(stored *StoredFile) (*Summary, error) {
+	file := models.MediaFile{
+		FilePath:      stored.FilePath,
+		Resolution:    stored.Resolution,
+		HDR:           stored.HDR,
+		CodecVideo:    stored.CodecVideo,
+		CodecAudio:    stored.CodecAudio,
+		AudioChannels: stored.AudioChannels,
+		Container:     stored.Container,
+		EditionKey:    stored.EditionKey,
+	}
+	if len(stored.VideoTracks) > 0 {
+		var tracks []storedVideoTrack
+		if err := json.Unmarshal(stored.VideoTracks, &tracks); err != nil {
+			return nil, fmt.Errorf("decoding video tracks: %w", err)
+		}
+		file.VideoTracks = make([]models.VideoTrack, len(tracks))
+		for i, t := range tracks {
+			file.VideoTracks[i] = models.VideoTrack{
+				Codec: t.Codec, DolbyVision: t.DolbyVision, DVProfile: t.DVProfile, HDR10Plus: t.HDR10Plus,
+				Width: t.Width, Height: t.Height, AspectRatio: t.AspectRatio,
+				VideoRangeType: t.VideoRangeType, ColorTransfer: t.ColorTransfer,
+			}
+		}
+	}
+	if len(stored.AudioTracks) > 0 {
+		var tracks []storedAudioTrack
+		if err := json.Unmarshal(stored.AudioTracks, &tracks); err != nil {
+			return nil, fmt.Errorf("decoding audio tracks: %w", err)
+		}
+		file.AudioTracks = make([]models.AudioTrack, len(tracks))
+		for i, t := range tracks {
+			file.AudioTracks[i] = models.AudioTrack{
+				Title: t.Title, EmbeddedTitle: t.EmbeddedTitle, Language: t.Language, Codec: t.Codec,
+				Profile: t.Profile, Channels: t.Channels, Default: t.Default,
+			}
+		}
+	}
+	return summarize(&file, stored.HasSubtitles), nil
+}
+
+func summarize(best *models.MediaFile, multiSub bool) *Summary {
 	summary := &Summary{
 		Resolution:    normalizeResolution(best.Resolution),
 		HDR:           normalizeHDR(best),
@@ -31,7 +121,7 @@ func BuildSummary(files []*models.MediaFile) *Summary {
 		ReleaseType:   normalizeReleaseType(best.FilePath),
 		Edition:       normalizeEdition(best.EditionKey),
 		MultiAudio:    detectMultiAudio(best),
-		MultiSub:      detectMultiSub(best),
+		MultiSub:      multiSub,
 	}
 	if summary.Resolution == "" &&
 		summary.HDR == "" &&
@@ -234,11 +324,11 @@ func normalizeAudioCandidates(candidates []string) string {
 	return ""
 }
 
-// normalizeReleaseType delegates to subtitles.ParseReleaseInfo so the badge
+// normalizeReleaseType delegates to subtitles.ParseReleaseSource so the badge
 // label uses the same word-boundary-enforced regex as the rest of the system,
 // avoiding false positives like "dvd" matching paths containing "goodvideos".
 func normalizeReleaseType(path string) string {
-	source := subtitles.ParseReleaseInfo(path).Source
+	source := subtitles.ParseReleaseSource(path)
 	if source == "" {
 		return ""
 	}

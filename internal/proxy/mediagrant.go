@@ -176,6 +176,9 @@ func (s *Server) handleGrantIdentity(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case card.PlayMethod == playback.PlayRemux:
+		if refuseRemuxRange(w, r) {
+			return
+		}
 		if remuxRunsOnTranscodeNodeV3(&claims) {
 			info := sessionInfo(s.tracker, &claims, "remux")
 			release := s.tracker.Hold(r.Context(), info)

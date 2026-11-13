@@ -2,9 +2,9 @@
 
 The configured plugin HTTP proxy is mounted at the narrow common parent
 `/api/v2/plugin-content`. Pages use `/plugins/{installation_id}/*`; static
-assets use `/plugin-assets/{installation_id}/*`. The frozen v1 mounts remain
-unchanged. The ordinary public `GET /api/v2/plugin-content/capabilities`
-reports revision 1 and whether the proxy dependency is configured. Availability
+assets use `/plugin-assets/{installation_id}/*`. The ordinary public `GET /api/v2/plugin-content/capabilities`
+reports whether the proxy dependency is configured, with the opaque `revision`
+every capability document carries. Availability
 does not promise that a particular installation or route is available.
 
 The generated OpenAPI extension `x-silo-plugin-content` describes the closed
@@ -14,7 +14,7 @@ request bodies, statuses and media. The separate finite raw registry retains all
 its validation rules. This is a specific plugin-content exclusion, not an escape
 hatch for ordinary API operations.
 
-Page mounts accept the same nine HTTP methods as the bridge proxy. The proxy
+Page mounts accept the plugin proxy's nine HTTP methods. The proxy
 still matches the plugin descriptor before dispatch and applies its public,
 authenticated or admin policy. A page URL without the directory slash receives
 a same-origin 308 preserving its query before dispatch, so browser-relative
@@ -47,7 +47,7 @@ by the rules the viewer and admin gates apply elsewhere:
 
 The existing proxy's credential header filters, response header filters, request
 buffering, error behavior and HTTPRoutes RPC remain unchanged. Query forwarding
-retains only the first value of each repeated key, as in the bridge proxy. This is not a
+retains only the first value of each repeated key. This is not a
 websocket tunnel or an arbitrary streaming transport. Bodies are buffered in
 full before the plugin RPC, under a host cap of 3.75 MiB (4 MiB gRPC receive
 limit less room for the request envelope) on both mounts and for every method,
@@ -80,8 +80,7 @@ for (`profile_pin_revision`), and renewal requires the profile to still exist,
 belong to the account and have that revision: setting, changing or clearing the
 PIN ends renewal, as it ends the profile's verification tokens. The PIN itself
 is not asked again. A cookie without the revision, from an older release, is not
-renewed and expires on its own. The v1 launch cookie renews the same way on
-`/api/v1`. A response that carries a renewed cookie is sent with
+renewed and expires on its own. A response that carries a renewed cookie is sent with
 `Cache-Control: private, no-store`, applied as the response headers are
 written, so a shared cache never stores one viewer's credential, whatever the
 plugin's own headers say. Static pages and error responses are covered too,
@@ -90,7 +89,8 @@ request still validates the login session, so revoking that session invalidates
 the cookie before its expiry and ends renewal.
 
 Plugin-generated absolute links, redirects and response bodies are not rewritten.
-A preserved v1 absolute href remains a v1 href. Plugin authors must use compatible
+An absolute href to a retired `/api/v1` plugin path is passed through unchanged
+and answers `410 Gone`. Plugin authors must use compatible
 relative links or the appropriate versioned content mount for navigation and
 assets. The launch and proxy integration tests cover browser cookie scope,
 relative assets, descriptor access policies and session revocation. They do not

@@ -4,16 +4,12 @@ import (
 	"context"
 	"log/slog"
 	"maps"
-	"net/http"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -24,6 +20,7 @@ import (
 
 type recommendationsEngine interface {
 	SimilarItems(ctx context.Context, userID int, profileID, itemID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
+	SimilarItemsWithReasons(ctx context.Context, userID int, profileID, itemID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
 	BecauseYouWatched(ctx context.Context, userID int, profileID string, sourceItemID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
 	GetTasteProfileSummary(ctx context.Context, userID int, profileID string) (*recommendations.TasteProfileSummary, error)
 }
@@ -142,14 +139,6 @@ func (h *RecommendationsHandler) WithUserStoreOutsidePostgres(outside bool) *Rec
 
 // --- Response types ---
 
-type scoredItemsResponse struct {
-	Items []recommendations.ScoredItem `json:"items"`
-}
-
-type forYouMainResponse struct {
-	Row *recommendations.ForYouRow `json:"row"`
-}
-
 func (h *RecommendationsHandler) engineUnavailable() bool {
 	return !h.enabled || h.engine == nil
 }
@@ -160,157 +149,6 @@ func emptyTasteProfileSummary() recommendations.TasteProfileSummary {
 		FavoriteDirectors: []string{},
 		SignalCounts:      map[string]int{},
 	}
-}
-
-// HandleSimilar handles GET /recommendations/similar/{item_id}.
-func (h *RecommendationsHandler) HandleSimilar(w http.ResponseWriter, r *http.Request) {
-	if h.engineUnavailable() {
-		writeJSON(w, http.StatusOK, scoredItemsResponse{Items: []recommendations.ScoredItem{}})
-		return
-	}
-
-	itemID := chi.URLParam(r, "item_id")
-	if itemID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
-		return
-	}
-
-	limit, _ := parsePagination(r)
-	if limit > 50 {
-		limit = 50
-	}
-
-	filter := requestAccessFilter(r)
-	items, err := h.SimilarItems(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), itemID, limit, filter)
-	if err == nil {
-		items, err = h.keepAccessible(r.Context(), items, filter)
-	}
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, scoredItemsResponse{Items: items})
-}
-
-// v1RecommendationRowLimit keeps a frozen v1 row read at the 20 items a row
-// has always answered there; the reader serves up to 50 for v2.
-func v1RecommendationRowLimit(r *http.Request) int {
-	limit, _ := parsePagination(r)
-	return min(limit, recommendationsDefaultLimit)
-}
-
-// HandleForYouMain handles GET /recommendations/for-you/main.
-func (h *RecommendationsHandler) HandleForYouMain(w http.ResponseWriter, r *http.Request) {
-	limit := v1RecommendationRowLimit(r)
-	row, err := h.ForYouMain(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), limit, requestAccessFilter(r))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, forYouMainResponse{Row: row})
-}
-
-// HandleForYouRows handles GET /recommendations/for-you/rows.
-func (h *RecommendationsHandler) HandleForYouRows(w http.ResponseWriter, r *http.Request) {
-	limit := v1RecommendationRowLimit(r)
-	rows, err := h.ForYouRows(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), limit, requestAccessFilter(r))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, recommendations.ForYouResponse{Rows: rows})
-}
-
-// HandleBecauseWatched handles GET /recommendations/because-watched/{item_id}.
-func (h *RecommendationsHandler) HandleBecauseWatched(w http.ResponseWriter, r *http.Request) {
-	if h.engineUnavailable() {
-		writeJSON(w, http.StatusOK, scoredItemsResponse{Items: []recommendations.ScoredItem{}})
-		return
-	}
-
-	itemID := chi.URLParam(r, "item_id")
-	if itemID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
-		return
-	}
-
-	limit, _ := parsePagination(r)
-	filter := requestAccessFilter(r)
-	items, err := h.BecauseWatched(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), itemID, limit, filter)
-	if err == nil {
-		items, err = h.keepAccessible(r.Context(), items, filter)
-	}
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, scoredItemsResponse{Items: items})
-}
-
-// HandleSimilarUsers handles GET /recommendations/similar-users.
-func (h *RecommendationsHandler) HandleSimilarUsers(w http.ResponseWriter, r *http.Request) {
-	limit := v1RecommendationRowLimit(r)
-	items, err := h.SimilarUsersLiked(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), limit, requestAccessFilter(r))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, scoredItemsResponse{Items: items})
-}
-
-// HandleTasteProfile handles GET /recommendations/taste-profile.
-func (h *RecommendationsHandler) HandleTasteProfile(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, h.TasteProfile(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context())))
-}
-
-// HandlePopular handles GET /recommendations/popular?days=30&limit=20.
-func (h *RecommendationsHandler) HandlePopular(w http.ResponseWriter, r *http.Request) {
-	days := 30
-	if d := r.URL.Query().Get("days"); d != "" {
-		if parsed, err := strconv.Atoi(d); err == nil && parsed > 0 {
-			days = parsed
-		}
-	}
-
-	limit := 20
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 50 {
-			limit = parsed
-		}
-	}
-
-	items, err := h.PopularItems(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), days, limit, requestAccessFilter(r))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, scoredItemsResponse{Items: items})
-}
-
-// HandleRecentlyAdded handles GET /recommendations/recently-added?days=14&limit=20.
-func (h *RecommendationsHandler) HandleRecentlyAdded(w http.ResponseWriter, r *http.Request) {
-	days := 14
-	if d := r.URL.Query().Get("days"); d != "" {
-		if parsed, err := strconv.Atoi(d); err == nil && parsed > 0 {
-			days = parsed
-		}
-	}
-
-	limit := 20
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 50 {
-			limit = parsed
-		}
-	}
-
-	items, err := h.RecentlyAddedItems(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), days, limit, requestAccessFilter(r))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, scoredItemsResponse{Items: items})
 }
 
 // filterRecommendations removes watched, marked Not interested and rated items
@@ -460,48 +298,6 @@ type combinedForYouItem struct {
 	AirDateTime    time.Time
 }
 
-// HandleDiscover handles GET /recommendations/discover.
-// Returns all recommendation rows with fully enriched item metadata for the
-// carousel-based discover page.
-func (h *RecommendationsHandler) HandleDiscover(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.Discover(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), requestAccessFilter(r))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// HandleSection handles GET /recommendations/section/{kind} and
-// /recommendations/section/{kind}/{key}. It returns the full contents of a
-// single recommendation row so the UI can render a dedicated "see all" page.
-func (h *RecommendationsHandler) HandleSection(w http.ResponseWriter, r *http.Request) {
-	if h.reader == nil || h.Fetcher == nil {
-		writeError(w, http.StatusNotFound, "not_found", "Section not found")
-		return
-	}
-
-	kind := chi.URLParam(r, "kind")
-	key := chi.URLParam(r, "key")
-	if kind == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Section kind is required")
-		return
-	}
-
-	limit := sectionDetailDefaultLimit
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
-			limit = parsed
-		}
-	}
-	resp, err := h.Section(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), kind, key, limit, requestAccessFilter(r))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
 // itemEnrichment caches the data needed to convert ScoredItem records into
 // sectionItemResponse for a single request.
 type itemEnrichment struct {
@@ -569,33 +365,7 @@ func (h *RecommendationsHandler) buildSectionItems(
 		if !ok || mi == nil {
 			continue
 		}
-		item := sectionItemResponse{
-			ContentID:              mi.ContentID,
-			Type:                   mi.Type,
-			Title:                  mi.Title,
-			Year:                   mi.Year,
-			Genres:                 mi.Genres,
-			Keywords:               mi.Keywords,
-			Status:                 mi.Status,
-			RatingIMDB:             mi.RatingIMDB,
-			RatingTMDB:             mi.RatingTMDB,
-			RatingRTCritic:         mi.RatingRTCritic,
-			RatingRTAudience:       mi.RatingRTAudience,
-			OriginalLanguage:       mi.OriginalLanguage,
-			Overview:               mi.Overview,
-			ReleaseDate:            mi.ReleaseDate,
-			LastAirDate:            mi.LastAirDate,
-			PosterThumbhash:        mi.PosterThumbhash,
-			BackdropThumbhash:      mi.BackdropThumbhash,
-			PosterIsEpisodeStill:   mi.PosterIsEpisodeStill,
-			BackdropIsEpisodeStill: mi.BackdropIsEpisodeStill,
-		}
-		if item.Genres == nil {
-			item.Genres = []string{}
-		}
-		if item.Keywords == nil {
-			item.Keywords = []string{}
-		}
+		item := sectionItemFromMediaItem(mi)
 		urls := artwork[mi.ContentID]
 		item.PosterURL, item.BackdropURL, item.LogoURL = urls.posterURL, urls.backdropURL, urls.logoURL
 		item.ParentArtwork = episodeParentArtworkView(mi.ParentArtwork, urls.parents)

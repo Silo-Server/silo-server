@@ -1,6 +1,7 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { isValidTMDBListURL, TMDB_LIST_URL_PLACEHOLDER } from "@/lib/tmdbList";
+import { useT } from "@/i18n";
 
 interface TMDBListURLFieldProps {
   id: string;
@@ -21,14 +22,15 @@ export function TMDBListURLField({
   value,
   onChange,
   disabled,
-  label = "TMDB list URL",
-  help = "Paste a public list from themoviedb.org. Movies and shows sync in list order and match your libraries by TMDB, IMDb, or TVDB ID.",
+  label,
+  help,
 }: TMDBListURLFieldProps) {
+  const t = useT();
   const invalid = value.trim().length > 0 && !isValidTMDBListURL(value);
   const hintId = `${id}-hint`;
   return (
     <div className="space-y-2">
-      <Label htmlFor={id}>{label}</Label>
+      <Label htmlFor={id}>{label ?? t("web.collections.tmdbListUrl.label")}</Label>
       <Input
         id={id}
         value={value}
@@ -44,8 +46,8 @@ export function TMDBListURLField({
         className={invalid ? "text-destructive text-xs" : "text-muted-foreground text-xs"}
       >
         {invalid
-          ? "Enter a TMDB list URL such as https://www.themoviedb.org/list/310, or the list's number."
-          : help}
+          ? t("web.collections.tmdbListUrl.invalid")
+          : (help ?? t("web.collections.tmdbListUrl.help"))}
       </p>
     </div>
   );

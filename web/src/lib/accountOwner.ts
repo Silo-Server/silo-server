@@ -1,4 +1,5 @@
 import type { AdminUser } from "@/api/types";
+import { t, type MessageKey, type TextValues } from "@/i18n";
 
 // The server Owner is the account that set up the server, or the one ownership
 // was last transferred to. Only the Owner may grant the admin role, change an
@@ -63,7 +64,15 @@ export function canViewAsAccount(
   );
 }
 
-/** The role shown for an account: the Owner is labeled "owner" rather than "admin". */
-export function accountRoleLabel(account: AdminUser): string {
-  return account.is_owner ? "owner" : account.role;
+/**
+ * The role shown for an account: the Owner is labeled "owner" rather than
+ * "admin". Pass `englishText` for a sort key that is the same in every language.
+ */
+export function accountRoleLabel(
+  account: AdminUser,
+  format: (id: MessageKey, values?: TextValues) => string = t,
+): string {
+  return format("web.admin.common.accounts.role", {
+    role: account.is_owner ? "owner" : account.role,
+  });
 }

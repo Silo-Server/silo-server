@@ -1,4 +1,5 @@
 import { formatLanguageWhenLoaded } from "@/lib/languageNamesLoader";
+import { t } from "@/i18n";
 import type { OverlayDef } from "../types";
 
 function formatRuntime(minutes: number | null | undefined): string | null {
@@ -12,8 +13,12 @@ export const METADATA_OVERLAYS: readonly OverlayDef[] = [
   {
     id: "year",
     category: "metadata",
-    label: "Year",
-    description: "Release year",
+    get label() {
+      return t("web.settings.overlays.badge.year.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.year.description");
+    },
     defaultPosition: "bottom-left",
     defaultEnabled: false,
     iconCapable: false,
@@ -22,8 +27,12 @@ export const METADATA_OVERLAYS: readonly OverlayDef[] = [
   {
     id: "runtime",
     category: "metadata",
-    label: "Runtime",
-    description: "Item runtime in hours and minutes",
+    get label() {
+      return t("web.settings.overlays.badge.runtime.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.runtime.description");
+    },
     defaultPosition: "bottom-left",
     defaultEnabled: false,
     iconId: "clock",
@@ -33,34 +42,49 @@ export const METADATA_OVERLAYS: readonly OverlayDef[] = [
   {
     id: "original_language",
     category: "metadata",
-    label: "Language",
-    description: "Original language of the content",
+    get label() {
+      return t("web.settings.overlays.badge.originalLanguage.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.originalLanguage.description");
+    },
     defaultPosition: "bottom-left",
     defaultEnabled: false,
     iconId: "globe",
     iconCapable: true,
     getValue: (d) => (d.original_language ? formatLanguageWhenLoaded(d.original_language) : null),
+    getValueKey: (d) => d.original_language || null,
   },
   {
     id: "studio",
     category: "metadata",
-    label: "Studio",
-    description: "Primary production studio (movies)",
+    get label() {
+      return t("web.settings.overlays.badge.studio.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.studio.description");
+    },
     defaultPosition: "bottom-right",
     defaultEnabled: false,
     iconId: "building",
     iconCapable: true,
     getValue: (d) => d.studio ?? null,
+    getValueKey: (d) => d.studio || null,
   },
   {
     id: "network",
     category: "metadata",
-    label: "Network",
-    description: "Primary network (series)",
+    get label() {
+      return t("web.settings.overlays.badge.network.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.network.description");
+    },
     defaultPosition: "bottom-right",
     defaultEnabled: false,
     iconId: "tv",
     iconCapable: true,
     getValue: (d) => d.network ?? null,
+    getValueKey: (d) => d.network || null,
   },
 ];

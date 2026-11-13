@@ -3,17 +3,22 @@ import { Check, ChevronLeft, ChevronRight } from "lucide-react";
 import type { Season } from "@/api/types";
 import { usePrefetchCatalogSeason } from "@/hooks/queries/catalogRead";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
+import { buildItemHref } from "@/lib/mediaNavigation";
 import { formatSeasonMeta, formatSeasonProgress, getSeasonDisplayTitle } from "./itemDetailLayout";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
+import { useAppLanguage, useT } from "@/i18n";
 
 interface SeasonCarouselProps {
   seasons: Season[];
+  /** The series page's library scope, kept on each season link. */
+  libraryId?: number;
 }
 
-export default function SeasonCarousel({ seasons }: SeasonCarouselProps) {
+export default function SeasonCarousel({ seasons, libraryId }: SeasonCarouselProps) {
+  useAppLanguage();
   const sorted = seasons.slice().sort((a, b) => a.season_number - b.season_number);
-  const prefetchSeason = usePrefetchCatalogSeason();
+  const prefetchSeason = usePrefetchCatalogSeason(libraryId);
 
   if (sorted.length === 0) {
     return null;
@@ -32,6 +37,7 @@ export default function SeasonCarousel({ seasons }: SeasonCarouselProps) {
           hasProgress && season.episode_count > 0
             ? Math.round((userData.watched_count / season.episode_count) * 100)
             : 0;
+        const seasonHref = buildItemHref({ contentId: season.content_id, libraryId });
 
         return (
           <li key={season.content_id} className="embla__slide shrink-0">
@@ -44,7 +50,7 @@ export default function SeasonCarousel({ seasons }: SeasonCarouselProps) {
               {/* Poster */}
               <div className="group/media relative">
                 <ViewTransitionLink
-                  to={`/item/${season.content_id}`}
+                  to={seasonHref}
                   className="media-card-image relative block aspect-[2/3] overflow-hidden rounded-xl"
                 >
                   {season.poster_url ? (
@@ -63,7 +69,7 @@ export default function SeasonCarousel({ seasons }: SeasonCarouselProps) {
 
                   {/* Completed checkmark */}
                   {isCompleted && (
-                    <div className="absolute top-2.5 right-2.5 rounded-full bg-green-500/90 p-1 text-white shadow-sm">
+                    <div className="absolute end-2.5 top-2.5 rounded-full bg-green-500/90 p-1 text-white shadow-sm">
                       <Check className="size-3.5" strokeWidth={3} />
                     </div>
                   )}
@@ -92,7 +98,7 @@ export default function SeasonCarousel({ seasons }: SeasonCarouselProps) {
               </div>
 
               {/* Info — always the same height */}
-              <ViewTransitionLink to={`/item/${season.content_id}`} className="block px-0.5 pt-2.5">
+              <ViewTransitionLink to={seasonHref} className="block px-0.5 pt-2.5">
                 <div className="truncate text-[0.8125rem] font-semibold">
                   {getSeasonDisplayTitle(season)}
                 </div>
@@ -115,13 +121,16 @@ export default function SeasonCarousel({ seasons }: SeasonCarouselProps) {
  * slides, each an `<li className="embla__slide shrink-0">`.
  */
 export function SeasonRail({ count, children }: { count: number; children: ReactNode }) {
+  const t = useT();
   const { emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } = useCarouselEmbla();
 
   return (
     <section className="group/carousel">
       <div className="mb-5 flex items-end justify-between gap-4">
-        <h2 className="text-xl font-semibold">Seasons</h2>
-        <span className="text-muted-foreground text-sm">{count} total</span>
+        <h2 className="text-xl font-semibold">{t("web.detail.seasons.heading")}</h2>
+        <span className="text-muted-foreground text-sm">
+          {t("web.detail.seasons.totalCount", { count: count })}
+        </span>
       </div>
 
       <div className="relative">
@@ -129,8 +138,8 @@ export function SeasonRail({ count, children }: { count: number; children: React
           <button
             type="button"
             onClick={scrollPrev}
-            className="from-background/90 absolute top-0 bottom-0 left-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-r to-transparent opacity-0 transition-opacity duration-200 group-hover/carousel:opacity-100 focus-visible:opacity-100"
-            aria-label="Scroll left"
+            className="from-background/90 absolute start-0 top-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-r to-transparent opacity-0 transition-opacity duration-200 group-hover/carousel:opacity-100 focus-visible:opacity-100 rtl:bg-gradient-to-l"
+            aria-label={t("web.detail.carousel.scrollLeft")}
           >
             <ChevronLeft className="text-foreground h-6 w-6" />
           </button>
@@ -146,8 +155,8 @@ export function SeasonRail({ count, children }: { count: number; children: React
           <button
             type="button"
             onClick={scrollNext}
-            className="from-background/90 absolute top-0 right-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-l to-transparent opacity-0 transition-opacity duration-200 group-hover/carousel:opacity-100 focus-visible:opacity-100"
-            aria-label="Scroll right"
+            className="from-background/90 absolute end-0 top-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-l to-transparent opacity-0 transition-opacity duration-200 group-hover/carousel:opacity-100 focus-visible:opacity-100 rtl:bg-gradient-to-r"
+            aria-label={t("web.detail.carousel.scrollRight")}
           >
             <ChevronRight className="text-foreground h-6 w-6" />
           </button>

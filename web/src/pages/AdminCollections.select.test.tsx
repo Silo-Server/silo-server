@@ -14,7 +14,7 @@ import {
   storedAdminCollection as stored,
 } from "./adminCollections.test-support";
 
-import { STARTER_PACK_BLOCKS_DELETE } from "@/lib/collections/copy";
+import { starterPackBlocksDelete } from "@/lib/collections/copy";
 
 import AdminCollections from "./AdminCollections";
 
@@ -484,7 +484,7 @@ describe("AdminCollections Select collections delete", () => {
         },
       ]),
     );
-    expect(within(dialog).getByRole("alert")).toHaveTextContent(STARTER_PACK_BLOCKS_DELETE);
+    expect(within(dialog).getByRole("alert")).toHaveTextContent(starterPackBlocksDelete());
     const confirm = within(dialog).getByRole("button", { name: "Delete 1" });
     expect(confirm).toBeDisabled();
     await user.click(confirm);

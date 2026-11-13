@@ -48,8 +48,15 @@ agree.
 
 ## Ranking, counts, and continuation
 
-The relevance order is exact title, title position, year hint, phrase rank,
-title prefix rank, overview rank, lower title, and content ID. Title position
+The relevance order is media rank, exact title, title position, year hint,
+phrase rank, title prefix rank, overview rank, lower title, and content ID.
+Media rank puts every series, movie, and other catalog item above every
+episode: an episode often carries its show's title (Dexter's pilot is titled
+"Dexter"), and its one-title document outranked the series on the later keys.
+Episodes stay in the results after the catalog items. Media rank orders
+full-text matches only: fuzzy matches, which run only when full text finds
+fewer than five results, still follow every full-text match, so a typo match
+for a series does not outrank an exact episode match. Title position
 is 2 when a title, original title, sort title, or alias starts with the query,
 1 when it contains the query, and 0 otherwise. When a title variant contains
 the query, title prefix rank is `1 / (1 + words)` of the shortest such variant,
@@ -71,7 +78,7 @@ to `numeric`; PostgreSQL compares that with a `real` rank as `float8`, so a
 `real` key such as 2.4 never equals itself, and continuation skipped or
 repeated rank ties. `postgresCursorConfig` names the meaning of the keys;
 change it with any ranking change so older cursors are rejected
-(`invalid_cursor` in `/api/v2`, `catalog_cursor_changed` in `/api/v1`).
+(`invalid_cursor`).
 
 Title and alias lookups produce an indexed union of candidate IDs before media
 policy checks and scoring. Media library checks remain correlated with those

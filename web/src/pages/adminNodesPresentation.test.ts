@@ -14,10 +14,12 @@ import {
   describeNodeGPU,
   describeNodeGroups,
   describeNodeJobs,
+  describeNodeGPUBusy,
   describeNodeSystem,
   describeReprobeOutcome,
   describeResourceSample,
   describeSharedGPU,
+  describeSystemStats,
   filterNodesByGroup,
   nodeHWDevicePaths,
   nodeHasHWDeviceInventory,
@@ -984,7 +986,6 @@ describe("resource attribution", () => {
           sample_interval_seconds: 5,
           cpu: { available: false },
           memory: { available: false },
-          network: { available: false },
           process: {},
         },
       },
@@ -995,10 +996,12 @@ describe("resource attribution", () => {
       stale: true,
       cpu: { muted: true },
       memory: { muted: true },
-      network: { muted: true },
       processMemory: { muted: true },
       heapMemory: { muted: true },
     });
+    expect(describeSystemStats(FULL_SAMPLE, { network: { available: false } }).network.muted).toBe(
+      true,
+    );
   });
 
   it("detects a stopped worker sampler without treating normal health polling as stale", () => {
@@ -1014,6 +1017,22 @@ describe("resource attribution", () => {
     expect(describeNodeSystem(node, NOW + 30_000).kind).toBe("reported");
     node.last_stats!.sampled_at = new Date(NOW - 20_000).toISOString();
     expect(describeNodeSystem(node, NOW)).toMatchObject({ kind: "unreported", label: "Stale" });
+  });
+
+  it("treats an old GPU reading as stale even when the sample has no system block", () => {
+    const gpu = [{ device: "/dev/dri/renderD128", source: "intel_gpu_top", video_busy_pct: 40 }];
+    const reading = (sampledAt: string) =>
+      describeNodeGPUBusy(
+        makeNode({
+          healthy: true,
+          last_health_check: new Date(NOW).toISOString(),
+          last_stats: { sampled_at: sampledAt, gpu },
+        }),
+        NOW,
+      );
+
+    expect(reading(new Date(NOW).toISOString())?.value).toBe("40%");
+    expect(reading(new Date(NOW - 10 * 60_000).toISOString())).toBeNull();
   });
 });
 

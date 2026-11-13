@@ -62,20 +62,29 @@ const audioPreferenceColumns = `profile_id, series_id, audio_track_index,
 		       audio_language, audio_track_signature, updated_at`
 
 func getAudioPreference(ctx context.Context, exec preferenceSettingsExecutor, userID int, profileID, seriesID string) (*userstore.AudioPreference, error) {
-	pref, err := scanAudioPreference(exec.QueryRow(ctx, `
-		SELECT `+audioPreferenceColumns+`
-		FROM user_audio_preferences
-		WHERE user_id = $1 AND profile_id = $2 AND series_id = $3`,
-		userID, profileID, seriesID,
-	))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
+	pref, err := scanOptionalAudioPreference(exec.QueryRow(ctx, audioPreferenceSQL, userID, profileID, seriesID))
 	if err != nil {
 		return nil, fmt.Errorf("getting audio preference for profile %q series %q: %w",
 			profileID, seriesID, err)
 	}
 	return pref, nil
+}
+
+// audioPreferenceSQL reads one preference row: $1 user, $2 profile, $3
+// series or movie.
+const audioPreferenceSQL = `
+		SELECT ` + audioPreferenceColumns + `
+		FROM user_audio_preferences
+		WHERE user_id = $1 AND profile_id = $2 AND series_id = $3`
+
+// scanOptionalAudioPreference is scanAudioPreference returning nil when the
+// row does not exist.
+func scanOptionalAudioPreference(row pgx.Row) (*userstore.AudioPreference, error) {
+	pref, err := scanAudioPreference(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return pref, err
 }
 
 // ListAudioPreferences reads the profile's stored audio preferences for

@@ -27,8 +27,8 @@ func (DashboardLayoutDocument) Schema(huma.Registry) *huma.Schema {
 }
 
 type AdminDashboardLayout struct {
-	Layout    *DashboardLayoutDocument `json:"layout"`
-	UpdatedAt *Instant                 `json:"updated_at"`
+	Layout    *DashboardLayoutDocument `json:"layout" nullable:"true" doc:"Stored layout; null when this account has none saved, and the client keeps its local or default arrangement"`
+	UpdatedAt *Instant                 `json:"updated_at" nullable:"true" doc:"When the stored layout was last saved; null when none is saved"`
 }
 type AdminDashboardLayoutInput struct {
 	IfMatch     string `header:"If-Match"`

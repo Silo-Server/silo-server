@@ -45,11 +45,11 @@ func TestActingAdminHouseholdRule(t *testing.T) {
 		{"no requirement wired", session, "", primaryChecker(true, true, nil), nil, http.StatusNoContent},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			legacy := captureActingAdminResponse(RequireActingAdmin(tc.check, tc.household), tc.claims, tc.profileID)
+			legacy := captureActingAdminResponse(RequireActingAdminWith(NewActingAdminDecider(tc.check, tc.household)), tc.claims, tc.profileID)
 			if legacy.code != tc.want {
 				t.Fatalf("legacy status = %d, want %d: %s", legacy.code, tc.want, legacy.body)
 			}
-			policyBacked := captureActingAdminResponse(NewPolicyActingAdminMiddleware(pdp, tc.check, tc.household), tc.claims, tc.profileID)
+			policyBacked := captureActingAdminResponse(RequireActingAdminWith(NewPolicyActingAdminDecider(pdp, tc.check, tc.household)), tc.claims, tc.profileID)
 			assertMiddlewareResponsesEqual(t, policyBacked, legacy)
 		})
 	}
@@ -80,6 +80,40 @@ func TestMetadataCurationHouseholdRule(t *testing.T) {
 			policyBacked := captureMetadataCurationResponse(
 				NewPolicyPermissionMiddleware(fakePermissionUserLoader{user: admin}, fakeTargetLibraryResolver{ids: []int{1}}, primaryChecker(true, true, nil), tc.household, pdp),
 				adminClaims(), "", "item-1")
+			assertMiddlewareResponsesEqual(t, policyBacked, legacy)
+		})
+	}
+}
+
+// TestMarkerEditHouseholdRule: the marker gate's admin grant is an
+// acting-admin decision (#1911), so a profile-less admin session on a
+// restricted household needs an assigned marker_edit like any other caller.
+// The legacy and the policy-backed gate answer every case identically.
+func TestMarkerEditHouseholdRule(t *testing.T) {
+	pdp := newMiddlewarePolicyPDP(t)
+	admin := &models.User{ID: 7, Role: "admin", Enabled: true, Permissions: []string{}}
+	granted := &models.User{ID: 7, Role: "admin", Enabled: true, Permissions: []string{string(auth.PermissionMarkerEdit)}}
+	for _, tc := range []struct {
+		name      string
+		user      *models.User
+		household HouseholdProfileRequirement
+		want      int
+	}{
+		{"restricted household", admin, householdRequirement(true, nil), http.StatusForbidden},
+		{"restricted household, assigned grant", granted, householdRequirement(true, nil), http.StatusNoContent},
+		{"unrestricted household", admin, householdRequirement(false, nil), http.StatusNoContent},
+		{"lookup error", admin, householdRequirement(false, errors.New("store down")), http.StatusInternalServerError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			legacy := captureMarkerEditResponse(
+				NewPermissionMiddleware(fakePermissionUserLoader{user: tc.user}, nil, primaryChecker(true, true, nil), tc.household),
+				adminClaims())
+			if legacy.code != tc.want {
+				t.Fatalf("legacy status = %d, want %d: %s", legacy.code, tc.want, legacy.body)
+			}
+			policyBacked := captureMarkerEditResponse(
+				NewPolicyPermissionMiddleware(fakePermissionUserLoader{user: tc.user}, nil, primaryChecker(true, true, nil), tc.household, pdp),
+				adminClaims())
 			assertMiddlewareResponsesEqual(t, policyBacked, legacy)
 		})
 	}

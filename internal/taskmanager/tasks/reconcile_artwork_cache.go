@@ -299,6 +299,9 @@ func (t *ReconcileArtworkCacheTask) Execute(ctx context.Context, progress taskma
 			stats.SampleMissing, stats.Sampled, stats.Requeued, stats.Cleared,
 		)
 	}
+	if stats.Unrecovered > 0 {
+		message += fmt.Sprintf(", kept %d missing a size with no provider source (refresh or re-upload them)", stats.Unrecovered)
+	}
 	if stats.Errors > 0 {
 		// SweepErrors is zero here (checked above), so these are probe or
 		// branding errors — reported, but they don't reduce sweep coverage.

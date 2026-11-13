@@ -10,14 +10,14 @@ import (
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 )
 
-// Section catalog-box-sets: movie box sets. A library with box sets on
-// browses the movies TMDB lists in one collection (a franchise such as Harry
-// Potter) as one box_set card under group=box_set; these reads search box
-// sets and open one. getCatalogSearchCapabilities.box_sets advertises them
-// to viewers, and getLibraryCapabilities.box_sets to administrators.
+// Section catalog-box-sets: movie box sets. In a library with box sets on,
+// the movies TMDB lists in one collection (a franchise such as Harry Potter)
+// form one box set; these reads search box sets, open one, and find a
+// movie's. Library browse never groups movies into box sets.
+// getCatalogSearchCapabilities.box_sets advertises them to viewers, and
+// getLibraryCapabilities.box_sets to administrators.
 
 const (
-	groupBoxSet         = "box_set"
 	opSearchBoxSets     = "searchCatalogBoxSets"
 	opGetCatalogBoxSet  = "getCatalogBoxSet"
 	opGetItemBoxSet     = "getCatalogItemBoxSet"

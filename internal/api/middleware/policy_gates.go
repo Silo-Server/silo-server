@@ -6,11 +6,12 @@ import (
 	"slices"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/policy"
-	"github.com/go-chi/chi/v5"
 )
 
 const (
@@ -26,12 +27,6 @@ const (
 // gates. *policy.PDP satisfies it.
 type PermissionDecider interface {
 	CheckPermission(context.Context, policy.PermissionInput) (policy.PermissionDecision, policy.Meta, error)
-}
-
-// NewPolicyActingAdminMiddleware enforces the acting-admin gate through the
-// policy PDP while preserving RequireActingAdmin's response contract.
-func NewPolicyActingAdminMiddleware(pdp PermissionDecider, primaryChecker PrimaryProfileChecker, household HouseholdProfileRequirement) func(http.Handler) http.Handler {
-	return RequireActingAdminWith(NewPolicyActingAdminDecider(pdp, primaryChecker, household))
 }
 
 // NewPolicyActingAdminDecider is the acting-admin decision evaluated by the
@@ -251,9 +246,9 @@ func (m *PolicyPermissionMiddleware) RequireMarkerEdit(next http.Handler) http.H
 			return
 		}
 
-		// marker_edit reads no household fact (its admin grant is not an
-		// acting-admin decision, #1911), so skip that lookup.
-		facts, err := resolveActingAdminFacts(r, claims, m.checkPrimary, nil)
+		// The admin grant for marker_edit is an acting-admin decision (#1911),
+		// so the policy needs the same profile and household facts.
+		facts, err := m.actingAdminFacts(r, claims)
 		if err != nil {
 			writePermissionError(w, http.StatusInternalServerError, policyInternalErrorCode, activeProfileVerificationFailedMsg)
 			return

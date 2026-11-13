@@ -2,15 +2,10 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
@@ -140,7 +135,9 @@ func TestMergePremieresIntoDiscoverRow_PromotesAndRanksCandidates(t *testing.T) 
 	}
 }
 
-func TestRecommendationsHandleDiscover_FallsBackToLegacyRowsWhenUpcomingLoadFails(t *testing.T) {
+// A failed calendar read costs Discover its airings blend, not the page: the
+// cached rows still answer, without upcoming events.
+func TestDiscoverFallsBackToCachedRowsWhenUpcomingLoadFails(t *testing.T) {
 	t.Parallel()
 
 	handler := NewRecommendationsHandler(nil, stubRecommendationsReader{
@@ -151,43 +148,20 @@ func TestRecommendationsHandleDiscover_FallsBackToLegacyRowsWhenUpcomingLoadFail
 		}},
 	}, nil, nil, nil, false)
 	handler.Fetcher = stubDiscoverFetcher{
-		items: []*models.MediaItem{{
-			ContentID: "movie-1",
-			Type:      "movie",
-			Title:     "Movie One",
-			Genres:    []string{"Drama"},
-			Status:    "matched",
-		}},
+		items: []*models.MediaItem{{ContentID: "movie-1", Type: "movie", Title: "Movie One", Genres: []string{"Drama"}, Status: "matched"}},
 	}
 	handler.CalendarRepo = stubCalendarRepository{err: errors.New("calendar unavailable")}
 
-	req := httptest.NewRequest(http.MethodGet, "/recommendations/discover", nil)
-	ctx := apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7})
-	ctx = apimw.SetProfileID(ctx, "profile-1")
-	req = req.WithContext(ctx)
-	rec := httptest.NewRecorder()
-
-	handler.HandleDiscover(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
+	view, err := handler.Discover(t.Context(), 7, "profile-1", catalog.AccessFilter{UserID: 7, ProfileID: "profile-1"})
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
 	}
-
-	var resp discoverResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
+	if len(view.Rows) != 1 || view.Rows[0].Label != "For You" {
+		t.Fatalf("rows = %+v, want the cached For You row", view.Rows)
 	}
-	if len(resp.Rows) != 1 {
-		t.Fatalf("rows = %d, want 1", len(resp.Rows))
-	}
-	if resp.Rows[0].Label != "For You" {
-		t.Fatalf("row label = %q, want For You", resp.Rows[0].Label)
-	}
-	if len(resp.Rows[0].Items) != 1 || resp.Rows[0].Items[0].ContentID != "movie-1" {
-		t.Fatalf("legacy row items = %+v, want movie-1", resp.Rows[0].Items)
-	}
-	if resp.Rows[0].Items[0].UpcomingEvent != nil {
-		t.Fatalf("legacy row should not include upcoming event metadata")
+	items := view.Rows[0].Items
+	if len(items) != 1 || items[0].ContentID != "movie-1" || items[0].UpcomingEvent != nil {
+		t.Fatalf("row items = %+v, want movie-1 without an upcoming event", items)
 	}
 }
 
@@ -337,4 +311,59 @@ func mustCalendarDate(value string) time.Time {
 
 func testStringPtr(value string) *string {
 	return &value
+}
+
+// Recommendation cards carry the catalog fields the poster badges read
+// (content rating, advisory age, studio, runtime, network, airing status), as
+// Home and library section cards do.
+func TestRecommendationCardsCarryBadgeMetadata(t *testing.T) {
+	t.Parallel()
+
+	movie := &models.MediaItem{
+		ContentID: "movie-1", Type: "movie", Title: "Movie One", Status: "matched",
+		Runtime: 117, Studios: []string{"Northlight Pictures"}, ContentRating: "PG-13",
+		AdvisoryAge: new(13), AdvisorySource: "commonsense",
+	}
+	series := &models.MediaItem{
+		ContentID: "series-1", Type: "series", Title: "Series One", Status: "matched",
+		Networks: []string{"Harbor TV"}, ContentRating: "TV-14", ShowStatus: "Continuing",
+	}
+	handler := NewRecommendationsHandler(nil, stubRecommendationsReader{
+		discoverRows: []recommendations.ForYouRow{{
+			Type:  "cluster",
+			Label: "For You",
+			Items: []recommendations.ScoredItem{{MediaItemID: "movie-1"}, {MediaItemID: "series-1"}},
+		}},
+	}, nil, nil, nil, false)
+	handler.Fetcher = stubDiscoverFetcher{items: []*models.MediaItem{movie, series}}
+
+	view, err := handler.Discover(context.Background(), 7, "profile-1", catalog.AccessFilter{})
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	rows := view.Rows
+	if len(rows) != 1 || len(rows[0].Items) != 2 {
+		t.Fatalf("rows = %+v, want one row with two cards", rows)
+	}
+	handler.reader = watchTonightReader{result: recommendations.WatchTonightResult{
+		Items: []recommendations.ScoredItem{{MediaItemID: "movie-1", Score: 2}, {MediaItemID: "series-1", Score: 1}},
+	}}
+	watchTonight, err := handler.WatchTonight(context.Background(), 7, "profile-1", catalog.AccessFilter{}, 2)
+	if err != nil {
+		t.Fatalf("WatchTonight: %v", err)
+	}
+	if len(watchTonight.Items) != 2 {
+		t.Fatalf("WatchTonight items = %+v, want two cards", watchTonight.Items)
+	}
+	for _, card := range []sectionItemResponse{rows[0].Items[0], watchTonight.Items[0].Card()} {
+		if card.ContentRating != "PG-13" || card.AdvisoryAge == nil || *card.AdvisoryAge != 13 || card.AdvisorySource != "commonsense" ||
+			card.Runtime != 117 || len(card.Studios) != 1 || card.Studios[0] != "Northlight Pictures" {
+			t.Errorf("movie card = rating %q, advisory %v/%q, runtime %d, studios %v", card.ContentRating, card.AdvisoryAge, card.AdvisorySource, card.Runtime, card.Studios)
+		}
+	}
+	for _, card := range []sectionItemResponse{rows[0].Items[1], watchTonight.Items[1].Card()} {
+		if card.ContentRating != "TV-14" || card.ShowStatus != "Continuing" || len(card.Networks) != 1 || card.Networks[0] != "Harbor TV" {
+			t.Errorf("series card = rating %q, show status %q, networks %v", card.ContentRating, card.ShowStatus, card.Networks)
+		}
+	}
 }

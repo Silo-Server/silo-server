@@ -45,12 +45,13 @@ const (
 	letterFoldTo   = "aaaaaaaaacccccddeeeeeeeeegggghhiiiiiiiiijklllllnnnnooooooooorrrsssstttuuuuuuuuuuwyyyzzzaaaaaaaaacccccddeeeeeeeeegggghhiiiiiiiijklllllnnnnooooooooorrrsssstttuuuuuuuuuuwyyyzzzstst"
 )
 
-// letterBucketSQL files a lowercased title key under its initial: A to Z after
-// folding accents, else LetterOther. ascii() returns the first character's
-// code point, so the range check holds under any database collation.
-func letterBucketSQL(titleKey string) string {
-	initial := fmt.Sprintf("translate(left(%s, 1), '%s', '%s')", titleKey, letterFoldFrom, letterFoldTo)
-	return fmt.Sprintf("CASE WHEN ascii(%[1]s) BETWEEN 97 AND 122 THEN upper(%[1]s) ELSE '%[2]s' END", initial, LetterOther)
+// letterBucketSQL files the initial of a lowercased title key (its first
+// character) under a letter: A to Z after folding accents, else LetterOther.
+// ascii() returns the character's code point, so the range check holds under
+// any database collation.
+func letterBucketSQL(initial string) string {
+	folded := fmt.Sprintf("translate(%s, '%s', '%s')", initial, letterFoldFrom, letterFoldTo)
+	return fmt.Sprintf("CASE WHEN ascii(%[1]s) BETWEEN 97 AND 122 THEN upper(%[1]s) ELSE '%[2]s' END", folded, LetterOther)
 }
 
 // LetterIndex answers, for def in title order, how many matches file under
@@ -63,7 +64,7 @@ func (e *QueryExecutor) LetterIndex(ctx context.Context, def QueryDefinition, ac
 	if e == nil || e.Pool == nil {
 		return LetterIndex{}, fmt.Errorf("query executor requires a database pool")
 	}
-	if e.GroupByWork && len(e.BoxSetCollections) == 0 {
+	if e.GroupByWork {
 		return LetterIndex{}, fmt.Errorf("%w: the letter index does not group by work", ErrInvalidCatalogRequest)
 	}
 	if NormalizeQuerySort(def.Sort).Field != querySortTitle {
@@ -82,32 +83,54 @@ func (e *QueryExecutor) LetterIndex(ctx context.Context, def QueryDefinition, ac
 	return e.LetterIndexes.get(ctx, key, load)
 }
 
+// queryLetterIndex runs letterIndexSQL and builds the index from the rows it
+// keeps, in list order: each row where the initial changes, plus the last row.
 func (e *QueryExecutor) queryLetterIndex(ctx context.Context, sql string, args []any) (LetterIndex, error) {
 	rows, err := e.Pool.Query(ctx, sql, args...)
 	if err != nil {
 		return LetterIndex{}, fmt.Errorf("querying letter index: %w", err)
 	}
 	defer rows.Close()
-	index := LetterIndex{Letters: []LetterBucket{}, Runs: []LetterRun{}}
-	bucketAt := map[string]int{}
+	var runs []LetterRun
+	total := 0
 	for rows.Next() {
 		var run LetterRun
-		var length int
-		if err := rows.Scan(&run.Letter, &run.Position, &length); err != nil {
+		var opens bool
+		if err := rows.Scan(&run.Letter, &run.Position, &opens); err != nil {
 			return LetterIndex{}, fmt.Errorf("scanning letter index: %w", err)
 		}
-		index.Runs = append(index.Runs, run)
-		if i, ok := bucketAt[run.Letter]; ok {
-			index.Letters[i].Count += length
-			continue
+		total = run.Position + 1
+		// Two initials can file under one letter ("e" and "é"), so a row that
+		// opens under the letter of the run before it continues that run.
+		if opens && (len(runs) == 0 || runs[len(runs)-1].Letter != run.Letter) {
+			runs = append(runs, run)
 		}
-		bucketAt[run.Letter] = len(index.Letters)
-		index.Letters = append(index.Letters, LetterBucket{Letter: run.Letter, Count: length, Position: run.Position})
 	}
 	if err := rows.Err(); err != nil {
 		return LetterIndex{}, fmt.Errorf("reading letter index: %w", err)
 	}
-	return index, nil
+	return letterIndexOfRuns(runs, total), nil
+}
+
+// letterIndexOfRuns totals runs, in list order, into letters: a run ends where
+// the next starts, the last at total.
+func letterIndexOfRuns(runs []LetterRun, total int) LetterIndex {
+	index := LetterIndex{Letters: []LetterBucket{}, Runs: []LetterRun{}}
+	bucketAt := map[string]int{}
+	for i, run := range runs {
+		end := total
+		if i+1 < len(runs) {
+			end = runs[i+1].Position
+		}
+		index.Runs = append(index.Runs, run)
+		if at, ok := bucketAt[run.Letter]; ok {
+			index.Letters[at].Count += end - run.Position
+			continue
+		}
+		bucketAt[run.Letter] = len(index.Letters)
+		index.Letters = append(index.Letters, LetterBucket{Letter: run.Letter, Count: end - run.Position, Position: run.Position})
+	}
+	return index
 }
 
 const (
@@ -131,9 +154,12 @@ func newLetterIndexCache() *letterIndexCache {
 		func(index LetterIndex) int { return len(index.Runs) })
 }
 
-// letterIndexSQL numbers the plan's rows in its own order, files each under
-// its initial, and keeps the rows that open a run (their letter differs from
-// the row before), with the run's length.
+// letterIndexSQL numbers the plan's rows in its own order in one window pass
+// and keeps the first row, each row whose initial differs from the row
+// before, and the last row, with its letter, zero-based position, and whether
+// it opens a run of one initial. Only the kept rows, usually a few hundred,
+// are folded to a letter; queryLetterIndex merges runs of initials that
+// share one.
 func (p previewPagePlan) letterIndexSQL() (string, []any) {
 	args := append([]any{}, p.cteArgs...)
 	args = append(args, p.args...)
@@ -142,15 +168,16 @@ func (p previewPagePlan) letterIndexSQL() (string, []any) {
 	if len(p.ctes) > 0 {
 		withClause = "WITH " + strings.Join(p.ctes, ",\n") + "\n"
 	}
+	initial := fmt.Sprintf("left(%s, 1)", p.titleKey)
 	sql := fmt.Sprintf(
-		`%sSELECT bucket, start, COALESCE(LEAD(start) OVER (ORDER BY start), total) - start FROM (
-			SELECT bucket, (position - 1)::int AS start, total::int AS total,
-				bucket IS DISTINCT FROM LAG(bucket) OVER (ORDER BY position) AS opens_run
-			FROM (
-				SELECT %s AS bucket, ROW_NUMBER() OVER (%s) AS position, COUNT(*) OVER () AS total %s %s
-			) ranked
-		) marked WHERE opens_run ORDER BY start`,
-		withClause, letterBucketSQL(p.titleKey), p.orderBy, p.fromClausePaged, p.whereClause,
+		`%[1]sSELECT %[2]s, start, opens FROM (
+			SELECT %[3]s AS initial, (ROW_NUMBER() OVER w - 1)::int AS start,
+				LAG(TRUE) OVER w IS NULL OR %[3]s IS DISTINCT FROM LAG(%[3]s) OVER w AS opens,
+				LEAD(TRUE) OVER w IS NULL AS closes
+			%[4]s %[5]s
+			WINDOW w AS (%[6]s)
+		) numbered WHERE opens OR closes ORDER BY start`,
+		withClause, letterBucketSQL("initial"), initial, p.fromClausePaged, p.whereClause, p.orderBy,
 	)
 	return sql, args
 }
@@ -179,9 +206,5 @@ func (r *CatalogResolver) LetterIndex(ctx context.Context, req CatalogRequest, a
 	// lets it be cached.
 	executor := r.queryExecutorForScope(req.Query.MediaScope, nil)
 	executor.LetterIndexes = r.letterIndexes
-	if len(req.BoxSetCollections) > 0 {
-		executor.GroupByWork = true
-		executor.BoxSetCollections = req.BoxSetCollections
-	}
 	return executor.LetterIndex(ctx, req.Query, access)
 }

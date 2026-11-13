@@ -87,7 +87,7 @@ func (h *SectionHandler) CreateAdminSection(ctx context.Context, req AdminSectio
 		return none, apiError(http.StatusBadRequest, "bad_request", msg)
 	}
 
-	if msg, ok := validateSectionConfig(sections.SectionType(req.SectionType), req.Config, req.V1Rules); !ok {
+	if msg, ok := validateSectionConfig(sections.SectionType(req.SectionType), req.Config); !ok {
 		return none, apiError(http.StatusBadRequest, "bad_request", msg)
 	}
 	if req.ValidateRecipe {
@@ -106,6 +106,7 @@ func (h *SectionHandler) CreateAdminSection(ctx context.Context, req AdminSectio
 		ItemLimit:   req.ItemLimit,
 		Config:      req.Config,
 		Enabled:     req.Enabled,
+		WebOnly:     req.Featured && req.WebOnly,
 	}
 	if sec.Scope == "" {
 		sec.Scope = adminSectionScopeHome
@@ -308,15 +309,6 @@ func (h *SectionHandler) previewAdminSection(ctx context.Context, req AdminSecti
 	if err := rec.Validate(req.Config); err != nil {
 		return none, apiError(http.StatusBadRequest, "invalid_config", err.Error())
 	}
-	// A rule the frozen /api/v1 vocabulary lacks fails as it did when the
-	// fetcher could not parse it.
-	if req.V1Rules {
-		if def, err := sections.ParseQueryDefinition(req.Config); err == nil {
-			if err := catalog.ValidateV1Rules(def); err != nil {
-				return none, apiError(http.StatusInternalServerError, "preview_failed", "parsing query definition: "+err.Error())
-			}
-		}
-	}
 
 	limit := req.ItemLimit
 	if limit <= 0 || limit > 50 {
@@ -445,6 +437,7 @@ func (h *SectionHandler) UpdateAdminSection(ctx context.Context, id string, req 
 		}
 		originalConfig := append(json.RawMessage(nil), existing.Config...)
 		originalType := existing.SectionType
+		originalFeatured := existing.Featured
 		if req.Position != nil {
 			existing.Position = *req.Position
 		}
@@ -466,6 +459,16 @@ func (h *SectionHandler) UpdateAdminSection(ctx context.Context, id string, req 
 		if req.Enabled != nil {
 			existing.Enabled = *req.Enabled
 		}
+		// Only a hero row can be kept off the apps, and a row that becomes the
+		// hero starts on every client unless this request says otherwise, so
+		// a flag an older server left on a demoted row never comes back.
+		switch {
+		case req.WebOnly != nil:
+			existing.WebOnly = *req.WebOnly
+		case !originalFeatured:
+			existing.WebOnly = false
+		}
+		existing.WebOnly = existing.WebOnly && existing.Featured
 		if !sections.ValidSectionTypes[existing.SectionType] {
 			return none, apiError(400, "bad_request", "Invalid section_type")
 		}
@@ -476,10 +479,7 @@ func (h *SectionHandler) UpdateAdminSection(ctx context.Context, id string, req 
 			return none, apiError(400, "bad_request", msg)
 		}
 		definitionChanged := existing.SectionType != originalType || !jsonConfigEqual(originalConfig, existing.Config)
-		// Like the recipe check below, the v1 rule vocabulary applies only to a
-		// changed definition, so v1 can still rename, move or disable a row
-		// whose rules were saved through v2.
-		if msg, ok := validateSectionConfig(existing.SectionType, existing.Config, req.V1Rules && definitionChanged); !ok {
+		if msg, ok := validateSectionConfig(existing.SectionType, existing.Config); !ok {
 			return none, apiError(400, "bad_request", msg)
 		}
 		// Only a changed type or config runs the recipe check, so a row saved
@@ -541,14 +541,4 @@ func (h *SectionHandler) ReorderAdminSections(ctx context.Context, scope string,
 		expected = *v
 	}
 	return h.repo.ReorderScopeIfRevision(ctx, scope, library, ids, expected)
-}
-func (h *SectionHandler) reorderLegacySections(ctx context.Context, entries []sections.ReorderEntry) error {
-	return h.repo.Reorder(ctx, entries)
-}
-
-func adminSectionServiceError(err error) error {
-	if errors.Is(err, sections.ErrSectionNotFound) {
-		return apiError(404, "not_found", "Section not found")
-	}
-	return err
 }

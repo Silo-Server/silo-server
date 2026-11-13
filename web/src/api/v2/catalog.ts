@@ -25,6 +25,7 @@ import type {
   SubtitleInfo,
 } from "@/api/types";
 import type { components } from "@/api/v2/schema";
+import { sectionTitleKey } from "@/lib/sectionTitle";
 
 /**
  * Catalog item cards as the app still models them. v2 emits one shared
@@ -99,7 +100,6 @@ export function catalogItemFromV2(item: CatalogItemV2): CatalogCardItem {
     manga_volume_count: item.manga_volume_count,
     pending_translation_language: item.pending_translation_language,
     machine_translated_fields: item.machine_translated_fields,
-    ...(item.box_set ? { box_set: item.box_set } : {}),
   };
 }
 
@@ -114,6 +114,7 @@ export function sectionFromV2(section: SectionV2): ResolvedSection {
     is_custom: section.is_custom,
     customized: section.customized,
     items: section.items.map(catalogItemFromV2),
+    ...sectionTitleKey(section),
   };
 }
 

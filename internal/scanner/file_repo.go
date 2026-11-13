@@ -12,12 +12,12 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/database/readtx"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/pathscope"
 	"github.com/Silo-Server/silo-server/internal/scanbatch"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -86,6 +86,12 @@ const overlayFileColumns = `content_id, episode_id, media_folder_id, file_path,
 const mfOverlayFileColumns = `mf.content_id, mf.episode_id, mf.media_folder_id, mf.file_path,
 	mf.codec_video, mf.codec_audio, mf.resolution, mf.audio_channels, mf.hdr, mf.container,
 	mf.video_tracks, mf.audio_tracks, mf.subtitle_tracks, mf.external_subtitles, mf.edition_key`
+
+// mfEpisodeListFileColumns adds what a season's episode list shows for each
+// version beyond its overlay badges: the file ID, the size, and the probe
+// timestamps MediaFile.ProbeRejected reads.
+const mfEpisodeListFileColumns = mfOverlayFileColumns + `,
+	mf.id, mf.file_size, mf.probe_updated_at, mf.probe_failed_at`
 
 // mfFileColumns qualifies every column with the "mf" alias for use in JOIN queries
 // where unqualified "id" would be ambiguous.
@@ -750,6 +756,19 @@ func scanMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 }
 
 func scanOverlayMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
+	return scanOverlayMediaFilesWith(rows, nil)
+}
+
+// scanEpisodeListMediaFiles scans rows selected with mfEpisodeListFileColumns.
+func scanEpisodeListMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
+	return scanOverlayMediaFilesWith(rows, func(f *models.MediaFile) []any {
+		return []any{&f.ID, &f.FileSize, &f.ProbeUpdatedAt, &f.ProbeFailedAt}
+	})
+}
+
+// scanOverlayMediaFilesWith scans the overlay columns followed by the
+// destinations extra returns for each file, if any.
+func scanOverlayMediaFilesWith(rows pgx.Rows, extra func(*models.MediaFile) []any) ([]*models.MediaFile, error) {
 	var files []*models.MediaFile
 	for rows.Next() {
 		var f models.MediaFile
@@ -758,7 +777,7 @@ func scanOverlayMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 		var hdr *bool
 		var videoTracksJSON, audioTracksJSON, subtitleTracksJSON, externalSubtitlesJSON []byte
 
-		if err := rows.Scan(
+		dest := []any{
 			&contentID,
 			&episodeID,
 			&f.MediaFolderID,
@@ -774,7 +793,11 @@ func scanOverlayMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 			&subtitleTracksJSON,
 			&externalSubtitlesJSON,
 			&editionKey,
-		); err != nil {
+		}
+		if extra != nil {
+			dest = append(dest, extra(&f)...)
+		}
+		if err := rows.Scan(dest...); err != nil {
 			return nil, fmt.Errorf("scanning overlay media file: %w", err)
 		}
 
@@ -886,6 +909,23 @@ func (r *FileRepository) UpsertBatchTx(ctx context.Context, tx pgx.Tx, files []m
 		if _, err := results.Exec(); err != nil {
 			return fmt.Errorf("media file batch upsert: %w", err)
 		}
+	}
+	return nil
+}
+
+// LockByPathsTx locks the media_files rows at paths, in id order, within the
+// caller's transaction. A paths entry with no row locks nothing.
+func (r *FileRepository) LockByPathsTx(ctx context.Context, tx pgx.Tx, paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `
+		SELECT 1 FROM media_files
+		WHERE file_path = ANY($1)
+		ORDER BY id
+		FOR NO KEY UPDATE
+	`, paths); err != nil {
+		return fmt.Errorf("locking media files: %w", err)
 	}
 	return nil
 }
@@ -1051,6 +1091,8 @@ func (r *FileRepository) upsertWithQueryer(ctx context.Context, queryer fileQuer
 		END,
 		match_suppressed_at = NULL,
 		missing_since = NULL,
+		-- A file written onto a retitle's stand-in is a real file now.
+		stand_in_for_file_id = NULL,
 		updated_at = NOW()
 	RETURNING ` + fileColumns
 
@@ -1183,7 +1225,16 @@ func (r *FileRepository) updateIdentity(ctx context.Context, mf models.MediaFile
 
 // identityAssignments sets the path-derived identity columns, and the
 // sidecar list when one is given, from arguments $2 to $24 of identityArgs.
-const identityAssignments = `media_folder_id = $2,
+// A path that names no season or episode keeps the stored numbers, which a
+// match may have filled in.
+const identityAssignments = identityGroupColumns + `
+		season_number = COALESCE($12, season_number),
+		episode_number = COALESCE($13, episode_number),
+		` + identityVariantColumns
+
+// identityGroupColumns and identityVariantColumns are the assignments of
+// identityAssignments around the season and episode numbers.
+const identityGroupColumns = `media_folder_id = $2,
 		canonical_root_path = $3,
 		observed_root_path = $4,
 		content_group_key = $5,
@@ -1192,10 +1243,9 @@ const identityAssignments = `media_folder_id = $2,
 		base_year = $8,
 		base_type = $9,
 		identity_confidence = $10,
-		identity_json = $11,
-		season_number = COALESCE($12, season_number),
-		episode_number = COALESCE($13, episode_number),
-		edition_raw = $14,
+		identity_json = $11,`
+
+const identityVariantColumns = `edition_raw = $14,
 		edition_key = $15,
 		edition_confidence = $16,
 		edition_source = $17,
@@ -1237,65 +1287,6 @@ func identityArgs(key any, mf models.MediaFile, externalSubtitlesJSON []byte) []
 		nilIfZero(mf.MultiEpisodeEnd),
 		externalSubtitlesJSON,
 	}
-}
-
-// MovedFileCandidates returns the rows in a folder that recorded the same size
-// and OSHash as the file that appeared at filePath, the rows it may have moved
-// from, along with any row already at filePath. A scan whose snapshot predates
-// another scan's write finds that row here and leaves it alone.
-func (r *FileRepository) MovedFileCandidates(ctx context.Context, folderID int, filePath string, fileSize int64, fileHash string) ([]*scanStateFile, error) {
-	rows, err := r.pool.Query(ctx, `SELECT `+scanStateColumns+` FROM media_files
-		WHERE media_folder_id = $3
-		  AND (file_path = $4 OR (file_hash = $1 AND file_size = $2 AND extra_id IS NULL))`,
-		fileHash, fileSize, folderID, filePath,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("querying moved file candidates: %w", err)
-	}
-	return scanScanStateRows(rows)
-}
-
-// RelinkMovedFile moves the row of a file that left moved.FilePath to
-// mf.FilePath, marks it present, and rewrites its path-derived identity and
-// sidecars from mf. Probe data, chapters, markers, and every row keyed to the
-// file's id stay as they are. The update only applies while the row is still
-// the one the caller verified: same path, bytes, modification time, and links.
-// It reports false when the row changed meanwhile or another row holds the new
-// path; the caller then treats the file as new.
-func (r *FileRepository) RelinkMovedFile(ctx context.Context, moved *scanStateFile, mf models.MediaFile) (bool, error) {
-	externalSubtitlesJSON, err := serializeJSONB(mf.ExternalSubtitles)
-	if err != nil {
-		return false, fmt.Errorf("marshaling external_subtitles: %w", err)
-	}
-	args := append(identityArgs(moved.ID, mf, externalSubtitlesJSON),
-		mf.FilePath,
-		moved.FilePath,
-		moved.FileHash,
-		moved.FileSize,
-		moved.FileModifiedAt,
-		nilIfEmpty(moved.ContentID),
-		nilIfEmpty(moved.EpisodeID),
-	)
-	tag, err := r.pool.Exec(ctx, `UPDATE media_files SET `+identityAssignments+`,
-		file_path = $25,
-		missing_since = NULL,
-		updated_at = NOW()
-	WHERE id = $1
-	  AND file_path = $26
-	  AND file_hash = $27
-	  AND file_size = $28
-	  AND file_modified_at IS NOT DISTINCT FROM $29
-	  AND content_id IS NOT DISTINCT FROM $30
-	  AND episode_id IS NOT DISTINCT FROM $31
-	  AND extra_id IS NULL`, args...)
-	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return false, nil
-		}
-		return false, fmt.Errorf("relinking moved media file: %w", err)
-	}
-	return tag.RowsAffected() == 1, nil
 }
 
 type ChapterThumbnailFailureState struct {
@@ -3740,54 +3731,60 @@ func (r *servedEpisodeRows) Scan(dest ...any) error {
 // episode IDs, excluding files that are marked missing. A multi-episode file
 // is listed under every requested episode it spans.
 func (r *FileRepository) ListByEpisodeIDs(ctx context.Context, episodeIDs []string) (map[string][]*models.MediaFile, error) {
-	grouped := make(map[string][]*models.MediaFile, len(episodeIDs))
-	if len(episodeIDs) == 0 {
-		return grouped, nil
-	}
-
-	query := `SELECT served.episode_id, ` + mfFileColumns + `
-		FROM (` + catalog.ServedEpisodeFilesSQL + `) served(episode_id, file_id)
-		JOIN media_files mf ON mf.id = served.file_id
-		ORDER BY served.episode_id ASC, mf.id ASC`
-	rows, err := r.pool.Query(ctx, query, episodeIDs)
-	if err != nil {
-		return nil, fmt.Errorf("querying files by episode_ids: %w", err)
-	}
-	defer rows.Close()
-
-	served := &servedEpisodeRows{Rows: rows}
-	files, err := scanMediaFiles(served)
-	if err != nil {
-		return nil, err
-	}
-	for i, file := range files {
-		grouped[served.episodeIDs[i]] = append(grouped[served.episodeIDs[i]], file)
-	}
-	return grouped, nil
+	return r.listServedEpisodeFiles(ctx, episodeIDs, mfFileColumns, scanMediaFiles, "files")
 }
 
 // ListOverlayFilesByEpisodeIDs returns a lightweight media-file projection for
 // building overlay summaries, grouped by episode ID.
 func (r *FileRepository) ListOverlayFilesByEpisodeIDs(ctx context.Context, episodeIDs []string) (map[string][]*models.MediaFile, error) {
+	return r.listServedEpisodeFiles(ctx, episodeIDs, mfOverlayFileColumns, scanOverlayMediaFiles, "overlay files")
+}
+
+// ListEpisodeListFilesByEpisodeIDs returns the media-file projection a
+// season's episode list renders (mfEpisodeListFileColumns), grouped by
+// episode ID.
+func (r *FileRepository) ListEpisodeListFilesByEpisodeIDs(ctx context.Context, episodeIDs []string) (map[string][]*models.MediaFile, error) {
+	return r.listServedEpisodeFiles(ctx, episodeIDs, mfEpisodeListFileColumns, scanEpisodeListMediaFiles, "episode list files")
+}
+
+// listServedEpisodeFiles selects columns for the files served under the given
+// episodes and groups them by episode ID, in episode then file ID order. Files
+// marked missing are left out, and a multi-episode file is listed under every
+// requested episode it spans.
+func (r *FileRepository) listServedEpisodeFiles(
+	ctx context.Context,
+	episodeIDs []string,
+	columns string,
+	scan func(pgx.Rows) ([]*models.MediaFile, error),
+	what string,
+) (map[string][]*models.MediaFile, error) {
 	grouped := make(map[string][]*models.MediaFile, len(episodeIDs))
 	if len(episodeIDs) == 0 {
 		return grouped, nil
 	}
 
-	query := `SELECT served.episode_id, ` + mfOverlayFileColumns + `
+	query := `SELECT served.episode_id, ` + columns + `
 		FROM (` + catalog.ServedEpisodeFilesSQL + `) served(episode_id, file_id)
 		JOIN media_files mf ON mf.id = served.file_id
 		ORDER BY served.episode_id ASC, mf.id ASC`
-	rows, err := r.pool.Query(ctx, query, episodeIDs)
-	if err != nil {
-		return nil, fmt.Errorf("querying overlay files by episode_ids: %w", err)
+	// Each connection keeps one generic plan. Planning takes about 1 ms,
+	// several times what a short season takes to read. PostgreSQL would plan
+	// again for every list shorter than ten, because the generic plan is
+	// priced for ten episodes; longer lists already run on it. Both branches
+	// look up each requested episode by index whatever the list's length.
+	var served *servedEpisodeRows
+	var files []*models.MediaFile
+	var scanErr error
+	err := readtx.Query(ctx, r.pool, query, []any{episodeIDs}, func(rows pgx.Rows) error {
+		served = &servedEpisodeRows{Rows: rows}
+		files, scanErr = scan(served)
+		return scanErr
+	}, readtx.GenericPlan)
+	if scanErr != nil {
+		return nil, scanErr
 	}
-	defer rows.Close()
-
-	served := &servedEpisodeRows{Rows: rows}
-	files, err := scanOverlayMediaFiles(served)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("querying %s by episode_ids: %w", what, err)
 	}
 	for i, file := range files {
 		grouped[served.episodeIDs[i]] = append(grouped[served.episodeIDs[i]], file)
@@ -4122,6 +4119,16 @@ func (r *FileRepository) BulkLinkEpisodesBySeries(ctx context.Context, seriesCon
 // the same recognized root path within a media folder. If preferredType is
 // set, matches of that type sort first.
 func (r *FileRepository) FindContentIDByRootPath(ctx context.Context, folderID int, rootPath, preferredType string) (string, error) {
+	return findContentIDByRootPath(ctx, r.pool, folderID, rootPath, preferredType)
+}
+
+// FindContentIDByRootPathTx is FindContentIDByRootPath within the caller's
+// transaction.
+func (r *FileRepository) FindContentIDByRootPathTx(ctx context.Context, tx pgx.Tx, folderID int, rootPath, preferredType string) (string, error) {
+	return findContentIDByRootPath(ctx, tx, folderID, rootPath, preferredType)
+}
+
+func findContentIDByRootPath(ctx context.Context, queryer fileQueryer, folderID int, rootPath, preferredType string) (string, error) {
 	query := `SELECT mf.content_id
 		FROM media_files mf
 		JOIN media_items mi ON mi.content_id = mf.content_id
@@ -4144,7 +4151,7 @@ func (r *FileRepository) FindContentIDByRootPath(ctx context.Context, folderID i
 		LIMIT 1`
 
 	var contentID string
-	err := r.pool.QueryRow(ctx, query, args...).Scan(&contentID)
+	err := queryer.QueryRow(ctx, query, args...).Scan(&contentID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", nil
@@ -4157,6 +4164,17 @@ func (r *FileRepository) FindContentIDByRootPath(ctx context.Context, folderID i
 // FindContentIDByObservedRootPath finds an existing linked content item for
 // files under the same observed root path within a media folder.
 func (r *FileRepository) FindContentIDByObservedRootPath(ctx context.Context, folderID int, observedRootPath, preferredType string) (string, error) {
+	return r.findContentIDByObservedRootPath(ctx, folderID, observedRootPath, preferredType, 0)
+}
+
+// FindOtherContentIDByObservedRootPath is FindContentIDByObservedRootPath
+// over every file but excludeFileID, the lookup matching makes for a file
+// that is not linked yet.
+func (r *FileRepository) FindOtherContentIDByObservedRootPath(ctx context.Context, folderID int, observedRootPath, preferredType string, excludeFileID int) (string, error) {
+	return r.findContentIDByObservedRootPath(ctx, folderID, observedRootPath, preferredType, excludeFileID)
+}
+
+func (r *FileRepository) findContentIDByObservedRootPath(ctx context.Context, folderID int, observedRootPath, preferredType string, excludeFileID int) (string, error) {
 	query := `SELECT mf.content_id
 		FROM media_files mf
 		JOIN media_items mi ON mi.content_id = mf.content_id
@@ -4164,11 +4182,12 @@ func (r *FileRepository) FindContentIDByObservedRootPath(ctx context.Context, fo
 		  AND mf.observed_root_path = $2
 		  AND mf.content_id IS NOT NULL
 		  AND mf.missing_since IS NULL
+		  AND mf.id <> $3
 		ORDER BY `
 
-	args := []any{folderID, observedRootPath}
+	args := []any{folderID, observedRootPath, excludeFileID}
 	if preferredType != "" {
-		query += `CASE WHEN mi.type = $3 THEN 0 ELSE 1 END, `
+		query += `CASE WHEN mi.type = $4 THEN 0 ELSE 1 END, `
 		args = append(args, preferredType)
 	}
 	query += `CASE WHEN lower(trim(mi.status)) = 'matched' THEN 0 ELSE 1 END,

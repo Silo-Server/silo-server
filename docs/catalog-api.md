@@ -1,15 +1,12 @@
 # Catalog API
 
 > **API lifecycle:** this documents the stable `/api/v2` native contract, which locks with Silo
-> 1.0. The frozen alpha `/api/v1` surface answers the same features through the pre-1.0 bridge
-> window and is then retired. See [the native API contract](architecture/api-contract.md).
+> 1.0. See [the native API contract](architecture/api-contract.md).
 
 ## Recommendation limits
 
 `GET /api/v2/recommendations/because-watched/{item_id}` accepts `limit` from
-1 to 50 (default 20). The v1 bridge route clamps positive limits above 50
-to 50 and keeps its existing default of 50 for missing or invalid values.
-The shared service caps the limit before the engine expands its candidate queries.
+1 to 50 (default 20). The shared service caps the limit before the engine expands its candidate queries.
 
 ## Section browsing
 
@@ -29,8 +26,7 @@ below the cap; a list that reaches 200 items answers `total_exact: false`, since
 the row may hold more. Some engines produce fewer items than the cap
 (recommendation rows stop at 60). On Home, row-backed lists drop watched items when the profile
 hides them, as the row does. Each page request rebuilds the list, so a row
-whose source moves (trending over a sliding window) can shift between pages. The
-frozen `/api/v1` catalog keeps answering row-backed sections with no items.
+whose source moves (trending over a sliding window) can shift between pages.
 
 A Home or library row is the first page of its section: clients show a few cards
 in the row and open the full list here. To download only the cards a row shows,
@@ -49,6 +45,65 @@ row is drawn again. A client that shows a capped row reporting `has_more` and
 wants the rest of it in place reads the row again at its own limit
 (`getHomeSectionItems` without `item_limit`) and keeps the cards it already shows.
 
+## Section titles
+
+A `Section` and a `SectionLayoutEntry` (Home and library pages), each row of
+`getProfileSectionSettings`, each `AdminSection` (`listAdminSections`,
+`getAdminSection`, and the responses that answer one), and each `RecommendationRow`
+(`getDiscover`, `getForYouMain`, `listForYouRows`, `getRecommendationSection`) carry
+`title_key` and `title_args` while their `title` is the server's own text: a built-in row name such as
+`home.section.continueWatching`, a generated library row (`home.section.recentlyAddedIn` with `{"library": "Movies"}`),
+the synthetic Next Up row, a Because You Watched heading that names its title
+(`home.section.becauseYouWatchedTitle` with `title`), the shared row a For You or
+taste-match section shows a new profile (`home.section.popularOnServer`,
+`home.section.topGenre` with `genre`), and every recommendation row title the server words
+(`home.section.forYou`, `home.section.becauseYouEnjoy` with `genres`, the cluster's
+comma-separated genre names, `home.section.pickedFromYourHistory`,
+`home.section.profilesLikeYouEnjoyed`). A home row that still
+holds the older default "Trending on Server" carries `home.section.trendingOnServer`. A seasonal
+row's in-season title carries `home.section.seasonal.<theme>.<vibe>` while it is a built-in
+vibe's own title; a title an admin set for the theme or a custom holiday has none. The built-in
+rows of the Requests Discover page (`row_order` and the rows of `listDiscoverSections`,
+`getDiscoverSection` and `getDiscoverRow`, and each row of `getRequestDiscoverLayout`) carry
+`title_key` (`home.section.discoverTrendingMovies` and the like) while the row still holds its
+default title. The key names a message in the shared translation
+catalog, and `title_args` fills its placeholders by name. A client that has the key shows
+its translation; otherwise, and whenever the fields are absent, it shows `title`.
+`title_args` and `default_title_args` are left out when the message has no placeholders,
+so a client must not require them to use a key.
+
+The fields are absent when an administrator or the profile typed the title, and when the
+server replaced the stored title with one of an item or season (a seasonal row's custom title,
+an editorial subject). That replacement happens when the row's items are read: the
+`Section` from that read carries the title to show, while the layout entry and the profile's
+section settings keep the stored title and its key, so a client heads a loaded row with the
+fetched `Section`'s title fields. For a stored section, the server records the key with the
+row it writes, and an update that changes the row's title without changing its key clears it, so whether a row keeps
+its key never depends on comparing text. A library rename re-keys the generated rows that
+still carry their own key, with the new name in `title_args`; a generated row without a key
+is renamed only while its title still reads as the old library name. Upgrading keyed the existing rows whose title is
+exactly a built-in name, because stored rows don't record who wrote them, so a typed title
+identical to a built-in name shows that name's translation. For a recommendation row, the server derives the key from the row's type and wording when
+it builds the response, so a title in other wording, such as one an older build cached, has none. A profile
+title override equal to the administrator's title keeps the key. A profile settings row
+also carries `default_title_key` and `default_title_args` for its `default_title`, the
+administrator's title a renamed row can go back to, under the same rules. An
+`AdminSection` describes the stored row, so an editor still edits `title` itself.
+`getHomeCapabilities`
+reports `section_title_keys: true` on a server that sends them; it is informational, and a
+client acts on `title_key` whenever it is present. The Jellyfin surface
+does not carry them.
+
+Each preset `listSectionRecipes` answers also carries `display_name_key`,
+`description_short_key` and, for a preset with a `description_long`, `description_long_key`:
+the shared catalog messages (`home.recipe.<preset>.name`, `.description`, `.details`, or a
+`home.section.*` key when the name is also a row title) whose English is `display_name`,
+`description_short` and `description_long`. The text fields stay English in every answer, a
+client with the key shows its translation.
+
+How clients look up a `title_key` in the shared translation catalog is in
+[the client translation architecture](architecture/i18n.md).
+
 ## People search
 
 `GET /api/v2/catalog/people` (`listPeople`) accepts a name query in `q` and
@@ -59,7 +114,7 @@ matches "Lark Hackshaw" but not "Chad Thackston", and `luc` matches "Jean-Luc".
 A partial last word still matches, which keeps typeahead working. A name
 written without separators, as many Chinese, Japanese, and Korean names are,
 matches only from its start. Only the first eight distinct words count, and a
-repeated word counts once. `%` and `_` are literal. Case-insensitive exact name
+word repeated exactly, with the same case, counts once. `%` and `_` are literal. Case-insensitive exact name
 matches come first;
 other matches sort by name, with person ID breaking ties. Ranking happens before
 applying the limit.
@@ -83,8 +138,7 @@ must check this signal before offering people results, including unscoped
 searches. Web omits the People row on older servers that do not advertise support.
 
 Web search applies its selected media scope to both titles and people. People
-responses remain an `{items}` collection with string IDs. The v1 bridge retains
-its existing alphabetical, unscoped search.
+responses remain an `{items}` collection with string IDs.
 
 ## Person detail
 
@@ -97,11 +151,8 @@ apply the same visibility rule as a v2 people search without `media_scope`: the
 viewer must be able to see at least one of the person's credits. Otherwise both
 answer `404`, exactly as for an unknown ID, so these routes do not return the
 name, biography, or photo of someone who appears only in titles the viewer cannot
-see. The v1 bridge routes `GET /api/v1/people/{id}` and
-`POST /api/v1/people/{id}/refresh`, and the Jellyfin-compatible `GET /Items/{id}`
-for a person, follow the same rule. The v1 bridge search `GET /api/v1/people?q=`
-lists only people the viewer can see this way and keeps its alphabetical order
-without exact-name ranking. The admin person routes are not filtered.
+see. The Jellyfin-compatible `GET /Items/{id}` for a person follows the same
+rule. The admin person routes are not filtered.
 
 Clients that warm a cache speculatively, such as web prefetching the cast of an
 open item, pass `prefetch=true`. A prefetch returns the same person but does not
@@ -138,7 +189,9 @@ so the parameter can narrow a scope but never widen it; a scope left with no
 library answers no values. `library_ids` is refused with `source=section`.
 `getCatalogFilters` accepts it too.
 
-The answer carries two lists, each at most `limit` long.
+The answer carries two lists, each at most `limit` long. `limit` accepts up to
+100, but the server caps it at 50: a larger value returns at most 50 values in
+each list, and `has_more` and `values_has_more` are measured against 50.
 
 `matches` holds the values that start with `q`, ignoring case, in A to Z order,
 and is empty for an empty `q`. `has_more` is true when more values than `limit`
@@ -173,11 +226,6 @@ the same matching and order.
 when the server accepts `library_ids`, answers `values` and `values_has_more`,
 matches word starts in `values`, and returns common values for an empty `q`.
 
-`GET /api/v1/catalog/filters/search` is frozen and answers as it always has:
-names that start with `q`, read live from the database in `LOWER(name)` order
-under the database collation, with `%` and `_` in `q` acting as wildcards. It
-returns nothing for an empty `q`.
-
 ## Saved browse sort
 
 `PUT /api/v2/collections/sort-preference` (`setCollectionSortPreference`) saves the
@@ -200,7 +248,7 @@ A successful save returns `200` with the stored `CollectionSortPreference`.
 ignored for Watchlist and Favorites. Saved personal-list preferences accept
 non-personalized sort fields; `added_at` means the date the item was added to the
 list. Personalized sorts (`progress`, `date_viewed`, and `plays`) are rejected for
-both saved preferences and Favorites/Watchlist browse. History accepts
+saved Watchlist and Favorites preferences and for Favorites/Watchlist browse. History accepts
 `date_viewed` with an active profile, but rejects mutable `progress` and `plays`
 sorts. An empty `field` pins the profile to list source order.
 
@@ -278,9 +326,6 @@ member as unknown, and an account whose user store does not keep descriptions (t
 store) reports `false` and answers a non-empty `description` with `501 capability_unsupported`.
 `updateCollection` changes the description of an existing collection.
 
-The frozen `/api/v1/collections` create ignores a `description` member, in a JSON body and in
-the multipart `data` field alike; the collection is created with an empty description.
-
 ## Personal smart previews
 
 `previewCollection` (`POST /api/v2/collections/preview`) returns the first titles a smart query
@@ -290,8 +335,6 @@ does not show whether the server returns posters: check `preview_posters` in the
 `getCollectionCapabilities` document. The URL can be signed and expire, like other artwork URLs,
 so read a fresh preview rather than storing it.
 `previewAdminCollection` items carry the same field.
-
-The frozen `/api/v1/collections/preview` response is unchanged and carries no poster.
 
 ## Personal collection imports
 
@@ -350,9 +393,6 @@ sync or import returns shows what was stored. A scheduled sync runs on one node:
 `next_sync_at` past the minimum interval, which is when a failed sync retries; a successful sync
 replaces that with the schedule's next run unless the schedule was saved while it ran.
 
-The frozen `/api/v1/collections/{id}` update ignores a `sync_schedule` member, and `/api/v1`
-collection responses carry no `sync_cadence`.
-
 ## Collections that hold a title
 
 `listCollections` (`GET /api/v2/collections`) accepts an optional `contains_item`, a title's
@@ -365,25 +405,35 @@ every collection, even a collection that still stores it. Check `contains_item` 
 `getCollectionCapabilities` document before sending it: a server without that flag rejects the
 parameter as unknown.
 
-The frozen `/api/v1/collections` list ignores a `contains_item` parameter, and its collections
-carry no `contains`.
-
 ## Library-scoped version lists
 
 `library_id` on `getCatalogItem`, `listCatalogItemVersions`, `listCatalogItemEpisodes`,
 `listSeriesSeasons`, `getSeriesSeason`, and `listSeasonEpisodes` names the library the
 viewer opened the item from. It always validates that the item is a member of that
-library and picks the library's metadata language as the presentation fallback. It
-does not, by default, change which files come back: an item stored in several
-libraries lists every version the viewer may access, so a "Movies" and "Movies 4K"
-split still shows both files from either library.
+library and picks the library's metadata language as the presentation fallback. A
+season, and the season and episode lists, are members through their series. On these
+native reads an episode is a member when it or its series is in the library: the
+series' lists name every episode under any library that holds the series, so an
+episode with no file in that library still opens from it. Native v2
+`getWatchState` accepts the same series membership. The Jellyfin compatibility surface
+keeps the episode's own libraries. The check does not, by default, change which files come back: an item
+stored in several libraries lists every version the viewer may access, so a "Movies"
+and "Movies 4K" split still shows both files from either library.
 
 The administrator setting `catalog.scope_versions_to_library` (default `false`)
-makes those reads answer only the versions stored in the named library. A read
-without `library_id` is unaffected, and so is `getWatchDetail`, watch-together
-selection, and the Jellyfin compatibility surface: an item always plays from its
-full accessible version list. No client change is needed: the setting only
-changes what an existing `library_id` request returns.
+makes those reads answer only the versions stored in the named library, so an
+episode with no file there lists no versions. A read without `library_id` is
+unaffected, and so is `getWatchState`, watch-together selection, and the Jellyfin
+compatibility surface: an item always plays from its full accessible version list.
+No client change is needed: the setting only changes what an existing `library_id`
+request returns.
+
+The web app keeps the library on links from a series to its seasons and episodes,
+but not on Play links. An episode card whose list entry has no file keeps no library,
+so with the setting on, an episode the opened library has no file for opens with
+every version rather than nothing to play. An entry also has no file when the viewer
+may access none of the episode's files, or the episode has none; that episode opens
+without the library, and so without its metadata-language fallback.
 
 ## Device-scoped playback answers
 
@@ -403,6 +453,25 @@ one does not
 (see "Omission is a request" in `docs/architecture/playback-protocol-v3.md`).
 The plan's `selected_tracks` names the track that plays.
 
+## File paths and names
+
+`getCatalogItem`, `listCatalogItemVersions` and `getWatchState` say where a
+file lives and what it is called only to a viewer who may curate the item's
+metadata: an admin acting as administrator, or an account with the metadata
+curation permission. Everyone else gets every technical field of each version,
+but not its `file_path` or `file_name`, an external subtitle track's
+`file_name` or a `title` that is only that file name, or an item's
+`folder_paths`. The rule covers the versions nested in
+`playback_variants` too. When two such subtitles share a language, format and
+flags, the second gets the title `en 2` (then `en 3`, and so on), as the
+playback inventory labels it, so a saved choice still tells them apart. A
+choice the viewer saved earlier under a sidecar's file name comes back in
+`effective_subtitle_track_signature` with that sidecar's new label, or with no
+label when that sidecar is gone.
+
+Audiobook and ebook versions keep `file_name` for every viewer, and lose only
+`file_path`. Those beta features name and open files by it.
+
 ## Episode files
 
 Each episode in `listSeasonEpisodes` and `listCatalogItemEpisodes` lists its
@@ -414,8 +483,7 @@ is none, it answers the terminal reason `source_unreadable` (see
 [Playback API](playback-api.md#start)). The field is cleared once the file is
 replaced and a scan or playback attempt probes it successfully. The web client
 marks an episode only when every one of its files is unreadable, since any
-readable version still plays. `/api/v1` episode listings do not carry the
-field.
+readable version still plays.
 
 ## Episode ratings
 
@@ -424,8 +492,24 @@ Each episode in `listSeasonEpisodes` and `listCatalogItemEpisodes` carries
 page's `ratings` uses: a 0-100 `score`, the source's own `display`, and the
 source's `name`. They are built from the episode's stored rating columns by the
 same rules as a title page, so a stored 0 (unrated) or a value off the 0-10
-scale is left out, and an episode with no rating omits the field. `/api/v1`
-episode listings do not carry ratings.
+scale is left out, and an episode with no rating omits the field.
+
+## External IDs on cards
+
+Movie and series cards carry `imdb_id`, `tmdb_id`, and `tvdb_id`, the same IDs
+the item's detail document shows, in these listings:
+
+- catalog browse and search (`listCatalogItems`)
+- library and personal collection items
+- favorites and the watchlist
+- watch history
+
+Each member is omitted when the item has no ID from that provider, so a movie
+usually has no `tvdb_id`. Home and library section cards, and episode cards in
+any listing, leave all three out even when the item has them. A client that
+matches titles across servers can read the IDs from a page of cards instead of
+fetching each item's detail, but must fall back to the detail document for a
+card that omits them.
 
 ## Section quality badges
 
@@ -480,16 +564,7 @@ The server inserts that Next Up row (`system-next-up`, type `next_up`) after
 Continue Watching; it is the only one. The recipe gallery does not list
 `next_up`, and creating an admin row of that type, changing a row to it, or
 adding it to a profile's page fails validation. A profile can still save a
-`next_up` row it already has, such as one brought in by a bridge import.
-
-## Bridge note
-
-The alpha `/api/v1` surface exposes the same saved-sort and capability features at
-`/api/v1/collections/sort-preference`, `/api/v1/collections/capabilities`, and
-`/api/v1/catalog`, with numeric `collection_id` values instead of strings. Those
-paths are frozen: no feature work lands on them, and Silo 1.0 answers the whole
-`/api/v1` namespace with `410 Gone` and the `client_upgrade_required` problem code.
-Build against `/api/v2`.
+`next_up` row it already has, such as one brought in by a SQLite bridge import.
 
 ## Personal-list pagination
 
@@ -497,8 +572,7 @@ Build against `/api/v2`.
 `added_at`, then descending item ID. The cursor retains the database timestamp's full precision;
 clients must send it unchanged rather than construct it from visible timestamps. PostgreSQL orders
 by the stored timestamp column so the existing profile/time indexes can serve the page. Visible
-`added_at` fields remain UTC timestamps with millisecond precision. The frozen v1 list queries and their timestamp
-formatting are unchanged.
+`added_at` fields remain UTC timestamps with millisecond precision.
 
 ## Not interested
 
@@ -516,8 +590,70 @@ and ranks similar titles lower there, after a rebuild that starts within
 seconds; it leaves library browsing, search, item detail, playback, favorites
 and the watchlist alone. A change publishes `user_state.changed` with
 `change: "not_interested"` and a `not_interested` boolean, so the profile's other
-clients can update. The frozen v1 surface has no mark and does not show it. See
+clients can update. See
 [recommendations.md](architecture/recommendations.md#rows).
+
+## Allowed titles
+
+The household's primary profile can let a limited profile watch specific movies
+and series above its rating or advisory-age limit. Detect support with
+`GET /api/v2/capabilities/title-allowances`; it reports `unsupported` on a
+server whose user store is not PostgreSQL. Every operation below needs the
+acting profile to manage the household (the verified primary profile) and
+answers `403` otherwise.
+
+- `GET /api/v2/catalog/items/{id}/title-allowances` lists every other profile
+  on the account with its `state` for the movie or series: `within_limits`,
+  `allowed`, `allowed_by_collection`, `above_limit` (can be allowed), or
+  `no_library_access`.
+- `PUT` and `DELETE /api/v2/profiles/{id}/allowed-titles/{item_id}` add and
+  remove one allowance; both answer `204` and repeat safely. `PUT` answers `422`
+  for an episode or season (allow the series), for a profile with no limit
+  (`no_maturity_limits`), and for a title in a library the profile cannot see
+  (`no_library_access`). `GET /api/v2/profiles/{id}/allowed-titles` lists the
+  profile's own allowances as catalog cards, newest first, paged with `limit`
+  and `cursor`. Cards for titles the acting profile cannot see are left out, so
+  a page can hold fewer cards than its limit while `page.has_more` is true.
+- `PUT` and `DELETE /api/v2/profiles/{id}/allowed-collections/{collection_id}`
+  allow a personal collection as it changes: titles added to it later are
+  allowed too. Only a manual collection the acting primary profile created can
+  be allowed this way; any other answers `422` (`collection_not_live`).
+  `GET /api/v2/profiles/{id}/allowed-collections` lists them, with `live: false`
+  for a collection that no longer qualifies and so allows nothing.
+- `POST /api/v2/profiles/{id}/allowed-titles/copy-collection` with
+  `{"collection_id": ...}` allows the movies and series a personal collection
+  holds now, in libraries the profile can reach (for a smart collection, what its query matches for the acting
+  profile), as individual allowances, and answers how many were new. One copy
+  allows at most 10,000 titles; copying a stored collection again continues
+  with titles the profile is not yet allowed. A stored collection's copy
+  also reads at most 100,000 entries, so titles the acting profile cannot see
+  count toward that bound on every copy. Because a repeated copy continues,
+  the operation is not retryable: after an uncertain response, read the
+  allowed titles before copying again.
+
+A profile sees at most 10,000 of its allowed titles, from its own allowances
+and its live collections together. Past that, which ones it sees is
+unspecified and the rest stay hidden.
+
+An allowed title is visible and playable for the profile everywhere content is
+reached, Jellyfin clients included. A series allowance covers its seasons and
+episodes. Allowances never lift library restrictions, a custom scope policy's
+rating override, or a stricter `MaxOfficialRating` a Jellyfin client sends. See
+[title-allowances.md](architecture/title-allowances.md).
+
+## Episodes left on a series card
+
+On a series or season card the profile has not finished, v2 `user_state` adds
+`watched_count` (episodes the profile watched) and `unplayed_count` (available
+episodes it has not). Both are absent on a finished series or season, on movies
+and episodes, and when the user store has no episode rollup; the frozen v1 card
+never carries them. "Available" and "watched" follow `played`: an episode counts
+while it belongs to a library, and is watched when its visible progress or a
+visible completed history row says so. Clients draw the episodes-left mark in a
+card's top-right status corner from the pair (see
+[card-overlays.md](architecture/card-overlays.md)). `played` still comes from the
+completion query; the counts come from one batched rollup per kind for just the
+unfinished series and seasons on the page.
 
 ## Watchlist titles outside the library
 
@@ -618,6 +754,16 @@ year), a `title` or `show_title` value that is empty or not a string, or a
 `latest_episode_added` or `last_air_date` bound that is not a date (`2024-01-31`)
 or an RFC 3339 time.
 
+A Smart collection also needs at least one complete rule, since empty rule groups
+match every title. A rule is complete when it has a field, an operator and a value
+that is not missing, blank, or a range with an empty end (`QueryDefinition.HasCompleteRule`).
+`createAdminCollection`, `createCollection`, an `updateAdminCollection` or
+`updateCollection` that sends a Smart collection's `query_definition`, and an
+`updateAdminCollection` that switches a collection to Smart answer
+`422 validation_failed` at `body.query_definition.groups` when there is none. An update that leaves the rules alone still works on a Smart
+collection saved before this check, and backup
+restore doesn't apply it.
+
 | Operators | Fields | Value |
 | --- | --- | --- |
 | `contains`, `not_contains`, `is`, `is_not`, `begins_with`, `ends_with` | `title`, `show_title` | string, compared ignoring case; `%` and `_` match literally |
@@ -631,7 +777,7 @@ negative `show_title` rules. Combine `show_title`, `watched`, and `title` rules
 to select watched episodes of a show while excluding particular episode titles.
 `GET /api/v2/catalog/search/capabilities` advertises `show_title_rules: true`
 when the server accepts the field. Clients should offer it only in episode
-rule editors and only while that flag is true. `/api/v1` refuses `show_title`.
+rule editors and only while that flag is true.
 
 `not_in_last` keeps titles whose date falls before the span; a title without the
 date matches neither `in_last` nor `not_in_last`, and a title with no runtime
@@ -663,10 +809,7 @@ and a show's last watched date is its most recently finished episode.
 when the server accepts `title`, `decade`, `runtime`, the TMDB and Rotten
 Tomatoes ratings, `latest_episode_added`, `last_air_date`, the partial title
 operators, and `not_in_last`. Older servers answer those rules with `422`, so the
-web rule editor offers them only while the flag is true. `/api/v1` keeps its frozen
-rule vocabulary: its catalog requests (including `POST /api/v1/catalog/query`) and
-its section and collection saves and previews refuse those fields and
-`not_in_last` with the errors they gave before.
+web rule editor offers them only while the flag is true.
 
 ### Search continuation
 
@@ -698,11 +841,20 @@ servers ignore an unrecognized `type`, which searches every media type, and
 reject it as a people `media_scope`. A client that hides books must check the
 flag and send `video` when it is absent.
 
-`GET /api/v2/catalog/search/capabilities` reports the selected provider and, for
+`GET /api/v2/catalog/search/capabilities` reports the provider selected by the
+responding server's current ranking-availability checks and, for
 Meilisearch, `result_window_limit`, `session_ttl_seconds`, and
-`max_sessions_per_account`. Catalog query bodies default to 50 results per page. Search
-responses also expose the applicable window limit and fixed session expiry in
-`search_diagnostics`.
+`max_sessions_per_account`. While Meilisearch is configured but its index is
+unbuilt, unreachable, or on an incompatible schema, searches fall back to
+PostgreSQL and the read reports `provider: postgres` without the Meilisearch
+limits. These provider and limit fields are an explicit exception to the usual
+configuration-only capability contract: changes in availability affect the
+document's `revision` and `ETag`, and replicas can return different answers.
+This is a snapshot, not a dependency-health guarantee; a failed PostgreSQL
+index-state read can also select fallback even though searches cannot succeed.
+Clients use each search response's `search_diagnostics` for its actual provider,
+applicable window limit, and fixed session expiry. A later search can choose a
+different provider. Catalog query bodies default to 50 results per page.
 
 PostgreSQL search retains the complete relevance tuple or requested SQL sort
 rather than a numeric page. It selects the FTS or bounded fuzzy retrieval family
@@ -713,7 +865,9 @@ server whose PostgreSQL ranking differed. PostgreSQL search retains its
 three-second deadline inside the overall browse deadline.
 
 Meilisearch captures the configured ranked result window in one provider response,
-then stores its filtered, ordered candidate IDs in shared Redis for 15 minutes.
+then stores its filtered, ordered candidate IDs for 15 minutes. Redis shares
+sessions across replicas. Without Redis, sessions stay in process, so a cursor
+returns `invalid_cursor` after a restart or when another replica handles it.
 The configured window must be between 1 and 1,000 candidates; a larger runtime
 index setting returns `capability_unsupported` before serving a partial ranking.
 This is the provider's reachable window, not an exact global match count.
@@ -725,8 +879,9 @@ and access scope. Pages reauthorize each candidate and advance past deleted or
 inaccessible IDs. Explicit window seeks count visible rows within this bounded
 ranking. Metadata and access remain live; the retained IDs and their order are
 immutable. Fallback may select PostgreSQL before the first page, but a continuation
-never switches providers. Expiry or Redis eviction returns `invalid_cursor`;
-Redis failure returns `dependency_unavailable`. Restarting performs a new search.
+never switches providers. Expiry or eviction returns `invalid_cursor`; a
+configured Redis failure returns `dependency_unavailable`. Restarting performs a
+new search.
 
 ### Letter index
 
@@ -787,36 +942,25 @@ The letter index sorts the whole result to number it, so its cost grows with
 the result like an exact count; it has the same 10-second deadline as a window
 seek. It covers the query source only and takes no search text or
 `name_prefix`. `getCatalogSearchCapabilities` reports `letter_index: true` when
-the operation is available. With `group: "box_set"` it counts a box set browse
-(see Movie box sets) the way `queryCatalogItems` pages it.
+the operation is available.
 
 ## Movie box sets
 
-A movie or mixed library can browse the movies TMDB lists in one collection (a
-franchise such as Harry Potter) as one box set. An administrator turns it on
+A movie or mixed library can gather the movies TMDB lists in one collection (a
+franchise such as Harry Potter) into one box set. An administrator turns it on
 with the library's `box_sets_enabled`; `box_set_min_movies` (2 to 10, default
 2) is the fewest of a collection's movies the library must hold, and
 `box_sets_in_search` (default true) lists the library's box sets in search.
 `getCatalogSearchCapabilities` reports `box_sets: true` to viewers when the
 server supports them (`getLibraryCapabilities` reports the same to
-administrators), and `listUserLibraries` reports each viewer library's `box_sets_enabled`
-so a client knows which libraries to browse with `group=box_set`.
+administrators), and `listUserLibraries` reports each viewer library's
+`box_sets_enabled`.
 
-`listCatalogItems` and `queryCatalogItems` with `group=box_set`, on a
-`source=query` browse of one library with box sets on and no search text,
-return a box set card in place of the collection's movies once the viewer can
-see at least `box_set_min_movies` of them there. The card has `type:
-"box_set"`, `content_id: "box_set:<tmdb collection id>"`, the collection's
-title, overview, and artwork, and a `box_set` object with its `id`,
-`library_id`, `movie_count`, `played_count`, `first_year`, and `last_year`.
-The card stands at its first movie in the requested order and carries that
-movie's `sort_metrics`; totals, cursors, and `seek` count the grouped list.
-`name_prefix` matches that first movie, so a box set is listed under one
-letter, the one the letter index files it under.
-Any other request with `group=box_set` returns the ordinary list. Send the
-same `group` to `queryCatalogLetters` so the letter index counts the grouped
-list. A collection's artwork is cached like item artwork when the server
-caches metadata images; until then its URLs point at TMDB.
+Box sets appear in search, on their own page, and as a row on a movie's page.
+Library browse never groups them: `listCatalogItems`, `queryCatalogItems`, and
+`queryCatalogLetters` list each movie on its own. A collection's artwork is
+cached like item artwork when the server caches metadata images; until then
+its URLs point at TMDB.
 
 `GET /api/v2/catalog/box-sets/{id}?library_id=` (`getCatalogBoxSet`) answers a
 box set with its movies in that library that the viewer can see, in collection
@@ -885,7 +1029,7 @@ opens a series or season on its play target can request that season's episode
 list without fetching the episode first. The season comes from the same query
 that chose the target. The field is absent when there is no play target or the
 target is not an episode; a client that finds it absent fetches the episode as
-before. Cards do not carry it, and the frozen v1 detail does not expose it.
+before. Cards do not carry it.
 ## Episode spoiler protection
 
 Two profile settings in the settings contract let a viewer hide episode details
@@ -911,8 +1055,7 @@ that fallback series artwork remains visible. Select the provenance belonging to
 the URL actually displayed, including when falling back from a backdrop to a poster.
 
 `GET /api/v2/images/capabilities` advertises `episode_still_provenance: true`.
-Provenance does not depend on the viewer's spoiler preferences. The frozen v1
-response fields remain unchanged.
+Provenance does not depend on the viewer's spoiler preferences.
 
 ## Collection membership titles
 
@@ -923,7 +1066,28 @@ title while retaining `media_item_id` for mutations and ordering. Clients should
 fall back to the ID when the title is absent. Personal membership pages hydrate
 titles through the existing viewer access filter; admin pages require acting
 administrator access. Membership identity, ordering and cursor revision checks
-are unchanged. Frozen v1 membership responses do not expose this field.
+are unchanged.
+
+## Server smart collection libraries
+
+A server smart collection keeps two library lists. Its `library_ids` are where it shows: the
+library Collections tabs that list it, and the libraries through which a viewer can open it. Its
+`query_definition.library_ids` are where its titles come from, and an empty list means every
+library. The two are independent, so a collection can draw from every library and show only on the
+Movies tab. Every read of its titles (`/api/v2` collection items, home and library
+rows, the catalog `library_collection` source, Jellyfin BoxSet children and `item_count`) runs the
+rules over their own libraries and then applies the viewer's access: allowed libraries, hidden
+libraries and rating limits. A viewer who can reach none of the collection's own `library_ids` gets
+none of its titles from any of these reads, as its page refuses them. A row on one library's page
+still lists only that library's titles.
+`previewAdminCollection` previews the same rules with no viewer limits.
+
+Before this, reads narrowed the rules to the collection's `library_ids`, and rules naming no library
+took them. A migration wrote that effective list into each existing collection's rules, so none of
+them changed titles, and restoring a backup made before this change (restore set version 4 or older)
+does the same for the collections it creates. Rules naming only libraries outside the collection's
+own libraries matched nothing before; they now draw from the libraries they name, which is what the
+admin preview already showed.
 
 ## Admin template list
 
@@ -934,8 +1098,7 @@ created from and the same set the personal template list (`listCollectionTemplat
 their summaries from the bundle list below. A category left with no templates is dropped; the
 rest keep their order. The response schema is unchanged.
 
-The route requires acting administrator access. The frozen `/api/v1/admin/collections/templates`
-response is unchanged and still lists every built-in template.
+The route requires acting administrator access.
 
 ## Template bundle summaries
 
@@ -952,8 +1115,7 @@ Check `template_summaries` in the `getAdminCollectionCapabilities` document befo
 administrator sets its source; today that is the `tmdb_franchise_placeholder` template, which has
 no TMDB collection ID. Applying the bundle still creates that collection.
 
-The route requires acting administrator access. The frozen
-`/api/v1/admin/collections/template-bundles` response is unchanged and carries no `templates`.
+The route requires acting administrator access.
 
 ## Rows that show a server collection
 
@@ -975,8 +1137,37 @@ The rows list includes turned-off rows. Both routes read the administrator page 
 profile added to its own Home are not listed or counted. A collection that `row_count` reports as
 used cannot be deleted (`409`) until those rows stop showing it.
 
-Both routes require acting administrator access. The frozen `/api/v1/admin/collections` list is
-unchanged and carries no counts.
+Both routes require acting administrator access.
+
+## Calendar movie dates
+
+`GET /api/v2/calendar` lists each movie once, on its first home release: the
+earlier of its digital (streaming or purchase) and physical (disc) release
+dates, each the earliest in any country. A theatrical release never reaches a
+media server, so the calendar does not use `release_date` for movies, and a
+movie with no home release date yet is not listed. The event carries a
+`digital` or `physical` badge naming the release it is listed on; when both
+fall on the same day, it is `digital`. The frozen `/api/v1/calendar` lists
+movies on the same dates, because both read the same events, but never sends
+these two badges.
+
+The home release dates pick only the calendar day. The upcoming titles in the
+For You discover row follow the same day, and their `upcoming_event.badges`
+carry the same `digital` or `physical` badge on `/api/v2` (never on
+`/api/v1/recommendations/discover`). Item detail, sorting, filters and the year
+still use `release_date`, and no item response carries the home release dates.
+
+Metadata providers supply them as `digital_release_date` and
+`physical_release_date` (`YYYY-MM-DD`) in the `metadata` Struct of a movie's
+`GetMetadata` response. The host ignores the keys on other item types and drops
+a value that is not a calendar date. The TMDB plugin derives them from TMDB's
+type 4 (digital) and type 5 (physical) release dates. Every refresh, scheduled
+ones included, replaces a stored date with the one the provider sends now,
+because providers revise them. A date the provider stops sending is kept,
+except when Identify, or an NFO on a manual refresh, corrects the item's match:
+the new movie's dates replace the stored ones even when it has none. A bulk
+enrichment pass is not a refresh and only fills dates that are empty.
+Locking release dates on an item also locks them.
 
 ## Advisory age
 
@@ -1040,8 +1231,6 @@ book libraries, never carry an advisory age, so the limit never hides them.
   the first without the second. The profile operations reject unknown members,
   so do not send either field to a server that does not report it.
 
-Frozen v1 responses do not expose these fields.
-
 ## Ratings on title pages
 
 Every client shows a title's external ratings the same way: the v2 item detail
@@ -1081,7 +1270,7 @@ does the same, and its `rating_sources` lists only the sources clients show.
 The exception is a viewer who may curate the item's metadata (an admin, or an
 account with the metadata curation permission): their item detail, and the
 detail `updateAdminItemMetadata` returns, keep every stored value for the
-metadata editor. Frozen v1 responses are unchanged.
+metadata editor.
 
 Browse follows the choice too. A v2 catalog browse sorted by
 `rating_rt_critic` or `rating_rt_audience` while that source is hidden orders
@@ -1166,8 +1355,8 @@ level or inside the SDK's `metadata` envelope:
   show them. They are always percentages: `scale` and `percent` are ignored.
 - `name`: the plain-text mark clients show next to the score, at most 24
   characters.
-- `label`: optional; the source's full name in the administrator's list, at
-  most 60 characters. `name` stands in when it is absent.
+- `label`: optional; the source's full name in the administrator's list. `name`
+  stands in when it is absent or longer than 60 characters.
 - `scale`: the top of the source's own scale, above 0 and at most 100. The
   plugin still sends a 0-100 `score`; a `scale` of 10 shows 72 as `7.2`.
 - `percent`: optional; `true` shows the 0-100 score as a percentage, and the
@@ -1182,8 +1371,6 @@ own sources. `GET /api/v2/admin/rating-sources` lists every source an
 administrator can show, with the plugin that declared it;
 `GET /api/v2/admin/rating-sources/capabilities` reports
 `plugin_declared_sources: true` on a server that has that list.
-
-Frozen v1 responses do not expose this member.
 
 ## Local theme songs, V2
 
@@ -1291,7 +1478,7 @@ ordinary localized fields; these members describe it:
   and, on items, `tagline`. It is absent when no shown field was
   machine-translated, and it is never set for provider or manually entered
   text. Clients label exactly the fields it names; an AI `tagline` alone says
-  nothing about the overview. The frozen v1 JSON does not carry it.
+  nothing about the overview.
 - `pending_translation_language` on the item detail is this profile's
   metadata language when the item's description is not available in it yet.
   `POST /api/v2/catalog/items/{id}/translate-description` with that value as
