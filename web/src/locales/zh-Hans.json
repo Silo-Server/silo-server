@@ -21100,6 +21100,46 @@
       "value": "计数未加载"
     }
   ],
+  "web.admin.common.downloadAccess.conversionOff": [
+    {
+      "type": 0,
+      "value": "服务器未准备适合设备的副本，因此所有下载都是原始文件。请在"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "设置→下载"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "中开启。"
+    }
+  ],
+  "web.admin.common.downloadAccess.serverOff": [
+    {
+      "type": 0,
+      "value": "整个服务器已关闭下载，因此任何人都无法下载。请在"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "设置→下载"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "中开启。"
+    }
+  ],
   "web.admin.common.editorConflict.message": [
     {
       "type": 0,
@@ -52140,6 +52180,12 @@
       "value": "磁盘上限（%）"
     }
   ],
+  "web.admin.settings.downloads.enabled.description": [
+    {
+      "type": 0,
+      "value": "整个服务器的开关。开启时，由访问组和账户决定谁可以下载。关闭时，任何人都无法下载。"
+    }
+  ],
   "web.admin.settings.downloads.enabled.label": [
     {
       "type": 0,
@@ -73494,6 +73540,12 @@
     {
       "type": 0,
       "value": "不允许下载"
+    }
+  ],
+  "web.admin.users.detail.overview.access.downloadsServerOff": [
+    {
+      "type": 0,
+      "value": "整个服务器已关闭下载"
     }
   ],
   "web.admin.users.detail.overview.access.groupSource": [

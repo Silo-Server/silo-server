@@ -21048,6 +21048,46 @@
       "value": "件数は未読み込み"
     }
   ],
+  "web.admin.common.downloadAccess.conversionOff": [
+    {
+      "type": 0,
+      "value": "サーバーがデバイスに適したコピーを準備していないため、ダウンロードはすべて元のファイルになります。"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "設定 → ダウンロード"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "でオンにしてください。"
+    }
+  ],
+  "web.admin.common.downloadAccess.serverOff": [
+    {
+      "type": 0,
+      "value": "サーバー全体でダウンロードがオフになっているため、誰もダウンロードできません。"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "設定 → ダウンロード"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "でオンにしてください。"
+    }
+  ],
   "web.admin.common.editorConflict.message": [
     {
       "type": 0,
@@ -51784,6 +51824,12 @@
       "value": "ディスク使用率の上限（%）"
     }
   ],
+  "web.admin.settings.downloads.enabled.description": [
+    {
+      "type": 0,
+      "value": "サーバー全体のスイッチです。オンの場合、ダウンロードできるユーザーはアクセスグループとアカウントで決まります。オフの場合、誰もダウンロードできません。"
+    }
+  ],
   "web.admin.settings.downloads.enabled.label": [
     {
       "type": 0,
@@ -73002,6 +73048,12 @@
     {
       "type": 0,
       "value": "ダウンロード不可"
+    }
+  ],
+  "web.admin.users.detail.overview.access.downloadsServerOff": [
+    {
+      "type": 0,
+      "value": "サーバー全体でダウンロードがオフです"
     }
   ],
   "web.admin.users.detail.overview.access.groupSource": [

@@ -23089,6 +23089,46 @@
       "value": "Anzahl nicht geladen"
     }
   ],
+  "web.admin.common.downloadAccess.conversionOff": [
+    {
+      "type": 0,
+      "value": "Der Server erstellt keine gerätefreundlichen Kopien, daher ist jeder Download die Originaldatei. Schalte das unter "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Einstellungen → Downloads"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " ein."
+    }
+  ],
+  "web.admin.common.downloadAccess.serverOff": [
+    {
+      "type": 0,
+      "value": "Downloads sind für den gesamten Server ausgeschaltet, daher kann niemand etwas herunterladen. Schalte sie unter "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Einstellungen → Downloads"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " ein."
+    }
+  ],
   "web.admin.common.editorConflict.message": [
     {
       "type": 0,
@@ -57867,6 +57907,12 @@
       "value": "Datenträger-Obergrenze (%)"
     }
   ],
+  "web.admin.settings.downloads.enabled.description": [
+    {
+      "type": 0,
+      "value": "Der Schalter für den gesamten Server. Ein: Zugriffsgruppen und Konten legen fest, wer herunterladen darf. Aus: Niemand kann herunterladen."
+    }
+  ],
   "web.admin.settings.downloads.enabled.label": [
     {
       "type": 0,
@@ -80001,6 +80047,12 @@
     {
       "type": 0,
       "value": "Downloads nicht erlaubt"
+    }
+  ],
+  "web.admin.users.detail.overview.access.downloadsServerOff": [
+    {
+      "type": 0,
+      "value": "Downloads sind für den gesamten Server ausgeschaltet"
     }
   ],
   "web.admin.users.detail.overview.access.groupSource": [

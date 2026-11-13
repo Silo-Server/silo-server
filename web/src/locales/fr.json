@@ -25302,6 +25302,46 @@
       "value": "Nombre non chargé"
     }
   ],
+  "web.admin.common.downloadAccess.conversionOff": [
+    {
+      "type": 0,
+      "value": "Le serveur ne prépare pas de copies adaptées aux appareils ; chaque téléchargement est donc le fichier d’origine. Activez cette option dans "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Paramètres → Téléchargements"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.downloadAccess.serverOff": [
+    {
+      "type": 0,
+      "value": "Les téléchargements sont désactivés pour l’ensemble du serveur ; personne ne peut donc télécharger. Activez-les dans "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Paramètres → Téléchargements"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.common.editorConflict.message": [
     {
       "type": 0,
@@ -64381,6 +64421,12 @@
       "value": "Plafond du disque (%)"
     }
   ],
+  "web.admin.settings.downloads.enabled.description": [
+    {
+      "type": 0,
+      "value": "L’interrupteur pour l’ensemble du serveur. Activé, les groupes d’accès et les comptes déterminent qui peut télécharger. Désactivé, personne ne le peut."
+    }
+  ],
   "web.admin.settings.downloads.enabled.label": [
     {
       "type": 0,
@@ -87231,6 +87277,12 @@
     {
       "type": 0,
       "value": "Téléchargements non autorisés"
+    }
+  ],
+  "web.admin.users.detail.overview.access.downloadsServerOff": [
+    {
+      "type": 0,
+      "value": "Les téléchargements sont désactivés pour l’ensemble du serveur"
     }
   ],
   "web.admin.users.detail.overview.access.groupSource": [

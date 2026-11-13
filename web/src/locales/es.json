@@ -25366,6 +25366,46 @@
       "value": "Recuento no cargado"
     }
   ],
+  "web.admin.common.downloadAccess.conversionOff": [
+    {
+      "type": 0,
+      "value": "El servidor no está preparando copias adaptadas a los dispositivos, así que cada descarga es el archivo original. Actívalo en "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Configuración → Descargas"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.downloadAccess.serverOff": [
+    {
+      "type": 0,
+      "value": "Las descargas están desactivadas para todo el servidor, así que nadie puede descargar. Actívalas en "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Configuración → Descargas"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.common.editorConflict.message": [
     {
       "type": 0,
@@ -64581,6 +64621,12 @@
       "value": "Límite de disco (%)"
     }
   ],
+  "web.admin.settings.downloads.enabled.description": [
+    {
+      "type": 0,
+      "value": "El interruptor para todo el servidor. Si está activado, los grupos de acceso y las cuentas deciden quién puede descargar. Si está desactivado, nadie puede."
+    }
+  ],
   "web.admin.settings.downloads.enabled.label": [
     {
       "type": 0,
@@ -87483,6 +87529,12 @@
     {
       "type": 0,
       "value": "Descargas no permitidas"
+    }
+  ],
+  "web.admin.users.detail.overview.access.downloadsServerOff": [
+    {
+      "type": 0,
+      "value": "Las descargas están desactivadas para todo el servidor"
     }
   ],
   "web.admin.users.detail.overview.access.groupSource": [

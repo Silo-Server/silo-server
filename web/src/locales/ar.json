@@ -32105,6 +32105,46 @@
       "value": "لم يُحمَّل العدد"
     }
   ],
+  "web.admin.common.downloadAccess.conversionOff": [
+    {
+      "type": 0,
+      "value": "لا يُعدّ الخادم نسخًا ملائمة للأجهزة، لذا يكون كل تنزيل هو الملف الأصلي. فعّل ذلك في "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "الإعدادات ← التنزيلات"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.downloadAccess.serverOff": [
+    {
+      "type": 0,
+      "value": "التنزيلات معطّلة على الخادم بأكمله، لذا لا يمكن لأحد التنزيل. فعّلها في "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "الإعدادات ← التنزيلات"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.common.editorConflict.message": [
     {
       "type": 0,
@@ -82924,6 +82964,12 @@
       "value": "الحد الأعلى للقرص (%)"
     }
   ],
+  "web.admin.settings.downloads.enabled.description": [
+    {
+      "type": 0,
+      "value": "المفتاح الخاص بالخادم بأكمله. عند تفعيله، تحدد مجموعات الوصول والحسابات من يمكنه التنزيل. وعند تعطيله، لا يمكن لأحد التنزيل."
+    }
+  ],
   "web.admin.settings.downloads.enabled.label": [
     {
       "type": 0,
@@ -108042,6 +108088,12 @@
     {
       "type": 0,
       "value": "التنزيلات غير مسموح بها"
+    }
+  ],
+  "web.admin.users.detail.overview.access.downloadsServerOff": [
+    {
+      "type": 0,
+      "value": "التنزيلات معطّلة على الخادم بأكمله"
     }
   ],
   "web.admin.users.detail.overview.access.groupSource": [

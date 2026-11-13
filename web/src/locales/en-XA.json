@@ -25165,6 +25165,46 @@
       "value": "⟦Çöûñţ ñöţ ļöåđéđ~~~~~~~⟧"
     }
   ],
+  "web.admin.common.downloadAccess.conversionOff": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé šéŕṽéŕ îšñ'ţ þŕéþåŕîñĝ đéṽîçé-ƒŕîéñđļý çöþîéš, šö éṽéŕý đöŵñļöåđ îš ţĥé öŕîĝîñåļ ƒîļé. Ţûŕñ îţ öñ îñ "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Šéţţîñĝš → Đöŵñļöåđš"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ".~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.downloadAccess.serverOff": [
+    {
+      "type": 0,
+      "value": "⟦Đöŵñļöåđš åŕé ţûŕñéđ öƒƒ ƒöŕ ţĥé ŵĥöļé šéŕṽéŕ, šö ñöƀöđý çåñ đöŵñļöåđ. Ţûŕñ ţĥéɱ öñ îñ "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Šéţţîñĝš → Đöŵñļöåđš"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ".~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.common.editorConflict.message": [
     {
       "type": 0,
@@ -63379,6 +63419,12 @@
       "value": "⟦Đîšķ çéîļîñĝ (%)~~~~~~~⟧"
     }
   ],
+  "web.admin.settings.downloads.enabled.description": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé šŵîţçĥ ƒöŕ ţĥé ŵĥöļé šéŕṽéŕ. Öñ, åççéšš ĝŕöûþš åñđ åççöûñţš đéçîđé ŵĥö ɱåý đöŵñļöåđ. Öƒƒ, ñöƀöđý çåñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.settings.downloads.enabled.label": [
     {
       "type": 0,
@@ -86993,6 +87039,12 @@
     {
       "type": 0,
       "value": "⟦Đöŵñļöåđš ñöţ åļļöŵéđ~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.users.detail.overview.access.downloadsServerOff": [
+    {
+      "type": 0,
+      "value": "⟦Đöŵñļöåđš åŕé öƒƒ ƒöŕ ţĥé ŵĥöļé šéŕṽéŕ~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.users.detail.overview.access.groupSource": [

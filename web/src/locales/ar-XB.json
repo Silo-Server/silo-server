@@ -24421,6 +24421,46 @@
       "value": "\u200F\u202ECount not loaded\u202C"
     }
   ],
+  "web.admin.common.downloadAccess.conversionOff": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe server isn't preparing device-friendly copies, so every download is the original file. Turn it on in \u202C"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "\u202ESettings → Downloads\u202C"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "\u202E.\u202C"
+    }
+  ],
+  "web.admin.common.downloadAccess.serverOff": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDownloads are turned off for the whole server, so nobody can download. Turn them on in \u202C"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "\u202ESettings → Downloads\u202C"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "\u202E.\u202C"
+    }
+  ],
   "web.admin.common.editorConflict.message": [
     {
       "type": 0,
@@ -61331,6 +61371,12 @@
       "value": "\u200F\u202EDisk ceiling (%)\u202C"
     }
   ],
+  "web.admin.settings.downloads.enabled.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe switch for the whole server. On, access groups and accounts decide who may download. Off, nobody can.\u202C"
+    }
+  ],
   "web.admin.settings.downloads.enabled.label": [
     {
       "type": 0,
@@ -84153,6 +84199,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EDownloads not allowed\u202C"
+    }
+  ],
+  "web.admin.users.detail.overview.access.downloadsServerOff": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDownloads are off for the whole server\u202C"
     }
   ],
   "web.admin.users.detail.overview.access.groupSource": [

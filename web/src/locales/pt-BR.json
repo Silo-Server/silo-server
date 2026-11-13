@@ -25622,6 +25622,46 @@
       "value": "Contagem não carregada"
     }
   ],
+  "web.admin.common.downloadAccess.conversionOff": [
+    {
+      "type": 0,
+      "value": "O servidor não está preparando cópias compatíveis com dispositivos, então todo download é o arquivo original. Ative em "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Configurações → Downloads"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.downloadAccess.serverOff": [
+    {
+      "type": 0,
+      "value": "Os downloads estão desativados para todo o servidor, então ninguém pode baixar. Ative-os em "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Configurações → Downloads"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.common.editorConflict.message": [
     {
       "type": 0,
@@ -64665,6 +64705,12 @@
       "value": "Limite do disco (%)"
     }
   ],
+  "web.admin.settings.downloads.enabled.description": [
+    {
+      "type": 0,
+      "value": "A chave para todo o servidor. Ativado: os grupos de acesso e as contas decidem quem pode baixar. Desativado: ninguém pode."
+    }
+  ],
   "web.admin.settings.downloads.enabled.label": [
     {
       "type": 0,
@@ -87547,6 +87593,12 @@
     {
       "type": 0,
       "value": "Downloads não permitidos"
+    }
+  ],
+  "web.admin.users.detail.overview.access.downloadsServerOff": [
+    {
+      "type": 0,
+      "value": "Os downloads estão desativados para todo o servidor"
     }
   ],
   "web.admin.users.detail.overview.access.groupSource": [
