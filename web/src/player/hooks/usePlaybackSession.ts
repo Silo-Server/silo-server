@@ -1446,7 +1446,9 @@ export function usePlaybackSession(
         if (isFailureRecovery) {
           attemptedPlanKeysRef.current = attemptedPlanKeys;
           attemptCountRef.current = Math.min(attemptCount + 1, MAX_ATTEMPT_COUNT_V3 + 1);
-        } else {
+        } else if (!reconnect) {
+          // A reconnect changes nothing the viewer asked for, so the routes
+          // that already failed in this attempt stay excluded.
           attemptedPlanKeysRef.current = [];
           attemptCountRef.current = 1;
         }
@@ -1755,11 +1757,14 @@ export function usePlaybackSession(
   // the route and could push a direct-play viewer onto a transcode. Each
   // attempt first asks for the current route again with a `track_change` that
   // changes nothing (the server keeps the route eligible and answers with a
-  // fresh plan at the saved position). If the session did not survive — a
-  // server restart answers 404 — it starts a new session at the same position
-  // with the same tracks. Unreachable or overloaded answers back off; any
-  // adopted plan ends the cycle; the viewer leaving or another start cancels
-  // it.
+  // fresh plan at the saved position). A progressive remux reanchors instead:
+  // the no-op track_change replans from the top and can hand back a route that
+  // already failed in this attempt, while a reanchor reopens the remux at the
+  // saved position, as the remux range refusal promises. If the session did not
+  // survive — a server restart answers 404 — it starts a new session at the
+  // same position with the same tracks. Unreachable or overloaded answers back
+  // off; any adopted plan ends the cycle; the viewer leaving or another start
+  // cancels it.
 
   const scheduleReconnectAttempt = useCallback((delayMs: number) => {
     const reconnect = reconnectRef.current;
@@ -1836,11 +1841,11 @@ export function usePlaybackSession(
 
     if (planRef.current && sessionIdRef.current) {
       try {
-        const adopted = await issueReplanRef.current(
-          { operation: "track_change", positionSeconds },
-          false,
-          true,
-        );
+        const operation =
+          planRef.current.delivery === "server_remux_progressive"
+            ? "seek_reanchor"
+            : "track_change";
+        const adopted = await issueReplanRef.current({ operation, positionSeconds }, false, true);
         // An adopted plan has already ended the cycle.
         if (adopted || !isCurrent()) return;
       } catch (error) {

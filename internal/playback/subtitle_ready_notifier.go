@@ -368,6 +368,10 @@ func (n *SubtitleReadyNotifier) resolveTrack(ctx context.Context, sessionID stri
 		return nil
 	}
 	items := ScopeSubtitleInventoryV3(sessionID, file, BuildSubtitleInventoryV3(file, additional), features)
+	// The notifier does not know whether the session's viewer may see file
+	// names, so no realtime track names a sidecar by its file. Clients match
+	// these events by sync key and track identity, not by label.
+	HideSidecarFileNamesV3(items, file)
 	for i := range items {
 		if match(items[i]) {
 			track := items[i]

@@ -51,9 +51,7 @@ export function useDiagnosticsStatus() {
         throw new StaleApiRequestContextError();
       const status = result.status;
       if (status !== "available" && status !== "disabled" && status !== "storage_unavailable")
-        throw new Error(
-          "Unrecognized diagnostics availability. Reload before changing upload settings.",
-        );
+        throw new Error(t("web.admin.errors.diagnosticsAvailabilityUnknown"));
       return { ...result, status };
     },
     staleTime: 30_000,

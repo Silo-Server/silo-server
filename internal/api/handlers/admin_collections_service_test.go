@@ -58,7 +58,7 @@ func TestAdminCollectionServiceRejectsUnknownVisibility(t *testing.T) {
 
 // TestCollectionNameErrorNamesTheField: a taken name or slug is a field
 // error, which v2 answers as 422 validation_failed at body.title or
-// body.slug and v1 as 400, never a 500.
+// body.slug, never a 500.
 func TestCollectionNameErrorNamesTheField(t *testing.T) {
 	slugConflict := &pgconn.PgError{Code: "23505", ConstraintName: "library_collections_library_slug_unique"}
 	for _, tc := range []struct {
@@ -224,7 +224,7 @@ func TestDeleteAdminCollectionArtworkClearsReferenceWhenVariantDeleteFailsDB(t *
 
 // A /api/v2 smart collection needs a complete rule: one with none would match
 // every title. The refusal names query_definition.groups so the editor can
-// point at the rules. Updates that leave the rules alone, and /api/v1, keep
+// point at the rules. Updates that leave the rules alone keep
 // working for collections saved before the check.
 func TestSmartCollectionNeedsACompleteRule(t *testing.T) {
 	const blank = `{"groups":[{"match":"all","rules":[{"field":"genre","op":"is","value":""}]}]}`
@@ -257,7 +257,6 @@ func TestSmartCollectionNeedsACompleteRule(t *testing.T) {
 		"switched to smart, no stored rule": {existingType: manual, existingRules: `{}`, req: AdminCollectionUpdate{CollectionType: &smart}, refused: true},
 		"switched to smart, stored rule":    {existingType: manual, existingRules: comedy, req: AdminCollectionUpdate{CollectionType: &smart}},
 		"manual sending empty rules":        {existingType: manual, req: AdminCollectionUpdate{QueryDefinition: json.RawMessage(`{"groups":[]}`)}},
-		"v1, rules removed":                 {existingType: smart, req: AdminCollectionUpdate{QueryDefinition: json.RawMessage(`{"groups":[]}`), V1Rules: true}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := adminSmartRuleCheck(tc.existingType, json.RawMessage(tc.existingRules), tc.req, tc.req.QueryDefinition)

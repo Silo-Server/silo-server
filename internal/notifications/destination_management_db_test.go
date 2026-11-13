@@ -171,59 +171,59 @@ func TestEmailPrefsStayOnTheAccountDB(t *testing.T) {
 		}
 	}
 
-	_, hash, err := newEmailToken()
-	if err != nil {
+	queue := func(user int, address string) (EmailVerificationReceipt, error) {
+		return repo.QueueVerification(ctx, EmailVerificationIntent{
+			ID: uuid.NewString(), UserID: user, ProfileID: sharedID, Address: address,
+			ProfileName: "Synthetic profile", LinkBase: "https://example.test",
+		}, testPushCipher(t))
+	}
+	// verify takes an address from the queue to its followed link.
+	verify := func(user int, address string) {
+		t.Helper()
+		receipt, err := queue(user, address)
+		if err != nil || !receipt.Current {
+			t.Fatalf("account %d queue = %+v, %v", user, receipt, err)
+		}
+		claim, err := repo.ClaimVerificationDispatch(ctx, time.Now())
+		if err != nil || claim == nil {
+			t.Fatalf("account %d claim = %v, %v", user, claim, err)
+		}
+		if !claim.PrefsFound || claim.PrefsUser != user || claim.PrefsHash != claim.TokenHash {
+			t.Fatalf("account %d claim read another row's pending state: %+v", user, claim)
+		}
+		if outcome, err := repo.ConsumeVerifyToken(ctx, claim.TokenHash); err != nil || outcome != EmailVerifyOK {
+			t.Fatalf("account %d verification = %v, %v", user, outcome, err)
+		}
+	}
+
+	if err := repo.SetMode(ctx, accountB, sharedID, EmailModePerEpisode); err != nil {
 		t.Fatal(err)
 	}
-	if err = repo.RequestPendingAddress(ctx, accountB, sharedID, "b@example.test", hash, time.Now().Add(time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	if outcome, err := repo.ConsumeVerifyToken(ctx, hash); err != nil || outcome != EmailVerifyOK {
-		t.Fatalf("account B verification = %v, %v", outcome, err)
-	}
-	if err = repo.SetMode(ctx, accountB, sharedID, EmailModePerEpisode); err != nil {
-		t.Fatal(err)
-	}
+	verify(accountB, "b@example.test")
 	if got := get(accountA); got.Mode != EmailModeOff || got.CustomEmail != "" {
 		t.Fatalf("account A sees account B's email settings: %+v", got)
 	}
 
-	if err = repo.SetMode(ctx, accountA, sharedID, EmailModeDailyDigest); err != nil {
+	if err := repo.SetMode(ctx, accountA, sharedID, EmailModeDailyDigest); err != nil {
 		t.Fatal(err)
 	}
 	checkB("account A's mode change")
 	// A verified address still serves one profile on the whole server.
-	if err = repo.RequestPendingAddress(ctx, accountA, sharedID, "B@example.test", "unused", time.Now().Add(time.Hour)); !errors.Is(err, ErrEmailAddressInUse) {
+	if _, err := queue(accountA, "B@example.test"); !errors.Is(err, ErrEmailAddressInUse) {
 		t.Fatalf("account A claiming account B's address = %v", err)
 	}
 
-	receipt, err := repo.QueueVerification(ctx, EmailVerificationIntent{
-		ID: uuid.NewString(), UserID: accountA, ProfileID: sharedID, Address: "a@example.test",
-		ProfileName: "Synthetic profile", LinkBase: "https://example.test",
-	}, testPushCipher(t))
-	if err != nil || !receipt.Current {
-		t.Fatalf("account A queue = %+v, %v", receipt, err)
-	}
-	claim, err := repo.ClaimVerificationDispatch(ctx, time.Now())
-	if err != nil || claim == nil {
-		t.Fatalf("claim = %v, %v", claim, err)
-	}
-	if !claim.PrefsFound || claim.PrefsUser != accountA || claim.PrefsHash != claim.TokenHash {
-		t.Fatalf("claim read another row's pending state: %+v", claim)
-	}
-	if outcome, err := repo.ConsumeVerifyToken(ctx, claim.TokenHash); err != nil || outcome != EmailVerifyOK {
-		t.Fatalf("account A verification = %v, %v", outcome, err)
-	}
+	verify(accountA, "a@example.test")
 	if got := get(accountA); got.Mode != EmailModeDailyDigest || got.CustomEmail != "a@example.test" {
 		t.Fatalf("account A's email settings = %+v", got)
 	}
 	checkB("account A's verification")
 
-	if err = repo.ClearCustomAddress(ctx, accountA, sharedID); err != nil {
+	if err := repo.ClearCustomAddress(ctx, accountA, sharedID); err != nil {
 		t.Fatal(err)
 	}
 	checkB("account A's address removal")
-	if err = repo.DeleteForProfile(ctx, accountA, sharedID); err != nil {
+	if err := repo.DeleteForProfile(ctx, accountA, sharedID); err != nil {
 		t.Fatal(err)
 	}
 	checkB("deleting account A's profile")

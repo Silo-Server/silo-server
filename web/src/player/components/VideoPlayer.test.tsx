@@ -4110,6 +4110,117 @@ describe("VideoPlayer source timeline", () => {
     expect(video.currentTime).toBe(300);
   });
 
+  describe("a seek made while a quality change is fetched", () => {
+    // The plan starts the new stream where the quality change was asked for.
+    const plan = fixturePlanV3({
+      delivery: "server_transcode_hls",
+      stream: {
+        url: "/playback/transcode/session-1/master.m3u8",
+        protocol: "hls",
+        headers: {},
+        header_refresh: "none",
+      },
+      timeline: {
+        source_start_seconds: 120,
+        player_start_seconds: 120,
+        stream_origin_seconds: 0,
+        timeline_offset_seconds: 0,
+        can_seek_anywhere: true,
+        seek_restoration: "player_position",
+      },
+    });
+
+    // Plays the first transport, asks for a quality change, and seeks back
+    // to 30 s while the replan is in flight. The old stream completes the seek.
+    async function seekDuringReplan() {
+      const rendered = renderPlayer({ plan });
+      const video = rendered.container.querySelector("video")!;
+      await waitFor(() =>
+        expect(video.src !== "" || hlsJS.constructed.mock.calls.length > 0).toBe(true),
+      );
+      fireEvent.loadedMetadata(video);
+      fireFrameTimeUpdate(video);
+      fireEvent.playing(video);
+      rendered.rerenderPlayer({ plan, replanning: true });
+      act(() => {
+        controls.current!.onSeek(30);
+      });
+      expect(video.currentTime).toBe(30);
+      fireEvent.seeked(video);
+      fireFrameTimeUpdate(video);
+      return { ...rendered, video };
+    }
+
+    function newStream(rerenderPlayer: (next: Partial<Parameters<typeof VideoPlayer>[0]>) => void) {
+      rerenderPlayer({
+        plan,
+        replanning: false,
+        planRevision: 2,
+        streamUrl: "/api/v1/stream/session-1?revision=2",
+      });
+    }
+
+    it("starts the hls.js stream at the seek", async () => {
+      hlsJS.supported = true;
+      const { rerenderPlayer } = await seekDuringReplan();
+      hlsJS.constructed.mockClear();
+
+      newStream(rerenderPlayer);
+
+      await waitFor(() => expect(hlsJS.constructed).toHaveBeenCalledOnce());
+      expect(hlsJS.constructed).toHaveBeenCalledWith(
+        expect.objectContaining({ startPosition: 30 }),
+      );
+    });
+
+    it("starts the native HLS stream at the seek", async () => {
+      const { video, rerenderPlayer } = await seekDuringReplan();
+
+      newStream(rerenderPlayer);
+      await waitFor(() => expect(video.src).toContain("revision=2"));
+      fireEvent.loadedMetadata(video);
+
+      expect(video.currentTime).toBe(30);
+    });
+
+    it("resumes another quality change at the seek before the new stream plays", async () => {
+      hlsJS.supported = true;
+      const onQualitySelect = vi.fn();
+      const { rerenderPlayer } = await seekDuringReplan();
+      rerenderPlayer({
+        plan,
+        replanning: false,
+        planRevision: 2,
+        streamUrl: "/api/v1/stream/session-1?revision=2",
+        onQualitySelect,
+      });
+      await waitFor(() => expect(hlsJS.constructed).toHaveBeenCalled());
+
+      const selectQuality = (
+        controls.current as unknown as { onQualitySelect: (id: string) => void }
+      ).onQualitySelect;
+      act(() => selectQuality("480p"));
+
+      expect(onQualitySelect).toHaveBeenCalledWith("480p", 30, undefined, expect.any(Function));
+    });
+
+    it("forgets the seek when the replan settles without a new stream", async () => {
+      hlsJS.supported = true;
+      const { rerenderPlayer } = await seekDuringReplan();
+      rerenderPlayer({ plan, replanning: false, replanError: "Replan refused." });
+      hlsJS.constructed.mockClear();
+
+      // A later quality change starts where it was asked for.
+      rerenderPlayer({ plan, replanning: true });
+      newStream(rerenderPlayer);
+
+      await waitFor(() => expect(hlsJS.constructed).toHaveBeenCalledOnce());
+      expect(hlsJS.constructed).toHaveBeenCalledWith(
+        expect.objectContaining({ startPosition: 120 }),
+      );
+    });
+  });
+
   // Chrome keeps a Matroska file's container start time on its clock, so a
   // file that starts 30 s in reports currentTime 30 at its first frame.
   // Subtitle cues, the resume seek, and the reported position all have to

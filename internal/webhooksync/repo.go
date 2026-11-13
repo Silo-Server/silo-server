@@ -60,45 +60,6 @@ func (r *Repository) CreateConnection(ctx context.Context, conn Connection) (*Co
 	return r.scanConnection(row)
 }
 
-func (r *Repository) ListConnections(ctx context.Context, userID int) ([]Connection, error) {
-	rows, err := r.pool.Query(ctx, `
-		SELECT c.id, c.user_id, c.provider, c.server_id, c.server_name, c.base_url, c.access_token, c.default_profile_id,
-		       c.webhook_secret, c.account_discovery_available,
-		       c.last_webhook_received_at, c.last_webhook_error_at, COALESCE(c.last_webhook_error_message, ''),
-		       c.created_at, c.updated_at,
-		       COUNT(m.id)::integer AS user_count
-		FROM webhook_sync_connections c
-		LEFT JOIN webhook_sync_profile_mappings m ON m.connection_id = c.id
-		WHERE c.user_id = $1
-		GROUP BY c.id
-		ORDER BY c.created_at DESC`, userID)
-	if err != nil {
-		return nil, fmt.Errorf("listing webhook sync connections: %w", err)
-	}
-	defer rows.Close()
-
-	var out []Connection
-	for rows.Next() {
-		var c Connection
-		if err := rows.Scan(
-			&c.ID, &c.UserID, &c.Provider, &c.ServerID, &c.ServerName, &c.BaseURL, &c.AccessToken, &c.DefaultProfileID,
-			&c.WebhookSecret, &c.AccountDiscoveryAvailable,
-			&c.LastWebhookReceivedAt, &c.LastWebhookErrorAt, &c.LastWebhookErrorMessage,
-			&c.CreatedAt, &c.UpdatedAt, &c.UserCount,
-		); err != nil {
-			return nil, fmt.Errorf("scanning webhook sync connection: %w", err)
-		}
-		if c.AccessToken, err = r.cipher.DecryptIfEncrypted(c.AccessToken, webhookTokenAAD(c.ID)); err != nil {
-			return nil, fmt.Errorf("decrypt webhook access token: %w", err)
-		}
-		out = append(out, c)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating webhook sync connections: %w", err)
-	}
-	return out, nil
-}
-
 func (r *Repository) GetConnection(ctx context.Context, userID int, id string) (*Connection, error) {
 	row := r.pool.QueryRow(ctx, `
 		SELECT id, user_id, provider, server_id, server_name, base_url, access_token, default_profile_id,

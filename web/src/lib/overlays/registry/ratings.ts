@@ -84,8 +84,10 @@ export const RATINGS_OVERLAYS: readonly OverlayDef[] = [
     defaultAccent: "#fa6400",
     iconCapable: false,
     ratingSource: "rt_audience",
-    getValue: (d) => ratingLabel("RT Audience", d.rating_rt_audience, 100),
-    sourceMark: "RT Audience",
+    getValue: (d) => ratingLabel(t("web.item.card.rtAudience"), d.rating_rt_audience, 100),
+    get sourceMark() {
+      return t("web.item.card.rtAudience");
+    },
     getScore: (d) => ratingScore(d.rating_rt_audience, 100),
   },
   {

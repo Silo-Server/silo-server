@@ -267,7 +267,8 @@ export interface ActionBarProps {
   selectedVersion?: FileVersion | null;
   /** The viewer chose selectedVersion rather than playing the default version. */
   versionPicked?: boolean;
-  onSelectVersion?: (version: FileVersion) => void;
+  onSelectVersion?: (version: FileVersion | null) => void;
+  onSelectEdition?: (key: string) => void;
   onDownload?: () => void;
   onSearchSubtitles?: () => void;
   /** Opens the season picker to request seasons the library is missing. */
@@ -338,6 +339,7 @@ export default function ActionBar({
   selectedVersion,
   versionPicked = false,
   onSelectVersion,
+  onSelectEdition,
   onDownload,
   onSearchSubtitles,
   onRequestSeasons,
@@ -926,16 +928,6 @@ export default function ActionBar({
       ),
     ],
     [
-      canCurateMetadata && onShowMediaInfo && (
-        <DetailOverflowMenuItem
-          key="media-info"
-          closeMenu={closeOverflowMenu}
-          onAction={onShowMediaInfo}
-        >
-          <Info className="size-4" />
-          {t("web.detail.mediaInfo.title")}
-        </DetailOverflowMenuItem>
-      ),
       isAdmin && contentId && (
         <DetailOverflowMenuItem
           key="play-history"
@@ -948,6 +940,18 @@ export default function ActionBar({
       ),
     ],
   ];
+  const infoItems = [
+    onShowMediaInfo && (
+      <DetailOverflowMenuItem
+        key="media-info"
+        closeMenu={closeOverflowMenu}
+        onAction={onShowMediaInfo}
+      >
+        <Info className="size-4" />
+        {t("web.detail.mediaInfo.title")}
+      </DetailOverflowMenuItem>
+    ),
+  ];
   const manageItems = manageGroups.flat().filter(Boolean);
   // A single management action sits at the end of the menu instead of behind Manage.
   const hasManagePanel = manageItems.length > 1;
@@ -955,6 +959,7 @@ export default function ActionBar({
     playbackItems,
     libraryItems,
     partyItems,
+    infoItems,
     hasManagePanel
       ? [
           <DetailOverflowMenuItem
@@ -1330,6 +1335,8 @@ export default function ActionBar({
               playbackVariants={playbackVariants}
               selectedVersion={selectedVersion}
               onSelectVersion={onSelectVersion}
+              onSelectEdition={onSelectEdition}
+              versionPicked={versionPicked}
             />
           )}
           {selectedVersion && (selectedVersion.audio_tracks?.length ?? 0) > 0 && (

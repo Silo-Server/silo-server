@@ -8,6 +8,8 @@ export interface SeriesPrimaryAction {
 
 export interface LeafPrimaryAction {
   label: string;
+  /** True when the action continues a live resume point rather than starting. */
+  resuming: boolean;
   progress?: number;
 }
 
@@ -41,7 +43,7 @@ export function resolveLeafPrimaryAction(
 
   const playLabel = defaultLabel ?? t("web.detail.actions.play");
   if (!userData || !("position_seconds" in userData)) {
-    return { label: playLabel };
+    return { label: playLabel, resuming: false };
   }
 
   const positionSeconds = userData.position_seconds ?? 0;
@@ -57,12 +59,14 @@ export function resolveLeafPrimaryAction(
   if (isInProgress) {
     return {
       label: t("web.detail.actions.resume"),
+      resuming: true,
       progress,
     };
   }
 
   return {
     label: playLabel,
+    resuming: false,
     progress,
   };
 }

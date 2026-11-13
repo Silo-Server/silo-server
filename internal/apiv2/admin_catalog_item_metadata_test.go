@@ -62,6 +62,10 @@ func TestAdminItemMetadataTransport(t *testing.T) {
 	if rec.Code != 200 || f.update.Status != nil {
 		t.Fatalf("null status: %d %s %#v", rec.Code, rec.Body, f.update)
 	}
+	rec = do(t, h, "POST", path+"/refresh-metadata", `{"mode":"reset"}`, bearer(memberToken))
+	if rec.Code != 202 || f.mode != adminjob.ItemRefreshModeReset {
+		t.Fatalf("reset: %d %s %#v", rec.Code, rec.Body, f)
+	}
 	before := f.calls
 	rec = do(t, h, "POST", path+"/refresh-metadata", `{"mode":"wrong"}`, bearer(memberToken))
 	if rec.Code != 422 || f.calls != before {
