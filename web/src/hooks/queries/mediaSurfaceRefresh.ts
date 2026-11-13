@@ -58,6 +58,12 @@ interface InvalidateMediaSurfaceOptions {
   // episode count) changes with them.
   refreshItemKeyedLists?: boolean;
   listOwnerIds?: ReadonlySet<string>;
+  /**
+   * Refresh catalog lists now, even while a list page is on its first read,
+   * for a change the viewer must not keep seeing, such as losing access to a
+   * library. See holdCatalogListsForFirstReads.
+   */
+  skipFirstReadHold?: boolean;
 }
 
 const MEDIA_SURFACE_REFRESH_DELAY_MS = 600;
@@ -485,7 +491,8 @@ export async function invalidateMediaSurfaceQueries(
   const matches = (query: Query) =>
     shouldInvalidateMediaSurfaceQuery(query.queryKey, scoped, relatedIds);
   const runningLetterIndexes = refetchLetterIndexesWhenDone(queryClient, matches);
-  const holdsCatalogLists = holdCatalogListsForFirstReads(queryClient, matches);
+  const holdsCatalogLists =
+    !options.skipFirstReadHold && holdCatalogListsForFirstReads(queryClient, matches);
   await queryClient.invalidateQueries({
     predicate: (query) =>
       matches(query) &&
