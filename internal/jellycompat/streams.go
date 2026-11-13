@@ -3109,8 +3109,10 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 				// A stop, an expiry or an administrator's end that ran while this
 				// rebuild was starting found no transcode to close. With the native
 				// session gone, nothing else would close the one just registered.
-				if _, err := h.sessionMgr.GetSession(upstreamSessionID); errors.Is(err, playback.ErrSessionNotFound) {
-					h.tm.CloseTranscodeSessionIf(upstreamSessionID, reconstructed, "")
+				if h.tm.CloseTranscodeSessionIfSessionGone(upstreamSessionID, reconstructed, func() bool {
+					_, err := h.sessionMgr.GetSession(upstreamSessionID)
+					return !errors.Is(err, playback.ErrSessionNotFound)
+				}) {
 					return nil, errCompatUpstreamSessionGone
 				}
 				h.recordTranscodeStreamDetails(ctx, upstreamSessionID, reconstructed.Opts())

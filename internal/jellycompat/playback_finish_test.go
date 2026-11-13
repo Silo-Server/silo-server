@@ -168,18 +168,36 @@ func TestAdminEndRetiresJellyfinPlay(t *testing.T) {
 	}
 }
 
-// TestPlaylistRebuildClosesTranscodeOfEndedSession covers issue #4120. A
-// playlist request rebuilds a play's lost transcode. When the native session
-// goes away after the request found it and before the rebuild registers its
-// transcode, whatever removed the session found no transcode to close. The
-// rebuild has to close the one it registered, or FFmpeg keeps encoding with
-// no session left to expire it. The play itself stays resumable.
-func TestPlaylistRebuildClosesTranscodeOfEndedSession(t *testing.T) {
+// sessionMissHook runs onMiss the first time a session lookup finds nothing.
+type sessionMissHook struct {
+	*playback.SessionManager
+	onMiss func()
+}
+
+func (m *sessionMissHook) GetSession(sessionID string) (*playback.Session, error) {
+	session, err := m.SessionManager.GetSession(sessionID)
+	if err != nil && m.onMiss != nil {
+		onMiss := m.onMiss
+		m.onMiss = nil
+		onMiss()
+	}
+	return session, err
+}
+
+// newLostTranscodePlay builds a transcoded Jellyfin play, play-1 on upstream-1,
+// with a stored recipe and no running transcode, so a playlist request
+// rebuilds it. The native session is removed during the first rebuild: after
+// the request has found it and before FFmpeg starts, which is when the rebuild
+// reads its config. That is what an expiry leaves once its close has found no
+// transcode. afterRemoval, when set, runs right after. The returned function
+// sends a playlist request and returns its status.
+func newLostTranscodePlay(t *testing.T, afterRemoval func()) (*PlaybackHandler, *sessionMissHook, *PlaybackSessionStore, func() int) {
+	t.Helper()
 	const upstreamID = "upstream-1"
 	// A title this short gets a generated playlist, so the request does not
 	// wait on the stand-in FFmpeg, which writes none.
 	source := PlaybackMediaSource{ID: "source-42", FileID: 42, Version: catalog.FileVersion{FileID: 42, Duration: 3600}}
-	sessions := playback.NewSessionManager(0, 0)
+	sessions := &sessionMissHook{SessionManager: playback.NewSessionManager(0, 0)}
 	sessions.RegisterReconstructed(&playback.Session{
 		ID: upstreamID, UserID: 1, ProfileID: "profile-1", MediaFileID: 42,
 		PlayMethod: playback.PlayTranscode, BasePlayMethod: playback.PlayTranscode, IsJellyfinCompat: true,
@@ -199,16 +217,16 @@ func TestPlaylistRebuildClosesTranscodeOfEndedSession(t *testing.T) {
 	tm := handler.tm
 	t.Cleanup(func() { tm.CloseTranscodeSession(upstreamID, "") })
 
-	// The rebuild reads its config after the request has found the native
-	// session and before it starts FFmpeg, so the session goes away in between,
-	// as it does when it expires and the expiry's close finds no transcode.
 	config := tm.Config
-	sessionRemoved := false
+	removed := false
 	tm.Config = func() playback.TranscodeRuntimeConfig {
-		if !sessionRemoved {
-			sessionRemoved = true
+		if !removed {
+			removed = true
 			if err := sessions.StopSession(upstreamID); err != nil {
 				t.Error(err)
+			}
+			if afterRemoval != nil {
+				afterRemoval()
 			}
 		}
 		return config()
@@ -224,24 +242,55 @@ func TestPlaylistRebuildClosesTranscodeOfEndedSession(t *testing.T) {
 		handler.HandleHLSManifest(rec, req.WithContext(ctx))
 		return rec.Code
 	}
+	return handler, sessions, store, requestPlaylist
+}
+
+// TestPlaylistRebuildClosesTranscodeOfEndedSession covers issue #4120. When a
+// play's native session goes away while a playlist request rebuilds its
+// transcode, whatever removed the session found no transcode to close. The
+// rebuild has to close the one it registered, or FFmpeg keeps encoding with
+// no session left to expire it. The play itself stays resumable.
+func TestPlaylistRebuildClosesTranscodeOfEndedSession(t *testing.T) {
+	handler, sessions, store, requestPlaylist := newLostTranscodePlay(t, nil)
 
 	code := requestPlaylist()
-	if !sessionRemoved {
-		t.Fatalf("the playlist request rebuilt nothing: status %d", code)
-	}
-	if code != http.StatusNotFound || tm.GetTranscodeSession(upstreamID) != nil {
+	if code != http.StatusNotFound || handler.tm.GetTranscodeSession("upstream-1") != nil {
 		t.Errorf("playlist status = %d, rebuilt transcode still registered = %v; want 404 and no transcode left without a native session",
-			code, tm.GetTranscodeSession(upstreamID) != nil)
+			code, handler.tm.GetTranscodeSession("upstream-1") != nil)
 	}
 	if _, ok := store.Get("play-1"); !ok {
 		t.Fatal("the play is no longer routable, so the client cannot resume it")
 	}
-	if code := requestPlaylist(); code != http.StatusOK || tm.GetTranscodeSession(upstreamID) == nil {
+	if code := requestPlaylist(); code != http.StatusOK || handler.tm.GetTranscodeSession("upstream-1") == nil {
 		t.Errorf("the next playlist request = %d, transcode running = %v; want the play resumed",
-			code, tm.GetTranscodeSession(upstreamID) != nil)
+			code, handler.tm.GetTranscodeSession("upstream-1") != nil)
 	}
-	if _, err := sessions.GetSession(upstreamID); err != nil {
+	if _, err := sessions.GetSession("upstream-1"); err != nil {
 		t.Errorf("the resumed play has no native session to expire its transcode: %v", err)
+	}
+}
+
+// TestPlaylistRebuildKeepsTranscodeAResumedPlayAdopted: a second playlist
+// request can register the native session again and adopt the rebuilt
+// transcode just after the rebuild found the session gone. The rebuild must
+// not then close the transcode under the resumed play.
+func TestPlaylistRebuildKeepsTranscodeAResumedPlayAdopted(t *testing.T) {
+	var sessions *sessionMissHook
+	var requestPlaylist func() int
+	resumed := 0
+	handler, sessions, _, requestPlaylist := newLostTranscodePlay(t, func() {
+		// The next lookup to miss is the rebuild's own, once its transcode is
+		// registered.
+		sessions.onMiss = func() { resumed = requestPlaylist() }
+	})
+
+	code := requestPlaylist()
+	if resumed != http.StatusOK {
+		t.Fatalf("the resuming request = %d, want 200 (0 means it never ran)", resumed)
+	}
+	if code != http.StatusOK || handler.tm.GetTranscodeSession("upstream-1") == nil {
+		t.Errorf("rebuilding request = %d, transcode running = %v; want 200 and the adopted transcode kept",
+			code, handler.tm.GetTranscodeSession("upstream-1") != nil)
 	}
 }
 

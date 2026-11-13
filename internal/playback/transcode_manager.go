@@ -1278,6 +1278,39 @@ func (m *TranscodeManager) CloseTranscodeSessionIf(sessionID string, expected *T
 	return true
 }
 
+// CloseTranscodeSessionIfSessionGone is for a start or rebuild that may have
+// registered expected after its playback session ended: whatever removed the
+// session closed the transcode first and found none. It reports whether
+// hasSession found no session for sessionID, and in that case tears down
+// expected if it is still the registered transcode.
+//
+// hasSession is read under the transcode map lock, which a request also takes
+// to adopt a registered transcode after it has registered the session again.
+// So either that request registered the session before this read, which then
+// finds it, or it reads the map after the removal and starts its own
+// transcode. A check followed by CloseTranscodeSessionIf would close a
+// transcode adopted in between. hasSession must not call into the manager.
+func (m *TranscodeManager) CloseTranscodeSessionIfSessionGone(sessionID string, expected *TranscodeSession, hasSession func() bool) bool {
+	// The usual case takes no lock: the session is there.
+	if hasSession() {
+		return false
+	}
+	m.transcodeMu.Lock()
+	if hasSession() {
+		m.transcodeMu.Unlock()
+		return false
+	}
+	registered := expected != nil && m.transcodes[sessionID] == expected
+	if registered {
+		delete(m.transcodes, sessionID)
+	}
+	m.transcodeMu.Unlock()
+	if registered {
+		_ = expected.Close()
+	}
+	return true
+}
+
 // remoteTranscodeControlClient sends stop requests to transcode nodes. Playback
 // paths call the stop synchronously, so a stop aimed at a dead host must give
 // up as quickly as the start that found it dead: it uses the same connect bound
