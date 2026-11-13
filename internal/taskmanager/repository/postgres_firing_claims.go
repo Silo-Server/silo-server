@@ -65,8 +65,10 @@ func (r *PgFiringClaims) ClaimFiring(ctx context.Context, key string, slot time.
 			return fmt.Errorf("locking task firing claim pruning: %w", err)
 		}
 		if pruning {
+			// now() is stable within the statement, so the expiry index
+			// bounds the scan; clock_timestamp() would scan every claim.
 			if _, err := tx.Exec(ctx, `
-				DELETE FROM task_firing_claims WHERE expires_at < clock_timestamp()`); err != nil {
+				DELETE FROM task_firing_claims WHERE expires_at < now()`); err != nil {
 				return fmt.Errorf("pruning task firing claims: %w", err)
 			}
 		}

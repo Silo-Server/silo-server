@@ -56,11 +56,11 @@ func (claimTestTriggers) GetOrCreateTriggers(context.Context, string, []TriggerC
 }
 func (claimTestTriggers) SetTriggers(context.Context, string, []TriggerConfig) error { return nil }
 
-type claimTestExecutions struct{}
+type claimTestExecutions struct{ latest *ExecutionResult }
 
 func (claimTestExecutions) Insert(context.Context, ExecutionResult) error { return nil }
-func (claimTestExecutions) GetLatest(context.Context, string) (*ExecutionResult, error) {
-	return nil, nil
+func (e claimTestExecutions) GetLatest(context.Context, string) (*ExecutionResult, error) {
+	return e.latest, nil
 }
 func (claimTestExecutions) List(context.Context, string, int) ([]ExecutionResult, error) {
 	return nil, nil
@@ -94,16 +94,20 @@ type claimingTask struct {
 }
 
 func (claimingTask) ClaimsFirings() bool { return true }
-func (t claimingTask) Execute(context.Context, ProgressReporter) error {
-	t.ran <- struct{}{}
+func (t claimingTask) Execute(ctx context.Context, _ ProgressReporter) error {
+	select {
+	case t.ran <- struct{}{}:
+	case <-ctx.Done():
+	}
 	return nil
 }
 
-// A firing another server claimed is skipped and the trigger rearmed; a won
-// claim runs.
+// A firing another server claimed is skipped, the trigger rearmed and the
+// winner's run read from history as the last execution; a won claim runs.
 func TestTriggerLoopRunsOnlyClaimedFirings(t *testing.T) {
 	claims := &recordingClaims{}
-	m := New(claimTestTriggers{}, claimTestExecutions{}, newTestTrigger, nil)
+	elsewhere := &ExecutionResult{TaskKey: "test", CompletedAt: time.Now()}
+	m := New(claimTestTriggers{}, claimTestExecutions{latest: elsewhere}, newTestTrigger, nil)
 	m.SetFiringClaims(claims)
 	task := claimingTask{ran: make(chan struct{}, 1)}
 	m.Register(task)
@@ -134,6 +138,9 @@ func TestTriggerLoopRunsOnlyClaimedFirings(t *testing.T) {
 			t.Fatal("lost claims did not rearm the trigger")
 		case <-time.After(5 * time.Millisecond):
 		}
+	}
+	if got := w.info().LastExecution; got != elsewhere {
+		t.Fatalf("last execution after lost claims = %v, want the run read from history", got)
 	}
 	claims.mu.Lock()
 	claims.win = true

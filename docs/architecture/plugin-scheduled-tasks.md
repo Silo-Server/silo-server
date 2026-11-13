@@ -96,8 +96,9 @@ Invariants:
   claims of one task; the row, which outlives the transaction, is what a
   later server finds. An advisory lock alone would let a server that fires
   after the winner's run finished run it again.
-- Daily and weekly slots name the scheduled instant, so a late timer, a start
-  spread or a server's clock a few seconds off still names the same firing.
+- Daily and weekly slots name the scheduled instant nearest the time the
+  timer was armed for, so a late timer, a start spread or a server's clock a
+  few seconds off still names the same firing.
   Servers must share a time zone, since times of day are read in the process
   time zone.
 - Interval timers on different servers are not aligned: each counts from the
@@ -105,10 +106,18 @@ Invariants:
   counts from the loss. The window covers timers that straddle a slot
   boundary, so successive runs of an interval task are at least about one
   interval apart, wherever they run. Runs of one task on different servers
-  can overlap only if a run lasts longer than its interval.
+  can overlap only if a run lasts longer than the window (the interval less
+  up to a minute).
 - A startup firing runs once per cluster start: a server that starts, or
-  registers the task, within 10 minutes of another's startup claim skips it.
-  A server restarted alone later runs it again.
+  registers the task, within 10 minutes of any claim of the task skips it.
+  That claim can come from any of the task's triggers and from any process,
+  including the previous process of a single-server install, so restarting a
+  one-server install within 10 minutes of the task's last claim skips its
+  startup run. A server restarted later runs it again.
+- A server that loses a claim reads the task's latest completed run from
+  history, so its last execution trails the cluster by at most one firing
+  (the winner's run may still be going) rather than staying at what it read
+  when it started.
 - A claim that cannot be recorded fails closed: the server skips the firing
   and logs a warning, and the next firing tries again. So does a firing with
   no slot every server would agree on, such as a malformed time of day, an

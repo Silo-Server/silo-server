@@ -203,6 +203,7 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 			// Another server runs this firing. Rearm from now, as after a
 			// skipped preflight: this server's last result is older than that
 			// run, so an interval would otherwise fire again at once.
+			m.reloadLastResult(ctx, w)
 			m.rearmTriggersFromNow(w)
 			continue
 		}

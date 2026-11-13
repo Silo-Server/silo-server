@@ -110,10 +110,20 @@ func (m *TaskManager) claimFiring(ctx context.Context, w *taskWorker, fired Trig
 		return true
 	}
 	var trigger TriggerConfig
+	firedAt := time.Now()
 	if fired != nil {
 		trigger = fired.Config()
+		// A daily or weekly timer that wakes many hours late (a paused
+		// process, a clock jump) still names the firing it was armed for,
+		// not the one nearest the late wake-up. A due time in the future
+		// means a run rearmed the trigger since it fired; keep the wake-up.
+		if trigger.Type == TriggerTypeDaily || trigger.Type == TriggerTypeWeekly {
+			if due := fired.NextRunTime(); !due.IsZero() && !due.After(firedAt) {
+				firedAt = due
+			}
+		}
 	}
-	slot, window, ok := FiringSlot(trigger, time.Now())
+	slot, window, ok := FiringSlot(trigger, firedAt)
 	if !ok {
 		// No trigger fired (a schedule change woke the loop), or its slot
 		// isn't one every server would compute: running here could repeat on
@@ -133,4 +143,20 @@ func (m *TaskManager) claimFiring(ctx context.Context, w *taskWorker, fired Trig
 			"task", w.task.Key(), "slot", slot)
 	}
 	return won
+}
+
+// reloadLastResult reads w's latest run from history after another server
+// took its firing. Only local runs update lastResult, so without this a
+// server that keeps losing claims shows the run it loaded at startup as the
+// task's last execution.
+func (m *TaskManager) reloadLastResult(ctx context.Context, w *taskWorker) {
+	latest, err := m.historyRepo.GetLatest(ctx, w.task.Key())
+	if err != nil || latest == nil {
+		return
+	}
+	w.mu.Lock()
+	if w.lastResult == nil || latest.CompletedAt.After(w.lastResult.CompletedAt) {
+		w.lastResult = latest
+	}
+	w.mu.Unlock()
 }
