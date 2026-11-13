@@ -82,8 +82,9 @@ func TestIsProbeRejectionSeparatesRefusedFilesFromProbeTrouble(t *testing.T) {
 		{"guess the container demuxer refuses", 25, 1, invalid, 25, "m4v", true, true},
 		{"guess the container demuxer reads", 5, 0, invalid, 5, "m4v", false, false},
 		{"guess a wider read is sure of", 25, 1, invalid, 26, "m4v", false, false},
-		// A wider read that finds another format does not confirm the guess.
-		{"guess a wider read contradicts", 25, 1, invalid, 26, "mp3", true, true},
+		// A wider read that finds another format neither confirms the guess
+		// nor shows damage.
+		{"guess a wider read contradicts", 25, 1, invalid, 26, "mp3", false, true},
 		// A read that storage fails says nothing about the file, whichever
 		// of the two reads it is.
 		{"guess a wider read cannot finish", 25, 1, invalid, -1, "m4v", false, true},
