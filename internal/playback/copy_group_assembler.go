@@ -90,6 +90,9 @@ type copyGroupRun struct {
 	// pruner never visits a number behind its cursor again in this
 	// generation, so a segment rebuilt there would stay for good.
 	pruned map[int]bool
+	// generation is the session's segmentGeneration the run was started
+	// for. A prune pass checked against another generation doesn't mark it.
+	generation uint64
 }
 
 // copyGroupFile is a group file and its first video presentation time on the
@@ -154,7 +157,7 @@ func removeInheritedSegments(dir string) {
 // prefix its groups use. Groups the previous run left are removed. Assembled
 // segments stay, unless the run emits another audio recipe (audioRecipeKey):
 // then they no longer match the stream and are removed too.
-func (a *copyGroupAssembler) startRun(startSegment int, audioKey string) string {
+func (a *copyGroupAssembler) startRun(startSegment int, audioKey string, generation uint64) string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.removeGroupsLocked()
@@ -175,6 +178,7 @@ func (a *copyGroupAssembler) startRun(startSegment int, audioKey string) string 
 		head:         startSegment - 1,
 		lastKey:      -1,
 		groups:       map[int]string{},
+		generation:   generation,
 	}
 	return a.run.prefix
 }
@@ -489,17 +493,18 @@ func (a *copyGroupAssembler) writeSegmentLocked(run *copyGroupRun, n int, paths 
 	return os.Rename(tmp, final)
 }
 
-// forget marks segment n as no longer assembled: the pruner removed it
-// behind the player. Progress doesn't count it toward the produced head. The
-// current run doesn't rebuild it, since the pruner wouldn't remove it again;
-// a run restarted at it does.
-func (a *copyGroupAssembler) forget(n int) {
+// forget marks segment n as no longer assembled: a prune pass of the
+// session's generation removed it behind the player. Progress doesn't count
+// it toward the produced head. The run of that generation doesn't rebuild
+// it, since the pruner wouldn't remove it again; a run restarted at it does,
+// even when the pass that removed it reports after the restart.
+func (a *copyGroupAssembler) forget(n int, generation uint64) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if n >= 0 && n < len(a.assembled) {
 		a.assembled[n] = false
 	}
-	if a.run != nil {
+	if a.run != nil && a.run.generation == generation {
 		if a.run.pruned == nil {
 			a.run.pruned = map[int]bool{}
 		}

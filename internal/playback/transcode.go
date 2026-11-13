@@ -519,7 +519,8 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	if copyPlan != nil {
 		log.Printf("playback: session %s serves a %d-segment keyframe playlist", opts.SessionID, len(copyPlan.durations))
 		copyGroups = newCopyGroupAssembler(opts.OutputDir, copyPlan)
-		opts.copyGroupPrefix = copyGroups.startRun(opts.StartSegmentNumber, audioRecipeKey(opts))
+		// The session starts at generation 0.
+		opts.copyGroupPrefix = copyGroups.startRun(opts.StartSegmentNumber, audioRecipeKey(opts), 0)
 	}
 
 	// The synchronous source guard above is bounded by the caller's startup
@@ -3753,6 +3754,7 @@ func (s *TranscodeSession) restart(
 	}
 	s.restartCount++
 	s.segmentGeneration++
+	generation := s.segmentGeneration
 	s.segmentPruneRunning = false
 	preStartRangePrunable := opts.SegmentRetentionSeconds > 0 && s.lastPruneFloor < startSegment
 	s.lastRequestedSegment = startSegment
@@ -3795,7 +3797,7 @@ func (s *TranscodeSession) restart(
 	if s.copyGroups != nil {
 		// Segments already assembled belong to the plan, not to a run, so
 		// they stay; only the previous run's groups go.
-		opts.copyGroupPrefix = s.copyGroups.startRun(startSegment, audioRecipeKey(opts))
+		opts.copyGroupPrefix = s.copyGroups.startRun(startSegment, audioRecipeKey(opts), generation)
 	} else if s.cleanStaleOutputForRestart(previousOpts, opts, startSegment) {
 		log.Printf("playback: cleaned stale transcode output at/after segment %d before restart (video %q -> %q)",
 			startSegment, previousOpts.TargetCodecVideo, opts.TargetCodecVideo)

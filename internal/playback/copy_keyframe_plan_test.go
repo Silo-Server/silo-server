@@ -280,7 +280,7 @@ func TestPlannedRestartQueuedBehindAnotherKeepsTheNewRun(t *testing.T) {
 		plan.durations[n], plan.keyframes[n], plan.firstKey[n] = 2, float64(2*n), n
 	}
 	groups := newCopyGroupAssembler(t.TempDir(), plan)
-	groups.startRun(20, "")
+	groups.startRun(20, "", 0)
 	groups.assembled[5] = true
 	seen, current := time.Unix(100, 0), time.Unix(200, 0)
 	s := &TranscodeSession{
@@ -438,7 +438,7 @@ func TestPlannedRecoveryTargetRejectsSegmentsOutsideThePlaylist(t *testing.T) {
 // starts its head again, so the throttler lets FFmpeg rebuild it.
 func TestPlannedProgressHeadAcrossPruning(t *testing.T) {
 	a := newCopyGroupAssembler(t.TempDir(), evenPlan())
-	a.startRun(0, "audio")
+	a.startRun(0, "audio", 0)
 	if _, head, _, _ := a.progress(); head != -1 {
 		t.Fatalf("new run: head %d, want -1", head)
 	}
@@ -448,13 +448,13 @@ func TestPlannedProgressHeadAcrossPruning(t *testing.T) {
 	if _, head, count, _ := a.progress(); head != 3 || count != 4 {
 		t.Fatalf("head %d of %d segments, want 3 of 4", head, count)
 	}
-	a.forget(0)
-	a.forget(1)
+	a.forget(0, 0)
+	a.forget(1, 0)
 	if _, head, count, _ := a.progress(); head != 3 || count != 2 {
 		t.Fatalf("after pruning segments 0 and 1: head %d of %d segments, want 3 of 2", head, count)
 	}
 
-	a.startRun(1, "audio")
+	a.startRun(1, "audio", 0)
 	if _, head, _, _ := a.progress(); head != 0 {
 		t.Fatalf("restart at removed segment 1: head %d, want 0", head)
 	}
@@ -470,9 +470,9 @@ func TestPlannedProgressHeadAcrossPruning(t *testing.T) {
 func TestPlannedRunDoesNotRebuildSegmentsPrunedDuringIt(t *testing.T) {
 	dir := t.TempDir()
 	a := newCopyGroupAssembler(dir, evenPlan())
-	a.startRun(0, "audio")
+	a.startRun(0, "audio", 0)
 	a.assembled[1] = true
-	a.forget(1)
+	a.forget(1, 0)
 
 	first, end := a.plan.keyframeRange(1)
 	for k := first; k < end; k++ {
@@ -492,16 +492,24 @@ func TestPlannedRunDoesNotRebuildSegmentsPrunedDuringIt(t *testing.T) {
 		t.Fatalf("groups %v, assembled %v; want the groups dropped and the segment gone", a.run.groups, a.hasSegment(1))
 	}
 
-	a.startRun(1, "audio")
+	a.startRun(1, "audio", 1)
 	if a.run.pruned[1] {
 		t.Fatal("a run restarted at the pruned segment won't rebuild it")
+	}
+
+	// A prune pass of the previous generation can report its removal after
+	// the restart started the new run. It must not stop the new run from
+	// rebuilding the segment it was restarted for.
+	a.forget(1, 0)
+	if a.run.pruned[1] || a.hasSegment(1) {
+		t.Fatalf("late prune of generation 0: pruned %v, assembled %v; want the new run free to rebuild segment 1", a.run.pruned[1], a.hasSegment(1))
 	}
 }
 
 func TestPlannedProgressDatesOutputForTheThrottler(t *testing.T) {
 	plan := evenPlan()
 	a := newCopyGroupAssembler(t.TempDir(), plan)
-	a.startRun(0, "audio")
+	a.startRun(0, "audio", 0)
 	produced := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	a.run.lastProducedAt = produced
 	s := &TranscodeSession{opts: plannedOpts(), copyPlan: plan, copyGroups: a, generationStartedAt: produced.Add(-time.Minute)}

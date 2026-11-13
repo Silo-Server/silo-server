@@ -20,7 +20,7 @@ func TestCopyGroupAssemblerMatchesNearbyKeyframes(t *testing.T) {
 	dir := t.TempDir()
 	plan := &copySegmentPlan{keyframes: []float64{.118125, .122125, .126125}, firstKey: []int{0}, durations: []float64{2}}
 	a := newCopyGroupAssembler(dir, plan)
-	a.startRun(0, "")
+	a.startRun(0, "", 0)
 	if err := os.WriteFile(filepath.Join(dir, "init.mp4"), testInit(), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestCopyGroupAssemblerFinishesBeforeProcessDone(t *testing.T) {
 	dir := t.TempDir()
 	plan := &copySegmentPlan{durations: []float64{2}, keyframes: []float64{0}, firstKey: []int{0}}
 	a := newCopyGroupAssembler(dir, plan)
-	prefix := a.startRun(0, "copy")
+	prefix := a.startRun(0, "copy", 0)
 	if err := os.WriteFile(filepath.Join(dir, "init.mp4"), testInit(), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestCopyGroupAssemblerStopsFFmpegWhenARunBreaks(t *testing.T) {
 	dir := t.TempDir()
 	plan := &copySegmentPlan{durations: []float64{2, 2}, keyframes: []float64{0, 2}, firstKey: []int{0, 1}}
 	a := newCopyGroupAssembler(dir, plan)
-	prefix := a.startRun(0, "copy")
+	prefix := a.startRun(0, "copy", 0)
 	if err := os.WriteFile(filepath.Join(dir, "init.mp4"), testInit(), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestCopyGroupAssemblerKeepsTheTimelineInThePlanRecord(t *testing.T) {
 			t.Fatal(err)
 		}
 		a := newCopyGroupAssembler(dir, plan)
-		a.startRun(2, "copy")
+		a.startRun(2, "copy", 0)
 		for n, at := range []float64{2.08, 4.08} {
 			group := box("moof", box("traf", fullBox("tfhd", 0, 0x20000, u32(1)), fullBox("tfdt", 1, 0, u64(uint64(at*12800)))))
 			if err := a.mapGroupLocked(a.run, filepath.Join(dir, fmt.Sprintf("g%d", n)), group); err != nil {
@@ -199,7 +199,7 @@ func TestCopyGroupAssemblerRejectsTheFileWhenGroupsMismatchThePlan(t *testing.T)
 			plan := &copySegmentPlan{durations: []float64{2, 2, 2, 2}, keyframes: []float64{0, 2, 4, 6}, firstKey: []int{0, 1, 2, 3},
 				file: keyframes.Version{Path: source, Size: info.Size(), ModTime: info.ModTime()}}
 			a := newCopyGroupAssembler(dir, plan)
-			prefix := a.startRun(0, "copy")
+			prefix := a.startRun(0, "copy", 0)
 			if err := os.WriteFile(filepath.Join(dir, "init.mp4"), testInit(), 0o600); err != nil {
 				t.Fatal(err)
 			}
