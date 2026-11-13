@@ -668,6 +668,7 @@ export function CollectionEditor<Raw extends WireCollection>({
   const collages = isServer || personalCapabilities.data?.poster_collages === true;
   const poster = useListedPoster(scope, view, {
     awaitCollage: created && collages && artworkSlots.length > 0,
+    countMayLag: isServer && smart,
     version: editor.etag,
   });
   // A new Synced list starts with its pick's poster.

@@ -306,14 +306,14 @@ describe("useListedPoster", () => {
     collectionFromV2(getCollectionOk as Parameters<typeof collectionFromV2>[0]),
   );
 
-  function watch(awaitCollage = true) {
+  function watch(awaitCollage = true, countMayLag = false) {
     client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
     return renderHook(
       ({ version }: { version: string }) =>
-        useListedPoster(PERSONAL_SCOPE, view, { awaitCollage, version }),
+        useListedPoster(PERSONAL_SCOPE, view, { awaitCollage, countMayLag, version }),
       { wrapper, initialProps: { version: "saved-1" } },
     );
   }
@@ -388,6 +388,16 @@ describe("useListedPoster", () => {
     const afterSave = listCalls();
     await act(() => vi.advanceTimersByTimeAsync(6_000));
     expect(listCalls()).toBeGreaterThan(afterSave);
+  });
+
+  it("waits for a collection whose count may not have caught up with its save", async () => {
+    v2Recorder.answer("GET /api/v2/collections", {
+      items: [{ ...getCollectionOk, item_count: 0, poster_url: "" }],
+    });
+    watch(true, true);
+    await waitFor(() => expect(listCalls()).toBe(1));
+    await act(() => vi.advanceTimersByTimeAsync(6_000));
+    expect(listCalls()).toBeGreaterThan(1);
   });
 
   it("doesn't wait for a collection without titles, or one that gets no collage", async () => {
