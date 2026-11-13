@@ -3703,7 +3703,7 @@ func (s *TranscodeSession) restart(
 		return flight.err
 	}
 	cancelValidation()
-	previousThrottleSeconds := s.stopThrottler()
+	previousThrottleSeconds := s.StopThrottler()
 
 	// Kill current process without removing output directory.
 	if cancelCurrent != nil {
@@ -3884,8 +3884,8 @@ func (s *TranscodeSession) restart(
 		hookCtx, cancelHook := context.WithTimeout(ctx, restartHookTimeout)
 		hook(hookCtx)
 		if errors.Is(hookCtx.Err(), context.DeadlineExceeded) {
-			// The hook gave up before it armed a throttler. Keep the threshold
-			// this session had rather than let the new process run unthrottled.
+			// A hook that gave up before it started a throttler leaves the new
+			// process unthrottled. Keep the threshold this session had instead.
 			s.mu.Lock()
 			unthrottled := s.throttler == nil
 			s.mu.Unlock()
@@ -4471,14 +4471,9 @@ func (s *TranscodeSession) StartThrottler(thresholdSeconds int) {
 	t.Start()
 }
 
-// StopThrottler stops the throttler if one is running.
-func (s *TranscodeSession) StopThrottler() {
-	s.stopThrottler()
-}
-
-// stopThrottler stops the throttler and returns its threshold in seconds, or
-// zero when none was running.
-func (s *TranscodeSession) stopThrottler() int {
+// StopThrottler stops the throttler if one is running and returns its
+// threshold in seconds, or zero when none was.
+func (s *TranscodeSession) StopThrottler() int {
 	s.mu.Lock()
 	t := s.throttler
 	s.throttler = nil
