@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/plugins/pluginsig"
 )
 
@@ -156,7 +157,10 @@ func (c *SignatureChecker) checkBinary(
 		return c.outcome(ctx, req, refusing, SignatureStateInvalid, packageError(cause, signatureIdentityMessage))
 	}
 	if req.BundleURLErr != nil {
-		cause := fmt.Errorf("bundle_url of %s %s doesn't resolve: %w", req.PluginID, req.Version, req.BundleURLErr)
+		// The resolution error quotes the catalog's URL, which could carry a
+		// credential in its query, so only its redacted text is logged.
+		cause := fmt.Errorf("bundle_url of %s %s doesn't resolve: %s", req.PluginID, req.Version,
+			logredact.SanitizeText(req.BundleURLErr.Error()))
 		return c.outcome(ctx, req, refusing, SignatureStateInvalid, packageError(cause, signatureInvalidMessage))
 	}
 	if strings.TrimSpace(req.BundleURL) == "" {
