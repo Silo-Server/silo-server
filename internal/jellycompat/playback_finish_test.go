@@ -268,6 +268,47 @@ func TestAdminEndClosesTranscodeStartedBeforeSessionStop(t *testing.T) {
 	})
 }
 
+// TestJellyfinStopClosesTranscodeStartedDuringIt covers issue #4112. A rebuild
+// or a fresh start holds the session lifecycle lock from before it starts
+// FFmpeg until it has registered the transcode. A stop that arrives in between
+// finds nothing to close, so it has to close what that start registers, or
+// FFmpeg keeps encoding for a play that has ended.
+func TestJellyfinStopClosesTranscodeStartedDuringIt(t *testing.T) {
+	handler, sourceID, _ := newFinishRecordingHandler(t)
+	playEnded := make(chan struct{})
+	handler.sessionMgr.(*playback.SessionManager).AddFinishHook(func(context.Context, *playback.Session) {
+		close(playEnded)
+	})
+	waitFor := func(done <-chan struct{}, what string) {
+		t.Helper()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("timed out waiting for %s", what)
+		}
+	}
+
+	startDone := handler.tm.LockSessionLifecycle("upstream-1")
+	stopReturned := make(chan struct{})
+	go func() {
+		defer close(stopReturned)
+		stop := `{"PlaySessionId":"play-1","MediaSourceId":"` + sourceID + `","PositionTicks":35000000000}`
+		req := httptest.NewRequest(http.MethodPost, "/Sessions/Playing/Stopped", strings.NewReader(stop))
+		req = req.WithContext(context.WithValue(req.Context(), compatSessionKey,
+			&Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}))
+		handler.HandleSessionPlayingStopped(httptest.NewRecorder(), req)
+	}()
+	// The stop ends the play after its first close, which found no transcode.
+	waitFor(playEnded, "the stop to end the play")
+	handler.tm.RegisterTranscodeSession("upstream-1", &playback.TranscodeSession{})
+	startDone()
+	waitFor(stopReturned, "the stop to return")
+
+	if handler.tm.GetTranscodeSession("upstream-1") != nil {
+		t.Fatal("the transcode a start registered during the stop is still registered")
+	}
+}
+
 // headerSignalingRecorder reports when the handler has written its status.
 type headerSignalingRecorder struct {
 	*httptest.ResponseRecorder

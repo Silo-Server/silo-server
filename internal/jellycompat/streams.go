@@ -2049,22 +2049,29 @@ func (h *PlaybackHandler) cleanupPlaySession(
 			_ = h.sessionMgr.StopSession(playSession.UpstreamSessionID)
 		}
 	}
+	// A rebuild or a fresh start holds the session lifecycle lock from before it
+	// starts FFmpeg until it has registered the transcode, so the close above
+	// finds nothing while one is in flight. Wait for it and close what it
+	// registered: the play is over, and nothing else would. The close above
+	// stays outside the lock because a restart holds the lock through its hook,
+	// which can wait on the FFmpeg context that only a close cancels.
+	unlock := h.tm.LockSessionLifecycle(playSession.UpstreamSessionID)
+	h.tm.CloseTranscodeSession(playSession.UpstreamSessionID, "")
 	// Deliberate stop: drop the node recipe so a buffered/retrying request after
 	// a node restart cannot reconstruct a fresh ffmpeg for this stopped session.
 	// Best effort and bounded — never fail teardown on a recipe-store hiccup.
-	// The session lifecycle lock orders the delete after a transcode move that
-	// is rewriting the record (commitCompatTranscodeMove).
+	// The lock also orders the delete after a transcode move that is rewriting
+	// the record (commitCompatTranscodeMove).
 	if h.RecipeNodeStore != nil {
-		unlock := h.tm.LockSessionLifecycle(playSession.UpstreamSessionID)
 		delCtx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), 2*time.Second)
 		err := h.RecipeNodeStore.Delete(delCtx, playSession.UpstreamSessionID)
 		cancel()
-		unlock()
 		if err != nil {
 			slog.WarnContext(ctx, "delete node transcode recipe failed", "component", "jellycompat", "error", err,
 				"playback_session_id", playSession.UpstreamSessionID)
 		}
 	}
+	unlock()
 	// Clients often drop the connection right after reporting a stop, so detach
 	// the sync from request cancellation to keep the admin view accurate.
 	h.syncSessionsNow(context.WithoutCancel(ctx), "compat_stop")
