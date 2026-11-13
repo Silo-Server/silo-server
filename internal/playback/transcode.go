@@ -1498,13 +1498,60 @@ func appendVideoToolboxRateControl(args []string, opts TranscodeOpts) []string {
 // appendVideoFilterArgs appends the -vf selection for an encoding (non-copy)
 // video stream: the subtitle burn-in chain (which includes scaling and hw
 // download/upload for QSV/VAAPI) or the hwaccel-appropriate standalone scale
-// filter. The ONE home of this decision — the HLS builder and the single-file
+// filter, led by cpuDeinterlaceFilter when the video is decoded on the CPU.
+// The ONE home of this decision — the HLS builder and the single-file
 // prepare builder must always produce identical filter chains (a fix landing
 // in only one of them silently ships wrong cached artifacts).
 func appendVideoFilterArgs(args []string, opts TranscodeOpts) []string {
 	if opts.ToneMapMode != "" {
 		return appendToneMapFilterArgs(args, opts)
 	}
+	start := len(args)
+	args = appendSDRVideoFilterArgs(args, opts)
+	// Only video decoded on the CPU is deinterlaced here. Frames a hardware
+	// decoder produced stay as they are, including in the burn-in graphs that
+	// download them for subtitles.
+	if opts.SoftwareVideoDecode || !isHardwareTranscodeBackend(opts.HWAccel) {
+		args = prependCPUDeinterlace(args, start)
+	}
+	return args
+}
+
+// cpuDeinterlaceFilter deinterlaces the frames a software decoder flags as
+// interlaced and passes every other frame through untouched, one output frame
+// per input frame, so progressive sources keep their pixels, frame rate and
+// timestamps. Without it both fields of an interlaced frame are encoded into
+// one picture that the output then labels progressive.
+const cpuDeinterlaceFilter = "bwdif=mode=send_frame:deint=interlaced"
+
+// The FFmpeg options that carry a video filter graph.
+const (
+	videoFilterOption        = "-vf"
+	videoFilterComplexOption = "-filter_complex"
+)
+
+// prependCPUDeinterlace makes cpuDeinterlaceFilter the first filter the
+// decoded video reaches in the graph appended at args[start:], or adds a graph
+// holding only that filter when none was appended.
+func prependCPUDeinterlace(args []string, start int) []string {
+	for i := start; i+1 < len(args); i++ {
+		switch args[i] {
+		case videoFilterOption:
+			args[i+1] = cpuDeinterlaceFilter + "," + args[i+1]
+			return args
+		case videoFilterComplexOption:
+			const video = "[0:v:0]"
+			args[i+1] = strings.Replace(args[i+1], video, video+cpuDeinterlaceFilter+"[vdeint];[vdeint]", 1)
+			return args
+		}
+	}
+	return append(args, videoFilterOption, cpuDeinterlaceFilter)
+}
+
+// appendSDRVideoFilterArgs appends the subtitle burn-in or scale graph of a
+// transcode that does no tone mapping, or nothing when the encoder takes the
+// decoded frames as they are.
+func appendSDRVideoFilterArgs(args []string, opts TranscodeOpts) []string {
 	switch {
 	case bitmapBurnInActive(opts):
 		return appendBitmapSubtitleBurnInArgs(args, opts)

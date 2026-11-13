@@ -2251,6 +2251,14 @@ webOS) drop to HDR10 for `dvh1`. There is no MPEG-TS or progressive form.
 `video_to_h264` only when `playback.allow_hevc_encoding` is on and the client's
 HLS delivery lists HEVC and can decode that output.
 
+`video_to_h264` and `video_to_hevc` deinterlace the frames an executor decodes
+on the CPU: FFmpeg's `bwdif` converts each frame the decoder flags as interlaced
+and passes the others through, one output frame per input frame. Frames from a
+hardware decoder, and every tone-mapped transcode, are encoded as decoded, so
+an interlaced source can still reach the client with both fields in each frame.
+The recipe versions did not change for this: an executor from before it serves
+the same plans and differs only in the pictures of interlaced sources.
+
 `audio_to_aac` recipe version 4 treats the selected source channel count as a
 byte-affecting input, as version 2 began doing, and passes every AAC encode,
 remuxes included, through `aresample=async=1` so it keeps a continuous sample
