@@ -3683,26 +3683,41 @@ func compatLanguageName(code string) string {
 // compatRegionalLanguageName names a tag with a script or region the way the
 // web app does, using CLDR: "Brazilian Portuguese", "Traditional Chinese",
 // "Portuguese (Angola)". Bare, undefined, private-use and malformed tags
-// return "".
+// return "", and so do tags with any other subtag: CLDR names drop variants
+// and extensions, so "ca-ES-valencia" and "ca-ES" would share a label.
 func compatRegionalLanguageName(code string) string {
 	canonical := lang.CanonicalTag(code)
 	if !strings.Contains(canonical, "-") || lang.PrimaryLanguage(canonical) == "" {
 		return ""
 	}
 	tag, err := language.Parse(canonical)
-	if err != nil {
+	// CanonicalTag keeps a three-letter second subtag as written, but Parse
+	// reads it as an extended language and names that one instead: "es-lat"
+	// would become "Latin" and "en-sdh" "Southern Kurdish".
+	if err != nil || tag.String() != canonical || len(tag.Variants()) > 0 || len(tag.Extensions()) > 0 {
 		return ""
 	}
 	base, _ := tag.Base()
 	script, scriptConfidence := tag.Script()
+	region, regionConfidence := tag.Region()
+	scriptName, regionName := "", ""
+	if scriptConfidence == language.Exact {
+		scriptName = display.English.Scripts().Name(script)
+	}
+	if regionConfidence == language.Exact {
+		regionName = display.English.Regions().Name(region)
+	}
+	// A subtag CLDR can't name would vanish from the label, so "ur-Aran-PK"
+	// would read the same as "ur-PK" and "sr-Latn-CS" the same as "sr-Latn".
+	if (scriptConfidence == language.Exact && scriptName == "") || (regionConfidence == language.Exact && regionName == "") {
+		return ""
+	}
 	if base.String() == "sr" && script.String() == "Latn" && scriptConfidence == language.Exact {
 		// CLDR names sr-Latn through its "sh" alias, "Serbo-Croatian",
 		// which hides both the language and the script.
-		qualifiers := []string{display.English.Scripts().Name(script)}
-		if region, confidence := tag.Region(); confidence == language.Exact {
-			if name := display.English.Regions().Name(region); name != "" {
-				qualifiers = append(qualifiers, name)
-			}
+		qualifiers := []string{scriptName}
+		if regionName != "" {
+			qualifiers = append(qualifiers, regionName)
 		}
 		return display.English.Languages().Name(base) + " (" + strings.Join(qualifiers, ", ") + ")"
 	}

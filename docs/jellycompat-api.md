@@ -520,7 +520,9 @@ entry. MPEG-TS remuxes keep the single variant. Audio and subtitle streams
 carry `LocalizedLanguage`, and audio streams carry `LocalizedOriginal`, in
 English. `LocalizedLanguage` and `DisplayTitle` name a tag with a region or
 script by its CLDR name, such as "Brazilian Portuguese" for `pt-BR` or
-"Portuguese (Angola)" for `pt-AO`; `Language` keeps the stored tag.
+"Portuguese (Angola)" for `pt-AO`; `Language` keeps the stored tag. A tag
+with any other subtag, or a script or region CLDR has no name for, keeps the
+title-cased tag ("Ca ES Valencia"), so distinct tags never share a label.
 
 HEVC Dolby Vision Profile 8 with a proven HDR10 base layer and no enhancement
 layer can use HLS fMP4 remux when a positive video-range condition names both

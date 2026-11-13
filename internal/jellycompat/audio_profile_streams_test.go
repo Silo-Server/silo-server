@@ -110,7 +110,12 @@ func TestBuildMediaStreamsNamesRegionalLanguages(t *testing.T) {
 		{"es-419", "Latin American Spanish", "Latin American Spanish (External, SRT)"},
 		{"pt-AO", "Portuguese (Angola)", "Portuguese (Angola) (External, SRT)"},
 		{"sr-Latn", "Serbian (Latin)", "Serbian (Latin) (External, SRT)"},
-		{"sr-Latn-CS", "Serbian (Latin)", "Serbian (Latin) (External, SRT)"},
+		{"sr-Latn-RS", "Serbian (Latin, Serbia)", "Serbian (Latin, Serbia) (External, SRT)"},
+		{"sr-Latn-CS", "Sr Latn CS", "Sr Latn CS (External, SRT)"},
+		{"ur-Aran-PK", "Ur Aran PK", "Ur Aran PK (External, SRT)"},
+		{"es-lat", "Es Lat", "Es Lat (External, SRT)"},
+		{"en-sdh", "En Sdh", "En Sdh (External, SRT)"},
+		{"ca-ES-valencia", "Ca ES Valencia", "Ca ES Valencia (External, SRT)"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.language, func(t *testing.T) {
