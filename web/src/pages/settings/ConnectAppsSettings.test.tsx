@@ -290,7 +290,7 @@ describe("ConnectAppsSettings", () => {
 
   // A directory account signs in to a Jellyfin app with its directory
   // credentials, which the server routes to the directory (#2871).
-  it("gives a directory account its directory username for Jellyfin apps", () => {
+  it("gives a directory account its directory username for Jellyfin apps", async () => {
     mocks.useCompatConnectInfo.mockReturnValue({
       data: makeConnectInfo(
         {},
@@ -313,6 +313,11 @@ describe("ConnectAppsSettings", () => {
     expect(findButton(container, "Kids")).toBeUndefined();
     expect(container.textContent).not.toContain("j.doe#Kids");
     expect(container.textContent).not.toContain("needs #PIN");
+
+    await click(findButton(container, "A Jellyfin app says my username or password is wrong"));
+    expect(container.textContent).toContain("j.doe");
+    expect(container.textContent).not.toContain("password#PIN");
+    expect(container.textContent).not.toContain("append #PIN");
   });
 
   it("flags a loopback compat address rather than offering it for copying", () => {

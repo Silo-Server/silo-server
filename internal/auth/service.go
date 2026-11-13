@@ -384,9 +384,20 @@ func (s *Service) PasswordSignInFor(ctx context.Context, userID int) (PasswordSi
 		// account by name, so without one (an OIDC account, say) there is
 		// no directory username known to sign in with.
 		for _, identity := range identities {
-			if identity.InstallationID == directory.Info.InstallationID {
-				return PasswordSignIn{Directory: true, DirectoryUsername: identity.Username}, nil
+			if identity.InstallationID != directory.Info.InstallationID {
+				continue
 			}
+			// The sign-in routes the typed name, which is the directory
+			// username: another account holding that name with a local
+			// password takes it.
+			route, err := s.routePasswordLogin(ctx, identity.Username)
+			if err != nil {
+				return PasswordSignIn{}, err
+			}
+			if route != directory.Info.ID {
+				return PasswordSignIn{}, nil
+			}
+			return PasswordSignIn{Directory: true, DirectoryUsername: identity.Username}, nil
 		}
 		return PasswordSignIn{}, nil
 	}

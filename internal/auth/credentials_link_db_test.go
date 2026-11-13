@@ -263,6 +263,14 @@ func TestPasswordSignInForDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	check(svc, oidcOnly, PasswordSignIn{})
+	// A local account named like the directory identity takes that name's
+	// sign-ins, so the directory credentials no longer reach the member.
+	namesake := env.localAccount(t, "alice", models.RoleUser)
+	check(svc, member, PasswordSignIn{})
+	if _, err := env.pool.Exec(ctx, `UPDATE users SET username = $1 WHERE id = $2`, env.name("alice-renamed"), namesake.ID); err != nil {
+		t.Fatal(err)
+	}
+	check(svc, member, PasswordSignIn{Directory: true, DirectoryUsername: alice.Username})
 
 	// A network provider refusing the person refuses the password too.
 	viewer := env.localAccount(t, "viewer", models.RoleUser)

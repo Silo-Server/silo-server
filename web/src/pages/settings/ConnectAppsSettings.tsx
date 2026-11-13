@@ -195,9 +195,12 @@ function ProfilePicker({
 function TroubleshootingPanel({
   accountUsername,
   compatURL,
+  directory,
 }: {
   accountUsername: string;
   compatURL: string | null;
+  // A directory sign-in never takes a PIN, so the PIN advice doesn't apply.
+  directory: boolean;
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
@@ -209,14 +212,18 @@ function TroubleshootingPanel({
         username: accountUsername,
       }),
     },
-    {
-      q: t("web.settings.connectApps.troubleshooting.pinQuestion"),
-      a: t("web.settings.connectApps.troubleshooting.pinAnswer"),
-    },
-    {
-      q: t("web.settings.connectApps.troubleshooting.hashPasswordQuestion"),
-      a: t("web.settings.connectApps.troubleshooting.hashPasswordAnswer"),
-    },
+    ...(directory
+      ? []
+      : [
+          {
+            q: t("web.settings.connectApps.troubleshooting.pinQuestion"),
+            a: t("web.settings.connectApps.troubleshooting.pinAnswer"),
+          },
+          {
+            q: t("web.settings.connectApps.troubleshooting.hashPasswordQuestion"),
+            a: t("web.settings.connectApps.troubleshooting.hashPasswordAnswer"),
+          },
+        ]),
     {
       q: t("web.settings.connectApps.troubleshooting.duplicateQuestion"),
       a: t("web.settings.connectApps.troubleshooting.duplicateAnswer"),
@@ -692,7 +699,11 @@ export default function ConnectAppsSettings() {
       </section>
 
       {showCompatCredentials ? (
-        <TroubleshootingPanel accountUsername={jellyfinAccountName} compatURL={compatURL} />
+        <TroubleshootingPanel
+          accountUsername={jellyfinAccountName}
+          compatURL={compatURL}
+          directory={directoryLoginAvailable}
+        />
       ) : null}
 
       {showCompatCredentials && jellyfinProfiles.length > 1 ? (
