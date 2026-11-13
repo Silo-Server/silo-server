@@ -22,7 +22,7 @@ func (c retryRouteClient) Handle(context.Context, *pluginv1.HandleHTTPRequest) (
 	return nil, c.err
 }
 
-type retryProxyService struct{ err error }
+type retryProxyService struct{ client retryRouteClient }
 
 func (retryProxyService) RouteDescriptors(context.Context, int) ([]*pluginv1.HttpRouteDescriptor, error) {
 	return []*pluginv1.HttpRouteDescriptor{{Method: http.MethodPost, Path: "/report", Access: "authenticated"}}, nil
@@ -33,7 +33,7 @@ func (retryProxyService) ResolveAssetPath(context.Context, int, string) (string,
 }
 
 func (s retryProxyService) HTTPRoutesClient(context.Context, int, string) (httpRouteClient, error) {
-	return retryRouteClient{err: s.err}, nil
+	return s.client, nil
 }
 
 // blockWithDelay is the error a plugin reports a provider-wide block with: the
@@ -66,7 +66,7 @@ func TestHTTPProxyRelaysAProviderBlocksDelay(t *testing.T) {
 		{"a plain error is the route's own", errors.New("no plugin"), http.StatusBadGateway, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			proxy := NewHTTPProxy(retryProxyService{err: tc.err}, profileTestInstallationStore{})
+			proxy := NewHTTPProxy(retryProxyService{client: retryRouteClient{err: tc.err}}, profileTestInstallationStore{})
 			req := httptest.NewRequest(http.MethodPost, "/api/v2/plugins/1/report", nil)
 			req = req.WithContext(WithPluginAccess(req.Context(), true, false))
 			rec := httptest.NewRecorder()
