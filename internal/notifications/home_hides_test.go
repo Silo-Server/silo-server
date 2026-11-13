@@ -251,6 +251,19 @@ func TestSupersededInProgress(t *testing.T) {
 	if got := supersededInProgress(special, []completedEpisode{{key: EpisodeKey(0, 6), at: at(10)}}, keys); len(got) != 1 {
 		t.Fatalf("special after a later special finish: superseded = %v, want s5", got)
 	}
+
+	// Within one second, the store's full-precision time decides: E3 resumed
+	// at .900 after E5 was completed at .100 stays, and E2 resumed at .050
+	// before it is superseded.
+	second := at(30)
+	precise := []userstore.WatchProgress{
+		{MediaItemID: "e2", PositionSeconds: 30, UpdatedAt: second.Format(time.RFC3339), UpdatedAtTime: second.Add(50 * time.Millisecond)},
+		{MediaItemID: "e3", PositionSeconds: 30, UpdatedAt: second.Format(time.RFC3339), UpdatedAtTime: second.Add(900 * time.Millisecond)},
+	}
+	got = supersededInProgress(precise, []completedEpisode{{key: EpisodeKey(1, 5), at: second.Add(100 * time.Millisecond)}}, keys)
+	if _, ok := got["e2"]; !ok || len(got) != 1 {
+		t.Fatalf("within one second: superseded = %v, want only e2", got)
+	}
 }
 
 type allLibrariesScope struct{}

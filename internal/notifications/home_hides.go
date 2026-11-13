@@ -57,6 +57,18 @@ type completedEpisode struct {
 	at  time.Time
 }
 
+// progressUpdatedAt is when entry was last written, at the store's full
+// precision when it keeps one. Home compares progress by the full Postgres
+// timestamps, so two writes within one second must keep their order (#2878).
+// ok is false when the store's time doesn't parse.
+func progressUpdatedAt(entry userstore.WatchProgress) (at time.Time, ok bool) {
+	if !entry.UpdatedAtTime.IsZero() {
+		return entry.UpdatedAtTime, true
+	}
+	at, err := time.Parse(time.RFC3339, entry.UpdatedAt)
+	return at, err == nil
+}
+
 // supersededInProgress returns the in-progress episodes Home's Continue
 // Watching hides because a later episode of the series was completed more
 // recently: the viewer moved past them. Specials have no airing position, so
@@ -70,8 +82,8 @@ func supersededInProgress(inProgress []userstore.WatchProgress, completed []comp
 		if !ok {
 			continue
 		}
-		at, err := time.Parse(time.RFC3339, entry.UpdatedAt)
-		if err != nil {
+		at, ok := progressUpdatedAt(entry)
+		if !ok {
 			continue
 		}
 		special := key < firstRegularEpisodeKey
