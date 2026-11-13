@@ -252,6 +252,7 @@ const (
 	transcodeCodecH264       = "h264"
 	transcodeCodecHEVC       = "hevc"
 	HWAccelNone              = "none"
+	HWAccelAuto              = "auto"
 	transcodeHWQSV           = "qsv"
 	transcodeHWVAAPI         = "vaapi"
 	transcodeHWNVENC         = "nvenc"
@@ -1062,9 +1063,10 @@ func resolveEffectiveTranscodeHWAccelContext(ctx context.Context, opts Transcode
 	}
 	// An explicit NVENC setting keeps the established libx264 fallback for a
 	// source the CUDA decoder must not receive. Intel QSV/VAAPI have the
-	// explicit upload paths below and retain hardware encoding. Only the
-	// automatic pipeline's mixed stage, which falls back to software itself if
-	// the CUDA upload fails, keeps NVENC encoding after a CPU decode.
+	// explicit upload paths below and retain hardware encoding. Only an
+	// AutoTranscodePipeline's mixed stage (hw_accel=auto, or the
+	// NewSoftwareDecodeRetryPipeline fallback), which falls back to software
+	// itself if the CUDA upload fails, keeps NVENC encoding after a CPU decode.
 	if opts.SoftwareVideoDecode && hwAccel == transcodeHWNVENC &&
 		(!opts.nvencSoftwareDecode || opts.ToneMapMode != "") {
 		return HWAccelNone
@@ -2242,9 +2244,9 @@ func (s *TranscodeSession) getManifest(currentGeneration bool) ([]byte, error) {
 					return nil, ErrManifestNotReady
 				}
 				if s.waitErr != nil {
-					stderr := truncateStderr(s.stderr.String())
-					if stderr != "" {
-						return nil, fmt.Errorf("%w: %w (stderr: %s)", ErrTranscodeFailed, s.waitErr, stderr)
+					retained := s.stderr.String()
+					if stderr := truncateStderr(retained); stderr != "" {
+						return nil, classifyFFmpegFailure(fmt.Errorf("%w: %w (stderr: %s)", ErrTranscodeFailed, s.waitErr, stderr), retained)
 					}
 					return nil, fmt.Errorf("%w: %w", ErrTranscodeFailed, s.waitErr)
 				}
@@ -4057,15 +4059,16 @@ func (s *TranscodeSession) manifestTimeoutError(timeout time.Duration) error {
 	s.mu.Lock()
 	running := s.running
 	waitErr := s.waitErr
-	stderr := ""
+	retained := ""
 	if s.stderr != nil {
-		stderr = truncateStderr(s.stderr.String())
+		retained = s.stderr.String()
 	}
 	s.mu.Unlock()
+	stderr := truncateStderr(retained)
 
 	switch {
 	case waitErr != nil && stderr != "":
-		return fmt.Errorf("%w after %s: ffmpeg exited: %w (stderr: %s)", ErrManifestNotReady, timeout, waitErr, stderr)
+		return classifyFFmpegFailure(fmt.Errorf("%w after %s: ffmpeg exited: %w (stderr: %s)", ErrManifestNotReady, timeout, waitErr, stderr), retained)
 	case waitErr != nil:
 		return fmt.Errorf("%w after %s: ffmpeg exited: %w", ErrManifestNotReady, timeout, waitErr)
 	case running:

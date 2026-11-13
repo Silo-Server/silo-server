@@ -288,14 +288,21 @@ for that textual payload rather than claiming application/json on the wire.
 `hw_accel=auto` (a video transcode without tone mapping that resolves to a
 hardware backend), the node tries CPU decode with GPU encode, then software;
 otherwise it keeps the limited software retry for an early VideoToolbox failure.
+Outside `auto`, when the GPU decoder rejects the source (FFmpeg's
+`Hardware is lacking required capabilities`) of a video transcode that decoded
+on the GPU without tone mapping, the node walks the same CPU decode with GPU
+encode, then software, instead of failing the start.
 `auto_fallback_ready` asks for that wait only when the node's own `hw_accel=auto`
 pipeline is enabled for the start, judged from its live hardware; otherwise the
 start is not waited on. The Jellyfin-compatible surface sends it for `auto` video
 transcodes instead of `RequireReady`, and older nodes ignore it. Each attempt
 gets its own manifest wait, so callers size the start deadline of an `auto`
 video transcode that sets either field to `TranscodeStartReadyMaxDuration` (one
-wait per path); every other start keeps the single-wait deadline. Readiness is
-judged only on a manifest the current FFmpeg process wrote; an earlier
+wait per path). A `RequireReady` video transcode under an explicit hardware
+backend gets the same deadline, because a decoder rejection can lead to the
+CPU-decode and software attempts. Every other start keeps the single-wait
+deadline. Readiness is judged only on a manifest the current FFmpeg process
+wrote; an earlier
 generation's `stream.m3u8` in a reused directory does not count. A process still
 running at the deadline is closed, never duplicated. The response reports `software_video_decode`
 when the executed recipe decodes on the CPU; older nodes omit it, so callers OR
