@@ -1925,6 +1925,16 @@
       "value": "戻る"
     }
   ],
+  "player.scrubber.endsAt": [
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "に終了"
+    }
+  ],
   "player.seekInterval.choice": [
     {
       "type": 6,
@@ -4048,6 +4058,18 @@
     {
       "type": 0,
       "value": "メンバーを読み込み中…"
+    }
+  ],
+  "web.admin.access.groups.members.noMatches": [
+    {
+      "type": 0,
+      "value": "検索に一致するメンバーはいません。"
+    }
+  ],
+  "web.admin.access.groups.members.search": [
+    {
+      "type": 0,
+      "value": "メンバーを検索"
     }
   ],
   "web.admin.access.groups.newGroup": [
@@ -38805,6 +38827,34 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.list.hidePaths": [
+    {
+      "type": 0,
+      "value": "パスを非表示"
+    }
+  ],
+  "web.admin.libraries.list.moreActions": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "のその他の操作"
+    }
+  ],
+  "web.admin.libraries.list.moveDown": [
+    {
+      "type": 0,
+      "value": "下へ移動"
+    }
+  ],
+  "web.admin.libraries.list.moveUp": [
+    {
+      "type": 0,
+      "value": "上へ移動"
+    }
+  ],
   "web.admin.libraries.list.neverScanned": [
     {
       "type": 0,
@@ -38833,6 +38883,12 @@
     {
       "type": 0,
       "value": "ライブラリをスキャン"
+    }
+  ],
+  "web.admin.libraries.list.showPaths": [
+    {
+      "type": 0,
+      "value": "パスを表示"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -74866,6 +74922,16 @@
       "value": "ユーザーを読み込めませんでした。"
     }
   ],
+  "web.admin.users.list.moreActions": [
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "のその他の操作"
+    }
+  ],
   "web.admin.users.list.nextPage": [
     {
       "type": 0,
@@ -74876,6 +74942,12 @@
     {
       "type": 0,
       "value": "グループなし"
+    }
+  ],
+  "web.admin.users.list.noMatches": [
+    {
+      "type": 0,
+      "value": "検索またはフィルターに一致するユーザーはいません。"
     }
   ],
   "web.admin.users.list.pageRange": [
@@ -105259,6 +105331,12 @@
       "value": "音声"
     }
   ],
+  "web.player.audioMenu.onlyOneTrack": [
+    {
+      "type": 0,
+      "value": "音声トラックは1つのみ"
+    }
+  ],
   "web.player.audioMenu.trackFallback": [
     {
       "type": 0,
@@ -105273,6 +105351,16 @@
     {
       "type": 0,
       "value": "音声トラック"
+    }
+  ],
+  "web.player.audioMenu.triggerWithTrack": [
+    {
+      "type": 0,
+      "value": "音声トラック、"
+    },
+    {
+      "type": 1,
+      "value": "track"
     }
   ],
   "web.player.bar.backgroundPlayback": [
@@ -105464,6 +105552,16 @@
       "value": " Mbps"
     }
   ],
+  "web.player.buffering.loadingFrom": [
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "から読み込み中"
+    }
+  ],
   "web.player.buffering.undoCaption": [
     {
       "type": 0,
@@ -105480,6 +105578,26 @@
     {
       "type": 0,
       "value": "チャプター"
+    }
+  ],
+  "web.player.chaptersMenu.nowPlaying": [
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 8,
+      "value": "now",
+      "children": [
+        {
+          "type": 0,
+          "value": "再生中"
+        }
+      ]
     }
   ],
   "web.player.chaptersMenu.trigger": [
@@ -105542,6 +105660,12 @@
       "value": "全画面表示を終了"
     }
   ],
+  "web.player.controls.exitFullscreenShortcut": [
+    {
+      "type": 0,
+      "value": "全画面表示を終了（F）"
+    }
+  ],
   "web.player.controls.fillScreen": [
     {
       "type": 0,
@@ -105552,6 +105676,18 @@
     {
       "type": 0,
       "value": "全画面表示"
+    }
+  ],
+  "web.player.controls.fullscreenShortcut": [
+    {
+      "type": 0,
+      "value": "全画面表示（F）"
+    }
+  ],
+  "web.player.controls.more": [
+    {
+      "type": 0,
+      "value": "その他"
     }
   ],
   "web.player.controls.moreOptions": [
@@ -105573,6 +105709,12 @@
     }
   ],
   "web.player.controls.pictureInPicture": [
+    {
+      "type": 0,
+      "value": "ピクチャーインピクチャー"
+    }
+  ],
+  "web.player.controls.pictureInPictureItem": [
     {
       "type": 0,
       "value": "ピクチャーインピクチャー"
@@ -105600,6 +105742,26 @@
     {
       "type": 0,
       "value": "前のエピソード"
+    }
+  ],
+  "web.player.controls.remainingTime": [
+    {
+      "type": 0,
+      "value": "−"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.player.controls.remainingTimeLabel": [
+    {
+      "type": 0,
+      "value": "残り"
+    },
+    {
+      "type": 1,
+      "value": "time"
     }
   ],
   "web.player.controls.skipBack": [
@@ -106252,6 +106414,12 @@
       "value": "ドロップフレーム"
     }
   ],
+  "web.player.info.heading": [
+    {
+      "type": 0,
+      "value": "再生情報"
+    }
+  ],
   "web.player.info.playMethod": [
     {
       "type": 0,
@@ -106437,6 +106605,73 @@
       "value": "title"
     }
   ],
+  "web.player.nextEpisode.playNow": [
+    {
+      "type": 0,
+      "value": "今すぐ再生"
+    }
+  ],
+  "web.player.nextEpisode.regionLabel": [
+    {
+      "type": 0,
+      "value": "次に再生"
+    }
+  ],
+  "web.player.nextEpisode.seasonEpisode": [
+    {
+      "type": 0,
+      "value": "シーズン"
+    },
+    {
+      "type": 1,
+      "value": "season"
+    },
+    {
+      "type": 0,
+      "value": " · エピソード"
+    },
+    {
+      "type": 1,
+      "value": "episode"
+    }
+  ],
+  "web.player.nextEpisode.upNextIn": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "次に再生まで"
+            },
+            {
+              "type": 8,
+              "value": "num",
+              "children": [
+                {
+                  "type": 7
+                },
+                {
+                  "type": 0,
+                  "value": "秒"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.player.postRoll.stillPlaying": [
+    {
+      "type": 0,
+      "value": "再生中 · クリックして戻る"
+    }
+  ],
   "web.player.quality.auto": [
     {
       "type": 0,
@@ -106475,6 +106710,18 @@
       "value": "選択中"
     }
   ],
+  "web.player.quality.sourceFile": [
+    {
+      "type": 0,
+      "value": "ソースファイル"
+    }
+  ],
+  "web.player.quality.streamingQuality": [
+    {
+      "type": 0,
+      "value": "ストリーミング画質"
+    }
+  ],
   "web.player.quality.title": [
     {
       "type": 0,
@@ -106485,6 +106732,42 @@
     {
       "type": 1,
       "value": "menu"
+    },
+    {
+      "type": 0,
+      "value": "、"
+    },
+    {
+      "type": 1,
+      "value": "speed"
+    }
+  ],
+  "web.player.quality.triggerWithValue": [
+    {
+      "type": 1,
+      "value": "menu"
+    },
+    {
+      "type": 0,
+      "value": "、"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.player.quality.triggerWithValueAndSpeed": [
+    {
+      "type": 1,
+      "value": "menu"
+    },
+    {
+      "type": 0,
+      "value": "、"
+    },
+    {
+      "type": 1,
+      "value": "value"
     },
     {
       "type": 0,
@@ -107258,6 +107541,12 @@
       "value": "Siloはこのファイルを読み取れませんでした。ファイルが空か破損している可能性があります。"
     }
   ],
+  "web.player.upNext.autoplay": [
+    {
+      "type": 0,
+      "value": "自動再生"
+    }
+  ],
   "web.player.upNext.autoplayOff": [
     {
       "type": 0,
@@ -107307,6 +107596,18 @@
       "value": "を見終わりました"
     }
   ],
+  "web.player.upNext.heading": [
+    {
+      "type": 0,
+      "value": "次に再生"
+    }
+  ],
+  "web.player.upNext.headingShuffle": [
+    {
+      "type": 0,
+      "value": "次にランダム再生"
+    }
+  ],
   "web.player.upNext.minutesLeft": [
     {
       "type": 6,
@@ -107351,10 +107652,49 @@
       "value": "プレビューなし"
     }
   ],
+  "web.player.upNext.onDeckScrollBack": [
+    {
+      "type": 0,
+      "value": "視聴中を前へスクロール"
+    }
+  ],
+  "web.player.upNext.onDeckScrollForward": [
+    {
+      "type": 0,
+      "value": "視聴中を次へスクロール"
+    }
+  ],
   "web.player.upNext.playingNext": [
     {
       "type": 0,
       "value": "次に再生"
+    }
+  ],
+  "web.player.upNext.startsAfterCredits": [
+    {
+      "type": 0,
+      "value": "クレジット終了後に自動的に始まります"
+    }
+  ],
+  "web.player.upNext.startsIn": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "秒後に開始"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.player.volume.label": [
@@ -124210,6 +124550,12 @@
       "value": "字幕をオンにする"
     }
   ],
+  "web.subtitles.menu.heading": [
+    {
+      "type": 0,
+      "value": "字幕"
+    }
+  ],
   "web.subtitles.menu.noMatch": [
     {
       "type": 0,
@@ -124258,6 +124604,18 @@
       "value": "外部"
     }
   ],
+  "web.subtitles.menu.subtitlesOffShortcut": [
+    {
+      "type": 0,
+      "value": "字幕オフ（C）"
+    }
+  ],
+  "web.subtitles.menu.subtitlesShortcut": [
+    {
+      "type": 0,
+      "value": "字幕（C）"
+    }
+  ],
   "web.subtitles.menu.syncHint": [
     {
       "type": 0,
@@ -124304,10 +124662,32 @@
       "value": "このサーバーでは字幕のタイミングを変更できません。"
     }
   ],
+  "web.subtitles.menu.toolsLabel": [
+    {
+      "type": 0,
+      "value": "字幕ツール"
+    }
+  ],
+  "web.subtitles.menu.tracksLabel": [
+    {
+      "type": 0,
+      "value": "字幕トラック"
+    }
+  ],
   "web.subtitles.menu.translateWithAi": [
     {
       "type": 0,
       "value": "AIで翻訳…"
+    }
+  ],
+  "web.subtitles.menu.triggerWithValue": [
+    {
+      "type": 0,
+      "value": "字幕、"
+    },
+    {
+      "type": 1,
+      "value": "value"
     }
   ],
   "web.subtitles.quotaWindow.day": [

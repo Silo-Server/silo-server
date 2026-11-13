@@ -248,6 +248,7 @@ const I18N_CONVERTED = [
   "src/hooks/useTTS.ts",
   "src/hooks/useAdminNavTopics.ts",
   "src/hooks/useIsActingAdmin.ts",
+  "src/lib/accessGroupPolicyChanges.ts",
   "src/lib/accountOwner.ts",
   "src/lib/adminJobs.ts",
   "src/lib/adminNavigation.ts",
@@ -394,7 +395,6 @@ const PHYSICAL_DIRECTION = [
   "src/components/admin/dashboard/charts/LineChart.tsx",
   "src/components/admin/dashboard/charts/StackedColumnChart.tsx",
   "src/components/overlays/CardOverlays.tsx",
-  "src/player/components/PlaybackSpeedTrack.tsx",
   "src/player/components/SeekBar.tsx",
   "src/player/components/VolumeControl.tsx",
 ];
@@ -426,6 +426,7 @@ const ADMIN_TEXT_PATHS = [
   "src/components/ServerActivity.tsx",
   // Helpers only admin pages import.
   "src/hooks/queries/useAutoscan.ts",
+  "src/lib/accessGroupPolicyChanges.ts",
   "src/lib/accountOwner.ts",
   "src/lib/aiProviders.ts",
   "src/lib/externalSignInAdmin.ts",

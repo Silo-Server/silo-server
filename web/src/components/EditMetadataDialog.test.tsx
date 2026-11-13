@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ItemDetail } from "@/api/types";
 
@@ -119,43 +119,18 @@ describe("EditMetadataDialog field locks", () => {
     );
   });
 
-  it("unlocks every field before a reset refreshes from providers", async () => {
-    mocks.updateAsync.mockResolvedValue({});
-    const item = series([0, 1, 10]);
-    render(<EditMetadataDialog item={item} open onOpenChange={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Reset to Provider" }));
-    fireEvent.click(screen.getByText("Reset & Refresh"));
-
-    await waitFor(() => expect(mocks.refresh).toHaveBeenCalledWith({ item, mode: "quick" }));
-    expect(mocks.updateAsync).toHaveBeenCalledWith({ locked_fields: [] });
-    expect(mocks.updateAsync.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.refresh.mock.invocationCallOrder[0]!,
-    );
-  });
-
-  it("keeps the dialog open and does not refresh when unlocking fails", async () => {
-    mocks.updateAsync.mockRejectedValue(new Error("nope"));
+  // The server clears the locks with the reset's own write, so a reset that
+  // fails leaves them in place (#3581).
+  it("resets on the server without unlocking first", () => {
     const onOpenChange = vi.fn();
-    render(<EditMetadataDialog item={series([0])} open onOpenChange={onOpenChange} />);
+    const item = series([0, 1, 10]);
+    render(<EditMetadataDialog item={item} open onOpenChange={onOpenChange} />);
     fireEvent.click(screen.getByRole("button", { name: "Reset to Provider" }));
     fireEvent.click(screen.getByText("Reset & Refresh"));
 
-    await waitFor(() => expect(mocks.updateAsync).toHaveBeenCalled());
-    // Let the rejected unlock settle before checking what the reset did next.
-    await mocks.updateAsync.mock.results[0]!.value.catch(() => undefined);
-    await Promise.resolve();
-    expect(mocks.refresh).not.toHaveBeenCalled();
-    expect(onOpenChange).not.toHaveBeenCalledWith(false);
-  });
-
-  it("refreshes straight away when nothing is locked", () => {
-    const item = series();
-    render(<EditMetadataDialog item={item} open onOpenChange={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Reset to Provider" }));
-    fireEvent.click(screen.getByText("Reset & Refresh"));
-
+    expect(mocks.refresh).toHaveBeenCalledWith({ item, mode: "reset" });
     expect(mocks.updateAsync).not.toHaveBeenCalled();
-    expect(mocks.refresh).toHaveBeenCalledWith({ item, mode: "quick" });
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });
 
@@ -252,8 +227,7 @@ describe("EditMetadataDialog season and episode locks", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
-  it("shows the locked count and unlocks before a reset refreshes", async () => {
-    mocks.updateAsync.mockResolvedValue({});
+  it("shows the locked count and resets on the server", () => {
     const item = child("episode", [0, 13]);
     render(<EditMetadataDialog item={item} open onOpenChange={vi.fn()} />);
     expect(screen.getByText("2 locked")).toBeInTheDocument();
@@ -261,11 +235,8 @@ describe("EditMetadataDialog season and episode locks", () => {
     fireEvent.click(screen.getByRole("button", { name: "Reset to Provider" }));
     fireEvent.click(screen.getByText("Reset & Refresh"));
 
-    await waitFor(() => expect(mocks.refresh).toHaveBeenCalledWith({ item, mode: "quick" }));
-    expect(mocks.updateAsync).toHaveBeenCalledWith({ locked_fields: [] });
-    expect(mocks.updateAsync.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.refresh.mock.invocationCallOrder[0]!,
-    );
+    expect(mocks.refresh).toHaveBeenCalledWith({ item, mode: "reset" });
+    expect(mocks.updateAsync).not.toHaveBeenCalled();
   });
 });
 

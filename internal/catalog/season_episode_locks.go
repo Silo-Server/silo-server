@@ -121,18 +121,12 @@ func ClearSeriesChildEditsTx(ctx context.Context, tx pgx.Tx, seriesID string) er
 		columns []childLockedColumn
 		edited  []string
 	}{{seasonsTable, seasonLockedColumns, seasonEditedColumns}, {episodesTable, episodeLockedColumns, episodeEditedColumns}} {
-		assignments := joinColumns(target.columns, ", ", func(c childLockedColumn) string {
-			return fmt.Sprintf("%[1]s = CASE WHEN %[2]d = ANY(locked_fields) THEN %[3]s ELSE %[1]s END", c.column, c.field, c.empty)
-		})
 		editedPredicates := make([]string, 0, len(target.edited))
-		clearAssignments := make([]string, 0, len(target.edited))
 		for _, column := range target.edited {
 			editedPredicates = append(editedPredicates, column+" <> ''")
-			clearAssignments = append(clearAssignments, column+" = ''")
 		}
-		query := fmt.Sprintf(`UPDATE %s SET %s, %s, locked_fields = '{}', updated_at = NOW()
-			WHERE series_id = $1 AND (locked_fields <> '{}' OR %s)`,
-			target.table, assignments, strings.Join(clearAssignments, ", "), strings.Join(editedPredicates, " OR "))
+		query := clearChildEditsSQL(target.table, target.columns, target.edited, true) +
+			fmt.Sprintf(` WHERE series_id = $1 AND (locked_fields <> '{}' OR %s)`, strings.Join(editedPredicates, " OR "))
 		if _, err := tx.Exec(ctx, query, seriesID); err != nil {
 			return fmt.Errorf("clearing %s edits of series %s: %w", target.table, seriesID, err)
 		}
@@ -143,4 +137,60 @@ func ClearSeriesChildEditsTx(ctx context.Context, tx pgx.Tx, seriesID string) er
 		return fmt.Errorf("clearing edits of series %s: %w", seriesID, err)
 	}
 	return nil
+}
+
+// clearChildEditsSQL is the UPDATE, without its WHERE clause, that removes a
+// season's or episode's locks, empties its lockable columns (only the locked
+// ones, or all of them) and empties the edited columns.
+func clearChildEditsSQL(table string, columns []childLockedColumn, edited []string, onlyLocked bool) string {
+	assignments := joinColumns(columns, ", ", func(c childLockedColumn) string {
+		if onlyLocked {
+			return fmt.Sprintf("%[1]s = CASE WHEN %[2]d = ANY(locked_fields) THEN %[3]s ELSE %[1]s END", c.column, c.field, c.empty)
+		}
+		return fmt.Sprintf("%s = %s", c.column, c.empty)
+	})
+	for _, column := range edited {
+		assignments += ", " + column + " = " + sqlEmptyText
+	}
+	return fmt.Sprintf(`UPDATE %s SET %s, locked_fields = '{}', updated_at = NOW()`, table, assignments)
+}
+
+// ResetEdits empties a season's lockable fields and removes its locks, for
+// Reset to Provider. The refresh that follows writes the provider's values over
+// the empty ones, so a field the provider has no value for stays empty. With
+// keepText the title and overview stay: a refresh in another language than the
+// series' own writes neither.
+func (r *SeasonRepository) ResetEdits(ctx context.Context, contentID string, keepText bool) error {
+	if _, err := r.pool.Exec(ctx, clearChildEditsSQL(seasonsTable, resetColumns(seasonLockedColumns, keepText), nil, false)+` WHERE content_id = $1`, contentID); err != nil {
+		return fmt.Errorf("resetting season %s: %w", contentID, err)
+	}
+	return nil
+}
+
+// ResetEdits is SeasonRepository.ResetEdits for an episode. The series' air
+// dates may come from the cleared date, so they are recomputed with it.
+func (r *EpisodeRepository) ResetEdits(ctx context.Context, contentID string, keepText bool) error {
+	err := pgx.BeginTxFunc(ctx, r.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+		var seriesID string
+		query := clearChildEditsSQL(episodesTable, resetColumns(episodeLockedColumns, keepText), nil, false) + ` WHERE content_id = $1 RETURNING series_id`
+		if err := tx.QueryRow(ctx, query, contentID).Scan(&seriesID); err != nil {
+			return err
+		}
+		return refreshSeriesAirDates(ctx, tx, []string{seriesID})
+	})
+	if err != nil {
+		return fmt.Errorf("resetting episode %s: %w", contentID, err)
+	}
+	return nil
+}
+
+// resetColumns is the lockable columns a reset empties: all of them, or all
+// but the title and overview.
+func resetColumns(columns []childLockedColumn, keepText bool) []childLockedColumn {
+	if !keepText {
+		return columns
+	}
+	return slices.DeleteFunc(slices.Clone(columns), func(c childLockedColumn) bool {
+		return c.column == childColumnTitle || c.column == childColumnOverview
+	})
 }

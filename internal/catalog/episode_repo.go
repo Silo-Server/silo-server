@@ -1176,6 +1176,22 @@ func (r *EpisodeRepository) ListBySeason(ctx context.Context, seriesID string, s
 // UNIQUE index (series_id, season_number, episode_number). Neighbors are
 // resolved across season boundaries, so the result is at most three rows.
 func (r *EpisodeRepository) ListAdjacentInSeries(ctx context.Context, seriesID string, seasonNumber, episodeNumber int) ([]*models.Episode, error) {
+	return r.ListAdjacentInSeriesFor(ctx, seriesID, seasonNumber, episodeNumber, AccessFilter{})
+}
+
+// ListAdjacentInSeriesFor is ListAdjacentInSeries for a viewer. Under a
+// playback-quality ceiling it drops a selected episode with no version the
+// viewer may play, without reaching past it to a later neighbor, as Next Up
+// waits rather than skipping ahead.
+func (r *EpisodeRepository) ListAdjacentInSeriesFor(ctx context.Context, seriesID string, seasonNumber, episodeNumber int, access AccessFilter) ([]*models.Episode, error) {
+	args := []any{seriesID, seasonNumber, episodeNumber}
+	where := ""
+	if playable := EpisodePlayableUnderCeilingSQL("adjacent.content_id", access, func(value any) int {
+		args = append(args, value)
+		return len(args)
+	}); playable != "" {
+		where = "\n\tWHERE " + playable
+	}
 	query := `SELECT ` + episodeColumns + ` FROM (
 		(SELECT ` + episodeColumns + `
 			FROM episodes
@@ -1199,10 +1215,10 @@ func (r *EpisodeRepository) ListAdjacentInSeries(ctx context.Context, seriesID s
 			  AND ` + episodeAvailabilityPredicate + `
 			ORDER BY season_number ASC, episode_number ASC
 			LIMIT 1)
-	) AS adjacent
+	) AS adjacent` + where + `
 	ORDER BY season_number ASC, episode_number ASC`
 
-	rows, err := r.pool.Query(ctx, query, seriesID, seasonNumber, episodeNumber)
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing adjacent episodes in series: %w", err)
 	}
@@ -1425,6 +1441,13 @@ func (r *EpisodeRepository) BrowseEpisodes(ctx context.Context, seriesID, season
 		index++
 	} else {
 		conditions = append(conditions, "EXISTS (SELECT 1 FROM episode_libraries el WHERE el.episode_id=e.content_id)")
+	}
+	if playable := EpisodePlayableUnderCeilingSQL("e.content_id", access, func(value any) int {
+		args = append(args, value)
+		index = len(args) + 1
+		return len(args)
+	}); playable != "" {
+		conditions = append(conditions, playable)
 	}
 	appendLibraryAccessConditions("s.content_id", access, &conditions, &args, &index)
 	applyAccessFilter("s", access, &conditions, &args, &index)

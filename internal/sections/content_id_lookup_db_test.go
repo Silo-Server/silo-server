@@ -86,3 +86,61 @@ func TestContentIDLookupsKeepOneStatementPostgres(t *testing.T) {
 		}
 	}
 }
+
+// An episode card needs a version the viewer may play: under a 1080p ceiling a
+// Continue Watching or Next Up card for a 4K-only episode would not start, so
+// the lookup leaves it out. Without a ceiling the episode still makes a card.
+func TestEpisodeCardsSkipEpisodesAboveQualityCeilingPostgres(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	prefix := "ceiling-cards-" + uuid.NewString()[:8] + "-"
+	var library int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ('series', $1, true) RETURNING id`, prefix+"lib").Scan(&library); err != nil {
+		t.Fatalf("seed library: %v", err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM media_files WHERE media_folder_id = $1`, library)
+		_, _ = pool.Exec(bg, `DELETE FROM episodes WHERE series_id LIKE $1`, prefix+"%")
+		_, _ = pool.Exec(bg, `DELETE FROM media_items WHERE content_id LIKE $1`, prefix+"%")
+		_, _ = pool.Exec(bg, `DELETE FROM media_folders WHERE id = $1`, library)
+	})
+	series, fullHD, uhd := prefix+"series", prefix+"e1", prefix+"e2"
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`INSERT INTO media_items (content_id, type, title, status) VALUES ($1, 'series', $1, 'matched')`, series)
+	exec(`INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at) VALUES ($1, $2, now())`, series, library)
+	for i, ep := range []struct{ id, resolution string }{{fullHD, "1080p"}, {uhd, "2160p"}} {
+		exec(`INSERT INTO episodes (content_id, series_id, season_number, episode_number, title, overview, runtime, rating_imdb) VALUES ($1, $2, 1, $3, 'Episode', '', 0, 0)`, ep.id, series, i+1)
+		exec(`INSERT INTO media_files (episode_id, media_folder_id, file_path, resolution) VALUES ($1, $2, $3, $4)`, ep.id, library, "/"+ep.id, ep.resolution)
+	}
+
+	fetcher := NewFetcher(pool)
+	for _, tc := range []struct {
+		ceiling string
+		want    []string
+	}{{"", []string{fullHD, uhd}}, {"1080p", []string{fullHD}}} {
+		items, _, err := fetcher.fetchEpisodeTargetsByContentIDs(ctx, []string{fullHD, uhd}, nil, nil, catalog.AccessFilter{MaxPlaybackQuality: tc.ceiling})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := contentIDs(items)
+		slices.Sort(got)
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("ceiling %q: episode cards = %v, want %v", tc.ceiling, got, tc.want)
+		}
+	}
+}

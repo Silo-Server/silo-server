@@ -974,14 +974,36 @@ func (h *ItemsHandler) buildEpisodeResponses(ctx context.Context, v ItemViewer, 
 	if h.detailSvc != nil {
 		stillURLs = h.detailSvc.PresignURLsWithExpiry(ctx, stillPaths, requestVariantHint("card", size))
 	}
+	hasCeiling := access.NormalizePlaybackQuality(filter.MaxPlaybackQuality) != ""
+	kept := resp[:0]
 	for i := range resp {
-		resp[i].StillURL = stillURLs[stillPaths[i]].URL
-		files := catalog.FilterMediaFilesByAccess(filesByEpisode[resp[i].ContentID], filter)
-		resp[i].Files = episodeFileResponses(files, filter)
-		resp[i].UserData = userData[resp[i].ContentID]
-		resp[i].OverlaySummary = overlays.BuildSummary(files)
+		served := filesByEpisode[resp[i].ContentID]
+		if hasCeiling && len(served) > 0 && !anyFileAllowed(served, filter) {
+			// Every version exceeds the viewer's quality ceiling, so there is
+			// nothing to play: leave the episode out until one fits.
+			continue
+		}
+		ep := resp[i]
+		ep.StillURL = stillURLs[stillPaths[i]].URL
+		files := catalog.FilterMediaFilesByAccess(served, filter)
+		ep.Files = episodeFileResponses(files, filter)
+		ep.UserData = userData[ep.ContentID]
+		ep.OverlaySummary = overlays.BuildSummary(files)
+		kept = append(kept, ep)
 	}
-	return resp
+	return kept
+}
+
+// anyFileAllowed reports whether the viewer may play one of files. It reads
+// every served file, not the versions shown for the library being browsed,
+// because playback reaches every version.
+func anyFileAllowed(files []*models.MediaFile, filter catalog.AccessFilter) bool {
+	for _, f := range files {
+		if catalog.FileAllowedByAccess(f, filter) {
+			return true
+		}
+	}
+	return false
 }
 
 // listEpisodeFiles batch-fetches media files keyed by episode ID, falling back

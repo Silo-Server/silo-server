@@ -202,9 +202,17 @@ type CompatPlaybackStore interface {
 	Put(session PlaybackSession)
 	// PutNegotiated stores a PlaybackInfo negotiation and atomically replaces
 	// older, still-unstarted negotiations for the same client device and item.
-	PutNegotiated(session PlaybackSession)
-	// Get returns a session when it exists and is not expired.
+	// An error means the negotiation was not stored, so its PlaySessionId
+	// must not be handed to the client.
+	PutNegotiated(session PlaybackSession) error
+	// Get returns a session when it exists and is not expired. A failed
+	// durable read with no cached copy reads as not found; code that grants
+	// access uses Lookup instead.
 	Get(id string) (*PlaybackSession, bool)
+	// Lookup is Get for callers that grant access by PlaySessionId: it
+	// returns an error, instead of not-found, when the store could not be
+	// read and holds no usable copy of the session.
+	Lookup(id string) (*PlaybackSession, bool, error)
 	// Delete removes a session.
 	Delete(id string)
 	// HideFromRouting immediately makes a caller-owned session unavailable to
@@ -308,8 +316,9 @@ func (s *PlaybackSessionStore) Put(session PlaybackSession) {
 // and Stopped reports. Replacing only unstarted sessions keeps real concurrent
 // playback intact while preventing the abandoned negotiation from later
 // publishing a stale pause.
-func (s *PlaybackSessionStore) PutNegotiated(session PlaybackSession) {
+func (s *PlaybackSessionStore) PutNegotiated(session PlaybackSession) error {
 	s.putNegotiatedNormalized(session)
+	return nil
 }
 
 // putNormalized stores or replaces a compat playback session and returns the
@@ -326,12 +335,12 @@ func (s *PlaybackSessionStore) putNormalized(session PlaybackSession) PlaybackSe
 	return session
 }
 
-func (s *PlaybackSessionStore) putNegotiatedNormalized(session PlaybackSession) (PlaybackSession, []string) {
+func (s *PlaybackSessionStore) putNegotiatedNormalized(session PlaybackSession) (PlaybackSession, []PlaybackSession) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	session = s.normalizeSession(session)
-	removed := make([]string, 0, 1)
+	removed := make([]PlaybackSession, 0, 1)
 	if session.CompatToken != "" && session.ClientDeviceID != "" && session.RouteItemID != "" {
 		for id, existing := range s.sessions {
 			if id == session.ID || existing.Terminal || existing.UpstreamSessionID != "" {
@@ -342,12 +351,26 @@ func (s *PlaybackSessionStore) putNegotiatedNormalized(session PlaybackSession) 
 				mediaSourceIDsEqual(existing.RouteItemID, session.RouteItemID) &&
 				existing.NegotiationVariant == session.NegotiationVariant {
 				delete(s.sessions, id)
-				removed = append(removed, id)
+				removed = append(removed, existing)
 			}
 		}
 	}
 	s.sessions[session.ID] = session
 	return session, removed
+}
+
+// undoNegotiated reverses putNegotiatedNormalized: it drops the negotiation id
+// and restores the sessions it displaced, unless one was stored again since.
+func (s *PlaybackSessionStore) undoNegotiated(id string, displaced []PlaybackSession) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	delete(s.sessions, id)
+	for _, session := range displaced {
+		if _, ok := s.sessions[session.ID]; !ok {
+			s.sessions[session.ID] = session
+		}
+	}
 }
 
 func (s *PlaybackSessionStore) normalizeSession(session PlaybackSession) PlaybackSession {
@@ -379,6 +402,12 @@ func (s *PlaybackSessionStore) Get(id string) (*PlaybackSession, bool) {
 	}
 	cp := session
 	return &cp, true
+}
+
+// Lookup implements CompatPlaybackStore. The in-memory store cannot fail.
+func (s *PlaybackSessionStore) Lookup(id string) (*PlaybackSession, bool, error) {
+	session, ok := s.Get(id)
+	return session, ok, nil
 }
 
 // Delete removes a playback session.

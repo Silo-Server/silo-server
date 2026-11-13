@@ -276,7 +276,7 @@ func TestDownloadLinkedToCanceledPreparationFails(t *testing.T) {
 	create := func(id string) *Download {
 		t.Helper()
 		d := &Download{
-			ID: id, UserID: 0, MediaFileID: fileID, ContentID: "ctl-content", Kind: KindQueued,
+			ID: id, UserID: 0, MediaFileID: fileID, ContentID: fileContentID(t, pool, fileID), Kind: KindQueued,
 			Status: StatusPreparing, Format: FormatTranscode, ArtifactID: row.ID,
 			CreatedAt: time.Now(), UpdatedAt: time.Now(),
 		}
@@ -371,7 +371,7 @@ func seedPreparationRequester(t *testing.T, pool *pgxpool.Pool, fileID int, arti
 	}
 	if err := repo.Create(ctx, &Download{
 		ID: downloadID, UserID: userID, ProfileID: "profile-prep", DeviceID: deviceID, MediaFileID: fileID,
-		ContentID: "prep-content", Kind: KindQueued, Status: status,
+		ContentID: fileContentID(t, pool, fileID), Kind: KindQueued, Status: status,
 		Format: FormatTranscode, ArtifactID: artifactID,
 		CreatedAt: time.Now(), UpdatedAt: time.Now(),
 	}); err != nil {
@@ -399,7 +399,7 @@ func linkRecoveryDownload(t *testing.T, pool *pgxpool.Pool, fileID int, artifact
 	downloadID := fmt.Sprintf("recovery-download-%d", time.Now().UnixNano())
 	if err := NewRepository(pool).Create(ctx, &Download{
 		ID: downloadID, UserID: userID, MediaFileID: fileID,
-		ContentID: "recovery-content", Kind: KindQueued, Status: status,
+		ContentID: fileContentID(t, pool, fileID), Kind: KindQueued, Status: status,
 		Format: FormatTranscode, ArtifactID: artifactID, FileSize: 4242,
 		CreatedAt: time.Now(), UpdatedAt: time.Now(),
 	}); err != nil {

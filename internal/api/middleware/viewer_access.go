@@ -47,11 +47,11 @@ func (m *ViewerAccessMiddleware) RequireViewerAccess(next http.Handler) http.Han
 			SessionID:    claims.SessionID,
 			ProfileID:    profileID,
 			ProfileToken: r.Header.Get("X-Profile-Token"),
-			// API keys have no PIN proof by design. A display token or a
-			// direct-download link was issued to an already verified profile
-			// and carries the profile in its claims; the profile still has
-			// to exist and be owned by the user, which Resolve checks.
-			SkipPINVerification: claims.TokenType == auth.TokenTypeAPIKey ||
+			// A display token or a direct-download link was issued to an
+			// already verified profile and carries the profile in its
+			// claims; the profile still has to exist and be owned by the
+			// user, which Resolve checks.
+			SkipPINVerification: claims.SkipsProfilePIN() ||
 				claims.TokenType == auth.TokenTypeApplePushDisplay ||
 				claims.TokenType == auth.TokenTypeDirectDownloadLink,
 		}

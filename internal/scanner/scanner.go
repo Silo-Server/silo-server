@@ -3011,12 +3011,45 @@ func (s *Scanner) processFile(
 		externalSubsChecked = true
 		return externalSubs
 	}
+	// externalSubsToStore is the sidecar list a write to an existing row
+	// stores. After a failed listing it keeps the stored sidecars the scan
+	// could not see instead of storing only the ones it found.
+	externalSubsToStore := func() ([]models.ExternalSubtitle, error) {
+		found := externalSubtitleModels(loadExternalSubs())
+		if externalSubsChecked {
+			return found, nil
+		}
+		// Read by path, the key both writes use, not the snapshot's ID.
+		stored, err := s.fileRepo.GetByPath(ctx, filePath)
+		if errors.Is(err, ErrFileNotFound) {
+			// Deleted since the snapshot: there is nothing stored to keep,
+			// and the upsert re-ingests the file.
+			return found, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("reading stored sidecars of file %s: %w", filePath, err)
+		}
+		return keepUnlistedSidecars(stored.ExternalSubtitles, found), nil
+	}
 
 	// Check if unchanged (same size) only when playback-critical probe data
 	// is already present or this scanner cannot repair it on this node. This
 	// lets rescans repair legacy rows when local ffprobe metadata is available
 	// without forcing endless rewrites on nodes that cannot probe.
 	if existing, ok := existingByPath[filePath]; ok {
+		// A missing row may be a retitle's stand-in, and the file the one that
+		// left it; that row takes its path back before anything probes the
+		// file onto the stand-in.
+		if existing.MissingSince != nil {
+			reclaimed, err := s.reclaimStandIn(ctx, folder, filePath, existing, fileSize, fileModifiedAt, assignment, groupAssignment, loadExternalSubs)
+			if err != nil {
+				// Left for a later scan; see reclaimStandIn.
+				return 0, nil, err
+			}
+			if reclaimed {
+				return actionUpdated, []string{"moved"}, nil
+			}
+		}
 		currentExternalSubtitlePaths := externalSubtitleInfoPaths(loadExternalSubs())
 		updateReasons := scanStateUpdateReasons(existing, fileSize, fileModifiedAt, currentExternalSubtitlePaths, externalSubsChecked, assignment, groupAssignment, folder.Type, s.ffprobePath != "")
 		if shouldSkipStableConfirmedScanState(existing, existingContentStatuses[existing.ContentID], fileSize, fileModifiedAt, updateReasons, s.ffprobePath != "") {
@@ -3080,7 +3113,11 @@ func (s *Scanner) processFile(
 			if rejectionStands || len(updateReasons) > 1 {
 				mf := models.MediaFile{MediaFolderID: folder.ID, FilePath: filePath}
 				populateScanIdentity(&mf, filePath, folder.Type, assignment, groupAssignment, existing)
-				mf.ExternalSubtitles = externalSubtitleModels(loadExternalSubs())
+				externalSubtitles, err := externalSubsToStore()
+				if err != nil {
+					return 0, nil, err
+				}
+				mf.ExternalSubtitles = externalSubtitles
 				applied, persistErr := persistIdentityUpdate(&mf,
 					func(file models.MediaFile) (int, error) {
 						return s.fileRepo.UpdateIdentityAndExternalSubtitles(ctx, file)
@@ -3101,8 +3138,10 @@ func (s *Scanner) processFile(
 			}
 		}
 
-		// Detect external subtitles.
-		externalSubs = loadExternalSubs()
+		externalSubtitles, err := externalSubsToStore()
+		if err != nil {
+			return 0, nil, err
+		}
 
 		// Check for intro/credits markers from S3.
 		markerFetcher := s.markerFetcher
@@ -3133,7 +3172,7 @@ func (s *Scanner) processFile(
 			mf.SubtitleTracks = []models.SubtitleTrack{}
 		}
 
-		mf.ExternalSubtitles = externalSubtitleModels(externalSubs)
+		mf.ExternalSubtitles = externalSubtitles
 
 		upserted, upsertErr := s.fileRepo.Upsert(ctx, mf)
 		if upsertErr != nil {
@@ -3429,11 +3468,18 @@ func hasMissingExternalSubtitlePath(paths []string) bool {
 		if strings.TrimSpace(path) == "" {
 			continue
 		}
-		if _, err := fspath.Stat(path); errors.Is(err, os.ErrNotExist) {
+		if sidecarConfirmedGone(path) {
 			return true
 		}
 	}
 	return false
+}
+
+// sidecarConfirmedGone reports that a stored sidecar no longer exists. Any
+// other stat failure leaves it unconfirmed.
+func sidecarConfirmedGone(path string) bool {
+	_, err := fspath.Stat(path)
+	return errors.Is(err, os.ErrNotExist)
 }
 
 func shouldSkipStableConfirmedScanState(
@@ -3637,6 +3683,35 @@ func shouldPreserveExistingProbeAfterProbeFailure(updateReasons []string, probe 
 		}
 	}
 	return foundRepair
+}
+
+// keepUnlistedSidecars merges the sidecars a failed listing found into the
+// stored ones. A stored sidecar the listing did not return is kept unless it
+// is confirmed gone; one the listing found takes its freshly parsed form.
+func keepUnlistedSidecars(stored, found []models.ExternalSubtitle) []models.ExternalSubtitle {
+	foundByPath := make(map[string]models.ExternalSubtitle, len(found))
+	for _, sub := range found {
+		foundByPath[filepath.Clean(sub.Path)] = sub
+	}
+	result := make([]models.ExternalSubtitle, 0, len(stored)+len(found))
+	for _, sub := range stored {
+		path := filepath.Clean(sub.Path)
+		if fresh, ok := foundByPath[path]; ok {
+			result = append(result, fresh)
+			delete(foundByPath, path)
+			continue
+		}
+		if sidecarConfirmedGone(sub.Path) {
+			continue
+		}
+		result = append(result, sub)
+	}
+	for _, sub := range found {
+		if _, ok := foundByPath[filepath.Clean(sub.Path)]; ok {
+			result = append(result, sub)
+		}
+	}
+	return result
 }
 
 func externalSubtitleModels(externalSubs []ExternalSubtitleInfo) []models.ExternalSubtitle {

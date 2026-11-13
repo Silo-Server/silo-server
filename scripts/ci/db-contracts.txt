@@ -13,11 +13,14 @@
 ./internal/catalog TestMixedCatalogMangaCounts
 ./internal/catalog TestContentRatingCeilingAcrossSystemsDB
 ./internal/catalog TestRatingsPageFollowsAccessDB
+./internal/catalog TestEpisodesAboveQualityCeilingStayHiddenPostgres
+./internal/sections TestEpisodeCardsSkipEpisodesAboveQualityCeilingPostgres
 ./internal/userstore/pgstore TestTitleAllowancesLiftProfileLimitsDB
 ./internal/catalog TestJellyfinPersonReadsMatchNativeVisibilityPostgres
 ./internal/recommendations TestRecentCompletedItemIDsGroupsSeriesBeforeLimit
 ./internal/sections TestCompatibilityRecentlyAddedReturnsFlatDistinctSeries
 ./internal/sections TestSectionsSkipItemsInNoLibraryPostgres
+./internal/sections TestPersonalSmartCollectionRowKeepsTheCollectionLimitPostgres
 ./internal/sections TestEpisodeCardsCarryParentArtworkPostgres
 ./internal/catalog TestCatalogQueryWithoutLibraryLeavesOutItemsInNoLibraryDB
 ./internal/catalog TestCountsAndListingsLeaveOutItemsHeldByRemovalGraceDB
@@ -28,6 +31,7 @@
 ./internal/audiobooks TestABSListsLeaveOutBooksInNoLibraryDB
 ./internal/api/handlers TestAdminStatsLeaveOutFilesAndItemsHeldByRemovalGraceDB
 ./internal/sections TestRuleRowsReadTheViewersWatchStatePostgres
+./internal/sections TestSmartCollectionRowWithDisplayFilterReadsTheViewersWatchStatePostgres
 ./internal/scanner TestFileRepositoryPreservesFirstSeenScanProvenance
 ./internal/scanner TestMultiEpisodeFileServesSpannedEpisodesDB
 ./internal/scanner TestScannedGroupForItemDB
@@ -40,12 +44,16 @@
 ./internal/scanner TestHDR10PlusBackfillLeavesARowRewrittenDuringTheReadDB
 ./internal/scanner TestHDR10PlusBackfillStopsWhenStorageStallsDB
 ./internal/scanner TestRescanKeepsHDR10PlusWhenTheFrameReadFailsDB
+./internal/scanner TestRescanKeepsSidecarsItCouldNotListDB
 ./internal/scanner TestScanStateCarriesProbeRejectionDB
 ./internal/scanner TestRescanKeepsProbeFactsOfARejectedUnchangedFileDB
 ./internal/scanner TestFinalizeVariantsKeepsMatchSuppressionDB
 ./internal/scanner TestFinalizeVariantsRetotalsPartsLeftByARenameDB
 ./internal/scanner TestFinalizeVariantsReadsWholeGroupFoundOutsideTheScopeDB
 ./internal/scanner TestScanKeepsFileRowAcrossRenameDB
+./internal/scanner TestMatchLinkRefusedAfterRetitleDB
+./internal/metadata TestSkeletonUndoFollowsTheLinkDB
+./internal/metadata TestEpisodeLinkFollowsSameTitleMoveDB
 ./internal/scanner TestScanIndexesFileWithNonUTF8Name
 ./migrations TestScanRunForeignKeysHaveLeadingIndexesDB
 
@@ -55,6 +63,9 @@
 ./internal/catalogseed TestSeedCarriesSeasonEpisodeLocksDB
 ./internal/metadata TestIdentify_SeasonEpisodeLocksFollowTheShow
 ./internal/metadata TestIdentify_SeasonEpisodeLocksClearOnEveryCorrectionPath
+./internal/metadata TestResetToProvider_SeasonAndEpisodeRows
+./internal/metadata TestResetToProvider_ItemRowClearsStoredLocks
+./internal/metadata TestResetToProvider_DoesNotFollowARebind
 
 # Movie box sets: grouping by viewer access and the minimum, grouped browse
 # and letters, search, sync bookkeeping, and collection artwork.
@@ -209,6 +220,9 @@
 
 # Minting a key for another account holds the Owner rules against a concurrent promotion.
 ./internal/api/handlers TestAdminAPIKeyCreationHoldsOwnerRulesAgainstPromotionDB
+
+# Deleting an account removes its personal collections' artwork.
+./internal/api/handlers TestAdminAccountDeleteRemovesCollectionArtworkDB
 
 # Recovery identity changes retire links and prevent delivery to a stale address.
 ./internal/passwordreset TestResetLinkRetiresOnRecoveryEmailChangeDB
@@ -424,6 +438,11 @@
 ./internal/requests TestDeleteFailedRequestDatabase
 ./internal/requests TestListDownloadingRequestsOrderDatabase
 ./internal/downloads TestConcurrentArtifactCreatesCannotBypassQuotaDB
+./internal/downloads TestParkedDownloadIsNotServedOrPreparedFromItsOldFileDB
+./internal/downloads TestRegistrationRefusesAFileOfAnotherTitleDB
+./internal/downloads TestRegistrationAndRetitleSerializeOnTheFileRowDB
+./internal/downloads TestManagedRequestRegistersNothingWhenAFileLeftItsTitleDB
+./internal/downloads TestMonitorSyncSkipsAnEpisodeWhoseFileLeftItsTitleDB
 ./internal/downloads TestSubscriptionSyncPagePostgres
 ./internal/downloads TestMonitorSyncKeepsDeletedEpisodesDeletedPostgres
 ./internal/downloads TestMonitorSyncSkipsWatchedEpisodesPostgres

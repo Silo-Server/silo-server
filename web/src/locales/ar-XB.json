@@ -1925,6 +1925,16 @@
       "value": "\u200F\u202EGo Back\u202C"
     }
   ],
+  "player.scrubber.endsAt": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEnds \u202C"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "player.seekInterval.choice": [
     {
       "type": 6,
@@ -4139,6 +4149,18 @@
     {
       "type": 0,
       "value": "\u200F\u202ELoading members...\u202C"
+    }
+  ],
+  "web.admin.access.groups.members.noMatches": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo members match your search.\u202C"
+    }
+  ],
+  "web.admin.access.groups.members.search": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESearch members\u202C"
     }
   ],
   "web.admin.access.groups.newGroup": [
@@ -46598,6 +46620,34 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.list.hidePaths": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHide paths\u202C"
+    }
+  ],
+  "web.admin.libraries.list.moreActions": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMore actions for \u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.moveDown": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMove down\u202C"
+    }
+  ],
+  "web.admin.libraries.list.moveUp": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMove up\u202C"
+    }
+  ],
   "web.admin.libraries.list.neverScanned": [
     {
       "type": 0,
@@ -46626,6 +46676,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EScan Library\u202C"
+    }
+  ],
+  "web.admin.libraries.list.showPaths": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EShow paths\u202C"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -86257,6 +86313,16 @@
       "value": "\u200F\u202ECould not load users.\u202C"
     }
   ],
+  "web.admin.users.list.moreActions": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMore actions for \u202C"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    }
+  ],
   "web.admin.users.list.nextPage": [
     {
       "type": 0,
@@ -86267,6 +86333,12 @@
     {
       "type": 0,
       "value": "\u200F\u202ENo group\u202C"
+    }
+  ],
+  "web.admin.users.list.noMatches": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo users match your search or filter.\u202C"
     }
   ],
   "web.admin.users.list.pageRange": [
@@ -121475,6 +121547,12 @@
       "value": "\u200F\u202EAudio\u202C"
     }
   ],
+  "web.player.audioMenu.onlyOneTrack": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOnly one audio track\u202C"
+    }
+  ],
   "web.player.audioMenu.trackFallback": [
     {
       "type": 0,
@@ -121489,6 +121567,16 @@
     {
       "type": 0,
       "value": "\u200F\u202EAudio tracks\u202C"
+    }
+  ],
+  "web.player.audioMenu.triggerWithTrack": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAudio tracks, \u202C"
+    },
+    {
+      "type": 1,
+      "value": "track"
     }
   ],
   "web.player.bar.backgroundPlayback": [
@@ -121757,6 +121845,16 @@
       "value": "\u202E Mbps\u202C"
     }
   ],
+  "web.player.buffering.loadingFrom": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELoading from \u202C"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.player.buffering.undoCaption": [
     {
       "type": 0,
@@ -121773,6 +121871,30 @@
     {
       "type": 0,
       "value": "\u200F\u202EChapters\u202C"
+    }
+  ],
+  "web.player.chaptersMenu.nowPlaying": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "\u202E · \u202C"
+    },
+    {
+      "type": 8,
+      "value": "now",
+      "children": [
+        {
+          "type": 0,
+          "value": "\u202ENow playing\u202C"
+        }
+      ]
     }
   ],
   "web.player.chaptersMenu.trigger": [
@@ -121835,6 +121957,12 @@
       "value": "\u200F\u202EExit fullscreen\u202C"
     }
   ],
+  "web.player.controls.exitFullscreenShortcut": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EExit fullscreen (F)\u202C"
+    }
+  ],
   "web.player.controls.fillScreen": [
     {
       "type": 0,
@@ -121845,6 +121973,18 @@
     {
       "type": 0,
       "value": "\u200F\u202EFullscreen\u202C"
+    }
+  ],
+  "web.player.controls.fullscreenShortcut": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFullscreen (F)\u202C"
+    }
+  ],
+  "web.player.controls.more": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMore\u202C"
     }
   ],
   "web.player.controls.moreOptions": [
@@ -121871,6 +122011,12 @@
       "value": "\u200F\u202EPicture in Picture\u202C"
     }
   ],
+  "web.player.controls.pictureInPictureItem": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPicture in picture\u202C"
+    }
+  ],
   "web.player.controls.pictureInPictureShortcut": [
     {
       "type": 0,
@@ -121893,6 +122039,26 @@
     {
       "type": 0,
       "value": "\u200F\u202EPrevious episode\u202C"
+    }
+  ],
+  "web.player.controls.remainingTime": [
+    {
+      "type": 0,
+      "value": "\u200F\u202E−\u202C"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.player.controls.remainingTimeLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERemaining \u202C"
+    },
+    {
+      "type": 1,
+      "value": "time"
     }
   ],
   "web.player.controls.skipBack": [
@@ -122595,6 +122761,12 @@
       "value": "\u200F\u202EDropped frames\u202C"
     }
   ],
+  "web.player.info.heading": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPlayback info\u202C"
+    }
+  ],
   "web.player.info.playMethod": [
     {
       "type": 0,
@@ -122799,6 +122971,94 @@
       "value": "title"
     }
   ],
+  "web.player.nextEpisode.playNow": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPlay now\u202C"
+    }
+  ],
+  "web.player.nextEpisode.regionLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EUp next\u202C"
+    }
+  ],
+  "web.player.nextEpisode.seasonEpisode": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESeason \u202C"
+    },
+    {
+      "type": 1,
+      "value": "season"
+    },
+    {
+      "type": 0,
+      "value": "\u202E · Episode \u202C"
+    },
+    {
+      "type": 1,
+      "value": "episode"
+    }
+  ],
+  "web.player.nextEpisode.upNextIn": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EUp next in \u202C"
+            },
+            {
+              "type": 8,
+              "value": "num",
+              "children": [
+                {
+                  "type": 7
+                },
+                {
+                  "type": 0,
+                  "value": "\u202Es\u202C"
+                }
+              ]
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EUp next in \u202C"
+            },
+            {
+              "type": 8,
+              "value": "num",
+              "children": [
+                {
+                  "type": 7
+                },
+                {
+                  "type": 0,
+                  "value": "\u202Es\u202C"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.player.postRoll.stillPlaying": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EStill playing · Click to return\u202C"
+    }
+  ],
   "web.player.quality.auto": [
     {
       "type": 0,
@@ -122845,6 +123105,18 @@
       "value": "\u200F\u202ESelected\u202C"
     }
   ],
+  "web.player.quality.sourceFile": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESource file\u202C"
+    }
+  ],
+  "web.player.quality.streamingQuality": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EStreaming quality\u202C"
+    }
+  ],
   "web.player.quality.title": [
     {
       "type": 0,
@@ -122859,6 +123131,50 @@
     {
       "type": 1,
       "value": "menu"
+    },
+    {
+      "type": 0,
+      "value": "\u202E, \u202C"
+    },
+    {
+      "type": 1,
+      "value": "speed"
+    }
+  ],
+  "web.player.quality.triggerWithValue": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "menu"
+    },
+    {
+      "type": 0,
+      "value": "\u202E, \u202C"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.player.quality.triggerWithValueAndSpeed": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "menu"
+    },
+    {
+      "type": 0,
+      "value": "\u202E, \u202C"
+    },
+    {
+      "type": 1,
+      "value": "value"
     },
     {
       "type": 0,
@@ -123723,6 +124039,12 @@
       "value": "\u200F\u202ESilo couldn't read this file. It appears to be empty or damaged.\u202C"
     }
   ],
+  "web.player.upNext.autoplay": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAuto-play\u202C"
+    }
+  ],
   "web.player.upNext.autoplayOff": [
     {
       "type": 0,
@@ -123791,6 +124113,18 @@
       "value": "series"
     }
   ],
+  "web.player.upNext.heading": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EUp next\u202C"
+    }
+  ],
+  "web.player.upNext.headingShuffle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EUp next at random\u202C"
+    }
+  ],
   "web.player.upNext.minutesLeft": [
     {
       "type": 6,
@@ -123851,10 +124185,68 @@
       "value": "\u200F\u202ENo Preview\u202C"
     }
   ],
+  "web.player.upNext.onDeckScrollBack": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EScroll On Deck back\u202C"
+    }
+  ],
+  "web.player.upNext.onDeckScrollForward": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EScroll On Deck forward\u202C"
+    }
+  ],
   "web.player.upNext.playingNext": [
     {
       "type": 0,
       "value": "\u200F\u202EPlaying Next\u202C"
+    }
+  ],
+  "web.player.upNext.startsAfterCredits": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EStarts on its own when the credits end\u202C"
+    }
+  ],
+  "web.player.upNext.startsIn": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EStarts in \u202C"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202Es\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EStarts in \u202C"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202Es\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.player.volume.label": [
@@ -142345,6 +142737,12 @@
       "value": "\u200F\u202EEnable captions\u202C"
     }
   ],
+  "web.subtitles.menu.heading": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESubtitles\u202C"
+    }
+  ],
   "web.subtitles.menu.noMatch": [
     {
       "type": 0,
@@ -142393,6 +142791,18 @@
       "value": "\u200F\u202EExternal\u202C"
     }
   ],
+  "web.subtitles.menu.subtitlesOffShortcut": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESubtitles off (C)\u202C"
+    }
+  ],
+  "web.subtitles.menu.subtitlesShortcut": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESubtitles (C)\u202C"
+    }
+  ],
   "web.subtitles.menu.syncHint": [
     {
       "type": 0,
@@ -142439,10 +142849,32 @@
       "value": "\u200F\u202EThis server doesn't allow changing subtitle timing.\u202C"
     }
   ],
+  "web.subtitles.menu.toolsLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESubtitle tools\u202C"
+    }
+  ],
+  "web.subtitles.menu.tracksLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESubtitle tracks\u202C"
+    }
+  ],
   "web.subtitles.menu.translateWithAi": [
     {
       "type": 0,
       "value": "\u200F\u202ETranslate with AI…\u202C"
+    }
+  ],
+  "web.subtitles.menu.triggerWithValue": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESubtitles, \u202C"
+    },
+    {
+      "type": 1,
+      "value": "value"
     }
   ],
   "web.subtitles.quotaWindow.day": [
