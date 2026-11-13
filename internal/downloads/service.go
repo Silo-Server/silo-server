@@ -746,7 +746,7 @@ func (s *Service) createSeriesScoped(ctx context.Context, userID int, req Create
 		return nil, "", nil, fmt.Errorf("listing episodes: %w", err)
 	}
 
-	items, skipped, err := s.episodeItemsWithSkipped(ctx, userID, req.historyProfile(), req.ContentID, episodes, template, filter)
+	items, skipped, err := s.episodeItemsWithSkipped(ctx, userID, req.historyProfile(), req.ContentID, episodes, template, entryOwner{req.ProfileID, req.DeviceID}, filter)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -828,14 +828,14 @@ func (s *Service) createSeriesScoped(ctx context.Context, userID int, req Create
 // file. It batches the file lookup into one query (not one per episode) and
 // preserves episode order. Shared by series/season downloads and subscription
 // backfill so file selection stays identical.
-func (s *Service) episodeItems(ctx context.Context, userID int, profileID, seriesID string, episodes []*models.Episode, filter catalog.AccessFilter) ([]managedItem, error) {
-	items, _, err := s.episodeItemsWithSkipped(ctx, userID, profileID, seriesID, episodes, nil, filter)
+func (s *Service) episodeItems(ctx context.Context, userID int, profileID, seriesID string, episodes []*models.Episode, owner entryOwner, filter catalog.AccessFilter) ([]managedItem, error) {
+	items, _, err := s.episodeItemsWithSkipped(ctx, userID, profileID, seriesID, episodes, nil, owner, filter)
 	return items, err
 }
 
 // episodeItemsWithSkipped picks a file per episode: the version closest to
 // template when one is set, otherwise the profile's watch-history preference.
-func (s *Service) episodeItemsWithSkipped(ctx context.Context, userID int, profileID, seriesID string, episodes []*models.Episode, template *models.MediaFile, filter catalog.AccessFilter) ([]managedItem, []SkippedDownload, error) {
+func (s *Service) episodeItemsWithSkipped(ctx context.Context, userID int, profileID, seriesID string, episodes []*models.Episode, template *models.MediaFile, owner entryOwner, filter catalog.AccessFilter) ([]managedItem, []SkippedDownload, error) {
 	if len(episodes) == 0 {
 		return nil, nil, nil
 	}
@@ -847,64 +847,54 @@ func (s *Service) episodeItemsWithSkipped(ctx context.Context, userID int, profi
 	if err != nil {
 		return nil, nil, fmt.Errorf("resolving files for %d episodes: %w", len(episodes), err)
 	}
-	// An episode served only by a multi-episode file linked to an earlier
-	// episode can register it only under that episode, so its pick decides
-	// whether the file is free. Load the linked episodes this page lacks.
-	pickIDs := episodeIDs
-	var linked []string
-	for _, ep := range episodes {
-		for _, f := range filesByEpisode[ep.ContentID] {
-			if linkedElsewhere(f, ep.ContentID) && !slices.Contains(pickIDs, f.EpisodeID) && !slices.Contains(linked, f.EpisodeID) {
-				linked = append(linked, f.EpisodeID)
-			}
-		}
-	}
-	if len(linked) > 0 {
-		linkedFiles, err := s.fileRepo.ListByEpisodeIDs(ctx, linked)
-		if err != nil {
-			return nil, nil, fmt.Errorf("resolving files for %d linked episodes: %w", len(linked), err)
-		}
-		for id, files := range linkedFiles {
-			filesByEpisode[id] = files
-		}
-		pickIDs = append(slices.Clone(episodeIDs), linked...)
-	}
 	var pref versionPreference
 	if template != nil {
 		pref = templatePreference(template)
 	} else {
 		for _, files := range filesByEpisode {
 			if len(files) > 1 {
-				pref = s.loadVersionPreference(ctx, userID, profileID, seriesID, pickIDs)
+				pref = s.loadVersionPreference(ctx, userID, profileID, seriesID, episodeIDs)
 				break
 			}
 		}
 	}
-	picks := make(map[string]*models.MediaFile, len(pickIDs))
-	for _, id := range pickIDs {
-		picks[id] = pref.pick(id, ownCandidates(id, allowedCandidates(filesByEpisode[id], filter)))
+	picks := make(map[string]*models.MediaFile, len(episodes))
+	for _, ep := range episodes {
+		picks[ep.ContentID] = pref.pick(ep.ContentID, ownCandidates(ep.ContentID, allowedCandidates(filesByEpisode[ep.ContentID], filter)))
 	}
 	items := make([]managedItem, 0, len(episodes))
 	skipped := make([]SkippedDownload, 0)
 	queued := make(map[int]bool, len(episodes))
 	for _, ep := range episodes {
-		if len(filesByEpisode[ep.ContentID]) == 0 {
+		files := filesByEpisode[ep.ContentID]
+		if len(files) == 0 {
 			skipped = append(skipped, SkippedDownload{EpisodeID: ep.ContentID, Reason: "no_file"})
 			continue
 		}
 		file := picks[ep.ContentID]
 		// Every row is keyed on its file's linked episode (see
-		// registrableFile). A multi-episode file serves each episode it spans
-		// and is downloaded once, under its first episode, so a later page of
-		// the same batch finds the entry an earlier page registered. When that
-		// episode keeps a different file, the later episode has no entry.
+		// registrableFile), so an episode served only by a multi-episode file
+		// shares the entry of the range's first episode. It follows that
+		// entry's file when the file serves it too, and has no entry of its
+		// own when the first episode keeps a file that does not.
 		if linkedElsewhere(file, ep.ContentID) {
-			if first := picks[file.EpisodeID]; first != nil && first.ID != file.ID {
-				skipped = append(skipped, SkippedDownload{EpisodeID: ep.ContentID, Reason: "multi_episode_conflict"})
+			first, err := s.linkedEpisodeFile(ctx, userID, seriesID, file.EpisodeID, picks, owner, files)
+			if err != nil {
+				return nil, nil, err
+			}
+			switch {
+			case first == nil:
+			case servedBy(files, first.ID):
+				file = first
+			default:
+				skipped = append(skipped, SkippedDownload{EpisodeID: ep.ContentID, Reason: SkipReasonMultiEpisodeConflict})
 				continue
 			}
 		}
 		episodeID := ep.ContentID
+		// A multi-episode file is downloaded once, under its first episode,
+		// so a later page of the same batch finds the entry an earlier page
+		// registered.
 		if file.MultiEpisodeEnd > file.MultiEpisodeStart {
 			if queued[file.ID] {
 				continue
@@ -915,6 +905,48 @@ func (s *Service) episodeItemsWithSkipped(ctx context.Context, userID int, profi
 		items = append(items, managedItem{file: file, contentID: seriesID, episodeID: episodeID})
 	}
 	return items, skipped, nil
+}
+
+// SkipReasonMultiEpisodeConflict marks a batch or monitor episode served only
+// by a multi-episode file whose first episode keeps a different file. A
+// multi-episode file is registered under its first episode only, so the
+// episode has no entry of its own.
+const SkipReasonMultiEpisodeConflict = "multi_episode_conflict"
+
+// entryOwner is the profile and device a batch registers managed entries
+// for; an empty deviceID is an ephemeral batch with no entries to consult.
+type entryOwner struct{ profileID, deviceID string }
+
+// linkedEpisodeFile returns the file the first episode of a multi-episode
+// range registers: its pick when the batch holds it, otherwise the file of
+// the device's entry for it, looked up among served, the files serving the
+// later episode. It returns nil when neither is known, and the later episode
+// then registers its pick under the first episode.
+func (s *Service) linkedEpisodeFile(ctx context.Context, userID int, seriesID, linkedID string, picks map[string]*models.MediaFile, owner entryOwner, served []*models.MediaFile) (*models.MediaFile, error) {
+	if pick, ok := picks[linkedID]; ok {
+		return pick, nil
+	}
+	if owner.deviceID == "" {
+		return nil, nil
+	}
+	entry, err := s.repo.GetManagedEntry(ctx, userID, owner.profileID, owner.deviceID, seriesID, linkedID)
+	if errors.Is(err, ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading the entry of episode %s: %w", linkedID, err)
+	}
+	for _, f := range served {
+		if f.ID == entry.MediaFileID {
+			return f, nil
+		}
+	}
+	return &models.MediaFile{ID: entry.MediaFileID}, nil
+}
+
+// servedBy reports whether files holds the file with id.
+func servedBy(files []*models.MediaFile, id int) bool {
+	return slices.ContainsFunc(files, func(f *models.MediaFile) bool { return f.ID == id })
 }
 
 // linkedElsewhere reports whether f is a multi-episode file serving episodeID

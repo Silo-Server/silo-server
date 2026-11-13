@@ -3,6 +3,7 @@ package downloads
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -168,14 +169,43 @@ func TestSeasonWithAMultiEpisodeFileRegistersEachEpisodeOncePostgres(t *testing.
 	svc := NewService(repo, nil, nil, files, createItemResolver{}, pager, fakeUserRepo{&models.User{ID: 1, DownloadAllowed: new(true)}}, &syncAccess{}, nil, &config.DownloadConfig{Enabled: true})
 	req := CreateRequest{ContentID: "series", ProfileID: "profile", DeviceID: "device", BatchID: "season", StrictIdentity: true, VersionTemplateFileID: 1}
 
-	// Following episode 1's own file, each episode with a file of its own
-	// gets one entry, and episode 3 is skipped rather than refusing the page.
-	page, err := svc.CreateSeriesPage(t.Context(), 1, req, new(1), nil, 10, catalog.AccessFilter{})
-	if err != nil || len(page.Items) != 2 ||
-		page.Items[0].EpisodeID != "ep-1" || page.Items[0].MediaFileID != 1 ||
-		page.Items[1].EpisodeID != "ep-2" || page.Items[1].MediaFileID != 2 ||
-		len(page.Skipped) != 1 || page.Skipped[0].EpisodeID != "ep-3" {
-		t.Fatalf("season %+v skipped %+v %v", page.Items, page.Skipped, err)
+	pageOf := func(device string, eps ...*models.Episode) CreatePage {
+		t.Helper()
+		pager.rows = eps
+		r := req
+		r.DeviceID = device
+		page, err := svc.CreateSeriesPage(t.Context(), 1, r, new(1), nil, 10, catalog.AccessFilter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return page
+	}
+	ep1, ep2, ep3 := pager.rows[0], pager.rows[1], pager.rows[2]
+	registered := func(page CreatePage) map[string]int {
+		got := map[string]int{}
+		for _, d := range page.Items {
+			got[d.EpisodeID] = d.MediaFileID
+		}
+		return got
+	}
+
+	// Following episode 1's own file, each episode with a file of its own gets
+	// one entry, and episode 3 is skipped rather than refusing the page. One
+	// episode per page reaches the same result: episode 3's page finds the
+	// entry the first page registered for episode 1.
+	whole := pageOf("device", ep1, ep2, ep3)
+	if got := registered(whole); !reflect.DeepEqual(got, map[string]int{"ep-1": 1, "ep-2": 2}) || len(whole.Skipped) != 1 || whole.Skipped[0].EpisodeID != "ep-3" {
+		t.Fatalf("season %v skipped %+v", got, whole.Skipped)
+	}
+	pageOf("paged", ep1)
+	pageOf("paged", ep2)
+	if third := pageOf("paged", ep3); len(third.Items) != 0 || len(third.Skipped) != 1 || third.Skipped[0].Reason != SkipReasonMultiEpisodeConflict {
+		t.Fatalf("episode 3 page %+v skipped %+v", third.Items, third.Skipped)
+	}
+	// Without an entry for episode 1, as when a monitor leaves out a watched
+	// episode 1, episode 3 registers the range under episode 1.
+	if alone := pageOf("fresh", ep3); !reflect.DeepEqual(registered(alone), map[string]int{"ep-1": 3}) {
+		t.Fatalf("episode 3 alone %+v skipped %+v", alone.Items, alone.Skipped)
 	}
 }
 

@@ -156,7 +156,7 @@ func TestEpisodeItemsFollowTheSeriesVersion(t *testing.T) {
 	}
 
 	// A page holding only ep-2 and ep-3 still follows ep-1's version.
-	items, err := svc.episodeItems(context.Background(), 7, "p1", "series", []*models.Episode{{ContentID: "ep-2"}, {ContentID: "ep-3"}}, catalog.AccessFilter{})
+	items, err := svc.episodeItems(context.Background(), 7, "p1", "series", []*models.Episode{{ContentID: "ep-2"}, {ContentID: "ep-3"}}, entryOwner{}, catalog.AccessFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,21 +246,29 @@ func TestEpisodeItemsKeepEachRowOnItsFilesLinkedEpisode(t *testing.T) {
 	// multi-episode file.
 	single := &models.MediaFile{ID: 1, ContentID: "series", EpisodeID: "ep-1", Resolution: "720p"}
 	multi := &models.MediaFile{ID: 3, ContentID: "series", EpisodeID: "ep-1", Resolution: "720p", MultiEpisodeStart: 1, MultiEpisodeEnd: 3}
-	files := episodeFiles{
-		"ep-1": {single, multi},
-		"ep-2": {multi, {ID: 5, ContentID: "series", EpisodeID: "ep-2", Resolution: "1080p"}},
-		"ep-3": {multi},
-		"ep-4": {{ID: 2, ContentID: "series", EpisodeID: "ep-4", Resolution: "1080p"}},
-	}
 	season := []*models.Episode{
 		{ContentID: "ep-1", SeasonNumber: 1, EpisodeNumber: 1},
 		{ContentID: "ep-2", SeasonNumber: 1, EpisodeNumber: 2},
 		{ContentID: "ep-3", SeasonNumber: 1, EpisodeNumber: 3},
-		{ContentID: "ep-4", SeasonNumber: 1, EpisodeNumber: 4},
 	}
-	svc := &Service{fileRepo: files}
+	files := episodeFiles{
+		"ep-1": {single, multi},
+		"ep-2": {multi, {ID: 5, ContentID: "series", EpisodeID: "ep-2", Resolution: "1080p"}},
+		"ep-3": {multi},
+	}
+	// Two versions of S01E01-E02, both linked to episode 1, and no other
+	// files. The profile last played episode 1 in 720p and episode 2 in 1080p.
+	range720 := &models.MediaFile{ID: 7, ContentID: "series", EpisodeID: "ep-1", Resolution: "720p", MultiEpisodeStart: 1, MultiEpisodeEnd: 2}
+	range1080 := &models.MediaFile{ID: 8, ContentID: "series", EpisodeID: "ep-1", Resolution: "1080p", MultiEpisodeStart: 1, MultiEpisodeEnd: 2}
+	versions := episodeFiles{"ep-1": {range720, range1080}, "ep-2": {range720, range1080}}
+	history := hintProgressStores{&hintProgressStore{rows: map[string]userstore.WatchProgress{
+		"ep-1": {UpdatedAt: "2026-11-01T10:00:00Z", LastFileID: new(7)},
+		"ep-2": {UpdatedAt: "2026-11-02T10:00:00Z", LastFileID: new(8)},
+	}}}
 
 	cases := map[string]struct {
+		svc      *Service
+		episodes []*models.Episode
 		template *models.MediaFile
 		want     map[string]int
 		skipped  []string
@@ -268,44 +276,40 @@ func TestEpisodeItemsKeepEachRowOnItsFilesLinkedEpisode(t *testing.T) {
 		// Episode 1 keeps its own file, so episode 3, whose only file is the
 		// multi-episode file linked to episode 1, has no entry of its own.
 		// Episode 2 takes its own file over the matching 720p range.
-		"episode 1 picks its own file": {single, map[string]int{"ep-1": 1, "ep-2": 5, "ep-4": 2}, []string{"ep-3"}},
+		"episode 1 keeps its own file": {&Service{fileRepo: files}, season, single, map[string]int{"ep-1": 1, "ep-2": 5}, []string{"ep-3"}},
 		// Episode 1 picks the multi-episode file, which then serves episode 3
 		// through episode 1's entry.
-		"episode 1 picks the range": {multi, map[string]int{"ep-1": 3, "ep-2": 5, "ep-4": 2}, nil},
+		"episode 1 picks the range": {&Service{fileRepo: files}, season, multi, map[string]int{"ep-1": 3, "ep-2": 5}, nil},
+		// Episode 2 would pick the 1080p range, but episode 1's 720p range
+		// already serves it.
+		"episode 1's range serves episode 2": {&Service{fileRepo: versions, progressStores: history}, season[:2], nil, map[string]int{"ep-1": 7}, nil},
 	}
 	for name, tc := range cases {
-		for pages, batch := range map[string][][]*models.Episode{
-			"one page":     {season},
-			"one per page": {season[:1], season[1:2], season[2:3], season[3:]},
-		} {
-			t.Run(name+"/"+pages, func(t *testing.T) {
-				got := map[string]int{}
-				var skipped []string
-				for _, page := range batch {
-					items, skips, err := svc.episodeItemsWithSkipped(context.Background(), 7, "", "series", page, tc.template, catalog.AccessFilter{})
-					if err != nil {
-						t.Fatal(err)
-					}
-					for _, it := range items {
-						if prev, ok := got[it.episodeID]; ok && prev != it.file.ID {
-							t.Fatalf("episode %s registered files %d and %d", it.episodeID, prev, it.file.ID)
-						}
-						if it.episodeID != it.file.EpisodeID {
-							t.Fatalf("file %d registered under %s, linked to %s", it.file.ID, it.episodeID, it.file.EpisodeID)
-						}
-						got[it.episodeID] = it.file.ID
-					}
-					for _, s := range skips {
-						if s.Reason != "multi_episode_conflict" {
-							t.Fatalf("episode %s skipped as %q", s.EpisodeID, s.Reason)
-						}
-						skipped = append(skipped, s.EpisodeID)
-					}
+		t.Run(name, func(t *testing.T) {
+			items, skips, err := tc.svc.episodeItemsWithSkipped(context.Background(), 7, "p1", "series", tc.episodes, tc.template, entryOwner{}, catalog.AccessFilter{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := map[string]int{}
+			for _, it := range items {
+				if _, ok := got[it.episodeID]; ok {
+					t.Fatalf("episode %s registered twice", it.episodeID)
 				}
-				if !reflect.DeepEqual(got, tc.want) || !reflect.DeepEqual(skipped, tc.skipped) {
-					t.Fatalf("registered %v skipped %v, want %v skipped %v", got, skipped, tc.want, tc.skipped)
+				if it.episodeID != it.file.EpisodeID {
+					t.Fatalf("file %d registered under %s, linked to %s", it.file.ID, it.episodeID, it.file.EpisodeID)
 				}
-			})
-		}
+				got[it.episodeID] = it.file.ID
+			}
+			var skipped []string
+			for _, s := range skips {
+				if s.Reason != SkipReasonMultiEpisodeConflict {
+					t.Fatalf("episode %s skipped as %q", s.EpisodeID, s.Reason)
+				}
+				skipped = append(skipped, s.EpisodeID)
+			}
+			if !reflect.DeepEqual(got, tc.want) || !reflect.DeepEqual(skipped, tc.skipped) {
+				t.Fatalf("registered %v skipped %v, want %v skipped %v", got, skipped, tc.want, tc.skipped)
+			}
+		})
 	}
 }

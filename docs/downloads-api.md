@@ -512,9 +512,11 @@ without a local file.
 A multi-episode file (S01E01-E02) is registered once, under the first episode
 of its range, which the catalog links it to; the other episodes it spans have
 no entry of their own. A later episode with a file of its own takes that file.
-An episode whose only file is a multi-episode file is listed in `skipped` with
-reason `multi_episode_conflict` when the range's first episode registers a
-different file.
+An episode served only by multi-episode files shares the first episode's entry
+when that entry's file serves it. When the first episode keeps a file that does
+not, the episode is listed in `skipped` with reason `multi_episode_conflict`.
+The first episode's file is its pick on the same page, otherwise the file of the
+device's existing entry for it.
 
 Batch pages preserve existing managed entries by default, including their chosen
 bytes, completion or terminal status, revision and previous batch membership. Use
@@ -2057,8 +2059,8 @@ optional `season_number` (zero selects Specials). The `limit` query defaults to
 version template and device/profile identity unchanged while following `page.next_cursor` through
 the `cursor` query. Continue through empty `items` when `page.has_more` is true;
 `skipped` reports episodes with no file (`no_file`), episodes the preset cannot
-reach (`quality_unavailable`), and episodes whose only file is a multi-episode file
-the range's first episode does not register (`multi_episode_conflict`). When `bulk_quality` is reported, a managed batch
+reach (`quality_unavailable`), and episodes served only by a multi-episode file
+whose first episode keeps a different file (`multi_episode_conflict`). When `bulk_quality` is reported, a managed batch
 accepts any of `quality_presets`; a batch without a device header takes only
 `original`. When `batch_version` is reported, `media_file_id` on a batch names
 the version template described in §4.1.
