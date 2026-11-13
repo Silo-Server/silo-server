@@ -203,7 +203,14 @@ func buildSheetsArgs(req Request, attempt Attempt, hw hardwareDecode, entries []
 	}
 	args = append(args, req.keyframeInputArgs(skip)...)
 	args = append(args, decode...)
+	// AVI packets carry a DTS but no PTS. Without one, a decoder that holds
+	// keyframes back for reordering, such as H.264 or MPEG-2 with B-frames,
+	// stamps each with the DTS of the packet that releases it, a GOP or more
+	// later, and the timing log has no packet time. genpts fills each
+	// missing PTS from the stream's later DTS before decoding; packets that
+	// carry one keep it.
 	args = append(args,
+		"-fflags", "+genpts",
 		"-ss", formatSeconds(req.Window.StartSeconds),
 		"-t", formatSeconds(req.Window.DurationSeconds),
 		"-i", req.Input,

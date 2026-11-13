@@ -318,17 +318,14 @@ func (a *sheetAssembler) readPacketTiming(path string) error {
 // duration count in that time base and are relative to the window start.
 // Stream 0 is the video; any later stream is an audio stream (see
 // buildSheetsArgs), which only extends audioEnd.
-// With dtsTiming, a video packet without a PTS falls back to its DTS:
-// packed-bitstream XviD in AVI carries no PTS on any packet, and a DTS never
-// runs ahead of the PTS it stands in for, so the fallback cannot stretch a
-// reordered stream's extent. Without a PTS the decoder stamps each frame
-// with the DTS of the packet that released it, so the fallback is set only
-// for a decoder in low-delay mode, which releases each keyframe as it
-// arrives. A reordering decoder, such as H.264 with B-frames, releases a
-// keyframes-only read's keyframes a GOP or more late; its DTS-only windows
-// keep failing rather than publish every cell at an earlier keyframe. Audio
-// is not reordered, so an audio packet without a PTS always counts by its
-// DTS.
+// A window demuxes with genpts (see buildSheetsArgs), which gives AVI's
+// packets the PTS the container leaves out. With dtsTiming, a video packet
+// still without one falls back to its DTS: a DTS never runs ahead of the
+// PTS it stands in for, so the fallback cannot stretch a reordered stream's
+// extent. Without a PTS the decoder stamps each frame with the DTS of the
+// packet that released it, so the fallback is set only for a decoder in
+// low-delay mode, which releases each keyframe as it arrives. Audio is not
+// reordered, so an audio packet without a PTS always counts by its DTS.
 func (a *sheetAssembler) packetLine(line string) {
 	if raw, ok := strings.CutPrefix(line, "#tb "); ok {
 		index, value, ok := strings.Cut(raw, ": ")

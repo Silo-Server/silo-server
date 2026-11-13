@@ -200,7 +200,7 @@ func TestBuildSheetsArgs(t *testing.T) {
 		t.Fatal(err)
 	}
 	want = []string{"-hide_banner", "-nostdin", "-loglevel", "repeat+info", "-threads", "2", "-filter_threads", "2",
-		"-skip_frame:v", "nokey", "-ss", "0", "-t", "15.04", "-i", "/media/a.mkv"}
+		"-skip_frame:v", "nokey", "-fflags", "+genpts", "-ss", "0", "-t", "15.04", "-i", "/media/a.mkv"}
 	want = append(want, "-map", "0:V:0", "-c", "copy", "-f", "framecrc", "packets.framecrc")
 	want = append(want, output...)
 	if !slices.Equal(args, want) || list != nil {
