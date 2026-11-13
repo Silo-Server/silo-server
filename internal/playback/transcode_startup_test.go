@@ -238,16 +238,26 @@ func TestStartReconstructTranscodeKeepsOutputForNextAttempt(t *testing.T) {
 	if err := os.WriteFile(servedSegment, []byte("segment"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// The request that triggered the rebuild ends during the first attempt.
+	// The rebuild serves every request waiting on it, so later attempts still
+	// start. Like StartTranscode for some recipes, this seam returns a
+	// canceled context's error.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	attempts := 0
-	start := func(_ context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
+	start := func(startCtx context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
+		if err := startCtx.Err(); err != nil {
+			return nil, err
+		}
 		attempts++
+		cancel()
 		if _, err := os.Stat(servedSegment); err != nil {
 			t.Fatalf("attempt %d: failed attempt removed the shared output dir: %v", attempts, err)
 		}
 		return fakeStartupSession(t, opts, outputDir, attempts == 3, false), nil
 	}
 
-	session, err := StartReconstructTranscode(context.Background(), pipeline, TranscodeStartup{Timeout: time.Millisecond, Start: start})
+	session, err := StartReconstructTranscode(ctx, pipeline, TranscodeStartup{Timeout: time.Millisecond, Start: start})
 	if err != nil {
 		t.Fatalf("StartReconstructTranscode: %v", err)
 	}

@@ -144,30 +144,34 @@ func runTranscodeStartup(ctx context.Context, pipeline *AutoTranscodePipeline, s
 	// A fresh start stops waiting when its request ends: the caller holds the
 	// session lifecycle lock for the whole wait and discards the transport once
 	// its request is gone, so waiting on only delays the client's retry. A
-	// reconstruct serves every segment request waiting on it, so it outlives
-	// the one that triggered it.
-	waitCtx := ctx
+	// reconstruct serves every segment request waiting on it, so each attempt's
+	// launch and wait outlive the one that triggered it. StartTranscode returns
+	// a canceled context's error for some recipes (an HEVC target, a capped
+	// VAAPI encode, burned-in text subtitles), which would fail the rebuild
+	// for all of them.
+	attemptCtx := ctx
 	if reconstruct {
-		waitCtx = context.WithoutCancel(ctx)
+		attemptCtx = context.WithoutCancel(ctx)
 	}
 	attempt := pipeline.Current()
 	legacyRetryUsed := false
 	for {
-		session, err := startup.start(ctx, attempt)
+		session, err := startup.start(attemptCtx, attempt)
 		if err != nil {
 			// Validation, directory, and exec failures are not hardware
 			// failures; another path cannot fix them.
 			return nil, err
 		}
 
-		_, err = session.WaitForGenerationManifestContext(waitCtx, startup.timeout())
+		_, err = session.WaitForGenerationManifestContext(attemptCtx, startup.timeout())
 		if err == nil {
 			pipeline.RememberSuccess()
 			return session, nil
 		}
-		if waitCtx.Err() != nil {
-			// The requester left; this says nothing about the device, so the
-			// pipeline neither advances nor remembers a result.
+		if attemptCtx.Err() != nil {
+			// A fresh start's requester left (a reconstruct's context never
+			// ends); this says nothing about the device, so the pipeline
+			// neither advances nor remembers a result.
 			wasRunning := session.IsRunning()
 			failedDevice := session.Opts().HWDevice
 			_ = session.Close()
