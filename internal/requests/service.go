@@ -265,8 +265,8 @@ const (
 	// every row at once: on a cold certification cache each consumed page
 	// costs up to 20 cert lookups against the client's rate limiter. A
 	// Discover page row reads ceil(limit/20) pages, plus one when it filters
-	// (see firstRowPage), so its worst case is rows x that x 20 lookups;
-	// /api/v1's six rows read sectionBackfillBudgetAggregate pages each.
+	// (see firstRowPage), so its worst case is rows x that x 20 lookups; a
+	// layout preview reads sectionBackfillBudgetAggregate pages per row.
 	// Steady state is unaffected: certifications are cached for 7 days,
 	// shared across all profiles.
 	sectionBackfillBudgetSingle    = 5
@@ -1669,26 +1669,17 @@ func withPolicyCache(ctx context.Context) context.Context {
 	return context.WithValue(ctx, policyCacheKey{}, &policyCache{byUser: map[int]EffectivePolicy{}})
 }
 
-func (s *Service) resolvePolicy(ctx context.Context, userID int) (EffectivePolicy, error) {
-	settings, err := s.store.GetSettings(ctx)
-	if err != nil {
-		return EffectivePolicy{}, err
-	}
-	limit, err := s.store.GetUserLimit(ctx, userID)
-	if err != nil {
-		return EffectivePolicy{}, err
-	}
-	viewerAccess, err := s.viewerRequestAccess(ctx, userID)
-	if err != nil {
-		return EffectivePolicy{}, err
-	}
-
+// LayeredPolicy is the request policy an account gets, without its usage:
+// the server's settings, then its access group's limits, then its own, a
+// layer set to inherit deferring to the next; allowed is the account's
+// requests switch. Every reader of an account's request authority uses it.
+func LayeredPolicy(settings Settings, allowed bool, group *GroupLimit, limit *UserLimit) EffectivePolicy {
 	policy := EffectivePolicy{
 		RequestsEnabled: settings.RequestsEnabled,
 		MaxRequests:     settings.GlobalMaxRequests,
 		WindowDays:      settings.GlobalWindowDays,
 		AutoApprove:     settings.GlobalAutoApprovalEnabled,
-		Blocked:         !viewerAccess.allowed,
+		Blocked:         !allowed,
 	}
 	if policy.WindowDays <= 0 {
 		policy.WindowDays = 7
@@ -1698,7 +1689,7 @@ func (s *Service) resolvePolicy(ctx context.Context, userID int) (EffectivePolic
 	limitMode, maxRequests, windowDays := LimitModeInherit, (*int)(nil), (*int)(nil)
 	approval := ApprovalModeInherit
 	layers := []*UserLimit{}
-	if g := viewerAccess.group; g != nil {
+	if g := group; g != nil {
 		layers = append(layers, &UserLimit{LimitMode: g.LimitMode, MaxRequests: g.MaxRequests, WindowDays: g.WindowDays, ApprovalMode: g.ApprovalMode})
 	}
 	if limit != nil {
@@ -1734,6 +1725,28 @@ func (s *Service) resolvePolicy(ctx context.Context, userID int) (EffectivePolic
 		policy.AutoApprove = true
 	}
 
+	return policy
+}
+
+func (s *Service) resolvePolicy(ctx context.Context, userID int) (EffectivePolicy, error) {
+	settings, err := s.store.GetSettings(ctx)
+	if err != nil {
+		return EffectivePolicy{}, err
+	}
+	limit, err := s.store.GetUserLimit(ctx, userID)
+	if err != nil {
+		return EffectivePolicy{}, err
+	}
+	viewerAccess, err := s.viewerRequestAccess(ctx, userID)
+	if err != nil {
+		return EffectivePolicy{}, err
+	}
+
+	var group *GroupLimit
+	if viewerAccess.group != nil {
+		group = viewerAccess.group
+	}
+	policy := LayeredPolicy(settings, viewerAccess.allowed, group, limit)
 	policy.WindowStart = s.now().AddDate(0, 0, -policy.WindowDays)
 	if !policy.Unlimited {
 		used, err := s.store.CountUserRequestsSince(ctx, userID, policy.WindowStart)
@@ -2588,6 +2601,7 @@ func (s *Service) recordTargets(ctx context.Context, req Request, actor Viewer, 
 	validStatus := map[Status]bool{StatusQueued: true, StatusDownloading: true, StatusCompleted: true, StatusFailed: true}
 	returned := map[Quality]bool{}
 	var record []Target
+	completion := newCompletionCheck(req, nil)
 	for _, rt := range targets {
 		if !validQuality[rt.Quality] {
 			slog.WarnContext(ctx, "requests: plugin returned unknown quality; skipping", "component", "requests", "request_id", req.ID, "quality", string(rt.Quality))
@@ -2608,6 +2622,10 @@ func (s *Service) recordTargets(ctx context.Context, req Request, actor Viewer, 
 		if status == "" || !validStatus[status] {
 			status = StatusQueued // coerce unknown/empty status to the DB-valid default
 		}
+		// The plugin has already acted, so a completion that does not stand,
+		// or that could not be checked, is recorded as queued rather than
+		// dropped; reconcile completes it once the seasons are in.
+		status = completion.reported(ctx, s, StatusQueued, status)
 		message := rt.Message
 		if status == StatusFailed {
 			message = explainSubmissionFailure(req, message)
@@ -2618,6 +2636,10 @@ func (s *Service) recordTargets(ctx context.Context, req Request, actor Viewer, 
 			ExternalID: rt.ExternalID, ExternalStatus: rt.ExternalStatus, LastError: message,
 			RouteID: decision.RouteID, RouteName: decision.RouteName,
 		})
+	}
+	if completion.err != nil {
+		slog.WarnContext(ctx, "requests: could not check the requested seasons; holding the target", "component", "requests",
+			"request_id", req.ID, "err", completion.err)
 	}
 	for _, q := range plan.want {
 		if returned[q] {
@@ -2895,9 +2917,9 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request, fc *fulfill
 		return reconcileUnchanged, nil
 	}
 	statuses, checkErr := s.checkTargetStatuses(ctx, req, targets, fc)
-	change, err := s.applyTargetStatuses(ctx, targets, statuses)
+	change, err := s.applyTargetStatuses(ctx, newCompletionCheck(req, &present), targets, statuses)
 	if err != nil {
-		return reconcileUnchanged, err
+		return reconcileUnchanged, errors.Join(err, checkErr)
 	}
 	return change, checkErr
 }
@@ -2909,8 +2931,12 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request, fc *fulfill
 // idle target costs no write per pass. A target with progress that got no
 // status back (its server was skipped or failed, or the call did) keeps it
 // until it goes stale; see settleUnansweredDownload. Both reconcile and the
-// download refresh pass apply statuses here.
-func (s *Service) applyTargetStatuses(ctx context.Context, targets []Target, statuses []RouterTargetStatus) (reconcileChange, error) {
+// download refresh pass apply statuses here. A completion the plugin reports
+// for a season request stands only once the requested seasons are in the
+// library (see completionCheck); until then the target keeps its status and
+// only the raw status is written. When the library cannot be read, the other
+// statuses are still applied and the error is returned afterwards.
+func (s *Service) applyTargetStatuses(ctx context.Context, check *completionCheck, targets []Target, statuses []RouterTargetStatus) (reconcileChange, error) {
 	change := reconcileUnchanged
 	answered := make([]bool, len(targets))
 	for _, st := range statuses {
@@ -2927,23 +2953,12 @@ func (s *Service) applyTargetStatuses(ctx context.Context, targets []Target, sta
 			continue
 		}
 		status := target.Status
-		if newStatus := st.Status; newStatus != "" && newStatus != target.Status {
+		if newStatus := check.reported(ctx, s, target.Status, st.Status); newStatus != "" && newStatus != target.Status {
 			if _, err := s.store.UpdateTargetStatus(ctx, target.ID, newStatus, "", st.ExternalStatus, st.Message, Viewer{}); err != nil {
 				return reconcileUnchanged, err
 			}
 			status = newStatus
-			switch newStatus {
-			case StatusCompleted:
-				change = reconcileCompleted
-			case StatusDownloading:
-				if change == reconcileUnchanged {
-					change = reconcileDownloading
-				}
-			case StatusFailed:
-				if change == reconcileUnchanged {
-					change = reconcileFailed
-				}
-			}
+			change = mergeReconcileChange(change, newStatus)
 		} else if st.ExternalStatus != "" && st.ExternalStatus != target.ExternalStatus {
 			// The server's own state moved without changing the target's
 			// status (say, a download went from importing to stalled). Keep
@@ -2966,7 +2981,23 @@ func (s *Service) applyTargetStatuses(ctx context.Context, targets []Target, sta
 			return reconcileUnchanged, err
 		}
 	}
-	return change, nil
+	return change, check.err
+}
+
+// mergeReconcileChange folds a target's new status into a pass's change: a
+// completion wins, and otherwise the first change seen stands.
+func mergeReconcileChange(change reconcileChange, status Status) reconcileChange {
+	switch {
+	case status == StatusCompleted:
+		return reconcileCompleted
+	case change != reconcileUnchanged:
+		return change
+	case status == StatusDownloading:
+		return reconcileDownloading
+	case status == StatusFailed:
+		return reconcileFailed
+	}
+	return change
 }
 
 // checkTargetStatuses asks each live target's plugin for its status. Targets

@@ -1,5 +1,6 @@
 import type { ItemDetail } from "@/api/types";
 import type { V2Body } from "@/api/v2/request";
+import { t } from "@/i18n";
 
 /** One target of the v2 history removal command, as the contract declares it. */
 export type HistoryRemovalTarget = V2Body<"POST /api/v2/history/remove">["targets"][number];
@@ -23,28 +24,27 @@ export function buildHistoryRemovalTarget(
   };
 }
 
-export function historyRemovalLabelForMediaType(mediaType: HistoryRemovalMediaType): string {
-  return historyRemovalScopeForMediaType(mediaType) === "show"
-    ? "Remove Show Watch Data"
-    : "Remove Watch Data";
-}
-
 export function historyRemovalDialogTitle(
   targets: Array<Pick<HistoryRemovalTarget, "scope">>,
 ): string {
   if (targets.length > 1) {
-    return "Remove selected watch data?";
+    return t("web.catalog.history.dialogTitleSelected");
   }
-  return targets[0]?.scope === "show" ? "Remove show watch data?" : "Remove watch data?";
+  return targets[0]?.scope === "show"
+    ? t("web.catalog.history.dialogTitleShow")
+    : t("web.catalog.history.dialogTitle");
 }
 
 export function historyRemovalDialogDescription(
   targets: Array<Pick<HistoryRemovalTarget, "scope">>,
 ): string {
   if (targets.length > 1) {
-    return `${targets.length} selected items will have their watch history, watched status, and resume progress cleared for this profile.`;
+    return t("web.catalog.history.dialogBodySelected", {
+      count: targets.length,
+      selected: targets.length,
+    });
   }
   return targets[0]?.scope === "show"
-    ? "This clears the show's watch history, watched episodes, and resume progress for this profile."
-    : "This clears the item's watch history, watched status, and resume progress for this profile.";
+    ? t("web.catalog.history.dialogBodyShow")
+    : t("web.catalog.history.dialogBody");
 }

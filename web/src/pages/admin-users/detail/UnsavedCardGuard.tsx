@@ -10,8 +10,10 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { useT } from "@/i18n";
+import { TOUCH_TARGETS } from "@/lib/touchTargets";
 
-import { ACCESS_CARD_TITLES, useCardEditing } from "./cardEditing";
+import { ACCESS_CARD_TITLE_KEYS, useCardEditing } from "./cardEditing";
 import { parseUserDetailTab } from "./userDetailTabs";
 
 function tabOf(search: string) {
@@ -24,6 +26,7 @@ function tabOf(search: string) {
  * the draft). A filter or sub-view change within the tab is not blocked.
  */
 export function UnsavedCardGuard() {
+  const t = useT();
   const { active } = useCardEditing();
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
@@ -73,20 +76,20 @@ export function UnsavedCardGuard() {
         stay();
       }}
     >
-      <AlertDialogContent>
+      <AlertDialogContent className={TOUCH_TARGETS}>
         <AlertDialogHeader>
-          <AlertDialogTitle>Leave without saving?</AlertDialogTitle>
+          <AlertDialogTitle>{t("web.admin.users.detail.common.unsaved.title")}</AlertDialogTitle>
           <AlertDialogDescription>
-            You have {count} unsaved {count === 1 ? "change" : "changes"} in{" "}
-            <strong className="text-foreground font-semibold">
-              {active ? ACCESS_CARD_TITLES[active.id] : ""}
-            </strong>
-            .
+            {t("web.admin.users.detail.common.unsaved.description", {
+              count,
+              card: active ? t(ACCESS_CARD_TITLE_KEYS[active.id]) : "",
+              b: (chunks) => <strong className="text-foreground font-semibold">{chunks}</strong>,
+            })}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <Button variant="ghost" disabled={saving} onClick={stay}>
-            Keep editing
+            {t("web.admin.users.detail.common.unsaved.keepEditing")}
           </Button>
           <Button
             variant="outline"
@@ -96,10 +99,12 @@ export function UnsavedCardGuard() {
               leave();
             }}
           >
-            Discard
+            {t("web.admin.users.detail.common.unsaved.discard")}
           </Button>
           <Button disabled={saving} onClick={() => void saveAndContinue()}>
-            {saving ? "Saving..." : "Save and continue"}
+            {saving
+              ? t("web.admin.users.detail.common.saving")
+              : t("web.admin.users.detail.common.unsaved.saveAndContinue")}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

@@ -5,6 +5,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useDeleteOverlayImage, useUploadOverlayImage } from "@/hooks/queries/admin/overlayImages";
+import { useT } from "@/i18n";
 import type { OverlayImage } from "@/lib/overlays";
 
 const IMAGE_ACCEPT = "image/png,image/jpeg,image/webp";
@@ -28,6 +29,7 @@ export function OverlayImageLibrary({
   images: readonly OverlayImage[];
   uploadsAvailable: boolean;
 }) {
+  const t = useT();
   const upload = useUploadOverlayImage();
   const remove = useDeleteOverlayImage();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -41,7 +43,7 @@ export function OverlayImageLibrary({
     setError(null);
     if (!file) return;
     if (file.size > MAX_IMAGE_BYTES) {
-      setError("Pick an image of 4 MB or less.");
+      setError(t("web.settings.overlays.library.tooLarge"));
       return;
     }
     setPending(file);
@@ -75,7 +77,7 @@ export function OverlayImageLibrary({
               type="file"
               accept={IMAGE_ACCEPT}
               className="sr-only"
-              aria-label="Badge image file"
+              aria-label={t("web.settings.overlays.library.fileLabel")}
               onChange={(event) => pick(event.target.files?.[0])}
             />
             <Button
@@ -86,13 +88,15 @@ export function OverlayImageLibrary({
               disabled={upload.isPending}
             >
               <ImagePlus className="h-4 w-4" aria-hidden="true" />
-              {pending ? "Pick another image" : "Choose image"}
+              {pending
+                ? t("web.settings.overlays.library.pickAnother")
+                : t("web.settings.overlays.library.choose")}
             </Button>
             {pending ? (
               <>
                 <div className="space-y-1">
                   <label htmlFor={nameId} className="text-muted-foreground text-xs font-medium">
-                    Name
+                    {t("web.settings.overlays.library.name")}
                   </label>
                   <Input
                     id={nameId}
@@ -108,21 +112,19 @@ export function OverlayImageLibrary({
                   onClick={submit}
                   disabled={name.trim().length === 0 || upload.isPending}
                 >
-                  Upload
+                  {t("web.settings.overlays.library.upload")}
                 </Button>
               </>
             ) : null}
           </div>
           {error ? <p className="text-destructive text-sm">{error}</p> : null}
           <p className="text-muted-foreground text-[13px] leading-relaxed">
-            PNG, JPEG, or WebP up to 4 MB. A transparent PNG works best. Then pick it from a badge's
-            Adjust menu, as its icon or for one value such as 2160p.
+            {t("web.settings.overlays.library.help")}
           </p>
         </>
       ) : (
         <p className="text-muted-foreground text-sm leading-relaxed">
-          Image uploads need asset storage. Configure storage to upload badge images. Images already
-          in the library stay listed below and can be deleted.
+          {t("web.settings.overlays.library.needsStorage")}
         </p>
       )}
       {images.length > 0 ? (
@@ -142,7 +144,7 @@ export function OverlayImageLibrary({
                 type="button"
                 variant="ghost"
                 size="icon"
-                aria-label={`Delete ${image.name}`}
+                aria-label={t("web.settings.overlays.library.deleteLabel", { name: image.name })}
                 onClick={() => setConfirmDelete(image)}
               >
                 <Trash2 className="h-4 w-4" aria-hidden="true" />
@@ -156,9 +158,9 @@ export function OverlayImageLibrary({
         onOpenChange={(open) => {
           if (!open) setConfirmDelete(null);
         }}
-        title="Delete this image?"
-        description="Badges that use it go back to showing text, for every profile."
-        confirmLabel="Delete"
+        title={t("web.settings.overlays.library.deleteTitle")}
+        description={t("web.settings.overlays.library.deleteDescription")}
+        confirmLabel={t("web.settings.overlays.library.delete")}
         variant="destructive"
         isPending={remove.isPending}
         onConfirm={() => {

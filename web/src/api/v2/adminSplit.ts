@@ -5,6 +5,7 @@ import {
 } from "@/api/client";
 import { v2 } from "./request";
 import type { ItemFile, ItemSplitRequest } from "@/api/types";
+import { t } from "@/i18n";
 export async function getAdminItemFiles(id: string, signal?: AbortSignal) {
   const profileContext = captureProfileRequestContext();
   if (!profileContext) throw new StaleApiRequestContextError();
@@ -22,7 +23,7 @@ export async function getAdminItemFiles(id: string, signal?: AbortSignal) {
     files.push(...page.items);
     if (!page.page?.has_more) break;
     const next = page.page.next_cursor;
-    if (!next || seen.has(next)) throw new Error("Incomplete item file list. Reload to try again.");
+    if (!next || seen.has(next)) throw new Error(t("web.admin.errors.itemFilesIncomplete"));
     seen.add(next);
     cursor = next;
   }

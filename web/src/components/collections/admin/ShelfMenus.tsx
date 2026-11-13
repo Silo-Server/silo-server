@@ -11,14 +11,9 @@ import {
 } from "lucide-react";
 
 import { ActionMenu, type ActionMenuItem } from "@/components/calm/ActionMenu";
-import {
-  PIN_LABEL,
-  SHOW_ON_TAB_LABEL,
-  UNPIN_LABEL,
-  pinHelp,
-  unpinHelp,
-} from "@/lib/collections/copy";
+import { pinLabel, showOnTabLabel, unpinLabel, pinHelp, unpinHelp } from "@/lib/collections/copy";
 import { sortedBy, type Shelf } from "@/lib/collections/shelves";
+import { useT } from "@/i18n";
 
 /**
  * A shelf's ⋯: Rename shelf, Move to top, Move to bottom and Delete shelf….
@@ -42,18 +37,25 @@ export function ShelfMenu({
   onMove: (to: "top" | "bottom") => void;
   onDelete: () => void;
 }) {
+  const t = useT();
   const items: ActionMenuItem[] = [
-    { key: "rename", label: "Rename shelf", icon: Pencil, disabled, onSelect: onRename },
+    {
+      key: "rename",
+      label: t("web.collections.shelfDialogs.renameShelf"),
+      icon: Pencil,
+      disabled,
+      onSelect: onRename,
+    },
     {
       key: "top",
-      label: "Move to top",
+      label: t("web.collections.admin.moveToTop"),
       icon: ArrowUpToLine,
       disabled: disabled || isFirst,
       onSelect: () => onMove("top"),
     },
     {
       key: "bottom",
-      label: "Move to bottom",
+      label: t("web.collections.admin.moveToBottom"),
       icon: ArrowDownToLine,
       disabled: disabled || isLast,
       onSelect: () => onMove("bottom"),
@@ -62,14 +64,19 @@ export function ShelfMenu({
   if (shelf.kind === "regular")
     items.push({
       key: "delete",
-      label: "Delete shelf…",
+      label: t("web.collections.admin.deleteShelfItem"),
       icon: Trash2,
       destructive: true,
       group: true,
       disabled,
       onSelect: onDelete,
     });
-  return <ActionMenu label={`More for shelf ${shelf.name}`} items={items} />;
+  return (
+    <ActionMenu
+      label={t("web.collections.admin.moreForShelf", { name: shelf.name })}
+      items={items}
+    />
+  );
 }
 
 /**
@@ -107,13 +114,19 @@ export function ArrangeCardMenu({
   onPinChange: (pinned: boolean) => void;
   onVisibleChange: (visible: boolean) => void;
 }) {
+  const t = useT();
   const current = shelves.find((shelf) => shelf.id === currentShelfId);
   const by = current ? sortedBy(current.sortMode) : null;
   const items: ActionMenuItem[] = [
-    { key: "edit", label: "Edit collection", icon: Pencil, onSelect: onEdit },
+    {
+      key: "edit",
+      label: t("web.collections.admin.editCollection"),
+      icon: Pencil,
+      onSelect: onEdit,
+    },
     {
       key: "move",
-      label: "Move to shelf",
+      label: t("web.collections.admin.moveToShelf"),
       icon: Move,
       disabled: !canMove,
       selectedKey: currentShelfId,
@@ -126,7 +139,7 @@ export function ArrangeCardMenu({
     },
     {
       key: "pin",
-      label: pinned ? UNPIN_LABEL : PIN_LABEL,
+      label: pinned ? unpinLabel() : pinLabel(),
       icon: pinned ? PinOff : Pin,
       help: pinned ? unpinHelp(by, inSeveralLibraries) : pinHelp(by, inSeveralLibraries),
       disabled: !canPin,
@@ -135,18 +148,18 @@ export function ArrangeCardMenu({
     visible
       ? {
           key: "hide",
-          label: "Hide from Collections tab",
+          label: t("web.collections.admin.hideFromTab"),
           icon: EyeOff,
           group: true,
           onSelect: () => onVisibleChange(false),
         }
       : {
           key: "show",
-          label: SHOW_ON_TAB_LABEL,
+          label: showOnTabLabel(),
           icon: Eye,
           group: true,
           onSelect: () => onVisibleChange(true),
         },
   ];
-  return <ActionMenu label={`More for ${name}`} items={items} />;
+  return <ActionMenu label={t("web.collections.admin.moreFor", { name })} items={items} />;
 }

@@ -130,6 +130,7 @@ type SeasonRecord struct {
 	MetadataEtag    string     `json:"metadata_etag"`
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
+	LockedFields    []int      `json:"locked_fields,omitempty"`
 }
 
 type EpisodeRecord struct {
@@ -150,6 +151,7 @@ type EpisodeRecord struct {
 	MetadataEtag   string     `json:"metadata_etag"`
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
+	LockedFields   []int      `json:"locked_fields,omitempty"`
 }
 
 type VideoTrackRecord struct {

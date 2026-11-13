@@ -9,6 +9,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 func TestAdminCollectionServiceRejectsArtworkInDefinition(t *testing.T) {
@@ -133,5 +134,62 @@ func TestDeleteAdminCollectionArtworkClearsReferenceWhenVariantDeleteFailsDB(t *
 				t.Fatalf("cleanup did not run after the clear: deleted %#v", artwork.deleted)
 			}
 		})
+	}
+}
+
+// A /api/v2 smart collection needs a complete rule: one with none would match
+// every title. The refusal names query_definition.groups so the editor can
+// point at the rules. Updates that leave the rules alone keep
+// working for collections saved before the check.
+func TestSmartCollectionNeedsACompleteRule(t *testing.T) {
+	const blank = `{"groups":[{"match":"all","rules":[{"field":"genre","op":"is","value":""}]}]}`
+	const comedy = `{"groups":[{"match":"all","rules":[{"field":"genre","op":"is","value":"Comedy"}]}]}`
+	needsRule := func(t *testing.T, err error) {
+		t.Helper()
+		if e, ok := errors.AsType[*APIError](err); !ok || e.Status != 400 || e.Field != "query_definition.groups" {
+			t.Fatalf("expected a query_definition.groups field error, got %v", err)
+		}
+	}
+
+	h := &LibraryCollectionHandler{}
+	for _, definition := range []string{"", `{"groups":[]}`, blank} {
+		_, err := h.CreateAdminCollection(t.Context(), AdminCollectionCreate{LibraryID: 1, Title: "Everything", CollectionType: collectionTypeSmart, QueryDefinition: json.RawMessage(definition)})
+		needsRule(t, err)
+	}
+
+	smart, manual := collectionTypeSmart, collectionManagementModeManual
+	for name, tc := range map[string]struct {
+		existingType  string
+		existingRules string
+		req           AdminCollectionUpdate
+		refused       bool
+	}{
+		"smart, rules removed":              {existingType: smart, req: AdminCollectionUpdate{QueryDefinition: json.RawMessage(`{"groups":[]}`)}, refused: true},
+		"smart, only a blank rule":          {existingType: smart, req: AdminCollectionUpdate{QueryDefinition: json.RawMessage(blank)}, refused: true},
+		"smart, a rule":                     {existingType: smart, req: AdminCollectionUpdate{QueryDefinition: json.RawMessage(comedy)}},
+		"saved empty, renamed only":         {existingType: smart, existingRules: `{}`, req: AdminCollectionUpdate{Title: new("Renamed")}},
+		"saved empty, list toggle":          {existingType: smart, existingRules: `{}`, req: AdminCollectionUpdate{CollectionType: &smart, Featured: new(true)}},
+		"switched to smart, no stored rule": {existingType: manual, existingRules: `{}`, req: AdminCollectionUpdate{CollectionType: &smart}, refused: true},
+		"switched to smart, stored rule":    {existingType: manual, existingRules: comedy, req: AdminCollectionUpdate{CollectionType: &smart}},
+		"manual sending empty rules":        {existingType: manual, req: AdminCollectionUpdate{QueryDefinition: json.RawMessage(`{"groups":[]}`)}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := adminSmartRuleCheck(tc.existingType, json.RawMessage(tc.existingRules), tc.req, tc.req.QueryDefinition)
+			if tc.refused {
+				needsRule(t, err)
+			} else if err != nil {
+				t.Fatalf("refused: %v", err)
+			}
+		})
+	}
+
+	store := &lifecycleStore{collection: userstore.Collection{ID: "c", CreatorProfileID: "owner", CollectionType: smart}}
+	personal := NewCollectionHandler(lifecycleProvider{store: store})
+	_, err := personal.CreatePersonalCollection(t.Context(), PersonalCollectionCreateCommand{UserID: 1, ProfileID: "owner", Request: PersonalCollectionCreateRequest{Name: "Everything", CollectionType: smart, QueryDefinition: json.RawMessage(`{"groups":[]}`)}})
+	needsRule(t, err)
+	_, err = personal.UpdatePersonalCollection(t.Context(), PersonalCollectionUpdateCommand{UserID: 1, ProfileID: "owner", CollectionID: "c", Request: PersonalCollectionUpdateRequest{QueryDefinition: json.RawMessage(blank)}})
+	needsRule(t, err)
+	if store.mutations != 0 {
+		t.Fatalf("refused saves wrote %d times", store.mutations)
 	}
 }

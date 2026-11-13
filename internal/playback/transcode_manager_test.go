@@ -475,6 +475,41 @@ func TestReconstructSessionAdmission(t *testing.T) {
 	}
 }
 
+// A video copy applies neither negotiated target, so a session rebuilt from a
+// copy card must not report them to the admin views, the same as before the
+// restart. An encode keeps them.
+func TestReconstructSessionReportsOnlyAppliedVideoTargets(t *testing.T) {
+	tests := []struct {
+		codec          string
+		wantResolution string
+		wantKbps       int
+	}{
+		{codec: "copy"},
+		{codec: "h264", wantResolution: "720p", wantKbps: 3608},
+	}
+	for _, tt := range tests {
+		t.Run(tt.codec, func(t *testing.T) {
+			card := NewRecipeCard(7, "p", 77, "", TranscodeOpts{
+				SessionID:         "s",
+				InputPath:         "/media/movie.mkv",
+				TargetCodecVideo:  tt.codec,
+				CopyVideoMPEGTS:   tt.codec == "copy",
+				TargetResolution:  "720p",
+				TargetBitrateKbps: 3608,
+			})
+			m := NewTranscodeManager()
+			m.Sessions = NewSessionManager(0, 0)
+			got := m.ReconstructSession(t.Context(), "s", 7, card)
+			if got == nil {
+				t.Fatal("ReconstructSession refused the card")
+			}
+			if got.TargetResolution != tt.wantResolution || got.TargetBitrateKbps != tt.wantKbps {
+				t.Fatalf("targets = (%q, %d), want (%q, %d)", got.TargetResolution, got.TargetBitrateKbps, tt.wantResolution, tt.wantKbps)
+			}
+		})
+	}
+}
+
 // acquireReconstructSlot must bound concurrent reconstructs and let a caller
 // whose request is cancelled give up its place instead of queueing dead work.
 func TestAcquireReconstructSlot(t *testing.T) {

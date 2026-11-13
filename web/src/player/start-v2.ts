@@ -11,7 +11,9 @@
  * to do.
  */
 
+import { problemDisplayText } from "@/api/v2/request";
 import type { components } from "@/api/v2/schema";
+import { t } from "@/i18n";
 import { cancelBandwidthProbe } from "./bandwidth-probe";
 import type { PlayerConfig } from "./context/PlayerConfigContext";
 import {
@@ -57,12 +59,12 @@ export async function playbackCapabilitiesV2(
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(CAPABILITIES_TIMEOUT_MS),
     });
-    if (response.status === 404) throw new Error("API v2 playback is unavailable on this server");
+    if (response.status === 404) throw new Error(t("web.player.error.v2Unavailable"));
     if (!response.ok)
-      throw new PlayerFetchError(response.status, "Playback capabilities unavailable");
+      throw new PlayerFetchError(response.status, t("web.player.error.capabilitiesUnavailable"));
     const cap = (await response.json()) as PlaybackCapabilitiesV2;
     if (!Array.isArray(cap.features) || !Array.isArray(cap.protocol_versions))
-      throw new Error("Invalid playback capabilities");
+      throw new Error(t("web.player.error.capabilitiesInvalid"));
     capabilitiesCache.set(origin, { at: Date.now(), cap });
     return cap;
   } catch (error) {
@@ -171,11 +173,19 @@ async function requestPlaybackStartV2(
         const text = response.ok ? await response.text() : await response.text().catch(() => "");
         options.signal?.throwIfAborted();
         if (!response.ok) {
-          let message = "Playback start was refused";
+          let message = t("web.player.error.startRefused");
           let code: string | undefined;
           try {
-            const problem = JSON.parse(text) as { detail?: string; title?: string; type?: string };
-            message = problem.detail?.trim() || problem.title?.trim() || message;
+            const problem = JSON.parse(text) as {
+              detail?: string;
+              title?: string;
+              type?: string;
+              errors?: { code?: string }[];
+            };
+            message = problemDisplayText(
+              problem,
+              problem.detail?.trim() || problem.title?.trim() || message,
+            );
             code = problem.type?.split("?")[0]?.split("/").pop()?.replace(/#.*$/, "") || undefined;
           } catch {
             // A non-problem body keeps the generic message.
@@ -206,14 +216,13 @@ async function requestPlaybackStartV2(
 
 /** The start body for these capabilities, or a plain Error when they rule v2 playback out. */
 function startBody(cap: PlaybackCapabilitiesV2, body: StartRequestV3) {
-  if (cap.state === "not_configured")
-    throw new Error("API v2 playback is not configured on this server");
+  if (cap.state === "not_configured") throw new Error(t("web.player.error.notConfigured"));
   if (cap.state !== "available" || !cap.allowed || !cap.installation_id)
-    throw new Error("Playback is not available for this account");
+    throw new Error(t("web.player.error.notAvailableForAccount"));
   if (!cap.protocol_versions.includes(3))
-    throw new Error("This server does not offer playback protocol v3");
+    throw new Error(t("web.player.error.protocolUnsupported"));
   if (body.allow_alternate_versions === false && !cap.features.includes("fixed_media_file_v1"))
-    throw new Error("This server needs an update to keep playback on the same version.");
+    throw new Error(t("web.player.error.fixedVersionUnsupported"));
   const installationId = cap.installation_id;
   const payload = JSON.stringify({
     ...bufferingQualityWire(body, cap.features),

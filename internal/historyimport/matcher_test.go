@@ -44,7 +44,7 @@ func (s *matcherRepoStub) MatchEpisodeBySeries(_ context.Context, seriesID strin
 	return s.episodeBySeries, nil
 }
 
-func (s *matcherRepoStub) MatchEpisodesBySeries(_ context.Context, seriesID string, seasonNumber *int, watchedAt *time.Time) ([]Match, error) {
+func (s *matcherRepoStub) MatchEpisodesBySeries(_ context.Context, seriesID string, seasonNumber *int, watchedAt *time.Time, _ []int) ([]Match, error) {
 	s.episodesBySeriesID = seriesID
 	if seasonNumber != nil {
 		season := *seasonNumber

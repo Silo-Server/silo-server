@@ -14,7 +14,12 @@ import {
   type OverlayStyle,
   type PresetId,
 } from "@/lib/overlays";
+import { useT, type Translate } from "@/i18n";
 import { cn } from "@/lib/utils";
+
+// Badge text in the style picker's samples: a resolution, not interface text.
+const SAMPLE_BADGE = "4K";
+const PERCENT = "%";
 
 // The presets an older server (below settings revision 25) can store.
 const LEGACY_PRESET_IDS: readonly PresetId[] = ["minimal", "classic", "vibrant", "pill", "square"];
@@ -28,11 +33,12 @@ export function BadgeStylePicker({
   onChange: (next: PresetId) => void;
   supportsStyles: boolean;
 }) {
+  const t = useT();
   const ids = supportsStyles ? PRESET_IDS : LEGACY_PRESET_IDS;
   return (
     <div
       role="radiogroup"
-      aria-label="Badge style"
+      aria-label={t("web.settings.overlays.look.style")}
       className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-7"
     >
       {ids.map((id) => {
@@ -47,7 +53,7 @@ export function BadgeStylePicker({
             title={preset.description}
             onClick={() => onChange(id)}
             className={cn(
-              "focus-visible:ring-ring flex flex-col items-stretch gap-2 rounded-xl border p-2 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none",
+              "focus-visible:ring-ring flex flex-col items-stretch gap-2 rounded-xl border p-2 text-start transition-colors focus-visible:ring-2 focus-visible:outline-none",
               active ? "border-primary bg-primary/8" : "border-border/60 hover:border-border",
             )}
           >
@@ -56,7 +62,7 @@ export function BadgeStylePicker({
                 className={preset.badgeClass}
                 style={preset.badgeStyle(preset.id === "vibrant" ? "#f5c518" : undefined)}
               >
-                4K
+                {SAMPLE_BADGE}
               </span>
             </span>
             <span className="text-center text-xs font-medium">{preset.label}</span>
@@ -69,59 +75,69 @@ export function BadgeStylePicker({
 
 // "preset" stands for an absent style field: the preset's own value.
 type Inherit = "preset";
-const PRESET_CHOICE = { value: "preset" as const, label: "Style default" };
+const presetChoice = (t: Translate) => ({
+  value: "preset" as const,
+  label: t("web.settings.overlays.look.styleDefault"),
+});
 
-const SHAPE_CHOICES: readonly { value: OverlayShape | Inherit; label: string }[] = [
-  PRESET_CHOICE,
-  { value: "pill", label: "Pill" },
-  { value: "rounded", label: "Rounded" },
-  { value: "square", label: "Square" },
+const shapeChoices = (
+  t: Translate,
+): readonly { value: OverlayShape | Inherit; label: string }[] => [
+  presetChoice(t),
+  { value: "pill", label: t("web.settings.overlays.look.shape.pill") },
+  { value: "rounded", label: t("web.settings.overlays.look.shape.rounded") },
+  { value: "square", label: t("web.settings.overlays.look.shape.square") },
 ];
 
-const WEIGHT_CHOICES: readonly { value: OverlayFontWeight | Inherit; label: string }[] = [
-  PRESET_CHOICE,
-  { value: "regular", label: "Regular" },
-  { value: "semibold", label: "Semibold" },
-  { value: "extrabold", label: "Extra bold" },
+const weightChoices = (
+  t: Translate,
+): readonly { value: OverlayFontWeight | Inherit; label: string }[] => [
+  presetChoice(t),
+  { value: "regular", label: t("web.settings.overlays.look.weight.regular") },
+  { value: "semibold", label: t("web.settings.overlays.look.weight.semibold") },
+  { value: "extrabold", label: t("web.settings.overlays.look.weight.extrabold") },
 ];
 
 type Toggle = "on" | "off" | Inherit;
 
-const CASE_CHOICES: readonly { value: Toggle; label: string }[] = [
-  PRESET_CHOICE,
-  { value: "on", label: "Capitals" },
-  { value: "off", label: "As written" },
+const caseChoices = (t: Translate): readonly { value: Toggle; label: string }[] => [
+  presetChoice(t),
+  { value: "on", label: t("web.settings.overlays.look.letters.capitals") },
+  { value: "off", label: t("web.settings.overlays.look.letters.asWritten") },
 ];
 
-const SHADOW_CHOICES: readonly { value: Toggle; label: string }[] = [
-  PRESET_CHOICE,
-  { value: "on", label: "Shadow" },
-  { value: "off", label: "No shadow" },
+const shadowChoices = (t: Translate): readonly { value: Toggle; label: string }[] => [
+  presetChoice(t),
+  { value: "on", label: t("web.settings.overlays.look.shadow.on") },
+  { value: "off", label: t("web.settings.overlays.look.shadow.off") },
 ];
 
 // Swatches as #RRGGBBAA (fill, border) or #RRGGBB (text).
-const FILL_SWATCHES = [
-  { value: "#000000B3", label: "Dark" },
-  { value: "#0F172ACC", label: "Slate" },
-  { value: "#000000FF", label: "Black" },
-  { value: "#FFFFFFE6", label: "Light" },
-  { value: "#00000000", label: "None" },
-] as const;
+const fillSwatches = (t: Translate) =>
+  [
+    { value: "#000000B3", label: t("web.settings.overlays.look.fill.dark") },
+    { value: "#0F172ACC", label: t("web.settings.overlays.look.fill.slate") },
+    { value: "#000000FF", label: t("web.settings.overlays.look.fill.black") },
+    { value: "#FFFFFFE6", label: t("web.settings.overlays.look.fill.light") },
+    { value: "#00000000", label: t("web.settings.overlays.look.fill.none") },
+  ] as const;
 
-const TEXT_SWATCHES = [
-  { value: "#FFFFFF", label: "White" },
-  { value: "#000000", label: "Black" },
-  { value: "#F5C518", label: "Gold" },
-  { value: "#CBD5E1", label: "Silver" },
-] as const;
+const textSwatches = (t: Translate) =>
+  [
+    { value: "#FFFFFF", label: t("web.settings.overlays.look.textColor.white") },
+    { value: "#000000", label: t("web.settings.overlays.look.textColor.black") },
+    { value: "#F5C518", label: t("web.settings.overlays.look.textColor.gold") },
+    { value: "#CBD5E1", label: t("web.settings.overlays.look.textColor.silver") },
+  ] as const;
 
-const BORDER_CHOICES = [
-  PRESET_CHOICE,
-  { value: "none", label: "None" },
-  { value: "subtle", label: "Subtle" },
-  { value: "strong", label: "Strong" },
-] as const;
-type BorderChoice = (typeof BORDER_CHOICES)[number]["value"];
+type BorderChoice = Inherit | "none" | "subtle" | "strong";
+
+const borderChoices = (t: Translate): readonly { value: BorderChoice; label: string }[] => [
+  presetChoice(t),
+  { value: "none", label: t("web.settings.overlays.look.border.none") },
+  { value: "subtle", label: t("web.settings.overlays.look.border.subtle") },
+  { value: "strong", label: t("web.settings.overlays.look.border.strong") },
+];
 
 const BORDER_STYLES: Record<
   Exclude<BorderChoice, Inherit>,
@@ -167,6 +183,7 @@ function Swatches({
   swatches: readonly { value: string; label: string }[];
   onChange: (next: string | undefined) => void;
 }) {
+  const t = useT();
   return (
     <div className="space-y-2">
       <p className="text-sm font-medium">{label}</p>
@@ -181,7 +198,7 @@ function Swatches({
             value === undefined && "border-primary text-foreground",
           )}
         >
-          {PRESET_CHOICE.label}
+          {presetChoice(t).label}
         </button>
         {swatches.map((swatch) => {
           const active = value?.toLowerCase() === swatch.value.toLowerCase();
@@ -225,6 +242,7 @@ export function OverlayLookControls({
   onChange: (next: CardOverlayPrefs) => void;
   supportsStyles: boolean;
 }) {
+  const t = useT();
   const style = prefs.style ?? {};
   // The slider moves freely and saves once, when it is let go.
   const [draftSize, setDraftSize] = useState<number | null>(null);
@@ -242,9 +260,10 @@ export function OverlayLookControls({
         <div className="space-y-5">
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-3">
-              <p className="text-sm font-medium">Size</p>
+              <p className="text-sm font-medium">{t("web.settings.overlays.look.size")}</p>
               <span className="text-muted-foreground text-xs tabular-nums">
-                {Math.round(size * 100)}%
+                {Math.round(size * 100)}
+                {PERCENT}
               </span>
             </div>
             <Slider
@@ -252,7 +271,7 @@ export function OverlayLookControls({
               max={STYLE_SIZE_MAX}
               step={0.05}
               value={[size]}
-              thumbLabels={["Badge size"]}
+              thumbLabels={[t("web.settings.overlays.look.sizeLabel")]}
               onValueChange={([next]) => {
                 if (next !== undefined) setDraftSize(next);
               }}
@@ -264,45 +283,45 @@ export function OverlayLookControls({
             />
           </div>
           <ChoiceButtons
-            label="Shape"
+            label={t("web.settings.overlays.look.shape")}
             value={style.shape ?? "preset"}
-            options={SHAPE_CHOICES}
+            options={shapeChoices(t)}
             onChange={(next) => patch({ shape: next === "preset" ? undefined : next })}
           />
           <ChoiceButtons
-            label="Weight"
+            label={t("web.settings.overlays.look.weight")}
             value={style.fontWeight ?? "preset"}
-            options={WEIGHT_CHOICES}
+            options={weightChoices(t)}
             onChange={(next) => patch({ fontWeight: next === "preset" ? undefined : next })}
           />
           <ChoiceButtons
-            label="Letters"
+            label={t("web.settings.overlays.look.letters")}
             value={toggleOf(style.uppercase)}
-            options={CASE_CHOICES}
+            options={caseChoices(t)}
             onChange={(next) => patch({ uppercase: fromToggle(next) })}
           />
           <ChoiceButtons
-            label="Shadow"
+            label={t("web.settings.overlays.look.shadow")}
             value={toggleOf(style.shadow)}
-            options={SHADOW_CHOICES}
+            options={shadowChoices(t)}
             onChange={(next) => patch({ shadow: fromToggle(next) })}
           />
           <Swatches
-            label="Fill"
+            label={t("web.settings.overlays.look.fill")}
             value={style.background}
-            swatches={FILL_SWATCHES}
+            swatches={fillSwatches(t)}
             onChange={(background) => patch({ background })}
           />
           <Swatches
-            label="Text"
+            label={t("web.settings.overlays.look.text")}
             value={style.textColor}
-            swatches={TEXT_SWATCHES}
+            swatches={textSwatches(t)}
             onChange={(textColor) => patch({ textColor })}
           />
           <ChoiceButtons
-            label="Border"
+            label={t("web.settings.overlays.look.border")}
             value={borderChoiceOf(style)}
-            options={BORDER_CHOICES}
+            options={borderChoices(t)}
             onChange={(next) =>
               patch(
                 next === "preset"
@@ -321,7 +340,7 @@ export function OverlayLookControls({
                 onChange(rest);
               }}
             >
-              Use the style as designed
+              {t("web.settings.overlays.look.reset")}
             </Button>
           ) : null}
         </div>

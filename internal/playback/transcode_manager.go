@@ -816,6 +816,11 @@ func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID str
 		RequestedMediaFileID:       card.RequestedMediaFileID,
 		DisableProgressPersistence: card.DisableProgressPersistence,
 	}
+	if card.VideoStreamCopy() {
+		// A copy applies neither target; the card keeps them only to match and
+		// rebuild the negotiated stream, so the admin views must not show them.
+		s.TargetResolution, s.TargetBitrateKbps = "", 0
+	}
 	if card.IsTranscodeRecipe() {
 		s.OutputContainer = HLSOutputContainer(card.TranscodeOpts("", "", nil))
 		s.OutputProtocol = OutputProtocolHLS
@@ -975,7 +980,6 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 	cfg := m.runtimeConfig()
 	outputDir := reconstructionOutputDir(cfg.TranscodeDir, sessionID, card.OutputSubdir)
 	opts := card.TranscodeOpts(outputDir, cfg.FFmpegPath, m.logSink())
-	opts.Reconstructed = true
 	// Recipe cards preserve the original launch tuning, but a reconstruction is
 	// not a fresh generation: restore the conservative manifest lead so recovery
 	// never exposes a hardware encoder after only one fragment.

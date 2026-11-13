@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { v2 } from "@/api/v2/request";
+import { t } from "@/i18n";
 import type { UserDevice } from "@/api/types";
 
 import { deviceKeys, settingsKeys } from "./keys";
@@ -122,5 +123,5 @@ export function deviceRecencyGroup(device: UserDevice, now: number): DeviceRecen
 
 /** What to call a device: the name its profile gave it, else the one it reports. */
 export function deviceDisplayName(device: Pick<UserDevice, "custom_name" | "device_name">): string {
-  return device.custom_name || device.device_name || "Unknown device";
+  return device.custom_name || device.device_name || t("web.settings.sessions.device.unknown");
 }

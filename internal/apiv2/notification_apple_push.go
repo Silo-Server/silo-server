@@ -127,7 +127,7 @@ func registerOrderedApplePush(reg *Registry) {
 		if err != nil {
 			return nil, err
 		}
-		cmd := notifications.ApplePushCommand{UserID: user, ProfileID: profile, InstallationKey: in.InstallationKey, Generation: generation, ApplePushRegistrationInput: notifications.ApplePushRegistrationInput{DeviceID: in.Body.DeviceID, APNsToken: in.Body.APNsToken, APNsEnvironment: in.Body.APNsEnvironment, APNsTopic: in.Body.APNsTopic, PushMode: in.Body.PushMode}}
+		cmd := notifications.ApplePushCommand{UserID: user, ProfileID: profile, InstallationKey: in.InstallationKey, Generation: generation, ApplePushRegistrationInput: notifications.ApplePushRegistrationInput{DeviceID: in.Body.DeviceID, APNsToken: in.Body.APNsToken, APNsEnvironment: in.Body.APNsEnvironment, APNsTopic: in.Body.APNsTopic, PushMode: in.Body.PushMode, LoginSessionID: claims.SessionID}}
 		identity := evt.SocketIdentity{UserID: user, ProfileID: profile, SessionID: claims.SessionID, Role: claims.Role, ImpersonatorUserID: claims.ImpersonatorUserID, AccessExpiresAt: claims.ExpiresAt.Time}
 		if r := requestFrom(ctx); r != nil {
 			identity.ProfileToken = r.Header.Get("X-Profile-Token")

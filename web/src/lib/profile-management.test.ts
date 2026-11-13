@@ -10,6 +10,8 @@ import {
   buildProfileAccessSummary,
   buildProfileRequestFromDraft,
   buildProfileUpdateFromDraft,
+  canAddProfile,
+  canSwitchProfile,
   clearKidsPreset,
   createProfileDraft,
 } from "./profile-management";
@@ -226,5 +228,24 @@ describe("profile-management", () => {
     expect(ADVISORY_AGE_OPTIONS[0]).toEqual({ value: null, label: "No limit" });
     // Exactly the server's range, so any stored limit has a matching option.
     expect(ages).toEqual(Array.from({ length: 21 }, (_, index) => index + 1));
+  });
+
+  it.each([
+    { count: 1, max: 1, want: false },
+    { count: 2, max: 1, want: false },
+    { count: 0, max: 1, want: true },
+    { count: 4, max: 5, want: true },
+    { count: 3, max: null, want: true },
+  ])("allows another profile for $count of $max: $want", ({ count, max, want }) => {
+    expect(canAddProfile(count, max)).toBe(want);
+  });
+
+  it.each([
+    { count: 1, max: 1, want: false },
+    { count: 2, max: 2, want: true },
+    { count: 1, max: 2, want: true },
+    { count: 1, max: null, want: true },
+  ])("offers Switch Profile for $count of $max: $want", ({ count, max, want }) => {
+    expect(canSwitchProfile(count, max)).toBe(want);
   });
 });

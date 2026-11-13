@@ -52,6 +52,8 @@ func (r *FileRepository) saveMarkerThumbnailState(ctx context.Context, expected 
 	if expected.MarkerThumbnailBaseSegments != nil {
 		base = expected.MarkerThumbnailBaseSegments
 	}
+	// Image identities hash the path, so a worker that read the row before a
+	// rename would store identities for the old path; the path check fences it.
 	if models.MarkerFileIdentity(current) != models.MarkerFileIdentity(expected) || current.FilePath != expected.FilePath ||
 		!slices.Equal(models.EffectiveMarkerSegments(current), base) || current.MissingSince != nil || current.MediaFolderID != expected.MediaFolderID {
 		return nil, nil
@@ -94,20 +96,7 @@ func (r *FileRepository) saveMarkerThumbnailState(ctx context.Context, expected 
 		}
 		thumbnails = merged
 	}
-	// Image state deliberately contains no provider kind, range, or provenance.
-	type imageState struct {
-		Identity   string     `json:"identity"`
-		Path       string     `json:"thumbnail_path,omitempty"`
-		Hash       string     `json:"thumbnail_thumbhash,omitempty"`
-		RetryAfter *time.Time `json:"thumbnail_retry_after,omitempty"`
-		FailedAt   *time.Time `json:"thumbnail_failed_at,omitempty"`
-		LastError  string     `json:"thumbnail_last_error,omitempty"`
-	}
-	states := make([]imageState, 0, len(thumbnails))
-	for _, image := range thumbnails {
-		states = append(states, imageState{image.Identity, image.ThumbnailPath, image.ThumbnailThumbhash, image.ThumbnailRetryAfter, image.ThumbnailFailedAt, image.ThumbnailLastError})
-	}
-	data, err := json.Marshal(states)
+	data, err := markerThumbnailStateJSON(thumbnails)
 	if err != nil {
 		return nil, err
 	}
@@ -123,4 +112,22 @@ func (r *FileRepository) saveMarkerThumbnailState(ctx context.Context, expected 
 		return &overlay, nil
 	}
 	return saved, nil
+}
+
+// markerThumbnailStateJSON encodes the stored form of marker image state,
+// which deliberately contains no provider kind, range, or provenance.
+func markerThumbnailStateJSON(thumbnails []models.MarkerThumbnail) ([]byte, error) {
+	type imageState struct {
+		Identity   string     `json:"identity"`
+		Path       string     `json:"thumbnail_path,omitempty"`
+		Hash       string     `json:"thumbnail_thumbhash,omitempty"`
+		RetryAfter *time.Time `json:"thumbnail_retry_after,omitempty"`
+		FailedAt   *time.Time `json:"thumbnail_failed_at,omitempty"`
+		LastError  string     `json:"thumbnail_last_error,omitempty"`
+	}
+	states := make([]imageState, 0, len(thumbnails))
+	for _, image := range thumbnails {
+		states = append(states, imageState{image.Identity, image.ThumbnailPath, image.ThumbnailThumbhash, image.ThumbnailRetryAfter, image.ThumbnailFailedAt, image.ThumbnailLastError})
+	}
+	return json.Marshal(states)
 }

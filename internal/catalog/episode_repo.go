@@ -39,7 +39,7 @@ const episodeColumns = `content_id, series_id, season_id, season_number, episode
 	imdb_id, tmdb_id, tvdb_id,
 	still_path, still_source_path, still_thumbhash,
 	metadata_s3_path, metadata_etag, metadata_source,
-	created_at, updated_at`
+	created_at, updated_at, locked_fields`
 
 // refreshSeriesAirDatesSQL maintains the denormalized media_items columns
 // last_air_date_at (newest episode aired on or before today) and
@@ -230,6 +230,7 @@ func scanEpisode(row pgx.Row) (*models.Episode, error) {
 		&ep.MetadataSource,
 		&ep.CreatedAt,
 		&ep.UpdatedAt,
+		&ep.LockedFields,
 	)
 	if seasonID != nil {
 		ep.SeasonID = *seasonID
@@ -313,6 +314,7 @@ func scanEpisodes(rows pgx.Rows) ([]*models.Episode, error) {
 			&ep.MetadataSource,
 			&ep.CreatedAt,
 			&ep.UpdatedAt,
+			&ep.LockedFields,
 		)
 		if seasonID != nil {
 			ep.SeasonID = *seasonID
@@ -439,11 +441,8 @@ func upsertEpisode(ctx context.Context, db episodeUpsertDB, ep *models.Episode, 
 		)
 		ON CONFLICT (series_id, season_number, episode_number) DO UPDATE SET
 			season_id = COALESCE(EXCLUDED.season_id, episodes.season_id),
-			title = EXCLUDED.title,
+			` + episodeLockableAssignments + `,
 			default_metadata_language = COALESCE(NULLIF(EXCLUDED.default_metadata_language, ''), episodes.default_metadata_language),
-			overview = EXCLUDED.overview,
-			air_date = EXCLUDED.air_date,
-			runtime = EXCLUDED.runtime,
 			rating_imdb = EXCLUDED.rating_imdb,
 			rating_tmdb = EXCLUDED.rating_tmdb,
 			imdb_id = COALESCE(NULLIF(EXCLUDED.imdb_id, ''), episodes.imdb_id),
@@ -668,11 +667,8 @@ func (r *EpisodeRepository) bulkUpsertOnce(ctx context.Context, seriesID string,
 	)
 	ON CONFLICT (series_id, season_number, episode_number) DO UPDATE SET
 		season_id = COALESCE(EXCLUDED.season_id, episodes.season_id),
-		title = EXCLUDED.title,
+		` + episodeLockableAssignments + `,
 		default_metadata_language = COALESCE(NULLIF(EXCLUDED.default_metadata_language, ''), episodes.default_metadata_language),
-		overview = EXCLUDED.overview,
-		air_date = EXCLUDED.air_date,
-		runtime = EXCLUDED.runtime,
 		rating_imdb = EXCLUDED.rating_imdb,
 		rating_tmdb = EXCLUDED.rating_tmdb,
 		imdb_id = COALESCE(NULLIF(EXCLUDED.imdb_id, ''), episodes.imdb_id),
@@ -1173,6 +1169,22 @@ func (r *EpisodeRepository) ListBySeason(ctx context.Context, seriesID string, s
 // UNIQUE index (series_id, season_number, episode_number). Neighbors are
 // resolved across season boundaries, so the result is at most three rows.
 func (r *EpisodeRepository) ListAdjacentInSeries(ctx context.Context, seriesID string, seasonNumber, episodeNumber int) ([]*models.Episode, error) {
+	return r.ListAdjacentInSeriesFor(ctx, seriesID, seasonNumber, episodeNumber, AccessFilter{})
+}
+
+// ListAdjacentInSeriesFor is ListAdjacentInSeries for a viewer. Under a
+// playback-quality ceiling it drops a selected episode with no version the
+// viewer may play, without reaching past it to a later neighbor, as Next Up
+// waits rather than skipping ahead.
+func (r *EpisodeRepository) ListAdjacentInSeriesFor(ctx context.Context, seriesID string, seasonNumber, episodeNumber int, access AccessFilter) ([]*models.Episode, error) {
+	args := []any{seriesID, seasonNumber, episodeNumber}
+	where := ""
+	if playable := EpisodePlayableUnderCeilingSQL("adjacent.content_id", access, func(value any) int {
+		args = append(args, value)
+		return len(args)
+	}); playable != "" {
+		where = "\n\tWHERE " + playable
+	}
 	query := `SELECT ` + episodeColumns + ` FROM (
 		(SELECT ` + episodeColumns + `
 			FROM episodes
@@ -1196,10 +1208,10 @@ func (r *EpisodeRepository) ListAdjacentInSeries(ctx context.Context, seriesID s
 			  AND ` + episodeAvailabilityPredicate + `
 			ORDER BY season_number ASC, episode_number ASC
 			LIMIT 1)
-	) AS adjacent
+	) AS adjacent` + where + `
 	ORDER BY season_number ASC, episode_number ASC`
 
-	rows, err := r.pool.Query(ctx, query, seriesID, seasonNumber, episodeNumber)
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing adjacent episodes in series: %w", err)
 	}
@@ -1287,6 +1299,11 @@ func (r *EpisodeRepository) UpdateMetadata(ctx context.Context, contentID string
 
 	addString("title", upd.Title)
 	addString("overview", upd.Overview)
+	if upd.LockedFields != nil {
+		setClauses = append(setClauses, fmt.Sprintf("locked_fields = $%d", argIdx))
+		args = append(args, lockableFields(*upd.LockedFields, episodeLockedColumns))
+		argIdx++
+	}
 	addInt("episode_number", upd.EpisodeNumber)
 	addInt("season_number", upd.SeasonNumber)
 	addString("air_date", upd.AirDate)
@@ -1414,6 +1431,13 @@ func (r *EpisodeRepository) BrowseEpisodes(ctx context.Context, seriesID, season
 		index++
 	} else {
 		conditions = append(conditions, "EXISTS (SELECT 1 FROM episode_libraries el WHERE el.episode_id=e.content_id)")
+	}
+	if playable := EpisodePlayableUnderCeilingSQL("e.content_id", access, func(value any) int {
+		args = append(args, value)
+		index = len(args) + 1
+		return len(args)
+	}); playable != "" {
+		conditions = append(conditions, playable)
 	}
 	appendLibraryAccessConditions("s.content_id", access, &conditions, &args, &index)
 	applyAccessFilter("s", access, &conditions, &args, &index)

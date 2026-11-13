@@ -18,13 +18,14 @@ import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useRequestBrowse } from "@/hooks/queries/useRequests";
 import { flattenResultPages, pendingPageSize } from "@/lib/mediaRequests";
 import type { DiscoverBrowseKind, DiscoverBrowseResponse, RequestMediaType } from "@/api/types";
+import { useT, type MessageKey } from "@/i18n";
 
 type BrowseSort = "popularity" | "vote_average" | "release_date";
 
-const SORT_OPTIONS: { value: BrowseSort; label: string }[] = [
-  { value: "popularity", label: "Popularity" },
-  { value: "vote_average", label: "Rating" },
-  { value: "release_date", label: "Release date" },
+const SORT_OPTIONS: { value: BrowseSort; labelKey: MessageKey }[] = [
+  { value: "popularity", labelKey: "web.requests.browse.sortPopularity" },
+  { value: "vote_average", labelKey: "web.requests.browse.sortRating" },
+  { value: "release_date", labelKey: "web.requests.browse.sortReleaseDate" },
 ];
 
 interface RequestBrowseProps {
@@ -32,6 +33,7 @@ interface RequestBrowseProps {
 }
 
 export default function RequestBrowse({ kind }: RequestBrowseProps) {
+  const t = useT();
   const { slug = "" } = useParams<{ slug: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -44,7 +46,7 @@ export default function RequestBrowse({ kind }: RequestBrowseProps) {
   const firstPage = browse.data?.pages[0];
 
   const title = firstPage?.display_name ?? humanizeSlug(slug);
-  useDocumentTitle(title ? `${title} - Requests` : "Requests");
+  useDocumentTitle(title ? t("web.requests.pageTitle", { title }) : t("web.requests.title"));
 
   function updateSort(next: string) {
     const params = new URLSearchParams(searchParams);
@@ -65,7 +67,12 @@ export default function RequestBrowse({ kind }: RequestBrowseProps) {
   const loadMore = useCallback(() => {
     if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
   }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
-  const kindLabel = kind === "studio" ? "Studio" : kind === "network" ? "Network" : "Genre";
+  const kindLabel =
+    kind === "studio"
+      ? t("web.requests.browse.studio")
+      : kind === "network"
+        ? t("web.requests.browse.network")
+        : t("web.requests.browse.genre");
 
   // A later page's failure keeps what loaded and offers a retry at the foot,
   // even when every loaded page was empty.
@@ -76,7 +83,11 @@ export default function RequestBrowse({ kind }: RequestBrowseProps) {
       <div className="relative space-y-6 px-4 pt-6 pb-12 sm:px-6 lg:px-10 xl:px-12">
         <PageBack to="/requests" up />
         <h1 className="text-foreground mt-10 text-2xl font-bold tracking-tight sm:mt-12 sm:text-3xl">
-          {kindLabel} not found.
+          {kind === "studio"
+            ? t("web.requests.browse.studioNotFound")
+            : kind === "network"
+              ? t("web.requests.browse.networkNotFound")
+              : t("web.requests.browse.genreNotFound")}
         </h1>
       </div>
     );
@@ -95,7 +106,7 @@ export default function RequestBrowse({ kind }: RequestBrowseProps) {
               {title}
             </h1>
             <p className="text-muted-foreground mt-1 text-sm">
-              {browse.isLoading ? "Loading..." : kindLabel}
+              {browse.isLoading ? t("web.requests.browse.loading") : kindLabel}
             </p>
           </div>
         </div>
@@ -106,19 +117,19 @@ export default function RequestBrowse({ kind }: RequestBrowseProps) {
               onValueChange={(value) => updateMediaType(value as RequestMediaType)}
             >
               <TabsList>
-                <TabsTrigger value="movie">Movies</TabsTrigger>
-                <TabsTrigger value="series">Series</TabsTrigger>
+                <TabsTrigger value="movie">{t("web.requests.browse.movies")}</TabsTrigger>
+                <TabsTrigger value="series">{t("web.requests.browse.series")}</TabsTrigger>
               </TabsList>
             </Tabs>
           ) : null}
           <Select value={sort} onValueChange={updateSort}>
-            <SelectTrigger className="w-[160px]" aria-label="Sort by">
-              <SelectValue placeholder="Sort" />
+            <SelectTrigger className="w-[160px]" aria-label={t("web.requests.browse.sortBy")}>
+              <SelectValue placeholder={t("web.requests.browse.sort")} />
             </SelectTrigger>
             <SelectContent>
               {SORT_OPTIONS.map((option) => (
                 <SelectItem key={option.value} value={option.value}>
-                  {option.label}
+                  {t(option.labelKey)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -129,11 +140,9 @@ export default function RequestBrowse({ kind }: RequestBrowseProps) {
       {browse.isLoading ? (
         <RequestResultsGridSkeleton />
       ) : firstPageFailed ? (
-        <p className="text-muted-foreground text-sm">
-          Could not load this browse page. Try a different sort or media type.
-        </p>
+        <p className="text-muted-foreground text-sm">{t("web.requests.browse.loadFailed")}</p>
       ) : results.length === 0 && !hasNextPage ? (
-        <p className="text-muted-foreground text-sm">Nothing matched. Try a different sort.</p>
+        <p className="text-muted-foreground text-sm">{t("web.requests.browse.empty")}</p>
       ) : (
         // A page can come back empty, e.g. when a profile's rating limit
         // filters out every title on it; the foot keeps loading.

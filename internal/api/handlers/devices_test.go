@@ -9,9 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
-
-	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
@@ -80,195 +77,28 @@ func devicesRequest(method, target, profileID string) *http.Request {
 	return req.WithContext(apimw.SetProfileID(ctx, profileID))
 }
 
-func listDevices(t *testing.T, h *DeviceHandler, query, profileID string) deviceListResponse {
-	t.Helper()
-	target := "/devices"
-	if query != "" {
-		target += "?" + query
-	}
-	rec := httptest.NewRecorder()
-	h.HandleListDevices(rec, devicesRequest(http.MethodGet, target, profileID))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET %s = %d: %s", target, rec.Code, rec.Body.String())
-	}
-	var body deviceListResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decoding: %v", err)
-	}
-	return body
-}
-
-// TestListDevices_CountsAMirroredPairOnce. The intro-skip preference is stored
-// under two keys while old clients are in the field, and the badge on the
-// device list is meant to tell a household how much this device does
-// differently — not how many rows the compatibility mirror needed to say it.
-// Counting rows would also make the badge drop by one on every affected device
-// the day the mirror is retired, which reads as a change nobody made.
-func TestListDevices_CountsAMirroredPairOnce(t *testing.T) {
+// TestDeviceSettingsPage_CountsAMirroredPairOnce. The intro-skip preference
+// is stored under two keys while old clients are in the field, and the badge
+// on the device list is meant to tell a household how much this device does
+// differently, not how many rows the compatibility mirror needed to say it.
+// Counting rows would also make the badge drop by one on every affected
+// device the day the mirror is retired, which reads as a change nobody made.
+func TestDeviceSettingsPage_CountsAMirroredPairOnce(t *testing.T) {
 	handler, store := newDevicesTestHandler(t)
 	seedDevice(t, store, "profile-1", "device-1", "Laptop")
-	seedDeviceValue(t, store, "profile-1", "device-1",
-		settingskeys.PlaybackIntroSkipMode, `"never"`)
-	seedDeviceValue(t, store, "profile-1", "device-1",
-		settingskeys.PlaybackAutoSkipIntro, `false`)
+	seedDeviceValue(t, store, "profile-1", "device-1", settingskeys.PlaybackIntroSkipMode, `"never"`)
+	seedDeviceValue(t, store, "profile-1", "device-1", settingskeys.PlaybackAutoSkipIntro, `false`)
 	seedDeviceValue(t, store, "profile-1", "device-1", "player.hdr_enabled", `false`)
 
-	body := listDevices(t, handler, "", "profile-1")
-
-	if len(body.Devices) != 1 {
-		t.Fatalf("returned %d devices, want 1: %+v", len(body.Devices), body.Devices)
-	}
-	if body.Devices[0].ChangedCount != 2 {
-		t.Errorf("changed_count = %d, want 2: the mirrored intro pair is one preference",
-			body.Devices[0].ChangedCount)
-	}
-}
-
-func routeDevice(
-	t *testing.T, h *DeviceHandler, method, target, deviceID, profileID string,
-	handle func(http.ResponseWriter, *http.Request),
-) *httptest.ResponseRecorder {
-	t.Helper()
-	req := devicesRequest(method, target, profileID)
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("device_id", deviceID)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-
-	rec := httptest.NewRecorder()
-	handle(rec, req)
-	return rec
-}
-
-func TestForgetDevice_RejectsOtherProfilesDevice(t *testing.T) {
-	handler, store := newDevicesTestHandler(t)
-	seedDevice(t, store, "profile-2", "device-9", "Robin's iPad")
-	seedDeviceValue(t, store, "profile-2", "device-9", "player.hdr_enabled", `false`)
-
-	rec := routeDevice(t, handler, http.MethodDelete, "/devices/device-9", "device-9",
-		"profile-1", handler.HandleForgetDevice)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("DELETE another profile's device = %d, want 404", rec.Code)
-	}
-
-	registry := store.(userstore.DeviceRegistry)
-	exists, err := registry.DeviceExists(context.Background(), "profile-2", "device-9")
+	ctx := devicesRequest(http.MethodGet, "/devices", "profile-1").Context()
+	page, err := handler.DeviceSettingsPage(ctx, DeviceSettingsActor{UserID: 1, ProfileID: "profile-1"}, false, userstore.DevicePageOptions{Limit: 10})
 	if err != nil {
-		t.Fatalf("DeviceExists: %v", err)
+		t.Fatalf("DeviceSettingsPage: %v", err)
 	}
-	if !exists {
-		t.Error("another profile's device was removed")
+	if len(page) != 1 {
+		t.Fatalf("returned %d devices, want 1: %+v", len(page), page)
 	}
-	if got := storedDeviceIDFor(t, store, "player.hdr_enabled"); got != "device-9" {
-		t.Errorf("another profile's setting row was removed (device %q)", got)
-	}
-}
-
-// Forgetting a device two profiles share removes only the caller's half.
-func TestForgetDevice_LeavesOtherProfilesRowOnSharedDevice(t *testing.T) {
-	handler, store := newDevicesTestHandler(t)
-	seedDevice(t, store, "profile-1", "shared-tv", "Living Room TV")
-	seedDevice(t, store, "profile-2", "shared-tv", "Living Room TV")
-	seedDeviceValue(t, store, "profile-2", "shared-tv", "player.hdr_enabled", `false`)
-
-	rec := routeDevice(t, handler, http.MethodDelete, "/devices/shared-tv", "shared-tv",
-		"profile-1", handler.HandleForgetDevice)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("DELETE = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	registry := store.(userstore.DeviceRegistry)
-	stillThere, err := registry.DeviceExists(context.Background(), "profile-2", "shared-tv")
-	if err != nil {
-		t.Fatalf("DeviceExists: %v", err)
-	}
-	if !stillThere {
-		t.Error("forgetting one profile's half removed the other profile's row")
-	}
-	if got := storedDeviceIDFor(t, store, "player.hdr_enabled"); got != "shared-tv" {
-		t.Errorf("the other profile's setting row was removed (device %q)", got)
-	}
-}
-
-func TestClearDeviceSettings_KeepsRegistryRow(t *testing.T) {
-	handler, store := newDevicesTestHandler(t)
-	seedDevice(t, store, "profile-1", "device-2", "Apple TV")
-	seedDeviceValue(t, store, "profile-1", "device-2", "player.hdr_enabled", `false`)
-
-	rec := routeDevice(t, handler, http.MethodDelete, "/devices/device-2/settings", "device-2",
-		"profile-1", handler.HandleClearDeviceSettings)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("DELETE = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	registry := store.(userstore.DeviceRegistry)
-	exists, err := registry.DeviceExists(context.Background(), "profile-1", "device-2")
-	if err != nil {
-		t.Fatalf("DeviceExists: %v", err)
-	}
-	if !exists {
-		t.Error("registry row was removed; clear must keep the device")
-	}
-	if got := storedDeviceIDFor(t, store, "player.hdr_enabled"); got != "" {
-		t.Errorf("setting row survived clear on device %q", got)
-	}
-}
-
-// --- Household scope ---
-
-func householdDevicesHandler(t *testing.T) (*DeviceHandler, userstore.UserStore) {
-	t.Helper()
-	handler, store := newDevicesTestHandler(t)
-	handler.ProfileTokens = access.NewProfileTokenService("test-secret-value-at-least-32-chars", 0)
-	return handler, store
-}
-
-func TestListDevices_NonPrimaryCannotRequestHousehold(t *testing.T) {
-	handler, store := householdDevicesHandler(t)
-	seedDevice(t, store, "profile-1", "device-1", "Sam's laptop")
-	seedDevice(t, store, "profile-2", "device-9", "Robin's iPad")
-
-	rec := httptest.NewRecorder()
-	handler.HandleListDevices(rec, devicesRequest(http.MethodGet, "/devices?scope=household", "profile-2"))
-
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("non-primary household read = %d, want 403: %s", rec.Code, rec.Body.String())
-	}
-	if strings.Contains(rec.Body.String(), "device-1") {
-		t.Error("refusal leaked another profile's device")
-	}
-}
-
-// Default scope stays private even for the household parent, so the ordinary
-// screen cannot show the family's devices by forgetting to ask for less.
-func TestListDevices_PrimaryDefaultsToOwnProfile(t *testing.T) {
-	handler, store := householdDevicesHandler(t)
-	seedDevice(t, store, "profile-1", "device-1", "Sam's laptop")
-	seedDevice(t, store, "profile-2", "device-9", "Robin's iPad")
-
-	body := listDevices(t, handler, "", "profile-1")
-
-	if len(body.Devices) != 1 || body.Devices[0].DeviceID != "device-1" {
-		t.Fatalf("default scope returned %+v, want only device-1", body.Devices)
-	}
-}
-
-func TestForgetDevice_NonPrimaryCannotForgetSiblingsDevice(t *testing.T) {
-	handler, store := householdDevicesHandler(t)
-	seedDevice(t, store, "profile-1", "device-1", "Sam's laptop")
-
-	rec := routeDevice(t, handler, http.MethodDelete, "/devices/device-1?profile_id=profile-1",
-		"device-1", "profile-2", handler.HandleForgetDevice)
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("non-primary forgetting a sibling's device = %d, want 403: %s",
-			rec.Code, rec.Body.String())
-	}
-
-	registry := store.(userstore.DeviceRegistry)
-	exists, err := registry.DeviceExists(context.Background(), "profile-1", "device-1")
-	if err != nil {
-		t.Fatalf("DeviceExists: %v", err)
-	}
-	if !exists {
-		t.Error("a non-primary profile removed a sibling's device")
+	if page[0].ChangedCount != 2 {
+		t.Errorf("changed_count = %d, want 2: the mirrored intro pair is one preference", page[0].ChangedCount)
 	}
 }

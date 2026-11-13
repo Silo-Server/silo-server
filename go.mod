@@ -21,9 +21,10 @@ require (
 )
 
 require (
+	filippo.io/age v1.3.2
 	github.com/SherClockHolmes/webpush-go v1.4.0
 	github.com/abadojack/whatlanggo v1.0.1
-	github.com/andybalholm/brotli v1.2.1
+	github.com/andybalholm/brotli v1.2.8
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.22.34
 	github.com/danielgtaylor/huma/v2 v2.38.0
 	github.com/getkin/kin-openapi v0.149.0
@@ -32,7 +33,7 @@ require (
 	github.com/h2non/bimg v1.1.9
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/joho/godotenv v1.5.1
-	github.com/klauspost/compress v1.18.7
+	github.com/klauspost/compress v1.20.2
 	github.com/miekg/dns v1.1.61
 	github.com/mmcdole/gofeed v1.3.0
 	github.com/oasdiff/oasdiff v1.30.0
@@ -58,6 +59,7 @@ require (
 
 require (
 	cloud.google.com/go v0.123.0 // indirect
+	filippo.io/hpke v0.4.0 // indirect
 	github.com/PuerkitoBio/goquery v1.8.0 // indirect
 	github.com/TwiN/go-color v1.4.1 // indirect
 	github.com/agnivade/levenshtein v1.2.1 // indirect

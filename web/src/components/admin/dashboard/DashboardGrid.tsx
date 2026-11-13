@@ -13,12 +13,15 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { useDragAutoScroll } from "./dragAutoScroll";
 import { getDashboardWidget } from "./registry";
 import type { WidgetId } from "./types";
 import type { DashboardLayout } from "./useDashboardLayout";
 import { WidgetChromeProvider } from "./widgetChrome";
+import { isRightToLeft, readingArrowKey } from "@/lib/direction";
+import { Direction } from "radix-ui";
 
 /** Fallback for the `gap` of `.admin-widget-grid` in app.css (0.875rem). */
 const GRID_GAP_PX = 14;
@@ -109,6 +112,8 @@ export function DashboardGrid({
     removeWidget,
     addWidget,
   } = layout;
+  const t = useT();
+  const dir = Direction.useDirection();
 
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [draggedId, setDraggedId] = useState<WidgetId | null>(null);
@@ -127,6 +132,8 @@ export function DashboardGrid({
     id: WidgetId;
     title: string;
     startX: number;
+    /** 1, or -1 right to left, where the handle grows the widget leftward. */
+    inlineSign: number;
     startY: number;
     startSpan: number;
     startRows: number;
@@ -202,9 +209,11 @@ export function DashboardGrid({
       const host = (event.target as HTMLElement).closest<HTMLElement>("[data-widget-id]");
       if (!host) return null;
       const rect = host.getBoundingClientRect();
-      return { id: overId, edge: event.clientX < rect.left + rect.width / 2 ? "before" : "after" };
+      // "Before" is the start side: the left half, or the right half right to left.
+      const leftHalf = event.clientX < rect.left + rect.width / 2;
+      return { id: overId, edge: leftHalf !== (dir === "rtl") ? "before" : "after" };
     },
-    [findWidgetIdFromEvent],
+    [dir, findWidgetIdFromEvent],
   );
 
   /** The entry the payload should land in front of, or null to append. */
@@ -278,7 +287,11 @@ export function DashboardGrid({
             ? entries.length + 1
             : Math.max(1, entries.findIndex((entry) => entry.id === beforeId) + 1);
         setLiveMessage(
-          `${getDashboardWidget(id).title} added at position ${position} of ${entries.length + 1}`,
+          t("web.admin.dashboard.grid.added", {
+            title: t(getDashboardWidget(id).titleKey),
+            position: position,
+            total: entries.length + 1,
+          }),
         );
         onAddPanelOpenChange(false);
         return;
@@ -308,6 +321,7 @@ export function DashboardGrid({
       moveWidget,
       onAddPanelOpenChange,
       resolveBeforeId,
+      t,
     ],
   );
 
@@ -332,8 +346,9 @@ export function DashboardGrid({
       const columnUnit = gridWidth > 0 ? (gridWidth + gapPx) / GRID_COLUMNS : 1;
       resizeSessionRef.current = {
         id,
-        title: widget.title,
+        title: t(widget.titleKey),
         startX: event.clientX,
+        inlineSign: isRightToLeft(event.currentTarget) ? -1 : 1,
         startY: event.clientY,
         startSpan: currentSpan,
         startRows: currentRows,
@@ -351,7 +366,7 @@ export function DashboardGrid({
       };
       setResizePreview({ id, span: currentSpan, rows: currentRows });
     },
-    [isCustomizing],
+    [isCustomizing, t],
   );
 
   /**
@@ -366,7 +381,10 @@ export function DashboardGrid({
     // Each axis is clamped to its own range, so a widget with a pinned width
     // still grows in height and never drifts sideways under the pointer.
     const nextSpan = clamp(
-      Math.round(session.startSpan + (session.latestClientX - session.startX) / session.columnUnit),
+      Math.round(
+        session.startSpan +
+          ((session.latestClientX - session.startX) * session.inlineSign) / session.columnUnit,
+      ),
       session.minSpan,
       session.maxSpan,
     );
@@ -423,16 +441,22 @@ export function DashboardGrid({
       }
       resizeWidget(session.id, { span: session.latestSpan, rows: session.latestRows });
       setLiveMessage(
-        `${session.title} resized to ${session.latestSpan} of ${GRID_COLUMNS} columns × ${session.latestRows} ${session.latestRows === 1 ? "row" : "rows"}`,
+        t("web.admin.dashboard.grid.resized", {
+          title: session.title,
+          span: session.latestSpan,
+          columns: GRID_COLUMNS,
+          rows: session.latestRows,
+        }),
       );
     },
-    [autoScroll, resizeWidget],
+    [autoScroll, resizeWidget, t],
   );
 
   const handleMoveKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLButtonElement>, id: WidgetId) => {
-      const backward = event.key === "ArrowLeft" || event.key === "ArrowUp";
-      const forward = event.key === "ArrowRight" || event.key === "ArrowDown";
+      const key = readingArrowKey(event);
+      const backward = key === "ArrowLeft" || key === "ArrowUp";
+      const forward = key === "ArrowRight" || key === "ArrowDown";
       if (!backward && !forward) return;
       event.preventDefault();
       const index = entries.findIndex((entry) => entry.id === id);
@@ -447,10 +471,14 @@ export function DashboardGrid({
         moveWidget(id, after ? after.id : null);
       }
       setLiveMessage(
-        `${getDashboardWidget(id).title} moved to position ${nextIndex + 1} of ${entries.length}`,
+        t("web.admin.dashboard.grid.moved", {
+          title: t(getDashboardWidget(id).titleKey),
+          position: nextIndex + 1,
+          total: entries.length,
+        }),
       );
     },
-    [entries, moveWidget],
+    [entries, moveWidget, t],
   );
 
   const handleResizeKeyDown = useCallback(
@@ -461,9 +489,10 @@ export function DashboardGrid({
       currentRows: number,
     ) => {
       // The corner handle owns both axes: left/right walk columns, up/down walk
-      // rows, matching the direction the same drag would take.
-      const columnStep =
-        event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : undefined;
+      // rows, matching the direction the same drag would take. The handle sits
+      // on the end corner, so right to left the keys mirror too.
+      const key = readingArrowKey(event);
+      const columnStep = key === "ArrowLeft" ? -1 : key === "ArrowRight" ? 1 : undefined;
       const rowStep = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : undefined;
       if (columnStep === undefined && rowStep === undefined) return;
       event.preventDefault();
@@ -473,10 +502,15 @@ export function DashboardGrid({
       if (nextSpan === currentSpan && nextRows === currentRows) return;
       resizeWidget(id, { span: nextSpan, rows: nextRows });
       setLiveMessage(
-        `${widget.title} resized to ${nextSpan} of ${GRID_COLUMNS} columns × ${nextRows} ${nextRows === 1 ? "row" : "rows"}`,
+        t("web.admin.dashboard.grid.resized", {
+          title: t(widget.titleKey),
+          span: nextSpan,
+          columns: GRID_COLUMNS,
+          rows: nextRows,
+        }),
       );
     },
-    [resizeWidget],
+    [resizeWidget, t],
   );
 
   const isResizing = resizePreview !== null;
@@ -510,6 +544,7 @@ export function DashboardGrid({
               : entry.rows;
           const canResize = widget.minSpan !== widget.maxSpan || widget.minRows !== widget.maxRows;
           const WidgetComponent = widget.Component;
+          const title = t(widget.titleKey);
 
           return (
             <div
@@ -552,16 +587,16 @@ export function DashboardGrid({
                       aria-hidden="true"
                       className={cn(
                         "bg-primary pointer-events-none absolute inset-y-0 z-30 w-1 rounded-full",
-                        dropIndicator.edge === "before" ? "-left-2.5" : "-right-2.5",
+                        dropIndicator.edge === "before" ? "-start-2.5" : "-end-2.5",
                       )}
                     />
                   )}
 
-                  <div className="border-border bg-background/95 absolute -top-3 right-3 z-20 flex items-center gap-0.5 rounded-full border px-1 py-0.5 shadow-md backdrop-blur">
+                  <div className="border-border bg-background/95 absolute end-3 -top-3 z-20 flex items-center gap-0.5 rounded-full border px-1 py-0.5 shadow-md backdrop-blur">
                     <button
                       type="button"
-                      aria-label={`Move ${widget.title} (drag, or arrow keys)`}
-                      title="Drag or use arrow keys to move"
+                      aria-label={t("web.admin.dashboard.grid.moveLabel", { title })}
+                      title={t("web.admin.dashboard.grid.moveHint")}
                       className="text-muted-foreground hover:text-foreground focus-visible:ring-ring flex h-6 w-6 cursor-grab items-center justify-center rounded-full focus-visible:ring-2 focus-visible:outline-none active:cursor-grabbing"
                       onKeyDown={(event) => handleMoveKeyDown(event, entry.id)}
                     >
@@ -569,8 +604,8 @@ export function DashboardGrid({
                     </button>
                     <button
                       type="button"
-                      aria-label={`Remove ${widget.title}`}
-                      title="Remove"
+                      aria-label={t("web.admin.dashboard.grid.removeLabel", { title })}
+                      title={t("web.admin.dashboard.grid.removeHint")}
                       className="text-muted-foreground hover:text-destructive focus-visible:ring-ring flex h-6 w-6 cursor-pointer items-center justify-center rounded-full focus-visible:ring-2 focus-visible:outline-none"
                       onClick={() => removeWidget(entry.id)}
                     >
@@ -584,10 +619,10 @@ export function DashboardGrid({
                   {canResize && (
                     <button
                       type="button"
-                      aria-label={`Resize ${widget.title} (drag, or arrow keys)`}
-                      title="Drag or use arrow keys to resize"
+                      aria-label={t("web.admin.dashboard.grid.resizeLabel", { title })}
+                      title={t("web.admin.dashboard.grid.resizeHint")}
                       className={cn(
-                        "border-border bg-background/95 hover:border-primary hover:bg-primary/30 focus-visible:ring-ring absolute -right-1.5 -bottom-1.5 z-20 hidden h-3.5 w-3.5 cursor-nwse-resize touch-none rounded-[4px] border shadow-md focus-visible:ring-2 focus-visible:outline-none lg:block",
+                        "border-border bg-background/95 hover:border-primary hover:bg-primary/30 focus-visible:ring-ring absolute -end-1.5 -bottom-1.5 z-20 hidden h-3.5 w-3.5 cursor-nwse-resize touch-none rounded-[4px] border shadow-md focus-visible:ring-2 focus-visible:outline-none lg:block rtl:cursor-nesw-resize",
                         isWidgetResizing && "border-primary bg-primary/30",
                       )}
                       onPointerDown={(event) =>
@@ -608,7 +643,10 @@ export function DashboardGrid({
                       aria-hidden="true"
                       className="bg-primary text-primary-foreground absolute -top-3 left-1/2 z-30 -translate-x-1/2 rounded-full px-2 py-0.5 text-[10px] font-bold whitespace-nowrap tabular-nums shadow-md"
                     >
-                      {span} × {rows}
+                      {t("web.admin.dashboard.grid.sizeBadge", {
+                        span: span,
+                        rows: rows,
+                      })}
                     </span>
                   )}
                 </>
@@ -633,22 +671,20 @@ export function DashboardGrid({
           onInteractOutside={(event) => event.preventDefault()}
         >
           <SheetHeader className="pb-0">
-            <SheetTitle>Add widget</SheetTitle>
-            <SheetDescription>
-              Widgets you&apos;ve removed or haven&apos;t placed yet.
-            </SheetDescription>
+            <SheetTitle>{t("web.admin.dashboard.addSheet.title")}</SheetTitle>
+            <SheetDescription>{t("web.admin.dashboard.addSheet.description")}</SheetDescription>
           </SheetHeader>
           <div className="overlay-scroll flex flex-col gap-2 overflow-y-auto p-4 pt-2">
             {hiddenWidgets.length === 0 ? (
               <p className="text-muted-foreground py-4 text-sm">
-                Everything is on the dashboard already.
+                {t("web.admin.dashboard.addSheet.empty")}
               </p>
             ) : (
               hiddenWidgets.map((widget) => (
                 <button
                   key={widget.id}
                   type="button"
-                  className="border-border hover:border-primary/50 hover:bg-accent/40 focus-visible:ring-ring flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                  className="border-border hover:border-primary/50 hover:bg-accent/40 focus-visible:ring-ring flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-start transition-colors focus-visible:ring-2 focus-visible:outline-none"
                   onClick={() => addWidget(widget.id)}
                   // Dragging is the pointer shortcut for placing the widget at
                   // a specific spot; clicking (the keyboard path) appends.
@@ -670,9 +706,9 @@ export function DashboardGrid({
                     <Plus className="h-3.5 w-3.5" />
                   </span>
                   <span className="min-w-0">
-                    <span className="block text-sm font-semibold">{widget.title}</span>
+                    <span className="block text-sm font-semibold">{t(widget.titleKey)}</span>
                     <span className="text-muted-foreground block text-xs">
-                      {widget.description}
+                      {t(widget.descriptionKey)}
                     </span>
                   </span>
                 </button>

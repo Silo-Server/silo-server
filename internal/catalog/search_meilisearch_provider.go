@@ -79,7 +79,7 @@ type MeilisearchProviderConfig struct {
 }
 
 type MeilisearchSearchProvider struct {
-	sessions  *searchSessionStore
+	sessions  searchSessionStore
 	itemRepo  *ItemRepository
 	stateRepo meilisearchIndexStateStore
 	fallback  *PostgresSearchProvider
@@ -164,6 +164,7 @@ func NewMeilisearchSearchProvider(
 		stateStore = stateRepo
 	}
 	return &MeilisearchSearchProvider{
+		sessions:    &memorySearchSessionStore{},
 		itemRepo:    itemRepo,
 		stateRepo:   stateStore,
 		fallback:    fallback,

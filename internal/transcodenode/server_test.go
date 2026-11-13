@@ -1097,6 +1097,35 @@ func TestValidateCopyVideoMPEGTSAttestation(t *testing.T) {
 	}
 }
 
+// A node that ignores the copied codec writes AAC into fMP4 without
+// aac_adtstoasc and fails after the first segment. Runs that need no filter
+// keep working on older nodes, which omit the receipt.
+func TestValidateCopyAudioCodecAttestation(t *testing.T) {
+	aacIntoFMP4 := TranscodeStartRequest{SourceVideoCodec: "h264", TargetCodecVideo: "copy", TargetCodecAudio: "copy", CopyAudioCodec: "aac"}
+	aacIntoMPEGTS := aacIntoFMP4
+	aacIntoMPEGTS.CopyVideoMPEGTS = true
+	ac3IntoFMP4 := aacIntoFMP4
+	ac3IntoFMP4.CopyAudioCodec = "ac3"
+	for _, test := range []struct {
+		name     string
+		request  TranscodeStartRequest
+		response TranscodeStartResponse
+		wantErr  bool
+	}{
+		{name: "aac into fmp4 confirmed", request: aacIntoFMP4, response: TranscodeStartResponse{CopyAudioCodec: "aac"}},
+		{name: "aac into fmp4 on an older node", request: aacIntoFMP4, wantErr: true},
+		{name: "aac into mpeg-ts on an older node", request: aacIntoMPEGTS},
+		{name: "ac3 into fmp4 on an older node", request: ac3IntoFMP4},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := ValidateCopyAudioCodecAttestation(test.request, test.response)
+			if got := errors.Is(err, ErrCopyAudioCodecAttestationMismatch); got != test.wantErr {
+				t.Fatalf("error = %v, want mismatch %v", err, test.wantErr)
+			}
+		})
+	}
+}
+
 // Requests the node cannot execute as written are refused with 400 before
 // anything runs.
 func TestHandleStartAndPrepareRejectInvalidRequests(t *testing.T) {
@@ -1204,6 +1233,16 @@ func TestHandleStartAttestsRecipeVersions(t *testing.T) {
 			},
 			receipt: func(response TranscodeStartResponse) string { return strconv.FormatBool(response.CopyVideoMPEGTS) },
 			want:    "true",
+		},
+		{
+			name: "copied AAC into fMP4",
+			request: TranscodeStartRequest{
+				SessionID: "attested-copy-aac", InputPath: "/media/movie.ts",
+				SourceVideoCodec: "h264", TargetCodecVideo: "copy", TargetCodecAudio: "copy", CopyAudioCodec: "aac",
+				CopyFMP4RecipeVersion: playback.CopyFMP4RecipeVersion, SegmentDuration: 2,
+			},
+			receipt: func(response TranscodeStartResponse) string { return response.CopyAudioCodec },
+			want:    "aac",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {

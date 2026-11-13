@@ -137,7 +137,7 @@ function openMenu(sync: SubtitleSync, activeIndex: number | null = 1) {
       subtitleSync={sync}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: /captions/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^Subtitles/ }));
 }
 
 beforeEach(() => {
@@ -241,7 +241,7 @@ it("hands a downloaded subtitle to the sync state so its auto-sync shows", () =>
       subtitleSync={sync}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: /captions/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^Subtitles/ }));
   fireEvent.click(screen.getByRole("menuitem", { name: "Add Subtitles…" }));
   fireEvent.click(within(document.body).getByRole("button", { name: "Finish download" }));
 

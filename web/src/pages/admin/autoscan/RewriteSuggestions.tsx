@@ -10,6 +10,10 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useAutoscanRewriteSuggestions } from "@/hooks/queries/useAutoscan";
+import { useT } from "@/i18n";
+
+/** Points from the server's path to Silo's; a symbol, not text. */
+const ARROW = "→";
 
 /**
  * "Sync from server": reads the bound arr's root folders for a saved source and
@@ -30,6 +34,7 @@ export function RewriteSuggestions({
   disabledReason: string | null;
   onApply: (additions: AutoscanPathRewrite[]) => void;
 }) {
+  const t = useT();
   const suggest = useAutoscanRewriteSuggestions();
   const [previewState, setPreview] = useState<{
     value: AutoscanRewriteSuggestions;
@@ -99,10 +104,12 @@ export function RewriteSuggestions({
         size="sm"
         disabled={disabledReason !== null || suggest.isPending}
         onClick={handleSync}
-        title={disabledReason ?? "Fetch root-folder mappings from the connected server"}
+        title={disabledReason ?? t("web.admin.autoscan.rewrites.syncTitle")}
       >
         <RefreshCw className={suggest.isPending ? "animate-spin" : undefined} />
-        {suggest.isPending ? "Syncing…" : "Sync from server"}
+        {suggest.isPending
+          ? t("web.admin.autoscan.rewrites.syncing")
+          : t("web.admin.autoscan.rewrites.sync")}
       </Button>
       {disabledReason && (
         <span className="text-muted-foreground basis-full text-xs">{disabledReason}</span>
@@ -112,12 +119,14 @@ export function RewriteSuggestions({
         <div
           className="border-border basis-full space-y-4 rounded-md border p-3"
           role="region"
-          aria-label="Rewrite suggestions"
+          aria-label={t("web.admin.autoscan.rewrites.regionAria")}
         >
           <div className="space-y-2">
-            <p className="text-sm font-medium">Proposed</p>
+            <p className="text-sm font-medium">{t("web.admin.autoscan.rewrites.proposed")}</p>
             {preview.proposed.length === 0 ? (
-              <p className="text-muted-foreground text-xs">No proposed rewrites.</p>
+              <p className="text-muted-foreground text-xs">
+                {t("web.admin.autoscan.rewrites.noneProposed")}
+              </p>
             ) : (
               preview.proposed.map((proposal) => (
                 <label key={proposal.from} className="flex items-center gap-2 text-sm">
@@ -127,15 +136,15 @@ export function RewriteSuggestions({
                     onChange={() => toggleSelected(proposal.from)}
                   />
                   <span className="min-w-0 font-mono text-xs break-all">
-                    {proposal.from} → {proposal.to}
+                    {proposal.from} {ARROW} {proposal.to}
                   </span>
                   {proposal.match_depth >= 2 ? (
                     <Badge variant="secondary" className="text-xs">
-                      {`${proposal.match_depth} segments`}
+                      {t("web.admin.autoscan.rewrites.segments", { count: proposal.match_depth })}
                     </Badge>
                   ) : (
                     <Badge variant="destructive" className="text-xs">
-                      1 segment — weak
+                      {t("web.admin.autoscan.rewrites.weak")}
                     </Badge>
                   )}
                 </label>
@@ -145,29 +154,35 @@ export function RewriteSuggestions({
 
           {preview.unmatched.length > 0 && (
             <CollapsibleList
-              title={`No Silo match (${preview.unmatched.length})`}
+              title={t("web.admin.autoscan.rewrites.unmatched", {
+                count: preview.unmatched.length,
+              })}
               items={preview.unmatched}
             />
           )}
           {preview.ambiguous.length > 0 && (
             <CollapsibleList
-              title={`Ambiguous (${preview.ambiguous.length})`}
+              title={t("web.admin.autoscan.rewrites.ambiguous", {
+                count: preview.ambiguous.length,
+              })}
               items={preview.ambiguous.map((a) => `${a.root} → ${a.candidates.join(", ")}`)}
             />
           )}
           {preview.covered.length > 0 && (
             <CollapsibleList
-              title={`Already mapped (${preview.covered.length})`}
+              title={t("web.admin.autoscan.rewrites.covered", {
+                count: preview.covered.length,
+              })}
               items={preview.covered}
             />
           )}
 
           <div className="flex flex-wrap items-center gap-2">
             <Button type="button" size="sm" disabled={selected.size === 0} onClick={applySelected}>
-              Add selected
+              {t("web.admin.autoscan.rewrites.addSelected")}
             </Button>
             <Button type="button" variant="outline" size="sm" onClick={() => setPreview(null)}>
-              Dismiss
+              {t("web.admin.autoscan.rewrites.dismiss")}
             </Button>
           </div>
         </div>
@@ -184,7 +199,7 @@ function CollapsibleList({ title, items }: { title: string; items: string[] }) {
     <div className="space-y-1">
       <button
         type="button"
-        className="flex items-center gap-1.5 text-left"
+        className="flex items-center gap-1.5 text-start"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-controls={panelId}
@@ -197,7 +212,7 @@ function CollapsibleList({ title, items }: { title: string; items: string[] }) {
         <span className="text-sm font-medium">{title}</span>
       </button>
       {open && (
-        <ul id={panelId} className="text-muted-foreground space-y-0.5 pl-5 text-xs">
+        <ul id={panelId} className="text-muted-foreground space-y-0.5 ps-5 text-xs">
           {items.map((item) => (
             <li key={item} className="font-mono break-all">
               {item}
