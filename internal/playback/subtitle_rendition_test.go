@@ -730,7 +730,6 @@ func TestRebuiltSessionKeepsEarlierGenerationCues(t *testing.T) {
 	}
 
 	rebuiltOpts := opts
-	rebuiltOpts.Reconstructed = true
 	rebuiltOpts.StartSegmentNumber = 25
 	rebuiltOpts.SeekSeconds = 50
 	rebuilt, err := StartTranscode(t.Context(), rebuiltOpts)
