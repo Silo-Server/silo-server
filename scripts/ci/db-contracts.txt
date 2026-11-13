@@ -52,6 +52,8 @@
 ./internal/scanner TestFinalizeVariantsRetotalsPartsLeftByARenameDB
 ./internal/scanner TestFinalizeVariantsReadsWholeGroupFoundOutsideTheScopeDB
 ./internal/scanner TestScanKeepsFileRowAcrossRenameDB
+./internal/scanner TestScanLeavesOutFilesWithoutVideoDB
+./internal/scanner TestScanFileRetiresFileWithoutVideoDB
 ./internal/scanner TestMatchLinkRefusedAfterRetitleDB
 ./internal/metadata TestSkeletonUndoFollowsTheLinkDB
 ./internal/metadata TestEpisodeLinkFollowsSameTitleMoveDB
