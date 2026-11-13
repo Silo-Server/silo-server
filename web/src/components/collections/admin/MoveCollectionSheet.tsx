@@ -13,8 +13,8 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import {
-  PIN_LABEL,
-  SHOW_ON_TAB_LABEL,
+  pinLabel,
+  showOnTabLabel,
   arrangeHeading,
   pinHelp,
   pinSwitchLabel,
@@ -22,6 +22,7 @@ import {
 import { sortedBy, type Shelf } from "@/lib/collections/shelves";
 
 import { ToggleRow } from "../fields/ToggleRow";
+import { useT } from "@/i18n";
 
 /**
  * Arrange on a phone has no drag: a card's ⋯ opens this sheet, "Move *name*",
@@ -56,17 +57,20 @@ export function MoveCollectionSheet({
   onVisibleChange: (visible: boolean) => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const currentShelfId = currentShelf.id;
   const [shelfId, setShelfId] = useState(currentShelfId);
   return (
     <Sheet open onOpenChange={(open) => !open && onClose()}>
       <SheetContent side="bottom" className="max-h-[85vh] gap-0 overflow-y-auto rounded-t-[22px]">
         <SheetHeader>
-          <SheetTitle>Move {collection.title}</SheetTitle>
+          <SheetTitle>
+            {t("web.collections.admin.moveSheetTitle", { name: collection.title })}
+          </SheetTitle>
           <SheetDescription>{arrangeHeading(libraryName)}</SheetDescription>
         </SheetHeader>
         <RadioGroup
-          aria-label="Shelf"
+          aria-label={t("web.collections.admin.shelfLabel")}
           value={shelfId}
           onValueChange={setShelfId}
           disabled={!canMove}
@@ -79,9 +83,9 @@ export function MoveCollectionSheet({
               label={shelf.name}
               hint={
                 shelf.id === currentShelfId
-                  ? "Now here"
+                  ? t("web.collections.admin.nowHere")
                   : sortedBy(shelf.sortMode)
-                    ? `Sorted by ${sortedBy(shelf.sortMode)}`
+                    ? t("web.collections.admin.sortedBy", { by: sortedBy(shelf.sortMode) ?? "" })
                     : undefined
               }
               className="min-h-11"
@@ -90,7 +94,7 @@ export function MoveCollectionSheet({
         </RadioGroup>
         <div className="border-border/70 mx-4 mt-4 border-t pt-4">
           <ToggleRow
-            label={PIN_LABEL}
+            label={pinLabel()}
             switchLabel={pinSwitchLabel(
               collection.title,
               currentShelf.kind === "ungrouped" ? null : currentShelf.name,
@@ -111,7 +115,7 @@ export function MoveCollectionSheet({
               onClose();
             }}
           >
-            Move
+            {t("web.collections.admin.move")}
           </Button>
           <div className="grid gap-2">
             <Button
@@ -122,7 +126,7 @@ export function MoveCollectionSheet({
                 onEdit();
               }}
             >
-              <Pencil aria-hidden /> Edit collection
+              <Pencil aria-hidden /> {t("web.collections.admin.editCollection")}
             </Button>
             <Button
               variant="outline"
@@ -133,7 +137,7 @@ export function MoveCollectionSheet({
               }}
             >
               {visible ? <EyeOff aria-hidden /> : <Eye aria-hidden />}
-              {visible ? "Hide from Collections tab" : SHOW_ON_TAB_LABEL}
+              {visible ? t("web.collections.admin.hideFromTab") : showOnTabLabel()}
             </Button>
           </div>
         </SheetFooter>

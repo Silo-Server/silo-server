@@ -58,3 +58,39 @@ func (r ForYouRow) Global() bool {
 	}
 	return false
 }
+
+// The placeholders of the keyed row titles: a cluster row's comma-separated
+// genre names and a genre row's genre.
+const (
+	titleArgGenres = "genres"
+	titleArgGenre  = "genre"
+)
+
+// TitleKey is the translation catalog key of the row's title, and the values
+// of its placeholders, while the title is one this file words. It is "" for
+// any other title, such as a cluster title cached in older wording.
+func (r ForYouRow) TitleKey() (string, map[string]string) {
+	switch {
+	case r.Type == clusterRowType && r.Label == ForYouLabel:
+		return "home.section.forYou", nil
+	case r.Type == clusterRowType && r.Label == unlabeledClusterTitle:
+		return "home.section.pickedFromYourHistory", nil
+	case r.Type == clusterRowType:
+		if genres, ok := clusterTitleLabel(r.Label); ok && genres != "" {
+			return "home.section.becauseYouEnjoy", map[string]string{titleArgGenres: genres}
+		}
+	case r.Type == RecTypeSimilarUsersLiked && r.Label == similarUsersLabel:
+		return "home.section.profilesLikeYouEnjoyed", nil
+	case r.Type == RecTypePopular && r.Label == popularLabel:
+		return "home.section.popularOnServer", nil
+	case r.Type == RecTypeRecentlyAdded && r.Label == recentlyAddedLabel:
+		return "home.section.recentlyAdded", nil
+	case r.Type == RecTypeTopRated && r.Label == highlyRatedLabel:
+		return "home.section.highlyRatedInLibrary", nil
+	case r.Type == genreSamplerRowType:
+		if genre, ok := strings.CutPrefix(r.Label, genreRowLabel("")); ok && genre != "" {
+			return "home.section.topGenre", map[string]string{titleArgGenre: genre}
+		}
+	}
+	return "", nil
+}

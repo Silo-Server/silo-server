@@ -17,6 +17,7 @@ import {
 } from "@/test/fixtures/collectionAnswers";
 import { installV2Recorder, v2Recorder } from "@/test/v2Recorder";
 import {
+  addGenreRule,
   choose,
   nameField,
   prepareEditorPage,
@@ -132,6 +133,7 @@ async function save(count: number) {
 
 function patchBody(index = 0) {
   return writes().filter((call) => call.operation.startsWith("PATCH"))[index]!.body as {
+    library_ids: string[];
     query_definition: { groups: Array<{ rules: unknown[] }>; library_ids: number[] };
     sort_config: Record<string, unknown>;
   };
@@ -140,6 +142,11 @@ function patchBody(index = 0) {
 /** The sentence's libraries control, by the summary it shows. */
 function libraries(summary: string) {
   return new RegExp(`^Libraries:\\s*${summary}$`);
+}
+
+/** Where it shows: the server Smart collection's libraries control, by its summary. */
+function showsIn(summary: string) {
+  return new RegExp(`^Show in libraries:\\s*${summary}$`);
 }
 
 function optionsOf(combobox: HTMLElement) {
@@ -172,18 +179,36 @@ describe("the rules", () => {
     expect(patchBody().query_definition.groups[0]!.rules).toEqual([COMEDY, watched]);
   });
 
-  it("server: can't save once every library is unticked, and says why", async () => {
+  it("server: draws from every library apart from where it shows", async () => {
+    const user = userEvent.setup();
+    showServerSmart(rules(), {}, { library_ids: ["2"] });
+    showEditorPage("/admin/collections/c1/edit");
+    await sentence();
+    expect(screen.getByRole("button", { name: showsIn("Kids") })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: libraries("Movies, 4K Movies") }));
+    await user.click(screen.getByRole("menuitem", { name: "All libraries" }));
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: libraries("all libraries") })).toBeInTheDocument();
+    expect(previews("server").at(-1)!.body).toMatchObject({
+      query_definition: { library_ids: [] },
+    });
+    await save(1);
+    expect(patchBody().query_definition.library_ids).toEqual([]);
+    expect(patchBody().library_ids).toEqual(["2"]);
+  });
+
+  it("server: can't save once it shows in no library, and says why", async () => {
     const user = userEvent.setup();
     showEditorPage("/admin/collections/c1/edit");
     await sentence();
-    await user.click(screen.getByRole("button", { name: libraries("Movies, 4K Movies") }));
+    await user.click(screen.getByRole("button", { name: showsIn("Movies, 4K Movies") }));
     await user.click(screen.getByRole("menuitemcheckbox", { name: "Movies" }));
     await user.click(screen.getByRole("menuitemcheckbox", { name: "4K Movies" }));
     await user.keyboard("{Escape}");
     expect(within(saveBar()).getByRole("button", { name: "Save" })).toBeDisabled();
     expect(saveBar()).toHaveTextContent("Pick at least one library.");
-    const pane = screen.getByText(/Live preview/).closest("section")!;
-    expect(pane).toHaveTextContent("From every library until you pick some");
+    // The rules still name their own libraries.
+    expect(screen.getByRole("button", { name: libraries("Movies, 4K Movies") })).toBeTruthy();
     fireEvent.click(within(saveBar()).getByRole("button", { name: "Save" }));
     expect(writes()).toEqual([]);
   });
@@ -262,22 +287,39 @@ describe("Order", () => {
 });
 
 describe("creating a Smart collection", () => {
-  it("server: waits for a library before it can be created, but previews every library meanwhile", async () => {
+  it("server: draws from all libraries, and creates once it has somewhere to show", async () => {
     v2Recorder.answer(
       "POST /api/v2/admin/collections/preview",
       previewOf(3, ["Alien", "Avatar", "Titanic"]),
     );
+    v2Recorder.answer("POST /api/v2/admin/collections", adminSmartCollection(rules()));
+    const user = userEvent.setup();
     showEditorPage("/admin/collections/new?type=smart");
     await rename("Staff picks");
-    expect(screen.getByRole("button", { name: "Create collection" })).toBeDisabled();
-    expect(screen.getAllByText("Pick its libraries, then create it.").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: libraries("all libraries") })).toBeInTheDocument();
+    await addGenreRule();
     const pane = screen.getByText(/Live preview/).closest("section")!;
     expect(await within(pane).findByText("Avatar")).toBeInTheDocument();
-    expect(pane).toHaveTextContent("From every library until you pick some");
-    const request = previews("server").at(-1)!.body as {
-      query_definition: { library_ids: number[] };
-    };
-    expect(request.query_definition.library_ids).toEqual([]);
+    expect(previews("server").at(-1)!.body).toMatchObject({
+      query_definition: { library_ids: [] },
+    });
+    const create = screen.getByRole("button", { name: "Create collection" });
+    expect(create).toBeDisabled();
+    expect(
+      screen.getAllByText("Pick the libraries it shows in, then create it.").length,
+    ).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: showsIn("Choose libraries") }));
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "Movies" }));
+    await user.keyboard("{Escape}");
+    expect(create).toBeEnabled();
+    fireEvent.click(create);
+    await vi.waitFor(() =>
+      expect(v2Recorder.callsOf("POST /api/v2/admin/collections")).toHaveLength(1),
+    );
+    expect(v2Recorder.callsOf("POST /api/v2/admin/collections")[0]!.body).toMatchObject({
+      library_ids: ["1"],
+      query_definition: { library_ids: [] },
+    });
   });
 });
 
@@ -290,6 +332,7 @@ describe("Back", () => {
       state: listReturnState(view),
     });
     await rename("Fox classics");
+    await addGenreRule();
     fireEvent.click(screen.getByRole("button", { name: "Create collection" }));
     await vi.waitFor(() =>
       expect(router.state.location.pathname).toBe("/admin/collections/c1/edit"),
@@ -300,8 +343,44 @@ describe("Back", () => {
   });
 });
 
+describe("a Smart collection needs a rule", () => {
+  it("personal: previews nothing and waits for a rule before Create", async () => {
+    v2Recorder.answer("POST /api/v2/collections/preview", previewOf(2, ["Alien", "Avatar"]));
+    showEditorPage("/collections/new?type=smart");
+    await rename("Comfort");
+    const create = screen.getByRole("button", { name: "Create collection" });
+    expect(create).toBeDisabled();
+    expect(within(saveBar()).getByRole("status")).toHaveTextContent(
+      "Not created yet Add a rule, then create it.",
+    );
+    const pane = screen.getByText(/Live preview/).closest("section")!;
+    expect(pane).toHaveTextContent("Add a rule to see what it matches");
+    await addGenreRule();
+    expect(await within(pane).findByText("Avatar")).toBeInTheDocument();
+    expect(create).toBeEnabled();
+    // Previews went out only for the complete rule, never for empty or blank rules.
+    const sent = previews("personal").map(
+      (call) => (call.body as { query_definition: { groups: unknown[] } }).query_definition.groups,
+    );
+    expect(sent.length).toBeGreaterThan(0);
+    for (const groups of sent) {
+      expect(groups).toEqual([{ match: "all", rules: [COMEDY] }]);
+    }
+  });
+
+  it("server: won't save once its last rule is removed", async () => {
+    showEditorPage("/admin/collections/c1/edit?libraryId=1");
+    const rule = await screen.findByRole("group", { name: "Rule 1" });
+    fireEvent.click(within(rule).getByRole("button", { name: "Remove rule" }));
+    expect(within(saveBar()).getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(saveBar()).toHaveTextContent("Add at least one rule.");
+    const pane = screen.getByText(/Live preview/).closest("section")!;
+    expect(pane).toHaveTextContent("Add a rule to see what it matches");
+  });
+});
+
 describe("the save bar before Create", () => {
-  it("server: says what's still missing, name then libraries, then how many titles match", async () => {
+  it("server: says what's still missing, name then where it shows then a rule, then how many titles match", async () => {
     v2Recorder.answer("POST /api/v2/admin/collections/preview", previewOf(38, ["Alien"]));
     const user = userEvent.setup();
     showEditorPage("/admin/collections/new?type=smart");
@@ -309,18 +388,19 @@ describe("the save bar before Create", () => {
     const status = () => within(saveBar()).getByRole("status");
     expect(status()).toHaveTextContent("Not created yet Name it, then create it.");
     await rename("Fox classics");
-    expect(status()).toHaveTextContent("Not created yet Pick its libraries, then create it.");
+    expect(status()).toHaveTextContent(
+      "Not created yet Pick the libraries it shows in, then create it.",
+    );
     expect(create).toBeDisabled();
     const where = screen.getByRole("region", { name: "Where it shows" });
     const row = within(where).getByRole("group", { name: "Libraries" });
-    expect(row).toHaveTextContent("Not picked yet");
-    await user.click(within(row).getByRole("button", { name: "Change libraries" }));
-    const control = document.activeElement as HTMLElement;
-    expect(control).toHaveAccessibleName(/^Libraries:/);
-    await user.click(control);
+    await user.click(within(row).getByRole("button", { name: showsIn("Choose libraries") }));
     await user.click(screen.getByRole("menuitemcheckbox", { name: "Movies" }));
     await user.keyboard("{Escape}");
-    expect(row).toHaveTextContent("Movies");
+    expect(within(row).getByRole("button", { name: showsIn("Movies") })).toBeInTheDocument();
+    expect(status()).toHaveTextContent("Not created yet Add a rule, then create it.");
+    expect(create).toBeDisabled();
+    await addGenreRule();
     await vi.waitFor(() =>
       expect(status()).toHaveTextContent(
         "Not created yet 38 titles match now. New ones join on their own.",

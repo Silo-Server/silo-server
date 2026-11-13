@@ -12,6 +12,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useHasUnsavedChanges } from "@/hooks/useUnsavedChanges";
+import { useT } from "@/i18n";
 
 /**
  * Confirms before an in-app navigation throws away staged edits.
@@ -28,6 +29,7 @@ import { useHasUnsavedChanges } from "@/hooks/useUnsavedChanges";
  * `<MemoryRouter>`.
  */
 export function UnsavedChangesGuard() {
+  const t = useT();
   const hasUnsavedChanges = useHasUnsavedChanges();
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
@@ -56,13 +58,13 @@ export function UnsavedChangesGuard() {
     >
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Discard unsaved changes?</AlertDialogTitle>
+          <AlertDialogTitle>{t("web.shell.unsavedChanges.title")}</AlertDialogTitle>
           <AlertDialogDescription>
-            This page has edits that were never saved. Leaving now throws them away.
+            {t("web.shell.unsavedChanges.description")}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
           <AlertDialogAction
             variant="destructive"
             onClick={() => {
@@ -70,7 +72,7 @@ export function UnsavedChangesGuard() {
               blocker.proceed?.();
             }}
           >
-            Discard
+            {t("web.shell.unsavedChanges.discard")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

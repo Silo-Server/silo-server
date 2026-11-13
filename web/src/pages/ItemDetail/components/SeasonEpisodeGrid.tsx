@@ -19,6 +19,7 @@ import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/e
 import { overlayDataFromEpisodeListItem, type CardOverlayPrefs } from "@/lib/overlays";
 import { cn } from "@/lib/utils";
 import { EpisodeGridSkeleton } from "./SectionSkeletons";
+import { useT } from "@/i18n";
 import EpisodeCardCaption from "./EpisodeCardCaption";
 import { episodeLinkLibraryId, type EpisodeNavigationState } from "../itemDetailLayout";
 
@@ -54,6 +55,7 @@ export default function SeasonEpisodeGrid({
   episodeLinkState,
   libraryId,
 }: SeasonEpisodeGridProps) {
+  const t = useT();
   const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
   const spoilerPrefs = useEpisodeSpoilerPrefs();
   const prefetchScopedEpisode = usePrefetchCatalogItemDetail(libraryId);
@@ -71,7 +73,7 @@ export default function SeasonEpisodeGrid({
   if (episodes.length === 0) {
     return (
       <div className="border-border text-muted-foreground bg-surface rounded-lg border p-5 text-sm">
-        No episodes are available for this season yet.
+        {t("web.detail.seasons.noEpisodes")}
       </div>
     );
   }
@@ -123,13 +125,15 @@ function SeasonEpisodeCard({
   spoilerPrefs: EpisodeSpoilerPrefs;
   onPrefetch: () => void;
 }) {
+  const t = useT();
   const cardRef = useRef<HTMLDivElement>(null);
   const prefetchHandlers = useDwellPrefetch(onPrefetch);
   const hasPartialProgress =
     !episode.user_data?.played &&
     (episode.user_data?.position_seconds ?? 0) > 0 &&
     (episode.user_data?.duration_seconds ?? 0) > 0;
-  const episodeTitle = episode.title || `Episode ${episode.episode_number}`;
+  const episodeTitle =
+    episode.title || t("web.detail.episodes.numbered", { episode: episode.episode_number });
   const unwatched = isEpisodeUnwatched(episode.user_data);
   const hideImage =
     spoilerPrefs.hideImages && unwatched && isEpisodeStill(episode.still_is_episode_still);

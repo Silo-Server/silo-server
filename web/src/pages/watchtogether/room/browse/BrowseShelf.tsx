@@ -3,6 +3,8 @@ import { ChevronDown, ChevronUp, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { BrowseItem } from "@/api/types";
 import type { PickerEntry } from "@/api/v2/watchTogetherPicker";
+import { useT, type MessageKey } from "@/i18n";
+import { useSectionTitle } from "@/lib/sectionTitle";
 import type { WatchTogetherRoomMember } from "@/lib/watchTogether";
 import { PickerRowSection, PosterTile, TogetherRow, type PickerCard } from "../picker/PickerRow";
 import {
@@ -21,13 +23,13 @@ export interface BrowseSelection {
 }
 
 type Chip = "all" | "movies" | "series" | "together" | "watchlists" | "recent";
-const chips: { id: Chip; label: string }[] = [
-  { id: "all", label: "All" },
-  { id: "movies", label: "Movies" },
-  { id: "series", label: "Series" },
-  { id: "together", label: "Together" },
-  { id: "watchlists", label: "Watchlists" },
-  { id: "recent", label: "Recent" },
+const chips: { id: Chip; label: MessageKey }[] = [
+  { id: "all", label: "web.watchTogether.browse.chipAll" },
+  { id: "movies", label: "web.watchTogether.browse.chipMovies" },
+  { id: "series", label: "web.watchTogether.browse.chipSeries" },
+  { id: "together", label: "web.watchTogether.browse.chipTogether" },
+  { id: "watchlists", label: "web.watchTogether.browse.chipWatchlists" },
+  { id: "recent", label: "web.watchTogether.browse.chipRecent" },
 ];
 
 export function cardOf(item: ShelfItem | BrowseItem | PickerEntry["item"]): PickerCard {
@@ -41,13 +43,13 @@ export function cardOf(item: ShelfItem | BrowseItem | PickerEntry["item"]): Pick
   };
 }
 
-const emptyMessage: Record<Chip, string> = {
-  all: "Nothing to browse yet. Search for something above.",
-  movies: "No movies in the library yet. Search for one above.",
-  series: "No series in the library yet. Search for one above.",
-  together: "Nothing in progress for two or more of you yet.",
-  watchlists: "Nobody in the room has anything on their watchlist.",
-  recent: "Nothing added recently.",
+const emptyMessage: Record<Chip, MessageKey> = {
+  all: "web.watchTogether.browse.emptyAll",
+  movies: "web.watchTogether.browse.emptyMovies",
+  series: "web.watchTogether.browse.emptySeries",
+  together: "web.watchTogether.browse.emptyTogether",
+  watchlists: "web.watchTogether.browse.emptyWatchlists",
+  recent: "web.watchTogether.browse.emptyRecent",
 };
 
 /**
@@ -63,7 +65,7 @@ export function BrowseShelf({
   selectedId,
   verb,
   collapsible = false,
-  collapsedLabel = "Browse",
+  collapsedLabel,
   open,
   onOpenChange,
   onSelect,
@@ -81,6 +83,8 @@ export function BrowseShelf({
   onOpenChange: (open: boolean) => void;
   onSelect: (selection: BrowseSelection) => void;
 }) {
+  const t = useT();
+  const sectionTitle = useSectionTitle();
   const [query, setQuery] = useState("");
   const [chip, setChip] = useState<Chip>("all");
   const expanded = !collapsible || open;
@@ -138,14 +142,18 @@ export function BrowseShelf({
       <button
         type="button"
         onClick={() => onOpenChange(true)}
-        className="surface-panel-subtle hover:border-ring/40 flex w-full items-center gap-3 rounded-xl border border-transparent px-4 py-3 text-left transition-colors"
+        className="surface-panel-subtle hover:border-ring/40 flex w-full items-center gap-3 rounded-xl border border-transparent px-4 py-3 text-start transition-colors"
         data-testid="browse-shelf-collapsed"
       >
         <Search className="text-muted-foreground size-4 shrink-0" />
         <span className="min-w-0 flex-1">
-          <span className="block text-sm font-semibold">{collapsedLabel}</span>
+          <span className="block text-sm font-semibold">
+            {collapsedLabel ?? t("web.watchTogether.browse.collapsed")}
+          </span>
           <span className="text-muted-foreground block text-xs">
-            Search or browse what the room has in common to {verb} something.
+            {verb === "pick"
+              ? t("web.watchTogether.browse.collapsedHintPick")
+              : t("web.watchTogether.browse.collapsedHintSuggest")}
           </span>
         </span>
         <ChevronDown className="text-muted-foreground size-4 shrink-0" />
@@ -156,20 +164,28 @@ export function BrowseShelf({
   return (
     <section
       className="flex min-w-0 flex-col gap-4"
-      aria-label={verb === "pick" ? "Browse to pick" : "Browse to suggest"}
+      aria-label={
+        verb === "pick"
+          ? t("web.watchTogether.browse.sectionPick")
+          : t("web.watchTogether.browse.sectionSuggest")
+      }
     >
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-56 flex-1">
-          <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2" />
+          <Search className="text-muted-foreground pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2" />
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search movies, series, episodes…"
-            aria-label="Search movies and series"
-            className="border-border bg-surface placeholder:text-muted-foreground h-10 w-full rounded-lg border py-2 pr-3 pl-9 text-sm outline-none focus:border-white/30"
+            placeholder={t("web.watchTogether.browse.searchPlaceholder")}
+            aria-label={t("web.watchTogether.browse.searchLabel")}
+            className="border-border bg-surface placeholder:text-muted-foreground h-10 w-full rounded-lg border py-2 ps-9 pe-3 text-sm outline-none focus:border-white/30"
           />
         </div>
-        <div role="tablist" aria-label="Filter" className="flex flex-wrap gap-1">
+        <div
+          role="tablist"
+          aria-label={t("web.watchTogether.browse.filterLabel")}
+          className="flex flex-wrap gap-1"
+        >
           {chips.map((c) => (
             <button
               key={c.id}
@@ -183,7 +199,7 @@ export function BrowseShelf({
                   : "bg-surface-raised text-muted-foreground hover:text-foreground"
               }`}
             >
-              {c.label}
+              {t(c.label)}
             </button>
           ))}
         </div>
@@ -193,7 +209,7 @@ export function BrowseShelf({
             variant="ghost"
             size="icon-sm"
             onClick={() => onOpenChange(false)}
-            aria-label="Hide browse"
+            aria-label={t("web.watchTogether.browse.hide")}
           >
             <ChevronUp className="size-4" />
           </Button>
@@ -201,13 +217,18 @@ export function BrowseShelf({
       </div>
 
       {search.q ? (
-        <section className="flex flex-col gap-2" aria-label="Search results">
+        <section
+          className="flex flex-col gap-2"
+          aria-label={t("web.watchTogether.browse.searchResults")}
+        >
           <div className="flex items-baseline gap-2">
             <h3 className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
-              Search results
+              {t("web.watchTogether.browse.searchResults")}
             </h3>
             {!search.isFetching ? (
-              <span className="text-muted-foreground text-[11px]">· {searchItems.length}</span>
+              <span className="text-muted-foreground text-[11px]">
+                {t("web.watchTogether.browse.resultCount", { count: searchItems.length })}
+              </span>
             ) : null}
           </div>
           {search.isError ? (
@@ -215,14 +236,14 @@ export function BrowseShelf({
               role="alert"
               className="text-muted-foreground flex items-center gap-2 py-6 text-sm"
             >
-              Could not search.
+              {t("web.watchTogether.browse.searchFailed")}
               <Button variant="outline" size="sm" onClick={() => void search.refetch()}>
-                Retry
+                {t("common.retry")}
               </Button>
             </div>
           ) : searchItems.length === 0 && !search.isFetching ? (
             <p className="text-muted-foreground py-6 text-sm">
-              No matches for “{search.q}”. Try another title, or clear the filter.
+              {t("web.watchTogether.browse.noMatches", { query: search.q })}
             </p>
           ) : (
             // Results are scanned, not flicked through: a wrapping grid.
@@ -242,8 +263,8 @@ export function BrowseShelf({
         <>
           {showRow("together") ? (
             <TogetherRow
-              title="Continue watching together"
-              hint="in progress for 2+ of you"
+              title={t("web.watchTogether.browse.togetherTitle")}
+              hint={t("web.watchTogether.browse.togetherHint")}
               entries={togetherEntries}
               members={members}
               selectedId={selectedId}
@@ -257,8 +278,8 @@ export function BrowseShelf({
           ) : null}
           {showRow("watchlists") ? (
             <TogetherRow
-              title="On your watchlists"
-              hint="anyone in the room"
+              title={t("web.watchTogether.browse.watchlistsTitle")}
+              hint={t("web.watchTogether.browse.watchlistsHint")}
               entries={watchlistEntries}
               members={members}
               selectedId={selectedId}
@@ -266,7 +287,7 @@ export function BrowseShelf({
             />
           ) : null}
           {homeSections.map((section) => (
-            <PickerRowSection key={section.id} title={section.title}>
+            <PickerRowSection key={section.id} title={sectionTitle(section)}>
               {section.items.map((item) => (
                 <PosterTile
                   key={item.content_id}
@@ -278,7 +299,10 @@ export function BrowseShelf({
             </PickerRowSection>
           ))}
           {showRecentMovies && (recentMovies.items.length > 0 || recentMovies.isFetching) ? (
-            <PickerRowSection title="Recently added movies" loading={recentMovies.isFetching}>
+            <PickerRowSection
+              title={t("web.watchTogether.browse.recentMovies")}
+              loading={recentMovies.isFetching}
+            >
               {recentMovies.items.map((item) => (
                 <PosterTile
                   key={item.content_id}
@@ -290,7 +314,10 @@ export function BrowseShelf({
             </PickerRowSection>
           ) : null}
           {showRecentSeries && (recentSeries.items.length > 0 || recentSeries.isFetching) ? (
-            <PickerRowSection title="Recently added series" loading={recentSeries.isFetching}>
+            <PickerRowSection
+              title={t("web.watchTogether.browse.recentSeries")}
+              loading={recentSeries.isFetching}
+            >
               {recentSeries.items.map((item) => (
                 <PosterTile
                   key={item.content_id}
@@ -302,7 +329,9 @@ export function BrowseShelf({
             </PickerRowSection>
           ) : null}
           {browseEmpty ? (
-            <p className="text-muted-foreground py-8 text-center text-sm">{emptyMessage[chip]}</p>
+            <p className="text-muted-foreground py-8 text-center text-sm">
+              {t(emptyMessage[chip])}
+            </p>
           ) : null}
         </>
       )}

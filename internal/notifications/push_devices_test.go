@@ -700,7 +700,7 @@ func TestPushStopsWhenTheRegisteringLoginEndsDB(t *testing.T) {
 		if picked[device.id] != want {
 			t.Errorf("fan-out picked %s (session %q) = %v, want %v", device.id, session, picked[device.id], want)
 		}
-		_, _, err := repo.EnqueueTestAttempt(ctx, device.platform, "default", device.serverDeviceID)
+		_, _, err := repo.EnqueueTestAttempt(ctx, device.platform, 7, "default", device.serverDeviceID)
 		if delivered := !errors.Is(err, ErrPushDeliveryNotFound); delivered != want {
 			t.Errorf("test send to %s (session %q): err=%v, want delivered=%v", device.id, session, err, want)
 		}
@@ -745,7 +745,7 @@ func TestQueuedPushStopsWhenTheRegisteringLoginEndsDB(t *testing.T) {
 	_, device := registerForSession(t, repo, "live")
 	queue := func() PushDeliveryAttempt {
 		t.Helper()
-		attempt, _, err := repo.EnqueueTestAttempt(ctx, device.platform, "default", device.serverDeviceID)
+		attempt, _, err := repo.EnqueueTestAttempt(ctx, device.platform, 7, "default", device.serverDeviceID)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -600,6 +600,7 @@ func maybeApplyPostgresTuning(ctx context.Context, pool *pgxpool.Pool, appMaxCon
 		"memory_source", opts.MemorySource,
 		"memory_budget_percent", opts.MemoryBudgetPercent,
 		"cpus", opts.CPUs,
+		"detected_cpus", opts.DetectedCPUs,
 		"connections", opts.Connections,
 		"storage", opts.Storage,
 		"db_size", result.DBSize,
@@ -1917,6 +1918,7 @@ func main() {
 			},
 		)
 		pluginHost = pluginhost.NewHost(pluginhost.Config{
+			IdleStopAfter:   pluginhost.IdleStopAfter,
 			EventPublisher:  eventsHub,
 			LibraryLister:   pluginhost.NewLibraryLister(libDataSource),
 			CatalogPresence: catalogPresence,
@@ -2750,8 +2752,41 @@ func main() {
 	if watchProviderService != nil {
 		historyRepo := historyimport.NewRepository(deps.DB, deps.SecretCipher)
 		historyIdentity := watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, catalog.NewProviderIDRepository(deps.DB))
+		// A sync's episodes follow what the profile may open, as any viewer
+		// read does, so it resolves scope the same way.
+		var watchProviderScopes interface {
+			Resolve(context.Context, access.ResolveInput) (access.Scope, error)
+		}
+		if policySystem != nil {
+			watchProviderScopes = policy.NewViewerResolver(auth.NewUserRepository(deps.DB), userStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent)
+		} else {
+			// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path.
+			watchProviderScopes = access.NewResolver(auth.NewUserRepository(deps.DB), userStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent)
+		}
+		watchProviderLibrary := catalog.NewLibraryItemRepository(deps.DB)
 		watchProviderService.
 			WithMatcher(historyimport.NewMatcher(historyRepo)).
+			WithProfileAccess(func(ctx context.Context, userID int, profileID string) (watchsync.ProfileAccess, error) {
+				// A sync runs for the connection's profile without a viewer,
+				// so a PIN does not apply; the profile's hidden-library
+				// preference is not an access rule.
+				scope, err := watchProviderScopes.Resolve(ctx, access.ResolveInput{
+					UserID: userID, ProfileID: profileID, SkipPINVerification: true, ContentAccessOnly: true,
+				})
+				if err != nil {
+					return watchsync.ProfileAccess{}, err
+				}
+				allowed := scope.AllowedLibraryIDs
+				if scope.LibrariesRestricted && allowed == nil {
+					allowed = []int{}
+				}
+				return watchsync.ProfileAccess{
+					AllowedLibraryIDs: allowed,
+					Accessible: func(ctx context.Context, contentIDs []string) (map[string]bool, error) {
+						return watchProviderLibrary.FilterAccessibleContentIDs(ctx, contentIDs, allowed, scope.DisabledLibraryIDs, scope.MaturityLimits)
+					},
+				}, nil
+			}).
 			WithWatchState(watchstate.NewService(userStoreProvider).WithStableIdentityResolver(historyIdentity)).
 			WithUserStoreProvider(userStoreProvider).
 			WithRatingStore(catalog.NewRatingsRepo(deps.DB)).

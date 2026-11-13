@@ -697,10 +697,13 @@ users/<account id>.json           version 2 and later
 blobs/<object key>
 ```
 
-`restore-set.json` has `format: "silo-restore-set"`, `version` (4: version 2
+`restore-set.json` has `format: "silo-restore-set"`, `version` (5: version 2
 added the users section; version 3 the home sections section, template
 collections in `collections.json`, and an omitted item's `cause` and
-`error`; version 4 a home section's `web_only`), the source
+`error`; version 4 a home section's `web_only`; version 5 no new field, but a
+server smart collection's rules now draw from their own `library_ids`, so a
+restore pins an older set's smart collection rules to the collection's
+libraries; version 6 a home section's `title_key` and `title_args`), the source
 server id and name, Silo version, creation time, `SECRET_KEY` check value, and
 a section index: for each section its item count, each of its files with
 size and SHA-256, and the blob keys its documents reference. Plugin archive
@@ -722,9 +725,15 @@ format version: an older reader refuses a newer set as "from a newer Silo"
 instead of failing on what it does not know, and a set that claims an older
 version while holding something added later (`users` in version 1,
 `home_sections` or template collections in version 2, a `web_only` section
-in version 3) is refused. A set without `web_only` reads it as false, the
-column's default. Readers accept versions 1 to 4; version 4 is always
-written.
+in version 3, a `title_key` section in version 5) is refused. A set without
+`web_only` reads it as false, the column's default. A set without `title_key`
+reads every title as typed text, so a restored title never gains a key; a
+keyed title keeps its key and arguments when a restore creates or replaces the
+section. A restore never takes a key away: replacing a section with a title
+that has no key leaves the key the section already has when the title is the
+same text, because the two then show the same English, and a set written
+before version 6 cannot say whether its title was typed. The restore preview
+reports a section that differs only by its key as changed. Readers accept versions 1 to 6; version 6 is always written.
 
 | Section | Holds | Blob prefixes |
 |---|---|---|
@@ -1304,7 +1313,10 @@ access resolver (`internal/access/resolver.go`) reads to decide access:
 `is_child`, `max_content_rating`, `max_advisory_age`, `require_advisory_age`,
 `library_restrictions_enabled`, the allowed libraries
 (`user_profile_allowed_libraries`), and `max_playback_quality`. The PIN
-revision is not carried; a restored profile starts its own.
+revision is not carried; a restored profile starts its own. A profile restored
+as the account's primary drops its library limit, since the primary profile
+inherits its account's libraries (`access.ProfileLibraryLimit`); credential
+carry reads a primary profile's stored limit the same way.
 
 **Data types**, each owned by the package that owns its tables and
 implemented against the small interface in `internal/backup/userdata`

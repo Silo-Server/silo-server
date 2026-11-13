@@ -24,6 +24,7 @@ import {
   type RestoreSource,
 } from "@/hooks/queries/admin/backupRestore";
 import { adminKeys } from "@/hooks/queries/keys";
+import { useT, type MessageKey, type Translate } from "@/i18n";
 import { formatTime, preferredDateLocale } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
 import { RestoreChoose } from "@/pages/admin-backups/RestoreChoose";
@@ -46,11 +47,16 @@ import {
 // The settings layout loads these field styles for its pages; this page is not one of them.
 import "@/styles/admin-settings.css";
 
-const STEPS = ["Choose", "Review", "Restore"] as const;
+const STEPS: readonly MessageKey[] = [
+  "web.admin.backups.restore.steps.choose",
+  "web.admin.backups.restore.steps.review",
+  "web.admin.backups.restore.steps.restore",
+];
 
 function StepIndicator({ current }: { current: number }) {
+  const t = useT();
   return (
-    <nav aria-label="Restore steps">
+    <nav aria-label={t("web.admin.backups.restore.steps.label")}>
       <ol className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
         {STEPS.map((label, index) => {
           const done = index < current;
@@ -74,7 +80,7 @@ function StepIndicator({ current }: { current: number }) {
               >
                 {done ? <Check className="size-3.5" strokeWidth={3} /> : index + 1}
               </span>
-              {label}
+              {t(label)}
             </li>
           );
         })}
@@ -94,41 +100,70 @@ const takenDate = (taken: Date) =>
  * The page heading. A backup of this server is named by its date; an upload
  * by the server it came from, and its subtitle says it was uploaded.
  */
-function restoreHeading({
-  taken,
-  version,
-  set,
-  fromUpload,
-}: {
-  taken: Date | null;
-  version: string | undefined;
-  set: { same_server: boolean; server_name: string; server_id: string } | undefined;
-  fromUpload: boolean;
-}): { title: string; subtitle: string | undefined } {
-  if (!taken) return { title: "Restore from a backup", subtitle: undefined };
+function restoreHeading(
+  t: Translate,
+  {
+    taken,
+    version,
+    set,
+    fromUpload,
+  }: {
+    taken: Date | null;
+    version: string | undefined;
+    set: { same_server: boolean; server_name: string; server_id: string } | undefined;
+    fromUpload: boolean;
+  },
+): { title: string; subtitle: string | undefined } {
+  if (!taken) return { title: t("web.admin.backups.restore.heading.default"), subtitle: undefined };
   const known = knownSiloVersion(version);
   const name = set ? sourceServerName(set) : null;
   // A server without a name is "another server"; its id is only a detail.
   const idDetail =
-    set && !set.same_server && !name ? `server ${shortServerId(set.server_id)}` : null;
-  const sentence = (parts: (string | null)[]) => {
-    const text = parts.filter(Boolean).join(", ");
-    return `${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
-  };
-  const time = `taken at ${formatTime(taken)}`;
-  const withVersion = known ? `with Silo ${known}` : null;
+    set && !set.same_server && !name
+      ? t("web.admin.backups.restore.heading.serverId", { id: shortServerId(set.server_id) })
+      : null;
+  const sentence = (parts: (string | null)[]) =>
+    t("web.admin.backups.restore.heading.subtitle", { parts: parts.filter(Boolean).join(", ") });
+  const time = formatTime(taken);
+  const withVersion = known
+    ? t("web.admin.backups.restore.heading.withVersion", { version: known })
+    : null;
   if (fromUpload) {
-    const origin = set?.same_server ? "uploaded from this server" : "uploaded from another server";
+    const origin = set?.same_server
+      ? t("web.admin.backups.restore.heading.uploadedFromThis")
+      : t("web.admin.backups.restore.heading.uploadedFromAnother");
+    let source = "other";
+    if (!name) source = set?.same_server ? "this" : "another";
     return {
-      title: `Restore from ${name ?? (set?.same_server ? "this server" : "another server")}'s backup of ${takenDate(taken)}`,
-      subtitle: sentence([origin, time, withVersion, idDetail]),
+      title: t("web.admin.backups.restore.heading.upload", {
+        source,
+        date: takenDate(taken),
+        name: name ?? "",
+      }),
+      subtitle: sentence([
+        origin,
+        t("web.admin.backups.restore.heading.takenAt", { time }),
+        withVersion,
+        idDetail,
+      ]),
     };
   }
   let where: string | null = null;
-  if (set) where = set.same_server ? "on this server" : `from ${name ?? "another server"}`;
+  if (set) {
+    if (set.same_server) where = t("web.admin.backups.restore.heading.onThisServer");
+    else
+      where = name
+        ? t("web.admin.backups.restore.heading.fromServer", { name })
+        : t("web.admin.backups.restore.heading.fromAnother");
+  }
   return {
-    title: `Restore from ${takenDate(taken)}`,
-    subtitle: sentence([time, withVersion, where, idDetail]),
+    title: t("web.admin.backups.restore.heading.backup", { date: takenDate(taken) }),
+    subtitle: sentence([
+      t("web.admin.backups.restore.heading.takenAtFirst", { time }),
+      withVersion,
+      where,
+      idDetail,
+    ]),
   };
 }
 
@@ -149,6 +184,7 @@ function refusalOf(error: unknown): RestoreRefusal {
  * from an uploaded restore set.
  */
 export default function AdminBackupRestore() {
+  const t = useT();
   const { id: backupId = "", uploadId = "" } = useParams();
   const source: RestoreSource = uploadId
     ? { kind: "upload", id: uploadId }
@@ -216,7 +252,7 @@ export default function AdminBackupRestore() {
   const takenAt = backup?.created_at ?? origin?.created_at;
   const taken = takenAt ? new Date(takenAt) : null;
   const version = set?.silo_version ?? backup?.silo_version ?? uploadSource?.silo_version;
-  const { title, subtitle } = restoreHeading({ taken, version, set: origin, fromUpload });
+  const { title, subtitle } = restoreHeading(t, { taken, version, set: origin, fromUpload });
 
   const step = jobId ? 2 : reviewing ? 1 : 0;
 
@@ -253,7 +289,7 @@ export default function AdminBackupRestore() {
   if (capabilities.data && !capabilities.data.selective_restore) {
     body = (
       <p role="alert" className="surface-panel rounded-2xl p-6">
-        Restoring parts of a backup isn&apos;t available on this server.
+        {t("web.admin.backups.restore.unavailable")}
       </p>
     );
   } else if (jobId) {
@@ -261,9 +297,11 @@ export default function AdminBackupRestore() {
       <Skeleton className="h-40 w-full rounded-2xl" />
     ) : job.isError || !job.data ? (
       <div role="alert" className="surface-panel space-y-3 rounded-2xl p-6">
-        <p>Couldn&apos;t read the restore. {backupErrorMessage(job.error)}</p>
+        <p>
+          {t("web.admin.backups.restore.jobLoadFailed", { reason: backupErrorMessage(job.error) })}
+        </p>
         <Button variant="outline" size="sm" onClick={() => void job.refetch()}>
-          Try again
+          {t("common.tryAgain")}
         </Button>
       </div>
     ) : (
@@ -275,7 +313,7 @@ export default function AdminBackupRestore() {
         onCancel={() =>
           cancel.mutate(job.data.id, {
             onError: (error) =>
-              toast.error("Couldn't stop the restore", {
+              toast.error(t("web.admin.backups.restore.stopFailed"), {
                 description: backupErrorMessage(error),
               }),
           })
@@ -285,7 +323,7 @@ export default function AdminBackupRestore() {
     );
   } else if (preview.isPending) {
     body = (
-      <div className="space-y-4" role="status" aria-label="Reading the backup">
+      <div className="space-y-4" role="status" aria-label={t("web.admin.backups.restore.reading")}>
         <Skeleton className="h-32 w-full rounded-xl" />
         <Skeleton className="h-32 w-full rounded-xl" />
       </div>
@@ -296,12 +334,9 @@ export default function AdminBackupRestore() {
   ) {
     body = (
       <div role="alert" className="surface-panel space-y-3 rounded-2xl p-6">
-        <p className="font-medium">This server can&apos;t verify this backup.</p>
+        <p className="font-medium">{t("web.admin.backups.restore.unverifiedTitle")}</p>
         <p className="text-muted-foreground text-sm">
-          It was uploaded, or written under a different SECRET_KEY, or by a version of Silo that
-          didn&apos;t record what checking it needs. Anyone who could change the file could have
-          changed what it restores. Open it only if you trust where it came from. Settings that
-          connect to outside services and plugin settings are never restored from it.
+          {t("web.admin.backups.restore.unverifiedBody")}
         </p>
         <Button
           variant="outline"
@@ -311,7 +346,7 @@ export default function AdminBackupRestore() {
             setAcceptUnauthenticated(true);
           }}
         >
-          Open it anyway
+          {t("web.admin.backups.restore.openAnyway")}
         </Button>
       </div>
     );
@@ -319,11 +354,15 @@ export default function AdminBackupRestore() {
     body = (
       <div role="alert" className="surface-panel space-y-3 rounded-2xl p-6">
         <p>
-          Couldn&apos;t open this {fromUpload ? "uploaded backup" : "backup"} for restoring.{" "}
-          {backupErrorMessage(preview.error)}
+          {t(
+            fromUpload
+              ? "web.admin.backups.restore.openFailedUpload"
+              : "web.admin.backups.restore.openFailed",
+            { reason: backupErrorMessage(preview.error) },
+          )}
         </p>
         <Button variant="outline" size="sm" onClick={() => void preview.refetch()}>
-          Try again
+          {t("common.tryAgain")}
         </Button>
       </div>
     );
@@ -351,14 +390,26 @@ export default function AdminBackupRestore() {
       <div className="space-y-5">
         {lastJob ? (
           <p className="text-muted-foreground text-sm">
-            A restore from this {fromUpload ? "upload" : "backup"} ran{" "}
-            {lastJob.finished_at ? backupDateTime(lastJob.finished_at) : "earlier"}.{" "}
-            <Link
-              to={`?job=${encodeURIComponent(lastJob.id)}`}
-              className="text-foreground underline underline-offset-2"
-            >
-              See its report
-            </Link>
+            {t(
+              lastJob.finished_at
+                ? fromUpload
+                  ? "web.admin.backups.restore.lastRun.uploadAt"
+                  : "web.admin.backups.restore.lastRun.backupAt"
+                : fromUpload
+                  ? "web.admin.backups.restore.lastRun.uploadEarlier"
+                  : "web.admin.backups.restore.lastRun.backupEarlier",
+              {
+                date: lastJob.finished_at ? backupDateTime(lastJob.finished_at) : "",
+                link: (chunks) => (
+                  <Link
+                    to={`?job=${encodeURIComponent(lastJob.id)}`}
+                    className="text-foreground underline underline-offset-2"
+                  >
+                    {chunks}
+                  </Link>
+                ),
+              },
+            )}
           </p>
         ) : null}
         <RestoreChoose
@@ -380,7 +431,7 @@ export default function AdminBackupRestore() {
         className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-sm"
       >
         <ArrowLeft aria-hidden="true" className="size-4" />
-        Backups
+        {t("web.admin.backups.restore.backLink")}
       </Link>
       <PageHeader title={title} subtitle={subtitle} className="mb-4" />
       <StepIndicator current={step} />

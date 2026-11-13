@@ -93,6 +93,29 @@ func (r *MediaItemLocalizationRepository) Upsert(ctx context.Context, loc *model
 	return nil
 }
 
+// ClearMatchText empties an item's localized text in every language, after a
+// correction of its match: the text describes the previous title. Upsert can't,
+// since an empty value never blanks stored text. keepTitle and keepText hold the
+// fields an admin locked, and manual translations stay, as Upsert keeps them.
+// Artwork stays for the artwork pass to decide.
+func (r *MediaItemLocalizationRepository) ClearMatchText(ctx context.Context, contentID string, keepTitle, keepText bool) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE media_item_localizations SET
+			title = CASE WHEN $2 THEN title ELSE '' END,
+			sort_title = CASE WHEN $2 THEN sort_title ELSE '' END,
+			overview = CASE WHEN $3 OR overview_source = 'manual' THEN overview ELSE '' END,
+			overview_source = CASE WHEN $3 OR overview_source = 'manual' THEN overview_source ELSE 'provider' END,
+			tagline = CASE WHEN $3 OR tagline_source = 'manual' THEN tagline ELSE '' END,
+			tagline_source = CASE WHEN $3 OR tagline_source = 'manual' THEN tagline_source ELSE 'provider' END,
+			updated_at = NOW()
+		WHERE content_id = $1
+	`, contentID, keepTitle, keepText)
+	if err != nil {
+		return fmt.Errorf("clearing media item localization text: %w", err)
+	}
+	return nil
+}
+
 // UpsertAITranslation writes AI-translated overview/tagline values. A nil
 // pointer leaves that field untouched. Per field, the write lands only when the
 // existing value is empty or already AI-sourced: provider and manual text is

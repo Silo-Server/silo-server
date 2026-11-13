@@ -176,6 +176,11 @@ func (a *applier) createCollection(ctx context.Context, tx pgx.Tx, input catalog
 	if input.SourceURL, input.SourceConfig, err = collectionutil.CanonicalCollectionSource(input.CollectionType, input.SourceURL, input.SourceConfig); err != nil {
 		return err
 	}
+	// Before version 5 a smart collection's rules drew only from its own
+	// libraries; pin them there so it keeps the titles it had.
+	if fromBackup && a.rs.Index.Version < restoreSetSmartRulesOwnLibraries && catalog.IsLiveQueryType(input.CollectionType) {
+		input.QueryDefinition = catalog.PinSmartRulesToCollectionLibraries(input.QueryDefinition, input.LibraryIDs)
+	}
 	if fromBackup && a.rs.unverified && scheduleOf(input.SyncSchedule) != "" {
 		input.SyncSchedule = nil
 		*notes = append(*notes, msgScheduleWithheld)

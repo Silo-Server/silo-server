@@ -5,6 +5,7 @@ import {
   type ProfileRequestContextSnapshot,
 } from "@/api/client";
 import { v2 } from "./request";
+import { t } from "@/i18n";
 export interface AdminSettingIdentity {
   scope:
     | "account"
@@ -69,7 +70,7 @@ export async function listAdminSettingValues(
           visited.has(page.page.next_cursor))) ||
       (!page.page.has_more && page.page.next_cursor)
     )
-      throw new Error("Invalid settings page. Reload the settings.");
+      throw new Error(t("web.admin.errors.settingsPageInvalid"));
     revision = page.revision;
     for (const row of page.items)
       values.push({

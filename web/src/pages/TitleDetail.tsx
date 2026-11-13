@@ -8,6 +8,7 @@ import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { parseRequestMediaType } from "@/lib/mediaRequests";
 import ExternalTitleContent from "@/pages/ItemDetail/ExternalTitleContent";
 import ItemDetailSkeleton from "@/pages/ItemDetail/ItemDetailSkeleton";
+import { useT } from "@/i18n";
 
 /**
  * `/title/:mediaType/:tmdbId`: a movie or series by its TMDB id. A title the
@@ -27,6 +28,7 @@ export default function TitleDetail() {
 }
 
 function TitlePage({ mediaType, tmdbID }: { mediaType: RequestMediaType; tmdbID: number }) {
+  const t = useT();
   const detail = useRequestMediaDetail(mediaType, tmdbID);
   const notFound = isNotFoundProblem(detail.error);
   const item = notFound ? undefined : detail.data;
@@ -36,7 +38,11 @@ function TitlePage({ mediaType, tmdbID }: { mediaType: RequestMediaType; tmdbID:
   // this page for.
   const libraryItem = useCatalogItemDetail(libraryContentID);
 
-  useDocumentTitle(notFound ? "Not found" : (item?.title ?? "Title"));
+  useDocumentTitle(
+    notFound
+      ? t("web.detail.page.notFoundTitle")
+      : (item?.title ?? t("web.detail.page.titleTabFallback")),
+  );
 
   if (detail.isLoading || (libraryContentID && libraryItem.isLoading)) {
     return <ItemDetailSkeleton />;
@@ -48,8 +54,8 @@ function TitlePage({ mediaType, tmdbID }: { mediaType: RequestMediaType; tmdbID:
     }
     return (
       <PageUnavailable
-        title="Couldn't load this title"
-        description="Something went wrong while loading it. Try again in a moment."
+        title={t("web.detail.page.titleLoadFailed")}
+        description={t("web.detail.page.loadFailedBody")}
         onRetry={() => void detail.refetch()}
         retrying={detail.isFetching}
       />
@@ -74,11 +80,12 @@ function TitlePage({ mediaType, tmdbID }: { mediaType: RequestMediaType; tmdbID:
  * well as for one TMDB does not know, so this says neither, like the item page.
  */
 function TitleUnavailable() {
-  useDocumentTitle("Not found");
+  const t = useT();
+  useDocumentTitle(t("web.detail.page.notFoundTitle"));
   return (
     <PageUnavailable
-      title="This item isn't available"
-      description="It may have been removed, or you may not have access to it."
+      title={t("web.detail.page.unavailableTitle")}
+      description={t("web.detail.page.unavailableBody")}
     />
   );
 }

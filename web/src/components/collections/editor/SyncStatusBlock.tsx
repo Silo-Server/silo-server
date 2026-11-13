@@ -3,16 +3,16 @@ import { AlertCircle, Info, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
-  LAST_SYNC,
-  NEXT_SYNC,
-  NOT_COUNTED_YET,
-  NOT_IN_YOUR_LIBRARIES,
-  NOT_SCHEDULED,
-  NOT_SYNCED_YET,
-  SAVE_BEFORE_SYNC,
-  SYNC_NOW,
-  SYNCING_NOW,
-  WHY_SKIPPED,
+  lastSync,
+  nextSync,
+  notCountedYet,
+  notInYourLibraries,
+  notScheduled,
+  notSyncedYet,
+  saveBeforeSync,
+  syncNow,
+  syncingNow,
+  whySkipped,
   keepsTitles,
   skippedExplanation,
   syncFailedLead,
@@ -22,6 +22,7 @@ import {
 import type { CollectionView } from "@/lib/collections/scope";
 import { formatDateTime } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
+import { useT } from "@/i18n";
 
 type SyncState = NonNullable<CollectionView["sync"]>;
 
@@ -67,14 +68,15 @@ export function SyncStatusBlock({
   /** Whether this page offers Sync now, which counts the skipped titles. */
   canSync?: boolean;
 }) {
+  const t = useT();
   const id = useId();
   const [explaining, setExplaining] = useState(false);
-  let last: ReactNode = <b className="font-semibold">{NOT_SYNCED_YET}</b>;
+  let last: ReactNode = <b className="font-semibold">{notSyncedYet()}</b>;
   if (syncing) {
     last = (
       <b className="flex items-center gap-1.5 font-semibold">
         <Loader2 aria-hidden className="size-3.5 animate-spin" />
-        {SYNCING_NOW}
+        {syncingNow()}
       </b>
     );
   } else if (sync.lastAt) {
@@ -86,7 +88,7 @@ export function SyncStatusBlock({
         />
         <b className="font-semibold">{syncedAgo(sync.lastAt)}</b>
         <span className="text-muted-foreground text-[12.5px]">
-          {itemCount} title{itemCount === 1 ? "" : "s"}
+          {t("web.collections.metaLine.titleCount", { count: itemCount, shown: itemCount })}
         </span>
       </>
     );
@@ -95,20 +97,20 @@ export function SyncStatusBlock({
     <div className="grid gap-2">
       <div
         role="group"
-        aria-label="Sync status"
+        aria-label={t("web.collections.syncStatus.label")}
         className="border-border divide-border grid overflow-hidden rounded-[14px] border max-sm:divide-y sm:grid-cols-3 sm:divide-x"
       >
-        <Cell label={LAST_SYNC}>{last}</Cell>
-        <Cell label={NEXT_SYNC}>
-          <b className="font-semibold">{sync.nextAt ? when(sync.nextAt) : NOT_SCHEDULED}</b>
+        <Cell label={lastSync()}>{last}</Cell>
+        <Cell label={nextSync()}>
+          <b className="font-semibold">{sync.nextAt ? when(sync.nextAt) : notScheduled()}</b>
         </Cell>
-        <Cell label={NOT_IN_YOUR_LIBRARIES}>
+        <Cell label={notInYourLibraries()}>
           <b className="font-semibold">
-            {skipped === undefined ? NOT_COUNTED_YET : titlesSkipped(skipped)}
+            {skipped === undefined ? notCountedYet() : titlesSkipped(skipped)}
           </b>
           <button
             type="button"
-            aria-label={WHY_SKIPPED}
+            aria-label={whySkipped()}
             aria-expanded={explaining}
             aria-controls={`${id}-why`}
             onClick={() => setExplaining((open) => !open)}
@@ -144,7 +146,12 @@ export function SyncFailedCallout({
   saveFirst?: boolean;
   onSyncNow?: () => void;
 }) {
-  const retry = sync.nextAt ? ` It tries again ${when(sync.nextAt)}.` : "";
+  const t = useT();
+  const retry = sync.nextAt
+    ? ` ${t("web.collections.syncStatus.triesAgain", { when: when(sync.nextAt) })}`
+    : "";
+  // After the lead: the server's message, if any, what the list kept, and when it tries again.
+  const detail = [sync.message, keepsTitles(itemCount)].filter(Boolean).join(" ") + retry;
   return (
     <div
       role="alert"
@@ -152,9 +159,7 @@ export function SyncFailedCallout({
     >
       <AlertCircle aria-hidden className="text-destructive mt-0.5 size-4 shrink-0" />
       <p className="min-w-0 flex-1">
-        <b className="font-semibold">{syncFailedLead(sync.lastAt)}</b>
-        {sync.message ? ` ${sync.message}` : ""} {keepsTitles(itemCount)}
-        {retry}
+        <b className="font-semibold">{syncFailedLead(sync.lastAt)}</b> {detail}
       </p>
       {onSyncNow ? (
         <Button
@@ -165,11 +170,11 @@ export function SyncFailedCallout({
           onClick={onSyncNow}
         >
           {syncing ? <Loader2 aria-hidden className="animate-spin" /> : null}
-          {SYNC_NOW}
+          {syncNow()}
         </Button>
       ) : null}
       {onSyncNow && saveFirst ? (
-        <p className="text-muted-foreground w-full text-[12.5px]">{SAVE_BEFORE_SYNC}</p>
+        <p className="text-muted-foreground w-full text-[12.5px]">{saveBeforeSync()}</p>
       ) : null}
     </div>
   );

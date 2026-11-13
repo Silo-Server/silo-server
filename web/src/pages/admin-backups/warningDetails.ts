@@ -1,10 +1,11 @@
 import type { AdminBackup, AdminBackupOmitted } from "@/api/v2/adminBackups";
+import { englishText, t, type MessageKey, type TextValues } from "@/i18n";
+import { formatLocale } from "@/lib/appLocale";
 
 type MissingBlob = AdminBackup["missing_blobs"][number];
 
-function plural(count: number, one: string, many = `${one}s`): string {
-  return `${count} ${count === 1 ? one : many}`;
-}
+/** Formats a message: `t` for the page, `englishText` for the report pasted into an issue. */
+type Text = (id: MessageKey, values?: TextValues) => string;
 
 const UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
 const NUMERIC_ID = /\b(profile|account|user|item|library|collection)( id)? \d+\b/gi;
@@ -35,13 +36,17 @@ function technicalDetail(cause: string): string {
 }
 
 /** What went wrong for a group of accounts, as a person would say it. */
-function plainSummary(reason: AdminBackupOmitted["reason"], cause: string, count: number): string {
-  const whose = count === 1 ? "its" : "their";
-  if (reason === "too_large") return `${whose} data is too large for the restore set`;
+function plainSummary(
+  reason: AdminBackupOmitted["reason"],
+  cause: string,
+  count: number,
+  text: Text = t,
+): string {
+  if (reason === "too_large") return text("web.admin.backups.warnings.tooLarge", { count });
   const reading = /(?:^|: )reading ([^:]+?)(?::|$)/.exec(cause);
   return reading?.[1]
-    ? `${whose} ${reading[1].trim()} couldn't be read`
-    : `${whose} data couldn't be read`;
+    ? text("web.admin.backups.warnings.partUnreadable", { count, part: reading[1].trim() })
+    : text("web.admin.backups.warnings.dataUnreadable", { count });
 }
 
 export interface OmissionGroup {
@@ -78,8 +83,13 @@ export function groupOmissions(omitted: readonly AdminBackupOmitted[]): Omission
 }
 
 /** "182 accounts — their notification preferences couldn't be read". */
-export function omissionGroupTitle(group: OmissionGroup): string {
-  return `${plural(group.labels.length, "account")} — ${group.summary}`;
+export function omissionGroupTitle(group: OmissionGroup, text: Text = t): string {
+  const count = group.labels.length;
+  return text("web.admin.backups.warnings.groupTitle", {
+    count,
+    count_text: count,
+    summary: group.summary,
+  });
 }
 
 /** Names shown before "and N more". */
@@ -89,7 +99,7 @@ export const NAMES_SHOWN = 5;
 export function nameSampleText(names: readonly string[], shown = NAMES_SHOWN): string {
   const list = names.slice(0, shown).join(", ");
   const more = names.length - shown;
-  return more > 0 ? `${list}, and ${more} more` : list;
+  return more > 0 ? t("web.admin.backups.warnings.nameSample", { names: list, more: more }) : list;
 }
 
 export interface MissingFileGroup {
@@ -110,25 +120,37 @@ export function groupMissingBlobs(blobs: readonly MissingBlob[]): MissingFileGro
 }
 
 /** "98 downloaded subtitles", "2 uploaded artwork files". */
-export function missingGroupTitle(group: MissingFileGroup): string {
+export function missingGroupTitle(group: MissingFileGroup, text: Text = t): string {
   const count = group.keys.length;
-  if (/artwork$/.test(group.source)) return plural(count, `${group.source} file`);
-  return plural(count, group.source);
+  const values = { count, count_text: count, source: group.source };
+  if (/artwork$/.test(group.source))
+    return text("web.admin.backups.warnings.missingArtwork", values);
+  return text("web.admin.backups.warnings.missingGroup", values);
 }
 
 /** "182 accounts weren't included in this backup's restore set." */
-export function omittedHeadline(count: number): string {
-  return `${count === 1 ? "1 account wasn't" : `${count} accounts weren't`} included in this backup's restore set.`;
+function omittedHeadline(count: number, text: Text = t): string {
+  return text("web.admin.backups.warnings.omittedHeadline", { count, count_text: count });
 }
 
 /** "101 files were missing when the backup copied them." */
-export function missingHeadline(listed: number, total: number = listed): string {
-  if (total === 1) return "1 file was missing when the backup copied it.";
-  const missing = `${total.toLocaleString()} files were missing when the backup copied them.`;
-  return total > listed ? `${missing} The first ${listed.toLocaleString()} are listed.` : missing;
+export function missingHeadline(listed: number, total: number = listed, text: Text = t): string {
+  const values = {
+    count: total,
+    count_text: total === 1 ? "1" : total.toLocaleString(formatLocale()),
+  };
+  return total > listed && total !== 1
+    ? text("web.admin.backups.warnings.missingHeadlineFirst", {
+        ...values,
+        listed: listed.toLocaleString(formatLocale()),
+      })
+    : text("web.admin.backups.warnings.missingHeadline", values);
 }
 
-/** Every group as plain text, for pasting into an issue. */
+/**
+ * Every group as plain text, for pasting into an issue. It stays English in
+ * every interface language: maintainers read it.
+ */
 export function warningDetailsReport({
   backupId,
   omitted,
@@ -141,22 +163,23 @@ export function warningDetailsReport({
   /** Every missing file; `missing` lists at most the first 10,000. */
   missingTotal?: number;
 }): string {
-  const lines = [`Backup ${backupId}`];
+  const lines = [englishText("web.admin.backups.warnings.reportBackup", { id: backupId })];
   if (omitted.length > 0) {
-    lines.push("", omittedHeadline(omitted.length));
+    lines.push("", omittedHeadline(omitted.length, englishText));
     for (const group of groupOmissions(omitted)) {
+      const summary = plainSummary(group.reason, group.cause, group.labels.length, englishText);
       lines.push(
         "",
-        `${omissionGroupTitle(group)} (${group.reason})`,
+        `${omissionGroupTitle({ ...group, summary }, englishText)} (${group.reason})`,
         `  ${group.detail}`,
         `  ${group.labels.join(", ")}`,
       );
     }
   }
   if (missing.length > 0) {
-    lines.push("", missingHeadline(missing.length, missingTotal));
+    lines.push("", missingHeadline(missing.length, missingTotal, englishText));
     for (const group of groupMissingBlobs(missing)) {
-      lines.push("", missingGroupTitle(group), ...group.keys.map((key) => `  ${key}`));
+      lines.push("", missingGroupTitle(group, englishText), ...group.keys.map((key) => `  ${key}`));
     }
   }
   return lines.join("\n");

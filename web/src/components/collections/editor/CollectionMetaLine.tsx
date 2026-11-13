@@ -2,6 +2,7 @@ import { Fragment } from "react";
 
 import { MetaDot } from "@/components/calm/ListRow";
 import { cn } from "@/lib/utils";
+import { useT } from "@/i18n";
 
 /** A sync state worth showing: a list that failed, or one syncing now. */
 export interface SyncAttention {
@@ -33,9 +34,12 @@ export function CollectionMetaLine({
   attention?: SyncAttention;
   className?: string;
 }) {
+  const t = useT();
   const counted = [
     typeLabel,
-    itemCount === undefined ? undefined : `${itemCount} title${itemCount === 1 ? "" : "s"}`,
+    itemCount === undefined
+      ? undefined
+      : t("web.collections.metaLine.titleCount", { count: itemCount, shown: itemCount }),
   ]
     .filter(Boolean)
     .join(" · ");

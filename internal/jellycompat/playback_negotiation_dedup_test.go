@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -83,6 +84,24 @@ func TestHandlePlaybackInfoReplacesDuplicateJellyfinWebNegotiation(t *testing.T)
 	}
 	if stored.ClientDeviceID != "web-device" {
 		t.Fatalf("ClientDeviceID = %q, want web-device", stored.ClientDeviceID)
+	}
+}
+
+// PlaybackInfo never hands out a PlaySessionId it could not persist: other
+// replicas could not resolve it, so the client gets a retryable 503 (#2923).
+func TestHandlePlaybackInfoAnswers503WhenNegotiationIsNotPersisted(t *testing.T) {
+	handler, routeID := newSubtitleSelectionHandler(t)
+	handler.playbackStore = NewDurableCompatPlaybackStore(newUnreachableCompatPool(t), time.Hour, nil)
+
+	recorder := servePlaybackInfo(handler, routeID, `{}`)
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 (body: %s)", recorder.Code, recorder.Body.String())
+	}
+	if recorder.Header().Get("Retry-After") == "" {
+		t.Fatal("503 carries no Retry-After")
+	}
+	if strings.Contains(recorder.Body.String(), "PlaySessionId") {
+		t.Fatalf("response hands out a PlaySessionId: %s", recorder.Body.String())
 	}
 }
 

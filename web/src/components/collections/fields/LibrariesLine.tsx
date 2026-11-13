@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import LibraryMultiSelect from "@/components/LibraryMultiSelect";
+import { useT } from "@/i18n";
 
 import { LIBRARIES_LINE_ID } from "./librariesLineFocus";
 
@@ -31,6 +32,7 @@ export function LibrariesLine({
   /** When none ticked means every library: how that reads, as in "All my libraries". */
   allLabel?: string;
 }) {
+  const t = useT();
   return (
     <div className="grid gap-2.5">
       <div id={LIBRARIES_LINE_ID} className="flex flex-wrap items-center gap-2.5">
@@ -42,7 +44,7 @@ export function LibrariesLine({
           eligibleKinds={eligibleKinds}
           ineligibleReason={ineligibleReason}
           hideAllOption={!allLabel}
-          emptyLabel={allLabel ?? "Choose libraries"}
+          emptyLabel={allLabel ?? t("web.collections.fields.chooseLibraries")}
           triggerLabel={lead}
           triggerClassName="h-9 max-w-full justify-between gap-1 rounded-[10px] px-3 font-semibold"
           disabled={disabled}

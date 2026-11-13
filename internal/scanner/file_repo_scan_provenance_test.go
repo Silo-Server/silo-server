@@ -68,7 +68,7 @@ func TestFileRepositoryPreservesFirstSeenScanProvenance(t *testing.T) {
 	if file.FirstSeenScanRunID != firstRunID {
 		t.Fatalf("first upsert provenance = %q, want %q", file.FirstSeenScanRunID, firstRunID)
 	}
-	if err := repo.UpdateEpisodeLink(ctx, file.ID, episodeOneID, 1, 1); err != nil {
+	if err := repo.UpdateEpisodeLink(ctx, file.ID, file.FilePath, episodeOneID, 1, 1); err != nil {
 		t.Fatalf("delayed episode link: %v", err)
 	}
 	assertEpisodeProvenance(t, ctx, pool, episodeOneID, folderID, firstRunID)
@@ -101,7 +101,7 @@ func TestFileRepositoryPreservesFirstSeenScanProvenance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("additional version upsert: %v", err)
 	}
-	if err := repo.UpdateEpisodeLink(ctx, version.ID, episodeOneID, 1, 1); err != nil {
+	if err := repo.UpdateEpisodeLink(ctx, version.ID, version.FilePath, episodeOneID, 1, 1); err != nil {
 		t.Fatalf("additional version link: %v", err)
 	}
 	assertEpisodeProvenance(t, ctx, pool, episodeOneID, folderID, firstRunID)

@@ -25,7 +25,7 @@ type matcherRepository interface {
 	MatchEpisodeByExternalID(ctx context.Context, column, value string) ([]mediaLookupRow, error)
 	MatchEpisodeBySeriesExternalID(ctx context.Context, column, value string, seasonNumber, episodeNumber int) ([]mediaLookupRow, error)
 	MatchEpisodeBySeries(ctx context.Context, seriesID string, seasonNumber, episodeNumber int) (*Match, error)
-	MatchEpisodesBySeries(ctx context.Context, seriesID string, seasonNumber *int, watchedAt *time.Time) ([]Match, error)
+	MatchEpisodesBySeries(ctx context.Context, seriesID string, seasonNumber *int, watchedAt *time.Time, allowedLibraryIDs []int) ([]Match, error)
 }
 
 type Matcher struct {
@@ -81,7 +81,7 @@ func (m *Matcher) MatchLeaves(ctx context.Context, record Record) ([]Match, stri
 		if err != nil || series == nil {
 			return nil, reason, err
 		}
-		matches, err := m.repo.MatchEpisodesBySeries(ctx, series.MediaItemID, seasonNumber, record.LastPlayedAt)
+		matches, err := m.repo.MatchEpisodesBySeries(ctx, series.MediaItemID, seasonNumber, record.LastPlayedAt, record.AllowedLibraryIDs)
 		if err != nil {
 			return nil, "", err
 		}

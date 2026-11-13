@@ -92,6 +92,14 @@ describe("settingsDisplay", () => {
     expect(formatSettingValue(SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE, "")).toBe("No preference");
   });
 
+  // A stored open tag outside the advisory list must stay selectable, or the
+  // admin select renders blank and a re-save could replace the profile's choice.
+  it("keeps a stored language tag the suggestions lack", () => {
+    const options = optionsFor(SETTING_DEFINITIONS[SETTING_KEYS.UI_APP_LANGUAGE], "pt-PT");
+    expect(options[0]).toEqual({ value: "", label: "Match device" });
+    expect(options.map((option) => option.value)).toContain("pt-PT");
+  });
+
   it("renders booleans and enum members with their contract labels", () => {
     expect(formatSettingValue(SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO, "true")).toBe("Enabled");
     // A stored null bandwidth cap is "No limit" even where the default is a cap.

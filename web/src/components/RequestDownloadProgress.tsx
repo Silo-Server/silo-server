@@ -3,6 +3,7 @@ import type { RequestDownload } from "@/api/types";
 import { Progress } from "@/components/ui/progress";
 import { formatRequestDownload, requestDownloadPercent } from "@/lib/requestDownload";
 import { cn } from "@/lib/utils";
+import { useT } from "@/i18n";
 
 /** How often a shown estimate is checked against the clock again. */
 const ESTIMATE_CLOCK_INTERVAL_MS = 30_000;
@@ -36,11 +37,14 @@ export function RequestDownloadProgress({
   admin?: boolean;
   className?: string;
 }) {
+  const t = useT();
   useEstimateClock(Boolean(download.estimated_completion_at));
   const percent = requestDownloadPercent(download);
   return (
     <div className={cn("min-w-0 space-y-1", className)} data-download-phase={download.phase}>
-      {percent !== undefined ? <Progress value={percent} aria-label="Download progress" /> : null}
+      {percent !== undefined ? (
+        <Progress value={percent} aria-label={t("web.requests.download.progress")} />
+      ) : null}
       <p className="text-muted-foreground text-xs leading-snug">
         {formatRequestDownload(download, { admin })}
       </p>

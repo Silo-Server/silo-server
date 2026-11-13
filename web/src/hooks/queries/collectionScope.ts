@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { normalizeQueryDefinition, type QueryDefinition } from "@/api/types";
 import { isNotFoundProblem, v2, V2ProblemError } from "@/api/v2/request";
 import { useDebounce } from "@/hooks/useDebounce";
-import { ARTWORK_SLOT_LABEL, DRAFT_FIELD_LABEL, SAVE_FAILED } from "@/lib/collections/copy";
+import { artworkSlotLabel, draftFieldLabel, saveFailed } from "@/lib/collections/copy";
 import { changedFields, mergeDraft, takeFields, type DraftField } from "@/lib/collections/draft";
 import type {
   ArtworkDraft,
@@ -22,6 +22,7 @@ import type {
   SyncOutcome,
   WireCollection,
 } from "@/lib/collections/scope";
+import { t, useAppLanguage } from "@/i18n";
 
 /**
  * An editor read may carry no artwork URLs (they are presigned, and would move
@@ -203,16 +204,21 @@ export function useScopeSync<Raw extends WireCollection>(scope: CollectionScope<
     retry: false,
     mutationFn: (id: string) => scope.sync(id),
     onSuccess: (result, id) => {
-      const matched = `${result.itemsMatched} item${result.itemsMatched === 1 ? "" : "s"}`;
+      const matched = {
+        count: result.itemsMatched,
+        count_text: result.itemsMatched,
+      };
       toast.success(
         result.status === "warning"
-          ? `Synced with warnings — matched ${matched}`
-          : `Synced — matched ${matched}`,
+          ? t("web.common.toast.collections.syncedWithWarnings", matched)
+          : t("web.common.toast.collections.synced", matched),
       );
       void scope.invalidate(queryClient, id);
     },
     onError: (error, id) => {
-      toast.error(error instanceof Error ? error.message : "Sync failed");
+      toast.error(
+        error instanceof Error ? error.message : t("web.common.toast.collections.syncFailed"),
+      );
       // The server records a failed sync on the collection; show it.
       void scope.invalidate(queryClient, id);
     },
@@ -235,12 +241,12 @@ export function useScopeDelete<Raw extends WireCollection>(
     retry: false,
     mutationFn: (ref: { id: string; etag: string }) => scope.remove(ref),
     onSuccess: (_data, { id }) => {
-      toast.success("Collection deleted");
+      toast.success(t("web.common.toast.collections.deleted"));
       options.onDeleted?.(id);
       return scope.invalidate(queryClient, id);
     },
     onError: (error) => {
-      toast.error(scope.errorMessage(error, "Failed to delete"));
+      toast.error(scope.errorMessage(error, t("web.common.toast.collections.deleteFailed")));
       if (isPreconditionFailed(error)) {
         void scope.invalidate(queryClient);
         options.onStale?.();
@@ -319,6 +325,7 @@ export function useCollectionDraft<Raw extends WireCollection>(
   scope: CollectionScope<Raw>,
   init: { snapshot?: EditorSnapshot<Raw>; kind: CreateKind; libraryId?: number | null },
 ) {
+  useAppLanguage();
   const queryClient = useQueryClient();
   const [state, setStateValue] = useState<DraftState<Raw>>(() => {
     const draft = scope.toDraft(init.snapshot?.view ?? null, init);
@@ -505,7 +512,7 @@ export function useCollectionDraft<Raw extends WireCollection>(
       }
       return { id: outcome.id, failedItems, sync: outcome.sync, warnings: outcome.warnings };
     } catch (error) {
-      setSaveError(scope.errorMessage(error, SAVE_FAILED));
+      setSaveError(scope.errorMessage(error, saveFailed()));
       return null;
     } finally {
       setSaving(false);
@@ -561,7 +568,7 @@ export function useCollectionDraft<Raw extends WireCollection>(
         }
       }
     } catch (error) {
-      setSaveError(scope.errorMessage(error, SAVE_FAILED));
+      setSaveError(scope.errorMessage(error, saveFailed()));
       return false;
     } finally {
       setSaving(false);
@@ -601,8 +608,8 @@ export function useCollectionDraft<Raw extends WireCollection>(
     /** What the save bar names: changed fields, then staged artwork. */
     pendingLabels: [
       ...new Set([
-        ...changed.map((field) => DRAFT_FIELD_LABEL[field]),
-        ...artwork.map((slot) => ARTWORK_SLOT_LABEL[slot]),
+        ...changed.map((field) => draftFieldLabel(field)),
+        ...artwork.map((slot) => artworkSlotLabel(slot)),
       ]),
     ],
     isDirty: changed.length > 0 || artwork.length > 0,

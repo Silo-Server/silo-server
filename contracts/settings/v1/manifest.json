@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 27,
+  "revision": 28,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -153,6 +153,19 @@
         { "value": "tr", "introduced_in": 1 },
         { "value": "uk", "introduced_in": 1 },
         { "value": "vi", "introduced_in": 1 }
+      ]
+    },
+    "app_languages": {
+      "type": "language_tag",
+      "options": [
+        { "value": "en", "introduced_in": 28 },
+        { "value": "es", "introduced_in": 28 },
+        { "value": "de", "introduced_in": 28 },
+        { "value": "fr", "introduced_in": 28 },
+        { "value": "pt-BR", "introduced_in": 28 },
+        { "value": "ja", "introduced_in": 28 },
+        { "value": "zh-Hans", "introduced_in": 28 },
+        { "value": "ar", "introduced_in": 28 }
       ]
     }
   },
@@ -1141,6 +1154,22 @@
       "description": "How clock times are written across the interface.",
       "recommended_control": "select",
       "notes": "Moved from account to profile scope; the account row is copied to every profile during migration."
+    },
+    {
+      "key": "ui.app_language",
+      "introduced_in": 28,
+      "persistence": "remote",
+      "allowed_scopes": ["profile", "profile_device"],
+      "resolution_order": ["profile_device", "profile", "default"],
+      "value_schema": { "type": "language_tag", "nullable": true },
+      "default_value": null,
+      "category": "appearance",
+      "label": "App language",
+      "description": "Language of the app's menus, buttons and messages. Separate from the audio, subtitle and metadata languages.",
+      "recommended_control": "select",
+      "suggested_options": "app_languages",
+      "unset_label": "Match device",
+      "notes": "null means follow the device or browser language. A client applies a value only when it ships that language, matched the same way it matches the device language list (a regional tag such as es-MX matches es; zh-CN and zh-SG match zh-Hans), and otherwise behaves as if the value were null. The value is an open tag so adding a language never needs a server release: app_languages is an advisory floor, and a client's picker lists only the languages it ships, plus the stored value when the client does not ship it, so the picker never shows a stored choice as Match device and a re-save never erases it. This is the interface language; spoken-language and text preferences are playback.audio_language, playback.subtitle_language and catalog.metadata_language."
     },
     {
       "key": "home.hide_watched_items",
