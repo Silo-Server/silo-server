@@ -80,6 +80,10 @@ type copyGroupRun struct {
 	groups         map[int]string
 	lastProducedAt time.Time
 	broken         bool
+	// pruned holds the segments the pruner removed during this run. The
+	// pruner never visits a number behind its cursor again in this
+	// generation, so a segment rebuilt there would stay for good.
+	pruned map[int]bool
 }
 
 // copyGroupFile is a group file and its first video presentation time on the
@@ -353,7 +357,8 @@ func (a *copyGroupAssembler) placeLocked(run *copyGroupRun, path string, at floa
 
 // assembleLocked joins every segment the run has all the groups for. Only
 // segments the run's groups fall in are considered. One already assembled
-// is rebuilt if its file has gone (pruned behind the player).
+// is rebuilt if its file has gone, unless the pruner removed it during this
+// run: then its groups are dropped, and a run restarted at it rebuilds it.
 func (a *copyGroupAssembler) assembleLocked(run *copyGroupRun) error {
 	touched := map[int]struct{}{}
 	for k := range run.groups {
@@ -365,6 +370,10 @@ func (a *copyGroupAssembler) assembleLocked(run *copyGroupRun) error {
 	}
 	sort.Ints(segments)
 	for _, n := range segments {
+		if run.pruned[n] {
+			a.dropGroupsLocked(run, n)
+			continue
+		}
 		if a.assembled[n] {
 			if _, err := os.Stat(filepath.Join(a.dir, plannedSegmentName(n))); err == nil {
 				a.dropGroupsLocked(run, n)
@@ -433,13 +442,20 @@ func (a *copyGroupAssembler) writeSegmentLocked(run *copyGroupRun, n int, paths 
 }
 
 // forget marks segment n as no longer assembled: the pruner removed it
-// behind the player. A run that reaches it again rebuilds it, and progress
-// doesn't count it toward the produced head.
+// behind the player. Progress doesn't count it toward the produced head. The
+// current run doesn't rebuild it, since the pruner wouldn't remove it again;
+// a run restarted at it does.
 func (a *copyGroupAssembler) forget(n int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if n >= 0 && n < len(a.assembled) {
 		a.assembled[n] = false
+	}
+	if a.run != nil {
+		if a.run.pruned == nil {
+			a.run.pruned = map[int]bool{}
+		}
+		a.run.pruned[n] = true
 	}
 }
 

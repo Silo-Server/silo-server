@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"os/exec"
@@ -493,6 +494,40 @@ func TestPlannedProgressHeadAcrossPruning(t *testing.T) {
 	a.assembled[1] = true
 	if _, head, _, _ := a.progress(); head != 3 {
 		t.Fatalf("after rebuilding segment 1: head %d, want 3", head)
+	}
+}
+
+// A restart can keep assembled segments the player then downloads, and the
+// pruner removes, before the new run gets there. The run doesn't rebuild
+// them: the pruner's cursor is past them and would never remove them again.
+func TestPlannedRunDoesNotRebuildSegmentsPrunedDuringIt(t *testing.T) {
+	dir := t.TempDir()
+	a := newCopyGroupAssembler(dir, evenPlan())
+	a.startRun(0, "audio")
+	a.assembled[1] = true
+	a.forget(1)
+
+	first, end := a.plan.keyframeRange(1)
+	for k := first; k < end; k++ {
+		p := filepath.Join(dir, fmt.Sprintf("gop1_%d.m4s", k))
+		if err := os.WriteFile(p, []byte("not fMP4"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		a.run.groups[k] = p
+	}
+	if err := a.assembleLocked(a.run); err != nil {
+		t.Fatalf("assemble: %v, want the pruned segment skipped", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, plannedSegmentName(1))); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("segment 1 rebuilt behind the pruner (%v)", err)
+	}
+	if len(a.run.groups) != 0 || a.hasSegment(1) {
+		t.Fatalf("groups %v, assembled %v; want the groups dropped and the segment gone", a.run.groups, a.hasSegment(1))
+	}
+
+	a.startRun(1, "audio")
+	if a.run.pruned[1] {
+		t.Fatal("a run restarted at the pruned segment won't rebuild it")
 	}
 }
 

@@ -3299,6 +3299,15 @@ func (s *TranscodeSession) openSegment(name string) (lease *SegmentLease, dv81 b
 	}, s.opts.VideoBitstreamFilter == DV7ToDV81BitstreamFilter, s.opts.SessionID, nil
 }
 
+// forgetDV81Conversion drops a removed media file's conversion entry, so a
+// file written again under its name in the same generation, as a planned
+// session's assembler can, is converted again when served.
+func (s *TranscodeSession) forgetDV81Conversion(name string) {
+	s.dv81Mu.Lock()
+	defer s.dv81Mu.Unlock()
+	delete(s.dv81Converted, name)
+}
+
 // convertDV81 rewrites a served file of a DV7ToDV81BitstreamFilter session
 // in place before it is handed out: init.mp4's DOVI record, or a media
 // segment's RPUs. dv81Mu serializes it, so no request sees a file mid-rewrite,

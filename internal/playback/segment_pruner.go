@@ -243,6 +243,7 @@ func (s *TranscodeSession) pruneDownloadedSegments(generation uint64, downloaded
 		if s.copyGroups != nil {
 			s.copyGroups.forget(candidate.number)
 		}
+		s.forgetDV81Conversion(filepath.Base(candidate.path))
 		removed++
 		freedBytes += info.Size()
 	}
