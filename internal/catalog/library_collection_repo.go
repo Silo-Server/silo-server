@@ -275,6 +275,16 @@ func CreateLibraryCollectionInTx(ctx context.Context, tx pgx.Tx, input CreateLib
 		legacyLibraryID = input.LibraryIDs[0]
 	}
 
+	// Take the libraries' order locks before writing the row, as an update
+	// does before it writes a slug, so the two can't deadlock on the slug.
+	lockLibraries := slices.Clone(input.LibraryIDs)
+	if legacyLibraryID > 0 {
+		lockLibraries = append(lockLibraries, legacyLibraryID)
+	}
+	if err := lockLibraryCollectionOrderRevisions(ctx, tx, lockLibraries); err != nil {
+		return "", err
+	}
+
 	// The slug only has to be unique within the legacy library, and it is
 	// derived from the title, so take a free one rather than fail the save.
 	// A writer that claims it first is retried.
@@ -312,10 +322,6 @@ func CreateLibraryCollectionInTx(ctx context.Context, tx pgx.Tx, input CreateLib
 			return "", errors.New("user-collections group cannot accept admin collections")
 		}
 		groupLibraryID = &libraryID
-	}
-
-	if err := lockLibraryCollectionOrderRevisions(ctx, tx, input.LibraryIDs); err != nil {
-		return "", err
 	}
 
 	groupMatchedLibrary := input.GroupID == nil
