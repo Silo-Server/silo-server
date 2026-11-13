@@ -445,10 +445,13 @@ waiting, the request is marked aborted: the `api request` and
 native counter's `status` label is `aborted` (no longer only numeric), the v2
 and compat `status_class` label is `aborted`, and the v2 and compat spans set
 `http.response.outcome` to `aborted` with an error status. A request whose
-client has gone, including one whose write to the client failed (net/http
-cancels the request context then, a write deadline included), is recorded the
-way a returned request would be. The activity log still records only requests
-that return, so an aborted request has no activity row.
+client has gone, including one whose buffered write to the client failed
+(net/http cancels the request context then, a write deadline included), is
+recorded the way a returned request would be. An HTTP/1.1 body sent through
+`ReadFrom` (the sendfile path) is the exception: net/http does not cancel the
+context when that write fails, so a client that stalls there is recorded as
+aborted. The activity log still records only requests that return, so an
+aborted request has no activity row.
 
 ## Jellyfin-compatible listener
 
@@ -502,7 +505,7 @@ the per-scrape sample limit in the
 Latency for one client on one route lives on the trace. Each request opens a
 server span named `jellycompat <METHOD> <route>` with `http.request.method`,
 `http.route`, `http.response.status_code` (or `http.response.outcome` set to
-`hijacked`; `aborted` is set alongside the status code) and
+`hijacked`; `aborted` is set alongside the status code once one was sent) and
 `jellycompat.client`. Postgres, Redis and S3 dependency spans
 started during the request are its children instead of separate root traces.
 The span carries no path, query, header value or body. A `/socket` span stays

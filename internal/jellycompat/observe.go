@@ -138,8 +138,13 @@ func observeCompatRequest(next http.Handler) http.Handler {
 			)
 			if aborted {
 				span.SetAttributes(attribute.String("http.response.outcome", compatStatusAborted))
+				if sw.status != 0 {
+					span.SetAttributes(attribute.Int("http.response.status_code", sw.status))
+				}
 				span.SetStatus(codes.Error, compatStatusAborted)
-			} else if sw.status == 0 && sw.hijacked {
+				return
+			}
+			if sw.status == 0 && sw.hijacked {
 				span.SetAttributes(attribute.String("http.response.outcome", compatStatusHijacked))
 				return
 			}
