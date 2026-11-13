@@ -30,6 +30,8 @@ const mocks = vi.hoisted(() => {
     useAuth: vi.fn(),
     useCurrentProfile: vi.fn(),
     startPlayback: vi.fn(),
+    quality: undefined as string | undefined,
+    qualitySettled: true,
   };
 });
 
@@ -92,7 +94,16 @@ vi.mock("@/hooks/useAuth", () => ({
 vi.mock("@/hooks/queries/qualityPreference", () => ({
   // The resolution cap comes from the settings contract; these tests render
   // without a QueryClient, so the hook stands in for the resolved answer.
-  useQualityPreference: (fallback?: string | null) => fallback ?? null,
+  useQualityPreference: (fallback?: string | null) => mocks.quality ?? fallback ?? null,
+  useQualityPreferenceState: (fallback?: string | null) => ({
+    preference: mocks.quality ?? fallback ?? null,
+    settled: mocks.qualitySettled,
+  }),
+}));
+
+vi.mock("@/hooks/queries/trackPreferences", () => ({
+  useSetAudioPreference: () => ({ mutateAsync: vi.fn().mockResolvedValue(undefined) }),
+  useDeleteAudioPreference: () => ({ mutateAsync: vi.fn().mockResolvedValue(undefined) }),
 }));
 
 vi.mock("@/hooks/useCurrentProfile", () => ({
@@ -207,6 +218,8 @@ function renderMovie(item = makeMovieItem()) {
 
 describe("MovieContent", () => {
   beforeEach(() => {
+    mocks.quality = undefined;
+    mocks.qualitySettled = true;
     mocks.capturedActionBarProps.value = null;
     mocks.capturedMetadataBadgesProps.value = null;
     mocks.capturedQualityBadgesProps.value = null;
@@ -335,6 +348,75 @@ describe("MovieContent", () => {
     expect(mocks.capturedActionBarProps.value).toMatchObject({
       versionPicked: false,
       selectedVersion: { file_id: 1 },
+    });
+  });
+
+  it("initializes the edition when quality loads, then keeps it on quality changes", () => {
+    const item = makeMovieItem({
+      versions: [
+        movieVersion({ file_id: 1, edition_key: "theatrical", resolution: "1080p" }),
+        movieVersion({ file_id: 2, edition_key: "extended", resolution: "2160p" }),
+      ],
+    });
+    const client = new QueryClient();
+    const page = () => (
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <MovieContent item={item} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    mocks.quality = "auto";
+    mocks.qualitySettled = false;
+    const { rerender } = render(page());
+    mocks.quality = "1080p";
+    mocks.qualitySettled = true;
+    rerender(page());
+    expect(mocks.capturedActionBarProps.value).toMatchObject({ selectedVersion: { file_id: 1 } });
+    mocks.quality = "auto";
+    rerender(page());
+    expect(mocks.capturedActionBarProps.value).toMatchObject({
+      selectedVersion: { file_id: 1 },
+      versionPicked: false,
+    });
+  });
+
+  it("clears file-specific tracks when a quality change changes the Auto file", () => {
+    const item = makeMovieItem({
+      versions: [
+        movieVersion({
+          file_id: 1,
+          resolution: "1080p",
+          audio_tracks: [{ codec: "aac", language: "en" }],
+        }),
+        movieVersion({ file_id: 2, resolution: "2160p" }),
+      ],
+    });
+    const client = new QueryClient();
+    const page = () => (
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <MovieContent item={item} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    mocks.quality = "1080p";
+    const { rerender } = render(page());
+    act(() => {
+      (mocks.capturedActionBarProps.value?.onSelectAudioTrack as (index: number) => void)(0);
+      (mocks.capturedActionBarProps.value?.onSelectSubtitleOff as () => void)();
+    });
+    expect(mocks.capturedActionBarProps.value).toMatchObject({
+      audioSelectionMode: "explicit",
+      prePlaySubtitleMode: "off",
+    });
+    mocks.quality = "auto";
+    rerender(page());
+    expect(mocks.capturedActionBarProps.value).toMatchObject({
+      selectedVersion: { file_id: 2 },
+      audioSelectionMode: "auto",
+      explicitAudioTrackIndex: null,
+      prePlaySubtitleMode: "auto",
     });
   });
 

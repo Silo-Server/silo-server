@@ -47,7 +47,7 @@ import {
   canEditMarkers as canEditMarkersForUser,
 } from "@/lib/permissions";
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
-import { useQualityPreference } from "@/hooks/queries/qualityPreference";
+import { useQualityPreferenceState } from "@/hooks/queries/qualityPreference";
 import { useDetailWatchTogether } from "@/pages/watchtogether/DetailWatchTogether";
 import { hasMachineTranslation } from "./components/machineTranslation";
 import { useT } from "@/i18n";
@@ -78,7 +78,9 @@ export default function MovieContent({
   // The resolution cap comes from the settings contract, where the quality
   // picker writes; the profile column it falls back to is only the pre-cutover
   // choice, since that picker no longer mirrors into it.
-  const qualityPreference = useQualityPreference(currentProfile?.quality_preference);
+  const { preference: qualityPreference, settled: qualitySettled } = useQualityPreferenceState(
+    currentProfile?.quality_preference,
+  );
   const canCurateMetadata = canCurateMetadataForUser(user, currentProfile);
   const canEditMarkers = canEditMarkersForUser(user, currentProfile);
 
@@ -158,10 +160,18 @@ export default function MovieContent({
 
   // Reset selection when navigating to a different movie (adjust state during render).
   const [prevContentId, setPrevContentId] = useState(item.content_id);
+  const [prevSelectedFileId, setPrevSelectedFileId] = useState(selectedVersion?.file_id);
   if (prevContentId !== item.content_id) {
     setPrevContentId(item.content_id);
     setManualSelectedFileId(null);
     setSelectedEditionKey(undefined);
+    setSubtitleSelectionMode("auto");
+    setExplicitSubtitleSelection(null);
+  } else if (selectedEditionKey === undefined && qualitySettled && defaultSelectedVersion) {
+    setSelectedEditionKey(defaultSelectedVersion.edition_key ?? "");
+  }
+  if (prevSelectedFileId !== selectedVersion?.file_id) {
+    setPrevSelectedFileId(selectedVersion?.file_id);
     setSubtitleSelectionMode("auto");
     setExplicitSubtitleSelection(null);
   }
