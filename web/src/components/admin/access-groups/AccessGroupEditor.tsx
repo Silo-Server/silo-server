@@ -690,7 +690,12 @@ export function AccessGroupEditor({
 
         <AccessGroupPermissionsSection permissions={permissions} onChange={setPermissions} />
 
-        <AccessGroupMembers groupId={group.id} />
+        <AccessGroupMembers
+          group={group}
+          groups={allGroups.data ?? []}
+          groupsReady={allGroups.isSuccess}
+          onRetryGroups={allGroups.isError ? () => void allGroups.refetch() : undefined}
+        />
 
         {/* Below lg, Delete is in the menu at the top and Save in the pinned bar. */}
         <div className="flex flex-wrap items-center justify-between gap-3 max-lg:hidden">
