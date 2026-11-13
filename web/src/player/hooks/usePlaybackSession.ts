@@ -2003,15 +2003,17 @@ export function usePlaybackSession(
    * `track_change` that changes nothing returns a fresh plan — inventory
    * included — without excluding the route already playing.
    *
-   * A track or quality change queued behind the replan in flight returns a
-   * fresh plan too, so the refresh leaves it queued rather than replacing
-   * the viewer's choice with an echo of the current tracks.
+   * A track, quality or output change queued behind the replan in flight
+   * returns a fresh plan too, so the refresh leaves it queued rather than
+   * replacing the viewer's choice with an echo of the current tracks.
    */
   const refreshSubtitles = useCallback(
     (currentPosition: number) => {
       if (!planRef.current) return;
       const queued = pendingReplanRef.current?.options.operation;
-      if (queued === "track_change" || queued === "quality_change") return;
+      if (queued === "track_change" || queued === "quality_change" || queued === "output_change") {
+        return;
+      }
       void replan({ operation: "track_change", positionSeconds: currentPosition });
     },
     [replan],
@@ -2034,6 +2036,44 @@ export function usePlaybackSession(
       const plan = planRef.current;
       if (!plan) return;
       if (!canFoldAnnouncedSubtitleTrack(plan.subtitle.inventory, track)) {
+        // A queued pick of a stored subtitle names its ordinal in this stale
+        // inventory, so it could land on another track. The plan is refetched
+        // first, and the pick follows at that stored subtitle's new ordinal.
+        const pending = pendingReplanRef.current;
+        const pick = pending?.options;
+        const pickedIndex =
+          pending?.planId === plan.plan_id && pick?.operation === "track_change"
+            ? pick.subtitle?.index
+            : undefined;
+        const pickedStoredId =
+          pickedIndex === undefined
+            ? undefined
+            : plan.subtitle.inventory.find((item) => item.combined_index === pickedIndex)
+                ?.stored_subtitle_id;
+        if (pending && pick && pickedStoredId !== undefined) {
+          void replan(
+            { operation: "track_change", positionSeconds: playbackPositionRef.current },
+            false,
+            false,
+            () => {
+              const picked = planRef.current?.subtitle.inventory.find(
+                (item) => item.stored_subtitle_id === pickedStoredId,
+              );
+              if (!picked) return;
+              void replan(
+                {
+                  ...pick,
+                  positionSeconds: playbackPositionRef.current,
+                  subtitle: { id: "", index: picked.combined_index },
+                },
+                pending.retireSessionOnRefusal,
+                false,
+                pending.onAdopt,
+              );
+            },
+          );
+          return;
+        }
         refreshSubtitles(playbackPositionRef.current);
         return;
       }
@@ -2049,7 +2089,7 @@ export function usePlaybackSession(
         subtitleUrls: mapSubtitleInventory(inventory, nextPlan.effective_media_file_id, config),
       }));
     },
-    [config, refreshSubtitles],
+    [config, refreshSubtitles, replan],
   );
 
   const updatePlaybackState = useCallback((positionSeconds: number, playing: boolean) => {

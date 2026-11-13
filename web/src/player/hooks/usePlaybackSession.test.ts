@@ -924,6 +924,42 @@ describe("usePlaybackSession output capability changes", () => {
     unmount();
   });
 
+  it("keeps a queued output change when a subtitle refresh follows it", async () => {
+    const setHDR = outputProbe(true);
+    let resolveFirstReplan: ((response: Response) => void) | undefined;
+    const firstReplanResponse = new Promise<Response>((resolve) => {
+      resolveFirstReplan = resolve;
+    });
+    const operations: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      hdrFetch((init) => {
+        operations.push((JSON.parse(String(init?.body)) as { operation: string }).operation);
+        if (operations.length === 1) return firstReplanResponse;
+        return new Promise<Response>(() => {});
+      }),
+    );
+
+    const { result, unmount } = renderSession();
+    await waitFor(() => expect(result.current.sessionId).toBe("session-hdr"));
+
+    act(() => result.current.refreshSubtitles(120));
+    await waitFor(() => expect(operations).toHaveLength(1));
+    act(() => setHDR(false));
+    // The output change re-probes decode support before it queues.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    act(() => result.current.refreshSubtitles(121));
+    await act(async () => {
+      resolveFirstReplan?.(jsonResponse(playable("session-hdr", undefined, OUTPUT_CHANGE)));
+      await firstReplanResponse;
+    });
+
+    await waitFor(() => expect(operations).toEqual(["track_change", "output_change"]));
+    unmount();
+  });
+
   it("uses the latest capabilities when an output change queues behind another replan", async () => {
     const setHDR = outputProbe(true);
     let resolveFirstReplan: ((response: Response) => void) | undefined;
@@ -3197,11 +3233,19 @@ describe("usePlaybackSession announced subtitle tracks", () => {
     unmount();
   });
 
-  // A refetch is any replan; one already queued returns the fresh inventory
-  // itself, so the refetch must not replace a subtitle the viewer picked.
-  it("keeps a queued subtitle pick when an announcement needs a refetch", async () => {
+  // The plan lists en (stored 1) at 0 and es (stored 2) at 1. While a quality
+  // change runs, the server deletes 1, so es moves to 0 and fr (stored 3) is
+  // added at 1, and the viewer picks es at 1 from the stale menu. The
+  // conflicting announcement shows the pick's ordinal is stale: the plan is
+  // refetched first, and the pick then goes out at es's new ordinal.
+  it("replays a queued stored-subtitle pick at its ordinal after a refetch", async () => {
     const initial = [stored(0, 1, "en"), stored(1, 2, "es")];
     const plan = fixturePlanV3({ subtitle: { mode: "render", inventory: initial } });
+    const refreshed = fixturePlanV3({
+      plan_id: "plan:refreshedinv0001",
+      plan_attempt_key: "v3:refreshedinv0001",
+      subtitle: { mode: "render", inventory: [stored(0, 2, "es"), stored(1, 3, "fr")] },
+    });
     let resolveQualityReplan: ((response: Response) => void) | undefined;
     const qualityReplanResponse = new Promise<Response>((resolve) => {
       resolveQualityReplan = resolve;
@@ -3212,6 +3256,7 @@ describe("usePlaybackSession announced subtitle tracks", () => {
       sessionFetch((init) => {
         replanBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
         if (replanBodies.length === 1) return qualityReplanResponse;
+        if (replanBodies.length === 2) return jsonResponse(playable("session-1", refreshed));
         return new Promise<Response>(() => {});
       }, plan),
     );
@@ -3227,10 +3272,12 @@ describe("usePlaybackSession announced subtitle tracks", () => {
       await qualityReplanResponse;
     });
 
-    await waitFor(() => expect(replanBodies).toHaveLength(2));
-    expect(replanBodies[1]).toMatchObject({
+    await waitFor(() => expect(replanBodies).toHaveLength(3));
+    expect(replanBodies[1]).toMatchObject({ operation: "track_change" });
+    expect(replanBodies[1]?.selected_tracks).not.toHaveProperty("subtitle.index", 1);
+    expect(replanBodies[2]).toMatchObject({
       operation: "track_change",
-      selected_tracks: { subtitle: { index: 1 } },
+      selected_tracks: { subtitle: { index: 0 } },
     });
     unmount();
   });
