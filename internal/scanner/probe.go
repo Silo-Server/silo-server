@@ -136,14 +136,14 @@ func probeMediaFile(ctx context.Context, ffprobePath string, filePath string, li
 	defer cancel()
 	// Errors go to stderr (kept on the *exec.ExitError) so IsProbeRejection
 	// can tell an unreadable source from damaged content; stdout stays JSON.
-	args := append([]string{"-v", "error"}, limits.inputOptions...)
-	args = append(args,
+	args := slices.Concat(limits.inputOptions, []string{
+		"-v", "error",
 		"-print_format", "json",
 		"-show_format",
 		"-show_streams",
 		"-show_chapters",
 		filePath,
-	)
+	})
 	cmd := fspath.CommandContext(probeCtx, ffprobePath, args...)
 	cmd.WaitDelay = limits.waitDelay
 
