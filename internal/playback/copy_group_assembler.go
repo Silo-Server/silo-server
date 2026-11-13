@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/playback/keyframes"
 )
 
 // A keyframe-planned copy session (copy_keyframe_plan.go) has FFmpeg cut at
@@ -216,23 +219,36 @@ func (a *copyGroupAssembler) scan(final bool) error {
 			break
 		}
 		if err := a.mapGroupLocked(run, path, data); err != nil {
-			return breakRun(run, name, err)
+			return a.breakRun(run, name, err)
 		}
 		run.nextFile++
 	}
 	if final && run.pending != nil {
 		if err := a.anchorLocked(run, *run.pending, nil); err != nil {
-			return breakRun(run, filepath.Base(run.pending.path), err)
+			return a.breakRun(run, filepath.Base(run.pending.path), err)
 		}
 	}
 	return a.assembleLocked(run)
 }
 
-// breakRun stops a run's assembly at a group it can't place.
-func breakRun(run *copyGroupRun, group string, err error) error {
+// errGroupsMismatchPlan marks FFmpeg cutting where the plan doesn't. The plan
+// comes from the file's Cues, which only a few sampled clusters vouch for
+// (#2453), so Cues that leave out keyframes, or list ones that aren't, show
+// up here.
+var errGroupsMismatchPlan = errors.New("FFmpeg's keyframe groups don't match the keyframe playlist")
+
+// breakRun stops a run's assembly at a group it can't place. When the groups
+// show the plan is wrong, the file version it came from is rejected
+// (keyframes.Reject), so later playbacks keep FFmpeg's playlist. A plan
+// rebuilt from its record doesn't know that version and rejects nothing; the
+// next fresh playback of the file checks it again.
+func (a *copyGroupAssembler) breakRun(run *copyGroupRun, group string, err error) error {
 	slog.Warn("keyframe playlist: can't place an FFmpeg keyframe group; this run stops assembling",
 		"component", "playback", "group", group, "error", err)
 	run.broken = true
+	if errors.Is(err, errGroupsMismatchPlan) {
+		keyframes.Reject(a.plan.file)
+	}
 	return fmt.Errorf("place keyframe group %s: %w", group, err)
 }
 
@@ -287,7 +303,7 @@ func (a *copyGroupAssembler) anchorLocked(run *copyGroupRun, first copyGroupFile
 	keys := a.plan.keyframes
 	last := min(sort.SearchFloat64s(keys, first.at+groupTimeTolerance)-1, a.plan.restartKeyframe(run.startSegment))
 	if last < 0 {
-		return fmt.Errorf("first group at %.3fs precedes every keyframe", first.at)
+		return fmt.Errorf("%w: first group at %.3fs precedes every keyframe", errGroupsMismatchPlan, first.at)
 	}
 	i := last
 	if second != nil {
@@ -300,7 +316,7 @@ func (a *copyGroupAssembler) anchorLocked(run *copyGroupRun, first copyGroupFile
 			}
 		}
 		if i < 0 {
-			return fmt.Errorf("groups at %.3fs and %.3fs match no consecutive keyframes", first.at, second.at)
+			return fmt.Errorf("%w: groups at %.3fs and %.3fs match no consecutive keyframes", errGroupsMismatchPlan, first.at, second.at)
 		}
 	}
 	run.offset = first.at - keys[i]
@@ -345,7 +361,12 @@ func (a *copyGroupAssembler) placeLocked(run *copyGroupRun, path string, at floa
 		i--
 	}
 	if i >= len(keys) || math.Abs(keys[i]-source) > groupTimeTolerance {
-		return fmt.Errorf("group at %.3fs matches no keyframe", source)
+		return fmt.Errorf("%w: group at %.3fs matches no keyframe", errGroupsMismatchPlan, source)
+	}
+	if run.lastKey >= 0 && i > run.lastKey+1 {
+		// FFmpeg cuts at every keyframe, and a run's groups follow one
+		// another, so the plan lists keyframes the file doesn't have.
+		return fmt.Errorf("%w: FFmpeg cut no group at the keyframe at %.3fs", errGroupsMismatchPlan, keys[run.lastKey+1])
 	}
 	run.groups[i] = path
 	run.lastKey = max(run.lastKey, i)

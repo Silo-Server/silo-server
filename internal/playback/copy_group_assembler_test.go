@@ -3,6 +3,7 @@ package playback
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/playback/keyframes"
 )
 
 func TestCopyGroupAssemblerMatchesNearbyKeyframes(t *testing.T) {
@@ -165,4 +168,52 @@ func TestCopyGroupAssemblerKeepsTheTimelineInThePlanRecord(t *testing.T) {
 			t.Fatalf("timeline %.3f, shift %.3f; want %.3f, %.3f", a.timeline, a.run.shift, original, original-0.08)
 		}
 	})
+}
+
+// Groups that don't fall on the plan's keyframes show its Cues are wrong for
+// the file, so the run stops and later playbacks of the file keep FFmpeg's
+// playlist.
+func TestCopyGroupAssemblerRejectsTheFileWhenGroupsMismatchThePlan(t *testing.T) {
+	for name, tc := range map[string]struct {
+		groups []float64
+		reject bool
+	}{
+		"matches": {groups: []float64{0, 2, 4}},
+		// FFmpeg cut at a keyframe the Cues left out.
+		"group between keyframes": {groups: []float64{0, 2, 3}, reject: true},
+		// The Cues list a keyframe FFmpeg didn't cut at.
+		"skipped keyframe": {groups: []float64{0, 2, 6}, reject: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			// Not Matroska: Load reports ErrNoIndex, and ErrIncompleteIndex
+			// only once the file is rejected.
+			source := filepath.Join(dir, "source.mkv")
+			if err := os.WriteFile(source, []byte("not matroska"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			info, err := os.Stat(source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan := &copySegmentPlan{durations: []float64{2, 2, 2, 2}, keyframes: []float64{0, 2, 4, 6}, firstKey: []int{0, 1, 2, 3},
+				file: keyframes.Version{Path: source, Size: info.Size(), ModTime: info.ModTime()}}
+			a := newCopyGroupAssembler(dir, plan)
+			prefix := a.startRun(0, "copy")
+			if err := os.WriteFile(filepath.Join(dir, "init.mp4"), testInit(), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			for n, at := range tc.groups {
+				group := box("moof", box("traf", fullBox("tfhd", 0, 0x20000, u32(1)), fullBox("tfdt", 1, 0, u64(uint64(at*12800)))))
+				if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("%s%06d.m4s", prefix, n)), group, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err = a.scan(false)
+			_, loadErr := keyframes.Load(source)
+			if rejected := errors.Is(loadErr, keyframes.ErrIncompleteIndex); rejected != tc.reject || (err != nil) != tc.reject {
+				t.Fatalf("scan err %v, rejected %v (Load err %v); want rejected %v", err, rejected, loadErr, tc.reject)
+			}
+		})
+	}
 }

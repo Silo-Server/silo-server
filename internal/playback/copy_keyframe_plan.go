@@ -41,15 +41,14 @@ type copySegmentPlan struct {
 	// (copyGroupAssembler.timeline), kept with the plan so a rebuilt session
 	// lines its segments up with the ones its player already has.
 	timeline *float64
+	// file is the source version the plan was made from, which a run whose
+	// groups don't match the plan rejects (copyGroupAssembler.breakRun);
+	// zero for a plan rebuilt from its record.
+	file keyframes.Version
 }
 
-// loadKeyframeIndex reads a source's keyframe index, and
-// loadVerifiedKeyframeIndex waits for its full check, stopping when ctx is
-// done; tests replace both.
-var (
-	loadKeyframeIndex         = keyframes.Load
-	loadVerifiedKeyframeIndex = keyframes.LoadVerified
-)
+// loadKeyframeIndex reads a source's keyframe index; tests replace it.
+var loadKeyframeIndex = keyframes.Load
 
 // probeInputStart returns the start time FFmpeg reads for a source; tests
 // replace it. ffprobe opens the file with the same demuxer as FFmpeg, so its
@@ -76,26 +75,14 @@ func planCopySegments(ctx context.Context, opts TranscodeOpts) (*copySegmentPlan
 		!CanGenerateSyntheticManifest(opts.TotalDuration, opts.SegmentDuration) {
 		return nil, nil
 	}
-	// A rebuilt session that lost its plan record (a clean shutdown removes
-	// the output directory) may already have served the planned playlist.
-	// The plan follows from the verified index alone, so wait for the check
-	// here rather than fall back to FFmpeg's playlist, which a player holding
-	// the planned one can't follow. Once the check has run, the index is
-	// cached. The check stops if the rebuild's request goes away (see
-	// resolveCopyPlan).
-	return planFromKeyframeIndex(ctx, opts, opts.Reconstructed)
+	return planFromKeyframeIndex(ctx, opts)
 }
 
 // planFromKeyframeIndex plans a session's segments from its source's keyframe
-// index, waiting for the index's full check when verified is set, or returns
-// nil when the index can't give a plan. It fails when the source's start
-// can't be probed.
-func planFromKeyframeIndex(ctx context.Context, opts TranscodeOpts, verified bool) (*copySegmentPlan, error) {
-	load := loadKeyframeIndex
-	if verified {
-		load = func(path string) (keyframes.Index, error) { return loadVerifiedKeyframeIndex(ctx, path) }
-	}
-	idx, err := load(opts.InputPath)
+// index, or returns nil when the index can't give a plan. It fails when the
+// source's start can't be probed.
+func planFromKeyframeIndex(ctx context.Context, opts TranscodeOpts) (*copySegmentPlan, error) {
+	idx, err := loadKeyframeIndex(opts.InputPath)
 	if err != nil {
 		if !errors.Is(err, keyframes.ErrNoIndex) {
 			log.Printf("playback: read keyframe index for %s: %v; using FFmpeg's playlist", opts.SessionID, err)
@@ -131,7 +118,7 @@ func planFromKeyframeIndex(ctx context.Context, opts TranscodeOpts, verified boo
 		log.Printf("playback: session %s: input start %.3fs is after the first keyframe; using FFmpeg's playlist", opts.SessionID, inputStart)
 		return nil, nil
 	}
-	return &copySegmentPlan{durations: durations, keyframes: idx.Keyframes, firstKey: firstKey, inputStart: inputStart}, nil
+	return &copySegmentPlan{durations: durations, keyframes: idx.Keyframes, firstKey: firstKey, inputStart: inputStart, file: idx.File}, nil
 }
 
 // copyPlanRecordFile keeps a session's planning decision in its output
@@ -151,17 +138,19 @@ type copyPlanRecord struct {
 // resolveCopyPlan returns the plan a session serves. The first start decides
 // and records the decision; a rebuilt session follows the record, so it
 // serves the playlist its player already has. Deciding afresh could differ:
-// a file's index that was still being checked may be verified by then.
+// a playback may have rejected the file's index since (keyframes.Reject).
 //
 // The record lives in the output directory, which a clean shutdown removes.
-// A rebuilt session without one plans again from the verified index (see
-// planCopySegments), which gives the same plan as the first start. If that
-// start had fallen back to FFmpeg's playlist, the rebuilt session now plans:
-// its planned segments are the ones FFmpeg cuts from the beginning, so the
-// segments the player already fetched still match.
+// A rebuilt session without one plans again from the index, which gives the
+// same plan as the first start unless the file has been rejected. If that
+// start had fallen back to FFmpeg's playlist, the rebuilt session may now
+// plan: its planned segments are the ones FFmpeg cuts from the beginning, so
+// the segments the player already fetched still match. The reverse, a
+// planned session rebuilt onto FFmpeg's playlist, is what the record
+// prevents.
 //
 // A record written before plans kept their keyframe groups holds only the
-// segment durations. The session plans again from the verified index and
+// segment durations. The session plans again from the index and
 // keeps that plan if it gives the same durations, the playlist the player
 // has; otherwise it fails with ErrKeyframePlanChanged, since no rebuild can
 // serve that playlist.
@@ -193,20 +182,20 @@ func resolveCopyPlan(ctx context.Context, opts TranscodeOpts) (*copySegmentPlan,
 
 	// Record the decision whatever the start's fate: StartTranscode launches
 	// FFmpeg even if its caller has gone, and that session serves this
-	// playlist. A probe cut short by the caller plans nothing, and that
-	// session serves FFmpeg's playlist.
+	// playlist.
 	plan, err := planCopySegments(ctx, opts)
-	if plan == nil && opts.Reconstructed && (err != nil || ctx.Err() != nil) {
-		// The rebuild's request went away during the keyframe check, or the
-		// source's start couldn't be probed. Neither says anything about the
-		// file, so don't record it: StartTranscode abandons this rebuild,
-		// and the next one plans.
-		return nil, errors.Join(err, ctx.Err())
-	}
 	if err != nil {
-		// A first start serves FFmpeg's playlist and records that, so its
-		// rebuilds follow.
+		// The source's start couldn't be probed (or the caller went away
+		// during the probe), which says nothing about the file, so record
+		// nothing. A rebuilt session may have served the planned playlist,
+		// which FFmpeg's can't stand in for: StartTranscode abandons it, and
+		// the next rebuild plans. A first start serves FFmpeg's playlist; a
+		// rebuild that plans then still matches the player's segments.
+		if opts.Reconstructed {
+			return nil, err
+		}
 		log.Printf("playback: session %s: %v; using FFmpeg's playlist", opts.SessionID, err)
+		return nil, nil
 	}
 	if err := writeCopyPlanRecord(path, plan); err != nil {
 		// Without a record a rebuilt session can't promise the same
@@ -222,7 +211,7 @@ func resolveCopyPlan(ctx context.Context, opts TranscodeOpts) (*copySegmentPlan,
 var ErrKeyframePlanChanged = errors.New("keyframe playlist can't be rebuilt")
 
 // migrateCopyPlanRecord replaces a durations-only plan record with the plan
-// the verified index gives, if its durations match.
+// the index gives, if its durations match.
 func migrateCopyPlanRecord(ctx context.Context, opts TranscodeOpts, path string, durations []float64) (*copySegmentPlan, error) {
 	// The previous implementation also planned copies packaged as MPEG-TS.
 	// Planned segments are now assembled only as fMP4, so a TS session's
@@ -230,7 +219,7 @@ func migrateCopyPlanRecord(ctx context.Context, opts TranscodeOpts, path string,
 	if !videoUsesFMP4(opts) {
 		return nil, fmt.Errorf("%w: its recorded playlist lists MPEG-TS segments", ErrKeyframePlanChanged)
 	}
-	plan, err := planFromKeyframeIndex(ctx, opts, true)
+	plan, err := planFromKeyframeIndex(ctx, opts)
 	if err != nil {
 		// The record stays, so the next rebuild tries again.
 		return nil, err
