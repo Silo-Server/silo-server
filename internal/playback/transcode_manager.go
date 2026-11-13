@@ -1100,8 +1100,8 @@ const initialThrottleSettingsTimeout = 5 * time.Second
 // StartInitialThrottler starts the throttler for a transcode that was just
 // started or rebuilt. The transcode outlives the request that asked for it, so
 // the settings read is detached from that request and bounded instead. A
-// restart hook calls StartThrottler with its FFmpeg context, which Close
-// cancels.
+// restart hook calls StartThrottler with the context Restart gives it, which
+// ends when the session closes or restartHookTimeout passes.
 func (m *TranscodeManager) StartInitialThrottler(ctx context.Context, ts *TranscodeSession) {
 	if m.StartThrottler == nil {
 		return
@@ -1296,6 +1296,46 @@ func (m *TranscodeManager) CloseTranscodeSessionIf(sessionID string, expected *T
 	}
 
 	m.StopRemoteTranscode(sessionID, transcodeNodeURL)
+	return true
+}
+
+// CloseTranscodeSessionIfSessionGone is for a start or rebuild that may have
+// registered expected after its playback session ended: whatever removed the
+// session closed the transcode first and found none. It reports whether
+// hasSession found no session for sessionID, and in that case tears down
+// expected if it is still the registered transcode.
+//
+// hasSession is read under the transcode map lock, which a request also takes
+// to adopt a registered transcode after it has registered the session again.
+// So either that request registered the session before this read, which then
+// finds it, or it reads the map after the removal and starts its own
+// transcode. A check followed by CloseTranscodeSessionIf would close a
+// transcode adopted in between.
+//
+// The close removes the output directory, so it runs under the session
+// lifecycle lock, which a start or rebuild holds before it writes there. The
+// caller must not hold that lock, and hasSession must not call into the
+// manager.
+func (m *TranscodeManager) CloseTranscodeSessionIfSessionGone(sessionID string, expected *TranscodeSession, hasSession func() bool) bool {
+	// The usual case takes no lock: the session is there.
+	if hasSession() {
+		return false
+	}
+	unlock := m.LockSessionLifecycle(sessionID)
+	defer unlock()
+	m.transcodeMu.Lock()
+	if hasSession() {
+		m.transcodeMu.Unlock()
+		return false
+	}
+	registered := expected != nil && m.transcodes[sessionID] == expected
+	if registered {
+		delete(m.transcodes, sessionID)
+	}
+	m.transcodeMu.Unlock()
+	if registered {
+		_ = expected.Close()
+	}
 	return true
 }
 
