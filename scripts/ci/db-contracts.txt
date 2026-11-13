@@ -130,6 +130,10 @@
 # configured root that is now an empty directory (a lost mount).
 ./internal/scanner TestScanSubtreeAudiobookVanishedBookUnderEmptyRootDB
 
+# A full audiobook or ebook scan keeps the books under a configured root that is
+# now an empty directory until the operator confirms the cleanup.
+./internal/scanner TestScanBookFolderKeepsBooksUnderEmptyRootDB
+
 # A monitored rename of a book folder keeps the book: the old path is
 # reconciled first, and the removal grace holds the book for the new path.
 ./internal/scanner TestScanSubtreeAudiobookRenameKeepsBookDB
