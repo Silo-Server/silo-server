@@ -23,6 +23,29 @@ type RawOperation struct {
 	// WildcardParam names a terminal path parameter that captures nested paths.
 	// OpenAPI retains {name}; Chi receives its corresponding /* route.
 	WildcardParam string
+	// CrossOrigin sends uncredentialed wildcard CORS on every answer,
+	// authorization refusals included, so a player page on another origin (a
+	// Google Cast receiver) can read the response. Only for media a URL or
+	// header token authorizes, never a cookie.
+	CrossOrigin bool
+}
+
+// Cross-origin media headers. The exposed set matches the media proxy's, so
+// a player reads the same range and validator headers from either origin.
+const (
+	mediaCORSAllowHeaders  = "Range"
+	mediaCORSExposeHeaders = "Accept-Ranges, Content-Encoding, Content-Length, Content-Range, ETag, Last-Modified, Retry-After"
+)
+
+// mediaCrossOrigin runs outside the authorization gate, so a refusal still
+// reaches the player as a readable status instead of an opaque CORS failure.
+// The native listener answers no OPTIONS preflight: a GET whose only extra
+// header is a single-range Range is CORS-safelisted and needs none.
+func mediaCrossOrigin(ctx huma.Context, next func(huma.Context)) {
+	ctx.SetHeader("Access-Control-Allow-Origin", "*")
+	ctx.SetHeader("Access-Control-Allow-Headers", mediaCORSAllowHeaders)
+	ctx.SetHeader("Access-Control-Expose-Headers", mediaCORSExposeHeaders)
+	next(ctx)
 }
 
 // RawImpliedStatuses lists only failures of the shared authorization gates.
@@ -195,7 +218,12 @@ func RegisterRaw(reg *Registry, raw RawOperation, handler http.Handler) {
 		r, w := humachi.Unwrap(ctx)
 		handler.ServeHTTP(w, r.WithContext(ctx.Context()))
 	}
-	for _, middleware := range []func(huma.Context, func(huma.Context)){observeIdentity, classGate(reg.deps), observeOperation} {
+	middlewares := []func(huma.Context, func(huma.Context)){observeIdentity, classGate(reg.deps), observeOperation}
+	if raw.CrossOrigin {
+		// Last wraps outermost.
+		middlewares = append(middlewares, mediaCrossOrigin)
+	}
+	for _, middleware := range middlewares {
 		next := serve
 		serve = func(ctx huma.Context) { middleware(ctx, next) }
 	}

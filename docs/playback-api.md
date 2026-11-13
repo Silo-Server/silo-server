@@ -399,6 +399,14 @@ byte is a v2 problem; a failure after it ends the stream. A stopped, expired or
 terminated session answers `410 playback_session_ended`. A subtitle sidecar the
 node has no room to read yet answers `503` with `Retry-After`; retry it then.
 
+The HLS manifest and segment answers, refusals included, carry
+`Access-Control-Allow-Origin: *` with `Range` allowed and the range and
+validator headers exposed, so a player on another origin, such as a Google Cast
+receiver, can read them. Subtitle sidecars send the same wildcard from their
+handler. The wildcard never comes with `Access-Control-Allow-Credentials`, and
+the API answers no `OPTIONS` preflight: a GET with a single-range `Range` needs
+none.
+
 Subtitle inventory URLs in v2 playback responses use the `/api/v2/stream/`
 mount, including relative `/stream/` values produced by the shared inventory
 builder. The web player applies the same mapping to realtime subtitle URLs.

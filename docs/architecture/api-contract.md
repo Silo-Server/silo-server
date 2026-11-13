@@ -1090,7 +1090,10 @@ Media proxy routes retain their explicit cross-origin behavior because a browser
 streams from a separate proxy or transcode-node origin. Those routes still perform their normal
 token or bearer authorization and do not enable credentialed wildcard CORS; CORS is never an
 authorization mechanism. Jellyfin compatibility and other non-native surfaces retain their own
-tested policies. Support for a separately hosted browser client may later add an explicit
+tested policies. The native HLS manifest and segment routes send the same uncredentialed
+wildcard on every answer, authorization refusals included, because a Google Cast receiver plays
+them from a script on Google's origin; a raw operation opts in with `RawOperation.CrossOrigin`.
+Support for a separately hosted browser client may later add an explicit
 administrator-configured origin allowlist without changing the default native contract.
 
 ### What Huma covers
