@@ -4,42 +4,42 @@
       "operation_id": "updateDownloadSubscription",
       "change_id": "request-property-became-not-nullable",
       "fingerprint": "758bc212b081efa8d4532211cf311e027e493fb36971a7b6c9dcf912f025a11e",
-      "reason": "The handler already answers 400 for null on every monitor patch field and docs/downloads-api.md says null is rejected; only the document claimed it was accepted. silo-apple omits nil fields, and silo-android and web do not call this operation.",
+      "reason": "The handler already refuses null on every monitor patch field and docs/downloads-api.md says null is rejected; only the document claimed it was accepted. silo-apple omits nil fields, and silo-android and web do not call this operation.",
       "approved_in": "#3535"
     },
     {
       "operation_id": "updateDownloadSubscription",
       "change_id": "request-property-became-not-nullable",
       "fingerprint": "a3a523da084f36d085bff481d94cebadd34aef3beb97b83d36fd24f79e813acc",
-      "reason": "The handler already answers 400 for null on every monitor patch field and docs/downloads-api.md says null is rejected; only the document claimed it was accepted. silo-apple omits nil fields, and silo-android and web do not call this operation.",
+      "reason": "The handler already refuses null on every monitor patch field and docs/downloads-api.md says null is rejected; only the document claimed it was accepted. silo-apple omits nil fields, and silo-android and web do not call this operation.",
       "approved_in": "#3535"
     },
     {
       "operation_id": "updateDownloadSubscription",
       "change_id": "request-property-became-not-nullable",
       "fingerprint": "d2fbcd692e1d26043b7f191350163753c9df6e86b9007a46204dbad0dd024922",
-      "reason": "The handler already answers 400 for null on every monitor patch field and docs/downloads-api.md says null is rejected; only the document claimed it was accepted. silo-apple omits nil fields, and silo-android and web do not call this operation.",
+      "reason": "The handler already refuses null on every monitor patch field and docs/downloads-api.md says null is rejected; only the document claimed it was accepted. silo-apple omits nil fields, and silo-android and web do not call this operation.",
       "approved_in": "#3535"
     },
     {
       "operation_id": "updateDownloadSubscription",
       "change_id": "request-property-became-not-nullable",
       "fingerprint": "6ab3919a77cf889c326d06ea05fbc49ce68490490a6cd850466928e6cb136c0e",
-      "reason": "The handler already answers 400 for null on every monitor patch field and docs/downloads-api.md says null is rejected; only the document claimed it was accepted. silo-apple omits nil fields, and silo-android and web do not call this operation.",
+      "reason": "The handler already refuses null on every monitor patch field and docs/downloads-api.md says null is rejected; only the document claimed it was accepted. silo-apple omits nil fields, and silo-android and web do not call this operation.",
       "approved_in": "#3535"
     },
     {
       "operation_id": "updateDownloadSubscription",
       "change_id": "request-property-became-not-nullable",
       "fingerprint": "db3bc0b9bc885edf79e8d775113459c401e27e0999625f46c949fbaf1f097240",
-      "reason": "The handler already answers 400 for null on every monitor patch field and docs/downloads-api.md says null is rejected; only the document claimed it was accepted. silo-apple omits nil fields, and silo-android and web do not call this operation.",
+      "reason": "The handler already refuses null on every monitor patch field and docs/downloads-api.md says null is rejected; only the document claimed it was accepted. silo-apple omits nil fields, and silo-android and web do not call this operation.",
       "approved_in": "#3535"
     },
     {
       "operation_id": "updateDownloadSubscription",
       "change_id": "request-property-became-not-nullable",
       "fingerprint": "ac753659fe85643f58ede9067603f9a00b4af6c911480a374c7471eb54b7f7a8",
-      "reason": "The handler already answers 400 for null on every monitor patch field and docs/downloads-api.md says null is rejected; only the document claimed it was accepted. silo-apple omits nil fields, and silo-android and web do not call this operation.",
+      "reason": "The handler already refuses null on every monitor patch field and docs/downloads-api.md says null is rejected; only the document claimed it was accepted. silo-apple omits nil fields, and silo-android and web do not call this operation.",
       "approved_in": "#3535"
     }
   ]

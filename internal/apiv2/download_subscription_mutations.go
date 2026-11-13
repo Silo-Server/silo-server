@@ -42,8 +42,8 @@ type DownloadSubscriptionPatchBody struct {
 
 // TransformSchema documents every member as non-nullable. Patch documents a
 // member as nullable, but updateDownloadSubscription refuses null on each of
-// them with 400. Huma treats null on an optional member as absent, so that
-// handler check, not the schema, is what refuses it.
+// them. Huma treats null on an optional member as absent, so that handler
+// check, not the schema, is what refuses it.
 func (DownloadSubscriptionPatchBody) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema {
 	for _, property := range s.Properties {
 		property.Nullable = false
