@@ -62,6 +62,7 @@ import {
   historyImportKeys,
   libraryKeys,
   notInterestedKeys,
+  notificationKeys,
   requestKeys,
   sectionKeys,
 } from "@/hooks/queries/keys";
@@ -718,6 +719,12 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     }
     if (message.event === "notification.read") {
       applyNotificationRead(queryClient, message.data as NotificationReadEventPayload);
+      return;
+    }
+    if (message.event === "notification.email_changed") {
+      // A verification link, opened in another tab or on another device,
+      // changed this profile's email address.
+      void queryClient.invalidateQueries({ queryKey: notificationKeys.emailPreferences() });
     }
   }
 

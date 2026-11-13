@@ -14,6 +14,9 @@ import (
 const (
 	EventNotificationCreated = "notification.created"
 	EventNotificationRead    = "notification.read"
+	// EventNotificationEmailChanged is published when a verification link
+	// changed a profile's email notification address, so open tabs reread it.
+	EventNotificationEmailChanged = "notification.email_changed"
 )
 
 // Dispatcher fans one committed notification delivery out to a channel.

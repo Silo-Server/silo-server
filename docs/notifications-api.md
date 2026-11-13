@@ -128,6 +128,12 @@ empty cutoff remains a no-op. Tokens from another account/profile or operation
 are rejected; clients must not substitute a fresh cutoff after an uncertain
 response without a new user intent.
 
+When an email verification link changes a profile's notification address,
+verified or cleared because another profile claimed it first, the profile's
+`notifications` channel gets a best-effort `notification.email_changed` event
+with `profile_id`. Clients reread the email preferences for it; the link page
+itself has no session to update them.
+
 The database update is authoritative. Best-effort `notification.read` events for
 this operation contain `profile_id`, `through_created_at` at full precision, and
 `through_id`; they do not claim `all: true`. Clients reread lists/counts for these

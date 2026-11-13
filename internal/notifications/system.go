@@ -70,6 +70,10 @@ type System struct {
 	// dispatcher below can hand them to the provider.
 	EmailVerification *EmailVerificationService
 
+	// events publishes account- and profile-scoped changes; nil without
+	// realtime publishing.
+	events *evt.Hub
+
 	mailSender                mail.Sender
 	emailBrand                *mail.BrandLoader
 	emailVerificationDispatch *emailVerificationDispatcher
@@ -240,6 +244,7 @@ func NewSystem(
 	}
 
 	system = &System{
+		events:              hub,
 		Settings:            settings,
 		Releases:            releases,
 		Interests:           interests,

@@ -172,6 +172,21 @@ const (
 	EmailVerifyConflict
 )
 
+// verifyTokenOwner returns the profile whose pending address a verification
+// token hash belongs to, and whether there is one.
+func (r *EmailPrefsRepository) verifyTokenOwner(ctx context.Context, tokenHash string) (userID int, profileID string, ok bool, err error) {
+	err = r.pool.QueryRow(ctx, `
+		SELECT user_id, profile_id FROM notification_email_prefs
+		WHERE pending_token_hash = $1 AND pending_token_hash <> ''`, tokenHash).Scan(&userID, &profileID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, "", false, nil
+	}
+	if err != nil {
+		return 0, "", false, fmt.Errorf("look up verify token owner: %w", err)
+	}
+	return userID, profileID, true, nil
+}
+
 // ConsumeVerifyToken promotes the pending address matching the token hash to
 // the verified custom address. Single-use: the pending state is cleared on
 // every outcome except invalid. Uniqueness is re-checked here — request-time

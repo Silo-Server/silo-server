@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/mail"
 )
 
@@ -75,11 +76,34 @@ func (s *System) ClearEmailAddress(ctx context.Context, userID int, profileID st
 
 // VerifyEmailToken consumes a verification token from a clicked link,
 // promoting that profile's pending address to the verified destination.
+//
+// The link opens a standalone page, so a Silo tab still showing the address as
+// waiting would only learn of it on reload. When the link changed the
+// profile's address, verified or cleared by a conflict, the profile's
+// notifications channel gets notification.email_changed (#3406).
 func (s *System) VerifyEmailToken(ctx context.Context, token string) (EmailVerifyOutcome, error) {
 	if s == nil || s.EmailPrefs == nil || token == "" {
 		return EmailVerifyInvalid, nil
 	}
-	return s.EmailPrefs.ConsumeVerifyToken(ctx, hashEmailToken(token))
+	hash := hashEmailToken(token)
+	// The token is single-use, so its owner is read before it is consumed.
+	userID, profileID, owned, ownerErr := s.EmailPrefs.verifyTokenOwner(ctx, hash)
+	outcome, err := s.EmailPrefs.ConsumeVerifyToken(ctx, hash)
+	if err == nil && ownerErr == nil && owned && (outcome == EmailVerifyOK || outcome == EmailVerifyConflict) {
+		s.publishEmailChanged(ctx, userID, profileID)
+	}
+	return outcome, err
+}
+
+// publishEmailChanged tells the profile's open tabs its email address changed.
+// Best-effort: the stored preferences are the source of truth, and a tab that
+// misses the event sees the change on its next read.
+func (s *System) publishEmailChanged(ctx context.Context, userID int, profileID string) {
+	if s.events == nil {
+		return
+	}
+	_ = s.events.PublishJSON(ctx, evt.ChannelNotifications, EventNotificationEmailChanged,
+		map[string]any{"profile_id": profileID}, evt.PublishOptions{UserID: userID, ProfileID: profileID})
 }
 
 // UnsubscribeEmail handles a tokenized unsubscribe link: the matching

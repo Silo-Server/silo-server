@@ -18,6 +18,7 @@ import {
   collectionKeys,
   itemKeys,
   libraryKeys,
+  notificationKeys,
   requestKeys,
   sectionKeys,
 } from "@/hooks/queries/keys";
@@ -870,6 +871,26 @@ describe("RealtimeEventsProvider", () => {
 
     expect(queryClient.getQueryState(seriesKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(otherSeriesKey)?.isInvalidated).toBe(false);
+  });
+
+  it("rereads the email preferences when a verification link changes the address", async () => {
+    const queryClient = new QueryClient();
+    const emailKey = notificationKeys.emailPreferences();
+    queryClient.setQueryData([...emailKey, "profile-1"], {});
+    const invalidations = invalidationCounter(queryClient);
+    mockState.profile = { id: "profile-1", has_pin: false };
+
+    await renderProvider(queryClient);
+    await act(async () => {
+      FakeWebSocket.instances[0]?.emitMessage({
+        type: "event",
+        channel: "notifications",
+        event: "notification.email_changed",
+        data: { profile_id: "profile-1" },
+      });
+    });
+
+    expect(invalidations(emailKey)).toBe(1);
   });
 
   it("refetches request state once per burst of request notifications, for any profile", async () => {
