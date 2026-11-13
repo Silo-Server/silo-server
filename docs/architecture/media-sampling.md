@@ -392,8 +392,9 @@ must use the returned height and reject chunks whose geometry differs.
 - MPEG-4 Part 2 (`mpeg4`, `msmpeg4*`) adds `-flags:v +low_delay`. Its
   decoder otherwise holds each picture back for B-frames that a
   keyframes-only read never sends, and releases it when the next keyframe
-  arrives; in AVI, whose packets carry no PTS, the frame then takes that
-  keyframe's time, and every cell showed the keyframe a GOP before its own.
+  arrives, and a frame without a PTS of its own then takes that keyframe's
+  time: before windows demuxed with genpts (below), every cell of a
+  packed-bitstream AVI showed the keyframe a GOP before its own.
   Keyframes-only and reference-only reads decode no B-frames, so low delay
   changes no picture. The repeat repair keeps its own `noref`.
 - A window also copies the same input's video packets to a `framecrc`
@@ -425,11 +426,8 @@ must use the returned height and reject chunks whose geometry differs.
   fills each missing PTS from the stream's later DTS before the packet is
   decoded or copied, so frames and the timing file keep their own times;
   packets that carry a PTS keep it. A derived PTS can sit a frame after the
-  keyframe's true time, well inside a sample interval.
-- A packet still without a PTS counts by its DTS only when the decoder runs
-  in low delay (MPEG-4 Part 2, above), which releases each keyframe as it
-  arrives, so the DTS is the frame's own. A DTS never runs ahead of its PTS,
-  so the extent can only shrink, by the reorder delay.
+  keyframe's true time, as it does in playback, which demuxes with genpts
+  too. A video packet still without a PTS has no usable time.
 - A cell without a frame shows the previous cell's frame, and cells before
   the first frame show the first, so the grid never shifts. A run that had
   to fill more than 10 % of its cells (and more than one) fails as `empty`,

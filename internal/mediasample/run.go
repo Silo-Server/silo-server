@@ -513,7 +513,6 @@ func (a attemptRun) readSheets(req Request, times []float64, plan listPlan, onDi
 		assembler.plan = plan
 		assembler.onDisorder = onDisorder
 	}
-	assembler.dtsTiming = req.lowDelay
 	if failure := a.exec(req, args, stdinBytes, assembler, append(logHandlers, assembler.line)...); failure != nil {
 		return Result{}, failure
 	}
