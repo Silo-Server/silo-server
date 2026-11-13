@@ -685,7 +685,8 @@ func TestReconstructTranscodeWithoutAutoStartsOnceWithoutWaiting(t *testing.T) {
 	starts := 0
 	m.startTranscode = func(_ context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
 		starts++
-		// Never ready and already exited: a waiting caller would fail.
+		// Never ready and already exited for a reason other than a decoder
+		// rejection: the session is still returned, as an unwaited one was.
 		return &TranscodeSession{opts: opts, stderr: newBoundedTailBuffer(stderrTailMaxBytes)}, nil
 	}
 	card := NewRecipeCard(5, "p", 77, "", TranscodeOpts{

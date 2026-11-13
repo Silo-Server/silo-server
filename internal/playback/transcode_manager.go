@@ -1048,8 +1048,8 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 	}
 	// Under hw_accel=auto a reconstruct walks the same safer paths as a fresh
 	// start, keeping a slow process rather than duplicating it. Every other
-	// recipe starts once without waiting, as segment requests already wait for
-	// a reconstructed process.
+	// recipe starts once, and only one that decodes on the GPU is waited on,
+	// so a decoder that rejects the source can move to CPU decoding.
 	transcodeSession, err := StartReconstructTranscode(ctx, newPipeline(ctx, opts), TranscodeStartup{Start: startTranscode})
 	if err != nil {
 		slog.ErrorContext(ctx, "reconstruct transcode start failed", "component", "playback", "error", err, "session", sessionID, "playback_session_id", sessionID)
