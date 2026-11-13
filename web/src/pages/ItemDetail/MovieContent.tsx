@@ -34,10 +34,10 @@ import HeroCrewLine from "./components/HeroCrewLine";
 import MediaUserActionBar from "./components/MediaUserActionBar";
 import MediaInfoDialog from "./components/MediaInfoDialog";
 import SubtitleSearchDialog from "./components/SubtitleSearchDialog";
-import { sortByResolution } from "./components/VersionFlyout";
 import {
   selectDefaultPlaybackVariantVersion,
   selectedDownloadVersions,
+  selectedStartVersion,
 } from "./components/versionRankingUtils";
 import { resolveSelectedMediaSummary } from "./components/selectedMediaSummary";
 import { RecommendationGridSkeleton } from "./components/SectionSkeletons";
@@ -112,27 +112,26 @@ export default function MovieContent({
   const [mediaInfoFileId, setMediaInfoFileId] = useState<number | null>(null);
 
   // Version selection state — drives the Play button and inline stream popovers.
-  const sortedVersions = useMemo(() => sortByResolution(item.versions), [item.versions]);
   const userData = leafUserData(item.user_data);
   const [selectedEditionKey, setSelectedEditionKey] = useState<string | undefined>(undefined);
   const defaultSelectedVersion = useMemo(
     () =>
       selectDefaultPlaybackVariantVersion(
-        sortedVersions,
+        item.versions,
         item.playback_variants,
         userData,
         qualityPreference,
         selectedEditionKey,
       ),
-    [qualityPreference, selectedEditionKey, item.playback_variants, sortedVersions, userData],
+    [qualityPreference, selectedEditionKey, item.playback_variants, item.versions, userData],
   );
   const [manualSelectedFileId, setManualSelectedFileId] = useState<number | null>(null);
   const pickedVersion = useMemo(
     () =>
       manualSelectedFileId != null
-        ? (sortedVersions.find((version) => version.file_id === manualSelectedFileId) ?? null)
+        ? (item.versions.find((version) => version.file_id === manualSelectedFileId) ?? null)
         : null,
-    [manualSelectedFileId, sortedVersions],
+    [manualSelectedFileId, item.versions],
   );
   const selectedVersion = pickedVersion ?? defaultSelectedVersion;
   const selectedMediaSummary = useMemo(
@@ -196,6 +195,10 @@ export default function MovieContent({
   );
   const downloadVersions = useMemo(
     () => selectedDownloadVersions(selectedVersion, item.playback_variants, qualityPreference),
+    [selectedVersion, item.playback_variants, qualityPreference],
+  );
+  const restartVersion = useMemo(
+    () => selectedStartVersion(selectedVersion, item.playback_variants, qualityPreference),
     [selectedVersion, item.playback_variants, qualityPreference],
   );
 
@@ -364,6 +367,7 @@ export default function MovieContent({
               versions={item.versions}
               playbackVariants={item.playback_variants}
               selectedVersion={selectedVersion}
+              restartVersion={restartVersion}
               versionPicked={pickedVersion != null}
               onSelectVersion={handleSelectVersion}
               onSelectEdition={handleSelectEdition}
@@ -419,6 +423,7 @@ export default function MovieContent({
             open={downloadOpen}
             onOpenChange={setDownloadOpen}
             versions={downloadVersions}
+            partsInOrder
             title={title}
           />
           <SubtitleSearchDialog

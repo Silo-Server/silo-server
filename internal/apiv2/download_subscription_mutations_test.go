@@ -80,11 +80,22 @@ func TestSubscriptionMutationTransport(t *testing.T) {
 		t.Fatalf("%d %s %+v", rec.Code, rec.Body.String(), svc.patch)
 	}
 	current := rec.Header().Get("ETag")
-	for _, body := range []string{`{"active":null}`, `{"mode":null}`, `{"season_numbers":null}`, `{"quality":null}`, `{"max_storage_bytes":-1}`} {
+	for _, body := range []string{`{"max_storage_bytes":-1}`} {
 		rec = do(t, h, "PATCH", path+"/monitor", body, with(device, "If-Match", current))
 		if rec.Code != 400 {
 			t.Fatalf("invalid %d %s", rec.Code, rec.Body.String())
 		}
+	}
+	// Null on a monitor field is a validation failure naming the member.
+	for _, member := range []string{"active", "mode", "season_numbers", "delete_watched", "max_storage_bytes", "quality"} {
+		p := requireProblem(t, do(t, h, "PATCH", path+"/monitor", `{"`+member+`":null}`, with(device, "If-Match", current)), TypeValidationFailed)
+		if len(p.Errors) != 1 || p.Errors[0].Location != "body."+member {
+			t.Fatalf("null %s: errors = %+v", member, p.Errors)
+		}
+	}
+	p := requireProblem(t, do(t, h, "PATCH", path+"/monitor", `{"active":true,"quality":null,"mode":null}`, with(device, "If-Match", current)), TypeValidationFailed)
+	if len(p.Errors) != 2 || p.Errors[0].Location != "body.mode" || p.Errors[1].Location != "body.quality" {
+		t.Fatalf("two nulls: errors = %+v", p.Errors)
 	}
 	rec = do(t, h, "DELETE", path+"/monitor", "", with(device, "If-Match", tag))
 	if rec.Code != 412 {

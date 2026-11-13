@@ -389,6 +389,10 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 	}
 
 	logs := newPrepareLogWriter(ctx, opts)
+	// wroteOutput records whether the last failed attempt had written any of
+	// the artifact. FFmpeg writes the container header only once every encoder
+	// has opened, so an attempt that wrote nothing died while starting.
+	wroteOutput := false
 	runOnce := func(runOpts TranscodeOpts) error {
 		args := buildPrepareFileArgs(runOpts, partPath)
 		bin := runOpts.FFmpegPath
@@ -412,10 +416,13 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 		err := cmd.Run()
 		logs.flush()
 		if err != nil {
+			info, statErr := os.Stat(partPath)
+			wroteOutput = statErr == nil && info.Size() > 0
 			_ = os.Remove(partPath)
 			logs.event("ffmpeg process exit error", formatWaitError(err))
-			if tail := truncateStderr(stderr.String()); tail != "" {
-				return fmt.Errorf("%w: %w (stderr: %s)", ErrTranscodeFailed, err, tail)
+			retained := stderr.String()
+			if tail := truncateStderr(retained); tail != "" {
+				return classifyFFmpegFailure(fmt.Errorf("%w: %w (stderr: %s)", ErrTranscodeFailed, err, tail), retained)
 			}
 			return fmt.Errorf("%w: %w", ErrTranscodeFailed, err)
 		}
@@ -437,6 +444,29 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 			retryOpts := opts
 			retryOpts.HWAccel = retryAccel
 			err = runOnce(retryOpts)
+		} else if decodeRetry := NewSoftwareDecodeRetryPipeline(opts, err); decodeRetry.Enabled() {
+			// The hardware decoder rejected the source, so the same command
+			// fails again. Decode on the CPU with the hardware encoder, then
+			// fall back to software, as a playback start does.
+			slog.WarnContext(ctx, "prepared encode failed in the hardware decoder; retrying with CPU decoding",
+				"hw_accel", opts.HWAccel, "output", outputPath, "error", err)
+			logs.event("retrying with CPU decoding", "")
+			for {
+				err = runOnce(decodeRetry.Current())
+				// Only an attempt that died while starting says the hardware
+				// path is unusable. One that had written output got past
+				// encoder startup, and its failure (a full disk, say) would
+				// fail a software encode too.
+				if err == nil || ctx.Err() != nil || wroteOutput || !decodeRetry.AdvanceAfterFailure("") {
+					break
+				}
+				if decodeRetry.Current().HWAccel == transcodeHWNone {
+					// A software encode occupies no GPU; don't count it
+					// against the device for the rest of the encode.
+					releaseHWDevice()
+				}
+				logs.event("retrying with software encoding", "")
+			}
 		}
 	}
 	if err != nil {

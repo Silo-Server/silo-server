@@ -348,6 +348,12 @@ Success is `202` with the typed administrator job, a job `Location`, and
 can poll their own item jobs. The web waits on that job; it does not equate
 submission with completion.
 
+`complete` clears the file links in the refresh scope and rescans it, so the
+files are matched again. A podcast library keeps its links: the podcast scanner
+finds a show through them and rewrites the show and its episodes from their tags
+on every scan, so clearing them would replace the show and episode IDs that
+favorites and progress refer to.
+
 `reset` is Reset to Provider: a quick refresh of the movie, series, season or
 episode that also removes its `locked_fields` and gives every lockable field,
 the credits and the rating sources the providers' values, empty when no

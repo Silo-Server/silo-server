@@ -6,6 +6,7 @@
 ./internal/catalog TestDualLibraryItemDeniedByDisabledLibraryDB
 ./internal/catalog TestEpisodeOpensUnderEveryLibraryOfItsSeriesDB
 ./internal/catalog TestCatalogQueryRequestedLibraryOutsideAccessDB
+./internal/catalog TestCatalogSearchSortsByProfilePlaysDB
 ./internal/catalog TestLibraryCollectionDrawsFromItsRulesLibrariesDB
 ./internal/catalog TestLibraryCollectionReplaceItemsWritesOnlyTheDifferenceDB
 ./internal/catalog TestLibraryCollectionReplaceItemsRacesMemberDeleteDB
@@ -129,6 +130,10 @@
 # configured root that is now an empty directory (a lost mount).
 ./internal/scanner TestScanSubtreeAudiobookVanishedBookUnderEmptyRootDB
 
+# A full audiobook or ebook scan keeps the books under a configured root that is
+# now an empty directory until the operator confirms the cleanup.
+./internal/scanner TestScanBookFolderKeepsBooksUnderEmptyRootDB
+
 # A monitored rename of a book folder keeps the book: the old path is
 # reconciled first, and the removal grace holds the book for the new path.
 ./internal/scanner TestScanSubtreeAudiobookRenameKeepsBookDB
@@ -165,6 +170,10 @@
 ./internal/scanner TestPodcastShowScanWritesTheShowInItsTransaction
 ./internal/scanner TestScanSubtreeCountsOnlyTheEpisodesItIndexed
 ./internal/scanner TestStalePodcastScanLeavesNewerCatalogStateAlone
+
+# A complete metadata refresh of a podcast show or episode keeps the show and
+# episode content IDs.
+./internal/adminjob TestCompleteItemRefreshKeepsPodcastIDsDB
 
 # Profile history and account/invitation persistence.
 ./internal/api/handlers TestAccessGroupUpdateLibraryPolicyDB
@@ -404,6 +413,8 @@
 ./internal/notifications TestNotifyFulfilledDeliversOncePerAccountForSharedProfileID
 ./internal/notifications TestRecomputeSeriesFollowsHomeRemovalsPostgres
 ./internal/notifications TestRecomputeSeriesNextUpCardSkipsSpecialAnchorPostgres
+./internal/notifications TestRecomputeSeriesNextUpAnchorKeepsSubsecondOrderPostgres
+./internal/notifications TestRecomputeSeriesContinueWatchingKeepsWholeSecondSupersedePostgres
 ./internal/notifications TestPushDeviceRepositoryUpsertApplePreservesStableIDs
 ./internal/notifications TestRetireApplePushStopsDeliveryAndOrdersAgainstRegistrationDB
 ./internal/notifications TestSendPushTestCarriesTheProfilesNewestNotification
@@ -474,8 +485,10 @@
 ./internal/userstore/pgstore TestPostgresProgressHints
 ./internal/userstore/pgstore TestPostgresUnmarkKeepsHistory
 ./internal/userstore/pgstore TestPostgresAtomicJellycompatProgress
+./internal/userstore/pgstore TestPostgresJellycompatPlayedByDate
 ./internal/userstore/pgstore TestPostgresPersonalListPage
 ./internal/userstore/pgstore TestPostgresReplaceCollectionItemsWritesOnlyTheDifference
+./internal/userstore/pgstore TestPostgresReplaceCollectionItemsWaitsOutADelete
 ./internal/userstore/pgstore TestPostgresItemUserFlagsMatchesPerTableReads
 
 # Intro analysis state timestamps and config-hash isolation.
@@ -954,8 +967,9 @@
 
 # Backups: the full restore round trip (needs the PostgreSQL 18 client), the
 # manifest written last and the sweep, the cluster-wide subsystem lock, the
-# published status of the operation holding it, and every table classified
-# for backup and restore. Selective restore: the
+# published status of the operation holding it, every table classified
+# for backup and restore, and a carried credential kept only for a profile
+# of its own account. Selective restore: the
 # restore round trip with re-run after interruption, idempotency and digest
 # refusal; plugins never installed from a backup, only reconfigured; restore job fencing;
 # a restored library whose setup partly failed, or whose provider placement
@@ -967,6 +981,7 @@
 ./internal/backup TestServerSpecificSettingsComeFromTheLiveServerDB
 ./internal/backup TestControlConnectionIsNeverOnTheLiveDatabaseDB
 ./internal/backup TestCustomPoliciesComeFromTheLiveServerDB
+./internal/backup TestCarryMatchesAProfileWithinItsAccountDB
 ./internal/backup TestBackupWritesManifestLastDB
 ./internal/backup TestSubsystemLockSerializesBackupsAndDeletesDB
 ./internal/backup TestLostLockSessionCancelsWorkDB
