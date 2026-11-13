@@ -77,6 +77,9 @@ type probeLimits struct {
 	// waitDelay bounds how long a killed ffprobe's output may stay open,
 	// which a child it started, as a wrapper script does, can hold.
 	waitDelay time.Duration
+	// inputOptions are extra ffprobe options for the stream probe, such as a
+	// longer analysis window (see deepProbeLimits).
+	inputOptions []string
 }
 
 var defaultProbeLimits = probeLimits{
@@ -132,14 +135,15 @@ func probeMediaFile(ctx context.Context, ffprobePath string, filePath string, li
 	defer cancel()
 	// Errors go to stderr (kept on the *exec.ExitError) so IsProbeRejection
 	// can tell an unreadable source from damaged content; stdout stays JSON.
-	cmd := fspath.CommandContext(probeCtx, ffprobePath,
-		"-v", "error",
+	args := append([]string{"-v", "error"}, limits.inputOptions...)
+	args = append(args,
 		"-print_format", "json",
 		"-show_format",
 		"-show_streams",
 		"-show_chapters",
 		filePath,
 	)
+	cmd := fspath.CommandContext(probeCtx, ffprobePath, args...)
 	cmd.WaitDelay = limits.waitDelay
 
 	output, err := cmd.Output()
