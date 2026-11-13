@@ -4432,17 +4432,23 @@ func (s *TranscodeSession) LastRequestedSegment() int {
 	return s.lastRequestedSegment
 }
 
-// StartThrottler creates and starts a throttler for this session.
-// No-op if thresholdSeconds <= 0, stdinPipe is nil, or the session is closing.
+// StartThrottler creates and starts a throttler for this session, replacing
+// one already running: a first start can finish after a restart hook armed its
+// own. No-op if thresholdSeconds <= 0, stdinPipe is nil, or the session is
+// closing.
 func (s *TranscodeSession) StartThrottler(thresholdSeconds int) {
 	s.mu.Lock()
 	if s.stdinPipe == nil || thresholdSeconds <= 0 || s.closing {
 		s.mu.Unlock()
 		return
 	}
+	replaced := s.throttler
 	t := NewTranscodeThrottler(s, s.stdinPipe, thresholdSeconds, s.opts.SegmentDuration)
 	s.throttler = t
 	s.mu.Unlock()
+	if replaced != nil {
+		replaced.Stop()
+	}
 	t.Start()
 }
 

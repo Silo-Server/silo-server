@@ -198,3 +198,25 @@ func TestClosedSessionArmsNoThrottler(t *testing.T) {
 		t.Fatal("the restart hook armed a throttler on a closed session")
 	}
 }
+
+// A transcode's first throttler start can finish after a restart hook has
+// armed one. The later start replaces it; a throttler left running could not
+// be stopped again.
+func TestStartThrottlerStopsTheThrottlerItReplaces(t *testing.T) {
+	s := newRunningFakeSession(t)
+	s.StartThrottler(minThresholdSeconds)
+	s.mu.Lock()
+	replaced := s.throttler
+	s.mu.Unlock()
+	if replaced == nil {
+		t.Fatal("no throttler armed on a running session")
+	}
+
+	s.StartThrottler(minThresholdSeconds)
+
+	select {
+	case <-replaced.stopCh:
+	default:
+		t.Fatal("the replaced throttler is still running")
+	}
+}
