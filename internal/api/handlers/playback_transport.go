@@ -85,17 +85,13 @@ func (h *PlaybackHandler) startRemotePlaybackTransport(ctx context.Context, node
 
 func (h *PlaybackHandler) remotePlaybackTransportTimeout(nodeURL string, request transcodenode.TranscodeStartRequest) time.Duration {
 	if request.ToneMapMode == "" {
-		if request.RequireReady && remoteAutoFallbackPossibleV3(request) {
-			// The node answers only after its first manifest, which under
-			// hw_accel=auto can follow an early exit on each safer path.
+		if request.RequireReady && (remoteAutoFallbackPossibleV3(request) || remoteHardwareRetryPossibleV3(request)) {
+			// The node answers only after its first manifest, which can
+			// follow an early exit on each safer path: hw_accel=auto's
+			// fallback, or under an explicit hardware backend the CPU-decode
+			// and software retries after a decoder rejection. Each attempt
+			// may use its whole readiness wait before it exits.
 			return transcodenode.TranscodeStartReadyMaxDuration + 5*time.Second
-		}
-		if request.RequireReady && remoteHardwareRetryPossibleV3(request) {
-			// An explicit hardware start can retry after an early exit: in
-			// software under VideoToolbox, or with CPU decode then software
-			// when the GPU decoder rejects the source. That rejection exits at
-			// decoder init, so two full waits cover the attempts after it.
-			return 2*transcodenode.TranscodeStartReadinessTimeout + 5*time.Second
 		}
 		return playback.ManifestStartupTimeout + 5*time.Second
 	}
@@ -123,7 +119,7 @@ func remoteAutoFallbackPossibleV3(request transcodenode.TranscodeStartRequest) b
 // configured acceleration is neither auto nor none.
 func remoteHardwareRetryPossibleV3(request transcodenode.TranscodeStartRequest) bool {
 	hwAccel := strings.ToLower(strings.TrimSpace(request.HWAccel))
-	return hwAccel != "" && hwAccel != "auto" && hwAccel != playback.HWAccelNone &&
+	return hwAccel != "" && hwAccel != playback.HWAccelAuto && hwAccel != playback.HWAccelNone &&
 		!strings.EqualFold(strings.TrimSpace(request.TargetCodecVideo), "copy")
 }
 

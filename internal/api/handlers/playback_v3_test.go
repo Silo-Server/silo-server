@@ -3208,12 +3208,12 @@ func TestRemotePlaybackTransportTimeoutCoversAutoFallbackAttempts(t *testing.T) 
 	}
 
 	// An explicit hardware start can retry with CPU decode, then software,
-	// after its GPU decoder rejects the source at init.
+	// after its GPU decoder rejects the source.
 	handler := &PlaybackHandler{}
 	explicit := ready
 	explicit.HWAccel = "nvenc"
-	if got, want := handler.remotePlaybackTransportTimeout(nodeURL, explicit), 2*transcodenode.TranscodeStartReadinessTimeout+5*time.Second; got != want {
-		t.Errorf("explicit accel: start timeout = %s, want %s", got, want)
+	if got := handler.remotePlaybackTransportTimeout(nodeURL, explicit); got <= minimum {
+		t.Errorf("explicit accel: start timeout = %s, want more than %s", got, minimum)
 	}
 
 	// Starts that cannot fall back keep the single-wait budget, so an

@@ -298,9 +298,9 @@ transcodes instead of `RequireReady`, and older nodes ignore it. Each attempt
 gets its own manifest wait, so callers size the start deadline of an `auto`
 video transcode that sets either field to `TranscodeStartReadyMaxDuration` (one
 wait per path). A `RequireReady` video transcode under an explicit hardware
-backend gets two waits: its VideoToolbox software retry, or the CPU-decode and
-software attempts after a decoder rejection, which exits at decoder init. Every
-other start keeps the single-wait deadline. Readiness is
+backend gets the same deadline, because a decoder rejection leads to the
+CPU-decode and software attempts. Every other start keeps the single-wait
+deadline. Readiness is
 judged only on a manifest the current FFmpeg process wrote; an earlier
 generation's `stream.m3u8` in a reused directory does not count. A process still
 running at the deadline is closed, never duplicated. The response reports `software_video_decode`

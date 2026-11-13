@@ -252,6 +252,7 @@ const (
 	transcodeCodecH264       = "h264"
 	transcodeCodecHEVC       = "hevc"
 	HWAccelNone              = "none"
+	HWAccelAuto              = "auto"
 	transcodeHWQSV           = "qsv"
 	transcodeHWVAAPI         = "vaapi"
 	transcodeHWNVENC         = "nvenc"
