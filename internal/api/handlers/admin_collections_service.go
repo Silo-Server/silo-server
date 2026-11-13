@@ -111,11 +111,6 @@ func (h *LibraryCollectionHandler) ListAdminCollections(ctx context.Context, lib
 
 func (h *LibraryCollectionHandler) createAdminCollection(ctx context.Context, req AdminCollectionCreate, artwork adminCollectionArtwork) (AdminCollection, error) {
 	var none AdminCollection
-	if req.CollectionType != "" {
-		if err := validateCollectionType(req.CollectionType); err != nil {
-			return none, err
-		}
-	}
 	if err := validateCollectionVisibility(req.Visibility); err != nil {
 		return none, err
 	}
@@ -302,9 +297,9 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 }
 
 // validateCollectionType rejects values the library_collections
-// collection_type CHECK constraint would refuse. Create skips it for an empty
-// value, which later defaults to manual; an update has no default to fall back
-// to, so an explicit empty value is an error.
+// collection_type CHECK constraint would refuse. Create and restore skip it for
+// an empty value, which defaults to manual; an update has no default to fall
+// back to, so an explicit empty value is an error.
 func validateCollectionType(collectionType string) error {
 	if catalog.IsKnownType(collectionType) {
 		return nil
@@ -330,13 +325,18 @@ func normalizeCollectionVisibilityUpdate(visibility *string) (*string, error) {
 }
 
 // normalizeAdminCollectionInput validates and normalizes the fields of a new
-// admin collection as the create command takes them: its visibility, title,
+// admin collection as the create command takes them: its visibility, type, title,
 // TMDB list source, rules (a smart collection's checked as smart rules),
 // sort, sync schedule, and management fields. It fills the defaults the
 // command stores and rewrites the JSON fields in their normalized form.
 func normalizeAdminCollectionInput(in *catalog.CreateLibraryCollectionInput) error {
 	if err := validateCollectionVisibility(in.Visibility); err != nil {
 		return err
+	}
+	if in.CollectionType != "" {
+		if err := validateCollectionType(in.CollectionType); err != nil {
+			return err
+		}
 	}
 	if strings.TrimSpace(in.Title) == "" {
 		return apiError(http.StatusBadRequest, "bad_request", "title is required")
