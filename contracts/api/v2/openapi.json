@@ -54817,7 +54817,7 @@
             "type": "string"
           },
           "status": {
-            "description": "unmatched, pending or ambiguous",
+            "description": "unmatched, pending or ambiguous. An audiobook without a provider match is unmatched",
             "examples": [
               "unmatched"
             ],

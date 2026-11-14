@@ -1023,6 +1023,13 @@
 # crew lock.
 ./internal/scanner TestAudiobookRescanKeepsCrewLockedCreditsDB
 
+# A provider match owns an audiobook's year, genres and credits: a rescan only
+# fills what is empty, and the match keeps the tag narrator and the book's own
+# cover. Audiobooks without a provider match show in the unmatched list.
+./internal/scanner TestAudiobookRescanKeepsProviderMatchDB
+./internal/audiobooks TestPersistKeepsTagNarratorAndLocalCoverDB
+./internal/api/handlers TestUnmatchedItemsListsAudiobooksWithoutProviderMatchDB
+
 # Dashboard egress splits by stream node and API server without adding the
 # per-node rows to the total, and a wide bucket's split comes from its peak minute.
 ./internal/dashmetrics TestSampleSharedRecordsEgressPerNodeDB

@@ -35677,7 +35677,7 @@ export interface components {
       /** @example Movies */
       library_name: string;
       /**
-       * @description unmatched, pending or ambiguous
+       * @description unmatched, pending or ambiguous. An audiobook without a provider match is unmatched
        * @example unmatched
        */
       status: string;

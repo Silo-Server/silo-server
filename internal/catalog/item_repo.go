@@ -2696,15 +2696,55 @@ func (r *ItemRepository) ReplacePeople(ctx context.Context, contentID string, pe
 	}
 	defer tx.Rollback(ctx)
 
+	if err := r.ReplacePeopleTx(ctx, tx, contentID, people); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// ReplacePeopleTx is ReplacePeople in the caller's transaction.
+func (r *ItemRepository) ReplacePeopleTx(ctx context.Context, tx pgx.Tx, contentID string, people []models.ItemPerson) error {
 	if _, err := tx.Exec(ctx, "DELETE FROM item_people WHERE content_id = $1", contentID); err != nil {
 		return fmt.Errorf("delete existing people: %w", err)
 	}
+	return r.insertPeopleTx(ctx, tx, contentID, people)
+}
 
+// PersonKindsOf returns the distinct credit kinds in people, in first-seen
+// order.
+func PersonKindsOf(people []models.ItemPerson) []models.PersonKind {
+	var kinds []models.PersonKind
+	for _, p := range people {
+		if !slices.Contains(kinds, p.Kind) {
+			kinds = append(kinds, p.Kind)
+		}
+	}
+	return kinds
+}
+
+// ReplacePeopleKindsTx replaces only the credits of the given kinds in the
+// caller's transaction and leaves every other kind on the item as it is.
+func (r *ItemRepository) ReplacePeopleKindsTx(ctx context.Context, tx pgx.Tx, contentID string, kinds []models.PersonKind, people []models.ItemPerson) error {
+	if len(kinds) == 0 {
+		return nil
+	}
+	kindValues := make([]int, len(kinds))
+	for i, k := range kinds {
+		kindValues[i] = int(k)
+	}
+	if _, err := tx.Exec(ctx, "DELETE FROM item_people WHERE content_id = $1 AND kind = ANY($2)", contentID, kindValues); err != nil {
+		return fmt.Errorf("delete existing people: %w", err)
+	}
+	return r.insertPeopleTx(ctx, tx, contentID, people)
+}
+
+// insertPeopleTx inserts credits and queues the item's search-index update.
+func (r *ItemRepository) insertPeopleTx(ctx context.Context, tx pgx.Tx, contentID string, people []models.ItemPerson) error {
 	if len(people) == 0 {
 		if err := r.searchIndexEvents.EnqueueUpsert(ctx, tx, contentID); err != nil {
 			return fmt.Errorf("enqueueing catalog search people update: %w", err)
 		}
-		return tx.Commit(ctx)
+		return nil
 	}
 
 	// Deduplicate by (person_id, kind, character) — PostgreSQL's ON CONFLICT
@@ -2751,8 +2791,7 @@ func (r *ItemRepository) ReplacePeople(ctx context.Context, contentID string, pe
 	if err := r.searchIndexEvents.EnqueueUpsert(ctx, tx, contentID); err != nil {
 		return fmt.Errorf("enqueueing catalog search people update: %w", err)
 	}
-
-	return tx.Commit(ctx)
+	return nil
 }
 
 // ClearPeopleTx removes every credit on a media item in the caller's

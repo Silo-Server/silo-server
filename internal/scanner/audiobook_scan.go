@@ -1110,7 +1110,7 @@ func (s *Scanner) claimAudiobookIdentity(ctx context.Context, folderID int, phys
 				return "", err
 			}
 			item := &models.MediaItem{ContentID: claimedID, SortTitle: titleutil.DeriveDefaultSortTitle(title)}
-			applyBookToMediaItem(item, book)
+			applyBookToMediaItem(item, book, false)
 			if err := s.itemRepo.UpsertTx(ctx, tx, item); err != nil {
 				return "", err
 			}
@@ -1135,11 +1135,21 @@ func lockAudiobookRoot(ctx context.Context, tx pgx.Tx, folderID int, physical st
 }
 
 func (s *Scanner) updateAudiobookMediaItemTx(ctx context.Context, tx pgx.Tx, contentID string, book *parsedAudiobook) error {
+	// Lock the row before reading it and its match: the enricher writes a
+	// match under the same lock, so this write cannot replace one that
+	// commits in between with values from the tags.
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM media_items WHERE content_id = $1 FOR UPDATE`, contentID); err != nil {
+		return fmt.Errorf("lock audiobook media item %s: %w", contentID, err)
+	}
 	item, err := s.itemRepo.GetByIDTx(ctx, tx, contentID)
 	if err != nil {
 		return fmt.Errorf("get audiobook media item %s: %w", contentID, err)
 	}
-	applyBookToMediaItem(item, book)
+	matched, err := audiobookProviderMatched(ctx, tx, contentID)
+	if err != nil {
+		return err
+	}
+	applyBookToMediaItem(item, book, matched)
 	return s.itemRepo.UpsertTx(ctx, tx, item)
 }
 
@@ -1184,7 +1194,7 @@ func createAudiobookMediaItem(ctx context.Context, itemWriter filesystemMediaIte
 		SortTitle: titleutil.DeriveDefaultSortTitle(cleanTitle),
 		Year:      book.Year,
 	}
-	applyBookToMediaItem(item, book)
+	applyBookToMediaItem(item, book, false)
 	if err := itemWriter.Upsert(ctx, item); err != nil {
 		return "", err
 	}
@@ -1346,11 +1356,16 @@ const (
 // so manual edits to fields not driven by the file (e.g., poster_path
 // set by the metadata enricher) survive.
 //
+// Tags own the title. Year, genres and studios belong to the tags only
+// while the book has no provider match; once matched, the provider owns
+// them and the tags only fill a field that is still empty, so a rescan
+// cannot mix a second source into a matched book.
+//
 // Audiobook titles are stripped of trailing narrator/edition suffixes
 // (`Foo (Read by Bar)`, `Foo - read by Bar`, etc.) since that data is
 // already captured as item_people kind=8. The raw tag value is preserved
 // in OriginalTitle when it differs so the original is never lost.
-func applyBookToMediaItem(item *models.MediaItem, book *parsedAudiobook) {
+func applyBookToMediaItem(item *models.MediaItem, book *parsedAudiobook, providerMatched bool) {
 	item.Type = "audiobook"
 	if !slices.Contains(item.LockedFields, lockedFieldName) {
 		raw := strings.TrimSpace(book.Title)
@@ -1367,16 +1382,16 @@ func applyBookToMediaItem(item *models.MediaItem, book *parsedAudiobook) {
 		}
 	}
 	releaseDatesLocked := slices.Contains(item.LockedFields, lockedFieldReleaseDates)
-	if !releaseDatesLocked {
+	if !releaseDatesLocked && (!providerMatched || item.Year == 0) {
 		item.Year = book.Year
 	}
 	if book.Overview != "" && item.Overview == "" && !slices.Contains(item.LockedFields, lockedFieldOverview) {
 		item.Overview = book.Overview
 	}
-	if book.Publisher != "" && !slices.Contains(item.LockedFields, lockedFieldStudios) {
+	if book.Publisher != "" && !slices.Contains(item.LockedFields, lockedFieldStudios) && (!providerMatched || len(item.Studios) == 0) {
 		item.Studios = mergeUniqueStrings(item.Studios, []string{book.Publisher})
 	}
-	if len(book.Genres) > 0 && !slices.Contains(item.LockedFields, lockedFieldGenres) {
+	if len(book.Genres) > 0 && !slices.Contains(item.LockedFields, lockedFieldGenres) && (!providerMatched || len(item.Genres) == 0) {
 		item.Genres = mergeUniqueStrings(item.Genres, book.Genres)
 	}
 	if rd := normalizeReleaseDateForSQL(book.ReleaseDate); rd != "" && !releaseDatesLocked && (item.ReleaseDate == nil || *item.ReleaseDate == "") {
@@ -1716,11 +1731,13 @@ func (s *Scanner) audiobookCandidateCredits(ctx context.Context, contentIDs []st
 }
 
 // upsertAudiobookPeople upserts author and narrator rows into item_people,
-// using the PersonRepository to find-or-create each person by name. When the
-// parsed credits differ, ReplacePeople makes scanner-derived credits authoritative,
-// unless an admin locked the crew credits, which hold authors and narrators.
-// Skips the DELETE+INSERT entirely when the existing credit set already
-// matches the desired set (case-insensitive on name, exact on kind).
+// using the PersonRepository to find-or-create each person by name. For a book
+// without a provider match, differing parsed credits replace the stored ones.
+// Once a provider matched the book, its credits stay, and the tags only add a
+// kind (author or narrator) the item has no credit for. An admin's crew lock,
+// which holds authors and narrators, keeps the credits from either change.
+// Skips the write entirely when the existing credit set already matches the
+// desired set (case-insensitive on name, exact on kind).
 func (s *Scanner) upsertAudiobookPeople(ctx context.Context, contentID string, book *parsedAudiobook) error {
 	if s.personRepo == nil {
 		return fmt.Errorf("personRepo not configured on Scanner")
@@ -1735,16 +1752,9 @@ func (s *Scanner) upsertAudiobookPeople(ctx context.Context, contentID string, b
 	if err == nil && audiobookPeopleCreditsEqual(existing, desired) {
 		return nil
 	}
-	var locked []int
-	if err := s.fileRepo.Pool().QueryRow(ctx,
-		`SELECT COALESCE(locked_fields, '{}'::integer[]) FROM media_items WHERE content_id = $1`,
-		contentID).Scan(&locked); err != nil {
-		return fmt.Errorf("read audiobook field locks: %w", err)
-	}
-	if slices.Contains(locked, lockedFieldCrew) {
-		return nil
-	}
 
+	// A person row nobody is credited with is harmless, so resolve the names
+	// before taking the item's row lock.
 	people := make([]models.ItemPerson, 0, len(desired))
 	for i, c := range desired {
 		personID, err := s.personRepo.FindOrCreate(ctx, models.Person{Name: c.Name})
@@ -1758,7 +1768,56 @@ func (s *Scanner) upsertAudiobookPeople(ctx context.Context, contentID string, b
 		})
 	}
 
-	return s.itemRepo.ReplacePeople(ctx, contentID, people)
+	tx, err := s.fileRepo.Pool().Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin audiobook credits: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	// Decide under the item's row lock, which the enricher also takes to write
+	// a match, so a match committed since the read above is seen here.
+	var locked []int
+	if err := tx.QueryRow(ctx,
+		`SELECT COALESCE(locked_fields, '{}'::integer[]) FROM media_items WHERE content_id = $1 FOR UPDATE`,
+		contentID).Scan(&locked); err != nil {
+		return fmt.Errorf("read audiobook field locks: %w", err)
+	}
+	if slices.Contains(locked, lockedFieldCrew) {
+		return nil
+	}
+	matched, err := audiobookProviderMatched(ctx, tx, contentID)
+	if err != nil {
+		return err
+	}
+	if !matched {
+		if err := s.itemRepo.ReplacePeopleTx(ctx, tx, contentID, people); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
+	}
+	var credited []int
+	if err := tx.QueryRow(ctx,
+		`SELECT COALESCE(array_agg(DISTINCT kind), '{}'::integer[]) FROM item_people WHERE content_id = $1`,
+		contentID).Scan(&credited); err != nil {
+		return fmt.Errorf("read audiobook credit kinds: %w", err)
+	}
+	missing := slices.DeleteFunc(people, func(p models.ItemPerson) bool { return slices.Contains(credited, int(p.Kind)) })
+	if len(missing) == 0 {
+		return nil
+	}
+	if err := s.itemRepo.ReplacePeopleKindsTx(ctx, tx, contentID, catalog.PersonKindsOf(missing), missing); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// audiobookProviderMatched reports whether a metadata provider identified the
+// book; see catalog.AudiobookProviderMatchedWhere.
+func audiobookProviderMatched(ctx context.Context, q fileQueryer, contentID string) (bool, error) {
+	var matched bool
+	if err := q.QueryRow(ctx, `SELECT `+catalog.AudiobookProviderMatchedWhere("$1"), contentID).Scan(&matched); err != nil {
+		return false, fmt.Errorf("read audiobook provider match: %w", err)
+	}
+	return matched, nil
 }
 
 // upsertAudiobookSeries writes the parsed series_name and series_index into
