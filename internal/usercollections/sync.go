@@ -22,6 +22,19 @@ import (
 // the collection from the whole catalog instead.
 var ErrOwnerAccessUnavailable = errors.New("couldn't check which titles this collection's owner can access, so the collection was not updated")
 
+// SourceError is a sync that failed reading the collection's source list,
+// such as MDBList or TMDB refusing or not answering the request. Its message
+// is the one RunSync stores on the collection.
+type SourceError struct{ Err error }
+
+func (e *SourceError) Error() string { return e.Err.Error() }
+
+func (e *SourceError) Unwrap() error { return e.Err }
+
+// recordFailedSyncTimeout bounds the write that stores a failed sync. It runs
+// detached from the sync's context, which may be the one that just expired.
+const recordFailedSyncTimeout = 10 * time.Second
+
 // Service performs sync runs for user-owned imported collections. The result
 // of each sync is written into user_personal_collection_items via the
 // per-user store. Members are limited to titles the collection's owner
@@ -101,11 +114,18 @@ type sourceMatcher func(ctx context.Context, collection *userstore.Collection, c
 // that have validated ownership pass the collection in to avoid a second
 // GetCollection round trip. Returns both the sync result and the post-sync
 // collection state so callers can render the updated row without an extra
-// read.
+// read. A sync that fails before it writes anything is recorded as the
+// collection's failed status with the error's message, whether it ran on
+// import, on a schedule or by hand, and the members, item count and next run
+// stay as they were. A collection with no source is left alone.
 func (s *Service) RunSync(ctx context.Context, userID int, store userstore.UserStore, collection *userstore.Collection) (*SyncResult, *userstore.Collection, error) {
+	fail := func(err error) (*SyncResult, *userstore.Collection, error) {
+		s.recordFailedSync(ctx, userID, store, collection, logredact.SanitizeURLError(err).Error())
+		return nil, nil, err
+	}
 	cfg, err := ParseSourceConfig(collection.SourceConfig)
 	if err != nil {
-		return nil, nil, fmt.Errorf("parsing source_config: %w", err)
+		return fail(fmt.Errorf("parsing source_config: %w", err))
 	}
 	var match sourceMatcher
 	switch cfg.Mode {
@@ -119,18 +139,24 @@ func (s *Service) RunSync(ctx context.Context, userID int, store userstore.UserS
 		return nil, nil, ErrSyncUnsupported
 	}
 	startedAt := time.Now().UTC()
+	// ownerFilter records its own failure.
 	owner, err := s.ownerFilter(ctx, userID, store, collection)
 	if err != nil {
 		return nil, nil, err
 	}
 	contentIDs, err := match(ctx, collection, cfg)
 	if err != nil {
-		return nil, nil, err
+		return fail(err)
 	}
 	members, scanned, unmatched, err := s.selectMembers(ctx, owner, cfg, contentIDs)
 	if err != nil {
-		return nil, nil, err
+		return fail(err)
 	}
+	if err := store.ReplaceCollectionItems(ctx, collection.ID, members); err != nil {
+		return fail(err)
+	}
+	// The members are replaced, so a failure recording the sync is not
+	// recorded over them with the old item count.
 	result, updated, err := s.applyResult(ctx, store, collection, startedAt, members, len(contentIDs), scanned, unmatched)
 	if err == nil {
 		s.refreshCollage(userID, store, updated, owner)
@@ -174,23 +200,35 @@ func (s *Service) ownerFilter(ctx context.Context, userID int, store userstore.U
 		"owner_profile_id", collection.CreatorProfileID,
 		"error", err,
 	)
-	if stateErr := store.UpdateCollectionSyncState(ctx, userstore.UpdateCollectionSyncStateInput{
+	s.recordFailedSync(ctx, userID, store, collection, ErrOwnerAccessUnavailable.Error())
+	return catalog.AccessFilter{}, ErrOwnerAccessUnavailable
+}
+
+// recordFailedSync stores a failed sync with message on the collection,
+// keeping its members, item count and next run. It writes only while the
+// collection's last sync is still the one this sync started from, so a sync
+// that started later and finished first keeps its result.
+func (s *Service) recordFailedSync(ctx context.Context, userID int, store userstore.UserStore, collection *userstore.Collection, message string) {
+	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordFailedSyncTimeout)
+	defer cancel()
+	if err := store.UpdateCollectionSyncState(recordCtx, userstore.UpdateCollectionSyncStateInput{
 		ID:                collection.ID,
 		Status:            "failed",
-		Message:           ErrOwnerAccessUnavailable.Error(),
+		Message:           message,
 		ItemCount:         collection.ItemCount,
 		LastSyncAt:        time.Now().UTC(),
 		NextSyncAt:        collection.NextSyncAt,
 		ScheduleAtStart:   collection.SyncSchedule,
 		NextSyncAtAtStart: collection.NextSyncAt,
-	}); stateErr != nil {
+		RequireLastSyncAt: true,
+		LastSyncAtAtStart: collection.LastSyncAt,
+	}); err != nil {
 		s.logger.ErrorContext(ctx, "user collection sync: recording the failed sync failed",
 			"user_id", userID,
 			"collection_id", collection.ID,
-			"error", stateErr,
+			"error", err,
 		)
 	}
-	return catalog.AccessFilter{}, ErrOwnerAccessUnavailable
 }
 
 // ── MDBList ──────────────────────────────────────────────────────────────────
@@ -216,7 +254,7 @@ func (s *Service) matchMDBList(ctx context.Context, collection *userstore.Collec
 		return s.fetchMDBListEntries(ctx, url, fetchLimit)
 	})
 	if err != nil {
-		return nil, err
+		return nil, &SourceError{Err: err}
 	}
 
 	var movieBatch, seriesBatch catalog.ExternalIDBatch
@@ -378,7 +416,7 @@ func (s *Service) matchTMDB(ctx context.Context, _ *userstore.Collection, cfg So
 	if err != nil {
 		// The error text reaches the collection's stored sync message, and a
 		// transport error embeds the request URL, which carries the API key.
-		return nil, fmt.Errorf("fetching TMDB preset: %w", logredact.SanitizeURLError(err))
+		return nil, &SourceError{Err: fmt.Errorf("fetching TMDB preset: %w", logredact.SanitizeURLError(err))}
 	}
 	return catalog.MatchTMDBEntries(ctx, s.items, s.TMDBCollections, results)
 }
@@ -399,7 +437,7 @@ func (s *Service) matchTMDBList(ctx context.Context, collection *userstore.Colle
 	}
 	results, err := s.TMDBLists.GetList(ctx, listID, collectionutil.SourceFetchLimit(cfg.Limit))
 	if err != nil {
-		return nil, fmt.Errorf("fetching TMDB list %d: %w", listID, logredact.SanitizeURLError(err))
+		return nil, &SourceError{Err: fmt.Errorf("fetching TMDB list %d: %w", listID, logredact.SanitizeURLError(err))}
 	}
 	return catalog.MatchTMDBEntries(ctx, s.items, s.TMDBLists, results)
 }
@@ -416,9 +454,6 @@ func (s *Service) applyResult(
 	scanned int,
 	unmatched int,
 ) (*SyncResult, *userstore.Collection, error) {
-	if err := store.ReplaceCollectionItems(ctx, collection.ID, matched); err != nil {
-		return nil, nil, err
-	}
 	completedAt := time.Now().UTC()
 
 	status := "success"

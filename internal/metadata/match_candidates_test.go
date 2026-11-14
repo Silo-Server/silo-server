@@ -49,6 +49,72 @@ func TestBuildMatchDecisionOnlyReportsTrustedIDConflictForExplicitConflict(t *te
 	}
 }
 
+// The persisted decision names the rule that rejected the candidates, so an
+// admin is not shown a passing score against the floor without the reason.
+func TestBuildMatchDecisionNamesRejectingRule(t *testing.T) {
+	t.Parallel()
+
+	tmdbMovie := func(title string, year int, id string) MatchCandidate {
+		return MatchCandidate{
+			Title: title, Year: year, ContentType: "movie",
+			ProviderIDs: map[string]string{"tmdb": id}, Sources: []string{"tmdb"},
+		}
+	}
+	tests := []struct {
+		name          string
+		hints         *MatchHints
+		candidates    []MatchCandidate
+		rejection     MatchRejection
+		requiredScore float64
+	}{
+		{
+			name:          "lone candidate without a year",
+			hints:         &MatchHints{Title: "4th Man Out", Type: "movie"},
+			candidates:    []MatchCandidate{tmdbMovie("4th Man Out", 2015, "342672")},
+			rejection:     MatchRejectionLoneCandidate,
+			requiredScore: automaticMatchLoneCandidateScore,
+		},
+		{
+			name:          "below the floor",
+			hints:         &MatchHints{Title: "Northern Lights", Type: "movie"},
+			candidates:    []MatchCandidate{tmdbMovie("Quiet Harbor", 2015, "1")},
+			rejection:     MatchRejectionBelowFloor,
+			requiredScore: automaticMatchAcceptanceFloor,
+		},
+		{
+			name:       "year more than two years off",
+			hints:      &MatchHints{Title: "Example", Year: 2010, Type: "movie"},
+			candidates: []MatchCandidate{tmdbMovie("Example", 2015, "1")},
+			rejection:  MatchRejectionYearMismatch,
+		},
+		{
+			name:       "top candidates tied",
+			hints:      &MatchHints{Title: "Example", Type: "movie"},
+			candidates: []MatchCandidate{tmdbMovie("Example", 2001, "1"), tmdbMovie("Example", 2015, "2")},
+			rejection:  MatchRejectionAmbiguous,
+		},
+		{
+			name:       "trusted id not returned",
+			hints:      &MatchHints{Title: "Example", ImdbID: "tt0473100", Type: "movie"},
+			candidates: []MatchCandidate{tmdbMovie("Example", 2015, "1")},
+			rejection:  MatchRejectionTrustedIDMissing,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			decision := boundedMatchDecision(buildMatchDecision(tt.hints, tt.candidates, nil, false, nil))
+			if decision.Outcome != MatchOutcomeCandidateRejected {
+				t.Fatalf("outcome = %q, want candidate_rejected", decision.Outcome)
+			}
+			if decision.Rejection != tt.rejection || decision.RequiredScore != tt.requiredScore {
+				t.Fatalf("rejection = %q (required %v), want %q (required %v)",
+					decision.Rejection, decision.RequiredScore, tt.rejection, tt.requiredScore)
+			}
+		})
+	}
+}
+
 func TestScoreMatchCandidate_DoesNotCountLocalNFOAsProviderCorroboration(t *testing.T) {
 	t.Parallel()
 

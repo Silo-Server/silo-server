@@ -69,6 +69,7 @@ type AdminAccountCapabilitiesOutputBody struct {
 	PolicyDefaults       bool `json:"policy_defaults" doc:"Whether getAdminUserPolicyDefaults reports the policy an admin or a regular account with no access group uses for fields it does not override"`
 	ProfileAvatars       bool `json:"profile_avatars" doc:"Whether listAdminUserProfiles returns each profile's avatar, avatar_url and avatar_source as listProfiles does"`
 	ProfileSections      bool `json:"profile_sections" doc:"Whether listAdminUserProfileSectionOverrides, getAdminUserProfileSectionSettings, replaceAdminUserProfileSectionOverrides and resetAdminUserProfileSectionOverrides can read and change one profile's page layout"`
+	ProfileManagement    bool `json:"profile_management" doc:"Whether getAdminUserProfile, createAdminUserProfile, updateAdminUserProfile and deleteAdminUserProfile can read and change an account's profiles, including setting or removing a profile's PIN, and whether listAdminUserProfiles reports has_pin, is_primary and is_child"`
 }
 
 type AdminAccountPolicyInput struct {
@@ -130,6 +131,9 @@ type AdminAccountProfile struct {
 	ID   ID     `json:"id"`
 	Name string `json:"name"`
 	ProfileAvatar
+	HasPIN     bool            `json:"has_pin" doc:"Whether the profile is locked with a PIN"`
+	IsPrimary  bool            `json:"is_primary" doc:"The household parent (not the server admin role)"`
+	IsChild    bool            `json:"is_child"`
 	LastSeenAt NullableInstant `json:"last_seen_at" doc:"Latest time any device reported this profile; null when no device has"`
 }
 type AdminAccountProfilesOutput struct {
@@ -261,6 +265,7 @@ func registerAdminAccounts(reg *Registry) {
 		out.Body.PolicyDefaults = true
 		out.Body.ProfileAvatars = reg.deps.AdminAccounts != nil
 		out.Body.ProfileSections = reg.deps.AdminAccounts != nil && reg.deps.AdminProfileSections != nil
+		out.Body.ProfileManagement = reg.deps.AdminAccounts != nil && reg.deps.Profiles != nil
 		if resets := reg.deps.PasswordResets; resets != nil {
 			caps := resets.PasswordResetCapabilities(ctx)
 			out.Body.PasswordResetLink, out.Body.PasswordResetEmail = caps.Link, caps.Email
@@ -375,7 +380,7 @@ func registerAdminAccounts(reg *Registry) {
 		}
 		items := make([]AdminAccountProfile, 0, len(rows))
 		for _, row := range rows {
-			items = append(items, AdminAccountProfile{ID: ID(row.ID), Name: row.Name, ProfileAvatar: profileAvatarOf(row.Avatar, row.AvatarURL, row.AvatarSource), LastSeenAt: nullableInstantOf(row.LastSeenAt)})
+			items = append(items, AdminAccountProfile{ID: ID(row.ID), Name: row.Name, ProfileAvatar: profileAvatarOf(row.Avatar, row.AvatarURL, row.AvatarSource), HasPIN: row.HasPIN, IsPrimary: row.IsPrimary, IsChild: row.IsChild, LastSeenAt: nullableInstantOf(row.LastSeenAt)})
 		}
 		return &AdminAccountProfilesOutput{Body: Paginated(items, "")}, nil
 	})

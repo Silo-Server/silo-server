@@ -291,22 +291,31 @@ func TestRecommendationSectionsTakeTheServedRowTitlePostgres(t *testing.T) {
 		title             string
 		rowType, rowLabel string
 		pool              []recommendations.ScoredItem
-		want              string
+		want, wantKey     string
 	}{
-		{"new profile", SectionRecommendedForYou, "Recommended for You", recommendations.RecTypePopular, "Popular on This Server", []recommendations.ScoredItem{{MediaItemID: id}}, "Popular on This Server"},
-		{"warm profile", SectionRecommendedForYou, "Recommended for You", "cluster", recommendations.ForYouLabel, []recommendations.ScoredItem{{MediaItemID: id}}, "Recommended for You"},
-		{"taste match fallback", SectionTasteMatch, "Top Picks Today", "genre_sampler", "Top Drama", []recommendations.ScoredItem{{MediaItemID: id}}, "Top Drama"},
-		{"admin title", SectionRecommendedForYou, "Movie Night", recommendations.RecTypePopular, "Popular on This Server", []recommendations.ScoredItem{{MediaItemID: id}}, "Movie Night"},
-		{"row filtered empty", SectionRecommendedForYou, "Recommended for You", recommendations.RecTypePopular, "Popular on This Server", []recommendations.ScoredItem{{MediaItemID: id + "-missing"}}, "Recommended for You"},
+		{"new profile", SectionRecommendedForYou, "Recommended for You", recommendations.RecTypePopular, "Popular on This Server", []recommendations.ScoredItem{{MediaItemID: id}}, "Popular on This Server", "home.section.popularOnServer"},
+		{"warm profile", SectionRecommendedForYou, "Recommended for You", "cluster", recommendations.ForYouLabel, []recommendations.ScoredItem{{MediaItemID: id}}, "Recommended for You", titleKeyRecommendedForYou},
+		{"taste match fallback", SectionTasteMatch, "Top Picks Today", "genre_sampler", "Top Drama", []recommendations.ScoredItem{{MediaItemID: id}}, "Top Drama", "home.section.topGenre"},
+		{"admin title", SectionRecommendedForYou, "Movie Night", recommendations.RecTypePopular, "Popular on This Server", []recommendations.ScoredItem{{MediaItemID: id}}, "Movie Night", ""},
+		{"row filtered empty", SectionRecommendedForYou, "Recommended for You", recommendations.RecTypePopular, "Popular on This Server", []recommendations.ScoredItem{{MediaItemID: id + "-missing"}}, "Recommended for You", titleKeyRecommendedForYou},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fetcher.RecommendationReader = &poolReader{pool: tc.pool, rowType: tc.rowType, rowLabel: tc.rowLabel}
-			got, err := fetcher.FetchOne(ctx, ResolvedSection{ID: "recs", SectionType: tc.sectionType, Title: tc.title, ItemLimit: 20}, nil, nil, 7, "p1", catalog.AccessFilter{})
+			// A section the server titled carries its key; the admin's
+			// "Movie Night" carries none.
+			section := ResolvedSection{ID: "recs", SectionType: tc.sectionType, Title: tc.title, ItemLimit: 20}
+			if tc.title == "Recommended for You" {
+				section.TitleKey = titleKeyRecommendedForYou
+			}
+			got, err := fetcher.FetchOne(ctx, section, nil, nil, 7, "p1", catalog.AccessFilter{})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got.Title != tc.want {
-				t.Fatalf("title = %q, want %q", got.Title, tc.want)
+			if got.Title != tc.want || got.TitleKey != tc.wantKey {
+				t.Fatalf("title = %q key %q, want %q key %q", got.Title, got.TitleKey, tc.want, tc.wantKey)
+			}
+			if tc.wantKey == "home.section.topGenre" && got.TitleArgs["genre"] != "Drama" {
+				t.Fatalf("title args = %v, want genre Drama", got.TitleArgs)
 			}
 		})
 	}

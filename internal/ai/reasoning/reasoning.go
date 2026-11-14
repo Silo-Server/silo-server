@@ -62,6 +62,18 @@ func ForModel(model string) []string {
 		return []string{levelMinimal, levelLow, levelMedium, levelHigh}
 	case strings.HasPrefix(model, "o1"), strings.HasPrefix(model, "o3"), strings.HasPrefix(model, "o4"):
 		return []string{levelLow, levelMedium, levelHigh}
+	// xAI documents reasoning_effort for grok-4.5 through grok-4.7 only, and
+	// reasoning cannot be disabled, so "none" is not offered. grok-4.5 treats
+	// "xhigh" as "high". Other grok-4 names (4.3, 4.20) keep the custom
+	// vocabulary because xAI documents different or no levels for them.
+	case strings.HasPrefix(model, "grok-4.5"), strings.HasPrefix(model, "grok-4.6"), strings.HasPrefix(model, "grok-4.7"):
+		return []string{levelLow, levelMedium, levelHigh, levelExtraHigh}
+	// DeepSeek's V4 API accepts low, high and max, maps medium and xhigh onto
+	// high, and turns thinking off through its thinking parameter instead.
+	// Other hosts serving deepseek-named models (Ollama's deepseek-r1, for
+	// one) have their own effort values, so only V4 names are matched.
+	case strings.HasPrefix(model, "deepseek-v4"), strings.HasPrefix(model, "deepseek-flash"):
+		return []string{levelLow, levelHigh, levelMax}
 	default:
 		return slices.Clone(Levels)
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -281,6 +282,102 @@ func TestScanSubtreeReconcilesDeletedTitleFolderDB(t *testing.T) {
 	}
 }
 
+// TestScanFolderEmptyRootKeepsCatalogedFilesDB covers a full scan of a library
+// with two configured roots when one root becomes an empty directory (the bare
+// mountpoint of a dropped drive). The files cataloged under it must not be
+// marked missing and the root must be reported as suspect, while the other
+// root keeps scanning normally.
+func TestScanFolderEmptyRootKeepsCatalogedFilesDB(t *testing.T) {
+	pool := newScannerTestPool(t)
+	ctx := t.Context()
+	droppedRoot := t.TempDir()
+	liveRoot := t.TempDir()
+	folderID := seedDeadRootTestFolder(t, pool, "movies", fmt.Sprintf("empty-root-%d", time.Now().UnixNano()))
+	folder := &models.MediaFolder{ID: folderID, Type: "movies", Paths: []string{droppedRoot, liveRoot}}
+	s := NewScanner(NewFileRepository(pool), "", nil, 2, false, time.Hour)
+
+	droppedFile := filepath.Join(droppedRoot, "Dropped (2001)", "Dropped (2001).mkv")
+	liveGone := filepath.Join(liveRoot, "Gone (2002)", "Gone (2002).mkv")
+	liveKept := filepath.Join(liveRoot, "Kept (2003)", "Kept (2003).mkv")
+	writeRelinkTestMedia(t, droppedFile, 1)
+	writeRelinkTestMedia(t, liveGone, 2)
+	writeRelinkTestMedia(t, liveKept, 3)
+	if _, err := s.ScanFolder(ctx, folder); err != nil {
+		t.Fatalf("first scan: %v", err)
+	}
+
+	if err := os.RemoveAll(filepath.Join(droppedRoot, "Dropped (2001)")); err != nil {
+		t.Fatalf("empty the dropped root: %v", err)
+	}
+	if err := os.RemoveAll(filepath.Join(liveRoot, "Gone (2002)")); err != nil {
+		t.Fatalf("remove a title from the live root: %v", err)
+	}
+	result, err := s.ScanFolder(ctx, folder)
+	if err != nil {
+		t.Fatalf("second scan: %v", err)
+	}
+
+	if len(result.SuspectEmptyRoots) != 1 || filepath.Clean(result.SuspectEmptyRoots[0]) != filepath.Clean(droppedRoot) {
+		t.Fatalf("SuspectEmptyRoots = %v, want only the emptied root", result.SuspectEmptyRoots)
+	}
+	for _, tc := range []struct {
+		name        string
+		path        string
+		wantMissing bool
+	}{
+		{"file under the emptied root", droppedFile, false},
+		{"file removed under the live root", liveGone, true},
+		{"file kept under the live root", liveKept, false},
+	} {
+		var missing bool
+		if err := pool.QueryRow(ctx, `SELECT missing_since IS NOT NULL FROM media_files WHERE file_path = $1`, tc.path).Scan(&missing); err != nil {
+			t.Fatalf("%s: read file row: %v", tc.name, err)
+		}
+		if missing != tc.wantMissing {
+			t.Fatalf("%s: marked missing = %v, want %v", tc.name, missing, tc.wantMissing)
+		}
+	}
+}
+
+// TestListRootsWithCatalogedFilesDB pins which roots count as holding
+// cataloged files: a file at or under the root, present or marked missing,
+// and nothing that only shares a string prefix with it. Roots come back in
+// input order.
+func TestListRootsWithCatalogedFilesDB(t *testing.T) {
+	pool := newScannerTestPool(t)
+	ctx := t.Context()
+	// media_files.file_path is unique across folders, so the paths carry a
+	// per-run prefix.
+	lib := fmt.Sprintf("/cataloged-roots-%d", time.Now().UnixNano())
+	folderID := seedDeadRootTestFolder(t, pool, "movies", lib)
+	for _, file := range []struct {
+		path    string
+		missing bool
+	}{
+		{lib + "/live/Movie (2001)/Movie (2001).mkv", false},
+		{lib + "/gone/Movie (2002).mkv", true},
+		{lib + "/movies2/Movie (2003).mkv", false},
+		{lib + "/100%_done/Movie (2004).mkv", false},
+		{lib + "/file.mkv", false},
+	} {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO media_files (media_folder_id, file_path, file_size, missing_since)
+			VALUES ($1, $2, 1, CASE WHEN $3 THEN now() END)`, folderID, file.path, file.missing); err != nil {
+			t.Fatalf("seed %s: %v", file.path, err)
+		}
+	}
+
+	roots := []string{lib + "/gone", lib + "/empty", lib + "/movies", lib + "/live/", lib + "/100%_done", lib + "/100x_done", lib + "/100%", lib + "/file.mkv", lib + "/f"}
+	got, err := NewFileRepository(pool).ListRootsWithCatalogedFiles(ctx, folderID, roots)
+	if err != nil {
+		t.Fatalf("ListRootsWithCatalogedFiles: %v", err)
+	}
+	want := []string{lib + "/gone", lib + "/live/", lib + "/100%_done", lib + "/file.mkv"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("roots with cataloged files = %q, want %q", got, want)
+	}
+}
+
 // TestScanSubtreeAudiobookVanishedBookUnderEmptyRootDB covers a scoped scan of
 // a deleted book folder. Under a library root that still has entries the
 // book's files are reconciled; under a configured root that is now an empty
@@ -346,6 +443,143 @@ func TestScanSubtreeAudiobookVanishedBookUnderEmptyRootDB(t *testing.T) {
 				t.Fatalf("library memberships = %d, want kept = %v", memberships, !tc.wantMissing)
 			}
 		})
+	}
+}
+
+// TestScanBookFolderKeepsBooksUnderEmptyRootDB covers a full scan of a
+// two-root audiobook or ebook library where one root is reachable but empty (a
+// lost mount leaving its mountpoint) while the catalog still has a book there.
+// The scan must keep that book until the operator confirms the cleanup, as its
+// dead_root warning says, and remove it once they have.
+func TestScanBookFolderKeepsBooksUnderEmptyRootDB(t *testing.T) {
+	pool := newScannerTestPool(t)
+	ffprobe := filepath.Join(t.TempDir(), "ffprobe")
+	writeFakeTool(t, ffprobe, `#!/bin/sh
+cat <<'JSON'
+{"format":{"format_name":"mov,mp4,m4a","duration":"3600.0","size":"1","bit_rate":"64000","tags":{"title":"Present Book","artist":"Present Author","date":"2020"}},"streams":[{"index":0,"codec_type":"audio","codec_name":"aac","channels":2}],"chapters":[]}
+JSON
+`)
+	// Root A holds a readable book, so the scan is not wholly empty; root B is
+	// an empty directory with a cataloged book under it. Paths are relative to
+	// those roots.
+	for _, bk := range []struct {
+		kind, itemType         string
+		presentFile            string
+		lostFile, lostObserved string
+		presentContent         func(*testing.T) []byte
+		scan                   func(context.Context, *Scanner, *models.MediaFolder) error
+	}{
+		{
+			kind: "audiobooks", itemType: "audiobook",
+			presentFile: "Present Author/Present Book/part.m4b",
+			lostFile:    "Lost Book/part.m4b", lostObserved: "Lost Book",
+			presentContent: func(*testing.T) []byte { return []byte("x") },
+			scan: func(ctx context.Context, s *Scanner, f *models.MediaFolder) error {
+				return s.ScanAudiobookFolder(ctx, f, true)
+			},
+		},
+		{
+			kind: "ebooks", itemType: "ebook",
+			presentFile: "Present Book.epub",
+			lostFile:    "Lost Book.epub", lostObserved: "Lost Book.epub",
+			presentContent: func(t *testing.T) []byte {
+				data, err := os.ReadFile(writeTestEPUB(t, nil))
+				if err != nil {
+					t.Fatal(err)
+				}
+				return data
+			},
+			scan: func(ctx context.Context, s *Scanner, f *models.MediaFolder) error {
+				return s.ScanEbookFolder(ctx, f)
+			},
+		},
+	} {
+		for _, tc := range []struct {
+			name        string
+			confirmed   bool
+			wantKept    bool
+			wantWarning string
+		}{
+			{"cleanup not confirmed", false, true, "dead_root"},
+			{"cleanup confirmed", true, false, ""},
+		} {
+			t.Run(bk.kind+"/"+tc.name, func(t *testing.T) {
+				ctx := t.Context()
+				rootA, rootB := t.TempDir(), t.TempDir()
+				folderID := seedDeadRootTestFolder(t, pool, bk.kind, fmt.Sprintf("empty-root-full-%d", time.Now().UnixNano()))
+				folder := &models.MediaFolder{ID: folderID, Type: bk.kind, Paths: []string{rootA, rootB}}
+				s := NewScanner(NewFileRepository(pool), ffprobe, nil, 2, false, time.Hour)
+
+				presentFile := filepath.Join(rootA, bk.presentFile)
+				if err := os.MkdirAll(filepath.Dir(presentFile), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(presentFile, bk.presentContent(t), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				itemType := bk.itemType
+				bookFile := filepath.Join(rootB, bk.lostFile)
+				observedRoot := filepath.Join(rootB, bk.lostObserved)
+				contentID := fmt.Sprintf("%s-empty-root-%d", itemType, folderID)
+				t.Cleanup(func() {
+					_, _ = pool.Exec(context.Background(), `DELETE FROM media_item_libraries WHERE media_folder_id = $1`, folderID)
+					_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id IN (SELECT content_id FROM media_files WHERE media_folder_id = $1) OR content_id = $2`, folderID, contentID)
+				})
+				for _, stmt := range []struct {
+					sql  string
+					args []any
+				}{
+					{`INSERT INTO media_items (content_id, type, title, status, genres) VALUES ($1, $2, 'Lost Book', 'local', '{}'::text[])`, []any{contentID, itemType}},
+					{`INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, []any{contentID, folderID}},
+					{`INSERT INTO media_files (content_id, media_folder_id, file_path, observed_root_path, canonical_root_path, file_size, file_modified_at)
+					  VALUES ($1, $2, $3, $4, $4, 4, now())`, []any{contentID, folderID, bookFile, observedRoot}},
+					{`UPDATE media_folders SET allow_empty_cleanup_once = $2 WHERE id = $1`, []any{folderID, tc.confirmed}},
+				} {
+					if _, err := pool.Exec(ctx, stmt.sql, stmt.args...); err != nil {
+						t.Fatalf("seed: %v", err)
+					}
+				}
+
+				if err := bk.scan(ctx, s, folder); err != nil {
+					t.Fatalf("full scan: %v", err)
+				}
+
+				requireEmptyRootBookState(t, pool, folderID, contentID, bookFile, tc.wantKept, tc.wantWarning)
+			})
+		}
+	}
+}
+
+// requireEmptyRootBookState checks the book under the empty root after the
+// full scan: whether its file and library membership were kept, and the
+// library's scan warning code ("" for none).
+func requireEmptyRootBookState(t *testing.T, pool *pgxpool.Pool, folderID int, contentID, bookFile string, wantKept bool, wantWarning string) {
+	t.Helper()
+	ctx := t.Context()
+	var missing bool
+	if err := pool.QueryRow(ctx, `SELECT missing_since IS NOT NULL FROM media_files WHERE file_path = $1`, bookFile).Scan(&missing); err != nil {
+		t.Fatalf("read file row: %v", err)
+	}
+	if missing == wantKept {
+		t.Fatalf("file marked missing = %v, want %v", missing, !wantKept)
+	}
+	var memberships int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM media_item_libraries WHERE content_id = $1`, contentID).Scan(&memberships); err != nil {
+		t.Fatalf("count memberships: %v", err)
+	}
+	if kept := memberships > 0; kept != wantKept {
+		t.Fatalf("library memberships = %d, want kept = %v", memberships, wantKept)
+	}
+	warning, err := catalog.NewFolderRepository(pool).GetScanWarning(ctx, folderID)
+	if err != nil {
+		t.Fatalf("read scan warning: %v", err)
+	}
+	got := ""
+	if warning.Code != nil {
+		got = *warning.Code
+	}
+	if got != wantWarning {
+		t.Fatalf("scan warning = %q, want %q", got, wantWarning)
 	}
 }
 

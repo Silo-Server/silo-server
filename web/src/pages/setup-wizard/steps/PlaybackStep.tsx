@@ -4,10 +4,12 @@ import { AdvancedSection } from "@/components/settings/AdvancedSection";
 import { PathSettingField } from "@/components/settings/PathSettingField";
 import { useHWAccelDetection, type HWAccelInfo } from "@/hooks/queries/admin/system";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
+import { useT, type Translate } from "@/i18n";
 import { SettingField, SettingFieldStatus } from "@/pages/admin-settings/SettingField";
 import {
   HW_ACCEL_OPTIONS,
   describeDetection,
+  hardwareVerified,
   formatResolved,
   hasHardwareToneMapCapability,
 } from "@/pages/admin-settings/playbackSettings.utils";
@@ -38,22 +40,24 @@ function statusLine(status: Status | undefined) {
 }
 
 function playbackSummary(
+  t: Translate,
   transcodeEnabled: boolean,
   hwAccel: string,
   probed: HWAccelInfo | undefined,
 ): string | undefined {
-  if (!transcodeEnabled) return "Video transcoding off";
-  if (hwAccel === "none") return "Software";
-  if (probed?.resolved && probed.resolved !== "none") return formatResolved(probed.resolved);
+  if (!transcodeEnabled) return t("web.setup.playback.summaryTranscodingOff");
+  if (hwAccel === "none") return t("web.setup.playback.summarySoftware");
+  if (hardwareVerified(probed)) return formatResolved(probed.resolved);
   return hwAccel === "auto" ? undefined : formatResolved(hwAccel);
 }
 
 export function PlaybackStep() {
+  const t = useT();
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
   const { handleSubmit, busy, skip } = useStepSubmit(
     "playback",
     form,
-    "Failed to save playback settings",
+    t("web.setup.playback.saveFailed"),
   );
 
   const transcodeEnabled = form.getValue("playback.transcode_enabled") !== "false";
@@ -61,61 +65,59 @@ export function PlaybackStep() {
   const detection = useHWAccelDetection(hwAccel !== "none");
   const probed = hwAccel === "none" ? undefined : detection.data;
   const detectedLabel = describeDetection(probed);
-  const hardwareFound = Boolean(probed?.resolved && probed.resolved !== "none");
+  const hardwareFound = hardwareVerified(probed);
   const hardwareToneMapAvailable = hasHardwareToneMapCapability(probed);
 
-  useStepSummary("playback", playbackSummary(transcodeEnabled, hwAccel, probed));
+  useStepSummary("playback", playbackSummary(t, transcodeEnabled, hwAccel, probed));
 
   if (form.isPending) return <StepSkeleton rows={4} />;
 
   let hwStatus: Status | undefined;
   if (hwAccel !== "none") {
     if (detectedLabel) hwStatus = { tone: hardwareFound ? "ok" : "warn", text: detectedLabel };
-    else if (detection.isLoading) hwStatus = { tone: "muted", text: "Detecting hardware…" };
+    else if (detection.isLoading)
+      hwStatus = { tone: "muted", text: t("web.setup.playback.detecting") };
     else if (detection.isError)
-      hwStatus = { tone: "warn", text: "Couldn't probe this server's hardware." };
+      hwStatus = { tone: "warn", text: t("web.setup.playback.detectFailed") };
   }
   let gpuToneMapStatus: Status | undefined;
   if (hardwareToneMapAvailable) {
-    gpuToneMapStatus = { tone: "ok", text: "Hardware tone mapper available" };
+    gpuToneMapStatus = { tone: "ok", text: t("web.setup.playback.gpuToneMapAvailable") };
   } else if (hwAccel !== "none" && probed) {
-    gpuToneMapStatus = {
-      tone: "muted",
-      text: "No validated hardware tone mapper found yet; enabling it here does no harm.",
-    };
+    gpuToneMapStatus = { tone: "muted", text: t("web.setup.playback.gpuToneMapMissing") };
   }
 
   return (
     <StepFrame
-      title="Playback"
-      lede="When a device can't play a file as-is, Silo converts it on the fly. A GPU makes that cheap; without one it runs on the CPU."
+      title={t("web.setup.playback.title")}
+      lede={t("web.setup.playback.lede")}
       onSubmit={handleSubmit}
       busy={busy}
       onSkip={skip}
-      footnote="More in Admin › Settings › Playback."
+      footnote={t("web.setup.playback.footnote")}
     >
       <StepSection>
         <SettingField
-          label="Video transcoding"
+          label={t("web.setup.playback.transcodingLabel")}
           type="toggle"
-          description="Off never re-encodes video. Silo still repackages files and converts audio for devices that need it."
+          description={t("web.setup.playback.transcodingDescription")}
           value={transcodeEnabled ? "true" : "false"}
           onChange={(v) => form.setValue("playback.transcode_enabled", v)}
         />
         <SettingField
-          label="Hardware acceleration"
+          label={t("web.setup.playback.hwAccelLabel")}
           type="select"
           options={HW_ACCEL_OPTIONS}
-          description="Auto picks the best device this server can see."
+          description={t("web.setup.playback.hwAccelDescription")}
           status={statusLine(hwStatus)}
           value={hwAccel}
           onChange={(v) => form.setValue("playback.hw_accel", v)}
           disabled={!transcodeEnabled}
         />
         <SettingField
-          label="Allow 4K transcoding"
+          label={t("web.setup.playback.allow4kLabel")}
           type="toggle"
-          description="Heavy load on most hardware."
+          description={t("web.setup.playback.allow4kDescription")}
           value={form.getValue("allow_4k_transcode")}
           onChange={(v) => form.setValue("allow_4k_transcode", v)}
           disabled={!transcodeEnabled}
@@ -123,22 +125,22 @@ export function PlaybackStep() {
       </StepSection>
 
       <StepSection
-        title="HDR tone mapping"
-        caption="Converts HDR video to SDR for screens that can't show HDR. Each path has to be allowed before Silo will use it."
+        title={t("web.setup.playback.toneMapTitle")}
+        caption={t("web.setup.playback.toneMapCaption")}
       >
         <SettingField
-          label="On the GPU"
+          label={t("web.setup.playback.gpuToneMapLabel")}
           type="toggle"
-          description="Fast. Uses a validated hardware tone mapper on this server or a transcode node."
+          description={t("web.setup.playback.gpuToneMapDescription")}
           status={statusLine(gpuToneMapStatus)}
           value={form.getValue("playback.transcode_hardware_tone_map_enabled")}
           onChange={(v) => form.setValue("playback.transcode_hardware_tone_map_enabled", v)}
           disabled={!transcodeEnabled}
         />
         <SettingField
-          label="On the CPU"
+          label={t("web.setup.playback.cpuToneMapLabel")}
           type="toggle"
-          description="Works everywhere, but a single stream can max out several cores."
+          description={t("web.setup.playback.cpuToneMapDescription")}
           value={form.getValue("playback.transcode_software_tone_map_enabled")}
           onChange={(v) => form.setValue("playback.transcode_software_tone_map_enabled", v)}
           disabled={!transcodeEnabled}
@@ -148,21 +150,25 @@ export function PlaybackStep() {
       <StepSection>
         <AdvancedSection
           id="setup.playback"
-          title="Paths"
+          title={t("web.setup.playback.pathsTitle")}
           count={2}
           forceOpen={form.isDirty("playback.ffmpeg_path") || form.isDirty("playback.transcode_dir")}
         >
           <PathSettingField
-            label="FFmpeg path"
+            label={t("web.setup.playback.ffmpegPathLabel")}
             defaultValue={DEFAULT_FFMPEG_PATH}
-            description={`Leave blank to use the FFmpeg that ships with the server, at ${DEFAULT_FFMPEG_PATH}.`}
+            description={t("web.setup.playback.ffmpegPathDescription", {
+              path: DEFAULT_FFMPEG_PATH,
+            })}
             value={form.getValue("playback.ffmpeg_path")}
             onChange={(v) => form.setValue("playback.ffmpeg_path", v)}
           />
           <PathSettingField
-            label="Transcode directory"
+            label={t("web.setup.playback.transcodeDirLabel")}
             defaultValue={DEFAULT_TRANSCODE_DIR}
-            description={`Fast local storage with room to spare. Leave blank to use ${DEFAULT_TRANSCODE_DIR}.`}
+            description={t("web.setup.playback.transcodeDirDescription", {
+              path: DEFAULT_TRANSCODE_DIR,
+            })}
             value={form.getValue("playback.transcode_dir")}
             onChange={(v) => form.setValue("playback.transcode_dir", v)}
           />

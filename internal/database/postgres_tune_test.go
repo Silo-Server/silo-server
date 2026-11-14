@@ -11,59 +11,175 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// recommendPostgresOLTPCases are the hosts TestRecommendPostgresOLTPSettings
+// sizes.
+var recommendPostgresOLTPCases = []struct {
+	name           string
+	memoryBudget   int64
+	memoryExplicit bool
+	cpus           int
+	detectedCPUs   int
+	want           map[string]string
+}{
+	{
+		name:         "mid-sized host reaches the shared_buffers ceiling",
+		memoryBudget: 16 * sizeGB,
+		cpus:         8,
+		want: map[string]string{
+			"max_connections":                  "100",
+			"shared_buffers":                   "2GB",
+			"effective_cache_size":             "12GB",
+			"maintenance_work_mem":             "1GB",
+			"autovacuum_work_mem":              "256MB",
+			"wal_buffers":                      "16MB",
+			"min_wal_size":                     "2GB",
+			"max_wal_size":                     "8GB",
+			"random_page_cost":                 "1.1",
+			"effective_io_concurrency":         "1000",
+			"work_mem":                         "38836kB",
+			"huge_pages":                       "try",
+			"jit":                              "off",
+			"wal_compression":                  "lz4",
+			"max_worker_processes":             "8",
+			"max_parallel_workers_per_gather":  "4",
+			"max_parallel_workers":             "8",
+			"max_parallel_maintenance_workers": "4",
+		},
+	},
+	{
+		name:         "small host stays under the ceilings",
+		memoryBudget: 2 * sizeGB,
+		cpus:         4,
+		want: map[string]string{
+			"shared_buffers":       "512MB",
+			"effective_cache_size": "1536MB",
+			"maintenance_work_mem": "128MB",
+			"autovacuum_work_mem":  "128MB",
+			"wal_buffers":          "16MB",
+			"huge_pages":           "off",
+		},
+	},
+	{
+		name:         "large host with an explicit CPU count",
+		memoryBudget: 48 * sizeGB,
+		cpus:         64,
+		want: map[string]string{
+			"shared_buffers":         "2GB",
+			"effective_cache_size":   "36GB",
+			"maintenance_work_mem":   "3GB",
+			"autovacuum_work_mem":    "256MB",
+			"work_mem":               "76725kB",
+			"huge_pages":             "try",
+			"max_worker_processes":   "64",
+			"max_parallel_workers":   "64",
+			"autovacuum_max_workers": "5",
+			"io_workers":             "16",
+		},
+	},
+	{
+		// POSTGRES_TUNE_MEMORY is the way above the ceiling. work_mem is the
+		// same as under a detected budget of this size.
+		name:           "explicit memory budget is not bounded",
+		memoryBudget:   32 * sizeGB,
+		memoryExplicit: true,
+		cpus:           8,
+		want: map[string]string{
+			"shared_buffers":       "8GB",
+			"effective_cache_size": "24GB",
+			"autovacuum_work_mem":  "256MB",
+			"work_mem":             "77672kB",
+			"huge_pages":           "try",
+		},
+	},
+	{
+		// Workers follow the bounded count; work_mem keeps the detected
+		// one, so bounding does not raise it.
+		name:         "detected CPU count was bounded",
+		memoryBudget: 16 * sizeGB,
+		cpus:         16,
+		detectedCPUs: 224,
+		want: map[string]string{
+			"max_worker_processes":   "16",
+			"max_parallel_workers":   "16",
+			"autovacuum_max_workers": "4",
+			"io_workers":             "4",
+			"work_mem":               "12945kB",
+		},
+	},
+}
+
 func TestRecommendPostgresOLTPSettings(t *testing.T) {
+	for _, tt := range recommendPostgresOLTPCases {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := PostgresTuneOptions{
+				Enabled:           true,
+				Profile:           postgresTuneProfileOLTP,
+				MemoryBudgetBytes: tt.memoryBudget,
+				MemoryExplicit:    tt.memoryExplicit,
+				CPUs:              tt.cpus,
+				DetectedCPUs:      tt.detectedCPUs,
+				Connections:       100,
+				Storage:           postgresTuneStorageNVMe,
+				DBSize:            postgresTuneDBSizeMidRAM,
+				OSType:            "linux",
+			}
+			byName := map[string]string{}
+			for _, setting := range RecommendPostgresOLTPSettings(opts, 18) {
+				byName[setting.Name] = setting.Value
+			}
+			for key, value := range tt.want {
+				if byName[key] != value {
+					t.Errorf("%s = %q, want %q", key, byName[key], value)
+				}
+			}
+			if _, ok := byName["io_method"]; ok {
+				t.Error("io_method should only be emitted when explicitly configured")
+			}
+		})
+	}
+}
+
+// A container without a CPU limit reports every core of its host.
+func TestDetectedPostgresTuneCPUsAreBounded(t *testing.T) {
+	for detected, want := range map[int]int{0: 1, 8: 8, 16: 16, 17: 16, 224: 16} {
+		if got := detectedPostgresTuneCPUs(detected); got != want {
+			t.Errorf("detectedPostgresTuneCPUs(%d) = %d, want %d", detected, got, want)
+		}
+	}
+}
+
+// The startup settings are written before the database exists, so they must
+// not change with its size, and they must leave out io_method, which would
+// stop the server from starting if PostgreSQL rejected it.
+func TestRecommendPostgresStartupSettings(t *testing.T) {
 	opts := PostgresTuneOptions{
 		Enabled:           true,
 		Profile:           postgresTuneProfileOLTP,
 		MemoryBudgetBytes: 16 * sizeGB,
 		CPUs:              8,
-		Connections:       100,
+		Connections:       300,
 		Storage:           postgresTuneStorageNVMe,
-		DBSize:            postgresTuneDBSizeMidRAM,
 		OSType:            "linux",
+		IOMethod:          "io_uring",
 	}
-
-	settings := RecommendPostgresOLTPSettings(opts, 18)
-	byName := map[string]string{}
-	for _, setting := range settings {
-		byName[setting.Name] = setting.Value
+	want := []PostgresTuneSetting{
+		{Name: "shared_buffers", Value: "2GB", RequiresRestart: true},
+		{Name: "wal_buffers", Value: "16MB", RequiresRestart: true},
+		{Name: "huge_pages", Value: "try", RequiresRestart: true},
+		{Name: "max_worker_processes", Value: "8", RequiresRestart: true},
 	}
-
-	expected := map[string]string{
-		"max_connections":                  "100",
-		"shared_buffers":                   "4GB",
-		"effective_cache_size":             "12GB",
-		"maintenance_work_mem":             "1GB",
-		"wal_buffers":                      "16MB",
-		"min_wal_size":                     "2GB",
-		"max_wal_size":                     "8GB",
-		"random_page_cost":                 "1.1",
-		"effective_io_concurrency":         "1000",
-		"work_mem":                         "38836kB",
-		"huge_pages":                       "try",
-		"jit":                              "off",
-		"wal_compression":                  "lz4",
-		"max_worker_processes":             "8",
-		"max_parallel_workers_per_gather":  "4",
-		"max_parallel_workers":             "8",
-		"max_parallel_maintenance_workers": "4",
-	}
-
-	for key, value := range expected {
-		if byName[key] != value {
-			t.Fatalf("%s = %q, want %q", key, byName[key], value)
+	for _, dbSize := range []string{postgresTuneDBSizeAuto, postgresTuneDBSizeLessRAM, postgresTuneDBSizeMidRAM, postgresTuneDBSizeGreaterRAM} {
+		opts.DBSize = dbSize
+		if got := RecommendPostgresStartupSettings(opts, 18); !slices.Equal(got, want) {
+			t.Fatalf("DBSize %s: startup settings = %v, want %v", dbSize, got, want)
 		}
-	}
-
-	if _, ok := byName["io_method"]; ok {
-		t.Fatal("io_method should only be emitted when explicitly configured")
 	}
 }
 
 func TestLoadPostgresTuneOptionsFromEnv(t *testing.T) {
 	t.Setenv("POSTGRES_TUNE", "auto")
 	t.Setenv("POSTGRES_TUNE_MEMORY", "8GB")
-	t.Setenv("POSTGRES_TUNE_CPUS", "4")
+	t.Setenv("POSTGRES_TUNE_CPUS", "64")
 	t.Setenv("POSTGRES_TUNE_STORAGE", "hdd")
 	t.Setenv("POSTGRES_TUNE_DB_SIZE", "greater_ram")
 
@@ -84,11 +200,15 @@ func TestLoadPostgresTuneOptionsFromEnv(t *testing.T) {
 	if opts.MemorySource != "env" {
 		t.Fatalf("MemorySource = %q, want env", opts.MemorySource)
 	}
+	if !opts.MemoryExplicit {
+		t.Fatal("MemoryExplicit = false, want true for a set POSTGRES_TUNE_MEMORY")
+	}
 	if opts.MemoryBudgetPercent != 100 {
 		t.Fatalf("MemoryBudgetPercent = %d, want 100", opts.MemoryBudgetPercent)
 	}
-	if opts.CPUs != 4 {
-		t.Fatalf("CPUs = %d, want 4", opts.CPUs)
+	// An explicit count is the operator's and is not bounded.
+	if opts.CPUs != 64 || opts.DetectedCPUs != 0 {
+		t.Fatalf("CPUs = %d, DetectedCPUs = %d, want 64 and 0", opts.CPUs, opts.DetectedCPUs)
 	}
 	if opts.Connections != 100 {
 		t.Fatalf("Connections = %d, want 100", opts.Connections)
@@ -164,6 +284,53 @@ func TestClassifyPostgresTuneDBSize(t *testing.T) {
 func TestParsePostgresTuneByteSizeRequiresUnit(t *testing.T) {
 	if _, err := parsePostgresTuneByteSize("16"); err == nil {
 		t.Fatal("expected bare memory value to be rejected")
+	}
+}
+
+// postgresStartupTuneSetting mirrors which tuned settings PostgreSQL reads
+// only at start. A new major version can move a setting either way: a
+// reloadable one in the startup file is wasted, and a restart-only one left
+// out brings back the restart a new cluster needs.
+func TestPostgresStartupSettingsMatchServerPostgres(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	major, err := postgresMajorVersion(ctx, pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Enough memory and CPUs that every tuned setting is recommended.
+	opts := PostgresTuneOptions{
+		Enabled:           true,
+		MemoryBudgetBytes: 64 * sizeGB,
+		CPUs:              32,
+		Connections:       100,
+		Storage:           postgresTuneStorageSSD,
+		DBSize:            postgresTuneDBSizeMidRAM,
+		OSType:            "linux",
+		IOMethod:          "worker",
+	}
+	for _, setting := range RecommendPostgresOLTPSettings(opts, major) {
+		atStart, err := postgresSettingRequiresRestart(ctx, pool, setting.Name)
+		if err != nil {
+			t.Fatalf("%s: %v", setting.Name, err)
+		}
+		startup := postgresStartupTuneSetting(setting.Name, major)
+		leftOut := setting.Name == "max_connections" || setting.Name == "io_method"
+		if startup && !atStart {
+			t.Errorf("%s is reloadable on PostgreSQL %d; drop it from the startup settings", setting.Name, major)
+		}
+		if atStart && !startup && !leftOut {
+			t.Errorf("%s needs a restart on PostgreSQL %d; add it to the startup settings", setting.Name, major)
+		}
 	}
 }
 

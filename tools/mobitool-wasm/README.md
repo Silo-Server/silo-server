@@ -7,8 +7,8 @@ MOBI/AZW/AZW3 ebooks to EPUB on demand. The consuming package is
 `internal/ebookconvert`, which `go:embed`s this artifact.
 
 ## Why this shape
-- **No cgo, no external binary.** The `.wasm` is `go:embed`-ed; the Go build stays
-  `CGO_ENABLED=0` and cross-compiles trivially.
+- **No cgo, no external binary.** The `.wasm` is `go:embed`-ed, so the converter adds
+  no cgo, native library or external binary to the build.
 - **Architecture-independent.** wasm32 bytecode runs identically on amd64/arm64
   servers through wazero. Build once (CI, amd64), run anywhere.
 - **Sandboxed.** Untrusted ebook bytes are parsed inside the WASM sandbox with

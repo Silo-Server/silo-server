@@ -178,7 +178,7 @@ reversible by adding UI back, not by a data migration.
 
 Reuse these instead of adding a bespoke variant per page:
 
-- `SettingField` / `FieldGroup` / `SaveBar` (`web/src/pages/admin-settings/`)
+- `SettingField` / `FieldGroup` (`web/src/pages/admin-settings/`), `SaveBar` (`web/src/components/`)
   and `useSettingsForm` (`web/src/hooks/`) — the one save model. Every page
   batches edits and commits them through one `SaveBar` with Discard; provider
   credentials are the only exception, and only because they need
@@ -236,8 +236,8 @@ not folded into this pass:
 - Key renames (e.g. un-namespaced `allow_4k_transcode`,
   `enable_transcode_throttle`, `transcode_throttle_seconds` moving under
   `playback.*`).
-- Introducing `server.public_url` as one canonical public URL that
-  `jellyfin_compat.public_url` and friends would derive from.
+- Deriving `jellyfin_compat.public_url` and friends from `server.public_url`,
+  which already exists.
 - Deleting the legacy `s3.operational_*` rows that a past migration copied and
   never removed.
 

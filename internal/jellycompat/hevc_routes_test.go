@@ -25,10 +25,11 @@ func TestHEVCPlaybackURLsRejectOlderAPIRouters(t *testing.T) {
 	for _, channels := range []int{2, 6} {
 		source := testCompatSource(NewResourceIDCodec(), testCompatVersion())
 		source.TargetVideoCodec = "hevc"
+		source.SupportsDirectPlay, source.SupportsDirectStream = false, false
 		for i := range source.Version.AudioTracks {
 			source.Version.AudioTracks[i].Channels = channels
 		}
-		dto := (&PlaybackHandler{}).mediaSourceDTO("item", "play", "token", source)
+		dto := (&PlaybackHandler{}).mediaSourceDTO("item", "play", source)
 		urls := []string{dto.TranscodingURL}
 		for _, resource := range []string{"stream.m3u8", "init.mp4", "seg_00001.m4s"} {
 			urls = append(urls, buildSegmentProxyPath("item", "play", source.ID, resource, compatHLSRoutePathSegment(source)))

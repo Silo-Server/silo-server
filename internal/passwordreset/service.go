@@ -213,7 +213,7 @@ func (s *Service) Issue(ctx context.Context, in IssueInput) (*IssueResult, error
 		return nil, err
 	}
 
-	resetURL := linkBase + "/reset-password/" + token
+	resetURL := mail.AccountLink(linkBase, "/reset-password", token)
 	result := &IssueResult{ExpiresAt: expiresAt}
 	if in.Delivery == DeliveryLink {
 		result.URL = resetURL
@@ -317,7 +317,7 @@ func (s *Service) sendRequested(ctx context.Context, login string) error {
 		return err
 	}
 	brand := s.brand.Load(ctx)
-	content := composeResetEmail(brand, true, user.Username, s.serverName(ctx), linkBase+"/reset-password/"+token, expiresAt, s.now())
+	content := composeResetEmail(brand, true, user.Username, s.serverName(ctx), mail.AccountLink(linkBase, "/reset-password", token), expiresAt, s.now())
 	if err := s.mail.Send(ctx, mail.Message{
 		To:       []string{user.Email},
 		Subject:  content.Subject,

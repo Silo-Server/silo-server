@@ -123,6 +123,88 @@ Several items with one key follow these rules:
   names one. Plugin tombstones carry only the key, so one whose rows name more
   than one kind of title changes nothing and adds a warning.
 
+## Sync-run admission
+
+Manual admission locks the current connection row for its provider, account and
+profile in a short Read Committed PostgreSQL transaction, independent of the
+session's default isolation. Provider deferral, active-run
+coalescing, stale-run retirement, the one-hour manual cooldown and insertion
+commit together. Queued or running rows through the existing ten-minute manual
+window coalesce. Older active rows are marked failed; that retirement commits
+even when its completion time causes a cooldown response.
+
+Scheduled insertion takes the same row lock and skips a live manual reservation
+within that window. Scheduled runs retain their existing overlap behavior with
+other scheduled runs and have no new timeout or takeover policy. A manual
+request can still retire an older scheduled row without stopping that worker.
+Both producers reserve before taking the process-local execution guard, and only
+a newly created reservation starts work.
+
+Completion takes the same short row lock, preserving real late results and
+counters even after timeout retirement. Terminal persistence uses a bounded
+context detached from work cancellation. No transaction spans provider work.
+All API nodes must use this admission boundary for the guarantee to hold; older
+nodes can still insert independently during a mixed-version rollout. Dispatch
+remains process-local, without durable replay or exactly-once provider effects.
+
+## Pending watches
+
+Watched imports read a provider incrementally. After a sync, the cursor is past every
+row it returned, so the provider never returns a watch again unless that title's
+entry changes. A watch that matched no library item when it was read would be lost
+for good once the title is added later. `watch_provider_pending_watches` keeps those
+watches instead.
+
+- Each row is keyed by `(connection_id, kind, provider_item_key)`. The kind is part of
+  the key because provider item keys repeat across kinds. A row belongs to the provider
+  account that returned it. Only the connection's current account writes rows: the
+  write checks the account under a lock on the connection row, which a rebind waits
+  for. Listing a connection's rows drops those of any other account. After a reconnect
+  to a different account, no watch from the old one imports, even from a sync of the
+  old account that was still running.
+- A plugin can return watched state for a SERIES item: the account finished the
+  series as of `last_watched_at`, which it must send. Without that time, the row is
+  skipped with a warning. The marker covers every regular-season episode in a library
+  that had aired by then, or that has no air date. Specials are not covered. Simkl
+  reports completed shows this way, because it lists no episodes for them.
+- A marker covers only episodes the connection's profile may open. They must be in
+  the libraries it may see, with the series in one of them too, and the series must be
+  within its maturity limits (`Service.WithProfileAccess`, resolved through
+  `access.Resolver` once per sync and checked with
+  `catalog.FilterAccessibleContentIDs`; the profile's PIN and hidden-library preference
+  don't apply). Without that limit, one marker would record, and a second provider's
+  export would send, episodes the profile can't open. The kept-marker hash uses the
+  same rules, so a change in what the profile may open re-applies the marker to the
+  new set.
+- Whole-series and whole-season markers stay kept after they match, with
+  `applied_episodes`, a hash of the episodes they covered (`historyimport.LeafSetHash`).
+  Each sync computes the same hash for every kept series marker in one query
+  (`historyimport.SeriesLeafHashes`, the same filter as the expansion). A marker whose
+  covered episodes changed is applied again. That marks an episode a library gains
+  later, even when another left between the same two syncs, and an episode already
+  marked keeps its play.
+- A connection keeps at most 50,000 rows (`maxPendingWatches`). Past that the oldest by
+  `last_watched_at` go, so a provider history that matches little of the library can't
+  grow what every sync reloads without bound. Listing returns nothing to a caller whose
+  account is no longer the connection's.
+- Every watched import matches the kept rows again after the provider's own rows, in
+  batched catalog reads (`historyimport.MatchAllOn`). A kept row that matches imports
+  like a fresh one and is deleted. One that still matches nothing adds no warning. A
+  provider row with the same kind and key replaces the kept row for that sync.
+- Writes are guarded by `last_watched_at`: an overlapping older sync cannot replace a
+  newer kept watch, and deleting a matched watch never removes a newer one. The rows are
+  written before the cursor is saved. If that write fails, the sync fails, and the
+  provider's rows are read again.
+- The plugin watched cursor key carries a version, now `plugin.remote.watched.v3`.
+  It's raised when an import change needs rows that an earlier version read and
+  dropped: v2 for pending watches, v3 for finished-series watched state. Each raise
+  makes every connection read its watched history once more in full. A node still
+  running an old version writes its old key, which is ignored, so a rolling deploy
+  can't undo the re-read. Imports never re-add a play the profile removed
+  (`user_history_hidden_items`).
+- A restore keeps the live connection's cursors and takes the kept rows from the backup.
+  A watch first kept after the backup was taken is not read again.
+
 ## Watched-history export
 
 A sync drains a connection's whole pending history-export backlog, oldest play
@@ -169,6 +251,17 @@ waits for that lookup for at most half of the time it has left. Lookups that
 run on the caller's context, for watched exports and the
 open-scrobble sweep (one lookup for all its sessions), take at most five
 seconds and at most half of the time the caller has left.
+
+A Jellyfin client's Stopped report stages its stop and delivers it as a
+confirmed stop, which gives each provider up to two minutes, the plugin
+host's watch-sync deadline. That budget starts when watch-sync begins the
+dispatch, so time the stop spends queued behind earlier events it must follow
+counts against it. The report waits at most five seconds
+for that delivery before it answers; delivery carries on in the background. A
+staged stop that keeps failing is retried until an hour after the play
+stopped, then dropped with one warning. History export can still deliver a
+dropped completed play, but only when watched export is turned on for that
+connection and the play was recorded in local watch history.
 
 An episode's `title` is its own, and its `year` is its series' year, as on
 the import side. An item whose event kind differs from its catalog kind gets

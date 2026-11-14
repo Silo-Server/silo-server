@@ -2,7 +2,9 @@ import type { SettingsSectionEntry } from "@/api/types";
 import { homeRowsPath, type RowLinkCollection } from "@/lib/homeRows/rowLinks";
 import type { PageRef, Surface } from "@/lib/homeRows/types";
 
-import { joinNames, libraryPageLabel } from "./copy";
+import { t } from "@/i18n";
+
+import { joinNames, libraryPageLabel, nameWithPlace } from "./copy";
 
 /**
  * A Home or library page row that shows a collection: an administrator's row
@@ -32,9 +34,19 @@ type LibraryNames = ReadonlyMap<number, string>;
 
 /** "Home" or "Kids page"; on this profile's own pages "My Home" or "My Kids page". */
 export function rowPlace(page: PageRef, names: LibraryNames, surface: Surface = "admin"): string {
-  const place =
-    page.kind === "home" ? "Home" : libraryPageLabel(names.get(page.libraryId) ?? "Library");
-  return surface === "profile" ? `My ${place}` : place;
+  if (page.kind === "home")
+    return surface === "profile"
+      ? t("web.collections.rows.myHome")
+      : t("web.collections.rows.home");
+  const library = libraryName(names, page.libraryId);
+  return surface === "profile"
+    ? t("web.collections.rows.myLibraryPage", { library })
+    : libraryPageLabel(library);
+}
+
+/** A library's name, or a neutral word while it isn't known. */
+function libraryName(names: LibraryNames, libraryId: number): string {
+  return names.get(libraryId) ?? t("web.collections.rows.unknownLibrary");
 }
 
 /** `rowPlace` inside a sentence: "Home", "the Kids page", "my Home" or "my Kids page". */
@@ -43,8 +55,14 @@ export function rowPlaceInSentence(
   names: LibraryNames,
   surface: Surface = "admin",
 ): string {
-  if (surface === "profile") return `my ${rowPlace(page, names)}`;
-  return page.kind === "home" ? "Home" : `the ${rowPlace(page, names)}`;
+  if (page.kind === "home")
+    return surface === "profile"
+      ? t("web.collections.rows.myHomeInSentence")
+      : t("web.collections.rows.home");
+  const library = libraryName(names, page.libraryId);
+  return surface === "profile"
+    ? t("web.collections.rows.myLibraryPageInSentence", { library })
+    : t("web.collections.rows.theLibraryPage", { library });
 }
 
 /**
@@ -52,14 +70,22 @@ export function rowPlaceInSentence(
  * sees and "Hidden" for one this profile hid.
  */
 export function rowMeta(row: CollectionRow, names: LibraryNames): string {
-  const where = `${rowPlace(row.page, names, row.surface)} · row ${row.position} of ${row.pageRowCount}`;
+  const where = t("web.collections.rows.rowMeta", {
+    place: rowPlace(row.page, names, row.surface),
+    position: row.position,
+    total: row.pageRowCount,
+  });
   if (row.enabled) return where;
-  return `${where} · ${row.surface === "profile" ? "Hidden" : "Turned off"}`;
+  const state =
+    row.surface === "profile"
+      ? t("web.collections.rows.hidden")
+      : t("web.collections.rows.turnedOff");
+  return `${where} · ${state}`;
 }
 
 /** "Studio Ghibli (Home)": each row by title and place, for naming rows in a message. */
 export function rowLabels(rows: readonly CollectionRow[], names: LibraryNames): string[] {
-  return rows.map((row) => `${row.title} (${rowPlace(row.page, names)})`);
+  return rows.map((row) => nameWithPlace(row.title, rowPlace(row.page, names)));
 }
 
 /**
@@ -72,15 +98,21 @@ export function rowPlaces(rows: readonly CollectionRow[], names: LibraryNames): 
   const pages = [
     ...new Set(
       rows.flatMap((row) =>
-        row.page.kind === "library" ? [names.get(row.page.libraryId) ?? "Library"] : [],
+        row.page.kind === "library" ? [libraryName(names, row.page.libraryId)] : [],
       ),
     ),
   ];
-  const article = mine ? "my" : "the";
   const parts = [
-    ...(home ? [mine ? "my Home" : "Home"] : []),
+    ...(home
+      ? [mine ? t("web.collections.rows.myHomeInSentence") : t("web.collections.rows.home")]
+      : []),
     ...(pages.length > 0
-      ? [`${article} ${joinNames(pages)} page${pages.length === 1 ? "" : "s"}`]
+      ? [
+          t(mine ? "web.collections.rows.myLibraryPages" : "web.collections.rows.theLibraryPages", {
+            count: pages.length,
+            libraries: joinNames(pages),
+          }),
+        ]
       : []),
   ];
   return parts.length > 0 ? joinNames(parts) : null;
@@ -92,7 +124,7 @@ export function onRowsLine(rows: readonly CollectionRow[], names: LibraryNames):
     rows.filter((row) => row.enabled),
     names,
   );
-  return places ? `On ${places}` : null;
+  return places ? t("web.collections.rows.onPlaces", { places }) : null;
 }
 
 interface NamedLibrary {

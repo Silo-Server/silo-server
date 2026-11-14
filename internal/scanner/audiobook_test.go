@@ -392,7 +392,7 @@ func TestCollectAudiobookRootScansKeepsSiblingFoldersWhenRootHasLooseAudio(t *te
 		t.Fatal(err)
 	}
 
-	scans, err := collectAudiobookRootScans(t.Context(), 1, []string{root}, nil, true)
+	scans, err := collectAudiobookRootScans(t.Context(), 1, []string{root}, []string{root}, true)
 	if err != nil {
 		t.Fatalf("collectAudiobookRootScans: %v", err)
 	}
@@ -466,7 +466,7 @@ func TestScanSubtreeAudiobookLibraryUsesAudiobookPipeline(t *testing.T) {
 	}
 
 	s := &Scanner{ffprobePath: "definitely-missing-ffprobe"}
-	_, err := s.ScanSubtree(context.Background(), &models.MediaFolder{ID: 42, Type: "audiobooks"}, bookDir)
+	_, err := s.ScanSubtree(context.Background(), &models.MediaFolder{ID: 42, Type: "audiobooks", Paths: []string{root}}, bookDir)
 	if err == nil {
 		t.Fatal("ScanSubtree returned nil, want audiobook parse failure")
 	}
@@ -481,7 +481,9 @@ func TestScanSubtreeAudiobookLibraryUsesAudiobookPipeline(t *testing.T) {
 func TestScanSubtreeAudiobookLibraryRejectsInvalidScopedRoot(t *testing.T) {
 	s := &Scanner{}
 
-	_, err := s.ScanSubtree(context.Background(), &models.MediaFolder{ID: 42, Type: "audiobooks"}, "")
+	// A relative root lets the scope pass the library check and reach the
+	// audiobook scan-root validation.
+	_, err := s.ScanSubtree(context.Background(), &models.MediaFolder{ID: 42, Type: "audiobooks", Paths: []string{"."}}, "")
 	if err == nil {
 		t.Fatal("ScanSubtree returned nil, want invalid root error")
 	}
@@ -502,7 +504,7 @@ func TestScanFileAudiobookLibraryUsesAudiobookPipeline(t *testing.T) {
 	}
 
 	s := &Scanner{ffprobePath: "definitely-missing-ffprobe"}
-	err := s.ScanFile(context.Background(), filePath, &models.MediaFolder{ID: 42, Type: "audiobooks"})
+	err := s.ScanFile(context.Background(), filePath, &models.MediaFolder{ID: 42, Type: "audiobooks", Paths: []string{root}})
 	if err == nil {
 		t.Fatal("ScanFile returned nil, want audiobook parse failure")
 	}
@@ -514,10 +516,55 @@ func TestScanFileAudiobookLibraryUsesAudiobookPipeline(t *testing.T) {
 	}
 }
 
+// A file change from real-time monitoring or autoscan rebuilds the books under
+// the file's folder with the library's ignore files, as a library scan does. For
+// a file directly in the library root, that is every book in the library.
+func TestScanFileAudiobookHonorsIgnoreFiles(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, ".siloignore"), "Drafts\n")
+	writeTestFile(t, filepath.Join(root, "intro.mp3"), "audio")
+	writeTestFile(t, filepath.Join(root, "Kept Book", "01.mp3"), "audio")
+	writeTestFile(t, filepath.Join(root, "Drafts", "Draft Book", "01.mp3"), "audio")
+	writeTestFile(t, filepath.Join(root, "Hidden Book", ".nomedia"), "")
+	writeTestFile(t, filepath.Join(root, "Hidden Book", "01.mp3"), "audio")
+
+	// Every book fails to parse without ffprobe, so the error names each book
+	// the scan rebuilt.
+	s := &Scanner{ffprobePath: "definitely-missing-ffprobe"}
+	err := s.ScanFile(t.Context(), filepath.Join(root, "intro.mp3"), &models.MediaFolder{ID: 42, Type: "audiobooks", Paths: []string{root}})
+	if err == nil {
+		t.Fatal("ScanFile returned nil, want audiobook parse failures")
+	}
+	if !strings.Contains(err.Error(), "Kept Book") {
+		t.Errorf("error = %q, want Kept Book rebuilt", err)
+	}
+	for _, excluded := range []string{"Draft Book", "Hidden Book"} {
+		if strings.Contains(err.Error(), excluded) {
+			t.Errorf("error = %q, want excluded %s left alone", err, excluded)
+		}
+	}
+}
+
+// An admin's request for an excluded file's exact path still scans it.
+func TestScanFileAudiobookExplicitRequestScansExcludedFile(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, ".siloignore"), "Drafts\n")
+	file := filepath.Join(root, "Drafts", "Draft Book", "01.mp3")
+	writeTestFile(t, file, "audio")
+
+	s := &Scanner{ffprobePath: "definitely-missing-ffprobe"}
+	err := s.ScanFile(WithExplicitFileRequest(t.Context()), file, &models.MediaFolder{ID: 42, Type: "audiobooks", Paths: []string{root}})
+	if err == nil || !strings.Contains(err.Error(), "Draft Book") {
+		t.Fatalf("ScanFile error = %v, want Draft Book rebuilt", err)
+	}
+}
+
 func TestScanFileAudiobookLibraryRejectsRelativeScopedRoot(t *testing.T) {
 	s := &Scanner{}
 
-	err := s.ScanFile(context.Background(), "chapter.mp3", &models.MediaFolder{ID: 42, Type: "audiobooks"})
+	// A relative root lets the path pass the library check and reach the
+	// audiobook scan-root validation.
+	err := s.ScanFile(context.Background(), "chapter.mp3", &models.MediaFolder{ID: 42, Type: "audiobooks", Paths: []string{"."}})
 	if err == nil {
 		t.Fatal("ScanFile returned nil, want invalid root error")
 	}
@@ -645,7 +692,8 @@ func TestApplyBookToMediaItemDoesNotBlankAllNarratorSuffixTitle(t *testing.T) {
 }
 
 // An admin's locked fields survive a changed-book rescan: tags only fill what
-// the editor has not pinned.
+// the editor has not pinned. The item's overview starts empty, as after an
+// admin clears a bad tag description.
 func TestApplyBookToMediaItemKeepsLockedFields(t *testing.T) {
 	book := &parsedAudiobook{
 		Title:       "Tagged Title",
@@ -653,6 +701,7 @@ func TestApplyBookToMediaItemKeepsLockedFields(t *testing.T) {
 		ReleaseDate: "2001-02-03",
 		Genres:      []string{"Tagged Genre"},
 		Publisher:   "Tagged Press",
+		Overview:    "Tagged overview",
 	}
 	edited := "2020-05-06"
 	newItem := func(locked ...int) *models.MediaItem {
@@ -667,17 +716,19 @@ func TestApplyBookToMediaItemKeepsLockedFields(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		name        string
-		locked      []int
-		wantTitle   string
-		wantYear    int
-		wantGenres  []string
-		wantStudios []string
+		name         string
+		locked       []int
+		wantTitle    string
+		wantYear     int
+		wantGenres   []string
+		wantStudios  []string
+		wantOverview string
 	}{
-		{"nothing locked", nil, "Tagged Title", 2001, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}},
-		{"title locked", []int{lockedFieldName}, "Admin Title", 2001, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}},
-		{"release dates locked", []int{lockedFieldReleaseDates}, "Tagged Title", 2020, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}},
-		{"genres and studios locked", []int{lockedFieldGenres, lockedFieldStudios}, "Tagged Title", 2001, []string{"Admin Genre"}, []string{"Admin Studio"}},
+		{"nothing locked", nil, "Tagged Title", 2001, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}, "Tagged overview"},
+		{"title locked", []int{lockedFieldName}, "Admin Title", 2001, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}, "Tagged overview"},
+		{"release dates locked", []int{lockedFieldReleaseDates}, "Tagged Title", 2020, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}, "Tagged overview"},
+		{"genres and studios locked", []int{lockedFieldGenres, lockedFieldStudios}, "Tagged Title", 2001, []string{"Admin Genre"}, []string{"Admin Studio"}, "Tagged overview"},
+		{"overview locked", []int{lockedFieldOverview}, "Tagged Title", 2001, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			item := newItem(tc.locked...)
@@ -696,6 +747,9 @@ func TestApplyBookToMediaItemKeepsLockedFields(t *testing.T) {
 			}
 			if !slices.Equal(item.Studios, tc.wantStudios) {
 				t.Errorf("Studios = %v, want %v", item.Studios, tc.wantStudios)
+			}
+			if item.Overview != tc.wantOverview {
+				t.Errorf("Overview = %q, want %q", item.Overview, tc.wantOverview)
 			}
 		})
 	}

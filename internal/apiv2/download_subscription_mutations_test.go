@@ -80,12 +80,65 @@ func TestSubscriptionMutationTransport(t *testing.T) {
 		t.Fatalf("%d %s %+v", rec.Code, rec.Body.String(), svc.patch)
 	}
 	current := rec.Header().Get("ETag")
-	for _, body := range []string{`{"active":null}`, `{"mode":null}`, `{"season_numbers":null}`, `{"max_storage_bytes":-1}`} {
-		rec = do(t, h, "PATCH", path+"/monitor", body, with(device, "If-Match", current))
-		if rec.Code != 400 {
-			t.Fatalf("invalid %d %s", rec.Code, rec.Body.String())
+	// An out-of-range bound is a validation failure at the member, with
+	// create's code and detail.
+	tooMany := strings.TrimSuffix(strings.Repeat("1,", 10001), ",")
+	for _, tc := range []struct{ patch, create, location, detail string }{
+		{`{"max_storage_bytes":-1}`, `"season_numbers":[1],"max_storage_bytes":-1`, "body.max_storage_bytes", "expected number >= 0"},
+		{`{"season_numbers":[` + tooMany + `]}`, `"season_numbers":[` + tooMany + `],"max_storage_bytes":0`, "body.season_numbers", "expected array length <= 10000"},
+	} {
+		p := requireProblem(t, do(t, h, "PATCH", path+"/monitor", tc.patch, with(device, "If-Match", current)), TypeValidationFailed)
+		if len(p.Errors) != 1 || p.Errors[0].Location != tc.location || p.Errors[0].Code != "out_of_range" || p.Errors[0].Detail != tc.detail {
+			t.Fatalf("%s: errors = %+v", tc.location, p.Errors)
+		}
+		create := requireProblem(t, do(t, h, "POST", path, `{"series_id":"series","mode":"specific_seasons","delete_watched":false,`+tc.create+`}`, device), TypeValidationFailed)
+		if len(create.Errors) != 1 || create.Errors[0] != p.Errors[0] {
+			t.Fatalf("%s: patch errors %+v, create errors %+v; want the same", tc.location, p.Errors, create.Errors)
 		}
 	}
+	// Null on a monitor field is a validation failure naming the member.
+	for _, member := range []string{"active", "mode", "season_numbers", "delete_watched", "max_storage_bytes", "quality"} {
+		p := requireProblem(t, do(t, h, "PATCH", path+"/monitor", `{"`+member+`":null}`, with(device, "If-Match", current)), TypeValidationFailed)
+		if len(p.Errors) != 1 || p.Errors[0].Location != "body."+member {
+			t.Fatalf("null %s: errors = %+v", member, p.Errors)
+		}
+	}
+	p := requireProblem(t, do(t, h, "PATCH", path+"/monitor", `{"active":true,"quality":null,"mode":null}`, with(device, "If-Match", current)), TypeValidationFailed)
+	if len(p.Errors) != 2 || p.Errors[0].Location != "body.mode" || p.Errors[1].Location != "body.quality" {
+		t.Fatalf("two nulls: errors = %+v", p.Errors)
+	}
+	// An invalid monitor option the service rejects is a validation failure
+	// at the member, on create and on edit. Each body passes the schema.
+	// Only create names a series, so only create can get ErrNotSeries.
+	for _, tc := range []struct {
+		err            error
+		create, patch  string
+		location, code string
+	}{
+		{downloads.ErrSeasonsRequired, `"mode":"specific_seasons"`, `{"mode":"specific_seasons"}`, "body.season_numbers", "required"},
+		{downloads.ErrInvalidSeasonNumbers, `"mode":"specific_seasons","season_numbers":[-1]`, `{"season_numbers":[-1]}`, "body.season_numbers", "out_of_range"},
+		{downloads.ErrNotSeries, `"mode":"all"`, "", "body.series_id", "invalid"},
+	} {
+		svc.err = tc.err
+		problems := []problemDoc{requireProblem(t, do(t, h, "POST", path, `{"series_id":"series","delete_watched":false,"max_storage_bytes":0,`+tc.create+`}`, device), TypeValidationFailed)}
+		if tc.patch != "" {
+			problems = append(problems, requireProblem(t, do(t, h, "PATCH", path+"/monitor", tc.patch, with(device, "If-Match", current)), TypeValidationFailed))
+		}
+		for _, p := range problems {
+			if len(p.Errors) != 1 || p.Errors[0].Location != tc.location || p.Errors[0].Code != tc.code {
+				t.Fatalf("%v: errors = %+v", tc.err, p.Errors)
+			}
+		}
+	}
+	// Edit's schema has no mode enum, so the service rejects an unknown mode;
+	// the answer matches the one create's schema gives.
+	svc.err = downloads.ErrInvalidSubscriptionMode
+	patchMode := requireProblem(t, do(t, h, "PATCH", path+"/monitor", `{"mode":"weekly"}`, with(device, "If-Match", current)), TypeValidationFailed)
+	createMode := requireProblem(t, do(t, h, "POST", path, `{"series_id":"series","mode":"weekly","delete_watched":false,"max_storage_bytes":0}`, device), TypeValidationFailed)
+	if len(patchMode.Errors) != 1 || len(createMode.Errors) != 1 || patchMode.Errors[0] != createMode.Errors[0] {
+		t.Fatalf("unknown mode: patch errors %+v, create errors %+v; want the same", patchMode.Errors, createMode.Errors)
+	}
+	svc.err = nil
 	rec = do(t, h, "DELETE", path+"/monitor", "", with(device, "If-Match", tag))
 	if rec.Code != 412 {
 		t.Fatalf("stale delete %d", rec.Code)

@@ -996,6 +996,10 @@ func (s *Service) copyTransitionData(ctx context.Context, staged stagedTarget, p
 		}
 	}
 	copyScope := func(scope string, source, destination blobstore.Store, prefix string, excluded ...string) error {
+		// Backups never move with storage: local ones hold unencrypted dumps
+		// that must not reach a bucket, and a bucket's are tied to their
+		// destination. Every pass, public or private, leaves them out.
+		excluded = append(excluded, blobstore.BackupNamespace)
 		copied, bytes, skipped, err := s.copyPrefixPass(ctx, staged.ID, scope, source, destination, prefix, progress, pass.objects, runID, sameRunListings, finalPass, excluded...)
 		if err != nil {
 			return err
@@ -1083,7 +1087,7 @@ var operationalPrefixes = append(append([]string(nil), operationalArtifactPrefix
 
 // preservedAssetPrefixes are the assets preserve_uploads copies: uploads that
 // cannot be downloaded again from a provider.
-var preservedAssetPrefixes = []string{"branding", "collection-images", "user-collection-images", "library-posters", "subtitles"}
+var preservedAssetPrefixes = []string{"branding", "collection-images", "user-collection-images", "library-posters", "overlay-images", "subtitles"}
 
 // operationalStore mirrors blobstore.Open: a private bucket owns diagnostics,
 // job artifacts, and avatars whatever the backend is, a local backend without

@@ -774,6 +774,11 @@ func TestValidateValueRejectsOutOfContractValues(t *testing.T) {
 		{name: "nullable language tag", key: keyAudioLanguage, value: jsonNull},
 		{name: "malformed language tag", key: keyAudioLanguage, value: `"not a language"`, wantErr: true},
 
+		// The interface language is an open tag; null, not "", means follow the device.
+		{name: "app language tag", key: "ui.app_language", value: `"pt-BR"`},
+		{name: "app language follows the device", key: "ui.app_language", value: jsonNull},
+		{name: "app language empty string rejected", key: "ui.app_language", value: `""`, wantErr: true},
+
 		{name: "non-nullable boolean rejects null", key: keyAutoPlayNext, value: jsonNull, wantErr: true},
 	}
 
@@ -1334,9 +1339,15 @@ func TestObjectSchemasAcceptTheShapesClientsStore(t *testing.T) {
 
 	valid := map[string]string{
 		"catalog.metadata_language_overrides": `{"ja":"en","no":"x-silo-original"}`,
-		"ui.card_overlays": `{"version":2,"preset":"minimal","order":["hdr","year"],` +
+		"ui.card_overlays": `{"version":2,"preset":"plate",` +
+			`"style":{"size":1.4,"shape":"rounded","background":"#000000b3","textColor":"#ffffff",` +
+			`"borderColor":"#ffffff26","borderWidth":1,"fontWeight":"extrabold","uppercase":false,"shadow":true},` +
+			`"order":["hdr","year"],` +
 			`"items":{"hdr":{"enabled":true,"position":"top-left","accentColor":"#f5c518"},` +
-			`"year":{"enabled":false,"position":"bottom-right","showIcon":true}}}`,
+			`"resolution":{"enabled":true,"position":"left-edge",` +
+			`"image":"` + strings.Repeat("ab", 32) + `.webp","valueImages":{"2160p":"` + strings.Repeat("cd", 32) + `.webp"}},` +
+			`"rating_imdb":{"enabled":true,"position":"top-right"},` +
+			`"year":{"enabled":false,"position":"right-edge","showIcon":true}}}`,
 		"ui.sidebar_pins": `{"7":[{"type":"section","id":"recently-added","label":"Recently Added"}],` +
 			`"12":[{"type":"collection","id":"c-9","label":"Marvel"}]}`,
 		"ui.disabled_library_ids":      `[3,9]`,

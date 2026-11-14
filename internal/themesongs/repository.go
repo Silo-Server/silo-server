@@ -96,15 +96,14 @@ type owner struct {
 }
 
 func (r *Repository) Resolve(ctx context.Context, id string, inherit bool, filter catalog.AccessFilter) (string, []File, error) {
-	var kind, series, season string
-	var number int
+	item := Item{ID: id}
 	err := r.pool.QueryRow(ctx, `SELECT type, content_id, '', 0 FROM media_items WHERE content_id=$1
 		UNION ALL SELECT 'season', series_id, content_id, season_number FROM seasons WHERE content_id=$1
-		UNION ALL SELECT 'episode', series_id, COALESCE(season_id,''), season_number FROM episodes WHERE content_id=$1`, id).Scan(&kind, &series, &season, &number)
+		UNION ALL SELECT 'episode', series_id, COALESCE(season_id,''), season_number FROM episodes WHERE content_id=$1`, id).Scan(&item.Type, &item.SeriesID, &item.SeasonID, &item.SeasonNumber)
 	if errors.Is(err, pgx.ErrNoRows) {
 		if seriesID, seasonNumber, ok := catalog.ParseSyntheticSeasonID(id); ok {
 			err = r.pool.QueryRow(ctx, `SELECT 'season', series_id, COALESCE(season_id,''), season_number FROM episodes
-				WHERE series_id=$1 AND season_number=$2 LIMIT 1`, seriesID, seasonNumber).Scan(&kind, &series, &season, &number)
+				WHERE series_id=$1 AND season_number=$2 LIMIT 1`, seriesID, seasonNumber).Scan(&item.Type, &item.SeriesID, &item.SeasonID, &item.SeasonNumber)
 		}
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -113,9 +112,16 @@ func (r *Repository) Resolve(ctx context.Context, id string, inherit bool, filte
 	if err != nil {
 		return "", nil, err
 	}
-	if err := catalog.NewItemRepository(r.pool).EnsureAccessible(ctx, series, filter); err != nil {
+	if err := catalog.NewItemRepository(r.pool).EnsureAccessible(ctx, item.SeriesID, filter); err != nil {
 		return "", nil, err
 	}
+	return r.ResolveItem(ctx, item, inherit, filter)
+}
+
+// ResolveItem is Resolve for an item the caller already looked up and
+// authorized under filter, as item detail has: it repeats neither.
+func (r *Repository) ResolveItem(ctx context.Context, item Item, inherit bool, filter catalog.AccessFilter) (string, []File, error) {
+	id, kind, series, number := item.ID, item.Type, item.SeriesID, item.SeasonNumber
 	owners := []owner{}
 	switch kind {
 	case "movie", ownerSeries:
@@ -127,6 +133,7 @@ func (r *Repository) Resolve(ctx context.Context, id string, inherit bool, filte
 		}
 	case "episode":
 		if inherit {
+			season := item.SeasonID
 			if season == "" {
 				season = fmt.Sprintf("%s-S%02d", series, number)
 			}
@@ -151,7 +158,10 @@ func (r *Repository) Resolve(ctx context.Context, id string, inherit bool, filte
 
 func (r *Repository) files(ctx context.Context, target owner, filter catalog.AccessFilter) ([]File, error) {
 	conditions, args := catalog.MediaFileAccessSQL("mf", filter, []any{target.series, target.kind, target.seasonNumber})
-	conditions = append(conditions, `mf.content_id=$1`, `mf.missing_since IS NULL`, `mf.extra_id IS NULL`)
+	conditions = append(conditions, `mf.content_id=$1`, `mf.missing_since IS NULL`, `mf.extra_id IS NULL`,
+		// A theme matches only candidates in its own folder, so files in a
+		// folder without themes cannot contribute; most folders have none.
+		`EXISTS (SELECT 1 FROM item_theme_songs ts WHERE ts.media_folder_id=mf.media_folder_id)`)
 	// Collapse episodes and versions to owner directories before checking ambiguity.
 	// Flat episode roots name the video file; themes belong to its directory,
 	// subject to the same access and ambiguity checks as directory-valued roots.

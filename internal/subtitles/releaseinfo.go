@@ -26,9 +26,7 @@ var (
 
 // ParseReleaseInfo extracts release metadata from a media filename or path.
 func ParseReleaseInfo(filePathOrName string) ReleaseInfo {
-	name := filepath.Base(filePathOrName)
-	ext := filepath.Ext(name)
-	nameNoExt := strings.TrimSuffix(name, ext)
+	nameNoExt := releaseName(filePathOrName)
 
 	var info ReleaseInfo
 
@@ -49,4 +47,16 @@ func ParseReleaseInfo(filePathOrName string) ReleaseInfo {
 	}
 
 	return info
+}
+
+// ParseReleaseSource returns ParseReleaseInfo(filePathOrName).Source without
+// running the other patterns, for callers that render every card's badge.
+func ParseReleaseSource(filePathOrName string) string {
+	return sourceRe.FindString(releaseName(filePathOrName))
+}
+
+// releaseName is a path's file name without its extension.
+func releaseName(filePathOrName string) string {
+	name := filepath.Base(filePathOrName)
+	return strings.TrimSuffix(name, filepath.Ext(name))
 }

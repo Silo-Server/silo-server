@@ -3,6 +3,7 @@ package abs
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -229,7 +230,7 @@ func (h *Handler) handleSetItemProgress(w http.ResponseWriter, r *http.Request) 
 	}
 	contentID := chi.URLParam(r, "libraryItemId")
 	var body progressBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
 		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
 	}
@@ -330,7 +331,7 @@ func (h *Handler) handleSessionSync(w http.ResponseWriter, r *http.Request) {
 	}
 	sid := chi.URLParam(r, "sid")
 	var p syncPayload
-	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&p); err != nil {
 		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
 	}

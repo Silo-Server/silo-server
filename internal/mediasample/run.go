@@ -264,6 +264,7 @@ func (a attemptRun) samples(req Request) (Result, *AttemptError) {
 		if req.Sheets != nil {
 			req.skipFrame = keyframeSkipFor(header.info.VideoCodec)
 			req.lowDelay = keyframeLowDelayFor(header.info.VideoCodec)
+			req.timingAudio = header.info.AudioStreams
 		}
 		if req.Sheets != nil && req.Sheets.UseInputAspect {
 			out := req.Sheets.forDisplayAspect(header.info.displayAspect())
@@ -512,7 +513,6 @@ func (a attemptRun) readSheets(req Request, times []float64, plan listPlan, onDi
 		assembler.plan = plan
 		assembler.onDisorder = onDisorder
 	}
-	assembler.dtsTiming = req.lowDelay
 	if failure := a.exec(req, args, stdinBytes, assembler, append(logHandlers, assembler.line)...); failure != nil {
 		return Result{}, failure
 	}

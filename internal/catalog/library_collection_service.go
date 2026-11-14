@@ -171,6 +171,14 @@ type libraryCollectionSourceConfig struct {
 	Discover *libraryCollectionDiscoverConfig `json:"discover,omitempty"`
 }
 
+// TMDBCollectionSourceUnset reports whether a collection's source names no
+// TMDB collection: the placeholder a franchise template creates until an
+// administrator sets one.
+func TMDBCollectionSourceUnset(sourceConfig json.RawMessage) bool {
+	var cfg libraryCollectionSourceConfig
+	return json.Unmarshal(sourceConfig, &cfg) != nil || cfg.CollectionID <= 0
+}
+
 // libraryCollectionDiscoverConfig persists TMDB /discover filters in the
 // collection's source_config JSON. Field names follow the TMDBDiscoverSpec
 // JSON contract so the on-disk shape matches the template spec.
@@ -881,9 +889,11 @@ func slugifyCollectionTitle(title string) string {
 
 // MaybeGenerateCollage builds the collage an unrestricted viewer sees after a
 // sync, unless the collection has an uploaded or template poster, so the
-// common case is ready before anyone asks. Restricted viewers' collages are
-// built when first read (CollectionPosters). Errors are logged but never
-// propagated so that sync operations are not blocked by collage failures.
+// common case is ready before anyone asks. For a smart collection, saved
+// rather than synced, it queues the build in the background. Restricted
+// viewers' collages are built when first read (CollectionPosters). Errors are
+// logged but never propagated so that sync operations are not blocked by
+// collage failures.
 func (s *LibraryCollectionService) MaybeGenerateCollage(ctx context.Context, collectionID string) {
 	if s.CollageGen == nil {
 		return
@@ -894,7 +904,14 @@ func (s *LibraryCollectionService) MaybeGenerateCollage(ctx context.Context, col
 		slog.WarnContext(ctx, "collage: failed to load collection", "component", "catalog", "collection_id", collectionID, "error", err)
 		return
 	}
-	if _, assigned := AssignedCollectionPoster(collection); assigned || collectionUsesLiveQuery(collection) {
+	if _, assigned := AssignedCollectionPoster(collection); assigned {
+		return
+	}
+
+	if collectionUsesLiveQuery(collection) {
+		// Through the build queue, so a read of the saved collection that
+		// asked for the same refresh shares this one.
+		s.smartCollageSet().refreshLater(s.smartCollection(collection, AccessFilter{}), serverSmartCollageAccessKey(AccessFilter{}))
 		return
 	}
 

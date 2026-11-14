@@ -44,12 +44,13 @@ func TestProxyDownloadServesAuthorizedRange(t *testing.T) {
 		t.Fatal(err)
 	}
 	token := signToken(t, streamtoken.Claims{
-		SessionID:   "download-1",
-		MediaPath:   path,
-		PlayMethod:  streamtoken.PlayMethodDownload,
-		UserID:      7,
-		ProfileID:   "profile-1",
-		MediaFileID: 42,
+		SessionID:        "download-1",
+		MediaPath:        path,
+		PlayMethod:       streamtoken.PlayMethodDownload,
+		UserID:           7,
+		ProfileID:        "profile-1",
+		MediaFileID:      42,
+		DownloadFilename: "Heat (1995).mp4",
 	}, secret, time.Minute)
 
 	req := httptest.NewRequest(http.MethodGet, "/downloads/file/"+token, nil)
@@ -63,7 +64,8 @@ func TestProxyDownloadServesAuthorizedRange(t *testing.T) {
 	if rr.Body.String() != "2345" {
 		t.Fatalf("body = %q, want %q", rr.Body.String(), "2345")
 	}
-	if got := rr.Header().Get("Content-Disposition"); !strings.Contains(got, "prepared movie.mp4") {
+	// The API names the download; the file's own name stays on the server.
+	if got := rr.Header().Get("Content-Disposition"); !strings.Contains(got, "Heat") || strings.Contains(got, "prepared movie") {
 		t.Fatalf("Content-Disposition = %q", got)
 	}
 }

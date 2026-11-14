@@ -20,6 +20,8 @@ type fakeLifecycle struct {
 	err        error
 	// requestsDisabled turns requests off for the server.
 	requestsDisabled bool
+	// profileBlocked reports the viewer's profile blocked from requests.
+	profileBlocked bool
 }
 
 func (f *fakeLifecycle) Cancel(_ context.Context, v mediarequests.Viewer, id, reason string) (*mediarequests.Request, error) {
@@ -28,9 +30,14 @@ func (f *fakeLifecycle) Cancel(_ context.Context, v mediarequests.Viewer, id, re
 	f.reason = reason
 	return fixtureMediaRequest(id, 949), f.err
 }
+func (f *fakeLifecycle) RemoveFailed(_ context.Context, v mediarequests.Viewer, id string) error {
+	f.viewer = v
+	f.id = id
+	return f.err
+}
 func (f *fakeLifecycle) GetFeatureStatus(_ context.Context, v mediarequests.Viewer) (mediarequests.FeatureStatus, error) {
 	f.viewer = v
-	return mediarequests.FeatureStatus{RequestsEnabled: !f.requestsDisabled, RatingRestrictionsEnforced: true}, f.err
+	return mediarequests.FeatureStatus{RequestsEnabled: !f.requestsDisabled, RatingRestrictionsEnforced: true, ProfileRequestsBlocked: f.profileBlocked}, f.err
 }
 
 type fakeWatchLifecycle struct {
@@ -44,6 +51,7 @@ type fakeWatchLifecycle struct {
 	settingValues         map[string]any
 	lastUpdate            watchsync.ConnectionUpdate
 	updateErr             error
+	pollErr               error
 	WatchProviderService
 	user         int
 	profile, key string
@@ -67,6 +75,9 @@ func (f *fakeWatchLifecycle) GetConnectionStatus(_ context.Context, u int, p, ke
 }
 func (f *fakeWatchLifecycle) PollDeviceAuth(_ context.Context, u int, p, key, id string) (watchsync.Connection, error) {
 	f.user, f.profile, f.key = u, p, key
+	if f.pollErr != nil {
+		return watchsync.Connection{}, f.pollErr
+	}
 	return watchsync.Connection{AccessToken: "secret-token"}, f.err
 }
 func (f *fakeWatchLifecycle) StartDeviceAuth(_ context.Context, u int, p, key string) (watchsync.DeviceAuthSession, error) {
@@ -119,7 +130,7 @@ func TestWatchProviderLifecycleErrors(t *testing.T) {
 	for _, tc := range []struct {
 		err  error
 		want ProblemType
-	}{{watchsync.UnknownProviderError{Key: "missing"}, TypeNotFound}, {watchsync.ErrAuthSessionMismatch, TypeNotFound}, {watchsync.ErrAuthSessionCompleted, TypeConflict}, {fmt.Errorf("provider rejected the key: %w", watchsync.ErrInvalidCredential), TypeValidationFailed}, {errors.New("private database failure"), TypeInternalError}} {
+	}{{watchsync.UnknownProviderError{Key: "missing"}, TypeNotFound}, {watchsync.ErrAuthSessionMismatch, TypeNotFound}, {watchsync.ErrAuthSessionCompleted, TypeDeviceLoginExpired}, {fmt.Errorf("watch sync plugin: %w", watchsync.ErrAuthSessionExpired), TypeDeviceLoginExpired}, {fmt.Errorf("watch sync plugin: %w", watchsync.ErrDeviceAuthDenied), TypeNotPermitted}, {fmt.Errorf("provider rejected the key: %w", watchsync.ErrInvalidCredential), TypeValidationFailed}, {errors.New("private database failure"), TypeInternalError}} {
 		w.err = tc.err
 		rec := do(t, h, http.MethodPost, Prefix+"/watch-providers/trakt/auth/poll", `{"auth_session_id":"00000000-0000-4000-8000-000000000001"}`, requestOwner)
 		requireProblem(t, rec, tc.want)
@@ -139,6 +150,26 @@ func TestWatchProviderLifecycleErrors(t *testing.T) {
 	if rec.Header().Get("Retry-After") != "2" {
 		t.Fatalf("provider rate limit Retry-After = %q, want 2", rec.Header().Get("Retry-After"))
 	}
+}
+
+// Finishing a device authorization again, after its first answer was lost,
+// reports the connection that answer created; with the connection gone, the
+// used code is expired.
+func TestWatchProviderPollCompletedSession(t *testing.T) {
+	w := &fakeWatchLifecycle{pollErr: watchsync.ErrAuthSessionCompleted}
+	h := lifecycleHandler(&fakeLifecycle{}, w)
+	body := `{"auth_session_id":"00000000-0000-4000-8000-000000000001"}`
+	rec := do(t, h, http.MethodPost, Prefix+"/watch-providers/simkl/auth/poll", body, requestOwner)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"connected":true`) {
+		t.Fatalf("retry after completion: %d %s", rec.Code, rec.Body.String())
+	}
+	w.missingConnection = true
+	rec = do(t, h, http.MethodPost, Prefix+"/watch-providers/simkl/auth/poll", body, requestOwner)
+	requireProblem(t, rec, TypeDeviceLoginExpired)
+	// A failed connection read is a server failure, not an expired code.
+	w.err = errors.New("connection read failed")
+	rec = do(t, h, http.MethodPost, Prefix+"/watch-providers/simkl/auth/poll", body, requestOwner)
+	requireProblem(t, rec, TypeInternalError)
 }
 
 // Connection config the host or the plugin rejects is a client problem, and
@@ -172,6 +203,18 @@ func TestRequestLifecycleViewerAndCancel(t *testing.T) {
 	requireProblem(t, rec, TypePermissionDenied)
 }
 
+func TestRemoveFailedRequestViewer(t *testing.T) {
+	r := &fakeLifecycle{}
+	h := lifecycleHandler(r, &fakeWatchLifecycle{})
+	rec := do(t, h, http.MethodDelete, Prefix+"/requests/r-1", "", requestOwner)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("remove: %d %s", rec.Code, rec.Body.String())
+	}
+	if r.viewer.UserID != 1 || r.viewer.ProfileID != "p-owner" || r.viewer.IsAdmin || r.id != "r-1" {
+		t.Fatalf("wrong viewer or input: %+v", r)
+	}
+}
+
 func (f *fakeWatchLifecycle) UpdateConnection(ctx context.Context, u int, p, key string, update watchsync.ConnectionUpdate) (watchsync.ConnectionStatus, error) {
 	return f.GetConnectionStatus(ctx, u, p, key)
 }
@@ -192,6 +235,7 @@ func requestLifecycleFixtureCases() []fixtureCase {
 		{name: "watch_provider_sync_ok", operationID: "triggerWatchProviderSync", method: http.MethodPost, path: Prefix + "/watch-providers/trakt/sync", schema: "WatchProviderSyncOutputBody", status: http.StatusAccepted},
 		{name: "watch_provider_delete_ok", operationID: "deleteWatchProviderConnection", method: http.MethodDelete, path: Prefix + "/watch-providers/trakt/connection", status: http.StatusNoContent},
 		{name: "request_status_ok", operationID: "getRequestStatus", method: http.MethodGet, path: Prefix + "/requests/status", schema: "FeatureStatus"},
+		{name: "remove_failed_request_ok", operationID: "removeFailedRequest", method: http.MethodDelete, path: Prefix + "/requests/r-1", status: http.StatusNoContent},
 		{name: "cancel_request_ok", operationID: "cancelRequest", method: http.MethodPost, path: Prefix + "/requests/r-1/cancel", body: `{"reason":"No longer needed"}`, schema: "MediaRequest"},
 		{name: "watch_provider_connection_ok", operationID: opGetWatchProviderConnection, method: http.MethodGet, path: Prefix + "/watch-providers/trakt/connection", schema: "WatchProviderConnection"},
 		{name: "watch_provider_device_auth_ok", operationID: "startWatchProviderDeviceAuth", method: http.MethodPost, path: Prefix + "/watch-providers/trakt/auth/device-code", schema: "WatchProviderDeviceAuth"},

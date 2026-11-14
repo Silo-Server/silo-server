@@ -44,28 +44,32 @@ func lettersOfList(keys []string) LetterIndex {
 	return index
 }
 
-// orderedTitleKeys pages the whole query through the cursor pager and returns
-// each item's title sort key in list order.
+// orderedTitleKeys pages the whole query through the cursor pager, a few
+// items a page, and returns each item's title sort key in list order.
 func orderedTitleKeys(t *testing.T, resolver *CatalogResolver, req CatalogRequest, access AccessFilter) []string {
 	t.Helper()
 	req.CursorPaging = true
-	req.Limit = 200
-	result, err := resolver.Resolve(t.Context(), req, access)
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if result.HasMore {
-		t.Fatal("seeded list should fit one page")
-	}
-	keys := make([]string, 0, len(result.Items))
-	for _, item := range result.Items {
-		key := strings.Trim(item.SortTitle, " ")
-		if key == "" {
-			key = item.Title
+	req.Limit = 3
+	var keys []string
+	for range 100 {
+		result, err := resolver.Resolve(t.Context(), req, access)
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
 		}
-		keys = append(keys, key)
+		for _, item := range result.Items {
+			key := strings.Trim(item.SortTitle, " ")
+			if key == "" {
+				key = item.Title
+			}
+			keys = append(keys, key)
+		}
+		if !result.HasMore {
+			return keys
+		}
+		req.After = result.Next
 	}
-	return keys
+	t.Fatal("pager did not reach the end of the seeded list")
+	return nil
 }
 
 // TestLetterIndexMatchesCursorPagesPostgres checks the letter index against
@@ -73,8 +77,10 @@ func orderedTitleKeys(t *testing.T, resolver *CatalogResolver, req CatalogReques
 // away, accents folded, anything else under #), every letter's position is
 // where the cursor pager lists its first title, in both directions and when a
 // seek jumps there, and the runs match the pager's order whatever the
-// database collation does with accented and non-Latin initials. Set SILO_TEST_DATABASE_URL to a migrated
-// disposable database; every inserted row is removed on completion.
+// database collation does with accented, punctuated, and non-Latin initials:
+// a linguistic collation sorts "Élite" among the E titles and "'Allo 'Allo!"
+// among the A titles, C sorts both apart. Set SILO_TEST_DATABASE_URL to a
+// migrated disposable database; every inserted row is removed on completion.
 func TestLetterIndexMatchesCursorPagesPostgres(t *testing.T) {
 	pool := collectionSortTestPool(t)
 	ctx := t.Context()
@@ -100,6 +106,8 @@ func TestLetterIndexMatchesCursorPagesPostgres(t *testing.T) {
 		{"Titanic", ""},
 		{"Élite", ""},
 		{"Eagle Eye", ""},
+		{"Ève", ""},
+		{"'Allo 'Allo!", ""},
 		{"2001: A Space Odyssey", ""},
 		{"(500) Days of Summer", ""},
 		{"alien", ""},
@@ -126,7 +134,7 @@ func TestLetterIndexMatchesCursorPagesPostgres(t *testing.T) {
 
 	resolver := NewCatalogResolver(NewBrowseRepository(pool), NewItemRepository(pool))
 	access := AccessFilter{AllowedLibraryIDs: []int{libraryID}}
-	wantCounts := map[string]int{"#": 3, "A": 2, "E": 2, "H": 2, "O": 1, "S": 1, "T": 1, "Z": 1}
+	wantCounts := map[string]int{"#": 4, "A": 2, "E": 3, "H": 2, "O": 1, "S": 1, "T": 1, "Z": 1}
 
 	for _, order := range []string{"asc", "desc"} {
 		t.Run(order, func(t *testing.T) {

@@ -206,6 +206,21 @@ func (s *directUserDataService) ListProgressFiltered(ctx context.Context, sessio
 	return completedProgressWithPlayDates(ctx, store, session.ProfileID, status, entries)
 }
 
+// ListPlayedProgressByDate pages completed progress in play-date order, the
+// order SortBy=DatePlayed asks for, reporting each row's play date. It returns
+// userstore.ErrJellycompatPlayedByDateUnsupported when the store cannot.
+func (s *directUserDataService) ListPlayedProgressByDate(ctx context.Context, session *Session, types []string, libraryID *int, ascending bool, limit, offset int) ([]upstreamProgress, error) {
+	store, err := s.storeProvider.ForUser(ctx, session.StreamAppUserID)
+	if err != nil {
+		return nil, fmt.Errorf("open user store: %w", err)
+	}
+	entries, err := userstore.ListJellycompatPlayedByDate(ctx, store, session.ProfileID, types, libraryID, ascending, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("list played progress by date: %w", err)
+	}
+	return completedProgressWithPlayDates(ctx, store, session.ProfileID, progressStatusCompleted, entries)
+}
+
 // completedProgressWithPlayDates converts a progress page and, for completed
 // pages, reports each row's play date instead of its write time, matching
 // GetProgress and ListProgressByMediaItems. In-progress pages keep the write
@@ -378,14 +393,14 @@ func (s *directUserDataService) MarkPlayed(ctx context.Context, session *Session
 	return nil
 }
 
-func (s *directUserDataService) MarkPlayedBatch(ctx context.Context, session *Session, contentIDs []string) error {
+func (s *directUserDataService) MarkPlayedBatch(ctx context.Context, session *Session, contentIDs []string, recordRewatch bool) error {
 	if s.watchState == nil {
 		return fmt.Errorf("watch state service is not configured")
 	}
 	if len(contentIDs) == 0 {
 		return nil
 	}
-	if err := s.watchState.RecordJellycompatMarkPlayedBatch(ctx, session.StreamAppUserID, session.ProfileID, contentIDs, time.Now().UTC()); err != nil {
+	if err := s.watchState.RecordJellycompatMarkPlayedBatch(ctx, session.StreamAppUserID, session.ProfileID, contentIDs, time.Now().UTC(), recordRewatch); err != nil {
 		return err
 	}
 	notifySignalsChanged(ctx, s.signalsNotifier, session.StreamAppUserID, session.ProfileID)
@@ -450,11 +465,11 @@ func fromUpstreamProgress(entry upstreamProgress) userstore.WatchProgress {
 	}
 }
 
-func (s *directUserDataService) MarkPlayedBatchAt(ctx context.Context, session *Session, ids []string, date time.Time) error {
+func (s *directUserDataService) MarkPlayedBatchAt(ctx context.Context, session *Session, ids []string, date time.Time, recordRewatch bool) error {
 	if s.watchState == nil {
 		return fmt.Errorf("watch state service unavailable")
 	}
-	if err := s.watchState.RecordJellycompatMarkPlayedBatch(ctx, session.StreamAppUserID, session.ProfileID, ids, date); err != nil {
+	if err := s.watchState.RecordJellycompatMarkPlayedBatch(ctx, session.StreamAppUserID, session.ProfileID, ids, date, recordRewatch); err != nil {
 		return err
 	}
 	notifySignalsChanged(ctx, s.signalsNotifier, session.StreamAppUserID, session.ProfileID)

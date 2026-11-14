@@ -11,9 +11,11 @@ import { PillSwitcher } from "@/components/calm/PillSwitcher";
 import { SelectAllHeader } from "@/components/calm/SelectModeBar";
 import { Button } from "@/components/ui/button";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { useT } from "@/i18n";
 import { describeRow, type DescribeContext, type DescriptionPart } from "@/lib/homeRows/describe";
 import { pageLabel, pageParam } from "@/lib/homeRows/pages";
 import type { HomeRow, HomeRowsListAdapter } from "@/lib/homeRows/types";
+import { useHomeRowTitle } from "@/lib/sectionTitle";
 import { cn } from "@/lib/utils";
 import { MobileDockBar } from "./MobileDockBar";
 import { ConflictBanner, LibraryPageNote, ReorderHint } from "./notes";
@@ -89,6 +91,8 @@ export function HomeRowsPage({
   highlightRowId?: string | null;
   children?: ReactNode;
 }) {
+  const t = useT();
+  const rowTitle = useHomeRowTitle();
   const dragging = useRef(false);
   const list = useRef<HTMLDivElement>(null);
   const narrow = useMediaQuery(NARROW_QUERY);
@@ -117,9 +121,19 @@ export function HomeRowsPage({
   const { rows, surface, page } = adapter;
   const label = pageLabel(page, adapter.pages);
   const shownCount = rows.filter((row) => row.shown).length;
+  // The first shown hero is the page's banner; only it can be kept off the apps.
+  const bannerRowId = rows.find((row) => row.hero && row.shown)?.id;
   const summary =
     adapter.status === "ready"
-      ? `${rows.length} ${rows.length === 1 ? "row" : "rows"} · ${shownCount} ${surface === "admin" ? "on" : "shown"}`
+      ? t(
+          surface === "admin"
+            ? "web.home.rows.page.summaryAdmin"
+            : "web.home.rows.page.summaryProfile",
+          {
+            row_count: rows.length,
+            shown_count: shownCount,
+          },
+        )
       : undefined;
   const describeContext: DescribeContext = { pageKind: page.kind, surface, collection };
 
@@ -137,7 +151,7 @@ export function HomeRowsPage({
     return {
       moveToTop: {
         key: "move-top",
-        label: "Move to top",
+        label: t("web.home.rows.page.moveToTop"),
         icon: ArrowUpToLine,
         group: true,
         disabled: !adapter.canReorder || index === 0,
@@ -145,7 +159,7 @@ export function HomeRowsPage({
       },
       moveToBottom: {
         key: "move-bottom",
-        label: "Move to bottom",
+        label: t("web.home.rows.page.moveToBottom"),
         icon: ArrowDownToLine,
         disabled: !adapter.canReorder || index === rows.length - 1,
         onSelect: () => move(row, "bottom"),
@@ -179,7 +193,7 @@ export function HomeRowsPage({
       onClick={addRow.onClick}
       className={cn(narrow && "h-12 rounded-[14px] text-[15px]")}
     >
-      <Plus /> Add row
+      <Plus /> {t("web.home.rows.page.addRow")}
     </Button>
   );
 
@@ -202,7 +216,7 @@ export function HomeRowsPage({
 
       {pageSwitcher ? (
         <PillSwitcher
-          label="Page"
+          label={t("web.home.rows.page.pageSwitcher")}
           options={adapter.pages.map((option, index) => ({
             value: pageParam(option.ref),
             label: option.label,
@@ -227,14 +241,14 @@ export function HomeRowsPage({
 
       {adapter.status === "error" ? (
         <div role="alert" className="surface-panel space-y-3 rounded-2xl p-6">
-          <p>{adapter.error ?? "Could not load these rows."}</p>
+          <p>{adapter.error ?? t("web.home.rows.page.loadFailed")}</p>
           <Button variant="outline" onClick={() => void adapter.reload()}>
-            Reload rows
+            {t("web.home.rows.reloadRows")}
           </Button>
         </div>
       ) : adapter.status === "loading" ? (
         <p role="status" className="text-muted-foreground px-1 text-sm">
-          Loading rows…
+          {t("web.home.rows.page.loading")}
         </p>
       ) : (
         <div className="grid gap-4" onKeyDown={handleListKeyDown}>
@@ -252,7 +266,7 @@ export function HomeRowsPage({
             ) : null}
             {rows.length === 0 ? (
               <p className="text-muted-foreground px-[18px] py-8 text-center text-sm">
-                No rows on {label} yet.
+                {t("web.home.rows.page.empty", { page: label })}
               </p>
             ) : (
               <>
@@ -260,7 +274,7 @@ export function HomeRowsPage({
                   rows={rows}
                   canReorder={adapter.canReorder && !selectMode}
                   orderToken={adapter.orderToken}
-                  label={`Rows on ${label}`}
+                  label={t("web.home.rows.page.listLabel", { page: label })}
                   onReorder={(ids, token, movedId) => void adapter.reorder(ids, token, movedId)}
                   onDragActiveChange={(active) => {
                     dragging.current = active;
@@ -273,6 +287,7 @@ export function HomeRowsPage({
                       row={row}
                       highlighted={row.id === highlightRowId}
                       surface={surface}
+                      page={page}
                       pageLabel={label}
                       description={describe ? describe(row) : describeRow(row, describeContext)}
                       icon={rowIcon?.(row)}
@@ -288,11 +303,12 @@ export function HomeRowsPage({
                           : undefined
                       }
                       switchDisabled={!adapter.canEdit}
+                      webOnlyBanner={row.webOnly === true && row.id === bannerRowId}
                       onShownChange={(shown) => void adapter.setShown(row.id, shown)}
                       onOpen={onOpenRow ? () => onOpenRow(row) : undefined}
                       menu={
                         <ActionMenu
-                          label={`More for ${row.title}`}
+                          label={t("web.home.rows.page.rowMenu", { row: rowTitle(row) })}
                           triggerRef={focus.attachMenuTrigger(row.id)}
                           items={rowMenuItems(row, sharedItems(row, rows.indexOf(row)))}
                         />

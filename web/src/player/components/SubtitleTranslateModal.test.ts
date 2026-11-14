@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildSubtitleTranslateRequest, isTranslatableSource } from "./subtitleTranslateRequest";
-import { sourceLabel, sourceLabels } from "./SubtitleTranslateModal";
+import { sourceLabel, sourceLabels } from "./subtitleTranslateRequest";
 import type { PlayerAudioTrack, PlayerSubtitleInfo } from "../types";
 
 function track(p: Partial<PlayerSubtitleInfo>): PlayerSubtitleInfo {

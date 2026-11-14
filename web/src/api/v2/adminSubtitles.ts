@@ -6,6 +6,7 @@ import {
 } from "@/api/client";
 import { v2, type V2Query } from "./request";
 import type { components } from "./schema";
+import { t } from "@/i18n";
 
 export type AdminStoredSubtitle = components["schemas"]["AdminStoredSubtitle"];
 export type AdminSubtitleListQuery = V2Query<"GET /api/v2/admin/subtitles">;
@@ -52,6 +53,6 @@ export async function listAdminSubtitles(
         !/^[1-9]\d*$/.test(item.media_file_id),
     )
   )
-    throw new Error("Invalid subtitle list. Reload the page.");
+    throw new Error(t("web.admin.errors.subtitleListInvalid"));
   return body;
 }

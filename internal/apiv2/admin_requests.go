@@ -627,7 +627,7 @@ func (reg *Registry) loadAdminRequestOptions(ctx context.Context, in *AdminReque
 		}
 	}
 	cleared := b.BaseURL != nil && baseURL == ""
-	options, err := s.LoadIntegrationOptions(ctx, adminRequestViewer(ctx), mediarequests.Integration{ID: string(in.ID), Name: b.Name, CapabilityID: b.CapabilityID, InstallationID: install, BaseURL: baseURL, BaseURLCleared: cleared, APIKeyRef: b.APIKey, PluginConfig: b.PluginConfig})
+	options, err := s.LoadIntegrationOptions(ctx, adminRequestViewer(ctx), mediarequests.Integration{ID: string(in.ID), Name: b.Name, CapabilityID: b.CapabilityID, InstallationID: install, BaseURL: baseURL, BaseURLCleared: cleared, TestConnection: true, APIKeyRef: b.APIKey, PluginConfig: b.PluginConfig})
 	if err != nil {
 		return nil, requestProblem(err)
 	}

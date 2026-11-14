@@ -108,7 +108,9 @@ func TestSubtitleInventoryV3_AttachesURLsOnlyToSidecarTracks(t *testing.T) {
 		},
 	}
 
-	items := SubtitleInventoryV3("sess-1", file, nil)
+	items := SubtitleInventoryV3("sess-1", file, []SubtitleInventoryEntryV3{
+		{Codec: "sub", Source: SubtitleSourceDownloadedV3, DownloadedSubtitleID: 71},
+	})
 
 	cases := []struct {
 		index         int
@@ -119,6 +121,7 @@ func TestSubtitleInventoryV3_AttachesURLsOnlyToSidecarTracks(t *testing.T) {
 		{1, "/stream/sess-1/subtitles/1.ass?file_id=44&embedded_stream_index=1", "/stream/sess-1/subtitles/1/fonts?file_id=44&embedded_stream_index=1"},
 		{2, "/stream/sess-1/subtitles/2.sup?file_id=44&embedded_stream_index=2", ""},
 		{3, "", ""},
+		{4, "", ""},
 	}
 	for _, tc := range cases {
 		got := items[tc.index]
@@ -129,6 +132,23 @@ func TestSubtitleInventoryV3_AttachesURLsOnlyToSidecarTracks(t *testing.T) {
 			t.Errorf("item %d font_bundle_url = %q, want %q", tc.index, got.FontBundleURL, tc.fontBundleURL)
 		}
 	}
+	// A stored track without a URL or timing key must still be identifiable
+	// after a plan refresh, so a readiness event cannot auto-select it.
+	raw, err := json.Marshal(items[4])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire struct {
+		StoredID int    `json:"stored_subtitle_id"`
+		SyncKey  string `json:"sync_key"`
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if wire.StoredID != 71 || wire.SyncKey != "" {
+		t.Fatalf("stored identity or timing support changed: %s", raw)
+	}
+
 }
 
 func TestScopeSubtitleInventoryV3PreservesPinnedIdentity(t *testing.T) {
@@ -363,6 +383,48 @@ func TestSubtitleInventoryV3_EmbeddedRowsCarryStreamIdentity(t *testing.T) {
 			if ok != wantOK || got != wantValue {
 				t.Errorf("row %d %s = %v (present %v), want %v (present %v)", i, key, got, ok, wantValue, wantOK)
 			}
+		}
+	}
+}
+
+// A viewer who may not see file names must not read one from an untitled
+// sidecar's label. A sidecar with its own title, and every embedded track,
+// keeps its label.
+func TestHideSidecarFileNamesV3(t *testing.T) {
+	file := &models.MediaFile{
+		ID: 42,
+		ExternalSubtitles: []models.ExternalSubtitle{
+			{Path: "/media/Movie.2023.1080p.WEB-DL-GROUP.en.srt", Language: "en", Format: "srt"},
+			// The scanner stores a sidecar's file name as its title.
+			{Path: "/media/Movie.2023.1080p.WEB-DL-GROUP.es.srt", Language: "es", Format: "srt", Title: "Movie.2023.1080p.WEB-DL-GROUP.es.srt"},
+			{Path: "/media/movie.fr.srt", Language: "fr", Format: "srt", Title: "Commentary"},
+			// A second untitled English sidecar stays distinguishable.
+			{Path: "/media/Movie.2023.1080p.WEB-DL-OTHER.en.srt", Language: "en", Format: "srt"},
+			// A file name that starts with a space is still only a file name.
+			{Path: "/media/ Movie.2023.1080p.WEB-DL-GROUP.de.srt", Language: "de", Format: "srt", Title: " Movie.2023.1080p.WEB-DL-GROUP.de.srt"},
+		},
+		SubtitleTracks: []models.SubtitleTrack{{Index: 0, Language: "ja", Codec: "subrip", Title: "Signs"}},
+	}
+	items := BuildSubtitleInventoryV3(file, nil)
+	if items[0].Label != "Movie.2023.1080p.WEB-DL-GROUP.en.srt" {
+		t.Fatalf("untitled sidecar label = %q, want its file name before hiding", items[0].Label)
+	}
+	// A restored plan keeps the labels it was built with; the sidecars may
+	// have changed since.
+	restored := slices.Clone(items)
+
+	HideSidecarFileNamesV3(items, file)
+
+	for i, want := range []string{"en", "es", "Commentary", "en 2", "de", "Signs"} {
+		if items[i].Label != want {
+			t.Errorf("item %d label = %q, want %q", i, items[i].Label, want)
+		}
+	}
+
+	HideSidecarFileNamesV3(restored, &models.MediaFile{ID: 42})
+	for i, item := range restored[:5] {
+		if strings.Contains(item.Label, ".srt") {
+			t.Errorf("restored item %d label = %q after its sidecars changed, want no file name", i, item.Label)
 		}
 	}
 }

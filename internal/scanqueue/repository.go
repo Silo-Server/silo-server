@@ -8,12 +8,12 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/oklog/ulid/v2"
 
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/scantrigger"
 )
 
 const (
@@ -102,33 +102,48 @@ func scanRunRows(rows pgx.Rows) ([]*models.ScanRun, error) {
 }
 
 func (r *Repository) Create(ctx context.Context, input CreateInput) (*models.ScanRun, bool, error) {
-	run, err := scanRunRow(r.pool.QueryRow(ctx, `
-		INSERT INTO scan_runs (
-			id, media_folder_id, mode, path, trigger, status, autoscan_event_id
-		) VALUES ($1, $2, $3, $4, $5, $6, $7)
-		RETURNING `+scanRunColumns,
-		ulid.Make().String(),
-		input.LibraryID,
-		input.Mode,
-		input.Path,
-		input.Trigger,
-		StatusAccepted,
-		input.AutoscanEventID,
-	))
-	if err == nil {
-		return run, true, nil
-	}
+	return r.createOrCoalesce(ctx, r.pool, input)
+}
 
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-		existing, lookupErr := r.coalesceIntoActive(ctx, r.pool, input)
-		if lookupErr != nil {
-			return nil, false, lookupErr
+// createOrCoalesce inserts an accepted run for input's scope, or, when an
+// accepted or running run already owns that scope, coalesces input into it
+// and reports created=false. The insert names idx_scan_runs_active_scope as
+// its conflict arbiter, so a claimed scope is an ordinary empty result rather
+// than a unique violation Postgres would log as an ERROR; any other conflict
+// still fails. If the owning run finishes between the insert and the
+// coalesce, the scope is free again and the insert is retried once.
+func (r *Repository) createOrCoalesce(ctx context.Context, db dbExecutor, input CreateInput) (*models.ScanRun, bool, error) {
+	for range 2 {
+		run, err := scanRunRow(db.QueryRow(ctx, `
+			INSERT INTO scan_runs (
+				id, media_folder_id, mode, path, trigger, status, autoscan_event_id
+			) VALUES ($1, $2, $3, $4, $5, $6, $7)
+			ON CONFLICT (media_folder_id, mode, path) WHERE status IN ('accepted', 'running') DO NOTHING
+			RETURNING `+scanRunColumns,
+			ulid.Make().String(),
+			input.LibraryID,
+			input.Mode,
+			input.Path,
+			input.Trigger,
+			StatusAccepted,
+			input.AutoscanEventID,
+		))
+		if err == nil {
+			return run, true, nil
 		}
-		return existing, false, nil
-	}
+		if !errors.Is(err, ErrScanRunNotFound) {
+			return nil, false, fmt.Errorf("create scan run: %w", err)
+		}
 
-	return nil, false, fmt.Errorf("create scan run: %w", err)
+		existing, err := r.coalesceIntoActive(ctx, db, input)
+		if err == nil {
+			return existing, false, nil
+		}
+		if !errors.Is(err, ErrScanRunNotFound) {
+			return nil, false, err
+		}
+	}
+	return nil, false, fmt.Errorf("create scan run: scope stayed claimed with no active run: %w", ErrScanRunNotFound)
 }
 
 // coalesceIntoActive returns the accepted or running run that already owns
@@ -138,16 +153,23 @@ func (r *Repository) Create(ctx context.Context, input CreateInput) (*models.Sca
 // one more scan of the same scope is enqueued with the request's trigger.
 // Direct admin triggers are never recorded because queue workers do not claim
 // them; a follow-up carrying one would sit until the stale janitor failed it.
+//
+// An admin's request for a file's exact path is owed as a follow-up unless the
+// run already carries such a trigger as its follow-up, or as its own trigger
+// while it has not started: only that trigger lets the file scan import a file
+// the library's ignore files exclude (scantrigger.FileScanContext). It
+// replaces an automatic follow-up, which its own scan of the scope covers.
 func (r *Repository) coalesceIntoActive(ctx context.Context, db dbExecutor, input CreateInput) (*models.ScanRun, error) {
 	requeue := !isDirectTrigger(input.Trigger)
+	explicitFile := input.Mode == ModeFile && scantrigger.ExplicitPathTrigger(input.Trigger)
 	return scanRunRow(db.QueryRow(ctx, `
 		UPDATE scan_runs
 		SET followup_trigger = CASE
-				WHEN $5 AND status = $6 AND followup_trigger = '' THEN $7
+				WHEN `+oweFollowupSQL+` THEN $7
 				ELSE followup_trigger
 			END,
 			updated_at = CASE
-				WHEN $5 AND status = $6 AND followup_trigger = '' THEN NOW()
+				WHEN `+oweFollowupSQL+` THEN NOW()
 				ELSE updated_at
 			END
 		WHERE id = (
@@ -168,8 +190,17 @@ func (r *Repository) coalesceIntoActive(ctx context.Context, db dbExecutor, inpu
 		requeue,
 		StatusRunning,
 		input.Trigger,
+		explicitFile,
+		[]string{scantrigger.TriggerPath, scantrigger.TriggerLibraryIDPath},
 	))
 }
+
+// oweFollowupSQL is coalesceIntoActive's test for recording the request as the
+// run's follow-up.
+const oweFollowupSQL = `$5 AND (
+					(status = $6 AND followup_trigger = '')
+					OR ($8 AND NOT followup_trigger = ANY($9) AND (status = $6 OR NOT trigger = ANY($9)))
+				)`
 
 type dbExecutor interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
@@ -197,35 +228,12 @@ func (r *Repository) CreateBatch(ctx context.Context, inputs []CreateInput) ([]*
 	runs := make([]*models.ScanRun, 0, len(inputs))
 	created := make([]bool, 0, len(inputs))
 	for _, input := range inputs {
-		run, err := scanRunRow(tx.QueryRow(ctx, `
-			INSERT INTO scan_runs (
-				id, media_folder_id, mode, path, trigger, status, autoscan_event_id
-			) VALUES ($1, $2, $3, $4, $5, $6, $7)
-			ON CONFLICT DO NOTHING
-			RETURNING `+scanRunColumns,
-			ulid.Make().String(),
-			input.LibraryID,
-			input.Mode,
-			input.Path,
-			input.Trigger,
-			StatusAccepted,
-			input.AutoscanEventID,
-		))
-		if err == nil {
-			runs = append(runs, run)
-			created = append(created, true)
-			continue
+		run, wasCreated, err := r.createOrCoalesce(ctx, tx, input)
+		if err != nil {
+			return nil, nil, err
 		}
-		if !errors.Is(err, ErrScanRunNotFound) {
-			return nil, nil, fmt.Errorf("create scan run: %w", err)
-		}
-
-		existing, lookupErr := r.coalesceIntoActive(ctx, tx, input)
-		if lookupErr != nil {
-			return nil, nil, lookupErr
-		}
-		runs = append(runs, existing)
-		created = append(created, false)
+		runs = append(runs, run)
+		created = append(created, wasCreated)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -659,11 +667,13 @@ func (r *Repository) GetByID(ctx context.Context, id string) (*models.ScanRun, e
 }
 
 // RequeueStaleRunning returns to the queue every worker run whose heartbeat is
-// older than staleAfter, measured on the database clock that stamped it.
+// older than staleAfter, measured on the database clock that stamped it. Like
+// Requeue, it drops the abandoned attempt's progress.
 func (r *Repository) RequeueStaleRunning(ctx context.Context, staleAfter time.Duration) (int, error) {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE scan_runs
 		SET status = $2,
+			result_payload = '{}'::jsonb,
 			started_at = NULL,
 			heartbeat_at = NULL,
 			completed_at = NULL,

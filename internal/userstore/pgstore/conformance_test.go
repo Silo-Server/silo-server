@@ -92,6 +92,21 @@ func TestPostgresAtomicJellycompatProgress(t *testing.T) {
 	storetest.RunAtomicJellycompatProgress(t, newStore(pool, userID))
 }
 
+// TestPostgresJellycompatPlayedByDate runs the play-date listing conformance
+// test against the Postgres backend; the SQLite backend runs it in
+// internal/userdb. Skips unless SILO_TEST_DATABASE_URL is set.
+func TestPostgresJellycompatPlayedByDate(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	userID := seedTestUser(t, pool, "conf-playedbydate")
+	t.Cleanup(func() {
+		for _, table := range []string{"user_watch_history", "user_history_hidden_items", "user_watch_progress", "user_profiles"} {
+			_, _ = pool.Exec(ctx, `DELETE FROM `+table+` WHERE user_id = $1`, userID)
+		}
+	})
+	storetest.RunJellycompatPlayedByDate(t, newStore(pool, userID))
+}
+
 // TestPostgresPersonalListPage runs the keyset favorites/watchlist paging
 // and membership-change conformance tests against the Postgres backend.
 // Skips unless SILO_TEST_DATABASE_URL is set.
@@ -126,10 +141,11 @@ func TestPostgresDeleteProfileRemovesProfileState(t *testing.T) {
 }
 
 // profileTablesClearedElsewhere are the user tables with a profile_id that
-// DeleteProfile leaves to another step, with the step.
+// profileCascadeTables leaves out, with the step that clears them.
 var profileTablesClearedElsewhere = map[string]string{
-	"user_devices":   "the profile handler's device-library purge (downloads.Repository.PurgeProfileDevices)",
-	"user_downloads": "the profile handler's device-library purge (downloads.Repository.PurgeProfileDevices)",
+	"user_personal_collections": "DeleteProfile's own delete, which returns the collection IDs for artwork cleanup",
+	"user_devices":              "the profile handler's device-library purge (downloads.Repository.PurgeProfileDevices)",
+	"user_downloads":            "the profile handler's device-library purge (downloads.Repository.PurgeProfileDevices)",
 }
 
 // Every user-store table (user_*) keyed by (user_id, profile_id) is cleared
@@ -245,7 +261,7 @@ func TestPostgresConcurrentProfileDeletesWithCrossVisibility(t *testing.T) {
 		var wg sync.WaitGroup
 		errs := make(chan error, 2)
 		for _, id := range []string{"a", "b"} {
-			wg.Go(func() { errs <- newStore(pool, userID).DeleteProfile(ctx, id) })
+			wg.Go(func() { _, err := newStore(pool, userID).DeleteProfile(ctx, id); errs <- err })
 		}
 		wg.Wait()
 		close(errs)
@@ -286,7 +302,7 @@ func TestPostgresConcurrentProfileAndCollectionDeletes(t *testing.T) {
 
 		var wg sync.WaitGroup
 		errs := make(chan error, 2)
-		wg.Go(func() { errs <- newStore(pool, userID).DeleteProfile(ctx, "listed") })
+		wg.Go(func() { _, err := newStore(pool, userID).DeleteProfile(ctx, "listed"); errs <- err })
 		wg.Go(func() { errs <- newStore(pool, userID).DeleteCollection(ctx, c.ID) })
 		wg.Wait()
 		close(errs)
@@ -324,7 +340,7 @@ func TestPostgresConcurrentProfileDeleteAndCollectionReorder(t *testing.T) {
 
 		var wg sync.WaitGroup
 		var deleteErr, reorderErr error
-		wg.Go(func() { deleteErr = newStore(pool, userID).DeleteProfile(ctx, "gone") })
+		wg.Go(func() { _, deleteErr = newStore(pool, userID).DeleteProfile(ctx, "gone") })
 		wg.Go(func() { reorderErr = newStore(pool, userID).ReorderCollections(ctx, "gone", ids) })
 		wg.Wait()
 		if deleteErr != nil {

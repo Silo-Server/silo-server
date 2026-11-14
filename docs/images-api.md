@@ -1,9 +1,7 @@
 # Images API
 
 > **API lifecycle:** this documents the stable `/api/v2` native contract, which locks with Silo
-> 1.0. The frozen alpha `/api/v1` surface carries the same artwork ladder through the pre-1.0
-> bridge window and is then retired. See
-> [the native API contract](architecture/api-contract.md).
+> 1.0. See [the native API contract](architecture/api-contract.md).
 
 Silo caches artwork at a fixed ladder of widths and returns a URL for one of them.
 The URL is either a direct object-storage URL or a signed server route. By default the server picks the width from context — card rows get
@@ -36,15 +34,17 @@ The parameter is accepted on:
 - catalog browse and query
 - item detail and watch detail
 - seasons, a single season, and episodes
-- home and library sections, including single-section items
+- home and library sections, including single-section items and the home
+  layout's included sections (`getHomeLayout` with `include_items`)
 - the personal lists: `/api/v2/favorites`, `/api/v2/watchlist`, and `/api/v2/history`
 - shuffles, the not-interested list, and notification series
 - the recommendation reads: discover, For You, a recommendation section,
   because-watched, popular, recently added, similar, similar users, the taste
   seed grid, Watch Tonight and Watch Tonight cards
 
-Other surfaces ignore it. The frozen `/api/v1` recommendation routes ignore it
-too.
+The item versions list and the beta manga-file and audiobook-group lists accept
+it as well. Other JSON `/api/v2` operations reject it as an unknown query
+parameter with `422 validation_failed`.
 
 Within item detail this covers cast and crew headshots too: they follow the
 `profile` ladder, which has no wide rung, so `large` and `medium` land on the
@@ -155,7 +155,7 @@ GET /api/v2/images/capabilities
 
 ```json
 {
-  "revision": "1",
+  "revision": "opaque-capability-revision",
   "state": "available",
   "allowed": true,
   "param": "image_size",
@@ -182,7 +182,9 @@ GET /api/v2/images/capabilities
     "clearart": { "small": 500, "medium": 500, "large": 1000 },
     "disc": { "small": 300, "medium": 500, "large": 1000 }
   },
-  "original_max_width_px": 3840
+  "original_max_width_px": 3840,
+  "storage_backend": "s3",
+  "delivery": "direct"
 }
 ```
 
@@ -246,9 +248,8 @@ cards. The URLs follow `image_size` like the other artwork on the detail; with n
 size they resolve at `medium`.
 
 Today the images come from local sidecar files next to the media (see
-[local NFO metadata](architecture/local-nfo-metadata.md#sidecar-artwork)). No
-metadata plugin supplies them, so a library without such files has none. The
-frozen `/api/v1` detail and capability documents do not carry them.
+[local NFO metadata](architecture/local-nfo-metadata.md#sidecar-artwork-copy-into-the-s3-image-cache)). No
+metadata plugin supplies them, so a library without such files has none.
 
 ## Episode still provenance
 
@@ -312,16 +313,6 @@ The shared cached-artwork resolver applies the same persisted availability
 selection to Jellyfin image URL resolution. Its protocol parameters and image
 response shapes are unchanged; image fetching remains independent of catalog
 metadata responses.
-
-## Bridge note
-
-The frozen alpha surface exposes the same ladder at `/api/v1/catalog`,
-`/api/v1/home/sections`, and the other v1 reads, and its capability document at
-`GET /api/v1/images/capability` (singular, with a numeric `schema_version` instead of
-`revision`/`state`). It rejects a bad size with `400 invalid_image_size` and a bad
-`include_artwork` with `400 invalid_include_artwork`. Those paths are frozen, and Silo
-1.0 answers the whole `/api/v1` namespace with `410 Gone` and the
-`client_upgrade_required` problem code. Build against `/api/v2`.
 
 ### Marker thumbnail lifecycle
 

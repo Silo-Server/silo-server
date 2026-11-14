@@ -66,15 +66,27 @@ func overlayTestPool(t testing.TB) (*pgxpool.Pool, *overlayQueryTrace) {
 
 func seedOverlayFiles(t testing.TB, pool *pgxpool.Pool, files ...*models.MediaFile) {
 	t.Helper()
+	// A nil track list is stored as SQL NULL.
+	column := func(tracks any) []byte {
+		if reflect.ValueOf(tracks).IsNil() {
+			return nil
+		}
+		data, err := json.Marshal(tracks)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return data
+	}
 	for _, file := range files {
 		tracks, err := json.Marshal(file.VideoTracks)
 		if err != nil {
 			t.Fatal(err)
 		}
 		_, err = pool.Exec(t.Context(), `INSERT INTO media_files
-   (id, content_id, episode_id, media_folder_id, resolution, hdr, video_tracks, codec_audio)
-   VALUES ($1, $2, NULLIF($3, ''), $4, $5, $6, $7, $8)`,
-			file.ID, file.ContentID, file.EpisodeID, file.MediaFolderID, file.Resolution, file.HDR, tracks, file.CodecAudio)
+   (id, content_id, episode_id, media_folder_id, resolution, hdr, video_tracks, codec_audio, subtitle_tracks, external_subtitles)
+   VALUES ($1, $2, NULLIF($3, ''), $4, $5, $6, $7, $8, $9, $10)`,
+			file.ID, file.ContentID, file.EpisodeID, file.MediaFolderID, file.Resolution, file.HDR, tracks, file.CodecAudio,
+			column(file.SubtitleTracks), column(file.ExternalSubtitles))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -127,6 +139,9 @@ func TestOverlaySummariesRankingMatchesGo(t *testing.T) {
 		{Resolution: "1080p", VideoTracks: []models.VideoTrack{{ColorTransfer: "ARIB-STD-B67"}}},
 		{Resolution: "1080p", HDR: true, VideoTracks: []models.VideoTrack{{VideoRangeType: "SDR"}}},
 		{Resolution: "1080p", VideoTracks: []models.VideoTrack{{VideoRangeType: "SDR"}, {VideoRangeType: "HDR10"}}},
+		{Resolution: "1080p", SubtitleTracks: []models.SubtitleTrack{}, ExternalSubtitles: []models.ExternalSubtitle{}},
+		{Resolution: "1080p", SubtitleTracks: []models.SubtitleTrack{{Language: "en"}}},
+		{Resolution: "1080p", ExternalSubtitles: []models.ExternalSubtitle{{Path: "film.en.srt"}}},
 	}
 	fetcher := &Fetcher{pool: pool}
 	for i, candidate := range cases {

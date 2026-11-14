@@ -69,17 +69,30 @@ func (s *PostgresUserStore) GetSubtitlePreference(ctx context.Context, profileID
 }
 
 func getSubtitlePreference(ctx context.Context, exec preferenceSettingsExecutor, userID int, profileID, seriesID string) (*userstore.SubtitlePreference, error) {
+	pref, err := scanSubtitlePreference(exec.QueryRow(ctx, subtitlePreferenceSQL, userID, profileID, seriesID))
+	if err != nil {
+		return nil, fmt.Errorf("getting subtitle preference for profile %q series %q: %w",
+			profileID, seriesID, err)
+	}
+	return pref, nil
+}
+
+// subtitlePreferenceSQL reads one preference row: $1 user, $2 profile, $3
+// series or movie.
+const subtitlePreferenceSQL = `
+		SELECT profile_id, series_id, subtitle_language, subtitle_track_index,
+		       external_subtitle_path, subtitle_mode, subtitle_track_signature, show_forced_subtitles, updated_at
+		FROM user_subtitle_preferences
+		WHERE user_id = $1 AND profile_id = $2 AND series_id = $3`
+
+// scanSubtitlePreference reads the row subtitlePreferenceSQL selects, nil
+// when there is none.
+func scanSubtitlePreference(row pgx.Row) (*userstore.SubtitlePreference, error) {
 	var pref userstore.SubtitlePreference
 	var showForcedSubtitles pgtype.Bool
 	var updatedAt time.Time
 	var signatureJSON []byte
-	err := exec.QueryRow(ctx, `
-		SELECT profile_id, series_id, subtitle_language, subtitle_track_index,
-		       external_subtitle_path, subtitle_mode, subtitle_track_signature, show_forced_subtitles, updated_at
-		FROM user_subtitle_preferences
-		WHERE user_id = $1 AND profile_id = $2 AND series_id = $3`,
-		userID, profileID, seriesID,
-	).Scan(
+	err := row.Scan(
 		&pref.ProfileID,
 		&pref.SeriesID,
 		&pref.SubtitleLanguage,
@@ -94,13 +107,12 @@ func getSubtitlePreference(ctx context.Context, exec preferenceSettingsExecutor,
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("getting subtitle preference for profile %q series %q: %w",
-			profileID, seriesID, err)
+		return nil, err
 	}
 	pref.TrackSignature, err = userstore.UnmarshalSubtitleTrackSignature(signatureJSON)
 	if err != nil {
 		return nil, fmt.Errorf("decoding subtitle track signature for profile %q series %q: %w",
-			profileID, seriesID, err)
+			pref.ProfileID, pref.SeriesID, err)
 	}
 	pref.ShowForcedSubtitles, pref.HasShowForcedSubtitles = boolValue(showForcedSubtitles)
 	pref.UpdatedAt = timeToString(updatedAt)

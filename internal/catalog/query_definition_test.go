@@ -80,3 +80,36 @@ func TestQueryDefinitionValidationRejects(t *testing.T) {
 		})
 	}
 }
+
+// A smart collection needs a rule complete enough to filter; with none its
+// query matches every title. Values arrive as decoded JSON.
+func TestQueryDefinitionHasCompleteRule(t *testing.T) {
+	rule := func(field, op string, value any) QueryDefinition {
+		return QueryDefinition{Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{{Field: field, Op: op, Value: value}}}}}
+	}
+	for name, tc := range map[string]struct {
+		definition QueryDefinition
+		want       bool
+	}{
+		"no groups":             {definition: QueryDefinition{}, want: false},
+		"a group with no rules": {definition: QueryDefinition{Groups: []QueryGroup{{Match: "all"}}}, want: false},
+		"blank value":           {definition: rule("genre", "is", "  "), want: false},
+		"missing value":         {definition: rule("genre", "is", nil), want: false},
+		"open range":            {definition: rule("year", "between", []any{float64(1990), ""}), want: false},
+		"empty range":           {definition: rule("year", "between", []any{}), want: false},
+		"no field":              {definition: rule("", "is", "Comedy"), want: false},
+		"no operator":           {definition: rule("genre", "", "Comedy"), want: false},
+		"text":                  {definition: rule("genre", "is", "Comedy"), want: true},
+		"zero":                  {definition: rule("year", "is", float64(0)), want: true},
+		"false":                 {definition: rule("watched", "is", false), want: true},
+		"range":                 {definition: rule("year", "between", []any{float64(1990), float64(1999)}), want: true},
+		"one complete rule among blanks": {definition: QueryDefinition{Groups: []QueryGroup{
+			{Match: "all", Rules: []QueryRule{{Field: "genre", Op: "is", Value: ""}}},
+			{Match: "all", Rules: []QueryRule{{Field: "genre", Op: "is", Value: "Drama"}}},
+		}}, want: true},
+	} {
+		if got := tc.definition.HasCompleteRule(); got != tc.want {
+			t.Errorf("%s: HasCompleteRule() = %t, want %t", name, got, tc.want)
+		}
+	}
+}

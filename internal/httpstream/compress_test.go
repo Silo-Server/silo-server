@@ -65,12 +65,13 @@ func TestCompressWithExclusionsWriterSupportsHijack(t *testing.T) {
 
 // Flush still reaches the connection through the wrapper, before and after
 // the exclusion decision, and what the handler wrote before a flush decodes
-// before the body ends, which progressive subtitle extracts rely on.
+// before the body ends, which progressive subtitle extracts rely on. A
+// response held for its declared length streams from its first flush.
 func TestCompressWithExclusionsWriterSupportsFlush(t *testing.T) {
 	for _, tc := range []struct {
-		accept string
-		skip   bool
-	}{{"gzip", false}, {"br", false}, {"zstd", false}, {"gzip", true}} {
+		accept         string
+		skip, declared bool
+	}{{"gzip", false, false}, {"br", false, false}, {"zstd", false, false}, {"gzip", true, false}, {"gzip, identity;q=0", false, true}, {"br, identity;q=0", false, true}, {"zstd, identity;q=0", false, true}} {
 		rec := httptest.NewRecorder()
 		h := CompressWithExclusions(nil, func(*http.Request, http.Header) bool { return tc.skip }, "text/plain")(
 			http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -78,7 +79,9 @@ func TestCompressWithExclusionsWriterSupportsFlush(t *testing.T) {
 				if _, ok := w.(http.Flusher); !ok {
 					t.Errorf("%s skip=%v: writer %T does not implement http.Flusher", tc.accept, tc.skip, w)
 				}
-				if err := http.NewResponseController(w).Flush(); err != nil {
+				if tc.declared {
+					w.Header().Set("Content-Length", strconv.Itoa(len("chunk and the rest")))
+				} else if err := http.NewResponseController(w).Flush(); err != nil {
 					t.Errorf("%s skip=%v: Flush before write: %v", tc.accept, tc.skip, err)
 				}
 				_, _ = io.WriteString(w, "chunk")
@@ -99,12 +102,16 @@ func TestCompressWithExclusionsWriterSupportsFlush(t *testing.T) {
 		if got, err := decodeBody(rec.Header().Get("Content-Encoding"), rec.Body.Bytes()); err != nil || got != "chunk and the rest" {
 			t.Errorf("%s skip=%v: body decodes to %q, %v", tc.accept, tc.skip, got, err)
 		}
+		if length := rec.Header().Get("Content-Length"); tc.declared && length != "" {
+			t.Errorf("%s declared: streamed response states Content-Length %s", tc.accept, length)
+		}
 	}
 }
 
 // The compressor applies the coding the client weights highest, ties going to
 // zstd, then br, then gzip, marks every negotiated response Vary, and leaves
-// excluded responses identity-encoded without it.
+// excluded responses identity-encoded without it. An encoded body the handler
+// declared a length for goes out with its encoded length.
 func TestCompressWithExclusionsNegotiatesCoding(t *testing.T) {
 	var large strings.Builder
 	for i := range 2000 {
@@ -178,7 +185,7 @@ func TestCompressWithExclusionsNegotiatesCoding(t *testing.T) {
 				wantVary = ""
 			}
 			if tc.want != "" {
-				wantLength = ""
+				wantLength = strconv.Itoa(rec.Body.Len())
 			}
 			if vary, length := rec.Header().Get("Vary"), rec.Header().Get("Content-Length"); vary != wantVary || length != wantLength {
 				t.Fatalf("Vary = %q, Content-Length = %q; want %q, %q", vary, length, wantVary, wantLength)

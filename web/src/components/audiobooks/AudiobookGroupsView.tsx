@@ -17,6 +17,7 @@ import {
   type AudiobookGroupBy,
   type AudiobookGroupSort,
 } from "@/hooks/queries/audiobookGroups";
+import { useT, type Translate } from "@/i18n";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
 import { formatHoursMinutes } from "@/lib/audiobooks/duration";
@@ -28,23 +29,30 @@ interface AudiobookGroupsViewProps {
   onSelectGroup: (name: string) => void;
 }
 
-const GROUP_NOUN: Record<AudiobookGroupBy, string> = {
-  author: "authors",
-  narrator: "narrators",
-  series: "series",
-};
-
-function groupStats(group: AudiobookGroup): string {
+function groupStats(t: Translate, group: AudiobookGroup): string {
   const parts = [
-    `${group.item_count} ${group.item_count === 1 ? "book" : "books"}`,
+    t("web.audiobooks.groups.statBooks", {
+      count: group.item_count,
+      count_text: group.item_count,
+    }),
     formatHoursMinutes(group.total_duration_seconds),
   ];
   if (group.in_progress_count > 0) {
-    parts.push(`${group.in_progress_count} in progress`);
+    parts.push(
+      t("web.audiobooks.groups.statInProgress", {
+        count: group.in_progress_count,
+        count_text: group.in_progress_count,
+      }),
+    );
   } else if (group.finished_count > 0 && group.finished_count === group.item_count) {
-    parts.push("all finished");
+    parts.push(t("web.audiobooks.groups.statAllFinished"));
   } else if (group.finished_count > 0) {
-    parts.push(`${group.finished_count} finished`);
+    parts.push(
+      t("web.audiobooks.groups.statFinished", {
+        count: group.finished_count,
+        count_text: group.finished_count,
+      }),
+    );
   }
   return parts.join(" · ");
 }
@@ -126,6 +134,7 @@ export default function AudiobookGroupsView({
   groupBy,
   onSelectGroup,
 }: AudiobookGroupsViewProps) {
+  const t = useT();
   // Authors/narrators default to most-books-first (collection heavy hitters);
   // series read more naturally alphabetized.
   const [sort, setSort] = useState<AudiobookGroupSort>(groupBy === "series" ? "name" : "count");
@@ -161,13 +170,31 @@ export default function AudiobookGroupsView({
     enabled: Boolean(hasNextPage) && !isFetchingNextPage,
   });
 
-  const noun = GROUP_NOUN[groupBy];
   const isSeries = groupBy === "series";
   const countLabel = totalExact
     ? groups.length === total
-      ? String(total)
-      : `${groups.length} of ${total}`
-    : `${groups.length}${hasNextPage ? "+" : ""}`;
+      ? t("web.audiobooks.groups.countAll", {
+          group_by: groupBy,
+          count: total,
+          total: total,
+        })
+      : t("web.audiobooks.groups.countPartial", {
+          group_by: groupBy,
+          shown: groups.length,
+          count: total,
+          total: total,
+        })
+    : hasNextPage
+      ? t("web.audiobooks.groups.countAtLeast", {
+          group_by: groupBy,
+          count: groups.length,
+          loaded: groups.length,
+        })
+      : t("web.audiobooks.groups.countAll", {
+          group_by: groupBy,
+          count: groups.length,
+          total: groups.length,
+        });
 
   return (
     <div className="space-y-5">
@@ -175,7 +202,7 @@ export default function AudiobookGroupsView({
         <Input
           value={filter}
           onChange={(event) => setFilter(event.target.value)}
-          placeholder={`Search ${noun}…`}
+          placeholder={t("web.audiobooks.groups.searchPlaceholder", { group_by: groupBy })}
           className="w-full max-w-xs"
         />
         <Select value={sort} onValueChange={(value) => setSort(value as AudiobookGroupSort)}>
@@ -183,16 +210,12 @@ export default function AudiobookGroupsView({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="name">Name</SelectItem>
-            <SelectItem value="count">Most books</SelectItem>
-            <SelectItem value="duration">Longest</SelectItem>
+            <SelectItem value="name">{t("web.audiobooks.groups.sortName")}</SelectItem>
+            <SelectItem value="count">{t("web.audiobooks.groups.sortCount")}</SelectItem>
+            <SelectItem value="duration">{t("web.audiobooks.groups.sortDuration")}</SelectItem>
           </SelectContent>
         </Select>
-        {firstPage && (
-          <span className="text-muted-foreground ml-auto text-sm">
-            {countLabel} {noun}
-          </span>
-        )}
+        {firstPage && <span className="text-muted-foreground ms-auto text-sm">{countLabel}</span>}
       </div>
 
       {isInitialLoading ? (
@@ -214,14 +237,16 @@ export default function AudiobookGroupsView({
         )
       ) : failedWithNothingLoaded ? (
         <PageUnavailable
-          title={`Couldn't load these ${noun}`}
+          title={t("web.audiobooks.groups.loadFailed", { group_by: groupBy })}
           description={loadErrorDescription(error)}
           onRetry={() => void refetch()}
           retrying={isFetching}
         />
       ) : groups.length === 0 ? (
         <p className="text-muted-foreground py-10 text-center text-sm">
-          {filter ? `No ${noun} match “${filter}”.` : `No ${noun} found in this library.`}
+          {filter
+            ? t("web.audiobooks.groups.noMatch", { group_by: groupBy, filter })
+            : t("web.audiobooks.groups.empty", { group_by: groupBy })}
         </p>
       ) : isSeries ? (
         <>
@@ -231,7 +256,7 @@ export default function AudiobookGroupsView({
                 key={group.name}
                 type="button"
                 onClick={() => onSelectGroup(group.name)}
-                className="group/series text-left"
+                className="group/series text-start"
               >
                 <div className="transition-transform duration-(--duration-fast) group-hover/series:scale-[1.02]">
                   <CoverStack group={group} large />
@@ -240,7 +265,7 @@ export default function AudiobookGroupsView({
                   {group.name}
                 </div>
                 <div className="text-muted-foreground truncate px-0.5 text-xs">
-                  {groupStats(group)}
+                  {groupStats(t, group)}
                 </div>
               </button>
             ))}
@@ -257,13 +282,13 @@ export default function AudiobookGroupsView({
                 key={group.name}
                 type="button"
                 onClick={() => onSelectGroup(group.name)}
-                className="surface-panel hover:bg-muted/40 flex items-center gap-4 rounded-xl border-0 px-4 py-3 text-left transition-colors duration-(--duration-fast)"
+                className="surface-panel hover:bg-muted/40 flex items-center gap-4 rounded-xl border-0 px-4 py-3 text-start transition-colors duration-(--duration-fast)"
               >
                 <CoverStack group={group} />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-semibold">{group.name}</div>
                   <div className="text-muted-foreground mt-0.5 truncate text-xs">
-                    {groupStats(group)}
+                    {groupStats(t, group)}
                   </div>
                 </div>
                 <ChevronRight className="text-muted-foreground/50 h-4 w-4 shrink-0" />

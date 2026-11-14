@@ -126,7 +126,10 @@ type meilisearchFederatedQuery struct {
 	MatchingStrategy     string                    `json:"matchingStrategy,omitempty"`
 	Vector               []float32                 `json:"vector,omitempty"`
 	Hybrid               *meilisearchHybridRequest `json:"hybrid,omitempty"`
-	FederationOptions    struct {
+	// RankingScoreThreshold drops this query's hits that score below it. Only
+	// the meaning-only query sets one; see meilisearchSemanticScoreFloor.
+	RankingScoreThreshold float64 `json:"rankingScoreThreshold,omitempty"`
+	FederationOptions     struct {
 		Weight float64 `json:"weight"`
 	} `json:"federationOptions"`
 }

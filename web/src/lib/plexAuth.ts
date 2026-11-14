@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import { randomUUID } from "./uuid";
 
 const PLEX_TV_BASE_URL = "https://plex.tv";
@@ -91,7 +92,7 @@ function buildPlexHeaders(token?: string): HeadersInit {
 async function readJSON<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const body = (await response.text()).trim();
-    throw new Error(body || `Plex request failed with status ${response.status}`);
+    throw new Error(body || t("web.settings.plexAuth.requestFailed", { status: response.status }));
   }
   return (await response.json()) as T;
 }
@@ -107,7 +108,7 @@ export async function createPlexPin(): Promise<PlexPinResponse> {
   });
   const pin = await readJSON<PlexPinResponse>(response);
   if (!pin.id || !pin.code) {
-    throw new Error("Plex sign-in returned an invalid PIN response.");
+    throw new Error(t("web.settings.plexAuth.invalidPinResponse"));
   }
   return pin;
 }
@@ -171,6 +172,126 @@ export async function listPlexResources(token: string): Promise<BrowserPlexServe
     });
 }
 
+/** A member of the signed-in account's Plex Home, including managed users. */
+export interface PlexHomeUser {
+  uuid: string;
+  title: string;
+  /** Switching to this user needs their Plex Home PIN. */
+  protected: boolean;
+  /** A managed user: a Home member without a plex.tv login of their own. */
+  restricted: boolean;
+}
+
+interface PlexHomeUsersResponse {
+  users?: Array<{
+    uuid?: string;
+    title?: string;
+    username?: string;
+    protected?: boolean;
+    restricted?: boolean;
+  }>;
+}
+
+/**
+ * The Plex Home members the signed-in account can switch to. An account outside
+ * a Plex Home, or a plex.tv error, yields an empty list: Home users are an
+ * option on top of importing the signed-in account, never a requirement.
+ */
+async function listPlexHomeUsers(token: string): Promise<PlexHomeUser[]> {
+  try {
+    const response = await fetch(`${PLEX_TV_BASE_URL}/api/v2/home/users`, {
+      method: "GET",
+      headers: buildPlexHeaders(token),
+    });
+    const home = await readJSON<PlexHomeUsersResponse>(response);
+    return (home.users ?? [])
+      .filter((user) => !!user.uuid)
+      .map((user) => ({
+        uuid: user.uuid as string,
+        title: user.title || user.username || "Plex user",
+        protected: user.protected === true,
+        restricted: user.restricted === true,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+async function getPlexAccountUUID(token: string): Promise<string> {
+  const response = await fetch(`${PLEX_TV_BASE_URL}/api/v2/user`, {
+    method: "GET",
+    headers: buildPlexHeaders(token),
+  });
+  const account = await readJSON<{ uuid?: string }>(response);
+  return account.uuid ?? "";
+}
+
+/**
+ * Switches from the signed-in account to another Plex Home member and returns
+ * that member's plex.tv token. plex.tv checks the PIN for a protected member.
+ */
+async function switchPlexHomeUser(token: string, userUUID: string, pin?: string): Promise<string> {
+  const url = new URL(
+    `${PLEX_TV_BASE_URL}/api/v2/home/users/${encodeURIComponent(userUUID)}/switch`,
+  );
+  if (pin) {
+    url.searchParams.set("pin", pin);
+  }
+  const response = await fetch(url.toString(), {
+    method: "POST",
+    headers: buildPlexHeaders(token),
+  });
+  if (response.status === 401 || response.status === 403) {
+    throw new Error(
+      pin
+        ? t("web.settings.plexAuth.homeUserPinRejected")
+        : t("web.settings.plexAuth.homeUserPinRequired"),
+    );
+  }
+  const user = await readJSON<{ authToken?: string }>(response);
+  if (!user.authToken) {
+    throw new Error(t("web.settings.plexAuth.homeUserNoSignIn"));
+  }
+  return user.authToken;
+}
+
+/**
+ * Signs in as a Plex Home member and finds the chosen server as they see it,
+ * so the import uses that member's own server token and watch state.
+ */
+export async function resolvePlexHomeUserServer(
+  token: string,
+  user: PlexHomeUser,
+  pin: string,
+  serverIdentifier: string,
+): Promise<{ accountToken: string; server: BrowserPlexServer }> {
+  const userToken = await switchPlexHomeUser(token, user.uuid, pin || undefined);
+  const servers = await listPlexResources(userToken);
+  const server = servers.find((candidate) => candidate.clientIdentifier === serverIdentifier);
+  if (!server) {
+    throw new Error(t("web.settings.plexAuth.homeUserNoServerAccess", { name: user.title }));
+  }
+  return { accountToken: userToken, server };
+}
+
+export interface PlexHome {
+  /** The signed-in account's plex.tv UUID, to tell it apart in users. */
+  accountUUID: string;
+  /** Plex Home members, the signed-in account included; empty outside a Home. */
+  users: PlexHomeUser[];
+}
+
+/** Looks up the signed-in account's Plex Home; never fails the sign-in. */
+export async function loadPlexHome(token: string): Promise<PlexHome> {
+  const [users, accountUUID] = await Promise.all([
+    listPlexHomeUsers(token),
+    getPlexAccountUUID(token).catch(() => ""),
+  ]);
+  // Without the account's UUID every member looks like someone else, so
+  // treat that as no Home.
+  return accountUUID ? { accountUUID, users } : { accountUUID: "", users: [] };
+}
+
 export interface PlexAuthenticationResult {
   /** The plex.tv account token; needed for account-level APIs like the watchlist. */
   accountToken: string;
@@ -183,7 +304,7 @@ export async function completePlexAuthentication(
 ): Promise<PlexAuthenticationResult> {
   const authToken = await checkPlexPin(pinID, pinCode);
   if (!authToken) {
-    throw new Error("Plex sign-in was not completed. Please try again.");
+    throw new Error(t("web.settings.plexAuth.signInIncomplete"));
   }
   const servers = await listPlexResources(authToken);
   return { accountToken: authToken, servers };

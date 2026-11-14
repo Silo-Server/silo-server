@@ -398,6 +398,11 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		return nil, err
 	}
 	cfg.Playback.SubtitleSyncNodeCapacity = subtitleSyncNodeCapacity
+	trickplayNodeCapacity, err := intOr(m, "playback.trickplay_node_capacity", 1)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Playback.TrickplayNodeCapacity = trickplayNodeCapacity
 	transcodeEnabled, err := boolOr(m, "playback.transcode_enabled", true)
 	if err != nil {
 		return nil, err

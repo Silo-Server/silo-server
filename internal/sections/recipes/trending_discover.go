@@ -7,11 +7,12 @@ import (
 )
 
 // TrendingDiscoverParams configures the trending_discover section: external
-// global trending pulled from TMDB, mixing movies + series in one list,
-// matched to titles already in the library.
+// global trending pulled from TMDB, matched to titles already in the library.
+// The feed mixes movies and series; FilterType narrows a row to one of them.
 type TrendingDiscoverParams struct {
-	Source string `json:"source"` // "tmdb"
-	Window string `json:"window"` // "day" | "week"
+	Source     string `json:"source"`                // "tmdb"
+	Window     string `json:"window"`                // "day" | "week"
+	FilterType string `json:"filter_type,omitempty"` // "" (both) | "movie" | "series"
 }
 
 type trendingDiscoverRecipe struct{}
@@ -40,6 +41,11 @@ func (trendingDiscoverRecipe) Validate(raw json.RawMessage) error {
 	case "", "day", "week":
 	default:
 		return errors.New(`trending_discover: window must be "day" or "week"`)
+	}
+	switch p.FilterType {
+	case "", "movie", "series":
+	default:
+		return errors.New(`trending_discover: filter_type must be "movie" or "series"`)
 	}
 	return nil
 }

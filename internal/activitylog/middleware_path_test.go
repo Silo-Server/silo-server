@@ -24,10 +24,8 @@ func TestMiddlewarePathFiltering(t *testing.T) {
 		logged bool
 	}{
 		// v1 exclusions.
-		{name: "v1 health", path: "/api/v1/health", logged: false},
-		{name: "v1 ready", path: "/api/v1/ready", logged: false},
-		{name: "v1 admin logs", path: "/api/v1/admin/logs", logged: false},
-		{name: "v1 admin logs app", path: "/api/v1/admin/logs/app", logged: false},
+		{name: "retained health probe", path: "/api/v1/health", logged: false},
+		{name: "retained ready probe", path: "/api/v1/ready", logged: false},
 
 		// v2 exclusions: every operation under the admin log prefix.
 		{name: "v2 admin logs app", path: "/api/v2/admin/logs/app", logged: false},
@@ -37,22 +35,17 @@ func TestMiddlewarePathFiltering(t *testing.T) {
 		{name: "v2 admin logs ws capabilities", path: "/api/v2/admin/logs/ws/capabilities", logged: false},
 
 		// Session starts stay logged on both majors.
-		{name: "v1 stream session start", path: "/api/v1/stream/sess-1", logged: true},
 		{name: "v2 stream session start", path: "/api/v2/stream/sess-1", logged: true},
 
 		// Per-chunk stream fetches are suppressed on both majors.
-		{name: "v1 stream subtitles", path: "/api/v1/stream/sess-1/subtitles/2", logged: false},
 		{name: "v2 stream subtitles", path: "/api/v2/stream/sess-1/subtitles/2", logged: false},
 		{name: "v2 stream subtitle fonts", path: "/api/v2/stream/sess-1/subtitles/2/fonts", logged: false},
-		{name: "v1 transcode master playlist", path: "/api/v1/playback/transcode/sess-1/master.m3u8", logged: false},
 		{name: "v2 transcode master playlist", path: "/api/v2/playback/transcode/sess-1/master.m3u8", logged: false},
-		{name: "v1 transcode segment", path: "/api/v1/playback/transcode/sess-1/segment/0.ts", logged: false},
 		{name: "v2 transcode segment", path: "/api/v2/playback/transcode/sess-1/segment/0.ts", logged: false},
 
 		// Neighboring paths must not be swept up by prefix matching.
 		{name: "v2 admin stream telemetry parity", path: "/api/v2/admin/stream-telemetry/parity", logged: true},
 		{name: "v2 catalog item", path: "/api/v2/catalog/items/abc", logged: true},
-		{name: "v1 catalog item", path: "/api/v1/catalog/items/abc", logged: true},
 	}
 
 	for _, tc := range tests {
