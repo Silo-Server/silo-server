@@ -25,6 +25,7 @@
 ./internal/sections TestSectionsSkipItemsInNoLibraryPostgres
 ./internal/sections TestPersonalSmartCollectionRowKeepsTheCollectionLimitPostgres
 ./internal/sections TestNextUpDismissalKeepsTheRowFullPostgres
+./internal/sections TestNextUpOutOfScopeSeriesKeepTheRowFullPostgres
 ./internal/sections TestContinueReadingFillsTheRowAfterCollapsingMangaChaptersPostgres
 ./internal/sections TestEpisodeCardsCarryParentArtworkPostgres
 ./internal/catalog TestCatalogQueryWithoutLibraryLeavesOutItemsInNoLibraryDB
