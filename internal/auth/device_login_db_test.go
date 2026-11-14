@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -106,6 +107,31 @@ func TestDeviceLoginStartLegacyKeepsV1AnswerDB(t *testing.T) {
 	info, err := svc.Lookup(ctx, DeviceLoginLookupInput{BrowserCode: match[1]})
 	if err != nil || info.Status != DeviceLoginStatusPending || info.DeviceName != name("legacy") {
 		t.Fatalf("lookup by token = %+v, %v", info, err)
+	}
+}
+
+// TestDeviceLoginStartStoresMalformedLabelsDB: a long multibyte name is cut
+// by characters, a NUL is dropped, and a Latin-1 Quick Connect header byte is
+// dropped, so Postgres stores each request instead of refusing the insert.
+func TestDeviceLoginStartStoresMalformedLabelsDB(t *testing.T) {
+	svc, _, _, name := deviceLoginTestService(t)
+	ctx := t.Context()
+
+	long := name("ja-") + strings.Repeat("日", maxDeviceNameLen)
+	start, err := svc.Start(ctx, DeviceLoginStartInput{DeviceName: long, DevicePlatform: "tv\x00os"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := string([]rune(long)[:maxDeviceNameLen]); start.DeviceName != want || start.DevicePlatform != "tvos" {
+		t.Fatalf("recorded name %q, platform %q; want %q, %q", start.DeviceName, start.DevicePlatform, want, "tvos")
+	}
+
+	qc, err := svc.StartQuickConnect(ctx, QuickConnectStartInput{DeviceName: name("latin1-Caf\xe9"), AppName: "Jellyfin\x00Web"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if qc.DeviceName != name("latin1-Caf") || qc.AppName != "JellyfinWeb" {
+		t.Fatalf("recorded name %q, app %q", qc.DeviceName, qc.AppName)
 	}
 }
 
