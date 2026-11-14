@@ -185,6 +185,7 @@ func (s *Service) TestGlobalConfigWithClears(
 // the admin typed and the fields the schema declares reach the plugin, so a
 // test cannot send a saved credential to a destination it was never saved
 // for (issue #2796).
+//
 // invalid wraps a rejected entry in the caller's error type.
 func (s *Service) prepareStagedGlobalConfig(
 	ctx context.Context,
@@ -235,14 +236,9 @@ func stagedConfigChangesSettings(
 	secretPaths [][]string,
 ) bool {
 	for _, path := range secretPaths {
-		typed, present := configPathValue(submitted, path)
-		if !present || isClearedConfigValue(typed) {
-			continue
-		}
-		switch typed.(type) {
-		case map[string]any, []any:
-			// A secret object or list is compared whole below.
-		default:
+		// A secret object or list counts as typed too: its contents are
+		// secret, so comparing them would answer the same guesses.
+		if typed, present := configPathValue(submitted, path); present && !isClearedConfigValue(typed) {
 			return true
 		}
 	}
@@ -273,14 +269,8 @@ func settingsForComparison(value map[string]any, secretPaths [][]string) (map[st
 		normalized = map[string]any{}
 	}
 	for _, path := range secretPaths {
-		// A secret path can name a whole object or list (a map of servers
-		// with secrets inside, or a shape the path walker cannot address).
-		// Its other values may be destinations, so it is compared whole.
-		secret, _ := configPathValue(normalized, path)
-		switch secret.(type) {
-		case map[string]any, []any:
-			continue
-		}
+		// A submitted secret already counts as a change, so a secret here
+		// is the stored one on both sides and is left out.
 		deleteConfigPath(normalized, path)
 	}
 	for field, fieldValue := range normalized {

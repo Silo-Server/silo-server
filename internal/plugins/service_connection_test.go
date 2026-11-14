@@ -467,13 +467,21 @@ var stagedSecretCases = []stagedSecretCase{
 		wantToken:    "saved-token",
 	},
 	{
-		name:         "same URL inside an object of secrets",
-		sameSettings: true,
+		// The admin API never shows an object of secrets, so sending one
+		// is typing it, even with the stored URL and a blank key.
+		name: "same URL inside an object of secrets",
 		submitted: stagedSecretSubmission(func(v map[string]any) {
 			v["servers"] = map[string]any{"main": map[string]any{"url": "https://api.example.invalid", "key": ""}}
 		}),
-		wantPassword:  stagedSavedPassword,
-		wantToken:     "saved-token",
+		wantServerKey: nil,
+	},
+	{
+		// Matching the stored key must not bring back the other stored
+		// secrets, or the result would confirm the guess.
+		name: "stored key guessed inside an object of secrets",
+		submitted: stagedSecretSubmission(func(v map[string]any) {
+			v["servers"] = map[string]any{"main": map[string]any{"url": "https://api.example.invalid", "key": "saved-server-key"}}
+		}),
 		wantServerKey: "saved-server-key",
 	},
 	{

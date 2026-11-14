@@ -3507,8 +3507,7 @@ same way without storing it, with one difference: a blank secret reuses the stor
 only while the entry is otherwise unchanged. Unchanged means no secret is typed and every
 other field, after clears, matches the stored entry; a field the stored entry lacks
 matches its declared default. A secret object or list (such as a map of servers with keys
-inside) is compared whole, blank secrets filled from the stored one, so it counts as typed
-only when it differs from what is stored. A staged entry that changes a server URL, issuer, CA or any
+inside) counts as typed whenever it is sent, because its contents are secret. A staged entry that changes a server URL, issuer, CA or any
 other setting, or types a secret, is tested with only the secrets the administrator typed
 and without undeclared stored fields, so a destination changed in an entry never receives
 that entry's saved credentials. The rule is per entry: the other stored entries go to the
