@@ -2934,16 +2934,14 @@ func (r *ItemRepository) UpdateMetadataTx(ctx context.Context, tx pgx.Tx, conten
 
 	// The item's ID columns before the edit, read under the lock the UPDATE
 	// takes anyway; the durable-ID sync below skips an ID this edit resends.
-	var storedIDs map[string]string
+	var storedTMDB, storedIMDb, storedTVDB string
 	if upd.TmdbID != nil || upd.ImdbID != nil || upd.TvdbID != nil {
-		var tmdb, imdb, tvdb string
 		err := tx.QueryRow(ctx, `
 			SELECT COALESCE(tmdb_id, ''), COALESCE(imdb_id, ''), COALESCE(tvdb_id, '')
-			FROM media_items WHERE content_id = $1 FOR NO KEY UPDATE`, contentID).Scan(&tmdb, &imdb, &tvdb)
+			FROM media_items WHERE content_id = $1 FOR NO KEY UPDATE`, contentID).Scan(&storedTMDB, &storedIMDb, &storedTVDB)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("reading edited item provider ids: %w", err)
 		}
-		storedIDs = map[string]string{providerTMDB: tmdb, providerIMDb: imdb, providerTVDB: tvdb}
 	}
 	tag, err := tx.Exec(ctx, query, args...)
 	if err != nil {
@@ -2972,11 +2970,16 @@ func (r *ItemRepository) UpdateMetadataTx(ctx context.Context, tx pgx.Tx, conten
 	for _, edited := range []struct {
 		provider string
 		value    *string
-	}{{providerTMDB, upd.TmdbID}, {providerTVDB, upd.TvdbID}, {providerIMDb, upd.ImdbID}} {
+		stored   string
+	}{
+		{contentid.ProviderTMDB, upd.TmdbID, storedTMDB},
+		{contentid.ProviderTVDB, upd.TvdbID, storedTVDB},
+		{contentid.ProviderIMDB, upd.ImdbID, storedIMDb},
+	} {
 		// Only a changed ID is a choice, as lockCuratedProviderIDs judges it: an
 		// edit form resends unchanged IDs, and a curator's scope check skips
 		// them, so their durable rows stay as they are.
-		if edited.value == nil || strings.EqualFold(strings.TrimSpace(*edited.value), strings.TrimSpace(storedIDs[edited.provider])) {
+		if edited.value == nil || strings.EqualFold(strings.TrimSpace(*edited.value), strings.TrimSpace(edited.stored)) {
 			continue
 		}
 		if err := syncEditedProviderIDTx(ctx, tx, contentID, edited.provider, *edited.value); err != nil {
@@ -3001,9 +3004,9 @@ func (r *ItemRepository) UpdateMetadataTx(ctx context.Context, tx pgx.Tx, conten
 // the holder's row, so two edits that swap IDs don't deadlock. A holder that
 // commits after the check fails the insert on the unique key instead; the
 // savepoint confines that failure to the durable row, so the edit still saves.
-// A writer that doesn't lock the item row, such as ReplaceByContentID, can put
-// this item's row back between the delete and the insert; the insert then
-// overwrites it.
+// ReplaceByContentID and the provider-ID drift repair lock the item before its
+// rows, so they wait for the edit; the upsert overwrites a row any other
+// writer puts back between the delete and the insert.
 func syncEditedProviderIDTx(ctx context.Context, tx pgx.Tx, contentID, provider, value string) error {
 	if _, err := tx.Exec(ctx, `
 		DELETE FROM media_item_provider_ids
