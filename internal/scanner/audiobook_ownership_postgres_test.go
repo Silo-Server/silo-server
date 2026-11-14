@@ -13,17 +13,20 @@ import (
 
 // A rescan of a provider-matched book keeps the provider's year, genres and
 // credits, even when the file has no year tag and different credits; tags
-// only fill what the provider left empty. Without a match the tags rule.
+// only fill what the provider left empty. A match whose only stored ID is the
+// tagged ASIN counts through its success outcome. Without a match the tags
+// rule.
 func TestAudiobookRescanKeepsProviderMatchDB(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
-		matched     bool
+		matchedBy   string // "", "provider id" or "outcome"
 		wantYear    int
 		wantGenres  []string
 		wantCredits []string
 	}{
-		{"provider matched", true, 2008, []string{"Provider Genre"}, []string{"Provider Author", "Tag Narrator"}},
-		{"unmatched", false, 0, []string{"Provider Genre", "Tag Genre"}, []string{"Tag Author", "Tag Narrator"}},
+		{"provider matched", "provider id", 2008, []string{"Provider Genre"}, []string{"Provider Author", "Tag Narrator"}},
+		{"matched through the tagged asin", "outcome", 2008, []string{"Provider Genre"}, []string{"Provider Author", "Tag Narrator"}},
+		{"unmatched", "", 0, []string{"Provider Genre", "Tag Genre"}, []string{"Tag Author", "Tag Narrator"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pool := newBookScanTestPool(t)
@@ -46,8 +49,15 @@ VALUES ($1,'audiobook','Emma','',2008,'{Provider Genre}'::text[])`, id); err != 
 			if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries (content_id,media_folder_id) VALUES ($1,$2)`, id, folder.ID); err != nil {
 				t.Fatal(err)
 			}
-			if tc.matched {
-				if _, err := pool.Exec(ctx, `INSERT INTO media_item_provider_ids (content_id,provider,provider_id,item_type) VALUES ($1,'audible',$1,'audiobook')`, id); err != nil {
+			seeds := map[string][]string{
+				"provider id": {`INSERT INTO media_item_provider_ids (content_id,provider,provider_id,item_type) VALUES ($1,'audible',$1,'audiobook')`},
+				"outcome": {
+					`INSERT INTO media_item_provider_ids (content_id,provider,provider_id,item_type) VALUES ($1,'asin',$1,'audiobook')`,
+					`INSERT INTO audiobook_enrichment_state (content_id,attempts,outcome) VALUES ($1,1,'success')`,
+				},
+			}
+			for _, stmt := range seeds[tc.matchedBy] {
+				if _, err := pool.Exec(ctx, stmt, id); err != nil {
 					t.Fatal(err)
 				}
 			}

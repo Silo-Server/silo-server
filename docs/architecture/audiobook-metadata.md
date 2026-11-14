@@ -9,10 +9,13 @@ one owner, so a rescan never leaves a book describing two sources.
 ## Matched means a provider identity
 
 A book is provider-matched when it has a `media_item_provider_ids` row other
-than `asin`; the scanner stores the ASIN tag there, so that row alone is not a
-match. The enricher and an admin's Match Item both write one.
-`catalog.AudiobookProviderMatchedWhere` is the shared predicate. The enricher's
-claim query applies the same test inline to decide what still needs a match.
+than `asin`, or its last enrichment outcome in `audiobook_enrichment_state` is
+`success`. The scanner stores the ASIN tag as an `asin` row, so that row alone
+is not a match. The enricher and an admin's Match Item write a provider's own
+ID; the outcome covers a match that stored no such ID, such as a lookup by the
+tagged ASIN or a match whose provider ID another item already owns.
+`catalog.AudiobookProviderMatchedWhere` is the one predicate; the scanner and
+the admin unmatched list both use it.
 
 ## Who owns which field
 
