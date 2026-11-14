@@ -866,6 +866,41 @@ func TestAudiobookPeopleCreditsEqual(t *testing.T) {
 // A monitor or webhook scan scoped to a book folder that was deleted is an
 // empty scope, so the book's files can be reconciled. A missing library root,
 // or a missing parent above the book, stays an unreadable path.
+// A duplicate candidate must carry every tagged credit, and may carry more:
+// a provider match stores fuller credits, and renaming that book's folder
+// must keep its item and progress.
+func TestAudiobookCreditsContain(t *testing.T) {
+	person := func(name string, kind models.PersonKind) models.ItemPerson {
+		return models.ItemPerson{Person: models.Person{Name: name}, Kind: kind}
+	}
+	tags := []audiobookCredit{
+		{Name: "Author A", Kind: models.PersonKindAuthor},
+		{Name: "Reader One", Kind: models.PersonKindNarrator},
+		{Name: "Reader Two", Kind: models.PersonKindNarrator},
+	}
+	tests := []struct {
+		name     string
+		existing []models.ItemPerson
+		want     bool
+	}{
+		{"equal sets", []models.ItemPerson{
+			person("author a", models.PersonKindAuthor), person("Reader One", models.PersonKindNarrator), person("Reader Two", models.PersonKindNarrator),
+		}, true},
+		{"provider credits are a superset", []models.ItemPerson{
+			person("Author A", models.PersonKindAuthor), person("Reader One", models.PersonKindNarrator),
+			person("Reader Two", models.PersonKindNarrator), person("Reader Three", models.PersonKindNarrator),
+		}, true},
+		{"shares only the first narrator", []models.ItemPerson{
+			person("Author A", models.PersonKindAuthor), person("Reader One", models.PersonKindNarrator),
+		}, false},
+	}
+	for _, tc := range tests {
+		if got := audiobookCreditsContain(tc.existing, tags); got != tc.want {
+			t.Errorf("%s: audiobookCreditsContain = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestCollectAudiobookRootScansTreatsVanishedBookFolderAsEmpty(t *testing.T) {
 	library := t.TempDir()
 	// The encoded scope must also decode its parent before checking it.

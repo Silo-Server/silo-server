@@ -1178,14 +1178,16 @@ func (s *Scanner) findAudiobookDuplicate(ctx context.Context, book *parsedAudiob
 	rows.Close()
 	// The query matches on the first author and narrator only. Recordings
 	// that share those but differ in the rest of the cast are different
-	// editions, so the whole credit set must agree.
+	// editions, so every tagged credit must be on the candidate. The
+	// candidate may have more: a provider match stores the provider's
+	// fuller credits, and a renamed folder must keep its item.
 	credits, err := s.audiobookCandidateCredits(ctx, candidates)
 	if err != nil {
 		return nil
 	}
 	desired := book.credits()
 	for _, candidateID := range candidates {
-		if audiobookPeopleCreditsEqual(credits[candidateID], desired) {
+		if audiobookCreditsContain(credits[candidateID], desired) {
 			existingID = candidateID
 			break
 		}
@@ -1531,6 +1533,26 @@ func (b *parsedAudiobook) credits() []audiobookCredit {
 	add(b.Authors, b.Author, models.PersonKindAuthor)
 	add(b.Narrators, b.Narrator, models.PersonKindNarrator)
 	return out
+}
+
+// audiobookCreditsContain reports whether every desired credit appears in
+// existing with the same kind, comparing names case-insensitively. existing
+// may hold more credits.
+func audiobookCreditsContain(existing []models.ItemPerson, desired []audiobookCredit) bool {
+	type key struct {
+		name string
+		kind models.PersonKind
+	}
+	have := make(map[key]struct{}, len(existing))
+	for _, p := range existing {
+		have[key{strings.ToLower(strings.TrimSpace(p.Name)), p.Kind}] = struct{}{}
+	}
+	for _, d := range desired {
+		if _, ok := have[key{strings.ToLower(strings.TrimSpace(d.Name)), d.Kind}]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // audiobookCandidateCredits loads the author and narrator credits of the
