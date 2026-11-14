@@ -411,7 +411,10 @@ type itemRefreshTestFileRepo struct {
 	// unlinkedReads is how many scope reads after the clear find no linked
 	// file, as while another worker's match is still running.
 	unlinkedReads int
-	reads         int
+	// partlyLinkedReads is how many reads after those still find one more
+	// file of the scope unlinked; -1 means it never links.
+	partlyLinkedReads int
+	reads             int
 }
 
 func (r *itemRefreshTestFileRepo) GetByContentID(_ context.Context, _ string) ([]*models.MediaFile, error) {
@@ -426,6 +429,9 @@ func (r *itemRefreshTestFileRepo) GetByFolderAndPathPrefix(_ context.Context, _ 
 	r.reads++
 	if r.clearedPath != "" && r.reads <= r.unlinkedReads {
 		return nil, nil
+	}
+	if r.clearedPath != "" && (r.partlyLinkedReads < 0 || r.reads <= r.unlinkedReads+r.partlyLinkedReads) {
+		return append(slices.Clone(r.filesByPath), &models.MediaFile{FilePath: "/media/mixed/Title/still-unlinked.mkv"}), nil
 	}
 	return r.filesByPath, nil
 }
@@ -495,6 +501,9 @@ func (r *itemRefreshTestSkippedRootRepo) DeleteMissingInScope(_ context.Context,
 
 type itemRefreshTestEpisodeRepo struct {
 	episode *models.Episode
+	// missingReads is how many lookups find no episode yet.
+	missingReads int
+	reads        int
 }
 
 func (r *itemRefreshTestEpisodeRepo) GetByID(_ context.Context, _ string) (*models.Episode, error) {
@@ -502,6 +511,10 @@ func (r *itemRefreshTestEpisodeRepo) GetByID(_ context.Context, _ string) (*mode
 }
 
 func (r *itemRefreshTestEpisodeRepo) GetBySeriesAndNumber(_ context.Context, seriesID string, seasonNum int, episodeNum int) (*models.Episode, error) {
+	r.reads++
+	if r.reads <= r.missingReads {
+		return nil, errors.New("episode not found")
+	}
 	if r.episode != nil && r.episode.SeriesID == seriesID && r.episode.SeasonNumber == seasonNum && r.episode.EpisodeNumber == episodeNum {
 		return r.episode, nil
 	}
@@ -639,6 +652,47 @@ func TestItemRefreshExecutorCompleteRefreshWaitsForTheRelink(t *testing.T) {
 
 	if _, ingester, _, err := run(t, "movie", 0, time.Second); err != nil || ingester.unlinked {
 		t.Fatalf("movie target: err %v, unlinked ingest %v; want the plain ingest", err, ingester.unlinked)
+	}
+}
+
+// A complete refresh waits for the whole scope: while a file in it is still
+// unlinked, or the requested episode row isn't there yet, it checks again. A
+// file that never links doesn't fail the refresh once the wait passes.
+func TestItemRefreshExecutorCompleteRefreshWaitsForTheWholeScope(t *testing.T) {
+	t.Parallel()
+	run := func(t *testing.T, partlyLinkedReads, missingEpisodeReads int, wait time.Duration) (*ItemRefreshResult, *itemRefreshTestFileRepo, *itemRefreshTestEpisodeRepo, error) {
+		t.Helper()
+		fileRepo := &itemRefreshTestFileRepo{
+			filesByPath:       []*models.MediaFile{{ContentID: "new-series-id", FilePath: "/media/mixed/Title/Title S01E03.mkv"}},
+			partlyLinkedReads: partlyLinkedReads,
+		}
+		episodeRepo := &itemRefreshTestEpisodeRepo{
+			episode:      &models.Episode{ContentID: "new-episode-id", SeriesID: "new-series-id", SeasonNumber: 1, EpisodeNumber: 3},
+			missingReads: missingEpisodeReads,
+		}
+		executor := NewItemRefreshExecutor(
+			&itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 7, Enabled: true, Paths: []string{"/media/mixed"}}},
+			fileRepo, &itemRefreshTestRootClaimRepo{}, &itemRefreshTestGroupClaimRepo{}, newItemRefreshTestSkippedRootRepo(),
+			nil, episodeRepo, &itemRefreshTestIngester{}, &itemRefreshTestScanRuns{}, &itemRefreshTestRefresher{}, nil, nil,
+		)
+		executor.relinkWait = wait
+		result, err := executor.Execute(context.Background(), ItemRefreshRequest{
+			RequestedContentID: "old-episode-id", RequestedType: "episode", RequestedSeasonNumber: 1, RequestedEpisodeNumber: 3,
+			RefreshContentID: "old-series-id", ScanFolderID: 7, ScanPath: "/media/mixed/Title", Mode: ItemRefreshModeComplete,
+		}, nil)
+		return result, fileRepo, episodeRepo, err
+	}
+
+	result, files, _, err := run(t, 3, 0, 5*time.Second)
+	if err != nil || result.RefreshContentID != "new-episode-id" || files.reads < 4 {
+		t.Fatalf("partly linked scope: result %+v after %d reads, err %v; want new-episode-id after the 4th read", result, files.reads, err)
+	}
+	result, _, episodes, err := run(t, 0, 2, 5*time.Second)
+	if err != nil || result.RefreshContentID != "new-episode-id" || episodes.reads < 3 {
+		t.Fatalf("late episode row: result %+v after %d lookups, err %v; want new-episode-id after the 3rd", result, episodes.reads, err)
+	}
+	if result, _, _, err := run(t, -1, 0, 50*time.Millisecond); err != nil || result.RefreshContentID != "new-episode-id" {
+		t.Fatalf("a file that never links: result %+v, err %v; want the refresh to finish with what is linked", result, err)
 	}
 }
 

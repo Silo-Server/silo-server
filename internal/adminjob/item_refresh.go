@@ -493,6 +493,10 @@ const (
 // to any item.
 var errNoRebuiltContent = errors.New("no rebuilt content found in refresh scope")
 
+// errRebuiltTargetNotFound is a requested season or episode that the rebuilt
+// series does not hold (yet): its row can appear after the first file links.
+var errRebuiltTargetNotFound = errors.New("target not found")
+
 // isSeriesTarget reports whether a refresh of requestedType rebuilds a series
 // root, which the TV match queue matches.
 func isSeriesTarget(requestedType string) bool {
@@ -718,9 +722,11 @@ func (e *ItemRefreshExecutor) prepareCompleteRefresh(ctx context.Context, req It
 	return nil
 }
 
-// resolveRelinkedTargets is resolveCompleteRefreshTargets once the scope's
-// files are linked again: while none is, it checks again until relinkWait
-// passes, then reports errNoRebuiltContent.
+// resolveRelinkedTargets is resolveCompleteRefreshTargets once the scope is
+// rebuilt: while a present file in it is still unlinked, or the requested
+// season or episode isn't there yet, it checks again until relinkWait passes.
+// Then it resolves with what is linked, so a file that never matches does not
+// fail the refresh, and reports errNoRebuiltContent when nothing is.
 func (e *ItemRefreshExecutor) resolveRelinkedTargets(ctx context.Context, req ItemRefreshRequest) (string, string, error) {
 	wait := e.relinkWait
 	if wait <= 0 {
@@ -728,8 +734,9 @@ func (e *ItemRefreshExecutor) resolveRelinkedTargets(ctx context.Context, req It
 	}
 	deadline := time.Now().Add(wait)
 	for {
-		refreshID, detailID, err := e.resolveCompleteRefreshTargets(ctx, req)
-		if !errors.Is(err, errNoRebuiltContent) || !time.Now().Before(deadline) {
+		refreshID, detailID, unlinked, err := e.resolveCompleteRefreshTargets(ctx, req)
+		rebuilding := errors.Is(err, errNoRebuiltContent) || errors.Is(err, errRebuiltTargetNotFound) || (err == nil && unlinked > 0)
+		if !rebuilding || !time.Now().Before(deadline) {
 			return refreshID, detailID, err
 		}
 		timer := time.NewTimer(min(completeRefreshRelinkPoll, time.Until(deadline)))
@@ -742,15 +749,23 @@ func (e *ItemRefreshExecutor) resolveRelinkedTargets(ctx context.Context, req It
 	}
 }
 
-func (e *ItemRefreshExecutor) resolveCompleteRefreshTargets(ctx context.Context, req ItemRefreshRequest) (string, string, error) {
+// resolveCompleteRefreshTargets resolves the rebuilt item from the scope's
+// linked files, and reports how many present files in the scope are still
+// unlinked. A local extra keeps no content link, so it doesn't count.
+func (e *ItemRefreshExecutor) resolveCompleteRefreshTargets(ctx context.Context, req ItemRefreshRequest) (string, string, int, error) {
 	files, err := e.fileRepo.GetByFolderAndPathPrefix(ctx, req.ScanFolderID, req.ScanPath)
 	if err != nil {
-		return "", "", fmt.Errorf("loading rebuilt files: %w", err)
+		return "", "", 0, fmt.Errorf("loading rebuilt files: %w", err)
 	}
 
 	distinctContentIDs := make(map[string]struct{})
+	unlinked := 0
 	for _, file := range files {
-		if file == nil || file.MissingSince != nil || file.ContentID == "" {
+		if file == nil || file.MissingSince != nil || file.ExtraID != "" {
+			continue
+		}
+		if file.ContentID == "" {
+			unlinked++
 			continue
 		}
 		distinctContentIDs[file.ContentID] = struct{}{}
@@ -758,10 +773,10 @@ func (e *ItemRefreshExecutor) resolveCompleteRefreshTargets(ctx context.Context,
 
 	switch len(distinctContentIDs) {
 	case 0:
-		return "", "", errNoRebuiltContent
+		return "", "", unlinked, errNoRebuiltContent
 	case 1:
 	default:
-		return "", "", fmt.Errorf("multiple rebuilt content IDs found in refresh scope")
+		return "", "", unlinked, errors.New("multiple rebuilt content IDs found in refresh scope")
 	}
 
 	refreshContentID := ""
@@ -777,7 +792,7 @@ func (e *ItemRefreshExecutor) resolveCompleteRefreshTargets(ctx context.Context,
 				detailContentID = season.ContentID
 				refreshContentID = season.ContentID
 			} else {
-				return "", "", fmt.Errorf("rebuilt season target not found")
+				return "", "", unlinked, fmt.Errorf("rebuilt season %w", errRebuiltTargetNotFound)
 			}
 		}
 	case "episode":
@@ -786,12 +801,12 @@ func (e *ItemRefreshExecutor) resolveCompleteRefreshTargets(ctx context.Context,
 				detailContentID = episode.ContentID
 				refreshContentID = episode.ContentID
 			} else {
-				return "", "", fmt.Errorf("rebuilt episode target not found")
+				return "", "", unlinked, fmt.Errorf("rebuilt episode %w", errRebuiltTargetNotFound)
 			}
 		}
 	}
 
-	return refreshContentID, detailContentID, nil
+	return refreshContentID, detailContentID, unlinked, nil
 }
 
 func normalizeItemRefreshMode(mode ItemRefreshMode) ItemRefreshMode {
