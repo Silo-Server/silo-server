@@ -9055,6 +9055,12 @@
       "value": "\u200F\u202EThis path matches more than one library.\u202C"
     }
   ],
+  "web.admin.autoscan.activity.reason.pathIgnored": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe library's ignore files exclude this file, so it was not scanned.\u202C"
+    }
+  ],
   "web.admin.autoscan.activity.reason.pathNotFileOrDir": [
     {
       "type": 0,

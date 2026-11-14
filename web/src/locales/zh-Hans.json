@@ -8544,6 +8544,12 @@
       "value": "此路径匹配多个媒体库。"
     }
   ],
+  "web.admin.autoscan.activity.reason.pathIgnored": [
+    {
+      "type": 0,
+      "value": "媒体库的忽略文件排除了此文件，因此未被扫描。"
+    }
+  ],
   "web.admin.autoscan.activity.reason.pathNotFileOrDir": [
     {
       "type": 0,

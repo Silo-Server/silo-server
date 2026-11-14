@@ -9102,6 +9102,12 @@
       "value": "Este caminho corresponde a mais de uma biblioteca."
     }
   ],
+  "web.admin.autoscan.activity.reason.pathIgnored": [
+    {
+      "type": 0,
+      "value": "Os arquivos de exclusão da biblioteca excluem este arquivo, então ele não foi verificado."
+    }
+  ],
   "web.admin.autoscan.activity.reason.pathNotFileOrDir": [
     {
       "type": 0,

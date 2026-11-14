@@ -9351,6 +9351,12 @@
       "value": "⟦Ţĥîš þåţĥ ɱåţçĥéš ɱöŕé ţĥåñ öñé ļîƀŕåŕý.~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.autoscan.activity.reason.pathIgnored": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé ļîƀŕåŕý'š îĝñöŕé ƒîļéš éẋçļûđé ţĥîš ƒîļé, šö îţ ŵåš ñöţ šçåññéđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.autoscan.activity.reason.pathNotFileOrDir": [
     {
       "type": 0,

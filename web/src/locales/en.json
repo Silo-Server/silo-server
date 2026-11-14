@@ -8819,6 +8819,12 @@
       "value": "This path matches more than one library."
     }
   ],
+  "web.admin.autoscan.activity.reason.pathIgnored": [
+    {
+      "type": 0,
+      "value": "The library's ignore files exclude this file, so it was not scanned."
+    }
+  ],
   "web.admin.autoscan.activity.reason.pathNotFileOrDir": [
     {
       "type": 0,
