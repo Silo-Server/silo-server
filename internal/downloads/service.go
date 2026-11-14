@@ -646,10 +646,13 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 // and the caller's row returned: reporting an error would invite a retry
 // that duplicates the download or conflicts on its revision.
 func (s *Service) confirmArtifactLink(ctx context.Context, d *Download) *Download {
-	confirmed, err := s.repo.ConfirmArtifactLink(ctx, d)
+	confirmed, requeued, err := s.repo.ConfirmArtifactLink(ctx, d)
 	if err != nil {
 		slog.WarnContext(ctx, "confirming download artifact link failed", "component", "downloads", "download_id", d.ID, "artifact_id", d.ArtifactID, "error", err)
 		confirmed = d
+	}
+	if requeued {
+		s.artifacts.triggerDrain()
 	}
 	// A new download joining a job still being prepared changes that job's
 	// requester list; the job itself emits nothing when it is only reused.
@@ -1167,6 +1170,10 @@ func (s *Service) reuseOrReplaceManaged(ctx context.Context, existing, replaceme
 		return existing, nil
 	}
 	row, err := s.repo.ReplaceManagedEntry(ctx, existing, replacement)
+	if err == nil && row.ArtifactID != existing.ArtifactID {
+		// A new quality leaves the old job without this download.
+		s.artifacts.stopAbandonedPreparations(ctx, existing)
+	}
 	// The shared CAS returns a concurrent winner after losing the update. Native
 	// creation must not report that winner as successful replacement of our target.
 	if err == nil && expected != nil && (row.ID != existing.ID || row.Revision != existing.Revision+1 || !sameManagedTarget(row, replacement)) {
@@ -1401,6 +1408,7 @@ func (s *Service) Delete(ctx context.Context, userID int, profileID, deviceID, d
 			return err
 		}
 		s.notifyPreparationRequesters(ctx, before)
+		s.artifacts.stopAbandonedPreparations(ctx, before)
 		return nil
 	}
 
@@ -1428,6 +1436,7 @@ func (s *Service) Delete(ctx context.Context, userID int, profileID, deviceID, d
 	}
 	if err == nil {
 		s.notifyPreparationRequesters(ctx, dl)
+		s.artifacts.stopAbandonedPreparations(ctx, dl)
 	}
 	return err
 }

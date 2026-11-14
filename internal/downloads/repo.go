@@ -680,20 +680,22 @@ func (r *Repository) MarkLinkedDownloadsFailed(ctx context.Context, artifactID, 
 // reset is fenced on the artifact so a concurrent create that relinked the
 // row elsewhere is left alone. A preparing row whose artifact is gone was
 // linked to a job an administrator canceled meanwhile; it fails as the
-// cancel's own downloads did, since no job will ever finish it.
-func (r *Repository) ConfirmArtifactLink(ctx context.Context, d *Download) (*Download, error) {
+// cancel's own downloads did, since no job will ever finish it. A preparing
+// row whose job was retired as abandoned meanwhile queues that job again;
+// requeued reports it, so the caller can start preparation.
+func (r *Repository) ConfirmArtifactLink(ctx context.Context, d *Download) (*Download, bool, error) {
 	if d == nil || d.ArtifactID == "" {
-		return d, nil
+		return d, false, nil
 	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("beginning artifact link check: %w", err)
+		return nil, false, fmt.Errorf("beginning artifact link check: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	var artifactStatus string
 	err = tx.QueryRow(ctx, `SELECT status FROM download_artifacts WHERE id = $1 FOR SHARE`, d.ArtifactID).Scan(&artifactStatus)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return nil, fmt.Errorf("checking linked artifact status: %w", err)
+		return nil, false, fmt.Errorf("checking linked artifact status: %w", err)
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		if _, err := tx.Exec(ctx,
@@ -701,10 +703,24 @@ func (r *Repository) ConfirmArtifactLink(ctx context.Context, d *Download) (*Dow
 			 WHERE id = $1 AND artifact_id = $2 AND status = 'preparing'`,
 			d.ID, d.ArtifactID, PreparationCanceledMessage,
 		); err != nil {
-			return nil, fmt.Errorf("failing download of canceled artifact: %w", err)
+			return nil, false, fmt.Errorf("failing download of canceled artifact: %w", err)
 		}
 	}
+	requeued := false
 	switch artifactStatus {
+	case ArtifactExpired:
+		// The job was retired as abandoned after the create read it. This
+		// download needs it, so prepare it again.
+		tag, err := tx.Exec(ctx,
+			`UPDATE download_artifacts a SET `+requeueArtifactAssignment+`, last_used_at = now()
+			 WHERE a.id = $2 AND a.status = 'expired'
+			   AND EXISTS (SELECT 1 FROM downloads d WHERE d.id = $1 AND d.artifact_id = a.id AND d.status = 'preparing')`,
+			d.ID, d.ArtifactID,
+		)
+		if err != nil {
+			return nil, false, fmt.Errorf("requeuing expired artifact of a new download: %w", err)
+		}
+		requeued = tag.RowsAffected() > 0
 	case "queued", "tone_map_queued", "audio_v2_queued", "tracks_v1_queued", "running", "tone_map_running", "audio_v2_running", "tracks_v1_running":
 		if _, err := tx.Exec(ctx,
 			`UPDATE downloads SET status = 'preparing', bytes_sent = 0, completed_at = NULL,
@@ -712,20 +728,20 @@ func (r *Repository) ConfirmArtifactLink(ctx context.Context, d *Download) (*Dow
 			 WHERE id = $1 AND artifact_id = $2 AND status = 'ready'`,
 			d.ID, d.ArtifactID,
 		); err != nil {
-			return nil, fmt.Errorf("resetting download of requeued artifact: %w", err)
+			return nil, false, fmt.Errorf("resetting download of requeued artifact: %w", err)
 		}
 	}
 	current, err := scanDownload(tx.QueryRow(ctx, `SELECT `+downloadColumns+` FROM downloads WHERE id = $1`, d.ID))
 	if errors.Is(err, ErrNotFound) {
-		return d, nil // deleted concurrently; the caller's copy is all that remains
+		return d, false, nil // deleted concurrently; the caller's copy is all that remains
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("committing artifact link check: %w", err)
+		return nil, false, fmt.Errorf("committing artifact link check: %w", err)
 	}
-	return current, nil
+	return current, requeued, nil
 }
 
 // ReconcileLinkedDownloads repairs downloads stranded in 'preparing' against a

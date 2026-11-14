@@ -131,18 +131,62 @@ func (r *ArtifactRepository) ResumePreparations(ctx context.Context, ids []strin
 // preparing and fails the downloads still waiting on them with errMsg, in one
 // transaction. It returns the deleted jobs and the downloads it failed.
 func (r *ArtifactRepository) CancelPreparations(ctx context.Context, ids []string, errMsg string) ([]stoppedArtifact, []*Download, error) {
-	return r.cancelPreparations(ctx, ids, errMsg, "")
+	return r.cancelPreparations(ctx, ids, errMsg)
 }
 
-// CancelAbandonedPreparations is CancelPreparations for jobs no live download
-// refers to any more. The check runs in the statement that deletes the job,
-// so a download that linked the job since the caller looked keeps it.
-func (r *ArtifactRepository) CancelAbandonedPreparations(ctx context.Context, ids []string, errMsg string) ([]stoppedArtifact, []*Download, error) {
-	return r.cancelPreparations(ctx, ids, errMsg,
-		` AND NOT EXISTS (SELECT 1 FROM downloads d WHERE d.artifact_id = download_artifacts.id AND `+liveLinkPredicate+`)`)
+// abandonedPreparationGrace keeps the sweep and the claim query away from a
+// job a create has just queued or linked but whose download row is not
+// committed yet: Ensure writes the job before the create inserts its row.
+const abandonedPreparationGrace = 10 * time.Minute
+
+// abandonedPreparationPredicate matches a queued or running job (alias a)
+// that no in-flight download needs.
+const abandonedPreparationPredicate = `a.status IN ('queued', 'tone_map_queued', 'audio_v2_queued', 'tracks_v1_queued',
+	                   'running', 'tone_map_running', 'audio_v2_running', 'tracks_v1_running')
+	AND NOT EXISTS (SELECT 1 FROM downloads d WHERE d.artifact_id = a.id AND ` + inFlightLinkPredicate + `)`
+
+// RetireAbandonedPreparations expires every listed queued or running job that
+// no in-flight download needs any more, so nothing encodes for nobody. The
+// row keeps its recipe: a create that read the job before this committed
+// links to an expired row, which ConfirmArtifactLink queues again. The row
+// also keeps its id and output path, so a running job keeps an unowned lease
+// for pauseClaimGrace, as a pause does: the stopped worker may run until its
+// next heartbeat, and a job queued again meanwhile waits that out. The check
+// runs in the statement that expires the job, so a download committed since
+// the caller looked keeps it preparing.
+func (r *ArtifactRepository) RetireAbandonedPreparations(ctx context.Context, ids []string) ([]stoppedArtifact, error) {
+	return r.retireAbandonedPreparations(ctx, `a.id = ANY($1)`, ids)
 }
 
-func (r *ArtifactRepository) cancelPreparations(ctx context.Context, ids []string, errMsg, filter string) ([]stoppedArtifact, []*Download, error) {
+// RetireStaleAbandonedPreparations is RetireAbandonedPreparations for every
+// job nothing has used within abandonedPreparationGrace. It catches jobs
+// whose last download left by a path that does not retire them itself, and
+// jobs abandoned before this check existed.
+func (r *ArtifactRepository) RetireStaleAbandonedPreparations(ctx context.Context) ([]stoppedArtifact, error) {
+	return r.retireAbandonedPreparations(ctx, `a.last_used_at < now() - make_interval(secs => $1)`, abandonedPreparationGrace.Seconds())
+}
+
+func (r *ArtifactRepository) retireAbandonedPreparations(ctx context.Context, filter string, arg any) ([]stoppedArtifact, error) {
+	rows, err := r.pool.Query(ctx,
+		`WITH target AS (
+		     SELECT a.id, a.status IN `+runningArtifactStatuses+` AS running
+		     FROM download_artifacts a
+		     WHERE `+filter+` AND `+abandonedPreparationPredicate+`
+		     FOR UPDATE
+		 )
+		 UPDATE download_artifacts a SET `+expireLocatorAssignment+`, paused_at = NULL,
+		     lease_expires_at = CASE WHEN t.running THEN now() + make_interval(secs => $2)
+		                             WHEN a.lease_expires_at > now() THEN a.lease_expires_at END
+		 FROM target t
+		 WHERE a.id = t.id
+		 RETURNING a.id, t.running`, arg, pauseClaimGrace.Seconds())
+	if err != nil {
+		return nil, fmt.Errorf("retiring abandoned preparations: %w", err)
+	}
+	return scanStoppedArtifacts(rows)
+}
+
+func (r *ArtifactRepository) cancelPreparations(ctx context.Context, ids []string, errMsg string) ([]stoppedArtifact, []*Download, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("beginning preparation cancel: %w", err)
@@ -152,7 +196,7 @@ func (r *ArtifactRepository) cancelPreparations(ctx context.Context, ids []strin
 		`WITH target AS (
 		     SELECT id, status IN `+runningArtifactStatuses+` AS running
 		     FROM download_artifacts
-		     WHERE id = ANY($1) AND `+preparingArtifactPredicate+filter+`
+		     WHERE id = ANY($1) AND `+preparingArtifactPredicate+`
 		     FOR UPDATE
 		 )
 		 DELETE FROM download_artifacts a USING target t
@@ -377,16 +421,8 @@ func (m *ArtifactManager) ResumePreparations(ctx context.Context, ids []string) 
 // CancelPreparations deletes the listed jobs, stops their running attempts,
 // and fails the downloads waiting on them.
 func (m *ArtifactManager) CancelPreparations(ctx context.Context, ids []string) ([]PreparationResult, error) {
-	return m.cancelPreparations(ctx, ids, m.repo.CancelPreparations)
-}
-
-func (m *ArtifactManager) cancelPreparations(
-	ctx context.Context,
-	ids []string,
-	cancel func(context.Context, []string, string) ([]stoppedArtifact, []*Download, error),
-) ([]PreparationResult, error) {
 	ids = uniqueIDs(ids)
-	canceled, failed, err := cancel(ctx, ids, PreparationCanceledMessage)
+	canceled, failed, err := m.repo.CancelPreparations(ctx, ids, PreparationCanceledMessage)
 	if err != nil {
 		return nil, err
 	}
@@ -409,4 +445,39 @@ func (m *ArtifactManager) cancelPreparations(
 		}
 		return PreparationNotFound
 	}), nil
+}
+
+// stopAbandonedPreparations retires the unfinished jobs of removed that no
+// other in-flight download needs and stops their attempts on this replica.
+// Attempts elsewhere stop at their next heartbeat, which expiry fences out.
+// It is best effort after the removal committed: the next preparation run's
+// sweep retires whatever a failure here leaves behind.
+func (m *ArtifactManager) stopAbandonedPreparations(ctx context.Context, removed ...*Download) {
+	var ids []string
+	for _, d := range removed {
+		if d != nil && d.ArtifactID != "" {
+			ids = append(ids, d.ArtifactID)
+		}
+	}
+	if m == nil || len(ids) == 0 {
+		return
+	}
+	retired, err := m.repo.RetireAbandonedPreparations(ctx, uniqueIDs(ids))
+	if err != nil {
+		slog.WarnContext(ctx, "stopping preparations no download needs failed", "component", "downloads", "error", err)
+		return
+	}
+	m.announceRetired(ctx, retired)
+}
+
+// announceRetired stops this replica's attempts of retired jobs and tells
+// listeners they left the preparation queue.
+func (m *ArtifactManager) announceRetired(ctx context.Context, retired []stoppedArtifact) {
+	m.stopLocalAttempts(retired)
+	for _, r := range retired {
+		m.notifyPreparationChanged(ctx, r.ID)
+	}
+	if len(retired) > 0 {
+		slog.InfoContext(ctx, "download preparations no download needs stopped", "component", "downloads", "count", len(retired))
+	}
 }

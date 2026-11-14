@@ -37,12 +37,20 @@ revision, so a device that fetched the whole file before it can still report
 `completed`. That report applies to the `preparing` row, and when no in-flight
 download is left and the job is still waiting in the queue, the job returns to
 `expired` in the same transaction. A job a worker already claimed finishes into the
-cache: an expired row keeps its id and output path, so stopping a live encode could
-race a later prepare-again. An expired row is not a
-preparation: the admin preparation list, queue positions, and cancel skip it. Neither
-the failed sweep nor a revoke's cancel of abandoned preparations deletes a row that a
-live download refers to, in flight or finished, because finished downloads read its
-recipe.
+cache in that case. An expired row is not a preparation: the admin preparation list,
+queue positions, and cancel skip it. The failed sweep never deletes a row that a live
+download refers to, in flight or finished, because finished downloads read its recipe.
+
+A queued or running job that loses its last in-flight download is retired: the row
+becomes `expired`, keeps its recipe, and the encode stops. Deleting a download,
+revoking it, and changing a managed download's quality retire the old job at once, in
+the statement that checks no in-flight download still needs it. The preparation run
+also retires jobs nothing has used for ten minutes, for downloads removed any other
+way, and the claim query skips them. An expired row keeps its id and output path, so
+retiring a running job leaves an unowned lease, as a pause does: the stopped worker may
+write until its next heartbeat, and a prepare-again waits that out before a new
+attempt claims the job. A create that read the job before it was retired links its
+download to the expired row, and confirming the link queues the job again.
 
 ## Locations, budgets, and the disk ceiling
 
@@ -147,8 +155,8 @@ storage views to re-read after a pass that freed bytes or an action.
 An administrator can revoke managed downloads (listed rows, or every row on one
 device). The row becomes `revoked` with `revoked_at`, `revoked_by`, and an optional
 reason; the file route refuses it, and its prepared file becomes cached if nothing else
-is in flight on it. A preparation is canceled when no live download refers to it any
-more; the statement that deletes it checks this. History counts the size of the copies
+is in flight on it. A preparation no in-flight download needs any more is retired, as
+described above. History counts the size of the copies
 the device had finished downloading.
 A revoked episode is excluded from the device's series monitor, and a whole-device
 revoke can pause the device's monitors.
