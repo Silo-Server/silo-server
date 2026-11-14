@@ -346,16 +346,19 @@ func TestScanFolderEmptyRootKeepsCatalogedFilesDB(t *testing.T) {
 func TestListRootsWithCatalogedFilesDB(t *testing.T) {
 	pool := newScannerTestPool(t)
 	ctx := t.Context()
-	folderID := seedDeadRootTestFolder(t, pool, "movies", fmt.Sprintf("cataloged-roots-%d", time.Now().UnixNano()))
+	// media_files.file_path is unique across folders, so the paths carry a
+	// per-run prefix.
+	lib := fmt.Sprintf("/cataloged-roots-%d", time.Now().UnixNano())
+	folderID := seedDeadRootTestFolder(t, pool, "movies", lib)
 	for _, file := range []struct {
 		path    string
 		missing bool
 	}{
-		{"/lib/live/Movie (2001)/Movie (2001).mkv", false},
-		{"/lib/gone/Movie (2002).mkv", true},
-		{"/lib/movies2/Movie (2003).mkv", false},
-		{"/lib/100%_done/Movie (2004).mkv", false},
-		{"/lib/file.mkv", false},
+		{lib + "/live/Movie (2001)/Movie (2001).mkv", false},
+		{lib + "/gone/Movie (2002).mkv", true},
+		{lib + "/movies2/Movie (2003).mkv", false},
+		{lib + "/100%_done/Movie (2004).mkv", false},
+		{lib + "/file.mkv", false},
 	} {
 		if _, err := pool.Exec(ctx, `
 			INSERT INTO media_files (media_folder_id, file_path, file_size, missing_since)
@@ -364,12 +367,12 @@ func TestListRootsWithCatalogedFilesDB(t *testing.T) {
 		}
 	}
 
-	roots := []string{"/lib/gone", "/lib/empty", "/lib/movies", "/lib/live/", "/lib/100%_done", "/lib/100x_done", "/lib/file.mkv", "/lib/f"}
+	roots := []string{lib + "/gone", lib + "/empty", lib + "/movies", lib + "/live/", lib + "/100%_done", lib + "/100x_done", lib + "/100%", lib + "/file.mkv", lib + "/f"}
 	got, err := NewFileRepository(pool).ListRootsWithCatalogedFiles(ctx, folderID, roots)
 	if err != nil {
 		t.Fatalf("ListRootsWithCatalogedFiles: %v", err)
 	}
-	want := []string{"/lib/gone", "/lib/live/", "/lib/100%_done", "/lib/file.mkv"}
+	want := []string{lib + "/gone", lib + "/live/", lib + "/100%_done", lib + "/file.mkv"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("roots with cataloged files = %q, want %q", got, want)
 	}

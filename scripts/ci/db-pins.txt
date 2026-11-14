@@ -209,6 +209,10 @@
 # plan, and match the same literal paths as a prefix LIKE.
 ./internal/scanner TestFolderPathPrefixQueryUsesPathRangeUnderGenericPlanDB
 
+# The empty-root check probes each root on the folder path index under a
+# generic plan instead of reading every file of the folder.
+./internal/scanner TestListRootsWithCatalogedFilesUsesPathRangeUnderGenericPlanDB
+
 # Subtree theme passes read the scanned subtree and probe canonical roots above
 # it on their indexes instead of reading every file in the library.
 ./internal/themesongs TestDirectoriesReadsOnlyTheScannedSubtreeDB
