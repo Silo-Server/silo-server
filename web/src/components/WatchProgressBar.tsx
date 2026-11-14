@@ -47,7 +47,7 @@ export default function WatchProgressBar({
       <div
         className={cn(
           "h-full rounded-full shadow-[0_0_0_0.5px_rgba(0,0,0,0.4)]",
-          animate && "transition-[width] duration-300",
+          animate && "transition-[width] duration-300 motion-reduce:transition-none",
         )}
         style={{ width: `${clamped}%`, background: fillColor }}
       />
