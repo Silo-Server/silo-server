@@ -9055,6 +9055,12 @@
       "value": "\u200F\u202EThis path matches more than one library.\u202C"
     }
   ],
+  "web.admin.autoscan.activity.reason.pathIgnored": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe library's ignore files exclude this file, so it was not scanned.\u202C"
+    }
+  ],
   "web.admin.autoscan.activity.reason.pathNotFileOrDir": [
     {
       "type": 0,
@@ -105618,6 +105624,12 @@
       "value": "\u200F\u202EYour Data\u202C"
     }
   ],
+  "web.common.toast.collections.created": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECollection created\u202C"
+    }
+  ],
   "web.common.toast.collections.deleteFailed": [
     {
       "type": 0,
@@ -105628,6 +105640,12 @@
     {
       "type": 0,
       "value": "\u200F\u202ECollection deleted\u202C"
+    }
+  ],
+  "web.common.toast.collections.saved": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECollection saved\u202C"
     }
   ],
   "web.common.toast.collections.syncFailed": [

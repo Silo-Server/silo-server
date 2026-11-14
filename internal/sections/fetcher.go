@@ -530,9 +530,10 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 
 	// Ebook resume points live in ebook_reader_progress rather than the
 	// watch-progress store, so reading sections pull from that table and skip
-	// the next-up handling below.
+	// the next-up handling below. In-progress chapters of one manga collapse
+	// to one card while paging, as episodes do.
 	if continueType == ContinueTypeReading {
-		orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, catalog.DroppedSeriesSet{}, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, false, orderedItems, itemMeta, completedCache,
+		orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, catalog.DroppedSeriesSet{}, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, true, orderedItems, itemMeta, completedCache,
 			func(pageLimit, offset int) ([]userstore.WatchProgress, error) {
 				entries, err := f.listEbookContinueWatchingProgress(ctx, userID, profileID, pageLimit, offset)
 				if err != nil {
@@ -542,14 +543,6 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 			})
 		if err != nil {
 			return SectionWithItems{}, err
-		}
-		// Manga chapters are ebook items linked to a series; collapse multiple
-		// in-progress chapters of the same manga to a single card (keeping the
-		// most recently read), mirroring the episode→series collapse. Resolve
-		// the linkage into itemMeta so the shared collapse can group by series.
-		if len(orderedItems) > 1 {
-			f.applyMangaChapterSeriesMeta(ctx, orderedItems, itemMeta)
-			orderedItems = collapseContinueWatchingSeriesCandidates(orderedItems, itemMeta)
 		}
 		return SectionWithItems{
 			ResolvedSection: resolved,
@@ -680,6 +673,11 @@ func (f *Fetcher) collectContinueProgressItems(
 			return nil, err
 		}
 		maps.Copy(itemMeta, pageMeta)
+		if continueType == ContinueTypeReading {
+			// Manga chapters are ebooks; link each to its series so the
+			// collapse below groups them like a series' episodes.
+			f.applyMangaChapterSeriesMeta(ctx, pageItems, itemMeta)
+		}
 		orderedItems = appendContinuePage(orderedItems, pageItems, itemMeta, seen, limit, collapseSeries)
 		if rawProgressCount < pageLimit {
 			break

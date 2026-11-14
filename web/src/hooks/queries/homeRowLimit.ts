@@ -1,4 +1,4 @@
-import type { HomeSectionItemsResponse } from "@/api/types";
+import type { HomeSectionItemsResponse, ResolvedSection } from "@/api/types";
 import { sectionFromV2 } from "@/api/v2/catalog";
 import type { components } from "@/api/v2/schema";
 import { visibleCarouselSlideCount } from "@/lib/carouselWindow";
@@ -18,6 +18,38 @@ const HOME_ROW_REFERENCE_VIEWPORT_PX = 1920;
  */
 export const HOME_ROW_ITEM_LIMIT =
   2 * visibleCarouselSlideCount("standard", HOME_ROW_REFERENCE_VIEWPORT_PX);
+
+/** Whether a row tracks what the viewer is partway through: Continue Watching or Next Up. */
+export function isProgressSectionType(sectionType: string): boolean {
+  return sectionType === "continue_watching" || sectionType === "next_up";
+}
+
+/**
+ * Whether a row already shows every card its Explore all page would, so the
+ * row gets no Explore all link and no title link.
+ *
+ * Only Continue Watching and Next Up can tell. Their total_count is the
+ * list's own size, and the server answers a row shorter than its limit only
+ * when the list holds nothing more. Other rows keep the link even when short:
+ * the server drops titles an earlier row already shows and counts what is
+ * left, so their page can hold more than the row and its count. A row filled
+ * to its limit was cut there, whatever its count says, and so was one the
+ * server reports holds more (has_more).
+ */
+export function sectionShowsWholeList(
+  section: Pick<ResolvedSection, "section_type" | "items" | "has_more"> & {
+    item_limit?: number;
+    total_count?: number;
+  },
+): boolean {
+  if (!isProgressSectionType(section.section_type) || section.has_more) return false;
+  if (section.total_count === undefined) return false;
+  const limit =
+    section.item_limit !== undefined && section.item_limit > 0
+      ? Math.min(section.item_limit, HOME_ROW_ITEM_LIMIT)
+      : HOME_ROW_ITEM_LIMIT;
+  return section.items.length < limit && section.total_count <= section.items.length;
+}
 
 /**
  * The cached form of a Home row read. A read with item_limit is partial when

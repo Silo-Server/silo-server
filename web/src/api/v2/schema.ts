@@ -23261,7 +23261,7 @@ export interface components {
       device_id: string;
     };
     ApplePushResetReceipt: {
-      /** @description True when the server cleared the installation's binding and its Apple push registrations. False when there was nothing to clear: no ordered record for this device_id, or one already bound to the sent key, whose generation order still applies. After a cleared or absent record, the next registration with that key binds at any positive generation. */
+      /** @description True when the server cleared the installation's binding and its Apple push registrations. False when there was nothing to clear: no ordered record for this device_id, or one already bound to the sent key, whose generation order still applies. After a cleared or absent record, the next registration with that key binds at any positive generation, unless a retirement reached the cleared record first and fenced older generations. */
       reset: boolean;
     };
     ApplePushRetirementBody: {
@@ -26605,17 +26605,17 @@ export interface components {
       series_id: string;
     };
     DownloadSubscriptionPatchBody: {
-      active?: boolean | null;
-      delete_watched?: boolean | null;
+      active?: boolean;
+      delete_watched?: boolean;
       /** Format: int64 */
-      max_storage_bytes?: number | null;
-      mode?: string | null;
+      max_storage_bytes?: number;
+      mode?: string;
       /**
        * @description Quality preset for episodes registered from now on; already-registered downloads keep theirs.
-       * @enum {string|null}
+       * @enum {string}
        */
-      quality?: "original" | "20mbps" | "10mbps" | "5mbps" | "2mbps" | "1mbps" | null;
-      season_numbers?: number[] | null;
+      quality?: "original" | "20mbps" | "10mbps" | "5mbps" | "2mbps" | "1mbps";
+      season_numbers?: number[];
     };
     DownloadSubscriptionSync: {
       /**
