@@ -50,17 +50,22 @@ func Metrics(next http.Handler) http.Handler {
 		// Wrap response writer to capture status code.
 		wrapped := &statusWriter{ResponseWriter: w, status: 200}
 
-		next.ServeHTTP(wrapped, r)
+		httpstream.Serve(next, wrapped, r, func(aborted bool) {
+			duration := time.Since(start).Seconds()
+			path := "unmatched"
+			if route := chi.RouteContext(r.Context()); route != nil && route.RoutePattern() != "" {
+				path = route.RoutePattern()
+			}
+			method := metricMethod(r.Method)
 
-		duration := time.Since(start).Seconds()
-		path := "unmatched"
-		if route := chi.RouteContext(r.Context()); route != nil && route.RoutePattern() != "" {
-			path = route.RoutePattern()
-		}
-		method := metricMethod(r.Method)
-
-		httpRequestsTotal.WithLabelValues(method, path, strconv.Itoa(activitylog.RecordedStatus(r, wrapped.status, wrapped.written))).Inc()
-		httpRequestDuration.WithLabelValues(method, path).Observe(duration)
+			// A stream broken after its status was sent is not a success.
+			status := "aborted"
+			if !aborted {
+				status = strconv.Itoa(activitylog.RecordedStatus(r, wrapped.status, wrapped.written))
+			}
+			httpRequestsTotal.WithLabelValues(method, path, status).Inc()
+			httpRequestDuration.WithLabelValues(method, path).Observe(duration)
+		})
 	})
 }
 

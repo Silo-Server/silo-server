@@ -2,6 +2,7 @@ package apiv2
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"log/slog"
@@ -260,5 +261,48 @@ func TestObservedFlushReturnsTransportError(t *testing.T) {
 	h.ServeHTTP(inner, httptest.NewRequest(http.MethodGet, "/api/v2/downloads/d1/file", nil))
 	if !errors.Is(got, errFlushFailed) {
 		t.Fatalf("flush error = %v", got)
+	}
+}
+
+// A response the handler breaks after committing it, with
+// panic(http.ErrAbortHandler), is still recorded once, and the panic carries
+// on so net/http breaks the connection. It is aborted while the client waits;
+// once the client has gone, the abort is only how the response ended.
+func TestObservedAbortIsRecordedAndRepanics(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		ctx       func() context.Context
+		wantClass string
+	}{
+		{"client waiting", context.Background, "aborted"},
+		{"client gone", func() context.Context {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			return ctx
+		}, "2xx"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			buf := captureLogs(t)
+			labels := prometheus.Labels{labelAPIMajor: "2", labelOperationID: labelNone, labelMethod: http.MethodGet, labelStatusClass: tc.wantClass, labelErrorCode: labelNone, labelAuthClass: authClassAnonymous, labelClient: labelNone}
+			before := counterValue(t, requestsTotal, labels)
+			h := observe(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte("partial"))
+				panic(http.ErrAbortHandler)
+			}))
+			func() {
+				defer func() {
+					if rec := recover(); rec != http.ErrAbortHandler { //nolint:errorlint // sentinel compared by identity, as net/http does
+						t.Fatalf("recovered %v, want http.ErrAbortHandler", rec)
+					}
+				}()
+				h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/v2/stream/s1", nil).WithContext(tc.ctx()))
+			}()
+			if got := counterValue(t, requestsTotal, labels) - before; got != 1 {
+				t.Fatalf("%s request counted %v times, want 1", tc.wantClass, got)
+			}
+			if n := strings.Count(buf.String(), `"msg":"apiv2 request"`); n != 1 || !strings.Contains(buf.String(), `"status_class":"`+tc.wantClass+`"`) || !strings.Contains(buf.String(), `"status":200`) {
+				t.Fatalf("logged %d request lines, want one %s line with status 200: %s", n, tc.wantClass, buf.String())
+			}
+		})
 	}
 }
