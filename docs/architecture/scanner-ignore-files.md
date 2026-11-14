@@ -6,8 +6,11 @@ paths they discover. Existing library layouts still apply: podcast episodes
 must be directly inside a show folder, and audiobook discovery stops below a
 book folder containing audio. Loose audio in a configured library root does
 not stop it, and a configured root inside a book is still walked as its own
-root. A subtree scan follows the same rules, so a scoped folder that holds
-audio is one book.
+root. A subtree or audiobook file scan applies these rules from its scoped
+folder down: a scoped folder that holds audio is one book unless it is a
+configured library root. The scan doesn't look at folders above the scope,
+so a scope inside a book folder still becomes a book of its own, and an
+admin's request for an excluded file walks below its folder (see below).
 
 Every ignore file must be a regular file in the directory it applies to. A
 directory or symlink with one of these names is ordinary content.
