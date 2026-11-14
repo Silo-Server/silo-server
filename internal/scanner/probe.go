@@ -958,9 +958,9 @@ func primaryVideoFrameRate(streams []ffprobeStream) (string, bool) {
 	return "", false
 }
 
-// frameSideDataProbeTimeout bounds the one-frame decode that reads HDR10+
+// frameSideDataProbeTimeout bounds each first-frame read that looks for HDR10+
 // metadata. A 4K HEVC frame decodes in well under a second; the margin covers
-// slow network storage.
+// slow network storage and the longer read of a stream that starts mid-GOP.
 const frameSideDataProbeTimeout = 30 * time.Second
 
 // applyPrimaryVideoFrameSideData reads the first decoded frame of the primary
@@ -1027,20 +1027,37 @@ type firstVideoFrame struct {
 //
 // One packet normally decodes to the first frame. A stream whose first packet
 // does not decode on its own, such as one that starts mid-GOP, is read again
-// over frameSideDataFallbackPackets before it counts as having no frame.
+// over frameSideDataFallbackPackets. When its first keyframe lies further in,
+// a last read goes up to frameSideDataLongGOPPackets and stops at the first
+// decoded frame before the stream counts as having no frame.
 func probeFirstVideoFrame(ctx context.Context, ffprobePath, filePath, streamSpecifier string) (firstVideoFrame, error) {
-	frame, err := probeFirstVideoFramePackets(ctx, ffprobePath, filePath, streamSpecifier, 1)
+	frame, err := probeFirstVideoFramePackets(ctx, ffprobePath, filePath, streamSpecifier, 1, false)
 	if errors.Is(err, errNoFrameDecoded) {
-		return probeFirstVideoFramePackets(ctx, ffprobePath, filePath, streamSpecifier, frameSideDataFallbackPackets)
+		frame, err = probeFirstVideoFramePackets(ctx, ffprobePath, filePath, streamSpecifier, frameSideDataFallbackPackets, false)
+	}
+	if errors.Is(err, errNoFrameDecoded) {
+		frame, err = probeFirstVideoFramePackets(ctx, ffprobePath, filePath, streamSpecifier, frameSideDataLongGOPPackets, true)
 	}
 	return frame, err
 }
 
-// frameSideDataFallbackPackets is the second read's packet budget: about a
-// second of video, enough to reach a keyframe in common GOP layouts.
-const frameSideDataFallbackPackets = 24
+const (
+	// frameSideDataFallbackPackets is the second read's packet budget: about
+	// a second of video, enough to reach a keyframe in common GOP layouts.
+	frameSideDataFallbackPackets = 24
+	// frameSideDataLongGOPPackets is the last read's packet budget. It covers
+	// the longest default keyframe interval of common encoders (x264 and x265
+	// use 250 frames). The read stops at the first decoded frame, so it reads
+	// and decodes only a few packets past the first keyframe; decoding all
+	// 300 packets of a 4K stream would take most of frameSideDataProbeTimeout.
+	frameSideDataLongGOPPackets = 300
+)
 
-func probeFirstVideoFramePackets(ctx context.Context, ffprobePath, filePath, streamSpecifier string, packets int) (firstVideoFrame, error) {
+// probeFirstVideoFramePackets reads up to packets packets of the stream and
+// returns the frames ffprobe decoded from them. With stopAtFirstFrame it stops
+// ffprobe as soon as the first decoded frame is written, which ffprobe does
+// while it is still reading.
+func probeFirstVideoFramePackets(ctx context.Context, ffprobePath, filePath, streamSpecifier string, packets int, stopAtFirstFrame bool) (firstVideoFrame, error) {
 	probeCtx, cancel := context.WithTimeout(ctx, frameSideDataProbeTimeout)
 	defer cancel()
 	cmd := fspath.CommandContext(probeCtx, ffprobePath,
@@ -1055,31 +1072,102 @@ func probeFirstVideoFramePackets(ctx context.Context, ffprobePath, filePath, str
 	// As for the other ffprobe runs: a wrapper's child dies with it, and a
 	// child that still holds stdout cannot keep the read open past its deadline.
 	cmd.WaitDelay = defaultProbeLimits.waitDelay
-	output, err := cmd.Output()
-	processmetrics.Record(processmetrics.Probe, cmd.ProcessState, err, probeCtx.Err())
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		if errors.Is(probeCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
-			return firstVideoFrame{}, fmt.Errorf("%w after %s for %s", errFrameSideDataTimeout, frameSideDataProbeTimeout, filePath)
-		}
+		return firstVideoFrame{}, fmt.Errorf("opening ffprobe frame output for %s: %w", filePath, err)
+	}
+	if err := cmd.Start(); err != nil {
+		processmetrics.Record(processmetrics.Probe, nil, err, probeCtx.Err())
 		return firstVideoFrame{}, fmt.Errorf("ffprobe frame side data failed for %s: %w", filePath, err)
 	}
-	var payload struct {
-		Frames []struct {
-			ColorRange   string            `json:"color_range"`
-			SideDataList []ffprobeSideData `json:"side_data_list"`
-		} `json:"frames"`
+	// WaitDelay does not reach a pipe read before Wait, so the deadline
+	// closes it too, for a child that outlives the killed ffprobe.
+	stopClose := context.AfterFunc(probeCtx, func() { _ = stdout.Close() })
+	frames, parseErr := decodeProbeFrames(stdout, stopAtFirstFrame)
+	stopped := stopAtFirstFrame && parseErr == nil && len(frames) > 0
+	if stopped {
+		cancel() // kills ffprobe and closes the pipe
+	} else {
+		// Drain the rest while Wait runs, as cmd.Output does: output after
+		// the JSON cannot block ffprobe from exiting, and WaitDelay still
+		// ends a read held open by a child that outlives it.
+		go func() { _, _ = io.Copy(io.Discard, stdout) }()
 	}
-	if err := json.Unmarshal(output, &payload); err != nil {
-		return firstVideoFrame{}, fmt.Errorf("ffprobe frame side data JSON parse failed for %s: %w", filePath, err)
-	}
-	if len(payload.Frames) == 0 {
+	stopClose()
+	waitErr := cmd.Wait()
+	processmetrics.Record(processmetrics.Probe, cmd.ProcessState, waitErr, probeCtx.Err())
+	switch {
+	case stopped:
+	case (waitErr != nil || parseErr != nil) && probeTimedOut(ctx, probeCtx):
+		return firstVideoFrame{}, fmt.Errorf("%w after %s for %s", errFrameSideDataTimeout, frameSideDataProbeTimeout, filePath)
+	case waitErr != nil:
+		return firstVideoFrame{}, fmt.Errorf("ffprobe frame side data failed for %s: %w", filePath, waitErr)
+	case parseErr != nil:
+		return firstVideoFrame{}, fmt.Errorf("ffprobe frame side data JSON parse failed for %s: %w", filePath, parseErr)
+	case len(frames) == 0:
 		return firstVideoFrame{}, fmt.Errorf("%w for %s", errNoFrameDecoded, filePath)
 	}
-	frame := firstVideoFrame{ColorRange: payload.Frames[0].ColorRange}
-	for _, decoded := range payload.Frames {
+	frame := firstVideoFrame{ColorRange: frames[0].ColorRange}
+	for _, decoded := range frames {
 		frame.SideData = append(frame.SideData, decoded.SideDataList...)
 	}
 	return frame, nil
+}
+
+type probeFrame struct {
+	ColorRange   string            `json:"color_range"`
+	SideDataList []ffprobeSideData `json:"side_data_list"`
+}
+
+// decodeProbeFrames reads the frames array of ffprobe's JSON output as it
+// arrives. With firstOnly it returns once the first frame is complete.
+func decodeProbeFrames(r io.Reader, firstOnly bool) ([]probeFrame, error) {
+	dec := json.NewDecoder(r)
+	if err := expectJSONDelim(dec, '{'); err != nil {
+		return nil, err
+	}
+	var frames []probeFrame
+	for dec.More() {
+		key, err := dec.Token()
+		if err != nil {
+			return frames, err
+		}
+		if key != "frames" {
+			var skip json.RawMessage
+			if err := dec.Decode(&skip); err != nil {
+				return frames, err
+			}
+			continue
+		}
+		if err := expectJSONDelim(dec, '['); err != nil {
+			return frames, err
+		}
+		for dec.More() {
+			var frame probeFrame
+			if err := dec.Decode(&frame); err != nil {
+				return frames, err
+			}
+			frames = append(frames, frame)
+			if firstOnly {
+				return frames, nil
+			}
+		}
+		if err := expectJSONDelim(dec, ']'); err != nil {
+			return frames, err
+		}
+	}
+	return frames, expectJSONDelim(dec, '}')
+}
+
+func expectJSONDelim(dec *json.Decoder, want json.Delim) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	if tok != want {
+		return fmt.Errorf("unexpected JSON token %v, want %v", tok, want)
+	}
+	return nil
 }
 
 // probeVideoPacketDuration derives a duration for files whose duration
