@@ -294,8 +294,8 @@ function ProfileEditor({
 }) {
   const t = useT();
   const libraries = useAccountLibraries(user);
-  // The advisory-age flags describe this server, which the admin's own
-  // profile list reports.
+  // The profile capability flags describe this server, which the admin's
+  // own profile list reports.
   const server = useProfiles();
   const editId = editing?.mode === "edit" ? editing.id : null;
   const full = useAdminUserProfile(user.id, editId);
@@ -340,6 +340,7 @@ function ProfileEditor({
         libraries={libraries}
         advisoryAgeSupported={server.maxAdvisoryAgeSupported}
         requireAdvisoryAgeSupported={server.requireAdvisoryAgeSupported}
+        requestsAllowedSupported={server.requestsAllowedSupported}
         save={save}
         className={TOUCH_TARGETS}
         onOpenChange={(next) => {

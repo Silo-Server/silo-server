@@ -1189,6 +1189,7 @@ func checkCarryAuthority(t *testing.T, loader PGLoader, pool *pgxpool.Pool, dsn,
 	exec(restored, `INSERT INTO user_profiles (id, user_id, name) VALUES ($1, $2, 'Deleted since')`, profile+"-gone", userID)
 	keptAs(false, "want the key dropped: the backup has a profile this account no longer has")
 	exec(restored, `DELETE FROM user_profiles WHERE id = $1`, profile+"-gone")
+	checkCarryKeepsRequestsBlock(t, pool, restored, profile, keptAs)
 }
 
 // checkAnotherKey: a backup taken with another SECRET_KEY restores only

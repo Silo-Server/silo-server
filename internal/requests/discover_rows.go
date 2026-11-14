@@ -75,7 +75,7 @@ func (s *Service) DiscoverRows(ctx context.Context, viewer Viewer) (*DiscoverLay
 		return nil, errRequestServiceNotConfigured
 	}
 	ctx = withPolicyCache(ctx)
-	if err := s.ensureRequestsEnabled(ctx); err != nil {
+	if err := s.ensureDiscoveryAllowed(ctx, viewer); err != nil {
 		return nil, err
 	}
 	ceiling, err := s.viewerContentCeiling(ctx, viewer)
@@ -164,7 +164,7 @@ func (s *Service) DiscoverRow(ctx context.Context, viewer Viewer, rowID string, 
 		return nil, errRequestServiceNotConfigured
 	}
 	ctx = withPolicyCache(ctx)
-	if err := s.ensureRequestsEnabled(ctx); err != nil {
+	if err := s.ensureDiscoveryAllowed(ctx, viewer); err != nil {
 		return nil, err
 	}
 	rows, err := s.layoutRows(ctx)

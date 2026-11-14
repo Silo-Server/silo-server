@@ -46,6 +46,7 @@ export default function Profiles() {
     avatarUploadEnabled,
     maxAdvisoryAgeSupported,
     requireAdvisoryAgeSupported,
+    requestsAllowedSupported,
     maxProfiles,
   } = useProfiles();
   const { data: libraries = [], isLoading: librariesLoading } = useAvailableUserLibraries();
@@ -217,6 +218,7 @@ export default function Profiles() {
           avatarUploadEnabled={avatarUploadEnabled}
           advisoryAgeSupported={maxAdvisoryAgeSupported}
           requireAdvisoryAgeSupported={requireAdvisoryAgeSupported}
+          requestsAllowedSupported={requestsAllowedSupported}
           onOpenChange={setEditorOpen}
           onSaveSuccess={(profile, context) => void handleCreateSuccess(profile, context)}
         />
@@ -306,6 +308,7 @@ export default function Profiles() {
         avatarUploadEnabled={avatarUploadEnabled}
         advisoryAgeSupported={maxAdvisoryAgeSupported}
         requireAdvisoryAgeSupported={requireAdvisoryAgeSupported}
+        requestsAllowedSupported={requestsAllowedSupported}
         profileContext={addSession?.profileContext}
         onOpenChange={(open) => {
           if (!open) {
