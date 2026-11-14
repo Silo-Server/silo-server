@@ -5,7 +5,10 @@ import { captureProfileRequestContext } from "@/api/client";
 import { v2 } from "@/api/v2/request";
 import { recKeys, favoriteKeys } from "./keys";
 import { invalidateMediaSurfaceQueries } from "./mediaSurfaceRefresh";
-import { PERSONAL_STATE_WRITE_TIMEOUT_MS } from "./personalStateWrites";
+import {
+  PERSONAL_STATE_WRITE_TIMEOUT_MS,
+  personalStateMutationOptions,
+} from "./personalStateWrites";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 import { storage } from "@/utils/storage";
 
@@ -128,6 +131,11 @@ export function useSubmitTasteSeed() {
     scheduleTasteSeedRefetches(queryClient);
   };
   return useMutation({
+    // Run even while the browser reports itself offline. A paused save would
+    // only capture its profile once it resumed, so a profile switch in
+    // another tab meanwhile would send these removals as that profile; this
+    // way an offline save fails at once and the page shows the error.
+    ...personalStateMutationOptions,
     mutationFn: async ({ add, remove }: TasteSeedChanges): Promise<TasteSeedSaveResult> => {
       const profileContext = captureProfileRequestContext() ?? undefined;
       const added =

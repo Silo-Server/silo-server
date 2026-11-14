@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook } from "@testing-library/react";
+import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
+import { renderHook, waitFor } from "@testing-library/react";
 import { createElement } from "react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -30,6 +30,7 @@ describe("taste seeding on the v2 contract", () => {
   });
 
   afterEach(() => {
+    onlineManager.setOnline(true);
     setAccessToken(null);
     vi.unstubAllGlobals();
   });
@@ -121,6 +122,30 @@ describe("taste seeding on the v2 contract", () => {
     const { result } = renderSubmit();
 
     await result.current.mutateAsync({ add: ["movie:heat-1995"], remove: ["movie:alien-1979"] });
+    expect(profiles).toEqual(["p-owner", "p-owner"]);
+  });
+
+  // A save started while the browser reports itself offline is sent at once
+  // rather than held until it reconnects, so a profile switched before then
+  // (in another tab, say) can't receive the removals.
+  it("does not hold an offline save for a later profile", async () => {
+    setAccessToken("token-owner");
+    const profiles: (string | null)[] = [];
+    const fetchMock = stubFetch((_url, init) => {
+      profiles.push(new Headers(init?.headers).get("X-Profile-Id"));
+      return init?.method === "DELETE"
+        ? new Response(null, { status: 204 })
+        : jsonResponse(createTasteSeedOk);
+    });
+    const { result } = renderSubmit();
+
+    onlineManager.setOnline(false);
+    void result.current.mutateAsync({ add: ["movie:heat-1995"], remove: ["movie:alien-1979"] });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    setProfileId("p-kid");
+    onlineManager.setOnline(true);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(profiles).toEqual(["p-owner", "p-owner"]);
   });
 
