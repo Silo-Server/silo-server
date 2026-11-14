@@ -23,13 +23,14 @@ const mocks = vi.hoisted(() => ({
   toggleActivePlayback: vi.fn(),
   user: null as null | { role: "admin" | "user"; permissions?: string[] },
   refresh: vi.fn(),
+  profile: { is_primary: true } as null | { is_primary: boolean },
 }));
 
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({ user: mocks.user }),
 }));
 vi.mock("@/hooks/useCurrentProfile", () => ({
-  useCurrentProfile: () => ({ profile: { is_primary: true } }),
+  useCurrentProfile: () => ({ profile: mocks.profile, hasSelectedProfile: true }),
 }));
 vi.mock("@/components/EditMetadataDialog", () => ({
   default: ({ open, item }: { open: boolean; item: { title: string } }) =>
@@ -181,6 +182,7 @@ describe("AudiobookContent playback actions", () => {
 describe("AudiobookContent metadata actions", () => {
   beforeEach(() => {
     mocks.controller = null;
+    mocks.profile = { is_primary: true };
   });
 
   it("lets a metadata curator edit and match the book", async () => {
@@ -208,6 +210,18 @@ describe("AudiobookContent metadata actions", () => {
         mode: "quick",
       }),
     );
+  });
+
+  it("offers no metadata actions while the selected profile is still loading", () => {
+    mocks.user = { role: "admin" };
+    mocks.profile = null;
+    render(
+      <MemoryRouter>
+        <AudiobookContent item={bookWithProgress(0)} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByRole("button", { name: "More actions" })).not.toBeInTheDocument();
   });
 
   it("offers no metadata actions to a listener", () => {

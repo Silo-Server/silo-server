@@ -117,8 +117,11 @@ export default function AudiobookContent({
     );
   };
   const { user } = useAuth();
-  const { profile: currentProfile } = useCurrentProfile();
-  const canCurateMetadata = canCurateMetadataForUser(user, currentProfile);
+  const { profile: currentProfile, hasSelectedProfile } = useCurrentProfile();
+  // Until a stored profile resolves, the null profile would read as "no
+  // profile selected" and grant an admin's curation rights to any profile.
+  const profileIsResolved = !hasSelectedProfile || Boolean(currentProfile);
+  const canCurateMetadata = profileIsResolved && canCurateMetadataForUser(user, currentProfile);
   const scopedItem = useMemo(
     () => (libraryId === undefined ? item : { ...item, library_id: libraryId }),
     [item, libraryId],
