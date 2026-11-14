@@ -287,6 +287,39 @@ function subtitleSourceOf(source: string): PlayerSubtitleInfo["source"] {
 }
 
 /**
+ * Whether an announced track can join `inventory` at the ordinal the server
+ * gave it: it either takes the next free ordinal or re-announces the stored
+ * subtitle already at that ordinal. Ordinals are dense, so anything else
+ * means the inventory no longer matches the server's.
+ */
+function canFoldAnnouncedSubtitleTrack(
+  inventory: readonly SubtitleInventoryItemV3[],
+  track: SubtitleInventoryItemV3,
+): boolean {
+  const current = inventory.find((item) => item.combined_index === track.combined_index);
+  if (!current) return track.combined_index === inventory.length;
+  return (
+    track.stored_subtitle_id !== undefined &&
+    current.stored_subtitle_id === track.stored_subtitle_id
+  );
+}
+
+/**
+ * The ordinal the stored subtitle at `index` in `from` holds in `to`. It is
+ * `index` itself when that names no stored subtitle, whose ordinals a
+ * deletion does not move, and null when the stored subtitle is gone.
+ */
+function storedSubtitleOrdinalIn(
+  index: number,
+  from: readonly SubtitleInventoryItemV3[],
+  to: readonly SubtitleInventoryItemV3[],
+): number | null {
+  const storedId = from.find((item) => item.combined_index === index)?.stored_subtitle_id;
+  if (storedId === undefined) return index;
+  return to.find((item) => item.stored_subtitle_id === storedId)?.combined_index ?? null;
+}
+
+/**
  * Maps the plan's subtitle inventory onto the player's track shape.
  *
  * `index` is the server's combined ordinal, copied verbatim: it is the identity
@@ -604,6 +637,8 @@ export function usePlaybackSession(
     planId: string;
     /** The file the queued request's track ordinals index into. */
     mediaFileId: number;
+    /** The subtitle inventory the queued request's subtitle ordinal indexes. */
+    subtitleInventory: readonly SubtitleInventoryItemV3[];
     onAdopt?: (planRevision: number) => void;
   } | null>(null);
   const issueReplanRef = useRef<
@@ -1359,6 +1394,7 @@ export function usePlaybackSession(
               resolve,
               planId: plan.plan_id,
               mediaFileId: plan.effective_media_file_id,
+              subtitleInventory: plan.subtitle.inventory,
               onAdopt,
             };
           });
@@ -2006,10 +2042,97 @@ export function usePlaybackSession(
    * There is no "refresh" operation in v3, and there does not need to be: a
    * `track_change` that changes nothing returns a fresh plan — inventory
    * included — without excluding the route already playing.
+   *
+   * A track, quality or output change queued behind the replan in flight
+   * returns a fresh plan too, so the refresh leaves it queued rather than
+   * replacing the viewer's choice with an echo of the current tracks. A
+   * queued pick of a stored subtitle is the exception, below.
    */
   const refreshSubtitles = useCallback(
     (currentPosition: number) => {
-      if (!planRef.current) return;
+      const plan = planRef.current;
+      if (!plan) return;
+      // A queued pick of a stored subtitle names its ordinal in the inventory
+      // it was made on, which a refresh is about to replace, so it could land
+      // on another track. The plan is refetched first, and the pick follows at
+      // that stored subtitle's new ordinal.
+      const pending = pendingReplanRef.current;
+      const pick = pending?.options;
+      const pickedIndex =
+        pending?.mediaFileId === plan.effective_media_file_id && pick?.operation === "track_change"
+          ? pick.subtitle?.index
+          : undefined;
+      const pickedStoredId =
+        pickedIndex === undefined
+          ? undefined
+          : pending?.subtitleInventory.find((item) => item.combined_index === pickedIndex)
+              ?.stored_subtitle_id;
+      if (pending && pick && pickedIndex !== undefined && pickedStoredId !== undefined) {
+        const pickedAt = pickedIndex;
+        void replan(
+          { operation: "track_change", positionSeconds: currentPosition },
+          false,
+          false,
+          () => {
+            const fresh = planRef.current?.subtitle.inventory ?? [];
+            // A choice made while the refetch ran is newer than this pick; a
+            // queued seek or refresh is not, and the pick replaces it.
+            const newer = pendingReplanRef.current;
+            const queued = newer?.options;
+            if (
+              newer &&
+              (queued?.operation === "quality_change" ||
+                queued?.operation === "output_change" ||
+                (queued?.operation === "track_change" &&
+                  (queued.subtitle !== undefined || queued.audio !== undefined)))
+            ) {
+              // The menu still listed the stale inventory, so a subtitle
+              // picked from it moves to its stored subtitle's new ordinal.
+              const index =
+                queued.operation === "track_change" ? queued.subtitle?.index : undefined;
+              if (
+                index !== undefined &&
+                newer.mediaFileId === planRef.current?.effective_media_file_id
+              ) {
+                const moved = storedSubtitleOrdinalIn(index, newer.subtitleInventory, fresh);
+                pendingReplanRef.current = {
+                  ...newer,
+                  options: {
+                    ...queued,
+                    subtitle: moved === null ? null : { id: "", index: moved },
+                  },
+                };
+              }
+              return;
+            }
+            const pickedOrdinal = storedSubtitleOrdinalIn(
+              pickedAt,
+              pending.subtitleInventory,
+              fresh,
+            );
+            // On another file the pick names no track there; the queue
+            // drops such a pick too.
+            if (planRef.current?.effective_media_file_id !== pending.mediaFileId) return;
+            void replan(
+              {
+                ...pick,
+                // A queued seek is replaced, so its target goes out with the pick.
+                positionSeconds: queued?.positionSeconds ?? playbackPositionRef.current,
+                // A pick the refetch shows was deleted turns subtitles off.
+                subtitle: pickedOrdinal === null ? null : { id: "", index: pickedOrdinal },
+              },
+              pending.retireSessionOnRefusal,
+              false,
+              pending.onAdopt,
+            );
+          },
+        );
+        return;
+      }
+      const queued = pendingReplanRef.current?.options.operation;
+      if (queued === "track_change" || queued === "quality_change" || queued === "output_change") {
+        return;
+      }
       void replan({ operation: "track_change", positionSeconds: currentPosition });
     },
     [replan],
@@ -2019,11 +2142,22 @@ export function usePlaybackSession(
    * Folds a track the server pushed over the realtime socket into the plan's
    * inventory at the ordinal the server assigned it. The ordinal is never
    * derived client-side, which is why the payload carries the whole entry.
+   *
+   * The ordinal is only meaningful against the server's current inventory.
+   * Deleting a stored subtitle shifts the later ones down without telling
+   * this player, so the announced ordinal can name a different track in this
+   * plan. The track is folded in only when it extends the inventory or
+   * re-announces the stored subtitle already there; otherwise the plan is
+   * refetched, and the server keeps the viewer's subtitle by its identity.
    */
   const applySubtitleTrack = useCallback(
     (track: SubtitleInventoryItemV3) => {
       const plan = planRef.current;
       if (!plan) return;
+      if (!canFoldAnnouncedSubtitleTrack(plan.subtitle.inventory, track)) {
+        refreshSubtitles(playbackPositionRef.current);
+        return;
+      }
       const inventory = [
         ...plan.subtitle.inventory.filter((item) => item.combined_index !== track.combined_index),
         track,
@@ -2036,7 +2170,7 @@ export function usePlaybackSession(
         subtitleUrls: mapSubtitleInventory(inventory, nextPlan.effective_media_file_id, config),
       }));
     },
-    [config],
+    [config, refreshSubtitles],
   );
 
   const updatePlaybackState = useCallback((positionSeconds: number, playing: boolean) => {

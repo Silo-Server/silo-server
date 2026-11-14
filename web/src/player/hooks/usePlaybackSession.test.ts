@@ -924,6 +924,42 @@ describe("usePlaybackSession output capability changes", () => {
     unmount();
   });
 
+  it("keeps a queued output change when a subtitle refresh follows it", async () => {
+    const setHDR = outputProbe(true);
+    let resolveFirstReplan: ((response: Response) => void) | undefined;
+    const firstReplanResponse = new Promise<Response>((resolve) => {
+      resolveFirstReplan = resolve;
+    });
+    const operations: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      hdrFetch((init) => {
+        operations.push((JSON.parse(String(init?.body)) as { operation: string }).operation);
+        if (operations.length === 1) return firstReplanResponse;
+        return new Promise<Response>(() => {});
+      }),
+    );
+
+    const { result, unmount } = renderSession();
+    await waitFor(() => expect(result.current.sessionId).toBe("session-hdr"));
+
+    act(() => result.current.refreshSubtitles(120));
+    await waitFor(() => expect(operations).toHaveLength(1));
+    act(() => setHDR(false));
+    // The output change re-probes decode support before it queues.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    act(() => result.current.refreshSubtitles(121));
+    await act(async () => {
+      resolveFirstReplan?.(jsonResponse(playable("session-hdr", undefined, OUTPUT_CHANGE)));
+      await firstReplanResponse;
+    });
+
+    await waitFor(() => expect(operations).toEqual(["track_change", "output_change"]));
+    unmount();
+  });
+
   it("uses the latest capabilities when an output change queues behind another replan", async () => {
     const setHDR = outputProbe(true);
     let resolveFirstReplan: ((response: Response) => void) | undefined;
@@ -3157,4 +3193,190 @@ it("carries a displaced Restore's clear on the request that replaced it", async 
     learned_limit: "clear",
   });
   unmount();
+});
+
+describe("usePlaybackSession announced subtitle tracks", () => {
+  const stored = (index: number, id: number, language: string) =>
+    fixtureSubtitleInventoryItemV3({
+      track_id: `file:7:subtitle:${index}`,
+      combined_index: index,
+      source: "downloaded",
+      language,
+      label: language,
+      stored_subtitle_id: id,
+      url: `/stream/session-1/subtitles/${index}.vtt?file_id=7&downloaded_subtitle_id=${id}`,
+    });
+
+  // The plan lists stored subtitles 1 (en) and 2 (es) at ordinals 0 and 1.
+  // When a stored subtitle is deleted the server's later ordinals shift down,
+  // so an announced track can land on an ordinal this plan gives another
+  // stored subtitle. Only an append or a re-announcement of the same stored
+  // subtitle may be folded in; anything else means the plan is stale.
+  it.each([
+    { name: "appends a new track", track: stored(2, 3, "fr"), folds: true },
+    { name: "replaces a re-announced track", track: stored(1, 2, "es"), folds: true },
+    {
+      name: "refetches when a different stored track holds the ordinal",
+      track: stored(1, 3, "fr"),
+      folds: false,
+    },
+    {
+      name: "refetches when the announced track would leave a gap",
+      track: stored(3, 3, "fr"),
+      folds: false,
+    },
+  ])("$name", async ({ track, folds }) => {
+    const initial = [stored(0, 1, "en"), stored(1, 2, "es")];
+    const selected = { id: "file:7:subtitle:1", index: 1 };
+    const replanBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      sessionFetch(
+        (init) => {
+          replanBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+          return new Promise<Response>(() => {});
+        },
+        fixturePlanV3({
+          subtitle: { mode: "render", inventory: initial },
+          selected_tracks: { ...fixturePlanV3().selected_tracks, subtitle: selected },
+        }),
+      ),
+    );
+    const { result, unmount } = renderSession();
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    act(() => result.current.applySubtitleTrack(track));
+
+    const inventory = result.current.plan?.subtitle.inventory ?? [];
+    if (folds) {
+      expect(inventory.find((item) => item.combined_index === track.combined_index)).toEqual(track);
+      expect(replanBodies).toEqual([]);
+    } else {
+      expect(inventory).toEqual(initial);
+      await waitFor(() => expect(replanBodies).toHaveLength(1));
+      // The refetch carries the viewer's subtitle over; the server keeps it
+      // on the same stored subtitle.
+      expect(replanBodies[0]).toMatchObject({
+        operation: "track_change",
+        selected_tracks: { subtitle: selected },
+      });
+    }
+    unmount();
+  });
+
+  // The plan lists en (stored 1) at 0 and es (stored 2) at 1. While a quality
+  // change runs, the server deletes 1, so es moves to 0 and fr (stored 3) is
+  // added at 1, and the viewer picks es at 1 from the stale menu. The
+  // conflicting announcement shows the pick's ordinal is stale: the plan is
+  // refetched first, and the pick then goes out at es's new ordinal.
+  it.each([
+    {
+      name: "replays a queued stored-subtitle pick at its ordinal after a refetch",
+      next: "none",
+      trackless: false,
+    },
+    {
+      name: "replays the pick over a seek made while the refetch runs",
+      next: "seek",
+      trackless: false,
+    },
+    {
+      name: "keeps a newer pick made while the refetch runs, at its ordinal",
+      next: "pick",
+      trackless: false,
+    },
+    {
+      name: "turns subtitles off for a newer pick the refetch no longer lists",
+      next: "deleted",
+      trackless: false,
+    },
+    {
+      name: "turns subtitles off for a queued pick the refetch no longer lists",
+      next: "gone",
+      trackless: false,
+    },
+    // An announcement the server could not resolve carries no track, and the
+    // player refetches without knowing which ordinals moved.
+    { name: "replays the pick after a trackless announcement", next: "none", trackless: true },
+  ] as const)("$name", async ({ next, trackless }) => {
+    // de (stored 4) sits at 2 in this plan and moves to 1 once en is deleted.
+    const initial = [stored(0, 1, "en"), stored(1, 2, "es"), stored(2, 4, "de")];
+    const plan = fixturePlanV3({ subtitle: { mode: "render", inventory: initial } });
+    const refreshed = fixturePlanV3({
+      plan_id: "plan:refreshedinv0001",
+      plan_attempt_key: "v3:refreshedinv0001",
+      subtitle: {
+        mode: "render",
+        inventory: [stored(0, 2, "es"), stored(1, 4, "de"), stored(2, 3, "fr")],
+      },
+    });
+    let resolveQualityReplan: ((response: Response) => void) | undefined;
+    const qualityReplanResponse = new Promise<Response>((resolve) => {
+      resolveQualityReplan = resolve;
+    });
+    let resolveRefresh: ((response: Response) => void) | undefined;
+    const refreshResponse = new Promise<Response>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    const replanBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      sessionFetch((init) => {
+        replanBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        if (replanBodies.length === 1) return qualityReplanResponse;
+        if (replanBodies.length === 2) return refreshResponse;
+        return new Promise<Response>(() => {});
+      }, plan),
+    );
+    const { result, unmount } = renderSession();
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    act(() => result.current.changeQuality("1080p", 30));
+    await waitFor(() => expect(replanBodies).toHaveLength(1));
+    // es, or en (stored 1), which the refetch shows was deleted.
+    act(() => result.current.changeSubtitleTrack(next === "gone" ? 0 : 1, 31));
+    act(() => {
+      if (trackless) result.current.refreshSubtitles(31);
+      else result.current.applySubtitleTrack(stored(2, 3, "fr"));
+    });
+    await act(async () => {
+      // The quality change's plan still lists the stale inventory.
+      resolveQualityReplan?.(
+        jsonResponse(
+          playable("session-1", {
+            ...plan,
+            plan_id: "plan:qualityplan00001",
+            plan_attempt_key: "v3:qualityplan00001",
+          }),
+        ),
+      );
+      await qualityReplanResponse;
+    });
+    await waitFor(() => expect(replanBodies).toHaveLength(2));
+    expect(replanBodies[1]).toMatchObject({ operation: "track_change" });
+    expect(replanBodies[1]?.selected_tracks).not.toHaveProperty("subtitle.index", 1);
+    // The menu still lists this plan's inventory, so a pick made now names
+    // de by its stale ordinal.
+    act(() => {
+      if (next === "pick") result.current.changeSubtitleTrack(2, 32);
+      if (next === "deleted") result.current.changeSubtitleTrack(0, 32);
+      if (next === "seek") void result.current.reanchorSeek(200);
+    });
+    await act(async () => {
+      resolveRefresh?.(jsonResponse(playable("session-1", refreshed)));
+      await refreshResponse;
+    });
+
+    await waitFor(() => expect(replanBodies).toHaveLength(3));
+    expect(replanBodies[2]).toMatchObject({ operation: "track_change" });
+    if (next === "deleted" || next === "gone") {
+      expect(replanBodies[2]?.selected_tracks).not.toHaveProperty("subtitle.index");
+    } else {
+      expect(replanBodies[2]).toMatchObject({
+        selected_tracks: { subtitle: { index: next === "pick" ? 1 : 0 } },
+      });
+    }
+    if (next === "seek") expect(replanBodies[2]).toMatchObject({ position_seconds: 200 });
+    unmount();
+  });
 });

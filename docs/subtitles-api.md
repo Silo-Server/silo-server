@@ -207,6 +207,16 @@ track it asked for, so another viewer's current subtitle never changes. The
 event is also sent when deduplication returned an existing row. API servers
 that predate the event ignore it on the cluster bus.
 
+No event announces a deleted subtitle, and deleting one moves every later
+stored subtitle down an ordinal, so `track.combined_index` can name a
+different track in the player's plan. A player folds `track` in only when its
+ordinal is the next free one in the plan's inventory or holds the same
+`stored_subtitle_id`; otherwise it refetches the plan with a `track_change`
+replan that carries its current selection over. The server keeps that
+selection on the same stored subtitle at its new ordinal, or turns subtitles
+off when that stored subtitle was deleted and reports it with the
+`subtitle_track_unavailable` degradation warning.
+
 This operation does not change Jellyfin subtitle delivery. Multipart uploads
 and AI job creation and cancellation have their own v2 operations, described
 below.
