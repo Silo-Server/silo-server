@@ -239,7 +239,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
           showCloseButton
         >
           {/* Header */}
-          <DialogHeader className="border-border/10 shrink-0 flex-row items-center justify-between border-b px-5 py-4">
+          <DialogHeader className="border-border/10 shrink-0 flex-row items-center justify-between border-b px-5 py-4 pe-12">
             <div className="flex items-center gap-2.5">
               <DialogTitle className="text-[15px] font-semibold">
                 {t("web.item.dialog.editMetadataTitle")}

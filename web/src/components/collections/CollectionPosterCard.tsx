@@ -5,6 +5,7 @@ import type { LibraryTabCollection } from "@/api/types";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { useToggleSidebarPin } from "@/hooks/queries/sidebarPins";
 import { useT } from "@/i18n";
+import { formatLocale } from "@/lib/appLocale";
 import {
   buildLibraryCollectionCatalogHref,
   buildUserCollectionCatalogHref,
@@ -88,7 +89,7 @@ export function CollectionPosterCard({
           )}
           {meta === undefined ? (
             <span className="bg-background/60 text-foreground absolute end-2 bottom-2 rounded-md px-2 py-0.5 text-[0.6875rem] font-bold backdrop-blur-sm">
-              {collection.item_count}
+              {collection.item_count.toLocaleString(formatLocale())}
             </span>
           ) : null}
         </div>

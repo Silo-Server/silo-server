@@ -1,7 +1,7 @@
 import type { ScopeKind } from "./scope";
 import type { CollectionKind } from "./types";
 import { t, type MessageKey } from "@/i18n";
-import { appLanguage } from "@/lib/appLocale";
+import { appLanguage, formatLocale } from "@/lib/appLocale";
 import { titlesAlreadySaved } from "./copyEditor";
 
 export * from "./copyEditor";
@@ -544,7 +544,10 @@ export function addToCollectionFootnote() {
 
 /** "Manual · 15 titles": a manual collection's line in a picker. */
 export function manualTitleCount(count: number): string {
-  return t("web.collections.copy.manualTitleCount", { count, count_text: count });
+  return t("web.collections.copy.manualTitleCount", {
+    count,
+    count_text: count.toLocaleString(formatLocale()),
+  });
 }
 
 /** The Add to collection footer: how many of the profile's collections hold the title. */

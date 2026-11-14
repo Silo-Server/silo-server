@@ -7,6 +7,7 @@ import { getAccessGroup, type AccessGroupEditor as GroupEditor } from "@/api/v2/
 import { isRequestEditorConflict } from "@/api/v2/adminRequests";
 import { V2ProblemError } from "@/api/v2/request";
 import type { AccessGroupInput } from "@/api/types";
+import { DownloadsServerNotice } from "@/components/admin/DownloadsServerNotice";
 import { EditorConflict } from "@/components/admin/EditorConflict";
 import { RequestLimitFields } from "@/components/admin/RequestLimitFields";
 import { LibraryAccessSelector } from "@/components/LibraryAccessSelector";
@@ -531,6 +532,7 @@ export function AccessGroupEditor({
           <h2 className="text-sm font-semibold">
             {t("web.admin.access.groups.downloads.heading")}
           </h2>
+          <DownloadsServerNotice />
           <ToggleRow
             label={t("web.admin.access.groups.downloads.allow")}
             description={t("web.admin.access.groups.downloads.allowDescription")}

@@ -119,6 +119,18 @@ export function reconnectDelayMs(attempt: number): number {
 }
 
 /**
+ * Stops the player's session as it leaves. sendBeacon doesn't support DELETE,
+ * so the stop uses fetch keepalive to outlive a closing page. An unloading
+ * page sends it at once rather than after any progress still in flight.
+ */
+function stopOnPageExit(config: PlayerConfig, sessionId: string | null, unloading = false) {
+  if (!sessionId) return;
+  void stopSequencedSession(config, sessionId, true, unloading).catch(() => {
+    // Best effort: the session expires server-side.
+  });
+}
+
+/**
  * Whether a failed reconnect request is worth repeating later: the server was
  * unreachable or overloaded, or it asked for a retry. Anything else is its
  * considered answer.
@@ -242,6 +254,12 @@ export interface UsePlaybackSessionResult extends PlaybackSessionState {
    * Resolves with whether a plan at the new position was adopted.
    */
   reanchorSeek: (positionSeconds: number) => Promise<boolean>;
+  /**
+   * The player moved to `positionSeconds` inside the stream it has, without a
+   * replan. A quality, track or output change queued behind the replan in
+   * flight then resumes there rather than where it was asked for.
+   */
+  reportSeek: (positionSeconds: number) => void;
   /** Re-reads the subtitle inventory by replanning with the selection unchanged. */
   refreshSubtitles: (currentPosition: number) => void;
   /** Folds a realtime-delivered inventory entry in without a server round trip. */
@@ -1256,6 +1274,18 @@ export function usePlaybackSession(
     versionPicked,
   ]);
 
+  // A closed tab, a reload or a navigation away never unmounts the player, so
+  // the stop goes out from pagehide. A page kept in the back-forward cache can
+  // come back playing, so its session stays; the server stops counting it
+  // toward the stream limit once its progress reports stop.
+  useEffect(() => {
+    const onPageHide = (event: PageTransitionEvent) => {
+      if (!event.persisted) stopOnPageExit(config, sessionIdRef.current, true);
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, [config]);
+
   // Clean up session on unmount.
   useEffect(() => {
     return () => {
@@ -1267,12 +1297,7 @@ export function usePlaybackSession(
       endReconnect(false);
       // A start this player left still loading no longer holds off speed tests.
       playbackStartEnded();
-      const sid = sessionIdRef.current;
-      if (!sid) return;
-      // sendBeacon doesn't support DELETE, so the stop uses fetch keepalive.
-      void stopSequencedSession(config, sid, true).catch(() => {
-        // Best effort: the session expires server-side.
-      });
+      stopOnPageExit(config, sessionIdRef.current);
     };
   }, [config, endReconnect]);
 
@@ -1978,6 +2003,22 @@ export function usePlaybackSession(
     [replan, reportEvent],
   );
 
+  const reportSeek = useCallback((positionSeconds: number) => {
+    const pending = pendingReplanRef.current;
+    if (!pending || !Number.isFinite(positionSeconds) || positionSeconds < 0) return;
+    // A recovery or reanchor names a position of its own; the other queued
+    // operations only carry where the viewer was when they were asked for.
+    const { operation } = pending.options;
+    if (
+      operation !== "quality_change" &&
+      operation !== "track_change" &&
+      operation !== "output_change"
+    ) {
+      return;
+    }
+    pendingReplanRef.current = { ...pending, options: { ...pending.options, positionSeconds } };
+  }, []);
+
   /**
    * Re-reads the subtitle inventory.
    *
@@ -2114,6 +2155,7 @@ export function usePlaybackSession(
     retryConnection,
     invalidatePlan,
     reanchorSeek,
+    reportSeek,
     refreshSubtitles,
     applySubtitleTrack,
     updatePlaybackState,

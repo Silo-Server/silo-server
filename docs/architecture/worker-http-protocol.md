@@ -203,11 +203,18 @@ The request's optional `log_session_id` (`download-prepare-<artifact id>`) label
 the node's FFmpeg log lines with the durable job, so every attempt of one artifact
 reads as one stream in the operational logs. The node accepts only that shape and
 otherwise logs nothing; the field never affects bytes, so the execution fingerprint
-excludes it.
+excludes it. The optional `source_frame_rate` is the source video's frame rate,
+which the prepared file keeps. It also never affects bytes and is excluded from the
+fingerprint, and older nodes ignore it.
 
 `GET /downloads/prepare/{artifact_id}/progress` reads the in-memory progress of a
 prepare attempt running on the node: `encoded_seconds`, `duration_seconds`, and
-`speed` from FFmpeg's `-progress` stream. It requires node bearer authorization.
+`speed` from FFmpeg's `-progress` stream. FFmpeg's output time waits for every
+stream, so a subtitle track with no cue yet holds it back while the encode runs.
+With `source_frame_rate`, a reading is the frames encoded at that rate when that is
+further, and `speed` is FFmpeg's encode rate in frames per second over it. A remux
+that copies the video reads output time alone, since copied video keeps the source's
+own timing. It requires node bearer authorization.
 An id with no encode in flight answers `running: false`, never 404, so the API
 treats 404 as a node that predates the operation and reports the attempt as unable
 to report progress. Readings are not durable and say nothing about a completed
@@ -288,14 +295,24 @@ for that textual payload rather than claiming application/json on the wire.
 `hw_accel=auto` (a video transcode without tone mapping that resolves to a
 hardware backend), the node tries CPU decode with GPU encode, then software;
 otherwise it keeps the limited software retry for an early VideoToolbox failure.
+Outside `auto`, when the GPU decoder rejects the source (FFmpeg's
+`Hardware is lacking required capabilities`) of a video transcode that decoded
+on the GPU without tone mapping, the node walks the same CPU decode with GPU
+encode, then software, instead of failing the start.
 `auto_fallback_ready` asks for that wait only when the node's own `hw_accel=auto`
 pipeline is enabled for the start, judged from its live hardware; otherwise the
 start is not waited on. The Jellyfin-compatible surface sends it for `auto` video
-transcodes instead of `RequireReady`, and older nodes ignore it. Each attempt
-gets its own manifest wait, so callers size the start deadline of an `auto`
+transcodes instead of `RequireReady`, and older nodes ignore it. For a video
+transcode under an explicit hardware backend that decodes on the GPU without
+tone mapping it sends `RequireReady`, so the node can take the decoder-rejection
+retry above. Each attempt gets its own manifest wait, so callers size the start
+deadline of an `auto`
 video transcode that sets either field to `TranscodeStartReadyMaxDuration` (one
-wait per path); every other start keeps the single-wait deadline. Readiness is
-judged only on a manifest the current FFmpeg process wrote; an earlier
+wait per path). A `RequireReady` video transcode under an explicit hardware
+backend gets the same deadline, because a decoder rejection can lead to the
+CPU-decode and software attempts. Every other start keeps the single-wait
+deadline. Readiness is judged only on a manifest the current FFmpeg process
+wrote; an earlier
 generation's `stream.m3u8` in a reused directory does not count. A process still
 running at the deadline is closed, never duplicated. The response reports `software_video_decode`
 when the executed recipe decodes on the CPU; older nodes omit it, so callers OR

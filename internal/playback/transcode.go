@@ -117,6 +117,16 @@ type TranscodeOpts struct {
 	// stream tokens never freeze it: a reconstruct under auto rebuilds the
 	// pipeline and derives it again from live configuration.
 	nvencSoftwareDecode bool
+	// gpuDecodeFailed moves a running QSV or VAAPI session to CPU decode after
+	// its GPU-decoded generation failed (see gpuDecodeFailedFilterSetupLocked).
+	// On VAAPI it also stops FFmpeg rotating the CPU-decoded frames by the
+	// source's display matrix: FFmpeg never rotates hardware frames, so the
+	// segments already served are in coded orientation. QSV always passes
+	// -noautorotate. It is deliberately unexported and leaves
+	// SoftwareVideoDecode alone, so a recipe card or stream token written from
+	// the live options still records GPU decode and a reconstruct produces the
+	// same orientation.
+	gpuDecodeFailed bool
 	// softwareEncode retains a frozen GPU tone-map graph while its final
 	// SDR frames feed a software encoder: libx265 on a device without HEVC
 	// encoding, or either codec on a VAAPI device with no capped rate
@@ -190,7 +200,11 @@ type TranscodeOpts struct {
 	TargetAudioBitrateKbps int
 	TargetBitrateKbps      int     // max video bitrate in kbps; 0 = CRF-only (no cap)
 	TotalDuration          float64 // total media duration in seconds (for VOD manifest)
-	FastStart              bool    // use superfast preset for faster first-segment production
+	// SourceFrameRate is the source video's frame rate, which a prepared file
+	// keeps. A prepared download reads its progress from the frames encoded
+	// at this rate (see prepareProgressWriter). Zero when unknown.
+	SourceFrameRate float64
+	FastStart       bool // use superfast preset for faster first-segment production
 	// ThrottleSeconds is the resolved forward-buffer policy for this session.
 	// Zero disables throttling. It is durable so a remote executor can preserve
 	// the API server's policy across node reconstruction without reading settings.
@@ -252,6 +266,7 @@ const (
 	transcodeCodecH264       = "h264"
 	transcodeCodecHEVC       = "hevc"
 	HWAccelNone              = "none"
+	HWAccelAuto              = "auto"
 	transcodeHWQSV           = "qsv"
 	transcodeHWVAAPI         = "vaapi"
 	transcodeHWNVENC         = "nvenc"
@@ -351,6 +366,9 @@ type TranscodeSession struct {
 	// subtitleOriginMu serializes observations of a span's origin, so
 	// concurrent subtitle requests share one ffprobe run.
 	subtitleOriginMu sync.Mutex
+	// closing is set once Close or CloseProcess begins. It is terminal: from
+	// then on no restart publishes a generation and no throttler is armed.
+	closing bool
 }
 
 // NewTranscodeSessionForTest exposes only the output directory needed by tests
@@ -362,7 +380,9 @@ func NewTranscodeSessionForTest(outputDir string) *TranscodeSession {
 // SetRestartHook registers a callback fired after every successful Restart.
 // The owning handler uses it to re-arm the transcode throttler and the exit
 // monitor; firing it from Restart itself keeps every restart caller (web
-// segment recovery, audio switch, jellycompat seek) consistent.
+// segment recovery, audio switch, jellycompat seek) consistent. The callback's
+// context ends when the new FFmpeg process is closed or restartHookTimeout
+// passes, and anything in it that can block must honor that context.
 func (s *TranscodeSession) SetRestartHook(fn func(context.Context)) {
 	s.mu.Lock()
 	s.restartHook = fn
@@ -704,6 +724,9 @@ func normalizeTranscodeOptsContext(ctx context.Context, opts TranscodeOpts) Tran
 	opts.EncoderHWAccel = ""
 	opts.FFmpegPath = ResolveFFmpegPath(opts.FFmpegPath)
 	opts = resolveSoftwareVideoDecode(opts)
+	if opts.gpuDecodeFailed {
+		opts.SoftwareVideoDecode = true
+	}
 	if opts.ToneMapMode == tonemap.ModeSoftware {
 		opts.SoftwareVideoDecode = true
 		opts.HWAccel = HWAccelNone
@@ -840,7 +863,7 @@ func validateToneMapSource(ctx context.Context, opts TranscodeOpts) error {
 		InputPath:           opts.InputPath,
 		DurationSeconds:     opts.TotalDuration,
 		SourceBitDepth:      opts.SourceVideoBitDepth,
-		SoftwareVideoDecode: opts.SoftwareVideoDecode,
+		SoftwareVideoDecode: opts.SoftwareVideoDecode || opts.gpuDecodeFailed,
 		Mode:                opts.ToneMapMode,
 		Backend:             backend,
 		Filter:              opts.ToneMapFilter,
@@ -1062,9 +1085,10 @@ func resolveEffectiveTranscodeHWAccelContext(ctx context.Context, opts Transcode
 	}
 	// An explicit NVENC setting keeps the established libx264 fallback for a
 	// source the CUDA decoder must not receive. Intel QSV/VAAPI have the
-	// explicit upload paths below and retain hardware encoding. Only the
-	// automatic pipeline's mixed stage, which falls back to software itself if
-	// the CUDA upload fails, keeps NVENC encoding after a CPU decode.
+	// explicit upload paths below and retain hardware encoding. Only an
+	// AutoTranscodePipeline's mixed stage (hw_accel=auto, or the
+	// NewSoftwareDecodeRetryPipeline fallback), which falls back to software
+	// itself if the CUDA upload fails, keeps NVENC encoding after a CPU decode.
 	if opts.SoftwareVideoDecode && hwAccel == transcodeHWNVENC &&
 		(!opts.nvencSoftwareDecode || opts.ToneMapMode != "") {
 		return HWAccelNone
@@ -1241,6 +1265,8 @@ func appendHWAccelArgs(args []string, opts TranscodeOpts) []string {
 		args = append(args, "-filter_hw_device", vaapiHWDeviceAlias)
 		if !opts.SoftwareVideoDecode {
 			args = append(args, "-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi")
+		} else if opts.gpuDecodeFailed {
+			args = append(args, "-noautorotate")
 		}
 	case transcodeHWNVENC:
 		if opts.SoftwareVideoDecode {
@@ -1472,13 +1498,60 @@ func appendVideoToolboxRateControl(args []string, opts TranscodeOpts) []string {
 // appendVideoFilterArgs appends the -vf selection for an encoding (non-copy)
 // video stream: the subtitle burn-in chain (which includes scaling and hw
 // download/upload for QSV/VAAPI) or the hwaccel-appropriate standalone scale
-// filter. The ONE home of this decision — the HLS builder and the single-file
+// filter, led by cpuDeinterlaceFilter when the video is decoded on the CPU.
+// The ONE home of this decision — the HLS builder and the single-file
 // prepare builder must always produce identical filter chains (a fix landing
 // in only one of them silently ships wrong cached artifacts).
 func appendVideoFilterArgs(args []string, opts TranscodeOpts) []string {
 	if opts.ToneMapMode != "" {
 		return appendToneMapFilterArgs(args, opts)
 	}
+	start := len(args)
+	args = appendSDRVideoFilterArgs(args, opts)
+	// Only video decoded on the CPU is deinterlaced here. Frames a hardware
+	// decoder produced stay as they are, including in the burn-in graphs that
+	// download them for subtitles.
+	if opts.SoftwareVideoDecode || !isHardwareTranscodeBackend(opts.HWAccel) {
+		args = prependCPUDeinterlace(args, start)
+	}
+	return args
+}
+
+// cpuDeinterlaceFilter deinterlaces the frames a software decoder flags as
+// interlaced and passes every other frame through untouched, one output frame
+// per input frame, so progressive sources keep their pixels, frame rate and
+// timestamps. Without it both fields of an interlaced frame are encoded into
+// one picture that the output then labels progressive.
+const cpuDeinterlaceFilter = "bwdif=mode=send_frame:deint=interlaced"
+
+// The FFmpeg options that carry a video filter graph.
+const (
+	videoFilterOption        = "-vf"
+	videoFilterComplexOption = "-filter_complex"
+)
+
+// prependCPUDeinterlace makes cpuDeinterlaceFilter the first filter the
+// decoded video reaches in the graph appended at args[start:], or adds a graph
+// holding only that filter when none was appended.
+func prependCPUDeinterlace(args []string, start int) []string {
+	for i := start; i+1 < len(args); i++ {
+		switch args[i] {
+		case videoFilterOption:
+			args[i+1] = cpuDeinterlaceFilter + "," + args[i+1]
+			return args
+		case videoFilterComplexOption:
+			const video = "[0:v:0]"
+			args[i+1] = strings.Replace(args[i+1], video, video+cpuDeinterlaceFilter+"[vdeint];[vdeint]", 1)
+			return args
+		}
+	}
+	return append(args, videoFilterOption, cpuDeinterlaceFilter)
+}
+
+// appendSDRVideoFilterArgs appends the subtitle burn-in or scale graph of a
+// transcode that does no tone mapping, or nothing when the encoder takes the
+// decoded frames as they are.
+func appendSDRVideoFilterArgs(args []string, opts TranscodeOpts) []string {
 	switch {
 	case bitmapBurnInActive(opts):
 		return appendBitmapSubtitleBurnInArgs(args, opts)
@@ -2242,9 +2315,9 @@ func (s *TranscodeSession) getManifest(currentGeneration bool) ([]byte, error) {
 					return nil, ErrManifestNotReady
 				}
 				if s.waitErr != nil {
-					stderr := truncateStderr(s.stderr.String())
-					if stderr != "" {
-						return nil, fmt.Errorf("%w: %w (stderr: %s)", ErrTranscodeFailed, s.waitErr, stderr)
+					retained := s.stderr.String()
+					if stderr := truncateStderr(retained); stderr != "" {
+						return nil, classifyFFmpegFailure(fmt.Errorf("%w: %w (stderr: %s)", ErrTranscodeFailed, s.waitErr, stderr), retained)
 					}
 					return nil, fmt.Errorf("%w: %w", ErrTranscodeFailed, s.waitErr)
 				}
@@ -3329,18 +3402,32 @@ func (s *TranscodeSession) CloseProcess() error {
 // shutdown kills the ffmpeg process and, when removeOutput is true, removes the
 // temporary output directory.
 func (s *TranscodeSession) shutdown(removeOutput bool) error {
+	// Closing is terminal: a restart that has not published its generation
+	// yet publishes none. A restart in flight swaps the generation's cancel
+	// and done, so wait for it before reading them.
+	s.mu.Lock()
+	s.closing = true
+	flight := s.restarting
+	s.mu.Unlock()
 	s.StopThrottler()
-	// Cancel the context to kill the process (no mutex needed for cancel).
-	if s.cancel != nil {
-		s.cancel()
+	if flight != nil {
+		<-flight.done
+	}
+	s.mu.Lock()
+	cancel, done := s.cancel, s.done
+	s.mu.Unlock()
+
+	// Cancel the context to kill the process.
+	if cancel != nil {
+		cancel()
 	}
 
 	// Wait for the monitor goroutine to finish reaping the process.
 	// This avoids a deadlock: the goroutine needs s.mu to mark running=false,
 	// so we must not hold s.mu while waiting.
 	// done is nil when no process was started (e.g. test-only sessions).
-	if s.done != nil {
-		<-s.done
+	if done != nil {
+		<-done
 	}
 
 	if removeOutput {
@@ -3549,6 +3636,10 @@ func (s *TranscodeSession) RestartSegment(ctx context.Context, segNum int) (Segm
 	return target, true, err
 }
 
+// errSessionClosing is a restart of a session whose Close has begun. It is
+// ErrSessionSuperseded to callers: the handle is no longer the live session.
+var errSessionClosing = fmt.Errorf("%w: the session is closing", ErrSessionSuperseded)
+
 // restartFlight carries the outcome of an in-flight restart so a concurrent
 // caller waits for it and receives the result instead of assuming success and
 // falling through to a stream the failed restart never produced.
@@ -3557,10 +3648,55 @@ type restartFlight struct {
 	err  error
 }
 
+// ffmpegFilterSetupFailure is the line FFmpeg prints when it cannot configure
+// a filter graph. Silo runs FFmpeg at -loglevel error, so FFmpeg's reason for
+// rebuilding a graph mid-stream (an info line) is never captured; this is.
+const ffmpegFilterSetupFailure = "Error reinitializing filters!"
+
+// gpuDecodeFailedFilterSetupLocked reports whether the last generation decoded
+// on an Intel GPU and exited by itself because FFmpeg could not configure its
+// filter graph. That is how a QSV or VAAPI transcode dies when the VAAPI
+// decoder replaces its frames context mid-stream: the rebuilt graph cannot
+// feed hardware frames to the encoder that is already open, and it fails at
+// the same frame on every restart. CPU-decoded frames reach the same graph
+// through an upload, so the restart takes that route once. The caller holds
+// s.mu.
+//
+// The line also follows unrelated graph failures. Those sessions were failing
+// anyway and lose only GPU decode. NVENC is left out: with CPU decode an
+// explicit NVENC setting encodes on libx264.
+func (s *TranscodeSession) gpuDecodeFailedFilterSetupLocked() bool {
+	if s.running || s.waitErr == nil || s.stderr == nil || s.opts.SoftwareVideoDecode || s.opts.gpuDecodeFailed {
+		return false
+	}
+	if s.opts.HWAccel != transcodeHWQSV && s.opts.HWAccel != transcodeHWVAAPI {
+		return false
+	}
+	return strings.Contains(s.stderr.String(), ffmpegFilterSetupFailure)
+}
+
+// crashState reports, in one read, whether FFmpeg exited with an error and has
+// not been restarted, and whether the next restart would then move the session
+// from GPU to CPU decode (see gpuDecodeFailedFilterSetupLocked).
+func (s *TranscodeSession) crashState() (crashed, restartsOnCPU bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.running || s.waitErr == nil {
+		return false, false
+	}
+	return true, s.gpuDecodeFailedFilterSetupLocked()
+}
+
 // restartToneMapValidationTimeout bounds the tone-map source recheck on a
 // restart. It is deliberately shorter than the caller's post-restart segment
 // wait (30s) so a slow validation cannot consume the entire recovery window.
 var restartToneMapValidationTimeout = 20 * time.Second
+
+// restartHookTimeout bounds a restart hook. A restart runs under the session
+// lifecycle lock, and a stop takes that lock before it closes the session, so
+// the close that cancels the hook's FFmpeg context cannot reach a hook that
+// waits on it, as the throttler's settings read does when the database stalls.
+var restartHookTimeout = 5 * time.Second
 
 func (s *TranscodeSession) restart(
 	ctx context.Context,
@@ -3580,12 +3716,23 @@ func (s *TranscodeSession) restart(
 		<-flight.done
 		return flight.err
 	}
+	if s.closing {
+		s.mu.Unlock()
+		return errSessionClosing
+	}
 	flight := &restartFlight{done: make(chan struct{})}
 	s.restarting = flight
 	opts := s.opts
+	decodeOnCPU := s.gpuDecodeFailedFilterSetupLocked()
 	cancelCurrent := s.cancel
 	done := s.done
 	s.mu.Unlock()
+	if decodeOnCPU {
+		// The same command would fail the same way at the same frame. Decide
+		// before the tone-map recheck below, so it validates the route this
+		// restart will run.
+		opts.gpuDecodeFailed = true
+	}
 	// A tone-map recipe is valid only for the frozen source revision. Recheck it
 	// while the current process is still serving so replacement bytes can never
 	// displace a valid generation or inherit its cached preflight verdict. The
@@ -3603,7 +3750,7 @@ func (s *TranscodeSession) restart(
 		return flight.err
 	}
 	cancelValidation()
-	s.StopThrottler()
+	previousThrottleSeconds := s.StopThrottler()
 
 	// Kill current process without removing output directory.
 	if cancelCurrent != nil {
@@ -3623,6 +3770,15 @@ func (s *TranscodeSession) restart(
 	}
 
 	s.mu.Lock()
+	if s.closing {
+		// Close began while this restart validated or stopped the previous
+		// generation: stop before touching the output or starting FFmpeg.
+		flight.err = errSessionClosing
+		s.restarting = nil
+		s.mu.Unlock()
+		close(flight.done)
+		return flight.err
+	}
 	s.running = false
 	s.waitErr = nil
 	if s.stderr != nil {
@@ -3681,6 +3837,13 @@ func (s *TranscodeSession) restart(
 	}
 
 	log.Printf("playback: ffmpeg restart cmd: %s %s", bin, strings.Join(args, " "))
+	if decodeOnCPU {
+		slog.WarnContext(ctx, "transcode could not configure its filter graph on GPU-decoded frames; restarting with CPU decoding",
+			"component", "playback",
+			"playback_session_id", opts.SessionID,
+			"hw_accel", opts.HWAccel,
+		)
+	}
 	s.logFFmpegEvent(ctx, "ffmpeg process restart", "")
 
 	// As on initial start, the caller bounds synchronous validation; the new
@@ -3728,6 +3891,20 @@ func (s *TranscodeSession) restart(
 	}
 
 	s.mu.Lock()
+	if s.closing {
+		// Close began while this generation started: end it here, before
+		// the flight lets Close read the session's generation.
+		s.mu.Unlock()
+		cancel()
+		_ = cmd.Wait()
+		releaseHWDevice()
+		s.mu.Lock()
+		flight.err = errSessionClosing
+		s.restarting = nil
+		s.mu.Unlock()
+		close(flight.done)
+		return flight.err
+	}
 	if s.stdinPipe != nil {
 		s.stdinPipe.Close()
 	}
@@ -3751,7 +3928,24 @@ func (s *TranscodeSession) restart(
 	go s.monitorFFmpeg(ctx, cmd, s.done, releaseHWDevice)
 
 	if hook != nil {
-		hook(ctx)
+		hookCtx, cancelHook := context.WithTimeout(ctx, restartHookTimeout)
+		hook(hookCtx)
+		if errors.Is(hookCtx.Err(), context.DeadlineExceeded) {
+			// A hook that gave up before it started a throttler leaves the new
+			// process unthrottled. Keep the threshold this session had instead.
+			s.mu.Lock()
+			unthrottled := s.throttler == nil
+			s.mu.Unlock()
+			if unthrottled {
+				s.StartThrottler(previousThrottleSeconds)
+			}
+			slog.WarnContext(ctx, "transcode restart hook timed out; the transcode throttle may not match its settings until the next restart",
+				"component", "playback",
+				"playback_session_id", opts.SessionID,
+				"timeout", restartHookTimeout,
+			)
+		}
+		cancelHook()
 	}
 
 	return nil
@@ -4057,15 +4251,16 @@ func (s *TranscodeSession) manifestTimeoutError(timeout time.Duration) error {
 	s.mu.Lock()
 	running := s.running
 	waitErr := s.waitErr
-	stderr := ""
+	retained := ""
 	if s.stderr != nil {
-		stderr = truncateStderr(s.stderr.String())
+		retained = s.stderr.String()
 	}
 	s.mu.Unlock()
+	stderr := truncateStderr(retained)
 
 	switch {
 	case waitErr != nil && stderr != "":
-		return fmt.Errorf("%w after %s: ffmpeg exited: %w (stderr: %s)", ErrManifestNotReady, timeout, waitErr, stderr)
+		return classifyFFmpegFailure(fmt.Errorf("%w after %s: ffmpeg exited: %w (stderr: %s)", ErrManifestNotReady, timeout, waitErr, stderr), retained)
 	case waitErr != nil:
 		return fmt.Errorf("%w after %s: ffmpeg exited: %w", ErrManifestNotReady, timeout, waitErr)
 	case running:
@@ -4310,10 +4505,10 @@ func (s *TranscodeSession) LastRequestedSegment() int {
 }
 
 // StartThrottler creates and starts a throttler for this session.
-// No-op if thresholdSeconds <= 0 or stdinPipe is nil.
+// No-op if thresholdSeconds <= 0, stdinPipe is nil, or the session is closing.
 func (s *TranscodeSession) StartThrottler(thresholdSeconds int) {
 	s.mu.Lock()
-	if s.stdinPipe == nil || thresholdSeconds <= 0 {
+	if s.stdinPipe == nil || thresholdSeconds <= 0 || s.closing {
 		s.mu.Unlock()
 		return
 	}
@@ -4323,15 +4518,18 @@ func (s *TranscodeSession) StartThrottler(thresholdSeconds int) {
 	t.Start()
 }
 
-// StopThrottler stops the throttler if one is running.
-func (s *TranscodeSession) StopThrottler() {
+// StopThrottler stops the throttler if one is running and returns its
+// threshold in seconds, or zero when none was.
+func (s *TranscodeSession) StopThrottler() int {
 	s.mu.Lock()
 	t := s.throttler
 	s.throttler = nil
 	s.mu.Unlock()
-	if t != nil {
-		t.Stop()
+	if t == nil {
+		return 0
 	}
+	t.Stop()
+	return t.thresholdSeconds
 }
 
 type ffmpegStderrWriter struct {
