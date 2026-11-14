@@ -820,6 +820,10 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 		if errors.Is(err, errFolderHasNoMedia) {
 			return err
 		}
+		var unreadableBook *noReadableAudiobookPartError
+		if errors.As(err, &unreadableBook) {
+			s.retireUnreadableAudiobookFiles(ctx, folder.ID, unreadableBook.paths)
+		}
 		return fmt.Errorf("parse audiobook folder %s: %w", folderPath, err)
 	}
 	if unreadable != nil {
@@ -896,6 +900,23 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 		"unreadable_files", len(parsed.UnreadableParts),
 	)
 	return nil
+}
+
+// retireUnreadableAudiobookFiles marks missing the rows of a book whose every
+// file ffprobe now rejects. The files are still on disk, so the missing-file
+// sweep would otherwise keep offering a book that cannot play. Failure only
+// delays this to the next scan, so it is logged rather than returned.
+func (s *Scanner) retireUnreadableAudiobookFiles(ctx context.Context, folderID int, paths []string) {
+	if s.fileRepo == nil || len(paths) == 0 {
+		return
+	}
+	if _, err := s.fileRepo.Pool().Exec(ctx, `
+		UPDATE media_files SET missing_since = COALESCE(missing_since, NOW())
+		WHERE media_folder_id = $1 AND file_path = ANY($2) AND missing_since IS NULL
+	`, folderID, paths); err != nil {
+		slog.WarnContext(ctx, "audiobook scan: could not retire unreadable files", "component", "scanner",
+			"folder_id", folderID, "error", err)
+	}
 }
 
 func applyAudiobookEmbeddedCover(
@@ -1141,17 +1162,35 @@ func (s *Scanner) findAudiobookDuplicate(ctx context.Context, book *parsedAudiob
 	defer rows.Close()
 
 	var existingID string
+	var candidates []string
 	for rows.Next() {
 		var candidateID, candidateTitle string
 		if err := rows.Scan(&candidateID, &candidateTitle); err != nil {
 			return nil
 		}
 		if audiobookDedupeTitlesMatch(candidateTitle, cleanTitle) {
+			candidates = append(candidates, candidateID)
+		}
+	}
+	if rows.Err() != nil {
+		return nil
+	}
+	rows.Close()
+	// The query matches on the first author and narrator only. Recordings
+	// that share those but differ in the rest of the cast are different
+	// editions, so the whole credit set must agree.
+	desired := book.credits()
+	for _, candidateID := range candidates {
+		people, err := s.itemRepo.GetPeople(ctx, candidateID)
+		if err != nil {
+			return nil
+		}
+		if audiobookPeopleCreditsEqual(audiobookAuthorNarratorCredits(people), desired) {
 			existingID = candidateID
 			break
 		}
 	}
-	if rows.Err() != nil || existingID == "" {
+	if existingID == "" {
 		return nil
 	}
 
@@ -1491,6 +1530,18 @@ func (b *parsedAudiobook) credits() []audiobookCredit {
 	}
 	add(b.Authors, b.Author, models.PersonKindAuthor)
 	add(b.Narrators, b.Narrator, models.PersonKindNarrator)
+	return out
+}
+
+// audiobookAuthorNarratorCredits keeps the author and narrator credits, the
+// ones the scanner derives from tags.
+func audiobookAuthorNarratorCredits(people []models.ItemPerson) []models.ItemPerson {
+	out := make([]models.ItemPerson, 0, len(people))
+	for _, p := range people {
+		if p.Kind == models.PersonKindAuthor || p.Kind == models.PersonKindNarrator {
+			out = append(out, p)
+		}
+	}
 	return out
 }
 

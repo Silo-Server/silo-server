@@ -932,6 +932,14 @@ func TestSplitAudiobookCredits(t *testing.T) {
 			t.Errorf("splitAudiobookCredits(%q) = %q, want %q", tc.raw, got, tc.want)
 		}
 	}
+	// A crafted tag cannot fan out into unbounded person writes.
+	many := make([]string, 50)
+	for i := range many {
+		many[i] = fmt.Sprintf("Reader %d", i)
+	}
+	if got := splitAudiobookCredits(strings.Join(many, ";")); len(got) != maxAudiobookCreditsPerRole {
+		t.Errorf("50 narrators split into %d credits, want the cap of %d", len(got), maxAudiobookCreditsPerRole)
+	}
 }
 
 func TestParseSeriesIndex(t *testing.T) {
@@ -1103,7 +1111,11 @@ func TestParseAudiobookFolderSkipsRejectedPart(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, "part3.mp3")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := parseAudiobookFolder(t.Context(), "ffprobe", dir, nil); err == nil || errors.Is(err, errFolderHasNoMedia) {
-		t.Fatalf("book with no readable part: err = %v, want a failure", err)
+	// The caller retires rows indexed for these files, so the error must
+	// carry them.
+	_, err = parseAudiobookFolder(t.Context(), "ffprobe", dir, nil)
+	var unreadable *noReadableAudiobookPartError
+	if !errors.As(err, &unreadable) || !reflect.DeepEqual(unreadable.paths, []string{bad}) {
+		t.Fatalf("book with no readable part: err = %v, want noReadableAudiobookPartError for %s", err, bad)
 	}
 }

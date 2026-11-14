@@ -186,7 +186,8 @@ type probedAudiobookPart struct {
 //   - Book tags come from the first part. In a multi-file book whose title
 //     tags name the parts ("Chapter 01"), the album tag is the book title.
 //   - A part keeps its embedded chapters; a part of a multi-file book without
-//     them gets one chapter named after its file.
+//     them gets one chapter named after its file, even when it is the only
+//     readable part.
 func parseAudiobookParts(ctx context.Context, ffprobePath, folderPath string, audioFiles []string) (*parsedAudiobook, error) {
 	book := &parsedAudiobook{}
 	parts := make([]probedAudiobookPart, 0, len(audioFiles))
@@ -227,7 +228,7 @@ func parseAudiobookParts(ctx context.Context, ffprobePath, folderPath string, au
 		})
 	}
 	if len(parts) == 0 {
-		return nil, fmt.Errorf("audiobook folder %s: ffprobe rejected every audio file (%s)", folderPath, strings.Join(book.UnreadableParts, ", "))
+		return nil, &noReadableAudiobookPartError{folder: folderPath, paths: book.UnreadableParts}
 	}
 
 	tags := make([]map[string]string, len(parts))
@@ -256,13 +257,15 @@ func parseAudiobookParts(ctx context.Context, ffprobePath, folderPath string, au
 		bookTags = merged
 	}
 	book.populateFromTags(bookTags)
-	if len(audioFiles) > 1 && strings.TrimSpace(bookTags["album"]) != "" {
+	if len(audioFiles) > 1 {
 		titles := make([]string, len(parts))
 		for i, p := range parts {
 			titles[i] = p.tags["title"]
 		}
+		// A part title never names the book. Without an album tag the
+		// filesystem fallback below supplies the title.
 		if partTitlesNameParts(titles) {
-			book.Title = bookTags["album"]
+			book.Title = strings.TrimSpace(bookTags["album"])
 		}
 	}
 	book.applyFilesystemFallbacks(folderPath, audioFiles)
@@ -270,7 +273,7 @@ func parseAudiobookParts(ctx context.Context, ffprobePath, folderPath string, au
 	book.Files = make([]parsedAudiobookFile, len(parts))
 	for i, p := range parts {
 		file := p.file
-		if len(parts) > 1 && len(file.Chapters) == 0 {
+		if len(audioFiles) > 1 && len(file.Chapters) == 0 {
 			stem := strings.TrimSuffix(filepath.Base(file.Path), filepath.Ext(file.Path))
 			file.Chapters = []ChapterInfo{{
 				Index:        i,
@@ -282,6 +285,18 @@ func parseAudiobookParts(ctx context.Context, ffprobePath, folderPath string, au
 		book.Files[i] = file
 	}
 	return book, nil
+}
+
+// noReadableAudiobookPartError reports a book folder in which ffprobe
+// rejected every audio file. paths lists those files so the caller can
+// retire rows indexed for them before they became unreadable.
+type noReadableAudiobookPartError struct {
+	folder string
+	paths  []string
+}
+
+func (e *noReadableAudiobookPartError) Error() string {
+	return fmt.Sprintf("audiobook folder %s: ffprobe rejected every audio file (%s)", e.folder, strings.Join(e.paths, ", "))
 }
 
 // populateFromTags fills the audiobook's header fields from the ffprobe

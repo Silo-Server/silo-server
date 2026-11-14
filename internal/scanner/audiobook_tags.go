@@ -9,13 +9,22 @@ import (
 	"time"
 )
 
+// maxAudiobookCreditsPerRole and maxAudiobookCreditNameLen bound what one
+// author or narrator tag can write: each credit is a person lookup or insert,
+// and a tag is file content anyone with write access to a library controls.
+const (
+	maxAudiobookCreditsPerRole = 20
+	maxAudiobookCreditNameLen  = 200
+)
+
 // splitAudiobookCredits splits an author or narrator tag that names several
 // people into one name per person. Taggers join names with ";", "&", " and ",
 // or ",". Commas and conjunctions also occur inside one name ("King,
 // Stephen", "Martin Luther King, Jr.", "Simon & Schuster"), so those split
 // only when every piece has at least two words, as a full personal name
 // does. Semicolons always split. Names are deduplicated case-insensitively,
-// keeping the first spelling.
+// keeping the first spelling, and capped at maxAudiobookCreditsPerRole names
+// of at most maxAudiobookCreditNameLen bytes.
 func splitAudiobookCredits(raw string) []string {
 	var out []string
 	seen := make(map[string]bool)
@@ -24,11 +33,14 @@ func splitAudiobookCredits(raw string) []string {
 			for _, name := range splitCreditPieces(joined, audiobookCreditCommaRE) {
 				name = collapseSpacesRE.ReplaceAllString(strings.TrimSpace(name), " ")
 				key := strings.ToLower(name)
-				if name == "" || seen[key] {
+				if name == "" || len(name) > maxAudiobookCreditNameLen || seen[key] {
 					continue
 				}
 				seen[key] = true
 				out = append(out, name)
+				if len(out) == maxAudiobookCreditsPerRole {
+					return out
+				}
 			}
 		}
 	}
