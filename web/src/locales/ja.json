@@ -91493,6 +91493,18 @@
       "value": "字幕をアップロードしました"
     }
   ],
+  "web.common.toast.watchProviders.authDeclined": [
+    {
+      "type": 0,
+      "value": "プロバイダーのサイトで接続が拒否されました。もう一度お試しいただくには「接続」を選択してください。"
+    }
+  ],
+  "web.common.toast.watchProviders.authNotApproved": [
+    {
+      "type": 0,
+      "value": "先にプロバイダーのサイトでコードを承認してから、もう一度お試しください。"
+    }
+  ],
   "web.common.toast.watchProviders.connectFailed": [
     {
       "type": 0,
