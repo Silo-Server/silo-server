@@ -728,6 +728,16 @@ func (c *SubtitleCache) ServeExtractWithResult(w http.ResponseWriter, r *http.Re
 	w.Header().Set("Cache-Control", "no-store")
 	counter := &subtitleCountingWriter{w: w}
 	var writer io.Writer = counter
+	// A windowed text response waits for its first cue before committing a
+	// status. FFmpeg writes its muxer header before the first packet, so a
+	// source read that fails afterwards would otherwise leave a browser with a
+	// successful 200 whose body is only "WEBVTT\n". The handler can answer
+	// retryably only while nothing has been written.
+	var gate *subtitleCueGate
+	if format == SubtitleFormatVTTV3 || format == subtitleFormatASS {
+		gate = newSubtitleCueGate(counter, format)
+		writer = gate
+	}
 	var capture *subtitleWindowCapture
 	if windowLeader {
 		// Keep the successful slice as the last-good copy. The capture bound is
@@ -754,10 +764,17 @@ func (c *SubtitleCache) ServeExtractWithResult(w http.ResponseWriter, r *http.Re
 	warmOverlap := c.warmInFlight(opts, format)
 	overlapStart := time.Now()
 	recordSubtitleServeSource(subtitleServeSourceExtract)
-	err := c.runExtract(extractCtx, opts, extract, counter)
+	heldBytes := func() int { return 0 }
+	if gate != nil {
+		heldBytes = gate.heldBytes
+	}
+	err := c.runExtract(extractCtx, opts, extract, counter, heldBytes)
 	if warmOverlap {
 		recordSubtitleWarmPageOverlap(format, time.Since(overlapStart))
 	}
+	// A clean window with no dialog is a complete empty document; a failed
+	// extract drops the held header so nothing commits a 200 for it.
+	err = gate.finish(err)
 	if err != nil {
 		if r.Context().Err() == nil && IsSubtitleUpstreamError(err) {
 			c.noteExtractionFailure(opts, format)
@@ -782,12 +799,19 @@ func (c *SubtitleCache) ServeExtractWithResult(w http.ResponseWriter, r *http.Re
 // upstream 5xx failed before any bytes reached the client. Retrying after bytes
 // have been written would duplicate or corrupt the response, and a non-upstream
 // failure is not expected to recover within one request.
-func (c *SubtitleCache) runExtract(ctx context.Context, opts StreamExtractOpts, extract SUPExtractFunc, counter *subtitleCountingWriter) error {
+//
+// heldBytes counts output buffered by a response gate that has not reached the
+// client yet. A failed attempt that filled that buffer must not be retried:
+// the next attempt would append a second header to the same response.
+func (c *SubtitleCache) runExtract(ctx context.Context, opts StreamExtractOpts, extract SUPExtractFunc, counter *subtitleCountingWriter, heldBytes func() int) error {
+	if heldBytes == nil {
+		heldBytes = func() int { return 0 }
+	}
 	delays := c.retryDelays()
 	var err error
 	for attempt := 0; ; attempt++ {
 		err = extract(ctx, opts)
-		if err == nil || ctx.Err() != nil || counter.bytes > 0 ||
+		if err == nil || ctx.Err() != nil || counter.bytes > 0 || heldBytes() > 0 ||
 			!IsSubtitleUpstreamError(err) || attempt >= len(delays) {
 			return err
 		}
@@ -1938,7 +1962,7 @@ func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request,
 	warmOverlap := c.warmInFlight(sourceOpts, subtitleFormatSUP)
 	overlapStart := time.Now()
 	recordSubtitleServeSource(subtitleServePGSSupSource)
-	err := c.runExtract(extractCtx, opts, extract, counter)
+	err := c.runExtract(extractCtx, opts, extract, counter, nil)
 	if warmOverlap {
 		recordSubtitleWarmPageOverlap(subtitleFormatSUP, time.Since(overlapStart))
 	}

@@ -2275,11 +2275,14 @@ The implicit window starts on a fixed grid derived from its own length, not at
 the live playhead. A page anchored a few seconds behind the playhead is never
 reused: the next request's range runs past the page the previous one produced,
 no stored page contains it, and the server demuxes the source again for every
-request. Text pages are 600 s. A bitmap (PGS) page is 120 s, the page the web
-player already requests, because a bitmap page can only be produced by demuxing
-the container: on a 50 GB / 2h52m release a 600 s page reads about 2.9 GB and
-measured 65-105 s per request, longer than the fetch that asked for it, so it
-was abandoned and never stored.
+request. Text and bitmap pages are both 120 s, the page the web player already
+requests, because a page can only be produced by demuxing the container up to
+its end: a 600 s text page measured 41-63 s per extract on a virtual source for
+a few kilobytes of output, and on a 50 GB / 2h52m release a 600 s bitmap page
+reads about 2.9 GB and measured 65-105 s per request, longer than the fetch that
+asked for it, so it was abandoned and never stored. The shorter text page also
+keeps an ASS retry inside a client fetch deadline instead of re-reading ten
+minutes of container for four kilobytes of script.
 
 The same grid is what a windowed request and the window prefetch use, so the page
 one stores is the page the client asks for next. Per class: a bitmap client asks

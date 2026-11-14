@@ -1076,11 +1076,11 @@ func TestVirtualImplicitWindowAppliesToASS(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("ASS whole-track fetch = %d %q", rec.Code, rec.Body.String())
 	}
-	if got := rec.Header().Get(playback.SubtitleCoverageHeader); got != "0.000-600.000" {
-		t.Fatalf("ASS windowed coverage header = %q, want 0.000-600.000", got)
+	if got := rec.Header().Get(playback.SubtitleCoverageHeader); got != "0.000-120.000" {
+		t.Fatalf("ASS windowed coverage header = %q, want 0.000-120.000", got)
 	}
 	windowLine := windowedFFmpegArgs(t, argsLog)
-	for _, want := range []string{"-ss 0.000", "-to 600.000", "-copyts", "-c:s copy", "-f ass pipe:1"} {
+	for _, want := range []string{"-ss 0.000", "-to 120.000", "-copyts", "-c:s copy", "-f ass pipe:1"} {
 		if !strings.Contains(windowLine, want) {
 			t.Fatalf("implicit ASS window args %q missing %q", windowLine, want)
 		}
@@ -1510,8 +1510,8 @@ func TestVirtualWholeTrackTextFetchServesImplicitWindowThenWarms(t *testing.T) {
 	}
 	// A whole-track request served only a window must say so, or the client
 	// cannot know it needs to request subsequent windows.
-	if got := rec.Header().Get(playback.SubtitleCoverageHeader); got != "0.000-600.000" {
-		t.Fatalf("windowed coverage header = %q, want 0.000-600.000", got)
+	if got := rec.Header().Get(playback.SubtitleCoverageHeader); got != "0.000-120.000" {
+		t.Fatalf("windowed coverage header = %q, want 0.000-120.000", got)
 	}
 	if got := rec.Header().Get(playback.SubtitleWindowedHeader); got != "true" {
 		t.Fatalf("windowed marker = %q, want true", got)
@@ -1542,8 +1542,8 @@ func TestVirtualWholeTrackTextFetchServesImplicitWindowThenWarms(t *testing.T) {
 			windowLine = line
 		}
 	}
-	if !strings.Contains(windowLine, "-ss 0.000") || !strings.Contains(windowLine, "-to 600.000") {
-		t.Fatalf("implicit window args = %q, want -ss 0.000 -to 600.000", windowLine)
+	if !strings.Contains(windowLine, "-ss 0.000") || !strings.Contains(windowLine, "-to 120.000") {
+		t.Fatalf("implicit window args = %q, want -ss 0.000 -to 120.000", windowLine)
 	}
 
 	// Warm regression: once the detached warm has committed, a second
@@ -1695,8 +1695,8 @@ func TestVirtualPositionWithoutDurationClampsToImplicitWindow(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "WEBVTT") {
 		t.Fatalf("position-only fetch = %d %q", rec.Code, rec.Body.String())
 	}
-	if got := rec.Header().Get(playback.SubtitleCoverageHeader); got != "0.000-600.000" {
-		t.Fatalf("position-only coverage header = %q, want 0.000-600.000", got)
+	if got := rec.Header().Get(playback.SubtitleCoverageHeader); got != "0.000-120.000" {
+		t.Fatalf("position-only coverage header = %q, want 0.000-120.000", got)
 	}
 	if got := rec.Header().Get(playback.SubtitleWindowedHeader); got != "true" {
 		t.Fatalf("position-only windowed marker = %q, want true", got)
@@ -1704,7 +1704,7 @@ func TestVirtualPositionWithoutDurationClampsToImplicitWindow(t *testing.T) {
 	// The advertised range must match the ffmpeg command: the open `-ss 0`
 	// without a `-to` was the unbounded extract this finding is about.
 	windowLine := windowedFFmpegArgs(t, argsLog)
-	for _, want := range []string{"-ss 0.000", "-to 600.000"} {
+	for _, want := range []string{"-ss 0.000", "-to 120.000"} {
 		if !strings.Contains(windowLine, want) {
 			t.Fatalf("position-only window args %q missing %q", windowLine, want)
 		}
@@ -1803,13 +1803,13 @@ func TestSubtitleUpstreamFailureAnswersRetryableAndBacksOff(t *testing.T) {
 	}
 }
 
-// The implicit window keeps the legacy 600 s bound for text whole-track clients
-// without a windowing contract, so a native client that does not refetch does
-// not lose subtitles after two minutes. The page starts on the span-aligned
-// grid so every retry inside it asks for the same window.
+// The implicit window is the same 120 s page the web player requests, so a
+// text whole-track client without a windowing contract is still bounded to a
+// read that finishes inside a fetch deadline. The page starts on the
+// span-aligned grid so every retry inside it asks for the same window.
 func TestVirtualSubtitleImplicitWindowDurationAndResumeStart(t *testing.T) {
-	if virtualSubtitleImplicitWindowSeconds != 600 {
-		t.Fatalf("implicit window = %vs, want 600s", virtualSubtitleImplicitWindowSeconds)
+	if virtualSubtitleImplicitWindowSeconds != 120 {
+		t.Fatalf("implicit window = %vs, want 120s", virtualSubtitleImplicitWindowSeconds)
 	}
 	handler := &StreamHandler{}
 	opts := playback.StreamExtractOpts{TrackIndex: 0, SourceCodec: "subrip"}
@@ -1820,8 +1820,8 @@ func TestVirtualSubtitleImplicitWindowDurationAndResumeStart(t *testing.T) {
 	if opts.SeekSeconds != 3600 {
 		t.Fatalf("implicit start = %v, want the containing page start (3600)", opts.SeekSeconds)
 	}
-	if opts.DurationSeconds != 600 {
-		t.Fatalf("implicit duration = %v, want 600", opts.DurationSeconds)
+	if opts.DurationSeconds != 120 {
+		t.Fatalf("implicit duration = %v, want 120", opts.DurationSeconds)
 	}
 }
 
@@ -2751,4 +2751,142 @@ func TestVirtualSubtitleWarmStaysFullTrackAtStart(t *testing.T) {
 		t.Fatalf("from-start warm ffmpeg invocations = %d window, %d full-track; want 0/1", window, warm)
 	}
 	waitForCommittedTextEntry(t, handler.SubtitleCache, identity, 0, "subrip")
+}
+
+// A windowed text extract that fails after its muxer wrote the WebVTT header
+// must not commit a 200 whose body is only "WEBVTT\n". FFmpeg writes the header
+// before it reaches the window's first packet; a failed source read after that
+// used to look like a successful empty subtitle document to the browser, which
+// is why the measured SRT path showed a 200 with 7 bytes before the next
+// request got a real window.
+func TestVirtualWindowHeaderOnlyFailureAnswersRetryable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test helper is unix-only")
+	}
+	dir := t.TempDir()
+	handler, session, file, _ := newVirtualSubtitleWindowFixture(t, dir,
+		"#!/bin/sh\n"+
+			"printf 'WEBVTT\\n'\n"+
+			"printf 'Server returned 500 Server Error reply\\n' >&2\n"+
+			"exit 1\n")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/subtitle?position=600&duration=120", nil)
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				t.Fatalf("header-only failure committed a response instead of answering retryably: %v", recovered)
+			}
+		}()
+		handler.streamEmbeddedSubtitle(rec, req, file, 0, session, false, "vtt")
+	}()
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("header-only failure = %d %q, want a retryable 503", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "WEBVTT") {
+		t.Fatalf("header-only failure body = %q, want no subtitle document", rec.Body.String())
+	}
+	if got := rec.Header().Get("Retry-After"); got == "" {
+		t.Fatal("retryable header-only failure carried no Retry-After")
+	}
+}
+
+// A committed .sup artifact pins the release it was extracted from. A seek that
+// re-requests the whole track must serve that artifact even when the live
+// layout probe cannot reach the provider; re-probing first is what turned a
+// completed artifact into a 503 after a seeking client came back.
+func TestVirtualPGSCommittedArtifactSkipsDriftProbe(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test helper is unix-only")
+	}
+	dir := t.TempDir()
+	argsLog := filepath.Join(dir, "ffmpeg.args")
+	probeLog := filepath.Join(dir, "ffprobe.log")
+	handler, session, file, virtualURI := newVirtualSubtitleWindowFixture(t, dir,
+		pgsWindowStubScript(argsLog))
+	file.SubtitleTracks = []models.SubtitleTrack{{Index: 0, Codec: "hdmv_pgs_subtitle"}}
+	session.VirtualSubtitleTracks = file.SubtitleTracks
+
+	identity := virtualSubtitleCacheIdentity(file, virtualURI, 0)
+	done := handler.SubtitleCache.WarmTrackInBackground(playback.StreamExtractOpts{
+		InputPath:     "unused",
+		CacheIdentity: identity,
+		TrackIndex:    0,
+		SourceCodec:   "hdmv_pgs_subtitle",
+		FFmpegPath:    filepath.Join(dir, "ffmpeg"),
+	}, playback.StreamExtractSubtitle, "")
+	<-done
+	if !handler.SubtitleCache.HasCommittedEntry("unused", identity, 0, "hdmv_pgs_subtitle", "") {
+		t.Fatal("pre-warm did not commit the .sup artifact")
+	}
+	// A provider that cannot answer ffprobe is the measured post-seek case: the
+	// artifact is on disk, but the probe used to run first and fail closed.
+	writeExecutableScript(t, filepath.Join(dir, "ffprobe"),
+		"#!/bin/sh\necho probe >> '"+probeLog+"'\nexit 1\n")
+	if err := os.Remove(argsLog); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/subtitle", nil)
+	handler.streamEmbeddedSubtitle(rec, req, file, 0, session, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("seek re-request = %d %q, want the committed .sup artifact", rec.Code, rec.Body.String())
+	}
+	if rec.Body.Len() == 0 {
+		t.Fatal("committed .sup artifact served an empty body")
+	}
+	if got := countLogLines(t, probeLog); got != 0 {
+		t.Fatalf("drift probe ran %d times despite a committed .sup artifact, want 0", got)
+	}
+	if _, err := os.Stat(argsLog); !os.IsNotExist(err) {
+		t.Fatalf("ffmpeg ran for a committed .sup cache hit: %v", err)
+	}
+}
+
+// A probe failure is answered retryably, but the retry can only succeed if the
+// artifact it reads exists. The handler therefore starts a detached fill whose
+// own probe gets another chance; production showed repeated probe-timeout 503s
+// because nothing was ever warmed between them.
+func TestVirtualProbeFailureWarmsSoRetryIsServed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test helper is unix-only")
+	}
+	dir := t.TempDir()
+	argsLog := filepath.Join(dir, "ffmpeg.args")
+	probeLog := filepath.Join(dir, "ffprobe.log")
+	marker := filepath.Join(dir, "first-probe")
+	handler, session, file, virtualURI := newVirtualSubtitleWindowFixture(t, dir,
+		"#!/bin/sh\nprintf '%s\\n' \"$*\" >> '"+argsLog+"'\ncat <<'VTT'\n"+warmSubtitleVTT+"VTT\n")
+	// The first probe fails; every later probe reports the fixture's layout, so
+	// the detached warm can validate its own registration and commit.
+	writeExecutableScript(t, filepath.Join(dir, "ffprobe"),
+		"#!/bin/sh\necho probe >> '"+probeLog+"'\n"+
+			"if [ ! -f '"+marker+"' ]; then : > '"+marker+"'; exit 1; fi\n"+
+			"printf '%s' '{\"streams\":[{\"index\":0,\"codec_name\":\"subrip\",\"codec_type\":\"subtitle\",\"tags\":{}}]}'\n")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/subtitle?position=600&duration=120", nil)
+	handler.streamEmbeddedSubtitle(rec, req, file, 0, session, true)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("failed probe = %d %q, want a retryable 503", rec.Code, rec.Body.String())
+	}
+
+	identity := virtualSubtitleCacheIdentity(file, virtualURI, 0)
+	waitForCommittedTextEntry(t, handler.SubtitleCache, identity, 0, "subrip")
+	probesAfterWarm := countLogLines(t, probeLog)
+	if probesAfterWarm < 2 {
+		t.Fatalf("probes after the warm = %d, want the failed serve probe plus the warm's probe", probesAfterWarm)
+	}
+
+	retry := httptest.NewRecorder()
+	retryReq := httptest.NewRequest(http.MethodGet, "/subtitle?position=600&duration=120", nil)
+	handler.streamEmbeddedSubtitle(retry, retryReq, file, 0, session, true)
+	if retry.Code != http.StatusOK || !strings.Contains(retry.Body.String(), "WEBVTT") {
+		t.Fatalf("retry after the warm = %d %q, want the committed artifact", retry.Code, retry.Body.String())
+	}
+	if got := countLogLines(t, probeLog); got != probesAfterWarm {
+		t.Fatalf("retry probed the source again: probes %d -> %d, want a committed-artifact hit", probesAfterWarm, got)
+	}
 }

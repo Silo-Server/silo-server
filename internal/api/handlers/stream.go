@@ -3967,6 +3967,20 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 				"file_id", file.ID,
 				"plan_ordinal", planOrdinal,
 				"track", opts.TrackIndex)
+		} else if playback.IsPGS(opts.SourceCodec) && h.SubtitleCache.HasCommittedEntry(
+			opts.InputPath, opts.CacheIdentity, opts.TrackIndex, opts.SourceCodec, opts.TargetFormat,
+		) {
+			// A committed .sup artifact pins the release the same way a
+			// committed text artifact does: it was extracted from this exact
+			// identity (source candidate, ordinal, inventory token, generation
+			// bucket). Probing the live layout first cannot improve bytes the
+			// server already holds, and on a slow provider it can fail closed
+			// with a retryable 503 even though the seek's re-request could be
+			// answered from disk in milliseconds. A seek must not invalidate a
+			// completed artifact.
+			slog.DebugContext(r.Context(), "virtual subtitle layout probe skipped: committed bitmap artifact", "component", "api",
+				"file_id", file.ID,
+				"track", opts.TrackIndex)
 		} else {
 			// The key is captured before the probe: a drift remap changes
 			// opts.TrackIndex, but later requests still arrive with the plan
@@ -3988,6 +4002,14 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 				// error that a same-ordinal different-language rotation would
 				// never raise. A retryable error lets the client fall back to
 				// subtitles-off, which the server already treats as legitimate.
+				//
+				// Start the detached fill before answering: the retry's only
+				// path to success is a committed artifact (it skips the probe),
+				// and leaving the client to repeat the probe against the same
+				// slow provider produced the measured run of 503s.
+				if r.Method != http.MethodHead && !isClientCancellation(r.Context(), probeErr) {
+					h.warmVirtualSubtitleAfterProbeFailure(file, track, session, opts, nil, virtualActive, middleware.GetReqID(r.Context()))
+				}
 				writeSubtitleProbeFailure(w, r.Context(), probeErr)
 				return
 			}
@@ -4142,7 +4164,11 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 			// A map error already proved the plan ordinal names no live stream;
 			// if the re-probe then cannot establish the layout either, there is
 			// no verified ordinal to retry with. Fail closed rather than re-spawn
-			// the same unverified extraction.
+			// the same unverified extraction, and start the detached fill so the
+			// next retry can read a committed artifact instead of re-probing.
+			if r.Method != http.MethodHead && !isClientCancellation(r.Context(), probeErr) {
+				h.warmVirtualSubtitleAfterProbeFailure(file, track, session, opts, inheritedLayout, virtualActive, middleware.GetReqID(r.Context()))
+			}
 			writeSubtitleProbeFailure(w, r.Context(), probeErr)
 			return
 		}
@@ -4517,6 +4543,24 @@ func subtitleWarmHintMatchesPlanTrack(requested models.SubtitleTrack, planTracks
 }
 
 func (h *StreamHandler) warmVirtualSubtitleAfterWindowMiss(file *models.MediaFile, track models.SubtitleTrack, session *playback.Session, opts playback.StreamExtractOpts, inherited *virtualSubtitleLayoutSeed, virtualActive bool, requestID string) {
+	h.warmVirtualSubtitle(file, track, session, opts, inherited, virtualActive, requestID, false, false)
+}
+
+// warmVirtualSubtitleAfterProbeFailure starts the detached fill when the
+// request's live-layout probe could not establish the source. The handler has
+// already decided to answer retryably; without a fill, every retry repeats the
+// same probe against the same slow provider and fails again (production showed
+// 18 probe-timeout 503s before one request finally succeeded). The warm opens
+// its own relay registration, probes with the warm budget, and commits the
+// artifact under the serve identity, so the next retry is a cache hit instead
+// of another probe. force lets it run for a whole-track request (no explicit
+// window, which normally fills inline) and for a bitmap track while playback
+// runs, because those are exactly the cases no inline fill produced.
+func (h *StreamHandler) warmVirtualSubtitleAfterProbeFailure(file *models.MediaFile, track models.SubtitleTrack, session *playback.Session, opts playback.StreamExtractOpts, inherited *virtualSubtitleLayoutSeed, virtualActive bool, requestID string) {
+	h.warmVirtualSubtitle(file, track, session, opts, inherited, virtualActive, requestID, false, true)
+}
+
+func (h *StreamHandler) warmVirtualSubtitle(file *models.MediaFile, track models.SubtitleTrack, session *playback.Session, opts playback.StreamExtractOpts, inherited *virtualSubtitleLayoutSeed, virtualActive bool, requestID string, _ bool, force bool) {
 	if h == nil || h.SubtitleCache == nil || file == nil || session == nil || !virtualActive {
 		return
 	}
@@ -4555,8 +4599,10 @@ func (h *StreamHandler) warmVirtualSubtitleAfterWindowMiss(file *models.MediaFil
 	// repeat is a fresh full remote demux. The warm's mandatory drift probe and
 	// progressive .sup handling are unchanged — only the populate step is new.
 	// Full-track requests already fill the cache inline through ServeExtract's
-	// tee; only explicit windows need a detached warm.
-	if opts.SeekSeconds == 0 && opts.DurationSeconds == 0 {
+	// tee; only explicit windows need a detached warm. force is the exception:
+	// a failed live-layout probe produced no inline fill at all, so the retry
+	// needs the artifact even for a param-less whole-track request.
+	if !force && opts.SeekSeconds == 0 && opts.DurationSeconds == 0 {
 		return
 	}
 	// A committed entry means this request served its window from the cached
@@ -4597,8 +4643,9 @@ func (h *StreamHandler) warmVirtualSubtitleAfterWindowMiss(file *models.MediaFil
 		// artifact is small and the next fetch reads it). A bitmap track falls
 		// through only when the viewer is paused: a whole .sup is tens of
 		// megabytes read from the entire container, and it is never the page
-		// playback needs next.
-		if !live.IsPaused && playback.NeedsBurnIn(opts.SourceCodec) {
+		// playback needs next. A probe failure is the exception: there is no
+		// page extract to wait for, so the artifact is the retry's only path.
+		if !force && !live.IsPaused && playback.NeedsBurnIn(opts.SourceCodec) {
 			slog.DebugContext(context.Background(), "virtual subtitle warm skipped: bitmap full-track warm stays paused-only",
 				"component", "api", "session", session.ID, "file_id", file.ID, "codec", opts.SourceCodec)
 			return
@@ -4804,15 +4851,18 @@ func (h *StreamHandler) virtualSubtitleWarmExtractor(file *models.MediaFile, tra
 
 // Defaults for the implicit first window served to a cold whole-track subtitle
 // request against a large/unknown virtual/remote source. The web player asks
-// for its own 120 s windows; this implicit bound stays at 600 s for text
-// clients that request a whole track and have no windowing contract, so a
-// native client that does not refetch cannot lose subtitles after two minutes.
-// The window starts on a span-aligned page that contains the session position,
-// so a retry from the same page asks for the window the previous request
-// produced instead of a range shifted a few seconds later (see
-// implicitVirtualWindowStart).
+// for its own 120 s windows; this implicit bound is the same page for text
+// clients that request a whole track and have no windowing contract. A 600 s
+// text page measured 41-63 s per extract on a virtual source because ffmpeg
+// demuxes the container up to the window end and discards it: the output is a
+// few kilobytes, but the read is hundreds of megabytes. 120 s matches the
+// window length the web player already requests, so the implicit range is one
+// the client can adopt without learning a new cadence. The window starts on a
+// span-aligned page that contains the session position, so a retry from the
+// same page asks for the window the previous request produced instead of a
+// range shifted a few seconds later (see implicitVirtualWindowStart).
 const (
-	virtualSubtitleImplicitWindowSeconds = 600.0
+	virtualSubtitleImplicitWindowSeconds = 120.0
 	// virtualSubtitleBitmapImplicitWindowSeconds is the implicit page for a
 	// bitmap (PGS) track. A bitmap page can only be produced by demuxing the
 	// container, so its cost scales with the page length: on a 50 GB / 2h52m
