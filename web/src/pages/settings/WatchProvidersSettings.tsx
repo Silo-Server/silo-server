@@ -593,19 +593,23 @@ function WatchProviderCard({
     }
   };
 
-  const handlePoll = () => {
-    if (!authSession) return;
-    pollAuth.mutate(authSession.id, {
-      onSuccess: () => {
-        setAuthSession(null);
-        setCodeCopied(false);
-      },
-    });
-  };
-
   const handleCancelAuth = () => {
     setAuthSession(null);
     setCodeCopied(false);
+  };
+
+  const handlePoll = () => {
+    if (!authSession) return;
+    pollAuth.mutate(authSession.id, {
+      onSuccess: handleCancelAuth,
+      onError: (err) => {
+        // An expired, used, declined, or unknown code can never finish, so
+        // drop it and offer Connect again. A code not approved yet stays.
+        if (err instanceof V2ProblemError && [403, 404, 410].includes(err.status)) {
+          handleCancelAuth();
+        }
+      },
+    });
   };
 
   const handleStartConnect = () => {
