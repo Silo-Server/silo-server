@@ -2,63 +2,111 @@ package jellycompat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/ratingsources"
 )
 
-type criticRatingSettings map[string]string
-
-func (s criticRatingSettings) Get(_ context.Context, key string) (string, error) {
-	return s[key], nil
+// criticRatingContent serves one rated movie or series through the
+// production converters, so the test covers the rating copy in each.
+type criticRatingContent struct {
+	stubContentService
+	kind string
 }
 
-// criticRatingPolicy is a rating-source policy whose metadata plugins declare
-// the Rotten Tomatoes critic score and whose administrator shows extra.
-func criticRatingPolicy(extra string) *ratingsources.Policy {
-	declared := func(context.Context) ([]ratingsources.DeclaredSource, error) {
-		return []ratingsources.DeclaredSource{{RatingSourceDefinition: models.RatingSourceDefinition{Source: models.RatingSourceRTCritic, Name: "RT", Scale: 100, Percent: true}}}, nil
-	}
-	return ratingsources.NewPolicy(criticRatingSettings{config.CatalogExtraRatingSourcesSettingKey: extra}, declared)
+func (s *criticRatingContent) BrowseItems(context.Context, *Session, url.Values) (*upstreamBrowseResponse, error) {
+	item := mediaItemToListItem(&models.MediaItem{ContentID: "rated", Type: s.kind, Title: "Rated", RatingIMDB: new(7.5), RatingRTCritic: new(93)})
+	return &upstreamBrowseResponse{Items: []upstreamListItem{item}, Total: 1}, nil
+}
+
+func (s *criticRatingContent) GetItemDetail(context.Context, *Session, string, *int) (*upstreamItemDetail, error) {
+	detail := itemDetailToUpstream(&catalog.ItemDetail{ContentID: "rated", Type: s.kind, Title: "Rated", RatingIMDB: new(7.5), RatingRTCritic: new(93)})
+	return &detail, nil
+}
+
+func (s *criticRatingContent) ListSeasons(context.Context, *Session, string, *int) ([]upstreamSeason, error) {
+	return []upstreamSeason{}, nil
 }
 
 // Jellyfin clients render CriticRating as the Rotten Tomatoes percentage, so
-// it carries the stored rt_critic score on list and detail items, but only
-// when the administrator shows that source, as native title pages do.
+// list and detail responses carry the stored rt_critic score, but only while
+// a metadata plugin declares that source and the administrator shows it.
 func TestCriticRatingFollowsShownRatingSources(t *testing.T) {
-	imdb, critic := 7.5, 93
-	list := upstreamListItem{ContentID: "movie-1", Type: "movie", Title: "Movie", RatingIMDB: &imdb, RatingRTCritic: &critic}
-	detail := upstreamItemDetail{ContentID: "movie-1", Type: "movie", Title: "Movie", RatingIMDB: &imdb, RatingRTCritic: &critic}
+	for _, kind := range []string{"movie", "series"} {
+		for _, tc := range []struct {
+			name            string
+			shown, declared bool
+			want            any
+		}{
+			{name: "shown", shown: true, declared: true, want: 93.0},
+			{name: "not turned on", declared: true},
+			{name: "not declared", shown: true},
+		} {
+			t.Run(kind+"/"+tc.name, func(t *testing.T) {
+				extra := ""
+				if tc.shown {
+					extra = models.RatingSourceRTCritic
+				}
+				policy := ratingsources.NewPolicy(stubSettingsReader{values: map[string]string{config.CatalogExtraRatingSourcesSettingKey: extra}},
+					func(context.Context) ([]ratingsources.DeclaredSource, error) {
+						if !tc.declared {
+							return nil, nil
+						}
+						return []ratingsources.DeclaredSource{{RatingSourceDefinition: models.RatingSourceDefinition{Source: models.RatingSourceRTCritic, Name: "RT", Scale: 100, Percent: true}}}, nil
+					})
+				sessions := NewSessionStore(time.Hour, time.Now)
+				if err := sessions.Put(Session{Token: "critic", StreamAppUserID: 1, ProfileID: "p1", PseudoUserID: PseudoUserID(1, "p1")}); err != nil {
+					t.Fatal(err)
+				}
+				codec := NewResourceIDCodec()
+				router := NewRouter(Dependencies{Config: &config.Config{}, IDCodec: codec, SessionStore: sessions, ContentService: &criticRatingContent{kind: kind}, UserDataService: &mockUserDataService{}, RatingSources: policy})
 
-	for _, tc := range []struct {
-		name    string
-		ratings *ratingsources.Policy
-		want    *float64
-	}{
-		{name: "shown", ratings: criticRatingPolicy(models.RatingSourceRTCritic), want: new(93.0)},
-		{name: "not turned on", ratings: criticRatingPolicy(""), want: nil},
-		{name: "no policy", ratings: nil, want: nil},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			m := newMapper(NewResourceIDCodec(), &config.Config{})
-			m.ratings = newShownRatings(tc.ratings)
-			for name, dto := range map[string]baseItemDTO{
-				"list":   m.itemFromList(list, false, nil, nil),
-				"detail": m.itemFromDetail(detail, false, nil),
-			} {
-				if !equalFloatPtr(dto.CriticRating, tc.want) {
-					t.Errorf("%s CriticRating = %v, want %v", name, deref(dto.CriticRating), deref(tc.want))
+				id := codec.EncodeStringID(EncodedIDItem, "rated")
+				for _, path := range []string{
+					"/Items?Recursive=true&IncludeItemTypes=" + kind,
+					"/Items/Latest",
+					"/Items/" + id,
+					"/Users/" + PseudoUserID(1, "p1").String() + "/Items/" + id,
+				} {
+					req := httptest.NewRequest(http.MethodGet, path, nil)
+					req.Header.Set("X-Emby-Token", "critic")
+					rec := httptest.NewRecorder()
+					router.ServeHTTP(rec, req)
+					if rec.Code != http.StatusOK {
+						t.Fatalf("%s: status %d: %s", path, rec.Code, rec.Body.String())
+					}
+					// Lists answer {"Items": [...]}, Latest a bare array, and
+					// detail the item itself.
+					var raw any
+					if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+						t.Fatalf("%s: %v", path, err)
+					}
+					if items, ok := raw.([]any); ok && len(items) > 0 {
+						raw = items[0]
+					}
+					item, _ := raw.(map[string]any)
+					if items, ok := item["Items"].([]any); ok && len(items) > 0 {
+						item, _ = items[0].(map[string]any)
+					}
+					if got := item["CriticRating"]; got != tc.want {
+						t.Errorf("%s CriticRating = %v, want %v", path, got, tc.want)
+					}
+					if got := item["CommunityRating"]; got != 7.5 {
+						t.Errorf("%s CommunityRating = %v, want the IMDb rating 7.5", path, got)
+					}
 				}
-				if dto.CommunityRating == nil || *dto.CommunityRating != imdb {
-					t.Errorf("%s CommunityRating = %v, want the IMDb rating %v", name, deref(dto.CommunityRating), imdb)
-				}
-			}
-		})
+			})
+		}
 	}
 }
 
@@ -93,18 +141,4 @@ func TestCriticRatingReadsFailingPolicyOncePerList(t *testing.T) {
 	if got := settings.reads.Load(); got != 1 {
 		t.Fatalf("mapping 20 items read the settings %d times, want 1", got)
 	}
-}
-
-func equalFloatPtr(a, b *float64) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return *a == *b
-}
-
-func deref(v *float64) any {
-	if v == nil {
-		return nil
-	}
-	return *v
 }
