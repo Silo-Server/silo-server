@@ -115,9 +115,9 @@ func (r *PushDeviceRepository) ApplyApplePushAndFinalize(ctx context.Context, cm
 	if err != nil {
 		return result, err
 	}
-	var storedKey, storedIntent string
+	var storedKey, storedIntent, storedProfile string
 	var storedUser int
-	err = tx.QueryRow(ctx, `SELECT installation_key_hash,intent_hash,generation,registration_id,server_device_id,push_mode,user_id FROM apple_push_installations WHERE device_id=$1`, registration.DeviceID).Scan(&storedKey, &storedIntent, &result.Generation, &result.RegistrationID, &result.ServerDeviceID, &result.PushMode, &storedUser)
+	err = tx.QueryRow(ctx, `SELECT installation_key_hash,intent_hash,generation,registration_id,server_device_id,push_mode,user_id,profile_id FROM apple_push_installations WHERE device_id=$1`, registration.DeviceID).Scan(&storedKey, &storedIntent, &result.Generation, &result.RegistrationID, &result.ServerDeviceID, &result.PushMode, &storedUser, &storedProfile)
 	if err != nil {
 		return result, err
 	}
@@ -126,6 +126,11 @@ func (r *PushDeviceRepository) ApplyApplePushAndFinalize(ctx context.Context, cm
 			if storedUser == cmd.UserID {
 				return ApplePushReceipt{}, ErrPushInstallationKeyMismatch
 			}
+			return ApplePushReceipt{}, ErrPushInstallationProof
+		}
+		// A retirement fence on a reset installation came without a session, so
+		// its key proves nothing about the account: the reservation still holds.
+		if storedProfile == "" && storedUser != 0 && storedUser != cmd.UserID {
 			return ApplePushReceipt{}, ErrPushInstallationProof
 		}
 		if cmd.Generation < generation || (cmd.Generation == generation && intent != storedIntent) {
@@ -230,6 +235,10 @@ func validateApplePushRetirement(cmd ApplePushRetirement) error {
 // keeps the key hash and owner so a later registration with a higher generation
 // resumes through the ordinary ordered path. An installation the server never
 // ordered has no key to check; the call then answers removed and writes nothing.
+// An installation its owner reset has no key either, but a registration sent
+// before this retirement may still arrive, so the retirement's key and
+// generation are stored as a fence. The installation stays reserved for its
+// account, and the owner's next reset clears a fence planted with another key.
 func (r *PushDeviceRepository) RetireApplePush(ctx context.Context, cmd ApplePushRetirement) (ApplePushReceipt, error) {
 	if r == nil || r.pool == nil {
 		return ApplePushReceipt{}, ErrPushDeviceUnavailable
@@ -250,7 +259,19 @@ func (r *PushDeviceRepository) RetireApplePush(ctx context.Context, cmd ApplePus
 		return ApplePushReceipt{}, err
 	}
 	if generation == 0 {
-		return retired, nil
+		var reservedFor int
+		if err = tx.QueryRow(ctx, `SELECT user_id FROM apple_push_installations WHERE device_id=$1`, cmd.DeviceID).Scan(&reservedFor); err != nil {
+			return ApplePushReceipt{}, err
+		}
+		if reservedFor == 0 {
+			return retired, nil
+		}
+		// The reset already deleted the ordered rows. Rows a legacy writer added
+		// since are left alone: this call has no proof that they belong to it.
+		if _, err = tx.Exec(ctx, `UPDATE apple_push_installations SET installation_key_hash=$2,generation=$3,intent_hash=$4,registration_id='',server_device_id='',push_mode=$5 WHERE device_id=$1`, cmd.DeviceID, pushDigest([]byte(cmd.InstallationKey)), cmd.Generation, applePushRetiredIntent, PushModeOff); err != nil {
+			return ApplePushReceipt{}, err
+		}
+		return retired, tx.Commit(ctx)
 	}
 	var storedKey, storedIntent string
 	if err = tx.QueryRow(ctx, `SELECT installation_key_hash,intent_hash FROM apple_push_installations WHERE device_id=$1`, cmd.DeviceID).Scan(&storedKey, &storedIntent); err != nil {
