@@ -104,12 +104,7 @@ interface ItemRefreshJobResult {
 
 interface RefreshItemMetadataContext {
   toastID: string | number;
-  /** The URL the refresh started from; onReplaced follows only from there. */
-  startURL: string;
-}
-
-function currentURL() {
-  return window.location.pathname + window.location.search;
+  startURL: string; // onReplaced follows only while the browser is still on this URL.
 }
 
 export function useRefreshItemMetadata() {
@@ -123,7 +118,7 @@ export function useRefreshItemMetadata() {
           ? t("web.item.toast.refreshRunningComplete")
           : t("web.item.toast.refreshRunningQuick"),
       ),
-      startURL: currentURL(),
+      startURL: window.location.href,
     }),
     mutationFn: async ({ item, mode }: RefreshItemMetadataVariables) => {
       const job = adminTaskJobFromV2(
@@ -227,18 +222,10 @@ export function useRefreshItemMetadata() {
         }
       }
 
-      // A Complete Refresh can finish minutes later, and this runs even after
-      // the page that started it unmounts, so follow the item only while the
-      // admin is still on that page's URL. A mounted check would not do: when
-      // the old ID 404s, the page has already swapped to its unavailable
-      // state, and following is what recovers it.
-      if (
-        detailContentID &&
-        detailContentID !== item.content_id &&
-        onReplaced &&
-        currentURL() === context?.startURL
-      ) {
-        await onReplaced(detailContentID);
+      // Runs after unmount too. Check the URL, not mount: a page whose old ID 404s must follow.
+      const stillOnStartPage = window.location.href === context?.startURL;
+      if (detailContentID && detailContentID !== item.content_id && stillOnStartPage) {
+        await onReplaced?.(detailContentID);
       }
     },
     onError: (err, _variables, context) => {
