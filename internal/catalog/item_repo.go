@@ -2956,8 +2956,75 @@ func (r *ItemRepository) UpdateMetadataTx(ctx context.Context, tx pgx.Tx, conten
 			return fmt.Errorf("deleting cleared rating sources: %w", err)
 		}
 	}
+	for _, edited := range []struct {
+		provider string
+		value    *string
+	}{{providerTMDB, upd.TmdbID}, {providerTVDB, upd.TvdbID}, {providerIMDb, upd.ImdbID}} {
+		if edited.value == nil {
+			continue
+		}
+		if err := syncEditedProviderIDTx(ctx, tx, contentID, edited.provider, *edited.value); err != nil {
+			return err
+		}
+	}
 	if err := r.searchIndexEvents.EnqueueUpsert(ctx, tx, contentID); err != nil {
 		return fmt.Errorf("enqueueing catalog search metadata update: %w", err)
+	}
+	return nil
+}
+
+// syncEditedProviderIDTx makes the item's durable provider ID for provider
+// match an edited ID column. Lookups, AttachTMDBID and a refresh's ID seeding
+// read the durable row, so leaving it would keep the replaced or cleared ID
+// in use. Callers sync providers in preferredProviderIDOrder, the order
+// ReplaceByContentIDTx writes them in, so the two can't wait on each other.
+//
+// An ID another item of the same type already holds stays on the column only,
+// as before this sync existed; the next refresh's conflict recovery decides
+// between the two items. The NOT EXISTS check settles that without waiting on
+// the holder's row, so two edits that swap IDs don't deadlock. A holder that
+// commits after the check fails the insert on the unique key instead; the
+// savepoint confines that failure to the durable row, so the edit still saves.
+// A writer that doesn't lock the item row, such as ReplaceByContentID, can put
+// this item's row back between the delete and the insert; the insert then
+// overwrites it.
+func syncEditedProviderIDTx(ctx context.Context, tx pgx.Tx, contentID, provider, value string) error {
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM media_item_provider_ids
+		WHERE content_id = $1 AND lower(provider) = $2`, contentID, provider); err != nil {
+		return fmt.Errorf("deleting edited %s provider id: %w", provider, err)
+	}
+	if value == "" {
+		return nil
+	}
+	savepoint, err := tx.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("storing edited %s provider id: %w", provider, err)
+	}
+	defer savepoint.Rollback(ctx) //nolint:errcheck // a no-op once the savepoint is released
+	_, err = savepoint.Exec(ctx, `
+		INSERT INTO media_item_provider_ids (content_id, item_type, provider, provider_id, created_at, updated_at)
+		SELECT mi.content_id, mi.type, $2, $3, NOW(), NOW()
+		FROM media_items mi
+		WHERE mi.content_id = $1
+		  AND NOT EXISTS (
+			SELECT 1 FROM media_item_provider_ids held
+			WHERE lower(held.provider) = $2 AND held.provider_id = $3
+			  AND held.item_type = mi.type AND held.content_id <> mi.content_id
+		  )
+		ON CONFLICT (content_id, provider) DO UPDATE
+		SET item_type = EXCLUDED.item_type,
+		    provider_id = EXCLUDED.provider_id,
+		    updated_at = NOW()`, contentID, provider, value)
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok &&
+		pgErr.Code == "23505" && pgErr.ConstraintName == "media_item_provider_ids_provider_provider_id_item_type_key" {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("storing edited %s provider id: %w", provider, err)
+	}
+	if err := savepoint.Commit(ctx); err != nil {
+		return fmt.Errorf("storing edited %s provider id: %w", provider, err)
 	}
 	return nil
 }

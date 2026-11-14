@@ -181,6 +181,13 @@ func (r *ProviderIDRepository) AttachTMDBID(ctx context.Context, contentID, item
 	return nil
 }
 
+// The providers whose IDs media_items also stores in a column.
+const (
+	providerTMDB = "tmdb"
+	providerIMDb = "imdb"
+	providerTVDB = "tvdb"
+)
+
 const providerIDColumns = `content_id, item_type, provider, provider_id, created_at, updated_at`
 
 // excludedProviderIDs lists providers that ReplaceByContentID does NOT manage:
