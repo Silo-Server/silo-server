@@ -170,33 +170,46 @@ func TestAdmitSearchMatchRejectsConflictingExistingProviderID(t *testing.T) {
 	}
 }
 
-// An item with no author has only its title to vouch for a candidate, so the
-// candidate must carry the whole title (#3161). The two untagged books from the
-// issue stay unmatched; a provider's longer form of the same title, an item
-// with an author, and an item with a provider ID are admitted as before.
-func TestAdmitSearchMatchWithoutAnAuthorNeedsTheWholeTitle(t *testing.T) {
-	for _, tc := range []struct {
+// An item with no author has only its title to vouch for a candidate (#3161).
+// The untagged books from the issue, and the same partial match the other way
+// round, stay unmatched. Folder titles with an author or series prefix, and
+// every calibrated production pair, are decided as they are with an author.
+func TestAdmitSearchMatchWithoutAnAuthorNeedsTheTitleToIdentifyTheBook(t *testing.T) {
+	type admissionCase struct {
 		name      string
 		want      string
 		candidate string
-		noAuthor  bool
+		ids       map[string]string
 		existing  map[string]string
 		accept    bool
-	}{
-		{name: "a one-word prefix", want: "Raw Stream", candidate: "Raw", noAuthor: true},
-		{name: "two shared words", want: "Unknown Author Book", candidate: "The Book of Unknown Americans", noAuthor: true},
-		{name: "a contained shorter title", want: "Dune Messiah", candidate: "Dune", noAuthor: true},
-		{name: "the same title", want: "Raw Stream", candidate: "Raw Stream", noAuthor: true, accept: true},
-		{name: "the title with a series suffix", want: "Project Hail Mary", candidate: "Project Hail Mary (Unabridged)", noAuthor: true, accept: true},
-		{name: "a partial match with an author", want: "Raw Stream", candidate: "Raw", accept: true},
-		{name: "a partial match with a provider ID", want: "Raw Stream", candidate: "Raw", noAuthor: true, existing: map[string]string{"audible": "B0OTHER"}, accept: true},
-	} {
+	}
+	cases := []admissionCase{
+		{name: "a one-word prefix", want: "Raw Stream", candidate: "Raw"},
+		{name: "two shared words", want: "Unknown Author Book", candidate: "The Book of Unknown Americans"},
+		{name: "a contained shorter title", want: "Dune Messiah", candidate: "Dune"},
+		{name: "a short title inside a longer one", want: "Dune", candidate: "Dune Messiah"},
+		{name: "the same title", want: "Raw Stream", candidate: "Raw Stream", accept: true},
+		{name: "an author-prefixed folder", want: "Andy Weir - Project Hail Mary", candidate: "Project Hail Mary", accept: true},
+		{name: "an ampersand", want: "Pride & Prejudice", candidate: "Pride and Prejudice", accept: true},
+		{name: "a partial match carrying the item's ID", want: "Raw Stream", candidate: "Raw",
+			ids: map[string]string{"audible": "B0SAME"}, existing: map[string]string{"audible": "B0SAME"}, accept: true},
+		{name: "a partial match beside another provider's ID", want: "Raw Stream", candidate: "Raw",
+			existing: map[string]string{"asin": "B0OTHER"}},
+	}
+	for _, pair := range productionPairs {
+		cases = append(cases, admissionCase{name: "production: " + pair.name, want: pair.want, candidate: pair.got, accept: pair.accept})
+	}
+	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			ids := tc.ids
+			if ids == nil {
+				ids = map[string]string{"apple_books": "1417703839"}
+			}
 			got, err := AdmitSearchMatch(context.Background(), SearchMatchAdmissionRequest{
 				WantTitle:           tc.want,
-				Results:             []SearchResult{{Name: tc.candidate, ProviderIDs: map[string]string{"apple_books": "1417703839"}}},
+				Results:             []SearchResult{{Name: tc.candidate, ProviderIDs: ids}},
 				ExistingProviderIDs: tc.existing,
-				NoAuthor:            tc.noAuthor,
+				NoAuthor:            true,
 			})
 			if err != nil {
 				t.Fatalf("AdmitSearchMatch: %v", err)
