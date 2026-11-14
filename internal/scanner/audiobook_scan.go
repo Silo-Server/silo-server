@@ -1401,7 +1401,8 @@ func audiobookPeopleCreditsEqual(existing []models.ItemPerson, desired []audiobo
 
 // upsertAudiobookPeople upserts author and narrator rows into item_people,
 // using the PersonRepository to find-or-create each person by name. When the
-// parsed credits differ, ReplacePeople makes scanner-derived credits authoritative.
+// parsed credits differ, ReplacePeople makes scanner-derived credits authoritative,
+// unless an admin locked the crew credits, which hold authors and narrators.
 // Skips the DELETE+INSERT entirely when the existing credit set already
 // matches the desired set (case-insensitive on name, exact on kind).
 func (s *Scanner) upsertAudiobookPeople(ctx context.Context, contentID string, book *parsedAudiobook) error {
@@ -1422,6 +1423,15 @@ func (s *Scanner) upsertAudiobookPeople(ctx context.Context, contentID string, b
 
 	existing, err := s.itemRepo.GetPeople(ctx, contentID)
 	if err == nil && audiobookPeopleCreditsEqual(existing, desired) {
+		return nil
+	}
+	var locked []int
+	if err := s.fileRepo.Pool().QueryRow(ctx,
+		`SELECT COALESCE(locked_fields, '{}'::integer[]) FROM media_items WHERE content_id = $1`,
+		contentID).Scan(&locked); err != nil {
+		return fmt.Errorf("read audiobook field locks: %w", err)
+	}
+	if slices.Contains(locked, lockedFieldCrew) {
 		return nil
 	}
 

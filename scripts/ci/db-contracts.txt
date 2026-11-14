@@ -25,6 +25,7 @@
 ./internal/sections TestSectionsSkipItemsInNoLibraryPostgres
 ./internal/sections TestPersonalSmartCollectionRowKeepsTheCollectionLimitPostgres
 ./internal/sections TestNextUpDismissalKeepsTheRowFullPostgres
+./internal/sections TestNextUpOutOfScopeSeriesKeepTheRowFullPostgres
 ./internal/sections TestContinueReadingFillsTheRowAfterCollapsingMangaChaptersPostgres
 ./internal/sections TestEpisodeCardsCarryParentArtworkPostgres
 ./internal/catalog TestCatalogQueryWithoutLibraryLeavesOutItemsInNoLibraryDB
@@ -485,6 +486,9 @@
 ./internal/requests TestDeleteFailedRequestDatabase
 ./internal/requests TestMarkAvailableLeavesARetryResendingATierDatabase
 ./internal/requests TestListDownloadingRequestsOrderDatabase
+./internal/requests TestRecordSubmissionReplacesFailedTargetDatabase
+./internal/requests TestWithdrawIgnoresFailedTargetsDatabase
+./internal/requests TestUpdateTargetStatusLeavesFinishedTargetDatabase
 ./internal/downloads TestConcurrentArtifactCreatesCannotBypassQuotaDB
 ./internal/downloads TestParkedDownloadIsNotServedOrPreparedFromItsOldFileDB
 ./internal/downloads TestRegistrationRefusesAFileOfAnotherTitleDB
@@ -896,6 +900,10 @@
 # (issue #3441).
 ./internal/scanqueue TestCreateOnClaimedScopeJoinsTheActiveRunDB
 
+# An admin's exact-path file request that joins an automatic run is owed as a
+# follow-up, so it keeps the ignore-file bypass (issue #4157).
+./internal/scanqueue TestExplicitFileRequestJoinsActiveRunAsFollowUpDB
+
 # A scan cut short by shutdown goes back to the queue with its owed follow-up;
 # an admin cancel still ends it cancelled, and a late requeue never takes back
 # another worker's claim.
@@ -963,6 +971,10 @@
 
 # An audiobook enrichment match keeps the fields an admin locked.
 ./internal/audiobooks TestPersistKeepsAdminLockedFieldsDB
+
+# An audiobook rescan keeps the authors and narrators an admin locked with the
+# crew lock.
+./internal/scanner TestAudiobookRescanKeepsCrewLockedCreditsDB
 
 # Dashboard egress splits by stream node and API server without adding the
 # per-node rows to the total, and a wide bucket's split comes from its peak minute.
@@ -1140,3 +1152,5 @@
 ./internal/backup TestBeforeUpgradeDestinationsDB
 ./internal/backup TestBeforeUpgradeRetriesDB
 ./internal/catalog TestExternalIDLookupSkipsItemsWithAnotherTMDBIDDB
+./internal/catalog TestResolveProviderAliasesSkipsItemsWithAnotherTMDBIDDB
+./internal/watchlist TestLibraryMatchesUsesTheTitlesRetainedIDsDB

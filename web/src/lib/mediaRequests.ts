@@ -98,15 +98,19 @@ export function formatRequestDisplayState(state: RequestDisplayState): string {
 /**
  * Mirrors the server's rule for withdrawing a request, which decline and
  * cancel share: a request can be withdrawn until something has been sent for
- * it, so while it is pending, or approved with no target yet. (The server also
- * refuses the moment a send is in flight.)
+ * it, so while it is pending, or approved with no target yet other than failed
+ * ones a retry has yet to resend. (The server also refuses the moment a send
+ * is in flight.)
  */
 export function canWithdrawRequest(
   request: Pick<MediaRequest, "status" | "outcome" | "targets">,
 ): boolean {
   if (request.outcome !== "active") return false;
   if (request.status === "pending") return true;
-  return request.status === "approved" && (request.targets?.length ?? 0) === 0;
+  return (
+    request.status === "approved" &&
+    (request.targets ?? []).every((target) => target.status === "failed")
+  );
 }
 
 /**

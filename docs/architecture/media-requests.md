@@ -224,9 +224,10 @@ the target aggregate: a target change always recomputes the request's status fro
 its targets, because after submission the targets are the source of truth.
 
 Decline and cancel apply to requests nothing has been sent for: `pending` ones,
-and `approved` ones with no target and no live submission lease (waiting for the
-library, or backing off after a failed send). Once a submission is in flight or
-a target exists, the request stays in the pipeline until it completes or fails,
+and `approved` ones with no live submission lease and no target other than a
+failed one (waiting for the library, or backing off after a failed send). Once a
+submission is in flight or any other target exists, the request stays in the
+pipeline until it completes or fails,
 because withdrawing it could leave the downstream service's state diverged from
 Silo's. Retry reopens a `failed` request to `approved` + `active` in one guarded
 write. When the request had delivered one quality, it keeps that target and
@@ -277,8 +278,11 @@ A submission converges the request's targets to the qualities it currently
 wants. A failed target for a quality it no longer wants is deleted, but only
 when that quality set was resolved without error. A failed entitlement lookup
 or a connection skipped for a missing key makes the set look smaller than it
-is, so in either case every failed target is kept for an admin to see. If
-nothing is left to send, the remaining targets decide the status.
+is, so in either case every failed target is kept for an admin to see. A
+failed target for a quality being resent stays until the attempt records its
+result, which replaces it in the same transaction, so a resend that errors
+keeps the failure through the backoff. If nothing is left to send, the
+remaining targets decide the status.
 
 ## Season requests
 
