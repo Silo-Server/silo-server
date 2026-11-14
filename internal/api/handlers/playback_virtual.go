@@ -3403,8 +3403,21 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 					admissible = false
 				}
 				if admissible {
-					dbFile = ownerRow
-					dbFound = true
+					// Two rows of the same release share candidate URIs. The
+					// exact-path owner is then a duplicate of the selected
+					// version, not a different file: the requested row can
+					// serve these same bytes and keeps its own inventory.
+					// Rebinding the plan to the duplicate would rename the
+					// version the viewer selected and replace its track menu
+					// with the duplicate's possibly staler snapshot.
+					if virtualSiblingOwnerSharesRelease(file, ownerRow) {
+						slog.DebugContext(attemptCtx, "virtual playback: keeping the requested row for a same-release sibling owner",
+							"component", "api", "requested_file_id", file.ID, "owner_file_id", ownerRow.ID,
+							"candidate_uri", cand.URI, "reason", "same_release_owner")
+					} else {
+						dbFile = ownerRow
+						dbFound = true
+					}
 				}
 			}
 		}
@@ -4013,6 +4026,48 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 					candidate.URI, result.File.Duration, expectedRuntimeMinutes))
 				continue
 			}
+			// A rotation adopts the identity of the row that owns the served
+			// bytes, but it must not cost the viewer the file they selected.
+			// Reject a candidate whose effective row contradicts the item's
+			// runtime or would offer fewer audio or subtitle tracks than the
+			// selected row. The next candidate may be the selected release
+			// itself, and a wrong or track-poor substitute is worse than an
+			// honest failure. The duration clause keeps the rule intact on a
+			// surface that excuses a size-gapped probe from its own duration
+			// guard: tolerance for a posted-short release is not a license to
+			// serve a different one. This also keeps a size-gapped serve of
+			// the requested row's own bytes on the requested row (its
+			// effective id equals the requested id, so the guard does not
+			// fire).
+			if result.File.ID > 0 && result.File.ID != file.ID {
+				rotationReason := ""
+				switch {
+				case !virtualRuntimePlausible(result.File.Duration, expectedRuntimeMinutes):
+					rotationReason = "duration_contradiction"
+				case virtualRotationWouldDropTracks(file, result.File, result.File):
+					rotationReason = "track_loss"
+				}
+				if rotationReason != "" {
+					slog.WarnContext(r.Context(), "virtual candidate rotation refused: effective row contradicts the selected release",
+						"component", "api", "requested_file_id", file.ID, "effective_file_id", result.File.ID,
+						"candidate_uri", candidate.URI, "reason", rotationReason,
+						"probed_duration_seconds", result.File.Duration, "expected_runtime_minutes", expectedRuntimeMinutes,
+						"selected_audio_tracks", len(file.AudioTracks), "selected_subtitle_tracks", len(file.SubtitleTracks),
+						"effective_audio_tracks", len(result.File.AudioTracks), "effective_subtitle_tracks", len(result.File.SubtitleTracks))
+					h.unpinVirtualSticky(stickyKey, candidate.URI)
+					attemptErr = errors.Join(attemptErr, fmt.Errorf("candidate %s rotates to row %d (%s)",
+						candidate.URI, result.File.ID, rotationReason))
+					continue
+				}
+			}
+			// A genuine rotation (the selected row cannot serve) stays a
+			// substitution and says so, so the client can report which
+			// version it got instead of silently replacing the file the
+			// viewer picked.
+			if result.File.ID > 0 && result.File.ID != file.ID && virtualRequestedRowIsSelection(file) {
+				result.SubstitutedFromFileID = file.ID
+				result.SubstitutionReason = substitutionReasonVersionNotPlayableV3
+			}
 			result.CandidateRank = i
 			result.CandidateCount = len(candidates)
 			if result.EvidenceObservation || virtualProbeEvidenceWithholdsIdentity(evidenceVerdict) {
@@ -4143,6 +4198,14 @@ func (h *PlaybackHandler) fallbackSameReleaseAfterServedSizeMismatch(
 	ownerID := effectiveVirtualOwner(anchor.OwnerInstallationID, file.VirtualOwnerInstallationID)
 	sibling := h.matchSameReleaseSiblingProbe(ctx, file, anchor, ownerID, stickyKey)
 	if sibling == nil {
+		return nil
+	}
+	if virtualRotationWouldDropTracks(file, sibling.row, sibling.probed) {
+		slog.WarnContext(ctx, "virtual probe served size mismatch: refusing a same-release sibling that would lose audio or subtitle tracks",
+			"component", "api", "file_id", file.ID, "sibling_file_id", sibling.row.ID,
+			"candidate_uri", anchor.URI, "sibling_uri", sibling.cand.URI,
+			"selected_audio_tracks", len(file.AudioTracks), "selected_subtitle_tracks", len(file.SubtitleTracks),
+			"substitute_audio_tracks", len(sibling.probed.AudioTracks), "substitute_subtitle_tracks", len(sibling.probed.SubtitleTracks))
 		return nil
 	}
 	h.persistVirtualProbeEvidence(ctx, sibling.row, sibling.probed.FilePath, sibling.probed,
@@ -6029,7 +6092,30 @@ func (h *PlaybackHandler) virtualProbeEvidenceRotateTarget(ctx context.Context, 
 	// stale.
 	virtualOwnerLookups.clear(backoffKey)
 	if ownerRow != nil && ownerRow.ID != catalogFile.ID {
-		if virtualSiblingOwnerSharesRelease(catalogFile, ownerRow) {
+		sameRelease := virtualSiblingOwnerSharesRelease(catalogFile, ownerRow)
+		// A rotation may adopt the owner's identity, never a poorer track
+		// menu than the selected row offered. The probe measured the bytes
+		// this write describes, so compare that inventory.
+		if virtualRotationWouldDropTracks(catalogFile, ownerRow, probed) {
+			if sameRelease {
+				// The bytes are the selected row's own release and the
+				// viewer picked that row. Keep the measured inventory on it
+				// instead of moving it to a duplicate with a poorer menu.
+				return catalogFile, probed, true
+			}
+			slog.WarnContext(ctx, "virtual probe evidence rotation refused: owner row would lose audio or subtitle tracks",
+				"component", "api", "requested_file_id", catalogFile.ID, "owner_file_id", ownerRow.ID,
+				"candidate_uri", resolvedPath,
+				"selected_audio_tracks", len(catalogFile.AudioTracks), "selected_subtitle_tracks", len(catalogFile.SubtitleTracks),
+				"probed_audio_tracks", len(probed.AudioTracks), "probed_subtitle_tracks", len(probed.SubtitleTracks),
+				virtualEvidenceLogKeyReason, "sibling_owner_track_loss")
+			// Keep the live session's menu useful without moving the bytes:
+			// publish the measured inventory to sessions already bound to this
+			// candidate, and write nothing to a row that would lose tracks.
+			h.publishRefusedProbeInventory(ctx, catalogFile.ID, resolvedPath, probed)
+			return nil, nil, false
+		}
+		if sameRelease {
 			// Duplicate catalog rows for one release share candidate URIs and
 			// neutral keys. Rotating here would overlay the requested row's
 			// probed inventory onto its duplicate sibling (and, on the reverse
@@ -7124,6 +7210,55 @@ func rotateVirtualSourceToOwnerRow(probed *models.MediaFile, ownerRow *models.Me
 	return &rotated
 }
 
+// virtualRequestedRowIsSelection reports whether the requested row is a
+// concrete version the viewer can select rather than a provider-neutral
+// placeholder that exists only to own a release's candidates. A placeholder
+// has no own candidate, probe stamp, or track inventory, so a plan that binds
+// it to a concrete owner is ordinary auto selection, not a substitution of the
+// viewer's version.
+func virtualRequestedRowIsSelection(row *models.MediaFile) bool {
+	if row == nil {
+		return false
+	}
+	return virtualResultCandidateID(row.FilePath) != "" ||
+		row.ProbeUpdatedAt != nil ||
+		len(row.AudioTracks) > 0 ||
+		len(row.SubtitleTracks) > 0
+}
+
+// virtualRotationWouldDropTracks reports whether adopting target as the
+// effective row would offer fewer audio or subtitle tracks than the selected
+// row. It is the track-safety half of the rotation rule: adopting the identity
+// of the bytes' owner is allowed, losing a track the viewer selected is not.
+//
+// probed is the inventory the plan will actually carry after the rotation
+// (rotateVirtualSourceToOwnerRow overlays it on the owner row), so a measured
+// probe is compared instead of the owner's stale declaration. A non-nil probed
+// file with zero tracks is a measurement, not missing evidence. When probed is
+// nil the target row's declaration is the best available inventory; a row with
+// no tracks at all is treated as unknown, never as zero, so an unprobed owner
+// is not rejected for the absence of a declaration.
+func virtualRotationWouldDropTracks(selected, target, probed *models.MediaFile) bool {
+	if selected == nil {
+		return false
+	}
+	selectedAudio, selectedSubtitles := len(selected.AudioTracks), len(selected.SubtitleTracks)
+	if selectedAudio == 0 && selectedSubtitles == 0 {
+		// A placeholder selects no tracks; there is nothing to lose.
+		return false
+	}
+	if probed != nil {
+		return len(probed.AudioTracks) < selectedAudio || len(probed.SubtitleTracks) < selectedSubtitles
+	}
+	if target == nil {
+		return false
+	}
+	if len(target.AudioTracks) == 0 && len(target.SubtitleTracks) == 0 {
+		return false
+	}
+	return len(target.AudioTracks) < selectedAudio || len(target.SubtitleTracks) < selectedSubtitles
+}
+
 // virtualCompletedReleaseRetryBudget bounds the one same-release retry a
 // completed, duration-verified pinned release gets before the alternate walk.
 // It matches the detached catalog discovery budget: a provider that just
@@ -7502,6 +7637,19 @@ func (h *PlaybackHandler) fallbackResolveStaleVirtualSource(
 				// candidate refuses before this point. The owning row's catalog
 				// identity is kept and the freshly probed track/stream evidence
 				// is overlaid so the verified inventory is not lost.
+				//
+				// Track safety: a substitute that would offer fewer audio or
+				// subtitle tracks than the selected row is not a rescue, it is
+				// a silent downgrade. Refuse it and let the walk try another
+				// candidate; if none survives, the start fails honestly.
+				if virtualRotationWouldDropTracks(file, ownerRow, resolved.File) {
+					slog.WarnContext(ctx, "virtual stale fallback: refusing a substitute that would lose audio or subtitle tracks",
+						"component", "api", "file_id", file.ID, "substitute_file_id", ownerRow.ID,
+						"candidate", stream.URI, "resolved", resolved.URI,
+						"selected_audio_tracks", len(file.AudioTracks), "selected_subtitle_tracks", len(file.SubtitleTracks),
+						"substitute_audio_tracks", len(resolved.File.AudioTracks), "substitute_subtitle_tracks", len(resolved.File.SubtitleTracks))
+					continue
+				}
 				rotated := *resolved
 				rotated.File = rotateVirtualSourceToOwnerRow(resolved.File, ownerRow, resolved.URI)
 				slog.InfoContext(ctx, "virtual stale fallback: rotated to an existing alternate version row",
