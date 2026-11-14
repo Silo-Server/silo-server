@@ -320,6 +320,11 @@ library when it is approved is not sent; the reconcile pass completes it. If rou
 claim choose a server that cannot, that tier is not sent and the attempt fails
 with a message naming the server.
 
+A Retry of a season request that delivered one quality skips both checks. The
+library holds the delivered copy, so its seasons say nothing about the tier
+that failed. The request is claimed and resends only its failed tiers, and only
+the servers those tiers go to must take seasons.
+
 A season is complete when every aired episode of it has a file in an enabled
 library, judged by the library's own provider metadata, so no external service
 is involved. An episode has a file when one is linked to it

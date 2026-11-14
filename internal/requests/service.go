@@ -2247,21 +2247,32 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 			return nil, err
 		}
 		if match := matches[req.TMDBID]; match.Available {
-			// Seasons that reached the library since the request was made
-			// need no download: the reconcile pass completes the request.
-			fulfilled, _, err := s.requestFulfilled(ctx, req, match)
+			targets, err := s.store.ListTargets(ctx, req.ID)
 			if err != nil {
 				return nil, err
 			}
-			if fulfilled {
-				return &req, nil
-			}
-			deliverable, err := s.missingSeasonsDeliverable(ctx, fc, req)
-			if err != nil {
-				return nil, err
-			}
-			if !deliverable {
-				return &req, nil
+			// A retry of a request that delivered one quality resends the
+			// others. The library holds the delivered copy, so its seasons
+			// say nothing about the tiers being resent, and only the servers
+			// those tiers go to need to take seasons (checked after the claim).
+			retrying := slices.ContainsFunc(targets, func(t Target) bool { return t.Status == StatusCompleted })
+			if !retrying {
+				// Seasons that reached the library since the request was made
+				// need no download: the reconcile pass completes the request.
+				fulfilled, _, err := s.requestFulfilled(ctx, req, match)
+				if err != nil {
+					return nil, err
+				}
+				if fulfilled {
+					return &req, nil
+				}
+				deliverable, err := s.missingSeasonsDeliverable(ctx, fc, req)
+				if err != nil {
+					return nil, err
+				}
+				if !deliverable {
+					return &req, nil
+				}
 			}
 			missingSeasons = true
 		}
@@ -2329,8 +2340,9 @@ func (s *Service) submitClaimed(ctx context.Context, req Request, actor Viewer, 
 		return nil, errors.New(s.unusableRouterMessage(ctx, fc, req.MediaType))
 	}
 	if missingSeasons {
-		// missingSeasonsDeliverable checked every series connection; this
-		// guards the plugin actually chosen.
+		// missingSeasonsDeliverable checked every series connection (except
+		// on a retry of a request that delivered a quality); this guards the
+		// plugin actually chosen.
 		ok, err := s.routerSupportsSeasons(ctx, fc, installationID, capabilityID)
 		if err != nil {
 			return nil, err
