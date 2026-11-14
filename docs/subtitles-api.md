@@ -275,6 +275,9 @@ the same byte limits. It returns `language` and `source` (`filename`, `metadata`
 `content`, or `manual`) and never stores the file. It requires account/profile
 authority but works without subtitle storage. This read-only POST is naturally
 idempotent. Detection uses the supplied language only as fallback, not override.
+Each server runs at most four detections at once, and an account at most two of
+them. A request beyond either limit gets `429 rate_limited` with `Retry-After`
+before its body is read, so a client can send it again.
 
 Web detail and player callers use these forms with captured authority and suppress
 stale completions. Jellyfin subtitle delivery is unchanged.
