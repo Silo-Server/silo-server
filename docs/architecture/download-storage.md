@@ -35,18 +35,20 @@ A missing file found by recovery, or a node requeue, expires the row instead of
 deleting it, and only in-flight rows are reset to `preparing`. The reset keeps the
 revision, so a device that fetched the whole file before it can still report
 `completed`. That report applies to the `preparing` row, and when no in-flight
-download is left and the job is still waiting in the queue, the job returns to
-`expired` in the same transaction. A job a worker already claimed finishes into the
-cache in that case. An expired row is not a preparation: the admin preparation list,
+download is left, the job is retired as described below. An expired row is not a
+preparation: the admin preparation list,
 queue positions, and cancel skip it. The failed sweep never deletes a row that a live
 download refers to, in flight or finished, because finished downloads read its recipe.
 
 A queued or running job that loses its last in-flight download is retired: the row
 becomes `expired`, keeps its recipe, and the encode stops. Deleting a download,
-revoking it, and changing a managed download's quality retire the old job at once, in
-the statement that checks no in-flight download still needs it. The preparation run
-also retires jobs nothing has used for ten minutes, for downloads removed any other
-way, and the claim query skips them. An expired row keeps its id and output path, so
+revoking it, changing a managed download's quality, and a late `completed` report
+retire the old job at once, in the statement that checks no in-flight download still
+needs it. For downloads removed any other way, a job nothing has used for ten minutes
+counts as abandoned: the claim query skips it, its worker's next heartbeat fails, and
+the preparation run retires it. The heartbeat matters on a busy replica, whose
+preparation run waits for its running encodes. Asking for an expired file again
+counts as a use. An expired row keeps its id and output path, so
 retiring a running job leaves an unowned lease, as a pause does: the stopped worker may
 write until its next heartbeat, and a prepare-again waits that out before a new
 attempt claims the job. A create that read the job before it was retired links its

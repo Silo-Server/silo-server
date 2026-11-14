@@ -134,9 +134,10 @@ func (r *ArtifactRepository) CancelPreparations(ctx context.Context, ids []strin
 	return r.cancelPreparations(ctx, ids, errMsg)
 }
 
-// abandonedPreparationGrace keeps the sweep and the claim query away from a
-// job a create has just queued or linked but whose download row is not
-// committed yet: Ensure writes the job before the create inserts its row.
+// abandonedPreparationGrace keeps the sweep, the claim query, and the
+// heartbeat fence away from a job a create has just queued or linked but
+// whose download row is not committed yet: Ensure writes the job before the
+// create inserts its row.
 const abandonedPreparationGrace = 10 * time.Minute
 
 // abandonedPreparationPredicate matches a queued or running job (alias a)

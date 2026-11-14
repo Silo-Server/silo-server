@@ -202,10 +202,14 @@ func (r *ArtifactRepository) Heartbeat(ctx context.Context, id, owner string, le
 	if leaseSecs <= 0 {
 		leaseSecs = 60
 	}
+	// A job no in-flight download has needed for abandonedPreparationGrace
+	// loses its lease here, so its worker stops without waiting for the
+	// preparation run, which on a busy replica waits for this very encode.
 	tag, err := r.pool.Exec(ctx,
-		`UPDATE download_artifacts SET lease_expires_at = now() + make_interval(secs => $3)
-		 WHERE id = $1 AND lease_owner = $2 AND status IN ('running', 'tone_map_running', 'audio_v2_running', 'tracks_v1_running')`,
-		id, owner, leaseSecs,
+		`UPDATE download_artifacts a SET lease_expires_at = now() + make_interval(secs => $3)
+		 WHERE a.id = $1 AND a.lease_owner = $2 AND a.status IN ('running', 'tone_map_running', 'audio_v2_running', 'tracks_v1_running')
+		   AND NOT (a.last_used_at < now() - make_interval(secs => $4) AND `+abandonedPreparationPredicate+`)`,
+		id, owner, leaseSecs, abandonedPreparationGrace.Seconds(),
 	)
 	if err != nil {
 		return false, fmt.Errorf("heartbeating artifact: %w", err)
@@ -398,21 +402,16 @@ func (r *ArtifactRepository) ReclaimExpiredLeases(ctx context.Context) ([]reclai
 // Requeue sends a failed or expired artifact back to queued for a fresh
 // attempt. The deterministic output_path is preserved, and so is an unowned
 // lease window a stopped worker left: ClaimNext waits it out, so the new
-// attempt never shares the output path with an encode still shutting down. Returns ErrNotFound
-// when the row no longer exists (a concurrent sweep deleted it) or is no
-// longer failed or expired (another request requeued it first), so a caller
-// never resets a job that is running or ready.
+// attempt never shares the output path with an encode still shutting down.
+// last_used_at moves to now, so the caller's download has
+// abandonedPreparationGrace to link before the job counts as abandoned.
+// Returns ErrNotFound when the row no longer exists (a concurrent sweep
+// deleted it) or is no longer failed or expired (another request requeued it
+// first), so a caller never resets a job that is running or ready.
 func (r *ArtifactRepository) Requeue(ctx context.Context, id string) error {
 	tag, err := r.pool.Exec(ctx,
 		`UPDATE download_artifacts
-		 SET status = CASE
-		                  WHEN track_recipe_version <> '' THEN 'tracks_v1_queued'
-		                  WHEN audio_recipe_version <> '' THEN 'audio_v2_queued'
-		                  WHEN tone_map_mode <> '' THEN 'tone_map_queued'
-		                  ELSE 'queued'
-		              END,
-		     attempts = 0, error_message = '', next_retry_at = NULL,
-		     lease_owner = NULL, completed_at = NULL,
+		 SET `+requeueArtifactAssignment+`, last_used_at = now(), lease_owner = NULL,
 		     lease_expires_at = CASE WHEN lease_owner IS NULL AND lease_expires_at > now() THEN lease_expires_at END,
 		     origin_node_id = 0, origin_node_url = '', origin_node_group = '', origin_artifact_id = ''
 		 WHERE id = $1 AND status IN ('failed', 'expired')`,

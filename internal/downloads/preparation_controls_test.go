@@ -532,6 +532,45 @@ func TestDeletingTheLastDownloadStopsItsPreparationDB(t *testing.T) {
 	}
 }
 
+func TestLateCompletionStopsItsPreparationDB(t *testing.T) {
+	repo, pool, fileID := newArtifactTestRepo(t)
+	ctx := context.Background()
+	m := &ArtifactManager{repo: repo, downloads: NewRepository(pool), owner: "api-test"}
+	svc := &Service{repo: m.downloads, artifacts: m}
+	row, _, err := repo.EnsureQueued(ctx, newArtifact(t, fileID, "hash-late-completion"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE download_artifacts SET status = 'running', attempts = 1,
+		lease_owner = 'api-test', lease_expires_at = now() + interval '1 minute' WHERE id = $1`, row.ID); err != nil {
+		t.Fatal(err)
+	}
+	encodeCtx, stopEncode := context.WithCancel(ctx)
+	defer stopEncode()
+	untrack := m.trackLocalAttempt(row.ID, stopEncode)
+	defer untrack()
+	// Recovery reset this download to preparing, but the device already
+	// holds the whole file and reports it complete.
+	userID, deviceID := seedPreparationRequester(t, pool, fileID, row.ID, StatusPreparing)
+	downloadID := requesterDownloadID(t, pool, userID)
+	var revision int
+	if err := pool.QueryRow(ctx, `SELECT revision FROM downloads WHERE id = $1`, downloadID).Scan(&revision); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ReportStatus(ctx, userID, "profile-prep", deviceID, downloadID,
+		StatusEvent{Status: StatusCompleted, UpdatedAt: time.Now(), Revision: revision}); err != nil {
+		t.Fatal(err)
+	}
+	var status string
+	if err := pool.QueryRow(ctx, `SELECT status FROM download_artifacts WHERE id = $1`, row.ID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if encodeCtx.Err() == nil || status != ArtifactExpired {
+		t.Fatalf("job after its last download reported complete = %q, encode stopped %v; want expired and stopped",
+			status, encodeCtx.Err() != nil)
+	}
+}
+
 // claimRunnable claims every job a worker could start now, failing each one
 // so the next claim moves on, and reports which were claimed.
 func claimRunnable(t *testing.T, repo *ArtifactRepository, pool *pgxpool.Pool) map[string]bool {
@@ -589,10 +628,24 @@ func TestStaleAbandonedPreparationsAreRetiredNotClaimedDB(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// A file prepared long ago and since expired, which a create has just
+	// asked for again, before inserting its download.
+	reasked := ensure("hash-stale-reasked", `, status = 'expired'`)
+	if err := repo.Requeue(ctx, reasked); err != nil {
+		t.Fatal(err)
+	}
+	// A job whose last download went while this replica encodes it: its
+	// next heartbeat stops it, without waiting for a preparation run.
+	orphanLocal := ensure("hash-stale-orphan-local",
+		`, status = 'running', attempts = 1, lease_owner = 'api-test', lease_expires_at = now() + interval '1 minute'`)
+	if ok, err := repo.Heartbeat(ctx, orphanLocal, "api-test", time.Minute); err != nil || ok {
+		t.Fatalf("Heartbeat of a job no download needs = (%v, %v), want fenced", ok, err)
+	}
+
 	// No worker starts an abandoned job.
 	claimed := claimRunnable(t, repo, pool)
-	if claimed[orphanQueued] || claimed[orphanRunning] || !claimed[needed] || !claimed[fresh.ID] {
-		t.Fatalf("claimed %v; want the needed and the fresh job, not the abandoned ones", claimed)
+	if claimed[orphanQueued] || claimed[orphanRunning] || !claimed[needed] || !claimed[fresh.ID] || !claimed[reasked] {
+		t.Fatalf("claimed %v; want the needed, the fresh and the re-asked job, not the abandoned ones", claimed)
 	}
 
 	// The preparation run retires them.

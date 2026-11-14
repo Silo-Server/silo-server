@@ -674,9 +674,11 @@ func (r *Repository) MarkLinkedDownloadsFailed(ctx context.Context, artifactID, 
 // artifact and returns the stored row. Missing-output recovery can requeue
 // the artifact after the create read it: a 'ready' row linked afterwards is
 // returned to 'preparing' here, and a row that existed earlier was already
-// reset by the requeue, so the caller's copy is stale either way. FOR SHARE
-// waits for an in-flight requeue to commit, so either this read sees the
-// queued artifact or the requeue's linked-download reset sees this row. The
+// reset by the requeue, so the caller's copy is stale either way. The row
+// lock waits for an in-flight requeue to commit, so either this read sees the
+// queued artifact or the requeue's linked-download reset sees this row. It is
+// FOR NO KEY UPDATE, not FOR SHARE, because the expired case below updates
+// the row: two confirms sharing the lock would each wait on the other. The
 // reset is fenced on the artifact so a concurrent create that relinked the
 // row elsewhere is left alone. A preparing row whose artifact is gone was
 // linked to a job an administrator canceled meanwhile; it fails as the
@@ -693,7 +695,7 @@ func (r *Repository) ConfirmArtifactLink(ctx context.Context, d *Download) (*Dow
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	var artifactStatus string
-	err = tx.QueryRow(ctx, `SELECT status FROM download_artifacts WHERE id = $1 FOR SHARE`, d.ArtifactID).Scan(&artifactStatus)
+	err = tx.QueryRow(ctx, `SELECT status FROM download_artifacts WHERE id = $1 FOR NO KEY UPDATE`, d.ArtifactID).Scan(&artifactStatus)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, fmt.Errorf("checking linked artifact status: %w", err)
 	}
