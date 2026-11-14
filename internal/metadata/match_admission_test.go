@@ -169,3 +169,54 @@ func TestAdmitSearchMatchRejectsConflictingExistingProviderID(t *testing.T) {
 		t.Fatalf("admission = %+v, want provider-ID conflict with no admitted IDs", got)
 	}
 }
+
+// An item with no author has only its title to vouch for a candidate (#3161).
+// The untagged books from the issue, and the same partial match the other way
+// round, stay unmatched. Folder titles with an author or series prefix, and
+// every calibrated production pair, are decided as they are with an author.
+func TestAdmitSearchMatchWithoutAnAuthorNeedsTheTitleToIdentifyTheBook(t *testing.T) {
+	type admissionCase struct {
+		name      string
+		want      string
+		candidate string
+		ids       map[string]string
+		existing  map[string]string
+		accept    bool
+	}
+	cases := []admissionCase{
+		{name: "a one-word prefix", want: "Raw Stream", candidate: "Raw"},
+		{name: "two shared words", want: "Unknown Author Book", candidate: "The Book of Unknown Americans"},
+		{name: "a contained shorter title", want: "Dune Messiah", candidate: "Dune"},
+		{name: "a short title inside a longer one", want: "Dune", candidate: "Dune Messiah"},
+		{name: "the same title", want: "Raw Stream", candidate: "Raw Stream", accept: true},
+		{name: "an author-prefixed folder", want: "Andy Weir - Project Hail Mary", candidate: "Project Hail Mary", accept: true},
+		{name: "an ampersand", want: "Pride & Prejudice", candidate: "Pride and Prejudice", accept: true},
+		{name: "a partial match carrying the item's ID", want: "Raw Stream", candidate: "Raw",
+			ids: map[string]string{"audible": "B0SAME"}, existing: map[string]string{"audible": "B0SAME"}, accept: true},
+		{name: "a partial match beside another provider's ID", want: "Raw Stream", candidate: "Raw",
+			existing: map[string]string{"asin": "B0OTHER"}},
+	}
+	for _, pair := range productionPairs {
+		cases = append(cases, admissionCase{name: "production: " + pair.name, want: pair.want, candidate: pair.got, accept: pair.accept})
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ids := tc.ids
+			if ids == nil {
+				ids = map[string]string{"apple_books": "1417703839"}
+			}
+			got, err := AdmitSearchMatch(context.Background(), SearchMatchAdmissionRequest{
+				WantTitle:           tc.want,
+				Results:             []SearchResult{{Name: tc.candidate, ProviderIDs: ids}},
+				ExistingProviderIDs: tc.existing,
+				NoAuthor:            true,
+			})
+			if err != nil {
+				t.Fatalf("AdmitSearchMatch: %v", err)
+			}
+			if accepted := got.Status == SearchMatchAccepted; accepted != tc.accept {
+				t.Fatalf("%q for %q: status %s, want accepted = %v", tc.candidate, tc.want, got.Status, tc.accept)
+			}
+		})
+	}
+}
