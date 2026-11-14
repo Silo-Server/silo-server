@@ -20,7 +20,7 @@ func (s *Scanner) scanThemeSongs(ctx context.Context, folder *models.MediaFolder
 	if !supportsThemeSongs(folder.Type) {
 		return nil
 	}
-	discovery := themeDiscovery{roots: folder.Paths, ffprobe: s.ffprobePath, ancestors: make(map[themeIgnoreKey]themeIgnoreState), readDir: fspath.ReadDir}
+	discovery := themeDiscovery{roots: compactScanRoots(folder.Paths), ffprobe: s.ffprobePath, ancestors: make(map[themeIgnoreKey]themeIgnoreState), readDir: fspath.ReadDir}
 	return discovery.scan(ctx, themesongs.NewRepository(s.fileRepo.Pool()), folder.ID, scope, exact)
 }
 
@@ -101,6 +101,9 @@ type themeIgnoreState struct {
 	err     error
 }
 
+// themeDiscovery's roots are compacted (compactScanRoots): a full scan walks a
+// root nested in another as part of the outer one, so the outer root's ignore
+// files and skipped folder names apply below the nested root too.
 type themeDiscovery struct {
 	roots     []string
 	ffprobe   string
@@ -140,7 +143,7 @@ func (d *themeDiscovery) ancestorRules(directory, root string) themeIgnoreState 
 // discoverThemeSongs follows the local conventions theme.<audio-extension> and
 // theme-music/<audio-file>. It never imports these files into media_files.
 func discoverThemeSongs(ctx context.Context, directory string, roots []string, ffprobe string, cached map[string]themesongs.File) ([]themesongs.File, error) {
-	d := themeDiscovery{roots: roots, ffprobe: ffprobe, ancestors: make(map[themeIgnoreKey]themeIgnoreState), readDir: fspath.ReadDir}
+	d := themeDiscovery{roots: compactScanRoots(roots), ffprobe: ffprobe, ancestors: make(map[themeIgnoreKey]themeIgnoreState), readDir: fspath.ReadDir}
 	return d.discover(ctx, directory, cached)
 }
 
@@ -148,10 +151,7 @@ func (d *themeDiscovery) discover(ctx context.Context, directory string, cached 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	// A full scan walks a root nested in another as part of the outer one
-	// (compactScanRoots), so the outer root's ignore files and skipped folder
-	// names apply below the nested root too.
-	root := scopeLibraryRoot(directory, compactScanRoots(d.roots))
+	root := scopeLibraryRoot(directory, d.roots)
 	var state themeIgnoreState
 	if root != "" && root != directory {
 		if SkippedDirName(filepath.Base(directory)) {

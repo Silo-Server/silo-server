@@ -196,6 +196,14 @@ func TestThemeDiscoveryNestedRootFollowsOuterRootWalk(t *testing.T) {
 	if err != nil {
 		t.Skip("ffmpeg is required")
 	}
+	sample := filepath.Join(t.TempDir(), "theme.mp3")
+	if out, err := exec.Command(ffmpeg, "-v", "error", "-f", "lavfi", "-i", "sine=frequency=220:duration=1", "-y", sample).CombinedOutput(); err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	data, err := os.ReadFile(sample)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		name, nested, owner, outerIgnore string
 		want                             int
@@ -212,8 +220,8 @@ func TestThemeDiscoveryNestedRootFollowsOuterRootWalk(t *testing.T) {
 			if err := os.MkdirAll(owner, 0755); err != nil {
 				t.Fatal(err)
 			}
-			if out, err := exec.Command(ffmpeg, "-v", "error", "-f", "lavfi", "-i", "sine=frequency=220:duration=1", "-y", filepath.Join(owner, "theme.mp3")).CombinedOutput(); err != nil {
-				t.Fatalf("%v: %s", err, out)
+			if err := os.WriteFile(filepath.Join(owner, "theme.mp3"), data, 0600); err != nil {
+				t.Fatal(err)
 			}
 			if tc.outerIgnore != "" {
 				if err := os.WriteFile(filepath.Join(lib, ".siloignore"), []byte(tc.outerIgnore), 0600); err != nil {
