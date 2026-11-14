@@ -8815,6 +8815,12 @@
       "value": "Dieser Pfad passt zu mehr als einer Mediathek."
     }
   ],
+  "web.admin.autoscan.activity.reason.pathIgnored": [
+    {
+      "type": 0,
+      "value": "Die Ignorierdateien der Mediathek schließen diese Datei aus, daher wurde sie nicht gescannt."
+    }
+  ],
   "web.admin.autoscan.activity.reason.pathNotFileOrDir": [
     {
       "type": 0,
@@ -98406,6 +98412,20 @@
       "value": "Unbekannt"
     }
   ],
+  "web.common.activity.subtitle.episode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "series"
+    }
+  ],
   "web.common.activity.subtitle.movie": [
     {
       "type": 0,
@@ -100052,6 +100072,12 @@
       "value": "Deine Daten"
     }
   ],
+  "web.common.toast.collections.created": [
+    {
+      "type": 0,
+      "value": "Sammlung erstellt"
+    }
+  ],
   "web.common.toast.collections.deleteFailed": [
     {
       "type": 0,
@@ -100062,6 +100088,12 @@
     {
       "type": 0,
       "value": "Sammlung gelöscht"
+    }
+  ],
+  "web.common.toast.collections.saved": [
+    {
+      "type": 0,
+      "value": "Sammlung gespeichert"
     }
   ],
   "web.common.toast.collections.syncFailed": [

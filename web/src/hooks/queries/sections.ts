@@ -225,7 +225,17 @@ export function fetchLibrarySectionItems(
   }).then((section) => ({ section: sectionFromV2(section) }));
 }
 
-export function useLibraryLayout(libraryId: number) {
+/**
+ * A library's Recommended layout. Two components observe it: LibraryPage
+ * starts the read while it waits for the saved page state and refetches a
+ * failed read when the tab is shown again, so LibraryRecommended passes
+ * `retryOnMount: false` and shows a failure that landed before it mounted
+ * instead of starting a second deadline.
+ */
+export function useLibraryLayout(
+  libraryId: number,
+  options?: { enabled?: boolean; retryOnMount?: boolean },
+) {
   return useQuery({
     queryKey: sectionKeys.libraryLayout(libraryId),
     queryFn: ({ signal }): Promise<LibraryLayoutResponse> =>
@@ -233,7 +243,8 @@ export function useLibraryLayout(libraryId: number) {
         (layout) => ({ sections: layout.sections }),
       ),
     staleTime: 5 * 60 * 1000,
-    enabled: libraryId > 0,
+    enabled: libraryId > 0 && (options?.enabled ?? true),
+    retryOnMount: options?.retryOnMount,
   });
 }
 

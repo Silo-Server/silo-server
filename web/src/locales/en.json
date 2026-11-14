@@ -8819,6 +8819,12 @@
       "value": "This path matches more than one library."
     }
   ],
+  "web.admin.autoscan.activity.reason.pathIgnored": [
+    {
+      "type": 0,
+      "value": "The library's ignore files exclude this file, so it was not scanned."
+    }
+  ],
   "web.admin.autoscan.activity.reason.pathNotFileOrDir": [
     {
       "type": 0,
@@ -98998,6 +99004,20 @@
       "value": "Unknown"
     }
   ],
+  "web.common.activity.subtitle.episode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "series"
+    }
+  ],
   "web.common.activity.subtitle.movie": [
     {
       "type": 0,
@@ -100616,6 +100636,12 @@
       "value": "Your Data"
     }
   ],
+  "web.common.toast.collections.created": [
+    {
+      "type": 0,
+      "value": "Collection created"
+    }
+  ],
   "web.common.toast.collections.deleteFailed": [
     {
       "type": 0,
@@ -100626,6 +100652,12 @@
     {
       "type": 0,
       "value": "Collection deleted"
+    }
+  ],
+  "web.common.toast.collections.saved": [
+    {
+      "type": 0,
+      "value": "Collection saved"
     }
   ],
   "web.common.toast.collections.syncFailed": [

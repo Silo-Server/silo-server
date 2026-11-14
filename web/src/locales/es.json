@@ -9130,6 +9130,12 @@
       "value": "Esta ruta coincide con más de una biblioteca."
     }
   ],
+  "web.admin.autoscan.activity.reason.pathIgnored": [
+    {
+      "type": 0,
+      "value": "Los archivos de exclusión de la biblioteca excluyen este archivo, así que no se escaneó."
+    }
+  ],
   "web.admin.autoscan.activity.reason.pathNotFileOrDir": [
     {
       "type": 0,
@@ -108079,6 +108085,20 @@
       "value": "Desconocido"
     }
   ],
+  "web.common.activity.subtitle.episode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "series"
+    }
+  ],
   "web.common.activity.subtitle.movie": [
     {
       "type": 0,
@@ -109881,6 +109901,12 @@
       "value": "Tus datos"
     }
   ],
+  "web.common.toast.collections.created": [
+    {
+      "type": 0,
+      "value": "Colección creada"
+    }
+  ],
   "web.common.toast.collections.deleteFailed": [
     {
       "type": 0,
@@ -109891,6 +109917,12 @@
     {
       "type": 0,
       "value": "Colección eliminada"
+    }
+  ],
+  "web.common.toast.collections.saved": [
+    {
+      "type": 0,
+      "value": "Colección guardada"
     }
   ],
   "web.common.toast.collections.syncFailed": [
