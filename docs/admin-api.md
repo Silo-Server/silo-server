@@ -3509,8 +3509,9 @@ other field, after clears, matches the stored entry; a field the stored entry la
 matches its declared default. A secret object or list (such as a map of servers with keys
 inside) counts as typed whenever it is sent, because its contents are secret. A staged entry that changes a server URL, issuer, CA or any
 other setting, or types a secret, is tested with only the secrets the administrator typed
-and without undeclared stored fields, so a destination changed in an entry never receives
-that entry's saved credentials. The rule is per entry: the other stored entries go to the
+and without undeclared stored top-level fields, so a destination changed in an entry never
+receives the saved secrets that entry declares. An undeclared key stored inside a declared
+object is kept. The rule is per entry: the other stored entries go to the
 plugin unchanged, so a plugin that keeps a credential in one entry and its destination in
 another is not covered. The server validates the merged entry against the
 plugin's schema and returns 422 with the plugin's own message on failure, then persists
