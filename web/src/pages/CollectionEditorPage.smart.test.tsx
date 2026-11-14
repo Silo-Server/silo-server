@@ -4,7 +4,7 @@
  * the rules match, an Order block that respects a stored default sort, and
  * the same save bar and layout as every other editor.
  */
-import { act, fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -324,7 +324,7 @@ describe("creating a Smart collection", () => {
 });
 
 describe("Back", () => {
-  it("server: still goes back to the list view it was opened from after Create", async () => {
+  it("server: Create goes back to the list view it was opened from", async () => {
     const view = "/admin/collections?view=list&libraryId=1&type=smart&q=fox";
     const router = showEditorPage({
       pathname: "/admin/collections/new",
@@ -335,11 +335,25 @@ describe("Back", () => {
     await addGenreRule();
     fireEvent.click(screen.getByRole("button", { name: "Create collection" }));
     await vi.waitFor(() =>
-      expect(router.state.location.pathname).toBe("/admin/collections/c1/edit"),
+      expect(router.state.location.pathname + router.state.location.search).toBe(view),
     );
-    // Let the page render at its new address before reading the link.
-    await act(async () => {});
-    expect(screen.getByRole("link", { name: "Collections" })).toHaveAttribute("href", view);
+  });
+
+  it("server: Save goes back to the library it was opened from only while the collection is in it", async () => {
+    const user = userEvent.setup();
+    const router = showEditorPage("/admin/collections/c1/edit?libraryId=1");
+    await sentence();
+    await user.click(screen.getByRole("button", { name: libraries("Movies, 4K Movies") }));
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "Movies" }));
+    await user.keyboard("{Escape}");
+    // The read after the save sees it in 4K Movies only.
+    showServerSmart(rules({ library_ids: [3] }));
+    await save(1);
+    await vi.waitFor(() =>
+      expect(router.state.location.pathname + router.state.location.search).toBe(
+        "/admin/collections?libraryId=3&view=list",
+      ),
+    );
   });
 });
 

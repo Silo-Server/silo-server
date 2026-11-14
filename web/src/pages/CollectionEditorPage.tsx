@@ -71,7 +71,8 @@ function EditorSkeleton() {
 /**
  * Every collection editor URL, both scopes: `/new?type=…[&source=…]` and
  * `/:id/edit`. Mounted once per family by a pathless route, so it stays the
- * same page from `/new` to `/:id/edit` after Create. Every type opens the
+ * same page from `/new` to `/:id/edit` after a Create that left something
+ * unsaved; a clean Create returns to the list. Every type opens the
  * same editor, create and edit. `/new` with no type opens the collection
  * list with the New collection picker over it, so old links still work.
  * Someone who can't change the collection is sent to its page instead of a form.
@@ -87,7 +88,8 @@ export default function CollectionEditorPage({ scope: scopeKind }: { scope: Scop
   const source = SYNCED_TABS.find((tab) => tab === searchParams.get("source"));
   const location = useLocation();
   // The collection the create editor made, its kind, and the visit it was made
-  // on: the editor carries on at its edit URL. Any other visit starts a fresh one.
+  // on: the editor carries on at its edit URL when Create left something
+  // unsaved. Any other visit starts a fresh one.
   const [created, setCreated] = useState<{
     round: number;
     id?: string;
