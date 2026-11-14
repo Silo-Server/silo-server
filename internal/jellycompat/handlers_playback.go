@@ -3277,7 +3277,7 @@ func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version c
 			Type:                   "Video",
 			Codec:                  strings.ToLower(track.Codec),
 			TimeBase:               "1/1000",
-			DisplayTitle:           firstNonEmpty(track.Title, track.Codec),
+			DisplayTitle:           videoTrackDisplayTitle(track, version.HDR),
 			Title:                  firstNonEmpty(track.Title, track.Codec),
 			IsDefault:              index == 0,
 			IsExternal:             false,
@@ -3780,6 +3780,108 @@ func compatAudioSpatialFormat(profile string) string {
 		return "DTSX"
 	default:
 		return "None"
+	}
+}
+
+// videoTrackDisplayTitle builds the label Jellyfin's MediaStream.DisplayTitle
+// gives a video stream: resolution, upper-cased codec, then the Dolby Vision
+// profile or the video range ("4K HEVC Dolby Vision Profile 8.1 (HDR10)",
+// "1080p H264 SDR"). Silo also names HDR10+, which Jellyfin reports as "HDR".
+// The track title is left out: when the file has none, the scanner stores
+// ffprobe's codec long name there, which would only repeat the codec.
+func videoTrackDisplayTitle(track models.VideoTrack, versionHDR bool) string {
+	parts := make([]string, 0, 3)
+	if resolution := compatVideoResolutionLabel(track.Width, track.Height, track.Interlaced); resolution != "" {
+		parts = append(parts, resolution)
+	}
+	if codec := strings.TrimSpace(track.Codec); codec != "" {
+		parts = append(parts, strings.ToUpper(codec))
+	}
+	rangeType := compatVideoRangeType(track, versionHDR)
+	hdr10Plus := strings.HasSuffix(rangeType, "HDR10Plus")
+	dolbyVision := ""
+	if strings.HasPrefix(rangeType, "DOVI") {
+		dolbyVision = compatDolbyVisionTitle(track, hdr10Plus)
+	}
+	switch {
+	case dolbyVision != "":
+		parts = append(parts, dolbyVision)
+	case hdr10Plus:
+		parts = append(parts, "HDR10+")
+	default:
+		if videoRange := compatVideoRange(track, versionHDR); videoRange != "Unknown" {
+			parts = append(parts, videoRange)
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// compatVideoResolutionLabel follows Jellyfin's MediaStream.GetResolutionText:
+// each label covers frames up to its 16:9 size, with room for ultrawide and
+// 4:3 frames, so 2560x1080 is 1080p and 3840x1600 is 4K.
+func compatVideoResolutionLabel(width, height int, interlaced bool) string {
+	if width <= 0 || height <= 0 {
+		return ""
+	}
+	scan := "p"
+	if interlaced {
+		scan = "i"
+	}
+	for _, step := range []struct {
+		maxWidth, maxHeight int
+		lines               string
+	}{
+		{256, 144, "144"},
+		{426, 240, "240"},
+		{640, 360, "360"},
+		{682, 384, "384"},
+		{720, 404, "404"},
+		{854, 480, "480"},
+		{960, 544, "540"},
+		{1024, 576, "576"},
+		{1280, 962, "720"},
+		{2560, 1440, "1080"},
+	} {
+		if width <= step.maxWidth && height <= step.maxHeight {
+			return step.lines + scan
+		}
+	}
+	switch {
+	case width <= 4096 && height <= 3072:
+		return "4K"
+	case width <= 8192 && height <= 6144:
+		return "8K"
+	default:
+		return ""
+	}
+}
+
+// compatDolbyVisionTitle follows Jellyfin's MediaStream.VideoDoViTitle
+// ("Dolby Vision Profile 8.1 (HDR10)"), naming an HDR10+ base layer as
+// "(HDR10+)". It is empty for profiles Jellyfin does not label.
+func compatDolbyVisionTitle(track models.VideoTrack, hdr10Plus bool) string {
+	profile := compatDolbyVisionProfile(track)
+	switch profile {
+	case 4, 5, 7, 8, 9, 10:
+	default:
+		return ""
+	}
+	title := "Dolby Vision Profile " + strconv.Itoa(profile)
+	if track.DVBLCompatID > 0 {
+		title += "." + strconv.Itoa(track.DVBLCompatID)
+	}
+	switch track.DVBLCompatID {
+	case 1, 6: // 6 is Blu-ray, which in practice is HDR10.
+		if hdr10Plus {
+			return title + " (HDR10+)"
+		}
+		return title + " (HDR10)"
+	case 2:
+		return title + " (SDR)"
+	case 4:
+		return title + " (HLG)"
+	default:
+		return title
 	}
 }
 
