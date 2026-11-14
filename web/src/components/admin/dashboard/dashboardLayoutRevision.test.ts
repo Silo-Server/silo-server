@@ -298,13 +298,42 @@ it("reports an edit made before the first read as unsaved on return when the ser
   expect(result.current.entries[0]?.span).toBe(7);
   expect(result.current.serverSaveBlocked).toBe(true);
 });
-it("does not save an earlier visit's edit under a different profile", async () => {
+it("keeps an earlier visit's edit unsaved under a different profile", async () => {
   const { unmount, writes } = await mountWithReadHeld();
   unmount();
   await settle();
   setProfileId("b");
   setProfileToken("pin-b");
-  await mountLoaded();
+  const { result } = await mountLoaded();
   await debounce();
   expect(writes).toHaveLength(0);
+  expect(result.current.entries[0]?.span).toBe(7);
+  expect(result.current.serverSaveBlocked).toBe(true);
+});
+it("saves the edit another tab left pending, not this tab's older copy", async () => {
+  localStorage.setItem(dashboardLayoutStorageKey(1), JSON.stringify(document(5)));
+  const held: ((r: Response) => void)[] = [];
+  const writes = stubFetch(
+    () => Promise.resolve(saved('"B"')),
+    () =>
+      new Promise<Response>((r) => {
+        held.push(r);
+      }),
+  );
+  const waiting = renderHook(useDashboardLayout, fixture());
+  await settle();
+  const editing = renderHook(useDashboardLayout, fixture());
+  await settle();
+  act(() => editing.result.current.resizeWidget("users", { span: 7 }));
+  editing.unmount();
+  await settle();
+  const empty = new Response(JSON.stringify({ layout: null, updated_at: null }), {
+    headers: { "Content-Type": "application/json", ETag: '"A"' },
+  });
+  await act(async () => held[0]!(empty));
+  await settle();
+  await debounce();
+  expect(writes).toHaveLength(1);
+  expect(JSON.parse(String(writes[0]!.body)).layout.entries[0].span).toBe(7);
+  expect(waiting.result.current.entries[0]?.span).toBe(7);
 });
