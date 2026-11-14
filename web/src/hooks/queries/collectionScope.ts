@@ -4,9 +4,9 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { toast } from "sonner";
 
 import { normalizeQueryDefinition, type QueryDefinition } from "@/api/types";
-import { isNotFoundProblem, v2, V2ProblemError } from "@/api/v2/request";
+import { isNotFoundProblem, problemFieldDetail, v2, V2ProblemError } from "@/api/v2/request";
 import { useDebounce } from "@/hooks/useDebounce";
-import { ARTWORK_SLOT_LABEL, DRAFT_FIELD_LABEL, SAVE_FAILED } from "@/lib/collections/copy";
+import { artworkSlotLabel, draftFieldLabel, saveFailed } from "@/lib/collections/copy";
 import { changedFields, mergeDraft, takeFields, type DraftField } from "@/lib/collections/draft";
 import type {
   ArtworkDraft,
@@ -23,6 +23,7 @@ import type {
   SyncOutcome,
   WireCollection,
 } from "@/lib/collections/scope";
+import { t, useAppLanguage } from "@/i18n";
 
 /**
  * An editor read may carry no artwork URLs (they are presigned, and would move
@@ -52,12 +53,17 @@ const COLLAGE_POLL_MS = 3_000;
  * while one with titles shows no poster (`awaitCollage`), the list is read
  * again every few seconds for a short while. `version` names the saved state
  * the editor holds (its ETag): a save moves it and starts a new wait, even
- * after an earlier one gave up.
+ * after an earlier one gave up. With `countMayLag` (a server Smart collection,
+ * whose count is refreshed after a save) a count of 0 doesn't end the wait.
  */
 export function useListedPoster<Raw extends WireCollection>(
   scope: CollectionScope<Raw>,
   view: CollectionView<Raw> | undefined,
-  { awaitCollage, version }: { awaitCollage: boolean; version?: string },
+  {
+    awaitCollage,
+    countMayLag = false,
+    version,
+  }: { awaitCollage: boolean; countMayLag?: boolean; version?: string },
 ): { url?: string; isCollage: boolean } {
   const id = view?.id;
   // When this wait for a collage began, and for which saved version; reset
@@ -70,7 +76,12 @@ export function useListedPoster<Raw extends WireCollection>(
     select: (data) => data.collections.find((entry) => entry.id === id),
     refetchInterval: (query) => {
       const entry = query.state.data?.collections.find((c) => c.id === id);
-      if (!awaitCollage || !entry || entry.poster_url || collectionItemCount(entry) === 0) {
+      if (
+        !awaitCollage ||
+        !entry ||
+        entry.poster_url ||
+        (collectionItemCount(entry) === 0 && !countMayLag)
+      ) {
         waiting.current = null;
         return false;
       }
@@ -204,16 +215,21 @@ export function useScopeSync<Raw extends WireCollection>(scope: CollectionScope<
     retry: false,
     mutationFn: (id: string) => scope.sync(id),
     onSuccess: (result, id) => {
-      const matched = `${result.itemsMatched} item${result.itemsMatched === 1 ? "" : "s"}`;
+      const matched = {
+        count: result.itemsMatched,
+        count_text: result.itemsMatched,
+      };
       toast.success(
         result.status === "warning"
-          ? `Synced with warnings — matched ${matched}`
-          : `Synced — matched ${matched}`,
+          ? t("web.common.toast.collections.syncedWithWarnings", matched)
+          : t("web.common.toast.collections.synced", matched),
       );
       void scope.invalidate(queryClient, id);
     },
     onError: (error, id) => {
-      toast.error(error instanceof Error ? error.message : "Sync failed");
+      toast.error(
+        error instanceof Error ? error.message : t("web.common.toast.collections.syncFailed"),
+      );
       // The server records a failed sync on the collection; show it.
       void scope.invalidate(queryClient, id);
     },
@@ -236,12 +252,12 @@ export function useScopeDelete<Raw extends WireCollection>(
     retry: false,
     mutationFn: (ref: { id: string; etag: string }) => scope.remove(ref),
     onSuccess: (_data, { id }) => {
-      toast.success("Collection deleted");
+      toast.success(t("web.common.toast.collections.deleted"));
       options.onDeleted?.(id);
       return scope.invalidate(queryClient, id);
     },
     onError: (error) => {
-      toast.error(scope.errorMessage(error, "Failed to delete"));
+      toast.error(scope.errorMessage(error, t("web.common.toast.collections.deleteFailed")));
       if (isPreconditionFailed(error)) {
         void scope.invalidate(queryClient);
         options.onStale?.();
@@ -324,6 +340,7 @@ export function useCollectionDraft<Raw extends WireCollection>(
   scope: CollectionScope<Raw>,
   init: { snapshot?: EditorSnapshot<Raw>; kind: CreateKind; libraryId?: number | null },
 ) {
+  useAppLanguage();
   const queryClient = useQueryClient();
   const [state, setStateValue] = useState<DraftState<Raw>>(() => {
     const draft = scope.toDraft(init.snapshot?.view ?? null, init);
@@ -344,6 +361,8 @@ export function useCollectionDraft<Raw extends WireCollection>(
   }, []);
   const [isSaving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // The server's refusal of a name, with the name it refused: it shows until the name changes.
+  const [nameRefusal, setNameRefusal] = useState<{ name: string; message: string } | null>(null);
   const [artworkErrors, setArtworkErrors] = useState<Partial<Record<ArtworkSlot, string>>>({});
   const syncRun = useRef(0);
   const initKind = init.kind;
@@ -371,8 +390,12 @@ export function useCollectionDraft<Raw extends WireCollection>(
   );
 
   const setDraft = useCallback(
-    (update: (draft: CollectionDraft) => CollectionDraft) =>
-      setState((previous) => ({ ...previous, draft: update(previous.draft) })),
+    (update: (draft: CollectionDraft) => CollectionDraft) => {
+      const name = current.current.draft.name;
+      setState((previous) => ({ ...previous, draft: update(previous.draft) }));
+      // A refusal is about the name it was given; editing the name drops it.
+      if (current.current.draft.name !== name) setNameRefusal(null);
+    },
     [setState],
   );
 
@@ -513,9 +536,12 @@ export function useCollectionDraft<Raw extends WireCollection>(
           conflicts: [],
         }));
       }
+      setNameRefusal(null);
       return { id: outcome.id, failedItems, sync: outcome.sync, warnings: outcome.warnings };
     } catch (error) {
-      setSaveError(scope.errorMessage(error, SAVE_FAILED));
+      const refused = nameFieldError(error);
+      setNameRefusal(refused === null ? null : { name: saved.name, message: refused });
+      setSaveError(refused ?? scope.errorMessage(error, saveFailed()));
       return null;
     } finally {
       setSaving(false);
@@ -544,6 +570,8 @@ export function useCollectionDraft<Raw extends WireCollection>(
     if (!id) return false;
     setSaving(true);
     setSaveError(null);
+    // The name the refused request carried, not whatever is typed when it answers.
+    let submittedName = current.current.draft.name;
     try {
       // Created, but never read back: read it before sending a version.
       if (!current.current.etag) {
@@ -552,9 +580,11 @@ export function useCollectionDraft<Raw extends WireCollection>(
       }
       for (let attempt = 0; ; attempt++) {
         const { draft, etag, base } = current.current;
+        submittedName = draft.name;
         try {
           const outcome = await scope.update({ id, etag: etag ?? "" }, draft as SavableDraft, base);
           await rebase(id, draft, outcome.failedArtwork, outcome.warnings);
+          setNameRefusal(null);
           return true;
         } catch (error) {
           if (!isPreconditionFailed(error)) throw error;
@@ -571,7 +601,9 @@ export function useCollectionDraft<Raw extends WireCollection>(
         }
       }
     } catch (error) {
-      setSaveError(scope.errorMessage(error, SAVE_FAILED));
+      const refused = nameFieldError(error);
+      setNameRefusal(refused === null ? null : { name: submittedName, message: refused });
+      setSaveError(refused ?? scope.errorMessage(error, saveFailed()));
       return false;
     } finally {
       setSaving(false);
@@ -595,6 +627,7 @@ export function useCollectionDraft<Raw extends WireCollection>(
   const discard = useCallback(() => {
     setArtworkErrors({});
     setSaveError(null);
+    setNameRefusal(null);
     setState((previous) => ({
       ...previous,
       draft: { ...previous.base, stagedItems: previous.draft.stagedItems },
@@ -611,13 +644,16 @@ export function useCollectionDraft<Raw extends WireCollection>(
     /** What the save bar names: changed fields, then staged artwork. */
     pendingLabels: [
       ...new Set([
-        ...changed.map((field) => DRAFT_FIELD_LABEL[field]),
-        ...artwork.map((slot) => ARTWORK_SLOT_LABEL[slot]),
+        ...changed.map((field) => draftFieldLabel(field)),
+        ...artwork.map((slot) => artworkSlotLabel(slot)),
       ]),
     ],
     isDirty: changed.length > 0 || artwork.length > 0,
     isSaving,
     saveError,
+    /** Why the server refused the name being edited, such as one another collection already has. */
+    nameError:
+      nameRefusal !== null && nameRefusal.name === state.draft.name ? nameRefusal.message : null,
     artworkErrors,
     syncWithServer,
     create,
@@ -626,4 +662,16 @@ export function useCollectionDraft<Raw extends WireCollection>(
     resolveConflicts,
     discard,
   };
+}
+
+/**
+ * The text of a save's refusal of the collection's name (`body.title` on a
+ * server collection, `body.name` on a personal one), or null for any other error.
+ */
+function nameFieldError(error: unknown): string | null {
+  if (!(error instanceof V2ProblemError)) return null;
+  const refusal = error.problem.errors?.find(
+    (fieldError) => fieldError.location === "body.title" || fieldError.location === "body.name",
+  );
+  return refusal ? problemFieldDetail(refusal) : null;
 }

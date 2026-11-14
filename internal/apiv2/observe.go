@@ -32,7 +32,7 @@ import (
 // logged once, here, with labels that are stable across releases and bounded
 // in cardinality: the operation ID (never the raw path), the method folded
 // into the fixed standard set, the status class, the problem type
-// identifier, the credential class, and a fixed client family. The v1 request logger and metrics middleware skip the /api/v2/
+// identifier, the credential class, and a fixed client family. The listener-wide request logger and metrics middleware skip the /api/v2/
 // subtree so a v2 request is not recorded twice with two label vocabularies.
 //
 // Nothing here logs a URL, a query string, a header value other than the
@@ -89,9 +89,8 @@ var (
 	}, []string{labelOperationID})
 
 	// v1TombstoneRequests counts requests answered by the v1 retirement
-	// tombstone. It is registered now so dashboards and release gates can
-	// reference it before the tombstone exists; RecordV1Tombstone increments
-	// it once the listener serves one.
+	// tombstone (RecordV1Tombstone), so operators can see which clients still
+	// call /api/v1.
 	v1TombstoneRequests = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "streamapp_apiv1_tombstone_requests_total",
 		Help: "Requests answered by the API v1 retirement tombstone, by method.",
@@ -143,30 +142,35 @@ func observe(next http.Handler) http.Handler {
 		o.clientName, o.clientVersion = clientIdentity(r)
 		r = r.WithContext(context.WithValue(r.Context(), observationKey{}, o))
 		sw := &statusRecorder{ResponseWriter: w}
-		next.ServeHTTP(sw, r)
-		status := sw.status
-		if activitylog.RecordedStatus(r, status, status != 0) == activitylog.StatusClientClosedRequest {
-			// The client went away, and its server error is recorded as
-			// abandoned, as the activity log records it as 499. The error is
-			// still written: net/http also cancels the context of a client
-			// that only half-closed, and an unwritten response would reach
-			// that client as an empty 200.
-			status = 0
-		}
-		if span.IsRecording() {
-			span.SetAttributes(attribute.String("operation", o.operationID), attribute.String("error.type", o.errorCode))
-			if status != 0 {
-				span.SetAttributes(attribute.Int("http.response.status_code", status))
-			} else if sw.hijacked {
-				span.SetAttributes(attribute.String("http.response.outcome", "hijacked"))
-			} else {
-				span.SetAttributes(attribute.String("http.response.outcome", "abandoned"))
+		httpstream.Serve(next, sw, r, func(aborted bool) {
+			status := sw.status
+			if activitylog.RecordedStatus(r, status, status != 0) == activitylog.StatusClientClosedRequest {
+				// The client went away, and its server error is recorded as
+				// abandoned, as the activity log records it as 499. The error is
+				// still written: net/http also cancels the context of a client
+				// that only half-closed, and an unwritten response would reach
+				// that client as an empty 200.
+				status = 0
 			}
-			if status >= 500 {
-				span.SetStatus(codes.Error, "server_error")
+			if span.IsRecording() {
+				span.SetAttributes(attribute.String("operation", o.operationID), attribute.String("error.type", o.errorCode))
+				if status != 0 {
+					span.SetAttributes(attribute.Int("http.response.status_code", status))
+				}
+				switch {
+				case aborted:
+					span.SetAttributes(attribute.String("http.response.outcome", "aborted"))
+					span.SetStatus(codes.Error, "aborted")
+				case status == 0 && sw.hijacked:
+					span.SetAttributes(attribute.String("http.response.outcome", "hijacked"))
+				case status == 0:
+					span.SetAttributes(attribute.String("http.response.outcome", "abandoned"))
+				case status >= 500:
+					span.SetStatus(codes.Error, "server_error")
+				}
 			}
-		}
-		report(r, o, status, sw.hijacked, sw.bytes, time.Since(start))
+			report(r, o, status, aborted, sw.hijacked, sw.bytes, time.Since(start))
+		})
 	})
 }
 
@@ -240,12 +244,16 @@ func (s *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return conn, rw, err
 }
 
-func report(r *http.Request, o *observation, status int, hijacked bool, bodyBytes int64, elapsed time.Duration) {
+func report(r *http.Request, o *observation, status int, aborted, hijacked bool, bodyBytes int64, elapsed time.Duration) {
 	name, version := o.clientName, o.clientVersion
 	major := strconv.Itoa(APIMajor)
 	method := methodLabel(r.Method)
 	class := statusClass(status)
-	if status == 0 && hijacked {
+	switch {
+	case aborted:
+		// The handler broke the response after sending its status.
+		class = "aborted"
+	case status == 0 && hijacked:
 		class = "hijacked"
 	}
 	requestsTotal.WithLabelValues(major, o.operationID, method, class, o.errorCode, o.authClass, telemetry.ClientLabel(name)).Inc()

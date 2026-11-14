@@ -14,6 +14,8 @@ import { WidgetHeader } from "../WidgetHeader";
 import { WidgetRangePicker } from "../WidgetRangePicker";
 import { TimeseriesChartBody } from "./timeseriesChart";
 import { buildTimeseriesPoints } from "./timeseriesSeries";
+import { formatLocale } from "@/lib/appLocale";
+import { useT } from "@/i18n";
 
 /**
  * Concurrent playback sessions over the chosen window, one point per bucket the
@@ -25,6 +27,7 @@ import { buildTimeseriesPoints } from "./timeseriesSeries";
  * minute, so the summit of a spike survives being zoomed out.
  */
 export function ConcurrentStreamsWidget() {
+  const t = useT();
   const { range } = useWidgetRange();
   const query = useAdminTimeseries(rangeHours(range));
   const points = useMemo(
@@ -36,9 +39,13 @@ export function ConcurrentStreamsWidget() {
 
   return (
     <Card className="h-full">
-      <WidgetHeader title={rangeTitle("Concurrent streams", range)}>
+      <WidgetHeader
+        title={rangeTitle(t("web.admin.dashboard.widgets.concurrentStreams.title"), range)}
+      >
         <span className="text-muted-foreground text-[11px] tabular-nums">
-          Peak {peak.toLocaleString()}
+          {t("web.admin.dashboard.widgets.concurrentStreams.peak", {
+            value: peak.toLocaleString(formatLocale()),
+          })}
         </span>
         <WidgetRangePicker />
       </WidgetHeader>
@@ -46,11 +53,13 @@ export function ConcurrentStreamsWidget() {
         <TimeseriesChartBody
           query={query}
           points={points}
-          seriesLabel="Streams"
-          ariaLabel={`Concurrent streams over ${rangePhrase(range)}`}
-          errorMessage="Failed to load stream history."
-          emptyMessage="No stream samples yet"
-          formatTimestamp={(t) => formatRangeTimestamp(range, t, { withTime: true })}
+          seriesLabel={t("web.admin.dashboard.widgets.concurrentStreams.seriesLabel")}
+          ariaLabel={t("web.admin.dashboard.widgets.concurrentStreams.chartLabel", {
+            range: rangePhrase(range),
+          })}
+          errorMessage={t("web.admin.dashboard.widgets.concurrentStreams.loadFailed")}
+          emptyMessage={t("web.admin.dashboard.widgets.concurrentStreams.empty")}
+          formatTimestamp={(time) => formatRangeTimestamp(range, time, { withTime: true })}
           edgeLabels={rangeEdgeLabels(range)}
           minTickStep={1}
           fill

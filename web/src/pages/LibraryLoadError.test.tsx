@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import libraryLayoutOk from "../../../contracts/api/v2/fixtures/get_library_layout_ok.json";
@@ -96,16 +96,37 @@ vi.mock("@/components/HeroBanner", () => ({
   default: () => <div>Hero</div>,
 }));
 
+vi.mock("@/hooks/queries/libraries", () => ({
+  useUserLibraries: () => ({
+    data: [{ id: 7, name: "Movies", type: "movies", sort_order: 0 }],
+    isLoading: false,
+  }),
+}));
+
+vi.mock("@/hooks/useAuth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/useAuth")>()),
+  useOptionalAuth: () => ({ user: { id: 1 } }),
+}));
+
+vi.mock("@/hooks/queries/shuffles", () => ({
+  useStartShuffle: () => ({ startShuffle: vi.fn(), isStarting: false }),
+}));
+
+vi.mock("@/components/LibraryHeader", () => ({
+  default: () => <div>Library header</div>,
+}));
+
 import LibraryBrowse from "./LibraryBrowse";
+import LibraryPage from "./LibraryPage";
 import LibraryRecommended from "./LibraryRecommended";
 
-function renderWithClient(ui: ReactNode) {
+function renderWithClient(ui: ReactNode, path = "/library/7") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/library/7"]}>{ui}</MemoryRouter>
+      <MemoryRouter initialEntries={[path]}>{ui}</MemoryRouter>
     </QueryClientProvider>,
   );
   return client;
@@ -135,6 +156,7 @@ function callsTo(key: string) {
 }
 
 afterEach(() => {
+  localStorage.clear();
   mocks.v2.mockReset();
   mocks.fetchLibrarySectionItems.mockReset();
   mocks.visibleEnd = null;
@@ -267,5 +289,61 @@ describe("Recommended tab load errors", () => {
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
     expect(screen.getAllByText("Row Recently Added")).not.toHaveLength(0);
     expect(callsTo("GET /api/v2/library/{id}/layout")).toBe(3);
+  });
+});
+
+describe("First entry to a library", () => {
+  function deferred() {
+    let reject!: (reason: unknown) => void;
+    const promise = new Promise<never>((_resolve, rej) => {
+      reject = rej;
+    });
+    return { promise, reject };
+  }
+
+  // The saved page state decides the tab, so the page waits for it. A server
+  // that stops answering then fails both reads one deadline after the click,
+  // not one deadline for the saved state and a second for the layout.
+  it("reads the layout beside the saved page state and shows its timeout without reading it again", async () => {
+    localStorage.setItem("profile_id", "profile-1");
+    const pageState = deferred();
+    const layout = deferred();
+    mocks.v2.mockImplementation((key: string, options: { query?: { keys?: string[] } }) => {
+      if (key === "GET /api/v2/settings/values/effective") {
+        return options.query?.keys?.includes("ui.library_page_state")
+          ? pageState.promise
+          : Promise.resolve({ items: [] });
+      }
+      if (key === "GET /api/v2/library/{id}/layout") return layout.promise;
+      return Promise.reject(new Error(`unexpected ${key}`));
+    });
+
+    renderWithClient(
+      <Routes>
+        <Route path="/library/:libraryId" element={<LibraryPage />} />
+      </Routes>,
+    );
+
+    await waitFor(() => expect(callsTo("GET /api/v2/library/{id}/layout")).toBe(1));
+
+    // Both deadlines pass; the layout's lands first, before the tab mounts.
+    await act(async () => {
+      layout.reject(new V2TimeoutError("getLibraryLayout", 30_000));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      pageState.reject(new V2TimeoutError("getEffectiveSettingValues", 30_000));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", { name: "Couldn't load recommendations" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText("The server isn't responding. Try again in a moment."),
+      ).toBeInTheDocument();
+    });
+    expect(callsTo("GET /api/v2/library/{id}/layout")).toBe(1);
   });
 });

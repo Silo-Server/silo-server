@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 func TestCatalogCompositionBudgetIsValidation(t *testing.T) {
@@ -36,23 +35,6 @@ func TestAdminCollectionRawCompositionAdmission(t *testing.T) {
 	_, err = h.CreateAdminCollection(t.Context(), AdminCollectionCreate{LibraryID: 1, Title: "Synthetic", CollectionType: "smart", QueryDefinition: raw})
 	if got, ok := errors.AsType[*APIError](err); !ok || got.Status != http.StatusBadRequest || got.Field != "query_definition" {
 		t.Fatalf("raw composed budget must be refused before normalization/database access: %v", err)
-	}
-}
-
-func TestLegacyLiveCollectionRawCompositionAdmission(t *testing.T) {
-	ids := make([]int, 256)
-	for i := range ids {
-		ids[i] = 1
-	}
-	raw, err := json.Marshal(catalog.QueryDefinition{LibraryIDs: ids})
-	if err != nil {
-		t.Fatal(err)
-	}
-	h := &LibraryCollectionHandler{Executor: &catalog.QueryExecutor{}}
-	_, _, err = h.loadLiveCollectionItems(t.Context(), &models.LibraryCollection{LibraryID: 1, QueryDefinition: raw}, catalog.AccessFilter{}, CollectionItemPage{})
-	queryErr, ok := errors.AsType[smartCollectionQueryError](err)
-	if !ok || !errors.Is(queryErr.err, catalog.ErrQueryComplexity) {
-		t.Fatalf("legacy binding and raw query escaped admission: %v", err)
 	}
 }
 

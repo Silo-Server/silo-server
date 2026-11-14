@@ -41,25 +41,6 @@ func capServerCollections(collections []*models.LibraryCollection) ([]*models.Li
 	return collections, total
 }
 
-// HandleListServerCollections aggregates visible server (admin-curated library)
-// collections across every library the requester can access, bucketed by
-// library. It powers the "Server collections" section of the user-facing
-// Collections tab, surfacing collections that otherwise live only inside each
-// individual library's tab.
-//
-// This is intentionally a separate endpoint from GET /collections (which
-// returns the user's editable personal collections): the two have different
-// access semantics and cache/refetch lifecycles, and overloading the personal
-// response with read-only server collections would be a client-facing trap.
-func (h *LibraryCollectionHandler) HandleListServerCollections(w http.ResponseWriter, r *http.Request) {
-	view, err := h.ListServerCollections(r.Context(), requestAccessFilter(r))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, view)
-}
-
 func (h *LibraryCollectionHandler) ListServerCollections(ctx context.Context, access catalog.AccessFilter) (ServerCollectionsView, error) {
 	resp := ServerCollectionsView{Libraries: []ServerCollectionsLibraryView{}}
 	if h.FolderRepo == nil {

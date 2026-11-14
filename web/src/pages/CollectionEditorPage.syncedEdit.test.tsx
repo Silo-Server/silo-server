@@ -567,7 +567,8 @@ it.each(["unavailable", "future-status"])(
     showEditorPage(SERVER_EDIT);
     await nameField();
     expect(within(statusStrip()).getByText("Count unavailable")).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent("Count unavailable.");
+    // An unknown count says nothing about what the failed list kept.
+    expect(screen.getByRole("alert")).not.toHaveTextContent(/Keeps|Count unavailable/);
     expect(screen.queryByText(/999 titles/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Keeps 0/)).not.toBeInTheDocument();
     const menu = await openMoreActions();

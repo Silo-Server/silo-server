@@ -12,6 +12,7 @@ import (
 
 type fakeAdminNotificationPush struct {
 	calls                     int
+	account                   int
 	platform, profile, device string
 	err                       error
 }
@@ -20,20 +21,20 @@ type fakeAdminNotificationPush struct {
 // for, standing in for a profile whose inbox is not empty.
 const fixtureNotifiedProfile = "notified-profile"
 
-func (f *fakeAdminNotificationPush) send(platform, profile, device string) (*notifications.ApplePushTestResult, error) {
+func (f *fakeAdminNotificationPush) send(platform string, account int, profile, device string) (*notifications.ApplePushTestResult, error) {
 	f.calls++
-	f.platform, f.profile, f.device = platform, profile, device
+	f.account, f.platform, f.profile, f.device = account, platform, profile, device
 	result := &notifications.ApplePushTestResult{AttemptID: "attempt-1", PushDeviceID: "device-1", ServerDeviceID: device, Outcome: "retrying", UpstreamStatus: new(503)}
 	if profile == fixtureNotifiedProfile {
 		result.DeliveryID, result.Outcome, result.UpstreamStatus = "delivery-1", "delivered", new(200)
 	}
 	return result, f.err
 }
-func (f *fakeAdminNotificationPush) SendApplePushTest(_ context.Context, profile, device string) (*notifications.ApplePushTestResult, error) {
-	return f.send("apple", profile, device)
+func (f *fakeAdminNotificationPush) SendApplePushTest(_ context.Context, account int, profile, device string) (*notifications.ApplePushTestResult, error) {
+	return f.send("apple", account, profile, device)
 }
-func (f *fakeAdminNotificationPush) SendAndroidPushTest(_ context.Context, profile, device string) (*notifications.ApplePushTestResult, error) {
-	return f.send("fcm", profile, device)
+func (f *fakeAdminNotificationPush) SendAndroidPushTest(_ context.Context, account int, profile, device string) (*notifications.ApplePushTestResult, error) {
+	return f.send("fcm", account, profile, device)
 }
 
 func TestAdminNotificationPushDispatch(t *testing.T) {
@@ -63,7 +64,7 @@ func TestAdminNotificationPushDispatch(t *testing.T) {
 			if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
 				t.Fatal(err)
 			}
-			if fake.calls != 1 || fake.platform != platform || fake.profile != "target-profile" || fake.device != "target-device" || result.Outcome != "retrying" || result.UpstreamStatus == nil || *result.UpstreamStatus != 503 || result.DeliveryID != "" {
+			if fake.calls != 1 || fake.account != 2 || fake.platform != platform || fake.profile != "target-profile" || fake.device != "target-device" || result.Outcome != "retrying" || result.UpstreamStatus == nil || *result.UpstreamStatus != 503 || result.DeliveryID != "" {
 				t.Fatalf("dispatch/result mismatch: %+v %+v", fake, result)
 			}
 			rec = do(t, h, http.MethodPost, path, `{"profile_id":"`+fixtureNotifiedProfile+`"}`, bearer(adminToken))

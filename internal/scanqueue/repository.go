@@ -13,6 +13,7 @@ import (
 
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/scantrigger"
 )
 
 const (
@@ -152,16 +153,23 @@ func (r *Repository) createOrCoalesce(ctx context.Context, db dbExecutor, input 
 // one more scan of the same scope is enqueued with the request's trigger.
 // Direct admin triggers are never recorded because queue workers do not claim
 // them; a follow-up carrying one would sit until the stale janitor failed it.
+//
+// An admin's request for a file's exact path is owed as a follow-up unless the
+// run already carries such a trigger as its follow-up, or as its own trigger
+// while it has not started: only that trigger lets the file scan import a file
+// the library's ignore files exclude (scantrigger.FileScanContext). It
+// replaces an automatic follow-up, which its own scan of the scope covers.
 func (r *Repository) coalesceIntoActive(ctx context.Context, db dbExecutor, input CreateInput) (*models.ScanRun, error) {
 	requeue := !isDirectTrigger(input.Trigger)
+	explicitFile := input.Mode == ModeFile && scantrigger.ExplicitPathTrigger(input.Trigger)
 	return scanRunRow(db.QueryRow(ctx, `
 		UPDATE scan_runs
 		SET followup_trigger = CASE
-				WHEN $5 AND status = $6 AND followup_trigger = '' THEN $7
+				WHEN `+oweFollowupSQL+` THEN $7
 				ELSE followup_trigger
 			END,
 			updated_at = CASE
-				WHEN $5 AND status = $6 AND followup_trigger = '' THEN NOW()
+				WHEN `+oweFollowupSQL+` THEN NOW()
 				ELSE updated_at
 			END
 		WHERE id = (
@@ -182,8 +190,17 @@ func (r *Repository) coalesceIntoActive(ctx context.Context, db dbExecutor, inpu
 		requeue,
 		StatusRunning,
 		input.Trigger,
+		explicitFile,
+		[]string{scantrigger.TriggerPath, scantrigger.TriggerLibraryIDPath},
 	))
 }
+
+// oweFollowupSQL is coalesceIntoActive's test for recording the request as the
+// run's follow-up.
+const oweFollowupSQL = `$5 AND (
+					(status = $6 AND followup_trigger = '')
+					OR ($8 AND NOT followup_trigger = ANY($9) AND (status = $6 OR NOT trigger = ANY($9)))
+				)`
 
 type dbExecutor interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row

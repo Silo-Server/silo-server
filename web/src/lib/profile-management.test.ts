@@ -10,6 +10,8 @@ import {
   buildProfileAccessSummary,
   buildProfileRequestFromDraft,
   buildProfileUpdateFromDraft,
+  canAddProfile,
+  canSwitchProfile,
   clearKidsPreset,
   createProfileDraft,
 } from "./profile-management";
@@ -219,6 +221,54 @@ describe("profile-management", () => {
     ).toBeNull();
   });
 
+  it("carries the requests switch through drafts, requests and the summary", () => {
+    const supported = { requestsAllowedSupported: true };
+    // A profile from a server that predates the switch counts as allowed.
+    expect(createProfileDraft(makeProfile()).requestsAllowed).toBe(true);
+    expect(createProfileDraft().requestsAllowed).toBe(true);
+
+    const blocked = createProfileDraft(makeProfile({ requests_allowed: false }));
+    expect(blocked.requestsAllowed).toBe(false);
+    expect(buildProfileUpdateFromDraft(blocked, supported).requests_allowed).toBe(false);
+    expect(
+      buildProfileUpdateFromDraft({ ...blocked, requestsAllowed: true }, supported)
+        .requests_allowed,
+    ).toBe(true);
+    expect(
+      buildProfileRequestFromDraft({ ...blocked, name: "Kid" }, supported).requests_allowed,
+    ).toBe(false);
+    // A new profile is allowed by default, so the member is left out.
+    expect(
+      "requests_allowed" in
+        buildProfileRequestFromDraft({ ...blocked, name: "Kid", requestsAllowed: true }, supported),
+    ).toBe(false);
+    // Never sent to a server that does not accept it.
+    expect("requests_allowed" in buildProfileUpdateFromDraft(blocked)).toBe(false);
+    expect("requests_allowed" in buildProfileRequestFromDraft({ ...blocked, name: "Kid" })).toBe(
+      false,
+    );
+
+    expect(buildProfileAccessSummary(makeProfile({ requests_allowed: false })).text).toBe(
+      "Any content · All libraries · Any quality · No requests",
+    );
+  });
+
+  it("turns requests off with the kids preset unless set by hand", () => {
+    const kids = applyKidsPreset(createProfileDraft(), {
+      contentRatingTouched: false,
+      libraryAccessTouched: false,
+    });
+    expect(kids.requestsAllowed).toBe(false);
+    expect(clearKidsPreset(kids).requestsAllowed).toBe(true);
+    expect(
+      applyKidsPreset(createProfileDraft(), {
+        contentRatingTouched: false,
+        libraryAccessTouched: false,
+        requestsTouched: true,
+      }).requestsAllowed,
+    ).toBe(true);
+  });
+
   it("offers every limit the server accepts", () => {
     const ages = ADVISORY_AGE_OPTIONS.flatMap((option) =>
       option.value === null ? [] : [option.value],
@@ -226,5 +276,24 @@ describe("profile-management", () => {
     expect(ADVISORY_AGE_OPTIONS[0]).toEqual({ value: null, label: "No limit" });
     // Exactly the server's range, so any stored limit has a matching option.
     expect(ages).toEqual(Array.from({ length: 21 }, (_, index) => index + 1));
+  });
+
+  it.each([
+    { count: 1, max: 1, want: false },
+    { count: 2, max: 1, want: false },
+    { count: 0, max: 1, want: true },
+    { count: 4, max: 5, want: true },
+    { count: 3, max: null, want: true },
+  ])("allows another profile for $count of $max: $want", ({ count, max, want }) => {
+    expect(canAddProfile(count, max)).toBe(want);
+  });
+
+  it.each([
+    { count: 1, max: 1, want: false },
+    { count: 2, max: 2, want: true },
+    { count: 1, max: 2, want: true },
+    { count: 1, max: null, want: true },
+  ])("offers Switch Profile for $count of $max: $want", ({ count, max, want }) => {
+    expect(canSwitchProfile(count, max)).toBe(want);
   });
 });

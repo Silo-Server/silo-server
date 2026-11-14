@@ -47,7 +47,7 @@ func TestCollectionCountAvailabilityRecoveryDB(t *testing.T) {
 	assert503(err)
 	// A failed preflight cannot commit a metadata edit and then report failure.
 	name := "Must not persist"
-	_, err = h.UpdatePersonalCollection(t.Context(), PersonalCollectionUpdateCommand{UserID: f.account, ProfileID: "owner", CollectionID: legacy.ID, Request: PersonalCollectionUpdateRequest{Name: &name}, V1Rules: true})
+	_, err = h.UpdatePersonalCollection(t.Context(), PersonalCollectionUpdateCommand{UserID: f.account, ProfileID: "owner", CollectionID: legacy.ID, Request: PersonalCollectionUpdateRequest{Name: &name}})
 	assert503(err)
 	stored, err := store.GetCollection(t.Context(), legacy.ID)
 	if err != nil {
@@ -87,7 +87,7 @@ func TestCollectionCountAvailabilityRecoveryDB(t *testing.T) {
 		t.Fatalf("v2 metadata edit: %+v, %v", edited, err)
 	}
 	// Known-ID repair works through frozen v1 even while its list fails.
-	repaired, err := h.UpdatePersonalCollection(t.Context(), PersonalCollectionUpdateCommand{UserID: f.account, ProfileID: "owner", CollectionID: legacy.ID, Request: PersonalCollectionUpdateRequest{QueryDefinition: json.RawMessage(`{"media_scope":"movie","groups":[{"rules":[{"field":"year","op":"gte","value":9999}]}]}`)}, V1Rules: true})
+	repaired, err := h.UpdatePersonalCollection(t.Context(), PersonalCollectionUpdateCommand{UserID: f.account, ProfileID: "owner", CollectionID: legacy.ID, Request: PersonalCollectionUpdateRequest{QueryDefinition: json.RawMessage(`{"media_scope":"movie","groups":[{"rules":[{"field":"year","op":"gte","value":9999}]}]}`)}})
 	if err != nil || repaired.ItemCountStatus != CollectionCountAvailable || repaired.ItemCount != 0 {
 		t.Fatalf("v1 repair/available empty: %+v, %v", repaired, err)
 	}

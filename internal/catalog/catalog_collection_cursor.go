@@ -7,9 +7,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
-	"github.com/jackc/pgx/v5"
 )
 
 var ErrCatalogCursorChanged = errors.New("catalog source changed during pagination")

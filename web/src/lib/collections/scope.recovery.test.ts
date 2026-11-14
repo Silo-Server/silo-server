@@ -100,10 +100,7 @@ describe("legacy definition metadata recovery", () => {
       draft,
     );
     const body = writes()[0]!.body as Record<string, unknown>;
-    expect(body.query_definition).toMatchObject({
-      groups: storedQuery(undefined).groups,
-      library_ids: [2],
-    });
+    expect(body.query_definition).toMatchObject({ groups: storedQuery(undefined).groups });
     expect(body.library_ids).toEqual(["2"]);
     expect(body).not.toHaveProperty("collection_type");
     expect(draft.rules?.groups).toHaveLength(17);
@@ -127,23 +124,25 @@ describe("legacy definition metadata recovery", () => {
     expect(writes()[0]!.body).toHaveProperty("display_query_definition", showOnly);
   });
 
-  it.each([PERSONAL_SCOPE, SERVER_SCOPE] as const)(
-    "sends a smart definition when only its library scope changes (%s)",
-    async (scope) => {
-      v2Recorder.answer(
-        scope.kind === "personal"
-          ? "GET /api/v2/collections/{id}"
-          : "GET /api/v2/admin/collections/{id}",
-        scope.kind === "personal"
-          ? personalSmartCollection(storedQuery(undefined))
-          : adminSmartCollection(storedQuery(undefined)),
-      );
-      const { draft, etag } = await loaded(scope as CollectionScope<WireCollection>);
-      const smart = { ...draft, kind: "smart" as const, rules: storedQuery(undefined) };
-      await scope.update({ id: "c1", etag }, { ...smart, libraryIds: [2] }, smart);
-      expect(writes()[0]!.body).toHaveProperty("query_definition.library_ids", [2]);
-    },
-  );
+  it("sends a personal smart definition when only its libraries change", async () => {
+    v2Recorder.answer(
+      "GET /api/v2/collections/{id}",
+      personalSmartCollection(storedQuery(undefined)),
+    );
+    const { draft, etag } = await loaded(PERSONAL_SCOPE);
+    const smart = { ...draft, kind: "smart" as const, rules: storedQuery(undefined) };
+    await PERSONAL_SCOPE.update({ id: "c1", etag }, { ...smart, libraryIds: [2] }, smart);
+    expect(writes()[0]!.body).toHaveProperty("query_definition.library_ids", [2]);
+  });
+
+  it("keeps a server smart definition out of a change to where it shows", async () => {
+    v2Recorder.answer("GET /api/v2/admin/collections/{id}", adminSmartCollection(legacyRules));
+    const { draft, etag } = await loaded(SERVER_SCOPE);
+    await SERVER_SCOPE.update({ id: "c1", etag }, { ...draft, libraryIds: [2] }, draft);
+    const body = writes()[0]!.body as Record<string, unknown>;
+    expect(body).not.toHaveProperty("query_definition");
+    expect(body.library_ids).toEqual(["2"]);
+  });
 
   it.each([PERSONAL_SCOPE, SERVER_SCOPE] as const)(
     "retains the complete definition without a loaded base (%s)",

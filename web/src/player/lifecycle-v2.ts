@@ -1,4 +1,6 @@
+import { problemDisplayText } from "@/api/v2/request";
 import type { components } from "@/api/v2/schema";
+import { t } from "@/i18n";
 import type { PlayerConfig } from "./context/PlayerConfigContext";
 import { playerFetchResponse, PlayerFetchError } from "./player-fetch";
 import { playerV2Origin } from "./player-v2";
@@ -57,11 +59,15 @@ export async function replanV2(
   );
   const text = await response.text().catch(() => "");
   if (!response.ok) {
-    let message = "Playback replan was refused";
+    let message = t("web.player.error.replanRefused");
     let code: string | undefined;
     try {
-      const problem = JSON.parse(text) as { detail?: string; type?: string };
-      if (problem.detail) message = problem.detail;
+      const problem = JSON.parse(text) as {
+        detail?: string;
+        type?: string;
+        errors?: { code?: string }[];
+      };
+      message = problemDisplayText(problem, problem.detail || message);
       code = problem.type?.split("?")[0]?.split("/").pop()?.replace(/#.*$/, "") || undefined;
     } catch {
       // A non-problem body keeps the generic message.

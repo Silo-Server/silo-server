@@ -43,35 +43,16 @@ type catalogRuleBuilder struct {
 // query, whose text search is the only one that reaches the episode catalog.
 var ErrSearchMediaScopeSource = errors.New(`type "video_with_episodes" is only supported with source "query"`)
 
-// CatalogRequestOptions widens the shared catalog grammar for callers that
-// opt in.
-type CatalogRequestOptions struct {
-	// SearchMediaScopes accepts the search-only MediaScopeVideoWithEpisodes in
-	// type. /api/v2 opts in; the frozen /api/v1 grammar keeps dropping it like
-	// any other unrecognized type.
-	SearchMediaScopes bool
-	// ExtendedRules accepts the rule fields and not_in_last added after the
-	// /api/v1 freeze. /api/v2 opts in; without it the request keeps V1Rules.
-	ExtendedRules bool
-}
-
 // ParseCatalogRequest converts catalog URL params into a normalized request.
 func ParseCatalogRequest(values url.Values) (CatalogRequest, error) {
-	return ParseCatalogRequestWithOptions(values, CatalogRequestOptions{})
-}
-
-// ParseCatalogRequestWithOptions is ParseCatalogRequest with an opt-in
-// grammar.
-func ParseCatalogRequestWithOptions(values url.Values, options CatalogRequestOptions) (CatalogRequest, error) {
 	req := CatalogRequest{
-		Source:  CatalogSource(strings.ToLower(strings.TrimSpace(values.Get("source")))),
-		Limit:   20,
-		V1Rules: !options.ExtendedRules,
+		Source: CatalogSource(strings.ToLower(strings.TrimSpace(values.Get("source")))),
+		Limit:  20,
 	}
 	if req.Source == "" {
 		req.Source = CatalogSourceQuery
 	}
-	searchMediaScope := options.SearchMediaScopes && isSearchMediaScope(values.Get("type"))
+	searchMediaScope := isSearchMediaScope(values.Get("type"))
 	// Refuse the search-only scope before a source's own checks run, so the
 	// refusal always names type rather than whatever the source rejects first.
 	if searchMediaScope && req.Source != CatalogSourceQuery && isKnownCatalogSource(req.Source) {

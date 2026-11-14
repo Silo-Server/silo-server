@@ -159,3 +159,29 @@ func (s *PostgresUserStore) listAllSectionOverrides(ctx context.Context, scope, 
 
 	return overrides, nil
 }
+
+// RenameCollectionRows retitles every profile's rows for one collection that
+// still carry its old name (see userstore.RenameCollectionRowTitle), in one
+// transaction under lockSectionOverrides.
+func (s *PostgresUserStore) RenameCollectionRows(ctx context.Context, kind, collectionID, oldTitle, newTitle string, visibleTo func(profileID string) bool) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("beginning collection row rename: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	err = rewriteSectionOverrides(ctx, tx, s.userID, func(overrides []userstore.SectionOverride) ([]userstore.SectionOverride, bool) {
+		changed := false
+		for i := range overrides {
+			if (visibleTo == nil || visibleTo(overrides[i].ProfileID)) &&
+				userstore.RenameCollectionRowTitle(&overrides[i], kind, collectionID, oldTitle, newTitle) {
+				overrides[i].UpdatedAt = nowUTC()
+				changed = true
+			}
+		}
+		return overrides, changed
+	})
+	if err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}

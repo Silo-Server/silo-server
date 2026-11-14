@@ -51,11 +51,11 @@ func TestLibraryCollectionCompositionAdmission(t *testing.T) {
 		ids[i] = i + 1
 	}
 	collection := &models.LibraryCollection{LibraryIDs: []int{1}, CollectionType: "smart", QueryDefinition: []byte(budgetDefinitionJSON(t, QueryDefinition{LibraryIDs: ids}))}
-	if _, err := ResolveLibraryCollectionMembership(collection, nil); !errors.Is(err, ErrQueryComplexity) {
+	if _, err := ResolveLibraryCollectionMembership(collection, AccessFilter{}); !errors.Is(err, ErrQueryComplexity) {
 		t.Fatalf("collection binding and query library composition exceeds 256: %v", err)
 	}
 	collection.QueryDefinition = []byte(budgetDefinitionJSON(t, QueryDefinition{LibraryIDs: ids[:queryMaxLibraries-1]}))
-	if _, err := ResolveLibraryCollectionMembership(collection, nil); err != nil {
+	if _, err := ResolveLibraryCollectionMembership(collection, AccessFilter{}); err != nil {
 		t.Fatalf("exact composed library boundary: %v", err)
 	}
 }

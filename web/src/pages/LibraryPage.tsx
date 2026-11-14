@@ -5,8 +5,10 @@ import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import LibraryHeader from "@/components/LibraryHeader";
 import { useUserLibraries } from "@/hooks/queries/libraries";
+import { useLibraryLayout } from "@/hooks/queries/sections";
 import { useStartShuffle } from "@/hooks/queries/shuffles";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { useT } from "@/i18n";
 import LibraryRecommended from "./LibraryRecommended";
 import LibraryBrowse from "./LibraryBrowse";
 import LibraryCollections from "./LibraryCollections";
@@ -40,6 +42,7 @@ interface HydratedLibrarySearch {
 }
 
 export default function LibraryPage() {
+  const t = useT();
   const { libraryId } = useParams<{ libraryId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: libraries, isLoading } = useUserLibraries();
@@ -107,6 +110,13 @@ export default function LibraryPage() {
     [libraryType, searchParamsKey],
   );
 
+  // The Recommended tab's layout read starts here, beside the library-list and
+  // saved-state reads the page waits on, not after them: on a first visit a
+  // server that stops answering then fails the tab one deadline after the
+  // click instead of two. This observer also refetches a failed layout when
+  // the tab is shown again.
+  useLibraryLayout(id, { enabled: activeTab === "recommended" });
+
   // Tracks whether LibraryRecommended is currently rendering a hero banner.
   // We can't derive this from layout metadata alone — a featured section can
   // still resolve to error/empty, in which case no hero is actually on screen
@@ -117,7 +127,7 @@ export default function LibraryPage() {
     setHasRenderedHero(rendered);
   }, []);
 
-  useDocumentTitle(library?.name ?? "Library");
+  useDocumentTitle(library?.name ?? t("web.library.page.titleFallback"));
 
   /* eslint-disable react-hooks/set-state-in-effect -- hydration provenance is synchronized with router state */
   useEffect(() => {
@@ -422,9 +432,9 @@ export default function LibraryPage() {
   if (!library) {
     return (
       <div className="text-muted-foreground flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-        <p>This library is hidden or unavailable for your account.</p>
+        <p>{t("web.library.page.unavailable")}</p>
         <Link to="/settings/libraries" className="text-primary text-sm font-medium hover:underline">
-          Manage library visibility in Settings
+          {t("web.library.page.manageVisibility")}
         </Link>
       </div>
     );

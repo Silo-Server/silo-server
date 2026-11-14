@@ -1,3 +1,6 @@
+import { t } from "@/i18n";
+import { formatLocale } from "@/lib/appLocale";
+
 /** A missing status is the legacy contract. Explicit future statuses fail closed. */
 export interface CollectionCountFields {
   item_count?: number;
@@ -11,12 +14,14 @@ export function collectionItemCount(collection: CollectionCountFields): number |
   return collection.item_count ?? 0;
 }
 
-export const COUNT_UNAVAILABLE = "Count unavailable";
-
 /** Undefined is for a view that has not loaded a collection yet. */
 export function collectionCountLabel(count: number | null | undefined): string | undefined {
   if (count === undefined) return undefined;
-  return count === null ? COUNT_UNAVAILABLE : `${count} title${count === 1 ? "" : "s"}`;
+  if (count === null) return t("web.collections.count.unavailable");
+  return t("web.collections.metaLine.titleCount", {
+    count,
+    shown: count.toLocaleString(formatLocale()),
+  });
 }
 
 /** Most titles first, with all unavailable counts after known counts (including zero). */

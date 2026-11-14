@@ -91,20 +91,32 @@ func TestEnsureTranscodeSession_StartsThrottleForFreshCompatRemux(t *testing.T) 
 	handler := NewPlaybackHandler(nil, nil, nil, nil, store, sessions, testCompatFileResolver{file: file}, nil)
 	handler.TranscodeDir = filepath.Join(dir, "transcode")
 	handler.FFmpegPath = ffmpegPath
-	started := make(chan *playback.TranscodeSession, 1)
-	handler.tm.StartThrottler = func(_ context.Context, session *playback.TranscodeSession) {
-		started <- session
+	// The client disconnects once the remux is ready. The transcode stays
+	// registered for its retry, so the throttle must still start.
+	ctx, disconnect := context.WithCancel(context.Background())
+	defer disconnect()
+	handler.compatLocalTranscodeReady = func(*playback.TranscodeSession) { disconnect() }
+	type throttleStart struct {
+		session *playback.TranscodeSession
+		ctxErr  error
+	}
+	started := make(chan throttleStart, 1)
+	handler.tm.StartThrottler = func(ctx context.Context, session *playback.TranscodeSession) {
+		started <- throttleStart{session: session, ctxErr: ctx.Err()}
 	}
 
-	transcode, err := handler.ensureTranscodeSession(context.Background(), "play-1", "upstream-1", source)
+	transcode, err := handler.ensureTranscodeSession(ctx, "play-1", "upstream-1", source)
 	if err != nil {
 		t.Fatalf("ensureTranscodeSession: %v", err)
 	}
 	t.Cleanup(func() { handler.tm.CloseTranscodeSession("upstream-1", "") })
 	select {
 	case got := <-started:
-		if got != transcode {
+		if got.session != transcode {
 			t.Fatal("throttle started for a different transcode session")
+		}
+		if got.ctxErr != nil {
+			t.Fatalf("throttle start context: %v, want one that outlives the request", got.ctxErr)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("fresh Jellyfin-compatible remux did not start the transcode throttle")

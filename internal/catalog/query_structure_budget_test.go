@@ -173,7 +173,7 @@ func TestQueryStructureURLAdmission(t *testing.T) {
 		{"duplicate library IDs", url.Values{"library_id": make([]string, queryMaxLibraries+1)}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := ParseCatalogRequestWithOptions(tc.values, CatalogRequestOptions{ExtendedRules: true}); !errors.Is(err, ErrQueryComplexity) {
+			if _, err := ParseCatalogRequest(tc.values); !errors.Is(err, ErrQueryComplexity) {
 				t.Fatalf("URL raw admission: %v", err)
 			}
 		})
@@ -184,11 +184,11 @@ func TestQueryStructureURLAdmission(t *testing.T) {
 		values.Set(fmt.Sprintf("groups[0][rules][%d][op]", i), "gte")
 		values.Set(fmt.Sprintf("groups[0][rules][%d][value]", i), "2000")
 	}
-	if _, err := ParseCatalogRequestWithOptions(values, CatalogRequestOptions{ExtendedRules: true}); err != nil {
+	if _, err := ParseCatalogRequest(values); err != nil {
 		t.Fatalf("URL exact rule boundary: %v", err)
 	}
 	values.Set("genre", "Synthetic")
-	if _, err := ParseCatalogRequestWithOptions(values, CatalogRequestOptions{ExtendedRules: true}); !errors.Is(err, ErrQueryComplexity) {
+	if _, err := ParseCatalogRequest(values); !errors.Is(err, ErrQueryComplexity) {
 		t.Fatalf("implicit/explicit composition: %v", err)
 	}
 }

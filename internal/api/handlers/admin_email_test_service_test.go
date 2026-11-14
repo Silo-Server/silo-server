@@ -3,8 +3,6 @@ package handlers
 import (
 	"context"
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -23,6 +21,9 @@ func (s *adminTestEmailSender) Send(_ context.Context, message silomail.Message)
 	s.message = message
 	return s.err
 }
+
+// A test email goes to one valid recipient, and a send failure is reported
+// without the provider's text, which can carry credentials.
 func TestAdminEmailSingleSendAndSafeFailure(t *testing.T) {
 	sender := &adminTestEmailSender{}
 	h := NewEmailHandler(sender, nil)
@@ -30,20 +31,13 @@ func TestAdminEmailSingleSendAndSafeFailure(t *testing.T) {
 	if err != nil || !result.OK || sender.calls != 1 || len(sender.message.To) != 1 || sender.message.To[0] != "recipient@example.test" || sender.message.Subject != "Silo test email" || sender.message.HTMLBody == "" {
 		t.Fatal(result, err, sender)
 	}
-	_, err = h.SendAdminTestEmail(t.Context(), "invalid recipient")
-	if !errors.Is(err, ErrAdminEmailRecipient) || sender.calls != 1 {
+	if _, err := h.SendAdminTestEmail(t.Context(), "invalid recipient"); !errors.Is(err, ErrAdminEmailRecipient) || sender.calls != 1 {
 		t.Fatal(err, sender.calls)
 	}
 	sender.err = errors.New("smtp failure with private credential")
 	result, err = h.SendAdminTestEmail(t.Context(), "recipient@example.test")
 	if err != nil || result.OK || strings.Contains(result.Message, "credential") || sender.calls != 2 {
 		t.Fatal(result, err, sender.calls)
-	}
-	// The frozen bridge retains its old provider-error response and message.
-	rec := httptest.NewRecorder()
-	h.HandleTest(rec, httptest.NewRequest(http.MethodPost, "/admin/email/test", strings.NewReader(`{"to":"recipient@example.test"}`)))
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "private credential") || sender.calls != 3 {
-		t.Fatal(rec.Code, rec.Body.String(), sender.calls)
 	}
 	sender.err = silomail.ErrNotConfigured
 	result, err = h.SendAdminTestEmail(t.Context(), "recipient@example.test")

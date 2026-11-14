@@ -1,0 +1,138 @@
+# Title allowances
+
+A title allowance lets a limited profile watch a specific movie or series above
+its maturity limits (content-rating ceiling and advisory-age limit). The
+household's primary profile grants it, one title at a time or through a
+personal collection. The API is described in
+[catalog-api.md](../catalog-api.md#allowed-titles).
+
+## Rule
+
+A title passes a profile's maturity limits when it is within them **or** it is
+allowed. In SQL, `catalog.ApplyMaturityLimits` renders
+`((limits) OR <key> = ANY(allowed))`, where `<key>` is the row's `content_id`.
+Episode rows key on their series instead, so a series allowance covers every
+season and episode: the `episode_catalog_entries` read model goes through
+`catalog.ApplyEpisodeMaturityLimits` (`series_id`), and the episode relation
+(`episodeCatalogBaseRelation`, used by episode-scope queries, facets and mixed
+search hydration) through `applyEpisodeRelationAccessFilter`
+(`episode_series_id`). A read over episode rows that keys on `content_id`
+would compare episode IDs with title IDs and hide allowed episodes. Extras have no rating of
+their own and follow their title.
+
+An allowance lifts only the profile's own maturity limits. Library access,
+hidden libraries and every other restriction still apply, and the API refuses
+an allowance for a title the profile cannot reach through its libraries. Two
+stricter limits also win over it:
+
+- A custom scope policy that sets a content-rating override or a different
+  advisory-age limit for the profile (`policy.maturityOverridden`): the
+  administrator's limit applies and no allowance does.
+- A Jellyfin client's `MaxOfficialRating` that narrows the ceiling
+  (`jellycompat.clampMaturityLimits`): the client asked for less than the
+  profile may see, so its allowed titles stop passing too.
+
+An allowance names a title, not a rating: it survives a metadata refresh that
+changes the title's rating. A limited profile never sees a title it is not
+already allowed, so there is no request-to-watch flow.
+
+## Where the list comes from
+
+`access.MaturityLimits.AllowedTitleIDs` carries the allowed titles with the
+rest of the limits, so every catalog read, cache key and cursor that already
+copies the limits picks them up. Scope resolution fills it from
+`userstore.Profile.AllowedTitleIDs`, which the single-profile read in `pgstore`
+loads in the same statement as the profile row
+(`pgstore.ProfileAllowedTitleIDsSQL`). It is set only while the limits are
+active (`MaturityLimits.WithAllowedTitles`), so an unrestricted scope keeps
+the same fingerprint and cache keys as before.
+
+A code path that builds limits without the list is stricter than intended,
+never looser: it hides allowed titles and exposes nothing.
+
+The list is bounded, because every request the profile makes reads it and
+passes it to the catalog SQL. Both what the read returns and what it scans
+are bounded. It returns at most `userstore.MaxAllowedTitles` (10,000) distinct
+titles: a `UNION ALL` with a `LIMIT` and no `ORDER BY`, so PostgreSQL stops
+once it has them. Its collection branch reads at most 50,000 whole-title
+entries (`sub_item_id = ''`, as collection membership counts elsewhere) of
+the live collections, five times the title bound, and deduplicates within
+them, leaving out titles the profile is allowed directly. So collections that
+overlap up to five times over still yield every distinct title. Within both
+bounds the list is exact. Past either, which titles the profile sees is
+unspecified and can change between reads, and the rest stay hidden, so the
+bounds fail closed rather than costing every request more. Writes are not
+capped: checking a live collection's future size at write time would be
+imprecise and racy, since the collection can grow without an allowance write.
+
+The list is the union of:
+
+- `profile_title_allowances`: one row per allowed movie or series.
+- The titles of each collection in `profile_collection_allowances`, read only
+  while the collection is `manual` and its creator is the account's current
+  primary profile. Only the household manager can then change what it holds.
+  A collection that stops meeting either condition allows nothing until it
+  does again.
+
+Copying a collection (`AllowCollectionTitles`) writes individual title
+allowances and does not follow later changes. It copies what the household
+manager sees in the collection: for another profile's collection, only titles
+its owner can access too (`catalog.PersonalCollectionFilter`, as every read of
+it applies), so a member hidden from its owner never becomes an allowance. A
+smart collection stores no items, so its copy is what its query matches under
+that access now. Each copied title must also be in a library the target
+profile can reach; that check runs separately, because a title can sit in
+several libraries.
+
+When titles merge (provider-ID merges and catalog reattribution), title
+allowances move to the surviving title like favorites and ratings do.
+
+## Shared personal collections
+
+A shared collection shows titles both its owner and the viewer may access
+(`catalog.IntersectAccess`). When only one side has limits, that side's
+allowances apply. When both do, only titles both allowed pass the combined
+limits. That is narrower than each side's own rule but never wider, so one
+profile's allowance cannot lift another profile's limit.
+
+## Writes
+
+Every write that changes a row advances the account's `access_policy_revision`
+in the same transaction. Membership changes to a live-allowed collection do
+not; the allowed list itself is part of the access scope, cache keys
+(`AccessFilter.WriteAccessScopeCacheKey`) and v2 cursor digests, so those
+change with it.
+
+Cached recommendation rows are built under a profile's scope and only
+filtered by it when read, so they cannot gain a newly allowed title on their
+own. An allowance write that changed a row tells the recommendations worker
+to rebuild the target profile, as a change to its limits does. Titles a live
+collection gains later reach its recommendations when the daily recommendations
+job or another signal change rebuilds them; they are visible everywhere else at
+once.
+
+Allowance rows cascade away with their profile, title or collection. Writes go
+through `pgstore.TitleAllowances`, a store over the shared tables rather than
+optional methods on the per-account user store, so a decorated user-store
+provider (the notifications interest wrapper) cannot hide it. It is wired only
+when the user store keeps accounts in the same PostgreSQL database
+(`StoresAccountsIn`); otherwise the capability reports `unsupported` and no
+allowance can apply.
+
+## Backups
+
+A full restore carries both tables like the rest of the server's data. The
+restore authority check (`backup.profileLimits.looserThan`) reads each
+profile's allowed titles with the same SQL as the access scope and counts a
+title allowed in the backup but not on the live server as a loosening, like a
+lifted ceiling. That read is bounded, so the check also compares the raw rows
+uncapped: every title allowance, every allowed collection, and every member
+of those collections. A row past the bound could otherwise become effective
+later without having been compared. A single-account restore and a profile export leave
+allowances out; the household manager grants them again.
+
+## Playback and downloads
+
+Item access is checked by the same SQL before playback or a download starts.
+The policy engine's `content_rating_within_ceiling` input is not set by any
+live caller, so allowances need nothing there.

@@ -27,9 +27,10 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { useLibraryRealtimeMonitoring } from "@/hooks/queries/admin/libraries";
+import { useAppLanguage, useT, type Translate } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { extraKindGroupLabel, PROVIDER_TRAILER_KINDS } from "@/lib/extraKinds";
-import { LANGUAGES } from "@/player/utils/languageNames";
+import { languageOptions } from "@/player/utils/languageNames";
 
 import { BOX_SET_MIN_MOVIE_OPTIONS, LIBRARY_TYPES } from "./libraryTypes";
 import {
@@ -40,6 +41,22 @@ import {
 import { contentLevelLabel } from "./useLibraryForm";
 import type { LevelChainItem, LibraryFormController } from "./useLibraryForm";
 import { LibraryTranslatePanel } from "./LibraryTranslatePanel";
+
+// An example folder path, which is data in every language.
+const FOLDER_PATH_PLACEHOLDER = "/mnt/media/movies";
+
+// A library's metadata_language is a bare ISO 639-1 code; the server rejects
+// regional tags such as pt-BR, so the picker leaves them out.
+function libraryMetadataLanguages() {
+  return languageOptions().filter((lang) => /^[a-z]{2}$/.test(lang.code));
+}
+
+// Widens a switch's hit area to 44px on a phone without changing how it looks.
+const SWITCH_TOUCH_TARGET =
+  "relative max-sm:after:absolute max-sm:after:-inset-x-2 max-sm:after:-inset-y-3.5";
+
+// Grows a native checkbox to a comfortable tap size on a phone.
+const CHECKBOX_SIZE = "size-5 shrink-0 sm:size-3.5";
 
 function SettingCard({
   htmlFor,
@@ -57,7 +74,7 @@ function SettingCard({
   return (
     <div className="border-border bg-surface rounded-xl border p-3.5">
       <div className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
+        <div className="min-w-0 space-y-1">
           <Label htmlFor={htmlFor}>{title}</Label>
           <p className="text-muted-foreground text-xs leading-relaxed">{description}</p>
           {footer}
@@ -75,25 +92,27 @@ export function GeneralFields({
   form: LibraryFormController;
   posterSlot?: ReactNode;
 }) {
+  const t = useT();
   return (
     <div className="space-y-5">
       <div className="space-y-1.5">
-        <Label htmlFor="library-name">Name</Label>
+        <Label htmlFor="library-name">{t("web.admin.common.libraryEditor.general.name")}</Label>
         <Input
           id="library-name"
           value={form.name}
           onChange={(e) => form.setName(e.target.value)}
-          placeholder="e.g. Movies"
+          placeholder={t("web.admin.common.libraryEditor.general.namePlaceholder")}
           aria-invalid={form.errors.name ? true : undefined}
+          className="h-11 sm:h-9"
         />
         {form.errors.name ? <p className="text-destructive text-xs">{form.errors.name}</p> : null}
       </div>
       <div className="space-y-1.5">
-        <Label>Type</Label>
+        <Label>{t("web.admin.common.libraryEditor.general.type")}</Label>
         <div
-          className="grid grid-cols-3 gap-2 sm:grid-cols-5"
+          className="grid grid-cols-2 gap-2 sm:grid-cols-5"
           role="radiogroup"
-          aria-label="Library type"
+          aria-label={t("web.admin.common.libraryEditor.general.typeGroup")}
         >
           {LIBRARY_TYPES.map(({ value, label, icon: Icon }) => {
             const selected = form.type === value;
@@ -105,7 +124,7 @@ export function GeneralFields({
                 aria-checked={selected}
                 onClick={() => form.handleTypeChange(value)}
                 className={cn(
-                  "flex flex-col items-center gap-1.5 rounded-xl border px-2 py-3 transition-colors duration-150",
+                  "flex min-w-0 flex-col items-center gap-1.5 rounded-xl border px-2 py-3 transition-colors duration-150",
                   selected
                     ? "border-primary/50 bg-primary/10 text-foreground"
                     : "border-border bg-surface text-muted-foreground hover:bg-surface-hover hover:text-foreground",
@@ -114,24 +133,27 @@ export function GeneralFields({
                 <Icon
                   className={cn("size-5", selected ? "text-primary" : "text-muted-foreground")}
                 />
-                <span className="text-[11px] font-medium">{label}</span>
+                <span className="text-center text-xs font-medium break-words sm:text-[11px]">
+                  {label}
+                </span>
               </button>
             );
           })}
         </div>
         {form.library && form.type !== form.library.type ? (
           <p className="text-warning text-xs">
-            Changing the type of an existing library may require a full rescan to rematch items.
+            {t("web.admin.common.libraryEditor.general.typeChangeWarning")}
           </p>
         ) : null}
       </div>
       <SettingCard
         htmlFor="library-enabled-switch"
-        title="Enabled"
-        description="Disabled libraries are hidden from browsing and skipped by scans."
+        title={t("web.admin.common.libraryEditor.general.enabled")}
+        description={t("web.admin.common.libraryEditor.general.enabledDescription")}
       >
         <Switch
           id="library-enabled-switch"
+          className={SWITCH_TOUCH_TARGET}
           checked={form.enabled}
           onCheckedChange={form.setEnabled}
         />
@@ -142,7 +164,10 @@ export function GeneralFields({
 }
 
 export function FolderFields({ form }: { form: LibraryFormController }) {
+  const t = useT();
   const [browserOpen, setBrowserOpen] = useState(false);
+  const browseLabel = t("web.admin.common.libraryEditor.folders.browse");
+  const addPathLabel = t("web.admin.common.libraryEditor.folders.addPath");
 
   return (
     <div className="space-y-3">
@@ -153,17 +178,18 @@ export function FolderFields({ form }: { form: LibraryFormController }) {
             <PathAutocompleteInput
               value={path}
               onValueChange={(value) => form.updatePath(i, value)}
-              placeholder="/mnt/media/movies"
+              placeholder={FOLDER_PATH_PLACEHOLDER}
               aria-invalid={form.errors.paths ? true : undefined}
+              className="h-11 sm:h-9"
             />
             {form.paths.length > 1 && (
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="text-muted-foreground hover:text-destructive size-9 shrink-0"
+                className="text-muted-foreground hover:text-destructive size-11 shrink-0 sm:size-9"
                 onClick={() => form.removePath(i)}
-                title="Remove folder"
+                title={t("web.admin.common.libraryEditor.folders.remove")}
               >
                 <Trash2 className="size-3.5" />
               </Button>
@@ -172,12 +198,24 @@ export function FolderFields({ form }: { form: LibraryFormController }) {
         ))}
       </div>
       {form.errors.paths ? <p className="text-destructive text-xs">{form.errors.paths}</p> : null}
-      <div className="flex gap-1.5">
-        <Button type="button" variant="outline" size="sm" onClick={() => setBrowserOpen(true)}>
-          <FolderSearch className="mr-1 size-3.5" /> Browse
+      <div className="flex flex-wrap gap-1.5">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-11 flex-1 sm:h-8 sm:flex-none"
+          onClick={() => setBrowserOpen(true)}
+        >
+          <FolderSearch className="me-1 size-3.5" /> {browseLabel}
         </Button>
-        <Button type="button" variant="outline" size="sm" onClick={form.addPath}>
-          <Plus className="mr-1 size-3.5" /> Add Path
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-11 flex-1 sm:h-8 sm:flex-none"
+          onClick={form.addPath}
+        >
+          <Plus className="me-1 size-3.5" /> {addPathLabel}
         </Button>
       </div>
       <FolderBrowser
@@ -199,6 +237,7 @@ export function FolderFields({ form }: { form: LibraryFormController }) {
  * only the admin library editor fetches the monitoring status.
  */
 export function RealtimeMonitoringFields({ form }: { form: LibraryFormController }) {
+  const t = useT();
   const { data: status } = useLibraryRealtimeMonitoring();
   const serverOff = status?.server_enabled === false;
   const { library } = form;
@@ -213,14 +252,16 @@ export function RealtimeMonitoringFields({ form }: { form: LibraryFormController
   if (serverOff) {
     footer = (
       <p className="text-muted-foreground text-xs">
-        Real-time monitoring is turned off server-wide. Turn it on in{" "}
-        <Link
-          to={REALTIME_MONITORING_SETTINGS_PATH}
-          className="text-foreground font-medium underline underline-offset-2"
-        >
-          Settings → Library &amp; Metadata
-        </Link>
-        .
+        {t("web.admin.common.libraryEditor.monitoring.serverOff", {
+          link: (chunks) => (
+            <Link
+              to={REALTIME_MONITORING_SETTINGS_PATH}
+              className="text-foreground font-medium underline underline-offset-2"
+            >
+              {chunks}
+            </Link>
+          ),
+        })}
       </p>
     );
   } else if (entry && !hasUnsavedChange) {
@@ -231,7 +272,9 @@ export function RealtimeMonitoringFields({ form }: { form: LibraryFormController
           realtimeMonitoringNeedsAttention(entry) ? "text-warning" : "text-muted-foreground",
         )}
       >
-        Status: {realtimeMonitoringStatusText(entry)}
+        {t("web.admin.common.libraryEditor.monitoringStatus.line", {
+          status: realtimeMonitoringStatusText(entry),
+        })}
       </p>
     );
   }
@@ -239,12 +282,13 @@ export function RealtimeMonitoringFields({ form }: { form: LibraryFormController
   return (
     <SettingCard
       htmlFor="realtime-monitoring-switch"
-      title="Real-time monitoring"
-      description="Scan this library automatically when its files change."
+      title={t("web.admin.common.libraryEditor.monitoring.title")}
+      description={t("web.admin.common.libraryEditor.monitoring.description")}
       footer={footer}
     >
       <Switch
         id="realtime-monitoring-switch"
+        className={SWITCH_TOUCH_TARGET}
         checked={form.realtimeMonitoring}
         disabled={serverOff}
         onCheckedChange={form.setRealtimeMonitoring}
@@ -264,6 +308,8 @@ function ProviderLevelSection({
   onReorder: (items: LevelChainItem[]) => void;
   onToggleEnabled: (index: number) => void;
 }) {
+  // contentLevelLabel reads the interface language.
+  useAppLanguage();
   const [collapsed, setCollapsed] = useState(false);
 
   const moveItem = (index: number, direction: -1 | 1) => {
@@ -279,7 +325,7 @@ function ProviderLevelSection({
       <button
         type="button"
         onClick={() => setCollapsed(!collapsed)}
-        className="text-primary hover:text-primary/80 mb-1.5 flex items-center gap-1.5 text-xs font-semibold tracking-wider uppercase"
+        className="text-primary hover:text-primary/80 mb-1.5 flex min-h-11 items-center gap-1.5 text-start text-xs font-semibold tracking-wider uppercase sm:min-h-0"
       >
         {collapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
         {contentLevelLabel(level)}
@@ -290,40 +336,42 @@ function ProviderLevelSection({
             <div
               key={`${item.plugin_installation_id}:${item.capability_id}`}
               className={cn(
-                "flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm",
+                "flex items-center gap-2 rounded-md border px-2.5 py-0.5 text-sm sm:py-1.5",
                 item.enabled
                   ? "border-border bg-muted text-foreground"
                   : "border-border/50 bg-muted/30 text-muted-foreground",
               )}
             >
-              <input
-                type="checkbox"
-                checked={item.enabled}
-                onChange={() => onToggleEnabled(i)}
-                className="h-3.5 w-3.5"
-                style={{ accentColor: "var(--primary)" }}
-              />
-              <span className="flex-1 font-mono text-xs">{item.provider_slug}</span>
+              <label className="flex min-h-11 min-w-0 flex-1 cursor-pointer items-center gap-2 sm:min-h-0">
+                <input
+                  type="checkbox"
+                  checked={item.enabled}
+                  onChange={() => onToggleEnabled(i)}
+                  className={CHECKBOX_SIZE}
+                  style={{ accentColor: "var(--primary)" }}
+                />
+                <span className="min-w-0 font-mono text-xs break-all">{item.provider_slug}</span>
+              </label>
               <div className="flex gap-0.5">
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="h-5 w-5"
+                  className="size-11 sm:size-5"
                   disabled={i === 0}
                   onClick={() => moveItem(i, -1)}
                 >
-                  <ArrowUp className="h-2.5 w-2.5" />
+                  <ArrowUp className="size-4 sm:size-2.5" />
                 </Button>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="h-5 w-5"
+                  className="size-11 sm:size-5"
                   disabled={i === items.length - 1}
                   onClick={() => moveItem(i, 1)}
                 >
-                  <ArrowDown className="h-2.5 w-2.5" />
+                  <ArrowDown className="size-4 sm:size-2.5" />
                 </Button>
               </div>
               <span className="text-muted-foreground/70 font-mono text-[10px]">{i + 1}</span>
@@ -341,18 +389,21 @@ function boxSetMinMovieOptions(current: number): number[] {
 }
 
 export function BoxSetFields({ form }: { form: LibraryFormController }) {
+  const t = useT();
   return (
     <div className="border-border bg-surface rounded-xl border p-3.5">
       <div className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <Label htmlFor="box-sets-enabled">Box sets</Label>
+        <div className="min-w-0 space-y-1">
+          <Label htmlFor="box-sets-enabled">
+            {t("web.admin.common.libraryEditor.boxSets.title")}
+          </Label>
           <p className="text-muted-foreground text-xs leading-relaxed">
-            Group movies that TMDB lists in the same collection, such as the Harry Potter films,
-            into one box set in this library. Your files and watch history stay as they are.
+            {t("web.admin.common.libraryEditor.boxSets.description")}
           </p>
         </div>
         <Switch
           id="box-sets-enabled"
+          className={SWITCH_TOUCH_TARGET}
           checked={form.boxSetsEnabled}
           onCheckedChange={form.setBoxSetsEnabled}
         />
@@ -360,7 +411,9 @@ export function BoxSetFields({ form }: { form: LibraryFormController }) {
       {form.boxSetsEnabled && (
         <div className="border-border mt-3 space-y-3 border-t pt-3">
           <div className="space-y-1.5">
-            <Label id="box-set-min-movies-label">Minimum movies in a box set</Label>
+            <Label id="box-set-min-movies-label">
+              {t("web.admin.common.libraryEditor.boxSets.minMovies")}
+            </Label>
             <div
               role="radiogroup"
               aria-labelledby="box-set-min-movies-label"
@@ -376,7 +429,7 @@ export function BoxSetFields({ form }: { form: LibraryFormController }) {
                     aria-checked={selected}
                     onClick={() => form.setBoxSetMinMovies(count)}
                     className={cn(
-                      "rounded-full px-3 py-0.5 text-xs font-medium transition-colors",
+                      "min-h-11 min-w-11 rounded-full px-3 py-0.5 text-xs font-medium transition-colors sm:min-h-0 sm:min-w-0",
                       selected
                         ? "bg-primary text-primary-foreground"
                         : "text-muted-foreground hover:text-foreground",
@@ -388,26 +441,27 @@ export function BoxSetFields({ form }: { form: LibraryFormController }) {
               })}
             </div>
             <p className="text-muted-foreground text-xs">
-              A box set needs at least this many of its movies in this library. With fewer, the
-              movies show on their own.
+              {t("web.admin.common.libraryEditor.boxSets.minMoviesHelp")}
             </p>
           </div>
           <div className="flex items-start justify-between gap-4">
-            <div className="space-y-0.5">
-              <Label htmlFor="box-sets-in-search">Show box sets in search</Label>
+            <div className="min-w-0 space-y-0.5">
+              <Label htmlFor="box-sets-in-search">
+                {t("web.admin.common.libraryEditor.boxSets.inSearch")}
+              </Label>
               <p className="text-muted-foreground text-xs">
-                List a matching box set first in search results, with its movies after it.
+                {t("web.admin.common.libraryEditor.boxSets.inSearchHelp")}
               </p>
             </div>
             <Switch
               id="box-sets-in-search"
+              className={SWITCH_TOUCH_TARGET}
               checked={form.boxSetsInSearch}
               onCheckedChange={form.setBoxSetsInSearch}
             />
           </div>
           <p className="text-muted-foreground text-xs">
-            Box sets appear once Silo has looked up your movies&apos; collections, which runs in the
-            background after you save.
+            {t("web.admin.common.libraryEditor.boxSets.lookupNote")}
           </p>
         </div>
       )}
@@ -416,16 +470,17 @@ export function BoxSetFields({ form }: { form: LibraryFormController }) {
 }
 
 export function MetadataFields({ form }: { form: LibraryFormController }) {
+  const t = useT();
   return (
     <div className="space-y-5">
       <div className="space-y-1.5">
-        <Label>Metadata Language</Label>
+        <Label>{t("web.admin.common.libraryEditor.metadata.language")}</Label>
         <Select value={form.metadataLanguage} onValueChange={form.setMetadataLanguage}>
-          <SelectTrigger className="w-full sm:w-64">
+          <SelectTrigger className="w-full data-[size=default]:h-11 sm:w-64 sm:data-[size=default]:h-9">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {LANGUAGES.map((lang) => (
+            {libraryMetadataLanguages().map((lang) => (
               <SelectItem key={lang.code} value={lang.code}>
                 {lang.label}
               </SelectItem>
@@ -433,20 +488,21 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
           </SelectContent>
         </Select>
         <p className="text-muted-foreground text-xs">
-          Preferred language for titles, summaries, and artwork fetched from providers.
+          {t("web.admin.common.libraryEditor.metadata.languageHelp")}
         </p>
       </div>
       <div className="flex items-start justify-between gap-4">
-        <div className="space-y-0.5">
-          <Label htmlFor="auto-translate-metadata">Auto-translate descriptions</Label>
+        <div className="min-w-0 space-y-0.5">
+          <Label htmlFor="auto-translate-metadata">
+            {t("web.admin.common.libraryEditor.metadata.autoTranslate")}
+          </Label>
           <p className="text-muted-foreground text-xs">
-            When providers have no translation for this library&apos;s language, translate
-            descriptions with AI after each refresh. Requires AI description translation in Admin
-            Settings → AI.
+            {t("web.admin.common.libraryEditor.metadata.autoTranslateHelp")}
           </p>
         </div>
         <Switch
           id="auto-translate-metadata"
+          className={SWITCH_TOUCH_TARGET}
           checked={form.autoTranslateMetadata}
           onCheckedChange={form.setAutoTranslateMetadata}
         />
@@ -455,15 +511,14 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
       {form.settingSupport.boxSets && <BoxSetFields form={form} />}
       {form.settingSupport.trailers && (
         <div className="space-y-1.5">
-          <Label>Trailer &amp; extras types</Label>
+          <Label>{t("web.admin.common.libraryEditor.metadata.trailerKinds")}</Label>
           <p className="text-muted-foreground text-xs">
-            Video types fetched from metadata providers during refresh. Uncheck everything to
-            disable remote trailers for this library.
+            {t("web.admin.common.libraryEditor.metadata.trailerKindsHelp")}
           </p>
           <div
             className="grid grid-cols-1 gap-1.5 sm:grid-cols-2"
             role="group"
-            aria-label="Trailer and extras types"
+            aria-label={t("web.admin.common.libraryEditor.metadata.trailerKindsGroup")}
           >
             {PROVIDER_TRAILER_KINDS.map((kind) => {
               const checked = form.trailerKinds.includes(kind);
@@ -471,7 +526,7 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
                 <label
                   key={kind}
                   className={cn(
-                    "flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm",
+                    "flex min-h-11 cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm sm:min-h-0",
                     checked
                       ? "border-border bg-muted text-foreground"
                       : "border-border/50 bg-muted/30 text-muted-foreground",
@@ -481,7 +536,7 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
                     type="checkbox"
                     checked={checked}
                     onChange={() => form.toggleTrailerKind(kind)}
-                    className="h-3.5 w-3.5"
+                    className={CHECKBOX_SIZE}
                     style={{ accentColor: "var(--primary)" }}
                   />
                   {extraKindGroupLabel(kind)}
@@ -493,15 +548,14 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
       )}
       {form.contentLevels.length > 0 && (
         <div className="space-y-1.5">
-          <Label>Provider Priority</Label>
+          <Label>{t("web.admin.common.libraryEditor.metadata.providerPriority")}</Label>
           <p className="text-muted-foreground mb-3 text-xs">
-            Local metadata always comes first. Remote providers are asked in order from top to
-            bottom and fill in what is still missing. Uncheck a provider to skip it for that level.
+            {t("web.admin.common.libraryEditor.metadata.providerPriorityHelp")}
           </p>
           {form.chainLoading ? (
             <div className="border-border bg-surface text-muted-foreground flex items-center justify-center gap-2 rounded-xl border border-dashed p-4 text-xs">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Loading providers…
+              {t("web.admin.common.libraryEditor.metadata.loadingProviders")}
             </div>
           ) : form.hasMetadataProviders ? (
             <>
@@ -509,11 +563,14 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
                 <div className="mb-3">
                   <SettingCard
                     htmlFor="local-metadata-switch"
-                    title="Local metadata (NFO + artwork)"
-                    description="Reads .nfo files and artwork saved next to your media. Runs first at every level, so its values win over remote providers; fields you lock while editing an item win over both."
+                    title={t("web.admin.common.libraryEditor.metadata.localMetadata")}
+                    description={t(
+                      "web.admin.common.libraryEditor.metadata.localMetadataDescription",
+                    )}
                   >
                     <Switch
                       id="local-metadata-switch"
+                      className={SWITCH_TOUCH_TARGET}
                       checked={form.localMetadataEnabled}
                       onCheckedChange={form.toggleLocalMetadata}
                     />
@@ -532,15 +589,13 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
                 ))
               ) : (
                 <p className="border-border bg-surface text-muted-foreground rounded-xl border border-dashed p-4 text-center text-xs">
-                  No remote metadata provider plugins are installed. Install one under Admin →
-                  Plugins to fetch artwork and descriptions.
+                  {t("web.admin.common.libraryEditor.metadata.noRemoteProviders")}
                 </p>
               )}
             </>
           ) : (
             <p className="border-border bg-surface text-muted-foreground rounded-xl border border-dashed p-4 text-center text-xs">
-              No metadata provider plugins are installed. Install one under Admin → Plugins to fetch
-              artwork and descriptions.
+              {t("web.admin.common.libraryEditor.metadata.noProviders")}
             </p>
           )}
         </div>
@@ -559,24 +614,25 @@ export function AdvancedFields({
   /** Undefined when the server does not offer seek previews. */
   trickplaySupported?: boolean;
 }) {
+  const t = useT();
   return (
     <div className="space-y-3">
       {form.settingSupport.chapterThumbnails && (
         <SettingCard
           htmlFor="chapter-thumbnails-switch"
-          title="Generate chapter thumbnails"
-          description="Stores chapter preview images in artwork storage (local disk or S3). Chapter markers and chapter menus still work without thumbnails."
+          title={t("web.admin.common.libraryEditor.advanced.chapterThumbnails")}
+          description={t("web.admin.common.libraryEditor.advanced.chapterThumbnailsDescription")}
           footer={
             !chapterThumbnailsSupported ? (
               <p className="text-warning text-xs">
-                Artwork storage must be available before this can be enabled. Check it in Storage
-                &amp; Database settings.
+                {t("web.admin.common.libraryEditor.advanced.chapterThumbnailsUnavailable")}
               </p>
             ) : null
           }
         >
           <Switch
             id="chapter-thumbnails-switch"
+            className={SWITCH_TOUCH_TARGET}
             checked={form.chapterThumbnailsEnabled}
             disabled={!chapterThumbnailsSupported}
             onCheckedChange={form.setChapterThumbnailsEnabled}
@@ -586,18 +642,19 @@ export function AdvancedFields({
       {form.settingSupport.trickplay && trickplaySupported !== undefined && (
         <SettingCard
           htmlFor="trickplay-switch"
-          title="Generate seek previews"
-          description="Makes the thumbnails players show while seeking, in the configured public asset storage. Files are processed in the background at low priority. Turning this off deletes the library's previews."
+          title={t("web.admin.common.libraryEditor.advanced.trickplay")}
+          description={t("web.admin.common.libraryEditor.advanced.trickplayDescription")}
           footer={
             !trickplaySupported ? (
               <p className="text-warning text-xs">
-                Public asset storage is required before this can be enabled.
+                {t("web.admin.common.libraryEditor.advanced.trickplayUnavailable")}
               </p>
             ) : null
           }
         >
           <Switch
             id="trickplay-switch"
+            className={SWITCH_TOUCH_TARGET}
             checked={form.trickplayEnabled}
             disabled={!trickplaySupported && !form.trickplayEnabled}
             onCheckedChange={form.setTrickplayEnabled}
@@ -605,9 +662,13 @@ export function AdvancedFields({
         </SettingCard>
       )}
       {form.settingSupport.introDetection && (
-        <SettingCard htmlFor="intro-detection-switch" {...markerDetectionCopy(form.settingSupport)}>
+        <SettingCard
+          htmlFor="intro-detection-switch"
+          {...markerDetectionCopy(form.settingSupport, t)}
+        >
           <Switch
             id="intro-detection-switch"
+            className={SWITCH_TOUCH_TARGET}
             checked={form.introDetectionEnabled}
             onCheckedChange={form.setIntroDetectionEnabled}
           />
@@ -620,25 +681,23 @@ export function AdvancedFields({
 // markerDetectionCopy describes what local marker detection covers in a
 // library: movies get best-effort end credits only, episodes get intros and
 // credits, and mixed libraries hold both.
-function markerDetectionCopy(support: {
-  creditsOnlyDetection: boolean;
-  movieCreditsDetection: boolean;
-}): { title: string; description: string } {
+function markerDetectionCopy(
+  support: {
+    creditsOnlyDetection: boolean;
+    movieCreditsDetection: boolean;
+  },
+  t: Translate,
+): { title: string; description: string } {
   if (support.creditsOnlyDetection) {
     return {
-      title: "Detect credits markers (best effort)",
-      description:
-        "Looks for end credits in movies in this library, from embedded chapters and the picture near the end. Some movies get no credits marker, or one that starts late. Needs Detect credits on in server settings.",
+      title: t("web.admin.common.libraryEditor.advanced.creditsTitle"),
+      description: t("web.admin.common.libraryEditor.advanced.creditsDescription"),
     };
   }
-  const episodes =
-    "Runs background audio analysis for episodes in this library. Embedded intro and credits chapters are used when available.";
-  const kinds =
-    "Detect intros and Detect credits in server settings choose which markers it finds.";
   return {
-    title: "Detect intro and credits markers",
+    title: t("web.admin.common.libraryEditor.advanced.introCreditsTitle"),
     description: support.movieCreditsDetection
-      ? `${episodes} Movies get end credits only, on a best-effort basis. ${kinds}`
-      : `${episodes} ${kinds}`,
+      ? t("web.admin.common.libraryEditor.advanced.introCreditsMixedDescription")
+      : t("web.admin.common.libraryEditor.advanced.introCreditsDescription"),
   };
 }

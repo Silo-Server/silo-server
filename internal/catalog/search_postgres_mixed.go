@@ -48,7 +48,7 @@ func (r *ItemRepository) GetSearchItemsByIDsWithAccess(
 		&args,
 		&argIdx,
 	)
-	applyAccessFilter("mi", AccessFilter{
+	applyEpisodeRelationAccessFilter("mi", AccessFilter{
 		MaturityLimits:     filter.MaturityLimits,
 		ExcludedMediaTypes: filter.ExcludedMediaTypes,
 	}, &episodeConditions, &args, &argIdx)
@@ -172,7 +172,7 @@ func (r *ItemRepository) buildMixedSearchCursorSQL(parsed parsedSearchQuery, ite
 	var episodeLibraries, episodePolicy []string
 	if includeEpisodes {
 		appendEpisodeCatalogSearchAccess("ece", filter, &episodeLibraries, &episodePolicy, &args, &argIdx)
-		ApplyMaturityLimits("ece", AccessFilter{
+		ApplyEpisodeMaturityLimits("ece", AccessFilter{
 			MaturityLimits: filter.MaturityLimits,
 		}, &episodePolicy, &args, &argIdx)
 		if len(filter.ExcludedMediaTypes) > 0 {

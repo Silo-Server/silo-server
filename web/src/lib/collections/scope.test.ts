@@ -44,6 +44,15 @@ function storedQuery(limit: number | undefined): QueryDefinition & Record<string
   };
 }
 
+/** A new Smart draft's rules with one Genre rule: a Smart collection needs one. */
+function withComedy(draft: { rules?: QueryDefinition }): QueryDefinition {
+  const rules = draft.rules!;
+  return {
+    ...rules,
+    groups: [{ match: "all", rules: [{ field: "genre", op: "is", value: "Comedy" }] }],
+  };
+}
+
 function savable<T extends { kind: string }>(draft: T) {
   if (draft.kind === "synced") throw new Error("only Manual and Smart drafts here");
   return draft as T & ManualOrSmartDraft;
@@ -188,7 +197,7 @@ describe("create and update send the editor's bodies", () => {
 
   it("creates a server smart collection", async () => {
     const draft = savable(SERVER_SCOPE.toDraft(null, { kind: "smart", libraryId: 1 }));
-    await SERVER_SCOPE.create({ ...draft, name: "New this month" });
+    await SERVER_SCOPE.create({ ...draft, name: "New this month", rules: withComedy(draft) });
     expect(writes()).toEqual(goldens.adminSmartCreate);
   });
 
@@ -237,6 +246,7 @@ describe("create and update send the editor's bodies", () => {
     const result = await PERSONAL_SCOPE.create({
       ...draft,
       name: "Comfort",
+      rules: withComedy(draft),
       artwork: { poster: { file: png("poster.png") } },
     });
     expect(result).toEqual({ id: "c1", warnings: [], failedArtwork: [] });

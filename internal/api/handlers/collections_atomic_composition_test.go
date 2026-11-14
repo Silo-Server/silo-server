@@ -87,7 +87,7 @@ func testPersonalCollectionCompositionRace(t *testing.T, displayRules int, displ
 	defer cancel()
 	sourceDone, displayDone := make(chan error, 1), make(chan error, 1)
 	update := func(req PersonalCollectionUpdateRequest, done chan<- error) {
-		_, err := h.UpdatePersonalCollection(ctx, PersonalCollectionUpdateCommand{UserID: f.account, ProfileID: "owner", CollectionID: c.ID, Request: req, V1Rules: true})
+		_, err := h.UpdatePersonalCollection(ctx, PersonalCollectionUpdateCommand{UserID: f.account, ProfileID: "owner", CollectionID: c.ID, Request: req})
 		done <- err
 	}
 	go update(PersonalCollectionUpdateRequest{QueryDefinition: compositionRules(t, 64)}, sourceDone)
@@ -170,8 +170,8 @@ func TestPersonalCollectionCompositionRawRecheck(t *testing.T) {
 		display string
 	}{
 		{name: "discarded-display-rules", request: PersonalCollectionUpdateRequest{DisplayQueryDefinition: json.RawMessage(strings.ReplaceAll(string(compositionRules(t, 65)), `"movie"`, `"all"`))}, source: string(compositionRules(t, 64))},
-		{name: "discarded-source-groups", request: PersonalCollectionUpdateRequest{QueryDefinition: json.RawMessage(`{"groups":[{},{},{},{},{},{},{},{}]}`)}, display: `{"groups":[{},{},{},{},{},{},{},{},{}]}`},
-		{name: "duplicate-source-libraries", request: PersonalCollectionUpdateRequest{QueryDefinition: json.RawMessage(`{"library_ids":[` + strings.Repeat("1,", 255) + `1]}`)}, display: `{"library_ids":[1]}`},
+		{name: "discarded-source-groups", request: PersonalCollectionUpdateRequest{QueryDefinition: json.RawMessage(`{"groups":[{"rules":[{"field":"year","op":"gte","value":2000}]},{},{},{},{},{},{},{}]}`)}, display: `{"groups":[{},{},{},{},{},{},{},{},{}]}`},
+		{name: "duplicate-source-libraries", request: PersonalCollectionUpdateRequest{QueryDefinition: json.RawMessage(`{"groups":[{"rules":[{"field":"year","op":"gte","value":2000}]}],"library_ids":[` + strings.Repeat("1,", 255) + `1]}`)}, display: `{"library_ids":[1]}`},
 		{name: "combined-value-bytes", request: PersonalCollectionUpdateRequest{QueryDefinition: json.RawMessage(`{"groups":[{"rules":[{"field":"title","op":"is","value":"` + strings.Repeat("x", 65528) + `"}]}]}`)}, display: string(compositionRules(t, 1))},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

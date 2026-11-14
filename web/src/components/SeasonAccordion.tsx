@@ -7,12 +7,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import EpisodeRow from "@/components/EpisodeRow";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
+import { useT } from "@/i18n";
+import { getSeasonDisplayTitle } from "@/pages/ItemDetail/itemDetailLayout";
 
 interface SeasonAccordionProps {
   seasons: Season[];
 }
 
 export default function SeasonAccordion({ seasons }: SeasonAccordionProps) {
+  const t = useT();
   const sorted = seasons.slice().sort((a, b) => a.season_number - b.season_number);
 
   const [activeSeason, setActiveSeason] = useState(sorted[sorted.length - 1]?.content_id ?? "");
@@ -20,21 +23,23 @@ export default function SeasonAccordion({ seasons }: SeasonAccordionProps) {
   if (seasons.length === 0) return null;
 
   const current = sorted.find((s) => s.content_id === activeSeason) ?? sorted[0]!;
-  const currentTitle =
-    current.is_specials || current.season_number === 0
-      ? "Specials"
-      : current.title || `Season ${current.season_number}`;
+  const currentTitle = getSeasonDisplayTitle(current);
 
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <h2 className="text-[1.25rem] font-bold">Episodes</h2>
-          <span className="text-muted-foreground text-base">{current.episode_count} Episodes</span>
+          <h2 className="text-[1.25rem] font-bold">{t("web.detail.episodes.heading")}</h2>
+          <span className="text-muted-foreground text-base">
+            {t("web.detail.seasons.episodesCountTitle", {
+              count: current.episode_count,
+              count_text: current.episode_count,
+            })}
+          </span>
         </div>
         <Button asChild variant="outline" size="sm">
           <ViewTransitionLink to={`/item/${current.content_id}`}>
-            Season Page
+            {t("web.detail.seasons.seasonPage")}
             <ArrowUpRight className="h-4 w-4" />
           </ViewTransitionLink>
         </Button>
@@ -74,10 +79,25 @@ export default function SeasonAccordion({ seasons }: SeasonAccordionProps) {
             )}
             {current.user_data && (
               <div className="text-muted-foreground mt-1 flex flex-wrap gap-2 text-[0.6875rem]">
-                <span>{current.user_data.watched_count} watched</span>
-                <span>{current.user_data.unplayed_count} left</span>
+                <span>
+                  {t("web.detail.seasons.watchedCount", {
+                    count: current.user_data.watched_count,
+                    count_text: current.user_data.watched_count,
+                  })}
+                </span>
+                <span>
+                  {t("web.detail.seasons.leftCount", {
+                    count: current.user_data.unplayed_count,
+                    count_text: current.user_data.unplayed_count,
+                  })}
+                </span>
                 {current.user_data.in_progress_count > 0 && (
-                  <span>{current.user_data.in_progress_count} in progress</span>
+                  <span>
+                    {t("web.detail.seasons.inProgressCount", {
+                      count: current.user_data.in_progress_count,
+                      count_text: current.user_data.in_progress_count,
+                    })}
+                  </span>
                 )}
               </div>
             )}
@@ -103,11 +123,7 @@ export default function SeasonAccordion({ seasons }: SeasonAccordionProps) {
                 isActive ? "text-primary bg-accent" : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              {season.is_specials || season.season_number === 0
-                ? "Specials"
-                : season.title && season.title !== `Season ${season.season_number}`
-                  ? season.title
-                  : `Season ${season.season_number}`}
+              {getSeasonDisplayTitle(season)}
             </button>
           );
         })}
@@ -122,6 +138,7 @@ export default function SeasonAccordion({ seasons }: SeasonAccordionProps) {
 }
 
 function SeasonPanel({ seasonId }: { seasonId: string | undefined }) {
+  const t = useT();
   const { data, isLoading } = useItemEpisodes(seasonId);
   const episodes = data?.episodes ?? [];
 
@@ -138,7 +155,7 @@ function SeasonPanel({ seasonId }: { seasonId: string | undefined }) {
   if (episodes.length === 0) {
     return (
       <div className="border-border text-muted-foreground bg-surface rounded-lg border p-5 text-sm">
-        No episodes are available for this season yet.
+        {t("web.detail.seasons.noEpisodes")}
       </div>
     );
   }

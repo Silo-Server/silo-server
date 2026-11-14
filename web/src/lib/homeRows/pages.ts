@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import type { HomeRowsPageOption, LibraryPage, PageRef } from "./types";
 
 export const HOME_PAGE: PageRef = { kind: "home" };
@@ -23,7 +24,8 @@ export function samePage(a: PageRef, b: PageRef): boolean {
 
 /** The page's name in sentences: "Home" or the library name. */
 export function pageLabel(ref: PageRef, pages: readonly HomeRowsPageOption[]): string {
-  return pages.find((page) => samePage(page.ref, ref))?.label ?? "Home";
+  const library = ref.kind === "library" && pages.find((page) => samePage(page.ref, ref));
+  return library ? library.label : t("web.home.rows.pages.home");
 }
 
 /** The library pages among `pages`, by library id, in the switcher's order. */

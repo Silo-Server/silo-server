@@ -23,7 +23,7 @@ type NotificationDestinationService interface {
 	RotateNotificationWebhookSecret(context.Context, int, string, string) (string, error)
 	DeleteNotificationServerChannel(context.Context, string) error
 	DeleteNotificationWebhook(context.Context, int, string, string, func(int64) error) error
-	SubscribeNotificationWebPush(context.Context, int, string, string, string, string, string) (*notifications.WebPushSubscription, error)
+	SubscribeNotificationWebPush(context.Context, int, string, string, string, string, string, string) (*notifications.WebPushSubscription, error)
 	UnsubscribeNotificationWebPush(context.Context, int, string, string) error
 	DeleteNotificationWebPushSubscription(context.Context, int, string, string) error
 
@@ -326,7 +326,7 @@ func registerNotificationDestinations(reg *Registry) {
 		if p != nil {
 			return nil, p
 		}
-		row, err := reg.deps.NotificationDestinations.SubscribeNotificationWebPush(ctx, user, profile, in.Body.Endpoint, in.Body.Keys.P256dh, in.Body.Keys.Auth, in.Body.DeviceName)
+		row, err := reg.deps.NotificationDestinations.SubscribeNotificationWebPush(ctx, user, profile, in.Body.Endpoint, in.Body.Keys.P256dh, in.Body.Keys.Auth, in.Body.DeviceName, claimsFrom(ctx).SessionID)
 		if errors.Is(err, notifications.ErrWebPushInvalid) {
 			return nil, NewProblem(TypeValidationFailed, "Invalid browser push subscription.")
 		}

@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS profiles (
     max_content_rating TEXT,
     max_advisory_age INTEGER CHECK (max_advisory_age BETWEEN 1 AND 21),
     require_advisory_age BOOLEAN NOT NULL DEFAULT false,
+    requests_blocked BOOLEAN NOT NULL DEFAULT false,
     quality_preference TEXT DEFAULT '1080p',
     language TEXT DEFAULT 'en',
     subtitle_language TEXT,
