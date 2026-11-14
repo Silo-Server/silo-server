@@ -229,3 +229,34 @@ silo_events_client_socket_refusals_total{reason="unavailable"} 0
 		}
 	}
 }
+
+// A client that hangs up mid-handshake is not a shutdown: it must not answer
+// 503 or count toward the draining refusals the rollout gates read.
+func TestClientSocketAbandonedHandshakeIsNotDraining(t *testing.T) {
+	h, _ := socketTestHandler(t)
+	admission := h.Events.socketAdmission
+	ticket := socketTestTicket(t, h, time.Now().Add(time.Minute))
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	r := eventAdmissionRequest(t, 0).WithContext(ctx)
+	r.Header.Set("Sec-WebSocket-Protocol", EventsSocketProtocol+", "+eventsTicketProtocolPrefix+ticket)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code == http.StatusServiceUnavailable {
+		t.Fatal("abandoned handshake answered as draining")
+	}
+	want := `
+# HELP silo_events_client_socket_refusals_total Refused client socket reservations by bounded reason.
+# TYPE silo_events_client_socket_refusals_total counter
+silo_events_client_socket_refusals_total{reason="account"} 0
+silo_events_client_socket_refusals_total{reason="process"} 0
+silo_events_client_socket_refusals_total{reason="draining"} 0
+silo_events_client_socket_refusals_total{reason="unavailable"} 0
+`
+	if err := testutil.CollectAndCompare(admission, strings.NewReader(want), "silo_events_client_socket_refusals_total"); err != nil {
+		t.Fatal(err)
+	}
+	if admission.Occupancy() != 0 {
+		t.Fatal("abandoned handshake leaked its reservation")
+	}
+}

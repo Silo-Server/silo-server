@@ -1,6 +1,7 @@
 package events
 
 import (
+	"context"
 	"errors"
 	"sync"
 )
@@ -113,6 +114,36 @@ func (a *ClientSocketAdmission) Reserve(accountID int, draining bool) (*ClientSo
 	a.accounts[accountID]++
 	a.metrics.observeAdmission(a.total, a.accounts[accountID])
 	return &ClientSocketReservation{admission: a, accountID: accountID}, ""
+}
+
+// Admit reserves capacity for one client socket attempt and ties it to the
+// process lifetime. The returned context ends with ctx or when app is
+// canceled. Call release once the socket is closed and unsubscribed; it
+// cancels that context and returns the capacity. draining reports whether the
+// process has begun shutting down. A request the client abandons is admitted
+// and fails at upgrade; only shutdown counts as a draining refusal.
+func (a *ClientSocketAdmission) Admit(ctx, app context.Context, accountID int, draining func() bool) (context.Context, func(), ClientSocketRefusal) {
+	reservation, refusal := a.Reserve(accountID, draining())
+	if refusal != "" {
+		return ctx, nil, refusal
+	}
+	admitted, cancel := context.WithCancel(ctx)
+	stop := func() bool { return true }
+	if app != nil {
+		stop = context.AfterFunc(app, cancel)
+	}
+	release := func() {
+		cancel()
+		stop()
+		reservation.Release()
+	}
+	// Shutdown can begin between Reserve and the AfterFunc registration.
+	if draining() {
+		release()
+		a.RecordDrainingRefusal()
+		return ctx, nil, ClientSocketDraining
+	}
+	return admitted, release, ""
 }
 
 // RecordDrainingRefusal counts a pre-admission shutdown refusal, without

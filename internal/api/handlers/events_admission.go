@@ -46,25 +46,9 @@ func refuseEventSocket(w http.ResponseWriter, refusal evt.ClientSocketRefusal) {
 }
 
 func (h *EventsHandler) admitClientSocket(w http.ResponseWriter, r *http.Request, accountID int) (*http.Request, func(), bool) {
-	reservation, refusal := h.socketAdmission.Reserve(accountID, h.socketDraining())
+	ctx, release, refusal := h.socketAdmission.Admit(r.Context(), h.appContext, accountID, h.socketDraining)
 	if refusal != "" {
 		refuseEventSocket(w, refusal)
-		return r, nil, false
-	}
-	ctx, cancel := context.WithCancel(r.Context())
-	stop := func() bool { return true }
-	if h.appContext != nil {
-		stop = context.AfterFunc(h.appContext, cancel)
-	}
-	release := func() {
-		cancel()
-		stop()
-		reservation.Release()
-	}
-	if ctx.Err() != nil || h.socketDraining() {
-		release()
-		h.socketAdmission.RecordDrainingRefusal()
-		refuseEventSocket(w, evt.ClientSocketDraining)
 		return r, nil, false
 	}
 	return r.WithContext(ctx), release, true

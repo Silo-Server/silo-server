@@ -113,23 +113,12 @@ func NewSocketHandlerWithUserData(sessions *SessionStore, keys *AdminAPIKeyAuthe
 			writeSessionLookupFailed(w, r, token, err)
 			return
 		}
-		reservation, refusal := lifecycle.Admission.Reserve(session.StreamAppUserID, lifecycle.draining())
+		ctx, release, refusal := lifecycle.Admission.Admit(r.Context(), lifecycle.AppContext, session.StreamAppUserID, lifecycle.draining)
 		if refusal != "" {
 			refuseCompatSocket(w, refusal)
 			return
 		}
-		defer reservation.Release()
-		ctx, cancel := context.WithCancel(r.Context())
-		defer cancel()
-		if lifecycle.AppContext != nil {
-			stop := context.AfterFunc(lifecycle.AppContext, cancel)
-			defer stop()
-		}
-		if ctx.Err() != nil || lifecycle.draining() {
-			lifecycle.Admission.RecordDrainingRefusal()
-			refuseCompatSocket(w, evt.ClientSocketDraining)
-			return
-		}
+		defer release()
 		startNotices := func() (<-chan wsMessage, func()) {
 			if events != nil && codec != nil {
 				return userDataNotices(events, session, codec)
