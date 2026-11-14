@@ -1061,7 +1061,7 @@ export interface WatchIndexerRelease {
   download_state: IndexerReleaseDownloadState;
 }
 
-// Batched liveness check for virtual versions (POST /catalog/versions/check).
+// Batched liveness check for virtual versions (POST /api/v2/catalog/versions/check).
 export interface VersionLivenessResult {
   file_id: number;
   available: boolean;

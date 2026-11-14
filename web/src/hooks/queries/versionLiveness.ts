@@ -1,10 +1,14 @@
 import { useQueries } from "@tanstack/react-query";
 import { useMemo } from "react";
 
-import { apiV1 } from "@/api/client";
-import type { VersionLivenessResponse } from "@/api/types";
+import type { VersionLivenessResponse, VersionLivenessResult } from "@/api/types";
+import { v2 } from "@/api/v2/request";
+import type { components } from "@/api/v2/schema";
 import { catalogKeys } from "@/hooks/queries/keys";
 import { isVirtualFileVersion } from "@/pages/ItemDetail/components/versionFormatUtils";
+
+type CatalogVersionsCheck = components["schemas"]["CatalogVersionsCheck"];
+type CatalogVersionCheckResult = CatalogVersionsCheck["results"][number];
 
 /**
  * The minimal server-shaped fields the liveness check reads from a row. Both
@@ -50,16 +54,46 @@ export const VERSION_LIVENESS_BATCH_SIZE = 40;
 /** How long a liveness result is trusted before it is re-checked. */
 export const VERSION_LIVENESS_STALE_MS = 5 * 60 * 1000;
 
+/**
+ * Reads one v2 check result into the numeric file ids the item page and player
+ * menus key on. The v2 contract renders ids as opaque strings; a value that is
+ * not a positive safe integer names no catalog row, so it is dropped rather
+ * than keyed under NaN.
+ */
+function livenessResultFromV2(
+  result: CatalogVersionCheckResult,
+): VersionLivenessResult | undefined {
+  const fileId = Number(result.file_id);
+  if (!Number.isSafeInteger(fileId) || fileId <= 0) {
+    return undefined;
+  }
+  return {
+    file_id: fileId,
+    available: result.available,
+    failed: result.failed,
+    source_mismatch: result.source_mismatch
+      ? {
+          served_bytes: result.source_mismatch.served_bytes,
+          declared_bytes: result.source_mismatch.declared_bytes,
+        }
+      : undefined,
+  };
+}
+
 export async function fetchVersionLiveness(
   fileIds: number[],
-  options?: RequestInit,
+  options?: { signal?: AbortSignal },
 ): Promise<VersionLivenessResponse> {
-  return apiV1<VersionLivenessResponse>("/catalog/versions/check", {
-    ...options,
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...(options?.headers ?? {}) },
-    body: JSON.stringify({ file_ids: fileIds }),
+  const response = await v2("POST /api/v2/catalog/versions/check", {
+    body: { file_ids: fileIds.map(String) },
+    ...(options?.signal ? { signal: options.signal } : {}),
   });
+  return {
+    results: response.results.flatMap((result) => {
+      const mapped = livenessResultFromV2(result);
+      return mapped ? [mapped] : [];
+    }),
+  };
 }
 
 /**

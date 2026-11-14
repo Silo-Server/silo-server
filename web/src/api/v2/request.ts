@@ -54,6 +54,7 @@ const authExchangeOperations = new Set<V2OperationKey>([
 // the server only as long as a GET does.
 const readOnlyPostOperations = new Set<V2OperationKey>([
   "POST /api/v2/catalog/query",
+  "POST /api/v2/catalog/versions/check",
   "POST /api/v2/admin/sections/preview",
   "POST /api/v2/direct-download/links",
 ]);
