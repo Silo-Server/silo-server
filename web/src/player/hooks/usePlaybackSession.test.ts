@@ -3185,14 +3185,16 @@ describe("usePlaybackSession page unload", () => {
     await waitFor(() => expect(result.current.sessionId).toBe("session-1"));
 
     act(() => pagehide(persisted));
-
-    if (stops) {
-      await waitFor(() => expect(stopCalls()).toHaveLength(1));
-      expect(stopCalls()[0]?.keepalive).toBe(true);
-    } else {
+    if (!stops) {
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(stopCalls()).toHaveLength(0);
+      // The page leaving the cache for good still stops, which also proves
+      // the listener was attached during the cached unload.
+      act(() => pagehide(false));
     }
+
+    await waitFor(() => expect(stopCalls()).toHaveLength(1));
+    expect(stopCalls()[0]?.keepalive).toBe(true);
     unmount();
   });
 });

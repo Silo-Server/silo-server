@@ -433,6 +433,16 @@ const (
 	// §2.5 publishes it to clients.
 	StartupSessionGrace = 90 * time.Second
 
+	// PausedStreamSlotGrace is how long a paused session keeps holding one of
+	// its user's stream slots without activity. Clients report progress every
+	// 10 seconds while paused, but a browser throttles the timers of a hidden
+	// tab to about once a minute, so this outlasts that. A paused session quiet
+	// for longer has lost its player (a closed tab, a killed app): it frees the
+	// stream slot, while cleanup still keeps it for DefaultPausedSessionGrace so
+	// a returning client can resume (#243). Its transcode slot stays held until
+	// then, because its encoder does.
+	PausedStreamSlotGrace = 2 * time.Minute
+
 	// remoteTransportIdleGrace is the floor on the idle windows for a session
 	// whose media is served by another node. See remoteTransportGrace: it must
 	// outlast a heartbeat gap on an otherwise healthy proxy stream, while still
@@ -1985,7 +1995,7 @@ func (m *SessionManager) activeCountExcludingLocked(userID int, excludeSessionID
 		if excludeSessionID != "" && s.ID == excludeSessionID {
 			continue
 		}
-		if s.UserID == userID && m.countsTowardLimitsLocked(s, now) {
+		if s.UserID == userID && m.countsTowardLimitsLocked(s, now, true) {
 			count++
 		}
 	}
@@ -2004,7 +2014,7 @@ func (m *SessionManager) transcodeCountExcludingLocked(userID int, excludeSessio
 		if excludeSessionID != "" && s.ID == excludeSessionID {
 			continue
 		}
-		if s.UserID == userID && (s.PlayMethod == PlayTranscode || s.replacementPlayMethod == PlayTranscode) && m.countsTowardLimitsLocked(s, now) {
+		if s.UserID == userID && (s.PlayMethod == PlayTranscode || s.replacementPlayMethod == PlayTranscode) && m.countsTowardLimitsLocked(s, now, false) {
 			count++
 		}
 	}
@@ -2088,7 +2098,11 @@ func (m *SessionManager) touchSessionLocked(s *Session) {
 	s.UpdatedAt = now
 }
 
-func (m *SessionManager) countsTowardLimitsLocked(s *Session, now time.Time) bool {
+// countsTowardLimitsLocked reports whether s holds one of its user's slots.
+// With releaseQuietPause, a paused session holds its slot only for
+// PausedStreamSlotGrace after its last activity rather than the whole paused
+// grace.
+func (m *SessionManager) countsTowardLimitsLocked(s *Session, now time.Time, releaseQuietPause bool) bool {
 	if s == nil {
 		return false
 	}
@@ -2101,13 +2115,11 @@ func (m *SessionManager) countsTowardLimitsLocked(s *Session, now time.Time) boo
 	if s.activeTransportCount > 0 {
 		return true
 	}
-	// Clients report progress every 10 seconds while paused too, so a paused
-	// session that has gone quiet for the active grace has lost its player (a
-	// closed tab, a killed app). It stops holding a slot then, while cleanup
-	// keeps the session for the paused grace so a returning client can still
-	// resume (#243).
-	activeGrace, _ := remoteTransportGrace(s, m.activeGrace, m.pausedGrace)
-	return !m.sessionIsInactiveLocked(s, now, activeGrace, activeGrace, StartupSessionGrace)
+	activeGrace, pausedGrace := remoteTransportGrace(s, m.activeGrace, m.pausedGrace)
+	if releaseQuietPause && pausedGrace > PausedStreamSlotGrace {
+		pausedGrace = PausedStreamSlotGrace
+	}
+	return !m.sessionIsInactiveLocked(s, now, activeGrace, pausedGrace, StartupSessionGrace)
 }
 
 // remoteTransportGrace widens the idle windows for a session whose bytes are

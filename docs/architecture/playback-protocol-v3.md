@@ -339,12 +339,14 @@ plan has no position to report, and this window lets it wait out a startup
 timeout of up to 60 seconds and still ask for the next fallback. The windows are
 fixed.
 
-A paused session counts toward the account's stream and transcode limits only
-while it is inside the 45-second window (five minutes when a proxy node serves
-it) or the 90-second startup window, as it stays while its client keeps
-reporting progress. Past that it keeps its 30-minute paused grace, so a client
-that comes back can still resume, but it no longer holds a slot: a player closed
-while paused frees its slot within about a minute.
+A paused session counts toward the account's stream limit only while it has
+shown activity within the last **2 minutes** (or is inside the 90-second startup
+window). A client that keeps reporting progress stays inside it, even from a
+background browser tab whose timers are throttled to about once a minute. Past
+that it keeps its 30-minute paused grace, so a client that comes back can still
+resume, but it no longer holds a stream slot: a player closed while paused frees
+its slot within about two minutes. It still counts toward the transcode limit
+until it ends, because its encoder is kept for it.
 
 These count as activity:
 
