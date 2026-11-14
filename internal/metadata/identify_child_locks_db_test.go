@@ -72,7 +72,7 @@ func (f *identifyLockFixture) seedAt(t *testing.T, seriesID, tvdb string) string
 	}
 	// The title details need no lock: no provider writes them.
 	title, overview, airDate, tagline := identifyEditTitle, identifyEditOverview, identifyEditAirDate, identifyEditTagline
-	if err := f.seasons.UpdateMetadata(ctx, seasonID, &catalog.MetadataUpdate{Title: &title, SortTitle: &title, OriginalTitle: &title, Overview: &overview, Tagline: &tagline, AirDate: &airDate, TvdbID: &tvdb, LockedFields: &identifySeasonLocks}); err != nil {
+	if err := f.seasons.UpdateMetadata(ctx, seasonID, &catalog.MetadataUpdate{Title: &title, OriginalTitle: &title, Overview: &overview, Tagline: &tagline, AirDate: &airDate, TvdbID: &tvdb, LockedFields: &identifySeasonLocks}); err != nil {
 		t.Fatal(err)
 	}
 	runtime := identifyEditRuntime
@@ -336,7 +336,7 @@ func assertEditsCleared(t *testing.T, pool *pgxpool.Pool, seriesID string, seaso
 	if season.Title != "Season 1" || season.Overview != "" || season.AirDate != nil {
 		t.Errorf("season = %q, %q, %v, want the default title and nothing else", season.Title, season.Overview, season.AirDate)
 	}
-	if details := []string{season.SortTitle, season.OriginalTitle, season.Tagline, season.TvdbID}; slices.ContainsFunc(details, func(v string) bool { return v != "" }) {
+	if details := []string{season.OriginalTitle, season.Tagline, season.TvdbID}; slices.ContainsFunc(details, func(v string) bool { return v != "" }) {
 		t.Errorf("season title details = %q, want them cleared", details)
 	}
 	if episode.Title != "Episode 1" || episode.Overview != "" || episode.AirDate != nil || episode.Runtime != 0 {

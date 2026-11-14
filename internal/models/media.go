@@ -855,7 +855,6 @@ type Season struct {
 	// LockedFields lists the fields a refresh keeps; see catalog.childLockedColumn.
 	LockedFields []int
 	// No metadata provider writes these; admin edits and seed imports do.
-	SortTitle     string
 	OriginalTitle string
 	Tagline       string
 	ImdbID        string

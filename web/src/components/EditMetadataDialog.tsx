@@ -44,6 +44,14 @@ const EPISODE_FIELD_LOCK_MAP: Record<string, number> = {
   runtime: FIELD_RUNTIME,
 };
 
+const TYPE_LABEL_KEYS: Partial<Record<ItemDetail["type"], MessageKey>> = {
+  movie: "web.item.editMetadata.typeMovie",
+  series: "web.item.editMetadata.typeSeries",
+  season: "web.item.editMetadata.typeSeason",
+  episode: "web.item.editMetadata.typeEpisode",
+  audiobook: "web.detail.hero.typeAudiobook",
+};
+
 const RESET_DESCRIPTION_KEYS: Partial<Record<ItemDetail["type"], MessageKey>> = {
   series: "web.item.editMetadata.resetDescriptionSeries",
   season: "web.item.editMetadata.resetDescriptionSeason",
@@ -53,6 +61,7 @@ const RESET_DESCRIPTION_KEYS: Partial<Record<ItemDetail["type"], MessageKey>> = 
 const FIELD_LOCK_MAPS: Partial<Record<ItemDetail["type"], Record<string, number>>> = {
   movie: FIELD_LOCK_MAP,
   series: FIELD_LOCK_MAP,
+  audiobook: FIELD_LOCK_MAP,
   season: SEASON_FIELD_LOCK_MAP,
   episode: EPISODE_FIELD_LOCK_MAP,
 };
@@ -79,7 +88,12 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
   const ownsImageLock = item.type === "movie" || item.type === "series";
   // A season or episode has the series' content rating, which decides age limits.
   const ownsContentRating = item.type !== "season" && item.type !== "episode";
+  // Seasons order by number, so a sort title would do nothing.
+  const ownsSortTitle = item.type !== "season";
   const fieldLockMap = FIELD_LOCK_MAPS[item.type];
+  // An audiobook's fields mostly come from its file tags, which no provider
+  // supplies, so a reset would empty them rather than restore them.
+  const canResetToProvider = fieldLockMap !== undefined && item.type !== "audiobook";
   const canEditImages = useIsActingAdmin();
   const visibleSections = SECTIONS.filter(
     (s) => s.types.includes(item.type) && (s.key !== "images" || canEditImages),
@@ -223,15 +237,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
     );
   }
 
-  const typeLabel = t(
-    item.type === "movie"
-      ? "web.item.editMetadata.typeMovie"
-      : item.type === "series"
-        ? "web.item.editMetadata.typeSeries"
-        : item.type === "season"
-          ? "web.item.editMetadata.typeSeason"
-          : "web.item.editMetadata.typeEpisode",
-  );
+  const typeLabel = t(TYPE_LABEL_KEYS[item.type] ?? "web.item.editMetadata.typeEpisode");
 
   return (
     <>
@@ -293,15 +299,17 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
                   </FieldRow>
 
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <FieldRow
-                      label={t("web.item.editMetadata.sortTitle")}
-                      lockIcon={renderLockIcon("sort_title")}
-                    >
-                      <Input
-                        value={form.sort_title}
-                        onChange={(e) => setField("sort_title", e.target.value)}
-                      />
-                    </FieldRow>
+                    {ownsSortTitle && (
+                      <FieldRow
+                        label={t("web.item.editMetadata.sortTitle")}
+                        lockIcon={renderLockIcon("sort_title")}
+                      >
+                        <Input
+                          value={form.sort_title}
+                          onChange={(e) => setField("sort_title", e.target.value)}
+                        />
+                      </FieldRow>
+                    )}
                     <FieldRow
                       label={t("web.item.editMetadata.originalTitle")}
                       lockIcon={renderLockIcon("original_title")}
@@ -418,7 +426,9 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
 
               {effectiveActiveSection === "dates" && (
                 <div className="space-y-4">
-                  {(item.type === "movie" || item.type === "series") && (
+                  {(item.type === "movie" ||
+                    item.type === "series" ||
+                    item.type === "audiobook") && (
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <FieldRow
                         label={t("web.item.dialog.fieldYear")}
@@ -431,7 +441,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
                         />
                       </FieldRow>
 
-                      {item.type === "movie" && (
+                      {(item.type === "movie" || item.type === "audiobook") && (
                         <FieldRow
                           label={t("web.item.editMetadata.releaseDate")}
                           lockIcon={renderLockIcon("release_date")}
@@ -689,7 +699,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
           {/* Footer */}
           <div className="border-border/10 flex shrink-0 flex-col-reverse gap-2 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:py-3.5">
             <div>
-              {fieldLockMap && (
+              {canResetToProvider && (
                 <Button
                   variant="ghost"
                   size="sm"

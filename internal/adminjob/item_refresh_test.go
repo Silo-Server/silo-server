@@ -17,6 +17,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/events"
@@ -228,6 +229,8 @@ type itemRefreshTestRefresher struct {
 	folderID   int
 	reset      bool
 	err        error
+	// authorize, when set, stands in for a merge onto these libraries.
+	authorize []int
 }
 
 type itemRefreshTestArtworkCacher struct {
@@ -256,11 +259,62 @@ func (r *itemRefreshTestRefresher) RefreshItemForLibrary(_ context.Context, cont
 	return r.RefreshTargetForLibrary(context.Background(), "item", contentID, folderID)
 }
 
-func (r *itemRefreshTestRefresher) RefreshTargetForLibrary(_ context.Context, targetType, contentID string, folderID int) error {
+func (r *itemRefreshTestRefresher) RefreshTargetForLibrary(ctx context.Context, targetType, contentID string, folderID int) error {
 	r.targetType = targetType
 	r.contentID = contentID
 	r.folderID = folderID
+	if r.authorize != nil {
+		if err := access.AuthorizeMetadataCurationLibraries(ctx, r.authorize); err != nil {
+			return err
+		}
+	}
 	return r.err
+}
+
+// A delegated curator's refresh job runs later, possibly on another node, so
+// its scope must survive the job row and hold the refresh's merges to the
+// curator's libraries. Admin and automatic jobs carry no scope.
+func TestItemRefreshHoldsCuratorJobsToTheirLibraries(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name    string
+		mode    ItemRefreshMode
+		scope   *access.MetadataCurationScope
+		merge   []int
+		refused bool
+	}{
+		{"curator merge outside scope", "", &access.MetadataCurationScope{LibraryIDs: []int{3}}, []int{3, 4}, true},
+		{"curator reset merge outside scope", ItemRefreshModeReset, &access.MetadataCurationScope{LibraryIDs: []int{3}}, []int{3, 4}, true},
+		{"curator merge onto item in no library", "", &access.MetadataCurationScope{LibraryIDs: []int{3}}, []int{}, true},
+		{"curator merge inside scope", "", &access.MetadataCurationScope{LibraryIDs: []int{3}}, []int{3}, false},
+		{"unrestricted curator", "", &access.MetadataCurationScope{}, []int{3, 4}, false},
+		{"admin or automatic job", "", nil, []int{4}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload, err := json.Marshal(ItemRefreshRequest{
+				RequestedContentID: "movie-1",
+				RefreshContentID:   "movie-1",
+				ScanFolderID:       3,
+				ScanPath:           "/media/movie",
+				Mode:               tc.mode,
+				CurationScope:      tc.scope,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var req ItemRefreshRequest
+			if err := json.Unmarshal(payload, &req); err != nil {
+				t.Fatal(err)
+			}
+			refresher := &itemRefreshTestRefresher{authorize: tc.merge}
+			executor := newItemRefreshTestExecutor(&itemRefreshTestIngester{}, &itemRefreshTestScanRuns{}, refresher, nil)
+			_, err = executor.Execute(context.Background(), req, nil)
+			if refused := errors.Is(err, access.ErrMetadataCurationScope); refused != tc.refused || (!tc.refused && err != nil) {
+				t.Fatalf("Execute() error = %v, want refused=%v", err, tc.refused)
+			}
+		})
+	}
 }
 
 func (r *itemRefreshTestRefresher) ResetTargetForLibrary(ctx context.Context, targetType, contentID string, folderID int) error {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -123,5 +124,48 @@ func TestRequirePathInLibrarySymlinkedRoot(t *testing.T) {
 		if err := requirePathInLibrary(path, folder); !errors.Is(err, ErrPathOutsideLibrary) {
 			t.Errorf("requirePathInLibrary(%q) = %v, want ErrPathOutsideLibrary", path, err)
 		}
+	}
+}
+
+// TestSubtreeScanUnderAnExcludedNestedRootDoesNothing covers a library with
+// one root nested in another. A full scan reaches the inner root through the
+// outer one, so when the outer root's rules exclude the inner root, a subtree
+// scan inside it must stop before the catalog, as for a scope under a skipped
+// root. Walking nothing and reconciling would retire the subtree outside the
+// full scan's empty-root guard.
+func TestSubtreeScanUnderAnExcludedNestedRootDoesNothing(t *testing.T) {
+	cases := []struct {
+		name   string
+		nested string            // nested root, relative to the outer root
+		files  map[string]string // ignore files, relative to the outer root
+	}{
+		{name: "outer root .nomedia", nested: "nested", files: map[string]string{".nomedia": ""}},
+		{name: "outer root pattern", nested: "nested", files: map[string]string{".siloignore": "nested\n"}},
+		{name: "marker between the roots", nested: "a/nested", files: map[string]string{"a/.nomedia": ""}},
+		{name: "hidden nested root", nested: ".nested"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			nested := filepath.Join(root, tc.nested)
+			movieDir := filepath.Join(nested, "Movie (2024)")
+			writeTestFile(t, filepath.Join(movieDir, "Movie (2024).mkv"), "")
+			for name, content := range tc.files {
+				writeTestFile(t, filepath.Join(root, name), content)
+			}
+			folder := &models.MediaFolder{ID: 7, Type: "movies", Paths: []string{root, nested}}
+
+			// The scanner has no catalog, so a scan past the guard fails or
+			// panics.
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("ScanSubtree(%q) went past the guard: %v", movieDir, r)
+				}
+			}()
+			result, err := (&Scanner{}).ScanSubtree(context.Background(), folder, movieDir)
+			if err != nil || result == nil || !reflect.DeepEqual(*result, ScanResult{}) {
+				t.Fatalf("ScanSubtree(%q) = %+v, %v; want an empty result before the catalog is read", movieDir, result, err)
+			}
+		})
 	}
 }

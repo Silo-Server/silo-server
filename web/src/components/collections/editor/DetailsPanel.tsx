@@ -81,6 +81,7 @@ export function DetailsPanel({
   onChange,
   showOnly,
   nameNote,
+  nameError,
 }: {
   draft: CollectionDraft;
   onChange: (update: (draft: CollectionDraft) => CollectionDraft) => void;
@@ -88,9 +89,15 @@ export function DetailsPanel({
   showOnly: boolean;
   /** A line under Name, as in "Kept your name". */
   nameNote?: string;
+  /** Why the last save refused this name, as in "Another collection in Movies already has this name". */
+  nameError?: string | null;
 }) {
   const t = useT();
   const id = useId();
+  const nameDescribedBy =
+    [nameError ? `${id}-name-error` : null, nameNote ? `${id}-name-note` : null]
+      .filter(Boolean)
+      .join(" ") || undefined;
   return (
     <section
       aria-label={t("web.collections.details.label")}
@@ -103,13 +110,19 @@ export function DetailsPanel({
         <Input
           id={`${id}-name`}
           required
-          aria-describedby={nameNote ? `${id}-name-note` : undefined}
+          aria-invalid={nameError ? true : undefined}
+          aria-describedby={nameDescribedBy}
           value={draft.name}
           onChange={(event) => {
             const name = event.target.value;
             onChange((current) => ({ ...current, name }));
           }}
         />
+        {nameError ? (
+          <p id={`${id}-name-error`} role="alert" className="text-destructive text-[12.5px]">
+            {nameError}
+          </p>
+        ) : null}
         {nameNote ? (
           <p id={`${id}-name-note`} role="status" className="text-muted-foreground text-[12.5px]">
             {nameNote}
