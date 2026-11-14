@@ -189,8 +189,7 @@ func awaitStartup(t *testing.T, ch <-chan error, what string) error {
 // migrates, another waits for the wrapper and then finds nothing pending;
 // one whose wait runs out fails naming SILO_MIGRATION_WAIT. The waiting
 // server holds no snapshot, so the first server's migrations can build an
-// index concurrently, which waits for every older snapshot. It takes about
-// two seconds: the expired wait, then the waiter's next retry.
+// index concurrently, which waits for every older snapshot.
 func TestStartupMigrationsSerializeServersDB(t *testing.T) {
 	pool := startupTestDatabase(t)
 	legacyInstall(t, pool, 1)

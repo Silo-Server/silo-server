@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"math/rand/v2"
 	"os"
 	"strings"
 	"sync"
@@ -33,9 +34,13 @@ const (
 	defaultMigrationWait = 60 * time.Minute
 	// wrapperCheckInterval is how often the wrapper's session is checked.
 	wrapperCheckInterval = 10 * time.Second
-	// migrationWrapperRetryInterval is how often a waiting server tries the
-	// wrapper lock again.
-	migrationWrapperRetryInterval = time.Second
+	// A waiting server tries the wrapper lock again after a random pause of
+	// migrationWrapperRetryMin plus up to migrationWrapperRetryJitter. Short
+	// and random, so servers started together do not retry in step and each
+	// take a turn per round; a holder with nothing pending keeps the lock for
+	// only tens of milliseconds.
+	migrationWrapperRetryMin    = 50 * time.Millisecond
+	migrationWrapperRetryJitter = 100 * time.Millisecond
 )
 
 // ErrMigrationLockLost reports that the session holding the migration
@@ -300,7 +305,7 @@ func waitForMigrationWrapper(ctx context.Context, conn *pgx.Conn, wait time.Dura
 	defer stop()
 	deadline := started.Add(wait)
 	for {
-		pause := migrationWrapperRetryInterval
+		pause := migrationWrapperRetryMin + rand.N(migrationWrapperRetryJitter) //nolint:gosec // retry jitter, not a secret
 		if wait > 0 {
 			pause = min(pause, time.Until(deadline))
 		}
