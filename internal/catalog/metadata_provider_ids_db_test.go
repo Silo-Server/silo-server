@@ -78,7 +78,7 @@ func TestMetadataUpdateKeepsDurableProviderIDsDB(t *testing.T) {
 	}
 	edited := make(chan error, 1)
 	go func() { edited <- repo.UpdateMetadata(ctx, movie, &MetadataUpdate{TvdbID: &racedTVDB}) }()
-	waitForProviderIDLockWait(t, pool, edited)
+	waitForLockWait(t, pool, edited, "INSERT INTO media_item_provider_ids")
 	if err := claim.Commit(ctx); err != nil {
 		t.Fatalf("commit claim: %v", err)
 	}
@@ -87,19 +87,42 @@ func TestMetadataUpdateKeepsDurableProviderIDsDB(t *testing.T) {
 	}
 	assertColumns(t, pool, "media_items", movie, map[string]string{"tvdb_id": racedTVDB})
 	assertDurableProviderIDs(t, pool, movie, map[string]string{})
+
+	// A replace (book enrichment, a legacy refresh) waits for an edit holding
+	// the item before it deletes the item's rows, so the two can't deadlock.
+	edit, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin edit: %v", err)
+	}
+	defer edit.Rollback(ctx) //nolint:errcheck // a no-op once the edit commits
+	if _, err := edit.Exec(ctx, `SELECT 1 FROM media_items WHERE content_id = $1 FOR UPDATE`, movie); err != nil {
+		t.Fatalf("lock item: %v", err)
+	}
+	replaced := make(chan error, 1)
+	go func() {
+		replaced <- NewProviderIDRepository(pool).ReplaceByContentID(ctx, movie, map[string]string{"tmdb": newTMDB})
+	}()
+	waitForLockWait(t, pool, replaced, "SELECT type FROM media_items")
+	if err := edit.Commit(ctx); err != nil {
+		t.Fatalf("commit edit: %v", err)
+	}
+	if err := <-replaced; err != nil {
+		t.Fatalf("ReplaceByContentID: %v", err)
+	}
+	assertDurableProviderIDs(t, pool, movie, map[string]string{"tmdb": newTMDB})
 }
 
-// waitForProviderIDLockWait returns once a session waits on a lock while
-// writing media_item_provider_ids, and fails if the edit finishes first.
-func waitForProviderIDLockWait(t *testing.T, pool *pgxpool.Pool, done <-chan error) {
+// waitForLockWait returns once a session of this database waits on a lock
+// while running statement, and fails if done reports first.
+func waitForLockWait(t *testing.T, pool *pgxpool.Pool, done <-chan error, statement string) {
 	t.Helper()
 	deadline := time.After(10 * time.Second)
 	for {
 		var waiting bool
 		if err := pool.QueryRow(context.Background(), `
 			SELECT EXISTS (SELECT 1 FROM pg_stat_activity
-			WHERE wait_event_type = 'Lock' AND pid <> pg_backend_pid()
-			  AND strpos(query, 'media_item_provider_ids') > 0)`).Scan(&waiting); err != nil {
+			WHERE wait_event_type = 'Lock' AND datname = current_database()
+			  AND pid <> pg_backend_pid() AND strpos(query, $1) > 0)`, statement).Scan(&waiting); err != nil {
 			t.Fatalf("read lock waits: %v", err)
 		}
 		if waiting {
@@ -107,9 +130,9 @@ func waitForProviderIDLockWait(t *testing.T, pool *pgxpool.Pool, done <-chan err
 		}
 		select {
 		case err := <-done:
-			t.Fatalf("the edit finished without waiting on the claim: %v", err)
+			t.Fatalf("finished without waiting on a lock in %q: %v", statement, err)
 		case <-deadline:
-			t.Fatal("the edit never waited on the claim")
+			t.Fatalf("never waited on a lock in %q", statement)
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
