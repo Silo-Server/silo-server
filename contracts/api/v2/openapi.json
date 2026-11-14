@@ -45114,6 +45114,18 @@
           "stream": {
             "$ref": "#/components/schemas/StreamV3"
           },
+          "substituted_from_file_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "substitution_reason": {
+            "description": "Machine-readable cause of a version substitution; only present with substituted_from_file_id. A client must treat an unknown value as a generic substitution.",
+            "type": "string"
+          },
           "subtitle": {
             "$ref": "#/components/schemas/SubtitleDecisionV3"
           },

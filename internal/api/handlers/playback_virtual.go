@@ -2860,8 +2860,15 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 		// budget larger than that; the staging deadline always wins when it
 		// is smaller.
 		listCtx, cancel := context.WithTimeout(stagingCtx, 15*time.Second)
+		// Report what the listing can actually spend: the staging deadline wins
+		// when it is smaller than the 15s cap, and an already-consumed staging
+		// budget is 0 ms rather than a negative bound.
+		listingBound := 15 * time.Second
+		if deadline, ok := stagingCtx.Deadline(); ok {
+			listingBound = min(listingBound, max(0, time.Until(deadline)))
+		}
 		listWait := startVirtualResolveWaitLog(stagingCtx, "fetch", "provider_listing", file.ContentID, file.ID, file.FilePath,
-			virtualProbeBudget, virtualProbeBudget)
+			listingBound, virtualProbeBudget)
 		streams, err := h.VirtualPlaybackStreamLister.ListVirtualPlaybackStreams(
 			listCtx, file.FilePath, userID, profileID, file.VirtualOwnerInstallationID,
 		)
@@ -3907,6 +3914,19 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 	var firstResolved *resolvedVirtualPlaybackSource
 	var attemptErr error
 	for i, candidate := range candidates {
+		// The cold path's deadline is the only budget a candidate resolve has.
+		// Once it is spent, another iteration only asks the provider a question
+		// the deadline already answered: the resolve is pre-empted before its
+		// wait starts and reports a negative bound (the production series
+		// bound_ms=-34/-65/-95/-126 on four consecutive attempts), which the
+		// version fallback and the transport then read as a provider listing
+		// failure and use to justify a release substitution. Stop here with the
+		// honest budget outcome instead.
+		if _, attemptAllowed := virtualResolveAttemptBudget(attemptCtx, virtualProbeBudget); !attemptAllowed {
+			attemptErr = errors.Join(attemptErr, fmt.Errorf(
+				"virtual resolve budget exhausted before candidate %d: %w", i, context.DeadlineExceeded))
+			break
+		}
 		candidateProviderRelist = providerRelist && i == 0
 		result, err := resolveAndProbe(i, candidate)
 		if fastPathHit {

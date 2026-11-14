@@ -713,6 +713,34 @@ Every viewer then starts a new fixed-file attempt for that room selection. Ordin
 web, Apple, Android, and Jellyfin playback keep their existing behavior; Apple
 has no active room caller and Android's room UI remains disabled.
 
+## Version substitution
+
+`startPlayback` and `replanPlayback` may commit a release other than the row the
+client asked for: the requested release is dead or its provider listing failed, a
+transport or decode failure rotated the candidate, or the planner could not
+deliver the picked version to this client. The plan reports that instead of
+leaving the client to diff ids:
+
+- `substituted_from_file_id` is the catalog row the client asked for;
+- `substitution_reason` is the machine-readable cause.
+
+Both are omitted when the effective row is the requested one. The vocabulary is
+additive — `dead_release`, `listing_failed`, `transport_failed`,
+`decode_rejected`, `version_not_playable`, `unknown` — and a client must render
+an unknown value as a generic substitution rather than failing. The fields are
+UI-only: they are set after the plan identity is finalized and never change
+`plan_id` or `plan_attempt_key`. `effective_media_file_id` still names the row
+actually served, and `effective_virtual_uri` / `virtual_source_revision` follow
+it. Every plan decision and every replan that commits another row carries them,
+so a client never has to guess from an id diff.
+
+A substitution is bounded by the viewer's selection. A substitute that would
+offer fewer audio or subtitle tracks than the selected row, or contradict the
+item's runtime, is refused; when no substitute can serve the selection, the
+start answers the retryable `virtual_source_unavailable` terminal with a message
+naming the version list, so the client offers the versions instead of playing a
+poorer menu.
+
 ## Progress and stop
 
 Progress accepts `{installation_id, sequence, position, is_paused}`. `sequence`

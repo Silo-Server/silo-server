@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -3329,7 +3330,16 @@ func runVirtualVersionFallbackCandidatesV3(
 				if ctx.Err() != nil {
 					return
 				}
-				listCtx, listCancel := context.WithTimeout(ctx, listingBudget)
+				// The per-listing bound comes from what the decision budget has
+				// left, never from a bare WithTimeout on an already-spent
+				// parent: that produced a negative bound and a resolve
+				// pre-empted before it started (see
+				// virtualResolveAttemptBudget).
+				listBudget, listAllowed := virtualResolveAttemptBudget(ctx, listingBudget)
+				if !listAllowed {
+					return
+				}
+				listCtx, listCancel := context.WithTimeout(ctx, listBudget)
 				resolved, ok := resolve(listCtx, candidates[idx])
 				listCancel()
 				if ok {
@@ -3464,6 +3474,24 @@ func (h *PlaybackHandler) resolveVirtualStartWithVersionFallback(
 	if resolveErr == nil || !virtualStartVersionFallbackEligibleV3(req) || !virtualProviderListingOutage(resolveErr) {
 		return resolved, resolveErr
 	}
+	// A timeout is not a verdict about the release. When the start's own budget
+	// is spent, the selected row was never disproven — every alternate would be
+	// resolved with the same expired deadline, so the walk could only land on a
+	// sibling that happens to answer from cache while the viewer's release was
+	// never given a chance. Observed production shape: four resolve attempts
+	// reporting a negative bound (bound_ms=-34/-65/-95/-126), then a plan whose
+	// requested_file_id and effective_file_id named different releases. Keep the
+	// selection and let the caller answer the honest retryable terminal.
+	walkBudget, walkAllowed := virtualResolveAttemptBudget(r.Context(), virtualStartVersionFallbackDecisionBudget)
+	if !walkAllowed || r.Context().Err() != nil {
+		slog.WarnContext(r.Context(), "virtual start version fallback skipped: the start budget is exhausted",
+			"component", "api", "signal", "start_budget_exhausted",
+			"file_id", file.ID,
+			"remaining_ms", virtualResolveRemainingMilliseconds(r.Context()),
+			"budget_exhausted", true,
+			"error", logredact.SanitizeURLError(resolveErr))
+		return resolved, resolveErr
+	}
 	// One deadline owns the whole walk. resolveVirtualPlaybackSource re-bases
 	// its own cold path on r.Context() and context.WithTimeout keeps the
 	// earlier deadline, so this bounds every alternate without restarting the
@@ -3471,7 +3499,7 @@ func (h *PlaybackHandler) resolveVirtualStartWithVersionFallback(
 	// from the per-listing budget: a healthy candidate is returned the moment
 	// it resolves, while a walk of dead pins terminals once the decision budget
 	// elapses rather than waiting out the full cold-start budget per version.
-	walkCtx, cancel := context.WithTimeout(r.Context(), virtualStartVersionFallbackDecisionBudget)
+	walkCtx, cancel := context.WithTimeout(r.Context(), walkBudget)
 	defer cancel()
 	// Thread the caller's session-binding intent rather than forcing it false.
 	// The fresh-start start path declares unbound on the request context before
@@ -3526,6 +3554,14 @@ func (h *PlaybackHandler) resolveVirtualStartWithVersionFallback(
 	// is published together with its index on the runner's channel, never via a
 	// shared variable, so two concurrent successes cannot race for it and a
 	// straggler cannot overwrite the winner the caller reads.
+	//
+	// A substitute is accepted only when it can serve the viewer's selection:
+	// the same rotation guard #448 applies to a rotation (a contradictory
+	// runtime or a poorer audio/subtitle menu is refused, never served) is
+	// applied here to the cross-version fallback as well, so the two paths
+	// share one policy.
+	expectedRuntimeMinutes := h.virtualExpectedRuntimeMinutes(walkCtx, file)
+	var refusedSubstitutes atomic.Int32
 	resolveAlternate := func(listCtx context.Context, alternate *models.MediaFile) (resolvedVirtualPlaybackSource, bool) {
 		listReq := walkReq.WithContext(listCtx)
 		altResolved, altErr := h.resolveVirtualPlaybackSource(
@@ -3533,6 +3569,21 @@ func (h *PlaybackHandler) resolveVirtualStartWithVersionFallback(
 			virtualResolveOptionsV3{sessionBound: false, bypassProviderFloor: true},
 		)
 		if altErr == nil && altResolved.File != nil {
+			if reason := virtualVersionFallbackSubstitutionRejectionV3(expectedRuntimeMinutes, file, altResolved.File); reason != "" {
+				refusedSubstitutes.Add(1)
+				slog.WarnContext(listCtx, "virtual start version fallback refused a substitute that contradicts the selected release",
+					"component", "api", "requested_file_id", file.ID,
+					"effective_file_id", altResolved.File.ID,
+					"candidate_uri", alternate.FilePath,
+					"reason", reason,
+					"probed_duration_seconds", altResolved.File.Duration,
+					"expected_runtime_minutes", expectedRuntimeMinutes,
+					"selected_audio_tracks", len(file.AudioTracks),
+					"selected_subtitle_tracks", len(file.SubtitleTracks),
+					"effective_audio_tracks", len(altResolved.File.AudioTracks),
+					"effective_subtitle_tracks", len(altResolved.File.SubtitleTracks))
+				return resolvedVirtualPlaybackSource{}, false
+			}
 			return altResolved, true
 		}
 		if altErr != nil {
@@ -3550,6 +3601,12 @@ func (h *PlaybackHandler) resolveVirtualStartWithVersionFallback(
 		walkCtx, candidateRows, virtualStartVersionFallbackWorkers, virtualStartVersionFallbackListingBudget, resolveAlternate,
 	)
 	if !ok {
+		if refusedSubstitutes.Load() > 0 && virtualRequestedRowIsSelection(file) {
+			// A substitute existed but none could serve the selection. A
+			// truthful, actionable terminal beats serving different bytes with
+			// fewer tracks: name the version list so the viewer can choose.
+			return resolved, fmt.Errorf("%w: %w", errVirtualSelectedReleaseCannotPlay, resolveErr)
+		}
 		return resolved, resolveErr
 	}
 	// Mark the substitution so the plan can tell the client the requested
@@ -4895,6 +4952,28 @@ func publishSubstitutionFieldsV3(plan *playback.PlanV3, requestedFileID, effecti
 		plan.SubstitutionReason = fallbackReason
 	}
 	plan.SubstitutedFromFileID = requestedFileID
+}
+
+// replanSubstitutionReasonV3 classifies why a replan commits a release other
+// than the row the viewer selected, into the additive substitution_reason
+// vocabulary. A cause already named on the plan wins (a version-pick hunt or a
+// transport alternate knows more than the replan does); otherwise the replan's
+// own evidence names the move: a candidate rotation for a decode rejection, a
+// failure-recovery rotation for a transport failure, and anything else as a
+// release the planner could not keep. It never invents a dead-release verdict,
+// which needs a confirmation only the resolver can give.
+func replanSubstitutionReasonV3(plan *playback.PlanV3, req playback.ReplanRequestV3, decodeRotation bool) string {
+	if plan != nil && plan.SubstitutionReason != "" {
+		return plan.SubstitutionReason
+	}
+	switch {
+	case decodeRotation:
+		return substitutionReasonDecodeRejectedV3
+	case failureRecoveryOperationV3(req.EffectiveOperation()):
+		return substitutionReasonTransportFailedV3
+	default:
+		return substitutionReasonVersionNotPlayableV3
+	}
 }
 
 // recoverVirtualTransportSameReleaseV3 spends one bounded same-release retry
@@ -12201,6 +12280,17 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		// the canonical recipe attempt key for loop retirement.
 		finalizeReplanPlanIdentityV3(result.Plan, record.PlaybackAttemptID, req.ReplanRequestID, start.ClientPlaybackContext.Output.OutputContextID)
 		artifactRecipe.PlanID = result.Plan.PlanID
+	}
+	// Every replan that commits a release other than the row the viewer selected
+	// reports it, not only the explicit version-pick hunt: a failure-recovery
+	// rotation, a decode rotation and a rehydration after a dead source all move
+	// the session onto different bytes, and a client that cannot see that can
+	// only guess. The fields are set after the plan identity is finalized, so
+	// they never change the plan hash, and the helper is a no-op on a replan that
+	// keeps the requested row.
+	if result.Plan != nil && requestedFile != nil && effectiveFile != nil {
+		publishSubstitutionFieldsV3(result.Plan, requestedFile.ID, effectiveFile.ID,
+			replanSubstitutionReasonV3(result.Plan, req, virtualDecodeRotation))
 	}
 	response := playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, ServerFeatures: serverFeaturesForRequestV3(r.Context()), Outcome: playback.OutcomePlayableV3, SessionID: session.ID, PlaybackPlan: result.Plan}
 	if seekNoMovement {
