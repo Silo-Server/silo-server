@@ -137,11 +137,39 @@ type ChapterThumbnailReadyPayload struct {
 	ThumbnailThumbhash string `json:"thumbnail_thumbhash,omitempty"`
 }
 
+// TimeRangePayload is one skippable range as a marker update reports it.
+//
+// The provenance fields mirror the watch payload's marker, so a client that
+// takes its markers from an update keeps the source and confidence it would
+// have drawn from the watch response. They are the only place an on-demand
+// provider's answer is ever described: such a marker is never saved, so the
+// event is the whole record of it.
 type TimeRangePayload struct {
 	Start float64 `json:"start"`
 	End   float64 `json:"end"`
+	// Source is the class of source that produced the range, absent when the
+	// file row recorded none.
+	Source string `json:"source,omitempty"`
+	// Provider is the provider that supplied the range, empty for local
+	// detection.
+	Provider string `json:"provider,omitempty"`
+	// Confidence is the source's own rating, 0-1, absent when nobody rated the
+	// range: a client handed an unrated range as the number 0 would print a
+	// measurement nobody made.
+	Confidence *float64 `json:"confidence,omitempty"`
+	// Algorithm identifies the detector, e.g. "chromaprint:v4".
+	Algorithm string `json:"algorithm,omitempty"`
 }
 
+// MarkersUpdatedPayload announces a file's marker inventory to the sessions
+// watching it.
+//
+// The four ranges carry their own provenance. They are also the only
+// announcement some markers ever get — an on-demand provider's answer is never
+// saved, and a marker local analysis finds mid-playback is written after the
+// client has already read the watch payload — so a range sent without its
+// source leaves the skip prompt's source line blank for a viewer who asked for
+// it.
 type MarkersUpdatedPayload struct {
 	SessionID      string                 `json:"session_id"`
 	FileID         int                    `json:"file_id"`

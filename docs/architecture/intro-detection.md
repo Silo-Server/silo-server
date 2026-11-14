@@ -263,6 +263,25 @@ every start would otherwise repeat the comparison. Admin refresh compares both
 kinds again, and admin re-detection compares again the kinds it asks for:
 the intro, the credits, or both.
 
+### The marker update clients receive
+
+A `markers_updated` event announces a file's markers to the playback sessions
+watching it: `marker_segments` is the occurrence inventory, and `intro`,
+`credits`, `recap` and `preview` are the kind's first occurrence as a range.
+Each of those four ranges carries the provenance the row records for its kind —
+`source`, `provider`, `confidence` and `algorithm` — because for a marker that
+is never saved (an on-demand provider's answer) or one found after the client
+read the watch payload the event is the only announcement there is, and the
+player's "show marker source" setting reads that provenance to draw the line
+above its skip prompt. A range that is absent for a kind is `null`.
+
+The event is delivered to a session with a realtime connection and published on
+the replica bus for sessions connected to another replica. What crosses the bus
+carries the ranges and their provenance, so a replica that republishes an update
+sends what the originating node sent rather than re-deriving a bare range; a
+snapshot without them comes from an older build, and the receiving replica
+derives the ranges from its segments instead of announcing four empty ones.
+
 ### Tail pass
 
 One ffmpeg run per file (`mediasample` `Window` over the tail, keyframes

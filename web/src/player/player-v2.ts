@@ -81,6 +81,9 @@ export type PlayerV2Key = `${string} ${keyof paths & string}`;
 /** The JSON request body of a v2 operation (`never` when it has none). */
 export type PlayerV2Body<K extends PlayerV2Key> = BodyOf<OperationOf<K>>;
 
+/** The success body a v2 operation answers with, as the transport parses it. */
+export type PlayerV2Response<K extends PlayerV2Key> = SuccessOf<OperationOf<K>>;
+
 export type PlayerV2Options<K extends PlayerV2Key> = {
   signal?: AbortSignal;
   query?: QueryOf<OperationOf<K>>;

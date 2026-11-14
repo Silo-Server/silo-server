@@ -1,5 +1,5 @@
 import type { SubtitleInventoryItemV3 } from "./protocol-v3";
-import type { PlayerMarkerSegment } from "./types";
+import type { PlayerMarkerProvenance, PlayerMarkerSegment } from "./types";
 
 export type PlaybackRealtimeMessageType = "command" | "event" | "hello" | "ack" | "result";
 
@@ -85,7 +85,12 @@ export interface PlaybackChapterThumbnailReadyPayload {
   thumbnail_thumbhash?: string;
 }
 
-export interface PlaybackTimeRangePayload {
+/**
+ * A range as an update reports it, with the provenance the watch payload's marker
+ * carries: for an on-demand provider's marker the update is the only announcement,
+ * so a range without it draws no source line.
+ */
+export interface PlaybackTimeRangePayload extends PlayerMarkerProvenance {
   start: number;
   end: number;
 }
@@ -360,8 +365,24 @@ function isChapterThumbnailReadyPayload(
   );
 }
 
+/**
+ * A range is valid when its bounds are numbers and any provenance it carries is
+ * the type it claims to be. A mistyped field rejects the range and its event, as
+ * this parser does everywhere; the fields themselves stay optional, since a
+ * server that reports no provenance is still reporting a marker.
+ */
 function isTimeRangePayload(value: unknown): value is PlaybackTimeRangePayload {
-  return isRecord(value) && typeof value.start === "number" && typeof value.end === "number";
+  return (
+    isRecord(value) &&
+    typeof value.start === "number" &&
+    typeof value.end === "number" &&
+    isOptionalString(value.source) &&
+    isOptionalString(value.provider) &&
+    isOptionalString(value.algorithm) &&
+    (value.confidence === undefined ||
+      value.confidence === null ||
+      typeof value.confidence === "number")
+  );
 }
 
 function isMarkerSegment(value: unknown): value is PlayerMarkerSegment {

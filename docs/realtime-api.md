@@ -731,6 +731,25 @@ for the full buffering policy.
 See [Watch Party synchronization](architecture/watch-party-synchronization.md)
 for transaction, lease, delivery, and deployment behavior.
 
+### `markers_updated`
+
+Sent to every playback session with a realtime connection that is playing the
+file, when its markers change: a provider lookup at playback start, local
+detection, an edit, or an admin refresh. Its payload contains `session_id`,
+numeric `file_id`, `marker_segments` (every effective occurrence as `kind`,
+`start_seconds`, `end_seconds`), and `intro`, `credits`, `recap`, and `preview`.
+Each of those four is the kind's first occurrence as `{start, end}`, or `null`
+when the file has none.
+
+Each range also carries the provenance the file records for that kind, the same
+fields as the watch payload's marker: `source`, `provider`, `confidence` (0–1),
+and `algorithm`. Each is omitted when nothing is recorded; an omitted
+`confidence` means the range is unrated, not rated 0. A marker from an on-demand
+provider is never saved, so this event is the only place its provenance appears.
+A range from a server that predates these fields, or from an older replica
+during a rolling deploy, has none. Clients that show a marker's source should
+keep what they already hold for a range whose bounds did not change.
+
 ### `marker_thumbnail_ready` (native v2, negotiated)
 
 Only playback attempts that opted into `marker_thumbnails_v1` at start receive

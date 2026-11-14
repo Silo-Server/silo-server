@@ -28,9 +28,18 @@ type MarkerUpdateNotifier struct {
 
 // markerUpdateSnapshot carries enough data to deliver an update without reading
 // the database: on-demand markers may never be persisted.
+//
+// The four ranges ride the snapshot rather than being derived when it is
+// delivered, because a replica that republishes an update has only this struct
+// and provenance is not in the marker segments: with "show marker source" on, a
+// replica that dropped it would blank the line a viewer asked for.
 type markerUpdateSnapshot struct {
 	SourceID string                 `json:"source_id"`
 	FileID   int                    `json:"file_id"`
+	Intro    *TimeRangePayload      `json:"intro"`
+	Credits  *TimeRangePayload      `json:"credits"`
+	Recap    *TimeRangePayload      `json:"recap"`
+	Preview  *TimeRangePayload      `json:"preview"`
 	Segments []models.MarkerSegment `json:"marker_segments"`
 }
 
@@ -91,6 +100,7 @@ func (n *MarkerUpdateNotifier) MarkersUpdated(ctx context.Context, file *models.
 		FileID:   file.ID,
 		Segments: models.EffectiveMarkerSegments(file),
 	}
+	snapshot.Intro, snapshot.Credits, snapshot.Recap, snapshot.Preview = markerUpdateRanges(file, snapshot.Segments)
 	n.dispatch(ctx, snapshot)
 	if ctx.Err() != nil {
 		return
@@ -111,17 +121,77 @@ func (n *MarkerUpdateNotifier) MarkersUpdated(ctx context.Context, file *models.
 	}
 }
 
-func (n *MarkerUpdateNotifier) dispatch(ctx context.Context, snapshot markerUpdateSnapshot) {
-	firstRange := func(kind string) *TimeRangePayload {
-		for _, segment := range snapshot.Segments {
-			if segment.Kind == kind {
-				return &TimeRangePayload{Start: segment.StartSeconds, End: segment.EndSeconds}
+// markerUpdateRanges reports the file's first occurrence of each marker kind as
+// the event sends it, each with the provenance the row records for that kind.
+//
+// The ranges come from the same effective segment list the event carries, so
+// the two cannot disagree about which occurrence is the kind's range. Provenance
+// is per file and kind rather than per occurrence — one row holds one origin for
+// the intro — so every occurrence of a kind reports the same answer.
+func markerUpdateRanges(file *models.MediaFile, segments []models.MarkerSegment) (*TimeRangePayload, *TimeRangePayload, *TimeRangePayload, *TimeRangePayload) {
+	first := func(kind string) *TimeRangePayload {
+		for _, segment := range segments {
+			if segment.Kind != kind {
+				continue
+			}
+			source, provider, algorithm, confidence := markerProvenanceOf(file, kind)
+			return &TimeRangePayload{
+				Start:      segment.StartSeconds,
+				End:        segment.EndSeconds,
+				Source:     source,
+				Provider:   provider,
+				Confidence: confidence,
+				Algorithm:  algorithm,
 			}
 		}
 		return nil
 	}
-	intro, credits := firstRange("intro"), firstRange("credits")
-	recap, preview := firstRange("recap"), firstRange("preview")
+	return first(models.MarkerSegmentIntro), first(models.MarkerSegmentCredits),
+		first(models.MarkerSegmentRecap), first(models.MarkerSegmentPreview)
+}
+
+// markerProvenanceOf reads one kind's provenance off the file row.
+//
+// Confidence comes back as a pointer because the column is nullable: a range
+// nobody rated records none, and a client handed that as the number 0 would
+// print a measurement of nothing.
+func markerProvenanceOf(file *models.MediaFile, kind string) (source, provider, algorithm string, confidence *float64) {
+	if file == nil {
+		return "", "", "", nil
+	}
+	read := func(source, provider, algorithm *string, confidence *float64) (string, string, string, *float64) {
+		return stringOrEmpty(source), stringOrEmpty(provider), stringOrEmpty(algorithm), confidence
+	}
+	switch kind {
+	case models.MarkerSegmentIntro:
+		return read(file.IntroMarkersSource, file.IntroMarkersProvider, file.IntroMarkersAlgorithm, file.IntroMarkersConfidence)
+	case models.MarkerSegmentCredits:
+		return read(file.CreditsMarkersSource, file.CreditsMarkersProvider, file.CreditsMarkersAlgorithm, file.CreditsMarkersConfidence)
+	case models.MarkerSegmentRecap:
+		return read(file.RecapMarkersSource, file.RecapMarkersProvider, file.RecapMarkersAlgorithm, file.RecapMarkersConfidence)
+	case models.MarkerSegmentPreview:
+		return read(file.PreviewMarkersSource, file.PreviewMarkersProvider, file.PreviewMarkersAlgorithm, file.PreviewMarkersConfidence)
+	default:
+		return "", "", "", nil
+	}
+}
+
+func stringOrEmpty(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func (n *MarkerUpdateNotifier) dispatch(ctx context.Context, snapshot markerUpdateSnapshot) {
+	if snapshot.Intro == nil && snapshot.Credits == nil && snapshot.Recap == nil && snapshot.Preview == nil {
+		// A snapshot published by a replica on an older build (a rolling
+		// deploy) carries segments and no ranges. Deriving them here keeps its
+		// subscribers from announcing four empty ranges for a file that has
+		// markers, which would erase a viewer's marker and its source line.
+		// The file is unknown, so those ranges carry no provenance.
+		snapshot.Intro, snapshot.Credits, snapshot.Recap, snapshot.Preview = markerUpdateRanges(nil, snapshot.Segments)
+	}
 	for _, session := range n.sessions.GetSessionsByMediaFileID(snapshot.FileID) {
 		if ctx.Err() != nil {
 			return
@@ -129,7 +199,7 @@ func (n *MarkerUpdateNotifier) dispatch(ctx context.Context, snapshot markerUpda
 		if session == nil || session.ID == "" || !session.HasRealtimeConnection {
 			continue
 		}
-		event, err := NewMarkersUpdatedEvent(session.ID, snapshot.FileID, intro, credits, recap, preview, snapshot.Segments...)
+		event, err := NewMarkersUpdatedEvent(session.ID, snapshot.FileID, snapshot.Intro, snapshot.Credits, snapshot.Recap, snapshot.Preview, snapshot.Segments...)
 		if err != nil {
 			slog.WarnContext(ctx,
 				"failed to encode markers updated realtime event", "component", "playback",

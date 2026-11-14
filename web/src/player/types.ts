@@ -219,12 +219,18 @@ export interface PlayerMarkerSegment {
   end_seconds: number;
 }
 
-/** A full set of editable marker ranges for one file (null = no marker). */
+/**
+ * A full set of editable marker ranges for one file (null = no marker).
+ *
+ * A range carries the provenance the server recorded for it, so a save can
+ * report where the range now comes from: an edit makes it an edited range, and
+ * the skip prompt's source line reads that.
+ */
 export interface MarkerDraft {
-  intro: PlayerTimeRange | null;
-  recap: PlayerTimeRange | null;
-  credits: PlayerTimeRange | null;
-  preview: PlayerTimeRange | null;
+  intro: PlayerMarkerRange | null;
+  recap: PlayerMarkerRange | null;
+  credits: PlayerMarkerRange | null;
+  preview: PlayerMarkerRange | null;
 }
 
 /** A marker range positioned on the seek bar, tagged with its kind for color. */

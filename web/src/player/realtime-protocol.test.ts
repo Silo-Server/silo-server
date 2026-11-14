@@ -85,6 +85,21 @@ describe("realtime protocol", () => {
       { session_id: "session-1", file_id: 42, intro: { start: 12, end: 75 }, credits: null },
     ],
     [
+      "markers_updated",
+      {
+        session_id: "session-1",
+        file_id: 42,
+        intro: {
+          start: 12,
+          end: 75,
+          source: "plugin",
+          provider: "plugin:4:introdb",
+          confidence: 0.2,
+        },
+        credits: null,
+      },
+    ],
+    [
       "subtitle_ready",
       {
         session_id: "session-1",
@@ -109,6 +124,24 @@ describe("realtime protocol", () => {
         session_id: "session-1",
         name: "subtitle_ready",
         payload: { session_id: "session-1", file_id: 42, language: "es" },
+      }),
+    );
+
+    expect(event).toBeNull();
+  });
+
+  it("rejects a marker range whose provenance is not the type it claims", () => {
+    const event = parsePlaybackRealtimeMessage(
+      JSON.stringify({
+        type: "event",
+        session_id: "session-1",
+        name: "markers_updated",
+        payload: {
+          session_id: "session-1",
+          file_id: 42,
+          intro: { start: 12, end: 75, confidence: "0.2" },
+          credits: null,
+        },
       }),
     );
 
