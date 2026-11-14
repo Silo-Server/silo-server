@@ -150,7 +150,8 @@ function resolveLocalRef(schema: unknown, root: object): unknown {
   if (!section || !name) return undefined;
   const defs = (root as Record<string, unknown>)[section];
   if (!defs || typeof defs !== "object") return undefined;
-  return (defs as Record<string, unknown>)[name];
+  // JSON Pointer escapes "/" as "~1" and "~" as "~0" (RFC 6901).
+  return (defs as Record<string, unknown>)[name.replaceAll("~1", "/").replaceAll("~0", "~")];
 }
 
 /**

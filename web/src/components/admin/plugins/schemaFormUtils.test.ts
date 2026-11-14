@@ -73,7 +73,7 @@ describe("parseFieldTypes (#15)", () => {
   it("reads declared property types including array item types", () => {
     const json = JSON.stringify({
       type: "object",
-      $defs: { id: { type: "integer" } },
+      $defs: { id: { type: "integer" }, "a/b": { type: "integer" }, "a~1b": { type: "string" } },
       properties: {
         quality_profile_id: { type: "integer" },
         root_folder: { type: "string" },
@@ -84,6 +84,7 @@ describe("parseFieldTypes (#15)", () => {
         codes: { type: "array", items: { enum: ["001", "123"] } },
         maybe_ids: { type: "array", items: { type: ["integer", "null"] } },
         ref_ids: { type: "array", items: { $ref: "#/$defs/id" } },
+        escaped_ref_ids: { type: "array", items: { $ref: "#/$defs/a~1b" } },
         anything: { type: "array", items: { $ref: "#/$defs/thing" } },
         enabled: { type: "boolean" },
       },
@@ -98,6 +99,7 @@ describe("parseFieldTypes (#15)", () => {
       codes: "array",
       maybe_ids: "array:int",
       ref_ids: "array:int",
+      escaped_ref_ids: "array:int",
       anything: "array",
       enabled: "boolean",
     });
