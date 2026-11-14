@@ -73,6 +73,122 @@ func TestMarkerUpdateNotifierTargetsMatchingSessions(t *testing.T) {
 	}
 }
 
+func TestMarkerUpdateNotifierCarriesMarkerProvenance(t *testing.T) {
+	pluginSource := models.MarkerSourcePlugin
+	pluginProvider := "plugin:4:introdb"
+	rated := 0.2
+	zero := 0.0
+	scannerSource := models.MarkerSourceScanner
+	cases := []struct {
+		name         string
+		file         *models.MediaFile
+		wantSource   string
+		wantProvider string
+		wantConf     *float64
+	}{
+		{
+			name: "a provider's rated marker reports its source and confidence",
+			file: &models.MediaFile{
+				ID:                     100,
+				IntroMarkersSource:     &pluginSource,
+				IntroMarkersProvider:   &pluginProvider,
+				IntroMarkersConfidence: &rated,
+			},
+			wantSource:   models.MarkerSourcePlugin,
+			wantProvider: "plugin:4:introdb",
+			wantConf:     &rated,
+		},
+		{
+			name: "an unrated marker reports no confidence",
+			file: &models.MediaFile{
+				ID:                 100,
+				IntroMarkersSource: &scannerSource,
+			},
+			wantSource: models.MarkerSourceScanner,
+			wantConf:   nil,
+		},
+		{
+			name: "a marker rated zero reports the zero, not nothing",
+			file: &models.MediaFile{
+				ID:                     100,
+				IntroMarkersSource:     &pluginSource,
+				IntroMarkersProvider:   &pluginProvider,
+				IntroMarkersConfidence: &zero,
+			},
+			wantSource:   models.MarkerSourcePlugin,
+			wantProvider: "plugin:4:introdb",
+			wantConf:     &zero,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sessions := NewSessionManager(0, 0)
+			hub := NewRealtimeHub()
+			session := startPlaybackTestSession(t, sessions, 1, "profile-a", 100, PlayDirect)
+			conn := connectRealtimeTestConn(t, sessions, hub, session.ID)
+
+			introStart := 12.0
+			introEnd := 75.0
+			file := *tc.file
+			file.IntroStart, file.IntroEnd = &introStart, &introEnd
+			NewMarkerUpdateNotifier(sessions, hub).MarkersUpdated(context.Background(), &file)
+
+			if len(conn.messages) != 1 {
+				t.Fatalf("messages = %d, want 1", len(conn.messages))
+			}
+			var payload MarkersUpdatedPayload
+			if err := json.Unmarshal(conn.messages[0].(EventEnvelope).Payload, &payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload.Intro == nil {
+				t.Fatal("payload.Intro = nil, want a range")
+			}
+			if payload.Intro.Source != tc.wantSource {
+				t.Fatalf("payload.Intro.Source = %q, want %q", payload.Intro.Source, tc.wantSource)
+			}
+			if payload.Intro.Provider != tc.wantProvider {
+				t.Fatalf("payload.Intro.Provider = %q, want %q", payload.Intro.Provider, tc.wantProvider)
+			}
+			switch {
+			case tc.wantConf == nil && payload.Intro.Confidence != nil:
+				t.Fatalf("payload.Intro.Confidence = %v, want absent for an unrated marker", *payload.Intro.Confidence)
+			case tc.wantConf != nil && (payload.Intro.Confidence == nil || *payload.Intro.Confidence != *tc.wantConf):
+				t.Fatalf("payload.Intro.Confidence = %v, want %v", payload.Intro.Confidence, *tc.wantConf)
+			}
+		})
+	}
+}
+
+func TestMarkerUpdateNotifierDerivesRangesFromAnOlderReplicaSnapshot(t *testing.T) {
+	bus := &markerUpdateTestBus{}
+	remote, conn := newMarkerUpdateTestReplica(t)
+	if err := remote.UseEventBus(context.Background(), bus.publish, bus.subscribe); err != nil {
+		t.Fatal(err)
+	}
+	if len(bus.handlers) != 1 {
+		t.Fatalf("subscriptions = %d, want 1", len(bus.handlers))
+	}
+
+	// What a replica on the previous build publishes: the segments, and none of
+	// the four ranges this build reads.
+	bus.handlers[0](`{"source_id":"older-replica","file_id":100,"marker_segments":[{"kind":"credits","start_seconds":100,"end_seconds":120}]}`)
+
+	if len(conn.messages) != 1 {
+		t.Fatalf("messages = %d, want 1", len(conn.messages))
+	}
+	var payload MarkersUpdatedPayload
+	if err := json.Unmarshal(conn.messages[0].(EventEnvelope).Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Credits == nil || payload.Credits.Start != 100 || payload.Credits.End != 120 {
+		t.Fatalf("payload.Credits = %#v, want the range the snapshot's segments hold", payload.Credits)
+	}
+	if payload.Intro != nil || payload.Recap != nil || payload.Preview != nil {
+		t.Fatalf("payload = %#v, want no range for the kinds without one", payload)
+	}
+}
+
 type markerUpdateTestBus struct {
 	handlers []func(string)
 	events   []string
@@ -116,7 +232,14 @@ func TestMarkerUpdateNotifierDeliversAcrossReplicasOnce(t *testing.T) {
 		{Kind: "credits", StartSeconds: 100, EndSeconds: 120},
 		{Kind: "credits", StartSeconds: 150, EndSeconds: 180},
 	}
-	local.MarkersUpdated(ctx, &models.MediaFile{ID: 100, MarkerSegments: segments})
+	creditsSource := models.MarkerSourcePlugin
+	creditsProvider := "plugin:4:introdb"
+	local.MarkersUpdated(ctx, &models.MediaFile{
+		ID:                     100,
+		MarkerSegments:         segments,
+		CreditsMarkersSource:   &creditsSource,
+		CreditsMarkersProvider: &creditsProvider,
+	})
 	if len(bus.events) != 1 {
 		t.Fatalf("published events = %d, want 1 without rebroadcast", len(bus.events))
 	}
@@ -135,13 +258,22 @@ func TestMarkerUpdateNotifierDeliversAcrossReplicasOnce(t *testing.T) {
 		if payload.Credits == nil || payload.Credits.Start != 100 || payload.Credits.End != 120 {
 			t.Fatalf("%s credits = %#v, want first occurrence", name, payload.Credits)
 		}
+		if payload.Credits.Source != models.MarkerSourcePlugin || payload.Credits.Provider != creditsProvider {
+			t.Fatalf("%s credits provenance = %q/%q, want %q/%q", name,
+				payload.Credits.Source, payload.Credits.Provider, models.MarkerSourcePlugin, creditsProvider)
+		}
 	}
 	var snapshot map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(bus.events[0]), &snapshot); err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot) != 3 || snapshot["source_id"] == nil || snapshot["file_id"] == nil || snapshot["marker_segments"] == nil {
-		t.Fatalf("event fields = %#v, want only source, file, and marker snapshot", snapshot)
+	for _, field := range []string{"source_id", "file_id", "intro", "credits", "recap", "preview", "marker_segments"} {
+		if snapshot[field] == nil {
+			t.Fatalf("event fields = %#v, want %s present", snapshot, field)
+		}
+	}
+	if len(snapshot) != 7 {
+		t.Fatalf("event fields = %#v, want only the source, file, marker ranges and their segments", snapshot)
 	}
 
 	local.MarkersUpdated(ctx, &models.MediaFile{ID: 100})

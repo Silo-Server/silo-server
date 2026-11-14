@@ -57,6 +57,51 @@ it("saves changed ranges through the host-owned v2 player transport", async () =
   expect(result.current.editing).toBe(false);
 });
 
+it("reports the provenance the save recorded, so a source line survives it", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof fetch>(
+      async () =>
+        new Response(
+          JSON.stringify({
+            file_id: "42",
+            intro: { start_seconds: 0, end_seconds: 70, source: "manual" },
+            credits: {},
+            recap: {},
+            preview: {},
+            marker_segments: [],
+          }),
+          { status: 200 },
+        ),
+    ),
+  );
+  const onSaved = vi.fn();
+  const { result } = renderHook(
+    () =>
+      useMarkerEditor({
+        fileId: 42,
+        duration: 600,
+        markers: { intro: null, credits: null, recap: null, preview: null },
+        onSaved,
+      }),
+    { wrapper },
+  );
+  act(() => result.current.begin());
+  act(() => {
+    result.current.setEdge("intro", "start", 0);
+    result.current.setEdge("intro", "end", 70);
+  });
+  await act(() => result.current.save());
+
+  // Saving a range is what makes it an edited one; the draft cannot say so.
+  expect(onSaved).toHaveBeenCalledWith({
+    intro: { start: 0, end: 70, source: "manual" },
+    recap: null,
+    credits: null,
+    preview: null,
+  });
+});
+
 it("keeps the draft open when v2 refuses a save", async () => {
   vi.stubGlobal(
     "fetch",

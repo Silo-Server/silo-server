@@ -2,6 +2,7 @@ import type {
   MarkerKind,
   MarkerRegionView,
   PlayerFileVersion,
+  PlayerMarkerProvenance,
   PlayerMarkerRange,
   PlayerMarkerSegment,
   PlayerTimeRange,
@@ -14,6 +15,26 @@ const markerKinds: MarkerKind[] = ["intro", "credits", "recap", "preview"];
 // initial version state may have them undefined.
 function rangesEqual(a: PlayerTimeRange | null | undefined, b: PlayerTimeRange | null | undefined) {
   return (a?.start ?? null) === (b?.start ?? null) && (a?.end ?? null) === (b?.end ?? null);
+}
+
+/**
+ * Ranges and the provenance recorded beside them, as a version holds them.
+ *
+ * Wider than [rangesEqual] on purpose: an update can change only where a range
+ * came from, and a comparison that ignored that would report the version
+ * unchanged and drop the answer, leaving the skip prompt's source line empty.
+ */
+function markersEqual(
+  a: PlayerMarkerRange | null | undefined,
+  b: PlayerMarkerRange | null | undefined,
+): boolean {
+  return (
+    rangesEqual(a, b) &&
+    (a?.source ?? null) === (b?.source ?? null) &&
+    (a?.provider ?? null) === (b?.provider ?? null) &&
+    (a?.confidence ?? null) === (b?.confidence ?? null) &&
+    (a?.algorithm ?? null) === (b?.algorithm ?? null)
+  );
 }
 
 function segmentsEqual(a: PlayerMarkerSegment[] | undefined, b: PlayerMarkerSegment[] | undefined) {
@@ -30,13 +51,51 @@ function segmentsEqual(a: PlayerMarkerSegment[] | undefined, b: PlayerMarkerSegm
   );
 }
 
+/**
+ * A version's marker after an update reports its range.
+ *
+ * An update that names a provenance is the whole answer for that range: it is
+ * the server describing the marker as its row now holds it, and a confidence
+ * left out of it means the range is unrated rather than that the client should
+ * keep an older rating.
+ *
+ * An update that names none is a bare range, which is what a server without the
+ * provenance fields sends and what the editor's draft carries. A range it
+ * restates keeps the provenance the version already holds — the row's own answer
+ * for that kind, which a range that did not move cannot have changed, and which
+ * is what a skip prompt reads to draw its source line. A range that moved takes
+ * nothing from the range it replaced: a moved range was detected or supplied by
+ * someone the update does not name, and a stale attribution answers the
+ * question the line exists to answer with something false.
+ */
+function rangeAfterUpdate(
+  existing: PlayerMarkerRange | null | undefined,
+  update: PlayerMarkerRange | null,
+): PlayerMarkerRange | null {
+  if (update === null) return null;
+  if (namesAProvenance(update)) return update;
+  const restated =
+    existing != null && existing.start === update.start && existing.end === update.end;
+  return restated ? { ...update, ...provenanceOf(existing) } : update;
+}
+
+/** Whether a range says anything about where it came from. */
+function namesAProvenance(range: PlayerMarkerProvenance): boolean {
+  return (
+    Boolean(range.source) ||
+    Boolean(range.provider) ||
+    Boolean(range.algorithm) ||
+    range.confidence != null
+  );
+}
+
 export function patchVersionMarkers(
   versions: PlayerFileVersion[],
   fileId: number,
-  intro?: PlayerTimeRange | null,
-  credits?: PlayerTimeRange | null,
-  recap?: PlayerTimeRange | null,
-  preview?: PlayerTimeRange | null,
+  intro?: PlayerMarkerRange | null,
+  credits?: PlayerMarkerRange | null,
+  recap?: PlayerMarkerRange | null,
+  preview?: PlayerMarkerRange | null,
   markerSegments?: PlayerMarkerSegment[],
 ): PlayerFileVersion[] {
   if (
@@ -55,10 +114,12 @@ export function patchVersionMarkers(
       return version;
     }
 
-    const nextIntro = intro === undefined ? version.intro : intro;
-    const nextCredits = credits === undefined ? version.credits : credits;
-    const nextRecap = recap === undefined ? version.recap : recap;
-    const nextPreview = preview === undefined ? version.preview : preview;
+    const nextIntro = intro === undefined ? version.intro : rangeAfterUpdate(version.intro, intro);
+    const nextCredits =
+      credits === undefined ? version.credits : rangeAfterUpdate(version.credits, credits);
+    const nextRecap = recap === undefined ? version.recap : rangeAfterUpdate(version.recap, recap);
+    const nextPreview =
+      preview === undefined ? version.preview : rangeAfterUpdate(version.preview, preview);
     let nextSegments =
       markerSegments?.map((segment) => {
         const previous = version.marker_segments?.find(
@@ -92,10 +153,10 @@ export function patchVersionMarkers(
       }
     }
     if (
-      rangesEqual(version.intro, nextIntro) &&
-      rangesEqual(version.credits, nextCredits) &&
-      rangesEqual(version.recap, nextRecap) &&
-      rangesEqual(version.preview, nextPreview) &&
+      markersEqual(version.intro, nextIntro) &&
+      markersEqual(version.credits, nextCredits) &&
+      markersEqual(version.recap, nextRecap) &&
+      markersEqual(version.preview, nextPreview) &&
       segmentsEqual(version.marker_segments, nextSegments)
     ) {
       return version;

@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { PlayerFileVersion, PlayerMarkerSegment } from "../types";
+import { markerProvenanceLabel } from "@/lib/markerProvenance";
 import {
   markerOccurrenceAtTime,
   patchVersionMarkers,
@@ -91,6 +92,84 @@ describe("patchVersionMarkers", () => {
       intro: { start: 10, end: 60 },
       credits: { start: 1500, end: 1790 },
     });
+  });
+
+  it("keeps the source of a range an update restates", () => {
+    const versions = [
+      makeVersion({
+        intro: {
+          start: 12,
+          end: 75,
+          source: "plugin",
+          provider: "plugin:4:introdb",
+          confidence: 0.2,
+        },
+        credits: { start: 1500, end: 1790, source: "scanner", provider: null },
+      }),
+    ];
+
+    // A marker update that restates the intro but moves the credits has no
+    // provenance of its own; the source line the viewer asked for must survive
+    // it, whether or not another kind in the same update changed.
+    const patched = patchVersionMarkers(
+      versions,
+      1,
+      { start: 12, end: 75 },
+      { start: 1490, end: 1780 },
+    );
+
+    expect(
+      markerProvenanceLabel(patched[0]!.intro!, { showConfidence: false, showSource: true }),
+    ).toBe("TheIntroDB");
+  });
+
+  it("takes the source an update carries over the one it replaced", () => {
+    const versions = [
+      makeVersion({ intro: { start: 12, end: 75, source: "manual", provider: null } }),
+    ];
+
+    const patched = patchVersionMarkers(versions, 1, {
+      start: 12,
+      end: 75,
+      source: "plugin",
+      provider: "plugin:4:introdb",
+    });
+
+    expect(
+      markerProvenanceLabel(patched[0]!.intro!, { showConfidence: false, showSource: true }),
+    ).toBe("TheIntroDB");
+  });
+
+  it("does not lend a moved range the source of the range it replaced", () => {
+    const versions = [
+      makeVersion({ intro: { start: 12, end: 75, source: "scanner", provider: null } }),
+    ];
+
+    // The row's origin for a kind is not the client's to assume: a range that
+    // moved was detected or supplied by someone the update does not name.
+    const patched = patchVersionMarkers(versions, 1, { start: 0, end: 30 });
+
+    expect(
+      markerProvenanceLabel(patched[0]!.intro!, { showConfidence: true, showSource: true }),
+    ).toBeNull();
+  });
+
+  it("reports the source of a range only an update has ever named", () => {
+    const versions = [makeVersion({ intro: null })];
+
+    // The event is the only announcement an on-demand provider's marker gets, so
+    // its provenance has to ride it.
+    const patched = patchVersionMarkers(versions, 1, {
+      start: 12,
+      end: 75,
+      source: "online",
+      provider: "introdb",
+      confidence: 0.9,
+    });
+
+    expect(
+      markerProvenanceLabel(patched[0]!.intro!, { showConfidence: true, showSource: true }),
+    ).toBe("90% · TheIntroDB");
   });
 });
 
