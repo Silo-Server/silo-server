@@ -4385,7 +4385,7 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 				h.maybeStartThrottler(ctx, ts)
 				h.tm.MonitorLocalTranscodeExit(session.ID, ts)
 			})
-			h.maybeStartThrottler(r.Context(), ts)
+			h.tm.StartInitialThrottler(r.Context(), ts)
 			h.tm.MonitorLocalTranscodeExit(session.ID, ts)
 			return nil
 		},

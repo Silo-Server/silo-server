@@ -1087,14 +1087,35 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 		m.MonitorLocalTranscodeExit(sessionID, transcodeSession)
 	})
 
-	if m.StartThrottler != nil {
-		m.StartThrottler(ctx, transcodeSession)
-	}
+	m.StartInitialThrottler(ctx, transcodeSession)
 	m.MonitorLocalTranscodeExit(sessionID, transcodeSession)
 	slog.InfoContext(ctx, "transcode process reconstructed from recipe card", "component", "playback",
 		"session", sessionID, "playback_session_id", sessionID,
 		"requested_segment", requestedSegment, "start_segment_number", opts.StartSegmentNumber)
 	return transcodeSession, nil
+}
+
+// initialThrottleSettingsTimeout bounds the settings read behind a transcode's
+// first throttler start. A rebuild holds the session lifecycle lock and a
+// reconstruct slot across that read, so a stalled database must not keep them.
+const initialThrottleSettingsTimeout = 5 * time.Second
+
+// StartInitialThrottler starts the throttler for a transcode that was just
+// started or rebuilt. The transcode outlives the request that asked for it, so
+// the settings read is detached from that request and bounded instead. A
+// restart hook calls StartThrottler with the context Restart gives it, which
+// ends when the session closes or restartHookTimeout passes.
+func (m *TranscodeManager) StartInitialThrottler(ctx context.Context, ts *TranscodeSession) {
+	if m.StartThrottler == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), initialThrottleSettingsTimeout)
+	defer cancel()
+	m.StartThrottler(ctx, ts)
+	if ctx.Err() != nil {
+		slog.WarnContext(ctx, "transcode throttle settings read timed out; the transcode may run unthrottled until its next restart",
+			"component", "playback", "playback_session_id", ts.Opts().SessionID, "timeout", initialThrottleSettingsTimeout)
+	}
 }
 
 func reconstructionOutputDir(root, sessionID, signedSubdir string) string {
