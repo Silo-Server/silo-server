@@ -923,6 +923,10 @@
 ./internal/dashmetrics TestSampleSharedRecordsEgressPerNodeDB
 ./internal/api/handlers TestQueryAdminTimeseriesSplitsEgressBySourceDB
 
+# A play's API-served bytes add up tick by tick, and the prune keeps them while
+# the play's history row exists.
+./internal/dashmetrics TestSessionAPIEgressAccumulatesDB
+
 # Clearing admin collection artwork commits the cleared reference even when a
 # stored variant fails to delete.
 ./internal/api/handlers TestDeleteAdminCollectionArtworkClearsReferenceWhenVariantDeleteFailsDB

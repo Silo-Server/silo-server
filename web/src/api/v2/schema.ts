@@ -19389,6 +19389,11 @@ export interface components {
     };
     AdminPlaybackHistoryEntry: {
       /**
+       * Format: int64
+       * @description Viewer bytes the API servers sent for the play, counted a minute at a time while it played. Bytes a stream node or proxy sent the viewer directly are not included. Null when no count was recorded for the play: the API servers sent it nothing, or it played before counting existed, so null does not mean the play used no data
+       */
+      api_served_bytes: number | null;
+      /**
        * @description How the audio stream was delivered when the play ended, with the video_decision values. Null when unknown
        * @enum {string|null}
        */

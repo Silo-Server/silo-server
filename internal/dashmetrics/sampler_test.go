@@ -1,8 +1,12 @@
 package dashmetrics
 
 import (
+	"context"
+	"reflect"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 )
@@ -39,47 +43,59 @@ func TestComputeEgressDelta(t *testing.T) {
 			snapshot: streamtelemetry.Snapshot{
 				Sessions: []streamtelemetry.SessionView{viewerSession("s1", 4_000)},
 			},
-			wantDelta: egressDelta{Total: 4_000},
-			wantNext:  map[string]int64{"session:s1": 4_000},
+			wantDelta: egressDelta{Total: 4_000, Sessions: map[string]int64{"s1": 4_000}},
+			wantNext:  map[string]int64{"session:s1\x000": 4_000},
 		},
 		{
 			name: "a grown session contributes only the growth",
-			prev: map[string]int64{"session:s1": 4_000},
+			prev: map[string]int64{"session:s1\x000": 4_000},
 			snapshot: streamtelemetry.Snapshot{
 				Sessions: []streamtelemetry.SessionView{viewerSession("s1", 6_500)},
 			},
-			wantDelta: egressDelta{Total: 2_500},
-			wantNext:  map[string]int64{"session:s1": 6_500},
+			wantDelta: egressDelta{Total: 2_500, Sessions: map[string]int64{"s1": 2_500}},
+			wantNext:  map[string]int64{"session:s1\x000": 6_500},
 		},
 		{
 			name: "a pruned session leaves the map and adds nothing",
-			prev: map[string]int64{"session:s1": 4_000, "session:s2": 1_000},
+			prev: map[string]int64{"session:s1\x000": 4_000, "session:s2\x000": 1_000},
 			snapshot: streamtelemetry.Snapshot{
 				Sessions: []streamtelemetry.SessionView{viewerSession("s2", 1_000)},
 			},
 			wantDelta: egressDelta{},
-			wantNext:  map[string]int64{"session:s2": 1_000},
+			wantNext:  map[string]int64{"session:s2\x000": 1_000},
 		},
 		{
 			name: "a counter regression clamps at zero instead of going negative",
-			prev: map[string]int64{"session:s1": 9_000},
+			prev: map[string]int64{"session:s1\x000": 9_000},
 			snapshot: streamtelemetry.Snapshot{
 				Sessions: []streamtelemetry.SessionView{viewerSession("s1", 500)},
 			},
 			wantDelta: egressDelta{},
-			wantNext:  map[string]int64{"session:s1": 500},
+			wantNext:  map[string]int64{"session:s1\x000": 500},
 		},
 		{
 			name: "a regressing session does not cancel out a growing one",
-			prev: map[string]int64{"session:s1": 9_000, "session:s2": 100},
+			prev: map[string]int64{"session:s1\x000": 9_000, "session:s2\x000": 100},
 			snapshot: streamtelemetry.Snapshot{
 				Sessions: []streamtelemetry.SessionView{
 					viewerSession("s1", 500),
 					viewerSession("s2", 900),
 				},
 			},
-			wantDelta: egressDelta{Total: 800},
-			wantNext:  map[string]int64{"session:s1": 500, "session:s2": 900},
+			wantDelta: egressDelta{Total: 800, Sessions: map[string]int64{"s2": 800}},
+			wantNext:  map[string]int64{"session:s1\x000": 500, "session:s2\x000": 900},
+		},
+		{
+			name: "a session re-created under its id after a prune counts from zero",
+			prev: map[string]int64{"session:s1\x001": 10_000},
+			snapshot: streamtelemetry.Snapshot{
+				Sessions: []streamtelemetry.SessionView{{
+					SessionID: "s1", Generation: 2,
+					Routes: []streamtelemetry.RouteActivityView{{Role: streamtelemetry.RoleViewerEgress, BytesAccepted: 10_000}},
+				}},
+			},
+			wantDelta: egressDelta{Total: 10_000, Sessions: map[string]int64{"s1": 10_000}},
+			wantNext:  map[string]int64{"session:s1\x002": 10_000},
 		},
 		{
 			name: "relay routes are excluded so relayed bytes are not counted twice",
@@ -94,8 +110,8 @@ func TestComputeEgressDelta(t *testing.T) {
 					},
 				}},
 			},
-			wantDelta: egressDelta{Total: 700},
-			wantNext:  map[string]int64{"session:s1": 700},
+			wantDelta: egressDelta{Total: 700, Sessions: map[string]int64{"s1": 700}},
+			wantNext:  map[string]int64{"session:s1\x000": 700},
 		},
 		{
 			name: "viewer transfers count as download egress and other transfer roles do not",
@@ -116,25 +132,25 @@ func TestComputeEgressDelta(t *testing.T) {
 				Sessions:  []streamtelemetry.SessionView{viewerSession("x", 10)},
 				Transfers: []streamtelemetry.TransferView{{ID: "x", Role: streamtelemetry.RoleViewerEgress, BytesAccepted: 20}},
 			},
-			wantDelta: egressDelta{Total: 30, Download: 20},
-			wantNext:  map[string]int64{"session:x": 10, "transfer:x": 20},
+			wantDelta: egressDelta{Total: 30, Download: 20, Sessions: map[string]int64{"x": 10}},
+			wantNext:  map[string]int64{"session:x\x000": 10, "transfer:x": 20},
 		},
 		{
 			name: "session growth stays out of the download subset",
-			prev: map[string]int64{"session:s1": 100, "transfer:t1": 100},
+			prev: map[string]int64{"session:s1\x000": 100, "transfer:t1": 100},
 			snapshot: streamtelemetry.Snapshot{
 				Sessions:  []streamtelemetry.SessionView{viewerSession("s1", 700)},
 				Transfers: []streamtelemetry.TransferView{{ID: "t1", Role: streamtelemetry.RoleViewerEgress, BytesAccepted: 350}},
 			},
-			wantDelta: egressDelta{Total: 850, Download: 250},
-			wantNext:  map[string]int64{"session:s1": 700, "transfer:t1": 350},
+			wantDelta: egressDelta{Total: 850, Download: 250, Sessions: map[string]int64{"s1": 600}},
+			wantNext:  map[string]int64{"session:s1\x000": 700, "transfer:t1": 350},
 		},
 		{
 			name:      "a nil previous map behaves like an empty one",
 			prev:      nil,
 			snapshot:  streamtelemetry.Snapshot{Sessions: []streamtelemetry.SessionView{viewerSession("s1", 42)}},
-			wantDelta: egressDelta{Total: 42},
-			wantNext:  map[string]int64{"session:s1": 42},
+			wantDelta: egressDelta{Total: 42, Sessions: map[string]int64{"s1": 42}},
+			wantNext:  map[string]int64{"session:s1\x000": 42},
 		},
 	}
 
@@ -143,7 +159,7 @@ func TestComputeEgressDelta(t *testing.T) {
 			t.Parallel()
 
 			delta, next := computeEgressDelta(tt.prev, tt.snapshot)
-			if delta != tt.wantDelta {
+			if !reflect.DeepEqual(delta, tt.wantDelta) {
 				t.Fatalf("delta = %+v, want %+v", delta, tt.wantDelta)
 			}
 			if len(next) != len(tt.wantNext) {
@@ -238,4 +254,26 @@ func TestSamplerStopIsIdempotent(t *testing.T) {
 	sampler := NewSampler(nil, nil, "api-1")
 	sampler.Stop()
 	sampler.Stop()
+}
+
+// TestSaveSessionBytesKeepsBytesAfterAFailedWrite: the baseline has already
+// moved past bytes whose write failed, so they must wait for the next try
+// rather than be dropped.
+func TestSaveSessionBytesKeepsBytesAfterAFailedWrite(t *testing.T) {
+	t.Parallel()
+	pool, err := pgxpool.New(t.Context(), "postgres://nobody@127.0.0.1:1/none?connect_timeout=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	sampler := NewSampler(pool, nil, "replica-a")
+
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	sampler.queueSessionBytes(map[string]int64{"s1": 5})
+	sampler.saveSessionBytes(ctx)
+	sampler.queueSessionBytes(map[string]int64{"s1": 3, "s2": 1})
+	if want := map[string]int64{"s1": 8, "s2": 1}; !reflect.DeepEqual(sampler.unsaved, want) {
+		t.Fatalf("unsaved = %v, want %v", sampler.unsaved, want)
+	}
 }

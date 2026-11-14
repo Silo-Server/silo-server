@@ -48,6 +48,7 @@ type logicalSession struct {
 	subject         Subject
 	profileID       string
 	sessionID       string
+	generation      uint64
 	mediaFileID     int
 	playMethod      string
 	startedAt       time.Time

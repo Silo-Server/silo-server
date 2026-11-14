@@ -3375,6 +3375,8 @@ export interface AdminPlaybackHistoryItem {
   completed: boolean;
   /** Measured watch time; null for a play recorded before it was measured. */
   played_seconds: number | null;
+  /** Bytes the API servers sent the viewer; null when they sent none or it wasn't counted. */
+  api_served_bytes: number | null;
   series_title: string;
   season_number: number | null;
   episode_number: number | null;
