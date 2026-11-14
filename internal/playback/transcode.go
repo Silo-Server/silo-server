@@ -4066,14 +4066,20 @@ func (s *TranscodeSession) restart(
 		hook(hookCtx)
 		if errors.Is(hookCtx.Err(), context.DeadlineExceeded) {
 			// A hook that gave up before it started a throttler leaves the new
-			// process unthrottled, and so does a first start that finished
-			// during this restart and armed one on the replaced process's
-			// pipe. Keep the threshold this session had instead.
+			// process unthrottled. Keep the threshold this session had instead.
+			// A first start that finished during this restart armed its
+			// throttler on the replaced process's pipe after StopThrottler
+			// ran, so its threshold is the newer one; re-arming also stops it.
 			s.mu.Lock()
-			unthrottled := s.throttler == nil || s.throttler.stdinPipe != s.stdinPipe
+			armed := s.throttler
+			current := armed != nil && armed.stdinPipe == s.stdinPipe
 			s.mu.Unlock()
-			if unthrottled {
-				s.StartThrottler(previousThrottleSeconds)
+			if !current {
+				threshold := previousThrottleSeconds
+				if armed != nil {
+					threshold = armed.thresholdSeconds
+				}
+				s.StartThrottler(threshold)
 			}
 			slog.WarnContext(ctx, "transcode restart hook timed out; the transcode throttle may not match its settings until the next restart",
 				"component", "playback",

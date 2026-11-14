@@ -222,19 +222,20 @@ func TestStartThrottlerStopsTheThrottlerItReplaces(t *testing.T) {
 	}
 }
 
-// A first start can finish during a restart and arm a throttler on the pipe of
-// the process being replaced. When the restart hook then times out, its
-// fallback must not take that throttler for the new process's.
+// A first start can finish during a restart, after the restart stopped the
+// throttler it found (none here), and arm one on the pipe of the process being
+// replaced. When the restart hook then times out, its fallback must not take
+// that throttler for the new process's, and must keep its threshold.
 func TestRestartHookTimeoutReplacesAThrottlerOnTheOldPipe(t *testing.T) {
 	setRestartHookTimeout(t, 50*time.Millisecond)
 	s := newRunningFakeSession(t)
-	s.StartThrottler(minThresholdSeconds)
 	s.mu.Lock()
 	oldPipe := s.stdinPipe
 	s.mu.Unlock()
+	stale := NewTranscodeThrottler(s, oldPipe, 90, 2)
 	s.SetRestartHook(func(ctx context.Context) {
 		s.mu.Lock()
-		s.throttler = NewTranscodeThrottler(s, oldPipe, minThresholdSeconds, 2)
+		s.throttler = stale
 		s.mu.Unlock()
 		<-ctx.Done()
 	})
@@ -244,9 +245,18 @@ func TestRestartHookTimeoutReplacesAThrottlerOnTheOldPipe(t *testing.T) {
 	}
 
 	s.mu.Lock()
-	current := s.throttler != nil && s.throttler.stdinPipe == s.stdinPipe
+	got := s.throttler
+	current := got != nil && got.stdinPipe == s.stdinPipe
 	s.mu.Unlock()
 	if !current {
 		t.Fatal("after a timed-out restart hook, the throttler does not write to the new process")
+	}
+	if got.thresholdSeconds != 90 {
+		t.Fatalf("threshold = %d, want the 90 the first start read", got.thresholdSeconds)
+	}
+	select {
+	case <-stale.stopCh:
+	default:
+		t.Fatal("the throttler on the replaced pipe is still running")
 	}
 }
