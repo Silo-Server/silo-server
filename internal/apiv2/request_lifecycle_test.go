@@ -164,6 +164,10 @@ func TestWatchProviderPollCompletedSession(t *testing.T) {
 	w.missingConnection = true
 	rec = do(t, h, http.MethodPost, Prefix+"/watch-providers/simkl/auth/poll", body, requestOwner)
 	requireProblem(t, rec, TypeDeviceLoginExpired)
+	// A failed connection read is a server failure, not an expired code.
+	w.err = errors.New("connection read failed")
+	rec = do(t, h, http.MethodPost, Prefix+"/watch-providers/simkl/auth/poll", body, requestOwner)
+	requireProblem(t, rec, TypeInternalError)
 }
 
 // Connection config the host or the plugin rejects is a client problem, and

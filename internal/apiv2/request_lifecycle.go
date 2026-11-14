@@ -391,7 +391,11 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 			if errors.Is(err, watchsync.ErrAuthSessionCompleted) {
 				// A retry after a lost success answer: report the connection
 				// that poll created rather than fail.
-				if out, connErr := connection(ctx, u, p, in.Provider); connErr == nil && out.Body.Connected {
+				out, connErr := connection(ctx, u, p, in.Provider)
+				if connErr != nil {
+					return nil, connErr
+				}
+				if out.Body.Connected {
 					return out, nil
 				}
 			}
