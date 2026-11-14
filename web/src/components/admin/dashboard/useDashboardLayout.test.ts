@@ -251,6 +251,11 @@ describe("useDashboardLayout", () => {
       { id: "users", span: 5, rows: 4 },
     ]);
 
+    // Picking the view already on screen is not an edit, so nothing is saved.
+    const unpicked = result.current.entries;
+    act(() => result.current.setWidgetView("egress-24h", "total"));
+    expect(result.current.entries).toBe(unpicked);
+
     act(() => {
       result.current.setWidgetView("egress-24h", "nodes");
       result.current.setWidgetView("users", "nodes");
