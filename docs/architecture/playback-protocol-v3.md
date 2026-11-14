@@ -346,7 +346,9 @@ background browser tab whose timers are throttled to about once a minute. Past
 that it keeps its 30-minute paused grace, so a client that comes back can still
 resume, but it no longer holds a stream slot: a player closed while paused frees
 its slot within about two minutes. It still counts toward the transcode limit
-until it ends, because its encoder is kept for it.
+until it ends, because its encoder is kept for it. Limits are checked when a
+stream starts: a paused session that reports again after another stream took
+its slot keeps playing, even if the account is then over its stream limit.
 
 These count as activity:
 
