@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -305,7 +306,7 @@ func TestPolicyMarkerEditMiddlewareEvalErrorIsInternal(t *testing.T) {
 
 func newMiddlewarePolicyPDP(t *testing.T) *policy.PDP {
 	t.Helper()
-	engine, err := policy.NewEngine(context.Background())
+	engine, err := policy.NewEngine(context.Background(), policy.WithEvalTimeout(time.Minute))
 	if err != nil {
 		t.Fatalf("NewEngine() error: %v", err)
 	}
