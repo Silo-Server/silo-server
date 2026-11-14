@@ -93,14 +93,19 @@ func audiobookEnrichWorkers(batchSize int) int {
 // enrichmentItemRow is a minimal projection of media_items joined to
 // media_item_libraries. We only read what we need to call the provider chain.
 type enrichmentItemRow struct {
-	ContentID   string
-	ClaimToken  string
-	Title       string
-	Year        int
-	FolderID    int
-	Language    string // resolved from media_folders.metadata_language
-	Author      string // from item_people where kind = PersonKindAuthor (7), best-effort
-	ProviderIDs map[string]string
+	ContentID  string
+	ClaimToken string
+	Title      string
+	Year       int
+	FolderID   int
+	Language   string // resolved from media_folders.metadata_language
+	Author     string // from item_people where kind = PersonKindAuthor (7), best-effort
+	// Narrators are the item's narrator credits (kind 8) as tagged; one entry
+	// may name several people.
+	Narrators []string
+	// SeriesPosition is the item's whole-number audiobook_series index, or 0.
+	SeriesPosition int
+	ProviderIDs    map[string]string
 	// Chain holds the slugs of the providers resolved for this item, so a
 	// failure takes its retry-after from those providers' pauses only.
 	Chain []string
@@ -478,7 +483,7 @@ func (e *Enricher) runBatch(ctx context.Context, items []enrichmentItemRow, enri
 					slog.WarnContext(ctx, "audiobook enrichment: item failed", "component", "audiobooks",
 						"content_id", item.ContentID,
 						"title", item.Title,
-						"error", err,
+						"error", redactProviderText(err.Error()),
 					)
 				}
 			}
@@ -627,7 +632,23 @@ func (e *Enricher) claimBatch(ctx context.Context) ([]enrichmentItemRow, error) 
 				 ORDER BY ip.sort_order, ip.id
 				 LIMIT 1),
 				''
-			) AS author
+			) AS author,
+			ARRAY(
+				SELECT p.name
+				FROM item_people ip
+				JOIN people p ON p.id = ip.person_id
+				WHERE ip.content_id = mi.content_id
+				  AND ip.kind = 8
+				ORDER BY ip.sort_order, ip.id
+			) AS narrators,
+			COALESCE((
+				SELECT s.series_index::int
+				FROM audiobook_series s
+				WHERE s.content_id = mi.content_id
+				  AND s.series_index > 0
+				  AND s.series_index < 100000
+				  AND s.series_index = trunc(s.series_index)
+			), 0) AS series_position
 		FROM claimed c
 		JOIN media_items mi ON mi.content_id = c.content_id
 		ORDER BY mi.created_at ASC, mi.content_id ASC
@@ -648,6 +669,8 @@ func (e *Enricher) claimBatch(ctx context.Context) ([]enrichmentItemRow, error) 
 			&item.FolderID,
 			&item.Language,
 			&item.Author,
+			&item.Narrators,
+			&item.SeriesPosition,
 		); err != nil {
 			return nil, fmt.Errorf("scanning audiobook enrichment row: %w", err)
 		}
@@ -721,206 +744,8 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 		return e.deferItem(ctx, item, until)
 	}
 
-	// Seed accumulated provider IDs from durable store.
-	accumulatedIDs := make(map[string]string, len(item.ProviderIDs))
-	for k, v := range item.ProviderIDs {
-		accumulatedIDs[k] = v
-	}
-
-	// Phase 1: Search — collect provider IDs.
-	searchQuery := metadata.SearchQuery{
-		Title:       item.Title,
-		Author:      item.Author,
-		Year:        item.Year,
-		ContentType: "audiobook",
-		ProviderIDs: accumulatedIDs,
-		Language:    item.Language,
-	}
-
-	// Track whether any provider errored during this item's enrichment. When
-	// nothing is accumulated AND at least one provider errored, we return an
-	// error WITHOUT stamping last_refreshed so the sweep retries the item later
-	// rather than burning it terminally on a transient provider failure.
-	var providerErrs []error
-
-	// The title the first accepting provider settled on; later providers must
-	// agree with it before their IDs are merged in.
-	var agreedTitle string
-
-	for _, p := range providers {
-		sp, ok := p.(metadata.SearchProvider)
-		if !ok {
-			continue
-		}
-		results, searchErr := sp.Search(ctx, searchQuery)
-		if searchErr != nil {
-			slog.WarnContext(ctx, "audiobook enrichment: search error", "component", "audiobooks",
-				"provider", p.Slug(),
-				"content_id", item.ContentID,
-				"error", searchErr,
-			)
-			providerErrs = append(providerErrs, fmt.Errorf("%s search: %w", p.Slug(), searchErr))
-			continue
-		}
-		admission, admitErr := metadata.AdmitSearchMatch(ctx, metadata.SearchMatchAdmissionRequest{
-			WantTitle:           item.Title,
-			WantYear:            item.Year,
-			Results:             results,
-			AgreedTitle:         agreedTitle,
-			ExistingProviderIDs: accumulatedIDs,
-			Owner:               e.providerIDs,
-			ItemType:            "audiobook",
-			ContentID:           item.ContentID,
-			NoAuthor:            strings.TrimSpace(item.Author) == "",
-		})
-		if admitErr != nil {
-			providerErrs = append(providerErrs, fmt.Errorf("%s candidate admission: %w", p.Slug(), admitErr))
-			continue
-		}
-		for _, conflict := range admission.Conflicts {
-			slog.InfoContext(ctx, "audiobook enrichment: provider id already owned by another item; skipping", "component", "audiobooks",
-				"provider", conflict.Provider,
-				"provider_id", conflict.ProviderID,
-				"content_id", item.ContentID,
-				"owned_by", conflict.OwnedBy,
-			)
-		}
-
-		switch admission.Status {
-		case metadata.SearchMatchNoCredibleMatch:
-			// Info, not Debug: during a backlog drain the rejection rate is
-			// what separates "threshold too strict" from "providers answering
-			// badly", and it cannot be read from a log level nobody enables.
-			slog.InfoContext(ctx, "audiobook enrichment: no credible match", "component", "audiobooks",
-				"provider", p.Slug(),
-				"content_id", item.ContentID,
-				"title", item.Title,
-				"candidates", len(results),
-			)
-			continue
-		case metadata.SearchMatchProviderDisagreement:
-			slog.WarnContext(ctx, "audiobook enrichment: provider disagreement; skipping", "component", "audiobooks",
-				"provider", p.Slug(),
-				"content_id", item.ContentID,
-				"accepted_title", agreedTitle,
-				"rejected_title", admission.MatchedTitle,
-			)
-			continue
-		case metadata.SearchMatchProviderIDConflict:
-			slog.WarnContext(ctx, "audiobook enrichment: provider identity contradicts an existing ID; skipping", "component", "audiobooks",
-				"provider", p.Slug(),
-				"content_id", item.ContentID,
-			)
-			continue
-		case metadata.SearchMatchNoUsableProviderIDs:
-			continue
-		}
-		agreedTitle = admission.AgreedTitle
-		for k, v := range admission.ProviderIDs {
-			accumulatedIDs[k] = v
-		}
-		slog.DebugContext(ctx, "audiobook enrichment: search result", "component", "audiobooks",
-			"provider", p.Slug(),
-			"content_id", item.ContentID,
-			"matched_ids", accumulatedIDs,
-		)
-	}
-
-	// Phase 2: GetMetadata — merge results.
-	accumulator := &metadata.MetadataResult{
-		ProviderIDs: accumulatedIDs,
-	}
-
-	for _, p := range providers {
-		mp, ok := p.(metadata.MetadataProvider)
-		if !ok {
-			continue
-		}
-		result, getErr := mp.GetMetadata(ctx, metadata.MetadataRequest{
-			ProviderIDs: accumulatedIDs,
-			ContentType: "audiobook",
-			Language:    item.Language,
-		})
-		if getErr != nil {
-			slog.WarnContext(ctx, "audiobook enrichment: GetMetadata error", "component", "audiobooks",
-				"provider", p.Slug(),
-				"content_id", item.ContentID,
-				"error", getErr,
-			)
-			providerErrs = append(providerErrs, fmt.Errorf("%s metadata: %w", p.Slug(), getErr))
-			continue
-		}
-		if result == nil || !result.HasMetadata {
-			continue
-		}
-		// Validate each provider before its fields or IDs enter the shared
-		// accumulator. Checking only the aggregate lets a later correct author
-		// validate an earlier same-title result for a different book.
-		if !metadata.AuthorsAgree(item.Author, result.People) {
-			slog.InfoContext(ctx, "audiobook enrichment: author mismatch; treating as no match", "component", "audiobooks",
-				"provider", p.Slug(),
-				"content_id", item.ContentID,
-				"title", item.Title,
-				"item_author", item.Author,
-			)
-			if until, ok := pausedOnly(providerErrs); ok {
-				return e.deferItem(ctx, item, until)
-			}
-			if len(providerErrs) > 0 {
-				joined := errors.Join(providerErrs...)
-				e.recordFailure(ctx, item, classifyProviderError(joined), joined.Error())
-				return fmt.Errorf("author mismatch observed after %d provider error(s): %w",
-					len(providerErrs), joined)
-			}
-			return e.completeWithoutMetadata(ctx, item, EnrichmentOutcomeNoMatch)
-		}
-		identity, identityErr := metadata.AdmitProviderIDs(ctx, metadata.ProviderIDAdmissionRequest{
-			CandidateProviderIDs: result.ProviderIDs,
-			ExistingProviderIDs:  accumulator.ProviderIDs,
-			Owner:                e.providerIDs,
-			ItemType:             "audiobook",
-			ContentID:            item.ContentID,
-		})
-		if identityErr != nil {
-			providerErrs = append(providerErrs, fmt.Errorf("%s metadata identity admission: %w", p.Slug(), identityErr))
-			continue
-		}
-		if identity.ContradictsExisting {
-			slog.WarnContext(ctx, "audiobook enrichment: metadata identity contradicts an existing ID; skipping", "component", "audiobooks",
-				"provider", p.Slug(),
-				"content_id", item.ContentID,
-			)
-			continue
-		}
-		for _, conflict := range identity.Conflicts {
-			slog.InfoContext(ctx, "audiobook enrichment: metadata provider id already owned by another item; skipping", "component", "audiobooks",
-				"provider", conflict.Provider,
-				"provider_id", conflict.ProviderID,
-				"content_id", item.ContentID,
-				"owned_by", conflict.OwnedBy,
-			)
-		}
-		admittedResult := *result
-		admittedResult.ProviderIDs = identity.ProviderIDs
-		result = &admittedResult
-		// MergeMetadata intentionally copies fields, not the provider-level
-		// admission marker. Preserve it here so an otherwise sparse response
-		// (for example, title/year/people only) is still recognized as a
-		// successful metadata response rather than being stamped no_match.
-		if result.HasMetadata {
-			accumulator.HasMetadata = true
-		}
-		// Bootstrap subsequent providers with any newly discovered IDs.
-		accumulatedIDs = accumulator.ProviderIDs
-		metadata.MergeMetadata(result, accumulator, nil, metadata.MergeFillEmpty)
-
-		slog.DebugContext(ctx, "audiobook enrichment: metadata received", "component", "audiobooks",
-			"provider", p.Slug(),
-			"content_id", item.ContentID,
-			"has_poster", result.PosterPath != "",
-			"has_overview", result.Overview != "",
-		)
-	}
+	match := e.findMatch(ctx, item, providers)
+	accumulatedIDs, accumulator, providerErrs := match.ids, match.metadata, match.providerErrs
 
 	// Nothing found.
 	if !accumulator.HasMetadata && accumulator.PosterPath == "" && accumulator.Overview == "" {

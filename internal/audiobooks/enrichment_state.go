@@ -287,7 +287,7 @@ func (s *enrichmentStateStore) RecordFailure(
 	// failure/backoff write for that call.
 	// last_error is shown to admins and kept in the database; mask secrets a
 	// provider may have echoed into its error text, as the log handler does.
-	cause = logredact.SanitizeText(logredact.RedactSecretAssignments(cause))
+	cause = redactProviderText(cause)
 	const maxCause = 500
 	if len(cause) > maxCause {
 		cause = strings.ToValidUTF8(cause[:maxCause], "")
@@ -366,4 +366,12 @@ func (s *enrichmentStateStore) RecordOutcomeTx(
 		return ErrAudiobookEnrichmentClaimLost
 	}
 	return nil
+}
+
+// redactProviderText masks credentials in provider error text before it is
+// stored or logged. Plugin errors are free text, often a gRPC status
+// description quoting the upstream request, and the log handler only masks
+// secret-named keys, not values.
+func redactProviderText(text string) string {
+	return logredact.SanitizeText(logredact.RedactSecretAssignments(text))
 }

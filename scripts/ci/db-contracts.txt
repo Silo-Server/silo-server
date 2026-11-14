@@ -1021,6 +1021,10 @@
 # rest of the sweep.
 ./internal/audiobooks TestAudiobookEnrichmentSweepRateLimitDB
 
+# Audiobook enrichment loads the tagged narrators and series position its
+# candidate checks compare against.
+./internal/audiobooks TestClaimBatchLoadsNarratorsAndSeriesPositionDB
+
 # An audiobook rescan keeps the authors and narrators an admin locked with the
 # crew lock.
 ./internal/scanner TestAudiobookRescanKeepsCrewLockedCreditsDB
