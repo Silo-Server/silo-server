@@ -160229,6 +160229,18 @@
       "value": "إزالة PIN"
     }
   ],
+  "web.profiles.editor.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "السماح بالطلبات"
+    }
+  ],
+  "web.profiles.editor.requestsAllowedHint": [
+    {
+      "type": 0,
+      "value": "يتيح لهذا الملف الشخصي تصفّح العناوين غير الموجودة في المكتبة وطلبها. يحدّ التصنيف العمري للمحتوى هذه العناوين بحسب تصنيفها الأمريكي فقط، ولا ينطبق عليها حد العمر الاستشاري."
+    }
+  ],
   "web.profiles.editor.restrictLibraries": [
     {
       "type": 0,
@@ -160389,6 +160401,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.profiles.helpers.access.noRequests": [
+    {
+      "type": 0,
+      "value": "بلا طلبات"
     }
   ],
   "web.profiles.helpers.access.quality": [
@@ -162693,6 +162711,12 @@
       "value": "في انتظار الاستيراد"
     }
   ],
+  "web.requests.hub.blockedIntro": [
+    {
+      "type": 0,
+      "value": "الطلبات معطّلة لهذا الملف الشخصي. لا يزال بإمكانك رؤية الطلبات التي قدّمها وإلغاؤها."
+    }
+  ],
   "web.requests.hub.browseDiscover": [
     {
       "type": 0,
@@ -162911,6 +162935,12 @@
     {
       "type": 0,
       "value": "الطلبات من حسابك، مجمّعة حسب ما سيحدث بعد ذلك."
+    }
+  ],
+  "web.requests.hub.yoursIntroProfile": [
+    {
+      "type": 0,
+      "value": "الطلبات التي قدّمها هذا الملف الشخصي، مجمّعة حسب ما سيحدث بعد ذلك."
     }
   ],
   "web.requests.pageTitle": [

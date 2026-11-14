@@ -126159,6 +126159,18 @@
       "value": "\u200F\u202ERemove PIN\u202C"
     }
   ],
+  "web.profiles.editor.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAllow requests\u202C"
+    }
+  ],
+  "web.profiles.editor.requestsAllowedHint": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELets this profile browse titles that are not in the library and request them. The content rating limits those titles by their US rating only, and the advisory-age limit does not apply to them.\u202C"
+    }
+  ],
   "web.profiles.editor.restrictLibraries": [
     {
       "type": 0,
@@ -126287,6 +126299,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.profiles.helpers.access.noRequests": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo requests\u202C"
     }
   ],
   "web.profiles.helpers.access.quality": [
@@ -128363,6 +128381,12 @@
       "value": "\u200F\u202EWaiting for import\u202C"
     }
   ],
+  "web.requests.hub.blockedIntro": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERequests are turned off for this profile. You can still see and cancel the requests it made.\u202C"
+    }
+  ],
   "web.requests.hub.browseDiscover": [
     {
       "type": 0,
@@ -128581,6 +128605,12 @@
     {
       "type": 0,
       "value": "\u200F\u202ERequests from your account, grouped by what happens next.\u202C"
+    }
+  ],
+  "web.requests.hub.yoursIntroProfile": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERequests this profile made, grouped by what happens next.\u202C"
     }
   ],
   "web.requests.pageTitle": [
