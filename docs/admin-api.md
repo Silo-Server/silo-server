@@ -3371,6 +3371,16 @@ check records it on the installation row, so every node returns it. It disappear
 installed version changes or a later check handles the plugin without failing; a check that
 cannot reach the plugin's repository leaves it in place.
 
+Every installation carries `signature`, the release signature check Silo ran when it installed
+the package ([plugin trust](architecture/plugin-trust.md#release-signatures)). `state` is
+`verified`, `unsigned` (nothing to check: an upload, an archive install, or a catalog entry
+without `bundle_url`), `invalid` (a bundle was checked and did not prove the policy), or
+`unknown` (installed before Silo checked signatures, or the check could not run). A verified
+installation also has `source_repo`, the repository its signing certificate names, and
+`verified_at`. The check is recorded once on the installation row and is not re-run; replacing
+the package records the new package's result. Catalog entries carry no signature, because
+nothing is verified before download.
+
 Both reads require an acting administrator and answer 503 when the
 plugin service or stores are not wired. The web plugins page and admin sidebar read these
 routes under captured profile authority and drain pages with a bounded loop; a stale

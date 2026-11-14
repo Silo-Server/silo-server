@@ -687,7 +687,9 @@ creation is off), `local_login_disabled`
 (403), `password_expired` (403), `email_in_use` (409),
 `identity_linked_elsewhere` (409), `provider_already_enabled` (409),
 `break_glass_required` (409), `last_sign_in_method` (409),
-`provider_unavailable` (503), `network_identity_required` (403, a network
+`provider_unavailable` (503; also a sign-in the provider answered before a
+re-check of the same account recorded a later answer, which succeeds when
+repeated), `network_identity_required` (403, a network
 identity sign-in or link that did not come through the provider's overlay)
 and `invalid_grant` (400, a completion code
 redeemed with a `code_verifier` that does not fit it, or a web code redeemed

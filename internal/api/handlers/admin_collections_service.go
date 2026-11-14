@@ -192,6 +192,11 @@ func (h *LibraryCollectionHandler) CreateAdminCollection(ctx context.Context, re
 
 func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, collectionID string, req AdminCollectionUpdate, artwork adminCollectionArtwork) (AdminCollection, error) {
 	var none AdminCollection
+	if req.CollectionType != nil {
+		if err := validateCollectionType(*req.CollectionType); err != nil {
+			return none, err
+		}
+	}
 	visibility, err := normalizeCollectionVisibilityUpdate(req.Visibility)
 	if err != nil {
 		return none, err
@@ -351,6 +356,17 @@ func collectionNameError(err error) *APIError {
 	return nil
 }
 
+// validateCollectionType rejects values the library_collections
+// collection_type CHECK constraint would refuse. Create and restore skip it for
+// an empty value, which defaults to manual; an update has no default to fall
+// back to, so an explicit empty value is an error.
+func validateCollectionType(collectionType string) error {
+	if catalog.IsKnownType(collectionType) {
+		return nil
+	}
+	return fieldError("collection_type", "collection_type must be manual, smart, mdblist, or tmdb")
+}
+
 // normalizeCollectionVisibilityUpdate validates an update's visibility. Nil
 // means "not provided" and stays nil; an explicit empty value means the
 // default, so it becomes visible rather than reaching the CHECK constraint.
@@ -369,13 +385,18 @@ func normalizeCollectionVisibilityUpdate(visibility *string) (*string, error) {
 }
 
 // normalizeAdminCollectionInput validates and normalizes the fields of a new
-// admin collection as the create command takes them: its visibility, title,
+// admin collection as the create command takes them: its visibility, type, title,
 // TMDB list source, rules (a smart collection's checked as smart rules),
 // sort, sync schedule, and management fields. It fills the defaults the
 // command stores and rewrites the JSON fields in their normalized form.
 func normalizeAdminCollectionInput(in *catalog.CreateLibraryCollectionInput) error {
 	if err := validateCollectionVisibility(in.Visibility); err != nil {
 		return err
+	}
+	if in.CollectionType != "" {
+		if err := validateCollectionType(in.CollectionType); err != nil {
+			return err
+		}
 	}
 	if strings.TrimSpace(in.Title) == "" {
 		return apiError(http.StatusBadRequest, "bad_request", "title is required")

@@ -168,10 +168,11 @@ func TestPlanPlaybackV3CroppedRungKeepsEncoderHeight(t *testing.T) {
 				t.Errorf("encoder target = %q, want %q", result.TargetResolution, tc.wantResolution)
 			}
 			args := appendVideoFilterArgs(nil, TranscodeOpts{TargetResolution: result.TargetResolution})
-			var wantArgs []string
+			wantFilter := "bwdif=mode=send_frame:deint=interlaced"
 			if tc.wantScale != "" {
-				wantArgs = []string{"-vf", tc.wantScale}
+				wantFilter += "," + tc.wantScale
 			}
+			wantArgs := []string{"-vf", wantFilter}
 			if !reflect.DeepEqual(args, wantArgs) {
 				t.Errorf("encoder filter args = %v, want %v", args, wantArgs)
 			}

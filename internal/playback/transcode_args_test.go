@@ -986,7 +986,7 @@ func withSubtitle(opts TranscodeOpts, codec string) TranscodeOpts {
 	return opts
 }
 
-var mixedStageWant = []string{"-vf format=nv12,hwupload,scale_cuda=w=-2:h=720:format=nv12", "-c:v h264_nvenc"}
+var mixedStageWant = []string{"-vf bwdif=mode=send_frame:deint=interlaced,format=nv12,hwupload,scale_cuda=w=-2:h=720:format=nv12", "-c:v h264_nvenc"}
 
 // Mixed stages decode on the CPU, upload with the device-aware hwupload
 // (hwupload_cuda ignores -filter_hw_device), and let FFmpeg autorotate.
@@ -1016,7 +1016,7 @@ func mpeg4Part2(hwAccel string) ffmpegArgsTokenCase {
 			TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, HWAccel: hwAccel,
 			TargetResolution: "420p", TargetBitrateKbps: 720,
 		},
-		want:   []string{"-c:v libx264", "-vf scale=-2:420"},
+		want:   []string{"-c:v libx264", "-vf bwdif=mode=send_frame:deint=interlaced,scale=-2:420"},
 		forbid: []string{"-hwaccel vaapi", "h264_qsv", "h264_vaapi", "scale_vaapi", "hwmap=derive_device=qsv"},
 	}
 }
@@ -1033,6 +1033,15 @@ func nonQSVForcedIDR(hwAccel string) ffmpegArgsTokenCase {
 }
 
 var buildFFmpegArgsEmitsRecipeTokensCases = []ffmpegArgsTokenCase{
+	{
+		name: "software encode at source size still deinterlaces flagged frames",
+		opts: TranscodeOpts{
+			InputPath: "/media/dvd.mkv", OutputDir: "/tmp/out", SessionID: "session-deinterlace", SourceVideoCodec: "mpeg2video",
+			TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, HWAccel: HWAccelNone,
+		},
+		want:   []string{"-c:v libx264", "-vf bwdif=mode=send_frame:deint=interlaced"},
+		forbid: []string{"scale="},
+	},
 	{
 		name: "QSV drops superfast preset",
 		opts: TranscodeOpts{
@@ -1156,7 +1165,7 @@ var buildFFmpegArgsEmitsRecipeTokensCases = []ffmpegArgsTokenCase{
 			TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, HWAccel: "vaapi", TargetResolution: "720p", TargetBitrateKbps: 2000,
 		},
 		want:   []string{"-hwaccel vaapi", "-vf scale_vaapi=w=-2:h=720:format=nv12"},
-		forbid: []string{"-vf scale=-2:720"},
+		forbid: []string{"-vf scale=-2:720", "bwdif"},
 	},
 	{
 		// High 10 AVC must software-decode and scale software frames before the upload.
@@ -1168,7 +1177,7 @@ var buildFFmpegArgsEmitsRecipeTokensCases = []ffmpegArgsTokenCase{
 		},
 		want: []string{
 			"-init_hw_device vaapi=va:", "-init_hw_device qsv=qs@va", "-c:v h264_qsv",
-			"-vf scale=-2:720,format=nv12,hwupload,hwmap=derive_device=qsv,format=qsv",
+			"-vf bwdif=mode=send_frame:deint=interlaced,scale=-2:720,format=nv12,hwupload,hwmap=derive_device=qsv,format=qsv",
 		},
 		forbid: []string{"-hwaccel vaapi", "-hwaccel_output_format vaapi", "hwdownload", "scale_vaapi"},
 	},
@@ -1179,7 +1188,7 @@ var buildFFmpegArgsEmitsRecipeTokensCases = []ffmpegArgsTokenCase{
 			SoftwareVideoDecode: true, TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, HWAccel: "qsv",
 			TargetResolution: "720p", SubtitleTrackIndex: 0, SubtitleBurnIn: true, SubtitleCodec: "ass",
 		},
-		want:   []string{"-vf format=yuv420p,scale=-2:720,subtitles=filename='/media/high10.mkv':si=0,format=nv12,hwupload,hwmap=derive_device=qsv,format=qsv"},
+		want:   []string{"-vf bwdif=mode=send_frame:deint=interlaced,format=yuv420p,scale=-2:720,subtitles=filename='/media/high10.mkv':si=0,format=nv12,hwupload,hwmap=derive_device=qsv,format=qsv"},
 		forbid: []string{"hwdownload", "-hwaccel vaapi"},
 	},
 	{
@@ -1189,7 +1198,7 @@ var buildFFmpegArgsEmitsRecipeTokensCases = []ffmpegArgsTokenCase{
 			SoftwareVideoDecode: true, TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, HWAccel: "qsv",
 			TargetResolution: "720p", SubtitleTrackIndex: 2, SubtitleBurnIn: true, SubtitleCodec: "hdmv_pgs_subtitle",
 		},
-		want:   []string{"-filter_complex [0:v:0]format=yuv420p[vmain];[vmain][0:s:2]overlay=eof_action=pass,scale=-2:720,format=nv12,hwupload,hwmap=derive_device=qsv,format=qsv[vout]"},
+		want:   []string{"-filter_complex [0:v:0]bwdif=mode=send_frame:deint=interlaced[vdeint];[vdeint]format=yuv420p[vmain];[vmain][0:s:2]overlay=eof_action=pass,scale=-2:720,format=nv12,hwupload,hwmap=derive_device=qsv,format=qsv[vout]"},
 		forbid: []string{"overlay_vaapi", "hwdownload", "-hwaccel vaapi"},
 	},
 	{
@@ -1202,7 +1211,7 @@ var buildFFmpegArgsEmitsRecipeTokensCases = []ffmpegArgsTokenCase{
 			TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, HWAccel: "none", TargetResolution: "1080p",
 			SubtitleTrackIndex: 2, SubtitleBurnIn: true, SubtitleCodec: "hdmv_pgs_subtitle",
 		},
-		want:   []string{"-filter_complex [0:v:0][0:s:2]overlay=eof_action=pass,scale=-2:1080[vout]", "-map [vout]", "-c:v libx264"},
+		want:   []string{"-filter_complex [0:v:0]bwdif=mode=send_frame:deint=interlaced[vdeint];[vdeint][0:s:2]overlay=eof_action=pass,scale=-2:1080[vout]", "-map [vout]", "-c:v libx264"},
 		forbid: []string{"-map 0:v:0", "-vf ", "subtitles="},
 	},
 	{
@@ -1254,7 +1263,7 @@ var buildFFmpegArgsEmitsRecipeTokensCases = []ffmpegArgsTokenCase{
 			InputPath: "/media/movie.mkv", OutputDir: "/tmp/out", SessionID: "session-srt", TargetCodecVideo: "h264", TargetCodecAudio: "aac",
 			SegmentDuration: 2, HWAccel: "none", TargetResolution: "1080p", SubtitleTrackIndex: 1, SubtitleBurnIn: true, SubtitleCodec: "subrip",
 		},
-		want:   []string{"-vf scale=-2:1080,subtitles=filename='/media/movie.mkv':si=1", "-map 0:v:0"},
+		want:   []string{"-vf bwdif=mode=send_frame:deint=interlaced,scale=-2:1080,subtitles=filename='/media/movie.mkv':si=1", "-map 0:v:0"},
 		forbid: []string{"-filter_complex"},
 	},
 	{
@@ -1371,14 +1380,14 @@ var buildFFmpegArgsEmitsRecipeTokensCases = []ffmpegArgsTokenCase{
 		name:   "NVENC mixed stage text burn-in uploads without download",
 		opts:   nvencMixedOpts("1", "subrip"),
 		stage:  nvencMixedStageOpts,
-		want:   []string{"-vf format=yuv420p,scale=-2:720,subtitles=filename='/media/movie.mkv':si=1,format=nv12,hwupload ", "-init_hw_device cuda=cu:1 -filter_hw_device cu", "-c:v h264_nvenc"},
+		want:   []string{"-vf bwdif=mode=send_frame:deint=interlaced,format=yuv420p,scale=-2:720,subtitles=filename='/media/movie.mkv':si=1,format=nv12,hwupload ", "-init_hw_device cuda=cu:1 -filter_hw_device cu", "-c:v h264_nvenc"},
 		forbid: []string{"hwdownload", "hwupload_cuda"},
 	},
 	{
 		name:   "NVENC mixed stage bitmap burn-in uploads without download",
 		opts:   nvencMixedOpts("1", "hdmv_pgs_subtitle"),
 		stage:  nvencMixedStageOpts,
-		want:   []string{"-filter_complex [0:v:0]format=yuv420p[vmain];[vmain][0:s:1]overlay=eof_action=pass,scale=-2:720,format=nv12,hwupload[vout]", "-init_hw_device cuda=cu:1 -filter_hw_device cu", "-c:v h264_nvenc"},
+		want:   []string{"-filter_complex [0:v:0]bwdif=mode=send_frame:deint=interlaced[vdeint];[vdeint]format=yuv420p[vmain];[vmain][0:s:1]overlay=eof_action=pass,scale=-2:720,format=nv12,hwupload[vout]", "-init_hw_device cuda=cu:1 -filter_hw_device cu", "-c:v h264_nvenc"},
 		forbid: []string{"hwdownload", "hwupload_cuda"},
 	},
 	{

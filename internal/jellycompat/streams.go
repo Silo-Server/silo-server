@@ -753,6 +753,24 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 	}
 }
 
+// lookupOwnPlaySession returns the play session playSessionID names when it
+// belongs to the requesting compat session. Otherwise it answers the request
+// and reports false: a retryable 503 when the playback store could not be
+// read, so a brief outage does not end playback, and 404 when the session is
+// absent or another token's.
+func (h *PlaybackHandler) lookupOwnPlaySession(w http.ResponseWriter, r *http.Request, session *Session, playSessionID string) (*PlaybackSession, bool) {
+	playSession, found, err := h.playbackStore.Lookup(playSessionID)
+	if err != nil {
+		writePlaySessionLookupFailed(w, r, playSessionID, err)
+		return nil, false
+	}
+	if !found || playSession.CompatToken != session.Token {
+		writeError(w, http.StatusNotFound, "NotFound", "Playback session not found")
+		return nil, false
+	}
+	return playSession, true
+}
+
 // HandleMasterManifest serves the compat-owned HLS manifest route.
 // It returns a full-duration VOD manifest so clients can seek to any position.
 // Segments that haven't been transcoded yet are served on-demand by the segment handler.
@@ -769,9 +787,8 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	playSession, ok := h.playbackStore.Get(playSessionID)
-	if !ok || playSession.CompatToken != session.Token {
-		writeError(w, http.StatusNotFound, "NotFound", "Playback session not found")
+	playSession, ok := h.lookupOwnPlaySession(w, r, session, playSessionID)
+	if !ok {
 		return
 	}
 
@@ -1008,6 +1025,9 @@ func writeCompatTranscodeError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusUnsupportedMediaType, "TranscodeUnsupported", "The media source changed; refresh playback information")
 	case errors.Is(err, tonemap.ErrSourcePreflightRejected):
 		writeError(w, http.StatusUnsupportedMediaType, "TranscodeUnsupported", "The media source is unsupported by the selected tone-map executor")
+	case errors.Is(err, errCompatUpstreamSessionGone):
+		// As the segment route answers a rebuild whose session is gone.
+		writeError(w, http.StatusNotFound, "NotFound", "Upstream session not found")
 	case errors.Is(err, errTranscode4KDisallowed):
 		writeError(w, http.StatusForbidden, "Forbidden", "4K video transcoding is disabled on this server")
 	case errors.Is(err, errHDRTranscodeUnsupported):
@@ -1038,9 +1058,8 @@ func (h *PlaybackHandler) HandleHLSManifest(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	playSessionID := chiURLParam(r, "playlistId")
-	playSession, ok := h.playbackStore.Get(playSessionID)
-	if !ok || playSession.CompatToken != session.Token {
-		writeError(w, http.StatusNotFound, "NotFound", "Playback session not found")
+	playSession, ok := h.lookupOwnPlaySession(w, r, session, playSessionID)
+	if !ok {
 		return
 	}
 	source := firstMediaSource(playSession)
@@ -1109,8 +1128,11 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 	}
 
 	playSessionID := chiURLParam(r, "playlistId")
-	playSession, ok := h.playbackStore.Get(playSessionID)
-	if !ok || playSession.CompatToken != session.Token || playSession.UpstreamSessionID == "" {
+	playSession, ok := h.lookupOwnPlaySession(w, r, session, playSessionID)
+	if !ok {
+		return
+	}
+	if playSession.UpstreamSessionID == "" {
 		writeError(w, http.StatusNotFound, "NotFound", "Playback session not found")
 		return
 	}
@@ -3006,7 +3028,11 @@ func (h *PlaybackHandler) ensureTranscodeManifestWithToneMapMode(
 	transcodeSession, err := h.ensureTranscodeSessionWithToneMapMode(ctx, playSessionID, playSession.UpstreamSessionID, source, requiredToneMapMode)
 	if err != nil {
 		requestErr := ctx.Err()
-		if requestErr == nil || !errors.Is(err, requestErr) {
+		// A rebuild that found the native session gone has closed its own
+		// transcode. Either the play has already ended, or its session expired
+		// and the play can still resume, which a teardown here would prevent by
+		// deleting its row.
+		if !errors.Is(err, errCompatUpstreamSessionGone) && (requestErr == nil || !errors.Is(err, requestErr)) {
 			h.teardownPlaySession(ctx, playSession, nil, nil)
 		}
 		return nil, err
@@ -3028,6 +3054,10 @@ func (h *PlaybackHandler) ensureTranscodeManifestWithToneMapMode(
 }
 
 var compatManifestStartupTimeout = playback.ManifestStartupTimeout
+
+// errCompatUpstreamSessionGone means a rebuilt transcode was closed because the
+// play's native session went away while the rebuild was starting.
+var errCompatUpstreamSessionGone = errors.New("upstream session ended during the transcode rebuild")
 
 func compatTranscodeSessionUsesToneMapMode(session *playback.TranscodeSession, required tonemap.Mode) bool {
 	return required == "" || (session != nil && session.Opts().ToneMapMode == required)
@@ -3075,6 +3105,15 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 				// the manager after the fast-path check. Never adopt it solely by ID.
 				if !compatLiveTranscodeMatchesAudioSource(reconstructed, source) {
 					return nil, errCompatRecipeSourceMismatch
+				}
+				// A stop, an expiry or an administrator's end that ran while this
+				// rebuild was starting found no transcode to close. With the native
+				// session gone, nothing else would close the one just registered.
+				if h.tm.CloseTranscodeSessionIfSessionGone(upstreamSessionID, reconstructed, func() bool {
+					_, err := h.sessionMgr.GetSession(upstreamSessionID)
+					return !errors.Is(err, playback.ErrSessionNotFound)
+				}) {
+					return nil, errCompatUpstreamSessionGone
 				}
 				h.recordTranscodeStreamDetails(ctx, upstreamSessionID, reconstructed.Opts())
 				return reconstructed, nil
@@ -3265,7 +3304,9 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 				return nil, fallbackErr
 			}
 		}
-	} else if autoPipeline.Enabled() {
+	} else if autoPipeline.Enabled() || playback.HardwareDecodeRetryEligible(opts) {
+		// An explicit hardware backend has no fallback order, but its decoder
+		// can still reject the source, so it is waited on too.
 		var successor *playback.TranscodeSession
 		transcodeSession, successor, err = h.awaitCompatAutoTranscode(ctx, upstreamSessionID, source, requiredToneMapMode, autoPipeline, transcodeSession)
 		if err != nil {
@@ -3341,6 +3382,11 @@ func (h *PlaybackHandler) newCompatAutoTranscodePipeline(ctx context.Context, op
 // deadline is kept: it is already registered for concurrent manifest requests,
 // and a second encoder would duplicate it. It returns the ready (or slow)
 // session, or the live successor another caller installed instead.
+//
+// A disabled pipeline is an explicit hardware backend. It has no safer path
+// unless the GPU decoder rejected the source, which walks
+// playback.NewSoftwareDecodeRetryPipeline. Any other early exit returns the
+// registered session as an unwaited start would, for its exit monitor to end.
 func (h *PlaybackHandler) awaitCompatAutoTranscode(
 	ctx context.Context,
 	upstreamSessionID string,
@@ -3361,7 +3407,16 @@ func (h *PlaybackHandler) awaitCompatAutoTranscode(
 			return transcodeSession, nil, nil
 		}
 		failedDevice := transcodeSession.Opts().HWDevice
-		advanced := pipeline.AdvanceAfterFailure(failedDevice)
+		advanced := true
+		if pipeline.Enabled() {
+			advanced = pipeline.AdvanceAfterFailure(failedDevice)
+		} else {
+			// An explicit backend: only a decoder rejection has a safer path.
+			pipeline = playback.NewSoftwareDecodeRetryPipeline(pipeline.Current(), readyErr)
+			if !pipeline.Enabled() {
+				return transcodeSession, nil, nil
+			}
+		}
 		replaceUnlock := h.tm.LockSessionLifecycle(upstreamSessionID)
 		if live := h.tm.GetTranscodeSession(upstreamSessionID); live != transcodeSession {
 			replaceUnlock()

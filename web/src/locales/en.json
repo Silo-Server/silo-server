@@ -23189,6 +23189,46 @@
       "value": "Count not loaded"
     }
   ],
+  "web.admin.common.downloadAccess.conversionOff": [
+    {
+      "type": 0,
+      "value": "The server isn't preparing device-friendly copies, so every download is the original file. Turn it on in "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Settings → Downloads"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.downloadAccess.serverOff": [
+    {
+      "type": 0,
+      "value": "Downloads are turned off for the whole server, so nobody can download. Turn them on in "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Settings → Downloads"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.common.editorConflict.message": [
     {
       "type": 0,
@@ -51227,6 +51267,102 @@
       "value": "Settings"
     }
   ],
+  "web.admin.plugins.signature.invalid": [
+    {
+      "type": 0,
+      "value": "Failed the check"
+    }
+  ],
+  "web.admin.plugins.signature.invalidBanner": [
+    {
+      "type": 8,
+      "value": "b",
+      "children": [
+        {
+          "type": 0,
+          "value": "The release signature check failed for "
+        },
+        {
+          "type": 1,
+          "value": "name"
+        },
+        {
+          "type": 0,
+          "value": "."
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " The signature that came with this version doesn't prove which repository built it. The server log has the details."
+    }
+  ],
+  "web.admin.plugins.signature.label": [
+    {
+      "type": 0,
+      "value": "Release signature"
+    }
+  ],
+  "web.admin.plugins.signature.tileInvalid": [
+    {
+      "type": 0,
+      "value": "Signature failed"
+    }
+  ],
+  "web.admin.plugins.signature.tileVerified": [
+    {
+      "type": 0,
+      "value": "Signed release built from "
+    },
+    {
+      "type": 1,
+      "value": "repository"
+    }
+  ],
+  "web.admin.plugins.signature.unknown": [
+    {
+      "type": 0,
+      "value": "Not checked"
+    }
+  ],
+  "web.admin.plugins.signature.unsigned": [
+    {
+      "type": 0,
+      "value": "Not signed"
+    }
+  ],
+  "web.admin.plugins.signature.verified": [
+    {
+      "type": 0,
+      "value": "Built from "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "repository"
+        }
+      ]
+    }
+  ],
+  "web.admin.plugins.signature.verifiedAt": [
+    {
+      "type": 0,
+      "value": "Verified "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.plugins.signature.verifiedNoRepository": [
+    {
+      "type": 0,
+      "value": "Verified"
+    }
+  ],
   "web.admin.plugins.source.approvedCommunity": [
     {
       "type": 0,
@@ -58027,6 +58163,12 @@
       "value": "Disk ceiling (%)"
     }
   ],
+  "web.admin.settings.downloads.enabled.description": [
+    {
+      "type": 0,
+      "value": "The switch for the whole server. On, access groups and accounts decide who may download. Off, nobody can."
+    }
+  ],
   "web.admin.settings.downloads.enabled.label": [
     {
       "type": 0,
@@ -63814,7 +63956,7 @@
   "web.admin.settings.playback.transcoding.copyKeyframePlaylistDescription": [
     {
       "type": 0,
-      "value": "Experimental. When Silo copies a file's video, list every segment from the start, using the file's keyframes, instead of a playlist that grows as Silo copies. Stops Safari freezing partway through. A seek ahead of what Silo has copied waits for it to get there."
+      "value": "Experimental. When Silo copies a file's video, list every segment from the start, using the file's keyframes, instead of a playlist that grows as Silo copies. Stops Safari freezing partway through. A seek well past what Silo has copied starts the copy again from there."
     }
   ],
   "web.admin.settings.playback.transcoding.dir": [
@@ -80053,6 +80195,12 @@
     {
       "type": 0,
       "value": "Downloads not allowed"
+    }
+  ],
+  "web.admin.users.detail.overview.access.downloadsServerOff": [
+    {
+      "type": 0,
+      "value": "Downloads are off for the whole server"
     }
   ],
   "web.admin.users.detail.overview.access.groupSource": [

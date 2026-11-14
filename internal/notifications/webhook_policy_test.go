@@ -146,25 +146,28 @@ func TestWebhookResolvedDestinationPolicy(t *testing.T) {
 	}
 }
 
-func TestWebhookDialPolicyUpdates(t *testing.T) {
+func TestWebhookDialPolicyFixtures(t *testing.T) {
 	if err := newNotificationDialer(nil).Control("tcp", "8.8.8.8:443", nil); err != nil {
 		t.Fatalf("default connect guard refused public fixture: %v", err)
 	}
-	allowPrivate := true
-	dialer := newNotificationDialer(func() bool { return allowPrivate })
-	address := net.JoinHostPort("192.168.1.10", "443")
-	if err := dialer.Control("tcp", address, nil); err != nil {
+	if err := newNotificationDialer(func() bool { return true }).Control("tcp", net.JoinHostPort("192.168.1.10", "443"), nil); err != nil {
 		t.Fatal(err)
-	}
-	allowPrivate = false
-	if err := dialer.Control("tcp", address, nil); !errors.Is(err, errPrivateDestination) {
-		t.Fatal("connect guard did not read changed setting")
 	}
 	for _, address := range []string{"missing-port", "hostname.example:443", "[invalid]:443", "192.168.1.10:443"} {
 		if err := newNotificationDialer(nil).Control("tcp", address, nil); err == nil {
 			t.Errorf("default connect guard accepted %q", address)
 		}
 	}
+}
+
+// trustTestServer makes both of client's connection pools trust an httptest
+// TLS server's certificate.
+func trustTestServer(t *testing.T, client *http.Client, server *httptest.Server) {
+	t.Helper()
+	rootCAs := server.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs
+	transport := client.Transport.(*notificationTransport)
+	transport.public.TLSClientConfig = &tls.Config{RootCAs: rootCAs}
+	transport.private.TLSClientConfig = &tls.Config{RootCAs: rootCAs}
 }
 
 // The production client must refuse through its own dialer, including on a
@@ -184,7 +187,6 @@ func TestWebhookClientDialPolicy(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer server.Close()
-	rootCAs := server.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs
 
 	for _, tc := range []struct {
 		name, path   string
@@ -199,7 +201,7 @@ func TestWebhookClientDialPolicy(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			finished.Store(0)
 			client := newWebhookHTTPClient(func() bool { return tc.allowPrivate })
-			client.Transport.(*http.Transport).TLSClientConfig = &tls.Config{RootCAs: rootCAs}
+			trustTestServer(t, client, server)
 			result := sendWebhook(t.Context(), client, server.URL+tc.path, []byte("{}"), nil)
 			if result.OK != tc.ok || result.Message != tc.message {
 				t.Fatalf("OK=%v message=%q, want OK=%v message=%q", result.OK, result.Message, tc.ok, tc.message)
@@ -213,11 +215,13 @@ func TestWebhookClientDialPolicy(t *testing.T) {
 
 func TestWebhookTransportGuards(t *testing.T) {
 	client := newWebhookHTTPClient(nil)
-	transport := client.Transport.(*http.Transport)
-	if client.Timeout != webhookRequestTimeout || transport.ResponseHeaderTimeout != webhookRequestTimeout ||
-		transport.TLSHandshakeTimeout != 5*time.Second || transport.Proxy != nil || transport.DialContext == nil ||
-		(transport.TLSClientConfig != nil && transport.TLSClientConfig.InsecureSkipVerify) {
-		t.Fatal("delivery transport protections changed")
+	pools := client.Transport.(*notificationTransport)
+	for _, transport := range []*http.Transport{pools.public, pools.private} {
+		if client.Timeout != webhookRequestTimeout || transport.ResponseHeaderTimeout != webhookRequestTimeout ||
+			transport.TLSHandshakeTimeout != 5*time.Second || transport.Proxy != nil || transport.DialContext == nil ||
+			(transport.TLSClientConfig != nil && transport.TLSClientConfig.InsecureSkipVerify) {
+			t.Fatal("delivery transport protections changed")
+		}
 	}
 	if newNotificationDialer(nil).Timeout != 5*time.Second {
 		t.Fatal("dial timeout changed")
@@ -232,5 +236,61 @@ func TestWebhookTransportGuards(t *testing.T) {
 	req.URL.Scheme = "http"
 	if err := client.CheckRedirect(req, nil); err == nil {
 		t.Fatal("HTTPS downgrade accepted")
+	}
+}
+
+// Turning private destinations off must also stop deliveries over keep-alive
+// connections the client opened while they were on (#2794).
+func TestWebhookClientRefusesPooledPrivateConnectionAfterSettingOff(t *testing.T) {
+	var reached atomic.Int32
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	var allowPrivate atomic.Bool
+	allowPrivate.Store(true)
+	client := newWebhookHTTPClient(allowPrivate.Load)
+	trustTestServer(t, client, server)
+
+	if result := sendWebhook(t.Context(), client, server.URL, []byte("{}"), nil); !result.OK {
+		t.Fatalf("delivery with private destinations on failed: %q", result.Message)
+	}
+	allowPrivate.Store(false)
+	result := sendWebhook(t.Context(), client, server.URL, []byte("{}"), nil)
+	if result.OK || result.Message != "destination resolves to a private network" {
+		t.Fatalf("OK=%v message=%q after turning private destinations off, want refusal", result.OK, result.Message)
+	}
+	if reached.Load() != 1 {
+		t.Fatalf("destination reached %d times, want 1", reached.Load())
+	}
+	allowPrivate.Store(true)
+	if result := sendWebhook(t.Context(), client, server.URL, []byte("{}"), nil); !result.OK {
+		t.Fatalf("delivery after turning private destinations back on failed: %q", result.Message)
+	}
+}
+
+// A request that picked the private pool just before an administrator turned
+// private destinations off must still be refused when its connection is dialed.
+func TestWebhookPrivatePoolRechecksSettingAtDial(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	var allow atomic.Bool
+	client := newWebhookHTTPClient(allow.Load)
+	trustTestServer(t, client, server)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := client.Transport.(*notificationTransport).private.RoundTrip(req)
+	if err == nil {
+		_ = resp.Body.Close()
+		t.Fatal("private pool dialed a private address with the setting off")
+	}
+	if !errors.Is(err, errPrivateDestination) {
+		t.Fatalf("got %v, want the private-destination refusal", err)
 	}
 }
