@@ -1618,6 +1618,30 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 		requestedFormat = "vtt"
 	}
 
+	// A stored subtitle's issued URL names it by ID, so deleting an earlier
+	// stored subtitle cannot move the URL onto whichever one now holds its
+	// stream index. A URL without the ID (built by the client) resolves by
+	// position below.
+	if storedIDs := newCaseInsensitiveQuery(r.URL.Query()).Values(storedSubtitleIDQuery); len(storedIDs) > 0 {
+		storedID, parseErr := strconv.Atoi(storedIDs[0])
+		if parseErr != nil {
+			// The server never issues a malformed ID.
+			writeError(w, http.StatusNotFound, "NotFound", "Subtitle not found")
+			return
+		}
+		sub, lookupErr := h.findStoredSubtitle(r.Context(), file.ID, storedID)
+		if lookupErr != nil {
+			writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load subtitle")
+			return
+		}
+		if sub == nil {
+			writeError(w, http.StatusNotFound, "NotFound", "Subtitle not found")
+			return
+		}
+		h.serveStoredSubtitle(w, r, *sub, requestedFormat, segmentPTSOffset)
+		return
+	}
+
 	// Check for external subtitles first.
 	for i, sub := range file.ExternalSubtitles {
 		if externalSubtitleRouteIndex(file, i) == trackIndex {
@@ -1670,22 +1694,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 		baseIndex := computeDownloadedSubBaseIndex(file)
 		downloadedIndex := trackIndex - baseIndex
 		if downloadedIndex >= 0 && downloadedIndex < len(downloaded) {
-			dl := downloaded[downloadedIndex]
-			data, err := h.SubtitleBlobs.Get(r.Context(), dl.S3Key)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load subtitle from storage")
-				return
-			}
-			// Apply the stored timing correction before conversion or windowing.
-			data, err = subtitles.DeliveryBytes(&dl, data)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "ServerError", "Failed to prepare subtitle")
-				return
-			}
-			// The correction can change behind the same URL.
-			w.Header().Set("Cache-Control", "private, no-cache")
-			h.subtitlePlayed(r, subtitles.SyncTarget{MediaFileID: file.ID, StoredID: dl.ID})
-			h.deliverTextSubtitle(w, r, string(dl.Format), data, requestedFormat, segmentPTSOffset)
+			h.serveStoredSubtitle(w, r, downloaded[downloadedIndex], requestedFormat, segmentPTSOffset)
 			return
 		}
 	}
@@ -4526,6 +4535,45 @@ func seekSecondsFromTicks(seekStr string) float64 {
 		return 0
 	}
 	return float64(ticks) / 10_000_000
+}
+
+// storedSubtitleIDQuery names the stored subtitle a jellycompat subtitle
+// DeliveryUrl was issued for (see storedSubtitleDeliveryURL).
+const storedSubtitleIDQuery = "StoredSubtitleId"
+
+// findStoredSubtitle looks up a stored subtitle by the ID an issued URL
+// carries, returning nil when it is not found. Only the file's own stored
+// subtitles match, so an ID from another file is not found.
+func (h *PlaybackHandler) findStoredSubtitle(ctx context.Context, fileID, id int) (*subtitles.DownloadedSubtitle, error) {
+	if h.SubtitleRepo == nil || h.SubtitleBlobs == nil {
+		return nil, nil
+	}
+	sub, err := h.SubtitleRepo.GetDownloadedSubtitle(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if sub == nil || sub.MediaFileID != fileID {
+		return nil, nil
+	}
+	return sub, nil
+}
+
+func (h *PlaybackHandler) serveStoredSubtitle(w http.ResponseWriter, r *http.Request, dl subtitles.DownloadedSubtitle, requestedFormat string, segmentPTSOffset int64) {
+	data, err := h.SubtitleBlobs.Get(r.Context(), dl.S3Key)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load subtitle from storage")
+		return
+	}
+	// Apply the stored timing correction before conversion or windowing.
+	data, err = subtitles.DeliveryBytes(&dl, data)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to prepare subtitle")
+		return
+	}
+	// The correction can change behind the same URL.
+	w.Header().Set("Cache-Control", "private, no-cache")
+	h.subtitlePlayed(r, subtitles.SyncTarget{MediaFileID: dl.MediaFileID, StoredID: dl.ID})
+	h.deliverTextSubtitle(w, r, string(dl.Format), data, requestedFormat, segmentPTSOffset)
 }
 
 // computeDownloadedSubBaseIndex returns the first index available for downloaded subtitles.

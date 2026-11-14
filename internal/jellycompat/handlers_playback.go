@@ -2631,7 +2631,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 					IsHearingImpaired:      dl.HearingImpaired,
 					IsTextSubtitleStream:   true,
 					SupportsExternalStream: true,
-					DeliveryURL:            subtitleDeliveryURL(routeItemID, source.ID, streamIndex, format, playSessionID),
+					DeliveryURL:            storedSubtitleDeliveryURL(routeItemID, source.ID, streamIndex, format, playSessionID, dl.ID),
 					DeliveryMethod:         "External",
 					Path:                   downloadedSubtitlePath(source.Version, dl),
 					IsExternalURL:          boolPtr(false),
@@ -4168,6 +4168,17 @@ func subtitleDeliveryURL(routeItemID, mediaSourceID string, streamIndex int, for
 		return base
 	}
 	return base + "?" + url.Values{"PlaySessionId": {playSessionID}}.Encode()
+}
+
+// storedSubtitleDeliveryURL is subtitleDeliveryURL for a stored subtitle. It
+// also names the subtitle by ID, because its stream index is its position among
+// the file's stored subtitles and moves when an earlier one is deleted.
+func storedSubtitleDeliveryURL(routeItemID, mediaSourceID string, streamIndex int, format, playSessionID string, storedID int) string {
+	query := url.Values{storedSubtitleIDQuery: {strconv.Itoa(storedID)}}
+	if playSessionID != "" {
+		query.Set("PlaySessionId", playSessionID)
+	}
+	return fmt.Sprintf("/Videos/%s/%s/Subtitles/%d/stream.%s?%s", routeItemID, mediaSourceID, streamIndex, format, query.Encode())
 }
 
 func subtitlePath(track catalog.VersionSubtitleTrack, routeItemID, mediaSourceID string, streamIndex int, format string) string {
