@@ -13,17 +13,12 @@ import (
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 )
 
-// ArtworkAvailability is durable knowledge about one immutable revision.
-// Verified distinguishes a completed delivery check (including no usable keys)
-// from publication that has not yet been checked through external delivery.
-// Deliverable holds the latest verdict for the current delivery scope; while
-// Verified is false it predates the current publication, so it proves which
-// variants delivered but not which are missing.
+// ArtworkAvailability is durable knowledge about one immutable revision:
+// Published holds the exact keys its publication uploaded. Silo is the only
+// writer to the assets store and deletes a revision only after it is
+// retired, so every backend serves a published key as stored.
 type ArtworkAvailability struct {
-	Published   []string
-	Deliverable []string
-	External    bool
-	Verified    bool
+	Published []string
 }
 
 type ArtworkAvailabilityReader interface {
@@ -31,11 +26,9 @@ type ArtworkAvailabilityReader interface {
 }
 
 // These types' ladders have grown since revision manifests were introduced.
-// Before external delivery is verified, their widest rung (the one the latest
-// ladder version added) steps down one rung. Legacy artwork without a manifest
-// was cached before any of that growth, so it may only use the rungs every
-// ladder version has generated: up to the type's medium rung, which is pinned
-// to the pre-image_size default.
+// Legacy artwork without a manifest was cached before any of that growth, so
+// it may only use the rungs every ladder version has generated: up to the
+// type's medium rung, which is pinned to the pre-image_size default.
 var ladderTypesWithAddedRung = map[string]bool{
 	ImageCacheImagePoster:   true,
 	ImageCacheImageStill:    true,
@@ -69,8 +62,7 @@ func variantKey(key, variant string) string {
 // Neither cold caches nor missing manifests cause storage or delivery probes.
 // Without a reader every key resolves to itself.
 //
-// Where delivery cannot lag behind a write (local storage, direct S3), a
-// published revision has every rung its ladder version generated, so only a
+// A published revision has every rung its ladder version generated, so only a
 // rung a later ladder version added can be missing; only those keys are
 // looked up, and everything else resolves to itself without a query.
 func resolvePublishedLadderKeys(ctx context.Context, reader ArtworkAvailabilityReader, entries []resolveEntry) map[string]string {
@@ -81,13 +73,12 @@ func resolvePublishedLadderKeys(ctx context.Context, reader ArtworkAvailabilityR
 		}
 		return resolved
 	}
-	lookupAll := readsExternalDelivery(reader)
 	originals := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		if catalog.ImageTypeFromCachedPath(entry.originalPath) == "" {
 			continue
 		}
-		if lookupAll || isAddedRung(entry.originalPath) {
+		if isAddedRung(entry.originalPath) {
 			originals = append(originals, variantKey(entry.originalPath, artworkkey.OriginalVariant))
 		}
 	}
@@ -106,16 +97,6 @@ func resolvePublishedLadderKeys(ctx context.Context, reader ArtworkAvailabilityR
 		resolved[key] = selectPublishedVariant(key, state, known)
 	}
 	return resolved
-}
-
-// readsExternalDelivery reports whether reader serves a backend whose delivery
-// can lag behind a write. A reader that cannot say is treated as external, so
-// every key is looked up.
-func readsExternalDelivery(reader ArtworkAvailabilityReader) bool {
-	if r, ok := reader.(interface{ ExternalDelivery() bool }); ok {
-		return r.ExternalDelivery()
-	}
-	return true
 }
 
 // isAddedRung reports whether key names a rung wider than its type's medium
@@ -141,18 +122,7 @@ func selectPublishedVariant(key string, state ArtworkAvailability, known bool) s
 		}
 		return key
 	}
-	// An unverified external path is not proof the newly added size works,
-	// unless an earlier verdict in this scope already delivered it.
-	if state.External && !state.Verified && ladderTypesWithAddedRung[imageType] &&
-		keyVariant(key) == imagesize.Variant(imageType, imagesize.Large) && !slices.Contains(state.Deliverable, key) {
-		if lower, ok := imagesize.NextLower(imageType, keyVariant(key)); ok {
-			key = variantKey(key, lower)
-		}
-	}
 	keys := state.Published
-	if state.External && state.Verified {
-		keys = state.Deliverable
-	}
 	candidate := key
 	if keyVariant(key) == artworkkey.OriginalVariant && !slices.Contains(keys, key) {
 		candidate = variantKey(key, imagesize.Variant(imageType, imagesize.Large))
@@ -164,7 +134,7 @@ func selectPublishedVariant(key string, state ArtworkAvailability, known bool) s
 	if slices.Contains(keys, original) {
 		return original
 	}
-	// A known empty manifest or failed delivery is a placeholder, not a guess.
+	// A known empty manifest is a placeholder, not a guess.
 	return ""
 }
 

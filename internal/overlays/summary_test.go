@@ -1,6 +1,9 @@
 package overlays
 
 import (
+	"encoding/json"
+	"math/rand/v2"
+	"reflect"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -352,6 +355,74 @@ func TestBuildSummaryPrefersDolbyVisionSibling(t *testing.T) {
 	}
 	if got.HDR != "DV HDR10" {
 		t.Errorf("HDR = %q, want %q", got.HDR, "DV HDR10")
+	}
+}
+
+// BuildStoredSummary keeps only the fields BuildSummary reads today. Files
+// with every field set at random make a new field read in BuildSummary fail
+// here until StoredFile carries it too.
+func TestBuildStoredSummaryMatchesBuildSummary(t *testing.T) {
+	strs := []string{"", " ", "hevc", "H264", "av1", "mpeg2video", "eac3", "truehd", "DTS-HD MA", "dts", "aac", "flac",
+		"Dolby TrueHD + Dolby Atmos", "eng", "fre", "und", "DOVIWithHDR10", " HDR10", "HDR10Plus", "HLG", "SDR",
+		"smpte2084", "ARIB-STD-B67", "16:9", "2.39:1", "4:3", "720p", "1080p", "4K", "mkv", "mp4", "profile 8",
+		"directors-cut", "Film.2010.1080p.BluRay.x264-GRP.mkv", "/tv/Show S01E01 WEB-DL.mkv", "Film REMUX.mkv"}
+	ints := []int64{-1, 0, 1, 2, 5, 6, 7, 8, 720, 1080, 1920, 2160, 3840}
+	r := rand.New(rand.NewPCG(1, 2))
+	fill := func(v reflect.Value) {
+		for i := range v.NumField() {
+			f := v.Field(i)
+			if !f.CanSet() || r.IntN(2) == 0 {
+				continue
+			}
+			switch f.Kind() {
+			case reflect.String:
+				f.SetString(strs[r.IntN(len(strs))])
+			case reflect.Int, reflect.Int64:
+				f.SetInt(ints[r.IntN(len(ints))])
+			case reflect.Bool:
+				f.SetBool(true)
+			}
+		}
+	}
+	for range 5000 {
+		var file models.MediaFile
+		fill(reflect.ValueOf(&file).Elem())
+		// Store each track list as the scanner does, then decode it the way
+		// card lists did before StoredFile.
+		stored := make([][]byte, 4)
+		for i, tracks := range []any{&file.VideoTracks, &file.AudioTracks, &file.SubtitleTracks, &file.ExternalSubtitles} {
+			list := reflect.ValueOf(tracks).Elem()
+			if n := r.IntN(4) - 1; n >= 0 {
+				list.Set(reflect.MakeSlice(list.Type(), n, n))
+				for j := range n {
+					fill(list.Index(j))
+				}
+			}
+			data, err := json.Marshal(list.Interface())
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded := reflect.New(list.Type())
+			if err := json.Unmarshal(data, decoded.Interface()); err != nil {
+				t.Fatal(err)
+			}
+			list.Set(decoded.Elem())
+			stored[i] = data
+		}
+		want := BuildSummary([]*models.MediaFile{&file})
+		got, err := BuildStoredSummary(&StoredFile{
+			FilePath: file.FilePath, Resolution: file.Resolution, HDR: file.HDR,
+			CodecVideo: file.CodecVideo, CodecAudio: file.CodecAudio, AudioChannels: file.AudioChannels,
+			Container: file.Container, EditionKey: file.EditionKey,
+			VideoTracks: stored[0], AudioTracks: stored[1],
+			HasSubtitles: len(file.SubtitleTracks) > 0 || len(file.ExternalSubtitles) > 0,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("stored summary %+v, want %+v for %+v", got, want, file)
+		}
 	}
 }
 

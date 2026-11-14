@@ -27,6 +27,12 @@ type MediaFolder struct {
 	// TrickplayEnabled generates seek-bar previews for the library's video
 	// files (internal/trickplay). Off by default.
 	TrickplayEnabled bool
+	// BoxSetsEnabled browses the movies TMDB lists in one collection as a
+	// single box set card once at least BoxSetMinMovies of them are in the
+	// library. BoxSetsInSearch also lists matching box sets in search.
+	BoxSetsEnabled  bool
+	BoxSetMinMovies int
+	BoxSetsInSearch bool
 	// RealtimeMonitoring is the library's real-time monitoring switch. It
 	// takes effect only while the server-wide scanner.realtime_monitoring
 	// setting is on and the library is enabled.
@@ -419,12 +425,18 @@ type VideoTrack struct {
 	VideoRange          string `json:"video_range,omitempty"`
 	VideoRangeType      string `json:"video_range_type,omitempty"`
 	ColorRange          string `json:"color_range,omitempty"`
-	ColorPrimaries      string `json:"color_primaries,omitempty"`
-	ColorSpace          string `json:"color_space,omitempty"`
-	ColorTransfer       string `json:"color_transfer,omitempty"`
-	BitDepth            int    `json:"bit_depth,omitempty"`
-	PixelFormat         string `json:"pixel_format,omitempty"`
-	ReferenceFrames     int    `json:"reference_frames,omitempty"`
+	// FrameColorRange is the range FFmpeg reported on the primary PQ track's
+	// first decoded frame, "unknown" when the frame carried none. The decoder
+	// takes it from the bitstream, which can contradict the container's tag in
+	// ColorRange, and tone-map graphs see the decoder's value. It is empty
+	// when the frame was not read.
+	FrameColorRange string `json:"frame_color_range,omitempty" doc:"Color range FFmpeg reported on the first decoded frame of a PQ track (tv, pc, or unknown when the frame carried none); absent when the frame was not read. Can differ from color_range, the container's tag"`
+	ColorPrimaries  string `json:"color_primaries,omitempty"`
+	ColorSpace      string `json:"color_space,omitempty"`
+	ColorTransfer   string `json:"color_transfer,omitempty"`
+	BitDepth        int    `json:"bit_depth,omitempty"`
+	PixelFormat     string `json:"pixel_format,omitempty"`
+	ReferenceFrames int    `json:"reference_frames,omitempty"`
 	// MultiplePPS records whether an H.264 stream redefines the same
 	// pic_parameter_set_id in-band with more than one distinct content. Such
 	// streams cannot be safely stream-copied into an avc1/fMP4 HLS segment:
@@ -509,6 +521,11 @@ type SubtitleTrack struct {
 	HearingImpaired  bool   `json:"hearing_impaired"`
 	External         bool   `json:"external"`
 	FileName         string `json:"file_name,omitempty"`
+	// IndexOnly marks an embedded track FFmpeg can't demux from the source,
+	// such as a Matroska S_TEXT/WEBVTT track, which the server reads through
+	// the container's index instead (embeddedsub). No route that demuxes the
+	// source with FFmpeg, on the server or in a client, can carry it.
+	IndexOnly bool `json:"index_only,omitempty"`
 }
 
 // ExternalSubtitle represents a sidecar subtitle file stored as JSONB.
@@ -716,6 +733,8 @@ type MediaItem struct {
 	Keywords                     []string
 	OriginalLanguage             string
 	ReleaseDate                  *string // ISO date, nullable
+	DigitalReleaseDate           *string // ISO date (movies only): earliest digital release in any country, nullable
+	PhysicalReleaseDate          *string // ISO date (movies only): earliest physical (disc) release in any country, nullable
 	FirstAirDate                 *string // ISO date (series only), nullable
 	LastAirDate                  *string // ISO date (series only), nullable
 	AirTime                      *string // Series broadcast time (e.g. "20:00"), nullable
@@ -833,6 +852,14 @@ type Season struct {
 	// BackdropFillOnly, with WriteBackdrop, writes only while the stored
 	// backdrop is still empty when the upsert holds the row.
 	BackdropFillOnly bool `json:"-"`
+	// LockedFields lists the fields a refresh keeps; see catalog.childLockedColumn.
+	LockedFields []int
+	// No metadata provider writes these; admin edits and seed imports do.
+	OriginalTitle string
+	Tagline       string
+	ImdbID        string
+	TmdbID        string
+	TvdbID        string
 }
 
 // Episode represents a row in the episodes table.
@@ -866,6 +893,12 @@ type Episode struct {
 	// batch localization: the viewer's language this episode's description is
 	// missing, so an episode list can start on-view translation.
 	PendingTranslationLanguage string `json:"-"`
+	// LockedFields lists the fields a refresh keeps; see catalog.childLockedColumn.
+	LockedFields []int
+	// No metadata provider writes these; admin edits and seed imports do.
+	SortTitle     string
+	OriginalTitle string
+	Tagline       string
 }
 
 // MediaItemRoot represents a row in the media_item_roots table.

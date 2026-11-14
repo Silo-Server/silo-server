@@ -1025,7 +1025,7 @@ func snapToStep(def *settingscontract.Definition, value float64) float64 {
 // drop ids the schema no longer knows: validation is all-or-nothing, so one
 // stale id left in place would quarantine the user's whole badge config.
 var cardOverlayIDs = map[string]bool{
-	"resolution": true, "hdr": true, "resolution_hdr": true,
+	"resolution": true, "hdr": true, "resolution_hdr": true, "resolution_hdr_audio": true,
 	"audio": true, "audio_channels": true, "video_codec": true,
 	"container": true, "aspect_ratio": true, "release_type": true,
 	"edition": true, "multi_audio": true, "multi_sub": true,
@@ -1041,6 +1041,7 @@ var cardOverlayIDs = map[string]bool{
 var (
 	cardOverlayPositions = map[string]bool{
 		"top-left": true, "top-right": true, "bottom-left": true, "bottom-right": true,
+		"left-edge": true, "right-edge": true,
 	}
 	cardOverlayAccent = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 )

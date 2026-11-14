@@ -57,6 +57,13 @@ type SearchMatchAdmissionRequest struct {
 	Owner               ProviderIDOwnerLookup
 	ItemType            string
 	ContentID           string
+	// NoAuthor marks an item that names no author. The author check after
+	// GetMetadata then passes by default, so only the title vouches for a
+	// candidate, and word overlap alone is not credible: "Raw" for "Raw
+	// Stream" scores 0.67 (#3161). A candidate is considered only when its
+	// title alone identifies the work (titleAloneIdentifies) or it carries a
+	// provider ID the item already has.
+	NoAuthor bool
 }
 
 // SearchMatchAdmission is the result of applying title credibility,
@@ -74,7 +81,11 @@ type SearchMatchAdmission struct {
 // ownership lookup succeeds, so a lookup failure cannot partially admit a
 // candidate.
 func AdmitSearchMatch(ctx context.Context, req SearchMatchAdmissionRequest) (SearchMatchAdmission, error) {
-	selection, ok := selectBestMatchYear(req.WantTitle, req.WantYear, req.Results)
+	results := req.Results
+	if req.NoAuthor {
+		results = titleOnlyCandidates(req.WantTitle, req.ExistingProviderIDs, results)
+	}
+	selection, ok := selectBestMatchYear(req.WantTitle, req.WantYear, results)
 	if !ok {
 		return SearchMatchAdmission{Status: SearchMatchNoCredibleMatch}, nil
 	}
@@ -114,6 +125,52 @@ func AdmitSearchMatch(ctx context.Context, req SearchMatchAdmissionRequest) (Sea
 		result.AgreedTitle = selection.matchedTitle
 	}
 	return result, nil
+}
+
+// titleOnlyCandidates keeps the results an item with no author can be matched
+// to. They are filtered before selection, so a credible lower-scoring result
+// is still chosen when the top score belongs to one that isn't.
+func titleOnlyCandidates(want string, existing map[string]string, results []SearchResult) []SearchResult {
+	kept := make([]SearchResult, 0, len(results))
+	for _, r := range results {
+		if sharesProviderID(existing, r.ProviderIDs) || resultTitleIdentifies(want, r) {
+			kept = append(kept, r)
+		}
+	}
+	return kept
+}
+
+func resultTitleIdentifies(want string, r SearchResult) bool {
+	name := r.Name
+	if strings.TrimSpace(name) == "" {
+		name = r.OriginalTitle
+	}
+	if titleAloneIdentifies(want, name) {
+		return true
+	}
+	for _, alias := range r.TitleAliases {
+		if titleAloneIdentifies(want, alias.Title) {
+			return true
+		}
+	}
+	return false
+}
+
+// sharesProviderID reports whether candidate carries an ID the item already
+// holds under the same provider, which identifies the work without the title.
+func sharesProviderID(existing, candidate map[string]string) bool {
+	for provider, id := range candidate {
+		provider, id = strings.ToLower(strings.TrimSpace(provider)), strings.TrimSpace(id)
+		if provider == "" || id == "" {
+			continue
+		}
+		for have, haveID := range existing {
+			if strings.ToLower(strings.TrimSpace(have)) == provider && strings.TrimSpace(haveID) == id {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // AdmitProviderIDs stages new identities only after every ownership lookup

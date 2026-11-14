@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"sync"
 
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -14,7 +15,9 @@ import (
 // Attempt timeouts grow with the samples a request decodes: a base for
 // opening the input, plus a per-sample allowance generous enough for a 4K
 // HDR keyframe decoded and tone mapped in software at idle priority on a
-// busy host. A run that outlives it is stuck, not slow.
+// busy host. A run that outlives it is stuck, not slow. A read that decodes
+// every reference picture of the sampled span gets that span's playing time
+// on top (see mediasample.Request.AttemptSeconds).
 const (
 	attemptBaseSeconds       = 120
 	hardwareSecondsPerSample = 0.5
@@ -42,7 +45,10 @@ func attemptTimeout(perSample float64, n int) float64 {
 type LocalExtractor struct {
 	settings SettingsReader
 	hardware *mediasample.HardwareResolver
-	logger   *slog.Logger
+	// resolving pairs each run's Set with its Backend, so concurrent runs
+	// across a settings change never resolve another run's accelerator.
+	resolving sync.Mutex
+	logger    *slog.Logger
 	// exec replaces ffmpeg in tests.
 	exec mediasample.ExecFunc
 }
@@ -63,8 +69,11 @@ func (e *LocalExtractor) Extract(ctx context.Context, _ *Job, req mediasample.Re
 	if accel == "" {
 		accel = "auto"
 	}
-	e.hardware.Set(accel, readSetting(ctx, e.settings, hwDeviceSetting))
+	hwDevice := readSetting(ctx, e.settings, hwDeviceSetting)
+	e.resolving.Lock()
+	e.hardware.Set(accel, hwDevice)
 	resolved, device := e.hardware.Backend(ctx, ffmpeg)
+	e.resolving.Unlock()
 	hardware := mediasample.SupportsHardwareSheets(resolved)
 	req.Attempts = AttemptPlan(hardware, len(req.Samples.Seconds))
 	runner := mediasample.Runner{

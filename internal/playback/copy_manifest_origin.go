@@ -8,10 +8,11 @@ import (
 	"io"
 	"math"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/procgroup"
 )
 
 // Retain one bounded observed window, carrying its origin forward using actual
@@ -137,7 +138,7 @@ func probeSegmentVideoPTS(ctx context.Context, opts TranscodeOpts, outputDir str
 		files = append(files, file)
 		inputs = append(inputs, file)
 	}
-	cmd := exec.CommandContext(ctx, ffprobePathFromFFmpeg(ResolveFFmpegPath(opts.FFmpegPath)),
+	cmd := procgroup.CommandContext(ctx, ffprobePathFromFFmpeg(ResolveFFmpegPath(opts.FFmpegPath)),
 		"-v", "error", "-probesize", "5000000", "-analyzeduration", "3000000",
 		"-select_streams", "v:0", "-read_intervals", "%+#1", "-show_entries", "packet=pts_time",
 		"-of", "json", "-i", "pipe:0")
@@ -151,7 +152,7 @@ func probeSegmentVideoPTS(ctx context.Context, opts TranscodeOpts, outputDir str
 	}
 	data, readErr := io.ReadAll(io.LimitReader(stdout, 4097))
 	if readErr != nil || len(data) > 4096 {
-		_ = cmd.Process.Kill()
+		_ = procgroup.Kill(cmd)
 	}
 	waitErr := cmd.Wait()
 	if readErr != nil {

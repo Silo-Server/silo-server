@@ -25,7 +25,29 @@ bounded at one row per account.
 **Stored as a digest.** Tokens use the invitation scheme (`auth.NewLinkToken`): 32
 random bytes, base64url in the link, SHA-256 hex at rest. The raw token exists
 only in the email or in the one response that discloses a shared link. The request
-log redacts the `{token}` path parameter.
+log redacts the `{token}` path parameter of the deprecated path operations.
+
+<a id="link-tokens"></a>
+**Link tokens stay out of URLs the server sees.** A reset or invitation token is a
+bearer credential, and anything in front of Silo that logs request lines or
+`Referer` headers would store it. So:
+
+- `mail.AccountLink` puts the token in the link's fragment (`/reset-password#<token>`,
+  `/invite#<token>`), which a browser never sends.
+- The web app moves the token out of the address into the history entry's state
+  before it renders (`web/src/lib/linkToken.ts`, read by `useLinkToken`), so the router, and anything that
+  keys or stores by URL, never sees it. A link in the old path form is handled the
+  same way, so links issued before this rule still open.
+- The reset and claim screens send the token in a JSON body
+  (`POST /password-resets/lookup|complete`, `POST /invitations/lookup|accept`).
+  The path-token operations remain only as deprecated forms.
+- The HTML shell is served with `Referrer-Policy: strict-origin`, so the requests
+  an old path-form link's page makes before its address is cleared name only the
+  origin.
+
+A new screen that redeems a one-time token follows the same four points. An
+old-form link's own first request still carries its token; nothing after issue can
+change that, and such links expire within 24 hours (resets) or 7 days (invitations).
 
 **Bound to the password it replaces.** Each row records a SHA-256 fingerprint of
 `users.password_hash` at issue time, and a link only resolves while the account
@@ -43,6 +65,21 @@ the link and checks that its email still matches the address read for delivery.
 If the email changes first, no link is issued; if issuance wins, the email change
 deletes that link. Mail sent after a concurrent change can therefore carry only
 an unusable link to the previous address.
+
+**Authority judged under the lock.** Only the Owner may issue a link for
+another admin, nobody else may issue one for the Owner, and a scoped API key
+may not issue one for any admin. The handler checks this on arrival.
+`Repository.Issue` checks it again in the transaction that stores the link,
+after locking the issuer and the account in id order, the order ownership
+transfers use. A promotion of the account, or an ownership move to it, deletes
+the account's link in its own transaction. When it commits first, issuance sees
+the new role and refuses; when issuance commits first, the promotion deletes the
+new link. Either way no link issued under the old role survives. The issuer's
+row is held `FOR KEY SHARE`. That waits for an ownership move, which locks both
+accounts `FOR UPDATE` before changing `is_owner`, so an Owner who hands
+ownership away cannot finish issuing a link for another admin. It does not wait
+for other writers of the issuer's row, such as access-group updates, which lock
+many accounts in no fixed order and could otherwise deadlock with issuance.
 
 **Uniform not-found.** Lookup and completion return the same `ErrNotFound` for
 unknown, expired, used, replaced, and outdated links, so a probe learns nothing.
@@ -64,7 +101,22 @@ exactly one winner. Sign-in afterwards is a separate effect: when it fails, the
 response still reports the committed reset (`sign_in_required`) and the caller must
 not replay it. The `OnUserSessionsRevoked` hook then drops Jellyfin-compatible
 sessions held in memory, the same as for administrator account edits, on every
-replica: it announces the revocation on the admin event channel.
+replica: it announces the revocation on the admin event channel. A self-service
+password change that asks to sign out other sessions (`sign_out_other_sessions`)
+revokes the same set in its own transaction, except the session that asked
+(`RevokeOtherSignInsInTransaction`), and runs the same hook, so both stay in step.
+
+**Issuing takes the account lock too.** Every sign-out everywhere locks the
+account row before it revokes. A credential it covers is issued under that lock,
+after rechecking what the credential comes from in the same transaction, so it
+either commits first and is revoked or sees the revocation and is refused. A
+local password sign-in rechecks the password hash before opening its login
+session. Audiobookshelf-compatible sign-in, refresh, and `/authorize` hold the
+account row `FOR SHARE` while they check the login session the sign-in opened,
+the refresh token being rotated (revoked in that transaction), or the token
+`/authorize` was called with, then store their tokens. A credentials-plugin
+sign-in still opens its login session outside the lock. Jellyfin-compatible
+sessions carry the login session they came from and end with it.
 
 **No link without an external URL.** Links are built on `server.public_url`
 (`mail.AccountLinkBase`, shared with invitations). Without one, issuing fails with
@@ -131,13 +183,13 @@ administrator's tokens never carry it.
 
 **Allowlist, fail closed.** `RequireAuth` admits a restricted session only to the
 exact routes in `passwordChangeRoutes`: reading the account, the password
-capability, changing the password, and logout, on both API majors. Everything
+capability, changing the password, and logout. Everything
 else, including new routes, returns `403 password_change_required`. The
-`plugin_access` bridge refuses restricted tokens too. The refusal is still
+`plugin_access` check refuses restricted tokens too. The refusal is still
 attributed to the account in the request log. A restricted session may change the
 password without choosing a profile, but must still prove the temporary password,
 and cannot reuse it as the new one.
 
 **Surfaces that cannot run the change refuse the login.** Jellyfin and
-Audiobookshelf compatible sign-ins call `auth.Service.CompatLogin`, which refuses an
-account holding a temporary password before opening a session.
+Audiobookshelf compatible sign-ins call `auth.Service.CompatLoginWithLocalFallback`,
+which refuses an account holding a temporary password before opening a session.

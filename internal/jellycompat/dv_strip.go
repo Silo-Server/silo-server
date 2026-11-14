@@ -87,7 +87,9 @@ func (h *PlaybackHandler) applyCompatDVStrip(
 	// requires burning into the video instead of copying the HDR10 base layer.
 	allowHEVCEncoding := compatSourceTargetVideoCodec(source) == compatVideoCodecHEVC
 	stripped := h.buildPlaybackSource(routeItemID, playSessionID, compatHDR10BaseVersion(source.Version), profile, req, allow4KTranscode, allowHEVCEncoding)
-	if !stripped.HLSRemux {
+	// The strip is packaged as fMP4, which a copy the client accepts only as
+	// MPEG-TS rules out.
+	if !stripped.HLSRemux || stripped.hlsRemuxInTS {
 		return source
 	}
 	// A surround-to-stereo AAC remux also needs audio_to_aac v2 on the same
@@ -101,6 +103,9 @@ func (h *PlaybackHandler) applyCompatDVStrip(
 	stripped.ETag = source.ETag
 	stripped.SupportsDirectPlay = false
 	stripped.SupportsDirectStream = false
+	// A progressive remux would serve the original Dolby Vision file, so only
+	// the original's own eligibility counts.
+	stripped.progressiveRemuxFallback = source.progressiveRemuxFallback
 	stripped.DOVIVariant = false
 	stripped.DVStripToHDR10 = true
 	return stripped

@@ -73,6 +73,11 @@ type PersonalCollectionCollages struct {
 
 	refreshMu sync.Mutex
 	refreshes map[string]personalCollageRefresh
+
+	// noSources remembers the hand-picked and imported collections in which
+	// a viewer can see no title with a poster, so reads don't scan all their
+	// members again (personalCollectionReadMemo).
+	noSources personalCollectionReadMemo[struct{}]
 }
 
 // personalCollageRefresh is a pending Refresh of one collection: the latest
@@ -155,11 +160,16 @@ func (p *PersonalCollectionCollages) Posters(ctx context.Context, userID int, co
 	if len(members) == 0 {
 		return posters
 	}
+	members, remember := p.withoutRememberedNoSources(ctx, userID, members, access)
+	if len(members) == 0 {
+		return posters
+	}
 	sources, err := p.ListSources(ctx, userID, members, access)
 	if err != nil {
 		slog.WarnContext(ctx, "collage: failed to select personal collection collages", "component", "catalog", "error", err)
 		return posters
 	}
+	remember(sources)
 	ids := make([]string, 0, len(members))
 	for _, c := range members {
 		ids = append(ids, c.ID)
@@ -168,75 +178,88 @@ func (p *PersonalCollectionCollages) Posters(ctx context.Context, userID int, co
 	return posters
 }
 
+// withoutRememberedNoSources drops the hand-picked and imported collections
+// remembered to show the viewer described by access no title with a poster.
+// Pass the sources then listed for the rest to remember, so later reads skip
+// those that have none too. When their revisions can't be read, every
+// collection is kept and nothing is remembered.
+func (p *PersonalCollectionCollages) withoutRememberedNoSources(ctx context.Context, userID int, members []PersonalCollectionDefinition, access AccessFilter) ([]PersonalCollectionDefinition, func(map[string][]string)) {
+	ids := make([]string, 0, len(members))
+	for _, c := range members {
+		ids = append(ids, c.ID)
+	}
+	revisions, err := personalCollectionRevisions(ctx, p.pool, userID, ids)
+	if err != nil {
+		slog.WarnContext(ctx, "collage: failed to load personal collection revisions", "component", "catalog", "error", err)
+		return members, func(map[string][]string) {}
+	}
+	accessKey := collageAccessKey(access)
+	now := time.Now()
+	kept := make([]PersonalCollectionDefinition, 0, len(members))
+	for _, c := range members {
+		revision, ok := revisions[c.ID]
+		if ok {
+			if _, none := p.noSources.get(personalCollectionReadKey{userID, c.ID, accessKey}, revision, now); none {
+				continue
+			}
+		}
+		kept = append(kept, c)
+	}
+	return kept, func(sources map[string][]string) {
+		for _, c := range kept {
+			revision, ok := revisions[c.ID]
+			if ok && len(sources[c.ID]) == 0 {
+				p.noSources.put(personalCollectionReadKey{userID, c.ID, accessKey}, revision, struct{}{}, now)
+			}
+		}
+	}
+}
+
 // serveSmart returns the recorded collage each smart collection shows the
 // viewer described by access, and asks for a background refresh of each one
 // whose record is missing, made for another definition, or due.
 func (p *PersonalCollectionCollages) serveSmart(ctx context.Context, userID int, collections []PersonalCollectionDefinition, access AccessFilter) map[string]CollectionPoster {
-	posters := make(map[string]CollectionPoster, len(collections))
 	if len(collections) == 0 || (access.AllowedLibraryIDs != nil && len(access.AllowedLibraryIDs) == 0) {
-		return posters
+		return map[string]CollectionPoster{}
 	}
-	ids := make([]string, 0, len(collections))
+	smart := make([]smartCollageCollection, 0, len(collections))
 	for _, c := range collections {
-		ids = append(ids, c.ID)
+		smart = append(smart, p.smartCollection(c, access))
 	}
-	store := personalCollageStore{pool: p.pool, userID: userID}
-	recorded, err := store.getSmartCollages(ctx, ids, collageAccessKey(access))
-	if err != nil {
-		slog.WarnContext(ctx, "collage: failed to load smart collection collages", "component", "catalog", "error", err)
-		return posters
-	}
-	var touch []CollectionCollageRef
-	now := time.Now()
-	for _, c := range collections {
-		r, ok := recorded[c.ID]
-		if !ok || r.definitionKey != smartDefinitionKey(c.QueryDefinition) {
-			p.refreshSmartLater(userID, c, access)
-			continue
-		}
-		if now.Sub(r.refreshedAt) >= p.SmartRefreshInterval {
-			p.refreshSmartLater(userID, c, access)
-		}
-		if r.collage.Path == "" {
-			continue
-		}
-		posters[c.ID] = CollectionPoster{Path: r.collage.Path, Thumbhash: r.collage.Thumbhash, CollageKey: r.collage.Key}
-		if now.Sub(r.collage.LastUsedAt) > collectionCollageTouchInterval {
-			touch = append(touch, r.collage.CollectionCollageRef)
-		}
-	}
-	if err := store.TouchCollectionCollages(ctx, touch); err != nil {
-		slog.DebugContext(ctx, "collage: failed to touch collection collages", "component", "catalog", "error", err)
-	}
-	return posters
+	return p.smartCollageSet(userID).serve(ctx, smart, collageAccessKey(access))
 }
 
 // refreshSmartLater runs refreshSmart off the request. Refreshes of one
 // collection for one viewer and definition share a run.
 func (p *PersonalCollectionCollages) refreshSmartLater(userID int, c PersonalCollectionDefinition, access AccessFilter) {
-	ref := CollectionCollageRef{CollectionID: c.ID, Key: "smart:" + collageAccessKey(access) + ":" + smartDefinitionKey(c.QueryDefinition)}
-	p.buildQueue().runLater(ref, func(ctx context.Context) error { return p.refreshSmart(ctx, userID, c, access) })
+	p.smartCollageSet(userID).refreshLater(p.smartCollection(c, access), collageAccessKey(access))
 }
 
 // refreshSmart reads smart collection c's first matches the viewer described
 // by access can see, builds their collage unless it is stored, and records it
-// as the collage that viewer sees. When no match has a poster it records that
-// there is none and succeeds: the record holds off the next refresh until
-// SmartRefreshInterval, so the build queue keeps no retry marker for it.
+// as the collage that viewer sees.
 func (p *PersonalCollectionCollages) refreshSmart(ctx context.Context, userID int, c PersonalCollectionDefinition, access AccessFilter) error {
-	sources, err := p.smartSources(ctx, c.QueryDefinition, access)
-	if err != nil {
-		return err
+	return p.smartCollageSet(userID).refresh(ctx, p.smartCollection(c, access), collageAccessKey(access))
+}
+
+func (p *PersonalCollectionCollages) smartCollageSet(userID int) smartCollageSet {
+	return smartCollageSet{
+		set:             p.collageSet(userID),
+		records:         personalCollageStore{pool: p.pool, userID: userID},
+		refreshInterval: p.SmartRefreshInterval,
 	}
-	key := ""
-	if len(sources) > 0 {
-		if err := p.collageSet(userID).prepare(ctx, c.ID, sources); err != nil {
-			return err
-		}
-		key = CollectionCollageKey(sources)
+}
+
+// smartCollection is smart collection c as the viewer described by access
+// reads it.
+func (p *PersonalCollectionCollages) smartCollection(c PersonalCollectionDefinition, access AccessFilter) smartCollageCollection {
+	return smartCollageCollection{
+		id:            c.ID,
+		definitionKey: smartDefinitionKey(c.QueryDefinition),
+		sources: func(ctx context.Context) ([]string, error) {
+			return p.smartSources(ctx, c.QueryDefinition, access)
+		},
 	}
-	store := personalCollageStore{pool: p.pool, userID: userID}
-	return store.saveSmartCollage(ctx, c.ID, collageAccessKey(access), smartDefinitionKey(c.QueryDefinition), key)
 }
 
 // Refresh builds, in the background and after RefreshDelay, the collage the
@@ -348,6 +371,10 @@ func (p *PersonalCollectionCollages) listMemberSources(ctx context.Context, user
 	return nil
 }
 
+// buildPersonalCollectionCollageSourcesSQL orders members as
+// user_collection_items_continuation_idx does (position is NOT NULL, so the
+// COALESCE changes no order), letting each collection's scan stop at its first
+// titles with a poster instead of sorting all its members.
 func buildPersonalCollectionCollageSourcesSQL(userID int, collectionIDs []string, access AccessFilter) (string, []any) {
 	args := []any{userID, collectionIDs, CollectionCollageSourceLimit}
 	argIdx := 4
@@ -367,7 +394,7 @@ func buildPersonalCollectionCollageSourcesSQL(userID int, collectionIDs []string
 			  AND upci.sub_item_id = ''
 			  AND mi.poster_path <> ''
 			  AND ` + MangaChapterExclusionWhere("mi") + memberWhere.String() + `
-			ORDER BY upci.position, upci.media_item_id
+			ORDER BY COALESCE(upci.position, 0), upci.media_item_id
 			LIMIT $3
 		) src
 		ORDER BY c.ord, src.position, src.media_item_id`, args
@@ -388,16 +415,7 @@ func (p *PersonalCollectionCollages) smartSources(ctx context.Context, queryDefi
 	if err != nil {
 		return nil, fmt.Errorf("reading smart collection matches: %w", err)
 	}
-	var sources []string
-	for _, item := range items {
-		if item.PosterPath != "" {
-			sources = append(sources, item.PosterPath)
-			if len(sources) == CollectionCollageSourceLimit {
-				break
-			}
-		}
-	}
-	return sources, nil
+	return firstPosters(items), nil
 }
 
 // personalCollageStore keeps account userID's personal collection collages
@@ -497,17 +515,6 @@ func (s personalCollageStore) RetireUnusedCollectionCollages(ctx context.Context
 	return int(tag.RowsAffected()), nil
 }
 
-// smartCollage is the collage recorded for one smart collection and viewer
-// access. collage.Path is empty when the viewer can see no match with a
-// poster.
-type smartCollage struct {
-	definitionKey string
-	refreshedAt   time.Time
-	collage       CollectionCollage
-}
-
-// getSmartCollages returns the collages recorded for the viewer access
-// accessKey names, keyed by collection ID.
 func (s personalCollageStore) getSmartCollages(ctx context.Context, collectionIDs []string, accessKey string) (map[string]smartCollage, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT sc.collection_id, sc.definition_key, sc.refreshed_at,
@@ -536,8 +543,6 @@ func (s personalCollageStore) getSmartCollages(ctx context.Context, collectionID
 	return recorded, nil
 }
 
-// saveSmartCollage records variantKey, empty for none, as the collage the
-// viewer access accessKey names sees for a smart collection's definition.
 func (s personalCollageStore) saveSmartCollage(ctx context.Context, collectionID, accessKey, definitionKey, variantKey string) error {
 	if _, err := s.pool.Exec(ctx, `
 		INSERT INTO user_personal_collection_smart_collages (user_id, collection_id, access_key, definition_key, variant_key)

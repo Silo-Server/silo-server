@@ -110,7 +110,7 @@ func newScopeOnceFixture(tb testing.TB) *scopeOnceFixture {
 	if err := store.CreateProfile(ctx, userstore.Profile{ID: "profile-1", Name: "Viewer"}); err != nil {
 		tb.Fatalf("CreateProfile: %v", err)
 	}
-	engine, err := policy.NewEngine(ctx)
+	engine, err := policy.NewEngine(ctx, policy.WithEvalTimeout(time.Minute))
 	if err != nil {
 		tb.Fatalf("NewEngine: %v", err)
 	}

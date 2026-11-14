@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -30,9 +31,11 @@ const rehomeTestTransport = "rehome-transport"
 // fakeRehomeNode is a transcode node that accepts a start and then serves the
 // started transport's segments.
 type fakeRehomeNode struct {
-	server  *httptest.Server
-	starts  atomic.Int32
-	release chan struct{} // when non-nil, a start waits for it to close
+	server      *httptest.Server
+	starts      atomic.Int32
+	stops       atomic.Int32
+	legacyAudio bool
+	release     chan struct{} // when non-nil, a start waits for it to close
 
 	mu       sync.Mutex
 	lastSeen transcodenode.TranscodeStartRequest
@@ -63,10 +66,11 @@ func newFakeRehomeNode(t *testing.T, gated bool) *fakeRehomeNode {
 			w.WriteHeader(http.StatusAccepted)
 			// Like a node from before MPEG-TS copy attestation: it echoes the
 			// copy-fMP4 recipe version but not copy_video_mpegts.
-			_ = json.NewEncoder(w).Encode(transcodenode.TranscodeStartResponse{SessionID: req.SessionID, Status: "started", CopyFMP4RecipeVersion: req.CopyFMP4RecipeVersion})
+			_ = json.NewEncoder(w).Encode(transcodenode.TranscodeStartResponse{SessionID: req.SessionID, Status: "started", CopyFMP4RecipeVersion: req.CopyFMP4RecipeVersion, RequireAudioTrack: req.RequireAudioTrack && !node.legacyAudio})
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/transcode/"+rehomeTestTransport+"/segment/"):
 			_, _ = io.WriteString(w, "moved:"+strings.TrimPrefix(r.URL.Path, "/transcode/"+rehomeTestTransport+"/segment/"))
 		case r.Method == http.MethodDelete:
+			node.stops.Add(1)
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			http.NotFound(w, r)
@@ -506,6 +510,35 @@ func TestRelayMoveRefusesANodeThatDoesNotAttestMPEGTS(t *testing.T) {
 	}
 }
 
+// TestRelayMoveKeepsTheKeyframePlaylist pins that a move asks the new node for
+// the recipe's keyframe playlist and checks its echo as a start does: the
+// player may hold the planned playlist, which FFmpeg's own does not match.
+func TestRelayMoveKeepsTheKeyframePlaylist(t *testing.T) {
+	legacy := newFakeRehomeNode(t, false)
+	f := newRehomeFixture(t, []*nodepool.Node{
+		pooledNode(1, unreachableNodeURL(t)),
+		pooledNode(2, legacy.server.URL),
+	}, "ffmpeg")
+	previous := f.handler.PlaybackConfig
+	f.handler.PlaybackConfig = func() config.PlaybackConfig {
+		cfg := previous()
+		cfg.Routing = config.DefaultPlaybackRoutingPolicy()
+		cfg.Routing.RemuxExecution = config.PlaybackExecutionWorkerOnly
+		return cfg
+	}
+	card, _ := verifiedStreamCardFromToken(f.token, f.session.ID, f.handler.JWTSecret)
+	card.PlayMethod, card.CopyFMP4RecipeVersion = streamtoken.PlayMethodCopyFMP4Transcode, playback.CopyFMP4RecipeVersion
+	card.SourceVideoCodec, card.TargetCodecVideo, card.TargetCodecAudio, card.KeyframePlaylist = "h264", "copy", "copy", true
+	f.token = f.handler.signSessionToken(*card, false)
+
+	if rr := f.segment("seg_00003.ts"); rr.Code == http.StatusOK {
+		t.Fatalf("status = %d, body = %q; want the node without the keyframe-playlist echo refused", rr.Code, rr.Body.String())
+	}
+	if start := legacy.lastStart(); legacy.starts.Load() != 1 || !start.KeyframePlaylist {
+		t.Fatalf("starts = %d, request = %+v; want one keyframe-playlist start", legacy.starts.Load(), start)
+	}
+}
+
 // TestRelayMoveRestoresStoredRecipeAfterRefusedStart pins that a candidate's
 // rollback stop, which makes the node delete the transport's stored recipe,
 // does not cost a tokenless session the only recipe it has.
@@ -863,5 +896,36 @@ func TestRelayMoveWithoutARecordedPlanAdmitsRenditionNodes(t *testing.T) {
 	}
 	if eligible(&nodepool.Node{URL: older.URL}) {
 		t.Fatal("a node without the rendition feature was admitted")
+	}
+}
+
+func TestRelayMovePreservesMandatoryAudio(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		t.Run(fmt.Sprintf("legacy=%v", legacy), func(t *testing.T) {
+			node := newFakeRehomeNode(t, false)
+			node.legacyAudio = legacy
+			f := newRehomeFixture(t, []*nodepool.Node{pooledNode(1, unreachableNodeURL(t)), pooledNode(2, node.server.URL)}, "missing-test-ffmpeg")
+			card, _ := verifiedStreamCardFromToken(f.token, f.session.ID, f.handler.JWTSecret)
+			if card == nil {
+				t.Fatal("fixture stream token did not contain a recipe")
+			}
+			card.RequireAudioTrack, card.AudioTrackIndex = true, 1
+			f.token = f.handler.signSessionToken(*card, false)
+			response := f.segment("seg_00003.ts")
+			if !node.lastStart().RequireAudioTrack {
+				t.Fatal("rehome discarded mandatory audio selection")
+			}
+			if legacy {
+				if response.Code == http.StatusOK {
+					t.Fatalf("unconfirmed rehome status=%d", response.Code)
+				}
+				// A tokenless session's rollback sends the stop without waiting for it.
+				waitForCondition(t, func() bool { return node.stops.Load() > 0 }, "unconfirmed rehome never stopped the new transcode")
+				return
+			}
+			if response.Code != http.StatusOK {
+				t.Fatalf("confirmed rehome status=%d: %s", response.Code, response.Body.String())
+			}
+		})
 	}
 }

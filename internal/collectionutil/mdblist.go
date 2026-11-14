@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
 // MDBListRequestTimeout bounds one MDBList fetch when the base client sets no
@@ -207,9 +209,33 @@ func fetchMDBListJSONPage[T any](ctx context.Context, client *http.Client, pageU
 	}
 	var page []T
 	if err := json.Unmarshal(body, &page); err != nil {
+		if msg := mdblistFeedError(body); msg != "" {
+			return nil, fmt.Errorf("mdblist: %s", msg)
+		}
 		return nil, fmt.Errorf("parsing mdblist response: %w", err)
 	}
 	return page, nil
+}
+
+// mdblistFeedErrorMaxRunes bounds the feed's own error text, which is stored
+// and shown as the sync message after secret assignments are masked.
+const mdblistFeedErrorMaxRunes = 200
+
+// mdblistFeedError returns the message of the {"error": "..."} object the
+// /json feed sends with status 200 in place of a list, such as "This List is
+// Private", or "" when body is not one.
+func mdblistFeedError(body []byte) string {
+	var feedErr struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal(body, &feedErr) != nil {
+		return ""
+	}
+	msg := logredact.RedactSecretAssignments(strings.TrimSpace(feedErr.Error))
+	if runes := []rune(msg); len(runes) > mdblistFeedErrorMaxRunes {
+		msg = string(runes[:mdblistFeedErrorMaxRunes])
+	}
+	return msg
 }
 
 // FetchMDBListWithFallback tries each candidate URL in order and returns the

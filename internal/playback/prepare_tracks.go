@@ -119,7 +119,9 @@ func PlanPreparedTracks(file *models.MediaFile, targetCodecAudio string, audioTr
 		})
 	}
 	for i, track := range file.SubtitleTracks {
-		if track.External || !PreparedSubtitleEmbeddable(track.Codec) {
+		// The prepared encode maps each track from the source, which FFmpeg
+		// can't demux for an index-only track.
+		if track.External || track.IndexOnly || !PreparedSubtitleEmbeddable(track.Codec) {
 			continue
 		}
 		plan.Subtitles = append(plan.Subtitles, PreparedSubtitleTrack{
@@ -171,6 +173,21 @@ func preparedAudioCopyable(codec, primaryCodec string) bool {
 	return normalized == primaryCodec || normalized == audioCodecAACV3 || normalized == audioCodecMP3
 }
 
+// preparedRemuxEncodesAudio reports whether a remux of file that asks to copy
+// its audio would still encode some of it, because a track's codec cannot be
+// copied into MP4. Without a track inventory only the primary codec is known.
+func preparedRemuxEncodesAudio(file *models.MediaFile) bool {
+	if !PreparedTracksAvailable(file) {
+		return !preparedAudioCopyable(file.CodecAudio, normalizeCodecV3(file.CodecAudio))
+	}
+	for _, track := range PlanPreparedTracks(file, PreparedAudioCopy, -1).Audio {
+		if track.Codec != PreparedAudioCopy {
+			return true
+		}
+	}
+	return false
+}
+
 // preparedTextSubtitleCodecs lists embedded plain-text subtitle codecs that
 // convert to MP4 timed text without losing content.
 var preparedTextSubtitleCodecs = map[string]bool{
@@ -204,7 +221,7 @@ func PreparedSubtitleSidecarFormat(codec string) string {
 // title (MP4 handler name), and disposition are written explicitly.
 func appendPreparedTrackArgs(args []string, opts TranscodeOpts) []string {
 	plan := opts.PreparedTracks
-	args = append(args, "-map", "0:v:0")
+	args = appendPreparedVideoMap(args, opts)
 	for _, track := range plan.Audio {
 		args = append(args, "-map", fmt.Sprintf("0:a:%d", track.SourceIndex))
 	}
@@ -240,6 +257,18 @@ func appendPreparedTrackArgs(args []string, opts TranscodeOpts) []string {
 		args = append(args, "-disposition:s:"+stream, preparedDisposition(track.Default, track.Forced, track.HearingImpaired))
 	}
 	return args
+}
+
+// appendPreparedVideoMap maps the source's video stream, which every source
+// but audio-only media must have. An audiobook or podcast has at most a cover
+// picture, in whatever format it was embedded (MP4 refuses a GIF or BMP
+// cover), so its prepared file carries no video: clients show the server's
+// artwork, as they do when streaming it.
+func appendPreparedVideoMap(args []string, opts TranscodeOpts) []string {
+	if opts.AudioOnly {
+		return args
+	}
+	return append(args, "-map", "0:v:0")
 }
 
 // appendPreparedStreamMetadata writes an MP4-compatible language (ISO 639-2)

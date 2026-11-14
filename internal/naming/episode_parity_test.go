@@ -83,6 +83,7 @@ func TestEpisodeNamingSeriesTitle(t *testing.T) {
 		{"Show - 12 H.265", "Show", 12},
 		{"[Group] Show - 12v2 [1080p]", "Show", 12},
 		{"Show S01E12v2", "Show", 12},
+		{"Show ( 1x02 ) - Second", "Show", 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			token, ok := parseEpisodeToken(tc.name, nil, false, true, true)
@@ -146,6 +147,7 @@ func TestEpisodeNamingRangeTitleSuffix(t *testing.T) {
 	for _, name := range []string{
 		"S01E02E03E04 - Arrival.mkv", "S01E02v2-E04v2 - Arrival.mkv", "1x02x03x04 - Arrival.mkv",
 		"01x02 - 01x03 - 01x04 - Arrival.mkv", "02-04 - Arrival.mkv",
+		"Show - [1x02] - Arrival.mkv", "Show (1x02) Arrival.mkv",
 	} {
 		if got := EpisodeTitleSuffix(filepath.Join("Show", "Season 1", name)); got != "Arrival" {
 			t.Errorf("%q: suffix = %q, want Arrival", name, got)

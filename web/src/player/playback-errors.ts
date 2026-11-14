@@ -1,3 +1,4 @@
+import { serverText, t, type MessageKey } from "@/i18n";
 import { PlayerFetchError } from "./player-fetch";
 import type { TerminalV3 } from "./protocol-v3";
 
@@ -14,102 +15,103 @@ export interface PlaybackPolicyErrorDescription {
  * body's `terminal`. The status code only describes the request. So the whole
  * "playback was refused" surface is reason-keyed, and the server's own
  * `terminal.message` is the fallback for reasons this table does not name.
+ * The text is in the language of the moment the terminal arrived.
  */
 export function describePlanTerminal(terminal: TerminalV3): PlaybackPolicyErrorDescription {
   switch (terminal.reason) {
     case "transcoding_disabled":
       return {
-        title: "Transcoding is disabled",
-        message: "Transcoding is disabled for your user. Ask your server administrator for access.",
+        title: t("web.player.error.transcodingDisabled.title"),
+        message: t("web.player.error.transcodingDisabled.message"),
       };
     case "audio_transcoding_disabled":
       return {
-        title: "Audio transcoding is disabled",
-        message:
-          "This item requires audio conversion, but audio transcoding is disabled for your user.",
+        title: t("web.player.error.audioTranscodingDisabled.title"),
+        message: t("web.player.error.audioTranscodingDisabled.message"),
       };
     case "source_unavailable":
       return {
-        title: "This video is no longer available",
-        message:
-          "The file needed to play it can't be found right now. Go back and try another version if one is available.",
+        title: t("web.player.error.sourceUnavailable.title"),
+        message: t("web.player.error.sourceUnavailable.message"),
       };
     case "source_unreadable":
       return {
-        title: "This file can't be played",
-        message:
-          "Silo couldn't read this file. It appears to be empty or damaged. Replace the file, then rescan the library.",
+        title: t("web.player.error.sourceUnreadable.title"),
+        message: t("web.player.error.sourceUnreadable.message"),
       };
     case "source_metadata_incomplete":
       return {
-        title: "This file hasn't finished scanning",
-        message:
-          "Silo doesn't know enough about this file yet to plan playback. Try again once the scan finishes.",
+        title: t("web.player.error.sourceMetadataIncomplete.title"),
+        message: t("web.player.error.sourceMetadataIncomplete.message"),
       };
     case "client_hls_unsupported":
       return {
-        title: "This browser can't play the stream",
-        message:
-          "Playing this file needs HLS, which this browser doesn't support. Try a different browser.",
+        title: t("web.player.error.clientHlsUnsupported.title"),
+        message: t("web.player.error.clientHlsUnsupported.message"),
       };
     case "adaptation_exhausted":
     case "adaptation_unavailable":
       return {
-        title: "No playable version found",
-        message:
-          "Silo couldn't find a way to play this file on this device. Try another version if one is available.",
+        title: t("web.player.error.noPlayableVersion.title"),
+        message: t("web.player.error.noPlayableVersion.message"),
       };
     case "no_alternate_version":
       return {
-        title: "No playable version found",
+        title: t("web.player.error.noPlayableVersion.title"),
         // The server names the policy that ruled the source out (4K
         // transcoding disabled, for one); the generic sentence only covers a
         // missing message.
-        message:
-          terminal.message?.trim() ||
-          "Silo couldn't find a way to play this file on this device. Try another version if one is available.",
+        message: terminalMessage(terminal, "web.player.error.noPlayableVersion.message"),
       };
     case "hdr_transcode_unsupported":
     case "dv_conversion_unsupported":
       return {
-        title: "This HDR format can't be converted",
-        message:
-          "This file's dynamic range can't be converted for this device, and it can't be played as-is.",
+        title: t("web.player.error.hdrConversionUnsupported.title"),
+        message: t("web.player.error.hdrConversionUnsupported.message"),
       };
     case "video_conversion_unsupported":
     case "audio_conversion_unsupported":
       return {
-        title: "This file can't be converted",
-        message: "Silo can't convert this file into something this device can play.",
+        title: t("web.player.error.conversionUnsupported.title"),
+        message: t("web.player.error.conversionUnsupported.message"),
       };
     case "conversion_tool_unavailable":
     case "transcode_node_unavailable":
     case "transcode_node_capability_unavailable":
     case "transcode_start_failed":
       return {
-        title: "Playback unavailable",
+        title: t("web.player.watch.playbackUnavailable"),
         // The server names which part of the conversion path failed (no
         // transcode node, settings unavailable, transport refused to start);
         // the generic sentence only covers a missing message.
-        message:
-          terminal.message?.trim() ||
-          "The server couldn't start converting this file. Please try again.",
+        message: terminalMessage(terminal, "web.player.error.conversionUnavailable.message"),
       };
     case "capacity_unavailable":
       return {
-        title: "The server is busy",
-        message:
-          "There's no capacity to convert this file right now. Please try again in a moment.",
+        title: t("web.player.error.capacityUnavailable.title"),
+        message: t("web.player.error.capacityUnavailable.message"),
+      };
+    // The server has room here: this account has used its allowance. The
+    // server writes these for viewers, so every client shows the same advice.
+    case "stream_limit_reached":
+      return {
+        title: t("web.player.error.streamLimitReached.title"),
+        message: terminalMessage(terminal, "web.player.error.limitReached.message"),
+      };
+    case "transcode_limit_reached":
+      return {
+        title: t("web.player.error.transcodeLimitReached.title"),
+        message: terminalMessage(terminal, "web.player.error.limitReached.message"),
       };
     case "session_expired":
       return {
-        title: "Playback session expired",
-        message: "This playback session is no longer active. Start it again to keep watching.",
+        title: t("web.player.error.sessionExpired.title"),
+        message: t("web.player.error.sessionExpired.message"),
       };
     case "policy_denied":
       return {
-        title: "Playback unavailable",
-        message: "You do not have permission to play this item.",
+        title: t("web.player.watch.playbackUnavailable"),
+        message: t("web.player.error.notPermitted.message"),
       };
     case "subtitle_burn_in_source_unsupported":
     case "subtitle_codec_unsupported":
@@ -119,17 +121,17 @@ export function describePlanTerminal(terminal: TerminalV3): PlaybackPolicyErrorD
     case "subtitle_unavailable_in_version":
     case "subtitle_artifact_unavailable":
       return {
-        title: "That subtitle track can't be used",
+        title: t("web.player.watch.subtitleTrackUnusable"),
         // The server names the specific blocker (burn-in required, source
         // unsupported); the generic sentence only covers a missing message.
-        message:
-          terminal.message?.trim() ||
-          "Silo couldn't prepare the selected subtitles for this device. Try a different track.",
+        message: terminalMessage(terminal, "web.player.error.subtitleUnusable.message"),
       };
     default:
       return {
-        title: "Playback unavailable",
-        message: terminal.message?.trim() || "Silo could not start playback.",
+        title: t("web.player.watch.playbackUnavailable"),
+        // No client sentence names this reason, so the server's is shown as
+        // sent in every language, as for an unknown problem type.
+        message: terminal.message?.trim() || t("web.player.watch.startFailed"),
       };
   }
 }
@@ -138,11 +140,12 @@ export function describePlanTerminal(terminal: TerminalV3): PlaybackPolicyErrorD
  * What the viewer is told when a stream that was already playing lost its
  * connection to the server and the player could not get it back.
  */
-export const CONNECTION_LOST_ERROR: PlaybackPolicyErrorDescription = {
-  title: "Connection lost",
-  message:
-    "Silo lost its connection to the server and couldn't reconnect. Check your connection, then try again to continue where you left off.",
-};
+export function connectionLostError(): PlaybackPolicyErrorDescription {
+  return {
+    title: t("web.player.connection.lostTitle"),
+    message: t("web.player.error.connectionLost.message"),
+  };
+}
 
 /**
  * Describes the transport-level failures the v3 endpoints still express as HTTP
@@ -164,50 +167,59 @@ export function describePlaybackTransportError(
 
   if (error.status === 426 || error.code === "client_upgrade_required") {
     return {
-      title: "Update required",
-      message:
-        "This server speaks a newer playback protocol than this app. Reload the page to pick up the current version.",
+      title: t("web.player.error.upgradeRequired.title"),
+      message: t("web.player.error.upgradeRequired.message"),
     };
   }
 
   if (error.code === "playback_session_not_found") {
     return {
-      title: "Playback session expired",
-      message: "This playback session is no longer active. Start it again to keep watching.",
+      title: t("web.player.error.sessionExpired.title"),
+      message: t("web.player.error.sessionExpired.message"),
     };
   }
 
   if (error.status === 404) {
     return {
-      title: "This item is no longer available",
-      message:
-        "The file needed to play this item can't be found right now. Go back and try another version if one is available.",
+      title: t("web.player.error.itemUnavailable.title"),
+      message: t("web.player.error.itemUnavailable.message"),
     };
   }
 
   if (error.status === 401) {
     return {
-      title: "Authentication required",
-      message: "Your sign-in session has expired. Sign in again to continue playback.",
+      title: t("web.player.error.authenticationRequired.title"),
+      message: t("web.player.error.authenticationRequired.message"),
     };
   }
 
   if (error.status === 403) {
     return {
-      title: "Playback unavailable",
-      message: "You do not have permission to play this item.",
+      title: t("web.player.watch.playbackUnavailable"),
+      message: t("web.player.error.notPermitted.message"),
     };
   }
 
   if (error.status >= 500) {
     return {
-      title: "Playback unavailable",
+      title: t("web.player.watch.playbackUnavailable"),
       message:
         phase === "start"
-          ? "Silo could not start playback right now. Please try again."
-          : "Silo could not update playback right now. Please try again.",
+          ? t("web.player.error.serverError.start")
+          : t("web.player.error.serverError.update"),
     };
   }
 
   return null;
+}
+
+/**
+ * The server's own sentence for a terminal reason this table names, shown as
+ * sent in English. A translated interface shows the client's sentence for the
+ * reason when its catalog has one, as v2 problems show `error.<type>` before
+ * the server's detail.
+ */
+function terminalMessage(terminal: TerminalV3, id: MessageKey): string {
+  const english = terminal.message?.trim();
+  return english ? serverText(id, undefined, english) : t(id);
 }

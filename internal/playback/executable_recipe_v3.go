@@ -1,6 +1,10 @@
 package playback
 
-import "github.com/Silo-Server/silo-server/internal/tonemap"
+import (
+	"slices"
+
+	"github.com/Silo-Server/silo-server/internal/tonemap"
+)
 
 // ExecutableRecipeV3 is the frozen operational half of a protocol-v3 plan.
 // PlanV3 describes the client-visible route identity; these fields are the
@@ -59,6 +63,14 @@ type ExecutableRecipeV3 struct {
 	// version: binaries from before copy remux renditions read version 4 and
 	// reject a rendition outside a transcode.
 	SubtitleRendition bool `json:"subtitle_rendition,omitempty"`
+	// SubtitleRenditionTracks lists every embedded text track the stream
+	// publishes as an on-demand rendition, with SubtitleRendition. It needs
+	// version 6 so a binary that predates it rejects the recipe instead of
+	// reopening the transport with the selected track alone.
+	SubtitleRenditionTracks []SubtitleRenditionTrack `json:"subtitle_rendition_tracks,omitempty"`
+	// SubtitleRenditionSource is the source version the tracks were chosen
+	// from, which their segments are read from (version 6).
+	SubtitleRenditionSource SubtitleRenditionSource `json:"subtitle_rendition_source,omitzero"`
 	// CopyVideoMPEGTS mirrors the plan's MPEG-TS segment container. It needs
 	// version 5 so a binary that predates it rejects the recipe instead of
 	// reopening the transport as fMP4.
@@ -71,6 +83,7 @@ const (
 	executableRecipeVersionSourceAudioV3       = 3
 	executableRecipeVersionSubtitleRenditionV3 = 4
 	executableRecipeVersionCopyMPEGTSV3        = 5
+	executableRecipeVersionRenditionTracksV3   = 6
 )
 
 // FreezeExecutableRecipeV3 captures the byte-affecting facts from a planner result.
@@ -119,6 +132,8 @@ func FreezeExecutableRecipeV3(result PlannerResultV3) ExecutableRecipeV3 {
 		SubtitleCodec:                 result.SubtitleCodec,
 		DownloadedSubtitleID:          result.DownloadedSubtitleID,
 		SubtitleRendition:             result.SubtitleRendition,
+		SubtitleRenditionTracks:       slices.Clone(result.SubtitleRenditionTracks),
+		SubtitleRenditionSource:       result.SubtitleRenditionSource,
 		CopyVideoMPEGTS:               copyVideoMPEGTS,
 	}
 	if recipe.hasVersion2Fields() {
@@ -132,6 +147,9 @@ func FreezeExecutableRecipeV3(result PlannerResultV3) ExecutableRecipeV3 {
 	}
 	if recipe.hasVersion5Fields() {
 		recipe.Version = executableRecipeVersionCopyMPEGTSV3
+	}
+	if recipe.hasVersion6Fields() {
+		recipe.Version = executableRecipeVersionRenditionTracksV3
 	}
 	return recipe
 }
@@ -161,22 +179,29 @@ func (r ExecutableRecipeV3) hasVersion5Fields() bool {
 	return r.CopyVideoMPEGTS
 }
 
+func (r ExecutableRecipeV3) hasVersion6Fields() bool {
+	return len(r.SubtitleRenditionTracks) > 0 || !r.SubtitleRenditionSource.IsZero()
+}
+
 // Valid reports whether an executable recipe is complete and internally consistent.
 func (r ExecutableRecipeV3) Valid() bool {
-	if r.Version < executableRecipeVersionLegacyV3 || r.Version > executableRecipeVersionCopyMPEGTSV3 || r.PlanID == "" || r.SourceAudioChannels < 0 {
+	if r.Version < executableRecipeVersionLegacyV3 || r.Version > executableRecipeVersionRenditionTracksV3 || r.PlanID == "" || r.SourceAudioChannels < 0 {
 		return false
 	}
 	if (r.Version == executableRecipeVersionLegacyV3 && r.hasVersion2Fields()) ||
 		(r.Version < executableRecipeVersionSourceAudioV3 && r.hasVersion3Fields()) ||
 		(r.Version < executableRecipeVersionSubtitleRenditionV3 && r.hasVersion4Fields()) ||
-		(r.Version < executableRecipeVersionCopyMPEGTSV3 && r.hasVersion5Fields()) {
+		(r.Version < executableRecipeVersionCopyMPEGTSV3 && r.hasVersion5Fields()) ||
+		(r.Version < executableRecipeVersionRenditionTracksV3 && r.hasVersion6Fields()) {
 		return false
 	}
 	if r.CopyVideoMPEGTS && (r.PlayMethod != PlayRemux || r.TargetVideoCodec != codecCopyV3) {
 		return false
 	}
 	hlsRemux := r.PlayMethod == PlayRemux && r.TargetVideoCodec == codecCopyV3
-	if r.SubtitleRendition && ((r.PlayMethod != PlayTranscode && !hlsRemux) || r.SubtitleBurnIn || r.SubtitleTransportTrackIndex < 0) {
+	onDemand := len(r.SubtitleRenditionTracks) > 0
+	if r.SubtitleRendition && ((r.PlayMethod != PlayTranscode && !hlsRemux) || r.SubtitleBurnIn || r.SubtitleTransportTrackIndex < 0 && !onDemand) ||
+		onDemand && (!r.SubtitleRendition || !validSubtitleRenditionTracks(r.SubtitleRenditionTracks)) {
 		return false
 	}
 	hasToneMapField := r.ToneMapPolicy != "" || r.ToneMapMode != "" || r.ToneMapSourceKind != "" || r.ToneMapRecipeVersion != "" || r.ToneMapPreflightRequired || !r.ToneMapSourceRevision.IsZero()
@@ -241,6 +266,26 @@ func (r ExecutableRecipeV3) PlannerResult(plan *PlanV3) PlannerResultV3 {
 		SubtitleBurnIn:              r.SubtitleBurnIn,
 		SubtitleCodec:               r.SubtitleCodec,
 		SubtitleRendition:           r.SubtitleRendition,
+		SubtitleRenditionTracks:     slices.Clone(r.SubtitleRenditionTracks),
+		SubtitleRenditionSource:     r.SubtitleRenditionSource,
 		DownloadedSubtitleID:        r.DownloadedSubtitleID,
 	}
+}
+
+// validSubtitleRenditionTracks reports whether on-demand rendition tracks can
+// be served: each names a container track, once, and at most one is the
+// default.
+func validSubtitleRenditionTracks(tracks []SubtitleRenditionTrack) bool {
+	seen := make(map[uint64]bool, len(tracks))
+	defaults := 0
+	for _, track := range tracks {
+		if track.TrackNumber == 0 || seen[track.TrackNumber] {
+			return false
+		}
+		seen[track.TrackNumber] = true
+		if track.Default {
+			defaults++
+		}
+	}
+	return defaults <= 1
 }

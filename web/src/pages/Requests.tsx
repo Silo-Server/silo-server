@@ -3,6 +3,8 @@ import { Navigate, useSearchParams } from "react-router";
 import { Film, Info, Library, RefreshCw, Tv } from "lucide-react";
 import BrandCarousel from "@/components/BrandCarousel";
 import { CancelRequestDialog } from "@/components/CancelRequestDialog";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import LibraryItemLink from "@/components/LibraryItemLink";
 import MediaCarousel from "@/components/MediaCarousel";
 import { RequestDownloadProgress } from "@/components/RequestDownloadProgress";
 import RequestPosterCard from "@/components/RequestPosterCard";
@@ -20,8 +22,10 @@ import {
   useDiscoverNetworks,
   useDiscoverStudios,
   useMyMediaRequests,
+  useRemoveFailedMediaRequest,
   useRequestDiscovery,
 } from "@/hooks/queries/useRequests";
+import { useProfileRequestsAllowed } from "@/hooks/useCanRequest";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useWatchlistTitleToggle } from "@/hooks/useWatchlistTitleToggle";
 import { useUICustomization } from "@/hooks/useUICustomization";
@@ -29,6 +33,7 @@ import { formatRelativeTime } from "@/lib/date";
 import { formatDate } from "@/lib/datetime";
 import {
   canCancelOwnRequest,
+  canRemoveOwnRequest,
   formatMediaType,
   formatRequestDate,
   formatSeasonList,
@@ -40,8 +45,10 @@ import {
   tmdbImageURL,
   type RequestDisplayState,
 } from "@/lib/mediaRequests";
+import { useSectionTitle } from "@/lib/sectionTitle";
 import { carouselCardWidthClasses } from "@/lib/uiCustomization";
 import { cn } from "@/lib/utils";
+import { numberText, useT, type MessageKey } from "@/i18n";
 
 type RequestTab = "discover" | "yours";
 type RequestGroupKey = "attention" | "on_the_way" | "in_library" | "cancelled";
@@ -51,34 +58,24 @@ const PAGE_GUTTER = "px-4 sm:px-6 lg:px-10 xl:px-12";
 
 // Grouped by what happens next: problems first, then what is still coming,
 // then what has arrived. A cancelled request needs nothing, so it goes last.
-const REQUEST_GROUPS: Array<{ key: RequestGroupKey; title: string }> = [
-  { key: "attention", title: "Needs attention" },
-  { key: "on_the_way", title: "On the way" },
-  { key: "in_library", title: "In your library" },
-  { key: "cancelled", title: "Cancelled" },
+const REQUEST_GROUPS: Array<{ key: RequestGroupKey; titleKey: MessageKey }> = [
+  { key: "attention", titleKey: "web.requests.hub.needsAttention" },
+  { key: "on_the_way", titleKey: "web.requests.hub.onTheWay" },
+  { key: "in_library", titleKey: "web.requests.hub.inLibrary" },
+  { key: "cancelled", titleKey: "web.requests.hub.cancelled" },
 ];
 
 // A request can be cancelled until it is sent to the download automation:
 // while pending, and while approved but not yet sent (canCancelOwnRequest).
-const STATUS_HELP: Array<{ state: RequestDisplayState; description: string }> = [
-  {
-    state: "pending",
-    description:
-      "Waiting for an admin. You can cancel it until it is sent to the download automation.",
-  },
-  {
-    state: "approved",
-    description: "Approved, not yet sent to the download automation. You can still cancel it.",
-  },
-  { state: "processing", description: "Sent to the download automation." },
-  {
-    state: "partially_available",
-    description: "Some episodes of the requested seasons have arrived.",
-  },
-  { state: "available", description: "In your library and ready to watch." },
-  { state: "declined", description: "An admin declined it." },
-  { state: "cancelled", description: "Withdrawn before it was sent to the download automation." },
-  { state: "failed", description: "Silo or the download automation hit an error." },
+const STATUS_HELP: Array<{ state: RequestDisplayState; descriptionKey: MessageKey }> = [
+  { state: "pending", descriptionKey: "web.requests.hub.statusPending" },
+  { state: "approved", descriptionKey: "web.requests.hub.statusApproved" },
+  { state: "processing", descriptionKey: "web.requests.hub.statusProcessing" },
+  { state: "partially_available", descriptionKey: "web.requests.hub.statusPartial" },
+  { state: "available", descriptionKey: "web.requests.hub.statusAvailable" },
+  { state: "declined", descriptionKey: "web.requests.hub.statusDeclined" },
+  { state: "cancelled", descriptionKey: "web.requests.hub.statusCancelled" },
+  { state: "failed", descriptionKey: "web.requests.hub.statusFailed" },
 ];
 
 /**
@@ -103,8 +100,42 @@ export default function Requests() {
 }
 
 function RequestsHub() {
-  useDocumentTitle("Requests");
+  const t = useT();
+  useDocumentTitle(t("web.requests.title"));
+  const profileRequestsAllowed = useProfileRequestsAllowed();
+  if (!profileRequestsAllowed) return <BlockedProfileRequests />;
+  return <RequestsTabs />;
+}
 
+/**
+ * The hub for a profile the household manager blocked from requests: no
+ * discovery or search, only the requests this profile made (the server
+ * narrows the list to them), which it may still cancel. Titles are not
+ * linked, as their pages are discovery.
+ */
+function BlockedProfileRequests() {
+  const t = useT();
+  const mine = useMyMediaRequests({ limit: 100 });
+  return (
+    <div className="pb-10">
+      <header className={cn(PAGE_GUTTER, "pt-6 pb-4")}>
+        <h1 className="text-foreground text-2xl font-bold tracking-tight sm:text-3xl">
+          {t("web.requests.title")}
+        </h1>
+        <p className="text-muted-foreground mt-1 text-sm">{t("web.requests.hub.blockedIntro")}</p>
+      </header>
+      <YoursTab
+        requests={mine.data ?? []}
+        isLoading={mine.isLoading}
+        isError={mine.isError}
+        onRetry={() => void mine.refetch()}
+      />
+    </div>
+  );
+}
+
+function RequestsTabs() {
+  const t = useT();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = normalizeRequestTab(searchParams.get("tab"));
   const mine = useMyMediaRequests({ limit: 100 });
@@ -126,17 +157,14 @@ function RequestsHub() {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="text-foreground text-2xl font-bold tracking-tight sm:text-3xl">
-              Requests
+              {t("web.requests.title")}
             </h1>
-            <p className="text-muted-foreground mt-1 text-sm">
-              Ask for movies and series that aren&rsquo;t in the library yet, and follow your
-              requests.
-            </p>
+            <p className="text-muted-foreground mt-1 text-sm">{t("web.requests.hub.intro")}</p>
           </div>
           {/* Search is the app's own search page, which lists titles to request. */}
           <div className="w-full sm:w-72">
             <SearchBar
-              placeholder="Search movies and series"
+              placeholder={t("web.requests.hub.search")}
               buildSearchHref={(query) => requestSearchHref(query)}
             />
           </div>
@@ -147,12 +175,12 @@ function RequestsHub() {
         <div className={PAGE_GUTTER}>
           <TabsList variant="line" className="border-border w-full justify-start border-b">
             <TabsTrigger value="discover" className="flex-none px-3">
-              Discover
+              {t("web.requests.hub.discover")}
             </TabsTrigger>
             <TabsTrigger value="yours" className="flex-none px-3">
-              Yours
+              {t("web.requests.hub.yours")}
               {totalMine > 0 && (
-                <span className="bg-muted/80 text-muted-foreground ml-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-semibold tabular-nums">
+                <span className="bg-muted/80 text-muted-foreground ms-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-semibold tabular-nums">
                   {totalMine}
                 </span>
               )}
@@ -179,6 +207,8 @@ function RequestsHub() {
 }
 
 function DiscoverTab() {
+  const t = useT();
+  const sectionTitle = useSectionTitle();
   const discovery = useRequestDiscovery();
   const watchlist = useWatchlistTitleToggle();
 
@@ -187,16 +217,14 @@ function DiscoverTab() {
   if (discovery.isError) {
     return (
       <div className={cn(PAGE_GUTTER, "flex flex-col items-center gap-4 py-16 text-center")}>
-        <p className="text-muted-foreground text-sm">
-          TMDB couldn&rsquo;t be reached, so there is nothing to discover right now.
-        </p>
+        <p className="text-muted-foreground text-sm">{t("web.requests.hub.discoverFailed")}</p>
         <button
           type="button"
           onClick={() => void discovery.refetch()}
           className="text-primary hover:text-primary/80 inline-flex items-center gap-2 text-sm font-medium"
         >
           <RefreshCw className="h-4 w-4" />
-          Retry
+          {t("common.retry")}
         </button>
       </div>
     );
@@ -209,7 +237,7 @@ function DiscoverTab() {
     <div className="space-y-10">
       {(discovery.data?.rows ?? []).map((row) => {
         if (isBrandSourceType(row.type)) {
-          return <BrandRow key={row.key} type={row.type} title={row.title} />;
+          return <BrandRow key={row.key} type={row.type} title={sectionTitle(row)} />;
         }
         const section = sections.get(row.key);
         return section ? (
@@ -255,10 +283,11 @@ function DiscoverRow({
   section: RequestDiscoverySection;
   watchlist: ReturnType<typeof useWatchlistTitleToggle>;
 }) {
+  const sectionTitle = useSectionTitle();
   if (section.results.length === 0) return null;
   return (
     <MediaCarousel
-      title={section.title}
+      title={sectionTitle(section)}
       // A row trimmed to its size has more titles even on a one-page source.
       viewAllHref={
         section.total_pages > 1 || section.total_results > section.results.length
@@ -290,11 +319,16 @@ function YoursTab({
   isLoading: boolean;
   isError: boolean;
   onRetry: () => void;
-  onBrowse: () => void;
+  /** Opens Discover; absent when the profile may not discover or request. */
+  onBrowse?: () => void;
 }) {
+  const t = useT();
   const cancelRequest = useCancelMediaRequest();
   const [cancelTarget, setCancelTarget] = useState<MediaRequest | null>(null);
   const cancellingID = cancelRequest.isPending ? cancelRequest.variables : undefined;
+  const removeRequest = useRemoveFailedMediaRequest();
+  const [removeTarget, setRemoveTarget] = useState<MediaRequest | null>(null);
+  const removingID = removeRequest.isPending ? removeRequest.variables : undefined;
   const groups = useMemo(() => groupRequests(requests), [requests]);
 
   let body;
@@ -303,42 +337,45 @@ function YoursTab({
   } else if (isError) {
     body = (
       <div className="flex flex-col items-center gap-4 py-16 text-center">
-        <p className="text-muted-foreground text-sm">Couldn&rsquo;t load your requests.</p>
+        <p className="text-muted-foreground text-sm">{t("web.requests.hub.loadFailed")}</p>
         <button
           type="button"
           onClick={onRetry}
           className="text-primary hover:text-primary/80 inline-flex items-center gap-2 text-sm font-medium"
         >
           <RefreshCw className="h-4 w-4" />
-          Retry
+          {t("common.retry")}
         </button>
       </div>
     );
   } else if (requests.length === 0) {
     body = (
       <div className="flex flex-col items-center gap-3 py-16 text-center">
-        <p className="text-foreground text-sm font-medium">You haven&rsquo;t requested anything.</p>
-        <p className="text-muted-foreground max-w-sm text-sm">
-          Find a title on Discover or with search, and request it from its page. It shows up here
-          with its status.
-        </p>
-        <Button variant="outline" size="sm" onClick={onBrowse}>
-          Browse Discover
-        </Button>
+        <p className="text-foreground text-sm font-medium">{t("web.requests.hub.empty")}</p>
+        {onBrowse ? (
+          <>
+            <p className="text-muted-foreground max-w-sm text-sm">
+              {t("web.requests.hub.emptyHint")}
+            </p>
+            <Button variant="outline" size="sm" onClick={onBrowse}>
+              {t("web.requests.hub.browseDiscover")}
+            </Button>
+          </>
+        ) : null}
       </div>
     );
   } else {
     body = (
       <div className="space-y-8">
-        {REQUEST_GROUPS.map(({ key, title }) => {
+        {REQUEST_GROUPS.map(({ key, titleKey }) => {
           const items = groups[key];
           if (items.length === 0) return null;
           const headingID = `requests-group-${key}`;
           return (
             <section key={key} aria-labelledby={headingID} className="space-y-1">
               <h2 id={headingID} className="text-foreground text-lg font-semibold">
-                {title}
-                <span className="text-muted-foreground ml-2 text-sm font-normal tabular-nums">
+                {t(titleKey)}
+                <span className="text-muted-foreground ms-2 text-sm font-normal tabular-nums">
                   {items.length}
                 </span>
               </h2>
@@ -347,11 +384,16 @@ function YoursTab({
                   <RequestRow
                     key={request.id}
                     request={request}
+                    linkTitle={onBrowse !== undefined}
                     // Every request on this tab is the account's own.
                     onCancel={
                       canCancelOwnRequest(request) ? () => setCancelTarget(request) : undefined
                     }
                     isCancelling={cancellingID === request.id}
+                    onRemove={
+                      canRemoveOwnRequest(request) ? () => setRemoveTarget(request) : undefined
+                    }
+                    isRemoving={removingID === request.id}
                   />
                 ))}
               </ul>
@@ -366,7 +408,7 @@ function YoursTab({
     <div className={cn(PAGE_GUTTER, "max-w-5xl space-y-6")}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-muted-foreground text-sm">
-          Requests from your account, grouped by what happens next.
+          {onBrowse ? t("web.requests.hub.yoursIntro") : t("web.requests.hub.yoursIntroProfile")}
         </p>
         <StatusHelp />
       </div>
@@ -382,60 +424,93 @@ function YoursTab({
         }}
         isPending={cancelRequest.isPending}
       />
+      <ConfirmDialog
+        open={removeTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setRemoveTarget(null);
+        }}
+        title={t("web.requests.remove.title")}
+        description={t("web.requests.remove.description", { title: removeTarget?.title ?? "" })}
+        confirmLabel={t("web.requests.remove.action")}
+        cancelLabel={t("web.requests.cancel.keep")}
+        variant="destructive"
+        onConfirm={() => {
+          if (removeTarget) removeRequest.mutate(removeTarget.id);
+        }}
+        isPending={removeRequest.isPending}
+      />
     </div>
   );
 }
 
 function RequestRow({
   request,
+  linkTitle,
   onCancel,
   isCancelling,
+  onRemove,
+  isRemoving,
 }: {
   request: MediaRequest;
+  /** Links the poster and title to the title's page. */
+  linkTitle: boolean;
   /** Offered only while the request can still be withdrawn. */
   onCancel?: () => void;
   isCancelling: boolean;
+  /** Offered only on a failed request that delivered nothing. */
+  onRemove?: () => void;
+  isRemoving: boolean;
 }) {
+  const t = useT();
   const state = requestDisplayState(request.status, request.outcome, request.state);
   const href = requestDetailHref(request.media_type, request.tmdb_id);
   const poster = tmdbImageURL(request.poster_path, "w154");
   const MediaIcon = request.media_type === "series" ? Tv : Film;
   const details = [
     formatMediaType(request.media_type),
-    request.year ? String(request.year) : "",
+    request.year ? numberText(request.year) : "",
     request.seasons?.length ? formatSeasonList(request.seasons) : "",
     state === "partially_available" && request.season_progress?.length
       ? formatSeasonProgress(request.season_progress)
       : "",
   ].filter(Boolean);
   const updated = lastChange(request);
+  const posterClass = "bg-muted relative h-[72px] w-12 shrink-0 overflow-hidden rounded-md";
+  const posterContent = poster ? (
+    <img src={poster} alt="" loading="lazy" className="h-full w-full object-cover" />
+  ) : (
+    <span className="text-muted-foreground flex h-full items-center justify-center">
+      <MediaIcon className="h-4 w-4" />
+    </span>
+  );
 
   return (
     <li className="flex gap-3 py-3 sm:gap-4" data-request-id={request.id}>
-      <ViewTransitionLink
-        to={href}
-        tabIndex={-1}
-        aria-hidden
-        className="bg-muted relative h-[72px] w-12 shrink-0 overflow-hidden rounded-md"
-      >
-        {poster ? (
-          <img src={poster} alt="" loading="lazy" className="h-full w-full object-cover" />
-        ) : (
-          <span className="text-muted-foreground flex h-full items-center justify-center">
-            <MediaIcon className="h-4 w-4" />
-          </span>
-        )}
-      </ViewTransitionLink>
+      {linkTitle ? (
+        <ViewTransitionLink to={href} tabIndex={-1} aria-hidden className={posterClass}>
+          {posterContent}
+        </ViewTransitionLink>
+      ) : (
+        <div aria-hidden className={posterClass}>
+          {posterContent}
+        </div>
+      )}
 
       <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <ViewTransitionLink
-              to={href}
-              className="text-foreground min-w-0 truncate text-sm font-semibold hover:underline"
-            >
-              {request.title}
-            </ViewTransitionLink>
+            {linkTitle ? (
+              <ViewTransitionLink
+                to={href}
+                className="text-foreground min-w-0 truncate text-sm font-semibold hover:underline"
+              >
+                {request.title}
+              </ViewTransitionLink>
+            ) : (
+              <span className="text-foreground min-w-0 truncate text-sm font-semibold">
+                {request.title}
+              </span>
+            )}
             {state ? <RequestStatusBadge state={state} /> : null}
           </div>
           <p className="text-muted-foreground text-xs">{details.join(" · ")}</p>
@@ -446,21 +521,26 @@ function RequestRow({
             />
           ) : null}
           <p className="text-muted-foreground text-xs">
-            Requested{" "}
-            <time dateTime={request.created_at} title={formatDate(request.created_at, "medium")}>
-              {formatRequestDate(request)}
-            </time>
-            {updated ? (
-              <>
-                {" · "}Updated{" "}
+            {t(updated ? "web.requests.hub.requestedUpdated" : "web.requests.hub.requested", {
+              created: formatRequestDate(request),
+              updated: updated ?? "",
+              createdTime: (chunks) => (
+                <time
+                  dateTime={request.created_at}
+                  title={formatDate(request.created_at, "medium")}
+                >
+                  {chunks}
+                </time>
+              ),
+              updatedTime: (chunks) => (
                 <time
                   dateTime={request.updated_at}
                   title={formatDate(request.updated_at, "medium")}
                 >
-                  {updated}
+                  {chunks}
                 </time>
-              </>
-            ) : null}
+              ),
+            })}
           </p>
           {request.last_error ? (
             <p className="text-destructive text-xs leading-snug break-words">
@@ -468,22 +548,22 @@ function RequestRow({
             </p>
           ) : request.outcome_reason ? (
             <p className="text-muted-foreground text-xs leading-snug break-words">
-              Reason: {request.outcome_reason}
+              {t("web.requests.hub.reason", { reason: request.outcome_reason })}
             </p>
           ) : null}
         </div>
 
-        {onCancel || request.library_content_id ? (
+        {onCancel || onRemove || request.library_content_id ? (
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             {request.library_content_id ? (
               <Button asChild variant="outline" size="sm">
-                <ViewTransitionLink
-                  to={`/item/${encodeURIComponent(request.library_content_id)}`}
-                  aria-label={`Open ${request.title} in library`}
+                <LibraryItemLink
+                  contentId={request.library_content_id}
+                  aria-label={t("web.requests.hub.openInLibraryFor", { title: request.title })}
                 >
                   <Library className="h-3.5 w-3.5" aria-hidden />
-                  Open in library
-                </ViewTransitionLink>
+                  {t("web.requests.hub.openInLibrary")}
+                </LibraryItemLink>
               </Button>
             ) : null}
             {onCancel ? (
@@ -493,9 +573,21 @@ function RequestRow({
                 size="sm"
                 onClick={onCancel}
                 disabled={isCancelling}
-                aria-label={`Cancel request for ${request.title}`}
+                aria-label={t("web.requests.cancel.actionFor", { title: request.title })}
               >
-                Cancel request
+                {t("web.requests.cancel.action")}
+              </Button>
+            ) : null}
+            {onRemove ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onRemove}
+                disabled={isRemoving}
+                aria-label={t("web.requests.remove.actionFor", { title: request.title })}
+              >
+                {t("web.requests.remove.action")}
               </Button>
             ) : null}
           </div>
@@ -506,12 +598,13 @@ function RequestRow({
 }
 
 function StatusHelp() {
+  const t = useT();
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="sm" className="text-muted-foreground -ml-2 sm:-mr-2 sm:ml-0">
+        <Button variant="ghost" size="sm" className="text-muted-foreground -ms-2 sm:ms-0 sm:-me-2">
           <Info className="h-4 w-4" aria-hidden />
-          What the statuses mean
+          {t("web.requests.hub.statusHelp")}
         </Button>
       </PopoverTrigger>
       <PopoverContent
@@ -519,13 +612,13 @@ function StatusHelp() {
         collisionPadding={16}
         className="w-80 max-w-[calc(100vw-2rem)] p-4"
       >
-        <dl className="space-y-2.5" aria-label="Request statuses">
-          {STATUS_HELP.map(({ state, description }) => (
+        <dl className="space-y-2.5" aria-label={t("web.requests.hub.statuses")}>
+          {STATUS_HELP.map(({ state, descriptionKey }) => (
             <div key={state} className="grid grid-cols-[7.5rem_minmax(0,1fr)] items-start gap-3">
               <dt>
                 <RequestStatusBadge state={state} className="max-w-full" />
               </dt>
-              <dd className="text-muted-foreground text-xs leading-5">{description}</dd>
+              <dd className="text-muted-foreground text-xs leading-5">{t(descriptionKey)}</dd>
             </div>
           ))}
         </dl>

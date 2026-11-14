@@ -180,6 +180,12 @@ func boundedMatchDecision(decision *MatchDecision) *MatchDecision {
 		CandidateCount: decision.CandidateCount,
 		Threshold:      decision.Threshold,
 	}
+	// A caller can reclassify a rejected decision after it is built; the
+	// rejection rule only describes a candidate_rejected outcome.
+	if decision.Outcome == MatchOutcomeCandidateRejected {
+		bounded.Rejection = MatchRejection(truncateMatchFailureField(string(decision.Rejection), 64))
+		bounded.RequiredScore = decision.RequiredScore
+	}
 	for _, candidate := range decision.TopCandidates {
 		if len(bounded.TopCandidates) == 3 {
 			break

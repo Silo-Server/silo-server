@@ -9,6 +9,7 @@ import {
 import { captureProfileRequestContext } from "@/api/client";
 import { clearTourSuppressed, isTourSuppressed } from "@/lib/onboarding";
 import { LocalErrorBoundary } from "@/components/LocalErrorBoundary";
+import { useT } from "@/i18n";
 
 // Profiles that have finished onboarding do not need the tour's UI or settings controls.
 const TourHost = lazy(() => import("./TourHost").then((module) => ({ default: module.TourHost })));
@@ -38,6 +39,7 @@ function ProfileOnboardingGate({ children }: { children: ReactNode }) {
   // Sticky per mount: once the tour is dismissed we stop showing it even
   // before the state refetch lands.
   const [dismissed, setDismissed] = useState(false);
+  const t = useT();
 
   const shouldShow = enabled && !dismissed && state.data !== undefined && !state.data.done;
 
@@ -64,7 +66,7 @@ function ProfileOnboardingGate({ children }: { children: ReactNode }) {
   return (
     <>
       {children}
-      {progress.isError && <div role="alert">Progress could not be saved. Reload to continue.</div>}
+      {progress.isError && <div role="alert">{t("web.onboarding.gate.progressFailed")}</div>}
       {shouldShow && !suppressed && flow.data && flow.data.steps.length > 0 && (
         <LocalErrorBoundary>
           <Suspense fallback={null}>

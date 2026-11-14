@@ -1,9 +1,7 @@
 # API Keys API
 
 > **API lifecycle:** this documents the stable `/api/v2` native contract, which locks with Silo
-> 1.0. The frozen alpha `/api/v1` key routes are summarized in
-> [Bridge note](#bridge-note) and are retired after the pre-1.0 bridge window. See
-> [the native API contract](architecture/api-contract.md).
+> 1.0. See [the native API contract](architecture/api-contract.md).
 
 API keys are long-lived credentials for scripts and integrations. A key is a
 string with an `sa_` prefix and is sent the same way as a JWT access token:
@@ -25,7 +23,11 @@ raise its owner's shared allowance.
 By default a key is **unscoped** and can reach every route its owner can. A key
 created with `scopes` is an allowlist credential instead: the auth middleware
 admits it only to the routes those scopes name and answers `403 permission_denied`
-everywhere else, including routes added after the key was issued.
+everywhere else, including routes added after the key was issued. A scoped key
+must send the route's plain path: a path that percent-encodes a `/`, a `.`, or
+another character that needs no encoding, or that has a `.` or `..` segment, a
+doubled slash, or a trailing slash, is refused with the same `403`, because the
+router would not read it as the route the allowlist checked.
 
 Scopes only narrow. They never grant, and they never bypass the owner's role
 check. `admin:users` on a key owned by a non-admin account still cannot manage
@@ -39,18 +41,20 @@ credential: provisioning and managing ordinary accounts is in scope.
 |------------------------------------------|--------|
 | `POST` with `role: "admin"` | `403 permission_denied` |
 | `PUT` with `role: "admin"` | `403 permission_denied` |
-| `PUT` with `password` or `role` when the target account is currently an admin | `403 permission_denied` |
+| `PUT` with `password`, `email`, `role` or `break_glass` when the target account is currently an admin | `403 permission_denied` |
 | `POST` with `password` and a non-admin `role` | allowed |
 | `PUT` with `password` when the target account is not an admin | allowed |
 
-Unscoped keys and JWT sessions are unaffected.
+The frozen v1 routes refuse the same writes with `403 insufficient_scope`; v1 has no
+`break_glass` member. Unscoped keys and JWT sessions are unaffected.
 
 Discover the scopes a server understands with the capability endpoint below
 rather than sniffing the server version.
 
 ## Admin key management
 
-Admin key management lives under `/api/v2/admin/api-keys`:
+Admin key management lives under `/api/v2/admin/api-keys`, plus one account's key list under
+`/api/v2/admin/users`:
 
 | Method | Path | Result |
 |---|---|---|
@@ -60,6 +64,7 @@ Admin key management lives under `/api/v2/admin/api-keys`:
 | POST | `/admin/api-keys` | `201` creation response containing the full key and canonical `Location` |
 | PUT | `/admin/api-keys/{id}/tier` | Conditional tier update returning canonical metadata and `ETag` |
 | DELETE | `/admin/api-keys/{id}` | Conditional deletion returning `204` without a body |
+| GET | `/admin/users/{id}/api-keys` | One account's keys, as a bounded metadata collection with cursor continuation |
 
 These operations require acting-admin authority. Mutations retain the demo
 restriction; reads do not. Scoped API keys
@@ -161,7 +166,7 @@ answers any owner.
 | Area | Paths under `/api/v2` |
 |---|---|
 | Live sessions | `/admin/sessions`, `/admin/sessions/summary`, `/admin/sessions/capabilities`, `/admin/sessions/command-capabilities`, `/events/capabilities` |
-| History and stats | `/admin/playback-history`, `/admin/playback-history/capabilities`, `/admin/stats/playback-activity`, `/admin/stats/top-activity`, `/admin/stats/downloads` |
+| History and stats | `/admin/playback-history`, `/admin/playback-history/capabilities`, `/admin/stats/timeseries`, `/admin/stats/playback-activity`, `/admin/stats/top-activity`, `/admin/stats/downloads` |
 | Accounts | `/admin/users`, `/admin/users/capabilities`, `/admin/users/{id}`, and `/admin/users/{id}/` `profiles`, `devices`, `ips`, `downloads`, `downloads/summary`, `watch-summary` |
 | Devices and addresses | `/admin/devices`, `/admin/devices/capabilities`, `/admin/ips` |
 | Downloads | `/admin/downloads/entries`, `/admin/downloads/devices`, `/admin/downloads/preparations`, `/admin/downloads/preparations/capabilities` |
@@ -193,20 +198,3 @@ four hours. The key's revision and scope are rechecked every 15 seconds; see
 `GET /api/v2/admin/sessions/command-capabilities`. It grants no reads beyond
 that; combine it with `admin:monitor:read` to find the sessions to act on.
 
-## Bridge note
-
-The frozen alpha surface serves the same features at `/api/v1/api-keys`,
-`/api/v1/api-keys/scopes`, `/api/v1/admin/api-keys`,
-`/api/v1/admin/users/{userId}/api-keys`, and `/api/v1/admin/api-keys/{id}/tier`. It
-uses integer IDs, spells the tier field `tier` rather than `rate_tier`, has no
-cursor pagination, and does not use `ETag`/`If-Match` preconditions. V1 answers
-the admin-boundary refusals under [Scopes](#scopes) with `403 insufficient_scope`
-rather than `permission_denied`. Those routes are
-frozen: no feature work lands on them, and Silo 1.0 answers the whole `/api/v1`
-namespace with `410 Gone` and the `client_upgrade_required` problem code. Build
-against `/api/v2`. Both `POST /api/v1/api-keys` and `POST /api/v2/api-keys` require
-an admin account acting through its primary profile, as described under
-[Personal key management](#personal-key-management); v1 refuses anyone else with
-`403 forbidden` before reading the body. Applying the primary-profile rule to v1 is a
-critical bridge fix: before it, a child profile on an admin account could mint a key
-and use it to open PIN-protected profiles.

@@ -5,15 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"sync"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/google/uuid"
 
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/clientmetadata"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/streamlocation"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -299,11 +297,11 @@ type ClientInfo struct {
 // identity, so clamping only at session creation would let a client's oversized
 // header through to both.
 func (c ClientInfo) Normalized() ClientInfo {
-	c.Name = normalizeClientMetadataValue(c.Name, 128)
-	c.Version = normalizeClientMetadataValue(c.Version, 64)
-	c.Build = normalizeClientMetadataValue(c.Build, 64)
-	c.Channel = normalizeClientMetadataValue(c.Channel, 32)
-	c.UserAgent = normalizeClientMetadataValue(c.UserAgent, 512)
+	c.Name = normalizeClientMetadataValue(c.Name, clientmetadata.Name)
+	c.Version = normalizeClientMetadataValue(c.Version, clientmetadata.Version)
+	c.Build = normalizeClientMetadataValue(c.Build, clientmetadata.Build)
+	c.Channel = normalizeClientMetadataValue(c.Channel, clientmetadata.Channel)
+	c.UserAgent = normalizeClientMetadataValue(c.UserAgent, clientmetadata.UserAgent)
 	c.DeviceID = normalizeClientMetadataValue(c.DeviceID, 128)
 	c.DevicePlatform = normalizeClientMetadataValue(c.DevicePlatform, 40)
 	return c
@@ -383,6 +381,7 @@ type SessionManager struct {
 	lifecycleHooks       []LifecycleHooks
 	compatActivityReader SessionActivityReader
 	compatExpiryClaimer  SessionExpiryClaimer
+	compatAdminEnd       CompatAdminEnd
 	// deliveryActivityReader reports media that another node served for a
 	// remote-transport session. See SetDeliveryActivityReader.
 	deliveryActivityReader SessionActivityReader
@@ -451,6 +450,21 @@ const (
 	// round trip (issue #3202). docs/architecture/playback-protocol-v3.md
 	// §2.5 publishes it to clients.
 	StartupSessionGrace = 90 * time.Second
+
+	// PausedStreamSlotGrace is how long a paused session keeps holding one of
+	// its user's stream slots without activity. Clients report progress every
+	// 10 seconds while paused, but a browser throttles the timers of a hidden
+	// tab to about once a minute, so this outlasts that. A paused session quiet
+	// for longer has lost its player (a closed tab, a killed app): it frees the
+	// stream slot, while cleanup still keeps it for DefaultPausedSessionGrace so
+	// a returning client can resume (#243). Its transcode slot stays held until
+	// then, because its encoder does.
+	PausedStreamSlotGrace = 2 * time.Minute
+
+	// noPausedSlotCap keeps a paused session in a count for its whole paused
+	// grace. The transcode count uses it: a quiet paused session keeps its
+	// encoder until cleanup, so it keeps that slot too.
+	noPausedSlotCap time.Duration = 0
 
 	// remoteTransportIdleGrace is the floor on the idle windows for a session
 	// whose media is served by another node. See remoteTransportGrace: it must
@@ -544,43 +558,7 @@ func (m *SessionManager) AddFinishHook(fn func(context.Context, *Session)) {
 }
 
 func normalizeClientMetadataValue(value string, maxLen int) string {
-	// A text column takes neither invalid UTF-8 nor a NUL, and Postgres refuses
-	// the whole statement for either. The per-node session upserts share one
-	// transaction, so a single malformed client string would stop that entire
-	// node from reconciling — not just its own row — until the session goes
-	// away. Both scrubs are needed: NUL is perfectly valid UTF-8, so
-	// ToValidUTF8 leaves it, and a v3 start body can carry one as the JSON
-	// escape (headers cannot — net/http rejects bytes below 0x20).
-	// Control characters are stripped wholesale rather than just NUL: none of
-	// them belong in an identity label rendered in the admin UI and written to
-	// structured logs.
-	if !utf8.ValidString(value) {
-		value = strings.ToValidUTF8(value, "")
-	}
-	if strings.ContainsFunc(value, unicode.IsControl) {
-		value = strings.Map(func(r rune) rune {
-			if unicode.IsControl(r) {
-				return -1
-			}
-			return r
-		}, value)
-	}
-	value = strings.TrimSpace(value)
-	if maxLen <= 0 || len(value) <= maxLen {
-		return value
-	}
-	// Clamp by runes, not bytes. These bounds are published to clients as JSON
-	// Schema maxLength, which counts characters — a byte clamp would silently
-	// cut a value the contract calls valid, and cutting mid-rune would produce
-	// exactly the invalid UTF-8 scrubbed above.
-	runes := 0
-	for offset := range value {
-		if runes == maxLen {
-			return value[:offset]
-		}
-		runes++
-	}
-	return value
+	return clientmetadata.Normalize(value, maxLen)
 }
 
 // StartSession creates a new playback session using the same file as both the
@@ -2144,7 +2122,7 @@ func (m *SessionManager) activeCountExcludingLocked(userID int, excludeSessionID
 		if excludeSessionID != "" && s.ID == excludeSessionID {
 			continue
 		}
-		if s.UserID == userID && m.countsTowardLimitsLocked(s, now) {
+		if s.UserID == userID && m.countsTowardLimitsLocked(s, now, PausedStreamSlotGrace) {
 			count++
 		}
 	}
@@ -2163,7 +2141,7 @@ func (m *SessionManager) transcodeCountExcludingLocked(userID int, excludeSessio
 		if excludeSessionID != "" && s.ID == excludeSessionID {
 			continue
 		}
-		if s.UserID == userID && (s.PlayMethod == PlayTranscode || s.replacementPlayMethod == PlayTranscode) && m.countsTowardLimitsLocked(s, now) {
+		if s.UserID == userID && (s.PlayMethod == PlayTranscode || s.replacementPlayMethod == PlayTranscode) && m.countsTowardLimitsLocked(s, now, noPausedSlotCap) {
 			count++
 		}
 	}
@@ -2247,7 +2225,10 @@ func (m *SessionManager) touchSessionLocked(s *Session) {
 	s.UpdatedAt = now
 }
 
-func (m *SessionManager) countsTowardLimitsLocked(s *Session, now time.Time) bool {
+// countsTowardLimitsLocked reports whether s holds one of its user's slots.
+// A positive pausedSlotGrace caps how long a paused session holds the slot
+// after its last activity, below its whole paused grace.
+func (m *SessionManager) countsTowardLimitsLocked(s *Session, now time.Time, pausedSlotGrace time.Duration) bool {
 	if s == nil {
 		return false
 	}
@@ -2264,6 +2245,9 @@ func (m *SessionManager) countsTowardLimitsLocked(s *Session, now time.Time) boo
 		return true
 	}
 	activeGrace, pausedGrace := sessionGrace(s, m.activeGrace, m.pausedGrace)
+	if pausedSlotGrace > 0 {
+		pausedGrace = min(pausedGrace, pausedSlotGrace)
+	}
 	return !m.sessionIsInactiveLocked(s, now, activeGrace, pausedGrace, StartupSessionGrace)
 }
 

@@ -1,5 +1,6 @@
 import { TriangleAlert } from "lucide-react";
 import type { EpisodeListItem } from "@/api/types";
+import { useT } from "@/i18n";
 
 /**
  * Reports whether every file of an episode is one the server could not read
@@ -13,13 +14,14 @@ export function episodeFilesUnreadable(episode: Pick<EpisodeListItem, "files">):
 
 /** Inline marker for an episode whose files can't be played. */
 export default function UnreadableFileBadge({ className = "" }: { className?: string }) {
+  const t = useT();
   return (
     <span
       className={`text-destructive inline-flex items-center gap-1 font-medium ${className}`}
-      title="Silo couldn't read this file. It appears to be empty or damaged."
+      title={t("web.player.unreadableFile.title")}
     >
       <TriangleAlert className="size-3 shrink-0" aria-hidden="true" />
-      Damaged file
+      {t("web.player.unreadableFile.label")}
     </span>
   );
 }

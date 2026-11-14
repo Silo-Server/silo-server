@@ -116,17 +116,22 @@ type SectionOverridesReplaceInput struct {
 // the customization screen: the admin definition with the profile's
 // overrides applied.
 type ProfileSectionSetting struct {
-	ID           string        `json:"id" example:"s-continue-watching"`
-	SectionType  string        `json:"section_type" doc:"The recipe; the set is extensible" example:"continue_watching"`
-	Title        string        `json:"title" doc:"The title this profile sees: its own title override, or the administrator's title" example:"Continue Watching"`
-	DefaultTitle string        `json:"default_title" doc:"The administrator's title for this row; title shows it unless the profile saved a title override. Empty for a section the profile built" example:"Continue Watching"`
-	Featured     bool          `json:"featured" example:"false"`
-	ItemLimit    int           `json:"item_limit" example:"20"`
-	Hidden       bool          `json:"hidden" doc:"Hidden by the profile" example:"false"`
-	IsCustom     bool          `json:"is_custom" doc:"Built by the profile rather than defined by an administrator" example:"false"`
-	Customized   bool          `json:"customized" doc:"An admin section the profile has changed" example:"true"`
-	Position     int           `json:"position" example:"0"`
-	Config       SectionConfig `json:"config,omitzero" doc:"The recipe's effective config; absent when none, {} when explicitly empty"`
+	ID           string `json:"id" example:"s-continue-watching"`
+	SectionType  string `json:"section_type" doc:"The recipe; the set is extensible" example:"continue_watching"`
+	Title        string `json:"title" doc:"The title this profile sees: its own title override, or the administrator's title" example:"Continue Watching"`
+	DefaultTitle string `json:"default_title" doc:"The administrator's title for this row; title shows it unless the profile saved a title override. Empty for a section the profile built" example:"Continue Watching"`
+	// DefaultTitleKey and DefaultTitleArgs describe DefaultTitle as
+	// SectionTitleKey describes Title.
+	DefaultTitleKey  string            `json:"default_title_key,omitempty" doc:"Key of the shared translation catalog message whose English is default_title, under the same rules as title_key: present only while default_title is the server's own text, and absent when an administrator typed it" example:"home.section.continueWatching"`
+	DefaultTitleArgs map[string]string `json:"default_title_args,omitempty" doc:"Values of the default_title_key message's placeholders by name; present only with default_title_key, and absent when the message has none" example:"{\"library\":\"Movies\"}"`
+	Featured         bool              `json:"featured" example:"false"`
+	ItemLimit        int               `json:"item_limit" example:"20"`
+	Hidden           bool              `json:"hidden" doc:"Hidden by the profile" example:"false"`
+	IsCustom         bool              `json:"is_custom" doc:"Built by the profile rather than defined by an administrator" example:"false"`
+	Customized       bool              `json:"customized" doc:"An admin section the profile has changed" example:"true"`
+	Position         int               `json:"position" example:"0"`
+	Config           SectionConfig     `json:"config,omitzero" doc:"The recipe's effective config; absent when none, {} when explicitly empty"`
+	SectionTitleKey
 }
 
 // ProfileSectionSettingCollection is the getProfileSectionSettings envelope.
@@ -356,18 +361,23 @@ func profileSectionSettingsOf(resolved []sections.ResolvedSection) (*ProfileSect
 		if p != nil {
 			return nil, p
 		}
+		defaultKey := sectionTitleKeyOf(s.DefaultTitleKey, s.DefaultTitleArgs)
 		items = append(items, ProfileSectionSetting{
-			ID:           s.ID,
-			SectionType:  string(s.SectionType),
-			Title:        s.Title,
-			DefaultTitle: s.DefaultTitle,
-			Featured:     s.Featured,
-			ItemLimit:    s.ItemLimit,
-			Hidden:       s.Hidden,
-			IsCustom:     s.IsCustom,
-			Customized:   s.Customized,
-			Position:     s.Position,
-			Config:       config,
+			ID:               s.ID,
+			SectionType:      string(s.SectionType),
+			Title:            s.Title,
+			DefaultTitle:     s.DefaultTitle,
+			DefaultTitleKey:  defaultKey.TitleKey,
+			DefaultTitleArgs: defaultKey.TitleArgs,
+			Featured:         s.Featured,
+			ItemLimit:        s.ItemLimit,
+			Hidden:           s.Hidden,
+			IsCustom:         s.IsCustom,
+			Customized:       s.Customized,
+			Position:         s.Position,
+			Config:           config,
+			// Describes title: absent under a title override of the profile's own.
+			SectionTitleKey: sectionTitleKeyOf(s.TitleKey, s.TitleArgs),
 		})
 	}
 	return &ProfileSectionSettingCollectionOutput{Body: ProfileSectionSettingCollection{Collection: NewCollection(items)}}, nil

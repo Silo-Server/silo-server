@@ -6,6 +6,7 @@ import { SettingsSubheading } from "@/components/settings/SettingsSubheading";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useRestartKeys } from "@/hooks/useRestartKeys";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
+import { useT } from "@/i18n";
 import { SaveBar } from "@/components/SaveBar";
 
 import { FieldGroup } from "./FieldGroup";
@@ -37,12 +38,16 @@ const RETENTION_KEYS = [...RETENTION_ESSENTIAL_KEYS, ...RETENTION_ADVANCED_KEYS]
 
 const KEYS = [...SERVER_LOG_KEYS, ...RETENTION_KEYS];
 
+// Example prefixes are the server's own log component names, not prose.
+const QUIET_PREFIXES_EXAMPLE = "metadata, scanner";
+
 /**
  * Settings → Logging: what the server writes to its log, and how much log
  * history the database keeps. Every field is a plain batched setting, so the
  * page saves through the ordinary save bar.
  */
 export default function LoggingSettings() {
+  const t = useT();
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
   const restartKeys = useRestartKeys();
 
@@ -51,7 +56,11 @@ export default function LoggingSettings() {
 
   if (form.isLoading)
     return (
-      <div className="space-y-6" role="status" aria-label="Loading settings">
+      <div
+        className="space-y-6"
+        role="status"
+        aria-label={t("web.admin.settings.fields.loadingSettings")}
+      >
         <Skeleton className="h-8 w-48" />
         <div className="space-y-4">
           <Skeleton className="h-10 w-full" />
@@ -62,33 +71,33 @@ export default function LoggingSettings() {
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full" />
         </div>
-        <span className="sr-only">Loading settings</span>
+        <span className="sr-only">{t("web.admin.settings.fields.loadingSettings")}</span>
       </div>
     );
 
   return (
     <div className="flex h-full flex-col">
-      <SettingsPageHeader title="Logging" />
+      <SettingsPageHeader title={t("web.admin.settings.logging.title")} />
 
       <div className="flex-1 space-y-5">
         <FieldGroup
-          label="Server log"
+          label={t("web.admin.settings.logging.server.group")}
           restartAll={allRestart(SERVER_LOG_KEYS)}
           dirty={anyDirty(SERVER_LOG_KEYS)}
         >
           <SettingField
-            label="Log level"
+            label={t("web.admin.settings.logging.server.level.label")}
             dirty={form.isDirty("server.log_level")}
             type="select"
-            description="Sets the container log's level; Debug is loud, so keep it for chasing a problem. The Server Log page records Info and above either way."
+            description={t("web.admin.settings.logging.server.level.description")}
             value={form.getValue("server.log_level")}
             onChange={(v) => form.setValue("server.log_level", v)}
             restartRequired={restartKeys.has("server.log_level")}
             options={[
-              { value: "debug", label: "Debug" },
-              { value: "info", label: "Info" },
-              { value: "warn", label: "Warn" },
-              { value: "error", label: "Error" },
+              { value: "debug", label: t("web.admin.settings.logging.server.level.debug") },
+              { value: "info", label: t("web.admin.settings.logging.server.level.info") },
+              { value: "warn", label: t("web.admin.settings.logging.server.level.warn") },
+              { value: "error", label: t("web.admin.settings.logging.server.level.error") },
             ]}
           />
           <AdvancedSection
@@ -97,10 +106,10 @@ export default function LoggingSettings() {
             forceOpen={anyDirty(SERVER_LOG_ADVANCED_KEYS)}
           >
             <SettingField
-              label="Quiet log prefixes"
+              label={t("web.admin.settings.logging.server.quiet.label")}
               dirty={form.isDirty("server.log_quiet")}
-              hint="metadata, scanner"
-              description="Drops log lines starting with any of these words."
+              hint={QUIET_PREFIXES_EXAMPLE}
+              description={t("web.admin.settings.logging.server.quiet.description")}
               value={form.getValue("server.log_quiet")}
               onChange={(v) => form.setValue("server.log_quiet", v)}
               restartRequired={restartKeys.has("server.log_quiet")}
@@ -109,22 +118,22 @@ export default function LoggingSettings() {
         </FieldGroup>
 
         <FieldGroup
-          label="Log retention"
-          description="How much log history the database keeps."
+          label={t("web.admin.settings.logging.retention.group")}
+          description={t("web.admin.settings.logging.retention.description")}
           restartAll={allRestart(RETENTION_KEYS)}
           dirty={anyDirty(RETENTION_KEYS)}
         >
           <SettingField
-            label="Delete log entries older than"
+            label={t("web.admin.settings.logging.retention.days.label")}
             dirty={form.isDirty(OPSLOG_RETENTION_DAYS_KEY)}
             type="number"
-            unit="days"
+            unit={t("web.admin.settings.logging.retention.unitDays")}
             value={form.getValue(OPSLOG_RETENTION_DAYS_KEY)}
             onChange={(v) => form.setValue(OPSLOG_RETENTION_DAYS_KEY, v)}
             restartRequired={restartKeys.has(OPSLOG_RETENTION_DAYS_KEY)}
           />
           <SettingField
-            label="Maximum log size"
+            label={t("web.admin.settings.logging.retention.maxSize.label")}
             dirty={form.isDirty(OPSLOG_MAX_SIZE_MB_KEY)}
             type="number"
             unit="MB"
@@ -139,7 +148,7 @@ export default function LoggingSettings() {
             forceOpen={anyDirty(RETENTION_ADVANCED_KEYS)}
           >
             <SettingField
-              label="Maximum log entries"
+              label={t("web.admin.settings.logging.retention.maxRows.label")}
               dirty={form.isDirty(OPSLOG_MAX_ROWS_KEY)}
               type="number"
               value={form.getValue(OPSLOG_MAX_ROWS_KEY)}
@@ -147,26 +156,36 @@ export default function LoggingSettings() {
               restartRequired={restartKeys.has(OPSLOG_MAX_ROWS_KEY)}
             />
 
-            <SettingsSubheading>Permission checks</SettingsSubheading>
+            <SettingsSubheading>
+              {t("web.admin.settings.logging.retention.permissions.heading")}
+            </SettingsSubheading>
             <SettingField
-              label="Delete permission records older than"
+              label={t("web.admin.settings.logging.retention.permissions.days.label")}
               dirty={form.isDirty("policy.decision_log_retention_days")}
               type="number"
-              unit="days"
+              unit={t("web.admin.settings.logging.retention.unitDays")}
               value={form.getValue("policy.decision_log_retention_days")}
               onChange={(v) => form.setValue("policy.decision_log_retention_days", v)}
               restartRequired={restartKeys.has("policy.decision_log_retention_days")}
             />
             <SettingField
-              label="How much to record"
+              label={t("web.admin.settings.logging.retention.permissions.verbosity.label")}
               dirty={form.isDirty("policy.decision_log_verbosity")}
               type="select"
-              description="Full also stores a sample of each request."
+              description={t(
+                "web.admin.settings.logging.retention.permissions.verbosity.description",
+              )}
               value={form.getValue("policy.decision_log_verbosity") || "digest"}
               onChange={(v) => form.setValue("policy.decision_log_verbosity", v)}
               options={[
-                { value: "digest", label: "Summary" },
-                { value: "verbose", label: "Full" },
+                {
+                  value: "digest",
+                  label: t("web.admin.settings.logging.retention.permissions.verbosity.digest"),
+                },
+                {
+                  value: "verbose",
+                  label: t("web.admin.settings.logging.retention.permissions.verbosity.verbose"),
+                },
               ]}
               restartRequired={restartKeys.has("policy.decision_log_verbosity")}
             />

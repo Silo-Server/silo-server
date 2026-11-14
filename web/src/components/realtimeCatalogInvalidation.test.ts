@@ -7,6 +7,7 @@ import {
   downloadKeys,
   libraryKeys,
   mediaSurfaceKeys,
+  profileKeys,
   requestKeys,
   sectionKeys,
 } from "@/hooks/queries/keys";
@@ -242,6 +243,7 @@ describe("invalidateAccessDependentState", () => {
       calendarKeys.week("2026-09-28", "all"),
       requestKeys.status(),
       downloadKeys.capability(),
+      profileKeys.list(),
     ];
     for (const key of keys) queryClient.setQueryData(key, {});
 
@@ -249,5 +251,24 @@ describe("invalidateAccessDependentState", () => {
     await Promise.resolve();
 
     expect(keys.filter((key) => !queryClient.getQueryState(key)?.isInvalidated)).toEqual([]);
+  });
+
+  it("refreshes catalog lists while another list page is on its first read", async () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(catalogListKey(1), {});
+    // A page still loading, such as a letter jump's seek, holds a scan's list
+    // refreshes; an access change must not wait for it.
+    const firstRead = new QueryObserver(queryClient, {
+      queryKey: catalogListKey(2),
+      queryFn: () => new Promise<never>(() => undefined),
+    });
+    const unsubscribe = firstRead.subscribe(() => undefined);
+
+    invalidateAccessDependentState(queryClient, { allowDashboardRefetch: false });
+    await Promise.resolve();
+
+    expect(queryClient.getQueryState(catalogListKey(1))?.isInvalidated).toBe(true);
+    unsubscribe();
+    queryClient.clear();
   });
 });

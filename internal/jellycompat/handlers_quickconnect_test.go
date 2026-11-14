@@ -256,7 +256,7 @@ func TestAuthenticateWithQuickConnectMintsProfileSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	token := quickConnectSessionToken("SECRET")
-	if out.AccessToken != token || out.User.Name != "alice#Kids" || out.User.ID != PseudoUserID(7, "kids").String() {
+	if out.AccessToken != token || out.User.Name != "alice#Kids" || out.User.ID != compatUserID(PseudoUserID(7, "kids")) {
 		t.Fatalf("response = %+v", out)
 	}
 	session, ok := store.Get(token)

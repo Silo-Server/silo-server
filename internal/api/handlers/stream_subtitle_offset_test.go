@@ -46,6 +46,10 @@ func TestSubtitleTimestampOffsetExternalTrack(t *testing.T) {
 			if response.Code != tc.status || !strings.Contains(response.Body.String(), tc.want) || (tc.absent != "" && strings.Contains(response.Body.String(), tc.absent)) {
 				t.Fatalf("response = %d %q", response.Code, response.Body.String())
 			}
+			// Packaged TV apps fetch with an opaque Origin and must read errors too.
+			if got := response.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+				t.Fatalf("Access-Control-Allow-Origin = %q, want *", got)
+			}
 			if tc.method == http.MethodHead && response.Body.Len() != 0 {
 				t.Fatalf("HEAD body = %q", response.Body.String())
 			}

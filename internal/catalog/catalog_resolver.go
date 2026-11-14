@@ -31,6 +31,9 @@ type CatalogResult struct {
 	TotalExact        bool
 	SnapshotAt        time.Time // pagination fence timestamp
 	Next              *QueryCursor
+	// SectionCardProgress is set when browsing a Continue Watching or Next Up
+	// row, by content ID.
+	SectionCardProgress map[string]SectionCardProgress
 	// Provider, Mode, SemanticUsed, FallbackReason and IndexPendingEvents are
 	// per-query search diagnostics. They are only populated on the direct-search
 	// path (where a CatalogSearchProvider actually ran); browse / preview /
@@ -103,10 +106,12 @@ type facetFetcher interface {
 
 // pgxFacetFetcher is the production facetFetcher. It dispatches each method to
 // the existing package-level helpers using the supplied pool. values caches
-// column facet value lists for typeahead; nil disables caching.
+// column facet value lists for typeahead and technical the resolution and
+// track language lists; a nil cache disables caching.
 type pgxFacetFetcher struct {
-	pool   *pgxpool.Pool
-	values *facetValueCache
+	pool      *pgxpool.Pool
+	values    *facetValueCache
+	technical *technicalFacetCache
 }
 
 func (f *pgxFacetFetcher) DistinctArrayColumn(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
@@ -118,15 +123,15 @@ func (f *pgxFacetFetcher) DistinctScalarColumn(ctx context.Context, column strin
 }
 
 func (f *pgxFacetFetcher) Resolutions(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
-	return listResolutionsWithSource(ctx, f.pool, filters, baseRelation, mediaScope)
+	return listResolutionsWithSource(ctx, f.pool, f.technical, filters, baseRelation, mediaScope)
 }
 
 func (f *pgxFacetFetcher) JSONBLanguages(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
-	return listDistinctJSONBLanguageWithSource(ctx, f.pool, column, filters, baseRelation, mediaScope)
+	return listDistinctJSONBLanguageWithSource(ctx, f.pool, f.technical, column, filters, baseRelation, mediaScope)
 }
 
 func (f *pgxFacetFetcher) SubtitleLanguages(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
-	return listSubtitleLanguagesWithSource(ctx, f.pool, filters, baseRelation, mediaScope)
+	return listSubtitleLanguagesWithSource(ctx, f.pool, f.technical, filters, baseRelation, mediaScope)
 }
 
 func (f *pgxFacetFetcher) PeopleByKind(ctx context.Context, kind models.PersonKind, filters BrowseFilters, baseRelation string, mediaScope string) ([]string, error) {
@@ -229,7 +234,21 @@ type SectionDefinition struct {
 	// row itself with up to limit items. The list starts with the items the
 	// row shows and is already scoped to the acting profile. Nil when the
 	// resolver cannot build rows.
-	FetchItems func(ctx context.Context, limit int) ([]*models.MediaItem, error)
+	FetchItems func(ctx context.Context, limit int) (SectionRowItems, error)
+}
+
+// SectionRowItems is a row-backed section as its fetcher built it.
+type SectionRowItems struct {
+	Items []*models.MediaItem
+	// Progress is set on Continue Watching and Next Up rows, by content ID.
+	Progress map[string]SectionCardProgress
+}
+
+// SectionCardProgress is what a client needs to remove a card from its
+// Continue Watching or Next Up row.
+type SectionCardProgress struct {
+	ProgressUpdatedAt *string
+	ItemSource        string
 }
 
 // SectionResolver shares the page's visibility and configuration with catalog
@@ -587,18 +606,19 @@ func resolveRowBackedSectionSource(ctx context.Context, req CatalogRequest, sect
 	if req.SnapshotAt != nil {
 		snapshot = req.SnapshotAt.UTC()
 	}
-	items, err := section.FetchItems(ctx, SectionBrowseItemCap)
+	row, err := section.FetchItems(ctx, SectionBrowseItemCap)
 	if err != nil {
 		return nil, err
 	}
-	paged := paginateCatalogItems(items, req.Offset, req.Limit)
+	paged := paginateCatalogItems(row.Items, req.Offset, req.Limit)
 	return &CatalogResult{
 		Items:   paged,
-		Total:   len(items),
-		HasMore: req.Offset+len(paged) < len(items),
+		Total:   len(row.Items),
+		HasMore: req.Offset+len(paged) < len(row.Items),
 		// A row cut at the cap may hold more than it lists.
-		TotalExact: len(items) < SectionBrowseItemCap,
-		SnapshotAt: snapshot,
+		TotalExact:          len(row.Items) < SectionBrowseItemCap,
+		SnapshotAt:          snapshot,
+		SectionCardProgress: row.Progress,
 	}, nil
 }
 
@@ -1243,6 +1263,7 @@ func (r *CatalogResolver) ListFiltersWithOptions(ctx context.Context, req Catalo
 	if r == nil || r.browseRepo == nil {
 		return nil, fmt.Errorf("catalog resolver requires a browse repository")
 	}
+	req = withCacheableHistorySnapshot(req)
 	var (
 		filters    BrowseFilters
 		earlyEmpty bool
@@ -1316,6 +1337,17 @@ func (r *CatalogResolver) ListFiltersWithOptions(ctx context.Context, req Catalo
 	return r.listFiltersForSource(ctx, filters, options, "media_items mi", req.Query.MediaScope)
 }
 
+// withCacheableHistorySnapshot pins a history request without a snapshot to
+// the next whole minute. The snapshot is part of the cached facet lists' keys
+// (facet values, technical facets), so a per-request "now" would never hit;
+// the next whole minute still covers every event watched so far.
+func withCacheableHistorySnapshot(req CatalogRequest) CatalogRequest {
+	if req.Source == CatalogSourceHistory && req.SnapshotAt == nil {
+		req.SnapshotAt = new(time.Now().UTC().Truncate(time.Minute).Add(time.Minute))
+	}
+	return req
+}
+
 // CatalogFacetSearchResult is the typed return for SearchFacet.
 type CatalogFacetSearchResult struct {
 	// Matches are the values that start with q, case-insensitively, A-Z;
@@ -1363,12 +1395,7 @@ func (r *CatalogResolver) SearchFacet(ctx context.Context, req CatalogRequest, a
 	if q == "" && !isColumn {
 		return result, nil
 	}
-	if req.Source == CatalogSourceHistory && req.SnapshotAt == nil {
-		// The snapshot is part of the facet value cache key, so a
-		// per-request "now" would never hit. The next whole minute still
-		// covers every event watched so far.
-		req.SnapshotAt = new(time.Now().UTC().Truncate(time.Minute).Add(time.Minute))
-	}
+	req = withCacheableHistorySnapshot(req)
 	scope, err := r.facetSearchScope(ctx, req, access)
 	if err != nil {
 		return nil, err
@@ -1405,33 +1432,6 @@ func (r *CatalogResolver) SearchFacet(ctx context.Context, req CatalogRequest, a
 		return nil, err
 	}
 	return result, nil
-}
-
-// SearchFacetV1 answers /api/v1/catalog/filters/search as that frozen
-// contract always has: see searchFacetV1. A blank prefix matches nothing.
-func (r *CatalogResolver) SearchFacetV1(ctx context.Context, req CatalogRequest, access AccessFilter, facet string, prefix string, limit int) ([]string, bool, error) {
-	if r == nil || r.browseRepo == nil {
-		return nil, false, fmt.Errorf("catalog resolver requires a browse repository")
-	}
-	prefix = strings.TrimSpace(prefix)
-	if prefix == "" {
-		return []string{}, false, nil
-	}
-	scope, err := r.facetSearchScope(ctx, req, access)
-	if err != nil {
-		return nil, false, err
-	}
-	if scope.empty {
-		return []string{}, false, nil
-	}
-	matches, hasMore, err := searchFacetV1(ctx, r.browseRepo.pool, facet, scope.filters, scope.baseRelation, scope.mediaScope, prefix, clampFacetSearchLimit(limit))
-	if err != nil {
-		return nil, false, err
-	}
-	if matches == nil {
-		matches = []string{}
-	}
-	return matches, hasMore, nil
 }
 
 // facetScope is where a facet typeahead searches.
@@ -1862,11 +1862,11 @@ func validateCatalogOverlayQuery(req CatalogRequest, ruleFields, sortFields map[
 			return fmt.Errorf("%w: groups[%d].match must be 'all' or 'any'", ErrInvalidCatalogRequest, i)
 		}
 		for j, rule := range group.Rules {
-			if !ruleFields[rule.Field] || (req.V1Rules && v2RuleFields[rule.Field]) {
+			if !ruleFields[rule.Field] {
 				return fmt.Errorf("%w: groups[%d].rules[%d].field %q is not supported", ErrInvalidCatalogRequest, i, j, rule.Field)
 			}
 			fieldDef, ok := queryFieldDefs[rule.Field]
-			if !ok || !fieldDef.allows(rule.Op) || (req.V1Rules && rule.Op == ruleOpNotInLast) {
+			if !ok || !fieldDef.allows(rule.Op) {
 				return fmt.Errorf("%w: groups[%d].rules[%d] is invalid", ErrInvalidCatalogRequest, i, j)
 			}
 			if err := validateRuleValue(rule); err != nil {
@@ -2026,7 +2026,7 @@ type catalogPageSection struct {
 	CollectionID     string // library collection ID
 	UserCollectionID string // personal user collection ID
 	// FetchItems builds a row-backed section; see SectionDefinition.
-	FetchItems func(ctx context.Context, limit int) ([]*models.MediaItem, error)
+	FetchItems func(ctx context.Context, limit int) (SectionRowItems, error)
 }
 
 type catalogSectionFilters struct {
@@ -2237,7 +2237,7 @@ func bytesTrimSpace(raw []byte) []byte {
 // catalogLibraryCollectionMembership resolves how the catalog lists a library
 // collection's members for the viewer, within the libraries access allows.
 func catalogLibraryCollectionMembership(collection *models.LibraryCollection, access AccessFilter) (LibraryCollectionMembership, error) {
-	membership, err := ResolveLibraryCollectionMembership(collection, access.AllowedLibraryIDs)
+	membership, err := ResolveLibraryCollectionMembership(collection, access)
 	if err != nil {
 		return LibraryCollectionMembership{}, fmt.Errorf("%w: library collection query_definition: %w", ErrInvalidCatalogRequest, err)
 	}
@@ -2633,16 +2633,24 @@ func (r *CatalogResolver) fetchAllSearchCandidates(ctx context.Context, req Cata
 	return items, nil
 }
 
+// catalogSearchAccess narrows the viewer's access to the request's libraries
+// for a search, and returns the item types to search. The bool reports that
+// no requested library is accessible, so the search can return empty.
 func catalogSearchAccess(req CatalogRequest, access AccessFilter) (AccessFilter, []string, bool) {
 	allowedLibraryIDs, earlyEmpty := access.LibraryScope(req.Query.LibraryIDs)
 	if earlyEmpty {
 		return AccessFilter{}, nil, true
 	}
 
+	// The viewer's user and profile carry through so personalized sorts and
+	// rules (plays, date viewed, watched) resolve against that profile's
+	// history, as the request was validated for in Resolve.
 	searchAccess := AccessFilter{
 		AllowedLibraryIDs:  allowedLibraryIDs,
 		DisabledLibraryIDs: slices.Clone(access.DisabledLibraryIDs),
 		MaturityLimits:     access.MaturityLimits,
+		UserID:             access.UserID,
+		ProfileID:          access.ProfileID,
 	}
 
 	scope := req.Query.MediaScope

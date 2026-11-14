@@ -20,6 +20,13 @@
 //     (see computeEgressDelta), so the dashboard can split playback from
 //     download traffic.
 //
+// Alongside the shared row, dashboard_node_egress_samples gets one row per
+// stream node serving traffic: a breakdown of the node egress the shared row
+// already counts, kept in its own table so nothing that sums
+// dashboard_metric_samples counts it twice. Only the replica whose shared row
+// won the minute writes it, so a minute's split and total come from one
+// snapshot. Idle nodes write no row.
+//
 // Sampling is best-effort: every failure is logged and swallowed. A missed
 // minute is a gap in the chart, never a failed request or a dead server.
 package dashmetrics
@@ -51,7 +58,8 @@ const (
 	// retentionDays is how much history the charts can show — a month, so the
 	// dashboard's widest range has samples to draw. 1440 minutes a day times 31
 	// days is ~45k rows per source, and sources are (1 + replicas), so the table
-	// stays in the low hundreds of thousands of rows at most. Reads bucket the
+	// stays in the low hundreds of thousands of rows at most. The per-node table
+	// grows the same way with the number of busy nodes. Reads bucket the
 	// minutes down before returning them (internal/api/handlers), so a wide
 	// window costs the same on the wire as a narrow one.
 	retentionDays = 31
@@ -160,20 +168,32 @@ func (s *Sampler) sampleOnce(ctx context.Context, at time.Time) {
 	}
 }
 
-// sampleShared records the cluster-wide stream counts and node egress. Counting
-// and inserting happen in one statement so no replica can read one minute's
-// state and write it into another's bucket.
+// sampleShared records the cluster-wide stream counts and node egress, plus the
+// per-node split of that egress. Counting and inserting happen in one statement
+// so no replica can read one minute's state and write it into another's bucket.
+// The split is written only when this statement's shared row won the minute,
+// so it always adds up to the total it breaks down.
 func (s *Sampler) sampleShared(ctx context.Context) {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO dashboard_metric_samples
-			(bucket, source, streams_total, streams_direct, streams_remux, streams_transcode, egress_kbps)
-		SELECT date_trunc('minute', now()), 'shared',
-			(SELECT COUNT(*) FROM playback_sessions_sync),
-			(SELECT COUNT(*) FROM playback_sessions_sync WHERE play_method = 'direct'),
-			(SELECT COUNT(*) FROM playback_sessions_sync WHERE play_method = 'remux'),
-			(SELECT COUNT(*) FROM playback_sessions_sync WHERE play_method = 'transcode'),
-			(SELECT COALESCE(SUM(egress_kbps), 0) FROM stream_nodes WHERE enabled AND healthy)
-		ON CONFLICT (bucket, source) DO NOTHING
+		WITH nodes AS (
+			SELECT id, egress_kbps FROM stream_nodes WHERE enabled AND healthy
+		), shared AS (
+			INSERT INTO dashboard_metric_samples
+				(bucket, source, streams_total, streams_direct, streams_remux, streams_transcode, egress_kbps)
+			SELECT date_trunc('minute', now()), 'shared',
+				(SELECT COUNT(*) FROM playback_sessions_sync),
+				(SELECT COUNT(*) FROM playback_sessions_sync WHERE play_method = 'direct'),
+				(SELECT COUNT(*) FROM playback_sessions_sync WHERE play_method = 'remux'),
+				(SELECT COUNT(*) FROM playback_sessions_sync WHERE play_method = 'transcode'),
+				(SELECT COALESCE(SUM(egress_kbps), 0) FROM nodes)
+			ON CONFLICT (bucket, source) DO NOTHING
+			RETURNING bucket
+		)
+		INSERT INTO dashboard_node_egress_samples (bucket, node_id, egress_kbps)
+		SELECT shared.bucket, nodes.id, nodes.egress_kbps
+		FROM shared CROSS JOIN nodes
+		WHERE nodes.egress_kbps > 0
+		ON CONFLICT (bucket, node_id) DO NOTHING
 	`)
 	if err != nil {
 		slog.WarnContext(ctx, "failed to sample shared dashboard metrics", "component", component, "error", err)
@@ -232,12 +252,14 @@ func (s *Sampler) sampleProcessEgress(ctx context.Context, at time.Time) {
 
 // pruneExpired drops samples older than the retention window.
 func (s *Sampler) pruneExpired(ctx context.Context) {
-	_, err := s.pool.Exec(ctx, `
-		DELETE FROM dashboard_metric_samples
-		WHERE bucket < now() - make_interval(days => $1)
-	`, retentionDays)
-	if err != nil {
-		slog.WarnContext(ctx, "failed to prune dashboard metric samples", "component", component, "error", err)
+	for _, table := range []string{"dashboard_metric_samples", "dashboard_node_egress_samples"} {
+		_, err := s.pool.Exec(ctx, `
+			DELETE FROM `+table+`
+			WHERE bucket < now() - make_interval(days => $1)
+		`, retentionDays)
+		if err != nil {
+			slog.WarnContext(ctx, "failed to prune dashboard metric samples", "component", component, "table", table, "error", err)
+		}
 	}
 }
 

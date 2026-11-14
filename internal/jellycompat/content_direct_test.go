@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/url"
 	"slices"
 	"testing"
@@ -59,6 +60,17 @@ func TestItemDetailToUpstreamOrdersVideoVersionsLikeJellyfin(t *testing.T) {
 	}
 	if input.Versions[0].FileID != 1080 {
 		t.Fatal("compat conversion mutated the native catalog version order")
+	}
+}
+
+func TestItemDetailToUpstreamBreaksWidthTiesByType(t *testing.T) {
+	// Ties keep file id order for video types, which the catalog ranks best
+	// first, and builder (part) order for the others.
+	for itemType, want := range map[string][]int{"movie": {1, 2}, "ebook": {2, 1}} {
+		detail := itemDetailToUpstream(&catalog.ItemDetail{Type: itemType, Versions: []catalog.FileVersion{{FileID: 2}, {FileID: 1}}})
+		if got := []int{detail.Versions[0].FileID, detail.Versions[1].FileID}; !slices.Equal(got, want) {
+			t.Errorf("%s version order = %v, want %v", itemType, got, want)
+		}
 	}
 }
 
@@ -515,9 +527,11 @@ func makeBrowseTestMediaItems(count int) []*models.MediaItem {
 // chunked ListProgressByMediaItems path must not run at all.
 type seriesRollupCountingStore struct {
 	*progressCountingStore
-	counts      map[string]userstore.SeriesWatchCounts
-	err         error
-	rollupCalls int
+	counts            map[string]userstore.SeriesWatchCounts
+	seasonCounts      map[int]userstore.SeriesWatchCounts
+	err               error
+	rollupCalls       int
+	seasonRollupCalls int
 }
 
 func (s *seriesRollupCountingStore) SeriesEpisodeWatchCounts(_ context.Context, _ string, seriesIDs []string) (map[string]userstore.SeriesWatchCounts, error) {
@@ -535,7 +549,11 @@ func (s *seriesRollupCountingStore) SeriesEpisodeWatchCounts(_ context.Context, 
 }
 
 func (s *seriesRollupCountingStore) SeriesSeasonWatchCounts(context.Context, string, string) (map[int]userstore.SeriesWatchCounts, error) {
-	return map[int]userstore.SeriesWatchCounts{}, nil
+	s.seasonRollupCalls++
+	if s.err != nil {
+		return nil, s.err
+	}
+	return maps.Clone(s.seasonCounts), nil
 }
 
 func (s *seriesRollupCountingStore) SeasonEpisodeWatchCounts(context.Context, string, []string) (map[string]userstore.SeriesWatchCounts, error) {

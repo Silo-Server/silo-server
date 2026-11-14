@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/webhooksync"
 )
 
@@ -22,6 +24,16 @@ type WebhookSyncService interface {
 	GetWebhookMappings(context.Context, int, string) (*webhooksync.ProfileMappingsResponse, error)
 	UpdateWebhookMappings(context.Context, int, string, webhooksync.UpdateProfileMappingsInput) ([]webhooksync.ProfileMapping, error)
 	ListWebhookEvents(context.Context, int, string, *webhooksync.PageKey, int) ([]webhooksync.WebhookEventLog, bool, error)
+}
+
+// webhookSyncManagementDescription states the household-manager rule on every
+// connection management operation, reads included.
+const webhookSyncManagementDescription = "Webhook sync connections are account-wide: a connection's receiver URL carries its secret, and its mappings choose which profile an external user's watch state is written to. Only the account's household manager may read or change them. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's API key, or from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied."
+
+// WebhookSyncManagementService decides whether the caller is the account's
+// household manager.
+type WebhookSyncManagementService interface {
+	MayManageWebhookSync(context.Context, int, string, func(*userstore.Profile) error) (bool, error)
 }
 
 type WebhookConnection struct {
@@ -145,6 +157,7 @@ func registerWebhookSync(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
 	op := func(method, path, id, summary string) Operation {
 		o := Operation{Operation: humaOp(method, Prefix+"/webhook-sync"+path, id, "webhook-sync", summary), Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true}
+		o.Description = webhookSyncManagementDescription
 		o.Errors = []int{http.StatusNotFound, http.StatusConflict}
 		if method != http.MethodGet {
 			o.DemoRestricted = true
@@ -153,10 +166,23 @@ func registerWebhookSync(reg *Registry) {
 		return o
 	}
 	svc := func(ctx context.Context) (WebhookSyncService, int, *Problem) {
-		if reg.deps.WebhookSync == nil {
+		if reg.deps.WebhookSync == nil || reg.deps.WebhookSyncManagement == nil {
 			return nil, 0, unavailable("webhook sync")
 		}
-		return reg.deps.WebhookSync, claimsFrom(ctx).UserID, nil
+		// Checked before the service is handed out, so no operation, read
+		// or write, reaches it for a caller who is not the household manager.
+		user := claimsFrom(ctx).UserID
+		allowed, err := reg.deps.WebhookSyncManagement.MayManageWebhookSync(ctx, user, profileFrom(ctx), verifyHouseholdProfile(ctx))
+		if errors.Is(err, access.ErrProfileUnverified) {
+			return nil, 0, NewProblem(TypeProfileVerificationRequired, "Webhook sync management requires verifying the primary profile PIN.")
+		}
+		if err != nil {
+			return nil, 0, serviceProblem(err)
+		}
+		if !allowed {
+			return nil, 0, NewProblem(TypePermissionDenied, "Webhook sync management requires the account's primary profile.")
+		}
+		return reg.deps.WebhookSync, user, nil
 	}
 	position := func(ctx context.Context, id, cursor string) (CursorScope, *webhooksync.PageKey, *Problem) {
 		scope := CursorScope{OperationID: id, Security: strconv.Itoa(claimsFrom(ctx).UserID), Sort: "-created_at", Tiebreaker: "id"}

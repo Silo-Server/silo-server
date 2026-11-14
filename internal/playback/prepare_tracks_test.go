@@ -28,6 +28,8 @@ func preparedTracksTestFile() *models.MediaFile {
 			{Codec: "ass", Language: "en", HearingImpaired: true},
 			{Codec: "dvd_subtitle", Language: "de"},
 			{Codec: "webvtt", Language: "es", HearingImpaired: true},
+			// FFmpeg can't demux it from the source, so the encode leaves it out.
+			{Codec: "webvtt", Language: "en", IndexOnly: true},
 		},
 	}
 }
@@ -177,6 +179,31 @@ func TestPlanPreparedTracksSkipsUndecodableAudio(t *testing.T) {
 	}, "/artifacts/out.mp4"), " ")
 	if !strings.Contains(joined, "-map 0:v:0 -map 0:a:1 -map 0:a:2 -dn") || strings.Contains(joined, "0:a:0") || !strings.Contains(joined, "-disposition:a:0 default") {
 		t.Fatalf("prepared track args must map only the decodable tracks:\n%s", joined)
+	}
+}
+
+// An audiobook's only picture is cover art, which may be missing or in a
+// format MP4 refuses, so its prepared file maps no video in either layout; a
+// video file still requires its video stream.
+func TestBuildPrepareFileArgsMapsNoVideoForAudioOnlyMedia(t *testing.T) {
+	file := &models.MediaFile{BaseType: "audiobook", CodecAudio: "flac", AudioTracks: []models.AudioTrack{{Codec: "flac", Channels: 2}}}
+	for _, tc := range []struct {
+		name      string
+		audioOnly bool
+		tracks    *PreparedTracks
+		want      string
+	}{
+		{"audio-only, prepared tracks", true, PlanPreparedTracks(file, "aac", -1), "-map_chapters -1 -map 0:a:0 -dn"},
+		{"audio-only, legacy layout", true, nil, "-map_chapters -1 -map 0:a:0? -sn -dn"},
+		{"video, prepared tracks", false, PlanPreparedTracks(file, "aac", -1), "-map_chapters -1 -map 0:v:0 -map 0:a:0 -dn"},
+	} {
+		joined := strings.Join(buildPrepareFileArgs(TranscodeOpts{
+			InputPath: "/media/in.flac", TargetCodecVideo: "copy", TargetCodecAudio: "aac", AudioOnly: tc.audioOnly,
+			HWAccel: "none", AudioTrackIndex: -1, SubtitleTrackIndex: -1, PreparedTracks: tc.tracks,
+		}, "/artifacts/out.mp4"), " ")
+		if !strings.Contains(joined, tc.want) {
+			t.Fatalf("%s: want %q in:\n%s", tc.name, tc.want, joined)
+		}
 	}
 }
 

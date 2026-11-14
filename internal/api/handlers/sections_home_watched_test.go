@@ -10,6 +10,7 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
@@ -223,6 +224,47 @@ func TestCapSectionItemLimits(t *testing.T) {
 	}
 }
 
+// TestCutCappedSectionItems pins that a capped aggregate read answers at most
+// each row's capped limit, including an admin curated list, whose fetcher
+// returns every configured item, and that an uncapped read is left alone.
+func TestCutCappedSectionItems(t *testing.T) {
+	resolved := []sections.ResolvedSection{
+		{ID: "picks", SectionType: sections.SectionAdminCuratedList, ItemLimit: 50},
+		{ID: "unset", SectionType: sections.SectionAdminCuratedList},
+		{ID: "short", SectionType: sections.SectionRecentlyAdded, ItemLimit: 50},
+	}
+	sourceSizes := []int{30, 30, 3}
+	for _, tc := range []struct {
+		name string
+		cap  int
+		want []int
+	}{
+		{"cap below every row", 10, []int{10, 10, 3}},
+		{"cap above an unset row keeps its default", 40, []int{30, 20, 3}},
+		{"uncapped read is a no-op", 0, []int{30, 30, 3}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Stand in for FetchAll: an admin curated list returns every
+			// configured item whatever its limit.
+			capped := capSectionItemLimits(resolved, tc.cap)
+			rows := make([]sections.SectionWithItems, len(capped))
+			for i, s := range capped {
+				items := make([]*models.MediaItem, sourceSizes[i])
+				for j := range items {
+					items[j] = &models.MediaItem{ContentID: fmt.Sprintf("movie:%s-%d", s.ID, j)}
+				}
+				rows[i] = sections.SectionWithItems{ResolvedSection: s, Items: items, TotalCount: len(items)}
+			}
+			got := cutCappedSectionItems(rows, tc.cap)
+			for i, want := range tc.want {
+				if len(got[i].Items) != want || got[i].TotalCount != sourceSizes[i] {
+					t.Errorf("section %q: %d items, total %d; want %d items, total %d", got[i].ID, len(got[i].Items), got[i].TotalCount, want, sourceSizes[i])
+				}
+			}
+		})
+	}
+}
+
 func TestDropEmptyWatchedHomeSections(t *testing.T) {
 	input := []sections.SectionWithItems{
 		{
@@ -302,12 +344,12 @@ func TestHomePreferenceFiltersOnlyHomeResponses(t *testing.T) {
 	}
 	resolved := []sections.ResolvedSection{sectionItems[0].ResolvedSection}
 	prepared, states := handler.filterWatchedHomeSections(ctx, sectionItems, resolved)
-	home := handler.buildSectionsWithUserStates(ctx, prepared, nil, requestAccessFilter(req), requestArtwork(req), states)
+	home := handler.buildSectionsWithUserStates(ctx, prepared, nil, requestAccessFilter(req), imagesize.Request{}, states)
 	if got := home.Sections[0].Items; len(got) != 1 || got[0].ContentID != "unwatched" {
 		t.Fatalf("Home response items = %#v, want only unwatched", got)
 	}
 
-	library := handler.buildSectionsResponse(req, sectionItems, nil)
+	library := handler.buildSections(req.Context(), sectionItems, nil, requestAccessFilter(req), imagesize.Request{})
 	if got := len(library.Sections[0].Items); got != 2 {
 		t.Fatalf("non-Home response has %d items, want 2", got)
 	}

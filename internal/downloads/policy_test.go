@@ -56,6 +56,13 @@ func TestDownloadQualityResolverResolve(t *testing.T) {
 			FrameRate: "60/1", Bitrate: 55_000, BitDepth: 10,
 		}},
 	}
+	audioOnlyFile := &models.MediaFile{
+		ID:          6,
+		BaseType:    "audiobook",
+		CodecAudio:  "aac",
+		Container:   "mp4",
+		AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2}},
+	}
 	caps := playback.ClientCapabilities{
 		CodecsVideo: []string{"h264"},
 		CodecsAudio: []string{"aac"},
@@ -199,6 +206,20 @@ func TestDownloadQualityResolverResolve(t *testing.T) {
 			transcodeEnabled:   true,
 			artifactsAvailable: true,
 			wantErr:            ErrDownloadNotAllowed,
+		},
+		{
+			// A bitrate preset on audio-only media keeps its audio: the
+			// encode would turn the cover into H.264 the MP4 muxer refuses.
+			name:               "bitrate preset on audio-only media serves the source",
+			requested:          Quality5Mbps,
+			file:               audioOnlyFile,
+			caps:               caps,
+			transcodeEnabled:   true,
+			userTranscode:      true,
+			artifactsAvailable: true,
+			wantFormat:         FormatOriginal,
+			wantQuality:        Quality5Mbps,
+			wantEffective:      QualityOriginal,
 		},
 		{
 			name:             "bitrate blocked without artifact pipeline",

@@ -7,6 +7,7 @@ import {
   type SeekDirection,
 } from "@/lib/seekIntervals";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 import { storage } from "@/utils/storage";
 
 export const DEFAULT_SKIP_BACK_SECONDS = seekDefault("audiobook", "back");
@@ -77,8 +78,8 @@ export function useAudiobookPrefs(): AudiobookPrefs {
         void save(direction, seconds).catch(() =>
           toast.error(
             direction === "back"
-              ? "Failed to save rewind interval"
-              : "Failed to save fast-forward interval",
+              ? t("web.audiobooks.player.saveRewindFailed")
+              : t("web.audiobooks.player.saveForwardFailed"),
           ),
         );
         return;

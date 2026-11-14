@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 
 import {
   captureProfileRequestContext,
@@ -45,7 +46,7 @@ export async function fetchDownloadedSubtitles(
     const id = Number(subtitle.id);
     const fileId = Number(subtitle.media_file_id);
     if (!Number.isSafeInteger(id) || id <= 0 || !Number.isSafeInteger(fileId) || fileId <= 0) {
-      throw new Error("Unsupported subtitle identifier");
+      throw new Error(t("web.common.subtitles.unsupportedIdentifier"));
     }
     return { ...subtitle, id, media_file_id: fileId };
   });
@@ -94,7 +95,7 @@ export async function downloadSubtitle(
     fileId !== request.media_file_id ||
     String(fileId) !== response.subtitle.media_file_id
   ) {
-    throw new Error("Unsupported subtitle identifier");
+    throw new Error(t("web.common.subtitles.unsupportedIdentifier"));
   }
   return { subtitle: { ...response.subtitle, id, media_file_id: fileId } };
 }
@@ -128,7 +129,7 @@ export async function uploadSubtitle(
     fileId !== request.media_file_id ||
     String(fileId) !== response.subtitle.media_file_id
   )
-    throw new Error("Unsupported subtitle identifier");
+    throw new Error(t("web.common.subtitles.unsupportedIdentifier"));
   return { subtitle: { ...response.subtitle, id, media_file_id: fileId } };
 }
 
@@ -212,7 +213,9 @@ export function useDeleteSubtitlePreference() {
         queryClient.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] }),
       ]),
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to reset subtitle preference");
+      toast.error(
+        err instanceof Error ? err.message : t("web.common.toast.subtitles.resetPreferenceFailed"),
+      );
     },
   });
 }
@@ -263,7 +266,9 @@ export function useSetSubtitlePreference() {
       ),
     onSuccess: () => invalidateItemDetails(queryClient),
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to save subtitle preference");
+      toast.error(
+        err instanceof Error ? err.message : t("web.common.toast.subtitles.savePreferenceFailed"),
+      );
     },
   });
 }
@@ -276,14 +281,16 @@ export function useDownloadSubtitle() {
     retry: false,
     networkMode: "always",
     onSuccess: async (_response, request) => {
-      toast.success("Subtitle downloaded");
+      toast.success(t("web.common.toast.subtitles.downloaded"));
       await queryClient.invalidateQueries({
         queryKey: subtitleKeys.downloaded(request.media_file_id),
       });
     },
     onError: (err) => {
       if (!(err instanceof StaleApiRequestContextError))
-        toast.error(err instanceof Error ? err.message : "Failed to download subtitle");
+        toast.error(
+          err instanceof Error ? err.message : t("web.common.toast.subtitles.downloadFailed"),
+        );
     },
   });
 }
@@ -296,14 +303,16 @@ export function useUploadSubtitle() {
     retry: false,
     networkMode: "always",
     onSuccess: async (_response, request) => {
-      toast.success("Subtitle uploaded");
+      toast.success(t("web.common.toast.subtitles.uploaded"));
       await queryClient.invalidateQueries({
         queryKey: subtitleKeys.downloaded(request.media_file_id),
       });
     },
     onError: (err) => {
       if (!(err instanceof StaleApiRequestContextError))
-        toast.error(err instanceof Error ? err.message : "Failed to upload subtitle");
+        toast.error(
+          err instanceof Error ? err.message : t("web.common.toast.subtitles.uploadFailed"),
+        );
     },
   });
 }

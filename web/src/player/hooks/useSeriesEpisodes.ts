@@ -27,20 +27,22 @@ export function useSeriesEpisodes(
   const currentSeasonInfo = seasons.find((s) => s.season_number === currentSeason);
   const nextSeasonInfo = seasons.find((s) => s.season_number === currentSeason + 1);
 
-  // Fetch current season episodes.
+  // Fetch current season episodes. Up Next draws a still several times wider
+  // than the series page's episode cards, so the player keeps its own copy
+  // under a longer key; invalidating the season's episodes still reaches it.
   const { data: currentEpisodesData, isLoading: currentLoading } = useQuery({
-    queryKey: catalogKeys.seasonEpisodes(seriesId!, currentSeason, libraryId),
+    queryKey: [...catalogKeys.seasonEpisodes(seriesId!, currentSeason, libraryId), "up-next"],
     queryFn: ({ signal }) =>
-      fetchCatalogSeasonEpisodes(seriesId!, currentSeason, libraryId, { signal }),
+      fetchCatalogSeasonEpisodes(seriesId!, currentSeason, libraryId, { signal }, "upNext"),
     enabled: !!seriesId && currentSeason >= 0 && !!currentSeasonInfo,
     staleTime: 5 * 60 * 1000,
   });
 
   // Fetch next season episodes only when a next season exists.
   const { data: nextEpisodesData, isLoading: nextLoading } = useQuery({
-    queryKey: catalogKeys.seasonEpisodes(seriesId!, currentSeason + 1, libraryId),
+    queryKey: [...catalogKeys.seasonEpisodes(seriesId!, currentSeason + 1, libraryId), "up-next"],
     queryFn: ({ signal }) =>
-      fetchCatalogSeasonEpisodes(seriesId!, currentSeason + 1, libraryId, { signal }),
+      fetchCatalogSeasonEpisodes(seriesId!, currentSeason + 1, libraryId, { signal }, "upNext"),
     enabled: !!seriesId && !!nextSeasonInfo,
     staleTime: 5 * 60 * 1000,
   });

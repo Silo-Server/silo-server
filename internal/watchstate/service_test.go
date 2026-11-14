@@ -35,7 +35,7 @@ func TestJellycompatDatedMarkPlayedBoundsFutureDate(t *testing.T) {
 
 	before := time.Now().UTC().Add(-time.Second)
 	service := NewService(testStoreProvider{store: store})
-	if err := service.RecordJellycompatMarkPlayedBatch(t.Context(), 1, "profile-1", []string{"movie-1"}, before.Add(24*time.Hour)); err != nil {
+	if err := service.RecordJellycompatMarkPlayedBatch(t.Context(), 1, "profile-1", []string{"movie-1"}, before.Add(24*time.Hour), false); err != nil {
 		t.Fatal(err)
 	}
 	after := time.Now().UTC().Add(time.Second)

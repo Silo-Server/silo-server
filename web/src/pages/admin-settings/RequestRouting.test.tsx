@@ -736,6 +736,7 @@ describe("Where requests go: try a title", () => {
       year: 2019,
       network_ids: [],
       company_ids: [],
+      series_status: "returning",
     },
     rules: [
       {
@@ -854,7 +855,9 @@ describe("Where requests go: try a title", () => {
     });
     expect(calls("GET /api/v2/requests/search")).toHaveLength(0);
     expect(
-      within(series).getByText("English · United States · 2019 · No rating · Animation"),
+      within(series).getByText(
+        "English · United States · 2019 · Returning · No rating · Animation",
+      ),
     ).toBeInTheDocument();
     const result = within(series).getByText("Bluey (2018)").parentElement!;
     expect(

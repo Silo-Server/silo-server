@@ -13,7 +13,9 @@
  * identifier as the code, so callers handle v1 and v2 failures the same way.
  */
 
+import { problemDisplayText } from "@/api/v2/request";
 import type { paths } from "@/api/v2/schema";
+import { t } from "@/i18n";
 import type { PlayerConfig } from "./context/PlayerConfigContext";
 import { playerFetchResponse, PlayerFetchError } from "./player-fetch";
 
@@ -95,7 +97,7 @@ interface ProblemLike {
   type?: string;
   title?: string;
   detail?: string;
-  errors?: { detail?: string }[];
+  errors?: { code?: string; detail?: string }[];
 }
 
 /**
@@ -174,7 +176,7 @@ export async function playerV2<K extends PlayerV2Key>(
 
   const text = await res.text().catch(() => "");
   if (!res.ok) {
-    let message = res.statusText || "Request failed";
+    let message = res.statusText || t("web.player.error.requestFailed");
     let code: string | undefined;
     try {
       const problem = JSON.parse(text) as ProblemLike;
@@ -185,7 +187,7 @@ export async function playerV2<K extends PlayerV2Key>(
         .filter(Boolean)
         .join(" ");
       const detail = fieldDetails || problem.detail?.trim() || problem.title?.trim();
-      if (detail) message = detail;
+      message = problemDisplayText(problem, detail || message);
       if (typeof problem.type === "string") {
         const segment = problem.type.split("?")[0]?.split("/").pop() ?? "";
         code = segment.replace(/#.*$/, "") || undefined;

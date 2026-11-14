@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"slices"
@@ -12,6 +13,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogsvc "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/collections/templates"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 )
 
@@ -391,12 +393,22 @@ func (reg *Registry) syncPersonalCollection(ctx context.Context, in *PersonalCol
 	}
 	v, e := s.SyncPersonalCollection(ctx, u, profileFrom(ctx), string(in.ID))
 	if e != nil {
-		return nil, collectionProblem(e)
+		return nil, personalSyncProblem(e)
 	}
 	if v == nil {
 		return nil, NewProblem(TypeInternalError, "The sync returned no result.")
 	}
 	return &PersonalCollectionSyncOutput{Body: *collectionSyncResultOf(v)}, nil
+}
+
+// personalSyncProblem answers a sync whose source list refused or did not
+// answer as dependency_unavailable with the reason, which the sync also
+// recorded on the collection. Any other failure is a collection problem.
+func personalSyncProblem(err error) *Problem {
+	if sourceErr, ok := errors.AsType[*usercollections.SourceError](err); ok {
+		return NewProblem(TypeDependencyUnavailable, "Sync failed: "+logredact.SanitizeURLError(sourceErr).Error())
+	}
+	return collectionProblem(err)
 }
 func (reg *Registry) listServerCollections(ctx context.Context, _ *struct{}) (*ServerCollectionsOutput, error) {
 	s, ok := reg.deps.LibraryCollections.(interface {

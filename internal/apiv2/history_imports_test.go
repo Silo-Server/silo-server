@@ -381,3 +381,7 @@ func TestHistoryImportRoutesActForTheRequestProfile(t *testing.T) {
 		t.Fatalf("list and get did not go through the profile-aware seam: %+v", fake.actors)
 	}
 }
+
+// Without these methods the run operations fall back to account-wide reads
+// and writes; keep the profile rule a compile-time check.
+var _ profileScopedHistoryImports = (*handlers.HistoryImportHandler)(nil)

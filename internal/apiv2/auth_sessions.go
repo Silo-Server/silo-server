@@ -138,6 +138,7 @@ const setupDomain = "setup"
 
 // SetupServerInput creates the first administrator.
 type SetupServerInput struct {
+	SignInDeviceHeaders
 	RawBody []byte
 	Body    struct {
 		Username             string `json:"username" minLength:"1" maxLength:"254" doc:"Login name of the administrator" example:"admin"`
@@ -160,6 +161,7 @@ type SignupStatusOutput struct {
 
 // SignupInput creates an account from an invite code.
 type SignupInput struct {
+	SignInDeviceHeaders
 	RawBody []byte
 	Body    struct {
 		Username             string `json:"username" minLength:"1" maxLength:"254" doc:"Login name" example:"alice"`
@@ -212,7 +214,7 @@ func registerAuthSessions(reg *Registry) {
 	del := humaOp(http.MethodDelete, Prefix+"/auth/sessions/{id}", "deleteSession", "auth",
 		"Revoke one of the caller's login sessions.")
 	del.Errors = []int{http.StatusNotFound}
-	Register(reg, Operation{Operation: del, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true}, reg.deleteSession)
+	Register(reg, Operation{Operation: del, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true, Audited: true}, reg.deleteSession)
 	setup := humaOp(http.MethodPost, Prefix+"/auth/setup", "setupServer", "system",
 		"Create the first administrator account and open its session.")
 	setup.DefaultStatus = http.StatusCreated

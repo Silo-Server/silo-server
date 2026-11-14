@@ -3,8 +3,13 @@ package autoscan
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
 )
 
@@ -178,5 +183,125 @@ func TestIngestChangesTransientResolveFailureQueuesRetry(t *testing.T) {
 	}
 	if store.webhookErrors["s1"] == "" {
 		t.Fatal("transient failure must be visible on the webhook endpoint")
+	}
+}
+
+// rootResolver resolves subtree paths below root, a real directory, so the
+// removal wait can be exercised against the filesystem.
+type rootResolver struct {
+	fakeResolver
+	root string
+}
+
+func (r rootResolver) ResolveMissingSubtree(_ context.Context, path, trigger string) (*scantrigger.Target, error) {
+	if !strings.HasPrefix(path, r.root+string(filepath.Separator)) {
+		return nil, &scantrigger.RequestError{Status: 400, Code: "bad_request", Message: "outside media folders"}
+	}
+	return &scantrigger.Target{Folder: &models.MediaFolder{ID: 7}, Mode: scantrigger.ModeSubtree, Path: path, Trigger: trigger}, nil
+}
+
+// Radarr and Sonarr send a folder-delete webhook before they delete the
+// folder. The delivery waits, without recording an error, until the folder is
+// gone, and only then scans it.
+func TestIngestChangesWaitsForRemovedFolder(t *testing.T) {
+	root := t.TempDir()
+	folder := filepath.Join(root, "Film (2024)")
+	if err := os.Mkdir(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	store := webhookTestStore()
+	store.sources[0].PathRewrites = []PathRewrite{{From: "/movies", To: root}}
+	queue := &recordingQueuer{}
+	svc := NewService(store, &fakeProvider{}, passthroughConnRes{}, rootResolver{root: root}, queue, allowSuppressor{}, nil)
+	ingest := ChangeIngest{
+		SourceID:          "s1",
+		ProviderEventType: "MovieDelete",
+		Changes:           []Change{{SourcePath: "/movies/Film (2024)", Scope: ChangeScopeSubtree, Removed: true}},
+		ReceivedAt:        time.Now(),
+	}
+
+	result, err := svc.IngestChanges(context.Background(), ingest)
+	if err != nil || result.Pending || !result.AwaitingRemoval {
+		t.Fatalf("folder still present: result = %+v, err = %v, want awaiting removal and not a failure", result, err)
+	}
+	if _, err := svc.RetryPendingWebhookDeliveries(context.Background(), 10); err != nil {
+		t.Fatal(err)
+	}
+	if len(queue.enqueued) != 0 || len(store.createdEvents) != 0 {
+		t.Fatalf("scanned a folder still on disk: enqueued=%+v events=%+v", queue.enqueued, store.createdEvents)
+	}
+	if len(store.webhookErrors) != 0 || len(store.recorded) != 0 {
+		t.Fatalf("waiting recorded an error: webhook=%v source=%v", store.webhookErrors, store.recorded)
+	}
+	// Waiting is not a failure: the recheck neither carries an error nor
+	// backs off as attempts accumulate.
+	if len(store.retryDelays) != 2 || store.retryDelays[1] != store.retryDelays[0] || store.retryMessages[0] != "" || store.retryMessages[1] != "" {
+		t.Fatalf("rechecks = %v %q, want two equal delays and no error", store.retryDelays, store.retryMessages)
+	}
+	// A delivery still waiting after a few minutes is checked less often.
+	store.retried[0].ReceivedAt = time.Now().Add(-10 * time.Minute)
+	if _, err := svc.RetryPendingWebhookDeliveries(context.Background(), 10); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.retryDelays) != 3 || store.retryDelays[2] <= store.retryDelays[1] || store.retryMessages[2] != "" {
+		t.Fatalf("rechecks = %v %q, want a longer delay for an older delivery", store.retryDelays, store.retryMessages)
+	}
+
+	if err := os.Remove(folder); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.RetryPendingWebhookDeliveries(context.Background(), 10); err != nil {
+		t.Fatal(err)
+	}
+	if len(queue.enqueued) != 1 || queue.enqueued[0].Mode != scantrigger.ModeSubtree || queue.enqueued[0].Path != folder {
+		t.Fatalf("enqueued = %+v, want one subtree scan of %s", queue.enqueued, folder)
+	}
+	if len(store.completed) != 1 {
+		t.Fatalf("completed = %v, want the delivery completed", store.completed)
+	}
+}
+
+// A delivery stops waiting once the wait expires and never waits for a path
+// outside every library. A folder whose parent is gone too (a lost mount
+// below the library root) is not confirmed deleted, so it keeps waiting; a
+// deleted folder arr names with a trailing separator is confirmed.
+func TestIngestChangesRemovalWaitBounds(t *testing.T) {
+	root := t.TempDir()
+	folder := filepath.Join(root, "Film (2024)")
+	outside := t.TempDir()
+	if err := os.Mkdir(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name         string
+		path         string
+		receivedAt   time.Time
+		wantWaiting  bool
+		wantEnqueued int
+	}{
+		{"wait expired", folder, time.Now().Add(-removalWait - time.Minute), false, 1},
+		{"outside every library", outside, time.Now(), false, 0},
+		{"parent gone too", filepath.Join(root, "Show", "Season 01"), time.Now(), true, 0},
+		{"gone, sent with a trailing separator", filepath.Join(root, "Deleted (2024)") + string(filepath.Separator), time.Now(), false, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := webhookTestStore()
+			queue := &recordingQueuer{}
+			svc := NewService(store, &fakeProvider{}, passthroughConnRes{}, rootResolver{root: root}, queue, allowSuppressor{}, nil)
+			result, err := svc.IngestChanges(context.Background(), ChangeIngest{
+				SourceID:          "s1",
+				ProviderEventType: "MovieDelete",
+				Changes:           []Change{{SourcePath: tc.path, Scope: ChangeScopeSubtree, Removed: true}},
+				ReceivedAt:        tc.receivedAt,
+			})
+			wantCompleted := 1
+			if tc.wantWaiting {
+				wantCompleted = 0
+			}
+			if err != nil || result.Pending || result.AwaitingRemoval != tc.wantWaiting || len(queue.enqueued) != tc.wantEnqueued || len(store.completed) != wantCompleted {
+				t.Fatalf("result = %+v, err = %v, enqueued = %+v, completed = %v; want waiting=%v, %d enqueued, %d completed",
+					result, err, queue.enqueued, store.completed, tc.wantWaiting, tc.wantEnqueued, wantCompleted)
+			}
+		})
 	}
 }

@@ -6,11 +6,12 @@ import (
 	"testing"
 	"time"
 
+	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/downloads"
 )
 
 type fakeDownloadRegistry struct {
-	rows                []*downloads.Download
+	page                downloads.RegistryPage
 	user                int
 	profile, device, id string
 	event               downloads.StatusEvent
@@ -30,13 +31,13 @@ func (f *fakeDownloadRegistry) Capability(context.Context, int) (downloads.Capab
 		},
 	}, f.err
 }
-func (f *fakeDownloadRegistry) ListPage(_ context.Context, user int, profile, device string, after *downloads.RegistryPosition, limit int) ([]*downloads.Download, error) {
+func (f *fakeDownloadRegistry) ListPage(_ context.Context, user int, profile, device string, after *downloads.RegistryPosition, limit int, _ catalogpkg.AccessFilter) (downloads.RegistryPage, error) {
 	f.user = user
 	f.profile = profile
 	f.device = device
 	f.after = after
 	f.limit = limit
-	return f.rows, f.err
+	return f.page, f.err
 }
 func (f *fakeDownloadRegistry) ReportStatus(_ context.Context, user int, profile, device, id string, event downloads.StatusEvent) (*downloads.Download, error) {
 	f.user = user
@@ -49,7 +50,7 @@ func (f *fakeDownloadRegistry) ReportStatus(_ context.Context, user int, profile
 	}
 	return &downloads.Download{ID: id, UserID: user, ProfileID: profile, DeviceID: device, ContentID: "movie", MediaFileID: 42, Status: event.Status, Revision: event.Revision, StatusEventAt: &event.UpdatedAt, CreatedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}, nil
 }
-func (f *fakeDownloadRegistry) Delete(_ context.Context, user int, profile, device, id string) error {
+func (f *fakeDownloadRegistry) Delete(_ context.Context, user int, profile, device, id string, _ catalogpkg.AccessFilter) error {
 	f.user = user
 	f.profile = profile
 	f.device = device
@@ -59,7 +60,7 @@ func (f *fakeDownloadRegistry) Delete(_ context.Context, user int, profile, devi
 
 func TestDownloadRegistryCursorBoundary(t *testing.T) {
 	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	service := &fakeDownloadRegistry{rows: []*downloads.Download{{ID: "b", CreatedAt: at}, {ID: "a", CreatedAt: at}}}
+	service := &fakeDownloadRegistry{page: downloads.RegistryPage{Items: []*downloads.Download{{ID: "b", CreatedAt: at}}, Next: &downloads.RegistryPosition{CreatedAt: at, ID: "b"}}}
 	deps := pilotDeps(nil, nil)
 	deps.Downloads = service
 	h := newTestHandler(t, deps)
@@ -70,9 +71,9 @@ func TestDownloadRegistryCursorBoundary(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil || rec.Code != 200 || len(page.Items) != 1 || page.Page.NextCursor == "" {
 		t.Fatalf("%d %s %v", rec.Code, rec.Body.String(), err)
 	}
-	service.rows = nil
+	service.page = downloads.RegistryPage{}
 	rec = do(t, h, "GET", path+"?cursor="+page.Page.NextCursor, "", viewer)
-	if rec.Code != 200 || service.after == nil || service.after.ID != "b" || service.limit != 51 {
+	if rec.Code != 200 || service.after == nil || service.after.ID != "b" || service.limit != 50 {
 		t.Fatalf("%d %+v", rec.Code, service)
 	}
 	rec = do(t, h, "GET", path+"?cursor="+page.Page.NextCursor, "", with(viewer, "X-Silo-Device-Id", "other-device"))

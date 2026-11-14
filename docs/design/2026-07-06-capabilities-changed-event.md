@@ -4,6 +4,17 @@
 **Requested by:** Apple client team (silo-apple)
 **Status:** Proposed — server implementation needed
 
+**Note (2026-10-25):** The event hub's delivery rules have changed since this was
+written. `user_state` now reaches a connection only when the event carries both the
+connection's account and its bound profile, for administrators too, so an event
+targeted as described below (by `UserID` alone, or with no `UserID`) reaches no one.
+Nor is `user_state` the only user-scoped channel non-admins can subscribe to:
+`notifications`, `history_import` and, since this was written, `user_settings` are
+open to them too. The channel and targeting described under *Existing
+infrastructure*, *Proposed contract* and *Acceptance checks* are historical; don't
+build them as written. Choose the channel and targeting against
+[Personal event recipients](../realtime-api.md#personal-event-recipients).
+
 ## Problem
 
 Clients cache user-facing capability payloads (e.g. `GET /api/v1/downloads/capability`)

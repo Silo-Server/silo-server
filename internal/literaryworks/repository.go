@@ -510,20 +510,18 @@ func appendWorkItemsAccessFilters(conditions *[]string, args *[]any, argIdx *int
 			*args = append(*args, filter.AllowedLibraryIDs)
 			*argIdx = *argIdx + 1
 		}
-	} else if len(filter.DisabledLibraryIDs) > 0 {
-		*conditions = append(*conditions, `
-				EXISTS (
-					SELECT 1 FROM media_item_libraries mil_visible
-					WHERE mil_visible.content_id = lwi.content_id
-				)`)
-		*conditions = append(*conditions, fmt.Sprintf(`
+	} else {
+		*conditions = append(*conditions, catalog.InSomeLibraryWhere("lwi.content_id"))
+		if len(filter.DisabledLibraryIDs) > 0 {
+			*conditions = append(*conditions, fmt.Sprintf(`
 				NOT EXISTS (
 					SELECT 1 FROM media_item_libraries mil_disabled
 					WHERE mil_disabled.content_id = lwi.content_id
 					  AND mil_disabled.media_folder_id = ANY($%d)
 				)`, *argIdx))
-		*args = append(*args, filter.DisabledLibraryIDs)
-		*argIdx = *argIdx + 1
+			*args = append(*args, filter.DisabledLibraryIDs)
+			*argIdx = *argIdx + 1
+		}
 	}
 	catalog.ApplySectionAccessFilter("mi", catalog.AccessFilter{MaturityLimits: filter.MaturityLimits}, conditions, args, argIdx)
 }

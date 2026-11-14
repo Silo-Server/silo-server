@@ -300,6 +300,10 @@ func codecProfileApplies(
 	if !matchesCodecProfileContainer(profileContainers, container) {
 		return false
 	}
+	// Jellyfin evaluates audio codec profiles only against an audio stream.
+	if codecProfileTarget(profile) == "audio" && compatHasNoAudio(version) {
+		return false
+	}
 	if strings.TrimSpace(profile.Codec) == "" {
 		return true
 	}
@@ -545,7 +549,8 @@ func buildConditionValues(version catalog.FileVersion, audioStreamIndex *int) co
 		rounded := int(math.Round(frameRate))
 		values["videoframerate"] = conditionValue{text: strconv.Itoa(rounded), number: rounded, hasNum: true}
 	}
-	videoBitrate := video.Bitrate
+	// Track and file bitrates are kbps; profile conditions are bits per second.
+	videoBitrate := video.Bitrate * 1000
 	if videoBitrate == 0 && version.Bitrate > 0 {
 		videoBitrate = version.Bitrate * 1000
 	}
@@ -553,7 +558,7 @@ func buildConditionValues(version catalog.FileVersion, audioStreamIndex *int) co
 		values["videobitrate"] = intConditionValue(videoBitrate)
 	}
 	if audio.Bitrate > 0 {
-		values["audiobitrate"] = intConditionValue(audio.Bitrate)
+		values["audiobitrate"] = intConditionValue(audio.Bitrate * 1000)
 	}
 	if audio.SampleRate > 0 {
 		values["audiosamplerate"] = intConditionValue(audio.SampleRate)
@@ -624,6 +629,25 @@ func compatAudioTrack(version catalog.FileVersion, streamIndex *int) models.Audi
 		return version.AudioTracks[playback.SelectAudioTrack(version.AudioTracks, "", nil)]
 	}
 	return models.AudioTrack{Codec: version.CodecAudio}
+}
+
+// compatHasNoAudio reports a video-only source, using the same test as the
+// native planner. A track the probe could not name is still audio and keeps
+// the strict checks.
+func compatHasNoAudio(version catalog.FileVersion) bool {
+	return len(version.AudioTracks) == 0 && strings.TrimSpace(version.CodecAudio) == ""
+}
+
+// compatAudioExceedsChannels reports whether a channel ceiling rejects the
+// selected audio track: it has more channels than maxChannels, or an unknown
+// count. A ceiling of zero or less is no ceiling, and a video-only source has
+// no channels to exceed.
+func compatAudioExceedsChannels(version catalog.FileVersion, streamIndex *int, maxChannels int) bool {
+	if maxChannels <= 0 || compatHasNoAudio(version) {
+		return false
+	}
+	channels := compatAudioTrack(version, streamIndex).Channels
+	return channels <= 0 || channels > maxChannels
 }
 
 func compatAudioCodec(version catalog.FileVersion, streamIndex *int) string {

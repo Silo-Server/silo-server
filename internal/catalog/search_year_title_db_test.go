@@ -41,15 +41,13 @@ func TestSearchYearSuffixedTitleIsExactPostgres(t *testing.T) {
 		{"castle-castle", "series", "Castle & Castle", "", 2018},
 		{"the-castle", "movie", "The Castle", "The Castle", 1997},
 		{"castle-freak", "movie", "Castle Freak", "", 1996},
-		{"parent", "series", "Fixture Parent", "", 2001},
+		{"castle-2001", "movie", "Castle", "", 2001},
 		{"spy-2015", "movie", "Spy (2015)", "", 2015},
 		{"spyder", "movie", "Spyder", "", 2017},
 	} {
 		exec(`INSERT INTO media_items(content_id,type,title,original_title,year) VALUES($1,$2,$3,$4,$5)`, id(item.name), item.kind, item.title, item.original, item.year)
 		exec(`INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, id(item.name), library)
 	}
-	exec(`INSERT INTO episodes(content_id,series_id,season_number,episode_number,title) VALUES($1,$2,1,1,'Castle')`, id("episode"), id("parent"))
-	exec(`INSERT INTO episode_libraries(episode_id,media_folder_id) VALUES($1,$2)`, id("episode"), library)
 
 	repo := NewItemRepository(pool)
 	filter := AccessFilter{AllowedLibraryIDs: []int{library}}
@@ -71,10 +69,10 @@ func TestSearchYearSuffixedTitleIsExactPostgres(t *testing.T) {
 		want  func(t *testing.T, ids []string)
 	}{
 		{query: "Castle", want: func(t *testing.T, ids []string) {
-			// The literal "Castle" episode and the year-suffixed series share
+			// The literal "Castle" movie and the year-suffixed series share
 			// the exact tier ahead of every partial title.
-			if top := ids[:min(2, len(ids))]; !slices.Contains(top, id("castle-2009")) || !slices.Contains(top, id("episode")) {
-				t.Fatalf("exact tier = %v, want the series and the episode", top)
+			if top := ids[:min(2, len(ids))]; !slices.Contains(top, id("castle-2009")) || !slices.Contains(top, id("castle-2001")) {
+				t.Fatalf("exact tier = %v, want the series and the movie", top)
 			}
 			if slices.Index(ids, id("castle-1999")) < 2 {
 				t.Fatalf("a year suffix that is not the item's year counted as exact: %v", ids)

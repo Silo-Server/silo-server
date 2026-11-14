@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
@@ -402,14 +403,32 @@ func TestServeEmbeddedSubtitleOnlyServesSidecarTracks(t *testing.T) {
 			t.Fatalf("ordinal %d err = %v, want ErrAssetNotFound", ordinal, err)
 		}
 	}
-	// A failed PGS extract after the shared cache committed its 200 must abort
-	// the response rather than end it as a complete track.
-	defer func() {
-		if rec := recover(); rec != http.ErrAbortHandler { //nolint:errorlint // sentinel compared by identity, as net/http does
-			t.Fatalf("failed committed extract recovered %v, want http.ErrAbortHandler", rec)
-		}
-	}()
-	_ = s.serveEmbeddedSubtitle(httptest.NewRecorder(), req, dl, 1)
+	for _, payload := range []string{"", "PGS"} {
+		t.Run(map[bool]string{false: "before output", true: "after output"}[payload != ""], func(t *testing.T) {
+			ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
+			if err := os.WriteFile(ffmpeg, []byte("#!/bin/sh\nprintf '"+payload+"'\nexit 1\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			s.artifacts = &ArtifactManager{liveCfg: func() *config.Config {
+				return &config.Config{Playback: config.PlaybackConfig{FFmpegPath: ffmpeg}}
+			}}
+			w := httptest.NewRecorder()
+			w.Code = 0 // Distinguish an uncommitted response from an implicit 200.
+			var recovered any
+			var err error
+			func() {
+				defer func() { recovered = recover() }()
+				err = s.serveEmbeddedSubtitle(w, req, dl, 1)
+			}()
+			if payload == "" {
+				if recovered != nil || err == nil || w.Code != 0 || w.Body.Len() != 0 {
+					t.Fatalf("before output: recovered %v, err %v, status %d, bytes %d", recovered, err, w.Code, w.Body.Len())
+				}
+			} else if recovered != http.ErrAbortHandler || w.Code != http.StatusOK || w.Body.String() != payload { //nolint:errorlint // sentinel compared by identity, as net/http does
+				t.Fatalf("after output: recovered %v, status %d, body %q", recovered, w.Code, w.Body.String())
+			}
+		})
+	}
 }
 
 func TestManifestNamesTheSeriesPosterForEpisodes(t *testing.T) {

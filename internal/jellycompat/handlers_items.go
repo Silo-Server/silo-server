@@ -260,6 +260,10 @@ func (h *ItemsHandler) HandleItems(w http.ResponseWriter, r *http.Request) {
 		h.handleBrowseItems(w, r, session, query)
 	case query.isResumable:
 		h.handleResumeResponse(w, r, session, query)
+	case h.browsesPlayedListByCatalog(query):
+		// The played list reads progress rows, which carry no catalog fields
+		// to sort by; the catalog browse applies IsPlayed and sorts.
+		h.handleBrowseItems(w, r, session, query)
 	case query.isPlayed != nil && *query.isPlayed:
 		h.handlePlayedItems(w, r, session, query)
 	case query.isPlayed != nil:
@@ -297,6 +301,9 @@ func emptyQueryResult(startIndex int) queryResultDTO {
 // default path's ListSeasons yields an empty set and writes an empty page.
 func (h *ItemsHandler) handleItemParentChildren(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery) {
 	switch {
+	case itemTypesContain(query.itemTypes, "episode") && !query.allowsVideo():
+		// Episodes are video; MediaTypes=Audio and the like select none.
+		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
 	case itemTypesContain(query.itemTypes, "episode"):
 		h.writeSeriesEpisodesResponse(w, r, session, query, query.parentItemID, "", true)
 	case !query.hasItemTypeFilter || itemTypesContain(query.itemTypes, "season"):
@@ -311,9 +318,10 @@ func (h *ItemsHandler) handleItemParentChildren(w http.ResponseWriter, r *http.R
 // shared episode-listing path (also used by /Shows/{id}/Episodes) can be reused.
 func (h *ItemsHandler) handleSeasonEpisodeChildren(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery) {
 	// A season's only children are its episodes; a type filter that excludes
-	// Episode (e.g. IncludeItemTypes=Movie) yields nothing, mirroring the
-	// series-parent path's handling of unsatisfiable type filters.
-	if query.hasItemTypeFilter && !itemTypesContain(query.itemTypes, "episode") {
+	// Episode (e.g. IncludeItemTypes=Movie) or a MediaTypes filter that
+	// excludes Video yields nothing, mirroring the series-parent path's
+	// handling of unsatisfiable filters.
+	if (query.hasItemTypeFilter && !itemTypesContain(query.itemTypes, "episode")) || !query.allowsVideo() {
 		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
 		return
 	}
@@ -494,7 +502,7 @@ func (h *ItemsHandler) populateDetailSubtitles(ctx context.Context, detail *upst
 				IsHearingImpaired:      dl.HearingImpaired,
 				IsTextSubtitleStream:   true,
 				SupportsExternalStream: true,
-				DeliveryURL:            fmt.Sprintf("/Videos/%s/%s/Subtitles/%d/stream.%s", routeItemID, sourceID, streamIndex, format),
+				DeliveryURL:            storedSubtitleDeliveryURL(routeItemID, sourceID, streamIndex, format, "", dl.ID),
 				DeliveryMethod:         "External",
 				Path:                   downloadedSubtitlePath(version, dl),
 				IsExternalURL:          boolPtr(false),
@@ -1456,6 +1464,12 @@ func (h *ItemsHandler) HandleLatest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Jellyfin applies HidePlayedInLatest when the client doesn't send
+	// IsPlayed; Jellyfin Web's home Latest rows never send it.
+	if query.isPlayed == nil && h.hidePlayedInLatest(r.Context(), session) {
+		query.isPlayed = new(false)
+	}
+
 	// Jellyfin's /Items/Latest auto-infers item types from the parent
 	// library's collection type when no explicit IncludeItemTypes is given.
 	// Without this, clients like Infuse may not display "Latest Movies"
@@ -1657,7 +1671,7 @@ func (h *ItemsHandler) loadLatestViaSections(ctx context.Context, session *Sessi
 	// Fold the client's clamped max content rating into the access filter so the
 	// shared cached list respects the client's cap AND the cache key captures it
 	// — identical to the clamp BrowseItems applies.
-	filter.MaxContentRating = clampMaxContentRating(filter.MaxContentRating, query.maxOfficialRating)
+	filter.MaturityLimits = clampMaturityLimits(filter.MaturityLimits, query.maxOfficialRating)
 
 	limit := query.limit
 	if limit <= 0 {
@@ -2159,7 +2173,7 @@ var errConfiguredUserStoreUnavailable = errors.New("configured user store unavai
 // browse applies for query.
 func (h *ItemsHandler) episodeBrowseFilters(ctx context.Context, session *Session, query itemsQuery) (catalog.AccessFilter, catalog.BrowseFilters) {
 	access := h.resolveAccessFilter(ctx, session)
-	access.MaxContentRating = clampMaxContentRating(access.MaxContentRating, query.maxOfficialRating)
+	access.MaturityLimits = clampMaturityLimits(access.MaturityLimits, query.maxOfficialRating)
 	sortKey, order := "", ""
 	if query.sortExplicit {
 		sortKey = query.sort
@@ -2484,7 +2498,7 @@ func (h *ItemsHandler) writeAdjacentEpisodesResponse(w http.ResponseWriter, r *h
 		return
 	}
 
-	episodeModels, err := h.episodeRepo.ListAdjacentInSeries(r.Context(), target.SeriesID, target.SeasonNumber, target.EpisodeNumber)
+	episodeModels, err := h.episodeRepo.ListAdjacentInSeriesFor(r.Context(), target.SeriesID, target.SeasonNumber, target.EpisodeNumber, h.resolveAccessFilter(r.Context(), session))
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
@@ -2562,6 +2576,20 @@ func (h *ItemsHandler) nextUpNewReleasesFirst(ctx context.Context, session *Sess
 		return false
 	}
 	return access.ResolveViewerPreferences(ctx, store, h.adminDefaults, session.ProfileID).NextUpNewReleasesFirst
+}
+
+// hidePlayedInLatest reads the profile's home.hide_watched_items, which
+// Jellyfin clients see as HidePlayedInLatest, so Latest hides watched items
+// the way Silo's Home does. Without a store, or when the read fails, it is off.
+func (h *ItemsHandler) hidePlayedInLatest(ctx context.Context, session *Session) bool {
+	if h.storeProvider == nil || session.ProfileID == "" {
+		return false
+	}
+	store, err := h.storeProvider.ForUser(ctx, session.StreamAppUserID)
+	if err != nil {
+		return false
+	}
+	return sections.HideWatchedItemsFromHome(ctx, store, session.ProfileID)
 }
 
 // writeNextUpResponse renders a slice of catalog.NextUpResult into the
@@ -3592,6 +3620,32 @@ func progressPageCapacity(limit int) int {
 	return limit
 }
 
+// playedByDateLister is the user-data service's play-date listing; see
+// directUserDataService.ListPlayedProgressByDate.
+type playedByDateLister interface {
+	ListPlayedProgressByDate(ctx context.Context, session *Session, types []string, libraryID *int, ascending bool, limit, offset int) ([]upstreamProgress, error)
+}
+
+// fetchProgressRows reads one batch of progress rows for loadProgressPage. A
+// completed list sorted by DatePlayed reads in play-date order, in the
+// requested direction, so paging stays in that order. Every other list, and a
+// store that cannot order by play date, reads newest write first. filtered
+// pushes the type and library pre-filter into the store.
+func (h *ItemsHandler) fetchProgressRows(ctx context.Context, session *Session, status string, query itemsQuery, types []string, libraryID *int, filtered bool, limit, offset int) ([]upstreamProgress, error) {
+	if status == progressStatusCompleted && query.sortByKey == sortKeyDatePlayed {
+		if lister, ok := h.userData.(playedByDateLister); ok {
+			rows, err := lister.ListPlayedProgressByDate(ctx, session, types, libraryID, query.order == sortOrderAscending, limit, offset)
+			if !errors.Is(err, userstore.ErrJellycompatPlayedByDateUnsupported) {
+				return rows, err
+			}
+		}
+	}
+	if filtered {
+		return h.userData.ListProgressFiltered(ctx, session, status, types, libraryID, limit, offset)
+	}
+	return h.userData.ListProgress(ctx, session, status, limit, offset)
+}
+
 func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, status string, query itemsQuery, typeSet map[string]bool, libraryID *int) ([]baseItemDTO, int, error) {
 	// Resume views hide dismissed and superseded entries, so the visible list
 	// is sparser than the raw store list. The raw-offset fast path below is
@@ -3607,7 +3661,7 @@ func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, s
 		result := make([]progressHydratedItem, 0, progressPageCapacity(query.limit))
 		offset := query.startIndex
 		for {
-			progressEntries, err := h.userData.ListProgress(ctx, session, status, batchSize, offset)
+			progressEntries, err := h.fetchProgressRows(ctx, session, status, query, nil, nil, false, batchSize, offset)
 			if err != nil {
 				return nil, 0, err
 			}
@@ -3667,10 +3721,7 @@ func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, s
 		filteredTypes = sortedTypeSet(typeSet)
 	}
 	fetchProgress := func(off int) ([]upstreamProgress, error) {
-		if useFilteredFetch {
-			return h.userData.ListProgressFiltered(ctx, session, status, filteredTypes, libraryID, batchSize, off)
-		}
-		return h.userData.ListProgress(ctx, session, status, batchSize, off)
+		return h.fetchProgressRows(ctx, session, status, query, filteredTypes, libraryID, useFilteredFetch, batchSize, off)
 	}
 
 	items := make([]progressHydratedItem, 0, progressPageCapacity(query.limit))
@@ -4087,7 +4138,7 @@ func validatePseudoUser(w http.ResponseWriter, userID string, session *Session) 
 		writeError(w, http.StatusUnauthorized, "Unauthorized", "Missing authentication token")
 		return false
 	}
-	if userID == "" || userID == session.PseudoUserID.String() {
+	if userID == "" || isPseudoUser(userID, session.PseudoUserID) {
 		return true
 	}
 	writeError(w, http.StatusNotFound, "NotFound", "User not found")

@@ -12,12 +12,15 @@ import (
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
+	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
 	"github.com/Silo-Server/silo-server/internal/secret"
@@ -69,7 +72,11 @@ type Dependencies struct {
 	// control-plane recipe store (Redis) so a restarted transcode node can rebuild
 	// a jellycompat session. Optional; nil disables the handoff.
 	RecipeNodeStore recipeNodePutter
-	LoginResolver   loginResolver
+	// EventBus carries cluster events. The playback handler subscribes to
+	// proxies' requests to move a transcode off a node they cannot reach. Nil
+	// leaves proxy-egress transcodes without that failover.
+	EventBus      cache.EventBus
+	LoginResolver loginResolver
 	// ProfilePINAttempts is the native API's profile PIN limiter, shared so
 	// password#pin guesses count against the same per-profile budget. Nil
 	// gets a process-local limiter.
@@ -92,6 +99,9 @@ type Dependencies struct {
 	// the server's local network only when it is a direct URL to this store
 	// (artworkurl.FetchContext); every other URL reaches public addresses only.
 	ArtworkStore blobstore.Store
+	// AvatarStore holds uploaded profile avatars (the native API's
+	// ProfileHandler.AvatarStore). Nil serves no user avatars.
+	AvatarStore blobstore.Store
 
 	// Direct service dependencies (replaces Client)
 	ContentService  ContentService
@@ -168,9 +178,17 @@ type Dependencies struct {
 	// Settings (optional; reads server_settings for watched threshold, etc.)
 	SettingsRepo SettingsReader
 
+	// RatingSources is the administrator's choice of external ratings, the
+	// native API's. Items carry CriticRating only when it shows the Rotten
+	// Tomatoes critic score. Nil shows only IMDb and TMDB.
+	RatingSources *ratingsources.Policy
+
 	// Subtitle support (optional)
 	SubtitleRepo  subtitles.Repository // optional; downloaded subtitle support
 	SubtitleBlobs subtitles.BlobStore  // optional; backs downloaded subtitle reads
+	// KeptSubtitles reads embedded tracks from kept copies or through the
+	// file's index before the subtitle cache demuxes a source; nil demuxes.
+	KeptSubtitles playback.EmbeddedSubtitleSource
 	// SubtitlePlaySync aligns a subtitle the first time a client is served
 	// it, when it was never synced; nil leaves that to a request.
 	SubtitlePlaySync subtitles.PlaySyncer

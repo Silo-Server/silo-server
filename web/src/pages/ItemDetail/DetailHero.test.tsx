@@ -43,9 +43,10 @@ describe("DetailHero title", () => {
 });
 
 describe("DetailHero artwork revisions", () => {
+  const rungs: Record<string, string> = { poster: "w500", backdrop: "w1920" };
   const rev = "3f9a".repeat(16);
   const signed = (image: string, exp: number, sig: string) =>
-    `/api/v2/artwork/tmdb/movies/78/${image}/w780.${rev}.webp?exp=${exp}&sig=${sig}`;
+    `/api/v2/artwork/tmdb/movies/78/${image}/${rungs[image]}.${rev}.webp?exp=${exp}&sig=${sig}`;
   const hero = (exp: number, sig: string) => (
     <DetailHero
       title="Blade Runner"
@@ -102,7 +103,7 @@ describe("DetailHero artwork revisions", () => {
 
   it("hides signed artwork again when its revision changes", () => {
     const signed = (image: string, rev: string) =>
-      `/api/v2/artwork/tmdb/movies/78/${image}/w780.${rev.repeat(16)}.webp?exp=1758621600&sig=aaaa`;
+      `/api/v2/artwork/tmdb/movies/78/${image}/${rungs[image]}.${rev.repeat(16)}.webp?exp=1758621600&sig=aaaa`;
     const hero = (rev: string) => (
       <DetailHero
         title="Blade Runner"

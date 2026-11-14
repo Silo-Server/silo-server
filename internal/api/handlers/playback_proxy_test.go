@@ -178,9 +178,14 @@ func TestRelayToTranscodeNodeDoesNotAcknowledgeFailedDownstreamWrite(t *testing.
 		"public",
 	)
 	w := &failingProxyResponseWriter{header: make(http.Header), remaining: 5}
-	if err := handler.relayToTranscodeNode(w, req, node.URL, "/transcode/remote/segment/seg_00007.ts"); err != nil {
-		t.Fatalf("relay error = %v", err)
-	}
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != http.ErrAbortHandler { //nolint:errorlint // sentinel compared by identity, as net/http does
+				t.Fatalf("failed downstream transfer ended with %v, want panic(http.ErrAbortHandler)", recovered)
+			}
+		}()
+		_ = handler.relayToTranscodeNode(w, req, node.URL, "/transcode/remote/segment/seg_00007.ts")
+	}()
 
 	if got := acknowledgements.Load(); got != 0 {
 		t.Fatalf("failed downstream transfer produced %d acknowledgement(s)", got)

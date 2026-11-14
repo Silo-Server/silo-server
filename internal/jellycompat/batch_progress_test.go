@@ -78,7 +78,7 @@ func (m *mockUserDataService) MarkPlayed(context.Context, *Session, string) erro
 	panic("unused")
 }
 
-func (m *mockUserDataService) MarkPlayedBatch(context.Context, *Session, []string) error {
+func (m *mockUserDataService) MarkPlayedBatch(context.Context, *Session, []string, bool) error {
 	panic("unused")
 }
 

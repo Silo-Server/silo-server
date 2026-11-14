@@ -1,6 +1,7 @@
 package recommendations
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -563,5 +564,71 @@ func TestPersonalRowsOfferOnlyRecommendableMediaTypesPostgres(t *testing.T) {
 	}
 	if !slices.Contains(scoredIDs(bookSimilar), books[1]) {
 		t.Errorf("audiobook similar = %v, want the co-watched audiobook %s", scoredIDs(bookSimilar), books[1])
+	}
+}
+
+// "More like this" validates every candidate against the source item, those
+// the embedding search found and those only co-watch brought in: titles that
+// share no genre with it are dropped, a remake of it ranks below its peers,
+// and a co-watched title without an embedding keeps its place.
+func TestSimilarItemsValidateEveryCandidatePostgres(t *testing.T) {
+	f := newRelevanceFixture(t, "similar-validate")
+	ctx := t.Context()
+	const axis = 2800
+	near := func(distance float32) []float32 { return axisVector(axis, map[int]float32{axis + 1: distance}) }
+	setTitle := func(id, title string, year int) {
+		t.Helper()
+		if _, err := f.pool.Exec(ctx, `UPDATE media_items SET title = $2, year = $3 WHERE content_id = $1`, id, title, year); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cowatched := func(name string, genres []string) string {
+		t.Helper()
+		id := f.prefix + name
+		seedRecoMediaItem(t, f.pool, id, "movie", "matched")
+		if _, err := f.pool.Exec(ctx, `UPDATE media_items SET genres = $2 WHERE content_id = $1`, id, genres); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+
+	source := f.movie(t, "source", []string{"Drama"}, "PG-13", 13, near(0))
+	setTitle(source, "Harbor Lights", 2020)
+	remake := f.movie(t, "remake", []string{"Drama"}, "PG-13", 13, near(0.01))
+	setTitle(remake, "Harbor Lights", 1990)
+	comedy := f.movie(t, "comedy", []string{"Comedy"}, "PG-13", 13, near(0.02))
+	var peers []string
+	for i := range 3 {
+		peers = append(peers, f.movie(t, fmt.Sprintf("peer-%d", i), []string{"Drama"}, "PG-13", 13, near(0.03+0.01*float32(i))))
+	}
+	drama, otherComedy := cowatched("cowatched-drama", []string{"Drama"}), cowatched("cowatched-comedy", []string{"Comedy"})
+	if err := f.repo.UpsertCowatchPairs(ctx, []CowatchPair{
+		{ItemID: source, SimilarItemID: drama, JaccardScore: 0.9, CowatchCount: 5},
+		{ItemID: source, SimilarItemID: otherComedy, JaccardScore: 0.9, CowatchCount: 5},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(context.Background(), `DELETE FROM item_cowatch WHERE item_id LIKE $1 OR similar_item_id LIKE $1`, f.prefix+"%")
+	})
+	userID, viewer := newTasteTestAccount(t, f.pool, f.prefix+"viewer")
+
+	items, err := f.engine.SimilarItems(ctx, userID, viewer, source, 10, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := prefixed(items, f.prefix)
+	if slices.Contains(got, comedy) || slices.Contains(got, otherComedy) {
+		t.Errorf("similar = %v, want no title without a shared genre", got)
+	}
+	if !slices.Contains(got, drama) {
+		t.Errorf("similar = %v, want the co-watched %s without an embedding", got, drama)
+	}
+	at := slices.Index(got, remake)
+	for _, peer := range peers {
+		if i := slices.Index(got, peer); i < 0 || at < i {
+			t.Errorf("similar = %v, want every peer, and the remake after them", got)
+			break
+		}
 	}
 }

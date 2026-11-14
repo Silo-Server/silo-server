@@ -641,6 +641,16 @@
                   },
                   "font_attachments": {
                     "type": "boolean"
+                  },
+                  "limitations": {
+                    "type": "array",
+                    "maxItems": 16,
+                    "description": "Renderer limitations of this native route, honored when the server advertises native_embedded_limitations_v1. forced_unlisted: tracks flagged forced are never native. hidden_track_preemption: no track of a file with a forced track in the planned audio's language, or a default-flagged bitmap track, is native. literal_override_tags: a track the server knows carries ASS override tags is not native. An entry naming any other value is not used for native selection; the request stays valid.",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    }
                   }
                 },
                 "additionalProperties": true

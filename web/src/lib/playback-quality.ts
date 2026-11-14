@@ -1,13 +1,40 @@
+import { t } from "@/i18n";
+
 export type PlaybackQualityPreset = "any" | "standard" | "4k";
+
+/** A resolution name, the same in every language. */
+const QUALITY_4K = "4K";
 
 export const PLAYBACK_QUALITY_OPTIONS: Array<{
   value: PlaybackQualityPreset;
   label: string;
   description: string;
 }> = [
-  { value: "any", label: "Any", description: "Allow all resolutions" },
-  { value: "standard", label: "Standard", description: "Hide 4K and higher versions" },
-  { value: "4k", label: "4K", description: "Allow 4K and lower versions" },
+  {
+    value: "any",
+    get label() {
+      return t("web.profiles.helpers.quality.any");
+    },
+    get description() {
+      return t("web.profiles.helpers.quality.anyDescription");
+    },
+  },
+  {
+    value: "standard",
+    get label() {
+      return t("web.profiles.helpers.quality.standard");
+    },
+    get description() {
+      return t("web.profiles.helpers.quality.standardDescription");
+    },
+  },
+  {
+    value: "4k",
+    label: QUALITY_4K,
+    get description() {
+      return t("web.profiles.helpers.quality.fourKDescription");
+    },
+  },
 ];
 
 export function canonicalPlaybackQuality(value: string | null | undefined): string {
@@ -57,10 +84,10 @@ export function playbackQualityValueFromPreset(preset: PlaybackQualityPreset): s
 export function formatPlaybackQualityPreset(value: string | null | undefined): string {
   switch (playbackQualityPresetFromValue(value)) {
     case "standard":
-      return "Standard";
+      return t("web.profiles.helpers.quality.standard");
     case "4k":
-      return "4K";
+      return QUALITY_4K;
     default:
-      return "Any";
+      return t("web.profiles.helpers.quality.any");
   }
 }

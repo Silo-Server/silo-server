@@ -170,7 +170,8 @@ func (w *treeWalk) dir(ctx context.Context, logical, physical string, link bool)
 	}
 	for _, entry := range entries {
 		name := entry.Name()
-		if ignoredDir(name) {
+		// Hidden files stay: an ignore marker is one, and the scanner reads them.
+		if ignoredName(name) || (entry.IsDir() && ignoredDir(name)) {
 			continue
 		}
 		childLogical := filepath.Join(logical, name)
@@ -196,6 +197,9 @@ func (w *treeWalk) dir(ctx context.Context, logical, physical string, link bool)
 			}
 			if !info.IsDir() {
 				w.foundFile(childLogical)
+				continue
+			}
+			if ignoredDir(name) {
 				continue
 			}
 			childPhysical = filepath.Clean(resolved)

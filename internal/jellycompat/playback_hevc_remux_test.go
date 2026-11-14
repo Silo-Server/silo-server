@@ -238,7 +238,7 @@ func TestBuildPlaybackSourceHLSRemuxTranscodesAudioWhenCopyIsDisabled(t *testing
 		)
 	}
 
-	dto := h.mediaSourceDTO("item", "play", "token", source)
+	dto := h.mediaSourceDTO("item", "play", source)
 	if dto.TranscodingURL == "" || dto.TranscodingContainer != "mp4" {
 		t.Fatalf("transcoding route = URL %q container %q, want usable MP4 HLS route", dto.TranscodingURL, dto.TranscodingContainer)
 	}
@@ -270,7 +270,7 @@ func TestBuildPlaybackSourceKeepsLegacyTranscodingGateWithoutHLSProfile(t *testi
 	if source.SupportsTranscoding {
 		t.Fatal("SupportsTranscoding = true, want no unverified fMP4 HLS offer for an HTTP-only profile")
 	}
-	if dto := h.mediaSourceDTO("item", "play", "token", source); dto.TranscodingURL != "" {
+	if dto := h.mediaSourceDTO("item", "play", source); dto.TranscodingURL != "" {
 		t.Fatalf("TranscodingURL = %q, want empty", dto.TranscodingURL)
 	}
 }
@@ -378,7 +378,7 @@ func TestBuildPlaybackSourceSafariHEVCMKVOffersHLSRemux(t *testing.T) {
 		t.Fatalf("HLSRemuxAudioStreamIndexes = %v, want only the EAC3 stream frozen as copy-compatible", source.HLSRemuxAudioStreamIndexes)
 	}
 
-	dto := h.mediaSourceDTO("item", "play", "token", source)
+	dto := h.mediaSourceDTO("item", "play", source)
 	if dto.TranscodingURL == "" {
 		t.Fatal("TranscodingURL is empty")
 	}

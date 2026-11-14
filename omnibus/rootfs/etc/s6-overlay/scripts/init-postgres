@@ -14,22 +14,9 @@ source /etc/silo-omnibus/lib.sh
 if [[ -e /config/.compose-migration-pending ]]; then
   cat >&2 <<'MSG'
 A move from the multi-container Compose stack into /config was interrupted
-(/config/.compose-migration-pending is present). Run `docker compose up -d`
-without --no-deps so the Compose file's postgres service can finish it.
-MSG
-  exit 1
-fi
-
-# With Silo's database elsewhere no cluster is created below, but the
-# migration still moves Silo's directories, so Silo waits for it the same way
-# under REQUIRE_COMPOSE_MIGRATION.
-if ! enabled postgres && truthy "${REQUIRE_COMPOSE_MIGRATION:-false}" && [[ ! -e /config/.compose-migration-checked ]]; then
-  cat >&2 <<'MSG'
-The Compose file's postgres service has not yet checked SILO_DATA_ROOT for an
-earlier multi-container install to move here (/config/.compose-migration-checked
-is missing). Silo was likely started on its own, as `docker compose up -d
---no-deps silo` does. Run `docker compose up -d` once without --no-deps; later
-updates can use --no-deps again.
+(/config/.compose-migration-pending is present). Run the move again to finish
+it; see "Moving from the multi-container stack" in
+docs/architecture/omnibus-image.md.
 MSG
   exit 1
 fi
@@ -75,21 +62,6 @@ MSG
   own_tree postgres postgres "$PGDATA"
   s6-setuidgid postgres chmod 0700 "$PGDATA"
 else
-  # docker-compose.yml runs migrate-compose-stack before Silo to move an
-  # install of the multi-container stack here, and sets this so that Silo
-  # started without it (up --no-deps) does not create an empty cluster first.
-  # That step leaves the marker whenever it finishes, whatever it found.
-  if truthy "${REQUIRE_COMPOSE_MIGRATION:-false}" && [[ ! -e /config/.compose-migration-checked ]]; then
-    cat >&2 <<'MSG'
-/config/postgres/data holds no database, and the Compose file's postgres service
-has not yet checked SILO_DATA_ROOT for an earlier multi-container install to move
-here (/config/.compose-migration-checked is missing). Silo was likely started on
-its own, as `docker compose up -d --no-deps silo` does. Run `docker compose up -d`
-once without --no-deps so the postgres service can move an earlier install;
-later updates can use --no-deps again.
-MSG
-    exit 1
-  fi
   log "initializing a PostgreSQL $PG_MAJOR cluster in $PGDATA"
   # The directory can already exist, empty: a bind mount, or a directory
   # created ahead of the first start.
@@ -110,6 +82,29 @@ fi
 
 s6-setuidgid postgres install -d -m 0755 "$PGDATA/conf.d"
 s6-setuidgid postgres install -m 0644 /etc/silo-omnibus/postgresql.omnibus.conf "$PGDATA/conf.d/00-omnibus.conf"
+
+# POSTGRES_TUNE applies its settings with ALTER SYSTEM once Silo is up, and
+# PostgreSQL reads some of them, such as shared_buffers, only at start. Silo
+# prints those it sizes from memory and CPUs, read from the environment it
+# will see, so a new cluster starts with them rather than waiting for a
+# restart. postgresql.auto.conf, which ALTER SYSTEM writes, loads last and
+# still decides; a file such as 10-local.conf loads after this one. If Silo
+# cannot size them, it says why when it tunes, and the cluster starts untuned.
+# A value PostgreSQL rejects in a configuration file stops it from starting,
+# where ALTER SYSTEM refuses it and the server keeps running, so the file stays
+# only if PostgreSQL reads the configuration with it. postgres -C prints why not.
+tune_conf="$PGDATA/conf.d/02-omnibus-tune.conf"
+if tune="$(s6-setuidgid silo silo postgres-tune-conf -env /config/silo/.env -postgres-major "$PG_MAJOR")" &&
+  [[ -n "$tune" ]]; then
+  printf '# Written by the Silo omnibus image on every start while POSTGRES_TUNE is on.\n%s\n' "$tune" |
+    write_as postgres "$tune_conf"
+  if ! s6-setuidgid postgres postgres -D "$PGDATA" -C shared_buffers >/dev/null; then
+    warn "PostgreSQL rejects its configuration with the POSTGRES_TUNE startup settings; starting without $tune_conf"
+    s6-setuidgid postgres rm -f "$tune_conf"
+  fi
+else
+  s6-setuidgid postgres rm -f "$tune_conf"
+fi
 
 # With ENABLE_NODE_ACCESS, listen on every interface and let the silo role in
 # from the network with its password; Silo itself stays on the socket.

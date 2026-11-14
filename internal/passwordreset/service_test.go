@@ -30,7 +30,7 @@ type requestedLink struct {
 	minAge    time.Duration
 }
 
-func (f *fakeRepo) Issue(_ context.Context, _ int, _, tokenHash string, _ *int, _ time.Time) error {
+func (f *fakeRepo) Issue(_ context.Context, _ int, _, tokenHash string, _ Issuer, _ time.Time, _ Delivery) error {
 	f.issued = append(f.issued, tokenHash)
 	return nil
 }
@@ -95,13 +95,29 @@ type fakeSettings map[string]string
 
 func (f fakeSettings) Get(_ context.Context, key string) (string, error) { return f[key], nil }
 
-type fakeSessions struct{ err error }
+type fakeSessions struct {
+	err error
+	// userID is the account sign-in resolves to; 0 means 5.
+	userID    int
+	loggedOut *[]string
+}
 
 func (f fakeSessions) Login(context.Context, string, string, string, string) (*auth.TokenPair, *models.User, error) {
 	if f.err != nil {
 		return nil, nil, f.err
 	}
-	return &auth.TokenPair{AccessToken: "access"}, &models.User{ID: 5}, nil
+	id := f.userID
+	if id == 0 {
+		id = 5
+	}
+	return &auth.TokenPair{AccessToken: "access", SessionID: "sess"}, &models.User{ID: id}, nil
+}
+
+func (f fakeSessions) Logout(_ context.Context, sessionID string) error {
+	if f.loggedOut != nil {
+		*f.loggedOut = append(*f.loggedOut, sessionID)
+	}
+	return nil
 }
 
 func newTestService(repo *fakeRepo, sender *fakeMail, settings fakeSettings) *Service {
@@ -164,7 +180,7 @@ func TestRequestEmailsTheMatchingAccount(t *testing.T) {
 		if got.userID != 5 || got.minAge != selfServiceCooldown || got.expiresAt.Before(before.Add(SelfServiceTTL)) || got.expiresAt.After(time.Now().Add(SelfServiceTTL)) {
 			t.Fatalf("%q: stored %+v", login, got)
 		}
-		_, token, ok := strings.Cut(msg.TextBody, "https://silo.example.test/reset-password/")
+		_, token, ok := strings.Cut(msg.TextBody, "https://silo.example.test/reset-password#")
 		token, _, _ = strings.Cut(token, "\n")
 		if !ok || msg.To[0] != "alice@example.test" || auth.HashLinkToken(token) != got.tokenHash {
 			t.Fatalf("%q: email to %v does not carry the stored link", login, msg.To)
@@ -252,10 +268,10 @@ func TestIssueDeliversLinkOnlyWhereAsked(t *testing.T) {
 	s := newTestService(repo, sender, fakeSettings{"server.public_url": "https://silo.example.test/"})
 
 	link, err := s.Issue(t.Context(), IssueInput{UserID: 5, IssuedBy: 1, Delivery: DeliveryLink})
-	if err != nil || !strings.HasPrefix(link.URL, "https://silo.example.test/reset-password/") || len(sender.sent) != 0 {
+	if err != nil || !strings.HasPrefix(link.URL, "https://silo.example.test/reset-password#") || len(sender.sent) != 0 {
 		t.Fatalf("link = %+v, %v, sent %d", link, err, len(sender.sent))
 	}
-	token := strings.TrimPrefix(link.URL, "https://silo.example.test/reset-password/")
+	token := strings.TrimPrefix(link.URL, "https://silo.example.test/reset-password#")
 	if repo.issued[0] != auth.HashLinkToken(token) {
 		t.Fatal("stored digest does not match the returned link")
 	}
@@ -264,7 +280,7 @@ func TestIssueDeliversLinkOnlyWhereAsked(t *testing.T) {
 	if err != nil || !emailed.EmailSent || emailed.URL != "" || len(sender.sent) != 1 || sender.sent[0].To[0] != "alice@example.test" {
 		t.Fatalf("email = %+v, %v", emailed, err)
 	}
-	if !strings.Contains(sender.sent[0].TextBody, "/reset-password/") {
+	if !strings.Contains(sender.sent[0].TextBody, "/reset-password#") {
 		t.Fatal("email carries no link")
 	}
 	if inline := sender.sent[0].Inline; len(inline) != 1 || !strings.Contains(sender.sent[0].HTMLBody, "cid:"+inline[0].ContentID) {
@@ -329,5 +345,14 @@ func TestCompleteValidatesFirstAndReportsCommittedReset(t *testing.T) {
 	pair, user, err := s.Complete(t.Context(), "tok", "long-enough", "", "")
 	if !errors.Is(err, ErrSessionStart) || pair != nil || user == nil {
 		t.Fatalf("sign-in failure after commit = %v, %v, %v", pair, user, err)
+	}
+
+	// Sign-in that resolves to a different account returns no session and
+	// revokes the one it created.
+	var loggedOut []string
+	s.sessions = fakeSessions{userID: 6, loggedOut: &loggedOut}
+	pair, user, err = s.Complete(t.Context(), "tok", "long-enough", "", "")
+	if !errors.Is(err, ErrSessionStart) || pair != nil || user == nil || user.ID != 5 || len(loggedOut) != 1 {
+		t.Fatalf("sign-in as another account = %v, %v, %v, revoked %v", pair, user, err, loggedOut)
 	}
 }

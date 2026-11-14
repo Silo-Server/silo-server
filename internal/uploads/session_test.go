@@ -40,9 +40,9 @@ func TestManagerCompletesChunkedUpload(t *testing.T) {
 	}
 	defer upload.Cleanup()
 
-	data, err := os.ReadFile(upload.Path)
+	data, err := io.ReadAll(upload.File)
 	if err != nil {
-		t.Fatalf("ReadFile() error = %v", err)
+		t.Fatalf("read completed upload: %v", err)
 	}
 	if string(data) != "abcdefghij" {
 		t.Fatalf("assembled upload = %q, want %q", data, "abcdefghij")
@@ -156,6 +156,11 @@ func TestManagerReclaimsOrphanedDirsFromPreviousProcess(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(stale, "upload.bin"), []byte("leftover"), 0o600); err != nil {
 		t.Fatalf("write stale spool: %v", err)
 	}
+	// Only directories named like a session belong to the sweep.
+	foreign := filepath.Join(root, "not-a-session")
+	if err := os.Mkdir(foreign, 0o700); err != nil {
+		t.Fatalf("mkdir foreign dir: %v", err)
+	}
 
 	// A "restarted" manager knows nothing about the stale dir; reclaim must
 	// remove it while leaving live sessions untouched.
@@ -167,6 +172,9 @@ func TestManagerReclaimsOrphanedDirsFromPreviousProcess(t *testing.T) {
 	}
 	if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("stale dir still exists: %v", err)
+	}
+	if _, err := os.Stat(foreign); err != nil {
+		t.Fatalf("sweep removed a directory that is not a session: %v", err)
 	}
 	if _, err := manager.PutChunk(context.Background(), session.ID, 0, bytes.NewReader([]byte("abcd")), 4); err != nil {
 		t.Fatalf("live session broken after reclaim: %v", err)

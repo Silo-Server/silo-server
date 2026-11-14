@@ -77,6 +77,7 @@ func main() {
 	write(*out, "decision_response.json", goldenDecisionResponse())
 	write(*out, "native-decision_response.json", goldenNativeDecisionResponse())
 	write(*out, "hls-subtitle-rendition-decision_response.json", goldenHLSSubtitleRenditionDecisionResponse())
+	write(*out, "hls-subtitle-renditions-all-decision_response.json", goldenHLSSubtitleRenditionsAllDecisionResponse())
 	write(*out, "capability_response.json", goldenCapabilityResponse())
 	write(*out, "error_response.json", goldenErrorResponse())
 	write(*out, "route_event.json", goldenRouteEvent())
@@ -668,6 +669,22 @@ func goldenConformanceMatrix() playback.ConformanceMatrixV3 {
 	dv7Request.PlaybackAttemptID = "attempt-dv7-hdr10"
 	dv7Registry := playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{{Name: playback.TransformationServerDV7HDR10V3, RecipeVersion: playback.TransformationServerDV7HDR10RecipeVersionV3, Available: true}})
 	planner = append(planner, makePlannerScenario("dolby_vision_7_hdr10_fallback", "hdr_dv_matrix", dv7Request, dv7File, nil, settings, dv7Registry))
+
+	dv81File := *dv7File
+	dv81File.VideoTracks = append([]models.VideoTrack(nil), dv7File.VideoTracks...)
+	dv81File.VideoTracks[0].DVConfigPresent = true
+	dv81File.VideoTracks[0].DVRPUPresent = true
+	dv81File.VideoTracks[0].DVELPresent = true
+	dv81File.VideoTracks[0].DVBLPresent = true
+	dv81Request := conformanceHDRRequest()
+	dv81Request.PlaybackAttemptID = "attempt-dv7-to-dv81"
+	dv81Request.Capabilities.HDRDetails.DolbyVisionProfiles = []int{8}
+	dv81Request.ClientPlaybackContext.Output.HDRDetails.DolbyVisionProfiles = []int{8}
+	dv81Registry := playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
+		{Name: playback.TransformationServerDV7DV81V3, RecipeVersion: playback.TransformationServerDV7DV81RecipeVersionV3, Available: true},
+		{Name: playback.TransformationServerDV7HDR10V3, RecipeVersion: playback.TransformationServerDV7HDR10RecipeVersionV3, Available: true},
+	})
+	planner = append(planner, makePlannerScenario("dolby_vision_7_to_dv81", "hdr_dv_matrix", dv81Request, &dv81File, nil, settings, dv81Registry))
 
 	dv7ToneMapFile := *dv7File
 	dv7ToneMapFile.VideoTracks = append([]models.VideoTrack(nil), dv7File.VideoTracks...)

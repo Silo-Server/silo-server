@@ -7,10 +7,12 @@ import {
 } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { V2ProblemError } from "@/api/v2/request";
+import { t } from "@/i18n";
 import { v2 } from "@/api/v2/request";
 import {
   browseDiscoverV2,
   cancelMediaRequestV2,
+  removeFailedMediaRequestV2,
   createMediaRequestV2,
   followRequestMediaV2,
   getDiscoverRowV2,
@@ -284,11 +286,11 @@ export function useCreateMediaRequest() {
     retry: false,
     mutationFn: (body: CreateMediaRequestInput) => createMediaRequestV2(body),
     onSuccess: () => {
-      toast.success("Request submitted");
+      toast.success(t("web.common.requests.toast.submitted"));
       invalidateRequestSurfaces(queryClient);
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to submit request");
+      toast.error(err instanceof Error ? err.message : t("requests.error.create"));
     },
   });
 }
@@ -311,11 +313,15 @@ export function useToggleRequestFollow() {
         ? followRequestMediaV2(mediaType, tmdbID).then(() => undefined)
         : unfollowRequestMediaV2(mediaType, tmdbID),
     onSuccess: (_data, { follow }) => {
-      toast.success(follow ? "We'll let you know when it's available" : "Notification turned off");
+      toast.success(
+        follow
+          ? t("web.common.requests.toast.following")
+          : t("web.common.requests.toast.unfollowed"),
+      );
       invalidateRequestSurfaces(queryClient);
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to update notification");
+      toast.error(err instanceof Error ? err.message : t("requests.error.follow"));
     },
   });
 }
@@ -326,13 +332,30 @@ export function useCancelMediaRequest() {
     retry: false,
     mutationFn: (id: string) => cancelMediaRequestV2(id),
     onSuccess: () => {
-      toast.success("Request cancelled");
+      toast.success(t("web.common.requests.toast.cancelled"));
     },
     // A refused action still refreshes the queue: another admin may have
     // acted first, and the row should show what happened.
     onSettled: () => invalidateRequestSurfaces(queryClient),
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to cancel request");
+      toast.error(err instanceof Error ? err.message : t("web.common.requests.toast.cancelFailed"));
+    },
+  });
+}
+
+export function useRemoveFailedMediaRequest() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    retry: false,
+    mutationFn: (id: string) => removeFailedMediaRequestV2(id),
+    onSuccess: () => {
+      toast.success(t("web.common.requests.toast.removed"));
+    },
+    // A refused removal still refreshes: an admin may have retried it, and the
+    // row should show what happened.
+    onSettled: () => invalidateRequestSurfaces(queryClient),
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : t("web.common.requests.toast.removeFailed"));
     },
   });
 }

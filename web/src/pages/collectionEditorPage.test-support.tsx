@@ -5,9 +5,9 @@
  * `vi.mock` lines and calls `installV2Recorder()`.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider, useLocation } from "react-router";
-import { vi } from "vitest";
+import { expect, vi } from "vitest";
 
 import { adminCapabilities, personalCapabilities } from "@/test/fixtures/collectionAnswers";
 import { v2Recorder } from "@/test/v2Recorder";
@@ -96,4 +96,22 @@ export const saveBar = () => screen.getByRole("region", { name: "Unsaved changes
 export function choose(combobox: HTMLElement, option: string) {
   fireEvent.pointerDown(combobox, { button: 0, ctrlKey: false, pointerType: "mouse" });
   fireEvent.click(screen.getByRole("option", { name: option }));
+}
+
+/** Adds a Genre rule set to `genre`: a Smart collection needs one before it previews or creates. */
+export async function addGenreRule(genre = "Comedy") {
+  v2Recorder.answer("GET /api/v2/catalog/filters/search", {
+    matches: [genre],
+    values: [{ value: genre, count: 1 }],
+    has_more: false,
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "Add rule" }));
+  const rule = await screen.findByRole("group", { name: "Rule 1" });
+  fireEvent.click(within(rule).getByRole("combobox", { name: "Value" }));
+  const search = await screen.findByRole("combobox", { name: "Search genres" });
+  fireEvent.change(search, { target: { value: genre } });
+  fireEvent.keyDown(search, { key: "Enter" });
+  await vi.waitFor(() =>
+    expect(within(rule).getByRole("combobox", { name: "Value" })).toHaveTextContent(genre),
+  );
 }

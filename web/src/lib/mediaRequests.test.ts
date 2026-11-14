@@ -88,6 +88,11 @@ describe("canCancelOwnRequest", () => {
     expect(canCancelOwnRequest({ ...pending, status: "approved", targets: [] })).toBe(true);
   });
 
+  it("allows a retry backing off that holds only failed targets", () => {
+    const targets = [{ quality: "1080p", status: "failed" }] as MediaRequest["targets"];
+    expect(canCancelOwnRequest({ ...pending, status: "approved", targets })).toBe(true);
+  });
+
   it.each<[string, CancelFields]>([
     [
       "approved and sent",

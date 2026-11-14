@@ -212,12 +212,18 @@ func (e *QueryExecutor) PreviewCursorPage(ctx context.Context, def QueryDefiniti
 	if err != nil {
 		return QueryCursorPage{}, err
 	}
-	tx, err := e.Pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
-	if err != nil {
-		return QueryCursorPage{}, err
+	// A lone page statement already reads one snapshot; only the count needs
+	// a transaction to share it.
+	var q rowQuerier = e.Pool
+	var tx pgx.Tx
+	if includeTotal {
+		if tx, err = e.Pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}); err != nil {
+			return QueryCursorPage{}, err
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		q = tx
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	rows, err := tx.Query(ctx, sql, args...) //nolint:rowserrcheck // scanItemsWithMangaCounts checks Err through the cursorRows wrapper
+	rows, err := q.Query(ctx, sql, args...) //nolint:rowserrcheck // scanItemsWithMangaCounts checks Err through the cursorRows wrapper
 	if err != nil {
 		return QueryCursorPage{}, fmt.Errorf("querying cursor page: %w", err)
 	}
@@ -249,9 +255,9 @@ func (e *QueryExecutor) PreviewCursorPage(ctx context.Context, def QueryDefiniti
 			return QueryCursorPage{}, fmt.Errorf("counting cursor page: %w", err)
 		}
 		result.TotalExact = true
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return QueryCursorPage{}, err
+		if err := tx.Commit(ctx); err != nil {
+			return QueryCursorPage{}, err
+		}
 	}
 	return result, nil
 }

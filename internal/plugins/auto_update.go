@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -8,24 +9,52 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
+
+	"golang.org/x/mod/semver"
 
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
 
-// compareVersions compares two dot-separated version strings numerically.
-// Returns -1 if a < b, 0 if a == b, 1 if a > b.
-// Non-numeric segments fall back to lexicographic comparison.
+// compareVersions orders two plugin versions, returning -1 if a < b, 0 if
+// a == b, and 1 if a > b. Versions are Semantic Versioning strings with an
+// optional leading "v": a pre-release sorts below its release and build
+// metadata is ignored. Manifests are not validated, so a version that is not
+// valid semver sorts below every valid one, which lets a catalog release
+// replace a hand-installed build with a free-form version. Two invalid
+// versions compare dot segment by dot segment (see compareVersionSegments).
 func compareVersions(a, b string) int {
+	semA, semB := semverString(a), semverString(b)
+	validA, validB := semver.IsValid(semA), semver.IsValid(semB)
+	switch {
+	case validA && validB:
+		return semver.Compare(semA, semB)
+	case validA:
+		return 1
+	case validB:
+		return -1
+	}
+	return compareVersionSegments(a, b)
+}
+
+// semverString adds the "v" prefix golang.org/x/mod/semver requires.
+func semverString(version string) string {
+	if strings.HasPrefix(version, "v") {
+		return version
+	}
+	return "v" + version
+}
+
+// compareVersionSegments orders two versions dot segment by dot segment. A
+// missing segment sorts first, then integers by value, then other text
+// lexicographically. Ranking the kinds before comparing keeps the order
+// transitive, which the catalog sort needs.
+func compareVersionSegments(a, b string) int {
 	partsA := strings.Split(a, ".")
 	partsB := strings.Split(b, ".")
 
-	maxLen := len(partsA)
-	if len(partsB) > maxLen {
-		maxLen = len(partsB)
-	}
-
-	for i := 0; i < maxLen; i++ {
+	for i := 0; i < max(len(partsA), len(partsB)); i++ {
 		var segA, segB string
 		if i < len(partsA) {
 			segA = partsA[i]
@@ -33,27 +62,39 @@ func compareVersions(a, b string) int {
 		if i < len(partsB) {
 			segB = partsB[i]
 		}
-
-		numA, errA := strconv.Atoi(segA)
-		numB, errB := strconv.Atoi(segB)
-
-		if errA == nil && errB == nil {
-			if numA < numB {
-				return -1
-			}
-			if numA > numB {
-				return 1
-			}
-		} else {
-			if segA < segB {
-				return -1
-			}
-			if segA > segB {
-				return 1
-			}
+		if c := compareVersionSegment(segA, segB); c != 0 {
+			return c
 		}
 	}
 	return 0
+}
+
+func compareVersionSegment(a, b string) int {
+	rankA, numA := versionSegmentRank(a)
+	rankB, numB := versionSegmentRank(b)
+	if c := cmp.Compare(rankA, rankB); c != 0 {
+		return c
+	}
+	if rankA == segmentNumeric {
+		return cmp.Compare(numA, numB)
+	}
+	return strings.Compare(a, b)
+}
+
+const (
+	segmentMissing = iota
+	segmentNumeric
+	segmentText
+)
+
+func versionSegmentRank(segment string) (rank, value int) {
+	if segment == "" {
+		return segmentMissing, 0
+	}
+	if n, err := strconv.Atoi(segment); err == nil {
+		return segmentNumeric, n
+	}
+	return segmentText, 0
 }
 
 const pluginIDTMDB = "silo.tmdb"
@@ -201,7 +242,13 @@ func (s *AutoUpdateService) Check(ctx context.Context, opts AutoUpdateOptions) (
 
 	latestByRepositoryPlugin := latestCatalogEntriesByRepository(entries)
 	for _, existing := range installed {
-		if existing == nil || existing.RepositoryID == nil {
+		if existing == nil {
+			continue
+		}
+		if existing.RepositoryID == nil {
+			// An uploaded plugin, or one whose repository was deleted, has no
+			// automatic update left to fail, so drop any refusal it kept.
+			s.recordUpdateFailure(ctx, existing, CatalogEntry{}, autoUpdateOutcomeNone, nil, &summary)
 			continue
 		}
 		// The reserved builtin row must never be matched against catalog
@@ -220,6 +267,7 @@ func (s *AutoUpdateService) Check(ctx context.Context, opts AutoUpdateOptions) (
 			continue
 		}
 		outcome, err := s.handleExistingPlugin(ctx, existing, entry)
+		s.recordUpdateFailure(ctx, existing, entry, outcome, err, &summary)
 		if err != nil {
 			summary.recordFailuref("process plugin update %s: %v", existing.PluginID, err)
 			continue
@@ -464,6 +512,61 @@ func (s *AutoUpdateService) notifyPluginUpdate(ctx context.Context, existing *In
 		"available_version", newVersion,
 	)
 	return nil
+}
+
+// updateFailureGenericReason is shown for a refused automatic update whose
+// error was not written for the admin; the server log has the detail.
+const updateFailureGenericReason = "Silo couldn't install it. The server log has the details."
+
+// maxUpdateFailureReasonRunes bounds the stored reason shown in web admin.
+const maxUpdateFailureReasonRunes = 500
+
+// recordUpdateFailure keeps the installation's refused-update record in step
+// with this pass: a failed automatic update records the version and an
+// admin-facing reason, and a pass that handled the plugin without failing
+// clears an earlier record. A plugin missing from this pass's catalog (its
+// repository may be unreachable for now) keeps its record. A write failure
+// is counted in the summary and does not stop the pass; a plugin uninstalled
+// since the pass listed it has nothing left to record.
+func (s *AutoUpdateService) recordUpdateFailure(
+	ctx context.Context,
+	existing *Installation,
+	entry CatalogEntry,
+	outcome autoUpdateOutcome,
+	updateErr error,
+	summary *AutoUpdateSummary,
+) {
+	var input UpdateInstallationInput
+	switch {
+	case updateErr != nil && outcome == autoUpdateOutcomeUpdated:
+		input.UpdateFailure = &UpdateFailure{
+			Version:  entry.Manifest.GetVersion(),
+			Reason:   updateFailureReason(updateErr),
+			FailedAt: time.Now().UTC(),
+		}
+		input.IfVersion = &existing.Version
+	case updateErr == nil && existing.UpdateFailure != nil:
+		input.ClearUpdateFailure = true
+	default:
+		return
+	}
+	if err := s.installations.Update(ctx, existing.ID, input); err != nil && !errors.Is(err, ErrInstallationNotFound) {
+		summary.recordFailuref("record update result for plugin %s: %v", existing.PluginID, err)
+	}
+}
+
+// updateFailureReason is the admin-facing reason for a refused update: a
+// PackageError's message, which names no URL or checksum, or a generic line.
+func updateFailureReason(err error) string {
+	packageErr, ok := AsPackageError(err)
+	if !ok || strings.TrimSpace(packageErr.Message) == "" {
+		return updateFailureGenericReason
+	}
+	reason := logredact.SanitizeText(packageErr.Message)
+	if runes := []rune(reason); len(runes) > maxUpdateFailureReasonRunes {
+		reason = string(runes[:maxUpdateFailureReasonRunes-1]) + "…"
+	}
+	return reason
 }
 
 type repositoryPluginKey struct {

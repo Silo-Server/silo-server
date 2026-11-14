@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -587,11 +588,13 @@ func registerAll(reg *Registry) {
 	registerAdminRequestUsage(reg)
 	registerAdminAccountSettings(reg)
 	registerAdminProfileSections(reg)
+	registerAdminProfiles(reg)
 	registerAdminAccessGroups(reg)
 	registerPreferences(reg)
 	registerHome(reg)
 	registerFavorites(reg)
 	registerNotInterested(reg)
+	registerTitleAllowances(reg)
 	registerHistory(reg)
 	registerDeviceSettings(reg)
 	registerLibraries(reg)
@@ -624,9 +627,12 @@ func registerAll(reg *Registry) {
 	registerAdminDiagnosticDownload(reg)
 	registerAdminJobArtifactDownload(reg)
 	registerAdminJobArtifactCapabilities(reg)
+	registerAdminBackups(reg)
+	registerProfileTransfer(reg)
 	registerAdminDiagnosticReads(reg)
 	registerAdminDiagnosticDelete(reg)
 	registerAdminDashboardInsights(reg)
+	registerAdminAPIClients(reg)
 	registerAdminDashboardCapabilities(reg)
 	registerAdminDashboardLayout(reg)
 	registerAdminDashboardLayoutReset(reg)
@@ -641,6 +647,7 @@ func registerAll(reg *Registry) {
 	registerAdminNodeConfiguration(reg)
 	registerAdminServerStatus(reg)
 	registerAdminBrandingAssets(reg)
+	registerOverlayImages(reg)
 	registerAdminJellyfinCompatWeb(reg)
 	registerAdminServerRestart(reg)
 	registerAdminEmailTest(reg)
@@ -786,6 +793,7 @@ func GenerateOpenAPI() ([]byte, error) {
 	reg := &Registry{api: api}
 	registerAll(reg)
 	api.OpenAPI().Extensions = map[string]any{workerProtocolsExtension: describeWorkerProtocols(), pluginContentExtension: describePluginContent()}
+	admitNullInNullableEnums(api.OpenAPI().Components.Schemas.Map())
 	raw, err := api.OpenAPI().MarshalJSON()
 	if err != nil {
 		return nil, err
@@ -796,6 +804,37 @@ func GenerateOpenAPI() ([]byte, error) {
 	}
 	buf.WriteByte('\n')
 	return buf.Bytes(), nil
+}
+
+// admitNullInNullableEnums adds null to the enum of every nullable schema in
+// the components. JSON Schema applies type and enum separately, so
+// ["string", "null"] with an enum of strings alone still refuses null. The
+// pass runs on the document only: Huma's request validator accepts null on
+// a nullable schema before it checks the enum, and leaving the registered
+// enum alone keeps null out of its 422 message.
+func admitNullInNullableEnums(components map[string]*huma.Schema) {
+	var walk func(s *huma.Schema)
+	walk = func(s *huma.Schema) {
+		if s == nil {
+			return
+		}
+		if s.Nullable && len(s.Enum) > 0 && !slices.Contains(s.Enum, nil) {
+			s.Enum = append(slices.Clip(s.Enum), nil)
+		}
+		for _, property := range s.Properties {
+			walk(property)
+		}
+		walk(s.Items)
+		if value, ok := s.AdditionalProperties.(*huma.Schema); ok {
+			walk(value)
+		}
+		for _, sub := range slices.Concat(s.OneOf, s.AnyOf, s.AllOf) {
+			walk(sub)
+		}
+	}
+	for _, s := range components {
+		walk(s)
+	}
 }
 
 // noopAdapter lets the generator register operations without a router: the

@@ -962,14 +962,7 @@ func (w *MatchWorker) validateReusedGroupIdentity(ctx context.Context, file *mod
 		return fmt.Errorf("loading queued group identity: %w", err)
 	}
 	current := reparseQueuedFileIdentity(file, skeleton.Type, libraryRoots...)
-	ids := trustedStructuredIDsForSkeleton(file.FilePath, skeleton.ObservedRootPath, skeleton.RootPath, libraryRoots...)
-	if ids == nil {
-		ids = naming.ParseFolderIDs(skeletonFolderAnchorName(skeleton.ObservedRootPath, libraryRoots))
-		if ids == nil && skeleton.RootPath != skeleton.ObservedRootPath {
-			ids = naming.ParseFolderIDs(skeletonFolderAnchorName(skeleton.RootPath, libraryRoots))
-		}
-	}
-	if scannedGroupIdentityChanged(group, current, ids, libraryRoots...) {
+	if scannedGroupIdentityChanged(group, current, rescannedGroupIDs(file, skeleton.ObservedRootPath, libraryRoots...), libraryRoots...) {
 		return errors.New("filename identity changed since the last scan; rescan the library to update file grouping")
 	}
 	return nil
@@ -1031,7 +1024,7 @@ func (w *MatchWorker) reusableQueuedMovieSkeleton(ctx context.Context, file *mod
 		itemType = currentFile.BaseType
 	}
 
-	refreshedIDs := trustedStructuredIDsForSkeleton(file.FilePath, observedRootPath, rootPath, libraryRoots...)
+	refreshedIDs := trustedStructuredIDsForSkeleton(file.FilePath, observedRootPath, rootPath, nil, libraryRoots...)
 	// This is an unmatched-style skeleton being re-evaluated. Structured path
 	// IDs are current input; IDs that disappeared from the path must not remain
 	// trusted forever merely because an older parser copied them onto the
@@ -1047,6 +1040,12 @@ func (w *MatchWorker) reusableQueuedMovieSkeleton(ctx context.Context, file *mod
 		if refreshedIDs.TvdbID != "" {
 			tvdbID = refreshedIDs.TvdbID
 		}
+	}
+	// A rerun of a matched item refreshes the title it was matched to. A path
+	// tag can name another title, as when a file tagged {tmdb-106} sits in a
+	// folder tagged {tmdb-999}, and must not pull that title's metadata onto it.
+	if status == string(MatchOutcomeMatched) && (item.TmdbID != "" || item.ImdbID != "" || item.TvdbID != "") {
+		tmdbID, imdbID, tvdbID = item.TmdbID, item.ImdbID, item.TvdbID
 	}
 
 	return &skeletonResult{
@@ -1113,7 +1112,7 @@ func (w *MatchWorker) applyQueuedGroupOverride(ctx context.Context, file *models
 
 	wasAmbiguous := skeleton.ItemStatus == "ambiguous" //nolint:goconst // Item statuses are literals throughout this package.
 	applyGroupOverride(skeleton, override)
-	applyFolderIDHints(skeleton, trustedStructuredIDsForSkeleton(file.FilePath, skeleton.ObservedRootPath, skeleton.RootPath, libraryRoots...))
+	applyFolderIDHints(skeleton, trustedStructuredIDsForSkeleton(file.FilePath, skeleton.ObservedRootPath, skeleton.RootPath, override, libraryRoots...))
 	if wasAmbiguous {
 		// The match merges provider metadata into the stored item, and keeps
 		// the title of an item that is still ambiguous. Store the settled

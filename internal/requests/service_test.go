@@ -2,6 +2,7 @@ package requests
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -665,12 +666,12 @@ func TestDisabledRequestsBlockUserSurfaces(t *testing.T) {
 			_, err := service.Search(context.Background(), viewer, "fight", MediaTypeMovie, 1)
 			return err
 		}},
-		{"discover all", func() error {
-			_, err := service.DiscoverAll(context.Background(), viewer)
+		{"discover rows", func() error {
+			_, err := service.DiscoverRows(context.Background(), viewer)
 			return err
 		}},
-		{"discover section", func() error {
-			_, err := service.Discover(context.Background(), viewer, "popular_movies", 1)
+		{"discover row", func() error {
+			_, err := service.DiscoverRow(context.Background(), viewer, "popular_movies", 1)
 			return err
 		}},
 		{"detail", func() error {
@@ -692,6 +693,9 @@ func TestDisabledRequestsBlockUserSurfaces(t *testing.T) {
 		{"cancel", func() error {
 			_, err := service.Cancel(context.Background(), viewer, "req-1", "")
 			return err
+		}},
+		{"remove failed", func() error {
+			return service.RemoveFailed(context.Background(), viewer, "req-1")
 		}},
 		{"studios", func() error {
 			_, err := service.ListStudios(context.Background(), viewer)
@@ -777,11 +781,10 @@ func seedStalledPresenceRequest(t *testing.T, status Status, age time.Duration) 
 // on. A router that never reports completion would otherwise pin the request
 // open forever, because the presence shortcut stays disabled while a target
 // is live. Inside the horizon the router still owns the target: presence must
-// not short-circuit a submission that may simply be young. The presence check
-// is quality-agnostic, so a 2160p target still downloading against an
-// already-present 1080p copy must never be retired out from under the
-// in-flight download.
-func TestReconcileRequestsPresenceRetiresOnlyStalledQueuedTargets(t *testing.T) {
+// not short-circuit a submission that may simply be young. A downloading
+// target gets a longer horizon (see
+// TestReconcileRequestsPresenceRetiresStalledDownloadingTargets).
+func TestReconcileRequestsPresenceRetiresOnlyStalledTargets(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
 		status        Status
@@ -791,7 +794,8 @@ func TestReconcileRequestsPresenceRetiresOnlyStalledQueuedTargets(t *testing.T) 
 	}{
 		{"stalled queued", StatusQueued, 48 * time.Hour, 1, StatusCompleted},
 		{"recent queued", StatusQueued, time.Hour, 0, StatusQueued},
-		{"downloading", StatusDownloading, 30 * 24 * time.Hour, 0, StatusDownloading},
+		{"stalled downloading", StatusDownloading, 30 * 24 * time.Hour, 1, StatusCompleted},
+		{"recent downloading", StatusDownloading, 48 * time.Hour, 0, StatusDownloading},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, service, _ := seedStalledPresenceRequest(t, tc.status, tc.age)
@@ -815,6 +819,101 @@ func TestReconcileRequestsPresenceRetiresOnlyStalledQueuedTargets(t *testing.T) 
 			}
 			if store.requests["req-1"].Status != StatusCompleted {
 				t.Fatalf("request status = %q, want completed", store.requests["req-1"].Status)
+			}
+		})
+	}
+}
+
+// A router can report downloading for good: Seerr leaves a movie in
+// PROCESSING when its own availability check never runs, even once the file
+// is imported (#3478). Presence closes out such a target, but a downloading
+// target may also be a real download, and presence only knows the title is in
+// the library: not at which quality, and for a whole series, not which
+// episodes. So a target with download progress, a whole-series request, a
+// season request whose seasons are not all complete, and a request that asked
+// for another quality as well all keep their downloading target. A failed
+// target fetched nothing, so it does not hold the other tier open; the request
+// then aggregates to failed, as when its router reports the completion, so
+// Retry can resubmit the failed tier. Neither does a target this backstop
+// completed, since presence proved no file at its quality: otherwise a 2160p
+// target retired while queued would pin a stuck 1080p one forever.
+func TestReconcileRequestsPresenceRetiresStalledDownloadingTargets(t *testing.T) {
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	stale := now.Add(-30 * 24 * time.Hour)
+	const seriesID = 1399
+	movie := Request{ID: "req-1", MediaType: MediaTypeMovie, TMDBID: 550}
+	wholeSeries := Request{ID: "req-1", MediaType: MediaTypeSeries, TMDBID: seriesID}
+	seasons := Request{ID: "req-1", MediaType: MediaTypeSeries, TMDBID: seriesID, Seasons: []int{1, 2}}
+	complete := map[int]SeasonCounts{1: {Aired: 8, Have: 8}, 2: {Aired: 10, Have: 10}}
+	partial := map[int]SeasonCounts{1: {Aired: 8, Have: 8}, 2: {Aired: 10, Have: 4}}
+	downloading := Target{Quality: Quality1080p, Status: StatusDownloading, ExternalStatus: "3", UpdatedAt: stale}
+	withProgress := downloading
+	withProgress.Download = &DownloadProgress{Phase: DownloadPhaseStalled, BytesTotal: 100, BytesLeft: 60, UpdatedAt: now.Add(-time.Minute)}
+	uhd := downloading
+	uhd.Quality = Quality2160p
+	hdDone := Target{Quality: Quality1080p, Status: StatusCompleted, ExternalStatus: "5", UpdatedAt: stale}
+	uhdFailed := Target{Quality: Quality2160p, Status: StatusFailed, LastError: msgNoTargetForQuality, UpdatedAt: stale}
+	uhdByPresence := Target{Quality: Quality2160p, Status: StatusCompleted, ExternalStatus: ExternalStatusPresenceConfirmed, UpdatedAt: stale}
+
+	for _, tc := range []struct {
+		name    string
+		req     Request
+		seasons map[int]SeasonCounts
+		targets []Target
+		// retired is whether the last target is completed by presence, and
+		// status and outcome are the request's aggregate afterwards.
+		retired bool
+		status  Status
+		outcome Outcome
+	}{
+		{"movie", movie, nil, []Target{downloading}, true, StatusCompleted, OutcomeActive},
+		{"movie with download progress", movie, nil, []Target{withProgress}, false, StatusDownloading, OutcomeActive},
+		{"2160p beside a completed 1080p target", movie, nil, []Target{hdDone, uhd}, false, StatusDownloading, OutcomeActive},
+		{"2160p alone", movie, nil, []Target{uhd}, true, StatusCompleted, OutcomeActive},
+		{"1080p beside a failed 2160p target", movie, nil, []Target{uhdFailed, downloading}, true, StatusQueued, OutcomeFailed},
+		{"1080p beside a 2160p target completed by presence", movie, nil, []Target{uhdByPresence, downloading}, true, StatusCompleted, OutcomeActive},
+		{"whole series", wholeSeries, nil, []Target{downloading}, false, StatusDownloading, OutcomeActive},
+		{"seasons all complete", seasons, complete, []Target{downloading}, true, StatusCompleted, OutcomeActive},
+		{"a season incomplete", seasons, partial, []Target{downloading}, false, StatusDownloading, OutcomeActive},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newFakeStore()
+			req := tc.req
+			req.Status, req.Outcome = StatusDownloading, OutcomeActive
+			store.candidates = []*Request{&req}
+			store.requests[req.ID] = &req
+			for _, target := range tc.targets {
+				target.RequestID = req.ID
+				target.IntegrationID, target.IntegrationKind, target.ExternalID = "router-1", "seerr", "123"
+				if _, err := store.CreateTarget(context.Background(), target); err != nil {
+					t.Fatalf("seed target: %v", err)
+				}
+			}
+			presence := &fakePresence{available: map[MediaType]map[int]bool{req.MediaType: {req.TMDBID: true}}}
+			if tc.seasons != nil {
+				presence.seasons = map[string]map[int]SeasonCounts{fakePresenceContentID(req.MediaType, req.TMDBID): tc.seasons}
+			}
+			service := NewService(store, &fakeTMDBClient{}, presence)
+			service.Now = func() time.Time { return now }
+
+			result, err := service.ReconcileRequests(context.Background(), 100)
+			if err != nil {
+				t.Fatalf("ReconcileRequests returned error: %v", err)
+			}
+			targets, _ := store.ListTargets(context.Background(), req.ID)
+			last := targets[len(targets)-1]
+			switch {
+			case !tc.retired && last.Status != StatusDownloading:
+				t.Fatalf("target = %+v, want it left downloading", last)
+			case tc.retired && (last.Status != StatusCompleted || last.ExternalStatus != ExternalStatusPresenceConfirmed):
+				t.Fatalf("target = %+v, want it completed as %s", last, ExternalStatusPresenceConfirmed)
+			}
+			got := store.requests[req.ID]
+			if got.Status != tc.status || got.Outcome != tc.outcome {
+				t.Fatalf("request = %s/%s, want %s/%s", got.Status, got.Outcome, tc.status, tc.outcome)
+			}
+			if wantCompleted := tc.status == StatusCompleted; (result.Completed == 1) != wantCompleted {
+				t.Fatalf("result = %+v, want completed %v", result, wantCompleted)
 			}
 		})
 	}
@@ -1042,6 +1141,39 @@ func TestCancelPendingRequestAuthority(t *testing.T) {
 			}
 			if tc.wantCancelled && req.Outcome != OutcomeCancelled {
 				t.Fatalf("Outcome = %q, want canceled", req.Outcome)
+			}
+		})
+	}
+}
+
+func TestRemoveFailedRequestAuthority(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		viewer      Viewer
+		wantErr     error
+		wantRemoved bool
+	}{
+		{"owner", Viewer{UserID: 7, ProfileID: "profile-1"}, nil, true},
+		{"non-owner", Viewer{UserID: 8, ProfileID: "profile-2"}, ErrForbidden, false},
+		{"admin", Viewer{UserID: 99, IsAdmin: true}, nil, true},
+		{"no account", Viewer{}, ErrForbidden, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newFakeStore()
+			store.requests["req-failed"] = &Request{
+				ID:                "req-failed",
+				MediaType:         MediaTypeMovie,
+				TMDBID:            550,
+				Status:            StatusApproved,
+				Outcome:           OutcomeFailed,
+				RequestedByUserID: 7,
+			}
+			err := newTestService(store).RemoveFailed(context.Background(), tc.viewer, "req-failed")
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tc.wantErr)
+			}
+			if _, kept := store.requests["req-failed"]; kept == tc.wantRemoved {
+				t.Fatalf("request kept = %v, want removed = %v", kept, tc.wantRemoved)
 			}
 		})
 	}
@@ -1546,10 +1678,16 @@ func (f *fakeStore) MarkFulfilledNotified(_ context.Context, id string) (bool, e
 	return true, nil
 }
 
-func (f *fakeStore) ListMine(context.Context, int, ListFilter) ([]*Request, error) {
+func (f *fakeStore) ListMine(_ context.Context, _ int, filter ListFilter) ([]*Request, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]*Request(nil), f.mine...), nil
+	var out []*Request
+	for _, req := range f.mine {
+		if filter.RequestedByProfileID == "" || req.RequestedByProfileID == filter.RequestedByProfileID {
+			out = append(out, req)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeStore) ListAdmin(_ context.Context, filter ListFilter) ([]*Request, error) {
@@ -1612,7 +1750,8 @@ func (f *fakeStore) guardAccepts(g StateGuard, req *Request) bool {
 	}
 	if g.UnsentOnly && req.Status == StatusApproved {
 		leased := req.SubmitLeaseUntil != nil && req.SubmitLeaseUntil.After(time.Now())
-		return !leased && len(f.targets[req.ID]) == 0
+		sent := slices.ContainsFunc(f.targets[req.ID], func(t Target) bool { return t.Status != StatusFailed })
+		return !leased && !sent
 	}
 	return true
 }
@@ -1677,6 +1816,20 @@ func (f *fakeStore) SetOutcome(_ context.Context, id string, from StateGuard, ou
 	}
 	copy := *req
 	return &copy, nil
+}
+
+func (f *fakeStore) DeleteFailed(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	req := f.lookupLocked(id)
+	if req == nil {
+		return ErrNotFound
+	}
+	if req.Outcome != OutcomeFailed {
+		return ErrInvalidState
+	}
+	delete(f.requests, req.ID)
+	return nil
 }
 
 func (f *fakeStore) ReopenFailed(_ context.Context, id string, _ Viewer) (*Request, error) {
@@ -1762,15 +1915,17 @@ func (f *fakeStore) MarkAvailable(_ context.Context, id string, _ Viewer) (*Requ
 		return nil, ErrNotFound
 	}
 	open := req.Status == StatusPending || req.Status == StatusApproved || req.Status == StatusQueued || req.Status == StatusDownloading
-	claimed := req.Status == StatusApproved && req.SubmitLeaseUntil != nil && req.SubmitLeaseUntil.After(time.Now())
 	partlyDelivered := false
 	for _, t := range f.targets[id] {
 		if t.Status == StatusCompleted {
 			partlyDelivered = true
 		}
 	}
+	// An approved request that delivered a quality is resending the rest.
+	submitting := req.Status == StatusApproved &&
+		(partlyDelivered || req.SubmitLeaseUntil != nil && req.SubmitLeaseUntil.After(time.Now()))
 	failedElsewhere := req.Outcome == OutcomeFailed && !partlyDelivered
-	if !failedElsewhere && (req.Outcome != OutcomeActive || !open || claimed) {
+	if !failedElsewhere && (req.Outcome != OutcomeActive || !open || submitting) {
 		return nil, ErrInvalidState
 	}
 	f.statusUpdates = append(f.statusUpdates, StatusCompleted)
@@ -2012,6 +2167,10 @@ func (f *fakeStore) SetRoutingFacts(_ context.Context, id string, facts RoutingF
 	if req == nil {
 		return nil, ErrNotFound
 	}
+	if req.RoutingFacts.Captured() {
+		out := *req
+		return &out, nil
+	}
 	if f.factsSet == nil {
 		f.factsSet = map[string]RoutingFacts{}
 	}
@@ -2020,6 +2179,51 @@ func (f *fakeStore) SetRoutingFacts(_ context.Context, id string, facts RoutingF
 	req.IsAnime = facts.Anime
 	copy := *req
 	return &copy, nil
+}
+
+func (f *fakeStore) UpdateRoutingFacts(_ context.Context, id string, facts RoutingFacts) (*Request, error) {
+	return f.mergeRoutingFacts(id, facts, false)
+}
+
+func (f *fakeStore) FillRoutingFacts(_ context.Context, id string, facts RoutingFacts) (*Request, error) {
+	return f.mergeRoutingFacts(id, facts, true)
+}
+
+// mergeRoutingFacts merges facts into the stored ones key by key, as the
+// repository's jsonb concatenation does; keepStored keeps a key both hold.
+func (f *fakeStore) mergeRoutingFacts(id string, facts RoutingFacts, keepStored bool) (*Request, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	req := f.lookupLocked(id)
+	if req == nil {
+		return nil, ErrNotFound
+	}
+	stored, patch := map[string]json.RawMessage{}, map[string]json.RawMessage{}
+	for target, from := range map[*map[string]json.RawMessage]RoutingFacts{&stored: req.RoutingFacts, &patch: facts} {
+		raw, err := json.Marshal(from)
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(raw, target); err != nil {
+			return nil, err
+		}
+	}
+	for key, value := range patch {
+		if _, held := stored[key]; !held || !keepStored {
+			stored[key] = value
+		}
+	}
+	raw, err := json.Marshal(stored)
+	if err != nil {
+		return nil, err
+	}
+	var merged RoutingFacts
+	if err := json.Unmarshal(raw, &merged); err != nil {
+		return nil, err
+	}
+	req.RoutingFacts = merged
+	out := *req
+	return &out, nil
 }
 
 func (f *fakeStore) ListTargets(_ context.Context, requestID string) ([]Target, error) {
@@ -2066,9 +2270,18 @@ func (f *fakeStore) DeleteTarget(_ context.Context, id int64) error {
 	return ErrNotFound
 }
 
+// UpdateTargetStatus mirrors the repository: it writes only a queued or
+// downloading target and answers ErrInvalidState for a finished one.
 func (f *fakeStore) UpdateTargetStatus(_ context.Context, targetID int64, status Status, externalID, externalStatus, lastErr string, _ Viewer) (*Request, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	for _, ts := range f.targets {
+		for _, t := range ts {
+			if t.ID == targetID && t.Status != StatusQueued && t.Status != StatusDownloading {
+				return nil, ErrInvalidState
+			}
+		}
+	}
 	return f.updateTargetLocked(targetID, status, externalID, externalStatus, lastErr)
 }
 
@@ -2157,8 +2370,9 @@ func (f *fakeStore) UpdateTargetExternalStatus(_ context.Context, targetID int64
 	return nil
 }
 
-// RecordSubmission mirrors the repository's lease fence, then records each
-// target the way a create followed by a status update would.
+// RecordSubmission mirrors the repository's lease fence and its replacement of
+// the failed targets of the qualities it records, then records each target the
+// way a create followed by a status update would.
 func (f *fakeStore) RecordSubmission(_ context.Context, id string, leaseUntil time.Time, targets []Target, _ Viewer) (*Request, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -2174,6 +2388,9 @@ func (f *fakeStore) RecordSubmission(_ context.Context, id string, leaseUntil ti
 	if f.targets == nil {
 		f.targets = map[string][]Target{}
 	}
+	f.targets[id] = slices.DeleteFunc(f.targets[id], func(old Target) bool {
+		return old.Status == StatusFailed && slices.ContainsFunc(targets, func(t Target) bool { return t.Quality == old.Quality })
+	})
 	latest := req
 	for _, t := range targets {
 		f.targetSeq++
@@ -2279,7 +2496,9 @@ type fakePresence struct {
 	byTVDB    map[MediaType]map[int]int
 	got       []PresenceCandidate
 	// seasons holds per-season counts by series content ID.
-	seasons       map[string]map[int]SeasonCounts
+	seasons map[string]map[int]SeasonCounts
+	// seasonErr fails SeasonAvailability.
+	seasonErr     error
 	seasonLookups int
 }
 
@@ -2287,6 +2506,9 @@ func (f *fakePresence) SeasonAvailability(_ context.Context, seriesContentIDs []
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.seasonLookups++
+	if f.seasonErr != nil {
+		return nil, f.seasonErr
+	}
 	out := map[string]map[int]SeasonCounts{}
 	for _, id := range seriesContentIDs {
 		if counts, ok := f.seasons[id]; ok {
@@ -2350,6 +2572,7 @@ type fakeTMDBClient struct {
 	externalIDCalls   []int
 	detail            *tmdb.MediaDetail
 	detailErr         error
+	detailCalls       int
 	discoverPage      *tmdb.MediaPage
 	discoverErr       error
 	searchMediaType   string
@@ -2392,6 +2615,9 @@ func (f *fakeTMDBClient) GetExternalIDs(_ context.Context, _ string, id int) (*t
 }
 
 func (f *fakeTMDBClient) GetMediaDetail(context.Context, string, int) (*tmdb.MediaDetail, error) {
+	f.mu.Lock()
+	f.detailCalls++
+	f.mu.Unlock()
 	return f.detail, f.detailErr
 }
 
@@ -2510,6 +2736,14 @@ type fakeRouterProvider struct {
 	optionsErr     error
 	gotOptionsConn ResolvedRouterConnection
 
+	// TestConnection behavior: testFails answers not ok with testMessage;
+	// testErr fails the call itself.
+	testFails   bool
+	testMessage string
+	testErr     error
+	testCalls   int
+	gotTestConn ResolvedRouterConnection
+
 	// Validate behavior (default empty = valid).
 	validateFieldErrors   map[string]string
 	validateFormError     string
@@ -2601,8 +2835,15 @@ func (f *fakeRouterProvider) ListConfigOptions(_ context.Context, _ int, _ strin
 	return f.options, nil
 }
 
-func (f *fakeRouterProvider) TestConnection(_ context.Context, _ int, _ string, _ ResolvedRouterConnection) (bool, string, error) {
-	return true, "", nil
+func (f *fakeRouterProvider) TestConnection(_ context.Context, _ int, _ string, conn ResolvedRouterConnection) (bool, string, error) {
+	f.mu.Lock()
+	f.testCalls++
+	f.gotTestConn = conn
+	f.mu.Unlock()
+	if f.testErr != nil {
+		return false, "", f.testErr
+	}
+	return !f.testFails, f.testMessage, nil
 }
 
 func (f *fakeRouterProvider) Validate(_ context.Context, _ int, capabilityID string, conn ResolvedRouterConnection, siblings []ResolvedRouterConnection) (map[string]string, string, error) {

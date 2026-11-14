@@ -4,11 +4,18 @@ import { OVERLAY_POSITIONS } from "./types";
 import type {
   CardOverlayPrefs,
   OverlayData,
+  OverlayFontWeight,
   OverlayId,
   OverlayItemConfig,
   OverlayPosition,
+  OverlayShape,
+  OverlayStyle,
   PresetId,
 } from "./types";
+
+// Settings manifest revision whose card-overlays schema first accepts the
+// edge positions, the plate and band presets, style, and image references. Below it the server rejects a document that uses any of them.
+export const OVERLAY_STYLE_MANIFEST_REVISION = 25;
 
 export function buildDefaultPrefs(): CardOverlayPrefs {
   return { version: 2, preset: "classic", order: [], items: buildItems(undefined) };
@@ -19,12 +26,13 @@ export function buildDefaultPrefs(): CardOverlayPrefs {
 // renders nor edits these, but their stored config must survive a round-trip:
 // the native clients' settings UIs can author them, and dropping them here
 // would erase another client's preference on the next web save. Their bases
-// mirror the native registries' defaults (ribbons: top-right, disabled).
+// mirror the native registries' defaults (ribbons: disabled), on the right edge
+// now that the top-right corner shows watch status.
 const PASSTHROUGH_IDS = [
   "imdb_top_250",
   "rt_certified_fresh",
 ] as const satisfies readonly OverlayId[];
-const PASSTHROUGH_BASE: OverlayItemConfig = { enabled: false, position: "top-right" };
+const PASSTHROUGH_BASE: OverlayItemConfig = { enabled: false, position: "right-edge" };
 
 function isKnownOverlayId(v: unknown): v is OverlayId {
   return (
@@ -33,8 +41,14 @@ function isKnownOverlayId(v: unknown): v is OverlayId {
   );
 }
 
-function isValidPosition(v: unknown): v is OverlayPosition {
-  return typeof v === "string" && (OVERLAY_POSITIONS as readonly string[]).includes(v);
+// The stored position, or null when it is not one. The contract keeps
+// top-right valid for documents written before the corner held watch status;
+// such a badge moves to the right-edge rail, the same side of the card.
+function parsePosition(v: unknown): OverlayPosition | null {
+  if (v === "top-right") return "right-edge";
+  return typeof v === "string" && (OVERLAY_POSITIONS as readonly string[]).includes(v)
+    ? (v as OverlayPosition)
+    : null;
 }
 
 function isValidPreset(v: unknown): v is PresetId {
@@ -43,6 +57,67 @@ function isValidPreset(v: unknown): v is PresetId {
 
 function isHexColor(v: unknown): v is string {
   return typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v);
+}
+
+function isHexColorWithAlpha(v: unknown): v is string {
+  return typeof v === "string" && /^#[0-9a-fA-F]{8}$/.test(v);
+}
+
+const IMAGE_REF = /^[0-9a-f]{64}\.webp$/;
+const MAX_VALUE_IMAGES = 32;
+const MAX_VALUE_KEY_LENGTH = 64;
+
+export function isOverlayImageRef(v: unknown): v is string {
+  return typeof v === "string" && IMAGE_REF.test(v);
+}
+
+const SHAPES: readonly OverlayShape[] = ["pill", "rounded", "square"];
+const FONT_WEIGHTS: readonly OverlayFontWeight[] = ["regular", "semibold", "extrabold"];
+
+export const STYLE_SIZE_MIN = 0.75;
+export const STYLE_SIZE_MAX = 2;
+
+function parseValueImages(v: unknown): Record<string, string> | undefined {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+  const entries = Object.entries(v as Record<string, unknown>)
+    .filter(
+      (entry): entry is [string, string] =>
+        entry[0].length > 0 &&
+        // The contract's maxLength counts code points, not UTF-16 units.
+        [...entry[0]].length <= MAX_VALUE_KEY_LENGTH &&
+        isOverlayImageRef(entry[1]),
+    )
+    .slice(0, MAX_VALUE_IMAGES);
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+// Keeps the fields the contract accepts; an invalid field is dropped rather
+// than failing the whole style, and an empty style is no style.
+export function parseOverlayStyle(v: unknown): OverlayStyle | undefined {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+  const raw = v as Record<string, unknown>;
+  const style: OverlayStyle = {};
+  if (typeof raw.size === "number" && raw.size >= STYLE_SIZE_MIN && raw.size <= STYLE_SIZE_MAX) {
+    style.size = raw.size;
+  }
+  if (SHAPES.includes(raw.shape as OverlayShape)) style.shape = raw.shape as OverlayShape;
+  if (isHexColorWithAlpha(raw.background)) style.background = raw.background;
+  if (isHexColor(raw.textColor)) style.textColor = raw.textColor;
+  if (isHexColorWithAlpha(raw.borderColor)) style.borderColor = raw.borderColor;
+  if (
+    typeof raw.borderWidth === "number" &&
+    Number.isInteger(raw.borderWidth) &&
+    raw.borderWidth >= 0 &&
+    raw.borderWidth <= 3
+  ) {
+    style.borderWidth = raw.borderWidth;
+  }
+  if (FONT_WEIGHTS.includes(raw.fontWeight as OverlayFontWeight)) {
+    style.fontWeight = raw.fontWeight as OverlayFontWeight;
+  }
+  if (typeof raw.uppercase === "boolean") style.uppercase = raw.uppercase;
+  if (typeof raw.shadow === "boolean") style.shadow = raw.shadow;
+  return Object.keys(style).length > 0 ? style : undefined;
 }
 
 // Heuristic: v1 docs are flat Record<OverlayId, {enabled,position}>. v2 docs
@@ -58,12 +133,18 @@ function applyItemPatch(
   base: OverlayItemConfig,
   patch: Record<string, unknown>,
 ): OverlayItemConfig {
-  return {
+  const item: OverlayItemConfig = {
     enabled: typeof patch.enabled === "boolean" ? patch.enabled : base.enabled,
-    position: isValidPosition(patch.position) ? patch.position : base.position,
+    position: parsePosition(patch.position) ?? base.position,
     accentColor: isHexColor(patch.accentColor) ? patch.accentColor : undefined,
     showIcon: typeof patch.showIcon === "boolean" ? patch.showIcon : undefined,
   };
+  // Absent rather than undefined, so a document without images serializes
+  // exactly as it did before images existed.
+  if (isOverlayImageRef(patch.image)) item.image = patch.image;
+  const valueImages = parseValueImages(patch.valueImages);
+  if (valueImages) item.valueImages = valueImages;
+  return item;
 }
 
 // buildItems is the single registry pass shared by both migration paths and
@@ -98,12 +179,15 @@ function parseV2(parsed: Record<string, unknown>): CardOverlayPrefs {
   const items = parsed.items;
   const sourceItems =
     items && typeof items === "object" ? (items as Record<string, unknown>) : undefined;
-  return {
+  const prefs: CardOverlayPrefs = {
     version: 2,
     preset: isValidPreset(parsed.preset) ? parsed.preset : "classic",
     order: Array.isArray(parsed.order) ? (parsed.order as unknown[]).filter(isKnownOverlayId) : [],
     items: buildItems(sourceItems),
   };
+  const style = parseOverlayStyle(parsed.style);
+  if (style) prefs.style = style;
+  return prefs;
 }
 
 // Accepts the canonical settings-contract value (an object or null), the
@@ -161,34 +245,95 @@ export function isOverlaySupportedBy(id: OverlayId, support: OverlayServerSuppor
   return support.storedIds.has(id);
 }
 
+// The document cards render: image refs the library no longer lists are
+// dropped, so a deleted image costs no request per card. Settings screens keep
+// the stored refs so they can be cleared.
+export function withoutUnlistedImages(
+  prefs: CardOverlayPrefs,
+  listed: ReadonlySet<string>,
+): CardOverlayPrefs {
+  let changed = false;
+  const items = { ...prefs.items };
+  for (const [id, item] of Object.entries(prefs.items) as [OverlayId, OverlayItemConfig][]) {
+    const valueImages = Object.entries(item.valueImages ?? {});
+    const keptValueImages = valueImages.filter(([, ref]) => listed.has(ref));
+    const dropImage = item.image !== undefined && !listed.has(item.image);
+    if (!dropImage && keptValueImages.length === valueImages.length) continue;
+    const { image: _image, valueImages: _valueImages, ...rest } = item;
+    items[id] = {
+      ...rest,
+      ...(dropImage ? {} : { image: item.image }),
+      ...(keptValueImages.length > 0 ? { valueImages: Object.fromEntries(keptValueImages) } : {}),
+    };
+    changed = true;
+  }
+  return changed ? { ...prefs, items } : prefs;
+}
+
+// Whether the server accepts the revision-25 fields: edge positions, the
+// plate and band presets, style and image references.
+export function supportsOverlayStyles(support: OverlayServerSupport): boolean {
+  return (
+    support.manifestRevision !== undefined &&
+    support.manifestRevision >= OVERLAY_STYLE_MANIFEST_REVISION
+  );
+}
+
+// The position an older server stores for a badge: the corner on the same
+// side, as the badge sat before the edge rails existed.
+const LEGACY_POSITION: Partial<Record<OverlayPosition, string>> = {
+  "left-edge": "top-left",
+  "right-edge": "top-right",
+};
+
 // The document as the server can store it: ids it does not accept are
-// dropped from items and order.
+// dropped from items and order, and a server below revision 25 gets the
+// document without the fields it would reject.
 export function overlayPrefsForServer(
   prefs: CardOverlayPrefs,
   support: OverlayServerSupport,
 ): CardOverlayPrefs {
+  const styles = supportsOverlayStyles(support);
   const items = Object.fromEntries(
-    Object.entries(prefs.items).filter(([id]) => isOverlaySupportedBy(id as OverlayId, support)),
+    Object.entries(prefs.items)
+      .filter(([id]) => isOverlaySupportedBy(id as OverlayId, support))
+      .map(([id, item]) => {
+        if (styles) return [id, item];
+        const { image: _image, valueImages: _valueImages, ...rest } = item;
+        return [id, { ...rest, position: LEGACY_POSITION[item.position] ?? item.position }];
+      }),
   ) as CardOverlayPrefs["items"];
   const order = prefs.order.filter((id) => isOverlaySupportedBy(id, support));
-  return { ...prefs, order, items };
+  if (styles) return { ...prefs, order, items };
+  const { style: _style, ...rest } = prefs;
+  const preset = prefs.preset === "plate" || prefs.preset === "band" ? "classic" : prefs.preset;
+  return { ...rest, preset, order, items };
 }
 
 export function serializeOverlayPrefs(prefs: CardOverlayPrefs): string {
   return JSON.stringify(prefs);
 }
 
-// Whether `id` should be hidden because another enabled overlay already
-// displays the same information. The combined `resolution_hdr` badge
-// subsumes the standalone `resolution` and `hdr` badges — without this,
-// enabling the combined view on top of the defaults produces
-// "4K HDR 4K HDR" stacks. The user's stored prefs are left untouched so
-// toggling the combined badge off restores the standalones automatically.
-export function isOverlaySuppressed(id: OverlayId, prefs: CardOverlayPrefs): boolean {
-  if (id === "resolution" || id === "hdr") {
-    return prefs.items["resolution_hdr"]?.enabled === true;
+// Combined badges and the badges whose information each already shows,
+// widest first. Without this, enabling a combined badge on top of the
+// defaults produces "4K HDR 4K HDR" stacks.
+const COMBINED_BADGES: readonly (readonly [OverlayId, readonly OverlayId[]])[] = [
+  ["resolution_hdr_audio", ["resolution", "hdr", "audio", "resolution_hdr"]],
+  ["resolution_hdr", ["resolution", "hdr"]],
+];
+
+// The enabled combined badge that hides `id`, or null when `id` shows. The
+// user's stored prefs are left untouched so toggling the combined badge off
+// restores the badges it hid.
+export function overlaySuppressedBy(id: OverlayId, prefs: CardOverlayPrefs): OverlayId | null {
+  for (const [combined, covers] of COMBINED_BADGES) {
+    if (covers.includes(id) && prefs.items[combined]?.enabled === true) return combined;
   }
-  return false;
+  return null;
+}
+
+export function isOverlaySuppressed(id: OverlayId, prefs: CardOverlayPrefs): boolean {
+  return overlaySuppressedBy(id, prefs) !== null;
 }
 
 // Returns enabled overlays for a position, in the user's chosen order

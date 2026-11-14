@@ -4,4 +4,14 @@ set -euo pipefail
 export HOME=/config/silo
 # Silo reads an optional .env from its working directory.
 cd /config/silo
+# Pass an explicit NET_ADMIN grant across the uid change. Silo confines it to
+# its startup helper; see docs/architecture/tcp-congestion.md. The probe run
+# keeps a refused setpriv from stopping Silo: it then starts without the grant.
+prm="$(sed -n 's/^CapPrm:[[:space:]]*//p' /proc/self/status 2>/dev/null || true)"
+pass_net_admin=(setpriv --reuid=silo --regid=silo --init-groups
+  '--inh-caps=-all,+net_admin' '--ambient-caps=+net_admin' --)
+if [[ "$prm" =~ ^[[:xdigit:]]+$ ]] && (( (16#$prm >> 12) & 1 )) &&
+  "${pass_net_admin[@]}" true; then
+  exec "${pass_net_admin[@]}" silo
+fi
 exec s6-setuidgid silo silo

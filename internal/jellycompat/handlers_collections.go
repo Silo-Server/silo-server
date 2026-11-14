@@ -609,6 +609,12 @@ func (h *ItemsHandler) handleBoxSetChildren(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
 		return
 	}
+	// Limit=0 asks only for TotalRecordCount. The paths below read a zero
+	// limit as no cap or as a default page, so read one row for the total;
+	// writeListItemsPage drops it.
+	if query.countOnly {
+		query.limit = 1
+	}
 	leafType, membersAreLeaves := smartCollectionLeafType(collection)
 
 	// Play all / Shuffle asks for the collection's playable leaves. A smart
@@ -760,6 +766,9 @@ func (h *ItemsHandler) storedCollectionContentIDPage(ctx context.Context, sessio
 	if !applyCompatLibraryAccess(&access, nil, "mi.content_id", &conditions, &args, &argIdx) {
 		return nil, 0, nil
 	}
+	// A member in no library (one the scanner's file removal grace holds)
+	// is gone from its library pages, so it is no child here either.
+	conditions = append(conditions, catalog.InSomeLibraryWhere("mi.content_id"))
 	catalog.ApplySectionAccessFilter("mi", access, &conditions, &args, &argIdx)
 	from := "library_collection_items lci JOIN media_items mi ON mi.content_id = lci.media_item_id WHERE " + strings.Join(conditions, " AND ")
 
@@ -1170,8 +1179,13 @@ func (h *ItemsHandler) hydrateCollectionMembers(ctx context.Context, session *Se
 // Detail-level Fields (MediaSources, Path, ...) upgrade each child to its
 // detail DTO, as the library-parent browse path does; Infuse treats children
 // without them as unplayable. Episode members also get their season and
-// series context from episodeTargets.
+// series context from episodeTargets. A count-only request (Limit=0) gets
+// only the total.
 func (h *ItemsHandler) writeListItemsPage(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery, routeID string, listItems []upstreamListItem, episodeTargets map[string]compatEpisodeTarget, total int) {
+	if query.countOnly {
+		writeJSON(w, http.StatusOK, queryResultDTO{Items: []baseItemDTO{}, TotalRecordCount: total, StartIndex: query.startIndex})
+		return
+	}
 	h.rememberListImages(listItems)
 	contentIDs := contentIDsFromListItems(listItems)
 	favorites, progress, err := resolveUserStateForContentIDs(r.Context(), session, h.userData, contentIDs)
@@ -1211,12 +1225,11 @@ func (h *ItemsHandler) writeListItemsPage(w http.ResponseWriter, r *http.Request
 }
 
 // prepareSmartCollectionQuery resolves a smart (live-query) collection's stored
-// query definition into an executable form: normalized, validated, item-limited,
-// and intersected with the collection's own bound library scope, plus the
-// session access filter. ok is false when the collection has no executable
-// query — no executor wired, a malformed or invalid definition, or an empty
-// library intersection — so callers degrade to no children rather than error
-// and a single bad collection never 500s a browse.
+// query definition into an executable form: normalized, validated and
+// item-limited, over the rules' own libraries, plus the session access filter.
+// ok is false when the collection has no executable query (no executor wired,
+// or a malformed or invalid definition), so callers degrade to no children
+// rather than error and a single bad collection never 500s a browse.
 func (h *ItemsHandler) prepareSmartCollectionQuery(ctx context.Context, session *Session, c *models.LibraryCollection) (catalog.QueryDefinition, catalog.AccessFilter, bool) {
 	if h.queryExecutor == nil {
 		return catalog.QueryDefinition{}, catalog.AccessFilter{}, false
@@ -1236,20 +1249,9 @@ func (h *ItemsHandler) prepareSmartCollectionQuery(ctx context.Context, session 
 			"collection_id", c.ID, "error", err)
 		return catalog.QueryDefinition{}, catalog.AccessFilter{}, false
 	}
+	// The rules' own libraries pick the titles (every library when they name
+	// none); the session's access filter narrows them to what the viewer may see.
 	def = catalog.ApplySmartCollectionItemLimit(def)
-
-	switch {
-	case len(c.LibraryIDs) > 0:
-		def.LibraryIDs = catalog.IntersectCollectionLibraryIDs(def.LibraryIDs, c.LibraryIDs)
-		if len(def.LibraryIDs) == 0 {
-			return catalog.QueryDefinition{}, catalog.AccessFilter{}, false
-		}
-	case c.LibraryID > 0:
-		def.LibraryIDs = catalog.IntersectCollectionLibraryIDs(def.LibraryIDs, []int{c.LibraryID})
-		if len(def.LibraryIDs) == 0 {
-			return catalog.QueryDefinition{}, catalog.AccessFilter{}, false
-		}
-	}
 
 	return def, h.resolveAccessFilter(ctx, session), true
 }

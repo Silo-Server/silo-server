@@ -3,7 +3,9 @@ package catalog
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"net"
 	"os"
 	"reflect"
 	"slices"
@@ -11,11 +13,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestPlayableTargetResolverProfileStateAvailabilityAndAccess(t *testing.T) {
@@ -471,8 +475,9 @@ func TestPlayableTargetResolverResumesDeepInsideLongSeries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	trace := &playableTargetQueryTrace{}
-	cfg.ConnConfig.Tracer = trace
+	// One connection, so the repeated resolve below reuses its prepared statements.
+	cfg.MaxConns = 1
+	trace := tracePlayableTargets(cfg)
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		t.Fatalf("connect test database: %v", err)
@@ -560,6 +565,15 @@ func TestPlayableTargetResolverResumesDeepInsideLongSeries(t *testing.T) {
 	if rows, queries := trace.rows.Load(), trace.queries.Load(); rows != 1 || queries != 1 {
 		t.Fatalf("SQL winner read %d rows in %d queries, want one row in one query", rows, queries)
 	}
+	// The connection has now prepared the statements, so a repeat must reach
+	// PostgreSQL in one write: the JIT guard rides in the same round trip.
+	trace.writes.Store(0)
+	if _, err := resolver.Resolve(ctx, query); err != nil {
+		t.Fatalf("resolve long series again: %v", err)
+	}
+	if writes := trace.writes.Load(); writes != 1 {
+		t.Fatalf("SQL winner took %d round trips on a warm connection, want 1", writes)
+	}
 	trace.rows.Store(0)
 	trace.queries.Store(0)
 	query.ProgressStore = &recordingProgressStore{delegate: progressStore}
@@ -573,6 +587,62 @@ func TestPlayableTargetResolverResumesDeepInsideLongSeries(t *testing.T) {
 	t.Logf("generic read %d rows in %d queries; SQL winner read one row in one query", trace.rows.Load(), trace.queries.Load())
 }
 
+// A failed target read must return its error and leave the connection usable,
+// so the pool reuses it instead of opening another.
+func TestPlayableTargetQueryFailureKeepsConnection(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	resolver := NewPlayableTargetResolver(pool)
+	errScan := errors.New("scan failed")
+	for name, failure := range map[string]struct {
+		query string
+		scan  func(pgx.Rows) error
+		want  func(error) bool
+	}{
+		"statement": {
+			query: "SELECT 1 / $1::integer",
+			scan:  func(pgx.Rows) error { return nil },
+			want: func(err error) bool {
+				var pgErr *pgconn.PgError
+				return errors.As(err, &pgErr) && pgErr.Code == "22012"
+			},
+		},
+		"scan": {
+			query: "SELECT $1::integer",
+			scan:  func(pgx.Rows) error { return errScan },
+			want:  func(err error) bool { return errors.Is(err, errScan) },
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := pool.Ping(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			opened := pool.Stat().NewConnsCount()
+			if err := resolver.queryPlayableTargets(t.Context(), failure.query, []any{0}, failure.scan); !failure.want(err) {
+				t.Fatalf("queryPlayableTargets error = %v", err)
+			}
+			if err := pool.Ping(t.Context()); err != nil {
+				t.Fatalf("ping after failure: %v", err)
+			}
+			if reopened := pool.Stat().NewConnsCount() - opened; reopened != 0 {
+				t.Fatalf("pool opened %d connections after the failure, want its connection reused", reopened)
+			}
+		})
+	}
+}
+
 func nilIfBlank(value string) any {
 	if value == "" {
 		return nil
@@ -580,10 +650,33 @@ func nilIfBlank(value string) any {
 	return value
 }
 
-// Counts rows crossing the database boundary, including generic progress batches.
+// Counts rows crossing the database boundary, including generic progress
+// batches, the SELECTs returning them, sent alone or in a batch, and the
+// writes to the server, one per round trip once statements are prepared.
 type playableTargetQueryTrace struct {
 	rows    atomic.Int64
 	queries atomic.Int64
+	writes  atomic.Int64
+}
+
+// tracePlayableTargets installs trace on cfg, including its socket writes.
+func tracePlayableTargets(cfg *pgxpool.Config) *playableTargetQueryTrace {
+	trace := &playableTargetQueryTrace{}
+	cfg.ConnConfig.Tracer = trace
+	countServerWrites(cfg, &trace.writes)
+	return trace
+}
+
+// countServerWrites counts the writes cfg's connections make to the server:
+// one per round trip once a connection has prepared its statements.
+func countServerWrites(cfg *pgxpool.Config, writes *atomic.Int64) {
+	cfg.ConnConfig.DialFunc = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		conn, err := (&net.Dialer{}).DialContext(ctx, network, addr)
+		if err != nil {
+			return nil, err
+		}
+		return &writeCountingConn{Conn: conn, writes: writes}, nil
+	}
 }
 
 func (q *playableTargetQueryTrace) TraceQueryStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryStartData) context.Context {
@@ -591,8 +684,32 @@ func (q *playableTargetQueryTrace) TraceQueryStart(ctx context.Context, _ *pgx.C
 }
 
 func (q *playableTargetQueryTrace) TraceQueryEnd(_ context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
-	if data.CommandTag.Select() {
-		q.rows.Add(data.CommandTag.RowsAffected())
+	q.count(data.CommandTag)
+}
+
+func (*playableTargetQueryTrace) TraceBatchStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceBatchStartData) context.Context {
+	return ctx
+}
+
+func (q *playableTargetQueryTrace) TraceBatchQuery(_ context.Context, _ *pgx.Conn, data pgx.TraceBatchQueryData) {
+	q.count(data.CommandTag)
+}
+
+func (*playableTargetQueryTrace) TraceBatchEnd(context.Context, *pgx.Conn, pgx.TraceBatchEndData) {}
+
+func (q *playableTargetQueryTrace) count(tag pgconn.CommandTag) {
+	if tag.Select() {
+		q.rows.Add(tag.RowsAffected())
 		q.queries.Add(1)
 	}
+}
+
+type writeCountingConn struct {
+	net.Conn
+	writes *atomic.Int64
+}
+
+func (c *writeCountingConn) Write(b []byte) (int, error) {
+	c.writes.Add(1)
+	return c.Conn.Write(b)
 }
