@@ -120,85 +120,106 @@ func TestCanonicalizeMediaItemReferencesMergesNotificationMutesPostgres(t *testi
 // A drift repair of an item waits for an admin's ID edit holding that item,
 // rather than deleting the item's provider rows first and deadlocking with
 // the edit's own delete of one of them, and then leaves the edited ID alone
-// instead of writing back the ID it read before the edit.
+// instead of writing back the ID it read before the edit. Both repairs that
+// write the item's rows do this: a clean insert, and moving the ID off a
+// provisional owner.
 func TestProviderIDDriftRepairWaitsForItemEditPostgres(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
 	}
-	ctx := t.Context()
-	pool, err := pgxpool.New(ctx, dsn)
+	pool, err := pgxpool.New(t.Context(), dsn)
 	if err != nil {
 		t.Fatalf("connect test database: %v", err)
 	}
 	t.Cleanup(pool.Close)
-	contentID := "drift-repair-edit-" + uuid.NewString()
-	tmdbID := "drift-" + uuid.NewString()
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, contentID)
-	})
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO media_items (content_id, type, title, genres, status, tmdb_id)
-		VALUES ($1, 'movie', 'Drift Repair', '{}'::text[], 'matched', $2)`, contentID, tmdbID); err != nil {
-		t.Fatalf("seed item: %v", err)
-	}
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO media_item_provider_ids (content_id, item_type, provider, provider_id)
-		VALUES ($1, 'movie', 'tmdb', $2)`, contentID, "stale-"+tmdbID); err != nil {
-		t.Fatalf("seed durable id: %v", err)
-	}
+	repairer := NewProviderIDIntegrityRepairer(pool)
+	for _, tc := range []struct {
+		name   string
+		repair func(ctx context.Context, owner string, row providerIDDriftRow) (bool, error)
+	}{
+		{"clean insert", func(ctx context.Context, _ string, row providerIDDriftRow) (bool, error) {
+			return repairer.insertProviderIDsForDriftRow(ctx, row, providerEntriesFromDrift(row))
+		}},
+		{"provisional owner", func(ctx context.Context, owner string, row providerIDDriftRow) (bool, error) {
+			return repairer.moveProvisionalProviderClaim(ctx, owner, row, providerEntriesFromDrift(row))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			suffix := uuid.NewString()
+			contentID, owner := "drift-repair-edit-"+suffix, "drift-repair-owner-"+suffix
+			tmdbID := "drift-" + suffix
+			t.Cleanup(func() {
+				_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{contentID, owner})
+			})
+			if _, err := pool.Exec(ctx, `
+				INSERT INTO media_items (content_id, type, title, genres, status, tmdb_id)
+				VALUES ($1, 'movie', 'Drift Repair', '{}'::text[], 'matched', $3),
+					($2, 'movie', 'Provisional Owner', '{}'::text[], 'pending', '')`,
+				contentID, owner, tmdbID); err != nil {
+				t.Fatalf("seed items: %v", err)
+			}
+			if _, err := pool.Exec(ctx, `
+				INSERT INTO media_item_provider_ids (content_id, item_type, provider, provider_id)
+				VALUES ($1, 'movie', 'tmdb', $3), ($2, 'movie', 'tmdb', $4)`,
+				contentID, owner, "stale-"+tmdbID, tmdbID); err != nil {
+				t.Fatalf("seed durable ids: %v", err)
+			}
 
-	// The edit locks the item as lockCuratedProviderIDs does.
-	edit, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatalf("begin edit: %v", err)
-	}
-	defer edit.Rollback(ctx) //nolint:errcheck // a no-op once the edit commits
-	if _, err := edit.Exec(ctx, `SELECT 1 FROM media_items WHERE content_id = $1 FOR UPDATE`, contentID); err != nil {
-		t.Fatalf("lock item: %v", err)
-	}
-	row := providerIDDriftRow{ContentID: contentID, ItemType: "movie", Status: "matched", TMDBID: tmdbID}
-	repaired := make(chan error, 1)
-	go func() {
-		inserted, err := NewProviderIDIntegrityRepairer(pool).insertProviderIDsForDriftRow(ctx, row, providerEntriesFromDrift(row))
-		if err == nil && inserted {
-			err = errors.New("repair wrote provider ids read before the edit")
-		}
-		repaired <- err
-	}()
-	// Before the repair locked the item, it waited in its insert's foreign-key
-	// check instead.
-	waitForMediaItemLockWait(t, pool, repaired)
-	// The edit changes the TMDB ID, then syncs its durable row the way
-	// syncEditedProviderIDTx does.
-	editedID := "edited-" + tmdbID
-	if _, err := edit.Exec(ctx, `UPDATE media_items SET tmdb_id = $2 WHERE content_id = $1`, contentID, editedID); err != nil {
-		t.Fatalf("edit column: %v", err)
-	}
-	if _, err := edit.Exec(ctx, `
-		DELETE FROM media_item_provider_ids
-		WHERE content_id = $1 AND lower(provider) = 'tmdb'`, contentID); err != nil {
-		t.Fatalf("edit delete: %v", err)
-	}
-	if _, err := edit.Exec(ctx, `
-		INSERT INTO media_item_provider_ids (content_id, item_type, provider, provider_id)
-		VALUES ($1, 'movie', 'tmdb', $2)`, contentID, editedID); err != nil {
-		t.Fatalf("edit insert: %v", err)
-	}
-	if err := edit.Commit(ctx); err != nil {
-		t.Fatalf("commit edit: %v", err)
-	}
-	if err := <-repaired; err != nil {
-		t.Fatalf("repair: %v", err)
-	}
-	var durable string
-	if err := pool.QueryRow(ctx, `
-		SELECT provider_id FROM media_item_provider_ids
-		WHERE content_id = $1 AND provider = 'tmdb'`, contentID).Scan(&durable); err != nil {
-		t.Fatalf("read durable id: %v", err)
-	}
-	if durable != editedID {
-		t.Fatalf("durable tmdb = %q, want the edited %q", durable, editedID)
+			// The edit locks the item as lockCuratedProviderIDs does.
+			edit, err := pool.Begin(ctx)
+			if err != nil {
+				t.Fatalf("begin edit: %v", err)
+			}
+			defer edit.Rollback(ctx) //nolint:errcheck // a no-op once the edit commits
+			if _, err := edit.Exec(ctx, `SELECT 1 FROM media_items WHERE content_id = $1 FOR UPDATE`, contentID); err != nil {
+				t.Fatalf("lock item: %v", err)
+			}
+			row := providerIDDriftRow{ContentID: contentID, ItemType: "movie", Status: "matched", TMDBID: tmdbID}
+			repaired := make(chan error, 1)
+			go func() {
+				wrote, err := tc.repair(ctx, owner, row)
+				if err == nil && wrote {
+					err = errors.New("repair wrote provider ids read before the edit")
+				}
+				repaired <- err
+			}()
+			// Before the repair locked the item, it waited in its insert's
+			// foreign-key check instead.
+			waitForMediaItemLockWait(t, pool, repaired)
+			// The edit changes the TMDB ID, then syncs its durable row the way
+			// syncEditedProviderIDTx does.
+			editedID := "edited-" + tmdbID
+			if _, err := edit.Exec(ctx, `UPDATE media_items SET tmdb_id = $2 WHERE content_id = $1`, contentID, editedID); err != nil {
+				t.Fatalf("edit column: %v", err)
+			}
+			if _, err := edit.Exec(ctx, `
+				DELETE FROM media_item_provider_ids
+				WHERE content_id = $1 AND lower(provider) = 'tmdb'`, contentID); err != nil {
+				t.Fatalf("edit delete: %v", err)
+			}
+			if _, err := edit.Exec(ctx, `
+				INSERT INTO media_item_provider_ids (content_id, item_type, provider, provider_id)
+				VALUES ($1, 'movie', 'tmdb', $2)`, contentID, editedID); err != nil {
+				t.Fatalf("edit insert: %v", err)
+			}
+			if err := edit.Commit(ctx); err != nil {
+				t.Fatalf("commit edit: %v", err)
+			}
+			if err := <-repaired; err != nil {
+				t.Fatalf("repair: %v", err)
+			}
+			var durable string
+			if err := pool.QueryRow(ctx, `
+				SELECT provider_id FROM media_item_provider_ids
+				WHERE content_id = $1 AND provider = 'tmdb'`, contentID).Scan(&durable); err != nil {
+				t.Fatalf("read durable id: %v", err)
+			}
+			if durable != editedID {
+				t.Fatalf("durable tmdb = %q, want the edited %q", durable, editedID)
+			}
+		})
 	}
 }
 
