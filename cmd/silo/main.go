@@ -4093,7 +4093,7 @@ func main() {
 			compatDeps.SettingsRepo = settingsRepo
 			// The administrator's rating-source choice, read as the native
 			// API reads it, so Jellyfin clients get the Rotten Tomatoes
-			// critic score exactly when title pages show it.
+			// critic score only while that source is shown.
 			compatDeps.RatingSources = ratingsources.NewPolicy(settingsRepo, func(ctx context.Context) ([]ratingsources.DeclaredSource, error) {
 				return metadata.DeclaredRatingSources(ctx, deps.DB)
 			})
