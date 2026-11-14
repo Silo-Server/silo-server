@@ -22,6 +22,7 @@ import { EpisodeGridSkeleton } from "./SectionSkeletons";
 import { useT } from "@/i18n";
 import EpisodeCardCaption from "./EpisodeCardCaption";
 import { episodeLinkLibraryId, type EpisodeNavigationState } from "../itemDetailLayout";
+import WatchProgressBar from "@/components/WatchProgressBar";
 
 /**
  * How much of a season stays visible before the section scrolls, so a long one
@@ -171,28 +172,20 @@ function SeasonEpisodeCard({
                 data={overlayDataFromEpisodeListItem(episode)}
                 prefs={overlayPrefs}
                 variant="wide"
+                hasProgressBar={hasPartialProgress}
               />
             )}
             {/* Hover dim behind the play button */}
             {playable && <div className="media-card-hover-dim absolute inset-0" />}
             {hasPartialProgress && (
-              <div className="absolute inset-x-2 bottom-1.5 h-[3px] overflow-hidden rounded-full bg-black/40">
-                <div
-                  className="progress-fill h-full rounded-full"
-                  style={{
-                    width: `${Math.max(
-                      0,
-                      Math.min(
-                        100,
-                        ((episode.user_data?.position_seconds ?? 0) /
-                          (episode.user_data?.duration_seconds ?? 1)) *
-                          100,
-                      ),
-                    )}%`,
-                    background: "var(--primary)",
-                  }}
-                />
-              </div>
+              <WatchProgressBar
+                percent={
+                  ((episode.user_data?.position_seconds ?? 0) /
+                    (episode.user_data?.duration_seconds ?? 1)) *
+                  100
+                }
+                animate
+              />
             )}
           </div>
         </ViewTransitionLink>

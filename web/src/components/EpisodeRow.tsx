@@ -6,6 +6,7 @@ import UnreadableFileBadge, { episodeFilesUnreadable } from "@/components/Unread
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import { overlayDataFromEpisodeListItem } from "@/lib/overlays";
 import { useT } from "@/i18n";
+import WatchProgressBar from "@/components/WatchProgressBar";
 
 interface EpisodeRowProps {
   episode: EpisodeListItem;
@@ -71,17 +72,7 @@ export default function EpisodeRow({ episode, rating, watched, progress }: Episo
             hasProgressBar={hasProgress}
           />
         )}
-        {hasProgress && (
-          <div className="absolute inset-x-2 bottom-1.5 h-[3px] overflow-hidden rounded-full bg-black/40">
-            <div
-              className="h-full rounded-full"
-              style={{
-                width: `${derivedProgress}%`,
-                background: "var(--primary)",
-              }}
-            />
-          </div>
-        )}
+        {hasProgress && <WatchProgressBar percent={derivedProgress} />}
       </div>
 
       {/* Info */}
