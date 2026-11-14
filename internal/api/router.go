@@ -2640,10 +2640,15 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if userRepo != nil {
 		compatUsers = userRepo
 	}
+	var compatSignIn handlers.CompatPasswordSignIn
+	if authService != nil {
+		compatSignIn = authService
+	}
 	compatConnectInfoHandler := handlers.NewCompatConnectInfoHandler(
 		deps.Config,
 		settingsRepo,
 		compatUsers,
+		compatSignIn,
 	)
 	if authHandler != nil {
 		authHandler.SetOAuthRoutesAvailable(oauthHandler != nil)

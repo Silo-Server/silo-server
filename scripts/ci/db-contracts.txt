@@ -193,6 +193,8 @@
 ./internal/auth TestLoginIdentitySpaceDB
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
 ./internal/auth TestChangePasswordSignOutOtherSessionsDB
+./internal/auth TestPasswordSignInAvailableDB
+./internal/auth TestPasswordSignInAvailableNetworkRefusalDB
 ./internal/auth TestSignupPolicySerializationDB
 ./internal/apiv2 TestSignupCommitPolicyErrorsDB
 ./internal/auth TestJellyfinSessionDeleteFailureRollsBackRevocationPostgres

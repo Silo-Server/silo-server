@@ -19,7 +19,7 @@ func TestOperationalDiscoveryPreservesCompatibilityView(t *testing.T) {
 	cfg.JellyfinCompat.Enabled = true
 	cfg.JellyfinCompat.PublicURL = "https://compat.example.invalid"
 	cfg.JellyfinCompat.ServerName = "Test server"
-	service := handlers.NewCompatConnectInfoHandler(cfg, nil, nil)
+	service := handlers.NewCompatConnectInfoHandler(cfg, nil, nil, nil)
 	deps := parityDeps(false)
 	deps.CompatConnectInfo = service
 	handler := NewHandler(deps)

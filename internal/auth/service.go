@@ -329,6 +329,75 @@ func (s *Service) routePasswordLogin(ctx context.Context, username string) (stri
 	return directory, nil
 }
 
+// PasswordSignInAvailable reports whether user can sign in with a password
+// where no provider is named, as every compatibility client does: the
+// provider routePasswordLogin picks for the account, and the checks that
+// provider makes before a session. An account with its own password sign-in
+// signs in locally, so it needs a password, the server-wide switch unless it
+// is break-glass, and no network provider refusing it (see
+// LocalProvider.Authenticate). Any other account goes to the directory, so
+// it needs an enabled credentials provider it is linked to, or one whose
+// sign-in would link it by email.
+func (s *Service) PasswordSignInAvailable(ctx context.Context, user *models.User) (bool, error) {
+	if user == nil {
+		return false, nil
+	}
+	if user.LocalPasswordLoginEnabled {
+		return s.localPasswordSignInAvailable(ctx, user)
+	}
+	if s.users == nil {
+		return false, nil
+	}
+	for _, registered := range s.pluginProviders() {
+		if registered.Info.Mode != ProviderModeCredentials {
+			continue
+		}
+		if registered.Info.InstallationID <= 0 {
+			return false, nil
+		}
+		return s.directoryPasswordSignInAvailable(ctx, user, registered.Info.InstallationID)
+	}
+	return false, nil
+}
+
+// directoryPasswordSignInAvailable is PasswordSignInAvailable for an account
+// whose password goes to the directory at installationID. A linked account
+// can sign in there. So can one the directory's first sign-in would link by
+// email (AccountResolver.Resolve): email auto-match is on and it is an
+// ordinary account with an email. Whether the directory vouches for that
+// email only the directory knows, so such an account counts as able.
+func (s *Service) directoryPasswordSignInAvailable(ctx context.Context, user *models.User, installationID int) (bool, error) {
+	linked, err := accountHasIdentityAt(ctx, s.users.pool, user.ID, installationID)
+	if err != nil || linked {
+		return linked, err
+	}
+	if user.Email == "" || user.Role != models.RoleUser || user.IsOwner || user.BreakGlass {
+		return false, nil
+	}
+	return emailAutoMatchEnabled(ctx, s.users.pool)
+}
+
+// localPasswordSignInAvailable is PasswordSignInAvailable for an account with
+// its own password sign-in: the checks LocalProvider.Authenticate makes
+// besides the password itself.
+func (s *Service) localPasswordSignInAvailable(ctx context.Context, user *models.User) (bool, error) {
+	if user.PasswordHash == "" {
+		return false, nil
+	}
+	if user.BreakGlass || s.users == nil {
+		return true, nil
+	}
+	allowed, err := s.users.LocalPasswordLoginAllowed(ctx)
+	if err != nil || !allowed {
+		return false, err
+	}
+	refused, err := networkRefused(ctx, s.users.pool, user.ID)
+	if err != nil {
+		return false, err
+	}
+	return !refused, nil
+}
+
 // HasLoginName reports whether a password sign-in with name would find an
 // existing account (see LookupLogin).
 func (s *Service) HasLoginName(ctx context.Context, name string) (bool, error) {
