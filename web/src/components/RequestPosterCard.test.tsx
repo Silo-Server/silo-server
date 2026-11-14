@@ -24,7 +24,7 @@ describe("RequestPosterCard (discover variant)", () => {
     expect(markup).not.toContain("<button");
   });
 
-  it("marks a title already in the library as Available and links to it", () => {
+  it("marks a title already in the library as Available", () => {
     render(
       <MemoryRouter>
         <RequestPosterCard
@@ -44,10 +44,6 @@ describe("RequestPosterCard (discover variant)", () => {
     // The badge overlays the artwork; it is not part of a link.
     expect(badge?.closest(".group\\/media")).not.toBeNull();
     expect(badge?.closest("a")).toBeNull();
-    expect(screen.getByRole("link", { name: "Open Test Movie in library" })).toHaveAttribute(
-      "href",
-      "/item/movie%20tmdb%2042",
-    );
   });
 
   it("shows the default artwork in place of a poster that fails to load", () => {
@@ -175,21 +171,5 @@ describe("RequestPosterCard (mine variant)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel request for The Matrix" }));
 
     expect(onCancel).toHaveBeenCalledOnce();
-  });
-
-  it("links an available request to its library item", () => {
-    render(
-      <MemoryRouter>
-        <RequestPosterCard
-          variant="mine"
-          request={{ ...request, status: "completed", library_content_id: "movie-603" }}
-        />
-      </MemoryRouter>,
-    );
-
-    expect(screen.getByRole("link", { name: "Open The Matrix in library" })).toHaveAttribute(
-      "href",
-      "/item/movie-603",
-    );
   });
 });

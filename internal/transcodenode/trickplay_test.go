@@ -90,11 +90,22 @@ func TestTrickplayExtractRefuses(t *testing.T) {
 	if rec := postTrickplay(t, server, stats); rec.Code != http.StatusBadRequest || decode(rec).Reason != "invalid_request" {
 		t.Fatalf("stats request: %d %s", rec.Code, rec.Body.String())
 	}
-	server.trickplay.busy.Lock()
+	// The node admits playback.trickplay_node_capacity runs at once and
+	// refuses the next as busy.
+	server.watcher.Config().Playback.TrickplayNodeCapacity = 2
+	server.trickplay.running = 2
 	if rec := postTrickplay(t, server, valid); rec.Code != http.StatusServiceUnavailable || decode(rec).Reason != trickplay.NodeBusyReason {
-		t.Fatalf("busy: %d %s", rec.Code, rec.Body.String())
+		t.Fatalf("at capacity: %d %s", rec.Code, rec.Body.String())
 	}
-	server.trickplay.busy.Unlock()
+	server.trickplay.running = 1
+	// An admitted run fails here (no real ffmpeg or input) but never answers 503.
+	if rec := postTrickplay(t, server, valid); rec.Code == http.StatusServiceUnavailable {
+		t.Fatalf("second run refused under a capacity of 2: %d %s", rec.Code, rec.Body.String())
+	}
+	if server.trickplay.running != 1 {
+		t.Fatalf("running = %d after the run, want its slot back", server.trickplay.running)
+	}
+	server.trickplay.running = 0
 	server.inputPaths = denyInputPaths{}
 	if rec := postTrickplay(t, server, valid); rec.Code == http.StatusOK || rec.Code == http.StatusUnprocessableEntity {
 		t.Fatalf("unapproved path: %d", rec.Code)

@@ -37,11 +37,18 @@ keyframes only when it starts at the beginning of the source, the duration is
 known, the keyframe index exists and records where the video ends, the plan
 fits within the synthetic playlist's 50,000-segment limit, and the node can
 record the plan in the session's output directory. Any other copy keeps
-FFmpeg's playlist. A keyframe-planned copy never seek-restarts. While FFmpeg is
-running, a request for a segment past the last one it produced waits up to 30
-seconds for the copy to get there. When FFmpeg has stopped, or the segment is
-behind the produced head and gone, the copy restarts from the beginning, so
-FFmpeg cuts the same segments.
+FFmpeg's playlist. The plan comes from the Cues, which the node checks against
+only a few clusters. A keyframe-planned copy has FFmpeg cut at every keyframe and
+joins those groups into the planned segments, so it can restart anywhere and
+still produce them. A group that starts where the plan has no keyframe, or a
+planned keyframe FFmpeg doesn't cut at, stops that run with a transcode failure,
+and later playbacks of that file version on that process keep FFmpeg's
+playlist, until the file changes or the process restarts. While FFmpeg is
+running, a request for a segment up to 10 past the last one assembled waits for
+the copy to get there. Any other missing segment restarts FFmpeg at the keyframe
+before that segment. Assembled segments outlive the restart unless the audio
+changes. The session's recipe keeps the plan's start at the beginning, so a
+rebuilt session plans the same segments.
 
 The throttle fields belong to the internal API-to-node contract. Apple and
 Android clients require no request or response changes.
@@ -74,6 +81,23 @@ response; the protocol-v3 API rejects a missing echo and stops the transport,
 so a node that predates the echo never serves fMP4 under a plan that promises
 MPEG-TS. Recipe cards and signed reconstruction claims (`cvts`) carry the flag,
 so reconstruction, seek restarts, and rehoming keep it.
+
+## Copied audio codec
+
+`copy_audio_codec` on `POST /transcode/start` names the source codec of the
+audio track that `target_codec_audio: "copy"` keeps. When that track is AAC and
+the segments are fMP4, the node adds `aac_adtstoasc`, because fMP4 can't hold
+the ADTS framing that AAC from MPEG-TS uses. The node echoes the codec in the
+start response. For copied AAC into fMP4, protocol-v3 and jellycompat starts
+and protocol-v3 rehoming reject a missing or different echo and stop the
+transport, so they never start that stream on a node that predates the field.
+The receipt is checked only on `POST /transcode/start`: a jellycompat move and
+a node rebuilding a lost session from its token or stored recipe don't check
+it, so an older node reached that way still fails after the first segment. The
+check applies to every copied AAC track, including MKV and MP4 sources whose
+AAC an older node copies correctly without the filter, so update transcode
+nodes before the API server. MPEG-TS segments and other copied codecs don't need the echo. Recipe
+cards and signed reconstruction claims (`cac`) carry the codec.
 
 ## Subtitle renditions
 

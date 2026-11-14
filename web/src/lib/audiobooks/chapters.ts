@@ -1,5 +1,6 @@
 import type { AudiobookChapter, AudiobookFile } from "@/lib/audiobooks/types";
 import type { PlayerChapter } from "@/player/types";
+import { t } from "@/i18n";
 
 export interface ChapterListEntry {
   chapter: AudiobookChapter;
@@ -21,7 +22,8 @@ export function buildChapterList(files: AudiobookFile[]): ChapterListEntry[] {
         chapter,
         absoluteStart: offset + chapter.start_seconds,
         fileId: file.id,
-        label: chapter.title || `Chapter ${chapter.index + 1}`,
+        label:
+          chapter.title || t("web.audiobooks.chapter.fallbackTitle", { number: chapter.index + 1 }),
       });
     }
     offset += file.duration_seconds ?? 0;
@@ -62,7 +64,8 @@ export function buildPlayerChapters(files: AudiobookFile[]): PlayerChapter[] {
       const end = offset + (chapter.end_seconds || chapter.start_seconds);
       out.push({
         index: nextIndex++,
-        title: chapter.title || `Chapter ${chapter.index + 1}`,
+        title:
+          chapter.title || t("web.audiobooks.chapter.fallbackTitle", { number: chapter.index + 1 }),
         start_seconds: start,
         end_seconds: end > start ? end : start + 1,
         source: chapter.source || "embedded",

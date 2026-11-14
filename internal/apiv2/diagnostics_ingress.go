@@ -88,7 +88,7 @@ func registerDiagnosticsIngress(reg *Registry) {
 			return nil, err
 		}
 		if reg.deps.DiagnosticsIngress == nil {
-			return &DiagnosticsCapabilitiesOutput{Body: DiagnosticsCapabilities{Capability: Capability{State: StateNotConfigured}, Status: diagnostics.Status{Status: diagnostics.StatusStorageUnavailable, AcceptedSchemaVersions: []int{}}}}, nil
+			return &DiagnosticsCapabilitiesOutput{Body: DiagnosticsCapabilities{Capability: Capability{State: StateNotConfigured}, Status: diagnostics.Status{Status: diagnostics.StatusStorageUnavailable, AcceptedSchemaVersions: []int{}, AcceptedCrashSources: []string{}}}}, nil
 		}
 		status, err := reg.deps.DiagnosticsIngress.UploadStatus(ctx, userID)
 		if err != nil {

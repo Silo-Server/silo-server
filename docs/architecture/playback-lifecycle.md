@@ -14,7 +14,10 @@ It starts once and ends once; an id never starts again.
 
 - Native (v2 and the v1 bridge): starts when `startPlannedPlaybackV3` commits the
   transport; ends when its attempt row is stopped. A stopped attempt never
-  reconstructs, and reconstruction after a restart announces nothing.
+  reconstructs, and reconstruction after a restart announces nothing. A
+  reconstruction from a stream token, whose recipe card carries no client, takes
+  the client and device from the session's live row, or from its start row once
+  no live row is left.
 - Jellyfin: one upstream native session is one logical session, and the PlaySessionId
   is not exposed. It starts when a new upstream id wins the attach CAS in
   `ensureUpstreamPlayback`. It ends on a Stopped report or ActiveEncodings teardown,
@@ -88,6 +91,11 @@ an admin history row with an `end_reason` and `lifecycle_seq` within its idle gr
 plus one sweep interval after its last activity, while at least one API server runs.
 Each sweep ends at most 100 sessions per server, oldest activity first, so a larger
 backlog (a server dying with many sessions) drains over the following sweeps.
+When the history write of an end the sweep makes from the start row fails, the
+session stays live and the failure counts as activity: a session selected by its
+idleness is tried again after another grace instead of every 15 seconds, and sessions
+that keep failing move behind the others, so they never fill a batch. The row is
+recorded once the cause is fixed.
 Lifecycle events themselves are at most once.
 
 ## Listing

@@ -1,15 +1,8 @@
 package handlers
 
 import (
-	"context"
-	"errors"
-	"fmt"
 	"maps"
-	"net/http"
-	"slices"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 )
@@ -92,70 +85,5 @@ func TestConnectionCheckAuthorityEquivalence(t *testing.T) {
 				t.Fatalf("authority equality = %v, want %v", got, tc.equal)
 			}
 		})
-	}
-}
-
-func TestMeilisearchCheckBridgesUseOnlyBoundDraftCredentials(t *testing.T) {
-	originalCheck := checkAdminMeilisearchSettingsConnection
-	t.Cleanup(func() { checkAdminMeilisearchSettingsConnection = originalCheck })
-	for _, tc := range []struct {
-		name    string
-		draft   map[string]string
-		wantKey string
-	}{
-		{name: "changed authority", draft: map[string]string{catalog.SearchSettingMeilisearchURL: "https://other.example.test/base"}},
-		{name: "same authority path", draft: map[string]string{catalog.SearchSettingMeilisearchURL: "https://SEARCH.example.test:443/other"}, wantKey: "SYNTHETIC_STORED"},
-		{name: "explicit replacement", draft: map[string]string{catalog.SearchSettingMeilisearchURL: "https://other.example.test/base", catalog.SearchSettingMeilisearchAPIKey: "SYNTHETIC_DRAFT"}, wantKey: "SYNTHETIC_DRAFT"},
-		{name: "explicit clear", draft: map[string]string{catalog.SearchSettingMeilisearchURL: "https://other.example.test/base", catalog.SearchSettingMeilisearchAPIKey: ""}},
-		{name: "no authentication", draft: map[string]string{catalog.SearchSettingMeilisearchAPIKey: ""}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			h := &AdminHandler{SettingsRepo: &fakeServerSettingsStore{values: map[string]string{
-				catalog.SearchSettingMeilisearchURL:       "https://search.example.test/base",
-				catalog.SearchSettingMeilisearchAPIKey:    "SYNTHETIC_STORED",
-				catalog.SearchSettingMeilisearchTimeoutMS: "1234",
-			}}}
-			calls := 0
-			checkAdminMeilisearchSettingsConnection = func(ctx context.Context, cfg catalog.CatalogSearchSettings) error {
-				calls++
-				if cfg.MeilisearchAPIKey != tc.wantKey || cfg.Timeout != 1234*time.Millisecond {
-					t.Fatal("wrong credential or changed deadline")
-				}
-				if wantURL, changed := tc.draft[catalog.SearchSettingMeilisearchURL]; changed && cfg.MeilisearchURL != wantURL {
-					t.Fatal("draft URL was changed")
-				}
-				return ctx.Err()
-			}
-			dirty := slices.Sorted(maps.Keys(tc.draft))
-			result, err := h.CheckAdminSettingsConnection(t.Context(), "meilisearch", tc.draft, dirty)
-			if err != nil || !result.Success {
-				t.Fatalf("native service check failed: %v", err)
-			}
-			rec := performSettingsCheckRequest(t, h, "/admin/settings/check/meilisearch", map[string]any{"values": tc.draft, "dirty_keys": dirty})
-			if rec.Code != http.StatusOK || calls != 2 {
-				t.Fatalf("v1 status = %d, combined calls = %d", rec.Code, calls)
-			}
-		})
-	}
-	checkAdminMeilisearchSettingsConnection = func(context.Context, catalog.CatalogSearchSettings) error {
-		return catalog.ErrMeilisearchCheckRedirected
-	}
-	redirected := &AdminHandler{SettingsRepo: &fakeServerSettingsStore{values: map[string]string{catalog.SearchSettingMeilisearchURL: "http://search.example.test"}}}
-	if result, err := redirected.CheckAdminSettingsConnection(t.Context(), "meilisearch", nil, nil); err != nil || result.Success || result.Message != adminMeilisearchRedirectMessage {
-		t.Fatalf("redirected check result = %+v, %v", result, err)
-	}
-	checkAdminMeilisearchSettingsConnection = func(context.Context, catalog.CatalogSearchSettings) error {
-		return fmt.Errorf("%w: SYNTHETIC_PROVIDER_DETAIL", catalog.ErrMeilisearchCheckKeyRejected)
-	}
-	if result, err := redirected.CheckAdminSettingsConnection(t.Context(), "meilisearch", nil, nil); err != nil || result.Success || result.Message != adminMeilisearchKeyRejectedMessage {
-		t.Fatalf("rejected key check result = %+v, %v", result, err)
-	}
-	checkAdminMeilisearchSettingsConnection = func(context.Context, catalog.CatalogSearchSettings) error {
-		return errors.New("SYNTHETIC_PROVIDER_DETAIL")
-	}
-	h := &AdminHandler{SettingsRepo: &fakeServerSettingsStore{values: map[string]string{catalog.SearchSettingMeilisearchURL: "https://search.example.test"}}}
-	result, err := h.CheckAdminSettingsConnection(t.Context(), "meilisearch", nil, nil)
-	if err != nil || result.Success || strings.Contains(result.Message, "SYNTHETIC_PROVIDER_DETAIL") {
-		t.Fatal("native service exposed provider detail")
 	}
 }

@@ -64,6 +64,7 @@ func recipeCardFixtureOpts(revision tonemap.SourceRevision) TranscodeOpts {
 func TestRecipeCardRoundTripOpts(t *testing.T) {
 	revision := tonemap.SourceRevision{MediaFileID: 77, FileSize: 100, FileModifiedUnixNano: 200, StreamSignature: "stream"}
 	opts := recipeCardFixtureOpts(revision)
+	opts.CopyAudioCodec = "aac"
 
 	card := NewRecipeCard(42, "profile-1", 77, "", opts)
 	if card.SessionID != "abc" || card.UserID != 42 || card.ProfileID != "profile-1" || card.MediaFileID != 77 {
@@ -141,6 +142,9 @@ func checkRoundTripRecipeOpts(t *testing.T, got, opts TranscodeOpts, revision to
 	}
 	if !got.HLSVariableSubstitution {
 		t.Error("HLSVariableSubstitution lost in round trip")
+	}
+	if got.CopyAudioCodec != opts.CopyAudioCodec {
+		t.Errorf("CopyAudioCodec = %q, want %q", got.CopyAudioCodec, opts.CopyAudioCodec)
 	}
 }
 
@@ -327,6 +331,7 @@ func TestRecipeCardClaimsRoundTrip(t *testing.T) {
 	opts.ToneMapSourceKind = tonemap.SourceHLG
 	opts.ToneMapFilter = "tonemapx"
 	opts.SourceAudioChannels, opts.TargetAudioChannels, opts.TargetAudioBitrateKbps = 8, 6, 320
+	opts.CopyAudioCodec = "aac"
 	card := NewRecipeCard(42, "profile-1", 77, "http://node:9000", opts)
 	card.RoutingWorkload = "video_transcode"
 	card.RoutingExecution = "transcode"
@@ -356,6 +361,7 @@ func TestRecipeCardClaimsRoundTrip(t *testing.T) {
 		got.SeekSeconds != card.SeekSeconds || got.StreamOriginSeconds != card.StreamOriginSeconds ||
 		got.CopySeekAnchorResolved != card.CopySeekAnchorResolved || got.TargetResolution != card.TargetResolution ||
 		got.TargetCodecVideo != card.TargetCodecVideo || got.TargetCodecAudio != card.TargetCodecAudio ||
+		got.CopyAudioCodec != "aac" ||
 		got.TargetAudioChannels != card.TargetAudioChannels || got.TargetAudioBitrateKbps != card.TargetAudioBitrateKbps ||
 		got.SegmentDuration != card.SegmentDuration || got.StartSegmentNumber != card.StartSegmentNumber ||
 		got.SubtitleTrackIndex != card.SubtitleTrackIndex || got.SubtitleBurnIn != card.SubtitleBurnIn ||

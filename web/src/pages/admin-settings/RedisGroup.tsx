@@ -6,6 +6,7 @@ import { SecretField } from "@/components/settings/SecretField";
 import { useCheckAdminSettingsConnection } from "@/hooks/queries/admin/settings";
 import type { RestartKeyMatcher } from "@/hooks/useRestartKeys";
 import type { useSettingsForm } from "@/hooks/useSettingsForm";
+import { useT } from "@/i18n";
 
 import { FieldGroup } from "./FieldGroup";
 import { SettingField } from "./SettingField";
@@ -16,6 +17,9 @@ import { REDIS_KEYS, keepSavedRedisUrl, stageRedisUrl } from "./redisDraft";
  * is in flight, so a late keystroke cannot ride along with it; emptying the
  * input reverts to the saved URL (`keepSaved`).
  */
+const REDIS = "Redis";
+const REDIS_URL_EXAMPLE = "redis://host:6379";
+
 export interface RedisUrlEditors {
   keepSaved: (key: string) => void;
   setSecret: (key: string, value: string) => void;
@@ -31,6 +35,7 @@ export function RedisGroup({
   restartKeys: RestartKeyMatcher;
   secrets: RedisUrlEditors;
 }) {
+  const t = useT();
   const checkConnection = useCheckAdminSettingsConnection();
   const [connectionResult, setConnectionResult] = useState<ConnectionCheckResponse | null>(null);
   const redisUrl = form.getValue("redis.url");
@@ -61,22 +66,27 @@ export function RedisGroup({
     } catch (error) {
       setConnectionResult({
         success: false,
-        message: error instanceof Error ? error.message : "Connection check failed.",
+        message:
+          error instanceof Error
+            ? error.message
+            : t("web.admin.settings.fields.connectionCheckFailed"),
       });
     }
   }
 
   return (
     <FieldGroup
-      label="Redis"
+      label={REDIS}
       restartAll={REDIS_KEYS.every((key) => restartKeys.has(key))}
       dirty={REDIS_KEYS.some((key) => form.isDirty(key))}
     >
       <SettingField
-        label="Use Redis"
+        label={t("web.admin.settings.redis.enabled.label")}
         type="toggle"
         description={
-          managedByEnv ? "Set by REDIS_URL" : "Needed when running more than one server."
+          managedByEnv
+            ? t("web.admin.settings.redis.setByEnv")
+            : t("web.admin.settings.redis.enabled.description")
         }
         value={enabled ? "true" : "false"}
         onChange={(value) => {
@@ -103,12 +113,12 @@ export function RedisGroup({
             empty URL, and one clear per surface is the rule.
           */}
           <SecretField
-            label="Connection URL"
+            label={t("web.admin.settings.redis.url.label")}
             value={redisUrl}
             configured={configured}
             onKeep={() => keepSavedRedisUrl(urlDraft)}
             onChange={(v) => stageRedisUrl(urlDraft, v)}
-            hint={managedByEnv ? "Value supplied by REDIS_URL" : "redis://host:6379"}
+            hint={managedByEnv ? t("web.admin.settings.redis.url.managed") : REDIS_URL_EXAMPLE}
             disabled={managedByEnv || secrets.disabled}
             restartRequired={restartKeys.has("redis.url")}
           />
@@ -117,13 +127,13 @@ export function RedisGroup({
             one in the URL, or in REDIS_URL when the environment supplies it.
           */}
           <SettingField
-            label="Database number"
+            label={t("web.admin.settings.redis.db.label")}
             dirty={form.isDirty("redis.db")}
             type="number"
             description={
               managedByEnv
-                ? "Set by REDIS_URL"
-                : "Replaces the number in the URL. Installs sharing one Redis each need their own."
+                ? t("web.admin.settings.redis.setByEnv")
+                : t("web.admin.settings.redis.db.description")
             }
             value={form.getValue("redis.db")}
             onChange={(v) => {

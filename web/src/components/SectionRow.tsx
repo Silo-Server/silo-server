@@ -2,6 +2,7 @@ import { memo, useCallback, useMemo } from "react";
 import { ContinueWatchingRowCard } from "@/components/ContinueWatchingCard";
 import MediaCarousel, { type MediaCarouselWindowing } from "@/components/MediaCarousel";
 import SectionItemCard from "@/components/SectionItemCard";
+import { isProgressSectionType, sectionShowsWholeList } from "@/hooks/queries/homeRowLimit";
 import { useToggleSidebarPin } from "@/hooks/queries/sidebarPins";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import { buildSectionCatalogHref } from "@/pages/catalogSearchParams";
@@ -9,6 +10,8 @@ import type { ResolvedSection } from "@/api/types";
 import { Pin, PinOff } from "lucide-react";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
+import { useSectionTitle } from "@/lib/sectionTitle";
+import { useT } from "@/i18n";
 import { carouselCardWidthClasses, WIDE_CAROUSEL_CARD_WIDTH_CLASSES } from "@/lib/uiCustomization";
 import { initialCarouselSlideCount, visibleCarouselSlideCount } from "@/lib/carouselWindow";
 
@@ -37,6 +40,7 @@ function SectionPinButton({
   sectionTitle: string;
   libraryId: number;
 }) {
+  const t = useT();
   const { togglePin, isPinned, canToggle } = useToggleSidebarPin();
   const pinned = isPinned(libraryId, "section", sectionId);
 
@@ -50,7 +54,7 @@ function SectionPinButton({
           ? "text-primary hover:text-primary/80"
           : "text-muted-foreground/40 hover:bg-accent/60 hover:text-muted-foreground opacity-0 group-hover/carousel:opacity-100"
       }`}
-      title={pinned ? "Unpin from sidebar" : "Pin to sidebar"}
+      title={pinned ? t("web.home.sectionRow.unpin") : t("web.home.sectionRow.pin")}
     >
       {pinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
     </button>
@@ -63,6 +67,10 @@ export default memo(function SectionRow({
   priority = false,
   onNearEnd,
 }: SectionRowProps) {
+  const sectionTitle = useSectionTitle();
+  // The catalog page heads itself with the link's title, so it gets the shown
+  // (translated) title. A pin stores its label, so it keeps the server's title.
+  const shownTitle = sectionTitle(section);
   const browseHref = useMemo(
     () =>
       libraryId
@@ -70,17 +78,16 @@ export default memo(function SectionRow({
             scope: "library",
             libraryId,
             sectionId: section.id,
-            title: section.title,
+            title: shownTitle,
           })
-        : buildSectionCatalogHref({ scope: "home", sectionId: section.id, title: section.title }),
-    [libraryId, section.id, section.title],
+        : buildSectionCatalogHref({ scope: "home", sectionId: section.id, title: shownTitle }),
+    [libraryId, section.id, shownTitle],
   );
   const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
   const { cardPresentation } = useUICustomization();
   const posterSize = cardPresentation.poster_size;
   const posterWidthClasses = carouselCardWidthClasses(posterSize);
-  const isProgressRow =
-    section.section_type === "continue_watching" || section.section_type === "next_up";
+  const isProgressRow = isProgressSectionType(section.section_type);
   // One spoiler lookup per row rather than one per card.
   const { hideImages, hideOverviews } = useEpisodeSpoilerPrefs({ enabled: isProgressRow });
   const spoilerPrefs = useMemo(() => ({ hideImages, hideOverviews }), [hideImages, hideOverviews]);
@@ -115,12 +122,14 @@ export default memo(function SectionRow({
   const headerActions = libraryId ? (
     <SectionPinButton sectionId={section.id} sectionTitle={section.title} libraryId={libraryId} />
   ) : undefined;
+  // The browse page of a row that shows its whole list holds the same cards.
+  const rowHref = sectionShowsWholeList(section) ? undefined : browseHref;
 
   return (
     <MediaCarousel
-      title={section.title}
-      titleHref={browseHref}
-      viewAllHref={browseHref}
+      title={shownTitle}
+      titleHref={rowHref}
+      viewAllHref={rowHref}
       headerActions={headerActions}
       windowing={windowing}
       onNearEnd={onNearEnd ? handleNearEnd : undefined}

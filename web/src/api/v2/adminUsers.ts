@@ -13,6 +13,7 @@ import {
   adminAuthorityScope,
   requireAdminAuthority,
 } from "./adminAuthority";
+import { t } from "@/i18n";
 export type AdminUserEditor = {
   user: AdminUser;
   etag: string;
@@ -31,8 +32,7 @@ export function isStrongTag(value: string | null): value is string {
   return Boolean(value && /^"[\x21\x23-\x7e\x80-\xff]*"$/.test(value));
 }
 function strongTag(value: string | null) {
-  if (!isStrongTag(value))
-    throw new Error("Reload this user before saving: a strong ETag is required.");
+  if (!isStrongTag(value)) throw new Error(t("web.admin.errors.userReloadBeforeSaving"));
   return value;
 }
 type AdminUserV2 = V2Result<"GET /api/v2/admin/users">["items"][number];
@@ -107,15 +107,15 @@ export async function listAdminUsers(
     });
     requireAdminUserAuthority(profileContext);
     if (!Array.isArray(body.items) || !body.page || typeof body.page.has_more !== "boolean")
-      throw new Error("Invalid user pagination. Reload the list.");
+      throw new Error(t("web.admin.errors.userPaginationInvalid"));
     users.push(...body.items.map(adminUserFromV2));
     if (!body.page.has_more) {
-      if (body.page.next_cursor) throw new Error("Invalid user pagination. Reload the list.");
+      if (body.page.next_cursor) throw new Error(t("web.admin.errors.userPaginationInvalid"));
       return users;
     }
     const next = body.page.next_cursor;
     if (typeof next !== "string" || !next || seen.has(next))
-      throw new Error("Invalid user pagination. Reload the list.");
+      throw new Error(t("web.admin.errors.userPaginationInvalid"));
     seen.add(next);
     cursor = next;
   } while (cursor !== undefined);

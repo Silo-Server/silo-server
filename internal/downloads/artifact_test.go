@@ -87,16 +87,33 @@ func TestParamsHashIncludesFrozenToneMapRecipe(t *testing.T) {
 func TestValidateArtifactToneMapRevisionRejectsCatalogProbeDrift(t *testing.T) {
 	file := hdrDownloadTestFile()
 	revision := tonemap.RevisionForFile(file)
-	artifact := &Artifact{ToneMapMode: tonemap.ModeSoftware, ToneMapSourceRevision: revision.Encode()}
+	artifact := &Artifact{ToneMapMode: tonemap.ModeSoftware, ToneMapSourceKind: tonemap.SourcePQ, ToneMapSourceRevision: revision.Encode()}
 	if err := validateArtifactToneMapRevision(file, artifact); err != nil {
 		t.Fatalf("validateArtifactToneMapRevision(original) error = %v", err)
 	}
 
-	reprobed := *file
-	reprobed.VideoTracks = append([]models.VideoTrack(nil), file.VideoTracks...)
-	reprobed.VideoTracks[0].BitDepth++
-	if err := validateArtifactToneMapRevision(&reprobed, artifact); err == nil {
-		t.Fatal("validateArtifactToneMapRevision accepted changed probe metadata")
+	for _, tt := range []struct {
+		name    string
+		mutate  func(*models.VideoTrack)
+		wantErr bool
+	}{
+		{name: "reprobed stream", mutate: func(track *models.VideoTrack) { track.BitDepth++ }, wantErr: true},
+		// The HDR10+ backfill records the first frame's range without a new
+		// probe. A range that changes the source kind voids the frozen recipe;
+		// one that confirms the tag leaves it valid.
+		{name: "frame range changes the kind", mutate: func(track *models.VideoTrack) { track.FrameColorRange = "pc" }, wantErr: true},
+		{name: "frame range keeps the kind", mutate: func(track *models.VideoTrack) { track.FrameColorRange = "tv" }},
+	} {
+		changed := *file
+		changed.VideoTracks = append([]models.VideoTrack(nil), file.VideoTracks...)
+		tt.mutate(&changed.VideoTracks[0])
+		err := validateArtifactToneMapRevision(&changed, artifact)
+		if tt.wantErr && !errors.Is(err, tonemap.ErrSourceRevisionChanged) {
+			t.Fatalf("%s: validateArtifactToneMapRevision() = %v, want ErrSourceRevisionChanged", tt.name, err)
+		}
+		if !tt.wantErr && err != nil {
+			t.Fatalf("%s: validateArtifactToneMapRevision() = %v, want nil", tt.name, err)
+		}
 	}
 }
 

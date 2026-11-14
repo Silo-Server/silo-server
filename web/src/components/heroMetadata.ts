@@ -1,5 +1,6 @@
 import type { DisplayRating, SectionItem } from "@/api/types";
 import { primaryCardRating } from "@/components/ratings/ratings";
+import { codeNumber, numberText, t } from "@/i18n";
 
 function isPositiveFinite(value: number | undefined | null): value is number {
   return value != null && Number.isFinite(value) && value > 0;
@@ -22,10 +23,12 @@ function formatRuntime(seconds: number | undefined | null): string | null {
   if (!isPositiveFinite(seconds)) return null;
   const minutes = Math.round(seconds / 60);
   if (minutes <= 0) return null;
-  if (minutes < 60) return `${minutes} min`;
+  if (minutes < 60) return t("web.home.hero.runtimeMinutes", { minutes: minutes });
   const hours = Math.floor(minutes / 60);
   const remaining = minutes % 60;
-  return remaining === 0 ? `${hours}h` : `${hours}h ${remaining}m`;
+  return remaining === 0
+    ? t("web.home.hero.runtimeHours", { hours: hours })
+    : t("web.home.hero.runtimeHoursMinutes", { hours: hours, minutes: remaining });
 }
 
 export interface HeroMetadataEntry {
@@ -48,7 +51,10 @@ export function formatHeroMetadata(item: SectionItem): HeroMetadataEntry[] {
     if (isNonNegativeInteger(item.season_number) && isNonNegativeInteger(item.episode_number)) {
       entries.push({
         key: "episode-identity",
-        label: `S${item.season_number} · E${item.episode_number}`,
+        label: t("web.home.hero.episodeIdentity", {
+          season: codeNumber(item.season_number),
+          episode: codeNumber(item.episode_number),
+        }),
       });
     }
     if (runtime) entries.push({ key: "runtime", label: runtime });
@@ -57,7 +63,7 @@ export function formatHeroMetadata(item: SectionItem): HeroMetadataEntry[] {
   }
 
   if (Number.isInteger(item.year) && item.year > 0) {
-    entries.push({ key: "year", label: String(item.year) });
+    entries.push({ key: "year", label: numberText(item.year) });
   }
   if (runtime) entries.push({ key: "runtime", label: runtime });
   const rating = primaryCardRating(item);

@@ -405,6 +405,9 @@ type field struct {
 	contentID string
 	isTagline bool
 	text      string
+	// srcLanguage is the language text is written in; empty means the job's
+	// source language.
+	srcLanguage string
 }
 
 func (f field) segmentID() string {
@@ -465,18 +468,16 @@ func (s *Service) run(ctx context.Context, job *Job) {
 }
 
 // translateFields translates fields in batches and persists each batch as it
-// lands, so a cancellation keeps completed fields. onBatch reports the fields
-// persisted so far and the batch position. It returns the persisted count and
-// the first persist or model error.
+// lands, so a cancellation keeps completed fields. Fields are sent in groups
+// of one source language, each under a prompt naming that language, so a
+// Spanish episode in an English series is not translated "from English".
+// onBatch reports the fields persisted so far and the overall position. It
+// returns the persisted count and the first persist or model error.
 func (s *Service) translateFields(ctx context.Context, job *Job, fields []field, meta jobMeta, onBatch func(done, batchDone, batchTotal int)) (int, error) {
-	segments := make([]aitranslate.Segment, len(fields))
 	byID := make(map[string]field, len(fields))
-	for i, f := range fields {
-		segments[i] = aitranslate.Segment{ID: f.segmentID(), Text: f.text}
+	for _, f := range fields {
 		byID[f.segmentID()] = f
 	}
-
-	srcName := aitranslate.LanguageDisplayName(meta.srcLanguage)
 	tgtName := aitranslate.LanguageDisplayName(job.TargetLanguage)
 
 	// A persist failure cancels the remaining batches via persistCtx instead
@@ -485,38 +486,55 @@ func (s *Service) translateFields(ctx context.Context, job *Job, fields []field,
 	defer cancelPersist()
 	var persistMu sync.Mutex
 	var persistErr error
-	done := 0
+	done, sent := 0, 0
 
-	_, translateErr := aitranslate.Translate(persistCtx, s.chat, aitranslate.Request{
-		Segments:         segments,
-		SystemPrompt:     systemPrompt(srcName, tgtName, meta.title, meta.year),
-		TargetName:       tgtName,
-		EntryNoun:        "descriptions",
-		BatchSize:        metadataBatchSize,
-		ContextNeighbors: 0,
-	}, func(batch []aitranslate.Segment, batchDone, batchTotal int) {
-		// Finished translations should not be thrown away by a late cancel.
-		storeCtx := context.WithoutCancel(ctx)
-		for _, seg := range batch {
-			f, ok := byID[seg.ID]
-			if !ok {
-				continue
-			}
-			if err := s.persistField(storeCtx, job, f, seg.Text); err != nil {
-				persistMu.Lock()
-				if persistErr == nil {
-					persistErr = err
+	var translateErr error
+	groups := sourceGroups(fields, meta.srcLanguage)
+	for _, group := range groups {
+		segments := make([]aitranslate.Segment, len(group.fields))
+		for i, f := range group.fields {
+			segments[i] = aitranslate.Segment{ID: f.segmentID(), Text: f.text}
+		}
+		offset := sent
+		_, translateErr = aitranslate.Translate(persistCtx, s.chat, aitranslate.Request{
+			Segments:         segments,
+			SystemPrompt:     systemPrompt(group.srcName, tgtName, meta.title, meta.year),
+			TargetName:       tgtName,
+			EntryNoun:        "descriptions",
+			BatchSize:        metadataBatchSize,
+			ContextNeighbors: 0,
+		}, func(batch []aitranslate.Segment, batchDone, _ int) {
+			// Finished translations should not be thrown away by a late cancel.
+			storeCtx := context.WithoutCancel(ctx)
+			for _, seg := range batch {
+				f, ok := byID[seg.ID]
+				if !ok {
+					continue
 				}
-				persistMu.Unlock()
-				cancelPersist()
-				return
+				if err := s.persistField(storeCtx, job, f, seg.Text); err != nil {
+					persistMu.Lock()
+					if persistErr == nil {
+						persistErr = err
+					}
+					persistMu.Unlock()
+					cancelPersist()
+					return
+				}
+				done++
 			}
-			done++
+			if onBatch != nil {
+				onBatch(done, offset+batchDone, len(fields))
+			}
+		})
+		if translateErr != nil {
+			if len(groups) > 1 {
+				// Batch numbers count from the start of this language's group.
+				translateErr = fmt.Errorf("source language %q: %w", group.srcName, translateErr)
+			}
+			break
 		}
-		if onBatch != nil {
-			onBatch(done, batchDone, batchTotal)
-		}
-	})
+		sent += len(group.fields)
+	}
 
 	persistMu.Lock()
 	failure := persistErr
@@ -525,6 +543,36 @@ func (s *Service) translateFields(ctx context.Context, job *Job, fields []field,
 		failure = translateErr
 	}
 	return done, failure
+}
+
+// sourceGroup is the run of a job's fields written in one source language.
+type sourceGroup struct {
+	srcName string
+	fields  []field
+}
+
+// sourceGroups splits fields by the language their text is written in, in
+// the order each language first appears and keeping the job's order within a
+// group. A field with no language of its own is in jobLanguage. Languages are
+// matched by display name, the name the prompt carries.
+func sourceGroups(fields []field, jobLanguage string) []sourceGroup {
+	var groups []sourceGroup
+	index := map[string]int{}
+	for _, f := range fields {
+		lang := f.srcLanguage
+		if strings.TrimSpace(lang) == "" {
+			lang = jobLanguage
+		}
+		name := aitranslate.LanguageDisplayName(lang)
+		i, ok := index[name]
+		if !ok {
+			i = len(groups)
+			index[name] = i
+			groups = append(groups, sourceGroup{srcName: name})
+		}
+		groups[i].fields = append(groups[i].fields, f)
+	}
+	return groups
 }
 
 // libraryMaxFailuresInRow is how many items in a row may fail before a
@@ -841,7 +889,7 @@ func (s *Service) filterSeasons(ctx context.Context, job *Job, seasons []ChildTe
 			continue
 		}
 		if translatableField(season.Overview, locOverview, locSource, job.Force) {
-			fields = append(fields, field{kind: TargetSeason, contentID: season.ContentID, text: season.Overview})
+			fields = append(fields, field{kind: TargetSeason, contentID: season.ContentID, text: season.Overview, srcLanguage: season.DefaultLanguage})
 		}
 	}
 	return fields, nil
@@ -866,7 +914,7 @@ func (s *Service) filterEpisodes(ctx context.Context, job *Job, episodes []Child
 			continue
 		}
 		if translatableField(episode.Overview, locOverview, locSource, job.Force) {
-			fields = append(fields, field{kind: TargetEpisode, contentID: episode.ContentID, text: episode.Overview})
+			fields = append(fields, field{kind: TargetEpisode, contentID: episode.ContentID, text: episode.Overview, srcLanguage: episode.DefaultLanguage})
 		}
 	}
 	return fields, nil

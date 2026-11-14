@@ -468,6 +468,10 @@ func (s *interestTrackingStore) ListJellycompatProgressDates(ctx context.Context
 	return reader.ListJellycompatProgressDates(ctx, profileID, ids)
 }
 
+func (s *interestTrackingStore) ListJellycompatPlayedByDate(ctx context.Context, profileID string, types []string, libraryID *int, ascending bool, limit, offset int) ([]userstore.WatchProgress, error) {
+	return userstore.ListJellycompatPlayedByDate(ctx, s.UserStore, profileID, types, libraryID, ascending, limit, offset)
+}
+
 func (s *interestTrackingStore) SetProgressIfNewer(ctx context.Context, profileID, mediaItemID string, position, duration float64, completed bool, updatedAt time.Time) (bool, error) {
 	before := s.currentProgressState(ctx, profileID, mediaItemID)
 	applied, err := s.UserStore.SetProgressIfNewer(ctx, profileID, mediaItemID, position, duration, completed, updatedAt)
@@ -662,12 +666,12 @@ func (s *interestTrackingStore) DeleteHistoryBySource(ctx context.Context, profi
 // profiles may live outside Postgres, so no cascade covers these tables.
 // The purge is best-effort: a failure is logged, never surfaced as a
 // profile-deletion failure (the retention task prunes leftovers).
-func (s *interestTrackingStore) DeleteProfile(ctx context.Context, id string) error {
-	err := s.UserStore.DeleteProfile(ctx, id)
+func (s *interestTrackingStore) DeleteProfile(ctx context.Context, id string) ([]string, error) {
+	collectionIDs, err := s.UserStore.DeleteProfile(ctx, id)
 	if err == nil {
 		s.purgeProfile(ctx, id)
 	}
-	return err
+	return collectionIDs, err
 }
 
 func (s *interestTrackingStore) purgeProfile(ctx context.Context, id string) {
@@ -680,16 +684,16 @@ func (s *interestTrackingStore) purgeProfile(ctx context.Context, id string) {
 
 // DeleteProfileAudited is DeleteProfile through the wrapped store's audited
 // delete. A backend without one deletes the profile without an audit row.
-func (s *interestTrackingStore) DeleteProfileAudited(ctx context.Context, id string, audit func(pgx.Tx, *userstore.Profile) error) error {
+func (s *interestTrackingStore) DeleteProfileAudited(ctx context.Context, id string, audit func(pgx.Tx, *userstore.Profile) error) ([]string, error) {
 	deleter, ok := s.UserStore.(userstore.AuditedProfileDeleter)
 	if !ok {
 		return s.DeleteProfile(ctx, id)
 	}
-	err := deleter.DeleteProfileAudited(ctx, id, audit)
+	collectionIDs, err := deleter.DeleteProfileAudited(ctx, id, audit)
 	if err == nil {
 		s.purgeProfile(ctx, id)
 	}
-	return err
+	return collectionIDs, err
 }
 
 // Preserve the optional device settings capability without claiming support

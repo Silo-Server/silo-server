@@ -117,7 +117,7 @@ describe("Your collections", () => {
     rects.set(handle.closest("[data-collection-id]")!, new DOMRect(0, 0, 300, 100));
     rects.set(other.closest("[data-collection-id]")!, new DOMRect(320, 0, 300, 100));
     expect(document.getElementById(handle.getAttribute("aria-describedby")!)).toHaveTextContent(
-      "To pick up a draggable item, press the space bar.",
+      "To move an item, focus its handle and press Space or Enter. Use the arrow keys to move it, Space or Enter to drop it, or Escape to cancel.",
     );
 
     const announcements = recordAnnouncements();

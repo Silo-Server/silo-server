@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { Loader2, Trash2, Upload } from "lucide-react";
 
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import {
   useDeleteBrandingAsset,
@@ -32,6 +33,7 @@ export function BrandingAssetField({
   enabled,
   preview = "wide",
 }: BrandingAssetFieldProps) {
+  const t = useT();
   const inputRef = useRef<HTMLInputElement>(null);
   const upload = useUploadBrandingAsset();
   const remove = useDeleteBrandingAsset();
@@ -64,7 +66,7 @@ export function BrandingAssetField({
           {shownUrl ? (
             <img
               src={shownUrl}
-              alt={`${label} preview`}
+              alt={t("web.admin.common.brandingAssetField.previewAlt", { label })}
               className={cn("h-full w-full object-contain", showingDefault && "opacity-40")}
             />
           ) : (
@@ -75,14 +77,14 @@ export function BrandingAssetField({
           )}
         </div>
         {showingDefault && (
-          <span className="text-muted-foreground text-xs leading-none">{spec.emptyCaption}</span>
+          <span className="text-muted-foreground text-xs leading-none">{t(spec.emptyCaption)}</span>
         )}
       </div>
 
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium">{label}</p>
         {description && <p className="text-muted-foreground mt-0.5 text-xs">{description}</p>}
-        <p className="text-muted-foreground mt-0.5 text-xs leading-relaxed">{spec.guidance}</p>
+        <p className="text-muted-foreground mt-0.5 text-xs leading-relaxed">{spec.guidance()}</p>
       </div>
 
       <input
@@ -105,14 +107,16 @@ export function BrandingAssetField({
           ) : (
             <Upload className="h-3.5 w-3.5" />
           )}
-          {currentUrl ? "Replace" : "Upload"}
+          {currentUrl
+            ? t("web.admin.common.brandingAssetField.replace")
+            : t("web.admin.common.brandingAssetField.upload")}
         </button>
         {currentUrl && (
           <button
             type="button"
             onClick={() => remove.mutate({ kind })}
             disabled={busy}
-            aria-label={`Remove ${label}`}
+            aria-label={t("web.admin.common.brandingAssetField.remove", { label })}
             className="text-muted-foreground hover:text-destructive inline-flex items-center rounded-lg border border-transparent p-1.5 transition-colors disabled:opacity-50"
           >
             {remove.isPending ? (

@@ -40,7 +40,7 @@ func TestServiceRelaysRemoteArtifactOnEstablishedRoute(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/downloads/dl/file", nil)
 	req.Header.Set("Range", "bytes=1-3")
 	rr := httptest.NewRecorder()
-	err := svc.serveFileTarget(req.Context(), rr, req, &FileTarget{
+	err := svc.serveFileTarget(WithFileNamesVisible(req.Context()), rr, req, &FileTarget{
 		Path:                         `/artifacts/Movie "Final".mp4`,
 		OriginNodeURL:                origin.URL,
 		OriginArtifactID:             "artifact-1",

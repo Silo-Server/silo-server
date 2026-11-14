@@ -35,6 +35,7 @@ import {
   chapterLabel,
   firstUnreadChapter,
   flattenMangaList,
+  volumeChapterLabel,
   type MangaListEntry,
 } from "@/lib/mangaChapters";
 import { cn } from "@/lib/utils";
@@ -45,6 +46,7 @@ import ScoreRow from "./components/ScoreRow";
 import { formatFileSize } from "@/lib/mediaFormat";
 import { formatPageCount, metadataLine } from "./components/versionFormatUtils";
 import { hasMachineTranslation } from "./components/machineTranslation";
+import { useAppLanguage, useT } from "@/i18n";
 
 function genreHref(genre: string, libraryId?: number): string {
   const params = new URLSearchParams();
@@ -99,6 +101,7 @@ function MangaRow({
   seriesContentId: string;
   libraryId?: number;
 }) {
+  const t = useT();
   const { user } = useAuth();
   const readerHref = chapterReaderHref(chapter.content_id, seriesContentId, libraryId);
 
@@ -132,13 +135,13 @@ function MangaRow({
     try {
       const versions = await fetchCatalogItemVersions(chapter.content_id);
       if (versions.length === 0) {
-        toast.error("No downloadable files for this chapter");
+        toast.error(t("web.detail.manga.noDownloadableFiles"));
         return;
       }
       setDownloadVersions(versions);
       setDownloadOpen(true);
     } catch {
-      toast.error("Couldn't load chapter files. Try again later");
+      toast.error(t("web.detail.manga.chapterFilesLoadFailed"));
     } finally {
       setLoadingVersions(false);
     }
@@ -175,20 +178,25 @@ function MangaRow({
           {label}
         </span>
         {markedRead && (
-          <span className="text-success flex-shrink-0" title="Read">
+          <span className="text-success flex-shrink-0" title={t("web.detail.manga.readStatus")}>
             <Check className="size-4" />
-            <span className="sr-only">Read</span>
+            <span className="sr-only">{t("web.detail.manga.readStatus")}</span>
           </span>
         )}
         {progressPct != null && (
-          <span className="flex flex-shrink-0 items-center gap-1.5" title={`${progressPct}% read`}>
+          <span
+            className="flex flex-shrink-0 items-center gap-1.5"
+            title={t("web.detail.manga.percentRead", { percent: progressPct })}
+          >
             <span className="bg-muted block h-1 w-16 overflow-hidden rounded-full">
               <span
                 className="bg-primary block h-full rounded-full"
                 style={{ width: `${progressPct}%` }}
               />
             </span>
-            <span className="text-muted-foreground text-[11px] tabular-nums">{progressPct}%</span>
+            <span className="text-muted-foreground text-[11px] tabular-nums">
+              {t("web.detail.manga.percent", { percent: progressPct })}
+            </span>
           </span>
         )}
       </ViewTransitionLink>
@@ -197,9 +205,13 @@ function MangaRow({
           type="button"
           variant={markedRead ? "secondary" : "ghost"}
           size="icon-sm"
-          aria-label={markedRead ? "Mark chapter unread" : "Mark chapter read"}
+          aria-label={
+            markedRead
+              ? t("web.detail.manga.markChapterUnread")
+              : t("web.detail.manga.markChapterRead")
+          }
           aria-pressed={markedRead}
-          title={markedRead ? "Mark unread" : "Mark read"}
+          title={markedRead ? t("web.detail.manga.markUnread") : t("web.detail.manga.markRead")}
           disabled={watchedMutation.isPending}
           onClick={() => {
             const next = !markedRead;
@@ -216,8 +228,8 @@ function MangaRow({
             type="button"
             variant="ghost"
             size="icon-sm"
-            aria-label="Download chapter"
-            title="Download"
+            aria-label={t("web.detail.manga.downloadChapter")}
+            title={t("web.detail.actions.download")}
             disabled={loadingVersions}
             onClick={() => void handleDownload()}
           >
@@ -251,10 +263,16 @@ export default function MangaContent({
   libraryId?: number;
   showAdvisoryAge?: boolean;
 }) {
+  const t = useT();
   useAmbientColor(item.poster_thumbhash);
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
-  const entries = useMemo(() => buildMangaList(item.manga?.chapters ?? []), [item.manga?.chapters]);
+  const language = useAppLanguage();
+  const entries = useMemo(
+    () => buildMangaList(item.manga?.chapters ?? []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the entry labels follow the language
+    [item.manga?.chapters, language],
+  );
   const year = item.year ? String(item.year) : "";
   const publisher = item.studios?.[0];
   const chapterRows = item.manga?.chapters ?? [];
@@ -280,10 +298,14 @@ export default function MangaContent({
   const cta = resume
     ? {
         ...resume,
-        verb: resumeInProgress ? "Resume Reading" : anyRead ? "Continue" : "Start Reading",
+        verb: resumeInProgress
+          ? t("web.detail.manga.resumeReading")
+          : anyRead
+            ? t("web.detail.books.continueReading")
+            : t("web.detail.manga.startReading"),
       }
     : fallbackStart
-      ? { ...fallbackStart, verb: "Read Again" }
+      ? { ...fallbackStart, verb: t("web.detail.manga.readAgain") }
       : null;
 
   const [filesOpen, setFilesOpen] = useState(false);
@@ -296,7 +318,7 @@ export default function MangaContent({
         overviewMachineTranslated={hasMachineTranslation(item.machine_translated_fields)}
         title={item.title}
         topNav={<PageBack />}
-        context="Manga"
+        context={t("web.detail.hero.typeManga")}
         studioLabel={publisher}
         backdropUrl={item.backdrop_url}
         backdropThumbhash={item.backdrop_thumbhash}
@@ -341,8 +363,8 @@ export default function MangaContent({
                 <Button
                   variant="glass"
                   size="icon-lg"
-                  title="More"
-                  aria-label="More actions"
+                  title={t("web.detail.actions.more")}
+                  aria-label={t("web.detail.actions.moreActions")}
                   className="size-11 rounded-full"
                 >
                   <MoreVertical className="size-[18px]" />
@@ -351,7 +373,7 @@ export default function MangaContent({
               <DropdownMenuContent align="start" className="w-56">
                 <DropdownMenuItem onSelect={() => setFilesOpen(true)}>
                   <FileText className="size-4" />
-                  View Details
+                  {t("web.detail.manga.viewDetails")}
                 </DropdownMenuItem>
                 {isAdmin && (
                   <>
@@ -363,7 +385,7 @@ export default function MangaContent({
                       {refreshMetadataMutation.isPending && (
                         <RefreshCw className="size-4 animate-spin" />
                       )}
-                      Refresh Metadata
+                      {t("web.detail.actions.refreshMetadata")}
                     </DropdownMenuItem>
                   </>
                 )}
@@ -388,20 +410,18 @@ export default function MangaContent({
               }}
             >
               <CornerDownRight className="size-4" />
-              Jump to {resume.label}
+              {t("web.detail.manga.jumpTo", { label: resume.label })}
             </Button>
           </div>
         )}
         {entries.length === 0 ? (
-          <p className="text-muted-foreground text-sm">
-            No chapters found. Chapters appear here once the library scan completes.
-          </p>
+          <p className="text-muted-foreground text-sm">{t("web.detail.manga.noChapters")}</p>
         ) : (
           <ul className="divide-border/40 border-border/40 divide-y overflow-hidden rounded-lg border">
             {entries.map((entry) =>
               entry.kind === "section" ? (
                 <MangaSection
-                  key={`section-${entry.label}`}
+                  key={`section-${entry.id}`}
                   entry={entry}
                   seriesContentId={item.content_id}
                   libraryId={libraryId}
@@ -452,6 +472,7 @@ function MangaSection({
   seriesContentId: string;
   libraryId?: number;
 }) {
+  const t = useT();
   const allRead = entry.chapters.every((chapter) => chapter.read === true);
   const [open, setOpen] = useState(!allRead);
 
@@ -468,19 +489,27 @@ function MangaSection({
         </span>
         <span className="text-muted-foreground flex items-center gap-2 text-xs">
           {allRead && (
-            <span className="text-success flex items-center" title="All chapters read">
+            <span
+              className="text-success flex items-center"
+              title={t("web.detail.manga.allChaptersRead")}
+            >
               <Check className="size-3.5" />
-              <span className="sr-only">All chapters read</span>
+              <span className="sr-only">{t("web.detail.manga.allChaptersRead")}</span>
             </span>
           )}
-          {entry.chapters.length} {entry.chapters.length === 1 ? "chapter" : "chapters"}
-          <ChevronDown className={cn("size-4 transition-transform", !open && "-rotate-90")} />
+          {t("web.detail.manga.chapterCount", {
+            count: entry.chapters.length,
+            count_text: entry.chapters.length,
+          })}
+          <ChevronDown
+            className={cn("size-4 transition-transform", !open && "-rotate-90 rtl:rotate-90")}
+          />
         </span>
       </button>
       {open && (
         <ul className="divide-border/40 divide-y">
           {entry.chapters.map((chapter) => (
-            <li key={chapter.content_id} className="pl-4">
+            <li key={chapter.content_id} className="ps-4">
               <MangaRow
                 chapter={chapter}
                 label={chapterLabel(chapter)}
@@ -502,7 +531,7 @@ function flattenFirst(entries: ReturnType<typeof buildMangaList>) {
   if (!first) return null;
   if (first.kind === "section") {
     const [chapter] = first.chapters;
-    return chapter ? { chapter, label: `${first.label} · ${chapterLabel(chapter)}` } : null;
+    return chapter ? { chapter, label: volumeChapterLabel(first.label, chapter) } : null;
   }
   return { chapter: first.chapter, label: first.label };
 }

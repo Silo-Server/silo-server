@@ -7,6 +7,9 @@ import (
 	"testing"
 	"time"
 
+	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
+
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
 
@@ -279,5 +282,55 @@ func TestEnsureClientFailedLaunchPropagatesToAllCallers(t *testing.T) {
 	}
 	if got := host.startCount(); got != 1 {
 		t.Fatalf("failed launch host.Start calls = %d, want 1 (still single-flighted)", got)
+	}
+}
+
+func (h *countingHerdHost) Running(id int) bool {
+	_, err := h.Client(id)
+	return err == nil
+}
+
+func (h *ctxCaptureHost) Running(id int) bool {
+	_, err := h.Client(id)
+	return err == nil
+}
+
+// The host stops an idle plugin only when its start asked for that. An RPC
+// that finds no client, as after an idle stop, starts a lazy plugin with the
+// request set and reports the stopped plugin without an error; a resident is
+// the supervisor's and is never started with it.
+func TestOnlyLazyPluginsAreStartedWithStopWhenIdle(t *testing.T) {
+	manifest := testPluginManifest(t, "silo.metadb", "0.0.36")
+	store := installedPluginStore(t, 7, manifest)
+	host := &fakeServiceHost{clientErr: pluginhost.ErrClientNotFound}
+	service := &Service{installations: store, host: host}
+
+	// No process, as after an idle stop: reported stopped, not failed.
+	if state := service.RuntimeStateOf(store.byID[7]); state.State != ResidentStopped || state.LastError != "" {
+		t.Fatalf("runtime state of a stopped idle plugin = %+v, want stopped with no error", state)
+	}
+	if _, err := service.ensureClient(context.Background(), 7); err != nil {
+		t.Fatalf("ensureClient after an idle stop: %v", err)
+	}
+	if len(host.started) != 1 || len(host.stopped) != 0 {
+		t.Fatalf("starts = %d, stops = %d; want 1 start and no stop", len(host.started), len(host.stopped))
+	}
+	if !host.started[0].StopWhenIdle {
+		t.Fatal("a lazily started plugin was not started with StopWhenIdle")
+	}
+
+	resident := testPluginManifest(t, "silo.overlay", "1.0.0")
+	resident.Capabilities = []*pluginv1.CapabilityDescriptor{{
+		Type: capability.NetworkAccessProvider, Id: "overlay",
+		NetworkAccessProvider: &pluginv1.NetworkAccessProviderDescriptor{Provider: "tailscale"},
+	}}
+	residentStore := installedPluginStore(t, 8, resident)
+	residentHost := &fakeServiceHost{}
+	residentService := &Service{installations: residentStore, host: residentHost}
+	if _, err := residentService.start(context.Background(), 8, true); err != nil {
+		t.Fatalf("start resident: %v", err)
+	}
+	if len(residentHost.started) != 1 || residentHost.started[0].StopWhenIdle {
+		t.Fatalf("resident start requests = %+v, want one without StopWhenIdle", residentHost.started)
 	}
 }

@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
@@ -157,21 +158,6 @@ func (m *Manager) Search(ctx context.Context, req SearchRequest) (*SearchRespons
 		return resp.Results[i].Score > resp.Results[j].Score
 	})
 
-	return resp, nil
-}
-
-// SearchBridge returns the legacy provider language payload for the frozen v1
-// bridge while sharing the canonical search and scoring path.
-func (m *Manager) SearchBridge(ctx context.Context, req SearchRequest) (*SearchResponse, error) {
-	resp, err := m.Search(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	for i := range resp.Results {
-		if resp.Results[i].rawLanguage != "" {
-			resp.Results[i].Language = resp.Results[i].rawLanguage
-		}
-	}
 	return resp, nil
 }
 
@@ -330,6 +316,9 @@ func (m *Manager) StoreSubtitle(ctx context.Context, req StoreSubtitleRequest) (
 		return nil, fmt.Errorf("check duplicate: %w", err)
 	}
 	if existing != nil {
+		if err := m.restoreMissingObject(ctx, existing, req.Data); err != nil {
+			return nil, err
+		}
 		return existing, nil
 	}
 	// Legacy keys retain their old short digest. Verify actual bytes before
@@ -370,6 +359,23 @@ func (m *Manager) StoreSubtitle(ctx context.Context, req StoreSubtitleRequest) (
 		return nil, fmt.Errorf("insert subtitle record: %w", err)
 	}
 	return sub, nil
+}
+
+// restoreMissingObject writes data back under a stored subtitle whose object
+// is gone, as after a restore that left provider downloads out of the
+// backup, so storing the same subtitle again repairs it instead of
+// returning a row with no content. The row's content hash matched data, so
+// the bytes are the row's own. Any other read result leaves the object
+// alone.
+func (m *Manager) restoreMissingObject(ctx context.Context, sub *DownloadedSubtitle, data []byte) error {
+	if _, err := m.blobs.Get(ctx, sub.S3Key); !errors.Is(err, blobstore.ErrNotFound) {
+		return nil
+	}
+	if err := m.blobs.Put(ctx, sub.S3Key, data); err != nil {
+		return fmt.Errorf("restore missing subtitle object: %w", err)
+	}
+	slog.InfoContext(ctx, "restored a missing subtitle object", "component", "subtitles", "subtitle_id", sub.ID, "object_key", sub.S3Key)
+	return nil
 }
 
 // UpdateDownloadedSubtitle changes metadata without moving immutable content.
@@ -452,18 +458,4 @@ func (m *Manager) GetSubtitleContent(ctx context.Context, id int) (*DownloadedSu
 // file (used to enumerate offline subtitle assets).
 func (m *Manager) ListDownloadedSubtitles(ctx context.Context, mediaFileID int) ([]DownloadedSubtitle, error) {
 	return m.repo.ListDownloadedSubtitles(ctx, mediaFileID)
-}
-
-// DeleteSubtitle removes the database row, then attempts object cleanup.
-// Success means metadata is absent; object cleanup is best effort.
-func (m *Manager) DeleteSubtitle(ctx context.Context, id int) error {
-	sub, err := m.repo.DeleteDownloadedSubtitle(ctx, id)
-	if err != nil {
-		return fmt.Errorf("delete subtitle record: %w", err)
-	}
-	if sub == nil {
-		return nil
-	}
-	m.cleanupSubtitleObject(ctx, sub.S3Key)
-	return nil
 }

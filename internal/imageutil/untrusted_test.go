@@ -23,12 +23,18 @@ func TestUntrustedLoadersAreBlocked(t *testing.T) {
 	}
 }
 
-// SVG is the one untrusted libvips loader Silo re-enables, for provider logos.
+// SVG is the one untrusted libvips loader Silo re-enables, for provider logos,
+// and Rasterize is the only function that reads one.
 func TestLoadersKeptAfterUntrustedBlock(t *testing.T) {
+	svg := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8"/></svg>`)
+	rasterized, err := Rasterize(svg)
+	if err != nil {
+		t.Fatalf("Rasterize: %v", err)
+	}
 	cases := map[string][]byte{
-		"png":  testPNG(t, 8, 8),
-		"jpeg": largeTestJPEG(t, 8, 8),
-		"svg":  []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8"/></svg>`),
+		"png":            testPNG(t, 8, 8),
+		"jpeg":           largeTestJPEG(t, 8, 8),
+		"rasterized svg": rasterized,
 	}
 	for name, data := range cases {
 		t.Run(name, func(t *testing.T) {
