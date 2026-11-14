@@ -35,6 +35,8 @@
 ./internal/api/handlers TestPersonalListPagesKeepVisibleEpisodesDB
 ./internal/catalog TestPersonalListPageFollowsAccessDB
 ./internal/audiobooks TestABSListsLeaveOutBooksInNoLibraryDB
+./internal/audiobooks TestABSLibraryItemsFiltersAndSortDB
+./internal/audiobooks TestABSSeriesIdentityAndContinueListeningDB
 ./internal/api/handlers TestAdminStatsLeaveOutFilesAndItemsHeldByRemovalGraceDB
 ./internal/sections TestRuleRowsReadTheViewersWatchStatePostgres
 ./internal/sections TestSmartCollectionRowWithDisplayFilterReadsTheViewersWatchStatePostgres

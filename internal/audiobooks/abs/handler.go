@@ -48,9 +48,9 @@ type MediaStore interface {
 	GetAudiobooksByIDs(ctx context.Context, contentIDs []string, access catalog.AccessFilter) (map[string]*models.MediaItem, error)
 	// ListAudiobooks returns a page of audiobooks. When libraryID is non-zero
 	// it filters to items in that media_folder; 0 means all audiobook items.
-	// filter optionally pushes an authors/series/narrators predicate into the
-	// query (Filter{} for none) so per-author syncs avoid a full-library scan.
-	ListAudiobooks(ctx context.Context, libraryID int64, limit, offset int, access catalog.AccessFilter, filter Filter) ([]*models.MediaItem, int, error)
+	// q carries the ABS filter and sort, applied in SQL (ItemsQuery{} for
+	// none). limit <= 0 returns every match.
+	ListAudiobooks(ctx context.Context, libraryID int64, limit, offset int, access catalog.AccessFilter, q ItemsQuery) ([]*models.MediaItem, int, error)
 	GetMediaFiles(ctx context.Context, contentID string, access catalog.AccessFilter) ([]*models.MediaFile, error)
 	// ListAudiobookLibraries returns media_folder rows with type='audiobooks'.
 	ListAudiobookLibraries(ctx context.Context, access catalog.AccessFilter) ([]AudiobookLibrary, error)
@@ -75,6 +75,11 @@ type MediaStore interface {
 	// audiobook_series) in the library plus the total series count. limit<=0
 	// returns all.
 	ListLibrarySeries(ctx context.Context, libraryID int64, limit, offset int, access catalog.AccessFilter) ([]SeriesSummary, int, error)
+	// SearchLibraryAuthors and SearchLibrarySeries return up to limit authors
+	// or series in the library whose name contains term, prefix matches first,
+	// counting only books the viewer may see.
+	SearchLibraryAuthors(ctx context.Context, libraryID int64, term string, limit int, access catalog.AccessFilter) ([]AuthorSummary, error)
+	SearchLibrarySeries(ctx context.Context, libraryID int64, term string, limit int, access catalog.AccessFilter) ([]SeriesSummary, error)
 	// GetAuthorByID returns the author with the given people.id plus
 	// their audiobook list, sorted by title. Returns ErrNotFound when
 	// no people row matches.
@@ -127,9 +132,20 @@ type Author struct {
 	Books      []*models.MediaItem
 }
 
+// SeriesID is the ABS ID of the series a book names: the name lowercased,
+// LOWER(series_name) in SQL. Series have no table of their own; a series is
+// every audiobook_series row whose name matches case-insensitively, so the
+// list, the detail, the series filter, and collapseseries all group and look
+// up by this key, and lookups also accept the name itself in any case. The
+// store reads the key from the database (AudiobookSeriesMembership.Key);
+// this Go form is the fallback for an item hydrated without it.
+func SeriesID(name string) string {
+	return strings.ToLower(name)
+}
+
 // Series is the detail-shape series with books ordered by series_index.
 type Series struct {
-	ID    string // lowercased series_name
+	ID    string // SeriesID of Name
 	Name  string // canonical series_name
 	Books []*models.MediaItem
 }

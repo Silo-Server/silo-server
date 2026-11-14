@@ -153,12 +153,11 @@ func (h *Handler) buildFilterData(ctx context.Context, lib AudiobookLibrary, acc
 //
 //   - limit / page      — pagination
 //   - minified=1        — slim response (no tracks, flat author/series)
-//   - filter=<kind>.<b64value> — local-side filter (authors, series, narrators, progress)
+//   - filter=<kind>.<b64value> — authors, series, narrators, genres, tags,
+//     languages, or progress, applied in SQL
+//   - sort / desc       — the real ABS sort keys Silo has data for (see
+//     audiobookItemsOrder in the store); others fall back to title order
 //   - collapseseries=1  — fold books by series; returns one entry per series
-//
-// Note: sort pushdown is not yet implemented (returns insertion order from
-// the store). Filter is applied locally after fetching. These limitations
-// are consistent with the plugin at its initial launch.
 func (h *Handler) handleLibraryItems(w http.ResponseWriter, r *http.Request) {
 	lib, access, ok := h.resolveLibrary(w, r)
 	if !ok {
@@ -178,33 +177,25 @@ func (h *Handler) handleLibraryItems(w http.ResponseWriter, r *http.Request) {
 	collapseSeries := q.Get("collapseseries") == "1"
 	include := q.Get("include")
 
-	filter, hasFilter := ParseFilter(filterBy)
-
-	// authors/series/narrators filters push down into SQL (indexed) so we never
-	// load + hydrate the whole library. This applies even with collapseseries=1
-	// (the client's per-artist album sync): the SQL filter reduces to a handful
-	// of rows, then collapse + paging run in Go over that small set. Only
-	// progress/genre/tag/language filters still need the Go post-filter and the
-	// full fetch.
-	pushDown := hasFilter &&
-		(filter.Kind == FilterAuthors || filter.Kind == FilterSeries || filter.Kind == FilterNarrators)
-	sqlFilter := Filter{}
-	if pushDown {
-		sqlFilter = filter
+	filter, _ := ParseFilter(filterBy)
+	// Real ABS does not collapse inside a series filter: the client is showing
+	// that series' books.
+	if filter.Kind == FilterSeries {
+		collapseSeries = false
 	}
-	goFilter := hasFilter && !pushDown
+	a, _ := absAuthFrom(r)
+	query := ItemsQuery{Filter: filter, Sort: sortBy, Desc: sortDesc, UserID: a.UserID, ProfileID: a.ProfileID}
 
-	// SQL paginates only when nothing is post-processed in Go (no Go filter, no
-	// collapse) and the limit is positive; otherwise fetch the (now
-	// SQL-filtered, hence small) candidate set in full and slice in Go.
-	sqlPaginated := !goFilter && !collapseSeries && limit > 0
+	// SQL filters and sorts every request. It also paginates unless the page
+	// is collapsed by series, which runs in Go over the filtered set.
+	sqlPaginated := !collapseSeries && limit > 0
 	fetchLimit, fetchOffset := 0, 0
 	if sqlPaginated {
 		fetchLimit = limit
 		fetchOffset = page * limit
 	}
 
-	items, total, err := h.deps.MediaStore.ListAudiobooks(r.Context(), lib.ID, fetchLimit, fetchOffset, access, sqlFilter)
+	items, total, err := h.deps.MediaStore.ListAudiobooks(r.Context(), lib.ID, fetchLimit, fetchOffset, access, query)
 	if err != nil {
 		http.Error(w, "list audiobooks: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -215,18 +206,6 @@ func (h *Handler) handleLibraryItems(w http.ResponseWriter, r *http.Request) {
 	all := make([]LibraryItem, 0, len(items))
 	for _, item := range items {
 		all = append(all, siloItemToLibraryItem(item, lib, baseURL))
-	}
-
-	// Local filter (post-fetch) — only for filters not pushed into SQL.
-	if goFilter {
-		filtered := make([]LibraryItem, 0, len(all))
-		for _, it := range all {
-			if filter.Matches(it, false, false, false) {
-				filtered = append(filtered, it)
-			}
-		}
-		all = filtered
-		total = len(all)
 	}
 
 	// Collapse-by-series before paging.
@@ -490,39 +469,25 @@ func (h *Handler) handleLibrarySearch(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Best-effort author/series buckets: silo has no dedicated search-scoped
-	// store query for these yet, so we reuse the existing aggregate listers
-	// (capped, same pattern as buildFilterData/handleLibraryAuthors/
-	// handleLibrarySeries) and filter client-side on a case-insensitive
-	// substring match. narrators/tags/genres have no backing aggregation
-	// query at all in silo's catalog today and stay empty-but-present.
-	qLower := strings.ToLower(q)
-	const fetchCap = 5000
-
+	// narrators/tags/genres have no backing aggregation query in silo's
+	// catalog today and stay empty-but-present.
 	authorsOut := []any{}
-	if rows, _, err := h.deps.MediaStore.ListLibraryAuthors(r.Context(), lib.ID, fetchCap, 0, "name", false, access); err == nil {
+	if rows, err := h.deps.MediaStore.SearchLibraryAuthors(r.Context(), lib.ID, q, limit, access); err == nil {
 		for _, a := range rows {
-			if !strings.Contains(strings.ToLower(a.Name), qLower) {
-				continue
-			}
 			authorsOut = append(authorsOut, map[string]any{
 				"id":        a.ID,
 				"name":      a.Name,
 				"numBooks":  a.NumBooks,
 				"libraryId": libID,
 			})
-			if len(authorsOut) >= limit {
-				break
-			}
 		}
+	} else {
+		slog.WarnContext(r.Context(), "abs author search failed", "component", "audiobooks", "library", lib.ID, "err", err)
 	}
 
 	seriesOut := []any{}
-	if rows, _, err := h.deps.MediaStore.ListLibrarySeries(r.Context(), lib.ID, fetchCap, 0, access); err == nil {
+	if rows, err := h.deps.MediaStore.SearchLibrarySeries(r.Context(), lib.ID, q, limit, access); err == nil {
 		for _, s := range rows {
-			if !strings.Contains(strings.ToLower(s.Name), qLower) {
-				continue
-			}
 			// Real ABS wraps series search hits as { series, books } — the
 			// series sub-object is the plain Series.toOldJSON() shape (no
 			// numBooks field there; we add it anyway since an extra key is
@@ -555,10 +520,9 @@ func (h *Handler) handleLibrarySearch(w http.ResponseWriter, r *http.Request) {
 				},
 				"books": seriesBooks,
 			})
-			if len(seriesOut) >= limit {
-				break
-			}
 		}
+	} else {
+		slog.WarnContext(r.Context(), "abs series search failed", "component", "audiobooks", "library", lib.ID, "err", err)
 	}
 
 	out := empty
@@ -798,7 +762,11 @@ func siloItemToMetadata(item *models.MediaItem) Metadata {
 		if name == "" {
 			continue
 		}
-		obj := SeriesObj{ID: name, Name: name}
+		id := membership.Key
+		if id == "" {
+			id = SeriesID(name)
+		}
+		obj := SeriesObj{ID: id, Name: name}
 		if membership.Index != nil {
 			obj.Sequence = strconv.FormatFloat(*membership.Index, 'f', -1, 64)
 		}
