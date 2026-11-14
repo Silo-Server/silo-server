@@ -550,10 +550,11 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 	resolvedTarget := decision.PrepareTarget
 	toneMapPreResolved := preparedTargetRequiresToneMap(file, resolvedTarget)
 	if toneMapPreResolved {
-		// A quick, non-authoritative quota check avoids expensive capability work
-		// for requests that are already over quota. The check is repeated under the
-		// advisory lock below to retain the concurrency guarantee.
-		if err := s.limiter.Check(ctx, userID, 1); err != nil {
+		// A quick, non-authoritative period check avoids expensive capability
+		// work for requests that are already over quota. Whether the entry
+		// takes a concurrent slot depends on the resolved target, so that is
+		// checked under the advisory lock below.
+		if err := s.limiter.CheckCounts(ctx, userID, 0, 1); err != nil {
 			return nil, err
 		}
 		var err error
@@ -569,7 +570,14 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 	// creation so a rejected request cannot leave an encode job behind.
 	var d *Download
 	err := s.repo.WithUserQuotaLock(ctx, userID, func(ctx context.Context) error {
-		if err := s.limiter.Check(ctx, userID, 1); err != nil {
+		// The new entry takes a concurrent slot only when it starts
+		// preparing; one whose prepared file is already ready registers
+		// ready and counts only toward the period quota.
+		activating := 1
+		if s.artifacts.readyArtifact(ctx, file, decision.DeliveryFormat, resolvedTarget) {
+			activating = 0
+		}
+		if err := s.limiter.CheckCounts(ctx, userID, activating, 1); err != nil {
 			return err
 		}
 		var artifact *Artifact
