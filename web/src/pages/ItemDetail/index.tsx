@@ -7,6 +7,7 @@ import type { ItemDetail } from "@/api/types";
 import { isNotFoundProblem } from "@/api/v2/request";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { Button } from "@/components/ui/button";
+import { loadErrorDescription } from "@/components/loadErrorDescription";
 import PageUnavailable from "@/components/PageUnavailable";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { toast } from "sonner";
@@ -192,7 +193,10 @@ export default function ItemDetail() {
     // A 404 has the page to itself; a toast would only repeat it.
     if (itemError && !isNotFoundProblem(itemError)) {
       toast.error(
-        itemError instanceof Error ? itemError.message : t("web.detail.page.loadFailedToast"),
+        loadErrorDescription(
+          itemError,
+          itemError instanceof Error ? itemError.message : t("web.detail.page.loadFailedToast"),
+        ),
       );
     }
   }, [itemError, t]);
@@ -209,7 +213,7 @@ export default function ItemDetail() {
       return (
         <PageUnavailable
           title={t("web.detail.page.itemLoadFailed")}
-          description={t("web.detail.page.loadFailedBody")}
+          description={loadErrorDescription(itemError, t("web.detail.page.loadFailedBody"))}
           onRetry={() => void refetch()}
           retrying={isFetching}
         />

@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { V2ProblemError } from "@/api/v2/request";
+import { V2ProblemError, V2TimeoutError } from "@/api/v2/request";
 
 const mocks = vi.hoisted(() => ({
   useCatalogItemDetail: vi.fn(),
@@ -273,6 +273,28 @@ describe("ItemDetail", () => {
 
       await userEvent.click(screen.getByRole("button", { name: "Try again" }));
       expect(refetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("says the server isn't responding when the item read times out", () => {
+      mocks.useCatalogItemDetail.mockReturnValue({
+        data: undefined,
+        isLoading: false,
+        isFetching: false,
+        error: new V2TimeoutError("getCatalogItem", 30_000),
+        refetch: vi.fn(),
+      });
+
+      renderInRouter(<ItemDetail />);
+
+      expect(
+        screen.getByRole("heading", { level: 1, name: "Couldn't load this item" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText("The server isn't responding. Try again in a moment."),
+      ).toBeInTheDocument();
+      expect(mocks.toastError).toHaveBeenCalledWith(
+        "The server isn't responding. Try again in a moment.",
+      );
     });
 
     // Issue #3068: the web app has no podcast page, and a redirect to a route

@@ -1,6 +1,7 @@
 import { refreshAccessToken } from "@/api/client";
+import { API_READ_TIMEOUT_MS } from "@/api/requestDeadline";
 import type { LoginResponse, User } from "@/api/types";
-import { decodeV2Response, V2_CLIENT_HEADERS } from "@/api/v2/request";
+import { decodeV2Response, V2_CLIENT_HEADERS, withV2Deadline } from "@/api/v2/request";
 import type { components } from "@/api/v2/schema";
 
 /** The account document as every v2 credential and account response carries it. */
@@ -56,7 +57,10 @@ export interface RestoredUserSession {
 /**
  * Validates a stored token pair without touching the shared session: fetches
  * the account with the given access token, refreshes once on 401, and returns
- * the user together with whichever tokens ended up working.
+ * the user together with whichever tokens ended up working. Each request has
+ * the read deadline `v2()` gives, so a server that stops answering fails the
+ * restore with `V2TimeoutError` instead of holding the app on its loading
+ * screen.
  */
 export async function restoreUserSession({
   accessToken,
@@ -67,33 +71,42 @@ export async function restoreUserSession({
   refreshToken: string;
   fetchImpl?: typeof fetch;
 }): Promise<RestoredUserSession> {
-  let restoredAccessToken = accessToken;
-  let restoredRefreshToken = refreshToken;
-
-  const requestUser = (token: string) =>
-    fetchImpl("/api/v2/account/me", {
-      headers: {
-        Accept: "application/json",
-        ...V2_CLIENT_HEADERS,
-        Authorization: `Bearer ${token}`,
-      },
+  // A 401 asks for a refresh whatever happens to its body, which is read only
+  // for the error a refused refresh reports; a body that breaks off or stalls
+  // must not stop the refresh.
+  let accountStatus: number | undefined;
+  const readAccount = (token: string) =>
+    withV2Deadline("GET /api/v2/account/me", API_READ_TIMEOUT_MS, null, async (signal) => {
+      const res = await fetchImpl("/api/v2/account/me", {
+        headers: {
+          Accept: "application/json",
+          ...V2_CLIENT_HEADERS,
+          Authorization: `Bearer ${token}`,
+        },
+        signal,
+      });
+      accountStatus = res.status;
+      return decodeV2Response("GET /api/v2/account/me", res);
     });
 
-  let res = await requestUser(restoredAccessToken);
-
-  if (res.status === 401) {
-    const refreshed = await refreshAccessToken(restoredRefreshToken, fetchImpl);
-    if (refreshed) {
-      restoredAccessToken = refreshed.access_token;
-      restoredRefreshToken = refreshed.refresh_token;
-      res = await requestUser(restoredAccessToken);
-    }
+  try {
+    const account = await readAccount(accessToken);
+    return { user: userFromAccount(account), accessToken, refreshToken };
+  } catch (error) {
+    if (accountStatus !== 401) throw error;
+    const refreshed = await withV2Deadline(
+      "POST /api/v2/auth/refresh",
+      API_READ_TIMEOUT_MS,
+      null,
+      (signal) =>
+        refreshAccessToken(refreshToken, (input, init) => fetchImpl(input, { ...init, signal })),
+    );
+    if (!refreshed) throw error;
+    const account = await readAccount(refreshed.access_token);
+    return {
+      user: userFromAccount(account),
+      accessToken: refreshed.access_token,
+      refreshToken: refreshed.refresh_token,
+    };
   }
-
-  const account = await decodeV2Response("GET /api/v2/account/me", res);
-  return {
-    user: userFromAccount(account),
-    accessToken: restoredAccessToken,
-    refreshToken: restoredRefreshToken,
-  };
 }

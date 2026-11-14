@@ -6,6 +6,7 @@ import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { LayoutDashboard } from "lucide-react";
 import HeroBanner from "@/components/HeroBanner";
+import { loadErrorDescription } from "@/components/loadErrorDescription";
 import SectionRow from "@/components/SectionRow";
 import TasteSeedBanner from "@/components/TasteSeedBanner";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -46,7 +47,7 @@ const DESKTOP_SIDEBAR_QUERY = "(min-width: 64rem)";
 
 export default function Home() {
   const queryClient = useQueryClient();
-  const { data, isLoading, isError, refetch } = useHomeLayout();
+  const { data, isLoading, isError, error, refetch } = useHomeLayout();
   const { data: homeRefreshSignal = 0 } = useSectionRefreshSignal();
   const { cardPresentation } = useUICustomization();
   const sectionTitle = useSectionTitle();
@@ -357,7 +358,9 @@ export default function Home() {
       <div className="page-shell flex min-h-[50vh] items-center justify-center py-12">
         <div className="surface-panel max-w-md rounded-[1.8rem] border-0 p-6 text-center shadow-none">
           <p className="text-lg font-semibold">{t("web.home.page.loadFailedTitle")}</p>
-          <p className="text-muted-foreground mt-2 text-sm">{t("web.home.page.loadFailedBody")}</p>
+          <p className="text-muted-foreground mt-2 text-sm">
+            {loadErrorDescription(error, t("web.home.page.loadFailedBody"))}
+          </p>
           <button
             type="button"
             onClick={() => void refetch()}
