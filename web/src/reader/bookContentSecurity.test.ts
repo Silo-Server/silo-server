@@ -199,6 +199,29 @@ describe("book content security", () => {
   });
 
   it.each([
+    [
+      "a charset parameter",
+      "text/html; charset=windows-1252",
+      "<html><body><p>café</p></body></html>",
+    ],
+    [
+      "an XML declaration",
+      "application/xml",
+      `<?xml version="1.0" encoding="ISO-8859-1"?><doc>café</doc>`,
+    ],
+  ])("decodes a document by %s", async (_name, type, markup) => {
+    const target = new EventTarget();
+    protectBookContent({ transformTarget: target } as unknown as BookDoc);
+    const bytes = Uint8Array.from(markup, (c) => c.charCodeAt(0));
+    const detail = { data: new Blob([bytes]) as unknown, type: type as unknown };
+    target.dispatchEvent(new CustomEvent("data", { detail }));
+    const result = (await detail.data) as string;
+    expect(result).toContain("café");
+    // The output is UTF-8; nothing may still declare another encoding.
+    expect(result).not.toMatch(/ISO-8859-1|windows-1252/i);
+  });
+
+  it.each([
     ["an XSLT", `<?xml-stylesheet type="text/xsl" href="x.xsl"?><root/>`, "x.xsl"],
     [
       "a disguised XSLT",

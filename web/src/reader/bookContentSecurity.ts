@@ -162,10 +162,18 @@ function removeActiveContent(root: Document | DocumentFragment) {
   for (const node of removals) node.parentNode?.removeChild(node);
 }
 
+// The serializer writes a doctype's public and system identifiers without
+// escaping them, so a quote in one could end the doctype and start markup.
+// Entities are already expanded, so only the name is kept.
+function stripDoctypeIdentifiers(doc: Document) {
+  const { doctype } = doc;
+  doctype?.replaceWith(doc.implementation.createDocumentType(doctype.name, "", ""));
+}
+
 function addDocumentPolicy(doc: Document) {
   const root = doc.documentElement;
   if (!root || root.namespaceURI !== XHTML_NS) return;
-  // A doctype's identifiers can end the HTML doctype early and start markup.
+  // An HTML parser reads any other doctype name as quirks mode.
   doc.doctype?.replaceWith(doc.implementation.createDocumentType("html", "", ""));
   const head = doc.head ?? doc.createElementNS(XHTML_NS, "head");
   // A head after the body would put the policy after the content it guards.
@@ -187,11 +195,11 @@ function addDocumentPolicy(doc: Document) {
   head.prepend(charset, policy);
 }
 
-// Checks the HTML reading of sanitized markup, so a parse differential between
-// the sanitizer and a srcdoc frame fails closed instead of reaching the frame.
-function isInertAsHTML(markup: string, requirePolicy: boolean): boolean {
-  const doc = new DOMParser().parseFromString(markup, "text/html");
-  const policy = doc.head.querySelector('meta[http-equiv="Content-Security-Policy"]');
+// Checks how a frame will read the sanitized markup, so a parse or serializer
+// differential fails closed instead of reaching the frame.
+function isInert(markup: string, type: DOMParserSupportedType, requirePolicy: boolean): boolean {
+  const doc = new DOMParser().parseFromString(markup, type);
+  const policy = doc.head?.querySelector('meta[http-equiv="Content-Security-Policy"]');
   if (requirePolicy && policy?.getAttribute("content") !== BOOK_DOCUMENT_CSP) return false;
   const pending: ParentNode[] = [doc];
   for (let root = pending.pop(); root; root = pending.pop()) {
@@ -217,10 +225,18 @@ export function sanitizeBookDocument(markup: string, type: string): string {
   const essence = mimeEssence(type);
   const doc = new DOMParser().parseFromString(markup, parserType(essence));
   removeActiveContent(doc);
+  stripDoctypeIdentifiers(doc);
   addDocumentPolicy(doc);
-  const result = new XMLSerializer().serializeToString(doc);
+  // The markup is re-encoded as UTF-8; drop a declaration that names another
+  // encoding, which a frame rendering it as XML would honour.
+  const result = new XMLSerializer().serializeToString(doc).replace(/^<\?xml\s[^>]*\?>/, "");
   const isXHTML = doc.documentElement?.namespaceURI === XHTML_NS;
-  if ((isXHTML || rendersAsHTML(essence)) && !isInertAsHTML(result, isXHTML)) {
+  const asHTML = rendersAsHTML(essence);
+  if (
+    ((isXHTML || asHTML) && !isInert(result, "text/html", isXHTML)) ||
+    // Other XML types render from a blob, through an XML parser.
+    (!asHTML && !isInert(result, parserType(essence), false))
+  ) {
     console.warn("Book document could not be rendered safely; showing it empty");
     return EMPTY_XHTML;
   }
@@ -230,11 +246,32 @@ export function sanitizeBookDocument(markup: string, type: string): string {
 type DataDetail = { data: unknown; type: unknown; name?: unknown };
 type LoadDetail = { isScript?: boolean; allow?: boolean };
 
-async function toText(data: unknown): Promise<string> {
+// The encoding a frame would have used for these bytes: a byte order mark, then
+// the type's charset, then an XML declaration's encoding, then UTF-8.
+function encodingOf(bytes: Uint8Array, type: unknown): string {
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return "utf-8";
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return "utf-16be";
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return "utf-16le";
+  const charset = typeof type === "string" ? /;\s*charset\s*=\s*"?([\w.:-]+)/i.exec(type) : null;
+  const prolog = String.fromCharCode(...bytes.subarray(0, 128));
+  const declared = /^<\?xml\s[^>]*?encoding\s*=\s*["']([\w.:-]+)["']/.exec(prolog);
+  return charset?.[1] ?? declared?.[1] ?? "utf-8";
+}
+
+async function toText(data: unknown, type: unknown): Promise<string> {
   if (typeof data === "string") return data;
-  // Loaders hand over a Blob, which may come from another realm.
-  if (typeof (data as Blob | null)?.text === "function") return (data as Blob).text();
-  return new Blob([data as BlobPart]).text();
+  // Loaders hand over a Blob, which may come from another realm, or bytes.
+  const buffer =
+    typeof (data as Blob | null)?.arrayBuffer === "function"
+      ? await (data as Blob).arrayBuffer()
+      : await new Blob([data as BlobPart]).arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  try {
+    return new TextDecoder(encodingOf(bytes, type)).decode(bytes);
+  } catch {
+    // An encoding label the browser does not know.
+    return new TextDecoder().decode(bytes);
+  }
 }
 
 /**
@@ -259,9 +296,10 @@ export function protectBookContent(book: BookDoc) {
     // Only the bare type goes on: parameters can carry a second type a browser
     // would honour, or a charset the re-encoded markup no longer has.
     if (isDocumentType(essence)) {
+      const declaredType = detail.type;
       detail.type = essence;
       detail.data = Promise.resolve(detail.data).then(async (data) =>
-        sanitizeBookDocument(await toText(data), essence),
+        sanitizeBookDocument(await toText(data, declaredType), essence),
       );
     } else {
       // Images, fonts, and media still load as octet-stream; a frame does not
