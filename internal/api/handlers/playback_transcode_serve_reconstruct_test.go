@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -98,6 +99,56 @@ func TestTranscodeServePlainCardRecoveryFailureStays404(t *testing.T) {
 	}
 	if handler.tm.GetTranscodeSession(live.ID) != nil {
 		t.Fatal("failed recovery left a registered transcode runtime")
+	}
+}
+
+// A keyframe-planned session rebuilt after the server lost it (no live
+// session, no runtime) whose recorded playlist can't be served again ends:
+// the player hears 410, and the session the rebuild registered is removed
+// rather than left holding a stream slot nothing serves.
+func TestTranscodeServeColdPlannedRebuildThatCantPlanEndsTheSession(t *testing.T) {
+	sessionMgr := playback.NewSessionManager(0, 0)
+	handler := NewPlaybackHandler(sessionMgr)
+	transcodeDir := t.TempDir()
+	handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpegSleep(t, "30"), transcodeDir)
+	handler.JWTSecret = "test-secret"
+
+	sessionID := "5b1e6f0e-6c1d-4a51-9d0c-1770a0000001"
+	card := playback.NewRecipeCard(1, "profile-1", 42, "", playback.TranscodeOpts{
+		SessionID: sessionID, InputPath: "/media/movie.mkv",
+		TargetCodecVideo: "copy", TargetCodecAudio: "aac", SegmentDuration: 6,
+		KeyframePlaylist: true, CopyVideoMPEGTS: true,
+		AudioTrackIndex: -1, SubtitleTrackIndex: -1,
+	})
+	token := handler.signSessionToken(card, false)
+	if token == "" {
+		t.Fatal("sign stream token returned empty")
+	}
+	// The first start planned an MPEG-TS playlist (a durations-only record),
+	// which planned sessions no longer assemble.
+	outputDir := filepath.Join(transcodeDir, sessionID)
+	if err := os.MkdirAll(outputDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "keyframe-plan.json"), []byte(`{"planned":true,"durations":[6,6]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	handler.HandleGetTranscodeSegment(rec, playbackTestRequest(http.MethodGet,
+		"/api/v2/playback/transcode/"+sessionID+"/segment/seg_00001.ts?st="+token,
+		nil, map[string]string{"session_id": sessionID, "name": "seg_00001.ts"}))
+	t.Cleanup(func() {
+		if ts := handler.tm.GetTranscodeSession(sessionID); ts != nil {
+			_ = ts.Close()
+		}
+	})
+
+	if rec.Code != http.StatusGone {
+		t.Fatalf("status = %d, body = %s, want 410 for a playlist no rebuild can serve", rec.Code, rec.Body.String())
+	}
+	if _, err := sessionMgr.GetSession(sessionID); err == nil {
+		t.Fatal("the failed rebuild left its playback session registered")
 	}
 }
 

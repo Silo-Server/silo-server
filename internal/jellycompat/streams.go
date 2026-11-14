@@ -1037,6 +1037,10 @@ func writeCompatTranscodeError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusUnsupportedMediaType, "TranscodeUnsupported", err.Error())
 	case errors.Is(err, errRemoteTranscodeStartFailed), errors.Is(err, errRemoteSoftwareToneMapStartFailed):
 		writeError(w, http.StatusBadGateway, "TranscodeStartFailed", "No remote transcode executor could start the stream")
+	case errors.Is(err, playback.ErrKeyframePlanChanged):
+		// No rebuild can serve the playlist the player holds, so the session
+		// is gone, as for one that has ended.
+		writeError(w, http.StatusNotFound, "NotFound", "Transcode session not found")
 	case errors.Is(err, playback.ErrManifestNotReady):
 		writeError(w, http.StatusServiceUnavailable, "NotReady", "Transcode playlist not ready")
 	case errors.Is(err, playback.ErrTranscodeFailed):
@@ -1295,6 +1299,7 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 					playSession.UpstreamSessionID,
 					transcodeSession,
 					segNum,
+					decision.Progress.GenerationStartedAt,
 				)
 				// A restart skipped because the request ended is not a failure.
 				if restartErr != nil && !errors.Is(restartErr, playback.ErrManifestNotReady) && !errors.Is(restartErr, r.Context().Err()) {
@@ -3804,10 +3809,9 @@ func (h *PlaybackHandler) restartCompatTranscodeForAudioSelection(
 		// recipe written before negotiated audio was.
 		transcodeSession.SetRequireAudioTrack(compatRequiresAudioTrack(source))
 		transcodeSession.SetSourceAudioChannels(sourceAudioChannels)
-		startSegment := 0
-		if segmentDuration := transcodeSession.Opts().SegmentDuration; segmentDuration > 0 && positionSeconds > 0 {
-			startSegment = int(positionSeconds / float64(segmentDuration))
-		}
+		// A keyframe-planned session's segments vary in length, so the
+		// session maps the position to its segment.
+		startSegment := transcodeSession.SegmentAt(positionSeconds)
 		if err := h.tm.RestartSessionLocked(ctx, playSession.UpstreamSessionID, transcodeSession, positionSeconds, startSegment); err != nil {
 			transcodeSession.SetAudioTrackIndex(previousOpts.AudioTrackIndex)
 			transcodeSession.SetRequireAudioTrack(previousOpts.RequireAudioTrack)
@@ -3831,8 +3835,9 @@ func (h *PlaybackHandler) restartCompatTranscodeForAudioSelection(
 		// rebuilds ffmpeg from the newly selected audio track rather than the
 		// stale original. SetAudioTrackIndex mutated the live opts, so read them
 		// back. Best-effort: a stale recipe only costs node-restart resilience,
-		// not the live stream.
-		opts := transcodeSession.Opts()
+		// not the live stream. A keyframe-planned session's recipe keeps its
+		// start at the beginning, so a rebuild serves the same planned playlist.
+		opts := transcodeSession.RecipeOpts()
 		if err := h.persistTranscodeRecipe(context.WithoutCancel(ctx), playSession.ID, playSession.UpstreamSessionID, opts); err != nil {
 			slog.WarnContext(ctx, "persist audio-restarted transcode recipe", "component", "jellycompat", "error", err,
 				"play_session_id", playSessionFingerprint(playSession.ID), "playback_session_id", playSession.UpstreamSessionID)

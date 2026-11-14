@@ -1804,11 +1804,15 @@ moves with neither: on a default x264 source the lead is two frames. Each
 copy generation therefore also writes its first video packet, unshifted, as
 `framecrc` beside its cue file (`subtitles_N_video.crc`); the shift is the
 first segment's observed start less that packet's time, read with O, and
-recorded with it. The packet's record is read before the segment; after three
+recorded with it. A keyframe-planned restart's seek can land on a keyframe
+before its first segment, so its packet's time is moved forward by the
+planned time between that keyframe and the segment's start. The packet's
+record is read before the segment; after three
 reads that find none, O is taken without a shift. A segment whose cues are not produced yet is waited for
 while FFmpeg runs: as long as its video segment would be (up to 30 s) when the
 running or restarting stream is about to reach it, or is a keyframe-planned
-copy, which runs on to every segment; otherwise a few seconds. It is then
+copy, whose video request either waits for FFmpeg or restarts it at the
+segment; otherwise a few seconds. It is then
 answered as a valid WebVTT document with no cues, which a player keeps, so
 the longer wait is what keeps cues after a slow seek restart. A
 keyframe-planned copy is the exception: like its video segment, a subtitle
