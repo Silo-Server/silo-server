@@ -393,6 +393,31 @@ sync or import returns shows what was stored. A scheduled sync runs on one node:
 `next_sync_at` past the minimum interval, which is when a failed sync retries; a successful sync
 replaces that with the schedule's next run unless the schedule was saved while it ran.
 
+## Server collection names
+
+`createAdminCollection` and `updateAdminCollection` refuse a title that another server
+collection already has in one of the collection's libraries (its `library_ids`, or the legacy
+`library_id` of a collection without them). Titles compare without case or extra spaces,
+and hidden collections count. The refusal is `422 validation_failed` with one error at
+`body.title`, whose `detail` names a library both collections show in ("Another collection in
+Movies already has this name"). Clients send the whole collection on update, so an update
+checks the title only when it changes it (beyond case and spaces), in all the collection's
+libraries, or adds libraries, in just the added ones. Collections that already share a title,
+such as an import's, still save their other fields. Imports, templates and restores don't apply
+the rule.
+
+The `slug` is a URL name the server derives from the title when a create leaves it out. It is
+unique only within the collection's `library_id`: `library_id` when the create gives one, else the
+first of `library_ids`. A create takes the first free `<slug>-<n>` there instead of failing,
+including for a `slug` the request names, and the response carries the slug it got. So titles that
+differ only in punctuation ("Sci-Fi" and "Sci Fi"), or that have no Latin letters or digits (which
+derive `collection`), save as separate collections. `library_id` stays while that library is
+anywhere in `library_ids`. When an update drops it, the collection moves to the first remaining
+library and takes a free slug there the same way; a `slug` the update repeats unchanged doesn't
+count as a request for it. An update that names a different `slug` another collection of its
+`library_id` uses is refused at `body.slug`. An update with an empty `library_ids` is refused at
+`body.library_ids`.
+
 ## Collections that hold a title
 
 `listCollections` (`GET /api/v2/collections`) accepts an optional `contains_item`, a title's

@@ -34,7 +34,9 @@ fails closed, so the page waits for the acting profile before it decides.
 - **Everything else waits for Save.** Name, description, libraries, a Smart collection's rules and
   Order, artwork and the switches in Where it shows are a draft (`CollectionDraft`, `web/src/lib/collections/scope.ts`). The save bar
   names the fields that are pending and says titles are already saved. Discard never touches
-  titles.
+  titles. When the server refuses the name (another collection in one of its libraries has it,
+  see [Server collection names](../catalog-api.md#server-collection-names)), the Name field shows
+  the refusal until the name changes.
 - **Before the collection exists**, picked titles are staged in the draft. Create sends the POST,
   then one `PUT` per staged title in order. Titles that fail stay listed and marked, with Try
   again.
