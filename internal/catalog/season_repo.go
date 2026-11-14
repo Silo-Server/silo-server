@@ -54,7 +54,8 @@ const seasonColumns = `content_id, series_id, season_number, title, default_meta
 	air_date, poster_path, poster_source_path, poster_thumbhash,
 	metadata_s3_path, metadata_etag, metadata_source,
 	created_at, updated_at,
-	backdrop_path, backdrop_source_path, backdrop_thumbhash, locked_fields`
+	backdrop_path, backdrop_source_path, backdrop_thumbhash, locked_fields,
+	original_title, tagline, imdb_id, tmdb_id, tvdb_id`
 
 // scanSeason scans a single row into a *models.Season.
 func scanSeason(row pgx.Row) (*models.Season, error) {
@@ -79,6 +80,11 @@ func scanSeason(row pgx.Row) (*models.Season, error) {
 		&s.BackdropSourcePath,
 		&s.BackdropThumbhash,
 		&s.LockedFields,
+		&s.OriginalTitle,
+		&s.Tagline,
+		&s.ImdbID,
+		&s.TmdbID,
+		&s.TvdbID,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -114,6 +120,11 @@ func scanSeasons(rows pgx.Rows) ([]*models.Season, error) {
 			&s.BackdropSourcePath,
 			&s.BackdropThumbhash,
 			&s.LockedFields,
+			&s.OriginalTitle,
+			&s.Tagline,
+			&s.ImdbID,
+			&s.TmdbID,
+			&s.TvdbID,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning season row: %w", err)
@@ -497,7 +508,12 @@ func (r *SeasonRepository) UpdateMetadata(ctx context.Context, contentID string,
 	}
 
 	addString("title", upd.Title)
+	addString(childColumnOriginalTitle, upd.OriginalTitle)
 	addString("overview", upd.Overview)
+	addString(childColumnTagline, upd.Tagline)
+	addString(childColumnImdbID, upd.ImdbID)
+	addString(childColumnTmdbID, upd.TmdbID)
+	addString(childColumnTvdbID, upd.TvdbID)
 	if upd.LockedFields != nil {
 		setClauses = append(setClauses, fmt.Sprintf("locked_fields = $%d", argIdx))
 		args = append(args, lockableFields(*upd.LockedFields, seasonLockedColumns))

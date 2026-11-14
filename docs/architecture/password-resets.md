@@ -25,7 +25,29 @@ bounded at one row per account.
 **Stored as a digest.** Tokens use the invitation scheme (`auth.NewLinkToken`): 32
 random bytes, base64url in the link, SHA-256 hex at rest. The raw token exists
 only in the email or in the one response that discloses a shared link. The request
-log redacts the `{token}` path parameter.
+log redacts the `{token}` path parameter of the deprecated path operations.
+
+<a id="link-tokens"></a>
+**Link tokens stay out of URLs the server sees.** A reset or invitation token is a
+bearer credential, and anything in front of Silo that logs request lines or
+`Referer` headers would store it. So:
+
+- `mail.AccountLink` puts the token in the link's fragment (`/reset-password#<token>`,
+  `/invite#<token>`), which a browser never sends.
+- The web app moves the token out of the address into the history entry's state
+  before it renders (`web/src/lib/linkToken.ts`, read by `useLinkToken`), so the router, and anything that
+  keys or stores by URL, never sees it. A link in the old path form is handled the
+  same way, so links issued before this rule still open.
+- The reset and claim screens send the token in a JSON body
+  (`POST /password-resets/lookup|complete`, `POST /invitations/lookup|accept`).
+  The path-token operations remain only as deprecated forms.
+- The HTML shell is served with `Referrer-Policy: strict-origin`, so the requests
+  an old path-form link's page makes before its address is cleared name only the
+  origin.
+
+A new screen that redeems a one-time token follows the same four points. An
+old-form link's own first request still carries its token; nothing after issue can
+change that, and such links expire within 24 hours (resets) or 7 days (invitations).
 
 **Bound to the password it replaces.** Each row records a SHA-256 fingerprint of
 `users.password_hash` at issue time, and a link only resolves while the account

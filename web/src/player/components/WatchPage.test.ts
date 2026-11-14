@@ -1,6 +1,9 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { itemKeys } from "@/hooks/queries/keys";
 
 import type { UsePlaybackSessionResult } from "../hooks/usePlaybackSession";
 import { fixturePlanV3 } from "../protocol-v3.fixtures";
@@ -14,6 +17,7 @@ const roomConnectionMock = vi.hoisted(() => vi.fn());
 const playbackCapabilitiesMock = vi.hoisted(() => vi.fn());
 const startPlaybackMock = vi.hoisted(() => vi.fn());
 const trickplayRefetchMock = vi.hoisted(() => vi.fn());
+const fetchWatchDetailMock = vi.hoisted(() => vi.fn());
 vi.mock("../start-v2", () => ({ playbackCapabilitiesV2: playbackCapabilitiesMock }));
 
 vi.mock("../hooks/usePlaybackSession", () => ({
@@ -34,9 +38,20 @@ const playerConfig = {
 vi.mock("../context/PlayerConfigContext", () => ({
   usePlayerConfig: () => playerConfig,
 }));
-vi.mock("@tanstack/react-query", () => ({
-  useQueryClient: () => ({ fetchQuery: vi.fn() }),
-  useQuery: () => ({ data: undefined, refetch: trickplayRefetchMock }),
+// One real client for the file: the page's reads depend on how the library
+// cancels and reuses them.
+vi.mock("@tanstack/react-query", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@tanstack/react-query")>();
+  const client = new actual.QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return {
+    ...actual,
+    useQueryClient: () => client,
+    useQuery: () => ({ data: undefined, refetch: trickplayRefetchMock }),
+  };
+});
+vi.mock("@/hooks/queries/items", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/items")>()),
+  fetchWatchDetail: fetchWatchDetailMock,
 }));
 vi.mock("@/playback/watchPlaybackContext", () => ({
   useWatchPlaybackController: () => ({ startPlayback: startPlaybackMock }),
@@ -135,6 +150,8 @@ beforeEach(() => {
   videoPlayerMock.mockReset();
   trickplayRefetchMock.mockReset();
   toastErrorMock.mockReset();
+  fetchWatchDetailMock.mockReset();
+  useQueryClient().clear();
 });
 
 describe("WatchPage playback errors", () => {
@@ -590,4 +607,83 @@ it("merges marker images only into the active session's matching occurrence", ()
   expect(videoPlayerMock.mock.calls.at(-1)?.[0].markerSegments[0].thumbnail_url).toBe(
     "/yellow.webp",
   );
+});
+
+describe("a watch-detail read older than a marker change", () => {
+  const recap = { start: 9, end: 40 };
+  const savedMarkers = { intro: null, credits: null, recap, preview: null };
+  const saved = { ...version, recap };
+  const player = () => videoPlayerMock.mock.calls.at(-1)?.[0];
+
+  it("reads again when the reconnect read settles after a save", async () => {
+    playbackSessionMock.mockReturnValue(playbackSession());
+    let answer: (detail: { versions: PlayerFileVersion[] }) => void = () => {};
+    fetchWatchDetailMock
+      .mockReturnValueOnce(new Promise((resolve) => (answer = resolve)))
+      .mockResolvedValue({ versions: [saved] });
+    render(createElement(WatchPage, watchPageProps));
+    act(() => player().onRealtimeConnectionStateChange("connected"));
+    await waitFor(() => expect(fetchWatchDetailMock).toHaveBeenCalledTimes(1));
+
+    act(() => player().onMarkersEdited(7, savedMarkers));
+    answer({ versions: [version] });
+
+    await waitFor(() => expect(useQueryClient().isFetching()).toBe(0));
+    expect(player().recap).toEqual(recap);
+    expect(fetchWatchDetailMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not trust a read that was already running when the socket came back", async () => {
+    playbackSessionMock.mockReturnValue(playbackSession());
+    let answer: (detail: { versions: PlayerFileVersion[] }) => void = () => {};
+    fetchWatchDetailMock
+      .mockReturnValueOnce(new Promise((resolve) => (answer = resolve)))
+      .mockResolvedValue({ versions: [saved] });
+    render(createElement(WatchPage, watchPageProps));
+    act(() => player().onRealtimeConnectionStateChange("connected"));
+    await waitFor(() => expect(fetchWatchDetailMock).toHaveBeenCalledTimes(1));
+
+    act(() => player().onMarkersEdited(7, savedMarkers));
+    // The socket drops and returns while the first read is still out.
+    act(() => player().onRealtimeConnectionStateChange("disconnected"));
+    act(() => player().onRealtimeConnectionStateChange("connected"));
+    answer({ versions: [version] });
+
+    await waitFor(() => expect(useQueryClient().isFetching()).toBe(0));
+    expect(player().recap).toEqual(recap);
+  });
+
+  it("keeps a saved marker when a snapshot the cache already held reaches the page after it", () => {
+    playbackSessionMock.mockReturnValue(playbackSession());
+    const landed = [{ ...version, duration: 3700 }];
+    const view = render(createElement(WatchPage, watchPageProps));
+    useQueryClient().setQueryData(itemKeys.watchDetail("content-1"), { versions: landed });
+
+    act(() => player().onMarkersEdited(7, savedMarkers));
+    // The page then renders what the cache holds for its key.
+    const cached = useQueryClient().getQueryData<{ versions: PlayerFileVersion[] }>(
+      itemKeys.watchDetail("content-1"),
+    );
+    view.rerender(createElement(WatchPage, { ...watchPageProps, versions: cached!.versions }));
+
+    expect(player().recap).toEqual(recap);
+    expect(player().versions[0].duration).toBe(3700);
+  });
+
+  it("starts a page read over when a marker changes while it is in flight", async () => {
+    playbackSessionMock.mockReturnValue(playbackSession());
+    const withoutChapters = [{ ...version, chapters: [] }];
+    useQueryClient().setQueryData(itemKeys.watchDetail("content-1"), {
+      versions: withoutChapters,
+    });
+    fetchWatchDetailMock
+      .mockReturnValueOnce(new Promise(() => {}))
+      .mockResolvedValue({ versions: [saved] });
+    render(createElement(WatchPage, { ...watchPageProps, versions: withoutChapters }));
+    await waitFor(() => expect(fetchWatchDetailMock).toHaveBeenCalledTimes(1));
+
+    act(() => player().onMarkersEdited(7, savedMarkers));
+
+    await waitFor(() => expect(fetchWatchDetailMock).toHaveBeenCalledTimes(2));
+  });
 });

@@ -15,6 +15,7 @@ import {
 } from "@/hooks/queries/titleAllowances";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useT, type MessageKey } from "@/i18n";
+import { formatLocale } from "@/lib/appLocale";
 
 const SEARCH_LIMIT = 10;
 const SEARCH_DEBOUNCE_MS = 250;
@@ -169,11 +170,11 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
                     {collection.live
                       ? t("web.profiles.allowedTitles.titleCount", {
                           count: collection.item_count,
-                          count_text: collection.item_count,
+                          count_text: collection.item_count.toLocaleString(formatLocale()),
                         })
                       : t("web.profiles.allowedTitles.titleCountPaused", {
                           count: collection.item_count,
-                          count_text: collection.item_count,
+                          count_text: collection.item_count.toLocaleString(formatLocale()),
                         })}
                   </span>
                 </span>

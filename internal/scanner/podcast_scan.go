@@ -61,9 +61,17 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 		}
 		var rootIgnoreRules []ignoreRules
 		var skip bool
+		// Read the root first, even when an outer root's rules exclude it, so
+		// an unreadable root is still protected as a failed one.
 		entries, err := fspath.ReadDir(root)
 		if err == nil {
-			rootIgnoreRules, skip, err = dirIgnoreRules(nil, root, root, entries)
+			// A root nested in another inherits the outer root's rules, as
+			// the subtree scan of its shows does.
+			var inherited []ignoreRules
+			inherited, skip, err = scanRootIgnoreRules(root, folder.Paths)
+			if err == nil && !skip {
+				rootIgnoreRules, skip, err = dirIgnoreRules(inherited, root, root, entries)
+			}
 		}
 		if err != nil {
 			slog.WarnContext(ctx, "podcast scan: read root failed", "component", "scanner", "root", root, "error", err)

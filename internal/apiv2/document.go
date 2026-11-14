@@ -806,45 +806,34 @@ func GenerateOpenAPI() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// NullEnumWithheld lists the nullable members whose enum keeps null out,
-// keyed Schema.member, each with its reason. Such a member is nullable in
-// the document only because Patch documents every member that way, while
-// its handler refuses null; leaving null out of the enum is the part of its
-// schema that says so. The spec lint (internal/contractspec) reads the same
-// table and fails an entry that no longer names a nullable enum.
-var NullEnumWithheld = map[string]string{
-	"DownloadSubscriptionPatchBody.quality": "updateDownloadSubscription answers 400 for a null monitor field",
-}
-
 // admitNullInNullableEnums adds null to the enum of every nullable schema in
-// the components, except the members NullEnumWithheld lists. JSON Schema
-// applies type and enum separately, so ["string", "null"] with an enum of
-// strings alone still refuses null. The pass runs on the document only:
-// Huma's request validator accepts null on a nullable schema before it
-// checks the enum, and leaving the registered enum alone keeps null out of
-// its 422 message.
+// the components. JSON Schema applies type and enum separately, so
+// ["string", "null"] with an enum of strings alone still refuses null. The
+// pass runs on the document only: Huma's request validator accepts null on
+// a nullable schema before it checks the enum, and leaving the registered
+// enum alone keeps null out of its 422 message.
 func admitNullInNullableEnums(components map[string]*huma.Schema) {
-	var walk func(where string, s *huma.Schema)
-	walk = func(where string, s *huma.Schema) {
+	var walk func(s *huma.Schema)
+	walk = func(s *huma.Schema) {
 		if s == nil {
 			return
 		}
-		if _, withheld := NullEnumWithheld[where]; s.Nullable && len(s.Enum) > 0 && !slices.Contains(s.Enum, nil) && !withheld {
+		if s.Nullable && len(s.Enum) > 0 && !slices.Contains(s.Enum, nil) {
 			s.Enum = append(slices.Clip(s.Enum), nil)
 		}
-		for name, property := range s.Properties {
-			walk(where+"."+name, property)
+		for _, property := range s.Properties {
+			walk(property)
 		}
-		walk(where+".items", s.Items)
+		walk(s.Items)
 		if value, ok := s.AdditionalProperties.(*huma.Schema); ok {
-			walk(where+".additionalProperties", value)
+			walk(value)
 		}
 		for _, sub := range slices.Concat(s.OneOf, s.AnyOf, s.AllOf) {
-			walk(where, sub)
+			walk(sub)
 		}
 	}
-	for name, s := range components {
-		walk(name, s)
+	for _, s := range components {
+		walk(s)
 	}
 }
 

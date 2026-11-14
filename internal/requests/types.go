@@ -227,6 +227,10 @@ type FeatureStatus struct {
 	// profile settings are on. The caller adds the account's permission
 	// (v2 only).
 	WatchlistRequests bool `json:"-"`
+	// ProfileRequestsBlocked reports that the household manager blocked the
+	// viewer's profile from requests, which also takes the watchlist's
+	// titles outside the library away from it (v2 only).
+	ProfileRequestsBlocked bool `json:"-"`
 }
 
 type UserLimit struct {
@@ -320,7 +324,8 @@ type StateGuard struct {
 	Statuses []Status
 	Outcomes []Outcome
 	// UnsentOnly admits an approved request only while nothing has gone
-	// downstream for it: it has no target and no submission in flight.
+	// downstream for it: no submission is in flight and every target it has
+	// failed (a retry backing off keeps its failed targets until it resends).
 	UnsentOnly bool
 }
 
@@ -330,7 +335,8 @@ var guardPending = StateGuard{Statuses: []Status{StatusPending}, Outcomes: []Out
 // guardWithdrawable matches a request nobody has sent anywhere yet: pending,
 // or approved but waiting for the library (no router), or backing off after a
 // failed attempt. Decline and cancel accept these; once a submission is in
-// flight or a target exists, the request stays in the pipeline.
+// flight or a target other than a failed one exists, the request stays in the
+// pipeline.
 var guardWithdrawable = StateGuard{
 	Statuses:   []Status{StatusPending, StatusApproved},
 	Outcomes:   []Outcome{OutcomeActive},
@@ -543,8 +549,12 @@ type ListFilter struct {
 	Query             string
 	MediaType         MediaType
 	RequestedByUserID int
-	Limit             int
-	Offset            int
+	// RequestedByProfileID narrows the list to one profile's requests. The
+	// service sets it for a profile blocked from requests; no client input
+	// reaches it.
+	RequestedByProfileID string
+	Limit                int
+	Offset               int
 }
 
 // AdminView groups the admin queue by what an admin does next.

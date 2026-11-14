@@ -1153,14 +1153,17 @@ func audiobookLookupPaths(files []parsedAudiobookFile) []string {
 	return paths
 }
 
-// Lockable metadata fields the audiobook scan writes from tags. These mirror
-// metadata.MetadataField, which this package cannot import (metadata imports
-// scanner). The values are stored in media_items.locked_fields, so they cannot
-// change without a data migration.
+// Lockable metadata fields the audiobook and ebook scans write from file
+// metadata. These mirror metadata.MetadataField, which this package cannot
+// import (metadata imports scanner). The values are stored in
+// media_items.locked_fields, so they cannot change without a data migration.
 const (
 	lockedFieldName         = 0
+	lockedFieldOverview     = 1
 	lockedFieldGenres       = 2
 	lockedFieldStudios      = 3
+	lockedFieldCast         = 4
+	lockedFieldCrew         = 5
 	lockedFieldReleaseDates = 13
 )
 
@@ -1190,7 +1193,7 @@ func applyBookToMediaItem(item *models.MediaItem, book *parsedAudiobook) {
 	if !releaseDatesLocked {
 		item.Year = book.Year
 	}
-	if book.Overview != "" && item.Overview == "" {
+	if book.Overview != "" && item.Overview == "" && !slices.Contains(item.LockedFields, lockedFieldOverview) {
 		item.Overview = book.Overview
 	}
 	if book.Publisher != "" && !slices.Contains(item.LockedFields, lockedFieldStudios) {
@@ -1401,7 +1404,8 @@ func audiobookPeopleCreditsEqual(existing []models.ItemPerson, desired []audiobo
 
 // upsertAudiobookPeople upserts author and narrator rows into item_people,
 // using the PersonRepository to find-or-create each person by name. When the
-// parsed credits differ, ReplacePeople makes scanner-derived credits authoritative.
+// parsed credits differ, ReplacePeople makes scanner-derived credits authoritative,
+// unless an admin locked the crew credits, which hold authors and narrators.
 // Skips the DELETE+INSERT entirely when the existing credit set already
 // matches the desired set (case-insensitive on name, exact on kind).
 func (s *Scanner) upsertAudiobookPeople(ctx context.Context, contentID string, book *parsedAudiobook) error {
@@ -1422,6 +1426,15 @@ func (s *Scanner) upsertAudiobookPeople(ctx context.Context, contentID string, b
 
 	existing, err := s.itemRepo.GetPeople(ctx, contentID)
 	if err == nil && audiobookPeopleCreditsEqual(existing, desired) {
+		return nil
+	}
+	var locked []int
+	if err := s.fileRepo.Pool().QueryRow(ctx,
+		`SELECT COALESCE(locked_fields, '{}'::integer[]) FROM media_items WHERE content_id = $1`,
+		contentID).Scan(&locked); err != nil {
+		return fmt.Errorf("read audiobook field locks: %w", err)
+	}
+	if slices.Contains(locked, lockedFieldCrew) {
 		return nil
 	}
 

@@ -117,6 +117,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/Silo-Server/silo-server/internal/proxy"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
 	"github.com/Silo-Server/silo-server/internal/requests/discoverrows"
@@ -1878,11 +1879,21 @@ func main() {
 			}
 			return info, nil
 		}
+		// Release signatures are checked and recorded for every catalog
+		// install, and a first-party plugin without a valid signature is
+		// refused before its binary runs
+		// (docs/architecture/plugin-trust.md#release-signatures).
+		pluginSignatures := plugins.NewSignatureChecker(plugins.SignatureCheckerOptions{
+			Enforce:   true,
+			CacheRoot: pluginCacheDir,
+		})
 		catalogService := plugins.NewCatalogService(repositoryStore, plugins.CatalogServiceOptions{
 			SiloAPIVersion: plugins.DefaultSiloAPIVersion,
+			Signatures:     pluginSignatures,
 		})
 		installer := plugins.NewInstaller(installationStore, plugins.InstallerOptions{
-			BaseDir: pluginCacheDir,
+			BaseDir:    pluginCacheDir,
+			Signatures: pluginSignatures,
 		})
 
 		libSource := pluginLibrarySource{groups: accessGroupStore}
@@ -2553,6 +2564,9 @@ func main() {
 			)
 			if metadataImageCacheProcessor != nil {
 				itemRefreshExecutor.SetArtworkCacher(metadataImageCacheProcessor)
+			}
+			if itemRepo != nil {
+				itemRefreshExecutor.SetItemStatusReader(itemRepo)
 			}
 		}
 	}
@@ -4085,6 +4099,12 @@ func main() {
 				compatDeps.UserStateEvents = eventsHub
 			}
 			compatDeps.SettingsRepo = settingsRepo
+			// The administrator's rating-source choice, read as the native
+			// API reads it, so Jellyfin clients get the Rotten Tomatoes
+			// critic score only while that source is shown.
+			compatDeps.RatingSources = ratingsources.NewPolicy(settingsRepo, func(ctx context.Context) ([]ratingsources.DeclaredSource, error) {
+				return metadata.DeclaredRatingSources(ctx, deps.DB)
+			})
 			compatDeps.PersonRepo = personRepo
 			if deps.CollectionService != nil {
 				compatDeps.CollectionPosters = deps.CollectionService

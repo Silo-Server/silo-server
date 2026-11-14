@@ -77,7 +77,9 @@ func StartReadyTranscode(ctx context.Context, pipeline *AutoTranscodePipeline, s
 // directory. It differs from StartReadyTranscode in three ways:
 //   - With no fallback available (a disabled pipeline whose legacy retry does
 //     not apply) it starts once and returns without waiting, because segment
-//     requests already wait for a reconstructed process.
+//     requests already wait for a reconstructed process. A start that decodes
+//     on the GPU under an explicit hardware backend is the exception; see
+//     startReconstructOnce.
 //   - A process still running at the deadline is kept and returned.
 //   - A failed attempt followed by another is stopped with CloseProcess,
 //     keeping segments the client may still request; only the final failure
@@ -85,10 +87,41 @@ func StartReadyTranscode(ctx context.Context, pipeline *AutoTranscodePipeline, s
 func StartReconstructTranscode(ctx context.Context, pipeline *AutoTranscodePipeline, startup TranscodeStartup) (*TranscodeSession, error) {
 	if !pipeline.Enabled() {
 		if _, retryable := legacyStartupRetry(startup.LegacyRetry, pipeline.Current(), ""); !retryable {
-			return startup.start(ctx, pipeline.Current())
+			return startReconstructOnce(ctx, pipeline.Current(), startup)
 		}
 	}
 	return runTranscodeStartup(ctx, pipeline, startup, true)
+}
+
+// startReconstructOnce starts a reconstruct that has no fallback order. Its
+// recipe card may have been minted where the GPU decodes this source: on
+// another node, or before the operator chose this backend. So a start that is
+// HardwareDecodeRetryEligible is watched until its first manifest or its exit,
+// and a decoder rejection walks NewSoftwareDecodeRetryPipeline in the same
+// output directory. A ready, slow or otherwise failed process is returned as
+// started, for the segment path to serve or recover.
+func startReconstructOnce(ctx context.Context, opts TranscodeOpts, startup TranscodeStartup) (*TranscodeSession, error) {
+	session, err := startup.start(ctx, opts)
+	if err != nil || !HardwareDecodeRetryEligible(opts) {
+		return session, err
+	}
+	// A reconstruct serves every request waiting on it, so neither this wait
+	// nor the retry may end with the request that triggered it.
+	detached := context.WithoutCancel(ctx)
+	_, waitErr := session.WaitForGenerationManifestContext(detached, startup.timeout())
+	decodeRetry := NewSoftwareDecodeRetryPipeline(opts, waitErr)
+	if !decodeRetry.Enabled() {
+		return session, nil
+	}
+	slog.WarnContext(ctx, "hardware decoder rejected the source during reconstruct; retrying with CPU decoding",
+		"component", "playback",
+		"playback_session_id", opts.SessionID,
+		"failed_device", session.Opts().HWDevice,
+		"error", waitErr,
+	)
+	// The retry writes into this directory.
+	_ = session.CloseProcess()
+	return runTranscodeStartup(detached, decodeRetry, startup, true)
 }
 
 func (startup TranscodeStartup) start(ctx context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
@@ -111,30 +144,34 @@ func runTranscodeStartup(ctx context.Context, pipeline *AutoTranscodePipeline, s
 	// A fresh start stops waiting when its request ends: the caller holds the
 	// session lifecycle lock for the whole wait and discards the transport once
 	// its request is gone, so waiting on only delays the client's retry. A
-	// reconstruct serves every segment request waiting on it, so it outlives
-	// the one that triggered it.
-	waitCtx := ctx
+	// reconstruct serves every segment request waiting on it, so each attempt's
+	// launch and wait outlive the one that triggered it. StartTranscode returns
+	// a canceled context's error for some recipes (an HEVC target, a capped
+	// VAAPI encode, burned-in text subtitles), which would fail the rebuild
+	// for all of them.
+	attemptCtx := ctx
 	if reconstruct {
-		waitCtx = context.WithoutCancel(ctx)
+		attemptCtx = context.WithoutCancel(ctx)
 	}
 	attempt := pipeline.Current()
 	legacyRetryUsed := false
 	for {
-		session, err := startup.start(ctx, attempt)
+		session, err := startup.start(attemptCtx, attempt)
 		if err != nil {
 			// Validation, directory, and exec failures are not hardware
 			// failures; another path cannot fix them.
 			return nil, err
 		}
 
-		_, err = session.WaitForGenerationManifestContext(waitCtx, startup.timeout())
+		_, err = session.WaitForGenerationManifestContext(attemptCtx, startup.timeout())
 		if err == nil {
 			pipeline.RememberSuccess()
 			return session, nil
 		}
-		if waitCtx.Err() != nil {
-			// The requester left; this says nothing about the device, so the
-			// pipeline neither advances nor remembers a result.
+		if attemptCtx.Err() != nil {
+			// A fresh start's requester left (a reconstruct's context never
+			// ends); this says nothing about the device, so the pipeline
+			// neither advances nor remembers a result.
 			wasRunning := session.IsRunning()
 			failedDevice := session.Opts().HWDevice
 			_ = session.Close()
@@ -245,20 +282,29 @@ func (e *hardwareDecodeUnsupportedError) Is(target error) bool {
 // explicit setting never changes what hw_accel=auto prefers.
 //
 // The returned pipeline is disabled (Enabled reports false) when the cause is
-// any other failure, the attempt already decoded on the CPU, it carries a
-// tone-map recipe (whose filter graph names its executor), it copies video,
-// or it did not use a hardware backend.
+// any other failure or the attempt was not HardwareDecodeRetryEligible.
 func NewSoftwareDecodeRetryPipeline(failed TranscodeOpts, cause error) *AutoTranscodePipeline {
-	if !IsHardwareDecodeUnsupported(cause) ||
-		failed.SoftwareVideoDecode ||
-		failed.ToneMapMode != "" ||
-		strings.EqualFold(failed.TargetCodecVideo, "copy") ||
-		!isHardwareTranscodeBackend(failed.HWAccel) {
+	if !IsHardwareDecodeUnsupported(cause) || !HardwareDecodeRetryEligible(failed) {
 		return &AutoTranscodePipeline{base: failed}
 	}
 	retry := failed
 	retry.SoftwareVideoDecode = true
 	return newResolvedAutoTranscodePipeline(retry, newAutoTranscodePipelineCache())
+}
+
+// HardwareDecodeRetryEligible reports whether a start with opts could take the
+// CPU-decode retry after a decoder rejection: a video transcode on a hardware
+// backend that decodes on the GPU and carries no tone-map recipe (whose filter
+// graph names its executor). A start that would not otherwise wait for its
+// first manifest uses it to decide whether a rejection is worth waiting for.
+// It reads only the options, so a backend that a probe later turns into
+// software still counts.
+func HardwareDecodeRetryEligible(opts TranscodeOpts) bool {
+	return !resolveSoftwareVideoDecode(opts).SoftwareVideoDecode &&
+		!IsMPEG4Part2VideoCodec(opts.SourceVideoCodec) &&
+		opts.ToneMapMode == "" &&
+		!strings.EqualFold(opts.TargetCodecVideo, "copy") &&
+		isHardwareTranscodeBackend(opts.HWAccel)
 }
 
 // legacyDecodeRetryPipeline returns the CPU-decode fallback a startup outside

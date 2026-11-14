@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -43,9 +43,10 @@ export function EgressWidget() {
   const t = useT();
   // buildEgressBands names the "Other" band, so the bands follow the language.
   const language = useAppLanguage();
-  const { range } = useWidgetRange();
+  // The view is stored with the placement, so Nodes survives a reload.
+  const { range, view, setView } = useWidgetRange();
   const query = useAdminTimeseries(rangeHours(range));
-  const [byNode, setByNode] = useState(false);
+  const byNode = view === "nodes";
   // eslint-disable-next-line react-hooks/exhaustive-deps -- language re-runs the labels
   const bands = useMemo(() => buildEgressBands(query.data), [query.data, language]);
   const showBands = byNode && bands !== null;
@@ -84,7 +85,12 @@ export function EgressWidget() {
         <span className="text-muted-foreground text-[11px] whitespace-nowrap tabular-nums">
           {t("web.admin.dashboard.widgets.egress.peak", { value: formatMbps(peak) })}
         </span>
-        {bands ? <EgressViewToggle byNode={byNode} onChange={setByNode} /> : null}
+        {bands ? (
+          <EgressViewToggle
+            byNode={byNode}
+            onChange={(next) => setView(next ? "nodes" : "total")}
+          />
+        ) : null}
         <WidgetRangePicker />
       </WidgetHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col">

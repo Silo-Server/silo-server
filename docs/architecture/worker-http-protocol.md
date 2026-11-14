@@ -302,8 +302,11 @@ encode, then software, instead of failing the start.
 `auto_fallback_ready` asks for that wait only when the node's own `hw_accel=auto`
 pipeline is enabled for the start, judged from its live hardware; otherwise the
 start is not waited on. The Jellyfin-compatible surface sends it for `auto` video
-transcodes instead of `RequireReady`, and older nodes ignore it. Each attempt
-gets its own manifest wait, so callers size the start deadline of an `auto`
+transcodes instead of `RequireReady`, and older nodes ignore it. For a video
+transcode under an explicit hardware backend that decodes on the GPU without
+tone mapping it sends `RequireReady`, so the node can take the decoder-rejection
+retry above. Each attempt gets its own manifest wait, so callers size the start
+deadline of an `auto`
 video transcode that sets either field to `TranscodeStartReadyMaxDuration` (one
 wait per path). A `RequireReady` video transcode under an explicit hardware
 backend gets the same deadline, because a decoder rejection can lead to the
