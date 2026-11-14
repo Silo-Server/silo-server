@@ -1017,6 +1017,27 @@ func (s *Service) ensureManagedDecisions(ctx context.Context, userID int, req Cr
 				activating++
 			}
 		}
+		// Another request may have replaced an entry while this one waited.
+		// Check each guard against the entry as it is now, before anything
+		// is counted or an encode is queued, and replace that row.
+		preparedKeys := make([]ManagedEntryKey, len(prepared))
+		for k, r := range prepared {
+			preparedKeys[k] = keys[r.i]
+		}
+		current, err := s.repo.GetManagedEntriesByKeys(ctx, userID, req.ProfileID, req.DeviceID, preparedKeys)
+		if err != nil {
+			return err
+		}
+		for k, r := range prepared {
+			cur := current[keys[r.i]]
+			if err := checkManagedCreateRevision(cur, r.expected, r.expectedID); err != nil {
+				return err
+			}
+			if cur == nil {
+				return ErrNotFound
+			}
+			prepared[k].existing = cur
+		}
 		// A replacement whose prepared file is not ready leaves its entry
 		// preparing, whatever the entry's status is now. Count it as activating
 		// and leave the entry out of the active count, so a conversion that
