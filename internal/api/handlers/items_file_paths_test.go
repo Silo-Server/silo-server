@@ -31,8 +31,8 @@ func TestFilePathsFollowActingAdmin(t *testing.T) {
 			ctx = apimw.SetActingAdminDecider(ctx, func(context.Context, apimw.ActingAdminRequest) (bool, error) {
 				return tc.acting, tc.err
 			})
-			if got := h.canViewFilePaths(ctx); got != tc.want {
-				t.Fatalf("canViewFilePaths = %v, want %v", got, tc.want)
+			if got := h.CanViewFilePaths(ctx); got != tc.want {
+				t.Fatalf("CanViewFilePaths = %v, want %v", got, tc.want)
 			}
 		})
 	}

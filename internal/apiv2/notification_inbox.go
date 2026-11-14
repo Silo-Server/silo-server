@@ -399,8 +399,10 @@ func registerNotificationInbox(reg *Registry) {
 }
 
 // Only the extension display operation admits a display token. Reuse the
-// bridge's session/profile validation and both limiter positions, including
-// the pre-auth budget protecting the long-lived token's session lookup.
+// bridge's session/profile validation and charge each request to the limiter
+// once: the display-token path before the long-lived token's session lookup,
+// the access-token path after RequireAuth. A credential that does not validate
+// is refused before any limiter, as on every other authenticated operation.
 func notificationDisplayGateChain(deps Dependencies) ([]func(http.Handler) http.Handler, string) {
 	if deps.Auth == nil {
 		return nil, "auth"
@@ -408,19 +410,18 @@ func notificationDisplayGateChain(deps Dependencies) ([]func(http.Handler) http.
 	if deps.ViewerAccess == nil {
 		return nil, "viewer access"
 	}
-	postAuth := func(next http.Handler) http.Handler {
-		h := deps.ViewerAccess.RequireViewerAccess(apimw.RequireProfile(next))
+	viewer := func(next http.Handler) http.Handler {
+		return deps.ViewerAccess.RequireViewerAccess(apimw.RequireProfile(next))
+	}
+	limited := func(next http.Handler) http.Handler {
+		h := viewer(next)
 		if deps.RateLimit != nil {
 			h = deps.RateLimit(h)
 		}
 		return h
 	}
-	fallback := func(next http.Handler) http.Handler { return deps.Auth.RequireAuth(postAuth(next)) }
-	chain := make([]func(http.Handler) http.Handler, 0, 2)
-	if deps.RateLimit != nil {
-		chain = append(chain, deps.RateLimit)
-	}
-	return append(chain, deps.Auth.RequireApplePushDisplayAuth(fallback, postAuth)), ""
+	fallback := func(next http.Handler) http.Handler { return deps.Auth.RequireAuth(limited(next)) }
+	return []func(http.Handler) http.Handler{deps.Auth.RequireApplePushDisplayAuth(fallback, deps.RateLimit, viewer)}, ""
 }
 
 // NotificationCapabilities is the v2 projection of configured notification channels.

@@ -10,7 +10,7 @@ import (
 // presents an access policy revision the memo has not seen.
 func BenchmarkResolveViewerScope(b *testing.B) {
 	ctx := context.Background()
-	engine, err := NewEngine(ctx)
+	engine, err := NewEngine(ctx, WithEvalTimeout(time.Minute))
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func BenchmarkResolveViewerScope(b *testing.B) {
 // reads request_time.
 func BenchmarkResolveViewerScopeMemoHit(b *testing.B) {
 	ctx := context.Background()
-	engine, err := NewEngine(ctx)
+	engine, err := NewEngine(ctx, WithEvalTimeout(time.Minute))
 	if err != nil {
 		b.Fatal(err)
 	}

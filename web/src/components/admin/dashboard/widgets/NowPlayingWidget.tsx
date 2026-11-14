@@ -9,6 +9,7 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import {
   activityMethodMeta,
   classifyActivityMethod,
+  getPlaybackSessionSubtitle,
   getSessionClientLabel,
 } from "@/pages/adminActivityPresentation";
 import type { AdminSession } from "@/api/types";
@@ -300,17 +301,9 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
             ) : (
               <div className="truncate text-sm font-bold">{title}</div>
             )}
+            {/* Same episode line as the Activity page's Stream column. */}
             <div className="text-muted-foreground mb-1.5 truncate text-xs">
-              {session.series_name
-                ? t("web.admin.dashboard.widgets.nowPlaying.episodeLineWithSeries", {
-                    season: String(session.season_number),
-                    episode: String(session.episode_number),
-                    series: session.series_name,
-                  })
-                : t("web.admin.dashboard.widgets.nowPlaying.episodeLine", {
-                    season: String(session.season_number),
-                    episode: String(session.episode_number),
-                  })}
+              {getPlaybackSessionSubtitle(session)}
             </div>
           </>
         ) : (

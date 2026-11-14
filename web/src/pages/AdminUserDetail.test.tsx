@@ -171,6 +171,7 @@ vi.mock("@/hooks/queries/admin/plugins", () => ({
 }));
 vi.mock("@/hooks/queries/admin/settings", () => ({
   useAdminSettingValue: () => ({ data: "true" }),
+  useAdminServerSettings: () => ({ data: undefined }),
 }));
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({ beginImpersonation: mocks.beginImpersonation, user: mocks.viewer }),

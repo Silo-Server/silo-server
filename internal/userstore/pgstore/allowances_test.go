@@ -236,7 +236,7 @@ func TestTitleAllowancesLiftProfileLimitsDB(t *testing.T) {
 	})
 
 	t.Run("deleting the profile removes its allowances", func(t *testing.T) {
-		if err := f.store.DeleteProfile(ctx, "kid"); err != nil {
+		if _, err := f.store.DeleteProfile(ctx, "kid"); err != nil {
 			t.Fatal(err)
 		}
 		var left int

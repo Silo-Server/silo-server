@@ -37,13 +37,14 @@ type itemsQuery struct {
 	totalOverride          *int
 	isFavorite             bool
 	isResumable            bool
-	isNotFolder            bool // Filters=IsNotFolder or IsFolder=false: leaf items only
-	includesOnlyLeafTypes  bool // IncludeItemTypes names Episode and no Series or Season
-	hasItemTypeFilter      bool // true when IncludeItemTypes or ExcludeItemTypes was present in the request
-	wantsBoxSets           bool // true when IncludeItemTypes contains BoxSet
-	wantsViews             bool // true when IncludeItemTypes contains CollectionFolder
-	sortExplicit           bool // true when SortBy was present in the request
-	needsDetailFields      bool // true when requested Fields include detail-level data (e.g. MediaSources)
+	isNotFolder            bool   // Filters=IsNotFolder or IsFolder=false: leaf items only
+	includesOnlyLeafTypes  bool   // IncludeItemTypes names Episode and no Series or Season
+	hasItemTypeFilter      bool   // true when IncludeItemTypes or ExcludeItemTypes was present in the request
+	wantsBoxSets           bool   // true when IncludeItemTypes contains BoxSet
+	wantsViews             bool   // true when IncludeItemTypes contains CollectionFolder
+	sortExplicit           bool   // true when SortBy was present in the request
+	sortByKey              string // the SortBy key parseSort selects, lowercased; "" when no key maps
+	needsDetailFields      bool   // true when requested Fields include detail-level data (e.g. MediaSources)
 	itemType               string
 	sort                   string
 	order                  string
@@ -214,6 +215,7 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 	result.includesOnlyLeafTypes = itemTypesContain(includedTypes, "episode") &&
 		!itemTypesContain(includedTypes, "series") && !itemTypesContain(includedTypes, "season")
 	result.sortExplicit = strings.TrimSpace(q.Get("SortBy")) != ""
+	result.sortByKey = selectedSortKey(q.Get("SortBy"))
 	if result.sort == "latest_episode_added" && !itemTypesOnlySeries(result.itemTypes) {
 		result.sort = "created_at"
 	}
@@ -690,12 +692,7 @@ func mapSortBy(raw string) string {
 // sortsBySortName reports whether the SortBy key parseSort selects is SortName
 // rather than Name; both map to the title sort.
 func sortsBySortName(sortBy string) bool {
-	for _, key := range strings.Split(sortBy, ",") {
-		if _, ok := sortKey(key); ok {
-			return strings.EqualFold(strings.TrimSpace(key), "SortName")
-		}
-	}
-	return false
+	return selectedSortKey(sortBy) == sortKeySortName
 }
 
 // sortKey maps one Jellyfin SortBy key. Episode-order keys map to "" — the

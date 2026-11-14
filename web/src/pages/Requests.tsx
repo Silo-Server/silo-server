@@ -25,6 +25,7 @@ import {
   useRemoveFailedMediaRequest,
   useRequestDiscovery,
 } from "@/hooks/queries/useRequests";
+import { useProfileRequestsAllowed } from "@/hooks/useCanRequest";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useWatchlistTitleToggle } from "@/hooks/useWatchlistTitleToggle";
 import { useUICustomization } from "@/hooks/useUICustomization";
@@ -44,6 +45,7 @@ import {
   tmdbImageURL,
   type RequestDisplayState,
 } from "@/lib/mediaRequests";
+import { useSectionTitle } from "@/lib/sectionTitle";
 import { carouselCardWidthClasses } from "@/lib/uiCustomization";
 import { cn } from "@/lib/utils";
 import { numberText, useT, type MessageKey } from "@/i18n";
@@ -100,7 +102,40 @@ export default function Requests() {
 function RequestsHub() {
   const t = useT();
   useDocumentTitle(t("web.requests.title"));
+  const profileRequestsAllowed = useProfileRequestsAllowed();
+  if (!profileRequestsAllowed) return <BlockedProfileRequests />;
+  return <RequestsTabs />;
+}
 
+/**
+ * The hub for a profile the household manager blocked from requests: no
+ * discovery or search, only the requests this profile made (the server
+ * narrows the list to them), which it may still cancel. Titles are not
+ * linked, as their pages are discovery.
+ */
+function BlockedProfileRequests() {
+  const t = useT();
+  const mine = useMyMediaRequests({ limit: 100 });
+  return (
+    <div className="pb-10">
+      <header className={cn(PAGE_GUTTER, "pt-6 pb-4")}>
+        <h1 className="text-foreground text-2xl font-bold tracking-tight sm:text-3xl">
+          {t("web.requests.title")}
+        </h1>
+        <p className="text-muted-foreground mt-1 text-sm">{t("web.requests.hub.blockedIntro")}</p>
+      </header>
+      <YoursTab
+        requests={mine.data ?? []}
+        isLoading={mine.isLoading}
+        isError={mine.isError}
+        onRetry={() => void mine.refetch()}
+      />
+    </div>
+  );
+}
+
+function RequestsTabs() {
+  const t = useT();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = normalizeRequestTab(searchParams.get("tab"));
   const mine = useMyMediaRequests({ limit: 100 });
@@ -173,6 +208,7 @@ function RequestsHub() {
 
 function DiscoverTab() {
   const t = useT();
+  const sectionTitle = useSectionTitle();
   const discovery = useRequestDiscovery();
   const watchlist = useWatchlistTitleToggle();
 
@@ -201,7 +237,7 @@ function DiscoverTab() {
     <div className="space-y-10">
       {(discovery.data?.rows ?? []).map((row) => {
         if (isBrandSourceType(row.type)) {
-          return <BrandRow key={row.key} type={row.type} title={row.title} />;
+          return <BrandRow key={row.key} type={row.type} title={sectionTitle(row)} />;
         }
         const section = sections.get(row.key);
         return section ? (
@@ -247,10 +283,11 @@ function DiscoverRow({
   section: RequestDiscoverySection;
   watchlist: ReturnType<typeof useWatchlistTitleToggle>;
 }) {
+  const sectionTitle = useSectionTitle();
   if (section.results.length === 0) return null;
   return (
     <MediaCarousel
-      title={section.title}
+      title={sectionTitle(section)}
       // A row trimmed to its size has more titles even on a one-page source.
       viewAllHref={
         section.total_pages > 1 || section.total_results > section.results.length
@@ -282,7 +319,8 @@ function YoursTab({
   isLoading: boolean;
   isError: boolean;
   onRetry: () => void;
-  onBrowse: () => void;
+  /** Opens Discover; absent when the profile may not discover or request. */
+  onBrowse?: () => void;
 }) {
   const t = useT();
   const cancelRequest = useCancelMediaRequest();
@@ -314,10 +352,16 @@ function YoursTab({
     body = (
       <div className="flex flex-col items-center gap-3 py-16 text-center">
         <p className="text-foreground text-sm font-medium">{t("web.requests.hub.empty")}</p>
-        <p className="text-muted-foreground max-w-sm text-sm">{t("web.requests.hub.emptyHint")}</p>
-        <Button variant="outline" size="sm" onClick={onBrowse}>
-          {t("web.requests.hub.browseDiscover")}
-        </Button>
+        {onBrowse ? (
+          <>
+            <p className="text-muted-foreground max-w-sm text-sm">
+              {t("web.requests.hub.emptyHint")}
+            </p>
+            <Button variant="outline" size="sm" onClick={onBrowse}>
+              {t("web.requests.hub.browseDiscover")}
+            </Button>
+          </>
+        ) : null}
       </div>
     );
   } else {
@@ -340,6 +384,7 @@ function YoursTab({
                   <RequestRow
                     key={request.id}
                     request={request}
+                    linkTitle={onBrowse !== undefined}
                     // Every request on this tab is the account's own.
                     onCancel={
                       canCancelOwnRequest(request) ? () => setCancelTarget(request) : undefined
@@ -362,7 +407,9 @@ function YoursTab({
   return (
     <div className={cn(PAGE_GUTTER, "max-w-5xl space-y-6")}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-muted-foreground text-sm">{t("web.requests.hub.yoursIntro")}</p>
+        <p className="text-muted-foreground text-sm">
+          {onBrowse ? t("web.requests.hub.yoursIntro") : t("web.requests.hub.yoursIntroProfile")}
+        </p>
         <StatusHelp />
       </div>
       {body}
@@ -398,12 +445,15 @@ function YoursTab({
 
 function RequestRow({
   request,
+  linkTitle,
   onCancel,
   isCancelling,
   onRemove,
   isRemoving,
 }: {
   request: MediaRequest;
+  /** Links the poster and title to the title's page. */
+  linkTitle: boolean;
   /** Offered only while the request can still be withdrawn. */
   onCancel?: () => void;
   isCancelling: boolean;
@@ -425,33 +475,42 @@ function RequestRow({
       : "",
   ].filter(Boolean);
   const updated = lastChange(request);
+  const posterClass = "bg-muted relative h-[72px] w-12 shrink-0 overflow-hidden rounded-md";
+  const posterContent = poster ? (
+    <img src={poster} alt="" loading="lazy" className="h-full w-full object-cover" />
+  ) : (
+    <span className="text-muted-foreground flex h-full items-center justify-center">
+      <MediaIcon className="h-4 w-4" />
+    </span>
+  );
 
   return (
     <li className="flex gap-3 py-3 sm:gap-4" data-request-id={request.id}>
-      <ViewTransitionLink
-        to={href}
-        tabIndex={-1}
-        aria-hidden
-        className="bg-muted relative h-[72px] w-12 shrink-0 overflow-hidden rounded-md"
-      >
-        {poster ? (
-          <img src={poster} alt="" loading="lazy" className="h-full w-full object-cover" />
-        ) : (
-          <span className="text-muted-foreground flex h-full items-center justify-center">
-            <MediaIcon className="h-4 w-4" />
-          </span>
-        )}
-      </ViewTransitionLink>
+      {linkTitle ? (
+        <ViewTransitionLink to={href} tabIndex={-1} aria-hidden className={posterClass}>
+          {posterContent}
+        </ViewTransitionLink>
+      ) : (
+        <div aria-hidden className={posterClass}>
+          {posterContent}
+        </div>
+      )}
 
       <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <ViewTransitionLink
-              to={href}
-              className="text-foreground min-w-0 truncate text-sm font-semibold hover:underline"
-            >
-              {request.title}
-            </ViewTransitionLink>
+            {linkTitle ? (
+              <ViewTransitionLink
+                to={href}
+                className="text-foreground min-w-0 truncate text-sm font-semibold hover:underline"
+              >
+                {request.title}
+              </ViewTransitionLink>
+            ) : (
+              <span className="text-foreground min-w-0 truncate text-sm font-semibold">
+                {request.title}
+              </span>
+            )}
             {state ? <RequestStatusBadge state={state} /> : null}
           </div>
           <p className="text-muted-foreground text-xs">{details.join(" · ")}</p>

@@ -26,7 +26,7 @@ export function LibraryPosterSection({ library }: { library: Library }) {
   return (
     <div className="space-y-1.5">
       <Label>{t("web.admin.common.libraryEditor.poster.label")}</Label>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {library.poster_url ? (
           <img
             src={library.poster_url}
@@ -53,7 +53,7 @@ export function LibraryPosterSection({ library }: { library: Library }) {
           type="button"
           variant="outline"
           size="sm"
-          className="h-8 text-xs"
+          className="h-11 text-xs sm:h-8"
           onClick={() => document.getElementById(fileInputId)?.click()}
           disabled={uploadMutation.isPending}
         >
@@ -68,7 +68,7 @@ export function LibraryPosterSection({ library }: { library: Library }) {
             type="button"
             variant="ghost"
             size="icon"
-            className="text-muted-foreground hover:text-destructive h-8 w-8"
+            className="text-muted-foreground hover:text-destructive size-11 sm:size-8"
             onClick={() => deleteMutation.mutate(library.id)}
             disabled={deleteMutation.isPending}
             title={t("web.admin.common.libraryEditor.poster.remove")}

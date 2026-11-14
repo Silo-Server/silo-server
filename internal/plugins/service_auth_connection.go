@@ -17,7 +17,8 @@ import (
 var ErrAuthConnectionTestUnsupported = errors.New("auth provider has no connection test")
 
 // StagedConfig is one global configuration entry as the operator has it on
-// screen, not yet saved. Blank secret fields fall back to the stored secret;
+// screen, not yet saved. Blank secret fields fall back to the stored secret
+// only while the rest of the entry is unchanged and no secret is typed;
 // ClearSecrets drops stored secrets from the test.
 type StagedConfig struct {
 	Key          string

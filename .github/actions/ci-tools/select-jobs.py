@@ -14,10 +14,9 @@ WEB_JOBS = ("web", "web-test")
 # Run on every event regardless of what the diff touched.
 ALWAYS_JOBS = ("repo-checks",)
 SHA = re.compile(r"[0-9a-fA-F]{40}\Z")
-# These are embedded by contracts/api/v2 and consumed by the Go ledger,
-# scenario and compatibility gates. Web generation consumes openapi/fixtures.
+# These are embedded by contracts/api/v2 and consumed by the Go compatibility
+# gate. Web generation consumes openapi/fixtures.
 GO_ONLY_CONTRACTS = frozenset("contracts/api/v2/" + name for name in (
-    "migration.json", "migration.schema.json", "offline-routes.txt",
     "breaking-approvals.json", "breaking-approvals.schema.json",
 ))
 

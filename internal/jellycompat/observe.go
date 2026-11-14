@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 )
@@ -40,6 +41,9 @@ const (
 	compatLabelOther     = "other"
 	compatClientNone     = "none"
 	compatStatusHijacked = "hijacked"
+	// compatStatusAborted labels a response the handler broke after sending
+	// its status (panic(http.ErrAbortHandler)) while the client was waiting.
+	compatStatusAborted = "aborted"
 )
 
 // compatStatusClasses labels a status by its first digit.
@@ -102,40 +106,54 @@ func observeCompatRequest(next http.Handler) http.Handler {
 		ctx, span := otel.Tracer("silo/jellycompat").Start(telemetry.PublicContext(r.Context()), "jellycompat request", compatSpanOptions...)
 		defer span.End()
 		sw := &statusResponseWriter{ResponseWriter: w}
-		next.ServeHTTP(sw, r.WithContext(ctx))
-		elapsed := time.Since(start)
+		r = r.WithContext(ctx)
+		httpstream.Serve(next, sw, r, func(aborted bool) {
+			elapsed := time.Since(start)
 
-		route := chi.RouteContext(ctx).RoutePattern()
-		if route == "" {
-			route = compatRouteUnmatched
-		}
-		method := compatMethodLabel(r.Method)
-		client := compatClientFamily(r)
-		compatRequestsTotal.WithLabelValues(route, method, compatStatusClass(sw.status, sw.hijacked), client).Inc()
-		if _, untimed := untimedCompatRoutes[route]; !untimed {
-			seconds := elapsed.Seconds()
-			compatRequestDuration.WithLabelValues(route, method).Observe(seconds)
-			compatClientRequestDuration.WithLabelValues(client).Observe(seconds)
-		}
+			route := chi.RouteContext(ctx).RoutePattern()
+			if route == "" {
+				route = compatRouteUnmatched
+			}
+			method := compatMethodLabel(r.Method)
+			client := compatClientFamily(r)
+			class := compatStatusAborted
+			if !aborted {
+				class = compatStatusClass(sw.status, sw.hijacked)
+			}
+			compatRequestsTotal.WithLabelValues(route, method, class, client).Inc()
+			if _, untimed := untimedCompatRoutes[route]; !untimed {
+				seconds := elapsed.Seconds()
+				compatRequestDuration.WithLabelValues(route, method).Observe(seconds)
+				compatClientRequestDuration.WithLabelValues(client).Observe(seconds)
+			}
 
-		if !span.IsRecording() {
-			return
-		}
-		span.SetName("jellycompat " + method + " " + route)
-		span.SetAttributes(
-			attribute.String("http.request.method", method),
-			attribute.String("http.route", route),
-			attribute.String("jellycompat.client", client),
-		)
-		if sw.status == 0 && sw.hijacked {
-			span.SetAttributes(attribute.String("http.response.outcome", compatStatusHijacked))
-			return
-		}
-		status := statusOrDefault(sw.status)
-		span.SetAttributes(attribute.Int("http.response.status_code", status))
-		if status >= http.StatusInternalServerError {
-			span.SetStatus(codes.Error, "server_error")
-		}
+			if !span.IsRecording() {
+				return
+			}
+			span.SetName("jellycompat " + method + " " + route)
+			span.SetAttributes(
+				attribute.String("http.request.method", method),
+				attribute.String("http.route", route),
+				attribute.String("jellycompat.client", client),
+			)
+			if aborted {
+				span.SetAttributes(attribute.String("http.response.outcome", compatStatusAborted))
+				if sw.status != 0 {
+					span.SetAttributes(attribute.Int("http.response.status_code", sw.status))
+				}
+				span.SetStatus(codes.Error, compatStatusAborted)
+				return
+			}
+			if sw.status == 0 && sw.hijacked {
+				span.SetAttributes(attribute.String("http.response.outcome", compatStatusHijacked))
+				return
+			}
+			status := statusOrDefault(sw.status)
+			span.SetAttributes(attribute.Int("http.response.status_code", status))
+			if status >= http.StatusInternalServerError {
+				span.SetStatus(codes.Error, "server_error")
+			}
+		})
 	})
 }
 

@@ -66,6 +66,7 @@ func TestDownloadCreatePagesPostgres(t *testing.T) {
 	pager.rows = []*models.Episode{{ContentID: "special", SeasonNumber: 0, EpisodeNumber: 2}}
 	pager.more = false
 	files.rows = map[string][]*models.MediaFile{"special": {{ID: 42, ContentID: "series", EpisodeID: "special", FileSize: 10}}}
+	seedSchemaFiles(t, repo, files.rows["special"][0])
 	page, err = svc.CreateSeriesPage(t.Context(), 1, req, new(0), page.Next, 1, catalog.AccessFilter{})
 	if err != nil || len(page.Items) != 1 || page.Items[0].Status != StatusReady || page.Items[0].BatchID != "intent" || pager.after == nil {
 		t.Fatalf("managed %+v %v", page, err)
@@ -94,6 +95,7 @@ func TestDownloadCreatePagesPostgres(t *testing.T) {
 	}
 	// Single ephemeral registration uses the same policy and queued lifecycle.
 	files.single = &models.MediaFile{ID: 43, ContentID: "movie", FileSize: 12, Container: "mp4", CodecVideo: "h264", CodecAudio: "aac"}
+	seedSchemaFiles(t, repo, files.single)
 	single, err := svc.Create(t.Context(), 1, CreateRequest{ContentID: "movie", FileID: 43, StrictIdentity: true}, catalog.AccessFilter{})
 	if err != nil || single.DeviceID != "" || single.Status != StatusQueued || single.MediaFileID != 43 {
 		t.Fatalf("single ephemeral %+v %v", single, err)
@@ -126,6 +128,9 @@ func TestSeriesPageFollowsTheVersionTemplatePostgres(t *testing.T) {
 	}
 	template := hd(11, "ep-1")
 	files := &createFileResolver{rows: map[string][]*models.MediaFile{"ep-1": {uhd(10, "ep-1"), template}, "ep-2": {uhd(20, "ep-2"), hd(21, "ep-2")}}, single: template}
+	for _, episodeFiles := range files.rows {
+		seedSchemaFiles(t, repo, episodeFiles...)
+	}
 	svc := NewService(repo, nil, nil, files, createItemResolver{}, pager, fakeUserRepo{&models.User{ID: 1, DownloadAllowed: new(true)}}, &syncAccess{}, nil, &config.DownloadConfig{Enabled: true})
 	req := CreateRequest{ContentID: "series", ProfileID: "profile", BatchID: "intent", StrictIdentity: true}
 

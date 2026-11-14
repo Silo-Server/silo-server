@@ -118,6 +118,7 @@ export default function DownloadsSettings() {
           <SettingField
             label={t("web.admin.settings.downloads.enabled.label")}
             type="toggle"
+            description={t("web.admin.settings.downloads.enabled.description")}
             value={form.getValue("download.enabled")}
             onChange={(v) => form.setValue("download.enabled", v)}
             restartRequired={restartKeys.has("download.enabled")}

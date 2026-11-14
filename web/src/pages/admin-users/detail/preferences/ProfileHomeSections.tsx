@@ -20,6 +20,7 @@ import {
   hydrateRemovedSystemSections,
 } from "@/lib/homeRows/profileOverrides";
 import { useT, type Translate } from "@/i18n";
+import { TOUCH_TARGETS } from "@/lib/touchTargets";
 import { fetchRecipeCatalog } from "@/lib/recipes";
 
 import { DetailCard } from "../ui";
@@ -151,6 +152,7 @@ export function ProfileHomeSections({
           profile: profileName,
         })}
         confirmLabel={t("web.admin.users.detail.preferences.home.resetConfirm")}
+        className={TOUCH_TARGETS}
         onConfirm={() => {
           setConfirmReset(false);
           reset.mutate(undefined, {

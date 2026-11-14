@@ -1,9 +1,8 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -16,44 +15,57 @@ import (
 // blocking other backup settings.
 func TestBackupDestinationS3NeedsTheConfirmedKey(t *testing.T) {
 	const check = "1a2b-3c4d-5e6f-7a8b"
-	bucket := `"` + config.BackupS3EndpointSettingKey + `":"https://s3.example.com","` + config.BackupS3BucketSettingKey + `":"backups"`
-	put := func(h *AdminHandler, body string) *httptest.ResponseRecorder {
-		rec := httptest.NewRecorder()
-		h.HandleUpdateSettings(rec, httptest.NewRequest(http.MethodPut, "/admin/settings", strings.NewReader(`{"values":{`+body+`}}`)))
-		return rec
+	withBucket := func(values map[string]string) map[string]string {
+		values[config.BackupS3EndpointSettingKey] = "https://s3.example.com"
+		values[config.BackupS3BucketSettingKey] = "backups"
+		return values
 	}
-	putOne := func(h *AdminHandler, key, value string) *httptest.ResponseRecorder {
-		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodPut, "/admin/settings/"+key, strings.NewReader(`{"value":"`+value+`"}`))
-		h.HandleUpdateSetting(rec, withURLParam(req, "key", key))
-		return rec
+	// outcome is the status and error code a write answers.
+	outcome := func(err error) (int, string) {
+		if err == nil {
+			return http.StatusOK, ""
+		}
+		if apiErr, ok := errors.AsType[*APIError](err); ok {
+			return apiErr.Status, apiErr.Code
+		}
+		return http.StatusInternalServerError, err.Error()
 	}
-	toS3 := `"` + config.BackupDestinationSettingKey + `":"s3",` + bucket
+	put := func(h *AdminHandler, values map[string]string) (int, string) {
+		_, err := h.UpdateAdminSettings(t.Context(), values, nil)
+		return outcome(err)
+	}
+	putOne := func(h *AdminHandler, key, value string) (int, string) {
+		_, err := h.UpdateAdminSetting(t.Context(), key, value, nil)
+		return outcome(err)
+	}
+	toS3 := func() map[string]string {
+		return withBucket(map[string]string{config.BackupDestinationSettingKey: "s3"})
+	}
 
 	// Another key's confirmation does not count.
 	store := &fakeServerSettingsStore{values: map[string]string{config.BackupS3KeyAcknowledgedSettingKey: "0000-0000-0000-0000"}}
 	h := &AdminHandler{SettingsRepo: store, BackupKeyCheck: check}
-	if rec := put(h, toS3); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "backup_key_not_confirmed") {
-		t.Fatalf("switch before confirming: %d %s", rec.Code, rec.Body.String())
+	if status, code := put(h, toS3()); status != http.StatusConflict || code != "backup_key_not_confirmed" {
+		t.Fatalf("switch before confirming: %d %s", status, code)
 	}
-	if rec := put(h, `"`+config.BackupS3KeyAcknowledgedSettingKey+`":"`+check+`"`); rec.Code != http.StatusBadRequest {
-		t.Fatalf("writing the confirmation through settings: %d %s", rec.Code, rec.Body.String())
+	if status, code := put(h, map[string]string{config.BackupS3KeyAcknowledgedSettingKey: check}); status != http.StatusBadRequest {
+		t.Fatalf("writing the confirmation through settings: %d %s", status, code)
 	}
 	if _, stored := store.values[config.BackupDestinationSettingKey]; stored {
 		t.Fatalf("a refused write stored the destination: %v", store.values)
 	}
 
 	store.values[config.BackupS3KeyAcknowledgedSettingKey] = check
-	if rec := putOne(h, config.BackupDestinationSettingKey, "s3"); rec.Code != http.StatusBadRequest {
-		t.Fatalf("switch without a bucket: %d %s", rec.Code, rec.Body.String())
+	if status, code := putOne(h, config.BackupDestinationSettingKey, "s3"); status != http.StatusBadRequest {
+		t.Fatalf("switch without a bucket: %d %s", status, code)
 	}
-	if rec := put(h, toS3); rec.Code != http.StatusOK || store.values[config.BackupDestinationSettingKey] != "s3" {
-		t.Fatalf("switch after confirming: %d %s", rec.Code, rec.Body.String())
+	if status, code := put(h, toS3()); status != http.StatusOK || store.values[config.BackupDestinationSettingKey] != "s3" {
+		t.Fatalf("switch after confirming: %d %s", status, code)
 	}
 
 	// SECRET_KEY changed: the destination stays editable, and backups pause.
 	changed := &AdminHandler{SettingsRepo: store, BackupKeyCheck: "9999-9999-9999-9999"}
-	if rec := putOne(changed, config.BackupS3BucketSettingKey, "other"); rec.Code != http.StatusOK {
-		t.Fatalf("editing the bucket after the key changed: %d %s", rec.Code, rec.Body.String())
+	if status, code := putOne(changed, config.BackupS3BucketSettingKey, "other"); status != http.StatusOK {
+		t.Fatalf("editing the bucket after the key changed: %d %s", status, code)
 	}
 }

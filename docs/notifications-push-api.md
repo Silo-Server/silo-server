@@ -7,14 +7,7 @@ access token, so the server issues it a separate long-lived credential at
 push registration.
 
 > **API lifecycle:** the operations below are the stable `/api/v2` native contract,
-> which locks with Silo 1.0. The frozen alpha `/api/v1` surface serves the same
-> Apple display-token flow at the matching `/api/v1` paths through the pre-1.0
-> bridge window. After the bridge window, and once a maintainer decides to retire
-> it ([#886](https://github.com/Silo-Server/silo-server/issues/886)), the main API
-> listener answers the `/api/v1` business routes with `410 Gone` and the
-> `client_upgrade_required` problem code; `/api/v1/health` and `/api/v1/ready`
-> keep answering. See
-> [the native API contract](architecture/api-contract.md).
+> which locks with Silo 1.0. See [the native API contract](architecture/api-contract.md).
 
 Android is unaffected: it fetches `GET /api/v2/notifications/{id}` through the app's
 normal auth path, which refreshes on `401`.
@@ -167,10 +160,11 @@ X-Push-Installation-Key: <the app's current installation secret>
 `resetApplePushInstallation` needs a current login session of the account the
 installation is bound to, from any of its profiles. Display tokens and API keys
 are refused. Under the installation lock it deletes the installation's Apple
-push rows, which also drops their queued delivery attempts, and clears the
-stored key and generation. The installation stays reserved for the account
-until that account registers again: another account's ordered or legacy
-registration for the `device_id` is still refused. It answers `200`:
+push rows, which also drops their queued delivery attempts, clears the
+generation, and stores the hash of the sent key in place of the old one. The
+installation stays reserved for the account until that account registers
+again: another account's ordered or legacy registration for the `device_id` is
+still refused. It answers `200`:
 
 - `{"reset": true}` when it cleared a binding.
 - `{"reset": false}` when there was nothing to clear: the server has no ordered
@@ -186,7 +180,8 @@ Then register again with the same key the reset carried. The cleared
 installation accepts any positive generation, so the app can restart its counter
 at 1. A provider request already sent cannot be recalled, and a registration
 from the same account that reaches the server after the reset binds the
-installation, as a first registration would. The app should send the reset and the registration after
+installation, as a first registration would, unless a retirement reached it
+first (see "Retirement without a session"). The app should send the reset and the registration after
 it on the same serialized path as its other registrations for that device. A
 registration with an older key that is still in flight can otherwise bind first,
 and the next registration with the new key gets `push_installation_key_mismatch`
@@ -195,7 +190,8 @@ again; the app recovers by resetting on that later attempt.
 The retained-owner guarantee requires every API writer sharing the database to
 enforce it. Upgrade all API replicas before allowing reset requests. An older
 writer can treat a cleared generation as an unowned installation and overwrite
-the reserved account. `installation_reset_available` describes the responding
+the reserved account. A reset or retirement that an older writer handles stores
+no fence, so a late registration can still bind there. `installation_reset_available` describes the responding
 server; it does not certify that other replicas have been upgraded. Recovery to
 an older release must follow the [backup and rollback policy](release-versioning.md#backups-and-rollback),
 restoring the pre-upgrade database instead of running older writers against
@@ -235,6 +231,12 @@ retirement becomes the installation's newest intent:
   `removed: true` and writes nothing. Without a stored key the server cannot
   authorize removal, so a legacy unordered registration for that `device_id` is
   left in place.
+- An installation its owner reset returns `200` with `removed: true`. When the
+  sent key is the one the reset carried, the server stores the generation as a
+  fence, so a registration sent before the retirement that arrives after it gets
+  `409` instead of turning pushes back on. Any other key writes nothing, as for
+  an installation with no ordered record. Legacy unordered rows are left in
+  place, as above.
 
 The server keeps the key hash and owner. To receive pushes again, register
 through `registerApplePushDevice` with the same key and a higher generation.
@@ -339,15 +341,10 @@ failure cannot disable its replacement. Existing sender retry/delivery behavior
 for a current registration is unchanged. A provider call already in flight cannot
 be unsent; this contract does not guarantee immediate remote-delivery revocation.
 
-Once an installation adopts v2, bridge Android registration and generic device
-removal for that installation return `409 push_registration_upgrade_required`.
-Unadopted installations can still register and switch profiles within their
-account through the bridge, subject to the ownership rule below. Deploy the migration
-and guarded writer code to every API node before activating ordered native
-registration; older binaries that do not acquire the installation lock are not
-safe concurrent writers. No existing installation is enrolled by the migration.
-Native consumer adoption and its independent review remain required before the
-two existing registration/removal mappings can be ratified.
+Deploy the migration and guarded writer code to every API node before
+activating ordered native registration; older binaries that do not acquire the
+installation lock are not safe concurrent writers. No existing installation is
+enrolled by the migration.
 
 ### Android retirement without a session
 
@@ -379,10 +376,11 @@ installation's stored account/profile:
   registration, returns `409`. A late retirement therefore never removes a
   newer registration.
 - A key that does not match the stored hash returns `403`, as registration does.
-- An installation the server has no ordered record of (unknown, or bridge-only
-  at generation 0) returns `200` with `removed: true` and writes nothing.
-  Without a stored key the server cannot authorize removal, so a bridge
-  registration for that `device_id` is left in place.
+- An installation the server has no ordered record of (unknown, or registered
+  before ordered registration at generation 0) returns `200` with
+  `removed: true` and writes nothing. Without a stored key the server cannot
+  authorize removal, so an unordered registration for that `device_id` is left
+  in place.
 
 The server keeps the key hash and owner. To receive pushes again, register
 through `registerPushDevice` with the same key and a higher generation.
@@ -416,25 +414,3 @@ A subscription records the login session that last registered it. Once that sess
 The web app registers again on its own, so push survives a fresh sign-in. Once per sign-in and profile, after the page's first content, it sends the browser's existing subscription through the registration operation above if the server lists that endpoint under the current profile, or if this browser remembers enabling it for the current account and profile (`localStorage`, kept across sign-out, cleared by disable). This also binds a subscription made before the server recorded logins. It never registers for anyone else: someone else signing in on the same browser gets no push until they turn it on, and the endpoint stays with its owner until then. Permission is never requested. The automatic send is still a single attempt without authentication replay; a failure waits for the next page load. Impersonated sessions skip it.
 
 The remaining gaps follow from where the web app runs. A subscription made before the server recorded logins stays unbound, and keeps delivering after a revoke while the account is signed in anywhere else, until the web app next loads in that browser under its account and profile. After a fresh sign-in under a sibling profile, the subscribed profile's push stays stopped until that profile is next active in the browser. A subscription removed from another device is forgotten only when this browser next loads during the same login; if it signs in again first, the removal is undone.
-
-## Legacy mobile registration ownership
-
-The frozen bridge routes `POST /api/v1/devices/push/apple` and
-`POST /api/v1/notifications/push/devices` refuse a generation-zero registration
-when any destination for that device ID and platform belongs to another account.
-They return `409` with code `conflict` and leave every destination and queued
-attempt unchanged. A matching provider token, disabled destination, or matching
-profile ID does not bypass account ownership; profile IDs can repeat across accounts.
-
-Same-account profile switching still retires the previous profile's destination
-and attempts atomically. Refusal is checked under the existing installation lock,
-which serializes bridge writers and ordered v2 writers across API nodes.
-
-An older client switching accounts can therefore receive a conflict while the
-previous account's destination remains registered. Repeating registration does
-not resolve it. The conflict clears when the owning account unregisters that
-device, when the owning profile or account is deleted, or when notification
-retention removes the registration because its login session ended. Ordered bootstrap must
-occur while that existing account is selected; subsequent account transfers
-require its installation key and a newer generation. This repair adds no
-recovery or automatic rebinding mechanism.

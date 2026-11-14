@@ -32,6 +32,7 @@ type upstreamListItem struct {
 	ContentRating     string                  `json:"content_rating"`
 	Status            string                  `json:"status"`
 	RatingIMDB        *float64                `json:"rating_imdb"`
+	RatingRTCritic    *int                    `json:"rating_rt_critic"`
 	Overview          string                  `json:"overview"`
 	PosterURL         string                  `json:"poster_url"`
 	BackdropURL       string                  `json:"backdrop_url"`
@@ -101,6 +102,7 @@ type upstreamItemDetail struct {
 	Genres            []string                `json:"genres"`
 	RatingIMDB        *float64                `json:"rating_imdb"`
 	RatingTMDB        *float64                `json:"rating_tmdb"`
+	RatingRTCritic    *int                    `json:"rating_rt_critic"`
 	ImdbID            string                  `json:"imdb_id,omitempty"`
 	TmdbID            string                  `json:"tmdb_id,omitempty"`
 	TvdbID            string                  `json:"tvdb_id,omitempty"`

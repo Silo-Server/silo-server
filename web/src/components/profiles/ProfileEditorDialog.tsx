@@ -76,9 +76,11 @@ export function ProfileEditorDialog({
   avatarUploadEnabled = false,
   advisoryAgeSupported = false,
   requireAdvisoryAgeSupported = false,
+  requestsAllowedSupported = false,
   profileContext,
   save,
   onOpenChange,
+  className,
   onSaveSuccess,
 }: ProfileEditorDialogProps) {
   const t = useT();
@@ -90,7 +92,7 @@ export function ProfileEditorDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-3xl">
+      <DialogContent className={cn("sm:max-w-3xl", className)}>
         <DialogHeader>
           <DialogTitle>
             {mode === "edit"
@@ -109,6 +111,7 @@ export function ProfileEditorDialog({
             avatarUploadEnabled={avatarUploadEnabled}
             advisoryAgeSupported={advisoryAgeSupported}
             requireAdvisoryAgeSupported={requireAdvisoryAgeSupported}
+            requestsAllowedSupported={requestsAllowedSupported}
             profileContext={profileContext}
             save={save}
             onOpenChange={onOpenChange}
@@ -128,6 +131,7 @@ function ProfileEditorForm({
   avatarUploadEnabled,
   advisoryAgeSupported,
   requireAdvisoryAgeSupported,
+  requestsAllowedSupported,
   profileContext,
   save,
   onOpenChange,
@@ -140,6 +144,7 @@ function ProfileEditorForm({
   avatarUploadEnabled: boolean;
   advisoryAgeSupported: boolean;
   requireAdvisoryAgeSupported: boolean;
+  requestsAllowedSupported: boolean;
   profileContext?: ProfileRequestContextSnapshot;
   save?: ProfileEditorSave;
   onOpenChange: (open: boolean) => void;
@@ -184,6 +189,7 @@ function ProfileEditorForm({
   const [errors, setErrors] = useState<ValidationErrors>({});
   const [contentRatingTouched, setContentRatingTouched] = useState(false);
   const [libraryAccessTouched, setLibraryAccessTouched] = useState(false);
+  const [requestsTouched, setRequestsTouched] = useState(false);
   // Allowances belong to the signed-in household, so not when saving another
   // account's profiles (save), and only for another profile with a limit.
   const canManageAllowances = useCanManageTitleAllowances();
@@ -204,6 +210,8 @@ function ProfileEditorForm({
   const requireAdvisoryAgeId = useId();
   const requireAdvisoryAgeHelpId = useId();
   const playbackQualityId = useId();
+  const requestsAllowedId = useId();
+  const requestsAllowedHelpId = useId();
   const selectedContentRatingValue =
     draft.maxContentRating === "" ? ANY_CONTENT_RATING_VALUE : draft.maxContentRating;
 
@@ -257,6 +265,7 @@ function ProfileEditorForm({
     if (!checked) {
       setContentRatingTouched(false);
       setLibraryAccessTouched(false);
+      setRequestsTouched(false);
       setErrors((current) => ({ ...current, libraries: undefined }));
       setDraft((current) => clearKidsPreset(current));
       return;
@@ -266,6 +275,7 @@ function ProfileEditorForm({
       applyKidsPreset(current, {
         contentRatingTouched,
         libraryAccessTouched: libraryAccessTouched || isPrimary,
+        requestsTouched,
       }),
     );
   }
@@ -320,6 +330,7 @@ function ProfileEditorForm({
         const body = buildProfileUpdateFromDraft(draft, {
           advisoryAgeSupported,
           requireAdvisoryAgeSupported,
+          requestsAllowedSupported,
         });
         if (preserveExistingUpload || deleteExistingUpload) {
           delete body.avatar;
@@ -331,6 +342,7 @@ function ProfileEditorForm({
         const body = buildProfileRequestFromDraft(draft, {
           advisoryAgeSupported,
           requireAdvisoryAgeSupported,
+          requestsAllowedSupported,
         });
         savedProfile = save ? await save.create(body) : await createMutation.mutateAsync(body);
       }
@@ -721,6 +733,26 @@ function ProfileEditorForm({
           }}
           onLibraryChange={toggleLibrary}
         />
+
+        {requestsAllowedSupported ? (
+          <div className="border-border flex items-center justify-between gap-4 rounded-md border px-3 py-2">
+            <div className="space-y-0.5">
+              <Label htmlFor={requestsAllowedId}>{t("web.profiles.editor.requestsAllowed")}</Label>
+              <p id={requestsAllowedHelpId} className="text-muted-foreground text-xs">
+                {t("web.profiles.editor.requestsAllowedHint")}
+              </p>
+            </div>
+            <Switch
+              id={requestsAllowedId}
+              aria-describedby={requestsAllowedHelpId}
+              checked={draft.requestsAllowed}
+              onCheckedChange={(checked) => {
+                setRequestsTouched(true);
+                updateDraft("requestsAllowed", checked);
+              }}
+            />
+          </div>
+        ) : null}
       </section>
 
       {showAllowedTitles && profile ? <AllowedTitlesSection profileId={profile.id} /> : null}

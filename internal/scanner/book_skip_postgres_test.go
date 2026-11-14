@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -678,4 +679,65 @@ VALUES ($1,'audiobook','Book','local','{}',600)`, id); err != nil {
 		t.Fatal(err)
 	}
 	assertBookRuntime(t, pool, id, 480)
+}
+
+// A rescan of a retagged book keeps the authors and narrators an admin locked
+// with the crew lock, and replaces them when the lock is off.
+func TestAudiobookRescanKeepsCrewLockedCreditsDB(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		locked string
+		want   []string
+	}{
+		{"crew locked", "{5}", []string{"Stored Author", "Stored Narrator"}},
+		{"unlocked", "{}", []string{"Tagged Author", "Tagged Narrator"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pool := newBookScanTestPool(t)
+			folder := newBookScanTestFolder(t, pool, "audiobooks")
+			ctx := t.Context()
+			id := fmt.Sprintf("credit-lock-%d", folder.ID)
+			for _, stmt := range []struct {
+				sql  string
+				args []any
+			}{
+				{`INSERT INTO media_items (content_id,type,title,status,genres,locked_fields) VALUES ($1,'audiobook','Book','local','{}'::text[],$2::integer[])`, []any{id, tc.locked}},
+				{`INSERT INTO media_item_libraries (content_id,media_folder_id) VALUES ($1,$2)`, []any{id, folder.ID}},
+			} {
+				if _, err := pool.Exec(ctx, stmt.sql, stmt.args...); err != nil {
+					t.Fatal(err)
+				}
+			}
+			s := NewScanner(NewFileRepository(pool), "ffprobe", nil, 1, false, 0)
+			var stored []models.ItemPerson
+			for i, c := range []struct {
+				name string
+				kind models.PersonKind
+			}{{"Stored Author", models.PersonKindAuthor}, {"Stored Narrator", models.PersonKindNarrator}} {
+				personID, err := s.personRepo.FindOrCreate(ctx, models.Person{Name: c.name})
+				if err != nil {
+					t.Fatal(err)
+				}
+				stored = append(stored, models.ItemPerson{Person: models.Person{ID: personID}, Kind: c.kind, SortOrder: i})
+			}
+			if err := s.itemRepo.ReplacePeople(ctx, id, stored); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := s.upsertAudiobookPeople(ctx, id, &parsedAudiobook{Author: "Tagged Author", Narrator: "Tagged Narrator"}); err != nil {
+				t.Fatal(err)
+			}
+			people, err := s.itemRepo.GetPeople(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, p := range people {
+				got = append(got, p.Name)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("credits = %v, want %v", got, tc.want)
+			}
+		})
+	}
 }

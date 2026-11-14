@@ -2,55 +2,56 @@ import { BookHeadphones, BookMarked, BookOpen, Film, Layers, Podcast, Tv } from 
 
 import { t } from "@/i18n";
 
-// Each type's name is read when shown, in the interface language.
+// Each type's name is read when shown, in the interface language. The names are not admin
+// text: Settings > Libraries shows them to every profile.
 export const LIBRARY_TYPES = [
   {
     value: "movies",
     icon: Film,
     get label() {
-      return t("web.admin.common.libraryEditor.type.movies");
+      return t("web.common.libraryType.movies");
     },
   },
   {
     value: "series",
     icon: Tv,
     get label() {
-      return t("web.admin.common.libraryEditor.type.series");
+      return t("web.common.libraryType.series");
     },
   },
   {
     value: "mixed",
     icon: Layers,
     get label() {
-      return t("web.admin.common.libraryEditor.type.mixed");
+      return t("web.common.libraryType.mixed");
     },
   },
   {
     value: "audiobooks",
     icon: BookHeadphones,
     get label() {
-      return t("web.admin.common.libraryEditor.type.audiobooks");
+      return t("web.common.libraryType.audiobooks");
     },
   },
   {
     value: "ebooks",
     icon: BookOpen,
     get label() {
-      return t("web.admin.common.libraryEditor.type.ebooks");
+      return t("web.common.libraryType.ebooks");
     },
   },
   {
     value: "manga",
     icon: BookMarked,
     get label() {
-      return t("web.admin.common.libraryEditor.type.manga");
+      return t("web.common.libraryType.manga");
     },
   },
   {
     value: "podcasts",
     icon: Podcast,
     get label() {
-      return t("web.admin.common.libraryEditor.type.podcasts");
+      return t("web.common.libraryType.podcasts");
     },
   },
 ] as const;
