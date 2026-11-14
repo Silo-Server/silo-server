@@ -272,8 +272,17 @@ func TestProviderGatePausesAFailingProvider(t *testing.T) {
 		t.Fatalf("second outage pause ends %v, want doubled to %v", until, now.Add(2*providerOutagePause))
 	}
 
-	// Item-level failures say nothing about the provider being down.
+	// A per-item answer between transient failures breaks the streak.
 	now = now.Add(2 * providerOutagePause)
+	g.observe(ctx, "abm", down)
+	g.observe(ctx, "abm", down)
+	g.observe(ctx, "abm", status.Error(codes.NotFound, "no such ASIN"))
+	g.observe(ctx, "abm", down)
+	if _, paused := g.pausedUntil("abm"); paused {
+		t.Fatal("a NotFound answer did not break the failure streak")
+	}
+
+	// Item-level failures say nothing about the provider being down.
 	g.observe(ctx, "abm", nil)
 	for range providerOutageStreak {
 		g.observe(ctx, "abm", status.Error(codes.NotFound, "no such ASIN"))
@@ -286,5 +295,52 @@ func TestProviderGatePausesAFailingProvider(t *testing.T) {
 	}
 	if until, _ := g.pausedUntil("abm"); !until.Equal(now.Add(providerOutagePause)) {
 		t.Fatalf("pause after a recovery ends %v, want back to %v", until, now.Add(providerOutagePause))
+	}
+}
+
+// A book without provider IDs gets (nil, nil) from GetMetadata without any
+// request. That must not reset the failure streak a failing Search builds,
+// or an unavailable provider would never be paused.
+func TestSkippedMetadataLookupKeepsTheFailureStreak(t *testing.T) {
+	provider := &countingProvider{fakeAudiobookMetadataProvider: fakeAudiobookMetadataProvider{
+		slug: "abm", searchErr: status.Error(codes.Unavailable, "down"),
+	}}
+	e := &Enricher{resolveProviders: func(context.Context, int, string) ([]metadata.Provider, error) {
+		return []metadata.Provider{provider}, nil
+	}}
+	item := enrichmentItemRow{ContentID: "book", FolderID: 1, Title: "Book"}
+	for range providerOutageStreak {
+		_ = e.enrichItem(context.Background(), item)
+	}
+	if _, paused := e.gate.pausedUntil("abm"); !paused {
+		t.Fatal("provider not paused after a streak of failed searches")
+	}
+}
+
+// A book whose providers are all paused comes back when the first of them
+// can answer, not the last.
+func TestAllPausedReturnsTheEarliestPauseEnd(t *testing.T) {
+	now := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
+	g := &providerGate{now: func() time.Time { return now }}
+	ctx := context.Background()
+	g.observe(ctx, "short", status.Error(codes.ResourceExhausted, "busy"))
+	long, err := status.New(codes.ResourceExhausted, "busy").WithDetails(&errdetails.RetryInfo{RetryDelay: durationpb.New(48 * time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.observe(ctx, "long", long.Err())
+	providers := []metadata.Provider{
+		&fakeAudiobookMetadataProvider{slug: "short"},
+		&fakeAudiobookMetadataProvider{slug: "long"},
+	}
+	if until, ok := g.allPaused(providers); !ok || !until.Equal(now.Add(defaultProviderPause)) {
+		t.Fatalf("allPaused = (%v, %v), want the short pause end %v", until, ok, now.Add(defaultProviderPause))
+	}
+	errs := []error{
+		&providerPausedError{slug: "long", until: now.Add(48 * time.Hour)},
+		&providerPausedError{slug: "short", until: now.Add(defaultProviderPause)},
+	}
+	if until, ok := pausedOnly(errs); !ok || !until.Equal(now.Add(defaultProviderPause)) {
+		t.Fatalf("pausedOnly = (%v, %v), want the short pause end", until, ok)
 	}
 }

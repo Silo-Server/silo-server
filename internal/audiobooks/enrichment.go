@@ -210,15 +210,15 @@ func (e *Enricher) Run(ctx context.Context) (int, error) {
 	if e == nil || e.pool == nil || e.chainRepo == nil {
 		return 0, nil
 	}
-	lock, acquired, err := pglock.TryAcquire(ctx, e.pool, enrichSweepLock)
+	release, acquired, err := e.takeSweepLock(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("audiobook enrichment: take the sweep lock: %w", err)
+		return 0, err
 	}
 	if !acquired {
 		slog.InfoContext(ctx, "audiobook enrichment: another node is sweeping; skipping this run", "component", "audiobooks")
 		return 0, nil
 	}
-	defer func() { _ = lock.Release(context.WithoutCancel(ctx)) }()
+	defer release()
 
 	// The sweep summary compares against database time, not this node's clock.
 	var started time.Time
@@ -254,6 +254,25 @@ func (e *Enricher) Run(ctx context.Context) (int, error) {
 		"deferred", len(items)-summary.recorded(),
 	)
 	return summary.enriched, nil
+}
+
+// takeSweepLock takes the cluster-wide sweep lock and returns its release.
+// The session lock holds a pooled connection for the whole sweep, so a pool
+// of one connection would leave the sweep's own queries waiting forever. Such
+// a pool sweeps without the lock; the per-item claims still keep two nodes
+// from processing the same book.
+func (e *Enricher) takeSweepLock(ctx context.Context) (release func(), acquired bool, err error) {
+	if e.pool.Config().MaxConns < 2 {
+		return func() {}, true, nil
+	}
+	lock, acquired, err := pglock.TryAcquire(ctx, e.pool, enrichSweepLock)
+	if err != nil {
+		return nil, false, fmt.Errorf("audiobook enrichment: take the sweep lock: %w", err)
+	}
+	if !acquired {
+		return nil, false, nil
+	}
+	return func() { _ = lock.Release(context.WithoutCancel(ctx)) }, true, nil
 }
 
 // sweepSummary counts what a sweep recorded for its claimed items. It reads the
@@ -319,14 +338,14 @@ func (e *Enricher) HasPendingItems(ctx context.Context) (bool, error) {
 
 	// A sweep in progress on another node owns the work; this node's scheduled
 	// run would only find the lock taken.
-	lock, acquired, err := pglock.TryAcquire(ctx, e.pool, enrichSweepLock)
+	release, acquired, err := e.takeSweepLock(ctx)
 	if err != nil {
-		return false, fmt.Errorf("checking the audiobook enrichment sweep lock: %w", err)
+		return false, err
 	}
 	if !acquired {
 		return false, nil
 	}
-	_ = lock.Release(context.WithoutCancel(ctx))
+	release()
 
 	var exists bool
 	err = e.pool.QueryRow(ctx, `
@@ -819,6 +838,9 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 				"title", item.Title,
 				"item_author", item.Author,
 			)
+			if until, ok := pausedOnly(providerErrs); ok {
+				return e.deferItem(ctx, item, until)
+			}
 			if len(providerErrs) > 0 {
 				joined := errors.Join(providerErrs...)
 				e.recordFailure(ctx, item, classifyProviderError(joined), joined.Error())
@@ -1395,7 +1417,7 @@ func (e *Enricher) failOrDefer(ctx context.Context, item enrichmentItemRow, prov
 }
 
 // pausedOnly reports whether every error came from a paused provider, and the
-// latest pause end among them.
+// earliest pause end among them.
 func pausedOnly(errs []error) (time.Time, bool) {
 	var until time.Time
 	for _, err := range errs {
@@ -1403,7 +1425,7 @@ func pausedOnly(errs []error) (time.Time, bool) {
 		if !errors.As(err, &paused) {
 			return time.Time{}, false
 		}
-		if paused.until.After(until) {
+		if until.IsZero() || paused.until.Before(until) {
 			until = paused.until
 		}
 	}

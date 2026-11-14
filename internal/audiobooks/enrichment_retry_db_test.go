@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -198,6 +199,18 @@ func checkUnclaimedWriteCreatesRow(t *testing.T, ctx context.Context, pool *pgxp
 	if row := readRetryRow(t, ctx, pool, id); row.attempts != 1 || row.failures != 1 {
 		t.Fatalf("attempts=%d failures=%d, want 1 and 1", row.attempts, row.failures)
 	}
+
+	// last_error is kept for admins, so a secret echoed by a provider is masked.
+	if err := store.RecordFailure(ctx, id, "", EnrichmentErrorTransient, 0, "rpc error: desc = api_key=hunter2secret"); err != nil {
+		t.Fatal(err)
+	}
+	var lastError string
+	if err := pool.QueryRow(ctx, `SELECT last_error FROM audiobook_enrichment_state WHERE content_id = $1`, id).Scan(&lastError); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(lastError, "hunter2secret") {
+		t.Fatalf("last_error = %q, want the secret masked", lastError)
+	}
 }
 
 // newSweepTestLibrary creates an audiobook library and returns a function that
@@ -329,5 +342,34 @@ func TestAudiobookEnrichmentSweepRateLimitDB(t *testing.T) {
 	row = readRetryRow(t, ctx, pool, partial)
 	if row.attempts != 0 || row.outcome != nil || row.parkedFor == nil || *row.parkedFor != 3*time.Hour {
 		t.Fatalf("partly paused item: attempts=%d outcome=%v parked=%v, want deferred 3h with no outcome", row.attempts, row.outcome, row.parkedFor)
+	}
+	checkSweepRunsOnOneConnection(t, ctx, dsn, provider)
+}
+
+// The sweep lock holds a pooled connection, so a one-connection pool sweeps
+// without it instead of waiting on itself.
+func checkSweepRunsOnOneConnection(t *testing.T, ctx context.Context, dsn string, provider metadata.Provider) {
+	t.Helper()
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.MaxConns = 1
+	small, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer small.Close()
+	e := &Enricher{
+		pool: small, chainRepo: metadata.NewChainRepository(small), state: newEnrichmentStateStore(small),
+		batchSize: 1000, workers: 1,
+		resolveProviders: func(context.Context, int, string) ([]metadata.Provider, error) {
+			return []metadata.Provider{provider}, nil
+		},
+	}
+	runCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	if _, err := e.Run(runCtx); err != nil {
+		t.Fatalf("Run on a one-connection pool = %v, want it to finish", err)
 	}
 }

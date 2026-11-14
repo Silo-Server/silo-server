@@ -103,7 +103,7 @@ func (g *providerGate) latestPause(slugs []string) time.Time {
 // sweep for every other book.
 //
 // Consecutive transient failures pause the provider as down. Any answer,
-// including an empty one, clears that record.
+// including an empty one or a permanent per-item error, clears that record.
 func (g *providerGate) observe(ctx context.Context, slug string, err error) {
 	g.mu.Lock()
 	h := g.health(slug)
@@ -124,6 +124,9 @@ func (g *providerGate) observe(ctx context.Context, slug string, err error) {
 			pause = min(retryAfter, audiobookMaxRetryAfter)
 		}
 		until, reason = now.Add(pause), "rate limited"
+	case metadata.ProviderErrorPermanent:
+		// A per-item answer such as NotFound shows the provider is up.
+		h.failStreak, h.outages = 0, 0
 	case metadata.ProviderErrorTransient:
 		h.failStreak++
 		if h.failStreak >= providerOutageStreak {
@@ -152,22 +155,23 @@ func (g *providerGate) observe(ctx context.Context, slug string, err error) {
 }
 
 // allPaused reports whether every provider in the chain is paused, and the
-// latest pause end among them.
+// earliest pause end among them: the item is worth trying again as soon as
+// one of its providers can answer.
 func (g *providerGate) allPaused(providers []metadata.Provider) (time.Time, bool) {
 	if len(providers) == 0 {
 		return time.Time{}, false
 	}
-	var latest time.Time
+	var earliest time.Time
 	for _, p := range providers {
 		until, ok := g.pausedUntil(p.Slug())
 		if !ok {
 			return time.Time{}, false
 		}
-		if until.After(latest) {
-			latest = until
+		if earliest.IsZero() || until.Before(earliest) {
+			earliest = until
 		}
 	}
-	return latest, true
+	return earliest, true
 }
 
 // providerPausedError is what a paused provider returns instead of a call.
@@ -227,7 +231,12 @@ func (p gatedProvider) doGetMetadata(ctx context.Context, req metadata.MetadataR
 		return nil, &providerPausedError{slug: p.Slug(), until: until}
 	}
 	result, err := p.meta.GetMetadata(ctx, req)
-	p.gate.observe(ctx, p.Slug(), err)
+	// A nil error is not evidence of recovery: the plugin adapter answers
+	// (nil, nil) without a request when the item has no provider IDs yet, so
+	// only Search answers clear the failure streak.
+	if err != nil {
+		p.gate.observe(ctx, p.Slug(), err)
+	}
 	return result, err
 }
 

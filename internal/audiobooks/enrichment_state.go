@@ -9,6 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
 var ErrAudiobookEnrichmentClaimLost = errors.New("audiobook enrichment claim lost")
@@ -283,6 +285,9 @@ func (s *enrichmentStateStore) RecordFailure(
 	// helps nobody, and a byte-index slice can split a UTF-8 sequence --
 	// Postgres rejects invalid UTF-8, which would silently fail the whole
 	// failure/backoff write for that call.
+	// last_error is shown to admins and kept in the database; mask secrets a
+	// provider may have echoed into its error text, as the log handler does.
+	cause = logredact.SanitizeText(logredact.RedactSecretAssignments(cause))
 	const maxCause = 500
 	if len(cause) > maxCause {
 		cause = strings.ToValidUTF8(cause[:maxCause], "")

@@ -13,10 +13,11 @@ ALTER TABLE audiobook_enrichment_state
     ADD COLUMN IF NOT EXISTS failures integer NOT NULL DEFAULT 0;
 
 -- A no_match row's attempts was its streak. A row with no outcome and an
--- error class was mid-failure; its attempts approximates the failure count.
+-- error class last failed, but its attempts also counted earlier no-matches
+-- and skips, so it starts the new failure count at one.
 UPDATE audiobook_enrichment_state
 SET no_matches = CASE WHEN outcome = 'no_match' THEN attempts ELSE 0 END,
-    failures   = CASE WHEN outcome IS NULL AND last_error_class IS NOT NULL THEN attempts ELSE 0 END
+    failures   = CASE WHEN outcome IS NULL AND last_error_class IS NOT NULL THEN 1 ELSE 0 END
 WHERE attempts > 0;
 
 -- +goose Down
@@ -25,6 +26,12 @@ WHERE attempts > 0;
 UPDATE audiobook_enrichment_state
 SET outcome = NULL, completed_at = NULL
 WHERE outcome = 'failed';
+
+-- The older code reads attempts as the clean no-match count. Restore that
+-- meaning before the new counters are dropped.
+UPDATE audiobook_enrichment_state
+SET attempts = no_matches
+WHERE outcome = 'no_match';
 
 ALTER TABLE audiobook_enrichment_state
     DROP COLUMN IF EXISTS failures,
