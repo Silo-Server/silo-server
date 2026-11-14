@@ -63,7 +63,7 @@ import {
 } from "lucide-react";
 import { formatDateTime, formatTime } from "@/lib/datetime";
 import { formatLocale } from "@/lib/appLocale";
-import { codeNumber, englishText, numberText, type TextValues, type Translate, useT } from "@/i18n";
+import { englishText, numberText, type TextValues, type Translate, useT } from "@/i18n";
 import type { MessageKey } from "@/locales/keys";
 
 type SortField = "username" | "media" | "method" | "node" | "started";
@@ -1496,12 +1496,8 @@ function getDisplayTitle(
 
 function getDisplaySubtitle(session: AdminSession, t: Translate): string | null {
   if (session.series_name && session.season_number != null && session.episode_number != null) {
-    // Same episode line as the dashboard's Now Playing card.
-    return t("web.admin.dashboard.widgets.nowPlaying.episodeLineWithSeries", {
-      season: codeNumber(session.season_number),
-      episode: codeNumber(session.episode_number),
-      series: session.series_name,
-    });
+    const ep = `S${session.season_number}E${session.episode_number}`;
+    return session.series_name ? `${ep} · ${session.series_name}` : ep;
   }
   if (session.media_type === "movie") return t("web.common.activity.subtitle.movie");
   if (session.media_type === "series") return t("web.common.activity.subtitle.series");
