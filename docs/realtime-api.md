@@ -203,7 +203,8 @@ server sends them. Each event's `data` is:
   Absent when no server has a live row for it.
 - `end_reason` and `history` on `session.stopped`: the history entry the end
   recorded, as `GET /api/v2/admin/playback-history` returns it. Its figures are the
-  stored ones, so a later history read agrees with the event.
+  stored ones, so a later history read agrees with the event, except
+  `api_served_bytes`, which can still grow for up to a minute after the end.
 
 The envelope's `event_id` is `playback-lifecycle:<seq>`.
 
@@ -225,10 +226,11 @@ Delivery is at most once and nothing is replayed. A monitor reconciles:
    the session is live and whether it is paused. A row and an event with equal numbers
    carry the same state. Position and stream fields are observations: take them from
    the most recently received record.
-3. A history entry with `end_reason` is final. When it carries `lifecycle_seq`, that
-   number is higher than any its live session had; an entry without one was recorded
-   before lifecycle numbers existed and counts as number 0 for ordering, but is final
-   all the same.
+3. A history entry with `end_reason` is final, except that its `api_served_bytes` can
+   still grow for up to a minute. When it carries `lifecycle_seq`, that number is
+   higher than any its live session had; an entry without one was recorded before
+   lifecycle numbers existed and counts as number 0 for ordering, but is final all the
+   same.
 4. A session missing from a complete list, with no ended history entry yet, is moving
    between servers or about to be ended by the cluster sweep. Keep it open and read
    `GET /api/v2/admin/playback-history?ended_after=…` until its entry appears; every

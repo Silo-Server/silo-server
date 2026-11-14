@@ -1,5 +1,5 @@
 {
-  "revision": "1966162d2977d6d9b3adbd4bf5e7af19e29a0e73c17f58f9d4cf71d7f9d62c56",
+  "revision": "153d3f56970f6612748caa8f3c1ad28407208e431e5290aca80a07a7135817c0",
   "state": "available",
   "allowed": true,
   "available": true,
@@ -17,5 +17,6 @@
     "aborted",
     "replaced"
   ],
-  "lifecycle_seq": true
+  "lifecycle_seq": true,
+  "api_served_bytes": true
 }

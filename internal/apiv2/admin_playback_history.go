@@ -68,7 +68,7 @@ type AdminPlaybackHistoryEntry struct {
 	AudioDecision        *string  `json:"audio_decision" nullable:"true" enum:"direct,remux,transcode" doc:"How the audio stream was delivered when the play ended, with the video_decision values. Null when unknown"`
 	EndReason            *string  `json:"end_reason" nullable:"true" enum:"stopped,terminated,expired,aborted,replaced" doc:"Why the attempt ended: stopped by the viewer's client, terminated by an administrator, expired after the client went quiet, aborted by the server, or replaced by a new session for the same play (a Jellyfin client switched play method). Null when unknown, which includes every attempt recorded before it existed and a server teardown the client never recovered from"`
 	LifecycleSeq         *int64   `json:"lifecycle_seq" nullable:"true" doc:"Sequence number of the end this row records on the sessions channel: higher than every earlier number for the session, so the row supersedes any live row or session.* event with a lower one. Null on rows recorded before lifecycle numbers existed"`
-	APIServedBytes       *int64   `json:"api_served_bytes" nullable:"true" doc:"Viewer bytes the API servers sent for the play, counted a minute at a time while it played. Bytes a stream node or proxy sent the viewer directly are not included. Null when no count was recorded for the play: the API servers sent it nothing, or it played before counting existed, so null does not mean the play used no data"`
+	APIServedBytes       *int64   `json:"api_served_bytes" nullable:"true" doc:"Viewer bytes the API servers sent for the play, counted a minute at a time while it played. Bytes a stream node or proxy sent the viewer directly are not included. Null when no count was recorded for the play: the API servers sent it nothing, or it played before counting existed, so null does not mean the play used no data. Each API server adds its last bytes at its next sample, up to a minute after the play ends, so the figure can still grow after the entry is recorded"`
 }
 
 // AdminPlaybackHistoryCollection is the named envelope the contract carries.
@@ -101,6 +101,7 @@ type AdminPlaybackHistoryCapabilities struct {
 	EndReason        bool     `json:"end_reason" doc:"Entries carry end_reason"`
 	EndReasonValues  []string `json:"end_reason_values" doc:"Values end_reason may take"`
 	LifecycleSeq     bool     `json:"lifecycle_seq" doc:"Entries carry lifecycle_seq"`
+	APIServedBytes   bool     `json:"api_served_bytes" doc:"Entries carry api_served_bytes"`
 }
 
 const opListAdminPlaybackHistory = "listAdminPlaybackHistory"
@@ -127,6 +128,7 @@ func registerAdminPlaybackHistory(reg *Registry) {
 		out.Body.StreamDecisions = available
 		out.Body.EndReason = available
 		out.Body.LifecycleSeq = available
+		out.Body.APIServedBytes = available
 		out.Body.EndReasonValues = make([]string, len(handlers.PlaybackEndReasons))
 		for i, reason := range handlers.PlaybackEndReasons {
 			out.Body.EndReasonValues[i] = string(reason)

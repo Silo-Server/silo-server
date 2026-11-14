@@ -19446,6 +19446,8 @@ export interface components {
     AdminPlaybackHistoryCapabilities: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
+      /** @description Entries carry api_served_bytes */
+      api_served_bytes: boolean;
       available: boolean;
       /** @description Entries carry client_name and client_version */
       client_identity: boolean;
@@ -19482,7 +19484,7 @@ export interface components {
     AdminPlaybackHistoryEntry: {
       /**
        * Format: int64
-       * @description Viewer bytes the API servers sent for the play, counted a minute at a time while it played. Bytes a stream node or proxy sent the viewer directly are not included. Null when no count was recorded for the play: the API servers sent it nothing, or it played before counting existed, so null does not mean the play used no data
+       * @description Viewer bytes the API servers sent for the play, counted a minute at a time while it played. Bytes a stream node or proxy sent the viewer directly are not included. Null when no count was recorded for the play: the API servers sent it nothing, or it played before counting existed, so null does not mean the play used no data. Each API server adds its last bytes at its next sample, up to a minute after the play ends, so the figure can still grow after the entry is recorded
        */
       api_served_bytes: number | null;
       /**

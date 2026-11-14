@@ -1689,10 +1689,19 @@ null when unknown, which includes every attempt recorded before it existed; `end
 is also null for a server teardown the client never recovered from (an encoder exit, a
 withdrawn plan).
 
+`api_served_bytes` is the viewer bytes the API servers sent for the play. The dashboard
+sampler on each API server adds the play's growth in that server's stream telemetry once a
+minute to `playback_session_api_egress`, keyed by session id, so replicas add to one total
+and a restart loses at most the bytes since the last sample. Bytes a stream node or proxy
+sent the viewer directly, and bytes served through download routes, are not counted. Each
+server adds its last bytes at its next sample, so the figure can still grow for up to a
+minute after the entry is recorded. It is null when no count was recorded, which includes
+every attempt recorded before counting existed; null does not mean the play used no data.
+
 `GET /api/v2/admin/playback-history/capabilities` reports `available`, `ended_before`,
 `watch_measurement`, `client_ip`, `device_identity`, `client_identity`,
-`stream_decisions`, `end_reason`, `end_reason_values` and `lifecycle_seq`, for feature
-detection.
+`stream_decisions`, `end_reason`, `end_reason_values`, `lifecycle_seq` and
+`api_served_bytes`, for feature detection.
 
 The administrator history page and the user detail watch-history tab read this route
 under the authority captured when the query was created, keyed by an opaque authority

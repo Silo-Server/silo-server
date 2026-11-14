@@ -6616,7 +6616,7 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"8e5e419f09c4d6506da92cbfdc72d8ec4f2ae7ca528d216366c0adf84abb8e43\""
+        "ETag": "\"f972616cd7345e46aad847fe8f78d7c5f258f2695cea7bfcde149c9946f04d59\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminPlaybackHistoryCapabilities",
