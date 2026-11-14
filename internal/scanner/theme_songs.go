@@ -122,7 +122,7 @@ func (d *themeDiscovery) ancestorRules(directory, root string) themeIgnoreState 
 		state = d.ancestorRules(filepath.Dir(directory), root)
 	}
 	if state.err == nil && !state.ignored {
-		if ignoreRulesMatch(state.rules, directory, true) {
+		if (directory != root && SkippedDirName(filepath.Base(directory))) || ignoreRulesMatch(state.rules, directory, true) {
 			state.ignored = true
 		} else {
 			var entries []os.DirEntry
@@ -148,9 +148,15 @@ func (d *themeDiscovery) discover(ctx context.Context, directory string, cached 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	root := scopeLibraryRoot(directory, d.roots)
+	// A full scan walks a root nested in another as part of the outer one
+	// (compactScanRoots), so the outer root's ignore files and skipped folder
+	// names apply below the nested root too.
+	root := scopeLibraryRoot(directory, compactScanRoots(d.roots))
 	var state themeIgnoreState
 	if root != "" && root != directory {
+		if SkippedDirName(filepath.Base(directory)) {
+			return []themesongs.File{}, nil
+		}
 		state = d.ancestorRules(filepath.Dir(directory), root)
 	}
 	rules, ignored, err := state.rules, state.ignored, state.err
