@@ -207,6 +207,49 @@ func TestAutoscanMediaUpdatedIgnoresUnsupportedSidecars(t *testing.T) {
 	}
 }
 
+// A file the library's ignore files exclude is dropped from the batch like an
+// unmanaged path, so the rest of the batch still scans and the client sees
+// success.
+func TestAutoscanMediaUpdatedSkipsIgnoredFiles(t *testing.T) {
+	root := t.TempDir()
+	ignoredPath := filepath.Join(root, "Movie.sample.mkv")
+	moviePath := filepath.Join(root, "Movie (2024).mkv")
+	for path, content := range map[string]string{
+		filepath.Join(root, ".siloignore"): "*.sample.mkv\n",
+		ignoredPath:                        "test",
+		moviePath:                          "test",
+	} {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	queue := &fakeAutoscanQueue{}
+	handler := NewAutoscanHandler(&fakeAutoscanFolders{folders: []*models.MediaFolder{{
+		ID:      8,
+		Name:    "Movies",
+		Type:    "movie",
+		Enabled: true,
+		Paths:   []string{root},
+	}}}, queue, NewResourceIDCodec(), nil)
+
+	data, err := json.Marshal(map[string]any{"Updates": []map[string]string{
+		{"path": ignoredPath, "updateType": "Created"},
+		{"path": moviePath, "updateType": "Created"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	handler.HandleMediaUpdated(rec, httptest.NewRequest(http.MethodPost, "/Library/Media/Updated", bytes.NewReader(data)))
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(queue.calls) != 1 || queue.calls[0].mode != "file" || queue.calls[0].path != moviePath {
+		t.Fatalf("expected only the unignored file scanned, got %#v", queue.calls)
+	}
+}
+
 func TestAutoscanMediaUpdatedRootSidecarDoesNotScanLibrary(t *testing.T) {
 	root := t.TempDir()
 	anchorPath := filepath.Join(root, ".plexignore")

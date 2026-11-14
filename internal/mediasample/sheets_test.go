@@ -200,7 +200,7 @@ func TestBuildSheetsArgs(t *testing.T) {
 		t.Fatal(err)
 	}
 	want = []string{"-hide_banner", "-nostdin", "-loglevel", "repeat+info", "-threads", "2", "-filter_threads", "2",
-		"-skip_frame:v", "nokey", "-ss", "0", "-t", "15.04", "-i", "/media/a.mkv"}
+		"-skip_frame:v", "nokey", "-fflags", "+genpts", "-ss", "0", "-t", "15.04", "-i", "/media/a.mkv"}
 	want = append(want, "-map", "0:V:0", "-c", "copy", "-f", "framecrc", "packets.framecrc")
 	want = append(want, output...)
 	if !slices.Equal(args, want) || list != nil {
@@ -614,23 +614,16 @@ func TestSheetPacketTimingKeepsPresentationExtent(t *testing.T) {
 		end     float64
 		hasTime bool
 		wantErr bool
-		// dts is the assembler's dtsTiming.
-		dts bool
 	}{
-		{"reordered PTS", []string{"#tb 0: 1/90000", "0, 0, 180000, 45000, 1, 0x0", "0, 45000, 45000, 45000, 1, 0x0"}, 14.5, true, false, false},
-		{"missing numeric PTS uses DTS", []string{"#tb 0: 1/1000", "0, 0, -9223372036854775808, 1000, 1, 0x0"}, 13, true, false, true},
-		{"missing text PTS uses DTS", []string{"#tb 0: 1/1000", "0, 0, NOPTS, 1000, 1, 0x0"}, 13, true, false, true},
-		{"packed XviD without PTS", []string{"#tb 0: 1/25", "0, 0, -9223372036854775808, 1, 23436, 0x0", "0, 1, -9223372036854775808, 1, 11203, 0x0", "0, 2, -9223372036854775808, 1, 6, 0x0"}, 12.12, true, false, true},
-		{"DTS does not stretch PTS extent", []string{"#tb 0: 1/90000", "0, 0, 180000, 45000, 1, 0x0", "0, 45000, NOPTS, 45000, 1, 0x0"}, 14.5, true, false, true},
-		{"missing PTS without low delay", []string{"#tb 0: 1/1000", "0, 0, -9223372036854775808, 1000, 1, 0x0", "0, 1000, NOPTS, 1000, 1, 0x0"}, 0, false, false, false},
-		{"missing PTS and DTS", []string{"#tb 0: 1/1000", "0, -9223372036854775808, -9223372036854775808, 1000, 1, 0x0"}, 0, false, false, true},
-		{"negative duration", []string{"#tb 0: 1/1000", "0, 0, 1000, -1, 1, 0x0"}, 0, false, false, false},
-		{"invalid time base", []string{"#tb 0: 1/0"}, 0, false, true, false},
-		{"packet before time base", []string{"0, 0, 1000, 1000, 1, 0x0"}, 0, false, true, false},
+		{"reordered PTS", []string{"#tb 0: 1/90000", "0, 0, 180000, 45000, 1, 0x0", "0, 45000, 45000, 45000, 1, 0x0"}, 14.5, true, false},
+		{"video without PTS", []string{"#tb 0: 1/1000", "0, 0, -9223372036854775808, 1000, 1, 0x0", "0, 1000, NOPTS, 1000, 1, 0x0"}, 0, false, false},
+		{"negative duration", []string{"#tb 0: 1/1000", "0, 0, 1000, -1, 1, 0x0"}, 0, false, false},
+		{"invalid time base", []string{"#tb 0: 1/0"}, 0, false, true},
+		{"packet before time base", []string{"0, 0, 1000, 1000, 1, 0x0"}, 0, false, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			a := &sheetAssembler{offset: 12, dtsTiming: tt.dts}
+			a := &sheetAssembler{offset: 12}
 			for _, line := range tt.lines {
 				a.packetLine(line)
 			}

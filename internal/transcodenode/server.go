@@ -624,6 +624,7 @@ func (s *Server) restartSegmentLocked(
 	sessionID string,
 	session *playback.TranscodeSession,
 	segNum int,
+	seenGeneration time.Time,
 ) (playback.SegmentRecoveryTarget, bool, error) {
 	unlock := s.lockSessionLifecycle(sessionID)
 	defer unlock()
@@ -633,7 +634,7 @@ func (s *Server) restartSegmentLocked(
 	if !ok || live != session {
 		return playback.SegmentRecoveryTarget{}, false, playback.ErrSessionSuperseded
 	}
-	return session.RestartSegment(ctx, segNum)
+	return session.RestartSegmentSince(ctx, segNum, seenGeneration)
 }
 
 // NewServer creates a new transcode server.
@@ -2217,6 +2218,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	outputDir := s.sessionOutputDir(sessionID)
 	opts := card.TranscodeOpts(outputDir, cfg.Playback.FFmpegPath, s.ffmpegSink)
 	opts.SessionID = sessionID
+	opts.Reconstructed = true
 	// Recipe cards preserve the original launch tuning, but reconstruction must
 	// retain the normal manifest cushion rather than the fresh-start fast path.
 	opts.FastStart = false
@@ -2274,6 +2276,9 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 		return nil, r.Context().Err()
 	}
 	defer release()
+	// Past admission the rebuild serves every request waiting on it, so its
+	// probes and its start must not end with the request that triggered it.
+	rebuildCtx := context.WithoutCancel(r.Context())
 
 	// Resume near the segment the client is actually requesting. The card records
 	// the original start; if the client has played past it, spawning at the old
@@ -2300,16 +2305,16 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	// it moves to CPU decoding. An accel StartupRetryHWAccel would change
 	// (VideoToolbox, or QSV/VAAPI without a render device) is not waited on
 	// here: it keeps the software-encode retry below, which has its own wait.
-	pipeline := s.autoTranscodePipeline(r.Context(), opts)
+	pipeline := s.autoTranscodePipeline(rebuildCtx, opts)
 	retryAccel := opts.HWAccel
 	if !pipeline.Enabled() {
 		retryAccel = playback.StartupRetryHWAccel(opts)
 	}
 	var session *playback.TranscodeSession
 	if retryAccel != opts.HWAccel {
-		session, err = playback.StartTranscode(r.Context(), opts)
+		session, err = playback.StartTranscode(rebuildCtx, opts)
 	} else {
-		session, err = playback.StartReconstructTranscode(r.Context(), pipeline, playback.TranscodeStartup{Timeout: playback.ManifestStartupTimeout})
+		session, err = playback.StartReconstructTranscode(rebuildCtx, pipeline, playback.TranscodeStartup{Timeout: playback.ManifestStartupTimeout})
 	}
 	if err != nil {
 		slog.ErrorContext(r.Context(), "transcode node reconstruct start failed", "component", "transcodenode", "error", err,
@@ -2335,7 +2340,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 					"component", "transcodenode", "error", waitErr, "session", sessionID, "playback_session_id", sessionID)
 				retryOpts := opts
 				retryOpts.HWAccel = retryAccel
-				session, err = playback.StartTranscode(context.WithoutCancel(r.Context()), retryOpts)
+				session, err = playback.StartTranscode(rebuildCtx, retryOpts)
 				if err != nil {
 					slog.ErrorContext(r.Context(), "transcode node reconstruct retry failed", "component", "transcodenode", "error", err,
 						"session", sessionID, "playback_session_id", sessionID)
@@ -3076,6 +3081,7 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 					sessionID,
 					session,
 					segNum,
+					decision.Progress.GenerationStartedAt,
 				)
 				// A restart skipped because the request ended is not a failure.
 				if restartErr != nil && !errors.Is(restartErr, playback.ErrManifestNotReady) && !errors.Is(restartErr, r.Context().Err()) {

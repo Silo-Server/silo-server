@@ -245,7 +245,7 @@ override(base, _) := base if {`,
 // when it loads the same generation.
 func TestEngineReloadForgetsRememberedDecisions(t *testing.T) {
 	ctx := context.Background()
-	engine, err := NewEngine(ctx, WithRevision(7))
+	engine, err := NewEngine(ctx, WithRevision(7), WithEvalTimeout(time.Minute))
 	if err != nil {
 		t.Fatalf("NewEngine() error: %v", err)
 	}
@@ -310,7 +310,7 @@ func TestDecisionMemoEvictsLeastRecentlyUsed(t *testing.T) {
 // on its own.
 func TestEngineMemoKeysOnRequestTimeWhenPolicyReadsIt(t *testing.T) {
 	ctx := context.Background()
-	engine, err := NewEngine(ctx)
+	engine, err := NewEngine(ctx, WithEvalTimeout(time.Minute))
 	if err != nil {
 		t.Fatalf("NewEngine() error: %v", err)
 	}

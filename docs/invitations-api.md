@@ -10,14 +10,30 @@ and claim links. No raw claim token is retained for response replay.
 | Method | Path under `/api/v2` | Behavior |
 | --- | --- | --- |
 | GET | `/invitations/capabilities` | Public support and profile-store capability |
-| GET | `/invitations/{token}` | Claim-screen details for an eligible token |
-| POST | `/invitations/{token}/accept` | Atomically create the account; report login separately |
+| POST | `/invitations/lookup` | Claim-screen details for an eligible token, sent in the body |
+| POST | `/invitations/accept` | Atomically create the account; report login separately |
+| GET | `/invitations/{token}` | Deprecated path form of the lookup |
+| POST | `/invitations/{token}/accept` | Deprecated path form of acceptance |
 | GET | `/admin/invitations/capabilities` | Administrator support and profile-store capability |
 | GET | `/admin/invitations` | Bounded administrator history page |
 | GET | `/admin/invitations/{id}` | Administrator metadata, without a claim token or digest |
 | POST | `/admin/invitations` | Create and attempt delivery of a fresh invitation |
 | POST | `/admin/invitations/{id}/resend` | Replace the exact pending/expired source with a new invitation |
 | DELETE | `/admin/invitations/{id}` | Idempotently revoke that link; never delete an account |
+
+A claim link is `/invite#{token}`: the token is the URL fragment, which a browser
+never sends to the server or in a `Referer` header, so reverse proxies in front of
+Silo do not log it. `lookupInvitationLink` and `acceptInvitationLink` take it as
+`token` in the JSON body for the same reason. The path forms, `lookupInvitation`
+and `acceptInvitation`, behave identically but put the token in the request line.
+They are deprecated, send the `Deprecation` and `Link` headers, and will be removed
+before `/api/v2` locks, once released clients use the body forms. A link issued in
+the old `/invite/{token}` form still opens.
+
+The capability's `token_in_body` is true on a server that has the body forms. A
+server that predates them omits the field, so a client reads an absent value as
+false and uses the path forms there. It must not take a `404` from a body
+operation to mean an older server: `404` is the answer for a dead link.
 
 Capabilities use the shared `revision` and `state` head, plus `default_profile`
 and `profileless`. `default_profile` reflects the actual selected provider's

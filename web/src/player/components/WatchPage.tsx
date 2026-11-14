@@ -8,6 +8,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { PlayerFileVersion, PlayerPlaybackStateChange, WatchPageProps } from "../types";
 import type { PlaybackRealtimeEventEnvelope } from "../realtime-protocol";
 import { usePlaybackSession } from "../hooks/usePlaybackSession";
+import { useMarkerChangeGuard } from "../hooks/useMarkerChangeGuard";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
 import { resolvePlayableSubtitles } from "../utils/playableSubtitles";
 import { patchVersionMarkers, resolveActiveVersionMarkers } from "../utils/watchPageMarkers";
@@ -474,11 +475,17 @@ function WatchPagePlayer({
     }
     chapterRefreshAttemptsRef.current.add(session.mediaFileId);
 
-    void queryClient.fetchQuery({
-      queryKey: itemKeys.watchDetail(contentId, fileId, libraryId),
-      queryFn: () => fetchWatchDetail(contentId, fileId, libraryId),
-      staleTime: 0,
-    });
+    void queryClient
+      .fetchQuery({
+        queryKey: itemKeys.watchDetail(contentId, fileId, libraryId),
+        queryFn: () => fetchWatchDetail(contentId, fileId, libraryId),
+        staleTime: 0,
+      })
+      .catch(() => {
+        // The result arrives through the versions prop. A failed read leaves
+        // the chapters as they are. A read that a marker change restarted
+        // rejects here only if this call joined it; its replacement still runs.
+      });
   }, [
     contentId,
     fileId,
@@ -491,47 +498,17 @@ function WatchPagePlayer({
     playbackVersions,
   ]);
 
-  useEffect(() => {
-    if (
-      realtimeConnectionState !== "connected" ||
-      !session.sessionId ||
-      !session.mediaFileId ||
-      session.loading ||
-      session.replacing
-    ) {
-      return;
-    }
-
-    const activeFileId = session.mediaFileId;
-    let cancelled = false;
-    void queryClient
-      .fetchQuery({
-        queryKey: itemKeys.watchDetail(contentId, activeFileId, libraryId),
-        queryFn: () => fetchWatchDetail(contentId, activeFileId, libraryId),
-        staleTime: 0,
-      })
-      .then((detail) => {
-        if (!cancelled) {
-          setPlaybackVersions(detail.versions);
-        }
-      })
-      .catch(() => {
-        // Reconcile again on the next connection; keep the current markers meanwhile.
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
+  const applyMarkerChange = useMarkerChangeGuard({
     contentId,
+    fileId,
     libraryId,
-    queryClient,
-    realtimeConnectionState,
-    session.loading,
-    session.mediaFileId,
-    session.replacing,
-    session.sessionId,
-  ]);
+    versions,
+    setPlaybackVersions,
+    connected: realtimeConnectionState === "connected",
+    sessionId: session.sessionId,
+    activeFileId: session.mediaFileId,
+    busy: session.loading || session.replacing,
+  });
 
   const handleRealtimeEvent = useCallback(
     (event: PlaybackRealtimeEventEnvelope) => {
@@ -595,7 +572,7 @@ function WatchPagePlayer({
         return;
       }
 
-      setPlaybackVersions((current) =>
+      applyMarkerChange((current) =>
         patchVersionMarkers(
           current,
           file_id,
@@ -607,7 +584,7 @@ function WatchPagePlayer({
         ),
       );
     },
-    [session.mediaFileId, session.sessionId],
+    [applyMarkerChange, session.mediaFileId, session.sessionId],
   );
 
   // The plan is the player's contract: without one there is no transport, no
@@ -745,11 +722,11 @@ function WatchPagePlayer({
       markerSegments={selectedVersion?.marker_segments}
       autoPlayNextPreview={autoPlayNextPreview}
       canEditMarkers={canEditMarkers}
-      onMarkersEdited={(fileId, markers) =>
-        setPlaybackVersions((current) =>
+      onMarkersEdited={(editedFileId, markers) =>
+        applyMarkerChange((current) =>
           patchVersionMarkers(
             current,
-            fileId,
+            editedFileId,
             markers.intro,
             markers.credits,
             markers.recap,

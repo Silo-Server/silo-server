@@ -162,7 +162,7 @@ their own advertisements. `hdr_to_sdr_tonemap` additionally requires an
 administrator-enabled hardware or software policy and a successful device-level
 smoke probe for the applicable PQ, HLG, or SDR fallback-base source kind, or,
 for Dolby Vision Profile 5 and compatibility ID `0`, the `dolby_vision` kind,
-which only RPU-applying executors smoke, or, for PQ tagged full range, the
+which only RPU-applying executors smoke, or, for PQ whose decoded range is full, the
 `pq_full_range` kind, which only the software executor smokes. A client must
 not assume a transformation exists because this document names it.
 
@@ -337,7 +337,20 @@ on the 45-second window. A session is never ended within **90 seconds** of its
 another server, however long it has been idle: a player that cannot start a
 plan has no position to report, and this window lets it wait out a startup
 timeout of up to 60 seconds and still ask for the next fallback. The windows are
-fixed. These count as activity:
+fixed.
+
+A paused session counts toward the account's stream limit only while it has
+shown activity within the last **2 minutes** (or is inside the 90-second startup
+window). A client that keeps reporting progress stays inside it, even from a
+background browser tab whose timers are throttled to about once a minute. Past
+that it keeps its 30-minute paused grace, so a client that comes back can still
+resume, but it no longer holds a stream slot: a player closed while paused frees
+its slot within about two minutes. It still counts toward the transcode limit
+until it ends, because its encoder is kept for it. Limits are checked when a
+stream starts: a paused session that reports again after another stream took
+its slot keeps playing, even if the account is then over its stream limit.
+
+These count as activity:
 
 | Activity | Note |
 | --- | --- |
@@ -615,9 +628,16 @@ within its budget and keeps a recorded status only when the reprobed stream
 is unchanged. A failed read is never recorded as "not HDR10+", so a
 misbehaving ffprobe cannot mark the library that way. The
 `backfill_hdr10_plus` task, at startup and daily, reads the first frame of the
-unchecked files and sets only `hdr10_plus` and, for an HDR10+ file,
-`video_range_type`, writing only while the file and the track still match the
-row it read.
+unchecked files and sets `hdr10_plus`, for an HDR10+ file `video_range_type`,
+and `frame_color_range` (below), writing only while the file and the track
+still match the row it read.
+
+The same read records the frame's color range as `frame_color_range`
+(`unknown` when the frame carries none). The decoder takes the range from the
+bitstream before the container's tag, so the two can disagree; `color_range`
+keeps the tag, which the live stream probe at transcode start compares. A PQ
+track checked for HDR10+ before the range was recorded is read once more by
+the same task, which adds only `frame_color_range`.
 
 A client may additionally report the raw display probe in `output.display`
 with an evidence tier:
@@ -1804,18 +1824,23 @@ moves with neither: on a default x264 source the lead is two frames. Each
 copy generation therefore also writes its first video packet, unshifted, as
 `framecrc` beside its cue file (`subtitles_N_video.crc`); the shift is the
 first segment's observed start less that packet's time, read with O, and
-recorded with it. The packet's record is read before the segment; after three
+recorded with it. A keyframe-planned restart's seek can land on a keyframe
+before its first segment, so its packet's time is moved forward by the
+planned time between that keyframe and the segment's start. The packet's
+record is read before the segment; after three
 reads that find none, O is taken without a shift. A segment whose cues are not produced yet is waited for
 while FFmpeg runs: as long as its video segment would be (up to 30 s) when the
 running or restarting stream is about to reach it, or is a keyframe-planned
-copy, which runs on to every segment; otherwise a few seconds. It is then
+copy, whose video request either waits for FFmpeg or restarts it at the
+segment; otherwise a few seconds. It is then
 answered as a valid WebVTT document with no cues, which a player keeps, so
 the longer wait is what keeps cues after a slow seek restart. A
 keyframe-planned copy is the exception: like its video segment, a subtitle
 segment FFmpeg has not reached counts as the player's position for the
 throttle while it waits, and if FFmpeg has still not reached it after the
 wait it answers `404`, which the player can retry, rather than an empty
-document it would keep. Subtitle
+document it would keep. That holds after FFmpeg has exited too, since the
+segment's video request restarts it there, unless the session is closing. Subtitle
 segments never return `503` and never trigger a seek restart. Each seek restart writes a new cue file and
 keeps the earlier ones, so a backward seek into output an earlier generation
 produced keeps its cues. On FFmpeg's own playlist a generation keeps the
@@ -2251,6 +2276,14 @@ webOS) drop to HDR10 for `dvh1`. There is no MPEG-TS or progressive form.
 `video_to_h264` only when `playback.allow_hevc_encoding` is on and the client's
 HLS delivery lists HEVC and can decode that output.
 
+`video_to_h264` and `video_to_hevc` deinterlace the frames an executor decodes
+on the CPU: FFmpeg's `bwdif` converts each frame the decoder flags as interlaced
+and passes the others through, one output frame per input frame. Frames from a
+hardware decoder, and every tone-mapped transcode, are encoded as decoded, so
+an interlaced source can still reach the client with both fields in each frame.
+The recipe versions did not change for this: an executor from before it serves
+the same plans and differs only in the pictures of interlaced sources.
+
 `audio_to_aac` recipe version 4 treats the selected source channel count as a
 byte-affecting input, as version 2 began doing, and passes every AAC encode,
 remuxes included, through `aresample=async=1` so it keeps a continuous sample
@@ -2359,10 +2392,13 @@ other kinds cached. A `tonemap_opencl` or `tonemap_cuda` build that refuses it
 converts no HDR kind, because their HDR graphs always set the option. A
 `dolby_vision` smoke that fails for any other reason is
 retried after five minutes instead of being cached.
-A PQ base whose stream is tagged full range (`pc`) resolves to the
-`pq_full_range` kind. Every other kind's graph declares limited-range input;
-this one keeps each decoded frame's own range, because a container can tag a
-stream full range while its bitstream codes limited levels. Only the software
+A PQ base whose range is full (`pc`) resolves to the `pq_full_range` kind.
+The range is the first decoded frame's `frame_color_range` when it is
+explicit, and the stream tag otherwise (a track whose frame was not read
+yet). A full-range bitstream under a limited-range tag is therefore
+`pq_full_range`, and a limited-range bitstream under a full-range tag is
+`pq`. Every other kind's graph declares limited-range input; this one keeps
+each decoded frame's own range. Only the software
 executor advertises it, because its `zscale` and `tonemapx` stages read that
 range; the hardware filters have not been shown to, so a hardware-only policy
 refuses these sources with `hdr_transcode_unsupported`. The software
