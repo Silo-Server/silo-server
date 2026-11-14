@@ -16,6 +16,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/audiobooks/abs"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/database/pglock"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 )
@@ -166,8 +167,62 @@ func (s *ABSMediaStore) idsInALibrary(ctx context.Context, contentIDs []string) 
 // here via SQL, then load full rows via GetByIDs so the scan logic stays
 // in the catalog package.
 func (s *ABSMediaStore) ListAudiobooks(ctx context.Context, libraryID int64, limit, offset int, access catalog.AccessFilter, q abs.ItemsQuery) ([]*models.MediaItem, int, error) {
+	items, _, total, err := s.listAudiobooks(ctx, libraryID, limit, offset, access, q, false, nil)
+	return items, total, err
+}
+
+// absStreamBatch is how many books StreamAudiobooks loads and hands on at a
+// time.
+const absStreamBatch = 1000
+
+// StreamAudiobooks is ListAudiobooks with no limit, handing the books to emit
+// in order, absStreamBatch at a time, so a whole-library response never holds
+// every hydrated book at once. It returns the total before the first emit
+// through onTotal.
+func (s *ABSMediaStore) StreamAudiobooks(ctx context.Context, libraryID int64, access catalog.AccessFilter, q abs.ItemsQuery, onTotal func(int) error, emit func([]*models.MediaItem) error) error {
+	_, _, _, err := s.listAudiobooks(ctx, libraryID, 0, 0, access, q, false, &absStream{onTotal: onTotal, emit: emit})
+	return err
+}
+
+// absStream receives a whole-library listing in batches.
+type absStream struct {
+	onTotal func(int) error
+	emit    func([]*models.MediaItem) error
+}
+
+// ListAudiobooksCollapsed is ListAudiobooks with each series folded into one
+// entry, as ABS collapseseries=1 asks: the series' first book in the
+// requested order stands for it, carrying the IDs of every matching book in
+// the series. Books without a series pass through. The folding and paging run
+// in SQL, so a page loads only its own entries.
+func (s *ABSMediaStore) ListAudiobooksCollapsed(ctx context.Context, libraryID int64, limit, offset int, access catalog.AccessFilter, q abs.ItemsQuery) ([]abs.CollapsedAudiobook, int, error) {
+	items, members, total, err := s.listAudiobooks(ctx, libraryID, limit, offset, access, q, true, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]abs.CollapsedAudiobook, len(items))
+	for i, item := range items {
+		out[i] = abs.CollapsedAudiobook{Item: item}
+		if m, ok := members[item.ContentID]; ok {
+			out[i].SeriesID, out[i].SeriesName, out[i].SeriesBookIDs = m.key, m.name, m.books
+		}
+	}
+	return out, total, nil
+}
+
+// audiobookSeriesKey is the abs.SeriesID grouping of a book's series in SQL,
+// NULL for a book without one.
+const audiobookSeriesKey = `(SELECT LOWER(asx_key.series_name) FROM audiobook_series asx_key WHERE asx_key.content_id = mi.content_id)`
+
+// collapsedSeries is one folded series on a collapsed page.
+type collapsedSeries struct {
+	key, name string
+	books     []string
+}
+
+func (s *ABSMediaStore) listAudiobooks(ctx context.Context, libraryID int64, limit, offset int, access catalog.AccessFilter, q abs.ItemsQuery, collapse bool, stream *absStream) ([]*models.MediaItem, map[string]collapsedSeries, int, error) {
 	if s.Pool == nil {
-		return nil, 0, fmt.Errorf("abs_media_store: no pgx pool")
+		return nil, nil, 0, errors.New("abs_media_store: no pgx pool")
 	}
 	if offset < 0 {
 		offset = 0
@@ -190,6 +245,10 @@ func (s *ABSMediaStore) ListAudiobooks(ctx context.Context, libraryID int64, lim
 	where := strings.Join(conditions, " AND ")
 
 	countSQL := `SELECT COUNT(*) FROM media_items mi WHERE ` + where
+	if collapse {
+		countSQL = `SELECT COUNT(*) FILTER (WHERE skey IS NULL) + COUNT(DISTINCT skey)
+			FROM (SELECT ` + audiobookSeriesKey + ` AS skey FROM media_items mi WHERE ` + where + `) f`
+	}
 	var total int
 	var err error
 	if q.Filter.Kind == abs.FilterProgress {
@@ -200,16 +259,29 @@ func (s *ABSMediaStore) ListAudiobooks(ctx context.Context, libraryID int64, lim
 		total, err = s.cachedAudiobookCount(ctx, countSQL, args)
 	}
 	if err != nil {
-		return nil, 0, fmt.Errorf("abs_media_store: count audiobooks: %w", err)
+		return nil, nil, 0, fmt.Errorf("abs_media_store: count audiobooks: %w", err)
 	}
 	if total == 0 {
-		return []*models.MediaItem{}, 0, nil
+		return []*models.MediaItem{}, nil, 0, nil
 	}
 
 	dataArgs := append([]any(nil), args...)
 	argIdx = len(dataArgs) + 1
 	join, orderBy := audiobookItemsOrder(q, libraryID, viewer, access, &dataArgs, &argIdx)
 	dataSQL := `SELECT mi.content_id FROM media_items mi` + join + ` WHERE ` + where + ` ORDER BY ` + orderBy
+	if collapse {
+		// Number the matches in the requested order, keep each series' first,
+		// and page over what is left.
+		dataSQL = `WITH ordered AS (
+				SELECT mi.content_id, ` + audiobookSeriesKey + ` AS skey,
+					ROW_NUMBER() OVER (ORDER BY ` + orderBy + `) AS ord
+				FROM media_items mi` + join + ` WHERE ` + where + `
+			), firsts AS (
+				SELECT content_id, skey, ord, ROW_NUMBER() OVER (PARTITION BY skey ORDER BY ord) AS rn
+				FROM ordered
+			)
+			SELECT content_id FROM firsts WHERE skey IS NULL OR rn = 1 ORDER BY ord`
+	}
 	if limit > 0 {
 		dataSQL += fmt.Sprintf(` LIMIT $%d OFFSET $%d`, argIdx, argIdx+1)
 		dataArgs = append(dataArgs, limit, offset)
@@ -217,21 +289,57 @@ func (s *ABSMediaStore) ListAudiobooks(ctx context.Context, libraryID int64, lim
 
 	rows, err := s.Pool.Query(ctx, dataSQL, dataArgs...)
 	if err != nil {
-		return nil, 0, fmt.Errorf("abs_media_store: list audiobooks: %w", err)
+		return nil, nil, 0, fmt.Errorf("abs_media_store: list audiobooks: %w", err)
 	}
 	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
 	if err != nil {
-		return nil, 0, fmt.Errorf("abs_media_store: list audiobook ids: %w", err)
+		return nil, nil, 0, fmt.Errorf("abs_media_store: list audiobook ids: %w", err)
 	}
 	if len(ids) == 0 {
-		return []*models.MediaItem{}, total, nil
+		return []*models.MediaItem{}, nil, total, nil
 	}
 
+	if stream != nil {
+		return nil, nil, total, s.streamListing(ctx, stream, total, ids, access, libraryID)
+	}
+
+	ordered, err := s.loadListing(ctx, ids, access, libraryID)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	if !collapse {
+		return ordered, nil, total, nil
+	}
+	members, err := s.collapsedSeriesMembers(ctx, ids, where, args)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	return ordered, members, total, nil
+}
+
+// streamListing reports total, then loads and emits ids a batch at a time.
+func (s *ABSMediaStore) streamListing(ctx context.Context, stream *absStream, total int, ids []string, access catalog.AccessFilter, libraryID int64) error {
+	if err := stream.onTotal(total); err != nil {
+		return err
+	}
+	for start := 0; start < len(ids); start += absStreamBatch {
+		batch, err := s.loadListing(ctx, ids[start:min(start+absStreamBatch, len(ids))], access, libraryID)
+		if err != nil {
+			return err
+		}
+		if err := stream.emit(batch); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// loadListing loads and hydrates the books ids names, in that order.
+func (s *ABSMediaStore) loadListing(ctx context.Context, ids []string, access catalog.AccessFilter, libraryID int64) ([]*models.MediaItem, error) {
 	items, err := s.Items.GetByIDs(ctx, ids)
 	if err != nil {
-		return nil, 0, fmt.Errorf("abs_media_store: load audiobooks: %w", err)
+		return nil, fmt.Errorf("abs_media_store: load audiobooks: %w", err)
 	}
-
 	// GetByIDs sorts by content_id ASC; preserve the requested order.
 	byID := make(map[string]*models.MediaItem, len(items))
 	for _, it := range items {
@@ -244,7 +352,40 @@ func (s *ABSMediaStore) ListAudiobooks(ctx context.Context, libraryID int64, lim
 		}
 	}
 	s.hydrateListing(ctx, ordered, access, libraryID)
-	return ordered, total, nil
+	return ordered, nil
+}
+
+// collapsedSeriesMembers returns, for each page entry that stands for a
+// series, the series' key, its list name (the lowest spelling among the
+// matching books), and the IDs of the books that match the same filter
+// (where and args), in series order.
+func (s *ABSMediaStore) collapsedSeriesMembers(ctx context.Context, ids []string, where string, args []any) (map[string]collapsedSeries, error) {
+	memberArgs := append(append([]any(nil), args...), ids)
+	rows, err := s.Pool.Query(ctx, `
+		WITH page AS (
+			SELECT LOWER(series_name) AS skey, content_id AS rep
+			FROM audiobook_series WHERE content_id = ANY($`+strconv.Itoa(len(memberArgs))+`)
+		)
+		SELECT page.rep, page.skey, MIN(asx.series_name), array_agg(mi.content_id ORDER BY asx.series_index NULLS LAST, `+audiobookTitleSortKey+`, mi.content_id)
+		FROM page
+		JOIN audiobook_series asx ON LOWER(asx.series_name) = page.skey
+		JOIN media_items mi ON mi.content_id = asx.content_id
+		WHERE `+where+`
+		GROUP BY page.rep, page.skey`, memberArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("abs_media_store: load collapsed series: %w", err)
+	}
+	defer rows.Close()
+	members := make(map[string]collapsedSeries, len(ids))
+	for rows.Next() {
+		var rep string
+		var m collapsedSeries
+		if err := rows.Scan(&rep, &m.key, &m.name, &m.books); err != nil {
+			return nil, fmt.Errorf("abs_media_store: scan collapsed series: %w", err)
+		}
+		members[rep] = m
+	}
+	return members, rows.Err()
 }
 
 // absViewer is the profile whose listening progress a progress filter or
@@ -266,6 +407,7 @@ func newABSViewer(userID, profileID string) absViewer {
 const (
 	absSortAddedAt  = "addedAt"
 	absSortProgress = "progress"
+	absSortTitle    = "media.metadata.title"
 )
 
 func sqlDirection(desc bool) string {
@@ -357,7 +499,7 @@ func audiobookItemsOrder(q abs.ItemsQuery, libraryID int64, viewer absViewer, ac
 		return join, "wp_sort.updated_at " + dir + " " + nulls + ", " + byTitle
 	case "random":
 		return "", "random()"
-	case "media.metadata.title":
+	case absSortTitle:
 		return "", tail
 	default:
 		return "", byTitle
@@ -929,6 +1071,18 @@ func (s *ABSMediaStore) ListRecentlyAdded(ctx context.Context, libraryID int64, 
 		argIdx++
 	}
 	appendAudiobookAccessConditions("mi", access, &conditions, &args, &argIdx)
+	if libraryID != 0 {
+		// Walk idx_item_libraries_folder newest first and stop at limit,
+		// instead of computing every book's added date and sorting them all.
+		sql := `
+			SELECT mi.content_id FROM media_item_libraries mil
+			JOIN media_items mi ON mi.content_id = mil.content_id
+			WHERE mil.media_folder_id = $2 AND ` + strings.Join(conditions, " AND ") + `
+			ORDER BY mil.first_seen_at DESC, mil.content_id DESC
+			LIMIT $1
+		`
+		return s.listAudiobookIDs(ctx, sql, args, access, libraryID)
+	}
 	sql := `
 		SELECT mi.content_id FROM media_items mi
 		JOIN LATERAL (
@@ -972,19 +1126,65 @@ func (s *ABSMediaStore) ListDiscover(ctx context.Context, libraryID int64, limit
 	return s.listAudiobookIDs(ctx, sql, args, access, libraryID)
 }
 
+// authorCountsRefreshLock serializes RefreshAuthorCounts across API nodes.
+const authorCountsRefreshLock int64 = 0x4142_5341_5554_4831 // "ABSAUTH1"
+
 // RefreshAuthorCounts rebuilds the abs_audiobook_author_counts materialized
-// view that ListLibraryAuthors reads. CONCURRENTLY keeps it readable during the
-// refresh (requires the unique index). Driven by a periodic ticker in the
-// audiobooks service.
-func (s *ABSMediaStore) RefreshAuthorCounts(ctx context.Context) error {
+// view that ListLibraryAuthors reads, unless some node already did within
+// minInterval. Every API node calls it on a ticker; the advisory lock and the
+// abs_author_counts_refresh row make the cluster refresh once per interval.
+// CONCURRENTLY keeps the view readable during the refresh (requires the
+// unique index).
+func (s *ABSMediaStore) RefreshAuthorCounts(ctx context.Context, minInterval time.Duration) error {
 	if s.Pool == nil {
 		return nil
 	}
-	_, err := s.Pool.Exec(ctx, `REFRESH MATERIALIZED VIEW CONCURRENTLY abs_audiobook_author_counts`)
+	lock, acquired, err := pglock.TryAcquire(ctx, s.Pool, authorCountsRefreshLock)
 	if err != nil {
+		return fmt.Errorf("abs_media_store: lock author counts refresh: %w", err)
+	}
+	if !acquired {
+		return nil // another node is refreshing
+	}
+	defer func() { _ = lock.Release(ctx) }()
+	var fresh bool
+	if err := s.Pool.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM abs_author_counts_refresh WHERE refreshed_at > now() - $1::interval)`,
+		minInterval).Scan(&fresh); err != nil {
+		return fmt.Errorf("abs_media_store: read author counts refresh: %w", err)
+	}
+	if fresh {
+		return nil
+	}
+	if _, err := s.Pool.Exec(ctx, `REFRESH MATERIALIZED VIEW CONCURRENTLY abs_audiobook_author_counts`); err != nil {
 		return fmt.Errorf("abs_media_store: refresh author counts: %w", err)
 	}
+	if _, err := s.Pool.Exec(ctx, `
+		INSERT INTO abs_author_counts_refresh (singleton, refreshed_at) VALUES (true, now())
+		ON CONFLICT (singleton) DO UPDATE SET refreshed_at = EXCLUDED.refreshed_at`); err != nil {
+		return fmt.Errorf("abs_media_store: record author counts refresh: %w", err)
+	}
 	return nil
+}
+
+// libraryOverlapsDisabled reports whether a book in the library is also in
+// one of the profile's disabled libraries. The author view counts such a book
+// but the profile must not see it.
+func (s *ABSMediaStore) libraryOverlapsDisabled(ctx context.Context, libraryID int64, disabled []int) (bool, error) {
+	if len(disabled) == 0 {
+		return false, nil
+	}
+	var overlap bool
+	err := s.Pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM media_item_libraries here
+			JOIN media_item_libraries hidden ON hidden.content_id = here.content_id
+			WHERE here.media_folder_id = $1 AND hidden.media_folder_id = ANY($2)
+		)`, int(libraryID), disabled).Scan(&overlap)
+	if err != nil {
+		return false, fmt.Errorf("abs_media_store: check disabled library overlap: %w", err)
+	}
+	return overlap, nil
 }
 
 // ListLibraryAuthors returns one page of distinct audiobook authors plus the
@@ -995,8 +1195,10 @@ func (s *ABSMediaStore) RefreshAuthorCounts(ctx context.Context) error {
 // so it is safe only when the caller has no item-level restriction. When the
 // access filter carries an item-level predicate (a content-rating cap or
 // excluded media types), reading the MV would leak authors of books the caller
-// can't see, so we take the access-aware live path instead. Library-level
-// access is already enforced by scoping to a single resolved library.
+// can't see, so we take the access-aware live path instead. The same holds
+// when a book in this library is also in a library the profile disabled.
+// Library-level access is otherwise enforced by scoping to a single resolved
+// library.
 //
 // The advisory-age limit is deliberately not such a predicate here. Advisory
 // ages exist for movies and series only (the host drops one reported for any
@@ -1013,6 +1215,11 @@ func (s *ABSMediaStore) ListLibraryAuthors(ctx context.Context, libraryID int64,
 		offset = 0
 	}
 	if access.MaxContentRating != "" || len(access.ExcludedMediaTypes) > 0 {
+		return s.listLibraryAuthorsLive(ctx, libraryID, limit, offset, sortBy, sortDesc, access)
+	}
+	if overlap, err := s.libraryOverlapsDisabled(ctx, libraryID, access.DisabledLibraryIDs); err != nil {
+		return nil, 0, err
+	} else if overlap {
 		return s.listLibraryAuthorsLive(ctx, libraryID, limit, offset, sortBy, sortDesc, access)
 	}
 	var total int
@@ -1033,9 +1240,9 @@ func (s *ABSMediaStore) ListLibraryAuthors(ctx context.Context, libraryID int64,
 	case absSortAddedAt:
 		orderBy = "c.added_at " + dir + ", c.person_id"
 	case "numBooks":
-		orderBy = "c.num_books " + dir + ", LOWER(c.name)"
-	default: // name
-		orderBy = "LOWER(c.name) " + dir
+		orderBy = "c.num_books " + dir + ", LOWER(c.name), c.person_id"
+	default: // name; person_id keeps duplicate names from skipping or repeating across pages
+		orderBy = "LOWER(c.name) " + dir + ", c.person_id " + dir
 	}
 
 	// The MV carries no photo column; join people at read time so photo
@@ -1111,9 +1318,9 @@ func (s *ABSMediaStore) listLibraryAuthorsLive(ctx context.Context, libraryID in
 	case absSortAddedAt:
 		orderBy = "p.created_at " + dir + ", p.id"
 	case "numBooks":
-		orderBy = "num_books " + dir + ", LOWER(p.name)"
+		orderBy = "num_books " + dir + ", LOWER(p.name), p.id"
 	default: // name
-		orderBy = "LOWER(p.name) " + dir
+		orderBy = "LOWER(p.name) " + dir + ", p.id " + dir
 	}
 	dataSQL := `
 		SELECT p.id, p.name, COUNT(DISTINCT mi.content_id) AS num_books,
@@ -1176,60 +1383,54 @@ func (s *ABSMediaStore) ListLibrarySeries(ctx context.Context, libraryID int64, 
 	where := strings.Join(conditions, " AND ")
 
 	// Count distinct multi-book series (HAVING COUNT > 1) so pagination totals
-	// match what the data query returns.
-	var total int
-	countSQL := `SELECT COUNT(*) FROM (
+	// match what the data query returns. The count only shifts when the
+	// library changes, so it shares ListAudiobooks' short-lived cache.
+	total, err := s.cachedAudiobookCount(ctx, `SELECT COUNT(*) FROM (
 		SELECT LOWER(s.series_name)
 		FROM audiobook_series s JOIN media_items mi ON mi.content_id = s.content_id
-		WHERE ` + where + `
+		WHERE `+where+`
 		GROUP BY LOWER(s.series_name) HAVING COUNT(*) > 1
-	) t`
-	if err := s.Pool.QueryRow(ctx, countSQL, args...).Scan(&total); err != nil {
+	) t`, args)
+	if err != nil {
 		return nil, 0, fmt.Errorf("abs_media_store: count series: %w", err)
 	}
 	if total == 0 {
 		return []abs.SeriesSummary{}, 0, nil
 	}
 
-	// Two-stage: window-rank books inside each series (lowest series_index
-	// first), then aggregate the top 4 ids/titles/updated_at into parallel
-	// arrays. `book_ids[]` is text because content_id is text in this
-	// schema; parallel `titles[]` and `updated_ats[]` keep iteration
-	// straightforward in Go without composite type plumbing.
-	dataSQL := `
-		WITH ranked AS (
-			SELECT
-				LOWER(s.series_name) AS series_key,
-				s.series_name,
-				s.content_id,
-				mi.title,
-				mi.updated_at,
-				ROW_NUMBER() OVER (
-					PARTITION BY LOWER(s.series_name)
-					ORDER BY COALESCE(s.series_index, 999999), s.content_id
-				) AS rn,
-				COUNT(*) OVER (PARTITION BY LOWER(s.series_name)) AS series_count
-			FROM audiobook_series s
-			JOIN media_items mi
-				ON mi.content_id = s.content_id
-			WHERE ` + where + `
-		)
-		SELECT
-			series_key,
-			MIN(series_name) AS series_name,
-			MAX(series_count)::int AS num_books,
-			array_agg(content_id ORDER BY rn) FILTER (WHERE rn <= 4) AS book_ids,
-			array_agg(title      ORDER BY rn) FILTER (WHERE rn <= 4) AS titles,
-			array_agg(updated_at ORDER BY rn) FILTER (WHERE rn <= 4) AS updated_ats
-		FROM ranked
-		GROUP BY series_key
-		HAVING MAX(series_count) > 1
+	// Two stages: pick the page of series first, then read up to four
+	// preview books (lowest series_index first) for those series only, so a
+	// page never ranks and aggregates every book in the library. book_ids is
+	// text because content_id is text in this schema; parallel titles and
+	// updated_ats keep iteration straightforward in Go.
+	pageSQL := `
+		SELECT LOWER(s.series_name) AS series_key, MIN(s.series_name) AS series_name, COUNT(*)::int AS num_books
+		FROM audiobook_series s JOIN media_items mi ON mi.content_id = s.content_id
+		WHERE ` + where + `
+		GROUP BY LOWER(s.series_name) HAVING COUNT(*) > 1
 		ORDER BY series_key`
 	dataArgs := append([]any(nil), args...)
 	if limit > 0 {
-		dataSQL += fmt.Sprintf(` LIMIT $%d OFFSET $%d`, argIdx, argIdx+1)
+		pageSQL += fmt.Sprintf(` LIMIT $%d OFFSET $%d`, argIdx, argIdx+1)
 		dataArgs = append(dataArgs, limit, offset)
 	}
+	dataSQL := `
+		WITH page AS (` + pageSQL + `)
+		SELECT page.series_key, page.series_name, page.num_books,
+			COALESCE(array_agg(b.content_id ORDER BY b.rn) FILTER (WHERE b.content_id IS NOT NULL), '{}'),
+			COALESCE(array_agg(b.title ORDER BY b.rn) FILTER (WHERE b.content_id IS NOT NULL), '{}'),
+			COALESCE(array_agg(b.updated_at ORDER BY b.rn) FILTER (WHERE b.content_id IS NOT NULL), '{}')
+		FROM page
+		LEFT JOIN LATERAL (
+			SELECT s.content_id, mi.title, mi.updated_at,
+				ROW_NUMBER() OVER (ORDER BY COALESCE(s.series_index, 999999), s.content_id) AS rn
+			FROM audiobook_series s JOIN media_items mi ON mi.content_id = s.content_id
+			WHERE LOWER(s.series_name) = page.series_key AND ` + where + `
+			ORDER BY COALESCE(s.series_index, 999999), s.content_id
+			LIMIT 4
+		) b ON TRUE
+		GROUP BY page.series_key, page.series_name, page.num_books
+		ORDER BY page.series_key`
 	rows, err := s.Pool.Query(ctx, dataSQL, dataArgs...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("abs_media_store: list series: %w", err)
@@ -1447,4 +1648,47 @@ func (s *ABSMediaStore) SearchLibrarySeries(ctx context.Context, libraryID int64
 		out = append(out, abs.SeriesSummary{ID: key, Name: name, NumBooks: books, Books: previews})
 	}
 	return out, rows.Err()
+}
+
+// AudiobookPosterPath reads one audiobook's poster column. Like the full
+// lookup it replaces on the cover route, it applies no access filter.
+func (s *ABSMediaStore) AudiobookPosterPath(ctx context.Context, contentID string) (string, error) {
+	if s.Pool == nil {
+		return "", abs.ErrNotFound
+	}
+	var poster string
+	err := s.Pool.QueryRow(ctx, `
+		SELECT COALESCE(poster_path, '') FROM media_items
+		WHERE content_id = $1 AND type = 'audiobook'`, contentID).Scan(&poster)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", abs.ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("abs_media_store: audiobook poster: %w", err)
+	}
+	return poster, nil
+}
+
+// AuthorPhotoPath reads the photo path of a person credited as the author of
+// an audiobook. Anyone else, such as a film's cast, is not found: the author
+// image route needs no sign-in.
+func (s *ABSMediaStore) AuthorPhotoPath(ctx context.Context, authorID string) (string, error) {
+	id, err := strconv.ParseInt(authorID, 10, 64)
+	if err != nil || s.Pool == nil {
+		return "", abs.ErrNotFound
+	}
+	var photo string
+	err = s.Pool.QueryRow(ctx, `
+		SELECT COALESCE(p.photo_path, '') FROM people p
+		WHERE p.id = $1 AND EXISTS (
+			SELECT 1 FROM item_people ip JOIN media_items mi ON mi.content_id = ip.content_id
+			WHERE ip.person_id = p.id AND ip.kind = `+strconv.Itoa(int(models.PersonKindAuthor))+` AND mi.type = 'audiobook'
+		)`, id).Scan(&photo)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", abs.ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("abs_media_store: author photo: %w", err)
+	}
+	return photo, nil
 }

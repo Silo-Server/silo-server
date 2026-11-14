@@ -35,6 +35,12 @@ func (noopMediaStore) GetMediaFiles(context.Context, string, catalog.AccessFilte
 func (noopMediaStore) ListAudiobookLibraries(context.Context, catalog.AccessFilter) ([]AudiobookLibrary, error) {
 	return nil, nil
 }
+func (noopMediaStore) StreamAudiobooks(context.Context, int64, catalog.AccessFilter, ItemsQuery, func(int) error, func([]*models.MediaItem) error) error {
+	return nil
+}
+func (noopMediaStore) ListAudiobooksCollapsed(context.Context, int64, int, int, catalog.AccessFilter, ItemsQuery) ([]CollapsedAudiobook, int, error) {
+	return nil, 0, nil
+}
 func (noopMediaStore) SearchAudiobooks(context.Context, int64, string, int, catalog.AccessFilter) ([]*models.MediaItem, error) {
 	return nil, nil
 }
@@ -61,6 +67,12 @@ func (noopMediaStore) SearchLibraryAuthors(context.Context, int64, string, int, 
 }
 func (noopMediaStore) SearchLibrarySeries(context.Context, int64, string, int, catalog.AccessFilter) ([]SeriesSummary, error) {
 	return nil, nil
+}
+func (noopMediaStore) AudiobookPosterPath(context.Context, string) (string, error) {
+	return "", ErrNotFound
+}
+func (noopMediaStore) AuthorPhotoPath(context.Context, string) (string, error) {
+	return "", ErrNotFound
 }
 func (noopMediaStore) GetSeriesByName(context.Context, string, catalog.AccessFilter) (Series, error) {
 	return Series{}, ErrNotFound

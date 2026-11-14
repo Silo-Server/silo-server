@@ -200,13 +200,17 @@ func (s *Service) BuildABSHandler(deps ABSHandlerDeps) *abs.Handler {
 		go func() {
 			ctx := context.Background()
 			time.Sleep(30 * time.Second) // let startup settle before the first refresh
-			if err := mediaStore.RefreshAuthorCounts(ctx); err != nil {
+			// Each node ticks, but RefreshAuthorCounts skips when any node
+			// refreshed within the last interval (less a minute of slack for
+			// ticker drift), so the cluster refreshes about once per interval.
+			const interval = 15 * time.Minute
+			if err := mediaStore.RefreshAuthorCounts(ctx, interval-time.Minute); err != nil {
 				slog.Warn("abs: initial author-count refresh failed", "err", err)
 			}
-			ticker := time.NewTicker(15 * time.Minute)
+			ticker := time.NewTicker(interval)
 			defer ticker.Stop()
 			for range ticker.C {
-				if err := mediaStore.RefreshAuthorCounts(ctx); err != nil {
+				if err := mediaStore.RefreshAuthorCounts(ctx, interval-time.Minute); err != nil {
 					slog.Warn("abs: author-count refresh failed", "err", err)
 				}
 			}

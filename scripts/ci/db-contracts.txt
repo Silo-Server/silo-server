@@ -37,6 +37,7 @@
 ./internal/audiobooks TestABSListsLeaveOutBooksInNoLibraryDB
 ./internal/audiobooks TestABSLibraryItemsFiltersAndSortDB
 ./internal/audiobooks TestABSSeriesIdentityAndContinueListeningDB
+./internal/audiobooks TestABSCollapsedPagesAndNarrowLookupsDB
 ./internal/api/handlers TestAdminStatsLeaveOutFilesAndItemsHeldByRemovalGraceDB
 ./internal/sections TestRuleRowsReadTheViewersWatchStatePostgres
 ./internal/sections TestSmartCollectionRowWithDisplayFilterReadsTheViewersWatchStatePostgres

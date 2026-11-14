@@ -51,6 +51,14 @@ type MediaStore interface {
 	// q carries the ABS filter and sort, applied in SQL (ItemsQuery{} for
 	// none). limit <= 0 returns every match.
 	ListAudiobooks(ctx context.Context, libraryID int64, limit, offset int, access catalog.AccessFilter, q ItemsQuery) ([]*models.MediaItem, int, error)
+	// ListAudiobooksCollapsed is ListAudiobooks with each series folded into
+	// its first book in the requested order (ABS collapseseries=1); total
+	// counts the folded entries.
+	// StreamAudiobooks lists every match like ListAudiobooks with limit 0,
+	// reporting the total to onTotal first and then handing the books to
+	// emit in order, a batch at a time.
+	StreamAudiobooks(ctx context.Context, libraryID int64, access catalog.AccessFilter, q ItemsQuery, onTotal func(int) error, emit func([]*models.MediaItem) error) error
+	ListAudiobooksCollapsed(ctx context.Context, libraryID int64, limit, offset int, access catalog.AccessFilter, q ItemsQuery) ([]CollapsedAudiobook, int, error)
 	GetMediaFiles(ctx context.Context, contentID string, access catalog.AccessFilter) ([]*models.MediaFile, error)
 	// ListAudiobookLibraries returns media_folder rows with type='audiobooks'.
 	ListAudiobookLibraries(ctx context.Context, access catalog.AccessFilter) ([]AudiobookLibrary, error)
@@ -89,6 +97,12 @@ type MediaStore interface {
 	// by series_index ASC (NULLS LAST), title fallback. Returns
 	// ErrNotFound when no rows match.
 	GetSeriesByName(ctx context.Context, seriesName string, access catalog.AccessFilter) (Series, error)
+	// AudiobookPosterPath returns the stored poster path of an audiobook, or
+	// ErrNotFound when no audiobook has contentID.
+	AudiobookPosterPath(ctx context.Context, contentID string) (string, error)
+	// AuthorPhotoPath returns the stored photo path of a person who authored
+	// at least one audiobook, or ErrNotFound for anyone else.
+	AuthorPhotoPath(ctx context.Context, authorID string) (string, error)
 }
 
 // AuthorSummary is an aggregated author entry for /libraries/{id}/authors.
@@ -141,6 +155,17 @@ type Author struct {
 // this Go form is the fallback for an item hydrated without it.
 func SeriesID(name string) string {
 	return strings.ToLower(name)
+}
+
+// CollapsedAudiobook is one entry of a collapsed library page: a book, and
+// when it stands for its series, the IDs of the series' matching books.
+type CollapsedAudiobook struct {
+	Item *models.MediaItem
+	// SeriesID and SeriesName are the series' key and the name the series
+	// list shows for it; SeriesBookIDs are its matching books.
+	SeriesID      string
+	SeriesName    string
+	SeriesBookIDs []string
 }
 
 // Series is the detail-shape series with books ordered by series_index.
