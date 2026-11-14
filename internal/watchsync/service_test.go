@@ -1028,6 +1028,19 @@ func (r *serviceFakeRepo) ListOpenScrobbleSessions(_ context.Context) ([]Scrobbl
 	return append([]ScrobbleSession(nil), r.scrobbleSessions...), nil
 }
 
+func (r *serviceFakeRepo) ListScrobbleStops(_ context.Context, connectionID string, mediaItemIDs []string) (map[string][]time.Time, error) {
+	r.scrobbleMu.Lock()
+	defer r.scrobbleMu.Unlock()
+	stops := make(map[string][]time.Time)
+	for _, session := range r.scrobbleSessions {
+		if session.ConnectionID == connectionID && session.StopSentAt != nil && session.HistoryID != "" &&
+			slices.Contains(mediaItemIDs, session.MediaItemID) {
+			stops[session.MediaItemID] = append(stops[session.MediaItemID], *session.StopSentAt)
+		}
+	}
+	return stops, nil
+}
+
 func (r *serviceFakeRepo) ListPendingScrobbleReconciliations(_ context.Context) ([]ScrobbleSession, error) {
 	r.scrobbleMu.Lock()
 	defer r.scrobbleMu.Unlock()
@@ -2115,6 +2128,82 @@ func TestServiceImportWatchedDeduplicatesResolvedLeavesAtNewestTimestamp(t *test
 	}
 	if len(watchState.watchedAt) != 1 || watchState.watchedAt[0] == nil || !watchState.watchedAt[0].Equal(newerWatchedAt) {
 		t.Fatalf("recorded watched_at = %+v, want %v", watchState.watchedAt, newerWatchedAt)
+	}
+}
+
+// A scrobbled play comes back from the provider stamped when the stop arrived,
+// a second or so after Silo's own row (#3433). The import treats a watch within
+// two minutes of a stop this connection sent as that play, and records a watch
+// with no such stop: a later play of a short item, a play Silo didn't scrobble
+// to this provider, or one another connection scrobbled.
+func TestServiceImportWatchedSkipsProviderCopyOfScrobbledPlay(t *testing.T) {
+	localPlay := time.Date(2026, 11, 3, 1, 8, 27, 0, time.UTC)
+	stopSent := localPlay.Add(time.Second)
+	tests := []struct {
+		name         string
+		connectionID string // of the scrobble session; "" for none
+		remote       time.Time
+		wantRecorded bool
+	}{
+		{name: "provider stamp at the stop", connectionID: "conn-1", remote: stopSent},
+		{name: "provider stamp two minutes before the stop", connectionID: "conn-1", remote: stopSent.Add(-2 * time.Minute)},
+		{name: "provider stamp a minute after the stop", connectionID: "conn-1", remote: stopSent.Add(time.Minute)},
+		{name: "a second play of a short item", connectionID: "conn-1", remote: stopSent.Add(3 * time.Minute), wantRecorded: true},
+		{name: "a play this connection didn't scrobble", remote: stopSent, wantRecorded: true},
+		{name: "a play another connection scrobbled", connectionID: "conn-2", remote: stopSent, wantRecorded: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := openUserDB(t)
+			store := userdb.NewSQLiteUserStore(db)
+			if err := userdb.AddHistory(db, userstore.WatchHistoryEntry{
+				ID: "history-1", ProfileID: "profile-1", MediaItemID: testMovieMediaID,
+				WatchedAt: localPlay.Format(time.RFC3339), DurationSeconds: 7200, Completed: true,
+				Source: userstore.WatchHistorySourcePlayback,
+			}); err != nil {
+				t.Fatalf("AddHistory: %v", err)
+			}
+			repo := newServiceFakeRepo()
+			if tt.connectionID != "" {
+				repo.scrobbleSessions = []ScrobbleSession{{
+					PlaybackSessionID: "play-1", ConnectionID: tt.connectionID, MediaItemID: testMovieMediaID,
+					HistoryID: "history-1", LastAction: "stop", StopSentAt: &stopSent,
+				}}
+			}
+			remote := tt.remote
+			provider := watchedImporterStub{
+				historyStubBase: historyStubBase{key: "simkl", source: userstore.WatchHistorySourceSimkl},
+				rows: []RemoteWatch{{
+					Provider: "simkl", Kind: historyimport.KindMovie, Title: "Inception", LastWatchedAt: &remote,
+				}},
+			}
+			watchState := &recordingWatchState{}
+			service := NewService(repo, NewRegistry()).
+				WithMatcher(matchedMatcherStub{mediaItemID: testMovieMediaID}).
+				WithWatchState(watchState).
+				WithUserStoreProvider(staticStoreProvider{store: store})
+
+			result, err := service.ImportWatched(context.Background(), Connection{
+				ID: "conn-1", Provider: "simkl", UserID: 7, ProfileID: "profile-1",
+			}, ServerConfig{}, provider)
+			if err != nil {
+				t.Fatalf("ImportWatched: %v", err)
+			}
+			if recorded := len(watchState.targetIDs) == 1; recorded != tt.wantRecorded || result.Imported != len(watchState.targetIDs) {
+				t.Fatalf("recorded %v (result %+v), want recorded = %v", watchState.targetIDs, result, tt.wantRecorded)
+			}
+			if tt.wantRecorded {
+				return
+			}
+			// A skipped copy still marks the item completed at the provider's time.
+			progress, err := store.GetProgress(context.Background(), "profile-1", testMovieMediaID)
+			if err != nil {
+				t.Fatalf("GetProgress: %v", err)
+			}
+			if progress == nil || !progress.Completed || result.ProgressUpdated != 1 {
+				t.Fatalf("progress = %+v, result %+v; want completed and counted, so the sync refreshes signals", progress, result)
+			}
+		})
 	}
 }
 

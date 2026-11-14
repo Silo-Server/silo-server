@@ -477,15 +477,24 @@ func (u *userPlanner) checkPrimaryRoom(ctx context.Context, plan *accountPlan) e
 func (u *userPlanner) planProfiles(ctx context.Context, plan *accountPlan) error {
 	acct := plan.item.Account
 	claimed := map[string][]int{}
+	// The primary profile here has no library limit, and a backup's primary
+	// becomes the primary only when the account has none
+	// (pgstore.CreateRestoredProfileInTx).
+	primaryID := ""
+	if plan.localID > 0 {
+		err := u.q.QueryRow(ctx, `SELECT id FROM user_profiles WHERE user_id = $1 AND is_primary`, plan.localID).Scan(&primaryID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("checking the account's primary profile: %w", err)
+		}
+	}
 	for i := range plan.doc.Profiles {
 		e := &plan.doc.Profiles[i]
-		pp := profilePlan{entry: e, preview: PreviewProfile{ID: e.ID, Name: e.Name, IsPrimary: e.IsPrimary, Restricted: e.LibraryRestrictionsEnabled,
+		pp := profilePlan{entry: e, preview: PreviewProfile{ID: e.ID, Name: e.Name, IsPrimary: e.IsPrimary,
 			HasPIN: e.PINHash != "", DataTypes: []PreviewDataType{}}}
 		pp.allowed, pp.preview.LibrariesLeftOut = mapLibraries(e.AllowedLibraryIDs, u.libMap)
 		if pp.allowed == nil {
 			pp.allowed = []int{}
 		}
-		pp.preview.NoLibraryAccess = e.LibraryRestrictionsEnabled && len(pp.allowed) == 0
 		for _, t := range userDataTypes {
 			raw, ok := e.Data[t.ID()]
 			if !ok {
@@ -503,6 +512,16 @@ func (u *userPlanner) planProfiles(ctx context.Context, plan *accountPlan) error
 		}
 		pp.preview.Match, pp.localID = match, localID
 		pp.preview.LocalID = localID
+		// No library limit applies when the profile merges into the primary
+		// here, or is created as the primary because the account has none.
+		mergesIntoPrimary := localID != "" && localID == primaryID
+		becomesPrimary := localID == "" && e.IsPrimary && primaryID == ""
+		limited := e.LibraryRestrictionsEnabled && !mergesIntoPrimary && !becomesPrimary
+		pp.preview.Restricted = limited
+		if !limited {
+			pp.preview.LibrariesLeftOut = 0
+		}
+		pp.preview.NoLibraryAccess = limited && len(pp.allowed) == 0
 		switch {
 		case reason != "":
 			pp.preview.Status, pp.preview.Reason, pp.preview.Message = ItemAmbiguous, reason, message

@@ -168,6 +168,8 @@ func (h *SectionHandler) homeSectionRow(ctx context.Context, s sections.Resolved
 			Customized:  row.Customized,
 			Items:       []sectionItemResponse{},
 			HasMore:     hasMore,
+			TitleKey:    row.TitleKey,
+			TitleArgs:   row.TitleArgs,
 		}
 	}
 	built[0].HasMore = hasMore

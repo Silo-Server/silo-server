@@ -18,7 +18,6 @@ import (
 var (
 	ErrEmailVerificationConflict    = errors.New("verification intent conflicts with its original owner or address")
 	ErrEmailVerificationUnavailable = errors.New("durable email verification is unavailable")
-	ErrEmailLegacyWriter            = errors.New("this profile requires durable email verification")
 )
 
 // EmailVerificationIntent is a retained domain request. The caller must capture

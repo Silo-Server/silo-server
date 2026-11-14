@@ -18,13 +18,21 @@ export interface CatalogInvalidationOptions {
   libraryId?: number;
   allowDashboardRefetch: boolean;
   includeLibraryLists?: boolean;
+  /** Refresh catalog lists even while a list page is on its first read. */
+  skipFirstReadHold?: boolean;
 }
 
 export function invalidateCatalogState(
   queryClient: QueryClient,
   options: CatalogInvalidationOptions,
 ) {
-  const { itemId, libraryId, allowDashboardRefetch, includeLibraryLists = true } = options;
+  const {
+    itemId,
+    libraryId,
+    allowDashboardRefetch,
+    includeLibraryLists = true,
+    skipFirstReadHold,
+  } = options;
   // Library-scoped sweeps leave home section queries out (see
   // activeSectionQueryMatchesLibrary) so a scan cannot storm them — but the
   // refresh-signal bump below still reloads Home's rows through fetchQuery,
@@ -34,11 +42,14 @@ export function invalidateCatalogState(
   if (libraryId !== undefined) {
     void queryClient.invalidateQueries({ queryKey: sectionKeys.home(), refetchType: "none" });
   }
-  void invalidateMediaSurfaceQueries(queryClient, { itemId, libraryId, itemMayBeNew: true }).then(
-    () => {
-      bumpHomeRefreshSignal(queryClient);
-    },
-  );
+  void invalidateMediaSurfaceQueries(queryClient, {
+    itemId,
+    libraryId,
+    itemMayBeNew: true,
+    skipFirstReadHold,
+  }).then(() => {
+    bumpHomeRefreshSignal(queryClient);
+  });
   if (includeLibraryLists) {
     void queryClient.invalidateQueries({
       queryKey: adminKeys.libraries(),
@@ -65,9 +76,12 @@ export function invalidateAccessDependentState(
   queryClient: QueryClient,
   options: Pick<CatalogInvalidationOptions, "allowDashboardRefetch">,
 ) {
+  // Lists showing titles the viewer may no longer see refresh now, without
+  // waiting for a page still on its first read.
   invalidateCatalogState(queryClient, {
     allowDashboardRefetch: options.allowDashboardRefetch,
     includeLibraryLists: true,
+    skipFirstReadHold: true,
   });
   for (const queryKey of [
     collectionKeys.all,

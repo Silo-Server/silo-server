@@ -1,10 +1,8 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -64,28 +62,6 @@ func TestCreateProfile_RequestsBlockedNeedsAManager(t *testing.T) {
 		VerifyProfile: noProfileVerification,
 	})
 	requireAPIStatus(t, err, http.StatusForbidden)
-}
-
-// /api/v1 is frozen: a v1 body cannot set the block, and v1 never shows it.
-func TestRequestsBlockedStaysOffTheV1Wire(t *testing.T) {
-	store := newProfileTestStore(t)
-	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "profile-2", Name: "Kids"}); err != nil {
-		t.Fatalf("create profile: %v", err)
-	}
-	handler := NewProfileHandler(testUserStoreProvider{store: store})
-
-	req := newAuthorizedProfileRequestWithRole(http.MethodPut, "/profiles/profile-2", `{"requests_blocked":true,"requests_allowed":false,"name":"Kids"}`, "user", "profile-1")
-	rr := httptest.NewRecorder()
-	handler.HandleUpdateProfile(rr, withProfileRouteParam(req, "id", "profile-2"))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	if bytes.Contains(rr.Body.Bytes(), []byte("requests_")) {
-		t.Fatalf("v1 response leaked the requests block: %s", rr.Body.String())
-	}
-	if stored, _ := store.GetProfile(context.Background(), "profile-2"); stored.RequestsBlocked {
-		t.Fatal("a v1 body blocked the profile")
-	}
 }
 
 // The tour's requests step opens a page a blocked profile is refused, so the

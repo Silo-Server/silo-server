@@ -5,6 +5,7 @@ import type { components } from "@/api/v2/schema";
 import { v2, type V2Body, type V2Result } from "@/api/v2/request";
 import { profileKeys } from "./keys";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 
 function replaceProfileInList(profiles: Profile[] | undefined, updatedProfile: Profile) {
   if (!profiles || profiles.length === 0) {
@@ -204,11 +205,11 @@ export function useCreateProfile(profileContext?: ProfileRequestContextSnapshot)
   return useMutation({
     mutationFn: (body: ProfileCreate) => createProfile(body, profileContext),
     onSuccess: () => {
-      toast.success("Profile created");
+      toast.success(t("web.common.toast.profiles.created"));
       queryClient.invalidateQueries({ queryKey: profileKeys.list() });
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to save profile");
+      toast.error(err instanceof Error ? err.message : t("web.common.toast.profiles.saveFailed"));
     },
   });
 }
@@ -230,11 +231,11 @@ export function useUpdateProfile() {
           max_profiles: current?.max_profiles ?? null,
         };
       });
-      toast.success("Profile updated");
+      toast.success(t("web.common.toast.profiles.updated"));
       queryClient.invalidateQueries({ queryKey: profileKeys.list() });
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to save profile");
+      toast.error(err instanceof Error ? err.message : t("web.common.toast.profiles.saveFailed"));
     },
   });
 }
@@ -253,11 +254,13 @@ export function useUploadProfileAvatar(profileContext?: ProfileRequestContextSna
         requests_allowed_supported: current?.requests_allowed_supported ?? false,
         max_profiles: current?.max_profiles ?? null,
       }));
-      toast.success("Avatar updated");
+      toast.success(t("web.common.toast.profiles.avatarUpdated"));
       queryClient.invalidateQueries({ queryKey: profileKeys.list() });
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to upload avatar");
+      toast.error(
+        err instanceof Error ? err.message : t("web.common.toast.profiles.avatarUploadFailed"),
+      );
     },
   });
 }
@@ -295,11 +298,13 @@ export function useDeleteProfileAvatar() {
       }
     },
     onSuccess: () => {
-      toast.success("Avatar removed");
+      toast.success(t("web.common.toast.profiles.avatarRemoved"));
       queryClient.invalidateQueries({ queryKey: profileKeys.list() });
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to remove avatar");
+      toast.error(
+        err instanceof Error ? err.message : t("web.common.toast.profiles.avatarRemoveFailed"),
+      );
     },
   });
 }
@@ -309,11 +314,11 @@ export function useDeleteProfile() {
   return useMutation({
     mutationFn: (id: string) => v2("DELETE /api/v2/profiles/{id}", { path: { id } }),
     onSuccess: () => {
-      toast.success("Profile deleted");
+      toast.success(t("web.common.toast.profiles.deleted"));
       queryClient.invalidateQueries({ queryKey: profileKeys.list() });
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to delete");
+      toast.error(err instanceof Error ? err.message : t("web.common.toast.profiles.deleteFailed"));
     },
   });
 }

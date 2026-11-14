@@ -85,20 +85,12 @@ func TestBlockedProfileIsKeptOutOfRequestsAndDiscovery(t *testing.T) {
 			_, err := s.Search(ctx, v, "fight", MediaTypeMovie, 1)
 			return err
 		},
-		"discover": func(s *Service, v Viewer) error {
-			_, err := s.Discover(ctx, v, "trending_movies", 1)
-			return err
-		},
-		"discover all": func(s *Service, v Viewer) error {
-			_, err := s.DiscoverAll(ctx, v)
-			return err
-		},
 		"discover rows": func(s *Service, v Viewer) error {
 			_, err := s.DiscoverRows(ctx, v)
 			return err
 		},
 		"discover row": func(s *Service, v Viewer) error {
-			_, err := s.DiscoverRow(ctx, v, discoverrows.LegacyIDs()[0], 1)
+			_, err := s.DiscoverRow(ctx, v, discoverrows.DefaultRows()[0].ID, 1)
 			return err
 		},
 		"detail": func(s *Service, v Viewer) error {

@@ -249,8 +249,9 @@ func scopeInputFromParity(user *models.User, profile *userstore.Profile, disable
 		input.ProfileMaxRating = profile.MaxContentRating
 		input.ProfileMaxAdvisoryAge = profile.MaxAdvisoryAge
 		input.ProfileMaxQuality = profile.MaxPlaybackQuality
-		input.ProfileLibraryLimited = profile.LibraryRestrictionsEnabled
-		input.ProfileLibraryIDs = cloneParityInts(profile.AllowedLibraryIDs)
+		libraryIDs, libraryLimited := access.ProfileLibraryLimit(profile)
+		input.ProfileLibraryLimited = libraryLimited
+		input.ProfileLibraryIDs = cloneParityInts(libraryIDs)
 		input.ProfileHasPIN = profile.PINHash != ""
 		input.ProfileVerified = verified
 		// Hidden libraries are a profile-scoped row; without a profile there

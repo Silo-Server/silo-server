@@ -84,7 +84,7 @@ that list rather than trusting the queued credential. The Plex client removes
 `X-Plex-Token` from any redirect that leaves the first request's host or
 downgrades from HTTPS to HTTP, which `net/http` does not do for custom headers.
 
-Run monitors, v1 run responses, and realtime history-import events carry only
+Run monitors, run responses, and realtime history-import events carry only
 the fixed summaries from `historyimport.PublicRun`; stored diagnostics can hold
 an upstream response body and stay on the server.
 
@@ -104,9 +104,8 @@ Artwork Silo downloads on its own (metadata refresh, image-cache jobs, person
 images) comes from Public addresses only (`imagecache`). Provider artwork URLs
 are untrusted, so these downloads use the netguard transport too, checked on
 every dial and redirect; the cache keeps no address list of its own. An image
-an admin applies through `POST /api/v2/admin/items/{id}/images/apply` (and its v1
-counterpart) is trusted with the local network, like the import sources an
-admin configures. That covers a URL the admin typed and one picked from the
+an admin applies through `POST /api/v2/admin/items/{id}/images/apply` is
+trusted with the local network, like the import sources an admin configures. That covers a URL the admin typed and one picked from the
 provider list, since the server cannot tell them apart. The handler marks the
 request with `netguard.WithPrivateAccess`, and the download uses the netguard
 transport, which still refuses Blocked addresses on every dial and redirect.
@@ -154,9 +153,8 @@ Collection artwork downloads use the netguard transport with no fallback
 client (`newCollectionImageClient` in `internal/api/handlers`):
 
 - **Personal collection posters.** Any profile, including a child's, can set
-  one from a URL: `poster_source_url` on the v1 create and update and the v2
-  `createCollection`, and `source_url` on v2 `uploadCollectionPoster`. These
-  are Public only. Every refused address fails with the same error
+  one from a URL: `poster_source_url` on `createCollection`, and `source_url`
+  on `uploadCollectionPoster`. These are Public only. Every refused address fails with the same error
   (`errCollectionImageSourceNotAllowed`), whether something listens there or
   not, so the answer cannot be used to map the server's network.
 - **Library collection artwork.** The poster and backdrop source URLs on the
@@ -196,7 +194,14 @@ TLS handshake, response headers, and the body read-idle timeout) and no
 whole-request deadline. Requests are trusted with the local network so
 LAN-hosted repositories keep working. A blocked address, reached directly or by
 redirect, fails as a permanent `PackageError`, not a transient one, because a
-retry cannot change it.
+retry cannot change it. A release's Sigstore bundle (`bundle_url`) comes the
+same way, capped at 256 KiB.
+
+The Sigstore TUF metadata that release signatures are checked against
+([plugin trust](plugin-trust.md#release-signatures)) is fetched through the
+same netguard transport, but without the local-network trust: the mirror is
+Sigstore's public CDN, so those requests reach public addresses only. Each
+TUF download has a 30-second limit, because go-tuf's fetcher takes no context.
 
 ## Limits
 
@@ -209,7 +214,8 @@ that also applies to traffic from the container if that matters.
 
 Because guarded transports ignore proxy environment variables, a server whose
 only route to the internet is an HTTP proxy cannot download remote catalog
-seeds, plugin repository catalogs, or plugin packages.
+seeds, plugin repository catalogs, plugin packages, or the Sigstore TUF
+metadata, so it cannot verify plugin release signatures either.
 
 A resolver that answers public names with addresses netguard classes as
 Private makes those hosts unreachable for untrusted requests, provider artwork

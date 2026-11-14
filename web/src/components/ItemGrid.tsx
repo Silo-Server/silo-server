@@ -14,6 +14,7 @@ import type { BrowseItem } from "@/api/types";
 import ItemCard from "./ItemCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useGridLayout } from "@/hooks/useGridLayout";
+import { useT } from "@/i18n";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import { useUICustomization } from "@/hooks/useUICustomization";
@@ -135,6 +136,7 @@ function hasStaticItems(props: ItemGridProps): props is StaticItemGridProps {
 }
 
 export default function ItemGrid(props: ItemGridProps) {
+  const t = useT();
   const {
     loading,
     sortField,
@@ -637,7 +639,9 @@ export default function ItemGrid(props: ItemGridProps) {
         </div>
       ) : totalItems === 0 ? (
         (emptyState ?? (
-          <div className="text-muted-foreground py-12 text-center">No items found.</div>
+          <div className="text-muted-foreground py-12 text-center">
+            {t("web.catalog.grid.noItems")}
+          </div>
         ))
       ) : (
         <div

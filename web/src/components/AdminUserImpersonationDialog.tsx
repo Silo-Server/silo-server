@@ -5,6 +5,8 @@ import { captureAdminUserAuthority, requireAdminUserAuthority } from "@/api/v2/a
 import { useAdminUserCapabilities, useImpersonateUser } from "@/hooks/queries/admin/users";
 import { useAuth } from "@/hooks/useAuth";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { useT } from "@/i18n";
+import { TOUCH_TARGETS } from "@/lib/touchTargets";
 
 export function AdminUserImpersonationDialog({
   user,
@@ -17,6 +19,7 @@ export function AdminUserImpersonationDialog({
   onClose: () => void;
   onError: (message: string) => void;
 }) {
+  const t = useT();
   const navigate = useNavigate();
   const { beginImpersonation } = useAuth();
   const [authority] = useState(captureAdminUserAuthority);
@@ -30,13 +33,14 @@ export function AdminUserImpersonationDialog({
       onOpenChange={(open) => {
         if (!open && !busy.current) onClose();
       }}
-      title="View as user"
+      title={t("web.admin.users.impersonateDialog.title")}
       description={
         user.role === "admin"
-          ? `Continue as "${user.username}"? Actions you take will run as this admin, with their access, until you end this session.`
-          : `Continue as "${user.username}"? Actions you take will run as this user. Admin access will be unavailable until you end this session.`
+          ? t("web.admin.users.impersonateDialog.descriptionAdmin", { username: user.username })
+          : t("web.admin.users.impersonateDialog.descriptionUser", { username: user.username })
       }
-      confirmLabel="View as user"
+      confirmLabel={t("web.admin.users.impersonateDialog.confirm")}
+      className={TOUCH_TARGETS}
       isPending={impersonateMutation.isPending}
       onConfirm={() => {
         // Callers offer only accounts the viewer may view as
@@ -54,7 +58,9 @@ export function AdminUserImpersonationDialog({
             navigate("/profiles");
           })
           .catch((err: unknown) => {
-            onError(err instanceof Error ? err.message : "Could not start viewing as this user.");
+            onError(
+              err instanceof Error ? err.message : t("web.admin.users.impersonateDialog.failed"),
+            );
           })
           .finally(() => {
             busy.current = false;

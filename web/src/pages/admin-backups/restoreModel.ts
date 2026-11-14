@@ -1,3 +1,5 @@
+import { t, type MessageKey, type TextValues } from "@/i18n";
+import { appLanguage } from "@/lib/appLocale";
 import { DATA_TYPE_IDS, DATA_TYPE_PHRASES, pendingCount } from "@/lib/profileDataTypes";
 import type {
   RestoreDataTypeId,
@@ -17,58 +19,45 @@ import type {
  * or not offering it. Typed over the contract's reasons, so a new reason fails
  * the type check until it has a sentence here.
  */
-export const REASON_SENTENCES: Record<RestoreReason, string> = {
-  same: "It's already the same on this server.",
-  path_in_use: "A folder of this library belongs to another library on this server.",
-  folder_missing: "This server can't open one of the library's folders.",
-  library_not_restorable: "Its library can't be restored on this server.",
-  library_not_mapped: "Its library isn't on this server, and it wasn't chosen with it.",
-  ambiguous_name:
-    "More than one collection here has this name, so Silo can't tell which one to add to.",
-  needs_another_key: "It was encrypted with a different SECRET_KEY, so this server can't read it.",
-  config_needs_another_key:
-    "Its settings were encrypted with a different SECRET_KEY, so it installs without them and stays off.",
-  other_version: "Another version is installed here, so only its settings are restored.",
-  item_not_on_this_server: "The title it belongs to isn't in this server's catalog.",
-  file_missing: "Its image was missing when the backup was taken.",
-  not_in_backup: "The backup doesn't have it.",
-  changed_since_preview:
-    "This server changed after the preview. Open the restore again to see it as it is now.",
-  ambiguous_account:
-    "More than one account here matches its username or email, so Silo can't tell which one it is.",
-  ambiguous_profile:
-    "More than one profile on the account here has this name, so Silo can't tell which one it is.",
-  policy_wider: "This server would give it more access than it had in the backup.",
-  group_not_on_this_server:
-    "Its access group isn't on this server. Create a group with the same name, then open the restore again.",
-  login_taken: "Another account here signs in with its username or email.",
-  profile_limit: "The account here has no room for another profile.",
-  needs_primary_profile:
-    "Its primary profile has to be restored with it: only a primary profile manages the household.",
-  user_store_unsupported: "Accounts can be restored only on the PostgreSQL user store.",
-  template_not_available:
-    "This server's starter packs don't have its template, or the template doesn't suit the library.",
-  collection_not_mapped:
-    "The collection it shows isn't on this server or in the backup, so there's nothing for it to show.",
-  unreadable: "The backup's copy of it can't be read, so it was left out.",
-  files_missing_here: "Its files are missing on this server. Restoring writes them back.",
-  needs_install:
-    "It isn't installed here. Install it from a plugin catalog, then restore it again for its settings. A restore never installs a plugin from a backup.",
-  kept_stricter:
-    "Its settings that differ would widen access, so this server keeps its stricter current values.",
-  unverified_backup:
-    "It connects to outside services, so it isn't restored from a backup this server can't verify.",
-  over_restore_budget:
-    "This restore already wrote as much collection detail as one restore may. Restore it on its own.",
+export const REASON_SENTENCES: Record<RestoreReason, MessageKey> = {
+  same: "web.admin.backups.restore.reason.same",
+  path_in_use: "web.admin.backups.restore.reason.pathInUse",
+  folder_missing: "web.admin.backups.restore.reason.folderMissing",
+  library_not_restorable: "web.admin.backups.restore.reason.libraryNotRestorable",
+  library_not_mapped: "web.admin.backups.restore.reason.libraryNotMapped",
+  ambiguous_name: "web.admin.backups.restore.reason.ambiguousName",
+  needs_another_key: "web.admin.backups.restore.reason.needsAnotherKey",
+  config_needs_another_key: "web.admin.backups.restore.reason.configNeedsAnotherKey",
+  other_version: "web.admin.backups.restore.reason.otherVersion",
+  item_not_on_this_server: "web.admin.backups.restore.reason.itemNotOnThisServer",
+  file_missing: "web.admin.backups.restore.reason.fileMissing",
+  not_in_backup: "web.admin.backups.restore.reason.notInBackup",
+  changed_since_preview: "web.admin.backups.restore.reason.changedSincePreview",
+  ambiguous_account: "web.admin.backups.restore.reason.ambiguousAccount",
+  ambiguous_profile: "web.admin.backups.restore.reason.ambiguousProfile",
+  policy_wider: "web.admin.backups.restore.reason.policyWider",
+  group_not_on_this_server: "web.admin.backups.restore.reason.groupNotOnThisServer",
+  login_taken: "web.admin.backups.restore.reason.loginTaken",
+  profile_limit: "web.admin.backups.restore.reason.profileLimit",
+  needs_primary_profile: "web.admin.backups.restore.reason.needsPrimaryProfile",
+  user_store_unsupported: "web.admin.backups.restore.reason.userStoreUnsupported",
+  template_not_available: "web.admin.backups.restore.reason.templateNotAvailable",
+  collection_not_mapped: "web.admin.backups.restore.reason.collectionNotMapped",
+  unreadable: "web.admin.backups.restore.reason.unreadable",
+  files_missing_here: "web.admin.backups.restore.reason.filesMissingHere",
+  needs_install: "web.admin.backups.restore.reason.needsInstall",
+  kept_stricter: "web.admin.backups.restore.reason.keptStricter",
+  unverified_backup: "web.admin.backups.restore.reason.unverifiedBackup",
+  over_restore_budget: "web.admin.backups.restore.reason.overRestoreBudget",
 };
 
-export const SECTION_TITLES: Record<RestoreSectionId, string> = {
-  libraries: "Libraries",
-  plugins: "Plugins",
-  settings: "Settings",
-  home_sections: "Home and library sections",
-  users: "Users",
-  collections: "Collections and artwork",
+export const SECTION_TITLES: Record<RestoreSectionId, MessageKey> = {
+  libraries: "web.admin.backups.restore.section.libraries",
+  plugins: "web.admin.backups.restore.section.plugins",
+  settings: "web.admin.backups.restore.section.settings",
+  home_sections: "web.admin.backups.restore.section.homeSections",
+  users: "web.admin.backups.restore.section.users",
+  collections: "web.admin.backups.restore.section.collections",
 };
 
 /** On unless the admin turns them off: data a person would miss. Preferences overwrite, so they start off. */
@@ -80,45 +69,27 @@ export const DEFAULT_DATA_TYPES: ReadonlySet<RestoreDataTypeId> = new Set([
   "dismissals",
 ]);
 
-const POLICY_FIELDS: Record<RestorePolicyDifference["field"], string> = {
-  library_ids: "libraries",
-  max_playback_quality: "playback quality",
-  max_streams: "streams at once",
-  max_transcodes: "transcodes at once",
-  max_remote_stream_bitrate_kbps: "remote streaming bitrate",
-  max_local_stream_bitrate_kbps: "local streaming bitrate",
-  max_profiles: "profiles",
-  download_allowed: "downloads",
-  download_transcode_allowed: "converted downloads",
-  transcode_allowed: "transcoding",
-  audio_transcode_allowed: "audio transcoding",
-  requests_allowed: "requests",
-  permissions: "permissions",
-};
-
 /** Why a new account can't be created: "This server's Kids group allows more streams at once than the backup did." */
 export function policyDifferenceSentence(
   group: string | undefined,
   difference: RestorePolicyDifference,
 ): string {
-  const who = group ? `This server's ${group} group` : "This server's default access";
-  return `${who} allows more ${POLICY_FIELDS[difference.field]} than the backup did (${difference.here} here, ${difference.backup} in the backup).`;
+  const values = { field: difference.field, here: difference.here, backup: difference.backup };
+  return group
+    ? t("web.admin.backups.restore.policy.group", { ...values, group })
+    : t("web.admin.backups.restore.policy.default", values);
 }
 
 /**
  * Why a restore stopped or never started, for every code the report gives.
  * Typed over the contract's codes, like {@link REASON_SENTENCES}.
  */
-export const REPORT_ERROR_SENTENCES: Record<RestoreErrorCode, string> = {
-  restore_set_changed:
-    "The backup changed after the preview, so nothing was restored. Open the restore again to see it as it is now.",
-  busy: "Another backup or restore was running, so nothing was restored. Try again when it finishes.",
-  before_restore_backup_failed:
-    "Silo couldn't save a backup of this server first, so nothing was restored.",
-  interrupted:
-    "The restore stopped before it finished. Items above were committed; running the same restore again is safe.",
-  failed:
-    "The restore failed before it finished. Items above were committed; running the same restore again is safe.",
+export const REPORT_ERROR_SENTENCES: Record<RestoreErrorCode, MessageKey> = {
+  restore_set_changed: "web.admin.backups.restore.reportError.restoreSetChanged",
+  busy: "web.admin.backups.restore.reportError.busy",
+  before_restore_backup_failed: "web.admin.backups.restore.reportError.beforeRestoreBackupFailed",
+  interrupted: "web.admin.backups.restore.reportError.interrupted",
+  failed: "web.admin.backups.restore.reportError.failed",
 };
 
 /**
@@ -129,14 +100,14 @@ export function neverRestoredSettings(entries: readonly string[]): string[] {
   return entries.map((entry) => (/[._]$/.test(entry) ? `${entry}*` : entry));
 }
 
-function plural(count: number, one: string, many = `${one}s`): string {
-  return `${count} ${count === 1 ? one : many}`;
+/** A message whose plural selects on `count`, which it prints as `count_text`. */
+function counted(key: MessageKey, count: number, values: TextValues = {}): string {
+  return t(key, { ...values, count, count_text: count });
 }
 
-/** "a", "a and b", "a, b, and c". */
+/** "a", "a and b", "a, b, and c" in English: the interface language's list. */
 function listPhrase(parts: readonly string[]): string {
-  if (parts.length <= 2) return parts.join(" and ");
-  return `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}`;
+  return new Intl.ListFormat(appLanguage(), { style: "long", type: "conjunction" }).format(parts);
 }
 
 /**
@@ -210,13 +181,13 @@ function entryRequires(entry: IndexEntry): readonly string[] {
  * Branding assets by setting key, named as Appearance settings names them
  * (internal/branding/assets.go holds the list).
  */
-const BRANDING_NAMES: Record<string, string> = {
-  "branding.wordmark_ref": "logo (wordmark)",
-  "branding.wordmark_light_ref": "logo (wordmark) for light themes",
-  "branding.mark_ref": "logo (icon)",
-  "branding.mark_light_ref": "logo (icon) for light themes",
-  "branding.favicon_ref": "favicon",
-  "branding.login_bg_ref": "login background",
+const BRANDING_NAMES: Record<string, MessageKey> = {
+  "branding.wordmark_ref": "web.admin.backups.restore.branding.wordmark",
+  "branding.wordmark_light_ref": "web.admin.backups.restore.branding.wordmarkLight",
+  "branding.mark_ref": "web.admin.backups.restore.branding.mark",
+  "branding.mark_light_ref": "web.admin.backups.restore.branding.markLight",
+  "branding.favicon_ref": "web.admin.backups.restore.branding.favicon",
+  "branding.login_bg_ref": "web.admin.backups.restore.branding.loginBackground",
 };
 
 /**
@@ -225,13 +196,12 @@ const BRANDING_NAMES: Record<string, string> = {
  * reads "banner".
  */
 function brandingName(key: string): string {
-  return (
-    BRANDING_NAMES[key] ??
-    key
-      .replace(/^branding\./, "")
-      .replace(/_ref$/, "")
-      .replaceAll("_", " ")
-  );
+  const known = Object.hasOwn(BRANDING_NAMES, key) ? BRANDING_NAMES[key] : undefined;
+  if (known) return t(known);
+  return key
+    .replace(/^branding\./, "")
+    .replace(/_ref$/, "")
+    .replaceAll("_", " ");
 }
 
 /** An item's name for display: branding items carry a setting key as their label. */
@@ -240,24 +210,27 @@ export function displayLabel(item: { kind: RestoreItem["kind"]; label: string })
 }
 
 function itemName(entry: IndexEntry): string {
-  if (entry.type === "profile") return `the profile ${entry.profile.name}`;
+  if (entry.type === "profile") {
+    return t("web.admin.backups.restore.itemName.profile", { name: entry.profile.name });
+  }
+  const name = entry.item.label;
   switch (entry.item.kind) {
     case "library":
-      return `the ${entry.item.label} library`;
+      return t("web.admin.backups.restore.itemName.library", { name });
     case "settings_page":
-      return `the ${entry.item.label} page`;
+      return t("web.admin.backups.restore.itemName.page", { name });
     case "collection":
-      return `the ${entry.item.label} collection`;
+      return t("web.admin.backups.restore.itemName.collection", { name });
     case "template_collection":
-      return `the starter-pack collection ${entry.item.label}`;
+      return t("web.admin.backups.restore.itemName.template", { name });
     case "home_section":
-      return `the section ${entry.item.label}`;
+      return t("web.admin.backups.restore.itemName.section", { name });
     case "branding":
-      return `the branding ${brandingName(entry.item.label)}`;
+      return t("web.admin.backups.restore.itemName.branding", { name: brandingName(name) });
     case "account":
-      return `the account ${entry.item.label}`;
+      return t("web.admin.backups.restore.itemName.account", { name });
     default:
-      return entry.item.label;
+      return name;
   }
 }
 
@@ -298,7 +271,10 @@ export function chooseItems(
   const notices = [...blocked];
   if (added.length > 0) {
     notices.push(
-      `Also chose ${joinNames(added.map(itemName))}, which ${added.length === 1 ? "is" : "are"} needed by what you chose.`,
+      t("web.admin.backups.restore.notice.alsoChose", {
+        count: added.length,
+        names: joinNames(added.map(itemName)),
+      }),
     );
   }
   return { selection: next, notice: notices.length > 0 ? notices.join(" ") : null };
@@ -320,13 +296,18 @@ function requirementsOf(
     if (!dependency) {
       return {
         required,
-        problem: `${capitalize(itemName(entry))} needs a library that isn't in this backup.`,
+        problem: t("web.admin.backups.restore.notice.needsMissingLibrary", {
+          item: capitalize(itemName(entry)),
+        }),
       };
     }
     if (!entrySelectable(dependency)) {
       return {
         required,
-        problem: `${capitalize(itemName(entry))} needs ${itemName(dependency)}, which can't be restored.`,
+        problem: t("web.admin.backups.restore.notice.needsBlocked", {
+          item: capitalize(itemName(entry)),
+          dependency: itemName(dependency),
+        }),
       };
     }
     required.push(dependency);
@@ -360,10 +341,10 @@ export function unchooseItems(
   const names =
     dependents.length <= 3
       ? joinNames(dependents.map(itemName))
-      : plural(dependents.length, "item");
+      : counted("web.admin.backups.restore.notice.itemCount", dependents.length);
   return {
     selection: next,
-    notice: `Also unchose ${names}, which ${dependents.length === 1 ? "needs" : "need"} what you unchose.`,
+    notice: t("web.admin.backups.restore.notice.alsoUnchose", { count: dependents.length, names }),
   };
 }
 
@@ -371,8 +352,15 @@ function capitalize(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
+/**
+ * Names as a list. English keeps its "a, b and c" (no serial comma); other
+ * languages use their own list pattern.
+ */
 function joinNames(names: string[]): string {
   if (names.length <= 1) return names[0] ?? "";
+  if (appLanguage() !== "en") {
+    return new Intl.ListFormat(appLanguage(), { style: "long", type: "conjunction" }).format(names);
+  }
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
@@ -476,57 +464,69 @@ export function differingSettings(item: RestoreItem) {
 /** What restoring one item does, as a sentence for "Silo will". */
 function itemSentence(entry: IndexedItem): string {
   const { item } = entry;
+  const name = item.label;
   switch (item.kind) {
     case "library":
       return item.status === "not_on_this_server"
-        ? `Add the ${item.label} library and scan it`
-        : `Update ${item.label} to match the backup`;
+        ? t("web.admin.backups.restore.plan.libraryAdd", { name })
+        : t("web.admin.backups.restore.plan.libraryUpdate", { name });
     case "plugin": {
       const plugin = item.plugin;
       if (plugin?.installed_version) {
         return plugin.installed_version === plugin.version
-          ? `Restore the settings of ${item.label}`
-          : `Restore the settings of ${item.label} on the installed ${plugin.installed_version}`;
+          ? t("web.admin.backups.restore.plan.pluginSettings", { name })
+          : t("web.admin.backups.restore.plan.pluginSettingsOtherVersion", {
+              name,
+              version: plugin.installed_version,
+            });
       }
       if (plugin && !plugin.config_restorable)
-        return `Install ${item.label}, turned off and without its settings`;
-      if (plugin && plugin.config_keys.length > 0) return `Install ${item.label} with its settings`;
-      return `Install ${item.label}`;
+        return t("web.admin.backups.restore.plan.pluginInstallOff", { name });
+      if (plugin && plugin.config_keys.length > 0)
+        return t("web.admin.backups.restore.plan.pluginInstallWithSettings", { name });
+      return t("web.admin.backups.restore.plan.pluginInstall", { name });
     }
-    case "settings_page": {
-      const changed = differingSettings(item).length;
-      const outside = item.external_service
-        ? ", including some that connect to an outside service"
-        : "";
-      return `Replace ${plural(changed, "setting")} on the ${item.label} page${outside}`;
-    }
+    case "settings_page":
+      return counted(
+        item.external_service
+          ? "web.admin.backups.restore.plan.settingsPageExternal"
+          : "web.admin.backups.restore.plan.settingsPage",
+        differingSettings(item).length,
+        { name },
+      );
     case "account":
       return item.account?.target === "new"
-        ? `Create the account ${item.label}`
-        : `Merge ${item.label} into the matching account here`;
+        ? t("web.admin.backups.restore.plan.accountCreate", { name })
+        : t("web.admin.backups.restore.plan.accountMerge", { name });
     case "collection": {
       const collection = item.collection;
       if (item.status === "not_on_this_server") {
         return collection
-          ? `Create the ${item.label} collection with ${plural(collection.items - collection.unknown_items, "item")}`
-          : `Create the ${item.label} collection`;
+          ? counted(
+              "web.admin.backups.restore.plan.collectionCreateWithItems",
+              collection.items - collection.unknown_items,
+              { name },
+            )
+          : t("web.admin.backups.restore.plan.collectionCreate", { name });
       }
       return collection
-        ? `Add ${plural(collection.missing_items, "item")} to the ${item.label} collection`
-        : `Add the missing items to the ${item.label} collection`;
+        ? counted("web.admin.backups.restore.plan.collectionAddItems", collection.missing_items, {
+            name,
+          })
+        : t("web.admin.backups.restore.plan.collectionAddMissing", { name });
     }
     case "template_collection":
       return item.collection?.local_id
-        ? `Apply your changes to the starter-pack collection ${item.label}`
-        : `Recreate the starter-pack collection ${item.label} with its settings`;
+        ? t("web.admin.backups.restore.plan.templateApply", { name })
+        : t("web.admin.backups.restore.plan.templateRecreate", { name });
     case "home_section":
       return item.home_section?.local_id
-        ? `Replace the section ${item.label}`
-        : `Add the section ${item.label}`;
+        ? t("web.admin.backups.restore.plan.sectionReplace", { name })
+        : t("web.admin.backups.restore.plan.sectionAdd", { name });
     case "item_artwork":
-      return `Restore the uploaded ${item.label}`;
+      return t("web.admin.backups.restore.plan.artwork", { name });
     case "branding":
-      return `Restore the branding ${brandingName(item.label)}`;
+      return t("web.admin.backups.restore.plan.branding", { name: brandingName(name) });
   }
 }
 
@@ -544,23 +544,33 @@ function usersSentences(
   if (merged.length > 0) {
     const profiles = profileCount(merged);
     sentences.push(
-      `Merge ${plural(merged.length, "account")}${profiles > 0 ? ` (${plural(profiles, "profile")})` : ""} into the matching ${merged.length === 1 ? "account" : "accounts"} here`,
+      profiles > 0
+        ? counted("web.admin.backups.restore.plan.mergeAccountsWithProfiles", merged.length, {
+            profiles: counted("web.admin.backups.restore.plan.profileCount", profiles),
+          })
+        : counted("web.admin.backups.restore.plan.mergeAccounts", merged.length),
     );
   }
   if (created.length > 0) {
     const profiles = profileCount(created);
     sentences.push(
-      `Create ${created.length} new ${created.length === 1 ? "account" : "accounts"}${profiles > 0 ? ` with ${plural(profiles, "profile")}` : ""}`,
+      profiles > 0
+        ? counted("web.admin.backups.restore.plan.createAccountsWithProfiles", created.length, {
+            profiles: counted("web.admin.backups.restore.plan.profileCount", profiles),
+          })
+        : counted("web.admin.backups.restore.plan.createAccounts", created.length),
     );
   }
   if (profileCount(accounts) > 0) {
     const types = chosenDataTypes(accounts, selection, dataTypes);
     sentences.push(
       types.length > 0
-        ? `Restore their ${listPhrase(types.map((id) => DATA_TYPE_PHRASES[id]))}`
+        ? t("web.admin.backups.restore.plan.restoreData", {
+            data: listPhrase(types.map((id) => DATA_TYPE_PHRASES[id])),
+          })
         : dataTypes.size > 0
-          ? "Nothing to merge for the chosen data"
-          : "Restore the chosen profiles without their data",
+          ? t("web.admin.backups.restore.plan.nothingToMerge")
+          : t("web.admin.backups.restore.plan.profilesWithoutData"),
     );
   }
   return sentences;
@@ -578,14 +588,10 @@ function itemSentences(entries: readonly IndexedItem[]): string[] {
     .filter((entry) => entry.item.kind !== "template_collection")
     .map((entry) => itemSentence(entry));
   if (recreated > 0) {
-    sentences.push(
-      `Recreate ${plural(recreated, "starter-pack collection")} and ${recreated === 1 ? "its" : "their"} settings`,
-    );
+    sentences.push(counted("web.admin.backups.restore.plan.templatesRecreate", recreated));
   }
   if (updated > 0) {
-    sentences.push(
-      `Apply your changes to ${plural(updated, "starter-pack collection")} already here`,
-    );
+    sentences.push(counted("web.admin.backups.restore.plan.templatesApply", updated));
   }
   return sentences;
 }
@@ -595,9 +601,11 @@ function homeSectionSentences(entries: readonly IndexedItem[]): string[] {
   if (entries.length === 0) return [];
   const scopes = new Set(entries.map((entry) => entry.item.home_section?.scope ?? "home"));
   const count = entries.length;
-  if (scopes.size === 1 && scopes.has("home")) return [`Restore ${plural(count, "home section")}`];
-  if (scopes.size === 1) return [`Restore ${plural(count, "library page section")}`];
-  return [`Restore ${plural(count, "section")} on Home and library pages`];
+  if (scopes.size === 1 && scopes.has("home"))
+    return [counted("web.admin.backups.restore.plan.homeSections", count)];
+  if (scopes.size === 1)
+    return [counted("web.admin.backups.restore.plan.libraryPageSections", count)];
+  return [counted("web.admin.backups.restore.plan.mixedSections", count)];
 }
 
 export interface PlanSection {
@@ -618,7 +626,7 @@ export function restorePlan(
       const inSection = chosen.filter((entry) => entry.section === section.id);
       return {
         section: section.id,
-        title: SECTION_TITLES[section.id],
+        title: t(SECTION_TITLES[section.id]),
         sentences:
           section.id === "users"
             ? usersSentences(inSection, selection, dataTypes)
@@ -637,7 +645,7 @@ export interface Caveat {
 }
 
 function libraryAccessDropped(count: number): string {
-  return `${plural(count, "library", "libraries")} in its library access ${count === 1 ? "isn't" : "aren't"} on this server and ${count === 1 ? "is" : "are"} dropped. Nothing is widened.`;
+  return counted("web.admin.backups.restore.caveat.librariesDropped", count);
 }
 
 /** What a chosen item leaves out or needs afterwards, for review's "Left out" list. */
@@ -648,54 +656,39 @@ export function restoreCaveats(set: RestoreSet, selection: SelectionKeys): Cavea
     const add = (suffix: string, text: string, label = displayLabel(item)) =>
       caveats.push({ key: `${entry.key}:${suffix}`, label, text });
     if (item.reason === "other_version" || item.reason === "config_needs_another_key") {
-      add("reason", REASON_SENTENCES[item.reason]);
+      add("reason", t(REASON_SENTENCES[item.reason]));
     }
     if (item.missing_blobs.length > 0) {
       add(
         "files",
-        `${plural(item.missing_blobs.length, "file was", "files were")} missing when the backup was taken and ${item.missing_blobs.length === 1 ? "is" : "are"} left out.`,
+        counted("web.admin.backups.restore.caveat.filesMissing", item.missing_blobs.length),
       );
     }
     const otherKey = (item.settings ?? []).filter(
       (setting) => setting.status === "needs_another_key",
     ).length;
     if (otherKey > 0) {
-      add(
-        "key",
-        `${plural(otherKey, "encrypted setting")} saved with a different SECRET_KEY ${otherKey === 1 ? "is" : "are"} left out.`,
-      );
+      add("key", counted("web.admin.backups.restore.caveat.otherKeySettings", otherKey));
     }
     const stricter = (item.settings ?? []).filter(
       (setting) => setting.status === "kept_stricter",
     ).length;
     const cleared = (item.settings ?? []).filter((setting) => setting.status === "cleared").length;
     if (cleared > 0) {
-      add(
-        "cleared",
-        "A service's address changes without its credentials in the backup, so restoring clears them here and turns the service off until they're entered again.",
-      );
+      add("cleared", t("web.admin.backups.restore.caveat.credentialsCleared"));
     }
     const unverified = (item.settings ?? []).filter(
       (setting) => setting.status === "unverified_backup",
     ).length;
     if (unverified > 0) {
-      add(
-        "unverified",
-        `${plural(unverified, "setting")} that ${unverified === 1 ? "connects" : "connect"} to outside services ${unverified === 1 ? "isn't" : "aren't"} restored from a backup this server can't verify.`,
-      );
+      add("unverified", counted("web.admin.backups.restore.caveat.unverifiedSettings", unverified));
     }
     if (stricter > 0) {
-      add(
-        "stricter",
-        `${plural(stricter, "setting")} would widen access, so this server keeps ${stricter === 1 ? "its" : "their"} stricter current ${stricter === 1 ? "value" : "values"}.`,
-      );
+      add("stricter", counted("web.admin.backups.restore.caveat.stricterSettings", stricter));
     }
     const unknown = item.collection?.unknown_items ?? 0;
     if (unknown > 0) {
-      add(
-        "unknown",
-        `${plural(unknown, "item")} ${unknown === 1 ? "isn't" : "aren't"} in this server's catalog and ${unknown === 1 ? "is" : "are"} left out.`,
-      );
+      add("unknown", counted("web.admin.backups.restore.caveat.unknownItems", unknown));
     }
     if (item.restart_required) {
       const keys = differingSettings(item)
@@ -704,14 +697,14 @@ export function restoreCaveats(set: RestoreSet, selection: SelectionKeys): Cavea
       add(
         "restart",
         keys.length > 0
-          ? `Applies after a restart: ${keys.join(", ")}.`
-          : "Applies after a restart.",
+          ? t("web.admin.backups.restore.caveat.restartKeys", { keys: keys.join(", ") })
+          : t("web.admin.backups.restore.caveat.restart"),
       );
     }
     const account = item.account;
     if (account) {
       if (account.admin && account.target === "new") {
-        add("admin", "It's an administrator, so restoring it creates an administrator here.");
+        add("admin", t("web.admin.backups.restore.caveat.administrator"));
       }
       if (account.libraries_left_out > 0) {
         add("account-libraries", libraryAccessDropped(account.libraries_left_out));
@@ -722,15 +715,20 @@ export function restoreCaveats(set: RestoreSet, selection: SelectionKeys): Cavea
       if (extra > 0) {
         add(
           "room",
-          `There's room for ${plural(account.profile_room, "more profile")} on this account here, so ${plural(extra, "chosen profile is", "chosen profiles are")} left out.`,
+          counted("web.admin.backups.restore.caveat.noRoom", extra, {
+            room: counted("web.admin.backups.restore.caveat.roomCount", account.profile_room),
+          }),
         );
       }
       for (const profile of profiles) {
-        const label = `${item.label}, ${profile.name}`;
+        const label = t("web.admin.backups.restore.caveat.profileLabel", {
+          account: item.label,
+          profile: profile.name,
+        });
         if (profile.no_library_access) {
           add(
             `profile:${profile.id}:access`,
-            "None of its allowed libraries are on this server, so it's restored with no library access.",
+            t("web.admin.backups.restore.caveat.noLibraryAccess"),
             label,
           );
         } else if (profile.libraries_left_out > 0) {
@@ -749,10 +747,18 @@ export function restoreCaveats(set: RestoreSet, selection: SelectionKeys): Cavea
 /** The report's one-line result: "Restored 2 items, 1 left out, nothing failed." */
 export function reportHeadline(counts: RestoreReport["counts"]): string {
   const parts = [
-    counts.restored > 0 ? `Restored ${plural(counts.restored, "item")}` : "Restored nothing",
+    counts.restored > 0
+      ? counted("web.admin.backups.restore.report.restored", counts.restored)
+      : t("web.admin.backups.restore.report.restoredNothing"),
   ];
-  if (counts.unchanged > 0) parts.push(`${counts.unchanged} already the same`);
-  if (counts.left_out > 0) parts.push(`${counts.left_out} left out`);
-  parts.push(counts.failed > 0 ? `${counts.failed} failed` : "nothing failed");
-  return `${parts.join(", ")}.`;
+  if (counts.unchanged > 0)
+    parts.push(counted("web.admin.backups.restore.report.unchanged", counts.unchanged));
+  if (counts.left_out > 0)
+    parts.push(counted("web.admin.backups.restore.report.leftOut", counts.left_out));
+  parts.push(
+    counts.failed > 0
+      ? counted("web.admin.backups.restore.report.failed", counts.failed)
+      : t("web.admin.backups.restore.report.nothingFailed"),
+  );
+  return t("web.admin.backups.restore.report.headline", { parts: parts.join(", ") });
 }

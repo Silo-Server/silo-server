@@ -7,9 +7,11 @@ import { formatRelativeTime } from "@/lib/date";
 import { cn } from "@/lib/utils";
 import type { ResourceMetric, ResourceSamplePresentation } from "@/pages/adminNodesPresentation";
 import { describeResourceSample } from "@/pages/adminNodesPresentation";
+import { useT } from "@/i18n";
 
 /** CPU, memory, and GPU usage on the API host itself. */
 export function ServerResourcesWidget() {
+  const t = useT();
   const pageActivity = usePageActivity();
   const resourcesQuery = useSystemResources(pageActivity.canPollDashboard);
 
@@ -18,13 +20,18 @@ export function ServerResourcesWidget() {
   const sample = describeResourceSample(resourcesQuery.isError ? undefined : resourcesQuery.data);
   const sampledLabel =
     sample.kind === "sampled"
-      ? formatRelativeTime(sample.sampledAt, { rounding: "floor", justNowLabel: "just now" })
+      ? formatRelativeTime(sample.sampledAt, {
+          rounding: "floor",
+          justNowLabel: t("web.admin.dashboard.widgets.serverResources.justNow"),
+        })
       : null;
 
   return (
     <Card className="h-full gap-2 py-4">
       <CardHeader className="flex shrink-0 flex-row items-center justify-between space-y-0 pb-3">
-        <CardTitle className="text-sm font-bold">Server resources</CardTitle>
+        <CardTitle className="text-sm font-bold">
+          {t("web.admin.dashboard.widgets.serverResources.title")}
+        </CardTitle>
         {sampledLabel ? (
           <span
             className={cn(
@@ -32,7 +39,12 @@ export function ServerResourcesWidget() {
               sample.kind === "sampled" && sample.stale ? "text-warning" : "text-muted-foreground",
             )}
           >
-            {sample.kind === "sampled" && sample.stale ? "Stale · " : ""}Sampled {sampledLabel}
+            {t(
+              sample.kind === "sampled" && sample.stale
+                ? "web.admin.dashboard.widgets.serverResources.sampledStale"
+                : "web.admin.dashboard.widgets.serverResources.sampled",
+              { time: sampledLabel },
+            )}
           </span>
         ) : null}
       </CardHeader>
@@ -60,6 +72,7 @@ function SampledResources({
 }: {
   sample: Extract<ResourceSamplePresentation, { kind: "sampled" }>;
 }) {
+  const t = useT();
   return (
     <div className={cn("flex min-h-full flex-col", sample.stale && "opacity-60")}>
       {/*
@@ -69,19 +82,40 @@ function SampledResources({
         space above the footer.
       */}
       <div className="grid flex-1 grid-cols-[auto_minmax(2rem,1fr)_auto_fit-content(40%)] content-center items-center gap-x-3 gap-y-2.5 text-sm">
-        <ResourceRow label="CPU" metric={sample.cpu} />
-        <ResourceRow label="Memory" metric={sample.memory} />
-        {sample.gpu ? <ResourceRow label="GPU" metric={sample.gpu} /> : null}
+        <ResourceRow
+          label={t("web.admin.dashboard.widgets.serverResources.cpu")}
+          metric={sample.cpu}
+        />
+        <ResourceRow
+          label={t("web.admin.dashboard.widgets.serverResources.memory")}
+          metric={sample.memory}
+        />
+        {sample.gpu ? (
+          <ResourceRow
+            label={t("web.admin.dashboard.widgets.serverResources.gpu")}
+            metric={sample.gpu}
+          />
+        ) : null}
       </div>
       {/* Every footer reading comes from attribution, which an older server omits. */}
       {sample.processMemory ? (
         <div className="border-border/60 text-muted-foreground mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t pt-2 text-[11px]">
-          <ResourceFootnote label="Silo process" metric={sample.processMemory} />
+          <ResourceFootnote
+            label={t("web.admin.dashboard.widgets.serverResources.siloProcess")}
+            metric={sample.processMemory}
+          />
           {sample.heapMemory ? (
-            <ResourceFootnote label="Go heap" metric={sample.heapMemory} />
+            <ResourceFootnote
+              label={t("web.admin.dashboard.widgets.serverResources.goHeap")}
+              metric={sample.heapMemory}
+            />
           ) : null}
           {sample.instanceID ? (
-            <span title={sample.instanceID}>API instance {sample.instanceID.slice(0, 8)}</span>
+            <span title={sample.instanceID}>
+              {t("web.admin.dashboard.widgets.serverResources.apiInstance", {
+                id: sample.instanceID.slice(0, 8),
+              })}
+            </span>
           ) : null}
         </div>
       ) : null}
@@ -95,14 +129,18 @@ function SampledResources({
  * which is worth knowing but not worth the space on every row.
  */
 function ResourceRow({ label, metric }: { label: string; metric: ResourceMetric }) {
-  const title = `${metric.label}: ${metric.title}`;
+  const t = useT();
+  const title = t("web.admin.dashboard.widgets.serverResources.metricTitle", {
+    label: metric.label,
+    title: metric.title,
+  });
   return (
     <>
       <span title={title}>{label}</span>
       <LoadMeter fill={metric.fill} />
       <span
         className={cn(
-          "text-right font-semibold tabular-nums",
+          "text-end font-semibold tabular-nums",
           metric.muted && "text-muted-foreground",
         )}
         title={title}
@@ -117,12 +155,17 @@ function ResourceRow({ label, metric }: { label: string; metric: ResourceMetric 
 }
 
 function ResourceFootnote({ label, metric }: { label: string; metric: ResourceMetric }) {
+  const t = useT();
   return (
     <span title={metric.title}>
-      {label}{" "}
-      <span className={cn("font-semibold tabular-nums", !metric.muted && "text-foreground")}>
-        {metric.value}
-      </span>
+      {t("web.admin.dashboard.widgets.serverResources.footnote", {
+        label,
+        value: (
+          <span className={cn("font-semibold tabular-nums", !metric.muted && "text-foreground")}>
+            {metric.value}
+          </span>
+        ),
+      })}
     </span>
   );
 }

@@ -6,6 +6,7 @@ import {
   type RequestDisplayState,
 } from "@/lib/mediaRequests";
 import { cn } from "@/lib/utils";
+import { useAppLanguage } from "@/i18n";
 
 type BadgeProps = ComponentProps<typeof Badge>;
 type BadgeVariant = NonNullable<BadgeProps["variant"]>;
@@ -48,6 +49,8 @@ export function RequestStatusBadge({
   className,
   ...props
 }: RequestStatusBadgeProps) {
+  // The label comes from a plain helper; follow the app language.
+  useAppLanguage();
   const style = STATE_STYLES[state];
   return (
     <Badge
@@ -69,6 +72,7 @@ export function RequestReasonBadge({
   className,
   ...props
 }: SharedProps & { reason?: string }) {
+  useAppLanguage();
   return (
     <Badge
       variant="outline"

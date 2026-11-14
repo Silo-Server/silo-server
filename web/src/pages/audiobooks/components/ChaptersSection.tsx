@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { ArrowUpDown, ChevronDown, Play } from "lucide-react";
+import { numberText, useT, type Translate } from "@/i18n";
 import type { AudiobookChapter, AudiobookFile } from "@/lib/audiobooks/types";
 
 interface ChaptersSectionProps {
@@ -18,7 +19,7 @@ interface Row {
   positionIndex: number; // 1-based
 }
 
-function buildRows(files: AudiobookFile[]): Row[] {
+function buildRows(t: Translate, files: AudiobookFile[]): Row[] {
   const rows: Row[] = [];
   let offset = 0;
   let positionIndex = 1;
@@ -29,7 +30,7 @@ function buildRows(files: AudiobookFile[]): Row[] {
           chapter: ch,
           absoluteStart: offset + ch.start_seconds,
           durationSeconds: Math.max(0, (ch.end_seconds ?? ch.start_seconds) - ch.start_seconds),
-          label: ch.title || `Chapter ${ch.index + 1}`,
+          label: ch.title || t("web.audiobooks.chapter.fallbackTitle", { number: ch.index + 1 }),
           positionIndex: positionIndex++,
         });
       }
@@ -39,22 +40,26 @@ function buildRows(files: AudiobookFile[]): Row[] {
   return rows;
 }
 
-function formatChapterDuration(s: number): string {
+function formatChapterDuration(t: Translate, s: number): string {
   if (s <= 0) return "";
   const m = Math.floor(s / 60);
   const sec = Math.floor(s % 60);
-  return `${m}m ${String(sec).padStart(2, "0")}s`;
+  return t("web.audiobooks.chapters.duration", {
+    minutes: m,
+    seconds: numberText(String(sec).padStart(2, "0")),
+  });
 }
 
 function formatChapterStart(totalSeconds: number): string {
   const h = Math.floor(totalSeconds / 3600);
   const m = Math.floor((totalSeconds % 3600) / 60);
   const s = Math.floor(totalSeconds % 60);
-  return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return numberText(`${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`);
 }
 
 export function ChaptersSection({ files, currentPositionSeconds, onSelect }: ChaptersSectionProps) {
-  const rows = useMemo(() => buildRows(files), [files]);
+  const t = useT();
+  const rows = useMemo(() => buildRows(t, files), [t, files]);
   const [sort, setSort] = useState<SortMode>("position");
   const [sortOpen, setSortOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -86,27 +91,31 @@ export function ChaptersSection({ files, currentPositionSeconds, onSelect }: Cha
           aria-expanded={expanded}
           className="hover:text-primary flex items-center gap-2 text-xl font-semibold tracking-tight transition-colors"
         >
-          <ChevronDown className={`h-5 w-5 transition-transform ${expanded ? "" : "-rotate-90"}`} />
-          Chapters
-          <span className="text-muted-foreground text-sm font-normal">({rows.length})</span>
+          <ChevronDown
+            className={`h-5 w-5 transition-transform ${expanded ? "" : "-rotate-90 rtl:rotate-90"}`}
+          />
+          {t("web.audiobooks.chapters.heading")}
+          <span className="text-muted-foreground text-sm font-normal">
+            {t("web.audiobooks.chapters.count", { count: rows.length })}
+          </span>
         </button>
         {expanded && (
           <div className="relative">
             <button
               type="button"
-              aria-label="Sort chapters"
+              aria-label={t("web.audiobooks.chapters.sortAria")}
               aria-haspopup="menu"
               aria-expanded={sortOpen}
               className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-xs"
               onClick={() => setSortOpen((v) => !v)}
             >
               <ArrowUpDown className="h-3.5 w-3.5" />
-              Sort
+              {t("web.audiobooks.chapters.sort")}
             </button>
             {sortOpen && (
               <div
                 role="menu"
-                className="bg-popover absolute right-0 mt-2 w-44 overflow-hidden rounded-md border shadow-lg"
+                className="bg-popover absolute end-0 mt-2 w-44 overflow-hidden rounded-md border shadow-lg"
               >
                 {(["position", "longest-first"] as SortMode[]).map((mode) => (
                   <button
@@ -114,13 +123,15 @@ export function ChaptersSection({ files, currentPositionSeconds, onSelect }: Cha
                     role="menuitem"
                     type="button"
                     data-active={mode === sort ? "true" : undefined}
-                    className="hover:bg-muted/60 w-full px-3 py-2 text-left text-sm"
+                    className="hover:bg-muted/60 w-full px-3 py-2 text-start text-sm"
                     onClick={() => {
                       setSort(mode);
                       setSortOpen(false);
                     }}
                   >
-                    {mode === "position" ? "By position" : "Longest first"}
+                    {mode === "position"
+                      ? t("web.audiobooks.chapters.sortPosition")
+                      : t("web.audiobooks.chapters.sortLongest")}
                   </button>
                 ))}
               </div>
@@ -139,11 +150,11 @@ export function ChaptersSection({ files, currentPositionSeconds, onSelect }: Cha
                   type="button"
                   onClick={() => onSelect(row.absoluteStart)}
                   data-current={isCurrent ? "true" : undefined}
-                  className={`hover:bg-muted/50 flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${
-                    isCurrent ? "bg-muted/50 border-primary border-l-2" : ""
+                  className={`hover:bg-muted/50 flex w-full items-center gap-3 px-4 py-3 text-start transition-colors ${
+                    isCurrent ? "bg-muted/50 border-primary border-s-2" : ""
                   }`}
                 >
-                  <span className="text-muted-foreground w-8 shrink-0 text-right text-xs tabular-nums">
+                  <span className="text-muted-foreground w-8 shrink-0 text-end text-xs tabular-nums">
                     {row.positionIndex}
                   </span>
                   <span className="min-w-0 flex-1 truncate text-sm font-medium">{row.label}</span>
@@ -151,11 +162,12 @@ export function ChaptersSection({ files, currentPositionSeconds, onSelect }: Cha
                     {formatChapterStart(row.absoluteStart)}
                   </span>
                   <span className="text-muted-foreground shrink-0 font-mono text-xs">
-                    {formatChapterDuration(row.durationSeconds)}
+                    {formatChapterDuration(t, row.durationSeconds)}
                   </span>
                   {isCurrent && (
                     <span className="text-primary flex shrink-0 items-center gap-1 text-xs">
-                      <Play className="h-3 w-3 fill-current" /> listening
+                      <Play className="h-3 w-3 fill-current" />
+                      {t("web.audiobooks.chapters.listening")}
                     </span>
                   )}
                 </button>

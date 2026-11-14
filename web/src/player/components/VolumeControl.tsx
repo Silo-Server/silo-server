@@ -1,6 +1,7 @@
 import { useCallback, useRef } from "react";
 import { Volume2, VolumeX } from "lucide-react";
 import { storage } from "@/utils/storage";
+import { useT } from "@/i18n";
 
 /** Read persisted volume from localStorage. */
 export function getPersistedVolume(): { volume: number; muted: boolean } {
@@ -24,11 +25,11 @@ interface VolumeControlProps {
   onVolumeChange: (volume: number) => void;
   onMutedChange: (muted: boolean) => void;
   /**
-   * "overlay" (default) is the white-on-dark video HUD styling; "surface"
-   * uses theme tokens for placement on regular app surfaces like the
-   * audiobook mini bar.
+   * "overlay" (default) is white-on-dark for the audiobook player; "hud" is
+   * the video player's HUD; "surface" uses theme tokens for placement on
+   * regular app surfaces like the audiobook mini bar.
    */
-  tone?: "overlay" | "surface";
+  tone?: "overlay" | "hud" | "surface";
 }
 
 export function VolumeControl({
@@ -38,6 +39,7 @@ export function VolumeControl({
   onMutedChange,
   tone = "overlay",
 }: VolumeControlProps) {
+  const t = useT();
   const sliderRef = useRef<HTMLDivElement>(null);
 
   const getVolumeFromEvent = useCallback(
@@ -141,14 +143,24 @@ export function VolumeControl({
   );
 
   const surface = tone === "surface";
+  const hud = tone === "hud";
   const buttonClass = surface
     ? "text-muted-foreground hover:text-foreground hover:bg-muted inline-flex h-9 w-9 items-center justify-center rounded-full transition-colors"
-    : "player-utility-btn";
-  const sliderFocusClass = surface ? "focus-visible:ring-ring" : "focus-visible:ring-white/70";
-  const trackClass = surface ? "bg-muted" : "bg-white/15";
+    : hud
+      ? "hud-icon-btn"
+      : "player-utility-btn";
+  // The HUD draws its own focus ring (player-hud.css).
+  const sliderFocusClass = surface
+    ? "focus-visible:ring-2 focus-visible:ring-ring"
+    : hud
+      ? ""
+      : "focus-visible:ring-2 focus-visible:ring-white/70";
+  const trackClass = surface ? "bg-muted" : hud ? "bg-white/25" : "bg-white/15";
   const fillClass = surface
     ? "bg-foreground"
-    : "bg-white shadow-[0_0_8px_-1px_rgb(255_255_255/0.35)]";
+    : hud
+      ? "bg-[var(--hud-paper)]"
+      : "bg-white shadow-[0_0_8px_-1px_rgb(255_255_255/0.35)]";
   const thumbClass = surface ? "bg-foreground ring-border" : "bg-white ring-black/10";
 
   return (
@@ -160,8 +172,8 @@ export function VolumeControl({
         type="button"
         className={buttonClass}
         onClick={() => onMutedChange(!muted)}
-        aria-label={muted ? "Unmute" : "Mute"}
-        title={muted ? "Unmute (M)" : "Mute (M)"}
+        aria-label={muted ? t("web.player.volume.unmute") : t("web.player.volume.mute")}
+        title={muted ? t("web.player.volume.unmuteShortcut") : t("web.player.volume.muteShortcut")}
         data-active={muted || volume === 0 ? "false" : undefined}
       >
         {muted || volume === 0 ? (
@@ -178,18 +190,20 @@ export function VolumeControl({
         ref={sliderRef}
         role="slider"
         tabIndex={0}
-        aria-label="Volume"
+        aria-label={t("web.player.volume.label")}
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={Math.round(displayVolume * 100)}
-        aria-valuetext={`Volume ${Math.round(displayVolume * 100)}%`}
-        className={`group/vol-slider relative flex h-6 w-24 cursor-pointer touch-none items-center rounded-full focus-visible:ring-2 focus-visible:outline-none ${sliderFocusClass}`}
+        aria-valuetext={t("web.player.volume.valueText", {
+          percent: Math.round(displayVolume * 100),
+        })}
+        className={`group/vol-slider relative flex w-24 cursor-pointer touch-none items-center rounded-full ${hud ? "h-11" : "h-6 focus-visible:outline-none"} ${sliderFocusClass}`}
         onMouseDown={handleMouseDown}
         onTouchStart={handleTouchStart}
         onKeyDown={handleKeyDown}
       >
         <div
-          className={`relative h-[3px] w-full rounded-full transition-[height] duration-150 ease-out group-hover/vol-slider:h-[5px] ${trackClass}`}
+          className={`relative w-full rounded-full transition-[height] duration-150 ease-out ${hud ? "h-1 group-hover/vol-slider:h-1.5" : "h-[3px] group-hover/vol-slider:h-[5px]"} ${trackClass}`}
         >
           <div
             className={`absolute inset-y-0 left-0 rounded-full ${fillClass}`}

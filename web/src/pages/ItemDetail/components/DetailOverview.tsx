@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { EyeOff, Languages } from "lucide-react";
+import { useT } from "@/i18n";
 import MachineTranslatedLabel from "./MachineTranslatedLabel";
 
 interface DetailOverviewProps {
@@ -26,6 +27,7 @@ export default function DetailOverview({
   hidden = false,
   onReveal,
 }: DetailOverviewProps) {
+  const t = useT();
   const textRef = useRef<HTMLParagraphElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [overflowing, setOverflowing] = useState(false);
@@ -52,7 +54,7 @@ export default function DetailOverview({
           className="text-muted-foreground hover:text-foreground inline-flex cursor-pointer items-center gap-1.5 text-sm transition-colors"
         >
           <EyeOff className="h-3.5 w-3.5" />
-          Description hidden until you watch. Show it
+          {t("web.detail.overview.revealHidden")}
         </button>
       </div>
     );
@@ -62,7 +64,7 @@ export default function DetailOverview({
     <div className="detail-hero-description max-w-2xl">
       <p
         ref={textRef}
-        className={`text-muted-foreground leading-7 ${
+        className={`bidi-text text-muted-foreground leading-7 ${
           compact ? "text-sm" : "text-foreground/72 text-sm sm:text-[0.9375rem]"
         } ${clamp && !expanded ? "line-clamp-3" : ""} ${
           translating ? "animate-pulse opacity-50" : ""
@@ -78,13 +80,13 @@ export default function DetailOverview({
             onClick={() => setExpanded((value) => !value)}
             className="text-foreground/80 hover:text-foreground mt-1 cursor-pointer text-sm font-semibold"
           >
-            {expanded ? "Less" : "More"}
+            {expanded ? t("web.detail.overview.less") : t("web.detail.overview.more")}
           </button>
         )}
         {translating && (
           <span className="text-muted-foreground/70 mt-1 inline-flex items-center gap-1.5 text-xs">
             <Languages className="h-3 w-3 animate-pulse" />
-            Translating…
+            {t("web.detail.translation.translating")}
           </span>
         )}
         {!translating && machineTranslated && <MachineTranslatedLabel className="mt-1" />}
@@ -95,7 +97,7 @@ export default function DetailOverview({
             className="text-muted-foreground hover:text-foreground border-border/60 mt-1.5 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs transition-colors"
           >
             <Languages className="h-3 w-3" />
-            Translate
+            {t("web.detail.translation.translate")}
           </button>
         )}
       </div>

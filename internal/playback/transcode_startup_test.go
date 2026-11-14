@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -237,16 +238,26 @@ func TestStartReconstructTranscodeKeepsOutputForNextAttempt(t *testing.T) {
 	if err := os.WriteFile(servedSegment, []byte("segment"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// The request that triggered the rebuild ends during the first attempt.
+	// The rebuild serves every request waiting on it, so later attempts still
+	// start. Like StartTranscode for some recipes, this seam returns a
+	// canceled context's error.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	attempts := 0
-	start := func(_ context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
+	start := func(startCtx context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
+		if err := startCtx.Err(); err != nil {
+			return nil, err
+		}
 		attempts++
+		cancel()
 		if _, err := os.Stat(servedSegment); err != nil {
 			t.Fatalf("attempt %d: failed attempt removed the shared output dir: %v", attempts, err)
 		}
 		return fakeStartupSession(t, opts, outputDir, attempts == 3, false), nil
 	}
 
-	session, err := StartReconstructTranscode(context.Background(), pipeline, TranscodeStartup{Timeout: time.Millisecond, Start: start})
+	session, err := StartReconstructTranscode(ctx, pipeline, TranscodeStartup{Timeout: time.Millisecond, Start: start})
 	if err != nil {
 		t.Fatalf("StartReconstructTranscode: %v", err)
 	}
@@ -255,6 +266,51 @@ func TestStartReconstructTranscodeKeepsOutputForNextAttempt(t *testing.T) {
 	}
 	if got := session.Opts(); got.HWAccel != HWAccelNone || !got.SoftwareVideoDecode {
 		t.Fatalf("final attempt = %+v, want software path", got)
+	}
+}
+
+// A recipe card can be rebuilt where the GPU decoder rejects its source: on
+// another node, or after the operator chose this backend. An explicit backend
+// has no fallback order, so the reconstruct must still move to CPU decoding,
+// in the same directory, after the request that triggered it has gone.
+func TestStartReconstructTranscodeRetriesDecoderRejectionOnCPU(t *testing.T) {
+	opts := startupTestOpts()
+	opts.HWAccel = transcodeHWNVENC
+	opts.HWDevice = ""
+	pipeline := newAutoTranscodePipeline(context.Background(), opts, newAutoTranscodePipelineCache())
+	outputDir := t.TempDir()
+	servedSegment := filepath.Join(outputDir, "seg_00010.ts")
+	if err := os.WriteFile(servedSegment, []byte("segment"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var attempts []TranscodeOpts
+	start := func(startCtx context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
+		attempts = append(attempts, opts)
+		if len(attempts) > 1 && startCtx.Err() != nil {
+			t.Errorf("attempt %d launched on the ended request's context", len(attempts))
+		}
+		if _, err := os.Stat(servedSegment); err != nil {
+			t.Fatalf("attempt %d: rejected attempt removed the shared output dir: %v", len(attempts), err)
+		}
+		session := fakeStartupSession(t, opts, outputDir, len(attempts) == 2, false)
+		if len(attempts) == 1 {
+			_, _ = session.stderr.Write([]byte("[hevc @ 0x1] Hardware is lacking required capabilities"))
+			cancel()
+		}
+		return session, nil
+	}
+
+	session, err := StartReconstructTranscode(ctx, pipeline, TranscodeStartup{Timeout: time.Millisecond, Start: start})
+	if err != nil {
+		t.Fatalf("StartReconstructTranscode: %v", err)
+	}
+	if len(attempts) != 2 {
+		t.Fatalf("attempt count = %d, want GPU decode then CPU decode", len(attempts))
+	}
+	if got := session.Opts(); got.HWAccel != transcodeHWNVENC || !got.SoftwareVideoDecode {
+		t.Fatalf("returned attempt = %s software decode %v, want NVENC with CPU decode", got.HWAccel, got.SoftwareVideoDecode)
 	}
 }
 
@@ -402,5 +458,69 @@ func TestStartReadyTranscodeStopsWaitingWhenRequestEnds(t *testing.T) {
 		if len(cache.preferred) != 0 {
 			t.Fatalf("running=%v: a cancellation must never be cached", running)
 		}
+	}
+}
+
+// An explicit NVENC start on a card whose NVDEC cannot decode the source
+// (HEVC on a Maxwell GTX 970) failed the same way on its retry, because the
+// retry changed only the render device. A decoder rejection now walks CPU
+// decode with NVENC, then software; any other early exit keeps the old retry.
+func TestStartReadyTranscodeRetriesDecoderRejectionOnCPU(t *testing.T) {
+	const nvdecRejection = "[hevc @ 0x1] Hardware is lacking required capabilities\n" +
+		"[hevc @ 0x1] Failed setup for format cuda: hwaccel initialisation returned error."
+	base := startupTestOpts()
+	base.HWAccel = transcodeHWNVENC
+	base.HWDevice = ""
+	tests := []struct {
+		name      string
+		policy    TranscodeStartupRetry
+		stderr    string
+		readyOn   int
+		wantAccel []string
+	}{
+		{name: "mixed stage plays", policy: TranscodeStartupRetryAccelChange, stderr: nvdecRejection, readyOn: 2,
+			wantAccel: []string{transcodeHWNVENC, transcodeHWNVENC}},
+		{name: "software after mixed fails", policy: TranscodeStartupRetryOtherDevice, stderr: nvdecRejection,
+			wantAccel: []string{transcodeHWNVENC, transcodeHWNVENC, HWAccelNone}},
+		{name: "rejection after long output", policy: TranscodeStartupRetryAccelChange, stderr: strings.Repeat("x", 600) + "\n" + nvdecRejection, readyOn: 2,
+			wantAccel: []string{transcodeHWNVENC, transcodeHWNVENC}},
+		{name: "no retry policy", policy: TranscodeStartupRetryNone, stderr: nvdecRejection,
+			wantAccel: []string{transcodeHWNVENC}},
+		{name: "other failure keeps accel change rule", policy: TranscodeStartupRetryAccelChange, stderr: "[vost#0:0/h264_nvenc] Could not open encoder",
+			wantAccel: []string{transcodeHWNVENC}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pipeline := newAutoTranscodePipeline(context.Background(), base, newAutoTranscodePipelineCache())
+			if pipeline.Enabled() {
+				t.Fatal("explicit nvenc must not enable the auto pipeline")
+			}
+			var attempts []TranscodeOpts
+			start := func(_ context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
+				attempts = append(attempts, opts)
+				session := fakeStartupSession(t, opts, t.TempDir(), len(attempts) == tt.readyOn, false)
+				_, _ = session.stderr.Write([]byte(tt.stderr))
+				return session, nil
+			}
+
+			_, err := StartReadyTranscode(context.Background(), pipeline, TranscodeStartup{Timeout: time.Millisecond, Start: start, LegacyRetry: tt.policy})
+			if (err == nil) != (tt.readyOn > 0) {
+				t.Fatalf("error = %v, want ready on attempt %d", err, tt.readyOn)
+			}
+			if len(attempts) != len(tt.wantAccel) {
+				t.Fatalf("attempt count = %d, want %d", len(attempts), len(tt.wantAccel))
+			}
+			for i, attempt := range attempts {
+				if attempt.HWAccel != tt.wantAccel[i] {
+					t.Fatalf("attempt %d HWAccel = %q, want %q", i, attempt.HWAccel, tt.wantAccel[i])
+				}
+				if wantCPUDecode := i > 0; attempt.SoftwareVideoDecode != wantCPUDecode {
+					t.Fatalf("attempt %d SoftwareVideoDecode = %v, want %v", i, attempt.SoftwareVideoDecode, wantCPUDecode)
+				}
+			}
+			if len(attempts) > 1 && !attempts[1].nvencSoftwareDecode {
+				t.Fatal("CPU-decode retry must keep the NVENC encoder")
+			}
+		})
 	}
 }

@@ -13,8 +13,7 @@ lifecycle; `internal/mediasample` decodes and tiles the frames (see
 A library opts in through `trickplay_enabled` on the v2 library resources
 (`createLibrary`, `updateLibrary`); `trickplay_supported` reports whether the
 server can generate them (an assets store is configured), and
-`GET /api/v2/libraries/capabilities` reports `trickplay: true`. The frozen
-v1 library bodies neither read nor write it. Turning it on or off, or changing
+`GET /api/v2/libraries/capabilities` reports `trickplay: true`. Turning it on or off, or changing
 the library's type or whether it is enabled, runs a reconcile pass right away
 on the server that handled the change; turning it off, disabling the library,
 or changing it to a non-video type deletes the library's previews.

@@ -17,6 +17,7 @@ import {
   queryDefinitionToDisplayFilters,
 } from "@/lib/collectionDisplayFilters";
 import type { CollectionDraft } from "@/lib/collections/scope";
+import { useT } from "@/i18n";
 
 function ShowOnlyField({
   value,
@@ -25,19 +26,22 @@ function ShowOnlyField({
   value: CollectionDraft["showOnly"];
   onChange: (next: CollectionDraft["showOnly"]) => void;
 }) {
+  const t = useT();
   const id = useId();
   const { watch, media } = queryDefinitionToDisplayFilters(value);
   const commit = (nextWatch: UserCollectionWatchFilter, nextMedia: UserCollectionMediaFilter) =>
     onChange(displayFiltersToQueryDefinition(nextWatch, nextMedia));
   return (
     <fieldset className="grid gap-2" aria-describedby={`${id}-help`}>
-      <legend className="mb-2 text-[14.5px] font-semibold">Show only</legend>
+      <legend className="mb-2 text-[14.5px] font-semibold">
+        {t("web.collections.copy.fieldShowOnly")}
+      </legend>
       <div className="grid grid-cols-2 gap-2">
         <Select
           value={watch}
           onValueChange={(next) => commit(next as UserCollectionWatchFilter, media)}
         >
-          <SelectTrigger aria-label="Watch state" className="w-full">
+          <SelectTrigger aria-label={t("web.collections.details.watchState")} className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -52,7 +56,7 @@ function ShowOnlyField({
           value={media}
           onValueChange={(next) => commit(watch, next as UserCollectionMediaFilter)}
         >
-          <SelectTrigger aria-label="Content" className="w-full">
+          <SelectTrigger aria-label={t("web.collections.details.content")} className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -65,7 +69,7 @@ function ShowOnlyField({
         </Select>
       </div>
       <p id={`${id}-help`} className="text-muted-foreground text-[12.5px] leading-snug">
-        Hides titles while browsing, for example the ones you&apos;ve finished. Nothing is removed.
+        {t("web.collections.details.showOnlyHelp")}
       </p>
     </fieldset>
   );
@@ -85,15 +89,16 @@ export function DetailsPanel({
   /** A line under Name, as in "Kept your name". */
   nameNote?: string;
 }) {
+  const t = useT();
   const id = useId();
   return (
     <section
-      aria-label="Name and description"
+      aria-label={t("web.collections.details.label")}
       className="surface-panel grid content-start gap-4 rounded-[22px] p-5 sm:p-6"
     >
       <div className="grid gap-2">
         <label htmlFor={`${id}-name`} className="text-[14.5px] font-semibold">
-          Name
+          {t("web.collections.copy.fieldName")}
         </label>
         <Input
           id={`${id}-name`}
@@ -113,7 +118,10 @@ export function DetailsPanel({
       </div>
       <div className="grid gap-2">
         <label htmlFor={`${id}-description`} className="text-[14.5px] font-semibold">
-          Description <span className="text-muted-foreground font-normal">Optional</span>
+          {t("web.collections.details.descriptionLabel", {
+            field: t("web.collections.copy.fieldDescription"),
+            muted: (chunks) => <span className="text-muted-foreground font-normal">{chunks}</span>,
+          })}
         </label>
         <Textarea
           id={`${id}-description`}

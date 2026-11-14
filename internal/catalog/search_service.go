@@ -21,7 +21,7 @@ type CatalogSearchService struct {
 // Meilisearch path. Legacy reads do not create ranking sessions.
 func (s *CatalogSearchService) WithSearchSessionStore(client redis.UniversalClient) *CatalogSearchService {
 	if s != nil && s.meili != nil && client != nil {
-		s.meili.sessions = &searchSessionStore{client: client}
+		s.meili.sessions = &redisSearchSessionStore{client: client}
 	}
 	return s
 }

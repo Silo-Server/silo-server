@@ -2,7 +2,7 @@ import { act, fireEvent, render, renderHook, screen } from "@testing-library/rea
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Library } from "@/api/types";
-import { LANGUAGES } from "@/player/utils/languageNames";
+import { languageOptions } from "@/player/utils/languageNames";
 import { AdvancedFields, MetadataFields } from "./LibraryFormSections";
 import { useLibraryForm } from "./useLibraryForm";
 
@@ -167,7 +167,7 @@ describe("metadata language picker", () => {
     });
     const codes = screen
       .getAllByRole("option")
-      .map((option) => LANGUAGES.find((lang) => lang.label === option.textContent)?.code);
+      .map((option) => languageOptions().find((lang) => lang.label === option.textContent)?.code);
 
     expect(codes.length).toBeGreaterThan(1);
     expect(codes.filter((code) => !code || !/^[a-z]{2}$/.test(code))).toEqual([]);

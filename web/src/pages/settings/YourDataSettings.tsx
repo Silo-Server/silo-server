@@ -23,12 +23,13 @@ import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/hooks/useAuth";
+import { useT, type Translate } from "@/i18n";
 import { formatFileSize } from "@/lib/mediaFormat";
 import { DATA_TYPE_LABELS, dataCountsPhrase, titleList } from "@/lib/profileDataTypes";
 
 /** A size limit as a person says it: "64 MB", not "64.0 MB". */
 function sizeLimit(bytes: number): string {
-  return formatFileSize(bytes).replace(/\.0(?= )/, "");
+  return formatFileSize(bytes, { trimZeroDecimal: true });
 }
 
 function requireContext() {
@@ -40,9 +41,6 @@ function requireContext() {
 /** Thrown before upload when the chosen file can't be an export. */
 class ImportFileError extends Error {}
 
-const NOT_AN_EXPORT =
-  "This file isn't a profile export from Silo, or it's from a newer version of Silo.";
-
 function needsPin(error: unknown): boolean {
   return (
     error instanceof V2ProblemError &&
@@ -51,13 +49,13 @@ function needsPin(error: unknown): boolean {
   );
 }
 
-function failureMessage(error: unknown): string {
+function failureMessage(t: Translate, error: unknown): string {
   if (error instanceof ImportFileError) return error.message;
   if (error instanceof V2ProblemError) {
-    if (error.status === 422) return NOT_AN_EXPORT;
+    if (error.status === 422) return t("web.settings.yourData.import.notAnExport");
     return error.message;
   }
-  return "The server didn't answer. Check your connection, then try again.";
+  return t("web.settings.yourData.noAnswer");
 }
 
 function saveDocument(document: unknown) {
@@ -73,15 +71,21 @@ function saveDocument(document: unknown) {
 }
 
 function ImportSummary({ result }: { result: ProfileImportResult }) {
+  const t = useT();
   return (
     <div role="status" className="bg-background/60 space-y-2 rounded-lg border p-4 text-sm">
-      <p className="font-medium">Import finished. Nothing on this profile was deleted.</p>
+      <p className="font-medium">{t("web.settings.yourData.summary.finished")}</p>
       {result.data.length > 0 ? (
         <ul className="space-y-1">
           {result.data.map((data) => (
             <li key={data.type}>
-              {DATA_TYPE_LABELS[data.type]}:{" "}
-              <span className="text-muted-foreground tabular-nums">{dataCountsPhrase(data)}</span>
+              {t("web.settings.yourData.summary.line", {
+                type: DATA_TYPE_LABELS[data.type],
+                counts: dataCountsPhrase(data),
+                muted: (chunks) => (
+                  <span className="text-muted-foreground tabular-nums">{chunks}</span>
+                ),
+              })}
               {data.notes.map((note, position) => (
                 <span key={position} className="text-muted-foreground block text-xs">
                   {note}
@@ -93,13 +97,12 @@ function ImportSummary({ result }: { result: ProfileImportResult }) {
       ) : null}
       {result.unmatched.length > 0 ? (
         <p className="text-muted-foreground text-[13px] break-words">
-          Not in this server&apos;s library or not available to this profile, so left out:{" "}
-          {titleList(result.unmatched)}.
+          {t("web.settings.yourData.summary.unmatched", { titles: titleList(result.unmatched) })}
         </p>
       ) : null}
       {result.hidden.length > 0 ? (
         <p className="text-muted-foreground text-[13px] break-words">
-          Titles this profile isn&apos;t allowed to see, so left out: {titleList(result.hidden)}.
+          {t("web.settings.yourData.summary.hidden", { titles: titleList(result.hidden) })}
         </p>
       ) : null}
     </div>
@@ -108,6 +111,7 @@ function ImportSummary({ result }: { result: ProfileImportResult }) {
 
 /** Settings → Your Data: download this profile's own data, or merge a download back in. */
 export default function YourDataSettings() {
+  const t = useT();
   const { profile, selectProfile, verifyProfilePin } = useAuth();
   const queryClient = useQueryClient();
   const context = captureProfileRequestContext();
@@ -131,7 +135,10 @@ export default function YourDataSettings() {
     onSuccess: saveDocument,
     onError: (error) => {
       if (needsPin(error)) setAfterPin(() => () => exportData.mutate());
-      else toast.error("Couldn't export your data", { description: failureMessage(error) });
+      else
+        toast.error(t("web.settings.yourData.export.failed"), {
+          description: failureMessage(t, error),
+        });
     },
   });
 
@@ -141,17 +148,20 @@ export default function YourDataSettings() {
     mutationFn: async ({ file, target }: { file: File; target: ProfileRequestContextSnapshot }) => {
       if (maxBytes > 0 && file.size > maxBytes) {
         throw new ImportFileError(
-          `This file is ${formatFileSize(file.size)}. The largest export this server takes is ${sizeLimit(maxBytes)}.`,
+          t("web.settings.yourData.import.tooLarge", {
+            size: formatFileSize(file.size),
+            limit: sizeLimit(maxBytes),
+          }),
         );
       }
       let document: unknown;
       try {
         document = JSON.parse(await file.text());
       } catch {
-        throw new ImportFileError(NOT_AN_EXPORT);
+        throw new ImportFileError(t("web.settings.yourData.import.notAnExport"));
       }
       if (typeof document !== "object" || document === null || Array.isArray(document)) {
-        throw new ImportFileError(NOT_AN_EXPORT);
+        throw new ImportFileError(t("web.settings.yourData.import.notAnExport"));
       }
       if (!isCapturedProfileAuthorityActive(target)) throw new StaleApiRequestContextError();
       return importProfile(target, document as Record<string, unknown>);
@@ -171,14 +181,14 @@ export default function YourDataSettings() {
     onError: (error, { file }) => {
       if (needsPin(error))
         setAfterPin(() => () => importData.mutate({ file, target: requireContext() }));
-      else setImportError(failureMessage(error));
+      else setImportError(failureMessage(t, error));
     },
   });
 
   const header = (
     <PageHeader
-      title="Your Data"
-      subtitle="Download this profile's history, ratings, and lists, or merge a download back in."
+      title={t("web.settings.yourData.title")}
+      subtitle={t("web.settings.yourData.subtitle")}
     />
   );
 
@@ -196,8 +206,8 @@ export default function YourDataSettings() {
         {header}
         <p className="text-muted-foreground text-sm">
           {capability.isError
-            ? "Couldn't check whether this server can export profile data. Reload the page to try again."
-            : "This server can't export or import profile data."}
+            ? t("web.settings.yourData.capabilityFailed")
+            : t("web.settings.yourData.unavailable")}
         </p>
       </div>
     );
@@ -208,8 +218,8 @@ export default function YourDataSettings() {
       {header}
 
       <SettingsGroup
-        title="Export my data"
-        description="A file with this profile's watch history and progress, ratings, favorites and watchlist, personal collections, dismissed titles, and preferences. It holds no password, PIN, or account details."
+        title={t("web.settings.yourData.export.title")}
+        description={t("web.settings.yourData.export.description")}
       >
         <Button
           variant="outline"
@@ -221,13 +231,13 @@ export default function YourDataSettings() {
           ) : (
             <Download data-icon="inline-start" aria-hidden="true" />
           )}
-          Export my data
+          {t("web.settings.yourData.export.button")}
         </Button>
       </SettingsGroup>
 
       <SettingsGroup
-        title="Import data"
-        description="Merges an export into this profile, on this server or another. Newer progress wins, missing entries are added, and preferences are replaced. Nothing is deleted, and importing the same file twice changes nothing."
+        title={t("web.settings.yourData.import.title")}
+        description={t("web.settings.yourData.import.description")}
       >
         <div className="space-y-3">
           <input
@@ -253,16 +263,16 @@ export default function YourDataSettings() {
             ) : (
               <Upload data-icon="inline-start" aria-hidden="true" />
             )}
-            Choose an export file
+            {t("web.settings.yourData.import.chooseFile")}
           </Button>
           {maxBytes > 0 ? (
             <p className="text-muted-foreground text-xs">
-              A .json file from Export my data, up to {sizeLimit(maxBytes)}.
+              {t("web.settings.yourData.import.fileHint", { limit: sizeLimit(maxBytes) })}
             </p>
           ) : null}
           {importError ? (
             <p role="alert" className="text-destructive text-sm">
-              Couldn&apos;t import the file. {importError}
+              {t("web.settings.yourData.import.failed", { reason: importError })}
             </p>
           ) : null}
           {result ? <ImportSummary result={result} /> : null}
@@ -271,7 +281,7 @@ export default function YourDataSettings() {
 
       <ProfilePinDialog
         profile={afterPin ? profile : null}
-        description="Enter this profile's PIN to export or import its data."
+        description={t("web.settings.yourData.pinDescription")}
         onClose={() => setAfterPin(null)}
         onVerified={(verified, token) => {
           const retry = afterPin;

@@ -19,6 +19,7 @@ import {
   useSetCollectionAllowance,
 } from "@/hooks/queries/titleAllowances";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
+import { useT } from "@/i18n";
 
 interface AllowCollectionDialogProps {
   open: boolean;
@@ -44,6 +45,7 @@ export default function AllowCollectionDialog({
   collectionName,
   live,
 }: AllowCollectionDialogProps) {
+  const t = useT();
   const { data: household } = useProfiles({ enabled: open });
   const { profile: active } = useCurrentProfile();
   const limited = household.filter((p) => p.id !== active?.id && profileHasMaturityLimit(p));
@@ -52,16 +54,14 @@ export default function AllowCollectionDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="gap-4 sm:max-w-[480px]">
         <DialogHeader>
-          <DialogTitle>Allow &ldquo;{collectionName}&rdquo; for…</DialogTitle>
+          <DialogTitle>{t("web.profiles.allow.title", { name: collectionName })}</DialogTitle>
           <DialogDescription>
-            {live
-              ? "Ticked profiles can watch every title in this collection even if it is above their limit. New titles you add are allowed too."
-              : "Allows the titles in this collection now. Titles added later are not allowed."}
+            {live ? t("web.profiles.allow.collectionLive") : t("web.profiles.allow.collectionCopy")}
           </DialogDescription>
         </DialogHeader>
         {limited.length === 0 ? (
           <p className="text-muted-foreground text-sm">
-            No other profile has a rating or advisory-age limit.
+            {t("web.profiles.allow.noLimitedProfiles")}
           </p>
         ) : (
           <ul className="flex flex-col gap-1">
@@ -80,6 +80,7 @@ export default function AllowCollectionDialog({
 }
 
 function ProfileLabel({ profile, note }: { profile: Profile; note?: string }) {
+  const t = useT();
   const limit = describeMaturityLimit(profile);
   return (
     <>
@@ -90,7 +91,7 @@ function ProfileLabel({ profile, note }: { profile: Profile; note?: string }) {
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate text-sm font-medium">{profile.name}</span>
         <span className="text-muted-foreground text-xs">
-          {[limit && `Limit ${limit}`, note].filter(Boolean).join(" · ")}
+          {[limit && t("web.profiles.allow.limit", { limit }), note].filter(Boolean).join(" · ")}
         </span>
       </span>
     </>
@@ -123,6 +124,7 @@ function LiveRow({ profile, collectionId }: { profile: Profile; collectionId: st
 }
 
 function CopyRow({ profile, collectionId }: { profile: Profile; collectionId: string }) {
+  const t = useT();
   const copy = useAllowCollectionTitles();
   const [added, setAdded] = useState<number | null>(null);
   return (
@@ -130,7 +132,9 @@ function CopyRow({ profile, collectionId }: { profile: Profile; collectionId: st
       <ProfileLabel
         profile={profile}
         note={
-          added === null ? undefined : added === 1 ? "Allowed 1 title" : `Allowed ${added} titles`
+          added === null
+            ? undefined
+            : t("web.profiles.allow.allowedTitles", { count: added, count_text: added })
         }
       />
       <Button
@@ -142,7 +146,7 @@ function CopyRow({ profile, collectionId }: { profile: Profile; collectionId: st
           copy.mutate({ profileId: profile.id, collectionId }, { onSuccess: (n) => setAdded(n) })
         }
       >
-        Allow current titles
+        {t("web.profiles.allow.allowCurrent")}
       </Button>
     </li>
   );

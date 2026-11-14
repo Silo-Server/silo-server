@@ -45,6 +45,12 @@ type Deprecation struct {
 	Sunset *time.Time
 }
 
+// linkTokenPathDeprecation retires the operations that take a password reset
+// or invitation token in the URL path. Their body-token replacements keep the
+// token out of the access logs and Referer headers of anything in front of
+// the server.
+var linkTokenPathDeprecation = &Deprecation{At: time.Date(2026, time.November, 13, 0, 0, 0, 0, time.UTC), Link: DocsOrigin + "api/"}
+
 // validate is the registration-time check; a failing declaration is a build
 // failure, never a request failure.
 func (d *Deprecation) validate() error {

@@ -1,6 +1,8 @@
 import { memo, useCallback, useState } from "react";
 import { Star } from "lucide-react";
 import { readFinePointer } from "@/lib/pointerCapability";
+import { useT } from "@/i18n";
+import { readingArrowKey } from "@/lib/direction";
 
 interface StarRatingProps {
   value: number | null;
@@ -19,6 +21,7 @@ const STAR_COUNT = 5;
  * app.css), so moving across the stars does not render.
  */
 function StarRating({ value, onChange, size = 20, verticalArrows = true }: StarRatingProps) {
+  const t = useT();
   const [suppressPreview, setSuppressPreview] = useState(false);
   const clearSuppressPreview = useCallback(() => setSuppressPreview(false), []);
 
@@ -45,10 +48,11 @@ function StarRating({ value, onChange, size = 20, verticalArrows = true }: StarR
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       let newValue: number | null = null;
-      if (e.key === "ArrowRight" || (verticalArrows && e.key === "ArrowUp")) {
+      const key = readingArrowKey(e);
+      if (key === "ArrowRight" || (verticalArrows && key === "ArrowUp")) {
         e.preventDefault();
         newValue = Math.min((value ?? 0) + 1, STAR_COUNT);
-      } else if (e.key === "ArrowLeft" || (verticalArrows && e.key === "ArrowDown")) {
+      } else if (key === "ArrowLeft" || (verticalArrows && key === "ArrowDown")) {
         e.preventDefault();
         newValue = Math.max((value ?? 2) - 1, 1);
       }
@@ -67,7 +71,7 @@ function StarRating({ value, onChange, size = 20, verticalArrows = true }: StarR
   return (
     <div
       role="radiogroup"
-      aria-label="Rating"
+      aria-label={t("web.item.rating.label")}
       className="star-rating flex items-center gap-0.5 rounded-full px-2.5 py-2"
       data-suppress-preview={suppressPreview || undefined}
       onKeyDown={handleKeyDown}
@@ -81,9 +85,9 @@ function StarRating({ value, onChange, size = 20, verticalArrows = true }: StarR
             key={star}
             type="button"
             role="radio"
-            aria-label={`${star} star${star !== 1 ? "s" : ""}`}
+            aria-label={t("web.item.rating.stars", { count: star })}
             aria-checked={current}
-            title={current ? "Remove rating" : undefined}
+            title={current ? t("web.item.rating.remove") : undefined}
             tabIndex={star === tabbableStar ? 0 : -1}
             data-filled={filled}
             data-rating={star}

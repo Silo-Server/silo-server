@@ -2,6 +2,7 @@ import { FolderOpen, Loader2 } from "lucide-react";
 import { Link } from "react-router";
 
 import { Button } from "@/components/ui/button";
+import { useT } from "@/i18n";
 import { useActiveScans } from "@/hooks/queries/admin/scans";
 import { useScanLibrary } from "@/hooks/queries/admin/scanControls";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
@@ -18,6 +19,7 @@ interface LibraryEmptyStateProps {
  * scanning variant.
  */
 export default function LibraryEmptyState({ libraryId }: LibraryEmptyStateProps) {
+  const t = useT();
   const actingAdmin = useIsActingAdmin();
   const { data: activeScans = [] } = useActiveScans();
   const scanning =
@@ -36,9 +38,9 @@ export default function LibraryEmptyState({ libraryId }: LibraryEmptyStateProps)
         <>
           <Loader2 className="text-muted-foreground h-10 w-10 animate-spin" aria-hidden="true" />
           <div className="space-y-1">
-            <p className="text-sm font-medium">Scanning this library</p>
+            <p className="text-sm font-medium">{t("web.library.empty.scanningTitle")}</p>
             <p className="text-muted-foreground max-w-sm text-sm">
-              Titles will appear here as the scan finds them.
+              {t("web.library.empty.scanningBody")}
             </p>
           </div>
         </>
@@ -46,11 +48,9 @@ export default function LibraryEmptyState({ libraryId }: LibraryEmptyStateProps)
         <>
           <FolderOpen className="text-muted-foreground h-10 w-10" aria-hidden="true" />
           <div className="space-y-1">
-            <p className="text-sm font-medium">This library is empty</p>
+            <p className="text-sm font-medium">{t("web.library.empty.title")}</p>
             <p className="text-muted-foreground max-w-sm text-sm">
-              {actingAdmin
-                ? "No media has been added yet. Add files to the library's folders, then scan it."
-                : "There is nothing in this library yet."}
+              {actingAdmin ? t("web.library.empty.bodyAdmin") : t("web.library.empty.body")}
             </p>
           </div>
           {actingAdmin ? <AdminEmptyLibraryActions libraryId={libraryId} /> : null}
@@ -61,6 +61,7 @@ export default function LibraryEmptyState({ libraryId }: LibraryEmptyStateProps)
 }
 
 function AdminEmptyLibraryActions({ libraryId }: { libraryId: number }) {
+  const t = useT();
   const scanLibrary = useScanLibrary();
 
   return (
@@ -72,10 +73,10 @@ function AdminEmptyLibraryActions({ libraryId }: { libraryId: number }) {
         disabled={scanLibrary.isPending}
         onClick={() => scanLibrary.mutate(libraryId)}
       >
-        Scan library
+        {t("web.library.empty.scan")}
       </Button>
       <Link to="/admin/libraries" className="text-primary text-sm font-medium hover:underline">
-        Manage libraries
+        {t("web.library.empty.manage")}
       </Link>
     </div>
   );

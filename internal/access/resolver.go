@@ -124,12 +124,12 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 		scope.NextUpNewReleasesFirst = preferences.NextUpNewReleasesFirst
 		scope.HideWatchedItemsOnHome = preferences.HideWatchedItemsOnHome
 		scope.AllowedLibraryIDs, scope.LibrariesRestricted = ProfileLibraries(effective.LibraryIDs, profile)
-		verified, err := VerifyProfileForRequest(profile, input, user.ID, r.tokens)
+		verified, pinSkipped, err := VerifyProfileForRequest(profile, input, user.ID, r.tokens)
 		if err != nil {
 			return Scope{}, err
 		}
 		scope.ProfileVerified = verified
-		scope.PINVerificationSkipped = verified && profile.PINHash != "" && input.SkipPINVerification
+		scope.PINVerificationSkipped = pinSkipped
 		scope.ProfilePINRevision = profile.PINRevision
 	}
 
@@ -155,27 +155,37 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 	return scope, nil
 }
 
-// VerifyProfileForRequest applies the legacy profile PIN/token verification
-// checks for a resolved profile and returns whether the profile is verified for
-// the request.
+// VerifyProfileForRequest applies the profile PIN/token verification checks
+// for a resolved profile. It reports whether the profile is verified for the
+// request and whether that verification was only skipped: a PIN-locked
+// profile accepted through input.SkipPINVerification without a valid profile
+// token. A valid token bound to a login session counts as a real proof even
+// when the PIN could be skipped, so a view-as session that did enter the PIN
+// can still manage the household. A sessionless credential (an API key) stays
+// skipped whatever token it sends: its token is bound to no login session and
+// outlives the key.
 func VerifyProfileForRequest(
 	profile *userstore.Profile,
 	input ResolveInput,
 	userID int,
 	tokens ProfileTokenValidator,
-) (bool, error) {
+) (verified, pinSkipped bool, err error) {
 	if profile == nil {
-		return input.ProfileID == "", nil
+		return input.ProfileID == "", false, nil
 	}
-
-	profileVerified := profile.PINHash == "" || input.SkipPINVerification
-	if profile.PINHash != "" && !input.SkipPINVerification {
-		if err := CheckProfileToken(tokens, input.ProfileToken, userID, input.SessionID, profile); err != nil {
-			return false, err
+	if profile.PINHash == "" {
+		return true, false, nil
+	}
+	if input.SkipPINVerification && (input.ProfileToken == "" || input.SessionID == "") {
+		return true, true, nil
+	}
+	if err := CheckProfileToken(tokens, input.ProfileToken, userID, input.SessionID, profile); err != nil {
+		if input.SkipPINVerification {
+			return true, true, nil
 		}
-		profileVerified = true
+		return false, false, err
 	}
-	return profileVerified, nil
+	return true, false, nil
 }
 
 // CheckProfileToken reports whether token proves the caller entered profile's
@@ -276,17 +286,30 @@ func ProfileLibraries(accountLibraryIDs []int, profile *userstore.Profile) ([]in
 	return effectiveLibraries(accountLibraryIDs, profile)
 }
 
+// ProfileLibraryLimit is the profile's own library limit: the libraries it is
+// limited to, and whether it has a limit. The primary profile never has one:
+// it inherits its account's libraries and narrows what it browses only by
+// hiding libraries (ui.disabled_library_ids), which it can undo. A limit
+// stored on a primary profile, by an older server or a restored backup, is
+// ignored.
+func ProfileLibraryLimit(profile *userstore.Profile) ([]int, bool) {
+	if profile == nil || profile.IsPrimary || !profile.LibraryRestrictionsEnabled {
+		return nil, false
+	}
+	return profile.AllowedLibraryIDs, true
+}
+
 func effectiveLibraries(accountLibraryIDs []int, profile *userstore.Profile) ([]int, bool) {
 	accountRestricted := accountLibraryIDs != nil
-	profileRestricted := profile.LibraryRestrictionsEnabled
+	profileLibraryIDs, profileRestricted := ProfileLibraryLimit(profile)
 
 	switch {
 	case accountRestricted && profileRestricted:
-		return intersectInts(accountLibraryIDs, profile.AllowedLibraryIDs), true
+		return intersectInts(accountLibraryIDs, profileLibraryIDs), true
 	case accountRestricted:
 		return cloneInts(accountLibraryIDs), true
 	case profileRestricted:
-		return sortedUniqueInts(profile.AllowedLibraryIDs), true
+		return sortedUniqueInts(profileLibraryIDs), true
 	default:
 		return nil, false
 	}

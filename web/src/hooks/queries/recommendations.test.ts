@@ -1,14 +1,14 @@
 // @vitest-environment jsdom
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook } from "@testing-library/react";
+import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
+import { renderHook, waitFor } from "@testing-library/react";
 import { createElement } from "react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import createTasteSeedOk from "../../../../contracts/api/v2/fixtures/create_taste_seed_ok.json";
 
-import { setProfileId } from "@/api/client";
+import { setAccessToken, setProfileId } from "@/api/client";
 import { mediaSurfaceKeys } from "./keys";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
 import { useSubmitTasteSeed } from "./tasteSeed";
@@ -30,6 +30,8 @@ describe("taste seeding on the v2 contract", () => {
   });
 
   afterEach(() => {
+    onlineManager.setOnline(true);
+    setAccessToken(null);
     vi.unstubAllGlobals();
   });
 
@@ -54,13 +56,106 @@ describe("taste seeding on the v2 contract", () => {
     return { result, recInvalidations, homeBumps };
   }
 
+  // Unselecting a favourite removes it. The batch goes first, since the
+  // server waits for its refresh only when none is already queued, and a
+  // save that only removes skips the batch, whose endpoint needs a title.
+  it("adds the new picks, then removes unselected favourites", async () => {
+    const requests: string[] = [];
+    stubFetch((url, init) => {
+      requests.push(`${init?.method ?? "GET"} ${decodeURIComponent(url.pathname)}`);
+      return init?.method === "DELETE"
+        ? new Response(null, { status: 204 })
+        : jsonResponse(createTasteSeedOk);
+    });
+    const { result } = renderSubmit();
+
+    await expect(
+      result.current.mutateAsync({ add: ["movie:heat-1995"], remove: ["movie:alien-1979"] }),
+    ).resolves.toEqual({ added: createTasteSeedOk.added, removed: 1 });
+    expect(requests).toEqual([
+      "POST /api/v2/recommendations/taste-seed",
+      "DELETE /api/v2/favorites/movie:alien-1979",
+    ]);
+
+    requests.length = 0;
+    await expect(
+      result.current.mutateAsync({ add: [], remove: ["movie:alien-1979"] }),
+    ).resolves.toEqual({ added: 0, removed: 1 });
+    expect(requests).toEqual(["DELETE /api/v2/favorites/movie:alien-1979"]);
+  });
+
+  // A failed removal fails the save, so the picker stays open and the user
+  // can send it again; the removals after it are not sent.
+  it("fails the save when a removal fails", async () => {
+    const requests: string[] = [];
+    stubFetch((url, init) => {
+      requests.push(`${init?.method ?? "GET"} ${decodeURIComponent(url.pathname)}`);
+      return init?.method === "DELETE"
+        ? jsonResponse({ title: "Internal Server Error", status: 500 }, 500)
+        : jsonResponse(createTasteSeedOk);
+    });
+    const { result } = renderSubmit();
+
+    await expect(
+      result.current.mutateAsync({
+        add: ["movie:heat-1995"],
+        remove: ["movie:alien-1979", "movie:ran-1985"],
+      }),
+    ).rejects.toThrow();
+    expect(requests).toEqual([
+      "POST /api/v2/recommendations/taste-seed",
+      "DELETE /api/v2/favorites/movie:alien-1979",
+    ]);
+  });
+
+  // A profile switch partway through a save must not send the rest of it as
+  // the newly active profile.
+  it("sends the whole save as the profile that started it", async () => {
+    setAccessToken("token-owner");
+    const profiles: (string | null)[] = [];
+    stubFetch((_url, init) => {
+      profiles.push(new Headers(init?.headers).get("X-Profile-Id"));
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      setProfileId("p-kid");
+      return jsonResponse(createTasteSeedOk);
+    });
+    const { result } = renderSubmit();
+
+    await result.current.mutateAsync({ add: ["movie:heat-1995"], remove: ["movie:alien-1979"] });
+    expect(profiles).toEqual(["p-owner", "p-owner"]);
+  });
+
+  // A save started while the browser reports itself offline is sent at once
+  // rather than held until it reconnects, so a profile switched before then
+  // (in another tab, say) can't receive the removals.
+  it("does not hold an offline save for a later profile", async () => {
+    setAccessToken("token-owner");
+    const profiles: (string | null)[] = [];
+    const fetchMock = stubFetch((_url, init) => {
+      profiles.push(new Headers(init?.headers).get("X-Profile-Id"));
+      return init?.method === "DELETE"
+        ? new Response(null, { status: 204 })
+        : jsonResponse(createTasteSeedOk);
+    });
+    const { result } = renderSubmit();
+
+    onlineManager.setOnline(false);
+    void result.current.mutateAsync({ add: ["movie:heat-1995"], remove: ["movie:alien-1979"] });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    setProfileId("p-kid");
+    onlineManager.setOnline(true);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(profiles).toEqual(["p-owner", "p-owner"]);
+  });
+
   it("refetches the recommendation reads again after a submission", async () => {
     stubFetch(() => jsonResponse(createTasteSeedOk));
     const { result, recInvalidations, homeBumps } = renderSubmit();
 
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
-      await result.current.mutateAsync(["movie:heat-1995"]);
+      await result.current.mutateAsync({ add: ["movie:heat-1995"], remove: [] });
       expect(recInvalidations()).toBe(1);
       expect(homeBumps()).toBe(1);
 
@@ -93,9 +188,9 @@ describe("taste seeding on the v2 contract", () => {
 
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
-      await result.current.mutateAsync(["movie:heat-1995"]);
+      await result.current.mutateAsync({ add: ["movie:heat-1995"], remove: [] });
       await vi.advanceTimersByTimeAsync(1_000);
-      await result.current.mutateAsync(["movie:alien-1979"]);
+      await result.current.mutateAsync({ add: ["movie:alien-1979"], remove: [] });
       expect(recInvalidations()).toBe(2);
 
       await vi.advanceTimersByTimeAsync(3_000);

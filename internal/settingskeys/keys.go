@@ -9,7 +9,7 @@
 package settingskeys
 
 // Revision is the manifest revision these bindings were generated from.
-const Revision = 27
+const Revision = 28
 
 // Setting keys, one constant per definition.
 const (
@@ -117,6 +117,8 @@ const (
 	SearchMediaScope = "search.media_scope"
 	// Match device caption settings
 	SubtitleMatchesDevice = "subtitle.matches_device"
+	// App language
+	UiAppLanguage = "ui.app_language"
 	// Poster badges
 	UiCardOverlays = "ui.card_overlays"
 	// Card overlays enabled
@@ -213,6 +215,7 @@ var Remote = []string{
 	PlayerVideoSkipForwardSeconds,
 	RequestsWatchlistAutoRequest,
 	SearchMediaScope,
+	UiAppLanguage,
 	UiCardOverlays,
 	UiCardOverlaysEnabled,
 	UiCardPresentation,
