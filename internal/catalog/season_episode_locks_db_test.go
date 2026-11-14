@@ -141,7 +141,8 @@ func TestLockableFieldsKeepOnlyWhatARowCanHonor(t *testing.T) {
 
 // A season or episode stores the title details an admin edits, and the item
 // detail returns them. No provider writes them, so a refresh keeps them without
-// a lock. The content rating stays the series': it decides age limits.
+// a lock. The content rating stays the series': it decides age limits. A season
+// has no sort title, since seasons order by number.
 func TestSeasonEpisodeEditsKeepTitleDetailsDB(t *testing.T) {
 	ctx := context.Background()
 	f := newArtworkLockFixture(t, "title-details")
@@ -169,6 +170,9 @@ func TestSeasonEpisodeEditsKeepTitleDetailsDB(t *testing.T) {
 		}
 		got := []string{detail.SortTitle, detail.OriginalTitle, detail.Tagline, detail.ImdbID, detail.TmdbID, detail.TvdbID}
 		want := []string{sortTitle, originalTitle, tagline, imdbID, tmdbID, tvdbID}
+		if id == f.season.ContentID {
+			want[0] = ""
+		}
 		if !slices.Equal(got, want) {
 			t.Errorf("%s detail = %q, want %q", id, got, want)
 		}

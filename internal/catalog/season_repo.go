@@ -55,7 +55,7 @@ const seasonColumns = `content_id, series_id, season_number, title, default_meta
 	metadata_s3_path, metadata_etag, metadata_source,
 	created_at, updated_at,
 	backdrop_path, backdrop_source_path, backdrop_thumbhash, locked_fields,
-	sort_title, original_title, tagline, imdb_id, tmdb_id, tvdb_id`
+	original_title, tagline, imdb_id, tmdb_id, tvdb_id`
 
 // scanSeason scans a single row into a *models.Season.
 func scanSeason(row pgx.Row) (*models.Season, error) {
@@ -80,7 +80,6 @@ func scanSeason(row pgx.Row) (*models.Season, error) {
 		&s.BackdropSourcePath,
 		&s.BackdropThumbhash,
 		&s.LockedFields,
-		&s.SortTitle,
 		&s.OriginalTitle,
 		&s.Tagline,
 		&s.ImdbID,
@@ -121,7 +120,6 @@ func scanSeasons(rows pgx.Rows) ([]*models.Season, error) {
 			&s.BackdropSourcePath,
 			&s.BackdropThumbhash,
 			&s.LockedFields,
-			&s.SortTitle,
 			&s.OriginalTitle,
 			&s.Tagline,
 			&s.ImdbID,
@@ -510,7 +508,6 @@ func (r *SeasonRepository) UpdateMetadata(ctx context.Context, contentID string,
 	}
 
 	addString("title", upd.Title)
-	addString(childColumnSortTitle, upd.SortTitle)
 	addString(childColumnOriginalTitle, upd.OriginalTitle)
 	addString("overview", upd.Overview)
 	addString(childColumnTagline, upd.Tagline)

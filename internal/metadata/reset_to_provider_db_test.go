@@ -95,7 +95,7 @@ func TestResetToProvider_SeasonAndEpisodeRows(t *testing.T) {
 			if !tc.wantErr {
 				details := []string{episode.SortTitle, episode.OriginalTitle, episode.Tagline}
 				if tc.target == RefreshTargetSeason {
-					details = []string{season.SortTitle, season.OriginalTitle, season.Tagline, season.TvdbID}
+					details = []string{season.OriginalTitle, season.Tagline, season.TvdbID}
 				}
 				if slices.ContainsFunc(details, func(v string) bool { return v != "" }) {
 					t.Errorf("%s title details = %q, want them emptied", tc.target, details)

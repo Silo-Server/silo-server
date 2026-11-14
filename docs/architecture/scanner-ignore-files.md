@@ -100,21 +100,32 @@ scope is a skipped directory, or lies below one, reads nothing.
   listing and the read is absent. A subtree scan whose configured library root
   has an unreadable ignore file fails. Real-time monitoring keeps watching such
   a directory; the scans its changes trigger record the failure.
-- A single-file scan (`ScanFile`) reads no ignore files. An admin's scan
-  request for a file's exact path scans it even if a pattern would exclude
-  it. For audiobooks, this rebuilds the containing book as a whole.
+- A single-file scan (`ScanFile`) of a video, ebook, or manga file reads no
+  ignore files. An admin's scan request for a file's exact path scans it even
+  if a pattern would exclude it.
+- An audiobook file scan rebuilds the books under the file's folder (every
+  book in the library, for a file directly in the library root) and applies
+  the ignore files to them from the configured library root down, as a
+  subtree scan does. The one exception is an admin's request for the exact
+  path of a file the ignore files exclude, or below an ignore file that cannot
+  be read: that rebuild reads no ignore files, so the file is scanned. So is
+  every other book under its folder that they exclude (in the whole library,
+  for a file directly in the library root), until the next library scan
+  retires those again. The
+  exception follows the scan run's trigger, not the path, so a scan Silo
+  starts on its own always applies the rules, even when they change while the
+  scan waits in the queue.
 - A file change from real-time monitoring or autoscan (an *arr webhook, a
   plugin source, or the Jellyfin `/Library/Media/Updated` endpoint) that
   would become a single-file scan is checked against the ignore files from
   its configured library root down when it is resolved, and dropped when they
   exclude it, so automation does not import that file only for the next
   library scan to retire it again. If an ignore file on the way cannot be
-  read, the change is scanned anyway rather than dropped. Only the changed
-  file is checked: an audiobook file that passes still rebuilds every book
-  under its folder without ignore files (the whole library, for a file
-  directly in the library root), so the books and chapters they exclude
-  there are imported until the next library scan. A file change that becomes
-  a subtree scan needs no check; the subtree scan applies the rules.
+  read, the change is scanned anyway rather than dropped. An audiobook rebuild
+  then meets the same unreadable file and records it as a walk failure, as a
+  library scan does; a later scan imports the book once the file reads. A
+  file change that becomes a subtree scan needs no check; the subtree scan
+  applies the rules.
 - Subtree folder scans inherit markers and patterns from their configured
   library root through the subtree's ancestors. Rules outside the configured
   root do not apply. If an ancestor directory cannot be read, the subtree is
@@ -124,6 +135,9 @@ scope is a skipped directory, or lies below one, reads nothing.
   ordinary folder of the outer one, so the outer root's ignore files, and the
   hidden-folder rule for the inner root's own name, apply below it. Subtree
   scans and the full scans of every library kind apply the same rules there.
+  Local theme music discovery for movies and series uses the same boundary, so
+  it finds no theme the outer root's rules exclude or that sits in a skipped
+  folder below it.
 - A subtree scan whose configured library root is itself skipped (by
   `.nomedia` or a pattern-less `.ignore`) does nothing. Such a scan would find
   no files and retire the subtree outside the empty-root guard, so only a full

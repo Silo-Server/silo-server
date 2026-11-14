@@ -130,22 +130,58 @@ func TestProbeFileKeepsStreamFactsWhenFrameProbeFails(t *testing.T) {
 	}
 }
 
-// A first packet that does not decode on its own is read again over a longer
-// window before the file counts as having no frame.
+// A first packet that does not decode on its own is read again over longer
+// windows before the file counts as having no frame. A stream that starts
+// mid-GOP decodes nothing until its first keyframe, which a long GOP puts past
+// the 24-packet read. The last read stops at the first frame: its fake writes
+// one frame and then hangs, as ffprobe would while it decodes the rest.
 func TestProbeFileRereadsWhenTheFirstPacketDecodesNoFrame(t *testing.T) {
-	ffprobe, argsLog := writeHDR10PlusFFprobe(t, hdr10PlusStreamsJSON,
-		"case \" $* \" in *\" %+#1 \"*) printf '{\"frames\":[]}' ;; *) printf '%s' '"+hdr10PlusFrameJSON+"' ;; esac")
+	firstFrame := strings.TrimSuffix(hdr10PlusFrameJSON, "]}") + ","
+	tests := []struct {
+		name        string
+		noFrameArgs string
+		wantLast    string
+		wantReads   int
+	}{
+		{name: "keyframe within 24 packets", noFrameArgs: `*" %+#1 "*`, wantLast: "-read_intervals %+#24 ", wantReads: 2},
+		{name: "keyframe past 24 packets", noFrameArgs: `*" %+#1 "*|*" %+#24 "*`, wantLast: "-read_intervals %+#300 ", wantReads: 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ffprobe, argsLog := writeHDR10PlusFFprobe(t, hdr10PlusStreamsJSON,
+				"case \" $* \" in "+tt.noFrameArgs+") printf '{\"frames\":[]}' ;;\n"+
+					"*\" %+#300 \"*) printf '%s' '"+firstFrame+"'; exec sleep 60 ;;\n"+
+					"*) printf '%s' '"+hdr10PlusFrameJSON+"' ;; esac")
+
+			probe, err := ProbeFile(context.Background(), ffprobe, filepath.Join(t.TempDir(), "movie.mkv"))
+			if err != nil {
+				t.Fatalf("ProbeFile: %v", err)
+			}
+			// A last read that waited for ffprobe to exit would time out
+			// and leave the track unchecked.
+			if track := probe.VideoTracks[0]; !track.HDR10Plus || track.HDR10PlusUnchecked {
+				t.Fatalf("track = %+v, want HDR10+ found by a later read", track)
+			}
+			frames := frameProbeInvocations(t, argsLog)
+			if len(frames) != tt.wantReads || !strings.Contains(frames[len(frames)-1], tt.wantLast) {
+				t.Fatalf("frame probes = %q, want %d reads ending with %q", frames, tt.wantReads, tt.wantLast)
+			}
+		})
+	}
+}
+
+// Output after ffprobe's JSON, such as a wrapper's, is drained, so it cannot
+// keep ffprobe from exiting and turn a read frame into a timeout.
+func TestProbeFileReadsTheFrameBeforeTrailingOutput(t *testing.T) {
+	ffprobe, _ := writeHDR10PlusFFprobe(t, hdr10PlusStreamsJSON,
+		"printf '%s' '"+hdr10PlusFrameJSON+"'; head -c 1048576 /dev/zero | tr '\\0' ' '")
 
 	probe, err := ProbeFile(context.Background(), ffprobe, filepath.Join(t.TempDir(), "movie.mkv"))
 	if err != nil {
 		t.Fatalf("ProbeFile: %v", err)
 	}
 	if track := probe.VideoTracks[0]; !track.HDR10Plus || track.HDR10PlusUnchecked {
-		t.Fatalf("track = %+v, want HDR10+ found by the second read", track)
-	}
-	frames := frameProbeInvocations(t, argsLog)
-	if len(frames) != 2 || !strings.Contains(frames[1], "-read_intervals %+#24 ") {
-		t.Fatalf("frame probes = %q, want a one-packet read then a 24-packet read", frames)
+		t.Fatalf("track = %+v, want HDR10+ from the first read", track)
 	}
 }
 

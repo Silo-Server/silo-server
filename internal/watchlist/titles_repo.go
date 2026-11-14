@@ -691,6 +691,23 @@ func (r *titlesRepo) aliasesOf(ctx context.Context, titleID int64) ([]titleAlias
 	return aliases, nil
 }
 
+// aliasesOfTMDBOwners returns every alias of the titles holding any of the
+// TMDB IDs, current or former.
+func (r *titlesRepo) aliasesOfTMDBOwners(ctx context.Context, mediaType string, tmdbIDs []string) ([]titleAlias, error) {
+	aliases, err := collectAliases(r.pool.Query(ctx, `
+		SELECT a.title_id, a.media_type, a.provider, a.provider_id
+		FROM watchlist_title_aliases a
+		WHERE a.title_id IN (
+			SELECT o.title_id FROM watchlist_title_aliases o
+			WHERE o.media_type = $1 AND o.provider = 'tmdb' AND o.provider_id = ANY($2)
+		)
+		ORDER BY a.title_id, a.provider, a.provider_id`, mediaType, tmdbIDs))
+	if err != nil {
+		return nil, fmt.Errorf("reading watchlist title aliases by tmdb id: %w", err)
+	}
+	return aliases, nil
+}
+
 // aliasOwner returns the title holding a provider ID, or 0.
 func (r *titlesRepo) aliasOwner(ctx context.Context, q interface {
 	QueryRow(context.Context, string, ...any) pgx.Row

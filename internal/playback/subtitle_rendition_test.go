@@ -1474,6 +1474,22 @@ func TestPlannedCopySubtitleSegmentAheadOfFFmpegIsNotFound(t *testing.T) {
 		if got := session.LastRequestedSegment(); got != 5 {
 			t.Fatalf("throttle position = %d, want the requested segment 5", got)
 		}
+		// Once FFmpeg has exited, the segment's video request restarts it
+		// there, so the answer is still one the player retries.
+		session.running = false
+		rr = httptest.NewRecorder()
+		session.ServeSubtitleSegment(rr, httptest.NewRequest(http.MethodGet, "/segment/sub_00005.vtt", nil), "sub_00005.vtt")
+		if rr.Code != http.StatusNotFound {
+			t.Fatalf("segment ahead of an exited FFmpeg = %d %q, want 404", rr.Code, rr.Body.String())
+		}
+		// A closing session restarts nothing, so it answers at once.
+		session.closing = true
+		started = time.Now()
+		rr = httptest.NewRecorder()
+		session.ServeSubtitleSegment(rr, httptest.NewRequest(http.MethodGet, "/segment/sub_00005.vtt", nil), "sub_00005.vtt")
+		if rr.Code != http.StatusOK || time.Since(started) != 0 {
+			t.Fatalf("segment of a closing session = %d after %v, want an empty segment at once", rr.Code, time.Since(started))
+		}
 	})
 }
 

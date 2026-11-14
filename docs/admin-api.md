@@ -3503,7 +3503,18 @@ so the plugin's default applies; fields the manifest does not declare (plugin-ow
 are kept. Manifest-declared secret fields left blank keep their stored value, and a secret is
 removed only when named in `clear_secrets`. The
 connection test (`.../config/test` and the auth connection test) merges a staged entry the
-same way without storing it. The server validates the merged entry against the
+same way without storing it, with one difference: a blank secret reuses the stored secret
+only while the entry is otherwise unchanged. Unchanged means no secret is typed and every
+other field, after clears, matches the stored entry; a field the stored entry lacks
+matches its declared default. A secret object or list (such as a map of servers with keys
+inside) counts as typed whenever it is sent, because its contents are secret. A staged entry that changes a server URL, issuer, CA or any
+other setting, or types a secret, is tested with only the secrets the administrator typed
+and without undeclared stored top-level fields, so a destination changed in an entry never
+receives the saved secrets that entry declares. An undeclared key stored inside a declared
+object is kept, and an entry whose schema declares no secret is merged as a save would
+merge it, undeclared stored fields included. The rule is per entry: the other stored entries go to the
+plugin unchanged, so a plugin that keeps a credential in one entry and its destination in
+another is not covered. The server validates the merged entry against the
 plugin's schema and returns 422 with the plugin's own message on failure, then persists
 under a compare-and-swap on the stored revision and stops the running plugin so it rebinds.
 Success is 204. Repeating the same request converges on one stored entry, so the row is

@@ -1744,7 +1744,8 @@ func (f *fakeStore) guardAccepts(g StateGuard, req *Request) bool {
 	}
 	if g.UnsentOnly && req.Status == StatusApproved {
 		leased := req.SubmitLeaseUntil != nil && req.SubmitLeaseUntil.After(time.Now())
-		return !leased && len(f.targets[req.ID]) == 0
+		sent := slices.ContainsFunc(f.targets[req.ID], func(t Target) bool { return t.Status != StatusFailed })
+		return !leased && !sent
 	}
 	return true
 }
@@ -1908,15 +1909,17 @@ func (f *fakeStore) MarkAvailable(_ context.Context, id string, _ Viewer) (*Requ
 		return nil, ErrNotFound
 	}
 	open := req.Status == StatusPending || req.Status == StatusApproved || req.Status == StatusQueued || req.Status == StatusDownloading
-	claimed := req.Status == StatusApproved && req.SubmitLeaseUntil != nil && req.SubmitLeaseUntil.After(time.Now())
 	partlyDelivered := false
 	for _, t := range f.targets[id] {
 		if t.Status == StatusCompleted {
 			partlyDelivered = true
 		}
 	}
+	// An approved request that delivered a quality is resending the rest.
+	submitting := req.Status == StatusApproved &&
+		(partlyDelivered || req.SubmitLeaseUntil != nil && req.SubmitLeaseUntil.After(time.Now()))
 	failedElsewhere := req.Outcome == OutcomeFailed && !partlyDelivered
-	if !failedElsewhere && (req.Outcome != OutcomeActive || !open || claimed) {
+	if !failedElsewhere && (req.Outcome != OutcomeActive || !open || submitting) {
 		return nil, ErrInvalidState
 	}
 	f.statusUpdates = append(f.statusUpdates, StatusCompleted)
@@ -2261,9 +2264,18 @@ func (f *fakeStore) DeleteTarget(_ context.Context, id int64) error {
 	return ErrNotFound
 }
 
+// UpdateTargetStatus mirrors the repository: it writes only a queued or
+// downloading target and answers ErrInvalidState for a finished one.
 func (f *fakeStore) UpdateTargetStatus(_ context.Context, targetID int64, status Status, externalID, externalStatus, lastErr string, _ Viewer) (*Request, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	for _, ts := range f.targets {
+		for _, t := range ts {
+			if t.ID == targetID && t.Status != StatusQueued && t.Status != StatusDownloading {
+				return nil, ErrInvalidState
+			}
+		}
+	}
 	return f.updateTargetLocked(targetID, status, externalID, externalStatus, lastErr)
 }
 
@@ -2352,8 +2364,9 @@ func (f *fakeStore) UpdateTargetExternalStatus(_ context.Context, targetID int64
 	return nil
 }
 
-// RecordSubmission mirrors the repository's lease fence, then records each
-// target the way a create followed by a status update would.
+// RecordSubmission mirrors the repository's lease fence and its replacement of
+// the failed targets of the qualities it records, then records each target the
+// way a create followed by a status update would.
 func (f *fakeStore) RecordSubmission(_ context.Context, id string, leaseUntil time.Time, targets []Target, _ Viewer) (*Request, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -2369,6 +2382,9 @@ func (f *fakeStore) RecordSubmission(_ context.Context, id string, leaseUntil ti
 	if f.targets == nil {
 		f.targets = map[string][]Target{}
 	}
+	f.targets[id] = slices.DeleteFunc(f.targets[id], func(old Target) bool {
+		return old.Status == StatusFailed && slices.ContainsFunc(targets, func(t Target) bool { return t.Quality == old.Quality })
+	})
 	latest := req
 	for _, t := range targets {
 		f.targetSeq++

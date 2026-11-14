@@ -282,9 +282,11 @@ func (s *TranscodeSession) subtitleSegmentSource(segNum int) (file string, ready
 // player readiness the way a whole-file sidecar extraction did. The wait is
 // brief unless the live generation is about to reach the segment, when it is
 // as long as the matching video segment's. A keyframe-planned copy is the
-// exception: its video request for a segment FFmpeg has not reached waits and
-// then fails with ErrSegmentNotFound, so its subtitle segment does the same
-// rather than answer a final empty document the player would keep.
+// exception: its video request for any planned segment FFmpeg has not
+// produced waits for FFmpeg or restarts it there, even after it exited, so its
+// subtitle segment waits too and, if no generation reaches it, fails with
+// ErrSegmentNotFound rather than answer a final empty document the player
+// would keep.
 func (s *TranscodeSession) SubtitleSegmentVTT(ctx context.Context, segNum int) ([]byte, error) {
 	opts := s.Opts()
 	if subtitleRenditionsOnDemand(opts) {
@@ -296,6 +298,7 @@ func (s *TranscodeSession) SubtitleSegmentVTT(ctx context.Context, segNum int) (
 	poll := subtitleCuePollInterval
 	for {
 		file, ready, waitable, imminent := s.subtitleSegmentSource(segNum)
+		waitable = waitable || s.plannedSegmentRestartable(segNum)
 		if imminent {
 			deadline = started.Add(subtitleSegmentProductionWait)
 		}

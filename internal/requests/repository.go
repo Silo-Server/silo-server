@@ -619,7 +619,8 @@ const guardCondition = `(cardinality($2::text[]) = 0 OR status = ANY($2::text[])
 		  AND (cardinality($3::text[]) = 0 OR outcome = ANY($3::text[]))
 		  AND (NOT $4::boolean OR status <> 'approved' OR (
 		    (submit_lease_until IS NULL OR submit_lease_until <= now())
-		    AND NOT EXISTS (SELECT 1 FROM media_request_targets t WHERE t.request_id = media_requests.id)))`
+		    AND NOT EXISTS (SELECT 1 FROM media_request_targets t
+		      WHERE t.request_id = media_requests.id AND t.status <> 'failed')))`
 
 func guardArgs(g StateGuard) ([]string, []string, bool) {
 	statuses := make([]string, 0, len(g.Statuses))
@@ -912,7 +913,12 @@ func (r *Repository) MarkAvailable(ctx context.Context, id string, actor Viewer)
 		  AND (
 		    (outcome = 'active'
 		      AND status IN ('pending', 'approved', 'queued', 'downloading')
-		      AND (status <> 'approved' OR submit_lease_until IS NULL OR submit_lease_until <= now()))
+		      AND (status <> 'approved' OR (
+		        (submit_lease_until IS NULL OR submit_lease_until <= now())
+		        -- An approved request that delivered some quality is a retry
+		        -- resending the rest. The library holds the delivered copy,
+		        -- so only the resend, or its failure, settles the request.
+		        AND `+deliveredNothing+`)))
 		    -- A failed request is complete only when the title came from
 		    -- elsewhere. One that failed after delivering some quality keeps
 		    -- its failure visible for an admin to retry.

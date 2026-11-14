@@ -224,12 +224,16 @@ the target aggregate: a target change always recomputes the request's status fro
 its targets, because after submission the targets are the source of truth.
 
 Decline and cancel apply to requests nothing has been sent for: `pending` ones,
-and `approved` ones with no target and no live submission lease (waiting for the
-library, or backing off after a failed send). Once a submission is in flight or
-a target exists, the request stays in the pipeline until it completes or fails,
+and `approved` ones with no live submission lease and no target other than a
+failed one (waiting for the library, or backing off after a failed send). Once a
+submission is in flight or any other target exists, the request stays in the
+pipeline until it completes or fails,
 because withdrawing it could leave the downstream service's state diverged from
 Silo's. Retry reopens a `failed` request to `approved` + `active` in one guarded
-write.
+write. When the request had delivered one quality, it keeps that target and
+resends only the failed tiers. The library never completes such a retry: the
+title is present because of the delivered copy, which says nothing about the
+tiers being resent. Only the resend or its final failure ends the retry.
 
 Remove (`removeFailedRequest`, `DELETE /api/v2/requests/{id}`) deletes a
 `failed` request for its owner or an admin, with its targets, events and
@@ -274,8 +278,11 @@ A submission converges the request's targets to the qualities it currently
 wants. A failed target for a quality it no longer wants is deleted, but only
 when that quality set was resolved without error. A failed entitlement lookup
 or a connection skipped for a missing key makes the set look smaller than it
-is, so in either case every failed target is kept for an admin to see. If
-nothing is left to send, the remaining targets decide the status.
+is, so in either case every failed target is kept for an admin to see. A
+failed target for a quality being resent stays until the attempt records its
+result, which replaces it in the same transaction, so a resend that errors
+keeps the failure through the backoff. If nothing is left to send, the
+remaining targets decide the status.
 
 ## Season requests
 
@@ -441,6 +448,9 @@ connection that exists but cannot be used (no API key, not bound to a plugin
 installation) is a setup problem instead: the submission retries with backoff
 and records the reason in `last_error`, so fixing the connection lets the
 request through.
+A Retry of a request that delivered one quality is handled the same way, since
+the library cannot complete it. With no router to resend the failed tier, it
+backs off with the reason and then fails again.
 
 A connection needs an API key unless its plugin declares
 `request_router.api_key_optional` in its manifest. The host reads the
@@ -476,7 +486,9 @@ Every five minutes the reconcile pass submits approved requests, asks the router
 for target status, and completes open and failed requests whose media is present
 in the library.
 Completing from the library skips an approved request while its submission lease
-is live, so it cannot race a router call that is creating targets.
+is live, so it cannot race a router call that is creating targets. It also
+skips an approved request with a `completed` target, which is a Retry
+resending its failed tiers, and the pass submits that request instead.
 Every API process runs the task manager, so an advisory lock lets one server run
 each pass. A pass has two rotations. In-flight requests (`approved`, `queued`,
 `downloading`) get router calls. Requests only the library can complete
