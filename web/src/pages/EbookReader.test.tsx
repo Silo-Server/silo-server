@@ -125,7 +125,8 @@ vi.mock("@/reader/FoliateBookReader", async () => {
           ],
         });
         return () => onFileLoaded?.(null);
-      }, [onFileLoaded, onProgressChange, onReady, onSelectionChange]);
+        // Like the real reader, a new file closes the old book and opens another.
+      }, [file.file_id, onFileLoaded, onProgressChange, onReady, onSelectionChange]);
       return <div>reader surface {file.file_name}</div>;
     }),
   };
@@ -282,6 +283,46 @@ describe("EbookReader", () => {
       );
     });
   }
+
+  it("clears a search and its cut-off note when another file opens", async () => {
+    mocks.useCatalogItemDetail.mockReturnValue({
+      data: makeEbookItem({
+        versions: [makeVersion(), makeVersion({ file_id: 8, file_name: "Other.epub" })],
+      }),
+      isLoading: false,
+      error: null,
+    });
+    mocks.readerSearch.mockResolvedValue({
+      results: [{ cfi: "epubcfi(/6/8)", excerpt: "from the first file" }],
+      truncated: true,
+    });
+    await openReader();
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('button[aria-label="Search book"]')?.click();
+    });
+    const input = container.querySelector<HTMLInputElement>("form input")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "sea");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      input.form!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    expect(container.textContent).toContain("Showing the first 1,000 matches.");
+    expect(container.textContent).toContain("from the first file");
+
+    const fileSelect = Array.from(container.querySelectorAll<HTMLSelectElement>("select")).find(
+      (select) => Array.from(select.options).some((option) => option.value === "8"),
+    )!;
+    await act(async () => {
+      fileSelect.value = "8";
+      fileSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    expect(container.textContent).toContain("reader surface Other.epub");
+    expect(container.textContent).not.toContain("Showing the first");
+    expect(container.textContent).not.toContain("from the first file");
+  });
 
   // Picks a theme on the Reader settings tab.
   async function chooseTheme(value: string) {

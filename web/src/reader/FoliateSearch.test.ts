@@ -109,7 +109,9 @@ describe("foliate search excerpts", () => {
 
 describe("foliate view search", () => {
   type SearchItem = { cfi: string; excerpt: Excerpt };
-  type SearchResult = "done" | { progress?: number; index?: number; subitems?: SearchItem[] };
+  type SearchResult =
+    | "done"
+    | { progress?: number; index?: number; subitems?: SearchItem[]; truncated?: boolean };
   type TestView = HTMLElement & {
     book: unknown;
     getCFI: (index: number, range: Range) => string;
@@ -141,24 +143,33 @@ describe("foliate view search", () => {
 
   async function collect(iter: AsyncGenerator<SearchResult>) {
     const subitems: SearchItem[] = [];
+    let truncated = false;
     for await (const result of iter) {
-      if (result !== "done" && result.subitems) subitems.push(...result.subitems);
+      if (result === "done") continue;
+      if (result.subitems) subitems.push(...result.subitems);
+      if (result.truncated) truncated = true;
     }
-    return subitems;
+    return { subitems, truncated };
   }
 
-  it("stops a whole-book search at the result limit", async () => {
-    const perSection = "ab ".repeat(SEARCH_RESULT_LIMIT * 0.75);
-    // The reader passes its own limit; other callers get the default.
-    for (const [limit, expected] of [
-      [undefined, SEARCH_RESULT_LIMIT],
-      [250, 250],
-    ]) {
-      const { view, addAnnotation } = makeView([perSection, perSection, perSection]);
+  it("stops a whole-book search at the result limit and says when more matches exist", async () => {
+    const perSection = SEARCH_RESULT_LIMIT * 0.75;
+    const text = "ab ".repeat(perSection);
+    // [limit, matches kept, more exist]; 750 fills the first section exactly,
+    // so the next section shows whether the list was cut off.
+    for (const [limit, expected, more] of [
+      [undefined, SEARCH_RESULT_LIMIT, true],
+      [250, 250, true],
+      [perSection, perSection, true],
+      [perSection * 3, perSection * 3, false],
+    ] as const) {
+      const { view, addAnnotation } = makeView([text, text, text]);
 
-      const subitems = await collect(view.search({ query: "ab", limit }));
+      const { subitems, truncated } = await collect(view.search({ query: "ab", limit }));
 
       expect(subitems).toHaveLength(expected);
+      expect(truncated).toBe(more);
+      // The match that shows more exist is not outlined.
       expect(addAnnotation).toHaveBeenCalledTimes(expected);
       expect(subitems[0]?.excerpt).toEqual({
         pre: "",
@@ -179,7 +190,7 @@ describe("foliate view search", () => {
       return getCFI(index, range);
     };
 
-    const subitems = await collect(view.search({ query: "ab", signal: controller.signal }));
+    const { subitems } = await collect(view.search({ query: "ab", signal: controller.signal }));
 
     expect(controller.signal.aborted).toBe(true);
     expect(matched).toBeGreaterThan(0);

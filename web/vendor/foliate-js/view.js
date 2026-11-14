@@ -9,6 +9,7 @@ const NOTE_PREFIX = 'foliate-note:'
 
 // Silo: bound search work so a common term in a long book cannot freeze the
 // reader. Results stop at the limit (search's `limit` option, this by default),
+// a whole-book search ends with { truncated: true } when more matches exist,
 // and long sections yield to the event loop so an aborted search stops before
 // its section is exhausted.
 export const SEARCH_RESULT_LIMIT = 1000
@@ -612,6 +613,8 @@ export class View extends HTMLElement {
         if (signal?.aborted) return
         yield* this.#matchSection(matcher, query, index, doc, limit, signal)
     }
+    // Ends with { truncated: true } when matches run past `limit`. The match
+    // that shows it is read but neither yielded nor outlined.
     async * #searchBook(matcher, query, limit, signal) {
         const { sections } = this.book
         let remaining = limit
@@ -621,13 +624,18 @@ export class View extends HTMLElement {
             if (signal?.aborted) return
             const subitems = []
             for await (const item of this.#matchSection(
-                matcher, query, index, doc, remaining, signal)) subitems.push(item)
+                matcher, query, index, doc, remaining + 1, signal)) subitems.push(item)
             if (signal?.aborted) return
+            const truncated = subitems.length > remaining
+            if (truncated) subitems.length = remaining
             remaining -= subitems.length
             const progress = (index + 1) / sections.length
             yield { progress }
             if (subitems.length) yield { index, subitems }
-            if (remaining <= 0) return
+            if (truncated) {
+                yield { truncated }
+                return
+            }
         }
     }
     async * search(opts) {

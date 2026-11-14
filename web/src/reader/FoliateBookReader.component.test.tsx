@@ -454,7 +454,7 @@ describe("FoliateBookReader open flow", () => {
 
   // Each search parks until its gate opens, then yields `count` results. It
   // ignores the abort signal so the handle itself must drop a superseded run.
-  function gatedSearch(view: FakeFoliateView, count = 1) {
+  function gatedSearch(view: FakeFoliateView, count = 1, truncated = false) {
     const runs = new Map<
       string,
       { signal?: AbortSignal; limit?: number; gate: ReturnType<typeof deferred<void>> }
@@ -471,6 +471,7 @@ describe("FoliateBookReader open flow", () => {
           excerpt: { pre: "the ", match: query, post: " sails" },
         })),
       };
+      if (truncated) yield { truncated };
     };
     return runs;
   }
@@ -508,19 +509,17 @@ describe("FoliateBookReader open flow", () => {
     await expect(third).resolves.toBeNull();
   });
 
-  it("reports a search as truncated only when matches run past the limit", async () => {
+  it("asks for the result limit and reports the view's cut-off marker", async () => {
     mocks.loaderOpen.mockResolvedValue({ book: makeBook("A") });
     const reader = createRef<FoliateBookReaderHandle>();
     await act(async () => {
       root.render(ui(fileA, { ref: reader }));
     });
-    for (const [found, truncated] of [
-      [READER_SEARCH_RESULT_LIMIT, false],
-      [READER_SEARCH_RESULT_LIMIT + 1, true],
-    ] as const) {
-      const runs = gatedSearch(viewAt(0), found);
+    for (const truncated of [false, true]) {
+      const runs = gatedSearch(viewAt(0), READER_SEARCH_RESULT_LIMIT, truncated);
       const pending = reader.current!.search("lamp");
       await act(async () => {});
+      expect(runs.get("lamp")?.limit).toBe(READER_SEARCH_RESULT_LIMIT);
       runs.get("lamp")!.gate.resolve();
       const outcome = await pending;
       expect(outcome?.results).toHaveLength(READER_SEARCH_RESULT_LIMIT);
@@ -548,6 +547,17 @@ describe("FoliateBookReader open flow", () => {
     expect(runs.get("whale")?.signal?.aborted).toBe(true);
     runs.get("whale")!.gate.resolve();
     await expect(pending).resolves.toBeNull();
+
+    // A closed book can fail the section load the search is waiting on.
+    const failing = gatedSearch(viewAt(1));
+    const failed = reader.current!.search("ship");
+    await act(async () => {});
+    await act(async () => {
+      root.render(ui(fileA, { ref: reader }));
+    });
+    expect(failing.get("ship")?.signal?.aborted).toBe(true);
+    failing.get("ship")!.gate.reject(new Error("book destroyed"));
+    await expect(failed).resolves.toBeNull();
   });
 
   it("returns foliate's search excerpts as display text", async () => {

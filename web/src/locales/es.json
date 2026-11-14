@@ -132130,6 +132130,54 @@
       "value": "Buscar"
     }
   ],
+  "web.reader.search.truncated": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Se muestra la primera coincidencia."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Se muestran las primeras "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de coincidencias."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Se muestran las primeras "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " coincidencias."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.reader.settings.brightness": [
     {
       "type": 0,

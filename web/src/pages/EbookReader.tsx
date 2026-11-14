@@ -311,6 +311,11 @@ export default function EbookReader() {
   const tocEntries = useMemo(() => flattenToc(toc), [toc]);
   const handleFileLoaded = useCallback((state: ReaderLoadState | null) => {
     setLoadedFile(state);
+    // A closed book takes its search with it; its results point into that book.
+    if (!state) {
+      setSearchResults([]);
+      setSearchTruncated(false);
+    }
   }, []);
   const handleProgressChange = useCallback((progress: number | null) => {
     setReaderProgress(progress);
@@ -1040,7 +1045,7 @@ export default function EbookReader() {
                   </form>
                   {searchTruncated && (
                     <p className="text-muted-foreground px-2 text-xs">
-                      Showing the first {READER_SEARCH_RESULT_LIMIT.toLocaleString()} matches.
+                      {t("web.reader.search.truncated", { count: READER_SEARCH_RESULT_LIMIT })}
                     </p>
                   )}
                   <div className="space-y-1">

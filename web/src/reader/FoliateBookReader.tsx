@@ -140,6 +140,8 @@ type FoliateSearchResult = {
     excerpt?: FoliateSearchExcerpt;
     label?: string;
   }>;
+  // The last result of a search whose matches ran past its limit.
+  truncated?: boolean;
 };
 
 type RelocateDetail = {
@@ -652,25 +654,27 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
           searchRef.current = search;
           const { signal } = search.controller;
           const results: ReaderSearchResult[] = [];
+          let truncated = false;
           try {
-            // One match past the limit tells a cut-off list from one that is exactly full.
             for await (const result of view.search({
               query: trimmed,
               scope: "book",
-              limit: READER_SEARCH_RESULT_LIMIT + 1,
+              limit: READER_SEARCH_RESULT_LIMIT,
               signal,
             })) {
               if (signal.aborted) return null;
+              if (result.truncated) truncated = true;
               results.push(...flattenSearchResult(result));
             }
+          } catch (error) {
+            // A book closed under the search can fail its section loads.
+            if (signal.aborted) return null;
+            throw error;
           } finally {
             if (searchRef.current === search) searchRef.current = null;
           }
           if (signal.aborted) return null;
-          return {
-            results: results.slice(0, READER_SEARCH_RESULT_LIMIT),
-            truncated: results.length > READER_SEARCH_RESULT_LIMIT,
-          };
+          return { results, truncated };
         },
         clearSearch: () => {
           searchRef.current?.controller.abort();
