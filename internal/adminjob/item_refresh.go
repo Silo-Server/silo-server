@@ -796,20 +796,28 @@ func (e *ItemRefreshExecutor) resolveCompleteRefreshTargets(ctx context.Context,
 	switch req.RequestedType {
 	case "season":
 		if e.seasonRepo != nil {
-			if season, lookupErr := e.seasonRepo.GetBySeriesAndNumber(ctx, refreshContentID, req.RequestedSeasonNumber); lookupErr == nil && season != nil {
+			season, lookupErr := e.seasonRepo.GetBySeriesAndNumber(ctx, refreshContentID, req.RequestedSeasonNumber)
+			switch {
+			case lookupErr == nil && season != nil:
 				detailContentID = season.ContentID
 				refreshContentID = season.ContentID
-			} else {
+			case lookupErr == nil || errors.Is(lookupErr, catalog.ErrSeasonNotFound):
 				return "", "", unlinked, fmt.Errorf("rebuilt season %w", errRebuiltTargetNotFound)
+			default:
+				return "", "", unlinked, fmt.Errorf("loading rebuilt season: %w", lookupErr)
 			}
 		}
 	case "episode":
 		if e.episodeRepo != nil {
-			if episode, lookupErr := e.episodeRepo.GetBySeriesAndNumber(ctx, refreshContentID, req.RequestedSeasonNumber, req.RequestedEpisodeNumber); lookupErr == nil && episode != nil {
+			episode, lookupErr := e.episodeRepo.GetBySeriesAndNumber(ctx, refreshContentID, req.RequestedSeasonNumber, req.RequestedEpisodeNumber)
+			switch {
+			case lookupErr == nil && episode != nil:
 				detailContentID = episode.ContentID
 				refreshContentID = episode.ContentID
-			} else {
+			case lookupErr == nil || errors.Is(lookupErr, catalog.ErrEpisodeNotFound):
 				return "", "", unlinked, fmt.Errorf("rebuilt episode %w", errRebuiltTargetNotFound)
+			default:
+				return "", "", unlinked, fmt.Errorf("loading rebuilt episode: %w", lookupErr)
 			}
 		}
 	}

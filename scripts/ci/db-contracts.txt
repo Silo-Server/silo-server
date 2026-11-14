@@ -177,6 +177,10 @@
 # episode content IDs.
 ./internal/adminjob TestCompleteItemRefreshKeepsPodcastIDsDB
 
+# A complete metadata refresh of a series, season or episode relinks its files
+# and resolves the rebuilt item (#934).
+./internal/metadata TestCompleteRefreshRebuildsSeriesDB
+
 # Profile history and account/invitation persistence.
 ./internal/api/handlers TestAccessGroupUpdateLibraryPolicyDB
 ./internal/api/handlers TestClearResumePositionTargetsDB

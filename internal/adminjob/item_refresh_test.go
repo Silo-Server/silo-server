@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -520,12 +521,12 @@ func (r *itemRefreshTestEpisodeRepo) GetByID(_ context.Context, _ string) (*mode
 func (r *itemRefreshTestEpisodeRepo) GetBySeriesAndNumber(_ context.Context, seriesID string, seasonNum int, episodeNum int) (*models.Episode, error) {
 	r.reads++
 	if r.reads <= r.missingReads {
-		return nil, errors.New("episode not found")
+		return nil, catalog.ErrEpisodeNotFound
 	}
 	if r.episode != nil && r.episode.SeriesID == seriesID && r.episode.SeasonNumber == seasonNum && r.episode.EpisodeNumber == episodeNum {
 		return r.episode, nil
 	}
-	return nil, errors.New("episode not found")
+	return nil, catalog.ErrEpisodeNotFound
 }
 
 func (r *itemRefreshTestEpisodeRepo) ListBySeries(_ context.Context, _ string) ([]*models.Episode, error) {
@@ -625,41 +626,44 @@ func TestItemRefreshExecutorRunsResetJobsAsResets(t *testing.T) {
 // series root queue matches, ingests without the unlinked settle wait.
 func TestItemRefreshExecutorCompleteRefreshWaitsForTheRelink(t *testing.T) {
 	t.Parallel()
-	run := func(t *testing.T, requestedType string, unlinkedReads int, wait time.Duration) (*ItemRefreshResult, *itemRefreshTestIngester, *itemRefreshTestFileRepo, error) {
-		t.Helper()
-		ingester := &itemRefreshTestIngester{}
-		fileRepo := &itemRefreshTestFileRepo{
-			filesByPath:   []*models.MediaFile{{ContentID: "new-id", FilePath: "/media/mixed/Title/Title.mkv"}},
-			unlinkedReads: unlinkedReads,
+	// The relink poll runs on synctest's fake clock, so the waits cost no time.
+	synctest.Test(t, func(t *testing.T) {
+		run := func(t *testing.T, requestedType string, unlinkedReads int, wait time.Duration) (*ItemRefreshResult, *itemRefreshTestIngester, *itemRefreshTestFileRepo, error) {
+			t.Helper()
+			ingester := &itemRefreshTestIngester{}
+			fileRepo := &itemRefreshTestFileRepo{
+				filesByPath:   []*models.MediaFile{{ContentID: "new-id", FilePath: "/media/mixed/Title/Title.mkv"}},
+				unlinkedReads: unlinkedReads,
+			}
+			executor := NewItemRefreshExecutor(
+				&itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 7, Enabled: true, Paths: []string{"/media/mixed"}}},
+				fileRepo, &itemRefreshTestRootClaimRepo{}, &itemRefreshTestGroupClaimRepo{}, newItemRefreshTestSkippedRootRepo(),
+				nil, nil, ingester, &itemRefreshTestScanRuns{}, &itemRefreshTestRefresher{}, nil, nil,
+			)
+			executor.relinkWait = wait
+			result, err := executor.Execute(context.Background(), ItemRefreshRequest{
+				RequestedContentID: "old-id", RequestedType: requestedType, RefreshContentID: "old-id",
+				ScanFolderID: 7, ScanPath: "/media/mixed/Title", Mode: ItemRefreshModeComplete,
+			}, nil)
+			return result, ingester, fileRepo, err
 		}
-		executor := NewItemRefreshExecutor(
-			&itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 7, Enabled: true, Paths: []string{"/media/mixed"}}},
-			fileRepo, &itemRefreshTestRootClaimRepo{}, &itemRefreshTestGroupClaimRepo{}, newItemRefreshTestSkippedRootRepo(),
-			nil, nil, ingester, &itemRefreshTestScanRuns{}, &itemRefreshTestRefresher{}, nil, nil,
-		)
-		executor.relinkWait = wait
-		result, err := executor.Execute(context.Background(), ItemRefreshRequest{
-			RequestedContentID: "old-id", RequestedType: requestedType, RefreshContentID: "old-id",
-			ScanFolderID: 7, ScanPath: "/media/mixed/Title", Mode: ItemRefreshModeComplete,
-		}, nil)
-		return result, ingester, fileRepo, err
-	}
 
-	result, ingester, files, err := run(t, "series", 3, 5*time.Second)
-	if err != nil || result.RefreshContentID != "new-id" {
-		t.Fatalf("relinked after %d reads: result %+v, err %v; want new-id", files.reads, result, err)
-	}
-	if !ingester.unlinked {
-		t.Fatal("a series target ingested as unchanged, want IngestUnlinkedSubtree")
-	}
+		result, ingester, files, err := run(t, "series", 3, 5*time.Second)
+		if err != nil || result.RefreshContentID != "new-id" {
+			t.Fatalf("relinked after %d reads: result %+v, err %v; want new-id", files.reads, result, err)
+		}
+		if !ingester.unlinked {
+			t.Fatal("a series target ingested as unchanged, want IngestUnlinkedSubtree")
+		}
 
-	if _, _, _, err := run(t, "series", 1_000, 50*time.Millisecond); !errors.Is(err, errNoRebuiltContent) {
-		t.Fatalf("never relinked: err = %v, want errNoRebuiltContent", err)
-	}
+		if _, _, _, err := run(t, "series", 1_000, 50*time.Millisecond); !errors.Is(err, errNoRebuiltContent) {
+			t.Fatalf("never relinked: err = %v, want errNoRebuiltContent", err)
+		}
 
-	if _, ingester, _, err := run(t, "movie", 0, time.Second); err != nil || ingester.unlinked {
-		t.Fatalf("movie target: err %v, unlinked ingest %v; want the plain ingest", err, ingester.unlinked)
-	}
+		if _, ingester, _, err := run(t, "movie", 0, time.Second); err != nil || ingester.unlinked {
+			t.Fatalf("movie target: err %v, unlinked ingest %v; want the plain ingest", err, ingester.unlinked)
+		}
+	})
 }
 
 // A complete refresh waits for the whole scope: while a file in it is still
@@ -667,40 +671,43 @@ func TestItemRefreshExecutorCompleteRefreshWaitsForTheRelink(t *testing.T) {
 // file that never links doesn't fail the refresh once the wait passes.
 func TestItemRefreshExecutorCompleteRefreshWaitsForTheWholeScope(t *testing.T) {
 	t.Parallel()
-	run := func(t *testing.T, partlyLinkedReads, missingEpisodeReads int, wait time.Duration) (*ItemRefreshResult, *itemRefreshTestFileRepo, *itemRefreshTestEpisodeRepo, error) {
-		t.Helper()
-		fileRepo := &itemRefreshTestFileRepo{
-			filesByPath:       []*models.MediaFile{{ContentID: "new-series-id", FilePath: "/media/mixed/Title/Title S01E03.mkv"}},
-			partlyLinkedReads: partlyLinkedReads,
+	// The relink poll runs on synctest's fake clock, so the waits cost no time.
+	synctest.Test(t, func(t *testing.T) {
+		run := func(t *testing.T, partlyLinkedReads, missingEpisodeReads int, wait time.Duration) (*ItemRefreshResult, *itemRefreshTestFileRepo, *itemRefreshTestEpisodeRepo, error) {
+			t.Helper()
+			fileRepo := &itemRefreshTestFileRepo{
+				filesByPath:       []*models.MediaFile{{ContentID: "new-series-id", FilePath: "/media/mixed/Title/Title S01E03.mkv"}},
+				partlyLinkedReads: partlyLinkedReads,
+			}
+			episodeRepo := &itemRefreshTestEpisodeRepo{
+				episode:      &models.Episode{ContentID: "new-episode-id", SeriesID: "new-series-id", SeasonNumber: 1, EpisodeNumber: 3},
+				missingReads: missingEpisodeReads,
+			}
+			executor := NewItemRefreshExecutor(
+				&itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 7, Enabled: true, Paths: []string{"/media/mixed"}}},
+				fileRepo, &itemRefreshTestRootClaimRepo{}, &itemRefreshTestGroupClaimRepo{}, newItemRefreshTestSkippedRootRepo(),
+				nil, episodeRepo, &itemRefreshTestIngester{}, &itemRefreshTestScanRuns{}, &itemRefreshTestRefresher{}, nil, nil,
+			)
+			executor.relinkWait = wait
+			result, err := executor.Execute(context.Background(), ItemRefreshRequest{
+				RequestedContentID: "old-episode-id", RequestedType: "episode", RequestedSeasonNumber: 1, RequestedEpisodeNumber: 3,
+				RefreshContentID: "old-series-id", ScanFolderID: 7, ScanPath: "/media/mixed/Title", Mode: ItemRefreshModeComplete,
+			}, nil)
+			return result, fileRepo, episodeRepo, err
 		}
-		episodeRepo := &itemRefreshTestEpisodeRepo{
-			episode:      &models.Episode{ContentID: "new-episode-id", SeriesID: "new-series-id", SeasonNumber: 1, EpisodeNumber: 3},
-			missingReads: missingEpisodeReads,
-		}
-		executor := NewItemRefreshExecutor(
-			&itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 7, Enabled: true, Paths: []string{"/media/mixed"}}},
-			fileRepo, &itemRefreshTestRootClaimRepo{}, &itemRefreshTestGroupClaimRepo{}, newItemRefreshTestSkippedRootRepo(),
-			nil, episodeRepo, &itemRefreshTestIngester{}, &itemRefreshTestScanRuns{}, &itemRefreshTestRefresher{}, nil, nil,
-		)
-		executor.relinkWait = wait
-		result, err := executor.Execute(context.Background(), ItemRefreshRequest{
-			RequestedContentID: "old-episode-id", RequestedType: "episode", RequestedSeasonNumber: 1, RequestedEpisodeNumber: 3,
-			RefreshContentID: "old-series-id", ScanFolderID: 7, ScanPath: "/media/mixed/Title", Mode: ItemRefreshModeComplete,
-		}, nil)
-		return result, fileRepo, episodeRepo, err
-	}
 
-	result, files, _, err := run(t, 3, 0, 5*time.Second)
-	if err != nil || result.RefreshContentID != "new-episode-id" || files.reads < 4 {
-		t.Fatalf("partly linked scope: result %+v after %d reads, err %v; want new-episode-id after the 4th read", result, files.reads, err)
-	}
-	result, _, episodes, err := run(t, 0, 2, 5*time.Second)
-	if err != nil || result.RefreshContentID != "new-episode-id" || episodes.reads < 3 {
-		t.Fatalf("late episode row: result %+v after %d lookups, err %v; want new-episode-id after the 3rd", result, episodes.reads, err)
-	}
-	if result, _, _, err := run(t, -1, 0, 50*time.Millisecond); err != nil || result.RefreshContentID != "new-episode-id" {
-		t.Fatalf("a file that never links: result %+v, err %v; want the refresh to finish with what is linked", result, err)
-	}
+		result, files, _, err := run(t, 3, 0, 5*time.Second)
+		if err != nil || result.RefreshContentID != "new-episode-id" || files.reads < 4 {
+			t.Fatalf("partly linked scope: result %+v after %d reads, err %v; want new-episode-id after the 4th read", result, files.reads, err)
+		}
+		result, _, episodes, err := run(t, 0, 2, 5*time.Second)
+		if err != nil || result.RefreshContentID != "new-episode-id" || episodes.reads < 3 {
+			t.Fatalf("late episode row: result %+v after %d lookups, err %v; want new-episode-id after the 3rd", result, episodes.reads, err)
+		}
+		if result, _, _, err := run(t, -1, 0, 50*time.Millisecond); err != nil || result.RefreshContentID != "new-episode-id" {
+			t.Fatalf("a file that never links: result %+v, err %v; want the refresh to finish with what is linked", result, err)
+		}
+	})
 }
 
 func TestItemRefreshExecutorCompleteRefreshRebuildsAndMapsEpisodeTarget(t *testing.T) {

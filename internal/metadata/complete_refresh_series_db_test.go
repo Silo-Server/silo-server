@@ -169,6 +169,9 @@ func (h *seriesRefreshHarness) links(t *testing.T, folderID int) map[string][2]s
 // unchanged on disk, so without waiting out the TV queue's quiet window the
 // refresh ended with "no rebuilt content found in refresh scope" and left them
 // unlinked.
+//
+// It takes about 45 s: each of the scan and the three refreshes waits out the
+// real ~11 s TV queue settle window, which is the behavior under test.
 func TestCompleteRefreshRebuildsSeriesDB(t *testing.T) {
 	nonce := time.Now().UnixNano() % 100_000_000
 	show := &stubTVDB{tvdb: strconv.FormatInt(700_000_000+nonce, 10), title: "Refresh Show", year: 2020}
