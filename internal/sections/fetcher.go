@@ -948,7 +948,7 @@ func (f *Fetcher) fetchNextUpItems(ctx context.Context, userID int, profileID st
 		RankByRelease: newReleasesFirst,
 		// Excluded in the query, not afterwards, so dismissals never leave
 		// the row short while more series are eligible.
-		ExcludeHomeDismissals: true,
+		ExcludeEpisodeIDs: f.nextUpDismissedEpisodeIDs(ctx, userID, profileID),
 	})
 	if err != nil {
 		return nil, nil, err
@@ -1170,6 +1170,30 @@ func (f *Fetcher) activeDroppedSeries(ctx context.Context, userID int, profileID
 // dropped, for surfaces that list progress outside the sections fetcher.
 func (f *Fetcher) FilterDroppedProgress(ctx context.Context, userID int, profileID string, entries []userstore.WatchProgress) ([]userstore.WatchProgress, error) {
 	return f.progressFilter.FilterDroppedProgress(ctx, userID, profileID, entries)
+}
+
+// nextUpDismissedEpisodeIDs lists the episodes the profile dismissed from
+// Home's Next Up, read through the user store so either backend's dismissals
+// apply. A failure leaves Next Up unfiltered, like Continue Watching.
+func (f *Fetcher) nextUpDismissedEpisodeIDs(ctx context.Context, userID int, profileID string) []string {
+	if f.StoreProvider == nil || userID <= 0 || profileID == "" {
+		return nil
+	}
+	store, err := f.StoreProvider.ForUser(ctx, userID)
+	if err != nil {
+		slog.ErrorContext(ctx, "getting user store for next-up dismissals", "component", "sections", "profile_id", profileID, "error", err)
+		return nil
+	}
+	dismissals, err := store.ListHomeDismissals(ctx, profileID, userstore.HomeSurfaceNextUp)
+	if err != nil {
+		slog.ErrorContext(ctx, "listing next-up dismissals", "component", "sections", "profile_id", profileID, "error", err)
+		return nil
+	}
+	ids := make([]string, len(dismissals))
+	for i, dismissal := range dismissals {
+		ids[i] = dismissal.MediaItemID
+	}
+	return ids
 }
 
 // FetchAll runs all section queries in parallel and returns sections with items.

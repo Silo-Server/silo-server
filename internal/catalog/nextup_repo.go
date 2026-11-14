@@ -30,11 +30,12 @@ type NextUpQuery struct {
 	// up (the profile's ui.next_up_new_releases_first). Off, results keep the
 	// completion-time order and ActivityAt equals CompletedAt.
 	RankByRelease bool
-	// ExcludeHomeDismissals leaves out a series whose next episode the
-	// profile dismissed from Home's Next Up. The exclusion runs inside the
-	// walk's result query, so the walk keeps going until it has Limit rows
-	// and a short result still means no more series are eligible.
-	ExcludeHomeDismissals bool
+	// ExcludeEpisodeIDs leaves out a series whose next episode is listed:
+	// the episodes the profile dismissed from Home's Next Up. The exclusion
+	// runs inside the walk's result query, so the walk keeps going until it
+	// has Limit rows and a short result still means no more series are
+	// eligible.
+	ExcludeEpisodeIDs []string
 
 	// droppedSeriesIDs are the profile's actively dropped series, which a
 	// global lookup excludes. ListNextUp loads them; a series-scoped lookup
@@ -467,8 +468,8 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 
 	// The successor stays the next episode with any present file. When none of
 	// its files fits the viewer's quality ceiling the series waits off Next Up
-	// until one arrives, rather than skipping to a later episode. A successor
-	// dismissed from Home's Next Up also leaves its series out.
+	// until one arrives, rather than skipping to a later episode. An excluded
+	// successor also leaves its series out.
 	var resultConditions []string
 	if playable := EpisodePlayableUnderCeilingSQL("next_ep.content_id", q.AccessFilter, func(value any) int {
 		// Numbered from args itself: the release scope above binds a value
@@ -478,14 +479,9 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 	}); playable != "" {
 		resultConditions = append(resultConditions, playable)
 	}
-	if q.ExcludeHomeDismissals {
-		resultConditions = append(resultConditions, `NOT EXISTS (
-			SELECT 1 FROM user_home_item_dismissals hid
-			WHERE hid.user_id = $1
-			  AND hid.profile_id = $2
-			  AND hid.surface = '`+userstore.HomeSurfaceNextUp+`'
-			  AND hid.media_item_id = next_ep.content_id
-		)`)
+	if len(q.ExcludeEpisodeIDs) > 0 {
+		args = append(args, q.ExcludeEpisodeIDs)
+		resultConditions = append(resultConditions, fmt.Sprintf("NOT (next_ep.content_id = ANY($%d::text[]))", len(args)))
 	}
 	resultWhere := ""
 	if len(resultConditions) > 0 {
