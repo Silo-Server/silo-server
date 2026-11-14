@@ -195,13 +195,15 @@ describe("EditMetadataDialog season and episode locks", () => {
   });
 
   // No provider writes a season's or episode's title details or a season's IDs,
-  // so saving them locks nothing. The content rating stays the series'.
+  // so saving them locks nothing. The content rating stays the series', and a
+  // season has no sort title because seasons order by number.
   it.each(["season", "episode"] as const)("saves a %s's title details and IDs", (type) => {
-    const item = { ...child(type), sort_title: "Provider sort title", tvdb_id: "7654321" };
+    const item = { ...child(type), original_title: "Provider original title", tvdb_id: "7654321" };
     render(<EditMetadataDialog item={item} open onOpenChange={vi.fn()} />);
     expect(screen.queryByText("Content Rating")).not.toBeInTheDocument();
-    fireEvent.change(screen.getByDisplayValue("Provider sort title"), {
-      target: { value: "Edited sort title" },
+    expect(screen.queryByText("Sort Title") !== null).toBe(type === "episode");
+    fireEvent.change(screen.getByDisplayValue("Provider original title"), {
+      target: { value: "Edited original title" },
     });
     fireEvent.change(screen.getByPlaceholderText("No tagline"), {
       target: { value: "Edited tagline" },
@@ -211,7 +213,7 @@ describe("EditMetadataDialog season and episode locks", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
 
     expect(mocks.update).toHaveBeenCalledWith(
-      { sort_title: "Edited sort title", tagline: "Edited tagline", tvdb_id: "1234567" },
+      { original_title: "Edited original title", tagline: "Edited tagline", tvdb_id: "1234567" },
       expect.any(Object),
     );
   });

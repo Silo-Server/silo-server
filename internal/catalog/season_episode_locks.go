@@ -69,9 +69,10 @@ var (
 // The title details only an admin writes on a season or episode. No refresh
 // writes them, so they need no lock, but they describe one show like a locked
 // field does. An episode's provider IDs are not among them: refreshes write those.
+// Seasons have no sort title, since they order by number.
 var (
 	childEditedTextColumns = []string{childColumnSortTitle, childColumnOriginalTitle, childColumnTagline}
-	seasonEditedColumns    = slices.Concat(childEditedTextColumns, []string{childColumnImdbID, childColumnTmdbID, childColumnTvdbID})
+	seasonEditedColumns    = []string{childColumnOriginalTitle, childColumnTagline, childColumnImdbID, childColumnTmdbID, childColumnTvdbID}
 	episodeEditedColumns   = childEditedTextColumns
 )
 

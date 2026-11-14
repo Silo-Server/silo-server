@@ -79,6 +79,8 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
   const ownsImageLock = item.type === "movie" || item.type === "series";
   // A season or episode has the series' content rating, which decides age limits.
   const ownsContentRating = item.type !== "season" && item.type !== "episode";
+  // Seasons order by number, so a sort title would do nothing.
+  const ownsSortTitle = item.type !== "season";
   const fieldLockMap = FIELD_LOCK_MAPS[item.type];
   const canEditImages = useIsActingAdmin();
   const visibleSections = SECTIONS.filter(
@@ -293,15 +295,17 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
                   </FieldRow>
 
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <FieldRow
-                      label={t("web.item.editMetadata.sortTitle")}
-                      lockIcon={renderLockIcon("sort_title")}
-                    >
-                      <Input
-                        value={form.sort_title}
-                        onChange={(e) => setField("sort_title", e.target.value)}
-                      />
-                    </FieldRow>
+                    {ownsSortTitle && (
+                      <FieldRow
+                        label={t("web.item.editMetadata.sortTitle")}
+                        lockIcon={renderLockIcon("sort_title")}
+                      >
+                        <Input
+                          value={form.sort_title}
+                          onChange={(e) => setField("sort_title", e.target.value)}
+                        />
+                      </FieldRow>
+                    )}
                     <FieldRow
                       label={t("web.item.editMetadata.originalTitle")}
                       lockIcon={renderLockIcon("original_title")}
