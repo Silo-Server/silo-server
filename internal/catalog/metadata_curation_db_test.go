@@ -106,4 +106,16 @@ func TestCuratedProviderIDEditsStayInCurationScopeDB(t *testing.T) {
 			t.Fatalf("UpdateMetadata(tmdb_id=%q) over a library B IMDb anchor: error = %v, want refused", tmdb, err)
 		}
 	}
+
+	// A kept TMDB ID stored with stray whitespace still anchors the refresh,
+	// which trims it, so choosing a new IMDb ID is held to that anchor too.
+	paddedTmdb := id(6)
+	anchorPaddedB, _ := contentid.ForMovie(contentid.ProviderIDs{Tmdb: paddedTmdb})
+	seed(anchorPaddedB, "", libB)
+	padded := fmt.Sprintf("local:curation-identity-%d-padded", suffix)
+	seed(padded, " "+paddedTmdb+" ", libA)
+	err := repo.UpdateMetadata(access.WithMetadataCurationAuthorizer(ctx, curator), padded, &MetadataUpdate{ImdbID: new("tt" + id(7))})
+	if !errors.Is(err, access.ErrMetadataCurationScope) {
+		t.Fatalf("UpdateMetadata(imdb_id) keeping a padded library B TMDB anchor: error = %v, want refused", err)
+	}
 }

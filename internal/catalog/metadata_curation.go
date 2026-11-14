@@ -250,6 +250,10 @@ func lockCuratedProviderIDs(ctx context.Context, tx pgx.Tx, contentID string, up
 	// A refresh drops IDs it can't use (a TMDB ID of "0", a short IMDb ID)
 	// before deriving the anchor, so the anchor falls through to the next ID.
 	// Derive it the same way, or an unusable ID would hide that next anchor.
+	// Kept IDs come from the row untrimmed; refresh trims them first too.
+	resulting.Tmdb = strings.TrimSpace(resulting.Tmdb)
+	resulting.Imdb = strings.TrimSpace(resulting.Imdb)
+	resulting.Tvdb = strings.TrimSpace(resulting.Tvdb)
 	if !providerid.IsPositiveDecimal(resulting.Tmdb) {
 		resulting.Tmdb = ""
 	}
