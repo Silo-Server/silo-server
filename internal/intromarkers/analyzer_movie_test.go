@@ -448,6 +448,87 @@ func TestRunPagesMovies(t *testing.T) {
 	}
 }
 
+// stallingEpisodes is a repository whose episode count, the episode pass's
+// first read, waits for its context to end, like an episode pass on a library
+// too large to finish. It then calls afterStall, if set, and returns err, or
+// the context's error when err is nil.
+type stallingEpisodes struct {
+	*fakeIntroRepository
+	err        error
+	afterStall func()
+}
+
+func (s stallingEpisodes) CountEligibleCandidates(ctx context.Context) (int, error) {
+	<-ctx.Done()
+	if s.afterStall != nil {
+		s.afterStall()
+	}
+	if s.err != nil {
+		return 0, s.err
+	}
+	return 0, ctx.Err()
+}
+
+// Issue #3421: a run with a deadline stops its episodes early enough for the
+// movies to get their budget, and so does the episode pass a server without
+// Chromaprint runs before its separate movie pass. A cancel, or an error
+// other than the deadline, during the episodes still stops the run.
+func TestRunLeavesMoviesTheirShareOfTheDeadline(t *testing.T) {
+	errDatabase := errors.New("database unavailable")
+	run := func(a *Analyzer, ctx context.Context) (RunSummary, error) { return a.Run(ctx, allMarkerKinds, nil) }
+	runEpisodes := func(a *Analyzer, ctx context.Context) (RunSummary, error) {
+		return a.RunEpisodes(ctx, allMarkerKinds, nil)
+	}
+	for _, tc := range []struct {
+		name     string
+		run      func(*Analyzer, context.Context) (RunSummary, error)
+		cancelAt time.Duration
+		// cancelAsShareEnds cancels the run as the episodes' share ends.
+		cancelAsShareEnds bool
+		episodesErr       error
+		wantErr           error
+		wantMovies        int
+		wantSpent         bool
+	}{
+		{name: "episode share spent", run: run, wantMovies: 1, wantSpent: true},
+		{name: "episode pass alone leaves the movie share", run: runEpisodes, wantSpent: true},
+		{name: "repository error at the end of the share", run: run, episodesErr: errDatabase, wantErr: errDatabase},
+		{name: "canceled during episodes", run: run, cancelAt: 50 * time.Millisecond, wantErr: context.Canceled},
+		{name: "episode pass alone canceled as its share ends", run: runEpisodes, cancelAsShareEnds: true, wantErr: context.Canceled, wantSpent: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			repo := &fakeIntroRepository{enabledLibraries: 1, movieCandidates: []Candidate{movieCandidate(10, 7200)}}
+			sampler := &fakeMovieSampler{}
+			analyzer := movieAnalyzer(repo, sampler)
+			analyzer.repo = stallingEpisodes{fakeIntroRepository: repo, err: tc.episodesErr}
+			// The episodes' share ends a second before the deadline, which
+			// leaves the movie pass a wide margin on a loaded runner.
+			analyzer.movieBudget = time.Second
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if tc.cancelAt > 0 {
+				stop := time.AfterFunc(tc.cancelAt, cancel)
+				defer stop.Stop()
+			}
+			if tc.cancelAsShareEnds {
+				analyzer.repo = stallingEpisodes{fakeIntroRepository: repo, err: tc.episodesErr, afterStall: cancel}
+			}
+
+			summary, err := tc.run(analyzer, ctx)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("error = %v, want %v", err, tc.wantErr)
+			}
+			if summary.EpisodeBudgetExhausted != tc.wantSpent || sampler.tailCount() != tc.wantMovies || summary.MovieCreditsMarkersWritten != tc.wantMovies {
+				t.Fatalf("summary %+v, %d tail passes; want episode_budget_exhausted %v and %d movies", summary, sampler.tailCount(), tc.wantSpent, tc.wantMovies)
+			}
+			if tc.wantErr == nil && ctx.Err() != nil {
+				t.Fatalf("ctx %v; want the run finished before its deadline", ctx.Err())
+			}
+		})
+	}
+}
+
 // The scheduled run stops starting movies once the movie budget is spent;
 // the movie in progress finishes and the rest wait for the next run.
 func TestRunStopsMoviesAtTheBudget(t *testing.T) {

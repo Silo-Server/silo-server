@@ -21843,6 +21843,11 @@ export interface components {
       next_run_at?: string;
       /** Format: double */
       progress: number;
+      /**
+       * Format: date-time
+       * @description When the run in progress on this process started. Absent while the task is idle.
+       */
+      started_at?: string;
       /** @enum {string} */
       state: "idle" | "running" | "cancelling";
       triggers: components["schemas"]["AdminTaskTrigger"][];

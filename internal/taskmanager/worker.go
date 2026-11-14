@@ -56,6 +56,10 @@ func (w *taskWorker) info() TaskInfo {
 		ProgressMessage: w.progressMessage,
 		LastExecution:   w.lastResult,
 	}
+	if w.state != TaskStateIdle && !w.lastStarted.IsZero() {
+		started := w.lastStarted
+		info.StartedAt = &started
+	}
 	info.ManualOnly = isManualOnly(w.task)
 
 	var earliest time.Time

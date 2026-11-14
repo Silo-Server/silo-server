@@ -464,4 +464,8 @@ type RunSummary struct {
 	// MovieBudgetExhausted reports that the run stopped starting movies
 	// when the movie budget ran out; the rest wait for the next run.
 	MovieBudgetExhausted bool `json:"movie_budget_exhausted"`
+	// EpisodeBudgetExhausted reports that the episodes stopped early to
+	// leave the movies their share of the run's time limit; the rest wait
+	// for the next run.
+	EpisodeBudgetExhausted bool `json:"episode_budget_exhausted"`
 }

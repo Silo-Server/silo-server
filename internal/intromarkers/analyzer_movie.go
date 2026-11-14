@@ -32,10 +32,7 @@ const movieCandidatePageSize = 200
 // the movies. progress is called with the number of movies finished and the
 // share of the budget used, from 0 to 1.
 func (a *Analyzer) runMovies(ctx context.Context, progress func(done int, budgetUsed float64)) (RunSummary, error) {
-	budget := a.movieBudget
-	if budget <= 0 {
-		budget = movieCreditsRunBudget
-	}
+	budget := a.movieRunBudget()
 	started := a.clock()
 	deadline := started.Add(budget)
 	pageSize := a.moviePageSize
@@ -101,6 +98,14 @@ func (a *Analyzer) analyzeMovieCandidates(ctx context.Context, candidates []Cand
 	}
 	mergeRunSummary(&summary, a.analyzeMovies(ctx, candidates, movieRunOptions{}))
 	return summary, ctx.Err()
+}
+
+// movieRunBudget is how long a scheduled run starts new movies.
+func (a *Analyzer) movieRunBudget() time.Duration {
+	if a.movieBudget > 0 {
+		return a.movieBudget
+	}
+	return movieCreditsRunBudget
 }
 
 // clock returns the time movie budgets are measured by.

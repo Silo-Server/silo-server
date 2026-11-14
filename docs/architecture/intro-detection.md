@@ -456,7 +456,15 @@ last movie of the one before in that order, so a movie analyzed in this run
 that is still eligible is not listed again in it. The run starts no new
 movie, and lists no further page, once 60 minutes have passed since it
 started listing movies, and then reports `movie_budget_exhausted`; the
-remaining movies wait for the next run. Run summaries count
+remaining movies wait for the next run. When the run has a deadline, such as
+a scheduled run with a max runtime, the episode pass stops early enough to
+leave the movies that 60 minutes, or half the time left when the run starts if
+that is shorter. It stops where a cancel stops it, keeping the season groups
+it finished, reports `episode_budget_exhausted`, and the movie pass runs. A
+server without Chromaprint, which runs its episodes and then a separate movie
+pass under the cluster lock, leaves the same share when credits are on, even
+if another server then holds the lock and runs the movies. A run without a
+deadline gives the episodes as long as they take. Run summaries count
 `movies_considered` (the movies the run listed) and
 `movie_credits_markers_written`; the credits tail counters include movies.
 
