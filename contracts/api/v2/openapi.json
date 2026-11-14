@@ -31153,12 +31153,25 @@
       "CompatConnectAccountInfo": {
         "additionalProperties": false,
         "properties": {
+          "directory_login_available": {
+            "description": "True when a password sign-in without a provider, such as a Jellyfin client's, goes to the server's directory (LDAP), where this account has a linked identity, so the directory username and password sign in",
+            "type": "boolean"
+          },
+          "directory_username": {
+            "description": "The account's username at that directory; present when directory_login_available is true",
+            "examples": [
+              "alice"
+            ],
+            "type": "string"
+          },
           "password_login_available": {
+            "description": "True when the account's own Silo password signs in",
             "type": "boolean"
           }
         },
         "required": [
-          "password_login_available"
+          "password_login_available",
+          "directory_login_available"
         ],
         "type": "object"
       },

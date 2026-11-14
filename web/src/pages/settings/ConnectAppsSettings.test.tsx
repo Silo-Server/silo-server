@@ -288,6 +288,45 @@ describe("ConnectAppsSettings", () => {
     expect(container.textContent).not.toContain("johndoe#Doe Household");
   });
 
+  // A directory account signs in to a Jellyfin app with its directory
+  // credentials, which the server routes to the directory (#2871).
+  it("gives a directory account its directory username for Jellyfin apps", async () => {
+    mocks.useCompatConnectInfo.mockReturnValue({
+      data: makeConnectInfo(
+        {},
+        {
+          password_login_available: false,
+          directory_login_available: true,
+          directory_username: "j.doe",
+        },
+      ),
+      isLoading: false,
+    });
+    mocks.useAuthProviders.mockReturnValue({
+      data: { items: [LOCAL_PROVIDER, LDAP_PROVIDER], password_login: true },
+      isLoading: false,
+    });
+
+    render();
+
+    expect(container.textContent).not.toContain("This account can't sign in to a Jellyfin app");
+    expect(container.textContent).toContain("j.doe#Doe Household");
+    // The directory password signs in, not the account's Silo one.
+    expect(container.textContent).toContain("Your Office Directory password");
+    expect(container.textContent).not.toContain("just your account password");
+    expect(container.textContent).not.toContain("johndoe#");
+    // A PIN never reaches the directory, so a PIN-protected profile can't be
+    // reached with password#PIN and isn't offered.
+    expect(findButton(container, "Kids")).toBeUndefined();
+    expect(container.textContent).not.toContain("j.doe#Kids");
+    expect(container.textContent).not.toContain("needs #PIN");
+
+    await click(findButton(container, "A Jellyfin app says my username or password is wrong"));
+    expect(container.textContent).toContain("j.doe");
+    expect(container.textContent).not.toContain("password#PIN");
+    expect(container.textContent).not.toContain("append #PIN");
+  });
+
   it("flags a loopback compat address rather than offering it for copying", () => {
     mocks.useCompatConnectInfo.mockReturnValue({
       data: makeConnectInfo({ public_url: "http://127.0.0.1:8096" }),

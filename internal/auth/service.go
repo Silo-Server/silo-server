@@ -303,30 +303,128 @@ func (s *Service) LoginWithProvider(
 // sent to a directory. Any other name goes to the enabled credentials plugin
 // (LDAP), which may link or create the account; without one it is local.
 func (s *Service) routePasswordLogin(ctx context.Context, username string) (string, error) {
-	directory := ""
-	for _, registered := range s.pluginProviders() {
-		if registered.Info.Mode == ProviderModeCredentials {
-			directory = registered.Info.ID
-			break
-		}
-	}
-	if directory == "" || s.users == nil {
+	directory, ok := s.directoryProvider()
+	if !ok || s.users == nil {
 		return LocalProviderID, nil
 	}
 	user, err := LookupLogin(ctx, s.users, username)
 	if err != nil {
 		if IsNotFound(err) {
-			return directory, nil
+			return directory.Info.ID, nil
 		}
 		return "", fmt.Errorf("looking up user: %w", err)
 	}
-	if user.LocalPasswordLoginEnabled {
+	return passwordRoute(user, directory.Info.ID), nil
+}
+
+// directoryProvider is the enabled credentials plugin (LDAP), if any.
+func (s *Service) directoryProvider() (RegisteredProvider, bool) {
+	for _, registered := range s.pluginProviders() {
+		if registered.Info.Mode == ProviderModeCredentials {
+			return registered, true
+		}
+	}
+	return RegisteredProvider{}, false
+}
+
+// passwordRoute is routePasswordLogin's choice for an existing account,
+// with directory the enabled credentials plugin's provider ID or empty.
+func passwordRoute(user *models.User, directory string) string {
+	if directory == "" || user.LocalPasswordLoginEnabled {
 		// Whatever the server-wide switch says: with it off the local
 		// provider refuses with local_login_disabled, but the password never
 		// reaches the directory.
-		return LocalProviderID, nil
+		return LocalProviderID
 	}
-	return directory, nil
+	return directory
+}
+
+// PasswordSignIn is how a password sign-in that names no provider (a
+// Jellyfin or Audiobookshelf client, an app's password form) goes for one
+// account. At most one of Local and Directory is set; neither means no
+// password signs the account in.
+type PasswordSignIn struct {
+	// Local: the account's own Silo password signs in.
+	Local bool
+	// Directory: the name and password go to the directory (LDAP), which
+	// answers for the account through the identity linked there.
+	Directory bool
+	// DirectoryUsername is the username of that identity, the name to sign
+	// in with.
+	DirectoryUsername string
+}
+
+// PasswordSignInFor answers PasswordSignIn for userID from the decisions a
+// sign-in makes (routePasswordLogin, then LocalProvider.Authenticate's
+// policy), without a password. The directory's own answer, such as its group
+// rules, is not known until it is asked.
+func (s *Service) PasswordSignInFor(ctx context.Context, userID int) (PasswordSignIn, error) {
+	if s.users == nil {
+		return PasswordSignIn{}, errors.New("auth service has no user repository")
+	}
+	user, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		return PasswordSignIn{}, err
+	}
+	// Compatibility sign-ins refuse a temporary password's holder whichever
+	// provider answers (loginWithProvider, OpenIdentitySession).
+	if !user.Enabled || user.PasswordChangeRequired {
+		return PasswordSignIn{}, nil
+	}
+	directory, hasDirectory := s.directoryProvider()
+	directoryID := ""
+	if hasDirectory {
+		directoryID = directory.Info.ID
+	}
+	if passwordRoute(user, directoryID) == LocalProviderID && user.LocalPasswordLoginEnabled && user.PasswordHash != "" {
+		err = localPasswordPolicy(ctx, s.users.pool, user)
+		if err == nil {
+			return PasswordSignIn{Local: true}, nil
+		}
+		if !errors.Is(err, ErrLocalLoginDisabled) && !errors.Is(err, ErrNotPermitted) {
+			return PasswordSignIn{}, err
+		}
+	}
+	// The account's own name does not sign it in. A directory identity
+	// linked under another name is routed by that name, so it may still.
+	if !hasDirectory {
+		return PasswordSignIn{}, nil
+	}
+	return s.directorySignIn(ctx, user.ID, directory)
+}
+
+// directorySignIn is PasswordSignInFor for an account whose own name and
+// password do not sign it in. The directory answers for the account through
+// an identity linked there. Account resolution never matches a directory person to an
+// account by name, so without one (an OIDC account, say) there is no
+// directory username known to sign in with.
+func (s *Service) directorySignIn(ctx context.Context, userID int, directory RegisteredProvider) (PasswordSignIn, error) {
+	identities, err := listIdentitiesForUser(ctx, s.users.pool, userID)
+	if err != nil {
+		return PasswordSignIn{}, err
+	}
+	for _, identity := range identities {
+		if identity.InstallationID != directory.Info.InstallationID {
+			continue
+		}
+		// An administrator's link may record no username until the
+		// directory signs the person in: there is no name to offer.
+		if strings.TrimSpace(identity.Username) == "" {
+			return PasswordSignIn{}, nil
+		}
+		// The sign-in routes the typed name, which is the directory
+		// username: another account holding that name with a local password
+		// takes it.
+		route, err := s.routePasswordLogin(ctx, identity.Username)
+		if err != nil {
+			return PasswordSignIn{}, err
+		}
+		if route != directory.Info.ID {
+			return PasswordSignIn{}, nil
+		}
+		return PasswordSignIn{Directory: true, DirectoryUsername: identity.Username}, nil
+	}
+	return PasswordSignIn{}, nil
 }
 
 // HasLoginName reports whether a password sign-in with name would find an
@@ -823,22 +921,11 @@ func (s *Service) loginWithProvider(
 				if err := lockServerSettings(ctx, tx); err != nil {
 					return err
 				}
-				allowed, err := localPasswordLoginAllowed(ctx, tx)
-				if err != nil {
-					return err
-				}
-				if !allowed {
-					return ErrLocalLoginDisabled
-				}
-				// A re-check refusing the person holds this row lock too, so
-				// a refusal cannot land between this check and the session.
-				refused, err := networkRefused(ctx, tx, current.ID)
-				if err != nil {
-					return err
-				}
-				if refused {
-					return ErrNotPermitted
-				}
+			}
+			// A re-check refusing the person holds the account row lock too,
+			// so a refusal cannot land between this check and the session.
+			if err := localPasswordPolicy(ctx, tx, current); err != nil {
+				return err
 			}
 			if err := s.sessions.createWithQuerier(ctx, tx, session); err != nil {
 				return err

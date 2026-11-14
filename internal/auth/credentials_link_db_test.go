@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
@@ -197,5 +198,189 @@ func TestExternalSignInCredentialsSessionLocksAccountDB(t *testing.T) {
 	}
 	if n := liveSessions(user.ID); n != 0 {
 		t.Fatalf("a disabled account kept %d live sessions", n)
+	}
+}
+
+// passwordSignInEnv is a service with a directory (LDAP) provider whose
+// directory knows each person added with person, under "dir-pass".
+type passwordSignInEnv struct {
+	*externalSignInEnv
+	t         *testing.T
+	users     *UserRepository
+	sessions  *SessionRepository
+	svc       *Service
+	directory *directoryPlugin
+}
+
+func newPasswordSignInEnv(t *testing.T) *passwordSignInEnv {
+	env := &passwordSignInEnv{externalSignInEnv: newExternalSignInEnv(t), t: t}
+	env.users = NewUserRepository(env.pool)
+	env.sessions = NewSessionRepository(env.pool)
+	env.svc = env.newService()
+	env.directory = &directoryPlugin{users: map[string]*pluginv1.AuthenticateResponse{}}
+	provider := NewPluginProviderWithClientFactory(PluginProviderConfig{InstallationID: env.installationID, CapabilityID: "ldap", DisplayName: "Directory"},
+		env.sessions, env.resolver, func(context.Context) (pluginAuthClient, error) { return env.directory, nil })
+	env.svc.SetPluginProviderSource(staticProviderSource{{
+		Info:     LoginProviderInfo{ID: PluginProviderID(env.installationID, "ldap"), DisplayName: "Directory", Mode: ProviderModeCredentials, InstallationID: env.installationID},
+		Provider: provider,
+	}})
+	return env
+}
+
+// newService is a service without the directory provider.
+func (e *passwordSignInEnv) newService() *Service {
+	return NewService(NewLocalProvider(e.users, e.sessions), NewJWTService("synthetic-jwt-secret-synthetic-jwt-secret", time.Minute, time.Hour), e.sessions, e.users, nil, nil, nil)
+}
+
+func (e *passwordSignInEnv) person(label string) ExternalIdentity {
+	identity := e.identity(label)
+	e.directory.users[identity.Username+"\x00dir-pass"] = &pluginv1.AuthenticateResponse{ExternalSubject: identity.Subject, Issuer: "ldaps://ldap.example.test",
+		Username: identity.Username, Email: identity.Email, DisplayName: identity.DisplayName}
+	return identity
+}
+
+func (e *passwordSignInEnv) link(user *models.User, identity ExternalIdentity) {
+	e.t.Helper()
+	if _, err := e.svc.LinkCredentialsIdentity(e.t.Context(), CredentialsLinkInput{UserID: user.ID, InstallationID: e.installationID,
+		Password: "correct horse battery", DirectoryUsername: identity.Username, DirectoryPassword: "dir-pass"}); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+func (e *passwordSignInEnv) exec(sql string, args ...any) {
+	e.t.Helper()
+	if _, err := e.pool.Exec(e.t.Context(), sql, args...); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+func (e *passwordSignInEnv) check(svc *Service, user *models.User, want PasswordSignIn) {
+	e.t.Helper()
+	got, err := svc.PasswordSignInFor(e.t.Context(), user.ID)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	if got != want {
+		e.t.Fatalf("%s: PasswordSignInFor = %+v, want %+v", user.Username, got, want)
+	}
+}
+
+// TestPasswordSignInForDB: what PasswordSignInFor says about an account's
+// password sign-in without a provider is what CompatLogin then does: the
+// local password works, or the directory answers for an account linked to
+// it (under the directory username), or neither, as while a network
+// provider refuses the person.
+func TestPasswordSignInForDB(t *testing.T) {
+	env := newPasswordSignInEnv(t)
+	ctx := t.Context()
+	svc, users, newService, check := env.svc, env.users, env.newService, env.check
+	alice := env.person("alice")
+
+	member := env.localAccount(t, "member", models.RoleUser)
+	check(svc, member, PasswordSignIn{Local: true})
+
+	// Linked to the directory, the account's own password is off and a
+	// Jellyfin client's sign-in goes to the directory under its name there.
+	if _, err := svc.LinkCredentialsIdentity(ctx, CredentialsLinkInput{UserID: member.ID, InstallationID: env.installationID,
+		Password: "correct horse battery", DirectoryUsername: alice.Username, DirectoryPassword: "dir-pass"}); err != nil {
+		t.Fatal(err)
+	}
+	check(svc, member, PasswordSignIn{Directory: true, DirectoryUsername: alice.Username})
+	if _, user, err := svc.CompatLogin(ctx, alice.Username, "dir-pass", "Jellyfin Web", ""); err != nil || user.ID != member.ID {
+		t.Fatalf("compat sign-in with the directory credentials = %+v, %v", user, err)
+	}
+	// The server-wide local switch does not reach the directory.
+	env.setSetting(t, config.AuthLocalPasswordLoginSettingKey, "false")
+	check(svc, member, PasswordSignIn{Directory: true, DirectoryUsername: alice.Username})
+	env.setSetting(t, config.AuthLocalPasswordLoginSettingKey, "true")
+	// Without the directory provider nothing signs the account in.
+	check(newService(), member, PasswordSignIn{})
+	// An account without a local password and without a directory identity,
+	// as an OIDC account has, has no password that signs it in: its name
+	// would go to the directory, which knows no one linked to it.
+	oidcOnly := env.localAccount(t, "oidc-only", models.RoleUser)
+	if _, err := env.pool.Exec(ctx, `UPDATE users SET local_password_login_enabled = false WHERE id = $1`, oidcOnly.ID); err != nil {
+		t.Fatal(err)
+	}
+	check(svc, oidcOnly, PasswordSignIn{})
+	// A local account named like the directory identity takes that name's
+	// sign-ins, so the directory credentials no longer reach the member.
+	namesake := env.localAccount(t, "alice", models.RoleUser)
+	check(svc, member, PasswordSignIn{})
+	if _, err := env.pool.Exec(ctx, `UPDATE users SET username = $1 WHERE id = $2`, env.name("alice-renamed"), namesake.ID); err != nil {
+		t.Fatal(err)
+	}
+	check(svc, member, PasswordSignIn{Directory: true, DirectoryUsername: alice.Username})
+
+	// A network provider refusing the person refuses the password too.
+	viewer := env.localAccount(t, "viewer", models.RoleUser)
+	network := env.networkInstallation(t, "network")
+	if _, err := env.pool.Exec(ctx, `INSERT INTO plugin_auth_identities (plugin_installation_id, external_subject, user_id, last_check_status)
+		VALUES ($1, 'node-viewer', $2, 'not_permitted')`, network, viewer.ID); err != nil {
+		t.Fatal(err)
+	}
+	check(svc, viewer, PasswordSignIn{})
+	if _, _, err := svc.CompatLogin(ctx, viewer.Username, "correct horse battery", "Jellyfin Web", ""); !errors.Is(err, ErrNotPermitted) {
+		t.Fatalf("compat sign-in while refused = %v, want ErrNotPermitted", err)
+	}
+
+	// The server-wide switch off leaves only a break-glass password.
+	env.setSetting(t, config.AuthLocalPasswordLoginSettingKey, "false")
+	plain := env.localAccount(t, "plain", models.RoleUser)
+	check(svc, plain, PasswordSignIn{})
+	admin := env.localAccount(t, "glass-admin", models.RoleAdmin)
+	glass := true
+	if err := users.Update(ctx, admin.ID, models.UpdateUserInput{BreakGlass: &glass}); err != nil {
+		t.Fatal(err)
+	}
+	check(svc, admin, PasswordSignIn{Local: true})
+}
+
+// TestPasswordSignInForRoutesDB: PasswordSignInFor follows a compatibility
+// sign-in past the account's own name, to a directory identity linked under
+// another, and refuses what that sign-in refuses: a directory link without
+// a username to sign in with, and a temporary password to change first.
+func TestPasswordSignInForRoutesDB(t *testing.T) {
+	env := newPasswordSignInEnv(t)
+	ctx := t.Context()
+	svc, check := env.svc, env.check
+
+	// An account that keeps its local password beside a directory identity
+	// under another name: while the local password is refused, a sign-in
+	// with the directory name still goes to the directory and reaches it.
+	bob := env.person("bob")
+	both := env.localAccount(t, "both", models.RoleUser)
+	env.link(both, bob)
+	env.exec(`UPDATE users SET local_password_login_enabled = true WHERE id = $1`, both.ID)
+	check(svc, both, PasswordSignIn{Local: true})
+	env.setSetting(t, config.AuthLocalPasswordLoginSettingKey, "false")
+	check(svc, both, PasswordSignIn{Directory: true, DirectoryUsername: bob.Username})
+	if _, user, err := svc.CompatLogin(ctx, bob.Username, "dir-pass", "Jellyfin Web", ""); err != nil || user.ID != both.ID {
+		t.Fatalf("compat sign-in with the directory credentials while local is off = %+v, %v", user, err)
+	}
+	env.setSetting(t, config.AuthLocalPasswordLoginSettingKey, "true")
+
+	// A directory link that records no directory username (an
+	// administrator's link by subject) names no sign-in to offer.
+	unnamed := env.localAccount(t, "unnamed", models.RoleUser)
+	env.exec(`UPDATE users SET local_password_login_enabled = false WHERE id = $1`, unnamed.ID)
+	env.exec(`INSERT INTO plugin_auth_identities (plugin_installation_id, external_subject, user_id, username)
+		VALUES ($1, $2, $3, '')`, env.installationID, "subject-"+env.name("unnamed"), unnamed.ID)
+	check(svc, unnamed, PasswordSignIn{})
+
+	// A temporary password the holder must change first: compatibility
+	// sign-ins refuse the account, with its own password or the directory's.
+	carol := env.person("carol")
+	linked := env.localAccount(t, "linked", models.RoleUser)
+	env.link(linked, carol)
+	temporary := env.localAccount(t, "temporary", models.RoleUser)
+	env.exec(`UPDATE users SET password_change_required = true WHERE id = ANY($1)`, []int{temporary.ID, linked.ID})
+	check(svc, temporary, PasswordSignIn{})
+	if _, _, err := svc.CompatLogin(ctx, temporary.Username, "correct horse battery", "Jellyfin Web", ""); !errors.Is(err, ErrPasswordChangeRequired) {
+		t.Fatalf("compat sign-in with a temporary password = %v, want ErrPasswordChangeRequired", err)
+	}
+	check(svc, linked, PasswordSignIn{})
+	if _, _, err := svc.CompatLogin(ctx, carol.Username, "dir-pass", "Jellyfin Web", ""); !errors.Is(err, ErrPasswordChangeRequired) {
+		t.Fatalf("compat directory sign-in of an account with a temporary password = %v, want ErrPasswordChangeRequired", err)
 	}
 }

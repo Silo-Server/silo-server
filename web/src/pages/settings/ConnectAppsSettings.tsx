@@ -195,9 +195,12 @@ function ProfilePicker({
 function TroubleshootingPanel({
   accountUsername,
   compatURL,
+  directory,
 }: {
   accountUsername: string;
   compatURL: string | null;
+  // A directory sign-in never takes a PIN, so the PIN advice doesn't apply.
+  directory: boolean;
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
@@ -209,14 +212,18 @@ function TroubleshootingPanel({
         username: accountUsername,
       }),
     },
-    {
-      q: t("web.settings.connectApps.troubleshooting.pinQuestion"),
-      a: t("web.settings.connectApps.troubleshooting.pinAnswer"),
-    },
-    {
-      q: t("web.settings.connectApps.troubleshooting.hashPasswordQuestion"),
-      a: t("web.settings.connectApps.troubleshooting.hashPasswordAnswer"),
-    },
+    ...(directory
+      ? []
+      : [
+          {
+            q: t("web.settings.connectApps.troubleshooting.pinQuestion"),
+            a: t("web.settings.connectApps.troubleshooting.pinAnswer"),
+          },
+          {
+            q: t("web.settings.connectApps.troubleshooting.hashPasswordQuestion"),
+            a: t("web.settings.connectApps.troubleshooting.hashPasswordAnswer"),
+          },
+        ]),
     {
       q: t("web.settings.connectApps.troubleshooting.duplicateQuestion"),
       a: t("web.settings.connectApps.troubleshooting.duplicateAnswer"),
@@ -289,25 +296,44 @@ export default function ConnectAppsSettings() {
   const [kind, setKind] = useState<AppKind>("silo");
   const [selectedProfileID, setSelectedProfileID] = useState<string | null>(null);
 
+  const accountUsername = user?.username ?? "";
+  // Absent field (older server) means the account can use a password.
+  const passwordLoginAvailable = connectInfo?.account?.password_login_available ?? true;
+  // A directory account's Jellyfin sign-in goes to the directory, under its
+  // name there. The directory never sees a PIN, so password#PIN can't open a
+  // PIN-protected profile and only the others are offered.
+  const directoryLoginAvailable = connectInfo?.account?.directory_login_available ?? false;
+  const jellyfinProfiles = useMemo(
+    () => (directoryLoginAvailable ? profiles.filter((profile) => !profile.has_pin) : profiles),
+    [directoryLoginAvailable, profiles],
+  );
+  const jellyfinSignInAvailable =
+    passwordLoginAvailable || (directoryLoginAvailable && jellyfinProfiles.length > 0);
+  const jellyfinAccountName =
+    (directoryLoginAvailable && connectInfo?.account?.directory_username?.trim()) ||
+    accountUsername;
+  // The directory is the server's credentials provider other than Silo's own.
+  const directoryProviderName = directoryLoginAvailable
+    ? authProviders?.items.find((entry) => entry.mode === "credentials" && entry.id !== "local")
+        ?.display_name
+    : undefined;
+
   // Default to the profile the user is already using — the one they're most
   // likely setting an app up for.
   const selectedProfile = useMemo<Profile | null>(() => {
     return (
-      profiles.find((candidate) => candidate.id === selectedProfileID) ??
-      profiles.find((candidate) => candidate.id === activeProfile?.id) ??
-      profiles[0] ??
+      jellyfinProfiles.find((candidate) => candidate.id === selectedProfileID) ??
+      jellyfinProfiles.find((candidate) => candidate.id === activeProfile?.id) ??
+      jellyfinProfiles[0] ??
       null
     );
-  }, [activeProfile?.id, profiles, selectedProfileID]);
+  }, [activeProfile?.id, jellyfinProfiles, selectedProfileID]);
 
-  const accountUsername = user?.username ?? "";
   const siloURL = typeof window === "undefined" ? "" : window.location.origin;
   const compatEnabled = connectInfo?.jellyfin.enabled ?? false;
   const compatPendingRestart = connectInfo?.jellyfin.pending_restart ?? false;
   const compatURL = connectInfo?.jellyfin.public_url?.trim() || null;
   const compatURLIsLoopback = compatURL !== null && isLoopbackURL(compatURL);
-  // Absent field (older server) means the account can use a password.
-  const passwordLoginAvailable = connectInfo?.account?.password_login_available ?? true;
   const passwordFormShown = authProviders?.password_login ?? true;
   // Discovery lists the local provider only while the server allows password
   // sign-in, which tells a switched-off server apart from a provider account.
@@ -345,10 +371,10 @@ export default function ConnectAppsSettings() {
   // Everything below the credential panel is only meaningful when we actually
   // showed credentials above it.
   const showCompatCredentials =
-    isJellyfin && !isLoading && !loadFailed && compatEnabled && passwordLoginAvailable;
+    isJellyfin && !isLoading && !loadFailed && compatEnabled && jellyfinSignInAvailable;
 
   const jellyfinUsername = selectedProfile
-    ? buildJellyfinUsername(accountUsername, selectedProfile.name)
+    ? buildJellyfinUsername(jellyfinAccountName, selectedProfile.name)
     : "";
   const usernameIssue = selectedProfile ? jellyfinUsernameIssue(selectedProfile.name) : null;
   // A directory account signs in with its directory username, which can
@@ -430,16 +456,20 @@ export default function ConnectAppsSettings() {
               {t("web.settings.connectApps.loadFailed.body")}
             </p>
           </div>
-        ) : isJellyfin && !passwordLoginAvailable ? (
+        ) : isJellyfin && !jellyfinSignInAvailable ? (
           <div className="border-border rounded-md border border-dashed px-3.5 py-4">
             <p className="text-sm font-medium">
               {t("web.settings.connectApps.noJellyfinSignIn.title")}
             </p>
-            <p className="text-muted-foreground mt-1 text-sm leading-relaxed">
-              {serverPasswordSignInOff
-                ? t("web.settings.connectApps.noJellyfinSignIn.passwordSignInOff")
-                : t("web.settings.connectApps.noJellyfinSignIn.externalProvider")}
-            </p>
+            {/* A directory account lands here only when every profile has a
+                PIN; neither explanation below fits it. */}
+            {directoryLoginAvailable ? null : (
+              <p className="text-muted-foreground mt-1 text-sm leading-relaxed">
+                {serverPasswordSignInOff
+                  ? t("web.settings.connectApps.noJellyfinSignIn.passwordSignInOff")
+                  : t("web.settings.connectApps.noJellyfinSignIn.externalProvider")}
+              </p>
+            )}
           </div>
         ) : isJellyfin && !compatEnabled ? (
           <div className="border-border rounded-md border border-dashed px-3.5 py-4">
@@ -552,9 +582,9 @@ export default function ConnectAppsSettings() {
           </>
         ) : (
           <>
-            {isJellyfin && profiles.length > 0 ? (
+            {isJellyfin && jellyfinProfiles.length > 0 ? (
               <ProfilePicker
-                profiles={profiles}
+                profiles={jellyfinProfiles}
                 selectedId={selectedProfile?.id ?? null}
                 onSelect={(profile) => setSelectedProfileID(profile.id)}
               />
@@ -612,7 +642,7 @@ export default function ConnectAppsSettings() {
                   isJellyfin
                     ? (usernameIssue ??
                       t("web.settings.connectApps.username.jellyfinHint", {
-                        username: accountUsername,
+                        username: jellyfinAccountName,
                       }))
                     : siloSignIn.kind === "directory"
                       ? t("web.settings.connectApps.username.directoryHint", {
@@ -622,9 +652,11 @@ export default function ConnectAppsSettings() {
                 }
               >
                 {isJellyfin && selectedProfile ? (
-                  <HashString before={accountUsername} after={selectedProfile.name} />
+                  <HashString before={jellyfinAccountName} after={selectedProfile.name} />
                 ) : (
-                  <code className="font-mono">{siloUsername}</code>
+                  <code className="font-mono">
+                    {isJellyfin ? jellyfinAccountName : siloUsername}
+                  </code>
                 )}
               </FieldRow>
 
@@ -634,7 +666,14 @@ export default function ConnectAppsSettings() {
                 kind={kind}
                 hint={
                   isJellyfin
-                    ? buildJellyfinPasswordHint(selectedProfile)
+                    ? directoryLoginAvailable
+                      ? // Its PIN profiles aren't offered, and the hint names
+                        // the directory once its name has loaded.
+                        directoryProviderName &&
+                        t("web.settings.connectApps.password.directoryHint", {
+                          provider: directoryProviderName,
+                        })
+                      : buildJellyfinPasswordHint(selectedProfile)
                     : siloSignIn.kind === "directory"
                       ? t("web.settings.connectApps.password.directoryHint", {
                           provider: siloSignIn.provider.display_name,
@@ -672,14 +711,18 @@ export default function ConnectAppsSettings() {
       </section>
 
       {showCompatCredentials ? (
-        <TroubleshootingPanel accountUsername={accountUsername} compatURL={compatURL} />
+        <TroubleshootingPanel
+          accountUsername={jellyfinAccountName}
+          compatURL={compatURL}
+          directory={directoryLoginAvailable}
+        />
       ) : null}
 
-      {showCompatCredentials && profiles.length > 1 ? (
+      {showCompatCredentials && jellyfinProfiles.length > 1 ? (
         <section className="surface-panel rounded-md border px-4 py-4 shadow-none sm:px-5">
           <h3 className="text-sm font-semibold">{t("web.settings.connectApps.glance.title")}</h3>
           <ul className="mt-2.5 space-y-1.5">
-            {profiles.map((profile) => {
+            {jellyfinProfiles.map((profile) => {
               // Same guard as the Username field: a name containing # yields a
               // username the resolver can't parse, so don't list one here either.
               const issue = jellyfinUsernameIssue(profile.name);
@@ -696,7 +739,7 @@ export default function ConnectAppsSettings() {
                     </>
                   ) : (
                     <>
-                      <HashString before={accountUsername} after={profile.name} />
+                      <HashString before={jellyfinAccountName} after={profile.name} />
                       {profile.has_pin ? (
                         <Badge variant="outline" className="text-muted-foreground">
                           {t("web.settings.connectApps.glance.needsPin")}

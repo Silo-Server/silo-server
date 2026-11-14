@@ -179,6 +179,16 @@ func TestLinkNetworkIdentityDB(t *testing.T) {
 // enabled network identity provider installation beside it.
 func (e *recheckEnv) enableNetworkProvider(t *testing.T, label string) int {
 	t.Helper()
+	if _, err := e.pool.Exec(t.Context(), `UPDATE plugin_auth_bindings SET enabled = true WHERE plugin_installation_id = $1`, e.installationID); err != nil {
+		t.Fatal(err)
+	}
+	return e.networkInstallation(t, label)
+}
+
+// networkInstallation adds an enabled network identity provider
+// installation beside the env's own.
+func (e *externalSignInEnv) networkInstallation(t *testing.T, label string) int {
+	t.Helper()
 	ctx := t.Context()
 	exec := func(sql string, args ...any) {
 		t.Helper()
@@ -186,7 +196,6 @@ func (e *recheckEnv) enableNetworkProvider(t *testing.T, label string) int {
 			t.Fatal(err)
 		}
 	}
-	exec(`UPDATE plugin_auth_bindings SET enabled = true WHERE plugin_installation_id = $1`, e.installationID)
 	var network int
 	if err := e.pool.QueryRow(ctx, `INSERT INTO plugin_installations (plugin_id, version, install_path, enabled, update_policy, kind)
 		VALUES ($1, '0', '/nonexistent/network-sign-in-test', true, 'manual', 'plugin') RETURNING id`,
