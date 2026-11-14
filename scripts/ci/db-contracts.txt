@@ -189,6 +189,7 @@
 ./internal/scanner TestScanSubtreeIndexesPodcastShowFolders
 ./internal/scanner TestScanSubtreeReconcilesOnlyTheScannedPodcastShow
 ./internal/scanner TestPodcastShowScanLeavesANestedLibraryRootAlone
+./internal/scanner TestOuterRootIgnoreFileExcludesAShowInANestedLibraryRoot
 ./internal/scanner TestPodcastShowSurvivesConcurrentMembershipSweep
 ./internal/scanner TestConcurrentScansOfANewPodcastShowCreateOneShow
 ./internal/scanner TestPodcastShowScanWritesTheShowInItsTransaction
