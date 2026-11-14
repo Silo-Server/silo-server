@@ -944,14 +944,13 @@ func (f *Fetcher) fetchNextUpItems(ctx context.Context, userID int, profileID st
 		Limit:         limit,
 		DateCutoff:    since,
 		RankByRelease: newReleasesFirst,
+		// Excluded in the query, not afterwards, so dismissals never leave
+		// the row short while more series are eligible.
+		ExcludeEpisodeIDs: f.nextUpDismissedEpisodeIDs(ctx, userID, profileID),
 	})
 	if err != nil {
 		return nil, nil, err
 	}
-	if len(results) == 0 {
-		return nil, nil, nil
-	}
-	results = f.filterNextUpDismissals(ctx, userID, profileID, results)
 	if len(results) == 0 {
 		return nil, nil, nil
 	}
@@ -1171,39 +1170,28 @@ func (f *Fetcher) FilterDroppedProgress(ctx context.Context, userID int, profile
 	return f.progressFilter.FilterDroppedProgress(ctx, userID, profileID, entries)
 }
 
-func (f *Fetcher) filterNextUpDismissals(ctx context.Context, userID int, profileID string, results []catalog.NextUpResult) []catalog.NextUpResult {
-	if len(results) == 0 || f.StoreProvider == nil || userID <= 0 || profileID == "" {
-		return results
+// nextUpDismissedEpisodeIDs lists the episodes the profile dismissed from
+// Home's Next Up, read through the user store so either backend's dismissals
+// apply. A failure leaves Next Up unfiltered, like Continue Watching.
+func (f *Fetcher) nextUpDismissedEpisodeIDs(ctx context.Context, userID int, profileID string) []string {
+	if f.StoreProvider == nil || userID <= 0 || profileID == "" {
+		return nil
 	}
-
 	store, err := f.StoreProvider.ForUser(ctx, userID)
 	if err != nil {
 		slog.ErrorContext(ctx, "getting user store for next-up dismissals", "component", "sections", "profile_id", profileID, "error", err)
-		return results
+		return nil
 	}
-
 	dismissals, err := store.ListHomeDismissals(ctx, profileID, userstore.HomeSurfaceNextUp)
 	if err != nil {
 		slog.ErrorContext(ctx, "listing next-up dismissals", "component", "sections", "profile_id", profileID, "error", err)
-		return results
+		return nil
 	}
-	if len(dismissals) == 0 {
-		return results
+	ids := make([]string, len(dismissals))
+	for i, dismissal := range dismissals {
+		ids[i] = dismissal.MediaItemID
 	}
-
-	dismissedIDs := make(map[string]struct{}, len(dismissals))
-	for _, dismissal := range dismissals {
-		dismissedIDs[dismissal.MediaItemID] = struct{}{}
-	}
-
-	filtered := make([]catalog.NextUpResult, 0, len(results))
-	for _, result := range results {
-		if _, dismissed := dismissedIDs[result.ContentID]; dismissed {
-			continue
-		}
-		filtered = append(filtered, result)
-	}
-	return filtered
+	return ids
 }
 
 // FetchAll runs all section queries in parallel and returns sections with items.
