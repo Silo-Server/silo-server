@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/clientmetadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -1459,16 +1460,12 @@ func fallbackDeviceName(deviceName, userAgent string) string {
 	return "This device"
 }
 
+// trimDeviceField turns each whitespace run, tabs and line breaks included,
+// into one space, then drops invalid UTF-8 and the remaining control
+// characters and keeps at most limit characters. Postgres text rejects both
+// invalid UTF-8 and NUL, which would fail the whole request insert.
 func trimDeviceField(value string, limit int) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	value = strings.Join(strings.Fields(value), " ")
-	if len(value) <= limit {
-		return value
-	}
-	return value[:limit]
+	return clientmetadata.Normalize(strings.Join(strings.Fields(value), " "), limit)
 }
 
 func maskDeviceIPAddress(ip string) string {
