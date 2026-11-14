@@ -79,6 +79,9 @@ describe("parseFieldTypes (#15)", () => {
         tags: { type: "array", items: { type: "integer" } },
         labels: { type: "array", items: { type: "string" } },
         flags: { type: "array", items: { type: "boolean" } },
+        // No item type to go by: left out so the control heuristic decides.
+        ids: { type: "array", items: { enum: [1, 2] } },
+        anything: { type: "array" },
         enabled: { type: "boolean" },
       },
     });

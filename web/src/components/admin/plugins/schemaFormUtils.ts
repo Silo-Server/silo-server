@@ -124,8 +124,8 @@ function coerceBoolean(value: unknown): boolean {
 
 /**
  * A declared field type, derived from the plugin's json_schema. For arrays the
- * suffix `:int` / `:num` records the item type so MULTI_SELECT elements coerce
- * to numbers only when the json_schema says they are numeric.
+ * suffix `:int` / `:num` / `:bool` records the item type; plain `array` means
+ * string items, which are never coerced.
  */
 export type FieldType =
   | "string"
@@ -165,7 +165,9 @@ export function parseFieldTypes(jsonSchema: string | undefined | null): Record<s
       if (itemType === "integer") out[key] = "array:int";
       else if (itemType === "number") out[key] = "array:num";
       else if (itemType === "boolean") out[key] = "array:bool";
-      else out[key] = "array";
+      else if (itemType === "string") out[key] = "array";
+      // Any other item schema (no type, enum, $ref, a nullable type list)
+      // leaves the field untyped, so the control heuristic coerces it.
     } else if (type === "string" || type === "integer" || type === "number" || type === "boolean") {
       out[key] = type;
     }
