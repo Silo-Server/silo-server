@@ -319,14 +319,7 @@ func TestMigrationRollbackCandidatesListAppliedMigrationsAboveTheTarget(t *testi
 // registers: goose leaves their source path empty, so without a name their
 // progress logs would carry name="".
 func TestRegisteredGoMigrationsHaveNames(t *testing.T) {
-	for _, m := range []*goose.Migration{
-		settingsBackfillMigration(),
-		displayPrefsMoveMigration(),
-		subtitleLanguageBackfillMigration(),
-		invalidIndexRebuildMigration(),
-		pushAttemptKeyScopeMigration(),
-		externalSubtitleNameBackfillMigration(),
-	} {
+	for _, m := range goMigrations() {
 		name := migrationName(&goose.Source{Type: goose.TypeGo, Path: m.Source, Version: m.Version})
 		if name == "" || name != m.Source {
 			t.Errorf("Go migration %d is logged as %q, want its file name", m.Version, name)

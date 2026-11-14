@@ -68,12 +68,7 @@ func widenPushAttemptKey(ctx context.Context, db *sql.DB, schema string) error {
 // selects, before dropping the key named drop, so fanout is never without one.
 func swapPushAttemptKey(ctx context.Context, db *sql.DB, schema, keep, predicate, drop string) error {
 	quotedSchema := pgx.Identifier{schema}.Sanitize()
-	if err := ensureIndexConcurrently(ctx, db, quotedSchema+"."+keep, fmt.Sprintf(
-		"CREATE UNIQUE INDEX CONCURRENTLY %s ON %s.%s WHERE %s", keep, quotedSchema, pushAttemptKeyColumns, predicate)); err != nil {
-		return err
-	}
-	if _, err := db.ExecContext(ctx, "DROP INDEX CONCURRENTLY IF EXISTS "+quotedSchema+"."+drop); err != nil {
-		return fmt.Errorf("dropping %s: %w", drop, err)
-	}
-	return nil
+	return replaceIndexConcurrently(ctx, db, quotedSchema+"."+keep, fmt.Sprintf(
+		"CREATE UNIQUE INDEX CONCURRENTLY %s ON %s.%s WHERE %s", keep, quotedSchema, pushAttemptKeyColumns, predicate),
+		quotedSchema+"."+drop)
 }
