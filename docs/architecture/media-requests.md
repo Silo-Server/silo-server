@@ -481,6 +481,18 @@ candidates in `last_reconciled_at` order, stamps each one when checked, even if
 it errors, and looks presence up in one batch per media type. The 30-day bound
 keeps an upgrade from completing, and notifying, a backlog of old failures.
 
+An in-flight request whose media is in the library still completes through its
+targets, so a download under way is not orphaned. The stalled-target backstop
+covers a router that never reports completion: once presence confirms the
+media, it completes a target with `external_status` `presence_confirmed` when
+the target has gone without a status change for 24 hours while `queued`, or
+72 hours while `downloading`. Seerr, for one, can leave a movie in PROCESSING
+for good after the file is imported. Because presence matches the title only,
+a `downloading` target is kept while its plugin reports download progress, on a
+whole-series request, and on a request that also has a target at another
+quality that has not failed. A season request counts as present only once every requested season is
+complete.
+
 A second task, `refresh_request_downloads`, runs every minute between reconcile
 passes (see [Download progress](#download-progress)). It asks only about
 targets in `downloading` that already have download progress and whose plugin
