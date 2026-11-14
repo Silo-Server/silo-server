@@ -161,23 +161,8 @@ func TestProviderIDDriftRepairWaitsForItemEditPostgres(t *testing.T) {
 		repaired <- NewProviderIDIntegrityRepairer(pool).insertProviderIDsForDriftRow(ctx, row, providerEntriesFromDrift(row))
 	}()
 	// Before the repair locked the item, it waited in its insert's foreign-key
-	// check instead; either wait names the media_item tables.
-	deadline := time.After(10 * time.Second)
-	for waiting := false; !waiting; {
-		if err := pool.QueryRow(ctx, `
-			SELECT EXISTS (SELECT 1 FROM pg_stat_activity
-			WHERE wait_event_type = 'Lock' AND datname = current_database()
-			  AND pid <> pg_backend_pid() AND strpos(query, 'media_item') > 0)`).Scan(&waiting); err != nil {
-			t.Fatalf("read lock waits: %v", err)
-		}
-		select {
-		case err := <-repaired:
-			t.Fatalf("repair finished without waiting on the edit: %v", err)
-		case <-deadline:
-			t.Fatal("repair never waited on the edit")
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
+	// check instead.
+	waitForMediaItemLockWait(t, pool, repaired)
 	// syncEditedProviderIDTx's delete of the edited provider's row.
 	if _, err := edit.Exec(ctx, `
 		DELETE FROM media_item_provider_ids
@@ -198,5 +183,89 @@ func TestProviderIDDriftRepairWaitsForItemEditPostgres(t *testing.T) {
 	}
 	if durable != tmdbID {
 		t.Fatalf("durable tmdb = %q, want %q", durable, tmdbID)
+	}
+}
+
+// An automatic rebind of a skeleton onto its matched item waits for an
+// admin's ID edit holding the skeleton, rather than moving the skeleton's
+// provider rows first and deadlocking with the edit's delete of one of them.
+func TestRebindWaitsForItemEditPostgres(t *testing.T) {
+	pool := chainBuiltinTestPool(t)
+	ctx := t.Context()
+	suffix := uuid.NewString()
+	source, target := "rebind-edit-source-"+suffix, "rebind-edit-target-"+suffix
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{source, target})
+	})
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_items (content_id, type, title, genres, status)
+		VALUES ($1, 'movie', 'Skeleton', '{}'::text[], 'pending'), ($2, 'movie', 'Matched', '{}'::text[], 'matched')`,
+		source, target); err != nil {
+		t.Fatalf("seed items: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_item_provider_ids (content_id, item_type, provider, provider_id)
+		VALUES ($1, 'movie', 'tmdb', $2)`, source, "rebind-"+suffix); err != nil {
+		t.Fatalf("seed durable id: %v", err)
+	}
+
+	// The edit locks the skeleton as lockCuratedProviderIDs does.
+	edit, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin edit: %v", err)
+	}
+	defer edit.Rollback(ctx) //nolint:errcheck // a no-op once the edit commits
+	if _, err := edit.Exec(ctx, `SELECT 1 FROM media_items WHERE content_id = $1 FOR UPDATE`, source); err != nil {
+		t.Fatalf("lock item: %v", err)
+	}
+	rebound := make(chan error, 1)
+	go func() { rebound <- identifyMoveService(pool).rebindItemOnto(ctx, source, target, false, false) }()
+	// Before the rebind locked the skeleton, it waited at its final delete.
+	waitForMediaItemLockWait(t, pool, rebound)
+	// syncEditedProviderIDTx's delete of the edited provider's row.
+	if _, err := edit.Exec(ctx, `
+		DELETE FROM media_item_provider_ids
+		WHERE content_id = $1 AND lower(provider) = 'tmdb'`, source); err != nil {
+		t.Fatalf("edit delete: %v", err)
+	}
+	if err := edit.Commit(ctx); err != nil {
+		t.Fatalf("commit edit: %v", err)
+	}
+	if err := <-rebound; err != nil {
+		t.Fatalf("rebind: %v", err)
+	}
+	var remaining int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM media_items WHERE content_id = $1`, source).Scan(&remaining); err != nil {
+		t.Fatalf("read skeleton: %v", err)
+	}
+	if remaining != 0 {
+		t.Fatal("rebind left the skeleton in place")
+	}
+}
+
+// waitForMediaItemLockWait returns once another session of this database
+// waits on a lock in a statement on the media_item tables, and fails if done
+// reports first.
+func waitForMediaItemLockWait(t *testing.T, pool *pgxpool.Pool, done <-chan error) {
+	t.Helper()
+	deadline := time.After(10 * time.Second)
+	for {
+		var waiting bool
+		if err := pool.QueryRow(context.Background(), `
+			SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+			WHERE wait_event_type = 'Lock' AND datname = current_database()
+			  AND pid <> pg_backend_pid() AND strpos(query, 'media_item') > 0)`).Scan(&waiting); err != nil {
+			t.Fatalf("read lock waits: %v", err)
+		}
+		if waiting {
+			return
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("finished without waiting on a lock: %v", err)
+		case <-deadline:
+			t.Fatal("never waited on a lock")
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }

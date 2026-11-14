@@ -639,9 +639,10 @@
 # ID with the column, and skips one another item already holds.
 ./internal/catalog TestMetadataUpdateKeepsDurableProviderIDsDB
 
-# A provider-ID drift repair waits for an admin's ID edit on the same item
-# instead of deadlocking with it.
+# A provider-ID drift repair and an automatic rebind wait for an admin's ID
+# edit on the same item instead of deadlocking with it.
 ./internal/metadata TestProviderIDDriftRepairWaitsForItemEditPostgres
+./internal/metadata TestRebindWaitsForItemEditPostgres
 
 # Watch-provider events carry catalog titles to plugins.
 ./internal/watchsync TestGetMediaTitlesDB
