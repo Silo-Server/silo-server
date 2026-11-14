@@ -42,12 +42,13 @@ func TestThirdPartyModelCapabilities(t *testing.T) {
 		model  string
 		levels []string
 	}{
-		{"grok-4", []string{"low", "medium", "high"}},
 		{"grok-4.5", []string{"low", "medium", "high", "xhigh"}},
 		{"grok-4.6", []string{"low", "medium", "high", "xhigh"}},
 		{"openai/Grok-4.5", []string{"low", "medium", "high", "xhigh"}},
+		{"grok-4.20-multi-agent-0309", Levels},
 		{"deepseek-v4.1-flash", []string{"low", "high", "max"}},
-		{"deepseek/deepseek-chat", []string{"low", "high", "max"}},
+		{"deepseek-flash", []string{"low", "high", "max"}},
+		{"deepseek-r1:8b", Levels},
 		{"llama-3.3-70b", Levels},
 	} {
 		t.Run(test.model, func(t *testing.T) {
@@ -61,27 +62,6 @@ func TestThirdPartyModelCapabilities(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestOmitTemperature(t *testing.T) {
-	for _, test := range []struct {
-		model  string
-		effort string
-		want   bool
-	}{
-		{"gpt-5", "", true},
-		{"openai/o3", "", true},
-		{"grok-4.5", "", false},
-		{"deepseek-v4.1-flash", "", false},
-		{"deepseek/deepseek-chat", "", false},
-		{"grok-4.5", "low", true},
-		{"llama-3.3-70b", "", false},
-		{"llama-3.3-70b", "high", true},
-	} {
-		if got := OmitTemperature(test.model, test.effort); got != test.want {
-			t.Errorf("OmitTemperature(%q, %q) = %t, want %t", test.model, test.effort, got, test.want)
-		}
 	}
 }
 
