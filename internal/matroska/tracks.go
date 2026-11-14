@@ -63,6 +63,11 @@ type TrackEntry struct {
 	DefaultDuration uint64
 	// CodecDelay is subtracted from timestamps, in nanoseconds.
 	CodecDelay uint64
+	// SamplingFrequency is an audio track's sampling rate in Hz, and
+	// OutputSamplingFrequency the rate it decodes to when that differs (as
+	// for HE-AAC); each is 0 when the entry has none.
+	SamplingFrequency       float64
+	OutputSamplingFrequency float64
 	// TimestampScale is the deprecated TrackTimestampScale, 1 when absent.
 	TimestampScale float64
 	// Encodings holds at most MaxContentEncodings entries.
@@ -104,6 +109,15 @@ func ParseTrackEntry(entry []byte) TrackEntry {
 			t.CodecDelay = Uint(v)
 		case IDTrackTimestampScale:
 			t.TimestampScale = Float(v)
+		case IDAudio:
+			Children(v, func(id uint64, v []byte) {
+				switch id {
+				case IDSamplingFrequency:
+					t.SamplingFrequency = Float(v)
+				case IDOutputSamplingFreq:
+					t.OutputSamplingFrequency = Float(v)
+				}
+			})
 		case IDContentEncodings:
 			Children(v, func(id uint64, v []byte) {
 				if id == IDContentEncoding && len(t.Encodings) < MaxContentEncodings {

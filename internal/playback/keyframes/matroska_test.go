@@ -673,3 +673,47 @@ func TestReadMatroskaPreservesHeaderReadErrors(t *testing.T) {
 		}
 	}
 }
+
+// planTracks has codec IDs, so the planning read keeps its tracks.
+func planTracks(audioScale ...[]byte) []byte {
+	return el(idTracks,
+		el(idTrackEntry, append([][]byte{uintEl(idTrackNumber, audioTrack), uintEl(idTrackType, 2), el(matroska.IDCodecID, []byte("A_AAC"))}, audioScale...)...),
+		el(idTrackEntry, uintEl(idTrackNumber, videoTrack), uintEl(idTrackType, trackTypeVideo), el(matroska.IDCodecID, []byte("V_MPEG4/ISO/AVC"))),
+	)
+}
+
+// cuesFirstWithLeadingAudio builds a file whose Cues precede the media and
+// whose first cluster holds only audio, which no video cue points at.
+func cuesFirstWithLeadingAudio(tracksEl []byte) []byte {
+	seekHead := el(idSeekHead, el(idSeek, uintEl(idSeekID, idCues), uintEl(idSeekPosition, 0)))
+	head := slices.Concat(seekHead, info, tracksEl)
+	audioOnly := cluster(0, block(audioTrack, 0, true))
+	cuesLen := len(cuesFor(layout{}, 0, 0))
+	posA := uint64(len(head) + cuesLen + len(audioOnly))
+	posB := posA + uint64(len(clusterA))
+	return slices.Concat(ebmlHeader, el(idSegment, head, cuesFor(layout{}, posA, posB), audioOnly, clusterA, clusterB))
+}
+
+// With the Cues first, the scan stops before any cluster; the tracks still
+// start in the file's first cluster, not the first a video cue points at.
+func TestReadPlanIndexFindsTheFirstClusterAfterLeadingCues(t *testing.T) {
+	idx, err := read(cuesFirstWithLeadingAudio(planTracks()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(idx.Tracks) != 2 || !idx.Tracks[0].HasStart || idx.Tracks[0].Start != 0 || idx.Tracks[1].HasStart {
+		t.Fatalf("Tracks = %+v, want audio from 0 and no video in the first cluster", idx.Tracks)
+	}
+	if idx.VideoReorder != ReorderUnknown {
+		t.Fatalf("VideoReorder = %d, want ReorderUnknown for a cluster without video", idx.VideoReorder)
+	}
+}
+
+// The planning read doesn't apply a track's TrackTimestampScale to its
+// start, so it doesn't plan from such a track.
+func TestReadPlanIndexRejectsAScaledTrack(t *testing.T) {
+	_, err := read(cuesFirstWithLeadingAudio(planTracks(floatEl(idTrackTimestampScale, 2))))
+	if !errors.Is(err, ErrNoIndex) {
+		t.Fatalf("err = %v, want ErrNoIndex", err)
+	}
+}

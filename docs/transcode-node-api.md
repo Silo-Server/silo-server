@@ -28,26 +28,29 @@ URL different content. Clients seeking outside the produced window must
 negotiate a new playback transport at the requested source position.
 
 The experimental `playback.copy_keyframe_playlist` server setting, off by
-default, adds a keyframe-planned mode. With it on, a fresh copy-video
-`POST /transcode/start` carries `keyframe_playlist: true` and the node echoes
+default, adds a keyframe-planned mode. With it on, a fresh copy-video `POST
+/transcode/start` carries `keyframe_playlist: true` and the node echoes
 `keyframe_playlist: true` in the start response; the API rejects a missing echo
 and stops the transport. The echo confirms the node understood the request, not
 that it planned. A copy serves one complete playlist planned from the source's
 keyframes only when it starts at the beginning of the source, the duration is
-known, the keyframe index exists and records where the video ends, the plan
-fits within the synthetic playlist's 50,000-segment limit, and the node can
-record the plan in the session's output directory. Any other copy keeps
-FFmpeg's playlist. The plan comes from the Cues, which the node checks against
-only a few clusters, so a planned copy compares the segments FFmpeg writes with
-the plan. On the first mismatch, later playbacks of that file version on that
-process keep FFmpeg's playlist, until the file changes or the process
-restarts; the playback that found it keeps its plan. A keyframe-planned copy
-never seek-restarts. While FFmpeg is running, a request for a segment past the
-last one it produced waits up to 30 seconds for the copy to get there. When
-FFmpeg has stopped, or the segment is behind the produced head and gone, the
-copy restarts from the beginning, so FFmpeg cuts the same segments. A segment
-FFmpeg didn't write in a run that finished the whole stream gets a 404, since
-a restart wouldn't cut it either.
+known, the keyframe index exists and records where the video ends, the node can
+tell which packet FFmpeg's HLS muxer measures its segment targets from (audio
+that starts before the video moves them), the plan fits within the synthetic
+playlist's 50,000-segment limit, and the node can record the plan in the
+session's output directory. Any other copy keeps FFmpeg's playlist. The plan
+comes from the Cues, which the node checks against only a few clusters, so a
+planned copy compares the segments FFmpeg writes with the plan. On the first
+mismatch, unless a Jellyfin audio switch has changed the session's audio since
+it planned, later playbacks of that file version on that process keep FFmpeg's
+playlist, until the file changes or the process restarts; the playback that
+found it keeps its plan. A keyframe-planned copy never seek-restarts. While
+FFmpeg is running, a request for a segment past the last one it produced waits
+up to 30 seconds for the copy to get there. When FFmpeg has stopped, or the
+segment is behind the produced head and gone, the copy restarts from the
+beginning, so FFmpeg cuts the same segments. A segment FFmpeg didn't write in a
+run that finished the whole stream gets a 404, since a restart wouldn't cut it
+either.
 
 The throttle fields belong to the internal API-to-node contract. Apple and
 Android clients require no request or response changes.

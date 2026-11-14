@@ -40,7 +40,23 @@ type Index struct {
 	VideoEnd float64
 	// File is the version of the file Load read the index from, or zero.
 	File Version
+	// Tracks are the file's tracks in FFmpeg's stream order, with when each
+	// starts, and VideoReorder and VideoFrame describe the video's first
+	// frames; only Load sets them. PlanMuxSegments needs them to know which
+	// packet FFmpeg's HLS muxer starts from.
+	Tracks []Track
+	// VideoReorder is how many frames the first cluster shows the video's
+	// decode order running ahead of its presentation order: 0 without
+	// B-frames, ReorderUnknown when it holds too few video frames to tell.
+	VideoReorder int
+	// VideoFrame is the video's frame duration in seconds, or 0 when unknown.
+	VideoFrame float64
 }
+
+// ReorderUnknown is Index.VideoReorder when the first cluster holds fewer
+// than three video frames: a B-frame only shows up after the frame decoded
+// ahead of it, so such a cluster can't rule reordering out.
+const ReorderUnknown = -1
 
 // Matroska element IDs, from the Matroska specification.
 const (
@@ -110,6 +126,13 @@ func readPlanIndex(r io.ReaderAt, size int64) (Index, error) {
 		return Index{}, err
 	}
 	m.VideoEnd = end.seconds(m.timescale, m.frameSeconds)
+	first, err := firstCluster(r, m)
+	if err != nil {
+		return Index{}, err
+	}
+	if err := readTrackStarts(r, first, &m); err != nil {
+		return Index{}, err
+	}
 	return m.Index, nil
 }
 
@@ -126,6 +149,37 @@ type matroskaIndex struct {
 	timescale int64
 	// frameSeconds is the video track's default frame duration, or 0.
 	frameSeconds float64
+	// entries are the file's track entries, and firstCluster where its first
+	// cluster starts, or -1 when the scan didn't reach one. scanNext is the
+	// element after the one the scan stopped at once it had the metadata,
+	// or -1.
+	entries      []matroska.TrackEntry
+	firstCluster int64
+	scanNext     int64
+}
+
+// firstCluster returns where m's file's first cluster starts. When the
+// metadata precedes the media, readMatroska stops before reaching one; the
+// clusters the Cues point at may come after an audio-only one, so it walks
+// on to the first.
+func firstCluster(r io.ReaderAt, m matroskaIndex) (int64, error) {
+	if m.firstCluster >= 0 {
+		return m.firstCluster, nil
+	}
+	for at := m.scanNext; at >= 0 && at < m.segEnd; {
+		id, dataSize, headerLen, err := matroska.ReadElementHeader(r, at)
+		if err != nil {
+			return 0, fmt.Errorf("keyframes: read element at %d: %w", at, err)
+		}
+		if id == idCluster {
+			return at, nil
+		}
+		if dataSize == unknownSize {
+			break
+		}
+		at += headerLen + dataSize
+	}
+	return 0, ErrNoIndex
 }
 
 func readMatroska(r io.ReaderAt, size int64) (matroskaIndex, error) {
@@ -169,6 +223,9 @@ func readMatroska(r io.ReaderAt, size int64) (matroskaIndex, error) {
 		cues      []byte
 		haveInfo  bool
 		haveTrack bool
+		entries   []matroska.TrackEntry
+		first     int64 = -1
+		next      int64 = -1
 	)
 	for at := segStart; at < segEnd; {
 		id, dataSize, headerLen, err := matroska.ReadElementHeader(r, at)
@@ -216,6 +273,7 @@ func readMatroska(r io.ReaderAt, size int64) (matroskaIndex, error) {
 				// feature the times here don't apply; don't plan from them.
 				return matroskaIndex{}, ErrNoIndex
 			}
+			entries = trackEntries(data)
 		case idCues:
 			cues, err = matroska.ReadElementData(r, dataAt, dataSize, maxCuesSize)
 			if err != nil {
@@ -223,10 +281,16 @@ func readMatroska(r io.ReaderAt, size int64) (matroskaIndex, error) {
 			}
 		}
 		if cues != nil && haveInfo && haveTrack {
+			if dataSize != unknownSize {
+				next = dataAt + dataSize
+			}
 			break
 		}
 		// Clusters hold the media. Stop the linear scan at the first one and
 		// jump to the Cues the seek head points at, if they come later.
+		if id == idCluster {
+			first = at
+		}
 		if id == idCluster || dataSize == unknownSize {
 			break
 		}
@@ -270,6 +334,7 @@ func readMatroska(r io.ReaderAt, size int64) (matroskaIndex, error) {
 		if scaled {
 			return matroskaIndex{}, ErrNoIndex
 		}
+		entries = trackEntries(data)
 	}
 	if cues == nil || !haveTrack || !haveInfo {
 		return matroskaIndex{}, ErrNoIndex
@@ -295,6 +360,7 @@ func readMatroska(r io.ReaderAt, size int64) (matroskaIndex, error) {
 	return matroskaIndex{
 		Index: idx, segStart: segStart, segEnd: segEnd, video: video, ticks: ticks, clusters: clusters,
 		timescale: timescale, frameSeconds: float64(frameNS) / 1e9,
+		entries: entries, firstCluster: first, scanNext: next,
 	}, nil
 }
 

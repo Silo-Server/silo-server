@@ -129,40 +129,86 @@ func TestPlanSegmentsMatchesFFmpegHLS(t *testing.T) {
 		t.Skipf("ffmpeg can't make the test file (%v): %s", err, out)
 	}
 	for name, path := range map[string]string{"irregular": makeTestMKV(t, ffmpeg), "regular with an offset": regular} {
-		t.Run(name, func(t *testing.T) { checkPlanMatchesFFmpegHLS(t, ffmpeg, path) })
+		t.Run(name, func(t *testing.T) { checkPlanMatchesFFmpegHLS(t, ffmpeg, path, MuxAudio{}, true) })
 	}
 }
 
-func checkPlanMatchesFFmpegHLS(t *testing.T, ffmpeg, path string) {
+// FFmpeg's HLS muxer counts its segment targets from the first packet it
+// muxes, which is audio when the audio starts before the video (#4049).
+// Keyframes 20ms below a target then cut there or not depending on how far
+// the audio leads: FFmpeg's AAC encoder starts its track 1024 samples (21ms)
+// early, an AC3 track here starts 5ms early.
+func TestPlanSegmentsMatchesFFmpegHLSWhenAudioLeads(t *testing.T) {
+	ffmpeg, _ := requireFFmpeg(t)
+	mkv := func(name, audio string, bframes int) string {
+		path := filepath.Join(t.TempDir(), name+".mkv")
+		out, err := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+			"-f", "lavfi", "-i", "testsrc2=size=160x90:rate=50",
+			"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
+			"-t", "12", "-c:v", "libx264", "-preset", "ultrafast",
+			"-g", "1000", "-sc_threshold", "0", "-bf", strconv.Itoa(bframes),
+			"-force_key_frames", "0,1.98,4,6,8,9.98",
+			"-c:a", audio, path).CombinedOutput()
+		if err != nil {
+			t.Skipf("ffmpeg can't make the test file (%v): %s", err, out)
+		}
+		return path
+	}
+	aac, ac3 := mkv("aac", "aac", 0), mkv("ac3", "ac3", 0)
+	for name, tc := range map[string]struct {
+		path  string
+		audio MuxAudio
+		plan  bool
+	}{
+		"AAC copied":         {path: aac, plan: true},
+		"AC3 copied":         {path: ac3, plan: true},
+		"AC3 encoded to AAC": {path: ac3, audio: MuxAudio{Encoder: AudioAAC}, plan: true},
+		"AAC encoded to AAC": {path: aac, audio: MuxAudio{Encoder: AudioAAC}, plan: true},
+		// Two B-frames delay the video 40ms, which FFmpeg muxes ahead of the
+		// AAC; the first cluster shows only one frame of reordering, which
+		// can't tell that apart from audio first, so it may not plan.
+		"B-frames": {path: mkv("bframes", "aac", 2)},
+	} {
+		t.Run(name, func(t *testing.T) { checkPlanMatchesFFmpegHLS(t, ffmpeg, tc.path, tc.audio, tc.plan) })
+	}
+}
+
+// checkPlanMatchesFFmpegHLS runs a session's HLS copy of path, with the audio
+// copied or encoded as audio says, and compares FFmpeg's segments with the
+// plan. A plan PlanMuxSegments refuses is no mismatch, but must be wanted.
+func checkPlanMatchesFFmpegHLS(t *testing.T, ffmpeg, path string, audio MuxAudio, wantPlan bool) {
 	dir := t.TempDir()
-	out, err := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error",
+	audioArgs := []string{"-c:a", "copy"}
+	if audio.Encoder == AudioAAC {
+		// As a session encodes it (appendAudioArgs).
+		audioArgs = []string{"-c:a", "aac", "-b:a", "192k", "-ac", "2", "-af", "aresample=async=1"}
+	}
+	args := []string{"-hide_banner", "-loglevel", "error",
 		"-i", path, "-map", "0:v:0", "-map", "0:a:0",
 		"-copyts", "-avoid_negative_ts", "make_non_negative", "-start_at_zero",
-		"-c:v", "copy", "-c:a", "copy",
+		"-c:v", "copy"}
+	args = append(args, audioArgs...)
+	args = append(args,
 		"-f", "hls", "-hls_time", "2", "-hls_list_size", "0",
 		"-hls_segment_type", "fmp4",
 		"-hls_segment_filename", filepath.Join(dir, "seg_%05d.m4s"),
-		filepath.Join(dir, "stream.m3u8")).CombinedOutput()
+		filepath.Join(dir, "stream.m3u8"))
+	out, err := exec.Command(ffmpeg, args...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("ffmpeg: %v: %s", err, out)
 	}
 	written := playlistDurations(t, filepath.Join(dir, "stream.m3u8"))
 
 	// Plan as a session does: from the index, to the video's end.
-	f, err := os.Open(path)
-	if err != nil {
-		t.Fatal(err)
+	idx := readIndex(t, path)
+	starts, ok := PlanMuxSegments(idx, 2, audio)
+	if !ok {
+		if wantPlan {
+			t.Fatalf("no plan; FFmpeg wrote %v", written)
+		}
+		return
 	}
-	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
-	if err != nil {
-		t.Fatal(err)
-	}
-	idx, err := readPlanIndex(f, info.Size())
-	if err != nil {
-		t.Fatal(err)
-	}
-	planned := SegmentDurations(PlanSegments(idx.Keyframes, 2), idx.VideoEnd)
+	planned := SegmentDurations(starts, idx.VideoEnd)
 	if len(planned) != len(written) {
 		t.Fatalf("planned %d segments %v, FFmpeg wrote %d %v", len(planned), planned, len(written), written)
 	}
