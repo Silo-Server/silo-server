@@ -200,16 +200,22 @@ func checkUnclaimedWriteCreatesRow(t *testing.T, ctx context.Context, pool *pgxp
 		t.Fatalf("attempts=%d failures=%d, want 1 and 1", row.attempts, row.failures)
 	}
 
-	// last_error is kept for admins, so a secret echoed by a provider is masked.
-	if err := store.RecordFailure(ctx, id, "", EnrichmentErrorTransient, 0, "rpc error: desc = api_key=hunter2secret"); err != nil {
-		t.Fatal(err)
-	}
-	var lastError string
-	if err := pool.QueryRow(ctx, `SELECT last_error FROM audiobook_enrichment_state WHERE content_id = $1`, id).Scan(&lastError); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(lastError, "hunter2secret") {
-		t.Fatalf("last_error = %q, want the secret masked", lastError)
+	// last_error is kept for admins, so a secret echoed by a provider is
+	// masked, whether bare or nested in a gRPC status description.
+	for _, cause := range []string{
+		"api_key=hunter2secret",
+		"rpc error: code = Unknown desc = api_key=hunter2secret",
+	} {
+		if err := store.RecordFailure(ctx, id, "", EnrichmentErrorTransient, 0, cause); err != nil {
+			t.Fatal(err)
+		}
+		var lastError string
+		if err := pool.QueryRow(ctx, `SELECT last_error FROM audiobook_enrichment_state WHERE content_id = $1`, id).Scan(&lastError); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(lastError, "hunter2secret") {
+			t.Fatalf("last_error for %q = %q, want the secret masked", cause, lastError)
+		}
 	}
 }
 

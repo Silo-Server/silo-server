@@ -205,7 +205,9 @@ func (e *Enricher) SetFFmpegPath(path string) {
 // Run executes one sweep and returns how many items it matched. Only one node
 // sweeps at a time: Run returns 0 at once while another holds the sweep lock,
 // so adding nodes does not add provider load. Claims still fence each item, so
-// a lease that outlives a lost lock cannot be processed twice.
+// a lease that outlives a lost lock cannot be processed twice. The exception is
+// a node whose pool allows a single connection: it sweeps without the lock
+// (see takeSweepLock), so such nodes can sweep at the same time.
 func (e *Enricher) Run(ctx context.Context) (int, error) {
 	if e == nil || e.pool == nil || e.chainRepo == nil {
 		return 0, nil
@@ -259,8 +261,9 @@ func (e *Enricher) Run(ctx context.Context) (int, error) {
 // takeSweepLock takes the cluster-wide sweep lock and returns its release.
 // The session lock holds a pooled connection for the whole sweep, so a pool
 // of one connection would leave the sweep's own queries waiting forever. Such
-// a pool sweeps without the lock; the per-item claims still keep two nodes
-// from processing the same book.
+// a pool sweeps without the lock, so the one-sweeper guarantee does not hold
+// for it: several such nodes can sweep at once and add provider load. The
+// per-item claims still keep two nodes from processing the same book.
 func (e *Enricher) takeSweepLock(ctx context.Context) (release func(), acquired bool, err error) {
 	if e.pool.Config().MaxConns < 2 {
 		return func() {}, true, nil
