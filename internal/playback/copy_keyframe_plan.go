@@ -413,6 +413,19 @@ func (s *TranscodeSession) plannedRunCoversSince(segNum int, seenGeneration time
 		segNum <= progress.ProducedHead+plannedWaitSegments
 }
 
+// plannedSegmentRestartable reports whether segNum is a segment of a
+// keyframe-planned copy's plan that some generation may still produce: its
+// video request restarts FFmpeg there even after FFmpeg exited
+// (plannedSegmentRecoveryDecision), unless the session is closing.
+func (s *TranscodeSession) plannedSegmentRestartable(segNum int) bool {
+	if s.copyPlan == nil || segNum < 0 || segNum >= len(s.copyPlan.durations) {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.closing
+}
+
 // retentionFloor is the first segment the pruner keeps when the player has
 // downloaded through downloadedThrough: enough planned media behind that
 // segment, not counting it, to cover retentionSeconds. It counts as

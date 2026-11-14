@@ -1839,7 +1839,8 @@ keyframe-planned copy is the exception: like its video segment, a subtitle
 segment FFmpeg has not reached counts as the player's position for the
 throttle while it waits, and if FFmpeg has still not reached it after the
 wait it answers `404`, which the player can retry, rather than an empty
-document it would keep. Subtitle
+document it would keep. That holds after FFmpeg has exited too, since the
+segment's video request restarts it there, unless the session is closing. Subtitle
 segments never return `503` and never trigger a seek restart. Each seek restart writes a new cue file and
 keeps the earlier ones, so a backward seek into output an earlier generation
 produced keeps its cues. On FFmpeg's own playlist a generation keeps the
