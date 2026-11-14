@@ -12159,6 +12159,10 @@
               "unsupported"
             ],
             "type": "string"
+          },
+          "token_in_body": {
+            "description": "Whether lookupInvitationLink and acceptInvitationLink, which take the token in the request body, are available. Servers that predate them omit this; read an absent value as false and use the deprecated path operations there.",
+            "type": "boolean"
           }
         },
         "required": [
@@ -15079,9 +15083,9 @@
             "type": "string"
           },
           "reset_url": {
-            "description": "Present for delivery=link only. One-time disclosure of a bearer credential for the account's password; share it only with the account holder",
+            "description": "Present for delivery=link only. One-time disclosure of a bearer credential for the account's password; share it only with the account holder. The token is the URL's fragment, which browsers never send to the server",
             "examples": [
-              "https://silo.example.test/reset-password/3f2b47eb7b36dd2d"
+              "https://silo.example.test/reset-password#3f2b47eb7b36dd2d"
             ],
             "format": "uri",
             "type": "string"
@@ -37184,6 +37188,10 @@
               "unsupported"
             ],
             "type": "string"
+          },
+          "token_in_body": {
+            "description": "Whether lookupInvitationLink and acceptInvitationLink, which take the token in the request body, are available. Servers that predate them omit this; read an absent value as false and use the deprecated path operations there.",
+            "type": "boolean"
           }
         },
         "required": [
@@ -37198,7 +37206,7 @@
         "additionalProperties": false,
         "properties": {
           "claim_url": {
-            "description": "One-time disclosure; never retained for replay. Contains the bearer claim token.",
+            "description": "One-time disclosure; never retained for replay. Contains the bearer claim token as the URL's fragment, which browsers never send to the server.",
             "format": "uri",
             "type": "string"
           },
@@ -37220,6 +37228,47 @@
           "invitation",
           "claim_url",
           "delivery_status"
+        ],
+        "type": "object"
+      },
+      "InvitationLinkAcceptInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "description": "The invitee's address. Required when the lookup reports email_required; ignored otherwise.",
+            "maxLength": 254,
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 72,
+            "minLength": 8,
+            "type": "string"
+          },
+          "token": {
+            "description": "The token from the invitation link's fragment",
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "password"
+        ],
+        "type": "object"
+      },
+      "InvitationLinkInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "token": {
+            "description": "The token from the invitation link's fragment",
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
         ],
         "type": "object"
       },
@@ -43243,6 +43292,46 @@
           "status",
           "login_status",
           "username"
+        ],
+        "type": "object"
+      },
+      "PasswordResetLinkCompleteInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "password": {
+            "description": "The new password",
+            "examples": [
+              "margin fossil quench hollow"
+            ],
+            "maxLength": 72,
+            "minLength": 8,
+            "type": "string"
+          },
+          "token": {
+            "description": "The token from the reset link's fragment",
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "password"
+        ],
+        "type": "object"
+      },
+      "PasswordResetLinkInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "token": {
+            "description": "The token from the reset link's fragment",
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
         ],
         "type": "object"
       },
@@ -180989,6 +181078,216 @@
         "x-silo-conditional": true
       }
     },
+    "/api/v2/invitations/accept": {
+      "post": {
+        "operationId": "acceptInvitationLink",
+        "parameters": [
+          {
+            "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+              "examples": [
+                "8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"
+              ],
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional device name recorded on the login session (first 120 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Name",
+            "schema": {
+              "description": "Optional device name recorded on the login session (first 120 characters)",
+              "examples": [
+                "Living Room Apple TV"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional platform recorded on the login session (first 40 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Platform",
+            "schema": {
+              "description": "Optional platform recorded on the login session (first 40 characters)",
+              "examples": [
+                "tvOS"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvitationLinkAcceptInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationAcceptance"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Implemented"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Create the invited account through an invitation link.",
+        "tags": [
+          "invitations"
+        ],
+        "x-silo-class": "public",
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/invitations/capabilities": {
       "get": {
         "operationId": "getInvitationCapabilities",
@@ -181142,8 +181441,154 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/invitations/lookup": {
+      "post": {
+        "operationId": "lookupInvitationLink",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvitationLinkInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationLookup"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Describe an invitation link for the claim screen.",
+        "tags": [
+          "invitations"
+        ],
+        "x-silo-class": "public",
+        "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/invitations/{token}": {
       "get": {
+        "deprecated": true,
+        "description": "Deprecated: a token in the path reaches the access logs of anything in front of the server. Use lookupInvitationLink.",
         "operationId": "lookupInvitation",
         "parameters": [
           {
@@ -181254,11 +181699,17 @@
           "invitations"
         ],
         "x-silo-class": "public",
+        "x-silo-deprecation": {
+          "at": "2026-11-13T00:00:00Z",
+          "link": "https://siloserver.org/docs/api/"
+        },
         "x-silo-service-backed": true
       }
     },
     "/api/v2/invitations/{token}/accept": {
       "post": {
+        "deprecated": true,
+        "description": "Deprecated: a token in the path reaches the access logs of anything in front of the server. Use acceptInvitationLink.",
         "operationId": "acceptInvitation",
         "parameters": [
           {
@@ -181473,6 +181924,10 @@
           "invitations"
         ],
         "x-silo-class": "public",
+        "x-silo-deprecation": {
+          "at": "2026-11-13T00:00:00Z",
+          "link": "https://siloserver.org/docs/api/"
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -198256,8 +198711,344 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/password-resets/complete": {
+      "post": {
+        "operationId": "completePasswordResetLink",
+        "parameters": [
+          {
+            "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+              "examples": [
+                "8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"
+              ],
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional device name recorded on the login session (first 120 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Name",
+            "schema": {
+              "description": "Optional device name recorded on the login session (first 120 characters)",
+              "examples": [
+                "Living Room Apple TV"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional platform recorded on the login session (first 40 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Platform",
+            "schema": {
+              "description": "Optional platform recorded on the login session (first 40 characters)",
+              "examples": [
+                "tvOS"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "User-Agent",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordResetLinkCompleteInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordResetCompletion"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Set a new password through a reset link, sign out everywhere, and sign in.",
+        "tags": [
+          "auth"
+        ],
+        "x-silo-class": "public",
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/password-resets/lookup": {
+      "post": {
+        "operationId": "lookupPasswordResetLink",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordResetLinkInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordResetLookup"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Describe a usable password reset link for the reset screen.",
+        "tags": [
+          "auth"
+        ],
+        "x-silo-class": "public",
+        "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/password-resets/{token}": {
       "get": {
+        "deprecated": true,
+        "description": "Deprecated: a token in the path reaches the access logs of anything in front of the server. Use lookupPasswordResetLink.",
         "operationId": "lookupPasswordReset",
         "parameters": [
           {
@@ -198312,6 +199103,16 @@
             },
             "description": "Not Acceptable"
           },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -198358,11 +199159,17 @@
           "auth"
         ],
         "x-silo-class": "public",
+        "x-silo-deprecation": {
+          "at": "2026-11-13T00:00:00Z",
+          "link": "https://siloserver.org/docs/api/"
+        },
         "x-silo-service-backed": true
       }
     },
     "/api/v2/password-resets/{token}/complete": {
       "post": {
+        "deprecated": true,
+        "description": "Deprecated: a token in the path reaches the access logs of anything in front of the server. Use completePasswordResetLink.",
         "operationId": "completePasswordReset",
         "parameters": [
           {
@@ -198481,6 +199288,16 @@
             },
             "description": "Request Timeout"
           },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -198547,6 +199364,10 @@
           "auth"
         ],
         "x-silo-class": "public",
+        "x-silo-deprecation": {
+          "at": "2026-11-13T00:00:00Z",
+          "link": "https://siloserver.org/docs/api/"
+        },
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
