@@ -490,6 +490,7 @@
 ./internal/userstore/pgstore TestPostgresJellycompatPlayedByDate
 ./internal/userstore/pgstore TestPostgresPersonalListPage
 ./internal/userstore/pgstore TestPostgresReplaceCollectionItemsWritesOnlyTheDifference
+./internal/userstore/pgstore TestPostgresRemoveHistoryItemsDeletesTheirPlaysDB
 ./internal/userstore/pgstore TestPostgresReplaceCollectionItemsWaitsOutADelete
 ./internal/userstore/pgstore TestPostgresItemUserFlagsMatchesPerTableReads
 
