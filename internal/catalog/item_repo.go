@@ -3009,7 +3009,7 @@ func syncEditedProviderIDTx(ctx context.Context, tx pgx.Tx, contentID, provider,
 		WHERE mi.content_id = $1
 		  AND NOT EXISTS (
 			SELECT 1 FROM media_item_provider_ids held
-			WHERE lower(held.provider) = $2 AND held.provider_id = $3
+			WHERE held.provider = $2 AND held.provider_id = $3
 			  AND held.item_type = mi.type AND held.content_id <> mi.content_id
 		  )
 		ON CONFLICT (content_id, provider) DO UPDATE
