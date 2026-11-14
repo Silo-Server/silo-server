@@ -238,3 +238,85 @@ func TestFinalizeVariantsReadsWholeGroupFoundOutsideTheScopeDB(t *testing.T) {
 		t.Fatalf("disc 2 part total = %d, want 2", got)
 	}
 }
+
+// A scope is finalized a page at a time. Every page is visited, and a
+// multipart group whose parts land on different pages still gets its full
+// total. The second movie's files all sort after the first's, so they are
+// settled only if the pages after the first movie's discs are read; its two
+// discs straddle a page boundary at page size 2.
+func TestFinalizeVariantsPagesTheScopeDB(t *testing.T) {
+	for _, pageSize := range []int{1, 2, 3} {
+		t.Run(fmt.Sprintf("page size %d", pageSize), func(t *testing.T) {
+			fx := seedVariantContractMovie(t, fmt.Sprintf("paged-%d", pageSize))
+			previous := variantFinalizePageSize
+			variantFinalizePageSize = pageSize
+			t.Cleanup(func() { variantFinalizePageSize = previous })
+
+			ctx := context.Background()
+			laterID := fx.movieID + "-later"
+			t.Cleanup(func() {
+				_, _ = fx.pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, laterID)
+			})
+			if _, err := fx.pool.Exec(ctx, `
+				INSERT INTO media_items (content_id, type, title, status, genres)
+				VALUES ($1, 'movie', 'Later', 'matched', '{}'::text[])`, laterID); err != nil {
+				t.Fatalf("seed second movie: %v", err)
+			}
+
+			// In path order: the first movie's plain file, its three discs
+			// and a plain file stored with a stale edition, then the second
+			// movie's two discs and its stale plain file.
+			files := []struct {
+				path, owner string
+				total       int
+				stale       bool
+			}{
+				{"Discs (2010)/Discs.2010.1080p.mkv", fx.movieID, 0, false},
+				{"Discs (2010)/Discs.2010.CD1.mkv", fx.movieID, 3, false},
+				{"Discs (2010)/Discs.2010.CD2.mkv", fx.movieID, 3, false},
+				{"Discs (2010)/Discs.2010.CD3.mkv", fx.movieID, 3, false},
+				{"Discs (2010)/Discs.2010.mkv", fx.movieID, 0, true},
+				{"Later (2011)/Later.2011.CD1.mkv", laterID, 2, false},
+				{"Later (2011)/Later.2011.CD2.mkv", laterID, 2, false},
+				{"Later (2011)/Later.2011.mkv", laterID, 0, true},
+			}
+			ids := make([]int, len(files))
+			for i, file := range files {
+				if err := fx.pool.QueryRow(ctx, `
+					INSERT INTO media_files (content_id, media_folder_id, file_path, file_size)
+					VALUES ($1, $2, $3, 1024) RETURNING id`, file.owner, fx.folderID, fx.root+"/"+file.path).Scan(&ids[i]); err != nil {
+					t.Fatalf("seed %s: %v", file.path, err)
+				}
+				if file.stale {
+					if _, err := fx.pool.Exec(ctx, `
+						UPDATE media_files SET edition_key = 'stale', edition_source = 'heuristic_file'
+						WHERE id = $1`, ids[i]); err != nil {
+						t.Fatalf("seed stale edition: %v", err)
+					}
+				}
+			}
+			check := func(t *testing.T, i int) {
+				t.Helper()
+				var editionKey string
+				var total int
+				if err := fx.pool.QueryRow(ctx, `
+					SELECT COALESCE(edition_key, ''), COALESCE(presentation_part_total, 0)
+					FROM media_files WHERE id = $1`, ids[i]).Scan(&editionKey, &total); err != nil {
+					t.Fatalf("load %s: %v", files[i].path, err)
+				}
+				if total != files[i].total || editionKey != "" {
+					t.Fatalf("%s: part total = %d, edition = %q, want total %d and no edition", files[i].path, total, editionKey, files[i].total)
+				}
+			}
+
+			// A scope that is one file takes the same paged path.
+			fx.finalize(t, fx.root+"/"+files[3].path)
+			check(t, 3)
+
+			fx.finalize(t, fx.root)
+			for i := range files {
+				check(t, i)
+			}
+		})
+	}
+}

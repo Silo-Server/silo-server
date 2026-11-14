@@ -17,6 +17,13 @@ import (
 // other files of the same owner, so files outside the scope are loaded only as
 // variantSiblingOwners and variantOwnersToWiden choose. Other out-of-scope
 // files are finalized when their own scope runs.
+//
+// The scope is walked a page at a time in path order, so memory follows a
+// page, and the owners its files belong to, rather than the library. A page
+// needs no help from its neighbors: the sibling lookups read by owner across
+// the whole folder, so a multipart group split over pages is read in full, and
+// written, by the first page that holds one of its parts. Later pages skip the
+// files of owners an earlier page read in full, which are already settled.
 func (s *Scanner) FinalizeVariantsByPathPrefix(
 	ctx context.Context,
 	folder *models.MediaFolder,
@@ -26,24 +33,85 @@ func (s *Scanner) FinalizeVariantsByPathPrefix(
 		return nil
 	}
 
-	scopedFiles, err := s.fileRepo.ListVariantFilesByPathPrefix(ctx, folder.ID, pathPrefix)
-	if err != nil {
-		return fmt.Errorf("loading files for variant finalization: %w", err)
+	limit := variantFinalizePageSize
+	after := ""
+	settled := make(map[string]struct{})
+	for {
+		scopedFiles, err := s.fileRepo.ListVariantFilesByPathPrefix(ctx, folder.ID, pathPrefix, after, limit)
+		if err != nil {
+			return fmt.Errorf("loading files for variant finalization: %w", err)
+		}
+		if len(scopedFiles) == 0 {
+			return nil
+		}
+		for i := range scopedFiles {
+			after = max(after, scopedFiles[i].FilePath)
+		}
+		if err := s.finalizeVariantPage(ctx, folder, pathPrefix, unsettledVariantFiles(scopedFiles, settled), settled); err != nil {
+			return err
+		}
+		if len(scopedFiles) < limit {
+			return nil
+		}
 	}
+}
+
+// variantFinalizePageSize is the number of in-scope files one finalization
+// step loads, parses and writes. It is a variable so tests can split a scope
+// across pages.
+var variantFinalizePageSize = 2000
+
+// variantOwnerKey names a file's owner for the settled set: its episode, or
+// its content when it has no episode link.
+func variantOwnerKey(file *VariantFile) string {
+	if file.EpisodeID != "" {
+		return "episode:" + file.EpisodeID
+	}
+	if file.ContentID != "" {
+		return "content:" + file.ContentID
+	}
+	return ""
+}
+
+// unsettledVariantFiles returns the files of a page whose owner no earlier
+// page read in full.
+func unsettledVariantFiles(files []VariantFile, settled map[string]struct{}) []VariantFile {
+	if len(settled) == 0 {
+		return files
+	}
+	kept := files[:0:0]
+	for i := range files {
+		if _, ok := settled[variantOwnerKey(&files[i])]; !ok {
+			kept = append(kept, files[i])
+		}
+	}
+	return kept
+}
+
+// finalizeVariantPage finalizes one page of a scope and adds the owners it
+// read in full to settled: every file of those owners has been written.
+func (s *Scanner) finalizeVariantPage(
+	ctx context.Context,
+	folder *models.MediaFolder,
+	pathPrefix string,
+	scopedFiles []VariantFile,
+	settled map[string]struct{},
+) error {
 	if len(scopedFiles) == 0 {
 		return nil
 	}
-
-	candidates, err := s.variantFinalizationCandidates(ctx, folder, scopedFiles)
+	candidates, wholeOwners, err := s.variantFinalizationCandidates(ctx, folder, scopedFiles)
 	if err != nil {
 		return err
 	}
 	updates := variantMetadataUpdates(candidates)
-	if len(updates) == 0 {
-		return nil
+	if len(updates) > 0 {
+		if _, err := s.fileRepo.UpdateVariantMetadata(ctx, folder.ID, updates); err != nil {
+			return fmt.Errorf("finalizing variant metadata for %d files under %s: %w", len(updates), pathPrefix, err)
+		}
 	}
-	if _, err := s.fileRepo.UpdateVariantMetadata(ctx, folder.ID, updates); err != nil {
-		return fmt.Errorf("finalizing variant metadata for %d files under %s: %w", len(updates), pathPrefix, err)
+	for _, owner := range wholeOwners {
+		settled[owner] = struct{}{}
 	}
 	return nil
 }
@@ -72,11 +140,14 @@ func newVariantCandidates(files []VariantFile, folder *models.MediaFolder) []var
 	return candidates
 }
 
+// variantFinalizationCandidates returns the candidates of a page with the
+// sibling files they need, and the owners it read in full, keyed as
+// variantOwnerKey keys them.
 func (s *Scanner) variantFinalizationCandidates(
 	ctx context.Context,
 	folder *models.MediaFolder,
 	scopedFiles []VariantFile,
-) ([]variantCandidate, error) {
+) ([]variantCandidate, []string, error) {
 	candidates := newVariantCandidates(scopedFiles, folder)
 	loaded := make(map[int]struct{}, len(candidates))
 	for _, candidate := range candidates {
@@ -86,16 +157,28 @@ func (s *Scanner) variantFinalizationCandidates(
 	episodes, contents := variantSiblingOwners(candidates)
 	found, err := s.loadVariantCandidates(ctx, folder, episodes, contents, loaded)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	candidates = append(candidates, found...)
+	wholeOwners := wholeVariantOwners(nil, episodes, contents)
 
 	episodes, contents = variantOwnersToWiden(found, episodes, contents)
 	more, err := s.loadVariantCandidates(ctx, folder, episodes, contents, loaded)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return append(candidates, more...), nil
+	return append(candidates, more...), wholeVariantOwners(wholeOwners, episodes, contents), nil
+}
+
+// wholeVariantOwners appends the owners read in full to keys.
+func wholeVariantOwners(keys []string, episodes, contents VariantOwners) []string {
+	for id := range episodes.Whole {
+		keys = append(keys, "episode:"+id)
+	}
+	for id := range contents.Whole {
+		keys = append(keys, "content:"+id)
+	}
+	return keys
 }
 
 // loadVariantCandidates reads the files the owners name and returns those not
