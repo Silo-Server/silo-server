@@ -31,6 +31,7 @@ func scanWatchProgress(scanner interface {
 		return nil, err
 	}
 	wp.UpdatedAt = timeToString(updatedAt)
+	wp.UpdatedAtTime = updatedAt.UTC()
 	return &wp, nil
 }
 

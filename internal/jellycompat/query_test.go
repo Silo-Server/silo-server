@@ -118,6 +118,45 @@ func TestParseItemsQuerySort(t *testing.T) {
 	}
 }
 
+// A Filters=IsPlayed request sorted by a catalog field goes to the catalog
+// browse when the browse can return every matching type; DatePlayed, no
+// SortBy, keys Silo does not map, keys with no catalog order, and lists that
+// would lose their episodes keep the played list (#2978).
+func TestPlayedListSortRouting(t *testing.T) {
+	withEpisodes := &ItemsHandler{episodeRepo: &boundedEpisodeContractRepo{}}
+	withoutEpisodes := &ItemsHandler{}
+	for _, tc := range []struct {
+		params      string
+		wantCatalog bool
+		wantKey     string
+	}{
+		{"IncludeItemTypes=Movie&Filters=IsPlayed&SortBy=SortName&SortOrder=Descending", true, "sortname"},
+		{"IncludeItemTypes=Movie&Filters=IsPlayed&SortBy=DateCreated", true, "datecreated"},
+		{"IncludeItemTypes=Episode&Filters=IsPlayed&SortBy=SortName", true, "sortname"},
+		{"IncludeItemTypes=Movie,Episode&Filters=IsPlayed&SortBy=SortName", false, "sortname"},
+		{"Filters=IsPlayed&SortBy=SortName", false, "sortname"},
+		{"IncludeItemTypes=Movie&Filters=IsPlayed&SortBy=IndexNumber", false, "indexnumber"},
+		{"IncludeItemTypes=Episode&Filters=IsPlayed&SortBy=ParentIndexNumber,IndexNumber", true, "parentindexnumber"},
+		{"IncludeItemTypes=Movie&Filters=IsPlayed&SortBy=DatePlayed&SortOrder=Descending", false, "dateplayed"},
+		{"IncludeItemTypes=Movie&Filters=IsPlayed&SortBy=PlayCount,DatePlayed", false, "dateplayed"},
+		{"IncludeItemTypes=Movie&Filters=IsPlayed", false, ""},
+		{"IncludeItemTypes=Movie&Filters=IsPlayed&SortBy=PlayCount", false, ""},
+		{"IncludeItemTypes=Movie&MediaTypes=Audio&Filters=IsPlayed&SortBy=SortName", false, "sortname"},
+		{"IncludeItemTypes=Movie&IsPlayed=false&SortBy=SortName", false, "sortname"},
+		{"IncludeItemTypes=Movie&SortBy=SortName", false, "sortname"},
+	} {
+		query := parseItemsQuery(httptest.NewRequest("GET", "/Items?Recursive=true&"+tc.params, nil), NewResourceIDCodec())
+		if got := withEpisodes.browsesPlayedListByCatalog(query); got != tc.wantCatalog || query.sortByKey != tc.wantKey {
+			t.Errorf("%s: catalog sort = %v, key %q; want %v, %q", tc.params, got, query.sortByKey, tc.wantCatalog, tc.wantKey)
+		}
+		// Without an episode browse, an Episode-only list keeps the played list.
+		wantWithout := tc.wantCatalog && !query.episodeOnly()
+		if got := withoutEpisodes.browsesPlayedListByCatalog(query); got != wantWithout {
+			t.Errorf("%s without an episode browse: catalog sort = %v, want %v", tc.params, got, wantWithout)
+		}
+	}
+}
+
 func TestParseContentIDParam(t *testing.T) {
 	got := parseContentIDParam(" movie-1, movie-2, movie-1 ,, ")
 	want := []string{"movie-1", "movie-2"}

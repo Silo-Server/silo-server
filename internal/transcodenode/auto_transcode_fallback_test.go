@@ -19,6 +19,13 @@ import (
 // playable manifest and keeps running. Every transcode invocation is logged.
 func writeNodeFFmpegFailingOn(t *testing.T, failPattern string) (ffmpegPath, logPath string) {
 	t.Helper()
+	return writeNodeFFmpegFailingWith(t, failPattern, "intentional hardware failure")
+}
+
+// writeNodeFFmpegFailingWith is writeNodeFFmpegFailingOn with the stderr line
+// the failing attempt prints.
+func writeNodeFFmpegFailingWith(t *testing.T, failPattern, stderr string) (ffmpegPath, logPath string) {
+	t.Helper()
 	dir := t.TempDir()
 	ffmpegPath = filepath.Join(dir, "fake-ffmpeg.sh")
 	logPath = filepath.Join(dir, "invocations.log")
@@ -26,7 +33,7 @@ func writeNodeFFmpegFailingOn(t *testing.T, failPattern string) (ffmpegPath, log
 		"last=\"\"\n" +
 		"for arg in \"$@\"; do last=\"$arg\"; done\n" +
 		"case \"$last\" in *.m3u8) printf '%s\\n' \"$*\" >> \"" + logPath + "\" ;; esac\n" +
-		"case \"$*\" in *'" + failPattern + "'*) echo 'intentional hardware failure' >&2; exit 1 ;; esac\n" +
+		"case \"$*\" in *'" + failPattern + "'*) echo '" + stderr + "' >&2; exit 1 ;; esac\n" +
 		"case \"$last\" in\n" +
 		"  *.m3u8) out=\"$(dirname \"$last\")\"; mkdir -p \"$out\"; " +
 		"printf x > \"$out/init.mp4\"; printf x > \"$out/seg_0.m4s\"; " +
@@ -192,6 +199,87 @@ func TestSpawnReconstructAutoKeepsGPUEncodeWithCPUDecode(t *testing.T) {
 	}
 	if invocations := readNodeFFmpegInvocations(t, logPath); len(invocations) != 2 {
 		t.Fatalf("invocations = %q, want full hardware then CPU decode", invocations)
+	}
+}
+
+// A recipe card minted where the GPU decodes the source can be rebuilt on a
+// node whose decoder rejects it, as when a transcode moves off a dead node.
+// Under an explicit backend the rebuild must decode on the CPU instead of
+// registering the exited process.
+func TestSpawnReconstructExplicitNVENCRetriesRejectedDecodeOnCPU(t *testing.T) {
+	server := newTestServer(t)
+	server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
+	ffmpegPath, logPath := writeNodeFFmpegFailingWith(t, "-hwaccel cuda", "[hevc @ 0x1] Hardware is lacking required capabilities")
+	cfg := server.watcher.Config()
+	cfg.Playback.FFmpegPath = ffmpegPath
+	cfg.Playback.HWAccel = "nvenc"
+
+	const sessionID = "nvenc-reconstruct-1"
+	card := playback.NewRecipeCard(7, "profile-1", 42, "", playback.TranscodeOpts{
+		SessionID: sessionID, InputPath: "/media/movie.mkv",
+		TargetCodecVideo: "h264", TargetCodecAudio: "aac", TargetResolution: "720p", TargetBitrateKbps: 2000,
+		SegmentDuration: 2,
+	})
+	session, err := server.spawnReconstruct(httptest.NewRequest(http.MethodGet, "/", nil), sessionID, -1, card)
+	if err != nil || session == nil {
+		t.Fatalf("spawnReconstruct = %v, %v; want the CPU-decode session", session, err)
+	}
+	defer func() { _ = session.Close() }()
+	if opts := session.Opts(); opts.HWAccel != "nvenc" || !opts.SoftwareVideoDecode {
+		t.Fatalf("reconstructed = %s software decode %v, want NVENC with CPU decode", opts.HWAccel, opts.SoftwareVideoDecode)
+	}
+	invocations := readNodeFFmpegInvocations(t, logPath)
+	if len(invocations) != 2 || strings.Contains(invocations[1], "-hwaccel cuda") {
+		t.Fatalf("invocations = %q, want GPU decode then CPU decode", invocations)
+	}
+}
+
+// A node rebuild is shared by every request waiting on it, so once it is
+// admitted the request that triggered it can end without failing the others.
+// StartTranscode returns an ended request's error before FFmpeg runs for an
+// HEVC target, among other recipes.
+func TestSpawnReconstructOutlivesTriggeringRequest(t *testing.T) {
+	for _, test := range []struct{ name, hwAccel string }{
+		// StartupRetryHWAccel changes VideoToolbox, so the node starts it directly.
+		{name: "backend with a software retry", hwAccel: "videotoolbox"},
+		{name: "start once", hwAccel: playback.HWAccelNone},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := newTestServer(t)
+			server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
+			fakePath, _ := writeNodeFFmpegFailingOn(t, "no attempt fails")
+			// Answer the capability probes, then hand transcodes to the fake.
+			useFakeFFmpeg(t, server, "#!/bin/sh\n"+
+				"case \"$*\" in\n"+
+				"  *-hwaccels*) echo videotoolbox; exit 0 ;;\n"+
+				"  *-encoders*) echo ' V..... h264_videotoolbox x'; exit 0 ;;\n"+
+				"  *'-f null'*) exit 0 ;;\n"+
+				"esac\n"+
+				"exec \""+fakePath+"\" \"$@\"\n")
+			server.watcher.Config().Playback.HWAccel = test.hwAccel
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			// Called after admission, right before the start: the request ends here.
+			server.autoTranscodePipelineFn = func(stepCtx context.Context, opts playback.TranscodeOpts) *playback.AutoTranscodePipeline {
+				cancel()
+				if stepCtx.Err() != nil {
+					t.Error("fallback order resolved on the ended request's context")
+				}
+				return playback.NewAutoTranscodePipeline(stepCtx, opts)
+			}
+
+			const sessionID = "outlives-request-1"
+			card := playback.NewRecipeCard(7, "profile-1", 42, "", playback.TranscodeOpts{
+				SessionID: sessionID, InputPath: "/media/movie.mkv",
+				TargetCodecVideo: "hevc", TargetCodecAudio: "aac", TargetResolution: "720p", SegmentDuration: 2,
+			})
+			request := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(ctx)
+			session, err := server.spawnReconstruct(request, sessionID, -1, card)
+			if err != nil || session == nil {
+				t.Fatalf("spawnReconstruct = %v, %v; want the session the other requests wait for", session, err)
+			}
+			_ = session.Close()
+		})
 	}
 }
 

@@ -163,7 +163,7 @@ func TestApplePushDisplayAuthAnswers503WhenTheSessionCannotBeChecked(t *testing.
 		reached = true
 		w.WriteHeader(http.StatusNoContent)
 	})
-	h := am.RequireApplePushDisplayAuth(am.RequireAuth, nil)(next)
+	h := am.RequireApplePushDisplayAuth(am.RequireAuth, nil, nil)(next)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/notifications/apple-push/display", nil)
 	req.Header.Set("Authorization", "Bearer "+display)
 	rec := newReasonWriter()

@@ -476,7 +476,13 @@ func (s *Service) ResolveOAuthLogin(ctx context.Context, in OAuthLoginInput) (*m
 	}
 	// A linking flow (LinkingUserID > 0) links the identity to that account
 	// or refuses one linked elsewhere; see AccountResolver.
-	return provider.CompleteOAuth(ctx, in.Response, in.LinkingUserID)
+	return provider.CompleteOAuth(ctx, in.Response, in.LinkingUserID, in.AnswerFence)
+}
+
+// ProviderAnswerFence takes the answer fence of an OAuth sign-in, which the
+// handler passes back in OAuthLoginInput.AnswerFence (takeAnswerFence).
+func (s *Service) ProviderAnswerFence(ctx context.Context) (int64, error) {
+	return takeAnswerFence(ctx, s.sessions.pool)
 }
 
 // OpenOAuthSession opens the login session of a completion code being
@@ -509,7 +515,7 @@ type IdentitySession struct {
 // token pair. The account is locked and read again, so one disabled since
 // the provider answered is refused and account changes serialize with the
 // session's creation; the identity and its enabled installation are locked
-// too. A network identity's primary-provider refusal is read again under the
+// too, and an identity a re-check has refused since is not signed in. A network identity's primary-provider refusal is read again under the
 // account lock, which a re-check that refuses the account also holds.
 func (s *Service) OpenIdentitySession(ctx context.Context, db OAuthSessionDB, c IdentitySession) (*TokenPair, error) {
 	if db == nil {
@@ -597,15 +603,22 @@ func lockOAuthIdentity(ctx context.Context, db OAuthSessionDB, userID int, ident
 	if !enabled {
 		return 0, ErrProviderUnavailable
 	}
-	var lockedIdentityID int64
-	err = db.QueryRow(ctx, `SELECT id FROM plugin_auth_identities
+	// The provider answered active when the sign-in resolved. A refusal on
+	// record now was committed by a re-check since then, under the account
+	// lock held here, and it ended the account's sessions: this one must not
+	// open after it.
+	var refused bool
+	err = db.QueryRow(ctx, `SELECT last_check_status = ANY($4) OR pending_refusal = ANY($4) FROM plugin_auth_identities
 		WHERE id = $1 AND user_id = $2 AND plugin_installation_id = $3 FOR UPDATE`,
-		identityID, userID, installationID).Scan(&lockedIdentityID)
+		identityID, userID, installationID, refusalStatuses).Scan(&refused)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, ErrNotPermitted
 	}
 	if err != nil {
 		return 0, fmt.Errorf("lock oauth identity: %w", err)
+	}
+	if refused {
+		return 0, ErrNotPermitted
 	}
 	return installationID, nil
 }
@@ -623,7 +636,7 @@ func (s *Service) LinkOAuthIdentity(ctx context.Context, in OAuthLoginInput) (*m
 	if provider == nil {
 		return nil, ErrProviderUnavailable
 	}
-	user, _, err := provider.CompleteOAuth(ctx, in.Response, in.LinkingUserID)
+	user, _, err := provider.CompleteOAuth(ctx, in.Response, in.LinkingUserID, 0)
 	return user, err
 }
 

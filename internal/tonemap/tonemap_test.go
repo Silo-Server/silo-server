@@ -369,8 +369,9 @@ func TestSoftwareAndIntelToneMapsPinTheSourcePeak(t *testing.T) {
 }
 
 // TestDolbyVisionGraphsApplyTheRPU pins RPU application to the Dolby Vision
-// kind: standard bases keep their validated graphs, and only filters that can
-// apply an RPU may carry the kind.
+// kind: a standard base converts as declared on every executor, so the GPU
+// filters that would otherwise reshape it turn the RPU off, and only filters
+// that can apply an RPU may carry the kind.
 func TestDolbyVisionGraphsApplyTheRPU(t *testing.T) {
 	for name, filter := range map[string]string{
 		"software": SoftwareFilter(SourceDolbyVision, SoftwareFilterBT2390),
@@ -381,16 +382,16 @@ func TestDolbyVisionGraphsApplyTheRPU(t *testing.T) {
 			t.Errorf("%s Dolby Vision filter %q does not apply the RPU", name, filter)
 		}
 	}
-	for name, filter := range map[string]string{
-		"software": SoftwareFilter(SourcePQ, SoftwareFilterBT2390),
-		"qsv":      IntelFilter(SourcePQ, 0),
-	} {
-		if strings.Contains(filter, "apply_dovi") {
-			t.Errorf("%s PQ filter %q changed its Dolby Vision handling", name, filter)
-		}
+	if got := SoftwareFilter(SourcePQ, SoftwareFilterBT2390); strings.Contains(got, "apply_dovi") {
+		t.Errorf("software PQ filter %q changed its Dolby Vision handling", got)
 	}
-	if got := CUDAFilter(SourcePQ); !strings.Contains(got, "apply_dovi=0") {
-		t.Errorf("CUDA PQ filter %q must keep Dolby Vision processing off", got)
+	for name, filter := range map[string]string{
+		"intel": IntelFilter(SourcePQ, 0),
+		"cuda":  CUDAFilter(SourcePQ),
+	} {
+		if !strings.Contains(filter, "apply_dovi=0") {
+			t.Errorf("%s PQ filter %q must keep Dolby Vision processing off", name, filter)
+		}
 	}
 	for _, filter := range []string{SoftwareFilterBT2390, HardwareFilterOpenCL, HardwareFilterCUDA} {
 		if !FilterAppliesDolbyVision(filter) {

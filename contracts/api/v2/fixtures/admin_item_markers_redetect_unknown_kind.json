@@ -3,7 +3,7 @@
   "title": "Validation failed",
   "status": 422,
   "detail": "expected value to be one of \"intro, credits, all\"",
-  "instance": "urn:silo:request:00000000000000000000024d",
+  "instance": "urn:silo:request:00000000000000000000024e",
   "errors": [
     {
       "location": "body.kind",

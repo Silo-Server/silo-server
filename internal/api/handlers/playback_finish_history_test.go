@@ -14,6 +14,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/worker"
 )
 
 type finishHistoryReplica struct {
@@ -531,6 +532,35 @@ func (s *liveRowAdminStore) LiveSession(_ context.Context, sessionID string) (*p
 	return &live, nil
 }
 
+// A session rebuilt from a stream token, whose card carries no client, takes
+// back the client its live row kept, never one from another account's row.
+func TestReconstructedSessionRestoresItsClient(t *testing.T) {
+	for name, tc := range map[string]struct {
+		rowOwner               int
+		wantClient, wantDevice string
+	}{
+		"own row":               {rowOwner: 7, wantClient: "Silo Android", wantDevice: "device-1"},
+		"another account's row": {rowOwner: 8},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+			h.AdminStore = &liveRowAdminStore{live: &playback.Session{
+				ID: "token-session", UserID: tc.rowOwner, ProfileID: "profile",
+				ClientName: "Silo Android", DeviceID: "device-1",
+			}}
+			card := playback.NewDirectRecipeCard("token-session", 7, "profile", 9)
+
+			got := h.tm.ReconstructSession(t.Context(), card.SessionID, 7, card)
+			if got == nil {
+				t.Fatal("the token's recipe was not reconstructed")
+			}
+			if got.ClientName != tc.wantClient || got.DeviceID != tc.wantDevice {
+				t.Fatalf("client = %q, device = %q, want %q, %q", got.ClientName, got.DeviceID, tc.wantClient, tc.wantDevice)
+			}
+		})
+	}
+}
+
 // TestEveryEndRecordsTheAdminLog covers ends that wrote no admin history: an
 // abort, a Jellyfin method switch, and a stop that reached a replica without
 // the session's copy. Each records one row with its reason; a replaced play
@@ -615,8 +645,9 @@ func TestEveryEndRecordsTheAdminLog(t *testing.T) {
 	}
 }
 
-// TestLiveSessionReadsTheSyncedRowDB pins the columns a detached end reads
-// from the shared live row, including a row that never recorded a start.
+// TestLiveSessionReadsTheSyncedRowDB pins the columns a detached end and a
+// rebuilt session read from the shared live row, including a row that never
+// recorded a start, and from the start row once no live row is left.
 func TestLiveSessionReadsTheSyncedRowDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -666,6 +697,28 @@ func TestLiveSessionReadsTheSyncedRowDB(t *testing.T) {
 	}
 	if _, err = store.LiveSession(ctx, "missing-"+suffix); !errors.Is(err, playback.ErrSessionNotFound) {
 		t.Fatalf("missing row: err = %v, want ErrSessionNotFound", err)
+	}
+
+	// Once no live row is left, as after a graceful restart, the session is
+	// read from the row it stored when it started.
+	startOnly := uuid.NewString()
+	row, err := worker.SessionSyncRowJSON(worker.SessionSync{
+		SessionID: startOnly, UserID: account, ProfileID: "p-1", ClientName: "Silo Android TV",
+		ClientUserAgent: "ktor-client", DeviceID: "device-1", DevicePlatform: "android-tv",
+	}, "node-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := store.StartLifecycle(ctx, LifecycleStart{
+		SessionID: startOnly, Frontend: LifecycleFrontendNative, UserID: account, ProfileID: "p-1",
+		MediaFileID: 7, RequestedMediaFileID: 7, StartedAt: started, LiveRow: row,
+	}); err != nil || !ok {
+		t.Fatalf("start lifecycle: ok=%v err=%v", ok, err)
+	}
+	if live, err = store.LiveSession(ctx, startOnly); err != nil || live.UserID != account || live.ProfileID != "p-1" ||
+		live.ClientName != "Silo Android TV" || live.ClientUserAgent != "ktor-client" ||
+		live.DeviceID != "device-1" || live.DevicePlatform != "android-tv" {
+		t.Fatalf("start row = %+v, %v; want the client the session started on", live, err)
 	}
 }
 

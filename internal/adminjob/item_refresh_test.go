@@ -2,18 +2,25 @@ package adminjob
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/Silo-Server/silo-server/internal/cache"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/libraryingest"
+	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scanbatch"
 	"github.com/Silo-Server/silo-server/internal/scanner"
@@ -782,4 +789,193 @@ func TestItemRefreshExecutorCompleteRefreshRebuildsAndMapsEpisodeTarget(t *testi
 	if got, want := result.DetailContentID, "new-episode-id"; got != want {
 		t.Fatalf("result detail_content_id = %q, want %q", got, want)
 	}
+}
+
+// TestCompleteItemRefreshKeepsPodcastIDsDB covers issue #3405: a complete
+// metadata refresh of a podcast show, or of one of its episodes, keeps the
+// show's and episodes' content IDs, which favorites and progress refer to.
+func TestCompleteItemRefreshKeepsPodcastIDsDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	for _, target := range []string{"show", "episode"} {
+		t.Run(target, func(t *testing.T) {
+			f := newPodcastRefreshFixture(t, pool)
+			showID, episodeIDs := f.catalogIDs(t)
+			requestedID := showID
+			if target == "episode" {
+				requestedID = episodeIDs[0]
+			}
+
+			resolver := NewItemRefreshResolver(
+				catalog.NewItemRepository(pool),
+				catalog.NewSeasonRepository(pool),
+				catalog.NewEpisodeRepository(pool),
+				catalog.NewFolderRepository(pool),
+				f.fileRepo,
+			)
+			req, err := resolver.ResolveWithMode(ctx, requestedID, ItemRefreshModeComplete)
+			if err != nil {
+				t.Fatalf("ResolveWithMode: %v", err)
+			}
+			result, err := f.executor.Execute(ctx, *req, nil)
+			if err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+
+			gotShowID, gotEpisodeIDs := f.catalogIDs(t)
+			if gotShowID != showID || gotEpisodeIDs[0] != episodeIDs[0] || gotEpisodeIDs[1] != episodeIDs[1] {
+				t.Fatalf("after complete refresh: show=%s episodes=%v, want show=%s episodes=%v",
+					gotShowID, gotEpisodeIDs, showID, episodeIDs)
+			}
+			if result.RefreshContentID != requestedID || result.DetailContentID != requestedID {
+				t.Fatalf("result refresh=%s detail=%s, want both %s", result.RefreshContentID, result.DetailContentID, requestedID)
+			}
+		})
+	}
+}
+
+type podcastRefreshFixture struct {
+	pool     *pgxpool.Pool
+	fileRepo *scanner.FileRepository
+	executor *ItemRefreshExecutor
+	folderID int
+	episodes []string
+}
+
+// newPodcastRefreshFixture scans a podcast library holding one show with two
+// episodes. A fake ffprobe prints each episode file, which holds the ffprobe
+// JSON for its own tags.
+func newPodcastRefreshFixture(t *testing.T, pool *pgxpool.Pool) *podcastRefreshFixture {
+	t.Helper()
+	ctx := context.Background()
+	base := t.TempDir()
+	root := filepath.Join(base, "podcasts")
+	showDir := filepath.Join(root, "Refresh Show")
+	if err := os.MkdirAll(showDir, 0o755); err != nil {
+		t.Fatalf("mkdir show: %v", err)
+	}
+	ffprobePath := filepath.Join(base, "ffprobe")
+	// Hold the fork lock so a concurrent exec cannot inherit the open file
+	// and make running the tool fail with ETXTBSY.
+	syscall.ForkLock.Lock()
+	err := os.WriteFile(ffprobePath, []byte("#!/bin/sh\nfor last; do :; done\ncat \"$last\"\n"), 0o755)
+	syscall.ForkLock.Unlock()
+	if err != nil {
+		t.Fatalf("write fake ffprobe: %v", err)
+	}
+
+	var episodes []string
+	for i, title := range []string{"Episode One", "Episode Two"} {
+		probe, err := json.Marshal(map[string]any{
+			"format": map[string]any{
+				"format_name": "mp3",
+				"duration":    "61",
+				"tags":        map[string]string{"album": "Refresh Show", "title": title, "track": []string{"1", "2"}[i]},
+			},
+			"streams": []map[string]any{{"index": 0, "codec_type": "audio", "codec_name": "mp3", "channels": 2}},
+		})
+		if err != nil {
+			t.Fatalf("marshal probe: %v", err)
+		}
+		path := filepath.Join(showDir, []string{"ep01.mp3", "ep02.mp3"}[i])
+		if err := os.WriteFile(path, probe, 0o644); err != nil {
+			t.Fatalf("write episode: %v", err)
+		}
+		episodes = append(episodes, path)
+	}
+
+	folder := &models.MediaFolder{Type: "podcasts", Name: "Podcast refresh test", Enabled: true, Paths: []string{root}}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO media_folders (type, name, enabled) VALUES ($1, $2, true) RETURNING id`,
+		folder.Type, folder.Name,
+	).Scan(&folder.ID); err != nil {
+		t.Fatalf("seed folder: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `
+			DELETE FROM media_items WHERE content_id IN (
+				SELECT content_id FROM media_files WHERE media_folder_id = $1 AND content_id IS NOT NULL
+				UNION
+				SELECT content_id FROM media_item_libraries WHERE media_folder_id = $1
+			)`, folder.ID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_files WHERE media_folder_id = $1`, folder.ID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_folder_paths WHERE media_folder_id = $1`, folder.ID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, folder.ID)
+	})
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO media_folder_paths (media_folder_id, path) VALUES ($1, $2)`, folder.ID, root,
+	); err != nil {
+		t.Fatalf("seed folder path: %v", err)
+	}
+
+	fileRepo := scanner.NewFileRepository(pool)
+	scan := scanner.NewScanner(fileRepo, ffprobePath, nil, 2, false, 0)
+	if _, err := scan.ScanFolder(ctx, folder); err != nil {
+		t.Fatalf("ScanFolder: %v", err)
+	}
+	folders := catalog.NewFolderRepository(pool)
+	skippedRoots := metadata.NewSkippedRootRepository(pool)
+	executor := NewItemRefreshExecutor(
+		folders,
+		fileRepo,
+		catalog.NewRootClaimRepository(pool),
+		catalog.NewGroupClaimRepository(pool),
+		skippedRoots,
+		catalog.NewSeasonRepository(pool),
+		catalog.NewEpisodeRepository(pool),
+		libraryingest.NewExecutor(scan, podcastRefreshNoMatcher{}, folders, skippedRoots, nil, nil),
+		&itemRefreshTestScanRuns{},
+		&itemRefreshTestRefresher{},
+		nil,
+		nil,
+	)
+	executor.evictRails = nil
+	return &podcastRefreshFixture{pool: pool, fileRepo: fileRepo, executor: executor, folderID: folder.ID, episodes: episodes}
+}
+
+// catalogIDs returns the show ID and the episode ID of each episode file.
+func (f *podcastRefreshFixture) catalogIDs(t *testing.T) (string, []string) {
+	t.Helper()
+	var showID string
+	episodeIDs := make([]string, 0, len(f.episodes))
+	for _, path := range f.episodes {
+		var contentID, episodeID string
+		if err := f.pool.QueryRow(context.Background(), `
+			SELECT COALESCE(content_id, ''), COALESCE(episode_id, '')
+			FROM media_files WHERE media_folder_id = $1 AND file_path = $2
+		`, f.folderID, path).Scan(&contentID, &episodeID); err != nil {
+			t.Fatalf("load file %s: %v", path, err)
+		}
+		if contentID == "" || episodeID == "" || (showID != "" && contentID != showID) {
+			t.Fatalf("%s: content_id=%q episode_id=%q, want episodes of one show", path, contentID, episodeID)
+		}
+		showID = contentID
+		episodeIDs = append(episodeIDs, episodeID)
+	}
+	return showID, episodeIDs
+}
+
+// podcastRefreshNoMatcher stands in for the metadata matcher: the podcast
+// scanner links its own files, so a podcast ingest has nothing to match.
+type podcastRefreshNoMatcher struct{}
+
+func (podcastRefreshNoMatcher) ProcessBatchByFolderAndPathPrefix(context.Context, int, string, time.Time) (int, error) {
+	return 0, nil
+}
+
+func (podcastRefreshNoMatcher) ProcessAllByFolderAndPathPrefix(context.Context, int, string, time.Time) (int, error) {
+	return 0, nil
+}
+
+func (podcastRefreshNoMatcher) RetryUnmatchedItemsByFolderAndPathPrefix(context.Context, int, string) (int, int, error) {
+	return 0, 0, nil
 }

@@ -364,7 +364,7 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 		CurrentScope: claim.path,
 		MatchedFiles: result.MatchedFiles,
 		FilesDiscovered: scanResultCount(scanResult, func(value *scanner.ScanResult) int {
-			return value.New + value.Updated + value.Unchanged
+			return value.New + value.Updated + value.Unchanged + value.NoVideo
 		}),
 	})
 	for _, scopePath := range matchScopes {
