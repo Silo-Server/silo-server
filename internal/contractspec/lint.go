@@ -392,18 +392,9 @@ func lintNullableEnums(fail func(string, ...any), where string, s *schema) {
 
 // lintNullableEnum requires a nullable schema with an enum to list null in
 // it: JSON Schema applies type and enum separately, so a validator holding
-// ["string", "null"] and an enum of strings alone refuses null. A member in
-// apiv2.NullEnumWithheld must still be such an enum, so its entry goes with
-// the member it was written for.
+// ["string", "null"] and an enum of strings alone refuses null.
 func lintNullableEnum(fail func(string, ...any), where string, s *schema) {
-	refused := s.Nullable && len(s.Enum) > 0 && !slices.Contains(s.Enum, nil)
-	if reason, withheld := apiv2.NullEnumWithheld[strings.TrimPrefix(where, componentSchemas)]; withheld {
-		if !refused {
-			fail("%s: no longer a nullable enum without null; delete its apiv2.NullEnumWithheld entry (%s)", where, reason)
-		}
-		return
-	}
-	if refused {
+	if s.Nullable && len(s.Enum) > 0 && !slices.Contains(s.Enum, nil) {
 		fail("%s: nullable enum does not list null", where)
 	}
 }
