@@ -277,6 +277,8 @@ describe("EditMetadataDialog audiobooks", () => {
     // uploads for one; Match Item sets its provider IDs and cover.
     expect(screen.queryByRole("button", { name: "External IDs" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Images" })).not.toBeInTheDocument();
+    // A reset would empty the tag-derived fields no provider supplies.
+    expect(screen.queryByRole("button", { name: "Reset to Provider" })).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByDisplayValue("Test Book"), { target: { value: "Edited Book" } });
     fireEvent.click(screen.getByRole("button", { name: "Dates & Ratings" }));

@@ -44,6 +44,14 @@ const EPISODE_FIELD_LOCK_MAP: Record<string, number> = {
   runtime: FIELD_RUNTIME,
 };
 
+const TYPE_LABEL_KEYS: Partial<Record<ItemDetail["type"], MessageKey>> = {
+  movie: "web.item.editMetadata.typeMovie",
+  series: "web.item.editMetadata.typeSeries",
+  season: "web.item.editMetadata.typeSeason",
+  episode: "web.item.editMetadata.typeEpisode",
+  audiobook: "web.detail.hero.typeAudiobook",
+};
+
 const RESET_DESCRIPTION_KEYS: Partial<Record<ItemDetail["type"], MessageKey>> = {
   series: "web.item.editMetadata.resetDescriptionSeries",
   season: "web.item.editMetadata.resetDescriptionSeason",
@@ -79,6 +87,9 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
 
   const ownsImageLock = item.type === "movie" || item.type === "series";
   const fieldLockMap = FIELD_LOCK_MAPS[item.type];
+  // An audiobook's fields mostly come from its file tags, which no provider
+  // supplies, so a reset would empty them rather than restore them.
+  const canResetToProvider = fieldLockMap !== undefined && item.type !== "audiobook";
   const canEditImages = useIsActingAdmin();
   const visibleSections = SECTIONS.filter(
     (s) => s.types.includes(item.type) && (s.key !== "images" || canEditImages),
@@ -222,17 +233,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
     );
   }
 
-  const typeLabel = t(
-    item.type === "movie"
-      ? "web.item.editMetadata.typeMovie"
-      : item.type === "series"
-        ? "web.item.editMetadata.typeSeries"
-        : item.type === "season"
-          ? "web.item.editMetadata.typeSeason"
-          : item.type === "audiobook"
-            ? "web.detail.hero.typeAudiobook"
-            : "web.item.editMetadata.typeEpisode",
-  );
+  const typeLabel = t(TYPE_LABEL_KEYS[item.type] ?? "web.item.editMetadata.typeEpisode");
 
   return (
     <>
@@ -690,7 +691,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
           {/* Footer */}
           <div className="border-border/10 flex shrink-0 flex-col-reverse gap-2 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:py-3.5">
             <div>
-              {fieldLockMap && (
+              {canResetToProvider && (
                 <Button
                   variant="ghost"
                   size="sm"
