@@ -411,7 +411,11 @@ func (h *Handler) mirrorSessionSync(ctx context.Context, a ctxAuth, sess ABSPlay
 				"session_id", sess.ID, "content_id", sess.ContentID, "error", err)
 		}
 	}
-	h.updateNativePlaybackProgress(ctx, sess.ID, p.CurrentTime, p.timeDelta())
+	// The row's listening total after this sync. The native session credits
+	// how far it rose since the last total it saw, so a sync another replica
+	// handled still counts here.
+	total := float64(sess.TimeListeningSeconds + int(p.timeDelta()))
+	h.updateNativePlaybackProgress(ctx, sess.ID, p.CurrentTime, total)
 
 	// Realtime push to other connected clients.
 	h.publish(a.UserID, "user_item_progress_updated", map[string]any{
@@ -473,6 +477,10 @@ func (h *Handler) handleSessionClose(w http.ResponseWriter, r *http.Request) {
 	}
 	if closed && closeSync != nil {
 		h.mirrorSessionSync(r.Context(), a, sess, *final)
+		// A close on a replica without the native copy records the play from
+		// this row (absDetachedSession), which must include the final sync.
+		sess.CurrentPositionSeconds = closeSync.PositionSeconds
+		sess.TimeListeningSeconds += closeSync.ListeningSeconds
 	}
 	h.stopNativePlaybackSession(r.Context(), &sess)
 

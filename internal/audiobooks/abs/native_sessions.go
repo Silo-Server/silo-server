@@ -24,7 +24,6 @@ import (
 type PlaybackSessionManager interface {
 	StartSessionWithFilesContext(ctx context.Context, userID int, profileID string, effectiveFileID int, requestedFileID int, method playback.PlayMethod, transcodeAudio bool) (*playback.Session, error)
 	UpdateProgress(sessionID string, position float64, isPaused bool) error
-	UpdateProgressListened(sessionID string, position, listened float64) error
 	UpdateProgressReported(sessionID string, position, total float64) error
 	UpdateStreamState(sessionID string, state playback.SessionStreamState) error
 	BeginTransport(sessionID string) error
@@ -153,14 +152,15 @@ func (h *Handler) startNativePlaybackSession(
 	return session, nil
 }
 
-// updateNativePlaybackProgress mirrors a session sync. Its timeListened is the
-// time actually listened since the previous sync, so it is what the native
-// session credits as listening time; the position may have jumped by a seek.
-func (h *Handler) updateNativePlaybackProgress(ctx context.Context, sessionID string, position, listened float64) {
+// updateNativePlaybackProgress mirrors a session sync. total is the ABS
+// session's running listening total after the sync: the time actually
+// listened, which the native session credits instead of the position, since
+// the position may have jumped by a seek.
+func (h *Handler) updateNativePlaybackProgress(ctx context.Context, sessionID string, position, total float64) {
 	if h == nil || h.deps.NativeSessions == nil || sessionID == "" {
 		return
 	}
-	if err := h.deps.NativeSessions.UpdateProgressListened(sessionID, position, listened); err != nil {
+	if err := h.deps.NativeSessions.UpdateProgressReported(sessionID, position, total); err != nil {
 		if !errors.Is(err, playback.ErrSessionNotFound) {
 			slog.WarnContext(ctx, "abs session sync: update native session progress failed", "component", "audiobooks",
 				"session_id", sessionID, "position", position, "error", err)

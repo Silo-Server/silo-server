@@ -1056,26 +1056,13 @@ func (m *SessionManager) UpdateProgress(sessionID string, position float64, isPa
 	return m.updateProgress(sessionID, position, isPaused, -1)
 }
 
-// UpdateProgressListened is UpdateProgress for a playing client that also
-// reports how many seconds it played since its previous report; the session's
-// watch time credits that report (see WatchTime.Credit).
-func (m *SessionManager) UpdateProgressListened(sessionID string, position, listened float64) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	s, ok := m.sessions[sessionID]
-	if !ok {
-		return ErrSessionNotFound
-	}
-	m.creditProgressLocked(s, position, listened)
-	return nil
-}
-
-// UpdateProgressReported is UpdateProgressListened for a client that reports
+// UpdateProgressReported is UpdateProgress for a playing client that reports
 // its listening as a running total for the play: the session credits how far
-// the total rose past the highest one seen, so a late or repeated report
-// credits nothing. A client that has not reported a total is measured from
-// its position instead, as UpdateProgress does.
+// the total rose past the highest one seen (see WatchTime.Credit), so a late
+// or repeated report credits nothing. A report that does not raise the total
+// leaves the listening baseline where it was, so the next rise is still
+// capped by all the time since the last one. A client that has not reported a
+// total is measured from its position instead, as UpdateProgress does.
 func (m *SessionManager) UpdateProgressReported(sessionID string, position, total float64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1084,30 +1071,20 @@ func (m *SessionManager) UpdateProgressReported(sessionID string, position, tota
 	if !ok {
 		return ErrSessionNotFound
 	}
-	if total <= 0 && s.ReportedListening <= 0 {
-		s.Position = position
-		s.IsPaused = false
-		s.StopReported = false
-		s.streamRevision++
-		m.touchSessionLocked(s)
-		s.Watch.Observe(position, false, s.UpdatedAt)
-		return nil
-	}
-	listened := max(total-s.ReportedListening, 0)
-	s.ReportedListening = max(s.ReportedListening, total)
-	m.creditProgressLocked(s, position, listened)
-	return nil
-}
-
-// creditProgressLocked records a playing report and credits the seconds the
-// client says it listened since its previous one.
-func (m *SessionManager) creditProgressLocked(s *Session, position, listened float64) {
 	s.Position = position
 	s.IsPaused = false
 	s.StopReported = false
 	s.streamRevision++
 	m.touchSessionLocked(s)
-	s.Watch.Credit(position, listened, s.StartedAt, s.UpdatedAt)
+	switch {
+	case total <= 0 && s.ReportedListening <= 0:
+		s.Watch.Observe(position, false, s.UpdatedAt)
+	case total > s.ReportedListening:
+		listened := total - s.ReportedListening
+		s.ReportedListening = total
+		s.Watch.Credit(position, listened, s.StartedAt, s.UpdatedAt)
+	}
+	return nil
 }
 
 // UpdateProgressSample keeps a confirmed pause state when an already accepted

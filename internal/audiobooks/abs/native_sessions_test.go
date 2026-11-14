@@ -156,6 +156,7 @@ func TestHandleSessionCloseFinishesNativePlaybackSession(t *testing.T) {
 		name         string
 		body         string
 		closed       bool
+		detached     bool
 		wantPosition float64
 	}{
 		{name: "empty body", wantPosition: 100},
@@ -168,6 +169,9 @@ func TestHandleSessionCloseFinishesNativePlaybackSession(t *testing.T) {
 		{name: "no position", body: `{}`, wantPosition: 100},
 		// A repeated close applies no stale final sync.
 		{name: "already closed", body: `{"currentTime":3700,"timeListened":30}`, closed: true, wantPosition: 100},
+		// A close on a replica without the native copy records the play from
+		// the ABS row, which must carry the final sync too.
+		{name: "final sync on another replica", body: `{"currentTime":3700,"timeListened":30}`, detached: true, wantPosition: 3700},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			absSessions := &fakePlaybackSessionStore{}
@@ -176,11 +180,15 @@ func TestHandleSessionCloseFinishesNativePlaybackSession(t *testing.T) {
 			nativeSessions.AddFinishHook(func(_ context.Context, s *playback.Session) {
 				finished = append(finished, *s)
 			})
-			native, err := nativeSessions.StartSessionWithFilesContext(context.Background(), 1, "profile-1", 42, 42, playback.PlayDirect, false)
+			holder := nativeSessions
+			if tc.detached {
+				holder = playback.NewSessionManager(0, 0)
+			}
+			native, err := holder.StartSessionWithFilesContext(context.Background(), 1, "profile-1", 42, 42, playback.PlayDirect, false)
 			if err != nil {
 				t.Fatalf("start native session: %v", err)
 			}
-			if err := nativeSessions.UpdateProgress(native.ID, 100, false); err != nil {
+			if err := holder.UpdateProgress(native.ID, 100, false); err != nil {
 				t.Fatalf("seed native position: %v", err)
 			}
 			var closedAt *time.Time
@@ -188,11 +196,13 @@ func TestHandleSessionCloseFinishesNativePlaybackSession(t *testing.T) {
 				closedAt = new(time.Now())
 			}
 			_ = absSessions.InsertPlaybackSession(context.Background(), ABSPlaybackSession{
-				ID:        native.ID,
-				UserID:    "1",
-				ProfileID: "profile-1",
-				ContentID: "book-1",
-				ClosedAt:  closedAt,
+				ID:                     native.ID,
+				UserID:                 "1",
+				ProfileID:              "profile-1",
+				ContentID:              "book-1",
+				MediaFileID:            new(42),
+				CurrentPositionSeconds: 100,
+				ClosedAt:               closedAt,
 			})
 			syncer := &recordingPlaybackSessionSyncer{}
 			h := New(Dependencies{
@@ -228,7 +238,7 @@ func TestHandleSessionCloseFinishesNativePlaybackSession(t *testing.T) {
 			if finished[0].Position != tc.wantPosition {
 				t.Fatalf("finished position = %v, want %v", finished[0].Position, tc.wantPosition)
 			}
-			if syncer.calls == 0 {
+			if syncer.calls == 0 && !tc.detached {
 				t.Fatalf("native session syncer was not called")
 			}
 		})

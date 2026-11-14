@@ -148,6 +148,33 @@ func TestUpdateProgressReported(t *testing.T) {
 	}
 }
 
+// A delayed report with a lower total credits nothing and leaves the
+// listening baseline alone, so the next rise is capped by all the time since
+// the last accepted total, not by the gap since the delayed report.
+func TestUpdateProgressReportedStaleTotalKeepsBaseline(t *testing.T) {
+	manager := NewSessionManager(0, 0)
+	manager.RegisterReconstructed(&Session{ID: "reported-1", UserID: 7, StartedAt: time.Now().Add(-40 * time.Second)})
+	report := func(position, total float64) {
+		t.Helper()
+		if err := manager.UpdateProgressReported("reported-1", position, total); err != nil {
+			t.Fatalf("report: %v", err)
+		}
+	}
+	report(20, 20)
+	manager.mu.Lock()
+	manager.sessions["reported-1"].Watch.Until = manager.sessions["reported-1"].Watch.Until.Add(-20 * time.Second)
+	manager.mu.Unlock()
+	report(10, 10)
+	report(40, 40)
+	s, err := manager.GetSession("reported-1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if math.Abs(s.Watch.PlayedSeconds-40) > 0.01 {
+		t.Fatalf("played = %v, want 40", s.Watch.PlayedSeconds)
+	}
+}
+
 // backdatePlaybackTestSession makes a session look as if its client last
 // reported age ago.
 func backdatePlaybackTestSession(manager *SessionManager, sessionID string, age time.Duration) {

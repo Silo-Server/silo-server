@@ -1676,6 +1676,9 @@ func fillEmptySessionFacts(session, live *playback.Session) {
 	if session.RequestedMediaFileID == 0 {
 		session.RequestedMediaFileID = live.RequestedMediaFileID
 	}
+	if session.TimelineDuration <= 0 {
+		session.TimelineDuration = live.TimelineDuration
+	}
 }
 
 // reconstructedClientTimeout bounds the live-row read a rebuild makes, so a

@@ -109,7 +109,7 @@ type playbackSessionRow struct {
 	CompatOrigin             bool    `json:"-"`
 	// TimelineDuration is the length the position is measured against when
 	// that is more than the file, such as a whole multi-file audiobook. The
-	// frozen v1 shape keeps file_duration as the file's duration; v2 reads
+	// row's own file_duration stays the file's duration; v2 reads
 	// MeasuredDuration.
 	TimelineDuration *int `json:"-"`
 }
@@ -960,8 +960,6 @@ func (l *PlaybackSessionsLoader) populateProfileNames(ctx context.Context, sessi
 	}
 }
 
-// AdminPlaybackSessionView is the shared enriched diagnostic read model. It does
-// not grant authority to control or terminate the observed session.
 // MeasuredDuration is the length in seconds the session's position is
 // measured against: the whole timeline when the session has one, else the
 // file's duration.
@@ -972,6 +970,8 @@ func (s playbackSessionRow) MeasuredDuration() *int {
 	return s.FileDuration
 }
 
+// AdminPlaybackSessionView is the shared enriched diagnostic read model. It does
+// not grant authority to control or terminate the observed session.
 type AdminPlaybackSessionView = playbackSessionRow
 
 func (h *AdminHandler) AdminPlaybackSessionsAvailable() bool {
