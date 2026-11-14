@@ -227,8 +227,12 @@ func (r *ProviderIDIntegrityRepairer) repairDriftRow(ctx context.Context, row pr
 		return "", err
 	}
 	if len(owners) == 0 {
-		if err := r.insertProviderIDsForDriftRow(ctx, row, entries); err != nil {
+		inserted, err := r.insertProviderIDsForDriftRow(ctx, row, entries)
+		if err != nil {
 			return "", err
+		}
+		if !inserted {
+			return "unresolved", nil
 		}
 		return "clean_insert", nil
 	}
@@ -304,33 +308,48 @@ func (r *ProviderIDIntegrityRepairer) findProviderIDOwners(
 	return owners, nil
 }
 
-func (r *ProviderIDIntegrityRepairer) insertProviderIDsForDriftRow(ctx context.Context, row providerIDDriftRow, entries []providerIDEntry) error {
+// insertProviderIDsForDriftRow replaces the item's provider rows with entries
+// and reports whether it did. It skips an item whose ID columns changed since
+// the drift batch read them, such as by an admin's ID edit it waited for; the
+// next run judges the item again.
+func (r *ProviderIDIntegrityRepairer) insertProviderIDsForDriftRow(ctx context.Context, row providerIDDriftRow, entries []providerIDEntry) (bool, error) {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return fmt.Errorf("begin clean provider-id repair: %w", err)
+		return false, fmt.Errorf("begin clean provider-id repair: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 	// Lock the item before its provider rows, as an admin's ID edit does. A
 	// repair that deleted the rows first would wait on the edit's item lock
 	// for its inserts while the edit waits on the deleted rows: a deadlock.
-	if _, err := tx.Exec(ctx, `SELECT 1 FROM media_items WHERE content_id = $1 FOR NO KEY UPDATE`, row.ContentID); err != nil {
-		return fmt.Errorf("lock item %s for provider-id repair: %w", row.ContentID, err)
+	var current providerIDDriftRow
+	err = tx.QueryRow(ctx, `
+		SELECT type, COALESCE(imdb_id, ''), COALESCE(tmdb_id, ''), COALESCE(tvdb_id, '')
+		FROM media_items WHERE content_id = $1 FOR NO KEY UPDATE`, row.ContentID).
+		Scan(&current.ItemType, &current.IMDbID, &current.TMDBID, &current.TVDBID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("lock item %s for provider-id repair: %w", row.ContentID, err)
+	}
+	if current.ItemType != row.ItemType || current.IMDbID != row.IMDbID || current.TMDBID != row.TMDBID || current.TVDBID != row.TVDBID {
+		return false, nil
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM media_item_provider_ids WHERE content_id = $1`, row.ContentID); err != nil {
-		return fmt.Errorf("clear existing provider ids for %s: %w", row.ContentID, err)
+		return false, fmt.Errorf("clear existing provider ids for %s: %w", row.ContentID, err)
 	}
 	for _, entry := range entries {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO media_item_provider_ids (content_id, item_type, provider, provider_id, created_at, updated_at)
 			VALUES ($1, $2, $3, $4, NOW(), NOW())
 		`, row.ContentID, row.ItemType, entry.Provider, entry.ProviderID); err != nil {
-			return fmt.Errorf("insert repaired provider id %s for %s: %w", entry.Provider, row.ContentID, err)
+			return false, fmt.Errorf("insert repaired provider id %s for %s: %w", entry.Provider, row.ContentID, err)
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit clean provider-id repair: %w", err)
+		return false, fmt.Errorf("commit clean provider-id repair: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 func (r *ProviderIDIntegrityRepairer) moveProvisionalProviderClaim(ctx context.Context, ownerContentID string, row providerIDDriftRow, entries []providerIDEntry) error {

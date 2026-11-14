@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"os"
 	"reflect"
 	"strings"
@@ -118,7 +119,8 @@ func TestCanonicalizeMediaItemReferencesMergesNotificationMutesPostgres(t *testi
 
 // A drift repair of an item waits for an admin's ID edit holding that item,
 // rather than deleting the item's provider rows first and deadlocking with
-// the edit's own delete of one of them.
+// the edit's own delete of one of them, and then leaves the edited ID alone
+// instead of writing back the ID it read before the edit.
 func TestProviderIDDriftRepairWaitsForItemEditPostgres(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -158,16 +160,30 @@ func TestProviderIDDriftRepairWaitsForItemEditPostgres(t *testing.T) {
 	row := providerIDDriftRow{ContentID: contentID, ItemType: "movie", Status: "matched", TMDBID: tmdbID}
 	repaired := make(chan error, 1)
 	go func() {
-		repaired <- NewProviderIDIntegrityRepairer(pool).insertProviderIDsForDriftRow(ctx, row, providerEntriesFromDrift(row))
+		inserted, err := NewProviderIDIntegrityRepairer(pool).insertProviderIDsForDriftRow(ctx, row, providerEntriesFromDrift(row))
+		if err == nil && inserted {
+			err = errors.New("repair wrote provider ids read before the edit")
+		}
+		repaired <- err
 	}()
 	// Before the repair locked the item, it waited in its insert's foreign-key
 	// check instead.
 	waitForMediaItemLockWait(t, pool, repaired)
-	// syncEditedProviderIDTx's delete of the edited provider's row.
+	// The edit changes the TMDB ID, then syncs its durable row the way
+	// syncEditedProviderIDTx does.
+	editedID := "edited-" + tmdbID
+	if _, err := edit.Exec(ctx, `UPDATE media_items SET tmdb_id = $2 WHERE content_id = $1`, contentID, editedID); err != nil {
+		t.Fatalf("edit column: %v", err)
+	}
 	if _, err := edit.Exec(ctx, `
 		DELETE FROM media_item_provider_ids
 		WHERE content_id = $1 AND lower(provider) = 'tmdb'`, contentID); err != nil {
 		t.Fatalf("edit delete: %v", err)
+	}
+	if _, err := edit.Exec(ctx, `
+		INSERT INTO media_item_provider_ids (content_id, item_type, provider, provider_id)
+		VALUES ($1, 'movie', 'tmdb', $2)`, contentID, editedID); err != nil {
+		t.Fatalf("edit insert: %v", err)
 	}
 	if err := edit.Commit(ctx); err != nil {
 		t.Fatalf("commit edit: %v", err)
@@ -181,8 +197,8 @@ func TestProviderIDDriftRepairWaitsForItemEditPostgres(t *testing.T) {
 		WHERE content_id = $1 AND provider = 'tmdb'`, contentID).Scan(&durable); err != nil {
 		t.Fatalf("read durable id: %v", err)
 	}
-	if durable != tmdbID {
-		t.Fatalf("durable tmdb = %q, want %q", durable, tmdbID)
+	if durable != editedID {
+		t.Fatalf("durable tmdb = %q, want the edited %q", durable, editedID)
 	}
 }
 
