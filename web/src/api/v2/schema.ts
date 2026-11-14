@@ -21929,6 +21929,11 @@ export interface components {
       next_run_at?: string;
       /** Format: double */
       progress: number;
+      /**
+       * Format: date-time
+       * @description When the run in progress on this process started. Absent while the task is idle.
+       */
+      started_at?: string;
       /** @enum {string} */
       state: "idle" | "running" | "cancelling";
       triggers: components["schemas"]["AdminTaskTrigger"][];
@@ -26600,17 +26605,17 @@ export interface components {
       series_id: string;
     };
     DownloadSubscriptionPatchBody: {
-      active?: boolean | null;
-      delete_watched?: boolean | null;
+      active?: boolean;
+      delete_watched?: boolean;
       /** Format: int64 */
-      max_storage_bytes?: number | null;
-      mode?: string | null;
+      max_storage_bytes?: number;
+      mode?: string;
       /**
        * @description Quality preset for episodes registered from now on; already-registered downloads keep theirs.
-       * @enum {string|null}
+       * @enum {string}
        */
-      quality?: "original" | "20mbps" | "10mbps" | "5mbps" | "2mbps" | "1mbps" | null;
-      season_numbers?: number[] | null;
+      quality?: "original" | "20mbps" | "10mbps" | "5mbps" | "2mbps" | "1mbps";
+      season_numbers?: number[];
     };
     DownloadSubscriptionSync: {
       /**

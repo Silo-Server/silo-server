@@ -136223,6 +136223,12 @@
       "value": "بياناتك"
     }
   ],
+  "web.common.toast.collections.created": [
+    {
+      "type": 0,
+      "value": "تم إنشاء المجموعة"
+    }
+  ],
   "web.common.toast.collections.deleteFailed": [
     {
       "type": 0,
@@ -136233,6 +136239,12 @@
     {
       "type": 0,
       "value": "تم حذف المجموعة"
+    }
+  ],
+  "web.common.toast.collections.saved": [
+    {
+      "type": 0,
+      "value": "تم حفظ المجموعة"
     }
   ],
   "web.common.toast.collections.syncFailed": [

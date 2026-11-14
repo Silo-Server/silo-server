@@ -109312,6 +109312,12 @@
       "value": "⟦Ýöûŕ Đåţå~~~~⟧"
     }
   ],
+  "web.common.toast.collections.created": [
+    {
+      "type": 0,
+      "value": "⟦Çöļļéçţîöñ çŕéåţéđ~~~~~~~~⟧"
+    }
+  ],
   "web.common.toast.collections.deleteFailed": [
     {
       "type": 0,
@@ -109322,6 +109328,12 @@
     {
       "type": 0,
       "value": "⟦Çöļļéçţîöñ đéļéţéđ~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.collections.saved": [
+    {
+      "type": 0,
+      "value": "⟦Çöļļéçţîöñ šåṽéđ~~~~~~~⟧"
     }
   ],
   "web.common.toast.collections.syncFailed": [

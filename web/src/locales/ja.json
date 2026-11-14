@@ -91141,6 +91141,12 @@
       "value": "データ"
     }
   ],
+  "web.common.toast.collections.created": [
+    {
+      "type": 0,
+      "value": "コレクションを作成しました"
+    }
+  ],
   "web.common.toast.collections.deleteFailed": [
     {
       "type": 0,
@@ -91151,6 +91157,12 @@
     {
       "type": 0,
       "value": "コレクションを削除しました"
+    }
+  ],
+  "web.common.toast.collections.saved": [
+    {
+      "type": 0,
+      "value": "コレクションを保存しました"
     }
   ],
   "web.common.toast.collections.syncFailed": [

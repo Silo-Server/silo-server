@@ -4,6 +4,7 @@ import { useParams, useSearchParams } from "react-router";
 import { isNotFoundProblem } from "@/api/v2/request";
 import ItemGrid from "@/components/ItemGrid";
 import PageBack from "@/components/PageBack";
+import { loadErrorDescription } from "@/components/loadErrorDescription";
 import PageUnavailable from "@/components/PageUnavailable";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { Button } from "@/components/ui/button";
@@ -38,7 +39,7 @@ export default function BoxSetPage() {
       return (
         <PageUnavailable
           title={t("web.detail.boxSet.loadFailedTitle")}
-          description={t("web.detail.boxSet.loadFailedBody")}
+          description={loadErrorDescription(error, t("web.detail.boxSet.loadFailedBody"))}
           onRetry={() => void refetch()}
           retrying={isFetching}
         />
