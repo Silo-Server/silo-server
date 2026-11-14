@@ -1,0 +1,68 @@
+package auth
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"strings"
+)
+
+// JWTSecretSettingKey is the server_settings row that holds the signing secret
+// every process of a deployment shares: login tokens, profile tokens, stream
+// tokens and signed artwork URLs.
+const JWTSecretSettingKey = "auth.jwt_secret" //nolint:gosec // G101: a setting name, not a credential
+
+// JWTSecretStore is the server_settings surface EnsureJWTSecret needs.
+// catalog.EncryptedSettingsRepo satisfies it.
+type JWTSecretStore interface {
+	Get(ctx context.Context, key string) (string, error)
+	SetIfAbsent(ctx context.Context, key, value string) (bool, error)
+	UpdateValueAtomic(ctx context.Context, key string, update func(string) (string, error)) error
+}
+
+// EnsureJWTSecret returns the stored signing secret, generating and storing
+// one when none is stored. Processes that start at once on a new database
+// each generate a secret, but only the first write lands, and every process
+// returns the stored value, so all of them sign with the same secret.
+//
+// A stored value of only whitespace counts as no secret. It is encrypted at
+// rest, so the conditional write cannot see it as blank; it is replaced under
+// the key's lock instead, after a fresh read there, so the first process to
+// take the lock stores its secret and the rest keep it.
+func EnsureJWTSecret(ctx context.Context, store JWTSecretStore) (string, error) {
+	stored, err := store.Get(ctx, JWTSecretSettingKey)
+	if err != nil {
+		return "", fmt.Errorf("reading JWT secret: %w", err)
+	}
+	if strings.TrimSpace(stored) != "" {
+		return stored, nil
+	}
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("generating JWT secret: %w", err)
+	}
+	generated := base64.StdEncoding.EncodeToString(raw)
+	if stored == "" {
+		_, err = store.SetIfAbsent(ctx, JWTSecretSettingKey, generated)
+	} else {
+		err = store.UpdateValueAtomic(ctx, JWTSecretSettingKey, func(current string) (string, error) {
+			if strings.TrimSpace(current) != "" {
+				return current, nil
+			}
+			return generated, nil
+		})
+	}
+	if err != nil {
+		return "", fmt.Errorf("storing generated JWT secret: %w", err)
+	}
+	winner, err := store.Get(ctx, JWTSecretSettingKey)
+	if err != nil {
+		return "", fmt.Errorf("reading JWT secret back: %w", err)
+	}
+	if strings.TrimSpace(winner) == "" {
+		return "", errors.New("JWT secret is still empty after storing one")
+	}
+	return winner, nil
+}

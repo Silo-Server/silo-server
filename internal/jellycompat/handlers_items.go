@@ -260,6 +260,10 @@ func (h *ItemsHandler) HandleItems(w http.ResponseWriter, r *http.Request) {
 		h.handleBrowseItems(w, r, session, query)
 	case query.isResumable:
 		h.handleResumeResponse(w, r, session, query)
+	case h.browsesPlayedListByCatalog(query):
+		// The played list reads progress rows, which carry no catalog fields
+		// to sort by; the catalog browse applies IsPlayed and sorts.
+		h.handleBrowseItems(w, r, session, query)
 	case query.isPlayed != nil && *query.isPlayed:
 		h.handlePlayedItems(w, r, session, query)
 	case query.isPlayed != nil:
@@ -3616,6 +3620,32 @@ func progressPageCapacity(limit int) int {
 	return limit
 }
 
+// playedByDateLister is the user-data service's play-date listing; see
+// directUserDataService.ListPlayedProgressByDate.
+type playedByDateLister interface {
+	ListPlayedProgressByDate(ctx context.Context, session *Session, types []string, libraryID *int, ascending bool, limit, offset int) ([]upstreamProgress, error)
+}
+
+// fetchProgressRows reads one batch of progress rows for loadProgressPage. A
+// completed list sorted by DatePlayed reads in play-date order, in the
+// requested direction, so paging stays in that order. Every other list, and a
+// store that cannot order by play date, reads newest write first. filtered
+// pushes the type and library pre-filter into the store.
+func (h *ItemsHandler) fetchProgressRows(ctx context.Context, session *Session, status string, query itemsQuery, types []string, libraryID *int, filtered bool, limit, offset int) ([]upstreamProgress, error) {
+	if status == progressStatusCompleted && query.sortByKey == sortKeyDatePlayed {
+		if lister, ok := h.userData.(playedByDateLister); ok {
+			rows, err := lister.ListPlayedProgressByDate(ctx, session, types, libraryID, query.order == sortOrderAscending, limit, offset)
+			if !errors.Is(err, userstore.ErrJellycompatPlayedByDateUnsupported) {
+				return rows, err
+			}
+		}
+	}
+	if filtered {
+		return h.userData.ListProgressFiltered(ctx, session, status, types, libraryID, limit, offset)
+	}
+	return h.userData.ListProgress(ctx, session, status, limit, offset)
+}
+
 func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, status string, query itemsQuery, typeSet map[string]bool, libraryID *int) ([]baseItemDTO, int, error) {
 	// Resume views hide dismissed and superseded entries, so the visible list
 	// is sparser than the raw store list. The raw-offset fast path below is
@@ -3631,7 +3661,7 @@ func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, s
 		result := make([]progressHydratedItem, 0, progressPageCapacity(query.limit))
 		offset := query.startIndex
 		for {
-			progressEntries, err := h.userData.ListProgress(ctx, session, status, batchSize, offset)
+			progressEntries, err := h.fetchProgressRows(ctx, session, status, query, nil, nil, false, batchSize, offset)
 			if err != nil {
 				return nil, 0, err
 			}
@@ -3691,10 +3721,7 @@ func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, s
 		filteredTypes = sortedTypeSet(typeSet)
 	}
 	fetchProgress := func(off int) ([]upstreamProgress, error) {
-		if useFilteredFetch {
-			return h.userData.ListProgressFiltered(ctx, session, status, filteredTypes, libraryID, batchSize, off)
-		}
-		return h.userData.ListProgress(ctx, session, status, batchSize, off)
+		return h.fetchProgressRows(ctx, session, status, query, filteredTypes, libraryID, useFilteredFetch, batchSize, off)
 	}
 
 	items := make([]progressHydratedItem, 0, progressPageCapacity(query.limit))

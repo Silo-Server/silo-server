@@ -56,6 +56,9 @@ const readOnlyPostOperations = new Set<V2OperationKey>([
   "POST /api/v2/catalog/query",
   "POST /api/v2/admin/sections/preview",
   "POST /api/v2/direct-download/links",
+  // The link's token goes in the body to stay out of the URL.
+  "POST /api/v2/password-resets/lookup",
+  "POST /api/v2/invitations/lookup",
 ]);
 
 /**

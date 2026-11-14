@@ -113,6 +113,19 @@ export function pluginSummary(
   );
 }
 
+/**
+ * A verified signature's source repository as `owner/name`, from a URL like
+ * `https://github.com/owner/name`. Anything else is shown as sent.
+ */
+export function signatureRepositoryLabel(sourceRepo: string): string {
+  try {
+    const path = new URL(sourceRepo).pathname.replace(/^\/+|\/+$/g, "");
+    return path || sourceRepo;
+  } catch {
+    return sourceRepo;
+  }
+}
+
 export function safeExternalURL(rawURL?: string): string | undefined {
   if (!rawURL) return undefined;
   try {

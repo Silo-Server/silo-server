@@ -1229,6 +1229,37 @@ describe("usePlaybackSession output capability changes", () => {
     unmount();
   });
 
+  it("resumes a queued quality change at a seek made while it waited", async () => {
+    let resolveFirstReplan: ((response: Response) => void) | undefined;
+    const firstReplanResponse = new Promise<Response>((resolve) => {
+      resolveFirstReplan = resolve;
+    });
+    const replanBodies: Array<{ quality_preference: string; position_seconds: number }> = [];
+    const fetchMock = sessionFetch((init) => {
+      replanBodies.push(JSON.parse(String(init?.body)) as (typeof replanBodies)[number]);
+      if (replanBodies.length === 1) return firstReplanResponse;
+      return jsonResponse(playable("session-1"));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderSession();
+    await waitFor(() => expect(result.current.sessionId).toBe("session-1"));
+
+    act(() => result.current.changeQuality("720p", 120));
+    await waitFor(() => expect(replanBodies).toHaveLength(1));
+    act(() => result.current.changeQuality("480p", 121));
+    act(() => result.current.reportSeek(30));
+
+    await act(async () => {
+      resolveFirstReplan?.(jsonResponse(playable("session-1")));
+      await firstReplanResponse;
+    });
+
+    await waitFor(() => expect(replanBodies).toHaveLength(2));
+    expect(replanBodies[1]).toMatchObject({ quality_preference: "480p", position_seconds: 30 });
+    unmount();
+  });
+
   it("drops a predecessor failure after an output refresh adopts a new plan", async () => {
     const setHDR = outputProbe(true);
     let resolveOutputReplan: ((response: Response) => void) | undefined;

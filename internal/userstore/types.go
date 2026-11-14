@@ -146,11 +146,15 @@ type WatchProgress struct {
 	DurationSeconds float64
 	Completed       bool
 	UpdatedAt       string
-	LastFileID      *int
-	LastResolution  *string
-	LastHDR         *bool
-	LastCodecVideo  *string
-	LastEditionKey  *string
+	// UpdatedAtTime is UpdatedAt at the store's full precision, which
+	// UpdatedAt's whole seconds can lose. Zero when the store sets only
+	// UpdatedAt.
+	UpdatedAtTime  time.Time
+	LastFileID     *int
+	LastResolution *string
+	LastHDR        *bool
+	LastCodecVideo *string
+	LastEditionKey *string
 }
 
 const (

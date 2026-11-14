@@ -563,19 +563,6 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 	}
 	created := *createdPtr
 
-	if req.ShowForcedSubtitles != nil && !*req.ShowForcedSubtitles {
-		if err := store.UpdateProfile(ctx, created.ID, userstore.UpdateProfileInput{
-			ShowForcedSubtitles: req.ShowForcedSubtitles,
-		}); err != nil {
-			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to set forced subtitle preference")
-		}
-		p, err := store.GetProfile(ctx, created.ID)
-		if err != nil || p == nil {
-			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to retrieve profile after forced subtitle update")
-		}
-		created = *p
-	}
-
 	return h.toProfileResponse(ctx, store, created), nil
 }
 

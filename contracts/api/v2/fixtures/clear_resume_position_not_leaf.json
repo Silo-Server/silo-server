@@ -3,7 +3,7 @@
   "title": "Validation failed",
   "status": 422,
   "detail": "Only a movie or an episode has a resume position",
-  "instance": "urn:silo:request:000000000000000000000300",
+  "instance": "urn:silo:request:000000000000000000000303",
   "errors": [
     {
       "location": "path.media_item_id",

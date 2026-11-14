@@ -29,10 +29,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/sync/singleflight"
+	"golang.org/x/text/language"
+	"golang.org/x/text/language/display"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
@@ -1321,17 +1324,36 @@ func NewPlaybackHandler(
 		// is still the crashed one. We must NOT stop the upstream session before this
 		// check — if a successor reconstructed under the same id between ffmpeg's exit
 		// and here, an early StopSession would orphan its ffmpeg (live transcode, no
-		// session). Only stop the upstream session when the compare-and-delete matched
-		// the dead transcode. The recipe stays in the compat store either way so a
-		// resume reconstructs.
-		if h.sessionMgr != nil && h.tm.CloseTranscodeSessionIf(sessionID, dead, nodeURL) {
-			if h.playbackStore != nil {
-				if playSession, ok := h.playbackStore.FindByUpstreamSessionID(sessionID); ok {
-					h.dispatchCompatScrobble(ctx, compatScrobblePause, playSession, upstreamSession, nil)
-				}
-			}
-			_ = h.sessionMgr.StopSession(sessionID)
+		// session). The recipe stays in the compat store either way so a resume
+		// reconstructs.
+		if h.sessionMgr == nil || !h.tm.CloseTranscodeSessionIf(sessionID, dead, nodeURL) {
+			return
 		}
+		var playSession *PlaybackSession
+		if h.playbackStore != nil {
+			if found, ok := h.playbackStore.FindByUpstreamSessionID(sessionID); ok {
+				playSession = found
+			}
+		}
+		// With the dead transcode out of the map, a request can already have
+		// rebuilt the play: as a local transcode, which registers under the
+		// lifecycle lock, or on a transcode node, bound as the session's route.
+		// That play keeps its session, which is all that would expire its
+		// transcode. Under the lock, nothing registers between the check and
+		// the stop. A session that has already ended has nothing left to pause
+		// or stop.
+		unlock := h.tm.LockSessionLifecycle(sessionID)
+		defer unlock()
+		if h.tm.GetTranscodeSession(sessionID) != nil {
+			return
+		}
+		if current, err := h.sessionMgr.GetSession(sessionID); err != nil || current == nil || !sameCompatNode(current.TranscodeNodeURL, nodeURL) {
+			return
+		}
+		if playSession != nil {
+			_ = h.dispatchCompatScrobble(ctx, compatScrobblePause, playSession, upstreamSession, nil)
+		}
+		_ = h.sessionMgr.StopSession(sessionID)
 	}
 	if adder, ok := sessionMgr.(sessionExpirationHookAdder); ok {
 		adder.AddExpirationHook(h.handleExpiredSession)
@@ -1915,6 +1937,19 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	// Jellyfin-compat remote starts are not otherwise waited on. Let the node
 	// wait only when its live auto pipeline can fall back.
 	reqBody.AutoFallbackReady = compatRemoteAutoFallbackEligible(reqBody)
+	// An explicit hardware backend has no pipeline, but the node's decoder can
+	// still reject the source, and the node moves to CPU decoding only for a
+	// start it waits on.
+	if playback.HardwareDecodeRetryEligible(playback.TranscodeOpts{
+		HWAccel:             reqBody.HWAccel,
+		ToneMapMode:         reqBody.ToneMapMode,
+		TargetCodecVideo:    reqBody.TargetCodecVideo,
+		SourceVideoCodec:    reqBody.SourceVideoCodec,
+		SourceVideoProfile:  reqBody.SourceVideoProfile,
+		SourceVideoBitDepth: reqBody.SourceVideoBitDepth,
+	}) {
+		reqBody.RequireReady = true
+	}
 
 	dispatch := func(request transcodenode.TranscodeStartRequest) (transcodenode.TranscodeStartResponse, int, bool, error) {
 		body, err := json.Marshal(request)
@@ -3888,10 +3923,57 @@ func compatLanguageName(code string) string {
 	if name, ok := compatLanguageNames[normalized]; ok {
 		return name
 	}
+	if name := compatRegionalLanguageName(trimmed); name != "" {
+		return name
+	}
 	if len(normalized) > 3 {
 		return titleCaseWords(trimmed)
 	}
 	return strings.ToUpper(normalized)
+}
+
+// compatRegionalLanguageName names a tag with a script or region the way the
+// web app does, using CLDR: "Brazilian Portuguese", "Traditional Chinese",
+// "Portuguese (Angola)". Bare, undefined, private-use and malformed tags
+// return "", and so do tags with any other subtag: CLDR names drop variants
+// and extensions, so "ca-ES-valencia" and "ca-ES" would share a label.
+func compatRegionalLanguageName(code string) string {
+	canonical := lang.CanonicalTag(code)
+	if !strings.Contains(canonical, "-") || lang.PrimaryLanguage(canonical) == "" {
+		return ""
+	}
+	tag, err := language.Parse(canonical)
+	// CanonicalTag keeps a three-letter second subtag as written, but Parse
+	// reads it as an extended language and names that one instead: "es-lat"
+	// would become "Latin" and "en-sdh" "Southern Kurdish".
+	if err != nil || tag.String() != canonical || len(tag.Variants()) > 0 || len(tag.Extensions()) > 0 {
+		return ""
+	}
+	base, _ := tag.Base()
+	script, scriptConfidence := tag.Script()
+	region, regionConfidence := tag.Region()
+	scriptName, regionName := "", ""
+	if scriptConfidence == language.Exact {
+		scriptName = display.English.Scripts().Name(script)
+	}
+	if regionConfidence == language.Exact {
+		regionName = display.English.Regions().Name(region)
+	}
+	// A subtag CLDR can't name would vanish from the label, so "ur-Aran-PK"
+	// would read the same as "ur-PK" and "sr-Latn-CS" the same as "sr-Latn".
+	if (scriptConfidence == language.Exact && scriptName == "") || (regionConfidence == language.Exact && regionName == "") {
+		return ""
+	}
+	if base.String() == "sr" && script.String() == "Latn" && scriptConfidence == language.Exact {
+		// CLDR names sr-Latn through its "sh" alias, "Serbo-Croatian",
+		// which hides both the language and the script.
+		qualifiers := []string{scriptName}
+		if regionName != "" {
+			qualifiers = append(qualifiers, regionName)
+		}
+		return display.English.Languages().Name(base) + " (" + strings.Join(qualifiers, ", ") + ")"
+	}
+	return display.English.Tags().Name(tag)
 }
 
 func subtitleFormatLabel(codec string) string {
