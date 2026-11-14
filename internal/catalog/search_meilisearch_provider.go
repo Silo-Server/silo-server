@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"sort"
@@ -48,6 +49,17 @@ const (
 	// once per window. The probe is advisory only and never trips the circuit.
 	semanticCapabilityProbeTTL              = 5 * time.Minute
 	meilisearchFederationCapabilityCacheTTL = 5 * time.Minute
+	// meilisearchSemanticMinCosine is the least cosine similarity between a
+	// search's embedding and an item's embedding for the item to count as a
+	// match by meaning. Without a floor the meaning-only half of a hybrid
+	// search ranks every item that has a vector, so a search of two or more
+	// words returned the whole library. 0.3 is a starting value, not one
+	// measured against a real library: it sits above the cosine that
+	// unrelated texts usually get from the OpenAI text-embedding-3 models and
+	// MiniLM. A short search scored against a long title and overview tends to
+	// score lower than two similar sentences, so it may drop some weak
+	// meaning matches.
+	meilisearchSemanticMinCosine = 0.3
 )
 
 var meilisearchTitleSearchAttributes = []string{
@@ -356,12 +368,24 @@ func (p *MeilisearchSearchProvider) searchMeilisearch(ctx context.Context, req C
 	} else {
 		baseSearchReq, semanticFallback = p.buildMeilisearchSearchRequest(ctx, req)
 	}
-	useFederation := baseSearchReq.Hybrid != nil && searchRequestMixesEpisodeAndMedia(req.ItemTypes)
+	// Hybrid searches always federate: see buildFederatedSearchRequest.
+	useFederation := baseSearchReq.Hybrid != nil
 	if useFederation && p.isFederationUnsupported() {
 		semanticFallback = "meilisearch federation unsupported; using keyword search"
 		baseSearchReq.Vector = nil
 		baseSearchReq.Hybrid = nil
 		useFederation = false
+	}
+
+	// fallBackToKeyword switches the scan to keyword search. Keyword ranking
+	// differs from hybrid ranking, so the scan restarts from the first hit
+	// instead of carrying over hybrid-ranked offsets and items.
+	fallBackToKeyword := func(reason string) {
+		semanticFallback = reason
+		baseSearchReq.Vector = nil
+		baseSearchReq.Hybrid = nil
+		useFederation = false
+		accessible, meiliOffset, scanned = nil, 0, 0
 	}
 
 	for len(accessible) < target && !exhausted {
@@ -389,26 +413,15 @@ func (p *MeilisearchSearchProvider) searchMeilisearch(ctx context.Context, req C
 				p.markFederationSupported()
 			} else if isMeilisearchFederationUnsupported(err) {
 				p.markFederationUnsupported()
-				semanticFallback = "meilisearch federation unsupported; using keyword search"
-				baseSearchReq.Vector = nil
-				baseSearchReq.Hybrid = nil
-				useFederation = false
-				searchReq = baseSearchReq
-				searchReq.Offset = meiliOffset
-				searchReq.Limit = nextLimit
-				resp, err = p.client.Search(ctx, indexUID, searchReq)
+				fallBackToKeyword("meilisearch federation unsupported; using keyword search")
+				continue
 			}
 		} else {
 			resp, err = p.client.Search(ctx, indexUID, searchReq)
 		}
-		if err != nil && baseSearchReq.Hybrid != nil && !useFederation {
-			semanticFallback = "meilisearch hybrid search failed: " + err.Error()
-			baseSearchReq.Vector = nil
-			baseSearchReq.Hybrid = nil
-			searchReq = baseSearchReq
-			searchReq.Offset = meiliOffset
-			searchReq.Limit = nextLimit
-			resp, err = p.client.Search(ctx, indexUID, searchReq)
+		if err != nil && baseSearchReq.Hybrid != nil {
+			fallBackToKeyword("meilisearch hybrid search failed: " + err.Error())
+			continue
 		}
 		if err != nil {
 			return nil, err
@@ -552,12 +565,28 @@ func searchRequestMixesEpisodeAndMedia(itemTypes []string) bool {
 	return includesEpisodes && (len(itemTypes) == 0 || len(mediaTypes) > 0)
 }
 
+// buildFederatedSearchRequest runs a hybrid search as federated queries
+// instead of one Meilisearch hybrid query. A hybrid query applies a
+// rankingScoreThreshold to its keyword and meaning halves alike, so a floor
+// that drops unrelated meaning matches would also drop weak keyword matches.
+// Split apart, the keyword query keeps every keyword match, and only the
+// meaning-only query carries the floor. The weights are the hybrid ratio, as
+// Meilisearch weighs the two halves of a hybrid query, and federation drops
+// an item found by both queries from the lower-ranked one. A request that
+// mixes episodes with other media adds a keyword-only episode query, because
+// episodes carry no vectors.
 func (p *MeilisearchSearchProvider) buildFederatedSearchRequest(
 	indexUID string,
 	req CatalogSearchRequest,
 	base meilisearchSearchRequest,
 	offset, limit int,
 ) meilisearchFederatedSearchRequest {
+	semanticWeight := 0.0
+	if base.Hybrid != nil && len(base.Vector) > 0 {
+		semanticWeight = min(max(base.Hybrid.SemanticRatio, 0), 1)
+	}
+	keywordWeight := 1 - semanticWeight
+
 	mediaTypes, _ := splitSearchItemTypes(req.ItemTypes)
 	var mediaFilter string
 	if len(req.ItemTypes) == 0 {
@@ -566,30 +595,68 @@ func (p *MeilisearchSearchProvider) buildFederatedSearchRequest(
 		mediaFilter = meilisearchSearchFilter(mediaTypes, req.Access)
 	}
 	episodeFilter := meilisearchSearchFilter([]string{"episode"}, req.Access)
-	mediaQuery := meilisearchFederatedQuery{
-		IndexUID:             indexUID,
-		Query:                base.Query,
-		Filter:               mediaFilter,
-		AttributesToRetrieve: base.AttributesToRetrieve,
-		AttributesToSearchOn: base.AttributesToSearchOn,
-		MatchingStrategy:     base.MatchingStrategy,
-		Vector:               base.Vector,
-		Hybrid:               base.Hybrid,
+	keywordQuery := func(filter string) meilisearchFederatedQuery {
+		query := meilisearchFederatedQuery{
+			IndexUID:             indexUID,
+			Query:                base.Query,
+			Filter:               filter,
+			AttributesToRetrieve: base.AttributesToRetrieve,
+			AttributesToSearchOn: base.AttributesToSearchOn,
+			MatchingStrategy:     base.MatchingStrategy,
+		}
+		query.FederationOptions.Weight = keywordWeight
+		return query
 	}
-	mediaQuery.FederationOptions.Weight = 1
-	episodeQuery := meilisearchFederatedQuery{
-		IndexUID:             indexUID,
-		Query:                base.Query,
-		Filter:               episodeFilter,
-		AttributesToRetrieve: base.AttributesToRetrieve,
-		AttributesToSearchOn: base.AttributesToSearchOn,
-		MatchingStrategy:     base.MatchingStrategy,
+
+	queries := []meilisearchFederatedQuery{keywordQuery(mediaFilter)}
+	if semanticWeight > 0 {
+		// An empty q with a semanticRatio of 1 makes Meilisearch rank by the
+		// supplied vector alone. A meaning-only search never applies q, so
+		// negative terms (-word) narrow only the keyword query.
+		semanticQuery := meilisearchFederatedQuery{
+			IndexUID:              indexUID,
+			Filter:                mediaFilter,
+			AttributesToRetrieve:  base.AttributesToRetrieve,
+			Vector:                base.Vector,
+			Hybrid:                &meilisearchHybridRequest{Embedder: base.Hybrid.Embedder, SemanticRatio: 1},
+			RankingScoreThreshold: meilisearchSemanticScoreFloor(base.Vector, p.config.BinaryQuantized),
+		}
+		semanticQuery.FederationOptions.Weight = semanticWeight
+		queries = append(queries, semanticQuery)
 	}
-	episodeQuery.FederationOptions.Weight = 1
+	if searchRequestMixesEpisodeAndMedia(req.ItemTypes) {
+		queries = append(queries, keywordQuery(episodeFilter))
+	}
 	return meilisearchFederatedSearchRequest{
 		Federation: meilisearchFederationOptions{Offset: offset, Limit: limit},
-		Queries:    []meilisearchFederatedQuery{mediaQuery, episodeQuery},
+		Queries:    queries,
 	}
+}
+
+// meilisearchSemanticScoreFloor converts meilisearchSemanticMinCosine into the
+// score Meilisearch gives a meaning match, for use as rankingScoreThreshold.
+//
+// Meilisearch scores full-precision vectors as (1+cos)/2. Binary-quantized
+// vectors keep one sign bit per dimension and score by the share of bits that
+// agree, which for an angle θ between the vectors is about 1-θ/π. Vectors from
+// a model with fewer than embeddingvectors.CanonicalDimensions dimensions are
+// padded with zeros; padded bits always agree, which lifts every quantized
+// score, so the floor is scaled by the share of dimensions the model fills.
+// Zero padding does not change a cosine, so full-precision scores need no
+// such correction.
+func meilisearchSemanticScoreFloor(vector []float32, binaryQuantized bool) float64 {
+	if !binaryQuantized {
+		return (1 + meilisearchSemanticMinCosine) / 2
+	}
+	filled := len(vector)
+	for filled > 0 && vector[filled-1] == 0 {
+		filled--
+	}
+	if filled == 0 {
+		return 0
+	}
+	disagreeing := math.Acos(meilisearchSemanticMinCosine) / math.Pi
+	return 1 - disagreeing*float64(filled)/float64(len(vector))
 }
 
 func joinMeilisearchFilters(parts ...string) string {
@@ -650,8 +717,9 @@ func isMeilisearchFederationUnsupported(err error) bool {
 
 	// Older Meilisearch versions expose /multi-search but reject the newer
 	// federation object as an unknown field. Cache only that capability-shaped
-	// failure; malformed or incompatible federated queries should keep falling
-	// through to PostgreSQL so a request bug is not hidden for the process life.
+	// failure; a malformed or incompatible federated query falls back to
+	// keyword search for that request only, so a request bug is not hidden for
+	// the process life.
 	details := code + " " + message
 	mentionsFederation := strings.Contains(details, "federation")
 	unsupported := strings.Contains(details, "not supported") ||

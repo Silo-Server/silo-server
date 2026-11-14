@@ -194,7 +194,14 @@ TLS handshake, response headers, and the body read-idle timeout) and no
 whole-request deadline. Requests are trusted with the local network so
 LAN-hosted repositories keep working. A blocked address, reached directly or by
 redirect, fails as a permanent `PackageError`, not a transient one, because a
-retry cannot change it.
+retry cannot change it. A release's Sigstore bundle (`bundle_url`) comes the
+same way, capped at 256 KiB.
+
+The Sigstore TUF metadata that release signatures are checked against
+([plugin trust](plugin-trust.md#release-signatures)) is fetched through the
+same netguard transport, but without the local-network trust: the mirror is
+Sigstore's public CDN, so those requests reach public addresses only. Each
+TUF download has a 30-second limit, because go-tuf's fetcher takes no context.
 
 ## Limits
 
@@ -207,7 +214,8 @@ that also applies to traffic from the container if that matters.
 
 Because guarded transports ignore proxy environment variables, a server whose
 only route to the internet is an HTTP proxy cannot download remote catalog
-seeds, plugin repository catalogs, or plugin packages.
+seeds, plugin repository catalogs, plugin packages, or the Sigstore TUF
+metadata, so it cannot verify plugin release signatures either.
 
 A resolver that answers public names with addresses netguard classes as
 Private makes those hosts unreachable for untrusted requests, provider artwork

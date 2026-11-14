@@ -242,6 +242,12 @@ export interface UsePlaybackSessionResult extends PlaybackSessionState {
    * Resolves with whether a plan at the new position was adopted.
    */
   reanchorSeek: (positionSeconds: number) => Promise<boolean>;
+  /**
+   * The player moved to `positionSeconds` inside the stream it has, without a
+   * replan. A quality, track or output change queued behind the replan in
+   * flight then resumes there rather than where it was asked for.
+   */
+  reportSeek: (positionSeconds: number) => void;
   /** Re-reads the subtitle inventory by replanning with the selection unchanged. */
   refreshSubtitles: (currentPosition: number) => void;
   /** Folds a realtime-delivered inventory entry in without a server round trip. */
@@ -2014,6 +2020,22 @@ export function usePlaybackSession(
     [replan, reportEvent],
   );
 
+  const reportSeek = useCallback((positionSeconds: number) => {
+    const pending = pendingReplanRef.current;
+    if (!pending || !Number.isFinite(positionSeconds) || positionSeconds < 0) return;
+    // A recovery or reanchor names a position of its own; the other queued
+    // operations only carry where the viewer was when they were asked for.
+    const { operation } = pending.options;
+    if (
+      operation !== "quality_change" &&
+      operation !== "track_change" &&
+      operation !== "output_change"
+    ) {
+      return;
+    }
+    pendingReplanRef.current = { ...pending, options: { ...pending.options, positionSeconds } };
+  }, []);
+
   /**
    * Re-reads the subtitle inventory.
    *
@@ -2248,6 +2270,7 @@ export function usePlaybackSession(
     retryConnection,
     invalidatePlan,
     reanchorSeek,
+    reportSeek,
     refreshSubtitles,
     applySubtitleTrack,
     updatePlaybackState,

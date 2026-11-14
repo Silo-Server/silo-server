@@ -456,8 +456,13 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   sets `Deprecation: @<unix-seconds>`, `Link: <link>; rel="deprecation"` (appended to any
   existing `Link`), and `Sunset: <IMF-fixdate>` only when a sunset is declared, in the API
   middleware chain ahead of the class gate, so a gate denial or validation problem carries them
-  as a 200 does. No v2 operation is deprecated yet; the only deprecated
-  operations are test probes, recorded in the `deprecated_ok` and `deprecated_problem` fixtures.
+  as a 200 does. The deprecated v2 operations are the four that take
+  a password reset or invitation token in the URL path (`lookupPasswordReset`,
+  `completePasswordReset`, `lookupInvitation`, `acceptInvitation`; their replacements take it in
+  the body). They are removed before the lock: reset links live at most 24 hours and no client
+  but the web app called the reset pair, and the invitation pair goes once a released Android
+  build uses the body forms. Test probes, recorded in the `deprecated_ok` and
+  `deprecated_problem` fixtures, exercise the headers.
 - **Accepted library jobs.** Library refresh and deletion use the durable admin-job runner
   with canonical `/api/v2/library-jobs/{job_id}` monitors, safe named results/failures,
   conditional polling, and durable refresh cancellation. Worker progress and terminal writes
@@ -1090,7 +1095,10 @@ Media proxy routes retain their explicit cross-origin behavior because a browser
 streams from a separate proxy or transcode-node origin. Those routes still perform their normal
 token or bearer authorization and do not enable credentialed wildcard CORS; CORS is never an
 authorization mechanism. Jellyfin compatibility and other non-native surfaces retain their own
-tested policies. Support for a separately hosted browser client may later add an explicit
+tested policies. The native HLS manifest and segment routes send the same uncredentialed
+wildcard on every answer, authorization refusals included, because a Google Cast receiver plays
+them from a script on Google's origin; a raw operation opts in with `RawOperation.CrossOrigin`.
+Support for a separately hosted browser client may later add an explicit
 administrator-configured origin allowlist without changing the default native contract.
 
 ### What Huma covers

@@ -171,6 +171,80 @@ func TestPlaybackDeliveryCopyBeforeStatus(t *testing.T) {
 	})
 }
 
+// A Google Cast receiver plays HLS from a script on its own origin: it can
+// read neither the playlist nor a segment, nor learn why one was refused,
+// unless every answer carries uncredentialed CORS.
+func TestPlaybackHLSDeliveryAnswersCrossOrigin(t *testing.T) {
+	deps, _ := catalogDeps(t)
+	deps.PlaybackMedia = &PlaybackMediaHandlers{
+		Manifest: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+			_, _ = w.Write([]byte("#EXTM3U\n"))
+		}),
+		Segment: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/gone.m4s") {
+				http.Error(w, "gone", http.StatusGone)
+				return
+			}
+			w.Header().Set("Content-Type", "video/mp4")
+			http.ServeContent(w, r, "seg.m4s", time.Time{}, strings.NewReader("0123456789"))
+		}),
+		Original: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "video/mp4")
+			_, _ = w.Write([]byte("bytes"))
+		}),
+	}
+	h := newTestHandler(t, deps)
+	const castOrigin = "https://www.gstatic.com"
+	anonymous := map[string]string{"Origin": castOrigin}
+	viewer := with(viewerHeaders(), "Origin", castOrigin)
+	transcode := Prefix + "/playback/transcode/" + deliveryTestSession
+	requireCORS := func(name string, rec *httptest.ResponseRecorder) {
+		t.Helper()
+		if rec.Header().Get("Access-Control-Allow-Origin") != "*" ||
+			rec.Header().Get("Access-Control-Allow-Headers") != mediaCORSAllowHeaders ||
+			rec.Header().Get("Access-Control-Expose-Headers") != mediaCORSExposeHeaders ||
+			rec.Header().Get("Access-Control-Allow-Credentials") != "" {
+			t.Fatalf("%s: CORS headers %v", name, rec.Header())
+		}
+	}
+
+	manifest := do(t, h, http.MethodGet, transcode+"/master.m3u8?st=opaque", "", viewer)
+	if manifest.Code != http.StatusOK || manifest.Body.String() != "#EXTM3U\n" {
+		t.Fatalf("manifest: %d %q", manifest.Code, manifest.Body.String())
+	}
+	requireCORS("manifest", manifest)
+
+	segment := do(t, h, http.MethodGet, transcode+"/segment/seg_00001.m4s?st=opaque", "", with(viewer, "Range", "bytes=2-4"))
+	if segment.Code != http.StatusPartialContent || segment.Body.String() != "234" || segment.Header().Get("Content-Range") != "bytes 2-4/10" {
+		t.Fatalf("segment range: %d %q %v", segment.Code, segment.Body.String(), segment.Header())
+	}
+	requireCORS("segment", segment)
+
+	// The authorization gate refuses before the handler runs.
+	requireCORS("unauthenticated manifest", requireProblemResponse(t, do(t, h, http.MethodGet, transcode+"/master.m3u8?st=opaque", "", anonymous), TypeAuthenticationRequired))
+	requireCORS("unauthenticated segment", requireProblemResponse(t, do(t, h, http.MethodGet, transcode+"/segment/seg_00001.m4s?st=opaque", "", anonymous), TypeAuthenticationRequired))
+	// A handler failure becomes a problem through the delivery writer.
+	gone := do(t, h, http.MethodGet, transcode+"/segment/gone.m4s?st=opaque", "", viewer)
+	if gone.Code != http.StatusGone {
+		t.Fatalf("gone segment: %d %s", gone.Code, gone.Body.String())
+	}
+	requireCORS("gone segment", gone)
+
+	// Scope: other delivery and JSON operations keep the same-origin default.
+	for _, path := range []string{Prefix + "/stream/" + deliveryTestSession + "?st=opaque", Prefix + "/libraries"} {
+		if rec := do(t, h, http.MethodGet, path, "", viewer); rec.Header().Get("Access-Control-Allow-Origin") != "" {
+			t.Fatalf("%s gained CORS: %d %v", path, rec.Code, rec.Header())
+		}
+	}
+}
+
+func requireProblemResponse(t *testing.T, rec *httptest.ResponseRecorder, want ProblemType) *httptest.ResponseRecorder {
+	t.Helper()
+	requireProblem(t, rec, want)
+	return rec
+}
+
 func TestPlaybackDecisionV2ProjectsOnlyLocalMediaURLs(t *testing.T) {
 	for _, tc := range []struct{ path, want string }{
 		{"/api/v1/stream/session?st=opaque%2Btoken", "/api/v2/stream/session?st=opaque%2Btoken"},

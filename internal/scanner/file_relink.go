@@ -181,6 +181,11 @@ func (s *Scanner) tryRelinkMovedFile(
 	candidates = slices.DeleteFunc(candidates, func(candidate *scanStateFile) bool {
 		return isStandIn(candidate) || !sameFileModifiedAt(candidate.FileModifiedAt, fileModifiedAt)
 	})
+	// A row whose file has no video is never relinked; the file is probed at
+	// its new path like a new one.
+	if candidates, err = s.dropNoVideoCandidates(ctx, folder, candidates); err != nil {
+		return false, err
+	}
 	if len(candidates) == 0 {
 		return false, nil
 	}

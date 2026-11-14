@@ -1,6 +1,10 @@
+import { useSyncExternalStore } from "react";
 import { useEffectiveSettings } from "@/hooks/queries/settingValues";
 import { SETTING_KEYS } from "@/lib/settingsContract";
+import { onMeteredConnection } from "@/player/bandwidth-probe";
+import { networkInformation } from "@/player/network-information";
 import { normalizeQualityPreferenceV3 } from "@/player/protocol-v3";
+import { playbackQualitySettings } from "@/playback/playbackQualitySettings";
 
 /**
  * The resolution cap playback should apply, read from the contract.
@@ -26,12 +30,35 @@ export function useQualityPreference(fallback?: string | null): string | null {
   return useQualityPreferenceState(fallback).preference;
 }
 
-/** Detail pages initialize their edition after the first successful settings read. */
+function subscribeToNetworkChanges(onChange: () => void): () => void {
+  const connection = networkInformation() as (EventTarget & object) | undefined;
+  connection?.addEventListener?.("change", onChange);
+  return () => connection?.removeEventListener?.("change", onChange);
+}
+
+/**
+ * Whether the current link is metered, as the player decides it at start,
+ * updated when the browser reports a network or Data Saver change.
+ */
+function useMeteredConnection(): boolean {
+  return useSyncExternalStore(subscribeToNetworkChanges, onMeteredConnection, () => false);
+}
+
+/**
+ * The resolution cap the player starts with on the current connection: the
+ * cellular quality on a metered link (with its contract default until the read
+ * resolves), the main quality otherwise. Detail pages initialize their edition
+ * after the first successful settings read.
+ */
 export function useQualityPreferenceState(fallback?: string | null) {
+  const metered = useMeteredConnection();
   const { data } = useEffectiveSettings({
-    keys: [SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY],
+    keys: [
+      SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY,
+      SETTING_KEYS.PLAYBACK_CELLULAR_PREFERRED_QUALITY,
+    ],
   });
-  const resolved = data?.[SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY]?.value;
+  const resolved = playbackQualitySettings(data, metered).qualityPreference;
   return {
     preference:
       typeof resolved === "string"

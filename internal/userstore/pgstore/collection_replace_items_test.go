@@ -2,6 +2,7 @@ package pgstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -61,6 +62,60 @@ func TestPostgresReplaceCollectionItemsWritesOnlyTheDifference(t *testing.T) {
 		}
 		f.expect(t, "e", "a")
 	})
+}
+
+// TestPostgresReplaceCollectionItemsWaitsOutADelete pins #2844: a list sync's
+// replace that waits on a delete of its collection writes no rows under the
+// deleted ID once the delete commits, and says the collection is gone.
+func TestPostgresReplaceCollectionItemsWaitsOutADelete(t *testing.T) {
+	f := newReplaceItemsFixture(t)
+	f.replace(t, "a")
+	ctx := t.Context()
+
+	// Delete the collection the way deleteCollection does, without committing.
+	tx, err := f.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck // a no-op after the commit
+	for _, stmt := range []string{
+		`SELECT 1 FROM user_personal_collections WHERE user_id = $1 AND id = $2 FOR UPDATE`,
+		`DELETE FROM user_personal_collection_items WHERE user_id = $1 AND collection_id = $2`,
+		`DELETE FROM user_personal_collections WHERE user_id = $1 AND id = $2`,
+	} {
+		if _, err := tx.Exec(ctx, stmt, f.userID, f.collectionID); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	replacePool, app := newDeleteSessionPool(t)
+	replacer := newStore(replacePool, f.userID)
+	done := make(chan error, 1)
+	go func() {
+		done <- replacer.ReplaceCollectionItems(ctx, f.collectionID, []userstore.CollectionItemReplacement{
+			{MediaItemID: "a", Position: 0}, {MediaItemID: "b", Position: 1},
+		})
+	}()
+	waitForBlockedDelete(t, replacePool, app, func() {
+		select {
+		case err := <-done:
+			t.Fatalf("replace finished before the delete committed: %v", err)
+		default:
+		}
+	})
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; !errors.Is(err, userstore.ErrCollectionNotFound) {
+		t.Fatalf("replace after the delete = %v, want ErrCollectionNotFound", err)
+	}
+	var orphans int
+	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM user_personal_collection_items WHERE user_id = $1 AND collection_id = $2`, f.userID, f.collectionID).Scan(&orphans); err != nil {
+		t.Fatal(err)
+	}
+	if orphans != 0 {
+		t.Fatalf("%d item rows under the deleted collection, want 0", orphans)
+	}
 }
 
 type replaceItemsFixture struct {

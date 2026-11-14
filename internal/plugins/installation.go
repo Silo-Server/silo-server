@@ -54,6 +54,9 @@ type Installation struct {
 	// nil. A changed installed version or a later pass that does not fail
 	// clears it.
 	UpdateFailure *UpdateFailure `json:"-"`
+	// Signature is the release signature check of the installed package,
+	// recorded when it was installed and never re-run.
+	Signature Signature `json:"-"`
 }
 
 // UpdateFailure records an automatic update that was refused. Reason is
@@ -95,6 +98,9 @@ type CreateInstallationInput struct {
 	Enabled      bool
 	UpdatePolicy string
 	Capabilities []Capability
+	// Signature is the package's release signature check. A zero value
+	// records unknown.
+	Signature Signature
 }
 
 type UpdateInstallationInput struct {
@@ -115,6 +121,9 @@ type UpdateInstallationInput struct {
 	// is about updating from the version that was installed.
 	UpdateFailure      *UpdateFailure
 	ClearUpdateFailure bool
+	// Signature, when set, replaces the recorded release signature check, as
+	// when a new package replaces the installed one.
+	Signature *Signature
 	// IfVersion, when set, applies the row's column writes only while the
 	// installed version still equals it; otherwise they are a no-op. It does
 	// not guard Capabilities. An update check uses it so a refusal can't land
@@ -149,7 +158,7 @@ func (s *InstallationStore) WithTx(tx pgx.Tx) *InstallationStore {
 	return &InstallationStore{pool: tx}
 }
 
-const installationColumns = `id, repository_id, plugin_id, version, install_path, enabled, kind, update_policy, available_version, created_at, updated_at, runtime_generation, update_failed_version, update_failure_reason, update_failed_at`
+const installationColumns = `id, repository_id, plugin_id, version, install_path, enabled, kind, update_policy, available_version, created_at, updated_at, runtime_generation, update_failed_version, update_failure_reason, update_failed_at, signature_state, signature_source_repo, signature_verified_at`
 const capabilityColumns = `plugin_installation_id, capability_type, capability_id, metadata, created_at, updated_at`
 const archiveColumns = `plugin_installation_id, manifest_json, checksum, archive_bytes, created_at, updated_at`
 
@@ -158,6 +167,7 @@ func scanInstallation(row pgx.Row) (*Installation, error) {
 	var repositoryID *int
 	var failedVersion, failureReason *string
 	var failedAt *time.Time
+	var signatureState string
 	if err := row.Scan(
 		&installation.ID,
 		&repositoryID,
@@ -174,6 +184,9 @@ func scanInstallation(row pgx.Row) (*Installation, error) {
 		&failedVersion,
 		&failureReason,
 		&failedAt,
+		&signatureState,
+		&installation.Signature.SourceRepo,
+		&installation.Signature.VerifiedAt,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrInstallationNotFound
@@ -181,6 +194,7 @@ func scanInstallation(row pgx.Row) (*Installation, error) {
 		return nil, fmt.Errorf("scanning plugin installation: %w", err)
 	}
 	installation.RepositoryID = repositoryID
+	installation.Signature.State = SignatureState(signatureState)
 	if failedVersion != nil && failureReason != nil && failedAt != nil {
 		installation.UpdateFailure = &UpdateFailure{Version: *failedVersion, Reason: *failureReason, FailedAt: *failedAt}
 	}
@@ -245,8 +259,13 @@ func (s *InstallationStore) Create(ctx context.Context, input CreateInstallation
 	if updatePolicy == "" {
 		updatePolicy = "auto"
 	}
-	query := `INSERT INTO plugin_installations (repository_id, plugin_id, version, install_path, enabled, update_policy)
-		VALUES ($1, $2, $3, $4, $5, $6)
+	signatureState := input.Signature.State
+	if signatureState == "" {
+		signatureState = SignatureStateUnknown
+	}
+	query := `INSERT INTO plugin_installations (repository_id, plugin_id, version, install_path, enabled, update_policy,
+			signature_state, signature_source_repo, signature_verified_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING ` + installationColumns
 	installation, err := scanInstallation(tx.QueryRow(
 		ctx,
@@ -257,6 +276,9 @@ func (s *InstallationStore) Create(ctx context.Context, input CreateInstallation
 		input.InstallPath,
 		input.Enabled,
 		updatePolicy,
+		string(signatureState),
+		input.Signature.SourceRepo,
+		input.Signature.VerifiedAt,
 	))
 	if err != nil {
 		return nil, fmt.Errorf("creating plugin installation: %w", err)
@@ -398,6 +420,15 @@ func (s *InstallationStore) Update(ctx context.Context, id int, input UpdateInst
 		setClauses = append(setClauses, fmt.Sprintf("repository_id = $%d", argIndex))
 		args = append(args, input.RepositoryID)
 		argIndex++
+	}
+	if sig := input.Signature; sig != nil {
+		state := sig.State
+		if state == "" {
+			state = SignatureStateUnknown
+		}
+		setClauses = append(setClauses, fmt.Sprintf("signature_state = $%d, signature_source_repo = $%d, signature_verified_at = $%d", argIndex, argIndex+1, argIndex+2))
+		args = append(args, string(state), sig.SourceRepo, sig.VerifiedAt)
+		argIndex += 3
 	}
 	switch {
 	case input.UpdateFailure != nil:

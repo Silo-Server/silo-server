@@ -7,6 +7,7 @@ import type { BrowseItem } from "@/api/types";
 import { isNotFoundProblem } from "@/api/v2/request";
 import ItemGrid from "@/components/ItemGrid";
 import { cn } from "@/lib/utils";
+import { formatLocale } from "@/lib/appLocale";
 import PageUnavailable from "@/components/PageUnavailable";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import CastCarousel from "@/components/CastCarousel";
@@ -519,7 +520,10 @@ function CatalogResults({
             // A collection's hero has no count of its own; the filter bar shows it.
             resultCountLabel={
               isCollectionSource && showExactResultCount
-                ? t("web.catalog.page.titleCount", { count: totalItems, shown: totalItems })
+                ? t("web.catalog.page.titleCount", {
+                    count: totalItems,
+                    shown: totalItems.toLocaleString(formatLocale()),
+                  })
                 : undefined
             }
             resultCountLoading={

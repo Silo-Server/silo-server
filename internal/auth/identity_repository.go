@@ -119,17 +119,21 @@ func usableIdentityCount(ctx context.Context, db rowQuerier, userID int, exclude
 
 // insertIdentity writes a new link. signedIn records the sign-in that
 // created it, which is also a provider check that answered active; an
-// administrator link has neither yet.
-func insertIdentity(ctx context.Context, db dbQuerier, userID, installationID int, identity ExternalIdentity, signedIn bool) (*LinkedIdentity, error) {
+// administrator link has neither yet. A link the account's holder or an
+// administrator makes (fenced) takes an answer sequence value, so a sign-in
+// the provider answered before the link existed (for an earlier link of the
+// same subject, say) is not applied to it. A link a sign-in makes for itself
+// starts at 0, so an overlapping sign-in of the same person still signs in.
+func insertIdentity(ctx context.Context, db dbQuerier, userID, installationID int, identity ExternalIdentity, signedIn, fenced bool) (*LinkedIdentity, error) {
 	return scanIdentity(db.QueryRow(ctx, `
 		INSERT INTO plugin_auth_identities (
 			plugin_installation_id, external_subject, user_id, issuer, username, email, display_name,
-			linked_at, last_sign_in_at, last_checked_at, last_check_status, last_authenticated_at
+			linked_at, last_sign_in_at, last_checked_at, last_check_status, last_authenticated_at, answer_seq
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), CASE WHEN $8 THEN NOW() END, CASE WHEN $8 THEN NOW() END,
-			CASE WHEN $8 THEN $9 ELSE '' END, CASE WHEN $8 THEN NOW() END)
+			CASE WHEN $8 THEN $9 ELSE '' END, CASE WHEN $8 THEN NOW() END, CASE WHEN $10 THEN `+answerSeq+` ELSE 0 END)
 		RETURNING `+identityColumns,
 		installationID, identity.Subject, userID, identity.Issuer, identity.Username, identity.Email,
-		identity.DisplayName, signedIn, CheckStatusActive))
+		identity.DisplayName, signedIn, CheckStatusActive, fenced))
 }
 
 // recordIdentitySignIn refreshes what the provider said about the person
