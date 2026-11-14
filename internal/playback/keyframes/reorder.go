@@ -37,17 +37,18 @@ func signaledReorder(e matroska.TrackEntry) (int, bool) {
 	return 0, false
 }
 
-// avcReorder reads max_num_reorder_frames from the first SPS of an avcC
-// record (ISO/IEC 14496-15 5.3.3.1, H.264 7.3.2.1.1 and E.1.1).
+// avcReorder reads max_num_reorder_frames from the SPS of an avcC record
+// (ISO/IEC 14496-15 5.3.3.1, H.264 7.3.2.1.1 and E.1.1). A record with
+// several SPSs doesn't say which one the stream uses.
 func avcReorder(avcC []byte) (int, bool) {
-	if len(avcC) < 8 || avcC[0] != 1 || avcC[5]&0x1f == 0 {
+	if len(avcC) < 8 || avcC[0] != 1 || avcC[5]&0x1f != 1 {
 		return 0, false
 	}
 	n := int(binary.BigEndian.Uint16(avcC[6:8]))
 	if len(avcC) < 8+n || n < 4 || avcC[8]&0x1f != 7 {
 		return 0, false
 	}
-	b := &rbspReader{data: unescapeRBSP(avcC[9 : 8+n])}
+	b := newRBSPReader(avcC[9 : 8+n])
 	b.avcSPSToVUI()
 	if b.u(1) == 0 { // vui_parameters_present_flag
 		return 0, false
@@ -61,7 +62,11 @@ func avcReorder(avcC []byte) (int, bool) {
 	b.ue() // max_bits_per_mb_denom
 	b.ue() // log2_max_mv_length_horizontal
 	b.ue() // log2_max_mv_length_vertical
-	return b.reorder(b.ue())
+	reorder := b.ue()
+	// FFmpeg ignores the restriction when the SPS ends before its last
+	// field, max_dec_frame_buffering.
+	b.ue()
+	return b.reorder(reorder)
 }
 
 // avcSPSToVUI reads an H.264 SPS up to vui_parameters_present_flag.
@@ -189,12 +194,13 @@ func (b *rbspReader) hrd() {
 }
 
 // hevcReorder reads sps_max_num_reorder_pics of the highest sub-layer from
-// the first SPS of an hvcC record (ISO/IEC 14496-15 8.3.3.1, H.265
-// 7.3.2.2.1).
+// the SPS of an hvcC record (ISO/IEC 14496-15 8.3.3.1, H.265 7.3.2.2.1). A
+// record with several SPSs doesn't say which one the stream uses.
 func hevcReorder(hvcC []byte) (int, bool) {
 	if len(hvcC) < 23 || hvcC[0] != 1 {
 		return 0, false
 	}
+	var sps []byte
 	arrays := int(hvcC[22])
 	at := 23
 	for i := 0; i < arrays; i++ {
@@ -213,17 +219,23 @@ func hevcReorder(hvcC []byte) (int, bool) {
 			if len(hvcC) < at+n {
 				return 0, false
 			}
-			if nalType == 33 && n > 2 {
-				return hevcSPSReorder(unescapeRBSP(hvcC[at+2 : at+n]))
+			if nalType == 33 {
+				if sps != nil || n <= 2 {
+					return 0, false
+				}
+				sps = hvcC[at+2 : at+n]
 			}
 			at += n
 		}
 	}
-	return 0, false
+	if sps == nil {
+		return 0, false
+	}
+	return hevcSPSReorder(sps)
 }
 
 func hevcSPSReorder(sps []byte) (int, bool) {
-	b := &rbspReader{data: sps}
+	b := newRBSPReader(sps)
 	b.u(4)                // sps_video_parameter_set_id
 	maxSub := int(b.u(3)) //nolint:gosec // G115: a 3-bit field
 	b.u(1)                // sps_temporal_id_nesting_flag
@@ -303,17 +315,38 @@ func unescapeRBSP(nal []byte) []byte {
 }
 
 // rbspReader reads bits MSB first; bad is set once a read runs past the
-// data, after which every read returns 0.
+// payload, after which every read returns 0.
 type rbspReader struct {
 	data []byte
+	// bits is the payload's length, up to its rbsp_stop_one_bit: as in
+	// FFmpeg's parser, a field that reaches into it was never written.
+	bits int
 	pos  int
 	bad  bool
+}
+
+// newRBSPReader reads the payload of a NAL unit, without its header.
+func newRBSPReader(nal []byte) *rbspReader {
+	data := unescapeRBSP(nal)
+	b := &rbspReader{data: data}
+	for i := len(data) - 1; i >= 0; i-- {
+		if c := data[i]; c != 0 {
+			stop := 0
+			for c&1 == 0 {
+				c >>= 1
+				stop++
+			}
+			b.bits = i*8 + 7 - stop
+			break
+		}
+	}
+	return b
 }
 
 func (b *rbspReader) u(n int) uint64 {
 	var v uint64
 	for ; n > 0; n-- {
-		if b.bad || b.pos >= len(b.data)*8 {
+		if b.bad || b.pos >= b.bits {
 			b.bad = true
 			return 0
 		}

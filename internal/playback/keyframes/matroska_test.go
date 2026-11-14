@@ -3,6 +3,7 @@ package keyframes
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"io"
 	"math"
@@ -733,5 +734,30 @@ func TestReadPlanIndexRejectsAScaledTrack(t *testing.T) {
 	_, err := read(cuesFirstWithLeadingAudio(planTracks(floatEl(idTrackTimestampScale, 2))))
 	if !errors.Is(err, ErrNoIndex) {
 		t.Fatalf("err = %v, want ErrNoIndex", err)
+	}
+}
+
+// FFmpeg's decoder delay follows the SPS the stream uses, and ignores a
+// bitstream_restriction that the SPS cuts short. These avcC records come
+// from x264 encodes, the last two edited to add an unused SPS declaring 2
+// frames, and to end the SPS after max_num_reorder_frames.
+func TestSignaledReorder(t *testing.T) {
+	for _, tc := range []struct {
+		name, avcC string
+		want       int
+		ok         bool
+	}{
+		{"declared", "014d400bffe10017674d400beca146fc9808800000030080000032078a14cb01000468ce0fc8", 2, true},
+		{"two SPSs", "0164000bffe200196764000b4b3650a37e4c0440000003004000001903c50a658000186764000bacb4146fc980880000030008000003032078a15501000468ef0fcbfdf8f800", 0, false},
+		{"restriction cut short", "0164000bffe100186764000bacb4146fc980880000030008000003032078a14e01000468ef0fcbfdf8f800", 0, false},
+	} {
+		private, err := hex.DecodeString(tc.avcC)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, ok := signaledReorder(matroska.TrackEntry{CodecID: "V_MPEG4/ISO/AVC", CodecPrivate: private})
+		if got != tc.want || ok != tc.ok {
+			t.Errorf("%s: signaledReorder = %d, %v, want %d, %v", tc.name, got, ok, tc.want, tc.ok)
+		}
 	}
 }
