@@ -227,6 +227,7 @@ type MediaRequest struct {
 	State                string                  `json:"state" doc:"The one state to show a user: pending, approved, processing, partially_available (some requested seasons are in the library), available (in the library), declined, cancelled or failed" example:"pending"` //nolint:misspell // the store's spelling
 	Seasons              []int                   `json:"seasons" doc:"Series: the requested season numbers; empty means the whole series (requests made through v1 or before season requests)"`
 	SeasonProgress       []RequestSeasonProgress `json:"season_progress" doc:"Series season requests: each requested season's episodes, once the series is in the library; empty otherwise"`
+	Options              []RequestOptionChoice   `json:"options" doc:"What the requester chose from listRequestOptions when making the request, or the approving admin from listAdminRequestOptions, in the words it was offered in; empty when nothing was chosen"`
 	OutcomeReason        string                  `json:"outcome_reason,omitempty" doc:"Why the request was declined or withdrawn, when a reason was given"`
 	Source               string                  `json:"source" doc:"What created the request: direct (the Request button or an API create) or watchlist (adding a title that is not in the library to a watchlist); more values may be added" example:"direct"`
 	RequestedByUserID    ID                      `json:"requested_by_user_id,omitempty" example:"1"`
@@ -268,6 +269,8 @@ type MediaRequestCreate struct {
 	PosterPath   string `json:"poster_path,omitempty" doc:"TMDB image path"`
 	BackdropPath string `json:"backdrop_path,omitempty" doc:"TMDB image path"`
 	Seasons      []int  `json:"seasons,omitempty" maxItems:"200" doc:"Series only: the season numbers to request, starting at 1 (a season below 1 is refused). Omitted: every aired season not yet complete in the library" example:"[2,3]"`
+	// Options are the requester's picks from listRequestOptions.
+	Options map[string]string `json:"options,omitempty" maxProperties:"16" doc:"The requester's picks from listRequestOptions for this title, as option key to chosen value. A key or value that is not offered is refused with validation_failed. Omitted: the download server's own settings apply"`
 }
 
 // MediaRequestCreateInput is the createRequest request.
@@ -367,6 +370,7 @@ const (
 	opGetRequest            = "getRequest"
 	opSearchRequestMedia    = "searchRequestMedia"
 	opGetRequestMediaDetail = "getRequestMediaDetail"
+	opListRequestOptions    = "listRequestOptions"
 	opListDiscoverSections  = "listDiscoverSections"
 	opGetDiscoverSection    = "getDiscoverSection"
 	opGetDiscoverRow        = "getDiscoverRow"
@@ -410,6 +414,11 @@ func registerRequests(reg *Registry) {
 		"Get a movie's or series' detail document with its availability and request state.")
 	detail.Errors = []int{http.StatusConflict}
 	Register(reg, Operation{Operation: detail, Class: ClassProfileScoped, ServiceBacked: true}, reg.getRequestMediaDetail)
+
+	options := humaOp(http.MethodGet, Prefix+"/requests/options/{media_type}/{tmdb_id}", opListRequestOptions, requestsTag,
+		"List the download server settings the viewer may choose when requesting a title.")
+	options.Errors = []int{http.StatusConflict}
+	Register(reg, Operation{Operation: options, Class: ClassProfileScoped, ServiceBacked: true}, reg.listRequestOptions)
 
 	sections := humaOp(http.MethodGet, Prefix+"/requests/discover", opListDiscoverSections, requestsTag,
 		"List the Discover page's rows in the admin's order, with each title row's first page.")
@@ -525,6 +534,7 @@ func (reg *Registry) createRequest(ctx context.Context, in *MediaRequestCreateIn
 		PosterPath:   in.Body.PosterPath,
 		BackdropPath: in.Body.BackdropPath,
 		Seasons:      in.Body.Seasons,
+		Options:      in.Body.Options,
 	})
 	if err != nil {
 		return nil, requestProblem(err)
@@ -844,6 +854,7 @@ func mediaRequestOf(r *mediarequests.Request, viewer mediarequests.Viewer) Media
 		State:            string(r.State()),
 		Seasons:          NonNil(r.Seasons),
 		SeasonProgress:   requestSeasonProgressOf(r.SeasonProgress),
+		Options:          requestOptionChoicesOf(r.RequesterChoices),
 		OutcomeReason:    r.OutcomeReason,
 		Source:           string(requestSourceOf(r.Source)),
 		IsAnime:          r.IsAnime,

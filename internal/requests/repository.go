@@ -371,25 +371,26 @@ func (r *Repository) insertRequest(
 	if err != nil {
 		return nil, err
 	}
+	choices := encodeRequesterChoices(input.Choices)
 	row := exec.QueryRow(ctx, `
 		INSERT INTO media_requests (
 			id, provider, media_type, tmdb_id, tvdb_id, imdb_id, title, year,
 			overview, poster_path, backdrop_path, status, outcome,
 			requested_by_user_id, requested_by_profile_id, is_anime, created_at, updated_at, approved_at,
-			routing_facts, seasons, source
+			routing_facts, seasons, source, requester_choices
 		)
 		VALUES (
 			$1, 'tmdb', $2, $3, $4, $5, $6, $7,
 			$8, $9, $10, $11, $12,
 			$13, $14, $15, $16, $16, $17,
-			$18, $19, $20
+			$18, $19, $20, $21
 		)
 		RETURNING `+requestColumns(), input.ID, input.Input.MediaType, input.Input.TMDBID, tvdbID,
 		strings.TrimSpace(input.Input.IMDbID), strings.TrimSpace(input.Input.Title), year,
 		strings.TrimSpace(input.Input.Overview), strings.TrimSpace(input.Input.PosterPath),
 		strings.TrimSpace(input.Input.BackdropPath), status, outcome,
 		input.Requester.UserID, input.Requester.ProfileID, input.IsAnime, now, approvedAt,
-		facts, nonNilSeasons(input.Input.Seasons), requestSource(input.Input.Source))
+		facts, nonNilSeasons(input.Input.Seasons), requestSource(input.Input.Source), choices)
 	req, err := scanRequest(row)
 	if err != nil {
 		return nil, fmt.Errorf("insert request: %w", err)
@@ -647,6 +648,19 @@ func guardMiss(ctx context.Context, exec requestExecutor, id string) error {
 }
 
 func (r *Repository) SetStatus(ctx context.Context, id string, from StateGuard, status Status, actor Viewer) (*Request, error) {
+	return r.setStatus(ctx, id, from, status, actor, nil)
+}
+
+// ApproveWithRequesterChoices approves a pending request and replaces its
+// picks in one guarded update, so of two admins approving at once the one
+// whose approval wins also has their picks stored.
+func (r *Repository) ApproveWithRequesterChoices(ctx context.Context, id string, choices RequesterChoices, actor Viewer) (*Request, error) {
+	return r.setStatus(ctx, id, guardPending, StatusApproved, actor, encodeRequesterChoices(choices))
+}
+
+// setStatus applies a guarded status transition. choices, when not nil,
+// replaces the request's picks in the same update.
+func (r *Repository) setStatus(ctx context.Context, id string, from StateGuard, status Status, actor Viewer, choices []byte) (*Request, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin request status transaction: %w", err)
@@ -663,10 +677,11 @@ func (r *Repository) SetStatus(ctx context.Context, id string, from StateGuard, 
 		    completed_at = CASE WHEN $5 = 'completed' AND completed_at IS NULL THEN now() ELSE completed_at END,
 		    submit_attempts = CASE WHEN $5 = 'approved' THEN 0 ELSE submit_attempts END,
 		    submit_lease_until = CASE WHEN $5 = 'approved' THEN NULL ELSE submit_lease_until END,
-		    next_submit_at = CASE WHEN $5 = 'approved' THEN NULL ELSE next_submit_at END
+		    next_submit_at = CASE WHEN $5 = 'approved' THEN NULL ELSE next_submit_at END,
+		    requester_choices = COALESCE($6::jsonb, requester_choices)
 		WHERE id = $1
 		  AND `+guardCondition+`
-		RETURNING `+requestColumns(), id, statuses, outcomes, unsent, status))
+		RETURNING `+requestColumns(), id, statuses, outcomes, unsent, status, choices))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, guardMiss(ctx, tx, id)
@@ -1482,7 +1497,8 @@ func requestColumns() string {
 	        overview, poster_path, backdrop_path, status, outcome,
 	        requested_by_user_id, requested_by_profile_id, is_anime,
 	        last_error, created_at, updated_at, approved_at, completed_at,
-	        submit_attempts, submit_lease_until, next_submit_at, outcome_reason, routing_facts, seasons, source`
+	        submit_attempts, submit_lease_until, next_submit_at, outcome_reason, routing_facts, seasons, source,
+	        requester_choices`
 }
 
 type requestScanner interface {
@@ -1493,7 +1509,7 @@ func scanRequest(row requestScanner) (*Request, error) {
 	var req Request
 	var tvdbID, year sql.NullInt64
 	var approvedAt, completedAt, submitLeaseUntil, nextSubmitAt sql.NullTime
-	var rawFacts []byte
+	var rawFacts, rawChoices []byte
 	if err := row.Scan(
 		&req.ID,
 		&req.Provider,
@@ -1523,9 +1539,15 @@ func scanRequest(row requestScanner) (*Request, error) {
 		&rawFacts,
 		&req.Seasons,
 		&req.Source,
+		&rawChoices,
 	); err != nil {
 		return nil, err
 	}
+	choices, err := decodeRequesterChoices(rawChoices)
+	if err != nil {
+		return nil, err
+	}
+	req.RequesterChoices = choices
 	facts, err := decodeRoutingFacts(rawFacts)
 	if err != nil {
 		return nil, err

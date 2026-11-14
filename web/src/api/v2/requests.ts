@@ -12,6 +12,7 @@ import type {
   RequestMediaPage,
   RequestMediaResult,
   RequestMediaType,
+  RequestOption,
   RequestSearchMediaType,
   RequestTarget,
   RequestUserState,
@@ -131,6 +132,18 @@ export function getRequestMediaDetailV2(
         recommendations: d.recommendations.map(mediaResultFromV2),
       }) as RequestMediaDetail,
   );
+}
+
+// The download server settings the viewer may choose for a title. The server
+// asks the title's request plugin, so this is read when the viewer starts a
+// request, not for every title shown.
+export function listRequestOptionsV2(
+  mediaType: RequestMediaType,
+  tmdbID: number,
+): Promise<RequestOption[]> {
+  return v2("GET /api/v2/requests/options/{media_type}/{tmdb_id}", {
+    path: { media_type: mediaType, tmdb_id: tmdbID },
+  }).then((list) => list.options);
 }
 
 function discoverSectionFromV2(s: Schemas["DiscoverSection"]): RequestDiscoverySection {

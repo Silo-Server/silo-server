@@ -352,6 +352,80 @@ The series detail lists each regular season with its availability (`missing`,
 has at most one open request: a second profile that wants the same series while
 a request is open follows it.
 
+## Requester options
+
+A router plugin can let the requester, or the admin who approves, choose some
+of a download server's settings for one request, such as a quality profile or
+a root folder (`internal/requests/requester_options.go`). The plugin lists the
+config fields in its manifest (`request_router.requester_options`): each names
+a select field of its admin form, optionally a media type, a label, and a
+second select in the same form in which an admin says per server who chooses:
+`admin` (nobody; the saved value applies), `requester`, or `approver`. Because
+it is a select, a routing rule can override it. The host reads the list from the
+capability metadata stored at install, without launching the plugin. Whether a
+server offers an option is the host's decision from that list and the server's
+saved config; the plugin's RPCs are unchanged.
+
+`listRequestOptions` (`GET /api/v2/requests/options/{media_type}/{tmdb_id}`)
+answers what the viewer may choose for a title. The host names the one server
+the title would go to: the single usable connection when the media type has no
+routes, otherwise the server routing sends the title's HD copy to (its 4K copy
+when it gets no HD one), with that route's overrides applied. It then asks the
+plugin's `ListConfigOptions` for that server and returns the offered fields
+with their choices. It returns no options when no single server can be named
+(several connections without routes, or rules that need TMDB facts it could not
+read), when the server offers none, and when the plugin call fails, since a
+title can always be requested without a pick. The call reaches the download
+server, so clients make it when the requester opens the request control, never
+per card.
+
+`createRequest` takes the picks as `options` (option key to value). The host
+lists the offer again and refuses the request with `validation_failed` on
+`options` unless every key is offered and every value is one of its choices; it
+also refuses when the choices cannot be read. This check is the authority: a
+pick reaches the download server as a setting, so only a value the plugin
+listed for that server passes, and a plugin cannot offer a config key routing
+sets itself. The picks are stored on the request (`requester_choices`) with the
+labels they were offered under and the server they were offered on.
+
+An option's `default` is the value a form preselects. It is the server's own
+setting when that is one of the choices, and the first choice otherwise (a
+saved profile that was since deleted, say). A client therefore sends the
+selected value of every option it showed, the default included, so what the
+requester saw is what applies. A pick that is the server's own setting is not
+stored: that setting applies anyway, and it keeps following the server.
+Listing the options runs the same access check as creating a request, so an
+account that may not request cannot read the choices.
+
+At submission the picks are set in that server's config, over the server's own
+values and the route's overrides, and the plugin reads its config as always.
+They apply only to the server they were offered on, and only while that server
+still offers the option: picks for another server (routing changed since), or
+for an option the server no longer leaves to whoever picked, are left out and the server's own
+settings apply. A value is an id or a path of one server and may name
+something else on another. The plugin checks the value again when it submits.
+
+A request shows its picks as `options`, to the requester and to admins. They
+are the plugin's own words (a profile name, a folder path), which the
+requester already saw when choosing. `GET /requests/status` advertises
+`request_options_supported`. v1 does not carry options. Requests made from the
+watchlist, from a result card, or by a client that does not know options carry
+none.
+
+An admin approving a pending request chooses the options the server leaves to
+the approver, and may change those it leaves to requesters.
+`GET /admin/requests/{id}/options` (`listAdminRequestOptions`) lists both for
+the server the request would go to, each defaulting to the requester's pick
+when there is one. `adminApproveRequest` takes the admin's picks as `options`
+and checks them the same way; a pick replaces the requester's for that option
+and is stored as the admin's, also when it is the requester's own value, so
+a confirmed pick still applies after the server moves that option from
+requesters to the approver. The picks are stored in the same guarded update that approves
+the request, so when two admins approve at once the one whose approval wins is
+the one whose picks apply. A request that is approved automatically, or
+with several others at once, gets no approver pick, so an option left to the
+approver keeps the server's saved value there.
+
 ## Following a title
 
 A profile that finds a title someone else already requested can follow it

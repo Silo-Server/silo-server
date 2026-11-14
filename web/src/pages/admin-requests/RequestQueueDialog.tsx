@@ -44,7 +44,12 @@ import { RoutePreviewResult } from "@/pages/admin-settings/RequestRoutePreview";
 import { requestRouterInstallations } from "@/pages/admin-settings/requestServerModel";
 import { RequestActionButtons, type RequestQueueActionHandlers } from "./RequestActionButtons";
 import { RequestPoster, RequestStateSummary, TargetStatusBadge } from "./queueParts";
-import { formatRequestEventType, requestQueueView, targetServerName } from "./requestQueueModel";
+import {
+  distinctTargets,
+  formatRequestEventType,
+  requestQueueView,
+  targetServerName,
+} from "./requestQueueModel";
 
 const SEPARATOR = " · ";
 const SPACE = " ";
@@ -177,6 +182,12 @@ function RequestDetail({
                   {formatDateTime(request.completed_at)}
                 </Term>
               ) : null}
+              {/* What the requester chose for the download server, in the plugin's own words. */}
+              {request.options?.map((choice) => (
+                <Term key={choice.key} label={choice.label}>
+                  {choice.value_label}
+                </Term>
+              ))}
               {request.media_type === "series" ? (
                 <Term label={t("web.admin.requests.detail.seasons")}>
                   {request.seasons?.length
@@ -287,8 +298,12 @@ function TargetsTable({ request }: { request: MediaRequest }) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {request.targets?.map((target) => (
-            <TargetRows key={target.id} target={target} />
+          {distinctTargets(request.targets).map((entry) => (
+            <TargetRows
+              key={entry.target.id}
+              target={entry.target}
+              label={entry.shared ? NO_ROUTE : entry.target.quality}
+            />
           ))}
         </TableBody>
       </Table>
@@ -296,11 +311,17 @@ function TargetsTable({ request }: { request: MediaRequest }) {
   );
 }
 
-function TargetRows({ target }: { target: NonNullable<MediaRequest["targets"]>[number] }) {
+function TargetRows({
+  target,
+  label,
+}: {
+  target: NonNullable<MediaRequest["targets"]>[number];
+  label: string;
+}) {
   return (
     <>
       <TableRow className={target.last_error ? "border-b-0" : undefined}>
-        <TableCell className="font-medium">{target.quality}</TableCell>
+        <TableCell className="font-medium">{label}</TableCell>
         <TableCell>{targetServerName(target)}</TableCell>
         <TableCell className="text-muted-foreground">{target.route_name || NO_ROUTE}</TableCell>
         <TableCell>

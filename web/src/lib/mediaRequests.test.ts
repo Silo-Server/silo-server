@@ -14,6 +14,7 @@ import {
   parseRequestMediaType,
   pendingPageSize,
   requestDisplayState,
+  requestOptionsToSend,
   requestSearchHref,
   requestSearchTypeForScope,
   upcomingRequestSeasons,
@@ -193,5 +194,32 @@ describe("season requests", () => {
       formatSeasonProgress([{ season_number: 1, episodes_aired: 0, episodes_available: 3 }]),
     ).toBe("");
     expect(formatRequestDisplayState("partially_available")).toBe("Partially available");
+  });
+});
+
+describe("requestOptionsToSend", () => {
+  const options = [
+    {
+      key: "profile",
+      label: "Quality",
+      default: "default",
+      choices: [
+        { value: "default", label: "Server default" },
+        { value: "4", label: "Ultra-HD" },
+      ],
+    },
+  ];
+
+  it("sends the selected value of every option", () => {
+    expect(requestOptionsToSend(options, { profile: "4" })).toEqual({ profile: "4" });
+    // The default is what the form shows, so it is sent too.
+    expect(requestOptionsToSend(options, {})).toEqual({ profile: "default" });
+  });
+
+  it("falls back to the default for a stale value and ignores an unknown option", () => {
+    expect(requestOptionsToSend(options, { profile: "7", folder: "/x" })).toEqual({
+      profile: "default",
+    });
+    expect(requestOptionsToSend(undefined, { profile: "4" })).toBeUndefined();
   });
 });

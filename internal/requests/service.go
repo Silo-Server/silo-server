@@ -850,6 +850,11 @@ func (s *Service) CreateRequest(ctx context.Context, viewer Viewer, input Create
 	if err := validateCreateAccess(policy); err != nil {
 		return nil, err
 	}
+	// Last of the checks: it asks the download server for its choices.
+	choices, err := s.resolveRequesterChoices(ctx, requestProbe(viewer, normalized.MediaType, normalized.TMDBID, facts), normalized.Options)
+	if err != nil {
+		return nil, err
+	}
 
 	id, err := idgen.NextID()
 	if err != nil {
@@ -870,6 +875,7 @@ func (s *Service) CreateRequest(ctx context.Context, viewer Viewer, input Create
 		Facts:     facts,
 		Requester: viewer,
 		Now:       s.now(),
+		Choices:   choices,
 		// Re-requesting a title that failed for this user (e.g. a transient
 		// integration error) replaces their failed row.
 		ReplaceFailed: true,
@@ -1110,8 +1116,13 @@ func (s *Service) Approve(ctx context.Context, viewer Viewer, id string) (*Reque
 	if err != nil {
 		return nil, err
 	}
+	return s.afterAdminApproval(ctx, viewer, approved), nil
+}
+
+// afterAdminApproval notifies about and submits a request an admin approved.
+func (s *Service) afterAdminApproval(ctx context.Context, viewer Viewer, approved *Request) *Request {
 	s.notifyApproval(ctx, *approved, ApprovalOriginAdmin)
-	return s.withLibraryContent(ctx, s.submitAfterCommit(ctx, *approved, viewer)), nil
+	return s.withLibraryContent(ctx, s.submitAfterCommit(ctx, *approved, viewer))
 }
 
 // Decline rejects a request nothing has been sent for: a pending one, or an
@@ -2262,6 +2273,11 @@ func (s *Service) submitClaimed(ctx context.Context, req Request, actor Viewer, 
 		return done, err
 	}
 	s.populateRequesterIdentity(ctx, &req)
+	for i := range conns {
+		if err := s.applyRequesterChoices(ctx, fc, req, &conns[i], installationID, capabilityID); err != nil {
+			return nil, err
+		}
+	}
 	targets, msg, err := s.router.Fulfill(ctx, installationID, capabilityID, req, plan.want, conns)
 	if err != nil {
 		return nil, err
@@ -2312,6 +2328,10 @@ func (s *Service) submitRouted(ctx context.Context, req Request, actor Viewer, f
 			continue
 		}
 		conn, installationID, capabilityID, err := s.routedConnection(ctx, fc, decision, req.MediaType, q)
+		if err == nil {
+			// The requester's picks go over the route's overrides.
+			err = s.applyRequesterChoices(ctx, fc, req, &conn, installationID, capabilityID)
+		}
 		if err != nil {
 			if len(targets) == 0 {
 				// The chosen server is gone, disabled or not set up: an

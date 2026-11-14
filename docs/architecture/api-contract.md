@@ -1889,6 +1889,15 @@ series detail lists the regular seasons with availability and request coverage;
 requests carry `seasons`, `season_progress` and the `partially_available` state;
 `GET /api/v2/requests/status` advertises `season_requests_supported`.
 
+A request can carry the requester's choice of download server settings
+(`options` on `POST /api/v2/requests`), picked from
+`GET /api/v2/requests/options/{media_type}/{tmdb_id}`. That operation asks the
+title's download server, so a client calls it when the requester starts a
+request, not per title shown. A key or value that is not offered answers
+`validation_failed`. Requests carry what was chosen as `options`;
+`GET /api/v2/requests/status` advertises `request_options_supported`. See
+[Media requests](media-requests.md#requester-options).
+
 While a request downloads, requests, their targets and the title detail's
 request state carry `download` (phase, percent, bytes, estimated completion,
 and when the server last heard from the download server), and

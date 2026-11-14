@@ -1442,6 +1442,7 @@ func (f *fakeStore) CreateRequest(_ context.Context, input CreateRequestRecord) 
 		IsAnime:              input.IsAnime,
 		RoutingFacts:         input.Facts,
 		Seasons:              input.Input.Seasons,
+		RequesterChoices:     input.Choices,
 		RequestedByUserID:    input.Requester.UserID,
 		RequestedByProfileID: input.Requester.ProfileID,
 		Source:               requestSource(input.Input.Source),
@@ -1690,6 +1691,26 @@ func (f *fakeStore) SetStatus(_ context.Context, id string, from StateGuard, sta
 	}
 	copy := *req
 	return &copy, nil
+}
+
+func (f *fakeStore) ApproveWithRequesterChoices(_ context.Context, id string, choices RequesterChoices, _ Viewer) (*Request, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	req := f.lookupLocked(id)
+	if req == nil {
+		return nil, ErrNotFound
+	}
+	if !f.guardAccepts(guardPending, req) {
+		return nil, ErrInvalidState
+	}
+	f.statusUpdates = append(f.statusUpdates, StatusApproved)
+	req.RequesterChoices = choices
+	req.Status = StatusApproved
+	req.SubmitAttempts = 0
+	req.SubmitLeaseUntil = nil
+	req.NextSubmitAt = nil
+	approved := *req
+	return &approved, nil
 }
 
 func (f *fakeStore) SetOutcome(_ context.Context, id string, from StateGuard, outcome Outcome, _ Viewer, message string) (*Request, error) {
@@ -2599,8 +2620,11 @@ type fakeRouterProvider struct {
 	// urlOptional marks the installations whose router declares
 	// base_url_optional.
 	urlOptional map[int]bool
-	featuresErr error
-	gotTVDBID   *int
+	// requesterOptions are the requester options each installation's router
+	// declares.
+	requesterOptions map[int][]RouterRequesterOption
+	featuresErr      error
+	gotTVDBID        *int
 
 	// CheckStatus behavior.
 	statuses  []RouterTargetStatus
@@ -2645,6 +2669,7 @@ func (f *fakeRouterProvider) RouterFeatures(_ context.Context, installationID in
 		ReportsDownloadProgress: f.progressCapable[installationID],
 		APIKeyOptional:          f.keyOptional[installationID],
 		BaseURLOptional:         f.urlOptional[installationID],
+		RequesterOptions:        f.requesterOptions[installationID],
 	}, f.featuresErr
 }
 

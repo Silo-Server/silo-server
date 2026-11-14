@@ -5,9 +5,10 @@ import type {
   MediaRequestStatus,
   RequestMediaResult,
   RequestMediaSeason,
-  RequestSeasonProgress,
   RequestMediaType,
+  RequestOption,
   RequestSearchMediaType,
+  RequestSeasonProgress,
   RequestUserState,
 } from "@/api/types";
 import { numberText, t } from "@/i18n";
@@ -379,4 +380,30 @@ export function requestInputFromMediaResult(item: RequestMediaResult): CreateMed
     poster_path: item.poster_path || undefined,
     backdrop_path: item.backdrop_path || undefined,
   };
+}
+
+/** The viewer's picks, by option key. An option without a pick keeps its default. */
+export type RequestOptionPicks = Record<string, string>;
+
+/**
+ * The picks to send with a request: every option's selected value, which is
+ * its default until the viewer picks another. The default is sent too: it is
+ * what the form shows, and it is not always the download server's own
+ * setting. The server leaves out a pick that is its own setting. No options
+ * is undefined.
+ */
+export function requestOptionsToSend(
+  options: readonly RequestOption[] | undefined,
+  picks: RequestOptionPicks,
+): Record<string, string> | undefined {
+  const out: Record<string, string> = {};
+  for (const option of options ?? []) {
+    const chosen = picks[option.key];
+    const pick =
+      chosen !== undefined && option.choices.some((choice) => choice.value === chosen)
+        ? chosen
+        : option.default;
+    if (option.choices.some((choice) => choice.value === pick)) out[option.key] = pick;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }

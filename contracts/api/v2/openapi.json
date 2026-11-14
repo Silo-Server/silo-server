@@ -18768,6 +18768,14 @@
       "AdminRequestActionInputBody": {
         "additionalProperties": false,
         "properties": {
+          "options": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Approve only: the admin's picks from listAdminRequestOptions, as option key to chosen value. A pick replaces the requester's for that option. A key or value that is not offered is refused with validation_failed. Omitted: the requester's picks and the download server's own settings apply",
+            "maxProperties": 16,
+            "type": "object"
+          },
           "reason": {
             "type": "string"
           }
@@ -35435,6 +35443,10 @@
             "description": "Whether removeFailedRequest is available: a requester can delete their own failed request that delivered nothing.",
             "type": "boolean"
           },
+          "request_options_supported": {
+            "description": "Whether the server has listRequestOptions and takes options on createRequest. Whether a given title offers any depends on its download server and that server's request plugin.",
+            "type": "boolean"
+          },
           "requests_enabled": {
             "type": "boolean"
           },
@@ -35475,6 +35487,7 @@
           "watchlist_requests",
           "discover_rows_supported",
           "remove_failed_supported",
+          "request_options_supported",
           "revision",
           "state",
           "allowed"
@@ -40015,6 +40028,13 @@
             ],
             "type": "string"
           },
+          "options": {
+            "description": "What the requester chose from listRequestOptions when making the request, or the approving admin from listAdminRequestOptions, in the words it was offered in; empty when nothing was chosen",
+            "items": {
+              "$ref": "#/components/schemas/RequestOptionChoice"
+            },
+            "type": "array"
+          },
           "outcome": {
             "description": "active, declined, cancelled, failed",
             "examples": [
@@ -40146,6 +40166,7 @@
           "state",
           "seasons",
           "season_progress",
+          "options",
           "source",
           "is_anime",
           "targets",
@@ -40196,6 +40217,14 @@
               "movie"
             ],
             "type": "string"
+          },
+          "options": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "The requester's picks from listRequestOptions for this title, as option key to chosen value. A key or value that is not offered is refused with validation_failed. Omitted: the download server's own settings apply",
+            "maxProperties": 16,
+            "type": "object"
           },
           "overview": {
             "type": "string"
@@ -49608,6 +49637,124 @@
           "requestable",
           "following",
           "requested_by_viewer"
+        ],
+        "type": "object"
+      },
+      "RequestOption": {
+        "additionalProperties": false,
+        "properties": {
+          "choices": {
+            "description": "The values on offer; never empty",
+            "items": {
+              "$ref": "#/components/schemas/RequestOptionValue"
+            },
+            "type": "array"
+          },
+          "default": {
+            "description": "The value to preselect; always one of choices. It is the download server's own setting when that is on offer, and the first choice otherwise, so send the selected value of every option, also when it is the default. A value that is the server's own setting is not stored as a pick",
+            "examples": [
+              "default"
+            ],
+            "type": "string"
+          },
+          "key": {
+            "description": "The key to send in createRequest's options",
+            "examples": [
+              "radarr_profile_id"
+            ],
+            "type": "string"
+          },
+          "label": {
+            "description": "The option's name",
+            "examples": [
+              "Quality"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "default",
+          "choices"
+        ],
+        "type": "object"
+      },
+      "RequestOptionChoice": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "description": "The option's key",
+            "examples": [
+              "radarr_profile_id"
+            ],
+            "type": "string"
+          },
+          "label": {
+            "description": "The option's name",
+            "examples": [
+              "Quality"
+            ],
+            "type": "string"
+          },
+          "value": {
+            "description": "The chosen value",
+            "examples": [
+              "4"
+            ],
+            "type": "string"
+          },
+          "value_label": {
+            "description": "The chosen value's name when it was chosen",
+            "examples": [
+              "Ultra-HD"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "value",
+          "value_label"
+        ],
+        "type": "object"
+      },
+      "RequestOptionList": {
+        "additionalProperties": false,
+        "properties": {
+          "options": {
+            "description": "Empty, never null, when the title's download server offers no choice, or its choices cannot be read right now",
+            "items": {
+              "$ref": "#/components/schemas/RequestOption"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "options"
+        ],
+        "type": "object"
+      },
+      "RequestOptionValue": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "examples": [
+              "Ultra-HD"
+            ],
+            "type": "string"
+          },
+          "value": {
+            "examples": [
+              "4"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "label"
         ],
         "type": "object"
       },
@@ -123683,6 +123830,162 @@
           }
         ],
         "summary": "List a request's history, newest first (at most 200 entries).",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/requests/{id}/options": {
+      "get": {
+        "operationId": "listAdminRequestOptions",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The request",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "The request",
+              "examples": [
+                "1834729"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestOptionList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Manage media requests and their configuration.",
         "tags": [
           "admin"
         ],
@@ -213783,6 +214086,191 @@
           }
         ],
         "summary": "List the account's media requests, newest first.",
+        "tags": [
+          "requests"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/requests/options/{media_type}/{tmdb_id}": {
+      "get": {
+        "operationId": "listRequestOptions",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The media type",
+            "in": "path",
+            "name": "media_type",
+            "required": true,
+            "schema": {
+              "description": "The media type",
+              "enum": [
+                "movie",
+                "series"
+              ],
+              "examples": [
+                "movie"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "TMDB identifier (external, not a Silo ID)",
+            "in": "path",
+            "name": "tmdb_id",
+            "required": true,
+            "schema": {
+              "description": "TMDB identifier (external, not a Silo ID)",
+              "examples": [
+                949
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestOptionList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the download server settings the viewer may choose when requesting a title.",
         "tags": [
           "requests"
         ],

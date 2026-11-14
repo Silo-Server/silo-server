@@ -1120,6 +1120,7 @@ type MediaRequestService interface {
 	DiscoverRow(ctx context.Context, viewer mediarequests.Viewer, rowID string, page int) (*mediarequests.DiscoverySection, error)
 	GetDetail(ctx context.Context, viewer mediarequests.Viewer, mediaType mediarequests.MediaType, tmdbID int) (*mediarequests.MediaDetail, error)
 	CreateRequest(ctx context.Context, viewer mediarequests.Viewer, input mediarequests.CreateRequestInput) (*mediarequests.Request, error)
+	RequesterOptions(ctx context.Context, viewer mediarequests.Viewer, mediaType mediarequests.MediaType, tmdbID int) ([]mediarequests.RequesterOption, error)
 	ListMine(ctx context.Context, viewer mediarequests.Viewer, filter mediarequests.ListFilter) ([]*mediarequests.Request, error)
 	GetRequest(ctx context.Context, viewer mediarequests.Viewer, id string) (*mediarequests.Request, error)
 	ListStudios(ctx context.Context, viewer mediarequests.Viewer) ([]mediarequests.DiscoverBrandCard, error)

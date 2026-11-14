@@ -176,7 +176,8 @@ export function useApproveMediaRequest() {
   const queryClient = useQueryClient();
   return useMutation({
     retry: false,
-    mutationFn: (id: string) => approveAdminRequestV2(id),
+    mutationFn: ({ id, options }: { id: string; options?: Record<string, string> }) =>
+      approveAdminRequestV2(id, options),
     onSuccess: () => {
       toast.success(t("web.admin.requests.toast.approved"));
     },

@@ -3,9 +3,8 @@ import type { MouseEvent } from "react";
 import { Link, useSearchParams } from "react-router";
 import { Maximize2, RefreshCw, Search, X } from "lucide-react";
 import type { MediaRequest } from "@/api/types";
-import type { AdminRequestCounts } from "@/api/v2/adminRequests";
+import { listAdminRequestOptionsV2, type AdminRequestCounts } from "@/api/v2/adminRequests";
 import { BulkSelectionCheckbox } from "@/components/BulkSelectionCheckbox";
-import { RequestDownloadProgress } from "@/components/RequestDownloadProgress";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,21 +28,23 @@ import { formatMediaType, formatSeasonList, requestDetailHref } from "@/lib/medi
 import { cn } from "@/lib/utils";
 import { RequestActionButtons, type RequestQueueActionHandlers } from "./RequestActionButtons";
 import { RequestQueueDialog } from "./RequestQueueDialog";
+import { ApproveOptionsDialog, type ApprovePrompt } from "./ApproveOptionsDialog";
 import { BulkProgress } from "./BulkProgress";
+import { OptionCells, TargetList } from "./QueueCells";
 import {
   EmptyPanel,
   ReasonDialog,
   RequestPoster,
   RequestStateSummary,
   RowsSkeleton,
-  TargetStatusBadge,
 } from "./queueParts";
 import {
   defaultRequestQueueView,
   parseRequestQueueUser,
   parseRequestQueueView,
+  queueColumnsStyle,
   REQUEST_QUEUE_VIEWS,
-  targetServerName,
+  requestOptionColumns,
   type RequestQueueAction,
   type RequestQueueMediaFilter,
   type RequestQueueView,
@@ -51,7 +52,6 @@ import {
 
 const SEARCH_DEBOUNCE_MS = 300;
 const SEPARATOR = " · ";
-const SPACE = " ";
 
 const MEDIA_FILTERS: { value: RequestQueueMediaFilter; label: MessageKey }[] = [
   { value: "all", label: "web.admin.requests.queue.media.all" },
@@ -123,6 +123,7 @@ export function RequestQueue() {
     : null;
   if (opened !== null && openRequest === null) setOpened(null);
   const [prompt, setPrompt] = useState<ReasonPrompt | null>(null);
+  const [approvePrompt, setApprovePrompt] = useState<ApprovePrompt | null>(null);
   const [busy, setBusy] = useState<ReadonlyMap<string, RequestQueueAction>>(() => new Map());
   const approve = useApproveMediaRequest();
   const decline = useDeclineMediaRequest();
@@ -160,13 +161,30 @@ export function RequestQueue() {
       );
   }
 
+  /**
+   * Approves a request, first asking for the download server settings when
+   * its server has any to choose. A server whose choices cannot be read is
+   * approved with its own settings.
+   */
+  function approveRequest(request: MediaRequest) {
+    track(request, "approve", async () => {
+      const options = await listAdminRequestOptionsV2(request.id).catch(() => []);
+      if (!options || options.length === 0) return approve.mutateAsync({ id: request.id });
+      // A prompt already open keeps the dialog: replacing it would put this
+      // request under settings chosen for the other. Approve is pressed
+      // again once that dialog closes.
+      setApprovePrompt((open) => open ?? { request, options });
+      return request;
+    });
+  }
+
   const handlers: RequestQueueActionHandlers = {
     locked: bulk.isRunning,
     busyAction: (id) => busy.get(id),
     run: (action: RequestQueueAction, request: MediaRequest) => {
       switch (action) {
         case "approve":
-          return track(request, action, () => approve.mutateAsync(request.id));
+          return approveRequest(request);
         case "retry":
           return track(request, action, () => retry.mutateAsync(request.id));
         case "decline":
@@ -311,6 +329,15 @@ export function RequestQueue() {
           if (!open) setOpened(null);
         }}
       />
+      <ApproveOptionsDialog
+        prompt={approvePrompt}
+        onConfirm={(request, options) =>
+          track(request, "approve", () => approve.mutateAsync({ id: request.id, options }))
+        }
+        onOpenChange={(open) => {
+          if (!open) setApprovePrompt(null);
+        }}
+      />
       <ReasonDialog
         open={prompt !== null}
         {...reasonDialogText(t, prompt)}
@@ -423,6 +450,10 @@ function QueueList({
   const t = useT();
   const queue = useAdminRequestQueue(filter);
   const rows = useMemo(() => queue.data?.pages.flatMap((page) => page.items) ?? [], [queue.data]);
+  // A column per setting someone chose for a request on this page, such as
+  // a quality profile; none when nothing was chosen.
+  const optionColumns = useMemo(() => requestOptionColumns(rows), [rows]);
+  const columnsStyle = queueColumnsStyle(optionColumns.length);
   const selectable = view === "needs_approval";
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
   const selectedRows = rows.filter((row) => selected.has(row.id));
@@ -498,10 +529,15 @@ function QueueList({
           <div className="border-border text-muted-foreground hidden items-center gap-3 border-b px-4 py-2 text-xs font-medium lg:flex">
             {selectable ? <span className="w-4" /> : null}
             <span className="w-10" />
-            <div className="grid flex-1 grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1.3fr)] gap-x-6">
+            <div className="grid flex-1 grid-cols-(--queue-columns) gap-x-6" style={columnsStyle}>
               <span>{t("web.admin.requests.queue.column.request")}</span>
               <span>{t("web.admin.requests.queue.column.state")}</span>
               <span>{t("web.admin.requests.queue.column.servers")}</span>
+              {optionColumns.map((column) => (
+                <span key={column} className="truncate">
+                  {column}
+                </span>
+              ))}
             </div>
             <span className="w-60 shrink-0 text-end">
               <span className="sr-only">{t("web.admin.requests.queue.column.actions")}</span>
@@ -516,6 +552,7 @@ function QueueList({
                 key={request.id}
                 request={request}
                 requester={username(request.requested_by_user_id)}
+                optionColumns={optionColumns}
                 selectable={selectable}
                 selected={selected.has(request.id)}
                 handlers={handlers}
@@ -626,6 +663,7 @@ function fromControl(event: MouseEvent) {
 function QueueRow({
   request,
   requester,
+  optionColumns,
   selectable,
   selected,
   handlers,
@@ -635,6 +673,8 @@ function QueueRow({
 }: {
   request: MediaRequest;
   requester?: string;
+  /** The chosen settings shown as columns, by label. */
+  optionColumns: readonly string[];
   selectable: boolean;
   selected: boolean;
   handlers: RequestQueueActionHandlers;
@@ -665,7 +705,10 @@ function QueueRow({
         </div>
       ) : null}
       <RequestPoster request={request} className="w-10" />
-      <div className="grid min-w-0 flex-1 gap-x-6 gap-y-2 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1.3fr)]">
+      <div
+        className="grid min-w-0 flex-1 gap-x-6 gap-y-2 lg:grid-cols-(--queue-columns)"
+        style={queueColumnsStyle(optionColumns.length)}
+      >
         <div className="min-w-0 space-y-1">
           <Link
             to={requestDetailHref(request.media_type, request.tmdb_id)}
@@ -711,6 +754,7 @@ function QueueRow({
         </div>
         <RequestStateSummary request={request} />
         <TargetList request={request} />
+        <OptionCells request={request} columns={optionColumns} />
       </div>
       <div className="flex w-full items-center justify-end gap-2 lg:w-60 lg:shrink-0">
         <RequestActionButtons request={request} handlers={handlers} />
@@ -726,41 +770,5 @@ function QueueRow({
         </Button>
       </div>
     </li>
-  );
-}
-
-function TargetList({ request }: { request: MediaRequest }) {
-  const t = useT();
-  const targets = request.targets ?? [];
-  if (targets.length === 0) {
-    return <p className="text-muted-foreground text-xs">{t("web.admin.requests.queue.notSent")}</p>;
-  }
-  return (
-    <ul className="min-w-0 space-y-1.5 text-xs">
-      {targets.map((target) => (
-        <li key={target.id} className="min-w-0">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="font-medium">{target.quality}</span>
-            {SPACE}
-            <span>{targetServerName(target)}</span> <TargetStatusBadge target={target} />
-          </div>
-          {target.route_name ? (
-            <p className="text-muted-foreground truncate">
-              {t("web.admin.requests.queue.byRoute", { route: target.route_name })}
-            </p>
-          ) : null}
-          {target.download ? (
-            <RequestDownloadProgress
-              download={target.download}
-              admin
-              className="mt-1 w-56 max-w-full"
-            />
-          ) : null}
-          {target.last_error ? (
-            <p className="text-destructive line-clamp-2 break-words">{target.last_error}</p>
-          ) : null}
-        </li>
-      ))}
-    </ul>
   );
 }

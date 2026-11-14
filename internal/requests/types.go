@@ -298,6 +298,9 @@ type Request struct {
 	// season's episode counts once the series is in the library.
 	Seasons        []int            `json:"-"`
 	SeasonProgress []SeasonProgress `json:"-"`
+	// RequesterChoices are the download server settings the requester
+	// picked, with the server they were offered on. v2 only.
+	RequesterChoices RequesterChoices `json:"-"`
 	// Followers are the profiles, other than the requester's, that asked to be
 	// told when the title is available; loaded for the fulfilled notification.
 	Followers []Follower `json:"-"`
@@ -526,6 +529,9 @@ type CreateRequestInput struct {
 	// Source records what created the request; empty means SourceDirect.
 	// Set by the watchlist path, never read from a client body.
 	Source Source `json:"-"`
+	// Options are the requester's picks, keyed by option key, from the ones
+	// RequesterOptions offers for the title. v2 only.
+	Options map[string]string `json:"-"`
 }
 
 // RequestPageKey identifies the last emitted request in descending creation order.

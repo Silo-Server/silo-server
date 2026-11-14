@@ -24,6 +24,9 @@ type RouterFeatures struct {
 	// in a connection test of a saved server is tested as blank rather than
 	// as the saved address (see blankURLMeansSaved).
 	BaseURLOptional bool
+	// RequesterOptions are the connection settings a requester may choose
+	// for one request (see requester_options.go).
+	RequesterOptions []RouterRequesterOption
 }
 
 // RouterFeatureReader reads a router capability's declared features from the
