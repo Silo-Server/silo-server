@@ -656,7 +656,12 @@ func (h *PlaybackHandler) loadTranscodeServeSession(r *http.Request, sessionID s
 	if videoCopyReconstructRefused(r.Context(), h.fileResolver, h.CopySafetyRacer, card) {
 		return nil, playback.SessionMissing, nil, nil, nil
 	}
-	if card != nil && card.ToneMapMode != "" {
+	// A tone-mapped or keyframe-planned rebuild can fail for a reason the
+	// player has to hear (a terminal tone-map verdict, a playlist that can no
+	// longer be rebuilt). The atomic path rebuilds the runtime with the
+	// session and removes the session again when it can't, so a failed
+	// rebuild doesn't hold a stream slot and its error reaches the client.
+	if card != nil && (card.ToneMapMode != "" || card.KeyframePlaylist) {
 		session, _, status, reconstructErr := h.tm.LoadOrReconstructTranscodeWithError(r.Context(), h.sessionMgr.GetSession, sessionID, requestUserID, requestedSegment, card)
 		return session, status, card, claims, reconstructErr
 	}

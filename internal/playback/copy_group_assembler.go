@@ -497,12 +497,16 @@ func (a *copyGroupAssembler) writeSegmentLocked(run *copyGroupRun, n int, paths 
 // session's generation removed it behind the player. Progress doesn't count
 // it toward the produced head. The run of that generation doesn't rebuild
 // it, since the pruner wouldn't remove it again; a run restarted at it does,
-// even when the pass that removed it reports after the restart.
+// even when the pass that removed it reports after the restart. A late
+// notice leaves alone a segment that run has already rebuilt: the file on
+// disk is then the new one.
 func (a *copyGroupAssembler) forget(n int, generation uint64) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if n >= 0 && n < len(a.assembled) {
-		a.assembled[n] = false
+		if _, err := os.Stat(filepath.Join(a.dir, plannedSegmentName(n))); errors.Is(err, os.ErrNotExist) {
+			a.assembled[n] = false
+		}
 	}
 	if a.run != nil && a.run.generation == generation {
 		if a.run.pruned == nil {

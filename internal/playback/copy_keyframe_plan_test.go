@@ -504,6 +504,18 @@ func TestPlannedRunDoesNotRebuildSegmentsPrunedDuringIt(t *testing.T) {
 	if a.run.pruned[1] || a.hasSegment(1) {
 		t.Fatalf("late prune of generation 0: pruned %v, assembled %v; want the new run free to rebuild segment 1", a.run.pruned[1], a.hasSegment(1))
 	}
+
+	// The notice can come later still, after the new run rebuilt the
+	// segment. The new file stays counted, or the run's head would stop
+	// short of it.
+	if err := os.WriteFile(filepath.Join(dir, plannedSegmentName(1)), []byte("rebuilt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a.assembled[1] = true
+	a.forget(1, 0)
+	if !a.hasSegment(1) {
+		t.Fatal("a late prune of generation 0 unmarked the segment generation 1 rebuilt")
+	}
 }
 
 func TestPlannedProgressDatesOutputForTheThrottler(t *testing.T) {
