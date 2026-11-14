@@ -476,15 +476,16 @@ func (r *Repository) reconcile(ctx context.Context, conn reconcileConn, recipe R
 	return stats, nil
 }
 
-// sweepToneMaps checks the HDR conversion of the next batch of finished rows,
-// in file order, wrapping around at the end: a row whose file's catalog
-// facts now call for another conversion than its sheets were made with (a
-// rescan or backfill rewrote its color facts, or a newer server classifies
-// them differently) is requeued, and a row published before conversions
-// were recorded takes the conversion its facts call for or is requeued (see
-// toneMapStale). It returns the rows requeued. A pass checks a bounded slice so its cost does not grow with the
-// library; the whole queue is covered over successive passes, on whichever
-// servers run them, from a cursor kept in the database.
+// sweepToneMaps checks the HDR conversion of the finished rows among the next
+// batch of queue rows, in file order, wrapping around at the end: a row whose
+// file's catalog facts now call for another conversion than its sheets were
+// made with (a rescan or backfill rewrote its color facts, or a newer server
+// classifies them differently) is requeued, and a row published before
+// conversions were recorded takes the conversion its facts call for or is
+// requeued (see toneMapStale). It returns the rows requeued. A pass checks a
+// bounded slice so its cost does not grow with the library; the whole queue
+// is covered over successive passes, on whichever servers run them, from a
+// cursor kept in the database.
 func (r *Repository) sweepToneMaps(ctx context.Context, conn reconcileConn, batch int) (int, error) {
 	var after int64
 	err := conn.QueryRow(ctx, `SELECT after_id FROM public.trickplay_tone_map_cursor`).Scan(&after)
@@ -503,15 +504,16 @@ func (r *Repository) sweepToneMaps(ctx context.Context, conn reconcileConn, batc
 	for rows.Next() {
 		var id, revision int64
 		var source pgtype.Text
-		var eligible, hdr bool
+		var checkable, hdr bool
 		var tracks []byte
-		if err := rows.Scan(&id, &revision, &source, &eligible, &hdr, &tracks); err != nil {
+		if err := rows.Scan(&id, &revision, &source, &checkable, &hdr, &tracks); err != nil {
 			rows.Close()
 			return 0, err
 		}
 		read, last = read+1, id
-		// The other steps handle rows of files that are no longer eligible.
-		if !eligible {
+		// Rows that are not finished, or whose file is no longer eligible, are
+		// left to the other steps.
+		if !checkable {
 			continue
 		}
 		// Classify the facts as a claim reads them.
@@ -566,22 +568,24 @@ func toneMapStale(stored pgtype.Text, key string) bool {
 	return stored.String != key
 }
 
-// toneMapCandidatesSQL reads the next finished rows after a file that a
-// server at this version may change, with whether their file is eligible
-// and the catalog facts a claim reads. It takes the slice by key before
-// joining, so a pass reads a bounded number of rows however large the
-// library is. Foreign keys keep every slice row's file and library, so the
-// joins return the whole slice.
+// toneMapCandidatesSQL reads the next queue rows after a file, with whether
+// each is a finished row of an eligible file that a server at this version
+// may change, and the catalog facts a claim reads. The slice is the next rows
+// by key whatever their state, so a pass reads a bounded number of rows
+// however large the library or its backlog is; a row that is not finished
+// records its conversion when it publishes. Foreign keys keep every row's
+// file and library, so the joins return the whole slice.
 const toneMapCandidatesSQL = `
 	WITH slice AS MATERIALIZED (
-		SELECT media_file_id, revision, tone_map_source
+		SELECT media_file_id, state, revision, recipe_version, tone_map_source
 		FROM public.media_file_trickplay
-		WHERE media_file_id > $1 AND state = 'ready' AND revision IS NOT NULL AND recipe_version <= $2
+		WHERE media_file_id > $1
 		ORDER BY media_file_id
 		LIMIT $3
 	)
-	SELECT s.media_file_id, s.revision, s.tone_map_source,
-	       COALESCE(f.trickplay_enabled AND f.enabled IS NOT FALSE AND lower(btrim(f.type)) = ANY($4::text[])
+	SELECT s.media_file_id, COALESCE(s.revision, 0), s.tone_map_source,
+	       COALESCE(s.state = 'ready' AND s.revision IS NOT NULL AND s.recipe_version <= $2
+	       AND f.trickplay_enabled AND f.enabled IS NOT FALSE AND lower(btrim(f.type)) = ANY($4::text[])
 	       AND mf.missing_since IS NULL AND mf.probe_updated_at IS NOT NULL AND mf.duration > 0
 	       AND jsonb_typeof(mf.video_tracks) = 'array' AND jsonb_array_length(mf.video_tracks) > 0, false),
 	       COALESCE(mf.hdr, false), COALESCE(mf.video_tracks, '[]'::jsonb)
