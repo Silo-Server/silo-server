@@ -979,9 +979,6 @@ func (s *Scanner) updateAudiobookMediaItemTx(ctx context.Context, tx pgx.Tx, con
 		return fmt.Errorf("get audiobook media item %s: %w", contentID, err)
 	}
 	applyBookToMediaItem(item, book)
-	if item.SortTitle == "" {
-		item.SortTitle = titleutil.DeriveDefaultSortTitle(item.Title)
-	}
 	return s.itemRepo.UpsertTx(ctx, tx, item)
 }
 
@@ -1027,9 +1024,6 @@ func createAudiobookMediaItem(ctx context.Context, itemWriter filesystemMediaIte
 		Year:      book.Year,
 	}
 	applyBookToMediaItem(item, book)
-	if item.SortTitle == "" {
-		item.SortTitle = titleutil.DeriveDefaultSortTitle(item.Title)
-	}
 	if err := itemWriter.Upsert(ctx, item); err != nil {
 		return "", err
 	}
@@ -1185,6 +1179,9 @@ func applyBookToMediaItem(item *models.MediaItem, book *parsedAudiobook) {
 		item.Title = cleaned
 		if cleaned != raw && item.OriginalTitle == "" {
 			item.OriginalTitle = raw
+		}
+		if item.SortTitle == "" {
+			item.SortTitle = titleutil.DeriveDefaultSortTitle(item.Title)
 		}
 	}
 	releaseDatesLocked := slices.Contains(item.LockedFields, lockedFieldReleaseDates)
