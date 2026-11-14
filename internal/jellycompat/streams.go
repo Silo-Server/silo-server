@@ -579,6 +579,9 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 		playSession, source, err = h.createStaticPlaySession(r.Context(), session, routeID, mediaSourceID, clientPlaySessionID)
 	}
 	if err != nil {
+		if writeIfPlaySessionUnreadable(w, r, err) {
+			return
+		}
 		if errors.Is(err, errServerBitrateScopeUnavailable) {
 			writeError(w, http.StatusServiceUnavailable, "PlaybackUnavailable", "The server could not resolve the stream bitrate limit")
 			return
@@ -1576,6 +1579,9 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 	// before the primary media route is selected. A proxy egress assignment
 	// therefore governs the file or HLS transport, not this sidecar resource.
 	playSession, source, err := h.resolvePlaybackRoute(r, session, chiURLParam(r, "routeItemId"), chiURLParam(r, "routeMediaSourceId"))
+	if writeIfPlaySessionUnreadable(w, r, err) {
+		return
+	}
 	if err != nil || source == nil {
 		writeError(w, http.StatusNotFound, "NotFound", "Playback session not found")
 		return
@@ -3925,14 +3931,45 @@ func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *
 
 var errPlaybackRouteMismatch = errors.New("playback session does not match requested item")
 
+// playSessionReadError is a route resolution that failed because the playback
+// store could not be read and held no cached session, not because the
+// session is absent.
+type playSessionReadError struct {
+	playSessionID string
+	err           error
+}
+
+func (e *playSessionReadError) Error() string { return "reading play session: " + e.err.Error() }
+func (e *playSessionReadError) Unwrap() error { return e.err }
+
+// writeIfPlaySessionUnreadable answers the retryable 503 for a route
+// resolution that failed on an unreadable playback store, and reports whether
+// it did, so a brief outage does not end playback with a 404 (#4067).
+func writeIfPlaySessionUnreadable(w http.ResponseWriter, r *http.Request, err error) bool {
+	readErr, ok := errors.AsType[*playSessionReadError](err)
+	if !ok {
+		return false
+	}
+	writePlaySessionLookupFailed(w, r, readErr.playSessionID, readErr.err)
+	return true
+}
+
 func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *Session, routeID, mediaSourceID string) (*PlaybackSession, *PlaybackMediaSource, error) {
 	clientPlaySessionID := newCaseInsensitiveQuery(r.URL.Query()).Get("PlaySessionId")
 	// Only progressive routes support Jellyfin's MediaSource.Id == Item.Id
 	// convention. Subtitle and attachment routes identify an exact source.
 	allowItemAlias := chiURLParam(r, "routeMediaSourceId") == ""
 	staticRequest := strings.EqualFold(newCaseInsensitiveQuery(r.URL.Query()).Get("Static"), "true")
+	// readErr keeps a failed read of the client's PlaySessionId: the route
+	// lookup below may still find the session cached, and only when it doesn't
+	// is the request answered as unreadable rather than absent.
+	var readErr error
 	if clientPlaySessionID != "" {
-		if playSession, ok := h.playbackStore.Get(clientPlaySessionID); ok && playSession.CompatToken == compatSession.Token {
+		playSession, ok, err := h.playbackStore.Lookup(clientPlaySessionID)
+		if err != nil {
+			readErr = &playSessionReadError{playSessionID: clientPlaySessionID, err: err}
+		}
+		if ok && playSession.CompatToken == compatSession.Token {
 			if !mediaSourceIDsEqual(playSession.RouteItemID, routeID) {
 				return nil, nil, errPlaybackRouteMismatch
 			}
@@ -3947,15 +3984,28 @@ func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *S
 	if clientPlaySessionID == "" && staticRequest {
 		active, err := h.playbackStore.FindUnidentifiedPlayback(compatSession.Token, routeID, mediaSourceID)
 		if err != nil {
-			return nil, nil, err
+			// Two started plays matching is an answer: the request can't be
+			// bound to either. Any other failure (an unreadable store, a write
+			// still pending, an identity that changed mid-lookup) passes, so
+			// the request is answered as retryable.
+			if errors.Is(err, errUnidentifiedPlaybackAmbiguous) {
+				return nil, nil, err
+			}
+			return nil, nil, &playSessionReadError{err: err}
 		}
 		if active != nil {
 			return active, playbackRouteSource(active, mediaSourceID, allowItemAlias, staticRequest), nil
 		}
 	}
 
-	playSession, _, ok := h.playbackStore.FindByRoute(compatSession.Token, routeID)
+	playSession, _, ok, err := h.playbackStore.LookupByRoute(compatSession.Token, routeID)
+	if err != nil {
+		return nil, nil, &playSessionReadError{playSessionID: clientPlaySessionID, err: err}
+	}
 	if !ok {
+		if readErr != nil {
+			return nil, nil, readErr
+		}
 		return nil, nil, ErrSessionNotFound
 	}
 	if !mediaSourceIDsEqual(playSession.RouteItemID, routeID) {
