@@ -4,7 +4,10 @@ Media folders honor three file-based ignore mechanisms during scans. Series,
 movie, audiobook, podcast, ebook, and manga walkers apply these rules to the
 paths they discover. Existing library layouts still apply: podcast episodes
 must be directly inside a show folder, and audiobook discovery stops below a
-book folder containing audio.
+book folder containing audio. Loose audio in a configured library root does
+not stop it, and a configured root inside a book is still walked as its own
+root. A subtree scan follows the same rules, so a scoped folder that holds
+audio is one book.
 
 Every ignore file must be a regular file in the directory it applies to. A
 directory or symlink with one of these names is ordinary content.
