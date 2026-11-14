@@ -3798,9 +3798,9 @@ func videoTrackDisplayTitle(track models.VideoTrack, versionHDR bool) string {
 		parts = append(parts, strings.ToUpper(codec))
 	}
 	rangeType := compatVideoRangeType(track, versionHDR)
-	hdr10Plus := strings.HasSuffix(rangeType, "HDR10Plus")
+	hdr10Plus := strings.HasSuffix(rangeType, compatRangeHDR10Plus)
 	dolbyVision := ""
-	if strings.HasPrefix(rangeType, "DOVI") {
+	if strings.HasPrefix(rangeType, compatRangeDOVI) {
 		dolbyVision = compatDolbyVisionTitle(track, hdr10Plus)
 	}
 	switch {
@@ -3809,7 +3809,7 @@ func videoTrackDisplayTitle(track models.VideoTrack, versionHDR bool) string {
 	case hdr10Plus:
 		parts = append(parts, "HDR10+")
 	default:
-		if videoRange := compatVideoRange(track, versionHDR); videoRange != "Unknown" {
+		if videoRange := compatVideoRange(track, versionHDR); videoRange != compatRangeUnknown {
 			parts = append(parts, videoRange)
 		}
 	}
@@ -3870,11 +3870,11 @@ func compatDolbyVisionTitle(track models.VideoTrack, hdr10Plus bool) string {
 	if track.DVBLCompatID > 0 {
 		title += "." + strconv.Itoa(track.DVBLCompatID)
 	}
+	if hdr10Plus {
+		return title + " (HDR10+)"
+	}
 	switch track.DVBLCompatID {
 	case 1, 6: // 6 is Blu-ray, which in practice is HDR10.
-		if hdr10Plus {
-			return title + " (HDR10+)"
-		}
 		return title + " (HDR10)"
 	case 2:
 		return title + " (SDR)"

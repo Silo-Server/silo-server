@@ -226,6 +226,7 @@ func TestBuildMediaStreamsVideoDisplayTitle(t *testing.T) {
 		{"sdr 1080p", models.VideoTrack{Codec: "h264", Title: "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10", Width: 1920, Height: 1080}, false, "1080p H264 SDR"},
 		{"dolby vision 8.1", uhd(models.VideoTrack{ColorTransfer: "smpte2084", DVProfile: 8, DVBLCompatID: 1}), true, "4K HEVC Dolby Vision Profile 8.1 (HDR10)"},
 		{"dolby vision 8.1 hdr10 plus", uhd(models.VideoTrack{ColorTransfer: "smpte2084", DVProfile: 8, DVBLCompatID: 1, HDR10Plus: true}), true, "4K HEVC Dolby Vision Profile 8.1 (HDR10+)"},
+		{"legacy dolby vision hdr10 plus", uhd(models.VideoTrack{ColorTransfer: "smpte2084", DolbyVision: "Profile 8", HDR10Plus: true}), true, "4K HEVC Dolby Vision Profile 8 (HDR10+)"},
 		{"dolby vision 8.4", uhd(models.VideoTrack{ColorTransfer: "arib-std-b67", DVProfile: 8, DVBLCompatID: 4}), true, "4K HEVC Dolby Vision Profile 8.4 (HLG)"},
 		{"dolby vision 8.2", uhd(models.VideoTrack{DVProfile: 8, DVBLCompatID: 2}), true, "4K HEVC Dolby Vision Profile 8.2 (SDR)"},
 		{"dolby vision 7.6", uhd(models.VideoTrack{ColorTransfer: "smpte2084", DVProfile: 7, DVBLCompatID: 6}), true, "4K HEVC Dolby Vision Profile 7.6 (HDR10)"},
