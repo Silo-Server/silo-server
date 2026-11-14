@@ -271,6 +271,10 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 	if err != nil {
 		return result, err
 	}
+	titlesSince, titlesWired, err := s.listTitlesSince(ctx, conn, b)
+	if err != nil {
+		return result, err
+	}
 	seenRemote := make(remoteListPresence, len(rows))
 	states := make([]ListItemState, 0, len(rows))
 	// orderedIDs records matched local ids in the order the provider returned
@@ -306,7 +310,7 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 			return result, err
 		}
 		if match == nil {
-			state, kept, added, err := s.importListTitle(ctx, conn, b, row, key, removalsPending)
+			state, kept, added, err := s.importListTitle(ctx, conn, b, row, key, removalsPending, titlesSince != nil)
 			if err != nil {
 				return result, err
 			}
@@ -365,7 +369,12 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 			return result, err
 		}
 	}
-	s.requestQueuedListTitles(ctx, conn, b)
+	s.requestQueuedListTitles(ctx, conn, b, titlesSince)
+	if titlesWired && titlesSince == nil {
+		if err := s.repo.MarkWatchlistTitlesSince(ctx, conn.ID); err != nil {
+			return result, err
+		}
+	}
 	// An incremental response is only a delta; replacing the whole local order
 	// with that subset would discard every item absent from the delta.
 	if !batch.Incremental && b.applyOrder != nil && b.orderEnabled != nil && b.capOrder != nil &&

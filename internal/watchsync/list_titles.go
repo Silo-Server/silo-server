@@ -45,7 +45,9 @@ type WatchlistTitles interface {
 	LibraryHas(ctx context.Context, title WatchlistTitle) (bool, error)
 	// AddWatchlistTitle keeps the title as the profile's watchlist entry,
 	// keeping an existing entry's added_at. It reports whether it created one.
-	AddWatchlistTitle(ctx context.Context, userID int, profileID string, title WatchlistTitle, addedAt time.Time) (bool, error)
+	// With request set, a new entry is requested the way an entry added by
+	// hand is.
+	AddWatchlistTitle(ctx context.Context, userID int, profileID string, title WatchlistTitle, addedAt time.Time, request bool) (bool, error)
 	// RemoveWatchlistTitle takes the profile's entry for the title off.
 	RemoveWatchlistTitle(ctx context.Context, userID int, profileID string, title WatchlistTitle) error
 	// RequestQueuedWatchlistTitles applies watchlist requests, in order, to
@@ -139,7 +141,8 @@ func watchlistTitleFromListItemID(id string) (WatchlistTitle, bool) {
 // library item carries. A title some library item carries is left unmatched:
 // the matcher found it ambiguous, and an entry outside the library would
 // show it as missing. It returns the row's shadow state, or nil when the row
-// stays unmatched or waits for a local removal to reach the provider.
+// stays unmatched or waits for a local removal to reach the provider. A new
+// entry is requested only with request set; see listTitlesSince.
 func (s *Service) importListTitle(
 	ctx context.Context,
 	conn Connection,
@@ -147,6 +150,7 @@ func (s *Service) importListTitle(
 	row RemoteFavorite,
 	key string,
 	removalsPending map[string]time.Time,
+	request bool,
 ) (state *ListItemState, kept, added bool, err error) {
 	titles := s.watchlistTitles(b)
 	if titles == nil {
@@ -168,7 +172,7 @@ func (s *Service) importListTitle(
 		(row.FavoritedAtGuessed || !row.FavoritedAt.After(removedAt)) {
 		return nil, true, false, nil
 	}
-	added, err = titles.AddWatchlistTitle(ctx, conn.UserID, conn.ProfileID, title, row.FavoritedAt)
+	added, err = titles.AddWatchlistTitle(ctx, conn.UserID, conn.ProfileID, title, row.FavoritedAt, request)
 	if err != nil {
 		return nil, false, false, err
 	}
@@ -186,6 +190,19 @@ func (s *Service) importListTitle(
 		LastSeenRemoteAt: &listedAt,
 		LastSeenLocalAt:  &listedAt,
 	}, true, added, nil
+}
+
+// listTitlesSince returns when the connection's first watchlist import that
+// kept titles outside the library finished, and whether the titles are wired
+// at all. Sync requests only the titles it adds after that import, so
+// connecting a provider, or the first sync after upgrading, keeps the
+// provider's backlog on the watchlist without requesting all of it.
+func (s *Service) listTitlesSince(ctx context.Context, conn Connection, b listBinding) (*time.Time, bool, error) {
+	if s.watchlistTitles(b) == nil {
+		return nil, false, nil
+	}
+	since, err := s.repo.WatchlistTitlesSince(ctx, conn.ID)
+	return since, true, err
 }
 
 // removeLocalListItem takes a shadow row's item off the local list: a
@@ -327,14 +344,15 @@ func (s *Service) localListTitles(ctx context.Context, conn Connection, b listBi
 }
 
 // requestQueuedListTitles applies watchlist requests to every entry outside
-// the library that the provider lists, oldest listing first. A new entry is
-// requested as it is added; one a request quota refused then gets its request
-// on a later run. The titles come from the stored rows rather than the
-// provider's batch, which an incremental provider sends only for changes. A
-// failure is logged and leaves the import's result alone.
-func (s *Service) requestQueuedListTitles(ctx context.Context, conn Connection, b listBinding) {
+// the library that the provider lists and sync added after since (see
+// listTitlesSince), oldest listing first. A new entry is requested as it is
+// added; one a request quota refused then gets its request on a later run.
+// The titles come from the stored rows rather than the provider's batch,
+// which an incremental provider sends only for changes. A failure is logged
+// and leaves the import's result alone.
+func (s *Service) requestQueuedListTitles(ctx context.Context, conn Connection, b listBinding, since *time.Time) {
 	titles := s.watchlistTitles(b)
-	if titles == nil {
+	if titles == nil || since == nil {
 		return
 	}
 	states, err := s.repo.ListListItemStates(ctx, conn.ID, b.kind)
@@ -345,7 +363,7 @@ func (s *Service) requestQueuedListTitles(ctx context.Context, conn Connection, 
 	}
 	listed := make([]ListItemState, 0, len(states))
 	for _, state := range states {
-		if _, ok := watchlistTitleFromListItemID(state.MediaItemID); ok && state.LocalPresent && state.RemotePresent {
+		if _, ok := watchlistTitleFromListItemID(state.MediaItemID); ok && state.LocalPresent && state.RemotePresent && state.CreatedAt.After(*since) {
 			listed = append(listed, state)
 		}
 	}

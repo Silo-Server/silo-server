@@ -45,7 +45,8 @@ func (t syncTitles) LibraryHas(ctx context.Context, title watchsync.WatchlistTit
 // AddWatchlistTitle stores the provider's IDs and display fields. Providers
 // send no poster, so a new title is checked on TMDB right away rather than at
 // its next scheduled check; a failed check leaves that schedule to retry.
-func (t syncTitles) AddWatchlistTitle(ctx context.Context, userID int, profileID string, title watchsync.WatchlistTitle, addedAt time.Time) (bool, error) {
+// With request set, a new entry is then requested.
+func (t syncTitles) AddWatchlistTitle(ctx context.Context, userID int, profileID string, title watchsync.WatchlistTitle, addedAt time.Time, request bool) (bool, error) {
 	if addedAt.IsZero() {
 		addedAt = t.titles.now()
 	}
@@ -69,7 +70,7 @@ func (t syncTitles) AddWatchlistTitle(ctx context.Context, userID int, profileID
 				"component", "watchlist", "title_id", entry.Title.ID, "error", err)
 		}
 	}
-	if t.requests != nil {
+	if request && t.requests != nil {
 		// Request with the snapshot the check just refreshed.
 		stored := &entry.Title
 		if found, err := t.titles.Find(ctx, title.Kind, title.TMDBID); err == nil && found != nil {

@@ -38,17 +38,22 @@ type titlesStub struct {
 	promoted map[int]bool
 	former   map[int][]int
 	queued   []WatchlistTitle
+	// requested holds the TMDB IDs of the entries added with a request.
+	requested []int
 }
 
 func (s *titlesStub) LibraryHas(_ context.Context, title WatchlistTitle) (bool, error) {
 	return s.library[title.TMDBID], nil
 }
 
-func (s *titlesStub) AddWatchlistTitle(_ context.Context, _ int, _ string, title WatchlistTitle, addedAt time.Time) (bool, error) {
+func (s *titlesStub) AddWatchlistTitle(_ context.Context, _ int, _ string, title WatchlistTitle, addedAt time.Time, request bool) (bool, error) {
 	if _, ok := s.entries[title.TMDBID]; ok {
 		return false, nil
 	}
 	s.entries[title.TMDBID] = addedAt
+	if request {
+		s.requested = append(s.requested, title.TMDBID)
+	}
 	return true, nil
 }
 
@@ -110,6 +115,9 @@ type watchlistTitleImportCase struct {
 	wantRemote  bool
 	wantNoState bool
 	wantQueued  int
+	// synced means an earlier import already kept titles outside the
+	// library, so this one requests the titles it adds.
+	synced bool
 }
 
 func watchlistTitleImportCases() []watchlistTitleImportCase {
@@ -125,10 +133,19 @@ func watchlistTitleImportCases() []watchlistTitleImportCase {
 			rows:       []RemoteFavorite{fightClub},
 			wantEntry:  true,
 			wantResult: ImportListResult{Found: 1, Imported: 1, added: 1},
+			wantLocal:  true, wantRemote: true,
+		},
+		{
+			name:       "listed title the library lacks after the first sync",
+			synced:     true,
+			rows:       []RemoteFavorite{fightClub},
+			wantEntry:  true,
+			wantResult: ImportListResult{Found: 1, Imported: 1, added: 1},
 			wantLocal:  true, wantRemote: true, wantQueued: 1,
 		},
 		{
 			name:       "listed title already on the watchlist is queued for its request",
+			synced:     true,
 			entries:    map[int]time.Time{550: listedAt},
 			states:     []ListItemState{{MediaItemID: titleRow, Kind: "movie", ProviderItemKey: fightClub.ProviderItemKey, RemotePresent: true, LocalPresent: true}},
 			rows:       []RemoteFavorite{fightClub},
@@ -157,6 +174,7 @@ func watchlistTitleImportCases() []watchlistTitleImportCase {
 		},
 		{
 			name:       "title the provider lists under a former TMDB ID",
+			synced:     true,
 			former:     map[int][]int{550: {100}},
 			entries:    map[int]time.Time{550: listedAt},
 			states:     []ListItemState{{MediaItemID: titleRow, Kind: "movie", ProviderItemKey: "tmdb:550", RemotePresent: true, LocalPresent: true}},
@@ -197,8 +215,11 @@ func TestServiceWatchlistImportKeepsTitlesOutsideLibrary(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			store, repo, conn := favoriteImportFixture(t)
 			conn.ImportWatchlistEnabled, conn.SyncWatchlistRemovalsEnabled = true, true
+			if tt.synced {
+				repo.watchlistTitlesSince = map[string]time.Time{conn.ID: time.Now().Add(-time.Hour)}
+			}
 			for _, state := range tt.states {
-				state.ConnectionID, state.ListKind = conn.ID, ListKindWatchlist
+				state.ConnectionID, state.ListKind, state.CreatedAt = conn.ID, ListKindWatchlist, time.Now()
 				repo.listItemStates = append(repo.listItemStates, state)
 			}
 			titles := &titlesStub{library: tt.library, promoted: tt.promoted, former: tt.former, entries: map[int]time.Time{}}
@@ -221,6 +242,12 @@ func TestServiceWatchlistImportKeepsTitlesOutsideLibrary(t *testing.T) {
 			if len(titles.queued) != tt.wantQueued {
 				t.Fatalf("queued = %#v, want %d", titles.queued, tt.wantQueued)
 			}
+			if wantRequested := tt.synced && tt.wantResult.added > 0; (len(titles.requested) > 0) != wantRequested {
+				t.Fatalf("requested = %v, want a request %v", titles.requested, wantRequested)
+			}
+			if _, marked := repo.watchlistTitlesSince[conn.ID]; !marked {
+				t.Fatal("the import didn't record the connection's first title sync")
+			}
 			if _, ok := titles.entries[550]; ok != tt.wantEntry {
 				t.Fatalf("entry present = %v, want %v", ok, tt.wantEntry)
 			}
@@ -235,6 +262,39 @@ func TestServiceWatchlistImportKeepsTitlesOutsideLibrary(t *testing.T) {
 				t.Fatalf("state = %#v, want local %v remote %v", state, tt.wantLocal, tt.wantRemote)
 			}
 		})
+	}
+}
+
+// The first import that keeps titles outside the library, on a new
+// connection or the first sync after upgrading, keeps the provider's backlog
+// without requesting it; titles the provider lists later are requested.
+func TestServiceWatchlistImportRequestsOnlyTitlesAfterFirstSync(t *testing.T) {
+	store, repo, conn := favoriteImportFixture(t)
+	conn.ImportWatchlistEnabled = true
+	titles := &titlesStub{entries: map[int]time.Time{}}
+	service := NewService(repo, NewRegistry()).
+		WithMatcher(unmatchedMatcherStub{}).
+		WithUserStoreProvider(staticStoreProvider{store: store})
+	service.SetWatchlistTitles(titles)
+	backlog := RemoteFavorite{ProviderItemKey: "tmdb:550", Kind: "movie", Title: "Fight Club", TMDBID: "550"}
+	provider := &watchlistBatchProviderStub{rows: []RemoteFavorite{backlog}}
+
+	if _, err := service.importList(context.Background(), conn, ServerConfig{}, provider, service.watchlistBinding()); err != nil {
+		t.Fatal(err)
+	}
+	if len(titles.requested) != 0 || len(titles.queued) != 0 {
+		t.Fatalf("first sync requested %v, queued %v, want the backlog kept without requests", titles.requested, titles.queued)
+	}
+
+	provider.rows = append(provider.rows, RemoteFavorite{ProviderItemKey: "tmdb:680", Kind: "movie", Title: "Pulp Fiction", TMDBID: "680"})
+	if _, err := service.importList(context.Background(), conn, ServerConfig{}, provider, service.watchlistBinding()); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(titles.requested, []int{680}) {
+		t.Fatalf("requested = %v, want only the title listed after the first sync", titles.requested)
+	}
+	if len(titles.queued) != 1 || titles.queued[0].TMDBID != 680 {
+		t.Fatalf("queued = %#v, want only the title listed after the first sync", titles.queued)
 	}
 }
 
