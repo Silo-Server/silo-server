@@ -124,8 +124,8 @@ function coerceBoolean(value: unknown): boolean {
 
 /**
  * A declared field type, derived from the plugin's json_schema. For arrays the
- * suffix `:int` / `:num` records the item type so MULTI_SELECT elements coerce
- * to numbers only when the json_schema says they are numeric.
+ * suffix `:int` / `:num` / `:bool` records the item type; plain `array` holds
+ * string items or items of unknown type, and passes them through unchanged.
  */
 export type FieldType =
   | "string"
@@ -136,6 +136,44 @@ export type FieldType =
   | "array:bool"
   | "array:int"
   | "array:num";
+
+type ItemType = "string" | "integer" | "number" | "boolean";
+
+/**
+ * The schema a local `#/$defs/<name>` or `#/definitions/<name>` reference
+ * points at, or the schema itself when it isn't one.
+ */
+function resolveLocalRef(schema: unknown, root: object): unknown {
+  const ref = (schema as { $ref?: unknown } | null)?.$ref;
+  if (typeof ref !== "string") return schema;
+  const [, section, name] = /^#\/(\$defs|definitions)\/([^/]+)$/.exec(ref) ?? [];
+  if (!section || !name) return undefined;
+  const defs = (root as Record<string, unknown>)[section];
+  if (!defs || typeof defs !== "object") return undefined;
+  // JSON Pointer escapes "/" as "~1" and "~" as "~0" (RFC 6901).
+  return (defs as Record<string, unknown>)[name.replaceAll("~1", "/").replaceAll("~0", "~")];
+}
+
+/**
+ * The type of an array's items: a plain `type`, a nullable type list such as
+ * `["string", "null"]`, or the type every `enum` value shares, following a
+ * local `$ref` first.
+ */
+function arrayItemType(itemSchema: unknown, root: object): ItemType | undefined {
+  const items = resolveLocalRef(itemSchema, root);
+  if (!items || typeof items !== "object") return undefined;
+  const { type, enum: values } = items as { type?: unknown; enum?: unknown };
+  const types = Array.isArray(type) ? type.filter((t) => t !== "null") : [type];
+  if (types.length === 1 && ["string", "integer", "number", "boolean"].includes(types[0])) {
+    return types[0] as ItemType;
+  }
+  if (!Array.isArray(values) || values.length === 0) return undefined;
+  if (values.every((v) => typeof v === "string")) return "string";
+  if (values.every((v) => typeof v === "boolean")) return "boolean";
+  if (values.every((v) => Number.isInteger(v))) return "integer";
+  if (values.every((v) => typeof v === "number")) return "number";
+  return undefined;
+}
 
 /**
  * Parse the declared property types out of a plugin's (object) json_schema.
@@ -159,9 +197,7 @@ export function parseFieldTypes(jsonSchema: string | undefined | null): Record<s
     if (!value || typeof value !== "object") continue;
     const type = (value as { type?: unknown }).type;
     if (type === "array") {
-      const items = (value as { items?: unknown }).items;
-      const itemType =
-        items && typeof items === "object" ? (items as { type?: unknown }).type : undefined;
+      const itemType = arrayItemType((value as { items?: unknown }).items, parsed);
       if (itemType === "integer") out[key] = "array:int";
       else if (itemType === "number") out[key] = "array:num";
       else if (itemType === "boolean") out[key] = "array:bool";
@@ -211,7 +247,8 @@ export function coerceFieldValue(
       case "array:num": {
         const arr = Array.isArray(raw) ? raw : [];
         if (fieldType === "array") return arr;
-        if (fieldType === "array:bool") return arr.map((v) => coerceBoolean(v));
+        // A saved list loads as is, so keep a null item a nullable type allows.
+        if (fieldType === "array:bool") return arr.map((v) => (v === null ? v : coerceBoolean(v)));
         if (fieldType === "array:int") return arr.map((v) => coerceNumericString(v));
         return arr.map((v) => coerceNumberString(v));
       }
