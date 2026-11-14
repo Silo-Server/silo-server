@@ -2863,11 +2863,11 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request, fc *fulfill
 		// no live target (pending, failed, waiting for the library without a
 		// router, or legacy); otherwise let per-target reconcile + aggregate drive
 		// completion.
-		live, err := s.liveTargets(ctx, req.ID)
+		targets, err := s.store.ListTargets(ctx, req.ID)
 		if err != nil {
 			return reconcileUnchanged, err
 		}
-		if len(live) == 0 {
+		if !slices.ContainsFunc(targets, isLiveTarget) {
 			if req.Status == StatusCompleted {
 				return reconcileUnchanged, nil
 			}
@@ -2881,7 +2881,7 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request, fc *fulfill
 			}
 			return reconcileCompleted, nil
 		}
-		updated, retired, err := s.retireStalledTargets(ctx, req, live)
+		updated, retired, err := s.retireStalledTargets(ctx, req, targets)
 		if err != nil {
 			return reconcileUnchanged, err
 		}
@@ -3135,20 +3135,10 @@ func integrationByID(fc *fulfillContext, id string) *Integration {
 	return nil
 }
 
-// liveTargets returns the request's non-terminal (queued or downloading)
-// fulfillment targets.
-func (s *Service) liveTargets(ctx context.Context, requestID string) ([]Target, error) {
-	targets, err := s.store.ListTargets(ctx, requestID)
-	if err != nil {
-		return nil, err
-	}
-	var live []Target
-	for _, t := range targets {
-		if t.Status == StatusQueued || t.Status == StatusDownloading {
-			live = append(live, t)
-		}
-	}
-	return live, nil
+// isLiveTarget reports whether a fulfillment target is still in flight
+// (queued or downloading).
+func isLiveTarget(t Target) bool {
+	return t.Status == StatusQueued || t.Status == StatusDownloading
 }
 
 // stalledTargetHorizon is how long a queued target may go without a single
@@ -3184,34 +3174,31 @@ const ExternalStatusPresenceConfirmed = "presence_confirmed"
 // quality-agnostic presence check must not orphan, so it is closed out only
 // when all of these hold (see downloadRetirable):
 //   - it has gone stalledDownloadHorizon without a status change;
-//   - its plugin reports no download progress for it;
+//   - it has no download progress on record, which only a plugin that
+//     reports progress keeps, and which an unanswered check clears;
 //   - the request is for a movie or for named seasons, never a whole series,
 //     whose presence any one episode satisfies (present already requires every
 //     requested season to be complete);
-//   - every target of the request that has not failed is at its quality,
-//     since presence cannot tell a 1080p copy from a 2160p one.
+//   - every other target of the request is at its quality, failed, or
+//     itself closed out by presence, since presence cannot tell a 1080p copy
+//     from a 2160p one.
 //
-// The request status follows from the usual target aggregate. It returns the
-// request as of the last retirement, if any.
-func (s *Service) retireStalledTargets(ctx context.Context, req Request, live []Target) (*Request, bool, error) {
+// targets is every target of req. The request status follows from the usual
+// target aggregate. It returns the request as of the last retirement, if any.
+func (s *Service) retireStalledTargets(ctx context.Context, req Request, targets []Target) (*Request, bool, error) {
 	now := s.now()
+	queuedCutoff := now.Add(-stalledTargetHorizon)
+	downloadCutoff := now.Add(-stalledDownloadHorizon)
 	var updated *Request
 	retired := false
-	var all []Target
-	for _, t := range live {
+	for _, t := range targets {
 		switch t.Status {
 		case StatusQueued:
-			if t.UpdatedAt.After(now.Add(-stalledTargetHorizon)) {
+			if t.UpdatedAt.After(queuedCutoff) {
 				continue
 			}
 		case StatusDownloading:
-			if all == nil {
-				var err error
-				if all, err = s.store.ListTargets(ctx, req.ID); err != nil {
-					return updated, retired, err
-				}
-			}
-			if !downloadRetirable(req, t, all, now) {
+			if !downloadRetirable(req, t, targets, downloadCutoff) {
 				continue
 			}
 		default:
@@ -3239,9 +3226,10 @@ func (s *Service) retireStalledTargets(ctx context.Context, req Request, live []
 }
 
 // downloadRetirable reports whether presence may close out a downloading
-// target t of req, whose targets are all; see retireStalledTargets.
-func downloadRetirable(req Request, t Target, all []Target, now time.Time) bool {
-	if t.UpdatedAt.After(now.Add(-stalledDownloadHorizon)) || t.Download != nil {
+// target t of req, whose targets are all, once it has gone without a status
+// change since cutoff; see retireStalledTargets.
+func downloadRetirable(req Request, t Target, all []Target, cutoff time.Time) bool {
+	if t.UpdatedAt.After(cutoff) || t.Download != nil {
 		return false
 	}
 	if req.MediaType != MediaTypeMovie && !isSeasonRequest(req) {
@@ -3250,9 +3238,12 @@ func downloadRetirable(req Request, t Target, all []Target, now time.Time) bool 
 	for _, other := range all {
 		// A failed target fetched nothing, so the file is not its own. A
 		// quality no server could take is recorded as one (recordTargets).
-		if other.Quality != t.Quality && other.Status != StatusFailed {
-			return false
+		// A target this backstop completed proved no file of its own either:
+		// presence closed it out on the title alone.
+		if other.Quality == t.Quality || other.Status == StatusFailed || other.ExternalStatus == ExternalStatusPresenceConfirmed {
+			continue
 		}
+		return false
 	}
 	return true
 }

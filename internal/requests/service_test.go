@@ -834,7 +834,9 @@ func TestReconcileRequestsPresenceRetiresOnlyStalledTargets(t *testing.T) {
 // for another quality as well all keep their downloading target. A failed
 // target fetched nothing, so it does not hold the other tier open; the request
 // then aggregates to failed, as when its router reports the completion, so
-// Retry can resubmit the failed tier.
+// Retry can resubmit the failed tier. Neither does a target this backstop
+// completed, since presence proved no file at its quality: otherwise a 2160p
+// target retired while queued would pin a stuck 1080p one forever.
 func TestReconcileRequestsPresenceRetiresStalledDownloadingTargets(t *testing.T) {
 	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
 	stale := now.Add(-30 * 24 * time.Hour)
@@ -851,6 +853,7 @@ func TestReconcileRequestsPresenceRetiresStalledDownloadingTargets(t *testing.T)
 	uhd.Quality = Quality2160p
 	hdDone := Target{Quality: Quality1080p, Status: StatusCompleted, ExternalStatus: "5", UpdatedAt: stale}
 	uhdFailed := Target{Quality: Quality2160p, Status: StatusFailed, LastError: msgNoTargetForQuality, UpdatedAt: stale}
+	uhdByPresence := Target{Quality: Quality2160p, Status: StatusCompleted, ExternalStatus: ExternalStatusPresenceConfirmed, UpdatedAt: stale}
 
 	for _, tc := range []struct {
 		name    string
@@ -868,6 +871,7 @@ func TestReconcileRequestsPresenceRetiresStalledDownloadingTargets(t *testing.T)
 		{"2160p beside a completed 1080p target", movie, nil, []Target{hdDone, uhd}, false, StatusDownloading, OutcomeActive},
 		{"2160p alone", movie, nil, []Target{uhd}, true, StatusCompleted, OutcomeActive},
 		{"1080p beside a failed 2160p target", movie, nil, []Target{uhdFailed, downloading}, true, StatusQueued, OutcomeFailed},
+		{"1080p beside a 2160p target completed by presence", movie, nil, []Target{uhdByPresence, downloading}, true, StatusCompleted, OutcomeActive},
 		{"whole series", wholeSeries, nil, []Target{downloading}, false, StatusDownloading, OutcomeActive},
 		{"seasons all complete", seasons, complete, []Target{downloading}, true, StatusCompleted, OutcomeActive},
 		{"a season incomplete", seasons, partial, []Target{downloading}, false, StatusDownloading, OutcomeActive},
