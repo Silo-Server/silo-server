@@ -2,6 +2,7 @@ package storetest
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -105,4 +106,69 @@ func RunAtomicJellycompatProgress(t *testing.T, store userstore.UserStore) {
 		t.Fatal("duplicate history key accepted")
 	}
 	check(false, 77, 2, edit.EventAt)
+}
+
+// RunJellycompatPlayedByDate checks the play-date listing behind the
+// Jellyfin-compatible SortBy=DatePlayed: completed rows only, ordered by play
+// date in either direction regardless of write order, and paged by offset.
+func RunJellycompatPlayedByDate(t *testing.T, store userstore.UserStore) {
+	t.Helper()
+	ctx := t.Context()
+	const profile = "played-by-date"
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: profile, Name: "Played by date"}); err != nil {
+		t.Fatal(err)
+	}
+	writer, ok := store.(userstore.JellycompatProgressEditor)
+	if !ok {
+		t.Fatal("jellycompat progress editor unavailable")
+	}
+	const played2015, played2020, played2025 = "played-2015", "played-2020", "played-2025"
+	// Written newest play first; one fractional-second date and one unfinished
+	// row that must not be listed.
+	for _, row := range []struct {
+		id        string
+		date      time.Time
+		completed bool
+	}{
+		{played2025, time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC), true},
+		{played2020, time.Date(2020, 6, 1, 12, 30, 0, 500_000_000, time.UTC), true},
+		{"started-2022", time.Date(2022, 1, 1, 0, 0, 0, 0, time.UTC), false},
+		{played2015, time.Date(2015, 1, 1, 0, 0, 0, 0, time.UTC), true},
+	} {
+		edit := userstore.JellycompatProgressEdit{MediaItemID: row.id, DurationSeconds: 600, Completed: row.completed, EventAt: row.date}
+		if !row.completed {
+			edit.PositionSeconds = 120
+		}
+		if err := writer.ApplyJellycompatProgress(ctx, profile, edit); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list := func(ascending bool, limit, offset int) []string {
+		t.Helper()
+		rows, err := userstore.ListJellycompatPlayedByDate(ctx, store, profile, nil, nil, ascending, limit, offset)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids := make([]string, 0, len(rows))
+		for _, row := range rows {
+			if !row.Completed {
+				t.Fatalf("listed unfinished row %+v", row)
+			}
+			ids = append(ids, row.MediaItemID)
+		}
+		return ids
+	}
+	for _, tc := range []struct {
+		ascending     bool
+		limit, offset int
+		want          []string
+	}{
+		{true, 10, 0, []string{played2015, played2020, played2025}},
+		{false, 10, 0, []string{played2025, played2020, played2015}},
+		{false, 2, 1, []string{played2020, played2015}},
+	} {
+		if got := list(tc.ascending, tc.limit, tc.offset); !slices.Equal(got, tc.want) {
+			t.Fatalf("ascending=%v limit=%d offset=%d: %v, want %v", tc.ascending, tc.limit, tc.offset, got, tc.want)
+		}
+	}
 }

@@ -24,6 +24,7 @@ interface EditionOption {
   label: string;
   defaultVersion: FileVersion;
   versions: FileVersion[];
+  allVersions: FileVersion[];
 }
 
 function VersionDropdown({
@@ -223,6 +224,7 @@ function buildEditionOptions(
               )),
         defaultVersion,
         versions: sorted,
+        allVersions: edition.allVersions,
       },
     ];
   });
@@ -234,7 +236,7 @@ function resolveSelectedEditionOption(
 ): EditionOption | null {
   return (
     editionOptions.find((option) =>
-      option.versions.some((v) => v.file_id === selectedVersion?.file_id),
+      option.allVersions.some((v) => v.file_id === selectedVersion?.file_id),
     ) ??
     editionOptions[0] ??
     null

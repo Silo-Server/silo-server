@@ -2,18 +2,26 @@ package adminjob
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/Silo-Server/silo-server/internal/cache"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/libraryingest"
+	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scanbatch"
 	"github.com/Silo-Server/silo-server/internal/scanner"
@@ -101,6 +109,13 @@ type itemRefreshTestIngester struct {
 	runID    string
 	result   *libraryingest.Result
 	err      error
+	// unlinked is set when the subtree was ingested as unlinked.
+	unlinked bool
+}
+
+func (s *itemRefreshTestIngester) IngestUnlinkedSubtree(ctx context.Context, folder *models.MediaFolder, subtreePath string) (*libraryingest.Result, error) {
+	s.unlinked = true
+	return s.IngestSubtree(ctx, folder, subtreePath)
 }
 
 func (s *itemRefreshTestIngester) IngestSubtree(ctx context.Context, _ *models.MediaFolder, subtreePath string) (*libraryingest.Result, error) {
@@ -401,6 +416,13 @@ func TestItemRefreshIngestsWithoutRunWhenScopeAlreadyClaimed(t *testing.T) {
 type itemRefreshTestFileRepo struct {
 	filesByPath []*models.MediaFile
 	clearedPath string
+	// unlinkedReads is how many scope reads after the clear find no linked
+	// file, as while another worker's match is still running.
+	unlinkedReads int
+	// partlyLinkedReads is how many reads after those still find one more
+	// file of the scope unlinked; -1 means it never links.
+	partlyLinkedReads int
+	reads             int
 }
 
 func (r *itemRefreshTestFileRepo) GetByContentID(_ context.Context, _ string) ([]*models.MediaFile, error) {
@@ -412,6 +434,13 @@ func (r *itemRefreshTestFileRepo) GetByEpisodeID(_ context.Context, _ string) ([
 }
 
 func (r *itemRefreshTestFileRepo) GetByFolderAndPathPrefix(_ context.Context, _ int, _ string) ([]*models.MediaFile, error) {
+	r.reads++
+	if r.clearedPath != "" && r.reads <= r.unlinkedReads {
+		return nil, nil
+	}
+	if r.clearedPath != "" && (r.partlyLinkedReads < 0 || r.reads <= r.unlinkedReads+r.partlyLinkedReads) {
+		return append(slices.Clone(r.filesByPath), &models.MediaFile{FilePath: "/media/mixed/Title/still-unlinked.mkv"}), nil
+	}
 	return r.filesByPath, nil
 }
 
@@ -480,6 +509,9 @@ func (r *itemRefreshTestSkippedRootRepo) DeleteMissingInScope(_ context.Context,
 
 type itemRefreshTestEpisodeRepo struct {
 	episode *models.Episode
+	// missingReads is how many lookups find no episode yet.
+	missingReads int
+	reads        int
 }
 
 func (r *itemRefreshTestEpisodeRepo) GetByID(_ context.Context, _ string) (*models.Episode, error) {
@@ -487,10 +519,14 @@ func (r *itemRefreshTestEpisodeRepo) GetByID(_ context.Context, _ string) (*mode
 }
 
 func (r *itemRefreshTestEpisodeRepo) GetBySeriesAndNumber(_ context.Context, seriesID string, seasonNum int, episodeNum int) (*models.Episode, error) {
+	r.reads++
+	if r.reads <= r.missingReads {
+		return nil, catalog.ErrEpisodeNotFound
+	}
 	if r.episode != nil && r.episode.SeriesID == seriesID && r.episode.SeasonNumber == seasonNum && r.episode.EpisodeNumber == episodeNum {
 		return r.episode, nil
 	}
-	return nil, errors.New("episode not found")
+	return nil, catalog.ErrEpisodeNotFound
 }
 
 func (r *itemRefreshTestEpisodeRepo) ListBySeries(_ context.Context, _ string) ([]*models.Episode, error) {
@@ -584,6 +620,159 @@ func TestItemRefreshExecutorRunsResetJobsAsResets(t *testing.T) {
 	}
 }
 
+// A complete refresh whose scope another worker is still matching waits for
+// its files to be linked again before it resolves the rebuilt item, and gives
+// up with errNoRebuiltContent once relinkWait passes. A movie target, which no
+// series root queue matches, ingests without the unlinked settle wait.
+func TestItemRefreshExecutorCompleteRefreshWaitsForTheRelink(t *testing.T) {
+	t.Parallel()
+	// The relink poll runs on synctest's fake clock, so the waits cost no time.
+	synctest.Test(t, func(t *testing.T) {
+		run := func(t *testing.T, requestedType string, unlinkedReads int, wait time.Duration) (*ItemRefreshResult, *itemRefreshTestIngester, *itemRefreshTestFileRepo, error) {
+			t.Helper()
+			ingester := &itemRefreshTestIngester{}
+			fileRepo := &itemRefreshTestFileRepo{
+				filesByPath:   []*models.MediaFile{{ContentID: "new-id", FilePath: "/media/mixed/Title/Title.mkv"}},
+				unlinkedReads: unlinkedReads,
+			}
+			executor := NewItemRefreshExecutor(
+				&itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 7, Enabled: true, Paths: []string{"/media/mixed"}}},
+				fileRepo, &itemRefreshTestRootClaimRepo{}, &itemRefreshTestGroupClaimRepo{}, newItemRefreshTestSkippedRootRepo(),
+				nil, nil, ingester, &itemRefreshTestScanRuns{}, &itemRefreshTestRefresher{}, nil, nil,
+			)
+			executor.relinkWait = wait
+			result, err := executor.Execute(context.Background(), ItemRefreshRequest{
+				RequestedContentID: "old-id", RequestedType: requestedType, RefreshContentID: "old-id",
+				ScanFolderID: 7, ScanPath: "/media/mixed/Title", Mode: ItemRefreshModeComplete,
+			}, nil)
+			return result, ingester, fileRepo, err
+		}
+
+		result, ingester, files, err := run(t, "series", 3, 5*time.Second)
+		if err != nil || result.RefreshContentID != "new-id" {
+			t.Fatalf("relinked after %d reads: result %+v, err %v; want new-id", files.reads, result, err)
+		}
+		if !ingester.unlinked {
+			t.Fatal("a series target ingested as unchanged, want IngestUnlinkedSubtree")
+		}
+
+		if _, _, _, err := run(t, "series", 1_000, 50*time.Millisecond); !errors.Is(err, errNoRebuiltContent) {
+			t.Fatalf("never relinked: err = %v, want errNoRebuiltContent", err)
+		}
+
+		if _, ingester, _, err := run(t, "movie", 0, time.Second); err != nil || ingester.unlinked {
+			t.Fatalf("movie target: err %v, unlinked ingest %v; want the plain ingest", err, ingester.unlinked)
+		}
+	})
+}
+
+// A series root match links the root's files to a pending skeleton before it
+// asks the providers, and the provider match can merge that skeleton away. A
+// complete refresh waits for the match to finish instead of resolving to the
+// skeleton, and fails with errRebuiltItemMatching when it doesn't finish.
+func TestItemRefreshExecutorCompleteRefreshWaitsForTheSeriesMatch(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		run := func(statuses *itemRefreshTestItemStatuses, wait time.Duration) (*ItemRefreshResult, *itemRefreshTestItemStatuses, error) {
+			executor := NewItemRefreshExecutor(
+				&itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 7, Enabled: true, Paths: []string{"/media/tv"}}},
+				&itemRefreshTestFileRepo{filesByPath: []*models.MediaFile{{ContentID: "new-id", FilePath: "/media/tv/Title/Title S01E01.mkv"}}},
+				&itemRefreshTestRootClaimRepo{}, &itemRefreshTestGroupClaimRepo{}, newItemRefreshTestSkippedRootRepo(),
+				nil, nil, &itemRefreshTestIngester{}, &itemRefreshTestScanRuns{}, &itemRefreshTestRefresher{}, nil, nil,
+			)
+			executor.relinkWait = wait
+			executor.SetItemStatusReader(statuses)
+			result, err := executor.Execute(context.Background(), ItemRefreshRequest{
+				RequestedContentID: "old-id", RequestedType: "series", RefreshContentID: "old-id",
+				ScanFolderID: 7, ScanPath: "/media/tv/Title", Mode: ItemRefreshModeComplete,
+			}, nil)
+			return result, statuses, err
+		}
+
+		result, statuses, err := run(&itemRefreshTestItemStatuses{pendingReads: 2}, 5*time.Second)
+		if err != nil || result.RefreshContentID != "new-id" || statuses.reads < 3 {
+			t.Fatalf("matched after %d status reads: result %+v, err %v; want new-id after the 3rd", statuses.reads, result, err)
+		}
+		// A skeleton merged away between the file read and the status read
+		// has no status; the refresh reads the scope again.
+		result, statuses, err = run(&itemRefreshTestItemStatuses{goneReads: 2}, 5*time.Second)
+		if err != nil || result.RefreshContentID != "new-id" || statuses.reads < 3 {
+			t.Fatalf("item gone for %d status reads: result %+v, err %v; want new-id after the 3rd", statuses.reads, result, err)
+		}
+		if _, _, err := run(&itemRefreshTestItemStatuses{pendingReads: 1_000}, 50*time.Millisecond); !errors.Is(err, errRebuiltItemMatching) {
+			t.Fatalf("never matched: err = %v, want errRebuiltItemMatching", err)
+		}
+	})
+}
+
+// itemRefreshTestItemStatuses reports no item for its first goneReads reads,
+// every item as pending for its first pendingReads reads, then as matched.
+type itemRefreshTestItemStatuses struct {
+	goneReads    int
+	pendingReads int
+	reads        int
+}
+
+func (r *itemRefreshTestItemStatuses) GetStatusByIDs(_ context.Context, ids []string) (map[string]string, error) {
+	r.reads++
+	if r.reads <= r.goneReads {
+		return map[string]string{}, nil
+	}
+	status := "matched"
+	if r.reads <= r.pendingReads {
+		status = "pending"
+	}
+	out := make(map[string]string, len(ids))
+	for _, id := range ids {
+		out[id] = status
+	}
+	return out, nil
+}
+
+// A complete refresh waits for the whole scope: while a file in it is still
+// unlinked, or the requested episode row isn't there yet, it checks again. A
+// file that never links doesn't fail the refresh once the wait passes.
+func TestItemRefreshExecutorCompleteRefreshWaitsForTheWholeScope(t *testing.T) {
+	t.Parallel()
+	// The relink poll runs on synctest's fake clock, so the waits cost no time.
+	synctest.Test(t, func(t *testing.T) {
+		run := func(t *testing.T, partlyLinkedReads, missingEpisodeReads int, wait time.Duration) (*ItemRefreshResult, *itemRefreshTestFileRepo, *itemRefreshTestEpisodeRepo, error) {
+			t.Helper()
+			fileRepo := &itemRefreshTestFileRepo{
+				filesByPath:       []*models.MediaFile{{ContentID: "new-series-id", FilePath: "/media/mixed/Title/Title S01E03.mkv"}},
+				partlyLinkedReads: partlyLinkedReads,
+			}
+			episodeRepo := &itemRefreshTestEpisodeRepo{
+				episode:      &models.Episode{ContentID: "new-episode-id", SeriesID: "new-series-id", SeasonNumber: 1, EpisodeNumber: 3},
+				missingReads: missingEpisodeReads,
+			}
+			executor := NewItemRefreshExecutor(
+				&itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 7, Enabled: true, Paths: []string{"/media/mixed"}}},
+				fileRepo, &itemRefreshTestRootClaimRepo{}, &itemRefreshTestGroupClaimRepo{}, newItemRefreshTestSkippedRootRepo(),
+				nil, episodeRepo, &itemRefreshTestIngester{}, &itemRefreshTestScanRuns{}, &itemRefreshTestRefresher{}, nil, nil,
+			)
+			executor.relinkWait = wait
+			result, err := executor.Execute(context.Background(), ItemRefreshRequest{
+				RequestedContentID: "old-episode-id", RequestedType: "episode", RequestedSeasonNumber: 1, RequestedEpisodeNumber: 3,
+				RefreshContentID: "old-series-id", ScanFolderID: 7, ScanPath: "/media/mixed/Title", Mode: ItemRefreshModeComplete,
+			}, nil)
+			return result, fileRepo, episodeRepo, err
+		}
+
+		result, files, _, err := run(t, 3, 0, 5*time.Second)
+		if err != nil || result.RefreshContentID != "new-episode-id" || files.reads < 4 {
+			t.Fatalf("partly linked scope: result %+v after %d reads, err %v; want new-episode-id after the 4th read", result, files.reads, err)
+		}
+		result, _, episodes, err := run(t, 0, 2, 5*time.Second)
+		if err != nil || result.RefreshContentID != "new-episode-id" || episodes.reads < 3 {
+			t.Fatalf("late episode row: result %+v after %d lookups, err %v; want new-episode-id after the 3rd", result, episodes.reads, err)
+		}
+		if result, _, _, err := run(t, -1, 0, 50*time.Millisecond); err != nil || result.RefreshContentID != "new-episode-id" {
+			t.Fatalf("a file that never links: result %+v, err %v; want the refresh to finish with what is linked", result, err)
+		}
+	})
+}
+
 func TestItemRefreshExecutorCompleteRefreshRebuildsAndMapsEpisodeTarget(t *testing.T) {
 	t.Parallel()
 
@@ -649,6 +838,9 @@ func TestItemRefreshExecutorCompleteRefreshRebuildsAndMapsEpisodeTarget(t *testi
 	if got, want := fileRepo.clearedPath, "/media/mixed/Show/Season 01"; got != want {
 		t.Fatalf("ClearContentLinksByPathPrefix() path = %q, want %q", got, want)
 	}
+	if !ingester.unlinked {
+		t.Fatal("complete refresh ingested its scope as unchanged, want IngestUnlinkedSubtree")
+	}
 	if got, want := rootClaimRepo.deletedRoot, "/media/mixed/Show"; got != want {
 		t.Fatalf("DeleteByFolderAndRoot() root = %q, want %q", got, want)
 	}
@@ -667,4 +859,193 @@ func TestItemRefreshExecutorCompleteRefreshRebuildsAndMapsEpisodeTarget(t *testi
 	if got, want := result.DetailContentID, "new-episode-id"; got != want {
 		t.Fatalf("result detail_content_id = %q, want %q", got, want)
 	}
+}
+
+// TestCompleteItemRefreshKeepsPodcastIDsDB covers issue #3405: a complete
+// metadata refresh of a podcast show, or of one of its episodes, keeps the
+// show's and episodes' content IDs, which favorites and progress refer to.
+func TestCompleteItemRefreshKeepsPodcastIDsDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	for _, target := range []string{"show", "episode"} {
+		t.Run(target, func(t *testing.T) {
+			f := newPodcastRefreshFixture(t, pool)
+			showID, episodeIDs := f.catalogIDs(t)
+			requestedID := showID
+			if target == "episode" {
+				requestedID = episodeIDs[0]
+			}
+
+			resolver := NewItemRefreshResolver(
+				catalog.NewItemRepository(pool),
+				catalog.NewSeasonRepository(pool),
+				catalog.NewEpisodeRepository(pool),
+				catalog.NewFolderRepository(pool),
+				f.fileRepo,
+			)
+			req, err := resolver.ResolveWithMode(ctx, requestedID, ItemRefreshModeComplete)
+			if err != nil {
+				t.Fatalf("ResolveWithMode: %v", err)
+			}
+			result, err := f.executor.Execute(ctx, *req, nil)
+			if err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+
+			gotShowID, gotEpisodeIDs := f.catalogIDs(t)
+			if gotShowID != showID || gotEpisodeIDs[0] != episodeIDs[0] || gotEpisodeIDs[1] != episodeIDs[1] {
+				t.Fatalf("after complete refresh: show=%s episodes=%v, want show=%s episodes=%v",
+					gotShowID, gotEpisodeIDs, showID, episodeIDs)
+			}
+			if result.RefreshContentID != requestedID || result.DetailContentID != requestedID {
+				t.Fatalf("result refresh=%s detail=%s, want both %s", result.RefreshContentID, result.DetailContentID, requestedID)
+			}
+		})
+	}
+}
+
+type podcastRefreshFixture struct {
+	pool     *pgxpool.Pool
+	fileRepo *scanner.FileRepository
+	executor *ItemRefreshExecutor
+	folderID int
+	episodes []string
+}
+
+// newPodcastRefreshFixture scans a podcast library holding one show with two
+// episodes. A fake ffprobe prints each episode file, which holds the ffprobe
+// JSON for its own tags.
+func newPodcastRefreshFixture(t *testing.T, pool *pgxpool.Pool) *podcastRefreshFixture {
+	t.Helper()
+	ctx := context.Background()
+	base := t.TempDir()
+	root := filepath.Join(base, "podcasts")
+	showDir := filepath.Join(root, "Refresh Show")
+	if err := os.MkdirAll(showDir, 0o755); err != nil {
+		t.Fatalf("mkdir show: %v", err)
+	}
+	ffprobePath := filepath.Join(base, "ffprobe")
+	// Hold the fork lock so a concurrent exec cannot inherit the open file
+	// and make running the tool fail with ETXTBSY.
+	syscall.ForkLock.Lock()
+	err := os.WriteFile(ffprobePath, []byte("#!/bin/sh\nfor last; do :; done\ncat \"$last\"\n"), 0o755)
+	syscall.ForkLock.Unlock()
+	if err != nil {
+		t.Fatalf("write fake ffprobe: %v", err)
+	}
+
+	var episodes []string
+	for i, title := range []string{"Episode One", "Episode Two"} {
+		probe, err := json.Marshal(map[string]any{
+			"format": map[string]any{
+				"format_name": "mp3",
+				"duration":    "61",
+				"tags":        map[string]string{"album": "Refresh Show", "title": title, "track": []string{"1", "2"}[i]},
+			},
+			"streams": []map[string]any{{"index": 0, "codec_type": "audio", "codec_name": "mp3", "channels": 2}},
+		})
+		if err != nil {
+			t.Fatalf("marshal probe: %v", err)
+		}
+		path := filepath.Join(showDir, []string{"ep01.mp3", "ep02.mp3"}[i])
+		if err := os.WriteFile(path, probe, 0o644); err != nil {
+			t.Fatalf("write episode: %v", err)
+		}
+		episodes = append(episodes, path)
+	}
+
+	folder := &models.MediaFolder{Type: "podcasts", Name: "Podcast refresh test", Enabled: true, Paths: []string{root}}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO media_folders (type, name, enabled) VALUES ($1, $2, true) RETURNING id`,
+		folder.Type, folder.Name,
+	).Scan(&folder.ID); err != nil {
+		t.Fatalf("seed folder: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `
+			DELETE FROM media_items WHERE content_id IN (
+				SELECT content_id FROM media_files WHERE media_folder_id = $1 AND content_id IS NOT NULL
+				UNION
+				SELECT content_id FROM media_item_libraries WHERE media_folder_id = $1
+			)`, folder.ID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_files WHERE media_folder_id = $1`, folder.ID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_folder_paths WHERE media_folder_id = $1`, folder.ID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, folder.ID)
+	})
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO media_folder_paths (media_folder_id, path) VALUES ($1, $2)`, folder.ID, root,
+	); err != nil {
+		t.Fatalf("seed folder path: %v", err)
+	}
+
+	fileRepo := scanner.NewFileRepository(pool)
+	scan := scanner.NewScanner(fileRepo, ffprobePath, nil, 2, false, 0)
+	if _, err := scan.ScanFolder(ctx, folder); err != nil {
+		t.Fatalf("ScanFolder: %v", err)
+	}
+	folders := catalog.NewFolderRepository(pool)
+	skippedRoots := metadata.NewSkippedRootRepository(pool)
+	executor := NewItemRefreshExecutor(
+		folders,
+		fileRepo,
+		catalog.NewRootClaimRepository(pool),
+		catalog.NewGroupClaimRepository(pool),
+		skippedRoots,
+		catalog.NewSeasonRepository(pool),
+		catalog.NewEpisodeRepository(pool),
+		libraryingest.NewExecutor(scan, podcastRefreshNoMatcher{}, folders, skippedRoots, nil, nil),
+		&itemRefreshTestScanRuns{},
+		&itemRefreshTestRefresher{},
+		nil,
+		nil,
+	)
+	executor.evictRails = nil
+	return &podcastRefreshFixture{pool: pool, fileRepo: fileRepo, executor: executor, folderID: folder.ID, episodes: episodes}
+}
+
+// catalogIDs returns the show ID and the episode ID of each episode file.
+func (f *podcastRefreshFixture) catalogIDs(t *testing.T) (string, []string) {
+	t.Helper()
+	var showID string
+	episodeIDs := make([]string, 0, len(f.episodes))
+	for _, path := range f.episodes {
+		var contentID, episodeID string
+		if err := f.pool.QueryRow(context.Background(), `
+			SELECT COALESCE(content_id, ''), COALESCE(episode_id, '')
+			FROM media_files WHERE media_folder_id = $1 AND file_path = $2
+		`, f.folderID, path).Scan(&contentID, &episodeID); err != nil {
+			t.Fatalf("load file %s: %v", path, err)
+		}
+		if contentID == "" || episodeID == "" || (showID != "" && contentID != showID) {
+			t.Fatalf("%s: content_id=%q episode_id=%q, want episodes of one show", path, contentID, episodeID)
+		}
+		showID = contentID
+		episodeIDs = append(episodeIDs, episodeID)
+	}
+	return showID, episodeIDs
+}
+
+// podcastRefreshNoMatcher stands in for the metadata matcher: the podcast
+// scanner links its own files, so a podcast ingest has nothing to match.
+type podcastRefreshNoMatcher struct{}
+
+func (podcastRefreshNoMatcher) ProcessBatchByFolderAndPathPrefix(context.Context, int, string, time.Time) (int, error) {
+	return 0, nil
+}
+
+func (podcastRefreshNoMatcher) ProcessAllByFolderAndPathPrefix(context.Context, int, string, time.Time) (int, error) {
+	return 0, nil
+}
+
+func (podcastRefreshNoMatcher) RetryUnmatchedItemsByFolderAndPathPrefix(context.Context, int, string) (int, int, error) {
+	return 0, 0, nil
 }

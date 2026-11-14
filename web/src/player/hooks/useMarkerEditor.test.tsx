@@ -2,6 +2,7 @@ import { act, renderHook } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { PlayerConfigProvider, type PlayerConfig } from "../context/PlayerConfigContext";
+import type { MarkerDraft } from "../types";
 import { useMarkerEditor } from "./useMarkerEditor";
 
 const config: PlayerConfig = {
@@ -88,4 +89,43 @@ it("keeps the draft open when v2 refuses a save", async () => {
   expect(result.current.editing).toBe(true);
   expect(result.current.saving).toBe(false);
   expect(onSaved).not.toHaveBeenCalled();
+});
+
+it("reopens with the host's markers after a save whose realtime echo beat its response", async () => {
+  const initial: MarkerDraft = {
+    intro: { start: 0, end: 60 },
+    recap: null,
+    credits: null,
+    preview: null,
+  };
+  const afterSave: MarkerDraft = { ...initial, recap: { start: 0, end: 30 } };
+  const fromAnotherSession: MarkerDraft = { ...initial, intro: { start: 10, end: 70 } };
+  let respond: (response: Response) => void = () => {};
+  const fetchMock = vi.fn<typeof fetch>(
+    () => new Promise<Response>((resolve) => (respond = resolve)),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  const { result, rerender } = renderHook(
+    ({ markers }) => useMarkerEditor({ fileId: 42, duration: 600, markers }),
+    { wrapper, initialProps: { markers: initial } },
+  );
+  act(() => result.current.begin());
+  act(() => result.current.setEdge("recap", "end", 30));
+  let saving = Promise.resolve();
+  act(() => {
+    saving = result.current.save();
+  });
+  await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+  // The server pushes markers_updated before it answers the PUT, so the host
+  // already holds the saved values when the save resolves.
+  rerender({ markers: afterSave });
+  await act(async () => {
+    respond(new Response("{}", { status: 200 }));
+    await saving;
+  });
+  expect(result.current.editing).toBe(false);
+
+  rerender({ markers: fromAnotherSession });
+  act(() => result.current.begin());
+  expect(result.current.draft).toEqual(fromAnotherSession);
 });

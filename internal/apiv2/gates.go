@@ -56,6 +56,9 @@ func classGate(deps Dependencies) func(huma.Context, func(huma.Context)) {
 		if link, _ := op.Metadata[metaDirectDownloadLink].(bool); link && missing == "" {
 			chain = directDownloadGateChain(deps, chain)
 		}
+		if streamReferenceOperations[op.OperationID] && missing == "" {
+			chain = streamReferenceGateChain(deps, chain)
+		}
 		if attach, _ := op.Metadata[metaAttachSession].(bool); attach && class == ClassPublic && deps.Auth != nil {
 			chain = append(chain, deps.Auth.AttachSession)
 		}
@@ -298,6 +301,10 @@ func (d *denialWriter) problem() *Problem {
 		} else {
 			p = p.WithRetryAfter(apimw.CredentialCheckRetryAfterSeconds)
 		}
+	case apimw.CodePlaybackSessionEnded:
+		// A stream reference whose session was stopped: the same answer the
+		// delivery handlers give that session, not a sign-in problem.
+		p = NewProblem(TypePlaybackSessionEnded, "The playback session has ended.")
 	case legacyBadRequestCode:
 		p = badRequestProblem(d.reason)
 	case TypeInternalError.ID:

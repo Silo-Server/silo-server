@@ -1,4 +1,4 @@
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -43,5 +43,26 @@ describe("useQualityPreference", () => {
     setResolved("1080p");
     rerender();
     expect(result.current).toEqual({ preference: "1080p", settled: true });
+  });
+
+  it("follows the player onto the cellular quality while the link is metered", () => {
+    const connection = Object.assign(new EventTarget(), { type: "wifi" });
+    Object.defineProperty(navigator, "connection", { value: connection, configurable: true });
+    mocks.failed = false;
+    mocks.effective = {
+      [SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY]: { value: "2160p" },
+      [SETTING_KEYS.PLAYBACK_CELLULAR_PREFERRED_QUALITY]: { value: "720p" },
+    };
+    try {
+      const { result } = renderHook(() => useQualityPreferenceState());
+      expect(result.current.preference).toBe("2160p");
+      act(() => {
+        connection.type = "cellular";
+        connection.dispatchEvent(new Event("change"));
+      });
+      expect(result.current.preference).toBe("720p");
+    } finally {
+      Reflect.deleteProperty(navigator, "connection");
+    }
   });
 });

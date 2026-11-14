@@ -194,6 +194,10 @@ func (h *frontendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Content-Security-Policy", frontendContentSecurityPolicy)
+	// Requests the page makes send only its origin as Referer, never its
+	// path: a password reset or invitation link issued before tokens moved
+	// to the fragment carries its token there.
+	w.Header().Set("Referrer-Policy", "strict-origin")
 	// The HTML shell keeps a stable URL across builds, so it must never be
 	// served stale: every deploy changes which content-hashed /assets/*
 	// bundles it references. no-cache lets browsers and CDNs store it but

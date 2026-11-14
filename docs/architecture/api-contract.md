@@ -456,8 +456,13 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   sets `Deprecation: @<unix-seconds>`, `Link: <link>; rel="deprecation"` (appended to any
   existing `Link`), and `Sunset: <IMF-fixdate>` only when a sunset is declared, in the API
   middleware chain ahead of the class gate, so a gate denial or validation problem carries them
-  as a 200 does. No v2 operation is deprecated yet; the only deprecated
-  operations are test probes, recorded in the `deprecated_ok` and `deprecated_problem` fixtures.
+  as a 200 does. The deprecated v2 operations are the four that take
+  a password reset or invitation token in the URL path (`lookupPasswordReset`,
+  `completePasswordReset`, `lookupInvitation`, `acceptInvitation`; their replacements take it in
+  the body). They are removed before the lock: reset links live at most 24 hours and no client
+  but the web app called the reset pair, and the invitation pair goes once a released Android
+  build uses the body forms. Test probes, recorded in the `deprecated_ok` and
+  `deprecated_problem` fixtures, exercise the headers.
 - **Accepted library jobs.** Library refresh and deletion use the durable admin-job runner
   with canonical `/api/v2/library-jobs/{job_id}` monitors, safe named results/failures,
   conditional polling, and durable refresh cancellation. Worker progress and terminal writes
@@ -732,6 +737,23 @@ routes it replaces the account credential: the login session must still be activ
 resolves that profile's current limits and skips only the PIN proof the link stands for, as it
 does for the Apple display token. The link authorizes the start of a request; a transfer that
 began in time may run longer.
+
+The playback delivery routes (`getPlaybackMedia`, `getPlaybackManifest`, `getPlaybackSegment`,
+`getPlaybackSubtitle` and their HEAD forms) accept the plan's signed stream reference `st` the
+same way, for a receiver such as a Google Cast device that is handed only the plan URL. A request
+with an `Authorization` header or a `token` parameter takes the account path unchanged. Without
+either, a valid `st` that names a playback session (not a download, theme song or bandwidth
+probe) and the session in the path authorizes the request as its account, with the account's
+current role, while that session's playback attempt is live, owned by the reference's account and
+profile, and started by a login session that is still active. The attempt records that login
+session when playback starts. `X-Profile-Id` is rewritten to the reference's profile; viewer
+access then resolves that profile's limits and skips only the PIN proof, and the handlers apply
+the session-deny marker and ownership checks as for any request. A reference therefore ends when
+its session stops (even where no session-deny marker store is configured), when the login session
+signs out or is revoked (disabling an account revokes its sessions), or at the 24-hour
+stream-token expiry. An attempt with no login session, started with an API key or before attempts
+recorded one, keeps needing the account credential. Plans that negotiated
+`header_authenticated_media_v1` carry no `st`, so their media still needs the header.
 
 Household management (creating, editing, and deleting profiles, listing household sessions,
 managing another profile's devices or settings, importing history for another profile, and
@@ -1090,7 +1112,10 @@ Media proxy routes retain their explicit cross-origin behavior because a browser
 streams from a separate proxy or transcode-node origin. Those routes still perform their normal
 token or bearer authorization and do not enable credentialed wildcard CORS; CORS is never an
 authorization mechanism. Jellyfin compatibility and other non-native surfaces retain their own
-tested policies. Support for a separately hosted browser client may later add an explicit
+tested policies. The native HLS manifest and segment routes send the same uncredentialed
+wildcard on every answer, authorization refusals included, because a Google Cast receiver plays
+them from a script on Google's origin; a raw operation opts in with `RawOperation.CrossOrigin`.
+Support for a separately hosted browser client may later add an explicit
 administrator-configured origin allowlist without changing the default native contract.
 
 ### What Huma covers

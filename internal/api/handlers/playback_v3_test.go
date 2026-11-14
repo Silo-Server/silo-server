@@ -3207,19 +3207,27 @@ func TestRemotePlaybackTransportTimeoutCoversAutoFallbackAttempts(t *testing.T) 
 		}
 	}
 
+	// An explicit hardware start can retry with CPU decode, then software,
+	// after its GPU decoder rejects the source.
+	handler := &PlaybackHandler{}
+	explicit := ready
+	explicit.HWAccel = "nvenc"
+	if got := handler.remotePlaybackTransportTimeout(nodeURL, explicit); got <= minimum {
+		t.Errorf("explicit accel: start timeout = %s, want more than %s", got, minimum)
+	}
+
 	// Starts that cannot fall back keep the single-wait budget, so an
 	// unresponsive node fails over as quickly as before.
 	singleWait := playback.ManifestStartupTimeout + 5*time.Second
 	unready := ready
 	unready.RequireReady = false
-	explicit := ready
-	explicit.HWAccel = "nvenc"
+	softwareAccel := ready
+	softwareAccel.HWAccel = playback.HWAccelNone
 	copyVideo := ready
 	copyVideo.TargetCodecVideo = "copy"
-	handler := &PlaybackHandler{}
 	for name, request := range map[string]transcodenode.TranscodeStartRequest{
 		"unready":        unready,
-		"explicit accel": explicit,
+		"software accel": softwareAccel,
 		"copy video":     copyVideo,
 	} {
 		if got := handler.remotePlaybackTransportTimeout(nodeURL, request); got != singleWait {
@@ -3516,10 +3524,11 @@ func startPlaybackV2IntoRecorder(t *testing.T, h *PlaybackHandler, rr *httptest.
 	writeJSON(rr, http.StatusCreated, response)
 }
 
-// writePlaybackTestFFmpegFailingOn writes a fake FFmpeg that exits before its
-// first manifest when its arguments contain failPattern and otherwise behaves
-// like writePlaybackTestFFmpeg. Every real transcode invocation is logged.
-func writePlaybackTestFFmpegFailingOn(t *testing.T, failPattern string) (ffmpegPath, logPath string) {
+// writePlaybackTestFFmpegFailingOn writes a fake FFmpeg that prints failMessage
+// and exits before its first manifest when its arguments contain failPattern,
+// and otherwise behaves like writePlaybackTestFFmpeg. Every real transcode
+// invocation is logged.
+func writePlaybackTestFFmpegFailingOn(t *testing.T, failPattern, failMessage string) (ffmpegPath, logPath string) {
 	t.Helper()
 	dir := t.TempDir()
 	ffmpegPath = filepath.Join(dir, "fake-ffmpeg.sh")
@@ -3528,7 +3537,7 @@ func writePlaybackTestFFmpegFailingOn(t *testing.T, failPattern string) (ffmpegP
 		"last=\"\"\n" +
 		"for arg in \"$@\"; do last=\"$arg\"; done\n" +
 		"case \"$last\" in *.m3u8) printf '%s\\n' \"$*\" >> \"" + logPath + "\" ;; esac\n" +
-		"case \"$*\" in *'" + failPattern + "'*) echo 'intentional hardware failure' >&2; exit 1 ;; esac\n" +
+		"case \"$*\" in *'" + failPattern + "'*) echo '" + failMessage + "' >&2; exit 1 ;; esac\n" +
 		"case \"$last\" in\n" +
 		"  *.m3u8) out=\"$(dirname \"$last\")\"; mkdir -p \"$out\"; " +
 		"printf x > \"$out/init.mp4\"; printf x > \"$out/seg_0.m4s\"; " +
@@ -3566,14 +3575,18 @@ func autoNVENCPipelineSeamV3(t *testing.T) func(context.Context, playback.Transc
 	}
 }
 
-func prepareAutoLocalTransportV3(t *testing.T, ffmpegPath, sessionID string) (*PlaybackHandler, preparedTransportV3, *transportErrorV3) {
+// prepareLocalTransportForTestV3 starts a local H.264 transcode under the
+// configured hwAccel. Under auto it stands in for auto resolving to NVENC.
+func prepareLocalTransportForTestV3(t *testing.T, hwAccel, ffmpegPath, sessionID string) (*PlaybackHandler, preparedTransportV3, *transportErrorV3) {
 	t.Helper()
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	transcodeDir := t.TempDir()
 	handler.PlaybackConfig = func() config.PlaybackConfig {
-		return config.PlaybackConfig{FFmpegPath: ffmpegPath, TranscodeDir: transcodeDir, TranscodeEnabled: true, HWAccel: "auto"}
+		return config.PlaybackConfig{FFmpegPath: ffmpegPath, TranscodeDir: transcodeDir, TranscodeEnabled: true, HWAccel: hwAccel}
 	}
-	handler.autoTranscodePipelineV3 = autoNVENCPipelineSeamV3(t)
+	if hwAccel == "auto" {
+		handler.autoTranscodePipelineV3 = autoNVENCPipelineSeamV3(t)
+	}
 	file := v3HandlerFixtureFile(t)
 	result := playback.PlannerResultV3{
 		Plan:       &playback.PlanV3{PlanID: "plan:" + sessionID, Delivery: playback.DeliveryTranscodeHLSV3},
@@ -3590,8 +3603,8 @@ func prepareAutoLocalTransportV3(t *testing.T, ffmpegPath, sessionID string) (*P
 }
 
 func TestPrepareLocalTransportV3AutoKeepsGPUEncodeWithCPUDecode(t *testing.T) {
-	ffmpegPath, logPath := writePlaybackTestFFmpegFailingOn(t, "-hwaccel cuda")
-	handler, transport, transportErr := prepareAutoLocalTransportV3(t, ffmpegPath, "session-auto-mixed")
+	ffmpegPath, logPath := writePlaybackTestFFmpegFailingOn(t, "-hwaccel cuda", "intentional hardware failure")
+	handler, transport, transportErr := prepareLocalTransportForTestV3(t, "auto", ffmpegPath, "session-auto-mixed")
 	if transportErr != nil {
 		t.Fatalf("prepare auto local transport: %v (cause: %v)", transportErr, transportErr.cause)
 	}
@@ -3618,8 +3631,8 @@ func TestPrepareLocalTransportV3AutoKeepsGPUEncodeWithCPUDecode(t *testing.T) {
 }
 
 func TestPrepareLocalTransportV3AutoTerminalFailureKeepsMainError(t *testing.T) {
-	ffmpegPath, logPath := writePlaybackTestFFmpegFailingOn(t, "-f hls")
-	_, transport, transportErr := prepareAutoLocalTransportV3(t, ffmpegPath, "session-auto-terminal")
+	ffmpegPath, logPath := writePlaybackTestFFmpegFailingOn(t, "-f hls", "intentional hardware failure")
+	_, transport, transportErr := prepareLocalTransportForTestV3(t, "auto", ffmpegPath, "session-auto-terminal")
 	if transportErr == nil {
 		transport.rollback()
 		t.Fatal("failed ffmpeg startup returned a playable transport")
@@ -3633,6 +3646,26 @@ func TestPrepareLocalTransportV3AutoTerminalFailureKeepsMainError(t *testing.T) 
 	invocations := readPlaybackTestFFmpegInvocations(t, logPath)
 	if len(invocations) != 3 || !strings.Contains(invocations[2], "libx264") {
 		t.Fatalf("invocations = %q, want full hardware, mixed, then software", invocations)
+	}
+}
+
+// An explicit NVENC setting on a card whose NVDEC cannot decode the source
+// retried the identical CUDA decode. It now decodes on the CPU and keeps NVENC.
+func TestPrepareLocalTransportV3NVENCRetriesRejectedDecodeOnCPU(t *testing.T) {
+	ffmpegPath, logPath := writePlaybackTestFFmpegFailingOn(t, "-hwaccel cuda", "[hevc @ 0x1] Hardware is lacking required capabilities")
+	handler, transport, transportErr := prepareLocalTransportForTestV3(t, "nvenc", ffmpegPath, "session-nvenc-decode")
+	if transportErr != nil {
+		t.Fatalf("prepare local transport: %v (cause: %v)", transportErr, transportErr.cause)
+	}
+	if commitErr := transport.commit(); commitErr != nil {
+		t.Fatalf("commit: %v", commitErr)
+	}
+	defer handler.tm.CloseTranscodeSession("session-nvenc-decode", "")
+
+	invocations := readPlaybackTestFFmpegInvocations(t, logPath)
+	if len(invocations) != 2 || !strings.Contains(invocations[0], "-hwaccel cuda") ||
+		strings.Contains(invocations[1], "-hwaccel cuda") || !strings.Contains(invocations[1], "h264_nvenc") {
+		t.Fatalf("invocations = %q, want CUDA decode then CPU decode with NVENC", invocations)
 	}
 }
 

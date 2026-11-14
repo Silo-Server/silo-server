@@ -425,12 +425,18 @@ type VideoTrack struct {
 	VideoRange          string `json:"video_range,omitempty"`
 	VideoRangeType      string `json:"video_range_type,omitempty"`
 	ColorRange          string `json:"color_range,omitempty"`
-	ColorPrimaries      string `json:"color_primaries,omitempty"`
-	ColorSpace          string `json:"color_space,omitempty"`
-	ColorTransfer       string `json:"color_transfer,omitempty"`
-	BitDepth            int    `json:"bit_depth,omitempty"`
-	PixelFormat         string `json:"pixel_format,omitempty"`
-	ReferenceFrames     int    `json:"reference_frames,omitempty"`
+	// FrameColorRange is the range FFmpeg reported on the primary PQ track's
+	// first decoded frame, "unknown" when the frame carried none. The decoder
+	// takes it from the bitstream, which can contradict the container's tag in
+	// ColorRange, and tone-map graphs see the decoder's value. It is empty
+	// when the frame was not read.
+	FrameColorRange string `json:"frame_color_range,omitempty" doc:"Color range FFmpeg reported on the first decoded frame of a PQ track (tv, pc, or unknown when the frame carried none); absent when the frame was not read. Can differ from color_range, the container's tag"`
+	ColorPrimaries  string `json:"color_primaries,omitempty"`
+	ColorSpace      string `json:"color_space,omitempty"`
+	ColorTransfer   string `json:"color_transfer,omitempty"`
+	BitDepth        int    `json:"bit_depth,omitempty"`
+	PixelFormat     string `json:"pixel_format,omitempty"`
+	ReferenceFrames int    `json:"reference_frames,omitempty"`
 	// MultiplePPS records whether an H.264 stream redefines the same
 	// pic_parameter_set_id in-band with more than one distinct content. Such
 	// streams cannot be safely stream-copied into an avc1/fMP4 HLS segment:
