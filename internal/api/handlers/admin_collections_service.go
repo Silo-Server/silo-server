@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -148,6 +149,7 @@ func (h *LibraryCollectionHandler) createAdminCollection(ctx context.Context, re
 		ManagementSource: req.ManagementSource,
 		ManagementKey:    req.ManagementKey,
 		SyncSchedule:     syncSchedule,
+		UniqueTitle:      true,
 	}
 	if err := normalizeAdminCollectionInput(&input); err != nil {
 		return none, err
@@ -160,6 +162,9 @@ func (h *LibraryCollectionHandler) createAdminCollection(ctx context.Context, re
 
 	collection, err := h.repo.Create(ctx, input)
 	if err != nil {
+		if fieldErr := collectionNameError(err); fieldErr != nil {
+			return none, fieldErr
+		}
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to create collection")
 	}
 
@@ -196,6 +201,11 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 		return none, err
 	}
 	req.Visibility = visibility
+	// A collection shows in at least one library; with none it would drop out
+	// of every library's list while the update reported success.
+	if req.LibraryIDs != nil && len(uniquePositiveInts(*req.LibraryIDs)) == 0 {
+		return none, fieldError("library_ids", "Choose at least one library")
+	}
 	existing, err := h.repo.GetByID(ctx, collectionID)
 	if err != nil {
 		return none, adminCollectionLookupAPIError(err)
@@ -266,7 +276,11 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 		ManagementSource: req.ManagementSource,
 		ManagementKey:    req.ManagementKey,
 		SyncSchedule:     req.SyncSchedule,
+		UniqueTitle:      true,
 	}); err != nil {
+		if fieldErr := collectionNameError(err); fieldErr != nil {
+			return none, fieldErr
+		}
 		if errors.Is(err, catalog.ErrLibraryCollectionRevisionMismatch) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return none, err
 		}
@@ -294,6 +308,21 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 		h.refreshSmartCountAsync(collectionID)
 	}
 	return h.libraryCollectionResponseOf(ctx, h.withViewerPoster(ctx, updated)), nil
+}
+
+// collectionNameError answers a title another collection in one of the
+// collection's libraries already has, or a slug another collection of its
+// library already uses, as a validation error at that field, which v2
+// answers as 422 validation_failed at body.title or body.slug. Nil for any
+// other error.
+func collectionNameError(err error) *APIError {
+	if taken, ok := errors.AsType[*catalog.LibraryCollectionTitleTakenError](err); ok {
+		return fieldError("title", fmt.Sprintf("Another collection in %s already has this name", taken.LibraryName)).WithCause(err)
+	}
+	if catalog.IsLibraryCollectionSlugConflict(err) {
+		return fieldError("slug", "Another collection in this library already uses this slug").WithCause(err)
+	}
+	return nil
 }
 
 // validateCollectionType rejects values the library_collections
