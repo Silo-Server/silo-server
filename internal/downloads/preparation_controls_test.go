@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sync"
 	"testing"
@@ -568,6 +570,17 @@ func TestLateCompletionStopsItsPreparationDB(t *testing.T) {
 	if encodeCtx.Err() == nil || status != ArtifactExpired {
 		t.Fatalf("job after its last download reported complete = %q, encode stopped %v; want expired and stopped",
 			status, encodeCtx.Err() != nil)
+	}
+
+	// A worker elsewhere that wrote the whole file before its heartbeat
+	// noticed is refused the ready transition and removes what it wrote.
+	output := filepath.Join(t.TempDir(), "finished.mp4")
+	if err := os.WriteFile(output, []byte("encoded"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m.removeCanceledLocalOutput(ctx, row.ID, PreparedArtifact{OutputPath: output})
+	if _, err := os.Stat(output); !os.IsNotExist(err) {
+		t.Fatalf("output of the retired job after its worker gave up: stat error %v, want removed", err)
 	}
 }
 

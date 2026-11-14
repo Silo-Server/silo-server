@@ -354,13 +354,17 @@ func (m *ArtifactManager) trackLocalAttempt(id string, cancel context.CancelFunc
 }
 
 // removeCanceledLocalOutput deletes the local file of an attempt whose job
-// was canceled while it ran: no row will ever point at it. A job that still
-// exists lost its lease to another worker, which owns the path.
+// was canceled or retired while it ran: no row will ever point at it. A job
+// that exists in any other status lost its lease to another worker, which
+// owns the path. A retired job's path has no owner: queuing it again starts
+// a new attempt only after the stopped worker's lease window.
 func (m *ArtifactManager) removeCanceledLocalOutput(ctx context.Context, artifactID string, prepared PreparedArtifact) {
 	if prepared.Remote() || prepared.OutputPath == "" {
 		return
 	}
-	if _, err := m.repo.GetByID(ctx, artifactID); !errors.Is(err, ErrNotFound) {
+	switch row, err := m.repo.GetByID(ctx, artifactID); {
+	case errors.Is(err, ErrNotFound):
+	case err != nil, row.Status != ArtifactExpired:
 		return
 	}
 	if err := os.Remove(prepared.OutputPath); err != nil && !os.IsNotExist(err) {
