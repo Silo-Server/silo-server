@@ -26,7 +26,7 @@ import (
 // A second HTTP request then changes the household before the held mutation
 // reaches its service. No timers determine the ordering.
 func TestHouseholdMutationRechecksPINAfterSlowBody(t *testing.T) {
-	engine, err := policy.NewEngine(t.Context())
+	engine, err := policy.NewEngine(t.Context(), policy.WithEvalTimeout(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}

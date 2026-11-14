@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -745,7 +746,7 @@ func (s viewerResolverTestStore) ListSettingValuesForResolution(context.Context,
 
 func newViewerResolverTestPDP(t *testing.T, ctx context.Context) *PDP {
 	t.Helper()
-	engine, err := NewEngine(ctx)
+	engine, err := NewEngine(ctx, WithEvalTimeout(time.Minute))
 	if err != nil {
 		t.Fatalf("NewEngine() error: %v", err)
 	}
