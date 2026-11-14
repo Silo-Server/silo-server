@@ -10,6 +10,8 @@
 ./internal/catalog TestLibraryCollectionDrawsFromItsRulesLibrariesDB
 ./internal/catalog TestLibraryCollectionReplaceItemsWritesOnlyTheDifferenceDB
 ./internal/catalog TestLibraryCollectionReplaceItemsRacesMemberDeleteDB
+./internal/catalog TestLibraryCollectionNamesDB
+./internal/catalog TestLibraryCollectionNameRacesDB
 ./internal/catalog TestCatalogManualCollectionCursorDB
 ./internal/catalog TestMixedCatalogMangaCounts
 ./internal/catalog TestContentRatingCeilingAcrossSystemsDB
@@ -22,6 +24,7 @@
 ./internal/sections TestCompatibilityRecentlyAddedReturnsFlatDistinctSeries
 ./internal/sections TestSectionsSkipItemsInNoLibraryPostgres
 ./internal/sections TestPersonalSmartCollectionRowKeepsTheCollectionLimitPostgres
+./internal/sections TestContinueReadingFillsTheRowAfterCollapsingMangaChaptersPostgres
 ./internal/sections TestEpisodeCardsCarryParentArtworkPostgres
 ./internal/catalog TestCatalogQueryWithoutLibraryLeavesOutItemsInNoLibraryDB
 ./internal/catalog TestCountsAndListingsLeaveOutItemsHeldByRemovalGraceDB
@@ -130,6 +133,14 @@
 # A subtree scan of a title folder deleted under a reachable library root
 # marks its files missing and removes the title from the library.
 ./internal/scanner TestScanSubtreeReconcilesDeletedTitleFolderDB
+
+# A full scan with a configured root emptied (a dropped mount) keeps that
+# root's cataloged files and reports it suspect, and still scans the other root.
+./internal/scanner TestScanFolderEmptyRootKeepsCatalogedFilesDB
+
+# The roots that count as holding cataloged files: present or missing files at
+# or under the root, never a sibling that only shares a string prefix.
+./internal/scanner TestListRootsWithCatalogedFilesDB
 
 # A subtree scan of a deleted book folder reconciles its files, except under a
 # configured root that is now an empty directory (a lost mount).
@@ -940,6 +951,11 @@
 # stored variant fails to delete.
 ./internal/api/handlers TestDeleteAdminCollectionArtworkClearsReferenceWhenVariantDeleteFailsDB
 
+# An admin collection update checks its name only when it renames or adds
+# libraries, and refuses to leave the collection in no library.
+./internal/api/handlers TestAdminCollectionUpdateNameRuleDB
+./internal/api/handlers TestAdminCollectionUpdateNameRuleReadsTheLockedRowDB
+
 # API usage summaries behind the admin API clients card.
 ./internal/apiusage TestAPIUsageSummaryDB
 
@@ -1101,4 +1117,5 @@
 ./internal/backup TestBeforeUpgradeWaitsForANightlyBackupDB
 ./internal/backup TestBeforeUpgradeDestinationsDB
 ./internal/backup TestBeforeUpgradeRetriesDB
+./internal/catalog TestExternalIDLookupSkipsItemsWithAnotherTMDBIDDB
 ./internal/catalog TestResolveProviderAliasesSkipsItemsWithAnotherTMDBIDDB

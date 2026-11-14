@@ -3229,7 +3229,9 @@ func lookupExternalIDsSQL() string {
 		),
 		direct_matches AS (
 			SELECT r.query_tmdb_id, mi.content_id, r.provider, mil.media_folder_id::text, mi.title, r.ord,
-			       CASE r.provider WHEN 'tmdb' THEN 0 WHEN 'tvdb' THEN 1 WHEN 'imdb' THEN 2 ELSE 3 END AS provider_rank
+			       CASE r.provider WHEN 'tmdb' THEN 0 WHEN 'tvdb' THEN 1 WHEN 'imdb' THEN 2 ELSE 3 END AS provider_rank,
+			       COALESCE(mi.tmdb_id, '') AS item_tmdb_id, COALESCE(mi.tvdb_id, '') AS item_tvdb_id,
+			       COALESCE(mi.imdb_id, '') AS item_imdb_id
 			FROM requested r
 			JOIN media_items mi
 			  ON mi.type = $5
@@ -3244,7 +3246,9 @@ func lookupExternalIDsSQL() string {
 		),
 		provider_matches AS (
 			SELECT r.query_tmdb_id, mi.content_id, r.provider, mil.media_folder_id::text, mi.title, r.ord,
-			       CASE r.provider WHEN 'tmdb' THEN 0 WHEN 'tvdb' THEN 1 WHEN 'imdb' THEN 2 ELSE 3 END AS provider_rank
+			       CASE r.provider WHEN 'tmdb' THEN 0 WHEN 'tvdb' THEN 1 WHEN 'imdb' THEN 2 ELSE 3 END AS provider_rank,
+			       COALESCE(mi.tmdb_id, '') AS item_tmdb_id, COALESCE(mi.tvdb_id, '') AS item_tvdb_id,
+			       COALESCE(mi.imdb_id, '') AS item_imdb_id
 			FROM requested r
 			JOIN media_item_provider_ids mip
 			  ON mip.provider = r.provider
@@ -3255,8 +3259,10 @@ func lookupExternalIDsSQL() string {
 			JOIN media_folders mf ON mf.id = mil.media_folder_id
 			WHERE mf.enabled = true
 		)
-		SELECT DISTINCT ON (query_tmdb_id)
-		       query_tmdb_id, content_id, provider, media_folder_id, title
+		-- Every match, best first per query_tmdb_id. LookupExternalIDs keeps
+		-- the first one that names the requested title.
+		SELECT query_tmdb_id, content_id, provider, media_folder_id, title, ord,
+		       item_tmdb_id, item_tvdb_id, item_imdb_id
 		FROM (
 			SELECT * FROM direct_matches
 			UNION ALL
@@ -3306,11 +3312,39 @@ func (r *ItemRepository) LookupExternalIDs(
 	defer rows.Close()
 
 	out := make([]ExternalIDMatchRow, 0)
+	matched := make(map[string]bool)
 	for rows.Next() {
 		var row ExternalIDMatchRow
-		if err := rows.Scan(&row.QueryTMDBID, &row.MediaID, &row.MatchedProvider, &row.LibraryID, &row.Title); err != nil {
+		var ord int32
+		var itemTMDB, itemTVDB, itemIMDb string
+		if err := rows.Scan(&row.QueryTMDBID, &row.MediaID, &row.MatchedProvider, &row.LibraryID, &row.Title,
+			&ord, &itemTMDB, &itemTVDB, &itemIMDb); err != nil {
 			return nil, fmt.Errorf("scanning external id lookup row: %w", err)
 		}
+		if matched[row.QueryTMDBID] {
+			continue
+		}
+		// A TVDB or IMDb match stands in for the requested TMDB ID only when
+		// the item is not another title by the type's anchor precedence: an
+		// item holding a different TMDB ID is another movie, while a series
+		// sharing the TVDB ID is the same show whatever its TMDB ID.
+		if row.MatchedProvider != contentid.ProviderTMDB {
+			candidate := candidates[ord]
+			requested := map[string]string{
+				contentid.ProviderTMDB: candidate.TMDBID,
+				contentid.ProviderTVDB: candidate.TVDBID,
+				contentid.ProviderIMDB: candidate.IMDbID,
+			}
+			item := map[string]string{
+				contentid.ProviderTMDB: itemTMDB,
+				contentid.ProviderTVDB: itemTVDB,
+				contentid.ProviderIMDB: itemIMDb,
+			}
+			if IdentityProviderIDsContradict(mediaType, requested, item) {
+				continue
+			}
+		}
+		matched[row.QueryTMDBID] = true
 		out = append(out, row)
 	}
 	if err := rows.Err(); err != nil {
