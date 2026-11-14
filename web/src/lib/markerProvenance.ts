@@ -36,29 +36,48 @@ const PROVIDER_NAMES: Record<string, () => string> = {
 };
 
 /**
- * The name to show for a provider id.
+ * The provider id whose segments a report contests.
+ *
+ * TheIntroDB serves markers through this capability id, both unqualified (a
+ * built-in online provider) and qualified as `plugin:<installation id>:introdb`.
+ */
+const REPORTABLE_PROVIDER_ID = "introdb";
+
+/**
+ * The capability half of a provider id.
  *
  * Provider ids are not uniform. A plugin provider arrives qualified as
  * `plugin:<installation id>:<capability id>`, a built-in one as `built_in`, and a
- * provider that is neither may just be its own slug. Match the capability suffix
- * rather than the whole string, or every plugin-sourced marker shows a raw
- * installation id instead of a name.
+ * provider that is neither may just be its own slug. The installation id is local
+ * to one server and meaningless to a viewer — and to a decision about what a
+ * server's own plugin can report — so the capability is what both callers match on.
  */
+function providerCapability(provider: string | null | undefined): string {
+  const id = provider?.trim() ?? "";
+  return id.match(/^plugin:\d+:(.+)$/)?.[1]?.trim() ?? id;
+}
+
+/** The name to show for a provider id. */
 function providerDisplayName(provider: string | null | undefined): string {
-  const id = provider?.trim();
-  if (!id) return t("web.markers.provenance.online");
+  const capability = providerCapability(provider);
+  if (!capability) return t("web.markers.provenance.online");
 
-  const named = PROVIDER_NAMES[id];
-  if (named) return named();
+  return PROVIDER_NAMES[capability]?.() ?? capability;
+}
 
-  // plugin:<installation id>:<capability id> — the capability id is the stable
-  // half; the installation id is local to one server and meaningless to a viewer.
-  const qualified = id.match(/^plugin:\d+:(.+)$/);
-  if (qualified?.[1]) {
-    return PROVIDER_NAMES[qualified[1]]?.() ?? qualified[1];
-  }
-
-  return id;
+/**
+ * Whether a marked range came from TheIntroDB, the only provider a report is
+ * addressed to.
+ *
+ * A report contests a range TheIntroDB itself served, so the control belongs under
+ * that range and no other: under a range Silo's own scanner detected, one a person
+ * edited, or one another provider supplied, it would ask a viewer to contest
+ * something TheIntroDB never published. Provenance is recorded per file and kind,
+ * so this is a property of the range on screen, and a range with no recorded
+ * provenance is not attributable and therefore not reportable.
+ */
+export function isTheIntroDbRange(provenance: PlayerMarkerProvenance | null | undefined): boolean {
+  return providerCapability(provenance?.provider) === REPORTABLE_PROVIDER_ID;
 }
 
 /**

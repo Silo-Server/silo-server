@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import { SkipForward } from "lucide-react";
 import "@/styles/player-hud.css";
@@ -31,6 +31,12 @@ interface IntroSkipButtonProps {
   provenance?: PlayerMarkerProvenance | null;
   showConfidence?: boolean;
   showSource?: boolean;
+  /**
+   * Rendered UNDER the pill, as the next child of the prompt's own column — the
+   * report control. Absent draws nothing, so a viewer without the integration sees
+   * the prompt exactly as it was.
+   */
+  trailing?: ReactNode;
 }
 
 /**
@@ -49,6 +55,7 @@ export function IntroSkipButton({
   provenance,
   showConfidence = false,
   showSource = false,
+  trailing,
 }: IntroSkipButtonProps) {
   const t = useT();
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -135,7 +142,11 @@ export function IntroSkipButton({
       {caption ? (
         <span className="hud-card rounded-full px-3 py-1 text-xs font-medium">{caption}</span>
       ) : null}
-      {button}
+      {/* The action row holds the pill and nothing else. Anything trailing (the
+          report control) is a sibling of this row, so it lands UNDER the pill —
+          the column already right-aligns its children. */}
+      <span className="flex items-center gap-2">{button}</span>
+      {trailing}
     </div>
   );
 }

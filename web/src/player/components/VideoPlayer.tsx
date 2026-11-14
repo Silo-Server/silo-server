@@ -23,6 +23,8 @@ import { PlayerLoadingCover } from "./PlayerLoadingCover";
 import { PlaybackInfoOverlay } from "./PlaybackInfoOverlay";
 import { PlaybackNoticeOverlay, PlaybackNoticeStack } from "./PlaybackNoticeOverlay";
 import { IntroSkipButton } from "./IntroSkipButton";
+import { MarkerReportButton } from "./MarkerReportButton";
+import { isTheIntroDbRange } from "@/lib/markerProvenance";
 import { BufferingQualityPill } from "./BufferingQualityPill";
 import { MarkerEditPanel } from "./MarkerEditPanel";
 import { NextEpisodeOverlay } from "./NextEpisodeOverlay";
@@ -98,6 +100,7 @@ import type {
   MarkerDraft,
   MarkerKind,
   MarkerRegionView,
+  PlayerMarkerProvenance,
   PlaybackStartTrigger,
   SeriesContext,
   SubtitleMode,
@@ -322,6 +325,13 @@ interface VideoPlayerProps {
   showMarkerConfidence?: boolean;
   /** Show the marked range's source above the skip prompt. Off by default. */
   showMarkerSource?: boolean;
+  /**
+   * The marker plugin installation serving the report route, present only when the
+   * viewer has enabled reporting. Null draws no report control at all.
+   */
+  markerReportInstallationId?: number | null;
+  /** The item's content id, which carries the ids a report is addressed by. */
+  markerReportContentId?: string | null;
   /** Effective profile mode, seeded by the host before its settings read resolves. */
   bufferingMode?: BufferingMode;
   /**
@@ -548,6 +558,8 @@ export function VideoPlayer({
   introSkipMode = "ask",
   showMarkerConfidence = false,
   showMarkerSource = false,
+  markerReportInstallationId = null,
+  markerReportContentId = null,
   bufferingMode = "always",
   bandwidthCapKbps,
   bufferingTitleId,
@@ -3620,6 +3632,22 @@ export function VideoPlayer({
   // skip the intro instead of resuming.
   const introPromptTimed = activeIntroPrompt?.timer != null;
 
+  // The report control is handed to whichever pill is showing, so both the skip and
+  // the undo prompt offer it in the same place. It carries the installation serving
+  // the route: without one there is nothing to call. A report contests a range
+  // TheIntroDB served, so it is drawn only under such a range — under one Silo's own
+  // scanner found, one a person edited, or one another provider supplied, it would
+  // contest something TheIntroDB never published. The kind is taken per prompt, so
+  // the tooltip names the segment actually on screen.
+  const markerReportAction = (marker?: (PlayerMarkerProvenance & { kind?: MarkerKind }) | null) =>
+    markerReportInstallationId && markerReportContentId && isTheIntroDbRange(marker) ? (
+      <MarkerReportButton
+        installationId={markerReportInstallationId}
+        contentId={markerReportContentId}
+        kind={marker?.kind}
+      />
+    ) : null;
+
   useEffect(() => {
     if (!introPromptVisible || displayMode !== "foreground") return;
 
@@ -5696,6 +5724,7 @@ export function VideoPlayer({
           provenance={activeIntro}
           showConfidence={showMarkerConfidence}
           showSource={showMarkerSource}
+          trailing={markerReportAction(activeIntro)}
         />
       )}
       {!isDetached && !activeIntroPrompt && !nextEpisode.showCountdown && activeSkipMarker && (
@@ -5707,6 +5736,7 @@ export function VideoPlayer({
           provenance={activeSkipMarker}
           showConfidence={showMarkerConfidence}
           showSource={showMarkerSource}
+          trailing={markerReportAction(activeSkipMarker)}
         />
       )}
 

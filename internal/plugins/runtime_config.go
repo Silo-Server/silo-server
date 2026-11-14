@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -202,6 +204,97 @@ func (s *RuntimeConfigStore) ListGlobalConfigs(ctx context.Context, installation
 		return nil, fmt.Errorf("iterating plugin runtime configs: %w", err)
 	}
 	return configs, nil
+}
+
+// ListConfiguredGlobalConfigKeysForInstallations names each installation's global
+// configuration entries that hold a usable value, keyed by installation id, in one round
+// trip. Each entry's keys are unique and in ascending order, and an installation with no
+// stored entry is absent from the map rather than present with an empty slice.
+//
+// A stored row is not the same answer as a configured one. Clearing a credential leaves
+// the row behind with nothing in it, and a caller reading presence would then keep
+// offering a feature that cannot work — the operator removed the key and the toggle
+// stayed live. Values are decoded here only to judge whether the entry carries anything,
+// and are never returned, so a secret still cannot leave through this path.
+//
+// The user-facing plugin settings list builds one summary per eligible installation, so
+// reading one installation at a time would cost a query for every plugin on each request.
+func (s *RuntimeConfigStore) ListConfiguredGlobalConfigKeysForInstallations(ctx context.Context, installationIDs []int) (map[int][]string, error) {
+	keys := make(map[int][]string, len(installationIDs))
+	if len(installationIDs) == 0 {
+		return keys, nil
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT plugin_installation_id, config_key, config_value
+		FROM plugin_runtime_configs
+		WHERE plugin_installation_id = ANY($1)
+		ORDER BY plugin_installation_id ASC, config_key ASC
+	`, installationIDs)
+	if err != nil {
+		return nil, fmt.Errorf("listing plugin runtime config keys: %w", err)
+	}
+	defer rows.Close()
+
+	// A row that will not decode is dropped for its own installation rather than
+	// failing the batch: one damaged entry must not take every other plugin's
+	// configured state with it. The installation whose entry is unreadable reports
+	// nothing, which is the answer that keeps a screen from offering a feature that
+	// cannot work, and the warning names the entry an operator has to look at.
+	damaged := make(map[int]bool)
+	for rows.Next() {
+		var installationID int
+		var key string
+		var valueJSON []byte
+		if err := rows.Scan(&installationID, &key, &valueJSON); err != nil {
+			return nil, fmt.Errorf("scanning plugin runtime config key: %w", err)
+		}
+		value, err := decodeRuntimeConfigValue(s.cipher, installationID, key, valueJSON)
+		if err != nil {
+			slog.WarnContext(ctx, "skipping unreadable plugin runtime config entry", "component", "plugins",
+				"installation_id", installationID, "config_key", key, "error", err)
+			damaged[installationID] = true
+			continue
+		}
+		if key == "" || !runtimeConfigCarriesValue(value) {
+			continue
+		}
+		keys[installationID] = append(keys[installationID], key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating plugin runtime config keys: %w", err)
+	}
+	for installationID := range damaged {
+		delete(keys, installationID)
+	}
+	return keys, nil
+}
+
+// runtimeConfigCarriesValue reports whether a stored entry holds anything an operator
+// filled in. Empty strings, nulls and empty containers are the shape a cleared field
+// leaves behind, and none of them is a value a feature can use.
+func runtimeConfigCarriesValue(value map[string]any) bool {
+	for _, field := range value {
+		switch typed := field.(type) {
+		case nil:
+		case string:
+			if strings.TrimSpace(typed) != "" {
+				return true
+			}
+		case []any:
+			if len(typed) > 0 {
+				return true
+			}
+		case map[string]any:
+			if runtimeConfigCarriesValue(typed) {
+				return true
+			}
+		default:
+			// Numbers and booleans are choices an operator made, including 0 and false.
+			return true
+		}
+	}
+	return false
 }
 
 func runtimeConfigAAD(installationID int, key string) string {

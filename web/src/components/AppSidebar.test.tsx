@@ -109,6 +109,7 @@ function pluginInstallation(
     ],
     assets: [],
     category,
+    configured_global_keys: [],
   };
 }
 

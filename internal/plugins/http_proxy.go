@@ -6,11 +6,16 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
@@ -190,10 +195,50 @@ func (p *HTTPProxy) serveRoute(w http.ResponseWriter, r *http.Request, installat
 		Query:   queryToStruct(r.URL.Query()),
 	})
 	if err != nil {
-		http.Error(w, "plugin route failed", http.StatusBadGateway)
+		writePluginRouteError(w, err)
 		return
 	}
 	writePluginRouteResponse(w, r, installationID, response)
+}
+
+// writePluginRouteError answers a route call that failed inside the plugin.
+//
+// A provider-wide block reaches the host on the typed retry contract
+// (ResourceExhausted carrying RetryInfo), the same contract the marker lookup
+// path records its cooldown from. A viewer waiting on a plugin route has to be
+// told what that contract says — not now, and for how long — so the delay goes
+// out as Retry-After with a 429, which a client already reads as "try later"
+// rather than as a failure of the request. Every other failure is a 502: the
+// route could not answer at all, and nothing about it is retryable in a way the
+// caller can act on.
+func writePluginRouteError(w http.ResponseWriter, err error) {
+	delay, retryable := pluginRouteRetryDelay(err)
+	if !retryable {
+		http.Error(w, "plugin route failed", http.StatusBadGateway)
+		return
+	}
+	// Only when the provider said how long: a block with no delay still means
+	// "come back", and "0 seconds" would read as "retry immediately".
+	if delay > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(delay.Seconds()))))
+	}
+	http.Error(w, "plugin route is rate limited; try again later", http.StatusTooManyRequests)
+}
+
+// pluginRouteRetryDelay reads the delay a plugin asked for through the host's
+// typed retry contract. A ResourceExhausted without RetryInfo is still a block,
+// with no delay to relay.
+func pluginRouteRetryDelay(err error) (time.Duration, bool) {
+	st, ok := status.FromError(err)
+	if !ok || st.Code() != codes.ResourceExhausted {
+		return 0, false
+	}
+	for _, detail := range st.Details() {
+		if retry, ok := detail.(*errdetails.RetryInfo); ok && retry.GetRetryDelay() != nil {
+			return retry.GetRetryDelay().AsDuration(), true
+		}
+	}
+	return 0, true
 }
 
 // writePluginRouteResponse relays a plugin route's answer: its allowed

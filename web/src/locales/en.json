@@ -115541,6 +115541,68 @@
       "value": "Re-detect Markers"
     }
   ],
+  "web.markers.report.action": [
+    {
+      "type": 0,
+      "value": "Report issue"
+    }
+  ],
+  "web.markers.report.alreadyReported": [
+    {
+      "type": 0,
+      "value": "Already reported"
+    }
+  ],
+  "web.markers.report.confirm": [
+    {
+      "type": 0,
+      "value": "Confirm report"
+    }
+  ],
+  "web.markers.report.reported": [
+    {
+      "type": 0,
+      "value": "Reported"
+    }
+  ],
+  "web.markers.report.retry": [
+    {
+      "type": 0,
+      "value": "Retry the report"
+    }
+  ],
+  "web.markers.report.sending": [
+    {
+      "type": 0,
+      "value": "Reporting…"
+    }
+  ],
+  "web.markers.report.sessionExpired": [
+    {
+      "type": 0,
+      "value": "Your session expired — sign in and try again"
+    }
+  ],
+  "web.markers.report.title": [
+    {
+      "type": 0,
+      "value": "Report this segment as incorrect to TheIntroDB"
+    }
+  ],
+  "web.markers.report.titleForKind": [
+    {
+      "type": 0,
+      "value": "Report the "
+    },
+    {
+      "type": 1,
+      "value": "kind"
+    },
+    {
+      "type": 0,
+      "value": " segment as incorrect to TheIntroDB"
+    }
+  ],
   "web.markers.save": [
     {
       "type": 0,
@@ -130743,6 +130805,60 @@
     {
       "type": 0,
       "value": "The defaults this profile starts playback with. A library, a series, or one of your devices can override some of them."
+    }
+  ],
+  "web.settings.playback.theintrodb.description": [
+    {
+      "type": 0,
+      "value": "Contest a segment TheIntroDB got wrong. Reports are sent using this server’s TheIntroDB key."
+    }
+  ],
+  "web.settings.playback.theintrodb.enabled": [
+    {
+      "type": 0,
+      "value": "Report button enabled."
+    }
+  ],
+  "web.settings.playback.theintrodb.hidden": [
+    {
+      "type": 0,
+      "value": "Report button hidden."
+    }
+  ],
+  "web.settings.playback.theintrodb.hint": [
+    {
+      "type": 0,
+      "value": "Draws a button under the skip prompt. It asks for confirmation before sending, because a report cannot be taken back from here."
+    }
+  ],
+  "web.settings.playback.theintrodb.label": [
+    {
+      "type": 0,
+      "value": "Show a Report button under the skip prompt"
+    }
+  ],
+  "web.settings.playback.theintrodb.loadFailed": [
+    {
+      "type": 0,
+      "value": "Could not load this account’s plugin settings, so this switch stays off until they load."
+    }
+  ],
+  "web.settings.playback.theintrodb.saveFailed": [
+    {
+      "type": 0,
+      "value": "Could not change the reporting setting."
+    }
+  ],
+  "web.settings.playback.theintrodb.title": [
+    {
+      "type": 0,
+      "value": "TheIntroDB"
+    }
+  ],
+  "web.settings.playback.theintrodb.unavailable": [
+    {
+      "type": 0,
+      "value": "Unavailable: this server has no TheIntroDB API key. An administrator can add one under the plugin’s settings."
     }
   ],
   "web.settings.playback.title": [
