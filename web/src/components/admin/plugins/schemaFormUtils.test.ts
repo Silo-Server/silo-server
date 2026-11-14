@@ -130,6 +130,16 @@ describe("buildSchemaValues type-driven coercion (#15)", () => {
     expect(out.root_folder).toBe("007"); // string preserved, NOT 7
     expect(out.tags).toEqual([1, 2]);
   });
+  it("keeps null items in a boolean array", () => {
+    const d: PluginAdminForm = { fields: [field("flags", "Flags", "MULTI_SELECT")] };
+    const types = parseFieldTypes(
+      JSON.stringify({
+        type: "object",
+        properties: { flags: { type: "array", items: { type: ["boolean", "null"] } } },
+      }),
+    );
+    expect(buildSchemaValues(d, { flags: [null, "true"] }, types).flags).toEqual([null, true]);
+  });
 });
 
 describe("buildSchemaValues default_value (#6)", () => {

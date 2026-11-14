@@ -247,7 +247,8 @@ export function coerceFieldValue(
       case "array:num": {
         const arr = Array.isArray(raw) ? raw : [];
         if (fieldType === "array") return arr;
-        if (fieldType === "array:bool") return arr.map((v) => coerceBoolean(v));
+        // A saved list loads as is, so keep a null item a nullable type allows.
+        if (fieldType === "array:bool") return arr.map((v) => (v === null ? v : coerceBoolean(v)));
         if (fieldType === "array:int") return arr.map((v) => coerceNumericString(v));
         return arr.map((v) => coerceNumberString(v));
       }
