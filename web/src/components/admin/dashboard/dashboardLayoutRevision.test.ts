@@ -273,3 +273,38 @@ it("reports an edit made before a failed first read as unsaved", async () => {
   expect(writes).toHaveLength(0);
   expect(result.current.serverSaveBlocked).toBe(true);
 });
+it("saves an edit made before the first read once the dashboard is opened again", async () => {
+  const { unmount, writes } = await mountWithReadHeld();
+  unmount();
+  await settle();
+  expect(writes).toHaveLength(0);
+  const { result } = await mountLoaded();
+  await debounce();
+  expect(writes).toHaveLength(1);
+  expect(ifMatch(writes[0])).toBe('"A"');
+  expect(JSON.parse(String(writes[0]!.body)).layout.entries[0].span).toBe(7);
+  expect(result.current.entries[0]?.span).toBe(7);
+  expect(result.current.serverSaveBlocked).toBe(false);
+});
+it("reports an edit made before the first read as unsaved on return when the server layout changed", async () => {
+  const { unmount, writes } = await mountWithReadHeld(undefined, () =>
+    Promise.resolve(read('"C"', 9)),
+  );
+  unmount();
+  await settle();
+  const { result } = await mountLoaded();
+  await debounce();
+  expect(writes).toHaveLength(0);
+  expect(result.current.entries[0]?.span).toBe(7);
+  expect(result.current.serverSaveBlocked).toBe(true);
+});
+it("does not save an earlier visit's edit under a different profile", async () => {
+  const { unmount, writes } = await mountWithReadHeld();
+  unmount();
+  await settle();
+  setProfileId("b");
+  setProfileToken("pin-b");
+  await mountLoaded();
+  await debounce();
+  expect(writes).toHaveLength(0);
+});
