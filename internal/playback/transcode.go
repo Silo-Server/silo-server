@@ -4066,9 +4066,11 @@ func (s *TranscodeSession) restart(
 		hook(hookCtx)
 		if errors.Is(hookCtx.Err(), context.DeadlineExceeded) {
 			// A hook that gave up before it started a throttler leaves the new
-			// process unthrottled. Keep the threshold this session had instead.
+			// process unthrottled, and so does a first start that finished
+			// during this restart and armed one on the replaced process's
+			// pipe. Keep the threshold this session had instead.
 			s.mu.Lock()
-			unthrottled := s.throttler == nil
+			unthrottled := s.throttler == nil || s.throttler.stdinPipe != s.stdinPipe
 			s.mu.Unlock()
 			if unthrottled {
 				s.StartThrottler(previousThrottleSeconds)
@@ -4647,12 +4649,11 @@ func (s *TranscodeSession) LastRequestedSegment() int {
 
 // StartThrottler creates and starts a throttler for this session, replacing
 // one already running: a first start can finish after a restart hook armed its
-// own. No-op if thresholdSeconds <= 0, stdinPipe is nil, the session is
-// closing, or a restart is replacing the process: stdinPipe still belongs to
-// the old FFmpeg then, and the restart hook arms the new one's throttler.
+// own. No-op if thresholdSeconds <= 0, stdinPipe is nil, or the session is
+// closing.
 func (s *TranscodeSession) StartThrottler(thresholdSeconds int) {
 	s.mu.Lock()
-	if s.stdinPipe == nil || thresholdSeconds <= 0 || s.closing || s.restarting != nil {
+	if s.stdinPipe == nil || thresholdSeconds <= 0 || s.closing {
 		s.mu.Unlock()
 		return
 	}

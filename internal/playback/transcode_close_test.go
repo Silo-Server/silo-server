@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // CloseProcess must leave the output directory intact so a session sharing the
@@ -221,23 +222,31 @@ func TestStartThrottlerStopsTheThrottlerItReplaces(t *testing.T) {
 	}
 }
 
-// A first start whose settings read finishes during a restart must not bind a
-// throttler to the pipe of the process being replaced. The restart hook's
-// timeout fallback would read that throttler as the new process's and leave
-// the new process unthrottled.
-func TestStartThrottlerArmsNothingDuringARestart(t *testing.T) {
+// A first start can finish during a restart and arm a throttler on the pipe of
+// the process being replaced. When the restart hook then times out, its
+// fallback must not take that throttler for the new process's.
+func TestRestartHookTimeoutReplacesAThrottlerOnTheOldPipe(t *testing.T) {
+	setRestartHookTimeout(t, 50*time.Millisecond)
 	s := newRunningFakeSession(t)
-	s.mu.Lock()
-	s.restarting = &restartFlight{done: make(chan struct{})}
-	s.mu.Unlock()
-
 	s.StartThrottler(minThresholdSeconds)
+	s.mu.Lock()
+	oldPipe := s.stdinPipe
+	s.mu.Unlock()
+	s.SetRestartHook(func(ctx context.Context) {
+		s.mu.Lock()
+		s.throttler = NewTranscodeThrottler(s, oldPipe, minThresholdSeconds, 2)
+		s.mu.Unlock()
+		<-ctx.Done()
+	})
+
+	if err := s.Restart(context.Background(), 0, 0); err != nil {
+		t.Fatal(err)
+	}
 
 	s.mu.Lock()
-	armed := s.throttler != nil
-	s.restarting = nil
+	current := s.throttler != nil && s.throttler.stdinPipe == s.stdinPipe
 	s.mu.Unlock()
-	if armed {
-		t.Fatal("a throttler was armed on the pipe a restart is replacing")
+	if !current {
+		t.Fatal("after a timed-out restart hook, the throttler does not write to the new process")
 	}
 }
