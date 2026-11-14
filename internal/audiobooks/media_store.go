@@ -1134,7 +1134,8 @@ const authorCountsRefreshLock int64 = 0x4142_5341_5554_4831 // "ABSAUTH1"
 // minInterval. Every API node calls it on a ticker; the advisory lock and the
 // abs_author_counts_refresh row make the cluster refresh once per interval.
 // CONCURRENTLY keeps the view readable during the refresh (requires the
-// unique index).
+// unique index). Every statement runs on the connection that holds the lock,
+// so a pool of one connection does not wait on itself.
 func (s *ABSMediaStore) RefreshAuthorCounts(ctx context.Context, minInterval time.Duration) error {
 	if s.Pool == nil {
 		return nil
@@ -1147,8 +1148,9 @@ func (s *ABSMediaStore) RefreshAuthorCounts(ctx context.Context, minInterval tim
 		return nil // another node is refreshing
 	}
 	defer func() { _ = lock.Release(ctx) }()
+	conn := lock.Conn()
 	var fresh bool
-	if err := s.Pool.QueryRow(ctx, `
+	if err := conn.QueryRow(ctx, `
 		SELECT EXISTS (SELECT 1 FROM abs_author_counts_refresh WHERE refreshed_at > now() - $1::interval)`,
 		minInterval).Scan(&fresh); err != nil {
 		return fmt.Errorf("abs_media_store: read author counts refresh: %w", err)
@@ -1156,10 +1158,10 @@ func (s *ABSMediaStore) RefreshAuthorCounts(ctx context.Context, minInterval tim
 	if fresh {
 		return nil
 	}
-	if _, err := s.Pool.Exec(ctx, `REFRESH MATERIALIZED VIEW CONCURRENTLY abs_audiobook_author_counts`); err != nil {
+	if _, err := conn.Exec(ctx, `REFRESH MATERIALIZED VIEW CONCURRENTLY abs_audiobook_author_counts`); err != nil {
 		return fmt.Errorf("abs_media_store: refresh author counts: %w", err)
 	}
-	if _, err := s.Pool.Exec(ctx, `
+	if _, err := conn.Exec(ctx, `
 		INSERT INTO abs_author_counts_refresh (singleton, refreshed_at) VALUES (true, now())
 		ON CONFLICT (singleton) DO UPDATE SET refreshed_at = EXCLUDED.refreshed_at`); err != nil {
 		return fmt.Errorf("abs_media_store: record author counts refresh: %w", err)

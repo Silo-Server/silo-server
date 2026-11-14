@@ -3,10 +3,13 @@ package audiobooks
 import (
 	"context"
 	"errors"
+	"os"
 	"slices"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/audiobooks/abs"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -97,5 +100,32 @@ func TestABSCollapsedPagesAndNarrowLookupsDB(t *testing.T) {
 	}
 	if again := refreshedAt(); !again.Equal(first) {
 		t.Errorf("refresh within the interval ran again: %v then %v", first, again)
+	}
+}
+
+// TestABSAuthorCountsRefreshOnOneConnectionPoolDB covers a server whose
+// database pool allows one connection (database.max_connections accepts 1):
+// the refresh holds that connection for its advisory lock, so its own
+// statements must run on it rather than wait for a second.
+func TestABSAuthorCountsRefreshOnOneConnectionPoolDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	// A zero interval always refreshes, so the run reaches every statement.
+	if err := (&ABSMediaStore{Pool: pool}).RefreshAuthorCounts(ctx, 0); err != nil {
+		t.Fatalf("refresh on a one-connection pool: %v", err)
 	}
 }
