@@ -71,12 +71,17 @@ type itemsQuery struct {
 	studios                 []string // decoded studio names from StudioIds
 	officialRatings         []string
 	minCommunityRating      float64
-	minPremiereDate         string // YYYY-MM-DD
-	maxPremiereDate         string // YYYY-MM-DD
-	countOnly               bool   // Limit=0 was sent: only TotalRecordCount is wanted
-	limitDefaulted          bool   // Limit was absent, so limit holds the default page size
+	minCriticRating         float64 // minimum rt_critic score; set only while that source is shown
+	minPremiereDate         string  // YYYY-MM-DD
+	maxPremiereDate         string  // YYYY-MM-DD
+	countOnly               bool    // Limit=0 was sent: only TotalRecordCount is wanted
+	limitDefaulted          bool    // Limit was absent, so limit holds the default page size
 }
 
+// parseItemsQuery parses a request with the Rotten Tomatoes critic score
+// hidden: CriticRating sorts as an unknown key and MinCriticRating is ignored.
+// Handlers that serve items use ItemsHandler.parseItemsQuery, which adds them
+// back while the administrator shows that score.
 func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 	q := newCaseInsensitiveQuery(r.URL.Query())
 	result := itemsQuery{
@@ -91,7 +96,7 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 		disableImages:   !parseBool(q.Get("EnableImages"), true),
 		disableUserData: !parseBool(q.Get("EnableUserData"), true),
 	}
-	result.sort, result.order = parseSort(q.Get("SortBy"), q.Get("SortOrder"))
+	result.sort, result.order = parseSort(q.Get("SortBy"), q.Get("SortOrder"), false)
 
 	result.genres = splitNonemptyGenres(q.Get("Genres"))
 	for year := range strings.SplitSeq(q.Get("Years"), ",") {
@@ -215,7 +220,7 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 	result.includesOnlyLeafTypes = itemTypesContain(includedTypes, "episode") &&
 		!itemTypesContain(includedTypes, "series") && !itemTypesContain(includedTypes, "season")
 	result.sortExplicit = strings.TrimSpace(q.Get("SortBy")) != ""
-	result.sortByKey = selectedSortKey(q.Get("SortBy"))
+	result.sortByKey = selectedSortKey(q.Get("SortBy"), false)
 	if result.sort == "latest_episode_added" && !itemTypesOnlySeries(result.itemTypes) {
 		result.sort = "created_at"
 	}
@@ -392,6 +397,9 @@ func buildBrowseParams(query itemsQuery) url.Values {
 	}
 	if query.minCommunityRating > 0 {
 		params.Set("min_community_rating", strconv.FormatFloat(query.minCommunityRating, 'f', -1, 64))
+	}
+	if query.minCriticRating > 0 {
+		params.Set("min_critic_rating", strconv.FormatFloat(query.minCriticRating, 'f', -1, 64))
 	}
 	if query.minPremiereDate != "" {
 		params.Set("min_premiere_date", query.minPremiereDate)
@@ -664,14 +672,15 @@ func parseMediaTypes(rawValues []string) []string {
 // and order. The catalog sorts by one key, so the first key Silo maps wins and
 // takes the SortOrder entry at the same position. Jellyfin sorts ascending
 // when that entry is absent; without SortBy, Silo keeps its newest-first rail
-// default. Unmapped keys alone fall back to created_at.
-func parseSort(sortBy, sortOrder string) (sort, order string) {
+// default. Unmapped keys alone fall back to created_at. CriticRating maps only
+// while criticShown.
+func parseSort(sortBy, sortOrder string, criticShown bool) (sort, order string) {
 	keys := strings.Split(sortBy, ",")
 	orders := strings.Split(sortOrder, ",")
 	position := 0
 	sort = catalog.BrowseSortCreatedAt
 	for i, key := range keys {
-		if mapped, ok := sortKey(key); ok {
+		if mapped, ok := requestSortKey(key, criticShown); ok {
 			sort, position = mapped, i
 			break
 		}
@@ -685,14 +694,43 @@ func parseSort(sortBy, sortOrder string) (sort, order string) {
 
 // mapSortBy returns the browse sort parseSort selects for a SortBy list.
 func mapSortBy(raw string) string {
-	sort, _ := parseSort(raw, "")
+	sort, _ := parseSort(raw, "", false)
 	return sort
 }
 
-// sortsBySortName reports whether the SortBy key parseSort selects is SortName
-// rather than Name; both map to the title sort.
-func sortsBySortName(sortBy string) bool {
-	return selectedSortKey(sortBy) == sortKeySortName
+// requestSortKey is sortKey for one request: CriticRating maps only while
+// criticShown, and is an unknown key otherwise.
+func requestSortKey(raw string, criticShown bool) (string, bool) {
+	mapped, ok := sortKey(raw)
+	if ok && mapped == catalog.BrowseSortRatingRTCritic && !criticShown {
+		return "", false
+	}
+	return mapped, ok
+}
+
+// applyShownCriticRating adds the CriticRating sort and MinCriticRating
+// filter that parseItemsQuery leaves out, for a request whose critic score
+// criticShown reports shown. Items carry CriticRating under the same rule, so
+// neither the order nor the filter reveals a hidden score. criticShown is
+// called only when the request uses the score.
+func (q *itemsQuery) applyShownCriticRating(r *http.Request, criticShown func() bool) {
+	raw := newCaseInsensitiveQuery(r.URL.Query())
+	sortBy := raw.Get("SortBy")
+	// CriticRating changes the sort only as the first key Silo maps; any
+	// other key keeps what parseItemsQuery derived from it.
+	sortsByCritic := selectedSortKey(sortBy, true) == sortKeyCriticRating
+	minimum, err := strconv.ParseFloat(strings.TrimSpace(raw.Get("MinCriticRating")), 64)
+	hasMinimum := err == nil && minimum > 0
+	if (!sortsByCritic && !hasMinimum) || !criticShown() {
+		return
+	}
+	if sortsByCritic {
+		q.sort, q.order = parseSort(sortBy, raw.Get("SortOrder"), true)
+		q.sortByKey = sortKeyCriticRating
+	}
+	if hasMinimum {
+		q.minCriticRating = minimum
+	}
 }
 
 // sortKey maps one Jellyfin SortBy key. Episode-order keys map to "" — the
@@ -710,6 +748,8 @@ func sortKey(raw string) (string, bool) {
 		return catalog.BrowseSortYear, true
 	case "communityrating":
 		return catalog.BrowseSortRatingIMDB, true
+	case sortKeyCriticRating:
+		return catalog.BrowseSortRatingRTCritic, true
 	case "random":
 		return "random", true
 	case "dateplayed":
@@ -908,7 +948,7 @@ func (q caseInsensitiveQuery) Values(key string) []string {
 // path applies.
 func (q itemsQuery) hasCompatBrowseFilters() bool {
 	return q.nameLessThan != "" || q.nameStartsWithOrGreater != "" || len(q.excludeIDs) > 0 || len(q.studios) > 0 ||
-		len(q.officialRatings) > 0 || q.minCommunityRating > 0 || q.minPremiereDate != "" || q.maxPremiereDate != ""
+		len(q.officialRatings) > 0 || q.minCommunityRating > 0 || q.minCriticRating > 0 || q.minPremiereDate != "" || q.maxPremiereDate != ""
 }
 
 // parsePremiereDateBound converts a Jellyfin Min/MaxPremiereDate instant to

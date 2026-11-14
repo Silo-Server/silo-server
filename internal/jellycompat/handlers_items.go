@@ -148,7 +148,7 @@ func (h *ItemsHandler) handleViewsResponse(w http.ResponseWriter, r *http.Reques
 		writeCompatUpstreamError(w, err)
 		return
 	}
-	applyItemsResponseOptions(items, parseItemsQuery(r, h.codec))
+	applyItemsResponseOptions(items, h.parseItemsQuery(r))
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
 		TotalRecordCount: len(items),
@@ -204,7 +204,7 @@ func (h *ItemsHandler) HandleItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := parseItemsQuery(r, h.codec)
+	query := h.parseItemsQuery(r)
 	if query.matchesNothing() {
 		// A genre, person, studio, or item filter whose IDs name nothing
 		// matches nothing, rather than falling back to an unfiltered browse
@@ -1109,7 +1109,7 @@ func (h *ItemsHandler) HandleFiltersStub(w http.ResponseWriter, r *http.Request)
 		writeError(w, 401, "Unauthorized", "Missing authentication token")
 		return
 	}
-	filters, err := h.content.ListItemFilters(r.Context(), session, buildBrowseParams(parseItemsQuery(r, h.codec)))
+	filters, err := h.content.ListItemFilters(r.Context(), session, buildBrowseParams(h.parseItemsQuery(r)))
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
@@ -1223,7 +1223,7 @@ func (h *ItemsHandler) HandleFilters2Stub(w http.ResponseWriter, r *http.Request
 		writeError(w, 401, "Unauthorized", "Missing authentication token")
 		return
 	}
-	params := buildBrowseParams(parseItemsQuery(r, h.codec))
+	params := buildBrowseParams(h.parseItemsQuery(r))
 	if languageTypes := languageFacetTypes(newCaseInsensitiveQuery(r.URL.Query()).Values("IncludeItemTypes")); languageTypes != "" {
 		params.Set("language_facet_types", languageTypes)
 	}
@@ -1294,7 +1294,7 @@ func (h *ItemsHandler) HandleStudios(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 401, "Unauthorized", "Missing authentication token")
 		return
 	}
-	q := parseItemsQuery(r, h.codec)
+	q := h.parseItemsQuery(r)
 	filters, err := h.content.ListItemFilters(r.Context(), session, buildBrowseParams(q))
 	if err != nil {
 		writeCompatUpstreamError(w, err)
@@ -1457,7 +1457,7 @@ func (h *ItemsHandler) HandleLatest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := parseItemsQuery(r, h.codec)
+	query := h.parseItemsQuery(r)
 	// Latest returns a bare array with no total, so Limit=0 asks for nothing.
 	if query.countOnly {
 		writeJSON(w, http.StatusOK, []baseItemDTO{})
@@ -1829,7 +1829,7 @@ func (h *ItemsHandler) HandleGenres(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := parseItemsQuery(r, h.codec)
+	query := h.parseItemsQuery(r)
 	params := urlValuesFromItemsQuery(query)
 	filters, err := h.content.ListItemFilters(r.Context(), session, params)
 	if err != nil {
@@ -1885,7 +1885,7 @@ func (h *ItemsHandler) HandleGenreByName(w http.ResponseWriter, r *http.Request)
 
 	// Confirm the genre exists within the caller's visible scope so the
 	// response carries the canonical casing.
-	filters, err := h.content.ListItemFilters(r.Context(), session, urlValuesFromItemsQuery(parseItemsQuery(r, h.codec)))
+	filters, err := h.content.ListItemFilters(r.Context(), session, urlValuesFromItemsQuery(h.parseItemsQuery(r)))
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
@@ -1923,7 +1923,7 @@ func (h *ItemsHandler) HandleSeasons(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "Unauthorized", "Missing authentication token")
 		return
 	}
-	query := parseItemsQuery(r, h.codec)
+	query := h.parseItemsQuery(r)
 
 	seriesID, err := h.codec.DecodeStringID(EncodedIDItem, chi.URLParam(r, "id"))
 	if err != nil {
@@ -2060,7 +2060,7 @@ func (h *ItemsHandler) HandleEpisodes(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "Unauthorized", "Missing authentication token")
 		return
 	}
-	query := parseItemsQuery(r, h.codec)
+	query := h.parseItemsQuery(r)
 
 	var seriesID string
 	var requestedSeasonID string
@@ -2179,7 +2179,7 @@ func (h *ItemsHandler) episodeBrowseFilters(ctx context.Context, session *Sessio
 		sortKey = query.sort
 		order = query.order
 	}
-	return access, catalog.BrowseFilters{UserID: session.StreamAppUserID, MaturityLimits: access.MaturityLimits, ProfileID: session.ProfileID, IsFavorite: query.isFavorite, IsPlayed: query.isPlayed, IsResumable: query.isResumable, Genres: query.genres, Genre: query.genreName, Years: query.years, SearchTerm: query.searchTerm, NamePrefix: query.namePrefix, PersonID: query.personID, RequireBackdrop: query.requireBackdrop, AudioLanguages: query.audioLanguages, SubtitleLanguages: query.subtitleLanguages, ExcludeContentIDs: query.excludeIDs, Studios: query.studios, OfficialRatings: query.officialRatings, MinCommunityRating: query.minCommunityRating, MinPremiereDate: query.minPremiereDate, MaxPremiereDate: query.maxPremiereDate, NameLessThan: query.nameLessThan, NameStartsWithOrGreater: query.nameStartsWithOrGreater, Limit: query.limit, Offset: query.startIndex, Sort: sortKey, Order: order}
+	return access, catalog.BrowseFilters{UserID: session.StreamAppUserID, MaturityLimits: access.MaturityLimits, ProfileID: session.ProfileID, IsFavorite: query.isFavorite, IsPlayed: query.isPlayed, IsResumable: query.isResumable, Genres: query.genres, Genre: query.genreName, Years: query.years, SearchTerm: query.searchTerm, NamePrefix: query.namePrefix, PersonID: query.personID, RequireBackdrop: query.requireBackdrop, AudioLanguages: query.audioLanguages, SubtitleLanguages: query.subtitleLanguages, ExcludeContentIDs: query.excludeIDs, Studios: query.studios, OfficialRatings: query.officialRatings, MinCommunityRating: query.minCommunityRating, MinCriticRating: query.minCriticRating, MinPremiereDate: query.minPremiereDate, MaxPremiereDate: query.maxPremiereDate, NameLessThan: query.nameLessThan, NameStartsWithOrGreater: query.nameStartsWithOrGreater, Limit: query.limit, Offset: query.startIndex, Sort: sortKey, Order: order}
 }
 
 // browseEpisodes pages repo.BrowseEpisodes. The catalog applies favorite and
@@ -2263,7 +2263,7 @@ func (h *ItemsHandler) handleEpisodeBrowse(w http.ResponseWriter, r *http.Reques
 	}
 	filters.LibraryID = query.parentLibraryID
 	// Name still sorts by episode title, as Jellyfin's NameComparer does.
-	if filters.Sort == catalog.BrowseSortTitle && sortsBySortName(newCaseInsensitiveQuery(r.URL.Query()).Get("SortBy")) {
+	if filters.Sort == catalog.BrowseSortTitle && query.sortByKey == sortKeySortName {
 		filters.Sort = ""
 	}
 	if query.countOnly {
@@ -2525,7 +2525,7 @@ func (h *ItemsHandler) HandleNextUp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := parseItemsQuery(r, h.codec)
+	query := h.parseItemsQuery(r)
 
 	q := catalog.NextUpQuery{
 		UserID:          session.StreamAppUserID,
@@ -2668,7 +2668,7 @@ func (h *ItemsHandler) HandleUpcoming(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 401, "Unauthorized", "Missing authentication token")
 		return
 	}
-	query := parseItemsQuery(r, h.codec)
+	query := h.parseItemsQuery(r)
 	if userID := newCaseInsensitiveQuery(r.URL.Query()).Get("UserId"); userID != "" && !validatePseudoUser(w, userID, session) {
 		return
 	}
@@ -2735,7 +2735,7 @@ func (h *ItemsHandler) HandleResume(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "Unauthorized", "Missing authentication token")
 		return
 	}
-	query := parseItemsQuery(r, h.codec)
+	query := h.parseItemsQuery(r)
 	h.handleResumeResponse(w, r, session, query)
 }
 
@@ -3893,6 +3893,17 @@ func (h *ItemsHandler) hydrateProgressItems(ctx context.Context, session *Sessio
 	return result, nil
 }
 
+// parseItemsQuery parses r with the CriticRating sort and MinCriticRating
+// filter applied only while the administrator shows the Rotten Tomatoes
+// critic score, the rule items carry CriticRating under.
+func (h *ItemsHandler) parseItemsQuery(r *http.Request) itemsQuery {
+	query := parseItemsQuery(r, h.codec)
+	query.applyShownCriticRating(r, func() bool {
+		return h.mapper != nil && h.mapper.ratings.shows(models.RatingSourceRTCritic)
+	})
+	return query
+}
+
 func (h *ItemsHandler) resolveAccessFilter(ctx context.Context, session *Session) catalog.AccessFilter {
 	if h.accessFilter != nil {
 		return withCompatAccessExclusions(h.accessFilter(ctx, session.StreamAppUserID, session.ProfileID))
@@ -4455,7 +4466,7 @@ func (h *ItemsHandler) HandleAncestors(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
-	applyItemsResponseOptions(items, parseItemsQuery(r, h.codec))
+	applyItemsResponseOptions(items, h.parseItemsQuery(r))
 	writeJSON(w, 200, items)
 }
 
