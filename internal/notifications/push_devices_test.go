@@ -547,9 +547,9 @@ func TestApplePushInstallationResetDB(t *testing.T) {
 		t.Fatalf("registration newer than the retirement=%+v err=%v", resumed, e)
 	}
 
-	// Anyone who knows the device_id can plant a fence without a session. It
-	// must not let another account take the reservation, and the owner's reset
-	// clears it.
+	// Anyone who knows the device_id can call the retire route without a
+	// session. A key other than the reset's must not fence, or the owner's
+	// registration right after its reset would get a second key mismatch.
 	recovered := reinstalled
 	recovered.InstallationKey = key("5")
 	if done, e := reset(owner.UserID, recovered.InstallationKey); e != nil || !done {
@@ -557,21 +557,13 @@ func TestApplePushInstallationResetDB(t *testing.T) {
 	}
 	planted := ApplePushRetirement{DeviceID: owner.DeviceID, InstallationKey: foreign.InstallationKey, Generation: 1}
 	if got, e := repo.RetireApplePush(ctx, planted); e != nil || !got.Removed {
-		t.Fatalf("planted retirement=%+v err=%v", got, e)
+		t.Fatalf("retirement with another key=%+v err=%v", got, e)
 	}
-	hijack := foreign
-	hijack.Generation = 2
-	if _, err = repo.ApplyApplePushAndFinalize(ctx, hijack, cipher, nil); !errors.Is(err, ErrPushInstallationProof) || errors.Is(err, ErrPushInstallationKeyMismatch) {
-		t.Fatalf("another account crossing a planted fence=%v", err)
-	}
-	if _, err = repo.ApplyApplePushAndFinalize(ctx, recovered, cipher, nil); !errors.Is(err, ErrPushInstallationKeyMismatch) {
-		t.Fatalf("owner behind a planted fence=%v", err)
-	}
-	if done, e := reset(owner.UserID, recovered.InstallationKey); e != nil || !done {
-		t.Fatalf("owner clearing a planted fence=%v err=%v", done, e)
+	if _, err = repo.ApplyApplePushAndFinalize(ctx, foreign, cipher, nil); !errors.Is(err, ErrPushInstallationProof) || errors.Is(err, ErrPushInstallationKeyMismatch) {
+		t.Fatalf("another account after a retirement with its key=%v", err)
 	}
 	if got, e := repo.ApplyApplePushAndFinalize(ctx, recovered, cipher, nil); e != nil || !got.Enabled || got.Generation != 1 {
-		t.Fatalf("register after clearing a planted fence=%+v err=%v", got, e)
+		t.Fatalf("owner registering after a retirement with another key=%+v err=%v", got, e)
 	}
 
 	if done, e := repo.ResetApplePushInstallation(ctx, ApplePushReset{UserID: owner.UserID, DeviceID: "never-registered", InstallationKey: key("2")}); e != nil || done {
