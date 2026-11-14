@@ -1,9 +1,17 @@
 package playback
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func remuxVideoBitstreamFilterArg(args []string) string {
@@ -32,11 +40,158 @@ func TestBuildRemuxArgsDropsLeadingPicturesOnlyForSeekedVideo(t *testing.T) {
 		{name: "DV7 strip alone at zero", seek: 0, drop: true, dvProfile: 7, want: DV7ToHDR10BitstreamFilter},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			args := buildRemuxArgsWithLeadingPictureDropV3("/x.mkv", "mp4", test.seek, false, -1, test.dvProfile, false, test.audioOnly, 0, 0, 0, test.drop, "")
+			args := buildRemuxArgsWithLeadingPictureDropV3("/x.mkv", "mp4", test.seek, false, -1, test.dvProfile, false, test.audioOnly, 0, 0, 0, test.drop, "", nil)
 			if got := remuxVideoBitstreamFilterArg(args); got != test.want {
 				t.Fatalf("-bsf:v = %q, want %q (args=%s)", got, test.want, strings.Join(args, " "))
 			}
 		})
+	}
+}
+
+func TestBuildRemuxArgsTakesPrimedVideoFromConcatList(t *testing.T) {
+	primer := &remuxIDRPrimer{firstPTS: 0, anchorPTS: 86.67, anchorSeconds: 86.67}
+	for _, test := range []struct {
+		name   string
+		primer *remuxIDRPrimer
+		inputs []string
+		maps   []string
+		drop   string
+	}{
+		{name: "plain seeked copy", inputs: []string{"/x.mkv"}, maps: []string{"0:V:0", "0:a:0?"}, drop: ResumeLeadingPictureDropBitstreamFilter},
+		{name: "primed copy", primer: primer, inputs: []string{"pipe:0", "/x.mkv"}, maps: []string{"0:V:0", "1:a:0?"}, drop: primedResumeLeadingPictureDropBitstreamFilter},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			args := buildRemuxArgsWithLeadingPictureDropV3("/x.mkv", "mp4", 88.213, true, -1, 0, false, false, 0, 0, 0, true, "", test.primer)
+			var inputs, maps []string
+			for i := 0; i+1 < len(args); i++ {
+				switch args[i] {
+				case "-i":
+					inputs = append(inputs, args[i+1])
+				case "-map":
+					maps = append(maps, args[i+1])
+				}
+			}
+			if strings.Join(inputs, " ") != strings.Join(test.inputs, " ") || strings.Join(maps, " ") != strings.Join(test.maps, " ") {
+				t.Fatalf("inputs %v maps %v, want %v %v (args=%s)", inputs, maps, test.inputs, test.maps, strings.Join(args, " "))
+			}
+			if got := remuxVideoBitstreamFilterArg(args); got != test.drop {
+				t.Fatalf("-bsf:v = %q, want %q", got, test.drop)
+			}
+			joined := strings.Join(args, " ")
+			if test.primer != nil && !strings.Contains(joined, "-f concat -safe 0 -protocol_whitelist file,pipe -i pipe:0") {
+				t.Fatalf("concat input missing: %s", joined)
+			}
+			// The seeked input starts at the request, 1.543 s past the keyframe the concat clock starts on.
+			if hasOffset := strings.Contains(joined, "-itsoffset 1.543000 -i /x.mkv"); hasOffset != (test.primer != nil) {
+				t.Fatalf("-itsoffset present = %v, want %v: %s", hasOffset, test.primer != nil, joined)
+			}
+		})
+	}
+}
+
+// macOS Firefox shows nothing from a stream that starts on a CRA. A primed
+// resume of an open-GOP encode must start on the source's IDR, go straight to
+// the seek's CRA and decode cleanly; B-pyramid reordering is what lets extra
+// frames past the concat outpoint. A seek into the first GOP needs no primer.
+func TestPrimedRemuxStartsOnTheSourceIDRThenTheSeekKeyframe(t *testing.T) {
+	if testing.Short() {
+		t.Skip("real FFmpeg integration test")
+	}
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is not installed")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer cancel()
+	run := func(t *testing.T, args ...string) []byte {
+		t.Helper()
+		output, err := exec.CommandContext(ctx, ffmpeg, args...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("ffmpeg: %v\n%s", err, output)
+		}
+		return output
+	}
+	if !strings.Contains(string(run(t, "-hide_banner", "-encoders")), "libx265") {
+		t.Skip("libx265 is unavailable")
+	}
+	if !supportsLeadingPictureDropFilter(ffmpeg) {
+		t.Skip("ffmpeg's noise filter has no drop expression")
+	}
+	dir := t.TempDir()
+	source := filepath.Join(dir, "open-gop.mkv")
+	run(t, "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=64x64:rate=24",
+		"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "10",
+		"-c:v", "libx265", "-preset", "ultrafast",
+		"-x265-params", "log-level=error:keyint=48:min-keyint=48:scenecut=0:open-gop=1:bframes=8:b-pyramid=1:b-adapt=0:rc-lookahead=20",
+		"-c:a", "ac3", source)
+
+	const idrNLP, cra = 20, 21
+	for _, test := range []struct {
+		name string
+		seek float64
+		want []int // the first two slices' NAL unit types
+	}{
+		{name: "past the first GOP", seek: 5, want: []int{idrNLP, cra}},
+		// Matroska answers an exact keyframe seek with the keyframe before it (#839).
+		{name: "requested on a keyframe", seek: 6, want: []int{idrNLP, cra}},
+		{name: "inside the first GOP", seek: 1, want: []int{idrNLP, 1}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			session, err := startRemuxWithOptions(ctx, source, "mp4", test.seek, true, -1, 0, RemuxDVRejectP7V3, ffmpeg, false, 2, 2, 128, true, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			output := filepath.Join(dir, strings.ReplaceAll(test.name, " ", "-")+".mp4")
+			media, err := io.ReadAll(session)
+			_ = session.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(output, media, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			annexB := run(t, "-v", "error", "-i", output, "-map", "0:v", "-c", "copy", "-frames:v", "2", "-f", "hevc", "-")
+			var slices []int
+			for rest := annexB; ; {
+				i := bytes.Index(rest, []byte{0, 0, 1})
+				if i < 0 || i+3 >= len(rest) {
+					break
+				}
+				if nalType := int(rest[i+3]>>1) & 0x3f; nalType < 32 {
+					slices = append(slices, nalType)
+				}
+				rest = rest[i+3:]
+			}
+			if len(slices) < 2 || slices[0] != test.want[0] || slices[1] != test.want[1] {
+				t.Fatalf("first slice NAL types = %v, want %v", slices, test.want)
+			}
+			if decode := run(t, "-v", "error", "-i", output, "-f", "null", "-"); bytes.Contains(decode, []byte("[hevc @")) {
+				t.Fatalf("decoding the primed stream failed:\n%s", decode)
+			}
+			if test.want[1] != cra {
+				return
+			}
+			// The picture after the primer is the keyframe the plan's timeline starts at.
+			anchor, _, err := ResolveCopySeekAnchor(ctx, ffmpeg, source, test.seek, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := run(t, "-v", "error", "-i", output, "-map", "0:v", "-vf", `select=eq(n\,1)`, "-frames:v", "1", "-f", "md5", "-")
+			want := run(t, "-v", "error", "-ss", strconv.FormatFloat(anchor, 'f', 6, 64), "-i", source, "-map", "0:V:0", "-frames:v", "1", "-f", "md5", "-")
+			if !bytes.Equal(got, want) {
+				t.Fatalf("frame after the primer = %s, want the source frame at the %gs anchor = %s", got, anchor, want)
+			}
+		})
+	}
+}
+
+func TestRemuxIDRPrimerConcatListQuotesThePath(t *testing.T) {
+	primer := &remuxIDRPrimer{firstPTS: 0.042, anchorPTS: 86.67}
+	want := "ffconcat version 1.0\n" +
+		"file 'file:/tv/Bob'\\''s Burgers.mkv'\ninpoint 0.042000\noutpoint 0.043000\n" +
+		"file 'file:/tv/Bob'\\''s Burgers.mkv'\ninpoint 86.670000\n"
+	if got := primer.concatList("/tv/Bob's Burgers.mkv"); got != want {
+		t.Fatalf("concat list =\n%s\nwant\n%s", got, want)
 	}
 }
 
