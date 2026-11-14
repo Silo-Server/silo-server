@@ -320,6 +320,45 @@ describe("generic events provider recovery", () => {
     expect(fetchFixture).toHaveBeenCalledTimes(3);
   });
 
+  it("resets the failure ladder when access changes after a healthy subscription", async () => {
+    mountProvider();
+    await act(async () => {});
+    await act(async () => FixtureSocket.instances[0]!.end());
+    await advance(5_000);
+    await act(async () => FixtureSocket.instances[1]!.end());
+    await advance(10_000);
+    const socket = FixtureSocket.instances[2]!;
+    await accept(socket);
+    await advance(30_000);
+    await act(async () => {
+      socket.message({ type: "access_changed" });
+      socket.end(EVENTS_ACCESS_CHANGED_CLOSE_CODE);
+    });
+    await advance(0);
+    expect(fetchFixture).toHaveBeenCalledTimes(4);
+    await act(async () => FixtureSocket.instances[3]!.end());
+    await advance(4_999);
+    expect(fetchFixture).toHaveBeenCalledTimes(4);
+    await advance(1);
+    expect(fetchFixture).toHaveBeenCalledTimes(5);
+  });
+
+  it("recovers a socket that closed while another tab briefly switched profiles", async () => {
+    setProfileId("fixture-profile");
+    state.profile = { id: "fixture-profile", has_pin: false };
+    mountProvider();
+    await act(async () => {});
+    const socket = FixtureSocket.instances[0]!;
+    await accept(socket);
+    // Shared profile storage changes without a rerender here.
+    setProfileId("fixture-other-profile");
+    await act(async () => socket.end());
+    setProfileId("fixture-profile");
+    await advance(5_000);
+    expect(fetchFixture).toHaveBeenCalledTimes(2);
+    expect(FixtureSocket.instances).toHaveLength(2);
+  });
+
   it.each([
     ["problem", 5_000],
     ["retry-after", 12_000],

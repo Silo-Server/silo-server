@@ -954,14 +954,16 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     };
 
     const scheduleReconnect = (retryAfterMs = 0) => {
-      if (closedByEffect || !authorityActive() || reconnectTimerRef.current !== undefined) {
+      if (closedByEffect || reconnectTimerRef.current !== undefined) {
         return;
       }
       // The profile-rebind path stretches the delay so a persistently failing
       // ticket mint cannot turn into a tight reconnect loop.
       const profileDelay = nextReconnectDelayRef.current;
       const delay =
-        profileDelay === 0 ? 0 : recovery.reconnect(Math.max(retryAfterMs, profileDelay ?? 0));
+        profileDelay === 0
+          ? recovery.immediate()
+          : recovery.reconnect(Math.max(retryAfterMs, profileDelay ?? 0));
       nextReconnectDelayRef.current = null;
       reconnectTimerRef.current = scheduleEventSocketReconnect(() => {
         reconnectTimerRef.current = undefined;
@@ -1107,7 +1109,9 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       };
 
       socket.onclose = (event: CloseEvent) => {
-        if (closedByEffect || socketRef.current !== socket || !authorityActive()) {
+        // Clean up and schedule even while authority is briefly inactive:
+        // connect() checks it again when the retry fires.
+        if (socketRef.current !== socket) {
           return;
         }
         if (
@@ -1148,7 +1152,6 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       adminRefresh.cancel();
       clearReconnect();
       nextReconnectDelayRef.current = null;
-      profileRebindAttemptsRef.current = 0;
       for (const [jobId, waiter] of waitersRef.current) {
         window.clearTimeout(waiter.timeoutId);
         waiter.reject(new Error(`Realtime events provider closed before job ${jobId} finished`));

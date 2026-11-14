@@ -25,10 +25,11 @@ export function scheduleEventSocketReconnect(callback: () => void, delayMs: numb
   return () => window.clearTimeout(timer);
 }
 
-/** Generic events only; integrating work-rate recovery must preserve its reason-specific floors. */
+/** Retry ladder for the generic events socket; rooms and playback recover on their own. */
 export function createEventSocketRecovery(random = Math.random, now = () => performance.now()) {
   let failures = 0;
   let acceptedAt: number | null = null;
+  const healthy = () => acceptedAt !== null && now() - acceptedAt >= 30_000;
   return {
     attempt() {
       acceptedAt = null;
@@ -36,9 +37,15 @@ export function createEventSocketRecovery(random = Math.random, now = () => perf
     accepted() {
       acceptedAt ??= now();
     },
+    /** Reconnect at once (access changed): not a failure, but a healthy subscription still resets the ladder. */
+    immediate() {
+      if (healthy()) failures = 0;
+      acceptedAt = null;
+      return 0;
+    },
     reconnect(retryAfterMs = 0) {
       let floor: number;
-      if (acceptedAt !== null && now() - acceptedAt >= 30_000) {
+      if (healthy()) {
         failures = 0;
         floor = 1_000;
       } else {
