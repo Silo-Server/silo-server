@@ -20,6 +20,8 @@ interface SeekBarProps {
   /** Fires continuously while a handle is dragged. */
   onRegionEdgeChange?: (kind: MarkerKind, edge: "start" | "end", seconds: number) => void;
   onSeek: (seconds: number) => void;
+  /** Reports the position under a drag in progress, then null when it ends. */
+  onScrubTimeChange?: (seconds: number | null) => void;
   /** Unmodified arrow keys skip by the profile's intervals; Shift+Arrow nudges 5s. */
   onSkip: { back: () => void; forward: () => void };
   /** Seek-bar previews of the file being played, when it has them. */
@@ -30,8 +32,8 @@ interface SeekBarProps {
   onTrickplayError?: () => void;
 }
 
-/** Half the width of the preview bubble when it shows an image (w-44). */
-const WIDE_PREVIEW_HALF_WIDTH = 88;
+/** Half the width of the preview bubble when it shows an image (w-48). */
+const WIDE_PREVIEW_HALF_WIDTH = 96;
 
 const NO_SHEETS: ReadonlySet<string> = new Set();
 
@@ -43,31 +45,61 @@ interface SheetState {
 
 const NO_SHEET_STATE: SheetState = { source: null, loaded: NO_SHEETS, failed: NO_SHEETS };
 
-/** Region tint per marker kind (normal playback). */
+/**
+ * Region tint in normal playback: one colour per kind, so intro, recap, credits
+ * and preview can be told apart at a glance. The hover preview names the
+ * region with the same colour as its dot.
+ */
 const REGION_COLORS: Record<MarkerKind, string> = {
-  intro: "bg-sky-300/40",
-  recap: "bg-violet-300/40",
-  credits: "bg-amber-300/45",
-  preview: "bg-emerald-300/40",
+  intro: "bg-sky-300/45",
+  recap: "bg-violet-300/45",
+  credits: "bg-rose-300/45",
+  preview: "bg-emerald-300/45",
 };
 
 /** Brighter tint used while editing so regions stand out against the track. */
 const REGION_COLORS_EDIT: Record<MarkerKind, string> = {
-  intro: "bg-sky-300/70",
-  recap: "bg-violet-300/70",
-  credits: "bg-amber-300/75",
-  preview: "bg-emerald-300/70",
+  intro: "bg-sky-300/75",
+  recap: "bg-violet-300/75",
+  credits: "bg-rose-300/75",
+  preview: "bg-emerald-300/75",
 };
 
 const REGION_DOT_COLORS: Record<MarkerKind, string> = {
   intro: "bg-sky-300",
   recap: "bg-violet-300",
-  credits: "bg-amber-300",
+  credits: "bg-rose-300",
   preview: "bg-emerald-300",
 };
 
 function markerLabel(t: Translate, kind: MarkerKind): string {
   return t(MARKER_LABEL_KEYS[kind]);
+}
+
+/** Width of the cut between chapters on the track, in CSS pixels. */
+const CHAPTER_GAP_PX = 2;
+
+/**
+ * Cuts the track at each chapter start so chapters read as segments. A mask
+ * keeps the cut transparent, showing the picture through it, over every layer.
+ */
+function chapterGapMask(chapters: PlayerChapter[], duration: number): string | undefined {
+  if (duration <= 0) return undefined;
+  const cuts = chapters
+    .map((chapter) => (chapter.start_seconds / duration) * 100)
+    .filter((percent) => percent > 0.5 && percent < 99.5)
+    .sort((a, b) => a - b);
+  if (cuts.length === 0) return undefined;
+  const half = CHAPTER_GAP_PX / 2;
+  const stops: string[] = [];
+  let from = "0%";
+  for (const cut of cuts) {
+    stops.push(`#000 ${from} calc(${cut}% - ${half}px)`);
+    stops.push(`transparent calc(${cut}% - ${half}px) calc(${cut}% + ${half}px)`);
+    from = `calc(${cut}% + ${half}px)`;
+  }
+  stops.push(`#000 ${from} 100%`);
+  return `linear-gradient(to right, ${stops.join(", ")})`;
 }
 
 function findChapterAtTime(chapters: PlayerChapter[], time: number): PlayerChapter | null {
@@ -102,6 +134,7 @@ export function SeekBar({
   activeEditKind = null,
   onRegionEdgeChange,
   onSeek,
+  onScrubTimeChange,
   onSkip,
   trickplay = null,
   trickplayUpdatedAt,
@@ -139,6 +172,9 @@ export function SeekBar({
   );
 
   const [dragTime, setDragTime] = useState<number | null>(null);
+  useEffect(() => {
+    onScrubTimeChange?.(dragTime);
+  }, [dragTime, onScrubTimeChange]);
   // The preview follows the pointer while hovering and the scrub position
   // while dragging (mouse or touch); a marker handle drag shows its own.
   const previewTime = edgeDrag !== null ? null : (dragTime ?? hoverTime);
@@ -262,6 +298,15 @@ export function SeekBar({
     [dragging, getTimeFromTouch, onSeek],
   );
 
+  // A touch the system takes away (a gesture, a call) ends the drag without
+  // seeking, so neither the preview nor the finish time stays on it.
+  const handleTouchCancel = useCallback(() => {
+    if (!dragging) return;
+    setDragging(false);
+    setDragTime(null);
+    setHoverTime(null);
+  }, [dragging]);
+
   // Dragging a marker edge: its own pointer loop, isolated from the seek click.
   const handleEdgePointerDown = useCallback(
     (kind: MarkerKind, edge: "start" | "end") => (e: React.PointerEvent) => {
@@ -350,9 +395,11 @@ export function SeekBar({
 
   const activeRegion =
     editing && activeEditKind ? (regions.find((r) => r.kind === activeEditKind) ?? null) : null;
+  // Editing grows regions past the track, which a mask would clip.
+  const gapMask = editing ? undefined : chapterGapMask(chapters, duration);
 
   return (
-    <div className="player-seekbar group/seek relative w-full px-2">
+    <div className="player-seekbar group/seek relative w-full px-1.5">
       {/* Hover and scrub time preview */}
       {previewTime !== null && (
         <div
@@ -360,18 +407,15 @@ export function SeekBar({
           data-testid="seek-preview"
           style={{
             left: (() => {
-              const half = tile || hoverChapter || hoverRegion ? WIDE_PREVIEW_HALF_WIDTH : 24;
+              const half = tile || hoverChapter || hoverRegion ? WIDE_PREVIEW_HALF_WIDTH : 32;
               return `clamp(${half}px, ${(previewTime / (duration || 1)) * 100}%, calc(100% - ${half}px))`;
             })(),
-            bottom: "calc(100% + 8px)",
+            bottom: "calc(50% + 0.75rem)",
             transform: "translateX(-50%)",
           }}
         >
           <div
-            className={[
-              "overflow-hidden rounded-lg border border-white/[0.08] bg-neutral-900/95 text-white shadow-2xl backdrop-blur-md",
-              tile || hoverChapter || hoverRegion ? "w-44" : "",
-            ].join(" ")}
+            className={["hud-preview", tile || hoverChapter || hoverRegion ? "w-48" : ""].join(" ")}
           >
             {/* Seek preview, else the chapter thumbnail or placeholder */}
             {tile && trickplay ? (
@@ -397,18 +441,17 @@ export function SeekBar({
                 />
               )
             )}
-            <div className="px-2.5 py-1.5">
+            <div className="px-3 py-2">
               {hoverRegion && (
-                <div className="mb-1 flex items-center gap-1.5 text-[11px] leading-tight font-semibold text-white">
+                <div className="mb-1 flex items-center gap-1.5 text-xs leading-tight font-semibold">
                   <span
                     aria-hidden="true"
-                    className={[
-                      "h-1.5 w-1.5 rounded-full",
-                      REGION_DOT_COLORS[hoverRegion.kind],
-                    ].join(" ")}
+                    className={["h-2 w-2 rounded-full", REGION_DOT_COLORS[hoverRegion.kind]].join(
+                      " ",
+                    )}
                   />
                   <span className="truncate">{markerLabel(t, hoverRegion.kind)}</span>
-                  <span className="text-white/45 tabular-nums">
+                  <span className="text-[var(--hud-ash)] tabular-nums">
                     {t("web.player.seekBar.markerRange", {
                       start: formatTime(hoverRegion.start),
                       end: formatTime(hoverRegion.end),
@@ -416,20 +459,19 @@ export function SeekBar({
                   </span>
                 </div>
               )}
-              <div className="text-xs font-semibold text-white tabular-nums">
-                {formatTime(previewTime)}
-              </div>
+              <div className="text-sm font-semibold tabular-nums">{formatTime(previewTime)}</div>
               {hoverChapter && (
-                <div className="mt-0.5 truncate text-[11px] leading-tight text-white/50">
+                <div
+                  className="mt-0.5 truncate text-xs text-[var(--hud-ash)]"
+                  title={hoverChapter.title}
+                >
                   {hoverChapter.title}
                 </div>
               )}
             </div>
           </div>
-          {/* Caret */}
-          <div className="relative -mt-px h-2 w-4 overflow-hidden">
-            <div className="absolute top-0 left-1/2 h-2.5 w-2.5 -translate-x-1/2 rotate-45 border-r border-b border-white/[0.08] bg-neutral-900/95" />
-          </div>
+          {/* Caret pointing at the hovered moment on the track. */}
+          <div aria-hidden="true" className="hud-preview-caret" />
         </div>
       )}
 
@@ -439,21 +481,17 @@ export function SeekBar({
           className="pointer-events-none absolute z-20 flex flex-col items-center"
           style={{
             left: `clamp(28px, ${((edgeDrag === "start" ? activeRegion.start : activeRegion.end) / duration) * 100}%, calc(100% - 28px))`,
-            bottom: "calc(100% + 8px)",
+            bottom: "calc(50% + 0.75rem)",
             transform: "translateX(-50%)",
           }}
         >
-          <div className="rounded-lg border border-white/[0.08] bg-neutral-900/95 px-2.5 py-1.5 text-center shadow-2xl backdrop-blur-md">
-            <div className="text-[10px] font-medium tracking-wide text-white/45 capitalize">
+          <div className="hud-preview px-3 py-2 text-center">
+            <div className="text-xs font-medium text-[var(--hud-ash)] capitalize">
               {t("web.player.seekBar.markerEdge", { kind: activeRegion.kind, edge: edgeDrag })}
             </div>
-            <div className="text-xs font-semibold text-white tabular-nums">
+            <div className="text-sm font-semibold tabular-nums">
               {formatTime(edgeDrag === "start" ? activeRegion.start : activeRegion.end)}
             </div>
-          </div>
-          {/* Caret */}
-          <div className="relative -mt-px h-2 w-4 overflow-hidden">
-            <div className="absolute top-0 left-1/2 h-2.5 w-2.5 -translate-x-1/2 rotate-45 border-r border-b border-white/[0.08] bg-neutral-900/95" />
           </div>
         </div>
       )}
@@ -470,71 +508,73 @@ export function SeekBar({
         aria-valuemax={duration}
         aria-valuenow={displayTime}
         aria-valuetext={formatAriaValueText(displayTime)}
-        className="relative flex min-h-[44px] w-full cursor-pointer touch-none items-center rounded focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
+        className="relative flex min-h-[2.75rem] w-full cursor-pointer touch-none items-center rounded-md"
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseLeave={() => setHoverTime(null)}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchCancel}
         onKeyDown={handleKeyDown}
       >
-        <div
-          className={[
-            "relative h-[3px] w-full rounded-full bg-white/15 transition-[height] duration-200 ease-out group-hover/seek:h-[5px] pointer-coarse:h-[5px]",
-            editing ? "h-[5px]" : "",
-          ].join(" ")}
-        >
-          {duration > 0 &&
-            chapters
-              .filter((chapter) => chapter.start_seconds > 0 && chapter.start_seconds < duration)
-              .map((chapter) => (
-                <div
-                  key={chapter.index}
-                  className="absolute top-1/2 z-[1] h-[10px] w-px -translate-x-1/2 -translate-y-1/2 bg-white/55"
-                  style={{ left: `${(chapter.start_seconds / duration) * 100}%` }}
-                />
-              ))}
-          {/* Buffered ranges */}
-          {bufferedRanges.map((range, i) => (
+        <div className="relative w-full">
+          <div
+            className="hud-track hud-track-base"
+            data-active={editing || dragging ? "true" : undefined}
+            style={gapMask ? { maskImage: gapMask, WebkitMaskImage: gapMask } : undefined}
+          >
+            {/* Buffered ranges */}
+            {bufferedRanges.map((range, i) => (
+              <div
+                key={i}
+                className="hud-track-buffered absolute inset-y-0 rounded-full"
+                style={{ left: `${range.startPercent}%`, width: `${range.widthPercent}%` }}
+              />
+            ))}
+            {/* Marker regions. While editing they brighten and grow slightly
+                past the track so the area being adjusted reads clearly; the
+                active segment is a touch taller and gets a ring. */}
+            {duration > 0 &&
+              regions.map((region) => {
+                const isActive = editing && region.kind === activeEditKind;
+                const isHovered = hoverRegion === region && !dragging && edgeDrag === null;
+                return (
+                  <div
+                    aria-hidden="true"
+                    key={`${region.kind}:${region.start}:${region.end}`}
+                    className={[
+                      "absolute top-1/2 -translate-y-1/2 rounded-full transition-[height,box-shadow] duration-150 ease-out",
+                      editing ? (isActive ? "h-3" : "h-2.5") : "h-full",
+                      (editing ? REGION_COLORS_EDIT : REGION_COLORS)[region.kind],
+                      isActive || isHovered ? "z-[2] ring-1 ring-white/80" : "z-[1]",
+                    ].join(" ")}
+                    style={{
+                      left: `${(region.start / duration) * 100}%`,
+                      width: `${((region.end - region.start) / duration) * 100}%`,
+                    }}
+                  />
+                );
+              })}
+            {/* Played, under the regions: an edited region stays visible
+                across the part already played. */}
             <div
-              key={i}
-              className="absolute inset-y-0 rounded-full bg-white/30"
-              style={{ left: `${range.startPercent}%`, width: `${range.widthPercent}%` }}
+              className="hud-track-played absolute inset-y-0 left-0 rounded-full"
+              style={{ width: `${playedPercent}%` }}
             />
-          ))}
-          {/* Marker regions. While editing they brighten and grow slightly
-              past the thin track so the area being adjusted reads clearly; the
-              active segment is a touch taller and gets a ring. */}
-          {duration > 0 &&
-            regions.map((region) => {
-              const isActive = editing && region.kind === activeEditKind;
-              const isHovered = hoverRegion === region && !dragging && edgeDrag === null;
-              return (
-                <div
-                  aria-hidden="true"
-                  key={`${region.kind}:${region.start}:${region.end}`}
-                  className={[
-                    "absolute top-1/2 -translate-y-1/2 rounded-full transition-[height,box-shadow] duration-150 ease-out",
-                    editing ? (isActive ? "h-2.5" : "h-2") : isHovered ? "h-2" : "h-full",
-                    editing ? REGION_COLORS_EDIT[region.kind] : REGION_COLORS[region.kind],
-                    isActive || isHovered ? "z-[2] ring-1 ring-white/80" : "z-[1]",
-                  ].join(" ")}
-                  style={{
-                    left: `${(region.start / duration) * 100}%`,
-                    width: `${((region.end - region.start) / duration) * 100}%`,
-                  }}
-                />
-              );
-            })}
-          {/* Played — warm white with a subtle amber kiss at the leading edge */}
+          </div>
+          {/* Hover position: a hairline the preview's caret points at. */}
+          {previewTime !== null && !dragging && duration > 0 ? (
+            <div
+              aria-hidden="true"
+              className="hud-hover-line absolute top-1/2 z-[2] -translate-x-1/2 -translate-y-1/2"
+              style={{ left: `${(previewTime / duration) * 100}%` }}
+            />
+          ) : null}
+          {/* Playhead: always shown, so a paused frame says where it is. */}
           <div
-            className="absolute inset-y-0 left-0 rounded-full bg-white shadow-[0_0_10px_-1px_rgb(255_255_255/0.35)]"
-            style={{ width: `${playedPercent}%` }}
-          />
-          {/* Thumb */}
-          <div
-            className="absolute top-1/2 z-[3] h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white opacity-0 shadow-[0_4px_14px_rgb(0_0_0/0.45)] ring-1 ring-black/10 transition-all duration-200 group-hover/seek:opacity-100 pointer-coarse:opacity-100"
+            aria-hidden="true"
+            className="hud-thumb absolute top-1/2 z-[3] -translate-x-1/2 -translate-y-1/2 transition-transform duration-150 group-hover/seek:scale-110"
             style={{ left: `${playedPercent}%` }}
           />
           {/* Editable marker handles for the active region */}

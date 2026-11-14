@@ -60,14 +60,21 @@ export function useAppLanguage(): string {
 /**
  * Asks for the admin part of the catalog (`web.admin.*` text, kept out of the
  * launch bundle) and reports whether it is ready in the current language. The
- * admin layout and the setup wizard render nothing until it is. A failed load
- * throws to the error boundary, as a failed lazy route does.
+ * admin layout and the setup wizard show a loading state until it is. A failed
+ * load throws to the error boundary, as a failed lazy route does.
+ *
+ * A surface an admin reaches outside the admin layout (the server activity
+ * popover, the seek-preview dialog) passes `optional`: it renders nothing until
+ * the part is ready, and stays hidden if the load fails, since a failure there
+ * must not take the page down. Readiness follows the language: a switch swaps in
+ * the new language's messages and its admin part together, so ready text never
+ * goes empty mid-switch.
  */
-export function useAdminMessages(): boolean {
+export function useAdminMessages({ optional = false }: { optional?: boolean } = {}): boolean {
   useEffect(requestAdminMessages, []);
   const ready = useSyncExternalStore(subscribeAppIntl, adminMessagesReady, adminMessagesReady);
   // A recorded failure arrives through the request store, not the formatter.
   const failure = useSyncExternalStore(subscribeAdminRequest, adminLoadFailure, adminLoadFailure);
-  if (!ready && failure !== undefined) throw failure;
+  if (!ready && failure !== undefined && !optional) throw failure;
   return ready;
 }

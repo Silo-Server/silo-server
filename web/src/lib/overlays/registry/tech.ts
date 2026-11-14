@@ -247,7 +247,7 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
     defaultEnabled: false,
     iconId: "languages",
     iconCapable: true,
-    getValue: (d) => (d.multi_audio ? "Multi-Audio" : null),
+    getValue: (d) => (d.multi_audio ? t("web.settings.overlays.badge.multiAudio.value") : null),
   },
   {
     id: "multi_sub",

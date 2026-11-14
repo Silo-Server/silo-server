@@ -1,9 +1,7 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
-	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strconv"
@@ -14,75 +12,37 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/auth"
-	"github.com/Silo-Server/silo-server/internal/cache"
 	evt "github.com/Silo-Server/silo-server/internal/events"
-	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 )
 
-// eventsWSTestConn dials the events websocket against a handler authenticated
-// as the given claims, and returns a frame reader. These tests go through the
-// real socket rather than calling the handler directly because the behavior
-// under test — what a connection is subscribed to before it has said anything,
-// and whether it survives the grace period — only exists in the connection
-// loop.
-func eventsWSTestConn(t *testing.T, hub *evt.Hub, claims *auth.Claims, query string) (
-	*websocket.Conn,
-	func(wantType string) map[string]json.RawMessage,
-) {
+// dialEventsSocketV2 opens the v2 events socket for account 7 with role and
+// query, and returns the connection and a reader that fails the test unless
+// the next frame has the wanted type.
+func dialEventsSocketV2(t *testing.T, h *EventsSocketV2, role, query string) (*websocket.Conn, func(wantType string) map[string]json.RawMessage) {
 	t.Helper()
-	return eventsWSTestConnWithHandler(t, &EventsHandler{hub: hub}, claims, query)
-}
-
-func eventsWSTestConnWithHandler(
-	t *testing.T,
-	handler *EventsHandler,
-	claims *auth.Claims,
-	query string,
-) (*websocket.Conn, func(wantType string) map[string]json.RawMessage) {
-	t.Helper()
-	return eventsWSTestConnActing(t, handler, claims, query, actingAdminIs(true))
-}
-
-// actingAdminIs is an acting-admin decision that answers the same for every
-// profile.
-func actingAdminIs(acting bool) apimw.ActingAdminDecider {
-	return func(context.Context, apimw.ActingAdminRequest) (bool, error) { return acting, nil }
-}
-
-// eventsWSTestConnActing dials the v1 socket as claims, with decide as the
-// acting-admin decision for an admin account.
-func eventsWSTestConnActing(
-	t *testing.T,
-	handler *EventsHandler,
-	claims *auth.Claims,
-	query string,
-	decide apimw.ActingAdminDecider,
-) (*websocket.Conn, func(wantType string) map[string]json.RawMessage) {
-	t.Helper()
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := apimw.SetClaims(r.Context(), claims)
-		ctx = apimw.SetActingAdminDecider(ctx, decide)
-		handler.HandleWebSocket(w, r.WithContext(ctx))
-	}))
+	server := httptest.NewServer(h)
 	t.Cleanup(server.Close)
-
-	conn, resp, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http")+query, nil)
+	ticket, err := h.Tickets.Mint(t.Context(), evt.SocketIdentity{
+		UserID: 7, Role: role, SessionID: "synthetic-session", ProfileID: "a",
+		AccessExpiresAt: time.Now().Add(time.Minute), AccessFingerprint: "synthetic-scope",
+	})
 	if err != nil {
-		t.Fatalf("dialing events websocket: %v", err)
+		t.Fatal(err)
 	}
-	if resp != nil && resp.Body != nil {
+	dialer := websocket.Dialer{Subprotocols: []string{EventsSocketProtocol, eventsTicketProtocolPrefix + ticket}}
+	conn, resp, err := dialer.DialContext(t.Context(), "ws"+strings.TrimPrefix(server.URL, "http")+query, nil)
+	if resp != nil {
 		t.Cleanup(func() { _ = resp.Body.Close() })
 	}
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() { _ = conn.Close() })
-
-	readFrame := func(wantType string) map[string]json.RawMessage {
+	return conn, func(wantType string) map[string]json.RawMessage {
 		t.Helper()
 		if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
-			t.Fatalf("setting read deadline: %v", err)
+			t.Fatal(err)
 		}
 		_, data, err := conn.ReadMessage()
 		if err != nil {
@@ -97,235 +57,13 @@ func eventsWSTestConnActing(
 		}
 		return frame
 	}
-
-	return conn, readFrame
 }
 
-// TestEventsWebSocketDeclaredChannelsSkipHandshake is the point of the feature:
-// a connection that named its channels on the URL receives events without ever
-// writing to the socket.
-func TestEventsWebSocketDeclaredChannelsSkipHandshake(t *testing.T) {
-	hub := evt.NewHub("test", &cache.NoopEventBus{})
-	_, readFrame := eventsWSTestConn(t, hub,
-		&auth.Claims{UserID: 1, Role: "user"}, "?channels=user_settings")
-
-	hello := readFrame("hello")
-	if string(hello["required_action"]) != `"none"` {
-		t.Errorf("required_action = %s, want \"none\"", hello["required_action"])
-	}
-
-	subscribed := readFrame("subscribed")
-	if !strings.Contains(string(subscribed["channels"]), `"user_settings"`) {
-		t.Fatalf("declared channel was not accepted: %s", subscribed["channels"])
-	}
-
-	// Accepted channels hydrate with a snapshot, exactly as the handshake does.
-	if snapshot := readFrame("snapshot"); string(snapshot["channel"]) != `"user_settings"` {
-		t.Fatalf("snapshot channel = %s, want user_settings", snapshot["channel"])
-	}
-
-	publishUserSettingsEvent(context.Background(), hub, 1, "",
-		"playback.subtitle_language", "account")
-
-	if event := readFrame("event"); string(event["channel"]) != `"user_settings"` {
-		t.Errorf("event channel = %s, want user_settings", event["channel"])
-	}
-}
-
-// TestEventsWebSocketEmptyDeclarationStillClosed pins what disarms the grace
-// period: holding a subscription, not having spelled ?channels=. A declaration
-// that resolved to nothing leaves the connection in the exact state the clock
-// exists to reap — no subscriptions, no reason to expect a frame, but still a
-// hub subscriber, two goroutines, and an envelope channel every published
-// event fans into.
-func TestEventsWebSocketEmptyDeclarationStillClosed(t *testing.T) {
-	t.Parallel()
-	if testing.Short() {
-		t.Skip("waits out the subscribe grace period in real time")
-	}
-
-	tests := []struct {
-		name  string
-		query string
-	}{
-		{name: "declares no channels", query: "?channels="},
-		// Every name refused: a non-admin naming only an admin channel is
-		// subscribed to nothing, exactly as if it had named nothing.
-		{name: "every declared channel refused", query: "?channels=sessions"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			hub := evt.NewHub("test", &cache.NoopEventBus{})
-			conn, readFrame := eventsWSTestConn(t, hub,
-				&auth.Claims{UserID: 1, Role: "user"}, tt.query)
-
-			hello := readFrame("hello")
-			// The obligation is real, so the hello frame has to say so rather
-			// than sending the client off to wait silently on a doomed socket.
-			if string(hello["required_action"]) != `"subscribe"` {
-				t.Errorf("required_action = %s, want \"subscribe\"", hello["required_action"])
-			}
-			readFrame("subscribed")
-
-			if err := conn.SetReadDeadline(time.Now().Add(subscribeGracePeriod + 5*time.Second)); err != nil {
-				t.Fatalf("setting read deadline: %v", err)
-			}
-			// The error frame, then the close.
-			if _, _, err := conn.ReadMessage(); err != nil {
-				t.Fatalf("reading error frame: %v", err)
-			}
-			if _, _, err := conn.ReadMessage(); !websocket.IsCloseError(err, websocket.ClosePolicyViolation) {
-				t.Fatalf("close error = %v, want policy violation", err)
-			}
-		})
-	}
-}
-
-// TestEventsWebSocketPartialDeclarationSurvives is the boundary case on the
-// other side: one accepted channel among refusals is a live subscription, so
-// the connection is not on the clock.
-func TestEventsWebSocketPartialDeclarationSurvives(t *testing.T) {
-	t.Parallel()
-	if testing.Short() {
-		t.Skip("waits out the subscribe grace period in real time")
-	}
-
-	hub := evt.NewHub("test", &cache.NoopEventBus{})
-	conn, readFrame := eventsWSTestConn(t, hub,
-		&auth.Claims{UserID: 1, Role: "user"}, "?channels=sessions,user_settings")
-
-	hello := readFrame("hello")
-	if string(hello["required_action"]) != `"none"` {
-		t.Errorf("required_action = %s, want \"none\"", hello["required_action"])
-	}
-	readFrame("subscribed")
-	readFrame("snapshot")
-
-	time.Sleep(subscribeGracePeriod + time.Second)
-
-	publishUserSettingsEvent(context.Background(), hub, 1, "",
-		"playback.subtitle_language", "account")
-
-	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
-		t.Fatalf("setting read deadline: %v", err)
-	}
-	if event := readFrame("event"); string(event["channel"]) != `"user_settings"` {
-		t.Fatalf("event channel = %s, want user_settings", event["channel"])
-	}
-}
-
-// TestEventsWebSocketDeclaredChannelsCannotEscalate is the authorization
-// guarantee: naming an admin-only channel on the URL must not grant it, and
-// must not grant the events published to it either.
-func TestEventsWebSocketDeclaredChannelsCannotEscalate(t *testing.T) {
-	hub := evt.NewHub("test", &cache.NoopEventBus{})
-	_, readFrame := eventsWSTestConn(t, hub,
-		&auth.Claims{UserID: 1, Role: "user"}, "?channels=sessions,user_settings")
-
-	readFrame("hello")
-	subscribed := readFrame("subscribed")
-
-	if strings.Contains(string(subscribed["channels"]), `"sessions"`) {
-		t.Fatalf("non-admin was granted the sessions channel: %s", subscribed["channels"])
-	}
-	if !strings.Contains(string(subscribed["rejected"]), `"forbidden"`) {
-		t.Errorf("sessions was not reported as forbidden: %s", subscribed["rejected"])
-	}
-	// The permitted channel in the same request still landed.
-	if !strings.Contains(string(subscribed["channels"]), `"user_settings"`) {
-		t.Errorf("a forbidden channel denied the rest of the request: %s", subscribed["channels"])
-	}
-
-	readFrame("snapshot") // user_settings
-
-	// An admin-only event on the refused channel must not be delivered. Publish
-	// it first, then a permitted event; receiving the second without the first
-	// proves the first was filtered rather than merely slow.
-	if err := hub.PublishJSON(context.Background(), evt.ChannelSessions, "sessions.replaced", nil,
-		evt.PublishOptions{AdminOnly: true}); err != nil {
-		t.Fatalf("publishing admin-only event: %v", err)
-	}
-	publishUserSettingsEvent(context.Background(), hub, 1, "",
-		"playback.subtitle_language", "account")
-
-	event := readFrame("event")
-	if string(event["channel"]) != `"user_settings"` {
-		t.Fatalf("received an event on a channel this connection was refused: %s", event["channel"])
-	}
-}
-
-// TestEventsWebSocketAdminAccountChildProfileIsNotAdmin: a connection from an
-// admin account that is not acting as its primary profile, such as a child
-// profile, gets the user channels and only its own account's events, as on
-// the v2 socket.
-func TestEventsWebSocketAdminAccountChildProfileIsNotAdmin(t *testing.T) {
-	hub := evt.NewHub("test", &cache.NoopEventBus{})
-	_, readFrame := eventsWSTestConnActing(t, &EventsHandler{hub: hub},
-		&auth.Claims{UserID: 1, Role: "admin"}, "?channels=sessions,history_import", actingAdminIs(false))
-
-	hello := readFrame("hello")
-	if strings.Contains(string(hello["available_channels"]), `"sessions"`) {
-		t.Fatalf("child profile was offered an admin channel: %s", hello["available_channels"])
-	}
-	subscribed := readFrame("subscribed")
-	if strings.Contains(string(subscribed["channels"]), `"sessions"`) {
-		t.Fatalf("child profile was granted the sessions channel: %s", subscribed["channels"])
-	}
-	readFrame("snapshot") // history_import
-
-	// Another account's event first, then this account's: receiving the
-	// second without the first proves the first was filtered. history_import
-	// still reaches an acting admin across accounts, so only the demotion
-	// filters it here.
-	for _, env := range []evt.Envelope{
-		{Channel: evt.ChannelHistoryImport, Event: "foreign-import", UserID: 2},
-		{Channel: evt.ChannelHistoryImport, Event: "own-import", UserID: 1},
-	} {
-		if err := hub.Publish(context.Background(), env); err != nil {
-			t.Fatalf("publishing %s: %v", env.Event, err)
-		}
-	}
-	event := readFrame("event")
-	if string(event["event"]) != `"own-import"` {
-		t.Fatalf("child profile received another account's event: %s", event["event"])
-	}
-}
-
-// TestEventsWebSocketAdminDecisionUsesTicketProfile: a browser cannot set
-// X-Profile-Id on the handshake, so the profile its ticket was minted for
-// decides whether an admin account's connection acts as the admin.
-func TestEventsWebSocketAdminDecisionUsesTicketProfile(t *testing.T) {
-	decide := func(_ context.Context, in apimw.ActingAdminRequest) (bool, error) {
-		return in.ProfileID == "parent", nil
-	}
-	for profile, wantAdmin := range map[string]bool{"parent": true, "kid": false} {
-		t.Run(profile, func(t *testing.T) {
-			tickets := notifications.NewTicketStore(nil)
-			ticket, _, err := tickets.Mint(t.Context(), notifications.Ticket{UserID: 1, ProfileID: profile})
-			if err != nil {
-				t.Fatal(err)
-			}
-			handler := &EventsHandler{hub: evt.NewHub("test", &cache.NoopEventBus{})}
-			handler.SetNotificationsSystem(&notifications.System{Tickets: tickets})
-			_, readFrame := eventsWSTestConnActing(t, handler, &auth.Claims{UserID: 1, Role: "admin"},
-				"?ticket="+url.QueryEscape(ticket), decide)
-			hello := readFrame("hello")
-			if got := strings.Contains(string(hello["available_channels"]), `"sessions"`); got != wantAdmin {
-				t.Fatalf("admin channels offered = %v, want %v: %s", got, wantAdmin, hello["available_channels"])
-			}
-		})
-	}
-}
-
-// TestEventsWebSocketUnknownChannelDoesNotCloseConnection covers the third
-// change: an unrecognized channel name used to close the socket outright,
-// taking down every other channel the client held over one bad name.
-func TestEventsWebSocketUnknownChannelDoesNotCloseConnection(t *testing.T) {
-	hub := evt.NewHub("test", &cache.NoopEventBus{})
-	conn, readFrame := eventsWSTestConn(t, hub, &auth.Claims{UserID: 1, Role: "user"}, "")
-
+// An unrecognized channel in a subscribe frame is rejected by name and leaves
+// the connection and the valid channels in the same frame working.
+func TestEventsSocketV2UnknownChannelKeepsConnection(t *testing.T) {
+	h, _ := socketTestHandler()
+	conn, readFrame := dialEventsSocketV2(t, h, "user", "")
 	readFrame("hello")
 
 	if err := conn.WriteJSON(evt.EventsSubscribeMessage{
@@ -335,7 +73,6 @@ func TestEventsWebSocketUnknownChannelDoesNotCloseConnection(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("sending subscribe: %v", err)
 	}
-
 	subscribed := readFrame("subscribed")
 	if !strings.Contains(string(subscribed["rejected"]), `"unknown_channel"`) {
 		t.Errorf("unknown channel was not reported as such: %s", subscribed["rejected"])
@@ -343,69 +80,45 @@ func TestEventsWebSocketUnknownChannelDoesNotCloseConnection(t *testing.T) {
 	if !strings.Contains(string(subscribed["channels"]), `"user_settings"`) {
 		t.Fatalf("an unknown channel denied the valid one alongside it: %s", subscribed["channels"])
 	}
-
-	// The connection is still usable.
 	readFrame("snapshot")
-	publishUserSettingsEvent(context.Background(), hub, 1, "",
-		"playback.subtitle_language", "account")
+	publishUserSettingsEvent(t.Context(), h.Events.hub, 7, "", "playback.subtitle_language", "account")
 	if event := readFrame("event"); string(event["channel"]) != `"user_settings"` {
 		t.Errorf("event channel = %s, want user_settings", event["channel"])
 	}
 }
 
-// TestEventsWebSocketRejectsOversizeFrame covers the one case that is still
-// fatal, and has to be: a frame is buffered whole before its type can be read,
-// so an oversize frame cannot be answered with a rejection the way a bad
-// channel name can — refusing it politely would mean first doing the thing the
-// limit exists to prevent.
-func TestEventsWebSocketRejectsOversizeFrame(t *testing.T) {
-	hub := evt.NewHub("test", &cache.NoopEventBus{})
-	conn, readFrame := eventsWSTestConn(t, hub, &auth.Claims{UserID: 1, Role: "user"}, "")
+// A frame past the read limit ends the connection: it is buffered whole
+// before its type is known, so it cannot be answered with a rejection.
+func TestEventsSocketV2RejectsOversizeFrame(t *testing.T) {
+	h, _ := socketTestHandler()
+	conn, readFrame := dialEventsSocketV2(t, h, "user", "")
 	readFrame("hello")
 
-	oversize := `{"type":"subscribe","channels":["` +
-		strings.Repeat("x", maxEventsFrameBytes*2) + `"]}`
-	// The write itself may fail once the server has already torn the connection
-	// down, which is the same outcome; only accepting the frame is a failure.
+	oversize := `{"type":"subscribe","channels":["` + strings.Repeat("x", maxEventsFrameBytes*2) + `"]}`
+	// The write may fail once the server has torn the connection down, which
+	// is the same outcome; only accepting the frame is a failure.
 	if err := conn.WriteMessage(websocket.TextMessage, []byte(oversize)); err != nil {
 		return
 	}
 	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
-		t.Fatalf("setting read deadline: %v", err)
+		t.Fatal(err)
 	}
 	if _, _, err := conn.ReadMessage(); err == nil {
 		t.Fatal("a frame past the read limit was accepted")
 	}
 }
 
-// blockedTaskLister keeps snapshot work pending until the test observes the
-// socket reader answering a ping.
-type blockedTaskLister struct {
-	entered chan struct{}
-	release <-chan struct{}
-}
-
-func (s blockedTaskLister) ListTasks(bool) []taskmanager.TaskInfo {
-	close(s.entered)
-	<-s.release
-	return []taskmanager.TaskInfo{}
-}
-
-// The socket must process control frames while snapshot queries are blocked.
-// Waiting for a pong proves the reader started before those queries, without
-// waiting out the production ping and read-deadline intervals.
-func TestEventsWebSocketDeclaredChannelsSurviveSlowSnapshot(t *testing.T) {
+// The socket must answer control frames while a declared channel's snapshot
+// query is blocked, then deliver the snapshot and later events in order.
+func TestEventsSocketV2DeclaredChannelsSurviveSlowSnapshot(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	releaseSnapshot := sync.OnceFunc(func() { close(release) })
 	defer releaseSnapshot()
 
-	hub := evt.NewHub("test", &cache.NoopEventBus{})
-	handler := &EventsHandler{
-		hub:   hub,
-		tasks: blockedTaskLister{entered: entered, release: release},
-	}
-	conn, readFrame := eventsWSTestConnWithHandler(t, handler,
-		&auth.Claims{UserID: 1, Role: "admin"}, "?channels=tasks")
+	h, _ := socketTestHandler()
+	hub := h.Events.hub
+	h.Events = NewEventsHandler(hub, nil, nil, blockedTaskLister{entered: entered, release: release}, nil, nil, nil)
+	conn, readFrame := dialEventsSocketV2(t, h, "admin", "?channels=tasks")
 	readFrame("hello")
 	readFrame("subscribed")
 	select {
@@ -455,14 +168,25 @@ func TestEventsWebSocketDeclaredChannelsSurviveSlowSnapshot(t *testing.T) {
 	if string(frame["type"]) != `"snapshot"` || string(frame["channel"]) != `"tasks"` {
 		t.Fatalf("snapshot frame = %s", result.data)
 	}
-
-	if err := hub.PublishJSON(context.Background(), evt.ChannelTasks, "tasks.changed",
-		map[string]string{"id": "t1"}, evt.PublishOptions{}); err != nil {
+	if err := hub.PublishJSON(t.Context(), evt.ChannelTasks, "tasks.changed", map[string]string{"id": "t1"}, evt.PublishOptions{}); err != nil {
 		t.Fatalf("publishing: %v", err)
 	}
 	if event := readFrame("event"); string(event["channel"]) != `"tasks"` {
 		t.Errorf("event channel = %s, want tasks", event["channel"])
 	}
+}
+
+// blockedTaskLister keeps snapshot work pending until the test observes the
+// socket reader answering a ping.
+type blockedTaskLister struct {
+	entered chan struct{}
+	release <-chan struct{}
+}
+
+func (s blockedTaskLister) ListTasks(bool) []taskmanager.TaskInfo {
+	close(s.entered)
+	<-s.release
+	return []taskmanager.TaskInfo{}
 }
 
 func TestParseDeclaredChannels(t *testing.T) {

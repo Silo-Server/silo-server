@@ -178,6 +178,28 @@ func (m *SessionManager) ClaimCompatExpiry(ctx context.Context, candidates []Ses
 	return claimed, true, err
 }
 
+// CompatAdminEnd ends the Jellyfin play attached to a native session an
+// administrator stopped or terminated, and reports whether it ended one.
+type CompatAdminEnd func(ctx context.Context, sessionID string) bool
+
+func (m *SessionManager) SetCompatAdminEnd(end CompatAdminEnd) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.compatAdminEnd = end
+}
+
+// EndCompatPlayAsAdmin tells the Jellyfin surface that an administrator ended
+// sessionID, whether or not this replica holds the session. A Jellyfin play
+// keeps its own routing row and transcode, which stopping the native session
+// does not reach: the client's next request would rebuild the session from
+// that row. It reports whether a play was ended.
+func (m *SessionManager) EndCompatPlayAsAdmin(ctx context.Context, sessionID string) bool {
+	m.mu.RLock()
+	end := m.compatAdminEnd
+	m.mu.RUnlock()
+	return end != nil && end(ctx, sessionID)
+}
+
 // DeliveryActivity reads when a node last delivered media for each session,
 // for sessions this replica may not hold.
 func (m *SessionManager) DeliveryActivity(ctx context.Context, sessions []Session) (map[string]time.Time, error) {

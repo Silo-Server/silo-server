@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -468,6 +469,14 @@ func (s *Scanner) reconcileMissingEbookFiles(ctx context.Context, folder *models
 		return nil
 	}
 
+	// Protect unreachable and suspect-empty configured roots before marking,
+	// as the audiobook and movie/series pipelines do, so a lost mount cannot
+	// remove its books through membership reconciliation.
+	protectedRoots, err := s.sweepProtectedRoots(ctx, folder, confirmedCleanup, protectedRoots)
+	if err != nil {
+		return err
+	}
+
 	now := time.Now().UTC()
 	missing := 0
 	for _, root := range roots {
@@ -495,7 +504,7 @@ func (s *Scanner) reconcileMissingEbookFiles(ctx context.Context, folder *models
 
 	// The folder-wide sweep must retain the same protection as the marking
 	// pass, including rows already marked missing before this failed walk.
-	trashed, removedMemberships, deletedItems, err := s.sweepMissingAndReconcile(ctx, folder, confirmedCleanup, protectedRoots...)
+	trashed, removedMemberships, deletedItems, err := s.sweepMissingWithProtectedRoots(ctx, folder, protectedRoots)
 	if trashed > 0 {
 		slog.InfoContext(ctx, "ebook scan: emptied trash", "component", "scanner", "folder_id", folder.ID, "deleted", trashed)
 	}
@@ -741,9 +750,6 @@ func (s *Scanner) upsertEbookMediaItem(ctx context.Context, folderID int, filePa
 			return existing.ContentID, true, nil
 		}
 		applyEbookToMediaItem(existing, book)
-		if existing.SortTitle == "" {
-			existing.SortTitle = titleutil.DeriveDefaultSortTitle(existing.Title)
-		}
 		if err := s.itemRepo.Upsert(ctx, existing); err != nil {
 			return "", false, err
 		}
@@ -757,9 +763,6 @@ func (s *Scanner) upsertEbookMediaItem(ctx context.Context, folderID int, filePa
 			return existing.ContentID, true, nil
 		}
 		applyEbookToMediaItem(existing, book)
-		if existing.SortTitle == "" {
-			existing.SortTitle = titleutil.DeriveDefaultSortTitle(existing.Title)
-		}
 		if err := s.itemRepo.Upsert(ctx, existing); err != nil {
 			return "", false, err
 		}
@@ -818,9 +821,6 @@ func createEbookMediaItem(ctx context.Context, itemWriter filesystemMediaItemWri
 		Year:      book.Year,
 	}
 	applyEbookToMediaItem(item, book)
-	if item.SortTitle == "" {
-		item.SortTitle = titleutil.DeriveDefaultSortTitle(item.Title)
-	}
 	if err := itemWriter.Upsert(ctx, item); err != nil {
 		return "", err
 	}
@@ -852,9 +852,6 @@ func updateExistingEbookMediaItem(ctx context.Context, itemReader filesystemMedi
 		return true, nil
 	}
 	applyEbookToMediaItem(item, book)
-	if item.SortTitle == "" {
-		item.SortTitle = titleutil.DeriveDefaultSortTitle(item.Title)
-	}
 	return false, itemWriter.Upsert(ctx, item)
 }
 
@@ -865,26 +862,36 @@ func ebookItemHasCuratedMetadata(item *models.MediaItem) bool {
 	return item != nil && strings.EqualFold(strings.TrimSpace(item.Status), "matched")
 }
 
+// applyEbookToMediaItem copies file metadata onto the item, leaving each field
+// an admin locked as it is, even when it is empty.
 func applyEbookToMediaItem(item *models.MediaItem, book *parsedEbook) {
 	item.Type = "ebook"
-	if title := strings.TrimSpace(book.Title); title != "" {
-		item.Title = title
+	locked := func(field int) bool { return slices.Contains(item.LockedFields, field) }
+	if !locked(lockedFieldName) {
+		if title := strings.TrimSpace(book.Title); title != "" {
+			item.Title = title
+		}
+		if item.SortTitle == "" {
+			item.SortTitle = titleutil.DeriveDefaultSortTitle(item.Title)
+		}
 	}
-	if book.Year > 0 {
-		item.Year = book.Year
+	if !locked(lockedFieldReleaseDates) {
+		if book.Year > 0 {
+			item.Year = book.Year
+		}
+		if !book.PublishedAt.IsZero() && item.ReleaseDate == nil {
+			rd := book.PublishedAt.UTC().Format("2006-01-02")
+			item.ReleaseDate = &rd
+		}
 	}
-	if book.Description != "" && (item.Overview == "" || looksLikeHTML(item.Overview)) {
+	if book.Description != "" && !locked(lockedFieldOverview) && (item.Overview == "" || looksLikeHTML(item.Overview)) {
 		item.Overview = book.Description
 	}
-	if book.Publisher != "" {
+	if book.Publisher != "" && !locked(lockedFieldStudios) {
 		item.Studios = mergeUniqueStrings(item.Studios, []string{book.Publisher})
 	}
-	if len(book.Genres) > 0 {
+	if len(book.Genres) > 0 && !locked(lockedFieldGenres) {
 		item.Genres = mergeUniqueStrings(item.Genres, book.Genres)
-	}
-	if !book.PublishedAt.IsZero() && item.ReleaseDate == nil {
-		rd := book.PublishedAt.UTC().Format("2006-01-02")
-		item.ReleaseDate = &rd
 	}
 	if book.Language != "" && item.OriginalLanguage == "" {
 		item.OriginalLanguage = book.Language
@@ -1462,6 +1469,17 @@ func (s *Scanner) upsertEbookPeople(ctx context.Context, contentID string, book 
 		return nil
 	}
 	if ebookPeopleCreditsEqual(existing, desired) {
+		return nil
+	}
+	var locked []int
+	if err := s.fileRepo.Pool().QueryRow(ctx,
+		`SELECT COALESCE(locked_fields, '{}'::integer[]) FROM media_items WHERE content_id = $1`,
+		contentID).Scan(&locked); err != nil {
+		return fmt.Errorf("read ebook field locks: %w", err)
+	}
+	// The ebook enricher holds authors under either the crew or the cast lock,
+	// so a rescan does too.
+	if slices.Contains(locked, lockedFieldCrew) || slices.Contains(locked, lockedFieldCast) {
 		return nil
 	}
 

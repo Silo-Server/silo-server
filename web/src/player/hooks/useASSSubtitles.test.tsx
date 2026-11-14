@@ -10,7 +10,7 @@ const constructorOpts: Array<Record<string, unknown>> = [];
 const instances: Array<{
   timeOffset: number;
   resize: ReturnType<typeof vi.fn>;
-  renderer: { setTrack: ReturnType<typeof vi.fn> };
+  renderer: { setTrack: ReturnType<typeof vi.fn>; addFonts: ReturnType<typeof vi.fn> };
   prescaleFactor: number;
   prescaleHeightLimit: number;
   _canvas: HTMLCanvasElement;
@@ -24,6 +24,7 @@ vi.mock("jassub", () => {
     renderer = {
       setTrack: vi.fn().mockResolvedValue(undefined),
       setTrackByUrl: vi.fn().mockResolvedValue(undefined),
+      addFonts: vi.fn().mockResolvedValue(true),
     };
     prescaleFactor = 1;
     prescaleHeightLimit = 1080;
@@ -500,6 +501,134 @@ describe("ASS subtitle loading recovery", () => {
     } finally {
       unmount();
       error.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("renders without attached fonts that outlast the stall timer, then adds them", async () => {
+    vi.useFakeTimers();
+    const state = vi.fn();
+    const track = { ...attachedFontTrack, font_bundle_url: "/fonts/slow-success" };
+    let fontRequests = 0;
+    vi.mocked(fetch).mockImplementation((input) => {
+      if (String(input) === track.font_bundle_url) {
+        fontRequests++;
+        return new Promise((resolve) => {
+          setTimeout(() => resolve(mockFontBundleResponse("late-font")), 40_000);
+        });
+      }
+      return Promise.resolve(mockFetchResponse("[Script Info]"));
+    });
+    const videoRef = makeVideoRef();
+    const { unmount } = renderHook(() =>
+      useASSSubtitles(videoRef, [track], track.index, false, 0, 0, state),
+    );
+    try {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3_000);
+      });
+      expect(constructorOpts).toHaveLength(1);
+      expect(constructorOpts[0]!.fonts).toBeUndefined();
+      expect(state).toHaveBeenLastCalledWith("ready");
+      const resizesBeforeFonts = instances[0]!.resize.mock.calls.length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(fontRequests).toBe(1);
+      expect(constructorOpts).toHaveLength(1);
+      expect(state).not.toHaveBeenCalledWith("error");
+      expect(instances[0]!.renderer.addFonts).toHaveBeenCalledWith([expect.any(Uint8Array)]);
+      expect(instances[0]!.resize.mock.calls.length).toBeGreaterThan(resizesBeforeFonts);
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it("aborts late attached fonts when the track is torn down", async () => {
+    vi.useFakeTimers();
+    const track = { ...attachedFontTrack, font_bundle_url: "/fonts/late-after-teardown" };
+    let fontSignal: AbortSignal | undefined;
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      if (String(input) === track.font_bundle_url) {
+        fontSignal = init?.signal as AbortSignal;
+        // A response that arrives anyway, as if it ignored the abort.
+        return new Promise((resolve) => {
+          setTimeout(() => resolve(mockFontBundleResponse("late-font")), 40_000);
+        });
+      }
+      return Promise.resolve(mockFetchResponse("[Script Info]"));
+    });
+    const videoRef = makeVideoRef();
+    const { unmount } = renderHook(() =>
+      useASSSubtitles(videoRef, [track], track.index, false, 0, 0),
+    );
+    try {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3_000);
+      });
+      expect(instances).toHaveLength(1);
+      unmount();
+      expect(fontSignal?.aborted).toBe(true);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(instances[0]!.renderer.addFonts).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("requests attached fonts again when a transport rebuild aborts the pending request", async () => {
+    vi.useFakeTimers();
+    const track = { ...attachedFontTrack, font_bundle_url: "/fonts/rebuild-while-pending" };
+    const fontSignals: AbortSignal[] = [];
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      if (String(input) === track.font_bundle_url) {
+        const signal = init?.signal as AbortSignal;
+        fontSignals.push(signal);
+        return new Promise((resolve, reject) => {
+          signal.addEventListener("abort", () =>
+            reject(new DOMException("cancelled", "AbortError")),
+          );
+          setTimeout(() => resolve(mockFontBundleResponse("late-font")), 40_000);
+        });
+      }
+      return Promise.resolve(mockFetchResponse("[Script Info]"));
+    });
+    const videoRef = makeVideoRef();
+    const { rerender, unmount } = renderHook(
+      ({ transport }: { transport: number }) =>
+        useASSSubtitles(
+          videoRef,
+          [track],
+          track.index,
+          false,
+          0,
+          0,
+          undefined,
+          "contain",
+          undefined,
+          0,
+          transport,
+        ),
+      { initialProps: { transport: 0 } },
+    );
+    try {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3_000);
+      });
+      expect(instances).toHaveLength(1);
+      rerender({ transport: 1 });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(fontSignals).toHaveLength(2);
+      expect(fontSignals[0]!.aborted).toBe(true);
+      expect(instances).toHaveLength(2);
+      expect(instances[1]!.renderer.addFonts).toHaveBeenCalledWith([expect.any(Uint8Array)]);
+    } finally {
+      unmount();
       vi.useRealTimers();
     }
   });

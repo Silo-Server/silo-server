@@ -76,7 +76,7 @@ type ApplePushResetInput struct {
 	Body ApplePushResetBody
 }
 type ApplePushResetReceipt struct {
-	Reset bool `json:"reset" doc:"True when the server cleared the installation's binding and its Apple push registrations. False when there was nothing to clear: no ordered record for this device_id, or one already bound to the sent key, whose generation order still applies. After a cleared or absent record, the next registration with that key binds at any positive generation."`
+	Reset bool `json:"reset" doc:"True when the server cleared the installation's binding and its Apple push registrations. False when there was nothing to clear: no ordered record for this device_id, or one already bound to the sent key, whose generation order still applies. After a cleared or absent record, the next registration with that key binds at any positive generation, unless a retirement reached the cleared record first and fenced older generations."`
 }
 type ApplePushResetOutput struct{ Body ApplePushResetReceipt }
 type ApplePushRegistrationCapability struct {

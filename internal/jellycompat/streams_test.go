@@ -1640,6 +1640,16 @@ func TestGenerateCompatCopyVideoMasterManifestCodecsListEveryFormat(t *testing.T
 		{"vp9 profile 1", models.VideoTrack{Codec: "vp9", Profile: "Profile 1", Level: -99, BitDepth: 8, Width: 640, Height: 360}, aac, false, ""},
 		{"vp9 unknown size", models.VideoTrack{Codec: "vp9", Profile: "Profile 0", Level: -99, BitDepth: 8}, aac, false, ""},
 		{"h264 unknown level", models.VideoTrack{Codec: "h264", Profile: "High", Width: 1920, Height: 1080}, aac, false, ""},
+		// Profile bytes as FFmpeg's MP4 muxer writes them into the copy's avcC.
+		{"h264 constrained baseline", models.VideoTrack{Codec: "h264", Profile: "Constrained Baseline", Level: 30, Width: 640, Height: 360}, aac, false, "avc1.42401E,mp4a.40.2"},
+		{"h264 high 10", models.VideoTrack{Codec: "h264", Profile: "High 10", Level: 40, BitDepth: 10, Width: 1920, Height: 1080}, aac, false, "avc1.6E0028,mp4a.40.2"},
+		{"h264 high 4:2:2", models.VideoTrack{Codec: "h264", Profile: "High 4:2:2", Level: 40, Width: 1920, Height: 1080}, aac, false, "avc1.7A0028,mp4a.40.2"},
+		// The intra profiles require constraint_set3_flag.
+		{"h264 high 10 intra", models.VideoTrack{Codec: "h264", Profile: "High 10 Intra", Level: 40, Width: 1920, Height: 1080}, aac, false, "avc1.6E1028,mp4a.40.2"},
+		{"h264 unnamed profile", models.VideoTrack{Codec: "h264", Profile: "Extended", Level: 30, Width: 640, Height: 360}, aac, false, ""},
+		{"hevc main", models.VideoTrack{Codec: "hevc", Profile: "Main", Level: 120, Width: 1920, Height: 1080}, aac, false, "hvc1.1.4.L120.B0,mp4a.40.2"},
+		// Range Extensions profiles differ only in constraint flags the probe does not report.
+		{"hevc range extensions", models.VideoTrack{Codec: "hevc", Profile: "Rext", Level: 153, BitDepth: 10, PixelFormat: "yuv422p10le", Width: 3840, Height: 2160}, aac, false, ""},
 		{"hevc unknown level", models.VideoTrack{
 			Codec: "hevc", Profile: "Main 10", Width: 3840, Height: 2160,
 			DVProfile: 8, DVLevel: 6, VideoRangeType: compatRangeDOVIWithHDR,
@@ -1699,6 +1709,137 @@ func TestCompatMasterAudioCodecJellyfin12Strings(t *testing.T) {
 		source := PlaybackMediaSource{HLSRemux: true, TranscodeAudio: tc.transcode}
 		if got := compatMasterAudioCodec(source, models.AudioTrack{Codec: tc.codec, Profile: tc.profile}); got != tc.want {
 			t.Errorf("%s/%s transcode=%v = %q, want %q", tc.codec, tc.profile, tc.transcode, got, tc.want)
+		}
+	}
+}
+
+// Progressive stream, subtitle and attachment requests resolve their play
+// session by PlaySessionId or by route. When the store cannot be read and
+// holds no cached copy, they answer the retryable 503, not a 404 that ends
+// direct play or drops subtitles (#4067). An absent play session, or one owned
+// by another token, still answers 404, and a Static=true request does not
+// create a session in its place while the store is down.
+func TestRouteRequestsAnswer503WhenPlaySessionStoreUnavailable(t *testing.T) {
+	cold := NewDurableCompatPlaybackStore(newUnreachableCompatPool(t), time.Hour, nil)
+	other := NewPlaybackSessionStore(time.Hour, nil)
+	other.Put(PlaybackSession{ID: "ps-abc", CompatToken: "someone-else", RouteItemID: "itm", UpstreamSessionID: "up"})
+
+	routes := []struct {
+		name   string
+		path   string
+		params map[string]string
+		serve  func(*PlaybackHandler, http.ResponseWriter, *http.Request)
+	}{
+		{"stream by play session", "/Videos/itm/stream?PlaySessionId=ps-abc", map[string]string{"id": "itm"}, (*PlaybackHandler).HandleVideoStream},
+		{"stream by route", "/Videos/itm/stream", map[string]string{"id": "itm"}, (*PlaybackHandler).HandleVideoStream},
+		{"static stream by play session", "/Videos/itm/stream?Static=true&PlaySessionId=ps-abc", map[string]string{"id": "itm"}, (*PlaybackHandler).HandleVideoStream},
+		{"static stream without a play session", "/Videos/itm/stream?Static=true", map[string]string{"id": "itm"}, (*PlaybackHandler).HandleVideoStream},
+		{"subtitle", "/Videos/itm/src/Subtitles/0/Stream.srt?PlaySessionId=ps-abc",
+			map[string]string{"routeItemId": "itm", "routeMediaSourceId": "src", "index": "0", "format": "srt"}, (*PlaybackHandler).HandleSubtitleStream},
+		{"attachment", "/Videos/itm/src/Attachments/0",
+			map[string]string{"routeItemId": "itm", "routeMediaSourceId": "src", "index": "0"}, (*PlaybackHandler).HandleAttachment},
+	}
+	for _, route := range routes {
+		for _, tc := range []struct {
+			name     string
+			store    CompatPlaybackStore
+			wantCode int
+		}{
+			{"store unreadable", cold, http.StatusServiceUnavailable},
+			{"session absent", NewPlaybackSessionStore(time.Hour, nil), http.StatusNotFound},
+			{"session of another token", other, http.StatusNotFound},
+		} {
+			if strings.HasPrefix(route.name, "static") && tc.wantCode == http.StatusNotFound {
+				continue // an absent session sends Static=true to on-the-fly creation
+			}
+			t.Run(route.name+"/"+tc.name, func(t *testing.T) {
+				handler := &PlaybackHandler{playbackStore: tc.store}
+				req := httptest.NewRequest(http.MethodGet, route.path, nil)
+				routeCtx := chi.NewRouteContext()
+				for k, v := range route.params {
+					routeCtx.URLParams.Add(k, v)
+				}
+				ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
+				ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "compat-tok", StreamAppUserID: 1})
+				rec := httptest.NewRecorder()
+				route.serve(handler, rec, req.WithContext(ctx))
+				if rec.Code != tc.wantCode {
+					t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tc.wantCode, rec.Body.String())
+				}
+				if tc.wantCode == http.StatusServiceUnavailable && rec.Header().Get("Retry-After") == "" {
+					t.Fatal("503 carries no Retry-After")
+				}
+			})
+		}
+	}
+
+	// An ID-less static request that two started plays match can't be bound to
+	// either: that stays the 404 it was, not a retryable outage.
+	t.Run("static stream without a play session/two started plays", func(t *testing.T) {
+		ambiguous := NewPlaybackSessionStore(time.Hour, nil)
+		for _, id := range []string{"ps-one", "ps-two"} {
+			ambiguous.Put(PlaybackSession{ID: id, CompatToken: "compat-tok", RouteItemID: "itm", UpstreamSessionID: "up-" + id})
+		}
+		handler := &PlaybackHandler{playbackStore: ambiguous}
+		req := httptest.NewRequest(http.MethodGet, "/Videos/itm/stream?Static=true", nil)
+		routeCtx := chi.NewRouteContext()
+		routeCtx.URLParams.Add("id", "itm")
+		ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
+		ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "compat-tok", StreamAppUserID: 1})
+		rec := httptest.NewRecorder()
+		handler.HandleVideoStream(rec, req.WithContext(ctx))
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404 (body: %s)", rec.Code, rec.Body.String())
+		}
+	})
+}
+
+// A token-authenticated HLS request whose play session cannot be read from
+// the store answers a retryable 503, not a 404 that ends playback (#4008).
+// An absent play session, or one owned by another token, still answers 404.
+func TestHLSRoutesAnswer503WhenPlaySessionStoreUnavailable(t *testing.T) {
+	cold := NewDurableCompatPlaybackStore(newUnreachableCompatPool(t), time.Hour, nil)
+	other := NewPlaybackSessionStore(time.Hour, nil)
+	other.Put(PlaybackSession{ID: "ps-abc", CompatToken: "someone-else", RouteItemID: "itm", UpstreamSessionID: "up"})
+
+	routes := []struct {
+		name   string
+		path   string
+		params map[string]string
+		serve  func(*PlaybackHandler, http.ResponseWriter, *http.Request)
+	}{
+		{"master", "/Videos/itm/master.m3u8?PlaySessionId=ps-abc", map[string]string{"id": "itm"}, (*PlaybackHandler).HandleMasterManifest},
+		{"playlist", "/Videos/itm/hls/ps-abc/stream.m3u8", map[string]string{"id": "itm", "playlistId": "ps-abc"}, (*PlaybackHandler).HandleHLSManifest},
+		{"segment", "/Videos/itm/hls/ps-abc/seg_00000.ts", map[string]string{"id": "itm", "playlistId": "ps-abc", "segmentId": "seg_00000", "segmentContainer": "ts"}, (*PlaybackHandler).HandleHLSSegment},
+	}
+	for _, route := range routes {
+		for _, tc := range []struct {
+			name     string
+			store    CompatPlaybackStore
+			wantCode int
+		}{
+			{"store unreadable", cold, http.StatusServiceUnavailable},
+			{"session absent", NewPlaybackSessionStore(time.Hour, nil), http.StatusNotFound},
+			{"session of another token", other, http.StatusNotFound},
+		} {
+			t.Run(route.name+"/"+tc.name, func(t *testing.T) {
+				handler := &PlaybackHandler{playbackStore: tc.store}
+				req := httptest.NewRequest(http.MethodGet, route.path, nil)
+				routeCtx := chi.NewRouteContext()
+				for k, v := range route.params {
+					routeCtx.URLParams.Add(k, v)
+				}
+				ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
+				ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "compat-tok", StreamAppUserID: 1})
+				rec := httptest.NewRecorder()
+				route.serve(handler, rec, req.WithContext(ctx))
+				if rec.Code != tc.wantCode {
+					t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tc.wantCode, rec.Body.String())
+				}
+				if tc.wantCode == http.StatusServiceUnavailable && rec.Header().Get("Retry-After") == "" {
+					t.Fatal("503 carries no Retry-After")
+				}
+			})
 		}
 	}
 }

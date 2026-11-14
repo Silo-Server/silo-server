@@ -31,7 +31,7 @@ serves as External. The key matches case-insensitively; any other key returns
 built from configuration alone, so routes that need further dependencies, such
 as `GET /Persons/{name}` and `POST /Library/Media/Updated`, are not in it.
 `internal/jellycompat/router.go`
-owns registration; the native `/api/v1` contract is separate.
+owns registration; the native `/api/v2` contract is separate.
 
 ## Users and avatars
 
@@ -285,6 +285,12 @@ Jellyfin uses. A profile that turns on `ui.next_up_new_releases_first` instead
 gets a caught-up series back at the front when its next episode is released to
 the server. `nextUpDateCutoff` still filters on last played.
 
+`CommunityRating` is the IMDb rating (0-10). `CriticRating` is the stored
+Rotten Tomatoes critic score (0-100), present only while an enabled metadata
+plugin declares the `rt_critic` rating source and an administrator shows it under
+`catalog.extra_rating_sources`, the setting native item ratings follow (see
+`GET /api/v2/capabilities/ratings`).
+
 Items carry Jellyfin 12's `OriginalLanguage` (movies and series). Episodes set
 `ParentPrimaryImageItemId` and `ParentPrimaryImageTag` to their season's poster,
 or to the series poster when the season has none; both are removed when the
@@ -423,6 +429,13 @@ to the route's version, and a route version the item no longer has answers
 `404`. The negotiated session keeps the client's id as its route item id, so the
 stream URLs it hands out and later session reports can carry that id.
 
+Every compat user is a non-administrator, and only a viewer who may curate
+metadata sees where a file lives or what it is called (see
+[File paths and names](catalog-api.md#file-paths-and-names)). So an item's
+`Path` and `MediaSources[i].Path` are a stand-in, `/silo/{file id}.{container}`,
+and `MediaSources[i].Name` is the version's edition and quality, such as
+`Extended - 2160p HEVC HDR`.
+
 `GET` and `HEAD /Items/{id}/Download` serve the original file through the
 native direct download, the same service as `/api/v2/direct-download`, so they
 follow its rules. Both answer `403` when **Allow downloads** is off, the
@@ -545,6 +558,15 @@ Media URLs that Silo builds (`DirectStreamUrl`, `TranscodingUrl`, subtitle
 log grants that media only until the play session ends. A client that fetches
 one after the play session expired or stopped, or after a newer negotiation
 from the same device replaced an unstarted one, must send its own token.
+A `PlaySessionId` grant that cannot be read because the database is
+unavailable answers a retryable `503`, not `401`, unless the API server that
+answers still holds the play session. HLS master playlist, playlist and
+segment requests that carry a token answer the same retryable `503` when their
+play session cannot be read, and so do progressive stream, subtitle and
+attachment requests; a play session that is absent or belongs to another token
+answers `404`. `PlaybackInfo` answers `503` instead of
+returning a `PlaySessionId` it could not store, since other API servers could
+not resolve it.
 
 Copied-video HLS master playlists name copied audio as Jellyfin 12 does:
 HE-AAC as `mp4a.40.5`, TrueHD as `mlpa`, and DTS as `dtsc`, `dtsh` (DTS-HD HRA
@@ -564,7 +586,11 @@ base layer (HEVC profile 5, AV1 profile 10), a client whose device profile lists
 variant, listed before the fallback variant, unless the copied audio has no
 entry. MPEG-TS remuxes keep the single variant. Audio and subtitle streams
 carry `LocalizedLanguage`, and audio streams carry `LocalizedOriginal`, in
-English.
+English. `LocalizedLanguage` and `DisplayTitle` name a tag with a region or
+script by its CLDR name, such as "Brazilian Portuguese" for `pt-BR` or
+"Portuguese (Angola)" for `pt-AO`; `Language` keeps the stored tag. A tag
+with any other subtag, or a script or region CLDR has no name for, keeps the
+title-cased tag ("Ca ES Valencia"), so distinct tags never share a label.
 
 HEVC Dolby Vision Profile 8 with a proven HDR10 base layer and no enhancement
 layer can use HLS fMP4 remux when a positive video-range condition names both
@@ -610,6 +636,15 @@ rebasing; an empty timing window returns `TrackEvents: []`. Raw ASS requests req
 return 406. There is no fallback-font service, external/downloaded subtitle
 burn-in, or subtitle HLS playlist implementation. Changing a subtitle filter
 requires fresh playback negotiation.
+
+Stored (downloaded) subtitles take the stream indexes after the file's own
+tracks, in the order they are listed, so deleting one moves the later ones down.
+Their `DeliveryUrl` therefore also carries `StoredSubtitleId`, as the native
+stream route's issued URLs carry `downloaded_subtitle_id`. When the query names
+an ID, the route serves that stored subtitle of the media source's file
+whatever `{index}` says, and answers 404 once it is deleted, for an ID that is
+not one of that file's, or for a malformed ID. A URL without it, as a client
+builds from the index, resolves the index against the current list.
 
 Extracting an embedded text subtitle reads the whole source file, which can
 take minutes for a large remux on network storage. As in Jellyfin, the first
@@ -690,7 +725,9 @@ per-address budgets are listed under [Rate limiting](#rate-limiting).
 
 `GET /Sessions` lists started playback mappings owned by the caller's token,
 including mappings persisted by another API process. Device and activity filters
-apply to the returned list. Current native play state is included when locally
+apply to the returned list. Each entry's `Id` is 32 lowercase hex characters
+that stay the same for the life of the play; it is derived from the
+`PlaySessionId`, is not accepted in its place, and authorizes nothing. Current native play state is included when locally
 available and its account/profile ownership matches; unavailable remote state
 is omitted.
 
@@ -750,9 +787,9 @@ connection's shared budget, as described in
 [Sign-in rate limits](auth-api.md#sign-in-rate-limits).
 
 - `POST /Users/AuthenticateByName` spends the per-IP and `login` budgets before
-  the global budget, like native sign-in (`POST /api/v2/auth/login`, and
-  `POST /api/v1/auth/login` during the bridge). It shares the per-IP `login`
-  counter with every native operation that spends that budget. The account name also spends its
+  the global budget, like native sign-in (`POST /api/v2/auth/login`). It shares
+  the per-IP `login` counter with every native operation that spends that
+  budget. The account name also spends its
   sign-in attempt budget, shared with native sign-in on every node
   ([Sign-in attempts per name](auth-api.md#sign-in-attempts-per-name)); a
   locked name answers 429 `TooManyRequests` with `Retry-After`. It reads at

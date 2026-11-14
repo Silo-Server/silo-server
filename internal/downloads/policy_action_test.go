@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -208,7 +209,7 @@ func sameDownloadGateError(got, want error) bool {
 
 func newDownloadPolicyPDP(t *testing.T) *policyengine.PDP {
 	t.Helper()
-	engine, err := policyengine.NewEngine(context.Background())
+	engine, err := policyengine.NewEngine(context.Background(), policyengine.WithEvalTimeout(time.Minute))
 	if err != nil {
 		t.Fatalf("NewEngine() error: %v", err)
 	}

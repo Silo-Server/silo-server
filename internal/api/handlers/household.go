@@ -1,11 +1,8 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"io"
-	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
@@ -13,57 +10,29 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
-// canManageHousehold reports whether the caller may act for the whole household
-// — every profile on their own account — rather than only for themselves.
+// canManageHouseholdAs reports whether the caller, acting as activeProfileID,
+// may act for the whole household (every profile on their own account) rather
+// than only for themselves. verify checks a PIN-locked primary profile against
+// the viewer scope the gate resolved.
 //
 // The caller's active profile must be the one flagged is_primary, which is the
 // household parent and is deliberately *not* the server-wide admin role: a
 // household parent manages their family, an admin manages the server. The
 // admin role does not widen this. A non-primary profile on an admin account is
-// a household member like any other, exactly as RequireActingAdmin refuses it
-// admin powers; otherwise a child profile on the admin's account could lift
+// a household member like any other, exactly as the acting-admin gate refuses
+// it admin powers; otherwise a child profile on the admin's account could lift
 // its own limits or clear the parent's PIN.
 //
-// When that primary profile has a PIN, management additionally requires a valid
-// X-Profile-Token from /profiles/{id}/verify-pin. Without that, a client could
-// walk past a profile lock by sending only X-Profile-Id.
-//
-// A request that names no profile manages the household only when it is an
+// A caller that names no profile manages the household only when it is an
 // admin API key, or comes from an admin account whose household has no limited
-// profile (see
-// access.HouseholdRequiresProfile): first-run and admin tooling keep working,
-// but a device signed into the account cannot drop X-Profile-Id to get past a
-// child's limits or the parent's PIN.
+// profile (see access.HouseholdRequiresProfile): first-run and admin tooling
+// keep working, but a device signed into the account cannot drop its profile
+// to get past a child's limits or the parent's PIN.
 //
 // This is a policy boundary for well-behaved clients rather than a defense
 // against the account holder: every profile on an account shares one login
-// session, so X-Profile-Id is self-asserted (see the note in
-// internal/api/middleware/auth.go). It is the same boundary profile management
-// has always used, and it is applied here so household settings management is
-// guarded and auditable rather than implicit.
-func canManageHousehold(
-	r *http.Request,
-	store userstore.UserStore,
-	tokens *access.ProfileTokenService,
-) (bool, error) {
-	return canManageHouseholdAs(r.Context(), store, activeProfileIDOf(r), func(profile *userstore.Profile) error {
-		return verifyProfileTokenFor(r, tokens, profile)
-	})
-}
-
-// activeProfileIDOf is the profile the request acts as: the one the profile
-// gate resolved, else the declared header.
-func activeProfileIDOf(r *http.Request) string {
-	if id := apimw.GetProfileID(r.Context()); id != "" {
-		return id
-	}
-	return r.Header.Get("X-Profile-Id")
-}
-
-// canManageHouseholdAs is canManageHousehold with the request already reduced
-// to the acting profile and a verifier for a PIN-locked primary profile: the
-// v1 verifier checks X-Profile-Token, the v2 one the viewer scope the gate
-// resolved.
+// session, so the declared profile is self-asserted (see the note in
+// internal/api/middleware/auth.go).
 func canManageHouseholdAs(
 	ctx context.Context,
 	store userstore.UserStore,
@@ -161,41 +130,6 @@ func profileLessAdminMayManage(ctx context.Context, store userstore.UserStore) (
 		return false, fmt.Errorf("listing household profiles: %w", err)
 	}
 	return !access.HouseholdRequiresProfile(profiles), nil
-}
-
-// verifyProfileTokenFor checks the X-Profile-Token a PIN-locked profile must
-// present against the profile row the household check just loaded, so the
-// token must match that row's current PIN revision (see
-// access.CheckProfileToken). A handler wired without a token service fails
-// closed: "cannot verify" is not "verified".
-func verifyProfileTokenFor(r *http.Request, tokens *access.ProfileTokenService, profile *userstore.Profile) error {
-	if tokens == nil {
-		return access.ErrProfileUnverified
-	}
-	claims := apimw.GetClaims(r.Context())
-	if claims == nil || claims.SessionID == "" || claims.UserID == 0 {
-		return access.ErrProfileUnverified
-	}
-	return access.CheckProfileToken(tokens, r.Header.Get("X-Profile-Token"), claims.UserID, claims.SessionID, profile)
-}
-
-// maxHouseholdRequestBody bounds the JSON bodies readHouseholdRequestBody buffers.
-const maxHouseholdRequestBody = 1 << 20
-
-// readHouseholdRequestBody reads a v1 request's whole body before the handler
-// checks household authority. The check then sees the acting profile as it
-// stands once the body has arrived, so a client that holds its body open
-// cannot keep PIN proof that a PIN change made in the meantime revoked. v2
-// needs no equivalent: Huma reads the body before the handler runs. It writes
-// a 400 and returns false when the body cannot be read.
-func readHouseholdRequestBody(w http.ResponseWriter, r *http.Request) bool {
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxHouseholdRequestBody))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return false
-	}
-	r.Body = io.NopCloser(bytes.NewReader(body))
-	return true
 }
 
 // checkHouseholdPINRevision runs after the existing account transaction lock.

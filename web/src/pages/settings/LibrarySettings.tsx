@@ -29,6 +29,8 @@ import {
   useSetSettingValue,
 } from "@/hooks/queries/settingValues";
 import type { SettingIdentity } from "@/hooks/queries/settingValues";
+import { libraryTypeLabel } from "@/components/admin/libraries/libraryTypes";
+import { useSortableAccessibility } from "@/hooks/useSortableAccessibility";
 import { useT } from "@/i18n";
 import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { settingUnsetLabel } from "@/lib/settingsText";
@@ -371,7 +373,7 @@ function LibraryCard({
           <div className="flex flex-wrap items-center gap-2">
             <span className="truncate text-sm font-medium">{library.name}</span>
             <Badge variant="outline" className="shrink-0 capitalize">
-              {library.type}
+              {libraryTypeLabel(library.type)}
             </Badge>
             {hasOverride && (
               <Badge variant="secondary" className="shrink-0">
@@ -624,6 +626,12 @@ export default function LibrarySettings() {
   }
 
   const activeLibrary = activeId != null ? orderedLibraries.find((l) => l.id === activeId) : null;
+  const sortableAccessibility = useSortableAccessibility(
+    (orderedLibraries.length > 0 ? orderedLibraries : (libraries ?? [])).map((library) => ({
+      id: library.id,
+      name: library.name,
+    })),
+  );
 
   if (librariesLoading || libraryPrefsLoading || profileLoading || playbackPrefsLoading) {
     return <div className="text-muted-foreground pt-4">{t("web.settings.library.loading")}</div>;
@@ -708,6 +716,7 @@ export default function LibrarySettings() {
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
+        accessibility={sortableAccessibility}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
         onDragCancel={handleDragCancel}
@@ -739,7 +748,7 @@ export default function LibrarySettings() {
               <GripVertical className="text-muted-foreground h-4 w-4" />
               <span className="text-sm font-medium">{activeLibrary.name}</span>
               <Badge variant="outline" className="capitalize">
-                {activeLibrary.type}
+                {libraryTypeLabel(activeLibrary.type)}
               </Badge>
             </div>
           ) : null}

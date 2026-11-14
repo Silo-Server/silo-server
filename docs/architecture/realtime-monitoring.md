@@ -34,8 +34,7 @@ Two switches control monitoring:
   only while it is saved off, which is where the library editor sends an admin
   to turn it back on.
 - `media_folders.realtime_monitoring`, the per-library switch (default `true`
-  for existing and new libraries). It is exposed on `/api/v2/libraries` only;
-  the frozen `/api/v1` routes neither return nor change it.
+  for existing and new libraries). It is exposed on `/api/v2/libraries`.
 
 A library is monitored only when the server switch is on, the library is
 enabled, and its own switch is on. The monitor's desired set is exactly those

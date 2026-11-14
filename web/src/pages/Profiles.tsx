@@ -46,6 +46,7 @@ export default function Profiles() {
     avatarUploadEnabled,
     maxAdvisoryAgeSupported,
     requireAdvisoryAgeSupported,
+    requestsAllowedSupported,
     maxProfiles,
   } = useProfiles();
   const { data: libraries = [], isLoading: librariesLoading } = useAvailableUserLibraries();
@@ -55,7 +56,7 @@ export default function Profiles() {
   );
   const [addSession, setAddSession] = useState<AddProfileSession | null>(null);
   const [preparingAdd, setPreparingAdd] = useState(false);
-  const { selectProfile, verifyProfilePin, logout } = useAuth();
+  const { selectProfile, verifyProfilePin, logout, isImpersonating } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const redirectTarget = sanitizeAuthRedirect(searchParams.get("redirect"));
@@ -72,7 +73,8 @@ export default function Profiles() {
   }
 
   function handleSelect(profile: Profile) {
-    if (profile.has_pin) {
+    // View-as opens a locked profile without its PIN; the server allows it too.
+    if (profile.has_pin && !isImpersonating) {
       setPinRequest({ profile, purpose: "select" });
       return;
     }
@@ -216,6 +218,7 @@ export default function Profiles() {
           avatarUploadEnabled={avatarUploadEnabled}
           advisoryAgeSupported={maxAdvisoryAgeSupported}
           requireAdvisoryAgeSupported={requireAdvisoryAgeSupported}
+          requestsAllowedSupported={requestsAllowedSupported}
           onOpenChange={setEditorOpen}
           onSaveSuccess={(profile, context) => void handleCreateSuccess(profile, context)}
         />
@@ -305,6 +308,7 @@ export default function Profiles() {
         avatarUploadEnabled={avatarUploadEnabled}
         advisoryAgeSupported={maxAdvisoryAgeSupported}
         requireAdvisoryAgeSupported={requireAdvisoryAgeSupported}
+        requestsAllowedSupported={requestsAllowedSupported}
         profileContext={addSession?.profileContext}
         onOpenChange={(open) => {
           if (!open) {

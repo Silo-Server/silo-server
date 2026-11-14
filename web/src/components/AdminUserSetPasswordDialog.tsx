@@ -16,6 +16,8 @@ import { Switch } from "@/components/ui/switch";
 import { V2ProblemError } from "@/api/v2/request";
 import { useUpdateAdminUserSignIn } from "@/hooks/queries/admin/externalSignIn";
 import { useT } from "@/i18n";
+import { TOUCH_TARGETS } from "@/lib/touchTargets";
+import { cn } from "@/lib/utils";
 import { adminSignInErrorText } from "@/lib/externalSignInAdmin";
 import { newPasswordProblem, passwordErrorMessage } from "@/lib/newPassword";
 
@@ -99,7 +101,7 @@ export function AdminUserSetPasswordDialog({
         if (!open && !update.isPending) onClose();
       }}
     >
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className={cn("sm:max-w-md", TOUCH_TARGETS)}>
         <form onSubmit={submit} className="space-y-4" noValidate>
           <DialogHeader>
             <DialogTitle>{t("web.admin.users.setPasswordDialog.title")}</DialogTitle>

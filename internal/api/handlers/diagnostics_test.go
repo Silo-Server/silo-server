@@ -3,349 +3,16 @@ package handlers
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
-	"log/slog"
-	"mime/multipart"
 	"net/http"
-	"net/http/httptest"
-	"net/textproto"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/diagnostics"
 )
-
-func TestDiagnosticsUploadManifestTooBig(t *testing.T) {
-	service := newFakeDiagnosticsService()
-	handler := NewDiagnosticsHandler(service)
-	logs := captureDiagnosticsLogs(handler)
-
-	rec := httptest.NewRecorder()
-	handler.HandleUpload(rec, newDiagnosticsUploadRequest(t, []diagnosticsPart{
-		{name: "manifest", contentType: "application/json", body: bytes.Repeat([]byte("x"), int(diagnostics.MaxManifestBytes)+1)},
-		{name: "bundle", contentType: "application/gzip", body: []byte("bundle")},
-	}, accessClaims()))
-
-	assertDiagnosticsError(t, rec, http.StatusRequestEntityTooLarge, "too_large")
-	if service.ingestCalls != 0 {
-		t.Fatalf("ingest calls = %d, want 0", service.ingestCalls)
-	}
-	assertDiagnosticsRejectionLog(t, logs, "too_large", 42)
-}
-
-func TestDiagnosticsUploadWrongFirstPartNotDrained(t *testing.T) {
-	service := newFakeDiagnosticsService()
-	handler := NewDiagnosticsHandler(service)
-
-	// A large, wrongly-named first part must be rejected without draining its
-	// body: an invalid upload must not be allowed to stream its whole payload
-	// (holding the in-flight slot) before it gets a 400.
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	header := make(textproto.MIMEHeader)
-	header.Set("Content-Disposition", `form-data; name="bundle"`)
-	header.Set("Content-Type", "application/gzip")
-	w, err := writer.CreatePart(header)
-	if err != nil {
-		t.Fatalf("create multipart part: %v", err)
-	}
-	if _, err := w.Write(bytes.Repeat([]byte("x"), 1<<20)); err != nil {
-		t.Fatalf("write multipart part: %v", err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatalf("close multipart writer: %v", err)
-	}
-
-	counter := &countingReader{r: &body}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/diagnostics/reports", counter)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("Authorization", "Bearer token")
-	req = req.WithContext(apimw.SetClaims(req.Context(), accessClaims()))
-
-	rec := httptest.NewRecorder()
-	handler.HandleUpload(rec, req)
-
-	assertDiagnosticsError(t, rec, http.StatusBadRequest, "invalid_bundle")
-	if service.ingestCalls != 0 {
-		t.Fatalf("ingest calls = %d, want 0", service.ingestCalls)
-	}
-	// Only the small multipart framing/headers should have been read; the 1 MiB
-	// wrong-first-part body must not have been drained.
-	if counter.n > 128*1024 {
-		t.Fatalf("read %d bytes from request body, want the wrong first part rejected without draining (< 128 KiB)", counter.n)
-	}
-}
-
-type countingReader struct {
-	r io.Reader
-	n int64
-}
-
-func (c *countingReader) Read(p []byte) (int, error) {
-	n, err := c.r.Read(p)
-	c.n += int64(n)
-	return n, err
-}
-
-func TestDiagnosticsUploadRejectsAPIKey(t *testing.T) {
-	service := newFakeDiagnosticsService()
-	handler := NewDiagnosticsHandler(service)
-	logs := captureDiagnosticsLogs(handler)
-
-	rec := httptest.NewRecorder()
-	req := newDiagnosticsUploadRequest(t, validDiagnosticsParts(), &auth.Claims{
-		UserID:    42,
-		TokenType: auth.TokenTypeAPIKey,
-	})
-	req.Header.Set("Authorization", "Bearer sa_test")
-	handler.HandleUpload(rec, req)
-
-	assertDiagnosticsError(t, rec, http.StatusForbidden, "api_key_not_allowed")
-	if service.statusCalls != 0 {
-		t.Fatalf("status calls = %d, want 0", service.statusCalls)
-	}
-	assertDiagnosticsRejectionLog(t, logs, "api_key_not_allowed", 42)
-}
-
-func TestDiagnosticsUploadBusy(t *testing.T) {
-	service := newFakeDiagnosticsService()
-	service.started = make(chan struct{})
-	service.block = make(chan struct{})
-	handler := NewDiagnosticsHandler(service)
-	logs := captureDiagnosticsLogs(handler)
-
-	firstReq := newDiagnosticsUploadRequest(t, validDiagnosticsParts(), accessClaims())
-	firstDone := make(chan *httptest.ResponseRecorder, 1)
-	go func() {
-		rec := httptest.NewRecorder()
-		handler.HandleUpload(rec, firstReq)
-		firstDone <- rec
-	}()
-	<-service.started
-
-	rec := httptest.NewRecorder()
-	handler.HandleUpload(rec, newDiagnosticsUploadRequest(t, validDiagnosticsParts(), accessClaims()))
-
-	assertDiagnosticsError(t, rec, http.StatusServiceUnavailable, "busy")
-	if got := rec.Header().Get("Retry-After"); got != diagnosticsBusyRetryAfter {
-		t.Fatalf("Retry-After = %q, want %q", got, diagnosticsBusyRetryAfter)
-	}
-	assertDiagnosticsRejectionLog(t, logs, "busy", 42)
-
-	close(service.block)
-	first := <-firstDone
-	if first.Code != http.StatusCreated {
-		t.Fatalf("first status = %d, want %d; body=%s", first.Code, http.StatusCreated, first.Body.String())
-	}
-}
-
-func TestDiagnosticsAdminRoutesRejectNonActingAdmin(t *testing.T) {
-	service := newFakeDiagnosticsService()
-	handler := NewDiagnosticsHandler(service)
-	router := chi.NewRouter()
-	router.Use(apimw.RequireActingAdmin(nil, nil))
-	RegisterAdminDiagnosticsRoutes(router, handler)
-
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, adminDiagnosticsRequest(http.MethodGet, "/diagnostics/reports", &auth.Claims{
-		UserID:    8,
-		Role:      "user",
-		TokenType: auth.TokenTypeAccess,
-	}))
-
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusForbidden, rec.Body.String())
-	}
-	if service.listCalls != 0 {
-		t.Fatalf("list calls = %d, want 0", service.listCalls)
-	}
-}
-
-func TestDiagnosticsUploadsEnablementRequiresStorageProbe(t *testing.T) {
-	settings := &fakeServerSettingsStore{values: map[string]string{}}
-	handler := &AdminHandler{SettingsRepo: settings}
-	router := chi.NewRouter()
-	router.Put("/admin/settings/{key}", handler.HandleUpdateSetting)
-
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(
-		http.MethodPut,
-		"/admin/settings/"+diagnostics.KeyUploadsEnabled,
-		strings.NewReader(`{"value":"true"}`),
-	))
-
-	assertDiagnosticsError(t, rec, http.StatusBadRequest, "storage_unavailable")
-	if settings.values[diagnostics.KeyUploadsEnabled] != "" {
-		t.Fatalf("setting persisted = %q, want empty", settings.values[diagnostics.KeyUploadsEnabled])
-	}
-
-	store := &fakeDiagnosticsEnablementStore{bucket: "private"}
-	handler.DiagnosticsStore = store
-	rec = httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(
-		http.MethodPut,
-		"/admin/settings/"+diagnostics.KeyUploadsEnabled,
-		strings.NewReader(`{"value":"true"}`),
-	))
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
-	}
-	if settings.values[diagnostics.KeyUploadsEnabled] != "true" {
-		t.Fatalf("setting persisted = %q, want true", settings.values[diagnostics.KeyUploadsEnabled])
-	}
-	if !sameStringSlice(store.ops, []string{"put:diagnostics/.probe", "delete:diagnostics/.probe"}) {
-		t.Fatalf("probe ops = %v, want put/delete probe", store.ops)
-	}
-}
-
-func TestDiagnosticsNumericSettingsRejectOutOfRangeValues(t *testing.T) {
-	cases := []struct {
-		name    string
-		key     string
-		value   string
-		initial map[string]string
-	}{
-		{name: "bundle below minimum", key: diagnostics.KeyMaxBundleBytes, value: "1048575"},
-		{name: "bundle above maximum", key: diagnostics.KeyMaxBundleBytes, value: "268435457", initial: map[string]string{diagnostics.KeyMaxUncompressedBytes: "1073741824"}},
-		{name: "bundle above uncompressed", key: diagnostics.KeyMaxBundleBytes, value: "67108865", initial: map[string]string{diagnostics.KeyMaxUncompressedBytes: "67108864"}},
-		{name: "uncompressed below bundle", key: diagnostics.KeyMaxUncompressedBytes, value: "10485759", initial: map[string]string{diagnostics.KeyMaxBundleBytes: "10485760"}},
-		{name: "bundle above per-user cap", key: diagnostics.KeyMaxBundleBytes, value: "104857600", initial: map[string]string{diagnostics.KeyMaxUncompressedBytes: "1073741824", diagnostics.KeyMaxBytesPerUser: "10485760"}},
-		{name: "per-user below bundle", key: diagnostics.KeyMaxBytesPerUser, value: "10485760", initial: map[string]string{diagnostics.KeyMaxBundleBytes: "104857600", diagnostics.KeyMaxUncompressedBytes: "1073741824"}},
-		{name: "uncompressed above maximum", key: diagnostics.KeyMaxUncompressedBytes, value: "1073741825"},
-		{name: "reports below minimum", key: diagnostics.KeyMaxReportsPerUserDay, value: "0"},
-		{name: "reports above maximum", key: diagnostics.KeyMaxReportsPerUserDay, value: "1001"},
-		{name: "retention below minimum", key: diagnostics.KeyRetentionDays, value: "0"},
-		{name: "retention above maximum", key: diagnostics.KeyRetentionDays, value: "366"},
-		{name: "user bytes below minimum", key: diagnostics.KeyMaxBytesPerUser, value: "10485759"},
-		{name: "user bytes above maximum", key: diagnostics.KeyMaxBytesPerUser, value: "10737418241"},
-		{name: "not an integer", key: diagnostics.KeyRetentionDays, value: "thirty"},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			settings := &fakeServerSettingsStore{values: tc.initial}
-			rec := updateDiagnosticsSetting(t, &AdminHandler{SettingsRepo: settings}, tc.key, tc.value)
-			body := rec.Body.String()
-			assertDiagnosticsError(t, rec, http.StatusBadRequest, "bad_request")
-			if _, stored := settings.values[tc.key]; stored {
-				t.Fatalf("invalid value was stored: %#v", settings.values)
-			}
-			if !strings.Contains(body, tc.key) {
-				t.Fatalf("error body = %s, want clear error naming %s", body, tc.key)
-			}
-		})
-	}
-}
-
-type diagnosticsPart struct {
-	name        string
-	contentType string
-	body        []byte
-}
-
-func validDiagnosticsParts() []diagnosticsPart {
-	return []diagnosticsPart{
-		{name: "manifest", contentType: "application/json", body: []byte(`{"ok":true}`)},
-		{name: "bundle", contentType: "application/gzip", body: []byte("bundle")},
-	}
-}
-
-func newDiagnosticsUploadRequest(t *testing.T, parts []diagnosticsPart, claims *auth.Claims) *http.Request {
-	t.Helper()
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	for _, part := range parts {
-		header := make(textproto.MIMEHeader)
-		header.Set("Content-Disposition", `form-data; name="`+part.name+`"`)
-		header.Set("Content-Type", part.contentType)
-		w, err := writer.CreatePart(header)
-		if err != nil {
-			t.Fatalf("create multipart part: %v", err)
-		}
-		if _, err := w.Write(part.body); err != nil {
-			t.Fatalf("write multipart part: %v", err)
-		}
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatalf("close multipart writer: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/diagnostics/reports", &body)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("Authorization", "Bearer token")
-	if claims != nil {
-		req = req.WithContext(apimw.SetClaims(req.Context(), claims))
-	}
-	return req
-}
-
-func accessClaims() *auth.Claims {
-	return &auth.Claims{
-		UserID:    42,
-		TokenType: auth.TokenTypeAccess,
-	}
-}
-
-func assertDiagnosticsError(t *testing.T, rec *httptest.ResponseRecorder, status int, code string) {
-	t.Helper()
-	if rec.Code != status {
-		t.Fatalf("status = %d, want %d; body=%s", rec.Code, status, rec.Body.String())
-	}
-	var resp struct {
-		Error string `json:"error"`
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode error response: %v", err)
-	}
-	if resp.Error != code {
-		t.Fatalf("error = %q, want %q", resp.Error, code)
-	}
-}
-
-func captureDiagnosticsLogs(handler *DiagnosticsHandler) *bytes.Buffer {
-	var logs bytes.Buffer
-	handler.logger = slog.New(slog.NewJSONHandler(&logs, nil))
-	return &logs
-}
-
-func assertDiagnosticsRejectionLog(t *testing.T, logs *bytes.Buffer, reason string, userID int) {
-	t.Helper()
-	line := logs.String()
-	for _, want := range []string{
-		`"msg":"diagnostic report rejected"`,
-		`"component":"diagnostics"`,
-		`"result":"rejected"`,
-		`"reason":"` + reason + `"`,
-		`"user_id":` + strconv.Itoa(userID),
-	} {
-		if !strings.Contains(line, want) {
-			t.Fatalf("rejection log = %s, want %s", line, want)
-		}
-	}
-}
-
-func updateDiagnosticsSetting(t *testing.T, handler *AdminHandler, key, value string) *httptest.ResponseRecorder {
-	t.Helper()
-	router := chi.NewRouter()
-	router.Put("/admin/settings/{key}", handler.HandleUpdateSetting)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(
-		http.MethodPut,
-		"/admin/settings/"+key,
-		strings.NewReader(`{"value":"`+value+`"}`),
-	))
-	return rec
-}
 
 func readyDiagnosticsReport() *diagnostics.Report {
 	blobBucket := "private"
@@ -362,14 +29,6 @@ func readyDiagnosticsReport() *diagnostics.Report {
 		BlobKey:    &blobKey,
 		BlobBytes:  &blobBytes,
 	}
-}
-
-func adminDiagnosticsRequest(method, target string, claims *auth.Claims) *http.Request {
-	req := httptest.NewRequest(method, target, nil)
-	if claims != nil {
-		req = req.WithContext(apimw.SetClaims(req.Context(), claims))
-	}
-	return req
 }
 
 type fakeDiagnosticsService struct {
@@ -611,5 +270,80 @@ func TestDeleteAdminDiagnosticReportTreatsAbsentAsSuccess(t *testing.T) {
 	service.deleteErr = errors.New("database failed")
 	if err := handler.DeleteAdminDiagnosticReport(t.Context(), "report-1"); err == nil {
 		t.Fatal("database error suppressed")
+	}
+}
+
+func adminSettingFailure(t *testing.T, err error) *APIError {
+	t.Helper()
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok {
+		t.Fatalf("err = %T %v, want *APIError", err, err)
+	}
+	return apiErr
+}
+
+// Turning diagnostics uploads on must prove the private store accepts a write
+// first; without one, the setting is refused and nothing is stored.
+func TestUpdateAdminSettingDiagnosticsUploadsRequireStorageProbe(t *testing.T) {
+	settings := &fakeServerSettingsStore{values: map[string]string{}}
+	handler := &AdminHandler{SettingsRepo: settings}
+
+	_, err := handler.UpdateAdminSetting(context.Background(), diagnostics.KeyUploadsEnabled, "true", nil)
+	if apiErr := adminSettingFailure(t, err); apiErr.Status != http.StatusBadRequest || apiErr.Code != errCodeStorageUnavailable {
+		t.Fatalf("enable without storage = %d %q, want 400 %s", apiErr.Status, apiErr.Code, errCodeStorageUnavailable)
+	}
+	if got := settings.values[diagnostics.KeyUploadsEnabled]; got != "" {
+		t.Fatalf("setting persisted = %q, want nothing", got)
+	}
+
+	store := &fakeDiagnosticsEnablementStore{bucket: "private"}
+	handler.DiagnosticsStore = store
+	if _, err := handler.UpdateAdminSetting(context.Background(), diagnostics.KeyUploadsEnabled, "true", nil); err != nil {
+		t.Fatalf("enable with storage: %v", err)
+	}
+	if got := settings.values[diagnostics.KeyUploadsEnabled]; got != "true" {
+		t.Fatalf("setting persisted = %q, want true", got)
+	}
+	if !sameStringSlice(store.ops, []string{"put:diagnostics/.probe", "delete:diagnostics/.probe"}) {
+		t.Fatalf("probe ops = %v, want put then delete of the probe", store.ops)
+	}
+}
+
+// The diagnostics limits are range-checked on their own and against each
+// other; a rejected value names its key and is never stored.
+func TestUpdateAdminSettingDiagnosticsLimitsRejectOutOfRange(t *testing.T) {
+	cases := []struct {
+		name    string
+		key     string
+		value   string
+		initial map[string]string
+	}{
+		{name: "bundle below minimum", key: diagnostics.KeyMaxBundleBytes, value: "1048575"},
+		{name: "bundle above maximum", key: diagnostics.KeyMaxBundleBytes, value: "268435457", initial: map[string]string{diagnostics.KeyMaxUncompressedBytes: "1073741824"}},
+		{name: "bundle above uncompressed", key: diagnostics.KeyMaxBundleBytes, value: "67108865", initial: map[string]string{diagnostics.KeyMaxUncompressedBytes: "67108864"}},
+		{name: "uncompressed below bundle", key: diagnostics.KeyMaxUncompressedBytes, value: "10485759", initial: map[string]string{diagnostics.KeyMaxBundleBytes: "10485760"}},
+		{name: "bundle above per-user cap", key: diagnostics.KeyMaxBundleBytes, value: "104857600", initial: map[string]string{diagnostics.KeyMaxUncompressedBytes: "1073741824", diagnostics.KeyMaxBytesPerUser: "10485760"}},
+		{name: "per-user below bundle", key: diagnostics.KeyMaxBytesPerUser, value: "10485760", initial: map[string]string{diagnostics.KeyMaxBundleBytes: "104857600", diagnostics.KeyMaxUncompressedBytes: "1073741824"}},
+		{name: "uncompressed above maximum", key: diagnostics.KeyMaxUncompressedBytes, value: "1073741825"},
+		{name: "reports below minimum", key: diagnostics.KeyMaxReportsPerUserDay, value: "0"},
+		{name: "reports above maximum", key: diagnostics.KeyMaxReportsPerUserDay, value: "1001"},
+		{name: "retention below minimum", key: diagnostics.KeyRetentionDays, value: "0"},
+		{name: "retention above maximum", key: diagnostics.KeyRetentionDays, value: "366"},
+		{name: "user bytes below minimum", key: diagnostics.KeyMaxBytesPerUser, value: "10485759"},
+		{name: "user bytes above maximum", key: diagnostics.KeyMaxBytesPerUser, value: "10737418241"},
+		{name: "not an integer", key: diagnostics.KeyRetentionDays, value: "thirty"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			settings := &fakeServerSettingsStore{values: tc.initial}
+			_, err := (&AdminHandler{SettingsRepo: settings}).UpdateAdminSetting(context.Background(), tc.key, tc.value, nil)
+			apiErr := adminSettingFailure(t, err)
+			if apiErr.Status != http.StatusBadRequest || apiErr.Code != "bad_request" || !strings.Contains(apiErr.Message, tc.key) {
+				t.Fatalf("error = %d %q %q, want 400 bad_request naming %s", apiErr.Status, apiErr.Code, apiErr.Message, tc.key)
+			}
+			if _, stored := settings.values[tc.key]; stored {
+				t.Fatalf("invalid value was stored: %#v", settings.values)
+			}
+		})
 	}
 }

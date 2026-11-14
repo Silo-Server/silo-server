@@ -403,7 +403,7 @@ func (s *Service) generate(ctx context.Context, job *Job) (Published, error) {
 	perSheet := columns * rows
 	sheets := &mediasample.SheetsOutput{TileWidth: recipe.Width, TileHeight: height, Columns: columns, Rows: rows, Quality: Quality, UseInputAspect: true}
 	sheets.ToneMap = sheetsToneMap(&models.MediaFile{HDR: job.HDR, VideoTracks: job.VideoTracks})
-	published := Published{Recipe: recipe, StoreIdentity: s.store.Identity(), Height: height, Count: len(times)}
+	published := Published{Recipe: recipe, StoreIdentity: s.store.Identity(), ToneMapSource: toneMapKey(sheets.ToneMap), Height: height, Count: len(times)}
 	var revision int64
 	chunkSheets := 1
 	for start := 0; start < len(times); {
@@ -491,6 +491,18 @@ func sheetsToneMap(file *models.MediaFile) *mediasample.ToneMap {
 		source = tonemap.SourceDolbyVision
 	}
 	return &mediasample.ToneMap{AllowSoftware: true, Source: source}
+}
+
+// toneMapKey names the HDR conversion of sheets made with toneMap, as
+// media_file_trickplay.tone_map_source records it.
+func toneMapKey(toneMap *mediasample.ToneMap) string {
+	switch {
+	case toneMap == nil:
+		return "none"
+	case toneMap.Source == "":
+		return "best_effort"
+	}
+	return string(toneMap.Source)
 }
 
 // leaseAware reports a lost lease rather than the error it caused.
@@ -581,7 +593,7 @@ func (s *Service) Reconcile(ctx context.Context) (ReconcileStats, bool, error) {
 		// Keep the SQL on the lock's session, including with a pool of one
 		// connection. Losing that session also stops the guarded work.
 		reconcile = func(ctx context.Context, recipe Recipe, storeIdentity string, batch int) (ReconcileStats, error) {
-			return repository.reconcile(ctx, lock.Conn().Exec, recipe, storeIdentity, batch)
+			return repository.reconcile(ctx, lock.Conn(), recipe, storeIdentity, batch)
 		}
 	}
 	stats, more, err := s.reconcileBatches(ctx, recipe, reconcile)
@@ -602,11 +614,13 @@ func (s *Service) reconcileBatches(ctx context.Context, recipe Recipe, reconcile
 		total.Added += stats.Added
 		total.Removed += stats.Removed
 		total.Stale += stats.Stale
+		total.ToneMapStale += stats.ToneMapStale
 		if err != nil {
 			return total, false, err
 		}
 		s.Kick()
-		if stats.Reclaimed < reconcileBatch && stats.Added < reconcileBatch && stats.Removed < reconcileBatch && stats.Stale < reconcileBatch {
+		if stats.Reclaimed < reconcileBatch && stats.Added < reconcileBatch && stats.Removed < reconcileBatch && stats.Stale < reconcileBatch &&
+			stats.ToneMapStale < reconcileBatch {
 			return total, false, nil
 		}
 	}

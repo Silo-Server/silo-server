@@ -141,10 +141,12 @@ func TestPreparedSeasonReplacementCountsTowardConcurrentLimitDB(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = f.pool.Exec(ctx, `DELETE FROM download_artifacts WHERE media_file_id = $1`, f.fileID)
 	})
-	create := func(id, episodeID, status string) {
+	ep1, ep2 := f.contentID+"-ep-1", f.contentID+"-ep-2"
+	ep1File, ep2File := f.episodeFile(t, ep1), f.episodeFile(t, ep2)
+	create := func(id, episodeID string, fileID int, status string) {
 		now := time.Now()
 		if err := f.repo.Create(ctx, &Download{
-			ID: id, UserID: f.userID, ProfileID: f.profileA, DeviceID: f.deviceA, MediaFileID: f.fileID,
+			ID: id, UserID: f.userID, ProfileID: f.profileA, DeviceID: f.deviceA, MediaFileID: fileID,
 			ContentID: f.contentID, EpisodeID: episodeID, Kind: KindQueued, Status: status,
 			Format: FormatOriginal, Quality: QualityOriginal, EffectiveQuality: QualityOriginal,
 			FileSize: 1024, Revision: 1, CreatedAt: now, UpdatedAt: now,
@@ -154,10 +156,10 @@ func TestPreparedSeasonReplacementCountsTowardConcurrentLimitDB(t *testing.T) {
 	}
 	suffix := time.Now().UnixNano()
 	existingID := fmt.Sprintf("dl-ep-%d", suffix)
-	create(existingID, "ep-1", StatusReady)
+	create(existingID, ep1, ep1File, StatusReady)
 	// Another download holds the account's only slot.
 	busyID := fmt.Sprintf("dl-busy-%d", suffix)
-	create(busyID, "ep-2", StatusDownloading)
+	create(busyID, ep2, ep2File, StatusDownloading)
 
 	svc := NewService(f.repo, nil, NewQuantityLimiter(f.repo, 1, 0, 0), nil, nil, nil, nil, nil, nil, &config.DownloadConfig{Enabled: true})
 	svc.SetArtifactManager(NewArtifactManager(
@@ -170,13 +172,13 @@ func TestPreparedSeasonReplacementCountsTowardConcurrentLimitDB(t *testing.T) {
 		PrepareTarget: playback.PrepareTarget{Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", TargetBitrateKbps: 5000},
 	}
 	req := CreateRequest{ContentID: f.contentID, ProfileID: f.profileA, DeviceID: f.deviceA,
-		ExpectedEntries: map[string]ManagedCreateExpectation{"ep-1": {ID: existingID, Revision: 1}}}
-	item := managedItem{file: &models.MediaFile{ID: f.fileID, ContentID: f.contentID, FileSize: 1024}, contentID: f.contentID, episodeID: "ep-1"}
+		ExpectedEntries: map[string]ManagedCreateExpectation{ep1: {ID: existingID, Revision: 1}}}
+	item := managedItem{file: &models.MediaFile{ID: ep1File, ContentID: f.contentID, EpisodeID: ep1, FileSize: 1024}, contentID: f.contentID, episodeID: ep1}
 
 	if _, err := svc.ensureManagedDecisions(ctx, f.userID, req, []managedItem{item}, []QualityDecision{decision}, "season"); !errors.Is(err, ErrConcurrentLimitReached) {
 		t.Fatalf("replacement with no free slot: err = %v, want ErrConcurrentLimitReached", err)
 	}
-	row, err := f.repo.GetManagedEntry(ctx, f.userID, f.profileA, f.deviceA, f.contentID, "ep-1")
+	row, err := f.repo.GetManagedEntry(ctx, f.userID, f.profileA, f.deviceA, f.contentID, ep1)
 	if err != nil || row.Format != FormatOriginal || row.Revision != 1 {
 		t.Fatalf("refused replacement changed the entry: %+v %v", row, err)
 	}
@@ -186,12 +188,12 @@ func TestPreparedSeasonReplacementCountsTowardConcurrentLimitDB(t *testing.T) {
 	}
 	// A stale guard is refused before any encode is queued for it.
 	stale := req
-	stale.ExpectedEntries = map[string]ManagedCreateExpectation{"ep-1": {ID: existingID, Revision: 7}}
+	stale.ExpectedEntries = map[string]ManagedCreateExpectation{ep1: {ID: existingID, Revision: 7}}
 	if _, err := svc.ensureManagedDecisions(ctx, f.userID, stale, []managedItem{item}, []QualityDecision{decision}, "season"); !errors.Is(err, ErrStatusConflict) {
 		t.Fatalf("stale guard: err = %v, want ErrStatusConflict", err)
 	}
 	var jobs int
-	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM download_artifacts WHERE media_file_id = $1`, f.fileID).Scan(&jobs); err != nil || jobs != 0 {
+	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM download_artifacts WHERE media_file_id = $1`, ep1File).Scan(&jobs); err != nil || jobs != 0 {
 		t.Fatalf("stale guard queued %d encode jobs (%v)", jobs, err)
 	}
 	rows, err := svc.ensureManagedDecisions(ctx, f.userID, req, []managedItem{item}, []QualityDecision{decision}, "season")
@@ -210,12 +212,19 @@ func TestPreparedReplacementQuotaAccountingDB(t *testing.T) {
 		_, _ = f.pool.Exec(ctx, `DELETE FROM download_artifacts WHERE media_file_id = $1`, f.fileID)
 	})
 	suffix := time.Now().UnixNano()
+	files := make(map[string]int)
+	fileOf := func(episodeID string) int {
+		if _, ok := files[episodeID]; !ok {
+			files[episodeID] = f.episodeFile(t, f.contentID+"-"+episodeID)
+		}
+		return files[episodeID]
+	}
 	create := func(episodeID, status string) string {
 		id := fmt.Sprintf("dl-%s-%d", episodeID, suffix)
 		now := time.Now()
 		if err := f.repo.Create(ctx, &Download{
-			ID: id, UserID: f.userID, ProfileID: f.profileA, DeviceID: f.deviceA, MediaFileID: f.fileID,
-			ContentID: f.contentID, EpisodeID: episodeID, Kind: KindQueued, Status: status,
+			ID: id, UserID: f.userID, ProfileID: f.profileA, DeviceID: f.deviceA, MediaFileID: fileOf(episodeID),
+			ContentID: f.contentID, EpisodeID: f.contentID + "-" + episodeID, Kind: KindQueued, Status: status,
 			Format: FormatOriginal, Quality: QualityOriginal, EffectiveQuality: QualityOriginal,
 			FileSize: 1024, Revision: 1, CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
@@ -231,9 +240,10 @@ func TestPreparedReplacementQuotaAccountingDB(t *testing.T) {
 		PrepareTarget: playback.PrepareTarget{Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", TargetBitrateKbps: 5000},
 	}
 	replace := func(svc *Service, episodeID, id string) ([]*Download, error) {
+		linked := f.contentID + "-" + episodeID
 		req := CreateRequest{ContentID: f.contentID, ProfileID: f.profileA, DeviceID: f.deviceA,
-			ExpectedEntries: map[string]ManagedCreateExpectation{episodeID: {ID: id, Revision: 1}}}
-		item := managedItem{file: &models.MediaFile{ID: f.fileID, ContentID: f.contentID, FileSize: 1024}, contentID: f.contentID, episodeID: episodeID}
+			ExpectedEntries: map[string]ManagedCreateExpectation{linked: {ID: id, Revision: 1}}}
+		item := managedItem{file: &models.MediaFile{ID: fileOf(episodeID), ContentID: f.contentID, EpisodeID: linked, FileSize: 1024}, contentID: f.contentID, episodeID: linked}
 		return svc.ensureManagedDecisions(ctx, f.userID, req, []managedItem{item}, []QualityDecision{decision}, "season")
 	}
 
@@ -248,11 +258,15 @@ func TestPreparedReplacementQuotaAccountingDB(t *testing.T) {
 	}
 
 	// Once the prepared file is ready, another replacement to it takes no
-	// slot, even with the only concurrent slot taken.
-	if _, err := f.pool.Exec(ctx, `UPDATE download_artifacts SET status = 'ready' WHERE media_file_id = $1`, f.fileID); err != nil {
+	// slot, even with the only concurrent slot taken. Episode 2's file is
+	// prepared to the same target.
+	if _, err := artifacts.Ensure(ctx, &models.MediaFile{ID: fileOf("ep-2"), ContentID: f.contentID, EpisodeID: f.contentID + "-ep-2", FileSize: 1024}, decision.DeliveryFormat, decision.PrepareTarget); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.pool.Exec(ctx, `DELETE FROM downloads WHERE user_id = $1 AND episode_id = 'ep-1'`, f.userID); err != nil {
+	if _, err := f.pool.Exec(ctx, `UPDATE download_artifacts SET status = 'ready' WHERE media_file_id = ANY($1)`, []int{fileOf("ep-1"), fileOf("ep-2")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(ctx, `DELETE FROM downloads WHERE user_id = $1 AND episode_id = $2`, f.userID, f.contentID+"-ep-1"); err != nil {
 		t.Fatal(err)
 	}
 	create("busy", StatusDownloading)
@@ -287,9 +301,10 @@ func TestManagedBatchOverConcurrentCapDB(t *testing.T) {
 	suffix := time.Now().UnixNano()
 	for i, status := range []string{StatusQueued, StatusDownloading} {
 		now := time.Now()
+		episodeID := fmt.Sprintf("%s-busy-%d", f.contentID, i)
 		if err := f.repo.Create(ctx, &Download{
 			ID: fmt.Sprintf("dl-busy-%d-%d", i, suffix), UserID: f.userID, ProfileID: f.profileA, DeviceID: f.deviceA,
-			MediaFileID: f.fileID, ContentID: f.contentID, EpisodeID: fmt.Sprintf("busy-%d", i), Kind: KindQueued,
+			MediaFileID: f.episodeFile(t, episodeID), ContentID: f.contentID, EpisodeID: episodeID, Kind: KindQueued,
 			Status: status, Format: FormatOriginal, Quality: QualityOriginal, EffectiveQuality: QualityOriginal,
 			FileSize: 1024, Revision: 1, CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
@@ -307,9 +322,10 @@ func TestManagedBatchOverConcurrentCapDB(t *testing.T) {
 	episodes := func(prefix string, n int) []managedItem {
 		items := make([]managedItem, n)
 		for i := range items {
+			episodeID := fmt.Sprintf("%s-%s-%d", f.contentID, prefix, i+1)
 			items[i] = managedItem{
-				file:      &models.MediaFile{ID: f.fileID, ContentID: f.contentID, FileSize: 1024},
-				contentID: f.contentID, episodeID: fmt.Sprintf("%s-%d", prefix, i+1),
+				file:      &models.MediaFile{ID: f.episodeFile(t, episodeID), ContentID: f.contentID, EpisodeID: episodeID, FileSize: 1024},
+				contentID: f.contentID, episodeID: episodeID,
 			}
 		}
 		return items
@@ -342,7 +358,7 @@ func TestManagedBatchOverConcurrentCapDB(t *testing.T) {
 		t.Fatalf("refused transcoded season left %d rows, want 6", got)
 	}
 	var jobs int
-	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM download_artifacts WHERE media_file_id = $1`, f.fileID).Scan(&jobs); err != nil || jobs != 0 {
+	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM download_artifacts a JOIN media_files mf ON mf.id = a.media_file_id WHERE mf.content_id = $1`, f.contentID).Scan(&jobs); err != nil || jobs != 0 {
 		t.Fatalf("refused transcoded season queued %d encode jobs (%v)", jobs, err)
 	}
 
