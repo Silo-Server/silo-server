@@ -109360,6 +109360,18 @@
       "value": "PINを削除"
     }
   ],
+  "web.profiles.editor.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "リクエストを許可"
+    }
+  ],
+  "web.profiles.editor.requestsAllowedHint": [
+    {
+      "type": 0,
+      "value": "このプロフィールで、ライブラリにないタイトルを閲覧してリクエストできるようにします。これらのタイトルには、年齢制限の上限が米国のレーティングのみで適用され、推奨年齢の上限は適用されません。"
+    }
+  ],
   "web.profiles.editor.restrictLibraries": [
     {
       "type": 0,
@@ -109472,6 +109484,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.profiles.helpers.access.noRequests": [
+    {
+      "type": 0,
+      "value": "リクエスト不可"
     }
   ],
   "web.profiles.helpers.access.quality": [
@@ -111364,6 +111382,12 @@
       "value": "インポート待ち"
     }
   ],
+  "web.requests.hub.blockedIntro": [
+    {
+      "type": 0,
+      "value": "このプロフィールではリクエストがオフになっています。このプロフィールが行ったリクエストは、引き続き確認やキャンセルができます。"
+    }
+  ],
   "web.requests.hub.browseDiscover": [
     {
       "type": 0,
@@ -111578,6 +111602,12 @@
     {
       "type": 0,
       "value": "このアカウントからのリクエストを、次に起こることごとにまとめています。"
+    }
+  ],
+  "web.requests.hub.yoursIntroProfile": [
+    {
+      "type": 0,
+      "value": "このプロフィールが行ったリクエストを、次に起こることごとにまとめています。"
     }
   ],
   "web.requests.pageTitle": [
