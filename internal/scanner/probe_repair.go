@@ -106,9 +106,9 @@ func carryUnprobedChapters(previous []models.MediaChapter, next *models.MediaFil
 
 // carryCheckedHDR10Plus keeps the primary track's recorded HDR10+ status and
 // first-frame color range across playback's probe repair, which skips the
-// frame read, when the reprobed stream is the one that was checked. The fields a repair fills in
-// (a missing color range, legacy Dolby Vision provenance) don't count as a
-// difference. Any other difference leaves the track unchecked for the HDR10+
+// frame read, when the reprobed stream is the one that was checked. The
+// fields a repair fills in (a missing color range, legacy Dolby Vision
+// provenance) don't count as a difference. Any other difference leaves the track unchecked for the HDR10+
 // backfill.
 func carryCheckedHDR10Plus(previous, next []models.VideoTrack) {
 	if len(previous) == 0 || len(next) == 0 || previous[0].HDR10PlusUnchecked || !next[0].HDR10PlusUnchecked {

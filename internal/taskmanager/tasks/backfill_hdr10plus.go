@@ -29,8 +29,9 @@ type HDR10PlusBackfiller interface {
 // mapping trusts over a contradicting container tag.
 //
 // It runs at startup and then daily. It reads only PQ files without a
-// recorded status, once each, so after the first pass it reads only the few
-// new ones. Every API process runs the task manager, so an advisory lock
+// recorded status or frame range, once each, so after the first pass it reads
+// only the few new ones. The first pass after an upgrade that added the frame
+// range reads every PQ file once more. Every API process runs the task manager, so an advisory lock
 // keeps one pass reading media across the cluster.
 type BackfillHDR10PlusTask struct {
 	backfiller HDR10PlusBackfiller

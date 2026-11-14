@@ -88,8 +88,9 @@ type HDR10PlusBackfillResult struct {
 // track without one, hdr10_plus and, for an HDR10+ file, video_range_type on
 // that track. It leaves the rest of the probe alone, so chapters, probe time,
 // and everything keyed to them stay as they are. A pass is resumable by
-// construction: a file drops out once its track has the key, and a pass that
-// stops early resumes with the files it did not reach.
+// construction: a file drops out once its track has both keys, which every
+// write sets together, and a pass that stops early resumes with the files it
+// did not reach.
 type HDR10PlusBackfiller struct {
 	pool        *pgxpool.Pool
 	ffprobePath string
