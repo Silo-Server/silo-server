@@ -209,15 +209,20 @@ func (r *Repository) UpdateStatus(ctx context.Context, id, status string, bytesS
 	return nil
 }
 
-// RenewTransferLease marks an account-level row's transfer as still running.
-// It changes nothing once the row has left 'downloading'.
-func (r *Repository) RenewTransferLease(ctx context.Context, id string) error {
-	if _, err := r.pool.Exec(ctx,
-		`UPDATE downloads SET updated_at = now() WHERE id = $1 AND device_id IS NULL AND status = 'downloading'`, id,
-	); err != nil {
-		return fmt.Errorf("renewing download transfer lease: %w", err)
+// RenewTransferLease marks an account-level row's transfer as still running
+// and reports whether it did. It renews only a 'downloading' row whose lease
+// still holds; a lapsed or finished transfer is left as it is.
+func (r *Repository) RenewTransferLease(ctx context.Context, id string) (bool, error) {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE downloads SET updated_at = now()
+		 WHERE id = $1 AND device_id IS NULL AND status = 'downloading'
+		   AND updated_at >= now() - make_interval(secs => $2)`,
+		id, transferLease.Seconds(),
+	)
+	if err != nil {
+		return false, fmt.Errorf("renewing download transfer lease: %w", err)
 	}
-	return nil
+	return tag.RowsAffected() == 1, nil
 }
 
 // FailLapsedTransfer marks an account-level row 'failed' when its transfer

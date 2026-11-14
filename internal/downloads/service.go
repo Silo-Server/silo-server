@@ -1327,16 +1327,9 @@ func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.
 			slog.WarnContext(ctx, "failed to transition download to downloading", "component", "downloads", "download_id", dl.ID, "error", err)
 		}
 	}
-	// A transfer whose lease lapsed died with the process serving it. Like a
-	// transfer that stops in-process, it fails and isn't served again; the
-	// client starts a new download, which the concurrent limit admits.
 	if dl.Format == FormatOriginal && dl.Status == StatusDownloading {
-		failed, err := s.repo.FailLapsedTransfer(ctx, dl.ID)
-		if err != nil {
+		if err := s.continueTransfer(ctx, dl.ID); err != nil {
 			return err
-		}
-		if failed {
-			return fmt.Errorf("download is %s: %w", StatusFailed, ErrDownloadNotActive)
 		}
 	}
 
@@ -1362,6 +1355,23 @@ func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.
 	return nil
 }
 
+// continueTransfer admits another request for an account-level row that is
+// already transferring only while its lease holds. Renewing the lease is the
+// check, so two requests racing on a lapsed row both see it lapse. A transfer
+// whose lease lapsed died with the process serving it; like a transfer that
+// stops in-process, it fails and isn't served again, and the client starts a
+// new download, which the concurrent limit admits.
+func (s *Service) continueTransfer(ctx context.Context, id string) error {
+	live, err := s.repo.RenewTransferLease(ctx, id)
+	if err != nil || live {
+		return err
+	}
+	if _, err := s.repo.FailLapsedTransfer(ctx, id); err != nil {
+		return err
+	}
+	return fmt.Errorf("download transfer is no longer active: %w", ErrDownloadNotActive)
+}
+
 // renewTransferLease keeps an account-level original row's concurrent slot
 // while this process serves its bytes (see transferLease), and returns the
 // function that stops renewing. A transfer that dies with the process stops
@@ -1377,7 +1387,7 @@ func (s *Service) renewTransferLease(ctx context.Context, dl *Download) (stop fu
 		ticker := time.NewTicker(transferLeaseRenewal)
 		defer ticker.Stop()
 		for {
-			if err := s.repo.RenewTransferLease(ctx, dl.ID); err != nil && ctx.Err() == nil {
+			if _, err := s.repo.RenewTransferLease(ctx, dl.ID); err != nil && ctx.Err() == nil {
 				slog.WarnContext(ctx, "failed to renew download transfer lease", "component", "downloads", "download_id", dl.ID, "error", err)
 			}
 			select {
