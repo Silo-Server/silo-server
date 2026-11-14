@@ -30,6 +30,11 @@ type NextUpQuery struct {
 	// up (the profile's ui.next_up_new_releases_first). Off, results keep the
 	// completion-time order and ActivityAt equals CompletedAt.
 	RankByRelease bool
+	// ExcludeHomeDismissals leaves out a series whose next episode the
+	// profile dismissed from Home's Next Up. The exclusion runs inside the
+	// walk's result query, so the walk keeps going until it has Limit rows
+	// and a short result still means no more series are eligible.
+	ExcludeHomeDismissals bool
 
 	// droppedSeriesIDs are the profile's actively dropped series, which a
 	// global lookup excludes. ListNextUp loads them; a series-scoped lookup
@@ -462,15 +467,29 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 
 	// The successor stays the next episode with any present file. When none of
 	// its files fits the viewer's quality ceiling the series waits off Next Up
-	// until one arrives, rather than skipping to a later episode.
-	ceilingWhere := ""
+	// until one arrives, rather than skipping to a later episode. A successor
+	// dismissed from Home's Next Up also leaves its series out.
+	var resultConditions []string
 	if playable := EpisodePlayableUnderCeilingSQL("next_ep.content_id", q.AccessFilter, func(value any) int {
 		// Numbered from args itself: the release scope above binds a value
 		// without advancing argIdx.
 		args = append(args, value)
 		return len(args)
 	}); playable != "" {
-		ceilingWhere = "\n\t\tWHERE " + playable
+		resultConditions = append(resultConditions, playable)
+	}
+	if q.ExcludeHomeDismissals {
+		resultConditions = append(resultConditions, `NOT EXISTS (
+			SELECT 1 FROM user_home_item_dismissals hid
+			WHERE hid.user_id = $1
+			  AND hid.profile_id = $2
+			  AND hid.surface = '`+userstore.HomeSurfaceNextUp+`'
+			  AND hid.media_item_id = next_ep.content_id
+		)`)
+	}
+	resultWhere := ""
+	if len(resultConditions) > 0 {
+		resultWhere = "\n\t\tWHERE " + strings.Join(resultConditions, "\n\t\t  AND ")
 	}
 
 	// When resumable items are disabled, suppress next-up only if the series has
@@ -683,7 +702,7 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 		) next_ep ON true
 		%s%s
 		ORDER BY es.updated_at DESC
-		LIMIT $3`, completedEpisodesCTE, nextUpAnchorsCTE, inProgressExclusion, activityExpr, sourceTable, releaseLateral, ceilingWhere)
+		LIMIT $3`, completedEpisodesCTE, nextUpAnchorsCTE, inProgressExclusion, activityExpr, sourceTable, releaseLateral, resultWhere)
 		return query, args
 	}
 
@@ -716,7 +735,7 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 		) next_ep ON true
 		%s%s
 		ORDER BY es.updated_at DESC
-		LIMIT $3`, activityExpr, sourceTable, releaseLateral, ceilingWhere)
+		LIMIT $3`, activityExpr, sourceTable, releaseLateral, resultWhere)
 
 	query := fmt.Sprintf(`
 		WITH %s%s%s

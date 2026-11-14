@@ -946,14 +946,13 @@ func (f *Fetcher) fetchNextUpItems(ctx context.Context, userID int, profileID st
 		Limit:         limit,
 		DateCutoff:    since,
 		RankByRelease: newReleasesFirst,
+		// Excluded in the query, not afterwards, so dismissals never leave
+		// the row short while more series are eligible.
+		ExcludeHomeDismissals: true,
 	})
 	if err != nil {
 		return nil, nil, err
 	}
-	if len(results) == 0 {
-		return nil, nil, nil
-	}
-	results = f.filterNextUpDismissals(ctx, userID, profileID, results)
 	if len(results) == 0 {
 		return nil, nil, nil
 	}
@@ -1171,41 +1170,6 @@ func (f *Fetcher) activeDroppedSeries(ctx context.Context, userID int, profileID
 // dropped, for surfaces that list progress outside the sections fetcher.
 func (f *Fetcher) FilterDroppedProgress(ctx context.Context, userID int, profileID string, entries []userstore.WatchProgress) ([]userstore.WatchProgress, error) {
 	return f.progressFilter.FilterDroppedProgress(ctx, userID, profileID, entries)
-}
-
-func (f *Fetcher) filterNextUpDismissals(ctx context.Context, userID int, profileID string, results []catalog.NextUpResult) []catalog.NextUpResult {
-	if len(results) == 0 || f.StoreProvider == nil || userID <= 0 || profileID == "" {
-		return results
-	}
-
-	store, err := f.StoreProvider.ForUser(ctx, userID)
-	if err != nil {
-		slog.ErrorContext(ctx, "getting user store for next-up dismissals", "component", "sections", "profile_id", profileID, "error", err)
-		return results
-	}
-
-	dismissals, err := store.ListHomeDismissals(ctx, profileID, userstore.HomeSurfaceNextUp)
-	if err != nil {
-		slog.ErrorContext(ctx, "listing next-up dismissals", "component", "sections", "profile_id", profileID, "error", err)
-		return results
-	}
-	if len(dismissals) == 0 {
-		return results
-	}
-
-	dismissedIDs := make(map[string]struct{}, len(dismissals))
-	for _, dismissal := range dismissals {
-		dismissedIDs[dismissal.MediaItemID] = struct{}{}
-	}
-
-	filtered := make([]catalog.NextUpResult, 0, len(results))
-	for _, result := range results {
-		if _, dismissed := dismissedIDs[result.ContentID]; dismissed {
-			continue
-		}
-		filtered = append(filtered, result)
-	}
-	return filtered
 }
 
 // FetchAll runs all section queries in parallel and returns sections with items.
