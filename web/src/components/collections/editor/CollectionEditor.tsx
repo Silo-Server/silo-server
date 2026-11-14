@@ -436,7 +436,11 @@ export function CollectionEditor<Raw extends WireCollection>({
       staged.length === 0 &&
       titleWrites.failures === (afterSave.failuresBefore ?? titleWrites.failures)
     ) {
-      setLeftSaved(afterSave.created ? "Collection created" : "Collection saved");
+      setLeftSaved(
+        afterSave.created
+          ? t("web.common.toast.collections.created")
+          : t("web.common.toast.collections.saved"),
+      );
       setLeaving(listPath);
     } else if (afterSave.created) {
       setOpenEdit(afterSave.created);
