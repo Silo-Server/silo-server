@@ -1119,3 +1119,4 @@
 ./internal/backup TestBeforeUpgradeRetriesDB
 ./internal/catalog TestExternalIDLookupSkipsItemsWithAnotherTMDBIDDB
 ./internal/catalog TestResolveProviderAliasesSkipsItemsWithAnotherTMDBIDDB
+./internal/watchlist TestLibraryMatchesUsesTheTitlesRetainedIDsDB

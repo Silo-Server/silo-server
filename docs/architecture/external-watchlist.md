@@ -122,7 +122,9 @@ alias when any of these holds:
 - a `stale_media_ids` row equals the alias, which catches an item that carries,
   or once carried, a TMDB duplicate ID since deleted.
 
-A `tmdb` match always counts. An `imdb` or `tvdb` match counts only when the
+A `tmdb` match always counts, even for a series whose TVDB ID differs: a
+watchlist title is a TMDB entry, so an item holding one of its TMDB IDs is that
+title. An `imdb` or `tvdb` match counts only when the
 item is not another title by its type's anchor precedence
 (`catalog.IdentityProviderIDsContradict`): at the first provider both the title
 and the item carry (TMDB, IMDb, TVDB for a movie; TVDB, TMDB, IMDb for a

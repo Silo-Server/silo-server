@@ -99,6 +99,9 @@ func TestResolveProviderAliasesSkipsItemsWithAnotherTMDBIDDB(t *testing.T) {
 		{"tvdb on an item without a tmdb id but another imdb id", []ProviderAlias{alias(1, "tmdb", titleTMDB), alias(1, "imdb", "tt"+id(20)), alias(1, "tvdb", id(11))}, ""},
 		{"imdb on an item with the tmdb id padded", []ProviderAlias{alias(1, "tmdb", id(16)), alias(1, "imdb", "tt"+id(17))}, "padded"},
 		{"series tvdb on a show with another tmdb id", []ProviderAlias{seriesAlias(1, "tmdb", titleTMDB), seriesAlias(1, "tvdb", id(14))}, "show"},
+		// A TMDB match always counts: a watchlist title is a TMDB entry, so a
+		// show holding its TMDB ID is that title whatever TVDB ID it carries.
+		{"series tmdb on a show with another tvdb id", []ProviderAlias{seriesAlias(1, "tmdb", id(13)), seriesAlias(1, "tvdb", id(22))}, "show"},
 		{"series imdb on a show with another tvdb id", []ProviderAlias{seriesAlias(1, "tmdb", titleTMDB), seriesAlias(1, "tvdb", id(21)), seriesAlias(1, "imdb", "tt"+id(15))}, ""},
 	}
 	repo := NewItemRepository(pool)
